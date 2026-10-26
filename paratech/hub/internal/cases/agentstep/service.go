@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"paratech/hub/internal/domain/llm/services/modelallowlist"
@@ -259,11 +260,20 @@ func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
 	usage := answer.Usage()
 	calls := answer.Calls()
 	unusable := answer.Failure()
+	textReply := false
 	if unusable == nil {
 		// The model's calls are untrusted: a call outside the catalog schema is the provider's failure (ADR-0023).
 		if cerr := st.version.Catalog.CheckReturned(calls); cerr != nil {
 			unusable = &values.ProviderError{Kind: values.KindPermanent, Reason: "invalid tool calls"}
 		}
+	} else if text, ok := answer.PlainText(); ok {
+		// The model ended its turn with text only (tool choice auto, no forced tool use with thinking): that text is
+		// shown as a reply card if the reply schema takes it, and is never anything else (TASK-200).
+		reply, rerr := st.version.Catalog.TextReply(textReplyID(rec.ID), text)
+		if rerr == nil {
+			calls, unusable, textReply = []values.ToolCall{reply}, nil, true
+		}
+		attrs = append(attrs, "text_reply", rerr == nil)
 	}
 	if unusable != nil {
 		// The provider billed this answer (output cap, end of turn, invalid calls): charged like Complete charges a
@@ -274,14 +284,18 @@ func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
 			return Result{}, err
 		}
 		failure := providerFailure(unusable)
-		logStep(outcomeProvider, append(attrs, "charged", true, "input_tokens", usage.Input(), "output_tokens", usage.Output(), "err", unusable)...)
+		logStep(outcomeProvider, append(attrs, "charged", true, "input_tokens", usage.Input(), "output_tokens", usage.Output(),
+			"reason", failureReason(unusable), "err", unusable)...)
 		return Result{}, failure
 	}
 
 	// Kept before the settlement, so a replayed answer can always be continued. A failure is only logged: the answer is
-	// paid for and returned, and only a continuation of it fails (ErrTurnGone).
-	if err := s.keep(ctx, st, calls, answer.Assistant()); err != nil {
-		s.log.ErrorContext(ctx, "agent step turn not kept", "reservation", rec.ID.String(), "err", err)
+	// paid for and returned, and only a continuation of it fails (ErrTurnGone). A text reply keeps nothing: its model
+	// turn holds no call to send back, so a continuation of it is ErrTurnGone, never a made-up turn.
+	if !textReply {
+		if err := s.keep(ctx, st, calls, answer.Assistant()); err != nil {
+			s.log.ErrorContext(ctx, "agent step turn not kept", "reservation", rec.ID.String(), "err", err)
+		}
 	}
 	quota, err = s.settle(ctx, st, rec.ID, values.EncodeCalls(calls), usage)
 	if err != nil {
@@ -570,6 +584,22 @@ func (s *Service) newID() (shared.ReservationID, error) {
 		return "", fmt.Errorf("random reservation id: %w", err)
 	}
 	return account.NewReservationID(b)
+}
+
+// textReplyPrefix starts the call id of a reply made from a text answer; the reservation id after it keeps ids distinct
+// within a thread (TASK-200).
+const textReplyPrefix = "hub_text_"
+
+func textReplyID(id shared.ReservationID) string { return textReplyPrefix + id.String() }
+
+// failureReason names why a billed answer was unusable, for the log line: a snake_case form of the provider error's
+// fixed reason ("no_tool_use", "output_cap", "invalid_tool_calls"), so it does not read like a lost connection.
+func failureReason(err error) string {
+	var pe *values.ProviderError
+	if !errors.As(err, &pe) || pe.Reason == "" {
+		return "unknown"
+	}
+	return strings.ReplaceAll(pe.Reason, " ", "_")
 }
 
 // providerFailure classifies a provider error; anything the adapter did not classify is permanent.
