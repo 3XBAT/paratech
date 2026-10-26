@@ -128,7 +128,7 @@ func TestPlanUndo(t *testing.T) {
 			if err := a.RefuseUndo(why, at(4)); err != nil || a.Refusal() != why {
 				t.Fatalf("RefuseUndo = %v, refusal %s", err, a.Refusal())
 			}
-			if ok, no := a.Undoable(at(4)); ok || no != NoUndo(why) {
+			if ok, no := a.Undoable(at(4), Target{}); ok || no != NoUndo(why) {
 				t.Fatalf("Undoable = %v %s", ok, no)
 			}
 		})
@@ -154,10 +154,68 @@ func TestUndoable(t *testing.T) {
 		StatusProposed: NoUndoIrreversible,
 	}
 	for _, s := range Statuses() {
-		ok, why := reach(t, s).Undoable(at(2)) // UNDOING since at(2): still running
+		ok, why := reach(t, s).Undoable(at(2), Target{}) // UNDOING since at(2): still running
 		if ok != (s == StatusDone) || why != want[s] {
 			t.Errorf("%s: Undoable = %v %s, want %s", s, ok, why, want[s])
 		}
+	}
+}
+
+// A DONE paid job whose result is ready offers no «Отменить» and CheckUndo refuses it; only a job reads its target.
+func TestUndoableOfAFinishedJob(t *testing.T) {
+	job := func(t *testing.T, tool values.Tool, c Compensation) *Action {
+		t.Helper()
+		a, err := New(spec(tool), t0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Complete(c, 1, at(1)); err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	j1, w1 := ref(t, values.KindJob, "j1"), ref(t, values.KindWork, "w1")
+	tests := []struct {
+		name   string
+		a      func(t *testing.T) *Action
+		target Target
+		needs  bool
+		ok     bool
+		why    NoUndo
+		err    error
+	}{
+		{"job running", func(t *testing.T) *Action { return job(t, values.ToolGenerateDraft, CancelJob{Job: j1}) }, Target{Version: 1}, true, true, NoUndoNone, nil},
+		{"job finished", func(t *testing.T) *Action { return job(t, values.ToolGenerateDraft, CancelJob{Job: j1}) }, Target{Version: 1, Final: true}, true, false, NoUndoResultReady, ErrResultReady},
+		{"job not read", func(t *testing.T) *Action { return job(t, values.ToolMakeSummary, CancelJob{Job: j1}) }, Target{}, true, true, NoUndoNone, nil},
+		{"finished work stays undoable", func(t *testing.T) *Action { return job(t, values.ToolWriteWork, StopWork{Work: w1, Job: j1}) }, Target{Version: 1, Final: true}, false, true, NoUndoNone, nil},
+		{"not a job", func(t *testing.T) *Action { return reach(t, StatusDone) }, Target{Version: 1, Final: true}, false, true, NoUndoNone, nil},
+		{"undone entry", func(t *testing.T) *Action { return reach(t, StatusUndone) }, Target{Final: true}, false, false, NoUndoUndone, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := tt.a(t)
+			if a.UndoNeedsTarget() != tt.needs {
+				t.Fatalf("UndoNeedsTarget = %v", a.UndoNeedsTarget())
+			}
+			if ok, why := a.Undoable(at(2), tt.target); ok != tt.ok || why != tt.why {
+				t.Fatalf("Undoable = %v %s, want %v %s", ok, why, tt.ok, tt.why)
+			}
+			if err := a.CheckUndo(tt.target); !errors.Is(err, tt.err) || (tt.err == nil) != (err == nil) {
+				t.Fatalf("CheckUndo = %v, want %v", err, tt.err)
+			}
+		})
+	}
+
+	// A refused job entry is not rewritten: it keeps its own reason.
+	a := job(t, values.ToolMakeSummary, CancelJob{Job: j1})
+	if err := errors.Join(a.BeginUndo(at(2)), a.RefuseUndo(UndoCannotStop, at(3))); err != nil {
+		t.Fatal(err)
+	}
+	if a.UndoNeedsTarget() {
+		t.Fatal("an UNDO_REFUSED entry reads its target")
+	}
+	if ok, why := a.Undoable(at(4), Target{Final: true}); ok || why != NoUndoCannotStop {
+		t.Fatalf("refused entry = %v %s", ok, why)
 	}
 }
 
@@ -176,7 +234,7 @@ func TestStaleUndoIsRetried(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a := reach(t, StatusUndoing)
-			ok, why := a.Undoable(tt.now)
+			ok, why := a.Undoable(tt.now, Target{})
 			if ok != tt.offered || a.CanUndo(tt.now) != tt.offered {
 				t.Fatalf("Undoable = %v %s, CanUndo = %v; want %v", ok, why, a.CanUndo(tt.now), tt.offered)
 			}
@@ -194,7 +252,7 @@ func TestStaleUndoIsRetried(t *testing.T) {
 	if err := a.StartUndo(stale); err != nil || a.Status() != StatusUndoing || a.State().UpdatedAt != stale {
 		t.Fatalf("retry = %v, %s at %v", err, a.Status(), a.State().UpdatedAt)
 	}
-	if ok, why := a.Undoable(stale.Add(time.Second)); ok || why != NoUndoRunning {
+	if ok, why := a.Undoable(stale.Add(time.Second), Target{}); ok || why != NoUndoRunning {
 		t.Fatalf("a renewed retry = %v %s, want running", ok, why)
 	}
 }
