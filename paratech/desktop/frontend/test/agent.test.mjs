@@ -15,9 +15,12 @@ import {
 import {
   askInput,
   collectAnswers,
+  composerKey,
   contextFor,
   entryModel,
+  inputPlacement,
   isFocusPanelKey,
+  panelShortcut,
   parseArtifact,
   requestText,
   roundCaption,
@@ -268,13 +271,17 @@ test("the context label follows the screen and is removable down to «Без п�
   assert.equal(askInput(none, "что задали").text, "что задали");
 });
 
-test("Ctrl+K focuses the panel; other keys do not", () => {
-  const key = (over) => ({ key: "k", ctrlKey: true, metaKey: false, altKey: false, shiftKey: false, ...over });
+test("Ctrl+K is read by the physical key, so the Russian layout works; other keys do not", () => {
+  const key = (over) => ({ key: "k", code: "KeyK", ctrlKey: true, metaKey: false, altKey: false, shiftKey: false, ...over });
   assert.equal(isFocusPanelKey(key({})), true);
   assert.equal(isFocusPanelKey(key({ key: "K" })), true);
+  assert.equal(isFocusPanelKey(key({ key: "л" })), true); // Russian layout: key is «л», code stays KeyK
+  assert.equal(isFocusPanelKey(key({ metaKey: true, ctrlKey: false })), true);
   assert.equal(isFocusPanelKey(key({ ctrlKey: false })), false);
-  assert.equal(isFocusPanelKey(key({ key: "j" })), false);
+  assert.equal(isFocusPanelKey(key({ key: "j", code: "KeyJ" })), false);
+  assert.equal(isFocusPanelKey(key({ key: "k", code: "KeyL" })), false);
   assert.equal(isFocusPanelKey(key({ shiftKey: true })), false);
+  assert.equal(isFocusPanelKey(key({ altKey: true })), false);
   assert.equal(requestText("  \n "), null);
   assert.equal(requestText(" привет "), "привет");
 });
@@ -341,7 +348,7 @@ test("question card: round N of 2, skip text, defaults and typed answers", () =>
 
 // ---- Progress card ----
 
-test("progress card: shown while working, with «Стоп» only while executing", () => {
+test("progress card: shown while working, with «Стоп» (TASK-143: also while planning)", () => {
   const u = update({ status: "EXECUTING", cards: [card({ kind: "progress", jobId: "j1" })] });
   const m = modelOf(u).cards;
   assert.equal(m.length, 1);
@@ -350,7 +357,7 @@ test("progress card: shown while working, with «Стоп» only while executing
   assert.equal(m[0].type, "progress");
   assert.equal(planning.length, 1);
   assert.equal(planning[0].type, "waiting");
-  assert.deepEqual(planning[0].buttons, []);
+  assert.deepEqual(planning[0].buttons.map((b) => b.label), ["Стоп"]);
   assert.match(html(u), /Работа идёт/);
 });
 
@@ -379,9 +386,9 @@ test("waiting: shown while the call runs, hidden on refusal and on any card that
   }
 });
 
-test("waiting: job-less PLANNING and EXECUTING give a waiting card, EXECUTING keeps «Стоп»", () => {
+test("waiting: job-less PLANNING and EXECUTING give a waiting card, both keep «Стоп» (TASK-143)", () => {
   const planning = modelOf(update({ status: "PLANNING" })).cards;
-  assert.deepEqual(planning, [{ type: "waiting", buttons: [] }]);
+  assert.deepEqual(planning, [{ type: "waiting", buttons: [{ id: "stop", label: "Стоп" }] }]);
   const executing = modelOf(update({ status: "EXECUTING" })).cards;
   assert.deepEqual(executing.map((c) => c.type), ["waiting"]);
   assert.deepEqual(executing[0].buttons.map((b) => b.label), ["Стоп"]);
@@ -537,7 +544,7 @@ test("offline: input disabled, «Нет связи с paratech», last thread vi
   assert.equal(mode.placeholder, "Нет связи с paratech");
   assert.equal(mode.staleNote, "нет связи — может быть неактуально");
   const out = panelHtml(withThread);
-  assert.match(out, /<input[^>]*disabled/);
+  assert.match(out, /<textarea[^>]*disabled/);
   assert.match(out, /Нет связи с paratech/);
   assert.match(out, /нет связи — может быть неактуально/);
   assert.match(out, /Последний ответ/);
@@ -559,7 +566,8 @@ test("a local offline refusal does not lock the input", () => {
 
 test("online: the input is enabled; before State answers it is not", () => {
   const out = panelHtml(stateWith());
-  assert.doesNotMatch(out, /<input[^>]*disabled/);
+  assert.doesNotMatch(out, /<textarea[^>]*disabled/);
+  assert.match(out, /maxLength="4000"|maxlength="4000"/);
   assert.match(out, /Спросить paratech/);
   assert.match(out, /Ctrl\+K/);
   assert.equal(panelMode(initialPanelState).inputEnabled, false);
@@ -582,6 +590,32 @@ test("the context chip shows the label and the remove button only while removabl
   const none = panelHtml(stateWith(), { ctx: contextFor("today", "", true) });
   assert.match(none, /Без предмета/);
   assert.doesNotMatch(none, /Убрать контекст/);
+});
+
+test("Enter sends, Shift+Enter breaks the line, Enter inside IME composition does neither", () => {
+  assert.equal(composerKey({ key: "Enter", shiftKey: false }), "send");
+  assert.equal(composerKey({ key: "Enter", shiftKey: true }), "none");
+  assert.equal(composerKey({ key: "Enter", shiftKey: false, isComposing: true }), "none");
+  assert.equal(composerKey({ key: "Enter", shiftKey: false, isComposing: false, keyCode: 229 }), "none");
+  assert.equal(composerKey({ key: "Enter", shiftKey: false, keyCode: 13 }), "send");
+  assert.equal(composerKey({ key: "a", shiftKey: false }), "none");
+});
+
+test("the second Ctrl+K closes an open panel, the first opens a closed one", () => {
+  assert.equal(panelShortcut(false), "open");
+  assert.equal(panelShortcut(true), "close");
+});
+
+test("the request field is on top before the first request and at the bottom after it", () => {
+  assert.equal(inputPlacement(0), "top");
+  assert.equal(inputPlacement(1), "bottom");
+  const empty = panelHtml(stateWith());
+  assert.match(empty, /class="ag ag-in-top"/);
+  const asked = panelHtml(stateWith({ type: "asked", id: 1, text: "q", scope }));
+  assert.match(asked, /class="ag ag-in-bottom"/);
+  // One textarea, not an input: Enter/Shift+Enter need a multi-line field.
+  assert.match(asked, /<textarea[^>]*class="ag-input"/);
+  assert.doesNotMatch(asked, /<input[^>]*ag-input/);
 });
 
 // ---- Plain text ----

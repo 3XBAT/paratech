@@ -126,16 +126,30 @@ func (c AgentCall) String() string {
 // GoString is String for %#v.
 func (c AgentCall) GoString() string { return "values.AgentCall" + c.String() }
 
-// AgentAnswer is a provider answer to an AgentCall: the tool calls in order, the usage and whether the model stopped
-// to use tools. The calls are UNTRUSTED. Build it with NewAgentAnswer, RefusedAgentAnswer or MalformedAgentAnswer.
+// AgentAnswer is a provider answer to an AgentCall: the tool calls in order, the usage, whether the model stopped
+// to use tools and the stop reason the provider gave. The calls are UNTRUSTED. Build it with NewAgentAnswer,
+// RefusedAgentAnswer or MalformedAgentAnswer.
 type AgentAnswer struct {
 	calls     []ToolCall
 	usage     Usage
 	toolUse   bool
 	refused   bool
 	malformed bool
+	stop      StopReason
 	assistant AssistantTurn
 }
+
+// WithStop records the stop reason the provider gave; an unknown value is StopOther.
+func (a AgentAnswer) WithStop(stop StopReason) AgentAnswer {
+	if !stop.valid() {
+		stop = StopOther
+	}
+	a.stop = stop
+	return a
+}
+
+// Stop is why the model stopped, for the log line of the step.
+func (a AgentAnswer) Stop() StopReason { return a.stop }
 
 // WithAssistant records the provider's raw assistant content of the answer.
 func (a AgentAnswer) WithAssistant(turn AssistantTurn) AgentAnswer {
@@ -146,13 +160,20 @@ func (a AgentAnswer) WithAssistant(turn AssistantTurn) AgentAnswer {
 // Assistant is the raw assistant content of the answer, zero when the provider gave none.
 func (a AgentAnswer) Assistant() AssistantTurn { return a.assistant }
 
-// NewAgentAnswer records an answer; whether it is usable is Failure's and the catalog's decision.
+// NewAgentAnswer records an answer; whether it is usable is Failure's and the catalog's decision. Its stop reason is
+// StopToolUse with toolUse and StopOther without, until WithStop sets the provider's.
 func NewAgentAnswer(calls []ToolCall, usage Usage, toolUse bool) AgentAnswer {
-	return AgentAnswer{calls: append([]ToolCall(nil), calls...), usage: usage, toolUse: toolUse}
+	a := AgentAnswer{calls: append([]ToolCall(nil), calls...), usage: usage, toolUse: toolUse}
+	if toolUse {
+		a.stop = StopToolUse
+	}
+	return a
 }
 
 // RefusedAgentAnswer records an answer the provider's safety classifiers stopped (stop reason refusal).
-func RefusedAgentAnswer(usage Usage) AgentAnswer { return AgentAnswer{usage: usage, refused: true} }
+func RefusedAgentAnswer(usage Usage) AgentAnswer {
+	return AgentAnswer{usage: usage, refused: true, stop: StopRefusal}
+}
 
 // MalformedAgentAnswer records an answer whose tool calls could not be read as calls; the provider billed it.
 func MalformedAgentAnswer(usage Usage) AgentAnswer { return AgentAnswer{usage: usage, malformed: true} }
@@ -168,11 +189,14 @@ func (a AgentAnswer) Usage() Usage { return a.usage }
 func (a AgentAnswer) Refused() bool { return a.refused }
 
 // Failure is the provider failure this answer stands for, nil when the model stopped to use tools. Every usable answer
-// is a tool use; anything else (plain text, end of turn, output cap, refusal) is permanent (ADR-0023).
+// is a tool use; anything else (plain text, end of turn, output cap, refusal) is permanent (ADR-0023). An answer cut at
+// the output cap says so, also when the cut left a broken call.
 func (a AgentAnswer) Failure() error {
 	switch {
 	case a.refused:
 		return &ProviderError{Kind: KindPermanent, Reason: "refused"}
+	case !a.toolUse && a.stop == StopMaxTokens:
+		return &ProviderError{Kind: KindPermanent, Reason: "output cap"}
 	case a.malformed:
 		return &ProviderError{Kind: KindPermanent, Reason: "malformed tool call"}
 	case !a.toolUse:
@@ -183,8 +207,8 @@ func (a AgentAnswer) Failure() error {
 
 // String prints the answer without the arguments.
 func (a AgentAnswer) String() string {
-	return fmt.Sprintf("{Calls:%d InputTokens:%d OutputTokens:%d ToolUse:%t Refused:%t Malformed:%t}", len(a.calls),
-		a.usage.input, a.usage.output, a.toolUse, a.refused, a.malformed)
+	return fmt.Sprintf("{Calls:%d InputTokens:%d OutputTokens:%d ToolUse:%t Refused:%t Malformed:%t Stop:%s}", len(a.calls),
+		a.usage.input, a.usage.output, a.toolUse, a.refused, a.malformed, a.stop)
 }
 
 // GoString is String for %#v.
