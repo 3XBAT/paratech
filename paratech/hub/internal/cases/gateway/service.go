@@ -115,11 +115,21 @@ type call struct {
 type reader struct {
 	canonical func(output string) (string, error)
 	failed    string
+	// reask, when set, names the refusals the model may fix: the server note for one more call, "" for any other.
+	reask func(err error) string
 }
 
+// Outcomes of the second call of a reader (the "reask" attribute of the log line).
+const (
+	reaskAccepted = "accepted"
+	reaskRefused  = "refused"
+	reaskFailed   = "failed"
+	reaskNoTime   = "no_time"
+)
+
 // newReader checks the input of a reader operation and returns its answer check and the data the model reads; nil
-// for any other operation.
-func newReader(op values.Operation, data string) (*reader, string, error) {
+// for any other operation. note is the server's reask note of the operation, "" when it has none.
+func newReader(op values.Operation, data, note string) (*reader, string, error) {
 	switch op {
 	case values.OperationInspectMaterial:
 		in, err := inspect.ParseInput(data)
@@ -138,6 +148,12 @@ func newReader(op values.Operation, data string) (*reader, string, error) {
 		return &reader{failed: triage.FailedOutput, canonical: func(out string) (string, error) {
 			a, err := in.ParseAnswer(out)
 			return a.Encode(), err
+		}, reask: func(err error) string {
+			// Only a missing helper: the rest of the answer was within the schema (ADR-0025, TASK-200).
+			if errors.Is(err, triage.ErrMissingHelper) {
+				return note
+			}
+			return ""
 		}}, in.ModelData(), nil
 	case values.OperationAnswer:
 		in, err := answer.ParseInput(data)
@@ -281,8 +297,16 @@ func (s *Service) run(ctx context.Context, cmd Command, op string, onDelta func(
 
 	usage := completion.Usage()
 	output := completion.Output()
+	stop := completion.Stop()
 	if c.reader != nil {
 		canonical, aerr := c.reader.canonical(output)
+		if aerr != nil && !streamed && c.reader.reask != nil {
+			if note := c.reader.reask(aerr); note != "" {
+				var outcome string
+				canonical, usage, stop, outcome, aerr = s.reask(ctx, c, rec, note, completion, aerr)
+				attrs = append(attrs, "reask", outcome)
+			}
+		}
 		if aerr != nil {
 			// The provider billed this answer: charged and stored as a refusal, so a retry with the key repeats the
 			// refusal instead of paying again (as AgentStep does, ADR-0023). Nothing of the answer leaves the Hub.
@@ -292,7 +316,7 @@ func (s *Service) run(ctx context.Context, cmd Command, op string, onDelta func(
 				return Result{}, err
 			}
 			logCall(outcomeProvider, append(attrs, "charged", true, "input_tokens", usage.Input(), "output_tokens", usage.Output(),
-				"stop", completion.Stop().String(), "err", aerr)...)
+				"stop", stop.String(), "reason", reasonInvalidAnswer, "err", aerr)...)
 			return Result{}, invalidAnswer()
 		}
 		output = canonical
@@ -304,7 +328,7 @@ func (s *Service) run(ctx context.Context, cmd Command, op string, onDelta func(
 		return Result{}, err
 	}
 	logCall(outcomeCompleted, append(attrs, "input_tokens", usage.Input(), "output_tokens", usage.Output(),
-		"stop", completion.Stop().String(), "charged", res.Charged)...)
+		"stop", stop.String(), "charged", res.Charged)...)
 	if !streamed {
 		sendWhole(onDelta, output)
 	}
@@ -319,6 +343,48 @@ func sendWhole(onDelta func(string), output string) {
 	if onDelta != nil && output != "" {
 		onDelta(output)
 	}
+}
+
+// reasonInvalidAnswer is the log reason of a billed answer that breaks the schema of its reader: the model answered,
+// so it is not a lost connection or a provider outage.
+const reasonInvalidAnswer = "invalid_answer"
+
+// reask asks the model once more, within the same reservation and attempt, after a reader answer it can fix: the same
+// request with the server note added to the prompt (ADR-0025, TASK-200). It returns the checked new answer and the
+// usage of both calls, all of which is charged (the hold of one call may be exceeded; Settle caps the charge at what
+// the account bears). Without time left before the hold expires, or when the second call fails without a billed
+// answer, the first refusal stands with the first usage and stop reason; otherwise the stop reason is the second's.
+func (s *Service) reask(ctx context.Context, c call, rec account.ReservationRecord, note string, first values.Completion,
+	firstErr error) (canonical string, usage values.Usage, stop values.StopReason, outcome string, err error) {
+	timeout := min(s.callTimeout, rec.ExpiresAt.Sub(s.clock.Now())-ledgerTimeout)
+	if timeout <= 0 {
+		return "", first.Usage(), first.Stop(), reaskNoTime, firstErr
+	}
+	req, err := values.NewRequest(c.request.Model(), c.request.Instructions()+"\n\n"+note, c.request.Data(), c.request.MaxOutput())
+	if err != nil {
+		return "", first.Usage(), first.Stop(), reaskFailed, firstErr
+	}
+	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	completion, err := s.provider.Complete(callCtx, req)
+	cancel()
+	if err == nil {
+		err = completion.Failure()
+	}
+	if err != nil {
+		// Not billed to the tester, as a failed first call is released (accepted gap, ADR-0010).
+		s.log.WarnContext(ctx, "completion reask failed", "reservation", rec.ID.String(), "err", err)
+		return "", first.Usage(), first.Stop(), reaskFailed, firstErr
+	}
+	u1, u2 := first.Usage(), completion.Usage()
+	usage, err = values.NewUsage(u1.Input()+u2.Input(), u1.Output()+u2.Output())
+	if err != nil {
+		return "", u1, first.Stop(), reaskFailed, firstErr
+	}
+	canonical, err = c.reader.canonical(completion.Output())
+	if err != nil {
+		return "", usage, completion.Stop(), reaskRefused, err
+	}
+	return canonical, usage, completion.Stop(), reaskAccepted, nil
 }
 
 // invalidAnswer is the permanent PROVIDER_ERROR of an answer that breaks the schema of its operation.
@@ -342,6 +408,7 @@ func (s *Service) validate(cmd Command) (call, error) {
 	if err != nil {
 		return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
+	var reask string
 	if spec.Operation().ServerPrompt() {
 		// The Hub's own prompt and alias (ADR-0023); its version, not the text, goes into the fingerprint.
 		p, ok := s.prompts[spec.Operation()]
@@ -351,9 +418,10 @@ func (s *Service) validate(cmd Command) (call, error) {
 		if spec, err = spec.WithServerPrompt(p.Alias, p.Version, p.Text); err != nil {
 			return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 		}
+		reask = p.Reask
 	}
 	// A reader's model reads the checked, re-encoded input; the fingerprint stays over what the client sent.
-	rd, data, err := newReader(spec.Operation(), spec.Data())
+	rd, data, err := newReader(spec.Operation(), spec.Data(), reask)
 	if err != nil {
 		return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}

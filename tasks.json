@@ -4347,7 +4347,7 @@
                 "go test -race ./hub/... ./shared/..., golangci-lint, buf breaking при изменении контракта"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-201",
@@ -4389,7 +4389,7 @@
             "dependencies": [
                 "TASK-193"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-210",

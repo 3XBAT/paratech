@@ -1,31 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type LibraryMaterial, type LibrarySubject, libraryApi, libraryErrorText } from "../bindings/library.js";
 import { callByName } from "../bindings/runtime.js";
-import { importNote, texts } from "../libraryView.js";
+import { folderCounts, importNote, texts } from "../libraryView.js";
 import type { PageId } from "../nav.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
-import { InboxList, NameForm, SubjectDetail, SubjectList } from "./SubjectsParts.js";
+import { InboxList, NameForm, SubjectDetail, SubjectList, SubjectTree } from "./SubjectsParts.js";
 
 type Form = "none" | "subject" | "folder";
 
 /**
- * «Предметы»: semesters, subjects, and the page of a subject with its folders. The core owns the rules (names,
- * semesters, system folders); the page shows what it reports and the text of its refusals.
+ * «Предметы»: the subjects as cards by semester, and the page of a subject (a tree on the left, the folders with their
+ * files on the right). The core owns the rules (names, semesters, system folders); the page shows what it reports and
+ * the text of its refusals. Which subject is open lives in the window route (TASK-202), so «Назад» restores it.
  * `reload` changes when files were added elsewhere (a drop on the window).
  */
-export function SubjectsPage(props: { onOpen: (id: PageId) => void; reload: number; visit?: number }) {
+export function SubjectsPage(props: {
+  onOpen: (id: PageId) => void;
+  reload: number;
+  /** The open subject ("" shows the list) and the way to open another one. */
+  subjectId: string;
+  onSelect: (subjectId: string) => void;
+}) {
   const api = useMemo(() => libraryApi(callByName), []);
+  const openId = props.subjectId;
   const [subjects, setSubjects] = useState<LibrarySubject[] | null>(null);
   const [inbox, setInbox] = useState<LibraryMaterial[]>([]);
-  const [openId, setOpenId] = useState("");
-  const [materials, setMaterials] = useState<LibraryMaterial[]>([]);
+  const [materials, setMaterials] = useState<LibraryMaterial[] | null>(null);
   const [form, setForm] = useState<Form>("none");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [note, setNote] = useState("");
-  const firstVisit = useRef(props.visit);
   const running = useRef(false); // a double click comes before the re-render that disables the button
 
   const load = useCallback(() => {
@@ -41,8 +47,20 @@ export function SubjectsPage(props: { onOpen: (id: PageId) => void; reload: numb
 
   useEffect(load, [load, props.reload]);
 
+  // Another subject (or the list): the form, the error and the note of the previous one go away.
   useEffect(() => {
-    if (openId === "") {
+    setForm("none");
+    setError("");
+    setNote("");
+    setMaterials(null);
+  }, [openId]);
+
+  const subject = subjects?.find((s) => s.id === openId) ?? null;
+  const known = subject !== null;
+
+  // A reload (a dropped file) only refetches the files; an open form stays.
+  useEffect(() => {
+    if (openId === "" || !known) {
       return;
     }
     let active = true;
@@ -53,21 +71,17 @@ export function SubjectsPage(props: { onOpen: (id: PageId) => void; reload: numb
     return () => {
       active = false;
     };
-  }, [api, openId, props.reload]);
+  }, [api, openId, known, props.reload]);
 
-  // A click on «Предметы» while a subject is open returns to the list.
+  // The route points at a subject that does not exist (any more): back to the list.
+  const { onSelect } = props;
   useEffect(() => {
-    if (props.visit !== firstVisit.current) {
-      firstVisit.current = props.visit;
-      setOpenId("");
-      setMaterials([]);
-      setForm("none");
-      setError("");
-      setNote("");
+    if (openId !== "" && subjects !== null && !known) {
+      onSelect("");
     }
-  }, [props.visit]);
+  }, [openId, subjects, known, onSelect]);
 
-  const subject = subjects?.find((s) => s.id === openId) ?? null;
+  const counts = useMemo(() => (subject && materials ? folderCounts(subject.folders, materials) : null), [subject, materials]);
 
   async function run(work: () => Promise<void>) {
     if (running.current) {
@@ -92,8 +106,7 @@ export function SubjectsPage(props: { onOpen: (id: PageId) => void; reload: numb
       const s = await api.createSubject(name, "");
       setSubjects((list) => [...(list ?? []), s]);
       setForm("none");
-      setOpenId(s.id);
-      setMaterials([]);
+      props.onSelect(s.id);
     });
 
   const createFolder = (name: string) =>
@@ -110,41 +123,99 @@ export function SubjectsPage(props: { onOpen: (id: PageId) => void; reload: numb
       load();
     });
 
-  const open = (id: string) => {
-    setOpenId(id);
-    setMaterials([]);
-    setForm("none");
-    setError("");
-  };
+  const subjectForm = form === "subject" && (
+    <NameForm label={texts.subjectName} busy={busy} error={error} onSubmit={(n) => void createSubject(n)} onCancel={() => setForm("none")} />
+  );
+
+  if (subject && subjects) {
+    return (
+      <section className="page">
+        <div className="subj">
+          <SubjectTree
+            subjects={subjects}
+            currentId={subject.id}
+            counts={counts}
+            busy={busy}
+            onOpen={props.onSelect}
+            onAddSubject={() => setForm("subject")}
+            onAddFolder={() => {
+              setError("");
+              setForm("folder");
+            }}
+          />
+          <div className="subj-main">
+            <div className="head">
+              <div>
+                <span className="label">{subject.semesterLabel || subject.semester}</span>
+                <h1>{subject.name}</h1>
+                {subject.aliases.length > 0 && (
+                  <p className="small muted sub-line">
+                    {texts.aliases}: {subject.aliases.join(", ")}
+                  </p>
+                )}
+              </div>
+              <div className="acts">
+                <Button icon="back" onClick={() => props.onSelect("")}>
+                  {texts.back}
+                </Button>
+              </div>
+            </div>
+            {subjectForm}
+            <SubjectDetail
+              subject={subject}
+              materials={materials ?? []}
+              folderForm={form === "folder"}
+              busy={busy}
+              error={error}
+              onCreateFolder={(n) => void createFolder(n)}
+              onCancelFolder={() => setForm("none")}
+            />
+            {form !== "folder" && form !== "subject" && error !== "" && (
+              <ResultLine kind="fail" role="alert">
+                {error}
+              </ResultLine>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (openId !== "" && (subjects === null || !known)) {
+    // Loading, or the unknown id being dropped by the effect above: no list flashes under an open route.
+    return (
+      <section className="page">
+        {loadError !== "" ? (
+          <ResultLine kind="fail" role="alert">
+            {loadError}
+          </ResultLine>
+        ) : (
+          <p className="muted">{texts.loading}</p>
+        )}
+      </section>
+    );
+  }
 
   return (
     <section className="page">
       <div className="head">
         <div>
-          <span className="label">{subject ? texts.title : "Библиотека"}</span>
-          <h1>{subject ? subject.name : texts.title}</h1>
+          <span className="label">Библиотека</span>
+          <h1>{texts.title}</h1>
         </div>
         <div className="acts">
-          {subject ? (
-            <Button icon="back" onClick={() => open("")}>
-              {texts.back}
-            </Button>
-          ) : (
-            <>
-              <Button icon="book" onClick={() => props.onOpen("knowledge")}>
-                {texts.knowledge}
-              </Button>
-              <Button icon="doc" onClick={() => props.onOpen("tickets")}>
-                Билеты
-              </Button>
-              <Button icon="up" disabled={busy} onClick={() => void addFile()}>
-                {texts.addFile}
-              </Button>
-              <Button variant="primary" icon="plus" disabled={busy} onClick={() => setForm("subject")}>
-                {texts.addSubject}
-              </Button>
-            </>
-          )}
+          <Button icon="book" onClick={() => props.onOpen("knowledge")}>
+            {texts.knowledge}
+          </Button>
+          <Button icon="doc" onClick={() => props.onOpen("tickets")}>
+            Билеты
+          </Button>
+          <Button icon="up" disabled={busy} onClick={() => void addFile()}>
+            {texts.addFile}
+          </Button>
+          <Button variant="primary" icon="plus" disabled={busy} onClick={() => setForm("subject")}>
+            {texts.addSubject}
+          </Button>
         </div>
       </div>
       {subjects === null && !loadError && <p className="muted">{texts.loading}</p>}
@@ -153,35 +224,22 @@ export function SubjectsPage(props: { onOpen: (id: PageId) => void; reload: numb
           {loadError}
         </ResultLine>
       )}
-      {form === "subject" && !subject && (
-        <NameForm label={texts.subjectName} busy={busy} error={error} onSubmit={(n) => void createSubject(n)} onCancel={() => setForm("none")} />
-      )}
-      {subjects !== null && !subject && (
+      {subjectForm}
+      {subjects !== null && (
         <>
-          <SubjectList subjects={subjects} onOpen={open} onAdd={() => setForm("subject")} />
+          <SubjectList subjects={subjects} onOpen={props.onSelect} onAdd={() => setForm("subject")} />
           <InboxList materials={inbox} />
-          {note !== "" && <ResultLine kind="ok" role="status">{note}</ResultLine>}
+          {note !== "" && (
+            <ResultLine kind="ok" role="status">
+              {note}
+            </ResultLine>
+          )}
           {form !== "subject" && error !== "" && (
             <ResultLine kind="fail" role="alert">
               {error}
             </ResultLine>
           )}
         </>
-      )}
-      {subject && (
-        <SubjectDetail
-          subject={subject}
-          materials={materials}
-          folderForm={form === "folder"}
-          busy={busy}
-          error={error}
-          onAddFolder={() => {
-            setError("");
-            setForm("folder");
-          }}
-          onCreateFolder={(n) => void createFolder(n)}
-          onCancelFolder={() => setForm("none")}
-        />
       )}
     </section>
   );

@@ -21,6 +21,7 @@ var files embed.FS
 const (
 	systemFile = "system.md"
 	toolsFile  = "tools.json"
+	reaskFile  = "reask.md"
 )
 
 // ErrNotFound means there is no embedded version of the profile or operation.
@@ -41,6 +42,13 @@ func Agent(profile string) ([]AgentVersion, error) {
 // Op returns the newest embedded server prompt of operation and its version; ErrNotFound when there is none.
 func Op(operation string) (version uint32, system []byte, err error) {
 	return opIn(files, operation)
+}
+
+// OpReask returns the reask note of the newest embedded version of operation and that version: the server text added
+// to its prompt when the Hub asks the model once more after a refusal it can fix (ADR-0025). ErrNotFound when the
+// operation or its newest version has none.
+func OpReask(operation string) (version uint32, note []byte, err error) {
+	return opReaskIn(files, operation)
 }
 
 func agentIn(fsys fs.FS, profile string) ([]AgentVersion, error) {
@@ -76,6 +84,23 @@ func opIn(fsys fs.FS, operation string) (uint32, []byte, error) {
 		return 0, nil, fmt.Errorf("prompts: %s: %w", file, err)
 	}
 	return newest, system, nil
+}
+
+func opReaskIn(fsys fs.FS, operation string) (uint32, []byte, error) {
+	versions, err := versionsIn(fsys, "ops", operation)
+	if err != nil {
+		return 0, nil, err
+	}
+	newest := versions[len(versions)-1]
+	file := path.Join("ops", operation, "v"+strconv.FormatUint(uint64(newest), 10), reaskFile)
+	note, err := fs.ReadFile(fsys, file)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil, ErrNotFound
+	}
+	if err != nil {
+		return 0, nil, fmt.Errorf("prompts: %s: %w", file, err)
+	}
+	return newest, note, nil
 }
 
 // versionsIn lists the version directories v1, v2, ... under kind/name in ascending order. Anything else in that

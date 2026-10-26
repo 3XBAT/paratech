@@ -32,7 +32,8 @@ export type IconName =
   | "tasks"
   | "journal"
   | "plus"
-  | "back";
+  | "back"
+  | "chevr";
 
 /** Rendered once per window, before any Icon. */
 export function IconSprite() {
@@ -143,6 +144,9 @@ export function IconSprite() {
       </symbol>
       <symbol id="i-back" viewBox="0 0 24 24">
         <path d="M15 5l-7 7 7 7" />
+      </symbol>
+      <symbol id="i-chevr" viewBox="0 0 24 24">
+        <path d="M9 6l6 6-6 6" />
       </symbol>
     </svg>
   );
