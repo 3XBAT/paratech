@@ -14,7 +14,7 @@ const (
 	MaxArgumentsBytes = 8 << 10 // arguments_json of one call
 	MaxCallIDBytes    = 64
 	MaxIDsPerArg      = 20 // job_status.ids
-	MaxCardIDs        = 10 // reply.assignments (card_ids, catalog v3)
+	MaxCardIDs        = 10 // reply.assignments (card_ids, since catalog v3)
 	MaxTextListItems  = 10 // 0..10 as the Hub; cannot_do needs one item in either list
 	MaxPlanSteps      = 8
 	MaxQuestions      = 3 // stricter than the Hub (5): the planner is told at most 3 per round
@@ -31,7 +31,7 @@ type Call struct {
 
 // ParseCall checks a call proposed by the planner (untrusted, hard rule 3): the call ID, the tool name and the
 // arguments JSON. The arguments must be one JSON object of at most MaxArgumentsBytes with only catalog arguments,
-// no duplicates, every required argument, exactly one of each one-of pair, and values of the catalog type. A null
+// no duplicates, every required argument, exactly one of each one-of group, and values of the catalog type. A null
 // optional argument counts as absent.
 func ParseCall(callID, tool, argumentsJSON string) (Call, error) {
 	if err := checkCallID(callID); err != nil {
@@ -268,11 +268,9 @@ func parseArgs(spec ToolSpec, raw []byte) (Args, error) {
 			return Args{}, fmt.Errorf("%w: %s is required", ErrInvalidArguments, as.Name)
 		}
 	}
-	for _, pair := range spec.oneOf {
-		_, a := vals[pair[0]]
-		_, b := vals[pair[1]]
-		if a == b {
-			return Args{}, fmt.Errorf("%w: exactly one of %s and %s is required", ErrInvalidArguments, pair[0], pair[1])
+	for _, group := range spec.oneOf {
+		if given(vals, group) != 1 {
+			return Args{}, fmt.Errorf("%w: exactly one of %s is required", ErrInvalidArguments, strings.Join(group, ", "))
 		}
 	}
 	if from, ok := vals["from"]; ok {
@@ -281,6 +279,17 @@ func parseArgs(spec ToolSpec, raw []byte) (Args, error) {
 		}
 	}
 	return Args{vals: vals}, nil
+}
+
+// given counts the arguments of names present in vals.
+func given(vals map[string]argValue, names []string) int {
+	n := 0
+	for _, name := range names {
+		if _, ok := vals[name]; ok {
+			n++
+		}
+	}
+	return n
 }
 
 func parseValue(as ArgSpec, raw json.RawMessage) (argValue, error) {

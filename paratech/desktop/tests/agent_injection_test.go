@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -73,7 +74,7 @@ func injectedValue(a values.ArgSpec, text string) any {
 	return text
 }
 
-// baselineArgs are the required arguments and the first of each one-of pair.
+// baselineArgs are the required arguments and the first of each one-of group.
 func baselineArgs(spec values.ToolSpec) map[string]any {
 	args := map[string]any{}
 	for _, a := range spec.Args() {
@@ -81,9 +82,9 @@ func baselineArgs(spec values.ToolSpec) map[string]any {
 			args[a.Name] = baselineValue(a)
 		}
 	}
-	for _, pair := range spec.OneOf() {
+	for _, group := range spec.OneOf() {
 		for _, a := range spec.Args() {
-			if a.Name == pair[0] {
+			if a.Name == group[0] {
 				args[a.Name] = baselineValue(a)
 			}
 		}
@@ -166,9 +167,10 @@ func TestAgentInjectionSlotSweep(t *testing.T) {
 				spec, _ := values.SpecOf(tool)
 				for _, a := range spec.Args() {
 					args := baselineArgs(spec)
-					for _, pair := range spec.OneOf() {
-						if a.Name == pair[1] {
-							delete(args, pair[0])
+					// Another member of a one-of group replaces the first, so the injected one is the only one.
+					for _, group := range spec.OneOf() {
+						if slices.Contains(group[1:], a.Name) {
+							delete(args, group[0])
 						}
 					}
 					args[a.Name] = injectedValue(a, fx.Untrusted)
