@@ -15,18 +15,18 @@ import (
 // byte-identical.
 const goldenCatalog = "../../../shared/testdata/tool_catalog_v%d.json"
 
-// TestEmbeddedPanel: v1 to v4 stay served to clients of those catalogs; v5 is the current version.
+// TestEmbeddedPanel: v1 to v5 stay served to clients of those catalogs; v6 is the current version.
 func TestEmbeddedPanel(t *testing.T) {
 	versions, err := Agent("panel")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 5 {
-		t.Fatalf("versions: %d, want v1 to v5", len(versions))
+	if len(versions) != 6 {
+		t.Fatalf("versions: %d, want v1 to v6", len(versions))
 	}
 	for i, v := range versions {
 		if v.Version != uint32(i+1) {
-			t.Fatalf("version %d at %d, want v1 to v5 in order", v.Version, i)
+			t.Fatalf("version %d at %d, want v1 to v6 in order", v.Version, i)
 		}
 	}
 	for _, v := range versions {
@@ -159,6 +159,50 @@ func TestPanelV5Prompt(t *testing.T) {
 	for _, gone := range []string{"generate_draft", "«Решение»", "the recording in «Сегодня»", "A recording opens its transcript"} {
 		if strings.Contains(system, gone) {
 			t.Errorf("agent/panel/v5/system.md still says %q", gone)
+		}
+	}
+}
+
+// TestPanelV6Prompt: v6 keeps every rule of v5 and adds create_assignment (TASK-216, ADR-0029): the title in the
+// student's words, IDs only from results, the date rules, people as text and never an address, the calendar only on
+// request. The «Добавить задание» button is not named until TASK-219 ships it.
+func TestPanelV6Prompt(t *testing.T) {
+	v5, system := panelSystem(t, 5), panelSystem(t, 6)
+	for _, line := range strings.Split(v5, "\n") {
+		// The trust line now also names times of day and the title and note of a new assignment.
+		if strings.HasPrefix(line, "- Tool arguments hold only") {
+			continue
+		}
+		if !strings.Contains(system, line) {
+			t.Errorf("agent/panel/v6/system.md drops the v5 line %q", line)
+		}
+	}
+	for _, rule := range []string{
+		"times of day", "the title and note of a new assignment from the student's own request",
+		"# Adding an assignment", "create_assignment adds an assignment or a reminder",
+		"«была пара по матанализу, нужно решить номер 5 к 30 октября»", "«запиши задание»", "«напомни завтра в 9 …»",
+		"in the student's own words", "at most 80 characters", "goes into note",
+		"never invent one", "list_subjects", "the subject of the current thread", "(«Без предмета»), no subject",
+		"only when the student names a lesson and find_lessons finds it",
+		"counts from today in the student context", "No date named: add the assignment without due",
+		"the reply says that no deadline is set",
+		"ask_questions, the possible dates as choices", "«к пятнице» when today is a Friday", "«к 5-му» without a month",
+		"«на следующей неделе» without a day",
+		"only when the student names a time", "«в 9» → 09:00", "«в 9 вечера» → 21:00", "only together with due",
+		"stays plain text in title or note", "never becomes an email address", "propose_send is never called for it",
+		"goes into no argument",
+		"only when the student asks for the calendar, propose_deadline with the assignment ID from the create_assignment result",
+		"Several assignments in one request: show_plan first",
+		"does not repeat the title", "«Задание добавлено, срок 2026-10-28.»",
+		"Times of day are HH:MM, 24 h",
+	} {
+		if !strings.Contains(system, rule) {
+			t.Errorf("agent/panel/v6/system.md does not state %q", rule)
+		}
+	}
+	for _, gone := range []string{"generate_draft", "«Решение»", "Добавить задание", "«Добавить»"} {
+		if strings.Contains(system, gone) {
+			t.Errorf("agent/panel/v6/system.md says %q", gone)
 		}
 	}
 }

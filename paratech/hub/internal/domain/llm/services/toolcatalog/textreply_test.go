@@ -25,7 +25,7 @@ func TestCatalogV5(t *testing.T) {
 // TestTextReply: a plain text becomes reply{text} under the exact check of a returned reply, in every catalog version;
 // JSON or a call inside the text stays text.
 func TestTextReply(t *testing.T) {
-	for _, file := range []string{goldenV1, goldenV2, goldenV3, golden, goldenV5} {
+	for _, file := range []string{goldenV1, goldenV2, goldenV3, golden, goldenV5, goldenV6} {
 		c := parseFile(t, file)
 		for _, text := range []string{
 			"Горутина — лёгкий поток выполнения в Go.",

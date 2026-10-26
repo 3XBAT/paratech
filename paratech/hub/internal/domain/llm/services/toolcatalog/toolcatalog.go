@@ -48,6 +48,7 @@ const (
 	typeID        = "id"
 	typeIDs       = "ids"
 	typeDate      = "date"
+	typeTime      = "time"
 	typeEnum      = "enum"
 	typeLabel     = "label"
 	typeQuery     = "query"
@@ -67,9 +68,13 @@ const (
 )
 
 var (
-	actionTypes = []string{typeID, typeIDs, typeDate, typeEnum, typeLabel, typeQuery}
+	actionTypes = []string{typeID, typeIDs, typeDate, typeTime, typeEnum, typeLabel, typeQuery}
 	uiTypes     = []string{typeText, typeTextList, typeCardIDs, typePlanSteps, typeQuestions}
 )
+
+// timeFrom is the first catalog with the time type (create_assignment.time, TASK-216). An older catalog naming it was
+// never released that way, so it is refused rather than served with a schema its desktop does not know.
+const timeFrom = 6
 
 // Question kinds of ask_questions.
 var questionKinds = []string{"choice", "text"}
@@ -117,7 +122,8 @@ type Catalog struct {
 
 // Parse reads a catalog text and checks it: known fields only, a version above 0, unique snake_case tool and argument
 // names, known classes, argument types allowed for the class (UI tools only card types, among them the IDs a card
-// lists; other tools only IDs, enums, dates, labels and queries), enum values only on enums; from catalog oneOfFrom on,
+// lists; other tools only IDs, enums, dates, times from catalog timeFrom, labels and queries), enum values only on
+// enums; from catalog oneOfFrom on,
 // a one_of note whose groups name optional arguments of declared tools. The deeper policy checks of the golden file
 // live in the contract test.
 func Parse(raw []byte) (*Catalog, error) {
@@ -138,7 +144,7 @@ func Parse(raw []byte) (*Catalog, error) {
 	}
 	c := &Catalog{version: doc.CatalogVersion, tools: make(map[string]tool, len(doc.Tools))}
 	for _, t := range doc.Tools {
-		if err := checkTool(t); err != nil {
+		if err := checkTool(t, doc.CatalogVersion); err != nil {
 			return nil, err
 		}
 		if _, dup := c.tools[t.Name]; dup {
@@ -164,7 +170,7 @@ func Parse(raw []byte) (*Catalog, error) {
 	return c, nil
 }
 
-func checkTool(t tool) error {
+func checkTool(t tool, version uint32) error {
 	if !values.ValidToolName(t.Name) {
 		return fmt.Errorf("%w: a tool name is not snake_case", ErrInvalidCatalog)
 	}
@@ -184,6 +190,9 @@ func checkTool(t tool) error {
 		seen[a.Name] = true
 		if !slices.Contains(allowed, a.Type) {
 			return fmt.Errorf("%w: tool %s: argument %s has a type its class does not allow", ErrInvalidCatalog, t.Name, a.Name)
+		}
+		if a.Type == typeTime && version < timeFrom {
+			return fmt.Errorf("%w: tool %s: argument %s: the time type exists from catalog %d", ErrInvalidCatalog, t.Name, a.Name, timeFrom)
 		}
 		if (a.Type == typeEnum) != (len(a.Values) > 0) {
 			return fmt.Errorf("%w: tool %s: argument %s: an enum needs values and only an enum has them", ErrInvalidCatalog, t.Name, a.Name)

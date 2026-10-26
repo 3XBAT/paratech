@@ -691,13 +691,15 @@ func TestAgentMessagesHaveOnlyAllowlistedStrings(t *testing.T) {
 	}
 }
 
-// Golden tool catalog (design §2.3, ADR-0021), the current version 5 (TASK-200: the tools of v4, a new server prompt;
-// v4, TASK-182: no generate_draft, triage_assignment by topic; v3, TASK-172: reply lists up to 10 assignment IDs; v2,
-// TASK-118: question and search query of up to 500 characters). Both the Hub catalog (TASK-114) and the desktop Tool
-// enum (TASK-115) must match it. Versions 1 to 4 are frozen: the Hub still serves them to clients of those versions.
+// Golden tool catalog (design §2.3, ADR-0021), the current version 6 (TASK-216: create_assignment and the time type;
+// v5, TASK-200: the tools of v4, a new server prompt; v4, TASK-182: no generate_draft, triage_assignment by topic; v3,
+// TASK-172: reply lists up to 10 assignment IDs; v2, TASK-118: question and search query of up to 500 characters).
+// Both the Hub catalog (TASK-114) and the desktop Tool enum (TASK-115) must match it. Versions 1 to 5 are frozen: the
+// Hub still serves them to clients of those versions.
 const (
-	toolCatalogVersion = 5
-	toolCatalogFile    = "testdata/tool_catalog_v5.json"
+	toolCatalogVersion = 6
+	toolCatalogFile    = "testdata/tool_catalog_v6.json"
+	toolCatalogV5File  = "testdata/tool_catalog_v5.json"
 	toolCatalogV4File  = "testdata/tool_catalog_v4.json"
 	toolCatalogV3File  = "testdata/tool_catalog_v3.json"
 	toolCatalogV2File  = "testdata/tool_catalog_v2.json"
@@ -729,9 +731,9 @@ type toolCatalog struct {
 var (
 	toolNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 	toolClasses     = []string{"R", "U", "C", "UI"}
-	// Argument types of tools that act or read: only IDs, enums, dates, short labels and the student's question or
-	// search text (ADR-0022, TASK-118).
-	actionArgTypes = []string{"id", "ids", "date", "enum", "label", "query"}
+	// Argument types of tools that act or read: only IDs, enums, dates, times of day, short labels and the student's
+	// question or search text (ADR-0022, TASK-118, TASK-216).
+	actionArgTypes = []string{"id", "ids", "date", "time", "enum", "label", "query"}
 	// Types only UI tools may use: card text written by the model, at most 300 characters each (ADR-0023), and IDs a card
 	// lists, whose titles the desktop draws from local data (TASK-172).
 	uiArgTypes = []string{"text", "text_list", "card_ids", "plan_steps", "questions"}
@@ -782,6 +784,7 @@ var pinnedTools = map[string]string{
 	"make_lecture_text":        "U",
 	"find_homework":            "U",
 	"edit_due":                 "U",
+	"create_assignment":        "U",
 	"triage_assignment":        "U",
 	"write_work":               "U",
 	"propose_deadline":         "C",
@@ -902,9 +905,13 @@ func validateCatalog(c toolCatalog) []string {
 }
 
 // queryArguments are the only arguments of type query: the student's question and search text, at most 500
-// characters (TASK-118), and the topic of a work without an assignment (TASK-182). A query is longer free text than a
-// label, so a new one must be a conscious edit here.
-var queryArguments = []string{"answer_question.question", "search.query", "triage_assignment.topic"}
+// characters (TASK-118), the topic of a work without an assignment (TASK-182) and the note of an assignment the student
+// adds (TASK-216). A query is longer free text than a label, so a new one must be a conscious edit here.
+var queryArguments = []string{"answer_question.question", "create_assignment.note", "search.query", "triage_assignment.topic"}
+
+// timeArguments are the only arguments of type time (HH:MM, 24 h): the time of the deadline of an assignment the
+// student adds, only together with its due (TASK-216).
+var timeArguments = []string{"create_assignment.time"}
 
 // oneOfGroups are the one-of groups of the current catalog's note (tool -> arguments), which the desktop parser and,
 // from catalog 4, the Hub enforce: exactly one of the group per call.
@@ -945,6 +952,15 @@ func TestToolCatalog(t *testing.T) {
 	if ids := argumentsOfType(c, "card_ids"); !slices.Equal(ids, cardIDArguments) || !strings.Contains(c.Types["card_ids"], "0-10 IDs") {
 		t.Errorf("card_ids arguments %v (%q), want %v of 0-10 IDs", ids, c.Types["card_ids"], cardIDArguments)
 	}
+	if times := argumentsOfType(c, "time"); !slices.Equal(times, timeArguments) || !strings.Contains(c.Types["time"], "HH:MM, 24 h") ||
+		!strings.Contains(c.Types["time"], "only together with due") {
+		t.Errorf("time arguments %v (%q), want %v of HH:MM only with due", times, c.Types["time"], timeArguments)
+	}
+	create := c.Tools[toolIndex(t, c, "create_assignment")]
+	if create.Paid || !create.AgentCanExecute || len(create.Arguments) == 0 || create.Arguments[0].Name != "title" || !create.Arguments[0].Required ||
+		slices.ContainsFunc(create.Arguments[1:], func(a catalogArgument) bool { return a.Required }) {
+		t.Errorf("create_assignment = %+v, want a free U tool with only title required", create)
+	}
 	reply := c.Tools[toolIndex(t, c, "reply")]
 	if i := slices.IndexFunc(reply.Arguments, func(a catalogArgument) bool { return a.Name == "assignments" }); i < 0 || reply.Arguments[i].Required {
 		t.Errorf("reply.assignments must be optional: %+v", reply.Arguments)
@@ -984,10 +1000,27 @@ func TestToolCatalog(t *testing.T) {
 	}
 }
 
+// TestToolCatalogV5IsFrozen: catalog v5 stays as released: catalog v6 without create_assignment, the time type and
+// create_assignment in the date description.
+func TestToolCatalogV5IsFrozen(t *testing.T) {
+	v5, v6 := loadToolCatalogFile(t, toolCatalogV5File), loadToolCatalog(t)
+	if v5.CatalogVersion != 5 || v5.Types["time"] != "" {
+		t.Fatalf("v5: version %d, time type %q", v5.CatalogVersion, v5.Types["time"])
+	}
+	want := cloneCatalog(v6)
+	want.CatalogVersion = 5
+	delete(want.Types, "time")
+	want.Types["date"] = strings.Replace(want.Types["date"], "(edit_due.due, create_assignment.due without time)", "(edit_due.due)", 1)
+	want.Tools = slices.Delete(want.Tools, toolIndex(t, want, "create_assignment"), toolIndex(t, want, "create_assignment")+1)
+	if fmt.Sprint(want) != fmt.Sprint(v5) {
+		t.Errorf("v5 differs from v6 beyond create_assignment:\nv5 %+v\nv6 %+v", v5, want)
+	}
+}
+
 // TestToolCatalogV4IsFrozen: catalog v4 stays as released: catalog v5 with version 4 (v5 changed only the server
 // prompt, TASK-200).
 func TestToolCatalogV4IsFrozen(t *testing.T) {
-	v4, v5 := loadToolCatalogFile(t, toolCatalogV4File), loadToolCatalog(t)
+	v4, v5 := loadToolCatalogFile(t, toolCatalogV4File), loadToolCatalogFile(t, toolCatalogV5File)
 	if v4.CatalogVersion != 4 {
 		t.Fatalf("v4: version %d", v4.CatalogVersion)
 	}
@@ -1147,6 +1180,14 @@ func TestCatalogValidatorCatchesBadCatalogs(t *testing.T) {
 		{"link outside the exception", func(t *testing.T, c *toolCatalog) {
 			c.Tools = append(c.Tools, catalogTool{Name: "open_link", Class: "U", AgentCanExecute: true})
 		}, `tool name "open_link" names`},
+		{"C tool with a time argument", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "propose_deadline")
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "time", Type: "time"})
+		}, `argument propose_deadline.time has type "time"`},
+		{"UI tool with a time argument", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "reply")
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "time", Type: "time"})
+		}, `argument reply.time has type "time"`},
 		{"missing note", func(t *testing.T, c *toolCatalog) {
 			delete(c.Notes, "one_of")
 		}, `note "one_of" is missing`},

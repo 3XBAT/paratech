@@ -2,6 +2,7 @@ package toolcatalog
 
 import (
 	"encoding/json"
+	"regexp"
 	"slices"
 	"strconv"
 	"unicode"
@@ -28,6 +29,12 @@ const (
 
 // datePattern is the JSON Schema form of values.ValidDate's shape; the check also rejects impossible dates.
 const datePattern = `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`
+
+// timePattern is a time of day HH:MM, 24 h; the provider gets it as the schema and the check uses the same expression.
+// The rule "time only together with due" is the desktop's (an is_error result the planner corrects), not the Hub's.
+const timePattern = `^([01][0-9]|2[0-3]):[0-5][0-9]$`
+
+var timeOfDay = regexp.MustCompile(timePattern)
 
 type object = map[string]any
 
@@ -65,6 +72,8 @@ func (c *Catalog) typeSchema(a argument) object {
 		return object{"type": "array", "items": idSchema(), "minItems": 1, "maxItems": maxIDsItems}
 	case typeDate:
 		return object{"type": "string", "pattern": datePattern}
+	case typeTime:
+		return object{"type": "string", "pattern": timePattern}
 	case typeEnum:
 		return object{"type": "string", "enum": a.Values}
 	case typeLabel:
@@ -133,6 +142,9 @@ func (c *Catalog) valid(a argument, v any) bool {
 	case typeDate:
 		s, ok := v.(string)
 		return ok && values.ValidDate(s)
+	case typeTime:
+		s, ok := v.(string)
+		return ok && timeOfDay.MatchString(s)
 	case typeEnum:
 		s, ok := v.(string)
 		return ok && slices.Contains(a.Values, s)
