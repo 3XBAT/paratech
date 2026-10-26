@@ -668,13 +668,13 @@ func TestCatalogVersionsServedSideBySide(t *testing.T) {
 		args    string
 		ok      bool
 	}{
-		"v3 with assignments":  {3, listed, true},
-		"v3 without":           {3, `{"text":"Заданий нет."}`, true},
-		"v3 eleven":            {3, eleven, false},
-		"v3 not an id":         {3, `{"assignments":["a 1"],"text":"t"}`, false},
-		"v2 plain reply":       {2, `{"text":"Готово."}`, true},
-		"v2 with assignments":  {2, listed, false},
-		"v1 still served":      {1, `{"text":"Готово."}`, true},
+		"v3 with assignments": {3, listed, true},
+		"v3 without":          {3, `{"text":"Заданий нет."}`, true},
+		"v3 eleven":           {3, eleven, false},
+		"v3 not an id":        {3, `{"assignments":["a 1"],"text":"t"}`, false},
+		"v2 plain reply":      {2, `{"text":"Готово."}`, true},
+		"v2 with assignments": {2, listed, false},
+		"v1 still served":     {1, `{"text":"Готово."}`, true},
 	} {
 		provider := testenv.NewFakeAgentProvider(answer(t, 100, 20, toolCall(t, "toolu_01", "reply", tc.args)))
 		svc, err := agentstep.New(agentstep.Deps{

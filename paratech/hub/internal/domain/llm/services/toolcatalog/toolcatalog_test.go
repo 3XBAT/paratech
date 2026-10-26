@@ -129,7 +129,7 @@ func call(t *testing.T, tool, args string) values.ToolCall {
 
 func TestParseGolden(t *testing.T) {
 	c := goldenCatalog(t)
-	if c.Version() != 3 || len(c.Specs()) != 27|| !c.Has("show_plan") || c.Has("send_email") {
+	if c.Version() != 3 || len(c.Specs()) != 27 || !c.Has("show_plan") || c.Has("send_email") {
 		t.Fatalf("catalog version %d, %d tools", c.Version(), len(c.Specs()))
 	}
 	specs := c.Specs()
