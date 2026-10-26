@@ -3,9 +3,40 @@
 // impersonal («Создан предмет…», not «Я создал…»). Model text (summary, notes, questions, options, labels, replies) is
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
-import type { AnswerInput, ArgView, AskInput, CallProblem, CardView, PlanStepView, QuestionView } from "./bindings/agent.js";
+import type { AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, PlanStepView, QuestionView } from "./bindings/agent.js";
 import { type Entry, isBusyRefused } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
+import { dueText, parseMoment } from "./todayView.js";
+
+/** One row of the assignment list of a reply card. */
+export interface AssignmentRow {
+  id: string;
+  title: string;
+  /** "" when the subject is unknown. */
+  subject: string;
+  /** «сегодня», «завтра», «до сб, 24 окт.» or «просрочено»; "" without a date. */
+  due: string;
+  /** Overdue: drawn with the urgent colour of «Сегодня». */
+  overdue: boolean;
+}
+
+export const noTitleLabel = "Без названия";
+
+const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+/** The row of an assignment; the subject name comes from the student's subjects, the due date is read against `now`. */
+export function assignmentRow(a: AssignmentLineView, subjects: Readonly<Record<string, string>>, now: Date): AssignmentRow {
+  const d = parseMoment(a.due);
+  let due = "";
+  let overdue = false;
+  if (d !== null) {
+    const days = Math.round((dayStart(d) - dayStart(now)) / 86_400_000);
+    overdue = days < 0;
+    due = days < 0 ? "просрочено" : days === 0 ? "сегодня" : days === 1 ? "завтра" : dueText(a.due);
+  }
+  const subject = Object.prototype.hasOwnProperty.call(subjects, a.subjectId) ? subjects[a.subjectId] : "";
+  return { id: a.id, title: a.title.trim() === "" ? noTitleLabel : a.title, subject, due, overdue };
+}
 
 /** The agent screen of the core (values.Screen) for a section of the window; the core refuses unknown screens. */
 const screens: Record<PageId, string> = {
@@ -102,6 +133,7 @@ export const texts = {
   resultCaption: "Готово",
   answerCaption: "Ответ по материалам",
   replyCaption: "Ответ",
+  assignmentsLabel: "Задания",
   cannotDoCaption: "Целиком не получится",
   yourPart: "Остаётся на вашей стороне",
   ourPart: "Берёт на себя paratech",
@@ -339,7 +371,7 @@ export type CardModel =
   | { type: "waiting"; buttons: ButtonModel[] }
   | { type: "result"; caption: string; artifact: ArtifactLabel | null; fallback: string }
   | { type: "answer"; caption: string; text: string }
-  | { type: "reply"; caption: string; text: string }
+  | { type: "reply"; caption: string; text: string; assignments: AssignmentLineView[] }
   | { type: "cannot_do"; caption: string; yourTitle: string; yourPart: string[]; ourTitle: string; ourPart: string[] }
   | { type: "confirm"; caption: string; text: string; target: { kind: "proposal" | "preview"; id: string } | null }
   | { type: "action"; text: string; actionId: string; undo: { label: string; enabled: boolean } }
@@ -392,7 +424,7 @@ function cardModel(c: CardView, status: string): CardModel | null {
     case "answer":
       return { type: "answer", caption: texts.answerCaption, text: texts.answerReady };
     case "reply":
-      return { type: "reply", caption: texts.replyCaption, text: c.text };
+      return { type: "reply", caption: texts.replyCaption, text: c.text, assignments: c.assignments ?? [] };
     case "cannot_do":
       if (!c.cannotDo) {
         return null;

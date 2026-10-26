@@ -61,6 +61,15 @@
 .ag-lead { font-size: var(--fs-h3); line-height: var(--lh-h3); font-weight: 600; letter-spacing: -0.01em; }
 /* The reply is the model's text: line breaks stay, markup is never interpreted. */
 .ag-text { white-space: pre-wrap; }
+/* Assignment list of a reply (TASK-176); the overdue colour is the urgent one of «Сегодня» (--run-t). */
+.ag-asg { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ag-asg-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.ag-asg-row:hover { background: var(--raised); }
+.ag-asg-row:focus-visible { outline: 2px solid var(--control); outline-offset: 1px; }
+.ag-asg-main { display: flex; flex-direction: column; min-width: 0; }
+.ag-asg-t { overflow-wrap: anywhere; font-weight: 600; }
+.ag-asg-due { flex: none; color: var(--muted); }
+.ag-asg-late { color: var(--run-t); font-weight: 600; }
 .ag-sub { font-size: var(--fs-small); font-weight: 600; color: var(--muted); }
 .ag-list { margin: 0 0 8px; padding-left: 20px; overflow-wrap: anywhere; }
 .ag-list li { margin-bottom: 4px; }
