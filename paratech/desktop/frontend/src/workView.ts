@@ -18,6 +18,27 @@ export const limits = {
   noteMax: 1000,
 } as const;
 
+/** The limits of a presentation (domain/coursework/work/presentation.go, values/presentation.go). */
+export const slideLimits = {
+  minSlides: 8,
+  maxSlides: 12,
+  minWords: 15,
+  maxWords: 250,
+  totalWordsMin: 600,
+  totalWordsMax: 1200,
+  titleMax: 120,
+} as const;
+
+/** paper: an ordinary work; presentation: slides; lab: a lab report. */
+export type EditorMode = "paper" | "presentation" | "lab";
+
+export function editorMode(w: WorkWriting | null): EditorMode {
+  return w?.presentation === true ? "presentation" : w?.lab === true ? "lab" : "paper";
+}
+
+/** Words of a new slide: inside the limit of a slide. */
+export const newSlideWords = "60";
+
 /** Length in runes (code points), not UTF-16 units. */
 export function runeLen(s: string): number {
   return [...s].length;
@@ -40,8 +61,22 @@ export const workTexts = {
   generated: "Сгенерировано — прочитайте перед сдачей",
   verify: "проверить источник",
   revise: "Доработать",
-  reviseSection: "Что дорабатывать",
-  allSections: "Весь текст",
+  reviseSection: "К чему",
+  reviseNote: "Замечания",
+  reviseSubmit: "Доработать по замечаниям",
+  reviseAllCaption: "Работа будет написана заново целиком с учётом замечаний (платно)",
+  allSections: "Вся работа",
+  slide: "Слайд",
+  section: "Раздел",
+  slideNotes: "Заметки докладчика",
+  questionsCaption: "Вероятные вопросы",
+  answerLabel: "Ответ",
+  openTalk: "Открыть текст выступления",
+  todoCaption: "Что доделать самому",
+  todoDepends: "Выводы зависят от ваших данных",
+  manualNotRead: "Методичка не прочитана: отчёт написан по тексту задания.",
+  manualNoText: "В методичке нет текста, который можно прочитать: отчёт написан по тексту задания.",
+  columnFallback: "Колонка",
   editPlan: "Изменить план",
   rewrite: "Написать заново",
   cancel: "Отмена",
@@ -72,14 +107,65 @@ export const checkTexts = {
   titleLong: `Название раздела — не длиннее ${limits.titleMax} символов.`,
 } as const;
 
+export const slideCheckTexts = {
+  count: `Нужно от ${slideLimits.minSlides} до ${slideLimits.maxSlides} слайдов.`,
+  title: "У каждого слайда должен быть заголовок.",
+  titleLong: `Заголовок слайда — не длиннее ${slideLimits.titleMax} символов.`,
+  words: `Объём заметок слайда — целое число слов от ${slideLimits.minWords} до ${slideLimits.maxWords}.`,
+  totalMin: `Общий объём выступления — не меньше ${slideLimits.totalWordsMin} слов.`,
+  totalMax: `Общий объём выступления — не больше ${slideLimits.totalWordsMax} слов.`,
+} as const;
+
+/** Labels of the parts of a lab report. */
+export const partLabels: Readonly<Record<string, string>> = {
+  goal: "Цель",
+  equipment: "Оборудование",
+  theory: "Теория",
+  procedure: "Ход работы",
+  results: "Результаты",
+  conclusions: "Выводы",
+};
+
 // ---- Which card ----
 
 export interface SectionText {
   key: string;
   heading: string;
   paragraphs: string[];
+  /** Parallel to paragraphs: the line is a placeholder («▢ …») of a lab report, shown highlighted. */
+  marks: boolean[];
   sources: { text: string; verify: boolean }[];
+  /** «Цель», «Выводы», …; "" for another work or the part "other". */
+  partLabel: string;
+  /** Bullets of a slide, or the columns of a two-column slide. */
+  bullets: string[];
+  columns: { heading: string; bullets: string[] }[];
+  /** A slide: its paragraphs are the speaker notes. */
+  slide: boolean;
 }
+
+export interface TalkQuestionView {
+  question: string;
+  answer: string;
+}
+
+export interface TodoItem {
+  key: string;
+  title: string;
+  prompt: string;
+}
+
+export type DoneExtras = {
+  kind: EditorMode;
+  /** «Вероятные вопросы» of a presentation; [] when none. */
+  questions: TalkQuestionView[];
+  /** The speaker text to open, "" when there is none. */
+  talkTarget: string;
+  /** «Что доделать самому» of a lab report: the placeholders and the fixed line; null for another work. */
+  todo: { items: TodoItem[]; depends: string } | null;
+  /** The line about the lab manual ("" when it was read, absent or not set yet). */
+  manualLine: string;
+};
 
 export type WorkCardModel =
   | { type: "none" }
@@ -88,27 +174,69 @@ export type WorkCardModel =
   | { type: "stopped"; caption: string; line: string; button: string }
   | { type: "approve"; caption: string; hint: string }
   | { type: "blocked"; caption: string; text: string; noteLabel: string; button: string }
-  | { type: "done"; caption: string; file: { kind: string; name: string }; notice: string; sections: SectionText[] };
+  | ({ type: "done"; caption: string; file: { kind: string; name: string }; notice: string; sections: SectionText[] } & DoneExtras);
 
-/** «Раздел N из M» while the sections are written; N is the section being written, never above M. */
+/** «Раздел N из M» («Слайд N из M» of a presentation) while the parts are written; N never above M. */
 export function progressLine(w: WorkWriting): string {
   if (w.step === "outline" || w.total <= 0) {
     return workTexts.planning;
   }
   const n = w.step === "assemble" ? w.total : Math.min(w.done + 1, w.total);
-  return `Раздел ${n} из ${w.total}`;
+  return `${w.presentation === true ? workTexts.slide : workTexts.section} ${n} из ${w.total}`;
 }
+
+const placeholderMark = "▢";
 
 /** The written sections to read: the paragraphs and the sources, as they came. */
 export function sectionTexts(sections: readonly WorkSection[]): SectionText[] {
   return sections
-    .filter((s) => s.paragraphs.length > 0 || s.sources.length > 0)
-    .map((s, i) => ({
+    .map((s) => ({
+      s,
+      paragraphs: s.paragraphs ?? [],
+      sources: s.sources ?? [],
+      bullets: s.bullets ?? [],
+      columns: s.columns ?? [],
+    }))
+    .filter((x) => x.paragraphs.length > 0 || x.sources.length > 0 || x.bullets.length > 0 || x.columns.length > 0)
+    .map(({ s, paragraphs, sources, bullets, columns }, i) => ({
       key: `${s.number}:${i}`,
       heading: `${s.number}. ${s.title}`,
-      paragraphs: s.paragraphs,
-      sources: s.sources.map((r) => ({ text: r.text, verify: r.verify })),
+      paragraphs,
+      marks: paragraphs.map((p) => p.startsWith(placeholderMark)),
+      sources: sources.map((r) => ({ text: r.text, verify: r.verify })),
+      partLabel: partLabels[s.part ?? ""] ?? "",
+      bullets,
+      columns: columns.map((c) => ({ heading: c.heading, bullets: c.bullets })),
+      slide: (s.kind ?? "") !== "",
     }));
+}
+
+/** The line about the lab manual; the manual is "" until the outline is set, then nothing is said. */
+export function manualLine(manual: string): string {
+  return manual === "not_read" ? workTexts.manualNotRead : manual === "no_text" ? workTexts.manualNoText : "";
+}
+
+/** The speaker text to open (a presentation only): the id of the material, "" when it is not ready. */
+export function talkTarget(w: TurnkeyWork): string {
+  const wr = w.writing;
+  return wr?.presentation === true && wr.step === "none" && wr.result !== "" ? (wr.talkMaterialId ?? "") : "";
+}
+
+function doneExtras(w: TurnkeyWork, wr: WorkWriting): DoneExtras {
+  const kind = editorMode(wr);
+  const lab = kind === "lab";
+  return {
+    kind,
+    questions: kind === "presentation" ? (wr.questions ?? []).map((q) => ({ question: q.question, answer: q.answer })) : [],
+    talkTarget: talkTarget(w),
+    todo: lab
+      ? {
+          items: (wr.placeholders ?? []).map((p, i) => ({ key: `${p.section}:${i}`, title: `${p.section}. ${p.title}`, prompt: p.prompt })),
+          depends: workTexts.todoDepends,
+        }
+      : null,
+    manualLine: lab ? manualLine(wr.manual ?? "") : "",
+  };
 }
 
 /**
@@ -118,8 +246,7 @@ export function sectionTexts(sections: readonly WorkSection[]): SectionText[] {
 export function workCardModel(w: TurnkeyWork): WorkCardModel {
   const wr = w.writing;
   if (wr === null) {
-    // A presentation is not written as a paper.
-    return w.status === "confirmed" && w.workType !== "presentation"
+    return w.status === "confirmed"
       ? { type: "start", caption: workTexts.caption, hint: workTexts.startHint, button: workTexts.start }
       : { type: "none" };
   }
@@ -148,9 +275,10 @@ export function workCardModel(w: TurnkeyWork): WorkCardModel {
       return {
         type: "done",
         caption: workTexts.doneCaption,
-        file: { kind: w.workType === "presentation" ? ".pptx" : workTexts.fileKind, name: wr.topic.trim() === "" ? workTexts.fallbackName : wr.topic },
+        file: { kind: w.workType === "presentation" || wr.presentation === true ? ".pptx" : workTexts.fileKind, name: wr.topic.trim() === "" ? workTexts.fallbackName : wr.topic },
         notice: workTexts.generated,
         sections: sectionTexts(wr.sections),
+        ...doneExtras(w, wr),
       };
   }
 }
@@ -287,40 +415,82 @@ export interface EditorItem {
   number: number;
   title: string;
   words: string;
+  /** Slide kind / lab part of a section of the saved plan; absent for a new one. */
+  kind?: string;
+  part?: string;
 }
 
 export const newSectionWords = "300";
 
 export function editorFromSections(sections: readonly WorkSection[]): EditorItem[] {
-  return sections.map((s) => ({ number: s.number, title: s.title, words: String(s.words) }));
+  return sections.map((s) => ({ number: s.number, title: s.title, words: String(s.words), kind: s.kind ?? "", part: s.part ?? "" }));
 }
 
-export function addItem(items: readonly EditorItem[]): EditorItem[] {
+/** The title slide and the conclusion slide keep their places and cannot be removed. */
+function isFixedSlide(it: EditorItem): boolean {
+  return it.kind === "title" || it.kind === "conclusion";
+}
+
+/** Adds a section; in a presentation before the conclusion slide, within the slide limits. */
+export function addItem(items: readonly EditorItem[], mode: EditorMode = "paper"): EditorItem[] {
+  if (mode === "presentation") {
+    if (items.length >= slideLimits.maxSlides) {
+      return [...items];
+    }
+    const fresh: EditorItem = { number: 0, title: "", words: newSlideWords };
+    const last = items.length - 1;
+    return last >= 0 && items[last].kind === "conclusion" ? [...items.slice(0, last), fresh, items[last]] : [...items, fresh];
+  }
   return items.length >= limits.maxSections ? [...items] : [...items, { number: 0, title: "", words: newSectionWords }];
 }
 
-export function removeItem(items: readonly EditorItem[], index: number): EditorItem[] {
-  return items.filter((_, i) => i !== index);
+/**
+ * A section can be removed unless it is the title or the conclusion slide, or the only section of a lab report with
+ * the part results or conclusions.
+ */
+export function canRemove(items: readonly EditorItem[], index: number): boolean {
+  const it = items[index];
+  if (it === undefined || isFixedSlide(it)) {
+    return false;
+  }
+  if (it.part === "results" || it.part === "conclusions") {
+    return items.some((o, i) => i !== index && o.part === it.part);
+  }
+  return true;
 }
 
-/** Moves an item one place up (-1) or down (1); at the edge nothing moves. */
-export function moveItem(items: readonly EditorItem[], index: number, dir: -1 | 1): EditorItem[] {
+export function removeItem(items: readonly EditorItem[], index: number): EditorItem[] {
+  return canRemove(items, index) ? items.filter((_, i) => i !== index) : [...items];
+}
+
+/** A section can move one place up (-1) or down (1) unless it or its neighbour is a fixed slide, or at the edge. */
+export function canMove(items: readonly EditorItem[], index: number, dir: -1 | 1): boolean {
   const to = index + dir;
   if (index < 0 || index >= items.length || to < 0 || to >= items.length) {
+    return false;
+  }
+  return !isFixedSlide(items[index]) && !isFixedSlide(items[to]);
+}
+
+/** Moves an item one place up (-1) or down (1); at the edge or next to a fixed slide nothing moves. */
+export function moveItem(items: readonly EditorItem[], index: number, dir: -1 | 1): EditorItem[] {
+  if (!canMove(items, index, dir)) {
     return [...items];
   }
+  const to = index + dir;
   const out = [...items];
   [out[index], out[to]] = [out[to], out[index]];
   return out;
 }
 
-function wordsOf(raw: string): number | null {
+function wordsOf(raw: string, mode: EditorMode = "paper"): number | null {
   const t = raw.trim();
   if (!/^\d{1,6}$/.test(t)) {
     return null;
   }
   const n = Number(t);
-  return n >= limits.minWords && n <= limits.maxWords ? n : null;
+  const [min, max] = mode === "presentation" ? [slideLimits.minWords, slideLimits.maxWords] : [limits.minWords, limits.maxWords];
+  return n >= min && n <= max ? n : null;
 }
 
 export interface EditorCheck {
@@ -332,36 +502,42 @@ export interface EditorCheck {
 }
 
 /** The light client check; the core checks again. */
-export function checkEditor(items: readonly EditorItem[]): EditorCheck {
-  const badTitles = items.map((i) => i.title.trim() === "" || runeLen(i.title.trim()) > limits.titleMax);
-  const badWords = items.map((i) => wordsOf(i.words) === null);
-  const total = items.reduce((sum, i) => sum + (wordsOf(i.words) ?? 0), 0);
+export function checkEditor(items: readonly EditorItem[], mode: EditorMode = "paper"): EditorCheck {
+  const slides = mode === "presentation";
+  const titleMax = slides ? slideLimits.titleMax : limits.titleMax;
+  const [minCount, maxCount] = slides ? [slideLimits.minSlides, slideLimits.maxSlides] : [limits.minSections, limits.maxSections];
+  const texts = slides ? slideCheckTexts : checkTexts;
+  const badTitles = items.map((i) => i.title.trim() === "" || runeLen(i.title.trim()) > titleMax);
+  const badWords = items.map((i) => wordsOf(i.words, mode) === null);
+  const total = items.reduce((sum, i) => sum + (wordsOf(i.words, mode) ?? 0), 0);
   let problem = "";
-  if (items.length < limits.minSections || items.length > limits.maxSections) {
-    problem = checkTexts.count;
+  if (items.length < minCount || items.length > maxCount) {
+    problem = texts.count;
   } else if (badTitles.some(Boolean)) {
-    problem = items.some((i) => runeLen(i.title.trim()) > limits.titleMax) ? checkTexts.titleLong : checkTexts.title;
+    problem = items.some((i) => runeLen(i.title.trim()) > titleMax) ? texts.titleLong : texts.title;
   } else if (badWords.some(Boolean)) {
-    problem = checkTexts.words;
-  } else if (total > limits.totalWordsMax) {
-    problem = checkTexts.total;
+    problem = texts.words;
+  } else if (slides && total < slideLimits.totalWordsMin) {
+    problem = slideCheckTexts.totalMin;
+  } else if (total > (slides ? slideLimits.totalWordsMax : limits.totalWordsMax)) {
+    problem = slides ? slideCheckTexts.totalMax : checkTexts.total;
   }
   return { ok: problem === "", problem, badTitles, badWords };
 }
 
 /** What EditOutline gets: the order of the editor, number 0 for a new section, trimmed titles. */
-export function toOutlineItems(items: readonly EditorItem[]): OutlineItem[] {
-  return items.map((i) => ({ number: i.number, title: i.title.trim(), words: wordsOf(i.words) ?? 0 }));
+export function toOutlineItems(items: readonly EditorItem[], mode: EditorMode = "paper"): OutlineItem[] {
+  return items.map((i) => ({ number: i.number, title: i.title.trim(), words: wordsOf(i.words, mode) ?? 0 }));
 }
 
 /** The editor differs from the saved plan, so EditOutline must be called before the next step. */
-export function isEdited(items: readonly EditorItem[], sections: readonly WorkSection[]): boolean {
+export function isEdited(items: readonly EditorItem[], sections: readonly WorkSection[], mode: EditorMode = "paper"): boolean {
   if (items.length !== sections.length) {
     return true;
   }
   return items.some((it, i) => {
     const s = sections[i];
-    return it.number !== s.number || it.title.trim() !== s.title.trim() || wordsOf(it.words) !== s.words;
+    return it.number !== s.number || it.title.trim() !== s.title.trim() || wordsOf(it.words, mode) !== s.words;
   });
 }
 
@@ -373,8 +549,26 @@ export interface ReviseOption {
   label: string;
 }
 
-export function reviseOptions(sections: readonly WorkSection[]): ReviseOption[] {
-  return [{ value: 0, label: workTexts.allSections }, ...sections.map((s) => ({ value: s.number, label: `${s.number}. ${s.title}` }))];
+/** «Вся работа», then «Слайд N. …» (a presentation) or «Раздел N. …». */
+export function reviseOptions(sections: readonly WorkSection[], mode: EditorMode = "paper"): ReviseOption[] {
+  const unit = mode === "presentation" ? workTexts.slide : workTexts.section;
+  return [{ value: 0, label: workTexts.allSections }, ...sections.map((s) => ({ value: s.number, label: `${unit} ${s.number}. ${s.title}` }))];
+}
+
+/** «Доработать по замечаниям» needs a note. */
+export function canSubmitNote(raw: string): boolean {
+  return noteOf(raw) !== "";
+}
+
+/** The caption under the choice: only «Вся работа» is rewritten as a whole (paid). */
+export function reviseCaption(number: number): string {
+  return number === 0 ? workTexts.reviseAllCaption : "";
+}
+
+/** «Доработать по замечаниям»: Regenerate(id, 0 or the section, note); an empty note makes no call (null). */
+export function reviseWork(api: TurnkeyApi, workId: string, number: number, raw: string): Promise<TurnkeyWork> | null {
+  const note = noteOf(raw);
+  return note === "" ? null : api.regenerate(workId, number, note);
 }
 
 /** The note for Regenerate: trimmed and cut to the limit in runes. */
@@ -406,10 +600,10 @@ export type StepResult = { ok: true; work: TurnkeyWork } | { ok: false; error: u
  * Saves the plan when edited, then runs `next`. Only the reply of `next` is returned for the card: the reply of
  * EditOutline is not applied, as it could re-mount the card and drop an error shown on it.
  */
-async function afterEdit(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[], edited: boolean, next: () => Promise<TurnkeyWork>): Promise<StepResult> {
+async function afterEdit(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[], edited: boolean, next: () => Promise<TurnkeyWork>, mode: EditorMode): Promise<StepResult> {
   if (edited) {
     try {
-      await api.editOutlineAt(workId, version, toOutlineItems(items));
+      await api.editOutlineAt(workId, version, toOutlineItems(items, mode));
     } catch (error) {
       // A stale plan: the card shows the error and the work is read again.
       return { ok: false, error, fresh: turnkeyErrorText(error) === staleText ? await readOrNull(api, workId) : null };
@@ -446,19 +640,19 @@ export function retryWriting(api: TurnkeyApi, workId: string): Promise<TurnkeyWo
 }
 
 /** «Утвердить план»: EditOutlineAt (the version the plan was shown at) if edited, then ApproveOutline. */
-export function approvePlan(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[], edited: boolean): Promise<StepResult> {
-  return afterEdit(api, workId, version, items, edited, () => api.approveOutline(workId));
+export function approvePlan(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[], edited: boolean, mode: EditorMode = "paper"): Promise<StepResult> {
+  return afterEdit(api, workId, version, items, edited, () => api.approveOutline(workId), mode);
 }
 
 /** «Написать заново» of a done work: EditOutlineAt, then StartWriting. */
-export function rewriteWork(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[], edited: boolean): Promise<StepResult> {
-  return afterEdit(api, workId, version, items, edited, () => api.startWriting(workId));
+export function rewriteWork(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[], edited: boolean, mode: EditorMode = "paper"): Promise<StepResult> {
+  return afterEdit(api, workId, version, items, edited, () => api.startWriting(workId), mode);
 }
 
 /** «Сохранить план»: the same stale rule, the saved work is the result. */
-export async function savePlanAt(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[]): Promise<StepResult> {
+export async function savePlanAt(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[], mode: EditorMode = "paper"): Promise<StepResult> {
   try {
-    return { ok: true, work: await api.editOutlineAt(workId, version, toOutlineItems(items)) };
+    return { ok: true, work: await api.editOutlineAt(workId, version, toOutlineItems(items, mode)) };
   } catch (error) {
     return { ok: false, error, fresh: turnkeyErrorText(error) === staleText ? await readOrNull(api, workId) : null };
   }
@@ -501,7 +695,15 @@ export type OpenView = { kind: "ok" | "fail"; text: string };
 
 /** Opens the copy of the ready file; a refused or failed open is a fixed text, never a path. */
 export async function openWork(library: Pick<LibraryApi, "openMaterial">, w: TurnkeyWork): Promise<OpenView | null> {
-  const id = openTarget(w);
+  return openById(library, openTarget(w));
+}
+
+/** «Открыть текст выступления»: the speaker text of a presentation, a copy as well. */
+export async function openTalk(library: Pick<LibraryApi, "openMaterial">, w: TurnkeyWork): Promise<OpenView | null> {
+  return openById(library, talkTarget(w));
+}
+
+async function openById(library: Pick<LibraryApi, "openMaterial">, id: string): Promise<OpenView | null> {
   if (id === "") {
     return null;
   }
