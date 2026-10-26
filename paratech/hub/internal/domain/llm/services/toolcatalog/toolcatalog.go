@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"paratech/hub/internal/domain/llm/values"
 )
@@ -301,6 +303,58 @@ func (c *Catalog) Check(call values.ToolCall) error {
 		}
 	}
 	return nil
+}
+
+// The card a plain text answer of the planner becomes, and its text argument (TASK-200).
+const (
+	toolReply    = "reply"
+	argReplyText = "text"
+)
+
+// TextReply turns the plain text of a planner answer without tool calls into the call reply{text} with callID, checked
+// as a returned reply (CheckReturned: the text type, at most MaxTextRunes characters) and as the desktop checks card
+// text (displayText). It is a display-only card and nothing else: the text never becomes another tool, an argument or
+// an action. A catalog without a UI reply tool, or a text either check refuses, is ErrInvalidCall; its texts never
+// quote the text.
+func (c *Catalog) TextReply(callID, text string) (values.ToolCall, error) {
+	if t, ok := c.tools[toolReply]; !ok || t.Class != classUI {
+		return values.ToolCall{}, fmt.Errorf("%w: the catalog has no reply card", ErrInvalidCall)
+	}
+	if !utf8.ValidString(text) {
+		return values.ToolCall{}, fmt.Errorf("%w: %s: the text is not UTF-8", ErrInvalidCall, toolReply)
+	}
+	if !displayText(text) {
+		return values.ToolCall{}, fmt.Errorf("%w: %s: the text has a character the card does not show", ErrInvalidCall, toolReply)
+	}
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false) // the canonical form of returned arguments (the anthropic adapter)
+	if err := enc.Encode(map[string]string{argReplyText: text}); err != nil {
+		return values.ToolCall{}, fmt.Errorf("%w: %s: the text cannot be encoded", ErrInvalidCall, toolReply)
+	}
+	call, err := values.NewToolCall(callID, toolReply, strings.TrimSuffix(b.String(), "\n"))
+	if err != nil {
+		return values.ToolCall{}, fmt.Errorf("%w: %s: %w", ErrInvalidCall, toolReply, err)
+	}
+	if err := c.CheckReturned([]values.ToolCall{call}); err != nil {
+		return values.ToolCall{}, err
+	}
+	return call, nil
+}
+
+// displayText is the stricter check of the desktop's card text (desktop values.Text): printable characters and line
+// breaks only, no tab, no U+FFFD, no angle brackets. Only TextReply applies it: a text the desktop refuses would leave
+// the turn with a Hub-made call the desktop cannot answer, so such a text stays the old failure instead.
+func displayText(s string) bool {
+	for _, r := range s {
+		if r == '\n' {
+			continue
+		}
+		if !unicode.IsPrint(r) || r == utf8.RuneError || r == '<' || r == '>' {
+			return false
+		}
+	}
+	return true
 }
 
 // decodeObject reads a JSON object keeping numbers exact.

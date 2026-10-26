@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"strings"
 
 	"paratech/hub/internal/domain/llm/values"
 )
@@ -162,12 +163,14 @@ type agentWireResponse struct {
 
 type agentWireBlockRead struct {
 	Type  string          `json:"type"`
+	Text  string          `json:"text"`
 	ID    string          `json:"id"`
 	Name  string          `json:"name"`
 	Input json.RawMessage `json:"input"`
 }
 
-// readAgentAnswer decodes a 200 answer to a planner call. Text and thinking blocks are not read; every tool_use block
+// readAgentAnswer decodes a 200 answer to a planner call. Thinking blocks are not read, text blocks only for a
+// text-only end of turn; every tool_use block
 // becomes a call with its input re-encoded canonically (sorted keys, no duplicate keys), so the arguments the Hub
 // checks, seals and returns are one exact string. The whole content array is kept raw in the answer (the assistant
 // turn the next step sends back). The stop reason is checked first: a refusal is a refused answer. A block that is
@@ -221,10 +224,20 @@ func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 		}
 		calls = append(calls, call)
 	}
-	// With tool choice auto the model may answer in plain text: no tool_use block is an unusable, billed answer.
+	// With tool choice auto the model may answer in plain text: no tool_use block is a billed answer without tool use,
+	// whose text the use case may still show as a reply card (TASK-200). Only text blocks count, joined as written.
 	toolUse := stop == values.StopToolUse && len(calls) > 0
 	answer := values.NewAgentAnswer(calls, usage, toolUse).WithStop(stop)
 	if !toolUse {
+		if stop == values.StopEnd && len(calls) == 0 {
+			var text strings.Builder
+			for _, b := range blocks {
+				if b.Type == blockText {
+					text.WriteString(b.Text)
+				}
+			}
+			answer = answer.WithText(text.String())
+		}
 		return answer, nil
 	}
 	turn, err := values.NewAssistantTurn(string(r.Content))

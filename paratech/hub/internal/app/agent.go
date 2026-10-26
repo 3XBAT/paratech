@@ -64,7 +64,13 @@ func newAgentParts(cfg config.Config, models *modelallowlist.List, log *slog.Log
 			log.Warn(opServerPromptOff, slog.String("operation", string(op)), slog.String("alias", alias))
 			continue
 		}
-		parts.serverPrompts[op] = gateway.ServerPrompt{Alias: alias, Version: "v" + strconv.FormatUint(uint64(version), 10), Text: string(text)}
+		reask, err := loadReask(op, version)
+		if err != nil {
+			return nil, err
+		}
+		parts.serverPrompts[op] = gateway.ServerPrompt{
+			Alias: alias, Version: "v" + strconv.FormatUint(uint64(version), 10), Text: string(text), Reask: reask,
+		}
 	}
 
 	keys, err := cfg.SealKeys()
@@ -85,6 +91,21 @@ func newAgentParts(cfg config.Config, models *modelallowlist.List, log *slog.Log
 		return nil, fmt.Errorf("app: %s: %w", config.EnvAgentSealKeys, err)
 	}
 	return parts, nil
+}
+
+// loadReask returns the reask note of the prompt version of op, "" when that version has none.
+func loadReask(op values.Operation, version uint32) (string, error) {
+	v, note, err := prompts.OpReask(string(op))
+	if errors.Is(err, prompts.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("app: reask note of %s: %w", op, err)
+	}
+	if v != version || !cleanPrompt(note) {
+		return "", fmt.Errorf("app: reask note of %s v%d must be non-empty UTF-8 without NUL of the prompt version", op, v)
+	}
+	return string(note), nil
 }
 
 // loadPanel parses every embedded version of the panel profile; the catalog version must match its directory.

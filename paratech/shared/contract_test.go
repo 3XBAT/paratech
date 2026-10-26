@@ -691,13 +691,14 @@ func TestAgentMessagesHaveOnlyAllowlistedStrings(t *testing.T) {
 	}
 }
 
-// Golden tool catalog (design §2.3, ADR-0021), the current version 4 (TASK-182: no generate_draft, triage_assignment by
-// topic; v3, TASK-172: reply lists up to 10 assignment IDs; v2, TASK-118: question and search query of up to 500
-// characters). Both the Hub catalog (TASK-114) and the desktop Tool enum (TASK-115) must match it. Versions 1 to 3 are
-// frozen: the Hub still serves them to clients of those versions.
+// Golden tool catalog (design §2.3, ADR-0021), the current version 5 (TASK-200: the tools of v4, a new server prompt;
+// v4, TASK-182: no generate_draft, triage_assignment by topic; v3, TASK-172: reply lists up to 10 assignment IDs; v2,
+// TASK-118: question and search query of up to 500 characters). Both the Hub catalog (TASK-114) and the desktop Tool
+// enum (TASK-115) must match it. Versions 1 to 4 are frozen: the Hub still serves them to clients of those versions.
 const (
-	toolCatalogVersion = 4
-	toolCatalogFile    = "testdata/tool_catalog_v4.json"
+	toolCatalogVersion = 5
+	toolCatalogFile    = "testdata/tool_catalog_v5.json"
+	toolCatalogV4File  = "testdata/tool_catalog_v4.json"
 	toolCatalogV3File  = "testdata/tool_catalog_v3.json"
 	toolCatalogV2File  = "testdata/tool_catalog_v2.json"
 	toolCatalogV1File  = "testdata/tool_catalog_v1.json"
@@ -983,10 +984,24 @@ func TestToolCatalog(t *testing.T) {
 	}
 }
 
+// TestToolCatalogV4IsFrozen: catalog v4 stays as released: catalog v5 with version 4 (v5 changed only the server
+// prompt, TASK-200).
+func TestToolCatalogV4IsFrozen(t *testing.T) {
+	v4, v5 := loadToolCatalogFile(t, toolCatalogV4File), loadToolCatalog(t)
+	if v4.CatalogVersion != 4 {
+		t.Fatalf("v4: version %d", v4.CatalogVersion)
+	}
+	want := cloneCatalog(v5)
+	want.CatalogVersion = 4
+	if fmt.Sprint(want) != fmt.Sprint(v4) {
+		t.Errorf("v4 differs from v5 beyond the version:\nv4 %+v\nv5 %+v", v4, want)
+	}
+}
+
 // TestToolCatalogV3IsFrozen: catalog v3 stays as released: catalog v4 with generate_draft before edit_due, without
 // triage_assignment.topic, and with the one_of note of pairs.
 func TestToolCatalogV3IsFrozen(t *testing.T) {
-	v3, v4 := loadToolCatalogFile(t, toolCatalogV3File), loadToolCatalog(t)
+	v3, v4 := loadToolCatalogFile(t, toolCatalogV3File), loadToolCatalogFile(t, toolCatalogV4File)
 	if v3.CatalogVersion != 3 || !strings.Contains(v3.Notes["one_of"], "triage_assignment (assignment|upload) and") {
 		t.Fatalf("v3: version %d, one_of %q", v3.CatalogVersion, v3.Notes["one_of"])
 	}
