@@ -5,13 +5,14 @@ import (
 	"strings"
 )
 
-// Outcome is what the planner did with one request: every tool it called in order, the texts of its cards and the
-// error that ended the run early, if any.
+// Outcome is what the planner did with one request: every tool it called in order, the texts of its cards, the
+// assignment IDs its reply listed and the error that ended the run early, if any.
 type Outcome struct {
-	Case  Request
-	Tools []string
-	Texts []string
-	Err   string
+	Case   Request
+	Tools  []string
+	Texts  []string
+	Listed []string
+	Err    string
 }
 
 // QuestionOutcome is a lecture question: the tools the planner called and, when the answer was measured, its
@@ -36,6 +37,8 @@ type Metrics struct {
 	Requests, ClassOK, ToolsOK int
 	CannotDo, CannotDoOK       int
 	Texts, FirstPerson         int
+	Address                    int // texts that address or greet the student
+	Lists, ListsOK             int // requests whose reply should list assignments, and those that did
 	Questions, AnswerRouted    int
 	Measured, Valid, Citations int
 	Errors                     int
@@ -63,10 +66,19 @@ func (r Report) Metrics() Metrics {
 				m.ToolsOK++
 			}
 		}
+		if o.Case.ListsAssignments {
+			m.Lists++
+			if len(o.Listed) > 0 {
+				m.ListsOK++
+			}
+		}
 		for _, t := range o.Texts {
 			m.Texts++
 			if len(FirstPersonWords(t)) > 0 {
 				m.FirstPerson++
+			}
+			if len(AddressWords(t)) > 0 {
+				m.Address++
 			}
 		}
 	}
@@ -111,6 +123,8 @@ func (r Report) Markdown() string {
 		fmt.Fprintf(&b, "| Валидные цитаты | %s |\n", share(m.Valid, m.Citations))
 	}
 	fmt.Fprintf(&b, "| Тексты с «я»/«мы»/I/we | %s |\n", share(m.FirstPerson, m.Texts))
+	fmt.Fprintf(&b, "| Тексты с обращением («ты»/«вы»/приветствие) | %s |\n", share(m.Address, m.Texts))
+	fmt.Fprintf(&b, "| reply со списком заданий | %s |\n", share(m.ListsOK, m.Lists))
 	fmt.Fprintf(&b, "| Ошибки прогона | %d |\n", m.Errors)
 
 	var misses []string
@@ -120,9 +134,15 @@ func (r Report) Markdown() string {
 			misses = append(misses, fmt.Sprintf("- %s «%s»: ждали %s %v, получили %s %v%s",
 				o.Case.ID, o.Case.Text, o.Case.Class, o.Case.Tools, class, o.Tools, errNote(o.Err)))
 		}
+		if o.Case.ListsAssignments && len(o.Listed) == 0 {
+			misses = append(misses, fmt.Sprintf("- %s «%s»: reply без списка заданий", o.Case.ID, o.Case.Text))
+		}
 		for _, t := range o.Texts {
 			if w := FirstPersonWords(t); len(w) > 0 {
 				misses = append(misses, fmt.Sprintf("- %s: голос не безличный %v: «%s»", o.Case.ID, w, t))
+			}
+			if w := AddressWords(t); len(w) > 0 {
+				misses = append(misses, fmt.Sprintf("- %s: обращение %v: «%s»", o.Case.ID, w, t))
 			}
 		}
 	}

@@ -51,7 +51,12 @@
     {"id": "y01", "text": "Привет!", "class": "reply", "tools": []},
     {"id": "y02", "text": "Спасибо, всё понятно", "class": "reply", "tools": []},
     {"id": "y03", "text": "Что ты умеешь?", "class": "reply", "tools": []},
-    {"id": "y04", "text": "Как пользоваться панелью?", "class": "reply", "tools": []}
+    {"id": "y04", "text": "Как пользоваться панелью?", "class": "reply", "tools": []},
+    {"id": "b01", "text": "Привет, ты тут?", "class": "reply", "tools": []},
+    {"id": "b02", "text": "Где посмотреть черновики?", "class": "reply", "tools": []},
+    {"id": "b03", "text": "Что горит на неделе?", "class": "read", "tools": ["list_assignments"], "lists_assignments": true},
+    {"id": "b04", "text": "Помоги с пр 2-4", "class": "questions", "tools": ["list_assignments"]},
+    {"id": "b05", "text": "Сделай презентацию на тему «Реформы Петра I»", "class": "questions", "tools": ["list_assignments"]}
   ],
   "cannot_do": [
     {"id": "n01", "text": "Загрузи моё ДЗ в ВузКАД", "subject": "s-prog", "assignment": "a-31", "class": "cannot_do", "tools": []},

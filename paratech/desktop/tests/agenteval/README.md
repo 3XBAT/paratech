@@ -4,8 +4,10 @@ Case set `testdata/live_cases.json`: 40–60 student requests (expected plan cla
 whole» cases (→ `cannot_do`), 20 lecture questions (→ `answer_question`, chunks and a reference citation). All data
 is fake; addresses only `example.invalid`.
 
-Metrics: plan class and tool routing, `cannot_do` share, share of card texts with first person (я/мы/I/we),
-share of valid citations (not measured until the Hub has the ANSWER prompt, TASK-118).
+Metrics: plan class and tool routing, `cannot_do` share, share of card texts with first person (я/мы/I/we) and with
+an address or greeting (ты/вы/привет), replies that list the assignments found (`lists_assignments`, catalog v3),
+share of valid citations (not measured until the Hub has the ANSWER prompt, TASK-118). Cases `b01`–`b05` are the beta
+questions of TASK-172/173 (greeting, «где черновики», «что горит», «помоги с пр 2-4», a topic without an assignment).
 
 CI (no tag) runs the scoring tests, checks the case file and runs the runner on the fake Hub.
 

@@ -11,7 +11,7 @@ import (
 
 func catalogClasses(t *testing.T) map[string]string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "shared", "testdata", "tool_catalog_v2.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "shared", "testdata", CatalogFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +77,9 @@ func TestParseCaseSetRejects(t *testing.T) {
 		"unknown class":      func(s string) string { return strings.Replace(s, `"class": "reply"`, `"class": "chat"`, 1) },
 		"duplicate id":       func(s string) string { return strings.Replace(s, `"id": "r02"`, `"id": "r01"`, 1) },
 		"bad reference":      func(s string) string { return strings.Replace(s, `"quote": "I = U / R"`, `"quote": "I = U * R"`, 1) },
+		"list without list_assignments": func(s string) string {
+			return strings.Replace(s, `"class": "reply", "tools": []}`, `"class": "reply", "tools": [], "lists_assignments": true}`, 1)
+		},
 		"unknown subject": func(s string) string {
 			return strings.Replace(s, `"subject": "s-math", "class"`, `"subject": "s-chem", "class"`, 1)
 		},
@@ -144,6 +147,54 @@ func TestFirstPersonWords(t *testing.T) {
 		if got := FirstPersonWords(text); !slices.Equal(got, want) {
 			t.Errorf("FirstPersonWords(%q) = %v, want %v", text, got, want)
 		}
+	}
+}
+
+func TestAddressWords(t *testing.T) {
+	for text, want := range map[string][]string{
+		"Две работы со сроком до среды.":          nil,
+		"Привет! Ты можешь посмотреть черновик.":  {"привет", "ты"},
+		"Скажите, какой предмет вы имеете в виду": {"вы"},
+		"Черновик — в вашем разделе «Задания».":   {"вашем"},
+		"Ваша работа готова":                      {"ваша"},
+		"Тыква, выход, вас-то, hint, history":     {"вас"},
+		"Hello, your draft is ready":              {"hello", "your"},
+	} {
+		if got := AddressWords(text); !slices.Equal(got, want) {
+			t.Errorf("AddressWords(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
+func TestReplyAssignments(t *testing.T) {
+	for _, tt := range []struct {
+		tool, args string
+		want       []string
+	}{
+		{"reply", `{"text":"Два.","assignments":["a-12","a-20"]}`, []string{"a-12", "a-20"}},
+		{"reply", `{"text":"Нет."}`, nil},
+		{"reply", `{"text":"x","assignments":"a-12"}`, nil},
+		{"cannot_do", `{"assignments":["a-12"]}`, nil},
+	} {
+		if got := ReplyAssignments(tt.tool, tt.args); !slices.Equal(got, tt.want) {
+			t.Errorf("ReplyAssignments(%s, %s) = %v, want %v", tt.tool, tt.args, got, tt.want)
+		}
+	}
+}
+
+// TestBetaQuestionsInTheCaseSet: the four questions of the beta (TASK-172/173) and a work on a topic without an
+// assignment stay in the live set with the routing the v3 prompt asks for.
+func TestBetaQuestionsInTheCaseSet(t *testing.T) {
+	cs := loadCases(t)
+	want := map[string]string{"b01": ClassReply, "b02": ClassReply, "b03": ClassRead, "b04": ClassQuestions, "b05": ClassQuestions}
+	for id, class := range want {
+		i := slicesIndex(cs.Requests, id)
+		if i < 0 || cs.Requests[i].Class != class {
+			t.Errorf("%s: missing or class is not %s", id, class)
+		}
+	}
+	if i := slicesIndex(cs.Requests, "b03"); i < 0 || !cs.Requests[i].ListsAssignments {
+		t.Error("b03 must expect a reply with the list of assignments")
 	}
 }
 
@@ -218,5 +269,22 @@ func TestReport(t *testing.T) {
 	}
 	if !strings.Contains(Report{Classes: classes}.Markdown(), "не измерено") {
 		t.Error("a run without measured answers must say so")
+	}
+
+	// Catalog v3: a reply that should list the assignments and a greeting with an address are both reported.
+	v3 := Report{Classes: classes, Requests: []Outcome{
+		{Case: Request{ID: "b03", Text: "Что горит?", Class: ClassRead, Tools: []string{"list_assignments"}, ListsAssignments: true},
+			Tools: []string{"list_assignments", "reply"}, Texts: []string{"Привет! У тебя два задания."}},
+		{Case: Request{ID: "b03b", Text: "Что на неделе?", Class: ClassRead, Tools: []string{"list_assignments"}, ListsAssignments: true},
+			Tools: []string{"list_assignments", "reply"}, Texts: []string{"Два задания."}, Listed: []string{"a-12", "a-20"}},
+	}}
+	if m := v3.Metrics(); m.Lists != 2 || m.ListsOK != 1 || m.Address != 1 || m.Texts != 2 {
+		t.Fatalf("v3 metrics = %+v", m)
+	}
+	md = v3.Markdown()
+	for _, s := range []string{"| reply со списком заданий | 1/2 (50%) |", "b03 «Что горит?»: reply без списка заданий", "b03: обращение [привет тебя]"} {
+		if !strings.Contains(md, s) {
+			t.Errorf("report misses %q:\n%s", s, md)
+		}
 	}
 }

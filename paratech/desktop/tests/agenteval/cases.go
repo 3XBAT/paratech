@@ -39,15 +39,16 @@ type Subject struct {
 }
 
 // Request is a student request and the expected routing: the class and the non-card tools in order (others may
-// come in between).
+// come in between). ListsAssignments marks a request whose reply should list the assignments found (catalog v3).
 type Request struct {
-	ID         string   `json:"id"`
-	Text       string   `json:"text"`
-	Subject    string   `json:"subject,omitempty"`
-	Assignment string   `json:"assignment,omitempty"`
-	Uploads    []string `json:"uploads,omitempty"`
-	Class      string   `json:"class"`
-	Tools      []string `json:"tools"`
+	ID               string   `json:"id"`
+	Text             string   `json:"text"`
+	Subject          string   `json:"subject,omitempty"`
+	Assignment       string   `json:"assignment,omitempty"`
+	Uploads          []string `json:"uploads,omitempty"`
+	Class            string   `json:"class"`
+	Tools            []string `json:"tools"`
+	ListsAssignments bool     `json:"lists_assignments,omitempty"`
 }
 
 // Chunk is a fragment of a lecture or a material.
@@ -80,8 +81,11 @@ type CaseSet struct {
 	Questions []Question `json:"questions"`
 }
 
+// CatalogFile is the golden catalog the run is scored against, in shared/testdata: the version the desktop sends.
+const CatalogFile = "tool_catalog_v3.json"
+
 // CatalogClasses reads the tool classes (tool -> R, U, C, UI) of a tool catalog file
-// (shared/testdata/tool_catalog_v2.json).
+// (shared/testdata/tool_catalog_v3.json).
 func CatalogClasses(raw []byte) (map[string]string, error) {
 	var doc struct {
 		Tools []struct {
@@ -146,6 +150,9 @@ func ParseCaseSet(raw []byte, toolClasses map[string]string) (CaseSet, error) {
 			if c, ok := toolClasses[tool]; !ok || c == "UI" {
 				return bad("request %s: %q is not a non-card tool of the catalog", r.ID, tool)
 			}
+		}
+		if r.ListsAssignments && (r.Class != ClassRead || !slices.Contains(r.Tools, "list_assignments")) {
+			return bad("request %s: a reply lists assignments only after list_assignments in a read", r.ID)
 		}
 	}
 	for _, r := range cs.CannotDo {
