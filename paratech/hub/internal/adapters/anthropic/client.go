@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"paratech/hub/internal/domain/llm/values"
@@ -41,6 +42,8 @@ type Options struct {
 	// Transport replaces http.DefaultTransport (tests). The adapter builds its own http.Client around it so that
 	// redirects are always refused.
 	Transport http.RoundTripper
+	// Log receives the adapter's operational lines; nil discards them.
+	Log *slog.Logger
 }
 
 // String prints the options without the key.
@@ -63,6 +66,9 @@ type Client struct {
 	endpoint string
 	timeout  time.Duration
 	http     *http.Client
+	log      *slog.Logger
+	// noSSE writes "provider answered without SSE" once per client; a pointer because the value receivers copy Client.
+	noSSE *sync.Once
 }
 
 // New validates o and returns a client.
@@ -81,10 +87,16 @@ func New(o Options) (*Client, error) {
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
+	log := o.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
 	return &Client{
 		key:      o.APIKey,
 		endpoint: endpoint,
 		timeout:  o.Timeout,
+		log:      log,
+		noSSE:    new(sync.Once),
 		http: &http.Client{
 			Transport:     transport,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
