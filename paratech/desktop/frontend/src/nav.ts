@@ -115,13 +115,13 @@ export function routeToPage(id: PageId): Route {
 }
 
 /** Opens a subject in «Предметы» ("" returns to the list); an entry of its own in the history. */
-export function routeToSubject(r: Route, subjectId: string): Route {
-  return { ...r, page: "subjects", transcript: "", summary: "", subject: subjectId };
+export function routeToSubject(_r: Route, subjectId: string): Route {
+  return { ...routeToPage("subjects"), subject: subjectId };
 }
 
 /** Shows an assignment on «Задания» from its list ("" returns to the list); an entry of its own in the history. */
-export function routeToOpenedAssignment(r: Route, assignmentId: string): Route {
-  return { ...r, page: "homework", transcript: "", summary: "", assignment: assignmentId };
+export function routeToOpenedAssignment(_r: Route, assignmentId: string): Route {
+  return { ...routeToPage("homework"), assignment: assignmentId };
 }
 
 /** Opens the transcript of a recording over the current section (in place of an open summary). */

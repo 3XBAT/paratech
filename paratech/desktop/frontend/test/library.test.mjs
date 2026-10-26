@@ -6,7 +6,8 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { errorTexts, genericError, libraryApi, libraryErrorText, methods, parseImport, parseSubject } from "../.test-build/bindings/library.js";
 import { folderCountText, folderCounts, folderTitle, groupBySemester, importNote, orderedFolders, sizeText, treeCount } from "../.test-build/libraryView.js";
-import { InboxList, SubjectDetail, SubjectList, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
+import { SubjectsPage } from "../.test-build/pages/SubjectsPage.js";
+import { InboxList,SubjectDetail, SubjectList, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
 
 const noop = () => undefined;
 
@@ -163,9 +164,26 @@ test("the line after «Добавить файл»: added, already there, nothin
   assert.equal(importNote({ cancelled: false, existing: false }), "Файл добавлен.");
 });
 
+test("an open subject that is not loaded yet shows only the loading line, not the list", () => {
+  const out = renderToStaticMarkup(h(SubjectsPage, { onOpen: noop, reload: 0, subjectId: "s1", onSelect: noop }));
+  assert.match(out, /class="muted"/);
+  assert.doesNotMatch(out, /subj-cards|<h1|<button/);
+  const list = renderToStaticMarkup(h(SubjectsPage, { onOpen: noop, reload: 0, subjectId: "", onSelect: noop }));
+  assert.match(list, /<h1/);
+});
+
+test("the cards are a list of buttons: ul/li, the button is not a listitem", () => {
+  const out = renderToStaticMarkup(h(SubjectList, { subjects: [subject()], onOpen: noop, onAdd: noop }));
+  assert.match(out, /<ul class="subj-cards"><li><button type="button" class="subj-card">/);
+  assert.doesNotMatch(out, /role="listitem"[^>]*subj-card|subj-card[^>]*role="listitem"/);
+});
+
+test("the files of a folder are a list with items", () => {
+  const out = renderToStaticMarkup(h(InboxList, { materials: [material()] }));
+  assert.match(out, /role="list"><div class="lrow" role="listitem">/);
+});
+
 test("the open subject is part of the window route: a rail click returns to the list, «Назад» restores it", () => {
-  const src = readFileSync(new URL("../src/pages/SubjectsPage.tsx", import.meta.url), "utf8");
-  assert.match(src, /const openId = props\.subjectId/);
   assert.match(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"), /<SubjectsPage[^>]*subjectId=\{props\.subject\}[^>]*onSelect=\{props\.onSelectSubject\}/);
 });
 

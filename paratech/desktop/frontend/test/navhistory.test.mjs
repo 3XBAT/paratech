@@ -107,7 +107,22 @@ test("a subject does not leak into other routes: a summary over «Предмет
   const r = routeToSubject(routeToPage("subjects"), "s1");
   assert.equal(routeToSummary(r, "r1").subject, "s1");
   assert.equal(routeToAssignment("a1").subject, "");
-  assert.equal(routeToOpenedAssignment(r, "a1").page, "homework");
+  const toCard = routeToOpenedAssignment(r, "a1");
+  assert.equal(toCard.page, "homework");
+  assert.equal(toCard.subject, "");
+  assert.equal(toCard.assignment, "a1");
+  const toSubject = routeToSubject(toCard, "s2");
+  assert.equal(toSubject.page, "subjects");
+  assert.equal(toSubject.assignment, "");
+  assert.equal(toSubject.subject, "s2");
+});
+
+test("a rail click to «Предметы» from an open subject shows the list; back returns to the subject", () => {
+  let hist = newHistory(routeToPage("subjects"));
+  hist = pushRoute(hist, routeToSubject(currentRoute(hist), "s1"));
+  hist = pushRoute(hist, routeToPage("subjects"));
+  assert.equal(currentRoute(hist).subject, "");
+  assert.equal(currentRoute(goBack(hist)).subject, "s1");
 });
 
 test("App wires the subject and the card through the route, not through page state", () => {

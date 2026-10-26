@@ -73,21 +73,23 @@ export function SubjectList(props: { subjects: readonly LibrarySubject[]; onOpen
           <h2 className="sec-h">
             {g.label} <span className="cnt num">· {g.subjects.length}</span>
           </h2>
-          <div className="subj-cards" role="list">
+          <ul className="subj-cards">
             {g.subjects.map((s) => (
-              <button key={s.id} type="button" className="subj-card" role="listitem" onClick={() => props.onOpen(s.id)}>
-                <span className="subj-card-head">
-                  <Icon name="folder" />
-                  <span className="t">{s.name}</span>
-                </span>
-                <span className="small muted">{orderedFolders(s.folders).map(folderTitle).join(" · ")}</span>
-                <span className="subj-card-open small">
-                  <span>Открыть</span>
-                  <Icon name="chevr" />
-                </span>
-              </button>
+              <li key={s.id}>
+                <button type="button" className="subj-card" onClick={() => props.onOpen(s.id)}>
+                  <span className="subj-card-head">
+                    <Icon name="folder" />
+                    <span className="t">{s.name}</span>
+                  </span>
+                  <span className="small muted">{orderedFolders(s.folders).map(folderTitle).join(" · ")}</span>
+                  <span className="subj-card-open small">
+                    <span>Открыть</span>
+                    <Icon name="chevr" />
+                  </span>
+                </button>
+              </li>
             ))}
-          </div>
+          </ul>
         </section>
       ))}
     </>
@@ -190,6 +192,16 @@ function FileRow(props: { m: LibraryMaterial }) {
   );
 }
 
+function FileRows(props: { files: readonly LibraryMaterial[] }) {
+  return (
+    <div role="list">
+      {props.files.map((m) => (
+        <FileRow key={m.id} m={m} />
+      ))}
+    </div>
+  );
+}
+
 /** The page of a subject: its folders (system ones first), the files of each, «＋ Папка». */
 export function SubjectDetail(props: {
   subject: LibrarySubject;
@@ -211,7 +223,7 @@ export function SubjectDetail(props: {
               {folderTitle(f)} <span className="cnt num">· {folderCountText(files.length)}</span>
             </h2>
             <Card className="lrows" label={folderTitle(f)}>
-              {files.length === 0 ? <p className="small muted empty-folder">{texts.emptyFolder}</p> : files.map((m) => <FileRow key={m.id} m={m} />)}
+              {files.length === 0 ? <p className="small muted empty-folder">{texts.emptyFolder}</p> : <FileRows files={files} />}
             </Card>
           </section>
         );
@@ -240,9 +252,7 @@ export function InboxList(props: { materials: readonly LibraryMaterial[] }) {
         {texts.inbox} <span className="cnt num">· {folderCountText(files.length)}</span>
       </h2>
       <Card className="lrows" label={texts.inbox}>
-        {files.map((m) => (
-          <FileRow key={m.id} m={m} />
-        ))}
+        <FileRows files={files} />
       </Card>
       <p className="small muted group-foot">{texts.inboxHint}</p>
     </section>

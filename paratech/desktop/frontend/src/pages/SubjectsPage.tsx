@@ -47,12 +47,20 @@ export function SubjectsPage(props: {
 
   useEffect(load, [load, props.reload]);
 
+  // Another subject (or the list): the form, the error and the note of the previous one go away.
   useEffect(() => {
     setForm("none");
     setError("");
     setNote("");
     setMaterials(null);
-    if (openId === "") {
+  }, [openId]);
+
+  const subject = subjects?.find((s) => s.id === openId) ?? null;
+  const known = subject !== null;
+
+  // A reload (a dropped file) only refetches the files; an open form stays.
+  useEffect(() => {
+    if (openId === "" || !known) {
       return;
     }
     let active = true;
@@ -63,9 +71,16 @@ export function SubjectsPage(props: {
     return () => {
       active = false;
     };
-  }, [api, openId, props.reload]);
+  }, [api, openId, known, props.reload]);
 
-  const subject = subjects?.find((s) => s.id === openId) ?? null;
+  // The route points at a subject that does not exist (any more): back to the list.
+  const { onSelect } = props;
+  useEffect(() => {
+    if (openId !== "" && subjects !== null && !known) {
+      onSelect("");
+    }
+  }, [openId, subjects, known, onSelect]);
+
   const counts = useMemo(() => (subject && materials ? folderCounts(subject.folders, materials) : null), [subject, materials]);
 
   async function run(work: () => Promise<void>) {
@@ -162,6 +177,21 @@ export function SubjectsPage(props: {
             )}
           </div>
         </div>
+      </section>
+    );
+  }
+
+  if (openId !== "" && (subjects === null || !known)) {
+    // Loading, or the unknown id being dropped by the effect above: no list flashes under an open route.
+    return (
+      <section className="page">
+        {loadError !== "" ? (
+          <ResultLine kind="fail" role="alert">
+            {loadError}
+          </ResultLine>
+        ) : (
+          <p className="muted">{texts.loading}</p>
+        )}
       </section>
     );
   }
