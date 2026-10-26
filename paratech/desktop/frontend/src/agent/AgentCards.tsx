@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import type { AnswerInput, AssignmentLineView, DraftView } from "../bindings/agent.js";
+import type { AgentApi, AnswerInput, AssignmentLineView, DraftView } from "../bindings/agent.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
@@ -7,6 +7,7 @@ import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
 import type { TurnkeyApi } from "../bindings/turnkey.js";
 import { ConfirmCard } from "./ConfirmCard.js";
 import { WorkWritingCard } from "./WorkCard.js";
+import { FreeWorkCard } from "./FreeWorkCard.js";
 import { Waiting } from "./Waiting.js";
 import {
   assignmentRow,
@@ -32,6 +33,8 @@ export interface CardActions {
   confirm?: { api: AgentConfirmApi; deleteApi: RecordingDeleteApi };
   /** The core calls of the `work` cards; without them such a card shows nothing. */
   turnkey?: TurnkeyApi;
+  /** The core calls of the `free_work` cards; without them such a card shows nothing. */
+  freeWork?: Pick<AgentApi, "freeWork" | "freeWorkCard">;
   /** Subject names by id, for the assignment list of a reply; an unknown subject is left out. */
   subjects?: Readonly<Record<string, string>>;
   /** «Сегодня» for the due dates; the current time when absent. */
@@ -288,6 +291,10 @@ function Card(props: { card: CardModel; actions: CardActions }) {
       );
     case "work":
       return props.actions.turnkey ? <WorkWritingCard key={card.workId} api={props.actions.turnkey} workId={card.workId} /> : null;
+    case "free_work":
+      return props.actions.freeWork ? (
+        <FreeWorkCard key={`${card.ref.threadId}:${card.ref.turn}:${card.ref.callId}`} api={props.actions.freeWork} fwRef={card.ref} turnkey={props.actions.turnkey} />
+      ) : null;
     case "action": {
       const note = props.actions.undoNote(card.actionId);
       return (

@@ -76,6 +76,8 @@
 .ag-list li::marker { color: var(--muted); }
 .ag-note { display: flex; gap: 8px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--muted); }
 .ag-note .i { flex: none; width: 14px; height: 14px; margin-top: 2px; }
+.ag-fw-chk { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--muted); }
+.ag-fw-out { margin: 0; }
 .ag-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .ag-rerun { display: flex; justify-content: flex-start; margin-top: 4px; }
 .ag-revise { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
