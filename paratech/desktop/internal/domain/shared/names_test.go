@@ -23,6 +23,12 @@ func TestSafeFileName(t *testing.T) {
 		{"only dots", "...", ""},
 		{"empty", "", ""},
 		{"dot dot", "..", ""},
+		{"right-to-left override", "работа\u202excod.exe", "работаxcod.exe"},
+		{"bidi embeddings and isolates", "\u202aa\u202bb\u202cc\u202dd\u2066e\u2067f\u2068g\u2069h", "abcdefgh"},
+		{"bidi marks", "a\u200eb\u200fc\u061cd", "abcd"},
+		{"zero-width characters", "\ufeffa\u200bb\u200cc\u200dd\u2060e", "abcde"},
+		{"only invisible characters", "\u200b\u202e\ufeff", ""},
+		{"invisible before a reserved name", "\u200bCON", "_CON"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -110,8 +111,26 @@ func (q StepQuestion) Key() string { return q.key }
 // IsZero reports whether q is the zero value.
 func (q StepQuestion) IsZero() bool { return q.data == "" }
 
-// MaxAdviceRunes bounds an answer about a helper step.
-const MaxAdviceRunes = 2000
+// Attempt returns the question asked for the answer number n (1..MaxAdviceAttempts): the same data, and for n > 1 a
+// key of its own. The Hub replays the answer it stored for a key, so an answer that fails CheckAdvice would come back
+// for the same question forever; the next attempt asks anew. ok is false for another n or a zero q.
+func (q StepQuestion) Attempt(n int) (StepQuestion, bool) {
+	if q.IsZero() || n < 1 || n > MaxAdviceAttempts {
+		return StepQuestion{}, false
+	}
+	if n > 1 {
+		q.key += ":a" + strconv.Itoa(n)
+	}
+	return q, true
+}
+
+// Bounds of an answer about a helper step.
+const (
+	// MaxAdviceRunes bounds the text of an answer.
+	MaxAdviceRunes = 2000
+	// MaxAdviceAttempts bounds the answers paid for one question (Attempt).
+	MaxAdviceAttempts = 3
+)
 
 // CheckAdvice checks an answer about a helper step before it is shown: untrusted text for a card only, trimmed,
 // 1..MaxAdviceRunes characters without control characters other than line breaks and tabs. Error: ErrInvalidAnswer.

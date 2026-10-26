@@ -161,8 +161,9 @@ func (s *Service) WorkOf(ctx context.Context, src work.Source) (View, error) {
 
 // AskStep is «Спросить по шагу»: the student's question about one helper step, answered from that step and the
 // requirements only (work.StepQuestion), with no tools. The answer is untrusted text for a card. Errors:
-// ErrNotConfigured (no advisor yet), ErrNotFound, ErrInvalidRequest, ErrReaderUnavailable, ErrQuota,
-// ErrReaderRefused, ErrUnavailable.
+// ErrNotConfigured (no advisor yet), ErrNotFound, ErrInvalidRequest, ErrReaderUnavailable (no connection), ErrQuota,
+// ErrReaderRefused (the model refused, or its answer failed work.CheckAdvice: asking again gets a new answer until
+// work.MaxAdviceAttempts were paid for), ErrUnavailable.
 func (s *Service) AskStep(ctx context.Context, id shared.WorkID, step int, question string) (string, error) {
 	if s.advisor == nil {
 		return "", ErrNotConfigured
@@ -175,15 +176,26 @@ func (s *Service) AskStep(ctx context.Context, id shared.WorkID, step int, quest
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
-	out, err := s.advisor.AdviseStep(ctx, q)
-	if err != nil {
-		return "", s.readerError(err)
+	// A stored answer that fails the check would replay on its key forever: the next attempt has a key of its own. A
+	// replayed bad answer costs nothing, so the walk goes on; a new one was paid for, so the ask ends there (one paid
+	// call per ask, work.MaxAdviceAttempts per question).
+	var refused error
+	for n := 1; n <= work.MaxAdviceAttempts; n++ {
+		attempt, _ := q.Attempt(n)
+		out, replayed, err := s.advisor.AdviseStep(ctx, attempt)
+		if err != nil {
+			return "", s.readerError(err)
+		}
+		advice, err := work.CheckAdvice(out)
+		if err == nil {
+			return advice, nil
+		}
+		refused = err
+		if !replayed {
+			break
+		}
 	}
-	advice, err := work.CheckAdvice(out)
-	if err != nil {
-		return "", fmt.Errorf("%w: %w", ErrReaderRefused, err)
-	}
-	return advice, nil
+	return "", fmt.Errorf("%w: %w", ErrReaderRefused, refused)
 }
 
 // Remove deletes a work if it is still at version expected: the Undo of the agent's triage_assignment (ADR-0021). The

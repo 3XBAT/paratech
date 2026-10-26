@@ -173,7 +173,7 @@ func TestGenerateWhileOneRuns(t *testing.T) {
 	if _, err := e.svc.Generate(context.Background(), "a1", 1, "longer"); !errors.Is(err, ErrGenerationRunning) {
 		t.Fatalf("Generate = %v, want ErrGenerationRunning", err)
 	}
-	if !strings.Contains(ErrGenerationRunning.Error(), "Решение уже готовится") {
+	if !strings.Contains(ErrGenerationRunning.Error(), "Черновик уже готовится") {
 		t.Fatalf("text = %q", ErrGenerationRunning)
 	}
 }

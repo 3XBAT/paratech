@@ -77,8 +77,9 @@ func (r *ProposalRepository) Save(ctx context.Context, p *proposal.Proposal) err
 				ID: string(st.ID), Kind: string(st.Kind), Status: string(st.Status), AssignmentID: string(st.AssignmentID),
 				Title: st.Title, Body: st.Body, DueAt: jobNullMs(st.Due), Reason: string(st.Reason), Recipient: st.Recipient,
 				AttachmentSha256: st.AttachmentSHA256, AttachmentSize: st.AttachmentSize, AssignmentTitle: st.AssignmentTitle,
-				AttachmentFormat: string(st.AttachmentFormat), WorkID: string(st.WorkID), ConfirmedAt: jobNullMs(st.ConfirmedAt),
-				ExecutedAt: jobNullMs(st.ExecutedAt), CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
+				AttachmentFormat: string(st.AttachmentFormat), WorkID: string(st.WorkID), AttachmentName: st.AttachmentName,
+				ConfirmedAt: jobNullMs(st.ConfirmedAt), ExecutedAt: jobNullMs(st.ExecutedAt), CreatedAt: jobMs(st.CreatedAt),
+				UpdatedAt: jobMs(st.UpdatedAt),
 			})))
 		}
 		n, err := q.UpdateProposal(ctx, sqlcgen.UpdateProposalParams{
@@ -104,7 +105,7 @@ func proposalFromRow(row sqlcgen.Proposal) (*proposal.Proposal, error) {
 		Reason: proposal.RejectReason(row.Reason), Recipient: row.Recipient, AttachmentSHA256: row.AttachmentSha256,
 		AttachmentSize: row.AttachmentSize, AssignmentTitle: row.AssignmentTitle,
 		AttachmentFormat: proposal.Format(row.AttachmentFormat), WorkID: shared.WorkID(row.WorkID),
-		CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
+		AttachmentName: row.AttachmentName, CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 		ConfirmedAt: jobFromNullMs(row.ConfirmedAt), ExecutedAt: jobFromNullMs(row.ExecutedAt),
 	})
 	if err != nil {

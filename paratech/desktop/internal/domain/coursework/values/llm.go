@@ -51,6 +51,8 @@ type LLMRequest struct {
 	instructions   string
 	untrustedData  string
 	idempotencyKey string
+
+	maxOutputTokens int // 0: the Hub default of the alias
 }
 
 // NewLLMRequest validates and builds a request.
@@ -143,6 +145,22 @@ func (r LLMRequest) UntrustedData() string { return r.untrustedData }
 // IdempotencyKey returns the key that makes a retry free of a second charge.
 func (r LLMRequest) IdempotencyKey() string { return r.idempotencyKey }
 
+// MaxOutputTokensLimit bounds the output cap a request may ask for; the Hub clamps it far lower per alias.
+const MaxOutputTokensLimit = 1 << 20
+
+// WithMaxOutputTokens returns r asking for at most n output tokens (1..MaxOutputTokensLimit), its own cap instead of
+// the Hub default of the alias; the Hub clamps it to its own cap. A zero r or another n wraps ErrInvalidLLMRequest.
+func (r LLMRequest) WithMaxOutputTokens(n int) (LLMRequest, error) {
+	if r.IsZero() || n < 1 || n > MaxOutputTokensLimit {
+		return LLMRequest{}, fmt.Errorf("%w: output cap %d", ErrInvalidLLMRequest, n)
+	}
+	r.maxOutputTokens = n
+	return r, nil
+}
+
+// MaxOutputTokens returns the output cap asked for; 0 means the Hub default of the alias.
+func (r LLMRequest) MaxOutputTokens() int { return r.maxOutputTokens }
+
 // UntrustedOutput is text produced by a language model (hard rule 3, PRD section 13.3, AC-18). It is a distinct
 // type, not a string, so that it cannot be passed to an email, file or calendar port or logged by accident: the
 // only way to read it is the deliberately named Unvalidated, which a reviewer can grep for. Validation against a
@@ -171,6 +189,7 @@ type LLMResult struct {
 	Output       UntrustedOutput
 	InputTokens  int64
 	OutputTokens int64
+	Replayed     bool // the Hub returned the result it stored for the key, without a new provider call or charge
 }
 
 // NewLLMResult builds a result; token counts used for accounting must not be negative.

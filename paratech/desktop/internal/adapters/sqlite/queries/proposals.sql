@@ -14,16 +14,16 @@ LIMIT sqlc.arg(max_rows);
 -- A never-stored proposal (version 0) is inserted with version 1.
 -- name: InsertProposal :exec
 INSERT INTO proposals (id, kind, status, assignment_id, title, body, due_at, reason, recipient, attachment_sha256,
-                       attachment_size, assignment_title, attachment_format, work_id, confirmed_at, executed_at, version,
-                       created_at, updated_at)
+                       attachment_size, assignment_title, attachment_format, work_id, attachment_name, confirmed_at,
+                       executed_at, version, created_at, updated_at)
 VALUES (sqlc.arg(id), sqlc.arg(kind), sqlc.arg(status), sqlc.arg(assignment_id), sqlc.arg(title), sqlc.arg(body),
         sqlc.arg(due_at), sqlc.arg(reason), sqlc.arg(recipient), sqlc.arg(attachment_sha256), sqlc.arg(attachment_size),
-        sqlc.arg(assignment_title), sqlc.arg(attachment_format), sqlc.arg(work_id), sqlc.arg(confirmed_at),
-        sqlc.arg(executed_at), 1, sqlc.arg(created_at), sqlc.arg(updated_at));
+        sqlc.arg(assignment_title), sqlc.arg(attachment_format), sqlc.arg(work_id), sqlc.arg(attachment_name),
+        sqlc.arg(confirmed_at), sqlc.arg(executed_at), 1, sqlc.arg(created_at), sqlc.arg(updated_at));
 
 -- Compare-and-swap on the loaded version. What the model proposed (kind, assignment, title, body, due), the attachment
--- format chosen before the validation, the work of a send and the creation time never change, so they are not written
--- again.
+-- format chosen before the validation, the work of a send, its file name pinned before the first save and the creation
+-- time never change, so they are not written again.
 -- name: UpdateProposal :execrows
 UPDATE proposals
 SET status            = sqlc.arg(status),

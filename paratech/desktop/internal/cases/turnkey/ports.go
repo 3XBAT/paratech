@@ -55,9 +55,11 @@ type Reader interface {
 
 // StepAdvisor answers «Спросить по шагу» from the narrow context of one helper step (work.StepQuestion), with no
 // tools. Implemented by the hubclient adapter on homework_draft (ADR-0025 addendum); without one AskStep answers
-// ErrNotConfigured. The answer is untrusted text for a card only.
+// ErrNotConfigured. The answer is untrusted text for a card only; replayed is true when the Hub returned the answer it
+// stored for the key of q (no new call, no charge). Errors follow the Reader's: shared.ErrQuotaExceeded,
+// work.ErrInvalidAnswer for a model refusal (nothing stored: the same key asks anew), anything else is no connection.
 type StepAdvisor interface {
-	AdviseStep(ctx context.Context, q work.StepQuestion) (string, error)
+	AdviseStep(ctx context.Context, q work.StepQuestion) (out string, replayed bool, err error)
 }
 
 // Clock supplies the current time in the student's zone (ARCH-24); the year of a title page is read from it.

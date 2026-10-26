@@ -19,7 +19,7 @@ func workSendFacts(t *testing.T) proposal.Facts {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.AttachmentRef, f.Filed = ref, true
+	f.AttachmentRef, f.Filed, f.AttachmentName = ref, true, "Реферат по истории.pptx"
 	return f
 }
 
@@ -41,7 +41,8 @@ func TestProposalWorkSendRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := repo.Get(ctx, "p1")
-	if err != nil || !reflect.DeepEqual(got.State(), p.State()) || got.WorkID() != "w1" || got.AttachmentFormat() != proposal.FormatPptx {
+	if err != nil || !reflect.DeepEqual(got.State(), p.State()) || got.WorkID() != "w1" || got.AttachmentFormat() != proposal.FormatPptx ||
+		got.AttachmentName() != "Реферат по истории.pptx" {
 		t.Fatalf("reloaded %+v, %v", got, err)
 	}
 	if err := got.Confirm(asgT0.Add(1)); err != nil {
@@ -50,7 +51,8 @@ func TestProposalWorkSendRoundTrip(t *testing.T) {
 	if err := repo.Save(ctx, got); err != nil {
 		t.Fatal(err)
 	}
-	if again, err := repo.Get(ctx, "p1"); err != nil || again.WorkID() != "w1" || again.Status() != proposal.StatusConfirmed {
+	if again, err := repo.Get(ctx, "p1"); err != nil || again.WorkID() != "w1" || again.Status() != proposal.StatusConfirmed ||
+		again.AttachmentName() != "Реферат по истории.pptx" {
 		t.Fatalf("after an update: %+v, %v", again, err)
 	}
 	waiting, err := repo.ListByStatus(ctx, proposal.StatusConfirmed, 10)
@@ -62,6 +64,7 @@ func TestProposalWorkSendRoundTrip(t *testing.T) {
 		"UPDATE proposals SET work_id = '' WHERE id = 'p1'",
 		"UPDATE proposals SET attachment_format = 'exe' WHERE id = 'p1'",
 		"UPDATE proposals SET work_id = '" + strings.Repeat("w", 129) + "' WHERE id = 'p1'",
+		"UPDATE proposals SET attachment_name = '" + strings.Repeat("n", 129) + "' WHERE id = 'p1'",
 	} {
 		if _, err := db.sql.ExecContext(ctx, q); !errors.Is(MapError(ctx, err), ErrConstraint) {
 			t.Errorf("%s: %v, want a constraint violation", q, err)
@@ -103,6 +106,10 @@ func TestMigrationToVersion33KeepsProposals(t *testing.T) {
 	if after := proposalRows(t, db); !reflect.DeepEqual(after, before) {
 		t.Fatalf("rows changed by the migration:\nbefore %v\nafter  %v", before, after)
 	}
+	// The repository reads and writes the pinned name of 34 (TASK-192); going down passes 34 first.
+	if _, err := p.UpTo(ctx, 34); err != nil {
+		t.Fatalf("up to 34: %v", err)
+	}
 	repo := NewProposalRepository(db)
 	for id, want := range map[proposal.ID]proposal.Format{"p1": proposal.FormatDocx, "p2": proposal.FormatText, "p3": ""} {
 		got, err := repo.Get(ctx, id)
@@ -123,6 +130,40 @@ func TestMigrationToVersion33KeepsProposals(t *testing.T) {
 	}
 	if _, err := p.DownTo(ctx, 32); err != nil {
 		t.Fatalf("down to 32: %v", err)
+	}
+	if after := proposalRows(t, db); !reflect.DeepEqual(after, before) {
+		t.Fatalf("rows after going down:\nbefore %v\nafter  %v", before, after)
+	}
+}
+
+// TASK-192: migration 34 adds the pinned name; a send of a work stored before loads without one (its copy takes the
+// library name, as before), and going down keeps the rows.
+func TestMigrationToVersion34KeepsWorkSends(t *testing.T) {
+	t.Parallel() // uses a database of its own
+	ctx := context.Background()
+	db := openTest(t, func(o *Options) { o.Migrate = false })
+	p, err := db.provider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 33); err != nil {
+		t.Fatalf("up to 33: %v", err)
+	}
+	sha := strings.Repeat("ab", 32)
+	mustExec(t, db, `INSERT INTO proposals (id, kind, status, assignment_id, recipient, attachment_sha256, attachment_size,
+		attachment_format, work_id, version, created_at, updated_at)
+		VALUES ('p1', 'send_work_email', 'VALIDATED', 'a1', 'teacher@school.example', '`+sha+`', 42, 'docx', 'w1', 1, 1, 2)`)
+	before := proposalRows(t, db)
+
+	if _, err := p.UpTo(ctx, 34); err != nil {
+		t.Fatalf("up to 34: %v", err)
+	}
+	got, err := NewProposalRepository(db).Get(ctx, "p1")
+	if err != nil || got.AttachmentName() != "" || got.WorkID() != "w1" {
+		t.Fatalf("an old send after the migration: %+v, %v", got, err)
+	}
+	if _, err := p.DownTo(ctx, 33); err != nil {
+		t.Fatalf("down to 33: %v", err)
 	}
 	if after := proposalRows(t, db); !reflect.DeepEqual(after, before) {
 		t.Fatalf("rows after going down:\nbefore %v\nafter  %v", before, after)

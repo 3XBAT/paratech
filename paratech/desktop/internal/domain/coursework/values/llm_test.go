@@ -69,6 +69,31 @@ func TestNewLLMRequest(t *testing.T) {
 	}
 }
 
+func TestWithMaxOutputTokens(t *testing.T) {
+	req, err := NewLLMRequest(OperationHomeworkDraft, "default", "instructions", "data", "key-1")
+	if err != nil || req.MaxOutputTokens() != 0 {
+		t.Fatalf("default cap: %d, %v", req.MaxOutputTokens(), err)
+	}
+	for _, tc := range []struct {
+		n  int
+		ok bool
+	}{{1, true}, {1024, true}, {MaxOutputTokensLimit, true}, {0, false}, {-1, false}, {MaxOutputTokensLimit + 1, false}} {
+		got, err := req.WithMaxOutputTokens(tc.n)
+		if tc.ok != (err == nil) || (tc.ok && (got.MaxOutputTokens() != tc.n || got.IdempotencyKey() != "key-1")) {
+			t.Errorf("WithMaxOutputTokens(%d) = %d, %v", tc.n, got.MaxOutputTokens(), err)
+		}
+		if !tc.ok && (!errors.Is(err, ErrInvalidLLMRequest) || !got.IsZero()) {
+			t.Errorf("WithMaxOutputTokens(%d) error %v", tc.n, err)
+		}
+	}
+	if req.MaxOutputTokens() != 0 {
+		t.Fatal("WithMaxOutputTokens changed the request it was called on")
+	}
+	if _, err := (LLMRequest{}).WithMaxOutputTokens(10); !errors.Is(err, ErrInvalidLLMRequest) {
+		t.Fatalf("a cap on the zero request: %v", err)
+	}
+}
+
 func TestZeroLLMRequestIsInvalid(t *testing.T) {
 	if !(LLMRequest{}).IsZero() {
 		t.Fatal("zero LLMRequest must report IsZero")

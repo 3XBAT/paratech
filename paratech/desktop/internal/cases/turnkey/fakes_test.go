@@ -207,15 +207,35 @@ func (f *fakeReader) paid() int {
 	return len(keys)
 }
 
+// fakeAdvisor answers as the Hub does: a key it answered replays the stored answer (replayed, no new call); a new key
+// takes the next of outs (out when none is left) and stores it, unless err refuses the call (nothing stored).
 type fakeAdvisor struct {
-	out string
-	err error
-	got []work.StepQuestion
+	out    string
+	outs   []string
+	err    error
+	got    []work.StepQuestion
+	stored map[string]string
+	calls  int // new (paid) calls
 }
 
-func (f *fakeAdvisor) AdviseStep(_ context.Context, q work.StepQuestion) (string, error) {
+func (f *fakeAdvisor) AdviseStep(_ context.Context, q work.StepQuestion) (string, bool, error) {
 	f.got = append(f.got, q)
-	return f.out, f.err
+	if out, ok := f.stored[q.Key()]; ok {
+		return out, true, nil
+	}
+	if f.err != nil {
+		return "", false, f.err
+	}
+	out := f.out
+	if len(f.outs) > 0 {
+		out, f.outs = f.outs[0], f.outs[1:]
+	}
+	if f.stored == nil {
+		f.stored = map[string]string{}
+	}
+	f.stored[q.Key()] = out
+	f.calls++
+	return out, false, nil
 }
 
 type fixedClock struct{}

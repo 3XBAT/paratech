@@ -25,20 +25,21 @@ func (c *Client) StepAdvisor(modelAlias string) *StepAdvisor {
 	return &StepAdvisor{c: c, alias: modelAlias}
 }
 
-// AdviseStep makes one paid call per question; the key follows the question (work.StepQuestion.Key) and the prompt
-// version, so the same question again is a free replay on the Hub. The output is untrusted model text for a card only
-// (work.CheckAdvice reads it). Errors are those of Complete; a permanent ErrProvider (a model refusal) also matches
-// work.ErrInvalidAnswer, as for the reader.
-func (a *StepAdvisor) AdviseStep(ctx context.Context, q work.StepQuestion) (string, error) {
+// AdviseStep makes one paid call per question with the advice's own output cap (prompts.StepAdviceMaxOutputTokens);
+// the key follows the question (work.StepQuestion.Key) and the prompt version, so the same question again is a free
+// replay on the Hub, reported by replayed. The output is untrusted model text for a card only (work.CheckAdvice reads
+// it). Errors are those of Complete; a permanent ErrProvider (a model refusal, of which the Hub stores nothing) also
+// matches work.ErrInvalidAnswer, as for the reader.
+func (a *StepAdvisor) AdviseStep(ctx context.Context, q work.StepQuestion) (out string, replayed bool, err error) {
 	if err := ctx.Err(); err != nil {
-		return "", fmt.Errorf("%s: %w", opAdvise, err)
+		return "", false, fmt.Errorf("%s: %w", opAdvise, err)
 	}
 	if q.IsZero() {
-		return "", permanent(opAdvise, ErrInvalidRequest)
+		return "", false, permanent(opAdvise, ErrInvalidRequest)
 	}
 	req, err := prompts.BuildStepAdvice(q.Data(), a.alias, q.Key())
 	if err != nil {
-		return "", permanent(opAdvise, ErrInvalidRequest)
+		return "", false, permanent(opAdvise, ErrInvalidRequest)
 	}
 
 	res, err := a.c.Complete(ctx, req)
@@ -47,7 +48,7 @@ func (a *StepAdvisor) AdviseStep(ctx context.Context, q work.StepQuestion) (stri
 		if errors.As(err, &e) && errors.Is(e, ErrProvider) && errors.Is(e, backoff.ErrPermanent) {
 			e.extra = append(e.extra, work.ErrInvalidAnswer)
 		}
-		return "", err
+		return "", false, err
 	}
-	return res.Output.Unvalidated(), nil
+	return res.Output.Unvalidated(), res.Replayed, nil
 }

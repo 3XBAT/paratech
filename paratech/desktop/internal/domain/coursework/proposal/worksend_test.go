@@ -23,6 +23,7 @@ func storedRef(t *testing.T, sha string) shared.ArtifactRef {
 func workFacts(t *testing.T) Facts {
 	f := goodFacts(t)
 	f.ShownFormat, f.AttachmentRef, f.Filed = FormatDocx, storedRef(t, shaA), true
+	f.AttachmentName = "Реферат: история «Руси».docx"
 	return f
 }
 
@@ -214,9 +215,13 @@ func TestRecheckWorkSend(t *testing.T) {
 	}
 }
 
+// TASK-192: the name is pinned at validation; the library name at execution (renamed since) changes nothing.
 func TestWorkEmailCommand(t *testing.T) {
 	p := workInStatus(t, StatusConfirmed)
-	cmd, err := p.WorkEmailCommand("Реферат: история «Руси».docx")
+	if p.AttachmentName() != "Реферат_ история «Руси».docx" {
+		t.Fatalf("pinned name %q", p.AttachmentName())
+	}
+	cmd, err := p.WorkEmailCommand("Переименованный.docx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,6 +229,20 @@ func TestWorkEmailCommand(t *testing.T) {
 		cmd.Attachment().String() != "exports/sent/p1/Реферат_ история «Руси».docx" || cmd.AttachmentDigest() != mustDigest(t, shaA, 11) ||
 		!cmd.ConfirmedAt().Equal(p.ConfirmedAt()) {
 		t.Fatalf("command: %+v", cmd)
+	}
+	if ref, err := p.WorkCopyRef("Переименованный.docx"); err != nil || ref != cmd.Attachment() {
+		t.Fatalf("WorkCopyRef = %s, %v", ref, err)
+	}
+
+	// A send stored before the name was pinned takes the library name at execution, as before.
+	st := p.State()
+	st.Version, st.AttachmentName = 1, ""
+	old, err := Restore(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd, err := old.WorkEmailCommand("Реферат.docx"); err != nil || cmd.Attachment().String() != "exports/sent/p1/Реферат.docx" {
+		t.Fatalf("old send: %+v, %v", cmd, err)
 	}
 	if _, err := p.EmailCommand(); !errors.Is(err, ErrWrongKind) {
 		t.Fatalf("EmailCommand of a work send = %v", err)
@@ -254,6 +273,8 @@ func TestCopyName(t *testing.T) {
 		{"", FormatDocx, "работа.docx"},
 		{"...", FormatPptx, "работа.pptx"},
 		{"line\nbreak", FormatDocx, "line break.docx"},
+		{"Реферат\u202excod.exe", FormatDocx, "Рефератxcod.docx"},
+		{"\u200bРеф\ufeffерат.docx", FormatDocx, "Реферат.docx"},
 		{strings.Repeat("я", 100) + ".docx", FormatDocx, strings.Repeat("я", maxCopyNameRunes) + ".docx"},
 	}
 	for _, tc := range cases {
@@ -292,6 +313,13 @@ func TestWorkSendRestore(t *testing.T) {
 		{"homework send with a work", inStatus(t, outEmail, StatusValidated).State(), func(s *State) { s.Version, s.WorkID = 1, "w1" }},
 		{"homework send as pptx", inStatus(t, outEmail, StatusValidated).State(), func(s *State) { s.Version, s.AttachmentFormat = 1, FormatPptx }},
 		{"rejected with a stale reason", base(StatusRejected), func(s *State) { s.Reason = ReasonArtifactChanged }},
+		{"name on a rejected send", base(StatusRejected), func(s *State) { s.AttachmentName = "Реферат.docx" }},
+		{"name on a proposed send", base(StatusProposed), func(s *State) { s.AttachmentName = "Реферат.docx" }},
+		{"name of another format", base(StatusValidated), func(s *State) { s.AttachmentName = "Реферат.pptx" }},
+		{"name without an extension", base(StatusValidated), func(s *State) { s.AttachmentName = "Реферат" }},
+		{"name with a path", base(StatusValidated), func(s *State) { s.AttachmentName = "../Реферат.docx" }},
+		{"name with a bidi override", base(StatusValidated), func(s *State) { s.AttachmentName = "a\u202excod.exe.docx" }},
+		{"name on a homework send", inStatus(t, outEmail, StatusValidated).State(), func(s *State) { s.Version, s.AttachmentName = 1, "x.txt" }},
 	}
 	for _, tc := range bad {
 		t.Run(tc.name, func(t *testing.T) {

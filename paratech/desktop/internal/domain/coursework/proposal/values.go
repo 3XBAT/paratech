@@ -208,9 +208,11 @@ type Facts struct {
 
 	// Send of a work only (Kind.NeedsWorkFile): the stored library file the work points at now (zero: none; Attachment
 	// is the digest of its content) and whether it is still filed where the work put it: in «ДЗ», or in «Входящие» for
-	// a work whose subject is none or gone.
-	AttachmentRef shared.ArtifactRef
-	Filed         bool
+	// a work whose subject is none or gone. AttachmentName is the library name of that file: Validate pins its CopyName,
+	// so a rename in the library before «Да» does not change the name the teacher gets.
+	AttachmentRef  shared.ArtifactRef
+	Filed          bool
+	AttachmentName string
 }
 
 // Format is the file a send attaches: the text export or the Word export of the assignment (TASK-094), or the Word or
@@ -288,4 +290,10 @@ func CopyName(materialName string, f Format) string {
 		name = copyFallbackName
 	}
 	return name + "." + string(f)
+}
+
+// validCopyName reports whether name is a CopyName in format f as Validate pins it, so a stored one passes the rules
+// it was made by.
+func validCopyName(name string, f Format) bool {
+	return f.Valid() && strings.HasSuffix(name, "."+string(f)) && CopyName(name, f) == name
 }

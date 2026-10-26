@@ -796,3 +796,8 @@ CREATE INDEX idx_ticket_sets_subject ON ticket_sets (subject_id);
 -- settings: 1 when the agent shows «Такого задания нет — могу сделать как свободную работу» before a work on a topic
 -- (settings.FreeWorkNotice, on by default), 0 after «Больше не показывать».
 ALTER TABLE settings ADD COLUMN free_work_notice INTEGER NOT NULL DEFAULT 1 CHECK (free_work_notice IN (0, 1));
+
+-- Migration 0034.
+-- proposals: the name of the copy a send_work_email attaches (proposal.CopyName, a safe file name the core made from
+-- the library name, never model text); '' for the other kinds, before validation and for sends stored before 0034.
+ALTER TABLE proposals ADD COLUMN attachment_name TEXT NOT NULL DEFAULT '' CHECK (length(attachment_name) <= 128);

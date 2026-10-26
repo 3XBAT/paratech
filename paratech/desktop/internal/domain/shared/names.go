@@ -45,14 +45,29 @@ func nameProblem(s string) string {
 // maxFileNameRunes bounds SafeFileName: far below the 255 UTF-16 units of NTFS, so a folder path still fits.
 const maxFileNameRunes = 120
 
-// SafeFileName turns free text (a lesson title) into a single Windows file-name segment: forbidden and control
-// characters become "_", runs of spaces collapse, the result is cut to maxFileNameRunes, trailing dots and spaces are
-// trimmed and a reserved device name gets a leading "_". It returns "" when nothing usable is left.
+// invisibleNameChar reports bidi controls and zero-width characters: they would let a name show another text or
+// extension than it has (a right-to-left override before "xcod.exe" shows "exe.docx"), so SafeFileName drops them.
+func invisibleNameChar(r rune) bool {
+	switch {
+	case r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069, r == 0x200E, r == 0x200F, r == 0x061C:
+		return true // bidi embeddings, overrides, isolates and marks
+	case r >= 0x200B && r <= 0x200D, r == 0x2060, r == 0xFEFF:
+		return true // zero-width space, joiners, word joiner, byte order mark
+	}
+	return false
+}
+
+// SafeFileName turns free text (a lesson title) into a single Windows file-name segment: bidi controls and zero-width
+// characters are dropped, forbidden and control characters become "_", runs of spaces collapse, the result is cut to
+// maxFileNameRunes, trailing dots and spaces are trimmed and a reserved device name gets a leading "_". It returns ""
+// when nothing usable is left.
 func SafeFileName(s string) string {
 	var b strings.Builder
 	space := false
 	for _, r := range s {
 		switch {
+		case invisibleNameChar(r):
+			continue
 		case unicode.IsSpace(r):
 			r = ' '
 		case unicode.IsControl(r) || strings.ContainsRune(forbiddenNameChars, r):

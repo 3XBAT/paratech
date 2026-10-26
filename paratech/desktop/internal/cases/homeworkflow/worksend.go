@@ -84,8 +84,8 @@ func (s *Service) ProposeSendWork(ctx context.Context, id shared.WorkID) (Propos
 
 // ConfirmSendWork is the student's «Да» on the send of a work: Confirm, then Execute, as ConfirmSend. shownSubject and
 // shownFormat are what the card showed; another subject or format by now, a changed, replaced, deleted or moved file,
-// or another recipient makes the proposal STALE and nothing is sent. Before the send the file is copied under its
-// library name into exports, and the email attaches that copy, keyed by the proposal (hard rule 7): a repeat sends no
+// or another recipient makes the proposal STALE and nothing is sent. Before the send the file is copied under the name
+// pinned when it was proposed (a rename in the library since changes nothing) into exports, and the email attaches that copy, keyed by the proposal (hard rule 7): a repeat sends no
 // second email, and an email whose outcome is unknown is never sent again here. Another kind yields ErrNotASend before
 // any change; other statuses the error of proposal.Confirm.
 func (s *Service) ConfirmSendWork(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format) (ProposalView, error) {
@@ -210,9 +210,12 @@ func (s *Service) copyWorkFile(ctx context.Context, p *proposal.Proposal, cmd pr
 	return nil
 }
 
-// workAttachmentName is the name the file of the send of a work goes under (proposal.CopyName of its library name);
-// empty when the work or its file is gone.
+// workAttachmentName is the name the file of the send of a work goes under: the one pinned at validation, else (a send
+// stored before it was pinned) proposal.CopyName of its library name, empty when the work or its file is gone.
 func (s *Service) workAttachmentName(ctx context.Context, p *proposal.Proposal) (string, error) {
+	if name := p.AttachmentName(); name != "" {
+		return name, nil
+	}
 	if s.works == nil {
 		return "", nil
 	}
