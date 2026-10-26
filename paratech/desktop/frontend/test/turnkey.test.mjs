@@ -399,17 +399,18 @@ test("an empty helper says so instead of showing empty blocks", () => {
   assert.ok(blank.includes(turnkeyTexts.helperEmpty));
 });
 
-test("«Спросить по шагу»: the answer is shown, «пока недоступны» is a calm note, other errors fail", async () => {
+test("«Спросить по шагу»: the answer is shown, every refusal is a fixed error text (no «backend missing» mode)", async () => {
   const log = [];
   const ok = await askStepOutcome(fakeApi(log), "w1", 1, "почему?");
   assert.deepEqual(ok, { kind: "answer", text: "Ответ" });
   assert.deepEqual(log[0], ["askStep", "w1", 1, "почему?"]);
 
+  // The no-advisor text of the core is an error like the others now.
   const none = await askStepOutcome(fakeApi([], { askStep: async () => { throw "Вопросы по шагу пока недоступны."; } }), "w1", 0, "q");
-  assert.deepEqual(none, { kind: "unavailable", text: "Вопросы по шагу пока недоступны." });
+  assert.deepEqual(none, { kind: "error", text: "Вопросы по шагу пока недоступны." });
 
   const wails = await askStepOutcome(fakeApi([], { askStep: async () => { throw new Error("Вопросы по шагу пока недоступны."); } }), "w1", 0, "q");
-  assert.equal(wails.kind, "unavailable");
+  assert.equal(wails.kind, "error");
 
   const bad = await askStepOutcome(fakeApi([], { askStep: async () => { throw new Error("secret internal detail"); } }), "w1", 0, "q");
   assert.deepEqual(bad, { kind: "error", text: "Не удалось выполнить. Попробуйте ещё раз." });

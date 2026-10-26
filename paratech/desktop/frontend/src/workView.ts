@@ -509,6 +509,40 @@ export async function openWork(library: Pick<LibraryApi, "openMaterial">, w: Tur
   return r.status === "opened" ? { kind: "ok", text: r.message } : { kind: "fail", text: r.message };
 }
 
+/**
+ * «Повторить» next to the error of a running step: only for a failed start/retry call. A refused stop (the fixed text or
+ * any other error of that call) never offers it: StartWriting would not undo a stop (TASK-191 L1).
+ */
+export function retryOffered(error: string, stopFailed: boolean): boolean {
+  return error !== "" && !stopFailed && error !== notStoppedText;
+}
+
+export const metaTexts = { subject: "Предмет", topic: "Тема", inbox: "Входящие" } as const;
+
+export interface WorkMeta {
+  subject: string;
+  topic: string;
+}
+
+/**
+ * Subject and topic of the work for the card header. The subject name comes from the library by `subjectId`; an id the
+ * library no longer has is «Входящие» (where the paper goes). Both are student or model text: text nodes only.
+ */
+export function workMeta(w: TurnkeyWork, subjects: ReadonlyMap<string, string>): WorkMeta {
+  // parseWork always gives strings; `||` also covers test fixtures that omit the fields.
+  const id = w.subjectId || (w.writing?.subjectId ?? "");
+  const topic = (w.topic || (w.writing?.topic ?? "")).trim();
+  const subject = id === "" ? "" : (subjects.get(id) ?? metaTexts.inbox);
+  return { subject, topic };
+}
+
+/** «Предмет: X · Тема: Y», the known parts only; "" when none. */
+export function metaLine(m: WorkMeta): string {
+  return [m.subject !== "" ? `${metaTexts.subject}: ${m.subject}` : "", m.topic !== "" ? `${metaTexts.topic}: ${m.topic}` : ""]
+    .filter((p) => p !== "")
+    .join(" · ");
+}
+
 /** A stop button shows while a writing job runs. */
 export function canStop(w: TurnkeyWork): boolean {
   return w.writing?.active === true;
