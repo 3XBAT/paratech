@@ -57,6 +57,9 @@ type fakeHWProposals struct {
 	shownSubject string                        // the last ConfirmSend
 	shownFormat  proposal.Format               // the last ConfirmSend
 	format       proposal.Format               // the last ProposeSend
+	createErr    error                         // returned by CreateAssignment
+	created      map[shared.AssignmentID]homeworkflow.NewAssignment
+	createCalls  []homeworkflow.NewAssignment // every CreateAssignment input
 }
 
 func (f *fakeHWProposals) ListAssignments(context.Context) ([]homeworkflow.AssignmentView, error) {
@@ -76,6 +79,20 @@ func (f *fakeHWProposals) CorrectLesson(_ context.Context, c homeworkflow.Lesson
 		ID: c.ID, Title: "Rivers", UpdatedAt: hwT0, Subject: c.Subject, SubjectSource: values.SourceUser,
 		CorrectedSubject: c.Subject,
 	}, f.err
+}
+
+// CreateAssignment stores by ID like the use case: the same ID is the same assignment.
+func (f *fakeHWProposals) CreateAssignment(_ context.Context, in homeworkflow.NewAssignment) (homeworkflow.AssignmentView, error) {
+	f.log.add("CreateAssignment")
+	f.createCalls = append(f.createCalls, in)
+	if err := cmpErr(f.createErr, f.err); err != nil {
+		return homeworkflow.AssignmentView{}, err
+	}
+	if f.created == nil {
+		f.created = map[shared.AssignmentID]homeworkflow.NewAssignment{}
+	}
+	f.created[in.ID] = in
+	return homeworkflow.AssignmentView{ID: in.ID, Title: in.Title, Description: in.Note, UpdatedAt: hwT0}, nil
 }
 
 func (f *fakeHWProposals) ProposeSend(_ context.Context, _ shared.AssignmentID, format proposal.Format) (homeworkflow.ProposalView, error) {
@@ -285,6 +302,19 @@ var everyHomeworkCall = []hwCall{
 	{"CorrectLesson", func(s *HomeworkService, id string) error {
 		_, err := s.CorrectLesson(context.Background(), id, "Физика", "")
 		return err
+	}},
+	// The request token is the id the method validates; a failure is a problem code, shown here as the page's error.
+	{"CreateAssignment", func(s *HomeworkService, id string) error {
+		res := s.CreateAssignment(context.Background(), CreateRequest{RequestID: id, Title: "Read chapter 3"})
+		switch {
+		case res.Problem == createInvalid && res.Field == fieldRequestID:
+			return ErrHomeworkInvalidID
+		case res.Problem == createFailed:
+			return ErrHomeworkUnavailable
+		case res.Problem != "":
+			return errors.New(res.Problem)
+		}
+		return nil
 	}},
 	{"DraftVersion", func(s *HomeworkService, id string) error {
 		_, err := s.DraftVersion(context.Background(), id, 1)
