@@ -10,10 +10,11 @@ import (
 	"paratech/hub/internal/domain/llm/values"
 )
 
-// golden is the contract's current catalog (v2); the Hub embeds a byte-identical copy (hub/pkg/prompts). goldenV1 is
-// the frozen catalog v1, still served to clients of that version.
+// golden is the contract's current catalog (v3); the Hub embeds a byte-identical copy (hub/pkg/prompts). goldenV1 and
+// goldenV2 are frozen, still served to clients of those versions.
 const (
-	golden   = "../../../../../../shared/testdata/tool_catalog_v2.json"
+	golden   = "../../../../../../shared/testdata/tool_catalog_v3.json"
+	goldenV2 = "../../../../../../shared/testdata/tool_catalog_v2.json"
 	goldenV1 = "../../../../../../shared/testdata/tool_catalog_v1.json"
 )
 
@@ -38,7 +39,7 @@ func parseFile(t *testing.T, file string) *Catalog {
 // TestQueryArguments: catalog v2 bounds the question of answer_question and the query of search at MaxQueryRunes on
 // one line; v1 keeps them labels of MaxLabelRunes.
 func TestQueryArguments(t *testing.T) {
-	v1, v2 := parseFile(t, goldenV1), goldenCatalog(t)
+	v1, v2 := parseFile(t, goldenV1), parseFile(t, goldenV2)
 	if v1.Version() != 1 || v2.Version() != 2 {
 		t.Fatalf("versions %d and %d", v1.Version(), v2.Version())
 	}
@@ -73,6 +74,50 @@ func TestQueryArguments(t *testing.T) {
 	}
 }
 
+// TestReplyAssignments: catalog v3 lets reply list 0-MaxCardIDs assignment IDs (TASK-172); v2 has no such argument.
+func TestReplyAssignments(t *testing.T) {
+	v2, v3 := parseFile(t, goldenV2), goldenCatalog(t)
+	ids := func(n int) string {
+		items := make([]string, n)
+		for i := range items {
+			items[i] = `"asg-` + strings.Repeat("x", i+1) + `"`
+		}
+		return `{"text":"Три задания.","assignments":[` + strings.Join(items, ",") + `]}`
+	}
+	for _, args := range []string{ids(0), ids(1), ids(MaxCardIDs), `{"text":"Заданий нет."}`} {
+		if err := v3.Check(call(t, "reply", args)); err != nil {
+			t.Errorf("v3 reply %s: %v", args, err)
+		}
+	}
+	for name, args := range map[string]string{
+		"eleven":     ids(MaxCardIDs + 1),
+		"not an id":  `{"text":"t","assignments":["a 1"]}`,
+		"empty id":   `{"text":"t","assignments":[""]}`,
+		"long id":    `{"text":"t","assignments":["` + strings.Repeat("a", 129) + `"]}`,
+		"a number":   `{"text":"t","assignments":[7]}`,
+		"an object":  `{"text":"t","assignments":[{"id":"a-1"}]}`,
+		"not a list": `{"text":"t","assignments":"a-1"}`,
+		"null":       `{"text":"t","assignments":null}`,
+	} {
+		if err := v3.Check(call(t, "reply", args)); !errors.Is(err, ErrInvalidCall) {
+			t.Errorf("v3 reply %s: err = %v, want ErrInvalidCall", name, err)
+		}
+	}
+	if err := v2.Check(call(t, "reply", ids(1))); !errors.Is(err, ErrInvalidCall) {
+		t.Errorf("v2 reply with assignments: err = %v, want ErrInvalidCall", err)
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(specFor(t, v3, "reply").Schema()), &schema); err != nil {
+		t.Fatal(err)
+	}
+	p := schema["properties"].(map[string]any)["assignments"].(map[string]any)
+	if p["type"] != "array" || p["maxItems"] != float64(MaxCardIDs) || p["minItems"] != nil ||
+		p["items"].(map[string]any)["maxLength"] != float64(maxIDBytes) || len(schema["required"].([]any)) != 1 {
+		t.Errorf("v3 reply schema = %v", schema)
+	}
+}
+
 func call(t *testing.T, tool, args string) values.ToolCall {
 	t.Helper()
 	c, err := values.NewToolCall("toolu_1", tool, args)
@@ -84,7 +129,7 @@ func call(t *testing.T, tool, args string) values.ToolCall {
 
 func TestParseGolden(t *testing.T) {
 	c := goldenCatalog(t)
-	if c.Version() != 2 || len(c.Specs()) != 27 || !c.Has("show_plan") || c.Has("send_email") {
+	if c.Version() != 3 || len(c.Specs()) != 27|| !c.Has("show_plan") || c.Has("send_email") {
 		t.Fatalf("catalog version %d, %d tools", c.Version(), len(c.Specs()))
 	}
 	specs := c.Specs()
@@ -276,10 +321,11 @@ func TestParseRejectsBadCatalogs(t *testing.T) {
 	base := string(raw)
 	for name, text := range map[string]string{
 		"not JSON":        "{",
-		"unknown field":   strings.Replace(base, `"catalog_version": 2,`, `"catalog_version": 2, "extra": true,`, 1),
-		"no version":      strings.Replace(base, `"catalog_version": 2,`, `"catalog_version": 0,`, 1),
+		"unknown field":   strings.Replace(base, `"catalog_version": 3,`, `"catalog_version": 3, "extra": true,`, 1),
+		"no version":      strings.Replace(base, `"catalog_version": 3,`, `"catalog_version": 0,`, 1),
 		"trailing data":   base + "{}",
-		"no tools":        `{"catalog_version": 2, "tools": []}`,
+		"no tools":        `{"catalog_version": 3, "tools": []}`,
+		"card ids on R":   strings.Replace(base, `{"name": "ids", "type": "ids"`, `{"name": "ids", "type": "card_ids"`, 1),
 		"bad tool name":   strings.Replace(base, `"name": "reply"`, `"name": "Reply"`, 1),
 		"duplicate tool":  strings.Replace(base, `"name": "reply"`, `"name": "cannot_do"`, 1),
 		"unknown class":   strings.Replace(base, `"class": "UI"`, `"class": "X"`, 1),

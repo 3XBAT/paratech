@@ -23,12 +23,13 @@ var (
 	ErrInvalidCall = errors.New("tool call does not match the catalog")
 )
 
-// Bounds of the argument types beyond the catalog text. The catalog fixes label (80), query (500, catalog v2) and text
-// (300); the list sizes are the Hub's.
+// Bounds of the argument types beyond the catalog text. The catalog fixes label (80), query (500, catalog v2), text
+// (300) and card_ids (10, catalog v3); the other list sizes are the Hub's.
 const (
 	MaxLabelRunes    = values.MaxLabelRunes
 	MaxQueryRunes    = 500
 	MaxTextRunes     = 300
+	MaxCardIDs       = 10
 	maxIDsItems      = 20
 	maxTextListItems = 10
 	maxPlanSteps     = 8
@@ -48,6 +49,7 @@ const (
 	typeQuery     = "query"
 	typeText      = "text"
 	typeTextList  = "text_list"
+	typeCardIDs   = "card_ids"
 	typePlanSteps = "plan_steps"
 	typeQuestions = "questions"
 )
@@ -62,7 +64,7 @@ const (
 
 var (
 	actionTypes = []string{typeID, typeIDs, typeDate, typeEnum, typeLabel, typeQuery}
-	uiTypes     = []string{typeText, typeTextList, typePlanSteps, typeQuestions}
+	uiTypes     = []string{typeText, typeTextList, typeCardIDs, typePlanSteps, typeQuestions}
 )
 
 // Question kinds of ask_questions.
@@ -99,8 +101,8 @@ type Catalog struct {
 }
 
 // Parse reads a catalog text and checks it: known fields only, a version above 0, unique snake_case tool and argument
-// names, known classes, argument types allowed for the class (UI tools only card types, other tools only IDs, enums,
-// dates, labels and queries), enum values only on enums. The deeper policy checks of the golden file live in the contract
+// names, known classes, argument types allowed for the class (UI tools only card types, among them the IDs a card
+// lists; other tools only IDs, enums, dates, labels and queries), enum values only on enums. The deeper policy checks of the golden file live in the contract
 // test.
 func Parse(raw []byte) (*Catalog, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
