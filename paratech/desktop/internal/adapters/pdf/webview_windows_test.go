@@ -18,9 +18,20 @@ import (
 )
 
 const (
-	printTimeout       = 60 * time.Second
+	// printTimeout is generous: a print takes about 1 s on a desktop, but the first start of the browser on a busy
+	// machine can take far longer.
+	printTimeout       = 2 * time.Minute
 	profileReleaseWait = 20 * time.Second
 )
+
+// envWebView2CI=1 runs the real-WebView2 tests on GitHub Actions too. They are off there by default: on the hosted
+// Windows runner the browser start is unpredictably slow (over a minute) and its processes starve the packages that
+// run alongside. Locally they always run.
+const envWebView2CI = "LA_WEBVIEW2_CI_TEST"
+
+func realWebView2Off(getenv func(string) string) bool {
+	return getenv("GITHUB_ACTIONS") == "true" && getenv(envWebView2CI) != "1"
+}
 
 const cyrillicPage = `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
@@ -59,9 +70,12 @@ func newTestPrinter(t *testing.T) (*Printer, string) {
 	return NewPrinter(dir, nil), dir
 }
 
-// requireRuntime skips tests that need a real WebView2 Runtime when the machine has none.
+// requireRuntime skips tests that need a real WebView2 Runtime when the machine has none or they are off on CI.
 func requireRuntime(t *testing.T) {
 	t.Helper()
+	if realWebView2Off(os.Getenv) {
+		t.Skipf("real WebView2 tests are off on GitHub Actions; set %s=1 to run them", envWebView2CI)
+	}
 	if _, err := findRuntime(); err != nil {
 		t.Skipf("no usable WebView2 runtime: %v", err)
 	}
@@ -360,6 +374,26 @@ func TestPrintCancelsOtherNavigations(t *testing.T) {
 			}
 			if fonts := fontObject.Match(out); fonts != tt.wantFonts {
 				t.Fatalf("PDF has fonts = %v, want %v", fonts, tt.wantFonts)
+			}
+		})
+	}
+}
+
+func TestRealWebView2OffOnlyOnCIWithoutOptIn(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		off  bool
+	}{
+		{name: "local", env: nil, off: false},
+		{name: "local with the opt-in", env: map[string]string{envWebView2CI: "1"}, off: false},
+		{name: "GitHub Actions", env: map[string]string{"GITHUB_ACTIONS": "true"}, off: true},
+		{name: "GitHub Actions with the opt-in", env: map[string]string{"GITHUB_ACTIONS": "true", envWebView2CI: "1"}, off: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := realWebView2Off(func(k string) string { return tt.env[k] }); got != tt.off {
+				t.Fatalf("off = %v, want %v", got, tt.off)
 			}
 		})
 	}
