@@ -21,7 +21,7 @@ import (
 // err refuses the print, during runs inside it (a change of the work meanwhile).
 type fakePDF struct {
 	docs      []cvalues.Document
-	deadlines []time.Duration
+	deadlines []time.Time
 	err       error
 	during    func()
 }
@@ -29,7 +29,7 @@ type fakePDF struct {
 func (f *fakePDF) RenderPDF(ctx context.Context, doc cvalues.Document) ([]byte, error) {
 	f.docs = append(f.docs, doc)
 	if d, ok := ctx.Deadline(); ok {
-		f.deadlines = append(f.deadlines, time.Until(d))
+		f.deadlines = append(f.deadlines, d)
 	}
 	if f.during != nil {
 		f.during()
@@ -51,6 +51,9 @@ func (p nameProfiles) Load(context.Context) (*settings.Settings, error) {
 	}
 	return s, s.SetProfile(prof, t0)
 }
+
+// farDeadline is a caller's deadline later than any print's.
+var farDeadline = time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
 
 type yearClock struct{ year int }
 
@@ -97,7 +100,9 @@ func TestExportPDF(t *testing.T) {
 				t.Fatalf("a pdf before the click: %s", before.Writing.PDF)
 			}
 
-			got, err := e.svc.ExportPDF(ctx, id)
+			far, cancel := context.WithDeadline(ctx, farDeadline)
+			defer cancel()
+			got, err := e.svc.ExportPDF(far, id)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -108,7 +113,8 @@ func TestExportPDF(t *testing.T) {
 			if len(p.docs) != 1 || !reflect.DeepEqual(p.docs[0], e.renderer.docs[len(e.renderer.docs)-1]) {
 				t.Fatal("the pdf is not printed from the document of the .docx")
 			}
-			if len(p.deadlines) != 1 || p.deadlines[0] > PDFTimeout || p.deadlines[0] < PDFTimeout-10*time.Second {
+			// The print has a deadline of its own, before the caller's far one.
+			if len(p.deadlines) != 1 || !p.deadlines[0].Before(farDeadline) || PDFTimeout != 60*time.Second {
 				t.Fatalf("print deadline = %v", p.deadlines)
 			}
 			last, paper := e.shelf.files[len(e.shelf.files)-1], e.shelf.files[0]
