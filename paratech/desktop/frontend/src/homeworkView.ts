@@ -41,11 +41,11 @@ interface Look {
 }
 
 const generationLooks: Readonly<Record<GenerationState, Look>> = {
-  generating: { kind: "run", icon: "wave", label: "Готовим решение…" },
+  generating: { kind: "run", icon: "wave", label: "Готовим черновик…" },
   waitingNetwork: { kind: "net", icon: "off", label: "Ждёт интернет" },
   waitingQuota: { kind: "wait", icon: "clock", label: "Лимит обработки исчерпан" },
-  failed: { kind: "fail", icon: "warn", label: "Решение не готово" },
-  done: { kind: "ok", icon: "ok", label: "Решение готово" },
+  failed: { kind: "fail", icon: "warn", label: "Черновик не готов" },
+  done: { kind: "ok", icon: "ok", label: "Черновик готов" },
 };
 
 /**
@@ -86,7 +86,7 @@ export function draftStatusStep(
 }
 
 /** The busy label of the generate button while the core prepares a draft. */
-export const generatingLabel = "Готовим решение…";
+export const generatingLabel = "Готовим черновик…";
 
 /** The generate button and the instructions field: off while a generation goes on or the shown text forbids one. */
 export interface GenerateOffer {

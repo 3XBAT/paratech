@@ -119,7 +119,7 @@ test("every generation state has a chip; waiting and failed ones show the core's
   }
   assert.deepEqual(
     generationStates.map((state) => generationView({ state, message: "" }).label),
-    ["Готовим решение…", "Ждёт интернет", "Лимит обработки исчерпан", "Решение не готово", "Решение готово"],
+    ["Готовим черновик…", "Ждёт интернет", "Лимит обработки исчерпан", "Черновик не готов", "Черновик готов"],
   );
   const text = "Нет связи с сервисом конспектов: проверьте интернет и адрес в разделе «Подключения». Генерация продолжится сама.";
   assert.equal(generationView({ state: "waitingNetwork", message: text }).hint, text);
@@ -169,8 +169,8 @@ test("the page follows the core's generation; a new version reloads the assignme
   assert.equal(draftStatusStep({ latestVersion: 3, generation: active({ jobId: "j2" }) }, 3, "j1").follow.jobId, "j2");
 });
 
-test("while a draft is prepared, generate and the instructions are off with «Готовим решение…»", () => {
-  assert.equal(generatingLabel, "Готовим решение…");
+test("while a draft is prepared, generate and the instructions are off with «Готовим черновик…»", () => {
+  assert.equal(generatingLabel, "Готовим черновик…");
   const base = { hasDraft: true, generating: false, olderShown: false, dirty: false };
   assert.deepEqual(generateOffer(base), {
     label: "Сгенерировать заново",
@@ -554,8 +554,11 @@ test("the Go literal extractor keeps each literal whole", () => {
 });
 
 // TASK-102: the student sees «решение», never «черновик»; internal names (draft…) and comments may keep it.
-test("no user-facing text says «черновик»", () => {
-  for (const rel of sourceFiles()) {
+// TASK-186 (owner decision 2026-10-26): the homework page itself calls the quick text «Быстрый черновик»; those files are
+// exempt and pinned by the test below.
+const draftWordFiles = ["pages/HomeworkPage.tsx", "pages/HomeworkDialogs.tsx", "homeworkView.ts"];
+test("no other user-facing text says «черновик»", () => {
+  for (const rel of sourceFiles().filter((f) => !draftWordFiles.includes(f))) {
     // The one exception: the caption of the agent's answer being written (TASK-148, ADR-0026), not the homework draft.
     const text = rel === "agentView.ts" ? code(rel).replace("Ответ пишется · черновик", "") : code(rel);
     assert.doesNotMatch(text, /чернов/i, rel);
