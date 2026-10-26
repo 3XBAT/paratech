@@ -4728,7 +4728,7 @@
             "dependencies": [
                 "TASK-216"
             ],
-            "status": "pending"
+            "status": "done"
         }
     ]
 }
