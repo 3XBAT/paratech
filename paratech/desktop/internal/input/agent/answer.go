@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/answering"
@@ -10,10 +11,14 @@ import (
 )
 
 // Answerer answers a question from the student's lessons (cases/answering, TASK-118): a paid read whose answer is
-// shown only in its card (ADR-0022).
+// shown only in its card (ADR-0022). scope is the reuse scope of its key: the same question is answered once per scope.
 type Answerer interface {
-	Ask(ctx context.Context, question string, subject shared.SubjectID) (answering.Asked, error)
+	Ask(ctx context.Context, question string, subject shared.SubjectID, scope string) (answering.Asked, error)
 }
+
+// answerScope is the reuse scope of the answers of step st: its request (thread and turn). «Продолжить» replays the
+// paid answer of the request; «Повторить» is another turn, so a fresh answer (ADR-0026).
+func answerScope(st agentturn.Step) string { return fmt.Sprintf("ag:%s:%d", st.Thread, st.Turn) }
 
 // answerCards is the card of an answer_question that made an answer: the panel reads its text by ID from the core
 // (AnswerService), so neither the planner nor the step carries it.
@@ -36,7 +41,7 @@ func answerCards(c agentturn.Call, out agentturn.Outcome) []values.Card {
 func (t tools) answerQuestion(ctx context.Context, call values.Call, scope values.Scope) (values.ToolResult, []values.Ref, error) {
 	q, _ := call.Args().Query("question")
 	sub := values.SearchSubjectOf(call.Args(), scope)
-	got, err := t.answerer.Ask(ctx, string(q), shared.SubjectID(sub.ID()))
+	got, err := t.answerer.Ask(ctx, string(q), shared.SubjectID(sub.ID()), t.reuse)
 	if err != nil {
 		return values.ToolResult{}, nil, err
 	}

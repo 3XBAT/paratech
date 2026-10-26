@@ -18,6 +18,7 @@ import (
 type askedQuestion struct {
 	question string
 	subject  shared.SubjectID
+	scope    string
 }
 
 type fakeAnswerer struct {
@@ -26,8 +27,8 @@ type fakeAnswerer struct {
 	asked []askedQuestion
 }
 
-func (f *fakeAnswerer) Ask(_ context.Context, q string, s shared.SubjectID) (answering.Asked, error) {
-	f.asked = append(f.asked, askedQuestion{q, s})
+func (f *fakeAnswerer) Ask(_ context.Context, q string, s shared.SubjectID, scope string) (answering.Asked, error) {
+	f.asked = append(f.asked, askedQuestion{q, s, scope})
 	return f.got, f.err
 }
 
@@ -42,7 +43,7 @@ func madeAnswer(t *testing.T) *answer.Answer {
 	req, err := answer.NewRequest("Что такое ряд?", []answer.Excerpt{{
 		Text:   "Абсолютная сходимость: ряд сходится, если сходится ряд модулей. " + injection,
 		Source: answer.Source{Recording: "r1", Section: answer.SectionLectureText, StartMs: 60_000},
-	}})
+	}}, "ag:th1:1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,10 +122,19 @@ func TestAnswerQuestion(t *testing.T) {
 
 	// The Driver shows an answer as its card (ID only); no answer or a refusal shows none.
 	tl := newWorld(t).tools(t)
-	tl.answerer = &fakeAnswerer{got: answering.Asked{Answer: madeAnswer(t)}}
-	r := tl.run(t.Context(), agentturn.Step{Scope: inPhysics}, answerCall(t, `{"question":"Что такое ряд?"}`))
+	asker := &fakeAnswerer{got: answering.Asked{Answer: madeAnswer(t)}}
+	tl.answerer = asker
+	r := tl.run(t.Context(), agentturn.Step{Thread: "th1", Turn: 3, Scope: inPhysics}, answerCall(t, `{"question":"Что такое ряд?"}`))
 	if len(r.cards) != 1 || r.cards[0] != (values.AnswerCard{Answer: mustRef(t, values.KindAnswer, "an1")}) {
 		t.Fatalf("cards = %+v", r.cards)
+	}
+
+	// The answer is reused within the request only: the same turn asks in the same scope, another turn in another.
+	tl.run(t.Context(), agentturn.Step{Thread: "th1", Turn: 3, Scope: inPhysics}, answerCall(t, `{"question":"Что такое ряд?"}`))
+	tl.run(t.Context(), agentturn.Step{Thread: "th1", Turn: 4, Scope: inPhysics}, answerCall(t, `{"question":"Что такое ряд?"}`))
+	if len(asker.asked) != 3 || asker.asked[0].scope != "ag:th1:3" || asker.asked[1].scope != "ag:th1:3" ||
+		asker.asked[2].scope != "ag:th1:4" || tl.reuse != "" {
+		t.Fatalf("asked %+v, tools scope %q", asker.asked, tl.reuse)
 	}
 	for _, ans := range []*fakeAnswerer{{}, {err: answering.ErrNoConnection}} {
 		tl.answerer = ans

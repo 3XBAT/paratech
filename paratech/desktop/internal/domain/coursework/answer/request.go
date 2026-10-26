@@ -29,8 +29,13 @@ const (
 	// MaxOutputTokens is the output cap asked for: at most MaxClaims claims with their quotes.
 	MaxOutputTokens = 4096
 
-	// keyPrefix starts every idempotency key of the reader; the version changes with the request shape.
-	keyPrefix = "ans:v1:"
+	// MaxScopeBytes bounds the reuse scope of a request.
+	MaxScopeBytes = 64
+
+	// keyPrefix starts every idempotency key of the reader; the version changes with the request shape. v2 adds the
+	// reuse scope; keys of v1 (no scope) stay valid in stored answers.
+	keyPrefix   = "ans:v2:"
+	keyPrefixV1 = "ans:v1:"
 	// chunkPrefix starts the chunk ID of a fragment: f1, f2, ... in the order sent.
 	chunkPrefix = "f"
 )
@@ -117,12 +122,17 @@ func ParseQuestion(s string) (string, error) {
 
 // NewRequest builds the request for question (ParseQuestion) from 1..MaxFragments excerpts in the order given; the
 // chunk IDs are f1, f2, ... Each text must be valid UTF-8 without NUL, not blank, at most MaxFragmentBytes, and all
-// together at most MaxFragmentsBytes; each source must be a valid place. Errors: ErrInvalidQuestion,
-// ErrInvalidRequest.
-func NewRequest(question string, excerpts []Excerpt) (Request, error) {
+// together at most MaxFragmentsBytes; each source must be a valid place. scope is the opaque reuse scope of the key
+// (validScope): the same question about the same places is one paid answer only within one scope. Errors:
+// ErrInvalidQuestion, ErrInvalidRequest.
+func NewRequest(question string, excerpts []Excerpt, scope string) (Request, error) {
 	q, err := ParseQuestion(question)
 	if err != nil {
 		return Request{}, err
+	}
+	if !validScope(scope) {
+		return Request{}, fmt.Errorf("%w: scope must be 1-%d printable ASCII bytes without spaces", ErrInvalidRequest,
+			MaxScopeBytes)
 	}
 	if len(excerpts) == 0 || len(excerpts) > MaxFragments {
 		return Request{}, fmt.Errorf("%w: 1-%d fragments", ErrInvalidRequest, MaxFragments)
@@ -163,7 +173,8 @@ func NewRequest(question string, excerpts []Excerpt) (Request, error) {
 	}{q, wire})
 	r.data = strings.TrimSuffix(b.String(), "\n")
 
-	// The places are part of the key: the same text of another lesson is another answer.
+	// The places are part of the key: the same text of another lesson is another answer. The scope comes last, after
+	// a fixed number of parts per fragment, so it cannot pass for a place.
 	sum := sha256.New()
 	sum.Write([]byte(r.data))
 	for _, f := range r.fragments {
@@ -173,8 +184,28 @@ func NewRequest(question string, excerpts []Excerpt) (Request, error) {
 			sum.Write([]byte(part))
 		}
 	}
+	sum.Write([]byte{0})
+	sum.Write([]byte(scope))
 	r.key = fmt.Sprintf("%s%x", keyPrefix, sum.Sum(nil))
 	return r, nil
+}
+
+// validScope reports whether s is 1..MaxScopeBytes of printable ASCII without spaces.
+func validScope(s string) bool {
+	if s == "" || len(s) > MaxScopeBytes {
+		return false
+	}
+	for i := range len(s) {
+		if s[i] < 0x21 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+// validKey reports whether k is a key of the reader, of any version.
+func validKey(k string) bool {
+	return (strings.HasPrefix(k, keyPrefix) || strings.HasPrefix(k, keyPrefixV1)) && len(k) == len(keyPrefix)+64
 }
 
 // Question returns the checked question.
@@ -186,8 +217,9 @@ func (r Request) Fragments() []Fragment { return append([]Fragment(nil), r.fragm
 // UntrustedData is the JSON object the reader reads as data: {"question","fragments":[{"chunk_id","text"}]}.
 func (r Request) UntrustedData() string { return r.data }
 
-// Key is the idempotency key: a digest of the data and the places, so the same question about the same fragments is
-// replayed by the Hub without a second charge and found again in the store, and any change is a new key.
+// Key is the idempotency key: a digest of the data, the places and the scope, so the same question about the same
+// fragments in the same scope is replayed by the Hub without a second charge and found again in the store, and any
+// change is a new key.
 func (r Request) Key() string { return r.key }
 
 // IsZero reports whether r is the zero value.
