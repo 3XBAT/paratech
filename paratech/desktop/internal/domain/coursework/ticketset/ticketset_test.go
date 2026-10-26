@@ -342,7 +342,7 @@ func classified(t *testing.T, reply string) *answer.Answer {
 	req, err := answer.NewRequest("Когда ряд сходится абсолютно?", []answer.Excerpt{{
 		Text:   "Ряд сходится абсолютно, если сходится ряд модулей.",
 		Source: answer.Source{Recording: "r1", Section: answer.SectionSummary},
-	}})
+	}}, "tk:v1")
 	if err != nil {
 		t.Fatal(err)
 	}
