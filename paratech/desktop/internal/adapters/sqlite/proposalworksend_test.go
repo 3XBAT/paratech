@@ -75,9 +75,9 @@ func TestProposalWorkSendRoundTrip(t *testing.T) {
 	}
 }
 
-// Migration 32 rebuilds proposals: the rows stored before survive as they were, and going down drops only the sends
-// of a work.
-func TestMigrationToVersion32KeepsProposals(t *testing.T) {
+// Migration 33 rebuilds proposals: the rows stored before survive as they were, and going down drops only the sends
+// of a work. The rows are stored at 31, the schema before TASK-180's branch point; 32 belongs to another task.
+func TestMigrationToVersion33KeepsProposals(t *testing.T) {
 	t.Parallel() // uses a database of its own
 	ctx := context.Background()
 	db := openTest(t, func(o *Options) { o.Migrate = false })
@@ -97,8 +97,8 @@ func TestMigrationToVersion32KeepsProposals(t *testing.T) {
 		('p3', 'create_deadline_event', 'REJECTED', 'a2', 'Rivers', '', 1760983200000, 'unknown_assignment', '', '', 0, '', '', NULL, NULL, 1, 1, 2)`)
 	before := proposalRows(t, db)
 
-	if _, err := p.UpTo(ctx, 32); err != nil {
-		t.Fatalf("up to 32: %v", err)
+	if _, err := p.UpTo(ctx, 33); err != nil {
+		t.Fatalf("up to 33: %v", err)
 	}
 	if after := proposalRows(t, db); !reflect.DeepEqual(after, before) {
 		t.Fatalf("rows changed by the migration:\nbefore %v\nafter  %v", before, after)
@@ -121,8 +121,8 @@ func TestMigrationToVersion32KeepsProposals(t *testing.T) {
 	if err := repo.Save(ctx, w); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.DownTo(ctx, 31); err != nil {
-		t.Fatalf("down to 31: %v", err)
+	if _, err := p.DownTo(ctx, 32); err != nil {
+		t.Fatalf("down to 32: %v", err)
 	}
 	if after := proposalRows(t, db); !reflect.DeepEqual(after, before) {
 		t.Fatalf("rows after going down:\nbefore %v\nafter  %v", before, after)

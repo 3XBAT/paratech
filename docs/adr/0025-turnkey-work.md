@@ -138,12 +138,13 @@ it cannot do the work whole — then help instead. Everything the model says abo
   nothing stored.
 - Recipient from the settings and subject from the assignment, as the homework send. The attachment is the work's
   library file (`.docx`, a presentation `.pptx`), pinned at the proposal by its stored reference `materials/<sha256>`,
-  SHA-256 and size, and required where the writing filed it: «ДЗ», or «Входящие» for a work whose subject is none or gone.
-- At «Да» the file is checked again: changed, replaced, deleted or moved out of «ДЗ», another recipient, subject or
+  SHA-256 and size, and required where the writing filed it: «ДЗ» of the work's subject, or «Входящие» for a work whose
+  subject is none or gone (the rule `domain/library/services/filing`, shared with the filing itself).
+- At «Да» the file is checked again: changed, replaced, deleted or moved out of that place, another recipient, subject or
   format — STALE (`work_file_moved` for a move), no email. Then it is copied to `exports/sent/<proposal id>/<name>.<ext>`
   (the library name through `shared.SafeFileName`, never model text) and the copy goes through the delivery flow keyed
   `proposal:<id>` (hard rule 7: one email; an unknown outcome is reconciled, never resent).
-- Storage: migration 0032 rebuilds `proposals` (kind, `attachment_format` 'pptx', `work_id`).
+- Storage: migration 0033 rebuilds `proposals` (kind, `attachment_format` 'pptx', `work_id`).
 
 ## Consequences
 - Answers, edits and confirmation come only from `input/wails`; the agent can start a triage, nothing more.

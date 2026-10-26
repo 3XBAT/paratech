@@ -340,7 +340,7 @@ ALTER TABLE settings ADD COLUMN recording_source_app TEXT NOT NULL DEFAULT '' CH
 -- (unknown_assignment), which a foreign key would refuse; an assignment deleted later makes a confirmed proposal STALE
 -- (Recheck) and keeps an EXECUTED one as the record of what was done, while a RESTRICT would block the deletion by
 -- reprocessing for every declined or rejected proposal.
--- Rebuilt by migration 0032 (TASK-180): kinds = proposal.AllKinds, with send_work_email, the core's own send of the
+-- Rebuilt by migration 0033 (TASK-180): kinds = proposal.AllKinds, with send_work_email, the core's own send of the
 -- file of a turnkey work (work_id; never a model proposal); attachment_format ('txt', 'docx' or 'pptx', proposal.Format)
 -- is the file a send attaches: the text or Word export of a homework send ('' for sends stored before TASK-094: the
 -- text export), the .docx or .pptx of a work; '' for the other kinds.
@@ -470,7 +470,7 @@ ALTER TABLE settings ADD COLUMN student_university TEXT NOT NULL DEFAULT '' CHEC
 ALTER TABLE settings ADD COLUMN student_faculty TEXT NOT NULL DEFAULT '' CHECK (length(student_faculty) <= 200);
 ALTER TABLE settings ADD COLUMN student_city TEXT NOT NULL DEFAULT '' CHECK (length(student_city) <= 200);
 
--- proposals: attachment_format, added by 0017, is part of the table as 0032 rebuilt it (above).
+-- proposals: attachment_format, added by 0017, is part of the table as 0033 rebuilt it (above).
 
 -- recordings (migration 0018): the deletion mark (recording.Recording.MarkDeleting), set before any file or row is
 -- removed, and the found assignments to delete with the recording (a JSON array of ids). A marked recording is hidden

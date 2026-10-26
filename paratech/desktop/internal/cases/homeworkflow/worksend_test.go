@@ -311,6 +311,7 @@ func TestSendWorkStale(t *testing.T) {
 			f, _ := e.sub.SystemFolder(subject.SystemMaterials)
 			e.works.change(t, "m1", func(m *material.Material) (bool, error) { return m.Place("s1", f.ID(), t0.Add(time.Minute)) })
 		}, proposal.FormatDocx, proposal.ReasonFileMoved},
+		{"file moved to «ДЗ» of another subject", func(t *testing.T, e *workEnv) { e.moveToOtherHomework(t) }, proposal.FormatDocx, proposal.ReasonFileMoved},
 		{"recipient removed", func(_ *testing.T, e *workEnv) { e.recipient = "" }, proposal.FormatDocx, proposal.ReasonRecipientChanged},
 		{"another format shown", func(*testing.T, *workEnv) {}, proposal.FormatPptx, proposal.ReasonFormatChanged},
 	}
@@ -345,6 +346,10 @@ func TestSendWorkRejected(t *testing.T) {
 		{"work not finished", func(t *testing.T, e *workEnv) { e.addDoneWork(t, "w1", work.Source{Assignment: "a1"}, "s1", nil) }, proposal.ReasonNoArtifact},
 		{"not in ДЗ", func(t *testing.T, e *workEnv) {
 			e.works.change(t, "m1", func(m *material.Material) (bool, error) { return m.MoveToInbox(t0) })
+		}, proposal.ReasonFileMoved},
+		{"in «ДЗ» of another subject", func(t *testing.T, e *workEnv) { e.moveToOtherHomework(t) }, proposal.ReasonFileMoved},
+		{"work without a subject, file in «ДЗ» of a subject", func(t *testing.T, e *workEnv) {
+			e.addDoneWork(t, "w1", work.Source{Assignment: "a1"}, "", e.material(t, "m1"))
 		}, proposal.ReasonFileMoved},
 		{"a presentation file for a paper", func(t *testing.T, e *workEnv) {
 			m := e.addMaterial(t, "m3", "Доклад.pptx", "PK slides", material.TypePPTX)
@@ -394,8 +399,7 @@ func TestSendWorkWithoutAssignment(t *testing.T) {
 // A work without a subject keeps its paper in «Входящие»: that is where it was filed, so it may be sent.
 func TestSendWorkWithoutSubjectFromInbox(t *testing.T) {
 	e := newWorkEnv(t)
-	e.works.change(t, "m1", func(m *material.Material) (bool, error) { return m.MoveToInbox(t0) })
-	e.addDoneWork(t, "w1", work.Source{Assignment: "a1"}, "", e.material(t, "m1"))
+	e.moveToInboxWithoutSubject(t)
 	if v := e.propose(t, "w1"); v.Status != proposal.StatusValidated {
 		t.Fatalf("proposal %s %s, want VALIDATED", v.Status, v.Reason)
 	}
@@ -404,6 +408,47 @@ func TestSendWorkWithoutSubjectFromInbox(t *testing.T) {
 	if v := e.propose(t, "w1"); v.Status != proposal.StatusValidated {
 		t.Fatalf("proposal %s %s, want VALIDATED", v.Status, v.Reason)
 	}
+}
+
+// The paper of a work without a subject moved from «Входящие» into «ДЗ» of a subject after the proposal is no longer
+// where it was filed: STALE, no email.
+func TestSendWorkWithoutSubjectMovedIntoHomework(t *testing.T) {
+	ctx := context.Background()
+	e := newWorkEnv(t)
+	e.moveToInboxWithoutSubject(t)
+	v := e.propose(t, "w1")
+	f, _ := e.sub.SystemFolder(subject.SystemHomework)
+	e.works.change(t, "m1", func(m *material.Material) (bool, error) { return m.Place("s1", f.ID(), t0.Add(time.Minute)) })
+	if _, err := e.svc.ConfirmSendWork(ctx, v.ID, v.Subject, v.AttachmentFormat); !errors.Is(err, proposal.ErrStale) {
+		t.Fatalf("ConfirmSendWork = %v, want ErrStale", err)
+	}
+	if got, err := e.svc.Get(ctx, v.ID); err != nil || got.Status != proposal.StatusStale || got.Reason != proposal.ReasonFileMoved {
+		t.Fatalf("proposal %+v, %v; want STALE %s", got, err, proposal.ReasonFileMoved)
+	}
+	if n := len(e.mailer.Calls()); n != 0 {
+		t.Fatalf("%d emails from a stale send", n)
+	}
+}
+
+// moveToOtherHomework adds subject s2 and moves m1 into its «ДЗ».
+func (e *workEnv) moveToOtherHomework(t *testing.T) {
+	t.Helper()
+	other, err := subject.New(subject.Spec{ID: "s2", Name: "Физика", Semester: libvalues.SemesterOf(t0)}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.works.mu.Lock()
+	e.works.subjects = append(e.works.subjects, other)
+	e.works.mu.Unlock()
+	f, _ := other.SystemFolder(subject.SystemHomework)
+	e.works.change(t, "m1", func(m *material.Material) (bool, error) { return m.Place("s2", f.ID(), t0.Add(time.Minute)) })
+}
+
+// moveToInboxWithoutSubject leaves m1 in «Входящие» and makes w1 a work without a subject, as the library files it.
+func (e *workEnv) moveToInboxWithoutSubject(t *testing.T) {
+	t.Helper()
+	e.works.change(t, "m1", func(m *material.Material) (bool, error) { return m.MoveToInbox(t0) })
+	e.addDoneWork(t, "w1", work.Source{Assignment: "a1"}, "", e.material(t, "m1"))
 }
 
 func (e *workEnv) material(t *testing.T, id shared.MaterialID) *material.Material {

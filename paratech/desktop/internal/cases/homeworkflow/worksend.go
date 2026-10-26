@@ -9,6 +9,7 @@ import (
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/coursework/work"
 	"paratech/desktop/internal/domain/library/material"
+	"paratech/desktop/internal/domain/library/services/filing"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -164,28 +165,21 @@ func (s *Service) workFileOf(ctx context.Context, id shared.WorkID, f proposal.F
 	return workFile{digest: d, ref: ref, filed: filed, name: m.Name()}, nil
 }
 
-// filed reports whether m is where the writing of a work of subject sub filed it (library.FileHomework): in «ДЗ» of a
-// subject, or in «Входящие» when the work has no subject or its subject is gone.
+// filed reports whether m is where the writing of a work of subject sub filed it (library.FileHomework): in «ДЗ» of
+// sub, or in «Входящие» when the work has no subject or its subject is gone.
 func (s *Service) filed(ctx context.Context, m *material.Material, sub shared.SubjectID) (bool, error) {
 	subjects, err := s.works.Subjects(ctx)
 	if err != nil {
 		return false, err
 	}
-	homework := func(id shared.SubjectID) (shared.FolderID, bool) {
-		for _, x := range subjects {
-			if x.ID() == id {
-				f, ok := x.SystemFolder(subject.SystemHomework)
-				return f.ID(), ok
-			}
+	var own *subject.Subject
+	for _, x := range subjects {
+		if sub != "" && x.ID() == sub {
+			own = x
+			break
 		}
-		return "", false
 	}
-	if m.InInbox() {
-		_, kept := homework(sub)
-		return sub == "" || !kept, nil
-	}
-	folder, ok := homework(m.Subject())
-	return ok && folder == m.Folder(), nil
+	return filing.Filed(m, sub, own, subject.SystemHomework), nil
 }
 
 // copyWorkFile writes the copy cmd attaches from the stored file p pinned, unless an earlier try wrote it already. The
