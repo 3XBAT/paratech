@@ -623,8 +623,8 @@ func TestInterruptAfterAnExecutedCall(t *testing.T) {
 	if !th.Seen(created) {
 		t.Fatal("the created subject is not known to the provenance check")
 	}
-	if _, err := e.svc.Interrupt(t.Context(), SubmitInput{Turn: ref(st), Outcomes: []Outcome{okResult("zz", `{}`)}}); err == nil {
-		t.Fatal("Interrupt accepted a result of a call the Driver does not run")
+	if _, err := e.svc.Interrupt(t.Context(), SubmitInput{Turn: ref(st), Outcomes: []Outcome{okResult("zz", `{}`)}}); !errors.Is(err, thread.ErrInvalidTransition) {
+		t.Fatalf("Interrupt of the done request = %v", err)
 	}
 }
 

@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
+	"slices"
 	"sync"
 	"time"
 
 	"paratech/desktop/internal/cases/agentturn"
+	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/shared"
@@ -22,6 +25,9 @@ const (
 	opTool    = "agent: tool"
 	opTooLong = "agent: request loop over its step limit"
 	opBadCard = "agent: card dropped"
+	opNoCalls = "agent: running request without calls"
+	opPanic   = "agent: request loop panicked"
+	opIdle    = "agent: request left running without a loop"
 )
 
 // maxSubmits bounds the results one loop reports. Every Submit of a request is followed by at most one new step, so
@@ -51,6 +57,7 @@ type Turns interface {
 	Rerun(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
 	Cancel(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
 	Interrupt(ctx context.Context, in agentturn.SubmitInput) (agentturn.Step, error)
+	RecoverIdle(ctx context.Context, in agentturn.IdleInput, live func(shared.ThreadID) bool) (bool, error)
 }
 
 // Problem is why an operation on a request did not go through, as an enum (no error text reaches the panel).
@@ -135,8 +142,13 @@ type Driver struct {
 	stops map[agentturn.TurnRef]*stopping
 	// inflight cancels the calls a loop (by operation id) runs for a request, for «Стоп».
 	inflight map[agentturn.TurnRef]map[uint64]context.CancelFunc
-	wg       sync.WaitGroup
+	// loops are the threads the running loops (by operation id) act on; "" while an Ask has not named its thread.
+	loops map[uint64]shared.ThreadID
+	wg    sync.WaitGroup
 }
+
+// loopKey carries the operation id of a loop in its ctx, so its own operation can tell other loops from itself.
+type loopKey struct{}
 
 // stopping is a «Стоп» of a request: once it is set no call of the request starts. When Turns.Stop has stored the
 // request stopped (ok) the calls in flight are cut and the loop closes the step with Interrupt, which keeps the
@@ -159,6 +171,7 @@ func New(d Deps) (*Driver, error) {
 	return &Driver{
 		turns: d.Turns, sink: d.Sink, log: log, cancels: map[uint64]context.CancelFunc{},
 		stops: map[agentturn.TurnRef]*stopping{}, inflight: map[agentturn.TurnRef]map[uint64]context.CancelFunc{},
+		loops: map[uint64]shared.ThreadID{},
 		tools: tools{
 			library: d.Library, inspector: d.Inspector, answerer: d.Answerer, knowledge: d.Knowledge, activity: d.Activity, assignments: d.Assignments,
 			deliveries: d.Deliveries, journal: d.Journal, actions: d.Actions, proposals: d.Proposals,
@@ -178,10 +191,17 @@ type opMarks struct {
 // resumes clears the «Стоп» marks of the thread.
 var resumes = opMarks{clear: true}
 
-// Ask starts a request typed in the panel.
+// Ask starts a request typed in the panel. A thread found busy while no loop of this process drives it is recovered
+// once and asked again (unstick).
 func (d *Driver) Ask(ctx context.Context, in agentturn.AskInput) error {
 	at := agentturn.Step{Scope: in.Scope}
-	return d.start(ctx, at, opMarks{}, func(ctx context.Context) (agentturn.Step, error) { return d.turns.Ask(ctx, in) })
+	return d.start(ctx, at, opMarks{}, func(ctx context.Context) (agentturn.Step, error) {
+		st, err := d.turns.Ask(ctx, in)
+		if d.unstick(ctx, err, agentturn.IdleInput{Scope: in.Scope}) {
+			st, err = d.turns.Ask(ctx, in)
+		}
+		return st, err
+	})
 }
 
 // ApprovePlan is «Да» on the plan card.
@@ -242,11 +262,60 @@ func (d *Driver) Restart(ctx context.Context, ref agentturn.TurnRef) error {
 }
 
 // Rerun is «Повторить» of the last finished or stopped request: a new request with the same text and scope. Refused
-// as busy while a loop of the thread still runs calls (an action finishing after «Стоп»).
+// as busy while a loop of the thread still runs calls (an action finishing after «Стоп»); a request left running with
+// no loop is recovered once and repeated (unstick).
 func (d *Driver) Rerun(ctx context.Context, ref agentturn.TurnRef) error {
 	return d.start(ctx, stepAt(ref), resumes, func(ctx context.Context) (agentturn.Step, error) {
-		return d.turns.Rerun(ctx, ref)
+		st, err := d.turns.Rerun(ctx, ref)
+		if d.unstick(ctx, err, agentturn.IdleInput{Thread: ref.Thread}) {
+			st, err = d.turns.Rerun(ctx, ref)
+		}
+		return st, err
 	})
+}
+
+// unstick is the safety net of TASK-171: an operation refused because the thread's request is PLANNING or EXECUTING
+// while no other loop of this process drives the thread (a loop that ended without closing it) stops that request as
+// Recover does at start, and reports true so the operation runs once more. With a live loop it stays busy.
+func (d *Driver) unstick(ctx context.Context, err error, in agentturn.IdleInput) bool {
+	if !errors.Is(err, thread.ErrTurnInProgress) {
+		return false
+	}
+	self, ok := ctx.Value(loopKey{}).(uint64)
+	if !ok {
+		return false
+	}
+	stopped, rerr := d.turns.RecoverIdle(ctx, in, func(th shared.ThreadID) bool { return d.liveOther(self, th) })
+	if rerr != nil {
+		if in.Thread != "" {
+			d.log.WarnContext(ctx, opIdle, "thread", in.Thread.String(), "err", rerr)
+		} else {
+			d.log.WarnContext(ctx, opIdle, "err", rerr) // an Ask: only its scope names the thread
+		}
+		return false
+	}
+	return stopped // the use case logs the request it stopped
+}
+
+// liveOther reports whether a loop other than self acts on thread th, or may (an Ask that has not named its thread).
+func (d *Driver) liveOther(self uint64, th shared.ThreadID) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for id, t := range d.loops {
+		if id != self && (t == th || t == "") {
+			return true
+		}
+	}
+	return false
+}
+
+// track records the thread loop id acts on.
+func (d *Driver) track(id uint64, th shared.ThreadID) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, ok := d.loops[id]; ok {
+		d.loops[id] = th
+	}
 }
 
 // Cancel is «Отмена»: the request ends.
@@ -303,6 +372,8 @@ func (d *Driver) start(ctx context.Context, at agentturn.Step, marks opMarks, op
 	id := d.next
 	d.next++
 	d.cancels[id] = cancel
+	d.loops[id] = at.Thread
+	ctx = context.WithValue(ctx, loopKey{}, id)
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
@@ -380,13 +451,41 @@ func (d *Driver) forget(id uint64) {
 		cancel()
 		delete(d.cancels, id)
 	}
+	delete(d.loops, id)
 }
 
 // run is the loop of operation id: show the step, run its calls, report their results, until no call is left. at is
 // the request the operation acts on; it names the request in an update of a failed operation.
+// No path leaves a request running without this loop (TASK-171): a failed Submit, a panic and a running step without
+// calls close the request through Interrupt.
 func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(ctx context.Context) (agentturn.Step, error)) {
+	var (
+		release func()              // set while the calls of a step are in flight
+		calls   []agentturn.Call    // the calls of the last step run
+		got     []agentturn.Outcome // their outcomes until a Submit stored them
+	)
+	defer func() {
+		if r := recover(); r != nil {
+			d.log.ErrorContext(ctx, opPanic, "thread", at.Thread.String(), "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
+			d.closeLeft(ctx, at, calls, got, ProblemFailed)
+		}
+		if release != nil {
+			release()
+		}
+	}()
+
 	st, err := op(ctx)
+	submitted := false
 	for submits := 0; ; submits++ {
+		if st.Thread != "" {
+			d.track(id, st.Thread)
+		}
+		if err != nil && submitted && !errors.Is(err, agentturn.ErrStaleTurn) && (st.Thread == "" || running(st.Status)) {
+			// Submit failed and the request may still run: close it, keeping the outcomes of the calls that ran.
+			d.log.WarnContext(ctx, opRequest, "thread", at.Thread.String(), "err", err)
+			d.closeLeft(ctx, at, calls, got, problemOf(err))
+			return
+		}
 		if ctx.Err() != nil {
 			// A failed Hub call already stored the request stopped; only calls handed to us need closing.
 			switch {
@@ -406,7 +505,15 @@ func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(
 			return
 		}
 		d.publish(st, ProblemNone)
+		if st.Thread != "" {
+			at = agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope}
+		}
 		if len(st.Calls) == 0 {
+			if running(st.Status) && !d.liveOther(id, st.Thread) {
+				// A broken invariant: nothing would ever run this request, and every next one would be busy.
+				d.log.ErrorContext(ctx, opNoCalls, "thread", st.Thread.String(), "status", st.Status.String())
+				d.closeLeft(ctx, at, nil, nil, ProblemNone)
+			}
 			return
 		}
 		if submits == maxSubmits {
@@ -418,20 +525,54 @@ func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(
 			return
 		}
 
-		callCtx, release := d.callsContext(ctx, id, refOf(st))
+		var callCtx context.Context
+		callCtx, release = d.callsContext(ctx, id, refOf(st))
+		calls, got = st.Calls, nil
 		outcomes, cards, stopped := d.runCalls(ctx, callCtx, st)
+		got = outcomes
 		if len(cards) > 0 {
 			d.publish(agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, Cards: cards}, ProblemNone)
 		}
 		if ctx.Err() != nil || stopped {
 			d.interrupt(ctx, st, outcomes)
 			release()
+			release = nil
 			return
 		}
-		at = agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope}
+		submitted = true
 		st, err = d.turns.Submit(ctx, agentturn.SubmitInput{Turn: refOf(st), Outcomes: outcomes})
 		release()
+		release = nil
+		if err == nil {
+			got = nil // stored
+		}
 	}
+}
+
+// running reports whether a request runs: the planner is called or its calls wait for the Driver.
+func running(s thread.Status) bool { return s == thread.StatusPlanning || s == thread.StatusExecuting }
+
+// closeLeft closes request at that its loop leaves (a failed Submit, a panic, a running step without calls) as
+// interrupt does: the outcomes of calls that ran are kept, the other calls are not done and the request stops
+// continuable. The panel gets the closed request with problem p.
+func (d *Driver) closeLeft(ctx context.Context, at agentturn.Step, calls []agentturn.Call, outcomes []agentturn.Outcome, p Problem) {
+	ref := refOf(at)
+	if ref.Thread == "" {
+		d.publish(at, p) // an Ask that failed before its thread was stored: nothing runs
+		return
+	}
+	closed, err := d.close(ctx, ref, calls, outcomes)
+	if err != nil {
+		d.log.WarnContext(ctx, opAbandon, "thread", ref.Thread.String(), "err", err)
+		if p != ProblemNone {
+			d.publish(at, p)
+		}
+		return
+	}
+	if closed.Scope == (values.Scope{}) {
+		closed.Scope = at.Scope
+	}
+	d.publish(closed, p)
 }
 
 // runCalls runs the calls of step st in order with callCtx and returns their outcomes, the cards they add and whether
@@ -448,7 +589,7 @@ func (d *Driver) runCalls(ctx, callCtx context.Context, st agentturn.Step) ([]ag
 		if d.stopRequested(ctx, ref) {
 			return outcomes, cards, true
 		}
-		r := d.tools.run(callCtx, st, c)
+		r := d.runCall(callCtx, st, c)
 		if callCtx.Err() == nil || r.write {
 			outcomes = append(outcomes, r.out)
 			cards = append(cards, r.cards...)
@@ -462,16 +603,60 @@ func (d *Driver) runCalls(ctx, callCtx context.Context, st agentturn.Step) ([]ag
 	return outcomes, cards, ctx.Err() == nil && d.stopRequested(ctx, ref)
 }
 
+// runCall runs one call; a tool that panics answers as failed, an action or proposal as outcome_unknown (it may have
+// acted; the journal settles it), so the loop still reports the step.
+func (d *Driver) runCall(ctx context.Context, st agentturn.Step, c agentturn.Call) (r ran) {
+	defer func() {
+		if p := recover(); p != nil {
+			d.log.ErrorContext(ctx, opPanic, "tool", c.Call.Tool().String(), "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
+			write := c.Class != actionpolicy.ClassR
+			why := values.RefuseFailed
+			if write {
+				why = values.RefuseUnknown
+			}
+			r = ran{out: agentturn.Outcome{Result: values.RefusalResult(c.Call.ID(), why)}, write: write}
+		}
+	}()
+	return d.tools.run(ctx, st, c)
+}
+
 // interrupt closes a request whose calls will not run because the ctx ended or «Стоп» was stored: the outcomes of the
 // calls that ran (the actions always, journaled DONE or FAILED) are kept, the others are answered as not done, and the
 // request stops continuable («Продолжить»), as when the ctx ends during a Hub call; a «Стоп» keeps its reason.
 func (d *Driver) interrupt(ctx context.Context, st agentturn.Step, outcomes []agentturn.Outcome) {
-	stopped, err := d.turns.Interrupt(context.WithoutCancel(ctx), agentturn.SubmitInput{Turn: refOf(st), Outcomes: outcomes})
+	stopped, err := d.close(ctx, refOf(st), st.Calls, outcomes)
 	if err != nil {
 		d.log.WarnContext(ctx, opAbandon, "thread", st.Thread.String(), "err", err)
 		return
 	}
 	d.publish(stopped, ProblemNone)
+}
+
+// close is Turns.Interrupt of ref with the outcomes of calls. Should the use case refuse the outcomes, it is tried once
+// more with unknownWrites of them; a request still left open is recovered with every call outcome_unknown (unstick).
+func (d *Driver) close(ctx context.Context, ref agentturn.TurnRef, calls []agentturn.Call, outcomes []agentturn.Outcome) (agentturn.Step, error) {
+	ctx = context.WithoutCancel(ctx)
+	closed, err := d.turns.Interrupt(ctx, agentturn.SubmitInput{Turn: ref, Outcomes: outcomes})
+	if err != nil && len(outcomes) > 0 && errors.Is(err, agentturn.ErrInvalidInput) {
+		d.log.WarnContext(ctx, opAbandon, "thread", ref.Thread.String(), "err", err)
+		closed, err = d.turns.Interrupt(ctx, agentturn.SubmitInput{Turn: ref, Outcomes: unknownWrites(calls, outcomes)})
+	}
+	return closed, err
+}
+
+// unknownWrites replaces refused outcomes: an action or proposal (any call not known as a read) may have acted, so it
+// becomes outcome_unknown, which the journal settles, never not done (hard rule 7); a read is dropped (not done).
+func unknownWrites(calls []agentturn.Call, outcomes []agentturn.Outcome) []agentturn.Outcome {
+	var out []agentturn.Outcome
+	for _, o := range outcomes {
+		id := o.Result.CallID
+		i := slices.IndexFunc(calls, func(c agentturn.Call) bool { return c.Call.ID() == id })
+		if i >= 0 && calls[i].Class == actionpolicy.ClassR {
+			continue
+		}
+		out = append(out, agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseUnknown)})
+	}
+	return out
 }
 
 // publish hands the step to the panel; a card that breaks its rules is dropped, never shown.
