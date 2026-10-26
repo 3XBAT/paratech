@@ -151,7 +151,8 @@ test("lesson, waiting, deadline, done and post lines", () => {
 
   const w = waitingLine({ proposalId: "p1", kind: "send_homework_email", assignmentId: "a1", title: "Реферат", subject: "История", due: "", recipient: "teacher@example.test", createdAt: "" });
   assert.equal(w.label, "Письмо преподавателю");
-  assert.equal(w.meta, "История · → teacher@example.test");
+  assert.equal(w.subject, "История");
+  assert.equal(w.meta, "→ teacher@example.test");
   assert.equal(waitingLine({ proposalId: "p2", kind: "create_deadline_event", assignmentId: "a1", title: "ДЗ", subject: "", due: at(24), recipient: "", createdAt: "" }).meta, "до сб, 24 окт.");
   assert.equal(waitingLine({ proposalId: "p3", kind: "unknown", assignmentId: "", title: "", subject: "", due: "", recipient: "", createdAt: "" }).label, "Действие");
 

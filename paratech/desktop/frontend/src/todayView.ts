@@ -181,7 +181,9 @@ export interface WaitingLine {
   key: string;
   label: string;
   title: string;
-  /** Subject, due date or recipient: the parts that are known. */
+  /** The library subject name, "" when the assignment has none. */
+  subject: string;
+  /** Due date or recipient: the parts that are known. */
   meta: string;
   icon: "cal" | "mail" | "tasks";
 }
@@ -200,7 +202,8 @@ export function waitingLine(w: TodayWaiting): WaitingLine {
     key: w.proposalId,
     label: k.label,
     title: titleOf(w.title),
-    meta: [w.subject, dueText(w.due), recipient].filter((p) => p !== "").join(" · "),
+    subject: w.subject.trim(),
+    meta: [dueText(w.due), recipient].filter((p) => p !== "").join(" · "),
     icon: k.icon,
   };
 }
@@ -217,7 +220,7 @@ export interface DeadlineLine {
 
 export function deadlineLine(b: TodayDeadline): DeadlineLine {
   const { weekday, date } = deadlineDay(b.due);
-  return { key: b.assignmentId, weekday, date, title: titleOf(b.title), subject: b.subject, chip: daysLeftText(b.daysLeft), urgent: b.urgent };
+  return { key: b.assignmentId, weekday, date, title: titleOf(b.title), subject: b.subject.trim(), chip: daysLeftText(b.daysLeft), urgent: b.urgent };
 }
 
 export interface DoneLine {
