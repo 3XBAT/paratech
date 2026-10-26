@@ -2,6 +2,7 @@ package values
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -28,6 +29,7 @@ func TestParseCall(t *testing.T) {
 		{name: "summary of recording", tool: "make_summary", args: `{"recording":"r1"}`},
 		{name: "homework of material", tool: "find_homework", args: `{"material":"m1"}`},
 		{name: "triage upload", tool: "triage_assignment", args: `{"upload":"u1"}`},
+		{name: "triage topic", tool: "triage_assignment", args: `{"topic":"Презентация «Реформы Петра I», 10 слайдов"}`},
 		{name: "due date", tool: "edit_due", args: `{"assignment":"a1","due":"2026-11-03"}`},
 		{name: "reply text with newline", tool: "reply", args: `{"text":"Готово.\nКонспект в папке."}`},
 		{name: "cannot do", tool: "cannot_do", args: `{"your_part":["Сдать лично"],"our_part":["Черновик"]}`},
@@ -55,9 +57,18 @@ func TestParseCall(t *testing.T) {
 		{name: "short date", tool: "edit_due", args: `{"assignment":"a1","due":"2026-1-1"}`, wantErr: ErrInvalidArguments},
 		{name: "date with time", tool: "edit_due", args: `{"assignment":"a1","due":"2026-11-03T10:00"}`, wantErr: ErrInvalidArguments},
 		{name: "to before from", tool: "find_lessons", args: `{"from":"2026-10-31","to":"2026-10-01"}`, wantErr: ErrInvalidArguments},
-		// search.query is a query of up to 500 characters since catalog v2 (TASK-118); instruction stays a label.
-		{name: "label too long", tool: "generate_draft", args: `{"assignment":"a1","instruction":"` + long + `"}`, wantErr: ErrInvalidArguments},
+		// generate_draft left the catalog in v4: the planner's call is an unknown tool.
+		{name: "retired tool", tool: "generate_draft", args: `{"assignment":"a1"}`, wantErr: ErrUnknownTool},
+		{name: "name too long", tool: "create_subject", args: `{"name":"` + long + `"}`, wantErr: ErrInvalidArguments},
+		// search.query is a query of up to 500 characters since catalog v2 (TASK-118).
 		{name: "query too long", tool: "search", args: `{"query":"` + strings.Repeat("я", MaxQueryRunes+1) + `"}`, wantErr: ErrInvalidArguments},
+		// triage_assignment.topic (catalog v4) is free model text: a query, checked like one.
+		{name: "topic too long", tool: "triage_assignment", args: `{"topic":"` + strings.Repeat("я", MaxQueryRunes+1) + `"}`, wantErr: ErrInvalidArguments},
+		{name: "topic with newline", tool: "triage_assignment", args: `{"topic":"a\nb"}`, wantErr: ErrInvalidArguments},
+		{name: "topic with bidi override", tool: "triage_assignment", args: `{"topic":"a\u202eb"}`, wantErr: ErrInvalidArguments},
+		{name: "topic with html", tool: "triage_assignment", args: `{"topic":"<b>x</b>"}`, wantErr: ErrInvalidArguments},
+		{name: "blank topic", tool: "triage_assignment", args: `{"topic":"  "}`, wantErr: ErrInvalidArguments},
+		{name: "topic as list", tool: "triage_assignment", args: `{"topic":["a"]}`, wantErr: ErrInvalidArguments},
 		{name: "label with newline", tool: "search", args: `{"query":"a\nb"}`, wantErr: ErrInvalidArguments},
 		{name: "label with bidi override", tool: "search", args: `{"query":"a\u202eb"}`, wantErr: ErrInvalidArguments},
 		{name: "label with zero width", tool: "search", args: `{"query":"a\u200bb"}`, wantErr: ErrInvalidArguments},
@@ -134,15 +145,18 @@ func TestCardIDs(t *testing.T) {
 	}
 }
 
-func TestParseCallOneOfPairs(t *testing.T) {
+// TestParseCallOneOfGroups: exactly one member of a one-of group, for the pairs and the three-way group of
+// triage_assignment (catalog v4).
+func TestParseCallOneOfGroups(t *testing.T) {
 	tests := []struct {
-		tool       string
-		base, a, b string
+		tool    string
+		base    string
+		members []string
 	}{
-		{tool: "make_summary", base: ``, a: `"recording":"r1"`, b: `"material":"m1"`},
-		{tool: "find_homework", base: ``, a: `"recording":"r1"`, b: `"material":"m1"`},
-		{tool: "triage_assignment", base: ``, a: `"assignment":"a1"`, b: `"upload":"u1"`},
-		{tool: "place_upload", base: `"upload":"u1","subject":"s1"`, a: `"folder":"f1"`, b: `"lesson":"l1"`},
+		{tool: "make_summary", members: []string{`"recording":"r1"`, `"material":"m1"`}},
+		{tool: "find_homework", members: []string{`"recording":"r1"`, `"material":"m1"`}},
+		{tool: "triage_assignment", members: []string{`"assignment":"a1"`, `"upload":"u1"`, `"topic":"Реформы Петра I"`}},
+		{tool: "place_upload", base: `"upload":"u1","subject":"s1"`, members: []string{`"folder":"f1"`, `"lesson":"l1"`}},
 	}
 	join := func(parts ...string) string {
 		var keep []string
@@ -154,15 +168,20 @@ func TestParseCallOneOfPairs(t *testing.T) {
 		return "{" + strings.Join(keep, ",") + "}"
 	}
 	for _, tt := range tests {
-		cases := []struct {
+		type check struct {
 			name string
 			args string
 			ok   bool
-		}{
-			{"first only", join(tt.base, tt.a), true},
-			{"second only", join(tt.base, tt.b), true},
-			{"both", join(tt.base, tt.a, tt.b), false},
+		}
+		cases := []check{
 			{"none", join(tt.base), false},
+			{"all", join(append([]string{tt.base}, tt.members...)...), false},
+		}
+		for i, m := range tt.members {
+			cases = append(cases, check{fmt.Sprintf("only %d", i), join(tt.base, m), true})
+			for j := i + 1; j < len(tt.members); j++ {
+				cases = append(cases, check{fmt.Sprintf("%d and %d", i, j), join(tt.base, m, tt.members[j]), false})
+			}
 		}
 		for _, c := range cases {
 			t.Run(tt.tool+"/"+c.name, func(t *testing.T) {
@@ -268,7 +287,7 @@ func TestPlanSteps(t *testing.T) {
 		`{"tool":"place_upload","arguments":{"upload":"u1","subject":"s1","folder":"f1"}},` +
 		`{"tool":"make_summary","arguments":{"material":"m1"}},` +
 		`{"tool":"create_subject","arguments":{"name":"Физика"}},` +
-		`{"tool":"generate_draft","arguments":{"assignment":"a1"}},` +
+		`{"tool":"triage_assignment","arguments":{"assignment":"a1"}},` +
 		`{"tool":"create_folder","arguments":{"name":"Лекции"}},` +
 		`{"tool":"place_upload","arguments":{"upload":"u2","subject":"s1"}}],"notes":["Займёт пару минут"]}`
 	call, err := ParseCall("c1", "show_plan", args)
@@ -300,8 +319,8 @@ func TestPlanSteps(t *testing.T) {
 		{"summary of recording", "make_summary", `{"recording":"r1"}`, 1, false},
 		{"same name", "create_subject", `{"name":"Физика"}`, 2, true},
 		{"other name", "create_subject", `{"name":"Химия"}`, 2, false},
-		{"planned draft", "generate_draft", `{"assignment":"a1"}`, 3, true},
-		{"extra argument", "generate_draft", `{"assignment":"a1","instruction":"кратко"}`, 3, false},
+		{"planned triage", "triage_assignment", `{"assignment":"a1"}`, 3, true},
+		{"topic instead of the assignment", "triage_assignment", `{"topic":"Реформы Петра I"}`, 3, false},
 		{"created subject", "create_folder", `{"subject":"s9","name":"Лекции"}`, 4, true},
 		{"created subject, other name", "create_folder", `{"subject":"s9","name":"Семинары"}`, 4, false},
 		{"created folder", "place_upload", `{"upload":"u2","subject":"s1","folder":"f9"}`, 5, true},
@@ -374,6 +393,9 @@ func TestPlanSteps(t *testing.T) {
 		{"neither of one-of", `[{"tool":"make_summary"}]`},
 		{"both of one-of", `[{"tool":"make_summary","arguments":{"recording":"r1","material":"m1"}}]`},
 		{"no folder or lesson", `[{"tool":"place_upload","arguments":{"upload":"u1","subject":"s1"}}]`},
+		{"triage without a source", `[{"tool":"triage_assignment"}]`},
+		{"triage with two sources", `[{"tool":"triage_assignment","arguments":{"assignment":"a1","topic":"Эссе"}}]`},
+		{"retired tool", `[{"tool":"generate_draft","arguments":{"assignment":"a1"}}]`},
 		{"subject created later", `[{"tool":"create_folder","arguments":{"name":"X"}},{"tool":"create_subject","arguments":{"name":"Y"}}]`},
 		{"folder is not a subject", `[{"tool":"create_folder","arguments":{"subject":"s1","name":"X"}},{"tool":"create_folder","arguments":{"name":"Y"}}]`},
 	}

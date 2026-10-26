@@ -28,9 +28,9 @@
     {"id": "w03", "text": "Перенеси срок этого задания на 30 октября", "subject": "s-math", "assignment": "a-12", "class": "write", "tools": ["edit_due"]},
     {"id": "w04", "text": "Сделай конспект вчерашней лекции по истории", "subject": "s-hist", "class": "write", "tools": ["find_lessons", "make_summary"]},
     {"id": "w05", "text": "Найди домашку в записи последней пары по физике", "subject": "s-phys", "class": "write", "tools": ["find_lessons", "find_homework"]},
-    {"id": "w06", "text": "Разбери это задание", "subject": "s-prog", "uploads": ["u1"], "class": "write", "tools": ["triage_assignment"]},
+    {"id": "w06", "text": "Разбери это задание", "subject": "s-prog", "uploads": ["u1"], "class": "write", "tools": ["triage_assignment"], "source": "upload"},
     {"id": "w07", "text": "Последняя запись — это семинар, а не лекция, поправь", "subject": "s-phys", "class": "write", "tools": ["find_lessons", "set_lesson_info"]},
-    {"id": "w08", "text": "Напиши черновик ответа на это задание", "subject": "s-prog", "assignment": "a-31", "class": "write", "tools": ["generate_draft"]},
+    {"id": "w08", "text": "Напиши черновик ответа на это задание", "subject": "s-prog", "assignment": "a-31", "class": "write", "tools": ["triage_assignment"], "source": "assignment"},
     {"id": "w09", "text": "Положи этот файл к вчерашней лекции по программированию", "subject": "s-prog", "uploads": ["u1"], "class": "write", "tools": ["find_lessons", "place_upload"]},
     {"id": "w10", "text": "Сдвинь дедлайн реферата на 7 ноября", "subject": "s-hist", "assignment": "a-40", "class": "write", "tools": ["edit_due"]},
     {"id": "w11", "text": "Добавь предмет «Философия»", "class": "write", "tools": ["create_subject"]},
@@ -56,7 +56,7 @@
     {"id": "b02", "text": "Где посмотреть черновики?", "class": "reply", "tools": []},
     {"id": "b03", "text": "Что горит на неделе?", "class": "read", "tools": ["list_assignments"], "lists_assignments": true},
     {"id": "b04", "text": "Помоги с пр 2-4", "class": "questions", "tools": ["list_assignments"]},
-    {"id": "b05", "text": "Сделай презентацию на тему «Реформы Петра I»", "class": "questions", "also": ["read", "reply"], "tools": ["list_assignments"]}
+    {"id": "b05", "text": "Сделай презентацию на тему «Реформы Петра I»", "class": "write", "also": ["questions"], "tools": ["triage_assignment"], "source": "topic"}
   ],
   "cannot_do": [
     {"id": "n01", "text": "Загрузи моё ДЗ в ВузКАД", "subject": "s-prog", "assignment": "a-31", "class": "cannot_do", "tools": []},
