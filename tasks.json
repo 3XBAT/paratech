@@ -3638,7 +3638,7 @@
                 "GOOS=windows go vet ./desktop/..."
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "blocked"
         },
         {
             "id": "TASK-171",
