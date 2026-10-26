@@ -146,7 +146,7 @@ func TestFreeWorkCall(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, err := FreeWorkCall(tt.entries, tt.turn, tt.callID)
+			c, adm, err := FreeWorkCall(tt.entries, tt.turn, tt.callID)
 			if !tt.ok {
 				if !errors.Is(err, ErrUnknownCall) {
 					t.Fatalf("FreeWorkCall = %+v, %v; want ErrUnknownCall", c, err)
@@ -158,6 +158,9 @@ func TestFreeWorkCall(t *testing.T) {
 			}
 			if q, _ := c.Args().Query("topic"); c.ID() != "c1" || string(q) != "Реформы Петра I, презентация" {
 				t.Fatalf("call = %+v", c)
+			}
+			if want := (Admission{Class: actionpolicy.ClassU, Paid: true, PlanStep: -1}); adm != want {
+				t.Fatalf("admission = %+v, want %+v", adm, want)
 			}
 		})
 	}

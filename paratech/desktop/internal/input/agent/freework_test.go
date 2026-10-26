@@ -266,12 +266,25 @@ func TestFreeWorkFailures(t *testing.T) {
 	t.Run("the reader refused the key", func(t *testing.T) {
 		fw := newFreeWorld(t)
 		fw.turnkey.started, fw.turnkey.err = turnkey.Started{}, turnkey.ErrInvalidRequest
-		_, err := fw.free.FreeWork(t.Context(), card1, true, false)
-		if err == nil || errors.Is(err, shared.ErrNotFound) {
-			t.Fatalf("FreeWork = %v", err)
+		got, err := fw.free.FreeWork(t.Context(), card1, true, false)
+		if err != nil || got != (values.FreeWorkOutcome{State: values.FreeWorkFailed}) {
+			t.Fatalf("FreeWork = %+v, %v", got, err)
 		}
-		if got, err := fw.free.FreeWorkCard(t.Context(), card1); err != nil || got.State != values.FreeWorkFailed {
-			t.Fatalf("card = %+v, %v", got, err)
+		if card, err := fw.free.FreeWorkCard(t.Context(), card1); err != nil || card != got {
+			t.Fatalf("card = %+v, %v; FreeWork said %+v", card, err, got)
+		}
+	})
+	// The reader found a work of the key that this call did not create (journal FAILED): FreeWork says what the card
+	// says, never «done» with a work Undo cannot remove.
+	t.Run("an existing work", func(t *testing.T) {
+		fw := newFreeWorld(t)
+		fw.turnkey.started.Created = false
+		got, err := fw.free.FreeWork(t.Context(), card1, true, false)
+		if err != nil || got.State != values.FreeWorkFailed {
+			t.Fatalf("FreeWork = %+v, %v", got, err)
+		}
+		if card, err := fw.free.FreeWorkCard(t.Context(), card1); err != nil || card != got {
+			t.Fatalf("card = %+v, %v; FreeWork said %+v", card, err, got)
 		}
 	})
 }

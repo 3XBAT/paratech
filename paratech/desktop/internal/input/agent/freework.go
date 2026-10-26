@@ -5,12 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync"
 
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/preferences"
 	"paratech/desktop/internal/domain/agent/action"
-	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/shared"
@@ -63,8 +61,6 @@ type FreeWorks struct {
 	settings NoticeSettings
 	tools    tools
 	log      *slog.Logger
-
-	mu sync.Mutex // one «Сделать» at a time: a second click waits and finds the first one's entry
 }
 
 // NewFreeWorks checks the dependencies.
@@ -85,18 +81,18 @@ func NewFreeWorks(d FreeWorkDeps) (*FreeWorks, error) {
 // FreeWorkCard returns the state of a card. A card that names no call waiting on it in its thread (another thread's,
 // a made-up one) wraps shared.ErrNotFound.
 func (f *FreeWorks) FreeWorkCard(ctx context.Context, card values.FreeWorkCard) (values.FreeWorkOutcome, error) {
-	if _, _, err := f.call(ctx, card); err != nil {
+	if _, _, _, err := f.call(ctx, card); err != nil {
 		return values.FreeWorkOutcome{}, err
 	}
 	return f.state(ctx, card)
 }
 
 // FreeWork is the student's answer on a card: accept is «Сделать», dontShowAgain «Больше не показывать» (stored
-// first, for either answer). «Сделать» starts the triage of the topic once; a repeated one returns the same work.
-// Errors wrap shared.ErrNotFound (no such card, or its work is gone), shared.ErrServiceNotConfigured (no turnkey
+// first, for either answer). «Сделать» starts the triage of the topic once; a repeated one returns the same work. The
+// outcome is the card's state after the answer (FreeWorkCard says the same). Errors wrap shared.ErrNotFound (no such card, or its work is gone), shared.ErrServiceNotConfigured (no turnkey
 // work in this build) or are a local failure.
 func (f *FreeWorks) FreeWork(ctx context.Context, card values.FreeWorkCard, accept, dontShowAgain bool) (values.FreeWorkOutcome, error) {
-	call, th, err := f.call(ctx, card)
+	call, adm, th, err := f.call(ctx, card)
 	if err != nil {
 		return values.FreeWorkOutcome{}, err
 	}
@@ -116,40 +112,44 @@ func (f *FreeWorks) FreeWork(ctx context.Context, card values.FreeWorkCard, acce
 			return values.FreeWorkOutcome{}, fmt.Errorf("%s: %w", opFreeWork, err)
 		}
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	// No lock: the journal entry of (thread, request, call ID) makes a second «Сделать» replay the first one (Find, or
+	// Begin failing on the same key), and the reader's request key is the same call's.
 	st := agentturn.Step{Thread: card.Thread, Turn: card.Turn, Scope: scope}
-	r := f.tools.write(ctx, st, agentturn.Call{Call: call, Class: actionpolicy.ClassU, Paid: true, PlanStep: -1})
-	if why, refused := values.RefusalOf(r.out.Result); refused {
+	r := f.tools.write(ctx, st, agentturn.Call{Call: call, Class: adm.Class, Paid: adm.Paid, PlanStep: adm.PlanStep})
+	out, err := f.state(ctx, card)
+	if err != nil {
+		return values.FreeWorkOutcome{}, err
+	}
+	// Refused before anything was journaled (no such source, no turnkey work in this build): the card still waits.
+	if why, refused := values.RefusalOf(r.out.Result); refused && out.State == values.FreeWorkWaiting {
 		return values.FreeWorkOutcome{}, freeWorkError(why)
 	}
-	for _, ref := range r.out.Seen {
-		if ref.Kind() == values.KindWork {
-			return values.FreeWorkOutcome{State: values.FreeWorkDone, Work: shared.WorkID(ref.ID())}, nil
-		}
-	}
-	return values.FreeWorkOutcome{}, fmt.Errorf("%s: no work in the result", opFreeWork)
+	return out, nil
 }
 
 // call is the call card names: the thread must exist and its own stored history must hold that call waiting on the
-// card (thread.FreeWorkCall), so a card of another thread or a made-up one is not found.
-func (f *FreeWorks) call(ctx context.Context, card values.FreeWorkCard) (values.Call, *thread.Thread, error) {
+// card (thread.FreeWorkCall, which also decides how the call runs), so a card of another thread or a made-up one is
+// not found.
+func (f *FreeWorks) call(ctx context.Context, card values.FreeWorkCard) (values.Call, thread.Admission, *thread.Thread, error) {
+	fail := func(err error) (values.Call, thread.Admission, *thread.Thread, error) {
+		return values.Call{}, thread.Admission{}, nil, err
+	}
 	if err := card.Validate(); err != nil {
-		return values.Call{}, nil, fmt.Errorf("%s: %w: %w", opFreeWork, shared.ErrNotFound, err)
+		return fail(fmt.Errorf("%s: %w: %w", opFreeWork, shared.ErrNotFound, err))
 	}
 	th, err := f.threads.Get(ctx, card.Thread)
 	if err != nil {
-		return values.Call{}, nil, fmt.Errorf("%s: %w", opFreeWork, err)
+		return fail(fmt.Errorf("%s: %w", opFreeWork, err))
 	}
 	entries, err := f.history.Since(ctx, card.Thread, card.Turn, freeWorkHistory)
 	if err != nil {
-		return values.Call{}, nil, fmt.Errorf("%s: %w", opFreeWork, err)
+		return fail(fmt.Errorf("%s: %w", opFreeWork, err))
 	}
-	call, err := thread.FreeWorkCall(entries, card.Turn, card.CallID)
+	call, adm, err := thread.FreeWorkCall(entries, card.Turn, card.CallID)
 	if err != nil {
-		return values.Call{}, nil, fmt.Errorf("%s: %w: %w", opFreeWork, shared.ErrNotFound, err)
+		return fail(fmt.Errorf("%s: %w: %w", opFreeWork, shared.ErrNotFound, err))
 	}
-	return call, th, nil
+	return call, adm, th, nil
 }
 
 // state reads the card's journal entry: none is waiting.
