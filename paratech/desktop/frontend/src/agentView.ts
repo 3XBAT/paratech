@@ -132,6 +132,7 @@ export const texts = {
   send: "Отправить",
   /** Visually hidden text of the waiting dots. */
   waiting: "Запрос выполняется",
+  draftCaption: "Ответ пишется · черновик",
   removeContext: "Убрать контекст",
   offlineBanner: "Нет связи с paratech",
   empty: "Можно задать вопрос или попросить что-нибудь сделать.",

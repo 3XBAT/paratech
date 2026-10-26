@@ -109,6 +109,34 @@ func ReplyAssignments(tool, argumentsJSON string) []string {
 	return args.Assignments
 }
 
+// triageTool is the tool whose source a case may check.
+const triageTool = "triage_assignment"
+
+// TriageSources are the arguments of triage_assignment of which exactly one is given (catalog v4).
+func TriageSources() []string { return []string{"assignment", "upload", "topic"} }
+
+// TriageSource returns the one source argument a triage_assignment call gives; other tools, unreadable arguments and
+// a call with no or several sources give "".
+func TriageSource(tool, argumentsJSON string) string {
+	if tool != triageTool {
+		return ""
+	}
+	var args map[string]json.RawMessage
+	if json.Unmarshal([]byte(argumentsJSON), &args) != nil {
+		return ""
+	}
+	found := ""
+	for _, name := range TriageSources() {
+		if v, ok := args[name]; ok && string(v) != "null" {
+			if found != "" {
+				return ""
+			}
+			found = name
+		}
+	}
+	return found
+}
+
 // CardTexts returns the model texts of a card call that the student reads: reply text, plan summary and notes,
 // cannot_do parts, question texts and options. Other tools and unreadable arguments give none.
 func CardTexts(tool, argumentsJSON string) []string {

@@ -3,7 +3,7 @@
 // operations, and a failed Ask arrives with an empty threadId. So every update is applied to the request it names
 // (threadId + turn) and does not depend on what came before, except that a finished request stays finished.
 
-import type { AgentState, AskInput, CallProblem, UpdateView } from "./bindings/agent.js";
+import type { AgentState, AskInput, CallProblem, DraftView, UpdateView } from "./bindings/agent.js";
 
 /** One request in the thread: what the student typed (local) and the latest update of the core. */
 export interface Entry {
@@ -28,9 +28,11 @@ export interface PanelState {
   nextSeq: number;
   /** The Hub link; null until State answered. */
   link: AgentState | null;
+  /** Unchecked answer texts being read (agent:draft), one per (thread, turn, call), the last one winning. */
+  drafts: readonly DraftView[];
 }
 
-export const initialPanelState: PanelState = { entries: [], nextSeq: 1, link: null };
+export const initialPanelState: PanelState = { entries: [], nextSeq: 1, link: null, drafts: [] };
 
 export type PanelAction =
   | { type: "asked"; id: number; text: string; scope: AskInput }
@@ -38,6 +40,7 @@ export type PanelAction =
   | { type: "rerunAsked"; from: { threadId: string; turn: number; text: string; scope: AskInput | null } }
   | { type: "rerunRefused"; key: string }
   | { type: "update"; update: UpdateView }
+  | { type: "draft"; draft: DraftView }
   | { type: "history"; requests: readonly UpdateView[] }
   | { type: "link"; link: AgentState };
 
@@ -67,7 +70,59 @@ function pendingLocal(entries: readonly Entry[], scope: string): Entry | undefin
   );
 }
 
+/**
+ * An update that ends the draft of its request: anything but a step of progress or a problem-only update (a refused
+ * button). A failed read emits no event of its own, so every other update is taken to clear.
+ */
+function clearsDrafts(u: UpdateView): boolean {
+  return u.threadId !== "" && !u.progress && !(u.status === "" && u.cards.length === 0);
+}
+
 function applyUpdate(s: PanelState, u: UpdateView): PanelState {
+  const next = applyUpdateEntries(s, u);
+  if (u.threadId === "") {
+    return next;
+  }
+  // Older turns of the thread are over; the own turn's drafts end only with a clearing update.
+  const drop = (d: DraftView) => d.threadId === u.threadId && (d.turn < u.turn || (clearsDrafts(u) && d.turn === u.turn));
+  if (!next.drafts.some(drop)) {
+    return next;
+  }
+  return { ...next, drafts: next.drafts.filter((d) => !drop(d)) };
+}
+
+/** The newest turn the thread has shown or been told about, -1 if none. */
+function currentTurn(s: PanelState, threadId: string): number {
+  return s.entries.reduce((m, e) => (e.threadId === threadId ? Math.max(m, e.turn) : m), -1);
+}
+
+function applyDraft(s: PanelState, d: DraftView): PanelState {
+  const cur = currentTurn(s, d.threadId);
+  // Stale: an older turn than the request's current one. Unknown threads are kept (the update may be a moment behind).
+  if (d.threadId === "" || d.turn < cur) {
+    return s;
+  }
+  const own = s.entries.find((e) => e.threadId === d.threadId && e.turn === d.turn);
+  // A finished request has no draft: a late event must not outlive the end.
+  // Any non-running status (done, stopped, failed, cancelled) means the same.
+  if (own?.update && own.update.status !== "" && own.update.status !== "PLANNING" && own.update.status !== "EXECUTING") {
+    return s;
+  }
+  const same = (x: DraftView) => x.threadId === d.threadId && x.turn === d.turn && x.callId === d.callId;
+  // A newer turn drops the older drafts of its thread; a call already shown keeps its position.
+  const kept = s.drafts.filter((x) => !(x.threadId === d.threadId && x.turn < d.turn));
+  return { ...s, drafts: kept.some(same) ? kept.map((x) => (same(x) ? d : x)) : [...kept, d] };
+}
+
+/** The drafts shown under a request, in arrival order. */
+export function draftsFor(s: PanelState, e: Entry): DraftView[] {
+  if (e.threadId === "") {
+    return [];
+  }
+  return s.drafts.filter((d) => d.threadId === e.threadId && d.turn === e.turn && d.texts.length > 0);
+}
+
+function applyUpdateEntries(s: PanelState, u: UpdateView): PanelState {
   if (u.threadId === "") {
     // A failed Ask: the core never named a thread, so the scope is all there is to match.
     const sc = scopeKey(u);
@@ -163,6 +218,8 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
       return { ...s, entries: s.entries.filter((x) => !(x.key === a.key && x.update === null)) };
     case "update":
       return applyUpdate(s, a.update);
+    case "draft":
+      return applyDraft(s, a.draft);
     case "history":
       return a.requests.reduce(
         (acc, u) => (acc.entries.some((e) => e.threadId === u.threadId && e.turn === u.turn && e.update !== null) ? acc : applyUpdate(acc, u)),

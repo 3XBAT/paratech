@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"time"
 
 	"paratech/desktop/internal/domain/coursework/answer"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
@@ -46,7 +47,8 @@ func New(d Deps) (*Service, error) {
 // citations are checked (answer.New) and the answer is stored. The same question about the same fragments in the same
 // reuse scope (answer.NewRequest: e.g. one agent request) returns the stored answer without asking again; another
 // scope asks afresh. No matching passage: Asked without an answer, nothing asked. A non-nil drafts gets the claim texts
-// of the output while it is read; the draft is never stored, returned or checked, only the whole output is.
+// of the output while it is read (throttled, the last one once the read succeeded); the draft is never stored,
+// returned or checked, only the whole output is.
 //
 // Errors: ErrInvalidQuestion, ErrNoConnection (asking again later repeats the same key, free if the Hub answered),
 // ErrQuota, ErrReaderRefused, ErrUnavailable (also for an invalid scope: the caller's bug, not the student's input),
@@ -82,9 +84,18 @@ func (s *Service) Ask(ctx context.Context, question string, subject shared.Subje
 	if got, ok, err := s.find(ctx, req.Key()); err != nil || ok {
 		return got, err
 	}
-	raw, err := s.reader.AnswerQuestion(ctx, req, draftsOf(drafts))
+	var partial func(string)
+	var dr *drafter
+	if drafts != nil {
+		dr = &drafter{sink: drafts, clock: s.clock}
+		partial = dr.partial
+	}
+	raw, err := s.reader.AnswerQuestion(ctx, req, partial)
 	switch {
 	case err == nil:
+		if dr != nil {
+			dr.flush() // a read without a result discards its text: only a whole output gets the last draft
+		}
 	case ctx.Err() != nil:
 		return Asked{}, ctx.Err()
 	case errors.Is(err, shared.ErrQuotaExceeded):
@@ -149,20 +160,45 @@ func (s *Service) find(ctx context.Context, key string) (Asked, bool, error) {
 	return Asked{Answer: a, Reused: true}, true, nil
 }
 
-// draftsOf turns the partial output into drafts for sink, passing only a changed draft; nil for no sink.
-func draftsOf(sink DraftSink) func(string) {
-	if sink == nil {
-		return nil
+// draftEvery bounds how often the partial output is scanned for its draft (answer.Draft reads it whole).
+const draftEvery = 100 * time.Millisecond
+
+// drafter turns the partial output into drafts for sink, passing only a changed draft. A scan runs when draftEvery
+// has passed since the last one or the output has doubled since, so a stream of many small deltas costs a bounded
+// number of whole scans, not one per delta (TASK-147); the output skipped meanwhile waits for flush.
+type drafter struct {
+	sink    DraftSink
+	clock   Clock
+	last    []string
+	scanned int       // length of the output at the last scan; 0 before the first
+	at      time.Time // time of the last scan
+	pending string    // the output received since the last scan, "" none
+}
+
+func (d *drafter) partial(soFar string) {
+	now := d.clock.Now()
+	if d.scanned > 0 && len(soFar) < 2*d.scanned && now.Sub(d.at) < draftEvery {
+		d.pending = soFar
+		return
 	}
-	var last []string
-	return func(soFar string) {
-		d := answer.Draft(soFar)
-		if slices.Equal(d, last) {
-			return
-		}
-		last = d
-		sink.Draft(slices.Clone(d))
+	d.scan(soFar, now)
+}
+
+// flush scans the output skipped since the last scan, so the last draft is the whole output's.
+func (d *drafter) flush() {
+	if d.pending != "" {
+		d.scan(d.pending, d.clock.Now())
 	}
+}
+
+func (d *drafter) scan(soFar string, now time.Time) {
+	d.pending, d.scanned, d.at = "", len(soFar), now
+	texts := answer.Draft(soFar)
+	if slices.Equal(texts, d.last) {
+		return
+	}
+	d.last = texts
+	d.sink.Draft(slices.Clone(texts))
 }
 
 // local wraps an error of the local store; a cancelled or timed-out ctx is returned as it is.

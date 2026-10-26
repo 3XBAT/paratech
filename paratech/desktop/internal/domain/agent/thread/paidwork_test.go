@@ -11,11 +11,11 @@ import (
 	"paratech/desktop/internal/domain/agent/values"
 )
 
-// TASK-170: paid work (generate_draft) the student did not approve. These tests pin the rule of ADR-0021 «Plan first»
-// and «Budget per request» against every split of calls the planner can choose.
+// TASK-170: paid work the student did not approve (triage_assignment; generate_draft until catalog v4). These tests pin
+// the rule of ADR-0021 «Plan first» and «Budget per request» against every split of calls the planner can choose.
 
 func draftRaw(id string, n int) values.RawCall {
-	return values.RawCall{CallID: id, Tool: "generate_draft", ArgumentsJSON: fmt.Sprintf(`{"assignment":"a%d"}`, n)}
+	return values.RawCall{CallID: id, Tool: "triage_assignment", ArgumentsJSON: fmt.Sprintf(`{"assignment":"a%d"}`, n)}
 }
 
 // observeAssignments makes a1..an known, as list_assignments results would.
@@ -215,7 +215,7 @@ func TestDraftsOfApprovedPlan(t *testing.T) {
 			if i > 1 {
 				s += `,`
 			}
-			s += fmt.Sprintf(`{"tool":"generate_draft","arguments":{"assignment":"a%d"}}`, i)
+			s += fmt.Sprintf(`{"tool":"triage_assignment","arguments":{"assignment":"a%d"}}`, i)
 		}
 		return s + `]`
 	}
@@ -234,7 +234,7 @@ func TestDraftsOfApprovedPlan(t *testing.T) {
 		if err := th.ProposePlan(planSteps(t, plan(5)), ctx, at(2)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := th.Admit(callID(t, "c1", "generate_draft", `{"assignment":"a1"}`), f, at(3)); !errors.Is(err, ErrInvalidTransition) {
+		if _, err := th.Admit(callID(t, "c1", "triage_assignment", `{"assignment":"a1"}`), f, at(3)); !errors.Is(err, ErrInvalidTransition) {
 			t.Fatalf("draft while the plan waits for «Да» = %v", err)
 		}
 		if err := th.RevisePlan(at(4)); err != nil {

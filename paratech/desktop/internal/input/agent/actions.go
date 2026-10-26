@@ -61,7 +61,8 @@ type MaterialWork interface {
 	Start(ctx context.Context, id shared.MaterialID, work homeworkflow.Work) (shared.JobID, bool, error)
 }
 
-// Drafts generates homework drafts (cases/homeworkflow).
+// Drafts generates homework drafts (cases/homeworkflow). Unused since catalog v4 (generate_draft left the agent; the
+// assignment page keeps «Быстрый черновик»).
 type Drafts interface {
 	ActiveGeneration(ctx context.Context, a shared.AssignmentID) (homeworkflow.GenerationView, bool, error)
 	Generate(ctx context.Context, a shared.AssignmentID, instruction string) (homeworkflow.GenerateResult, error)
@@ -78,8 +79,8 @@ type Tx interface {
 	Do(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
-// ActionDeps are the dependencies of Actions; every one except Materials, Turnkey and Log is required. Without
-// Materials the tools on a material answer "unavailable", without Turnkey triage_assignment does.
+// ActionDeps are the dependencies of Actions; every one except Materials, Turnkey, Drafts and Log is required.
+// Without Materials the tools on a material answer "unavailable", without Turnkey triage_assignment does.
 type ActionDeps struct {
 	Library     Library
 	Lessons     LessonInfo
@@ -87,7 +88,7 @@ type ActionDeps struct {
 	Rerunner    Rerunner
 	Materials   MaterialWork
 	Turnkey     Turnkey
-	Drafts      Drafts
+	Drafts      Drafts // ignored since catalog v4; stays until the wiring drops it
 	Jobs        Activity
 	Canceller   JobCanceller
 	Tx          Tx
@@ -105,7 +106,6 @@ type Actions struct {
 	rerunner    Rerunner
 	materials   MaterialWork
 	turnkey     Turnkey
-	drafts      Drafts
 	jobs        Activity
 	canceller   JobCanceller
 	tx          Tx
@@ -115,9 +115,9 @@ type Actions struct {
 
 // NewActions checks the dependencies.
 func NewActions(d ActionDeps) (*Actions, error) {
-	if d.Library == nil || d.Lessons == nil || d.Assignments == nil || d.Rerunner == nil || d.Drafts == nil ||
-		d.Jobs == nil || d.Canceller == nil || d.Tx == nil || d.Clock == nil {
-		return nil, fmt.Errorf("agent: actions: %w: every dependency except Log is required", ErrInvalidConfig)
+	if d.Library == nil || d.Lessons == nil || d.Assignments == nil || d.Rerunner == nil || d.Jobs == nil ||
+		d.Canceller == nil || d.Tx == nil || d.Clock == nil {
+		return nil, fmt.Errorf("agent: actions: %w: a required dependency is missing", ErrInvalidConfig)
 	}
 	log := d.Log
 	if log == nil {
@@ -125,8 +125,7 @@ func NewActions(d ActionDeps) (*Actions, error) {
 	}
 	return &Actions{
 		library: d.Library, lessons: d.Lessons, assignments: d.Assignments, rerunner: d.Rerunner, materials: d.Materials,
-		turnkey: d.Turnkey, drafts: d.Drafts,
-		jobs: d.Jobs, canceller: d.Canceller, tx: d.Tx, clock: d.Clock, log: log,
+		turnkey: d.Turnkey, jobs: d.Jobs, canceller: d.Canceller, tx: d.Tx, clock: d.Clock, log: log,
 	}, nil
 }
 
@@ -183,9 +182,12 @@ func (a *Actions) prepare(ctx context.Context, call values.Call) (prepared, bool
 		p, err = a.editDue(ctx, call)
 	case values.ToolMakeSummary, values.ToolMakeLectureText, values.ToolFindHomework:
 		p, err = a.postProcess(ctx, call)
-	case values.ToolGenerateDraft:
-		p, err = a.generateDraft(ctx, call)
 	case values.ToolTriageAssignment:
+		if call.Args().Has("topic") {
+			// A work on a free topic has no use case yet (TASK-188): "unavailable", nothing journaled or started.
+			// The topic is never logged or stored here.
+			return prepared{}, false, nil
+		}
 		p, err = a.triage(call)
 	case values.ToolWriteWork:
 		p, err = a.writeWork(ctx, call)
@@ -517,29 +519,6 @@ func (a *Actions) materialWork(tool values.Tool, id shared.MaterialID) (prepared
 			return effect{}, err
 		}
 		return jobEffect(job, created)
-	}}, nil
-}
-
-func (a *Actions) generateDraft(ctx context.Context, call values.Call) (prepared, error) {
-	aRef, _ := call.Args().ID("assignment")
-	instruction, _ := call.Args().Label("instruction")
-	id := shared.AssignmentID(aRef.ID())
-	if g, ok, err := a.drafts.ActiveGeneration(ctx, id); err != nil {
-		return prepared{}, err
-	} else if ok {
-		// A generation runs already (the student's or an earlier one): it is not this action's to undo.
-		j, err := values.NewRef(values.KindJob, string(g.JobID))
-		if err != nil {
-			return prepared{}, err
-		}
-		return prepared{noop: &values.WriteRow{Job: j}}, nil
-	}
-	return prepared{run: func(ctx context.Context) (effect, error) {
-		res, err := a.drafts.Generate(ctx, id, string(instruction))
-		if err != nil {
-			return effect{}, err
-		}
-		return jobEffect(res.JobID, res.Created)
 	}}, nil
 }
 

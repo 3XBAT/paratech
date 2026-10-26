@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // PlanStep is one planned call of a plan card: a tool and its arguments. Only ID, date, enum, label and query
 // arguments may appear, so the desktop renders the step from templates. A step carries every required argument (and one of each
-// one-of pair) except an ID of a subject or folder that an earlier step of the plan creates; such IDs are deferred. A
+// one-of group) except an ID of a subject or folder that an earlier step of the plan creates; such IDs are deferred. A
 // later call matches the step when it has the same tool and exactly the step's arguments with the same values, plus
 // only deferred IDs, so an approved step is never a wildcard.
 type PlanStep struct {
@@ -112,13 +113,17 @@ func EncodePlanSteps(steps []PlanStep) (string, error) {
 	return string(b), nil
 }
 
-// DecodePlanSteps parses stored steps with the same strict rules as the planner's plan_steps.
-func DecodePlanSteps(s string) ([]PlanStep, error) { return parsePlanSteps(json.RawMessage(s)) }
+// DecodePlanSteps parses stored steps with the same strict rules as the planner's plan_steps, except that a step may
+// name a retired tool: a plan stored under an older catalog still restores (its step can no longer be called).
+func DecodePlanSteps(s string) ([]PlanStep, error) { return decodePlanSteps(json.RawMessage(s), true) }
 
 // planStepArgTypes are the argument types a plan step may carry.
 var planStepArgTypes = []ArgType{ArgID, ArgIDs, ArgDate, ArgEnum, ArgLabel, ArgQuery}
 
-func parsePlanSteps(raw json.RawMessage) ([]PlanStep, error) {
+// parsePlanSteps parses the planner's plan_steps: current catalog tools only.
+func parsePlanSteps(raw json.RawMessage) ([]PlanStep, error) { return decodePlanSteps(raw, false) }
+
+func decodePlanSteps(raw json.RawMessage, stored bool) ([]PlanStep, error) {
 	items, err := decodeArray(raw, 1, MaxPlanSteps)
 	if err != nil {
 		return nil, err
@@ -126,7 +131,7 @@ func parsePlanSteps(raw json.RawMessage) ([]PlanStep, error) {
 	out := make([]PlanStep, 0, len(items))
 	created := map[IDKind]bool{}
 	for _, it := range items {
-		s, err := parsePlanStep(it, created)
+		s, err := parsePlanStep(it, created, stored)
 		if err != nil {
 			return nil, err
 		}
@@ -138,8 +143,8 @@ func parsePlanSteps(raw json.RawMessage) ([]PlanStep, error) {
 	return out, nil
 }
 
-// parsePlanStep parses one step; created holds the ID kinds that earlier steps create.
-func parsePlanStep(raw json.RawMessage, created map[IDKind]bool) (PlanStep, error) {
+// parsePlanStep parses one step; created holds the ID kinds that earlier steps create; stored allows a retired tool.
+func parsePlanStep(raw json.RawMessage, created map[IDKind]bool, stored bool) (PlanStep, error) {
 	fields, err := decodeObject(raw)
 	if err != nil {
 		return PlanStep{}, err
@@ -153,11 +158,14 @@ func parsePlanStep(raw json.RawMessage, created map[IDKind]bool) (PlanStep, erro
 	if err != nil {
 		return PlanStep{}, fmt.Errorf("%w: plan step tool: %w", ErrInvalidArguments, err)
 	}
-	t, err := ParseTool(name)
-	if err != nil {
-		return PlanStep{}, err
+	t := Tool(name)
+	spec, ok := specOf(t)
+	if !ok && stored {
+		spec, ok = storedSpecOf(t)
 	}
-	spec, _ := specOf(t)
+	if !ok {
+		return PlanStep{}, fmt.Errorf("%w: %q", ErrUnknownTool, name)
+	}
 	vals := map[string]argValue{}
 	if rawArgs, ok := fields[keyArguments]; ok {
 		members, err := decodeObject(rawArgs)
@@ -181,9 +189,9 @@ func parsePlanStep(raw json.RawMessage, created map[IDKind]bool) (PlanStep, erro
 		if _, ok := vals[as.Name]; ok {
 			continue
 		}
-		// Only an ID the step needs is deferred: a required one, or one of a one-of pair whose other member is
-		// absent. An optional ID the step leaves out stays out of the call, as every deferred ID must be filled in.
-		if as.Type == ArgID && created[as.Kind] && (as.Required || needsOneOf(spec, vals, as.Name)) {
+		// Only an ID the step needs is deferred: a required one, or the first of a one-of group that has no member
+		// yet. An optional ID the step leaves out stays out of the call, as every deferred ID must be filled in.
+		if as.Type == ArgID && created[as.Kind] && (as.Required || needsOneOf(spec, vals, deferred, as.Name)) {
 			deferred = append(deferred, as.Name)
 			continue
 		}
@@ -191,35 +199,24 @@ func parsePlanStep(raw json.RawMessage, created map[IDKind]bool) (PlanStep, erro
 			return PlanStep{}, fmt.Errorf("%w: plan step %s needs %s", ErrInvalidArguments, t, as.Name)
 		}
 	}
-	for _, pair := range spec.oneOf {
-		_, a := vals[pair[0]]
-		_, b := vals[pair[1]]
-		open := slices.Contains(deferred, pair[0]) || slices.Contains(deferred, pair[1])
-		if a && b || !a && !b && !open {
-			return PlanStep{}, fmt.Errorf("%w: plan step %s needs exactly one of %s and %s", ErrInvalidArguments, t,
-				pair[0], pair[1])
+	for _, group := range spec.oneOf {
+		n := given(vals, group)
+		open := slices.ContainsFunc(group, func(name string) bool { return slices.Contains(deferred, name) })
+		if n > 1 || n == 0 && !open {
+			return PlanStep{}, fmt.Errorf("%w: plan step %s needs exactly one of %s", ErrInvalidArguments, t,
+				strings.Join(group, ", "))
 		}
 	}
 	return PlanStep{tool: t, args: Args{vals: vals}, deferred: deferred}, nil
 }
 
-// needsOneOf reports whether name is in a one-of pair of spec whose other member vals lack.
-func needsOneOf(spec ToolSpec, vals map[string]argValue, name string) bool {
-	for _, pair := range spec.oneOf {
-		other := ""
-		switch name {
-		case pair[0]:
-			other = pair[1]
-		case pair[1]:
-			other = pair[0]
-		default:
-			continue
-		}
-		if _, ok := vals[other]; !ok {
-			return true
-		}
+// needsOneOf reports whether name is in a one-of group of spec of which neither vals nor deferred hold a member.
+func needsOneOf(spec ToolSpec, vals map[string]argValue, deferred []string, name string) bool {
+	group, ok := spec.oneOfGroup(name)
+	if !ok || given(vals, group) > 0 {
+		return false
 	}
-	return false
+	return !slices.ContainsFunc(group, func(n string) bool { return slices.Contains(deferred, n) })
 }
 
 // QuestionKind is the kind of a question on a Questions card.
