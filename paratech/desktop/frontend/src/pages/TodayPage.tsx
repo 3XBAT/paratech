@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { activityApi, type RecordingItem } from "../bindings/activity.js";
 import { agentConfirmApi } from "../bindings/agentConfirm.js";
+import { homeworkApi } from "../bindings/homework.js";
+import { libraryApi } from "../bindings/library.js";
 import { recordingDeleteApi } from "../bindings/recordingDelete.js";
 import { callByName } from "../bindings/runtime.js";
 import { type TodayScreen, todayApi, todayErrorText } from "../bindings/today.js";
@@ -10,6 +12,7 @@ import { useOpenSummary } from "../openSummary.js";
 import { dayTitle, newestOnly, stagesChanged, stagesKey, texts } from "../todayView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
+import { AddAssignmentDialog } from "./HomeworkDialogs.js";
 import { RecordingsPage } from "./RecordingsPage.js";
 import { AskSection, BurningSection, DoneSection, LessonsSection, PostsSection, WaitingSection } from "./TodayParts.js";
 
@@ -23,6 +26,9 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
   const activity = useMemo(() => activityApi(callByName), []);
   const calendar = useMemo(() => ({ api: agentConfirmApi(callByName), deleteApi: recordingDeleteApi(callByName) }), []);
   const openSummary = useOpenSummary();
+  const homework = useMemo(() => homeworkApi(callByName), []);
+  const library = useMemo(() => libraryApi(callByName), []);
+  const [adding, setAdding] = useState(false);
   const [all, setAll] = useState(false);
   const [screen, setScreen] = useState<TodayScreen | null>(null);
   const [error, setError] = useState("");
@@ -125,6 +131,17 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
           {error}
         </ResultLine>
       )}
+      {adding && (
+        <AddAssignmentDialog
+          api={homework}
+          library={library}
+          onClose={() => setAdding(false)}
+          onCreated={() => {
+            setAdding(false);
+            load(); // the new assignment shows in «Горит на 7 дней» when its deadline is near
+          }}
+        />
+      )}
       {screen === null && error === "" && <p className="muted">{texts.loading}</p>}
       {screen !== null && (
         <>
@@ -143,7 +160,11 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
             </div>
             <div>
               <WaitingSection waiting={screen.waiting} onOpenAssignment={props.onOpenAssignment} />
-              <BurningSection burning={screen.burning} onOpenAssignment={props.onOpenAssignment} />
+              <BurningSection
+                burning={screen.burning}
+                onOpenAssignment={props.onOpenAssignment}
+                onAdd={() => setAdding(true)}
+              />
             </div>
           </div>
         </>

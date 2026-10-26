@@ -18,16 +18,27 @@ import { Icon } from "../ui/Icon.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
 import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
 import { isDeadlineAction } from "../agentConfirmView.js";
+import { addTexts } from "../homeworkView.js";
 import { PostCalendar } from "./TodayCalendar.js";
 import { StatusChip } from "../ui/StatusChip.js";
 
-function Section(props: { title: string; count?: number; className?: string; children: ReactNode }) {
+function Section(props: { title: string; count?: number; className?: string; action?: ReactNode; children: ReactNode }) {
+  const heading = (
+    <h2 className="today-h">
+      {props.title}
+      {props.count !== undefined && props.count > 0 && <span className="num today-cnt"> · {props.count}</span>}
+    </h2>
+  );
   return (
     <section className={props.className ? `today-sec ${props.className}` : "today-sec"}>
-      <h2 className="today-h">
-        {props.title}
-        {props.count !== undefined && props.count > 0 && <span className="num today-cnt"> · {props.count}</span>}
-      </h2>
+      {props.action === undefined ? (
+        heading
+      ) : (
+        <div className="today-hrow">
+          {heading}
+          {props.action}
+        </div>
+      )}
       {props.children}
     </section>
   );
@@ -184,9 +195,25 @@ export function WaitingSection(props: { waiting: readonly TodayWaiting[]; onOpen
   );
 }
 
-export function BurningSection(props: { burning: readonly TodayDeadline[]; onOpenAssignment: (id: string) => void }) {
+export function BurningSection(props: {
+  burning: readonly TodayDeadline[];
+  onOpenAssignment: (id: string) => void;
+  /** «Добавить задание» next to the title; without it the button is not offered. */
+  onAdd?: () => void;
+}) {
+  const onAdd = props.onAdd;
   return (
-    <Section title={texts.burning} count={props.burning.length}>
+    <Section
+      title={texts.burning}
+      count={props.burning.length}
+      action={
+        onAdd === undefined ? undefined : (
+          <Button size="sm" icon="plus" onClick={onAdd}>
+            {addTexts.button}
+          </Button>
+        )
+      }
+    >
       {props.burning.length === 0 ? (
         <Empty>{texts.burningEmpty}</Empty>
       ) : (

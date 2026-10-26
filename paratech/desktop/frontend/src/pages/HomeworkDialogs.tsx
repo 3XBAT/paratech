@@ -1,8 +1,29 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 // The .js extensions let the Node test runner load the compiled dialogs (test/homework.test.mjs renders them).
-import { type DeliveryItem, type HomeworkApi, type SendFormat, sendFormats, type SendPreparation } from "../bindings/homework.js";
-import { errorText, sendFormatLabels, sendRetryable, sizeText } from "../homeworkView.js";
-import { Dialog, ResultLine, Segmented } from "../ui/controls.js";
+import {
+  type AssignmentItem,
+  type DeliveryItem,
+  type HomeworkApi,
+  type SendFormat,
+  sendFormats,
+  type SendPreparation,
+} from "../bindings/homework.js";
+import type { LibraryApi, LibrarySubject } from "../bindings/library.js";
+import {
+  type AddFieldErrors,
+  type AddForm,
+  addSession,
+  addTexts,
+  emptyAddForm,
+  errorText,
+  noteMax,
+  sendFormatLabels,
+  sendRetryable,
+  sizeText,
+  titleMax,
+  validateAddForm,
+} from "../homeworkView.js";
+import { Dialog, Field, Input, ResultLine, Segmented, Select } from "../ui/controls.js";
 
 // The two dialogs that lead to an email. Each one has a single call site of its binding, in its confirm button handler
 // (test/homework.test.mjs checks it): an email goes out only after the student pressed that button (AC-14, AC-15).
@@ -135,6 +156,176 @@ export function SendDialog(props: {
           {error}
         </ResultLine>
       )}
+    </Dialog>
+  );
+}
+
+/**
+ * «Добавить задание» (ADR-0029): a small form. The requestId token is made when the form opens (the dialog is mounted
+ * only while open); a second call cannot start while one runs. onCreated gets the stored assignment, the caller
+ * refreshes its list and closes. Everything the student typed is shown as input values and text nodes only.
+ */
+export function AddAssignmentDialog(props: {
+  api: Pick<HomeworkApi, "createAssignment">;
+  library: Pick<LibraryApi, "subjects">;
+  /** Subjects known up front (tests); the dialog loads them itself otherwise. */
+  initialSubjects?: readonly LibrarySubject[];
+  onCreated: (a: AssignmentItem) => void;
+  onClose: () => void;
+}) {
+  const [session] = useState(() => addSession(() => crypto.randomUUID()));
+  const [form, setForm] = useState<AddForm>(emptyAddForm);
+  const [subjects, setSubjects] = useState<readonly LibrarySubject[]>(props.initialSubjects ?? []);
+  const [subjectsFailed, setSubjectsFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [errors, setErrors] = useState<AddFieldErrors>({});
+  const [general, setGeneral] = useState("");
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    if (props.initialSubjects === undefined) {
+      props.library.subjects().then(
+        (s) => mounted.current && setSubjects(s),
+        () => mounted.current && setSubjectsFailed(true),
+      );
+    }
+    return () => {
+      mounted.current = false;
+    };
+    // The subjects are read once, when the form opens.
+  }, []);
+
+  function change(patch: Partial<AddForm>, field?: keyof AddFieldErrors) {
+    session.edited();
+    setForm((f) => ({ ...f, ...patch }));
+    setGeneral("");
+    if (field !== undefined) {
+      setErrors((e) => ({ ...e, [field]: undefined }));
+    }
+  }
+
+  async function submit() {
+    if (busy) {
+      return;
+    }
+    const local = validateAddForm(form);
+    setErrors(local);
+    setGeneral("");
+    if (Object.keys(local).length > 0) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const out = await session.submit(props.api, form);
+      if (out === null || !mounted.current) {
+        return;
+      }
+      if (out.created !== null) {
+        props.onCreated(out.created);
+        return;
+      }
+      setErrors(out.fieldErrors);
+      setGeneral(out.general);
+    } catch (err) {
+      if (mounted.current) {
+        setGeneral(errorText(err));
+      }
+    } finally {
+      if (mounted.current) {
+        setBusy(false);
+      }
+    }
+  }
+
+  return (
+    <Dialog
+      open
+      title={addTexts.title}
+      confirmLabel={busy ? addTexts.adding : addTexts.add}
+      cancelLabel={addTexts.cancel}
+      confirmDisabled={busy}
+      cancelDisabled={busy}
+      onConfirm={() => void submit()}
+      onCancel={props.onClose}
+    >
+      <div className="hw-add">
+        <Field label={addTexts.what} error={errors.title}>
+          {(id) => (
+            <Input
+              id={id}
+              value={form.title}
+              maxLength={titleMax}
+              disabled={busy}
+              aria-invalid={errors.title !== undefined}
+              onChange={(e) => change({ title: e.target.value }, "title")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  void submit();
+                }
+              }}
+            />
+          )}
+        </Field>
+        <Field label={addTexts.subject} hint={subjectsFailed ? addTexts.subjectsFailed : undefined}>
+          {(id) => (
+            <Select id={id} value={form.subjectId} disabled={busy} onChange={(e) => change({ subjectId: e.target.value })}>
+              <option value="">{addTexts.noSubject}</option>
+              {subjects.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+        <div className="hw-add-due">
+          <Field label={addTexts.due} error={errors.due}>
+            {(id) => (
+              <Input
+                id={id}
+                type="date"
+                value={form.date}
+                disabled={busy}
+                aria-invalid={errors.due !== undefined}
+                onChange={(e) => change({ date: e.target.value }, "due")}
+              />
+            )}
+          </Field>
+          <Field label={addTexts.time} hint={addTexts.timeHint} error={errors.time}>
+            {(id) => (
+              <Input
+                id={id}
+                type="time"
+                value={form.time}
+                disabled={busy}
+                aria-invalid={errors.time !== undefined}
+                onChange={(e) => change({ time: e.target.value }, "time")}
+              />
+            )}
+          </Field>
+        </div>
+        <Field label={addTexts.note} error={errors.note}>
+          {(id) => (
+            <textarea
+              id={id}
+              className="input hw-add-note"
+              rows={3}
+              value={form.note}
+              maxLength={noteMax}
+              disabled={busy}
+              aria-invalid={errors.note !== undefined}
+              onChange={(e) => change({ note: e.target.value }, "note")}
+            />
+          )}
+        </Field>
+        {general && (
+          <ResultLine kind="fail" role="alert">
+            {general}
+          </ResultLine>
+        )}
+      </div>
     </Dialog>
   );
 }
