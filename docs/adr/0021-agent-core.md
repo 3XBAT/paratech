@@ -89,3 +89,12 @@ is unchanged.
   rules: no-op detection, only an upload in «Входящие» is placed, the due date keeps its time of day, the lesson
   correction digest as version. Limited to the agent's actions and their compensation; anything larger goes to a use
   case.
+
+## Addendum: catalog 4 (TASK-182, owner's decision of 2026-10-26)
+- `generate_draft` is not an agent tool: the quick text draft is the student's own action («Быстрый черновик» on the
+  assignment page, next to «Сделать под ключ»). «Write/do the assignment» is `triage_assignment` → `write_work`.
+- `triage_assignment` also takes `topic` (query, ≤ 500 characters): a work on a topic without a fitting assignment;
+  the desktop takes the subject from the thread. Exactly one of `assignment | upload | topic`.
+- From catalog 4 the Hub also enforces the `one_of` groups of the catalog: a call that breaks one is an invalid
+  tool call. Catalogs 1–3 are served unchanged and leave their pairs to the desktop.
+- Saved `generate_draft` actions in the journal remain and keep their Undo; older catalogs still offer the tool.
