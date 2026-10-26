@@ -57,10 +57,11 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 		return fmt.Errorf("app: agent: %w", err)
 	}
 	// The actions and their Undo run on the same use cases as the screens; checks of a target's version and the change
-	// commit in one transaction of the local database.
+	// commit in one transaction of the local database. create_assignment and its Undo use the homework service of the
+	// screens too (ADR-0029).
 	actions, err := agentloop.NewActions(agentloop.ActionDeps{
-		Library: reads.library, Lessons: reads.knowledge, Assignments: reads.assignments, Rerunner: reads.rerunner,
-		Materials: reads.materials, Turnkey: reads.turnkey, Drafts: c.drafts, Jobs: reads.activity, Canceller: c.runner,
+		Library: reads.library, Lessons: reads.knowledge, Assignments: reads.assignments, NewAssignments: reads.assignments,
+		Rerunner: reads.rerunner, Materials: reads.materials, Turnkey: reads.turnkey, Drafts: c.drafts, Jobs: reads.activity, Canceller: c.runner,
 		Tx: c.db, Clock: e.local, Log: log,
 	})
 	if err != nil {

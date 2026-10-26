@@ -49,6 +49,13 @@ type AssignmentEdits interface {
 	EditAssignment(ctx context.Context, e homeworkflow.AssignmentEdit) (homeworkflow.AssignmentView, error)
 }
 
+// NewAssignments adds an assignment the student asked for and removes it again as the Undo of that same action
+// (cases/homeworkflow, ADR-0029). The agent has no other way to create or delete an assignment.
+type NewAssignments interface {
+	CreateAssignment(ctx context.Context, in homeworkflow.NewAssignment) (homeworkflow.AssignmentView, error)
+	RemoveCreatedAssignment(ctx context.Context, id shared.AssignmentID, expectedVersion int64) error
+}
+
 // Rerunner starts the post-processing of a recording again (cases/homeworkflow); created is false when the job of an
 // earlier start was found instead.
 type Rerunner interface {
@@ -80,21 +87,23 @@ type Tx interface {
 	Do(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
-// ActionDeps are the dependencies of Actions; every one except Materials, Turnkey, Drafts and Log is required.
-// Without Materials the tools on a material answer "unavailable", without Turnkey triage_assignment does.
+// ActionDeps are the dependencies of Actions; every one except Materials, Turnkey, NewAssignments, Drafts and Log is
+// required. Without Materials the tools on a material answer "unavailable", without Turnkey triage_assignment does,
+// without NewAssignments create_assignment does.
 type ActionDeps struct {
-	Library     Library
-	Lessons     LessonInfo
-	Assignments AssignmentEdits
-	Rerunner    Rerunner
-	Materials   MaterialWork
-	Turnkey     Turnkey
-	Drafts      Drafts // ignored since catalog v4; stays until the wiring drops it
-	Jobs        Activity
-	Canceller   JobCanceller
-	Tx          Tx
-	Clock       Clock
-	Log         *slog.Logger
+	Library        Library
+	Lessons        LessonInfo
+	Assignments    AssignmentEdits
+	NewAssignments NewAssignments
+	Rerunner       Rerunner
+	Materials      MaterialWork
+	Turnkey        Turnkey
+	Drafts         Drafts // ignored since catalog v4; stays until the wiring drops it
+	Jobs           Activity
+	Canceller      JobCanceller
+	Tx             Tx
+	Clock          Clock
+	Log            *slog.Logger
 }
 
 // Actions runs the reversible actions of the agent (class U, ADR-0021) on the use cases and is their Undo: it
@@ -104,6 +113,7 @@ type Actions struct {
 	library     Library
 	lessons     LessonInfo
 	assignments AssignmentEdits
+	added       NewAssignments
 	rerunner    Rerunner
 	materials   MaterialWork
 	turnkey     Turnkey
@@ -125,8 +135,9 @@ func NewActions(d ActionDeps) (*Actions, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Actions{
-		library: d.Library, lessons: d.Lessons, assignments: d.Assignments, rerunner: d.Rerunner, materials: d.Materials,
-		turnkey: d.Turnkey, jobs: d.Jobs, canceller: d.Canceller, tx: d.Tx, clock: d.Clock, log: log,
+		library: d.Library, lessons: d.Lessons, assignments: d.Assignments, added: d.NewAssignments, rerunner: d.Rerunner,
+		materials: d.Materials,
+		turnkey:   d.Turnkey, jobs: d.Jobs, canceller: d.Canceller, tx: d.Tx, clock: d.Clock, log: log,
 	}, nil
 }
 
@@ -155,7 +166,7 @@ type effect struct {
 	comp    action.Compensation
 	version int64
 	row     values.WriteRow
-	created values.Ref // the subject or folder a create made
+	created values.Ref // the subject, folder or assignment a create made
 	failed  bool       // the use case changed nothing (a job or a work that existed already)
 	// triage is what triage_assignment shows the planner instead of row; cards are the cards it adds.
 	triage *values.TriageRow
@@ -182,6 +193,8 @@ func (a *Actions) prepare(ctx context.Context, at origin, call values.Call) (pre
 		p, err = a.setLessonInfo(ctx, call)
 	case values.ToolEditDue:
 		p, err = a.editDue(ctx, call)
+	case values.ToolCreateAssignment:
+		p, err = a.createAssignment(at, call)
 	case values.ToolMakeSummary, values.ToolMakeLectureText, values.ToolFindHomework:
 		p, err = a.postProcess(ctx, call)
 	case values.ToolTriageAssignment:
@@ -591,6 +604,8 @@ func (a *Actions) Check(ctx context.Context, c action.Compensation) (action.Targ
 		return a.checkWork(ctx, v)
 	case action.StopWork:
 		return a.checkWriting(ctx, v)
+	case action.RemoveAssignment:
+		return a.checkAdded(ctx, v)
 	}
 	return action.Target{}, fmt.Errorf("%w: %T", action.ErrInvalidCompensation, c)
 }
@@ -612,6 +627,10 @@ func (a *Actions) Apply(ctx context.Context, c action.Compensation, expectedVers
 	}
 	if v, ok := c.(action.StopWork); ok {
 		return a.stopWork(ctx, v, expectedVersion)
+	}
+	if v, ok := c.(action.RemoveAssignment); ok {
+		// The use case removes it under its version in its own transaction; nothing is left to rebase on.
+		return 0, a.removeAdded(ctx, v, expectedVersion)
 	}
 	var after int64
 	err := a.tx.Do(ctx, func(ctx context.Context) error {
@@ -772,6 +791,8 @@ func (a *Actions) Observe(ctx context.Context, tool values.Tool, in action.Inten
 		}
 		next, ok := in.Next.(action.RestoreDue)
 		return observed(v.Version, in, ok && !next.OldDue.IsZero() && v.Due.Equal(next.OldDue)), nil
+	case values.ToolCreateAssignment:
+		return a.observeAdded(ctx, in)
 	}
 	return action.Observation{}, nil
 }

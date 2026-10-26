@@ -87,7 +87,8 @@ type AgentUpdateView struct {
 }
 
 // AgentCardView is one card; Kind says which field is set: plan, questions, progress (jobId), result (artifact,
-// "<kind>/<path>" of the artifact store), confirm (target), action_line (actionId), answer (answerId), cannot_do
+// "<kind>/<path>" of the artifact store), confirm (target), action_line (actionId; assignment for create_assignment),
+// answer (answerId), cannot_do
 // (cannotDo), reply (text and assignments), stopped (stopReason) or work (workId and outcome: questions, review,
 // helper, pending, failed or confirmed; the texts come from TurnkeyService.Work) or free_work (freeWork: the call the
 // card names, answered with AgentService.FreeWork; the page words the card itself, the topic never comes here).
@@ -103,10 +104,13 @@ type AgentCardView struct {
 	CannotDo    *AgentCannotDoView    `json:"cannotDo"`
 	Text        string                `json:"text"`
 	Assignments []AgentAssignmentView `json:"assignments"` // a reply's list; null on other cards
-	StopReason  string                `json:"stopReason"`
-	WorkID      string                `json:"workId"`
-	Outcome     string                `json:"outcome"`
-	FreeWork    *AgentFreeWorkRef     `json:"freeWork"`
+	// Assignment is the assignment an action_line of create_assignment added (ADR-0029); null on other cards and when
+	// it is gone.
+	Assignment *AgentAddedAssignmentView `json:"assignment"`
+	StopReason string                    `json:"stopReason"`
+	WorkID     string                    `json:"workId"`
+	Outcome    string                    `json:"outcome"`
+	FreeWork   *AgentFreeWorkRef         `json:"freeWork"`
 }
 
 // AgentFreeWorkRef names a free-work card «Такого задания нет — могу сделать как свободную работу» (TASK-188): the
@@ -124,6 +128,17 @@ type AgentAssignmentView struct {
 	Title     string `json:"title"`
 	SubjectID string `json:"subjectId"`
 	Due       string `json:"due"`
+}
+
+// AgentAddedAssignmentView is the assignment create_assignment added, from the local data, never from the model: its
+// title (plain text only), its library subject ("" none), its deadline date (YYYY-MM-DD, "" none) and time of day
+// (HH:MM, "" none; 23:59 when the student named no time).
+type AgentAddedAssignmentView struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	SubjectID string `json:"subjectId"`
+	Due       string `json:"due"`
+	Time      string `json:"time"`
 }
 
 // AgentRefView is a typed id: kind is subject, lesson, proposal, preview, ...
@@ -147,8 +162,8 @@ type AgentPlanStepView struct {
 }
 
 // AgentArgView is one argument of a plan step. Type is id (idKind, value), ids (idKind, values), date (value,
-// YYYY-MM-DD), enum (value), label (value: a short text, plain text only) or query (value: the student's question or
-// search text, up to 500 characters, plain text only).
+// YYYY-MM-DD), time (value, HH:MM), enum (value), label (value: a short text, plain text only) or query (value: the
+// student's question or search text, up to 500 characters, plain text only).
 type AgentArgView struct {
 	Name   string   `json:"name"`
 	Type   string   `json:"type"`
@@ -218,6 +233,11 @@ func cardView(c values.Card) (AgentCardView, bool) {
 		v.Target = &AgentRefView{Kind: string(c.Target.Kind()), ID: c.Target.ID()}
 	case values.ActionLine:
 		v.ActionID = string(c.Action)
+		if l := c.Assignment; !l.Assignment.IsZero() {
+			v.Assignment = &AgentAddedAssignmentView{
+				ID: l.Assignment.ID(), Title: l.Title, SubjectID: l.Subject.ID(), Due: l.Due.String(), Time: l.DueTime.String(),
+			}
+		}
 	case values.AnswerCard:
 		v.AnswerID = c.Answer.ID()
 	case values.CannotDoCard:
@@ -275,6 +295,10 @@ func argView(args values.Args, name string) AgentArgView {
 	}
 	if d, ok := args.Date(name); ok {
 		v.Type, v.Value = "date", d.String()
+		return v
+	}
+	if tod, ok := args.Time(name); ok {
+		v.Type, v.Value = "time", tod.String()
 		return v
 	}
 	if e, ok := args.Enum(name); ok {

@@ -6,6 +6,7 @@ import (
 
 	"paratech/desktop/internal/cases/agentjournal"
 	"paratech/desktop/internal/cases/agentturn"
+	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/knowledgebase"
 	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/cases/turnkey"
@@ -95,7 +96,12 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 		// The action is done; the entry stays PENDING and Recover settles it from its intent at the next start.
 		t.log.WarnContext(ctx, opJournal, "action", entry.ID.String(), "err", err)
 	}
-	cards := []values.Card{values.ActionLine{Action: entry.ID}}
+	line := values.ActionLine{Action: entry.ID}
+	if eff.created.Kind() == values.KindAssignment {
+		// The Driver fills its title, subject and deadline from the local data when it publishes the line.
+		line.Assignment = values.AssignmentLine{Assignment: eff.created}
+	}
+	cards := []values.Card{line}
 	if !eff.row.Job.IsZero() {
 		cards = append(cards, values.ProgressCard{Job: shared.JobID(eff.row.Job.ID())})
 	}
@@ -152,6 +158,8 @@ func (t tools) replay(ctx context.Context, c agentturn.Call, e agentjournal.Entr
 		row.Job = v.Job
 	case action.StopWork:
 		row.Job = v.Job
+	case action.RemoveAssignment:
+		row.ID, created = v.Assignment, v.Assignment
 	case action.RemoveWork:
 		tr, err := t.actions.triageReplay(ctx, v.Work)
 		if err != nil {
@@ -164,6 +172,11 @@ func (t tools) replay(ctx context.Context, c agentturn.Call, e agentjournal.Entr
 
 // refusalOf maps an error of an action's use case to the enum the planner gets (ADR-0022: never the text).
 func (t tools) refusalOf(ctx context.Context, tool values.Tool, err error) values.Refusal {
+	// The subject or lesson of a new assignment the use case does not know: an ID that passed provenance but is gone.
+	if tool == values.ToolCreateAssignment &&
+		(errors.Is(err, homeworkflow.ErrSubjectNotFound) || errors.Is(err, shared.ErrNotFound)) {
+		return values.RefuseUnknownID
+	}
 	switch {
 	case errors.Is(err, library.ErrNameTaken), errors.Is(err, library.ErrFolderTaken):
 		return values.RefuseNameTaken
