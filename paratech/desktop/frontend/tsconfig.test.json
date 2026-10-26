@@ -80,6 +80,7 @@
     "src/dropFiles.ts",
     "src/journalView.ts",
     "src/pages/SubjectsParts.tsx",
+    "src/pages/SubjectsPage.tsx",
     "src/pages/JournalParts.tsx",
     "src/ui/Rail.tsx",
     "src/ui/accent.ts",

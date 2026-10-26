@@ -4389,7 +4389,7 @@
             "dependencies": [
                 "TASK-193"
             ],
-            "status": "pending"
+            "status": "done"
         }
     ]
 }

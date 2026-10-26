@@ -252,16 +252,17 @@ test("the state of each step is the core's text, with its error, and stays visib
 
 test("the summary opens over the current section in place of the transcript, and jumps to an assignment", () => {
   const s = routeToSummary(routeToPage("homework"), "r1");
-  assert.deepEqual(s, { page: "homework", transcript: "", summary: "r1", assignment: "" });
-  assert.deepEqual(routeToTranscript(s, "r1"), { page: "homework", transcript: "r1", summary: "", assignment: "" });
+  assert.deepEqual(s, { page: "homework", transcript: "", summary: "r1", assignment: "", subject: "" });
+  assert.deepEqual(routeToTranscript(s, "r1"), { page: "homework", transcript: "r1", summary: "", assignment: "", subject: "" });
   assert.deepEqual(routeToSummary(routeToTranscript(routeToPage("recordings"), "r2"), "r2"), {
     page: "recordings",
     transcript: "",
     summary: "r2",
     assignment: "",
+    subject: "",
   });
-  assert.deepEqual(closeTranscript(s), { page: "homework", transcript: "", summary: "", assignment: "" });
-  assert.deepEqual(routeToAssignment("a1"), { page: "homework", transcript: "", summary: "", assignment: "a1" });
+  assert.deepEqual(closeTranscript(s), { page: "homework", transcript: "", summary: "", assignment: "", subject: "" });
+  assert.deepEqual(routeToAssignment("a1"), { page: "homework", transcript: "", summary: "", assignment: "a1", subject: "" });
   assert.equal(routeToPage("homework").assignment, "", "a rail click shows the list");
 });
 

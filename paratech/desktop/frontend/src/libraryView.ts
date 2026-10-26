@@ -110,6 +110,16 @@ export function sizeText(bytes: number): string {
   return `${Math.max(0, Math.round(bytes))} Б`;
 }
 
+/** The count next to a folder in the tree: «—» for an empty folder or while the files are being read. */
+export function treeCount(n: number | undefined): string {
+  return n === undefined || n === 0 ? "—" : String(n);
+}
+
+/** Files per folder of the open subject (removed files and «Входящие» do not count). */
+export function folderCounts(folders: readonly LibraryFolder[], materials: readonly LibraryMaterial[]): Map<string, number> {
+  return new Map(folders.map((f) => [f.id, filesOfFolder(materials, f.id).length]));
+}
+
 export function folderCountText(n: number): string {
   const last = n % 10;
   const tens = n % 100;
