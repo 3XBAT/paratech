@@ -6,12 +6,16 @@
 import { formatTime } from "./activityView.js";
 import {
   type ActiveGeneration,
+  type AssignmentItem,
+  type CreateAssignmentRequest,
+  type CreateAssignmentResult,
   type DeliveryItem,
   type DocxSaveResult,
   type DraftStatus,
   errorMessages,
   type GenerationState,
   type GenerationStatus,
+  type HomeworkApi,
   type SendFormat,
   type VersionSource,
 } from "./bindings/homework.js";
@@ -287,4 +291,152 @@ function errorMessage(err: unknown): string {
     return (err as { message: string }).message;
   }
   return "";
+}
+
+// The add-assignment form (TASK-219, ADR-0029). The core validates again; these checks only spare a round trip.
+// The student's text is never formatted here and is shown as text nodes only.
+
+export const titleMax = 200;
+export const noteMax = 2000;
+
+export const addTexts = {
+  button: "Добавить задание",
+  title: "Добавить задание",
+  what: "Что сделать",
+  subject: "Предмет",
+  noSubject: "Без предмета",
+  due: "Срок",
+  time: "Время",
+  timeHint: "Необязательно. Без времени срок — конец дня.",
+  note: "Заметка",
+  add: "Добавить",
+  adding: "Добавление…",
+  cancel: "Отмена",
+  subjectsFailed: "Список предметов не загрузился: задание можно добавить без предмета.",
+} as const;
+
+export interface AddForm {
+  title: string;
+  subjectId: string;
+  date: string;
+  time: string;
+  note: string;
+}
+
+export const emptyAddForm: AddForm = { title: "", subjectId: "", date: "", time: "", note: "" };
+
+export type AddFieldErrors = Partial<Record<"title" | "note" | "due" | "time", string>>;
+
+function realDate(s: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (m === null) {
+    return false;
+  }
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const t = new Date(Date.UTC(y, mo - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d;
+}
+
+/** Field errors of a form; an empty object means it can be sent. */
+export function validateAddForm(f: AddForm): AddFieldErrors {
+  const errors: AddFieldErrors = {};
+  const title = f.title.trim();
+  if (title === "") {
+    errors.title = "Укажите, что нужно сделать.";
+  } else if (/[\r\n]/.test(title)) {
+    errors.title = "Название — одна строка.";
+  } else if ([...title].length > titleMax) {
+    errors.title = `Название не длиннее ${titleMax} символов.`;
+  }
+  if ([...f.note].length > noteMax) {
+    errors.note = `Заметка не длиннее ${noteMax} символов.`;
+  }
+  if (f.date === "") {
+    errors.due = "Укажите срок.";
+  } else if (!realDate(f.date)) {
+    errors.due = "Дата указана неверно.";
+  }
+  if (f.time !== "" && !/^([01]\d|2[0-3]):[0-5]\d$/.test(f.time)) {
+    errors.time = "Время указано неверно: часы и минуты, например 09:00.";
+  }
+  return errors;
+}
+
+const fieldTexts: Readonly<Record<"title" | "note" | "due" | "time", string>> = {
+  title: "Название не подходит: одна строка, до 200 символов.",
+  note: "Заметка не подходит: до 2000 символов.",
+  due: "Срок указан неверно.",
+  time: "Время указано неверно.",
+};
+
+const problemTexts: Readonly<Record<string, string>> = {
+  subject_not_found: "Такого предмета больше нет: выберите другой или «Без предмета».",
+  lesson_not_found: "Пара не найдена: обновите страницу и повторите.",
+  failed: "Не удалось добавить задание. Попробуйте ещё раз.",
+  invalid: "Форма заполнена неверно. Проверьте поля.",
+};
+
+/** What the form shows for a reply of the core: the created assignment, or the text at a field or a general one. */
+export interface AddOutcome {
+  created: AssignmentItem | null;
+  fieldErrors: AddFieldErrors;
+  general: string;
+}
+
+/** Maps a create reply to what the form shows. */
+export function addOutcome(r: CreateAssignmentResult): AddOutcome {
+  if (r.problem === "" && r.assignment !== null) {
+    return { created: r.assignment, fieldErrors: {}, general: "" };
+  }
+  if (r.problem === "invalid" && (r.field === "title" || r.field === "note" || r.field === "due" || r.field === "time")) {
+    return { created: null, fieldErrors: { [r.field]: fieldTexts[r.field] }, general: "" };
+  }
+  return { created: null, fieldErrors: {}, general: problemTexts[r.problem] ?? problemTexts.failed };
+}
+
+/** The request of a form: trimmed title; the form binds to a subject only, never to a lesson. */
+export function addRequest(requestId: string, f: AddForm): CreateAssignmentRequest {
+  return { requestId, title: f.title.trim(), subjectId: f.subjectId, lessonId: "", date: f.date, time: f.time, note: f.note };
+}
+
+/**
+ * One open form: its requestId token and a guard against a second call while one runs. The same form sent again
+ * passes the same requestId; after a refusal an edit starts a new one (the core rejects an id with other content).
+ * A thrown error (outcome unknown) keeps the token: repeating the same form stores one assignment.
+ */
+export function addSession(newId: () => string) {
+  let requestId = newId();
+  let running = false;
+  let refused = false;
+  return {
+    get requestId() {
+      return requestId;
+    },
+    /** The student changed a field. */
+    edited() {
+      if (refused) {
+        requestId = newId();
+        refused = false;
+      }
+    },
+    /** null: a call is already running (a double click). */
+    async submit(api: Pick<HomeworkApi, "createAssignment">, f: AddForm): Promise<AddOutcome | null> {
+      if (running) {
+        return null;
+      }
+      running = true;
+      try {
+        const res = await api.createAssignment(addRequest(requestId, f));
+        const out = addOutcome(res);
+        refused = out.created === null;
+        if (res.problem === "invalid" && res.field === "requestId") {
+          requestId = newId(); // the token itself was refused: the next try needs another one
+          refused = false;
+        }
+        return out;
+      } finally {
+        running = false;
+      }
+    },
+  };
 }

@@ -6,6 +6,11 @@
 .today-sec { margin-top: 24px; }
 .today-sec:first-of-type { margin-top: 0; }
 .today-h { margin: 0 0 8px; padding: 0 16px; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--muted); }
+.today-hrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; padding-right: 16px; }
+.today-hrow .today-h { margin: 0; }
+.hw-add { display: flex; flex-direction: column; gap: 12px; min-width: min(28rem, 100%); }
+.hw-add-due { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.hw-add-note { min-height: 64px; resize: vertical; }
 .today-cnt { font-weight: 500; }
 .today-empty, .today-foot, .today-ask-hint { margin: 0; padding: 0 16px; }
 .today-ask-hint { margin-bottom: 12px; }
