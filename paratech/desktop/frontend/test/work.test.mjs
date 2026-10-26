@@ -23,7 +23,8 @@ import {
   openLabel,
   openTarget,
   openWork,
-  pollUntilStopped,
+  stopWork,
+  isStopped,
   singleFlight,
   startPolling,
   editorFromSections,
@@ -690,59 +691,67 @@ test("a refused stop shows the core's text and does not offer «Повторит
   assert.ok(renderWith(running, { error: "Другая ошибка", onError: noop }).includes("Повторить"));
 });
 
-test("polling after «Остановить» runs until writing.active is false, then stops", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
-  try {
-    const states = [true, true, false];
-    let reads = 0;
-    let done = 0;
-    const seen = [];
-    const stop = pollUntilStopped({
-      read: async () => work({ writing: writing({ step: "section", active: states[reads++] }) }),
-      onWork: (w) => seen.push(w.writing.active),
-      onDone: () => done++,
-    });
-    assert.equal(reads, 0, "the first read waits one interval");
-    for (let i = 0; i < 3; i++) {
-      mock.timers.tick(pollMs);
-      await new Promise((r) => setImmediate(r));
-    }
-    assert.deepEqual(seen, [true, true, false]);
-    assert.equal(done, 1);
-    mock.timers.tick(pollMs * 5);
-    await new Promise((r) => setImmediate(r));
-    assert.equal(reads, 3, "no more reads once inactive");
-    stop();
-  } finally {
-    mock.timers.reset();
-  }
+test("one poller serves a pending stop: it reads while active, backs off after a failure, ends once inactive", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const act = (active) => work({ version: 1, writing: writing({ step: "section", active }) });
+  assert.equal(pollDelay(act(true), false), pollMs);
+  assert.equal(pollDelay(act(true), true), retryMs);
+  assert.equal(pollDelay(act(false), false), null);
+  const { seen } = poller([act(true), new Error("net"), act(true), act(false)]);
+  await settle();
+  assert.equal(seen.reads, 1);
+  t.mock.timers.tick(pollMs);
+  await settle();
+  assert.equal(seen.reads, 2);
+  t.mock.timers.tick(pollMs);
+  await settle();
+  assert.equal(seen.reads, 2, "after a failed read the wait is retryMs");
+  t.mock.timers.tick(retryMs - pollMs);
+  await settle();
+  t.mock.timers.tick(pollMs);
+  await settle();
+  assert.equal(seen.reads, 4);
+  t.mock.timers.tick(retryMs * 3);
+  await settle();
+  assert.equal(seen.reads, 4, "no reads once inactive");
 });
 
-test("polling after «Остановить» stops on unmount and survives a failed read", async () => {
-  mock.timers.enable({ apis: ["setTimeout"] });
-  try {
-    let reads = 0;
-    const stop = pollUntilStopped({
-      read: async () => {
-        reads++;
-        throw new Error("x");
-      },
-      onWork: noop,
-      onDone: noop,
-    });
-    mock.timers.tick(pollMs);
-    await new Promise((r) => setImmediate(r));
-    assert.equal(reads, 1);
-    mock.timers.tick(pollMs);
-    await new Promise((r) => setImmediate(r));
-    assert.equal(reads, 2, "a failed read is tried again");
-    stop();
-    mock.timers.tick(pollMs * 5);
-    await new Promise((r) => setImmediate(r));
-    assert.equal(reads, 2, "unmounted: no reads");
-  } finally {
-    mock.timers.reset();
-  }
+test("a writing step without a job is «Написание остановлено» with «Продолжить», no dot, no polling", () => {
+  const stopped = work({ writing: writing({ step: "section", total: 3, done: 1, active: false }) });
+  assert.equal(isStopped(stopped), true);
+  assert.equal(isRunning(stopped), false);
+  assert.equal(pollDelay(stopped, false), null);
+  const m = workCardModel(stopped);
+  assert.equal(m.type, "stopped");
+  assert.equal(m.line, "Раздел 2 из 3");
+  const out = render(stopped);
+  assert.ok(out.includes("Написание остановлено"));
+  assert.ok(out.includes("Продолжить"));
+  assert.ok(!out.includes("ag-dot"));
+  assert.ok(!out.includes("Остановить"));
+  // A started job (active true) and an unknown flag are running.
+  assert.equal(workCardModel(work({ writing: writing({ step: "section", active: true }) })).type, "running");
+  assert.equal(isStopped(work({ writing: writing({ step: "approve", active: false }) })), false);
+});
+
+test("«Продолжить» calls StartWriting with the work id", async () => {
+  const log = [];
+  const api = { ...fakeApi(), startWriting: async (...a) => (log.push(a), work()) };
+  await retryWriting(api, "w3");
+  assert.deepEqual(log, [["w3"]]);
+});
+
+test("stopWork: the id goes to the core; watch only while the job is still active; a refusal rejects", async () => {
+  const log = [];
+  const still = work({ writing: writing({ step: "section", active: true }) });
+  const gone = work({ writing: writing({ step: "section", active: false }) });
+  const mk = (r) => ({ stopWriting: async (...a) => (log.push(a), r instanceof Error ? Promise.reject(r) : r) });
+  const a = await stopWork(mk(still), "w5");
+  assert.deepEqual(log, [["w5"]]);
+  assert.equal(a.watch, true);
+  assert.equal(a.work, still);
+  assert.equal((await stopWork(mk(gone), "w5")).watch, false);
+  await assert.rejects(stopWork(mk(new Error(notStoppedText)), "w5"), (e) => turnkeyErrorText(e) === notStoppedText);
 });
 
 test("«Открыть в Word» for a ready work, «Открыть в PowerPoint» for a presentation; the copy caption is shown", () => {

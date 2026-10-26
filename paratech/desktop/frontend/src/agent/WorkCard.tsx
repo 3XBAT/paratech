@@ -28,7 +28,7 @@ import {
   openLabel,
   openTarget,
   openWork,
-  pollUntilStopped,
+  stopWork,
   savePlanAt,
   type OpenView,
   workCardModel,
@@ -95,7 +95,7 @@ function OutlineEditor(props: { items: EditorItem[]; check: EditorCheck; disable
 
 const defaultLibrary = libraryApi(callByName);
 
-type Mode ="view" | "edit" | "revise";
+type Mode = "view" | "edit" | "revise";
 
 /**
  * The card of a work that was loaded. It owns the typed state (plan editor, note) and maps the buttons to the core; a
@@ -138,6 +138,7 @@ export function WorkBody(props: {
     await flight(async () => {
       setBusy(true);
       setError("");
+      setOpenView(null);
       try {
         await call();
       } catch (e) {
@@ -177,9 +178,9 @@ export function WorkBody(props: {
     setError(turnkeyErrorText(r.error));
   };
   const stop = async () => {
-    const w = await api.stopWriting(work.id);
-    props.onWork(w);
-    if (canStop(w)) {
+    const r = await stopWork(api, work.id);
+    props.onWork(r.work);
+    if (r.watch) {
       props.onStopped?.();
     }
   };
@@ -253,6 +254,20 @@ export function WorkBody(props: {
                 {props.stopping ? workTexts.stopping : workTexts.stop}
               </Button>
             )}
+          </div>
+        </section>
+      );
+
+    case "stopped":
+      return (
+        <section className="ag-card">
+          <h3 className="ag-card-h">{model.caption}</h3>
+          <p role="status">{model.line}</p>
+          {errorLine}
+          <div className="ag-actions">
+            <Button size="sm" variant="primary" disabled={busy} onClick={() => void run(async () => props.onWork(await retryWriting(api, work.id)))}>
+              {model.button}
+            </Button>
           </div>
         </section>
       );
@@ -450,13 +465,10 @@ export function WorkWritingCard(props: { api: TurnkeyApi; workId: string; librar
     [api, workId, running, apply],
   );
 
-  // A stop of a running step is asynchronous: read the work until writing.active is false. The cleanup stops it on unmount.
-  useEffect(() => {
-    if (!stopping) {
-      return undefined;
-    }
-    return pollUntilStopped({ read: () => api.work(workId), onWork: apply, onDone: () => setStopping(false) });
-  }, [api, workId, stopping, apply]);
+  // A stop of a running step is asynchronous, but the one poller above keeps reading while writing.active is true.
+  // «Остановка…» shows only while the job is still active; a new work resets it.
+  useEffect(() => setStopping(false), [workId]);
+  const stoppingNow = stopping && work !== null && canStop(work);
 
   return (
     <>
@@ -469,7 +481,7 @@ export function WorkWritingCard(props: { api: TurnkeyApi; workId: string; librar
           error={actionError}
           onError={onError}
           library={library}
-          stopping={stopping}
+          stopping={stoppingNow}
           onStopped={() => setStopping(true)}
         />
       )}

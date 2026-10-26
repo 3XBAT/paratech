@@ -48,6 +48,8 @@ export const workTexts = {
   retry: "Повторить",
   stop: "Остановить",
   stopping: "Остановка…",
+  stoppedCaption: "Написание остановлено",
+  resume: "Продолжить",
   openWord: "Открыть в Word",
   openPowerPoint: "Открыть в PowerPoint",
   copyNote: "Файл открывается как копия: правки в ней в приложение не возвращаются.",
@@ -83,6 +85,7 @@ export type WorkCardModel =
   | { type: "none" }
   | { type: "start"; caption: string; hint: string; button: string }
   | { type: "running"; caption: string; line: string }
+  | { type: "stopped"; caption: string; line: string; button: string }
   | { type: "approve"; caption: string; hint: string }
   | { type: "blocked"; caption: string; text: string; noteLabel: string; button: string }
   | { type: "done"; caption: string; file: { kind: string; name: string }; notice: string; sections: SectionText[] };
@@ -124,6 +127,9 @@ export function workCardModel(w: TurnkeyWork): WorkCardModel {
     case "outline":
     case "section":
     case "assemble":
+      if (wr.active === false) {
+        return { type: "stopped", caption: workTexts.stoppedCaption, line: progressLine(wr), button: workTexts.resume };
+      }
       return { type: "running", caption: workTexts.caption, line: progressLine(wr) };
     case "approve":
       return { type: "approve", caption: workTexts.approveCaption, hint: workTexts.approveHint };
@@ -154,10 +160,23 @@ export function workCardModel(w: TurnkeyWork): WorkCardModel {
 export const pollMs = 3000;
 export const retryMs = 15000;
 
-/** A step of the writing is running: the card re-reads the work until it is not. */
-export function isRunning(w: TurnkeyWork | null): boolean {
+function isWritingStep(w: TurnkeyWork | null): boolean {
   const step = w?.writing?.step;
   return step === "outline" || step === "section" || step === "assemble";
+}
+
+/**
+ * A step of the writing is running: the card re-reads the work until it is not. The core sets writing.active from the
+ * existence of a pending/running job and StartWriting enqueues it before it replies, so active=false on a writing step
+ * means the job is gone (stopped or failed), not "not started yet". Only an explicit false counts as stopped.
+ */
+export function isRunning(w: TurnkeyWork | null): boolean {
+  return isWritingStep(w) && w?.writing?.active !== false;
+}
+
+/** A writing step without a job: «Написание остановлено», offers «Продолжить». */
+export function isStopped(w: TurnkeyWork | null): boolean {
+  return isWritingStep(w) && w?.writing?.active === false;
 }
 
 /**
@@ -448,33 +467,13 @@ export const staleText = errorTexts[6];
 /** The core's refusal when a writing job could not be cancelled (TASK-178). */
 export const notStoppedText = errorTexts[7];
 
-/** While a stop is pending: reads the work every pollMs until writing.active is false. Returns the stop function. */
-export function pollUntilStopped(o: { read(): Promise<TurnkeyWork>; onWork(w: TurnkeyWork): void; onDone(): void }): () => void {
-  let alive = true;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const tick = async () => {
-    try {
-      const w = await o.read();
-      if (!alive) {
-        return;
-      }
-      o.onWork(w);
-      if (w.writing?.active !== true) {
-        o.onDone();
-        return;
-      }
-    } catch {
-      if (!alive) {
-        return;
-      }
-    }
-    timer = setTimeout(() => void tick(), pollMs);
-  };
-  timer = setTimeout(() => void tick(), pollMs);
-  return () => {
-    alive = false;
-    clearTimeout(timer);
-  };
+/**
+ * «Остановить»: the reply of the core. `watch` is true while the job is still active (a running step ends
+ * asynchronously); the single poller then keeps reading while the step runs. A refusal (ErrNotStopped) rejects.
+ */
+export async function stopWork(api: Pick<TurnkeyApi, "stopWriting">, workId: string): Promise<{ work: TurnkeyWork; watch: boolean }> {
+  const work = await api.stopWriting(workId);
+  return { work, watch: canStop(work) };
 }
 
 /** «Открыть в Word / PowerPoint»: a presentation is a .pptx, every other ready work a .docx. */
