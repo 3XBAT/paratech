@@ -19,6 +19,7 @@ import (
 	"paratech/desktop/internal/adapters/docx"
 	"paratech/desktop/internal/adapters/filestore"
 	"paratech/desktop/internal/adapters/hubclient"
+	"paratech/desktop/internal/adapters/pdf"
 	"paratech/desktop/internal/adapters/pptx"
 	"paratech/desktop/internal/adapters/random"
 	"paratech/desktop/internal/adapters/sqlite"
@@ -49,6 +50,7 @@ type turnkeyEnv struct {
 	upload  values.Ref
 	lib     *library.Service
 	jobs    *sqlite.JobRepository // the writing jobs (TASK-131); the scenario that writes runs them
+	printer *fakePrinter          // the WebView2 printer behind the real pdf renderer (TASK-198)
 }
 
 func newTurnkeyEnv(t *testing.T, assignmentText string) *turnkeyEnv {
@@ -84,14 +86,14 @@ func newTurnkeyEnv(t *testing.T, assignmentText string) *turnkeyEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.lib, e.jobs = lib, sqlite.NewJobRepository(e.db)
+	e.lib, e.jobs, e.printer = lib, sqlite.NewJobRepository(e.db), &fakePrinter{}
 	if e.works, err = turnkey.New(turnkey.Deps{
 		Works: sqlite.NewWorkRepository(e.db), Assignments: sqlite.NewAssignmentRepository(e.db), Materials: lib, Reader: hub,
 		Clock: e.clock, IDs: random.IDs{}, Log: log,
 		Writing: &turnkey.WritingDeps{
 			Writer: hub, Jobs: e.jobs, JobIDs: random.IDs{}, Profiles: sqlite.NewSettingsRepository(e.db),
-			Renderer: docx.New(), Slides: pptx.New(), Lessons: noLessonLabels{}, Shelf: lib, ModelAlias: "default",
-			MaxAttempts: 3,
+			Renderer: docx.New(), Slides: pptx.New(), PDF: pdf.NewRenderer(e.printer), Lessons: noLessonLabels{}, Shelf: lib,
+			ModelAlias: "default", MaxAttempts: 3,
 		},
 	}); err != nil {
 		t.Fatal(err)
