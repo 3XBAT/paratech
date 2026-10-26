@@ -147,10 +147,28 @@ const (
 	NoUndoCannotStop   NoUndo = "cannot_stop"
 )
 
-// Undoable reports whether «Отменить» is offered at now and, if not, why. A stale UNDOING entry is offered again (its
-// retry, StartUndo).
-func (a *Action) Undoable(now time.Time) (bool, NoUndo) {
+// UndoNeedsTarget reports whether Undoable and CheckUndo depend on the state of the target: a DONE paid job, whose
+// result may be ready by now. Other entries take the zero Target.
+func (a *Action) UndoNeedsTarget() bool {
+	_, job := a.comp.(CancelJob)
+	return a.status == StatusDone && job
+}
+
+// CheckUndo is the check before StartUndo: ErrResultReady when the paid job of a DONE entry finished (t.Final), so
+// «Отменить» is refused without touching the entry. A job that finishes after it is refused by PlanUndo.
+func (a *Action) CheckUndo(t Target) error {
+	if a.UndoNeedsTarget() && t.Final {
+		return ErrResultReady
+	}
+	return nil
+}
+
+// Undoable reports whether «Отменить» is offered at now and, if not, why; t is the state of the target when
+// UndoNeedsTarget, else the zero Target. A stale UNDOING entry is offered again (its retry, StartUndo).
+func (a *Action) Undoable(now time.Time, t Target) (bool, NoUndo) {
 	switch {
+	case a.CheckUndo(t) != nil:
+		return false, NoUndoResultReady
 	case a.status == StatusDone, a.undoStale(now):
 		return true, NoUndoNone
 	}

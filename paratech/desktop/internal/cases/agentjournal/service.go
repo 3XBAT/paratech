@@ -14,20 +14,21 @@ import (
 
 // Operation names, for error texts and the log.
 const (
-	opNew         = "agentjournal: new"
-	opFind        = "agentjournal: find"
-	opBegin       = "agentjournal: begin"
-	opFinish      = "agentjournal: finish"
-	opPropose     = "agentjournal: propose"
-	opBeginUndo   = "agentjournal: begin undo"
-	opFinishUndo  = "agentjournal: finish undo"
-	opUndoRequest = "agentjournal: undo the request"
-	opList        = "agentjournal: list"
-	opLive        = "agentjournal: live effects"
-	opRecover     = "agentjournal: recover"
-	opLineSubject = "agentjournal: subject of a journal line unknown"
-	opObserve     = "agentjournal: pending entry not settled"
-	opUndoRetry   = "agentjournal: undo retry failed"
+	opNew          = "agentjournal: new"
+	opFind         = "agentjournal: find"
+	opBegin        = "agentjournal: begin"
+	opFinish       = "agentjournal: finish"
+	opPropose      = "agentjournal: propose"
+	opBeginUndo    = "agentjournal: begin undo"
+	opFinishUndo   = "agentjournal: finish undo"
+	opUndoRequest  = "agentjournal: undo the request"
+	opList         = "agentjournal: list"
+	opLive         = "agentjournal: live effects"
+	opRecover      = "agentjournal: recover"
+	opLineSubject  = "agentjournal: subject of a journal line unknown"
+	opObserve      = "agentjournal: pending entry not settled"
+	opUndoRetry    = "agentjournal: undo retry failed"
+	opTargetUnread = "agentjournal: target of an entry unread"
 )
 
 // MaxList bounds the entries List and ListThread return.
@@ -73,7 +74,7 @@ func (s *Service) Find(ctx context.Context, th shared.ThreadID, turn int, callID
 	if err != nil {
 		return Entry{}, fmt.Errorf("%s: %w", opFind, err)
 	}
-	return entryOf(a, s.clock.Now()), nil
+	return entryOf(a, s.clock.Now(), action.Target{}), nil
 }
 
 // Begin records a U call PENDING before its use case runs (first transaction). A second entry for the same call is
@@ -86,7 +87,7 @@ func (s *Service) Begin(ctx context.Context, in BeginInput) (Entry, error) {
 	if err := s.actions.Save(ctx, a); err != nil {
 		return Entry{}, fmt.Errorf("%s: %w", opBegin, err)
 	}
-	return entryOf(a, s.clock.Now()), nil
+	return entryOf(a, s.clock.Now(), action.Target{}), nil
 }
 
 // Finish records the outcome of the use case (second transaction): DONE with its compensation, or FAILED.
@@ -109,7 +110,7 @@ func (s *Service) Propose(ctx context.Context, in BeginInput, proposal values.Re
 	if err := s.actions.Save(ctx, a); err != nil {
 		return Entry{}, fmt.Errorf("%s: %w", opPropose, err)
 	}
-	return entryOf(a, s.clock.Now()), nil
+	return entryOf(a, s.clock.Now(), action.Target{}), nil
 }
 
 // BeginUndo is «Отменить»: DONE -> UNDOING (or the retry of a stale UNDOING entry, action.StartUndo), saved before
@@ -136,7 +137,7 @@ func (s *Service) FinishUndo(ctx context.Context, id shared.ActionID) (Entry, er
 	if _, _, err := s.compensate(ctx, a); err != nil {
 		return Entry{}, fmt.Errorf("%s: %w", opFinishUndo, err)
 	}
-	return entryOf(a, s.clock.Now()), nil
+	return entryOf(a, s.clock.Now(), action.Target{}), nil
 }
 
 // compensate runs the compensation of an UNDOING entry and saves its new status. applied tells that Apply changed
@@ -204,7 +205,40 @@ func (s *Service) refuse(a *action.Action, err error) error {
 	return a.RefuseUndo(why, s.clock.Now())
 }
 
-// Undo is BeginUndo and FinishUndo. An entry left UNDOING by a failed compensation is retried once it is stale.
+// checkUndo is the check before StartUndo: a DONE paid job whose result is ready is action.ErrResultReady and the
+// entry stays DONE, nothing saved. A target that is gone is left to the compensation (UNDONE).
+func (s *Service) checkUndo(ctx context.Context, a *action.Action) error {
+	if !a.UndoNeedsTarget() {
+		return nil
+	}
+	t, err := s.comp.Check(ctx, a.Compensation())
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return nil
+	case err != nil:
+		return err
+	}
+	return a.CheckUndo(t)
+}
+
+// targetOf is the state of the target of a for «Отменить» in a list (read-only); the zero Target when a does not need
+// it or it cannot be read now (then «Отменить» is offered and Undo decides).
+func (s *Service) targetOf(ctx context.Context, a *action.Action) action.Target {
+	if s.comp == nil || !a.UndoNeedsTarget() {
+		return action.Target{}
+	}
+	t, err := s.comp.Check(ctx, a.Compensation())
+	if err != nil {
+		if !errors.Is(err, shared.ErrNotFound) {
+			s.log.WarnContext(ctx, opTargetUnread, "action", a.ID().String(), "err", err)
+		}
+		return action.Target{}
+	}
+	return t
+}
+
+// Undo is BeginUndo and FinishUndo; a paid job whose result is already ready is refused before the entry is touched
+// (action.ErrResultReady). An entry left UNDOING by a failed compensation is retried once it is stale.
 func (s *Service) Undo(ctx context.Context, id shared.ActionID) (Entry, error) {
 	if s.comp == nil {
 		return Entry{}, fmt.Errorf("%s: %w", opBeginUndo, ErrUndoUnavailable)
@@ -213,10 +247,13 @@ func (s *Service) Undo(ctx context.Context, id shared.ActionID) (Entry, error) {
 	if err != nil {
 		return Entry{}, fmt.Errorf("%s: %w", opBeginUndo, err)
 	}
+	if err := s.checkUndo(ctx, a); err != nil {
+		return Entry{}, fmt.Errorf("%s: %w", opBeginUndo, err)
+	}
 	if _, _, err := s.startUndo(ctx, a); err != nil {
 		return Entry{}, err
 	}
-	return entryOf(a, s.clock.Now()), nil
+	return entryOf(a, s.clock.Now(), action.Target{}), nil
 }
 
 // UndoRequest is «Отменить всё»: every action of a request that can still be undone, the newest first (the reverse
@@ -244,6 +281,14 @@ func (s *Service) UndoRequest(ctx context.Context, th shared.ThreadID, turn int)
 		if a.Turn() != turn || !a.CanUndo(s.clock.Now()) {
 			continue
 		}
+		err := s.checkUndo(ctx, a)
+		if errors.Is(err, action.ErrResultReady) {
+			continue // the result stays; the others of the request are still undone
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("action %s: %w", a.ID(), err))
+			continue
+		}
 		if u, ok := last[a.TargetRef()]; ok {
 			a.Rebase(u.a, u.after)
 		}
@@ -255,7 +300,7 @@ func (s *Service) UndoRequest(ctx context.Context, th shared.ThreadID, turn int)
 		if applied && !a.TargetRef().IsZero() {
 			last[a.TargetRef()] = undone{a: a, after: after}
 		}
-		out = append(out, entryOf(a, s.clock.Now()))
+		out = append(out, entryOf(a, s.clock.Now(), action.Target{}))
 	}
 	if len(errs) > 0 {
 		return out, fmt.Errorf("%s: %w", opUndoRequest, errors.Join(errs...))
@@ -288,7 +333,7 @@ func (s *Service) ListThread(ctx context.Context, thread shared.ThreadID, limit 
 	}
 	out, now := make([]Entry, len(as)), s.clock.Now()
 	for i, a := range as {
-		out[i] = entryOf(a, now)
+		out[i] = entryOf(a, now, s.targetOf(ctx, a))
 	}
 	return out, nil
 }
@@ -304,7 +349,7 @@ func (s *Service) List(ctx context.Context, limit int) ([]Line, error) {
 	lines := make([]Line, 0, len(as))
 	subjects := map[shared.ThreadID]shared.SubjectID{}
 	for _, a := range as {
-		can, why := a.Undoable(now)
+		can, why := a.Undoable(now, s.targetOf(ctx, a))
 		st := a.State()
 		lines = append(lines, Line{
 			Kind: LineAction, At: st.CreatedAt, UpdatedAt: st.UpdatedAt, Subject: s.subjectOf(ctx, subjects, st.Thread),
@@ -438,5 +483,5 @@ func (s *Service) update(ctx context.Context, id shared.ActionID, op string, cha
 	if err := s.actions.Save(ctx, a); err != nil {
 		return Entry{}, fmt.Errorf("%s: %w", op, err)
 	}
-	return entryOf(a, s.clock.Now()), nil
+	return entryOf(a, s.clock.Now(), action.Target{}), nil
 }
