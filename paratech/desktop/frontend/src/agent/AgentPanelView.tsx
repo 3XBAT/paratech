@@ -1,5 +1,5 @@
-import { type RefObject, useEffect, useRef } from "react";
-import { type AgentContext, entryModel, texts } from "../agentView.js";
+import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
+import { type AgentContext, composerKey, entryModel, inputPlacement, texts } from "../agentView.js";
 import { blockingEntry, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
 import { Icon } from "../ui/Icon.js";
 import { AgentRequest, type CardActions } from "./AgentCards.js";
@@ -10,14 +10,18 @@ export interface AgentPanelViewProps {
   draft: string;
   /** A refused button call, shown under the thread; "" when none. */
   notice: string;
-  inputRef: RefObject<HTMLInputElement | null>;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
   onDraft(text: string): void;
   onSubmit(): void;
   onRemoveContext(): void;
   actionsFor(entry: Entry): CardActions;
 }
 
-/** The right panel on every screen: header with the input, the context chip and the thread of requests. */
+/**
+ * The right panel on every screen: header, the request field, the context chip and the thread of requests. The field
+ * is one element that only changes its place by CSS order (top before the first request, bottom after), so focus and
+ * the draft stay when it moves.
+ */
 export function AgentPanelView(props: AgentPanelViewProps) {
   const { state, ctx } = props;
   const mode = panelMode(state);
@@ -28,44 +32,62 @@ export function AgentPanelView(props: AgentPanelViewProps) {
     end.current?.scrollIntoView?.({ block: "end" });
   }, [entries.length]);
 
+  // The field grows with its text; the CSS max-height (six lines) stops it and the rest scrolls.
+  const { inputRef, draft } = props;
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    }
+  }, [inputRef, draft]);
+
   return (
-    <aside className="ag" aria-label="Помощник paratech">
+    <aside className={`ag ag-in-${inputPlacement(entries.length)}`} aria-label="Помощник paratech">
       <header className="ag-head">
         <div className="ag-title">
           <span className="ag-name">{texts.title}</span>
           <kbd className="ag-kbd">{texts.hint}</kbd>
         </div>
-        <form
-          className="ag-ask-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            props.onSubmit();
+      </header>
+      <form
+        className="ag-ask-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          props.onSubmit();
+        }}
+      >
+        <textarea
+          ref={props.inputRef}
+          className="ag-input"
+          rows={1}
+          value={props.draft}
+          placeholder={mode.placeholder}
+          aria-label={mode.placeholder}
+          disabled={!mode.inputEnabled}
+          maxLength={4000}
+          autoComplete="off"
+          onChange={(e) => props.onDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (composerKey({ key: e.key, shiftKey: e.shiftKey, isComposing: e.nativeEvent.isComposing, keyCode: e.keyCode }) === "send") {
+              e.preventDefault();
+              props.onSubmit();
+            }
           }}
+        />
+        <button
+          type="submit"
+          className="ag-send"
+          aria-label={texts.send}
+          title={texts.send}
+          disabled={!mode.inputEnabled || props.draft.trim() === ""}
         >
-          <input
-            ref={props.inputRef}
-            className="ag-input"
-            type="text"
-            value={props.draft}
-            placeholder={mode.placeholder}
-            aria-label={mode.placeholder}
-            disabled={!mode.inputEnabled}
-            maxLength={4000}
-            autoComplete="off"
-            onChange={(e) => props.onDraft(e.target.value)}
-          />
-          <button
-            type="submit"
-            className="ag-send"
-            aria-label={texts.send}
-            title={texts.send}
-            disabled={!mode.inputEnabled || props.draft.trim() === ""}
-          >
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 19V5M5 12l7-7 7 7" />
-            </svg>
-          </button>
-        </form>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 19V5M5 12l7-7 7 7" />
+          </svg>
+        </button>
+      </form>
+      <div className="ag-ctx-wrap">
         <div className="ag-ctx">
           <span className="ag-chip">
             <span className="ag-chip-text">{ctx.label}</span>
@@ -82,7 +104,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
             <span>{texts.offlineBanner}</span>
           </p>
         )}
-      </header>
+      </div>
       <div className="ag-thread">
         {entries.length === 0 && <p className="ag-empty muted">{texts.empty}</p>}
         {mode.staleNote !== "" && <p className="ag-stale small muted">{mode.staleNote}</p>}
