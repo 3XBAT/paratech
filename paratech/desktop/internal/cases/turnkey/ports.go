@@ -83,6 +83,13 @@ type Jobs interface {
 	LatestByKeyPrefix(ctx context.Context, typ job.Type, prefix string) (*job.Job, error)
 }
 
+// JobCanceller cancels a job at the student's request (cases/jobrunner, wired by the app): a queued or waiting job at
+// once, a running one once its handler returns. A job that cannot be cancelled (finished meanwhile, or RUNNING with no
+// handler of this process) is an error.
+type JobCanceller interface {
+	Cancel(ctx context.Context, id shared.JobID) error
+}
+
 // Profiles reads the student profile for the title page (TASK-094). Implemented by the sqlite settings repository.
 type Profiles interface {
 	Load(ctx context.Context) (*settings.Settings, error)

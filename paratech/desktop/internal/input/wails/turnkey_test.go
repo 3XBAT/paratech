@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"paratech/desktop/internal/cases/turnkey"
 	"paratech/desktop/internal/domain/coursework/work"
+	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -23,6 +25,7 @@ type fakeTurnkey struct {
 	src     work.Source
 	outline []work.OutlineItem
 	calls   []string
+	reused  bool // StartWriting found its job (Created false)
 }
 
 func (f *fakeTurnkey) Work(context.Context, shared.WorkID) (turnkey.View, error) {
@@ -62,7 +65,7 @@ func (f *fakeTurnkey) AskStep(context.Context, shared.WorkID, int, string) (stri
 
 func (f *fakeTurnkey) StartWriting(context.Context, shared.WorkID) (turnkey.WritingStarted, error) {
 	f.calls = append(f.calls, "start")
-	return turnkey.WritingStarted{View: f.view, Job: "j1", Created: true}, f.err
+	return turnkey.WritingStarted{View: f.view, Job: "j1", Created: !f.reused}, f.err
 }
 
 func (f *fakeTurnkey) ApproveOutline(context.Context, shared.WorkID) (turnkey.WritingStarted, error) {
@@ -72,6 +75,16 @@ func (f *fakeTurnkey) ApproveOutline(context.Context, shared.WorkID) (turnkey.Wr
 
 func (f *fakeTurnkey) EditOutline(_ context.Context, _ shared.WorkID, items []work.OutlineItem) (turnkey.View, error) {
 	f.calls, f.outline = append(f.calls, "edit"), items
+	return f.view, f.err
+}
+
+func (f *fakeTurnkey) EditOutlineAt(_ context.Context, _ shared.WorkID, version int64, items []work.OutlineItem) (turnkey.View, error) {
+	f.calls, f.outline = append(f.calls, fmt.Sprintf("edit at %d", version)), items
+	return f.view, f.err
+}
+
+func (f *fakeTurnkey) StopWriting(context.Context, shared.WorkID) (turnkey.View, error) {
+	f.calls = append(f.calls, "stop")
 	return f.view, f.err
 }
 
@@ -109,7 +122,7 @@ func TestTurnkeyWritingJSON(t *testing.T) {
 		`{"number":1,"title":"Введение","words":200,"note":"","written":true,"paragraphs":["Абзац."],` +
 		`"sources":[{"text":"Методичка.docx","materialId":"m1","verify":false},{"text":"Иванов И. И.","materialId":"","verify":true}]},` +
 		`{"number":2,"title":"Итоги","words":150,"note":"","written":false,"paragraphs":[],"sources":[]}],` +
-		`"done":1,"total":2,"subjectId":"s1","materialId":"","result":"","job":""}`
+		`"done":1,"total":2,"subjectId":"s1","materialId":"","result":"","job":"","active":false,"jobState":""}`
 	if string(b) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", b, want)
 	}
@@ -157,6 +170,111 @@ func TestTurnkeyWritingCalls(t *testing.T) {
 		if _, err := s.ApproveOutline(ctx, "w1"); !errors.Is(err, tt.want) {
 			t.Errorf("%v: %v", tt.err, err)
 		}
+	}
+}
+
+// A job StartWriting found is the job of the card only while it is active: a finished one is no job.
+func TestTurnkeyStartedReusedJob(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		active bool
+		want   string
+	}{
+		{"finished job", false, ""},
+		{"active job", true, "j1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			v := writingWork()
+			if tt.active {
+				v.Writing.Active, v.Writing.Job, v.Writing.JobState = true, "j1", job.StatusRunning
+			}
+			s := NewTurnkeyService(&fakeTurnkey{view: v, reused: true}, discard())
+			got, err := s.StartWriting(t.Context(), "w1")
+			if err != nil || got.Writing.Job != tt.want || got.Writing.Active != tt.active {
+				t.Fatalf("StartWriting = %+v, %v; want job %q", got.Writing, err, tt.want)
+			}
+		})
+	}
+}
+
+// «Остановить» and the versioned plan edit reach the use case; a stale editor and a stop that did not go through are
+// fixed texts.
+func TestTurnkeyStopAndEditAt(t *testing.T) {
+	f := &fakeTurnkey{view: writingWork()}
+	s := NewTurnkeyService(f, discard())
+	ctx := t.Context()
+	if v, err := s.StopWriting(ctx, "w1"); err != nil || v.ID != "w1" || v.Writing == nil || v.Writing.Active {
+		t.Fatalf("StopWriting = %+v, %v", v.Writing, err)
+	}
+	items := []TurnkeyOutlineItem{{Number: 1, Title: "Введение", Words: 200}}
+	if v, err := s.EditOutlineAt(ctx, "w1", 7, items); err != nil || v.Version != 7 {
+		t.Fatalf("EditOutlineAt = %+v, %v", v, err)
+	}
+	if !slices.Equal(f.calls, []string{"stop", "edit at 7"}) || len(f.outline) != 1 || f.outline[0].Title != "Введение" {
+		t.Fatalf("calls = %v, outline = %+v", f.calls, f.outline)
+	}
+
+	for _, tt := range []struct {
+		err  error
+		call func() (TurnkeyWork, error)
+		want error
+	}{
+		{fmt.Errorf("%w: version 8", turnkey.ErrChanged), func() (TurnkeyWork, error) { return s.EditOutlineAt(ctx, "w1", 7, items) }, ErrTurnkeyStale},
+		{turnkey.ErrWritingRunning, func() (TurnkeyWork, error) { return s.EditOutlineAt(ctx, "w1", 7, items) }, ErrTurnkeyWriting},
+		{fmt.Errorf("%w: running", turnkey.ErrNotStopped), func() (TurnkeyWork, error) { return s.StopWriting(ctx, "w1") }, ErrTurnkeyNotStopped},
+		{fmt.Errorf("%w: %w", turnkey.ErrNotFound, shared.ErrNotFound), func() (TurnkeyWork, error) { return s.StopWriting(ctx, "w1") }, ErrTurnkeyNotFound},
+		{turnkey.ErrUnavailable, func() (TurnkeyWork, error) { return s.StopWriting(ctx, "w1") }, ErrTurnkeyUnavailable},
+	} {
+		f.err = tt.err
+		if _, err := tt.call(); !errors.Is(err, tt.want) {
+			t.Errorf("%v: %v, want %v", tt.err, err, tt.want)
+		}
+	}
+	if ErrTurnkeyStale.Error() != "Работа изменилась: обновите карточку." {
+		t.Fatalf("stale text = %q", ErrTurnkeyStale)
+	}
+}
+
+// Every read of a work tells whether its writing job runs and in which state.
+func TestTurnkeyWritingJobState(t *testing.T) {
+	for _, tt := range []struct {
+		active bool
+		status job.Status
+		want   string
+	}{
+		{true, job.StatusQueued, "queued"},
+		{true, job.StatusRunning, "running"},
+		{true, job.StatusWaitingForNetwork, "waiting_network"},
+		{true, job.StatusWaitingForQuota, "waiting_quota"},
+		{true, job.StatusWaitingForPower, "waiting_power"},
+		{true, job.StatusRetryWait, "retrying"},
+		{false, "", ""},
+		{true, job.StatusCompleted, ""}, // never active; shown as no job
+	} {
+		t.Run(string(tt.status), func(t *testing.T) {
+			v := writingWork()
+			v.Writing.Active, v.Writing.JobState, v.Writing.Job = tt.active, tt.status, "j9"
+			s := NewTurnkeyService(&fakeTurnkey{view: v}, discard())
+			got, err := s.Work(t.Context(), "w1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := got.Writing
+			wantJob := ""
+			if tt.want != "" {
+				wantJob = "j9"
+			}
+			if w.Active != (tt.want != "") || w.JobState != tt.want || w.Job != wantJob {
+				t.Fatalf("writing = active %v %q job %q, want %q", w.Active, w.JobState, w.Job, tt.want)
+			}
+			b, err := json.Marshal(w)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.want != "" && !strings.Contains(string(b), `"active":true,"jobState":"`+tt.want+`"`) {
+				t.Fatalf("JSON = %s", b)
+			}
+		})
 	}
 }
 

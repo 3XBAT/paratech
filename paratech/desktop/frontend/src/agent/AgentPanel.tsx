@@ -1,6 +1,7 @@
 import { type RefObject, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { type AgentApi, agentApi, type AskInput, type CallProblem, parseUpdate, updateEvent, type UpdateView } from "../bindings/agent.js";
 import { agentConfirmApi } from "../bindings/agentConfirm.js";
+import { libraryApi } from "../bindings/library.js";
 import { turnkeyApi } from "../bindings/turnkey.js";
 import { recordingDeleteApi } from "../bindings/recordingDelete.js";
 import { callByName, onEventData } from "../bindings/runtime.js";
@@ -15,6 +16,7 @@ import type { CardActions } from "./AgentCards.js";
 
 const api: AgentApi = agentApi(callByName);
 const turnkey = turnkeyApi(callByName);
+const library = libraryApi(callByName);
 const confirm = { api: agentConfirmApi(callByName), deleteApi: recordingDeleteApi(callByName) };
 
 /** Ctrl+K from anywhere in the window: a closed panel opens with focus in the input, an open one closes. */
@@ -47,8 +49,27 @@ function useFocusShortcut(input: RefObject<HTMLTextAreaElement | null>, open: bo
  * The agent panel: talks to the core through the bindings only. The Hub is the core's business; the panel holds no
  * keys and keeps nothing in browser storage.
  */
-export function AgentPanel(props: { page: PageId; assignmentId: string; open?: boolean; reveal?: () => void; hide?: () => void }) {
+export function AgentPanel(props: {
+  page: PageId;
+  assignmentId: string;
+  open?: boolean;
+  reveal?: () => void;
+  hide?: () => void;
+  onOpenAssignment?: (id: string) => void;
+}) {
   const [state, dispatch] = useReducer(reducePanel, initialPanelState);
+  // Subject names for the assignment lists of replies; unreadable subjects just leave the names out.
+  const [subjects, setSubjects] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let alive = true;
+    library.subjects().then(
+      (list) => alive && setSubjects(Object.fromEntries(list.map((s) => [s.id, s.name]))),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [props.page]);
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState("");
   // The context chip is removed per section: a new section brings its own label back.
@@ -282,6 +303,8 @@ export function AgentPanel(props: { page: PageId; assignmentId: string; open?: b
       busy,
       confirm,
       turnkey,
+      subjects,
+      openAssignment: props.onOpenAssignment,
       press,
       revise: (wish) => named && run(() => api.revisePlan(ref, wish)),
       answer: (answers) => named && run(() => api.answer(ref, answers)),
@@ -294,7 +317,7 @@ export function AgentPanel(props: { page: PageId; assignmentId: string; open?: b
       },
       undoNote: (actionId) => undoNotes[actionId],
     };
-  }, [state.entries, send, loadState, undoNotes, undoOne, undoAll]);
+  }, [state.entries, send, loadState, undoNotes, undoOne, undoAll, subjects, props.onOpenAssignment]);
 
   return (
     <AgentPanelView

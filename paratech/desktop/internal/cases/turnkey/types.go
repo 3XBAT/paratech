@@ -7,6 +7,7 @@ import (
 
 	cvalues "paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/coursework/work"
+	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -23,16 +24,17 @@ type Deps struct {
 	Log         *slog.Logger
 }
 
-// WritingDeps are the ports of the writing (TASK-131); every port is required but Slides.
+// WritingDeps are the ports of the writing (TASK-131); every port is required but Slides and Canceller.
 type WritingDeps struct {
-	Writer   Writer
-	Jobs     Jobs
-	JobIDs   JobIDs
-	Profiles Profiles
-	Renderer Renderer
-	Slides   SlideRenderer // nil: a presentation is not written (ErrNotWritable)
-	Lessons  LessonLabels
-	Shelf    Shelf
+	Writer    Writer
+	Jobs      Jobs
+	JobIDs    JobIDs
+	Canceller JobCanceller // nil: StopWriting answers ErrNotConfigured (TASK-178)
+	Profiles  Profiles
+	Renderer  Renderer
+	Slides    SlideRenderer // nil: a presentation is not written (ErrNotWritable)
+	Lessons   LessonLabels
+	Shelf     Shelf
 
 	ModelAlias  string // the Hub alias of the writing calls
 	MaxAttempts int    // attempts of a job; 0: DefaultJobAttempts
@@ -58,6 +60,12 @@ type WritingView struct {
 	Subject    shared.SubjectID   // the library subject whose «ДЗ» gets the file; "" «Входящие»
 	Material   shared.MaterialID  // the file in the library (the .pptx of a presentation), once done
 	Result     shared.ArtifactRef // the ResultCard of the file, once done
+
+	// The writing job that runs for the work, read with the view (TASK-178): none once it ended. A stopped running
+	// step stays active (RUNNING) until it returns, so the UI keeps polling until Active is false.
+	Active   bool
+	Job      shared.JobID
+	JobState job.Status // QUEUED, RUNNING, RETRY_WAIT or a WAITING_FOR_* state while Active
 
 	// A presentation (TASK-106): its template, the likely questions and the speaker text .docx once done.
 	Presentation bool

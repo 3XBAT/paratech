@@ -21,8 +21,17 @@ type Knowledge interface {
 type Reader interface {
 	// AnswerQuestion sends req under its key. A permanent refusal of the answer (the Hub's schema check, charged, or
 	// the provider's) wraps answer.ErrInvalidAnswer; a used-up quota shared.ErrQuotaExceeded; anything else means the
-	// Hub was not reached or refused the request, and nothing was charged as an answer.
-	AnswerQuestion(ctx context.Context, req answer.Request) (string, error)
+	// Hub was not reached or refused the request, and nothing was charged as an answer. A non-nil partial gets the
+	// output received so far, growing, in order, on the calling goroutine and before AnswerQuestion returns; it is
+	// untrusted draft text and the returned output may differ from the last one (ADR-0026).
+	AnswerQuestion(ctx context.Context, req answer.Request, partial func(soFar string)) (string, error)
+}
+
+// DraftSink shows the draft of an answer being written (ADR-0026). Implemented by input/agent. Draft gets the claim
+// texts written so far (answer.Draft), only when they change; they are untrusted model text, for display as a draft
+// only. It is called on the goroutine of Ask and must not block.
+type DraftSink interface {
+	Draft(texts []string)
 }
 
 // Repository stores the answers. Implemented by the sqlite adapter.

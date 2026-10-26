@@ -3132,7 +3132,7 @@
             "dependencies": [
                 "TASK-142"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-147",
@@ -3779,7 +3779,7 @@
                 "TASK-173",
                 "TASK-175"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-177",
@@ -3825,7 +3825,7 @@
                 "npm --prefix paratech/desktop/frontend run test и run build"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-179",

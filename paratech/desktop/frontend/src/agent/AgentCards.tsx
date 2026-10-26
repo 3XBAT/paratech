@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import type { AnswerInput } from "../bindings/agent.js";
+import type { AnswerInput, AssignmentLineView } from "../bindings/agent.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
@@ -9,6 +9,7 @@ import { ConfirmCard } from "./ConfirmCard.js";
 import { WorkWritingCard } from "./WorkCard.js";
 import { Waiting } from "./Waiting.js";
 import {
+  assignmentRow,
   type ButtonId,
   type ButtonModel,
   type CardModel,
@@ -31,6 +32,12 @@ export interface CardActions {
   confirm?: { api: AgentConfirmApi; deleteApi: RecordingDeleteApi };
   /** The core calls of the `work` cards; without them such a card shows nothing. */
   turnkey?: TurnkeyApi;
+  /** Subject names by id, for the assignment list of a reply; an unknown subject is left out. */
+  subjects?: Readonly<Record<string, string>>;
+  /** «Сегодня» for the due dates; the current time when absent. */
+  now?: Date;
+  /** Opens the assignment on «Домашние задания». */
+  openAssignment?: (id: string) => void;
   press(id: ButtonId): void;
   revise(wish: string): void;
   answer(answers: AnswerInput[]): void;
@@ -65,6 +72,33 @@ function Lines(props: { items: string[]; ordered?: boolean }) {
         <li key={i}>{t}</li>
       ))}
     </Tag>
+  );
+}
+
+/** The assignments a reply names: title and subject are plain text nodes; a row opens the assignment page. */
+export function AssignmentList(props: { items: AssignmentLineView[]; actions: CardActions }) {
+  if (props.items.length === 0) {
+    return null;
+  }
+  const now = props.actions.now ?? new Date();
+  const subjects = props.actions.subjects ?? {};
+  return (
+    <ul className="ag-asg" aria-label={texts.assignmentsLabel}>
+      {props.items.map((a, i) => {
+        const r = assignmentRow(a, subjects, now);
+        return (
+          <li key={`${a.id}:${i}`}>
+            <button type="button" className="ag-asg-row" onClick={() => props.actions.openAssignment?.(r.id)}>
+              <span className="ag-asg-main">
+                <span className="ag-asg-t">{r.title}</span>
+                {r.subject !== "" && <span className="ag-asg-s small muted">{r.subject}</span>}
+              </span>
+              {r.due !== "" && <span className={`ag-asg-due small num${r.overdue ? " ag-asg-late" : ""}`}>{r.due}</span>}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -221,6 +255,7 @@ function Card(props: { card: CardModel; actions: CardActions }) {
         <section className="ag-card">
           <h3 className="ag-card-h">{card.caption}</h3>
           <p className="ag-text">{card.text}</p>
+          <AssignmentList items={card.assignments} actions={props.actions} />
         </section>
       );
     case "cannot_do":

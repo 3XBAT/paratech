@@ -12,6 +12,8 @@ export const methods = {
   startWriting: `${service}.StartWriting`,
   approveOutline: `${service}.ApproveOutline`,
   editOutline: `${service}.EditOutline`,
+  editOutlineAt: `${service}.EditOutlineAt`,
+  stopWriting: `${service}.StopWriting`,
   regenerate: `${service}.Regenerate`,
   // TASK-130: questions, «Как понято задание», the helper.
   workOfAssignment: `${service}.WorkOfAssignment`,
@@ -31,6 +33,11 @@ export const workStatuses: readonly WorkStatus[] = ["triage", "questions", "revi
 export type WritingStep = "outline" | "approve" | "section" | "assemble" | "blocked" | "none";
 
 export const writingSteps: readonly WritingStep[] = ["outline", "approve", "section", "assemble", "blocked", "none"];
+
+/** State of the running writing job; "" when no job runs. */
+export type WritingJobState = "" | "queued" | "running" | "waiting_network" | "waiting_quota" | "waiting_power" | "retrying";
+
+export const writingJobStates: readonly WritingJobState[] = ["", "queued", "running", "waiting_network", "waiting_quota", "waiting_power", "retrying"];
 
 export interface WorkSource {
   text: string;
@@ -61,6 +68,9 @@ export interface WorkWriting {
   materialId: string;
   result: string;
   job: string;
+  /** A writing job runs for the work («Остановить»). */
+  active: boolean;
+  jobState: WritingJobState;
 }
 
 /** One question of the reader: a choice (options, default index) or a text (defaultText; "" may be skipped). */
@@ -148,6 +158,8 @@ export const errorTexts: readonly string[] = [
   "Не удалось выполнить. Попробуйте ещё раз.",
   "Работа ещё пишется: дождитесь окончания.",
   "Работа уже написана: измените план или сгенерируйте раздел заново.",
+  "Работа изменилась: обновите карточку.",
+  "Не удалось остановить написание. Попробуйте ещё раз.",
 ];
 
 export const genericError = "Не удалось выполнить. Попробуйте ещё раз.";
@@ -258,6 +270,8 @@ function parseWriting(raw: unknown): WorkWriting {
     materialId: str(r, "materialId", w),
     result: str(r, "result", w),
     job: str(r, "job", w),
+    active: optBool(r, "active", w),
+    jobState: r.jobState === undefined || r.jobState === null ? "" : oneOf(r, "jobState", writingJobStates, w),
   };
 }
 
@@ -368,6 +382,10 @@ export interface TurnkeyApi {
   approveOutline(workId: string): Promise<TurnkeyWork>;
   /** Saves the plan: the items in their order, number 0 is a new section. */
   editOutline(workId: string, items: OutlineItem[]): Promise<TurnkeyWork>;
+  /** editOutline for the plan as shown at `version`; a changed work is refused (stale). */
+  editOutlineAt(workId: string, version: number, items: OutlineItem[]): Promise<TurnkeyWork>;
+  /** «Остановить»: cancels the writing job, the written sections stay. */
+  stopWriting(workId: string): Promise<TurnkeyWork>;
   /** Section `number` again with the student's note; 0 is every section (or the plan of a blocked outline). */
   regenerate(workId: string, number: number, note: string): Promise<TurnkeyWork>;
   /** The work of an assignment; a missing one is the not-found error. */
@@ -397,6 +415,9 @@ export function turnkeyApi(call: CallByName): TurnkeyApi {
     approveOutline: async (id) => parseWork(await call(methods.approveOutline, id)),
     editOutline: async (id, items) =>
       parseWork(await call(methods.editOutline, id, items.map((i) => ({ number: i.number, title: i.title, words: i.words })))),
+    editOutlineAt: async (id, version, items) =>
+      parseWork(await call(methods.editOutlineAt, id, version, items.map((i) => ({ number: i.number, title: i.title, words: i.words })))),
+    stopWriting: async (id) => parseWork(await call(methods.stopWriting, id)),
     regenerate: async (id, number, note) => parseWork(await call(methods.regenerate, id, number, note)),
     workOfAssignment: async (id) => parseWork(await call(methods.workOfAssignment, id)),
     answerQuestions: async (id, answers) =>

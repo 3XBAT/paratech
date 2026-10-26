@@ -272,12 +272,14 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	// for «Спросить по шагу» yet: the Hub has no operation for it (ADR-0025). The writing (TASK-131) runs as a job on
 	// the Hub's homework_draft operation; the title page from the profile and the lesson the assignment shows, the
 	// paper filed into the subject's «ДЗ»; a presentation (TASK-106) files its .pptx and the speaker text there.
+	// «Остановить» (TASK-178) cancels through the runner built below.
 	works, err := turnkey.New(turnkey.Deps{
 		Works: sqlite.NewWorkRepository(db), Assignments: assignments, Materials: lib, Reader: llm, Clock: e.local,
 		IDs: e.ids, Log: log,
 		Writing: &turnkey.WritingDeps{
-			Writer: llm, Jobs: jobs, JobIDs: e.ids, Profiles: settings, Renderer: docx.New(), Slides: pptx.New(),
-			Lessons: c.proposals, Shelf: lib, ModelAlias: modelAlias, MaxAttempts: maxAttempts,
+			Writer: llm, Jobs: jobs, JobIDs: e.ids, Canceller: runnerCanceller{c: c}, Profiles: settings,
+			Renderer: docx.New(), Slides: pptx.New(), Lessons: c.proposals, Shelf: lib, ModelAlias: modelAlias,
+			MaxAttempts: maxAttempts,
 		},
 	})
 	if err != nil {

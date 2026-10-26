@@ -81,10 +81,10 @@ func (s *Service) Triage(ctx context.Context, src work.Source) (Started, error) 
 		return Started{}, err
 	}
 	if w.Status() != work.StatusTriage {
-		return Started{View: viewOf(w), Created: created}, nil
+		return Started{View: s.view(ctx, w), Created: created}, nil
 	}
 	w, err = s.ask(ctx, w)
-	return Started{View: viewOf(w), Created: created}, err
+	return Started{View: s.view(ctx, w), Created: created}, err
 }
 
 // Retry asks the due reader call of a work again («Повторить» after no network or a refused answer).
@@ -94,10 +94,10 @@ func (s *Service) Retry(ctx context.Context, id shared.WorkID) (View, error) {
 		return View{}, err
 	}
 	if w.Status() != work.StatusTriage {
-		return viewOf(w), fmt.Errorf("%w: no reader call is due", ErrInvalidRequest)
+		return s.view(ctx, w), fmt.Errorf("%w: no reader call is due", ErrInvalidRequest)
 	}
 	w, err = s.ask(ctx, w)
-	return viewOf(w), err
+	return s.view(ctx, w), err
 }
 
 // AnswerQuestions takes the student's answers to the questions of the current round (unanswered ones take their
@@ -111,7 +111,7 @@ func (s *Service) AnswerQuestions(ctx context.Context, id shared.WorkID, replies
 	if w.Status() == work.StatusTriage {
 		w, err = s.ask(ctx, w)
 	}
-	return viewOf(w), err
+	return s.view(ctx, w), err
 }
 
 // SkipQuestions is «Пропустить — сделай как считаешь»: every question takes its default, then as AnswerQuestions.
@@ -126,7 +126,7 @@ func (s *Service) EditUnderstanding(ctx context.Context, id shared.WorkID, u wor
 	if err != nil {
 		return View{}, err
 	}
-	return viewOf(w), nil
+	return s.view(ctx, w), nil
 }
 
 // ConfirmRequirements is «Подтвердить» on the card: the requirements are settled for the writing (TASK-105).
@@ -135,7 +135,7 @@ func (s *Service) ConfirmRequirements(ctx context.Context, id shared.WorkID) (Vi
 	if err != nil {
 		return View{}, err
 	}
-	return viewOf(w), nil
+	return s.view(ctx, w), nil
 }
 
 // Work returns a work. Errors: ErrNotFound, ErrUnavailable.
@@ -144,7 +144,7 @@ func (s *Service) Work(ctx context.Context, id shared.WorkID) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
-	return viewOf(w), nil
+	return s.view(ctx, w), nil
 }
 
 // WorkOf returns the work of a source that has not failed. Errors: ErrNotFound, ErrInvalidRequest, ErrUnavailable.
@@ -156,7 +156,7 @@ func (s *Service) WorkOf(ctx context.Context, src work.Source) (View, error) {
 	if err != nil {
 		return View{}, s.loadError(err)
 	}
-	return viewOf(w), nil
+	return s.view(ctx, w), nil
 }
 
 // AskStep is «Спросить по шагу»: the student's question about one helper step, answered from that step and the

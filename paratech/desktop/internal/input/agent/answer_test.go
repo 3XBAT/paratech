@@ -27,7 +27,7 @@ type fakeAnswerer struct {
 	asked []askedQuestion
 }
 
-func (f *fakeAnswerer) Ask(_ context.Context, q string, s shared.SubjectID, scope string) (answering.Asked, error) {
+func (f *fakeAnswerer) Ask(_ context.Context, q string, s shared.SubjectID, scope string, _ answering.DraftSink) (answering.Asked, error) {
 	f.asked = append(f.asked, askedQuestion{q, s, scope})
 	return f.got, f.err
 }
