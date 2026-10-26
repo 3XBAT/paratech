@@ -457,10 +457,10 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
   }
 
   // One stop card, from the stopped card or the update's own reason; the problem adds a button for what to do next.
-  // A running request shows neither: the stopped card and the problem are leftovers of the previous run (progress
-  // updates keep the cards and move only the status).
+  // A running request hides the stopped card: it is a leftover of the previous run (progress updates keep the cards
+  // and move only the status). The problem is fresh: a progress update clears the old one in the state.
   const running = activeStatuses.has(u.status);
-  const problem = running ? "" : u.problem;
+  const problem = u.problem;
   const stopCard = running ? undefined : u.cards.find((c) => c.kind === "stopped");
   const reason = running ? "" : stopCard?.stopReason || u.stopReason;
   const stop = reason !== "" ? (stopTexts[reason] ?? { text: "Остановлено", buttons: [] }) : null;

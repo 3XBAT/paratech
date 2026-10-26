@@ -72,6 +72,30 @@ test("a running request shows neither the old stopped card nor the old problem",
   assert.equal(entryModel(s.entries[0], last).cards.some((c) => c.type === "problem"), false);
 });
 
+test("a problem-only update on a running request shows the problem; a progress update clears it", () => {
+  for (const problem of ["failed", "stale"]) {
+    let s = reducePanel(initialPanelState, { type: "update", update: update({ status: "EXECUTING", cards: [card()] }) });
+    s = reducePanel(s, { type: "update", update: update({ status: "", problem }) });
+    assert.equal(entryModel(s.entries[0], last).cards.some((c) => c.type === "problem"), true, problem);
+    s = reducePanel(s, { type: "update", update: update({ status: "EXECUTING", progress: true }) });
+    assert.equal(s.entries[0].update.problem, "");
+    assert.equal(entryModel(s.entries[0], last).cards.some((c) => c.type === "problem"), false);
+  }
+});
+
+test("a successful rerun clears the old problem of its source", () => {
+  let s = reducePanel(initialPanelState, { type: "update", update: update({ status: "DONE", problem: "rerun_blocked" }) });
+  s = reducePanel(s, { type: "rerunAsked", from: { threadId: "t1", turn: 1, text: "x", scope: null } });
+  assert.equal(s.entries.find((e) => e.key === "thread:t1:1").update.problem, "");
+});
+
+test("history fills an entry that still awaits its first update", () => {
+  let s = reducePanel(initialPanelState, { type: "rerunAsked", from: { threadId: "t1", turn: 1, text: "x", scope: null } });
+  s = reducePanel(s, { type: "history", requests: [update({ turn: 2, status: "PLANNING" })] });
+  assert.equal(s.entries.length, 1);
+  assert.equal(s.entries[0].update.status, "PLANNING");
+});
+
 // ---- Стоп ----
 
 test("«Стоп» is offered at the waiting line only while PLANNING or EXECUTING", () => {

@@ -92,7 +92,7 @@ function applyUpdate(s: PanelState, u: UpdateView): PanelState {
     }
     // A step went to the Hub: only the status and the stop reason move, the cards shown stay.
     if (u.progress && known.update) {
-      return { ...s, entries: replace(s.entries, key, { ...known, update: { ...known.update, status: u.status, stopReason: u.stopReason } }) };
+      return { ...s, entries: replace(s.entries, key, { ...known, update: { ...known.update, status: u.status, stopReason: u.stopReason, problem: "" } }) };
     }
     // A failed button operation: no status, no cards, only a problem. The request itself is unchanged, so keep its
     // cards and buttons and attach the problem; the next real update replaces it.
@@ -143,6 +143,9 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
       if (s.entries.some((x) => x.key === key)) {
         return s;
       }
+      // A stale rerun_blocked/busy text of the source must not outlive a successful rerun.
+      const src = threadKey(a.from.threadId, a.from.turn);
+      const entries = s.entries.map((x) => (x.key === src && x.update ? { ...x, update: { ...x.update, problem: "" } } : x));
       const e: Entry = {
         key,
         seq: s.nextSeq,
@@ -153,7 +156,7 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
         callProblem: "",
         update: null,
       };
-      return { ...s, entries: [...s.entries, e], nextSeq: s.nextSeq + 1 };
+      return { ...s, entries: [...entries, e], nextSeq: s.nextSeq + 1 };
     }
     case "rerunRefused":
       // Only a request the core never answered for is taken back.
@@ -162,7 +165,7 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
       return applyUpdate(s, a.update);
     case "history":
       return a.requests.reduce(
-        (acc, u) => (acc.entries.some((e) => e.threadId === u.threadId && e.turn === u.turn) ? acc : applyUpdate(acc, u)),
+        (acc, u) => (acc.entries.some((e) => e.threadId === u.threadId && e.turn === u.turn && e.update !== null) ? acc : applyUpdate(acc, u)),
         s,
       );
     case "link":

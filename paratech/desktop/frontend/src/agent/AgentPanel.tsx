@@ -192,8 +192,8 @@ export function AgentPanel(props: { page: PageId; assignmentId: string; reveal?:
     // A request the core has not named yet has no buttons of its own: one refused as busy stops the running request
     // that blocks it, or is sent again.
     const blocking = named ? undefined : blockingEntry(state.entries, e);
-    // Own buttons are off while a call runs; the refused request's «Стоп» is guarded on the blocker (below).
-    const busy = named && pressed.current.busy(e.key, e.update);
+    // Buttons are off while a call runs; the refused request's «Стоп» is guarded on the blocker, so it shows that mark.
+    const busy = named ? pressed.current.busy(e.key, e.update) : blocking ? pressed.current.busy(blocking.key, blocking.update) : false;
     // `target`: the request whose update frees the buttons (default: this one). `onSuccess`: also free them when the
     // call is accepted. A call the core refused produces no update, so the buttons come back at once.
     const run = (
