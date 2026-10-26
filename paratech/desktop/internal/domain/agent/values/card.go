@@ -137,20 +137,29 @@ func (c ConfirmCard) Validate() error {
 	return nil
 }
 
-// ActionLine is one journal line with «Отменить».
+// ActionLine is one journal line with «Отменить». Assignment is the assignment create_assignment added (ADR-0029),
+// zero for other tools: the action names its ID, and the Driver fills its title, subject and deadline from the local
+// data before the line is shown (the planner never sees them).
 type ActionLine struct {
-	Action shared.ActionID
+	Action     shared.ActionID
+	Assignment AssignmentLine
 }
 
 // Kind returns CardActionLine.
 func (ActionLine) Kind() CardKind { return CardActionLine }
 
-// Validate checks the card.
+// Validate checks the card: an assignment, when there is one, is a valid line with a title.
 func (c ActionLine) Validate() error {
 	if err := c.Action.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidCard, err)
 	}
-	return nil
+	if c.Assignment == (AssignmentLine{}) {
+		return nil
+	}
+	if c.Assignment.Assignment.Kind() != KindAssignment {
+		return fmt.Errorf("%w: an action line names an assignment", ErrInvalidCard)
+	}
+	return c.Assignment.validate()
 }
 
 // AnswerCard shows an answer with verified citations by its ID.
@@ -198,13 +207,28 @@ type ReplyCard struct {
 	Lines       []AssignmentLine
 }
 
-// AssignmentLine is one assignment a reply lists, as the local data has it: its title (trusted local data, shown
-// as plain text), its library subject (zero when none) and its deadline (zero when none).
+// AssignmentLine is one assignment a reply lists (or an action line shows), as the local data has it: its title
+// (trusted local data, shown as plain text), its library subject (zero when none) and its deadline (zero when none).
+// DueTime is the time of day of the deadline, set on an action line only (zero on a reply's lines).
 type AssignmentLine struct {
 	Assignment Ref
 	Title      string
 	Subject    Ref
 	Due        Date
+	DueTime    TimeOfDay
+}
+
+func (l AssignmentLine) validate() error {
+	if strings.TrimSpace(l.Title) == "" || !utf8.ValidString(l.Title) {
+		return fmt.Errorf("%w: a line without a title", ErrInvalidCard)
+	}
+	if !l.Subject.IsZero() && l.Subject.Kind() != KindSubject {
+		return fmt.Errorf("%w: a line subject is not a subject", ErrInvalidCard)
+	}
+	if !l.DueTime.IsZero() && l.Due.IsZero() {
+		return fmt.Errorf("%w: a line time without a date", ErrInvalidCard)
+	}
+	return nil
 }
 
 // Kind returns CardReply.
@@ -234,11 +258,8 @@ func (c ReplyCard) Validate() error {
 			return fmt.Errorf("%w: a line of an assignment the reply does not list", ErrInvalidCard)
 		}
 		shown.Add(l.Assignment)
-		if strings.TrimSpace(l.Title) == "" || !utf8.ValidString(l.Title) {
-			return fmt.Errorf("%w: a line without a title", ErrInvalidCard)
-		}
-		if !l.Subject.IsZero() && l.Subject.Kind() != KindSubject {
-			return fmt.Errorf("%w: a line subject is not a subject", ErrInvalidCard)
+		if err := l.validate(); err != nil {
+			return err
 		}
 	}
 	return nil

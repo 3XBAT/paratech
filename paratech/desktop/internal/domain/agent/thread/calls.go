@@ -23,7 +23,8 @@ type OpenCall struct {
 	Result   values.ToolResult
 }
 
-// Created is an ID that a create_subject or create_folder call made while executing approved plan step Step. A
+// Created is an ID that a create_subject, create_folder or create_assignment call made while executing approved plan
+// step Step. A
 // deferred plan argument binds only to such an ID from an earlier step (ADR-0021, TASK-115 follow-up).
 type Created struct {
 	Ref  values.Ref
@@ -67,7 +68,7 @@ func (t *Turn) openCall(id string) *OpenCall {
 	return nil
 }
 
-// Answer records the result of an open call. created is the ID a create_subject or create_folder call made (zero
+// Answer records the result of an open call. created is the ID a create call (values.CreatedKind) made (zero
 // otherwise); it becomes known to the provenance check and, for an approved plan step, bindable to deferred
 // arguments of later steps.
 func (th *Thread) Answer(r values.ToolResult, created values.Ref, now time.Time) error {
@@ -167,8 +168,7 @@ func validOpen(open []OpenCall, approved int) bool {
 
 func validCreated(created []Created, approved int) bool {
 	for _, c := range created {
-		kind := c.Ref.Kind()
-		if (kind != values.KindSubject && kind != values.KindFolder) || c.Step < 0 || c.Step >= approved {
+		if !values.IsCreatedKind(c.Ref.Kind()) || c.Step < 0 || c.Step >= approved {
 			return false
 		}
 	}

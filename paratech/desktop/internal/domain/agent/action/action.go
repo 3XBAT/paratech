@@ -313,6 +313,8 @@ func (a *Action) TargetRef() values.Ref {
 		return v.Recording
 	case RestoreDue:
 		return v.Assignment
+	case RemoveAssignment:
+		return v.Assignment
 	}
 	return values.Ref{}
 }

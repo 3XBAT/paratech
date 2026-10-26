@@ -208,6 +208,10 @@ func TestCompensationMatchesTool(t *testing.T) {
 		{"stop turnkey writing", values.ToolWriteWork, StopWork{Work: ref(t, values.KindWork, "w1"), Job: j1}, true},
 		{"turnkey writing without its job", values.ToolWriteWork, StopWork{Work: ref(t, values.KindWork, "w1")}, false},
 		{"turnkey writing as a plain job", values.ToolWriteWork, CancelJob{Job: j1}, false},
+		{"remove added assignment", values.ToolCreateAssignment, RemoveAssignment{Assignment: a1}, true},
+		{"remove added assignment without id", values.ToolCreateAssignment, RemoveAssignment{}, false},
+		{"remove added assignment of a work", values.ToolCreateAssignment, RemoveAssignment{Assignment: ref(t, values.KindWork, "w1")}, false},
+		{"added assignment undone as a due", values.ToolCreateAssignment, RestoreDue{Assignment: a1}, false},
 
 		{"nil", values.ToolCreateSubject, nil, false},
 		{"other tool's compensation", values.ToolCreateSubject, CancelJob{Job: j1}, false},
