@@ -1,6 +1,6 @@
 // The writing cards of a turnkey work (TASK-132): the binding, the card of each step, the plan editor, polling and
 // plain-text rendering. Runs on the modules compiled by `npm run test` (tsconfig.test.json).
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
@@ -16,6 +16,14 @@ import {
   checkEditor,
   regenerateBlocked,
   rewriteWork,
+  savePlanAt,
+  staleText,
+  notStoppedText,
+  canStop,
+  openLabel,
+  openTarget,
+  openWork,
+  pollUntilStopped,
   singleFlight,
   startPolling,
   editorFromSections,
@@ -299,45 +307,68 @@ function callApi(log, over = {}) {
     work: mk("work", work({ version: 9 })),
     startWriting: mk("startWriting", work({ version: 3 })),
     approveOutline: mk("approveOutline", work({ version: 3 })),
-    editOutline: mk("editOutline", work({ version: 2 })),
+    editOutlineAt: mk("editOutlineAt", work({ version: 2 })),
     regenerate: mk("regenerate", work()),
   };
 }
 
 const planItems = [{ number: 1, title: " Введение ", words: "300" }];
 
-test("approve: EditOutline when edited then ApproveOutline; only the final reply is returned", async () => {
+test("approve: EditOutlineAt (with the version) when edited then ApproveOutline; only the final reply is returned", async () => {
   const log = [];
-  const r = await approvePlan(callApi(log), "w1", planItems, true);
-  assert.deepEqual(log, [["editOutline", "w1", [{ number: 1, title: "Введение", words: 300 }]], ["approveOutline", "w1"]]);
+  const r = await approvePlan(callApi(log), "w1", 4, planItems, true);
+  assert.deepEqual(log, [["editOutlineAt", "w1", 4, [{ number: 1, title: "Введение", words: 300 }]], ["approveOutline", "w1"]]);
   assert.equal(r.ok, true);
   assert.equal(r.work.version, 3);
 
   const plain = [];
-  await approvePlan(callApi(plain), "w1", planItems, false);
+  await approvePlan(callApi(plain), "w1", 4, planItems, false);
   assert.deepEqual(plain, [["approveOutline", "w1"]]);
 });
 
-test("rewrite: EditOutline then StartWriting; a failing StartWriting keeps the error and re-reads the work", async () => {
+test("rewrite: EditOutlineAt then StartWriting; a failing StartWriting keeps the error and re-reads the work", async () => {
   const log = [];
-  const r = await rewriteWork(callApi(log, { startWriting: new Error(errorTexts[3]) }), "w1", planItems, true);
-  assert.deepEqual(log.map((c) => c[0]), ["editOutline", "startWriting", "work"]);
+  const r = await rewriteWork(callApi(log, { startWriting: new Error(errorTexts[3]) }), "w1", 4, planItems, true);
+  assert.deepEqual(log.map((c) => c[0]), ["editOutlineAt", "startWriting", "work"]);
   assert.equal(r.ok, false);
   assert.equal(turnkeyErrorText(r.error), errorTexts[3]);
   assert.equal(r.fresh.version, 9);
 });
 
-test("a failing EditOutline stops the sequence and re-reads nothing", async () => {
+test("a failing EditOutlineAt stops the sequence and re-reads nothing", async () => {
   const log = [];
-  const r = await rewriteWork(callApi(log, { editOutline: new Error("x") }), "w1", planItems, true);
-  assert.deepEqual(log.map((c) => c[0]), ["editOutline"]);
+  const r = await rewriteWork(callApi(log, { editOutlineAt: new Error("x") }), "w1", 4, planItems, true);
+  assert.deepEqual(log.map((c) => c[0]), ["editOutlineAt"]);
   assert.equal(r.ok, false);
   assert.equal(r.fresh, null);
 });
 
+test("a stale plan edit shows the core's text and re-reads the card (approve, rewrite, save)", async () => {
+  for (const run of [
+    (api) => approvePlan(api, "w1", 4, planItems, true),
+    (api) => rewriteWork(api, "w1", 4, planItems, true),
+    (api) => savePlanAt(api, "w1", 4, planItems),
+  ]) {
+    const log = [];
+    const r = await run(callApi(log, { editOutlineAt: new Error(staleText) }));
+    assert.deepEqual(log.map((c) => c[0]), ["editOutlineAt", "work"]);
+    assert.equal(r.ok, false);
+    assert.equal(turnkeyErrorText(r.error), "Работа изменилась: обновите карточку.");
+    assert.equal(r.fresh.version, 9);
+  }
+});
+
+test("save plan: EditOutlineAt with the shown version; the saved work is the result", async () => {
+  const log = [];
+  const r = await savePlanAt(callApi(log), "w1", 4, planItems);
+  assert.deepEqual(log, [["editOutlineAt", "w1", 4, [{ number: 1, title: "Введение", words: 300 }]]]);
+  assert.equal(r.ok, true);
+  assert.equal(r.work.version, 2);
+});
+
 test("an unreadable work after a failed step gives no fresh work", async () => {
   const log = [];
-  const r = await approvePlan(callApi(log, { approveOutline: new Error("x"), work: new Error("y") }), "w1", planItems, true);
+  const r = await approvePlan(callApi(log, { approveOutline: new Error("x"), work: new Error("y") }), "w1", 4, planItems, true);
   assert.equal(r.ok, false);
   assert.equal(r.fresh, null);
 });
@@ -622,7 +653,142 @@ test("«Повторить» calls StartWriting with the work id", async () => {
 
 test("buttons without a binding are not offered", () => {
   const src = readFileSync(new URL("../src/workView.ts", import.meta.url), "utf8") + readFileSync(new URL("../src/agent/WorkCard.tsx", import.meta.url), "utf8");
-  for (const label of ["Открыть в Word", "Остановить", "Отправить преподавателю"]) {
+  // «Открыть в Word» and «Остановить» have bindings since TASK-177/178 and are offered (TASK-191).
+  for (const label of ["Отправить преподавателю"]) {
     assert.ok(!src.includes(label), label);
   }
+});
+
+// ---- «Остановить», «Открыть в Word / PowerPoint» (TASK-191) ----
+
+const doneWriting = (over) => writing({ step: "none", result: "ok", materialId: "m1", ...over });
+const library = { openMaterial: async () => ({ status: "opened", message: "Файл открывается в программе по умолчанию." }) };
+
+function renderWith(w, extra = {}) {
+  return renderToStaticMarkup(h(WorkBody, { work: w, api: fakeApi(), onWork: noop, ...extra }));
+}
+
+test("«Остановить» shows only while a job is active and is disabled while stopping", () => {
+  const running = work({ writing: writing({ step: "section", total: 2, active: true }) });
+  assert.equal(canStop(running), true);
+  assert.ok(renderWith(running).includes("Остановить"));
+  const stopping = renderWith(running, { stopping: true });
+  assert.ok(stopping.includes("Остановка…"));
+  assert.ok(!stopping.includes(">Остановить<"));
+  assert.ok(/<button[^>]*disabled[^>]*>[^<]*(<[^>]*>)*[^<]*Остановка…/.test(stopping), stopping);
+  const idle = work({ writing: writing({ step: "section", total: 2, active: false }) });
+  assert.equal(canStop(idle), false);
+  assert.ok(!renderWith(idle).includes("Остановить"));
+});
+
+test("a refused stop shows the core's text and does not offer «Повторить»", () => {
+  const running = work({ writing: writing({ step: "section", total: 2, active: true }) });
+  const out = renderWith(running, { error: notStoppedText, onError: noop });
+  assert.ok(out.includes("Не удалось остановить написание. Попробуйте ещё раз."));
+  assert.ok(!out.includes("Повторить"));
+  assert.ok(out.includes("Остановить"));
+  assert.ok(renderWith(running, { error: "Другая ошибка", onError: noop }).includes("Повторить"));
+});
+
+test("polling after «Остановить» runs until writing.active is false, then stops", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const states = [true, true, false];
+    let reads = 0;
+    let done = 0;
+    const seen = [];
+    const stop = pollUntilStopped({
+      read: async () => work({ writing: writing({ step: "section", active: states[reads++] }) }),
+      onWork: (w) => seen.push(w.writing.active),
+      onDone: () => done++,
+    });
+    assert.equal(reads, 0, "the first read waits one interval");
+    for (let i = 0; i < 3; i++) {
+      mock.timers.tick(pollMs);
+      await new Promise((r) => setImmediate(r));
+    }
+    assert.deepEqual(seen, [true, true, false]);
+    assert.equal(done, 1);
+    mock.timers.tick(pollMs * 5);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(reads, 3, "no more reads once inactive");
+    stop();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("polling after «Остановить» stops on unmount and survives a failed read", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    let reads = 0;
+    const stop = pollUntilStopped({
+      read: async () => {
+        reads++;
+        throw new Error("x");
+      },
+      onWork: noop,
+      onDone: noop,
+    });
+    mock.timers.tick(pollMs);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(reads, 1);
+    mock.timers.tick(pollMs);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(reads, 2, "a failed read is tried again");
+    stop();
+    mock.timers.tick(pollMs * 5);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(reads, 2, "unmounted: no reads");
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("«Открыть в Word» for a ready work, «Открыть в PowerPoint» for a presentation; the copy caption is shown", () => {
+  const paper = work({ workType: "referat", writing: doneWriting() });
+  const slides = work({ workType: "presentation", writing: doneWriting() });
+  assert.equal(openLabel(paper), "Открыть в Word");
+  assert.equal(openLabel(slides), "Открыть в PowerPoint");
+  const a = renderWith(paper, { library });
+  assert.ok(a.includes("Открыть в Word"));
+  assert.ok(a.includes("правки в ней в приложение не возвращаются"));
+  assert.ok(renderWith(slides, { library }).includes("Открыть в PowerPoint"));
+  // Not offered without a ready file or without the binding.
+  assert.ok(!renderWith(work({ workType: "referat", writing: doneWriting({ result: "" }) }), { library }).includes("Открыть в"));
+  assert.ok(!renderWith(paper).includes("Открыть в"));
+});
+
+test("opening sends the id only, once per call; a refusal is a fixed text", async () => {
+  const calls = [];
+  const lib = { openMaterial: async (...a) => (calls.push(a), { status: "refused", message: "Этот файл нельзя открыть отсюда." }) };
+  const w = work({ workType: "lab_report", writing: doneWriting({ materialId: "m7" }) });
+  assert.equal(openTarget(w), "m7");
+  const v = await openWork(lib, w);
+  assert.deepEqual(calls, [["m7"]]);
+  assert.deepEqual(v, { kind: "fail", text: "Этот файл нельзя открыть отсюда." });
+  const ok = await openWork(library, w);
+  assert.equal(ok.kind, "ok");
+  assert.equal(await openWork(lib, work({ writing: doneWriting({ result: "" }) })), null);
+  assert.equal(calls.length, 1, "no file, no call");
+});
+
+test("every button call goes through the in-flight guard and the card keeps its exports", () => {
+  const src = readFileSync(new URL("../src/agent/WorkCard.tsx", import.meta.url), "utf8");
+  const calls = src.match(/onClick=\{\(\) => void [^(]*\(/g) ?? [];
+  assert.ok(calls.length >= 8);
+  assert.ok(calls.every((c) => c.includes("void run(")), calls.join("\n"));
+  assert.match(src, /export function WorkWritingCard\(props: \{ api: TurnkeyApi; workId: string;/);
+});
+
+test("a double click on «Остановить» is one call", async () => {
+  const flight = singleFlight();
+  let calls = 0;
+  let release;
+  const stop = () => flight(() => new Promise((res) => { calls++; release = res; }));
+  const first = stop();
+  assert.equal(await stop(), false);
+  release();
+  await first;
+  assert.equal(calls, 1);
 });

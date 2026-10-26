@@ -3,7 +3,8 @@
 // an impersonal voice. Topic, titles, paragraphs, notes and sources are model or student text: pass them through
 // untouched and render them as text nodes only.
 
-import { notFoundText, turnkeyErrorText } from "./bindings/turnkey.js";
+import { errorTexts, notFoundText, turnkeyErrorText } from "./bindings/turnkey.js";
+import type { LibraryApi } from "./bindings/library.js";
 import type { OutlineItem, TurnkeyApi, TurnkeyWork, WorkSection, WorkWriting } from "./bindings/turnkey.js";
 
 // The limits of the domain (domain/coursework/work/writing.go); titles and notes are counted in runes, as there.
@@ -45,6 +46,11 @@ export const workTexts = {
   rewrite: "Написать заново",
   cancel: "Отмена",
   retry: "Повторить",
+  stop: "Остановить",
+  stopping: "Остановка…",
+  openWord: "Открыть в Word",
+  openPowerPoint: "Открыть в PowerPoint",
+  copyNote: "Файл открывается как копия: правки в ней в приложение не возвращаются.",
   addSection: "Добавить раздел",
   titleLabel: "Название раздела",
   wordsLabel: "Объём, слов",
@@ -136,7 +142,7 @@ export function workCardModel(w: TurnkeyWork): WorkCardModel {
       return {
         type: "done",
         caption: workTexts.doneCaption,
-        file: { kind: workTexts.fileKind, name: wr.topic.trim() === "" ? workTexts.fallbackName : wr.topic },
+        file: { kind: w.workType === "presentation" ? ".pptx" : workTexts.fileKind, name: wr.topic.trim() === "" ? workTexts.fallbackName : wr.topic },
         notice: workTexts.generated,
         sections: sectionTexts(wr.sections),
       };
@@ -370,12 +376,13 @@ export type StepResult = { ok: true; work: TurnkeyWork } | { ok: false; error: u
  * Saves the plan when edited, then runs `next`. Only the reply of `next` is returned for the card: the reply of
  * EditOutline is not applied, as it could re-mount the card and drop an error shown on it.
  */
-async function afterEdit(api: TurnkeyApi, workId: string, items: readonly EditorItem[], edited: boolean, next: () => Promise<TurnkeyWork>): Promise<StepResult> {
+async function afterEdit(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[], edited: boolean, next: () => Promise<TurnkeyWork>): Promise<StepResult> {
   if (edited) {
     try {
-      await api.editOutline(workId, toOutlineItems(items));
+      await api.editOutlineAt(workId, version, toOutlineItems(items));
     } catch (error) {
-      return { ok: false, error, fresh: null };
+      // A stale plan: the card shows the error and the work is read again.
+      return { ok: false, error, fresh: turnkeyErrorText(error) === staleText ? await readOrNull(api, workId) : null };
     }
   }
   try {
@@ -408,12 +415,91 @@ export function retryWriting(api: TurnkeyApi, workId: string): Promise<TurnkeyWo
   return api.startWriting(workId);
 }
 
-/** «Утвердить план»: EditOutline if edited, then ApproveOutline. */
-export function approvePlan(api: TurnkeyApi, workId: string, items: readonly EditorItem[], edited: boolean): Promise<StepResult> {
-  return afterEdit(api, workId, items, edited, () => api.approveOutline(workId));
+/** «Утвердить план»: EditOutlineAt (the version the plan was shown at) if edited, then ApproveOutline. */
+export function approvePlan(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[], edited: boolean): Promise<StepResult> {
+  return afterEdit(api, workId, version, items, edited, () => api.approveOutline(workId));
 }
 
-/** «Написать заново» of a done work: EditOutline, then StartWriting. */
-export function rewriteWork(api: TurnkeyApi, workId: string, items: readonly EditorItem[], edited: boolean): Promise<StepResult> {
-  return afterEdit(api, workId, items, edited, () => api.startWriting(workId));
+/** «Написать заново» of a done work: EditOutlineAt, then StartWriting. */
+export function rewriteWork(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[], edited: boolean): Promise<StepResult> {
+  return afterEdit(api, workId, version, items, edited, () => api.startWriting(workId));
+}
+
+/** «Сохранить план»: the same stale rule, the saved work is the result. */
+export async function savePlanAt(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[]): Promise<StepResult> {
+  try {
+    return { ok: true, work: await api.editOutlineAt(workId, version, toOutlineItems(items)) };
+  } catch (error) {
+    return { ok: false, error, fresh: turnkeyErrorText(error) === staleText ? await readOrNull(api, workId) : null };
+  }
+}
+
+async function readOrNull(api: TurnkeyApi, workId: string): Promise<TurnkeyWork | null> {
+  try {
+    return await api.work(workId);
+  } catch {
+    return null;
+  }
+}
+
+/** The core's refusal of a plan edit made on an old version (TASK-178). */
+export const staleText = errorTexts[6];
+
+/** The core's refusal when a writing job could not be cancelled (TASK-178). */
+export const notStoppedText = errorTexts[7];
+
+/** While a stop is pending: reads the work every pollMs until writing.active is false. Returns the stop function. */
+export function pollUntilStopped(o: { read(): Promise<TurnkeyWork>; onWork(w: TurnkeyWork): void; onDone(): void }): () => void {
+  let alive = true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const tick = async () => {
+    try {
+      const w = await o.read();
+      if (!alive) {
+        return;
+      }
+      o.onWork(w);
+      if (w.writing?.active !== true) {
+        o.onDone();
+        return;
+      }
+    } catch {
+      if (!alive) {
+        return;
+      }
+    }
+    timer = setTimeout(() => void tick(), pollMs);
+  };
+  timer = setTimeout(() => void tick(), pollMs);
+  return () => {
+    alive = false;
+    clearTimeout(timer);
+  };
+}
+
+/** «Открыть в Word / PowerPoint»: a presentation is a .pptx, every other ready work a .docx. */
+export function openLabel(w: TurnkeyWork): string {
+  return w.workType === "presentation" ? workTexts.openPowerPoint : workTexts.openWord;
+}
+
+/** The material to open: the ready file, "" if there is none. Only this id crosses to the core. */
+export function openTarget(w: TurnkeyWork): string {
+  return w.writing?.step === "none" && w.writing.result !== "" ? w.writing.materialId : "";
+}
+
+export type OpenView = { kind: "ok" | "fail"; text: string };
+
+/** Opens the copy of the ready file; a refused or failed open is a fixed text, never a path. */
+export async function openWork(library: Pick<LibraryApi, "openMaterial">, w: TurnkeyWork): Promise<OpenView | null> {
+  const id = openTarget(w);
+  if (id === "") {
+    return null;
+  }
+  const r = await library.openMaterial(id);
+  return r.status === "opened" ? { kind: "ok", text: r.message } : { kind: "fail", text: r.message };
+}
+
+/** A stop button shows while a writing job runs. */
+export function canStop(w: TurnkeyWork): boolean {
+  return w.writing?.active === true;
 }

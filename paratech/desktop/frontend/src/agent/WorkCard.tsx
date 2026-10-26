@@ -23,10 +23,19 @@ import {
   noteOf,
   removeItem,
   reviseOptions,
-  toOutlineItems,
+  canStop,
+  notStoppedText,
+  openLabel,
+  openTarget,
+  openWork,
+  pollUntilStopped,
+  savePlanAt,
+  type OpenView,
   workCardModel,
   workTexts,
 } from "../workView.js";
+import { libraryApi, type LibraryApi } from "../bindings/library.js";
+import { callByName } from "../bindings/runtime.js";
 import { turnkeyCardModel } from "../turnkeyView.js";
 import { FailedCard, HelperCard, QuestionsCard, TriageCard, UnderstandingCard } from "./TurnkeyCards.js";
 import { Button, IconButton } from "../ui/Button.js";
@@ -84,7 +93,9 @@ function OutlineEditor(props: { items: EditorItem[]; check: EditorCheck; disable
   );
 }
 
-type Mode = "view" | "edit" | "revise";
+const defaultLibrary = libraryApi(callByName);
+
+type Mode ="view" | "edit" | "revise";
 
 /**
  * The card of a work that was loaded. It owns the typed state (plan editor, note) and maps the buttons to the core; a
@@ -97,6 +108,12 @@ export function WorkBody(props: {
   /** The error of the last call and its setter live in the parent: this body is re-mounted when the step changes. */
   error?: string;
   onError?(text: string): void;
+  /** «Открыть в Word / PowerPoint» needs it; without it the buttons are not shown. */
+  library?: Pick<LibraryApi, "openMaterial">;
+  /** A stop was requested and the job has not finished yet. */
+  stopping?: boolean;
+  /** The core accepted «Остановить»: the parent keeps reading the work until the job is gone. */
+  onStopped?(): void;
 }) {
   const { work, api } = props;
   const error = props.error ?? "";
@@ -108,6 +125,7 @@ export function WorkBody(props: {
   const [reviseNumber, setReviseNumber] = useState(0);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [openView, setOpenView] = useState<OpenView | null>(null);
   // One call at a time: the guard answers a second click before the state has disabled the buttons.
   const [flight] = useState(singleFlight);
   const noteId = useId();
@@ -145,6 +163,32 @@ export function WorkBody(props: {
     }
     setError(turnkeyErrorText(r.error));
   };
+
+  // «Сохранить план»: a stale version shows the error, re-reads the card and drops the typed plan.
+  const savePlan = async () => {
+    const r = await savePlanAt(api, work.id, work.version, items);
+    if (r.ok) {
+      saved(r.work);
+      return;
+    }
+    if (r.fresh !== null) {
+      saved(r.fresh);
+    }
+    setError(turnkeyErrorText(r.error));
+  };
+  const stop = async () => {
+    const w = await api.stopWriting(work.id);
+    props.onWork(w);
+    if (canStop(w)) {
+      props.onStopped?.();
+    }
+  };
+  const open = async () => {
+    if (props.library !== undefined) {
+      setOpenView(await openWork(props.library, work));
+    }
+  };
+  const canOpen = props.library !== undefined && openTarget(work) !== "";
 
   const errorLine = error !== "" && (
     <ResultLine kind="fail" role="alert">
@@ -198,13 +242,18 @@ export function WorkBody(props: {
           </h3>
           <p role="status">{model.line}</p>
           {errorLine}
-          {error !== "" && (
-            <div className="ag-actions">
+          <div className="ag-actions">
+            {error !== "" && error !== notStoppedText && (
               <Button size="sm" variant="primary" disabled={busy} onClick={() => void run(async () => props.onWork(await retryWriting(api, work.id)))}>
                 {workTexts.retry}
               </Button>
-            </div>
-          )}
+            )}
+            {canStop(work) && (
+              <Button size="sm" variant="secondary" disabled={busy || props.stopping === true} onClick={() => void run(stop)}>
+                {props.stopping ? workTexts.stopping : workTexts.stop}
+              </Button>
+            )}
+          </div>
         </section>
       );
 
@@ -220,11 +269,11 @@ export function WorkBody(props: {
               size="sm"
               variant="primary"
               disabled={busy || !check.ok}
-              onClick={() => void run(() => step(approvePlan(api, work.id, items, edited)))}
+              onClick={() => void run(() => step(approvePlan(api, work.id, work.version, items, edited)))}
             >
               {workTexts.approve}
             </Button>
-            <Button size="sm" variant="secondary" disabled={busy || !check.ok || !edited} onClick={() => void run(async () => saved(await api.editOutline(work.id, toOutlineItems(items))))}>
+            <Button size="sm" variant="secondary" disabled={busy || !check.ok || !edited} onClick={() => void run(savePlan)}>
               {workTexts.savePlan}
             </Button>
           </div>
@@ -306,6 +355,13 @@ export function WorkBody(props: {
           )}
           {mode === "edit" && <OutlineEditor items={items} check={check} disabled={busy} onChange={setItems} />}
           {errorLine}
+          {openView !== null && (
+            <ResultLine kind={openView.kind} role={openView.kind === "fail" ? "alert" : "status"}>
+              {openView.text}
+            </ResultLine>
+          )}
+
+          {canOpen && mode === "view" && <p className="small muted">{workTexts.copyNote}</p>}
 
           <div className="ag-actions">
             {mode === "view" && (
@@ -316,6 +372,11 @@ export function WorkBody(props: {
                 <Button size="sm" variant="secondary" disabled={busy} onClick={() => setMode("edit")}>
                   {workTexts.editPlan}
                 </Button>
+                {canOpen && (
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(open)}>
+                    {openLabel(work)}
+                  </Button>
+                )}
               </>
             )}
             {mode === "revise" && (
@@ -334,7 +395,7 @@ export function WorkBody(props: {
                   size="sm"
                   variant="primary"
                   disabled={busy || !check.ok || !edited}
-                  onClick={() => void run(() => step(rewriteWork(api, work.id, items, edited)))}
+                  onClick={() => void run(() => step(rewriteWork(api, work.id, work.version, items, edited)))}
                 >
                   {workTexts.rewrite}
                 </Button>
@@ -350,9 +411,11 @@ export function WorkBody(props: {
 }
 
 /** Loads the work of a `work` card, re-reads it while a step runs, and shows the card of its step. */
-export function WorkWritingCard(props: { api: TurnkeyApi; workId: string }) {
+export function WorkWritingCard(props: { api: TurnkeyApi; workId: string; library?: LibraryApi }) {
   const { api, workId } = props;
+  const library = props.library ?? defaultLibrary;
   const [work, setWork] = useState<TurnkeyWork | null>(null);
+  const [stopping, setStopping] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const latest = useRef<TurnkeyWork | null>(null);
@@ -387,9 +450,29 @@ export function WorkWritingCard(props: { api: TurnkeyApi; workId: string }) {
     [api, workId, running, apply],
   );
 
+  // A stop of a running step is asynchronous: read the work until writing.active is false. The cleanup stops it on unmount.
+  useEffect(() => {
+    if (!stopping) {
+      return undefined;
+    }
+    return pollUntilStopped({ read: () => api.work(workId), onWork: apply, onDone: () => setStopping(false) });
+  }, [api, workId, stopping, apply]);
+
   return (
     <>
-      {work !== null && <WorkBody key={`${work.writing?.step ?? "-"}:${work.writing?.generation ?? 0}`} work={work} api={api} onWork={onWork} error={actionError} onError={onError} />}
+      {work !== null && (
+        <WorkBody
+          key={`${work.writing?.step ?? "-"}:${work.writing?.generation ?? 0}`}
+          work={work}
+          api={api}
+          onWork={onWork}
+          error={actionError}
+          onError={onError}
+          library={library}
+          stopping={stopping}
+          onStopped={() => setStopping(true)}
+        />
+      )}
       {loadError !== "" && (
         <p className="small muted" role="status">
           {loadError}
