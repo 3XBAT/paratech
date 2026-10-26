@@ -115,6 +115,8 @@ func TestHistoryTurnValidate(t *testing.T) {
 		{StudentText: "привет"},
 		{Calls: calls},
 		{Results: []ToolResult{{CallID: "c1", ResultJSON: `{}`}}},
+		{AgentReply: "reply: горутина — это"},
+		{AgentReply: strings.Repeat("a", MaxAgentReplyBytes)},
 	}
 	for i, h := range good {
 		if err := h.Validate(); err != nil {
@@ -127,6 +129,12 @@ func TestHistoryTurnValidate(t *testing.T) {
 		{Calls: &SealedCalls{Calls: calls.Calls}},
 		{Results: []ToolResult{{CallID: "c1"}}},
 		{StudentText: strings.Repeat("a", MaxStudentTextBytes+1)},
+		{StudentText: "x", AgentReply: "y"},
+		{AgentReply: "y", Results: []ToolResult{{CallID: "c1", ResultJSON: `{}`}}},
+		{AgentReply: strings.Repeat("a", MaxAgentReplyBytes+1)},
+		{AgentReply: " \n "},
+		{AgentReply: "a\x00b"},
+		{AgentReply: "a\xffb"},
 	}
 	for i, h := range bad {
 		if err := h.Validate(); !errors.Is(err, ErrInvalidResult) {

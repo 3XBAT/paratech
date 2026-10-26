@@ -468,33 +468,37 @@ func entry(turn int, text string, calls *values.SealedCalls, results ...values.T
 }
 
 func TestWindow(t *testing.T) {
-	sealed := &values.SealedCalls{Calls: []values.RawCall{{CallID: "c", Tool: "reply", ArgumentsJSON: `{}`}}, Seal: []byte{1}}
+	sealed := &values.SealedCalls{Calls: []values.RawCall{{CallID: "c", Tool: "reply", ArgumentsJSON: `{"text":"ответ"}`}}, Seal: []byte{1}}
 	var entries []values.HistoryEntry
 	for turn := 1; turn <= 20; turn++ {
 		entries = append(entries, entry(turn, fmt.Sprintf("просьба %d", turn), nil), entry(turn, "", sealed), entry(turn, "", nil, ok("c")))
 	}
 	got := Window(entries, 20)
-	// Earlier requests shrink to their texts (the last MaxHistoryTurns of them); only the current one has echoes, so
-	// the last echo is always one the Hub still keeps.
-	if len(got) != MaxHistoryTurns+3 || got[0].StudentText != "просьба 8" {
+	// Earlier requests shrink to pairs «text, reply» (the last MaxHistoryTurns of them); only the current one has
+	// echoes, so the last echo is always one the Hub still keeps.
+	if len(got) != 2*MaxHistoryTurns+3 || got[0].StudentText != "просьба 8" {
 		t.Fatalf("window has %d entries, first %+v", len(got), got[0])
 	}
-	for i, h := range got[:MaxHistoryTurns] {
-		if h.StudentText == "" || h.Calls != nil || len(h.Results) > 0 {
-			t.Fatalf("earlier entry %d = %+v, want a text only", i, h)
+	for i := range MaxHistoryTurns {
+		text, reply := got[2*i], got[2*i+1]
+		if text.StudentText != fmt.Sprintf("просьба %d", 8+i) || text.AgentReply != "" || text.Calls != nil || len(text.Results) > 0 {
+			t.Fatalf("earlier entry %d = %+v, want a text only", 2*i, text)
+		}
+		if reply.AgentReply != "reply: ответ" || reply.StudentText != "" || reply.Calls != nil || len(reply.Results) > 0 {
+			t.Fatalf("earlier entry %d = %+v, want the reply only", 2*i+1, reply)
 		}
 	}
-	if cur := got[MaxHistoryTurns:]; cur[0].StudentText != "просьба 20" || cur[1].Calls == nil || len(cur[2].Results) != 1 {
+	if cur := got[2*MaxHistoryTurns:]; cur[0].StudentText != "просьба 20" || cur[1].Calls == nil || len(cur[2].Results) != 1 {
 		t.Fatalf("current request = %+v", cur)
 	}
 
-	// Earlier texts are bounded by bytes too.
+	// Earlier pairs are bounded by bytes too; the reply counts.
 	big := strings.Repeat("a", MaxHistoryBytes/2+1)
 	var heavy []values.HistoryEntry
 	for turn := 1; turn <= 5; turn++ {
 		heavy = append(heavy, entry(turn, big, nil))
 	}
-	if got := Window(heavy, 5); len(got) != 2 || got[1].StudentText != big {
+	if got := Window(heavy, 5); len(got) != 3 || got[0].StudentText != big || got[1].AgentReply != NoReply || got[2].StudentText != big {
 		t.Fatalf("heavy window has %d entries", len(got))
 	}
 

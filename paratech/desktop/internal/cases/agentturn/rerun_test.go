@@ -49,8 +49,9 @@ func TestRerunDoneRequest(t *testing.T) {
 	}
 }
 
-// The planner history of a repeat ends with the repeat's own text, after the texts of the earlier requests (the
-// repeated request's text is one of them). Pinned so a change to the window (owner bug of 2026-10-24) is deliberate.
+// The planner history of a repeat ends with the repeat's own text, after the earlier requests as pairs «text, reply»
+// (the repeated request's text is one of them). Pinned so a change to the window (owner bug of 2026-10-24, TASK-183)
+// is deliberate.
 func TestRerunHistoryEndsWithItsText(t *testing.T) {
 	e := newEnv(t)
 	e.model.then(raw("r1", "reply", `{"text":"горутина — это"}`)).
@@ -62,13 +63,17 @@ func TestRerunHistoryEndsWithItsText(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := e.model.last(t).History
-	want := []string{"что такое горутина", "кто такой рыбаков", "кто такой рыбаков"}
+	want := []values.HistoryTurn{
+		{StudentText: "что такое горутина"}, {AgentReply: "reply: горутина — это"},
+		{StudentText: "кто такой рыбаков"}, {AgentReply: "reply: рыбаков — это"},
+		{StudentText: "кто такой рыбаков"},
+	}
 	if len(h) != len(want) {
 		t.Fatalf("history = %+v", h)
 	}
 	for i, w := range want {
-		if h[i].StudentText != w || h[i].Calls != nil || h[i].Results != nil {
-			t.Fatalf("history[%d] = %+v, want text %q", i, h[i], w)
+		if h[i].StudentText != w.StudentText || h[i].AgentReply != w.AgentReply || h[i].Calls != nil || h[i].Results != nil {
+			t.Fatalf("history[%d] = %+v, want %+v", i, h[i], w)
 		}
 	}
 }
@@ -203,7 +208,8 @@ func TestRerunFromStoppedWithOpenCalls(t *testing.T) {
 		stored[2].Entry.Results[0].ResultJSON != `{"error":"not_done"}` || stored[3].Turn != 2 {
 		t.Fatalf("stored history = %+v", stored)
 	}
-	if h := e.model.last(t).History; len(h) != 2 || h[1].StudentText != "что это\n[upload:u1]" {
+	if h := e.model.last(t).History; len(h) != 3 || h[2].StudentText != "что это\n[upload:u1]" ||
+		h[1].AgentReply != thread.NoReply+"\nactions: inspect_upload error, list_subjects error" {
 		t.Fatalf("repeat history = %+v", h)
 	}
 	if _, err := e.svc.Submit(t.Context(), SubmitInput{Turn: ref(st), Outcomes: []Outcome{okResult("c1", `{}`)}}); !errors.Is(err, ErrStaleTurn) {

@@ -2,6 +2,7 @@ package agentturn
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"paratech/desktop/internal/domain/agent/thread"
@@ -76,8 +77,8 @@ func TestAbortReturnsTheStoredRequest(t *testing.T) {
 
 // Owner report 2026-10-24: after «нет связи» and «Повторить» on a new question the planner answered the previous one.
 // The desktop sends every attempt of the new request with the new text last and the same history; the earlier request
-// goes as its text only, without its answer (thread.Window), so this pins the request shape the Hub gets: the repeats
-// change nothing on the desktop side.
+// goes as its text and the answer it got (thread.Window, TASK-183), so this pins the request shape the Hub gets: the
+// repeats change nothing on the desktop side.
 func TestAttemptsOfANewRequestEndWithItsText(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -114,7 +115,12 @@ func TestAttemptsOfANewRequestEndWithItsText(t *testing.T) {
 			}
 			for i, req := range reqs[1:] {
 				h := req.History
-				if len(h) != 2 || h[0].StudentText != "что такое горутина" || h[1].StudentText != "кто такой рыбаков" {
+				want := []values.HistoryTurn{
+					{StudentText: "что такое горутина"}, {AgentReply: "reply: горутина — это"}, {StudentText: "кто такой рыбаков"},
+				}
+				if !slices.EqualFunc(h, want, func(a, b values.HistoryTurn) bool {
+					return a.StudentText == b.StudentText && a.AgentReply == b.AgentReply && a.Calls == nil && a.Results == nil
+				}) {
 					t.Fatalf("attempt %d of the new request = %+v", i+1, h)
 				}
 			}

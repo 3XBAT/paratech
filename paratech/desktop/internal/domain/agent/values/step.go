@@ -2,6 +2,8 @@ package values
 
 import (
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"paratech/desktop/internal/domain/shared"
 )
@@ -29,9 +31,14 @@ type ToolResult struct {
 	IsError    bool
 }
 
-// HistoryTurn is one history entry of the thread: exactly one of StudentText, Calls or Results is set.
+// MaxAgentReplyBytes bounds the agent reply of an earlier request (gateway.proto AgentTurn.agent_reply).
+const MaxAgentReplyBytes = 2 << 10
+
+// HistoryTurn is one history entry of the thread: exactly one of StudentText, AgentReply, Calls or Results is set.
+// AgentReply is never stored: thread.Window builds it from the stored entries of an earlier request.
 type HistoryTurn struct {
 	StudentText string
+	AgentReply  string
 	Calls       *SealedCalls
 	Results     []ToolResult
 }
@@ -43,6 +50,13 @@ func (h HistoryTurn) Validate() error {
 		set++
 		if len(h.StudentText) > MaxStudentTextBytes {
 			return fmt.Errorf("%w: student text longer than %d bytes", ErrInvalidResult, MaxStudentTextBytes)
+		}
+	}
+	if h.AgentReply != "" {
+		set++
+		if len(h.AgentReply) > MaxAgentReplyBytes || !utf8.ValidString(h.AgentReply) ||
+			strings.ContainsRune(h.AgentReply, 0) || strings.TrimSpace(h.AgentReply) == "" {
+			return fmt.Errorf("%w: an agent reply is 1..%d bytes of UTF-8 without NUL", ErrInvalidResult, MaxAgentReplyBytes)
 		}
 	}
 	if h.Calls != nil {
@@ -60,14 +74,14 @@ func (h HistoryTurn) Validate() error {
 		}
 	}
 	if set != 1 {
-		return fmt.Errorf("%w: a history entry holds exactly one of text, calls and results", ErrInvalidResult)
+		return fmt.Errorf("%w: a history entry holds exactly one of text, reply, calls and results", ErrInvalidResult)
 	}
 	return nil
 }
 
 // Size returns the bytes of the entry that count toward the history window.
 func (h HistoryTurn) Size() int {
-	n := len(h.StudentText)
+	n := len(h.StudentText) + len(h.AgentReply)
 	if h.Calls != nil {
 		n += len(h.Calls.Seal)
 		for _, c := range h.Calls.Calls {
