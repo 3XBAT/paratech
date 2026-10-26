@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import server from "react-dom/server";
-import { methods, parseWork, turnkeyApi } from "../.test-build/bindings/turnkey.js";
+import { genericError, methods, parseWork, turnkeyApi, turnkeyErrorText } from "../.test-build/bindings/turnkey.js";
 import {
   answeredLine,
   askStepOutcome,
@@ -54,6 +54,7 @@ function fakeApi(log = [], over = {}) {
   };
   return {
     work: reply("work"), startWriting: reply("startWriting"), approveOutline: reply("approveOutline"), editOutline: reply("editOutline"),
+    editOutlineAt: reply("editOutlineAt"), stopWriting: reply("stopWriting"),
     regenerate: reply("regenerate"), workOfAssignment: reply("workOfAssignment"), answerQuestions: reply("answerQuestions"),
     skipQuestions: reply("skipQuestions"), editUnderstanding: reply("editUnderstanding"), confirmRequirements: reply("confirmRequirements"),
     retry: reply("retry"), askStep: async (...args) => (log.push(["askStep", ...args]), "Ответ"), ...over,
@@ -119,6 +120,41 @@ test("the API sends the answers, the card and the step question as the Go bindin
   assert.deepEqual(calls[5], [methods.askStep, "w1", 2, "почему?"]);
   const bad = turnkeyApi(async () => ({ nope: 1 }));
   await assert.rejects(bad.askStep("w1", 0, "q"));
+});
+
+const writingRaw = { step: "section", generation: 1, topic: "T", sections: [], done: 1, total: 3, subjectId: "", materialId: "", result: "", job: "j1" };
+
+test("parseWork reads the writing's active and jobState, defaults for an older build, rejects unknown", () => {
+  const base = { id: "w1", status: "writing", version: 2, problem: "", message: "" };
+  const on = parseWork({ ...base, writing: { ...writingRaw, active: true, jobState: "waiting_quota" } });
+  assert.equal(on.writing.active, true);
+  assert.equal(on.writing.jobState, "waiting_quota");
+  const old = parseWork({ ...base, writing: writingRaw });
+  assert.equal(old.writing.active, false);
+  assert.equal(old.writing.jobState, "");
+  assert.equal(parseWork({ ...base, writing: { ...writingRaw, active: false, jobState: "" } }).writing.jobState, "");
+  assert.throws(() => parseWork({ ...base, writing: { ...writingRaw, jobState: "paused" } }));
+  assert.throws(() => parseWork({ ...base, writing: { ...writingRaw, active: "yes" } }));
+});
+
+test("stopWriting and editOutlineAt call the Go methods with the arguments the binding takes", async () => {
+  const calls = [];
+  const api = turnkeyApi(async (name, ...args) => {
+    calls.push([name, ...args]);
+    return { id: "w1", status: "writing", version: 3, problem: "", message: "" };
+  });
+  await api.stopWriting("w1");
+  await api.editOutlineAt("w1", 2, [{ number: 1, title: "Введение", words: 300, extra: "x" }]);
+  assert.deepEqual(calls[0], [methods.stopWriting, "w1"]);
+  assert.deepEqual(calls[1], [methods.editOutlineAt, "w1", 2, [{ number: 1, title: "Введение", words: 300 }]]);
+  assert.match(methods.stopWriting, /TurnkeyService\.StopWriting$/);
+  assert.match(methods.editOutlineAt, /TurnkeyService\.EditOutlineAt$/);
+});
+
+test("the new refusal texts are known, others become the generic one", () => {
+  assert.equal(turnkeyErrorText("Работа изменилась: обновите карточку."), "Работа изменилась: обновите карточку.");
+  assert.equal(turnkeyErrorText(new Error("Не удалось остановить написание. Попробуйте ещё раз.")), "Не удалось остановить написание. Попробуйте ещё раз.");
+  assert.equal(turnkeyErrorText("boom"), genericError);
 });
 
 // ---- Which card ----
