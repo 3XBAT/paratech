@@ -25,6 +25,8 @@ export const methods = {
   confirmRequirements: `${service}.ConfirmRequirements`,
   retry: `${service}.Retry`,
   askStep: `${service}.AskStep`,
+  // TASK-199: «Скачать PDF» of a ready paper or lab report.
+  exportPdf: `${service}.ExportPDF`,
 } as const;
 
 export type WorkStatus = "triage" | "questions" | "review" | "confirmed" | "writing" | "done" | "helper" | "failed";
@@ -110,6 +112,8 @@ export interface WorkWriting {
   subjectId: string;
   materialId: string;
   result: string;
+  /** TASK-199: the PDF next to the file in the library; "" until «Скачать PDF» or after a new generation. */
+  pdfMaterialId: string;
   job: string;
   /** A writing job runs for the work («Остановить»). */
   active: boolean;
@@ -224,6 +228,9 @@ export const errorTexts: readonly string[] = [
   "Нет связи с paratech: вопрос не отправлен. Повторите позже.",
   "Лимит запросов исчерпан: ответить на вопрос сейчас нельзя.",
   "Ответ на вопрос не прошёл проверку. Спросите ещё раз или переформулируйте вопрос.",
+  // ExportPDF (TASK-198).
+  "Не удалось сохранить PDF: на компьютере нет нужного компонента Windows (WebView2).",
+  "Не удалось сохранить PDF. Попробуйте ещё раз.",
 ];
 
 export const genericError = "Не удалось выполнить. Попробуйте ещё раз.";
@@ -359,6 +366,7 @@ function parseWriting(raw: unknown): WorkWriting {
     subjectId: str(r, "subjectId", w),
     materialId: str(r, "materialId", w),
     result: str(r, "result", w),
+    pdfMaterialId: optStr(r, "pdfMaterialId", w),
     job: str(r, "job", w),
     active: optBool(r, "active", w),
     jobState: r.jobState === undefined || r.jobState === null ? "" : oneOf(r, "jobState", writingJobStates, w),
@@ -508,6 +516,8 @@ export interface TurnkeyApi {
   retry(workId: string): Promise<TurnkeyWork>;
   /** A question about helper step `step` (from 0); the answer is plain text. A refusal carries one of the fixed texts. */
   askStep(workId: string, step: number, question: string): Promise<string>;
+  /** «Скачать PDF»: the PDF of a ready paper is saved to the library; the work comes back with pdfMaterialId. */
+  exportPdf(workId: string): Promise<TurnkeyWork>;
 }
 
 /** Builds the turnkey API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -541,6 +551,7 @@ export function turnkeyApi(call: CallByName): TurnkeyApi {
       ),
     confirmRequirements: async (id) => parseWork(await call(methods.confirmRequirements, id)),
     retry: async (id) => parseWork(await call(methods.retry, id)),
+    exportPdf: async (id) => parseWork(await call(methods.exportPdf, id)),
     askStep: async (id, step, question) => {
       const r = record(await call(methods.askStep, id, step, question), "step answer");
       return str(r, "text", "step answer");

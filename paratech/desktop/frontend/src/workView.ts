@@ -95,6 +95,10 @@ export const workTexts = {
   moveDown: "Ниже",
   remove: "Убрать раздел",
   sources: "Источники",
+  downloadPdf: "Скачать PDF",
+  savingPdf: "Сохранение PDF…",
+  pdfSaved: "PDF сохранён в библиотеке рядом с файлом Word.",
+  openPdf: "Открыть PDF",
   fallbackName: "Работа",
   fileKind: ".docx",
 } as const;
@@ -691,7 +695,28 @@ export function openTarget(w: TurnkeyWork): string {
   return w.writing?.step === "none" && w.writing.result !== "" ? w.writing.materialId : "";
 }
 
-export type OpenView = { kind: "ok" | "fail"; text: string };
+/** «Скачать PDF» belongs to a ready paper or lab report; a presentation has none. */
+export function pdfOffered(w: TurnkeyWork): boolean {
+  const wr = w.writing;
+  return wr !== null && wr.step === "none" && wr.result !== "" && wr.presentation !== true && w.workType !== "presentation";
+}
+
+/** The saved PDF to open, "" while there is none. */
+export function pdfTarget(w: TurnkeyWork): string {
+  return pdfOffered(w) ? (w.writing?.pdfMaterialId ?? "") : "";
+}
+
+/** «Скачать PDF» → ExportPDF; a work that offers no PDF makes no call (null). */
+export function exportPdf(api: Pick<TurnkeyApi, "exportPdf">, w: TurnkeyWork): Promise<TurnkeyWork> | null {
+  return pdfOffered(w) && pdfTarget(w) === "" ? api.exportPdf(w.id) : null;
+}
+
+/** «Открыть PDF»: a copy of the saved PDF, like the other open buttons. */
+export async function openPdf(library: Pick<LibraryApi, "openMaterial">, w: TurnkeyWork): Promise<OpenView | null> {
+  return openById(library, pdfTarget(w));
+}
+
+export type OpenView ={ kind: "ok" | "fail"; text: string };
 
 /** Opens the copy of the ready file; a refused or failed open is a fixed text, never a path. */
 export async function openWork(library: Pick<LibraryApi, "openMaterial">, w: TurnkeyWork): Promise<OpenView | null> {
