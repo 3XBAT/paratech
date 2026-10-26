@@ -116,16 +116,10 @@ var (
 	// ErrInvalidAnswer means the model's answer breaks the reader schema; the whole answer is refused.
 	ErrInvalidAnswer = errors.New("invalid triage_assignment answer")
 	// ErrMissingHelper is the ErrInvalidAnswer of a partial or impossible work without its helper, an answer otherwise
-	// within the schema: the one defect the Hub asks the model once more to fix (MissingHelperNote, ADR-0025).
+	// within the schema: the one defect the Hub asks the model once more to fix, with the server's reask note of the
+	// prompt version (hub/pkg/prompts, ADR-0025).
 	ErrMissingHelper = fmt.Errorf("%w: a partial or impossible work needs a helper", ErrInvalidAnswer)
 )
-
-// MissingHelperNote is the trusted server text added to the prompt when the Hub asks the model once more after
-// ErrMissingHelper, within the same reservation (ADR-0025, TASK-200). It quotes nothing of the refused answer.
-const MissingHelperNote = `# Second call
-The previous answer to this data was refused: its "feasibility" was "partial" or "impossible" and its "helper" was null. ` +
-	`Answer again with the whole JSON object. With "partial" or "impossible", "helper" is an object with at least one step ` +
-	`in "steps" and a non-empty "submit"; with "full", "helper" is null.`
 
 // WorkType is the kind of work an assignment asks for. Closed set.
 type WorkType string

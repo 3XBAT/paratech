@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"paratech/hub/internal/domain/llm/values"
@@ -311,15 +312,19 @@ const (
 )
 
 // TextReply turns the plain text of a planner answer without tool calls into the call reply{text} with callID, checked
-// exactly as a returned reply (CheckReturned: the text type, at most MaxTextRunes characters). It is a display-only
-// card and nothing else: the text never becomes another tool, an argument or an action. A catalog without a UI reply
-// tool, or a text the reply schema refuses, is ErrInvalidCall; its texts never quote the text.
+// as a returned reply (CheckReturned: the text type, at most MaxTextRunes characters) and as the desktop checks card
+// text (displayText). It is a display-only card and nothing else: the text never becomes another tool, an argument or
+// an action. A catalog without a UI reply tool, or a text either check refuses, is ErrInvalidCall; its texts never
+// quote the text.
 func (c *Catalog) TextReply(callID, text string) (values.ToolCall, error) {
 	if t, ok := c.tools[toolReply]; !ok || t.Class != classUI {
 		return values.ToolCall{}, fmt.Errorf("%w: the catalog has no reply card", ErrInvalidCall)
 	}
 	if !utf8.ValidString(text) {
 		return values.ToolCall{}, fmt.Errorf("%w: %s: the text is not UTF-8", ErrInvalidCall, toolReply)
+	}
+	if !displayText(text) {
+		return values.ToolCall{}, fmt.Errorf("%w: %s: the text has a character the card does not show", ErrInvalidCall, toolReply)
 	}
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
@@ -335,6 +340,21 @@ func (c *Catalog) TextReply(callID, text string) (values.ToolCall, error) {
 		return values.ToolCall{}, err
 	}
 	return call, nil
+}
+
+// displayText is the stricter check of the desktop's card text (desktop values.Text): printable characters and line
+// breaks only, no tab, no U+FFFD, no angle brackets. Only TextReply applies it: a text the desktop refuses would leave
+// the turn with a Hub-made call the desktop cannot answer, so such a text stays the old failure instead.
+func displayText(s string) bool {
+	for _, r := range s {
+		if r == '\n' {
+			continue
+		}
+		if !unicode.IsPrint(r) || r == utf8.RuneError || r == '<' || r == '>' {
+			return false
+		}
+	}
+	return true
 }
 
 // decodeObject reads a JSON object keeping numbers exact.

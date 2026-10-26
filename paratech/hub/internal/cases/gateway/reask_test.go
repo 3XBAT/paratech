@@ -3,6 +3,7 @@ package gateway_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -35,7 +36,7 @@ func TestTriageReaskFixesAMissingHelper(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("provider calls = %d, want one reask", len(calls))
 	}
-	if calls[1].Instructions() != triagePrompt+"\n\n"+triage.MissingHelperNote || calls[1].Data() != calls[0].Data() ||
+	if calls[1].Instructions() != triagePrompt+"\n\n"+triageReask || calls[1].Data() != calls[0].Data() ||
 		calls[1].Model() != calls[0].Model() || calls[1].MaxOutput() != calls[0].MaxOutput() {
 		t.Fatalf("reask = %v, first %v", calls[1], calls[0])
 	}
@@ -56,7 +57,60 @@ func TestTriageReaskFixesAMissingHelper(t *testing.T) {
 	if !strings.Contains(logs, "reask=accepted") || !strings.Contains(logs, "outcome=completed") {
 		t.Fatalf("log: %s", logs)
 	}
-	f.assertNoText(t, "Реферат", "измерения", triage.MissingHelperNote[:30])
+	f.assertNoText(t, "Реферат", "измерения", triageReask[:20])
+}
+
+// TestTriageReaskLogsTheSecondStop: after a reask the log line has the stop reason of the answer it settles.
+func TestTriageReaskLogsTheSecondStop(t *testing.T) {
+	first := withStop(t, answer(t, partialNoHelper, 900, 120), values.StopSequence)
+	for name, tc := range map[string]struct {
+		second testenv.ProviderStep
+		want   string
+	}{
+		"accepted": {answer(t, partialHelper, 950, 140), "stop=end"},
+		"refused":  {withStop(t, answer(t, partialNoHelper, 950, 140), values.StopMaxTokens), "stop=max_tokens"},
+	} {
+		f := triageFixture(t, first, tc.second)
+		_, _ = f.svc.Complete(t.Context(), triageCommand("tr-1", triageRound1))
+		if logs := f.logs.String(); !strings.Contains(logs, tc.want) || strings.Contains(logs, "stop=stop_sequence") {
+			t.Errorf("%s: log: %s", name, logs)
+		}
+	}
+}
+
+// TestTriageWithoutReaskNote: a server prompt without a reask note never asks again.
+func TestTriageWithoutReaskNote(t *testing.T) {
+	f := triageFixture(t, answer(t, partialNoHelper, 900, 120), answer(t, partialHelper, 950, 140))
+	cfg := config(100_000)
+	cfg.ServerPrompts = map[values.Operation]gateway.ServerPrompt{
+		values.OperationTriageAssignment: {Alias: "strong", Version: "v1", Text: triagePrompt},
+	}
+	svc, err := gateway.New(gateway.Deps{
+		Accounts: f.store, Results: f.store, Provider: f.provider, Limiter: f.limiter, Clock: f.clock, Random: testenv.Random{},
+		Models: triageModels(t), Log: slog.New(slog.NewTextHandler(&syncWriter{w: f.logs}, nil)),
+	}, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Complete(t.Context(), triageCommand("tr-1", triageRound1)); !errors.Is(err, gateway.ErrInvalidAnswer) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.provider.Calls()) != 1 || strings.Contains(f.logs.String(), "reask=") {
+		t.Fatalf("provider calls %d, log %s", len(f.provider.Calls()), f.logs.String())
+	}
+	if used, _ := f.store.Totals(alice); used != 1020 {
+		t.Fatalf("used %d", used)
+	}
+}
+
+func withStop(t *testing.T, step testenv.ProviderStep, stop values.StopReason) testenv.ProviderStep {
+	t.Helper()
+	c, err := values.NewCompletion(step.Completion.Output(), step.Completion.Usage(), stop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step.Completion = c
+	return step
 }
 
 // TestTriageReaskOnlyOnce: a second answer without the helper is the refusal, charged with both usages and replayed

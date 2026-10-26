@@ -128,8 +128,8 @@ const (
 )
 
 // newReader checks the input of a reader operation and returns its answer check and the data the model reads; nil
-// for any other operation.
-func newReader(op values.Operation, data string) (*reader, string, error) {
+// for any other operation. note is the server's reask note of the operation, "" when it has none.
+func newReader(op values.Operation, data, note string) (*reader, string, error) {
 	switch op {
 	case values.OperationInspectMaterial:
 		in, err := inspect.ParseInput(data)
@@ -151,7 +151,7 @@ func newReader(op values.Operation, data string) (*reader, string, error) {
 		}, reask: func(err error) string {
 			// Only a missing helper: the rest of the answer was within the schema (ADR-0025, TASK-200).
 			if errors.Is(err, triage.ErrMissingHelper) {
-				return triage.MissingHelperNote
+				return note
 			}
 			return ""
 		}}, in.ModelData(), nil
@@ -297,12 +297,13 @@ func (s *Service) run(ctx context.Context, cmd Command, op string, onDelta func(
 
 	usage := completion.Usage()
 	output := completion.Output()
+	stop := completion.Stop()
 	if c.reader != nil {
 		canonical, aerr := c.reader.canonical(output)
 		if aerr != nil && !streamed && c.reader.reask != nil {
 			if note := c.reader.reask(aerr); note != "" {
 				var outcome string
-				canonical, usage, outcome, aerr = s.reask(ctx, c, rec, note, usage, aerr)
+				canonical, usage, stop, outcome, aerr = s.reask(ctx, c, rec, note, completion, aerr)
 				attrs = append(attrs, "reask", outcome)
 			}
 		}
@@ -315,7 +316,7 @@ func (s *Service) run(ctx context.Context, cmd Command, op string, onDelta func(
 				return Result{}, err
 			}
 			logCall(outcomeProvider, append(attrs, "charged", true, "input_tokens", usage.Input(), "output_tokens", usage.Output(),
-				"stop", completion.Stop().String(), "reason", reasonInvalidAnswer, "err", aerr)...)
+				"stop", stop.String(), "reason", reasonInvalidAnswer, "err", aerr)...)
 			return Result{}, invalidAnswer()
 		}
 		output = canonical
@@ -327,7 +328,7 @@ func (s *Service) run(ctx context.Context, cmd Command, op string, onDelta func(
 		return Result{}, err
 	}
 	logCall(outcomeCompleted, append(attrs, "input_tokens", usage.Input(), "output_tokens", usage.Output(),
-		"stop", completion.Stop().String(), "charged", res.Charged)...)
+		"stop", stop.String(), "charged", res.Charged)...)
 	if !streamed {
 		sendWhole(onDelta, output)
 	}
@@ -352,16 +353,16 @@ const reasonInvalidAnswer = "invalid_answer"
 // request with the server note added to the prompt (ADR-0025, TASK-200). It returns the checked new answer and the
 // usage of both calls, all of which is charged (the hold of one call may be exceeded; Settle caps the charge at what
 // the account bears). Without time left before the hold expires, or when the second call fails without a billed
-// answer, the first refusal stands with the first usage; a refused second answer is a refusal with both usages.
-func (s *Service) reask(ctx context.Context, c call, rec account.ReservationRecord, note string, first values.Usage,
-	firstErr error) (canonical string, usage values.Usage, outcome string, err error) {
+// answer, the first refusal stands with the first usage and stop reason; otherwise the stop reason is the second's.
+func (s *Service) reask(ctx context.Context, c call, rec account.ReservationRecord, note string, first values.Completion,
+	firstErr error) (canonical string, usage values.Usage, stop values.StopReason, outcome string, err error) {
 	timeout := min(s.callTimeout, rec.ExpiresAt.Sub(s.clock.Now())-ledgerTimeout)
 	if timeout <= 0 {
-		return "", first, reaskNoTime, firstErr
+		return "", first.Usage(), first.Stop(), reaskNoTime, firstErr
 	}
 	req, err := values.NewRequest(c.request.Model(), c.request.Instructions()+"\n\n"+note, c.request.Data(), c.request.MaxOutput())
 	if err != nil {
-		return "", first, reaskFailed, firstErr
+		return "", first.Usage(), first.Stop(), reaskFailed, firstErr
 	}
 	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	completion, err := s.provider.Complete(callCtx, req)
@@ -372,18 +373,18 @@ func (s *Service) reask(ctx context.Context, c call, rec account.ReservationReco
 	if err != nil {
 		// Not billed to the tester, as a failed first call is released (accepted gap, ADR-0010).
 		s.log.WarnContext(ctx, "completion reask failed", "reservation", rec.ID.String(), "err", err)
-		return "", first, reaskFailed, firstErr
+		return "", first.Usage(), first.Stop(), reaskFailed, firstErr
 	}
-	second := completion.Usage()
-	usage, err = values.NewUsage(first.Input()+second.Input(), first.Output()+second.Output())
+	u1, u2 := first.Usage(), completion.Usage()
+	usage, err = values.NewUsage(u1.Input()+u2.Input(), u1.Output()+u2.Output())
 	if err != nil {
-		return "", first, reaskFailed, firstErr
+		return "", u1, first.Stop(), reaskFailed, firstErr
 	}
 	canonical, err = c.reader.canonical(completion.Output())
 	if err != nil {
-		return "", usage, reaskRefused, err
+		return "", usage, completion.Stop(), reaskRefused, err
 	}
-	return canonical, usage, reaskAccepted, nil
+	return canonical, usage, completion.Stop(), reaskAccepted, nil
 }
 
 // invalidAnswer is the permanent PROVIDER_ERROR of an answer that breaks the schema of its operation.
@@ -407,6 +408,7 @@ func (s *Service) validate(cmd Command) (call, error) {
 	if err != nil {
 		return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
+	var reask string
 	if spec.Operation().ServerPrompt() {
 		// The Hub's own prompt and alias (ADR-0023); its version, not the text, goes into the fingerprint.
 		p, ok := s.prompts[spec.Operation()]
@@ -416,9 +418,10 @@ func (s *Service) validate(cmd Command) (call, error) {
 		if spec, err = spec.WithServerPrompt(p.Alias, p.Version, p.Text); err != nil {
 			return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 		}
+		reask = p.Reask
 	}
 	// A reader's model reads the checked, re-encoded input; the fingerprint stays over what the client sent.
-	rd, data, err := newReader(spec.Operation(), spec.Data())
+	rd, data, err := newReader(spec.Operation(), spec.Data(), reask)
 	if err != nil {
 		return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}

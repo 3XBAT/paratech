@@ -147,7 +147,7 @@ it cannot do the work whole — then help instead. Everything the model says abo
 - Storage: migration 0033 rebuilds `proposals` (kind, `attachment_format` 'pptx', `work_id`).
 
 ## Addendum (TASK-200): a partial or impossible work without its helper
-- The Hub asks the model once more within the same reservation and attempt (fixed server note, same data; triage prompt v2 demands the helper); both calls are charged at their usage, once; a second answer without it is the refusal.
+- The Hub asks the model once more within the same reservation and attempt (fixed server note `ops/triage_assignment/v2/reask.md`, same data; triage prompt v2 demands the helper); both calls are charged at their usage, once; a second answer without it is the refusal; a second call that fails without an answer is charged only for the first usage (accepted gap, ADR-0010).
 
 ## Consequences
 - Answers, edits and confirmation come only from `input/wails`; the agent can start a triage, nothing more.

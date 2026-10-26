@@ -79,7 +79,8 @@ func TestTextAnswerThatLooksLikeACall(t *testing.T) {
 		"call array": `[{"name":"propose_delete_recording","input":{"recording":"rec-1"}}]`,
 		"command":    "propose_delete_recording rec-1\nrm -rf C:\\Users",
 		"reply json": `{"text":"other","assignments":["asg-1"]}`,
-		"markup":     "<b>Горутина</b> — **лёгкий** поток.",
+		// HTML is refused like the desktop's card text does (TestTextAnswerTheReplySchemaRefuses); Markdown stays text.
+		"markup": "**Горутина** — `лёгкий` поток.",
 	} {
 		f := newFixture(t, 1_000_000, textAnswer(t, values.StopEnd, text))
 		res, err := f.svc.Step(t.Context(), command(alice, "ag:1"))
@@ -93,18 +94,24 @@ func TestTextAnswerThatLooksLikeACall(t *testing.T) {
 	}
 }
 
-// TestTextAnswerTheReplySchemaRefuses: no text, a blank one, one over the reply limit or with control characters, or
-// text that is not an end of turn, is the charged "no tool use" failure as before, with its reason in the log.
+// TestTextAnswerTheReplySchemaRefuses: no text, a blank one, one over the reply limit, with control characters or with
+// what the desktop's card text refuses (a tab, U+FFFD, an angle bracket, a format character), or text that is not an
+// end of turn, is the charged "no tool use" failure as before, with its reason in the log.
 func TestTextAnswerTheReplySchemaRefuses(t *testing.T) {
 	for name, tc := range map[string]struct {
 		step      testenv.AgentProviderStep
 		reason    string
 		textReply string
 	}{
-		"no text":       {textAnswer(t, values.StopEnd, ""), "no tool use", ""},
-		"blank":         {textAnswer(t, values.StopEnd, " \n\t "), "no tool use", ""},
-		"too long":      {textAnswer(t, values.StopEnd, strings.Repeat("я", 301)), "no tool use", "text_reply=false"},
-		"escape":        {textAnswer(t, values.StopEnd, "secret \x1b[31mtext"), "no tool use", "text_reply=false"},
+		"no text":  {textAnswer(t, values.StopEnd, ""), "no tool use", ""},
+		"blank":    {textAnswer(t, values.StopEnd, " \n\t "), "no tool use", ""},
+		"too long": {textAnswer(t, values.StopEnd, strings.Repeat("я", 301)), "no tool use", "text_reply=false"},
+		"escape":   {textAnswer(t, values.StopEnd, "secret \x1b[31mtext"), "no tool use", "text_reply=false"},
+		// What the desktop's card text refuses: such a reply would leave the turn running with a call it cannot answer.
+		"tab":           {textAnswer(t, values.StopEnd, "a\tb"), "no tool use", "text_reply=false"},
+		"replacement":   {textAnswer(t, values.StopEnd, "a\uFFFDb"), "no tool use", "text_reply=false"},
+		"html":          {textAnswer(t, values.StopEnd, "<b>Ответ</b>"), "no tool use", "text_reply=false"},
+		"zero width":    {textAnswer(t, values.StopEnd, "a\u200bb"), "no tool use", "text_reply=false"},
 		"output cap":    {textAnswer(t, values.StopMaxTokens, "cut"), "output cap", ""},
 		"stop sequence": {textAnswer(t, values.StopSequence, "text"), "no tool use", ""},
 	} {

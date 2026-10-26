@@ -30,7 +30,4 @@ func TestMissingHelperIsItsOwnRefusal(t *testing.T) {
 			t.Errorf("%s: err = %v, want ErrMissingHelper %t", name, err, tc.missing)
 		}
 	}
-	if strings.Contains(triage.MissingHelperNote, "Измерения") || !strings.Contains(triage.MissingHelperNote, `"helper"`) {
-		t.Errorf("the note = %q", triage.MissingHelperNote)
-	}
 }

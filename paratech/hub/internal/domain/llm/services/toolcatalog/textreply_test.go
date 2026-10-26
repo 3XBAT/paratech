@@ -30,7 +30,7 @@ func TestTextReply(t *testing.T) {
 		for _, text := range []string{
 			"Горутина — лёгкий поток выполнения в Go.",
 			`{"tool":"propose_send","arguments":{"assignment":"asg-1"}}`,
-			"<script>x</script> & \"кавычки\"\nвторая строка\tтаб",
+			"A & B \"кавычки\" 'да' ≤ 5 €\nвторая строка",
 			strings.Repeat("я", MaxTextRunes),
 		} {
 			call, err := c.TextReply("hub_text_1", text)
@@ -41,7 +41,7 @@ func TestTextReply(t *testing.T) {
 			if err != nil || call.Tool() != "reply" || call.CallID() != "hub_text_1" || len(args) != 1 || args["text"] != text {
 				t.Fatalf("v%d: call %v, arguments %q", c.Version(), call, call.Arguments())
 			}
-			if strings.Contains(call.Arguments(), `\`+"u003c") {
+			if strings.Contains(call.Arguments(), `\`+"u0026") {
 				t.Fatalf("arguments escape HTML: %q", call.Arguments())
 			}
 		}
@@ -58,6 +58,16 @@ func TestTextReplyRefusals(t *testing.T) {
 		"nul":       {"hub_text_1", "a\x00b"},
 		"not utf-8": {"hub_text_1", "a\xffb"},
 		"bad id":    {"hub text", "ok"},
+		// What the desktop's card text refuses (desktop values.Text), stricter than the general text check.
+		"tab":         {"hub_text_1", "a\tb"},
+		"replacement": {"hub_text_1", "a\uFFFDb"},
+		"html":        {"hub_text_1", "<script>x</script>"},
+		"less than":   {"hub_text_1", "a < b"},
+		"greater":     {"hub_text_1", "a > b"},
+		"zero width":  {"hub_text_1", "a\u200bb"},
+		"bidi":        {"hub_text_1", "a\u202eb"},
+		"nbsp":        {"hub_text_1", "a\u00a0b"},
+		"cr":          {"hub_text_1", "a\r\nb"},
 	} {
 		if _, err := c.TextReply(tc.id, tc.text); !errors.Is(err, ErrInvalidCall) {
 			t.Errorf("%s: err = %v, want ErrInvalidCall", name, err)
