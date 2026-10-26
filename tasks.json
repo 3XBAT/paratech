@@ -4390,6 +4390,25 @@
                 "TASK-193"
             ],
             "status": "pending"
+        },
+        {
+            "id": "TASK-210",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Агент · ядро] Десктоп на каталоге 5 (промпт панели v5 из TASK-200: всегда reply, только существующие экраны)",
+            "acceptance_criteria": [
+                "Супервизор 2026-10-26 (follow-up TASK-200): Hub отдаёт промпт v5 только клиентам с CatalogVersion 5, а десктоп на 4 (paratech/desktop/internal/domain/agent/values/tool.go) — исправление выдуманных экранов и правило «всегда reply» владельцу не доходят",
+                "values.CatalogVersion = 5; golden-ссылка на shared/testdata/tool_catalog_v5.json; agenteval CatalogFile на v5; инструменты v5 те же, что v4 — проверить побайтно и зафиксировать тестом",
+                "Старые просьбы на каталоге 4 после обновления: «Продолжить»/«Повторить» заканчиваются существующим честным отказом, новая просьба работает (как в TASK-184); тест",
+                "Исполнитель: go-core"
+            ],
+            "test_steps": [
+                "go test -race затронутых пакетов, desktop/tests и agenteval, GOOS=windows go vet, golangci-lint"
+            ],
+            "dependencies": [
+                "TASK-200"
+            ],
+            "status": "pending"
         }
     ]
 }
