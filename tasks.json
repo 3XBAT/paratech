@@ -4390,6 +4390,155 @@
                 "TASK-193"
             ],
             "status": "pending"
+        },
+        {
+            "id": "TASK-203",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Бэклог · Чаты агента · domain] Чат = поток agent/thread: название, архив, lastActive, переходы и расчёт заполнения окна истории thread.Fill",
+            "acceptance_criteria": [
+                "Владелец 2026-10-26: бэклог, не запускать без слова владельца",
+                "Перед запуском: ответы владельца на Open 1–6 в docs/adr/0028-agent-chats-context-ring.md; ADR-0028 переведён в Accepted",
+                "domain/agent/thread: Thread получает title, archived, lastActive (State/Restore); ключ предмета больше не уникален для потока (уникальность — забота хранилища, убирается в TASK-204)",
+                "Переходы в агрегате: Rename (1–80 рун, без управляющих символов), Archive (только когда текущей просьбы нет или она DONE/FAILED/CANCELLED/STOPPED, иначе ErrInvalidTransition), Restore; архивный поток не принимает новую просьбу; название по умолчанию «Новый чат», после первой просьбы — первый текст студента до 40 рун по границе слова (никогда не текст модели)",
+                "Просьба с областью, чей предмет не совпадает с ключом потока, отклоняется ErrInvalidThread (правило в домене, не в use case)",
+                "thread.Fill(entries, current) рядом с Window, на той же группировке пар: доля max(пары/12, байты/24 KiB, ходы/64) для прежних просьб, которые унесёт следующая просьба, и Overflow, если какая-то прежняя пара уже не отправляется; тест, что Fill и Window не расходятся на одних данных",
+                "Без IO и времени внутри (время — параметром), тест архитектуры зелёный",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/agent/... и тест архитектуры, golangci-lint ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-204",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Бэклог · Чаты агента · storage] Миграция agent_threads под несколько чатов на предмет и sqlite-адаптер потоков",
+            "acceptance_criteria": [
+                "Владелец 2026-10-26: бэклог, не запускать без слова владельца",
+                "Миграция desktop (следующий свободный номер): пересборка agent_threads без UNIQUE(subject_key), новые столбцы title, archived_at, last_active_at, индекс (subject_key, archived_at, last_active_at); ссылки agent_turns/agent_steps/agent_actions сохраняются; каждый существующий поток становится первым чатом своего ключа с названием «Основной чат»; Down возвращает прежнюю схему",
+                "docs/contracts/schema.sql: зеркало миграции дословно (TestMigrationMatchesContractSchema)",
+                "adapters/sqlite: Save/Get/Restore новых полей; «текущий чат ключа» = неархивный с наибольшим last_active_at; список чатов ключа (неархивные, затем архив); запросы через sqlc",
+                "Тесты адаптера: миграция на базе с данными (потоки, ходы, журнал сохраняются), текущий чат, список, архив; migrate_test и schema_test зелёные",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/adapters/sqlite/... ./desktop/tests/..., sqlc generate без расхождений, golangci-lint"
+            ],
+            "dependencies": [
+                "TASK-203"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-205",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Бэклог · Чаты агента · use case] cases/agentchats (список, новый, переименовать, архив, заполнение, прежние просьбы) и выбор чата в agentturn.Ask",
+            "acceptance_criteria": [
+                "Владелец 2026-10-26: бэклог, не запускать без слова владельца",
+                "Новый use case cases/agentchats со своими узкими портами в ports.go (ARCH-21): List(key) с Fill каждого чата, New(key) (если текущий чат ключа пуст — вернуть его), Rename, Archive, Restore, Earlier(thread) — прежние просьбы только для чтения: текст студента и строка из проверенных текстов планировщика (по образцу thread.Reply, русские подписи), без результатов инструментов и ID",
+                "cases/agentturn: AskInput получает необязательный ThreadID; пусто — текущий чат ключа области (создаётся, если нет, как сейчас); порт ThreadRepository.GetByKey становится «текущий чат ключа»; несовпадение предмета области и чата — ошибка домена",
+                "Бюджет, план, provenance и Undo по-прежнему на поток; Hub-контракт не меняется (thread_id уже на поток)",
+                "Правила только в агрегате; use case загружает, вызывает, сохраняет (ARCH-22); один агрегат на транзакцию",
+                "Тесты на фейках портов; существующие тесты agentturn не ослаблены",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/... и тест архитектуры, golangci-lint"
+            ],
+            "dependencies": [
+                "TASK-203"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-206",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Бэклог · Чаты агента · binding] Методы чатов в input/wails.AgentService, threadId в Ask, заполнение в agent:update, связывание в app",
+            "acceptance_criteria": [
+                "Владелец 2026-10-26: бэклог, не запускать без слова владельца",
+                "AgentService: Chats(subjectId) → [{threadId, title, archived, lastActive, running, fill{percent, level: normal|high|full, overflow}}], NewChat(subjectId), RenameChat(threadId, title), ArchiveChat, RestoreChat, ChatEarlier(threadId); AgentAskInput.threadId (пусто — текущий чат)",
+                "Пороги уровня по ADR-0028 (по умолчанию <70 normal, 70–89 high, ≥90 full) — одна функция в Go, не во фронтенде",
+                "agent:update в конце просьбы несёт fill её чата; ошибки — известные problem-коды (invalid, busy, failed), новый код для архивного чата",
+                "input/agent.Driver передаёт ThreadID; app связывает cases/agentchats; input/wails не импортирует input/agent (ADR-0021)",
+                "Привязки Wails перегенерированы; тесты биндинга",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/... ./desktop/internal/app/..., GOOS=windows go vet ./desktop/..., golangci-lint"
+            ],
+            "dependencies": [
+                "TASK-204",
+                "TASK-205"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-207",
+            "category": "ui",
+            "priority": "low",
+            "description": "[Бэклог · Чаты агента · UI] Список чатов в панели агента: новый, переключение, переименование, архив, прежние сообщения",
+            "acceptance_criteria": [
+                "Владелец 2026-10-26: бэклог, не запускать без слова владельца",
+                "В шапке панели — текущий чат (название) и список чатов выбранного предмета/«Без предмета»: неархивные по последней активности, ниже свёрнутый «Архив»; кнопка «Новый чат»; переименование по месту; «В архив» / «Вернуть»",
+                "Выбор чата ставит его предмет в чип контекста; смена предмета в чипе показывает чаты этого предмета и открывает текущий",
+                "Переключение во время выполняющейся просьбы разрешено: та продолжается, её чат помечен в списке; обновления применяются к своему чату по threadId",
+                "Прежние просьбы открытого чата — только текст (студент + строка ответа), кнопки только у текущей просьбы; архивный чат только для чтения, ввод отключён с подсказкой «Чат в архиве»",
+                "Безличные тексты, один акцент, тёмная тема, клавиатура и aria; тесты фронтенда",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-206"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-208",
+            "category": "ui",
+            "priority": "low",
+            "description": "[Бэклог · Чаты агента · UI] Кольцо заполнения контекста у поля ввода и подсказка «начать новый чат»",
+            "acceptance_criteria": [
+                "Владелец 2026-10-26: бэклог, не запускать без слова владельца",
+                "Небольшое кольцо слева от кнопки отправки, заполнено на fill.percent (не больше 100 %), role=\"img\" и скрытый текст «Контекст чата: N %», такая же подсказка при наведении",
+                "Уровни из Go (fill.level): normal — второстепенный цвет; high — акцент; full — акцент и строка под полем «Чат становится длинным — начать новый чат» с действием «Новый чат»; overflow — полное кольцо и «Ранние сообщения этого чата агент уже не видит — начать новый чат»; без красного",
+                "Обновляется при открытии чата и по agent:update в конце просьбы, не во время шага; prefers-reduced-motion — без анимации заполнения",
+                "Тесты фронтенда: уровни, подсказка, действие «Новый чат», aria-текст",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-207"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-209",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Бэклог · Чаты агента · Hub contract] Только при варианте «Б» владельца (Open 2 ADR-0028): размер окна модели в AgentStepResponse",
+            "acceptance_criteria": [
+                "Владелец 2026-10-26: бэклог, не запускать без слова владельца",
+                "Не нужна при выбранной мере ADR-0028 (заполнение окна истории десктопа); запускать только если владелец выберет реальные токены последнего шага против окна модели",
+                "gateway.proto: AgentStepResponse.context_window_tokens (поле 6, аддитивно, buf breaking зелёный); значение — из конфигурации Hub на профиль/алиас, не из ответа провайдера; при повторе (replayed) — то же значение",
+                "usage.input_tokens уже включает запись и чтение кеша (anthropic wire.go) — это и есть «использовано»; комментарий в proto об этом",
+                "Тесты agentstep и контракта; README Hub — новая настройка",
+                "Исполнитель: hub-dev (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./hub/... ./shared/..., buf generate и buf breaking в shared/, golangci-lint"
+            ],
+            "dependencies": [],
+            "status": "pending"
         }
     ]
 }
