@@ -28,7 +28,7 @@ func TestLoadLLM(t *testing.T) {
 			name: "defaults",
 			want: func(c config.Config) bool {
 				return c.AnthropicAPIKey == "" && c.AnthropicBaseURL == "https://api.anthropic.com" && c.LLMTimeout == 5*time.Minute &&
-					c.LLMModels == "default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:1024"
+					c.LLMModels == "default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:4096"
 			},
 		},
 		{
@@ -123,7 +123,7 @@ func TestParseModels(t *testing.T) {
 func TestConfigModels(t *testing.T) {
 	cfg := config.Default()
 	if got := cfg.Models(); len(got) != 2 || got[0] != (config.Model{Alias: "default", ID: "claude-sonnet-5-5", MaxOutput: 8192}) ||
-		got[1] != (config.Model{Alias: "planner", ID: "claude-haiku-5-5", MaxOutput: 1024}) {
+		got[1] != (config.Model{Alias: "planner", ID: "claude-haiku-5-5", MaxOutput: 4096}) {
 		t.Fatalf("default models = %+v", got)
 	}
 	cfg.LLMModels = "broken"

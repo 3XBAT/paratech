@@ -117,7 +117,7 @@ func TestNewCompletion(t *testing.T) {
 func TestStopReasonString(t *testing.T) {
 	want := map[StopReason]string{
 		StopOther: "other", StopEnd: "end", StopMaxTokens: "max_tokens", StopSequence: "stop_sequence",
-		StopRefusal: "refusal", StopContextWindow: "context_window", StopReason(99): "StopReason(99)",
+		StopRefusal: "refusal", StopContextWindow: "context_window", StopToolUse: "tool_use", StopReason(99): "StopReason(99)",
 	}
 	for s, w := range want {
 		if s.String() != w {

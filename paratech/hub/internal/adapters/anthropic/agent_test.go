@@ -215,6 +215,41 @@ func TestStepWithoutToolUseIsAFailure(t *testing.T) {
 	}
 }
 
+// TestStepKeepsTheStopReason: the answer carries the stop reason for the log line, and a cut at the output cap fails as
+// "output cap" (TASK-172), also when the cut left a broken call.
+func TestStepKeepsTheStopReason(t *testing.T) {
+	const usage = `,"usage":{"input_tokens":5,"output_tokens":1024}}`
+	for name, tc := range map[string]struct {
+		body   string
+		stop   values.StopReason
+		reason string
+	}{
+		"tool use":     {toolUseJSON, values.StopToolUse, ""},
+		"end of turn":  {`{"type":"message","content":[{"type":"text","text":"t"}],"stop_reason":"end_turn"` + usage, values.StopEnd, "no tool use"},
+		"output cap":   {`{"type":"message","content":[{"type":"text","text":"t"}],"stop_reason":"max_tokens"` + usage, values.StopMaxTokens, "output cap"},
+		"cut call":     {`{"type":"message","content":[{"type":"tool_use","id":"t1","name":"reply","input":[]}],"stop_reason":"max_tokens"` + usage, values.StopMaxTokens, "output cap"},
+		"pause":        {`{"type":"message","content":[],"stop_reason":"pause_turn"` + usage, values.StopOther, "no tool use"},
+		"no reason":    {`{"type":"message","content":[],"stop_reason":null` + usage, values.StopOther, "no tool use"},
+		"refusal":      {`{"type":"message","content":[],"stop_reason":"refusal"` + usage, values.StopRefusal, "refused"},
+		"bad tool use": {`{"type":"message","content":[{"type":"tool_use","id":"t 1","name":"reply","input":{}}],"stop_reason":"tool_use"` + usage, values.StopToolUse, "malformed tool call"},
+	} {
+		var rec recorder
+		srv := rec.serve(t, http.StatusOK, tc.body)
+		answer, err := newClient(t, srv.URL, time.Minute).Step(t.Context(), agentCall(t))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		reason := ""
+		var pe *values.ProviderError
+		if errors.As(answer.Failure(), &pe) {
+			reason = pe.Reason
+		}
+		if answer.Stop() != tc.stop || reason != tc.reason {
+			t.Errorf("%s: stop %s, failure %q; want %s, %q", name, answer.Stop(), reason, tc.stop, tc.reason)
+		}
+	}
+}
+
 // TestStepRefusalWinsOverContent: the stop reason is read before the blocks, so a refusal with a call is refused.
 func TestStepRefusalWinsOverContent(t *testing.T) {
 	body := `{"type":"message","content":[{"type":"tool_use","id":"t1","name":"reply","input":{"text":"x"}}],` +

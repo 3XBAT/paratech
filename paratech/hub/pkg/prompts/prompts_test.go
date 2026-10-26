@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"unicode/utf8"
@@ -14,14 +15,14 @@ import (
 // byte-identical.
 const goldenCatalog = "../../../shared/testdata/tool_catalog_v%d.json"
 
-// TestEmbeddedPanel: v1 stays served to clients of catalog v1; v2 is the current version.
+// TestEmbeddedPanel: v1 and v2 stay served to clients of those catalogs; v3 is the current version.
 func TestEmbeddedPanel(t *testing.T) {
 	versions, err := Agent("panel")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 2 || versions[0].Version != 1 || versions[1].Version != 2 {
-		t.Fatalf("versions = %+v, want v1 and v2", versions)
+	if len(versions) != 3 || versions[0].Version != 1 || versions[1].Version != 2 || versions[2].Version != 3 {
+		t.Fatalf("versions: %d, want v1, v2 and v3", len(versions))
 	}
 	for _, v := range versions {
 		golden, err := os.ReadFile(fmt.Sprintf(goldenCatalog, v.Version))
@@ -36,8 +37,38 @@ func TestEmbeddedPanel(t *testing.T) {
 		}
 	}
 	// The planner learns that answer_question returns only an ID and counts (ADR-0022).
-	if !bytes.Contains(versions[1].System, []byte("answer_question")) || !bytes.Contains(versions[1].System, []byte("answer_id")) {
-		t.Error("agent/panel/v2/system.md does not describe the answer_question result")
+	for _, v := range versions[1:] {
+		if !bytes.Contains(v.System, []byte("answer_question")) || !bytes.Contains(v.System, []byte("answer_id")) {
+			t.Errorf("agent/panel/v%d/system.md does not describe the answer_question result", v.Version)
+		}
+	}
+}
+
+// TestPanelV3Prompt: the rules of the beta feedback (TASK-172) are stated in the v3 prompt.
+func TestPanelV3Prompt(t *testing.T) {
+	versions, err := Agent("panel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	system := string(versions[len(versions)-1].System)
+	for _, rule := range []string{
+		// voice: no greetings, no address
+		"No greetings and no address", "«Привет»", "«ты»", "«вы»", "good:", "bad:",
+		// the screens of the app (desktop/frontend/src/nav.ts)
+		"«Сегодня»", "«Предметы»", "«ДЗ»", "«Входящие»", "«База знаний»", "«Билеты»", "«Задания»", "«Решение»", "Word",
+		"«Расписание»", "«Журнал»", "«Отменить»", "«Настройки»",
+		// turnkey works are filed into the subject's «ДЗ», or «Входящие» without a subject
+		"«Предметы» → the subject → «ДЗ»", "without a subject, in «Входящие»",
+		// a reference question is a reply with the screen, never cannot_do
+		"gets reply at once", "Never answer such a question with cannot_do",
+		// cannot_do only for a missing program or the student's own action, without contradictions
+		"cannot_do is only for", "our_part lists only what the app really does", "never contradict",
+		// questions about assignments list their IDs; titles are drawn by the desktop
+		"list_assignments", "assignments argument", "never names an assignment",
+	} {
+		if !strings.Contains(system, rule) {
+			t.Errorf("agent/panel/v3/system.md does not state %q", rule)
+		}
 	}
 }
 
