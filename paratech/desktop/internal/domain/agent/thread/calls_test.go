@@ -212,6 +212,64 @@ func TestDeferredIDBindsToCreatedID(t *testing.T) {
 	})
 }
 
+// create_assignment (catalog v6) creates an assignment ID for later steps of its plan: edit_due of that ID matches
+// the step that defers it, and the created ID survives a restore of the thread.
+func TestCreatedAssignmentBindsInThePlan(t *testing.T) {
+	th := newThread(t)
+	steps := planSteps(t, `[{"tool":"create_assignment","arguments":{"title":"Эссе","due":"2026-10-28"}},`+
+		`{"tool":"edit_due","arguments":{"due":"2026-10-30"}}]`)
+	if err := th.ProposePlan(steps, context(t), at(2)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.ApprovePlan(at(2)); err != nil {
+		t.Fatal(err)
+	}
+	stepWith(t, th, "c1")
+	call := callID(t, "c1", "create_assignment", `{"title":"Эссе","due":"2026-10-28","note":"не из плана"}`)
+	adm, err := th.Admit(call, Facts{Context: context(t)}, at(3))
+	if err != nil || adm.PlanStep != 0 {
+		t.Fatalf("create = %+v, %v", adm, err)
+	}
+	added := ref(t, values.KindAssignment, "ag-1")
+	if err := th.Answer(ok("c1"), added, at(3)); err != nil {
+		t.Fatal(err)
+	}
+	takeAll(t, th)
+
+	st := th.State()
+	st.Version = 1
+	back, err := Restore(st)
+	if err != nil {
+		t.Fatalf("restore with a created assignment: %v", err)
+	}
+	stepWith(t, back, "c2")
+	adm, err = back.Admit(callID(t, "c2", "edit_due", `{"assignment":"ag-1","due":"2026-10-30"}`), Facts{Context: context(t)}, at(3))
+	if err != nil || adm.PlanStep != 1 {
+		t.Fatalf("edit_due of the created assignment = %+v, %v", adm, err)
+	}
+}
+
+// Outside a plan the ID create_assignment made is known to the provenance check of the request, and a second
+// create_assignment needs a plan.
+func TestCreatedAssignmentOutsideAPlan(t *testing.T) {
+	th := newThread(t)
+	stepWith(t, th, "c1")
+	if _, err := th.Admit(callID(t, "c1", "create_assignment", `{"title":"Эссе"}`), Facts{Context: context(t)}, at(3)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.Answer(ok("c1"), ref(t, values.KindAssignment, "ag-1"), at(3)); err != nil {
+		t.Fatal(err)
+	}
+	takeAll(t, th)
+	if !th.Seen(ref(t, values.KindAssignment, "ag-1")) {
+		t.Fatal("the added assignment is not known to provenance")
+	}
+	stepWith(t, th, "c2")
+	if _, err := th.Admit(callID(t, "c2", "create_assignment", `{"title":"Доклад"}`), Facts{Context: context(t)}, at(3)); !errors.Is(err, ErrPlanRequired) {
+		t.Fatalf("second create_assignment without a plan = %v, want ErrPlanRequired", err)
+	}
+}
+
 func TestAnswerRules(t *testing.T) {
 	th := newThread(t)
 	stepWith(t, th, "c1", "c2")

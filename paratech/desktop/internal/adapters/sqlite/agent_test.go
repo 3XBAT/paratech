@@ -265,10 +265,15 @@ func TestAgentActions(t *testing.T) {
 		{values.ToolMakeSummary, action.CancelJob{Job: agentRef(t, values.KindJob, "j1")}},
 		{values.ToolTriageAssignment, action.RemoveWork{Work: agentRef(t, values.KindWork, "w1")}},
 		{values.ToolWriteWork, action.StopWork{Work: agentRef(t, values.KindWork, "w1"), Job: agentRef(t, values.KindJob, "j2")}},
+		{values.ToolCreateAssignment, action.RemoveAssignment{Assignment: agentRef(t, values.KindAssignment, "ag-1")}},
 	}
 	for i, tc := range comps {
 		id := shared.ActionID(fmt.Sprintf("a%d", i))
-		a, err := action.New(action.Spec{ID: id, Thread: "th1", Turn: 1, CallID: fmt.Sprintf("c%d", i), Tool: tc.tool}, agentAt(i))
+		spec := action.Spec{ID: id, Thread: "th1", Turn: 1, CallID: fmt.Sprintf("c%d", i), Tool: tc.tool}
+		if rm, ok := tc.comp.(action.RemoveAssignment); ok {
+			spec.Intent = action.Intent{Target: rm.Assignment} // a create names the ID it makes (ADR-0029)
+		}
+		a, err := action.New(spec, agentAt(i))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -404,6 +409,28 @@ func TestAgentActionIntentRefusalAndLookups(t *testing.T) {
 	mustExec(t, db, `UPDATE agent_actions SET intent = '{"target":"assignment:a1"}' WHERE id = 'i1'`)
 	if _, err := repo.Get(ctx, "i1"); err == nil {
 		t.Fatal("an intent with a target but no version was restored")
+	}
+}
+
+// The intent of create_assignment names the ID it will make with no version before (ADR-0029): it round-trips, and
+// Recover reads it back to settle a crash.
+func TestAgentActionIntentOfAnAddedAssignment(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	if err := NewAgentThreadRepository(db).Save(ctx, subjectThread(t)); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewAgentActionRepository(db)
+	in := action.Intent{Target: agentRef(t, values.KindAssignment, "ag-1")}
+	a, err := action.New(action.Spec{ID: "c1", Thread: "th1", Turn: 1, CallID: "c1", Tool: values.ToolCreateAssignment, Intent: in}, agentAt(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.Get(ctx, "c1")
+	if err != nil || got.Intent() != in || got.Status() != action.StatusPending {
+		t.Fatalf("got %+v, %v", got, err)
 	}
 }
 

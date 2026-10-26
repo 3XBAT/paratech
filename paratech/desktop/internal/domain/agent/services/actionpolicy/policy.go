@@ -36,7 +36,7 @@ type Rule struct {
 // ErrUnknownTool is returned for a tool outside the table.
 var ErrUnknownTool = errors.New("tool has no policy")
 
-// rules is the class table of catalogs v4/v5 (same tools) (a test in desktop/tests compares it with the golden catalog) and of the
+// rules is the class table of catalog v6 (a test in desktop/tests compares it with the golden catalog) and of the
 // retired tools (values.RetiredTools), so the journal entries and Undo of their stored actions keep working.
 var rules = map[values.Tool]Rule{
 	values.ToolListSubjects:           {Class: ClassR},
@@ -57,6 +57,7 @@ var rules = map[values.Tool]Rule{
 	values.ToolFindHomework:           {Class: ClassU, Paid: true},
 	values.ToolGenerateDraft:          {Class: ClassU, Paid: true},
 	values.ToolEditDue:                {Class: ClassU},
+	values.ToolCreateAssignment:       {Class: ClassU}, // one added at once; a second in the request needs a plan
 	values.ToolTriageAssignment:       {Class: ClassU, Paid: true},
 	values.ToolWriteWork:              {Class: ClassU, Paid: true, AlwaysPlan: true},
 	values.ToolProposeDeadline:        {Class: ClassC},

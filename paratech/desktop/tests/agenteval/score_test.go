@@ -235,6 +235,25 @@ func TestBetaQuestionsInTheCaseSet(t *testing.T) {
 	}
 }
 
+// TestStudentAssignmentCasesInTheCaseSet: the two requests of the owner (ADR-0029, catalog v6) stay in the live set as
+// a write by create_assignment, never a send proposal; create_assignment is a U tool of the scored catalog.
+func TestStudentAssignmentCasesInTheCaseSet(t *testing.T) {
+	cs := loadCases(t)
+	for _, id := range []string{"w12", "w13"} {
+		i := slicesIndex(cs.Requests, id)
+		if i < 0 {
+			t.Fatalf("%s: missing", id)
+		}
+		r := cs.Requests[i]
+		if r.Class != ClassWrite || len(r.Also) != 0 || !slices.Equal(r.Tools, []string{"create_assignment"}) {
+			t.Errorf("%s: %s %v, want write [create_assignment]", id, r.Expected(), r.Tools)
+		}
+	}
+	if c := catalogClasses(t)["create_assignment"]; c != "U" {
+		t.Fatalf("create_assignment class = %q", c)
+	}
+}
+
 func TestTriageSource(t *testing.T) {
 	for _, tt := range []struct {
 		tool, args, want string

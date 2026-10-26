@@ -369,7 +369,13 @@ func TestAgentPanelEventContract(t *testing.T) {
 		{"tool":"list_assignments","arguments":{"subject":"sub-1","due_before":"2026-10-30","status":"upcoming"}},
 		{"tool":"job_status","arguments":{"ids":["j1","j2"]}},
 		{"tool":"create_subject","arguments":{"name":"Физика"}},
-		{"tool":"create_folder","arguments":{"name":"Лабы"}}]`)
+		{"tool":"create_folder","arguments":{"name":"Лабы"}},
+		{"tool":"create_assignment","arguments":{"title":"Скинуть проверочную","due":"2026-10-24","time":"09:00"}},
+		{"tool":"propose_deadline"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nine, err := values.NewTimeOfDay(9, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,6 +406,10 @@ func TestAgentPanelEventContract(t *testing.T) {
 			values.ResultCard{Artifact: artifact},
 			values.ConfirmCard{Target: mustRef(t, values.KindProposal, "prop-1")},
 			values.ActionLine{Action: "act-1"},
+			values.ActionLine{Action: "act-2", Assignment: values.AssignmentLine{
+				Assignment: mustRef(t, values.KindAssignment, "ag-1"), Title: "Скинуть проверочную Иванову",
+				Subject: mustRef(t, values.KindSubject, "sub-1"), Due: due, DueTime: nine,
+			}},
 			values.AnswerCard{Answer: mustRef(t, values.KindAnswer, "ans-1")},
 			values.CannotDoCard{YourPart: []values.Text{"сдать лично"}},
 			values.ReplyCard{Text: "Готово"},
@@ -436,7 +446,12 @@ func TestAgentPanelEventContract(t *testing.T) {
 			`{"name":"subject","type":"id","idKind":"subject","value":"sub-1","values":[]}],"deferred":[]},`+
 			`{"tool":"job_status","args":[{"name":"ids","type":"ids","idKind":"job","value":"","values":["j1","j2"]}],"deferred":[]},`+
 			`{"tool":"create_subject","args":[{"name":"name","type":"label","idKind":"","value":"Физика","values":[]}],"deferred":[]},`+
-			`{"tool":"create_folder","args":[{"name":"name","type":"label","idKind":"","value":"Лабы","values":[]}],"deferred":["subject"]}],`+
+			`{"tool":"create_folder","args":[{"name":"name","type":"label","idKind":"","value":"Лабы","values":[]}],"deferred":["subject"]},`+
+			`{"tool":"create_assignment","args":[`+
+			`{"name":"due","type":"date","idKind":"","value":"2026-10-24","values":[]},`+
+			`{"name":"time","type":"time","idKind":"","value":"09:00","values":[]},`+
+			`{"name":"title","type":"label","idKind":"","value":"Скинуть проверочную","values":[]}],"deferred":[]},`+
+			`{"tool":"propose_deadline","args":[],"deferred":["assignment"]}],`+
 			`"notes":["без писем"]}`) + "," +
 		card(`"kind":"questions","questions":{"round":1,"questions":[`+
 			`{"kind":"choice","text":"Когда?","options":["сегодня","завтра"],"default":1,"citeRef":""},`+
@@ -445,6 +460,8 @@ func TestAgentPanelEventContract(t *testing.T) {
 		card(`"kind":"result","artifact":"exports/drafts/a1.docx"`) + "," +
 		card(`"kind":"confirm","target":{"kind":"proposal","id":"prop-1"}`) + "," +
 		card(`"kind":"action_line","actionId":"act-1"`) + "," +
+		card(`"kind":"action_line","actionId":"act-2","assignment":{"id":"ag-1","title":"Скинуть проверочную Иванову",`+
+			`"subjectId":"sub-1","due":"2026-10-24","time":"09:00"}`) + "," +
 		card(`"kind":"answer","answerId":"ans-1"`) + "," +
 		card(`"kind":"cannot_do","cannotDo":{"yourPart":["сдать лично"],"ourPart":[]}`) + "," +
 		card(`"kind":"reply","text":"Готово","assignments":[]`) + "," +
@@ -487,7 +504,8 @@ func card(fields string) string {
 	}
 	zero := []struct{ key, val string }{
 		{"kind", `""`}, {"plan", "null"}, {"questions", "null"}, {"jobId", `""`}, {"artifact", `""`}, {"target", "null"},
-		{"actionId", `""`}, {"answerId", `""`}, {"cannotDo", "null"}, {"text", `""`}, {"assignments", "null"}, {"stopReason", `""`},
+		{"actionId", `""`}, {"answerId", `""`}, {"cannotDo", "null"}, {"text", `""`}, {"assignments", "null"},
+		{"assignment", "null"}, {"stopReason", `""`},
 		{"workId", `""`}, {"outcome", `""`}, {"freeWork", "null"},
 	}
 	parts := make([]string, 0, len(zero))

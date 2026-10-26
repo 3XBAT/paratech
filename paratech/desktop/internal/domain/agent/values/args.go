@@ -92,6 +92,7 @@ type argValue struct {
 	ref       Ref
 	refs      []Ref
 	date      Date
+	tod       TimeOfDay
 	str       string // enum, label, name or text
 	texts     []Text
 	steps     []PlanStep
@@ -148,6 +149,12 @@ func (a Args) CardIDs(name string) []Ref {
 func (a Args) Date(name string) (Date, bool) {
 	v, ok := a.vals[name]
 	return v.date, ok && v.typ == ArgDate
+}
+
+// Time returns a time argument.
+func (a Args) Time(name string) (TimeOfDay, bool) {
+	v, ok := a.vals[name]
+	return v.tod, ok && v.typ == ArgTime
 }
 
 // Enum returns an enum argument.
@@ -278,7 +285,27 @@ func parseArgs(spec ToolSpec, raw []byte) (Args, error) {
 			return Args{}, fmt.Errorf("%w: to is before from", ErrInvalidArguments)
 		}
 	}
+	if err := checkTimeWithDue(vals); err != nil {
+		return Args{}, err
+	}
 	return Args{vals: vals}, nil
+}
+
+// dueArg is the date argument a time argument belongs to (create_assignment.due, catalog v6).
+const dueArg = "due"
+
+// checkTimeWithDue refuses a time of day without its date: the Hub does not check it (TASK-216), the planner gets
+// is_error and corrects the call.
+func checkTimeWithDue(vals map[string]argValue) error {
+	for name, v := range vals {
+		if v.typ != ArgTime {
+			continue
+		}
+		if due, ok := vals[dueArg]; !ok || due.typ != ArgDate {
+			return fmt.Errorf("%w: %s needs %s", ErrInvalidArguments, name, dueArg)
+		}
+	}
+	return nil
 }
 
 // given counts the arguments of names present in vals.
@@ -360,6 +387,15 @@ func parseValue(as ArgSpec, raw json.RawMessage) (argValue, error) {
 			return v, err
 		}
 		v.canon = v.date.String()
+	case ArgTime:
+		s, err := decodeString(raw)
+		if err != nil {
+			return v, err
+		}
+		if v.tod, err = ParseTimeOfDay(s); err != nil {
+			return v, err
+		}
+		v.canon = v.tod.String()
 	case ArgEnum:
 		s, err := decodeString(raw)
 		if err != nil {

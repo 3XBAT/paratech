@@ -25,6 +25,7 @@ const (
 	CompCancelJob         CompensationKind = "cancel_job"          // running: cancel; finished: remove the result
 	CompRemoveWork        CompensationKind = "remove_work"         // the triaged work, if the student has not touched it
 	CompStopWork          CompensationKind = "stop_work"           // writing: the job cancelled; done: the paper back to «Входящие»
+	CompRemoveAssignment  CompensationKind = "remove_assignment"   // the added assignment, if unchanged and unused (ADR-0029)
 )
 
 // compensationOf is the compensation kind of every U tool; a tool not listed has no Undo.
@@ -35,6 +36,7 @@ var compensationOf = map[values.Tool]CompensationKind{
 	values.ToolLinkMaterial:     CompUnlinkMaterial,
 	values.ToolSetLessonInfo:    CompRestoreLessonInfo,
 	values.ToolEditDue:          CompRestoreDue,
+	values.ToolCreateAssignment: CompRemoveAssignment,
 	values.ToolMakeSummary:      CompCancelJob,
 	values.ToolMakeLectureText:  CompCancelJob,
 	values.ToolFindHomework:     CompCancelJob,
@@ -168,6 +170,16 @@ func (StopWork) Kind() CompensationKind { return CompStopWork }
 func (c StopWork) validate() error {
 	return firstErr(need(c.Work, values.KindWork), need(c.Job, values.KindJob))
 }
+
+// RemoveAssignment undoes create_assignment (ADR-0029): the assignment it added is removed while it is still at the
+// version the action left and nothing uses it (no student edit, draft, work or calendar proposal since). It is only
+// ever the compensation of that same action: no tool removes an assignment.
+type RemoveAssignment struct{ Assignment values.Ref }
+
+// Kind returns CompRemoveAssignment.
+func (RemoveAssignment) Kind() CompensationKind { return CompRemoveAssignment }
+
+func (c RemoveAssignment) validate() error { return need(c.Assignment, values.KindAssignment) }
 
 func need(r values.Ref, kind values.IDKind) error {
 	if r.IsZero() || r.Kind() != kind {

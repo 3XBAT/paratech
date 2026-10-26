@@ -184,6 +184,19 @@ test("parseUpdate reads the assignments of a reply; null or missing is an empty 
   assert.equal(broken.cards.length, 0);
 });
 
+test("parseUpdate reads the assignment an action line added (catalog v6); null or missing is none, a broken one drops the card", () => {
+  const line = { kind: "action_line", plan: null, questions: null, jobId: "", artifact: "", target: null, actionId: "act1", answerId: "", cannotDo: null, text: "", stopReason: "" };
+  const added = { id: "ag-1", title: "Скинуть проверочную Иванову", subjectId: "s1", due: "2026-10-23", time: "09:00" };
+  const u = parseUpdate(update({ cards: [{ ...line, assignment: added }, { ...line, assignment: null }, line] }));
+  assert.equal(u.cards.length, 3);
+  assert.deepEqual(u.cards[0].assignment, added);
+  assert.equal(u.cards[0].actionId, "act1");
+  assert.equal(u.cards[1].assignment, null);
+  assert.equal(u.cards[2].assignment, null); // an older core
+  const broken = parseUpdate(update({ cards: [{ ...line, assignment: { ...added, time: 9 } }] }));
+  assert.equal(broken.cards.length, 0);
+});
+
 // ---- Reducer ----
 
 test("updates of one request replace each other; other requests stay", () => {

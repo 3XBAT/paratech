@@ -20,8 +20,9 @@ import (
 	"paratech/desktop/testenv"
 )
 
-// goldenCatalog is shared/testdata/tool_catalog_v5.json (TASK-113; v2 since TASK-118, v3 since TASK-173, v4 since
-// TASK-184, v5 since TASK-210), the tool list the Hub serves for the catalog version the desktop sends.
+// goldenCatalog is shared/testdata/tool_catalog_v6.json (TASK-113; v2 since TASK-118, v3 since TASK-173, v4 since
+// TASK-184, v5 since TASK-210, v6 since TASK-217), the tool list the Hub serves for the catalog version the desktop
+// sends.
 type goldenCatalog struct {
 	CatalogVersion int               `json:"catalog_version"`
 	Types          map[string]string `json:"types"`
@@ -77,6 +78,45 @@ func TestToolCatalogV5KeepsTheToolsOfV4(t *testing.T) {
 	}
 	if strings.Replace(string(v4), v4Line, v5Line, 1) != string(v5) {
 		t.Fatal("tool_catalog_v5.json differs from tool_catalog_v4.json beyond catalog_version")
+	}
+}
+
+// TestToolCatalogV6AddsCreateAssignment: v6 is v5 plus create_assignment (class U, free) and the argument type time
+// (TASK-216); every tool of v5 keeps its class and arguments, so the desktop runs them as on v5.
+func TestToolCatalogV6AddsCreateAssignment(t *testing.T) {
+	v5, v6 := loadGoldenCatalogFile(t, "tool_catalog_v5.json"), loadGoldenCatalogFile(t, "tool_catalog_v6.json")
+	// The desktop refuses a time without its due date (is_error); the Hub only states the rule.
+	if v6.CatalogVersion != 6 || !strings.Contains(v6.Types["time"], "HH:MM") || !strings.Contains(v6.Types["time"], "only together with due") ||
+		v5.Types["time"] != "" || len(v6.Types) != len(v5.Types)+1 {
+		t.Fatalf("v6 types = %v", v6.Types)
+	}
+	var rest []string
+	for _, tool := range v6.Tools {
+		if tool.Name == string(values.ToolCreateAssignment) {
+			if tool.Class != "U" || tool.Paid || !tool.AgentCanExecute {
+				t.Fatalf("create_assignment = %+v", tool)
+			}
+			continue
+		}
+		raw, err := json.Marshal(tool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rest = append(rest, string(raw))
+	}
+	var old []string
+	for _, tool := range v5.Tools {
+		raw, err := json.Marshal(tool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		old = append(old, string(raw))
+	}
+	if !slices.Equal(rest, old) {
+		t.Fatal("a tool of v5 changed in v6")
+	}
+	if v6.Notes["one_of"] != v5.Notes["one_of"] {
+		t.Fatal("the one-of groups changed in v6")
 	}
 }
 
@@ -282,14 +322,15 @@ func TestAgentRequestOfAnOlderCatalogAfterTheUpdate(t *testing.T) {
 	}
 }
 
-// The update to catalog 5 (TASK-210): calls sealed for a request stopped on catalog 4 no longer pass the Hub's check
-// once the desktop sends 5, so «Продолжить» and «Повторить» end with the honest «не удалось», and a new request works.
-func TestAgentRequestOfCatalog4AfterTheUpdateTo5(t *testing.T) {
+// The update to the current catalog (4 -> 5 in TASK-210, 5 -> 6 in TASK-217): calls sealed for a request stopped on
+// the previous catalog no longer pass the Hub's check once the desktop sends the new one, so «Продолжить» and
+// «Повторить» end with the honest «не удалось», and a new request works.
+func TestAgentRequestOfThePreviousCatalogAfterTheUpdate(t *testing.T) {
 	e := newAgentEnv(t)
 	ctx := context.Background()
 
-	// Before the update: the Hub seals and checks the calls for catalog 4.
-	e.hub.AsCatalog(4).Then(testenv.AgentCall{ID: "toolu_1", Tool: "list_subjects", Args: `{}`})
+	// Before the update: the Hub seals and checks the calls for the previous catalog.
+	e.hub.AsCatalog(values.CatalogVersion - 1).Then(testenv.AgentCall{ID: "toolu_1", Tool: "list_subjects", Args: `{}`})
 	st, err := e.turns.Ask(ctx, agentturn.AskInput{Text: "какие предметы?"})
 	if err != nil || len(st.Calls) != 1 {
 		t.Fatalf("Ask = %+v, %v", st, err)
@@ -299,7 +340,7 @@ func TestAgentRequestOfCatalog4AfterTheUpdateTo5(t *testing.T) {
 		t.Fatalf("stopped = %+v", st)
 	}
 
-	// The update: the Hub binds the catalog the desktop now sends (5), and the app starts again.
+	// The update: the Hub binds the catalog the desktop now sends, and the app starts again.
 	e.hub.AsCatalog(0)
 	e.start(t)
 
@@ -317,7 +358,7 @@ func TestAgentRequestOfCatalog4AfterTheUpdateTo5(t *testing.T) {
 		t.Fatalf("hub saw %d new requests, ran %d", len(reqs)-before, e.hub.Executed())
 	}
 	for _, r := range reqs[before:] {
-		if r.GetCatalogVersion() != 5 {
+		if r.GetCatalogVersion() != values.CatalogVersion {
 			t.Fatalf("catalog version %d", r.GetCatalogVersion())
 		}
 	}
