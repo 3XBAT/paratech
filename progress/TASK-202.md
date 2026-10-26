@@ -34,3 +34,23 @@ Note: the subject page keeps «Все предметы» as a button; the folder
 ### Настройки
 17. Prototype: left vertical nav (`group snav`, icons, accent dot on the current item) next to the content; implemented: tabs row above the content. Follow-up (layout): needs the page heads to move out of each sub-page into one shared head; touches six pages.
 18. «Изменения сохраняются сразу» over-line, `sec-h` + `foot` notes under groups: partly present. Follow-up (minor text).
+
+## Done
+- «Предметы»: semester headings with counts, subject cards (name, folders, «Открыть», neutral colour, one accent), subject page with a 220px tree (collapsible semesters/subjects, folder counts, «Предмет»/«Папка»), folder sections with file rows; stacked below 900px.
+- Back/forward: `Route.subject`; `routeToSubject`/`routeToOpenedAssignment` (built from `routeToPage`); Assignments card from the route; a rail click resets the subject.
+- Review fixes: neutral card link, route builders clear the other field, loading/unknown-id handling, a dropped file no longer closes an open form, ul/li card semantics, behaviour tests.
+
+## Decisions to confirm
+- The landing grid of subject cards is not in the prototype (tree + page only); added per the owner's complaint about the flat list.
+- «Папка» lives in the tree, not in the subject page.
+- «Все предметы» on the subject page adds a history entry.
+- The agent panel now gets the card opened from the list as context (route-driven) and loses it on «Назад».
+
+## Follow-ups (need data or layout, not built)
+Subject page: «Ближайшее», teacher, schedule line, lessons with status chips, «новая» mark, «Ещё действия». «Задания»: filter counters, day column. «Журнал»: grouping «Сейчас»/«Сегодня»/date. «Сегодня»: statusbar. «Настройки»: left nav with a shared head (six pages). Three source-regex tests remain (App wiring, HomeworkPage ternary, window route): replace with component tests later.
+
+## Changed existing tests
+summary/transcript tests: routes include `subject: ""`. library test: `onAddFolder` removed from SubjectDetail (moved to the tree); "returns to the list on a new visit" replaced by route-wiring tests.
+
+## Security
+Frontend-only; auditor: no findings. Names stay text nodes.
