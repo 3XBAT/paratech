@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // Plan classes: what the planner decided for a request, from the tools it called until it stopped.
@@ -39,7 +40,8 @@ type Subject struct {
 }
 
 // Request is a student request and the expected routing: the class and the non-card tools in order (others may
-// come in between). ListsAssignments marks a request whose reply should list the assignments found (catalog v3).
+// come in between). Also are other classes the prompt allows as well. ListsAssignments marks a request whose reply
+// should list the assignments found (catalog v3).
 type Request struct {
 	ID               string   `json:"id"`
 	Text             string   `json:"text"`
@@ -47,8 +49,19 @@ type Request struct {
 	Assignment       string   `json:"assignment,omitempty"`
 	Uploads          []string `json:"uploads,omitempty"`
 	Class            string   `json:"class"`
+	Also             []string `json:"also,omitempty"`
 	Tools            []string `json:"tools"`
 	ListsAssignments bool     `json:"lists_assignments,omitempty"`
+}
+
+// Accepts reports whether a run of class class routed the request right.
+func (r Request) Accepts(class string) bool {
+	return class == r.Class || slices.Contains(r.Also, class)
+}
+
+// Expected is the expected class for a report, alternatives joined with «/».
+func (r Request) Expected() string {
+	return strings.Join(append([]string{r.Class}, r.Also...), "/")
 }
 
 // Chunk is a fragment of a lecture or a material.
@@ -145,6 +158,11 @@ func ParseCaseSet(raw []byte, toolClasses map[string]string) (CaseSet, error) {
 		}
 		if !slices.Contains(Classes(), r.Class) {
 			return bad("request %s: unknown class %q", r.ID, r.Class)
+		}
+		for i, c := range r.Also {
+			if !slices.Contains(Classes(), c) || c == r.Class || c == ClassCannotDo || r.Class == ClassCannotDo || slices.Contains(r.Also[:i], c) {
+				return bad("request %s: alternative class %q", r.ID, c)
+			}
 		}
 		for _, tool := range r.Tools {
 			if c, ok := toolClasses[tool]; !ok || c == "UI" {

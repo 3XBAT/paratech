@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/shared"
@@ -49,7 +50,8 @@ func (t tools) replyLines(ctx context.Context, card values.ReplyCard) values.Rep
 	lines := make([]values.AssignmentLine, 0, len(byID))
 	for _, r := range card.Assignments {
 		i, ok := byID[shared.AssignmentID(r.ID())]
-		if !ok || strings.TrimSpace(views[i].Title) == "" {
+		// A line ReplyCard.Validate would refuse is skipped, so one bad title does not drop the whole list.
+		if !ok || strings.TrimSpace(views[i].Title) == "" || !utf8.ValidString(views[i].Title) {
 			continue
 		}
 		v := views[i]

@@ -128,7 +128,28 @@ func TestReplyListWhenTheDataCannotBeRead(t *testing.T) {
 	})
 }
 
-// TestReplyWithoutAssignmentsReadsNothing: a plain reply makes no read of the assignments.
+// TestReplySkipsACorruptTitle: an assignment whose title is not valid UTF-8 or blank is skipped; the other lines and
+// the text are still shown and the card stays valid.
+func TestReplySkipsACorruptTitle(t *testing.T) {
+	a1, a2 := mustRef(t, values.KindAssignment, "a1"), mustRef(t, values.KindAssignment, "a2")
+	for name, title := range map[string]string{"invalid utf-8": "Эссе \xff", "blank": "  "} {
+		t.Run(name, func(t *testing.T) {
+			turns := (&scriptedTurns{}).then(step(thread.StatusDone, nil, values.ReplyCard{Text: "Два задания.", Assignments: []values.Ref{a2, a1}}), nil)
+			d, sink, r, _ := replyDriver(t, turns)
+			r.assignments.views[1].Title = title
+			if err := d.Ask(t.Context(), agentturn.AskInput{Text: "что горит"}); err != nil {
+				t.Fatal(err)
+			}
+			d.Wait()
+			got := lastReply(t, sink)
+			if got.Text != "Два задания." || len(got.Lines) != 1 || got.Lines[0].Assignment != a1 || got.Validate() != nil {
+				t.Fatalf("reply = %+v", got)
+			}
+		})
+	}
+}
+
+// TestReplyWithoutAssignmentsReadsNothing:a plain reply makes no read of the assignments.
 func TestReplyWithoutAssignmentsReadsNothing(t *testing.T) {
 	turns := (&scriptedTurns{}).then(step(thread.StatusDone, nil, values.ReplyCard{Text: "Готово."}), nil)
 	d, sink, r, buf := replyDriver(t, turns)

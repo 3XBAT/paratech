@@ -80,6 +80,13 @@ func TestParseCaseSetRejects(t *testing.T) {
 		"list without list_assignments": func(s string) string {
 			return strings.Replace(s, `"class": "reply", "tools": []}`, `"class": "reply", "tools": [], "lists_assignments": true}`, 1)
 		},
+		"unknown alternative class": func(s string) string { return strings.Replace(s, `"also": ["read", "reply"]`, `"also": ["chat"]`, 1) },
+		"alternative equal to the class": func(s string) string {
+			return strings.Replace(s, `"also": ["read", "reply"]`, `"also": ["questions"]`, 1)
+		},
+		"duplicate alternative": func(s string) string {
+			return strings.Replace(s, `"also": ["read", "reply"]`, `"also": ["read", "read"]`, 1)
+		},
 		"unknown subject": func(s string) string {
 			return strings.Replace(s, `"subject": "s-math", "class"`, `"subject": "s-chem", "class"`, 1)
 		},
@@ -183,15 +190,32 @@ func TestReplyAssignments(t *testing.T) {
 }
 
 // TestBetaQuestionsInTheCaseSet: the four questions of the beta (TASK-172/173) and a work on a topic without an
-// assignment stay in the live set with the routing the v3 prompt asks for.
+// assignment stay in the live set with the routing the v3 prompt asks for. Without an assignment the prompt allows
+// questions or an honest reply (after list_assignments that is a read).
 func TestBetaQuestionsInTheCaseSet(t *testing.T) {
 	cs := loadCases(t)
-	want := map[string]string{"b01": ClassReply, "b02": ClassReply, "b03": ClassRead, "b04": ClassQuestions, "b05": ClassQuestions}
-	for id, class := range want {
+	want := map[string][]string{
+		"b01": {ClassReply}, "b02": {ClassReply}, "b03": {ClassRead}, "b04": {ClassQuestions},
+		"b05": {ClassQuestions, ClassRead, ClassReply},
+	}
+	for id, classes := range want {
 		i := slicesIndex(cs.Requests, id)
-		if i < 0 || cs.Requests[i].Class != class {
-			t.Errorf("%s: missing or class is not %s", id, class)
+		if i < 0 {
+			t.Errorf("%s: missing", id)
+			continue
 		}
+		r := cs.Requests[i]
+		if r.Class != classes[0] || len(r.Also) != len(classes)-1 {
+			t.Errorf("%s: classes %s, want %v", id, r.Expected(), classes)
+		}
+		for _, c := range classes {
+			if !r.Accepts(c) {
+				t.Errorf("%s: does not accept %s", id, c)
+			}
+		}
+	}
+	if i := slicesIndex(cs.Requests, "b05"); i >= 0 && cs.Requests[i].Accepts(ClassPlan) {
+		t.Error("b05 must not accept a plan without an assignment")
 	}
 	if i := slicesIndex(cs.Requests, "b03"); i < 0 || !cs.Requests[i].ListsAssignments {
 		t.Error("b03 must expect a reply with the list of assignments")
@@ -286,5 +310,20 @@ func TestReport(t *testing.T) {
 		if !strings.Contains(md, s) {
 			t.Errorf("report misses %q:\n%s", s, md)
 		}
+	}
+
+	// An alternative class counts as routed; a class outside them is reported with every expected class.
+	b05 := Request{ID: "b05", Text: "Презентация", Class: ClassQuestions, Also: []string{ClassRead, ClassReply}, Tools: []string{"list_assignments"}}
+	alt := Report{Classes: classes, Requests: []Outcome{
+		{Case: b05, Tools: []string{"list_assignments", "ask_questions"}},
+		{Case: b05, Tools: []string{"list_assignments", "reply"}},
+		{Case: b05, Tools: []string{"list_assignments", "show_plan"}},
+	}}
+	if m := alt.Metrics(); m.Requests != 3 || m.ClassOK != 2 || m.ToolsOK != 3 {
+		t.Fatalf("alternative metrics = %+v", m)
+	}
+	if md := alt.Markdown(); !strings.Contains(md, "ждали questions/read/reply [list_assignments], получили plan") ||
+		strings.Count(md, "b05 «") != 1 {
+		t.Errorf("alternative report:\n%s", md)
 	}
 }

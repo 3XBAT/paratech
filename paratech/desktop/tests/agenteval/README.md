@@ -1,6 +1,6 @@
 # Agent live check (level 2)
 
-Case set `testdata/live_cases.json`: 40–60 student requests (expected plan class and tools in order), 5 «cannot do
+Case set `testdata/live_cases.json`: 40–60 student requests (expected plan class, optional `also` classes the prompt allows too, and tools in order), 5 «cannot do
 whole» cases (→ `cannot_do`), 20 lecture questions (→ `answer_question`, chunks and a reference citation). All data
 is fake; addresses only `example.invalid`.
 

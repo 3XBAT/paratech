@@ -59,7 +59,7 @@ func (r Report) Metrics() Metrics {
 			}
 		} else {
 			m.Requests++
-			if class == o.Case.Class {
+			if o.Case.Accepts(class) {
 				m.ClassOK++
 			}
 			if MatchTools(o.Case.Tools, o.Tools) {
@@ -130,9 +130,9 @@ func (r Report) Markdown() string {
 	var misses []string
 	for _, o := range r.Requests {
 		class := ClassOf(o.Tools, r.Classes)
-		if class != o.Case.Class || !MatchTools(o.Case.Tools, o.Tools) || o.Err != "" {
+		if !o.Case.Accepts(class) || !MatchTools(o.Case.Tools, o.Tools) || o.Err != "" {
 			misses = append(misses, fmt.Sprintf("- %s «%s»: ждали %s %v, получили %s %v%s",
-				o.Case.ID, o.Case.Text, o.Case.Class, o.Case.Tools, class, o.Tools, errNote(o.Err)))
+				o.Case.ID, o.Case.Text, o.Case.Expected(), o.Case.Tools, class, o.Tools, errNote(o.Err)))
 		}
 		if o.Case.ListsAssignments && len(o.Listed) == 0 {
 			misses = append(misses, fmt.Sprintf("- %s «%s»: reply без списка заданий", o.Case.ID, o.Case.Text))
