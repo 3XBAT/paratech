@@ -10,7 +10,7 @@ import { AgentRequest, AssignmentList } from "../.test-build/agent/AgentCards.js
 const { renderToStaticMarkup } = server;
 const noop = () => undefined;
 const now = new Date(2026, 9, 26, 12, 0, 0);
-const iso = (day) => new Date(2026, 9, day, 18, 0, 0).toISOString();
+const iso = (day) => `2026-10-${String(day).padStart(2, "0")}`;
 const base = { press: noop, revise: noop, answer: noop, undo: noop, undoAll: noop, undoNote: () => undefined, now };
 
 const raw = (assignments) => ({
@@ -44,6 +44,15 @@ test("rows say today, tomorrow, a date, overdue; unknown subject is omitted", ()
   assert.equal(assignmentRow(line(), subjects, now).subject, "Матанализ");
   assert.equal(assignmentRow(line({ subjectId: "zzz" }), subjects, now).subject, "");
   assert.equal(assignmentRow(line({ subjectId: "constructor" }), subjects, now).subject, "");
+});
+
+test("a date-only due is a local day, not shifted by the zone", () => {
+  const early = new Date(2026, 9, 26, 0, 30);
+  assert.equal(assignmentRow(line({ due: "2026-10-26" }), {}, early).due, "сегодня");
+  assert.equal(assignmentRow(line({ due: "2026-10-27" }), {}, early).due, "завтра");
+  assert.equal(assignmentRow(line({ due: "2026-10-30" }), {}, early).due, "до пт, 30 окт.");
+  const late = new Date(2026, 9, 26, 23, 30);
+  assert.equal(assignmentRow(line({ due: "2026-10-26" }), {}, late).due, "сегодня");
 });
 
 test("the list renders title, subject and due; overdue gets the urgent class", () => {

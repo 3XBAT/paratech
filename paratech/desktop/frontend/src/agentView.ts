@@ -6,7 +6,7 @@
 import type { AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, PlanStepView, QuestionView } from "./bindings/agent.js";
 import { type Entry, isBusyRefused } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
-import { dueText, parseMoment } from "./todayView.js";
+import { daysLeftText, dueText, parseMoment } from "./todayView.js";
 
 /** One row of the assignment list of a reply card. */
 export interface AssignmentRow {
@@ -24,15 +24,22 @@ export const noTitleLabel = "Без названия";
 
 const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 
+/** A date-only "YYYY-MM-DD" is a local calendar day (not UTC midnight, which shifts the day west of UTC). */
+function parseDue(s: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  return m === null ? parseMoment(s) : new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
 /** The row of an assignment; the subject name comes from the student's subjects, the due date is read against `now`. */
 export function assignmentRow(a: AssignmentLineView, subjects: Readonly<Record<string, string>>, now: Date): AssignmentRow {
-  const d = parseMoment(a.due);
+  const d = parseDue(a.due);
   let due = "";
   let overdue = false;
   if (d !== null) {
     const days = Math.round((dayStart(d) - dayStart(now)) / 86_400_000);
     overdue = days < 0;
-    due = days < 0 ? "просрочено" : days === 0 ? "сегодня" : days === 1 ? "завтра" : dueText(a.due);
+    // The ISO text of a local date reads back as the same local day.
+    due = days < 2 ? daysLeftText(days) : dueText(d.toISOString());
   }
   const subject = Object.prototype.hasOwnProperty.call(subjects, a.subjectId) ? subjects[a.subjectId] : "";
   return { id: a.id, title: a.title.trim() === "" ? noTitleLabel : a.title, subject, due, overdue };
