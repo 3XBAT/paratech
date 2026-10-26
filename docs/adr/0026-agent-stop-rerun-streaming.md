@@ -90,10 +90,9 @@ contract but is not implemented. Streaming through the owner's gateway (`ai.star
 - `docs/refs/anthropic.md` gets a streaming section (event types, usage, errors) before the adapter is written.
 - A rerun costs planner steps and a new answer; the Hub quota bounds it.
 
-## Open (questions to the owner)
-1. Should «Повторить» of a finished request give a **fresh** answer (new paid `ANSWER`, proposed) or the stored one?
-2. Is it acceptable that a request whose effects cannot be undone (for example a finished summary) can never be
-   repeated, only asked again by typing? Proposed: yes.
-3. A limit on repeats of one request (proposed: none beyond the quota)?
-4. Showing unverified claim texts as a draft before the citation check: acceptable (proposed: yes, marked «черновик»)?
-5. Who runs the gateway probe with a real key, and may `provider_stream` be on for beta testers once it passes?
+## Decided by the owner (2026-10-26; was «Open»)
+1. «Повторить» gives a **fresh, paid** answer (a student who repeats wants something new), not the stored one.
+2. A request whose effects cannot be undone is never repeated by the button; the student asks again by typing.
+3. No limit on repeats beyond the quota.
+4. Unverified streamed claim texts are shown as «черновик» before the citation check (TASK-146..148).
+5. Streaming goes to beta testers (`provider_stream` on) after the owner runs the gateway probe and it passes.
