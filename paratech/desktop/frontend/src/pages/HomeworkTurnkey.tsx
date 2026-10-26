@@ -25,7 +25,7 @@ export function TurnkeyBlockView(props: { api: TurnkeyApi; state: TurnkeyBlockSt
           {state.error !== "" && <ResultLine kind="fail" role="alert">{state.error}</ResultLine>}
         </>
       )}
-      {state.phase === "work" && <WorkWritingCard key={state.workId} api={props.api} workId={state.workId} />}
+      {state.phase === "work" && <WorkWritingCard key={state.workId} api={props.api} workId={state.workId} initial={state.work} />}
     </Card>
   );
 }

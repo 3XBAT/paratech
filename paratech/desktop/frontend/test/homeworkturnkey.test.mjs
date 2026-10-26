@@ -85,7 +85,8 @@ test("a start shows the card of the work it returns", async () => {
       return { id: "w2" };
     },
   };
-  assert.deepEqual(await startTurnkeyOnce(singleFlight(), api, "a1"), { phase: "work", workId: "w2" });
+  // The state carries the reply too: it may hold the problem of a reader call that did not go through (TASK-193).
+  assert.deepEqual(await startTurnkeyOnce(singleFlight(), api, "a1"), { phase: "work", workId: "w2", work: { id: "w2" } });
   assert.deepEqual(calls, ["a1"]);
 });
 
@@ -105,7 +106,7 @@ test("a double click makes exactly one call", async () => {
   const second = startTurnkeyOnce(flight, api, "a1");
   assert.equal(await second, null, "the second click is ignored");
   release();
-  assert.deepEqual(await first, { phase: "work", workId: "w2" });
+  assert.deepEqual(await first, { phase: "work", workId: "w2", work: { id: "w2" } });
   assert.equal(calls, 1);
   // After the answer a new start is allowed again (a failed one can be repeated).
   const again = startTurnkeyOnce(flight, api, "a1");

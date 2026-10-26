@@ -25,19 +25,25 @@ import {
   reviseOptions,
   canStop,
   nextStopping,
-  notStoppedText,
   openLabel,
   openTarget,
   openWork,
   stopWork,
   savePlanAt,
+  retryOffered,
+  metaLine,
+  workMeta,
   type OpenView,
   workCardModel,
   workTexts,
 } from "../workView.js";
+import { type AgentConfirmApi, agentConfirmApi } from "../bindings/agentConfirm.js";
 import { libraryApi, type LibraryApi } from "../bindings/library.js";
+import { type RecordingDeleteApi, recordingDeleteApi } from "../bindings/recordingDelete.js";
 import { callByName } from "../bindings/runtime.js";
-import { turnkeyCardModel } from "../turnkeyView.js";
+import { canOfferSend } from "../sendWorkView.js";
+import { WorkSend } from "./WorkSend.js";
+import { triageReason, turnkeyCardModel } from "../turnkeyView.js";
 import { FailedCard, HelperCard, QuestionsCard, TriageCard, UnderstandingCard } from "./TurnkeyCards.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
@@ -95,6 +101,13 @@ function OutlineEditor(props: { items: EditorItem[]; check: EditorCheck; disable
 }
 
 const defaultLibrary = libraryApi(callByName);
+const defaultSend = { api: agentConfirmApi(callByName), deleteApi: recordingDeleteApi(callByName) };
+
+/** The calls that sending a ready work to the teacher needs; without them nothing about sending is shown. */
+export interface SendApis {
+  api: AgentConfirmApi;
+  deleteApi: RecordingDeleteApi;
+}
 
 type Mode = "view" | "edit" | "revise";
 
@@ -115,6 +128,10 @@ export function WorkBody(props: {
   stopping?: boolean;
   /** The core accepted «Остановить»: the parent keeps reading the work until the job is gone. */
   onStopped?(): void;
+  /** Sending a ready work to the teacher (see WorkSend); without it nothing about sending is shown. */
+  send?: SendApis;
+  /** Subject names by library id, for the subject line of the card. */
+  subjects?: ReadonlyMap<string, string>;
 }) {
   const { work, api } = props;
   const error = props.error ?? "";
@@ -127,6 +144,8 @@ export function WorkBody(props: {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [openView, setOpenView] = useState<OpenView | null>(null);
+  // The last failure came from «Остановить»: «Повторить» (StartWriting) is no answer to it.
+  const [stopFailed, setStopFailed] = useState(false);
   // One call at a time: the guard answers a second click before the state has disabled the buttons.
   const [flight] = useState(singleFlight);
   const noteId = useId();
@@ -140,6 +159,7 @@ export function WorkBody(props: {
       setBusy(true);
       setError("");
       setOpenView(null);
+      setStopFailed(false);
       try {
         await call();
       } catch (e) {
@@ -179,7 +199,13 @@ export function WorkBody(props: {
     setError(turnkeyErrorText(r.error));
   };
   const stop = async () => {
-    const r = await stopWork(api, work.id);
+    let r;
+    try {
+      r = await stopWork(api, work.id);
+    } catch (e) {
+      setStopFailed(true);
+      throw e;
+    }
     props.onWork(r.work);
     if (r.watch) {
       props.onStopped?.();
@@ -191,6 +217,9 @@ export function WorkBody(props: {
     }
   };
   const canOpen = props.library !== undefined && openTarget(work) !== "";
+
+  const metaText = metaLine(workMeta(work, props.subjects ?? new Map()));
+  const metaEl = metaText !== "" && <p className="small muted ag-text">{metaText}</p>;
 
   const errorLine = error !== "" && (
     <ResultLine kind="fail" role="alert">
@@ -204,9 +233,9 @@ export function WorkBody(props: {
     const ctx = { work, api, busy, run, step, onWork: props.onWork, errorLine };
     switch (early.type) {
       case "triage":
-        return <TriageCard ctx={ctx} caption={early.caption} line={early.line} problem={early.problem} />;
+        return <TriageCard ctx={ctx} caption={early.caption} problem={early.problem} />;
       case "failed":
-        return <FailedCard caption={early.caption} text={early.text} message={work.problem === "" ? "" : work.message} />;
+        return <FailedCard caption={early.caption} text={early.text} message={triageReason(work)} />;
       case "questions":
         // A new round is a new form: the typed answers of the old one are dropped.
         return <QuestionsCard key={`${work.questionRound}:${work.version}`} ctx={ctx} />;
@@ -225,6 +254,7 @@ export function WorkBody(props: {
       return (
         <section className="ag-card">
           <h3 className="ag-card-h">{model.caption}</h3>
+          {metaEl}
           <p>{model.hint}</p>
           {errorLine}
           <div className="ag-actions">
@@ -242,10 +272,11 @@ export function WorkBody(props: {
             <span className="ag-dot" aria-hidden="true" />
             {model.caption}
           </h3>
+          {metaEl}
           <p role="status">{model.line}</p>
           {errorLine}
           <div className="ag-actions">
-            {error !== "" && error !== notStoppedText && (
+            {retryOffered(error, stopFailed) && (
               <Button size="sm" variant="primary" disabled={busy} onClick={() => void run(async () => props.onWork(await retryWriting(api, work.id)))}>
                 {workTexts.retry}
               </Button>
@@ -263,6 +294,7 @@ export function WorkBody(props: {
       return (
         <section className="ag-card">
           <h3 className="ag-card-h">{model.caption}</h3>
+          {metaEl}
           <p role="status">{model.line}</p>
           {errorLine}
           <div className="ag-actions">
@@ -277,6 +309,7 @@ export function WorkBody(props: {
       return (
         <section className="ag-card">
           <h3 className="ag-card-h">{model.caption}</h3>
+          {metaEl}
           <p className="small muted">{model.hint}</p>
           <OutlineEditor items={items} check={check} disabled={busy} onChange={setItems} />
           {errorLine}
@@ -300,6 +333,7 @@ export function WorkBody(props: {
       return (
         <section className="ag-card">
           <h3 className="ag-card-h">{model.caption}</h3>
+          {metaEl}
           <p>{model.text}</p>
           <label className="small muted" htmlFor={noteId}>
             {model.noteLabel}
@@ -318,6 +352,7 @@ export function WorkBody(props: {
       return (
         <section className="ag-card">
           <h3 className="ag-card-h">{model.caption}</h3>
+          {metaEl}
           <p className="ag-file">
             <Icon name="doc" />
             <span className="ag-file-kind">{model.file.kind}</span>
@@ -421,20 +456,46 @@ export function WorkBody(props: {
               </>
             )}
           </div>
+          {mode === "view" && props.send !== undefined && (
+            <WorkSend api={props.send.api} deleteApi={props.send.deleteApi} workId={work.id} sendable={canOfferSend(work)} />
+          )}
         </section>
       );
   }
 }
 
 /** Loads the work of a `work` card, re-reads it while a step runs, and shows the card of its step. */
-export function WorkWritingCard(props: { api: TurnkeyApi; workId: string; library?: LibraryApi }) {
+// `initial`: the work as the call that made it replied (it may carry the problem of a reader call, which the core does not store).
+export function WorkWritingCard(props: { api: TurnkeyApi; workId: string; library?: LibraryApi; send?: SendApis; initial?: TurnkeyWork }) {
   const { api, workId } = props;
   const library = props.library ?? defaultLibrary;
-  const [work, setWork] = useState<TurnkeyWork | null>(null);
+  const send = props.send ?? defaultSend;
+  const [work, setWork] = useState<TurnkeyWork | null>(() => (props.initial !== undefined && props.initial.id === workId ? props.initial : null));
   const [stopping, setStopping] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
-  const latest = useRef<TurnkeyWork | null>(null);
+  const latest = useRef<TurnkeyWork | null>(work);
+  const [subjects, setSubjects] = useState<ReadonlyMap<string, string>>(() => new Map());
+
+  // Subject names for the subject line: read once the work names a subject; a failed read just leaves «Входящие».
+  const subjectId = work?.subjectId ?? "";
+  useEffect(() => {
+    if (subjectId === "") {
+      return;
+    }
+    let live = true;
+    library
+      .subjects()
+      .then((list) => {
+        if (live) {
+          setSubjects(new Map(list.map((s) => [s.id, s.name])));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [library, subjectId]);
 
   // An older reply never replaces a newer one.
   // A reply that came (a read or a call) clears an earlier read error.
@@ -483,6 +544,8 @@ export function WorkWritingCard(props: { api: TurnkeyApi; workId: string; librar
           error={actionError}
           onError={onError}
           library={library}
+          send={send}
+          subjects={subjects}
           stopping={stoppingNow}
           onStopped={() => setStopping(true)}
         />

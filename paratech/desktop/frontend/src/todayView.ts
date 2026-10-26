@@ -189,6 +189,7 @@ export interface WaitingLine {
 const waitingKinds: Readonly<Record<string, { label: string; icon: WaitingLine["icon"] }>> = {
   create_deadline_event: { label: "Срок в календарь", icon: "cal" },
   send_homework_email: { label: "Письмо преподавателю", icon: "mail" },
+  send_work_email: { label: "Работа преподавателю", icon: "mail" },
   export_homework: { label: "Выгрузка задания", icon: "tasks" },
 };
 
