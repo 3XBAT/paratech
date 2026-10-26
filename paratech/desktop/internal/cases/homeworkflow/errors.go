@@ -39,6 +39,9 @@ var (
 	// ErrNoDrafts is returned by Service.ProposeEmailOfVersion when the service was built without the drafts.
 	ErrNoDrafts = errors.New("homework workflow: drafts are not wired")
 
+	// ErrNoWorks is returned by Service.ProposeSendWork when the service was built without the works.
+	ErrNoWorks = errors.New("homework workflow: works are not wired")
+
 	// ErrExportLocked is returned by Drafts.ExportDraft while an email of the assignment is unresolved (PENDING,
 	// SENDING or UNKNOWN): the export file is its attachment, and overwriting it would fail or change that email.
 	ErrExportLocked = errors.New("homework draft: the export file is the attachment of an unresolved email")

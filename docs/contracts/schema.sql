@@ -340,10 +340,14 @@ ALTER TABLE settings ADD COLUMN recording_source_app TEXT NOT NULL DEFAULT '' CH
 -- (unknown_assignment), which a foreign key would refuse; an assignment deleted later makes a confirmed proposal STALE
 -- (Recheck) and keeps an EXECUTED one as the record of what was done, while a RESTRICT would block the deletion by
 -- reprocessing for every declined or rejected proposal.
+-- Rebuilt by migration 0033 (TASK-180): kinds = proposal.AllKinds, with send_work_email, the core's own send of the
+-- file of a turnkey work (work_id; never a model proposal); attachment_format ('txt', 'docx' or 'pptx', proposal.Format)
+-- is the file a send attaches: the text or Word export of a homework send ('' for sends stored before TASK-094: the
+-- text export), the .docx or .pptx of a work; '' for the other kinds.
 -- ---------------------------------------------------------------------------------------------------------------
 CREATE TABLE proposals (
     id                TEXT    PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
-    kind              TEXT    NOT NULL CHECK (kind IN ('send_homework_email', 'export_homework', 'create_deadline_event')),
+    kind              TEXT    NOT NULL CHECK (kind IN ('send_homework_email', 'export_homework', 'create_deadline_event', 'send_work_email')),
     status            TEXT    NOT NULL CHECK (status IN (
                           'PROPOSED', 'VALIDATED', 'REJECTED', 'CONFIRMED', 'DECLINED', 'EXECUTED', 'STALE')),
     assignment_id     TEXT    NOT NULL CHECK (length(assignment_id) > 0),
@@ -360,10 +364,13 @@ CREATE TABLE proposals (
     version           INTEGER NOT NULL DEFAULT 0,            -- optimistic concurrency (ADR-0004)
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
+    attachment_format TEXT    NOT NULL DEFAULT '' CHECK (attachment_format IN ('', 'txt', 'docx', 'pptx')),
+    work_id           TEXT    NOT NULL DEFAULT '' CHECK (length(work_id) <= 128), -- the work whose file is sent (send_work_email)
     CHECK ((due_at IS NOT NULL) = (kind = 'create_deadline_event')),
     CHECK ((reason <> '') = (status IN ('REJECTED', 'STALE'))),
     CHECK ((confirmed_at IS NOT NULL) = (status IN ('CONFIRMED', 'EXECUTED', 'STALE'))),
-    CHECK ((executed_at IS NOT NULL) = (status = 'EXECUTED'))
+    CHECK ((executed_at IS NOT NULL) = (status = 'EXECUTED')),
+    CHECK ((work_id <> '') = (kind = 'send_work_email'))
 );
 
 -- ---------------------------------------------------------------------------------------------------------------
@@ -463,10 +470,7 @@ ALTER TABLE settings ADD COLUMN student_university TEXT NOT NULL DEFAULT '' CHEC
 ALTER TABLE settings ADD COLUMN student_faculty TEXT NOT NULL DEFAULT '' CHECK (length(student_faculty) <= 200);
 ALTER TABLE settings ADD COLUMN student_city TEXT NOT NULL DEFAULT '' CHECK (length(student_city) <= 200);
 
--- proposals: the file a send_homework_email attaches (proposal.Format), chosen by the user in the confirmation dialog
--- and pinned with the digest: 'txt' the text export, 'docx' the Word export; '' for the other kinds and for sends stored
--- before, which attach the text export.
-ALTER TABLE proposals ADD COLUMN attachment_format TEXT NOT NULL DEFAULT '' CHECK (attachment_format IN ('', 'txt', 'docx'));
+-- proposals: attachment_format, added by 0017, is part of the table as 0033 rebuilt it (above).
 
 -- recordings (migration 0018): the deletion mark (recording.Recording.MarkDeleting), set before any file or row is
 -- removed, and the found assignments to delete with the recording (a JSON array of ids). A marked recording is hidden

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 
 	"paratech/desktop/internal/domain/library/material"
+	"paratech/desktop/internal/domain/library/services/filing"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/library/values"
@@ -346,11 +347,11 @@ func (s *Service) fileInto(ctx context.Context, sub shared.SubjectID, folder sub
 	case err != nil:
 		return nil, err
 	}
-	f, ok := target.SystemFolder(folder)
+	f, ok := filing.Target(sub, target, folder)
 	if !ok {
 		return im.Material, nil
 	}
-	return s.Place(ctx, im.Material.ID(), sub, f.ID())
+	return s.Place(ctx, im.Material.ID(), sub, f)
 }
 
 // MoveToInbox returns a material to «Входящие» (the undo of Place); the file is kept.

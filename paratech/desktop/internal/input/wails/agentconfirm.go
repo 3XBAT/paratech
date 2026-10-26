@@ -10,6 +10,7 @@ import (
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/coursework/proposal"
+	"paratech/desktop/internal/domain/coursework/work"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -27,12 +28,21 @@ const (
 	ErrAgentConfirmCalendar    = agentConfirmError("Календарь не подключён: подключите Google в настройках и нажмите «Да» ещё раз.")
 	ErrAgentConfirmNoDue       = agentConfirmError("У задания нет срока: укажите его в «Домашних заданиях».")
 	ErrAgentConfirmUnavailable = agentConfirmError("Не удалось выполнить. Нажмите «Да» ещё раз — повторного действия не будет.")
+	// ErrAgentConfirmNoAssignment is the refusal no_assignment: a work without an assignment is never sent (TASK-180).
+	ErrAgentConfirmNoAssignment = agentConfirmError("Работа сделана не по заданию из списка ДЗ: её можно сохранить, но не отправить преподавателю.")
 )
+
+// workRejectMessages explain why the send of a work cannot be confirmed; the other reasons read as for a homework send.
+var workRejectMessages = map[proposal.RejectReason]string{
+	proposal.ReasonNoArtifact: "Нет готового файла работы: дождитесь, пока она допишется, или проверьте, что файл не удалён.",
+	proposal.ReasonFileMoved:  "Файл работы убран из папки «ДЗ»: верните его туда и нажмите «Отправить преподавателю» ещё раз.",
+}
 
 // Operation names of the log.
 const (
 	opConfirmCard  = "ui: agent confirm card"
 	opProposeDue   = "ui: propose a deadline"
+	opProposeWork  = "ui: propose sending a work"
 	opAgentConfirm = "ui: agent confirm"
 	opAgentDecline = "ui: agent decline"
 	opAgentNotice  = "ui: agent confirm card notice"
@@ -62,9 +72,11 @@ const (
 )
 
 // AgentConfirmProposals is the proposal pipeline (cases/homeworkflow) as the confirm card uses it (ARCH-42). Only the
-// student's click calls ConfirmSend, ConfirmDeadline and Decline; input/agent has no such method.
+// student's click calls ConfirmSend, ConfirmSendWork, ConfirmDeadline and Decline; input/agent has no such method.
 type AgentConfirmProposals interface {
 	ProposeDeadline(ctx context.Context, a shared.AssignmentID) (homeworkflow.ProposalView, error)
+	ProposeSendWork(ctx context.Context, w shared.WorkID) (homeworkflow.ProposalView, error)
+	ConfirmSendWork(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format) (homeworkflow.ProposalView, error)
 	Get(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
 	Assignment(ctx context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error)
 	ConfirmSend(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format) (homeworkflow.ProposalView, error)
@@ -188,6 +200,26 @@ func (s *AgentConfirmService) ProposeDeadline(ctx context.Context, assignmentID 
 	return s.proposalCard(ctx, v)
 }
 
+// ProposeSendWork is «Отправить преподавателю» on a finished work (TASK-180), the student's action only; the agent
+// never calls it. The send of the work's file becomes a proposal, or the one that already waits is returned; the card
+// (kind "send") then offers «Да» (Confirm). A work without an assignment is refused with ErrAgentConfirmNoAssignment
+// (no_assignment). Nothing is sent here.
+func (s *AgentConfirmService) ProposeSendWork(ctx context.Context, workID string) (AgentConfirmCard, error) {
+	wid := shared.WorkID(workID)
+	if wid.Validate() != nil {
+		return AgentConfirmCard{}, ErrAgentConfirmInvalid
+	}
+	v, err := s.core.Proposals.ProposeSendWork(ctx, wid)
+	if errors.Is(err, work.ErrNoAssignment) {
+		s.log.Info(opProposeWork, "result", "no_assignment")
+		return AgentConfirmCard{}, ErrAgentConfirmNoAssignment
+	}
+	if err != nil {
+		return AgentConfirmCard{}, s.fail(opProposeWork, err)
+	}
+	return s.proposalCard(ctx, v)
+}
+
 // Confirm is «Да» on a proposal card: a send is confirmed with the subject and the attachment format the card
 // showed (another one by now makes it stale, nothing is sent), a deadline is put into the calendar. A second click is
 // safe: no second email and no second event (hard rule 7); an email whose outcome is unknown is never sent again here,
@@ -215,6 +247,12 @@ func (s *AgentConfirmService) Confirm(ctx context.Context, kind, id, emailSubjec
 			return AgentConfirmCard{}, ferr
 		}
 		v, err = s.core.Proposals.ConfirmSend(ctx, pid, emailSubject, f)
+	case proposal.KindSendWork:
+		f, ok := workFormats[format]
+		if !ok {
+			return AgentConfirmCard{}, ErrAgentConfirmInvalid
+		}
+		v, err = s.core.Proposals.ConfirmSendWork(ctx, pid, emailSubject, f)
 	case proposal.KindDeadlineEvent:
 		v, err = s.core.Proposals.ConfirmDeadline(ctx, pid)
 	default:
@@ -263,7 +301,7 @@ func (s *AgentConfirmService) proposalCard(ctx context.Context, v homeworkflow.P
 	switch v.Kind {
 	case proposal.KindDeadlineEvent:
 		card.Kind, card.Title, card.Due = agentCardDeadline, v.Title, timeText(v.Due)
-	case proposal.KindSendHomework:
+	case proposal.KindSendHomework, proposal.KindSendWork:
 		card.Kind = agentCardSend
 		card.Recipient, card.EmailSubject, card.DraftVersion = v.Recipient, v.Subject, v.DraftVersion
 		card.AttachmentName, card.AttachmentSize, card.AttachmentFormat = v.AttachmentName, v.AttachmentSize, string(v.AttachmentFormat)
@@ -275,6 +313,9 @@ func (s *AgentConfirmService) proposalCard(ctx context.Context, v homeworkflow.P
 	case proposal.StatusRejected:
 		card.Message = msgRejectedDefault
 		if msg, ok := rejectMessages[v.Reason]; ok {
+			card.Message = msg
+		}
+		if msg, ok := workRejectMessages[v.Reason]; ok && v.Kind == proposal.KindSendWork {
 			card.Message = msg
 		}
 		if v.Reason == proposal.ReasonDueOutOfRange {
@@ -370,6 +411,9 @@ func (s *AgentConfirmService) fail(op string, err error) error {
 	s.log.Error(op, "err", err)
 	return ErrAgentConfirmUnavailable
 }
+
+// workFormats are the attachment formats of the send of a work as the card names them.
+var workFormats = map[string]proposal.Format{"docx": proposal.FormatDocx, "pptx": proposal.FormatPptx}
 
 func proposalID(id string) (proposal.ID, error) {
 	pid := proposal.ID(id)

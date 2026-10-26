@@ -436,8 +436,8 @@ func TestSchemaStatusChecksMatchGoConstants(t *testing.T) {
 		})
 	}
 
-	// The proposals table also lists the kinds the parser accepts.
-	if got, want := kindSet(tables["proposals"]), sortedStrings(proposal.Kinds()); got == nil || !equalStrings(got, want) {
+	// The proposals table also lists every kind: those the parser accepts and the core's own send of a work.
+	if got, want := kindSet(tables["proposals"]), sortedStrings(proposal.AllKinds()); got == nil || !equalStrings(got, want) {
 		t.Errorf("kind CHECK of proposals = %v, Go constants = %v", got, want)
 	}
 }

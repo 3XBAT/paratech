@@ -55,13 +55,17 @@ func (a Attachment) Size() int64 { return a.size }
 const (
 	MediaTypeText = "text/plain"
 	MediaTypeDocx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	MediaTypePptx = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 )
 
-// MediaType returns the MIME type the email declares for the attachment: a Word file (.docx, TASK-094) or plain text
-// (the text export and anything else).
+// MediaType returns the MIME type the email declares for the attachment: a Word file (.docx, TASK-094), a PowerPoint
+// file (.pptx, the presentation of a work, TASK-180) or plain text (the text export and anything else).
 func (a Attachment) MediaType() string {
-	if strings.HasSuffix(strings.ToLower(a.ref.Path()), ".docx") {
+	switch p := strings.ToLower(a.ref.Path()); {
+	case strings.HasSuffix(p, ".docx"):
 		return MediaTypeDocx
+	case strings.HasSuffix(p, ".pptx"):
+		return MediaTypePptx
 	}
 	return MediaTypeText
 }

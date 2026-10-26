@@ -265,7 +265,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return err
 	}
 	handlers.calendar = c.calendarSync
-	if err := c.wireProposals(e, settings); err != nil {
+	if err := c.wireProposals(e, settings, lib); err != nil {
 		return err
 	}
 
