@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,19 +44,30 @@ func (k *fakeKnowledge) Texts(_ context.Context, s shared.SubjectID) ([]kb.Lesso
 	return k.texts, k.err
 }
 
+// fakeReader returns out(req) or err. partials, when set, are handed to partial first, as a stream would.
 type fakeReader struct {
-	out  func(req answer.Request) string
-	err  error
-	reqs []answer.Request
+	out      func(req answer.Request) string
+	err      error
+	partials []string
+	reqs     []answer.Request
 }
 
-func (r *fakeReader) AnswerQuestion(_ context.Context, req answer.Request) (string, error) {
+func (r *fakeReader) AnswerQuestion(_ context.Context, req answer.Request, partial func(string)) (string, error) {
 	r.reqs = append(r.reqs, req)
+	if partial != nil {
+		for _, p := range r.partials {
+			partial(p)
+		}
+	}
 	if r.err != nil {
 		return "", r.err
 	}
 	return r.out(req), nil
 }
+
+type draftLog struct{ got [][]string }
+
+func (d *draftLog) Draft(texts []string) { d.got = append(d.got, texts) }
 
 type memAnswers struct {
 	byID      map[shared.AnswerID]*answer.Answer
@@ -153,7 +165,7 @@ func TestNewRequiresPorts(t *testing.T) {
 
 func TestAsk(t *testing.T) {
 	e, ctx := newEnv(t), context.Background()
-	got, err := e.svc.Ask(ctx, "Что такое производная функции?", "s1", scope)
+	got, err := e.svc.Ask(ctx, "Что такое производная функции?", "s1", scope, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,13 +203,13 @@ func TestAsk(t *testing.T) {
 	}
 
 	// The same question again in the same scope: the stored answer, no second call.
-	again, err := e.svc.Ask(ctx, " Что такое производная функции? ", "s1", scope)
+	again, err := e.svc.Ask(ctx, " Что такое производная функции? ", "s1", scope, nil)
 	if err != nil || !again.Reused || again.Answer.ID() != "an1" || len(e.reader.reqs) != 1 || e.answers.inserts != 1 {
 		t.Fatalf("again = %+v, %v; %d calls", again, err, len(e.reader.reqs))
 	}
 
 	// Another scope (a repeated request): a fresh answer under another key.
-	fresh, err := e.svc.Ask(ctx, "Что такое производная функции?", "s1", "ag:th1:2")
+	fresh, err := e.svc.Ask(ctx, "Что такое производная функции?", "s1", "ag:th1:2", nil)
 	if err != nil || fresh.Reused || fresh.Answer.ID() != "an2" || len(e.reader.reqs) != 2 || e.answers.inserts != 2 ||
 		e.reader.reqs[1].Key() == e.reader.reqs[0].Key() {
 		t.Fatalf("other scope = %+v, %v; %d calls", fresh, err, len(e.reader.reqs))
@@ -213,7 +225,7 @@ func TestAskNoFragments(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t)
 			e.knowledge.texts = texts
-			got, err := e.svc.Ask(context.Background(), "Что такое ротор векторного поля?", "", scope)
+			got, err := e.svc.Ask(context.Background(), "Что такое ротор векторного поля?", "", scope, nil)
 			if err != nil || got.Answer != nil || len(e.reader.reqs) != 0 || e.answers.inserts != 0 {
 				t.Fatalf("Ask = %+v, %v; %d reader calls", got, err, len(e.reader.reqs))
 			}
@@ -221,7 +233,7 @@ func TestAskNoFragments(t *testing.T) {
 	}
 	// Only question words: no terms to search for.
 	e := newEnv(t)
-	if got, err := e.svc.Ask(context.Background(), "Что это такое?", "", scope); err != nil || got.Answer != nil {
+	if got, err := e.svc.Ask(context.Background(), "Что это такое?", "", scope, nil); err != nil || got.Answer != nil {
 		t.Fatalf("Ask = %+v, %v", got, err)
 	}
 }
@@ -262,7 +274,7 @@ func TestAskErrors(t *testing.T) {
 			if q == "" {
 				q = "Что такое производная функции?"
 			}
-			_, err := e.svc.Ask(context.Background(), q, "", e.scope)
+			_, err := e.svc.Ask(context.Background(), q, "", e.scope, nil)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("Ask = %v, want %v", err, tt.want)
 			}
@@ -280,7 +292,7 @@ func TestAskErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	e.reader.err = errors.New("call cancelled")
 	cancel()
-	if _, err := e.svc.Ask(ctx, "Что такое производная функции?", "", scope); !errors.Is(err, context.Canceled) {
+	if _, err := e.svc.Ask(ctx, "Что такое производная функции?", "", scope, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled = %v", err)
 	}
 }
@@ -288,7 +300,7 @@ func TestAskErrors(t *testing.T) {
 // A replayed step that answered the same question meanwhile: its answer stands.
 func TestAskConcurrentDuplicate(t *testing.T) {
 	e := newEnv(t)
-	first, err := e.svc.Ask(context.Background(), "Что такое производная функции?", "", scope)
+	first, err := e.svc.Ask(context.Background(), "Что такое производная функции?", "", scope, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,9 +310,73 @@ func TestAskConcurrentDuplicate(t *testing.T) {
 		e.answers.byID[first.Answer.ID()] = first.Answer
 		return validAnswer
 	}
-	got, err := e.svc.Ask(context.Background(), "Что такое производная функции?", "", scope)
+	got, err := e.svc.Ask(context.Background(), "Что такое производная функции?", "", scope, nil)
 	if err != nil || !got.Reused || got.Answer.ID() != first.Answer.ID() {
 		t.Fatalf("Ask = %+v, %v", got, err)
+	}
+}
+
+// The sink gets each changed draft of the stream; the answer is made from the whole output only, and the draft is
+// never the result.
+func TestAskDrafts(t *testing.T) {
+	const q = "Что такое производная функции?"
+	partials := []string{
+		`{"cla`,
+		`{"claims":[{"text":"Произ`,
+		`{"claims":[{"text":"Произ`, // a replayed chunk: no change
+		`{"claims":[{"text":"Производная","cites":[{"chunk_id":"f1"`,
+		`{"claims":[{"text":"Производная","cites":[{"chunk_id":"f1","quote":"x"}]},{"text":"` + injected,
+	}
+
+	e := newEnv(t)
+	e.reader.partials = partials
+	sink := &draftLog{}
+	got, err := e.svc.Ask(context.Background(), q, "", scope, sink)
+	if err != nil || got.Answer == nil {
+		t.Fatalf("Ask = %+v, %v", got, err)
+	}
+	want := [][]string{{"Произ"}, {"Производная"}, {"Производная", injected}}
+	if len(sink.got) != len(want) {
+		t.Fatalf("drafts %q, want %q", sink.got, want)
+	}
+	for i := range want {
+		if !slices.Equal(sink.got[i], want[i]) {
+			t.Fatalf("draft %d = %q, want %q", i, sink.got[i], want[i])
+		}
+	}
+	// The stored answer is the parsed whole output, not the draft.
+	if c := got.Answer.Claims(); len(c) != 2 || c[1].Text != "Производную ввёл Лейбниц." {
+		t.Fatalf("claims %+v", c)
+	}
+
+	// A failed read: drafts were shown, nothing is stored or returned.
+	e = newEnv(t)
+	e.reader.partials, e.reader.err = partials, shared.ErrNetworkUnavailable
+	sink = &draftLog{}
+	if got, err := e.svc.Ask(context.Background(), q, "", scope, sink); !errors.Is(err, ErrNoConnection) || got.Answer != nil {
+		t.Fatalf("Ask = %+v, %v", got, err)
+	}
+	if len(sink.got) != len(want) || e.answers.inserts != 0 {
+		t.Fatalf("%d drafts, %d inserts", len(sink.got), e.answers.inserts)
+	}
+
+	// A draft that would not parse never changes the outcome: the whole output is refused as before.
+	e = newEnv(t)
+	e.reader.partials = partials
+	e.reader.out = func(answer.Request) string { return partials[len(partials)-1] }
+	if _, err := e.svc.Ask(context.Background(), q, "", scope, &draftLog{}); !errors.Is(err, ErrReaderRefused) {
+		t.Fatalf("cut output = %v", err)
+	}
+
+	// A stored answer is reused without a read and without a draft.
+	e = newEnv(t)
+	if _, err := e.svc.Ask(context.Background(), q, "", scope, nil); err != nil {
+		t.Fatal(err)
+	}
+	e.reader.partials = partials
+	sink = &draftLog{}
+	if again, err := e.svc.Ask(context.Background(), q, "", scope, sink); err != nil || !again.Reused || len(sink.got) != 0 {
+		t.Fatalf("reuse = %+v, %v, %d drafts", again, err, len(sink.got))
 	}
 }
 

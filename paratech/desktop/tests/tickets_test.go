@@ -72,7 +72,7 @@ func (l subjectLessons) Texts(_ context.Context, sub shared.SubjectID) ([]kb.Les
 type answersPort struct{ s *answering.Service }
 
 func (p answersPort) Ask(ctx context.Context, q string, sub shared.SubjectID) (*answer.Answer, error) {
-	asked, err := p.s.Ask(ctx, q, sub, "tk:v1")
+	asked, err := p.s.Ask(ctx, q, sub, "tk:v1", nil)
 	switch {
 	case err == nil:
 		return asked.Answer, nil
@@ -101,11 +101,11 @@ type gateReader struct {
 	refuse atomic.Bool
 }
 
-func (g *gateReader) AnswerQuestion(ctx context.Context, req answer.Request) (string, error) {
+func (g *gateReader) AnswerQuestion(ctx context.Context, req answer.Request, partial func(string)) (string, error) {
 	if g.refuse.Load() {
 		return "", backoff.Permanent(fmt.Errorf("answer: %w", hubclient.ErrRejected))
 	}
-	return g.next.AnswerQuestion(ctx, req)
+	return g.next.AnswerQuestion(ctx, req, partial)
 }
 
 const ticketList = "Вопросы к экзамену\n" +

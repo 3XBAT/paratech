@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"paratech/desktop/internal/domain/coursework/answer"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
@@ -44,12 +45,13 @@ func New(d Deps) (*Service, error) {
 // that best match it (kb.Passages) go to the reader as fragments with their places; its answer is parsed strictly, its
 // citations are checked (answer.New) and the answer is stored. The same question about the same fragments in the same
 // reuse scope (answer.NewRequest: e.g. one agent request) returns the stored answer without asking again; another
-// scope asks afresh. No matching passage: Asked without an answer, nothing asked.
+// scope asks afresh. No matching passage: Asked without an answer, nothing asked. A non-nil drafts gets the claim texts
+// of the output while it is read; the draft is never stored, returned or checked, only the whole output is.
 //
 // Errors: ErrInvalidQuestion, ErrNoConnection (asking again later repeats the same key, free if the Hub answered),
 // ErrQuota, ErrReaderRefused, ErrUnavailable (also for an invalid scope: the caller's bug, not the student's input),
 // or the error of ctx.
-func (s *Service) Ask(ctx context.Context, question string, subject shared.SubjectID, scope string) (Asked, error) {
+func (s *Service) Ask(ctx context.Context, question string, subject shared.SubjectID, scope string, drafts DraftSink) (Asked, error) {
 	q, err := answer.ParseQuestion(question)
 	if err != nil {
 		return Asked{}, fmt.Errorf("%w: %w", ErrInvalidQuestion, err)
@@ -80,7 +82,7 @@ func (s *Service) Ask(ctx context.Context, question string, subject shared.Subje
 	if got, ok, err := s.find(ctx, req.Key()); err != nil || ok {
 		return got, err
 	}
-	raw, err := s.reader.AnswerQuestion(ctx, req)
+	raw, err := s.reader.AnswerQuestion(ctx, req, draftsOf(drafts))
 	switch {
 	case err == nil:
 	case ctx.Err() != nil:
@@ -145,6 +147,22 @@ func (s *Service) find(ctx context.Context, key string) (Asked, bool, error) {
 	}
 	s.log.InfoContext(ctx, opReused, slog.String("answer", string(a.ID())))
 	return Asked{Answer: a, Reused: true}, true, nil
+}
+
+// draftsOf turns the partial output into drafts for sink, passing only a changed draft; nil for no sink.
+func draftsOf(sink DraftSink) func(string) {
+	if sink == nil {
+		return nil
+	}
+	var last []string
+	return func(soFar string) {
+		d := answer.Draft(soFar)
+		if slices.Equal(d, last) {
+			return
+		}
+		last = d
+		sink.Draft(slices.Clone(d))
+	}
 }
 
 // local wraps an error of the local store; a cancelled or timed-out ctx is returned as it is.
