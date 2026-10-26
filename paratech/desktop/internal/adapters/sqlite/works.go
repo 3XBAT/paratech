@@ -44,9 +44,12 @@ func (r *WorkRepository) ActiveOf(ctx context.Context, src work.Source) (*work.W
 		row sqlcgen.Work
 		err error
 	)
-	if src.Assignment != "" {
+	switch {
+	case !src.Topic.IsZero():
+		row, err = q.GetActiveWorkOfTopic(ctx, jobNullString(src.Topic.Request()))
+	case src.Assignment != "":
 		row, err = q.GetActiveWorkOfAssignment(ctx, jobNullString(string(src.Assignment)))
-	} else {
+	default:
 		row, err = q.GetActiveWorkOfMaterial(ctx, jobNullString(string(src.Material)))
 	}
 	if err != nil {
@@ -67,6 +70,7 @@ func (r *WorkRepository) Save(ctx context.Context, w *work.Work) error {
 		v, ok := st.Edits[f]
 		return sql.NullString{String: v, Valid: ok}
 	}
+	topic := st.Source.Topic
 	var writing sql.NullString
 	if st.Writing != nil {
 		writing = sql.NullString{String: st.Writing.Encode(), Valid: true}
@@ -76,7 +80,9 @@ func (r *WorkRepository) Save(ctx context.Context, w *work.Work) error {
 		if st.Version == 0 {
 			err := q.InsertWork(ctx, sqlcgen.InsertWorkParams{
 				ID: string(st.ID), AssignmentID: jobNullString(string(st.Source.Assignment)),
-				MaterialID: jobNullString(string(st.Source.Material)), Status: string(st.Status), Round: int64(st.Round),
+				MaterialID: jobNullString(string(st.Source.Material)), TopicRequest: jobNullString(topic.Request()),
+				Topic: jobNullString(topic.Text()), TopicSubjectID: jobNullString(string(topic.Subject())),
+				Status: string(st.Status), Round: int64(st.Round),
 				Attempt: int64(st.Attempt), EditWorkType: edit(work.FieldWorkType), EditVolume: edit(work.FieldVolume),
 				EditFileFormat: edit(work.FieldFileFormat), EditFormatting: edit(work.FieldFormatting),
 				EditVariant: edit(work.FieldVariant), EditDeadline: edit(work.FieldDeadline),
@@ -205,9 +211,18 @@ func (r *WorkRepository) restore(ctx context.Context, row sqlcgen.Work) (*work.W
 		}
 		writing = &wr
 	}
+	src := work.Source{Assignment: shared.AssignmentID(row.AssignmentID.String), Material: shared.MaterialID(row.MaterialID.String)}
+	if row.Topic.Valid || row.TopicRequest.Valid {
+		// The stored topic passes the same rules as a new one and is stored clean already.
+		if src.Topic, err = work.NewTopic(row.TopicRequest.String, row.Topic.String, shared.SubjectID(row.TopicSubjectID.String)); err != nil {
+			return bad("topic", err)
+		}
+		if src.Topic.Text() != row.Topic.String {
+			return bad("topic", work.ErrInvalidTopic)
+		}
+	}
 	w, err := work.Restore(work.State{
-		Version: row.Version, ID: shared.WorkID(row.ID),
-		Source: work.Source{Assignment: shared.AssignmentID(row.AssignmentID.String), Material: shared.MaterialID(row.MaterialID.String)},
+		Version: row.Version, ID: shared.WorkID(row.ID), Source: src,
 		Status: work.Status(row.Status), Round: int(row.Round), Attempt: int(row.Attempt), Rounds: rounds, Edits: edits,
 		Writing: writing, CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 	})

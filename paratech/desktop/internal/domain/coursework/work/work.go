@@ -9,19 +9,31 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// Source is what the work is made from: an assignment of the homework list, or an uploaded file of the library that
-// holds the assignment. Exactly one is set.
+// Source is what the work is made from: an assignment of the homework list, an uploaded file of the library that
+// holds the assignment, or a topic without an assignment (TASK-187). Exactly one is set.
 type Source struct {
 	Assignment shared.AssignmentID
 	Material   shared.MaterialID
+	Topic      Topic
+}
+
+// Validate checks that exactly one well-formed source is set. Error: ErrInvalidWork.
+func (s Source) Validate() error {
+	if !s.valid() {
+		return fmt.Errorf("%w: exactly one source", ErrInvalidWork)
+	}
+	return nil
 }
 
 func (s Source) valid() bool {
+	topic := !s.Topic.IsZero()
 	switch {
-	case s.Assignment != "" && s.Material == "":
+	case s.Assignment != "" && s.Material == "" && !topic:
 		return s.Assignment.Validate() == nil
-	case s.Material != "" && s.Assignment == "":
+	case s.Material != "" && s.Assignment == "" && !topic:
 		return s.Material.Validate() == nil
+	case topic && s.Assignment == "" && s.Material == "":
+		return s.Topic.valid()
 	}
 	return false
 }

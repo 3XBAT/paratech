@@ -26,6 +26,7 @@ const (
 	ErrTurnkeyWritten     = turnkeyError("Работа уже написана: измените план или сгенерируйте раздел заново.")
 	ErrTurnkeyStale       = turnkeyError("Работа изменилась: обновите карточку.")
 	ErrTurnkeyNotStopped  = turnkeyError("Не удалось остановить написание. Попробуйте ещё раз.")
+	ErrTurnkeyNoSource    = turnkeyError("Задание не найдено: возможно, его удалили.")
 )
 
 // States of the writing job (TurnkeyWriting.JobState) while it is active.
@@ -68,6 +69,7 @@ var turnkeyMessages = map[string]string{
 
 // Operation names of the log.
 const (
+	opTurnkeyStart   = "ui: turnkey start"
 	opTurnkeyWork    = "ui: turnkey work"
 	opTurnkeyAnswer  = "ui: turnkey answers"
 	opTurnkeyEdit    = "ui: turnkey card edit"
@@ -80,6 +82,7 @@ const (
 
 // TurnkeyUseCase is the turnkey work (cases/turnkey) as its cards and the helper page use it (ARCH-42).
 type TurnkeyUseCase interface {
+	Triage(ctx context.Context, src work.Source) (turnkey.Started, error)
 	Work(ctx context.Context, id shared.WorkID) (turnkey.View, error)
 	WorkOf(ctx context.Context, src work.Source) (turnkey.View, error)
 	AnswerQuestions(ctx context.Context, id shared.WorkID, replies []work.Reply) (turnkey.View, error)
@@ -226,9 +229,10 @@ type TurnkeyAnswer struct {
 }
 
 // TurnkeyService is bound to the turnkey cards and the helper page: every exported method is callable from the page
-// by its full name. None of them sends or exports the work: AnswerQuestions, SkipQuestions and Retry ask the reader
-// (a paid call); StartWriting, ApproveOutline and Regenerate start a paid writing job whose paper is filed in the
-// local library; the rest change only local data.
+// by its full name. None of them sends or exports the work: StartForAssignment, AnswerQuestions, SkipQuestions and
+// Retry ask the reader (a paid call); StartWriting, ApproveOutline and Regenerate start a paid writing job whose paper
+// is filed in the local library; the rest change only local data. The student's click is the consent to a paid call:
+// unlike the agent's triage_assignment, StartForAssignment leaves no entry in the agent's journal.
 type TurnkeyService struct {
 	core TurnkeyUseCase
 	log  *slog.Logger
@@ -250,6 +254,19 @@ func (s *TurnkeyService) Work(ctx context.Context, id string) (TurnkeyWork, erro
 func (s *TurnkeyService) WorkOfAssignment(ctx context.Context, assignmentID string) (TurnkeyWork, error) {
 	v, err := s.core.WorkOf(ctx, work.Source{Assignment: shared.AssignmentID(assignmentID)})
 	return s.reply(opTurnkeyWork, v, err)
+}
+
+// StartForAssignment is «Сделать под ключ» on the assignment's page: the same triage as the agent's
+// triage_assignment (a paid reader call). An assignment that has a work already (not failed) gets it back without a
+// new paid call; a work whose call did not go through comes back with its problem, as with Retry. An assignment
+// that does not exist is ErrTurnkeyNoSource.
+func (s *TurnkeyService) StartForAssignment(ctx context.Context, assignmentID string) (TurnkeyWork, error) {
+	st, err := s.core.Triage(ctx, work.Source{Assignment: shared.AssignmentID(assignmentID)})
+	if err != nil && st.View.ID == "" && errors.Is(err, turnkey.ErrSourceNotFound) {
+		s.log.Info(opTurnkeyStart, "err", err)
+		return TurnkeyWork{}, ErrTurnkeyNoSource
+	}
+	return s.reply(opTurnkeyStart, st.View, err)
 }
 
 // AnswerQuestions sends the answers of the QuestionsCard; the next round is asked at once.

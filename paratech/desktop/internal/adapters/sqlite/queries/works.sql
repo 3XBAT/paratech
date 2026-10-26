@@ -12,15 +12,20 @@ SELECT * FROM works WHERE assignment_id = sqlc.arg(assignment_id) AND status <> 
 -- name: GetActiveWorkOfMaterial :one
 SELECT * FROM works WHERE material_id = sqlc.arg(material_id) AND status <> 'failed';
 
+-- The work of a topic request that has not failed; at most one (idx_works_topic).
+-- name: GetActiveWorkOfTopic :one
+SELECT * FROM works WHERE topic_request = sqlc.arg(topic_request) AND status <> 'failed';
+
 -- A never-stored work (version 0) is inserted with version 1.
 -- name: InsertWork :exec
-INSERT INTO works (id, assignment_id, material_id, status, round, attempt, edit_work_type, edit_volume,
-                   edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version,
-                   created_at, updated_at)
-VALUES (sqlc.arg(id), sqlc.arg(assignment_id), sqlc.arg(material_id), sqlc.arg(status), sqlc.arg(round),
-        sqlc.arg(attempt), sqlc.arg(edit_work_type), sqlc.arg(edit_volume), sqlc.arg(edit_file_format),
-        sqlc.arg(edit_formatting), sqlc.arg(edit_variant), sqlc.arg(edit_deadline), sqlc.arg(edit_sources),
-        sqlc.arg(writing), 1, sqlc.arg(created_at), sqlc.arg(updated_at));
+INSERT INTO works (id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt,
+                   edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline,
+                   edit_sources, writing, version, created_at, updated_at)
+VALUES (sqlc.arg(id), sqlc.arg(assignment_id), sqlc.arg(material_id), sqlc.arg(topic_request), sqlc.arg(topic),
+        sqlc.arg(topic_subject_id), sqlc.arg(status), sqlc.arg(round), sqlc.arg(attempt), sqlc.arg(edit_work_type),
+        sqlc.arg(edit_volume), sqlc.arg(edit_file_format), sqlc.arg(edit_formatting), sqlc.arg(edit_variant),
+        sqlc.arg(edit_deadline), sqlc.arg(edit_sources), sqlc.arg(writing), 1, sqlc.arg(created_at),
+        sqlc.arg(updated_at));
 
 -- name: UpdateWork :execrows
 UPDATE works
