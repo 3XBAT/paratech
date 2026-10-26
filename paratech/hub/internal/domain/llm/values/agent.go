@@ -13,6 +13,7 @@ import (
 const (
 	MaxAgentCalls        = 4
 	MaxStudentTextBytes  = 4 << 10
+	MaxAgentReplyBytes   = 2 << 10
 	MaxResultJSONBytes   = 16 << 10
 	MaxArgumentsBytes    = 8 << 10
 	MaxAgentRequestBytes = 256 << 10
@@ -140,11 +141,13 @@ const (
 	TurnStudentText TurnKind = iota + 1
 	TurnCalls
 	TurnResults
+	TurnAgentReply
 )
 
 // Turn is one history turn of a thread: what the student typed, an echo of calls the Hub returned (with their seal),
-// or the results of those calls. Build it with StudentTurn, CallsTurn or ResultsTurn. An echo inside an AgentCall may
-// also carry the kept assistant turn of its calls (AgentCall.WithAssistant).
+// the results of those calls, or what the app showed the student in answer to an earlier request. Build it with
+// StudentTurn, CallsTurn, ResultsTurn or AgentReplyTurn. An echo inside an AgentCall may also carry the kept assistant
+// turn of its calls (AgentCall.WithAssistant).
 type Turn struct {
 	kind      TurnKind
 	text      string
@@ -165,6 +168,21 @@ func StudentTurn(text string) (Turn, error) {
 		return Turn{}, fmt.Errorf("%w: student text is empty", ErrInvalidAgentRequest)
 	}
 	return Turn{kind: TurnStudentText, text: text}, nil
+}
+
+// AgentReplyTurn checks the app's answer to an earlier request of the thread, built by the desktop: non-blank, valid
+// UTF-8 without NUL, at most MaxAgentReplyBytes. It is bounded client data like a student text, so it has no seal
+// (ADR-0023 "History pairs").
+func AgentReplyTurn(text string) (Turn, error) {
+	switch {
+	case len(text) > MaxAgentReplyBytes:
+		return Turn{}, fmt.Errorf("%w: agent reply exceeds %d bytes", ErrInvalidAgentRequest, MaxAgentReplyBytes)
+	case !cleanText(text):
+		return Turn{}, fmt.Errorf("%w: agent reply is not valid UTF-8 without NUL", ErrInvalidAgentRequest)
+	case isBlank(text):
+		return Turn{}, fmt.Errorf("%w: agent reply is empty", ErrInvalidAgentRequest)
+	}
+	return Turn{kind: TurnAgentReply, text: text}, nil
 }
 
 // CallsTurn checks an echo: 1..MaxAgentCalls calls with distinct ids and a non-empty seal. Whether the seal matches is
@@ -200,7 +218,7 @@ func ResultsTurn(results []ToolResult) (Turn, error) {
 // Kind is the kind of the turn.
 func (t Turn) Kind() TurnKind { return t.kind }
 
-// Text is the student's text of a TurnStudentText.
+// Text is the student's text of a TurnStudentText or the app's answer of a TurnAgentReply.
 func (t Turn) Text() string { return t.text }
 
 // Calls are the echoed calls of a TurnCalls (a copy).

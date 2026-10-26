@@ -19,7 +19,7 @@ func answerRequest(t *testing.T) answer.Request {
 	r, err := answer.NewRequest("Что такое производная?", []answer.Excerpt{{
 		Text:   "Производная — предел отношения приращений.",
 		Source: answer.Source{Recording: "rec1", Section: answer.SectionLectureText, StartMs: 1000},
-	}})
+	}}, "ag:th1:1")
 	if err != nil {
 		t.Fatal(err)
 	}

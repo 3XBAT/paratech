@@ -747,9 +747,10 @@ CREATE TABLE work_rounds (
 -- answered from here. subject_id is the subject asked about (NULL: the whole base), without a foreign key. claims,
 -- missing and sources are the checked answer as JSON: untrusted model text and quotes of lessons, read back through
 -- answer.Restore; a source is the place a citation opens (recording, section, index, start).
+-- Migration 0030 rebuilt the table to accept the keys v2 (with the reuse scope of the request, TASK-142) next to v1.
 CREATE TABLE answers (
     id          TEXT    NOT NULL PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
-    request_key TEXT    NOT NULL UNIQUE CHECK (length(request_key) = 71 AND request_key GLOB 'ans:v1:*'),
+    request_key TEXT    NOT NULL UNIQUE CHECK (length(request_key) = 71 AND request_key GLOB 'ans:v[12]:*'),
     subject_id  TEXT    CHECK (subject_id IS NULL OR length(subject_id) BETWEEN 1 AND 128),
     question    TEXT    NOT NULL CHECK (length(question) BETWEEN 1 AND 500),
     fragments   INTEGER NOT NULL CHECK (fragments BETWEEN 1 AND 40),

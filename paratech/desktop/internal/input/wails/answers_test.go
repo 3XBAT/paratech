@@ -30,7 +30,7 @@ func cardAnswer(t *testing.T) *answer.Answer {
 		{Text: "Ряд сходится, если сходится ряд модулей. <b>жирный</b>",
 			Source: answer.Source{Recording: "r1", Section: answer.SectionLectureText, Index: 3, StartMs: 725_000, Title: "Матанализ", StartedAt: at}},
 		{Text: "Ключевые понятия: ряд, частичная сумма.", Source: answer.Source{Recording: "r2", Section: answer.SectionSummary, Index: 1}},
-	})
+	}, "ag:th1:1")
 	if err != nil {
 		t.Fatal(err)
 	}

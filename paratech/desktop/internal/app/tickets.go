@@ -16,9 +16,12 @@ type ticketAnswers struct {
 	answers *answering.Service
 }
 
+// ticketScope is the answer reuse scope of every ticket: the same ticket in the same subject reuses its paid answer.
+const ticketScope = "tk:v1"
+
 // Ask answers one ticket from the lessons of the subject; nil when no passage matches.
 func (t ticketAnswers) Ask(ctx context.Context, question string, sub shared.SubjectID) (*answer.Answer, error) {
-	asked, err := t.answers.Ask(ctx, question, sub)
+	asked, err := t.answers.Ask(ctx, question, sub, ticketScope)
 	switch {
 	case err == nil:
 		return asked.Answer, nil
