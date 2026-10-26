@@ -17,6 +17,8 @@ export const methods = {
   regenerate: `${service}.Regenerate`,
   // TASK-130: questions, «Как понято задание», the helper.
   workOfAssignment: `${service}.WorkOfAssignment`,
+  // TASK-185: «Сделать под ключ» on the assignment's page.
+  startForAssignment: `${service}.StartForAssignment`,
   answerQuestions: `${service}.AnswerQuestions`,
   skipQuestions: `${service}.SkipQuestions`,
   editUnderstanding: `${service}.EditUnderstanding`,
@@ -160,6 +162,7 @@ export const errorTexts: readonly string[] = [
   "Работа уже написана: измените план или сгенерируйте раздел заново.",
   "Работа изменилась: обновите карточку.",
   "Не удалось остановить написание. Попробуйте ещё раз.",
+  "Задание не найдено: возможно, его удалили.",
 ];
 
 export const genericError = "Не удалось выполнить. Попробуйте ещё раз.";
@@ -390,6 +393,11 @@ export interface TurnkeyApi {
   regenerate(workId: string, number: number, note: string): Promise<TurnkeyWork>;
   /** The work of an assignment; a missing one is the not-found error. */
   workOfAssignment(assignmentId: string): Promise<TurnkeyWork>;
+  /**
+   * «Сделать под ключ»: starts the triage of an assignment (a paid reader call; the click is the consent). An existing
+   * work comes back without a new call; a call that did not go through comes back as the work with its problem.
+   */
+  startForAssignment(assignmentId: string): Promise<TurnkeyWork>;
   /** Sends the answers of the questions card; the next round is asked at once (a paid call). */
   answerQuestions(workId: string, answers: QuestionAnswer[]): Promise<TurnkeyWork>;
   /** «Пропустить»: every question takes its default. */
@@ -420,6 +428,7 @@ export function turnkeyApi(call: CallByName): TurnkeyApi {
     stopWriting: async (id) => parseWork(await call(methods.stopWriting, id)),
     regenerate: async (id, number, note) => parseWork(await call(methods.regenerate, id, number, note)),
     workOfAssignment: async (id) => parseWork(await call(methods.workOfAssignment, id)),
+    startForAssignment: async (id) => parseWork(await call(methods.startForAssignment, id)),
     answerQuestions: async (id, answers) =>
       parseWork(await call(methods.answerQuestions, id, answers.map((a) => ({ question: a.question, option: a.option, text: a.text })))),
     skipQuestions: async (id) => parseWork(await call(methods.skipQuestions, id)),

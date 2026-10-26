@@ -55,7 +55,7 @@ function fakeApi(log = [], over = {}) {
   return {
     work: reply("work"), startWriting: reply("startWriting"), approveOutline: reply("approveOutline"), editOutline: reply("editOutline"),
     editOutlineAt: reply("editOutlineAt"), stopWriting: reply("stopWriting"),
-    regenerate: reply("regenerate"), workOfAssignment: reply("workOfAssignment"), answerQuestions: reply("answerQuestions"),
+    regenerate: reply("regenerate"), workOfAssignment: reply("workOfAssignment"), startForAssignment: reply("startForAssignment"), answerQuestions: reply("answerQuestions"),
     skipQuestions: reply("skipQuestions"), editUnderstanding: reply("editUnderstanding"), confirmRequirements: reply("confirmRequirements"),
     retry: reply("retry"), askStep: async (...args) => (log.push(["askStep", ...args]), "Ответ"), ...over,
   };
@@ -120,6 +120,35 @@ test("the API sends the answers, the card and the step question as the Go bindin
   assert.deepEqual(calls[5], [methods.askStep, "w1", 2, "почему?"]);
   const bad = turnkeyApi(async () => ({ nope: 1 }));
   await assert.rejects(bad.askStep("w1", 0, "q"));
+});
+
+test("startForAssignment starts the triage by the assignment id and parses the work or its problem", async () => {
+  assert.equal(methods.startForAssignment, "paratech/desktop/internal/input/wails.TurnkeyService.StartForAssignment");
+  const calls = [];
+  let reply = { id: "w1", assignmentId: "a7", status: "questions", version: 2, problem: "", message: "", questionRound: 1, questions: [choice] };
+  const api = turnkeyApi(async (name, ...args) => {
+    calls.push([name, ...args]);
+    return reply;
+  });
+  const w = await api.startForAssignment("a7");
+  assert.deepEqual(calls, [[methods.startForAssignment, "a7"]]);
+  assert.equal(w.status, "questions");
+  assert.equal(w.questions[0].text, choice.text);
+
+  reply = { id: "w1", status: "triage", version: 1, problem: "offline", message: "Нет связи с paratech: разбор не завершён. Повторите позже." };
+  const offline = await api.startForAssignment("a7");
+  assert.equal(offline.problem, "offline");
+  assert.equal(offline.status, "triage");
+
+  reply = { id: 1 };
+  await assert.rejects(api.startForAssignment("a7"));
+  const missing = turnkeyApi(async () => {
+    throw new Error("Задание не найдено: возможно, его удалили.");
+  });
+  await missing.startForAssignment("gone").then(
+    () => assert.fail("no error"),
+    (err) => assert.equal(turnkeyErrorText(err), "Задание не найдено: возможно, его удалили."),
+  );
 });
 
 const writingRaw = { step: "section", generation: 1, topic: "T", sections: [], done: 1, total: 3, subjectId: "", materialId: "", result: "", job: "j1" };

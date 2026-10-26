@@ -29,7 +29,7 @@ func (q *Queries) DeleteWork(ctx context.Context, arg DeleteWorkParams) (int64, 
 }
 
 const getActiveWorkOfAssignment = `-- name: GetActiveWorkOfAssignment :one
-SELECT id, assignment_id, material_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, version, created_at, updated_at, writing FROM works WHERE assignment_id = ?1 AND status <> 'failed'
+SELECT id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version, created_at, updated_at FROM works WHERE assignment_id = ?1 AND status <> 'failed'
 `
 
 // The work of an assignment that has not failed; at most one (idx_works_assignment).
@@ -40,6 +40,9 @@ func (q *Queries) GetActiveWorkOfAssignment(ctx context.Context, assignmentID sq
 		&i.ID,
 		&i.AssignmentID,
 		&i.MaterialID,
+		&i.TopicRequest,
+		&i.Topic,
+		&i.TopicSubjectID,
 		&i.Status,
 		&i.Round,
 		&i.Attempt,
@@ -50,16 +53,16 @@ func (q *Queries) GetActiveWorkOfAssignment(ctx context.Context, assignmentID sq
 		&i.EditVariant,
 		&i.EditDeadline,
 		&i.EditSources,
+		&i.Writing,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Writing,
 	)
 	return i, err
 }
 
 const getActiveWorkOfMaterial = `-- name: GetActiveWorkOfMaterial :one
-SELECT id, assignment_id, material_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, version, created_at, updated_at, writing FROM works WHERE material_id = ?1 AND status <> 'failed'
+SELECT id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version, created_at, updated_at FROM works WHERE material_id = ?1 AND status <> 'failed'
 `
 
 // The work of a library material that has not failed; at most one (idx_works_material).
@@ -70,6 +73,9 @@ func (q *Queries) GetActiveWorkOfMaterial(ctx context.Context, materialID sql.Nu
 		&i.ID,
 		&i.AssignmentID,
 		&i.MaterialID,
+		&i.TopicRequest,
+		&i.Topic,
+		&i.TopicSubjectID,
 		&i.Status,
 		&i.Round,
 		&i.Attempt,
@@ -80,17 +86,50 @@ func (q *Queries) GetActiveWorkOfMaterial(ctx context.Context, materialID sql.Nu
 		&i.EditVariant,
 		&i.EditDeadline,
 		&i.EditSources,
+		&i.Writing,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getActiveWorkOfTopic = `-- name: GetActiveWorkOfTopic :one
+SELECT id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version, created_at, updated_at FROM works WHERE topic_request = ?1 AND status <> 'failed'
+`
+
+// The work of a topic request that has not failed; at most one (idx_works_topic).
+func (q *Queries) GetActiveWorkOfTopic(ctx context.Context, topicRequest sql.NullString) (Work, error) {
+	row := q.db.QueryRowContext(ctx, getActiveWorkOfTopic, topicRequest)
+	var i Work
+	err := row.Scan(
+		&i.ID,
+		&i.AssignmentID,
+		&i.MaterialID,
+		&i.TopicRequest,
+		&i.Topic,
+		&i.TopicSubjectID,
+		&i.Status,
+		&i.Round,
+		&i.Attempt,
+		&i.EditWorkType,
+		&i.EditVolume,
+		&i.EditFileFormat,
+		&i.EditFormatting,
+		&i.EditVariant,
+		&i.EditDeadline,
+		&i.EditSources,
 		&i.Writing,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getWork = `-- name: GetWork :one
 
-SELECT id, assignment_id, material_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, version, created_at, updated_at, writing FROM works WHERE id = ?1
+SELECT id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version, created_at, updated_at FROM works WHERE id = ?1
 `
 
 // Turnkey works (TASK-129, ADR-0025): the aggregate coursework/work with its answered reader rounds, saved with the
@@ -102,6 +141,9 @@ func (q *Queries) GetWork(ctx context.Context, id string) (Work, error) {
 		&i.ID,
 		&i.AssignmentID,
 		&i.MaterialID,
+		&i.TopicRequest,
+		&i.Topic,
+		&i.TopicSubjectID,
 		&i.Status,
 		&i.Round,
 		&i.Attempt,
@@ -112,28 +154,32 @@ func (q *Queries) GetWork(ctx context.Context, id string) (Work, error) {
 		&i.EditVariant,
 		&i.EditDeadline,
 		&i.EditSources,
+		&i.Writing,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Writing,
 	)
 	return i, err
 }
 
 const insertWork = `-- name: InsertWork :exec
-INSERT INTO works (id, assignment_id, material_id, status, round, attempt, edit_work_type, edit_volume,
-                   edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version,
-                   created_at, updated_at)
+INSERT INTO works (id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt,
+                   edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline,
+                   edit_sources, writing, version, created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5,
-        ?6, ?7, ?8, ?9,
-        ?10, ?11, ?12, ?13,
-        ?14, 1, ?15, ?16)
+        ?6, ?7, ?8, ?9, ?10,
+        ?11, ?12, ?13, ?14,
+        ?15, ?16, ?17, 1, ?18,
+        ?19)
 `
 
 type InsertWorkParams struct {
 	ID             string
 	AssignmentID   sql.NullString
 	MaterialID     sql.NullString
+	TopicRequest   sql.NullString
+	Topic          sql.NullString
+	TopicSubjectID sql.NullString
 	Status         string
 	Round          int64
 	Attempt        int64
@@ -155,6 +201,9 @@ func (q *Queries) InsertWork(ctx context.Context, arg InsertWorkParams) error {
 		arg.ID,
 		arg.AssignmentID,
 		arg.MaterialID,
+		arg.TopicRequest,
+		arg.Topic,
+		arg.TopicSubjectID,
 		arg.Status,
 		arg.Round,
 		arg.Attempt,
