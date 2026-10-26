@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"paratech/desktop/internal/cases/turnkey"
+	cvalues "paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/coursework/work"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/shared"
@@ -124,12 +125,102 @@ func TestTurnkeyWritingJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"step":"approve","generation":1,"topic":"Древняя Русь","sections":[` +
-		`{"number":1,"title":"Введение","words":200,"note":"","written":true,"paragraphs":["Абзац."],` +
-		`"sources":[{"text":"Методичка.docx","materialId":"m1","verify":false},{"text":"Иванов И. И.","materialId":"","verify":true}]},` +
-		`{"number":2,"title":"Итоги","words":150,"note":"","written":false,"paragraphs":[],"sources":[]}],` +
-		`"done":1,"total":2,"subjectId":"s1","materialId":"","result":"","job":"","active":false,"jobState":""}`
+		`{"number":1,"kind":"","part":"","title":"Введение","words":200,"note":"","written":true,"paragraphs":["Абзац."],` +
+		`"sources":[{"text":"Методичка.docx","materialId":"m1","verify":false},{"text":"Иванов И. И.","materialId":"","verify":true}],` +
+		`"bullets":[],"columns":[]},` +
+		`{"number":2,"kind":"","part":"","title":"Итоги","words":150,"note":"","written":false,"paragraphs":[],"sources":[],` +
+		`"bullets":[],"columns":[]}],` +
+		`"done":1,"total":2,"subjectId":"s1","materialId":"","result":"","job":"","active":false,"jobState":"",` +
+		`"presentation":false,"template":"","questions":[],"talkMaterialId":"","talkResult":"",` +
+		`"lab":false,"manual":"","placeholders":[]}`
 	if string(b) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", b, want)
+	}
+}
+
+// A presentation and a lab report bring their own data to the card; a plain work has none (false, "" and []).
+func TestTurnkeyWritingKinds(t *testing.T) {
+	talk, err := shared.NewArtifactRef(shared.ArtifactExports, "homework/w1-talk.docx")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deck := writingWork()
+	deck.Status = work.StatusDone
+	deck.Writing.Step, deck.Writing.Material = work.StepNone, "m-pptx"
+	deck.Writing.Presentation, deck.Writing.Template = true, cvalues.PresentationGraphite
+	deck.Writing.Questions = []work.TalkQuestion{{Question: "Почему так?", Answer: "Потому что."}}
+	deck.Writing.Talk, deck.Writing.TalkResult = "m-talk", talk
+	deck.Writing.Sections = []turnkey.SectionView{
+		{Number: 1, Kind: cvalues.SlideBullets, Title: "Причины", Written: true, Paragraphs: []string{"Заметки."},
+			Bullets: []string{"Первое", "Второе"}},
+		{Number: 2, Kind: cvalues.SlideTwoColumns, Title: "Сравнение", Written: true,
+			Columns: []work.Column{{Heading: "До", Bullets: []string{"а"}}, {Heading: "После"}}},
+		{Number: 3, Kind: cvalues.SlideConclusion, Title: "Итоги"},
+	}
+
+	lab := writingWork()
+	lab.Writing.Lab, lab.Writing.Manual = true, work.ManualNotRead
+	lab.Writing.Placeholders = []work.Placeholder{{Section: 2, Title: "Результаты", Prompt: "▢ Вставьте таблицу измерений"}}
+	lab.Writing.Sections = []turnkey.SectionView{
+		{Number: 1, Part: work.LabGoal, Title: "Цель", Written: true, Paragraphs: []string{"Измерить."}},
+		{Number: 2, Part: work.LabResults, Title: "Результаты", Written: true, Paragraphs: []string{"▢ Вставьте таблицу измерений"}},
+	}
+
+	tests := map[string]struct {
+		view turnkey.View
+		want string
+	}{
+		"presentation": {deck, `"materialId":"m-pptx","result":"","job":"","active":false,"jobState":"",` +
+			`"presentation":true,"template":"graphite","questions":[{"question":"Почему так?","answer":"Потому что."}],` +
+			`"talkMaterialId":"m-talk","talkResult":"exports/homework/w1-talk.docx","lab":false,"manual":"","placeholders":[]}`},
+		"lab": {lab, `"presentation":false,"template":"","questions":[],"talkMaterialId":"","talkResult":"",` +
+			`"lab":true,"manual":"not_read","placeholders":[{"section":2,"title":"Результаты","prompt":"▢ Вставьте таблицу измерений"}]}`},
+		"plain": {writingWork(), `"presentation":false,"template":"","questions":[],"talkMaterialId":"","talkResult":"",` +
+			`"lab":false,"manual":"","placeholders":[]}`},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := NewTurnkeyService(&fakeTurnkey{view: tt.view}, discard()).Work(t.Context(), "w1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := json.Marshal(got.Writing)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasSuffix(string(b), tt.want) {
+				t.Fatalf("JSON =\n%s\nwant the end\n%s", b, tt.want)
+			}
+		})
+	}
+
+	sections := func(v turnkey.View) string {
+		got, err := NewTurnkeyService(&fakeTurnkey{view: v}, discard()).Work(t.Context(), "w1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := json.Marshal(got.Writing.Sections)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	wantDeck := `[{"number":1,"kind":"bullets","part":"","title":"Причины","words":0,"note":"","written":true,` +
+		`"paragraphs":["Заметки."],"sources":[],"bullets":["Первое","Второе"],"columns":[]},` +
+		`{"number":2,"kind":"two_columns","part":"","title":"Сравнение","words":0,"note":"","written":true,` +
+		`"paragraphs":[],"sources":[],"bullets":[],"columns":[{"heading":"До","bullets":["а"]},{"heading":"После","bullets":[]}]},` +
+		`{"number":3,"kind":"conclusion","part":"","title":"Итоги","words":0,"note":"","written":false,` +
+		`"paragraphs":[],"sources":[],"bullets":[],"columns":[]}]`
+	if got := sections(deck); got != wantDeck {
+		t.Errorf("slides =\n%s\nwant\n%s", got, wantDeck)
+	}
+	wantLab := `[{"number":1,"kind":"","part":"goal","title":"Цель","words":0,"note":"","written":true,` +
+		`"paragraphs":["Измерить."],"sources":[],"bullets":[],"columns":[]},` +
+		`{"number":2,"kind":"","part":"results","title":"Результаты","words":0,"note":"","written":true,` +
+		`"paragraphs":["▢ Вставьте таблицу измерений"],"sources":[],"bullets":[],"columns":[]}]`
+	if got := sections(lab); got != wantLab {
+		t.Errorf("lab sections =\n%s\nwant\n%s", got, wantLab)
 	}
 }
 
