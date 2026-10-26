@@ -61,7 +61,8 @@ type WritingView struct {
 	Material   shared.MaterialID  // the file in the library (the .pptx of a presentation), once done
 	Result     shared.ArtifactRef // the ResultCard of the file, once done
 
-	// The writing job that runs for the work, read with the view (TASK-178): none once it ended or was stopped.
+	// The writing job that runs for the work, read with the view (TASK-178): none once it ended. A stopped running
+	// step stays active (RUNNING) until it returns, so the UI keeps polling until Active is false.
 	Active   bool
 	Job      shared.JobID
 	JobState job.Status // QUEUED, RUNNING, RETRY_WAIT or a WAITING_FOR_* state while Active

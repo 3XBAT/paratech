@@ -25,6 +25,7 @@ type fakeTurnkey struct {
 	src     work.Source
 	outline []work.OutlineItem
 	calls   []string
+	reused  bool // StartWriting found its job (Created false)
 }
 
 func (f *fakeTurnkey) Work(context.Context, shared.WorkID) (turnkey.View, error) {
@@ -64,7 +65,7 @@ func (f *fakeTurnkey) AskStep(context.Context, shared.WorkID, int, string) (stri
 
 func (f *fakeTurnkey) StartWriting(context.Context, shared.WorkID) (turnkey.WritingStarted, error) {
 	f.calls = append(f.calls, "start")
-	return turnkey.WritingStarted{View: f.view, Job: "j1", Created: true}, f.err
+	return turnkey.WritingStarted{View: f.view, Job: "j1", Created: !f.reused}, f.err
 }
 
 func (f *fakeTurnkey) ApproveOutline(context.Context, shared.WorkID) (turnkey.WritingStarted, error) {
@@ -169,6 +170,30 @@ func TestTurnkeyWritingCalls(t *testing.T) {
 		if _, err := s.ApproveOutline(ctx, "w1"); !errors.Is(err, tt.want) {
 			t.Errorf("%v: %v", tt.err, err)
 		}
+	}
+}
+
+// A job StartWriting found is the job of the card only while it is active: a finished one is no job.
+func TestTurnkeyStartedReusedJob(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		active bool
+		want   string
+	}{
+		{"finished job", false, ""},
+		{"active job", true, "j1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			v := writingWork()
+			if tt.active {
+				v.Writing.Active, v.Writing.Job, v.Writing.JobState = true, "j1", job.StatusRunning
+			}
+			s := NewTurnkeyService(&fakeTurnkey{view: v, reused: true}, discard())
+			got, err := s.StartWriting(t.Context(), "w1")
+			if err != nil || got.Writing.Job != tt.want || got.Writing.Active != tt.active {
+				t.Fatalf("StartWriting = %+v, %v; want job %q", got.Writing, err, tt.want)
+			}
+		})
 	}
 }
 

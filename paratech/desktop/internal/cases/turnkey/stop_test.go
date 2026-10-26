@@ -10,8 +10,8 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// TestStopWriting: «Остановить» cancels the running writing job and keeps the sections written; a finished job or
-// none is no error and nothing is cancelled.
+// TestStopWriting: «Остановить» cancels a queued or waiting writing job at once; a running one stays active until its
+// step returns; the sections written stay; a finished job or none is no error and nothing is cancelled.
 func TestStopWriting(t *testing.T) {
 	errRefused := errors.New("not cancellable")
 	for _, tc := range []struct {
@@ -23,6 +23,7 @@ func TestStopWriting(t *testing.T) {
 		wantErr    error
 		wantCalls  int
 		wantStatus job.Status // of the job after the stop; "" no job
+		wantActive bool       // the view still shows the job: a running step ends when its handler returns
 	}{
 		{
 			name: "queued sections job", wantCalls: 1, wantStatus: job.StatusCancelled,
@@ -32,7 +33,7 @@ func TestStopWriting(t *testing.T) {
 			},
 		},
 		{
-			name: "running after a section", wantCalls: 1, wantStatus: job.StatusCancelled,
+			name: "running after a section", wantCalls: 1, wantStatus: job.StatusRunning, wantActive: true,
 			setup: func(t *testing.T, e *writeEnv) (shared.WorkID, shared.JobID) {
 				id := e.confirmed(t)
 				ap := e.approved(t, id)
@@ -124,10 +125,53 @@ func TestStopWriting(t *testing.T) {
 			if v.Version != before.Version || v.Status != before.Status {
 				t.Fatalf("the work changed: %d %s -> %d %s", before.Version, before.Status, v.Version, v.Status)
 			}
-			if w := v.Writing; w != nil && (w.Active || w.Job != "" || w.JobState != "") {
+			w := v.Writing
+			switch {
+			case tc.wantActive && (w == nil || !w.Active || w.Job != jid || w.JobState != job.StatusRunning):
+				t.Fatalf("a running step is not shown until it ends: %+v", w)
+			case !tc.wantActive && w != nil && (w.Active || w.Job != "" || w.JobState != ""):
 				t.Fatalf("still active after the stop: %+v", w)
 			}
 		})
+	}
+}
+
+// TestStopWritingReadsAgain: a step that saved a section between the first read and the cancel shows in the view;
+// the running job stays active until its handler returns, then the work shows no job.
+func TestStopWritingReadsAgain(t *testing.T) {
+	e := newWriteEnv(t)
+	ctx := t.Context()
+	id := e.confirmed(t)
+	ap := e.approved(t, id)
+	j := e.job(t, ap.Job)
+	if err := j.Claim(t0); err != nil {
+		t.Fatal(err)
+	}
+	before, err := e.svc.Work(ctx, id)
+	if err != nil || before.Writing.Done != 0 {
+		t.Fatalf("before = %+v, %v", before.Writing, err)
+	}
+	var stepErr error
+	e.canceller.before = func(j *job.Job) { stepErr = e.svc.Handle(ctx, j.Snapshot(), nil) }
+
+	v, err := e.svc.StopWriting(ctx, id)
+	if !errors.Is(stepErr, job.ErrContinueLater) {
+		t.Fatalf("the step meanwhile: %v", stepErr)
+	}
+	if err != nil || v.Version == before.Version || v.Writing.Done != 1 || !v.Writing.Sections[0].Written {
+		t.Fatalf("StopWriting = %+v, %v; want the section saved meanwhile", v.Writing, err)
+	}
+	if !v.Writing.Active || v.Writing.JobState != job.StatusRunning {
+		t.Fatalf("the running step is not shown: %+v", v.Writing)
+	}
+
+	// The handler returns into the cancelled context: the runner ends the job.
+	if err := j.Cancel(t0); err != nil {
+		t.Fatal(err)
+	}
+	after, err := e.svc.Work(ctx, id)
+	if err != nil || after.Writing.Active || after.Writing.Job != "" || after.Writing.Done != 1 {
+		t.Fatalf("after the step = %+v, %v", after.Writing, err)
 	}
 }
 

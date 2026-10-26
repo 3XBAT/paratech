@@ -132,8 +132,10 @@ type TurnkeyWork struct {
 // and the result. Step is outline (the plan is being written), approve (the plan waits for «Утвердить план»), section,
 // assemble, blocked (a step used its attempts: «Сгенерировать заново») or none (done). Active is read with every work:
 // a writing job runs for it («Остановить»), JobState queued, running, waiting_network, waiting_quota, waiting_power or
-// retrying ("" when not active). A step other than approve, blocked or none without Active was stopped or ended
-// early: «Продолжить» is StartWriting. Every text was written by the model: render it as plain text only.
+// retrying ("" when not active). StopWriting of a running step leaves it active (running) until the step ends: the
+// page keeps polling Work until Active is false. A step other than approve, blocked or none without Active was
+// stopped or ended early: «Продолжить» is StartWriting. Every text was written by the model: render it as plain
+// text only.
 type TurnkeyWriting struct {
 	Step       string           `json:"step"`
 	Generation int              `json:"generation"`
@@ -144,7 +146,7 @@ type TurnkeyWriting struct {
 	SubjectID  string           `json:"subjectId"`  // the subject whose «ДЗ» gets the file; "" «Входящие»
 	MaterialID string           `json:"materialId"` // the file in the library, once done
 	Result     string           `json:"result"`     // the artifact of the ResultCard, once done
-	Job        string           `json:"job"`        // the job the call started, else the active one (the progress card)
+	Job        string           `json:"job"`        // the job the call started, else the active one; "" when none
 	Active     bool             `json:"active"`
 	JobState   string           `json:"jobState"`
 }
@@ -317,7 +319,8 @@ func (s *TurnkeyService) EditOutlineAt(ctx context.Context, id string, version i
 	return s.reply(opTurnkeyOutline, v, err)
 }
 
-// StopWriting is «Остановить»: the writing job is cancelled, the sections written stay. Without a job nothing changes.
+// StopWriting is «Остановить»: the writing job is cancelled, the sections written stay. A running step stays active
+// until it ends (keep polling Work). Without a job nothing changes.
 func (s *TurnkeyService) StopWriting(ctx context.Context, id string) (TurnkeyWork, error) {
 	v, err := s.core.StopWriting(ctx, shared.WorkID(id))
 	return s.reply(opTurnkeyStop, v, err)
@@ -338,13 +341,14 @@ func (s *TurnkeyService) Regenerate(ctx context.Context, id string, number int, 
 	return s.started(opTurnkeyWrite, st, err)
 }
 
-// started maps the outcome of a call that starts a writing job: the work with the job of its progress card.
+// started maps the outcome of a call that starts a writing job: the work with the job of its progress card. A
+// finished job the call found (not created, not active) is no job of the card.
 func (s *TurnkeyService) started(op string, st turnkey.WritingStarted, err error) (TurnkeyWork, error) {
 	if err != nil {
 		return TurnkeyWork{}, s.fail(op, err)
 	}
 	out := workView(st.View)
-	if out.Writing != nil {
+	if out.Writing != nil && (st.Created || out.Writing.Active) {
 		out.Writing.Job = string(st.Job)
 	}
 	return out, nil

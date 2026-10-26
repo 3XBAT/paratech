@@ -114,9 +114,10 @@ func (f *fakeJobs) LatestByKeyPrefix(_ context.Context, typ job.Type, prefix str
 	return nil, shared.ErrNotFound
 }
 
-// fakeCanceller cancels a job of jobs as the runner does once the handler returned; a finished job is refused. before
-// (when set) runs on the job first, as a run that goes on meanwhile; err (when set) then refuses the job, as for a
-// RUNNING job no handler of this process runs.
+// fakeCanceller cancels a job of jobs as cases/jobrunner does: a queued or waiting job becomes CANCELLED, a RUNNING
+// one is left RUNNING (its handler context is cancelled; the job ends when the handler returns), a finished job is
+// refused. before (when set) runs on the job first, as a run that goes on meanwhile; err (when set) then refuses the
+// job, as for a RUNNING job no handler of this process runs.
 type fakeCanceller struct {
 	jobs   *fakeJobs
 	before func(j *job.Job)
@@ -135,8 +136,11 @@ func (f *fakeCanceller) Cancel(ctx context.Context, id shared.JobID) error {
 	if f.before != nil {
 		f.before(j)
 	}
-	if f.err != nil {
+	switch {
+	case f.err != nil:
 		return f.err
+	case j.Status() == job.StatusRunning:
+		return nil
 	}
 	return j.Cancel(t0)
 }

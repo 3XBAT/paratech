@@ -162,9 +162,11 @@ func (s *Service) editOutline(ctx context.Context, id shared.WorkID, expected *i
 	return View{}, fmt.Errorf("%w: the work keeps changing", ErrUnavailable)
 }
 
-// StopWriting is «Остановить»: the writing job of the work is cancelled (a running step ends without storing its
-// answer). The sections written stay; StartWriting continues and Regenerate writes again. No job of the work runs:
-// nothing changes. Errors: ErrNotConfigured, ErrNotFound, ErrNotStopped, ErrUnavailable.
+// StopWriting is «Остановить»: the writing job of the work is cancelled. A queued or waiting job ends at once; a
+// running step gets its context cancelled and ends without storing its answer, so the job shows as active until the
+// step returns. The work is read again after the cancel: a step that ended meanwhile shows. The sections written stay;
+// StartWriting continues and Regenerate writes again. No job of the work runs: nothing changes. Errors:
+// ErrNotConfigured, ErrNotFound, ErrNotStopped, ErrUnavailable.
 func (s *Service) StopWriting(ctx context.Context, id shared.WorkID) (View, error) {
 	if s.writing == nil || s.writing.Canceller == nil {
 		return View{}, ErrNotConfigured
@@ -188,6 +190,10 @@ func (s *Service) StopWriting(ctx context.Context, id shared.WorkID) (View, erro
 		}
 	}
 	s.log.InfoContext(ctx, opWriteStopped, slog.String("work", string(id)), slog.String("job", j.ID().String()))
+	// A step may have saved a section or the file between the first read and the cancel.
+	if w, err = s.get(ctx, id); err != nil {
+		return View{}, err
+	}
 	return s.view(ctx, w), nil
 }
 
