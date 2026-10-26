@@ -98,7 +98,7 @@ through its allowlist and never takes a model id or URL from a client. Settings 
 | `HUB_ANTHROPIC_API_KEY` | none (env only) | none | required to serve (the `keys` commands do not need it); secret, never printed |
 | `HUB_ANTHROPIC_BASE_URL` | `-anthropic-base-url` | `https://api.anthropic.com` | https; http only to a loopback host (local fake) |
 | `HUB_LLM_TIMEOUT` | `-llm-timeout` | `5m` | 10s..10m, at most half of `HUB_QUOTA_RESERVATION_TTL` |
-| `HUB_LLM_MODELS` | `-llm-models` | `default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:1024` | `alias=model-id:max_output_tokens[,...]`; config checks the syntax, the alias, model id and cap rules are checked at startup |
+| `HUB_LLM_MODELS` | `-llm-models` | `default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:4096` | `alias=model-id:max_output_tokens[,...]`; config checks the syntax, the alias, model id and cap rules are checked at startup |
 | `HUB_PROVIDER_STREAM` | `-provider-stream` | `false` | `CompleteStream` streams from the provider; off, it makes one unary call and sends the whole answer (ADR-0026) |
 
 A requested `max_output_tokens` of 0 means the alias cap; a larger value is clamped to it.
@@ -131,17 +131,28 @@ were sent, up to 5 unanswered parts, at least one of the two; whether a quote is
 
 ## Hub agent step
 `GatewayService.AgentStep` (ADR-0023): one planner step with tool use. The Hub picks the prompt and tool catalog
-(`hub/pkg/prompts/agent/panel/v<N>`, version = `catalog_version`; v1 and v2 are served, v2 is current) and the planner
+(`hub/pkg/prompts/agent/panel/v<N>`, version = `catalog_version`; v1, v2 and v3 are served, v3 is current) and the planner
 alias; the client sends neither. Rate limit,
 ledger, replay and conflicts work as for `Complete`; echoed tool calls must carry the Hub's seal. The model's raw turn
 (thinking with its signature) is kept in `agent_turns` per API key and sent back with the next step; the client never sees
 it, and it is purged with the stored answers. A continuation whose kept turn is gone is `failed_precondition`, not charged.
+The step's output cap is the client's `max_output_tokens` raised to the floor of 2048 and clamped to the planner alias cap
+(4096 by default); the log line `agent step` has the provider's `stop_reason`, and a step cut at the cap fails as `output cap`.
+
+The agent panel of the desktop needs `HUB_AGENT_SEAL_KEYS`: without it `AgentStep` is `unimplemented` and the desktop shows
+«hub rejected the request» on every step. Generate a secret and set it, for example in Git Bash:
+
+```
+openssl rand -hex 32
+# HUB_AGENT_SEAL_KEYS=1:<the 64 hex characters>
+```
+
 Settings:
 
 | Env | Flag | Default | Rule |
 |---|---|---|---|
-| `HUB_AGENT_SEAL_KEYS` | none (env only) | none | `version:hex[,version:hex]`, versions 1..255, secrets >= 32 bytes (e.g. `openssl rand -hex 32`); the first signs, the others are still accepted (rotation). Unset: `AgentStep` is `unimplemented`. Secret, never printed |
-| `HUB_AGENT_PLANNER_ALIAS` | `-agent-planner-alias` | `planner` | allowlist alias of the planner and of `INSPECT_MATERIAL`; must be in `HUB_LLM_MODELS` when seal keys are set (without it `INSPECT_MATERIAL` is off) |
+| `HUB_AGENT_SEAL_KEYS` | none (env only) | none | `version:hex[,version:hex]`, versions 1..255, secrets >= 32 bytes (e.g. `openssl rand -hex 32`); the first signs, the others are still accepted (rotation). Required for the agent panel: unset, `AgentStep` is `unimplemented` («hub rejected the request» on the desktop). Secret, never printed |
+| `HUB_AGENT_PLANNER_ALIAS` | `-agent-planner-alias` | `planner` | allowlist alias of the planner and of `INSPECT_MATERIAL`; must be in `HUB_LLM_MODELS` when seal keys are set (without it `INSPECT_MATERIAL` is off); its cap in `HUB_LLM_MODELS` is the planner's output limit, at least 2048 recommended (4096 by default) |
 | `HUB_AGENT_STRONG_ALIAS` | `-agent-strong-alias` | `default` | allowlist alias of `ANSWER` and `TRIAGE_ASSIGNMENT` |
 
 Code architecture rules are enforced by the root `.golangci.yml` (depguard) and `tests/arch_test.go` in each module.

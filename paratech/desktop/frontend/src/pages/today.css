@@ -1,19 +1,25 @@
 /* «Сегодня» (TASK-126): rows on the tokens of ui/tokens.css; the accent only for a running recording and an urgent
-   deadline (docs/design/concept-agent.html). Text from files and models wraps and never overflows. */
+   deadline (docs/design/concept-agent.html). Text from files and models wraps and never overflows.
+   The layout follows the width of the page itself (container query), not of the window: the agent panel takes
+   320-480 px of it (TASK-175). */
+.today { container-type: inline-size; }
 .today-sec { margin-top: 24px; }
 .today-sec:first-of-type { margin-top: 0; }
 .today-h { margin: 0 0 8px; padding: 0 16px; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--muted); }
 .today-cnt { font-weight: 500; }
 .today-empty, .today-foot, .today-ask-hint { margin: 0; padding: 0 16px; }
+.today-ask-hint { margin-bottom: 12px; }
 .today-foot { margin-top: 8px; }
 .today-chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px; }
-.today-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 24rem); gap: 24px; align-items: start; margin-top: 24px; }
+.today .today-chips > .btn { max-width: 100%; height: auto; min-height: 24px; padding-block: 4px; white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.today-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; margin-top: 24px; }
 .today-cols > div > .today-sec:first-child { margin-top: 0; }
 .today-back { margin-bottom: 8px; }
 
 .today-row { position: relative; display: grid; gap: 4px 16px; align-items: center; min-height: 60px; padding: 12px 16px; min-width: 0; }
 .today-row + .today-row::before, [role="listitem"] + [role="listitem"] > .today-row::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 1px; background: var(--sep); }
-.today-lesson { grid-template-columns: 4.5rem minmax(0, 1fr) minmax(0, 14rem) auto; }
+.today-lesson { grid-template-columns: 4.5rem minmax(0, 1fr) auto; }
+.today-lesson .today-st { grid-column: 2 / -1; }
 .today-problem { display: inline-flex; padding: 0; border: 0; background: none; cursor: pointer; font: inherit; }
 .today-loose { margin-bottom: 8px; }
 .today-lesson.live { background: linear-gradient(90deg, var(--rec-b), transparent 45%); }
@@ -31,8 +37,12 @@
 .today-st { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
 .today-ac { justify-self: end; }
 
-@media (max-width: 900px) {
-  .today-cols { grid-template-columns: minmax(0, 1fr); }
-  .today-lesson { grid-template-columns: 4.5rem minmax(0, 1fr) auto; }
-  .today-lesson .today-st { grid-column: 2 / -1; }
+/* Wide enough for a lesson row with its status column. */
+@container (min-width: 38rem) {
+  .today-lesson { grid-template-columns: 4.5rem minmax(0, 1fr) minmax(0, 14rem) auto; }
+  .today-lesson .today-st { grid-column: auto; }
+}
+/* Two columns only when the left one keeps at least 30rem; otherwise the right column goes below. */
+@container (min-width: 62rem) {
+  .today-cols { grid-template-columns: minmax(30rem, 1fr) minmax(0, 22rem); }
 }

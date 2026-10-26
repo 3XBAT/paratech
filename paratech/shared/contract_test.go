@@ -690,12 +690,13 @@ func TestAgentMessagesHaveOnlyAllowlistedStrings(t *testing.T) {
 	}
 }
 
-// Golden tool catalog (design §2.3, ADR-0021), the current version 2 (TASK-118: question and search query of up to 500
-// characters). Both the Hub catalog (TASK-114) and the desktop Tool enum (TASK-115) must match it. Version 1 is frozen:
-// the Hub still serves it to clients of that version.
+// Golden tool catalog (design §2.3, ADR-0021), the current version 3 (TASK-172: reply lists up to 10 assignment IDs; v2,
+// TASK-118: question and search query of up to 500 characters). Both the Hub catalog (TASK-114) and the desktop Tool
+// enum (TASK-115) must match it. Versions 1 and 2 are frozen: the Hub still serves them to clients of those versions.
 const (
-	toolCatalogVersion = 2
-	toolCatalogFile    = "testdata/tool_catalog_v2.json"
+	toolCatalogVersion = 3
+	toolCatalogFile    = "testdata/tool_catalog_v3.json"
+	toolCatalogV2File  = "testdata/tool_catalog_v2.json"
 	toolCatalogV1File  = "testdata/tool_catalog_v1.json"
 )
 
@@ -727,8 +728,9 @@ var (
 	// Argument types of tools that act or read: only IDs, enums, dates, short labels and the student's question or
 	// search text (ADR-0022, TASK-118).
 	actionArgTypes = []string{"id", "ids", "date", "enum", "label", "query"}
-	// Types only UI tools may use: card text written by the model, at most 300 characters each (ADR-0023).
-	uiArgTypes = []string{"text", "text_list", "plan_steps", "questions"}
+	// Types only UI tools may use: card text written by the model, at most 300 characters each (ADR-0023), and IDs a card
+	// lists, whose titles the desktop draws from local data (TASK-172).
+	uiArgTypes = []string{"text", "text_list", "card_ids", "plan_steps", "questions"}
 	// Class C tools only name trusted local objects: the confirm card shows trusted data, never model text.
 	confirmArgTypes = []string{"id"}
 	uiTools         = []string{"ask_questions", "cannot_do", "reply", "show_plan"}
@@ -900,22 +902,37 @@ func validateCatalog(c toolCatalog) []string {
 // characters (TASK-118). A query is longer free text than a label, so a new one must be a conscious edit here.
 var queryArguments = []string{"answer_question.question", "search.query"}
 
+// cardIDArguments are the only arguments of type card_ids: the assignments a reply lists, at most 10 (TASK-172). The
+// desktop checks their provenance like any ID; a new one must be a conscious edit here.
+var cardIDArguments = []string{"reply.assignments"}
+
+func argumentsOfType(c toolCatalog, typ string) []string {
+	var out []string
+	for _, tool := range c.Tools {
+		for _, a := range tool.Arguments {
+			if a.Type == typ {
+				out = append(out, tool.Name+"."+a.Name)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 func TestToolCatalog(t *testing.T) {
 	c := loadToolCatalog(t)
 	for _, p := range validateCatalog(c) {
 		t.Error(p)
 	}
-	var queries []string
-	for _, tool := range c.Tools {
-		for _, a := range tool.Arguments {
-			if a.Type == "query" {
-				queries = append(queries, tool.Name+"."+a.Name)
-			}
-		}
-	}
-	slices.Sort(queries)
-	if !slices.Equal(queries, queryArguments) || !strings.Contains(c.Types["query"], "500 characters") {
+	if queries := argumentsOfType(c, "query"); !slices.Equal(queries, queryArguments) || !strings.Contains(c.Types["query"], "500 characters") {
 		t.Errorf("query arguments %v (%q), want %v of at most 500 characters", queries, c.Types["query"], queryArguments)
+	}
+	if ids := argumentsOfType(c, "card_ids"); !slices.Equal(ids, cardIDArguments) || !strings.Contains(c.Types["card_ids"], "0-10 IDs") {
+		t.Errorf("card_ids arguments %v (%q), want %v of 0-10 IDs", ids, c.Types["card_ids"], cardIDArguments)
+	}
+	reply := c.Tools[toolIndex(t, c, "reply")]
+	if i := slices.IndexFunc(reply.Arguments, func(a catalogArgument) bool { return a.Name == "assignments" }); i < 0 || reply.Arguments[i].Required {
+		t.Errorf("reply.assignments must be optional: %+v", reply.Arguments)
 	}
 
 	got := map[string]string{}
@@ -936,10 +953,26 @@ func TestToolCatalog(t *testing.T) {
 	}
 }
 
+// TestToolCatalogV2IsFrozen: catalog v2 stays as released: catalog v3 without the card_ids type and reply.assignments.
+func TestToolCatalogV2IsFrozen(t *testing.T) {
+	v2, v3 := loadToolCatalogFile(t, toolCatalogV2File), loadToolCatalog(t)
+	if v2.CatalogVersion != 2 || v2.Types["card_ids"] != "" {
+		t.Fatalf("v2: version %d, card_ids type %q", v2.CatalogVersion, v2.Types["card_ids"])
+	}
+	want := cloneCatalog(v3)
+	want.CatalogVersion = 2
+	delete(want.Types, "card_ids")
+	i := toolIndex(t, want, "reply")
+	want.Tools[i].Arguments = slices.DeleteFunc(want.Tools[i].Arguments, func(a catalogArgument) bool { return a.Name == "assignments" })
+	if fmt.Sprint(want) != fmt.Sprint(v2) {
+		t.Errorf("v2 differs from v3 beyond reply.assignments:\nv2 %+v\nv3 %+v", v2, want)
+	}
+}
+
 // TestToolCatalogV1IsFrozen: catalog v1 stays as released: version 1, the same tools and classes, labels where v2 has
 // queries; everything else equal to v2.
 func TestToolCatalogV1IsFrozen(t *testing.T) {
-	v1, v2 := loadToolCatalogFile(t, toolCatalogV1File), loadToolCatalog(t)
+	v1, v2 := loadToolCatalogFile(t, toolCatalogV1File), loadToolCatalogFile(t, toolCatalogV2File)
 	if v1.CatalogVersion != 1 || len(v1.Tools) != len(v2.Tools) || v1.Types["query"] != "" {
 		t.Fatalf("v1: version %d, %d tools, query type %q", v1.CatalogVersion, len(v1.Tools), v1.Types["query"])
 	}
@@ -1004,6 +1037,14 @@ func TestCatalogValidatorCatchesBadCatalogs(t *testing.T) {
 			i := toolIndex(t, *c, "search")
 			c.Tools[i].Arguments[0].Type = "text"
 		}, `argument search.query has type "text"`},
+		{"R tool with card IDs", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "job_status")
+			c.Tools[i].Arguments[0].Type = "card_ids"
+		}, `argument job_status.ids has type "card_ids"`},
+		{"C tool with card IDs", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "propose_send")
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "others", Type: "card_ids"})
+		}, `argument propose_send.others has type "card_ids"`},
 		{"argument named recipient_email", func(t *testing.T, c *toolCatalog) {
 			i := toolIndex(t, *c, "generate_draft")
 			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "recipient_email", Type: "label"})

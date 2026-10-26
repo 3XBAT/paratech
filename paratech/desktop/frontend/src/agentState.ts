@@ -35,6 +35,8 @@ export const initialPanelState: PanelState = { entries: [], nextSeq: 1, link: nu
 export type PanelAction =
   | { type: "asked"; id: number; text: string; scope: AskInput }
   | { type: "askResult"; id: number; problem: CallProblem }
+  | { type: "rerunAsked"; from: { threadId: string; turn: number; text: string; scope: AskInput | null } }
+  | { type: "rerunRefused"; key: string }
   | { type: "update"; update: UpdateView }
   | { type: "history"; requests: readonly UpdateView[] }
   | { type: "link"; link: AgentState };
@@ -84,15 +86,25 @@ function applyUpdate(s: PanelState, u: UpdateView): PanelState {
   const key = threadKey(u.threadId, u.turn);
   const known = s.entries.find((e) => e.key === key);
   if (known) {
-    if (known.update && final.has(known.update.status) && !final.has(u.status)) {
+    // A problem-only update (a refused button) is no status: it must reach a finished request (a refused rerun).
+    if (known.update && final.has(known.update.status) && !final.has(u.status) && u.status !== "") {
       return s;
+    }
+    // A step went to the Hub: only the status and the stop reason move, the cards shown stay.
+    if (u.progress && known.update) {
+      return { ...s, entries: replace(s.entries, key, { ...known, update: { ...known.update, status: u.status, stopReason: u.stopReason, problem: "" } }) };
     }
     // A failed button operation: no status, no cards, only a problem. The request itself is unchanged, so keep its
     // cards and buttons and attach the problem; the next real update replaces it.
     if (known.update && u.status === "" && u.cards.length === 0) {
-      return { ...s, entries: replace(s.entries, key, { ...known, update: { ...known.update, problem: u.problem } }) };
+      // A refused rerun comes this way too (the problem lands on the old request): take the shown new one back.
+      const next = threadKey(u.threadId, u.turn + 1);
+      const entries = replace(s.entries, key, { ...known, update: { ...known.update, problem: u.problem } });
+      return { ...s, entries: entries.filter((x) => !(x.key === next && x.update === null)) };
     }
-    return { ...s, entries: replace(s.entries, key, { ...known, update: u }) };
+    const replaced = replace(s.entries, key, { ...known, update: u });
+    const pending = threadKey(u.threadId, u.turn + 1);
+    return { ...s, entries: u.problem === "" ? replaced : replaced.filter((x) => !(x.key === pending && x.update === null)) };
   }
   const local = pendingLocal(s.entries, scopeKey(u));
   if (local) {
@@ -125,11 +137,35 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
       }
       return { ...s, entries: replace(s.entries, e.key, { ...e, callProblem: a.problem }) };
     }
+    case "rerunAsked": {
+      // The new request is shown at once with the same text; the core's update for the next turn fills it by key.
+      const key = threadKey(a.from.threadId, a.from.turn + 1);
+      if (s.entries.some((x) => x.key === key)) {
+        return s;
+      }
+      // A stale rerun_blocked/busy text of the source must not outlive a successful rerun.
+      const src = threadKey(a.from.threadId, a.from.turn);
+      const entries = s.entries.map((x) => (x.key === src && x.update ? { ...x, update: { ...x.update, problem: "" } } : x));
+      const e: Entry = {
+        key,
+        seq: s.nextSeq,
+        threadId: a.from.threadId,
+        turn: a.from.turn + 1,
+        text: a.from.text,
+        scope: a.from.scope,
+        callProblem: "",
+        update: null,
+      };
+      return { ...s, entries: [...entries, e], nextSeq: s.nextSeq + 1 };
+    }
+    case "rerunRefused":
+      // Only a request the core never answered for is taken back.
+      return { ...s, entries: s.entries.filter((x) => !(x.key === a.key && x.update === null)) };
     case "update":
       return applyUpdate(s, a.update);
     case "history":
       return a.requests.reduce(
-        (acc, u) => (acc.entries.some((e) => e.threadId === u.threadId && e.turn === u.turn) ? acc : applyUpdate(acc, u)),
+        (acc, u) => (acc.entries.some((e) => e.threadId === u.threadId && e.turn === u.turn && e.update !== null) ? acc : applyUpdate(acc, u)),
         s,
       );
     case "link":
@@ -149,6 +185,60 @@ export function orderedEntries(entries: readonly Entry[]): Entry[] {
     const fb = first.get(b.threadId || b.key)!;
     return fa - fb || a.turn - b.turn || a.seq - b.seq;
   });
+}
+
+/** A request the core is working on: «Стоп» applies to it. */
+export function isRunning(status: string): boolean {
+  return status === "PLANNING" || status === "EXECUTING";
+}
+
+/** The last request of the thread: the only one that offers «Повторить». */
+export function lastEntry(entries: readonly Entry[]): Entry | undefined {
+  return orderedEntries(entries).at(-1);
+}
+
+/**
+ * The request that made the core refuse a new one as busy: the latest running request of the same subject. The refused
+ * request has no thread of its own, so «Стоп» on it stops this one.
+ */
+export function blockingEntry(entries: readonly Entry[], refused: Entry): Entry | undefined {
+  const u = refused.update;
+  if (!u) {
+    return undefined;
+  }
+  return orderedEntries(entries)
+    .filter((e) => e.threadId !== "" && e.update !== null && isRunning(e.update.status) && e.update.subjectId === u.subjectId)
+    .at(-1);
+}
+
+/** A refused-as-busy request that never got a thread, with the text it can be sent with again. */
+export function isBusyRefused(e: Entry): boolean {
+  return e.threadId === "" && e.update?.problem === "busy";
+}
+
+/**
+ * Double-click guard for buttons: a request is marked on the update it was pressed on and stays off until a newer
+ * update arrives or the call is refused. Synchronous, so two clicks before the next render make one call.
+ */
+export class PressTracker {
+  private marks = new Map<string, UpdateView | null>();
+
+  busy(key: string, update: UpdateView | null): boolean {
+    return this.marks.has(key) && this.marks.get(key) === update;
+  }
+
+  /** False when this press is a repeat. */
+  mark(key: string, update: UpdateView | null): boolean {
+    if (this.busy(key, update)) {
+      return false;
+    }
+    this.marks.set(key, update);
+    return true;
+  }
+
+  release(key: string): void {
+    this.marks.delete(key);
+  }
 }
 
 export interface PanelMode {
