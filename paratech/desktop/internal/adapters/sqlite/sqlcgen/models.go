@@ -306,6 +306,7 @@ type Setting struct {
 	StudentUniversity       string
 	StudentFaculty          string
 	StudentCity             string
+	FreeWorkNotice          int64
 }
 
 type SttModel struct {
