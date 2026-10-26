@@ -85,11 +85,12 @@ type Scope struct {
 	AssignmentID string
 }
 
-// Turn is one history turn: StudentText for values.TurnStudentText, Calls and Seal for values.TurnCalls, Results for
-// values.TurnResults.
+// Turn is one history turn: StudentText for values.TurnStudentText, AgentReply for values.TurnAgentReply, Calls and
+// Seal for values.TurnCalls, Results for values.TurnResults.
 type Turn struct {
 	Kind        values.TurnKind
 	StudentText string
+	AgentReply  string
 	Calls       []Call
 	Seal        []byte
 	Results     []ToolResult

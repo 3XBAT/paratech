@@ -112,6 +112,29 @@ func TestAgentStepMapsTheRequestAndTheResult(t *testing.T) {
 	}
 }
 
+// TestAgentStepMapsTheAgentReply: agent_reply maps to its own turn kind, kept apart from the student's text.
+func TestAgentStepMapsTheAgentReply(t *testing.T) {
+	for codec, opts := range codecs {
+		svc := &fakeStepper{err: agentstep.ErrInvalidRequest}
+		client := agentServer(t, svc, nil, opts...)
+		req := agentRequest()
+		req.Msg.Turns = []*hubv1.AgentTurn{
+			{Turn: &hubv1.AgentTurn_StudentText{StudentText: "что такое горутина?"}},
+			{Turn: &hubv1.AgentTurn_AgentReply{AgentReply: "reply: Лёгкий поток."}},
+			{Turn: &hubv1.AgentTurn_StudentText{StudentText: "кто такой Рыбаков?"}},
+		}
+		_, _ = client.AgentStep(t.Context(), req)
+		want := []agentstep.Turn{
+			{Kind: values.TurnStudentText, StudentText: "что такое горутина?"},
+			{Kind: values.TurnAgentReply, AgentReply: "reply: Лёгкий поток."},
+			{Kind: values.TurnStudentText, StudentText: "кто такой Рыбаков?"},
+		}
+		if got := svc.cmds[0].Turns; !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: turns = %+v, want %+v", codec, got, want)
+		}
+	}
+}
+
 func TestAgentStepMapsEnums(t *testing.T) {
 	svc := &fakeStepper{err: agentstep.ErrInvalidRequest}
 	client := agentServer(t, svc, nil)

@@ -106,14 +106,19 @@ func (c AgentCall) WithAssistant(turn AssistantTurn) (AgentCall, error) {
 	return c, nil
 }
 
-// InputBytes is the size of everything the call sends as input, the basis of the reservation.
+// InputBytes is the size of everything the call sends as input, the basis of the reservation, including the
+// MissingReplyText markers.
 func (c AgentCall) InputBytes() int64 {
 	n := int64(len(c.system) + len(c.base) + len(c.scope))
 	for _, t := range c.tools {
 		n += int64(len(t.name) + len(t.description) + len(t.schema))
 	}
-	for _, t := range c.turns {
+	marks := ReplyMarkers(c.turns)
+	for i, t := range c.turns {
 		n += t.bytes()
+		if marks[i] {
+			n += int64(len(MissingReplyText))
+		}
 	}
 	return n
 }

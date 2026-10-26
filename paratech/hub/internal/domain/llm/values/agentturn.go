@@ -62,6 +62,26 @@ func CallSetKey(threadID string, profile Profile, catalogVersion uint32, calls [
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// MissingReplyText stands on the assistant side for the answer to an earlier request when the client sent no agent
+// reply at all (a desktop before TASK-183). Without it consecutive student texts merge into one user message and the
+// model answers all of them (TASK-140).
+const MissingReplyText = "(earlier request; its answer is not available)"
+
+// ReplyMarkers reports for each turn whether MissingReplyText follows it: only when the turns hold no agent reply and
+// the turn is a student text directly followed by another one. A history with agent replies is sent as it is.
+func ReplyMarkers(turns []Turn) []bool {
+	marks := make([]bool, len(turns))
+	for _, t := range turns {
+		if t.kind == TurnAgentReply {
+			return marks
+		}
+	}
+	for i := 0; i+1 < len(turns); i++ {
+		marks[i] = turns[i].kind == TurnStudentText && turns[i+1].kind == TurnStudentText
+	}
+	return marks
+}
+
 // LastCalls is the index of the last echo of calls in the turns, or -1. That echo is the assistant turn the provider
 // sees last, the one whose kept content must be sent back (ADR-0023).
 func LastCalls(turns []Turn) int {

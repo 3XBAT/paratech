@@ -105,8 +105,10 @@ func newAgentWireRequest(call values.AgentCall) agentWireRequest {
 	}
 }
 
-// agentMessages maps the turns to messages: student text and tool results are user turns, echoed calls the assistant
-// turn with tool_use blocks, or the kept raw turn of the model when the echo carries one. Consecutive turns of one
+// agentMessages maps the turns to messages: student text and tool results are user turns, an agent reply an assistant
+// turn with one text block, echoed calls the assistant turn with tool_use blocks, or the kept raw turn of the model
+// when the echo carries one. A history without agent replies (an older desktop) gets values.MissingReplyText as an
+// assistant turn between consecutive student texts, so earlier requests read as answered. Consecutive turns of one
 // role share a message (results first, as the API wants tool results at the start of a user message). The last block
 // carries the second cache breakpoint.
 func agentMessages(turns []values.Turn) []agentWireMessage {
@@ -118,10 +120,16 @@ func agentMessages(turns []values.Turn) []agentWireMessage {
 		}
 		msgs = append(msgs, agentWireMessage{Role: role, Content: blocks})
 	}
-	for _, t := range turns {
+	marks := values.ReplyMarkers(turns)
+	for i, t := range turns {
 		switch t.Kind() {
 		case values.TurnStudentText:
 			add(roleUser, agentWireBlock{Type: blockText, Text: t.Text()})
+			if marks[i] {
+				add(roleAssistant, agentWireBlock{Type: blockText, Text: values.MissingReplyText})
+			}
+		case values.TurnAgentReply:
+			add(roleAssistant, agentWireBlock{Type: blockText, Text: t.Text()})
 		case values.TurnCalls:
 			if kept := t.Assistant(); !kept.IsZero() {
 				msgs = append(msgs, agentWireMessage{Role: roleAssistant, raw: json.RawMessage(kept.Raw())})
