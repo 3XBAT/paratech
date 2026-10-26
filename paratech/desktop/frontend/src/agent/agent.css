@@ -115,6 +115,9 @@
 .ag-wk-sec summary { cursor: pointer; font-weight: 600; overflow-wrap: anywhere; }
 .ag-wk-sec p { margin-top: 8px; }
 .ag-wk-verify { color: var(--accent); }
+.ag-wk-ph { padding: 2px 6px; border-left: 3px solid var(--accent); background: var(--fill); }
+.ag-wk-todo { margin: 8px 0; }
+.ag-area { height: auto; padding: 6px 8px; resize: vertical; }
 .ag-card select.ag-inp { padding: 0 4px; }
 
 .ag-act, .ag-stop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 32px; padding: 4px 4px 4px 12px; border-radius: var(--r-md); background: var(--panel); box-shadow: 0 0 0 1px var(--edge); font-size: var(--fs-small); line-height: var(--lh-small); }

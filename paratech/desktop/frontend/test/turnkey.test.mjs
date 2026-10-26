@@ -457,5 +457,6 @@ test("the cards render nothing for a work that has no outcome to show", () => {
   const ctx = { work: work({ status: "helper" }), api: fakeApi(), busy: false, run: async () => undefined, step: async () => undefined, onWork: noop, errorLine: false };
   assert.ok(renderToStaticMarkup(h(HelperCard, { ctx })).includes(turnkeyTexts.helperEmpty));
   assert.ok(renderToStaticMarkup(h(QuestionsCard, { ctx: { ...ctx, work: work({ status: "questions", questionRound: 1, questions: [choice] }) } })).includes("Какой объём?"));
-  assert.equal(render(work({ status: "confirmed", workType: "presentation" })), "");
+  // TASK-195: a presentation is written like any confirmed work.
+  assert.ok(render(work({ status: "confirmed", workType: "presentation" })).includes("Написать работу"));
 });
