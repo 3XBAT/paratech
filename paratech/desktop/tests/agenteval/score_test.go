@@ -11,7 +11,7 @@ import (
 
 func catalogClasses(t *testing.T) map[string]string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "shared", "testdata", "tool_catalog_v2.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "shared", "testdata", CatalogFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +77,16 @@ func TestParseCaseSetRejects(t *testing.T) {
 		"unknown class":      func(s string) string { return strings.Replace(s, `"class": "reply"`, `"class": "chat"`, 1) },
 		"duplicate id":       func(s string) string { return strings.Replace(s, `"id": "r02"`, `"id": "r01"`, 1) },
 		"bad reference":      func(s string) string { return strings.Replace(s, `"quote": "I = U / R"`, `"quote": "I = U * R"`, 1) },
+		"list without list_assignments": func(s string) string {
+			return strings.Replace(s, `"class": "reply", "tools": []}`, `"class": "reply", "tools": [], "lists_assignments": true}`, 1)
+		},
+		"unknown alternative class": func(s string) string { return strings.Replace(s, `"also": ["read", "reply"]`, `"also": ["chat"]`, 1) },
+		"alternative equal to the class": func(s string) string {
+			return strings.Replace(s, `"also": ["read", "reply"]`, `"also": ["questions"]`, 1)
+		},
+		"duplicate alternative": func(s string) string {
+			return strings.Replace(s, `"also": ["read", "reply"]`, `"also": ["read", "read"]`, 1)
+		},
 		"unknown subject": func(s string) string {
 			return strings.Replace(s, `"subject": "s-math", "class"`, `"subject": "s-chem", "class"`, 1)
 		},
@@ -144,6 +154,71 @@ func TestFirstPersonWords(t *testing.T) {
 		if got := FirstPersonWords(text); !slices.Equal(got, want) {
 			t.Errorf("FirstPersonWords(%q) = %v, want %v", text, got, want)
 		}
+	}
+}
+
+func TestAddressWords(t *testing.T) {
+	for text, want := range map[string][]string{
+		"Две работы со сроком до среды.":          nil,
+		"Привет! Ты можешь посмотреть черновик.":  {"привет", "ты"},
+		"Скажите, какой предмет вы имеете в виду": {"вы"},
+		"Черновик — в вашем разделе «Задания».":   {"вашем"},
+		"Ваша работа готова":                      {"ваша"},
+		"Тыква, выход, вас-то, hint, history":     {"вас"},
+		"Hello, your draft is ready":              {"hello", "your"},
+	} {
+		if got := AddressWords(text); !slices.Equal(got, want) {
+			t.Errorf("AddressWords(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
+func TestReplyAssignments(t *testing.T) {
+	for _, tt := range []struct {
+		tool, args string
+		want       []string
+	}{
+		{"reply", `{"text":"Два.","assignments":["a-12","a-20"]}`, []string{"a-12", "a-20"}},
+		{"reply", `{"text":"Нет."}`, nil},
+		{"reply", `{"text":"x","assignments":"a-12"}`, nil},
+		{"cannot_do", `{"assignments":["a-12"]}`, nil},
+	} {
+		if got := ReplyAssignments(tt.tool, tt.args); !slices.Equal(got, tt.want) {
+			t.Errorf("ReplyAssignments(%s, %s) = %v, want %v", tt.tool, tt.args, got, tt.want)
+		}
+	}
+}
+
+// TestBetaQuestionsInTheCaseSet: the four questions of the beta (TASK-172/173) and a work on a topic without an
+// assignment stay in the live set with the routing the v3 prompt asks for. Without an assignment the prompt allows
+// questions or an honest reply (after list_assignments that is a read).
+func TestBetaQuestionsInTheCaseSet(t *testing.T) {
+	cs := loadCases(t)
+	want := map[string][]string{
+		"b01": {ClassReply}, "b02": {ClassReply}, "b03": {ClassRead}, "b04": {ClassQuestions},
+		"b05": {ClassQuestions, ClassRead, ClassReply},
+	}
+	for id, classes := range want {
+		i := slicesIndex(cs.Requests, id)
+		if i < 0 {
+			t.Errorf("%s: missing", id)
+			continue
+		}
+		r := cs.Requests[i]
+		if r.Class != classes[0] || len(r.Also) != len(classes)-1 {
+			t.Errorf("%s: classes %s, want %v", id, r.Expected(), classes)
+		}
+		for _, c := range classes {
+			if !r.Accepts(c) {
+				t.Errorf("%s: does not accept %s", id, c)
+			}
+		}
+	}
+	if i := slicesIndex(cs.Requests, "b05"); i >= 0 && cs.Requests[i].Accepts(ClassPlan) {
+		t.Error("b05 must not accept a plan without an assignment")
+	}
+	if i := slicesIndex(cs.Requests, "b03"); i < 0 || !cs.Requests[i].ListsAssignments {
+		t.Error("b03 must expect a reply with the list of assignments")
 	}
 }
 
@@ -218,5 +293,37 @@ func TestReport(t *testing.T) {
 	}
 	if !strings.Contains(Report{Classes: classes}.Markdown(), "не измерено") {
 		t.Error("a run without measured answers must say so")
+	}
+
+	// Catalog v3: a reply that should list the assignments and a greeting with an address are both reported.
+	v3 := Report{Classes: classes, Requests: []Outcome{
+		{Case: Request{ID: "b03", Text: "Что горит?", Class: ClassRead, Tools: []string{"list_assignments"}, ListsAssignments: true},
+			Tools: []string{"list_assignments", "reply"}, Texts: []string{"Привет! У тебя два задания."}},
+		{Case: Request{ID: "b03b", Text: "Что на неделе?", Class: ClassRead, Tools: []string{"list_assignments"}, ListsAssignments: true},
+			Tools: []string{"list_assignments", "reply"}, Texts: []string{"Два задания."}, Listed: []string{"a-12", "a-20"}},
+	}}
+	if m := v3.Metrics(); m.Lists != 2 || m.ListsOK != 1 || m.Address != 1 || m.Texts != 2 {
+		t.Fatalf("v3 metrics = %+v", m)
+	}
+	md = v3.Markdown()
+	for _, s := range []string{"| reply со списком заданий | 1/2 (50%) |", "b03 «Что горит?»: reply без списка заданий", "b03: обращение [привет тебя]"} {
+		if !strings.Contains(md, s) {
+			t.Errorf("report misses %q:\n%s", s, md)
+		}
+	}
+
+	// An alternative class counts as routed; a class outside them is reported with every expected class.
+	b05 := Request{ID: "b05", Text: "Презентация", Class: ClassQuestions, Also: []string{ClassRead, ClassReply}, Tools: []string{"list_assignments"}}
+	alt := Report{Classes: classes, Requests: []Outcome{
+		{Case: b05, Tools: []string{"list_assignments", "ask_questions"}},
+		{Case: b05, Tools: []string{"list_assignments", "reply"}},
+		{Case: b05, Tools: []string{"list_assignments", "show_plan"}},
+	}}
+	if m := alt.Metrics(); m.Requests != 3 || m.ClassOK != 2 || m.ToolsOK != 3 {
+		t.Fatalf("alternative metrics = %+v", m)
+	}
+	if md := alt.Markdown(); !strings.Contains(md, "ждали questions/read/reply [list_assignments], получили plan") ||
+		strings.Count(md, "b05 «") != 1 {
+		t.Errorf("alternative report:\n%s", md)
 	}
 }

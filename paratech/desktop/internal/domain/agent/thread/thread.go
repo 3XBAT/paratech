@@ -485,6 +485,12 @@ func (th *Thread) known(context values.RefSet) values.RefSet {
 	return k
 }
 
+// CheckRefs is the provenance check of the IDs a card shows (reply, cannot_do): each must appear with its kind in the
+// context of the step or in a tool result of this thread, as for Admit (ADR-0022).
+func (th *Thread) CheckRefs(refs []values.Ref, context values.RefSet) error {
+	return actionpolicy.CheckProvenance(refs, th.known(context))
+}
+
 // --- plan --------------------------------------------------------------------------------------------
 
 // ProposePlan records the steps of show_plan and waits for «Да». Steps are U or C tools only, at most MaxWrites

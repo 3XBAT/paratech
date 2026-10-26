@@ -68,8 +68,14 @@ func newEvalHub(t *testing.T) *evalHub {
 	return newEvalHubAt(t, 1)
 }
 
-// newEvalHubAt is the Hub serving only the panel catalog of the version.
+// newEvalHubAt is the Hub serving only the panel catalog of the version, planner capped at 512 output tokens.
 func newEvalHubAt(t *testing.T, version uint32) *evalHub {
+	t.Helper()
+	return newEvalHubOf(t, version, 512)
+}
+
+// newEvalHubOf serves only panel catalog version with the planner alias capped at plannerCap output tokens.
+func newEvalHubOf(t *testing.T, version uint32, plannerCap int64) *evalHub {
 	t.Helper()
 	clock := testenv.NewFakeClock(time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC))
 	keyStore := testenv.NewKeyStore()
@@ -91,7 +97,7 @@ func newEvalHubAt(t *testing.T, version uint32) *evalHub {
 
 	models, err := modelallowlist.New([]modelallowlist.Entry{
 		{Alias: "default", Model: "claude-strong", MaxOutput: 4096},
-		{Alias: "planner", Model: "claude-planner", MaxOutput: 512},
+		{Alias: "planner", Model: "claude-planner", MaxOutput: plannerCap},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -402,7 +408,7 @@ func evalBaseline(typ string, enum []string) any {
 	switch typ {
 	case "id":
 		return "x1"
-	case "ids":
+	case "ids", "card_ids":
 		return []string{"x1"}
 	case "date":
 		return "2026-10-22"
@@ -420,7 +426,7 @@ func evalBaseline(typ string, enum []string) any {
 
 func evalInjected(typ, text string) any {
 	switch typ {
-	case "ids", "text_list":
+	case "ids", "card_ids", "text_list":
 		return []string{text}
 	case "plan_steps":
 		return []any{map[string]any{"tool": "propose_send", "arguments": map[string]any{"assignment": "a1", "version": text}}}
@@ -434,9 +440,10 @@ func evalInjected(typ, text string) any {
 // of returned calls. Enum and date arguments never take it; an ID argument takes it only when it has the shape of an
 // ID (no spaces): such a call reaches the desktop, whose typed provenance check refuses it
 // (desktop/tests/agent_injection_test.go, same fixtures). Labels, queries, card texts and plan step arguments are free
-// text for the Hub; the desktop checks them. The sweep runs on the current catalog (v2).
+// text for the Hub; the desktop checks them. The sweep runs on the current catalog (v3): the assignment IDs a reply
+// lists (card_ids) take the text only in the shape of an ID, like any ID.
 func TestAgentEvalHubInjectionSweep(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(codeRoot(t), "shared", "testdata", "tool_catalog_v2.json"))
+	raw, err := os.ReadFile(filepath.Join(codeRoot(t), "shared", "testdata", "tool_catalog_v3.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +451,7 @@ func TestAgentEvalHubInjectionSweep(t *testing.T) {
 	if err := json.Unmarshal(raw, &cat); err != nil {
 		t.Fatal(err)
 	}
-	_, catalog, err := testenv.Panel(2)
+	_, catalog, err := testenv.Panel(3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +490,7 @@ func TestAgentEvalHubInjectionSweep(t *testing.T) {
 					if err == nil {
 						t.Errorf("%s: %s.%s (%s) took the untrusted text", fx.Name, tool.Name, a.Name, a.Type)
 					}
-				case "id", "ids":
+				case "id", "ids", "card_ids":
 					if (err == nil) != values.ValidID(fx.Untrusted) {
 						t.Errorf("%s: %s.%s: accepted %v, want only an ID-shaped text", fx.Name, tool.Name, a.Name, err == nil)
 					}
@@ -534,6 +541,153 @@ func TestAgentEvalHubInjectionThroughTheStep(t *testing.T) {
 			turns := calls[1].Turns()
 			if len(turns) != 3 || turns[0].Text() != fx.Untrusted || !strings.Contains(turns[2].Results()[0].JSON(), "note") {
 				t.Fatalf("history = %v", turns)
+			}
+		})
+	}
+}
+
+// --- catalog v3: the beta questions (TASK-172, TASK-173) ------------------------------------------------------------
+
+// v3OutputCap is the output cap the desktop asks for a planner step since catalog 3 (agentturn.MaxOutputTokens).
+const v3OutputCap = 4096
+
+// v3Request is a step of thread th-eval on catalog 3 with the desktop's output cap.
+func v3Request(key string, turns ...*hubv1.AgentTurn) *hubv1.AgentStepRequest {
+	r := evalRequest(key, turns...)
+	r.CatalogVersion, r.MaxOutputTokens = 3, v3OutputCap
+	return r
+}
+
+// v3Case is a question of the beta with the recorded answers of a planner that follows the v3 prompt: the calls of
+// each step and the result the desktop sends back for the calls of each step but the last. rule is the line of the
+// v3 prompt the answers follow; the recorded texts are impersonal (no «я», «ты», «вы», no greeting).
+type v3Case struct {
+	name, text, rule string
+	steps            [][][3]string
+	results          []string
+}
+
+// TestAgentEvalHubV3BetaQuestions runs the four questions of the beta and a work on a topic without an assignment
+// through the real AgentStep on catalog 3 (recorded answers; a live model is level 2, desktop/tests/agenteval): the
+// prompt holds the rule each answer follows, every answer comes back unchanged and sealed for catalog 3, a reply
+// lists assignment IDs only (the desktop draws the titles), and the provider gets the v3 prompt, the v3 tools and
+// the desktop's output cap.
+func TestAgentEvalHubV3BetaQuestions(t *testing.T) {
+	assignments := `{"assignments":[{"id":"a-12","due":"2026-10-24","status":"upcoming"},{"id":"a-20","due":"2026-10-27","status":"upcoming"}]}`
+	cases := []v3Case{
+		{name: "greeting", text: "Привет, ты тут?", rule: "No greetings and no address",
+			steps: [][][3]string{{{"toolu_01", "reply", `{"text":"Можно спросить про задания, конспекты или лекции."}`}}}},
+		{name: "where are the drafts", text: "Где посмотреть черновики?",
+			rule:  "drafts of assignments: «Задания», the page of the assignment, block «Решение»",
+			steps: [][][3]string{{{"toolu_01", "reply", `{"text":"Черновик — в «Задания», на странице задания, блок «Решение»."}`}}}},
+		{name: "what is due this week", text: "Что горит на неделе?",
+			rule: "That reply lists the assignments in its assignments argument",
+			steps: [][][3]string{
+				{{"toolu_01", "list_assignments", `{"due_before":"2026-10-28","status":"upcoming"}`}},
+				{{"toolu_02", "reply", `{"text":"Два задания, ближайший срок — 2026-10-24.","assignments":["a-12","a-20"]}`}},
+			}, results: []string{assignments}},
+		{name: "help with practicals 2-4", text: "Помоги с пр 2-4", rule: "When the request is ambiguous, call ask_questions",
+			steps: [][][3]string{
+				{{"toolu_01", "list_assignments", `{"status":"upcoming"}`}},
+				{{"toolu_02", "ask_questions", `{"questions":[{"kind":"choice","question":"Какие работы имеются в виду?",` +
+					`"options":["Практические 2-4 по физике","Другие"],"default":0}]}`}},
+			}, results: []string{assignments}},
+		{name: "topic without an assignment", text: "Сделай презентацию на тему «Реформы Петра I»",
+			rule: "A work on a topic (реферат, доклад, эссе, презентация) is the app's own job",
+			steps: [][][3]string{
+				{{"toolu_01", "list_assignments", `{}`}},
+				{{"toolu_02", "reply", `{"text":"Работа по теме начинается с задания в «Задания»; задания с этой темой нет."}`}},
+			}, results: []string{`{"assignments":[]}`}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newEvalHubOf(t, 3, v3OutputCap)
+			if !strings.Contains(h.system, c.rule) {
+				t.Fatalf("the v3 prompt has no rule %q", c.rule)
+			}
+			for _, s := range c.steps {
+				h.provider.Push(answerWith(t, s...))
+			}
+			turns := []*hubv1.AgentTurn{{Turn: &hubv1.AgentTurn_StudentText{StudentText: c.text}}}
+			for i, s := range c.steps {
+				resp, err := h.step(t, v3Request(fmt.Sprintf("ag:th-eval:1:%d", i+1), turns...))
+				if err != nil {
+					t.Fatalf("step %d: %v", i+1, err)
+				}
+				got := resp.GetCalls().GetCalls()
+				if len(got) != len(s) {
+					t.Fatalf("step %d: %d calls, want %d", i+1, len(got), len(s))
+				}
+				for j, want := range s {
+					if got[j].GetCallId() != want[0] || got[j].GetTool() != want[1] || got[j].GetArgumentsJson() != want[2] {
+						t.Fatalf("step %d: call %d changed on the way: %v", i+1, j, got[j])
+					}
+				}
+				if err := h.sealer.Verify(h.binding(h.owner), modelCallsOf(t, resp), resp.GetCalls().GetSeal()); err != nil {
+					t.Fatalf("step %d: seal: %v", i+1, err)
+				}
+				if i < len(c.results) {
+					results := &hubv1.ToolResults{}
+					for _, call := range got {
+						results.Results = append(results.Results, &hubv1.ToolResult{CallId: call.GetCallId(), ResultJson: c.results[i]})
+					}
+					turns = append(turns, &hubv1.AgentTurn{Turn: &hubv1.AgentTurn_Calls{Calls: resp.GetCalls()}},
+						&hubv1.AgentTurn{Turn: &hubv1.AgentTurn_Results{Results: results}})
+				}
+			}
+
+			calls := h.provider.Calls()
+			if len(calls) != len(c.steps) {
+				t.Fatalf("provider calls = %d", len(calls))
+			}
+			for i, pc := range calls {
+				if pc.System() != h.system || pc.MaxOutput() != v3OutputCap || !replyListsAssignments(pc.Tools()) {
+					t.Fatalf("provider call %d: prompt, cap %d or tools are not those of catalog 3", i, pc.MaxOutput())
+				}
+			}
+		})
+	}
+}
+
+// replyListsAssignments reports whether the reply tool of a tool list takes an assignments argument (catalog 3).
+func replyListsAssignments(tools []values.ToolSpec) bool {
+	for _, tl := range tools {
+		if tl.Name() == "reply" {
+			return strings.Contains(tl.Schema(), `"assignments"`)
+		}
+	}
+	return false
+}
+
+// TestAgentEvalHubV3ReplyAssignmentsShape: a reply lists at most 10 IDs and only on catalog 3. A title or an object
+// instead of an ID, eleven IDs, or a list on catalog 2 is a permanent PROVIDER_ERROR: no such call reaches the desktop.
+func TestAgentEvalHubV3ReplyAssignmentsShape(t *testing.T) {
+	ids := make([]string, 0, toolcatalog.MaxCardIDs+1)
+	for i := range toolcatalog.MaxCardIDs + 1 {
+		ids = append(ids, fmt.Sprintf("a%d", i))
+	}
+	eleven, err := json.Marshal(ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		version uint32
+		args    string
+	}{
+		"title instead of an id": {3, `{"text":"Одно задание.","assignments":["Эссе по истории"]}`},
+		"object with a title":    {3, `{"text":"Одно задание.","assignments":[{"id":"a1","title":"Эссе"}]}`},
+		"eleven ids":             {3, `{"text":"Много заданий.","assignments":` + string(eleven) + `}`},
+		"a list on catalog 2":    {2, `{"text":"Одно задание.","assignments":["a1"]}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newEvalHubOf(t, c.version, v3OutputCap)
+			h.provider.Push(answerWith(t, [3]string{"toolu_01", "reply", c.args}))
+			req := v3Request("ag:th-eval:1:1")
+			req.CatalogVersion = c.version
+			_, err := h.step(t, req)
+			code, d := gwDetail(t, err)
+			if code != connectrpc.CodeUnavailable || d.GetCode() != hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR || d.GetRetryable() {
+				t.Fatalf("%v / %v, want a permanent PROVIDER_ERROR", code, d)
 			}
 		})
 	}

@@ -158,6 +158,21 @@ test("parseUpdate checks the shape, tolerates null lists and drops unknown cards
   assert.throws(() => parseState({ link: "weird", readOnly: false }));
 });
 
+test("parseUpdate reads the assignments of a reply; null or missing is an empty list, a broken line drops the card", () => {
+  const reply = { kind: "reply", plan: null, questions: null, jobId: "", artifact: "", target: null, actionId: "", answerId: "", cannotDo: null, text: "Два задания.", stopReason: "" };
+  const lines = [
+    { id: "a2", title: "Эссе", subjectId: "", due: "" },
+    { id: "a1", title: "Лабораторная 2", subjectId: "s1", due: "2026-10-24" },
+  ];
+  const u = parseUpdate(update({ cards: [{ ...reply, assignments: lines }, { ...reply, assignments: null }, reply] }));
+  assert.equal(u.cards.length, 3);
+  assert.deepEqual(u.cards[0].assignments, lines);
+  assert.deepEqual(u.cards[1].assignments, []);
+  assert.deepEqual(u.cards[2].assignments, []);
+  const broken = parseUpdate(update({ cards: [{ ...reply, assignments: [{ id: "a1", title: 5, subjectId: "", due: "" }] }] }));
+  assert.equal(broken.cards.length, 0);
+});
+
 // ---- Reducer ----
 
 test("updates of one request replace each other; other requests stay", () => {

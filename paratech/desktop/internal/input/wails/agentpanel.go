@@ -84,22 +84,32 @@ type AgentUpdateView struct {
 
 // AgentCardView is one card; Kind says which field is set: plan, questions, progress (jobId), result (artifact,
 // "<kind>/<path>" of the artifact store), confirm (target), action_line (actionId), answer (answerId), cannot_do
-// (cannotDo), reply (text), stopped (stopReason) or work (workId and outcome: questions, review, helper, pending,
-// failed or confirmed; the texts come from TurnkeyService.Work).
+// (cannotDo), reply (text and assignments), stopped (stopReason) or work (workId and outcome: questions, review,
+// helper, pending, failed or confirmed; the texts come from TurnkeyService.Work).
 type AgentCardView struct {
-	Kind       string              `json:"kind"`
-	Plan       *AgentPlanView      `json:"plan"`
-	Questions  *AgentQuestionsView `json:"questions"`
-	JobID      string              `json:"jobId"`
-	Artifact   string              `json:"artifact"`
-	Target     *AgentRefView       `json:"target"`
-	ActionID   string              `json:"actionId"`
-	AnswerID   string              `json:"answerId"`
-	CannotDo   *AgentCannotDoView  `json:"cannotDo"`
-	Text       string              `json:"text"`
-	StopReason string              `json:"stopReason"`
-	WorkID     string              `json:"workId"`
-	Outcome    string              `json:"outcome"`
+	Kind        string                `json:"kind"`
+	Plan        *AgentPlanView        `json:"plan"`
+	Questions   *AgentQuestionsView   `json:"questions"`
+	JobID       string                `json:"jobId"`
+	Artifact    string                `json:"artifact"`
+	Target      *AgentRefView         `json:"target"`
+	ActionID    string                `json:"actionId"`
+	AnswerID    string                `json:"answerId"`
+	CannotDo    *AgentCannotDoView    `json:"cannotDo"`
+	Text        string                `json:"text"`
+	Assignments []AgentAssignmentView `json:"assignments"` // a reply's list; null on other cards
+	StopReason  string                `json:"stopReason"`
+	WorkID      string                `json:"workId"`
+	Outcome     string                `json:"outcome"`
+}
+
+// AgentAssignmentView is an assignment a reply lists, from the local data, never from the model (TASK-173): its title
+// (plain text only), its library subject ("" none) and its deadline (YYYY-MM-DD, "" none).
+type AgentAssignmentView struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	SubjectID string `json:"subjectId"`
+	Due       string `json:"due"`
 }
 
 // AgentRefView is a typed id: kind is subject, lesson, proposal, preview, ...
@@ -200,6 +210,12 @@ func cardView(c values.Card) (AgentCardView, bool) {
 		v.CannotDo = &AgentCannotDoView{YourPart: texts(c.YourPart), OurPart: texts(c.OurPart)}
 	case values.ReplyCard:
 		v.Text = string(c.Text)
+		v.Assignments = make([]AgentAssignmentView, 0, len(c.Lines))
+		for _, l := range c.Lines {
+			v.Assignments = append(v.Assignments, AgentAssignmentView{
+				ID: l.Assignment.ID(), Title: l.Title, SubjectID: l.Subject.ID(), Due: l.Due.String(),
+			})
+		}
 	case values.StoppedCard:
 		v.StopReason = string(c.Reason)
 	case values.WorkCard:

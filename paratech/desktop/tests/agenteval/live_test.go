@@ -37,7 +37,7 @@ func TestAgentLive(t *testing.T) {
 		t.Fatalf("%s and %s are required", envURL, envKey)
 	}
 
-	rawCatalog, err := os.ReadFile(filepath.Join("..", "..", "..", "shared", "testdata", "tool_catalog_v2.json"))
+	rawCatalog, err := os.ReadFile(filepath.Join("..", "..", "..", "shared", "testdata", CatalogFile))
 	if err != nil {
 		t.Fatal(err)
 	}

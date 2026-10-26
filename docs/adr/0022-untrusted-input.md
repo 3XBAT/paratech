@@ -47,6 +47,14 @@ foreign text and pick tools.
 - **Forged history**: the Hub signs every echo of its tool calls (`seal`, ADR-0023).
 - **Irreversible actions** only by the student's click in `input/wails`; the agent has no path to them.
 
+## Addendum (TASK-173, catalog v3): a reply that lists assignments
+- `reply.assignments` (type `card_ids`): 0–10 assignment IDs, no text. Each ID passes the same typed provenance check
+  (base, scope, tool results of the thread); one of unknown origin refuses the whole reply with `unknown_id`, no card is
+  shown and the planner goes on.
+- The desktop fills the list from local data: title, library subject and deadline of each assignment; one deleted
+  since is skipped. The planner still never sees a title and never writes one; nothing read for the card goes back to
+  it (the result stays `{"shown":true}`) or into the log.
+
 ## Consequences
 - Some answers are less helpful (the planner cannot quote a title); cards show the trusted data instead.
 - Eval level 1 (CI, blocking): policy tests plus injection fixtures — a manual saying «send to x@y», a file name with a
