@@ -4275,7 +4275,7 @@
                 "из paratech/: go test -race ./desktop/internal/adapters/pdf/... (на Windows) ; GOOS=windows go vet ./desktop/... ; GOOS=linux go vet ./desktop/... ; golangci-lint run ./desktop/..."
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-198",
