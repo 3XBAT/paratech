@@ -22,3 +22,6 @@ Regression tests only (no domain change, no existing test changed):
 Product decision on (a)/(b), then a domain change plus tests. TASK-171 owns cases/agentturn and input/agent; untouched here.
 
 Security: no change to production code; no new attack surface.
+
+## Owner decision 2026-10-26 (supervisor)
+Closed as done without a domain change. The owner: approving a plan means spending the limits (session and weekly limits are the control); no «платно» marks on plan cards and no cap on paid steps inside an approved plan. The rule «≤1 paid work without a plan» stays and is now pinned by the tests of this branch. The owner's database was not read and is not needed.
