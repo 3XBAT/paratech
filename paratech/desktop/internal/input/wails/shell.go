@@ -70,6 +70,9 @@ type Core struct {
 	Knowledge KnowledgeUseCase // the «База знаний» section (TASK-091); the shell shows its save dialog
 
 	Library LibraryUseCase // «Предметы» (TASK-121); the shell shows its open dialog, Files reads the chosen file
+	// «Открыть в Word / PowerPoint» of a library file (TASK-177): the artifact store keeps the copy, Opener starts it.
+	MaterialViews MaterialViews
+	Opener        FileOpener
 
 	Agent AgentCore // the agent panel (TASK-119); the shell attaches its panel to the Wails events
 
@@ -279,7 +282,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Knowledge == nil {
 		return Services{}, errors.New("wails: open core: no knowledge base")
 	}
-	if core.Library == nil {
+	if core.Library == nil || core.MaterialViews == nil || core.Opener == nil {
 		return Services{}, errors.New("wails: open core: no library")
 	}
 	if !core.Agent.complete() {
@@ -328,9 +331,10 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 			s.opts.Log),
 		LectureText: NewLectureTextService(core.Summary, summaryPickerFunc(s.pickSummaryFile),
 			clipboardFunc(s.setClipboardText), s.opts.Log),
-		Deletion:   NewRecordingDeleteService(core.Deletion, s.opts.Log),
-		Knowledge:  NewKnowledgeBaseService(core.Knowledge, knowledgePickerFunc(s.pickKnowledgeFile), s.opts.Log),
-		Library:    NewLibraryService(core.Library, materialPickerFunc(s.pickMaterialFile), core.Files, s.opts.Log),
+		Deletion:  NewRecordingDeleteService(core.Deletion, s.opts.Log),
+		Knowledge: NewKnowledgeBaseService(core.Knowledge, knowledgePickerFunc(s.pickKnowledgeFile), s.opts.Log),
+		Library: NewLibraryService(core.Library, materialPickerFunc(s.pickMaterialFile), core.Files, s.opts.Log).
+			withOpener(core.MaterialViews, core.Opener),
 		Agent:      NewAgentService(core.Agent, s.opts.Log),
 		Today:      NewTodayService(core.Today, s.opts.Log),
 		AgentPanel: core.Agent.Panel,
