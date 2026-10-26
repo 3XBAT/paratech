@@ -8,7 +8,8 @@ import (
 )
 
 func TestEveryToolHasARule(t *testing.T) {
-	for _, tool := range values.Tools() {
+	tools := append(values.Tools(), values.RetiredTools()...)
+	for _, tool := range tools {
 		r, err := Of(tool)
 		if err != nil {
 			t.Fatalf("%s: %v", tool, err)
@@ -17,8 +18,12 @@ func TestEveryToolHasARule(t *testing.T) {
 			t.Fatalf("%s: AlwaysPlan only for paid U tools", tool)
 		}
 	}
-	if len(rules) != len(values.Tools()) {
-		t.Fatalf("rules has %d entries, catalog %d", len(rules), len(values.Tools()))
+	if len(rules) != len(tools) {
+		t.Fatalf("rules has %d entries, catalog and retired tools %d", len(rules), len(tools))
+	}
+	// A retired tool keeps its rule: the journal restores its stored actions (catalog v4 retired generate_draft).
+	if r, err := Of(values.ToolGenerateDraft); err != nil || r.Class != ClassU || !r.Paid {
+		t.Fatalf("Of(generate_draft) = %+v, %v", r, err)
 	}
 	if _, err := Of("send_email"); !errors.Is(err, ErrUnknownTool) {
 		t.Fatalf("Of(unknown) = %v", err)

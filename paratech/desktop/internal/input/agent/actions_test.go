@@ -10,6 +10,7 @@ import (
 
 	"paratech/desktop/internal/cases/agentjournal"
 	"paratech/desktop/internal/cases/agentturn"
+	"paratech/desktop/internal/cases/turnkey"
 	"paratech/desktop/internal/domain/agent/action"
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
@@ -159,12 +160,6 @@ func TestEveryActionAndItsUndo(t *testing.T) {
 		{"find homework", values.ToolFindHomework, `{"recording":"r1"}`, `{"changed":true,"done":true,"job":"job1"}`,
 			func(t *testing.T, w *world) {
 				if w.jobs.started[0] != "homework:r1" {
-					t.Fatalf("started %v", w.jobs.started)
-				}
-			}, jobCancelled},
-		{"generate draft", values.ToolGenerateDraft, `{"assignment":"a1","instruction":"кратко"}`, `{"changed":true,"done":true,"job":"job1"}`,
-			func(t *testing.T, w *world) {
-				if w.jobs.started[0] != "draft:a1:кратко" {
 					t.Fatalf("started %v", w.jobs.started)
 				}
 			}, jobCancelled},
@@ -422,7 +417,6 @@ func TestActionsWithNothingToDo(t *testing.T) {
 	if _, err := w.lessons.SetLessonInfo(t.Context(), "r1", "Физика", "lab"); err != nil {
 		t.Fatal(err)
 	}
-	w.drafts.active["a2"] = "job7"
 	tests := []struct {
 		tool   values.Tool
 		args   string
@@ -431,7 +425,6 @@ func TestActionsWithNothingToDo(t *testing.T) {
 		{values.ToolLinkMaterial, `{"material":"m2","lesson":"l2"}`, `{"changed":false,"done":true}`},
 		{values.ToolSetLessonInfo, `{"recording":"r1","subject":"s1","kind":"lab"}`, `{"changed":false,"done":true}`},
 		{values.ToolEditDue, `{"assignment":"a1","due":"2026-10-24"}`, `{"changed":false,"done":true}`},
-		{values.ToolGenerateDraft, `{"assignment":"a2"}`, `{"changed":false,"done":true,"job":"job7"}`},
 	}
 	for i, tt := range tests {
 		r, e := act(t, w, writeCall(t, "n"+string(rune('0'+i)), tt.tool, tt.args))
@@ -481,6 +474,47 @@ func TestActionRefusals(t *testing.T) {
 			t.Errorf("an error text reached the planner: %s", r.out.Result.ResultJSON)
 		}
 	}
+}
+
+// triage_assignment with a topic (catalog v4) has no use case until TASK-188: "unavailable", nothing journaled, no
+// work started, as a free call and as a step of an approved plan; the topic is not in the result.
+func TestTriageTopicUnavailable(t *testing.T) {
+	for _, step := range []int{-1, 0} {
+		w, f := withTurnkey(t, turnkey.Started{View: questionsView(2), Created: true}, nil)
+		c := writeCall(t, "c1", values.ToolTriageAssignment, `{"topic":"Реформы Петра I, презентация"}`)
+		c.PlanStep = step
+		r, e := act(t, w, c)
+		if !r.out.Result.IsError || r.out.Result.ResultJSON != `{"error":"unavailable"}` || len(r.cards) != 0 {
+			t.Fatalf("plan step %d: result %+v, cards %+v", step, r.out.Result, r.cards)
+		}
+		if e.Status != "" || len(w.store.order) != 0 || len(f.calls) != 0 {
+			t.Fatalf("plan step %d: journal %+v (%d entries), triage calls %+v", step, e, len(w.store.order), f.calls)
+		}
+	}
+}
+
+// An action of the retired generate_draft stored before catalog v4 keeps its Undo: the running job is cancelled.
+func TestUndoOfAStoredDraftAction(t *testing.T) {
+	w := newWorld(t)
+	ctx := t.Context()
+	jobID, err := w.jobs.start("draft:a1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := w.journal.Begin(ctx, agentjournal.BeginInput{Thread: req.Thread, Turn: req.Turn, CallID: "c1", Tool: values.ToolGenerateDraft})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.journal.Finish(ctx, e.ID, agentjournal.Outcome{
+		Compensation: action.CancelJob{Job: mustRef(t, values.KindJob, string(jobID))}, TargetVersion: jobVersion,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := w.journal.Undo(ctx, e.ID)
+	if err != nil || u.Status != action.StatusUndone || u.Tool != values.ToolGenerateDraft {
+		t.Fatalf("Undo = %+v, %v", u, err)
+	}
+	jobCancelled(t, w)
 }
 
 // Crashes between the steps of an action, settled by Recover at the next start: the use case did not run (FAILED),

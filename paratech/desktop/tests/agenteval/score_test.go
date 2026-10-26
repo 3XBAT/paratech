@@ -80,12 +80,19 @@ func TestParseCaseSetRejects(t *testing.T) {
 		"list without list_assignments": func(s string) string {
 			return strings.Replace(s, `"class": "reply", "tools": []}`, `"class": "reply", "tools": [], "lists_assignments": true}`, 1)
 		},
-		"unknown alternative class": func(s string) string { return strings.Replace(s, `"also": ["read", "reply"]`, `"also": ["chat"]`, 1) },
+		"unknown alternative class": func(s string) string { return strings.Replace(s, `"also": ["questions"]`, `"also": ["chat"]`, 1) },
 		"alternative equal to the class": func(s string) string {
-			return strings.Replace(s, `"also": ["read", "reply"]`, `"also": ["questions"]`, 1)
+			return strings.Replace(s, `"also": ["questions"]`, `"also": ["write"]`, 1)
 		},
 		"duplicate alternative": func(s string) string {
-			return strings.Replace(s, `"also": ["read", "reply"]`, `"also": ["read", "read"]`, 1)
+			return strings.Replace(s, `"also": ["questions"]`, `"also": ["questions", "questions"]`, 1)
+		},
+		"unknown source": func(s string) string { return strings.Replace(s, `"source": "topic"`, `"source": "title"`, 1) },
+		"source without triage_assignment": func(s string) string {
+			return strings.Replace(s, `"class": "write", "tools": ["create_subject"]}`, `"class": "write", "tools": ["create_subject"], "source": "topic"}`, 1)
+		},
+		"retired tool": func(s string) string {
+			return strings.Replace(s, `"tools": ["triage_assignment"], "source": "assignment"`, `"tools": ["generate_draft"]`, 1)
 		},
 		"unknown subject": func(s string) string {
 			return strings.Replace(s, `"subject": "s-math", "class"`, `"subject": "s-chem", "class"`, 1)
@@ -190,13 +197,14 @@ func TestReplyAssignments(t *testing.T) {
 }
 
 // TestBetaQuestionsInTheCaseSet: the four questions of the beta (TASK-172/173) and a work on a topic without an
-// assignment stay in the live set with the routing the v3 prompt asks for. Without an assignment the prompt allows
-// questions or an honest reply (after list_assignments that is a read).
+// assignment stay in the live set with the routing the v4 prompt asks for: the topic goes to triage_assignment{topic}
+// (questions first are allowed), never to a plan, a read or a refusal; a draft of an assignment to
+// triage_assignment{assignment} (TASK-184).
 func TestBetaQuestionsInTheCaseSet(t *testing.T) {
 	cs := loadCases(t)
 	want := map[string][]string{
 		"b01": {ClassReply}, "b02": {ClassReply}, "b03": {ClassRead}, "b04": {ClassQuestions},
-		"b05": {ClassQuestions, ClassRead, ClassReply},
+		"b05": {ClassWrite, ClassQuestions},
 	}
 	for id, classes := range want {
 		i := slicesIndex(cs.Requests, id)
@@ -214,11 +222,34 @@ func TestBetaQuestionsInTheCaseSet(t *testing.T) {
 			}
 		}
 	}
-	if i := slicesIndex(cs.Requests, "b05"); i >= 0 && cs.Requests[i].Accepts(ClassPlan) {
-		t.Error("b05 must not accept a plan without an assignment")
+	if i := slicesIndex(cs.Requests, "b05"); i < 0 || cs.Requests[i].Accepts(ClassPlan) || cs.Requests[i].Source != "topic" ||
+		!slices.Equal(cs.Requests[i].Tools, []string{"triage_assignment"}) {
+		t.Error("b05 must expect triage_assignment with a topic, not a plan")
+	}
+	if i := slicesIndex(cs.Requests, "w08"); i < 0 || cs.Requests[i].Source != "assignment" ||
+		!slices.Equal(cs.Requests[i].Tools, []string{"triage_assignment"}) {
+		t.Error("w08 (a draft of an assignment) must expect triage_assignment with the assignment")
 	}
 	if i := slicesIndex(cs.Requests, "b03"); i < 0 || !cs.Requests[i].ListsAssignments {
 		t.Error("b03 must expect a reply with the list of assignments")
+	}
+}
+
+func TestTriageSource(t *testing.T) {
+	for _, tt := range []struct {
+		tool, args, want string
+	}{
+		{"triage_assignment", `{"assignment":"a-31"}`, "assignment"},
+		{"triage_assignment", `{"upload":"u1","assignment":null}`, "upload"},
+		{"triage_assignment", `{"topic":"Реформы Петра I"}`, "topic"},
+		{"triage_assignment", `{"assignment":"a-31","topic":"Эссе"}`, ""},
+		{"triage_assignment", `{}`, ""},
+		{"triage_assignment", `not json`, ""},
+		{"write_work", `{"topic":"Эссе"}`, ""},
+	} {
+		if got := TriageSource(tt.tool, tt.args); got != tt.want {
+			t.Errorf("TriageSource(%s, %s) = %q, want %q", tt.tool, tt.args, got, tt.want)
+		}
 	}
 }
 
@@ -310,6 +341,20 @@ func TestReport(t *testing.T) {
 		if !strings.Contains(md, s) {
 			t.Errorf("report misses %q:\n%s", s, md)
 		}
+	}
+
+	// Catalog v4: a triage with the expected source counts; another source is reported.
+	topic := Request{ID: "b05", Text: "Презентация", Class: ClassWrite, Tools: []string{"triage_assignment"}, Source: "topic"}
+	v4 := Report{Classes: classes, Requests: []Outcome{
+		{Case: topic, Tools: []string{"triage_assignment"}, Sources: []string{"topic"}},
+		{Case: topic, Tools: []string{"list_assignments", "triage_assignment"}, Sources: []string{"assignment"}},
+	}}
+	if m := v4.Metrics(); m.Sources != 2 || m.SourcesOK != 1 || m.ClassOK != 2 {
+		t.Fatalf("v4 metrics = %+v", m)
+	}
+	if md := v4.Markdown(); !strings.Contains(md, "| triage_assignment: верный источник | 1/2 (50%) |") ||
+		!strings.Contains(md, "b05 «Презентация»: triage_assignment ждали с topic, получили [assignment]") {
+		t.Errorf("v4 report:\n%s", md)
 	}
 
 	// An alternative class counts as routed; a class outside them is reported with every expected class.
