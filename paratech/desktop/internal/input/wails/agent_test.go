@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/connections"
@@ -381,6 +382,12 @@ func TestAgentPanelEventContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A reply lists a-2, a-1 and a-3; a-3 is gone from the local data, so it has no line and is not shown.
+	a1, a2, a3 := mustRef(t, values.KindAssignment, "a-1"), mustRef(t, values.KindAssignment, "a-2"), mustRef(t, values.KindAssignment, "a-3")
+	due, err := values.NewDate(2026, time.October, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
 	u := AgentUpdate{
 		Thread: "th1", Turn: 3, Scope: scope, Status: "AWAITING_PLAN", StopReason: "",
 		Cards: []values.Card{
@@ -396,6 +403,10 @@ func TestAgentPanelEventContract(t *testing.T) {
 			values.AnswerCard{Answer: mustRef(t, values.KindAnswer, "ans-1")},
 			values.CannotDoCard{YourPart: []values.Text{"сдать лично"}},
 			values.ReplyCard{Text: "Готово"},
+			values.ReplyCard{Text: "Два задания.", Assignments: []values.Ref{a2, a1, a3}, Lines: []values.AssignmentLine{
+				{Assignment: a2, Title: "Эссе"},
+				{Assignment: a1, Title: "Лабораторная 2", Subject: mustRef(t, values.KindSubject, "sub-1"), Due: due},
+			}},
 			values.StoppedCard{Reason: values.StopOffline},
 			values.WorkCard{Work: mustRef(t, values.KindWork, "w-1"), Outcome: values.TriageHelper},
 		},
@@ -435,7 +446,10 @@ func TestAgentPanelEventContract(t *testing.T) {
 		card(`"kind":"action_line","actionId":"act-1"`) + "," +
 		card(`"kind":"answer","answerId":"ans-1"`) + "," +
 		card(`"kind":"cannot_do","cannotDo":{"yourPart":["сдать лично"],"ourPart":[]}`) + "," +
-		card(`"kind":"reply","text":"Готово"`) + "," +
+		card(`"kind":"reply","text":"Готово","assignments":[]`) + "," +
+		card(`"kind":"reply","text":"Два задания.","assignments":[`+
+			`{"id":"a-2","title":"Эссе","subjectId":"","due":""},`+
+			`{"id":"a-1","title":"Лабораторная 2","subjectId":"sub-1","due":"2026-10-24"}]`) + "," +
 		card(`"kind":"stopped","stopReason":"offline"`) + "," +
 		card(`"kind":"work","workId":"w-1","outcome":"helper"`) + `]}`
 	if string(got) != want {
@@ -471,7 +485,7 @@ func card(fields string) string {
 	}
 	zero := []struct{ key, val string }{
 		{"kind", `""`}, {"plan", "null"}, {"questions", "null"}, {"jobId", `""`}, {"artifact", `""`}, {"target", "null"},
-		{"actionId", `""`}, {"answerId", `""`}, {"cannotDo", "null"}, {"text", `""`}, {"stopReason", `""`},
+		{"actionId", `""`}, {"answerId", `""`}, {"cannotDo", "null"}, {"text", `""`}, {"assignments", "null"}, {"stopReason", `""`},
 		{"workId", `""`}, {"outcome", `""`},
 	}
 	parts := make([]string, 0, len(zero))

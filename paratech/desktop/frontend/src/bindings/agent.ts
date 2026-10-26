@@ -113,6 +113,17 @@ export interface CannotDoView {
   ourPart: string[];
 }
 
+/**
+ * An assignment a reply lists. The core reads it from the local data, never from the model; the title is still shown
+ * as plain text. subjectId and due ("YYYY-MM-DD") are "" when there is none.
+ */
+export interface AssignmentLineView {
+  id: string;
+  title: string;
+  subjectId: string;
+  due: string;
+}
+
 export type CardKind =
   | "plan"
   | "questions"
@@ -153,6 +164,8 @@ export interface CardView {
   answerId: string;
   cannotDo: CannotDoView | null;
   text: string;
+  /** A `reply` card: the assignments it lists, from the student's own data; empty for other cards. */
+  assignments: AssignmentLineView[];
   stopReason: string;
   /** A `work` card: the work whose texts TurnkeyService.Work returns; "" for other cards. */
   workId: string;
@@ -347,6 +360,12 @@ function parseCannotDo(raw: unknown): CannotDoView {
   return { yourPart: strings(r, "yourPart", w), ourPart: strings(r, "ourPart", w) };
 }
 
+function parseAssignmentLine(raw: unknown): AssignmentLineView {
+  const w = "assignment line";
+  const r = record(raw, w);
+  return { id: str(r, "id", w), title: str(r, "title", w), subjectId: str(r, "subjectId", w), due: str(r, "due", w) };
+}
+
 function nested<T>(r: Record<string, unknown>, key: string, parse: (raw: unknown) => T): T | null {
   const v = r[key];
   return v === null || v === undefined ? null : parse(v);
@@ -367,6 +386,8 @@ export function parseCard(raw: unknown): CardView {
     answerId: str(r, "answerId", w),
     cannotDo: nested(r, "cannotDo", parseCannotDo),
     text: str(r, "text", w),
+    // null on other cards and from an older core.
+    assignments: items(r.assignments, w, parseAssignmentLine),
     stopReason: str(r, "stopReason", w),
     // An older core does not send them; only a `work` card needs its workId (checked where the card is built).
     workId: optStr(r, "workId", w),
