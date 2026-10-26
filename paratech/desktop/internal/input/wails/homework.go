@@ -139,6 +139,7 @@ type HomeworkProposals interface {
 	ListAssignments(ctx context.Context) ([]homeworkflow.AssignmentView, error)
 	Assignment(ctx context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error)
 	CorrectLesson(ctx context.Context, c homeworkflow.LessonCorrection) (homeworkflow.AssignmentView, error)
+	CreateAssignment(ctx context.Context, in homeworkflow.NewAssignment) (homeworkflow.AssignmentView, error)
 	ProposeSend(ctx context.Context, a shared.AssignmentID, format proposal.Format) (homeworkflow.ProposalView, error)
 	Get(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
 	ConfirmSend(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format) (homeworkflow.ProposalView, error)

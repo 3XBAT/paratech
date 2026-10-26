@@ -12,9 +12,11 @@ import {
   type SendPreparation,
   type VersionText,
 } from "../bindings/homework";
+import { libraryApi } from "../bindings/library";
 import { callByName } from "../bindings/runtime";
 import { turnkeyApi } from "../bindings/turnkey";
 import {
+  addTexts,
   assignmentDeliveryView,
   blockedByEmail,
   type ChipView,
@@ -44,7 +46,7 @@ import { initialListState, type ListState } from "../listView";
 import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Field, Input, ResultLine, type ResultKind, Row } from "../ui/controls";
 import { StatusChip } from "../ui/StatusChip";
-import { SendAgainDialog, SendDialog, type SendResult } from "./HomeworkDialogs";
+import { AddAssignmentDialog, SendAgainDialog, SendDialog, type SendResult } from "./HomeworkDialogs";
 import { HomeworkTurnkey } from "./HomeworkTurnkey";
 import { LessonCorrection } from "./LessonCorrection";
 import { TranscriptLinks } from "./TranscriptLinks";
@@ -94,6 +96,8 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
   const [deliveries, setDeliveries] = useState<Readonly<Record<string, DeliveryItem[]>>>({});
   const [error, setError] = useState("");
   const [list, setList] = useState<ListState>(initialListState);
+  const [adding, setAdding] = useState(false);
+  const library = useMemo(() => libraryApi(callByName), []);
 
   useEffect(() => {
     let live = true;
@@ -150,7 +154,24 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
     <section className="page hw">
       <div className="head">
         <h1>Домашние задания</h1>
+        <div className="acts">
+          <Button icon="plus" onClick={() => setAdding(true)}>
+            {addTexts.button}
+          </Button>
+        </div>
       </div>
+      {adding && (
+        <AddAssignmentDialog
+          api={api}
+          library={library}
+          onClose={() => setAdding(false)}
+          onCreated={(a) => {
+            setAdding(false);
+            setItems((cur) => (cur === null ? cur : [a, ...cur.filter((x) => x.id !== a.id)]));
+            props.onOpen(a.id);
+          }}
+        />
+      )}
       {error && (
         <Banner kind="fail" role="alert">
           {error}
