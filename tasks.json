@@ -3732,7 +3732,7 @@
                 "go test -race ./desktop/internal/domain/agent/action/... ./desktop/internal/cases/agentjournal/... ./desktop/internal/input/wails/... и тест архитектуры"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-175",

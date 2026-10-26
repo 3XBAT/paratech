@@ -250,6 +250,8 @@ func TestAgentUndo(t *testing.T) {
 			AgentUndoView{ActionID: "act-1", Refusal: AgentUndoNameTaken}, false},
 		{"refusal as an error", agentjournal.Entry{}, fmt.Errorf("x: %w", action.ErrCannotStop),
 			AgentUndoView{ActionID: "act-1", Refusal: AgentUndoCannotStop}, false},
+		{"result ready before undo", agentjournal.Entry{}, fmt.Errorf("agentjournal: begin undo: %w", action.ErrResultReady),
+			AgentUndoView{ActionID: "act-1", Refusal: AgentUndoResultReady}, false},
 		{"no compensator", agentjournal.Entry{}, fmt.Errorf("x: %w", agentjournal.ErrUndoUnavailable),
 			AgentUndoView{ActionID: "act-1", Problem: AgentProblemUnavailable}, false},
 		{"concurrent change", agentjournal.Entry{}, fmt.Errorf("agentjournal: finish undo: %w", shared.ErrVersionConflict),

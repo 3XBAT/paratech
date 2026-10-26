@@ -161,12 +161,17 @@ func TestMaterialWorkAndUndo(t *testing.T) {
 		})
 	}
 
-	// Done: Undo is refused, the result is kept.
+	// Done: Undo is an error (result ready), the entry stays DONE, the result is kept.
 	w := materialWorld(t)
 	_, e := act(t, w, writeCall(t, "c1", values.ToolMakeSummary, `{"material":"m1"}`))
 	w.jobs.set("job1", job.StatusCompleted)
-	if u, err := w.journal.Undo(t.Context(), e.ID); err != nil || u.Status != action.StatusUndoRefused {
-		t.Fatalf("Undo of a finished job = %+v, %v", u, err)
+	u, err := w.journal.Undo(t.Context(), e.ID)
+	got, gerr := w.store.Get(t.Context(), e.ID)
+	if !errors.Is(err, action.ErrResultReady) || gerr != nil || got.Status() != action.StatusDone {
+		t.Fatalf("Undo of a finished job = %+v, %v; entry %v, %v", u, err, got, gerr)
+	}
+	if st := w.activity.jobs[0].Status; st != job.StatusCompleted {
+		t.Fatalf("job = %s, want completed", st)
 	}
 }
 
