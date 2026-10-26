@@ -58,10 +58,11 @@ type AssignmentRepository interface {
 	// that other records (a delivery) reference is kept and yields assignment.ErrInUse.
 	Delete(ctx context.Context, a *assignment.Assignment) error
 
-	// DeleteUnused removes an assignment the student added, for the Undo of its creation (ADR-0029). It is the
-	// version compare-and-swap of Delete (shared.ErrVersionConflict), and in the same transaction it refuses with
-	// assignment.ErrInUse an assignment that a draft, a delivery, a turnkey work or a proposal other than a declined
-	// or rejected one references; works are checked explicitly, their foreign key would cascade.
+	// DeleteUnused removes an assignment the student added, for the Undo of its creation (PRD section 10, ADR-0029).
+	// It is the version compare-and-swap of Delete (shared.ErrVersionConflict), and in the same transaction it refuses
+	// with assignment.ErrInUse an assignment that a draft, an unfinished draft generation, a delivery, a turnkey work
+	// or a proposal other than a declined or rejected one references; works are checked explicitly, their foreign key
+	// would cascade.
 	DeleteUnused(ctx context.Context, a *assignment.Assignment) error
 
 	// Save inserts or updates an assignment (PRD section 10: review and edit locally). It is the
@@ -185,10 +186,11 @@ type WorkFiles interface {
 	Subjects(ctx context.Context) ([]*subject.Subject, error)
 }
 
-// SubjectNames reads the current name of a library subject, for an assignment the student adds with it (ADR-0029).
-// Implemented by the app over cases/library; display only, nothing is written.
+// SubjectNames reads the current name of a library subject, for an assignment the student adds with it
+// (PRD section 10, ADR-0029). Implemented by the app over cases/library; display only, nothing is written.
 type SubjectNames interface {
-	// SubjectName returns the name of subject id (ADR-0024); an unknown subject wraps shared.ErrNotFound.
+	// SubjectName returns the name of subject id (PRD section 10, ADR-0024); an unknown subject wraps
+	// shared.ErrNotFound.
 	SubjectName(ctx context.Context, id shared.SubjectID) (string, error)
 }
 

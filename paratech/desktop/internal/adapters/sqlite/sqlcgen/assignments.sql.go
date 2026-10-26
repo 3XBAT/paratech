@@ -8,38 +8,40 @@ package sqlcgen
 import (
 	"context"
 	"database/sql"
-	"strings"
 )
 
 const assignmentInUse = `-- name: AssignmentInUse :one
 SELECT CAST(EXISTS (SELECT 1 FROM homework_drafts d WHERE d.assignment_id = ?1)
     OR EXISTS (SELECT 1 FROM deliveries v WHERE v.assignment_id = ?1)
     OR EXISTS (SELECT 1 FROM works w WHERE w.assignment_id = ?1)
-    OR EXISTS (SELECT 1 FROM proposals p WHERE p.assignment_id = ?1
-                                          AND p.status NOT IN (/*SLICE:free_statuses*/?)) AS INTEGER) AS in_use
+    OR EXISTS (SELECT 1 FROM proposals p
+               WHERE p.assignment_id = ?1
+                 AND p.status NOT IN (SELECT value FROM json_each(CAST(?2 AS TEXT))))
+    OR EXISTS (SELECT 1 FROM jobs j
+               WHERE j.type = ?3
+                 AND j.status IN (SELECT value FROM json_each(CAST(?4 AS TEXT)))
+                 AND json_extract(j.payload, '$.assignment_id') = ?1) AS INTEGER) AS in_use
 `
 
 type AssignmentInUseParams struct {
-	ID           string
-	FreeStatuses []string
+	ID                string
+	FreeStatuses      string
+	DraftJobType      string
+	ActiveJobStatuses string
 }
 
 // What references an assignment the student added before the Undo of its creation removes it (ADR-0029). works
 // cascade on delete and proposals have no foreign key, so both are checked here; the caller passes the proposal
-// statuses that leave the assignment free.
+// statuses that leave the assignment free. A draft generation that has not finished has no homework_drafts row yet,
+// so a job of the draft type in one of the passed active statuses whose payload names the assignment counts too.
+// Both status lists are JSON arrays: sqlc.slice next to a repeated named argument binds the wrong values.
 func (q *Queries) AssignmentInUse(ctx context.Context, arg AssignmentInUseParams) (int64, error) {
-	query := assignmentInUse
-	var queryParams []interface{}
-	queryParams = append(queryParams, arg.ID)
-	if len(arg.FreeStatuses) > 0 {
-		for _, v := range arg.FreeStatuses {
-			queryParams = append(queryParams, v)
-		}
-		query = strings.Replace(query, "/*SLICE:free_statuses*/?", strings.Repeat(",?", len(arg.FreeStatuses))[1:], 1)
-	} else {
-		query = strings.Replace(query, "/*SLICE:free_statuses*/?", "NULL", 1)
-	}
-	row := q.db.QueryRowContext(ctx, query, queryParams...)
+	row := q.db.QueryRowContext(ctx, assignmentInUse,
+		arg.ID,
+		arg.FreeStatuses,
+		arg.DraftJobType,
+		arg.ActiveJobStatuses,
+	)
 	var in_use int64
 	err := row.Scan(&in_use)
 	return in_use, err

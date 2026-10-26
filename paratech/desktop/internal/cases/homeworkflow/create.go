@@ -22,6 +22,9 @@ const (
 // Errors: invalid texts or deadline wrap assignment.ErrInvalidDetails (assignment.ErrInvalidTitle, ErrInvalidNote,
 // ErrInvalidDue, ErrInvalidTime); an unknown subject is ErrSubjectNotFound; an unknown lesson wraps shared.ErrNotFound.
 func (s *Service) CreateAssignment(ctx context.Context, in NewAssignment) (AssignmentView, error) {
+	// The input is checked before the stored row is looked up, because the repeat check compares the built candidate.
+	// So a repeat long after the first call can fail the due window, a removed lesson or a removed subject instead of
+	// returning the stored assignment; repeats are meant for retries within seconds.
 	now := s.clock.Now()
 	due, err := assignment.StudentDue(in.Date, in.Time, now.Location())
 	if err != nil {

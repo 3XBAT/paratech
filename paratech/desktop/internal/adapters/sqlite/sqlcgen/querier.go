@@ -12,7 +12,9 @@ import (
 type Querier interface {
 	// What references an assignment the student added before the Undo of its creation removes it (ADR-0029). works
 	// cascade on delete and proposals have no foreign key, so both are checked here; the caller passes the proposal
-	// statuses that leave the assignment free.
+	// statuses that leave the assignment free. A draft generation that has not finished has no homework_drafts row yet,
+	// so a job of the draft type in one of the passed active statuses whose payload names the assignment counts too.
+	// Both status lists are JSON arrays: sqlc.slice next to a repeated named argument binds the wrong values.
 	AssignmentInUse(ctx context.Context, arg AssignmentInUseParams) (int64, error)
 	// Runs before PurgeDeletedLesson: the FK cascade drops material_lessons rows silently, so the materials linked to
 	// a soft-deleted lesson get a new version (Undo compares material versions).

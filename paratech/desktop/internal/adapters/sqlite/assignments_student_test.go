@@ -69,6 +69,16 @@ func TestAssignmentDeleteUnused(t *testing.T) {
 	}
 	const proposalCols = `INSERT INTO proposals (id, kind, status, assignment_id, due_at, reason, confirmed_at, executed_at,
 		version, created_at, updated_at) VALUES `
+	// A draft generation of a1 in status, with a finish time if it ended; it has no homework_drafts row.
+	draftJob := func(typ, status, assignmentID string, finished any) func(t *testing.T, e *courseworkEnv) *assignment.Assignment {
+		return func(t *testing.T, e *courseworkEnv) *assignment.Assignment {
+			a := stored(t, e)
+			mustExec(t, e.db, `INSERT INTO jobs (id, type, status, idempotency_key, payload, max_attempts, next_run_at,
+				created_at, finished_at, version, updated_at) VALUES ('j1', ?, ?, 'k1', ?, 3, 0, 0, ?, 1, 0)`,
+				typ, status, `{"assignment_id":"`+assignmentID+`","base":0}`, finished)
+			return a
+		}
+	}
 	cases := []struct {
 		name  string
 		setup func(t *testing.T, e *courseworkEnv) *assignment.Assignment
@@ -87,6 +97,15 @@ func TestAssignmentDeleteUnused(t *testing.T) {
 			`('p1', 'create_deadline_event', 'EXECUTED', 'a1', 1, '', 1, 1, 1, 0, 0)`), assignment.ErrInUse},
 		{"a stale proposal", referenced(proposalCols +
 			`('p1', 'create_deadline_event', 'STALE', 'a1', 1, 'assignment_changed', 1, NULL, 1, 0, 0)`), assignment.ErrInUse},
+		{"a queued draft generation", draftJob("homework_draft", "QUEUED", "a1", nil), assignment.ErrInUse},
+		{"a running draft generation", draftJob("homework_draft", "RUNNING", "a1", nil), assignment.ErrInUse},
+		{"a draft generation waiting for the network", draftJob("homework_draft", "WAITING_FOR_NETWORK", "a1", nil),
+			assignment.ErrInUse},
+		{"a failed draft generation", draftJob("homework_draft", "FAILED", "a1", 1), nil},
+		{"a cancelled draft generation", draftJob("homework_draft", "CANCELLED", "a1", 1), nil},
+		{"a completed draft generation without a draft", draftJob("homework_draft", "COMPLETED", "a1", 1), nil},
+		{"a draft generation of another assignment", draftJob("homework_draft", "RUNNING", "a2", nil), nil},
+		{"another job type naming the assignment", draftJob("summarize", "RUNNING", "a1", nil), nil},
 		{"a draft", referenced("INSERT INTO homework_drafts (assignment_id, version) VALUES ('a1', 1)"), assignment.ErrInUse},
 		{"a delivery", referenced(`INSERT INTO deliveries (id, assignment_id, recipient, subject, artifact_ref, message_id,
 			idempotency_key, status, confirmed_at, created_at, updated_at)

@@ -57,10 +57,17 @@ DELETE FROM assignments WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_
 
 -- What references an assignment the student added before the Undo of its creation removes it (ADR-0029). works
 -- cascade on delete and proposals have no foreign key, so both are checked here; the caller passes the proposal
--- statuses that leave the assignment free.
+-- statuses that leave the assignment free. A draft generation that has not finished has no homework_drafts row yet,
+-- so a job of the draft type in one of the passed active statuses whose payload names the assignment counts too.
+-- Both status lists are JSON arrays: sqlc.slice next to a repeated named argument binds the wrong values.
 -- name: AssignmentInUse :one
 SELECT CAST(EXISTS (SELECT 1 FROM homework_drafts d WHERE d.assignment_id = sqlc.arg(id))
     OR EXISTS (SELECT 1 FROM deliveries v WHERE v.assignment_id = sqlc.arg(id))
     OR EXISTS (SELECT 1 FROM works w WHERE w.assignment_id = sqlc.arg(id))
-    OR EXISTS (SELECT 1 FROM proposals p WHERE p.assignment_id = sqlc.arg(id)
-                                          AND p.status NOT IN (sqlc.slice('free_statuses'))) AS INTEGER) AS in_use;
+    OR EXISTS (SELECT 1 FROM proposals p
+               WHERE p.assignment_id = sqlc.arg(id)
+                 AND p.status NOT IN (SELECT value FROM json_each(CAST(sqlc.arg(free_statuses) AS TEXT))))
+    OR EXISTS (SELECT 1 FROM jobs j
+               WHERE j.type = sqlc.arg(draft_job_type)
+                 AND j.status IN (SELECT value FROM json_each(CAST(sqlc.arg(active_job_statuses) AS TEXT)))
+                 AND json_extract(j.payload, '$.assignment_id') = sqlc.arg(id)) AS INTEGER) AS in_use;
