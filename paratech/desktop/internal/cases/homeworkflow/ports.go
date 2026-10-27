@@ -41,17 +41,25 @@ type LLMClient interface {
 // AssignmentRepository stores assignments in the local database, the system of record (PRD sections 5.3 and 10,
 // AC-20). Implemented by the sqlite adapter.
 type AssignmentRepository interface {
-	// Get loads an assignment (PRD section 10). It returns an error wrapping shared.ErrNotFound if there is none.
+	// Get loads an assignment (PRD section 10), a deleted one too (ADR-0029: «Вернуть»; use cases hide it from
+	// readers). It returns an error wrapping shared.ErrNotFound if there is none.
 	Get(ctx context.Context, id shared.AssignmentID) (*assignment.Assignment, error)
 
 	// GetBySource loads the assignment made from item index of the extraction answer of transcript t, so that
-	// reprocessing updates it instead of adding a second one (PRD sections 9 and 7.3). It returns an error wrapping
-	// shared.ErrNotFound if there is none.
+	// reprocessing updates it instead of adding a second one (PRD sections 9 and 7.3). A deleted one is loaded too: it
+	// is the tombstone that reprocessing never revives (ADR-0029). It returns an error wrapping shared.ErrNotFound if
+	// there is none.
 	GetBySource(ctx context.Context, t shared.TranscriptID, index int) (*assignment.Assignment, error)
 
 	// ListByTranscript loads the assignments extracted from transcript t in the order of the extraction answer, so
-	// that reprocessing finds the ones a shorter answer no longer has (PRD section 10). None is an empty list.
+	// that reprocessing finds the ones a shorter answer no longer has (PRD section 10). Deleted ones are skipped
+	// (ADR-0029; reprocessing never withdraws them anyway). None is an empty list.
 	ListByTranscript(ctx context.Context, t shared.TranscriptID) ([]*assignment.Assignment, error)
+
+	// Busy reports whether something in progress uses assignment id, so that DeleteAssignment refuses it with
+	// assignment.ErrInUse (PRD section 10, ADR-0029): a delivery in PENDING (a scheduled one too), SENDING or UNKNOWN, a work in triage
+	// or writing, or an unfinished draft generation or writing job. Called inside Tx.Do it reads in that transaction.
+	Busy(ctx context.Context, id shared.AssignmentID) (bool, error)
 
 	// Delete removes an assignment reprocessing withdrew (PRD section 10, assignment.Superseded). It is a version
 	// compare-and-swap (ADR-0004(d)): a row that changed or is gone yields shared.ErrVersionConflict. An assignment
@@ -78,8 +86,8 @@ type AssignmentRepository interface {
 // AssignmentList lists the stored assignments for the homework screen (PRD section 10 step 1: select an assignment).
 // Implemented by the sqlite adapter. It is a port of its own so that the fakes of AssignmentRepository stay small.
 type AssignmentList interface {
-	// ListRecent returns at most limit assignments, newest first (by creation time; PRD section 10); none is an empty
-	// list. limit is at least 1.
+	// ListRecent returns at most limit assignments, newest first (by creation time; PRD section 10), deleted ones
+	// skipped (ADR-0029); none is an empty list. limit is at least 1.
 	ListRecent(ctx context.Context, limit int) ([]*assignment.Assignment, error)
 }
 
@@ -373,12 +381,12 @@ type MaterialLookup interface {
 // ListByTranscript for a transcript (PRD section 10, TASK-122). Implemented by the sqlite adapter. A port of its own
 // so that the fakes of AssignmentRepository stay small.
 type MaterialAssignments interface {
-	// GetByMaterialSource loads the assignment of item index of the extraction of material m (PRD section 10); none
-	// wraps shared.ErrNotFound.
+	// GetByMaterialSource loads the assignment of item index of the extraction of material m (PRD section 10), a
+	// deleted one too (the tombstone, ADR-0029); none wraps shared.ErrNotFound.
 	GetByMaterialSource(ctx context.Context, m shared.MaterialID, index int) (*assignment.Assignment, error)
 
-	// ListByMaterial loads the assignments extracted from material m in the order of the answer (PRD section 10);
-	// none is an empty list.
+	// ListByMaterial loads the assignments extracted from material m in the order of the answer (PRD section 10),
+	// deleted ones skipped; none is an empty list.
 	ListByMaterial(ctx context.Context, m shared.MaterialID) ([]*assignment.Assignment, error)
 }
 

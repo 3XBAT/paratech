@@ -10,6 +10,43 @@ import (
 	"database/sql"
 )
 
+const assignmentBusy = `-- name: AssignmentBusy :one
+SELECT CAST(EXISTS (SELECT 1 FROM deliveries v
+                    WHERE v.assignment_id = ?1
+                      AND v.status IN (SELECT value FROM json_each(CAST(?2 AS TEXT))))
+    OR EXISTS (SELECT 1 FROM works w
+               WHERE w.assignment_id = ?1
+                 AND w.status IN (SELECT value FROM json_each(CAST(?3 AS TEXT))))
+    OR EXISTS (SELECT 1 FROM jobs j
+               WHERE j.type IN (SELECT value FROM json_each(CAST(?4 AS TEXT)))
+                 AND j.status IN (SELECT value FROM json_each(CAST(?5 AS TEXT)))
+                 AND json_extract(j.payload, '$.assignment_id') = ?1) AS INTEGER) AS busy
+`
+
+type AssignmentBusyParams struct {
+	ID                string
+	DeliveryStatuses  string
+	WorkStatuses      string
+	JobTypes          string
+	ActiveJobStatuses string
+}
+
+// What in progress keeps the soft delete of an assignment from going through (ADR-0029): a delivery that may still go out or
+// may have gone out unseen, a work being triaged or written, or an unfinished job (draft generation, writing) whose
+// payload names it. The caller passes the status and type lists as JSON arrays (see AssignmentRepository.Busy).
+func (q *Queries) AssignmentBusy(ctx context.Context, arg AssignmentBusyParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, assignmentBusy,
+		arg.ID,
+		arg.DeliveryStatuses,
+		arg.WorkStatuses,
+		arg.JobTypes,
+		arg.ActiveJobStatuses,
+	)
+	var busy int64
+	err := row.Scan(&busy)
+	return busy, err
+}
+
 const assignmentInUse = `-- name: AssignmentInUse :one
 SELECT CAST(EXISTS (SELECT 1 FROM homework_drafts d WHERE d.assignment_id = ?1)
     OR EXISTS (SELECT 1 FROM deliveries v WHERE v.assignment_id = ?1)
@@ -69,12 +106,13 @@ func (q *Queries) DeleteAssignment(ctx context.Context, arg DeleteAssignmentPara
 
 const getAssignment = `-- name: GetAssignment :one
 
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id FROM assignments WHERE id = ?1
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments WHERE id = ?1
 `
 
 // Assignments, the local homework (PRD section 10) with the optimistic-concurrency protocol of ADR-0004(d). The
 // deadline is due_at. Extracted rows are found again by (transcript_id, source_index) when a transcript is
-// reprocessed (TASK-042).
+// reprocessed (TASK-042). A deleted row (deleted_at, ADR-0029) is loaded by id and by source, so that the restore and the
+// tombstone of reprocessing see it, and skipped by every list.
 func (q *Queries) GetAssignment(ctx context.Context, id string) (Assignment, error) {
 	row := q.db.QueryRowContext(ctx, getAssignment, id)
 	var i Assignment
@@ -96,12 +134,13 @@ func (q *Queries) GetAssignment(ctx context.Context, id string) (Assignment, err
 		&i.UserSubject,
 		&i.UserTeacher,
 		&i.MaterialID,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const getAssignmentByMaterialSource = `-- name: GetAssignmentByMaterialSource :one
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id FROM assignments WHERE material_id = ?1 AND source_index = ?2
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments WHERE material_id = ?1 AND source_index = ?2
 `
 
 type GetAssignmentByMaterialSourceParams struct {
@@ -131,12 +170,13 @@ func (q *Queries) GetAssignmentByMaterialSource(ctx context.Context, arg GetAssi
 		&i.UserSubject,
 		&i.UserTeacher,
 		&i.MaterialID,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const getAssignmentBySource = `-- name: GetAssignmentBySource :one
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id FROM assignments WHERE transcript_id = ?1 AND source_index = ?2
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments WHERE transcript_id = ?1 AND source_index = ?2
 `
 
 type GetAssignmentBySourceParams struct {
@@ -165,6 +205,7 @@ func (q *Queries) GetAssignmentBySource(ctx context.Context, arg GetAssignmentBy
 		&i.UserSubject,
 		&i.UserTeacher,
 		&i.MaterialID,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -172,11 +213,11 @@ func (q *Queries) GetAssignmentBySource(ctx context.Context, arg GetAssignmentBy
 const insertAssignment = `-- name: InsertAssignment :exec
 INSERT INTO assignments (id, lesson_id, transcript_id, material_id, title, description, due_at, user_edited, source_index,
                          prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, version, created_at,
-                         updated_at)
+                         updated_at, deleted_at)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6,
         ?7, ?8, ?9, ?10,
         ?11, ?12, ?13, ?14, 1,
-        ?15, ?16)
+        ?15, ?16, ?17)
 `
 
 type InsertAssignmentParams struct {
@@ -196,6 +237,7 @@ type InsertAssignmentParams struct {
 	UserTeacher   string
 	CreatedAt     int64
 	UpdatedAt     int64
+	DeletedAt     sql.NullInt64
 }
 
 // A never-stored assignment (version 0) is inserted with version 1.
@@ -217,12 +259,15 @@ func (q *Queries) InsertAssignment(ctx context.Context, arg InsertAssignmentPara
 		arg.UserTeacher,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.DeletedAt,
 	)
 	return err
 }
 
 const listAssignmentsByMaterial = `-- name: ListAssignmentsByMaterial :many
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id FROM assignments WHERE material_id = ?1 ORDER BY source_index, id
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments
+WHERE material_id = ?1 AND deleted_at IS NULL
+ORDER BY source_index, id
 `
 
 func (q *Queries) ListAssignmentsByMaterial(ctx context.Context, materialID sql.NullString) ([]Assignment, error) {
@@ -252,6 +297,7 @@ func (q *Queries) ListAssignmentsByMaterial(ctx context.Context, materialID sql.
 			&i.UserSubject,
 			&i.UserTeacher,
 			&i.MaterialID,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -267,7 +313,9 @@ func (q *Queries) ListAssignmentsByMaterial(ctx context.Context, materialID sql.
 }
 
 const listAssignmentsByTranscript = `-- name: ListAssignmentsByTranscript :many
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id FROM assignments WHERE transcript_id = ?1 ORDER BY source_index, id
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments
+WHERE transcript_id = ?1 AND deleted_at IS NULL
+ORDER BY source_index, id
 `
 
 func (q *Queries) ListAssignmentsByTranscript(ctx context.Context, transcriptID sql.NullString) ([]Assignment, error) {
@@ -297,6 +345,7 @@ func (q *Queries) ListAssignmentsByTranscript(ctx context.Context, transcriptID 
 			&i.UserSubject,
 			&i.UserTeacher,
 			&i.MaterialID,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -312,7 +361,10 @@ func (q *Queries) ListAssignmentsByTranscript(ctx context.Context, transcriptID 
 }
 
 const listRecentAssignments = `-- name: ListRecentAssignments :many
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id FROM assignments ORDER BY created_at DESC, source_index, id LIMIT ?1
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments
+WHERE deleted_at IS NULL
+ORDER BY created_at DESC, source_index, id
+LIMIT ?1
 `
 
 // The newest assignments for the homework screen; the items of one extraction keep the order of the answer.
@@ -343,6 +395,7 @@ func (q *Queries) ListRecentAssignments(ctx context.Context, maxRows int64) ([]A
 			&i.UserSubject,
 			&i.UserTeacher,
 			&i.MaterialID,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -368,9 +421,10 @@ SET title          = ?1,
     hint_teacher   = ?7,
     user_subject   = ?8,
     user_teacher   = ?9,
+    deleted_at     = ?10,
     version        = version + 1,
-    updated_at     = ?10
-WHERE id = ?11 AND version = ?12
+    updated_at     = ?11
+WHERE id = ?12 AND version = ?13
 `
 
 type UpdateAssignmentParams struct {
@@ -383,6 +437,7 @@ type UpdateAssignmentParams struct {
 	HintTeacher     string
 	UserSubject     string
 	UserTeacher     string
+	DeletedAt       sql.NullInt64
 	UpdatedAt       int64
 	ID              string
 	ExpectedVersion int64
@@ -401,6 +456,7 @@ func (q *Queries) UpdateAssignment(ctx context.Context, arg UpdateAssignmentPara
 		arg.HintTeacher,
 		arg.UserSubject,
 		arg.UserTeacher,
+		arg.DeletedAt,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.ExpectedVersion,

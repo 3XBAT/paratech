@@ -853,3 +853,7 @@ CREATE INDEX idx_note_parts_material ON note_parts (material_id);
 -- typed by the student, not a secret; never sent to the agent or the Hub (ADR-0022).
 ALTER TABLE subjects ADD COLUMN teacher_name TEXT NOT NULL DEFAULT '' CHECK (length(teacher_name) <= 200);
 ALTER TABLE subjects ADD COLUMN teacher_email TEXT NOT NULL DEFAULT '' CHECK (length(teacher_email) <= 254 AND (teacher_email = '') = (teacher_name = ''));
+
+-- Migration 0039.
+-- assignments: when the student deleted the assignment (ms); NULL while it is not deleted.
+ALTER TABLE assignments ADD COLUMN deleted_at INTEGER;

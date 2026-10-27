@@ -112,6 +112,11 @@ func (r assignmentRepo) DeleteUnused(context.Context, *assignment.Assignment) er
 	return nil
 }
 
+func (r assignmentRepo) Busy(context.Context, shared.AssignmentID) (bool, error) {
+	r.s.t.Error("the proposal pipeline must not delete assignments")
+	return false, nil
+}
+
 func (r assignmentRepo) Save(context.Context, *assignment.Assignment) error {
 	r.s.t.Error("the proposal pipeline must not write assignments")
 	return nil

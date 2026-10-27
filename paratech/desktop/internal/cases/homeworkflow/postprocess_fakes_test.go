@@ -49,6 +49,8 @@ type ppStore struct {
 	failNextDelete error                        // returned once by the next assignment delete
 	beforeDelete   func()                       // run once before the next assignment delete, without the lock
 	inUse          map[shared.AssignmentID]bool // assignments a delivery references
+	busy           map[shared.AssignmentID]bool // assignments something in progress uses (Busy)
+	busyErr        error                        // returned by every Busy when set
 	readErr        error                        // returned by every transcript Get when set
 	listErr        error                        // returned by every lesson ListStartingBetween when set
 	listCalls      int                          // calls of lesson ListStartingBetween
@@ -62,7 +64,7 @@ func newPPStore() *ppStore {
 		lessons: map[shared.LessonID]*lesson.Lesson{}, summaries: map[summary.ID]summary.State{},
 		lectures:    map[lecturetext.ID]lecturetext.State{},
 		assignments: map[shared.AssignmentID]assignment.State{}, jobs: map[string]*job.Job{},
-		inUse: map[shared.AssignmentID]bool{},
+		inUse: map[shared.AssignmentID]bool{}, busy: map[shared.AssignmentID]bool{},
 	}
 }
 
@@ -235,6 +237,9 @@ func (r ppAssignments) GetBySource(_ context.Context, t shared.TranscriptID, ind
 func (r ppAssignments) ListByTranscript(_ context.Context, t shared.TranscriptID) ([]*assignment.Assignment, error) {
 	out := []*assignment.Assignment{}
 	for _, st := range r.s.assignmentsOf(t) {
+		if !st.DeletedAt.IsZero() { // skipped, as the sqlite adapter does
+			continue
+		}
 		a, err := assignment.Restore(st)
 		if err != nil {
 			return nil, err
@@ -260,7 +265,7 @@ func (r ppAssignments) ListByMaterial(_ context.Context, m shared.MaterialID) ([
 	defer r.s.mu.Unlock()
 	var states []assignment.State
 	for _, st := range r.s.assignments {
-		if st.Material == m && st.SourceIndex >= 0 {
+		if st.Material == m && st.SourceIndex >= 0 && st.DeletedAt.IsZero() {
 			states = append(states, st)
 		}
 	}
@@ -312,6 +317,16 @@ func (r ppAssignments) DeleteUnused(_ context.Context, a *assignment.Assignment)
 	}
 	delete(r.s.assignments, a.ID())
 	return nil
+}
+
+// Busy reports the assignments a test marked busy (something in progress uses them).
+func (r ppAssignments) Busy(_ context.Context, id shared.AssignmentID) (bool, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if r.s.busyErr != nil {
+		return false, r.s.busyErr
+	}
+	return r.s.busy[id], nil
 }
 
 func (r ppAssignments) Save(_ context.Context, a *assignment.Assignment) error {

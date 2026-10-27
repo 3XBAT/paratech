@@ -166,7 +166,8 @@ func (s *Service) ProposeSend(ctx context.Context, a shared.AssignmentID, format
 func (s *Service) facts(ctx context.Context, p *proposal.Proposal) (proposal.Facts, string, error) {
 	var f proposal.Facts
 
-	switch a, err := s.assignments.Get(ctx, p.AssignmentID()); {
+	// A deleted assignment is unknown to a proposal, as to every reader (ADR-0029).
+	switch a, err := liveAssignment(ctx, s.assignments, p.AssignmentID()); {
 	case err == nil:
 		f.AssignmentExists = true
 		f.AssignmentTitle = a.Details().Title() // the export heading comes from the stored assignment, not the model

@@ -141,7 +141,7 @@ func (s *Drafts) GenerateFrom(ctx context.Context, a shared.AssignmentID, base i
 const latestBase = -1
 
 func (s *Drafts) generate(ctx context.Context, a shared.AssignmentID, base int, instruction string) (GenerateResult, error) {
-	if _, err := s.assignments.Get(ctx, a); err != nil {
+	if _, err := liveAssignment(ctx, s.assignments, a); err != nil {
 		return GenerateResult{}, fmt.Errorf("%s: %w", opGenerate, err)
 	}
 	d, err := s.load(ctx, a)

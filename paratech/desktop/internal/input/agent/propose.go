@@ -10,6 +10,7 @@ import (
 	"paratech/desktop/internal/cases/recordingdelete"
 	"paratech/desktop/internal/domain/agent/action"
 	"paratech/desktop/internal/domain/agent/values"
+	"paratech/desktop/internal/domain/coursework/assignment"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -166,6 +167,8 @@ func rejected(r proposal.RejectReason) values.Refusal {
 // proposalRefusal maps an error of a proposal use case to the enum the planner gets (ADR-0022: never the text).
 func (t tools) proposalRefusal(ctx context.Context, tool values.Tool, err error) values.Refusal {
 	switch {
+	case errors.Is(err, assignment.ErrDeleted): // hidden from the agent as if it never was (ADR-0029)
+		return values.RefuseUnknownID
 	case errors.Is(err, shared.ErrNotFound), errors.Is(err, recordingdelete.ErrNotFound):
 		return values.RefuseNotFound
 	case errors.Is(err, homeworkflow.ErrNoDue):

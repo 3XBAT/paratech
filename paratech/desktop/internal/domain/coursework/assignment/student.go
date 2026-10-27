@@ -97,9 +97,10 @@ func StudentDue(date, timeOfDay string, loc *time.Location) (time.Time, error) {
 func (a *Assignment) ByStudent() bool { return a.source == noSource }
 
 // SameByStudent reports whether a and o are both assignments the student added with the same lesson, details and
-// subject, so that adding o again is a repeat of a (ADR-0029: idempotency by the caller's ID).
+// subject, so that adding o again is a repeat of a (ADR-0029: idempotency by the caller's ID). A deleted one is never
+// repeated: adding it again would bring it back.
 func (a *Assignment) SameByStudent(o *Assignment) bool {
-	return a.ByStudent() && o.ByStudent() && a.lesson == o.lesson && a.details.Equal(o.details) &&
+	return a.ByStudent() && o.ByStudent() && !a.Deleted() && !o.Deleted() && a.lesson == o.lesson && a.details.Equal(o.details) &&
 		a.correction == o.correction
 }
 

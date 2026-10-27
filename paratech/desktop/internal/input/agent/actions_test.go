@@ -236,6 +236,13 @@ func TestUndoRefusedAfterTheStudentsChange(t *testing.T) {
 					t.Fatal("the student's due date was overwritten")
 				}
 			}},
+		{"due: assignment deleted by the student", values.ToolEditDue, `{"assignment":"a1","due":"2026-10-30"}`,
+			func(w *world) { w.assignments.deleted = map[shared.AssignmentID]bool{"a1": true} },
+			func(t *testing.T, w *world) {
+				if w.assignments.views["a1"].Due.Day() != 30 {
+					t.Fatal("Undo changed a deleted assignment")
+				}
+			}},
 		{"lesson info: corrected by the student", values.ToolSetLessonInfo, `{"recording":"r1","subject":"s1","kind":"seminar"}`,
 			func(w *world) { _, _ = w.lessons.SetLessonInfo(context.Background(), "r1", "Физика", "lab") },
 			func(t *testing.T, w *world) {
@@ -473,6 +480,20 @@ func TestActionRefusals(t *testing.T) {
 		if strings.Contains(r.out.Result.ResultJSON, "library") {
 			t.Errorf("an error text reached the planner: %s", r.out.Result.ResultJSON)
 		}
+	}
+}
+
+// An assignment the student deleted is unknown to the agent (ADR-0029): edit_due naming it is refused as unknown_id and
+// changes nothing.
+func TestDeletedAssignmentIsAnUnknownID(t *testing.T) {
+	w := newWorld(t)
+	w.assignments.deleted = map[shared.AssignmentID]bool{"a1": true}
+	r, e := act(t, w, writeCall(t, "c1", values.ToolEditDue, `{"assignment":"a1","due":"2026-10-30"}`))
+	if !r.out.Result.IsError || r.out.Result.ResultJSON != `{"error":"`+string(values.RefuseUnknownID)+`"}` {
+		t.Fatalf("result = %s, want unknown_id", r.out.Result.ResultJSON)
+	}
+	if e.Status != "" || w.assignments.views["a1"].Version != 3 {
+		t.Fatalf("journal %q, version %d: the call ran", e.Status, w.assignments.views["a1"].Version)
 	}
 }
 
