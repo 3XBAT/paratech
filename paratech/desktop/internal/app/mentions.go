@@ -17,9 +17,15 @@ import (
 // material not removed), a lesson in the schedule (not deleted), an assignment not deleted. A malformed or missing
 // ID, or another kind, does not exist.
 type mentionObjects struct {
-	subjects    interface{ Subjects(ctx context.Context) ([]*subject.Subject, error) }
-	materials   interface{ Material(ctx context.Context, id shared.MaterialID) (*material.Material, error) }
-	lessons     interface{ Get(ctx context.Context, id shared.LessonID) (*lesson.Lesson, error) }
+	subjects interface {
+		Subjects(ctx context.Context) ([]*subject.Subject, error)
+	}
+	materials interface {
+		Material(ctx context.Context, id shared.MaterialID) (*material.Material, error)
+	}
+	lessons interface {
+		Get(ctx context.Context, id shared.LessonID) (*lesson.Lesson, error)
+	}
 	assignments interface {
 		Assignment(ctx context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error)
 	}

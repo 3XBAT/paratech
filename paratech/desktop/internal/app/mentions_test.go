@@ -24,7 +24,9 @@ type mentionLibrary struct {
 	err       error
 }
 
-func (l mentionLibrary) Subjects(context.Context) ([]*subject.Subject, error) { return l.subjects, l.err }
+func (l mentionLibrary) Subjects(context.Context) ([]*subject.Subject, error) {
+	return l.subjects, l.err
+}
 
 // Material answers as library.Service does: a malformed id, a missing one, a store failure.
 func (l mentionLibrary) Material(_ context.Context, id shared.MaterialID) (*material.Material, error) {

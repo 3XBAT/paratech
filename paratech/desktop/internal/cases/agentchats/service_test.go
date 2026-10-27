@@ -87,7 +87,7 @@ func TestRename(t *testing.T) {
 	}{
 		{"ok", "c1", "  Матан к экзамену  ", false, nil},
 		{"empty title", "c1", "   ", false, thread.ErrInvalidTitle},
-		{"bidi", "c1", "abc‮def", false, thread.ErrInvalidTitle},
+		{"bidi", "c1", "abc\u202edef", false, thread.ErrInvalidTitle},
 		{"running request", "c1", "Матан", true, ErrBusy},
 		{"missing", "c404", "Матан", false, shared.ErrNotFound},
 		{"malformed id", "a/b", "Матан", false, ErrInvalidInput},
