@@ -252,7 +252,7 @@ func TestMigrationToVersion8DropsCompletionNotices(t *testing.T) {
 }
 
 // materialImagesVersion is the migration that rebuilds materials for photos (TASK-165), the newest one.
-const materialImagesVersion = 40
+const materialImagesVersion = 42
 
 // The rebuild of materials keeps every row and every reference to them (lesson links, note parts), leaves foreign
 // keys on, takes photos only with 'no_text', and goes back down dropping the photos.

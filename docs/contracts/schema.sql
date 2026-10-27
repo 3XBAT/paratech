@@ -541,7 +541,7 @@ CREATE TABLE subject_folders (
 -- materials/<sha256> in the artifact store): uploading the same bytes again returns this row. original_name is shown
 -- only. NULL subject and folder: «Входящие». A subject or folder that holds a file (active or removed) cannot be
 -- deleted (RESTRICT): a removed file still needs them to be restored. Photos ('jpeg', 'png', rebuilt by migration
--- 0040, TASK-165) are pages of a note without text: text_status 'no_text', and only they have it.
+-- 0042, TASK-165) are pages of a note without text: text_status 'no_text', and only they have it.
 -- ---------------------------------------------------------------------------------------------------------------
 CREATE TABLE materials (
     id            TEXT    NOT NULL PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
