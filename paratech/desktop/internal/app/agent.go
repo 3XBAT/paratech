@@ -78,14 +78,14 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	}
 	// «Повторить» of a finished request asks the journal whether the request left effects (ADR-0026); agentturn does
 	// not import agentjournal (ARCH-20). Mentions are checked against the library, the schedule and the assignments.
-	mentions := mentionObjects{
+	c.mentions = mentionObjects{
 		subjects: reads.library, materials: reads.library, lessons: sqlite.NewLessonRepository(c.db),
 		assignments: reads.assignments,
 	}
 	c.agent, err = agentturn.New(agentturn.Deps{
 		Model: model, Threads: sqlite.NewAgentThreadRepository(c.db), History: sqlite.NewAgentHistory(c.db, e.clock),
 		Subjects: subjects, Facts: facts, Tx: c.db, Clock: e.local, IDs: e.ids, Progress: progress, Effects: c.journal,
-		Mentions: mentions, Log: log,
+		Mentions: c.mentions, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	libvalues "paratech/desktop/internal/domain/library/values"
 	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
+	"paratech/desktop/internal/input/wails"
 )
 
 type mentionLibrary struct {
@@ -140,5 +142,39 @@ func TestMentionObjectsExist(t *testing.T) {
 		if _, err := broken.Exists(t.Context(), ref); !errors.Is(err, boom) {
 			t.Errorf("%s with a failing store = %v", kind, err)
 		}
+	}
+}
+
+// The «@» search of the panel is wired to the local database: a subject and an assignment are found by name, and a
+// deleted assignment is not.
+func TestAgentMentionsWiring(t *testing.T) {
+	ctx := context.Background()
+	a, _ := newTestAppWith(t, t.TempDir())
+	ui := startCore(t, a)
+	panel := wails.NewAgentService(ui.Agent, slog.New(slog.DiscardHandler))
+
+	sub, err := ui.Library.CreateSubject(ctx, library.NewSubject{Name: "Матанализ"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := a.core.proposals.CreateAssignment(ctx, homeworkflow.NewAssignment{
+		ID: "mention-test-1", Title: "Матанализ: ряды", Subject: sub.ID(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := panel.MentionCandidates(ctx, "МАТАН")
+	if got.Problem != "" || len(got.Candidates) != 2 {
+		t.Fatalf("MentionCandidates = %+v", got)
+	}
+	if _, err := a.core.proposals.DeleteAssignment(ctx, v.ID, v.Version); err != nil {
+		t.Fatal(err)
+	}
+	got = panel.MentionCandidates(ctx, "матан")
+	if got.Problem != "" || len(got.Candidates) != 1 || got.Candidates[0].Kind != "subject" || got.Candidates[0].ID != string(sub.ID()) {
+		t.Fatalf("after the delete = %+v", got)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
