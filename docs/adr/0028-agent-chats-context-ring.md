@@ -1,6 +1,6 @@
 # ADR-0028: Agent chats and the context ring
 
-- **Status:** Accepted (owner 2026-10-27 «делаем»); Open 1–7 answered by the owner 2026-10-27 (below); Open 8–9 wait
+- **Status:** Accepted (owner 2026-10-27 «делаем»); Open 1–9 answered by the owner 2026-10-27 (below)
 - **Date:** 2026-10-26, reworked 2026-10-27
 - **Source:** owner 2026-10-26 (chats like Cursor, a ring near the input) and answers of 2026-10-27; research
   `paratech-ops/research/agent-chats-2026-10.md`; ADR-0021 («Threads per subject», superseded here), ADR-0022,
@@ -74,7 +74,7 @@ chat can be continued; a restart from an earlier message after a warning; the ri
   `Compact(through, text, now)`: `Through` only grows and stays below the current request). Columns on
   `agent_threads`. The text is **model output → untrusted data**: checked like a reply (printable plus line breaks, no
   control or bidi, ≤ 4000 runes), never HTML, never shown as instructions, never a source of provenance IDs, never
-  triggers any action (hard rule 3). Not shown to the student (Open 8).
+  triggers any action (hard rule 3). Never shown to the student (Open 8 → а): no binding returns it to the page.
 - **Into the window**: a new history turn `AgentTurn.history_summary` (oneof field 5, ≤ 8 KiB, only as the first turn
   and followed by a `student_text`, accepted for catalog ≥ 9). `Window` = summary turn + pairs after `Through`; `Fill`
   counts the summary as one turn and its bytes. Between compactions the history prefix only grows, so it stays cached;
@@ -92,8 +92,8 @@ On an earlier message N of the chat the student picks «Начать занов�
   context **and from the view**. Only when the current request is final. Nothing is deleted; actions and journal lines
   stay. If N ≤ `summary.Through`, the summary is cleared (the next compaction rebuilds it from the kept texts).
 - **«Форк»** (like Claude): a **new** chat with copies of requests 1…N−1 (student text, mentions, scope, frozen reply
-  line; no steps, seals, actions or provenance), the summary only if `Through` < N, titled «<title> (fork)» (title cut
-  so the whole is ≤ 80 runes). The text of N goes into the input of the new chat, which opens. The original chat stays
+  line; no steps, seals, actions or provenance), the summary only if `Through` < N, titled «<title> (fork)» in English
+  (Open 9 → а; title cut so the whole is ≤ 80 runes). The text of N goes into the input of the new chat, which opens. The original chat stays
   as it is. Allowed at any time (the source is only read).
 
 ### What «context used» means (Open 1 → а)
@@ -135,7 +135,5 @@ On an earlier message N of the chat the student picks «Начать занов�
 ## Open (owner)
 Answered 2026-10-27: 1 — (а) the share of the conversation the agent still remembers; 2 — (б) the name at mention
 time; 3 — two choices «Скрыть» / «Форк»; 4 — (б) automatic summary with a banner; 5 — (а) only @-mentions; 6 — (в)
-texts forever, technical details 90 days; 7 — (а) earlier messages text only.
-
-8. Показывать ли студенту текст сводки ранних сообщений? (а) не показывать — сводка только для агента; (б) свёрнутая строка «Сводка ранних сообщений» в начале чата, раскрывается по клику.
-9. Название форка: владелец написал «<название> (fork)», а тексты интерфейса у нас по-русски. (а) оставить «(fork)»; (б) «(форк)»; (в) «(копия)». До ответа в коде — «(fork)», как сказал владелец.
+texts forever, technical details 90 days; 7 — (а) earlier messages text only; 8 — (а) the summary is never shown to
+the student; 9 — (а) the fork title is «<title> (fork)» in English.
