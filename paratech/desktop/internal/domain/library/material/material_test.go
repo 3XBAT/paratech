@@ -42,6 +42,7 @@ func TestDetectType(t *testing.T) {
 		{"pdf", []byte("%PDF-1.7\n..."), TypePDF, nil},
 		{"utf-8 text", []byte("Лекция 1. Введение\n"), TypeTXT, nil},
 		{"text with BOM", []byte("\xef\xbb\xbfПривет"), TypeTXT, nil},
+		{"obsidian markdown", []byte("---\ntags: [лекция]\n---\n# Тема\n\n- [[Ссылка]] и **жирный**\n"), TypeTXT, nil},
 		{"empty", nil, "", ErrEmpty},
 		{"only a BOM", []byte("\xef\xbb\xbf"), "", ErrUnsupportedType},
 		{"other zip", zipWith(t, "readme.txt"), "", ErrUnsupportedType},
