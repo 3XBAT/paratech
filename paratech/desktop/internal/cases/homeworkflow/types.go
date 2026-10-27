@@ -66,6 +66,11 @@ type Deps struct {
 
 	// Optional (TASK-215): the subject of an assignment the student adds; without it a subject is ErrInvalidConfig.
 	Subjects SubjectNames
+
+	// Optional (TASK-229): DeleteAssignment queues the removal of the Google deadline event and asks for a sync,
+	// RestoreAssignment forgets a removal still waiting. Without Removals the event stays in Google.
+	Removals DeadlineRemovals
+	Sync     CalendarSyncRequester
 }
 
 // ProposalView is a proposal as the confirmation dialog shows it (PRD section 13.3, AC-14): what will happen, to which
@@ -190,6 +195,9 @@ type AssignmentView struct {
 	CorrectedTeacher string
 	// MaterialID is the library material the assignment was found in; empty for one from a lesson (TASK-122).
 	MaterialID shared.MaterialID
+	// Deleted is set only in the view DeleteAssignment returns, for «Задание удалено» with «Вернуть» (ADR-0029); other
+	// readers never show a deleted assignment.
+	Deleted bool
 }
 
 func assignmentViewOf(a *assignment.Assignment, l values.LessonLabel) AssignmentView {
@@ -200,6 +208,7 @@ func assignmentViewOf(a *assignment.Assignment, l values.LessonLabel) Assignment
 		Subject: l.Subject(), SubjectSource: l.SubjectSource(), Kind: l.Kind(), Teacher: l.Teacher(),
 		TeacherSource: l.TeacherSource(), LessonDate: l.Date(),
 		CorrectedSubject: a.Correction().Subject(), CorrectedTeacher: a.Correction().Teacher(), MaterialID: a.MaterialID(),
+		Deleted: a.Deleted(),
 	}
 }
 

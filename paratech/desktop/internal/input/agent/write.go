@@ -172,6 +172,10 @@ func (t tools) replay(ctx context.Context, c agentturn.Call, e agentjournal.Entr
 
 // refusalOf maps an error of an action's use case to the enum the planner gets (ADR-0022: never the text).
 func (t tools) refusalOf(ctx context.Context, tool values.Tool, err error) values.Refusal {
+	// An assignment the student deleted is hidden from the agent as if it never was (ADR-0029).
+	if errors.Is(err, assignment.ErrDeleted) {
+		return values.RefuseUnknownID
+	}
 	// The subject or lesson of a new assignment the use case does not know: an ID that passed provenance but is gone.
 	if tool == values.ToolCreateAssignment &&
 		(errors.Is(err, homeworkflow.ErrSubjectNotFound) || errors.Is(err, shared.ErrNotFound)) {

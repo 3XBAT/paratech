@@ -38,12 +38,13 @@ type deadlineRequest struct {
 // file. A proposal of the same deadline that already waits for «Да» is reused; the check is not atomic, so two
 // concurrent calls may store two, which is harmless as the calendar upserts one event per assignment. It takes the
 // Propose path (strict parse, validation against local state); the result is VALIDATED or REJECTED (due out of
-// range). An assignment without a deadline yields ErrNoDue, a missing one shared.ErrNotFound. No side effect happens.
+// range). An assignment without a deadline yields ErrNoDue, a missing or deleted one shared.ErrNotFound. No side
+// effect happens.
 func (s *Service) ProposeDeadline(ctx context.Context, a shared.AssignmentID) (ProposalView, error) {
 	if err := a.Validate(); err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opProposeDeadline, err)
 	}
-	asg, err := s.assignments.Get(ctx, a)
+	asg, err := liveAssignment(ctx, s.assignments, a)
 	if err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opProposeDeadline, err)
 	}
@@ -80,8 +81,7 @@ func (s *Service) ProposeDeadline(ctx context.Context, a shared.AssignmentID) (P
 // and nothing is stored. The recipient comes from the settings and the attachment is pinned by its digest, as for
 // ProposeSend; a send of the same content that already waits for «Да» is returned instead of a second one, so a
 // replayed agent call never makes two sends. A REJECTED proposal (no recipient, no export) is stored and returned. A
-// missing assignment, draft or
-// version wraps shared.ErrNotFound. No side effect happens.
+// missing or deleted assignment, a missing draft or version wraps shared.ErrNotFound. No side effect happens.
 func (s *Service) ProposeEmailOfVersion(ctx context.Context, a shared.AssignmentID, n int) (ProposalView, error) {
 	if s.drafts == nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opProposeVersion, ErrNoDrafts)
@@ -89,7 +89,7 @@ func (s *Service) ProposeEmailOfVersion(ctx context.Context, a shared.Assignment
 	if err := a.Validate(); err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opProposeVersion, err)
 	}
-	if _, err := s.assignments.Get(ctx, a); err != nil {
+	if _, err := liveAssignment(ctx, s.assignments, a); err != nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opProposeVersion, err)
 	}
 	d, err := s.drafts.Get(ctx, a)

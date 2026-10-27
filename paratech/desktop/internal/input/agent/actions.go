@@ -15,6 +15,7 @@ import (
 	"paratech/desktop/internal/domain/agent/action"
 	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/values"
+	"paratech/desktop/internal/domain/coursework/assignment"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/library/material"
@@ -588,6 +589,9 @@ func (a *Actions) Check(ctx context.Context, c action.Compensation) (action.Targ
 		return action.Target{Version: lessonVersion(l), Compensated: s == v.OldSubject && k == v.OldKind}, nil
 	case action.RestoreDue:
 		av, err := a.assignments.Assignment(ctx, shared.AssignmentID(v.Assignment.ID()))
+		if errors.Is(err, assignment.ErrDeleted) {
+			return deletedTarget, nil
+		}
 		if err != nil {
 			return action.Target{}, gone(err)
 		}
@@ -840,6 +844,10 @@ func absent(err error) (action.Observation, error) {
 	}
 	return action.Observation{}, err
 }
+
+// deletedTarget is the target of an Undo on an assignment the student deleted (ADR-0029): never at the version the
+// action recorded (stored versions start at 1), so Undo is refused as changed instead of counting as done.
+var deletedTarget = action.Target{}
 
 // gone maps a "not found" of a use case to shared.ErrNotFound.
 func gone(err error) error {

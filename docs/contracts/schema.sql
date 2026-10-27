@@ -570,7 +570,7 @@ CREATE TABLE material_lessons (
 );
 CREATE INDEX idx_material_lessons_lesson ON material_lessons (lesson_id);
 
--- agent_threads (migration 0022, rebuilt by 0039): one row per agent chat (ADR-0028), not tied to a subject: the
+-- agent_threads (migration 0022, rebuilt by 0040): one row per agent chat (ADR-0028), not tied to a subject: the
 -- subject belongs to the scope of each request. Aggregate agent/thread; its current request is the agent_turns row
 -- number = turns. title is thread.Title (1..80 characters, «Новый чат» until the first text); archived_at is set while
 -- the chat is in «Архив» (never deleted: journal lines reference it); last_active_at is when its last request started
@@ -595,9 +595,9 @@ CREATE INDEX idx_agent_threads_active ON agent_threads (archived_at, last_active
 -- ---------------------------------------------------------------------------------------------------------------
 -- agent_turns: the requests of a thread, written with the thread (part of its aggregate, no version of its own).
 -- Budget counters, the plan (plan_steps JSON), the calls of the last step that wait for results and the ids created
--- by approved create steps. planner_input counts the planner input of the request. mentions (0039) is the JSON array
+-- by approved create steps. planner_input counts the planner input of the request. mentions (0040) is the JSON array
 -- of the {"kind","id","label"} the student mentioned (values.Mention, at most 8; the label is display only, never sent).
--- dropped_by (0039) is the number of the later request that restarted the chat from an earlier one (0: not dropped);
+-- dropped_by (0040) is the number of the later request that restarted the chat from an earlier one (0: not dropped);
 -- a dropped request stays stored but is no longer read into the planner's history.
 -- ---------------------------------------------------------------------------------------------------------------
 CREATE TABLE agent_turns (
@@ -648,7 +648,7 @@ CREATE INDEX idx_agent_steps_created ON agent_steps (created_at);
 -- target_version the version of the target right after the action. proposal is '<kind>:<id>' of a PROPOSED entry.
 -- One entry per call of a request. intent (migration 0023) is the JSON object {"target","before","prior","name"} of
 -- action.Intent (NULL: none); undo_refusal is why an UNDO_REFUSED entry was refused. The journal of the panel lists
--- entries by created_at, then by rowid (insert order; 0039 kept the rowids).
+-- entries by created_at, then by rowid (insert order; 0040 kept the rowids).
 -- ---------------------------------------------------------------------------------------------------------------
 CREATE TABLE agent_actions (
     id             TEXT    PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
@@ -863,3 +863,7 @@ CREATE INDEX idx_note_parts_material ON note_parts (material_id);
 -- typed by the student, not a secret; never sent to the agent or the Hub (ADR-0022).
 ALTER TABLE subjects ADD COLUMN teacher_name TEXT NOT NULL DEFAULT '' CHECK (length(teacher_name) <= 200);
 ALTER TABLE subjects ADD COLUMN teacher_email TEXT NOT NULL DEFAULT '' CHECK (length(teacher_email) <= 254 AND (teacher_email = '') = (teacher_name = ''));
+
+-- Migration 0039.
+-- assignments: when the student deleted the assignment (ms); NULL while it is not deleted.
+ALTER TABLE assignments ADD COLUMN deleted_at INTEGER;

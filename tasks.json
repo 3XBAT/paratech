@@ -4871,7 +4871,7 @@
                 "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-229",
@@ -4894,7 +4894,7 @@
             "dependencies": [
                 "TASK-228"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-230",
@@ -5050,7 +5050,7 @@
             "dependencies": [
                 "TASK-235"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-237",

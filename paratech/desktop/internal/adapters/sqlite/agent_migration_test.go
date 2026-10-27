@@ -15,16 +15,16 @@ import (
 
 // Versions around the agent chats migration (TASK-204).
 const (
-	beforeChats = 38
-	chatsSchema = 39
+	beforeChats = 39
+	chatsSchema = 40
 )
 
 // longSubject is 100 characters, ending in a space at character 80.
 var longSubject = strings.Repeat("Матанализ ", 10)
 
-// agentDataAt38 fills a database of version 38: threads of subject s1, of «Без предмета», of a subject removed since
+// agentDataAt39 fills a database of version 39: threads of subject s1, of «Без предмета», of a subject removed since
 // and of a subject with a long name, with requests, history and journal lines (two of the same instant).
-func agentDataAt38(t *testing.T, db *DB) {
+func agentDataAt39(t *testing.T, db *DB) {
 	t.Helper()
 	for _, s := range []string{
 		`INSERT INTO subjects (id, name, name_key, semester, created_at, updated_at) VALUES ('s1', 'Физика', 'физика', '2026-autumn', 1, 1)`,
@@ -83,7 +83,7 @@ func TestMigrationToChatsKeepsThreads(t *testing.T) {
 	if err := steps.UpTo(ctx, beforeChats); err != nil {
 		t.Fatal(err)
 	}
-	agentDataAt38(t, db)
+	agentDataAt39(t, db)
 	if err := steps.UpTo(ctx, chatsSchema); err != nil {
 		t.Fatalf("up to %d: %v", chatsSchema, err)
 	}
@@ -184,7 +184,7 @@ func TestMigrationFromChatsDown(t *testing.T) {
 	if err := steps.UpTo(ctx, beforeChats); err != nil {
 		t.Fatal(err)
 	}
-	agentDataAt38(t, db)
+	agentDataAt39(t, db)
 	if err := steps.UpTo(ctx, chatsSchema); err != nil {
 		t.Fatal(err)
 	}

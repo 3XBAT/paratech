@@ -10,6 +10,10 @@ import (
 )
 
 type Querier interface {
+	// What in progress keeps the soft delete of an assignment from going through (ADR-0029): a delivery that may still go out or
+	// may have gone out unseen, a work being triaged or written, or an unfinished job (draft generation, writing) whose
+	// payload names it. The caller passes the status and type lists as JSON arrays (see AssignmentRepository.Busy).
+	AssignmentBusy(ctx context.Context, arg AssignmentBusyParams) (int64, error)
 	// What references an assignment the student added before the Undo of its creation removes it (ADR-0029). works
 	// cascade on delete and proposals have no foreign key, so both are checked here; the caller passes the proposal
 	// statuses that leave the assignment free. A draft generation that has not finished has no homework_drafts row yet,
@@ -77,7 +81,8 @@ type Querier interface {
 	GetAnswerByKey(ctx context.Context, requestKey string) (Answer, error)
 	// Assignments, the local homework (PRD section 10) with the optimistic-concurrency protocol of ADR-0004(d). The
 	// deadline is due_at. Extracted rows are found again by (transcript_id, source_index) when a transcript is
-	// reprocessed (TASK-042).
+	// reprocessed (TASK-042). A deleted row (deleted_at, ADR-0029) is loaded by id and by source, so that the restore and the
+	// tombstone of reprocessing see it, and skipped by every list.
 	GetAssignment(ctx context.Context, id string) (Assignment, error)
 	// Assignments found in a library material (TASK-122), found again by (material_id, source_index).
 	GetAssignmentByMaterialSource(ctx context.Context, arg GetAssignmentByMaterialSourceParams) (Assignment, error)
@@ -289,7 +294,8 @@ type Querier interface {
 	// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
 	// active is a JSON array of status names. A recording marked for deletion is left out (TASK-095).
 	ListRecordingActivityIDs(ctx context.Context, arg ListRecordingActivityIDsParams) ([]string, error)
-	// The assignments found in the transcripts of the recording, with whether a draft or any email exists.
+	// The assignments found in the transcripts of the recording, with whether a draft or any email exists. One the
+	// student deleted is neither offered nor purged: it stays, its transcript link set NULL (ADR-0029).
 	ListRecordingAssignments(ctx context.Context, recordingID string) ([]ListRecordingAssignmentsRow, error)
 	// The free subject strings the recordings name (the user's correction, else the lesson snapshot), with how many
 	// recordings name each; a recording marked for deletion is left out.

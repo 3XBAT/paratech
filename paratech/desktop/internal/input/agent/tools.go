@@ -118,6 +118,9 @@ var paidReads = []values.Tool{values.ToolInspectUpload, values.ToolAnswerQuestio
 
 // run runs one admitted call of step st and returns what it gave.
 func (t tools) run(ctx context.Context, st agentturn.Step, c agentturn.Call) ran {
+	if t.namesDeleted(ctx, c.Call) {
+		return ran{out: agentturn.Outcome{Result: values.RefusalResult(c.Call.ID(), values.RefuseUnknownID)}}
+	}
 	switch c.Class {
 	case actionpolicy.ClassU:
 		return t.write(ctx, st, c)

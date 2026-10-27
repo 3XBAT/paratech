@@ -17,6 +17,9 @@ export const methods = {
   // TASK-225: the page of a subject.
   subjectOverview: `${service}.SubjectOverview`,
   markSubjectOpened: `${service}.MarkSubjectOpened`,
+  // TASK-236: the teacher of a subject.
+  setSubjectTeacher: `${service}.SetSubjectTeacher`,
+  clearSubjectTeacher: `${service}.ClearSubjectTeacher`,
 } as const;
 
 /** The error texts of the Go binding (library.go); a Go test pins the same strings. */
@@ -81,6 +84,29 @@ export interface LibrarySubject {
   /** The text shown («Осень 2026»). */
   semesterLabel: string;
   folders: LibraryFolder[];
+  /** Passed back to setSubjectTeacher / clearSubjectTeacher; 0 when the reply has none. */
+  version: number;
+  /** null when no teacher is set. */
+  teacher: LibraryTeacher | null;
+}
+
+/** The teacher of a subject: personal data typed by the student, text nodes only. */
+export interface LibraryTeacher {
+  name: string;
+  email: string;
+}
+
+export type TeacherProblem = "" | "invalid" | "changed" | "not_found" | "failed";
+
+export const teacherProblems: readonly TeacherProblem[] = ["", "invalid", "changed", "not_found", "failed"];
+
+/** The reply of setSubjectTeacher / clearSubjectTeacher; the page owns the texts (TASK-238). */
+export interface TeacherResult {
+  problem: TeacherProblem;
+  /** "name" or "email" for "invalid"; "" otherwise. */
+  field: "" | "name" | "email";
+  /** Set only when problem is "". */
+  subject: LibrarySubject | null;
 }
 
 export interface LibraryMaterial {
@@ -149,7 +175,42 @@ export function parseSubject(raw: unknown): LibrarySubject {
     semester: optStr(r, "semester"),
     semesterLabel: optStr(r, "semesterLabel"),
     folders: list(r.folders, w, parseFolder),
+    version: typeof r.version === "number" && Number.isSafeInteger(r.version) && r.version >= 0 ? r.version : 0,
+    teacher: parseTeacher(r.teacher),
   };
+}
+
+/** A teacher of a subject; null for none or for a reply without both texts. */
+export function parseTeacher(raw: unknown): LibraryTeacher | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return null;
+  }
+  const r = raw as Record<string, unknown>;
+  const name = optStr(r, "name");
+  const email = optStr(r, "email");
+  return name !== "" && email !== "" ? { name, email } : null;
+}
+
+/** Reads the reply of a teacher call; an unknown or malformed reply is "failed" without a subject. */
+export function parseTeacherResult(raw: unknown): TeacherResult {
+  const failed: TeacherResult = { problem: "failed", field: "", subject: null };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return failed;
+  }
+  const r = raw as Record<string, unknown>;
+  const problem = r.problem;
+  if (typeof problem !== "string" || !teacherProblems.includes(problem as TeacherProblem)) {
+    return failed;
+  }
+  if (problem === "") {
+    try {
+      return { problem: "", field: "", subject: parseSubject(r.subject) };
+    } catch {
+      return failed;
+    }
+  }
+  const field = problem === "invalid" && (r.field === "name" || r.field === "email") ? r.field : "";
+  return { problem: problem as TeacherProblem, field, subject: null };
 }
 
 export function parseMaterial(raw: unknown): LibraryMaterial {
@@ -347,6 +408,10 @@ export interface LibraryApi {
   importFile(): Promise<LibraryImport>;
   /** «Открыть в Word / PowerPoint»: only the ID crosses; a failed call is "failed". */
   openMaterial(id: string): Promise<LibraryOpen>;
+  /** Sets the teacher while the subject is at version (the one shown); a failed call is "failed". */
+  setSubjectTeacher(subjectId: string, version: number, name: string, email: string): Promise<TeacherResult>;
+  /** Removes the teacher while the subject is at version; a failed call is "failed". */
+  clearSubjectTeacher(subjectId: string, version: number): Promise<TeacherResult>;
 }
 
 export function libraryApi(call: CallByName): LibraryApi {
@@ -365,6 +430,20 @@ export function libraryApi(call: CallByName): LibraryApi {
         return parseOpen(await call(methods.openMaterial, id));
       } catch {
         return parseOpen(null);
+      }
+    },
+    setSubjectTeacher: async (subjectId, version, name, email) => {
+      try {
+        return parseTeacherResult(await call(methods.setSubjectTeacher, subjectId, version, name, email));
+      } catch {
+        return parseTeacherResult(null);
+      }
+    },
+    clearSubjectTeacher: async (subjectId, version) => {
+      try {
+        return parseTeacherResult(await call(methods.clearSubjectTeacher, subjectId, version));
+      } catch {
+        return parseTeacherResult(null);
       }
     },
   };
