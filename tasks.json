@@ -5467,7 +5467,7 @@
                 "npm run test и run build"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         }
     ]
 }
