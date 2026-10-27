@@ -61,7 +61,7 @@ func (noUseCase) SetLessonInfo(context.Context, shared.RecordingID, string, stri
 func (noUseCase) Assignment(context.Context, shared.AssignmentID) (homeworkflow.AssignmentView, error) {
 	return homeworkflow.AssignmentView{}, errNoUseCase
 }
-func (noUseCase) EditAssignment(context.Context, homeworkflow.AssignmentEdit) (homeworkflow.AssignmentView, error) {
+func (noUseCase) SetAssignmentDue(context.Context, shared.AssignmentID, int64, time.Time) (homeworkflow.AssignmentView, error) {
 	return homeworkflow.AssignmentView{}, errNoUseCase
 }
 func (noUseCase) Retry(context.Context, shared.RecordingID, homeworkflow.Work) (shared.JobID, bool, error) {
