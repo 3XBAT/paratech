@@ -54,7 +54,7 @@ const maxDroppedPath = 32767
 // the type is still told from the content.
 func droppedExtension(ext string) bool {
 	switch ext {
-	case ".docx", ".pptx", ".pdf", ".txt":
+	case ".docx", ".pptx", ".pdf", ".txt", ".md", ".markdown":
 		return true
 	}
 	return false
@@ -85,6 +85,9 @@ const (
 
 // msgPDFNotExtracted is the note of a PDF, whose text is not read (ADR-0024).
 const msgPDFNotExtracted = "текст PDF не извлечён"
+
+// msgNoText is the note of a photo, whose text is not recognized (ADR-0027).
+const msgNoText = "текст не распознан"
 
 // LibraryUseCase is the library (ARCH-42); satisfied by library.Service.
 type LibraryUseCase interface {
@@ -150,8 +153,8 @@ type LibrarySubject struct {
 
 // LibraryMaterial is a file of the library. Name is the original file name, shown only (plain text). Type is "docx",
 // "pptx", "txt" or "pdf". Inbox: it is in «Входящие» (SubjectID and FolderID ""). Removed: deleted softly, restorable.
-// TextStatus is "pending", "extracted", "failed" or "pdf_not_extracted"; TextNote is the Russian note for the last
-// one. CreatedAt is RFC 3339 in UTC.
+// TextStatus is "pending", "extracted", "failed", "pdf_not_extracted" or "no_text" (a photo, "jpeg" or "png");
+// TextNote is the Russian note for the last two. CreatedAt is RFC 3339 in UTC.
 type LibraryMaterial struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
@@ -440,6 +443,10 @@ func (s *LibraryService) fail(op string, err error) error {
 		{library.ErrTooMany, ErrLibraryLimit},
 		{library.ErrMaterialRemoved, ErrLibraryFileRemoved},
 		{library.ErrEmptyFile, ErrLibraryEmptyFile},
+		// The photo errors wrap ErrFileTooLarge and ErrUnsupportedFile, so they go first.
+		{library.ErrImageTooLarge, ErrNotesImageTooLarge},
+		{library.ErrUnsupportedImage, ErrNotesImageFormat},
+		{library.ErrImageUnreadable, ErrNotesImageUnreadable},
 		{library.ErrFileTooLarge, ErrLibraryFileTooLarge},
 		{library.ErrUnsupportedFile, ErrLibraryUnsupported},
 		{library.ErrBusy, ErrLibraryBusy},
@@ -484,8 +491,11 @@ func libraryMaterial(m *material.Material) LibraryMaterial {
 	for _, l := range m.Lessons() {
 		out.LessonIDs = append(out.LessonIDs, string(l))
 	}
-	if m.TextStatus() == material.TextPDFNotExtracted {
+	switch m.TextStatus() {
+	case material.TextPDFNotExtracted:
 		out.TextNote = msgPDFNotExtracted
+	case material.TextNoText:
+		out.TextNote = msgNoText
 	}
 	return out
 }

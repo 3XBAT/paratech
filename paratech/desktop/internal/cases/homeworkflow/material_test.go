@@ -236,6 +236,7 @@ func TestMaterialJobsStart(t *testing.T) {
 	e := newMaterialEnv(t)
 	e.addMaterial("m1", material.TypeTXT, slides("текст"))
 	e.addMaterial("pdf", material.TypePDF, nil)
+	e.addMaterial("photo", material.TypeJPEG, nil)
 	gone := e.addMaterial("gone", material.TypeTXT, slides("x"))
 	if _, err := gone.Remove(ppT0); err != nil {
 		t.Fatal(err)
@@ -295,6 +296,7 @@ func TestMaterialJobsStart(t *testing.T) {
 		want error
 	}{
 		"pdf":          {"pdf", WorkSummary, ErrNoMaterialText},
+		"photo":        {"photo", WorkHomework, ErrNoMaterialText},
 		"removed":      {"gone", WorkSummary, material.ErrRemoved},
 		"missing":      {"nope", WorkSummary, shared.ErrNotFound},
 		"lecture text": {"m1", WorkLectureText, ErrUnknownWork},

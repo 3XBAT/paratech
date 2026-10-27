@@ -595,7 +595,7 @@ export function WorkBody(props: {
 }
 
 /** Loads the work of a `work` card, re-reads it while a step runs, and shows the card of its step. */
-// `initial`: the work as the call that made it replied (it may carry the problem of a reader call, which the core does not store).
+// `initial`: the work as the call that made it replied (it may carry the live problem of that call; the core keeps only lastProblem/lastMessage).
 export function WorkWritingCard(props: { api: TurnkeyApi; workId: string; library?: LibraryApi; send?: SendApis; initial?: TurnkeyWork }) {
   const { api, workId } = props;
   const library = props.library ?? defaultLibrary;

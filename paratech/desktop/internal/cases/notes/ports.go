@@ -35,6 +35,10 @@ type Materials interface {
 
 	// Material loads a material in any status; a missing one wraps shared.ErrNotFound.
 	Material(ctx context.Context, id shared.MaterialID) (*material.Material, error)
+
+	// PageImage loads an active photo with its stored bytes, checked against its sha256. One that is missing, removed
+	// or not a photo wraps shared.ErrNotFound; bytes that are gone or changed material.ErrDamaged.
+	PageImage(ctx context.Context, id shared.MaterialID) (*material.Material, []byte, error)
 }
 
 // Recordings reads a recording for its anchor. Implemented by the sqlite adapter.

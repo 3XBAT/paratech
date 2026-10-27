@@ -540,22 +540,24 @@ CREATE TABLE subject_folders (
 -- materials: the files of the library. Aggregate library/material. One row and one blob per sha256 (the blob is
 -- materials/<sha256> in the artifact store): uploading the same bytes again returns this row. original_name is shown
 -- only. NULL subject and folder: «Входящие». A subject or folder that holds a file (active or removed) cannot be
--- deleted (RESTRICT): a removed file still needs them to be restored.
+-- deleted (RESTRICT): a removed file still needs them to be restored. Photos ('jpeg', 'png', rebuilt by migration
+-- 0041, TASK-165) are pages of a note without text: text_status 'no_text', and only they have it.
 -- ---------------------------------------------------------------------------------------------------------------
 CREATE TABLE materials (
     id            TEXT    NOT NULL PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
     sha256        TEXT    NOT NULL UNIQUE CHECK (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
     size_bytes    INTEGER NOT NULL CHECK (size_bytes BETWEEN 1 AND 104857600),
-    type          TEXT    NOT NULL CHECK (type IN ('docx', 'pptx', 'txt', 'pdf')),
+    type          TEXT    NOT NULL CHECK (type IN ('docx', 'pptx', 'txt', 'pdf', 'jpeg', 'png')),
     original_name TEXT    NOT NULL DEFAULT '' CHECK (length(original_name) <= 255),
     subject_id    TEXT    REFERENCES subjects (id) ON DELETE RESTRICT,
     folder_id     TEXT,
     status        TEXT    NOT NULL CHECK (status IN ('active', 'removed')),
-    text_status   TEXT    NOT NULL CHECK (text_status IN ('pending', 'extracted', 'failed', 'pdf_not_extracted')),
+    text_status   TEXT    NOT NULL CHECK (text_status IN ('pending', 'extracted', 'failed', 'pdf_not_extracted', 'no_text')),
     version       INTEGER NOT NULL DEFAULT 0,                             -- optimistic concurrency (ADR-0004)
     created_at    INTEGER NOT NULL,
     updated_at    INTEGER NOT NULL,
     CHECK ((subject_id IS NULL) = (folder_id IS NULL)),
+    CHECK ((type IN ('jpeg', 'png')) = (text_status = 'no_text')),
     FOREIGN KEY (subject_id, folder_id) REFERENCES subject_folders (subject_id, id) ON DELETE RESTRICT
 );
 CREATE INDEX idx_materials_place ON materials (subject_id, folder_id);

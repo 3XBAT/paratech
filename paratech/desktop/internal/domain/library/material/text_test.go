@@ -226,13 +226,15 @@ func TestSetText(t *testing.T) {
 	if changed, err := m.SetText(TextFailed); err != nil || !changed {
 		t.Fatalf("SetText(failed) = %v, %v", changed, err)
 	}
-	for _, s := range []TextStatus{TextPending, TextPDFNotExtracted, "other"} {
+	for _, s := range []TextStatus{TextPending, TextPDFNotExtracted, TextNoText, "other"} {
 		if _, err := m.SetText(s); !errors.Is(err, ErrInvalidMaterial) {
 			t.Errorf("SetText(%q) = %v", s, err)
 		}
 	}
-	if _, err := newMaterial(t, TypePDF).SetText(TextExtracted); !errors.Is(err, ErrInvalidMaterial) {
-		t.Fatalf("SetText of a PDF = %v", err)
+	for _, typ := range []Type{TypePDF, TypeJPEG, TypePNG} {
+		if _, err := newMaterial(t, typ).SetText(TextExtracted); !errors.Is(err, ErrInvalidMaterial) {
+			t.Fatalf("SetText of a %s = %v", typ, err)
+		}
 	}
 	if _, err := m.Remove(t0); err != nil {
 		t.Fatal(err)

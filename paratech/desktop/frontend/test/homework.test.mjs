@@ -15,6 +15,7 @@ import {
   parseDraftStatus,
   sendFormats,
 } from "../.test-build/bindings/homework.js";
+import { formatTime, formatTimeMinutes } from "../.test-build/activityView.js";
 import {
   assignmentDeliveryView,
   blockedByEmail,
@@ -83,8 +84,16 @@ test("every email status has a chip with a Russian word, an icon and no jargon",
   assert.deepEqual(Object.keys(deliveryLooks).sort(), [...deliveryStatuses].sort());
 });
 
+test("formatTimeMinutes drops seconds and falls back like formatTime", () => {
+  assert.match(formatTimeMinutes("2026-10-16T10:05:07Z"), /^\d\d\.\d\d\.\d{4}, \d\d:\d\d$/);
+  assert.match(formatTime("2026-10-16T10:05:07Z"), /:\d\d:\d\d$/);
+  for (const bad of ["", "not a date"]) {
+    assert.equal(formatTimeMinutes(bad), formatTime(bad));
+  }
+});
+
 test("a sent email shows its time, a failed one its last error, an unknown one the core's notice", () => {
-  assert.match(deliveryView(delivery("SENT", { sentAt: "2026-10-16T10:05:00Z" })).hint, /^Отправлено \d/);
+  assert.match(deliveryView(delivery("SENT", { sentAt: "2026-10-16T10:05:07Z" })).hint, /^Отправлено \d\d\.\d\d\.\d{4}, \d\d:\d\d$/);
   const failed = deliveryView(delivery("FAILED", { lastError: "smtp: 550 mailbox unavailable" }));
   assert.equal(failed.problem, "smtp: 550 mailbox unavailable");
   assert.match(failed.hint, /«Подключения»/);
@@ -140,8 +149,9 @@ test("a running generation shows its progress; without one the usual time", () =
 
 // Mirrors AssignmentItem of internal/input/wails/homework.go.
 const assignment = () => ({
-  id: "a1", lessonId: "l1", title: "Задача 1", description: "", due: "", userEdited: false,
-  updatedAt: "2026-10-19T10:00:00Z", subject: "Матанализ", subjectSource: "schedule", kind: "lecture", teacher: "",
+  id: "a1", lessonId: "l1", title: "Задача 1", description: "", due: "", userEdited: false, version: 1,
+  updatedAt: "2026-10-19T10:00:00Z", subject: "Матанализ", subjectSource: "schedule", subjectFromLesson: true,
+  kind: "lecture", teacher: "",
   teacherSource: "", lessonDate: "", correctedSubject: "", correctedTeacher: "",
 });
 

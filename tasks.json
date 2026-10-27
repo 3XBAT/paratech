@@ -3536,7 +3536,7 @@
             "dependencies": [
                 "TASK-151"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-166",
@@ -3557,7 +3557,7 @@
                 "TASK-154",
                 "TASK-165"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-167",
@@ -4460,7 +4460,7 @@
             "dependencies": [
                 "TASK-204"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-206",
@@ -4942,7 +4942,7 @@
                 "TASK-229",
                 "TASK-230"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-232",
@@ -4965,7 +4965,7 @@
             "dependencies": [
                 "TASK-231"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-233",
@@ -5451,7 +5451,7 @@
                 "go test -race затронутых пакетов, GOOS=windows go vet"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-255",
@@ -5467,6 +5467,210 @@
                 "npm run test и run build"
             ],
             "dependencies": [],
+            "status": "done"
+        },
+        {
+            "id": "TASK-256",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Ссылки на пару · ядро] Значение CallLink и ссылка из календаря у пары (домен, миграция, sqlite)",
+            "acceptance_criteria": [
+                "Запрос владельца 2026-10-27: ссылка на звонок пары. docs/adr/0032-lesson-call-links.md, раздел «Value» и «Where links live»",
+                "domain/schedule/values: CallLink, ParseCallLink(s), String() (каноническая форма), Host(); правила ADR-0032: обрезка пробелов, не больше 2048 байт, только печатный ASCII без пробелов, кавычек, <>\\^{|} и обратной кавычки, схема http или https, хост из a-z0-9.- с точкой (IDN и IP — отказ), без user info, порта и фрагмента, в пути и query — символы RFC 3986 и %XX; ошибки называют правило и не цитируют текст",
+                "lesson.Content.CallLink — ссылка из календаря (каноническая строка, пусто — нет); Validate проверяет через ParseCallLink, Equal её учитывает; смена или пропажа ссылки при импорте — обычная смена содержимого (ChangeContent, ревизия растёт); IsCallHost здесь не делается (TASK-257)",
+                "Миграция desktop (следующий свободный номер на момент пуша; не параллельно с другой задачей с миграцией): lessons.call_link TEXT NOT NULL DEFAULT ''; docs/contracts/schema.sql — зеркало; репозиторий lessons читает и пишет поле; проекция в Google Calendar ссылку не пишет",
+                "Тесты: таблица ParseCallLink — принять Zoom с ?pwd=, Teams с %3a и %40, Meet, Телемост, http; отказ javascript:, file:, data:, user@host, порт, фрагмент, пробел, кавычки, IDN, IP, длиннее 2048, управляющие символы; Content.Equal и ChangeContent со ссылкой; sqlite roundtrip и старая строка без ссылки",
+                "Файлы: paratech/desktop/internal/domain/schedule/values/calllink*.go, paratech/desktop/internal/domain/schedule/lesson/*, paratech/desktop/internal/adapters/sqlite/lessons*.go, adapters/sqlite/queries/lessons.sql, adapters/sqlite/sqlcgen/*, paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/schedule/... ./desktop/internal/adapters/sqlite/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-257",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Ссылки на пару · ICS] Ссылка на звонок из события календаря: список сервисов и извлечение в icsschedule",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open 4 в docs/adr/0032-lesson-call-links.md (список сервисов звонков)",
+                "domain/schedule/values: IsCallHost(host) — хост равен домену из списка или кончается на «.домен» (граница метки: evilzoom.us не zoom.us); список — только в этой функции",
+                "adapters/icsschedule: кандидаты по порядку X-GOOGLE-CONFERENCE и X-MICROSOFT-SKYPETEAMSMEETINGURL (только если они есть в настоящих образцах экспорта, положенных в testdata и описанных в docs/refs/schedule-ics.md; ничего не выдумывать), URL, LOCATION, DESCRIPTION; в свободном тексте ссылка начинается с http:// или https:// и кончается на пробеле, <, > или кавычке, хвост .,;:!?)]» отрезается; берётся первая, что проходит ParseCallLink и IsCallHost; иначе ссылки нет; без угадывания (нет схемы — не ссылка)",
+                "Плохая ссылка — не ошибка строки: пара импортируется без ссылки; ссылки на материалы (другие хосты) не берутся; doc.go пакета и docs/refs/schedule-ics.md говорят, что читается",
+                "Тесты: Meet из экспорта Google, Zoom в LOCATION, Teams в DESCRIPTION, Телемост в URL; ссылка на диск или документ не берётся; evilzoom.us и javascript: не берутся; две ссылки — первая по порядку; повторный импорт с другой ссылкой даёт изменение в плане; пропала ссылка — изменение",
+                "Граница доверия: состязательное ревью безопасности (docs/process/security-review.md, security-auditor)",
+                "Файлы: paratech/desktop/internal/domain/schedule/values/callhost*.go, paratech/desktop/internal/adapters/icsschedule/* (и testdata), docs/refs/schedule-ics.md (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/schedule/... ./desktop/internal/adapters/icsschedule/... и тест архитектуры",
+                "golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-256"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-258",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Ссылки на пару · weblink] Открытие ссылки на звонок в системном браузере: weblink.OpenCallLink",
+            "acceptance_criteria": [
+                "docs/adr/0032-lesson-call-links.md, раздел «Opening and copying»; ADR-0009 (weblink)",
+                "adapters/weblink: OpenCallLink(ctx, values.CallLink) error — заново проверяет каноническую форму (http или https, хост по правилам ADR-0032, разрешённые байты пути и query, %XX) и всегда открывает через временный .url (путь startShortcut, как OpenAuthPage): URL никогда не идёт аргументом командной строки; отказ — ErrRefused; не Windows — ErrUnsupported",
+                "OpenLink и OpenAuthPage не меняются; браузер запускается вне нашего дерева процессов (ADR-0002)",
+                "Тесты: таблица отказов (CR/LF, кавычки, пробел, не http/https, порт, user info, плохой %), содержимое .url на Windows, отменённый контекст — процесс не стартует",
+                "Граница доверия: состязательное ревью безопасности (docs/process/security-review.md, security-auditor)",
+                "Файлы: paratech/desktop/internal/adapters/weblink/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/adapters/weblink/..., GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/...",
+                "На Windows: go test ./desktop/internal/adapters/weblink/... (настоящий запуск тестов Windows)"
+            ],
+            "dependencies": [
+                "TASK-256"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-259",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Ссылки на пару · ядро] Ссылка, которую вписывает студент: хранение и use case calllinks (вписать, убрать)",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open 1 и Open 4-б в docs/adr/0032-lesson-call-links.md (где вписывается ссылка; ограничивать ли её списком сервисов)",
+                "По ответу на Open 1: у предмета — поле library/subject со своей копией проверки формы (ARCH-11, как почта преподавателя в ADR-0030); у пары — поле lesson вне Content, метод SetStudentCallLink/ClearStudentCallLink без роста ревизии, импорт его не трогает; оба — и то и другое",
+                "Новый cases/calllinks: SetStudentLink и ClearStudentLink (ParseCallLink; при ответе 4-б «только из списка» — ещё IsCallHost), ожидаемая версия, ошибки invalid / not_found / changed; агенту инструментов нет, планировщик ссылок не видит (ADR-0022)",
+                "Миграция desktop (следующий свободный номер на момент пуша; не параллельно с другой задачей с миграцией): колонка(и) по Open 1, TEXT NOT NULL DEFAULT ''; docs/contracts/schema.sql — зеркало; sqlite читает и пишет",
+                "Тесты: домен (форма, очистка), use case (вписать, заменить, убрать, версия, неверная ссылка), повторный импорт не стирает ссылку студента, sqlite roundtrip",
+                "Файлы: paratech/desktop/internal/domain/library/subject/* или paratech/desktop/internal/domain/schedule/lesson/* (по Open 1), paratech/desktop/internal/cases/calllinks/* (новый), adapters/sqlite/* (lessons или subjects, queries, sqlcgen), paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/... ./desktop/internal/cases/calllinks/... ./desktop/internal/adapters/sqlite/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-256"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-260",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Ссылки на пару · ядро] Какая ссылка показывается и когда: доменный сервис joinlink и чтение в calllinks",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open 2 и Open 3 в docs/adr/0032-lesson-call-links.md (что важнее при двух ссылках; окно показа в «Сегодня»)",
+                "domain/schedule/services/joinlink (чистый): по ссылке из календаря, ссылке(ам) студента и названию пары возвращает Shown{Link, Source (student | calendar), EventTitle} или ничего; порядок — по Open 2; Visible(start, end, now) — окно «Сегодня» по Open 3; каждое сохранённое значение заново проходит ParseCallLink, не прошло — не показывается",
+                "cases/calllinks: Shown(ctx, lessonIDs, place) где place — popup (без окна) или today (окно Visible, время через Clock); порты — чтение пар и ссылок студента; todayfeed и recordingprompt не меняются",
+                "Тесты: сервис — только календарь, только студент, оба (по Open 2), испорченная сохранённая ссылка, границы окна; use case на фейках — удалённая пара, нет ссылки — нет строки",
+                "Файлы: paratech/desktop/internal/domain/schedule/services/joinlink/* (новый), paratech/desktop/internal/cases/calllinks/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/schedule/... ./desktop/internal/cases/calllinks/... и тест архитектуры",
+                "golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-256",
+                "TASK-259"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-261",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Ссылки на пару · привязка Wails] Ссылка в DTO окна записи и «Сегодня», открыть, копировать, вписать и убрать",
+            "acceptance_criteria": [
+                "docs/adr/0032-lesson-call-links.md; ядро — TASK-258, TASK-259, TASK-260",
+                "input/wails: PromptView (только пара, не ad-hoc) и строка пары «Сегодня» получают callLink {host, source: student | calendar, eventTitle} или null; сам URL на страницу не отдаётся",
+                "Новые методы: OpenCallLink(lessonId) и CopyCallLink(lessonId) — Go заново берёт ссылку через calllinks в момент щелчка, страница URL не присылает; открытие через свой интерфейс CallLinkOpener (ARCH-42, app подставляет weblink), копирование через существующий Clipboard; problem: '' | no_link | refused | failed",
+                "SetCallLink / ClearCallLink для ввода студента (по ответу Open 1: subjectId или lessonId, ожидаемая версия) → problem: '' | invalid | changed | not_found | failed",
+                "Сервис доступен и окну записи (popup), и главному окну; app — подключение",
+                "frontend/src/bindings: prompt.ts, today.ts (разбор callLink), новый callLinks.ts (open, copy, set, clear); тексты — в задачах UI",
+                "Тесты: каждый problem-код, null без ссылки, страница не может передать URL, разбор в bindings",
+                "Файлы: paratech/desktop/internal/input/wails/calllinks*.go (новый), prompt.go, today.go (только поле), paratech/desktop/internal/app/*, paratech/desktop/frontend/src/bindings/prompt.ts, today.ts, callLinks.ts, frontend/test/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/wails/... ./desktop/internal/app/..., GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/...",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-258",
+                "TASK-259",
+                "TASK-260"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-262",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Ссылки на пару · UI] Строка ссылки в окне записи пары",
+            "acceptance_criteria": [
+                "docs/adr/0032-lesson-call-links.md; привязка — TASK-261",
+                "Общий компонент frontend/src/components/CallLinkLine.tsx: «Ссылка на пару: <хост> · вписано вами» или «… · из календаря, событие „<название>“», хост целиком, кнопки «Открыть» и «Копировать»; всё — обычный текст (недоверенный), ничего не открывается само; нет ссылки — нет строки",
+                "Окно записи (popup) показывает строку под названием пары; ошибки: «Не удалось открыть ссылку», «Ссылка скопирована» / «Не удалось скопировать»",
+                "Тесты фронтенда: есть ссылка (оба источника), нет ссылки, щелчок вызывает OpenCallLink с id пары, ad-hoc без строки",
+                "Файлы: paratech/desktop/frontend/src/components/CallLinkLine.tsx (новый), frontend/src/popup/*, frontend/test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-261"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-263",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Ссылки на пару · UI] Строка ссылки у пары в «Сегодня»",
+            "acceptance_criteria": [
+                "docs/adr/0032-lesson-call-links.md; привязка — TASK-261; компонент — TASK-262",
+                "У пары в «Сегодня» — CallLinkLine, когда ядро отдало callLink (окно показа решает Go, страница не считает время); появляется при обычном опросе страницы",
+                "Тесты фронтенда: строка есть и нет, щелчки открыть и копировать",
+                "Файлы: paratech/desktop/frontend/src/pages/Today*.tsx, today.css, frontend/src/todayView.ts, frontend/test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-261",
+                "TASK-262"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-264",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Ссылки на пару · UI] Поле «Ссылка на звонок»: вписать, заменить, убрать",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open 1 в docs/adr/0032-lesson-call-links.md (страница предмета, пара в расписании или обе)",
+                "Поле «Ссылка на звонок» с подсказкой «Вставьте ссылку на Zoom, Teams, Meet или Телемост», кнопки «Сохранить» и «Убрать»; показывает хост сохранённой ссылки; ошибки по problem-кодам TASK-261: «Это не ссылка http или https», «Данные изменились, обновите», «Не удалось сохранить»",
+                "Если на пару есть и ссылка из календаря — подпись, какая показывается (по Open 2)",
+                "Тесты фронтенда: сохранить, неверная ссылка, убрать, изменилось",
+                "Файлы: по Open 1 — paratech/desktop/frontend/src/pages/SubjectsPage.tsx, SubjectsParts.tsx и/или SchedulePage.tsx, frontend/test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-261"
+            ],
             "status": "pending"
         }
     ]

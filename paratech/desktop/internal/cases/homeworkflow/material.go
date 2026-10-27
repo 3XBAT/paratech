@@ -114,7 +114,7 @@ func (s *MaterialJobs) Start(ctx context.Context, id shared.MaterialID, work Wor
 		return "", false, err
 	case !m.Active():
 		return "", false, material.ErrRemoved
-	case m.Type() == material.TypePDF:
+	case !m.Type().Readable(): // a PDF or a photo
 		return "", false, ErrNoMaterialText
 	}
 

@@ -57,6 +57,9 @@ export const errorTexts: readonly string[] = [
   "Не удалось прочитать файл.",
   "Этот файл добавить нельзя: перетащите файл с диска этого компьютера.",
   "За раз можно перетащить не больше 10 файлов.",
+  "Фото больше 25 МБ или 40 мегапикселей.",
+  "Фото подходят только в JPEG или PNG: HEIC, GIF, WebP, BMP, TIFF и SVG не подходят.",
+  "Не удалось прочитать фото: файл повреждён или обрезан.",
 ];
 
 export const genericError = "Не удалось выполнить действие.";
@@ -116,6 +119,8 @@ export interface NotePart {
   textStatus: string;
   removed: boolean;
   missing: boolean;
+  /** "/media/notepage/<material id>" for a photo page, "" otherwise. The only source of a page image. */
+  pageUrl: string;
 }
 
 export interface NoteView {
@@ -125,6 +130,8 @@ export interface NoteView {
   anchor: NoteAnchor;
   parts: NotePart[];
   removed: boolean;
+  /** Photo pages without recognized text. Text typed by hand is a separate part and does not change this count. */
+  noTextPages: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -231,7 +238,20 @@ export function parsePart(raw: unknown): NotePart {
     textStatus: optStr(r, "textStatus"),
     removed: r.removed === true,
     missing: r.missing === true,
+    pageUrl: pageUrl(optStr(r, "pageUrl")),
   };
+}
+
+export const pageUrlPrefix = "/media/notepage/";
+
+/** A page image address only when it is the core's same-origin one; anything else is no image. */
+export function pageUrl(v: string): string {
+  return v.startsWith(pageUrlPrefix) && v.length > pageUrlPrefix.length ? v : "";
+}
+
+function count(r: Record<string, unknown>, key: string): number {
+  const v = r[key];
+  return typeof v === "number" && Number.isInteger(v) && v > 0 ? v : 0;
 }
 
 /** Checks the shape of a note; a malformed reply is an error, not a default. */
@@ -245,6 +265,7 @@ export function parseNote(raw: unknown): NoteView {
     anchor: parseAnchor(r.anchor),
     parts: list(r.parts, w, parsePart),
     removed: r.removed === true,
+    noTextPages: count(r, "noTextPages"),
     createdAt: optStr(r, "createdAt"),
     updatedAt: optStr(r, "updatedAt"),
   };
