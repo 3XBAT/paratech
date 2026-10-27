@@ -14,6 +14,9 @@ export const methods = {
   materials: `${service}.Materials`,
   importFile: `${service}.ImportFile`,
   openMaterial: `${service}.OpenMaterial`,
+  // TASK-225: the page of a subject.
+  subjectOverview: `${service}.SubjectOverview`,
+  markSubjectOpened: `${service}.MarkSubjectOpened`,
 } as const;
 
 /** The error texts of the Go binding (library.go); a Go test pins the same strings. */
@@ -205,7 +208,135 @@ export function parseOpen(raw: unknown): LibraryOpen {
   return { status, message: openTexts[status] };
 }
 
+/** A line of «Ближайшее». Title is model or student text: a text node only. */
+export interface SubjectDeadline {
+  assignmentId: string;
+  title: string;
+  /** RFC 3339. */
+  due: string;
+  /** Calendar days from today; 0 is today. */
+  daysLeft: number;
+}
+
+/** A weekly place of the subject's lessons in the schedule; weekday 1 (Monday) to 7 (Sunday), times "HH:MM". */
+export interface SubjectSlot {
+  kind: string;
+  weekday: number;
+  start: string;
+  end: string;
+}
+
+export type LessonStatus = "recorded" | "transcribed" | "summaryReady" | "failed";
+
+export const lessonStatuses: readonly LessonStatus[] = ["recorded", "transcribed", "summaryReady", "failed"];
+
+export interface SubjectLesson {
+  recordingId: string;
+  /** "" for an ad-hoc recording (the page names it by its date). Text node only. */
+  title: string;
+  kind: string;
+  startedAt: string;
+  /** 0 when unknown. */
+  durationSeconds: number;
+  status: LessonStatus;
+  summaryNew: boolean;
+}
+
+export interface SubjectNewMaterial {
+  materialId: string;
+  folderId: string;
+}
+
+export interface SubjectOverview {
+  subjectId: string;
+  name: string;
+  openedAt: string;
+  deadlines: SubjectDeadline[];
+  schedule: SubjectSlot[];
+  lessons: SubjectLesson[];
+  newMaterials: SubjectNewMaterial[];
+}
+
+function count(r: Record<string, unknown>, key: string, what: string): number {
+  const v = r[key];
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+    throw new Error(`${what}: ${key} is not a count`);
+  }
+  return v;
+}
+
+function bool(r: Record<string, unknown>, key: string, what: string): boolean {
+  const v = r[key];
+  if (typeof v !== "boolean") {
+    throw new Error(`${what}: ${key} is not a boolean`);
+  }
+  return v;
+}
+
+export function parseDeadline(raw: unknown): SubjectDeadline {
+  const w = "deadline";
+  const r = record(raw, w);
+  const days = r.daysLeft;
+  if (typeof days !== "number" || !Number.isInteger(days)) {
+    throw new Error(`${w}: daysLeft is not an integer`);
+  }
+  return { assignmentId: str(r, "assignmentId", w), title: str(r, "title", w), due: str(r, "due", w), daysLeft: days };
+}
+
+export function parseSlot(raw: unknown): SubjectSlot {
+  const w = "slot";
+  const r = record(raw, w);
+  const weekday = count(r, "weekday", w);
+  if (weekday < 1 || weekday > 7) {
+    throw new Error(`${w}: weekday is out of range`);
+  }
+  return { kind: str(r, "kind", w), weekday, start: str(r, "start", w), end: str(r, "end", w) };
+}
+
+export function parseLesson(raw: unknown): SubjectLesson {
+  const w = "lesson";
+  const r = record(raw, w);
+  const status = r.status;
+  if (typeof status !== "string" || !lessonStatuses.includes(status as LessonStatus)) {
+    throw new Error(`${w}: status is not one of ${lessonStatuses.join(", ")}`);
+  }
+  return {
+    recordingId: str(r, "recordingId", w),
+    title: str(r, "title", w),
+    kind: optStr(r, "kind"),
+    startedAt: str(r, "startedAt", w),
+    durationSeconds: count(r, "durationSeconds", w),
+    status: status as LessonStatus,
+    summaryNew: bool(r, "summaryNew", w),
+  };
+}
+
+function parseNewMaterial(raw: unknown): SubjectNewMaterial {
+  const w = "new material";
+  const r = record(raw, w);
+  return { materialId: str(r, "materialId", w), folderId: str(r, "folderId", w) };
+}
+
+/** Checks the shape of the page data; a malformed reply is an error, not a default. */
+export function parseOverview(raw: unknown): SubjectOverview {
+  const w = "subject overview";
+  const r = record(raw, w);
+  return {
+    subjectId: str(r, "subjectId", w),
+    name: str(r, "name", w),
+    openedAt: optStr(r, "openedAt"),
+    deadlines: list(r.deadlines, w, parseDeadline),
+    schedule: list(r.schedule, w, parseSlot),
+    lessons: list(r.lessons, w, parseLesson),
+    newMaterials: list(r.newMaterials, w, parseNewMaterial),
+  };
+}
+
 export interface LibraryApi {
+  /** The data of the page of a subject; it changes nothing (see markSubjectOpened). */
+  subjectOverview(subjectId: string): Promise<SubjectOverview>;
+  /** Records the opening once the overview is shown, so the next visit marks only what is newer. */
+  markSubjectOpened(subjectId: string): Promise<void>;
   subjects(): Promise<LibrarySubject[]>;
   /** semester is a code or "" for the current one. */
   createSubject(name: string, semester: string): Promise<LibrarySubject>;
@@ -220,6 +351,10 @@ export interface LibraryApi {
 
 export function libraryApi(call: CallByName): LibraryApi {
   return {
+    subjectOverview: async (subjectId) => parseOverview(await call(methods.subjectOverview, subjectId)),
+    markSubjectOpened: async (subjectId) => {
+      await call(methods.markSubjectOpened, subjectId);
+    },
     subjects: async () => list(await call(methods.subjects), "subjects", parseSubject),
     createSubject: async (name, semester) => parseSubject(await call(methods.createSubject, name, [], semester)),
     createFolder: async (subjectId, name) => parseFolder(await call(methods.createFolder, subjectId, name)),

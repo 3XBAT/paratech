@@ -32,7 +32,8 @@ function material(over = {}) {
 
 test("bound method names and error texts match the Go LibraryService", () => {
   const go = readFileSync(new URL("../../internal/input/wails/library.go", import.meta.url), "utf8");
-  const goMethods = new Set([...go.matchAll(/^func \(s \*LibraryService\) ([A-Z]\w*)\(/gm)].map((m) => m[1]));
+  const overviewGo = readFileSync(new URL("../../internal/input/wails/subjectoverview.go", import.meta.url), "utf8");
+  const goMethods = new Set([...(go + overviewGo).matchAll(/^func \(s \*LibraryService\) ([A-Z]\w*)\(/gm)].map((m) => m[1]));
   const prefix = "paratech/desktop/internal/input/wails.LibraryService.";
   for (const m of Object.values(methods)) {
     assert.ok(goMethods.has(m.slice(prefix.length)), m);

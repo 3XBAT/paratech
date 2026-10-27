@@ -174,6 +174,10 @@ export interface QuestionAnswer {
   text: string;
 }
 
+export type LastProblem = "" | "offline" | "quota" | "refused" | "no_text" | "source_gone";
+
+export const lastProblems: readonly LastProblem[] = ["", "offline", "quota", "refused", "no_text", "source_gone"];
+
 /** The part of TurnkeyWork the cards read. Every text but `message` was written by the reader or the student: text nodes only. */
 export interface TurnkeyWork {
   id: string;
@@ -184,6 +188,12 @@ export interface TurnkeyWork {
   workType: string;
   problem: string;
   message: string;
+  /** TASK-226: the stored problem of the last reader call, kept across restarts; "" none. */
+  lastProblem: LastProblem;
+  /** The fixed Russian text of lastProblem from the core; "" without one. */
+  lastMessage: string;
+  /** TASK-226: when the work was last sent to the teacher (RFC 3339); "" never. */
+  sentAt: string;
   questionRound: number;
   questions: WorkQuestion[];
   hasCard: boolean;
@@ -450,6 +460,15 @@ function parseAnswered(raw: unknown): WorkAnswered {
   return { round: optCount(r, "round", w), question: str(r, "question", w), answer: str(r, "answer", w), default: optBool(r, "default", w) };
 }
 
+/** "" when the work was never sent (or an older build sent nothing); otherwise a readable RFC 3339 time. */
+function parseSentAt(r: Record<string, unknown>, what: string): string {
+  const v = optStr(r, "sentAt", what);
+  if (v !== "" && Number.isNaN(Date.parse(v))) {
+    throw new Error(`${what}: sentAt is not a time`);
+  }
+  return v;
+}
+
 /** Checks the shape of a work; a malformed reply is an error, not a default. */
 export function parseWork(raw: unknown): TurnkeyWork {
   const w = "turnkey work";
@@ -465,6 +484,9 @@ export function parseWork(raw: unknown): TurnkeyWork {
     workType: card.workType,
     problem: str(r, "problem", w),
     message: str(r, "message", w),
+    lastProblem: optOneOf(r, "lastProblem", lastProblems, w),
+    lastMessage: optStr(r, "lastMessage", w),
+    sentAt: parseSentAt(r, w),
     questionRound: optCount(r, "questionRound", w),
     questions: list(r, "questions", w, parseQuestion),
     hasCard: optBool(r, "hasCard", w),

@@ -3197,7 +3197,7 @@
                 "sqlc generate без дрейфа"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-150",
@@ -4849,7 +4849,7 @@
                 "TASK-225",
                 "TASK-226"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-228",

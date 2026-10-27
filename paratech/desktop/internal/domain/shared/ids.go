@@ -117,3 +117,12 @@ func (id MaterialID) String() string { return string(id) }
 
 // Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
 func (id MaterialID) Validate() error { return validateID("material", string(id)) }
+
+// NoteID identifies the student's own notes of a lecture (ADR-0027).
+type NoteID string
+
+// String returns the identifier as a plain string.
+func (id NoteID) String() string { return string(id) }
+
+// Validate reports whether the identifier is well formed (non-empty, bounded, printable, a safe file-name segment).
+func (id NoteID) Validate() error { return validateID("note", string(id)) }
