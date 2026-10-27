@@ -7,8 +7,11 @@ import { formatTime } from "./activityView.js";
 import {
   type ActiveGeneration,
   type AssignmentItem,
+  type ChangeAssignmentResult,
   type CreateAssignmentRequest,
   type CreateAssignmentResult,
+  type EditAssignmentRequest,
+  type EditAssignmentResult,
   type DeliveryItem,
   type DocxSaveResult,
   type DraftStatus,
@@ -19,6 +22,7 @@ import {
   type SendFormat,
   type VersionSource,
 } from "./bindings/homework.js";
+import type { LibrarySubject } from "./bindings/library.js";
 import { plural } from "./plural.js";
 import type { ResultKind } from "./ui/controls.js";
 import type { IconName } from "./ui/Icon.js";
@@ -371,7 +375,8 @@ export interface AddForm {
 
 export const emptyAddForm: AddForm = { title: "", subjectId: "", date: "", time: "", note: "" };
 
-export type AddFieldErrors = Partial<Record<"title" | "note" | "due" | "time", string>>;
+/** subject: only the edit form (subject_not_found). */
+export type AddFieldErrors = Partial<Record<"title" | "note" | "due" | "time" | "subject", string>>;
 
 function realDate(s: string): boolean {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
@@ -485,4 +490,167 @@ export function addSession(newId: () => string) {
       }
     },
   };
+}
+
+// «Удалить», «Вернуть» and «Изменить» (TASK-232, ADR-0029). The core decides what is allowed; the page only shows
+// its refusals in words. Assignment texts are student or model text: text nodes only.
+
+export const changeTexts = {
+  remove: "Удалить",
+  removing: "Удаление…",
+  removed: "Задание удалено",
+  restore: "Вернуть",
+  restoring: "Возврат…",
+  edit: "Изменить",
+  editTitle: "Изменить задание",
+  save: "Сохранить",
+  saving: "Сохранение…",
+  subjectsFailed: "Список предметов не загрузился: изменить задание сейчас нельзя.",
+  subjectsLoading: "Загрузка предметов…",
+  /** An empty subject of a lesson's assignment shows the lesson's subject, so «Без предмета» would be untrue. */
+  lessonSubject: "Предмет занятия",
+} as const;
+
+/** The aria-label of a row's delete button: the visible word first, then which assignment. */
+export function removeLabel(title: string): string {
+  return `${changeTexts.remove} задание: ${title}`;
+}
+
+const changeProblemTexts: Readonly<Record<string, string>> = {
+  in_use: "Сначала дождитесь отправки или работы над заданием",
+  changed: "Задание уже изменилось. Данные обновлены, повторите действие",
+  deleted: "Задание уже удалено",
+  not_found: "Задание не найдено",
+  failed: "Не удалось выполнить действие. Попробуйте ещё раз",
+};
+
+/** The Russian text of a delete, restore or edit refusal; an unknown code is the generic failure. */
+export function changeProblemText(problem: string): string {
+  return Object.hasOwn(changeProblemTexts, problem) ? changeProblemTexts[problem] : changeProblemTexts.failed;
+}
+
+/** A refusal after which the shown data is out of date: the page reloads it. */
+export function changeNeedsReload(problem: string): boolean {
+  return problem === "changed" || problem === "deleted" || problem === "not_found";
+}
+
+/** What the page shows after «Удалить» or «Вернуть»: the stored assignment (new version), or the refusal. */
+export interface ChangeOutcome {
+  assignment: AssignmentItem | null;
+  text: string;
+  reload: boolean;
+}
+
+export function changeOutcome(r: ChangeAssignmentResult): ChangeOutcome {
+  if (r.problem === "" && r.assignment !== null) {
+    return { assignment: r.assignment, text: "", reload: false };
+  }
+  return { assignment: null, text: changeProblemText(r.problem), reload: changeNeedsReload(r.problem) };
+}
+
+/**
+ * One call per key at a time: a double click on «Удалить» reaches the binding once. run gives null when the key is
+ * busy. The guard is synchronous, so it holds before the re-render that disables the button.
+ */
+export function flightGuard() {
+  const running = new Set<string>();
+  return {
+    has: (key: string) => running.has(key),
+    async run<T>(key: string, call: () => Promise<T>): Promise<T | null> {
+      if (running.has(key)) {
+        return null;
+      }
+      running.add(key);
+      try {
+        return await call();
+      } finally {
+        running.delete(key);
+      }
+    },
+  };
+}
+
+function two(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** The deadline as the form fields: local date YYYY-MM-DD and time HH:MM; 23:59 is the end of the day, no time. */
+export function dueFields(due: string): { date: string; time: string } {
+  const d = new Date(due);
+  if (due === "" || Number.isNaN(d.getTime())) {
+    return { date: "", time: "" };
+  }
+  const time = `${two(d.getHours())}:${two(d.getMinutes())}`;
+  return { date: `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`, time: time === "23:59" ? "" : time };
+}
+
+/** The library subject with this name; the assignment has no subject id, only the shown name. */
+export function subjectIdByName(name: string, subjects: readonly LibrarySubject[]): string {
+  const n = name.trim();
+  return n === "" ? "" : (subjects.find((s) => s.name.trim() === n)?.id ?? "");
+}
+
+/**
+ * The subject the edit form starts with. A lesson's subject stays "" (the empty choice is the lesson's subject, which
+ * the core falls back to); otherwise the library subject of the same name, or "" when there is none.
+ */
+export function editSubjectId(a: AssignmentItem, subjects: readonly LibrarySubject[]): string {
+  return a.subjectFromLesson ? "" : subjectIdByName(a.subject, subjects);
+}
+
+/** The label of the empty subject option of an assignment. */
+export function noSubjectLabel(a: AssignmentItem): string {
+  return a.lessonId !== "" || a.subjectFromLesson ? changeTexts.lessonSubject : addTexts.noSubject;
+}
+
+/** The edit form prefilled with the stored assignment. */
+export function editForm(a: AssignmentItem, subjects: readonly LibrarySubject[]): AddForm {
+  const { date, time } = dueFields(a.due);
+  return { title: a.title, subjectId: editSubjectId(a, subjects), date, time, note: a.description };
+}
+
+/** Like validateAddForm, but an assignment may have no deadline: an empty date is left to the core. */
+export function validateEditForm(f: AddForm): AddFieldErrors {
+  const errors = validateAddForm(f);
+  if (f.date === "" && errors.due !== undefined) {
+    delete errors.due;
+  }
+  return errors;
+}
+
+export function editRequest(a: { id: string; version: number }, f: AddForm): EditAssignmentRequest {
+  return { id: a.id, version: a.version, title: f.title.trim(), note: f.note, subjectId: f.subjectId, date: f.date, time: f.time };
+}
+
+const editFieldTexts: Readonly<Record<"title" | "note" | "due" | "time", string>> = {
+  title: fieldTexts.title,
+  // The length is checked before the call, so the core's refusal of a note is its characters (bidi and control).
+  note: "Заметка содержит неподдерживаемые управляющие символы: исправьте её или очистите поле",
+  due: fieldTexts.due,
+  time: fieldTexts.time,
+};
+
+/** What the edit form shows for the core's reply. */
+export interface EditOutcome {
+  saved: AssignmentItem | null;
+  fieldErrors: AddFieldErrors;
+  general: string;
+  reload: boolean;
+}
+
+export function editOutcome(r: EditAssignmentResult): EditOutcome {
+  if (r.problem === "" && r.assignment !== null) {
+    return { saved: r.assignment, fieldErrors: {}, general: "", reload: false };
+  }
+  const none = { saved: null, fieldErrors: {}, general: "", reload: false };
+  if (r.problem === "invalid") {
+    if (r.field === "title" || r.field === "note" || r.field === "due" || r.field === "time") {
+      return { ...none, fieldErrors: { [r.field]: editFieldTexts[r.field] } };
+    }
+    return { ...none, general: problemTexts.invalid };
+  }
+  if (r.problem === "subject_not_found") {
+    return { ...none, fieldErrors: { subject: "Такого предмета нет в библиотеке" } };
+  }
+  return { ...none, general: changeProblemText(r.problem), reload: changeNeedsReload(r.problem) };
 }

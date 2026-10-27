@@ -4,6 +4,7 @@ import { CollapsibleList } from "../CollapsibleList";
 import {
   type AssignmentDetail,
   type AssignmentItem,
+  type ChangeAssignmentResult,
   type DeliveryItem,
   type GenerationStatus,
   type HomeworkApi,
@@ -20,6 +21,10 @@ import {
   assignmentCounts,
   assignmentDeliveryView,
   type AssignmentFilter,
+  changeOutcome,
+  changeTexts,
+  flightGuard,
+  removeLabel,
   filterAssignments,
   blockedByEmail,
   type ChipView,
@@ -50,7 +55,7 @@ import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Field, Input, ResultLine, type ResultKind, Row } from "../ui/controls";
 import { StatusChip } from "../ui/StatusChip";
 import { FilterCounters, filterEmpty } from "./AssignmentFilter";
-import { AddAssignmentDialog, SendAgainDialog, SendDialog, type SendResult } from "./HomeworkDialogs";
+import { AddAssignmentDialog, EditAssignmentDialog, RemovedLine, SendAgainDialog, SendDialog, type SendResult } from "./HomeworkDialogs";
 import { HomeworkTurnkey } from "./HomeworkTurnkey";
 import { LessonCorrection } from "./LessonCorrection";
 import { TranscriptLinks } from "./TranscriptLinks";
@@ -97,6 +102,14 @@ function MessageLine(props: { message: Message }) {
 function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void }) {
   const { api } = props;
   const [items, setItems] = useState<AssignmentItem[] | null>(null);
+  // Deleted in this visit: the stored assignment at its new version, which «Вернуть» sends back.
+  const [removed, setRemoved] = useState<Readonly<Record<string, AssignmentItem>>>({});
+  const [restoredId, setRestoredId] = useState("");
+  const [busyId, setBusyId] = useState("");
+  const [rowProblem, setRowProblem] = useState<{ id: string; text: string } | null>(null);
+  const removedRef = useRef(removed);
+  removedRef.current = removed;
+  const guard = useRef(flightGuard());
   const [deliveries, setDeliveries] = useState<Readonly<Record<string, DeliveryItem[]>>>({});
   const [deliveriesLoaded, setDeliveriesLoaded] = useState(false);
   const [filter, setFilter] = useState<AssignmentFilter>("all");
@@ -139,7 +152,82 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
     };
   }, [api]);
 
+  // After a refusal that says the list is out of date, the list is read again (the removed lines stay).
+  async function reloadItems() {
+    try {
+      const as = await api.listAssignments();
+      // The core no longer lists the assignments deleted in this visit; their lines stay for «Вернуть».
+      setItems((prev) => [
+        ...as,
+        ...(prev ?? []).filter((x) => Object.hasOwn(removedRef.current, x.id) && !as.some((y) => y.id === x.id)),
+      ]);
+    } catch {
+      // The old list stays; the refusal text already asks to repeat.
+    }
+  }
+
+  async function change(a: AssignmentItem, call: () => Promise<ChangeAssignmentResult>, done: (next: AssignmentItem) => void) {
+    setRowProblem(null);
+    setBusyId(a.id);
+    try {
+      const r = await guard.current.run(a.id, call);
+      if (r === null) {
+        return; // a second click while the first call runs
+      }
+      const out = changeOutcome(r);
+      if (out.assignment !== null) {
+        done(out.assignment);
+        return;
+      }
+      setRowProblem({ id: a.id, text: out.text });
+      if (out.reload) {
+        await reloadItems();
+      }
+    } finally {
+      setBusyId((cur) => (cur === a.id ? "" : cur));
+    }
+  }
+
+  const remove = (a: AssignmentItem) =>
+    change(
+      a,
+      () => api.deleteAssignment(a.id, a.version),
+      (next) => {
+        setRestoredId("");
+        setRemoved((cur) => ({ ...cur, [a.id]: next }));
+      },
+    );
+
+  const restore = (a: AssignmentItem, gone: AssignmentItem) =>
+    change(
+      a,
+      () => api.restoreAssignment(a.id, gone.version),
+      (next) => {
+        setRemoved((cur) => {
+          const { [a.id]: _gone, ...rest } = cur;
+          return rest;
+        });
+        setItems((cur) => (cur === null ? cur : cur.map((x) => (x.id === a.id ? next : x))));
+        setRestoredId(a.id);
+      },
+    );
+
   const row = (a: AssignmentItem) => {
+    const problem = rowProblem !== null && rowProblem.id === a.id ? rowProblem.text : "";
+    const problemLine = problem !== "" && (
+      <ResultLine kind="fail" role="alert">
+        {problem}
+      </ResultLine>
+    );
+    if (Object.hasOwn(removed, a.id)) {
+      return (
+        <Row
+          key={a.id}
+          title={<RemovedLine busy={busyId === a.id} onRestore={() => void restore(a, removed[a.id])} />}
+          below={problemLine}
+        />
+      );
+    }
     const chip = assignmentDeliveryView(Object.hasOwn(deliveries, a.id) ? deliveries[a.id] : undefined);
     const lesson = lessonText(a);
     return (
@@ -153,11 +241,28 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
           </>
         }
         status={chip && <Chip view={chip} />}
-        actions={<Button onClick={() => props.onOpen(a.id)}>Открыть</Button>}
+        actions={
+          <>
+            <Button onClick={() => props.onOpen(a.id)}>Открыть</Button>
+            <Button
+              variant="danger"
+              aria-label={removeLabel(a.title)}
+              autoFocus={restoredId === a.id}
+              busy={busyId === a.id}
+              busyLabel={changeTexts.removing}
+              disabled={busyId === a.id}
+              onClick={() => void remove(a)}
+            >
+              {changeTexts.remove}
+            </Button>
+          </>
+        }
+        below={problemLine}
       />
     );
   };
 
+  const live = items === null ? [] : items.filter((a) => !Object.hasOwn(removed, a.id));
   const shown = items === null ? [] : filterAssignments(items, filter, deliveries, deliveriesLoaded);
 
   return (
@@ -197,7 +302,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
       ) : (
         <>
           <FilterCounters
-            counts={assignmentCounts(items, deliveries, deliveriesLoaded)}
+            counts={assignmentCounts(live, deliveries, deliveriesLoaded)}
             value={filter}
             onChange={(f) => {
               setFilter(f);
@@ -266,6 +371,11 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
   const [sendFormat, setSendFormat] = useState<SendFormat>(defaultSendFormat);
   const [sendAgain, setSendAgain] = useState<DeliveryItem | null>(null);
   const [correcting, setCorrecting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [gone, setGone] = useState<AssignmentItem | null>(null);
+  const [changing, setChanging] = useState(false);
+  const [changeProblem, setChangeProblem] = useState("");
+  const library = useMemo(() => libraryApi(callByName), []);
   const mounted = useRef(true);
   const acting = useRef(false); // one action at a time; a double click must not start a second one
   const loadingDeliveries = useRef(false);
@@ -657,6 +767,33 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
       "mail",
     );
 
+  // «Удалить» and «Вернуть» of this assignment; gone is the stored assignment at its new version, shown until the
+  // student leaves the page. The guard keeps a double click to one call.
+  const removeGuard = useRef(flightGuard());
+  async function changeThis(call: () => Promise<ChangeAssignmentResult>, done: (next: AssignmentItem) => void) {
+    setChangeProblem("");
+    setChanging(true);
+    try {
+      const r = await removeGuard.current.run(id, call);
+      if (r === null || !mounted.current) {
+        return;
+      }
+      const out = changeOutcome(r);
+      if (out.assignment !== null) {
+        done(out.assignment);
+        return;
+      }
+      setChangeProblem(out.text);
+      if (out.reload) {
+        await reload(true).catch(() => undefined);
+      }
+    } finally {
+      if (mounted.current) {
+        setChanging(false);
+      }
+    }
+  }
+
   if (detail === null) {
     return (
       <section className="page hw">
@@ -681,6 +818,35 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
   const versions = [...detail.versions].reverse(); // newest first
   const genView = gen && generationView(gen.status);
 
+  if (gone !== null) {
+    return (
+      <section className="page hw">
+        <div className="hw-back">
+          <Button variant="ghost" onClick={props.onBack}>
+            Все задания
+          </Button>
+        </div>
+        <RemovedLine
+          busy={changing}
+          onRestore={() =>
+            void changeThis(
+              () => api.restoreAssignment(id, gone.version),
+              (next) => {
+                setDetail((d) => (d === null ? d : { ...d, assignment: next }));
+                setGone(null);
+              },
+            )
+          }
+        />
+        {changeProblem && (
+          <ResultLine kind="fail" role="alert">
+            {changeProblem}
+          </ResultLine>
+        )}
+      </section>
+    );
+  }
+
   return (
     <section className="page hw">
       <div className="hw-back">
@@ -691,7 +857,48 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
       <div className="head">
         <h1 className="hw-title">{a.title}</h1>
         <span className="muted num">{dueText(a.due)}</span>
+        <div className="acts">
+          <Button disabled={changing} onClick={() => setEditing(true)}>
+            {changeTexts.edit}
+          </Button>
+          <Button
+            variant="danger"
+            aria-label={removeLabel(a.title)}
+            busy={changing}
+            busyLabel={changeTexts.removing}
+            disabled={changing}
+            onClick={() =>
+              void changeThis(
+                () => api.deleteAssignment(id, a.version),
+                (next) => {
+                  setEditing(false);
+                  setGone(next);
+                },
+              )
+            }
+          >
+            {changeTexts.remove}
+          </Button>
+        </div>
       </div>
+      {changeProblem && (
+        <ResultLine kind="fail" role="alert">
+          {changeProblem}
+        </ResultLine>
+      )}
+      {editing && (
+        <EditAssignmentDialog
+          api={api}
+          library={library}
+          assignment={a}
+          onClose={() => setEditing(false)}
+          onSaved={(next) => {
+            setDetail((d) => (d === null ? d : { ...d, assignment: next }));
+            setEditing(false);
+          }}
+          onStale={() => reload(true).catch(() => undefined)}
+        />
+      )}
       <div className="hw-lesson-head">
         {lesson !== "" && <span className="hw-lesson">{lesson}</span>}
         {!correcting && (
