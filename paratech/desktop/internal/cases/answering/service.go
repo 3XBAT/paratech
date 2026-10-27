@@ -19,6 +19,7 @@ const (
 	opAsked     = "answering: answer made"
 	opReused    = "answering: answer found by its key"
 	opNoPassage = "answering: no passage matches the question"
+	opNoteCheck = "answering: note of a citation not checked, shown as there"
 )
 
 // Service answers questions from the student's lessons.
@@ -26,6 +27,7 @@ type Service struct {
 	knowledge Knowledge
 	reader    Reader
 	answers   Repository
+	notes     Notes // nil: no citation shows as removed
 	clock     Clock
 	ids       IDs
 	log       *slog.Logger
@@ -40,7 +42,8 @@ func New(d Deps) (*Service, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Service{knowledge: d.Knowledge, reader: d.Reader, answers: d.Answers, clock: d.Clock, ids: d.IDs, log: log}, nil
+	return &Service{knowledge: d.Knowledge, reader: d.Reader, answers: d.Answers, notes: d.Notes, clock: d.Clock, ids: d.IDs,
+		log: log}, nil
 }
 
 // Ask answers question from the lessons of a library subject, or of the whole base for a zero subject. The passages
@@ -146,6 +149,38 @@ func (s *Service) Answer(ctx context.Context, id shared.AnswerID) (*answer.Answe
 		return nil, s.local(ctx, err)
 	}
 	return a, nil
+}
+
+// Card returns a stored answer for its card with the sources of notes removed since it was made (Card.Removed), so
+// such a citation shows «источник удалён» (ADR-0027). A note that cannot be checked is logged and shown as there.
+// Errors: those of Answer.
+func (s *Service) Card(ctx context.Context, id shared.AnswerID) (Card, error) {
+	a, err := s.Answer(ctx, id)
+	if err != nil {
+		return Card{}, err
+	}
+	sources := a.Sources()
+	removed := make([]bool, len(sources))
+	if s.notes == nil {
+		return Card{Answer: a, Removed: removed}, nil
+	}
+	active := map[shared.NoteID]bool{}
+	for i, src := range sources {
+		if src.Section != answer.SectionOwnNote {
+			continue
+		}
+		ok, seen := active[src.Note]
+		if !seen {
+			if ok, err = s.notes.NoteActive(ctx, src.Note); err != nil {
+				s.log.WarnContext(ctx, opNoteCheck, slog.String("answer", string(id)), slog.String("note", string(src.Note)),
+					slog.Any("cause", err))
+				ok = true
+			}
+			active[src.Note] = ok
+		}
+		removed[i] = !ok
+	}
+	return Card{Answer: a, Removed: removed}, nil
 }
 
 // find returns the stored answer of key; ok is false when there is none.

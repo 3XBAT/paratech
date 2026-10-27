@@ -40,7 +40,8 @@ func TestTicketCoveredByOwnNote(t *testing.T) {
 		lines = append(lines, strings.Join(b.Lines, "|"))
 	}
 	all := strings.Join(lines, "\n")
-	if !strings.Contains(all, "Если сходится ряд модулей. [источник: лекция «Ряды», 20.10.2026]") {
+	if !strings.Contains(all, "Если сходится ряд модулей. [источник: "+answer.OwnNoteName+" · стр. 3, «Ряды», 20.10.2026]") ||
+		!strings.Contains(all, "Нет в ваших лекциях и конспектах.") {
 		t.Fatalf("the claim of the note is not in the file:\n%s", all)
 	}
 	for _, id := range []string{"n1", "m1", "r1"} {

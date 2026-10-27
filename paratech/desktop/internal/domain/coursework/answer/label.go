@@ -6,6 +6,10 @@ import "strconv"
 // source is OwnNoteLabel.
 const OwnNoteName = "ваш конспект"
 
+// SourceRemovedLabel names a citation of a note of the student removed since the answer was made (ADR-0027): the
+// answer stays, its place no longer opens.
+const SourceRemovedLabel = "источник удалён"
+
 // Wording of the place of a note source.
 const (
 	labelSeparator = " · "

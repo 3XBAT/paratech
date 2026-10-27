@@ -13,14 +13,18 @@ import (
 )
 
 type fakeAnswers struct {
-	a    *answer.Answer
-	err  error
-	asks []shared.AnswerID
+	a       *answer.Answer
+	removed []bool
+	err     error
+	asks    []shared.AnswerID
 }
 
-func (f *fakeAnswers) Answer(_ context.Context, id shared.AnswerID) (*answer.Answer, error) {
+func (f *fakeAnswers) Card(_ context.Context, id shared.AnswerID) (answering.Card, error) {
 	f.asks = append(f.asks, id)
-	return f.a, f.err
+	if f.err != nil {
+		return answering.Card{}, f.err
+	}
+	return answering.Card{Answer: f.a, Removed: f.removed}, nil
 }
 
 func cardAnswer(t *testing.T) *answer.Answer {
@@ -70,7 +74,7 @@ func TestAnswerViewJSON(t *testing.T) {
 }
 
 // noNote is how a source of a recording shows the note fields.
-const noNote = `"noteId":"","materialId":"","locatorKind":"","locatorN":0,"label":""`
+const noNote = `"noteId":"","materialId":"","locatorKind":"","locatorN":0,"label":"","removed":false`
 
 // A source of the student's note maps to the card with its note, file, place and label, no recording and no time.
 func TestAnswerViewOwnNote(t *testing.T) {
@@ -101,9 +105,19 @@ func TestAnswerViewOwnNote(t *testing.T) {
 	}
 	want := `[{"recordingId":"","section":"ownNote","index":2,"startMs":0,"time":"","title":"Матанализ",` +
 		`"startedAt":"2026-10-20T00:00:00Z","noteId":"n1","materialId":"m1","locatorKind":"section","locatorN":4,` +
-		`"label":"ваш конспект · раздел „Ряды“"}]`
+		`"label":"ваш конспект · раздел „Ряды“","removed":false}]`
 	if string(b) != want || !got.Claims[0].FromLessons {
 		t.Fatalf("sources =\n%s\nwant\n%s", b, want)
+	}
+
+	// The note removed since: the source says so, the claim and its quote stay.
+	removed, err := NewAnswerService(&fakeAnswers{a: a, removed: []bool{true}}, discard()).Answer(t.Context(), "an1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := removed.Sources[0]; !s.Removed || s.Label != "источник удалён" || s.NoteID != "n1" ||
+		len(removed.Claims[0].Cites) != 1 || !removed.Claims[0].FromLessons {
+		t.Fatalf("removed = %+v", removed)
 	}
 }
 
