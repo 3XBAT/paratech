@@ -106,40 +106,22 @@ func (q *Queries) GetAgentActionByCall(ctx context.Context, arg GetAgentActionBy
 
 const getAgentThread = `-- name: GetAgentThread :one
 
-SELECT id, subject_key, turns, history_from, seen, version, created_at, updated_at FROM agent_threads WHERE id = ?1
+SELECT id, title, turns, history_from, seen, archived_at, last_active_at, version, created_at, updated_at FROM agent_threads WHERE id = ?1
 `
 
-// The agent panel (TASK-116): threads with their current request, the history sent to the planner and the action
-// journal. Threads and journal entries use the optimistic-concurrency protocol of ADR-0004(d).
+// The agent panel (TASK-116): chats (threads) with their current request, the history sent to the planner and the
+// action journal. Threads and journal entries use the optimistic-concurrency protocol of ADR-0004(d).
 func (q *Queries) GetAgentThread(ctx context.Context, id string) (AgentThread, error) {
 	row := q.db.QueryRowContext(ctx, getAgentThread, id)
 	var i AgentThread
 	err := row.Scan(
 		&i.ID,
-		&i.SubjectKey,
+		&i.Title,
 		&i.Turns,
 		&i.HistoryFrom,
 		&i.Seen,
-		&i.Version,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getAgentThreadByKey = `-- name: GetAgentThreadByKey :one
-SELECT id, subject_key, turns, history_from, seen, version, created_at, updated_at FROM agent_threads WHERE subject_key = ?1
-`
-
-func (q *Queries) GetAgentThreadByKey(ctx context.Context, subjectKey string) (AgentThread, error) {
-	row := q.db.QueryRowContext(ctx, getAgentThreadByKey, subjectKey)
-	var i AgentThread
-	err := row.Scan(
-		&i.ID,
-		&i.SubjectKey,
-		&i.Turns,
-		&i.HistoryFrom,
-		&i.Seen,
+		&i.ArchivedAt,
+		&i.LastActiveAt,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -148,7 +130,7 @@ func (q *Queries) GetAgentThreadByKey(ctx context.Context, subjectKey string) (A
 }
 
 const getAgentTurn = `-- name: GetAgentTurn :one
-SELECT thread_id, number, status, resume_status, stop_reason, scope, steps, writes, paid_unplanned, planner_input, question_rounds, step_open, retry, proposed_plan, approved_plan, used, open_calls, created_ids, started_at, updated_at FROM agent_turns WHERE thread_id = ?1 AND number = ?2
+SELECT thread_id, number, status, resume_status, stop_reason, scope, mentions, steps, writes, paid_unplanned, planner_input, question_rounds, step_open, retry, proposed_plan, approved_plan, used, open_calls, created_ids, dropped_by, started_at, updated_at FROM agent_turns WHERE thread_id = ?1 AND number = ?2
 `
 
 type GetAgentTurnParams struct {
@@ -166,6 +148,7 @@ func (q *Queries) GetAgentTurn(ctx context.Context, arg GetAgentTurnParams) (Age
 		&i.ResumeStatus,
 		&i.StopReason,
 		&i.Scope,
+		&i.Mentions,
 		&i.Steps,
 		&i.Writes,
 		&i.PaidUnplanned,
@@ -178,7 +161,34 @@ func (q *Queries) GetAgentTurn(ctx context.Context, arg GetAgentTurnParams) (Age
 		&i.Used,
 		&i.OpenCalls,
 		&i.CreatedIds,
+		&i.DroppedBy,
 		&i.StartedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getCurrentAgentThread = `-- name: GetCurrentAgentThread :one
+SELECT id, title, turns, history_from, seen, archived_at, last_active_at, version, created_at, updated_at FROM agent_threads
+WHERE archived_at IS NULL
+ORDER BY last_active_at DESC, id DESC
+LIMIT 1
+`
+
+// The current chat (ADR-0028): the unarchived one active last; ties go to the newer id.
+func (q *Queries) GetCurrentAgentThread(ctx context.Context) (AgentThread, error) {
+	row := q.db.QueryRowContext(ctx, getCurrentAgentThread)
+	var i AgentThread
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Turns,
+		&i.HistoryFrom,
+		&i.Seen,
+		&i.ArchivedAt,
+		&i.LastActiveAt,
+		&i.Version,
+		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -255,29 +265,34 @@ func (q *Queries) InsertAgentStep(ctx context.Context, arg InsertAgentStepParams
 }
 
 const insertAgentThread = `-- name: InsertAgentThread :exec
-INSERT INTO agent_threads (id, subject_key, turns, history_from, seen, version, created_at, updated_at)
-VALUES (?1, ?2, ?3, ?4, ?5, 1,
-        ?6, ?7)
+INSERT INTO agent_threads (id, title, turns, history_from, seen, archived_at, last_active_at, version, created_at,
+                           updated_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6,
+        ?7, 1, ?8, ?9)
 `
 
 type InsertAgentThreadParams struct {
-	ID          string
-	SubjectKey  string
-	Turns       int64
-	HistoryFrom int64
-	Seen        string
-	CreatedAt   int64
-	UpdatedAt   int64
+	ID           string
+	Title        string
+	Turns        int64
+	HistoryFrom  int64
+	Seen         string
+	ArchivedAt   sql.NullInt64
+	LastActiveAt int64
+	CreatedAt    int64
+	UpdatedAt    int64
 }
 
 // A never-stored thread (version 0) is inserted with version 1.
 func (q *Queries) InsertAgentThread(ctx context.Context, arg InsertAgentThreadParams) error {
 	_, err := q.db.ExecContext(ctx, insertAgentThread,
 		arg.ID,
-		arg.SubjectKey,
+		arg.Title,
 		arg.Turns,
 		arg.HistoryFrom,
 		arg.Seen,
+		arg.ArchivedAt,
+		arg.LastActiveAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -285,14 +300,14 @@ func (q *Queries) InsertAgentThread(ctx context.Context, arg InsertAgentThreadPa
 }
 
 const insertAgentTurn = `-- name: InsertAgentTurn :exec
-INSERT INTO agent_turns (thread_id, number, status, resume_status, stop_reason, scope, steps, writes, paid_unplanned,
-                         planner_input, question_rounds, step_open, retry, proposed_plan, approved_plan, used,
-                         open_calls, created_ids, started_at, updated_at)
+INSERT INTO agent_turns (thread_id, number, status, resume_status, stop_reason, scope, mentions, steps, writes,
+                         paid_unplanned, planner_input, question_rounds, step_open, retry, proposed_plan, approved_plan,
+                         used, open_calls, created_ids, started_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5,
-        ?6, ?7, ?8, ?9, ?10,
-        ?11, ?12, ?13, ?14,
-        ?15, ?16, ?17, ?18, ?19,
-        ?20)
+        ?6, ?7, ?8, ?9, ?10, ?11,
+        ?12, ?13, ?14, ?15,
+        ?16, ?17, ?18, ?19, ?20,
+        ?21)
 `
 
 type InsertAgentTurnParams struct {
@@ -302,6 +317,7 @@ type InsertAgentTurnParams struct {
 	ResumeStatus   string
 	StopReason     string
 	Scope          string
+	Mentions       string
 	Steps          int64
 	Writes         int64
 	PaidUnplanned  int64
@@ -326,6 +342,7 @@ func (q *Queries) InsertAgentTurn(ctx context.Context, arg InsertAgentTurnParams
 		arg.ResumeStatus,
 		arg.StopReason,
 		arg.Scope,
+		arg.Mentions,
 		arg.Steps,
 		arg.Writes,
 		arg.PaidUnplanned,
@@ -408,9 +425,10 @@ func (q *Queries) ListAgentActionsByThread(ctx context.Context, arg ListAgentAct
 }
 
 const listAgentSteps = `-- name: ListAgentSteps :many
-SELECT thread_id, seq, turn, entry, body, created_at FROM agent_steps
-WHERE thread_id = ?1 AND turn >= ?2
-ORDER BY seq DESC
+SELECT s.thread_id, s.seq, s.turn, s.entry, s.body, s.created_at FROM agent_steps s
+WHERE s.thread_id = ?1 AND s.turn >= ?2
+  AND NOT EXISTS (SELECT 1 FROM agent_turns u WHERE u.thread_id = s.thread_id AND u.number = s.turn AND u.dropped_by > 0)
+ORDER BY s.seq DESC
 LIMIT ?3
 `
 
@@ -420,7 +438,8 @@ type ListAgentStepsParams struct {
 	MaxRows  int64
 }
 
-// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first).
+// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first). Entries
+// of dropped requests are left out here, so they never take a place under the limit (ADR-0028).
 func (q *Queries) ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) ([]AgentStep, error) {
 	rows, err := q.db.QueryContext(ctx, listAgentSteps, arg.ThreadID, arg.FromTurn, arg.MaxRows)
 	if err != nil {
@@ -441,6 +460,36 @@ func (q *Queries) ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) 
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentThreadIDs = `-- name: ListAgentThreadIDs :many
+SELECT id FROM agent_threads
+ORDER BY archived_at IS NOT NULL, last_active_at DESC, id DESC
+`
+
+// Every chat: the unarchived ones by their last activity, newest first, then the archived ones in the same order.
+// (Comments of this file stay ASCII: sqlc rewrites queries by byte offset.)
+func (q *Queries) ListAgentThreadIDs(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listAgentThreadIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -609,29 +658,38 @@ func (q *Queries) UpdateAgentAction(ctx context.Context, arg UpdateAgentActionPa
 
 const updateAgentThread = `-- name: UpdateAgentThread :execrows
 UPDATE agent_threads
-SET turns        = ?1,
-    history_from = ?2,
-    seen         = ?3,
-    version      = version + 1,
-    updated_at   = ?4
-WHERE id = ?5 AND version = ?6
+SET title          = ?1,
+    turns          = ?2,
+    history_from   = ?3,
+    seen           = ?4,
+    archived_at    = ?5,
+    last_active_at = ?6,
+    version        = version + 1,
+    updated_at     = ?7
+WHERE id = ?8 AND version = ?9
 `
 
 type UpdateAgentThreadParams struct {
+	Title           string
 	Turns           int64
 	HistoryFrom     int64
 	Seen            string
+	ArchivedAt      sql.NullInt64
+	LastActiveAt    int64
 	UpdatedAt       int64
 	ID              string
 	ExpectedVersion int64
 }
 
-// Compare-and-swap on the loaded version; the key never changes.
+// Compare-and-swap on the loaded version.
 func (q *Queries) UpdateAgentThread(ctx context.Context, arg UpdateAgentThreadParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateAgentThread,
+		arg.Title,
 		arg.Turns,
 		arg.HistoryFrom,
 		arg.Seen,
+		arg.ArchivedAt,
+		arg.LastActiveAt,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.ExpectedVersion,

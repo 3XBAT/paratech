@@ -5,13 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-	"time"
 
 	"paratech/desktop/internal/cases/preferences"
 	"paratech/desktop/internal/cases/turnkey"
 	"paratech/desktop/internal/domain/agent/action"
 	"paratech/desktop/internal/domain/agent/services/actionpolicy"
-	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -31,14 +29,20 @@ func mustScope(t *testing.T, subject string) values.Scope {
 	return s
 }
 
-type memThreads map[shared.ThreadID]*thread.Thread
+type request struct {
+	thread shared.ThreadID
+	turn   int
+}
 
-func (m memThreads) Get(_ context.Context, id shared.ThreadID) (*thread.Thread, error) {
-	th, ok := m[id]
+// memScopes are the scopes of the stored requests.
+type memScopes map[request]values.Scope
+
+func (m memScopes) RequestScope(_ context.Context, id shared.ThreadID, turn int) (values.Scope, error) {
+	sc, ok := m[request{id, turn}]
 	if !ok {
-		return nil, fmt.Errorf("thread %s: %w", id, shared.ErrNotFound)
+		return values.Scope{}, fmt.Errorf("request %s/%d: %w", id, turn, shared.ErrNotFound)
 	}
-	return th, nil
+	return sc, nil
 }
 
 type memHistory map[shared.ThreadID][]values.HistoryEntry
@@ -95,20 +99,13 @@ type freeWorld struct {
 	free    *FreeWorks
 }
 
-// newFreeWorld has thread th1 of subject s1 whose request 2 has call c1 waiting on the card, and thread th2 «Без
-// предмета» whose request 1 has call c7 waiting.
+// newFreeWorld has thread th1 whose request 2, in subject s1, has call c1 waiting on the card (its request 1 was in
+// another subject: the request's subject counts, not the chat's), and thread th2 whose request 1, «Без предмета», has
+// call c7 waiting.
 func newFreeWorld(t *testing.T) *freeWorld {
 	t.Helper()
 	w, f := withTurnkey(t, turnkey.Started{View: questionsView(2), Created: true}, nil)
-	now := time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC)
-	th1, err := thread.New("th1", thread.Key("s1"), now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	th2, err := thread.New("th2", thread.NoSubject, now)
-	if err != nil {
-		t.Fatal(err)
-	}
+	scopes := memScopes{{"th1", 1}: mustScope(t, "s2"), {"th1", 2}: mustScope(t, "s1"), {"th2", 1}: {}, {"th2", 2}: {}}
 	args := `{"topic":"` + freeTopic + `"}`
 	history := memHistory{
 		"th1": waitingCall(t, 2, "c1", "triage_assignment", args),
@@ -116,7 +113,7 @@ func newFreeWorld(t *testing.T) *freeWorld {
 	}
 	n := &memNotice{on: true}
 	free, err := NewFreeWorks(FreeWorkDeps{
-		Threads: memThreads{"th1": th1, "th2": th2}, History: history, Journal: w.journal, Actions: w.actions, Settings: n,
+		Threads: scopes, History: history, Journal: w.journal, Actions: w.actions, Settings: n,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +123,7 @@ func newFreeWorld(t *testing.T) *freeWorld {
 
 var card1 = values.FreeWorkCard{Thread: "th1", Turn: 2, CallID: "c1"}
 
-// «Сделать» starts one work with the topic of the stored call and the thread's subject, journaled with Undo; a
+// «Сделать» starts one work with the topic of the stored call and the subject of its request, journaled with Undo; a
 // second «Сделать» returns the same work without another reader call or journal entry.
 func TestFreeWorkAccept(t *testing.T) {
 	fw := newFreeWorld(t)
@@ -234,6 +231,8 @@ func TestFreeWorkRefusesOtherCards(t *testing.T) {
 func TestFreeWorkOnlyForAWaitingTopic(t *testing.T) {
 	fw := newFreeWorld(t)
 	h := fw.free.history.(memHistory)
+	scopes := fw.free.threads.(memScopes)
+	scopes[request{"th1", 3}], scopes[request{"th1", 4}] = mustScope(t, "s1"), mustScope(t, "s1")
 	h["th1"] = append(h["th1"], waitingCall(t, 3, "c2", "triage_assignment", `{"assignment":"a1"}`)...)
 	ran := waitingCall(t, 4, "c3", "triage_assignment", `{"topic":"x"}`)
 	ran[2].Entry.Results[0] = values.ToolResult{CallID: "c3", ResultJSON: `{"work":"w1"}`}
@@ -346,7 +345,7 @@ func TestFactsOfAFreeTopic(t *testing.T) {
 // The deps are checked.
 func TestNewFreeWorksNeedsDeps(t *testing.T) {
 	w := newWorld(t)
-	full := FreeWorkDeps{Threads: memThreads{}, History: memHistory{}, Journal: w.journal, Actions: w.actions, Settings: &memNotice{}}
+	full := FreeWorkDeps{Threads: memScopes{}, History: memHistory{}, Journal: w.journal, Actions: w.actions, Settings: &memNotice{}}
 	if _, err := NewFreeWorks(full); err != nil {
 		t.Fatal(err)
 	}

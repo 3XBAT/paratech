@@ -16,8 +16,11 @@ import (
 // Operation names of the agent repositories, used in their error messages.
 const (
 	opGetAgentThread    = "sqlite: get agent thread"
+	opCurrentThread     = "sqlite: get current agent chat"
+	opRequestScope      = "sqlite: get agent request scope"
 	opSaveAgentThread   = "sqlite: save agent thread"
 	opListAgentThreads  = "sqlite: list running agent threads"
+	opListAgentChats    = "sqlite: list agent chats"
 	opAppendAgentStep   = "sqlite: append agent history"
 	opListAgentSteps    = "sqlite: read agent history"
 	maxAgentHistoryRows = 1024
@@ -43,6 +46,11 @@ type (
 	refWire struct {
 		Kind string `json:"kind"`
 		ID   string `json:"id"`
+	}
+	mentionWire struct {
+		Kind  string `json:"kind"`
+		ID    string `json:"id"`
+		Label string `json:"label"`
 	}
 	scopeWire struct {
 		Subject    string `json:"subject,omitempty"`
@@ -89,13 +97,41 @@ func (r *AgentThreadRepository) Get(ctx context.Context, id shared.ThreadID) (*t
 	return r.restore(ctx, row)
 }
 
-// GetByKey loads the thread of a subject key; a missing one wraps shared.ErrNotFound.
-func (r *AgentThreadRepository) GetByKey(ctx context.Context, key thread.Key) (*thread.Thread, error) {
-	row, err := r.db.Queries(ctx).GetAgentThreadByKey(ctx, key.String())
+// Current loads the current chat (ADR-0028): the unarchived one active last. None wraps shared.ErrNotFound.
+func (r *AgentThreadRepository) Current(ctx context.Context) (*thread.Thread, error) {
+	row, err := r.db.Queries(ctx).GetCurrentAgentThread(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%s by key: %w", opGetAgentThread, MapError(ctx, err))
+		return nil, fmt.Errorf("%s: %w", opCurrentThread, MapError(ctx, err))
 	}
 	return r.restore(ctx, row)
+}
+
+// List returns every chat: the unarchived ones by last activity, newest first, then the archived ones in the same
+// order.
+func (r *AgentThreadRepository) List(ctx context.Context) ([]*thread.Thread, error) {
+	ids, err := r.db.Queries(ctx).ListAgentThreadIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", opListAgentChats, MapError(ctx, err))
+	}
+	return r.getAll(ctx, ids)
+}
+
+// RequestScope returns the scope stored with request turn of a thread, the subject of that request (ADR-0028); a
+// missing request wraps shared.ErrNotFound.
+func (r *AgentThreadRepository) RequestScope(ctx context.Context, id shared.ThreadID, turn int) (values.Scope, error) {
+	row, err := r.db.Queries(ctx).GetAgentTurn(ctx, sqlcgen.GetAgentTurnParams{ThreadID: string(id), Number: int64(turn)})
+	if err != nil {
+		return values.Scope{}, fmt.Errorf("%s %s/%d: %w", opRequestScope, id, turn, MapError(ctx, err))
+	}
+	var w scopeWire
+	if err := strictJSON(row.Scope, &w); err != nil {
+		return values.Scope{}, fmt.Errorf("stored agent request %s/%d: scope: %w", id, turn, err)
+	}
+	sc, err := scopeFrom(w)
+	if err != nil {
+		return values.Scope{}, fmt.Errorf("stored agent request %s/%d: scope: %w", id, turn, err)
+	}
+	return sc, nil
 }
 
 // ListRunning returns the threads whose current request is PLANNING or EXECUTING.
@@ -104,6 +140,10 @@ func (r *AgentThreadRepository) ListRunning(ctx context.Context) ([]*thread.Thre
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", opListAgentThreads, MapError(ctx, err))
 	}
+	return r.getAll(ctx, ids)
+}
+
+func (r *AgentThreadRepository) getAll(ctx context.Context, ids []string) ([]*thread.Thread, error) {
 	out := make([]*thread.Thread, 0, len(ids))
 	for _, id := range ids {
 		th, err := r.Get(ctx, shared.ThreadID(id))
@@ -116,9 +156,9 @@ func (r *AgentThreadRepository) ListRunning(ctx context.Context) ([]*thread.Thre
 }
 
 // Save writes the thread and its current request in one transaction: an INSERT for version 0, otherwise a version
-// compare-and-swap (ADR-0004(d)). A stale version or an id stored first is shared.ErrVersionConflict; a second
-// thread for the same key is shared.ErrDuplicate. Inside a caller's transaction the new version is set when this
-// write succeeds, before that transaction commits; a caller whose transaction rolls back restores the old version.
+// compare-and-swap (ADR-0004(d)). A stale version or an id stored first is shared.ErrVersionConflict. Inside a
+// caller's transaction the new version is set when this write succeeds, before that transaction commits; a caller
+// whose transaction rolls back restores the old version.
 func (r *AgentThreadRepository) Save(ctx context.Context, th *thread.Thread) error {
 	st := th.State()
 	if st.Version < 0 {
@@ -142,15 +182,17 @@ func (r *AgentThreadRepository) Save(ctx context.Context, th *thread.Thread) err
 		q := r.db.Queries(ctx)
 		if st.Version == 0 {
 			err := DuplicateAsVersionConflict(MapError(ctx, q.InsertAgentThread(ctx, sqlcgen.InsertAgentThreadParams{
-				ID: string(st.ID), SubjectKey: st.Key.String(), Turns: int64(st.Turns), HistoryFrom: int64(st.HistoryFrom),
-				Seen: string(seen), CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
+				ID: string(st.ID), Title: st.Title, Turns: int64(st.Turns), HistoryFrom: int64(st.HistoryFrom),
+				Seen: string(seen), ArchivedAt: jobNullMs(st.ArchivedAt), LastActiveAt: jobMs(st.LastActive),
+				CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
 			})))
 			if err != nil {
 				return err
 			}
 		} else {
 			n, err := q.UpdateAgentThread(ctx, sqlcgen.UpdateAgentThreadParams{
-				Turns: int64(st.Turns), HistoryFrom: int64(st.HistoryFrom), Seen: string(seen), UpdatedAt: jobMs(st.UpdatedAt),
+				Title: st.Title, Turns: int64(st.Turns), HistoryFrom: int64(st.HistoryFrom), Seen: string(seen),
+				ArchivedAt: jobNullMs(st.ArchivedAt), LastActiveAt: jobMs(st.LastActive), UpdatedAt: jobMs(st.UpdatedAt),
 				ID: string(st.ID), ExpectedVersion: st.Version,
 			})
 			if err := VersionCAS(ctx, n, err); err != nil {
@@ -205,7 +247,11 @@ func turnParams(id shared.ThreadID, t thread.TurnState) (sqlcgen.InsertAgentTurn
 	if used == nil {
 		used = []bool{}
 	}
-	enc := map[string]any{"scope": scope, "used": used, "open": open, "created": created}
+	mentions := make([]mentionWire, len(t.Mentions))
+	for i, m := range t.Mentions {
+		mentions[i] = mentionWire{Kind: string(m.Ref().Kind()), ID: m.Ref().ID(), Label: m.Label()}
+	}
+	enc := map[string]any{"scope": scope, "mentions": mentions, "used": used, "open": open, "created": created}
 	text := map[string]string{}
 	for k, v := range enc {
 		b, err := json.Marshal(v)
@@ -220,8 +266,8 @@ func turnParams(id shared.ThreadID, t thread.TurnState) (sqlcgen.InsertAgentTurn
 	}
 	return sqlcgen.InsertAgentTurnParams{
 		ThreadID: string(id), Number: int64(t.Number), Status: string(t.Status), ResumeStatus: string(t.Resume),
-		StopReason: string(t.StopReason), Scope: text["scope"], Steps: int64(t.Budget.Steps), Writes: int64(t.Budget.Writes),
-		PaidUnplanned: int64(t.Budget.PaidUnplanned), PlannerInput: int64(t.Budget.InputTokens),
+		StopReason: string(t.StopReason), Scope: text["scope"], Mentions: text["mentions"], Steps: int64(t.Budget.Steps),
+		Writes: int64(t.Budget.Writes), PaidUnplanned: int64(t.Budget.PaidUnplanned), PlannerInput: int64(t.Budget.InputTokens),
 		QuestionRounds: int64(t.Budget.QuestionRounds), StepOpen: stepOpen, Retry: int64(t.Retry), ProposedPlan: proposed,
 		ApprovedPlan: approved, Used: text["used"], OpenCalls: text["open"], CreatedIds: text["created"],
 		StartedAt: jobMs(t.StartedAt), UpdatedAt: jobMs(t.UpdatedAt),
@@ -266,8 +312,9 @@ func (r *AgentThreadRepository) restore(ctx context.Context, row sqlcgen.AgentTh
 		return bad("seen ids", err)
 	}
 	st := thread.State{
-		Version: row.Version, ID: shared.ThreadID(row.ID), Key: thread.Key(row.SubjectKey), Turns: int(row.Turns),
-		HistoryFrom: int(row.HistoryFrom), CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
+		Version: row.Version, ID: shared.ThreadID(row.ID), Title: row.Title, Turns: int(row.Turns),
+		HistoryFrom: int(row.HistoryFrom), ArchivedAt: jobFromNullMs(row.ArchivedAt), LastActive: jobFromMs(row.LastActiveAt),
+		CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 	}
 	for _, w := range seenWire {
 		ref, err := values.NewRef(values.IDKind(w.Kind), w.ID)
@@ -296,16 +343,20 @@ func (r *AgentThreadRepository) restore(ctx context.Context, row sqlcgen.AgentTh
 
 func turnState(row sqlcgen.AgentTurn) (thread.TurnState, error) {
 	var (
-		scope   scopeWire
-		used    []bool
-		open    []openCallWire
-		created []createdWire
+		scope    scopeWire
+		mentions []mentionWire
+		used     []bool
+		open     []openCallWire
+		created  []createdWire
 	)
 	for _, col := range []struct {
 		name string
 		text string
 		v    any
-	}{{"scope", row.Scope, &scope}, {"used", row.Used, &used}, {"open calls", row.OpenCalls, &open}, {"created ids", row.CreatedIds, &created}} {
+	}{
+		{"scope", row.Scope, &scope}, {"mentions", row.Mentions, &mentions}, {"used", row.Used, &used},
+		{"open calls", row.OpenCalls, &open}, {"created ids", row.CreatedIds, &created},
+	} {
 		if err := strictJSON(col.text, col.v); err != nil {
 			return thread.TurnState{}, fmt.Errorf("%s: %w", col.name, err)
 		}
@@ -330,7 +381,18 @@ func turnState(row sqlcgen.AgentTurn) (thread.TurnState, error) {
 			InputTokens: int(row.PlannerInput), QuestionRounds: int(row.QuestionRounds),
 		},
 		StepOpen: row.StepOpen == 1, ProposedPlan: proposed, ApprovedPlan: approved, Used: used, Retry: int(row.Retry),
-		StartedAt: jobFromMs(row.StartedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
+		DroppedBy: int(row.DroppedBy), StartedAt: jobFromMs(row.StartedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
+	}
+	for _, w := range mentions {
+		ref, err := values.NewRef(values.IDKind(w.Kind), w.ID)
+		if err != nil {
+			return thread.TurnState{}, fmt.Errorf("mentions: %w", err)
+		}
+		m, err := values.NewMention(ref, w.Label)
+		if err != nil {
+			return thread.TurnState{}, fmt.Errorf("mentions: %w", err)
+		}
+		ts.Mentions = append(ts.Mentions, m)
 	}
 	if len(ts.Used) == 0 {
 		ts.Used = nil

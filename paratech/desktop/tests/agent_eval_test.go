@@ -268,7 +268,7 @@ func TestAgentEvalCToolIsNeverExecuted(t *testing.T) {
 }
 
 // TestAgentEvalProvenance: an ID passes only if it was shown to this thread in a field of its kind; IDs the student
-// typed, IDs of another kind and IDs seen in another subject's thread are refused.
+// typed, IDs of another kind and IDs seen in another chat are refused.
 func TestAgentEvalProvenance(t *testing.T) {
 	e := newEvalEnv(t, evalFacts{cost: evalCost})
 	// toolu_1 names an ID the student typed, toolu_2 an assignment as a subject, toolu_3 a job never shown, toolu_4 the
@@ -295,7 +295,14 @@ func TestAgentEvalProvenance(t *testing.T) {
 	}
 	play(t, e, st)
 
-	// The thread of no subject never saw job-1.
+	// Another chat never saw job-1: a newer empty chat is the current one, so the next Ask goes there (ADR-0028).
+	newer, err := thread.New("th9", e.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlite.NewAgentThreadRepository(e.db).Save(context.Background(), newer); err != nil {
+		t.Fatal(err)
+	}
 	e.hub.Then(testenv.AgentCall{ID: "toolu_6", Tool: "job_status", Args: `{"ids":["job-1"]}`}).Then(evalEnd)
 	other, err := e.turns.Ask(context.Background(), agentturn.AskInput{Text: "что с задачей?"})
 	if err != nil {

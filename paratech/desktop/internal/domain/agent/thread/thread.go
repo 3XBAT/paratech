@@ -14,13 +14,11 @@ import (
 // MaxSeenRefs bounds the IDs a thread remembers from tool results.
 const MaxSeenRefs = 4096
 
-// Thread is an agent chat (ADR-0028): its title, archive mark and requests of any subjects. The subject key stays
-// until the storage drops it (TASK-204); no rule ties the scope of a request to it. Fields change only through its
-// methods (ARCH-14).
+// Thread is an agent chat (ADR-0028): its title, archive mark and requests of any subjects; the subject belongs to
+// the scope of each request. Fields change only through its methods (ARCH-14).
 type Thread struct {
 	version int64 // persisted version for optimistic concurrency; 0 = never stored (ADR-0004)
 	id      shared.ThreadID
-	key     Key
 	turns   int   // number of the last request; 0 = none yet
 	current *Turn // the last request; nil only when turns == 0
 	seen    values.RefSet
@@ -35,18 +33,15 @@ type Thread struct {
 }
 
 // New creates an empty chat titled «Новый чат».
-func New(id shared.ThreadID, key Key, now time.Time) (*Thread, error) {
+func New(id shared.ThreadID, now time.Time) (*Thread, error) {
 	if err := id.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidThread, err)
-	}
-	if _, err := ParseKey(string(key)); err != nil {
-		return nil, err
 	}
 	if now.IsZero() {
 		return nil, fmt.Errorf("%w: no creation time", ErrInvalidThread)
 	}
 	return &Thread{
-		id: id, key: key, seen: values.RefSet{}, title: DefaultTitle, lastActive: now, createdAt: now, updatedAt: now,
+		id: id, seen: values.RefSet{}, title: DefaultTitle, lastActive: now, createdAt: now, updatedAt: now,
 	}, nil
 }
 
@@ -75,7 +70,6 @@ type TurnState struct {
 type State struct {
 	Version     int64
 	ID          shared.ThreadID
-	Key         Key
 	Turns       int
 	Current     *TurnState // nil when Turns == 0
 	Seen        []values.Ref
@@ -87,35 +81,24 @@ type State struct {
 	UpdatedAt   time.Time
 }
 
-// Restore rebuilds a stored thread without side effects and checks its invariants. A state stored before chats has
-// no title and no last activity (the storage gains them in TASK-204): it restores as «Новый чат», last active when its
-// last request started.
+// Restore rebuilds a stored thread without side effects and checks its invariants.
 func Restore(s State) (*Thread, error) {
 	bad := func(what string) (*Thread, error) { return nil, fmt.Errorf("%w: %s", ErrInvalidThread, what) }
 	if s.Version < 1 {
 		return bad("stored version must be at least 1")
 	}
-	th, err := New(s.ID, s.Key, s.CreatedAt)
+	th, err := New(s.ID, s.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	if s.UpdatedAt.Before(s.CreatedAt) {
 		return bad("updated before created")
 	}
-	if s.Title == "" {
-		s.Title = DefaultTitle
-	}
 	if err := checkTitle(s.Title); err != nil {
 		return bad(err.Error())
 	}
-	if s.LastActive.IsZero() {
-		s.LastActive = s.CreatedAt
-		if s.Current != nil {
-			s.LastActive = s.Current.StartedAt
-		}
-	}
-	if s.LastActive.Before(s.CreatedAt) {
-		return bad("last active before created")
+	if s.LastActive.IsZero() || s.LastActive.Before(s.CreatedAt) {
+		return bad("no last activity, or before created")
 	}
 	if !s.ArchivedAt.IsZero() && s.ArchivedAt.Before(s.CreatedAt) {
 		return bad("archived before created")
@@ -198,7 +181,7 @@ func restoreTurn(s TurnState, number int) (Turn, error) {
 // State returns the stored form of the thread.
 func (th *Thread) State() State {
 	s := State{
-		Version: th.version, ID: th.id, Key: th.key, Turns: th.turns, Seen: th.seen.Sorted(),
+		Version: th.version, ID: th.id, Turns: th.turns, Seen: th.seen.Sorted(),
 		HistoryFrom: th.historyFrom, Title: th.title, ArchivedAt: th.archivedAt, LastActive: th.lastActive,
 		CreatedAt: th.createdAt, UpdatedAt: th.updatedAt,
 	}
@@ -223,9 +206,6 @@ func (th *Thread) HistoryFrom() int { return th.historyFrom }
 
 // ID returns the thread ID.
 func (th *Thread) ID() shared.ThreadID { return th.id }
-
-// Key returns the subject key of the thread.
-func (th *Thread) Key() Key { return th.key }
 
 // Version returns the persisted version.
 func (th *Thread) Version() int64 { return th.version }

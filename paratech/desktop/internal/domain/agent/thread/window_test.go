@@ -173,7 +173,7 @@ func TestLabelNeverReachesTheHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	th, err := New("th1", NoSubject, t0)
+	th, err := New("th1", t0)
 	if err != nil {
 		t.Fatal(err)
 	}

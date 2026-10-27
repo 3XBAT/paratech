@@ -133,19 +133,23 @@ func (r *memThreads) Get(_ context.Context, id shared.ThreadID) (*thread.Thread,
 	return th, err
 }
 
-func (r *memThreads) GetByKey(ctx context.Context, key thread.Key) (*thread.Thread, error) {
+// Current is the unarchived thread with the newest last activity, ties to the greater id, as the sqlite adapter.
+func (r *memThreads) Current(ctx context.Context) (*thread.Thread, error) {
 	r.mu.Lock()
-	var id shared.ThreadID
+	var cur *thread.State
 	for _, st := range r.states {
-		if st.Key == key {
-			id = st.ID
+		if !st.ArchivedAt.IsZero() {
+			continue
+		}
+		if cur == nil || st.LastActive.After(cur.LastActive) || (st.LastActive.Equal(cur.LastActive) && st.ID > cur.ID) {
+			cur = &st
 		}
 	}
 	r.mu.Unlock()
-	if id == "" {
+	if cur == nil {
 		return nil, shared.ErrNotFound
 	}
-	return r.Get(ctx, id)
+	return r.Get(ctx, cur.ID)
 }
 
 func (r *memThreads) Save(_ context.Context, th *thread.Thread) error {
