@@ -312,6 +312,9 @@ func TestNewChecksIDAndTime(t *testing.T) {
 	}
 }
 
+// studentDeleted are the facts of an assignment the student deleted (ADR-0029).
+func studentDeleted(f *Facts) { f.AssignmentExists, f.AssignmentDeleted = false, true }
+
 func TestValidate(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -327,6 +330,8 @@ func TestValidate(t *testing.T) {
 		{"unknown assignment", outEmail, func(f *Facts) { f.AssignmentExists = false }, t0, StatusRejected, ReasonUnknownAssignment},
 		{"export unknown assignment", outExport, func(f *Facts) { f.AssignmentExists = false }, t0, StatusRejected, ReasonUnknownAssignment},
 		{"deadline unknown assignment", outDeadline, func(f *Facts) { f.AssignmentExists = false }, t0, StatusRejected, ReasonUnknownAssignment},
+		// Hidden like any reader's (ADR-0029): a new proposal of a deleted assignment is unknown.
+		{"assignment deleted by the student", outEmail, studentDeleted, t0, StatusRejected, ReasonUnknownAssignment},
 		{"email no recipient", outEmail, func(f *Facts) { f.Recipient = Recipient{} }, t0, StatusRejected, ReasonNoRecipient},
 		{"email no artifact", outEmail, func(f *Facts) { f.Attachment = Digest{} }, t0, StatusRejected, ReasonNoArtifact},
 		{"export needs no artifact or recipient", outExport, func(f *Facts) { *f = Facts{AssignmentExists: true, AssignmentTitle: "Algebra"} }, t0, StatusValidated, ""},
@@ -526,6 +531,13 @@ func TestRecheck(t *testing.T) {
 		{"email assignment deleted", outEmail, func(f *Facts) { f.AssignmentExists = false }, ReasonUnknownAssignment},
 		{"export assignment deleted", outExport, func(f *Facts) { f.AssignmentExists = false }, ReasonUnknownAssignment},
 		{"deadline assignment deleted", outDeadline, func(f *Facts) { f.AssignmentExists = false }, ReasonUnknownAssignment},
+		{"email assignment deleted by the student", outEmail, studentDeleted, ReasonAssignmentDeleted},
+		{"export assignment deleted by the student", outExport, studentDeleted, ReasonAssignmentDeleted},
+		{"deadline assignment deleted by the student", outDeadline, studentDeleted, ReasonAssignmentDeleted},
+		{"deleted by the student wins over a changed recipient", outEmail, func(f *Facts) {
+			studentDeleted(f)
+			f.Recipient = Recipient{}
+		}, ReasonAssignmentDeleted},
 		{"recipient changed", outEmail, func(f *Facts) { f.Recipient = mustRecipient(t, "other@school.example") }, ReasonRecipientChanged},
 		{"recipient removed", outEmail, func(f *Facts) { f.Recipient = Recipient{} }, ReasonRecipientChanged},
 		{"attachment removed", outEmail, func(f *Facts) { f.Attachment = Digest{} }, ReasonNoArtifact},

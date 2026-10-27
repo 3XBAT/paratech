@@ -60,6 +60,68 @@ func TestProposalsOfADeletedAssignment(t *testing.T) {
 	}
 }
 
+// «Да» on a validated proposal whose assignment the student deleted since goes STALE as assignment_deleted: nothing
+// is sent, exported or put into the calendar, and it can never be executed afterwards (ADR-0029). So does the repeat
+// of a confirmed one whose earlier execution failed.
+func TestYesOnAProposalOfADeletedAssignment(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name      string
+		out       string
+		yes       func(e *env, v ProposalView) error
+		confirmed bool // confirmed (an execution that failed) before the delete
+	}{
+		{"send_homework_email", outEmail, func(e *env, v ProposalView) error {
+			_, err := e.svc.ConfirmSend(ctx, v.ID, v.Subject, v.AttachmentFormat)
+			return err
+		}, false},
+		{"export_homework", outExport, func(e *env, v ProposalView) error {
+			if _, err := e.svc.Confirm(ctx, v.ID); err != nil {
+				return err
+			}
+			_, err := e.svc.Execute(ctx, v.ID)
+			return err
+		}, false},
+		{"create_deadline_event", outDeadline, func(e *env, v ProposalView) error {
+			_, err := e.svc.ConfirmDeadline(ctx, v.ID)
+			return err
+		}, false},
+		{"create_deadline_event confirmed before the delete", outDeadline, func(e *env, v ProposalView) error {
+			_, err := e.svc.Execute(ctx, v.ID)
+			return err
+		}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t).withHomework(t)
+			v := propose(t, e, tc.out)
+			if v.Status != proposal.StatusValidated {
+				t.Fatalf("proposal %+v, want VALIDATED", v)
+			}
+			if tc.confirmed {
+				if _, err := e.svc.Confirm(ctx, v.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			e.svc.assignments = deletedRepo{e.svc.assignments}
+
+			if err := tc.yes(e, v); !errors.Is(err, proposal.ErrStale) {
+				t.Fatalf("«Да» = %v, want ErrStale", err)
+			}
+			got, err := e.svc.Get(ctx, v.ID)
+			if err != nil || got.Status != proposal.StatusStale || got.Reason != proposal.ReasonAssignmentDeleted {
+				t.Fatalf("proposal %+v, %v; want STALE assignment_deleted", got, err)
+			}
+			if _, err := e.svc.Execute(ctx, v.ID); !errors.Is(err, proposal.ErrNotConfirmed) {
+				t.Fatalf("Execute after STALE = %v, want ErrNotConfirmed", err)
+			}
+			if n := e.sideEffects(); n != 0 {
+				t.Fatalf("%d side effects", n)
+			}
+		})
+	}
+}
+
 // A draft of a deleted assignment is not generated: nothing is enqueued.
 func TestGenerateDraftOfADeletedAssignment(t *testing.T) {
 	e := newDraftEnv(t)

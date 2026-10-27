@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/homeworkflow"
@@ -19,8 +20,9 @@ import (
 // recipient comes from the settings, the deadline goes to the app calendar (deadlineCalendar; only this path writes a
 // deadline, hard rule 3). The drafts let the agent's send name a draft version and the confirmation show it; the
 // waiting proposals let the same deadline proposed again reuse its card (TASK-127). The works and the library let the
-// student send the file of a finished work (TASK-180). It needs c.deliveries and c.calendar.
-func (c *core) wireProposals(e env, settings settingsLoader, lib *library.Service) error {
+// student send the file of a finished work (TASK-180). «Удалить» of an assignment queues the removal of its deadline
+// event for the calendar sync (ADR-0029). It needs c.deliveries and c.calendar.
+func (c *core) wireProposals(e env, settings settingsLoader, lib *library.Service, log *slog.Logger) error {
 	var err error
 	assignments := sqlite.NewAssignmentRepository(c.db)
 	proposals := sqlite.NewProposalRepository(c.db)
@@ -32,6 +34,7 @@ func (c *core) wireProposals(e env, settings settingsLoader, lib *library.Servic
 		Drafts: sqlite.NewDraftRepository(c.db), Waiting: proposals,
 		Works:    workFiles{works: sqlite.NewWorkRepository(c.db), lib: lib},
 		Subjects: subjectNames{lib},
+		Removals: sqlite.NewDeadlineEventRemovals(c.db), Sync: calendarRequest{c: c, log: log, why: "assignment deletion"},
 	})
 	if err != nil {
 		return fmt.Errorf("app: action proposals: %w", err)

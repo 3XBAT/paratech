@@ -251,6 +251,34 @@ func TestDeleteWaitsForJobsThenResumeFinishes(t *testing.T) {
 	}
 }
 
+// An assignment chosen with the recording that the student deleted (ADR-0029) before the deletion finished is no
+// longer in the contents (the store hides it), so the resumed purge keeps it; the others go.
+func TestResumeKeepsAnAssignmentDeletedMeanwhile(t *testing.T) {
+	w := newWorld()
+	w.addRecording(t, "r1", recording.StatusCompleted)
+	w.setContents("r1", deletion.Contents{Transcripts: 1, Assignments: found[:2]})
+	w.addJob(t, "j-stt", transcription.STTJobType, "r1", "", job.StatusRunning, -1)
+
+	res, err := newService(t, w).Delete(ctx, Request{Recording: "r1", Assignments: []shared.AssignmentID{"a-plain", "a-draft"}})
+	if err != nil || res.Outcome != OutcomePending {
+		t.Fatalf("Delete = %+v, %v; want pending", res, err)
+	}
+	w.setContents("r1", deletion.Contents{Transcripts: 1, Assignments: found[1:2]}) // «Удалить» of a-plain
+
+	w.mu.Lock()
+	if err := w.jobs["j-stt"].Requeue(w.now); err != nil {
+		t.Fatal(err)
+	}
+	delete(w.running, "j-stt")
+	w.mu.Unlock()
+	if n, err := newService(t, w).Resume(ctx); err != nil || n != 1 {
+		t.Fatalf("Resume = %d, %v; want 1", n, err)
+	}
+	if !reflect.DeepEqual(w.removals, []shared.AssignmentID{"a-draft"}) {
+		t.Fatalf("purged assignments = %v, want only a-draft", w.removals)
+	}
+}
+
 // A job enqueued or claimed while the deletion waits (a follow-up of a finishing job) is found and cancelled too.
 func TestDeleteCancelsJobsThatAppearMeanwhile(t *testing.T) {
 	w := newWorld()

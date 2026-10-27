@@ -144,6 +144,7 @@ func TestValidateWorkSend(t *testing.T) {
 	}{
 		{"filed in ДЗ", nil, ""},
 		{"no assignment", func(f *Facts) { f.AssignmentExists = false }, ReasonUnknownAssignment},
+		{"assignment deleted by the student", studentDeleted, ReasonUnknownAssignment},
 		{"no recipient", func(f *Facts) { f.Recipient = Recipient{} }, ReasonNoRecipient},
 		{"no file", func(f *Facts) { f.Attachment, f.AttachmentRef = Digest{}, shared.ArtifactRef{} }, ReasonNoArtifact},
 		{"file is not its content", func(f *Facts) { f.AttachmentRef = storedRef(t, shaB) }, ReasonNoArtifact},
@@ -183,6 +184,7 @@ func TestRecheckWorkSend(t *testing.T) {
 		reason RejectReason
 	}{
 		{"unchanged", nil, ""},
+		{"assignment deleted by the student", studentDeleted, ReasonAssignmentDeleted},
 		{"recipient removed", func(f *Facts) { f.Recipient = Recipient{} }, ReasonRecipientChanged},
 		{"file deleted", func(f *Facts) { f.Attachment, f.AttachmentRef = Digest{}, shared.ArtifactRef{} }, ReasonNoArtifact},
 		{"file changed", func(f *Facts) { f.Attachment, f.AttachmentRef = mustDigest(t, shaB, 11), storedRef(t, shaB) }, ReasonArtifactChanged},

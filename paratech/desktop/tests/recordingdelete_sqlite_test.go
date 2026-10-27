@@ -262,6 +262,47 @@ func TestDeleteRecordingWithARunningWorkWriting(t *testing.T) {
 	}
 }
 
+// An assignment of the recording the student deleted (ADR-0029) is not offered with it, a choice naming it is refused,
+// and it stays after the deletion, detached from the transcript; only the other one is deleted.
+func TestDeleteRecordingKeepsADeletedAssignment(t *testing.T) {
+	e := newDeleteEnv(t, func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	ctx := context.Background()
+	found := e.storedAssignments()
+	gone, kept := found[0].ID(), found[1].ID()
+	if _, err := e.db.DBTX(ctx).ExecContext(ctx, "UPDATE assignments SET deleted_at = 1, version = version + 1 WHERE id = ?",
+		string(gone)); err != nil {
+		t.Fatal(err)
+	}
+	s := e.service(10 * time.Second)
+
+	p, err := s.Preview(ctx, "r1")
+	if err != nil || len(p.Contents.Assignments) != 1 || p.Contents.Assignments[0].ID != kept {
+		t.Fatalf("Preview = %+v, %v; want only %s", p.Contents.Assignments, err, kept)
+	}
+	if _, err := s.Delete(ctx, recordingdelete.Request{Recording: "r1", Assignments: []shared.AssignmentID{gone, kept}}); !errors.Is(err, recordingdelete.ErrInvalidRequest) {
+		t.Fatalf("Delete naming the deleted assignment = %v, want ErrInvalidRequest", err)
+	}
+
+	res, err := s.Delete(ctx, recordingdelete.Request{Recording: "r1", Assignments: []shared.AssignmentID{kept}})
+	if err != nil || res.Outcome != recordingdelete.OutcomeDeleted || len(res.Deleted) != 1 || res.Deleted[0] != kept {
+		t.Fatalf("Delete = %+v, %v; want %s deleted", res, err, kept)
+	}
+	var n int
+	if err := e.db.DBTX(ctx).QueryRowContext(ctx,
+		"SELECT count(*) FROM assignments WHERE id = ? AND transcript_id IS NULL AND deleted_at IS NOT NULL", string(gone)).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("the deleted assignment after the recording deletion: %d rows, %v", n, err)
+	}
+	if n := e.count("assignments"); n != 1 {
+		t.Fatalf("%d assignments left, want the deleted one", n)
+	}
+	if n := e.count("recordings"); n != 0 {
+		t.Fatalf("%d recordings left", n)
+	}
+}
+
 // A job that ignores its cancellation longer than the wait leaves the deletion pending; once it ends, the next start
 // finishes it.
 func TestDeleteRecordingPendingThenResumed(t *testing.T) {

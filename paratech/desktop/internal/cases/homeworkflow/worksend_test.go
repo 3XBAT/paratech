@@ -338,6 +338,9 @@ func TestSendWorkStale(t *testing.T) {
 		{"file moved to «ДЗ» of another subject", func(t *testing.T, e *workEnv) { e.moveToOtherHomework(t) }, proposal.FormatDocx, proposal.ReasonFileMoved},
 		{"recipient removed", func(_ *testing.T, e *workEnv) { e.recipient = "" }, proposal.FormatDocx, proposal.ReasonRecipientChanged},
 		{"another format shown", func(*testing.T, *workEnv) {}, proposal.FormatPptx, proposal.ReasonFormatChanged},
+		{"assignment deleted by the student", func(_ *testing.T, e *workEnv) {
+			e.svc.assignments = deletedRepo{e.svc.assignments}
+		}, proposal.FormatDocx, proposal.ReasonAssignmentDeleted},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

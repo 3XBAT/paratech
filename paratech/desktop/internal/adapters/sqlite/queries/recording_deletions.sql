@@ -11,14 +11,15 @@ SELECT
     (SELECT COUNT(*) FROM lecture_texts l JOIN transcripts t ON t.id = l.id
      WHERE t.recording_id = sqlc.arg(recording_id)) AS lecture_texts;
 
--- The assignments found in the transcripts of the recording, with whether a draft or any email exists.
+-- The assignments found in the transcripts of the recording, with whether a draft or any email exists. One the
+-- student deleted is neither offered nor purged: it stays, its transcript link set NULL (ADR-0029).
 -- name: ListRecordingAssignments :many
 SELECT a.id, a.title,
        CAST(EXISTS (SELECT 1 FROM homework_drafts d WHERE d.assignment_id = a.id) AS INTEGER) AS has_draft,
        (SELECT COUNT(*) FROM deliveries v WHERE v.assignment_id = a.id) AS deliveries
 FROM assignments a
 JOIN transcripts t ON t.id = a.transcript_id
-WHERE t.recording_id = sqlc.arg(recording_id)
+WHERE t.recording_id = sqlc.arg(recording_id) AND a.deleted_at IS NULL
 ORDER BY a.created_at, a.source_index, a.id;
 
 -- name: DeleteSummariesOfRecording :exec
