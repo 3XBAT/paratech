@@ -14,6 +14,8 @@ import {
   editOutcome,
   editRequest,
   flightGuard,
+  missingSubjectName,
+  subjectMissingText,
   noSubjectLabel,
   removeLabel,
   validateEditForm,
@@ -152,6 +154,40 @@ test("an assignment without a deadline can be edited; other fields are still che
   assert.deepEqual(validateEditForm(f), {});
   assert.ok(validateEditForm({ ...f, title: "" }).title);
   assert.ok(validateEditForm({ ...f, date: "2026-02-30" }).due);
+});
+
+test("a time without a date asks for the date at the date field", () => {
+  const f = { title: "Задача", subjectId: "", date: "", time: "09:00", note: "" };
+  assert.equal(validateEditForm(f).due, "Укажите дату.");
+  assert.equal(validateEditForm({ ...f, time: "99:00" }).due, undefined);
+  assert.ok(validateEditForm({ ...f, time: "99:00" }).time);
+});
+
+test("a stored subject with no library match is reported; the first of equal names is taken", () => {
+  assert.equal(missingSubjectName(item({ subject: "Химия" }), subjects), "Химия");
+  assert.equal(missingSubjectName(item({ subject: "Физика" }), subjects), "");
+  assert.equal(missingSubjectName(item({ subject: "" }), subjects), "");
+  assert.equal(missingSubjectName(item({ subject: "Химия", subjectFromLesson: true }), subjects), "");
+  assert.equal(subjectMissingText("Химия"), "Предмет «Химия» не найден в библиотеке: выберите предмет или «Без предмета»");
+  assert.equal(editForm(item(), [subj("a", "Физика"), subj("b", "Физика")]).subjectId, "a");
+});
+
+test("an unmatched subject blocks saving until the select is touched, and is shown as text", () => {
+  const html = renderToStaticMarkup(
+    h(EditAssignmentDialog, {
+      api: { editAssignment: async () => editBad("failed") },
+      library: { subjects: async () => subjects },
+      initialSubjects: subjects,
+      assignment: item({ subject: "Химия <b>1</b>" }),
+      onSaved: () => undefined,
+      onStale: async () => undefined,
+      onClose: () => undefined,
+    }),
+  );
+  assert.ok(html.includes("Предмет «Химия &lt;b&gt;1&lt;/b&gt;» не найден в библиотеке"));
+  assert.ok(!html.includes("<b>1</b>"));
+  assert.match(html, />Выберите предмет</);
+  assert.match(html, /<button[^>]*disabled=""[^>]*>Сохранить</);
 });
 
 test("the edit request carries the shown version and the trimmed title", () => {

@@ -21,6 +21,8 @@ import {
   editSubjectId,
   emptyAddForm,
   errorText,
+  missingSubjectName,
+  subjectMissingText,
   noSubjectLabel,
   noteMax,
   sendFormatLabels,
@@ -287,6 +289,8 @@ export function RemovedLine(props: { busy: boolean; onRestore: () => void }) {
   );
 }
 
+const unchosenValue = "?";
+
 /** The fields of the add and the edit form: the same form, so the two cannot drift apart. */
 function AssignmentFields(props: {
   form: AddForm;
@@ -296,6 +300,8 @@ function AssignmentFields(props: {
   subjects: readonly LibrarySubject[];
   subjectHint?: string;
   noSubject: string;
+  /** Set: the select shows this extra option until the student chooses (the stored subject is not in the library). */
+  unchosen?: string;
   onChange: (patch: Partial<AddForm>, field?: keyof AddFieldErrors) => void;
   onSubmit: () => void;
 }) {
@@ -324,11 +330,12 @@ function AssignmentFields(props: {
         {(id) => (
           <Select
             id={id}
-            value={form.subjectId}
+            value={props.unchosen !== undefined ? unchosenValue : form.subjectId}
             disabled={busy}
             aria-invalid={errors.subject !== undefined}
             onChange={(e) => onChange({ subjectId: e.target.value }, "subject")}
           >
+            {props.unchosen !== undefined && <option value={unchosenValue}>{props.unchosen}</option>}
             <option value="">{props.noSubject}</option>
             {props.subjects.map((s) => (
               <option key={s.id} value={s.id}>
@@ -412,6 +419,7 @@ export function EditAssignmentDialog(props: {
   const [general, setGeneral] = useState("");
   const mounted = useRef(true);
   const touchedSubject = useRef(false);
+  const [touched, setTouched] = useState(false);
   const running = useRef(false);
   const latest = useRef(props.assignment);
   latest.current = props.assignment;
@@ -441,6 +449,7 @@ export function EditAssignmentDialog(props: {
   function change(patch: Partial<AddForm>, field?: keyof AddFieldErrors) {
     if (patch.subjectId !== undefined) {
       touchedSubject.current = true;
+      setTouched(true);
     }
     setForm((f) => ({ ...f, ...patch }));
     setGeneral("");
@@ -450,9 +459,11 @@ export function EditAssignmentDialog(props: {
   }
 
   const ready = subjects !== null;
+  // The stored subject has no library match: saving the empty choice would silently clear it, so the student chooses.
+  const missing = ready && !touched ? missingSubjectName(props.assignment, subjects) : "";
 
   async function submit() {
-    if (running.current || !ready) {
+    if (running.current || !ready || missing !== "") {
       return;
     }
     const local = validateEditForm(form);
@@ -492,14 +503,15 @@ export function EditAssignmentDialog(props: {
       title={changeTexts.editTitle}
       confirmLabel={busy ? changeTexts.saving : changeTexts.save}
       cancelLabel={addTexts.cancel}
-      confirmDisabled={busy || !ready}
+      confirmDisabled={busy || !ready || missing !== ""}
       cancelDisabled={busy}
       onConfirm={() => void submit()}
       onCancel={props.onClose}
     >
       <AssignmentFields
         form={form}
-        errors={errors}
+        errors={missing !== "" ? { ...errors, subject: subjectMissingText(missing) } : errors}
+        unchosen={missing !== "" ? "Выберите предмет" : undefined}
         general={general}
         busy={busy}
         subjects={subjects ?? []}

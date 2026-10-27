@@ -584,7 +584,10 @@ export function dueFields(due: string): { date: string; time: string } {
   return { date: `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`, time: time === "23:59" ? "" : time };
 }
 
-/** The library subject with this name; the assignment has no subject id, only the shown name. */
+/**
+ * The library subject with this name; the assignment has no subject id, only the shown name. Library names may
+ * repeat: the first one is taken.
+ */
 export function subjectIdByName(name: string, subjects: readonly LibrarySubject[]): string {
   const n = name.trim();
   return n === "" ? "" : (subjects.find((s) => s.name.trim() === n)?.id ?? "");
@@ -613,9 +616,26 @@ export function editForm(a: AssignmentItem, subjects: readonly LibrarySubject[])
 export function validateEditForm(f: AddForm): AddFieldErrors {
   const errors = validateAddForm(f);
   if (f.date === "" && errors.due !== undefined) {
-    delete errors.due;
+    if (f.time !== "" && errors.time === undefined) {
+      errors.due = "Укажите дату.";
+    } else {
+      delete errors.due;
+    }
   }
   return errors;
+}
+
+/**
+ * The name of the assignment's own subject when the library has no subject of that name (a rename or a correction
+ * text), else "". Saving with the empty choice would clear that subject, so the form asks for an explicit choice.
+ */
+export function missingSubjectName(a: AssignmentItem, subjects: readonly LibrarySubject[]): string {
+  const name = a.subject.trim();
+  return a.subjectFromLesson || name === "" || subjectIdByName(name, subjects) !== "" ? "" : name;
+}
+
+export function subjectMissingText(name: string): string {
+  return `Предмет «${name}» не найден в библиотеке: выберите предмет или «Без предмета»`;
 }
 
 export function editRequest(a: { id: string; version: number }, f: AddForm): EditAssignmentRequest {

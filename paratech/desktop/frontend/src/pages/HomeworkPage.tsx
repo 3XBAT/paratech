@@ -156,6 +156,10 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
   async function reloadItems() {
     try {
       const as = await api.listAssignments();
+      // An assignment that is live in the fresh list was restored elsewhere: its «Вернуть» line goes.
+      if (as.some((x) => Object.hasOwn(removedRef.current, x.id))) {
+        setRemoved((cur) => Object.fromEntries(Object.entries(cur).filter(([rid]) => !as.some((y) => y.id === rid))));
+      }
       // The core no longer lists the assignments deleted in this visit; their lines stay for «Вернуть».
       setItems((prev) => [
         ...as,
@@ -167,12 +171,15 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
   }
 
   async function change(a: AssignmentItem, call: () => Promise<ChangeAssignmentResult>, done: (next: AssignmentItem) => void) {
+    if (guard.current.has(a.id)) {
+      return; // a second click while the first call runs: it must not touch the first one's busy state
+    }
     setRowProblem(null);
     setBusyId(a.id);
     try {
       const r = await guard.current.run(a.id, call);
       if (r === null) {
-        return; // a second click while the first call runs
+        return;
       }
       const out = changeOutcome(r);
       if (out.assignment !== null) {
@@ -374,6 +381,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
   const [editing, setEditing] = useState(false);
   const [gone, setGone] = useState<AssignmentItem | null>(null);
   const [changing, setChanging] = useState(false);
+  const [restored, setRestored] = useState(false); // «Вернуть» was pressed: «Удалить» takes the focus
   const [changeProblem, setChangeProblem] = useState("");
   const library = useMemo(() => libraryApi(callByName), []);
   const mounted = useRef(true);
@@ -409,6 +417,8 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
         return;
       }
       setDetail(d);
+      // The core opened it, so it is live: a «Вернуть» line left from a deletion would only loop on «changed».
+      setGone(null);
       const running = d.generation;
       if (running !== null) {
         setGen((g) => (g !== null && g.jobId === running.jobId ? g : followGeneration(running)));
@@ -771,6 +781,9 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
   // student leaves the page. The guard keeps a double click to one call.
   const removeGuard = useRef(flightGuard());
   async function changeThis(call: () => Promise<ChangeAssignmentResult>, done: (next: AssignmentItem) => void) {
+    if (removeGuard.current.has(id)) {
+      return; // a second click while the first call runs: it must not touch the first one's busy state
+    }
     setChangeProblem("");
     setChanging(true);
     try {
@@ -834,6 +847,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
               (next) => {
                 setDetail((d) => (d === null ? d : { ...d, assignment: next }));
                 setGone(null);
+                setRestored(true);
               },
             )
           }
@@ -864,6 +878,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
           <Button
             variant="danger"
             aria-label={removeLabel(a.title)}
+            autoFocus={restored}
             busy={changing}
             busyLabel={changeTexts.removing}
             disabled={changing}
@@ -872,6 +887,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
                 () => api.deleteAssignment(id, a.version),
                 (next) => {
                   setEditing(false);
+                  setRestored(false);
                   setGone(next);
                 },
               )
