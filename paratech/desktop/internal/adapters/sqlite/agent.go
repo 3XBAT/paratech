@@ -18,6 +18,7 @@ const (
 	opGetAgentThread    = "sqlite: get agent thread"
 	opCurrentThread     = "sqlite: get current agent chat"
 	opRequestScope      = "sqlite: get agent request scope"
+	opRequestMentions   = "sqlite: get agent request mentions"
 	opSaveAgentThread   = "sqlite: save agent thread"
 	opListAgentThreads  = "sqlite: list running agent threads"
 	opListAgentChats    = "sqlite: list agent chats"
@@ -132,6 +133,24 @@ func (r *AgentThreadRepository) RequestScope(ctx context.Context, id shared.Thre
 		return values.Scope{}, fmt.Errorf("stored agent request %s/%d: scope: %w", id, turn, err)
 	}
 	return sc, nil
+}
+
+// RequestMentions returns the mentions stored with request turn of a thread, with the names shown at mention time
+// (ADR-0028); a missing request wraps shared.ErrNotFound.
+func (r *AgentThreadRepository) RequestMentions(ctx context.Context, id shared.ThreadID, turn int) ([]values.Mention, error) {
+	row, err := r.db.Queries(ctx).GetAgentTurn(ctx, sqlcgen.GetAgentTurnParams{ThreadID: string(id), Number: int64(turn)})
+	if err != nil {
+		return nil, fmt.Errorf("%s %s/%d: %w", opRequestMentions, id, turn, MapError(ctx, err))
+	}
+	var ws []mentionWire
+	if err := strictJSON(row.Mentions, &ws); err != nil {
+		return nil, fmt.Errorf("stored agent request %s/%d: mentions: %w", id, turn, err)
+	}
+	ms, err := mentionsFrom(ws)
+	if err != nil {
+		return nil, fmt.Errorf("stored agent request %s/%d: mentions: %w", id, turn, err)
+	}
+	return ms, nil
 }
 
 // ListRunning returns the threads whose current request is PLANNING or EXECUTING.
@@ -383,16 +402,8 @@ func turnState(row sqlcgen.AgentTurn) (thread.TurnState, error) {
 		StepOpen: row.StepOpen == 1, ProposedPlan: proposed, ApprovedPlan: approved, Used: used, Retry: int(row.Retry),
 		DroppedBy: int(row.DroppedBy), StartedAt: jobFromMs(row.StartedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 	}
-	for _, w := range mentions {
-		ref, err := values.NewRef(values.IDKind(w.Kind), w.ID)
-		if err != nil {
-			return thread.TurnState{}, fmt.Errorf("mentions: %w", err)
-		}
-		m, err := values.NewMention(ref, w.Label)
-		if err != nil {
-			return thread.TurnState{}, fmt.Errorf("mentions: %w", err)
-		}
-		ts.Mentions = append(ts.Mentions, m)
+	if ts.Mentions, err = mentionsFrom(mentions); err != nil {
+		return thread.TurnState{}, fmt.Errorf("mentions: %w", err)
 	}
 	if len(ts.Used) == 0 {
 		ts.Used = nil
@@ -413,6 +424,22 @@ func turnState(row sqlcgen.AgentTurn) (thread.TurnState, error) {
 		ts.Created = append(ts.Created, thread.Created{Ref: ref, Step: w.Step})
 	}
 	return ts, nil
+}
+
+func mentionsFrom(ws []mentionWire) ([]values.Mention, error) {
+	var out []values.Mention
+	for _, w := range ws {
+		ref, err := values.NewRef(values.IDKind(w.Kind), w.ID)
+		if err != nil {
+			return nil, err
+		}
+		m, err := values.NewMention(ref, w.Label)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, nil
 }
 
 func scopeFrom(w scopeWire) (values.Scope, error) {

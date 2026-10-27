@@ -85,6 +85,8 @@ type change struct {
 	context values.RefSet // IDs of the base and the scope of the current step
 	calls   []Call
 	cards   []values.Card
+	// redo rebuilds an Ask's change on the stored chat when its first save meets a version conflict; nil once stored.
+	redo func() (*change, error)
 }
 
 func (c *change) add(entry values.HistoryTurn) {
@@ -121,10 +123,23 @@ func (s *Service) Ask(ctx context.Context, in AskInput) (Step, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	c, err := s.asked(ctx, in, text, mentions)
+	if err != nil {
+		return Step{}, err
+	}
+	// A chat change (rename, archive, restore) does not take s.mu; one saved before the request is stored would make
+	// the first save a version conflict and lose the student's message, so the request is asked again once on the
+	// stored chat (see store).
+	c.redo = func() (*change, error) { return s.asked(ctx, in, text, mentions) }
+	return s.drive(ctx, c, opAsk)
+}
+
+// asked loads the chat of in and starts the request in it, not yet stored.
+func (s *Service) asked(ctx context.Context, in AskInput, text string, mentions []values.Mention) (*change, error) {
 	now := s.clock.Now()
 	th, err := s.chat(ctx, in.ThreadID, now)
 	if err != nil {
-		return Step{}, fmt.Errorf("%s: %w", opAsk, err)
+		return nil, fmt.Errorf("%s: %w", opAsk, err)
 	}
 
 	c := &change{th: th}
@@ -138,13 +153,13 @@ func (s *Service) Ask(ctx context.Context, in AskInput) (Step, error) {
 		err = th.Ask(req, now)
 	}
 	if err != nil {
-		return Step{}, fmt.Errorf("%s: %w", opAsk, err)
+		return nil, fmt.Errorf("%s: %w", opAsk, err)
 	}
 	if err := th.Observe(in.Uploads...); err != nil {
-		return Step{}, fmt.Errorf("%s: %w", opAsk, err)
+		return nil, fmt.Errorf("%s: %w", opAsk, err)
 	}
 	c.add(values.HistoryTurn{StudentText: text})
-	return s.drive(ctx, c, opAsk)
+	return c, nil
 }
 
 // chat loads the chat named id, or the current chat for an empty id, created when there is none.

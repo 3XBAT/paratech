@@ -59,7 +59,9 @@ func (s *Service) drive(ctx context.Context, c *change, op string) (st Step, err
 			return s.abort(ctx, c, op, values.StopOffline, fmt.Errorf("base: %w", err))
 		}
 		// The open step is stored before the call: a crash or a lost answer leaves a step «Продолжить» can repeat.
-		if err := s.save(ctx, c); err != nil {
+		if again, err := s.store(ctx, c); again {
+			continue
+		} else if err != nil {
 			return s.conflict(ctx, c, op, err)
 		}
 		turn, _ = c.th.Turn()
@@ -174,10 +176,29 @@ func (s *Service) abort(ctx context.Context, c *change, op string, reason values
 
 // finish saves the change and returns the step.
 func (s *Service) finish(ctx context.Context, c *change, op string) (Step, error) {
-	if err := s.save(ctx, c); err != nil {
+	if again, err := s.store(ctx, c); again {
+		return s.drive(ctx, c, op)
+	} else if err != nil {
 		return s.conflict(ctx, c, op, err)
 	}
 	return stepOf(c), nil
+}
+
+// store saves c. The first save of an Ask that meets a version conflict (its chat was saved after the load, nothing
+// of the request is stored yet) rebuilds c on the stored chat once and reports again: the caller goes on with it.
+func (s *Service) store(ctx context.Context, c *change) (again bool, err error) {
+	err = s.save(ctx, c)
+	redo := c.redo
+	c.redo = nil
+	if err == nil || redo == nil || !errors.Is(err, shared.ErrVersionConflict) {
+		return false, err
+	}
+	fresh, rerr := redo()
+	if rerr != nil {
+		return false, errors.Join(err, rerr)
+	}
+	*c = *fresh
+	return true, nil
 }
 
 // conflict handles a failed save. A version conflict means «Стоп» saved meanwhile: the stored, stopped request wins
