@@ -6,4 +6,5 @@
 // GoogleCalendarScope (calendar.app.created: only calendars the app created, AC-17).
 //
 // CallLink is the link to the online call of a lesson, parsed from untrusted text by ParseCallLink (ADR-0032).
+// Stored links are re-parsed on load: tightening ParseCallLink needs a migration that clears links which no longer pass.
 package values
