@@ -11,7 +11,8 @@ import (
 )
 
 // Deps are the ports of the service. Compensator, Resolver, Threads and Processing may be nil (no Undo, PENDING
-// entries become UNKNOWN at start, journal lines without a subject, no processing lines); Log may be nil.
+// entries become UNKNOWN at start, journal lines without a subject and chat title, no processing lines); Log may be
+// nil.
 type Deps struct {
 	Actions     ActionRepository
 	Compensator Compensator
@@ -73,6 +74,7 @@ type Line struct {
 	At        time.Time        // when the action was taken or the job created
 	UpdatedAt time.Time        // the last change (an undo, the end of a job)
 	Subject   shared.SubjectID // the subject of the action's request; empty for none or a job
+	ChatTitle string           // the title of the action's chat; empty for a job or a chat that cannot be read
 
 	// An action line.
 	Action  shared.ActionID
