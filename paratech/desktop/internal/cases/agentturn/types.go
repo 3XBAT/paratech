@@ -26,7 +26,7 @@ type Deps struct {
 
 // AskInput is a request typed in the panel.
 type AskInput struct {
-	Scope   values.Scope // the context chip picks the thread; only this subject is sent
+	Scope   values.Scope // the context chip: the subject of this request, the only one sent
 	Text    string
 	Uploads []values.Ref // files dropped with the request (upload IDs)
 }
@@ -37,10 +37,9 @@ type TurnRef struct {
 	Turn   int
 }
 
-// IdleInput names the thread whose request an operation found running: by its ID, else by the scope of an Ask.
+// IdleInput names the thread whose request an operation found running: by its ID, else the current chat (an Ask).
 type IdleInput struct {
 	Thread shared.ThreadID
-	Scope  values.Scope
 }
 
 // Outcome is what the Driver reports for one call it ran: the result built by the domain mapper (ADR-0022), the IDs

@@ -347,13 +347,13 @@ func (s *Service) List(ctx context.Context, limit int) ([]Line, error) {
 		return nil, fmt.Errorf("%s: %w", opList, err)
 	}
 	lines := make([]Line, 0, len(as))
-	subjects := map[shared.ThreadID]shared.SubjectID{}
+	subjects := map[requestOf]shared.SubjectID{}
 	for _, a := range as {
 		can, why := a.Undoable(now, s.targetOf(ctx, a))
 		st := a.State()
 		lines = append(lines, Line{
-			Kind: LineAction, At: st.CreatedAt, UpdatedAt: st.UpdatedAt, Subject: s.subjectOf(ctx, subjects, st.Thread),
-			Action: st.ID, Thread: st.Thread, Turn: st.Turn, Tool: st.Tool, Status: st.Status, CanUndo: can, NoUndo: why,
+			Kind: LineAction, At: st.CreatedAt, UpdatedAt: st.UpdatedAt, Action: st.ID, Thread: st.Thread, Turn: st.Turn,
+			Tool: st.Tool, Status: st.Status, CanUndo: can, NoUndo: why, Subject: s.subjectOf(ctx, subjects, requestOf{st.Thread, st.Turn}),
 		})
 	}
 	if s.processing != nil {
@@ -375,19 +375,24 @@ func (s *Service) List(ctx context.Context, limit int) ([]Line, error) {
 	return lines[:min(len(lines), limit)], nil
 }
 
-// subjectOf is the subject of a thread's key, cached per List; a thread that cannot be read gives none.
-func (s *Service) subjectOf(ctx context.Context, cache map[shared.ThreadID]shared.SubjectID, id shared.ThreadID) shared.SubjectID {
-	if sub, ok := cache[id]; ok || s.threads == nil {
+// requestOf names the request of a journal line.
+type requestOf struct {
+	thread shared.ThreadID
+	turn   int
+}
+
+// subjectOf is the subject of the scope of a line's request, cached per List; a request that cannot be read gives
+// none.
+func (s *Service) subjectOf(ctx context.Context, cache map[requestOf]shared.SubjectID, r requestOf) shared.SubjectID {
+	if sub, ok := cache[r]; ok || s.threads == nil {
 		return sub
 	}
-	var sub shared.SubjectID
-	th, err := s.threads.Get(ctx, id)
+	scope, err := s.threads.RequestScope(ctx, r.thread, r.turn)
 	if err != nil {
-		s.log.WarnContext(ctx, opLineSubject, "thread", id.String(), "err", err)
-	} else if r, ok := th.Key().Subject(); ok {
-		sub = shared.SubjectID(r.ID())
+		s.log.WarnContext(ctx, opLineSubject, "thread", r.thread.String(), "turn", r.turn, "err", err)
 	}
-	cache[id] = sub
+	sub := shared.SubjectID(scope.Subject().ID())
+	cache[r] = sub
 	return sub
 }
 

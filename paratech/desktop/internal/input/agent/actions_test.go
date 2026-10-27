@@ -476,7 +476,7 @@ func TestActionRefusals(t *testing.T) {
 	}
 }
 
-// triage_assignment with a topic (TASK-188) runs the topic triage with the call's key and the thread's subject, as a
+// triage_assignment with a topic (TASK-188) runs the topic triage with the call's key and the request's subject, as a
 // free call (the card was off) and as a step of an approved plan: journaled with Undo RemoveWork, the planner sees the
 // work and enums only, never the topic.
 func TestTriageTopicRuns(t *testing.T) {

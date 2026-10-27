@@ -67,10 +67,9 @@ type Querier interface {
 	GetActiveWorkOfTopic(ctx context.Context, topicRequest sql.NullString) (Work, error)
 	GetAgentAction(ctx context.Context, id string) (AgentAction, error)
 	GetAgentActionByCall(ctx context.Context, arg GetAgentActionByCallParams) (AgentAction, error)
-	// The agent panel (TASK-116): threads with their current request, the history sent to the planner and the action
-	// journal. Threads and journal entries use the optimistic-concurrency protocol of ADR-0004(d).
+	// The agent panel (TASK-116): chats (threads) with their current request, the history sent to the planner and the
+	// action journal. Threads and journal entries use the optimistic-concurrency protocol of ADR-0004(d).
 	GetAgentThread(ctx context.Context, id string) (AgentThread, error)
-	GetAgentThreadByKey(ctx context.Context, subjectKey string) (AgentThread, error)
 	GetAgentTurn(ctx context.Context, arg GetAgentTurnParams) (AgentTurn, error)
 	// Answers with citations (TASK-118, ADR-0022): the aggregate coursework/answer, written once and never saved again.
 	GetAnswer(ctx context.Context, id string) (Answer, error)
@@ -83,6 +82,8 @@ type Querier interface {
 	// Assignments found in a library material (TASK-122), found again by (material_id, source_index).
 	GetAssignmentByMaterialSource(ctx context.Context, arg GetAssignmentByMaterialSourceParams) (Assignment, error)
 	GetAssignmentBySource(ctx context.Context, arg GetAssignmentBySourceParams) (Assignment, error)
+	// The current chat (ADR-0028): the unarchived one active last; ties go to the newer id.
+	GetCurrentAgentThread(ctx context.Context) (AgentThread, error)
 	// Deliveries, the attempts to email an artifact (PRD section 10, AC-15), with the optimistic-concurrency protocol of
 	// ADR-0004(d). The idempotency key and the Message-ID are UNIQUE: a second delivery under the same key is refused.
 	GetDelivery(ctx context.Context, id string) (Delivery, error)
@@ -221,8 +222,12 @@ type Querier interface {
 	// Entries of the same instant follow the insert order (rowid; ids are random), so "undo the request" goes exactly
 	// in reverse.
 	ListAgentActionsByThread(ctx context.Context, arg ListAgentActionsByThreadParams) ([]AgentAction, error)
-	// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first).
+	// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first). Entries
+	// of dropped requests are left out here, so they never take a place under the limit (ADR-0028).
 	ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) ([]AgentStep, error)
+	// Every chat: the unarchived ones by their last activity, newest first, then the archived ones in the same order.
+	// (Comments of this file stay ASCII: sqlc rewrites queries by byte offset.)
+	ListAgentThreadIDs(ctx context.Context) ([]string, error)
 	ListAllSubjectAliases(ctx context.Context) ([]SubjectAlias, error)
 	ListAllSubjectFolders(ctx context.Context) ([]SubjectFolder, error)
 	ListAssignmentsByMaterial(ctx context.Context, materialID sql.NullString) ([]Assignment, error)
@@ -325,7 +330,7 @@ type Querier interface {
 	RecordingDeletionCounts(ctx context.Context, recordingID string) (RecordingDeletionCountsRow, error)
 	// Compare-and-swap on the loaded version; the call and its intent never change.
 	UpdateAgentAction(ctx context.Context, arg UpdateAgentActionParams) (int64, error)
-	// Compare-and-swap on the loaded version; the key never changes.
+	// Compare-and-swap on the loaded version.
 	UpdateAgentThread(ctx context.Context, arg UpdateAgentThreadParams) (int64, error)
 	// Compare-and-swap on the loaded version. The origin (lesson, transcript or material, source index) and the creation
 	// time never change, so a stale save cannot undo ON DELETE SET NULL of the lesson, the transcript or the material.

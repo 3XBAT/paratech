@@ -78,7 +78,7 @@ func TestCheckRefs(t *testing.T) {
 		if err := earlier.Observe(ref(t, values.KindAssignment, "a1")); err != nil {
 			t.Fatal(err)
 		}
-		th, err := New("th2", NoSubject, at(5))
+		th, err := New("th2", at(5))
 		if err != nil {
 			t.Fatal(err)
 		}

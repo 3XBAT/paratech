@@ -24,9 +24,10 @@ const (
 // card under many later steps is not found, which refuses it, never runs another call).
 const freeWorkHistory = 1024
 
-// FreeWorkThreads loads a thread (the agentturn.ThreadRepository port, implemented by the sqlite adapter).
+// FreeWorkThreads reads the scope stored with a request of a thread; a missing request wraps shared.ErrNotFound.
+// Implemented by the sqlite adapter.
 type FreeWorkThreads interface {
-	Get(ctx context.Context, id shared.ThreadID) (*thread.Thread, error)
+	RequestScope(ctx context.Context, id shared.ThreadID, turn int) (values.Scope, error)
 }
 
 // FreeWorkHistory reads the stored history of a thread (the agentturn.History port, implemented by the sqlite adapter).
@@ -51,10 +52,10 @@ type FreeWorkDeps struct {
 }
 
 // FreeWorks answers the free-work card «Такого задания нет — могу сделать как свободную работу» (TASK-188). The card
-// names a call only; the topic is read from that call in the card's own thread history and the subject from the thread,
-// so the page sends no text. «Сделать» is the student's consent: the triage runs through the journaled action path of
-// the agent (one entry per thread, request and call ID, Undo removes the work), so a second «Сделать» finds the same
-// work. «Не надо» stores nothing and runs nothing.
+// names a call only; the topic is read from that call in the card's own thread history and the subject from the scope
+// of the card's request (a chat spans subjects, ADR-0028), so the page sends no text. «Сделать» is the student's
+// consent: the triage runs through the journaled action path of the agent (one entry per thread, request and call ID,
+// Undo removes the work), so a second «Сделать» finds the same work. «Не надо» stores nothing and runs nothing.
 type FreeWorks struct {
 	threads  FreeWorkThreads
 	history  FreeWorkHistory
@@ -92,7 +93,7 @@ func (f *FreeWorks) FreeWorkCard(ctx context.Context, card values.FreeWorkCard) 
 // outcome is the card's state after the answer (FreeWorkCard says the same). Errors wrap shared.ErrNotFound (no such card, or its work is gone), shared.ErrServiceNotConfigured (no turnkey
 // work in this build) or are a local failure.
 func (f *FreeWorks) FreeWork(ctx context.Context, card values.FreeWorkCard, accept, dontShowAgain bool) (values.FreeWorkOutcome, error) {
-	call, adm, th, err := f.call(ctx, card)
+	call, adm, requestScope, err := f.call(ctx, card)
 	if err != nil {
 		return values.FreeWorkOutcome{}, err
 	}
@@ -106,8 +107,9 @@ func (f *FreeWorks) FreeWork(ctx context.Context, card values.FreeWorkCard, acce
 		return f.state(ctx, card)
 	}
 
+	// Only the subject of the request: the triage of a topic reads nothing else of the scope.
 	var scope values.Scope
-	if sub, ok := th.Key().Subject(); ok {
+	if sub := requestScope.Subject(); !sub.IsZero() {
 		if scope, err = values.NewScope(sub, "", values.Ref{}, values.Ref{}); err != nil {
 			return values.FreeWorkOutcome{}, fmt.Errorf("%s: %w", opFreeWork, err)
 		}
@@ -127,17 +129,17 @@ func (f *FreeWorks) FreeWork(ctx context.Context, card values.FreeWorkCard, acce
 	return out, nil
 }
 
-// call is the call card names: the thread must exist and its own stored history must hold that call waiting on the
-// card (thread.FreeWorkCall, which also decides how the call runs), so a card of another thread or a made-up one is
-// not found.
-func (f *FreeWorks) call(ctx context.Context, card values.FreeWorkCard) (values.Call, thread.Admission, *thread.Thread, error) {
-	fail := func(err error) (values.Call, thread.Admission, *thread.Thread, error) {
-		return values.Call{}, thread.Admission{}, nil, err
+// call is the call card names, with the scope of its request: the request must be stored and the thread's own
+// history must hold that call waiting on the card (thread.FreeWorkCall, which also decides how the call runs), so a
+// card of another thread or a made-up one is not found.
+func (f *FreeWorks) call(ctx context.Context, card values.FreeWorkCard) (values.Call, thread.Admission, values.Scope, error) {
+	fail := func(err error) (values.Call, thread.Admission, values.Scope, error) {
+		return values.Call{}, thread.Admission{}, values.Scope{}, err
 	}
 	if err := card.Validate(); err != nil {
 		return fail(fmt.Errorf("%s: %w: %w", opFreeWork, shared.ErrNotFound, err))
 	}
-	th, err := f.threads.Get(ctx, card.Thread)
+	scope, err := f.threads.RequestScope(ctx, card.Thread, card.Turn)
 	if err != nil {
 		return fail(fmt.Errorf("%s: %w", opFreeWork, err))
 	}
@@ -149,7 +151,7 @@ func (f *FreeWorks) call(ctx context.Context, card values.FreeWorkCard) (values.
 	if err != nil {
 		return fail(fmt.Errorf("%s: %w: %w", opFreeWork, shared.ErrNotFound, err))
 	}
-	return call, adm, th, nil
+	return call, adm, scope, nil
 }
 
 // state reads the card's journal entry: none is waiting.

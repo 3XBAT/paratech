@@ -507,7 +507,7 @@ func TestAgentActionSettledAfterACrashOnSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.hub.Then(testenv.AgentCall{ID: "r0", Tool: "reply", Args: `{"text":"ок"}`})
-	up := e.ask(t, scope, "привет") // the thread of the subject exists
+	up := e.ask(t, scope, "привет") // the chat exists
 	before, _ := e.subject(t, e.physics.ID())
 	entry, err := e.journal.Begin(t.Context(), agentjournal.BeginInput{
 		Thread: up.Thread, Turn: up.Turn, CallID: "w1", Tool: values.ToolCreateFolder,

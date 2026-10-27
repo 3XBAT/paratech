@@ -494,11 +494,7 @@ func TestSubmitConcurrentStop(t *testing.T) {
 // version in memory, so the next save of the same thread is not a conflict.
 func TestRolledBackSaveKeepsVersion(t *testing.T) {
 	e := newEnv(t)
-	key, err := thread.KeyOf(subjectScope(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	th, err := thread.New("th1", key, e.clock.Now())
+	th, err := thread.New("th1", e.clock.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -677,6 +673,51 @@ func TestCancel(t *testing.T) {
 	}
 	if all := e.history.all(st.Thread); len(all) != 3 || all[2].Entry.Results[0].ResultJSON != `{"error":"not_done"}` {
 		t.Fatalf("history = %+v", all)
+	}
+}
+
+// Ask without a chat goes to the current chat (ADR-0028): requests of two subjects share it, a newer chat takes over,
+// and with every chat archived a new one is created.
+func TestAskGoesToTheCurrentChat(t *testing.T) {
+	e := newEnv(t)
+	e.model.then(raw("r1", "reply", `{"text":"ок"}`)).then(raw("r2", "reply", `{"text":"ок"}`)).
+		then(raw("r3", "reply", `{"text":"ок"}`)).then(raw("r4", "reply", `{"text":"ок"}`))
+	first := ask(t, e, "по физике")
+	chem, err := values.NewScope(mustRef(t, values.KindSubject, "s2"), "", values.Ref{}, values.Ref{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := e.svc.Ask(t.Context(), AskInput{Scope: chem, Text: "по химии"})
+	if err != nil || second.Thread != first.Thread || second.Turn != 2 || second.Scope.Subject().ID() != "s2" {
+		t.Fatalf("a request of another subject = %+v, %v; want the same chat", second, err)
+	}
+
+	newer, err := thread.New("th9", e.clock.Now()) // same instant, greater id
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.threads.Save(t.Context(), newer); err != nil {
+		t.Fatal(err)
+	}
+	if third := ask(t, e, "в новом чате"); third.Thread != "th9" || third.Turn != 1 {
+		t.Fatalf("with a newer chat = %+v", third)
+	}
+
+	for _, id := range []shared.ThreadID{first.Thread, "th9"} {
+		th, err := e.threads.Get(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := th.Archive(e.clock.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.threads.Save(t.Context(), th); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fourth := ask(t, e, "всё в архиве")
+	if fourth.Thread == first.Thread || fourth.Thread == "th9" || fourth.Turn != 1 {
+		t.Fatalf("with every chat archived = %+v; want a new chat", fourth)
 	}
 }
 

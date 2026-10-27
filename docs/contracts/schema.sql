@@ -570,26 +570,35 @@ CREATE TABLE material_lessons (
 );
 CREATE INDEX idx_material_lessons_lesson ON material_lessons (lesson_id);
 
--- agent_threads (migration 0022): one thread per subject key (the subject id, or 'NONE' for «Без предмета»).
--- Aggregate agent/thread; its current request is the agent_turns row number = turns. seen is the JSON array of the
--- {"kind","id"} the provenance check knows from tool results; history_from is the first request whose history is
+-- agent_threads (migration 0022, rebuilt by 0039): one row per agent chat (ADR-0028), not tied to a subject: the
+-- subject belongs to the scope of each request. Aggregate agent/thread; its current request is the agent_turns row
+-- number = turns. title is thread.Title (1..80 characters, «Новый чат» until the first text); archived_at is set while
+-- the chat is in «Архив» (never deleted: journal lines reference it); last_active_at is when its last request started
+-- (its creation before the first): the current chat is the unarchived one with the newest. seen is the JSON array of
+-- the {"kind","id"} the provenance check knows from tool results; history_from is the first request whose history is
 -- sent (a request restarted after its model turn expired on the Hub sends only its own).
 -- ---------------------------------------------------------------------------------------------------------------
 CREATE TABLE agent_threads (
-    id           TEXT    PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
-    subject_key  TEXT    NOT NULL UNIQUE CHECK (length(subject_key) BETWEEN 1 AND 128),
-    turns        INTEGER NOT NULL DEFAULT 0 CHECK (turns >= 0),
-    history_from INTEGER NOT NULL DEFAULT 0 CHECK (history_from BETWEEN 0 AND turns),
-    seen         TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(seen) AND json_type(seen) = 'array'),
-    version      INTEGER NOT NULL DEFAULT 0,                                 -- optimistic concurrency (ADR-0004)
-    created_at   INTEGER NOT NULL,
-    updated_at   INTEGER NOT NULL
+    id             TEXT    PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
+    title          TEXT    NOT NULL CHECK (length(title) BETWEEN 1 AND 80),
+    turns          INTEGER NOT NULL DEFAULT 0 CHECK (turns >= 0),
+    history_from   INTEGER NOT NULL DEFAULT 0 CHECK (history_from BETWEEN 0 AND turns),
+    seen           TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(seen) AND json_type(seen) = 'array'),
+    archived_at    INTEGER CHECK (archived_at IS NULL OR archived_at >= created_at),
+    last_active_at INTEGER NOT NULL CHECK (last_active_at >= created_at),
+    version        INTEGER NOT NULL DEFAULT 0,                               -- optimistic concurrency (ADR-0004)
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL
 );
+CREATE INDEX idx_agent_threads_active ON agent_threads (archived_at, last_active_at);
 
 -- ---------------------------------------------------------------------------------------------------------------
 -- agent_turns: the requests of a thread, written with the thread (part of its aggregate, no version of its own).
 -- Budget counters, the plan (plan_steps JSON), the calls of the last step that wait for results and the ids created
--- by approved create steps. planner_input counts the planner input of the request.
+-- by approved create steps. planner_input counts the planner input of the request. mentions (0039) is the JSON array
+-- of the {"kind","id","label"} the student mentioned (values.Mention, at most 8; the label is display only, never sent).
+-- dropped_by (0039) is the number of the later request that restarted the chat from an earlier one (0: not dropped);
+-- a dropped request stays stored but is no longer read into the planner's history.
 -- ---------------------------------------------------------------------------------------------------------------
 CREATE TABLE agent_turns (
     thread_id       TEXT    NOT NULL REFERENCES agent_threads (id) ON DELETE CASCADE,
@@ -598,6 +607,7 @@ CREATE TABLE agent_turns (
     resume_status   TEXT    NOT NULL DEFAULT '' CHECK (resume_status IN ('', 'PLANNING', 'EXECUTING')),
     stop_reason     TEXT    NOT NULL DEFAULT '' CHECK (stop_reason IN ('', 'budget', 'offline', 'user', 'quota', 'failed', 'expired')),
     scope           TEXT    NOT NULL DEFAULT '{}' CHECK (json_valid(scope) AND json_type(scope) = 'object'),
+    mentions        TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(mentions) AND json_type(mentions) = 'array'),
     steps           INTEGER NOT NULL DEFAULT 0 CHECK (steps >= 0),
     writes          INTEGER NOT NULL DEFAULT 0 CHECK (writes >= 0),
     paid_unplanned  INTEGER NOT NULL DEFAULT 0 CHECK (paid_unplanned >= 0),
@@ -610,6 +620,7 @@ CREATE TABLE agent_turns (
     used            TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(used) AND json_type(used) = 'array'),
     open_calls      TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(open_calls) AND json_type(open_calls) = 'array'),
     created_ids     TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(created_ids) AND json_type(created_ids) = 'array'),
+    dropped_by      INTEGER NOT NULL DEFAULT 0 CHECK (dropped_by = 0 OR dropped_by > number),
     started_at      INTEGER NOT NULL,
     updated_at      INTEGER NOT NULL,
     PRIMARY KEY (thread_id, number)
@@ -635,7 +646,9 @@ CREATE INDEX idx_agent_steps_created ON agent_steps (created_at);
 -- agent_actions: the action journal (aggregate agent/action). A U call is PENDING before its use case runs and gets
 -- its outcome after; compensation is the typed Undo data (JSON {"kind", ...ids, old values}) of a DONE entry and
 -- target_version the version of the target right after the action. proposal is '<kind>:<id>' of a PROPOSED entry.
--- One entry per call of a request.
+-- One entry per call of a request. intent (migration 0023) is the JSON object {"target","before","prior","name"} of
+-- action.Intent (NULL: none); undo_refusal is why an UNDO_REFUSED entry was refused. The journal of the panel lists
+-- entries by created_at, then by rowid (insert order; 0039 kept the rowids).
 -- ---------------------------------------------------------------------------------------------------------------
 CREATE TABLE agent_actions (
     id             TEXT    PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 128),
@@ -650,15 +663,12 @@ CREATE TABLE agent_actions (
     version        INTEGER NOT NULL DEFAULT 0,                                 -- optimistic concurrency (ADR-0004)
     created_at     INTEGER NOT NULL,
     updated_at     INTEGER NOT NULL,
+    intent         TEXT    CHECK (intent IS NULL OR (json_valid(intent) AND json_type(intent) = 'object')),
+    undo_refusal   TEXT    NOT NULL DEFAULT '' CHECK (undo_refusal IN ('', 'changed', 'result_ready', 'cannot_stop')),
     UNIQUE (thread_id, turn, call_id)
 );
 CREATE INDEX idx_agent_actions_thread ON agent_actions (thread_id, created_at);
 CREATE INDEX idx_agent_actions_open ON agent_actions (status) WHERE status IN ('PENDING', 'UNDOING');
-
--- agent_actions (migration 0023): intent is the JSON object {"target","before","prior","name"} of action.Intent (NULL:
--- none); undo_refusal is why an UNDO_REFUSED entry was refused. The journal of the panel lists entries by created_at.
-ALTER TABLE agent_actions ADD COLUMN intent TEXT CHECK (intent IS NULL OR (json_valid(intent) AND json_type(intent) = 'object'));
-ALTER TABLE agent_actions ADD COLUMN undo_refusal TEXT NOT NULL DEFAULT '' CHECK (undo_refusal IN ('', 'changed', 'result_ready', 'cannot_stop'));
 CREATE INDEX idx_agent_actions_created ON agent_actions (created_at);
 
 -- ---------------------------------------------------------------------------------------------------------------
