@@ -73,8 +73,11 @@ func startShortcut(ctx context.Context, rawURL string) error {
 	}
 	time.AfterFunc(shortcutTTL, func() { _ = os.Remove(path) })
 
-	return start(ctx, path)
+	return startShortcutFile(ctx, path)
 }
+
+// startShortcutFile opens our .url file; tests replace it so they never start explorer.exe or a browser.
+var startShortcutFile = start
 
 // sweepShortcuts removes our .url files older than shortcutTTL, left by a run that quit before its timer fired.
 func sweepShortcuts(dir string, now time.Time) {
