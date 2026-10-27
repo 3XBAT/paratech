@@ -27,6 +27,7 @@ type Subject struct {
 	aliases  []Name
 	semester values.Semester
 	folders  []Folder // the system folders first, in the order of Systems, then own folders in the order added
+	teacher  Teacher  // zero while none is set
 
 	createdAt time.Time
 	updatedAt time.Time
@@ -70,8 +71,11 @@ type State struct {
 	Aliases   []string
 	Semester  values.Semester
 	Folders   []FolderState
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// TeacherName and TeacherEmail are both "" while no teacher is set.
+	TeacherName  string
+	TeacherEmail string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // Restore rebuilds a stored subject without side effects; it only checks that the state is consistent.
@@ -99,6 +103,13 @@ func Restore(st State) (*Subject, error) {
 			return nil, fmt.Errorf("%w: stored folder name", ErrInvalidSubject)
 		}
 		s.folders = append(s.folders, Folder{id: f.ID, name: n, system: f.System})
+	}
+	if st.TeacherName != "" || st.TeacherEmail != "" {
+		t, err := NewTeacher(st.TeacherName, st.TeacherEmail)
+		if err != nil || t.name != st.TeacherName || t.email != st.TeacherEmail {
+			return nil, fmt.Errorf("%w: stored teacher", ErrInvalidSubject)
+		}
+		s.teacher = t
 	}
 	if err := s.validate(); err != nil {
 		return nil, err
@@ -171,6 +182,31 @@ func (s *Subject) AddAlias(alias string, now time.Time) (changed bool, err error
 	s.aliases = append(s.aliases, n)
 	s.updatedAt = now
 	return true, nil
+}
+
+// SetTeacher sets the teacher of the subject (ADR-0030), replacing the one set before; the same name and address
+// again change nothing (changed is false). Errors wrap ErrInvalidTeacherName or ErrInvalidTeacherEmail.
+func (s *Subject) SetTeacher(name, email string, now time.Time) (changed bool, err error) {
+	t, err := NewTeacher(name, email)
+	if err != nil {
+		return false, err
+	}
+	if t == s.teacher {
+		return false, nil
+	}
+	s.teacher = t
+	s.updatedAt = now
+	return true, nil
+}
+
+// ClearTeacher removes the teacher of the subject; a subject without one changes nothing (changed is false).
+func (s *Subject) ClearTeacher(now time.Time) (changed bool) {
+	if s.teacher.IsZero() {
+		return false
+	}
+	s.teacher = Teacher{}
+	s.updatedAt = now
+	return true
 }
 
 // HasKey reports whether key (values.Key) is the key of the name or of an alias.
@@ -266,6 +302,9 @@ func (s *Subject) Semester() values.Semester { return s.semester }
 // Folders returns a copy of the folders: the system folders first, then own folders in the order added.
 func (s *Subject) Folders() []Folder { return slices.Clone(s.folders) }
 
+// Teacher returns the teacher of the subject; the zero Teacher while none is set.
+func (s *Subject) Teacher() Teacher { return s.teacher }
+
 // CreatedAt returns the creation time.
 func (s *Subject) CreatedAt() time.Time { return s.createdAt }
 
@@ -276,6 +315,7 @@ func (s *Subject) UpdatedAt() time.Time { return s.updatedAt }
 func (s *Subject) State() State {
 	st := State{
 		Version: s.version, ID: s.id, Name: s.name.text, Semester: s.semester, CreatedAt: s.createdAt, UpdatedAt: s.updatedAt,
+		TeacherName: s.teacher.name, TeacherEmail: s.teacher.email,
 	}
 	for _, a := range s.aliases {
 		st.Aliases = append(st.Aliases, a.text)

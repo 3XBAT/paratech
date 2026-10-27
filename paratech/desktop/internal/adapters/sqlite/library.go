@@ -105,6 +105,7 @@ func (r *SubjectRepository) Save(ctx context.Context, s *subject.Subject) error 
 		if st.Version == 0 {
 			if err := DuplicateAsVersionConflict(MapError(ctx, q.InsertSubject(ctx, sqlcgen.InsertSubjectParams{
 				ID: string(st.ID), Name: st.Name, NameKey: values.Key(st.Name), Semester: st.Semester.Code(),
+				TeacherName: st.TeacherName, TeacherEmail: st.TeacherEmail,
 				CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
 			}))); err != nil {
 				return err
@@ -112,6 +113,7 @@ func (r *SubjectRepository) Save(ctx context.Context, s *subject.Subject) error 
 		} else {
 			n, err := q.UpdateSubject(ctx, sqlcgen.UpdateSubjectParams{
 				Name: st.Name, NameKey: values.Key(st.Name), Semester: st.Semester.Code(), UpdatedAt: jobMs(st.UpdatedAt),
+				TeacherName: st.TeacherName, TeacherEmail: st.TeacherEmail,
 				ID: string(st.ID), ExpectedVersion: st.Version,
 			})
 			if err := VersionCAS(ctx, n, err); err != nil {
@@ -187,6 +189,7 @@ func subjectFromRows(row sqlcgen.Subject, aliases []sqlcgen.SubjectAlias, folder
 	}
 	st := subject.State{
 		Version: row.Version, ID: shared.SubjectID(row.ID), Name: row.Name, Semester: sem,
+		TeacherName: row.TeacherName, TeacherEmail: row.TeacherEmail,
 		CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 	}
 	for _, a := range aliases {

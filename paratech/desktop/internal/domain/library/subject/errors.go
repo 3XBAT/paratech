@@ -1,6 +1,9 @@
 package subject
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Errors of the subject aggregate (ARCH-18).
 var (
@@ -27,4 +30,13 @@ var (
 
 	// ErrTooMany means the subject has as many own folders or aliases as it may have.
 	ErrTooMany = errors.New("too many folders or aliases")
+
+	// ErrInvalidTeacher means a teacher name or address that breaks its rules; the error never holds the text.
+	ErrInvalidTeacher = errors.New("invalid teacher")
+
+	// ErrInvalidTeacherName means a bad teacher name; it wraps ErrInvalidTeacher.
+	ErrInvalidTeacherName = fmt.Errorf("%w: name", ErrInvalidTeacher)
+
+	// ErrInvalidTeacherEmail means a bad teacher address; it wraps ErrInvalidTeacher.
+	ErrInvalidTeacherEmail = fmt.Errorf("%w: email", ErrInvalidTeacher)
 )

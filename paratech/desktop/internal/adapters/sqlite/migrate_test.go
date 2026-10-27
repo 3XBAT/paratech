@@ -89,8 +89,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != 36 {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want 36", first, err)
+	if err != nil || first != 37 {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want 37", first, err)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
