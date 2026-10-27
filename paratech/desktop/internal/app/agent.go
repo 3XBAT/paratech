@@ -16,6 +16,7 @@ import (
 	"paratech/desktop/internal/cases/preferences"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/turnkey"
+	"paratech/desktop/internal/domain/shared"
 	agentloop "paratech/desktop/internal/input/agent"
 	"paratech/desktop/internal/input/wails"
 )
@@ -136,10 +137,26 @@ type panelSink struct {
 
 // Publish forwards u.
 func (s panelSink) Publish(u agentloop.Update) {
-	s.panel.Publish(wails.AgentUpdate{
+	s.panel.Publish(panelUpdate(u))
+}
+
+func panelUpdate(u agentloop.Update) wails.AgentUpdate {
+	return wails.AgentUpdate{
 		Thread: u.Thread, Turn: u.Turn, Scope: u.Scope, Status: u.Status, StopReason: u.StopReason, Cards: u.Cards,
 		Problem: string(u.Problem), Progress: u.Progress,
-	})
+	}
+}
+
+// driverCurrent reads the current request of a chat through the Driver for the panel (TASK-272); mapping only, as
+// panelSink.
+type driverCurrent struct {
+	driver *agentloop.Driver
+}
+
+// Current maps the Driver's Current.
+func (d driverCurrent) Current(ctx context.Context, id shared.ThreadID) (wails.AgentUpdate, bool, error) {
+	u, ok, err := d.driver.Current(ctx, id)
+	return panelUpdate(u), ok, err
 }
 
 // Draft forwards d.

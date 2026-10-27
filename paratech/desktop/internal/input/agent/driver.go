@@ -58,6 +58,7 @@ type Turns interface {
 	Cancel(ctx context.Context, ref agentturn.TurnRef) (agentturn.Step, error)
 	Interrupt(ctx context.Context, in agentturn.SubmitInput) (agentturn.Step, error)
 	RecoverIdle(ctx context.Context, in agentturn.IdleInput, live func(shared.ThreadID) bool) (bool, error)
+	Current(ctx context.Context, id shared.ThreadID) (agentturn.Step, bool, error)
 }
 
 // Problem is why an operation on a request did not go through, as an enum (no error text reaches the panel).
@@ -326,6 +327,18 @@ func (d *Driver) Cancel(ctx context.Context, ref agentturn.TurnRef) error {
 	return d.start(ctx, stepAt(ref), opMarks{}, func(ctx context.Context) (agentturn.Step, error) {
 		return d.turns.Cancel(ctx, ref)
 	})
+}
+
+// Current is the current request of chat id as an update, for a chat the panel opens without having seen the request
+// live (after a restart, ADR-0028): its cards pass the checks and local reads of a published update. It only reads: no
+// Hub call, no step, no loop. ok is false when the chat has no request or its request ended; a chat that does not
+// exist wraps shared.ErrNotFound.
+func (d *Driver) Current(ctx context.Context, id shared.ThreadID) (Update, bool, error) {
+	st, ok, err := d.turns.Current(ctx, id)
+	if err != nil || !ok {
+		return Update{}, false, err
+	}
+	return d.update(ctx, st, ProblemNone), true, nil
 }
 
 // Wait blocks until every operation started so far has ended. It is for tests: no operation may start while it waits
@@ -662,10 +675,15 @@ func unknownWrites(calls []agentturn.Call, outcomes []agentturn.Outcome) []agent
 	return out
 }
 
-// publish hands the step to the panel; a card that breaks its rules is dropped, never shown. A reply that lists
+// publish hands the step to the panel.
+func (d *Driver) publish(ctx context.Context, st agentturn.Step, p Problem) {
+	d.sink.Publish(d.update(ctx, st, p))
+}
+
+// update is the panel's form of step st; a card that breaks its rules is dropped, never shown. A reply that lists
 // assignments, and the action line of an added assignment, get their titles and deadlines from the local data here
 // (ctx may have ended: the read is local).
-func (d *Driver) publish(ctx context.Context, st agentturn.Step, p Problem) {
+func (d *Driver) update(ctx context.Context, st agentturn.Step, p Problem) Update {
 	cards := make([]values.Card, 0, len(st.Cards))
 	for _, c := range st.Cards {
 		if r, ok := c.(values.ReplyCard); ok && r.Validate() == nil {
@@ -680,9 +698,9 @@ func (d *Driver) publish(ctx context.Context, st agentturn.Step, p Problem) {
 		}
 		cards = append(cards, c)
 	}
-	d.sink.Publish(Update{
+	return Update{
 		Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, StopReason: st.StopReason, Cards: cards, Problem: p,
-	})
+	}
 }
 
 func refOf(st agentturn.Step) agentturn.TurnRef {

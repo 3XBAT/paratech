@@ -238,6 +238,17 @@ type scriptedTurns struct {
 	idles []agentturn.IdleInput
 	// refuseOutcomes makes Interrupt refuse the first report with outcomes (a use case that refuses what it gets).
 	refuseOutcomes bool
+	// current answers Current (ok when its Thread is set) with currentErr; currents records the chats asked.
+	current    agentturn.Step
+	currentErr error
+	currents   []shared.ThreadID
+}
+
+func (s *scriptedTurns) Current(_ context.Context, id shared.ThreadID) (agentturn.Step, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.currents = append(s.currents, id)
+	return s.current, s.current.Thread != "", s.currentErr
 }
 
 func (s *scriptedTurns) RecoverIdle(_ context.Context, in agentturn.IdleInput, live func(shared.ThreadID) bool) (bool, error) {
