@@ -17,6 +17,7 @@ import {
   groupHits,
   hitCountText,
   hitFocus,
+  hitOpening,
   hitPlace,
   idleFlight,
   kindOptions,
@@ -319,8 +320,32 @@ test("readiness marks and subject counts", () => {
   assert.equal(subjectMeta(subject({ lessons: 3, latest: "" })), "3 занятия");
   assert.deepEqual(
     lessonTabs.map((t) => t.label),
-    ["Кратко", "Текст лекции", "Расшифровка", "Задания"],
+    ["Мой конспект", "Кратко", "Текст лекции", "Расшифровка", "Задания"],
   );
+});
+
+// TASK-287: «Мой конспект» is the first tab and the default one.
+test("the lesson tabs start with «Мой конспект», which is the default", () => {
+  assert.equal(lessonTabs[0].value, "notes");
+  assert.equal(lessonTabs[0].label, "Мой конспект");
+  assert.deepEqual(
+    lessonTabs.map((t) => t.value),
+    ["notes", "summary", "lecture", "transcript", "homework"],
+  );
+  assert.deepEqual(noFocus, { tab: "notes", index: -1 });
+  assert.ok(lessonTabs.some((t) => t.value === noFocus.tab));
+});
+
+test("a hit keeps its tab for the recording's sections, and the notes and the title open «Мой конспект»", () => {
+  assert.equal(hitFocus(hit({ section: "summary", index: 1 })).tab, "summary");
+  assert.equal(hitFocus(hit({ section: "lectureText", index: 1 })).tab, "lecture");
+  assert.equal(hitFocus(hit({ section: "transcript", index: 1 })).tab, "transcript");
+  assert.equal(hitFocus(hit({ section: "ownNote", index: 0, materialId: "m1" })).tab, "notes");
+  assert.equal(hitFocus(hit({ section: "title", index: 0 })).tab, "notes");
+  // The file of a note hit still travels with the opening.
+  const o = hitOpening(hit({ section: "ownNote", index: 0, materialId: "m1" }));
+  assert.equal(o.focus.tab, "notes");
+  assert.equal(o.materialId, "m1");
 });
 
 test("a hit opens the lesson at its place", () => {
@@ -533,4 +558,17 @@ test("the knowledge base renders text only, talks only to the core and searches 
   assert.match(lessonPage, /summaryFocus\(view\.summary, focus\.index\)/);
   assert.match(lessonPage, /<SummaryCard view=\{view\} focusSection=\{focusSection\} focusPoint=\{focusPoint\} \/>/);
   assert.match(src("App.tsx"), /case "knowledge":\s*return <KnowledgeBasePage/);
+});
+
+test("«Мой конспект» is its own tab: before the summary view is read, and not inside «Кратко»", () => {
+  const page = src("pages/KnowledgeLessonPage.tsx");
+  const notes = page.indexOf(') : tab === "notes" ?');
+  const loading = page.indexOf("view === null ?");
+  const summary = page.indexOf(') : tab === "summary" ?');
+  assert.ok(notes > 0 && loading > notes && summary > loading);
+  // The block is created once, in the notes tab; the summary tab holds the AI note only.
+  assert.equal(page.slice(0, page.indexOf("export function NoteLecturePage")).match(/<OwnNotes/g)?.length, 1);
+  const summaryBranch = page.slice(summary, page.indexOf(') : tab === "homework"'));
+  assert.ok(!summaryBranch.includes("OwnNotes") && summaryBranch.includes("<AiNoteLabel />"));
+  assert.match(page, /useState<LessonTab>\(props\.focus\.tab\)/);
 });
