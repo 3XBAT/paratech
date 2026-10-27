@@ -37,7 +37,7 @@ model with 4 threads on a usual laptop CPU with AVX2 — rough, shown as «пр�
 | 0.05 | 0.10 | 0.30 | 0.80 | 0.60 | 1.60 |
 
 Quantized (q5, q8) × 0.8. Scaled by `(4 / cores)^0.7` (sublinear), where cores = threads, and for gentle at most 40 %
-of n. Example, 6 processors, gentle: large-v3 ≈ 2 h 17 min, medium ≈ 1 h 9 min, small ≈ 26 min. A model outside the
+of n. Example before ADR-0031 (numbers are now about twice larger), 6 processors, gentle: large-v3 ≈ 2 h 17 min, medium ≈ 1 h 9 min, small ≈ 26 min. A model outside the
 catalog has no table entry: only a measurement gives a number. **Amended by ADR-0031** (2026-10-27): the table is
 recalibrated on measurements and multiplied by 0.6 for the skipped silence (VAD); old measurements are reset.
 
