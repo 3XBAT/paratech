@@ -52,6 +52,10 @@ func (r *SubjectRepository) List(ctx context.Context) ([]*subject.Subject, error
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", opListSubjects, MapError(ctx, err))
 	}
+	teachers, err := q.ListAllSubjectTeachers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", opListSubjects, MapError(ctx, err))
+	}
 	aliasesOf := map[string][]sqlcgen.SubjectAlias{}
 	for _, a := range aliases {
 		aliasesOf[a.SubjectID] = append(aliasesOf[a.SubjectID], a)
@@ -60,10 +64,14 @@ func (r *SubjectRepository) List(ctx context.Context) ([]*subject.Subject, error
 	for _, f := range folders {
 		foldersOf[f.SubjectID] = append(foldersOf[f.SubjectID], f)
 	}
+	teachersOf := map[string][]sqlcgen.SubjectTeacher{}
+	for _, t := range teachers {
+		teachersOf[t.SubjectID] = append(teachersOf[t.SubjectID], t)
+	}
 
 	out := make([]*subject.Subject, 0, len(rows))
 	for _, row := range rows {
-		s, err := subjectFromRows(row, aliasesOf[row.ID], foldersOf[row.ID])
+		s, err := subjectFromRows(row, aliasesOf[row.ID], foldersOf[row.ID], teachersOf[row.ID])
 		if err != nil {
 			return nil, err
 		}
@@ -87,12 +95,16 @@ func (r *SubjectRepository) Get(ctx context.Context, id shared.SubjectID) (*subj
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", opGetSubject, id, MapError(ctx, err))
 	}
-	return subjectFromRows(row, aliases, folders)
+	teachers, err := q.ListSubjectTeachers(ctx, row.ID)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", opGetSubject, id, MapError(ctx, err))
+	}
+	return subjectFromRows(row, aliases, folders, teachers)
 }
 
 // Save writes the subject in one transaction: an INSERT for version 0, otherwise a version compare-and-swap
-// (ADR-0004(d)); aliases are rewritten, folders inserted and deleted (they are never renamed, and a folder that holds
-// a file must not be deleted even for a moment). A taken name or alias key wraps shared.ErrDuplicate; an id that
+// (ADR-0004(d)); aliases and teachers are rewritten, folders inserted and deleted (they are never renamed, and a
+// folder that holds a file must not be deleted even for a moment). A taken name or alias key wraps shared.ErrDuplicate; an id that
 // exists or a stale version shared.ErrVersionConflict; a removed folder that holds a file shared.ErrConflict.
 func (r *SubjectRepository) Save(ctx context.Context, s *subject.Subject) error {
 	st := s.State()
@@ -105,7 +117,6 @@ func (r *SubjectRepository) Save(ctx context.Context, s *subject.Subject) error 
 		if st.Version == 0 {
 			if err := DuplicateAsVersionConflict(MapError(ctx, q.InsertSubject(ctx, sqlcgen.InsertSubjectParams{
 				ID: string(st.ID), Name: st.Name, NameKey: values.Key(st.Name), Semester: st.Semester.Code(),
-				TeacherName: st.TeacherName, TeacherEmail: st.TeacherEmail,
 				CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
 			}))); err != nil {
 				return err
@@ -113,13 +124,15 @@ func (r *SubjectRepository) Save(ctx context.Context, s *subject.Subject) error 
 		} else {
 			n, err := q.UpdateSubject(ctx, sqlcgen.UpdateSubjectParams{
 				Name: st.Name, NameKey: values.Key(st.Name), Semester: st.Semester.Code(), UpdatedAt: jobMs(st.UpdatedAt),
-				TeacherName: st.TeacherName, TeacherEmail: st.TeacherEmail,
 				ID: string(st.ID), ExpectedVersion: st.Version,
 			})
 			if err := VersionCAS(ctx, n, err); err != nil {
 				return err
 			}
 			if err := q.DeleteSubjectAliases(ctx, string(st.ID)); err != nil {
+				return MapError(ctx, err)
+			}
+			if err := q.DeleteSubjectTeachers(ctx, string(st.ID)); err != nil {
 				return MapError(ctx, err)
 			}
 			if stored, err = q.ListSubjectFolders(ctx, string(st.ID)); err != nil {
@@ -130,6 +143,13 @@ func (r *SubjectRepository) Save(ctx context.Context, s *subject.Subject) error 
 		for i, a := range st.Aliases {
 			if err := q.InsertSubjectAlias(ctx, sqlcgen.InsertSubjectAliasParams{
 				AliasKey: values.Key(a), SubjectID: string(st.ID), Alias: a, Position: int64(i),
+			}); err != nil {
+				return MapError(ctx, err)
+			}
+		}
+		for _, t := range st.Teachers {
+			if err := q.InsertSubjectTeacher(ctx, sqlcgen.InsertSubjectTeacherParams{
+				SubjectID: string(st.ID), Role: string(t.Role), Name: t.Name, Email: t.Email,
 			}); err != nil {
 				return MapError(ctx, err)
 			}
@@ -182,15 +202,19 @@ func (r *SubjectRepository) Delete(ctx context.Context, s *subject.Subject) erro
 	return nil
 }
 
-func subjectFromRows(row sqlcgen.Subject, aliases []sqlcgen.SubjectAlias, folders []sqlcgen.SubjectFolder) (*subject.Subject, error) {
+// subjectFromRows restores a subject. subjects.teacher_* are legacy (migration 0044) and never read.
+func subjectFromRows(row sqlcgen.Subject, aliases []sqlcgen.SubjectAlias, folders []sqlcgen.SubjectFolder,
+	teachers []sqlcgen.SubjectTeacher) (*subject.Subject, error) {
 	sem, err := values.ParseSemester(row.Semester)
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", opRestoreSubject, row.ID, err)
 	}
 	st := subject.State{
 		Version: row.Version, ID: shared.SubjectID(row.ID), Name: row.Name, Semester: sem,
-		TeacherName: row.TeacherName, TeacherEmail: row.TeacherEmail,
 		CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
+	}
+	for _, t := range teachers {
+		st.Teachers = append(st.Teachers, subject.TeacherState{Role: subject.TeacherRole(t.Role), Name: t.Name, Email: t.Email})
 	}
 	for _, a := range aliases {
 		st.Aliases = append(st.Aliases, a.Alias)

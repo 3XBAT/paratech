@@ -391,6 +391,13 @@ type SubjectFolder struct {
 	Position  int64
 }
 
+type SubjectTeacher struct {
+	SubjectID string
+	Role      string
+	Name      string
+	Email     string
+}
+
 type Summary struct {
 	ID            string
 	TranscriptID  sql.NullString
