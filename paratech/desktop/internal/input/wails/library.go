@@ -187,8 +187,10 @@ type LibraryService struct {
 	files  MaterialFileReader
 	views  MaterialViews // «Открыть»: set by withOpener
 	opener FileOpener
-	log    *slog.Logger
-	drop   sync.Mutex // one drop at a time, so concurrent drops never hold many files in memory
+	// overview is the page of a subject (TASK-225): set by withOverview.
+	overview SubjectOverviewUseCase
+	log      *slog.Logger
+	drop     sync.Mutex // one drop at a time, so concurrent drops never hold many files in memory
 }
 
 // NewLibraryService returns the binding of the library; all arguments are required.

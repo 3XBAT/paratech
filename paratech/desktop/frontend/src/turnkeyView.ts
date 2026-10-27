@@ -74,12 +74,18 @@ export type TurnkeyCardModel =
   | { type: "understanding" }
   | { type: "helper" };
 
-/** Why the reader call did not go through: the core's message, a general line if only the problem code came; "" without a problem. */
+/**
+ * Why the reader call did not go through: the message of this call, else the stored problem of the last call
+ * (lastMessage, kept across restarts, TASK-226); a general line if only the code came; "" without a problem.
+ */
 export function triageReason(w: TurnkeyWork): string {
-  if (w.problem === "") {
-    return "";
+  if (w.problem !== "") {
+    return w.message !== "" ? w.message : turnkeyTexts.triageFailed;
   }
-  return w.message !== "" ? w.message : turnkeyTexts.triageFailed;
+  if (w.lastProblem) {
+    return w.lastMessage || turnkeyTexts.triageFailed;
+  }
+  return "";
 }
 
 /**

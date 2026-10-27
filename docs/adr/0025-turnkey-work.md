@@ -158,6 +158,16 @@ it cannot do the work whole — then help instead. Everything the model says abo
 ## Addendum (TASK-200): a partial or impossible work without its helper
 - The Hub asks the model once more within the same reservation and attempt (fixed server note `ops/triage_assignment/v2/reask.md`, same data; triage prompt v2 demands the helper); both calls are charged at their usage, once; a second answer without it is the refusal; a second call that fails without an answer is charged only for the first usage (accepted gap, ADR-0010).
 
+## Addendum (TASK-226): last problem and last send
+- The work keeps the problem of its last reader call as a code (`work.Problem`: offline, quota, refused, no_text,
+  source_gone; never model text). `NoteProblem` sets it while a call is due, `Refuse` sets `refused`; any status past
+  the call (an answer recorded) clears it, so only `triage` and `failed` may hold one.
+- It keeps when it was last sent (`RecordSent`, only forward, only a work of an assignment; `UpdatedAt` stays). The
+  deliveries stay the record: `Work`/`WorkOf` read the newest SENT delivery of the work's `send_work_email` proposals
+  (port `WorkSends`) and save a newer time, a repeatable step (ARCH-23) that is only logged when it fails. Such a save
+  bumps the version: an outline editor opened before it gets «Работа изменилась».
+- Storage: migration 0035 (`works.last_problem`, `works.sent_at`). DTO: `lastProblem`, `lastMessage`, `sentAt`.
+
 ## Consequences
 - Answers, edits and confirmation come only from `input/wails`; the agent can start a triage, nothing more.
 - The triage outcome of a request is not fed to the plan policy yet (`Facts.Triage`); the mandatory plan covers it.

@@ -30,6 +30,9 @@ var (
 	// ErrInvalidScope is returned for a scope or base that breaks its invariants.
 	ErrInvalidScope = errors.New("invalid scope")
 
+	// ErrInvalidMention is returned for a mention of a wrong kind, a bad label or too many mentions in a request.
+	ErrInvalidMention = errors.New("invalid mention")
+
 	// ErrInvalidResult is returned for a tool result or a history entry that breaks its limits.
 	ErrInvalidResult = errors.New("invalid tool result")
 

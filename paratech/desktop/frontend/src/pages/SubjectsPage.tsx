@@ -1,11 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type LibraryMaterial, type LibrarySubject, libraryApi, libraryErrorText } from "../bindings/library.js";
 import { callByName } from "../bindings/runtime.js";
-import { folderCounts, importNote, texts } from "../libraryView.js";
+import {
+  folderCounts,
+  freshMarks,
+  idleOverview,
+  importNote,
+  type OverviewState,
+  scheduleLine,
+  SubjectOverviewFlow,
+  texts,
+} from "../libraryView.js";
 import type { PageId } from "../nav.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
-import { InboxList, NameForm, SubjectDetail, SubjectList, SubjectTree } from "./SubjectsParts.js";
+import { InboxList, NameForm, OverviewSections, SubjectDetail, SubjectList, SubjectTree } from "./SubjectsParts.js";
 
 type Form = "none" | "subject" | "folder";
 
@@ -55,8 +64,24 @@ export function SubjectsPage(props: {
     setMaterials(null);
   }, [openId]);
 
+  // The overview of the open subject: loaded once per opening, then the opening is recorded (see SubjectOverviewFlow).
+  // It does not depend on `reload`, so a dropped file does not count as a new visit.
+  const [overviewState, setOverviewState] = useState<OverviewState>(idleOverview);
+  useEffect(() => {
+    if (openId === "") {
+      setOverviewState(idleOverview);
+      return;
+    }
+    const flow = new SubjectOverviewFlow(api, setOverviewState);
+    flow.open(openId);
+    return () => flow.close();
+  }, [api, openId]);
+
   const subject = subjects?.find((s) => s.id === openId) ?? null;
   const known = subject !== null;
+  const overview = overviewState.overview;
+  const schedule = overview ? scheduleLine(overview.schedule) : "";
+  const fresh = useMemo(() => freshMarks(overview), [overview]);
 
   // A reload (a dropped file) only refetches the files; an open form stays.
   useEffect(() => {
@@ -135,6 +160,7 @@ export function SubjectsPage(props: {
             subjects={subjects}
             currentId={subject.id}
             counts={counts}
+            freshFolders={fresh.folders}
             busy={busy}
             onOpen={props.onSelect}
             onAddSubject={() => setForm("subject")}
@@ -153,6 +179,7 @@ export function SubjectsPage(props: {
                     {texts.aliases}: {subject.aliases.join(", ")}
                   </p>
                 )}
+                {schedule !== "" && <p className="small muted sub-line">{schedule}</p>}
               </div>
               <div className="acts">
                 <Button icon="back" onClick={() => props.onSelect("")}>
@@ -161,9 +188,16 @@ export function SubjectsPage(props: {
               </div>
             </div>
             {subjectForm}
+            {overviewState.status === "failed" && (
+              <ResultLine kind="fail" role="alert">
+                {overviewState.error}
+              </ResultLine>
+            )}
+            {overview && <OverviewSections overview={overview} />}
             <SubjectDetail
               subject={subject}
               materials={materials ?? []}
+              fresh={fresh}
               folderForm={form === "folder"}
               busy={busy}
               error={error}

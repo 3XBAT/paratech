@@ -31,7 +31,7 @@ func validCore() Core {
 		Summary:    &fakeSummary{},
 		Deletion:   &fakeDeletion{},
 		Knowledge:  &fakeKnowledge{},
-		Library:    &fakeLibrary{}, MaterialViews: newMemViews(), Opener: &fakeOpener{},
+		Library:    &fakeLibrary{}, MaterialViews: newMemViews(), Opener: &fakeOpener{}, SubjectOverview: &fakeOverview{},
 		Agent: AgentCore{
 			Driver: &fakeAgentDriver{}, Link: &fakeConnections{}, Panel: NewAgentPanel(discard()), Life: context.Background(),
 			Journal: &fakeJournal{}, Clock: fixedClock{},
