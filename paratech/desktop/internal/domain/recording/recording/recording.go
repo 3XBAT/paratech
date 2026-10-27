@@ -53,6 +53,9 @@ type Recording struct {
 	lesson  shared.LessonID
 	status  Status
 
+	origin       Origin // captured or imported (ADR-0027)
+	sourceSHA256 string // the digest of an imported file; empty when captured
+
 	lessonSnapshot values.LessonSnapshot   // the lesson as it was at the start (TASK-088); zero without one
 	correction     values.LessonCorrection // the subject and kind the user set (TASK-091); zero: none
 
@@ -101,7 +104,7 @@ func New(spec Spec, now time.Time) (*Recording, error) {
 	}
 
 	r := &Recording{
-		id: spec.ID, lesson: spec.LessonID, lessonSnapshot: spec.Lesson, status: StatusStarting,
+		id: spec.ID, lesson: spec.LessonID, lessonSnapshot: spec.Lesson, status: StatusStarting, origin: OriginCaptured,
 		maxDuration: spec.MaxDuration, chunksDir: dir, startedAt: now, createdAt: now, updatedAt: now,
 	}
 	if err := r.validate(); err != nil {
@@ -135,11 +138,22 @@ type State struct {
 	HeartbeatAt         time.Time // zero = no heartbeat yet
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	// Origin is how the recording came to be; empty reads as OriginCaptured. SourceSHA256 is the digest of an imported
+	// file, set exactly for OriginImported.
+	Origin       Origin
+	SourceSHA256 string
 }
 
 // Restore rebuilds a stored recording without side effects; it only checks that the state is consistent.
 func Restore(s State) (*Recording, error) {
+	if s.Origin == "" {
+		s.Origin = OriginCaptured
+	}
+	if err := checkOrigin(s); err != nil {
+		return nil, err
+	}
 	r := &Recording{
+		origin: s.Origin, sourceSHA256: s.SourceSHA256,
 		version: s.Version, id: s.ID, lesson: s.LessonID, lessonSnapshot: s.Lesson, correction: s.Correction, status: s.Status,
 		maxDuration: s.MaxDuration, duration: s.Duration, chunks: s.Chunks, chunksDir: s.ChunksDir, audio: s.Audio,
 		silent: s.Silent, problem: s.Problem, startedAt: s.StartedAt, stoppedAt: s.StoppedAt, heartbeatAt: s.HeartbeatAt,
@@ -228,8 +242,11 @@ func (r *Recording) Deadline() time.Time { return r.startedAt.Add(r.maxDuration)
 // LimitReached reports whether the hard cap is reached at now.
 func (r *Recording) LimitReached(now time.Time) bool { return !now.Before(r.Deadline()) }
 
-// Duration returns the duration of the final track; ok is false until the recording is COMPLETED.
-func (r *Recording) Duration() (d time.Duration, ok bool) { return r.duration, !r.audio.IsZero() }
+// Duration returns the duration of the final track; ok is false until the recording is COMPLETED and for an imported
+// file whose duration is unknown (ADR-0027: only a WAV header tells it).
+func (r *Recording) Duration() (d time.Duration, ok bool) {
+	return r.duration, !r.audio.IsZero() && r.duration > 0
+}
 
 // Chunks returns the number of chunk files last observed in the chunk directory.
 func (r *Recording) Chunks() int { return r.chunks }

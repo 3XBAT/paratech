@@ -237,6 +237,7 @@ internal/cases/<usecase>/
 
 Use cases (пример): `cases/recordingsession`, `cases/jobrunner`, `cases/transcribe`, `cases/modelcatalog`, `cases/schedulesync`, `cases/homeworkflow`, `cases/senddelivery`.
 Агент и библиотека (ADR-0021, ADR-0024): `cases/agentturn`, `cases/agentjournal`, `cases/library`, `cases/answering`, `cases/todayfeed`, `cases/turnkey`; входной слой `input/agent`.
+Старые записи (ADR-0027): `cases/recordingimport` — аудиофайл лекции становится записью `recording` с origin `imported` (копия через Storage Manager, затем обычное локальное распознавание).
 
 **hub**
 

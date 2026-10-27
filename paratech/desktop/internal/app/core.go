@@ -380,6 +380,10 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return fmt.Errorf("app: recording deletion: %w", err)
 	}
+	recordingImport, err := c.wireRecordingImport(e, recordings, lessons, log)
+	if err != nil {
+		return err
+	}
 
 	c.sound, err = soundcheck.New(soundcheck.Deps{
 		Checker: levelChecker(recorder), Settings: settings, Recordings: recordingActivity{c.recordings}, Clock: e.clock,
@@ -460,8 +464,10 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Transcript: viewer,
 		Summary:    summaryViewer,
 		Deletion:   c.deletions,
-		Knowledge:  knowledge,
-		Library:    lib,
+		// «Импортировать запись лекции» (TASK-161).
+		RecordingImport: recordingImport,
+		Knowledge:       knowledge,
+		Library:         lib,
 		// «Открыть в Word / PowerPoint»: a named copy in the artifact store, started below that root only.
 		MaterialViews:   store,
 		Opener:          fileopen.New(filepath.Join(dataDir, artifactsDir)),
