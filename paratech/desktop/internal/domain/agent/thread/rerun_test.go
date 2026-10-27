@@ -87,11 +87,7 @@ func TestRerunFromStoppedWithOpenCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := KeyOf(scope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	th, err := New("th1", key, t0)
+	th, err := New("th1", t0)
 	if err != nil {
 		t.Fatal(err)
 	}

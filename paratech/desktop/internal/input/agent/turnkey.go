@@ -55,19 +55,20 @@ func (a *Actions) triage(call values.Call) (prepared, error) {
 	}}, nil
 }
 
-// origin is where a call comes from: its thread, its request and the subject of the thread ("" «Без предмета»).
+// origin is where a call comes from: its thread, its request and the subject of the request ("" «Без предмета»).
 type origin struct {
 	thread  shared.ThreadID
 	turn    int
 	subject shared.SubjectID
 }
 
-// originOf is the origin of the calls of step st: the scope's subject is the thread's key (thread.StartRequest).
+// originOf is the origin of the calls of step st: the subject is the one of the request's scope (a chat spans
+// subjects, ADR-0028).
 func originOf(st agentturn.Step) origin {
 	return origin{thread: st.Thread, turn: st.Turn, subject: shared.SubjectID(st.Scope.Subject().ID())}
 }
 
-// triageTopic starts a work on a free topic (TASK-187, TASK-188), in the subject of the call's thread. It runs as a
+// triageTopic starts a work on a free topic (TASK-187, TASK-188), in the subject of the call's request. It runs as a
 // step of an approved plan, as the paid job of a request whose student turned the free-work card off, or after «Сделать»
 // on the card (FreeWorks): each is the student's consent. The request key is the call's (thread, request, call ID), so
 // a replay or a second «Сделать» finds the same work, and a call of another request never does. The topic is free

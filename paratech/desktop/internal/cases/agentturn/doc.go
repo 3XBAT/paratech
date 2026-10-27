@@ -1,4 +1,4 @@
-// Package agentturn is the use case of one agent step (ADR-0021): load the thread of the scope, open a step, call
+// Package agentturn is the use case of one agent step (ADR-0021): load the chat (ADR-0028), open a step, call
 // the planner through AgentModel, parse the calls in the domain, apply the policy and the budget, save the thread.
 //
 // The case runs no tool: it returns the admitted calls (Step.Calls) and the Driver of input/agent runs them and

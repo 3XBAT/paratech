@@ -1,26 +1,40 @@
--- The agent panel (TASK-116): threads with their current request, the history sent to the planner and the action
--- journal. Threads and journal entries use the optimistic-concurrency protocol of ADR-0004(d).
+-- The agent panel (TASK-116): chats (threads) with their current request, the history sent to the planner and the
+-- action journal. Threads and journal entries use the optimistic-concurrency protocol of ADR-0004(d).
 
 -- name: GetAgentThread :one
 SELECT * FROM agent_threads WHERE id = sqlc.arg(id);
 
--- name: GetAgentThreadByKey :one
-SELECT * FROM agent_threads WHERE subject_key = sqlc.arg(subject_key);
+-- The current chat (ADR-0028): the unarchived one active last; ties go to the newer id.
+-- name: GetCurrentAgentThread :one
+SELECT * FROM agent_threads
+WHERE archived_at IS NULL
+ORDER BY last_active_at DESC, id DESC
+LIMIT 1;
+
+-- Every chat: the unarchived ones by their last activity, newest first, then the archived ones in the same order.
+-- (Comments of this file stay ASCII: sqlc rewrites queries by byte offset.)
+-- name: ListAgentThreadIDs :many
+SELECT id FROM agent_threads
+ORDER BY archived_at IS NOT NULL, last_active_at DESC, id DESC;
 
 -- A never-stored thread (version 0) is inserted with version 1.
 -- name: InsertAgentThread :exec
-INSERT INTO agent_threads (id, subject_key, turns, history_from, seen, version, created_at, updated_at)
-VALUES (sqlc.arg(id), sqlc.arg(subject_key), sqlc.arg(turns), sqlc.arg(history_from), sqlc.arg(seen), 1,
-        sqlc.arg(created_at), sqlc.arg(updated_at));
+INSERT INTO agent_threads (id, title, turns, history_from, seen, archived_at, last_active_at, version, created_at,
+                           updated_at)
+VALUES (sqlc.arg(id), sqlc.arg(title), sqlc.arg(turns), sqlc.arg(history_from), sqlc.arg(seen), sqlc.arg(archived_at),
+        sqlc.arg(last_active_at), 1, sqlc.arg(created_at), sqlc.arg(updated_at));
 
--- Compare-and-swap on the loaded version; the key never changes.
+-- Compare-and-swap on the loaded version.
 -- name: UpdateAgentThread :execrows
 UPDATE agent_threads
-SET turns        = sqlc.arg(turns),
-    history_from = sqlc.arg(history_from),
-    seen         = sqlc.arg(seen),
-    version      = version + 1,
-    updated_at   = sqlc.arg(updated_at)
+SET title          = sqlc.arg(title),
+    turns          = sqlc.arg(turns),
+    history_from   = sqlc.arg(history_from),
+    seen           = sqlc.arg(seen),
+    archived_at    = sqlc.arg(archived_at),
+    last_active_at = sqlc.arg(last_active_at),
+    version        = version + 1,
+    updated_at     = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 
 -- name: GetAgentTurn :one
@@ -31,11 +45,11 @@ SELECT * FROM agent_turns WHERE thread_id = sqlc.arg(thread_id) AND number = sql
 DELETE FROM agent_turns WHERE thread_id = sqlc.arg(thread_id) AND number = sqlc.arg(number);
 
 -- name: InsertAgentTurn :exec
-INSERT INTO agent_turns (thread_id, number, status, resume_status, stop_reason, scope, steps, writes, paid_unplanned,
-                         planner_input, question_rounds, step_open, retry, proposed_plan, approved_plan, used,
-                         open_calls, created_ids, started_at, updated_at)
+INSERT INTO agent_turns (thread_id, number, status, resume_status, stop_reason, scope, mentions, steps, writes,
+                         paid_unplanned, planner_input, question_rounds, step_open, retry, proposed_plan, approved_plan,
+                         used, open_calls, created_ids, started_at, updated_at)
 VALUES (sqlc.arg(thread_id), sqlc.arg(number), sqlc.arg(status), sqlc.arg(resume_status), sqlc.arg(stop_reason),
-        sqlc.arg(scope), sqlc.arg(steps), sqlc.arg(writes), sqlc.arg(paid_unplanned), sqlc.arg(planner_input),
+        sqlc.arg(scope), sqlc.arg(mentions), sqlc.arg(steps), sqlc.arg(writes), sqlc.arg(paid_unplanned), sqlc.arg(planner_input),
         sqlc.arg(question_rounds), sqlc.arg(step_open), sqlc.arg(retry), sqlc.arg(proposed_plan),
         sqlc.arg(approved_plan), sqlc.arg(used), sqlc.arg(open_calls), sqlc.arg(created_ids), sqlc.arg(started_at),
         sqlc.arg(updated_at));
@@ -62,11 +76,13 @@ SELECT CAST(COALESCE(MAX(seq), 0) AS INTEGER) AS seq FROM agent_steps WHERE thre
 INSERT INTO agent_steps (thread_id, seq, turn, entry, body, created_at)
 VALUES (sqlc.arg(thread_id), sqlc.arg(seq), sqlc.arg(turn), sqlc.arg(entry), sqlc.arg(body), sqlc.arg(created_at));
 
--- The newest entries of the requests from a number on, newest first (the adapter returns them oldest first).
+-- The newest entries of the requests from a number on, newest first (the adapter returns them oldest first). Entries
+-- of dropped requests are left out here, so they never take a place under the limit (ADR-0028).
 -- name: ListAgentSteps :many
-SELECT * FROM agent_steps
-WHERE thread_id = sqlc.arg(thread_id) AND turn >= sqlc.arg(from_turn)
-ORDER BY seq DESC
+SELECT s.* FROM agent_steps s
+WHERE s.thread_id = sqlc.arg(thread_id) AND s.turn >= sqlc.arg(from_turn)
+  AND NOT EXISTS (SELECT 1 FROM agent_turns u WHERE u.thread_id = s.thread_id AND u.number = s.turn AND u.dropped_by > 0)
+ORDER BY s.seq DESC
 LIMIT sqlc.arg(max_rows);
 
 -- name: GetAgentAction :one

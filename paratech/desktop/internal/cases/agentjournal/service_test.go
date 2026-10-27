@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/agent/action"
-	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/shared"
@@ -609,13 +608,14 @@ func TestListThread(t *testing.T) {
 	}
 }
 
-type memThreads map[shared.ThreadID]*thread.Thread
+// memScopes are the scopes of stored requests.
+type memScopes map[requestOf]values.Scope
 
-func (m memThreads) Get(_ context.Context, id shared.ThreadID) (*thread.Thread, error) {
-	if th, ok := m[id]; ok {
-		return th, nil
+func (m memScopes) RequestScope(_ context.Context, id shared.ThreadID, turn int) (values.Scope, error) {
+	if sc, ok := m[requestOf{id, turn}]; ok {
+		return sc, nil
 	}
-	return nil, shared.ErrNotFound
+	return values.Scope{}, shared.ErrNotFound
 }
 
 type memJobs []*job.Job
@@ -624,14 +624,10 @@ func (m memJobs) ListActivity(context.Context, int, []job.Type) ([]*job.Job, []s
 	return m, nil, nil
 }
 
-// «Журнал» is one list: the actions of paratech (undone ones included, with the subject of their thread) and the
-// processing jobs, newest first.
+// «Журнал» is one list: the actions of paratech (undone ones included, with the subject of the scope of their
+// request: a chat spans subjects) and the processing jobs, newest first.
 func TestListMergesActionsAndProcessing(t *testing.T) {
-	key, err := thread.SubjectKey(ref(t, values.KindSubject, "s1"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	th, err := thread.New("th1", key, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+	scope, err := values.NewScope(ref(t, values.KindSubject, "s1"), "", values.Ref{}, values.Ref{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,12 +636,14 @@ func TestListMergesActionsAndProcessing(t *testing.T) {
 		t.Fatal(err)
 	}
 	comp := &fakeComp{targets: at(1)}
-	s, _ := newServiceWith(t, Deps{Compensator: comp, Threads: memThreads{"th1": th}, Processing: memJobs{j}})
+	// Request 2 of th1 is in no subject: the subject is the request's, not the chat's.
+	scopes := memScopes{{"th1", 1}: scope, {"th1", 2}: {}}
+	s, _ := newServiceWith(t, Deps{Compensator: comp, Threads: scopes, Processing: memJobs{j}})
 	undone := done(t, s, begin(t, s, "c1").ID) // created at 09:00:01
 	if _, err := s.Undo(t.Context(), undone.ID); err != nil {
 		t.Fatal(err)
 	}
-	later := done(t, s, beginIn(t, s, BeginInput{Thread: "th2", Turn: 1, CallID: "c1", Tool: values.ToolCreateSubject}).ID)
+	later := done(t, s, beginIn(t, s, BeginInput{Thread: "th1", Turn: 2, CallID: "c1", Tool: values.ToolCreateSubject}).ID)
 
 	lines, err := s.List(t.Context(), 0)
 	if err != nil || len(lines) != 3 {
