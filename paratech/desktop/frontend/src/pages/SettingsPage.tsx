@@ -127,12 +127,6 @@ export function SettingsPage(props: { part?: SettingsPart }) {
   if (part === "settings") {
     return (
       <section className="page">
-        <div className="head">
-          <div>
-            <span className="label">Изменения сохраняются сразу</span>
-            <h1>Настройки</h1>
-          </div>
-        </div>
         {settings === null && !error && <p className="muted">Загрузка…</p>}
         {settings !== null && (
           <>
@@ -191,7 +185,7 @@ export function SettingsPage(props: { part?: SettingsPart }) {
         <div className="head">
           <div>
             <span className="label">Для титульного листа домашнего задания</span>
-            <h1>Профиль</h1>
+            <h2>Профиль</h2>
           </div>
         </div>
         <ProfileCard api={api} />
@@ -205,7 +199,7 @@ export function SettingsPage(props: { part?: SettingsPart }) {
       <div className="head">
         <div>
           <span className="label">Хранится на этом компьютере</span>
-          <h1>Оформление</h1>
+          <h2>Оформление</h2>
         </div>
       </div>
       <SettingsGroup caption="Оформление">

@@ -282,7 +282,7 @@ export function ModelsPage() {
       <div className="head">
         <div>
           <span className="label">Распознавание речи работает без интернета</span>
-          <h1>Модели речи</h1>
+          <h2>Модели речи</h2>
         </div>
         <div className="acts">
           <Button icon="up" disabled={dialogBusy} onClick={() => void choose()}>

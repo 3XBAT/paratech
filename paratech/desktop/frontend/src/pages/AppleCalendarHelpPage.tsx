@@ -81,9 +81,9 @@ export function HelpView(props: {
       <div className="head">
         <div>
           <span className="label">{helpTexts.lead}</span>
-          <h1 ref={title} tabIndex={-1}>
+          <h2 ref={title} tabIndex={-1}>
             {helpTexts.title}
-          </h1>
+          </h2>
           <p className="small muted">{helpTexts.entryText}</p>
         </div>
         <Button onClick={props.onBack}>{helpTexts.back}</Button>
