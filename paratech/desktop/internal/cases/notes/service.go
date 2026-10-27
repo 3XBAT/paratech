@@ -38,6 +38,7 @@ type Service struct {
 	clock      Clock
 	ids        IDs
 	log        *slog.Logger
+	counts     *countCache
 }
 
 // New checks that every required port is given (see Deps).
@@ -51,7 +52,7 @@ func New(d Deps) (*Service, error) {
 	}
 	return &Service{
 		notes: d.Notes, materials: d.Materials, recordings: d.Recordings, lessons: d.Lessons, clock: d.Clock, ids: d.IDs,
-		log: log,
+		log: log, counts: newCountCache(),
 	}, nil
 }
 

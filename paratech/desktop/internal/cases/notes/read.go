@@ -63,7 +63,7 @@ func (s *Service) ForSubject(ctx context.Context, sub shared.SubjectID) ([]View,
 
 // activeViews reads the active notes of list whose current anchor keep accepts (nil: all), in order.
 func (s *Service) activeViews(ctx context.Context, list []*note.Note, keep func(note.Anchor) bool) ([]View, error) {
-	r := s.newResolver()
+	r, b := s.newResolver(), newCountBudget()
 	out := []View{}
 	for _, n := range list {
 		if !n.Active() {
@@ -76,7 +76,7 @@ func (s *Service) activeViews(ctx context.Context, list []*note.Note, keep func(
 		if keep != nil && !keep(a) {
 			continue
 		}
-		v, err := s.viewWith(ctx, n, a)
+		v, err := s.viewWith(ctx, n, a, b)
 		if err != nil {
 			return nil, err
 		}
@@ -91,12 +91,15 @@ func (s *Service) view(ctx context.Context, n *note.Note) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
-	return s.viewWith(ctx, n, a)
+	return s.viewWith(ctx, n, a, newCountBudget())
 }
 
-func (s *Service) viewWith(ctx context.Context, n *note.Note, a note.Anchor) (View, error) {
+// viewWith reads the parts of n at the anchor a; their texts are counted within b.
+func (s *Service) viewWith(ctx context.Context, n *note.Note, a note.Anchor, b *countBudget) (View, error) {
 	ids := n.Parts()
-	v := View{Note: n, Anchor: a, Parts: make([]*material.Material, 0, len(ids))}
+	v := View{
+		Note: n, Anchor: a, Parts: make([]*material.Material, 0, len(ids)), Counts: make([]material.TextCounts, 0, len(ids)),
+	}
 	for _, id := range ids {
 		m, err := s.materials.Material(ctx, id)
 		switch {
@@ -109,6 +112,7 @@ func (s *Service) viewWith(ctx context.Context, n *note.Note, a note.Anchor) (Vi
 			v.NoTextPages++
 		}
 		v.Parts = append(v.Parts, m)
+		v.Counts = append(v.Counts, s.partCounts(ctx, m, b))
 	}
 	return v, nil
 }

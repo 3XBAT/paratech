@@ -97,11 +97,14 @@ type Replaced struct {
 
 // View is a note as it reads now. Anchor is the anchor resolved at read time: a recording or lesson that is gone
 // reads as the day of its snapshot. Parts holds the material of each part in order; nil for a material that is gone.
-// NoTextPages counts the parts that are photos without text, for «N стр. без текста» (ADR-0027).
+// NoTextPages counts the parts that are photos without text, for «N стр. без текста» (ADR-0027). Counts holds how the
+// text of each part is cut, in the order of Parts: zero for a part without text (a photo, a PDF, one that is gone,
+// removed or damaged) and for one not read within the bound of a listing (maxCountReads).
 type View struct {
 	Note        *note.Note
 	Anchor      note.Anchor
 	Parts       []*material.Material
+	Counts      []material.TextCounts
 	NoTextPages int
 }
 

@@ -90,7 +90,7 @@ export function JournalList(props: {
           <Card className="rows">
             {g.items.map(({ line, index }) => {
               const m = lineModel(line, index, props.subjects, g.key !== "now" && g.key !== "none");
-              const meta = [m.when, m.subject, m.status].filter((x) => x !== "").join(" · ");
+              const meta = [m.when, m.subject, m.chat === "" ? "" : `чат «${m.chat}»`, m.status].filter((x) => x !== "").join(" · ");
               return (
                 <Row
                   key={m.key}

@@ -90,8 +90,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != recordingOriginVersion {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, recordingOriginVersion)
+	if err != nil || first != lessonCallLinkVersion {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, lessonCallLinkVersion)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
@@ -255,7 +255,10 @@ func TestMigrationToVersion8DropsCompletionNotices(t *testing.T) {
 // materialImagesVersion is the migration that rebuilds materials for photos (TASK-165).
 const materialImagesVersion = 41
 
-// recordingOriginVersion adds the origin of a recording (TASK-161), the newest migration.
+// lessonCallLinkVersion is the migration that adds the call link of a lesson (TASK-256), the newest one.
+const lessonCallLinkVersion = 43
+
+// recordingOriginVersion adds the origin of a recording (TASK-161).
 const recordingOriginVersion = 42
 
 // Version 42 marks every earlier recording captured, takes an imported one with its digest only once, and goes back
