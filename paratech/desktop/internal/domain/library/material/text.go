@@ -206,6 +206,28 @@ func (t Text) Empty() bool { return len(t.fragments) == 0 }
 // Truncated reports whether the text was cut at a limit, so it is not the whole file.
 func (t Text) Truncated() bool { return t.truncated }
 
+// TextCounts tells how a text is cut, for «N разделов» / «N стр.» of a note part. A text has one locator kind, so at
+// most one of Sections and Pages is set; Fragments counts the pieces of any kind (slides and fragments included).
+type TextCounts struct {
+	Sections  int
+	Pages     int
+	Fragments int
+}
+
+// Counts returns how the text is cut; an empty text is all zero.
+func (t Text) Counts() TextCounts {
+	c := TextCounts{Fragments: len(t.fragments)}
+	for _, f := range t.fragments {
+		switch f.Locator.Kind {
+		case LocatorSection:
+			c.Sections++
+		case LocatorPage:
+			c.Pages++
+		}
+	}
+	return c
+}
+
 // Lines returns the text as lines: each fragment is its heading (Locator.String) and its lines.
 func (t Text) Lines() []string {
 	var out []string
