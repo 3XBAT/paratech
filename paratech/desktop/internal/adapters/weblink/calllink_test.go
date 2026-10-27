@@ -86,7 +86,10 @@ func useEnviron(t *testing.T, env ...string) {
 }
 
 // Fake environment for the checks: names only, values obviously fake.
-var fakeEnv = []string{"=C:=C:\\fake", "USERNAME=fake-user", "Db_Password=fake", "DEADBEEF2=fake", "PROGRAMFILES(X86)=C:\\fake"}
+var fakeEnv = []string{
+	"=C:=C:\\fake", "USERNAME=fake-user", "Db_Password=fake", "DEADBEEF2=fake", "PROGRAMFILES(X86)=C:\\fake",
+	"DB-TOKEN=fake", "AB.KEY=fake", "AD$SECRET=fake",
+}
 
 func TestCheckCallLinkEnv(t *testing.T) {
 	tests := []struct {
@@ -97,6 +100,11 @@ func TestCheckCallLinkEnv(t *testing.T) {
 		{"hex-prefixed set variable", "https://example.zoom.us/j/1?x=%DB_PASSWORD%20", true},
 		{"set variable, other case", "https://example.zoom.us/j/1?x=%db_password%20", true},
 		{"second opener names the variable", "https://example.zoom.us/j/1?x=%20%DB_PASSWORD%20", true},
+		{"set variable with a hyphen", "https://example.zoom.us/j/1?x=%DB-TOKEN%20", true},
+		{"set variable with a dot", "https://example.zoom.us/j/1?x=%AB.KEY%20", true},
+		{"set variable with a dollar", "https://example.zoom.us/j/1?x=%AD$SECRET%20", true},
+		{"set variable with a hyphen, other case", "https://example.zoom.us/j/1?x=%db-token%20", true},
+		{"hex-prefixed unset name with punctuation", "https://example.com/a?x=%DB-OTHER%20", false},
 		{"Teams quotes", teamsCallLink, false},
 		{"colon escapes", "https://example.com/a%3ab%3ac", false},
 		{"hex-prefixed unset variable", "https://example.com/a?x=%DEADBEEF%20", false},
@@ -105,6 +113,7 @@ func TestCheckCallLinkEnv(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			useEnviron(t, fakeEnv...)
+			mustCallLink(t, tt.in) // a valid link, so a refusal comes from the env check
 			got, err := checkCallLink(tt.in)
 			if tt.refuse && !errors.Is(err, ErrRefused) {
 				t.Fatalf("checkCallLink(%q) = %q, %v; want ErrRefused", tt.in, got, err)
@@ -126,10 +135,15 @@ func TestHasEnvReference(t *testing.T) {
 		{"https://example.com/%username%x", true},
 		{"https://example.com/%ProgramFiles(x86)%", true},
 		{"https://example.com/%a%USERNAME%", true},
+		{"https://example.com/%DB-TOKEN%", true},
+		{"https://example.com/%ab.key%", true},
+		{"https://example.com/%AD$SECRET%", true},
 		{"https://example.com/%C:%", false},
 		{"https://example.com/%%", false},
 		{"https://example.com/%FOO%", false},
+		// No longer gated by a character set: false only because no key is "USER NAME".
 		{"https://example.com/%USER NAME%", false},
+		{"https://example.com/%DB-OTHER%", false},
 		{"https://example.com/%USERNAME", false},
 		{"https://example.com/%22Tid%22", false},
 	}

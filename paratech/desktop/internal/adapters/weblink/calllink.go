@@ -47,7 +47,8 @@ var environ = os.Environ
 
 // hasEnvReference reports whether s has %NAME% with NAME an existing variable (case-insensitive, as on Windows).
 // Valid escapes can spell such a name (%DB_PASSWORD%20), and the shell may expand it when it reads the .url file.
-// Every '%' is tried as an opener, so in %A%B% both A and B are checked.
+// Every '%' is tried as an opener, so in %A%B% both A and B are checked. NAME is not filtered by a character set:
+// Windows expands names with punctuation too (%DB-TOKEN%, %AB.KEY%), so any non-empty text is compared to the keys.
 func hasEnvReference(s string, env []string) bool {
 	keys := envKeys(env)
 	for i := 0; i < len(s); i++ {
@@ -59,7 +60,7 @@ func hasEnvReference(s string, env []string) bool {
 			return false
 		}
 		name := s[i+1 : i+1+j]
-		if !isEnvName(name) {
+		if name == "" {
 			continue
 		}
 		for _, k := range keys {
@@ -87,17 +88,4 @@ func envKeys(env []string) []string {
 		}
 	}
 	return keys
-}
-
-func isEnvName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for i := 0; i < len(name); i++ {
-		c := name[i]
-		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' && c != '(' && c != ')' {
-			return false
-		}
-	}
-	return true
 }
