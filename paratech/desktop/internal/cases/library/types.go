@@ -41,8 +41,10 @@ type Inspected struct {
 }
 
 // Deps are the ports the Service needs; Log is optional. Texts, Reader and Inspections are needed only by the reading
-// of the text (MaterialText, Inspect): without them those answer ErrNotConfigured.
+// of the text (MaterialText, Inspect): without them those answer ErrNotConfigured. Notes is optional: without it a
+// subject with notes is still refused by the store, as ErrNotEmpty instead of ErrHasNotes.
 type Deps struct {
+	Notes       SubjectNotes
 	Subjects    SubjectRepository
 	Materials   MaterialRepository
 	Blobs       BlobStore

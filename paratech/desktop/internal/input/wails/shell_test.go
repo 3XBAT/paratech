@@ -32,6 +32,7 @@ func validCore() Core {
 		Deletion:   &fakeDeletion{},
 		Knowledge:  &fakeKnowledge{},
 		Library:    &fakeLibrary{}, MaterialViews: newMemViews(), Opener: &fakeOpener{}, SubjectOverview: &fakeOverview{},
+		Notes: &fakeNotesUC{},
 		Agent: AgentCore{
 			Driver: &fakeAgentDriver{}, Link: &fakeConnections{}, Panel: NewAgentPanel(discard()), Life: context.Background(),
 			Journal: &fakeJournal{}, Clock: fixedClock{},
@@ -124,6 +125,11 @@ func (f *fakeUI) pickMaterialFile() (string, error) {
 	return "", nil
 }
 
+func (f *fakeUI) pickNoteFiles(bool) ([]string, error) {
+	f.calls = append(f.calls, "pickNoteFiles")
+	return nil, nil
+}
+
 func (f *fakeUI) setClipboardText(string) error {
 	f.calls = append(f.calls, "setClipboardText")
 	return nil
@@ -150,6 +156,7 @@ func TestCommands(t *testing.T) {
 		{"pickDocxFile", func() error { _, err := s.pickDocxFile(context.Background(), "h.docx"); return err }},
 		{"pickKnowledgeFile", func() error { _, err := s.pickKnowledgeFile(context.Background(), "Физика.md"); return err }},
 		{"pickMaterialFile", func() error { _, err := s.pickMaterialFile(context.Background()); return err }},
+		{"pickNoteFiles", func() error { _, err := s.pickNoteFiles(context.Background(), true); return err }},
 		{"setClipboardText", func() error { return s.setClipboardText(context.Background(), "text") }},
 	}
 
