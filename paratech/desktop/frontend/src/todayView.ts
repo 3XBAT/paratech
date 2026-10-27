@@ -223,6 +223,19 @@ export function deadlineLine(b: TodayDeadline): DeadlineLine {
   return { key: b.assignmentId, weekday, date, title: titleOf(b.title), subject: b.subject.trim(), chip: daysLeftText(b.daysLeft), urgent: b.urgent };
 }
 
+/** «Ближайший срок — пт, 23.10» from the deadlines of the week (the earliest one); "" when there is none. */
+export function nearestDeadlineText(burning: readonly Pick<TodayDeadline, "due">[]): string {
+  const dues = burning.map((b) => ({ due: b.due, at: parseMoment(b.due) })).filter((b) => b.at !== null);
+  if (dues.length === 0) {
+    return "";
+  }
+  const first = dues.reduce((a, b) => ((b.at as Date) < (a.at as Date) ? b : a));
+  const { weekday, date } = deadlineDay(first.due);
+  return `Ближайший срок — ${weekday}, ${date}`;
+}
+
+export const statusTexts = { local: "Звук обрабатывается только на этом компьютере" } as const;
+
 export interface DoneLine {
   key: string;
   title: string;

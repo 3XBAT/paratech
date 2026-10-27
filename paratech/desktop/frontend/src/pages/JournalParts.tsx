@@ -2,6 +2,7 @@ import type { JournalLine } from "../bindings/agent.js";
 import {
   type FilterState,
   type KindChoice,
+  groupLines,
   kindOptions,
   lineModel,
   periodOptions,
@@ -72,35 +73,47 @@ export function JournalList(props: {
   /** The action whose «Отменить» runs now. */
   busyAction: string;
   onUndo(actionId: string): void;
+  /** The moment «Сегодня» is counted from; the clock when omitted. */
+  now?: Date;
 }) {
   if (props.lines.length === 0) {
     return <p className="muted">{texts.empty}</p>;
   }
   return (
-    <Card className="rows" label={texts.title}>
-      {props.lines.map((l, i) => {
-        const m = lineModel(l, i, props.subjects);
-        const meta = [m.when, m.subject, m.status].filter((x) => x !== "").join(" · ");
-        return (
-          <Row
-            key={m.key}
-            title={m.title}
-            meta={meta}
-            status={m.reason !== "" ? <span className="small muted">{m.reason}</span> : undefined}
-            actions={
-              m.undoActionId !== "" ? (
-                <Button size="sm" disabled={props.busyAction !== ""} onClick={() => props.onUndo(m.undoActionId)}>
-                  {props.busyAction === m.undoActionId ? texts.undoBusy : texts.undo}
-                </Button>
-              ) : m.cannotUndo ? (
-                <Button size="sm" variant="ghost" disabled>
-                  {texts.cannotUndo}
-                </Button>
-              ) : undefined
-            }
-          />
-        );
-      })}
-    </Card>
+    <>
+      {groupLines(props.lines, props.now ?? new Date()).map((g) => (
+        <section key={g.key} className="jr-sec" aria-label={g.title}>
+          <h2 className="jr-group">
+            {g.title}
+            <span className="cnt num">{g.items.length}</span>
+          </h2>
+          <Card className="rows" label={g.title}>
+            {g.items.map(({ line, index }) => {
+              const m = lineModel(line, index, props.subjects);
+              const meta = [m.when, m.subject, m.status].filter((x) => x !== "").join(" · ");
+              return (
+                <Row
+                  key={m.key}
+                  title={m.title}
+                  meta={meta}
+                  status={m.reason !== "" ? <span className="small muted">{m.reason}</span> : undefined}
+                  actions={
+                    m.undoActionId !== "" ? (
+                      <Button size="sm" disabled={props.busyAction !== ""} onClick={() => props.onUndo(m.undoActionId)}>
+                        {props.busyAction === m.undoActionId ? texts.undoBusy : texts.undo}
+                      </Button>
+                    ) : m.cannotUndo ? (
+                      <Button size="sm" variant="ghost" disabled>
+                        {texts.cannotUndo}
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              );
+            })}
+          </Card>
+        </section>
+      ))}
+    </>
   );
 }

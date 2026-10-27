@@ -39,11 +39,31 @@ html, body, #root { height: 100%; }
   .rail .tip { transition: none; }
 }
 
-/* Tabs of «Настройки». */
-.set-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 16px; }
-.set-tabs button { min-height: var(--h-ctl); padding: 0 12px; border: 0; border-radius: var(--r-md); background: none; color: var(--muted); font: inherit; font-size: var(--fs-small); font-weight: 500; cursor: pointer; }
-.set-tabs button:hover { background: var(--fill); color: var(--text); }
-.set-tabs button[aria-current="page"] { background: var(--raised); color: var(--text); box-shadow: 0 0 0 1px var(--edge); }
+/* «Настройки» (TASK-224, concept-agent.html «snav»): one head, the menu on the left, the section on the right. The
+   heads of the sections stay as their sub-titles. */
+.set-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px 32px; align-items: start; }
+.set-nav { display: flex; flex-wrap: wrap; gap: 4px; }
+.set-nav button { position: relative; display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 12px; border: 0; border-radius: var(--r-md); background: none; color: var(--text); font: inherit; font-weight: 500; text-align: left; cursor: pointer; }
+.set-nav button .i { width: 18px; height: 18px; color: var(--muted); }
+.set-nav button:hover { background: var(--fill); }
+.set-nav button[aria-current="page"] { background: var(--raised); font-weight: 600; box-shadow: 0 0 0 1px var(--edge); }
+.set-nav button[aria-current="page"] .i { color: var(--accent); }
+.set-body { min-width: 0; }
+.set-body .page > .head { margin-bottom: 16px; }
+.set-body .page > .head h1 { font-size: 20px; line-height: 26px; }
+@media (min-width: 900px) {
+  .set-layout { grid-template-columns: 220px minmax(0, 1fr); }
+  .set-nav { flex-direction: column; flex-wrap: nowrap; }
+  .set-nav button { width: 100%; }
+  .set-nav button[aria-current="page"]::after { content: ""; position: absolute; right: 12px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: var(--accent-fill); }
+}
+
+/* Counters of the filters of «Задания» and the groups of «Журнал» (TASK-224). */
+.seg .cnt { margin-left: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hw-filter { margin-bottom: 16px; }
+.jr-group { margin: 0 0 8px; font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 600; color: var(--muted); }
+.jr-sec + .jr-sec { margin-top: 24px; }
+.jr-group .cnt { margin-left: 6px; font-weight: 400; }
 
 /* «Предметы» (TASK-202, concept-agent.html «Tree»): a form of one name, an empty folder; the subject page is a tree
    (220px) and the folders with their files; the list is cards by semester. */

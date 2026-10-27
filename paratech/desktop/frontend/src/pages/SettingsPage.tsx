@@ -127,12 +127,6 @@ export function SettingsPage(props: { part?: SettingsPart }) {
   if (part === "settings") {
     return (
       <section className="page">
-        <div className="head">
-          <div>
-            <span className="label">Изменения сохраняются сразу</span>
-            <h1>Настройки</h1>
-          </div>
-        </div>
         {settings === null && !error && <p className="muted">Загрузка…</p>}
         {settings !== null && (
           <>

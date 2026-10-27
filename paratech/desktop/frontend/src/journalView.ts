@@ -194,6 +194,75 @@ export interface LineModel {
   reason: string;
 }
 
+export const groupTitles = { now: "Сейчас", today: "Сегодня", noDate: "Без даты" } as const;
+
+// The states of a line that is still going on: the core has not finished it yet.
+const inProgress: ReadonlySet<string> = new Set([
+  "PENDING",
+  "UNDOING",
+  "QUEUED",
+  "RUNNING",
+  "RETRY_WAIT",
+  "WAITING_FOR_NETWORK",
+  "WAITING_FOR_QUOTA",
+  "WAITING_FOR_POWER",
+]);
+
+const monthsGen = [
+  "января",
+  "февраля",
+  "марта",
+  "апреля",
+  "мая",
+  "июня",
+  "июля",
+  "августа",
+  "сентября",
+  "октября",
+  "ноября",
+  "декабря",
+] as const;
+
+export interface JournalGroup {
+  key: string;
+  title: string;
+  /** The lines in the order the core sent them (newest first), with their index in the whole list. */
+  items: { line: JournalLine; index: number }[];
+}
+
+/**
+ * Splits the lines into «Сейчас» (still going on), «Сегодня» and one group per earlier day, in local time. The order of
+ * the lines is kept; «Сейчас» comes first, the days follow in the order they first appear, «Без даты» is last.
+ */
+export function groupLines(lines: readonly JournalLine[], now: Date): JournalGroup[] {
+  const groups = new Map<string, JournalGroup>();
+  const put = (key: string, title: string, line: JournalLine, index: number) => {
+    const g = groups.get(key) ?? { key, title, items: [] };
+    g.items.push({ line, index });
+    groups.set(key, g);
+  };
+  lines.forEach((line, index) => {
+    if (inProgress.has(line.status)) {
+      put("now", groupTitles.now, line, index);
+      return;
+    }
+    const at = new Date(line.at);
+    if (line.at === "" || Number.isNaN(at.getTime())) {
+      put("none", groupTitles.noDate, line, index);
+      return;
+    }
+    const day = `${at.getFullYear()}-${at.getMonth()}-${at.getDate()}`;
+    if (at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth() && at.getDate() === now.getDate()) {
+      put("today", groupTitles.today, line, index);
+      return;
+    }
+    const year = at.getFullYear() === now.getFullYear() ? "" : ` ${at.getFullYear()}`;
+    put(day, `${at.getDate()} ${monthsGen[at.getMonth()]}${year}`, line, index);
+  });
+  const order = (g: JournalGroup) => (g.key === "now" ? 0 : g.key === "none" ? 2 : 1);
+  return [...groups.values()].sort((a, b) => order(a) - order(b));
+}
+
 /** Builds the line from the ids of the core; subjects maps ids to names. */
 export function lineModel(l: JournalLine, index: number, subjects: ReadonlyMap<string, string>): LineModel {
   const processing = l.kind === "processing";
