@@ -20,7 +20,7 @@ type StudentEdit struct {
 
 // EditByStudent stores e: the details, and the subject as the student's correction (the teacher correction stays).
 // The rules depend on the origin: an assignment the student added keeps those of NewByStudent (note at most
-// MaxNoteRunes, deadline within now - 31 days ... now + 2 years); an extracted one those of NewDetails. Both refuse
+// MaxNoteRunes, a changed deadline within now - 31 days ... now + 2 years); an extracted one those of NewDetails. Both refuse
 // bidi controls in the title and the note. Violations wrap ErrInvalidTitle, ErrInvalidNote or ErrInvalidDue (all
 // ErrInvalidDetails) and change nothing; a deleted assignment is ErrDeleted. The assignment is user-edited from then
 // on, also when nothing changed: the student has confirmed it.
@@ -35,8 +35,11 @@ func (a *Assignment) EditByStudent(e StudentEdit, now time.Time) error {
 		if err := checkStudentNote(e.Note); err != nil {
 			return err
 		}
-		if err := checkStudentDue(e.Due, now); err != nil {
-			return err
+		// Only a new deadline meets the window: the form re-sends the current one, which may have aged out of it.
+		if !e.Due.Equal(a.details.Due()) {
+			if err := checkStudentDue(e.Due, now); err != nil {
+				return err
+			}
 		}
 	} else if err := checkExtractedNote(e.Note); err != nil {
 		return err

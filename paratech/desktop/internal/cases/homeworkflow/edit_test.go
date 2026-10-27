@@ -149,6 +149,33 @@ func TestEditAssignmentUseCaseRefusals(t *testing.T) {
 	}
 }
 
+// The form re-sends the current deadline: a student assignment whose deadline aged out of the window keeps its
+// title and note editable; moving the deadline still meets the window.
+func TestEditAssignmentWithAnAgedDeadline(t *testing.T) {
+	e := newCreateEnv(t, testSubjects)
+	ctx := context.Background()
+	created, err := e.svc.CreateAssignment(ctx, NewAssignment{Title: "Решить 5", Subject: "s1", Date: "2026-10-20"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.clock.Advance(60 * 24 * time.Hour)
+
+	if _, err := e.svc.EditAssignment(ctx, AssignmentEdit{
+		ID: created.ID, ExpectedVersion: created.Version, Title: "x", Subject: "s1", Date: "2026-10-21",
+	}); !errors.Is(err, assignment.ErrInvalidDue) {
+		t.Fatalf("moved deadline: err = %v, want ErrInvalidDue", err)
+	}
+	v, err := e.svc.EditAssignment(ctx, AssignmentEdit{
+		ID: created.ID, ExpectedVersion: created.Version, Title: "Решить 6", Note: "Стр. 12", Subject: "s1", Date: "2026-10-20",
+	})
+	if err != nil {
+		t.Fatalf("EditAssignment: %v", err)
+	}
+	if v.Title != "Решить 6" || v.Description != "Стр. 12" || !v.Due.Equal(created.Due) {
+		t.Fatalf("view = %+v", v)
+	}
+}
+
 func TestEditAssignmentOfADeletedOne(t *testing.T) {
 	e := newCreateEnv(t, testSubjects)
 	ctx := context.Background()

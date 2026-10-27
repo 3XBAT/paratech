@@ -86,6 +86,52 @@ func TestEditByStudentRefusals(t *testing.T) {
 	}
 }
 
+// The form re-sends the current deadline: one aged out of the window stays editable, only a new one meets the window.
+func TestEditByStudentKeepsAnAgedDeadline(t *testing.T) {
+	due := t0.Add(48 * time.Hour)
+	now := due.AddDate(0, 0, 40) // the deadline is 40 days in the past
+	cases := []struct {
+		name string
+		due  time.Time
+		want error // nil: accepted
+	}{
+		{"unchanged deadline", due, nil},
+		{"unchanged deadline in another zone", due.In(time.FixedZone("MSK", 3*3600)), nil},
+		{"moved but still too early", due.Add(time.Hour), ErrInvalidDue},
+		{"moved too late", now.AddDate(2, 0, 0).Add(time.Minute), ErrInvalidDue},
+		{"moved into the window", now.Add(24 * time.Hour), nil},
+		{"removed", time.Time{}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := byStudent(t, StudentSpec{ID: "a1", Title: "Mine", Due: due})
+			before := a.State()
+			err := a.EditByStudent(StudentEdit{Title: "Renamed", Note: "new note", Due: c.due}, now)
+			if c.want == nil {
+				if err != nil {
+					t.Fatalf("err = %v, want accepted", err)
+				}
+				if st := a.State(); st.Title != "Renamed" || st.Description != "new note" || !st.Due.Equal(c.due) {
+					t.Fatalf("state = %+v", st)
+				}
+				return
+			}
+			if !errors.Is(err, c.want) {
+				t.Fatalf("err = %v, want %v", err, c.want)
+			}
+			if a.State() != before {
+				t.Fatal("a refused edit changed the assignment")
+			}
+		})
+	}
+
+	// No deadline before and after counts as unchanged.
+	a := byStudent(t, StudentSpec{ID: "a2", Title: "Mine"})
+	if err := a.EditByStudent(StudentEdit{Title: "Renamed"}, now); err != nil {
+		t.Fatalf("no deadline: %v", err)
+	}
+}
+
 func TestEditByStudentOfADeletedOne(t *testing.T) {
 	a := byStudent(t, StudentSpec{ID: "a1", Title: "Mine"})
 	if err := a.Delete(t0); err != nil {
