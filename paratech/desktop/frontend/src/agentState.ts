@@ -63,10 +63,19 @@ function replace(entries: readonly Entry[], key: string, next: Entry): Entry[] {
   return entries.map((e) => (e.key === key ? next : e));
 }
 
-/** The oldest sent request of the scope the core has not named yet. */
-function pendingLocal(entries: readonly Entry[], scope: string): Entry | undefined {
+/**
+ * The oldest sent request of the scope the core has not named yet. A request asked in one chat is never named by an
+ * update of another chat (`threadId` of the update; "" matches by scope only, the rule for a failed Ask).
+ */
+function pendingLocal(entries: readonly Entry[], scope: string, threadId = ""): Entry | undefined {
   return entries.find(
-    (e) => e.key.startsWith("local:") && e.callProblem === "" && e.update === null && e.scope !== null && scopeKey(e.scope) === scope,
+    (e) =>
+      e.key.startsWith("local:") &&
+      e.callProblem === "" &&
+      e.update === null &&
+      e.scope !== null &&
+      scopeKey(e.scope) === scope &&
+      (threadId === "" || (e.scope.threadId ?? "") === "" || e.scope.threadId === threadId),
   );
 }
 
@@ -78,9 +87,14 @@ function clearsDrafts(u: UpdateView): boolean {
   return u.threadId !== "" && !u.progress && !(u.status === "" && u.cards.length === 0);
 }
 
+/** An update of an Ask the core refused: no thread, or the asked chat with turn 0 and no status. */
+function isFailedAsk(u: UpdateView): boolean {
+  return u.threadId === "" || (u.turn === 0 && u.status === "");
+}
+
 function applyUpdate(s: PanelState, u: UpdateView): PanelState {
   const next = applyUpdateEntries(s, u);
-  if (u.threadId === "") {
+  if (isFailedAsk(u)) {
     return next;
   }
   // Older turns of the thread are over; the own turn's drafts end only with a clearing update.
@@ -123,10 +137,11 @@ export function draftsFor(s: PanelState, e: Entry): DraftView[] {
 }
 
 function applyUpdateEntries(s: PanelState, u: UpdateView): PanelState {
-  if (u.threadId === "") {
-    // A failed Ask: the core never named a thread, so the scope is all there is to match.
+  if (isFailedAsk(u)) {
+    // A failed Ask: the core never named a request (threadId "", or the asked chat with turn 0 and no status; real
+    // turns start at 1). The entry keeps threadId "": it stays unnamed, so its buttons act on the blocker, not on turn 0.
     const sc = scopeKey(u);
-    const local = pendingLocal(s.entries, sc);
+    const local = pendingLocal(s.entries, sc, u.threadId);
     if (local) {
       return { ...s, entries: replace(s.entries, local.key, { ...local, update: u }) };
     }
@@ -161,7 +176,7 @@ function applyUpdateEntries(s: PanelState, u: UpdateView): PanelState {
     const pending = threadKey(u.threadId, u.turn + 1);
     return { ...s, entries: u.problem === "" ? replaced : replaced.filter((x) => !(x.key === pending && x.update === null)) };
   }
-  const local = pendingLocal(s.entries, scopeKey(u));
+  const local = pendingLocal(s.entries, scopeKey(u), u.threadId);
   if (local) {
     return { ...s, entries: replace(s.entries, local.key, { ...local, key, threadId: u.threadId, turn: u.turn, update: u }) };
   }
@@ -263,8 +278,16 @@ export function blockingEntry(entries: readonly Entry[], refused: Entry): Entry 
   if (!u) {
     return undefined;
   }
+  // Busy is per chat: the blocker is in the chat the refused request was asked in; subject only when that is unknown.
+  const chat = refused.scope?.threadId || u.threadId;
   return orderedEntries(entries)
-    .filter((e) => e.threadId !== "" && e.update !== null && isRunning(e.update.status) && e.update.subjectId === u.subjectId)
+    .filter(
+      (e) =>
+        e.threadId !== "" &&
+        e.update !== null &&
+        isRunning(e.update.status) &&
+        (chat !== "" ? e.threadId === chat : e.update.subjectId === u.subjectId),
+    )
     .at(-1);
 }
 

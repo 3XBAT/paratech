@@ -3,8 +3,8 @@
 // impersonal («Создан предмет…», not «Я создал…»). Model text (summary, notes, questions, options, labels, replies) is
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
-import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, FreeWorkRef, PlanStepView, QuestionView } from "./bindings/agent.js";
-import { type Entry, isBusyRefused } from "./agentState.js";
+import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, EarlierRequestView, FreeWorkRef, PlanStepView, QuestionView } from "./bindings/agent.js";
+import { type Entry, isBusyRefused, isRunning } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
 import { daysLeftText, dueText, parseMoment } from "./todayView.js";
 
@@ -145,6 +145,200 @@ export function inputPlacement(entryCount: number): "top" | "bottom" {
 export function requestText(raw: string): string | null {
   const t = raw.trim();
   return t === "" ? null : t;
+}
+
+// ---- Chats ----
+// Titles, mention labels and replies are typed or model text: the page renders them as text nodes only.
+
+export const chatTexts = {
+  newChat: "Новый чат",
+  untitled: "Без названия",
+  chats: "Чаты",
+  list: "Список чатов",
+  archive: "Архив",
+  toArchive: "В архив",
+  restore: "Вернуть",
+  rename: "Переименовать",
+  renameLabel: "Название чата",
+  running: "идёт просьба",
+  archivedMark: "в архиве",
+  noChats: "Чатов пока нет.",
+  emptyArchive: "Архив пуст.",
+  earlierCaption: "Ранее в этом чате",
+} as const;
+
+/** The longest chat title, in characters (runes), as the core checks it. */
+export const maxChatTitle = 80;
+
+export type ChatOp = "list" | "open" | "new" | "rename" | "archive" | "restore";
+
+const chatFailTexts: Record<ChatOp, string> = {
+  list: "Не удалось загрузить чаты.",
+  open: "Не удалось загрузить прежние просьбы чата.",
+  new: "Не удалось начать новый чат.",
+  rename: "Не удалось переименовать чат.",
+  archive: "Не удалось отправить чат в архив.",
+  restore: "Не удалось вернуть чат из архива.",
+};
+
+export const chatBusyText = "Чат занят: дождитесь конца просьбы или остановите её.";
+export const chatGoneText = "Чат не найден: список обновлён.";
+
+/** The wording of a problem of a chat call; "" for no problem. An unknown code reads as a failure of the operation. */
+export function chatProblemText(p: ChatProblem | string, op: ChatOp): string {
+  switch (p) {
+    case "":
+      return "";
+    case "busy":
+      return op === "rename" || op === "archive" ? chatBusyText : "Чат занят, попробуйте ещё раз.";
+    case "not_found":
+      return chatGoneText;
+    default:
+      return chatFailTexts[op];
+  }
+}
+
+/** The list is re-read when the chat is gone. */
+export function refreshesChats(p: ChatProblem | string): boolean {
+  return p === "not_found";
+}
+
+export type TitleCheck = { ok: true; title: string } | { ok: false; text: string };
+
+/** A chat title to send: trimmed, not empty, at most 80 characters. */
+export function checkChatTitle(raw: string): TitleCheck {
+  const title = raw.trim();
+  if (title === "") {
+    return { ok: false, text: "Название не может быть пустым." };
+  }
+  if (Array.from(title).length > maxChatTitle) {
+    return { ok: false, text: `Название длиннее ${maxChatTitle} знаков.` };
+  }
+  return { ok: true, title };
+}
+
+export interface ChatRow {
+  threadId: string;
+  /** Never empty. */
+  title: string;
+  archived: boolean;
+  /** A request of the chat runs (the core says so, or the panel sees it). */
+  running: boolean;
+  lastActive: string;
+}
+
+export interface ChatSections {
+  active: ChatRow[];
+  archived: ChatRow[];
+}
+
+function activityMs(s: string): number {
+  const t = Date.parse(s);
+  return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t;
+}
+
+/** A request of the chat is going on, by what the panel has seen (updates are quicker than the list). */
+function runsLocally(entries: readonly Entry[], threadId: string): boolean {
+  return entries.some(
+    (e) =>
+      (e.threadId === threadId && e.update !== null && isRunning(e.update.status)) ||
+      (e.threadId === "" && e.callProblem === "" && e.update === null && e.scope !== null && (e.scope.threadId ?? "") === threadId),
+  );
+}
+
+/** Unarchived chats by last activity (newest first), then the archive in the same order; running chats are marked. */
+export function chatSections(chats: readonly ChatView[], entries: readonly Entry[]): ChatSections {
+  const rows = chats.map(
+    (c): ChatRow => ({
+      threadId: c.threadId,
+      title: c.title.trim() === "" ? chatTexts.untitled : c.title,
+      archived: c.archived,
+      running: c.running || runsLocally(entries, c.threadId),
+      lastActive: c.lastActive,
+    }),
+  );
+  const byActivity = (a: ChatRow, b: ChatRow) => {
+    const x = activityMs(a.lastActive);
+    const y = activityMs(b.lastActive);
+    return x === y ? 0 : y > x ? 1 : -1;
+  };
+  // Array.sort is stable: chats of equal activity keep the core's order.
+  return { active: rows.filter((r) => !r.archived).sort(byActivity), archived: rows.filter((r) => r.archived).sort(byActivity) };
+}
+
+/**
+ * The chat to show after the list was read: the open one while it exists; otherwise (or while none is open) the newest
+ * unarchived one, "" when there is none.
+ */
+export function reconcileOpenChat(chats: readonly ChatView[], openId: string, entries: readonly Entry[] = []): string {
+  if (openId !== "" && chats.some((c) => c.threadId === openId)) {
+    return openId;
+  }
+  return chatSections(chats, entries).active[0]?.threadId ?? "";
+}
+
+/** The chat after archiving `id`: stay unless it was the open one, then the newest unarchived. */
+export function openAfterArchive(chats: readonly ChatView[], openId: string, id: string, entries: readonly Entry[] = []): string {
+  if (openId !== id) {
+    return openId;
+  }
+  return chatSections(chats, entries).active.find((r) => r.threadId !== id)?.threadId ?? "";
+}
+
+/**
+ * The requests of the thread that belong to the open chat. Updates carry their own threadId, so the requests of other
+ * chats stay in the state untouched and only the open chat's are drawn. A request the core has not named yet belongs to
+ * the chat it was asked in (entry.scope.threadId). One without a thread or scope, one asked with no chat (""), and one
+ * asked in a chat that is not in `chatIds` (gone) are shown in whichever chat is open, so a failed Ask is never lost.
+ */
+export function visibleEntries(entries: readonly Entry[], openId: string, chatIds?: ReadonlySet<string>): Entry[] {
+  return entries.filter((e) => {
+    if (e.threadId !== "") {
+      return e.threadId === openId;
+    }
+    const asked = e.scope?.threadId ?? "";
+    if (e.scope === null || asked === "") {
+      return true;
+    }
+    return asked === openId || (chatIds !== undefined && !chatIds.has(asked));
+  });
+}
+
+const mentionKindLabels: Record<string, string> = {
+  subject: "Предмет",
+  lesson: "Занятие",
+  material: "Материал",
+  assignment: "Задание",
+};
+
+export interface EarlierItem {
+  key: string;
+  turn: number;
+  text: string;
+  /** The names stored at mention time; a missing one reads as the kind. */
+  mentions: { key: string; label: string }[];
+  /** The reply line; "" when no card was shown. */
+  reply: string;
+}
+
+/**
+ * Earlier requests of the open chat as text. A request the panel holds live (its own entry) is left out: it is drawn
+ * with its cards. No card buttons here, whatever the `current` flag says.
+ */
+export function earlierItems(requests: readonly EarlierRequestView[], entries: readonly Entry[], openId: string): EarlierItem[] {
+  return requests
+    .filter((r) => !entries.some((e) => e.threadId === openId && e.turn === r.turn))
+    .map((r) => ({
+      key: `earlier:${openId}:${r.turn}`,
+      turn: r.turn,
+      text: r.text,
+      mentions: r.mentions.map((m, i) => ({
+        key: `${m.kind}:${m.id}:${i}`,
+        label: m.label.trim() !== "" ? m.label : (mentionKindLabels[m.kind] ?? "Объект"),
+      })),
+      reply: r.reply,
+    }))
+    .sort((a, b) => a.turn - b.turn);
 }
 
 // ---- Texts ----

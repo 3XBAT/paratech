@@ -187,6 +187,8 @@ export interface LineModel {
   when: string;
   /** The typed name of the subject; "" for none. */
   subject: string;
+  /** The student's chat title of an action line (plain text); "" for none. */
+  chat: string;
   undoActionId: string;
   /** «Отменить нельзя» is shown. */
   cannotUndo: boolean;
@@ -282,6 +284,7 @@ export function lineModel(l: JournalLine, index: number, subjects: ReadonlyMap<s
     status: statusLabels[l.status] ?? "",
     when: timeOnly ? clockTime(l.at) : formatTime(l.at),
     subject: subjects.get(l.subjectId) ?? "",
+    chat: processing ? "" : (l.chatTitle ?? "").trim(),
     undoActionId: undoable ? l.actionId : "",
     cannotUndo: l.cannotUndo,
     reason: undoable ? "" : (noUndoReasons[l.noUndo] ?? ""),
