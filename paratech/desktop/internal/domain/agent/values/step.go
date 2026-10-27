@@ -94,10 +94,13 @@ func (h HistoryTurn) Size() int {
 	return n
 }
 
-// HistoryEntry is a stored history entry with the number of the request it belongs to.
+// HistoryEntry is a stored history entry with the number of the request it belongs to. DroppedBy is the number of the
+// request that restarted the chat from an earlier message (ADR-0028), 0 when the request is not dropped; the window
+// skips dropped requests.
 type HistoryEntry struct {
-	Turn  int
-	Entry HistoryTurn
+	Turn      int
+	Entry     HistoryTurn
+	DroppedBy int
 }
 
 // StepRequest is one planner step: the key ag:<thread>:<turn>:<step>, the shared base, the current scope and the

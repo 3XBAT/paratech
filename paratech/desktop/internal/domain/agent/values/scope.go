@@ -26,8 +26,8 @@ func (s Screen) Valid() bool {
 	}, s)
 }
 
-// Scope is the context of the current thread: only the current subject, never other subjects (ADR-0021). Zero refs
-// mean none; a zero subject is the thread without a subject.
+// Scope is the context of one request: its subject, screen, lesson and assignment (ADR-0021); a chat holds requests of
+// any subjects (ADR-0028). Zero refs mean none; a zero subject is a request without a subject.
 type Scope struct {
 	subject    Ref
 	screen     Screen
@@ -59,7 +59,7 @@ func wantKind(r Ref, kind IDKind) error {
 	return nil
 }
 
-// Subject returns the subject of the thread; zero for the thread without a subject.
+// Subject returns the subject of the request; zero for none.
 func (s Scope) Subject() Ref { return s.subject }
 
 // Screen returns the screen.
