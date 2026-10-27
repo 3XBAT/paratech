@@ -238,15 +238,18 @@ func TestWindowCutsWholePairs(t *testing.T) {
 		current int
 		pairs   int
 	}{
-		{"12 requests", append(earlier(15, short), entry(16, "сейчас", nil)), 16, MaxHistoryTurns},
-		{"24 KiB with the replies", append(earlier(10, full), entry(11, "сейчас", nil)), 11, 5},
+		// The start is the first request of a block of WindowStep: 6..25 are 20 pairs.
+		{"20 requests", append(earlier(25, short), entry(26, "сейчас", nil)), 26, MaxHistoryTurns},
+		// 15 full pairs exceed 48 KiB; the next block start (request 6) leaves 10.
+		{"48 KiB with the replies", append(earlier(15, full), entry(16, "сейчас", nil)), 16, 10},
+		// 12 pairs and 41 current turns exceed 64; from request 6 there are 7 pairs.
 		{"64 turns", func() []values.HistoryEntry {
 			out := append(earlier(12, short), entry(13, "сейчас", nil))
 			for range 20 {
 				out = append(out, echo(13, [2]string{"list_subjects", `{}`}), results(13, ok("c0")))
 			}
 			return out
-		}(), 13, (MaxRequestTurns - 41) / 2},
+		}(), 13, 7},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

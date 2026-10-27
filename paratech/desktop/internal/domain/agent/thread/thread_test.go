@@ -669,27 +669,42 @@ func TestKey(t *testing.T) {
 
 func TestWindowStart(t *testing.T) {
 	kb := 1 << 10
-	many := make([]int, 20)
+	// pairsOf numbers the pairs from first on, one text and one reply each.
+	pairsOf := func(first int, sizes ...int) []pair {
+		out := make([]pair, len(sizes))
+		for i, s := range sizes {
+			out[i] = pair{number: first + i, turns: make([]values.HistoryTurn, 2), size: s}
+		}
+		return out
+	}
+	many, heavy := make([]int, 25), make([]int, 10)
 	for i := range many {
 		many[i] = 100
 	}
+	for i := range heavy {
+		heavy[i] = 9 * kb
+	}
 	tests := []struct {
-		name  string
-		sizes []int
-		want  int
+		name     string
+		pairs    []pair
+		nowTurns int
+		want     int
 	}{
-		{"none", nil, 0},
-		{"all fit", []int{100, 200}, 0},
-		{"turn limit", many, 20 - MaxHistoryTurns},
-		{"byte limit", []int{10 * kb, 10 * kb, 10 * kb, 10 * kb}, 2},
-		{"exactly the byte limit", []int{1, 12 * kb, 12 * kb}, 1},
-		{"newest too large", []int{100, 25 * kb}, 2},
-		{"bad size", []int{100, -1, 100}, 2},
+		{"none", nil, 1, 0},
+		{"all fit", pairsOf(1, 100, 200), 1, 0},
+		{"pair limit moves a block", pairsOf(1, many...), 1, 5},
+		// 3..27: from 6 there are 22 pairs, from 11 there are 17.
+		{"pair limit from a later first request", pairsOf(3, many...), 1, 8},
+		{"byte limit moves a block", pairsOf(1, heavy...), 1, 5},
+		{"byte limit past the last block start, pair by pair", pairsOf(1, 20*kb, 20*kb, 20*kb, 20*kb), 1, 2},
+		{"exactly the byte limit", pairsOf(1, 1, 24*kb, 24*kb), 1, 1},
+		{"newest too large", pairsOf(1, 100, 49*kb), 1, 2},
+		{"turn limit", pairsOf(1, many[:12]...), 41, 5},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := WindowStart(tt.sizes); got != tt.want {
-				t.Fatalf("WindowStart = %d, want %d", got, tt.want)
+			if got := windowStart(tt.pairs, tt.nowTurns); got != tt.want {
+				t.Fatalf("windowStart = %d, want %d", got, tt.want)
 			}
 		})
 	}
