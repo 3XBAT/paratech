@@ -184,6 +184,81 @@ func TestRecordingDeletionPurge(t *testing.T) {
 	}
 }
 
+// An assignment of the recording the student deleted (ADR-0029) is not offered with it and is not purged: it stays,
+// detached from the transcript, and no removal is queued for it by the purge.
+func TestRecordingDeletionKeepsADeletedAssignment(t *testing.T) {
+	e, ctx := newDeletionEnv(t), context.Background()
+	mustExec(t, e.db, "UPDATE assignments SET deleted_at = 1, version = 2 WHERE id = 'a-plain'")
+
+	got, err := e.dels.Contents(ctx, e.rec.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Assignments) != 2 || got.Assignments[0].ID != "a-draft" || got.Assignments[1].ID != "a-sent" {
+		t.Fatalf("assignments offered = %+v, want a-draft and a-sent", got.Assignments)
+	}
+
+	// Purge removes what the use case chose from the contents; the deleted one is never among them.
+	if err := e.dels.Purge(ctx, e.rec, []shared.AssignmentID{"a-draft"}, []shared.JobID{"j-stt", "j-sum", "j-draft"},
+		recT0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		query string
+		want  int64
+	}{
+		{"SELECT count(*) FROM assignments WHERE id = 'a-plain' AND transcript_id IS NULL AND deleted_at = 1", 1},
+		{"SELECT count(*) FROM deadline_event_removals WHERE assignment_id = 'a-plain'", 0},
+		{"SELECT count(*) FROM transcripts", 0},
+	} {
+		if n := scanInt(t, e.db.sql, c.query); n != c.want {
+			t.Errorf("%s = %d, want %d", c.query, n, c.want)
+		}
+	}
+}
+
+// The soft delete's queue: a second queue keeps the first time, the row goes with a rolled-back transaction, and a
+// purge of a missing row is no error.
+func TestQueueDeadlineRemoval(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	removals := NewDeadlineEventRemovals(db)
+	at := recT0.Add(time.Hour)
+
+	if err := removals.QueueDeadlineRemoval(ctx, "a1", at); err != nil {
+		t.Fatal(err)
+	}
+	if err := removals.QueueDeadlineRemoval(ctx, "a1", at.Add(time.Hour)); err != nil {
+		t.Fatalf("second queue: %v", err)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM deadline_event_removals WHERE assignment_id = 'a1' AND created_at = ?",
+		at.UnixMilli()); n != 1 {
+		t.Fatalf("queued rows with the first time = %d, want 1", n)
+	}
+
+	rollback := errors.New("rolled back")
+	err := db.Do(ctx, func(ctx context.Context) error {
+		if err := removals.QueueDeadlineRemoval(ctx, "a2", at); err != nil {
+			return err
+		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatalf("Do = %v", err)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM deadline_event_removals WHERE assignment_id = 'a2'"); n != 0 {
+		t.Fatalf("a rolled-back queue left %d rows", n)
+	}
+
+	for range 2 {
+		if err := removals.PurgeDeadlineRemoval(ctx, "a1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ids, err := removals.ListDeadlineRemovals(ctx, 10); err != nil || len(ids) != 0 {
+		t.Fatalf("removals after the purge = %v, %v", ids, err)
+	}
+}
+
 func TestRecordingDeletionPurgeIsAllOrNothing(t *testing.T) {
 	cases := []struct {
 		name        string
