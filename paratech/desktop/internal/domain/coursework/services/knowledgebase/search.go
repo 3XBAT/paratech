@@ -117,7 +117,9 @@ type Snippet struct {
 // sections (of a summary made before TASK-101, 0 for its text and j+1 for key point j), 0 for the title, for
 // SectionOwnNote the fragment in Document.Notes. StartMs is where the block or segment starts in the recording, 0
 // otherwise. Key is the lesson's (Document.Key). Note, Material and Locator name the fragment of SectionOwnNote; zero
-// for the other sections.
+// for the other sections. Heading is the heading of a fragment of a section (its first line as Passage.Heading: one
+// plain line of at most MaxHeadingRunes, the last "…" when cut), whichever line matched; "" otherwise. It is untrusted
+// text of the student.
 type Hit struct {
 	Key       string
 	Recording shared.RecordingID
@@ -128,6 +130,7 @@ type Hit struct {
 	Note      shared.NoteID
 	Material  shared.MaterialID
 	Locator   Locator
+	Heading   string
 }
 
 // Search collects the hits of one query over the lessons scanned, in scan order: per lesson the title, the summary,
@@ -196,6 +199,7 @@ func (s *Search) Scan(d Document) {
 	for i := from; i < len(s.hits); i++ {
 		f := d.Notes[s.hits[i].Index]
 		s.hits[i].Note, s.hits[i].Material, s.hits[i].Locator = f.Note, f.Material, f.Locator
+		s.hits[i].Heading = fragmentHeading(f)
 	}
 }
 
