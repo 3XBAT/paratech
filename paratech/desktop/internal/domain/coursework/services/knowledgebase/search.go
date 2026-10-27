@@ -30,13 +30,13 @@ var ErrInvalidQuery = errors.New("invalid knowledge base query")
 // Section is where in a lesson a hit is.
 type Section string
 
-// Sections of a lesson, in the order a lesson is searched.
+// Sections of a lesson. A lesson is searched SectionOwnNote first, then the others in the order listed.
 const (
 	SectionTitle       Section = "title"
 	SectionSummary     Section = "summary"
 	SectionLectureText Section = "lectureText"
 	SectionTranscript  Section = "transcript"
-	// SectionOwnNote is the student's own notes (ADR-0027), searched after the sections of a recording.
+	// SectionOwnNote is the student's own notes (ADR-0027), searched before the sections of a recording.
 	SectionOwnNote Section = "ownNote"
 )
 
@@ -130,8 +130,8 @@ type Hit struct {
 	Locator   Locator
 }
 
-// Search collects the hits of one query over the lessons scanned, in scan order: per lesson the title, the summary,
-// the lecture text, the transcript and the student's notes, each text matched once, at most MaxSectionHits per section
+// Search collects the hits of one query over the lessons scanned, in scan order: per lesson the student's notes,
+// the title, the summary, the lecture text and the transcript, each text matched once, at most MaxSectionHits per section
 // of a lesson and MaxHits in all. Build it with NewSearch.
 type Search struct {
 	query     []rune // folded
@@ -156,6 +156,21 @@ func (s *Search) Scan(d Document) {
 		return
 	}
 	at := func(sec Section) Hit { return Hit{Key: d.Key, Recording: d.Recording, Section: sec} }
+
+	// The student's notes go first (ADR-0027 «Ranking»): the hit cap cuts the AI sections of a lesson, not them.
+	from := len(s.hits)
+	s.section(at(SectionOwnNote), func(add func(int, int64, string) bool) {
+		for i, f := range d.Notes {
+			if !add(i, 0, f.Text) {
+				return
+			}
+		}
+	})
+	for i := from; i < len(s.hits); i++ {
+		f := d.Notes[s.hits[i].Index]
+		s.hits[i].Note, s.hits[i].Material, s.hits[i].Locator = f.Note, f.Material, f.Locator
+	}
+
 	s.section(at(SectionTitle), func(add func(int, int64, string) bool) {
 		add(0, 0, d.Title)
 	})
@@ -185,18 +200,6 @@ func (s *Search) Scan(d Document) {
 			}
 		}
 	})
-	from := len(s.hits)
-	s.section(at(SectionOwnNote), func(add func(int, int64, string) bool) {
-		for i, f := range d.Notes {
-			if !add(i, 0, f.Text) {
-				return
-			}
-		}
-	})
-	for i := from; i < len(s.hits); i++ {
-		f := d.Notes[s.hits[i].Index]
-		s.hits[i].Note, s.hits[i].Material, s.hits[i].Locator = f.Note, f.Material, f.Locator
-	}
 }
 
 // section runs one section of a lesson: add matches a text and reports whether more texts are wanted. A block whose
