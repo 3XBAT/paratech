@@ -11,22 +11,31 @@ import type {
   LessonKind,
 } from "../bindings/knowledgeBase.js";
 import {
+  checkPastDate,
   correctionDraft,
+  dateCheckText,
   errorText,
   groupHits,
   hitCountText,
   hitPlace,
+  isNoteOnly,
   kindOptions,
-  lessonLabel,
+  lectureLabel,
+  lessonsWithoutNotes,
+  localDay,
   maxSubjectLength,
+  noteLectureTexts,
+  type PastChoice,
   readyMarks,
   subjectMeta,
   subjectName,
   subjectPlaceholder,
 } from "../knowledgeView.js";
+import { noSubjectText } from "../ownNotesView.js";
 import { Button } from "../ui/Button.js";
 import { Card, Field, Input, ResultLine, Select } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { StatusChip } from "../ui/StatusChip.js";
 
 /** «Кратко ✓ · Текст лекции · Расшифровка ✓»: a ready one has the tick and the word «готово» for screen readers. */
 export function ReadyMarks(props: { lesson: KnowledgeLesson }) {
@@ -70,12 +79,20 @@ export function LessonList(props: {
   return (
     <ul className="card kb-list" aria-label="Занятия">
       {props.lessons.map((l) => (
-        <li key={l.recordingId} className="kb-lesson">
+        <li key={l.key} className="kb-lesson">
           <button type="button" className="kb-item" onClick={() => props.onOpen(l)}>
-            <span className="kb-name">{lessonLabel(l)}</span>
-            <ReadyMarks lesson={l} />
+            <span className="kb-name">{lectureLabel(l)}</span>
+            {isNoteOnly(l) ? (
+              <span>
+                <StatusChip kind="neutral" icon="doc">
+                  {noteLectureTexts.ownChip}
+                </StatusChip>
+              </span>
+            ) : (
+              <ReadyMarks lesson={l} />
+            )}
           </button>
-          {onEdit && (
+          {onEdit && !isNoteOnly(l) && (
             <Button variant="ghost" onClick={() => onEdit(l)}>
               Указать предмет
             </Button>
@@ -83,6 +100,111 @@ export function LessonList(props: {
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * «Добавить конспект прошедшей пары»: a recorded lesson without notes, a date or «без даты»; the choice opens the
+ * notes block for it. Needs the subject in the library (the notes are filed under it): off with the block's own hint
+ * otherwise. Past schedule slots are not offered: the core has no list of them yet (follow-up, ADR-0027).
+ */
+export function AddPastNote(props: {
+  subject: Pick<KnowledgeSubject, "subjectId" | "noSubject">;
+  lectures: readonly KnowledgeLesson[];
+  onChoose: (c: PastChoice) => void;
+  /** Today as "YYYY-MM-DD"; the page's clock in the app, a fixed day in tests. */
+  today?: string;
+}) {
+  const known = props.subject.subjectId !== "";
+  const [open, setOpen] = useState(false);
+  const [lessonKey, setLessonKey] = useState("");
+  const [date, setDate] = useState("");
+  const [dateError, setDateError] = useState("");
+  const today = props.today ?? localDay(new Date());
+  const choices = lessonsWithoutNotes(props.lectures);
+  const t = noteLectureTexts;
+  const hint = known ? "" : noSubjectText(props.subject.noSubject ? "no-subject" : "none");
+
+  function chooseDate() {
+    const c = checkPastDate(date, today);
+    if (c.kind !== "ok") {
+      setDateError(dateCheckText(c));
+      return;
+    }
+    setDateError("");
+    props.onChoose({ kind: "day", date: c.date });
+  }
+
+  return (
+    <div className="kb-past">
+      <Button
+        icon="plus"
+        aria-expanded={open}
+        disabled={!known}
+        disabledReason={known ? undefined : hint}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {t.addPast}
+      </Button>
+      {!known && <p className="small muted">{hint}</p>}
+      {known && open && (
+        <Card className="box kb-form">
+          <h2>{t.addPastTitle}</h2>
+          <Field label={t.pickRecording}>
+            {(fid) => (
+              <Select id={fid} value={lessonKey} disabled={choices.length === 0} onChange={(e) => setLessonKey(e.target.value)}>
+                <option value="">{choices.length === 0 ? t.pickRecordingNone : "—"}</option>
+                {choices.map((l) => (
+                  <option key={l.key} value={l.key}>
+                    {lectureLabel(l)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <div className="acts start">
+            <Button
+              disabled={lessonKey === ""}
+              onClick={() => {
+                const lesson = choices.find((l) => l.key === lessonKey);
+                if (lesson) {
+                  props.onChoose({ kind: "recording", lesson });
+                }
+              }}
+            >
+              {t.choose}
+            </Button>
+          </div>
+          <Field label={t.pickDate}>
+            {(fid) => (
+              <Input
+                id={fid}
+                type="date"
+                max={today}
+                value={date}
+                aria-invalid={dateError !== ""}
+                onChange={(e) => {
+                  setDate(e.target.value);
+                  setDateError("");
+                }}
+              />
+            )}
+          </Field>
+          <div className="acts start">
+            <Button onClick={chooseDate}>{t.choose}</Button>
+            <Button onClick={() => props.onChoose({ kind: "undated" })}>{t.pickUndated}</Button>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              {t.close}
+            </Button>
+          </div>
+          {dateError !== "" && (
+            <ResultLine kind="fail" role="alert">
+              {dateError}
+            </ResultLine>
+          )}
+        </Card>
+      )}
+    </div>
   );
 }
 
@@ -110,9 +232,9 @@ export function HitList(props: {
         {hitCountText(props.result.hits.length, groups.length, props.result.truncated)}
       </p>
       {groups.map((g) => (
-        <div key={g.lesson.recordingId} className="card kb-group">
+        <div key={g.lesson.key} className="card kb-group">
           <button type="button" className="kb-item kb-group-head" onClick={() => props.onOpen(g.lesson, null)}>
-            <span className="kb-name">{lessonLabel(g.lesson)}</span>
+            <span className="kb-name">{lectureLabel(g.lesson)}</span>
             <span className="small muted">{subjectName(g.lesson)}</span>
           </button>
           <ul className="kb-hits">

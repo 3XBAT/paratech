@@ -2,7 +2,7 @@
 // names and pasted text are the student's or imported: they stay plain strings here and the components show them as
 // text nodes only. The student's notes and paratech's «Конспект» are never merged (ADR-0027, Coexistence).
 
-import type { LibrarySubjectState } from "./bindings/knowledgeBase.js";
+import type { KnowledgeLesson, LibrarySubjectState } from "./bindings/knowledgeBase.js";
 import { notesErrorText, pageUrl, type NoteFile, type NotesApi,type NotePart, type NotesAdd, type NoteTarget, type NoteView } from "./bindings/notes.js";
 import { plural } from "./plural.js";
 
@@ -374,6 +374,110 @@ export async function undoCall(api: UndoApi, a: UndoAction): Promise<NoteView | 
       return api.reorder(a.noteId, a.order);
     case "replace":
       return (await api.undoReplace(a.noteId, a.currentId, a.previousId)).note;
+  }
+}
+
+/**
+ * The lecture the «Мой конспект» block shows, by ids only (never a path): a recording, a schedule lesson, a day of a
+ * subject, or one undated note (noteId "" until the first file is added).
+ */
+export type OwnLecture =
+  | { kind: "recording"; recordingId: string }
+  | { kind: "lesson"; lessonId: string; subjectId: string }
+  | { kind: "day"; date: string; subjectId: string }
+  | { kind: "undated"; subjectId: string; noteId: string };
+
+type LectureSource = Pick<
+  KnowledgeLesson,
+  "anchor" | "recordingId" | "scheduleLessonId" | "date" | "notes" | "librarySubjectId" | "librarySubjectState"
+>;
+
+/** The subject of a lecture: the matched library subject, else the one its first note names; "" when neither. */
+export function lectureSubjectId(l: Pick<LectureSource, "notes" | "librarySubjectId" | "librarySubjectState">): string {
+  return pickSubjectId(l.notes, l.librarySubjectId, l.librarySubjectState);
+}
+
+/** How a lesson of the knowledge base is opened in the block (ADR-0027). */
+export function lectureOf(l: LectureSource): OwnLecture {
+  const subjectId = lectureSubjectId(l);
+  switch (l.anchor) {
+    case "recording":
+      return { kind: "recording", recordingId: l.recordingId };
+    case "lesson":
+      return { kind: "lesson", lessonId: l.scheduleLessonId, subjectId };
+    case "day":
+      return { kind: "day", date: l.date, subjectId };
+    case "undated":
+      return { kind: "undated", subjectId, noteId: l.notes[0]?.id ?? "" };
+  }
+}
+
+/** Identifies a lecture among the others (effect dependency, never shown). */
+export function lectureKey(l: OwnLecture): string {
+  switch (l.kind) {
+    case "recording":
+      return `recording:${l.recordingId}`;
+    case "lesson":
+      return `lesson:${l.lessonId}`;
+    case "day":
+      return `day:${l.subjectId}:${l.date}`;
+    case "undated":
+      return `undated:${l.subjectId}:${l.noteId}`;
+  }
+}
+
+/** The notes of the lecture through the notes binding; an undated lecture is its one note among the subject's. */
+export async function readLectureNotes(api: Pick<NotesApi, "forLesson" | "forSubject">, l: OwnLecture): Promise<NoteView[]> {
+  const none = { recordingId: "", lessonId: "", subjectId: "", date: "" };
+  switch (l.kind) {
+    case "recording":
+      return api.forLesson({ ...none, recordingId: l.recordingId });
+    case "lesson":
+      return api.forLesson({ ...none, lessonId: l.lessonId });
+    case "day":
+      return api.forLesson({ ...none, subjectId: l.subjectId, date: l.date });
+    case "undated": {
+      if (l.noteId === "" || l.subjectId === "") {
+        return [];
+      }
+      return (await api.forSubject(l.subjectId)).filter((n) => n.id === l.noteId);
+    }
+  }
+}
+
+/** The note an add goes to in an undated lecture: the one shown, else the one the lecture was opened with. */
+export function undatedNoteId(l: OwnLecture, notes: readonly Pick<NoteView, "id" | "removed">[]): string {
+  if (l.kind !== "undated") {
+    return "";
+  }
+  return notes.find((n) => !n.removed)?.id ?? l.noteId;
+}
+
+/** The target of an add, paste or drop in the lecture; noteId puts the files into that note. */
+export function lectureTarget(l: OwnLecture, subjectId: string, noteId = ""): NoteTarget {
+  switch (l.kind) {
+    case "recording":
+      return recordingTarget(l.recordingId, subjectId, noteId);
+    case "lesson":
+      return { noteId, subjectId, kind: "lesson", recordingId: "", lessonId: l.lessonId, date: "" };
+    case "day":
+      return { noteId, subjectId, kind: "day", recordingId: "", lessonId: "", date: l.date };
+    case "undated":
+      return { noteId, subjectId, kind: "undated", recordingId: "", lessonId: "", date: "" };
+  }
+}
+
+/** Whether the target of a drop event (the core's report) is this lecture. */
+export function isLecture(l: OwnLecture, t: NoteTarget): boolean {
+  switch (l.kind) {
+    case "recording":
+      return t.recordingId === l.recordingId;
+    case "lesson":
+      return t.lessonId === l.lessonId;
+    case "day":
+      return t.kind === "day" && t.date === l.date && t.subjectId === l.subjectId;
+    case "undated":
+      return t.kind === "undated" && t.subjectId === l.subjectId && (l.noteId === "" || t.noteId === "" || t.noteId === l.noteId);
   }
 }
 
