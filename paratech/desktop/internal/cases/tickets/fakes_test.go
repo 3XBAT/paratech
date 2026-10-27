@@ -118,6 +118,7 @@ type fakeAnswerer struct {
 type outcome struct {
 	reply string
 	none  bool // no passage matches
+	note  bool // the fragment is the student's note (no recording), not a summary
 	err   error
 }
 
@@ -148,9 +149,14 @@ func (f *fakeAnswerer) Ask(_ context.Context, q string, sub shared.SubjectID) (*
 	case o.none:
 		return nil, nil
 	}
-	req, err := answer.NewRequest(q, []answer.Excerpt{{Text: lessonText, Source: answer.Source{
+	src := answer.Source{
 		Recording: "r1", Section: answer.SectionSummary, Title: "Ряды", StartedAt: time.Date(2026, 10, 20, 7, 0, 0, 0, time.UTC),
-	}}}, "tk:v1")
+	}
+	if o.note {
+		src.Recording, src.Section, src.Note, src.Material = "", answer.SectionOwnNote, "n1", "m1"
+		src.Locator = answer.Locator{Kind: answer.LocatorPage, N: 3}
+	}
+	req, err := answer.NewRequest(q, []answer.Excerpt{{Text: lessonText, Source: src}}, "tk:v1")
 	if err != nil {
 		return nil, err
 	}

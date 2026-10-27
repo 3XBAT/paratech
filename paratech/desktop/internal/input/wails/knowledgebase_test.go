@@ -117,7 +117,8 @@ func TestKnowledgeJSON(t *testing.T) {
 	raw, _ = json.Marshal(lessons)
 	lessonJSON := `{"recordingId":"r1","startedAt":"2026-10-19T07:00:00Z","durationSeconds":5400,"title":"Механика",` +
 		`"subject":"Физика","subjectKey":"физика","kind":"lecture","subjectEdited":true,"kindEdited":false,` +
-		`"transcriptReady":true,"summaryReady":true,"lectureTextReady":false}`
+		`"transcriptReady":true,"summaryReady":true,"lectureTextReady":false,` +
+		`"librarySubjectId":"","librarySubjectState":"none"}`
 	if string(raw) != "["+lessonJSON+"]" {
 		t.Fatalf("Lessons JSON = %s\nwant [%s]", raw, lessonJSON)
 	}
@@ -145,6 +146,46 @@ func TestKnowledgeJSON(t *testing.T) {
 	f.result = knowledgebase.SearchResult{}
 	if got, err := s.Search(ctx, "кванты"); err != nil || got.Hits == nil {
 		t.Fatalf("no hits = %#v, %v; want an empty list", got, err)
+	}
+}
+
+// The page takes the library subject of a lesson from the core (TASK-252): an id only when matched, and the state.
+func TestKnowledgeLessonLibrarySubject(t *testing.T) {
+	phys := kb.LibrarySubject{ID: "phys", Name: "Физика"}
+	tests := []struct {
+		name      string
+		lesson    func(*kb.Lesson)
+		wantID    string
+		wantState string
+	}{
+		{"matched", func(l *kb.Lesson) { l.Library = phys }, "phys", "matched"},
+		{"none", func(*kb.Lesson) {}, "", "none"},
+		{"ambiguous", func(l *kb.Lesson) { l.Subject, l.LibraryAmbiguous = "Матан", true }, "", "ambiguous"},
+		{"no subject", func(l *kb.Lesson) { l.Subject = "" }, "", "no-subject"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := kbLesson()
+			tt.lesson(&l)
+			s, _ := newKnowledgeService(&fakeKnowledge{lessons: []kb.Lesson{l}}, nil)
+			got, err := s.Lesson(context.Background(), "r1")
+			if err != nil || got.LibrarySubjectID != tt.wantID || got.LibrarySubjectState != tt.wantState {
+				t.Fatalf("Lesson = id %q state %q, %v; want %q %q", got.LibrarySubjectID, got.LibrarySubjectState, err, tt.wantID, tt.wantState)
+			}
+		})
+	}
+}
+
+// TestFrontendKnowsLibrarySubjectStates keeps the states the binding sends equal to those the page accepts.
+func TestFrontendKnowsLibrarySubjectStates(t *testing.T) {
+	src, err := os.ReadFile("../../../frontend/src/bindings/knowledgeBase.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []kb.LibraryMatch{kb.LibraryMatched, kb.LibraryNone, kb.LibraryAmbiguous, kb.LibraryNoSubject} {
+		if !strings.Contains(string(src), `"`+string(s)+`"`) {
+			t.Errorf("frontend/src/bindings/knowledgeBase.ts does not list the library subject state %q", s)
+		}
 	}
 }
 

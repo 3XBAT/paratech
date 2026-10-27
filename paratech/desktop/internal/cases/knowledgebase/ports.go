@@ -75,11 +75,11 @@ type TextWriter interface {
 	WriteFile(ctx context.Context, path string, content []byte) error
 }
 
-// SubjectResolver maps the free subject strings of lessons to the subjects of the library (ADR-0024): name or alias,
-// an ambiguous string matches none, unmatched strings are absent. Implemented by cases/library, wired by the app; no
-// stored string is rewritten.
+// SubjectResolver tells how the free subject strings of lessons resolve to the subjects of the library (ADR-0024): by
+// name or alias to one subject, to none, or to several (ambiguous, none chosen). Implemented by cases/library, wired by
+// the app; no stored string is rewritten.
 type SubjectResolver interface {
-	ResolveSubjects(ctx context.Context, names []string) (map[string]subjectmatch.Match, error)
+	LookupSubjects(ctx context.Context, names []string) (map[string]subjectmatch.Resolution, error)
 }
 
 // NoteStore lists the student's own notes (ADR-0027). Implemented by the sqlite adapter.

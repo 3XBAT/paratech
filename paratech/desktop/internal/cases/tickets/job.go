@@ -229,7 +229,8 @@ func claimsOf(a *answer.Answer, loc *time.Location) []homeworkdoc.TicketClaim {
 			if !date.IsZero() {
 				date = date.In(loc)
 			}
-			tc.Sources = append(tc.Sources, homeworkdoc.TicketSource{Lesson: src.Title, Date: date, Section: src.Section})
+			tc.Sources = append(tc.Sources, homeworkdoc.TicketSource{Lesson: src.Title, Date: date, Section: src.Section,
+				Locator: src.Locator, Heading: src.Heading})
 		}
 		out = append(out, tc)
 	}

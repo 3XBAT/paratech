@@ -53,6 +53,31 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+// Lookup tells the four outcomes apart; only Matched carries a subject.
+func TestLookup(t *testing.T) {
+	ix := testIndex()
+	tests := []struct {
+		in   string
+		want Resolution
+	}{
+		{"Физика", Resolution{Match: Match{ID: "phys", Name: "Физика"}, Outcome: Matched}},
+		{"общая физика", Resolution{Match: Match{ID: "phys", Name: "Физика"}, Outcome: Matched}},
+		{"Матан", Resolution{Outcome: Ambiguous}},
+		{"МАТАН ", Resolution{Outcome: Ambiguous}},
+		{"Физика 2", Resolution{Outcome: NoMatch}},
+		{"", Resolution{Outcome: NoKey}},
+		{" \t ", Resolution{Outcome: NoKey}},
+	}
+	for _, tt := range tests {
+		if got := ix.Lookup(tt.in); got != tt.want {
+			t.Errorf("Lookup(%q) = %+v, want %+v", tt.in, got, tt.want)
+		}
+	}
+	if got := (Index{}).Lookup("Физика"); got != (Resolution{Outcome: NoMatch}) {
+		t.Fatalf("the zero index: Lookup = %+v", got)
+	}
+}
+
 func TestTakenByOther(t *testing.T) {
 	ix := testIndex()
 	tests := []struct {

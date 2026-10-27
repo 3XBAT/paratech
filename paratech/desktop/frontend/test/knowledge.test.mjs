@@ -60,6 +60,8 @@ const lesson = (over = {}) => ({
   transcriptReady: true,
   summaryReady: true,
   lectureTextReady: false,
+  librarySubjectId: "",
+  librarySubjectState: "none",
   ...over,
 });
 const subject = (over = {}) => ({ key: "матанализ", name: "Матанализ", lessons: 5, latest: noon, noSubject: false, ...over });
@@ -126,9 +128,21 @@ test("a malformed reply is an error, not a default", async () => {
     [() => knowledgeBaseApi(fakeCall({ hits: [hit({ lesson: null })], truncated: false }).call).search("ab"), /lesson/],
     [() => knowledgeBaseApi(fakeCall({ hits: null, truncated: false }).call).search("ab"), /hits/],
     [() => knowledgeBaseApi(fakeCall({ status: "done", message: "", name: "" }).call).exportSubject(""), /status/],
+    [() => knowledgeBaseApi(fakeCall(lesson({ librarySubjectState: "guess" })).call).lesson("r1"), /librarySubjectState/],
+    [() => knowledgeBaseApi(fakeCall(lesson({ librarySubjectId: undefined })).call).lesson("r1"), /librarySubjectId/],
+    [() => knowledgeBaseApi(fakeCall(lesson({ librarySubjectState: "matched" })).call).lesson("r1"), /does not fit/],
+    [() => knowledgeBaseApi(fakeCall(lesson({ librarySubjectId: "phys", librarySubjectState: "ambiguous" })).call).lesson("r1"), /does not fit/],
   ];
   for (const [run, msg] of bad) {
     await assert.rejects(run, msg);
+  }
+});
+
+test("the library subject of a lesson comes from the core with its state", async () => {
+  for (const [id, state] of [["phys", "matched"], ["", "none"], ["", "ambiguous"], ["", "no-subject"]]) {
+    const got = await knowledgeBaseApi(fakeCall(lesson({ librarySubjectId: id, librarySubjectState: state })).call).lesson("r1");
+    assert.equal(got.librarySubjectId, id);
+    assert.equal(got.librarySubjectState, state);
   }
 });
 

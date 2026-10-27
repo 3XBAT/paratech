@@ -2,8 +2,8 @@
 // names and pasted text are the student's or imported: they stay plain strings here and the components show them as
 // text nodes only. The student's notes and paratech's «Конспект» are never merged (ADR-0027, Coexistence).
 
-import type { LibrarySubject } from "./bindings/library.js";
-import { notesErrorText, type NoteFile, type NotesApi,type NotePart, type NotesAdd, type NoteTarget, type NoteView } from "./bindings/notes.js";
+import type { LibrarySubjectState } from "./bindings/knowledgeBase.js";
+import { notesErrorText, pageUrl, type NoteFile, type NotesApi,type NotePart, type NotesAdd, type NoteTarget, type NoteView } from "./bindings/notes.js";
 import { plural } from "./plural.js";
 
 /** Every label of the feature in one place: the owner's naming question is a one-line change here. */
@@ -33,6 +33,8 @@ export const ownNotesTexts = {
   undoneLine: "Действие отменено.",
   added: "добавлено",
   noSubject: "Для этого занятия не найден предмет в библиотеке: добавьте предмет, чтобы прикреплять конспект.",
+  subjectAmbiguous: "У нескольких предметов в библиотеке одно название — добавить заметку нельзя.",
+  subjectNone: "Предмет занятия не найден в библиотеке — добавьте его в «Предметах».",
   cancelled: "Выбор отменён.",
   statusLabel: "Состояние конспекта",
   partsLabel: "Части конспекта",
@@ -47,7 +49,87 @@ export const ownNotesTexts = {
   megabytes: "МБ",
   kilobytes: "КБ",
   counterOf: "из",
+  noText: "текст не распознан",
+  pagePasteLabel: "Текст страницы",
+  pagePasteHint: "Ctrl+Enter сохраняет, Esc закрывает.",
+  pageViewerOpen: "Открыть страницу",
+  viewerPrev: "Назад",
+  viewerNext: "Вперёд",
+  viewerClose: "Закрыть",
+  pageWord: "Страница",
+  pageTextWord: "Текст страницы",
+  viewerDialog: "Просмотр страниц",
 } as const;
+
+/** «3 стр. без текста» in the note header; "" when every page has text. */
+export function noTextPagesText(n: number): string {
+  return n > 0 ? `${n} стр. без текста` : "";
+}
+
+/** The alt text of a page image: the page number only, never the file name. */
+export function pageAlt(number: number, noText: boolean): string {
+  return `${ownNotesTexts.pageWord} ${number}: фото${noText ? `, ${ownNotesTexts.noText}` : ""}`;
+}
+
+/** The live-region line of the viewer. */
+export function viewerAnnounce(number: number, total: number): string {
+  return `${ownNotesTexts.pageWord} ${number} ${ownNotesTexts.counterOf} ${total}`;
+}
+
+/** The accessible name of the thumbnail button. */
+export function thumbLabel(number: number, total: number): string {
+  return `${ownNotesTexts.pageViewerOpen} ${number} ${ownNotesTexts.counterOf} ${total}`;
+}
+
+export interface PhotoPage {
+  materialId: string;
+  /** The only image source: the core's same-origin address. */
+  src: string;
+  /** 1-based position among the photo parts. */
+  number: number;
+  noText: boolean;
+  alt: string;
+}
+
+/** The photo parts of a note in order, numbered by their position among photo parts. */
+export function photoPages(note: Pick<NoteView, "parts">): PhotoPage[] {
+  const out: PhotoPage[] = [];
+  for (const p of note.parts) {
+    const src = pageUrl(p.pageUrl ?? "");
+    if (src === "") {
+      continue;
+    }
+    const noText = p.textStatus === "no_text";
+    const number = out.length + 1;
+    out.push({ materialId: p.materialId, src, number, noText, alt: pageAlt(number, noText) });
+  }
+  return out;
+}
+
+export type ViewerKey = "ArrowLeft" | "ArrowRight" | "Home" | "End";
+
+/** The page index after a key or a button; clamped to the first and the last page, never wraps. */
+export function stepPage(index: number, total: number, key: ViewerKey): number {
+  if (total <= 0) {
+    return 0;
+  }
+  let to = index;
+  switch (key) {
+    case "ArrowLeft":
+      to = index - 1;
+      break;
+    case "ArrowRight":
+      to = index + 1;
+      break;
+    case "Home":
+      to = 0;
+      break;
+    case "End":
+      to = total - 1;
+      break;
+  }
+  return Math.min(Math.max(to, 0), total - 1);
+}
 
 /** The longest pasted text the core keeps (cases/notes MaxPastedBytes). */
 export const maxPasteBytes = 1024 * 1024;
@@ -100,6 +182,8 @@ export function partState(p: Pick<NotePart, "textStatus" | "removed" | "missing"
       return ownNotesTexts.failed;
     case "pdf_not_extracted":
       return ownNotesTexts.pdfNotExtracted;
+    // A photo page without text has its own label and button.
+    case "no_text":
     default:
       return "";
   }
@@ -112,17 +196,24 @@ export interface PartRow {
   meta: string;
   canUp: boolean;
   canDown: boolean;
+  /** The photo page of the part, null for any other part. */
+  page: PhotoPage | null;
+  /** Number of photo pages in the note (for «N из M»). */
+  pageTotal: number;
 }
 
 /** The parts of a note as listed, with the moves each may make. */
 export function partRows(note: Pick<NoteView, "parts">): PartRow[] {
   const n = note.parts.length;
+  const pages = photoPages(note);
   return note.parts.map((p, i) => ({
     materialId: p.materialId,
     name: p.name === "" ? ownNotesTexts.untitled : p.name,
     meta: [partTypeLabel(p.type), partState(p)].filter((s) => s !== "").join(" · "),
     canUp: i > 0,
     canDown: i < n - 1,
+    page: pages.find((pg) => pg.materialId === p.materialId) ?? null,
+    pageTotal: pages.length,
   }));
 }
 
@@ -142,7 +233,25 @@ export function movedOrder(order: readonly string[], index: number, delta: -1 | 
   return out;
 }
 
-export const orderOf = (note: Pick<NoteView, "parts">): string[] => note.parts.map((p) => p.materialId);
+/**
+ * The order with newId moved to right after pageId; null when nothing has to change: the page or the new part is
+ * not in the order, they are the same, or the new part is already next to the page.
+ */
+export function orderAfter(order: readonly string[], pageId: string, newId: string): string[] | null {
+  const page = order.indexOf(pageId);
+  const at = order.indexOf(newId);
+  if (page < 0 || at < 0 || pageId === newId || at === page + 1) {
+    return null;
+  }
+  const out = order.filter((id) => id !== newId);
+  out.splice(out.indexOf(pageId) + 1, 0, newId);
+  return out;
+}
+
+/** «Текст страницы 2 добавлен» after a typed text is stored next to its page. */
+export const pageTextAddedText = (number: number): string => `${ownNotesTexts.pageTextWord} ${number} добавлен`;
+
+export const orderOf =(note: Pick<NoteView, "parts">): string[] => note.parts.map((p) => p.materialId);
 
 /** The notes shown: removed ones stay only while their «Отменить» is offered. */
 export function visibleNotes(notes: readonly NoteView[], undoNoteId: string): NoteView[] {
@@ -204,33 +313,28 @@ export function withNote(notes: readonly NoteView[], note: NoteView): NoteView[]
   return i < 0 ? [...notes, note] : notes.map((n, j) => (j === i ? note : n));
 }
 
-/** The subject of the notes: the one of an existing note, else the library subject named as the lesson. */
+/** The subject of the notes: the one of an existing note, else the library subject the core matched to the lesson. */
 export function pickSubjectId(
   notes: readonly Pick<NoteView, "subjectId">[],
-  subjects: readonly Pick<LibrarySubject, "id" | "name" | "aliases">[],
-  lessonSubject: string,
+  librarySubjectId: string,
+  state: LibrarySubjectState,
 ): string {
   if (notes.length > 0) {
     return notes[0].subjectId;
   }
-  const want = subjectKey(lessonSubject);
-  if (want === "") {
-    return "";
-  }
-  const hits = subjects.filter((s) => [s.name, ...s.aliases].some((n) => subjectKey(n) === want));
-  // Two subjects under one name: the page cannot choose for the student.
-  return hits.length === 1 ? hits[0].id : "";
+  return state === "matched" ? librarySubjectId : "";
 }
 
-/** The core's subject key (values.Key): format chars dropped, control chars as spaces, spaces collapsed, ё as е. */
-export function subjectKey(name: string): string {
-  return name
-    .replace(/\p{Cf}/gu, "")
-    .replace(/\p{Cc}/gu, " ")
-    .toLowerCase()
-    .replace(/ё/g, "е")
-    .replace(/\s+/g, " ")
-    .trim();
+/** Why adding is off: the reason the core gave for the lesson's subject. */
+export function noSubjectText(state: LibrarySubjectState): string {
+  switch (state) {
+    case "ambiguous":
+      return ownNotesTexts.subjectAmbiguous;
+    case "none":
+      return ownNotesTexts.subjectNone;
+    default:
+      return ownNotesTexts.noSubject;
+  }
 }
 
 export type UndoApi = Pick<NotesApi, "restore" | "reorder" | "undoReplace">;
