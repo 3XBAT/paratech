@@ -169,15 +169,16 @@ func (s *Service) RemoveSubject(ctx context.Context, id shared.SubjectID) error 
 		if err != nil {
 			return err
 		}
+		// Notes first, so a subject with notes and files says it has notes (they are not removed by removing files).
+		if err := s.checkNoNotes(ctx, id); err != nil {
+			return err
+		}
 		n, err := s.materials.Count(ctx, id, "")
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
 		if err := sub.Removable(n); err != nil {
 			return domainError(err)
-		}
-		if err := s.checkNoNotes(ctx, id); err != nil {
-			return err
 		}
 		err = s.subjects.Delete(ctx, sub)
 		switch {

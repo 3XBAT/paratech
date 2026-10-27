@@ -317,7 +317,7 @@ func (s *NotesService) ForSubject(ctx context.Context, subjectID string) ([]Note
 
 // addPaths reads the files one at a time and adds each to the notes of target; after the first one the rest go to
 // the same note. check, if set, refuses a path before it is read (the drop's allow-list). A refusal of the whole
-// request (the lecture, the subject) ends it as an error.
+// request (the lecture, the subject) ends it as an error; once a file is in the note, it ends it as that file's error.
 func (s *NotesService) addPaths(ctx context.Context, target NoteTarget, paths []string, check func(string) error) (NotesAdd, error) {
 	ref, err := target.anchor()
 	if err != nil {
@@ -345,7 +345,12 @@ func (s *NotesService) addPaths(ctx context.Context, target NoteTarget, paths []
 		req.Uploads = []notes.Upload{up}
 		res, err := s.uc.Add(ctx, req)
 		if err != nil && !fileError(err) {
-			return NotesAdd{}, s.fail(opNotesAdd, err)
+			if out.Note == nil {
+				return NotesAdd{}, s.fail(opNotesAdd, err)
+			}
+			// Earlier files are in the note already: keep their results and stop at this one.
+			out.Files = append(out.Files, NoteFile{Name: up.Name, Error: s.fail(opNotesAdd, err).Error()})
+			return out, nil
 		}
 		f := NoteFile{Name: up.Name}
 		if len(res.Parts) == 1 {

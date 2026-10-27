@@ -244,6 +244,27 @@ func TestNotesAddFiles(t *testing.T) {
 		t.Fatalf("AddFiles(recording not ready) = %v after %d calls", err, len(uc.adds))
 	}
 
+	// An unexpected error after a file was added keeps that file's result; the error is the failing file's, the call
+	// stops there.
+	c := dropDir + `\c.txt`
+	for _, tt := range []struct {
+		name string
+		err  error
+		want libraryError
+	}{
+		{"unexpected", errors.New("disk at C:/Users/student"), ErrNotesUnavailable},
+		{"busy", fmt.Errorf("w: %w", notes.ErrBusy), ErrLibraryBusy},
+	} {
+		s, uc, _, _ = newNotesBinding(t, map[string][]byte{a: []byte("A"), b: []byte("B"), c: []byte("C")}, a, b, c)
+		uc.addErrs["dup.txt"] = tt.err
+		out, err = s.AddFiles(ctx, recTarget)
+		if err != nil || out.Note == nil || out.Note.ID != "n1" || !out.Created || len(out.Files) != 2 || len(uc.adds) != 2 ||
+			out.Files[0].MaterialID != "m1" || out.Files[1].Name != "dup.txt" || out.Files[1].Error != tt.want.Error() {
+			t.Fatalf("%s: AddFiles(fails after one) = %+v, %v after %d calls", tt.name, out, err, len(uc.adds))
+		}
+		assertNoNotePath(t, out)
+	}
+
 	// An unreadable file.
 	s, _, _, _ = newNotesBinding(t, map[string][]byte{}, a)
 	if out, err := s.AddFiles(ctx, recTarget); err != nil || out.Files[0].Error != ErrLibraryFileUnreadable.Error() || out.Note != nil {

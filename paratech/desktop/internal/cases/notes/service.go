@@ -63,7 +63,8 @@ type target struct {
 }
 
 // Add stores the files in the library and adds them to the notes of a lecture (see AddRequest), each file on its own:
-// the result tells per file what happened. It fails as a whole for a bad request or anchor, or when no file could be
+// the result tells per file what happened. It fails as a whole for a bad request or anchor, for more files than the
+// note has room for (ErrTooManyParts, nothing stored), or when no file could be
 // stored (with the error of the first one); otherwise the files that failed carry their error in their result.
 func (s *Service) Add(ctx context.Context, req AddRequest) (Added, error) {
 	switch {
@@ -75,6 +76,11 @@ func (s *Service) Add(ctx context.Context, req AddRequest) (Added, error) {
 	t, err := s.target(ctx, req)
 	if err != nil {
 		return Added{}, err
+	}
+	// Refused before anything is filed, so a full note leaves no new files in the library. Files that are parts
+	// already count too: the bound is checked without storing them.
+	if t.note != nil && len(t.note.Parts())+len(req.Uploads) > note.MaxParts {
+		return Added{}, ErrTooManyParts
 	}
 
 	res := Added{Parts: make([]PartResult, 0, len(req.Uploads))}

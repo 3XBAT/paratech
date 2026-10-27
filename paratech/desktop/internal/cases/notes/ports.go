@@ -20,6 +20,7 @@ type NoteRepository interface {
 	// or material that does not exist shared.ErrConflict.
 	Save(ctx context.Context, n *note.Note) error
 
+	// ListBySubject lists by the stored date of the anchor, undated last, then by creation; ForSubject keeps this order.
 	ListBySubject(ctx context.Context, sub shared.SubjectID) ([]*note.Note, error)
 	ListByRecording(ctx context.Context, rec shared.RecordingID) ([]*note.Note, error)
 	ListByLesson(ctx context.Context, l shared.LessonID) ([]*note.Note, error)

@@ -62,6 +62,32 @@ func TestRemoveSubjectWithNotes(t *testing.T) {
 	}
 }
 
+func TestRemoveSubjectWithNotesAndFiles(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	phys := createSubject(t, e, "Физика")
+	if _, err := e.svc.Place(ctx, importText(t, e, "лекция").ID(), phys.ID(), ""); err != nil {
+		t.Fatal(err)
+	}
+	notes := &fakeNotes{of: map[shared.SubjectID]int{phys.ID(): 1}}
+	withNotes(t, e, notes)
+
+	// The notes are told first: removing the files would not make the subject removable.
+	if err := e.svc.RemoveSubject(ctx, phys.ID()); !errors.Is(err, ErrHasNotes) {
+		t.Fatalf("RemoveSubject(with notes and a file) = %v, want ErrHasNotes", err)
+	}
+	notes.err = errors.New("disk")
+	if err := e.svc.RemoveSubject(ctx, phys.ID()); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("RemoveSubject(notes unreadable) = %v, want ErrUnavailable", err)
+	}
+	notes.err, notes.of = nil, map[shared.SubjectID]int{}
+	if err := e.svc.RemoveSubject(ctx, phys.ID()); !errors.Is(err, ErrNotEmpty) || errors.Is(err, ErrHasNotes) {
+		t.Fatalf("RemoveSubject(a file, no notes) = %v, want ErrNotEmpty only", err)
+	}
+	if _, ok := e.subjects.rows[phys.ID()]; !ok {
+		t.Fatal("the subject was deleted although it holds a file")
+	}
+}
+
 func TestFileNotePart(t *testing.T) {
 	e, ctx := newEnv(t), context.Background()
 	phys := createSubject(t, e, "Физика")
