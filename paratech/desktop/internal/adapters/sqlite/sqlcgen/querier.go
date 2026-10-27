@@ -199,6 +199,9 @@ type Querier interface {
 	// The newest job of the type in one of the statuses (a JSON array of status names), by its last change, leaving out
 	// the ids of except_ids (a JSON array) (TASK-074: the last finished calendar sync that really ran).
 	LastJobOfTypeByStatus(ctx context.Context, arg LastJobOfTypeByStatusParams) (Job, error)
+	// When a send of the work to the teacher was last SENT (TASK-226), 0 if never: a send_work_email proposal of the work
+	// and the delivery keyed by it (proposal.EmailCommand.IdempotencyKey is 'proposal:' and the proposal id).
+	LastWorkSentAt(ctx context.Context, workID string) (int64, error)
 	// The number of the latest stored version, 0 when none; the repository inserts only the versions above it.
 	LatestDraftRevision(ctx context.Context, assignmentID string) (int64, error)
 	// The newest job of the type whose idempotency key starts with the prefix, in any status (TASK-079: the STT job of a
