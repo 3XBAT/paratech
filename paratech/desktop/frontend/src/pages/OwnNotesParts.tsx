@@ -1,18 +1,23 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { LibrarySubjectState } from "../bindings/knowledgeBase.js";
 import { dropAttributes, type NoteTarget, type NoteView } from "../bindings/notes.js";
 import {
   checkPaste,
   noSubjectText,
   ownNotesTexts as t,
+  noTextPagesText,
   partCountText,
+  type PartRow,
   partRows,
   pasteCounterText,
   pasteLimitText,
+  photoPages,
   type ResultLine,
   shortName,
+  thumbLabel,
   type UndoAction,
 } from "../ownNotesView.js";
+import { PageViewer } from "./PageViewer.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
@@ -48,6 +53,8 @@ export interface OwnNotesActions {
   onMove(note: NoteView, index: number, delta: -1 | 1): void;
   onRemove(noteId: string): void;
   onUndo(): void;
+  /** Text typed for a photo page goes to the note as a TXT part; true when it was stored. */
+  onPastePage(noteId: string, pageMaterialId: string, text: string): Promise<boolean>;
 }
 
 function NoteCard(props: {
@@ -73,21 +80,150 @@ function NoteCard(props: {
           <h3 className="own-note-title" title={note.title}>
             {shortName(note.title)}
           </h3>
-          <p className="small muted">{partCountText(rows.length)}</p>
+          <p className="small muted">
+            {partCountText(rows.length)}
+            {note.noTextPages > 0 && ` · ${noTextPagesText(note.noTextPages)}`}
+          </p>
         </div>
         <Button variant="ghost" size="sm" disabled={off} onClick={() => actions.onRemove(note.id)}>
           {t.remove}
         </Button>
       </div>
-      {rows.length > 0 && (
-        <ol className="own-parts" aria-label={t.partsLabel}>
+      {rows.length > 0 && <PartsList note={note} rows={rows} model={model} actions={actions} onMoved={props.onMoved} />}
+    </Card>
+  );
+}
+
+// Text typed by hand for a photo page: the same limit, counter and refusals as the paste above.
+function PagePaste(props: { noteId: string; materialId: string; disabled: boolean; actions: OwnNotesActions; onDone(): void }) {
+  const [text, setText] = useState("");
+  const [sent, setSent] = useState(false);
+  const id = useId();
+  const limitId = `${id}-limit`;
+  const area = useRef<HTMLTextAreaElement>(null);
+  const check = checkPaste(text);
+  const canSave = !props.disabled && !sent && check.kind === "ok";
+
+  useEffect(() => {
+    area.current?.focus();
+  }, []);
+
+  async function save() {
+    if (!canSave) {
+      return;
+    }
+    setSent(true);
+    const ok = await props.actions.onPastePage(props.noteId, props.materialId, text);
+    if (ok) {
+      props.onDone();
+    } else {
+      setSent(false);
+    }
+  }
+
+  return (
+    <div className="own-paste own-page-paste">
+      <label htmlFor={id}>{t.pagePasteLabel}</label>
+      <textarea
+        id={id}
+        ref={area}
+        className="input own-paste-text"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        aria-describedby={limitId}
+        aria-invalid={check.kind === "long"}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            props.onDone();
+          } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            void save();
+          }
+        }}
+      />
+      <p id={limitId} className="small muted">
+        {pasteLimitText()} {pasteCounterText(text)} {t.pagePasteHint}
+      </p>
+      <div className="acts start">
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!canSave}
+          disabledReason={check.kind === "long" ? t.tooLong : undefined}
+          onClick={() => void save()}
+        >
+          {t.pasteSave}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={props.onDone}>
+          {t.pasteCancel}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PartsList(props: {
+  note: NoteView;
+  rows: PartRow[];
+  model: OwnNotesModel;
+  actions: OwnNotesActions;
+  onMoved(materialId: string, dir: "up" | "down"): void;
+}) {
+  const { note, rows, model, actions } = props;
+  const off = model.busy;
+  const [viewing, setViewing] = useState(-1);
+  const [opener, setOpener] = useState<HTMLElement | null>(null);
+  const [pasting, setPasting] = useState("");
+  const pages = photoPages(note);
+  const list = useRef<HTMLOListElement>(null);
+  const refocus = useRef("");
+
+  // Closing the paste box returns the focus to the page's paste button; when that button is gone (the page no longer
+  // lacks text after a save) the focus goes to the page's thumbnail.
+  useEffect(() => {
+    if (pasting === "" && refocus.current !== "") {
+      const id = refocus.current;
+      refocus.current = "";
+      const q = (sel: string) =>
+        Array.from(list.current?.querySelectorAll<HTMLButtonElement>(sel) ?? []).find((b) => b.dataset.mid === id);
+      (q("button[data-page-paste]") ?? q("button[data-thumb]"))?.focus();
+    }
+  }, [pasting]);
+
+  const closePaste = (mid: string) => {
+    refocus.current = mid;
+    setPasting("");
+  };
+
+  return (
+    <>
+      {viewing >= 0 && <PageViewer pages={pages} start={viewing} opener={opener} onClose={() => setViewing(-1)} />}
+      <ol ref={list} className="own-parts" aria-label={t.partsLabel}>
           {rows.map((r, i) => (
             <li key={r.materialId} className="own-part">
+              {r.page !== null && (
+                <button
+                  type="button"
+                  className="own-thumb"
+                  data-thumb=""
+                  data-mid={r.materialId}
+                  aria-label={thumbLabel(r.page.number, r.pageTotal)}
+                  onClick={(e) => {
+                    setOpener(e.currentTarget);
+                    setViewing(r.page ? r.page.number - 1 : -1);
+                  }}
+                >
+                  <img src={r.page.src} alt={r.page.alt} loading="lazy" width={72} height={96} />
+                </button>
+              )}
               <span className="own-part-main">
                 <span className="own-part-name" title={r.name}>
                   {shortName(r.name)}
                 </span>
                 {r.meta !== "" && <span className="small muted">{r.meta}</span>}
+                {r.page !== null && r.page.noText && <span className="small muted">{t.noText}</span>}
               </span>
               <span className="own-part-acts">
                 <Button
@@ -130,12 +266,35 @@ function NoteCard(props: {
                 >
                   {t.replace}
                 </Button>
+                {r.page !== null && r.page.noText && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="doc"
+                    disabled={off}
+                    data-page-paste=""
+                    data-mid={r.materialId}
+                    aria-expanded={pasting === r.materialId}
+                    aria-label={`${t.paste}: ${t.pageWord} ${r.page.number}`}
+                    onClick={() => (pasting === r.materialId ? closePaste(r.materialId) : setPasting(r.materialId))}
+                  >
+                    {t.paste}
+                  </Button>
+                )}
               </span>
+              {pasting === r.materialId && (
+                <PagePaste
+                  noteId={note.id}
+                  materialId={r.materialId}
+                  disabled={off}
+                  actions={actions}
+                  onDone={() => closePaste(r.materialId)}
+                />
+              )}
             </li>
           ))}
-        </ol>
-      )}
-    </Card>
+      </ol>
+    </>
   );
 }
 

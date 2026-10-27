@@ -130,6 +130,17 @@ export function formatTime(rfc3339: string): string {
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("ru-RU");
 }
 
+/** Like formatTime, but date and minutes only (no seconds). */
+export function formatTimeMinutes(rfc3339: string): string {
+  if (rfc3339 === "") {
+    return "—";
+  }
+  const d = new Date(rfc3339);
+  return Number.isNaN(d.getTime())
+    ? "—"
+    : d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 const actionErrors: Readonly<Record<string, string>> = {
   [errorMessages.unavailable]: "Записи и задачи сейчас недоступны.",
   [errorMessages.invalidId]: "Неверный идентификатор.",

@@ -36,3 +36,4 @@ Open decisions are tracked in PRD §19.
 - [0029](0029-student-assignments.md) Assignments the student adds (by hand or through the agent); delete and edit
 - [0030](0030-subject-teachers-scheduled-send.md) Teacher of a subject and «Отправить в…»
 - [0031](0031-speech-vad.md) Skipping silence in speech recognition (Silero VAD)
+- [0032](0032-lesson-call-links.md) Call link of a lesson (Proposed)

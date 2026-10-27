@@ -21,7 +21,7 @@ import { OverviewSections, SubjectDetail, SubjectTree } from "../.test-build/pag
 import { parseWork } from "../.test-build/bindings/turnkey.js";
 import { triageReason, turnkeyTexts } from "../.test-build/turnkeyView.js";
 import { sendWorkTexts, sentNote, initialSendWork } from "../.test-build/sendWorkView.js";
-import { formatTime } from "../.test-build/activityView.js";
+import { formatTimeMinutes } from "../.test-build/activityView.js";
 import { WorkBody } from "../.test-build/agent/WorkCard.js";
 import { WorkSendView } from "../.test-build/agent/WorkSend.js";
 
@@ -251,7 +251,9 @@ test("the lastMessage is shown as text", () => {
 test("sentAt drives «Отправить ещё раз»; the session flag only bridges the gap", () => {
   const at = "2026-10-20T10:00:00Z";
   const sent = html(h(WorkSendView, { state: initialSendWork, sendable: true, sentAt: at, onSend: noop }));
-  assert.ok(sent.includes(`Отправлено ${formatTime(at)}`));
+  assert.ok(sent.includes(`Отправлено ${formatTimeMinutes(at)}`));
+  assert.ok(!/Отправлено \S+,? \d\d:\d\d:\d\d/.test(sent));
+  assert.match(sentNote(at, false).text, /^Отправлено \d\d\.\d\d\.\d{4}, \d\d:\d\d\. /);
   assert.ok(sent.includes(sendWorkTexts.again));
   assert.ok(!sent.includes(`>${sendWorkTexts.button}<`));
 

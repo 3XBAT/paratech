@@ -41,7 +41,7 @@ export async function startTurnkeyOnce(
   await flight(async () => {
     try {
       const w = await api.startForAssignment(assignmentId);
-      // The reply carries the problem of a reader call that did not go through; the core does not store it, so the card is seeded with it.
+      // The reply carries the live problem of this call; the core also stores it (lastProblem/lastMessage), but the card is seeded with the reply.
       next = { phase: "work", workId: w.id, work: w };
     } catch (err) {
       next = { phase: "none", error: turnkeyErrorText(err) };
