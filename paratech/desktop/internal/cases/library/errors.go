@@ -75,6 +75,16 @@ var (
 	// ErrUnsupportedFile means an upload that is not DOCX, PPTX, PDF or UTF-8 text.
 	ErrUnsupportedFile = errors.New("library: unsupported file type")
 
+	// ErrImageTooLarge means a photo over material.MaxImageBytes or material.MaxImagePixels; it wraps ErrFileTooLarge.
+	ErrImageTooLarge = fmt.Errorf("%w: photo over the limits", ErrFileTooLarge)
+
+	// ErrUnsupportedImage means an image that is not JPEG or PNG (HEIC, GIF, WebP, BMP, TIFF, SVG); it wraps
+	// ErrUnsupportedFile.
+	ErrUnsupportedImage = fmt.Errorf("%w: only JPEG and PNG photos", ErrUnsupportedFile)
+
+	// ErrImageUnreadable means a JPEG or PNG that does not decode (truncated, damaged); it wraps ErrUnsupportedFile.
+	ErrImageUnreadable = fmt.Errorf("%w: the photo cannot be decoded", ErrUnsupportedFile)
+
 	// ErrBusy means the subject or file kept changing while it was saved; trying again helps.
 	ErrBusy = errors.New("library: busy")
 
@@ -88,7 +98,7 @@ var (
 	// repairs it.
 	ErrFileDamaged = errors.New("library: stored file is damaged")
 
-	// ErrNoText means a file whose text is not read: PDF (ADR-0024).
+	// ErrNoText means a file whose text is not read: PDF (ADR-0024) or a photo (ADR-0027).
 	ErrNoText = errors.New("library: the text of this file type is not read")
 
 	// ErrTextUnreadable means a file whose text could not be read: damaged or beyond the reader's limits.
