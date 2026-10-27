@@ -5,8 +5,8 @@ package wails
 // Texts of the open dialog of the library.
 const (
 	materialDialogTitle   = "Выбор файла для предмета"
-	materialFilterName    = "Документы (*.docx, *.pptx, *.pdf, *.txt)"
-	materialFilterPattern = "*.docx;*.pptx;*.pdf;*.txt"
+	materialFilterName    = "Документы (*.docx, *.pptx, *.pdf, *.txt, *.md)"
+	materialFilterPattern = "*.docx;*.pptx;*.pdf;*.txt;*.md;*.markdown"
 )
 
 // pickMaterialFile shows the open dialog of a file of the library. The filter is a convenience only: the type is told
