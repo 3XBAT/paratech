@@ -326,9 +326,7 @@ func orient(img image.Image, o int) image.Image {
 	for y := range dh {
 		for x := range dw {
 			sx, sy := source(o, x, y, w, h)
-			r, g, bl, a := img.At(b.Min.X+sx, b.Min.Y+sy).RGBA()
-			i := dst.PixOffset(x, y)
-			dst.Pix[i], dst.Pix[i+1], dst.Pix[i+2], dst.Pix[i+3] = uint8(r>>8), uint8(g>>8), uint8(bl>>8), uint8(a>>8)
+			dst.Set(x, y, img.At(b.Min.X+sx, b.Min.Y+sy))
 		}
 	}
 	return dst
