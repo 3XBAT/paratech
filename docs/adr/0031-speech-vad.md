@@ -33,7 +33,7 @@ only the speech, in fewer 30 s windows: ×2 on 5 min of a real lecture and on sy
 - Recognition up to twice as fast, the more pauses the more; on almost continuous speech only a few percent. Short
   phrases in noise could be lost (not seen on the samples).
 - Segment ends are not where the speech ends; nothing may rely on them for the length of speech. The transcript view
-  caps the end by what the text can take to say (90 ms per character + 0.5 s) before looking for a pause.
+  caps the end by an estimate of the spoken length of the text before looking for a pause.
 - The estimate assumes VAD is on; without the model file the engine runs without it, and measurements then correct it.
 - Install downloads ~0.9 MB more from a second host family (Hugging Face).
 - Open: pin `source_url` to a commit of `ggml-org/whisper-vad` and compare the SHA-256 with its `lfs.oid`.

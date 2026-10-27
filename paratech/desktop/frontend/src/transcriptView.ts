@@ -180,8 +180,8 @@ export const maxParagraphChars = 900;
 
 const sentenceEnd = /[.!?…]["»”)]*$/;
 
-const msPerChar = 90;
-const spokenSlackMs = 500;
+const msPerChar = 125;
+const spokenSlackMs = 1000;
 
 /**
  * With voice activity detection whisper stretches a segment's end to the next speech start, so a pause no longer

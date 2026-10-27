@@ -236,6 +236,8 @@ test("a pause still starts a paragraph when VAD stretches the segment end to the
   assert.deepEqual(paragraphs(segs).map((p) => p.segments.length), [1, 1, 1]);
   const close = [seg(0, 0, "Это идёт без паузы.", 1700), seg(1, 1700, "И это тоже.", 3000)];
   assert.deepEqual(paragraphs(close).map((p) => p.segments.length), [2]);
+  const slow = [seg(0, 0, "Медленная речь без паузы, сорок знаков..", 4500), seg(1, 4500, "Дальше.", 5500)];
+  assert.deepEqual(paragraphs(slow).map((p) => p.segments.length), [2]);
 });
 
 test("segments are grouped into paragraphs by pauses and length; appending keeps the earlier ones", () => {
