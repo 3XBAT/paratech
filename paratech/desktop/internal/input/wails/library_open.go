@@ -145,7 +145,7 @@ func viewRef(m *material.Material) (shared.ArtifactRef, error) {
 // openExtension is the extension a program is chosen by; the type was told from the content.
 func openExtension(t material.Type) (string, error) {
 	switch t {
-	case material.TypeDOCX, material.TypePPTX, material.TypeTXT, material.TypePDF:
+	case material.TypeDOCX, material.TypePPTX, material.TypeTXT, material.TypePDF, material.TypeJPEG, material.TypePNG:
 		return "." + string(t), nil
 	}
 	return "", shared.ErrInvalidArtifactRef

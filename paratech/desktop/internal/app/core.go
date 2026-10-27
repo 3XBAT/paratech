@@ -16,6 +16,7 @@ import (
 	"paratech/desktop/internal/adapters/googlecal"
 	"paratech/desktop/internal/adapters/httpdownload"
 	"paratech/desktop/internal/adapters/hubclient"
+	"paratech/desktop/internal/adapters/imagepage"
 	"paratech/desktop/internal/adapters/localfile"
 	"paratech/desktop/internal/adapters/logfile"
 	"paratech/desktop/internal/adapters/pdf"
@@ -189,12 +190,13 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 
 	// The library of subjects and files (ADR-0024): files in the artifact store by sha256; a new subject's semester in
 	// the local time zone. Its texts are read locally (doctext); only Inspect asks the Hub's reader (TASK-122).
-	// A subject with notes of the student is not removed (ADR-0027).
+	// A subject with notes of the student is not removed (ADR-0027). Photos are encoded again locally (imagepage) and
+	// kept as pages without text (TASK-165).
 	noteRepo := sqlite.NewNoteRepository(db)
 	lib, err := library.New(library.Deps{
 		Subjects: sqlite.NewSubjectRepository(db), Materials: sqlite.NewMaterialRepository(db), Blobs: store,
 		Lessons: lessons, Strings: sqlite.NewSubjectStrings(db), Clock: e.local, IDs: e.ids, Texts: doctext.New(),
-		Reader: llm, Inspections: sqlite.NewInspectionRepository(db), Notes: noteRepo, Log: log,
+		Reader: llm, Inspections: sqlite.NewInspectionRepository(db), Notes: noteRepo, Images: imagepage.New(), Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: library: %w", err)

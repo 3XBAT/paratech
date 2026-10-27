@@ -51,6 +51,19 @@ func TestDetectType(t *testing.T) {
 		{"cp1251 text", []byte{0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2}, "", ErrUnsupportedType},
 		{"binary with NUL", []byte("MZ\x00\x00"), "", ErrUnsupportedType},
 		{"too large", make([]byte, MaxBytes+1), "", ErrTooLarge},
+		{"jpeg", []byte("\xff\xd8\xff\xe0\x00\x10JFIF"), TypeJPEG, nil},
+		{"png", []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"), TypePNG, nil},
+		{"jpeg over the image limit", append([]byte("\xff\xd8\xff"), make([]byte, MaxImageBytes)...), "", ErrImageTooLarge},
+		{"gif", []byte("GIF89a\x01\x00\x01\x00\x80\x00\x00"), "", ErrUnsupportedImage},
+		{"webp", []byte("RIFF\x10\x00\x00\x00WEBPVP8 "), "", ErrUnsupportedImage},
+		{"heic", []byte("\x00\x00\x00\x18ftypheic\x00\x00\x00\x00"), "", ErrUnsupportedImage},
+		{"avif", []byte("\x00\x00\x00\x1cftypavif\x00\x00\x00\x00"), "", ErrUnsupportedImage},
+		{"bmp", []byte("BM\x3a\x00\x00\x00\x00\x00\x00\x00\x36\x00"), "", ErrUnsupportedImage},
+		{"tiff", []byte("II*\x00\x08\x00\x00\x00\xff"), "", ErrUnsupportedImage},
+		{"svg", []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`), "", ErrUnsupportedImage},
+		{"svg with a prolog", []byte("\xef\xbb\xbf  <?xml version=\"1.0\"?>\n<SVG/>"), "", ErrUnsupportedImage},
+		{"xml that is not svg", []byte(`<?xml version="1.0"?><note>svg</note>`), TypeTXT, nil},
+		{"text that starts like a bmp", []byte("BMW и Audi"), TypeTXT, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -94,6 +107,14 @@ func TestNew(t *testing.T) {
 	}
 	if pdf := newMaterial(t, TypePDF); pdf.TextStatus() != TextPDFNotExtracted {
 		t.Fatalf("pdf text status = %q", pdf.TextStatus())
+	}
+	for _, typ := range []Type{TypeJPEG, TypePNG} {
+		if img := newMaterial(t, typ); img.TextStatus() != TextNoText {
+			t.Fatalf("%s text status = %q", typ, img.TextStatus())
+		}
+	}
+	if _, err := New(Spec{ID: "m3", Digest: DigestOf(nil), Size: MaxImageBytes + 1, Type: TypePNG}, t0); !errors.Is(err, ErrInvalidMaterial) {
+		t.Fatalf("New of a photo over MaxImageBytes = %v", err)
 	}
 	long, err := New(Spec{ID: "m2", Digest: DigestOf(nil), Size: 1, Type: TypeTXT, Name: strings.Repeat("я", 300)}, t0)
 	if err != nil || len([]rune(long.Name())) != MaxNameRunes {
@@ -257,6 +278,54 @@ func TestRestoreRoundTripAndRejects(t *testing.T) {
 		tt.modify(&s)
 		if _, err := Restore(s); !errors.Is(err, ErrInvalidMaterial) {
 			t.Errorf("%s: Restore = %v", tt.name, err)
+		}
+	}
+}
+
+// A photo always has TextNoText, and only a photo has it.
+func TestRestoreImageTextStatus(t *testing.T) {
+	img := newMaterial(t, TypeJPEG).State()
+	img.Version = 1
+	if _, err := Restore(img); err != nil {
+		t.Fatalf("Restore of a photo = %v", err)
+	}
+	tests := []struct {
+		name string
+		typ  Type
+		text TextStatus
+		size int64
+	}{
+		{"photo read as text", TypeJPEG, TextExtracted, 1},
+		{"photo pending", TypePNG, TextPending, 1},
+		{"document without text", TypeDOCX, TextNoText, 1},
+		{"pdf without text", TypePDF, TextNoText, 1},
+		{"photo too large", TypePNG, TextNoText, MaxImageBytes + 1},
+	}
+	for _, tt := range tests {
+		s := img
+		s.Type, s.Text, s.Size = tt.typ, tt.text, tt.size
+		if _, err := Restore(s); !errors.Is(err, ErrInvalidMaterial) {
+			t.Errorf("%s: Restore = %v", tt.name, err)
+		}
+	}
+}
+
+func TestTypeImageAndReadable(t *testing.T) {
+	tests := []struct {
+		typ             Type
+		image, readable bool
+	}{
+		{TypeDOCX, false, true},
+		{TypePPTX, false, true},
+		{TypeTXT, false, true},
+		{TypePDF, false, false},
+		{TypeJPEG, true, false},
+		{TypePNG, true, false},
+		{"gif", false, false},
+	}
+	for _, tt := range tests {
+		if tt.typ.Image() != tt.image || tt.typ.Readable() != tt.readable {
+			t.Errorf("%q: Image %v, Readable %v; want %v, %v", tt.typ, tt.typ.Image(), tt.typ.Readable(), tt.image, tt.readable)
 		}
 	}
 }

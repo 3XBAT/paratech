@@ -31,7 +31,7 @@ const maxCachedTextBytes = 4 * material.MaxTextBytes
 //
 // Errors (each also wraps the domain sentinel in brackets, for callers that cannot import this package):
 // ErrMaterialNotFound [shared.ErrNotFound], ErrMaterialRemoved [material.ErrRemoved], ErrNoText
-// [material.ErrTextNotExtracted] for a PDF, ErrFileDamaged [material.ErrDamaged], ErrTextUnreadable
+// [material.ErrTextNotExtracted] for a PDF or a photo, ErrFileDamaged [material.ErrDamaged], ErrTextUnreadable
 // [material.ErrTextUnreadable], ErrUnavailable, ErrNotConfigured.
 func (s *Service) MaterialText(ctx context.Context, id shared.MaterialID) (*material.Material, material.Text, error) {
 	if s.texts == nil {
@@ -43,7 +43,7 @@ func (s *Service) MaterialText(ctx context.Context, id shared.MaterialID) (*mate
 		return nil, material.Text{}, err
 	case !m.Active():
 		return m, material.Text{}, fmt.Errorf("%w: %w", ErrMaterialRemoved, material.ErrRemoved)
-	case m.Type() == material.TypePDF:
+	case !m.Type().Readable(): // a PDF or a photo: never read, so never searched, inspected or cited
 		return m, material.Text{}, fmt.Errorf("%w: %w", ErrNoText, material.ErrTextNotExtracted)
 	}
 
@@ -143,8 +143,8 @@ func (s *Service) readArtifact(ctx context.Context, ref shared.ArtifactRef, limi
 // (inspection.Request.Parse) and kept per material and text: asking again about the same text answers from the
 // store, free. It is a suggestion only: Inspect files, links and sends nothing; placing a file stays Place and Link.
 //
-// Without text there is nothing to ask: a PDF answers TextPDFNotExtracted, a file that cannot be read TextFailed, a
-// text with nothing in it Empty. The material's text status is recorded once it is known.
+// Without text there is nothing to ask: a PDF answers TextPDFNotExtracted, a photo TextNoText, a file that cannot be
+// read TextFailed, a text with nothing in it Empty. The material's text status is recorded once it is known.
 //
 // Errors: ErrMaterialNotFound, ErrMaterialRemoved, ErrFileDamaged, ErrReaderUnavailable (try again later, free),
 // ErrQuota, ErrReaderRefused (the answer broke the schema or the provider refused for good; the attempt is used, the
@@ -156,7 +156,7 @@ func (s *Service) Inspect(ctx context.Context, id shared.MaterialID) (Inspected,
 	m, text, err := s.MaterialText(ctx, id)
 	switch {
 	case errors.Is(err, ErrNoText):
-		return Inspected{Material: m, Text: material.TextPDFNotExtracted}, nil
+		return Inspected{Material: m, Text: m.TextStatus()}, nil
 	case errors.Is(err, ErrTextUnreadable):
 		return Inspected{Material: s.textStatus(ctx, m, material.TextFailed), Text: material.TextFailed}, nil
 	case err != nil:

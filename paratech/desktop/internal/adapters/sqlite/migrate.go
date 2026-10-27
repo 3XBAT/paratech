@@ -45,6 +45,8 @@ func (db *DB) Migrate(ctx context.Context) error {
 		return err
 	}
 	defer db.unlockWriter()
+	// A NO TRANSACTION migration (0041) that fails midway can leave its pooled connection with foreign_keys OFF or
+	// an open BEGIN; the DB is not used after that, because Open closes the pool when Migrate fails.
 	if _, err := p.Up(ctx); err != nil {
 		return MapError(ctx, fmt.Errorf("apply migrations: %w", err))
 	}

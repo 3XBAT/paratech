@@ -42,6 +42,7 @@ type Service struct {
 	reader      MaterialReader
 	inspections InspectionRepository
 	notes       SubjectNotes // optional
+	images      PageImages   // optional: without it photos are refused
 	log         *slog.Logger
 }
 
@@ -57,7 +58,8 @@ func New(d Deps) (*Service, error) {
 	}
 	return &Service{
 		subjects: d.Subjects, materials: d.Materials, blobs: d.Blobs, lessons: d.Lessons, strings: d.Strings,
-		clock: d.Clock, ids: d.IDs, texts: d.Texts, reader: d.Reader, inspections: d.Inspections, notes: d.Notes, log: log,
+		clock: d.Clock, ids: d.IDs, texts: d.Texts, reader: d.Reader, inspections: d.Inspections, notes: d.Notes,
+		images: d.Images, log: log,
 	}, nil
 }
 
@@ -240,19 +242,26 @@ func (s *Service) Material(ctx context.Context, id shared.MaterialID) (*material
 }
 
 // Import stores an upload in «Входящие»: the type is detected from the content, the bytes are kept once under their
-// sha256. The same bytes uploaded again return the material that exists (Existing), a removed one back in
-// «Входящие». A stored file that is missing or has another size is written again.
+// sha256. A photo (JPEG, PNG) is encoded again first (PageImages) and only the clean bytes are kept, under their own
+// sha256; it has no text. The same bytes uploaded again return the material that exists (Existing), a removed one back
+// in «Входящие». A stored file that is missing or has another size is written again.
 func (s *Service) Import(ctx context.Context, up Upload) (Imported, error) {
 	typ, err := material.DetectType(up.Data)
 	if err != nil {
 		return Imported{}, domainError(err)
 	}
-	digest := material.DigestOf(up.Data)
+	data := up.Data
+	if typ.Image() {
+		if data, err = s.cleanImage(ctx, typ, data); err != nil {
+			return Imported{}, err
+		}
+	}
+	digest := material.DigestOf(data)
 	ref, err := material.BlobRef(digest)
 	if err != nil {
 		return Imported{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
-	if err := s.ensureBlob(ctx, ref, up.Data); err != nil {
+	if err := s.ensureBlob(ctx, ref, data); err != nil {
 		return Imported{}, err
 	}
 
@@ -261,7 +270,7 @@ func (s *Service) Import(ctx context.Context, up Upload) (Imported, error) {
 		switch {
 		case errors.Is(err, shared.ErrNotFound):
 			m, err = material.New(material.Spec{
-				ID: s.ids.NewMaterialID(), Digest: digest, Size: int64(len(up.Data)), Type: typ, Name: up.Name,
+				ID: s.ids.NewMaterialID(), Digest: digest, Size: int64(len(data)), Type: typ, Name: up.Name,
 			}, s.clock.Now())
 			if err != nil {
 				return Imported{}, domainError(err)
@@ -294,6 +303,53 @@ func (s *Service) Import(ctx context.Context, up Upload) (Imported, error) {
 		}
 		return Imported{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
+}
+
+// cleanImage returns the photo data of type typ encoded again by PageImages; without the port it is refused. A
+// cleaner that gives another type or nothing is a fault of the app, not of the file.
+func (s *Service) cleanImage(ctx context.Context, typ material.Type, data []byte) ([]byte, error) {
+	if s.images == nil {
+		return nil, fmt.Errorf("%w: photos are not configured", ErrUnsupportedImage)
+	}
+	got, clean, err := s.images.Clean(ctx, data)
+	switch {
+	case errors.Is(err, material.ErrImageTooLarge), errors.Is(err, material.ErrUnsupportedImage),
+		errors.Is(err, material.ErrImageUnreadable):
+		return nil, domainError(err)
+	case err != nil:
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	case got != typ || len(clean) == 0:
+		return nil, fmt.Errorf("%w: photo of type %s cleaned as %q, %d bytes", ErrUnavailable, typ, got, len(clean))
+	}
+	return clean, nil
+}
+
+// PageImage returns an active photo of the library with its stored bytes, checked against its sha256: a page of a
+// note, shown by its id (TASK-165). A material that is missing, removed or not a photo is ErrMaterialNotFound
+// [shared.ErrNotFound]; bytes that are gone or changed ErrFileDamaged [material.ErrDamaged].
+func (s *Service) PageImage(ctx context.Context, id shared.MaterialID) (*material.Material, []byte, error) {
+	m, err := s.Material(ctx, id)
+	switch {
+	case err != nil:
+		return nil, nil, err
+	case !m.Active() || !m.Type().Image():
+		return nil, nil, fmt.Errorf("%w: %w: not an active photo", ErrMaterialNotFound, shared.ErrNotFound)
+	}
+	ref, err := material.BlobRef(m.Digest())
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+	}
+	data, err := s.readArtifact(ctx, ref, material.MaxImageBytes)
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return nil, nil, fmt.Errorf("%w: %w: %w", ErrFileDamaged, material.ErrDamaged, err)
+	case err != nil:
+		return nil, nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	case material.DigestOf(data) != m.Digest():
+		s.log.Warn(opBlobDamaged, slog.String("material", string(id)))
+		return nil, nil, fmt.Errorf("%w: %w", ErrFileDamaged, material.ErrDamaged)
+	}
+	return m, data, nil
 }
 
 // ensureBlob writes data to ref unless the same bytes are there: a stored file of another size, or of the same size
@@ -621,6 +677,12 @@ func domainError(err error) error {
 		to = ErrEmptyFile
 	case errors.Is(err, material.ErrTooLarge):
 		to = ErrFileTooLarge
+	case errors.Is(err, material.ErrImageTooLarge):
+		to = ErrImageTooLarge
+	case errors.Is(err, material.ErrImageUnreadable):
+		to = ErrImageUnreadable
+	case errors.Is(err, material.ErrUnsupportedImage): // before ErrUnsupportedType, which it wraps
+		to = ErrUnsupportedImage
 	case errors.Is(err, material.ErrUnsupportedType):
 		to = ErrUnsupportedFile
 	case errors.Is(err, subject.ErrInvalidSubject), errors.Is(err, material.ErrInvalidMaterial),

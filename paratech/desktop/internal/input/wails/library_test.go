@@ -225,6 +225,15 @@ func TestLibraryMaterials(t *testing.T) {
 	if !reflect.DeepEqual(list[0], want) {
 		t.Fatalf("material %+v\nwant %+v", list[0], want)
 	}
+	notes := map[material.Type]string{
+		material.TypeJPEG: "текст не распознан", material.TypePNG: "текст не распознан", material.TypeDOCX: "",
+	}
+	for typ, note := range notes {
+		got := libraryMaterial(testMaterial(t, typ))
+		if got.TextNote != note || (note != "" && got.TextStatus != "no_text") {
+			t.Errorf("%s: status %q, note %q, want note %q", typ, got.TextStatus, got.TextNote, note)
+		}
+	}
 
 	calls := []func() (LibraryMaterial, error){
 		func() (LibraryMaterial, error) { return s.Place(ctx, "m1", "s1", "") },
@@ -314,6 +323,9 @@ func TestLibraryErrors(t *testing.T) {
 		{library.ErrEmptyFile, ErrLibraryEmptyFile},
 		{library.ErrFileTooLarge, ErrLibraryFileTooLarge},
 		{library.ErrUnsupportedFile, ErrLibraryUnsupported},
+		{library.ErrImageTooLarge, ErrNotesImageTooLarge},
+		{library.ErrUnsupportedImage, ErrNotesImageFormat},
+		{library.ErrImageUnreadable, ErrNotesImageUnreadable},
 		{library.ErrBusy, ErrLibraryBusy},
 		{fmt.Errorf("%w: disk", library.ErrUnavailable), ErrLibraryUnavailable},
 		{errors.New("other"), ErrLibraryUnavailable},
