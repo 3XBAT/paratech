@@ -153,6 +153,15 @@ export function OwnNotes(props: { recordingId: string; subject: string }) {
           setPasteOpen(false);
         }
       }),
+    onPastePage: async (noteId, text) => {
+      let stored = false;
+      await act(async () => {
+        const add = await api.paste(recordingTarget(props.recordingId, subjectId, noteId), text);
+        applyAdd(add);
+        stored = add.error === "" && add.files.every((f) => f.error === "");
+      });
+      return stored;
+    },
     onReplace: (noteId, materialId) =>
       void act(async () => {
         const r = await api.replaceFile(noteId, materialId);
