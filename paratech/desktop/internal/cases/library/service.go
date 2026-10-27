@@ -325,15 +325,15 @@ func (s *Service) cleanImage(ctx context.Context, typ material.Type, data []byte
 }
 
 // PageImage returns an active photo of the library with its stored bytes, checked against its sha256: a page of a
-// note, shown by its id (TASK-165). A material that is missing, removed or not a photo is ErrMaterialNotFound; bytes
-// that are gone or changed ErrFileDamaged.
+// note, shown by its id (TASK-165). A material that is missing, removed or not a photo is ErrMaterialNotFound
+// [shared.ErrNotFound]; bytes that are gone or changed ErrFileDamaged [material.ErrDamaged].
 func (s *Service) PageImage(ctx context.Context, id shared.MaterialID) (*material.Material, []byte, error) {
 	m, err := s.Material(ctx, id)
 	switch {
 	case err != nil:
 		return nil, nil, err
 	case !m.Active() || !m.Type().Image():
-		return nil, nil, ErrMaterialNotFound
+		return nil, nil, fmt.Errorf("%w: %w: not an active photo", ErrMaterialNotFound, shared.ErrNotFound)
 	}
 	ref, err := material.BlobRef(m.Digest())
 	if err != nil {
@@ -342,12 +342,12 @@ func (s *Service) PageImage(ctx context.Context, id shared.MaterialID) (*materia
 	data, err := s.readArtifact(ctx, ref, material.MaxImageBytes)
 	switch {
 	case errors.Is(err, shared.ErrNotFound):
-		return nil, nil, fmt.Errorf("%w: %w", ErrFileDamaged, err)
+		return nil, nil, fmt.Errorf("%w: %w: %w", ErrFileDamaged, material.ErrDamaged, err)
 	case err != nil:
 		return nil, nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	case material.DigestOf(data) != m.Digest():
 		s.log.Warn(opBlobDamaged, slog.String("material", string(id)))
-		return nil, nil, ErrFileDamaged
+		return nil, nil, fmt.Errorf("%w: %w", ErrFileDamaged, material.ErrDamaged)
 	}
 	return m, data, nil
 }

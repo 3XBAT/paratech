@@ -97,8 +97,16 @@ type Replaced struct {
 
 // View is a note as it reads now. Anchor is the anchor resolved at read time: a recording or lesson that is gone
 // reads as the day of its snapshot. Parts holds the material of each part in order; nil for a material that is gone.
+// NoTextPages counts the parts that are photos without text, for «N стр. без текста» (ADR-0027).
 type View struct {
-	Note   *note.Note
-	Anchor note.Anchor
-	Parts  []*material.Material
+	Note        *note.Note
+	Anchor      note.Anchor
+	Parts       []*material.Material
+	NoTextPages int
+}
+
+// Page is a photo page of a note: the material and its clean bytes (the type tells image/jpeg or image/png).
+type Page struct {
+	Material *material.Material
+	Data     []byte
 }

@@ -105,7 +105,28 @@ func (s *Service) viewWith(ctx context.Context, n *note.Note, a note.Anchor) (Vi
 		case err != nil:
 			return View{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
+		if m != nil && m.Active() && m.TextStatus() == material.TextNoText {
+			v.NoTextPages++
+		}
 		v.Parts = append(v.Parts, m)
 	}
 	return v, nil
+}
+
+// PageImage returns a photo page by the id of its material: an active photo of the library, its bytes checked. The id
+// comes from the page; a material that is missing, removed, not a photo or damaged is ErrMaterialNotFound.
+func (s *Service) PageImage(ctx context.Context, id shared.MaterialID) (Page, error) {
+	if id.Validate() != nil {
+		return Page{}, ErrInvalidRequest
+	}
+	m, data, err := s.materials.PageImage(ctx, id)
+	switch {
+	case errors.Is(err, shared.ErrNotFound), errors.Is(err, material.ErrDamaged):
+		return Page{}, fmt.Errorf("%w: %w", ErrMaterialNotFound, err)
+	case err != nil:
+		return Page{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	case !m.Type().Image():
+		return Page{}, fmt.Errorf("%w: a %s is not a photo", ErrMaterialNotFound, m.Type())
+	}
+	return Page{Material: m, Data: data}, nil
 }
