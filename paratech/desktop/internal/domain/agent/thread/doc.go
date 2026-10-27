@@ -24,5 +24,7 @@
 //
 // Older turns are not part of the aggregate: the history sent to the planner is chosen by Window, which sends earlier
 // requests as their texts and replies only (the Hub keeps the model turn of an echo only for a while), and Fill tells
-// how much of that window the next request would use.
+// how much of that window the next request would use. A final request freezes its reply line (FreezeReply), kept
+// after its steps are purged. When the window would be full, CompactionPlan names the oldest pairs that become the
+// chat's summary (Compact, ADR-0028): untrusted model text, sent only as the first turn of the window.
 package thread

@@ -25,6 +25,8 @@ type Thread struct {
 	// historyFrom is the first request whose history is sent to the planner; a restarted request sends no older
 	// echo, whose model turn the Hub no longer keeps (ADR-0023). 0 means all.
 	historyFrom int
+	summary     values.HistorySummary // of the earlier requests 1…Through; zero: none (Compact)
+	summaryAt   time.Time             // when the summary was made; zero exactly when there is none
 	title       string
 	archivedAt  time.Time // zero: not archived
 	lastActive  time.Time // start of the last request; creation before the first
@@ -62,6 +64,7 @@ type TurnState struct {
 	Retry        int
 	Open         []OpenCall
 	Created      []Created
+	ReplyLine    string // set only while the request is final (FreezeReply)
 	StartedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -74,6 +77,8 @@ type State struct {
 	Current     *TurnState // nil when Turns == 0
 	Seen        []values.Ref
 	HistoryFrom int
+	Summary     values.HistorySummary // zero: none
+	SummaryAt   time.Time             // zero exactly when Summary is
 	Title       string
 	ArchivedAt  time.Time // zero: not archived
 	LastActive  time.Time
@@ -127,6 +132,10 @@ func Restore(s State) (*Thread, error) {
 		}
 		th.current = &t
 	}
+	if err := checkSummary(s); err != nil {
+		return bad(err.Error())
+	}
+	th.summary, th.summaryAt = s.Summary, s.SummaryAt
 	th.version, th.turns, th.historyFrom, th.updatedAt = s.Version, s.Turns, s.HistoryFrom, s.UpdatedAt
 	th.title, th.archivedAt, th.lastActive = s.Title, s.ArchivedAt, s.LastActive
 	th.seen.Add(s.Seen...)
@@ -166,6 +175,10 @@ func restoreTurn(s TurnState, number int) (Turn, error) {
 		return bad("bad created ids")
 	case s.DroppedBy != 0:
 		return bad("the current request is dropped")
+	case s.ReplyLine != "" && !s.Status.final():
+		return bad("a reply line before the request is final")
+	case s.ReplyLine != "" && (values.HistoryTurn{AgentReply: s.ReplyLine}).Validate() != nil:
+		return bad("bad reply line")
 	}
 	if err := values.CheckMentions(s.Mentions); err != nil {
 		return bad(err.Error())
@@ -174,7 +187,7 @@ func restoreTurn(s TurnState, number int) (Turn, error) {
 		number: s.Number, scope: s.Scope, mentions: slices.Clone(s.Mentions), status: s.Status, resume: s.Resume,
 		stopReason: s.StopReason, budget: s.Budget, stepOpen: s.StepOpen, proposed: slices.Clone(s.ProposedPlan), approved: slices.Clone(s.ApprovedPlan),
 		used: slices.Clone(s.Used), retry: s.Retry, open: slices.Clone(s.Open), created: slices.Clone(s.Created),
-		startedAt: s.StartedAt, updatedAt: s.UpdatedAt,
+		replyLine: s.ReplyLine, startedAt: s.StartedAt, updatedAt: s.UpdatedAt,
 	}, nil
 }
 
@@ -182,8 +195,8 @@ func restoreTurn(s TurnState, number int) (Turn, error) {
 func (th *Thread) State() State {
 	s := State{
 		Version: th.version, ID: th.id, Turns: th.turns, Seen: th.seen.Sorted(),
-		HistoryFrom: th.historyFrom, Title: th.title, ArchivedAt: th.archivedAt, LastActive: th.lastActive,
-		CreatedAt: th.createdAt, UpdatedAt: th.updatedAt,
+		HistoryFrom: th.historyFrom, Summary: th.summary, SummaryAt: th.summaryAt, Title: th.title,
+		ArchivedAt: th.archivedAt, LastActive: th.lastActive, CreatedAt: th.createdAt, UpdatedAt: th.updatedAt,
 	}
 	if th.current != nil {
 		t := th.current
@@ -191,7 +204,7 @@ func (th *Thread) State() State {
 			Number: t.number, Scope: t.scope, Mentions: slices.Clone(t.mentions), Status: t.status, Resume: t.resume,
 			StopReason: t.stopReason, Budget: t.budget, StepOpen: t.stepOpen, ProposedPlan: slices.Clone(t.proposed), ApprovedPlan: slices.Clone(t.approved),
 			Used: slices.Clone(t.used), Retry: t.retry, Open: slices.Clone(t.open), Created: slices.Clone(t.created),
-			StartedAt: t.startedAt, UpdatedAt: t.updatedAt,
+			ReplyLine: t.replyLine, StartedAt: t.startedAt, UpdatedAt: t.updatedAt,
 		}
 	}
 	return s
@@ -307,6 +320,12 @@ func (th *Thread) move(to Status, now time.Time) error {
 	}
 	if t.status == StatusStopped {
 		t.resume, t.stopReason = "", ""
+	}
+	// A stopped request that goes on is no longer final: its line is frozen again when it ends, and a summary that
+	// covers it is rebuilt by the next compaction.
+	if !to.final() {
+		t.replyLine = ""
+		th.clearSummaryFrom(t.number)
 	}
 	t.status = to
 	t.updatedAt = now
