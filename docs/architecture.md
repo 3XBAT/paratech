@@ -233,7 +233,7 @@ internal/cases/<usecase>/
 | `delivery` | `delivery` (включая UNKNOWN и сверку) | |
 | `settings` | `settings` | |
 | `agent` | `thread` (нить предмета, просьба, шаги, бюджет, раунды вопросов), `action` (журнал действий и Undo) | `actionpolicy` (классы R/U/C/UI, план, происхождение ID) |
-| `library` | `subject` (имя, алиасы, семестр, папки), `material` (файл по sha256, предмет, папка, связь с лекцией) | `subjectmatch` (строка расписания → ID предмета) |
+| `library` | `subject` (имя, алиасы, семестр, папки), `material` (файл по sha256, предмет, папка, связь с лекцией), `note` (конспект студента: предмет, якорь со снимком, части-материалы, ADR-0027) | `subjectmatch` (строка расписания → ID предмета) |
 
 Use cases (пример): `cases/recordingsession`, `cases/jobrunner`, `cases/transcribe`, `cases/modelcatalog`, `cases/schedulesync`, `cases/homeworkflow`, `cases/senddelivery`.
 Агент и библиотека (ADR-0021, ADR-0024): `cases/agentturn`, `cases/agentjournal`, `cases/library`, `cases/answering`, `cases/todayfeed`, `cases/turnkey`; входной слой `input/agent`.

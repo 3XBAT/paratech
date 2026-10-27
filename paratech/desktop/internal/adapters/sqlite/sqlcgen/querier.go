@@ -45,6 +45,7 @@ type Querier interface {
 	DeleteFinishedJob(ctx context.Context, arg DeleteFinishedJobParams) error
 	DeleteLectureTextsOfRecording(ctx context.Context, recordingID string) error
 	DeleteMaterialLessons(ctx context.Context, materialID string) error
+	DeleteNoteParts(ctx context.Context, noteID string) error
 	DeleteRecording(ctx context.Context, arg DeleteRecordingParams) (int64, error)
 	// The settings default references the model ON DELETE RESTRICT: the delete then fails with a foreign key error.
 	DeleteSttModel(ctx context.Context, id string) (int64, error)
@@ -106,6 +107,9 @@ type Querier interface {
 	GetLesson(ctx context.Context, id string) (ScheduleEntry, error)
 	GetMaterial(ctx context.Context, id string) (Material, error)
 	GetMaterialBySHA256(ctx context.Context, sha256 string) (Material, error)
+	// The student's own notes (TASK-149, ADR-0027): a note with its anchor and its ordered parts. The note follows the
+	// optimistic-concurrency protocol of ADR-0004(d); its parts carry no version of their own.
+	GetNote(ctx context.Context, id string) (Note, error)
 	// Action proposals of the LLM (PRD section 13.3) with the optimistic-concurrency protocol of ADR-0004(d).
 	GetProposal(ctx context.Context, id string) (Proposal, error)
 	// Recordings (PRD section 6.2). Writes run through DB.Do; the status machine stays in the aggregate, the queries only
@@ -168,6 +172,9 @@ type Querier interface {
 	// A never-stored material (version 0) is inserted with version 1.
 	InsertMaterial(ctx context.Context, arg InsertMaterialParams) error
 	InsertMaterialLesson(ctx context.Context, arg InsertMaterialLessonParams) error
+	// A never-stored note (version 0) is inserted with version 1.
+	InsertNote(ctx context.Context, arg InsertNoteParams) error
+	InsertNotePart(ctx context.Context, arg InsertNotePartParams) error
 	// A never-stored proposal (version 0) is inserted with version 1.
 	InsertProposal(ctx context.Context, arg InsertProposalParams) error
 	// A never-stored recording (version 0) is inserted with version 1.
@@ -258,6 +265,11 @@ type Querier interface {
 	ListLiveLessons(ctx context.Context) ([]ScheduleEntry, error)
 	ListMaterialLessons(ctx context.Context, materialID string) ([]string, error)
 	ListMaterialsOfSubject(ctx context.Context, subjectID sql.NullString) ([]Material, error)
+	ListNoteParts(ctx context.Context, noteID string) ([]string, error)
+	ListNotesOfLesson(ctx context.Context, lessonID sql.NullString) ([]Note, error)
+	ListNotesOfRecording(ctx context.Context, recordingID sql.NullString) ([]Note, error)
+	// By the date of the anchor, undated last, then as made.
+	ListNotesOfSubject(ctx context.Context, subjectID string) ([]Note, error)
 	// The proposals in one status, newest first (the Today screen lists the VALIDATED ones, TASK-125). The table stays
 	// small (one row per action the student was asked about), so no index.
 	ListProposalsByStatus(ctx context.Context, arg ListProposalsByStatusParams) ([]Proposal, error)
@@ -334,6 +346,8 @@ type Querier interface {
 	UpdateMaterial(ctx context.Context, arg UpdateMaterialParams) (int64, error)
 	// The text status is a fact about the content, not a change: checked against the version but keeps it (TASK-122).
 	UpdateMaterialText(ctx context.Context, arg UpdateMaterialTextParams) (int64, error)
+	// The subject of a note never changes.
+	UpdateNote(ctx context.Context, arg UpdateNoteParams) (int64, error)
 	// Compare-and-swap on the loaded version. What the model proposed (kind, assignment, title, body, due), the attachment
 	// format chosen before the validation, the work of a send, its file name pinned before the first save and the creation
 	// time never change, so they are not written again.
