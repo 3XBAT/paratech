@@ -33,17 +33,27 @@ type LessonText struct {
 }
 
 // Passage is a text of a lesson that may answer a question, with its place as a Hit counts it: Index is the summary
-// text, the lecture text block or the first transcript segment; StartMs is 0 for the summary. Text is untrusted.
+// text, the lecture text block, the first transcript segment or the fragment in Document.Notes; StartMs is 0 for the
+// summary and a note. Note, Material and Locator name the fragment of SectionOwnNote, zero for the other sections;
+// Heading is the first line of a note fragment of a section (its heading, one plain line), "" otherwise. Text and
+// Heading are untrusted.
 type Passage struct {
-	Lesson  Lesson
-	Section Section
-	Index   int
-	StartMs int64
-	Text    string
+	Lesson   Lesson
+	Section  Section
+	Index    int
+	StartMs  int64
+	Text     string
+	Note     shared.NoteID
+	Material shared.MaterialID
+	Locator  Locator
+	Heading  string
 }
 
-// Recording returns the recording of the passage.
+// Recording returns the recording of the passage; "" for a note-only lecture.
 func (p Passage) Recording() shared.RecordingID { return p.Lesson.Recording }
+
+// locatorSection is the Locator.Kind of a section of a note, whose first line is its heading.
+const locatorSection = "section"
 
 // stopWords are question words that say nothing of the topic (folded: lower case, «ё» as «е»).
 var stopWords = map[string]bool{
@@ -90,9 +100,14 @@ func Terms(question string) []string {
 
 // Passages picks the passages of the lessons that best match the question (ADR-0019: no index, a scan at query
 // time). The candidates are every summary text, every lecture text block and, for a lesson without a lecture text
-// (which is its full text), windows of consecutive transcript segments. A candidate matches when it holds a term of
-// the question; the most terms win, then the newer lesson, then the earlier place. At most MaxPassages; none when the
-// question has no terms. Texts are cleaned (no control or format characters, lines kept) and cut to MaxPassageBytes.
+// (which is its full text), windows of consecutive transcript segments, then every fragment of the student's notes
+// (SectionOwnNote, ADR-0027). A candidate matches when it holds a term of the question; the most terms win, then the
+// newer lesson, then the earlier place: within a lesson the notes come after the sections of its recording, as the
+// search scans them (ADR-0027 Open 6 keeps that order). At most MaxPassages; none when the question has no terms.
+// Texts are cleaned (no control or format characters, lines kept) and cut to MaxPassageBytes.
+//
+// Lessons are told apart by Lesson.Key (a note-only lecture has no recording); a lesson without a key by its
+// recording. A second lesson of the same key is left out.
 func Passages(question string, lessons []LessonText) []Passage {
 	terms := Terms(question)
 	if len(terms) == 0 {
@@ -104,45 +119,55 @@ func Passages(question string, lessons []LessonText) []Passage {
 		rank  int // lesson order, newest first
 		order int // place within the lesson
 	}
-	byRec := make(map[shared.RecordingID]LessonText, len(lessons))
+	byKey := make(map[string]LessonText, len(lessons))
 	ls := make([]Lesson, 0, len(lessons))
 	for _, lt := range lessons {
-		byRec[lt.Lesson.Recording] = lt
+		key := passageKey(lt.Lesson)
+		if _, ok := byKey[key]; ok {
+			continue
+		}
+		byKey[key] = lt
 		ls = append(ls, lt.Lesson)
 	}
 
 	var found []scored
 	for rank, l := range Newest(ls) {
-		d := byRec[l.Recording].Document
+		d := byKey[passageKey(l)].Document
 		order := 0
-		add := func(sec Section, index int, startMs int64, text string) {
+		add := func(p Passage, text string) {
 			order++
 			text = cleanText(text)
 			score, first := match(text, terms)
 			if score == 0 {
 				return
 			}
-			found = append(found, scored{
-				p:     Passage{Lesson: l, Section: sec, Index: index, StartMs: startMs, Text: cut(text, first)},
-				score: score, rank: rank, order: order,
-			})
+			p.Lesson, p.Text = l, cut(text, first)
+			found = append(found, scored{p: p, score: score, rank: rank, order: order})
 		}
 		for i, text := range d.Summary {
-			add(SectionSummary, i, 0, text)
+			add(Passage{Section: SectionSummary, Index: i}, text)
 		}
 		if len(d.Blocks) > 0 {
 			for i, b := range d.Blocks {
-				add(SectionLectureText, i, b.StartMs, strings.Join(append([]string{b.Heading}, b.Paragraphs...), "\n"))
+				add(Passage{Section: SectionLectureText, Index: i, StartMs: b.StartMs},
+					strings.Join(append([]string{b.Heading}, b.Paragraphs...), "\n"))
 			}
-			continue
+		} else {
+			for i := 0; i < len(d.Segments); i += transcriptWindow {
+				win := d.Segments[i:min(i+transcriptWindow, len(d.Segments))]
+				texts := make([]string, len(win))
+				for j, s := range win {
+					texts[j] = s.Text
+				}
+				add(Passage{Section: SectionTranscript, Index: i, StartMs: win[0].StartMs}, strings.Join(texts, " "))
+			}
 		}
-		for i := 0; i < len(d.Segments); i += transcriptWindow {
-			win := d.Segments[i:min(i+transcriptWindow, len(d.Segments))]
-			texts := make([]string, len(win))
-			for j, s := range win {
-				texts[j] = s.Text
+		for i, f := range d.Notes {
+			p := Passage{Section: SectionOwnNote, Index: i, Note: f.Note, Material: f.Material, Locator: f.Locator}
+			if f.Locator.Kind == locatorSection {
+				p.Heading = headingOf(f.Text)
 			}
-			add(SectionTranscript, i, win[0].StartMs, strings.Join(texts, " "))
+			add(p, f.Text)
 		}
 	}
 
@@ -160,6 +185,20 @@ func Passages(question string, lessons []LessonText) []Passage {
 		out = append(out, s.p)
 	}
 	return out
+}
+
+// passageKey tells the lessons of Passages apart: the lesson key, else the key of its recording.
+func passageKey(l Lesson) string {
+	if l.Key != "" {
+		return l.Key
+	}
+	return RecordingKey(l.Recording)
+}
+
+// headingOf is the first line of a note fragment of a section, one plain line.
+func headingOf(text string) string {
+	line, _, _ := strings.Cut(cleanText(text), "\n")
+	return strings.TrimSpace(plain([]rune(line)))
 }
 
 // match returns how many terms text holds and the rune position of the first match (of any term), -1 for none.

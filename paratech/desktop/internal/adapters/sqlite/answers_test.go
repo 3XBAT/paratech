@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -161,14 +162,70 @@ func TestMigrationToVersion30KeepsAnswers(t *testing.T) {
 	}
 }
 
+// A source of the student's note (TASK-153) is stored with its note, file and place and read back as it was.
+func TestAnswerOwnNoteSource(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	repo := NewAnswerRepository(db)
+	note := answer.Source{Section: answer.SectionOwnNote, Index: 1, Title: "Ряды", StartedAt: ansT0.Add(-time.Hour),
+		Note: "n1", Material: "m1", Locator: answer.Locator{Kind: answer.LocatorSection, N: 2}, Heading: "Ряд Тейлора"}
+	req, err := answer.NewRequest("Что такое ряд Тейлора?", []answer.Excerpt{
+		{Text: "Ключевые понятия: ряд.", Source: answer.Source{Recording: "rec1", Section: answer.SectionSummary}},
+		{Text: "Ряд Тейлора\nРяд Тейлора приближает функцию многочленом.", Source: note},
+	}, "ag:th1:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := req.Parse(`{"claims":[{"text":"Ряд приближает функцию.","cites":[{"chunk_id":"f2","quote":"приближает функцию многочленом"}]}],"missing":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := answer.New("an1", "s1", req, rep, ansT0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Insert(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.Get(ctx, "an1")
+	if err != nil || !reflect.DeepEqual(got.State(), a.State()) || got.Sources()[0].Recording != "" {
+		t.Fatalf("Get = %+v, %v", got, err)
+	}
+}
+
+// An answer stored before notes (TASK-118: sources without the note fields) reads unchanged, and a source of a
+// recording is still stored in that shape.
+func TestAnswerStoredBeforeNotes(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	repo := NewAnswerRepository(db)
+	a := newAnswer(t, "an1", "s1", "Что такое производная?")
+	if err := repo.Insert(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	old := `[{"recording":"rec1","section":"lectureText","index":2,"start_ms":754000,"title":"Матанализ","started_at":` +
+		strconv.FormatInt(ansT0.Add(-time.Hour).UnixMilli(), 10) + `}]`
+	if got := scanString(t, db, "SELECT sources FROM answers WHERE id = 'an1'"); got != old {
+		t.Fatalf("stored sources = %s\nwant %s", got, old)
+	}
+	if _, err := db.sql.ExecContext(ctx, `UPDATE answers SET sources = ? WHERE id = 'an1'`, old); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.Get(ctx, "an1")
+	if err != nil || !reflect.DeepEqual(got.State(), a.State()) {
+		t.Fatalf("old answer = %+v, %v\nwant %+v", got, err, a.State())
+	}
+}
+
 // A stored answer that breaks the schema or the aggregate's invariants is refused on reading, never shown.
 func TestAnswerCorruptRow(t *testing.T) {
 	tests := map[string]string{
-		"unknown field":  `UPDATE answers SET claims = '[{"text":"x","cites":[],"send":true}]'`,
-		"bad source":     `UPDATE answers SET sources = '[{"recording":"rec1","section":"title","index":0,"start_ms":0,"title":"","started_at":0}]'`,
-		"citation index": `UPDATE answers SET claims = '[{"text":"x","cites":[{"quote":"q","source":7}]}]'`,
-		"missing object": `UPDATE answers SET missing = '{"a":1}'`,
-		"blank missing":  `UPDATE answers SET missing = '[" "]'`,
+		"unknown field":         `UPDATE answers SET claims = '[{"text":"x","cites":[],"send":true}]'`,
+		"bad source":            `UPDATE answers SET sources = '[{"recording":"rec1","section":"title","index":0,"start_ms":0,"title":"","started_at":0}]'`,
+		"note with a recording": `UPDATE answers SET sources = '[{"recording":"rec1","section":"ownNote","index":0,"start_ms":0,"title":"","started_at":0,"note":"n1","material":"m1","locator_kind":"page","locator_n":1}]'`,
+		"note without locator":  `UPDATE answers SET sources = '[{"recording":"","section":"ownNote","index":0,"start_ms":0,"title":"","started_at":0,"note":"n1","material":"m1"}]'`,
+		"recording with a note": `UPDATE answers SET sources = '[{"recording":"rec1","section":"summary","index":0,"start_ms":0,"title":"","started_at":0,"note":"n1"}]'`,
+		"citation index":        `UPDATE answers SET claims = '[{"text":"x","cites":[{"quote":"q","source":7}]}]'`,
+		"missing object":        `UPDATE answers SET missing = '{"a":1}'`,
+		"blank missing":         `UPDATE answers SET missing = '[" "]'`,
 	}
 	for name, stmt := range tests {
 		t.Run(name, func(t *testing.T) {

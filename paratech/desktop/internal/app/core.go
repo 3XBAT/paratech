@@ -318,9 +318,10 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return fmt.Errorf("app: knowledge base: %w", err)
 	}
 	// Answers with citations (TASK-118): passages of the knowledge base, the ANSWER reader on the Hub, the answers kept
-	// locally for their cards.
+	// locally for their cards; a card marks a citation of a note removed since.
 	answers, err := answering.New(answering.Deps{
-		Knowledge: knowledge, Reader: llm, Answers: sqlite.NewAnswerRepository(db), Clock: e.clock, IDs: e.ids, Log: log,
+		Knowledge: knowledge, Reader: llm, Answers: sqlite.NewAnswerRepository(db), Notes: answerNotes{notes: noteRepo},
+		Clock: e.clock, IDs: e.ids, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: answers: %w", err)

@@ -27,7 +27,7 @@ const opAnswerCard = "ui: answer card"
 
 // AnswersUseCase reads a stored answer with citations (cases/answering) for its card (ARCH-42).
 type AnswersUseCase interface {
-	Answer(ctx context.Context, id shared.AnswerID) (*answer.Answer, error)
+	Card(ctx context.Context, id shared.AnswerID) (answering.Card, error)
 }
 
 // AnswerView is the AnswerCard of the agent panel (TASK-118): the question, the claims in the reader's order and the
@@ -61,6 +61,11 @@ type AnswerCite struct {
 // Index the summary text, the lecture text block or the first transcript segment; StartMs and Time ("12:05") where
 // it starts in the recording, 0 and "" for the summary. Title ("" for an ad-hoc recording) and StartedAt (RFC 3339 in
 // UTC, "" when unknown) name the lesson as it was when the answer was made.
+//
+// Section "ownNote" is the student's own note (ADR-0027): RecordingID, StartMs and Time are empty, NoteID and
+// MaterialID open the note's file at LocatorKind ("page", "slide", "section", "fragment") LocatorN, and Label names
+// the place («ваш конспект · стр. 3»); the note fields and Label are "" and 0 for the other sections. Removed is true
+// for a note removed since the answer was made: Label is then «источник удалён» and the place does not open.
 type AnswerSource struct {
 	RecordingID string `json:"recordingId"`
 	Section     string `json:"section"`
@@ -69,6 +74,12 @@ type AnswerSource struct {
 	Time        string `json:"time"`
 	Title       string `json:"title"`
 	StartedAt   string `json:"startedAt"`
+	NoteID      string `json:"noteId"`
+	MaterialID  string `json:"materialId"`
+	LocatorKind string `json:"locatorKind"`
+	LocatorN    int    `json:"locatorN"`
+	Label       string `json:"label"`
+	Removed     bool   `json:"removed"`
 }
 
 // AnswerService is bound to the answer card of the agent panel; it only reads.
@@ -84,7 +95,7 @@ func NewAnswerService(core AnswersUseCase, log *slog.Logger) *AnswerService {
 
 // Answer returns the answer with ID id for its card. Errors: ErrAnswerNotFound, ErrAnswerUnavailable.
 func (s *AnswerService) Answer(ctx context.Context, id string) (AnswerView, error) {
-	a, err := s.core.Answer(ctx, shared.AnswerID(id))
+	c, err := s.core.Card(ctx, shared.AnswerID(id))
 	switch {
 	case errors.Is(err, answering.ErrNotFound):
 		return AnswerView{}, ErrAnswerNotFound
@@ -92,11 +103,12 @@ func (s *AnswerService) Answer(ctx context.Context, id string) (AnswerView, erro
 		s.log.Warn(opAnswerCard, "err", err)
 		return AnswerView{}, ErrAnswerUnavailable
 	}
-	return answerView(a), nil
+	return answerView(c), nil
 }
 
 // answerView maps an answer; empty lists are [] for the page.
-func answerView(a *answer.Answer) AnswerView {
+func answerView(c answering.Card) AnswerView {
+	a := c.Answer
 	out := AnswerView{
 		ID: string(a.ID()), Question: a.Question(), SubjectID: string(a.Subject()),
 		CreatedAt: a.CreatedAt().UTC().Format(time.RFC3339), Claims: []AnswerClaim{}, Missing: a.Missing(),
@@ -109,12 +121,16 @@ func answerView(a *answer.Answer) AnswerView {
 		}
 		out.Claims = append(out.Claims, cl)
 	}
-	for _, src := range a.Sources() {
+	for i, src := range a.Sources() {
 		v := AnswerSource{
 			RecordingID: string(src.Recording), Section: string(src.Section), Index: src.Index, StartMs: src.StartMs,
-			Title: src.Title,
+			Title: src.Title, NoteID: string(src.Note), MaterialID: string(src.Material),
+			LocatorKind: string(src.Locator.Kind), LocatorN: src.Locator.N, Label: src.OwnNoteLabel(),
 		}
-		if src.Section != answer.SectionSummary {
+		if i < len(c.Removed) && c.Removed[i] {
+			v.Removed, v.Label = true, answer.SourceRemovedLabel
+		}
+		if src.Section == answer.SectionLectureText || src.Section == answer.SectionTranscript {
 			v.Time = summaryexport.BlockTime(src.StartMs)
 		}
 		if !src.StartedAt.IsZero() {

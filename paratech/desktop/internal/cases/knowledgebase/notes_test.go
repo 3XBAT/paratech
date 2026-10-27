@@ -281,15 +281,30 @@ func TestTextsAndExportWithNotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The answers do not cite notes yet (TASK-153): Texts stays the recorded lessons, without note texts nor reads.
-	if len(texts) != 1 || texts[0].Document.Recording != "r1" || texts[0].Lesson.Notes != nil || texts[0].Document.Notes != nil {
-		t.Fatalf("Texts(phys) = %+v", texts)
+	// The answers cite the student's notes (TASK-153): Texts gives the lessons of Lectures with the note texts read.
+	var keys []string
+	for _, lt := range texts {
+		keys = append(keys, lt.Lesson.Key)
+		if len(lt.Document.Notes) == 0 || lt.Document.Notes[0].Text != "Ряды\nРяд Тейлора сходится" {
+			t.Fatalf("Texts(phys) %s: notes = %+v", lt.Lesson.Key, lt.Document.Notes)
+		}
 	}
-	if all, err := e.svc.Texts(ctx, ""); err != nil || len(all) != 1 {
-		t.Fatalf("Texts(all) = %+v, %v", all, err)
+	if want := []string{"recording:r1", "day:phys:2026-09-12", "lesson:l-past", "note:undated"}; !reflect.DeepEqual(keys, want) {
+		t.Fatalf("Texts(phys) = %v\nwant %v", keys, want)
 	}
-	if len(e.texts.read) != 0 {
-		t.Fatalf("Texts read note parts %v", e.texts.read)
+	if texts[0].Document.Recording != "r1" || !reflect.DeepEqual(noteIDsOf(texts[0].Lesson), []shared.NoteID{"on-rec", "on-lesson"}) {
+		t.Fatalf("Texts(phys)[0] = %+v", texts[0])
+	}
+	all, err := e.svc.Texts(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var allKeys []string
+	for _, lt := range all {
+		allKeys = append(allKeys, lt.Lesson.Key)
+	}
+	if len(all) != 5 || !strings.Contains(strings.Join(allKeys, " "), "note:chem") || strings.Contains(strings.Join(allKeys, " "), "removed") {
+		t.Fatalf("Texts(all) = %v", allKeys)
 	}
 
 	if err := e.svc.ExportSubject(ctx, kb.LibraryKey("phys"), `C:\out\Физика.md`); err != nil {

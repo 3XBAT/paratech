@@ -106,7 +106,8 @@ type TicketBudget struct {
 	OverCap          bool  `json:"overCap"`
 }
 
-// TicketReport counts the tickets by coverage: «N из ваших лекций / частично / нет в ваших лекциях».
+// TicketReport counts the tickets by coverage: «N из ваших лекций / частично / нет в ваших лекциях и конспектах».
+// The student's notes count as lessons (ADR-0027): a ticket answered from a note is covered.
 type TicketReport struct {
 	Covered    int `json:"covered"`
 	Partial    int `json:"partial"`

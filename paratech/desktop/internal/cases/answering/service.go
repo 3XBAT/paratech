@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/answer"
@@ -18,6 +19,7 @@ const (
 	opAsked     = "answering: answer made"
 	opReused    = "answering: answer found by its key"
 	opNoPassage = "answering: no passage matches the question"
+	opNoteCheck = "answering: note of a citation not checked, shown as there"
 )
 
 // Service answers questions from the student's lessons.
@@ -25,6 +27,7 @@ type Service struct {
 	knowledge Knowledge
 	reader    Reader
 	answers   Repository
+	notes     Notes // nil: no citation shows as removed
 	clock     Clock
 	ids       IDs
 	log       *slog.Logger
@@ -39,7 +42,8 @@ func New(d Deps) (*Service, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Service{knowledge: d.Knowledge, reader: d.Reader, answers: d.Answers, clock: d.Clock, ids: d.IDs, log: log}, nil
+	return &Service{knowledge: d.Knowledge, reader: d.Reader, answers: d.Answers, notes: d.Notes, clock: d.Clock, ids: d.IDs,
+		log: log}, nil
 }
 
 // Ask answers question from the lessons of a library subject, or of the whole base for a zero subject. The passages
@@ -147,6 +151,38 @@ func (s *Service) Answer(ctx context.Context, id shared.AnswerID) (*answer.Answe
 	return a, nil
 }
 
+// Card returns a stored answer for its card with the sources of notes removed since it was made (Card.Removed), so
+// such a citation shows «источник удалён» (ADR-0027). A note that cannot be checked is logged and shown as there.
+// Errors: those of Answer.
+func (s *Service) Card(ctx context.Context, id shared.AnswerID) (Card, error) {
+	a, err := s.Answer(ctx, id)
+	if err != nil {
+		return Card{}, err
+	}
+	sources := a.Sources()
+	removed := make([]bool, len(sources))
+	if s.notes == nil {
+		return Card{Answer: a, Removed: removed}, nil
+	}
+	active := map[shared.NoteID]bool{}
+	for i, src := range sources {
+		if src.Section != answer.SectionOwnNote {
+			continue
+		}
+		ok, seen := active[src.Note]
+		if !seen {
+			if ok, err = s.notes.NoteActive(ctx, src.Note); err != nil {
+				s.log.WarnContext(ctx, opNoteCheck, slog.String("answer", string(id)), slog.String("note", string(src.Note)),
+					slog.Any("cause", err))
+				ok = true
+			}
+			active[src.Note] = ok
+		}
+		removed[i] = !ok
+	}
+	return Card{Answer: a, Removed: removed}, nil
+}
+
 // find returns the stored answer of key; ok is false when there is none.
 func (s *Service) find(ctx context.Context, key string) (Asked, bool, error) {
 	a, err := s.answers.FindByKey(ctx, key)
@@ -209,12 +245,30 @@ func (s *Service) local(ctx context.Context, err error) error {
 	return fmt.Errorf("%w: %w", ErrUnavailable, err)
 }
 
-// excerptOf is a passage of the knowledge base as a fragment for the reader, with the place it opens.
+// excerptOf is a passage of the knowledge base as a fragment for the reader, with the place it opens. Only the text
+// goes to the reader as data (answer.Request.UntrustedData); the place stays local.
 func excerptOf(p kb.Passage) answer.Excerpt {
-	return answer.Excerpt{Text: p.Text, Source: answer.Source{
+	src := answer.Source{
 		Recording: p.Recording(), Section: sectionOf(p.Section), Index: p.Index, StartMs: p.StartMs,
 		Title: p.Lesson.Title, StartedAt: p.Lesson.StartedAt,
-	}}
+	}
+	if src.Section == answer.SectionOwnNote {
+		src.Recording = "" // the note opens, not a recording the lesson may have
+		src.Note, src.Material = p.Note, p.Material
+		src.Locator = answer.Locator{Kind: answer.LocatorKind(p.Locator.Kind), N: p.Locator.N}
+		if src.Locator.Kind == answer.LocatorSection {
+			src.Heading = headingOf(p.Heading)
+		}
+	}
+	return answer.Excerpt{Text: p.Text, Source: src}
+}
+
+// headingOf cuts a heading to what a source keeps.
+func headingOf(s string) string {
+	if r := []rune(s); len(r) > answer.MaxHeadingRunes {
+		return strings.TrimSpace(string(r[:answer.MaxHeadingRunes-1])) + "…"
+	}
+	return s
 }
 
 func sectionOf(s kb.Section) answer.Section {
@@ -225,6 +279,8 @@ func sectionOf(s kb.Section) answer.Section {
 		return answer.SectionLectureText
 	case kb.SectionTranscript:
 		return answer.SectionTranscript
+	case kb.SectionOwnNote:
+		return answer.SectionOwnNote
 	}
 	return "" // kb.Passages makes no other section; answer.NewRequest refuses it
 }
