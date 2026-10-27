@@ -307,6 +307,7 @@ func TestLibraryErrors(t *testing.T) {
 		{library.ErrMaterialNotFound, ErrLibraryFileNotFound},
 		{library.ErrLessonNotFound, ErrLibraryLessonNotFound},
 		{library.ErrNotEmpty, ErrLibraryNotEmpty},
+		{library.ErrHasNotes, ErrLibraryHasNotes},
 		{library.ErrSystemFolder, ErrLibrarySystemFolder},
 		{library.ErrTooMany, ErrLibraryLimit},
 		{library.ErrMaterialRemoved, ErrLibraryFileRemoved},

@@ -114,6 +114,69 @@ func TestTextHeadAndDigest(t *testing.T) {
 	}
 }
 
+func TestSectionLocator(t *testing.T) {
+	text, err := NewText([]Fragment{
+		{Locator: Locator{Kind: LocatorSection, N: 1}, Lines: []string{"Ряды", "текст"}},
+		{Locator: Locator{Kind: LocatorSection, N: 2}, Lines: []string{"Итоги"}},
+	}, false)
+	if err != nil || text.String() != "[Раздел 1]\nРяды\nтекст\n[Раздел 2]\nИтоги" {
+		t.Fatalf("text = %q, %v", text.String(), err)
+	}
+	mixed := []Fragment{{Locator: Locator{Kind: LocatorSection, N: 1}}, {Locator: Locator{Kind: LocatorFragment, N: 2}}}
+	if _, err := NewText(mixed, false); !errors.Is(err, ErrInvalidText) {
+		t.Fatalf("sections and fragments = %v", err)
+	}
+}
+
+func TestTextCache(t *testing.T) {
+	text, err := NewText([]Fragment{
+		{Locator: Locator{Kind: LocatorSection, N: 1}, Lines: []string{"Ряды", `кавычки " и \ <b>`}},
+		{Locator: Locator{Kind: LocatorSection, N: 3}, Lines: []string{"Итоги"}},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := text.EncodeCache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := DecodeCache(data)
+	if err != nil || back.String() != text.String() || !back.Truncated() || back.Digest() != text.Digest() {
+		t.Fatalf("DecodeCache = %q, %v", back.String(), err)
+	}
+	empty, _ := NewText(nil, false)
+	if data, err := empty.EncodeCache(); err != nil {
+		t.Fatal(err)
+	} else if back, err := DecodeCache(data); err != nil || !back.Empty() {
+		t.Fatalf("empty text = %v", err)
+	}
+
+	broken := map[string]string{
+		"not json":        "garbage",
+		"truncated json":  string(data[:len(data)/2]),
+		"other version":   strings.Replace(string(data), `"v":1`, `"v":99`, 1),
+		"changed line":    strings.Replace(string(data), "Итоги", "Итог", 1),
+		"bad locator":     strings.Replace(string(data), `"n":3`, `"n":1`, 1),
+		"lost truncation": strings.Replace(string(data), `"truncated":true,`, "", 1),
+	}
+	for name, s := range broken {
+		if s == string(data) {
+			t.Fatalf("%s: the fixture did not change the cache", name)
+		}
+		if _, err := DecodeCache([]byte(s)); !errors.Is(err, ErrInvalidText) {
+			t.Errorf("%s: DecodeCache = %v", name, err)
+		}
+	}
+
+	d := DigestOf([]byte("x"))
+	if ref, err := TextRef(d); err != nil || ref.String() != "texts/"+d.String() {
+		t.Fatalf("TextRef = %s, %v", ref, err)
+	}
+	if _, err := TextRef("nope"); err == nil {
+		t.Fatal("TextRef of a bad digest")
+	}
+}
+
 func TestDecodeText(t *testing.T) {
 	utf16le := []byte{0xff, 0xfe, 0x1f, 0x04, 0x40, 0x04, '\n', 0} // «Пр\n»
 	utf16be := []byte{0xfe, 0xff, 0x04, 0x1f, 0x04, 0x40}

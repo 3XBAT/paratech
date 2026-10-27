@@ -33,6 +33,7 @@ const (
 	ErrLibraryFileNotFound    = libraryError("Файл не найден: обновите список.")
 	ErrLibraryLessonNotFound  = libraryError("Занятие не найдено в расписании.")
 	ErrLibraryNotEmpty        = libraryError("Сначала уберите отсюда все файлы, в том числе удалённые.")
+	ErrLibraryHasNotes        = libraryError("У предмета есть конспекты, в том числе удалённые: такой предмет удалить нельзя.")
 	ErrLibrarySystemFolder    = libraryError("Эту папку удалить нельзя.")
 	ErrLibraryLimit           = libraryError("Достигнут предел: слишком много папок, названий или связей.")
 	ErrLibraryFileRemoved     = libraryError("Файл удалён: сначала восстановите его.")
@@ -433,6 +434,7 @@ func (s *LibraryService) fail(op string, err error) error {
 		{library.ErrFolderNotFound, ErrLibraryFolderNotFound},
 		{library.ErrMaterialNotFound, ErrLibraryFileNotFound},
 		{library.ErrLessonNotFound, ErrLibraryLessonNotFound},
+		{library.ErrHasNotes, ErrLibraryHasNotes}, // before ErrNotEmpty, which it wraps
 		{library.ErrNotEmpty, ErrLibraryNotEmpty},
 		{library.ErrSystemFolder, ErrLibrarySystemFolder},
 		{library.ErrTooMany, ErrLibraryLimit},

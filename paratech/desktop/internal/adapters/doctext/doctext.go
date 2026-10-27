@@ -29,6 +29,7 @@ const (
 // Parts of an Office Open XML package.
 const (
 	docxBody     = "word/document.xml"
+	docxStyles   = "word/styles.xml"
 	pptxMain     = "ppt/presentation.xml"
 	pptxMainRels = "ppt/_rels/presentation.xml.rels"
 	pptxDir      = "ppt/"
@@ -46,6 +47,9 @@ func New() *Extractor { return &Extractor{} }
 // Extract reads the text of data of type typ. A PDF (and any other type) is material.ErrTextNotExtracted; a damaged
 // file, one that is not of its type or one beyond the limits is material.ErrTextUnreadable. A text cut at
 // material.MaxTextBytes is returned marked truncated.
+//
+// The text read is cached per file (ADR-0027 «Text»): a change of what any reader here gives for the same bytes must
+// bump material.TextCacheVersion, or old cached texts stay in use.
 func (e *Extractor) Extract(ctx context.Context, typ material.Type, data []byte) (material.Text, error) {
 	if err := ctx.Err(); err != nil {
 		return material.Text{}, fmt.Errorf("%s: %w", opExtract, err)
@@ -92,8 +96,12 @@ func txt(data []byte) ([]material.Fragment, bool, error) {
 	}
 	s = strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(s)
 	if !strings.Contains(s, "\f") {
-		return material.FragmentsOf(strings.Split(s, "\n")), truncated, nil
+		// A text file may be Markdown (detected as TXT by content); the hints of its front matter are for the import
+		// of notes, not part of the text.
+		return material.ReadMarkdown(s).Fragments, truncated, nil
 	}
+	// Form feeds mark a paged text (a printout, not a note): its pages are the locators, so their text is kept as it is,
+	// without the Markdown reading that would cut it into sections instead.
 	var fs []material.Fragment
 	for i, page := range strings.Split(s, "\f") {
 		fs = append(fs, material.Fragment{Locator: material.Locator{Kind: material.LocatorPage, N: i + 1}, Lines: strings.Split(page, "\n")})
@@ -201,6 +209,9 @@ type textWriter struct {
 	size      int
 	breaks    bool // a page break was seen
 	truncated bool
+	heading   bool  // the current paragraph has a heading style (DOCX)
+	heads     []int // the indexes in lines of the heading paragraphs
+	n         int   // the paragraphs kept so far
 }
 
 func newTextWriter() *textWriter { return &textWriter{pages: [][]string{nil}} }
@@ -217,15 +228,20 @@ func (w *textWriter) write(s string) {
 	w.line.WriteString(s)
 }
 
-// endParagraph ends the current line.
+// endParagraph ends the current line; a heading is only the first line of its paragraph.
 func (w *textWriter) endParagraph() {
 	if w.line.Len() == 0 {
 		return
+	}
+	if w.heading {
+		w.heads = append(w.heads, w.n)
+		w.heading = false
 	}
 	last := len(w.pages) - 1
 	w.pages[last] = append(w.pages[last], w.line.String())
 	w.line.Reset()
 	w.size++
+	w.n++
 }
 
 // pageBreak starts a new page; a break on a page without text yet is ignored (Word records explicit and rendered
@@ -287,10 +303,15 @@ func walk(ctx context.Context, data []byte, start func(xml.StartElement, *xml.De
 
 // --- DOCX ---------------------------------------------------------------------------------------------------
 
-// docx reads the paragraphs of the main document part in order.
+// docx reads the paragraphs of the main document part in order. Paragraphs of the styles Heading 1–3 cut it into
+// sections (material.SectionsOf) when there are at least two; else it has pages or fragments.
 func docx(ctx context.Context, data []byte) ([]material.Fragment, bool, error) {
 	p, err := open(data)
 	if err != nil {
+		return nil, false, err
+	}
+	styles := headingStyles(ctx, p)
+	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
 	body, err := p.part(docxBody)
@@ -304,6 +325,9 @@ func docx(ctx context.Context, data []byte) ([]material.Fragment, bool, error) {
 			switch s.Name.Local {
 			case "p":
 				w.endParagraph() // a paragraph inside another (a text box) starts a line of its own
+				w.heading = false
+			case "pStyle":
+				w.heading = isHeading(attr(s, "val"), styles)
 			case "t":
 				inText++
 			case "tab", "cr":
@@ -316,7 +340,8 @@ func docx(ctx context.Context, data []byte) ([]material.Fragment, bool, error) {
 				}
 			case "lastRenderedPageBreak":
 				w.pageBreak()
-			case "delText", "instrText": // deleted text of tracked changes, field codes
+			// Deleted text of tracked changes, field codes, the former properties of a tracked format change.
+			case "delText", "instrText", "pPrChange":
 				return dec.Skip()
 			}
 			return nil
@@ -325,6 +350,7 @@ func docx(ctx context.Context, data []byte) ([]material.Fragment, bool, error) {
 			switch e.Name.Local {
 			case "p":
 				w.endParagraph()
+				w.heading = false
 			case "t":
 				inText = max(inText-1, 0)
 			}
@@ -338,8 +364,64 @@ func docx(ctx context.Context, data []byte) ([]material.Fragment, bool, error) {
 		return nil, false, err
 	}
 	w.endParagraph()
+	if fs, ok := material.SectionsOf(w.lines(), w.heads); ok {
+		return fs, w.truncated, nil
+	}
 	return pages(w), w.truncated, nil
 }
+
+// headingStyles returns the ids of the paragraph styles named «heading 1» to «heading 3» in the styles part: Word
+// keeps these built-in names in English whatever the language, while the id follows the language («1» in a Russian
+// Word). The part is optional: a missing, damaged or too large one gives no ids, and the ids «Heading1» to «Heading3»
+// still count (isHeading).
+func headingStyles(ctx context.Context, p *pkg) map[string]bool {
+	ids := map[string]bool{}
+	if _, ok := p.entries[docxStyles]; !ok {
+		return ids
+	}
+	data, err := p.part(docxStyles)
+	if err != nil {
+		return ids
+	}
+	cur := ""
+	err = walk(ctx, data,
+		func(s xml.StartElement, _ *xml.Decoder) error {
+			switch s.Name.Local {
+			case "style":
+				cur = ""
+				if attr(s, "type") == "paragraph" {
+					cur = attr(s, "styleId")
+				}
+			case "name":
+				level, ok := strings.CutPrefix(strings.ToLower(attr(s, "val")), "heading ")
+				if cur != "" && ok && headingLevel(level) {
+					ids[cur] = true
+				}
+			}
+			return nil
+		},
+		func(e xml.EndElement) {
+			if e.Name.Local == "style" {
+				cur = ""
+			}
+		},
+		func(xml.CharData) {})
+	if err != nil {
+		return map[string]bool{}
+	}
+	return ids
+}
+
+// isHeading reports whether the paragraph style id is a heading of level 1 to 3.
+func isHeading(id string, styles map[string]bool) bool {
+	if styles[id] {
+		return true
+	}
+	level, ok := strings.CutPrefix(strings.ToLower(id), "heading")
+	return ok && headingLevel(level)
+}
+
+func headingLevel(s string) bool { return s == "1" || s == "2" || s == "3" }
 
 // pages are the fragments of a document: its pages when it has page breaks, else fragments of bounded size.
 func pages(w *textWriter) []material.Fragment {

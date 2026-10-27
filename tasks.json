@@ -3216,7 +3216,7 @@
                 "go test -race ./desktop/internal/domain/library/... ./desktop/internal/adapters/doctext/... ./desktop/internal/cases/library/... и тест архитектуры"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-151",
@@ -3238,7 +3238,7 @@
             "dependencies": [
                 "TASK-149"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-152",

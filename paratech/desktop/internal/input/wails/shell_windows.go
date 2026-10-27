@@ -66,6 +66,7 @@ func (s *Shell) run(ctx context.Context) error {
 	app.RegisterService(application.NewService(b.Deletion))
 	app.RegisterService(application.NewService(b.Knowledge))
 	app.RegisterService(application.NewService(b.Library))
+	app.RegisterService(application.NewService(b.Notes))
 	app.RegisterService(application.NewService(b.Agent))
 	app.RegisterService(application.NewService(b.Today))
 	app.RegisterService(application.NewService(b.AgentConfirm))
@@ -80,9 +81,14 @@ func (s *Shell) run(ctx context.Context) error {
 	var offs []func()
 	u.main, offs = newWindow(app, mainWindowSpec(s.opts.Name), offs)
 	u.popup, offs = newWindow(app, popupWindowSpec(s.opts.Name), offs)
-	// Wails runs each drop's listeners on a goroutine of their own, so the import may block.
+	// Wails runs each drop's listeners on a goroutine of their own, so the import may block. A drop on an element the
+	// page marks as a lecture goes to its notes (routeDrop).
 	offs = append(offs, u.main.OnWindowEvent(events.Common.WindowFilesDropped, func(e *application.WindowEvent) {
-		b.Library.importDropped(ctx, e.Context().DroppedFiles(), app.Event)
+		var attrs map[string]string
+		if d := e.Context().DropTargetDetails(); d != nil {
+			attrs = d.Attributes
+		}
+		routeDrop(ctx, b.Library, b.Notes, attrs, e.Context().DroppedFiles(), app.Event)
 	}))
 	// Wails closes every window on shutdown; without the hide-on-close hooks that close would be cancelled.
 	app.OnShutdown(func() {

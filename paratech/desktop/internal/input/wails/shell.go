@@ -75,6 +75,8 @@ type Core struct {
 	Opener        FileOpener
 	// The page of a subject (TASK-225): «Ближайшее», the schedule line, the lessons and the «новое» marks.
 	SubjectOverview SubjectOverviewUseCase
+	// «Мой конспект» (TASK-151): the shell shows its open dialog and routes a drop on a lecture; Files reads the files.
+	Notes NotesUseCase
 
 	Agent AgentCore // the agent panel (TASK-119); the shell attaches its panel to the Wails events
 
@@ -103,6 +105,7 @@ type ui interface {
 	pickDocxFile(name string) (string, error)
 	pickKnowledgeFile(name string) (string, error)
 	pickMaterialFile() (string, error)
+	pickNoteFiles(multiple bool) ([]string, error)
 	setClipboardText(text string) error
 }
 
@@ -208,6 +211,7 @@ type Services struct {
 	Deletion    *RecordingDeleteService
 	Knowledge   *KnowledgeBaseService
 	Library     *LibraryService
+	Notes       *NotesService
 	Agent       *AgentService
 	Today       *TodayService
 
@@ -287,6 +291,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Library == nil || core.MaterialViews == nil || core.Opener == nil || core.SubjectOverview == nil {
 		return Services{}, errors.New("wails: open core: no library")
 	}
+	if core.Notes == nil {
+		return Services{}, errors.New("wails: open core: no notes")
+	}
 	if !core.Agent.complete() {
 		return Services{}, errors.New("wails: open core: no agent")
 	}
@@ -337,6 +344,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		Knowledge: NewKnowledgeBaseService(core.Knowledge, knowledgePickerFunc(s.pickKnowledgeFile), s.opts.Log),
 		Library: NewLibraryService(core.Library, materialPickerFunc(s.pickMaterialFile), core.Files, s.opts.Log).
 			withOpener(core.MaterialViews, core.Opener).withOverview(core.SubjectOverview),
+		Notes:      NewNotesService(core.Notes, notesPickerFunc(s.pickNoteFiles), core.Files, s.opts.Log),
 		Agent:      NewAgentService(core.Agent, s.opts.Log),
 		Today:      NewTodayService(core.Today, s.opts.Log),
 		AgentPanel: core.Agent.Panel,
@@ -421,6 +429,15 @@ func (s *Shell) pickMaterialFile(context.Context) (string, error) {
 		return "", err
 	}
 	return u.pickMaterialFile()
+}
+
+// pickNoteFiles shows the open dialog of the files of notes over the main window; none when the user cancels.
+func (s *Shell) pickNoteFiles(_ context.Context, multiple bool) ([]string, error) {
+	u, err := s.current()
+	if err != nil {
+		return nil, err
+	}
+	return u.pickNoteFiles(multiple)
 }
 
 // setClipboardText puts text on the system clipboard.

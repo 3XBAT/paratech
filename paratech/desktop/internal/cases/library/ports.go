@@ -7,6 +7,7 @@ import (
 
 	"paratech/desktop/internal/domain/library/inspection"
 	"paratech/desktop/internal/domain/library/material"
+	"paratech/desktop/internal/domain/library/note"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/schedule/lesson"
@@ -54,8 +55,8 @@ type MaterialRepository interface {
 	SaveText(ctx context.Context, m *material.Material) error
 }
 
-// BlobStore keeps the bytes of the files in the private artifact store (hard rule 5). Implemented by the filestore
-// adapter.
+// BlobStore keeps the bytes of the files in the private artifact store (hard rule 5), and the texts extracted from
+// them (material.TextRef). Implemented by the filestore adapter.
 type BlobStore interface {
 	// Size returns the size of a stored file; a missing one wraps shared.ErrNotFound.
 	Size(ctx context.Context, ref shared.ArtifactRef) (int64, error)
@@ -108,6 +109,12 @@ type InspectionRepository interface {
 
 	// Save writes it under its version: a stale one wraps shared.ErrVersionConflict.
 	Save(ctx context.Context, i *inspection.Inspection) error
+}
+
+// SubjectNotes lists the student's own notes of a subject in any status (ADR-0027), so a subject that has them is
+// not removed. Implemented by the sqlite adapter.
+type SubjectNotes interface {
+	ListBySubject(ctx context.Context, sub shared.SubjectID) ([]*note.Note, error)
 }
 
 // IDs generates the identifiers of new subjects, folders and materials (ARCH-24).
