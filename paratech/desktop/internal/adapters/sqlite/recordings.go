@@ -61,6 +61,19 @@ func (r *RecordingRepository) Save(ctx context.Context, rec *recording.Recording
 	return nil
 }
 
+// opBySourceSHA256 names GetBySourceSHA256 in its error messages.
+const opBySourceSHA256 = "sqlite: get the imported recording of a file"
+
+// GetBySourceSHA256 loads the imported recording of the file with the digest (recordingimport.RecordingRepository,
+// TASK-161); none wraps shared.ErrNotFound.
+func (r *RecordingRepository) GetBySourceSHA256(ctx context.Context, sha256 string) (*recording.Recording, error) {
+	row, err := r.db.Queries(ctx).GetRecordingBySourceSHA256(ctx, jobNullString(sha256))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", opBySourceSHA256, MapError(ctx, err))
+	}
+	return recordingFromRow(row)
+}
+
 // ListByStatus returns the recordings in any of the statuses, oldest first.
 func (r *RecordingRepository) ListByStatus(ctx context.Context, statuses ...recording.Status) ([]*recording.Recording, error) {
 	names := make([]string, len(statuses))
@@ -251,6 +264,9 @@ func recordingFromRow(row sqlcgen.Recording) (*recording.Recording, error) {
 
 		DeletingAt:          jobFromNullMs(row.DeletingAt),
 		DeletingAssignments: deleting,
+
+		Origin:       recording.Origin(row.Origin),
+		SourceSHA256: row.SourceSha256.String,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: stored recording %s: %w", row.ID, err)
@@ -296,6 +312,9 @@ func recordingInsertParams(rec *recording.Recording) sqlcgen.InsertRecordingPara
 
 		UserSubject: u.UserSubject,
 		UserKind:    u.UserKind,
+
+		Origin:       string(rec.Origin()),
+		SourceSha256: jobNullString(rec.SourceSHA256()),
 	}
 }
 
