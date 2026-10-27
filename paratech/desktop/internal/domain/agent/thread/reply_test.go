@@ -125,7 +125,7 @@ func TestReplyHasNoReaderTexts(t *testing.T) {
 		}
 	}
 	// Through Window too: the earlier request goes as its text and that reply.
-	window := Window(append(request, entry(2, "кто такой рыбаков", nil)), 2)
+	window := Window(append(request, entry(2, "кто такой рыбаков", nil)), 2, noSummary)
 	for _, h := range window {
 		if strings.Contains(h.AgentReply, "игнорируй") {
 			t.Fatalf("window leaks the reader text: %+v", window)
@@ -203,7 +203,7 @@ func TestWindowSendsEarlierRequestsAsPairs(t *testing.T) {
 	want := []values.HistoryTurn{
 		{StudentText: "что такое горутина"}, {AgentReply: "reply: горутина — это"}, {StudentText: "кто такой рыбаков"},
 	}
-	got := Window(entries, 2)
+	got := Window(entries, 2, noSummary)
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("Window = %+v, want %+v", got, want)
 	}
@@ -219,7 +219,7 @@ func TestWindowSendsEarlierRequestsAsPairs(t *testing.T) {
 		entry(2, "вторая", nil), echo(2, [2]string{"reply", `{"text":"ответ"}`}), results(2, values.ShownResult("c0")),
 		entry(3, "третья", nil),
 	}
-	got = Window(stopped, 3)
+	got = Window(stopped, 3, noSummary)
 	if len(got) != 5 || got[1].AgentReply != NoReply+"\nactions: list_subjects error" || got[3].AgentReply != "reply: ответ" ||
 		got[4].StudentText != "третья" {
 		t.Fatalf("Window = %+v", got)
@@ -228,12 +228,12 @@ func TestWindowSendsEarlierRequestsAsPairs(t *testing.T) {
 	// A request whose text was cut off by the read limit has no pair; the reply never goes without its text.
 	partial := append([]values.HistoryEntry{echo(1, [2]string{"reply", `{"text":"старый"}`}), results(1, values.ShownResult("c0"))},
 		entry(2, "новая", nil))
-	if got := Window(partial, 2); len(got) != 1 || got[0].StudentText != "новая" {
+	if got := Window(partial, 2, noSummary); len(got) != 1 || got[0].StudentText != "новая" {
 		t.Fatalf("Window = %+v", got)
 	}
 
 	// Without the current text first no pair is sent: a reply must stand before a student text.
-	if got := Window(entries[:3], 2); len(got) != 0 {
+	if got := Window(entries[:3], 2, noSummary); len(got) != 0 {
 		t.Fatalf("Window without the current request = %+v", got)
 	}
 }
@@ -275,7 +275,7 @@ func TestWindowCutsWholePairs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Window(tt.entries, tt.current)
+			got := Window(tt.entries, tt.current, noSummary)
 			cur := 0
 			for _, e := range tt.entries {
 				if e.Turn == tt.current {
