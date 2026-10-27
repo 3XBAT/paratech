@@ -54,11 +54,11 @@ func TestModelLoadEstimatesJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 1.6 * (4 / 3.2)^0.7 h for gentle on 8 CPUs; normal measured at 30 min; max on 8 threads.
-	want := `{"current":{"mode":"gentle","secondsPerHour":6734,"source":"table","heavy":true},"modes":[` +
-		`{"mode":"gentle","secondsPerHour":6734,"source":"table","heavy":true},` +
+	// 5.3 * 0.5 (VAD) * (4 / 3.2)^0.7 h for gentle on 8 CPUs; normal measured at 30 min; max on 8 threads.
+	want := `{"current":{"mode":"gentle","secondsPerHour":11153,"source":"table","heavy":true},"modes":[` +
+		`{"mode":"gentle","secondsPerHour":11153,"source":"table","heavy":true},` +
 		`{"mode":"normal","secondsPerHour":1800,"source":"measured","heavy":false},` +
-		`{"mode":"max","secondsPerHour":3546,"source":"table","heavy":false}]}`
+		`{"mode":"max","secondsPerHour":5873,"source":"table","heavy":true}]}`
 	if string(raw) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", raw, want)
 	}

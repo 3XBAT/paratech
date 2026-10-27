@@ -151,8 +151,8 @@ func TestOverview(t *testing.T) {
 			l.Current.Heavy())
 	}
 	if len(l.Modes) != 3 || l.Modes[1].Load() != shared.LoadNormal || l.Modes[1].Source() != speedestimate.SourceTable ||
-		l.Modes[1].PerHour() != 96*time.Minute {
-		t.Errorf("large modes: %+v; want normal from the table, 1h36m", l.Modes)
+		l.Modes[1].PerHour() != 159*time.Minute {
+		t.Errorf("large modes: %+v; want normal from the table, 2h39m", l.Modes)
 	}
 	if got.Catalog["large-v3-f16"].Current != l.Current {
 		t.Errorf("the catalog entry does not show the measured speed of its installed model")

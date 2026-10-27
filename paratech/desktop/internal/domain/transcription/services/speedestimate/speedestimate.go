@@ -35,24 +35,30 @@ const (
 
 	// quantizedSpeedup: a quantized model (q5, q8) takes about this share of the time of its f16 variant.
 	quantizedSpeedup = 0.8
+
+	// silenceSkip: with voice activity detection (always on, ADR-0030) a run takes about this share of the time
+	// without it: only the speech is recognised, in about half the 30 s windows (measured ×2 on 2026-10-26/27).
+	silenceSkip = 0.5
 )
 
 // tableFactor is the processing time over audio duration of a full (f16) model of the family with referenceThreads
-// threads on a usual laptop CPU with AVX2; 0 for an unknown family. Rough numbers, see ADR-0016.
+// threads on a usual laptop CPU with AVX2, with the default decoder of whisper-cli (beam search) and without voice
+// activity detection; 0 for an unknown family. Calibrated on small-q5_1 and base-q5_1 (RTF 0.80 and 0.28 on an
+// i5-10300H, 2026-10-26); the other families keep their ratio to small. Rough numbers, see ADR-0016 and ADR-0030.
 func tableFactor(f values.ModelFamily) float64 {
 	switch f {
 	case values.FamilyTiny:
-		return 0.05
+		return 0.17
 	case values.FamilyBase:
-		return 0.10
+		return 0.35
 	case values.FamilySmall:
-		return 0.30
+		return 1.0
 	case values.FamilyMedium:
-		return 0.80
+		return 2.7
 	case values.FamilyLargeV3Turbo:
-		return 0.60
+		return 2.0
 	case values.FamilyLargeV3:
-		return 1.60
+		return 5.3
 	}
 	return 0
 }
@@ -97,7 +103,8 @@ func New() Estimator { return Estimator{policy: loadpolicy.New()} }
 
 // Estimate returns the processing time of 1 h of audio for a model of the family and weight format in the mode on a
 // computer with logicalCPUs logical processors. A measured speed of this model in this mode wins; otherwise the
-// table factor is scaled by the threads of the mode and, for a capped mode, by the share of the CPU it may use.
+// table factor is scaled by the silence skipped, the threads of the mode and, for a capped mode, by the share of the
+// CPU it may use.
 func (e Estimator) Estimate(family values.ModelFamily, q values.Quantization, load shared.RecognitionLoad,
 	logicalCPUs int, measured values.MeasuredSpeed) Estimate {
 	load = load.OrDefault()
@@ -105,7 +112,7 @@ func (e Estimator) Estimate(family values.ModelFamily, q values.Quantization, lo
 		return Estimate{load: load, perHour: perHour(measured.Factor()), source: SourceMeasured}
 	}
 
-	base := tableFactor(family)
+	base := tableFactor(family) * silenceSkip
 	if base == 0 {
 		return Estimate{load: load, source: SourceUnknown}
 	}

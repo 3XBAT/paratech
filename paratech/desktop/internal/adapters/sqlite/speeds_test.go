@@ -169,3 +169,44 @@ func TestMigrationToVersion11AddsRecognitionLoad(t *testing.T) {
 		t.Fatal("down to 10 left the speed table or the setting behind")
 	}
 }
+
+// TASK-222: speeds measured before voice activity detection are twice too slow; version 35 removes them, the next
+// runs measure again. Down and up again works on the empty table.
+func TestMigrationToVersion35ResetsTheSpeeds(t *testing.T) {
+	t.Parallel() // uses a database of its own
+	ctx := context.Background()
+	db := openTest(t, func(o *Options) { o.Migrate = false })
+	p, err := db.provider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 34); err != nil {
+		t.Fatalf("up to 34: %v", err)
+	}
+	saveModel(t, NewModelRepository(db), newModel(t, "m-1", "small", "1"))
+	r := NewSpeedStore(db)
+	key := values.SpeedKey{Model: "m-1", Load: shared.LoadGentle}
+	if err := r.SaveSpeed(ctx, key, mustSpeed(t, 0.92, 3), modelT0); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := p.UpTo(ctx, 35); err != nil {
+		t.Fatalf("up to 35: %v", err)
+	}
+	if all, err := r.Speeds(ctx); err != nil || len(all) != 0 {
+		t.Fatalf("speeds after the reset: %v, %v; want none", all, err)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM stt_models"); n != 1 {
+		t.Fatalf("%d models after the reset, want the model kept", n)
+	}
+
+	if _, err := p.DownTo(ctx, 34); err != nil {
+		t.Fatalf("down to 34: %v", err)
+	}
+	if _, err := p.Up(ctx); err != nil {
+		t.Fatalf("up again: %v", err)
+	}
+	if err := r.SaveSpeed(ctx, key, mustSpeed(t, 0.47, 1), modelT0); err != nil {
+		t.Fatalf("a new measurement after the reset: %v", err)
+	}
+}
