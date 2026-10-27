@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { libraryApi } from "../bindings/library.js";
+import type { LibrarySubjectState } from "../bindings/knowledgeBase.js";
 import { type NoteView, notesApi, type NotesAdd, notesDropEvent, parseAdd } from "../bindings/notes.js";
 import { callByName, onEventData } from "../bindings/runtime.js";
 import {
@@ -22,9 +22,12 @@ import "./ownNotes.css";
 
 // The «Мой конспект» block of one lecture (TASK-154): reads and changes the student's notes through NotesService and
 // hands the view a plain model. Each change is one call at a time; the latest one can be undone.
-export function OwnNotes(props: { recordingId: string; subject: string }) {
+export function OwnNotes(props: {
+  recordingId: string;
+  librarySubjectId: string;
+  librarySubjectState: LibrarySubjectState;
+}) {
   const api = useMemo(() => notesApi(callByName), []);
-  const library = useMemo(() => libraryApi(callByName), []);
   const mounted = useRef(true);
   const acting = useRef(false);
   const [notes, setNotes] = useState<NoteView[]>([]);
@@ -52,11 +55,9 @@ export function OwnNotes(props: { recordingId: string; subject: string }) {
     void (async () => {
       try {
         const list = await api.forLesson(lecture);
-        // A library that cannot be read only leaves adding off; the notes still show.
-        const subjects = await library.subjects().catch(() => []);
         if (!stopped) {
           setNotes(list);
-          setSubjectId(pickSubjectId(list, subjects, props.subject));
+          setSubjectId(pickSubjectId(list, props.librarySubjectId, props.librarySubjectState));
         }
       } catch (err) {
         if (!stopped) {
@@ -71,7 +72,7 @@ export function OwnNotes(props: { recordingId: string; subject: string }) {
     return () => {
       stopped = true;
     };
-  }, [api, library, props.recordingId, props.subject]);
+  }, [api, props.recordingId, props.librarySubjectId, props.librarySubjectState]);
 
   function applyAdd(add: NotesAdd) {
     if (add.note) {
@@ -207,6 +208,7 @@ export function OwnNotes(props: { recordingId: string; subject: string }) {
         notes: visibleNotes(notes, undoNoteId),
         loading,
         subjectId,
+        subjectState: props.librarySubjectState,
         target,
         busy,
         undo,

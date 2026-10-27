@@ -1,7 +1,9 @@
 import { useEffect, useId, useRef } from "react";
+import type { LibrarySubjectState } from "../bindings/knowledgeBase.js";
 import { dropAttributes, type NoteTarget, type NoteView } from "../bindings/notes.js";
 import {
   checkPaste,
+  noSubjectText,
   ownNotesTexts as t,
   partCountText,
   partRows,
@@ -24,6 +26,8 @@ export interface OwnNotesModel {
   loading: boolean;
   /** "" when no library subject matches the lesson: adding is off. */
   subjectId: string;
+  /** The core's verdict on the lesson's subject; picks the hint where adding is off. */
+  subjectState?: LibrarySubjectState;
   target: NoteTarget;
   busy: boolean;
   undo: UndoAction | null;
@@ -191,7 +195,7 @@ export function OwnNotesView(props: { model: OwnNotesModel; actions: OwnNotesAct
           {t.paste}
         </Button>
       </div>
-      {canAdd ? <p className="small muted">{t.dropHint}</p> : <p className="small muted">{t.noSubject}</p>}
+      {canAdd ? <p className="small muted">{t.dropHint}</p> : <p className="small muted">{noSubjectText(model.subjectState ?? "no-subject")}</p>}
       {model.pasteOpen && canAdd && (
         <div className="own-paste">
           <label htmlFor={pasteId}>{t.pasteLabel}</label>

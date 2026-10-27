@@ -199,7 +199,11 @@ export function KnowledgeLessonPage(props: {
                     <SummaryCard view={view} focusSection={focusSection} focusPoint={focusPoint} />
                   </div>
                 )}
-                <OwnNotes recordingId={id} subject={lesson.subject} />
+                <OwnNotes
+                  recordingId={id}
+                  librarySubjectId={lesson.librarySubjectId}
+                  librarySubjectState={lesson.librarySubjectState}
+                />
               </>
             ) : view === null ? (
               !error && <p className="muted">Загрузка…</p>

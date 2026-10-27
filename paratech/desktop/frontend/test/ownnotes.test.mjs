@@ -106,13 +106,14 @@ test("without a library subject adding is off and says why", () => {
   assert.ok(render(model()).includes("data-file-drop-target"));
 });
 
-test("the subject is the one of an existing note, else the library subject of the same name", () => {
-  const subjects = [{ id: "s9", name: "Матанализ", aliases: ["Мат. анализ"] }];
-  assert.equal(pickSubjectId([{ subjectId: "s1" }], subjects, "Матанализ"), "s1");
-  assert.equal(pickSubjectId([], subjects, " матанализ "), "s9");
-  assert.equal(pickSubjectId([], subjects, "мат. АНАЛИЗ"), "s9");
-  assert.equal(pickSubjectId([], subjects, "Физика"), "");
-  assert.equal(pickSubjectId([], subjects, ""), "");
+test("the subject is the one of an existing note, else the one the core matched", () => {
+  assert.equal(pickSubjectId([{ subjectId: "s1" }], "s9", "matched"), "s1");
+  assert.equal(pickSubjectId([{ subjectId: "s1" }], "", "ambiguous"), "s1");
+  assert.equal(pickSubjectId([], "s9", "matched"), "s9");
+  for (const state of ["none", "ambiguous", "no-subject"]) {
+    assert.equal(pickSubjectId([], "", state), "");
+    assert.equal(pickSubjectId([], "s9", state), "");
+  }
 });
 
 test("names, titles and refusals render as text: no element is created from them", () => {
@@ -132,14 +133,23 @@ test("names, titles and refusals render as text: no element is created from them
   }
 });
 
-test("the subject match follows the core's key and refuses an ambiguous name", () => {
-  const two = [{ id: "a", name: "Физика", aliases: [] }, { id: "b", name: " физика ", aliases: [] }];
-  assert.equal(pickSubjectId([], two, "Физика"), "");
-  const alias = [{ id: "a", name: "Физика", aliases: ["физика"] }];
-  assert.equal(pickSubjectId([], alias, "ФИЗИКА"), "a");
-  const yo = [{ id: "c", name: "Ёлки  и\tпалки", aliases: [] }];
-  assert.equal(pickSubjectId([], yo, "елки и палки"), "c");
-  assert.equal(pickSubjectId([], yo, "елки​ и палки"), "c");
+test("adding is off with a reason for an ambiguous or unknown subject", () => {
+  const off = (subjectState) => render(model({ subjectId: "", subjectState }));
+  assert.ok(off("ambiguous").includes("У нескольких предметов в библиотеке одно название"));
+  assert.ok(!off("ambiguous").includes(t.subjectNone));
+  assert.ok(off("none").includes("Предмет занятия не найден в библиотеке"));
+  assert.ok(off("no-subject").includes(t.noSubject));
+  assert.ok(off("matched").includes(t.noSubject));
+  assert.ok(!off("ambiguous").includes("data-file-drop-target"));
+  assert.ok(!off("none").includes("data-file-drop-target"));
+});
+
+test("the page no longer matches subject names itself", () => {
+  const src = readFileSync(new URL("../src/ownNotesView.ts", import.meta.url), "utf8");
+  assert.ok(!src.includes("subjectKey"));
+  const page = readFileSync(new URL("../src/pages/OwnNotes.tsx", import.meta.url), "utf8");
+  assert.ok(!page.includes("libraryApi"));
+  assert.ok(!page.includes("bindings/library"));
 });
 
 test("undoCall sends the right call for each action", async () => {
