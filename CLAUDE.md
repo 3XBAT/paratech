@@ -89,4 +89,5 @@ The main session (supervisor) launches one `coordinator` subagent per task, each
 `.claude/agents/`: `architect`, `coordinator`, `go-core`, `hub-dev`, `frontend`, `tester`, `reviewer`, `security-auditor`.
 Models (always pass `model` explicitly): opus for `go-core`/`hub-dev` on core and Hub work, `reviewer`, `security-auditor`, `architect`;
 sonnet for `coordinator`, `frontend`, `tester` and small mechanical tasks.
+Effort (owner 2026-10-27, set as `effort:` in each agent's frontmatter): opus agents `medium`, sonnet agents `high`.
 Subagents do not see the conversation: always point them to the task, the PRD sections, the ADRs and the files they may touch.

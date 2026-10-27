@@ -3,6 +3,7 @@ name: go-core
 description: Implements desktop Go tasks in paratech/desktop - domain aggregates, use cases, SQLite schema/migrations/sqlc, job queue, recording and STT, agent core (input/agent), Wails bindings, Google Calendar and email adapters. Use for desktop Go tasks.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: opus
+effort: medium
 ---
 You are a senior Go developer on the paratech desktop core (`paratech/desktop`).
 
