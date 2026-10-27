@@ -48,7 +48,7 @@ func TestEditAssignment(t *testing.T) {
 	e.clock.Advance(time.Hour)
 
 	view, err := e.svc.EditAssignment(context.Background(), AssignmentEdit{
-		ID: id, Title: "  Read chapter 4 and 5  ", Description: "With notes", Due: due,
+		ID: id, ExpectedVersion: 1, Title: "  Read chapter 4 and 5  ", Note: "With notes", Date: "2026-10-19", Time: "09:00",
 	})
 	if err != nil {
 		t.Fatalf("EditAssignment: %v", err)
@@ -68,7 +68,7 @@ func TestEditAssignment(t *testing.T) {
 	}
 
 	// Removing the deadline is an edit too.
-	view, err = e.svc.EditAssignment(context.Background(), AssignmentEdit{ID: id, Title: "Read chapter 4 and 5"})
+	view, err = e.svc.EditAssignment(context.Background(), AssignmentEdit{ID: id, ExpectedVersion: view.Version, Title: "Read chapter 4 and 5"})
 	if err != nil || !view.Due.IsZero() {
 		t.Fatalf("EditAssignment without a deadline = %+v, %v", view, err)
 	}
@@ -80,12 +80,30 @@ func TestEditAssignmentRefusals(t *testing.T) {
 		edit func(id shared.AssignmentID) AssignmentEdit
 		want error
 	}{
-		{"empty title", func(id shared.AssignmentID) AssignmentEdit { return AssignmentEdit{ID: id, Title: " "} }, assignment.ErrInvalidDetails},
-		{"multi-line title", func(id shared.AssignmentID) AssignmentEdit { return AssignmentEdit{ID: id, Title: "a\nb"} }, assignment.ErrInvalidDetails},
+		{"empty title", func(id shared.AssignmentID) AssignmentEdit {
+			return AssignmentEdit{ID: id, ExpectedVersion: 1, Title: " "}
+		}, assignment.ErrInvalidTitle},
+		{"multi-line title", func(id shared.AssignmentID) AssignmentEdit {
+			return AssignmentEdit{ID: id, ExpectedVersion: 1, Title: "a\nb"}
+		}, assignment.ErrInvalidTitle},
 		{"description too long", func(id shared.AssignmentID) AssignmentEdit {
-			return AssignmentEdit{ID: id, Title: "x", Description: strings.Repeat("a", assignment.MaxDescriptionRunes+1)}
-		}, assignment.ErrInvalidDetails},
-		{"unknown assignment", func(shared.AssignmentID) AssignmentEdit { return AssignmentEdit{ID: "nope", Title: "x"} }, shared.ErrNotFound},
+			return AssignmentEdit{ID: id, ExpectedVersion: 1, Title: "x", Note: strings.Repeat("a", assignment.MaxDescriptionRunes+1)}
+		}, assignment.ErrInvalidNote},
+		{"note with a bidi override", func(id shared.AssignmentID) AssignmentEdit {
+			return AssignmentEdit{ID: id, ExpectedVersion: 1, Title: "x", Note: "a\u202Eb"}
+		}, assignment.ErrInvalidNote},
+		{"bad date", func(id shared.AssignmentID) AssignmentEdit {
+			return AssignmentEdit{ID: id, ExpectedVersion: 1, Title: "x", Date: "19.10.2026"}
+		}, assignment.ErrInvalidDue},
+		{"time without a date", func(id shared.AssignmentID) AssignmentEdit {
+			return AssignmentEdit{ID: id, ExpectedVersion: 1, Title: "x", Time: "09:00"}
+		}, assignment.ErrInvalidTime},
+		{"other version", func(id shared.AssignmentID) AssignmentEdit {
+			return AssignmentEdit{ID: id, ExpectedVersion: 2, Title: "x"}
+		}, shared.ErrVersionConflict},
+		{"unknown assignment", func(shared.AssignmentID) AssignmentEdit {
+			return AssignmentEdit{ID: "nope", ExpectedVersion: 1, Title: "x"}
+		}, shared.ErrNotFound},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,7 +123,7 @@ func TestEditAssignmentRefusals(t *testing.T) {
 func TestEditSurvivesReprocessing(t *testing.T) {
 	e := newEditEnv(t)
 	id := e.first().ID
-	if _, err := e.svc.EditAssignment(context.Background(), AssignmentEdit{ID: id, Title: "Mine"}); err != nil {
+	if _, err := e.svc.EditAssignment(context.Background(), AssignmentEdit{ID: id, ExpectedVersion: 1, Title: "Mine"}); err != nil {
 		t.Fatal(err)
 	}
 	e.llm.Answer(values.OperationExtractHomework, `{"assignments":[{"title":"Theirs","description":"","due":null}]}`)
