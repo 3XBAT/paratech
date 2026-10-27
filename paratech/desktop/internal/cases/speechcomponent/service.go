@@ -133,7 +133,7 @@ func (s *Service) Status() Status {
 	defer s.mu.Unlock()
 	switch {
 	case s.run != nil:
-		return Status{State: StateInstalling, Stage: s.stage, DoneBytes: s.done, TotalBytes: s.spec.ArchiveSize()}
+		return Status{State: StateInstalling, Stage: s.stage, DoneBytes: s.done, TotalBytes: s.spec.DownloadBytes()}
 	case s.active:
 		return Status{State: StateReady}
 	case s.found == values.ComponentReady:
@@ -218,7 +218,7 @@ func (s *Service) install(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	// The archive is not needed after the attempt, whatever its outcome; a cancelled ctx must not keep it.
+	// The downloads are not needed after the attempt, whatever its outcome; a cancelled ctx must not keep them.
 	defer func() {
 		if err := s.files.DiscardArchive(context.WithoutCancel(ctx)); err != nil {
 			s.log.Warn("removing the speech component archive failed", "err", err)
@@ -226,6 +226,9 @@ func (s *Service) install(ctx context.Context) error {
 	}()
 
 	if err := s.download(ctx); err != nil {
+		return fmt.Errorf("%s: %w", opInstall, err)
+	}
+	if err := s.downloadSeparate(ctx); err != nil {
 		return fmt.Errorf("%s: %w", opInstall, err)
 	}
 
@@ -254,12 +257,48 @@ func (s *Service) download(ctx context.Context) error {
 	if err := s.spec.CheckDiskSpace(free); err != nil {
 		return err
 	}
+	return s.fetch(ctx, fetchItem{
+		src: s.spec.SourceURL(), size: s.spec.ArchiveSize(), check: s.spec.CheckReply,
+		save: s.files.SaveArchive, verify: s.spec.VerifyArchive,
+	}, 0)
+}
+
+// downloadSeparate fetches the files downloaded on their own (the VAD model) after the archive, each from its pinned
+// source, and verifies their sizes and SHA-256.
+func (s *Service) downloadSeparate(ctx context.Context) error {
+	base := s.spec.ArchiveSize()
+	for _, f := range s.spec.SeparateFiles() {
+		save := func(ctx context.Context, r io.Reader) (int64, values.SHA256, error) {
+			return s.files.SaveFile(ctx, f, r)
+		}
+		it := fetchItem{src: f.Source(), size: f.Size(), check: f.CheckReply, save: save, verify: f.Verify}
+		if err := s.fetch(ctx, it, base); err != nil {
+			return err
+		}
+		base += f.Size()
+	}
+	return nil
+}
+
+// fetchItem is one download of an install: its source, pinned size and checks, and where it is stored.
+type fetchItem struct {
+	src    values.SourceURL
+	size   int64
+	check  func(values.RangeReply) error
+	save   func(context.Context, io.Reader) (int64, values.SHA256, error)
+	verify func(values.SHA256, int64) error
+}
+
+// fetch downloads one item from the allowed hosts, stores it and verifies its size and SHA-256; the progress counts
+// from base, the bytes of the earlier downloads.
+func (s *Service) fetch(ctx context.Context, it fetchItem, base int64) error {
+	s.setStage(StageDownloading)
 	allow := s.spec.DownloadHosts()
-	if err := allow.Check(s.spec.SourceURL().String()); err != nil {
+	if err := allow.Check(it.src.String()); err != nil {
 		return err
 	}
 
-	reply, body, err := s.source.Fetch(ctx, s.spec.SourceURL(), 0, allow)
+	reply, body, err := s.source.Fetch(ctx, it.src, 0, allow)
 	switch {
 	case err == nil:
 	case ctx.Err() != nil:
@@ -270,13 +309,13 @@ func (s *Service) download(ctx context.Context) error {
 		return fmt.Errorf("%w: %w", ErrDownloadFailed, err)
 	}
 	defer func() { _ = body.Close() }()
-	if err := s.spec.CheckReply(reply); err != nil {
+	if err := it.check(reply); err != nil {
 		return err
 	}
 
 	// One byte over the pinned size is enough to tell another file.
-	pr := &progressReader{r: body, report: s.setDone}
-	n, sum, err := s.files.SaveArchive(ctx, io.LimitReader(pr, s.spec.ArchiveSize()+1))
+	pr := &progressReader{r: body, report: func(done int64) { s.setDone(base + done) }}
+	n, sum, err := it.save(ctx, io.LimitReader(pr, it.size+1))
 	switch {
 	case err == nil:
 	case ctx.Err() != nil:
@@ -288,10 +327,10 @@ func (s *Service) download(ctx context.Context) error {
 	}
 
 	s.setStage(StageVerifying)
-	if n < s.spec.ArchiveSize() {
-		return fmt.Errorf("%w: the source ended at %d of %d bytes", ErrDownloadFailed, n, s.spec.ArchiveSize())
+	if n < it.size {
+		return fmt.Errorf("%w: the source ended at %d of %d bytes", ErrDownloadFailed, n, it.size)
 	}
-	return s.spec.VerifyArchive(sum, n)
+	return it.verify(sum, n)
 }
 
 func (s *Service) isActive() bool {

@@ -35,3 +35,4 @@ Open decisions are tracked in PRD §19.
 - [0028](0028-agent-chats-context-ring.md) Agent chats and the context ring
 - [0029](0029-student-assignments.md) Assignments the student adds (by hand or through the agent); delete and edit
 - [0030](0030-subject-teachers-scheduled-send.md) Teacher of a subject and «Отправить в…»
+- [0031](0031-speech-vad.md) Skipping silence in speech recognition (Silero VAD)

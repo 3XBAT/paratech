@@ -36,13 +36,18 @@ type ComponentFiles interface {
 	// (PRD section 8.1: verify before install).
 	SaveArchive(ctx context.Context, content io.Reader) (int64, values.SHA256, error)
 
-	// Unpack takes the component files out of the stored archive into a fresh staging folder and, only when every
-	// file is there with the pinned size and SHA-256, makes them the installed folder (values.FolderInstalled),
-	// replacing the old one (PRD section 8.1). The archive must again have the pinned size and SHA-256. Nothing is
-	// executed. On an error the installed folder is left as it was, or missing when the replacement itself failed.
+	// SaveFile stores a file of the component downloaded on its own (values.ComponentFile.Separate, the VAD model),
+	// replacing an older one, and returns its size and SHA-256 (PRD section 8.1: verify before install).
+	SaveFile(ctx context.Context, f values.ComponentFile, content io.Reader) (int64, values.SHA256, error)
+
+	// Unpack takes the component files out of the stored archive, and the stored separate files, into a fresh staging
+	// folder and, only when every file is there with the pinned size and SHA-256, makes them the installed folder
+	// (values.FolderInstalled), replacing the old one (PRD section 8.1). The archive must again have the pinned size
+	// and SHA-256. Nothing is executed. On an error the installed folder is left as it was, or missing when the
+	// replacement itself failed.
 	Unpack(ctx context.Context, spec values.SpeechComponent) error
 
-	// DiscardArchive removes the stored archive; a missing one is not an error (PRD section 5.2).
+	// DiscardArchive removes the stored archive and separate files; missing ones are not an error (PRD section 5.2).
 	DiscardArchive(ctx context.Context) error
 }
 

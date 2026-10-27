@@ -180,6 +180,17 @@ export const maxParagraphChars = 900;
 
 const sentenceEnd = /[.!?…]["»”)]*$/;
 
+const msPerChar = 125;
+const spokenSlackMs = 1000;
+
+/**
+ * With voice activity detection whisper stretches a segment's end to the next speech start, so a pause no longer
+ * shows as a gap. The end is capped by what the text can take to say (ADR-0031).
+ */
+function spokenEndMs(seg: TranscriptSegment): number {
+  return Math.min(seg.endMs, seg.startMs + segmentText(seg).length * msPerChar + spokenSlackMs);
+}
+
 /** Groups segments into paragraphs; appending segments never changes the earlier paragraphs. */
 export function paragraphs(segments: readonly TranscriptSegment[]): Paragraph[] {
   const out: Paragraph[] = [];
@@ -196,7 +207,7 @@ export function paragraphs(segments: readonly TranscriptSegment[]): Paragraph[] 
     const prev = cur.length > 0 ? cur[cur.length - 1] : null;
     if (
       prev !== null &&
-      (seg.startMs - prev.endMs >= paragraphGapMs ||
+      (seg.startMs - spokenEndMs(prev) >= paragraphGapMs ||
         chars >= maxParagraphChars ||
         (chars >= softParagraphChars && sentenceEnd.test(segmentText(prev))))
     ) {

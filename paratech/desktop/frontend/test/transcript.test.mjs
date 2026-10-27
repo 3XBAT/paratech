@@ -226,6 +226,20 @@ test("while recognising the page shows the core's message, the progress and the 
   assert.equal(statusView(status({ state: "recognising", percent: 140 }), 1).progress, 100);
 });
 
+test("a pause still starts a paragraph when VAD stretches the segment end to the next speech (ADR-0031)", () => {
+  // Timings of the VAD fixture: every end equals the next start, the 75 s pause is inside the first segment.
+  const segs = [
+    seg(0, 0, "Сегодня тема — пределы.", 52630),
+    seg(1, 52630, "Начнём с определения.", 132100),
+    seg(2, 132100, "А вот и продолжение.", 133000),
+  ];
+  assert.deepEqual(paragraphs(segs).map((p) => p.segments.length), [1, 1, 1]);
+  const close = [seg(0, 0, "Это идёт без паузы.", 1700), seg(1, 1700, "И это тоже.", 3000)];
+  assert.deepEqual(paragraphs(close).map((p) => p.segments.length), [2]);
+  const slow = [seg(0, 0, "Медленная речь без паузы, сорок знаков..", 4500), seg(1, 4500, "Дальше.", 5500)];
+  assert.deepEqual(paragraphs(slow).map((p) => p.segments.length), [2]);
+});
+
 test("segments are grouped into paragraphs by pauses and length; appending keeps the earlier ones", () => {
   const segs = [
     seg(0, 0, " Сегодня тема — пределы.", 2000),

@@ -34,7 +34,7 @@ NSIS 3 is needed (`Unicode true`, `ManifestDPIAware`, System type `p`); the olde
 ## WebView2
 - The installer embeds `MicrosoftEdgeWebview2Setup.exe` from the module (`internal/commands/webview2/`, embedded by `internal/commands/generate_webview2.go`;
   1 793 816 bytes, file version 1.3.143.57, valid Authenticode signature of Microsoft Corporation, checked locally). `go.sum` is checked only when
-  the module is downloaded, not when it is read from the cache later; at build time the guard is the required Microsoft signature. The script downloads only the whisper.cpp archive (below).
+  the module is downloaded, not when it is read from the cache later; at build time the guard is the required Microsoft signature. The script downloads only the whisper.cpp archive and the VAD model (below).
 - At install it checks the `pv` value of `{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}` under `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients`
   and `HKCU\Software\Microsoft\EdgeUpdate\Clients` (Wails macro `wails.webview2runtime`). On this Windows 10 the HKLM value is present (155.0.4283.45):
   Windows 10/11 normally have the Evergreen runtime.
@@ -46,8 +46,8 @@ NSIS 3 is needed (`Unicode true`, `ManifestDPIAware`, System type `p`); the olde
 - Per user, no admin and no UAC: `RequestExecutionLevel user`, `SetShellVarContext current`.
 - Folder `%LOCALAPPDATA%\Programs\paratech` (can be changed on the folder page; an upgrade reuses `InstallLocation`, so an install
   of a version before the rename stays in `Programs\LearningAssistant`).
-- Files: `paratech.exe`, `paratech.ico`, `uninstall.exe` and always the 13 speech component files (`whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll`,
-  nine `ggml-cpu-*.dll`), listed by name in `project.nsi`. Before them the installer deletes `ggml-cpu-*.dll` of an older set (ggml loads every one next to it).
+- Files: `paratech.exe`, `paratech.ico`, `uninstall.exe` and always the 14 speech component files (`whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll`,
+  nine `ggml-cpu-*.dll`, the VAD model `ggml-silero-v5.1.2.bin`), listed by name in `project.nsi`. Before them the installer deletes `ggml-cpu-*.dll` of an older set (ggml loads every one next to it).
 - Start menu `paratech.lnk` (icon `paratech.ico`); no desktop shortcut, autostart or file associations; registers the per-user `paratech:` URL scheme (`HKCU\Software\Classes\paratech`, ADR-0013). Uninstall entry `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\LearningAssistant` (old id kept, ADR-0015) with the name «paratech» and `DisplayIcon` = `paratech.ico`.
 - Windows 10+ and x64 only (Wails `wails.checkArchitecture`). Installer and uninstaller icon: `desktop/build/windows/icon.ico` (`-DAPP_ICON`).
   The exe itself has no icon resource yet (follow-up, ADR-0015); the window and tray take the same icon embedded in the app.
@@ -57,14 +57,18 @@ NSIS 3 is needed (`Unicode true`, `ManifestDPIAware`, System type `p`); the olde
 
 ## Speech recognition component (whisper-cli)
 Pinned in `desktop/internal/app/speechcomponent.json` (the manifest the app embeds; `docs/refs/whisper.md`, "Speech recognition component").
-`build-alpha.ps1` reads it and, before the build, puts the 13 files next to the exe; `build-release.ps1` gets them in the staging folder the same way
+`build-alpha.ps1` reads it and, before the build, puts the 14 files next to the exe; `build-release.ps1` gets them in the staging folder the same way
 (`-SkipAppBuild`: `build-alpha.ps1 -ComponentOnly`), so every installer has them.
 - Download of `source_url` with `Invoke-WebRequest` (TLS 1.2+) into `paratech\dist\cache\speech-component\<version>\` (ignored by git). A cached archive is
   reused only if its size and SHA-256 match, else deleted and downloaded again.
 - Size and SHA-256 of the archive are checked before it is opened (mismatch: deleted, error). Only entries named exactly `<entry_prefix><name>` are unpacked,
   each to a path built from the manifest name, bounded by its size, then checked (size, SHA-256). Missing or duplicate entry: error. Nothing from the archive runs.
+- A file with a `source_url` of its own (the Silero VAD model, ADR-0031) is not in the archive: taken from `-WhisperDir` when that folder holds the
+  pinned file, else from the same cache, else downloaded from its URL (TLS 1.2+); kept only with the pinned size and SHA-256.
 - Whisper files already in the target folder are removed first; the copied set is checked again.
-- Offline: `-WhisperZip <archive>` (same checks) or `-WhisperDir <unpacked Release folder>` (each file checked). `build-alpha.ps1 -SkipWhisper`: dev build without it.
+- Offline: `-WhisperZip <archive>` (same checks) or `-WhisperDir <unpacked Release folder>` (each file checked); fully offline the VAD model must be in
+  `-WhisperDir` or in the cache. `build-alpha.ps1 -SkipWhisper`: dev build without it. Checked locally (2026-10-27): `-ComponentOnly -WhisperDir` with
+  the VAD model in the folder stages the 14 files.
 - Checked locally (2026-10-18): real download, checks and unpacking, `whisper-cli.exe --help` from the 13 files; a changed byte in the archive, a bad cached
   archive, a changed or missing file in `-WhisperDir`, duplicate, missing, renamed or changed entries all fail. Packing with `makensis` **[not verified]**: no NSIS here.
 - If the files are missing or damaged later, the app offers «Установить компонент распознавания» and installs the same archive into `<data dir>\components\speech`.

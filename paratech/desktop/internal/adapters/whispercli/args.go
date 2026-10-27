@@ -24,13 +24,19 @@ const (
 	flagThreads       = "-t"
 	flagLanguage      = "-l"
 
+	// Voice activity detection (TASK-222, ADR-0031): only the speech goes to the model, silence and pauses are
+	// skipped; timestamps stay those of the whole recording. The other -v* options keep the CLI defaults.
+	flagVAD      = "--vad"
+	flagVADModel = "-vm"
+
 	// jsonExt is appended by the CLI to the -of prefix.
 	jsonExt = ".json"
 )
 
-// buildArgs returns the argument vector after the program name. All values are validated by the caller.
-func buildArgs(model, audio, outPrefix string, threads int, language string) []string {
-	return []string{
+// buildArgs returns the argument vector after the program name; vadModel "" runs without voice activity detection.
+// All values are validated by the caller.
+func buildArgs(model, audio, outPrefix string, threads int, language, vadModel string) []string {
+	args := []string{
 		flagModel, model,
 		flagFile, audio,
 		flagOutputFile, outPrefix,
@@ -40,6 +46,10 @@ func buildArgs(model, audio, outPrefix string, threads int, language string) []s
 		flagThreads, strconv.Itoa(threads),
 		flagLanguage, language,
 	}
+	if vadModel != "" {
+		args = append(args, flagVAD, flagVADModel, vadModel)
+	}
+	return args
 }
 
 // checkArg rejects values that could change the meaning of the argument vector: control characters (newlines,

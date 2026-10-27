@@ -39,13 +39,13 @@ func RunFakeWhisper(args []string) (code int, ok bool) {
 	flags := map[string]bool{}
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; a {
-		case "-m", "-f", "-of", "-t", "-l":
+		case "-m", "-f", "-of", "-t", "-l", "-vm":
 			if i+1 >= len(args) {
 				return 0, false
 			}
 			opts[a] = args[i+1]
 			i++
-		case "-oj", "-pp", "-ng":
+		case "-oj", "-pp", "-ng", "--vad":
 			flags[a] = true
 		default:
 			return 0, false
@@ -55,10 +55,21 @@ func RunFakeWhisper(args []string) (code int, ok bool) {
 		return 0, false
 	}
 
+	// The adapter passes --vad only together with -vm (the VAD model of the speech component).
+	if flags["--vad"] != (opts["-vm"] != "") {
+		return 0, false
+	}
+
 	raw, err := os.ReadFile(opts["-m"])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to open model")
 		return 3, true
+	}
+	if vm := opts["-vm"]; vm != "" {
+		if _, err := os.Stat(vm); err != nil {
+			fmt.Fprintln(os.Stderr, "error: failed to open the VAD model")
+			return 10, true
+		}
 	}
 
 	switch strings.TrimSpace(string(raw)) {
