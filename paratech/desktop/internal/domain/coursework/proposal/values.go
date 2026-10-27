@@ -101,6 +101,9 @@ const (
 	ReasonSubjectChanged   RejectReason = "email_subject_changed"     // the email subject is not the one the user saw
 	ReasonFormatChanged    RejectReason = "attachment_format_changed" // the attachment format is not the one the user saw
 
+	// Stale only: the student deleted the assignment after the proposal (ADR-0029); a new one is unknown_assignment.
+	ReasonAssignmentDeleted RejectReason = "assignment_deleted"
+
 	// Send of a work, rejected or stale: its file is no longer in «ДЗ» (or in «Входящие» where a work without a
 	// subject leaves it).
 	ReasonFileMoved RejectReason = "work_file_moved"
@@ -114,7 +117,8 @@ func (r RejectReason) validFor(s Status) bool {
 			r == ReasonFileMoved
 	case StatusStale:
 		return r == ReasonUnknownAssignment || r == ReasonRecipientChanged || r == ReasonNoArtifact ||
-			r == ReasonArtifactChanged || r == ReasonSubjectChanged || r == ReasonFormatChanged || r == ReasonFileMoved
+			r == ReasonArtifactChanged || r == ReasonSubjectChanged || r == ReasonFormatChanged || r == ReasonFileMoved ||
+			r == ReasonAssignmentDeleted
 	}
 	return false
 }
@@ -195,6 +199,10 @@ type Facts struct {
 	AssignmentTitle  string    // its stored title, when it exists
 	Recipient        Recipient // the configured homework recipient; zero if none
 	Attachment       Digest    // the content of ExportRef of the assignment; zero if the file does not exist
+
+	// AssignmentDeleted: the student deleted it (ADR-0029); AssignmentExists is false then. Validate treats it as
+	// unknown, Recheck makes the proposal STALE with ReasonAssignmentDeleted.
+	AssignmentDeleted bool
 
 	// Send only, read before execution (Kind.NeedsSubject): the email subject the core builds now from trusted state
 	// and the one the confirmation dialog showed, carried back by the user's confirmation. Recheck is STALE when they

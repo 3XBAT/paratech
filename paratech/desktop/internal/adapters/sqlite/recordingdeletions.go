@@ -19,6 +19,7 @@ const (
 	opDeletionPurge    = "sqlite: purge a deleted recording"
 	opListRemovals     = "sqlite: list deadline events to remove"
 	opPurgeRemoval     = "sqlite: purge a removed deadline event"
+	opQueueRemoval     = "sqlite: queue a deadline event to remove"
 )
 
 // RecordingDeletions reads what a recording holds and removes its rows (the recordingdelete ports, TASK-095,
@@ -124,11 +125,25 @@ func (d *RecordingDeletions) Purge(ctx context.Context, rec *recording.Recording
 }
 
 // DeadlineEventRemovals are the deadline events of deleted assignments still to remove from Google (the
-// schedulesync.DeadlineRemovals port, TASK-095).
+// schedulesync.DeadlineRemovals port, TASK-095, and homeworkflow.DeadlineRemovals of the soft delete, TASK-229).
 type DeadlineEventRemovals struct{ db *DB }
 
 // NewDeadlineEventRemovals returns the deadline event removals of db.
 func NewDeadlineEventRemovals(db *DB) *DeadlineEventRemovals { return &DeadlineEventRemovals{db: db} }
+
+// QueueDeadlineRemoval queues the removal of the deadline event of assignment id at at, in the caller's transaction
+// or its own; one already queued keeps its time.
+func (r *DeadlineEventRemovals) QueueDeadlineRemoval(ctx context.Context, id shared.AssignmentID, at time.Time) error {
+	err := r.db.Do(ctx, func(ctx context.Context) error {
+		return MapError(ctx, r.db.Queries(ctx).InsertDeadlineEventRemoval(ctx, sqlcgen.InsertDeadlineEventRemovalParams{
+			AssignmentID: string(id), CreatedAt: jobMs(at),
+		}))
+	})
+	if err != nil {
+		return fmt.Errorf("%s %s: %w", opQueueRemoval, id, err)
+	}
+	return nil
+}
 
 // ListDeadlineRemovals returns up to limit assignments whose deadline event is to be removed, oldest first; a limit
 // below 1 returns none.

@@ -166,7 +166,8 @@ func (s *Service) ProposeSend(ctx context.Context, a shared.AssignmentID, format
 func (s *Service) facts(ctx context.Context, p *proposal.Proposal) (proposal.Facts, string, error) {
 	var f proposal.Facts
 
-	// A deleted assignment is unknown to a proposal, as to every reader (ADR-0029).
+	// A deleted assignment is unknown to a new proposal, as to every reader, and makes a confirmed one STALE
+	// (ADR-0029); the delete itself leaves the proposals alone.
 	switch a, err := liveAssignment(ctx, s.assignments, p.AssignmentID()); {
 	case err == nil:
 		f.AssignmentExists = true
@@ -176,6 +177,9 @@ func (s *Service) facts(ctx context.Context, p *proposal.Proposal) (proposal.Fac
 				return f, "", err
 			}
 		}
+	case errors.Is(err, assignment.ErrDeleted):
+		f.AssignmentDeleted = true
+		return f, "", nil // nothing else decides the outcome
 	case !errors.Is(err, shared.ErrNotFound):
 		return f, "", err
 	}

@@ -289,7 +289,8 @@ type Querier interface {
 	// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
 	// active is a JSON array of status names. A recording marked for deletion is left out (TASK-095).
 	ListRecordingActivityIDs(ctx context.Context, arg ListRecordingActivityIDsParams) ([]string, error)
-	// The assignments found in the transcripts of the recording, with whether a draft or any email exists.
+	// The assignments found in the transcripts of the recording, with whether a draft or any email exists. One the
+	// student deleted is neither offered nor purged: it stays, its transcript link set NULL (ADR-0029).
 	ListRecordingAssignments(ctx context.Context, recordingID string) ([]ListRecordingAssignmentsRow, error)
 	// The free subject strings the recordings name (the user's correction, else the lesson snapshot), with how many
 	// recordings name each; a recording marked for deletion is left out.
