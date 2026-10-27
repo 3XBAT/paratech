@@ -121,6 +121,11 @@ export interface NotePart {
   missing: boolean;
   /** "/media/notepage/<material id>" for a photo page, "" otherwise. The only source of a page image. */
   pageUrl: string;
+  /** Pieces of the text: a text has one kind of piece, so at most one of sections and pages is non-zero. */
+  sections: number;
+  pages: number;
+  /** Total pieces. */
+  fragments: number;
 }
 
 export interface NoteView {
@@ -239,7 +244,18 @@ export function parsePart(raw: unknown): NotePart {
     removed: r.removed === true,
     missing: r.missing === true,
     pageUrl: pageUrl(optStr(r, "pageUrl")),
+    sections: pieceCount(r, "sections"),
+    pages: pieceCount(r, "pages"),
+    fragments: pieceCount(r, "fragments"),
   };
+}
+
+const maxPieces = 1_000_000;
+
+/** A piece count: a non-negative integer up to a sane limit; anything else is 0. */
+function pieceCount(r: Record<string, unknown>, key: string): number {
+  const v = r[key];
+  return typeof v === "number" && Number.isInteger(v) && v > 0 ? Math.min(v, maxPieces) : 0;
 }
 
 export const pageUrlPrefix = "/media/notepage/";
