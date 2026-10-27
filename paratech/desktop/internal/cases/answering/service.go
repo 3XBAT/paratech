@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/answer"
@@ -209,12 +210,30 @@ func (s *Service) local(ctx context.Context, err error) error {
 	return fmt.Errorf("%w: %w", ErrUnavailable, err)
 }
 
-// excerptOf is a passage of the knowledge base as a fragment for the reader, with the place it opens.
+// excerptOf is a passage of the knowledge base as a fragment for the reader, with the place it opens. Only the text
+// goes to the reader as data (answer.Request.UntrustedData); the place stays local.
 func excerptOf(p kb.Passage) answer.Excerpt {
-	return answer.Excerpt{Text: p.Text, Source: answer.Source{
+	src := answer.Source{
 		Recording: p.Recording(), Section: sectionOf(p.Section), Index: p.Index, StartMs: p.StartMs,
 		Title: p.Lesson.Title, StartedAt: p.Lesson.StartedAt,
-	}}
+	}
+	if src.Section == answer.SectionOwnNote {
+		src.Recording = "" // the note opens, not a recording the lesson may have
+		src.Note, src.Material = p.Note, p.Material
+		src.Locator = answer.Locator{Kind: answer.LocatorKind(p.Locator.Kind), N: p.Locator.N}
+		if src.Locator.Kind == answer.LocatorSection {
+			src.Heading = headingOf(p.Heading)
+		}
+	}
+	return answer.Excerpt{Text: p.Text, Source: src}
+}
+
+// headingOf cuts a heading to what a source keeps.
+func headingOf(s string) string {
+	if r := []rune(s); len(r) > answer.MaxHeadingRunes {
+		return strings.TrimSpace(string(r[:answer.MaxHeadingRunes-1])) + "…"
+	}
+	return s
 }
 
 func sectionOf(s kb.Section) answer.Section {
@@ -225,6 +244,8 @@ func sectionOf(s kb.Section) answer.Section {
 		return answer.SectionLectureText
 	case kb.SectionTranscript:
 		return answer.SectionTranscript
+	case kb.SectionOwnNote:
+		return answer.SectionOwnNote
 	}
 	return "" // kb.Passages makes no other section; answer.NewRequest refuses it
 }

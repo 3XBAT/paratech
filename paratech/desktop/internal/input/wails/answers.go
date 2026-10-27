@@ -61,6 +61,10 @@ type AnswerCite struct {
 // Index the summary text, the lecture text block or the first transcript segment; StartMs and Time ("12:05") where
 // it starts in the recording, 0 and "" for the summary. Title ("" for an ad-hoc recording) and StartedAt (RFC 3339 in
 // UTC, "" when unknown) name the lesson as it was when the answer was made.
+//
+// Section "ownNote" is the student's own note (ADR-0027): RecordingID, StartMs and Time are empty, NoteID and
+// MaterialID open the note's file at LocatorKind ("page", "slide", "section", "fragment") LocatorN, and Label names
+// the place («ваш конспект · стр. 3»); the note fields and Label are "" and 0 for the other sections.
 type AnswerSource struct {
 	RecordingID string `json:"recordingId"`
 	Section     string `json:"section"`
@@ -69,6 +73,11 @@ type AnswerSource struct {
 	Time        string `json:"time"`
 	Title       string `json:"title"`
 	StartedAt   string `json:"startedAt"`
+	NoteID      string `json:"noteId"`
+	MaterialID  string `json:"materialId"`
+	LocatorKind string `json:"locatorKind"`
+	LocatorN    int    `json:"locatorN"`
+	Label       string `json:"label"`
 }
 
 // AnswerService is bound to the answer card of the agent panel; it only reads.
@@ -112,9 +121,10 @@ func answerView(a *answer.Answer) AnswerView {
 	for _, src := range a.Sources() {
 		v := AnswerSource{
 			RecordingID: string(src.Recording), Section: string(src.Section), Index: src.Index, StartMs: src.StartMs,
-			Title: src.Title,
+			Title: src.Title, NoteID: string(src.Note), MaterialID: string(src.Material),
+			LocatorKind: string(src.Locator.Kind), LocatorN: src.Locator.N, Label: src.OwnNoteLabel(),
 		}
-		if src.Section != answer.SectionSummary {
+		if src.Section == answer.SectionLectureText || src.Section == answer.SectionTranscript {
 			v.Time = summaryexport.BlockTime(src.StartMs)
 		}
 		if !src.StartedAt.IsZero() {
