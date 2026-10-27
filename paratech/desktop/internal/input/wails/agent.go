@@ -35,7 +35,7 @@ const (
 	AgentProblemInvalid     = "invalid"     // malformed ids, turn or answers
 	AgentProblemOffline     = "offline"     // Ask or Rerun while the Hub is not set up (AgentState says why); the panel is read-only
 	AgentProblemClosed      = "closed"      // the app is closing
-	AgentProblemUnavailable = "unavailable" // Undo is not wired
+	AgentProblemUnavailable = "unavailable" // Undo or ChatCurrent is not wired
 	AgentProblemBusy        = "busy"        // UndoRequest met a concurrent change; nothing more was undone, try again
 	AgentProblemFailed      = "failed"
 )
@@ -89,6 +89,8 @@ type AgentCore struct {
 	FreeWork AgentFreeWork
 	// Mentions are what the «@» search reads (TASK-246); incomplete: MentionCandidates answers unavailable.
 	Mentions AgentMentionSources
+	// Current reads the current request of a chat (TASK-272); nil: ChatCurrent answers unavailable.
+	Current AgentCurrent
 }
 
 func (c AgentCore) complete() bool {
@@ -144,6 +146,8 @@ type AgentService struct {
 	chats    AgentChats
 	freeWork AgentFreeWork
 	mentions AgentMentionSources
+	current  AgentCurrent
+	panel    *AgentPanel
 	life     context.Context
 	log      *slog.Logger
 }
@@ -153,7 +157,7 @@ type AgentService struct {
 func NewAgentService(c AgentCore, log *slog.Logger) *AgentService {
 	return &AgentService{
 		driver: c.Driver, link: c.Link, journal: c.Journal, clock: c.Clock, chats: c.Chats, freeWork: c.FreeWork,
-		mentions: c.Mentions, life: c.Life, log: log,
+		mentions: c.Mentions, current: c.Current, panel: c.Panel, life: c.Life, log: log,
 	}
 }
 
