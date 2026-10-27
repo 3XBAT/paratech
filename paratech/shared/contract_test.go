@@ -691,15 +691,16 @@ func TestAgentMessagesHaveOnlyAllowlistedStrings(t *testing.T) {
 	}
 }
 
-// Golden tool catalog (design §2.3, ADR-0021), the current version 7 (TASK-223: reply.text is a reply_text of up to
-// 4000 characters; v6, TASK-216: create_assignment and the time type; v5, TASK-200: the tools of v4, a new server
-// prompt; v4, TASK-182: no generate_draft, triage_assignment by topic; v3, TASK-172: reply lists up to 10 assignment
-// IDs; v2, TASK-118: question and search query of up to 500 characters). Both the Hub catalog (TASK-114) and the
-// desktop Tool enum (TASK-115) must match it. Versions 1 to 6 are frozen: the Hub still serves them to clients of those
-// versions.
+// Golden tool catalog (design §2.3, ADR-0021), the current version 8 (TASK-233: the tools of v7, a new server prompt;
+// v7, TASK-223: reply.text is a reply_text of up to 4000 characters; v6, TASK-216: create_assignment and the time type;
+// v5, TASK-200: the tools of v4, a new server prompt; v4, TASK-182: no generate_draft, triage_assignment by topic; v3,
+// TASK-172: reply lists up to 10 assignment IDs; v2, TASK-118: question and search query of up to 500 characters). Both
+// the Hub catalog (TASK-114) and the desktop Tool enum (TASK-115) must match it. Versions 1 to 7 are frozen: the Hub
+// still serves them to clients of those versions.
 const (
-	toolCatalogVersion = 7
-	toolCatalogFile    = "testdata/tool_catalog_v7.json"
+	toolCatalogVersion = 8
+	toolCatalogFile    = "testdata/tool_catalog_v8.json"
+	toolCatalogV7File  = "testdata/tool_catalog_v7.json"
 	toolCatalogV6File  = "testdata/tool_catalog_v6.json"
 	toolCatalogV5File  = "testdata/tool_catalog_v5.json"
 	toolCatalogV4File  = "testdata/tool_catalog_v4.json"
@@ -1012,9 +1013,23 @@ func TestToolCatalog(t *testing.T) {
 	}
 }
 
+// TestToolCatalogV7IsFrozen: catalog v7 stays as released: catalog v8 with version 7 (v8 changed only the server
+// prompt, TASK-233).
+func TestToolCatalogV7IsFrozen(t *testing.T) {
+	v7, v8 := loadToolCatalogFile(t, toolCatalogV7File), loadToolCatalog(t)
+	if v7.CatalogVersion != 7 {
+		t.Fatalf("v7: version %d", v7.CatalogVersion)
+	}
+	want := cloneCatalog(v8)
+	want.CatalogVersion = 7
+	if fmt.Sprint(want) != fmt.Sprint(v7) {
+		t.Errorf("v7 differs from v8 beyond the version:\nv7 %+v\nv8 %+v", v7, want)
+	}
+}
+
 // TestToolCatalogV6IsFrozen: catalog v6 stays as released: catalog v7 without the reply_text type, reply.text a text.
 func TestToolCatalogV6IsFrozen(t *testing.T) {
-	v6, v7 := loadToolCatalogFile(t, toolCatalogV6File), loadToolCatalog(t)
+	v6, v7 := loadToolCatalogFile(t, toolCatalogV6File), loadToolCatalogFile(t, toolCatalogV7File)
 	if v6.CatalogVersion != 6 || v6.Types["reply_text"] != "" {
 		t.Fatalf("v6: version %d, reply_text type %q", v6.CatalogVersion, v6.Types["reply_text"])
 	}

@@ -5001,7 +5001,7 @@
                 "go test ./shared/... и buf lint в paratech/shared"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-234",

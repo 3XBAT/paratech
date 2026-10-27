@@ -16,18 +16,18 @@ import (
 // byte-identical.
 const goldenCatalog = "../../../shared/testdata/tool_catalog_v%d.json"
 
-// TestEmbeddedPanel: v1 to v6 stay served to clients of those catalogs; v7 is the current version.
+// TestEmbeddedPanel: v1 to v7 stay served to clients of those catalogs; v8 is the current version.
 func TestEmbeddedPanel(t *testing.T) {
 	versions, err := Agent("panel")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 7 {
-		t.Fatalf("versions: %d, want v1 to v7", len(versions))
+	if len(versions) != 8 {
+		t.Fatalf("versions: %d, want v1 to v8", len(versions))
 	}
 	for i, v := range versions {
 		if v.Version != uint32(i+1) {
-			t.Fatalf("version %d at %d, want v1 to v7 in order", v.Version, i)
+			t.Fatalf("version %d at %d, want v1 to v8 in order", v.Version, i)
 		}
 	}
 	for _, v := range versions {
@@ -245,6 +245,54 @@ func TestPanelV7Prompt(t *testing.T) {
 		if strings.Contains(system, gone) {
 			t.Errorf("agent/panel/v7/system.md still says %q", gone)
 		}
+	}
+}
+
+// TestPanelV8Tools: catalog 8 is catalog 7 with the version raised (TASK-233 changes only the prompt).
+func TestPanelV8Tools(t *testing.T) {
+	versions, err := Agent("panel")
+	if err != nil || len(versions) < 8 || versions[6].Version != 7 || versions[7].Version != 8 {
+		t.Fatalf("panel versions: %d, %v", len(versions), err)
+	}
+	v7, v8 := versions[6].Tools, versions[7].Tools
+	want := bytes.Replace(v7, []byte(`"catalog_version": 7,`), []byte(`"catalog_version": 8,`), 1)
+	if bytes.Equal(want, v7) || !bytes.Equal(v8, want) {
+		t.Fatal("agent/panel/v8/tools.json differs from v7 beyond catalog_version")
+	}
+}
+
+// TestPanelV8Prompt: v8 keeps every rule of v7 and adds the owner's decision of 27.10 (TASK-233, ADR-0029 «Ask for the
+// subject»): without a subject in the thread or the request, ask_questions on the subject first, with «Без предмета»
+// as the last option; a named subject or a thread subject is never asked, and a missing date is still not asked.
+func TestPanelV8Prompt(t *testing.T) {
+	v7, system := panelSystem(t, 7), panelSystem(t, 8)
+	for _, line := range strings.Split(v7, "\n") {
+		// The subject line no longer adds a subject-less assignment in a thread without a subject; the new rule follows.
+		if strings.HasPrefix(line, "- IDs only from the student context, the current thread and tool results") {
+			continue
+		}
+		if !strings.Contains(system, line) {
+			t.Errorf("agent/panel/v8/system.md drops the v7 line %q", line)
+		}
+	}
+	for _, rule := range []string{
+		"the subject of the current thread", "in a thread without a subject («Без предмета»), the subject is asked first",
+		"- Subject not named", "when the current thread has no subject and the student names none, ask before adding",
+		"Call list_subjects", "ask_questions with one choice question «К какому предмету относится задание?»",
+		"the options are the names of the subjects from that result", "at most five",
+		"the last option is always «Без предмета»", "no default",
+		"create_assignment then takes the ID of that subject", "«Без предмета», the last option, means create_assignment without subject",
+		"Without any subject in the list_subjects result there is no question",
+		"«по матану нужно решить номер 5»", "is never asked: its ID comes from list_subjects",
+		"a request without a date still gets no question about the date",
+		"No date named: add the assignment without due",
+	} {
+		if !strings.Contains(system, rule) {
+			t.Errorf("agent/panel/v8/system.md does not state %q", rule)
+		}
+	}
+	if strings.Contains(system, "(«Без предмета»), no subject") {
+		t.Error("agent/panel/v8/system.md still adds a subject-less assignment without asking")
 	}
 }
 
