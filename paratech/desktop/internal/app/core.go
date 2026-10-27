@@ -419,6 +419,10 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return err
 	}
+	subjectPage, err := c.newSubjectView(dataDir, e, lib, knowledge, history, log)
+	if err != nil {
+		return err
+	}
 
 	if err := c.wireAgent(e, llm, agentReads{
 		library: lib, knowledge: knowledge, activity: history, assignments: c.proposals, deliveries: c.deliveries,
@@ -445,8 +449,9 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Knowledge:  knowledge,
 		Library:    lib,
 		// «Открыть в Word / PowerPoint»: a named copy in the artifact store, started below that root only.
-		MaterialViews: store,
-		Opener:        fileopen.New(filepath.Join(dataDir, artifactsDir)),
+		MaterialViews:   store,
+		Opener:          fileopen.New(filepath.Join(dataDir, artifactsDir)),
+		SubjectOverview: subjectPage,
 		// Life is set by openCore: the requests live as long as the app.
 		Agent: wails.AgentCore{Driver: c.driver, Panel: c.panel, Journal: c.journal, Clock: e.clock, FreeWork: c.freeWorks},
 		Today: todayScreen,

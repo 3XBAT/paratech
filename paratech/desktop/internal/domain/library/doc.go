@@ -3,7 +3,7 @@
 // the library by its sha256, and its extracted text) and domain/library/inspection (the reading of a material by the
 // quarantined reader, ADR-0022: suggestions only). Value objects shared by them live in domain/library/values (the
 // semester, the matching key of a name). Domain service: domain/library/services/subjectmatch (a free subject string → subject id, and the
-// subjects to suggest from the schedule).
+// subjects to suggest from the schedule); domain/library/services/overview (the rules of the page of a subject).
 //
 // The library is virtual: folders live in SQLite, the bytes of a file sit once in the private artifact store under
 // their sha256. Nothing of it is a visible folder on disk.
