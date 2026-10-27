@@ -2,6 +2,7 @@ package wails
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -145,6 +146,47 @@ func TestNoteViewPhotoPages(t *testing.T) {
 		t.Fatalf("view %+v", v)
 	}
 	assertNoNotePath(t, v)
+}
+
+// A part carries the counts of its text; a removed or missing part has none, and the page reads them by their names.
+func TestNoteViewCounts(t *testing.T) {
+	n := testNote(t, "n1", note.AnchorUndated, "m1", "m2", "p3", "m4", "m5")
+	removed := testPart(t, "m4", "b.txt")
+	if _, err := removed.Remove(libT0); err != nil {
+		t.Fatal(err)
+	}
+	v := noteViewOf(notes.View{
+		Note: n, Anchor: n.Anchor(),
+		Parts: []*material.Material{testPart(t, "m1", "a.md"), testPart(t, "m2", "a.docx"), testPhoto(t, "p3", material.TypeJPEG), removed, nil},
+		Counts: []material.TextCounts{
+			{Sections: 3, Fragments: 3}, {Pages: 2, Fragments: 2}, {}, {Sections: 5, Fragments: 5}, {Sections: 1, Fragments: 1},
+		},
+	})
+	type counts struct{ sections, pages, fragments int }
+	want := []counts{{3, 0, 3}, {0, 2, 2}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}}
+	for i, p := range v.Parts {
+		if got := (counts{p.Sections, p.Pages, p.Fragments}); got != want[i] {
+			t.Errorf("part %d: %+v, want %+v", i, got, want[i])
+		}
+	}
+
+	// Fewer counts than parts (a view built without them) read as zero.
+	short := noteViewOf(notes.View{Note: n, Anchor: n.Anchor(), Parts: []*material.Material{testPart(t, "m1", "a.md")}})
+	if p := short.Parts[0]; p.Sections != 0 || p.Pages != 0 || p.Fragments != 0 {
+		t.Fatalf("no counts: %+v", p)
+	}
+
+	b, err := json.Marshal(v.Parts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shape map[string]any
+	if err := json.Unmarshal(b, &shape); err != nil {
+		t.Fatal(err)
+	}
+	if shape["sections"] != 3.0 || shape["pages"] != 0.0 || shape["fragments"] != 3.0 {
+		t.Fatalf("payload %s", b)
+	}
 }
 
 func TestNotesPhotoErrors(t *testing.T) {

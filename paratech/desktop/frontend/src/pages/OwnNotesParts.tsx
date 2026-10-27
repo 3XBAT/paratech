@@ -223,6 +223,11 @@ function PartsList(props: {
                   {shortName(r.name)}
                 </span>
                 {r.meta !== "" && <span className="small muted">{r.meta}</span>}
+                {r.pieces !== "" && (
+                  <span className="small muted" data-pieces="">
+                    {r.pieces}
+                  </span>
+                )}
                 {r.page !== null && r.page.noText && <span className="small muted">{t.noText}</span>}
               </span>
               <span className="own-part-acts">

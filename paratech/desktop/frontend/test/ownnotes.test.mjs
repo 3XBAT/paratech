@@ -32,6 +32,44 @@ test("part rows show name, type and state, and which moves are possible", () => 
   assert.equal(rows[2].meta, "DOCX · файла больше нет в библиотеке");
 });
 
+test("a part shows its pieces: sections, then pages, then fragments, with Russian plurals", () => {
+  const text = (over) => partRows(note({ parts: [part("a", over)] }))[0].pieces;
+  assert.equal(text({ sections: 1 }), "1 раздел");
+  assert.equal(text({ sections: 2 }), "2 раздела");
+  assert.equal(text({ sections: 5 }), "5 разделов");
+  assert.equal(text({ sections: 11 }), "11 разделов");
+  assert.equal(text({ sections: 21 }), "21 раздел");
+  assert.equal(text({ pages: 12 }), "12 стр.");
+  assert.equal(text({ fragments: 1 }), "1 фрагмент");
+  assert.equal(text({ fragments: 3 }), "3 фрагмента");
+  assert.equal(text({ fragments: 14 }), "14 фрагментов");
+  // Precedence.
+  assert.equal(text({ sections: 2, pages: 5, fragments: 7 }), "2 раздела");
+  assert.equal(text({ sections: 0, pages: 5, fragments: 5 }), "5 стр.");
+  // Nothing to show.
+  assert.equal(text({ sections: 0, pages: 0, fragments: 0 }), "");
+  assert.equal(text({}), "");
+  assert.equal(text({ sections: -3, pages: 1.5, fragments: NaN }), "");
+  assert.equal(text({ sections: "5", fragments: null }), "");
+});
+
+test("parsePart normalises hostile piece counts", async () => {
+  const { parsePart } = await import("../.test-build/bindings/notes.js");
+  const p = (over) => parsePart({ materialId: "m", ...over });
+  assert.deepEqual([p({}).sections, p({}).pages, p({}).fragments], [0, 0, 0]);
+  const bad = p({ sections: -1, pages: 2.5, fragments: "9" });
+  assert.deepEqual([bad.sections, bad.pages, bad.fragments], [0, 0, 0]);
+  assert.equal(p({ sections: Infinity }).sections, 0);
+  assert.equal(p({ fragments: 1e12 }).fragments, 1_000_000);
+  assert.equal(p({ sections: 4, fragments: 4 }).sections, 4);
+});
+
+test("pieces render as a text node", () => {
+  const html = render(model({ notes: [note({ parts: [part("a", { name: evil, sections: 3 })] })] }));
+  assert.ok(html.includes("3 раздела"));
+  assert.ok(!html.includes("<img"));
+});
+
 test("movedOrder swaps neighbours and refuses the edges", () => {
   assert.deepEqual(movedOrder(["a", "b", "c"], 1, -1), ["b", "a", "c"]);
   assert.deepEqual(movedOrder(["a", "b", "c"], 1, 1), ["a", "c", "b"]);

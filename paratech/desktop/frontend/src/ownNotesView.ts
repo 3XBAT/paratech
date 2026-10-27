@@ -59,6 +59,13 @@ export const ownNotesTexts = {
   pageWord: "Страница",
   pageTextWord: "Текст страницы",
   viewerDialog: "Просмотр страниц",
+  sectionOne: "раздел",
+  sectionFew: "раздела",
+  sectionMany: "разделов",
+  pagesShort: "стр.",
+  fragmentOne: "фрагмент",
+  fragmentFew: "фрагмента",
+  fragmentMany: "фрагментов",
 } as const;
 
 /** «3 стр. без текста» in the note header; "" when every page has text. */
@@ -194,12 +201,30 @@ export interface PartRow {
   name: string;
   /** «DOCX · текст ещё извлекается»: type and state. */
   meta: string;
+  /** «3 раздела» / «12 стр.» / «5 фрагментов»; "" when the core gave no count. */
+  pieces: string;
   canUp: boolean;
   canDown: boolean;
   /** The photo page of the part, null for any other part. */
   page: PhotoPage | null;
   /** Number of photo pages in the note (for «N из M»). */
   pageTotal: number;
+}
+
+/** «3 раздела», «12 стр.», «5 фрагментов» for a part; sections win over pages, pages over fragments; "" when none. */
+export function partPiecesText(p: Partial<Pick<NotePart, "sections" | "pages" | "fragments">>): string {
+  const n = (v: unknown) => (typeof v === "number" && Number.isInteger(v) && v > 0 ? v : 0);
+  const { sections, pages, fragments } = { sections: n(p.sections), pages: n(p.pages), fragments: n(p.fragments) };
+  if (sections > 0) {
+    return `${sections} ${plural(sections, ownNotesTexts.sectionOne, ownNotesTexts.sectionFew, ownNotesTexts.sectionMany)}`;
+  }
+  if (pages > 0) {
+    return `${pages} ${ownNotesTexts.pagesShort}`;
+  }
+  if (fragments > 0) {
+    return `${fragments} ${plural(fragments, ownNotesTexts.fragmentOne, ownNotesTexts.fragmentFew, ownNotesTexts.fragmentMany)}`;
+  }
+  return "";
 }
 
 /** The parts of a note as listed, with the moves each may make. */
@@ -210,6 +235,7 @@ export function partRows(note: Pick<NoteView, "parts">): PartRow[] {
     materialId: p.materialId,
     name: p.name === "" ? ownNotesTexts.untitled : p.name,
     meta: [partTypeLabel(p.type), partState(p)].filter((s) => s !== "").join(" · "),
+    pieces: partPiecesText(p),
     canUp: i > 0,
     canDown: i < n - 1,
     page: pages.find((pg) => pg.materialId === p.materialId) ?? null,

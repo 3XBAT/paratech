@@ -128,6 +128,34 @@ func TestSectionLocator(t *testing.T) {
 	}
 }
 
+func TestTextCounts(t *testing.T) {
+	frag := func(kind LocatorKind, n int) Fragment {
+		return Fragment{Locator: Locator{Kind: kind, N: n}, Lines: []string{"строка"}}
+	}
+	tests := []struct {
+		name string
+		text []Fragment
+		want TextCounts
+	}{
+		{"empty", nil, TextCounts{}},
+		{"markdown sections", ReadMarkdown("# Ряды\nтекст\n## Итоги\nещё").Fragments, TextCounts{Sections: 2, Fragments: 2}},
+		{"plain text", ReadMarkdown("просто текст").Fragments, TextCounts{Fragments: 1}},
+		{"pages", []Fragment{frag(LocatorPage, 1), frag(LocatorPage, 2), frag(LocatorPage, 3)}, TextCounts{Pages: 3, Fragments: 3}},
+		{"slides", []Fragment{frag(LocatorSlide, 1), frag(LocatorSlide, 2)}, TextCounts{Fragments: 2}},
+		{"dropped empty section", []Fragment{frag(LocatorSection, 1), {Locator: Locator{Kind: LocatorSection, N: 2}}},
+			TextCounts{Sections: 1, Fragments: 1}},
+	}
+	for _, tt := range tests {
+		text, err := NewText(tt.text, false)
+		if err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		if got := text.Counts(); got != tt.want {
+			t.Errorf("%s: Counts = %+v, want %+v", tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestTextCache(t *testing.T) {
 	text, err := NewText([]Fragment{
 		{Locator: Locator{Kind: LocatorSection, N: 1}, Lines: []string{"Ряды", `кавычки " и \ <b>`}},
