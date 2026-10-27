@@ -395,8 +395,9 @@ export function singleFlight(): (call: () => Promise<void>) => Promise<boolean> 
 }
 
 /**
- * The newest of two replies: an older version never replaces a newer one. The core does not store the problem of a
- * reader call, so a read of the same version without one keeps the problem the reply carried.
+ * The newest of two replies: an older version never replaces a newer one. A plain read of the same version
+ * and status may come without the live `problem` (the core keeps only lastProblem/lastMessage), so the one the
+ * earlier reply carried is kept.
  */
 export function acceptWork(current: TurnkeyWork | null, next: TurnkeyWork): TurnkeyWork {
   if (current === null) {

@@ -4,7 +4,7 @@
 
 import { type AgentConfirmApi, type ConfirmCard, confirmErrorText } from "./bindings/agentConfirm.js";
 import type { TurnkeyWork } from "./bindings/turnkey.js";
-import { formatTime } from "./activityView.js";
+import { formatTimeMinutes } from "./activityView.js";
 
 export const sendWorkTexts = {
   button: "Отправить преподавателю",
@@ -42,7 +42,7 @@ export interface SentNote {
 /** What is known about earlier sends: `sentAt` of the work first, the send just confirmed here second. */
 export function sentNote(sentAt: string | undefined, sentHere: boolean): SentNote {
   if (sentAt) {
-    return { sent: true, text: `Отправлено ${formatTime(sentAt)}. ${sendWorkTexts.repeatWarning}` };
+    return { sent: true, text: `Отправлено ${formatTimeMinutes(sentAt)}. ${sendWorkTexts.repeatWarning}` };
   }
   return sentHere ? { sent: true, text: sendWorkTexts.alreadySent } : { sent: false, text: "" };
 }

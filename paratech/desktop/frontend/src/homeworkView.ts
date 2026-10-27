@@ -3,7 +3,7 @@
 // Model and student text is never formatted here: the page shows it as plain text.
 
 // The .js extensions let the Node test runner load the compiled modules; TypeScript and Vite map them to the .ts files.
-import { formatTime } from "./activityView.js";
+import { formatTime, formatTimeMinutes } from "./activityView.js";
 import {
   type ActiveGeneration,
   type AssignmentItem,
@@ -178,7 +178,7 @@ export function deliveryView(d: DeliveryItem): DeliveryView {
       hint = pendingHint;
       break;
     case "SENT":
-      hint = d.sentAt === "" ? "" : `Отправлено ${formatTime(d.sentAt)}`;
+      hint = d.sentAt === "" ? "" : `Отправлено ${formatTimeMinutes(d.sentAt)}`;
       break;
     case "FAILED":
       hint = failedHint;
