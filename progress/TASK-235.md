@@ -3,7 +3,7 @@
 ## Done
 - Domain `library/subject`: value object `Teacher` (`teacher.go`), `SetTeacher`/`ClearTeacher`/`Teacher()` on the aggregate (return `changed`; the same value or clearing none keeps the version), strict check in `Restore`. Errors: `ErrInvalidTeacher` with `ErrInvalidTeacherName`/`ErrInvalidTeacherEmail` wrapping it.
 - Name: trimmed, 1-200 runes, valid UTF-8, no control, no `unicode.Cf` (bidi, zero-width), no U+2028/2029. E-mail: own copy of the `proposal.NewRecipient` rules (ARCH-11) plus trim.
-- Migration `0037_subject_teacher.sql` (`teacher_name`, `teacher_email` TEXT NOT NULL DEFAULT '', length CHECKs, both-or-neither CHECK); `docs/contracts/schema.sql` mirrors it.
+- Migration `0038_subject_teacher.sql` (`teacher_name`, `teacher_email` TEXT NOT NULL DEFAULT '', length CHECKs, both-or-neither CHECK); `docs/contracts/schema.sql` mirrors it.
 - `cases/library`: `SetTeacher(ctx, id, name, email, expectedVersion)`, `ClearTeacher(ctx, id, expectedVersion)`; mismatch or save conflict is `ErrSubjectChanged`. The use cases log nothing.
 - Nothing is sent; the teacher is not in AgentBase or any Hub request (`TestDriverBaseCarriesNoTeacher`).
 
@@ -11,7 +11,7 @@
 The task names `adapters/sqlite/subjects*.go` and `queries/subjects*.sql`; the subject repository lives in `adapters/sqlite/library.go` and `queries/library.sql`, so those were changed (sqlc v1.31.1 regenerated, `sqlc diff` clean).
 
 ## Decisions to confirm (ADR-0030 Open, not decided in code)
-- B-4: one teacher per subject is built. If the owner wants lecturer and seminar teacher separately, `teacher` becomes a set keyed by lesson kind, `SetTeacher`/`ClearTeacher` take a kind, columns move to a `subject_teachers` table (new migration; 0037 becomes legacy). `NewTeacher` and its rules stay.
+- B-4: one teacher per subject is built. If the owner wants lecturer and seminar teacher separately, `teacher` becomes a set keyed by lesson kind, `SetTeacher`/`ClearTeacher` take a kind, columns move to a `subject_teachers` table (new migration; 0038 becomes legacy). `NewTeacher` and its rules stay.
 - B-1 (no teacher / no subject): affects only TASK-237. B-2, B-3: untouched.
 
 ## Follow-ups
@@ -22,7 +22,7 @@ The task names `adapters/sqlite/subjects*.go` and `queries/subjects*.sql`; the s
 - TASK-236: Wails error mapping must not log the raw `ErrUnavailable` cause with row data; check the support bundle for `subjects` rows.
 
 ## Changed existing tests
-- `adapters/sqlite/migrate_test.go`: expected schema version 37.
+- `adapters/sqlite/migrate_test.go`: expected schema version 38 (renumbered from 0037 after TASK-222 took it).
 - `tests/agent_driver_test.go`: the test subject "Физика" now has a fake teacher in `newDriverEnv`, so all driver tests run with personal data present.
 
 ## Verification note
