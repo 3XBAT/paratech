@@ -207,7 +207,7 @@ export function DiagnosticsPage() {
       <div className="head">
         <div>
           <span className="label">{texts.lead}</span>
-          <h1>{texts.title}</h1>
+          <h2>{texts.title}</h2>
         </div>
       </div>
 

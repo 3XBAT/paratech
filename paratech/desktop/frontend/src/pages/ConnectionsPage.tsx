@@ -326,7 +326,7 @@ export function ConnectionsPage(props: { visit?: number }) {
         <div className="head">
           <div>
             <span className="label">{overviewTexts.lead}</span>
-            <h1>{overviewTexts.title}</h1>
+            <h2>{overviewTexts.title}</h2>
           </div>
         </div>
         <div className="conn-cards">
@@ -599,9 +599,9 @@ function SectionPage(props: { title: string; onBack: () => void; children: React
       <div className="head">
         <div>
           <span className="label">{overviewTexts.title}</span>
-          <h1 ref={heading} tabIndex={-1}>
+          <h2 ref={heading} tabIndex={-1}>
             {props.title}
-          </h1>
+          </h2>
         </div>
         <Button onClick={props.onBack}>{overviewTexts.back}</Button>
       </div>

@@ -209,6 +209,52 @@ export function deliveriesInFlight(ds: readonly DeliveryItem[]): boolean {
   return ds.some((d) => d.status === "PENDING" || d.status === "SENDING");
 }
 
+export type AssignmentFilter = "all" | "active" | "sent";
+
+export const assignmentFilterOptions: readonly { value: AssignmentFilter; label: string }[] = [
+  { value: "all", label: "Все" },
+  { value: "active", label: "Активные" },
+  { value: "sent", label: "Отправленные" },
+];
+
+/** An assignment is sent when its newest email (the core lists them newest first) is SENT. */
+export function isSentAssignment(ds: readonly DeliveryItem[] | undefined): boolean {
+  return ds !== undefined && ds.length > 0 && ds[0].status === "SENT";
+}
+
+export interface AssignmentCounts {
+  all: number;
+  /** null while the emails are not loaded: the split is not known yet. */
+  active: number | null;
+  sent: number | null;
+}
+
+/** The counters of the filters. An assignment whose emails failed to load counts as active. */
+export function assignmentCounts(
+  items: readonly AssignmentItem[],
+  deliveries: Readonly<Record<string, DeliveryItem[]>>,
+  loaded: boolean,
+): AssignmentCounts {
+  if (!loaded) {
+    return { all: items.length, active: null, sent: null };
+  }
+  const sent = items.filter((a) => isSentAssignment(deliveries[a.id])).length;
+  return { all: items.length, active: items.length - sent, sent };
+}
+
+/** The assignments the filter shows, in the order they came. Before the emails are loaded the split is not known: all. */
+export function filterAssignments(
+  items: readonly AssignmentItem[],
+  filter: AssignmentFilter,
+  deliveries: Readonly<Record<string, DeliveryItem[]>>,
+  loaded: boolean,
+): AssignmentItem[] {
+  if (filter === "all" || !loaded) {
+    return [...items];
+  }
+  return items.filter((a) => isSentAssignment(deliveries[a.id]) === (filter === "sent"));
+}
+
 const sourceLabels: Readonly<Record<VersionSource, string>> = {
   generated: "сгенерирована",
   edited: "исправлена вручную",
