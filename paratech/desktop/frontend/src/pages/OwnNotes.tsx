@@ -4,16 +4,21 @@ import { type NoteView, notesApi, type NotesAdd, notesDropEvent, parseAdd } from
 import { callByName, onEventData } from "../bindings/runtime.js";
 import {
   addLines,
+  isLecture,
+  lectureKey,
+  lectureTarget,
   movedOrder,
   orderAfter,
   orderOf,
+  type OwnLecture,
   ownNotesTexts as t,
   pageTextAddedText,
   photoPages,
   pickSubjectId,
-  recordingTarget,
+  readLectureNotes,
   refusalText,
   type ResultLine,
+  undatedNoteId,
   type UndoAction,
   undoCall,
   undoneText,
@@ -26,9 +31,11 @@ import "./ownNotes.css";
 // The «Мой конспект» block of one lecture (TASK-154): reads and changes the student's notes through NotesService and
 // hands the view a plain model. Each change is one call at a time; the latest one can be undone.
 export function OwnNotes(props: {
-  recordingId: string;
+  lecture: OwnLecture;
   librarySubjectId: string;
   librarySubjectState: LibrarySubjectState;
+  /** The file of a search hit or a citation to mark; "" for none. */
+  focusMaterialId?: string;
 }) {
   const api = useMemo(() => notesApi(callByName), []);
   const mounted = useRef(true);
@@ -43,7 +50,11 @@ export function OwnNotes(props: {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
 
-  const target = recordingTarget(props.recordingId, subjectId);
+  // The lecture is read by its ids: a new object with the same ids must not reload the notes.
+  const lectureRef = useRef(props.lecture);
+  lectureRef.current = props.lecture;
+  const lectureId = lectureKey(props.lecture);
+  const target = lectureTarget(props.lecture, subjectId, undatedNoteId(props.lecture, notes));
 
   useEffect(() => {
     mounted.current = true;
@@ -54,10 +65,9 @@ export function OwnNotes(props: {
 
   useEffect(() => {
     let stopped = false;
-    const lecture = { recordingId: props.recordingId, lessonId: "", subjectId: "", date: "" };
     void (async () => {
       try {
-        const list = await api.forLesson(lecture);
+        const list = await readLectureNotes(api, lectureRef.current);
         if (!stopped) {
           setNotes(list);
           setSubjectId(pickSubjectId(list, props.librarySubjectId, props.librarySubjectState));
@@ -75,7 +85,7 @@ export function OwnNotes(props: {
     return () => {
       stopped = true;
     };
-  }, [api, props.recordingId, props.librarySubjectId, props.librarySubjectState]);
+  }, [api, lectureId, props.librarySubjectId, props.librarySubjectState]);
 
   function applyAdd(add: NotesAdd) {
     if (add.note) {
@@ -94,7 +104,7 @@ export function OwnNotes(props: {
     onEventData(notesDropEvent, (data) => {
       try {
         const add = parseAdd(data);
-        if (add.target.recordingId === props.recordingId && mounted.current) {
+        if (isLecture(lectureRef.current, add.target) && mounted.current) {
           applyAdd(add);
         }
       } catch {
@@ -116,7 +126,7 @@ export function OwnNotes(props: {
       closed = true;
       off?.();
     };
-  }, [props.recordingId]);
+  }, [lectureId]);
 
   async function act(action: () => Promise<void>) {
     if (acting.current) {
@@ -160,7 +170,7 @@ export function OwnNotes(props: {
     onPastePage: async (noteId, pageMaterialId, text) => {
       let stored = false;
       await act(async () => {
-        const add = await api.paste(recordingTarget(props.recordingId, subjectId, noteId), text);
+        const add = await api.paste(lectureTarget(props.lecture, subjectId, noteId), text);
         applyAdd(add);
         stored = add.error === "" && add.files.every((f) => f.error === "");
         const newId = add.files[0]?.materialId ?? "";
@@ -249,6 +259,7 @@ export function OwnNotes(props: {
         lines,
         pasteOpen,
         pasteText,
+        focusMaterialId: props.focusMaterialId,
       }}
       actions={actions}
     />

@@ -221,7 +221,7 @@ test("orderAfter puts the new part right after its page", () => {
 
 test("onPastePage stores the text for the note and moves it next to the page", () => {
   const src = readFileSync(new URL("../src/pages/OwnNotes.tsx", import.meta.url), "utf8");
-  assert.match(src, /onPastePage:[\s\S]*?recordingTarget\([^)]*noteId\)[\s\S]*?orderAfter\([\s\S]*?api\.reorder\(noteId/);
+  assert.match(src, /onPastePage:[\s\S]*?lectureTarget\([^)]*noteId\)[\s\S]*?orderAfter\([\s\S]*?api\.reorder\(noteId/);
 });
 
 const photo = (id, over = {}) =>
