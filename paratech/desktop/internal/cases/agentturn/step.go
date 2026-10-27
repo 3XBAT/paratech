@@ -72,7 +72,7 @@ func (s *Service) drive(ctx context.Context, c *change, op string) (st Step, err
 		c.context = values.NewRefSet(base.Refs()...)
 		c.context.Add(turn.Scope().Refs()...)
 		req := values.StepRequest{
-			Key: key, Thread: c.th.ID(), Base: base, Scope: turn.Scope(), History: thread.Window(entries, turn.Number()),
+			Key: key, Thread: c.th.ID(), Base: base, Scope: turn.Scope(), History: thread.Window(entries, turn.Number(), c.th.Summary()),
 			MaxOutputTokens: MaxOutputTokens,
 		}
 

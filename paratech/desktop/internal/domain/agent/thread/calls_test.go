@@ -534,7 +534,7 @@ func TestWindow(t *testing.T) {
 	for turn := 1; turn <= 20; turn++ {
 		entries = append(entries, entry(turn, fmt.Sprintf("просьба %d", turn), nil), entry(turn, "", sealed), entry(turn, "", nil, ok("c")))
 	}
-	got := Window(entries, 20)
+	got := Window(entries, 20, noSummary)
 	// Earlier requests shrink to pairs «text, reply» (all 19 fit MaxHistoryTurns); only the current one has echoes, so
 	// the last echo is always one the Hub still keeps.
 	const earlier = 19
@@ -560,7 +560,7 @@ func TestWindow(t *testing.T) {
 	for turn := 1; turn <= 5; turn++ {
 		heavy = append(heavy, entry(turn, big, nil))
 	}
-	if got := Window(heavy, 5); len(got) != 3 || got[0].StudentText != big || got[1].AgentReply != NoReply || got[2].StudentText != big {
+	if got := Window(heavy, 5, noSummary); len(got) != 3 || got[0].StudentText != big || got[1].AgentReply != NoReply || got[2].StudentText != big {
 		t.Fatalf("heavy window has %d entries", len(got))
 	}
 
@@ -570,7 +570,7 @@ func TestWindow(t *testing.T) {
 	for range 10 {
 		long = append(long, entry(1, "", sealed), entry(1, "", nil, ok("c")))
 	}
-	if got := Window(long, 1); len(got) != len(long) {
+	if got := Window(long, 1, noSummary); len(got) != len(long) {
 		t.Fatalf("current request cut to %d entries", len(got))
 	}
 }

@@ -30,8 +30,8 @@ import { AiNoteLabel } from "./OwnNotesParts";
 import { HomeworkCard, SummaryCard } from "./SummaryParts";
 import { TranscriptPage } from "./TranscriptPage";
 
-// One lesson of «База знаний» (TASK-091): «Кратко», «Текст лекции», «Расшифровка» and «Задания» as tabs over the
-// summary and transcript viewers (TASK-087/090/079), opened at the place a search found. Works offline: everything
+// One lesson of «База знаний» (TASK-091): «Мой конспект» (first, the default), «Кратко», «Текст лекции», «Расшифровка»
+// and «Задания» as tabs over the summary and transcript viewers (TASK-087/090/079), opened at the place a search found. Works offline: everything
 // comes from the core on this computer. Model text is rendered by those viewers as React text only.
 export function KnowledgeLessonPage(props: {
   api: KnowledgeBaseApi;
@@ -187,6 +187,14 @@ export function KnowledgeLessonPage(props: {
             onBack={props.onBack}
             onOpenSummary={() => setTab("summary")}
           />
+        ) : tab === "notes" ? (
+          // The student's own notes do not depend on the summary: no «Загрузка…» and no summary error here.
+          <OwnNotes
+            lecture={{ kind: "recording", recordingId: id }}
+            librarySubjectId={lesson.librarySubjectId}
+            librarySubjectState={lesson.librarySubjectState}
+            focusMaterialId={props.materialId}
+          />
         ) : (
           <>
             {error && (
@@ -194,25 +202,13 @@ export function KnowledgeLessonPage(props: {
                 {error}
               </Banner>
             )}
-            {tab === "summary" ? (
-              <>
-                {view === null ? (
-                  !error && <p className="muted">Загрузка…</p>
-                ) : (
-                  <div className="own-paratech">
-                    <AiNoteLabel />
-                    <SummaryCard view={view} focusSection={focusSection} focusPoint={focusPoint} />
-                  </div>
-                )}
-                <OwnNotes
-                  lecture={{ kind: "recording", recordingId: id }}
-                  librarySubjectId={lesson.librarySubjectId}
-                  librarySubjectState={lesson.librarySubjectState}
-                  focusMaterialId={props.materialId}
-                />
-              </>
-            ) : view === null ? (
+            {view === null ? (
               !error && <p className="muted">Загрузка…</p>
+            ) : tab === "summary" ? (
+              <div className="own-paratech">
+                <AiNoteLabel />
+                <SummaryCard view={view} focusSection={focusSection} focusPoint={focusPoint} />
+              </div>
             ) : tab === "homework" ? (
               <HomeworkCard view={view} onOpenAssignment={props.onOpenAssignment} />
             ) : (

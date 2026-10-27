@@ -10,8 +10,8 @@ import (
 	"paratech/desktop/internal/domain/coursework/summary"
 )
 
-// The student's notes are a section of their own after the transcript, with the note, material and locator of each
-// hit; the caps of ADR-0019 count it as a section.
+// The student's notes are a section of their own scanned first in a lesson (ADR-0027 «Ranking»), with the note,
+// material and locator of each hit; the caps of ADR-0019 count it as a section.
 func TestSearchOwnNotes(t *testing.T) {
 	d := Document{
 		Key: "recording:r1", Recording: "r1", Title: "Ряды",
@@ -29,9 +29,9 @@ func TestSearchOwnNotes(t *testing.T) {
 		got = append(got, fmt.Sprintf("%s %s %d %s %s %s/%d", h.Key, h.Section, h.Index, h.Note, h.Material, h.Locator.Kind, h.Locator.N))
 	}
 	want := []string{
-		"recording:r1 transcript 0   /0",
 		"recording:r1 ownNote 0 n1 m1 section/1",
 		"recording:r1 ownNote 2 n2 m2 page/3",
+		"recording:r1 transcript 0   /0",
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("hits =\n %v\nwant\n %v", got, want)
