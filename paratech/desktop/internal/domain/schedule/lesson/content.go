@@ -6,6 +6,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"paratech/desktop/internal/domain/schedule/values"
 )
 
 // Limits of a lesson.
@@ -30,6 +32,10 @@ type Content struct {
 	Subject string
 	Kind    Kind
 	Teacher string
+
+	// CallLink is the call link the imported event carries, in the canonical form of values.CallLink; "" none
+	// (ADR-0032). The calendar projection does not write it.
+	CallLink string
 }
 
 // Validate checks the invariants of a lesson's content.
@@ -49,7 +55,25 @@ func (c Content) Validate() error {
 	if err := c.Kind.Validate(); err != nil {
 		return err
 	}
-	return ValidateTeacher(c.Teacher)
+	if err := ValidateTeacher(c.Teacher); err != nil {
+		return err
+	}
+	return ValidateCallLink(c.CallLink)
+}
+
+// ValidateCallLink checks a stored call link: "" (none) or a link already in the canonical form of ParseCallLink.
+func ValidateCallLink(link string) error {
+	if link == "" {
+		return nil
+	}
+	parsed, err := values.ParseCallLink(link)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidLesson, err)
+	}
+	if parsed.String() != link {
+		return fmt.Errorf("%w: call link is not in canonical form", ErrInvalidLesson)
+	}
+	return nil
 }
 
 // ValidateTitle checks a lesson title: not blank, at most MaxTitleBytes, valid text without control characters.
@@ -79,10 +103,11 @@ func ValidateSpan(start, end time.Time) error {
 	return nil
 }
 
-// Equal reports whether both contents show the same lesson: same texts, same instants, same zone name and kind.
+// Equal reports whether both contents show the same lesson: same texts, same instants, same zone name, kind and call
+// link.
 func (c Content) Equal(o Content) bool {
 	return c.Title == o.Title && c.Start.Equal(o.Start) && c.End.Equal(o.End) && c.TimeZone == o.TimeZone &&
-		c.Subject == o.Subject && c.Kind == o.Kind && c.Teacher == o.Teacher
+		c.Subject == o.Subject && c.Kind == o.Kind && c.Teacher == o.Teacher && c.CallLink == o.CallLink
 }
 
 // Overlaps reports whether the two time ranges share time. Touching ranges (one ends when the other starts) do not.

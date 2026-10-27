@@ -79,7 +79,7 @@ func saveLesson(ctx context.Context, q *sqlcgen.Queries, l *lesson.Lesson) error
 	if l.Version() == 0 {
 		return DuplicateAsVersionConflict(MapError(ctx, q.InsertLesson(ctx, sqlcgen.InsertLessonParams{
 			ID: p.ID, Title: p.Title, StartsAt: p.StartsAt, EndsAt: p.EndsAt, Timezone: p.Timezone,
-			Subject: p.Subject, Kind: p.Kind, Teacher: p.Teacher, SourceUid: p.SourceUid, StartNotifiedAt: p.StartNotifiedAt, ContentRevision: p.ContentRevision,
+			Subject: p.Subject, Kind: p.Kind, Teacher: p.Teacher, CallLink: p.CallLink, SourceUid: p.SourceUid, StartNotifiedAt: p.StartNotifiedAt, ContentRevision: p.ContentRevision,
 			CalendarSyncedRevision: p.CalendarSyncedRevision, CalendarSyncedAt: p.CalendarSyncedAt,
 			DeletedAt: p.DeletedAt, CreatedAt: jobMs(l.CreatedAt()), UpdatedAt: p.UpdatedAt,
 		})))
@@ -163,7 +163,7 @@ func lessonFromRow(row sqlcgen.ScheduleEntry) (*lesson.Lesson, error) {
 		ID:      shared.LessonID(row.ID),
 		Content: lesson.Content{
 			Title: row.Title, Start: jobFromMs(row.StartsAt), End: jobFromMs(row.EndsAt), TimeZone: row.Timezone,
-			Subject: row.Subject, Kind: kind, Teacher: row.Teacher,
+			Subject: row.Subject, Kind: kind, Teacher: row.Teacher, CallLink: row.CallLink,
 		},
 		SourceUID:              row.SourceUid.String,
 		StartNotifiedAt:        jobFromNullMs(row.StartNotifiedAt),
@@ -196,6 +196,7 @@ func lessonUpdateParams(l *lesson.Lesson) sqlcgen.UpdateLessonParams {
 		Subject:                c.Subject,
 		Kind:                   c.Kind.String(),
 		Teacher:                c.Teacher,
+		CallLink:               c.CallLink,
 		SourceUid:              jobNullString(l.SourceUID()),
 		StartNotifiedAt:        jobNullMs(l.StartNotifiedAt()),
 		ContentRevision:        l.ContentRevision(),

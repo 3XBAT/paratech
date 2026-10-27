@@ -445,6 +445,10 @@ func TestMigrationToVersion14AddsLessonDetails(t *testing.T) {
 	if _, err := p.UpTo(ctx, 14); err != nil {
 		t.Fatalf("up to 14: %v", err)
 	}
+	// The repository reads the current schema: the row is checked at the latest version.
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("migrate to the latest: %v", err)
+	}
 	l, err := NewLessonRepository(db).Get(ctx, "l-old")
 	if err != nil {
 		t.Fatal(err)
