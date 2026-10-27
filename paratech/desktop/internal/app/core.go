@@ -16,6 +16,7 @@ import (
 	"paratech/desktop/internal/adapters/googlecal"
 	"paratech/desktop/internal/adapters/httpdownload"
 	"paratech/desktop/internal/adapters/hubclient"
+	"paratech/desktop/internal/adapters/imagepage"
 	"paratech/desktop/internal/adapters/localfile"
 	"paratech/desktop/internal/adapters/logfile"
 	"paratech/desktop/internal/adapters/pdf"
@@ -189,12 +190,13 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 
 	// The library of subjects and files (ADR-0024): files in the artifact store by sha256; a new subject's semester in
 	// the local time zone. Its texts are read locally (doctext); only Inspect asks the Hub's reader (TASK-122).
-	// A subject with notes of the student is not removed (ADR-0027).
+	// A subject with notes of the student is not removed (ADR-0027). Photos are encoded again locally (imagepage) and
+	// kept as pages without text (TASK-165).
 	noteRepo := sqlite.NewNoteRepository(db)
 	lib, err := library.New(library.Deps{
 		Subjects: sqlite.NewSubjectRepository(db), Materials: sqlite.NewMaterialRepository(db), Blobs: store,
 		Lessons: lessons, Strings: sqlite.NewSubjectStrings(db), Clock: e.local, IDs: e.ids, Texts: doctext.New(),
-		Reader: llm, Inspections: sqlite.NewInspectionRepository(db), Notes: noteRepo, Log: log,
+		Reader: llm, Inspections: sqlite.NewInspectionRepository(db), Notes: noteRepo, Images: imagepage.New(), Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: library: %w", err)
@@ -306,9 +308,10 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	handlers.works = works
 
 	// The knowledge base reads the same local results at query time and groups lessons by library subject; dates of
-	// the export in the local time zone.
+	// the export in the local time zone. The student's notes (ADR-0027) are read with their texts through the library.
 	knowledge, err := knowledgebase.New(knowledgebase.Deps{
-		Library: lib, Lessons: sqlite.NewKnowledgeBase(db), Recordings: recordings, Schedule: lessons, Transcripts: transcripts,
+		Library: lib, Notes: sqlite.NewNoteRepository(db), NoteTexts: lib, Subjects: lib,
+		Lessons: sqlite.NewKnowledgeBase(db), Recordings: recordings, Schedule: lessons, Transcripts: transcripts,
 		Artifacts: store, Summaries: summaries, LectureTexts: lectureTexts, Writer: textfile.New(), Clock: e.local, Log: log,
 	})
 	if err != nil {

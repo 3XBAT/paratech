@@ -28,7 +28,8 @@ var (
 	ErrNotDeleted = errors.New("assignment is not deleted")
 )
 
-// The field of an assignment the student adds that NewByStudent or StudentDue refused (ADR-0029). Each wraps
+// The field of an assignment the student adds or edits that NewByStudent, EditByStudent or StudentDue refused
+// (ADR-0029). Each wraps
 // ErrInvalidDetails, so the form can mark the field and other callers check ErrInvalidDetails alone.
 var (
 	ErrInvalidTitle = fmt.Errorf("%w: title", ErrInvalidDetails)

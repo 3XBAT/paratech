@@ -49,8 +49,8 @@ func NewByStudent(spec StudentSpec, now time.Time) (*Assignment, error) {
 	if err := checkStudentNote(spec.Note); err != nil {
 		return nil, err
 	}
-	if !spec.Due.IsZero() && (spec.Due.Before(now.AddDate(0, 0, -dueBackDays)) || spec.Due.After(now.AddDate(dueAheadYears, 0, 0))) {
-		return nil, fmt.Errorf("%w: outside %d days back ... %d years ahead", ErrInvalidDue, dueBackDays, dueAheadYears)
+	if err := checkStudentDue(spec.Due, now); err != nil {
+		return nil, err
 	}
 	d, err := NewDetails(spec.Title, spec.Note, spec.Due)
 	if err != nil {
@@ -122,6 +122,14 @@ func checkStudentNote(note string) error {
 		return fmt.Errorf("%w: must be at most %d characters of valid text", ErrInvalidNote, MaxNoteRunes)
 	case strings.ContainsFunc(note, func(r rune) bool { return controlNotBreak(r) || bidiControl(r) }):
 		return fmt.Errorf("%w: contains control characters", ErrInvalidNote)
+	}
+	return nil
+}
+
+// checkStudentDue checks that a deadline, when given, lies within now - 31 days ... now + 2 years.
+func checkStudentDue(due, now time.Time) error {
+	if !due.IsZero() && (due.Before(now.AddDate(0, 0, -dueBackDays)) || due.After(now.AddDate(dueAheadYears, 0, 0))) {
+		return fmt.Errorf("%w: outside %d days back ... %d years ahead", ErrInvalidDue, dueBackDays, dueAheadYears)
 	}
 	return nil
 }

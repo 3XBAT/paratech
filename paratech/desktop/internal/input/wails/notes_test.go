@@ -164,6 +164,11 @@ func (f *fakeNotesUC) ForSubject(_ context.Context, sub shared.SubjectID) ([]not
 	return f.views, f.err
 }
 
+func (f *fakeNotesUC) PageImage(_ context.Context, id shared.MaterialID) (notes.Page, error) {
+	f.calls = append(f.calls, "PageImage "+string(id))
+	return notes.Page{}, notes.ErrMaterialNotFound
+}
+
 type fakeNotePicker struct {
 	paths    []string
 	err      error

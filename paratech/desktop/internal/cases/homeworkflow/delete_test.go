@@ -80,7 +80,7 @@ func TestDeleteAndRestoreEveryOrigin(t *testing.T) {
 					t.Fatal("ListAssignments shows the deleted assignment")
 				}
 			}
-			if _, err := e.svc.EditAssignment(ctx, AssignmentEdit{ID: id, Title: "Правка"}); !errors.Is(err, assignment.ErrDeleted) {
+			if _, err := e.svc.EditAssignment(ctx, AssignmentEdit{ID: id, ExpectedVersion: deleted.Version, Title: "Правка"}); !errors.Is(err, assignment.ErrDeleted) {
 				t.Fatalf("edit of a deleted one: err = %v", err)
 			}
 			if _, err := e.svc.CorrectLesson(ctx, LessonCorrection{ID: id, Subject: "Физика"}); !errors.Is(err, assignment.ErrDeleted) {

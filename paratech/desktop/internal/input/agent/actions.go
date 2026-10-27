@@ -44,10 +44,10 @@ type LessonInfo interface {
 	SetLessonInfo(ctx context.Context, id shared.RecordingID, subject, kind string) (kb.Lesson, error)
 }
 
-// AssignmentEdits reads and edits an assignment (cases/homeworkflow).
+// AssignmentEdits reads an assignment and changes its deadline (cases/homeworkflow).
 type AssignmentEdits interface {
 	Assignment(ctx context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error)
-	EditAssignment(ctx context.Context, e homeworkflow.AssignmentEdit) (homeworkflow.AssignmentView, error)
+	SetAssignmentDue(ctx context.Context, id shared.AssignmentID, expectedVersion int64, due time.Time) (homeworkflow.AssignmentView, error)
 }
 
 // NewAssignments adds an assignment the student asked for and removes it again as the Undo of that same action
@@ -457,10 +457,11 @@ func (a *Actions) setDue(ctx context.Context, id shared.AssignmentID, before int
 	if v.Version != before {
 		return 0, errMovedOn
 	}
-	v, err = a.assignments.EditAssignment(ctx, homeworkflow.AssignmentEdit{
-		ID: id, Title: v.Title, Description: v.Description, Due: due,
-	})
-	if err != nil {
+	v, err = a.assignments.SetAssignmentDue(ctx, id, before, due)
+	switch {
+	case errors.Is(err, shared.ErrVersionConflict):
+		return 0, errMovedOn
+	case err != nil:
 		return 0, err
 	}
 	return v.Version, nil

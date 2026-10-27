@@ -327,6 +327,34 @@ func (f *fakeTexts) Extract(_ context.Context, typ material.Type, data []byte) (
 	return material.NewText(material.FragmentsOf(strings.Split(string(data), "\n")), false)
 }
 
+// fakeImages "cleans" a photo by prefixing it, so the stored bytes tell whether they went through it; err, when set,
+// is returned instead, and typ, when set, is the type it claims.
+type fakeImages struct {
+	mu    sync.Mutex
+	calls int
+	err   error
+	typ   material.Type
+}
+
+const cleanPrefix = "clean:"
+
+func (f *fakeImages) Clean(_ context.Context, data []byte) (material.Type, []byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if f.err != nil {
+		return "", nil, f.err
+	}
+	typ, err := material.DetectType(data)
+	if err != nil || !typ.Image() {
+		return "", nil, material.ErrUnsupportedImage
+	}
+	if f.typ != "" {
+		typ = f.typ
+	}
+	return typ, append([]byte(cleanPrefix), data...), nil
+}
+
 // fakeReader is the Hub's reader: it answers the next scripted output or error and records the requests.
 type fakeReader struct {
 	mu      sync.Mutex
@@ -448,6 +476,7 @@ type env struct {
 	texts       *fakeTexts
 	reader      *fakeReader
 	inspections *fakeInspections
+	images      *fakeImages
 	svc         *Service
 }
 
@@ -460,11 +489,11 @@ func newEnv(t interface {
 		subjects: newFakeSubjects(), materials: newFakeMaterials(), blobs: newFakeBlobs(),
 		lessons: fakeLessons{live: map[shared.LessonID]bool{"l1": true, "l2": true}}, strings: &fakeStrings{},
 		clock: &fakeClock{now: t0}, texts: &fakeTexts{}, reader: &fakeReader{},
-		inspections: &fakeInspections{rows: map[shared.MaterialID]inspection.State{}},
+		inspections: &fakeInspections{rows: map[shared.MaterialID]inspection.State{}}, images: &fakeImages{},
 	}
 	svc, err := New(Deps{
 		Subjects: e.subjects, Materials: e.materials, Blobs: e.blobs, Lessons: e.lessons, Strings: e.strings,
-		Clock: e.clock, IDs: &seqIDs{}, Texts: e.texts, Reader: e.reader, Inspections: e.inspections,
+		Clock: e.clock, IDs: &seqIDs{}, Texts: e.texts, Reader: e.reader, Inspections: e.inspections, Images: e.images,
 	})
 	if err != nil {
 		t.Fatal(err)

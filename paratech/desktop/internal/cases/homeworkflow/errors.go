@@ -49,8 +49,8 @@ var (
 	// ErrNoPath is returned by Drafts.SaveDocx without a target path.
 	ErrNoPath = errors.New("homework draft: no file to save to")
 
-	// ErrSubjectNotFound is returned by Service.CreateAssignment for a subject the library does not have (ADR-0029).
-	// It is not shared.ErrNotFound, which stands for an unknown lesson there.
+	// ErrSubjectNotFound is returned by Service.CreateAssignment and Service.EditAssignment for a subject the library
+	// does not have (ADR-0029). It is not shared.ErrNotFound, which stands for an unknown lesson or assignment there.
 	ErrSubjectNotFound = errors.New("homework workflow: subject not found")
 
 	// ErrNotByStudent is returned by Service.RemoveCreatedAssignment for an assignment the student did not add

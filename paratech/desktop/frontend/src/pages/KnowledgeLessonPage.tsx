@@ -22,6 +22,8 @@ import { Button } from "../ui/Button";
 import { Banner, type ResultKind, Segmented } from "../ui/controls";
 import { LessonInfoForm, ReadyMarks } from "./KnowledgeParts";
 import { LectureTextCard } from "./LectureTextParts";
+import { OwnNotes } from "./OwnNotes";
+import { AiNoteLabel } from "./OwnNotesParts";
 import { HomeworkCard, SummaryCard } from "./SummaryParts";
 import { TranscriptPage } from "./TranscriptPage";
 
@@ -187,10 +189,20 @@ export function KnowledgeLessonPage(props: {
                 {error}
               </Banner>
             )}
-            {view === null ? (
+            {tab === "summary" ? (
+              <>
+                {view === null ? (
+                  !error && <p className="muted">Загрузка…</p>
+                ) : (
+                  <div className="own-paratech">
+                    <AiNoteLabel />
+                    <SummaryCard view={view} focusSection={focusSection} focusPoint={focusPoint} />
+                  </div>
+                )}
+                <OwnNotes recordingId={id} subject={lesson.subject} />
+              </>
+            ) : view === null ? (
               !error && <p className="muted">Загрузка…</p>
-            ) : tab === "summary" ? (
-              <SummaryCard view={view} focusSection={focusSection} focusPoint={focusPoint} />
             ) : tab === "homework" ? (
               <HomeworkCard view={view} onOpenAssignment={props.onOpenAssignment} />
             ) : (

@@ -89,8 +89,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != 40 {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want 40", first, err)
+	if err != nil || first != materialImagesVersion {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, materialImagesVersion)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
@@ -248,6 +248,99 @@ func TestMigrationToVersion8DropsCompletionNotices(t *testing.T) {
 	mustExec(t, db, `INSERT INTO job_notices (job_id, status, job_type, notified_at) VALUES ('j1', 'FAILED', 'stt', 6)`)
 	if _, err := db.sql.ExecContext(ctx, "UPDATE settings SET notify_on_processing_complete = 2"); !errors.Is(MapError(ctx, err), ErrConstraint) {
 		t.Fatalf("restored CHECK: err = %v, want ErrConstraint", err)
+	}
+}
+
+// materialImagesVersion is the migration that rebuilds materials for photos (TASK-165), the newest one.
+const materialImagesVersion = 41
+
+// The rebuild of materials keeps every row and every reference to them (lesson links, note parts), leaves foreign
+// keys on, takes photos only with 'no_text', and goes back down dropping the photos.
+func TestMigrationMaterialImagesKeepsReferences(t *testing.T) {
+	t.Parallel() // uses a database of its own
+	ctx := context.Background()
+	db := openTest(t, func(o *Options) { o.Migrate = false })
+	p, err := db.provider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, materialImagesVersion-1); err != nil {
+		t.Fatalf("up to %d: %v", materialImagesVersion-1, err)
+	}
+	const digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	for _, s := range []string{
+		`INSERT INTO subjects (id, name, name_key, semester, created_at, updated_at) VALUES ('s1', 'Матан', 'матан', '2026-autumn', 1, 1)`,
+		`INSERT INTO subject_folders (id, subject_id, name, name_key, system, position) VALUES ('f1', 's1', 'Лекции', 'лекции', 'lectures', 0)`,
+		`INSERT INTO schedule_entries (id, title, starts_at, ends_at, timezone, created_at, updated_at) VALUES ('l1', 'Матан', 0, 10, 'Europe/Moscow', 0, 0)`,
+		`INSERT INTO materials (id, sha256, size_bytes, type, original_name, subject_id, folder_id, status, text_status, version, created_at, updated_at)
+			VALUES ('m1', '` + digest + `', 10, 'docx', 'a.docx', 's1', 'f1', 'active', 'extracted', 3, 1, 2)`,
+		`INSERT INTO material_lessons (material_id, lesson_id, position) VALUES ('m1', 'l1', 0)`,
+		`INSERT INTO notes (id, subject_id, title, anchor_kind, anchor_date, status, created_at, updated_at) VALUES ('n1', 's1', 'Конспект', 'day', '2026-10-27', 'active', 1, 1)`,
+		`INSERT INTO note_parts (note_id, material_id, position) VALUES ('n1', 'm1', 0)`,
+	} {
+		mustExec(t, db, s)
+	}
+
+	if _, err := p.UpTo(ctx, materialImagesVersion); err != nil {
+		t.Fatalf("migrate to %d: %v", materialImagesVersion, err)
+	}
+	var typ, text, name string
+	var version, size int64
+	if err := db.sql.QueryRowContext(ctx, "SELECT type, text_status, original_name, version, size_bytes FROM materials WHERE id = 'm1'").
+		Scan(&typ, &text, &name, &version, &size); err != nil {
+		t.Fatal(err)
+	}
+	if typ != "docx" || text != "extracted" || name != "a.docx" || version != 3 || size != 10 {
+		t.Fatalf("material after the rebuild: %s %s %s %d %d", typ, text, name, version, size)
+	}
+	for _, q := range []string{
+		"SELECT count(*) FROM material_lessons WHERE material_id = 'm1'",
+		"SELECT count(*) FROM note_parts WHERE material_id = 'm1'",
+		"PRAGMA foreign_keys",
+	} {
+		if n := scanInt(t, db.sql, q); n != 1 {
+			t.Errorf("%s = %d, want 1", q, n)
+		}
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM sqlite_master WHERE sql LIKE '%materials_v%'"); n != 0 {
+		t.Errorf("%d schema objects still name the old table", n)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM pragma_foreign_key_check"); n != 0 {
+		t.Errorf("%d broken references", n)
+	}
+	// The references are in force again: a material that is a part of a note cannot be deleted.
+	if _, err := db.sql.ExecContext(ctx, "DELETE FROM materials WHERE id = 'm1'"); !errors.Is(MapError(ctx, err), shared.ErrConflict) {
+		t.Fatalf("delete of a note part: %v, want ErrConflict", err)
+	}
+
+	const photo = `INSERT INTO materials (id, sha256, size_bytes, type, status, text_status, created_at, updated_at)
+		VALUES ('m2', '` + "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210" + `', 5, 'jpeg', 'active', 'no_text', 1, 1)`
+	for _, bad := range []string{
+		strings.Replace(photo, "'no_text'", "'pending'", 1),
+		strings.Replace(photo, "'jpeg'", "'docx'", 1),
+		strings.Replace(photo, "'jpeg'", "'gif'", 1),
+	} {
+		if _, err := db.sql.ExecContext(ctx, bad); !errors.Is(MapError(ctx, err), ErrConstraint) {
+			t.Errorf("%s: %v, want ErrConstraint", bad, err)
+		}
+	}
+	mustExec(t, db, photo)
+	mustExec(t, db, `INSERT INTO note_parts (note_id, material_id, position) VALUES ('n1', 'm2', 1)`)
+
+	if _, err := p.DownTo(ctx, materialImagesVersion-1); err != nil {
+		t.Fatalf("down to %d: %v", materialImagesVersion-1, err)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM materials"); n != 1 {
+		t.Fatalf("materials after down = %d, want the docx only", n)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM note_parts"); n != 1 {
+		t.Fatalf("note parts after down = %d, want the docx only", n)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM pragma_foreign_key_check"); n != 0 {
+		t.Errorf("%d broken references after down", n)
+	}
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("up again: %v", err)
 	}
 }
 

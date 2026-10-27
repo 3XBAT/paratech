@@ -281,17 +281,21 @@ func (a *memAssignments) Assignment(_ context.Context, id shared.AssignmentID) (
 	return homeworkflow.AssignmentView{}, fmt.Errorf("assignment %s: %w", id, shared.ErrNotFound)
 }
 
-func (a *memAssignments) EditAssignment(_ context.Context, e homeworkflow.AssignmentEdit) (homeworkflow.AssignmentView, error) {
-	v, ok := a.views[e.ID]
-	if !ok {
+func (a *memAssignments) SetAssignmentDue(_ context.Context, id shared.AssignmentID, expectedVersion int64,
+	due time.Time) (homeworkflow.AssignmentView, error) {
+	v, ok := a.views[id]
+	switch {
+	case !ok:
 		return homeworkflow.AssignmentView{}, shared.ErrNotFound
+	case v.Version != expectedVersion:
+		return homeworkflow.AssignmentView{}, shared.ErrVersionConflict
 	}
-	v.Title, v.Description, v.Due, v.UserEdited = e.Title, e.Description, e.Due.UTC(), true
-	if e.Due.IsZero() {
+	v.Due, v.UserEdited = due.UTC(), true
+	if due.IsZero() {
 		v.Due = time.Time{}
 	}
 	v.Version++
-	a.views[e.ID] = v
+	a.views[id] = v
 	return v, nil
 }
 

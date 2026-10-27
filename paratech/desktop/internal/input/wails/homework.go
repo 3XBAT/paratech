@@ -40,6 +40,7 @@ const (
 	ErrSendCannotConfirm     = homeworkError("Эту отправку уже нельзя подтвердить. Подготовьте её ещё раз.")
 	ErrSendAlreadyDecided    = homeworkError("Эта отправка уже подтверждена или отменена.")
 	ErrSendStale             = homeworkError("Файл, адрес получателя или тема письма изменились после подтверждения. Проверьте и подтвердите ещё раз.")
+	ErrSendAssignmentDeleted = homeworkError("Задание удалено: письмо не отправлено. Верните задание и подготовьте отправку ещё раз.")
 	ErrSendUnresolved        = homeworkError("Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Сначала разберитесь с ним в списке писем.")
 	ErrSendIncomplete        = homeworkError("Не удалось завершить отправку. Повторите — второе письмо не уйдёт — или проверьте список писем ниже.")
 	ErrExportLocked          = homeworkError("Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Пока оно не решено, файл задания менять нельзя.")
@@ -140,6 +141,9 @@ type HomeworkProposals interface {
 	Assignment(ctx context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error)
 	CorrectLesson(ctx context.Context, c homeworkflow.LessonCorrection) (homeworkflow.AssignmentView, error)
 	CreateAssignment(ctx context.Context, in homeworkflow.NewAssignment) (homeworkflow.AssignmentView, error)
+	DeleteAssignment(ctx context.Context, id shared.AssignmentID, expectedVersion int64) (homeworkflow.AssignmentView, error)
+	RestoreAssignment(ctx context.Context, id shared.AssignmentID, expectedVersion int64) (homeworkflow.AssignmentView, error)
+	EditAssignment(ctx context.Context, e homeworkflow.AssignmentEdit) (homeworkflow.AssignmentView, error)
 	ProposeSend(ctx context.Context, a shared.AssignmentID, format proposal.Format) (homeworkflow.ProposalView, error)
 	Get(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
 	ConfirmSend(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format) (homeworkflow.ProposalView, error)
@@ -201,22 +205,28 @@ func (c HomeworkCore) complete() bool {
 // unknown); a "transcript" one is a model hint from the recording, shown marked «по записи». Kind is the code of the
 // lesson kind ("lecture", "seminar", "practice", "lab" or ""). LessonDate is the lesson start («занятие 19.10»).
 // CorrectedSubject and CorrectedTeacher are the user's correction, "" when none, for the correction form.
+//
+// Version is the stored version; delete, restore and edit send it back (ADR-0029). SubjectFromLesson: the shown
+// subject is the lesson's (schedule or recording), not one the student chose, so an empty subject in the edit form
+// keeps showing it.
 type AssignmentItem struct {
-	ID               string `json:"id"`
-	LessonID         string `json:"lessonId"`
-	Title            string `json:"title"`
-	Description      string `json:"description"`
-	Due              string `json:"due"`
-	UserEdited       bool   `json:"userEdited"`
-	UpdatedAt        string `json:"updatedAt"`
-	Subject          string `json:"subject"`
-	SubjectSource    string `json:"subjectSource"`
-	Kind             string `json:"kind"`
-	Teacher          string `json:"teacher"`
-	TeacherSource    string `json:"teacherSource"`
-	LessonDate       string `json:"lessonDate"`
-	CorrectedSubject string `json:"correctedSubject"`
-	CorrectedTeacher string `json:"correctedTeacher"`
+	ID                string `json:"id"`
+	LessonID          string `json:"lessonId"`
+	Title             string `json:"title"`
+	Description       string `json:"description"`
+	Due               string `json:"due"`
+	UserEdited        bool   `json:"userEdited"`
+	Version           int64  `json:"version"`
+	UpdatedAt         string `json:"updatedAt"`
+	Subject           string `json:"subject"`
+	SubjectSource     string `json:"subjectSource"`
+	SubjectFromLesson bool   `json:"subjectFromLesson"`
+	Kind              string `json:"kind"`
+	Teacher           string `json:"teacher"`
+	TeacherSource     string `json:"teacherSource"`
+	LessonDate        string `json:"lessonDate"`
+	CorrectedSubject  string `json:"correctedSubject"`
+	CorrectedTeacher  string `json:"correctedTeacher"`
 }
 
 // VersionItem is one draft version in the history list.
@@ -688,13 +698,23 @@ func (s *HomeworkService) ConfirmSend(ctx context.Context, proposalID, subject, 
 		return ErrSendCannotConfirm
 	case errors.Is(err, proposal.ErrStale):
 		s.log.Info(opConfirmSend, "result", err)
-		return ErrSendStale
+		return s.staleSend(ctx, pid)
 	case errors.Is(err, senddelivery.ErrUnresolvedDelivery):
 		s.log.Info(opConfirmSend, "result", err)
 		return ErrSendUnresolved
 	}
 	s.log.Error(opConfirmSend, "err", err)
 	return ErrSendIncomplete
+}
+
+// staleSend explains a send that went STALE at the confirmation: its own text when the assignment was deleted
+// meanwhile (TASK-229), else ErrSendStale.
+func (s *HomeworkService) staleSend(ctx context.Context, pid proposal.ID) error {
+	v, err := s.proposals.Get(ctx, pid)
+	if err == nil && v.Reason == proposal.ReasonAssignmentDeleted {
+		return ErrSendAssignmentDeleted
+	}
+	return ErrSendStale
 }
 
 // CancelSend is «Отмена» in the confirmation dialog: the proposal is declined and can never be sent.
@@ -807,10 +827,11 @@ func assignmentID(id string) (shared.AssignmentID, error) {
 func assignmentItem(a homeworkflow.AssignmentView) AssignmentItem {
 	return AssignmentItem{
 		ID: string(a.ID), LessonID: string(a.LessonID), Title: a.Title, Description: a.Description, Due: rfc3339(a.Due),
-		UserEdited: a.UserEdited, UpdatedAt: rfc3339(a.UpdatedAt),
+		UserEdited: a.UserEdited, Version: a.Version, UpdatedAt: rfc3339(a.UpdatedAt),
 		Subject: a.Subject, SubjectSource: string(a.SubjectSource), Kind: a.Kind, Teacher: a.Teacher,
 		TeacherSource: string(a.TeacherSource), LessonDate: rfc3339(a.LessonDate),
 		CorrectedSubject: a.CorrectedSubject, CorrectedTeacher: a.CorrectedTeacher,
+		SubjectFromLesson: a.SubjectSource == values.SourceSchedule || a.SubjectSource == values.SourceTranscript,
 	}
 }
 

@@ -35,29 +35,53 @@ type Source struct {
 // Facts are what is known of the lesson of one recording.
 type Facts struct {
 	Recording shared.RecordingID
-	StartedAt time.Time
-	Duration  time.Duration // 0: unknown
-	Snapshot  *Source       // nil: the recording kept no snapshot
-	Live      *Source       // nil: an ad-hoc recording, or the lesson is gone
+	// ScheduleLesson is the schedule lesson the recording was made in; "" for an ad-hoc one.
+	ScheduleLesson shared.LessonID
+	StartedAt      time.Time
+	Duration       time.Duration // 0: unknown
+	Snapshot       *Source       // nil: the recording kept no snapshot
+	Live           *Source       // nil: an ad-hoc recording, or the lesson is gone
 	// Correction is what the user set; an empty field corrects nothing.
 	Correction Source
 	Ready      Readiness
 }
 
-// Lesson is one lesson of the knowledge base: a recording with its title, subject and kind. Title is "" for an
-// ad-hoc recording (the page names it by its date); Subject is "" for the group NoSubjectName. Library is the subject
-// of the library its Subject string resolves to (ADR-0024); zero when it resolves to none.
+// Lesson is one lesson of the knowledge base: a recording with its title, subject and kind, or a lecture the student
+// has only notes of (ADR-0027, WithNotes). Title is "" for an ad-hoc recording (the page names it by its date);
+// Subject is "" for the group NoSubjectName. Library is the subject of the library its Subject string resolves to
+// (ADR-0024); zero when it resolves to none.
+//
+// Key identifies the lesson (RecordingKey, LessonKey, DayKey or NoteKey). A note-only lecture has no Recording, starts
+// at the local midnight of its day (zero when undated) and has no Duration nor Ready.
 type Lesson struct {
-	Recording     shared.RecordingID
-	StartedAt     time.Time
-	Duration      time.Duration
-	Title         string
-	Subject       string
-	Kind          string // lesson kind code; "" if unknown
-	SubjectEdited bool   // the subject is the user's correction
-	KindEdited    bool   // the kind is the user's correction
-	Ready         Readiness
-	Library       LibrarySubject
+	Key            string
+	Recording      shared.RecordingID
+	ScheduleLesson shared.LessonID
+	StartedAt      time.Time
+	Duration       time.Duration
+	Title          string
+	Subject        string
+	Kind           string // lesson kind code; "" if unknown
+	SubjectEdited  bool   // the subject is the user's correction
+	KindEdited     bool   // the kind is the user's correction
+	Ready          Readiness
+	Library        LibrarySubject
+	// Notes are the student's own notes of the lesson, as made; nil without any.
+	Notes []Note
+}
+
+// Recorded reports that the lesson is a recording.
+func (l Lesson) Recorded() bool { return l.Recording != "" }
+
+// Undated reports that the lesson is a note-only lecture without a date.
+func (l Lesson) Undated() bool { return l.Recording == "" && l.StartedAt.IsZero() }
+
+// madeAt is when its first note was made: undated lectures are listed so.
+func (l Lesson) madeAt() time.Time {
+	if len(l.Notes) == 0 {
+		return time.Time{}
+	}
+	return l.Notes[0].CreatedAt
 }
 
 // LibrarySubject is a subject of the library (ADR-0024) as the knowledge base groups by it: its id and name.
@@ -107,7 +131,8 @@ func NewLesson(f Facts) Lesson {
 	label := values.NewLessonLabel(sched, values.LessonNames{}, values.NewLessonNames(f.Correction.Subject, ""))
 
 	l := Lesson{
-		Recording: f.Recording, StartedAt: f.StartedAt, Duration: f.Duration,
+		Key: RecordingKey(f.Recording), Recording: f.Recording, ScheduleLesson: f.ScheduleLesson,
+		StartedAt: f.StartedAt, Duration: f.Duration,
 		Subject: label.Subject(), SubjectEdited: label.SubjectSource() == values.SourceUser,
 		Kind: string(values.LessonKindOf(sched.Kind)), Ready: f.Ready,
 	}
@@ -132,19 +157,21 @@ func (l Lesson) SubjectKey() string {
 	return SubjectKey(l.Subject)
 }
 
-// Subject is one subject of the knowledge base with how many lessons it has. NoSubject marks the group NoSubjectName
-// (key ""). SubjectID is the library subject of the group; "" for a group of a free string.
+// Subject is one subject of the knowledge base with how many recorded lessons it has (Lessons; 0 for a subject with
+// note-only lectures only). NoSubject marks the group NoSubjectName (key ""). SubjectID is the library subject of the
+// group; "" for a group of a free string.
 type Subject struct {
 	Key       string
 	Name      string
 	Lessons   int
-	Latest    time.Time // the start of its newest lesson
+	Latest    time.Time // the start of its newest recorded lesson; zero without one
 	NoSubject bool
 	SubjectID shared.SubjectID
 }
 
 // Subjects groups the lessons by SubjectKey. A library subject is named as the library names it, a free string as its
-// newest lesson spells it; only groups with a lesson are listed, by name, the group NoSubjectName last.
+// newest lesson spells it; only groups with a lesson (recorded or note-only) are listed, by name, the group
+// NoSubjectName last.
 func Subjects(lessons []Lesson) []Subject {
 	groups := map[string]*Subject{}
 	var order []string
@@ -152,7 +179,7 @@ func Subjects(lessons []Lesson) []Subject {
 		key := l.SubjectKey()
 		g, ok := groups[key]
 		if !ok {
-			g = &Subject{Key: key, Name: l.Subject, Latest: l.StartedAt, NoSubject: key == "", SubjectID: l.Library.ID}
+			g = &Subject{Key: key, Name: l.Subject, NoSubject: key == "", SubjectID: l.Library.ID}
 			switch {
 			case g.NoSubject:
 				g.Name = NoSubjectName
@@ -162,7 +189,12 @@ func Subjects(lessons []Lesson) []Subject {
 			groups[key] = g
 			order = append(order, key)
 		}
-		g.Lessons++
+		if l.Recorded() {
+			if g.Lessons == 0 {
+				g.Latest = l.StartedAt
+			}
+			g.Lessons++
+		}
 	}
 
 	out := make([]Subject, 0, len(order))
@@ -199,22 +231,42 @@ func LessonsOf(lessons []Lesson, key string) []Lesson {
 	return out
 }
 
-// Newest returns a copy of the lessons, newest start first; equal starts by recording id.
+// Newest returns a copy of the lessons, newest start first; equal starts by recording id, then by key. Undated
+// lectures come last, as their first notes were made.
 func Newest(lessons []Lesson) []Lesson {
 	out := slices.Clone(lessons)
 	slices.SortStableFunc(out, func(a, b Lesson) int {
+		if au, bu := a.Undated(), b.Undated(); au != bu {
+			if au {
+				return 1
+			}
+			return -1
+		} else if au {
+			if c := a.madeAt().Compare(b.madeAt()); c != 0 {
+				return c
+			}
+			return cmp.Compare(a.Key, b.Key)
+		}
 		if c := b.StartedAt.Compare(a.StartedAt); c != 0 {
 			return c
 		}
-		return cmp.Compare(a.Recording, b.Recording)
+		if c := cmp.Compare(a.Recording, b.Recording); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Key, b.Key)
 	})
 	return out
 }
 
-// Oldest returns a copy of the lessons, oldest start first, as a subject is exported.
+// Oldest returns a copy of the lessons, oldest start first, as a subject is exported; undated lectures still come
+// last, in the order of Newest.
 func Oldest(lessons []Lesson) []Lesson {
 	out := Newest(lessons)
-	slices.Reverse(out)
+	dated := slices.IndexFunc(out, Lesson.Undated)
+	if dated < 0 {
+		dated = len(out)
+	}
+	slices.Reverse(out[:dated])
 	return out
 }
 
