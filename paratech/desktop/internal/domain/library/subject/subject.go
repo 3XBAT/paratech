@@ -65,12 +65,12 @@ func New(spec Spec, now time.Time) (*Subject, error) {
 
 // State is the stored form of a subject, for Restore and the repositories.
 type State struct {
-	Version   int64
-	ID        shared.SubjectID
-	Name      string
-	Aliases   []string
-	Semester  values.Semester
-	Folders   []FolderState
+	Version  int64
+	ID       shared.SubjectID
+	Name     string
+	Aliases  []string
+	Semester values.Semester
+	Folders  []FolderState
 	// TeacherName and TeacherEmail are both "" while no teacher is set.
 	TeacherName  string
 	TeacherEmail string
