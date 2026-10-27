@@ -1,0 +1,20 @@
+/* «Мой конспект» (TASK-154). One accent; the two blocks are told apart by heading, chip and a rule, not by colour. */
+.own-notes { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--sep); display: grid; gap: 12px; }
+.own-paratech { display: grid; gap: 12px; }
+.own-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.own-title { margin: 0; font-size: 16px; }
+.own-paste { display: grid; gap: 6px; max-width: 720px; }
+.own-paste-text { width: 100%; min-height: 140px; resize: vertical; font: inherit; }
+.own-status { display: grid; gap: 6px; }
+.own-status:empty { display: none; }
+.own-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.own-lines li { display: flex; gap: 6px; align-items: flex-start; overflow-wrap: anywhere; }
+.own-list { display: grid; gap: 12px; }
+.own-note-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.own-note-title { margin: 6px 0 0; font-size: 15px; overflow-wrap: anywhere; }
+.own-removed { margin: 0 0 8px; color: var(--muted); }
+.own-parts { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 2px; }
+.own-part { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--sep); }
+.own-part-main { display: grid; gap: 2px; min-width: 0; }
+.own-part-name { overflow-wrap: anywhere; }
+.own-part-acts { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
