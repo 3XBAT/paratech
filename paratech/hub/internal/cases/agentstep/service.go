@@ -262,6 +262,12 @@ func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
 	unusable := answer.Failure()
 	textReply := false
 	if unusable == nil {
+		// A reply text over its limit (catalog 7) is cut at a sentence rather than failed and charged (TASK-223); the
+		// echo carries the cut calls, so the kept turn is found under them.
+		var cut bool
+		if calls, cut = st.version.Catalog.FitReturned(calls); cut {
+			attrs = append(attrs, "reply_cut", true)
+		}
 		// The model's calls are untrusted: a call outside the catalog schema is the provider's failure (ADR-0023).
 		if cerr := st.version.Catalog.CheckReturned(calls); cerr != nil {
 			unusable = &values.ProviderError{Kind: values.KindPermanent, Reason: "invalid tool calls"}

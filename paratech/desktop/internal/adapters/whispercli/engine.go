@@ -81,6 +81,11 @@ type Config struct {
 	// Language is the -l value from the whisper.cpp list; "" means LanguageAuto.
 	Language string
 
+	// VADModel is the absolute path of the voice activity detection model of the verified speech component (it lies
+	// next to Binary, outside DataRoot); "" runs without it. A file that cannot be used is logged and the runs go on
+	// without voice activity detection: slower, but they still work.
+	VADModel string
+
 	// Timeout kills a run that takes longer; 0 means no limit besides the context.
 	Timeout time.Duration
 
@@ -97,6 +102,7 @@ type Engine struct {
 	cpus      int
 	policy    loadpolicy.Policy
 	language  string
+	vad       string // the -vm path; "" without voice activity detection
 	redact    []redaction
 	log       *slog.Logger
 
@@ -149,6 +155,15 @@ func New(cfg Config, paths Paths, artifacts Artifacts) (*Engine, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 
+	vad, unusable, err := checkVADModel(cfg.VADModel)
+	if err != nil {
+		return nil, err
+	}
+	if unusable != nil {
+		log.Warn("speech recognition runs without voice activity detection: the VAD model cannot be used",
+			slog.Any("err", unusable))
+	}
+
 	return &Engine{
 		cfg:       cfg,
 		paths:     paths,
@@ -157,6 +172,7 @@ func New(cfg Config, paths Paths, artifacts Artifacts) (*Engine, error) {
 		cpus:      cpus,
 		policy:    loadpolicy.New(),
 		language:  lang,
+		vad:       vad,
 		log:       log,
 		redact: []redaction{
 			newRedaction(cfg.DataRoot, placeholderData),
@@ -183,6 +199,30 @@ func checkBinary(bin string) error {
 	}
 
 	return nil
+}
+
+// checkVADModel returns the -vm path of Config.VADModel. A path that is not absolute and clean is a configuration
+// error; a file that is not a regular file or a path the CLI would not receive unchanged leaves the runs without
+// voice activity detection (path "", the reason in unusable). Messages do not contain the path.
+func checkVADModel(p string) (path string, unusable, err error) {
+	if p == "" {
+		return "", nil, nil
+	}
+	if !filepath.IsAbs(p) || filepath.Clean(p) != p {
+		return "", nil, fmt.Errorf("%w: VAD model path must be absolute and clean", ErrConfig)
+	}
+
+	fi, err := os.Lstat(p)
+	switch {
+	case err != nil:
+		return "", fmt.Errorf("%w: VAD model: %w", ErrInvalidInput, bareErr(err)), nil
+	case !fi.Mode().IsRegular():
+		return "", fmt.Errorf("%w: VAD model is not a regular file", ErrInvalidInput), nil
+	}
+	if err := checkArg(p); err != nil {
+		return "", fmt.Errorf("VAD model: %w", err), nil
+	}
+	return p, nil, nil
 }
 
 func checkDirs(root, work string) error {
@@ -261,7 +301,7 @@ func (e *Engine) Transcribe(ctx context.Context, audio, model, output shared.Art
 
 	policy := e.runPolicy(load)
 	outPrefix := filepath.Join(runDir, outName)
-	args := buildArgs(modelPath, audioPath, outPrefix, policy.Threads(), e.language)
+	args := buildArgs(modelPath, audioPath, outPrefix, policy.Threads(), e.language, e.vad)
 
 	var send func(int)
 	if progress != nil {

@@ -34,7 +34,8 @@ const (
 )
 
 // MaxOutputTokens is the output cap of one planner step; the Hub raises it to its floor and clamps it to its cap.
-// 4096 leaves room for a plan or a reply with a list in one step (TASK-172 raised the Hub's planner cap to match).
+// 4096 leaves room for a plan or a reply with a list in one step (TASK-172 raised the Hub's planner cap to match). The
+// Hub's planner alias is still capped at 4096, so a reply of catalog v7 (up to 4000 characters) is not asked more here.
 const MaxOutputTokens = 4096
 
 // historyLimit is the most entries read for a step: enough whole requests (a text, then an echo and results per

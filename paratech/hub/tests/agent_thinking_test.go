@@ -38,6 +38,7 @@ func (alwaysReady) Ping(context.Context) error { return nil }
 type thinkingEnv struct {
 	api    *testenv.FakeMessagesAPI
 	turns  *testenv.AgentTurns
+	store  *testenv.QuotaStore
 	client hubv1connect.GatewayServiceClient
 	owner  shared.APIKeyID
 	apiKey string
@@ -45,6 +46,12 @@ type thinkingEnv struct {
 }
 
 func newThinkingEnv(t *testing.T, answers ...[]testenv.FakeToolUse) thinkingEnv {
+	t.Helper()
+	return newPanelEnv(t, []uint32{1}, answers...)
+}
+
+// newPanelEnv is thinkingEnv serving the panel catalogs of versions.
+func newPanelEnv(t *testing.T, versions []uint32, answers ...[]testenv.FakeToolUse) thinkingEnv {
 	t.Helper()
 	e := thinkingEnv{api: testenv.NewFakeMessagesAPI(t, answers...), turns: testenv.NewAgentTurns(), logs: &lockedBuffer{}}
 	log := slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -76,17 +83,22 @@ func newThinkingEnv(t *testing.T, answers ...[]testenv.FakeToolUse) thinkingEnv 
 	if err != nil {
 		t.Fatal(err)
 	}
-	system, catalog, err := testenv.PanelV1()
-	if err != nil {
-		t.Fatal(err)
+	var served []agentstep.Version
+	for _, v := range versions {
+		system, catalog, err := testenv.Panel(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		served = append(served, agentstep.Version{System: system, Catalog: catalog})
 	}
 	store := testenv.NewQuotaStore()
+	e.store = store
 	agentSvc, err := agentstep.New(agentstep.Deps{
 		Accounts: store, Turns: e.turns, Provider: provider, Limiter: &testenv.FakeLimiter{}, Clock: clock,
 		Random: testenv.Random{}, Models: models, Sealer: sealer, Log: log,
 	}, agentstep.Config{
 		Unit: "tokens", Limit: 1_000_000, ReservationTTL: 10 * time.Minute, KeyRetention: 24 * time.Hour, CallTimeout: 4 * time.Minute,
-		Profiles: []agentstep.Profile{{Name: values.ProfilePanel, Alias: "planner", Versions: []agentstep.Version{{System: system, Catalog: catalog}}}},
+		Profiles: []agentstep.Profile{{Name: values.ProfilePanel, Alias: "planner", Versions: served}},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -34,24 +34,64 @@ Used by `desktop/internal/adapters/whispercli` (TASK-024). Re-verify everything 
 
 The pinned set lives in one manifest, `desktop/internal/app/speechcomponent.json` (embedded; the build scripts read the
 same file). Fields: `schema_version` (1), `version` (build tag), `source_url`, `size_bytes` and `sha256` of the archive,
-`download_hosts`, `entry_prefix` (`Release/`), `executable` (`whisper-cli.exe`) and `files`: `name`, `size_bytes`,
-`sha256` of each of the 13 files (`whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll`, nine `ggml-cpu-*.dll`).
-Parsed by `values.ParseSpeechComponent`.
+`download_hosts`, `entry_prefix` (`Release/`), `executable` (`whisper-cli.exe`), `vad_model` and `files`: `name`, `size_bytes`,
+`sha256` of each of the 14 files (`whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll`, nine `ggml-cpu-*.dll` from the archive,
+and `ggml-silero-v5.1.2.bin`). A file with its own `source_url` is not in the archive and is downloaded on its own (its host must be
+in `download_hosts`): the Silero VAD model (TASK-222, ADR-0031, see "Voice activity detection"). Parsed by `values.ParseSpeechComponent`.
 
 - **Hosts.** `github.com` answers `302` to `release-assets.githubusercontent.com` (seen 2026-10-18);
-  `objects.githubusercontent.com` is the older redirect host. Only these, exact match.
+  `objects.githubusercontent.com` is the older redirect host. For the VAD model `huggingface.co` and the Hugging Face CDN hosts of the
+  model catalog (below). Only these, exact match.
 - **Where the app looks**, in order: (a) the folder of the executable (installer, build scripts; read only), then
-  (b) `<data dir>\components\speech` (the in-app install; always writable). A folder counts only when all 13 files are
+  (b) `<data dir>\components\speech` (the in-app install; always writable). A folder counts only when all 14 files are
   regular files (no links or reparse points) with the pinned size and SHA-256; some files but no verified set is
-  "damaged". Detection hashes about 12 MB at start and after an install.
+  "damaged". Detection hashes about 12.5 MB at start and after an install.
 - **In-app install** (button «Установить компонент распознавания»): download from the hosts above, size and SHA-256 of
   the archive checked before it is opened; only the entries named exactly `Release/<file>` are unpacked, each to a path
   built from the manifest name, bounded and hashed while written, into `components\staging-*`; only a fully verified
-  set replaces `components\speech`. Nothing from the archive runs before that. Leftovers are removed at the next start.
+  set replaces `components\speech`. The VAD model is downloaded after the archive (whole file, size and SHA-256 checked) into
+  `components\download-<name>` and copied into the staging folder with the same checks. Nothing from the archive runs before that.
+  Leftovers are removed at the next start. A folder of an older app version (13 files, no VAD model) counts as damaged: the page
+  offers the install again.
   Then the engine is built from the new folder and the `stt` job type is registered at run time (no restart).
 - **Refresh.** New tag: update the manifest (archive size and digest from the GitHub asset, the 13 file sizes and
-  digests from the unpacked `Release/`), check `whisper-cli.exe --help` runs with only these files, update
-  `app/speech_test.go` (`TestEmbeddedSpeechManifest`).
+  digests from the unpacked `Release/`), check `whisper-cli.exe --help` runs with only these files and still lists the VAD
+  options, update `app/speech_test.go` (`TestEmbeddedSpeechManifest`).
+
+## Voice activity detection (TASK-222, ADR-0031)
+
+whisper-cli of b5454 has the VAD options (checked with `whisper-cli.exe --help` of the pinned binary, 2026-10-27):
+
+```
+--vad                               [false  ] enable Voice Activity Detection (VAD)
+-vm FNAME, --vad-model FNAME        [       ] VAD model path
+-vt N,     --vad-threshold N        [0.50   ] VAD threshold for speech recognition
+-vspd N,   --vad-min-speech-duration-ms  N [250    ]
+-vsd N,    --vad-min-silence-duration-ms N [100    ]
+-vmsd N,   --vad-max-speech-duration-s   N [FLT_MAX]
+-vp N,     --vad-speech-pad-ms           N [30     ]
+-vo N,     --vad-samples-overlap         N [0.10   ]
+```
+
+The adapter passes only `--vad -vm <component folder>\ggml-silero-v5.1.2.bin`; the other options keep these defaults, and the
+decoder stays the CLI default (beam search `-bs 5 -bo 5`, owner 2026-10-27).
+
+- **Model.** `ggml-silero-v5.1.2.bin`, 885 098 bytes, SHA-256 `29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf`,
+  from https://huggingface.co/ggml-org/whisper-vad (`resolve/main/ggml-silero-v5.1.2.bin`, downloaded 2026-10-26). **To pin**: the
+  `source_url` names `main`, not a commit, and the digest was computed from the download, not compared with the `lfs.oid` of the
+  Hugging Face API (no network in that session). The SHA-256 still pins the content: another file fails the install.
+- **Timestamps** (pinned binary, base-q5_1, synthetic lecture of TTS phrases with pauses of 3–75 s, 2026-10-27; fixture
+  `adapters/whispercli/testdata/vad`): the JSON offsets and the stdout lines are on the time line of the whole recording. Every
+  passage starts within 0.4 s of where it is spoken (without VAD the second one started 19 s early and whisper invented text in a
+  75 s pause). A segment before a pause **ends where the next speech starts** (one segment 52.6–132.1 s for about 4 s of speech): ends
+  are stretched over the silence, starts are right and never go back. The live preview and the stored document only need ordered
+  starts; the lecture text and the summary time codes use the starts.
+- **Speed** (same machine, 4 threads): synthetic 217 s with long pauses, base-q5_1: 29.3 s without VAD, 14.8 s with it (encoder
+  windows 10 → 3); synthetic Russian 279 s, 74 % speech, pauses under 2 s but two of 22 s: 57.0 s → 53.7 s (windows 11 → 8);
+  5 min of a real lecture, small-q5_1: 239.5 s → 120.9 s (research of 2026-10-26). The gain follows the silence.
+- **Progress** with VAD is the share of the speech processed: on the Russian sample 14 % … 100 % in seven steps, as smooth as
+  without VAD; on the sample with long pauses (3 windows) only 89 % and 100 %, then the time left falls back to the estimate
+  less the time since the start (ADR-0016).
 
 ## Models
 
@@ -121,7 +161,7 @@ download with "Источник модели ответил не так, как 
 ## Command line used by the adapter
 
 ```
-whisper-cli.exe -m <model> -f <audio> -of <run-dir>\out -oj -pp -ng -t <threads> -l <lang>
+whisper-cli.exe -m <model> -f <audio> -of <run-dir>\out -oj -pp -ng -t <threads> -l <lang> --vad -vm <component>\ggml-silero-v5.1.2.bin
 ```
 
 | Flag | Long form | Meaning (cli.cpp v1.9.5) | Adapter value |
@@ -134,12 +174,14 @@ whisper-cli.exe -m <model> -f <audio> -of <run-dir>\out -oj -pp -ng -t <threads>
 | `-ng` | `--no-gpu` | disable GPU | always (CPU-only, PRD section 4.3) |
 | `-t N` | `--threads` | threads (default `min(4, hardware threads)`) | load mode (ADR-0016), 1..256 |
 | `-l LANG` | `--language` | language code or `auto` (default `en`); lower-cased by the CLI | config, allowlist below |
+| `--vad` | | voice activity detection: only speech is recognised | when the component has a VAD model (always for the shipped one) |
+| `-vm FNAME` | `--vad-model` | VAD model path | absolute path in the verified component folder (next to the program); a file that cannot be used is logged and the run goes on without `--vad` |
 
 Other verified flags, not used: `-p N` processors, `-ot/-on/-d` offsets/duration, `-mc`, `-ml`, `-sow`, `-bo`, `-bs`, `-ac`, `-wt`, `-et`,
 `-lpt`, `-nth`, `-tp`, `-tpi`, `-debug`, `-tr` translate, `-di`, `-tdrz`, `-nf`, `-otxt`, `-ovtt`, `-osrt`, `-olrc`, `-owts`, `-fp`, `-ocsv`,
 `-ojf` (JSON with tokens; implies `-oj`), `-np` no prints, `-ps`, `-pc`, `--print-confidence`, `-nt` no timestamps, `-dl` detect language
 and exit, `--prompt`, `--carry-initial-prompt`, `-oved`, `-dtw`, `-ls`, `-dev N`, `-fa`/`-nfa` flash attention (default on), `-sns`,
-`--suppress-regex`, `--grammar`, `--grammar-rule`, `--grammar-penalty`, `--vad`, `-vm`, `-vt`, `-vspd`, `-vsd`, `-vmsd`, `-vp`, `-vo`,
+`--suppress-regex`, `--grammar`, `--grammar-rule`, `--grammar-penalty`, `-vt`, `-vspd`, `-vsd`, `-vmsd`, `-vp`, `-vo`,
 `-h`, `--version`.
 
 ### Argument parsing rules (security relevant)

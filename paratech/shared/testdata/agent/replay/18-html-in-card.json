@@ -1,11 +1,11 @@
 {
   "name": "18-html-in-card",
-  "about": "HTML in a card text: the desktop never shows it.",
+  "about": "HTML in a card text of at most 300 characters: the desktop never shows it. A reply text (catalog 7) may hold angle brackets, shown as plain text.",
   "calls": [
     {
       "call_id": "toolu_01",
-      "tool": "reply",
-      "arguments_json": "{\"text\":\"<img src=x onerror=alert(1)>\"}"
+      "tool": "cannot_do",
+      "arguments_json": "{\"your_part\":[\"<img src=x onerror=alert(1)>\"],\"our_part\":[]}"
     }
   ],
   "hub": "accept",

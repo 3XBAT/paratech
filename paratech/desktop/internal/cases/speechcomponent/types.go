@@ -44,7 +44,7 @@ type Status struct {
 	State State
 	Stage Stage // StateInstalling only
 
-	// Download progress of StateInstalling; TotalBytes is the archive size.
+	// Download progress of StateInstalling; TotalBytes is the archive and the separate files.
 	DoneBytes  int64
 	TotalBytes int64
 

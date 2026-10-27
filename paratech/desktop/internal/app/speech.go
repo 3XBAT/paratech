@@ -133,9 +133,13 @@ func (a *speechActivator) Activate(ctx context.Context, folder values.ComponentF
 	if dir == "" {
 		return fmt.Errorf("app: no directory for the %s speech component folder", folder)
 	}
+	var vad string
+	if name := a.spec.VADModel(); name != "" {
+		vad = filepath.Join(dir, name)
+	}
 	engine, err := whispercli.New(whispercli.Config{
 		Binary: filepath.Join(dir, a.spec.Executable()), DataRoot: a.root, WorkDir: filepath.Join(a.root, sttWorkDir),
-		LogicalCPUs: logicalCPUs(), Log: a.log,
+		LogicalCPUs: logicalCPUs(), VADModel: vad, Log: a.log,
 	}, a.store, a.store)
 	if err != nil {
 		return fmt.Errorf("app: speech recognition engine: %w", err)

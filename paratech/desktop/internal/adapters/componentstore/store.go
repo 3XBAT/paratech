@@ -1,12 +1,14 @@
 // Package componentstore keeps the speech recognition component on disk (TASK-072): it reads the folder of the
 // executable (what the installer ships, read only) and owns <data dir>/components, where the in-app install stores
-// the downloaded archive, unpacks it into a staging folder and swaps the verified set in as components/speech. It
-// satisfies the ComponentFiles port of cases/speechcomponent structurally. Standard library only.
+// the downloaded archive and the files downloaded on their own (the VAD model, TASK-222), unpacks them into a staging
+// folder and swaps the verified set in as components/speech. It satisfies the ComponentFiles port of
+// cases/speechcomponent structurally. Standard library only.
 //
 // Trust boundary: the archive comes from the network. Unpack opens it only when it is a regular file with the pinned
 // size and SHA-256 (read into memory, so it cannot change between the check and the use), takes only entries named
 // exactly <prefix><component file>, writes each to a path built from the manifest name, never from the entry name,
-// bounds and hashes every file while writing, and replaces the installed folder only when every file verified.
+// bounds and hashes every file while writing (a separate file too, copied from where SaveFile stored it), and
+// replaces the installed folder only when every file verified.
 // Nothing from the archive is executed here. Links and reparse points are never followed: a linked folder or file
 // does not count as the component.
 //
@@ -35,9 +37,11 @@ const (
 	componentsDir = "components"
 	installedDir  = "speech"
 	archiveName   = "speech.zip"
-	tmpPrefix     = "tmp-"
-	stagingPrefix = "staging-"
-	retiredPrefix = "retired-"
+	// downloadPrefix names a stored separate file: download-<manifest name>.
+	downloadPrefix = "download-"
+	tmpPrefix      = "tmp-"
+	stagingPrefix  = "staging-"
+	retiredPrefix  = "retired-"
 
 	dirPerm = 0o700
 	// filePerm keeps the program executable where modes count; Windows ignores it (the data directory ACL applies).
@@ -207,6 +211,16 @@ func inspectFile(r *os.Root, f values.ComponentFile) (values.FoundFile, bool, er
 // SaveArchive writes the archive to a temporary file and renames it over the stored archive; it returns the size and
 // SHA-256 of what it wrote. A failure leaves no temporary file behind.
 func (s *Store) SaveArchive(ctx context.Context, content io.Reader) (int64, values.SHA256, error) {
+	return s.save(ctx, archiveName, content)
+}
+
+// SaveFile stores a separate file of the component (downloaded on its own) like SaveArchive, under a name built
+// from the manifest name; Unpack copies it into the installed folder.
+func (s *Store) SaveFile(ctx context.Context, f values.ComponentFile, content io.Reader) (int64, values.SHA256, error) {
+	return s.save(ctx, downloadPrefix+f.Name(), content)
+}
+
+func (s *Store) save(ctx context.Context, name string, content io.Reader) (int64, values.SHA256, error) {
 	tmp := tmpPrefix + randomSuffix()
 	f, err := s.root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, filePerm)
 	if err != nil {
@@ -222,7 +236,7 @@ func (s *Store) SaveArchive(ctx context.Context, content io.Reader) (int64, valu
 		err = cerr
 	}
 	if err == nil {
-		err = s.replace(ctx, tmp, archiveName)
+		err = s.replace(ctx, tmp, name)
 	}
 	if err != nil {
 		_ = s.root.Remove(tmp)
@@ -244,35 +258,42 @@ func (s *Store) replace(ctx context.Context, from, to string) error {
 	return retry(ctx, func() error { return s.root.Rename(from, to) })
 }
 
-// DiscardArchive removes the stored archive.
+// DiscardArchive removes the stored archive and the stored separate files.
 func (s *Store) DiscardArchive(ctx context.Context) error {
 	if err := retry(ctx, func() error { return s.root.RemoveAll(archiveName) }); err != nil {
 		return fail(opDiscard, err)
 	}
-	return nil
+	stored := func(name string) bool { return hasPrefix(name, downloadPrefix) }
+	_, err := s.removeWhere(ctx, opDiscard, stored)
+	return err
 }
 
-// Cleanup removes what an interrupted install left: temporary files, staging and retired folders and the archive. It
-// returns how many entries it removed. Run it before any install.
+// Cleanup removes what an interrupted install left: temporary files, staging and retired folders, the archive and the
+// separate files. It returns how many entries it removed. Run it before any install.
 func (s *Store) Cleanup(ctx context.Context) (int, error) {
+	return s.removeWhere(ctx, opCleanup, leftover)
+}
+
+// removeWhere removes the entries of the component folder whose names match and returns how many it removed.
+func (s *Store) removeWhere(ctx context.Context, op string, match func(string) bool) (int, error) {
 	dir, err := s.root.Open(".")
 	if err != nil {
-		return 0, fail(opCleanup, err)
+		return 0, fail(op, err)
 	}
 	entries, err := dir.ReadDir(-1)
 	_ = dir.Close()
 	if err != nil {
-		return 0, fail(opCleanup, err)
+		return 0, fail(op, err)
 	}
 
 	removed := 0
 	var errs []error
 	for _, e := range entries {
-		if !leftover(e.Name()) {
+		if !match(e.Name()) {
 			continue
 		}
 		if err := retry(ctx, func() error { return s.root.RemoveAll(e.Name()) }); err != nil {
-			errs = append(errs, fail(opCleanup, err))
+			errs = append(errs, fail(op, err))
 			continue
 		}
 		removed++
@@ -281,7 +302,8 @@ func (s *Store) Cleanup(ctx context.Context) (int, error) {
 }
 
 func leftover(name string) bool {
-	return name == archiveName || hasPrefix(name, tmpPrefix) || hasPrefix(name, stagingPrefix) || hasPrefix(name, retiredPrefix)
+	return name == archiveName || hasPrefix(name, downloadPrefix) || hasPrefix(name, tmpPrefix) ||
+		hasPrefix(name, stagingPrefix) || hasPrefix(name, retiredPrefix)
 }
 
 func hasPrefix(s, p string) bool { return len(s) > len(p) && s[:len(p)] == p }

@@ -73,11 +73,13 @@ func (s ComponentState) String() string {
 	return fmt.Sprintf("state(%d)", int(s))
 }
 
-// ComponentFile is one file of the component with its pinned size and SHA-256.
+// ComponentFile is one file of the component with its pinned size and SHA-256. It comes from the archive, or, when it
+// has a source of its own (Separate), is downloaded on its own from there (the VAD model, TASK-222).
 type ComponentFile struct {
-	name string
-	size int64
-	sum  SHA256
+	name   string
+	size   int64
+	sum    SHA256
+	source SourceURL
 }
 
 // Name returns the file name: lowercase, no path.
@@ -88,6 +90,23 @@ func (f ComponentFile) Size() int64 { return f.size }
 
 // SHA256 returns the pinned digest.
 func (f ComponentFile) SHA256() SHA256 { return f.sum }
+
+// Separate reports whether the file is downloaded on its own from Source instead of taken from the archive.
+func (f ComponentFile) Separate() bool { return !f.source.IsZero() }
+
+// Source returns the URL of a separate file; zero for a file of the archive.
+func (f ComponentFile) Source() SourceURL { return f.source }
+
+// CheckReply accepts only the whole file (a request from byte 0) of the pinned length, when the server names one.
+func (f ComponentFile) CheckReply(r RangeReply) error {
+	if r.Status != RangeFull {
+		return fmt.Errorf("%w: %s: reply status %d, want the whole file", ErrUnexpectedRange, f.name, r.Status)
+	}
+	if r.Total != UnknownTotal && r.Total != f.size {
+		return fmt.Errorf("%w: %s: source has %d bytes, want %d", ErrSizeMismatch, f.name, r.Total, f.size)
+	}
+	return nil
+}
 
 // Verify reports whether bytes with the given digest and size are this file.
 func (f ComponentFile) Verify(sum SHA256, size int64) error {
@@ -110,8 +129,8 @@ type FoundFile struct {
 }
 
 // SpeechComponent is the pinned speech recognition component (whisper.cpp CLI and its libraries): the official release
-// archive with its size and SHA-256, the hosts a download may reach, and the files taken from the archive with their
-// sizes and SHA-256. It is immutable.
+// archive with its size and SHA-256, the hosts a download may reach, and the files with their sizes and SHA-256,
+// taken from the archive or downloaded on their own (the VAD model). It is immutable.
 type SpeechComponent struct {
 	version    string
 	source     SourceURL
@@ -120,8 +139,10 @@ type SpeechComponent struct {
 	hosts      HostAllowlist
 	prefix     string
 	executable string
+	vadModel   string
 	files      []ComponentFile
 	total      int64
+	separate   int64 // bytes of the separate files
 }
 
 // Version returns the release tag.
@@ -145,11 +166,33 @@ func (c SpeechComponent) EntryPrefix() string { return c.prefix }
 // Executable returns the name of the program file among Files.
 func (c SpeechComponent) Executable() string { return c.executable }
 
+// VADModel returns the name of the voice activity detection model among Files; "" when the component has none.
+func (c SpeechComponent) VADModel() string { return c.vadModel }
+
 // Files returns a copy of the files in manifest order.
 func (c SpeechComponent) Files() []ComponentFile { return append([]ComponentFile(nil), c.files...) }
 
+// ArchiveFiles returns the files taken from the archive, in manifest order.
+func (c SpeechComponent) ArchiveFiles() []ComponentFile { return c.filesWhere(false) }
+
+// SeparateFiles returns the files downloaded on their own, in manifest order.
+func (c SpeechComponent) SeparateFiles() []ComponentFile { return c.filesWhere(true) }
+
+func (c SpeechComponent) filesWhere(separate bool) []ComponentFile {
+	var out []ComponentFile
+	for _, f := range c.files {
+		if f.Separate() == separate {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // TotalBytes returns the sum of the file sizes.
 func (c SpeechComponent) TotalBytes() int64 { return c.total }
+
+// DownloadBytes returns what an install downloads: the archive and the separate files.
+func (c SpeechComponent) DownloadBytes() int64 { return c.size + c.separate }
 
 // File returns the component file with exactly this name.
 func (c SpeechComponent) File(name string) (ComponentFile, bool) {
@@ -162,13 +205,17 @@ func (c SpeechComponent) File(name string) (ComponentFile, bool) {
 }
 
 // EntryFile returns the component file an archive entry holds: the entry name must be exactly the prefix followed by
-// the file name. Every other entry is not part of the component.
+// the name of a file of the archive. Every other entry is not part of the component.
 func (c SpeechComponent) EntryFile(entry string) (ComponentFile, bool) {
 	rest, ok := strings.CutPrefix(entry, c.prefix)
 	if !ok {
 		return ComponentFile{}, false
 	}
-	return c.File(rest)
+	f, ok := c.File(rest)
+	if !ok || f.Separate() {
+		return ComponentFile{}, false
+	}
+	return f, true
 }
 
 // VerifyArchive reports whether a downloaded archive with the given digest and size is the pinned one.
@@ -193,8 +240,8 @@ func (c SpeechComponent) CheckReply(r RangeReply) error {
 	return nil
 }
 
-// RequiredSpace returns the free disk space an install needs: the archive, the unpacked files and DiskSpaceMargin.
-func (c SpeechComponent) RequiredSpace() int64 { return c.size + c.total + DiskSpaceMargin }
+// RequiredSpace returns the free disk space an install needs: the downloads, the installed files and DiskSpaceMargin.
+func (c SpeechComponent) RequiredSpace() int64 { return c.DownloadBytes() + c.total + DiskSpaceMargin }
 
 // CheckDiskSpace reports whether free bytes are enough for an install; too little is an *InsufficientSpaceError.
 func (c SpeechComponent) CheckDiskSpace(free int64) error {
@@ -253,7 +300,9 @@ func CombineFolders(states []ComponentState) (state ComponentState, index int) {
 //
 //	{"schema_version": 1, "version": "b5454", "source_url": "https://host/path/archive.zip", "size_bytes": 8928640,
 //	 "sha256": "<64 hex>", "download_hosts": ["host"], "entry_prefix": "Release/", "executable": "whisper-cli.exe",
-//	 "files": [{"name": "whisper-cli.exe", "size_bytes": 479744, "sha256": "<64 hex>"}]}
+//	 "vad_model": "ggml-silero-v5.1.2.bin",
+//	 "files": [{"name": "whisper-cli.exe", "size_bytes": 479744, "sha256": "<64 hex>"},
+//	           {"name": "ggml-silero-v5.1.2.bin", "size_bytes": 885098, "sha256": "<64 hex>", "source_url": "https://…"}]}
 type componentDoc struct {
 	SchemaVersion int                `json:"schema_version"`
 	Version       string             `json:"version"`
@@ -263,13 +312,15 @@ type componentDoc struct {
 	DownloadHosts []string           `json:"download_hosts"`
 	EntryPrefix   *string            `json:"entry_prefix"`
 	Executable    string             `json:"executable"`
+	VADModel      string             `json:"vad_model"`
 	Files         []componentFileDoc `json:"files"`
 }
 
 type componentFileDoc struct {
-	Name      string `json:"name"`
-	SizeBytes int64  `json:"size_bytes"`
-	SHA256    string `json:"sha256"`
+	Name      string  `json:"name"`
+	SizeBytes int64   `json:"size_bytes"`
+	SHA256    string  `json:"sha256"`
+	SourceURL *string `json:"source_url"`
 }
 
 // ParseSpeechComponent parses and validates the manifest. It is as strict as ParseCatalog: valid UTF-8 of at most
@@ -277,7 +328,9 @@ type componentFileDoc struct {
 // version label; an https source URL; an archive of 1..MaxComponentArchiveBytes with a SHA-256; valid download hosts;
 // an entry prefix (required, may be "") of path segments each followed by "/"; 1..MaxComponentFiles files with unique
 // lowercase names that are plain file names (no path, no Windows device name), sizes of 1..MaxComponentFileBytes,
-// MaxComponentTotalBytes in all, and a SHA-256 each; the executable is one of the files.
+// MaxComponentTotalBytes in all, a SHA-256 each and, for a file downloaded on its own, an https source URL whose host
+// joins the allowed hosts; the executable is one of the files of the archive; the VAD model, when named, is one of
+// the files.
 func ParseSpeechComponent(data []byte) (SpeechComponent, error) {
 	if len(data) > MaxComponentManifestBytes {
 		return SpeechComponent{}, fmt.Errorf("%w: larger than %d bytes", ErrInvalidComponent, MaxComponentManifestBytes)
@@ -339,12 +392,29 @@ func (d componentDoc) component() (SpeechComponent, error) {
 	if err != nil {
 		return SpeechComponent{}, err
 	}
-	c := SpeechComponent{
-		version: d.Version, source: src, size: d.SizeBytes, sum: sum, hosts: hosts.with(host), prefix: *d.EntryPrefix,
-		executable: d.Executable, files: files, total: total,
+	extraHosts := []string{host}
+	var separate int64
+	for _, f := range files {
+		if !f.Separate() {
+			continue
+		}
+		h, err := NormalizeHost(f.source.Host())
+		if err != nil {
+			return SpeechComponent{}, fmt.Errorf("file %q: %w", f.name, err)
+		}
+		extraHosts = append(extraHosts, h)
+		separate += f.size
 	}
-	if _, ok := c.File(d.Executable); !ok {
-		return SpeechComponent{}, fmt.Errorf("executable %q is not one of the files", d.Executable)
+	c := SpeechComponent{
+		version: d.Version, source: src, size: d.SizeBytes, sum: sum, hosts: hosts.with(extraHosts...),
+		prefix: *d.EntryPrefix, executable: d.Executable, vadModel: d.VADModel, files: files, total: total,
+		separate: separate,
+	}
+	if f, ok := c.File(d.Executable); !ok || f.Separate() {
+		return SpeechComponent{}, fmt.Errorf("executable %q is not one of the files of the archive", d.Executable)
+	}
+	if _, ok := c.File(d.VADModel); d.VADModel != "" && !ok {
+		return SpeechComponent{}, fmt.Errorf("vad_model %q is not one of the files", d.VADModel)
 	}
 	return c, nil
 }
@@ -370,12 +440,18 @@ func componentFiles(docs []componentFileDoc) ([]ComponentFile, int64, error) {
 		if err != nil {
 			return nil, 0, fmt.Errorf("file %d: %w", i, err)
 		}
+		var src SourceURL
+		if f.SourceURL != nil {
+			if src, err = ParseSourceURL(*f.SourceURL); err != nil {
+				return nil, 0, fmt.Errorf("file %d: %w", i, err)
+			}
+		}
 		total += f.SizeBytes
 		if total > MaxComponentTotalBytes {
 			return nil, 0, fmt.Errorf("files larger than %d bytes in all", MaxComponentTotalBytes)
 		}
 		names[f.Name] = true
-		files = append(files, ComponentFile{name: f.Name, size: f.SizeBytes, sum: sum})
+		files = append(files, ComponentFile{name: f.Name, size: f.SizeBytes, sum: sum, source: src})
 	}
 	return files, total, nil
 }

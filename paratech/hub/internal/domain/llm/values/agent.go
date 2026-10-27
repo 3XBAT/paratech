@@ -11,14 +11,17 @@ import (
 
 // Limits of one agent step (ADR-0023, gateway.proto AgentStepRequest). Sizes are bytes of UTF-8.
 const (
-	MaxAgentCalls        = 4
-	MaxStudentTextBytes  = 4 << 10
-	MaxAgentReplyBytes   = 2 << 10
-	MaxResultJSONBytes   = 16 << 10
-	MaxArgumentsBytes    = 8 << 10
-	MaxAgentRequestBytes = 256 << 10
-	MaxAgentTurns        = 64
-	MaxAgentSubjects     = 100
+	MaxAgentCalls       = 4
+	MaxStudentTextBytes = 4 << 10
+	MaxAgentReplyBytes  = 2 << 10
+	MaxResultJSONBytes  = 16 << 10
+	MaxArgumentsBytes   = 8 << 10
+	// MaxReturnedArgumentsBytes bounds the arguments of a call the provider returned, before the catalog fits them
+	// to MaxArgumentsBytes (NewReturnedToolCall).
+	MaxReturnedArgumentsBytes = 32 << 10
+	MaxAgentRequestBytes      = 256 << 10
+	MaxAgentTurns             = 64
+	MaxAgentSubjects          = 100
 	// MaxLabelRunes bounds a subject name (ADR-0022) and a label argument (tool catalog).
 	MaxLabelRunes = 80
 
@@ -66,13 +69,24 @@ type ToolCall struct {
 // 64 characters, arguments a JSON object of at most MaxArgumentsBytes. Whether the tool is in a catalog is the
 // catalog's decision.
 func NewToolCall(callID, tool, arguments string) (ToolCall, error) {
+	return newToolCall(callID, tool, arguments, MaxArgumentsBytes)
+}
+
+// NewReturnedToolCall is NewToolCall for a call as the provider returned it, with arguments of at most
+// MaxReturnedArgumentsBytes: the catalog may still cut a long reply text (toolcatalog FitReturned), and its
+// CheckReturned holds every returned call to MaxArgumentsBytes before the Hub seals or stores it (TASK-223).
+func NewReturnedToolCall(callID, tool, arguments string) (ToolCall, error) {
+	return newToolCall(callID, tool, arguments, MaxReturnedArgumentsBytes)
+}
+
+func newToolCall(callID, tool, arguments string, maxArguments int) (ToolCall, error) {
 	switch {
 	case !validCallID(callID):
 		return ToolCall{}, fmt.Errorf("%w: call id must be 1-%d characters of A-Z, a-z, 0-9, '_' and '-'", ErrInvalidAgentRequest, maxCallIDLen)
 	case !ValidToolName(tool):
 		return ToolCall{}, fmt.Errorf("%w: tool name must be snake_case of at most %d characters", ErrInvalidAgentRequest, maxToolNameLen)
-	case len(arguments) > MaxArgumentsBytes:
-		return ToolCall{}, fmt.Errorf("%w: arguments exceed %d bytes", ErrInvalidAgentRequest, MaxArgumentsBytes)
+	case len(arguments) > maxArguments:
+		return ToolCall{}, fmt.Errorf("%w: arguments exceed %d bytes", ErrInvalidAgentRequest, maxArguments)
 	case !jsonObject(arguments):
 		return ToolCall{}, fmt.Errorf("%w: arguments must be a JSON object", ErrInvalidAgentRequest)
 	}

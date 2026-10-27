@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -15,18 +16,18 @@ import (
 // byte-identical.
 const goldenCatalog = "../../../shared/testdata/tool_catalog_v%d.json"
 
-// TestEmbeddedPanel: v1 to v5 stay served to clients of those catalogs; v6 is the current version.
+// TestEmbeddedPanel: v1 to v6 stay served to clients of those catalogs; v7 is the current version.
 func TestEmbeddedPanel(t *testing.T) {
 	versions, err := Agent("panel")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 6 {
-		t.Fatalf("versions: %d, want v1 to v6", len(versions))
+	if len(versions) != 7 {
+		t.Fatalf("versions: %d, want v1 to v7", len(versions))
 	}
 	for i, v := range versions {
 		if v.Version != uint32(i+1) {
-			t.Fatalf("version %d at %d, want v1 to v6 in order", v.Version, i)
+			t.Fatalf("version %d at %d, want v1 to v7 in order", v.Version, i)
 		}
 	}
 	for _, v := range versions {
@@ -203,6 +204,46 @@ func TestPanelV6Prompt(t *testing.T) {
 	for _, gone := range []string{"generate_draft", "«Решение»", "Добавить задание", "«Добавить»"} {
 		if strings.Contains(system, gone) {
 			t.Errorf("agent/panel/v6/system.md says %q", gone)
+		}
+	}
+}
+
+// TestPanelV7Prompt: v7 keeps every rule of v6 but the 300-character limit of reply and the owner's decision of 27.10
+// (TASK-223): a simple question gets a short reply, an explanation or a big question a long one in paragraphs, up to
+// 4000 characters, still plain text.
+func TestPanelV7Prompt(t *testing.T) {
+	v6, system := panelSystem(t, 6), panelSystem(t, 7)
+	reworded := []string{
+		"You are the planner",                // a long plain text is cut, no longer a failed step; only reply may be long
+		"Always answer with the reply tool",  // no "short", no 300
+		"- Finish with reply",                // short after actions and lookups
+		"- Write card texts in the language", // 4000 for reply, 300 for the rest
+	}
+	for _, line := range strings.Split(v6, "\n") {
+		if slices.ContainsFunc(reworded, func(p string) bool { return strings.HasPrefix(line, p) }) {
+			continue
+		}
+		if !strings.Contains(system, line) {
+			t.Errorf("agent/panel/v7/system.md drops the v6 line %q", line)
+		}
+	}
+	for _, rule := range []string{
+		"cut when it is too long", "only the text of reply may be long", "the answer itself goes into reply.",
+		"after actions and lookups, one short, factual message",
+		"The text of reply is at most 4000 characters; every other card text is at most 300 characters",
+		"plain text without HTML or Markdown",
+		"# Length of a reply", "A simple question", "gets a short reply: one to three sentences",
+		"«объясни»", "«расскажи подробно»", "the question is big", "the reply is at length: up to 4000 characters",
+		"structured in paragraphs", "separated by an empty line", "No headings, no bold, no tables and no code blocks",
+		"A reply after an action or a lookup stays short", "never names one", "the answer of answer_question is never retold",
+	} {
+		if !strings.Contains(system, rule) {
+			t.Errorf("agent/panel/v7/system.md does not state %q", rule)
+		}
+	}
+	for _, gone := range []string{"at most 300 characters.\n", "a long or formatted one fails the step", "Each text is at most 300 characters"} {
+		if strings.Contains(system, gone) {
+			t.Errorf("agent/panel/v7/system.md still says %q", gone)
 		}
 	}
 }

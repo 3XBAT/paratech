@@ -7,10 +7,18 @@
   "download_hosts": [
     "github.com",
     "release-assets.githubusercontent.com",
-    "objects.githubusercontent.com"
+    "objects.githubusercontent.com",
+    "huggingface.co",
+    "us.aws.cdn.hf.co",
+    "cas-bridge.xethub.hf.co",
+    "transfer.xethub.hf.co",
+    "cdn-lfs.hf.co",
+    "cdn-lfs-us-1.hf.co",
+    "cdn-lfs-eu-1.hf.co"
   ],
   "entry_prefix": "Release/",
   "executable": "whisper-cli.exe",
+  "vad_model": "ggml-silero-v5.1.2.bin",
   "files": [
     {"name": "whisper-cli.exe", "size_bytes": 479744, "sha256": "331dba46d6427105d2b802cdbc7eae916ea1c5abf9b0d3b5cfe460d8db8e4366"},
     {"name": "whisper.dll", "size_bytes": 1370112, "sha256": "034396d75bb5720c1851674ff64a96192b58f6927b68d334ebd254ce6cad9674"},
@@ -24,6 +32,8 @@
     {"name": "ggml-cpu-sandybridge.dll", "size_bytes": 1026560, "sha256": "04edbdebc01a1d421062a960881a4f34d520d99693999518243f332406444c6e"},
     {"name": "ggml-cpu-skylakex.dll", "size_bytes": 1049600, "sha256": "1774714cf93621406ff35344b54715619a83242ae3e331e44d98a3b35ce801be"},
     {"name": "ggml-cpu-sse42.dll", "size_bytes": 862720, "sha256": "f060318772c4c2dbac312bbfff6ea700b85dbc502bb38585a7186d06d549301a"},
-    {"name": "ggml-cpu-x64.dll", "size_bytes": 866816, "sha256": "4b4b05caba40d4309b5d710ef74c59ba190516b8489f27bdb1ba11ae33c6e9d3"}
+    {"name": "ggml-cpu-x64.dll", "size_bytes": 866816, "sha256": "4b4b05caba40d4309b5d710ef74c59ba190516b8489f27bdb1ba11ae33c6e9d3"},
+    {"name": "ggml-silero-v5.1.2.bin", "size_bytes": 885098, "sha256": "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf",
+     "source_url": "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin"}
   ]
 }

@@ -1,0 +1,164 @@
+{
+	"systeminfo": "WHISPER : VITISAI = 0 | COREML = 0 | OPENVINO = 0 | CPU : SSE3 = 1 | SSSE3 = 1 | AVX = 1 | AVX2 = 1 | F16C = 1 | FMA = 1 | BMI2 = 1 | OPENMP = 1 | REPACK = 1 | ",
+	"model": {
+		"type": "base",
+		"multilingual": true,
+		"vocab": 51865,
+		"audio": {
+			"ctx": 1500,
+			"state": 512,
+			"head": 8,
+			"layer": 6
+		},
+		"text": {
+			"ctx": 448,
+			"state": 512,
+			"head": 8,
+			"layer": 6
+		},
+		"mels": 80,
+		"ftype": 9
+	},
+	"params": {
+		"model": "C:/data/models/ggml-base-q5_1.bin",
+		"language": "auto",
+		"translate": false
+	},
+	"result": {
+		"language": "en"
+	},
+	"transcription": [
+		{
+			"timestamps": {
+				"from": "00:00:02,110",
+				"to": "00:00:03,780"
+			},
+			"offsets": {
+				"from": 2110,
+				"to": 3780
+			},
+			"text": " Good Morning!"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:03,780",
+				"to": "00:00:49,150"
+			},
+			"offsets": {
+				"from": 3780,
+				"to": 49150
+			},
+			"text": " Today we talk about the history of computing and the first mechanical calculators."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:49,150",
+				"to": "00:00:52,630"
+			},
+			"offsets": {
+				"from": 49150,
+				"to": 52630
+			},
+			"text": " After the break, let us look at the homework."
+		},
+		{
+			"timestamps": {
+				"from": "00:00:52,630",
+				"to": "00:02:12,100"
+			},
+			"offsets": {
+				"from": 52630,
+				"to": 132100
+			},
+			"text": " Please read chapter three and solve problems one to five by Friday."
+		},
+		{
+			"timestamps": {
+				"from": "00:02:12,100",
+				"to": "00:02:15,820"
+			},
+			"offsets": {
+				"from": 132100,
+				"to": 135820
+			},
+			"text": " The last topic of the lecture is binary arithmetic."
+		},
+		{
+			"timestamps": {
+				"from": "00:02:15,820",
+				"to": "00:02:25,360"
+			},
+			"offsets": {
+				"from": 135820,
+				"to": 145360
+			},
+			"text": " Edition of two binary numbers works column by column with a carry."
+		},
+		{
+			"timestamps": {
+				"from": "00:02:25,360",
+				"to": "00:02:27,360"
+			},
+			"offsets": {
+				"from": 145360,
+				"to": 147360
+			},
+			"text": " That is all for today."
+		},
+		{
+			"timestamps": {
+				"from": "00:02:27,360",
+				"to": "00:02:49,270"
+			},
+			"offsets": {
+				"from": 147360,
+				"to": 169270
+			},
+			"text": " See you next week."
+		},
+		{
+			"timestamps": {
+				"from": "00:02:49,270",
+				"to": "00:02:50,970"
+			},
+			"offsets": {
+				"from": 169270,
+				"to": 170970
+			},
+			"text": " Good Morning!"
+		},
+		{
+			"timestamps": {
+				"from": "00:02:50,970",
+				"to": "00:03:26,100"
+			},
+			"offsets": {
+				"from": 170970,
+				"to": 206100
+			},
+			"text": " Today we talk about the history of computing and the first mechanical calculators."
+		},
+		{
+			"timestamps": {
+				"from": "00:03:26,100",
+				"to": "00:03:29,610"
+			},
+			"offsets": {
+				"from": 206100,
+				"to": 209610
+			},
+			"text": " After the break, let us look at the homework."
+		},
+		{
+			"timestamps": {
+				"from": "00:03:29,610",
+				"to": "00:03:33,090"
+			},
+			"offsets": {
+				"from": 209610,
+				"to": 213090
+			},
+			"text": " Please reach chapter 3 and solve problems 1-5 by Friday."
+		}
+	]
+}

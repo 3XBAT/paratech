@@ -178,10 +178,12 @@ func TestDriverProblemNamesTheRequest(t *testing.T) {
 	}
 }
 
-// A card that breaks its rules (HTML, too long) is dropped, never shown.
+// A card that breaks its rules (too long, a bidi override) is dropped, never shown. Angle brackets are no longer a
+// break in a reply (catalog v7): the page shows its text as plain text.
 func TestDriverDropsInvalidCards(t *testing.T) {
 	turns := (&scriptedTurns{}).then(step(thread.StatusDone, nil,
-		values.ReplyCard{Text: "<script>alert(1)</script>"}, values.ReplyCard{Text: "Готово"},
+		values.ReplyCard{Text: values.Text(strings.Repeat("я", values.MaxReplyTextRunes+1))},
+		values.ReplyCard{Text: "a\u202eb"}, values.ReplyCard{Text: "Готово"},
 		values.QuestionsCard{Round: 3}, nil), nil)
 	d, sink := newDriver(t, newReads(), turns)
 	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "привет"}); err != nil {
