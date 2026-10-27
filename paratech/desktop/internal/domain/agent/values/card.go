@@ -198,9 +198,9 @@ func (c CannotDoCard) Validate() error {
 	return validTexts(c.OurPart, "our part")
 }
 
-// ReplyCard is a short answer of the planner (reply). Assignments are the IDs the reply lists (catalog v3), each
-// passed the provenance check; Lines are what the desktop shows of them, filled from local data by the Driver
-// (ADR-0022): the planner never sees or writes a title.
+// ReplyCard is an answer of the planner (reply), a text of up to MaxReplyTextRunes since catalog v7. Assignments are
+// the IDs the reply lists (catalog v3), each passed the provenance check; Lines are what the desktop shows of them,
+// filled from local data by the Driver (ADR-0022): the planner never sees or writes a title.
 type ReplyCard struct {
 	Text        Text
 	Assignments []Ref
@@ -234,9 +234,10 @@ func (l AssignmentLine) validate() error {
 // Kind returns CardReply.
 func (ReplyCard) Kind() CardKind { return CardReply }
 
-// Validate checks the card: at most MaxCardIDs distinct assignment IDs, and lines only of those, each with a title.
+// Validate checks the card: a reply text, at most MaxCardIDs distinct assignment IDs, and lines only of those, each
+// with a title.
 func (c ReplyCard) Validate() error {
-	if _, err := ParseText(string(c.Text)); err != nil {
+	if _, err := ParseReplyText(string(c.Text)); err != nil {
 		return fmt.Errorf("%w: reply: %w", ErrInvalidCard, err)
 	}
 	if len(c.Assignments) > MaxCardIDs {

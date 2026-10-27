@@ -4777,7 +4777,7 @@
                 "go test -race ./hub/... ./shared/... ./desktop/internal/... затронутых пакетов, buf generate без дрейфа, golangci-lint, npm run test/build если тронут фронтенд"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-224",

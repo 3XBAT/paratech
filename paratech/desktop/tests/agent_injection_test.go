@@ -53,7 +53,7 @@ func baselineValue(a values.ArgSpec) any {
 		return "производная"
 	case values.ArgQuery:
 		return "Что такое производная сложной функции?"
-	case values.ArgText:
+	case values.ArgText, values.ArgReplyText:
 		return "Готово."
 	case values.ArgTextList:
 		return []string{"Готово."}
@@ -205,7 +205,7 @@ func injectionMayPass(a values.ArgSpec, fx injectionFixture) bool {
 	switch a.Type {
 	case values.ArgLabel:
 		return !a.Persistent || !fx.RefusedAsName
-	case values.ArgQuery, values.ArgText, values.ArgTextList, values.ArgQuestions:
+	case values.ArgQuery, values.ArgText, values.ArgReplyText, values.ArgTextList, values.ArgQuestions:
 		return true
 	}
 	return false

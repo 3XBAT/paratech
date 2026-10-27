@@ -11,19 +11,31 @@ import (
 
 // Length limits in characters (runes).
 const (
-	MaxTextRunes  = 300 // card text from show_plan, reply, cannot_do, ask_questions
-	MaxLabelRunes = 80  // label from the student's request and names
-	MaxQueryRunes = 500 // the student's question or search text (since catalog v2)
+	MaxTextRunes      = 300  // card text from show_plan, cannot_do, ask_questions
+	MaxReplyTextRunes = 4000 // reply.text (catalog v7, TASK-223)
+	MaxLabelRunes     = 80   // label from the student's request and names
+	MaxQueryRunes     = 500  // the student's question or search text (since catalog v2)
 )
 
-// Text is model text for a card: at most 300 characters, printable, no HTML angle brackets; line breaks allowed.
-// It is shown to the student only and never sent back as an instruction.
+// Text is model text for a card: at most 300 characters, printable, no HTML angle brackets; line breaks allowed. The
+// text of a reply card is a reply text (ParseReplyText). It is shown to the student only and never sent back as an
+// instruction.
 type Text string
 
 // ParseText trims s and checks it.
 func ParseText(s string) (Text, error) {
 	s = strings.TrimSpace(s)
-	if err := checkPrintable(s, MaxTextRunes, true); err != nil {
+	if err := checkPrintable(s, MaxTextRunes, true, false); err != nil {
+		return "", err
+	}
+	return Text(s), nil
+}
+
+// ParseReplyText trims s and checks it as the text of a reply card: at most MaxReplyTextRunes printable characters and
+// line breaks. Angle brackets are allowed: the card renders the text as plain text only (ADR-0023, TASK-223).
+func ParseReplyText(s string) (Text, error) {
+	s = strings.TrimSpace(s)
+	if err := checkPrintable(s, MaxReplyTextRunes, true, true); err != nil {
 		return "", err
 	}
 	return Text(s), nil
@@ -35,7 +47,7 @@ type Label string
 // ParseLabel trims s and checks it: 1..80 printable characters, one line, no HTML angle brackets.
 func ParseLabel(s string) (Label, error) {
 	s = strings.TrimSpace(s)
-	if err := checkPrintable(s, MaxLabelRunes, false); err != nil {
+	if err := checkPrintable(s, MaxLabelRunes, false, false); err != nil {
 		return "", err
 	}
 	return Label(s), nil
@@ -47,7 +59,7 @@ type Query string
 // ParseQuery trims s and checks it as a Label of up to 500 characters: printable, one line, no HTML angle brackets.
 func ParseQuery(s string) (Query, error) {
 	s = strings.TrimSpace(s)
-	if err := checkPrintable(s, MaxQueryRunes, false); err != nil {
+	if err := checkPrintable(s, MaxQueryRunes, false, false); err != nil {
 		return "", err
 	}
 	return Query(s), nil
@@ -82,8 +94,9 @@ func ParseName(s string) (Name, error) {
 }
 
 // checkPrintable allows letters, marks, digits, punctuation, symbols and the ASCII space (unicode.IsPrint), so
-// control, format (bidi overrides, zero-width), separator and private-use characters are refused.
-func checkPrintable(s string, maxRunes int, newlines bool) error {
+// control, format (bidi overrides, zero-width), separator and private-use characters are refused. Angle brackets only
+// with angles.
+func checkPrintable(s string, maxRunes int, newlines, angles bool) error {
 	if s == "" || !utf8.ValidString(s) || utf8.RuneCountInString(s) > maxRunes {
 		return fmt.Errorf("%w: must have 1..%d characters", ErrInvalidText, maxRunes)
 	}
@@ -98,7 +111,7 @@ func checkPrintable(s string, maxRunes int, newlines bool) error {
 		if r == utf8.RuneError {
 			return fmt.Errorf("%w: has a replacement character", ErrInvalidText)
 		}
-		if r == '<' || r == '>' {
+		if !angles && (r == '<' || r == '>') {
 			return fmt.Errorf("%w: has an angle bracket (no HTML)", ErrInvalidText)
 		}
 	}

@@ -193,10 +193,10 @@ func (a Args) Name(name string) (Name, bool) {
 	return Name(v.str), true
 }
 
-// Text returns a text argument.
+// Text returns a text or reply_text argument.
 func (a Args) Text(name string) (Text, bool) {
 	v, ok := a.vals[name]
-	if !ok || v.typ != ArgText {
+	if !ok || v.typ != ArgText && v.typ != ArgReplyText {
 		return "", false
 	}
 	return Text(v.str), true
@@ -440,6 +440,17 @@ func parseValue(as ArgSpec, raw json.RawMessage) (argValue, error) {
 			return v, err
 		}
 		t, err := ParseText(s)
+		if err != nil {
+			return v, err
+		}
+		v.str = string(t)
+	case ArgReplyText:
+		// The Hub cuts a longer text at a sentence (catalog v7); one over the limit here is still invalid.
+		s, err := decodeString(raw)
+		if err != nil {
+			return v, err
+		}
+		t, err := ParseReplyText(s)
 		if err != nil {
 			return v, err
 		}

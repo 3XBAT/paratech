@@ -96,6 +96,24 @@ func TestNewToolCall(t *testing.T) {
 		if _, err := NewToolCall(c[0], c[1], c[2]); !errors.Is(err, ErrInvalidAgentRequest) {
 			t.Errorf("%s: err = %v, want ErrInvalidAgentRequest", name, err)
 		}
+		if name == "long args" {
+			continue
+		}
+		if _, err := NewReturnedToolCall(c[0], c[1], c[2]); !errors.Is(err, ErrInvalidAgentRequest) {
+			t.Errorf("returned %s: err = %v, want ErrInvalidAgentRequest", name, err)
+		}
+	}
+}
+
+// TestNewReturnedToolCall: a returned call takes arguments up to MaxReturnedArgumentsBytes, never more.
+func TestNewReturnedToolCall(t *testing.T) {
+	args := "{" + strings.Repeat(" ", MaxReturnedArgumentsBytes-2) + "}"
+	c, err := NewReturnedToolCall("toolu_1", "reply", args)
+	if err != nil || c.Arguments() != args {
+		t.Fatalf("at the cap: %v", err)
+	}
+	if _, err := NewReturnedToolCall("toolu_1", "reply", "{"+strings.Repeat(" ", MaxReturnedArgumentsBytes-1)+"}"); !errors.Is(err, ErrInvalidAgentRequest) {
+		t.Fatalf("over the cap: err = %v", err)
 	}
 }
 
