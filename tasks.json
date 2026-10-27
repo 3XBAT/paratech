@@ -4799,7 +4799,7 @@
                 "go test -race затронутых пакетов, GOOS=windows go vet, golangci-lint"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-226",
