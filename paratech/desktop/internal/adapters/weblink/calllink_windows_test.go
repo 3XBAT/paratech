@@ -88,6 +88,22 @@ func TestOpenCallLinkCancelledStartsNothing(t *testing.T) {
 	}
 }
 
+func TestOpenCallLinkEnvReferenceStartsNothing(t *testing.T) {
+	f, dir := useFakeLauncher(t)
+	useEnviron(t, "DB_PASSWORD=fake")
+
+	link := mustCallLink(t, "https://example.zoom.us/j/1?x=%DB_PASSWORD%20")
+	if err := New().OpenCallLink(context.Background(), link); !errors.Is(err, ErrRefused) {
+		t.Fatalf("OpenCallLink = %v, want ErrRefused", err)
+	}
+	if f.calls != 0 {
+		t.Fatalf("launcher calls = %d, want 0", f.calls)
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, shortcutPrefix+"*.url")); len(files) != 0 {
+		t.Fatalf("a shortcut was written: %v", files)
+	}
+}
+
 func TestOpenCallLinkRefusedStartsNothing(t *testing.T) {
 	f, dir := useFakeLauncher(t)
 
