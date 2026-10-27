@@ -1,19 +1,28 @@
 import { type FormEvent, useState } from "react";
-import type { LibraryMaterial, LibrarySubject } from "../bindings/library.js";
+import type { LibraryMaterial, LibrarySubject, SubjectOverview } from "../bindings/library.js";
 import {
+  dayMonth,
+  daysChip,
+  type FreshMarks,
   filesOfFolder,
   folderCountText,
   folderTitle,
   groupBySemester,
+  lessonChip,
+  lessonMeta,
+  lessonTitle,
+  noFresh,
   orderedFolders,
   sizeText,
   texts,
   treeCount,
   typeLabel,
+  weekdayOf,
 } from "../libraryView.js";
 import { Button } from "../ui/Button.js";
 import { Card, EmptyState, Field, Input, ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { StatusChip } from "../ui/StatusChip.js";
 
 // Names of subjects, folders and files are typed or imported text: only text nodes here, never markup.
 
@@ -104,6 +113,8 @@ export function SubjectTree(props: {
   subjects: readonly LibrarySubject[];
   currentId: string;
   counts: ReadonlyMap<string, number> | null;
+  /** Folders with fresh files get «новое»; optional so the tree works without the overview. */
+  freshFolders?: ReadonlySet<string>;
   busy: boolean;
   onOpen(id: string): void;
   onAddSubject(): void;
@@ -150,6 +161,7 @@ export function SubjectTree(props: {
                               <div className="ti">
                                 <Icon name="folder" />
                                 <span className="nm">{folderTitle(f)}</span>
+                                {props.freshFolders?.has(f.id) === true && <span className="fresh">{texts.fresh}</span>}
                                 <span className="cnt num">{treeCount(props.counts?.get(f.id))}</span>
                               </div>
                             </li>
@@ -178,7 +190,7 @@ export function SubjectTree(props: {
   );
 }
 
-function FileRow(props: { m: LibraryMaterial }) {
+function FileRow(props: { m: LibraryMaterial; fresh?: boolean }) {
   const { m } = props;
   const meta = [typeLabel(m.type), sizeText(m.sizeBytes), m.textNote].filter((x) => x !== "").join(" · ");
   return (
@@ -188,17 +200,79 @@ function FileRow(props: { m: LibraryMaterial }) {
         <p className="t">{m.name}</p>
         {meta !== "" && <div className="meta num">{meta}</div>}
       </div>
+      {props.fresh === true && <span className="fresh">{texts.fresh}</span>}
     </div>
   );
 }
 
-function FileRows(props: { files: readonly LibraryMaterial[] }) {
+function FileRows(props: { files: readonly LibraryMaterial[]; fresh?: ReadonlySet<string> }) {
   return (
     <div role="list">
       {props.files.map((m) => (
-        <FileRow key={m.id} m={m} />
+        <FileRow key={m.id} m={m} fresh={props.fresh?.has(m.id)} />
       ))}
     </div>
+  );
+}
+
+/** «Ближайшее» and the lessons of a subject. Titles come from the model or the student: text nodes only. */
+export function OverviewSections(props: { overview: SubjectOverview }) {
+  const { deadlines, lessons } = props.overview;
+  return (
+    <>
+      {deadlines.length > 0 && (
+        <section className="section">
+          <h2 className="sec-h">{texts.upcoming}</h2>
+          <Card className="lrows" label={texts.upcoming}>
+            <div role="list">
+              {deadlines.map((d) => {
+                const chip = daysChip(d.daysLeft);
+                return (
+                  <div className="lrow drow" role="listitem" key={d.assignmentId}>
+                    <div className="d num">
+                      {weekdayOf(d.due)}
+                      <span>{dayMonth(d.due)}</span>
+                    </div>
+                    <div className="tx">
+                      <p className="t">{d.title}</p>
+                    </div>
+                    <StatusChip kind={chip.kind}>{chip.label}</StatusChip>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        </section>
+      )}
+      {lessons.length > 0 && (
+        <section className="section">
+          <h2 className="sec-h">
+            {texts.lessons} <span className="cnt num">· {lessons.length}</span>
+          </h2>
+          <Card className="lrows" label={texts.lessons}>
+            <div role="list">
+              {lessons.map((l) => {
+                const chip = lessonChip(l.status);
+                const meta = lessonMeta(l);
+                return (
+                  <div className="lrow" role="listitem" key={l.recordingId}>
+                    <Icon name="doc" />
+                    <div className="tx">
+                      <p className="t">{lessonTitle(l)}</p>
+                      {meta !== "" && <div className="meta num">{meta}</div>}
+                    </div>
+                    {l.summaryNew && <span className="fresh">{texts.fresh}</span>}
+                    <StatusChip kind={chip.kind} icon={chip.icon}>
+                      {chip.label}
+                    </StatusChip>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        </section>
+      )}
+    </>
   );
 }
 
@@ -206,6 +280,8 @@ function FileRows(props: { files: readonly LibraryMaterial[] }) {
 export function SubjectDetail(props: {
   subject: LibrarySubject;
   materials: readonly LibraryMaterial[];
+  /** The «новое» marks of this visit (TASK-227); none without the overview. */
+  fresh?: FreshMarks;
   folderForm: boolean;
   busy: boolean;
   error: string;
@@ -213,6 +289,7 @@ export function SubjectDetail(props: {
   onCancelFolder(): void;
 }) {
   const { subject } = props;
+  const fresh = props.fresh ?? noFresh;
   return (
     <>
       {orderedFolders(subject.folders).map((f) => {
@@ -221,9 +298,14 @@ export function SubjectDetail(props: {
           <section className="section" key={f.id}>
             <h2 className="sec-h">
               {folderTitle(f)} <span className="cnt num">· {folderCountText(files.length)}</span>
+              {fresh.folders.has(f.id) && <span className="fresh">{texts.fresh}</span>}
             </h2>
             <Card className="lrows" label={folderTitle(f)}>
-              {files.length === 0 ? <p className="small muted empty-folder">{texts.emptyFolder}</p> : <FileRows files={files} />}
+              {files.length === 0 ? (
+                <p className="small muted empty-folder">{texts.emptyFolder}</p>
+              ) : (
+                <FileRows files={files} fresh={fresh.materials} />
+              )}
             </Card>
           </section>
         );
