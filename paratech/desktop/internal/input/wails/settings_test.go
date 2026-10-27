@@ -177,6 +177,7 @@ func TestOpenBindings(t *testing.T) {
 		{name: "recording deletion", edit: func(c *Core) { c.Deletion = nil }},
 		{name: "knowledge base", edit: func(c *Core) { c.Knowledge = nil }},
 		{name: "library", edit: func(c *Core) { c.Library = nil }},
+		{name: "subject overview", edit: func(c *Core) { c.SubjectOverview = nil }},
 		{name: "agent driver", edit: func(c *Core) { c.Agent.Driver = nil }},
 		{name: "agent hub link", edit: func(c *Core) { c.Agent.Link = nil }},
 		{name: "agent panel", edit: func(c *Core) { c.Agent.Panel = nil }},
