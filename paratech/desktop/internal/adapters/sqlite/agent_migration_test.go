@@ -23,7 +23,7 @@ const (
 var longSubject = strings.Repeat("Матанализ ", 10)
 
 // agentDataAt39 fills a database of version 39: threads of subject s1, of «Без предмета», of a subject removed since
-// and of a subject with a long name, with requests, history and journal lines (two of the same instant).
+// and of a subject with a long name, one updated before it was created, with requests, history and journal lines (two of the same instant).
 func agentDataAt39(t *testing.T, db *DB) {
 	t.Helper()
 	for _, s := range []string{
@@ -33,7 +33,8 @@ func agentDataAt39(t *testing.T, db *DB) {
 			('th-s1', 's1', 2, 1, '[{"kind":"material","id":"m1"}]', 5, 1000, 9000),
 			('th-none', 'NONE', 1, 0, '[]', 2, 2000, 3000),
 			('th-gone', 's-gone', 0, 0, '[]', 1, 4000, 4000),
-			('th-long', 's2', 0, 0, '[]', 1, 5000, 6000)`,
+			('th-long', 's2', 0, 0, '[]', 1, 5000, 6000),
+			('th-skew', 's-skew', 0, 0, '[]', 1, 3500, 100)`,
 		`INSERT INTO agent_turns (thread_id, number, status, scope, steps, planner_input, started_at, updated_at) VALUES
 			('th-s1', 1, 'DONE', '{"subject":"s1"}', 1, 300, 1000, 2000),
 			('th-s1', 2, 'DONE', '{"subject":"s1","screen":"subjects"}', 2, 700, 8000, 9000),
@@ -114,6 +115,8 @@ func TestMigrationToChatsKeepsThreads(t *testing.T) {
 		"th-none": {"Без предмета", 3000, false},
 		"th-gone": {"Без предмета", 4000, false},
 		"th-long": {strings.TrimSpace(longSubject[:len(strings.Repeat("Матанализ ", 8))]), 6000, false},
+		// Updated before it was created (0022 did not check it): last active when created, the migration goes on.
+		"th-skew": {"Без предмета", 3500, false},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("chats = %+v\nwant %+v", got, want)
@@ -225,7 +228,7 @@ func TestMigrationFromChatsDown(t *testing.T) {
 	if err := rows.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// th-none, th-gone and th-long have no subject in their last request: one 'NONE' survives, the newest (th-long).
+	// th-none, th-gone, th-skew and th-long have no subject in their last request: one 'NONE' survives, the newest (th-long).
 	if want := map[string]string{"th-new": "s1", "th-long": "NONE"}; !reflect.DeepEqual(keys, want) {
 		t.Fatalf("threads after Down = %v, want %v", keys, want)
 	}

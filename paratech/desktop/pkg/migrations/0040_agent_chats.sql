@@ -4,7 +4,8 @@
 -- it are rebuilt with it, so no foreign key action deletes a row meanwhile (renaming agent_threads rewrites their
 -- references); agent_actions keeps its rowids, which order the journal of one instant. Every thread becomes a chat
 -- titled with the name of its subject (cut to 80 characters), «Без предмета» for NONE or a subject gone since; it was
--- last active when it was last updated.
+-- last active when it was last updated, or when created if an old row was updated before it (0022 did not check it,
+-- the new CHECK last_active_at >= created_at would abort the migration).
 --
 -- docs/contracts/schema.sql shows the result: the four agent tables as rebuilt here (TestMigrationMatchesContractSchema).
 
@@ -89,7 +90,7 @@ CREATE INDEX idx_agent_actions_open ON agent_actions (status) WHERE status IN ('
 CREATE INDEX idx_agent_actions_created ON agent_actions (created_at);
 INSERT INTO agent_threads (id, title, turns, history_from, seen, archived_at, last_active_at, version, created_at, updated_at)
     SELECT t.id, COALESCE(NULLIF(rtrim(substr(s.name, 1, 80)), ''), 'Без предмета'), t.turns, t.history_from, t.seen,
-           NULL, t.updated_at, t.version, t.created_at, t.updated_at
+           NULL, max(t.updated_at, t.created_at), t.version, t.created_at, t.updated_at
     FROM agent_threads_v1 t LEFT JOIN subjects s ON s.id = t.subject_key AND t.subject_key <> 'NONE';
 INSERT INTO agent_turns (thread_id, number, status, resume_status, stop_reason, scope, steps, writes, paid_unplanned,
                          planner_input, question_rounds, step_open, retry, proposed_plan, approved_plan, used,
