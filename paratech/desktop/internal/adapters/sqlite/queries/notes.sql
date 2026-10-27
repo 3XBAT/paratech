@@ -9,6 +9,10 @@ SELECT * FROM notes WHERE id = sqlc.arg(id);
 SELECT * FROM notes WHERE subject_id = sqlc.arg(subject_id)
 ORDER BY anchor_date IS NULL, anchor_date, created_at, id;
 
+-- Every note, for the knowledge base (TASK-152); ordered as ListNotesOfSubject.
+-- name: ListNotes :many
+SELECT * FROM notes ORDER BY anchor_date IS NULL, anchor_date, created_at, id;
+
 -- name: ListNotesOfRecording :many
 SELECT * FROM notes WHERE recording_id = sqlc.arg(recording_id) ORDER BY created_at, id;
 

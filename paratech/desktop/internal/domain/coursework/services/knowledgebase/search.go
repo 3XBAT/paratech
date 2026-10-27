@@ -36,7 +36,24 @@ const (
 	SectionSummary     Section = "summary"
 	SectionLectureText Section = "lectureText"
 	SectionTranscript  Section = "transcript"
+	// SectionOwnNote is the student's own notes (ADR-0027), searched after the sections of a recording.
+	SectionOwnNote Section = "ownNote"
 )
+
+// Locator is where a note fragment is in its file: Kind "page", "slide", "section" or "fragment" and N from 1.
+type Locator struct {
+	Kind string
+	N    int
+}
+
+// NoteFragment is one fragment of the text of a part of a note of the student, as plain values: its lines joined by
+// "\n" (of a section, the heading is the first line).
+type NoteFragment struct {
+	Note     shared.NoteID
+	Material shared.MaterialID
+	Locator  Locator
+	Text     string
+}
 
 // Block is one block of a lecture text, as plain values.
 type Block struct {
@@ -73,14 +90,18 @@ func SummaryTexts(sections []SummarySection, keyPoints []string) []string {
 	return append(out, keyPoints...)
 }
 
-// Document is everything searched of one lesson. Every text is untrusted.
+// Document is everything searched of one lesson. Key is the lesson's (Lesson.Key); Recording is "" for a note-only
+// lecture. Every text is untrusted.
 type Document struct {
+	Key       string
 	Recording shared.RecordingID
 	Title     string
 	// Summary is the texts of the summary (SummaryTexts): one per section, then the key points; nil: no summary.
 	Summary  []string
 	Blocks   []Block
 	Segments []Segment
+	// Notes are the fragments of the student's notes of the lesson, note by note and part by part.
+	Notes []NoteFragment
 }
 
 // Snippet is the text around a hit, one plain line cut to SnippetRunes: Match is the matched text as written, Before
@@ -93,19 +114,25 @@ type Snippet struct {
 
 // Hit is one place a query was found. Index is the block (SectionLectureText) or segment (SectionTranscript) index,
 // for the summary the index of its text in Document.Summary: i for section i, n+j for key point j of a summary of n
-// sections (of a summary made before TASK-101, 0 for its text and j+1 for key point j), 0 for the title. StartMs is where the block or segment
-// starts in the recording, 0 for the title and the summary.
+// sections (of a summary made before TASK-101, 0 for its text and j+1 for key point j), 0 for the title, for
+// SectionOwnNote the fragment in Document.Notes. StartMs is where the block or segment starts in the recording, 0
+// otherwise. Key is the lesson's (Document.Key). Note, Material and Locator name the fragment of SectionOwnNote; zero
+// for the other sections.
 type Hit struct {
+	Key       string
 	Recording shared.RecordingID
 	Section   Section
 	Index     int
 	StartMs   int64
 	Snippet   Snippet
+	Note      shared.NoteID
+	Material  shared.MaterialID
+	Locator   Locator
 }
 
 // Search collects the hits of one query over the lessons scanned, in scan order: per lesson the title, the summary,
-// the lecture text and the transcript, each text matched once, at most MaxSectionHits per section of a lesson and
-// MaxHits in all. Build it with NewSearch.
+// the lecture text, the transcript and the student's notes, each text matched once, at most MaxSectionHits per section
+// of a lesson and MaxHits in all. Build it with NewSearch.
 type Search struct {
 	query     []rune // folded
 	hits      []Hit
@@ -128,17 +155,18 @@ func (s *Search) Scan(d Document) {
 	if s.Full() {
 		return
 	}
-	s.section(d.Recording, SectionTitle, func(add func(int, int64, string) bool) {
+	at := func(sec Section) Hit { return Hit{Key: d.Key, Recording: d.Recording, Section: sec} }
+	s.section(at(SectionTitle), func(add func(int, int64, string) bool) {
 		add(0, 0, d.Title)
 	})
-	s.section(d.Recording, SectionSummary, func(add func(int, int64, string) bool) {
+	s.section(at(SectionSummary), func(add func(int, int64, string) bool) {
 		for i, text := range d.Summary {
 			if !add(i, 0, text) {
 				return
 			}
 		}
 	})
-	s.section(d.Recording, SectionLectureText, func(add func(int, int64, string) bool) {
+	s.section(at(SectionLectureText), func(add func(int, int64, string) bool) {
 		for i, b := range d.Blocks {
 			if !add(i, b.StartMs, b.Heading) {
 				return
@@ -150,18 +178,30 @@ func (s *Search) Scan(d Document) {
 			}
 		}
 	})
-	s.section(d.Recording, SectionTranscript, func(add func(int, int64, string) bool) {
+	s.section(at(SectionTranscript), func(add func(int, int64, string) bool) {
 		for i, seg := range d.Segments {
 			if !add(i, seg.StartMs, seg.Text) {
 				return
 			}
 		}
 	})
+	from := len(s.hits)
+	s.section(at(SectionOwnNote), func(add func(int, int64, string) bool) {
+		for i, f := range d.Notes {
+			if !add(i, 0, f.Text) {
+				return
+			}
+		}
+	})
+	for i := from; i < len(s.hits); i++ {
+		f := d.Notes[s.hits[i].Index]
+		s.hits[i].Note, s.hits[i].Material, s.hits[i].Locator = f.Note, f.Material, f.Locator
+	}
 }
 
 // section runs one section of a lesson: add matches a text and reports whether more texts are wanted. A block whose
-// heading matched is not matched again in its paragraphs.
-func (s *Search) section(rec shared.RecordingID, sec Section, texts func(add func(index int, startMs int64, text string) bool)) {
+// heading matched is not matched again in its paragraphs. at is the hit without its place.
+func (s *Search) section(at Hit, texts func(add func(index int, startMs int64, text string) bool)) {
 	found, last := 0, -1
 	texts(func(index int, startMs int64, text string) bool {
 		if index == last {
@@ -175,7 +215,9 @@ func (s *Search) section(rec shared.RecordingID, sec Section, texts func(add fun
 			s.truncated = true
 			return false
 		}
-		s.hits = append(s.hits, Hit{Recording: rec, Section: sec, Index: index, StartMs: startMs, Snippet: snip})
+		h := at
+		h.Index, h.StartMs, h.Snippet = index, startMs, snip
+		s.hits = append(s.hits, h)
 		found, last = found+1, index
 		return true
 	})
