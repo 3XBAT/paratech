@@ -29,6 +29,7 @@ import (
 	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/adapters/zipfile"
 	"paratech/desktop/internal/cases/activity"
+	"paratech/desktop/internal/cases/agentchats"
 	"paratech/desktop/internal/cases/agentjournal"
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/answering"
@@ -115,6 +116,7 @@ type core struct {
 
 	// The agent core (wireAgent): the steps of a request, the action journal and the Driver of the requests.
 	agent     *agentturn.Service
+	chats     *agentchats.Service // the chat list of the agent panel (ADR-0028)
 	journal   *agentjournal.Service
 	driver    *agentloop.Driver
 	panel     *wails.AgentPanel    // the Driver's updates as UI events
@@ -469,7 +471,9 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		SubjectOverview: subjectPage,
 		Notes:           ownNotes,
 		// Life is set by openCore: the requests live as long as the app.
-		Agent: wails.AgentCore{Driver: c.driver, Panel: c.panel, Journal: c.journal, Clock: e.clock, FreeWork: c.freeWorks},
+		Agent: wails.AgentCore{
+			Driver: c.driver, Panel: c.panel, Journal: c.journal, Clock: e.clock, Chats: c.chats, FreeWork: c.freeWorks,
+		},
 		Today: todayScreen,
 		// The confirm cards of the agent: only the student's click here confirms what the agent proposed.
 		AgentConfirm: wails.AgentConfirmCore{Proposals: c.proposals, Materials: lib, Deletions: c.deletions},

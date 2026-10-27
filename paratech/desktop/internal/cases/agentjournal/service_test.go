@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/agent/action"
+	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/shared"
@@ -608,14 +609,30 @@ func TestListThread(t *testing.T) {
 	}
 }
 
-// memScopes are the scopes of stored requests.
-type memScopes map[requestOf]values.Scope
+// memScopes are the scopes of stored requests and the titles of stored chats.
+type memScopes struct {
+	scopes map[requestOf]values.Scope
+	titles map[shared.ThreadID]string
+}
 
 func (m memScopes) RequestScope(_ context.Context, id shared.ThreadID, turn int) (values.Scope, error) {
-	if sc, ok := m[requestOf{id, turn}]; ok {
+	if sc, ok := m.scopes[requestOf{id, turn}]; ok {
 		return sc, nil
 	}
 	return values.Scope{}, shared.ErrNotFound
+}
+
+func (m memScopes) Get(_ context.Context, id shared.ThreadID) (*thread.Thread, error) {
+	title, ok := m.titles[id]
+	if !ok {
+		return nil, shared.ErrNotFound
+	}
+	at := time.Date(2026, 10, 22, 8, 0, 0, 0, time.UTC)
+	th, err := thread.New(id, at)
+	if err != nil {
+		return nil, err
+	}
+	return th, th.Rename(title, at)
 }
 
 type memJobs []*job.Job
@@ -637,7 +654,7 @@ func TestListMergesActionsAndProcessing(t *testing.T) {
 	}
 	comp := &fakeComp{targets: at(1)}
 	// Request 2 of th1 is in no subject: the subject is the request's, not the chat's.
-	scopes := memScopes{{"th1", 1}: scope, {"th1", 2}: {}}
+	scopes := memScopes{scopes: map[requestOf]values.Scope{{"th1", 1}: scope, {"th1", 2}: {}}, titles: map[shared.ThreadID]string{"th1": "Матан и физика"}}
 	s, _ := newServiceWith(t, Deps{Compensator: comp, Threads: scopes, Processing: memJobs{j}})
 	undone := done(t, s, begin(t, s, "c1").ID) // created at 09:00:01
 	if _, err := s.Undo(t.Context(), undone.ID); err != nil {
@@ -649,17 +666,27 @@ func TestListMergesActionsAndProcessing(t *testing.T) {
 	if err != nil || len(lines) != 3 {
 		t.Fatalf("List = %+v, %v", lines, err)
 	}
-	if lines[0].Action != later.ID || lines[0].Subject != "" || !lines[0].CanUndo {
+	if lines[0].Action != later.ID || lines[0].Subject != "" || !lines[0].CanUndo || lines[0].ChatTitle != "Матан и физика" {
 		t.Fatalf("newest line = %+v", lines[0])
 	}
-	if lines[1].Kind != LineProcessing || lines[1].Job != "j1" || lines[1].JobStatus != job.StatusQueued {
+	if lines[1].Kind != LineProcessing || lines[1].Job != "j1" || lines[1].JobStatus != job.StatusQueued || lines[1].ChatTitle != "" {
 		t.Fatalf("processing line = %+v", lines[1])
 	}
 	if lines[2].Action != undone.ID || lines[2].Status != action.StatusUndone || lines[2].Subject != "s1" ||
-		lines[2].CanUndo || lines[2].NoUndo != action.NoUndoUndone {
+		lines[2].CanUndo || lines[2].NoUndo != action.NoUndoUndone || lines[2].ChatTitle != "Матан и физика" {
 		t.Fatalf("undone line = %+v", lines[2])
 	}
 	if got, _ := s.List(t.Context(), 1); len(got) != 1 {
 		t.Fatalf("List(1) = %d lines", len(got))
+	}
+}
+
+// A line whose chat or request cannot be read is still listed, without a title or subject.
+func TestListWithoutTheChat(t *testing.T) {
+	s, _ := newServiceWith(t, Deps{Threads: memScopes{}})
+	begin(t, s, "c1")
+	lines, err := s.List(t.Context(), 0)
+	if err != nil || len(lines) != 1 || lines[0].ChatTitle != "" || lines[0].Subject != "" {
+		t.Fatalf("List = %+v, %v", lines, err)
 	}
 }
