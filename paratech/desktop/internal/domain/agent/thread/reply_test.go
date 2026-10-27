@@ -172,6 +172,28 @@ func TestReplyIsCutOnARuneBoundary(t *testing.T) {
 	}
 }
 
+// A long reply (catalog v7, TASK-223) goes into the history as one line cut to MaxAgentReplyBytes; the actions after
+// it are cut away with it, never a broken rune.
+func TestLongReplyIsCutForTheHistory(t *testing.T) {
+	paragraph := strings.Repeat("я", values.MaxReplyTextRunes/4-4)
+	text := strings.Join([]string{paragraph, paragraph, paragraph, paragraph}, "\n\n") + " <b>"
+	if n := utf8.RuneCountInString(text); n > values.MaxReplyTextRunes || n < values.MaxReplyTextRunes-10 {
+		t.Fatalf("text of %d runes", n)
+	}
+	args := argsJSON(t, map[string]string{"text": text})
+	got := Reply(turnsOf([]values.HistoryEntry{
+		entry(1, "x", nil), echo(1, [2]string{"reply", args}, [2]string{"list_subjects", `{}`}),
+		results(1, values.ShownResult("c0"), ok("c1")),
+	}))
+	if len(got) > values.MaxAgentReplyBytes || len(got) < values.MaxAgentReplyBytes-1 || !utf8.ValidString(got) ||
+		!strings.HasPrefix(got, "reply: я") || strings.Contains(got, "\n") {
+		t.Fatalf("reply of %d bytes, valid %v: %.40q", len(got), utf8.ValidString(got), got)
+	}
+	if err := (values.HistoryTurn{AgentReply: got}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Owner bug 2026-10-24 (TASK-140): an earlier request goes with its answer, the current text is last.
 func TestWindowSendsEarlierRequestsAsPairs(t *testing.T) {
 	entries := []values.HistoryEntry{
