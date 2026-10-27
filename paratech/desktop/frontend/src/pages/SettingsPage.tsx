@@ -185,7 +185,7 @@ export function SettingsPage(props: { part?: SettingsPart }) {
         <div className="head">
           <div>
             <span className="label">Для титульного листа домашнего задания</span>
-            <h1>Профиль</h1>
+            <h2>Профиль</h2>
           </div>
         </div>
         <ProfileCard api={api} />
@@ -199,7 +199,7 @@ export function SettingsPage(props: { part?: SettingsPart }) {
       <div className="head">
         <div>
           <span className="label">Хранится на этом компьютере</span>
-          <h1>Оформление</h1>
+          <h2>Оформление</h2>
         </div>
       </div>
       <SettingsGroup caption="Оформление">

@@ -126,7 +126,8 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
           }
         });
         setDeliveries(byId);
-        setDeliveriesLoaded(true);
+        // When every call was rejected the split is unknown, not «all active»: the counters stay hidden.
+        setDeliveriesLoaded(ds.length === 0 || ds.some((r) => r.status === "fulfilled"));
       } catch (err) {
         if (live) {
           setError(errorText(err));
@@ -206,20 +207,20 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
           {shown.length === 0 ? (
             <p className="muted">{filterEmpty}</p>
           ) : (
-        <CollapsibleList
-          items={shown}
-          itemKey={(a) => a.id}
-          renderItem={row}
-          renderContainer={(rows) => (
-            <div className="card rows" role="list">
-              {rows}
-            </div>
-          )}
-          state={list}
-          onStateChange={setList}
-          className="clist-card"
-          classNames={{ button: "btn ghost" }}
-        />
+            <CollapsibleList
+              items={shown}
+              itemKey={(a) => a.id}
+              renderItem={row}
+              renderContainer={(rows) => (
+                <div className="card rows" role="list">
+                  {rows}
+                </div>
+              )}
+              state={list}
+              onStateChange={setList}
+              className="clist-card"
+              classNames={{ button: "btn ghost" }}
+            />
           )}
         </>
       )}

@@ -116,6 +116,24 @@ export function App() {
   const overlay = route.transcript !== "" || route.summary !== "";
   const inSettings = railItemOf(current).id === "settings";
 
+  const pageView = (
+    <OpenTranscriptContext.Provider value={openTranscript}>
+      <OpenSummaryContext.Provider value={openSummary}>
+        <PageView
+          id={current}
+          visit={visit}
+          assignment={route.assignment}
+          subject={route.subject}
+          library={library}
+          onOpen={openPage}
+          onOpenAssignment={openAssignment}
+          onSelectAssignment={selectAssignment}
+          onSelectSubject={selectSubject}
+        />
+      </OpenSummaryContext.Provider>
+    </OpenTranscriptContext.Provider>
+  );
+
   return (
     <div
       className={`shell with-agent${open ? "" : " agent-closed"}${panel.dragging ? " agent-dragging" : ""}`}
@@ -134,26 +152,14 @@ export function App() {
             summary, so «Назад» finds it as the user left it. */}
         <div key={`${current}:${jump}`} className="screen" hidden={overlay}>
           {inSettings && <SettingsHead />}
-          <div className={inSettings ? "set-layout" : undefined}>
-            {inSettings && <SettingsTabs current={current} onOpen={openPage} />}
-            <div className={inSettings ? "set-body" : undefined}>
-              <OpenTranscriptContext.Provider value={openTranscript}>
-                <OpenSummaryContext.Provider value={openSummary}>
-                  <PageView
-                    id={current}
-                    visit={visit}
-                    assignment={route.assignment}
-                    subject={route.subject}
-                    library={library}
-                    onOpen={openPage}
-                    onOpenAssignment={openAssignment}
-                    onSelectAssignment={selectAssignment}
-                    onSelectSubject={selectSubject}
-                  />
-                </OpenSummaryContext.Provider>
-              </OpenTranscriptContext.Provider>
+          {inSettings ? (
+            <div className="set-layout">
+              <SettingsTabs current={current} onOpen={openPage} />
+              <div className="set-body">{pageView}</div>
             </div>
-          </div>
+          ) : (
+            pageView
+          )}
         </div>
         {route.transcript !== "" && (
           <div key={`transcript:${route.transcript}`} className="screen">

@@ -263,8 +263,14 @@ export function groupLines(lines: readonly JournalLine[], now: Date): JournalGro
   return [...groups.values()].sort((a, b) => order(a) - order(b));
 }
 
-/** Builds the line from the ids of the core; subjects maps ids to names. */
-export function lineModel(l: JournalLine, index: number, subjects: ReadonlyMap<string, string>): LineModel {
+/** "14:05": the day is already in the heading of a dated group. */
+function clockTime(rfc3339: string): string {
+  const d = new Date(rfc3339);
+  return Number.isNaN(d.getTime()) ? formatTime(rfc3339) : d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Builds the line from the ids of the core; subjects maps ids to names. timeOnly drops the date (dated groups). */
+export function lineModel(l: JournalLine, index: number, subjects: ReadonlyMap<string, string>, timeOnly = false): LineModel {
   const processing = l.kind === "processing";
   const title = processing ? (jobLabels[l.jobType] ?? "Обработка") : (toolLabels[l.tool] ?? "Действие");
   const key = processing ? `job:${l.jobId}:${index}` : `act:${l.actionId}:${index}`;
@@ -274,7 +280,7 @@ export function lineModel(l: JournalLine, index: number, subjects: ReadonlyMap<s
     kind: processing ? "processing" : "action",
     title,
     status: statusLabels[l.status] ?? "",
-    when: formatTime(l.at),
+    when: timeOnly ? clockTime(l.at) : formatTime(l.at),
     subject: subjects.get(l.subjectId) ?? "",
     undoActionId: undoable ? l.actionId : "",
     cannotUndo: l.cannotUndo,

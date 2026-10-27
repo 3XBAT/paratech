@@ -82,14 +82,14 @@ export function JournalList(props: {
   return (
     <>
       {groupLines(props.lines, props.now ?? new Date()).map((g) => (
-        <section key={g.key} className="jr-sec" aria-label={g.title}>
-          <h2 className="jr-group">
+        <section key={g.key} className="jr-sec" aria-labelledby={`jr-h-${g.key}`}>
+          <h2 className="jr-group" id={`jr-h-${g.key}`}>
             {g.title}
             <span className="cnt num">{g.items.length}</span>
           </h2>
-          <Card className="rows" label={g.title}>
+          <Card className="rows">
             {g.items.map(({ line, index }) => {
-              const m = lineModel(line, index, props.subjects);
+              const m = lineModel(line, index, props.subjects, g.key !== "now" && g.key !== "none");
               const meta = [m.when, m.subject, m.status].filter((x) => x !== "").join(" · ");
               return (
                 <Row

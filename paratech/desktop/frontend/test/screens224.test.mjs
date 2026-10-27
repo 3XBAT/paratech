@@ -1,5 +1,6 @@
 // TASK-224: «Журнал» by groups, left menu of «Настройки», counters of the filters of «Задания», the status line of «Сегодня».
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -43,8 +44,8 @@ test("an unfinished action is in Сейчас even when it started on an earlier
 
 test("the journal renders a heading with a count per group and nothing for an empty list", () => {
   const out = renderToStaticMarkup(h(JournalList, { lines: [line(), line({ actionId: "a2", at: new Date(2026, 9, 20).toISOString() })], subjects: new Map(), busyAction: "", onUndo: noop, now }));
-  assert.match(out, /<h2 class="jr-group">Сегодня<span class="cnt num">1<\/span><\/h2>/);
-  assert.match(out, /<h2 class="jr-group">20 октября<span class="cnt num">1<\/span><\/h2>/);
+  assert.match(out, /<h2 class="jr-group" id="[^"]+">Сегодня<span class="cnt num">1<\/span><\/h2>/);
+  assert.match(out, /<h2 class="jr-group" id="[^"]+">20 октября<span class="cnt num">1<\/span><\/h2>/);
   const empty = renderToStaticMarkup(h(JournalList, { lines: [], subjects: new Map(), busyAction: "", onUndo: noop, now }));
   assert.ok(!empty.includes("jr-group"));
 });
@@ -89,6 +90,37 @@ test("the filter buttons carry the counters", () => {
   assert.match(out, /Отправленные<span class="cnt">1<\/span>/);
   const loading = renderToStaticMarkup(h(FilterCounters, { counts: { all: 3, active: null, sent: null }, value: "all", onChange: noop }));
   assert.ok(!loading.includes("Активные<span"));
+});
+
+test("every filter but «Все» is disabled while the split is unknown", () => {
+  const loading = renderToStaticMarkup(h(FilterCounters, { counts: { all: 3, active: null, sent: null }, value: "all", onChange: noop }));
+  assert.match(loading, /<button type="button" aria-pressed="false" disabled="">Активные<\/button>/);
+  assert.match(loading, /<button type="button" aria-pressed="true">Все/);
+  const ready = renderToStaticMarkup(h(FilterCounters, { counts: { all: 3, active: 2, sent: 1 }, value: "all", onChange: noop }));
+  assert.ok(!ready.includes("disabled"));
+});
+
+test("dated groups show the time only, Сейчас and Без даты the full date", () => {
+  const lines = [line({ actionId: "run", kind: "processing", jobId: "j1", jobType: "stt", status: "RUNNING" }), line(), line({ actionId: "bad", at: "" })];
+  const out = renderToStaticMarkup(h(JournalList, { lines, subjects: new Map(), busyAction: "", onUndo: noop, now }));
+  // Only the line in «Сейчас» keeps the date; the one in «Сегодня» has the time, «Без даты» has a dash.
+  assert.equal(out.match(/27\.10\.2026/g).length, 1);
+  assert.ok(out.includes(">10:00<") || out.includes("10:00 ·") || out.includes("10:00"));
+});
+
+test("a group section is named by its heading once", () => {
+  const out = renderToStaticMarkup(h(JournalList, { lines: [line()], subjects: new Map(), busyAction: "", onUndo: noop, now }));
+  assert.match(out, /<section class="jr-sec" aria-labelledby="jr-h-today">/);
+  assert.ok(!out.includes('aria-label="Сегодня"'));
+});
+
+test("the sections of «Настройки» have no h1 of their own (the shared head is the only one)", () => {
+  // The pages need the Wails bindings to render, so their source is checked; SettingsHead is rendered.
+  assert.equal(renderToStaticMarkup(h(SettingsHead)).match(/<h1/g).length, 1);
+  for (const f of ["ModelsPage", "ConnectionsPage", "DiagnosticsPage", "SettingsPage", "AppleCalendarHelpPage"]) {
+    const src = readFileSync(new URL(`../src/pages/${f}.tsx`, import.meta.url), "utf8");
+    assert.ok(!src.includes("<h1"), f);
+  }
 });
 
 test("the status line names the nearest deadline of the week", () => {

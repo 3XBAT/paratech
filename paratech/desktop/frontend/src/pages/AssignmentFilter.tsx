@@ -8,8 +8,15 @@ export function FilterCounters(props: { counts: AssignmentCounts; value: Assignm
     <div className="seg hw-filter" role="group" aria-label="Какие задания показывать">
       {assignmentFilterOptions.map((o) => {
         const n = props.counts[o.value];
+        // The split is unknown (emails not loaded or every load failed): only «Все» works.
         return (
-          <button key={o.value} type="button" aria-pressed={o.value === props.value} onClick={() => props.onChange(o.value)}>
+          <button
+            key={o.value}
+            type="button"
+            aria-pressed={o.value === props.value}
+            disabled={n === null}
+            onClick={() => props.onChange(o.value)}
+          >
             {o.label}
             {n !== null && <span className="cnt">{n}</span>}
           </button>
