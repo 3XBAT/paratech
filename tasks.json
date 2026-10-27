@@ -4412,7 +4412,7 @@
                 "go test -race ./desktop/internal/domain/agent/... ./desktop/internal/cases/agentturn/... и тест архитектуры, golangci-lint ./desktop/..."
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-204",
