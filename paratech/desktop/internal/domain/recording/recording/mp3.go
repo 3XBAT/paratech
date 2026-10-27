@@ -73,31 +73,27 @@ func (h mp3Header) sameStream(o mp3Header) bool {
 }
 
 // mp3Audio is the MP3 whose first frame is at start of head: its frames are counted during the copy, and it is
-// refused now when its headers say it is too long.
-func mp3Audio(head, tail []byte, size int64, start int) (ImportedAudio, error) {
-	if d, ok := mp3Estimate(head[start:], tail, size-int64(start)); ok && d > MaxImportedDuration {
+// refused now when its Xing/Info or VBRI header says it is too long. No guess from the size and a bitrate: a VBR file
+// without such a header may start and end at the lowest bitrate, and the count during the copy is the cap anyway.
+func mp3Audio(head []byte, start int) (ImportedAudio, error) {
+	if d, ok := mp3Estimate(head[start:]); ok && d > MaxImportedDuration {
 		return ImportedAudio{}, fmt.Errorf("%w: about %v, at most %v", ErrAudioTooLong, d.Round(time.Second), MaxImportedDuration)
 	}
 	return ImportedAudio{Format: FormatMP3, counting: true, countFrom: int64(start)}, nil
 }
 
-// mp3Estimate is the duration of an MP3 of audioBytes whose first frame starts b: the frame count of a Xing/Info or
-// VBRI header, or the size over the bitrate when the frames at the start and at the end of the file share it (CBR).
-func mp3Estimate(b, tail []byte, audioBytes int64) (time.Duration, bool) {
+// mp3Estimate is the duration of an MP3 whose first frame starts b from the frame count of its Xing/Info or VBRI
+// header; not ok without one.
+func mp3Estimate(b []byte) (time.Duration, bool) {
 	h, ok := parseMP3Header(b)
 	if !ok {
 		return 0, false
 	}
-	if frames, ok := vbrFrames(b, h); ok {
-		return ratio(uint64(frames)*uint64(h.samples), uint64(h.rate)), true
-	}
-	if h.bitrate == 0 || audioBytes <= 0 {
+	frames, ok := vbrFrames(b, h)
+	if !ok {
 		return 0, false
 	}
-	if n, constant := walkFrames(b, h); n < 2 || !constant || !constantTail(tail, h) {
-		return 0, false
-	}
-	return ratio(uint64(audioBytes)*8, uint64(h.bitrate)), true
+	return ratio(uint64(frames)*uint64(h.samples), uint64(h.rate)), true
 }
 
 // vbrFrames reads the frame count of the Xing/Info header (after the side information) or of the VBRI header (32
@@ -130,36 +126,6 @@ func vbrFrames(b []byte, h mp3Header) (uint32, bool) {
 		return f, f > 0
 	}
 	return 0, false
-}
-
-// walkFrames follows the frames of lock's stream from the start of b: how many, and whether all have its bitrate.
-func walkFrames(b []byte, lock mp3Header) (n int, constant bool) {
-	constant = true
-	for off := 0; off+4 <= len(b); {
-		h, ok := parseMP3Header(b[off:])
-		if !ok || h.length < 4 || !h.sameStream(lock) {
-			break
-		}
-		n++
-		constant = constant && h.bitrate == lock.bitrate
-		off += h.length
-	}
-	return n, constant
-}
-
-// constantTail reports whether the first run of at least two frames of lock's stream in tail has lock's bitrate.
-func constantTail(tail []byte, lock mp3Header) bool {
-	for i := bytes.IndexByte(tail, 0xFF); i >= 0; {
-		if n, constant := walkFrames(tail[i:], lock); n >= 2 {
-			return constant
-		}
-		next := bytes.IndexByte(tail[i+1:], 0xFF)
-		if next < 0 {
-			break
-		}
-		i += 1 + next
-	}
-	return false
 }
 
 // MP3FrameCounter counts the frames of an MP3 while its bytes are copied (it is the io.Writer of the copy): the sum of

@@ -97,9 +97,9 @@ func TestDetectAudioMP3(t *testing.T) {
 		{"xing within", xingFrame(1000), nil, 1 << 30, nil},
 		{"info of a cbr file over four hours", bytes.Replace(xingFrame(600_000), []byte("Xing"), []byte("Info"), 1), nil, 1 << 30, ErrAudioTooLong},
 		{"vbri over four hours", vbriFrame(600_000), nil, 1 << 30, ErrAudioTooLong},
-		{"cbr over four hours", mp3Frames(low8, 900), mp3Frames(low8, 1800), huge, ErrAudioTooLong},
+		// The size over the bitrate is no estimate: the same head and tail may hold a VBR file without a header.
+		{"cbr-like head and tail of a large file", mp3Frames(low8, 900), mp3Frames(low8, 1800), huge, nil},
 		{"cbr within", mp3Frames(low8, 900), mp3Frames(low8, 1800), 1_000_000, nil},
-		{"cbr head longer than the head window", mp3Frames(low8, 2000), mp3Frames(low8, 1800), huge, ErrAudioTooLong},
 		{"vbr without a header", bytes.Repeat(mixedFrames(low8, low16), 300), mp3Frames(low8, 1800), huge, nil},
 		{"vbr at the end only", mp3Frames(low8, 900), bytes.Repeat(mixedFrames(low8, low16), 600), huge, nil},
 		{"no frames in the tail", mp3Frames(low8, 900), []byte("TAG and nothing else"), huge, nil},
@@ -119,6 +119,32 @@ func TestDetectAudioMP3(t *testing.T) {
 				t.Fatalf("DetectAudio = %+v, %v; want the frames counted", got, err)
 			}
 		})
+	}
+}
+
+// A VBR file without a Xing/VBRI header that starts and ends in silence at the lowest bitrate: its size over that
+// bitrate is over four hours, its frames are 2h15m36s. It is accepted, and the count is its duration.
+func TestMP3SilentEdgesWithoutVBRHeader(t *testing.T) {
+	parts := [][]byte{mp3Frames(low8, 1000), mp3Frames(low16, 110_000), mp3Frames(low8, 2000)}
+	var size int64
+	for _, p := range parts {
+		size += int64(len(p))
+	}
+	if ratio(uint64(size)*8, 8000) <= MaxImportedDuration {
+		t.Fatalf("the fixture must look longer than the cap at 8 kbit/s")
+	}
+	head, tail := parts[0][:ImportHeadBytes], parts[2][len(parts[2])-ImportTailBytes:]
+	audio, err := DetectAudio(head, tail, size)
+	if err != nil || !audio.NeedsFrameCount() {
+		t.Fatalf("DetectAudio = %+v, %v; want the frames counted", audio, err)
+	}
+	c := NewMP3FrameCounter(audio)
+	for _, p := range parts {
+		_, _ = c.Write(p)
+	}
+	got, err := audio.Counted(c)
+	if want := 113_000 * 72 * time.Millisecond; err != nil || got.Duration != want {
+		t.Fatalf("Counted = %+v, %v; want %v", got, err, want)
 	}
 }
 
@@ -232,11 +258,11 @@ func FuzzMP3FrameCounter(f *testing.F) {
 }
 
 func FuzzMP3Estimate(f *testing.F) {
-	f.Add(xingFrame(1000), []byte(nil), int64(1)<<20)
-	f.Add(vbriFrame(0), []byte(nil), int64(1)<<20)
-	f.Add(mp3Frames(low8, 10), mp3Frames(low8, 10), int64(1)<<31)
-	f.Fuzz(func(t *testing.T, b, tail []byte, n int64) {
-		if d, ok := mp3Estimate(b, tail, n); ok && d < 0 {
+	f.Add(xingFrame(1000))
+	f.Add(vbriFrame(0))
+	f.Add(mp3Frames(low8, 10))
+	f.Fuzz(func(t *testing.T, b []byte) {
+		if d, ok := mp3Estimate(b); ok && d < 0 {
 			t.Fatalf("mp3Estimate = %v", d)
 		}
 	})

@@ -113,8 +113,8 @@ func TestImportOfADateAndSubject(t *testing.T) {
 }
 
 // Every format has a duration cap: a file too long, or whose headers do not tell its duration, is refused. The headers
-// of WAV, FLAC and Ogg (and the size of a CBR MP3) refuse it before the copy; the frames of any other MP3 are counted
-// during the copy, which is then deleted.
+// of WAV, FLAC and Ogg (and the Xing/VBRI header of an MP3) refuse it before the copy; the frames of any other MP3 are
+// counted during the copy, which is then deleted.
 func TestImportDurationCap(t *testing.T) {
 	const big = int64(1) << 30
 	pairs := bytes.Repeat(append(mp3File(low8, 72, 1, ""), mp3File(low16, 144, 1, "")...), 300) // VBR, 43.2 s
@@ -130,8 +130,6 @@ func TestImportDurationCap(t *testing.T) {
 		{name: "ogg over 4 hours", file: original{data: oggHead(8000), end: oggPage(8000*(4*3600+1), []byte("x")), length: big},
 			want: recording.ErrAudioTooLong},
 		{name: "ogg without a last page", file: original{data: oggHead(8000), length: big}, want: recording.ErrAudioDurationUnknown},
-		{name: "cbr mp3 over 4 hours", file: original{data: mp3File(low8, 72, 900, "x"), end: mp3File(low8, 72, 1800, ""), length: 16_000_000},
-			want: recording.ErrAudioTooLong},
 		{name: "vbr mp3 over 4 hours", file: original{data: append(pairs, mp3File(low8, 72, 199_401, "")...)}, copied: true,
 			want: recording.ErrAudioTooLong},
 		{name: "mp3 without countable frames", file: original{data: append([]byte{0xFF, 0xFB, 0x04, 0x64}, make([]byte, 1000)...)}, copied: true,

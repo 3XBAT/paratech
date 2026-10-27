@@ -53,8 +53,8 @@ func (a ImportedAudio) NeedsFrameCount() bool { return a.counting }
 // RIFF/WAVE, fLaC, an ID3 tag or an MPEG audio frame, OggS with Vorbis. Anything else is ErrUnsupportedAudio. The
 // duration comes from the headers without decoding: the WAV data chunk, the FLAC STREAMINFO, the granule position of
 // the last Ogg page; one longer than MaxImportedDuration is ErrAudioTooLong, one the headers do not tell is
-// ErrAudioDurationUnknown. An MP3 is refused here only when its Xing/VBRI header, or the size over a bitrate that is
-// the same at the start and at the end, says it is too long; otherwise its frames are counted during the copy.
+// ErrAudioDurationUnknown. An MP3 is refused here only when its Xing/Info or VBRI header says it is too long;
+// otherwise its frames are counted during the copy.
 func DetectAudio(head, tail []byte, size int64) (ImportedAudio, error) {
 	if len(head) > ImportHeadBytes {
 		head = head[:ImportHeadBytes]
@@ -80,9 +80,9 @@ func DetectAudio(head, tail []byte, size int64) (ImportedAudio, error) {
 		d, ok := oggDuration(head, tail)
 		return knownAudio(FormatOGG, d, ok)
 	case bytes.HasPrefix(head, []byte("ID3")):
-		return id3Audio(head, tail, size)
+		return id3Audio(head)
 	case mpegFrame(head):
-		return mp3Audio(head, tail, size, 0)
+		return mp3Audio(head, 0)
 	}
 	return ImportedAudio{}, ErrUnsupportedAudio
 }
@@ -136,7 +136,7 @@ func wavDuration(head []byte, size int64) (time.Duration, bool) {
 
 // id3Audio looks past an ID3v2 tag: FLAC or an MPEG frame after it. A tag longer than the head is taken for MP3, the
 // usual case (a large cover picture), whose frames are counted from the end of the tag.
-func id3Audio(head, tail []byte, size int64) (ImportedAudio, error) {
+func id3Audio(head []byte) (ImportedAudio, error) {
 	if len(head) < 10 {
 		return ImportedAudio{}, ErrUnsupportedAudio
 	}
@@ -160,7 +160,7 @@ func id3Audio(head, tail []byte, size int64) (ImportedAudio, error) {
 		d, ok := flacDuration(rest)
 		return knownAudio(FormatFLAC, d, ok)
 	case mpegFrame(rest):
-		return mp3Audio(head, tail, size, end)
+		return mp3Audio(head, end)
 	}
 	return ImportedAudio{}, fmt.Errorf("%w: an ID3 tag before something that is not MP3", ErrUnsupportedAudio)
 }
