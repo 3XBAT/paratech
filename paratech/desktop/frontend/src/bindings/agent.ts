@@ -31,12 +31,26 @@ export const methods = {
   history: `${service}.History`,
   freeWorkCard: `${service}.FreeWorkCard`,
   freeWork: `${service}.FreeWork`,
+  chats: `${service}.Chats`,
+  newChat: `${service}.NewChat`,
+  renameChat: `${service}.RenameChat`,
+  archiveChat: `${service}.ArchiveChat`,
+  restoreChat: `${service}.RestoreChat`,
+  chatEarlier: `${service}.ChatEarlier`,
 } as const;
 
 /** Problems of a call (AgentResult.problem); "" when the operation started. */
 export type CallProblem = "" | "invalid" | "offline" | "closed" | "unavailable" | "busy" | "failed";
 
 export const callProblems: readonly CallProblem[] = ["", "invalid", "offline", "closed", "unavailable", "busy", "failed"];
+
+/**
+ * Problems of a chat call (chat list, rename, archive, restore, earlier requests); not_found: the chat is gone. Kept apart
+ * from CallProblem so the request texts stay exhaustive; an unknown code reads as "failed".
+ */
+export type ChatProblem = "" | "invalid" | "busy" | "failed" | "not_found";
+
+export const chatProblems: readonly ChatProblem[] = ["", "invalid", "busy", "failed", "not_found"];
 
 /** Why the panel is read-only: "ready" is the only state that accepts a request. */
 export type LinkState = "ready" | "no_hub" | "no_key" | "no_key_store" | "unknown";
@@ -56,6 +70,20 @@ export interface AskInput {
   assignmentId: string;
   /** "", today, subjects, assignments, schedule, journal or settings. */
   screen: string;
+  /**
+   * The chat; absent or "" is the current chat (a new one when there is none). A chat that no longer exists comes back
+   * as an update with problem "failed" (the update problems have no not_found).
+   */
+  threadId?: string;
+  /** The «@» objects of the text, at most 8 (values.MaxMentions; the core checks); absent means none. */
+  mentions?: MentionView[];
+}
+
+/** An «@» object: kind is subject, lesson, material or assignment; label is the name shown at mention time (plain text). */
+export interface MentionView {
+  kind: string;
+  id: string;
+  label: string;
 }
 
 /** The request a button belongs to. */
@@ -299,6 +327,8 @@ export interface JournalLine {
   subjectId: string;
   actionId: string;
   threadId: string;
+  /** The student's chat title of an action line (plain text); "" when the chat cannot be found or from an older core. */
+  chatTitle: string;
   turn: number;
   tool: string;
   jobId: string;
@@ -574,6 +604,7 @@ export function parseJournalLine(raw: unknown): JournalLine {
     subjectId: optStr(r, "subjectId", w),
     actionId: optStr(r, "actionId", w),
     threadId: optStr(r, "threadId", w),
+    chatTitle: optStr(r, "chatTitle", w),
     turn: typeof r.turn === "number" && Number.isFinite(r.turn) ? r.turn : 0,
     tool: optStr(r, "tool", w),
     jobId: optStr(r, "jobId", w),
@@ -608,7 +639,125 @@ export function parseUndoRequest(raw: unknown): UndoRequestView {
   return { problem: parseCallProblem(r), actions: items(r.actions, w, parseUndo) };
 }
 
+/** A line of the chat list; lastActive is RFC 3339 (UTC); running: the chat's request runs. */
+export interface ChatView {
+  threadId: string;
+  title: string;
+  archived: boolean;
+  lastActive: string;
+  running: boolean;
+}
+
+/** The chat list: unarchived chats newest first, then the archive. */
+export interface ChatsView {
+  problem: ChatProblem;
+  chats: ChatView[];
+}
+
+/** The outcome of a chat call; chat is the chat after the call, null unless problem is "". */
+export interface ChatResult {
+  problem: ChatProblem;
+  chat: ChatView | null;
+}
+
+/** A request of a chat, read-only; current marks the only one with buttons. */
+export interface EarlierRequestView {
+  turn: number;
+  text: string;
+  mentions: MentionView[];
+  /** What the student was shown (plain text); "" when no card was shown. */
+  reply: string;
+  current: boolean;
+}
+
+export interface EarlierView {
+  problem: ChatProblem;
+  requests: EarlierRequestView[];
+}
+
+/** An unknown or missing problem reads as "failed". */
+function chatProblemOf(r: Record<string, unknown>): ChatProblem {
+  const p = r.problem;
+  return typeof p === "string" && (chatProblems as readonly string[]).includes(p) ? (p as ChatProblem) : "failed";
+}
+
+/** Titles and labels are optional for the page: a missing one reads as "". */
+export function parseChat(raw: unknown): ChatView {
+  const w = "chat";
+  const r = record(raw, w);
+  return {
+    threadId: str(r, "threadId", w),
+    title: optStr(r, "title", w),
+    archived: flag(r, "archived"),
+    lastActive: optStr(r, "lastActive", w),
+    running: flag(r, "running"),
+  };
+}
+
+/** Malformed data reads as a failed call with no chats. */
+export function parseChats(raw: unknown): ChatsView {
+  try {
+    const r = record(raw, "chats");
+    const problem = chatProblemOf(r);
+    return { problem, chats: problem === "" ? items(r.chats, "chats", parseChat) : [] };
+  } catch {
+    return { problem: "failed", chats: [] };
+  }
+}
+
+/** Malformed data, or a missing chat on success, reads as a failed call. */
+export function parseChatResult(raw: unknown): ChatResult {
+  try {
+    const r = record(raw, "chat result");
+    const problem = chatProblemOf(r);
+    if (problem !== "") {
+      return { problem, chat: null };
+    }
+    return { problem, chat: parseChat(r.chat) };
+  } catch {
+    return { problem: "failed", chat: null };
+  }
+}
+
+function parseMention(raw: unknown): MentionView {
+  const w = "mention";
+  const r = record(raw, w);
+  return { kind: str(r, "kind", w), id: str(r, "id", w), label: optStr(r, "label", w) };
+}
+
+function parseEarlierRequest(raw: unknown): EarlierRequestView {
+  const w = "earlier request";
+  const r = record(raw, w);
+  return {
+    turn: num(r, "turn", w),
+    text: str(r, "text", w),
+    mentions: items(r.mentions, w, parseMention),
+    reply: optStr(r, "reply", w),
+    current: flag(r, "current"),
+  };
+}
+
+/** Malformed data reads as a failed call with no requests. */
+export function parseEarlier(raw: unknown): EarlierView {
+  try {
+    const r = record(raw, "earlier requests");
+    const problem = chatProblemOf(r);
+    return { problem, requests: problem === "" ? items(r.requests, "earlier requests", parseEarlierRequest) : [] };
+  } catch {
+    return { problem: "failed", requests: [] };
+  }
+}
+
 export interface AgentApi {
+  /** The chat list; reads only the local data. */
+  chats(): Promise<ChatsView>;
+  /** «Новый чат»: the current chat when it is still empty, else a new one. */
+  newChat(): Promise<ChatResult>;
+  renameChat(threadId: string, title: string): Promise<ChatResult>;
+  archiveChat(threadId: string): Promise<ChatResult>;
+  restoreChat(threadId: string): Promise<ChatResult>;
+  /** The requests of a chat as text, oldest first, the current one last. */
+  chatEarlier(threadId: string): Promise<EarlierView>;
   /** The Hub link of the panel; calls no Hub. */
   state(): Promise<AgentState>;
   /** Starts a request; the outcome comes as updates. */
@@ -647,6 +796,12 @@ function freeWorkArg(ref: FreeWorkRef): FreeWorkRef {
 export function agentApi(call: CallByName): AgentApi {
   const turn = (method: string) => async (ref: TurnRef) => parseCallProblem(await call(method, ref));
   return {
+    chats: async () => parseChats(await call(methods.chats)),
+    newChat: async () => parseChatResult(await call(methods.newChat)),
+    renameChat: async (threadId, title) => parseChatResult(await call(methods.renameChat, threadId, title)),
+    archiveChat: async (threadId) => parseChatResult(await call(methods.archiveChat, threadId)),
+    restoreChat: async (threadId) => parseChatResult(await call(methods.restoreChat, threadId)),
+    chatEarlier: async (threadId) => parseEarlier(await call(methods.chatEarlier, threadId)),
     state: async () => parseState(await call(methods.state)),
     ask: async (input) => parseCallProblem(await call(methods.ask, input)),
     approvePlan: turn(methods.approvePlan),

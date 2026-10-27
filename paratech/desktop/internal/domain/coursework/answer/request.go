@@ -48,17 +48,51 @@ const (
 	SectionSummary     Section = "summary"     // a section or a key point of the summary
 	SectionLectureText Section = "lectureText" // a block of the lecture text
 	SectionTranscript  Section = "transcript"  // consecutive segments of the transcript
+	SectionOwnNote     Section = "ownNote"     // a fragment of the student's own note (ADR-0027)
 )
 
 // Valid reports whether s is one of the sections.
 func (s Section) Valid() bool {
-	return s == SectionSummary || s == SectionLectureText || s == SectionTranscript
+	return s == SectionSummary || s == SectionLectureText || s == SectionTranscript || s == SectionOwnNote
 }
 
+// LocatorKind is the kind of place of a fragment in a file of a note.
+type LocatorKind string
+
+// Kinds of place in a file of a note, as the library reads its text.
+const (
+	LocatorPage     LocatorKind = "page"
+	LocatorSlide    LocatorKind = "slide"
+	LocatorSection  LocatorKind = "section"
+	LocatorFragment LocatorKind = "fragment"
+)
+
+// Locator is where a fragment of a note is in its file: the kind and N from 1.
+type Locator struct {
+	Kind LocatorKind
+	N    int
+}
+
+func (l Locator) valid() bool {
+	switch l.Kind {
+	case LocatorPage, LocatorSlide, LocatorSection, LocatorFragment:
+		return l.N >= 1
+	}
+	return false
+}
+
+// MaxHeadingRunes bounds the heading of a section of a note a source keeps for its label.
+const MaxHeadingRunes = 120
+
 // Source is the place in the student's lessons a fragment comes from, so a citation opens the lesson there. Index is
-// as the knowledge base counts it: the summary text, the lecture text block or the first transcript segment. StartMs
-// is where the block or the segments start in the recording, 0 for the summary. Title (one line, "" for an ad-hoc
-// recording) and StartedAt name the lesson as it was when the answer was made.
+// as the knowledge base counts it: the summary text, the lecture text block, the first transcript segment or the
+// fragment of the lesson's notes. StartMs is where the block or the segments start in the recording, 0 for the
+// summary and a note. Title (one line, "" for an ad-hoc recording) and StartedAt name the lesson as it was when the
+// answer was made.
+//
+// A source of SectionOwnNote has no Recording (a note-only lecture has none, and the note is what opens) but its
+// Note, Material and Locator; Heading is the heading line of a section of a note, "" otherwise. The other sections
+// have a Recording and none of these.
 type Source struct {
 	Recording shared.RecordingID
 	Section   Section
@@ -66,21 +100,46 @@ type Source struct {
 	StartMs   int64
 	Title     string
 	StartedAt time.Time
+	Note      shared.NoteID
+	Material  shared.MaterialID
+	Locator   Locator
+	Heading   string
 }
 
 func (s Source) validate() error {
-	switch {
-	case s.Recording.Validate() != nil:
-		return fmt.Errorf("%w: source recording", ErrInvalidState)
-	case !s.Section.Valid():
+	if !s.Section.Valid() {
 		return fmt.Errorf("%w: source section", ErrInvalidState)
-	case s.Index < 0 || s.StartMs < 0 || (s.Section == SectionSummary && s.StartMs != 0):
+	}
+	if s.Section == SectionOwnNote {
+		switch {
+		case s.Recording != "":
+			return fmt.Errorf("%w: source recording of a note", ErrInvalidState)
+		case s.Note.Validate() != nil || s.Material.Validate() != nil:
+			return fmt.Errorf("%w: source note", ErrInvalidState)
+		case !s.Locator.valid() || (s.Heading != "" && s.Locator.Kind != LocatorSection):
+			return fmt.Errorf("%w: source locator", ErrInvalidState)
+		case !oneLine(s.Heading) || utf8.RuneCountInString(s.Heading) > MaxHeadingRunes:
+			return fmt.Errorf("%w: source heading", ErrInvalidState)
+		}
+	} else {
+		switch {
+		case s.Recording.Validate() != nil:
+			return fmt.Errorf("%w: source recording", ErrInvalidState)
+		case s.Note != "" || s.Material != "" || s.Locator != (Locator{}) || s.Heading != "":
+			return fmt.Errorf("%w: source note of a recording", ErrInvalidState)
+		}
+	}
+	switch {
+	case s.Index < 0 || s.StartMs < 0 || ((s.Section == SectionSummary || s.Section == SectionOwnNote) && s.StartMs != 0):
 		return fmt.Errorf("%w: source place", ErrInvalidState)
-	case !utf8.ValidString(s.Title) || strings.ContainsAny(s.Title, "\n\r\x00"):
+	case !oneLine(s.Title):
 		return fmt.Errorf("%w: source title", ErrInvalidState)
 	}
 	return nil
 }
+
+// oneLine reports whether s is valid UTF-8 without line breaks or NUL.
+func oneLine(s string) bool { return utf8.ValidString(s) && !strings.ContainsAny(s, "\n\r\x00") }
 
 // Excerpt is a text of a lesson to answer from, with its place.
 type Excerpt struct {
@@ -174,12 +233,18 @@ func NewRequest(question string, excerpts []Excerpt, scope string) (Request, err
 	r.data = strings.TrimSuffix(b.String(), "\n")
 
 	// The places are part of the key: the same text of another lesson is another answer. The scope comes last, after
-	// a fixed number of parts per fragment, so it cannot pass for a place.
+	// a number of parts per fragment fixed by its section, so it cannot pass for a place. A fragment of a recording
+	// keeps the parts it had before notes, so the keys of stored answers are found again.
 	sum := sha256.New()
 	sum.Write([]byte(r.data))
 	for _, f := range r.fragments {
-		for _, part := range []string{string(f.Source.Recording), string(f.Source.Section), strconv.Itoa(f.Source.Index),
-			strconv.FormatInt(f.Source.StartMs, 10)} {
+		parts := []string{string(f.Source.Recording), string(f.Source.Section), strconv.Itoa(f.Source.Index),
+			strconv.FormatInt(f.Source.StartMs, 10)}
+		if f.Source.Section == SectionOwnNote {
+			parts = append(parts, string(f.Source.Note), string(f.Source.Material), string(f.Source.Locator.Kind),
+				strconv.Itoa(f.Source.Locator.N))
+		}
+		for _, part := range parts {
 			sum.Write([]byte{0})
 			sum.Write([]byte(part))
 		}

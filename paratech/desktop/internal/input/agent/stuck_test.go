@@ -32,6 +32,8 @@ type stuckTurns struct {
 	submits   int
 	recovered int
 	idleLive  []bool // what live said in each RecoverIdle
+	idleIn    []agentturn.IdleInput
+	askIn     []agentturn.AskInput
 }
 
 func (s *stuckTurns) stepLocked() agentturn.Step {
@@ -42,9 +44,10 @@ func (s *stuckTurns) stepLocked() agentturn.Step {
 	return st
 }
 
-func (s *stuckTurns) Ask(context.Context, agentturn.AskInput) (agentturn.Step, error) {
+func (s *stuckTurns) Ask(_ context.Context, in agentturn.AskInput) (agentturn.Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.askIn = append(s.askIn, in)
 	if running(s.status) {
 		return agentturn.Step{}, fmt.Errorf("agentturn: ask: %w", thread.ErrTurnInProgress)
 	}
@@ -112,9 +115,10 @@ func (s *stuckTurns) Interrupt(context.Context, agentturn.SubmitInput) (agenttur
 	return s.stepLocked(), nil
 }
 
-func (s *stuckTurns) RecoverIdle(_ context.Context, _ agentturn.IdleInput, live func(shared.ThreadID) bool) (bool, error) {
+func (s *stuckTurns) RecoverIdle(_ context.Context, in agentturn.IdleInput, live func(shared.ThreadID) bool) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.idleIn = append(s.idleIn, in)
 	if !running(s.status) {
 		return false, nil
 	}
@@ -223,6 +227,54 @@ func TestBusyWithoutALoopIsRecoveredOnce(t *testing.T) {
 			}
 			if len(r.activity.asked) != 0 {
 				t.Fatalf("a call ran: %v", r.activity.asked)
+			}
+		})
+	}
+}
+
+// An Ask into a named chat reaches the use case with that chat and its mentions, recovers that chat when it is stuck,
+// and a refused one names its chat in the update; an Ask without a chat recovers the current one and names none.
+func TestAskNamesItsChat(t *testing.T) {
+	subject, err := values.NewRef(values.KindSubject, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := values.NewMention(subject, "Матан")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		chat shared.ThreadID
+	}{
+		{"named chat", th1},
+		{"current chat", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			turns := &stuckTurns{turn: 1, status: thread.StatusExecuting, noRecover: true}
+			d, sink := newDriver(t, newReads(), turns)
+			in := agentturn.AskInput{ThreadID: tt.chat, Text: "привет", Mentions: []values.Mention{m}}
+			if err := d.Ask(t.Context(), in); err != nil {
+				t.Fatal(err)
+			}
+			d.Wait()
+			turns.mu.Lock()
+			idle, asked := slices.Clone(turns.idleIn), slices.Clone(turns.askIn)
+			turns.mu.Unlock()
+			if len(idle) != 1 || idle[0].Thread != tt.chat {
+				t.Fatalf("RecoverIdle got %+v, want chat %q", idle, tt.chat)
+			}
+			if len(asked) != 2 { // once more after the recovery
+				t.Fatalf("Ask calls = %d, want 2", len(asked))
+			}
+			for _, a := range asked {
+				if a.ThreadID != tt.chat || len(a.Mentions) != 1 || a.Mentions[0] != m {
+					t.Fatalf("Ask got %+v", a)
+				}
+			}
+			if up := lastUpdate(t, sink); up.Problem != ProblemBusy || up.Thread != tt.chat || up.Turn != 0 {
+				t.Fatalf("last update = %+v, want busy for chat %q", up, tt.chat)
 			}
 		})
 	}

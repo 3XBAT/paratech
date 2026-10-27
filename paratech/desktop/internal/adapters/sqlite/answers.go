@@ -70,13 +70,20 @@ type (
 		Text  string           `json:"text"`
 		Cites []answerCiteWire `json:"cites"`
 	}
+	// answerSourceWire is one source. The note fields (TASK-153) are optional, so answers stored before them read
+	// unchanged and a source of a recording is stored as it was.
 	answerSourceWire struct {
-		Recording string `json:"recording"`
-		Section   string `json:"section"`
-		Index     int    `json:"index"`
-		StartMs   int64  `json:"start_ms"`
-		Title     string `json:"title"`
-		StartedAt int64  `json:"started_at"` // Unix ms; 0 when unknown
+		Recording   string `json:"recording"`
+		Section     string `json:"section"`
+		Index       int    `json:"index"`
+		StartMs     int64  `json:"start_ms"`
+		Title       string `json:"title"`
+		StartedAt   int64  `json:"started_at"` // Unix ms; 0 when unknown
+		Note        string `json:"note,omitempty"`
+		Material    string `json:"material,omitempty"`
+		LocatorKind string `json:"locator_kind,omitempty"`
+		LocatorN    int    `json:"locator_n,omitempty"`
+		Heading     string `json:"heading,omitempty"`
 	}
 )
 
@@ -97,7 +104,8 @@ func answerJSON(st answer.State) (claims, missing, sources string, err error) {
 		}
 		sw = append(sw, answerSourceWire{
 			Recording: string(s.Recording), Section: string(s.Section), Index: s.Index, StartMs: s.StartMs,
-			Title: s.Title, StartedAt: started,
+			Title: s.Title, StartedAt: started, Note: string(s.Note), Material: string(s.Material),
+			LocatorKind: string(s.Locator.Kind), LocatorN: s.Locator.N, Heading: s.Heading,
 		})
 	}
 	m := st.Missing
@@ -145,7 +153,8 @@ func answerFromRow(row sqlcgen.Answer) (*answer.Answer, error) {
 	for _, s := range sw {
 		src := answer.Source{
 			Recording: shared.RecordingID(s.Recording), Section: answer.Section(s.Section), Index: s.Index,
-			StartMs: s.StartMs, Title: s.Title,
+			StartMs: s.StartMs, Title: s.Title, Note: shared.NoteID(s.Note), Material: shared.MaterialID(s.Material),
+			Locator: answer.Locator{Kind: answer.LocatorKind(s.LocatorKind), N: s.LocatorN}, Heading: s.Heading,
 		}
 		if s.StartedAt != 0 {
 			src.StartedAt = jobFromMs(s.StartedAt)

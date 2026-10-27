@@ -85,6 +85,9 @@ type change struct {
 	context values.RefSet // IDs of the base and the scope of the current step
 	calls   []Call
 	cards   []values.Card
+	// redo rebuilds the change of an Ask or a card answer on the stored chat when its first save meets a version
+	// conflict; nil once stored.
+	redo func() (*change, error)
 }
 
 func (c *change) add(entry values.HistoryTurn) {
@@ -121,10 +124,23 @@ func (s *Service) Ask(ctx context.Context, in AskInput) (Step, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	c, err := s.asked(ctx, in, text, mentions)
+	if err != nil {
+		return Step{}, err
+	}
+	// A chat change (rename, archive, restore) does not take s.mu; one saved before the request is stored would make
+	// the first save a version conflict and lose the student's message, so the request is asked again once on the
+	// stored chat (see store).
+	c.redo = func() (*change, error) { return s.asked(ctx, in, text, mentions) }
+	return s.drive(ctx, c, opAsk)
+}
+
+// asked loads the chat of in and starts the request in it, not yet stored.
+func (s *Service) asked(ctx context.Context, in AskInput, text string, mentions []values.Mention) (*change, error) {
 	now := s.clock.Now()
 	th, err := s.chat(ctx, in.ThreadID, now)
 	if err != nil {
-		return Step{}, fmt.Errorf("%s: %w", opAsk, err)
+		return nil, fmt.Errorf("%s: %w", opAsk, err)
 	}
 
 	c := &change{th: th}
@@ -138,13 +154,13 @@ func (s *Service) Ask(ctx context.Context, in AskInput) (Step, error) {
 		err = th.Ask(req, now)
 	}
 	if err != nil {
-		return Step{}, fmt.Errorf("%s: %w", opAsk, err)
+		return nil, fmt.Errorf("%s: %w", opAsk, err)
 	}
 	if err := th.Observe(in.Uploads...); err != nil {
-		return Step{}, fmt.Errorf("%s: %w", opAsk, err)
+		return nil, fmt.Errorf("%s: %w", opAsk, err)
 	}
 	c.add(values.HistoryTurn{StudentText: text})
-	return s.drive(ctx, c, opAsk)
+	return c, nil
 }
 
 // chat loads the chat named id, or the current chat for an empty id, created when there is none.
@@ -296,14 +312,27 @@ func (s *Service) AnswerQuestions(ctx context.Context, ref TurnRef, answers []va
 	})
 }
 
-// answerUI answers the open card call of tool with the result of decide, which also moves the request.
+// answerUI answers the open card call of tool with the result of decide, which also moves the request. A rename saved
+// between the load and the first save (allowed while the request waits for the student) would make that save a
+// version conflict and drop the click, so the answer is applied again once on the stored chat, as for Ask.
 func (s *Service) answerUI(ctx context.Context, ref TurnRef, tool values.Tool, op string,
 	decide func(c *change, id string) (values.ToolResult, error)) (Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	c, err := s.load(ctx, ref, op)
+	c, err := s.answered(ctx, ref, tool, op, decide)
 	if err != nil {
 		return Step{}, err
+	}
+	c.redo = func() (*change, error) { return s.answered(ctx, ref, tool, op, decide) }
+	return s.drive(ctx, c, op)
+}
+
+// answered loads the request of ref and answers its open card call of tool, not yet stored.
+func (s *Service) answered(ctx context.Context, ref TurnRef, tool values.Tool, op string,
+	decide func(c *change, id string) (values.ToolResult, error)) (*change, error) {
+	c, err := s.load(ctx, ref, op)
+	if err != nil {
+		return nil, err
 	}
 	turn, _ := c.th.Turn()
 	id := ""
@@ -314,16 +343,16 @@ func (s *Service) answerUI(ctx context.Context, ref TurnRef, tool values.Tool, o
 		}
 	}
 	if id == "" {
-		return Step{}, fmt.Errorf("%s: %w: no open %s card", op, thread.ErrInvalidTransition, tool)
+		return nil, fmt.Errorf("%s: %w: no open %s card", op, thread.ErrInvalidTransition, tool)
 	}
 	res, err := decide(c, id)
 	if err != nil {
-		return Step{}, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 	if err := c.th.Answer(res, values.Ref{}, s.clock.Now()); err != nil {
-		return Step{}, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
-	return s.drive(ctx, c, op)
+	return c, nil
 }
 
 // maxStopSaves bounds the saves of «Стоп» when steps keep saving in between.

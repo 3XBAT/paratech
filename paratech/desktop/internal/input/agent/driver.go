@@ -193,13 +193,14 @@ type opMarks struct {
 // resumes clears the «Стоп» marks of the thread.
 var resumes = opMarks{clear: true}
 
-// Ask starts a request typed in the panel. A thread found busy while no loop of this process drives it is recovered
-// once and asked again (unstick).
+// Ask starts a request typed in the panel, in the chat it names or the current one. A thread found busy while no loop
+// of this process drives it is recovered once and asked again (unstick). An update of a failed Ask names its chat when
+// the Ask named one.
 func (d *Driver) Ask(ctx context.Context, in agentturn.AskInput) error {
-	at := agentturn.Step{Scope: in.Scope}
+	at := agentturn.Step{Thread: in.ThreadID, Scope: in.Scope}
 	return d.start(ctx, at, opMarks{}, func(ctx context.Context) (agentturn.Step, error) {
 		st, err := d.turns.Ask(ctx, in)
-		if d.unstick(ctx, err, agentturn.IdleInput{}) { // Ask goes to the current chat
+		if d.unstick(ctx, err, agentturn.IdleInput{Thread: in.ThreadID}) { // "": the current chat
 			st, err = d.turns.Ask(ctx, in)
 		}
 		return st, err

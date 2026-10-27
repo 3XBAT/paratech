@@ -90,7 +90,8 @@ func TestAgentPanelWiring(t *testing.T) {
 	ctx := context.Background()
 	a, _ := newTestAppWith(t, t.TempDir())
 	ui := startCore(t, a)
-	if ui.Agent.Driver == nil || ui.Agent.Link == nil || ui.Agent.Panel == nil || ui.Agent.Life != a.startCtx {
+	if ui.Agent.Driver == nil || ui.Agent.Link == nil || ui.Agent.Panel == nil || ui.Agent.Life != a.startCtx ||
+		ui.Agent.Chats == nil {
 		t.Fatalf("agent core = %+v", ui.Agent)
 	}
 	events := &panelEvents{}
@@ -124,6 +125,49 @@ func TestAgentPanelWiring(t *testing.T) {
 	}
 	if ui.Agent.Life.Err() == nil {
 		t.Error("the agent's ctx must end with the app")
+	}
+}
+
+// The chat list of the panel is wired to the local database: a new chat is renamed, archived, listed and restored, and
+// its earlier requests are read; errors come as the panel's problems.
+func TestAgentChatsWiring(t *testing.T) {
+	ctx := context.Background()
+	a, _ := newTestAppWith(t, t.TempDir())
+	ui := startCore(t, a)
+	panel := wails.NewAgentService(ui.Agent, slog.New(slog.DiscardHandler))
+
+	created := panel.NewChat(ctx)
+	if created.Problem != "" || created.Chat.ThreadID == "" || created.Chat.Title != "Новый чат" {
+		t.Fatalf("NewChat = %+v", created)
+	}
+	if again := panel.NewChat(ctx); again.Chat.ThreadID != created.Chat.ThreadID {
+		t.Fatalf("a second NewChat of an empty chat = %+v, want the same chat", again)
+	}
+	id := created.Chat.ThreadID
+	if got := panel.RenameChat(ctx, id, "Матан и физика"); got.Problem != "" || got.Chat.Title != "Матан и физика" {
+		t.Fatalf("RenameChat = %+v", got)
+	}
+	if got := panel.ArchiveChat(ctx, id); got.Problem != "" || !got.Chat.Archived {
+		t.Fatalf("ArchiveChat = %+v", got)
+	}
+	list := panel.Chats(ctx)
+	if list.Problem != "" || len(list.Chats) != 1 || !list.Chats[0].Archived || list.Chats[0].Title != "Матан и физика" {
+		t.Fatalf("Chats = %+v", list)
+	}
+	if got := panel.RestoreChat(ctx, id); got.Problem != "" || got.Chat.Archived {
+		t.Fatalf("RestoreChat = %+v", got)
+	}
+	if got := panel.ChatEarlier(ctx, id); got.Problem != "" || len(got.Requests) != 0 {
+		t.Fatalf("ChatEarlier of an empty chat = %+v", got)
+	}
+	if got := panel.RenameChat(ctx, "th-none", "x"); got.Problem != wails.AgentProblemNotFound {
+		t.Fatalf("RenameChat of a missing chat = %+v", got)
+	}
+	if got := panel.RenameChat(ctx, id, ""); got.Problem != wails.AgentProblemInvalid {
+		t.Fatalf("RenameChat with no title = %+v", got)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -64,7 +64,7 @@ func newJournalAgent(t *testing.T, j *fakeJournal) (*AgentService, context.Cance
 	var logs bytes.Buffer
 	s := NewAgentService(AgentCore{
 		Driver: &fakeAgentDriver{}, Link: readyLink(), Panel: NewAgentPanel(discard()), Life: life, Journal: j,
-		Clock: fixedClock{},
+		Clock: fixedClock{}, Chats: &fakeChats{},
 	}, slog.New(slog.NewTextHandler(&logs, nil)))
 	return s, cancel, &logs
 }
@@ -75,7 +75,8 @@ func journalLines() []agentjournal.Line {
 	return []agentjournal.Line{
 		{
 			Kind: agentjournal.LineAction, At: at(time.Hour), UpdatedAt: at(time.Minute), Subject: "sub-1", Action: "act-1",
-			Thread: "th1", Turn: 2, Tool: values.ToolCreateFolder, Status: action.StatusDone, CanUndo: true,
+			Thread: "th1", ChatTitle: "Матан и физика", Turn: 2, Tool: values.ToolCreateFolder, Status: action.StatusDone,
+			CanUndo: true,
 		},
 		{
 			Kind: agentjournal.LineProcessing, At: at(2 * time.Hour), UpdatedAt: at(time.Hour), Job: "job-1",
@@ -115,13 +116,13 @@ func TestAgentHistoryContract(t *testing.T) {
 	}
 	want := `[` +
 		`{"kind":"action","at":"2026-10-22T11:00:00Z","updatedAt":"2026-10-22T11:59:00Z","subjectId":"sub-1",` +
-		`"actionId":"act-1","threadId":"th1","turn":2,"tool":"create_folder","jobId":"","jobType":"","status":"DONE",` +
-		`"undoable":true,"cannotUndo":false,"noUndo":""},` +
+		`"actionId":"act-1","threadId":"th1","chatTitle":"Матан и физика","turn":2,"tool":"create_folder","jobId":"",` +
+		`"jobType":"","status":"DONE","undoable":true,"cannotUndo":false,"noUndo":""},` +
 		`{"kind":"processing","at":"2026-10-22T10:00:00Z","updatedAt":"2026-10-22T11:00:00Z","subjectId":"",` +
-		`"actionId":"","threadId":"","turn":0,"tool":"","jobId":"job-1","jobType":"send_email","status":"COMPLETED",` +
-		`"undoable":false,"cannotUndo":true,"noUndo":"sent"},` +
+		`"actionId":"","threadId":"","chatTitle":"","turn":0,"tool":"","jobId":"job-1","jobType":"send_email",` +
+		`"status":"COMPLETED","undoable":false,"cannotUndo":true,"noUndo":"sent"},` +
 		`{"kind":"action","at":"2026-10-22T09:00:00Z","updatedAt":"2026-10-22T09:00:00Z","subjectId":"",` +
-		`"actionId":"act-2","threadId":"th2","turn":1,"tool":"propose_send","jobId":"","jobType":"","status":"PROPOSED",` +
+		`"actionId":"act-2","threadId":"th2","chatTitle":"","turn":1,"tool":"propose_send","jobId":"","jobType":"","status":"PROPOSED",` +
 		`"undoable":false,"cannotUndo":true,"noUndo":"irreversible"}]`
 	if string(got) != want {
 		t.Errorf("lines JSON =\n%s\nwant\n%s", got, want)

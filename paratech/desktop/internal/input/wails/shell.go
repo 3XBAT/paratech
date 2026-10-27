@@ -67,6 +67,8 @@ type Core struct {
 
 	Deletion RecordingDeleteUseCase // «Удалить» of the recording rows and the summary screen (TASK-095)
 
+	RecordingImport RecordingImportUseCase // «Импортировать запись лекции» (TASK-161); the shell shows its open dialog
+
 	Knowledge KnowledgeUseCase // the «База знаний» section (TASK-091); the shell shows its save dialog
 
 	Library LibraryUseCase // «Предметы» (TASK-121); the shell shows its open dialog, Files reads the chosen file
@@ -209,6 +211,7 @@ type Services struct {
 	Summary     *SummaryService
 	LectureText *LectureTextService
 	Deletion    *RecordingDeleteService
+	Import      *RecordingImportService
 	Knowledge   *KnowledgeBaseService
 	Library     *LibraryService
 	Notes       *NotesService
@@ -312,6 +315,9 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Tickets == nil {
 		return Services{}, errors.New("wails: open core: no tickets")
 	}
+	if core.RecordingImport == nil {
+		return Services{}, errors.New("wails: open core: no recording import")
+	}
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
 	return Services{
@@ -341,6 +347,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		LectureText: NewLectureTextService(core.Summary, summaryPickerFunc(s.pickSummaryFile),
 			clipboardFunc(s.setClipboardText), s.opts.Log),
 		Deletion:  NewRecordingDeleteService(core.Deletion, s.opts.Log),
+		Import:    NewRecordingImportService(core.RecordingImport, recordingPickerFunc(s.pickRecordingFile), s.opts.Log),
 		Knowledge: NewKnowledgeBaseService(core.Knowledge, knowledgePickerFunc(s.pickKnowledgeFile), s.opts.Log),
 		Library: NewLibraryService(core.Library, materialPickerFunc(s.pickMaterialFile), core.Files, s.opts.Log).
 			withOpener(core.MaterialViews, core.Opener).withOverview(core.SubjectOverview),

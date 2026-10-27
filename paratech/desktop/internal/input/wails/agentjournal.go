@@ -58,7 +58,7 @@ type AgentClock interface {
 
 // AgentHistoryFilter narrows «Журнал». Empty fields match every line. Kind is action or processing; Status is an
 // action status (DONE, UNDONE, UNDO_REFUSED, ...) or a job status (QUEUED, COMPLETED, ...); SubjectID matches the
-// subject of an action's thread (processing lines have none); Days is 1..90, 0 means 90; Undoable keeps only the
+// subject of an action's request (processing lines have none); Days is 1..90, 0 means 90; Undoable keeps only the
 // lines that offer «Отменить».
 type AgentHistoryFilter struct {
 	Kind      string `json:"kind"`
@@ -76,7 +76,8 @@ type AgentHistoryView struct {
 }
 
 // AgentJournalLineView is one line of «Журнал»: ids and enums only, the page words them. Times are RFC 3339 in UTC.
-// An action line has actionId, threadId, turn and tool; a processing line jobId and jobType. Status is the action or
+// An action line has actionId, threadId, chatTitle (the student's chat title, plain text only; "" when the chat cannot be
+// read), turn and tool, and the subject of its request; a processing line jobId and jobType. Status is the action or
 // job status. Undoable: «Отменить» is offered; CannotUndo: «Отменить нельзя» (a proposal, a sent email); NoUndo is
 // why there is no «Отменить» (running, failed, unknown, undone, irreversible, changed, result_ready, cannot_stop,
 // sent), "" when it is offered or there is nothing to say.
@@ -87,6 +88,7 @@ type AgentJournalLineView struct {
 	SubjectID  string `json:"subjectId"`
 	ActionID   string `json:"actionId"`
 	ThreadID   string `json:"threadId"`
+	ChatTitle  string `json:"chatTitle"`
 	Turn       int    `json:"turn"`
 	Tool       string `json:"tool"`
 	JobID      string `json:"jobId"`
@@ -254,6 +256,7 @@ func journalLineView(l agentjournal.Line) AgentJournalLineView {
 		return v
 	}
 	v.ActionID, v.ThreadID, v.Turn, v.Tool, v.Status = string(l.Action), string(l.Thread), l.Turn, string(l.Tool), string(l.Status)
+	v.ChatTitle = l.ChatTitle
 	v.Undoable, v.NoUndo = l.CanUndo, string(l.NoUndo)
 	v.CannotUndo = l.NoUndo == action.NoUndoIrreversible
 	return v

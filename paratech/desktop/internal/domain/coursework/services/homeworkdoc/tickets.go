@@ -19,25 +19,29 @@ const (
 	ticketsBySubject = "Ответы на билеты по дисциплине «%s»"
 	ticketPrefix     = "Билет "
 
-	// NotInLectures replaces the answer of a ticket the student's lessons do not cover.
-	NotInLectures = "Не найдено в ваших лекциях."
+	// notCovered names what the student's lessons and own notes (ADR-0027) do not cover.
+	notCovered = "Нет в ваших лекциях и конспектах"
+
+	// NotInLectures replaces the answer of a ticket the student's lessons and notes do not cover.
+	NotInLectures = notCovered + "."
 	// TicketNotAnswered replaces the answer of a ticket whose answer was refused.
 	TicketNotAnswered = "Ответ не прошёл проверку — подготовьте этот билет сами."
 	// UnsupportedMark follows a claim no citation of the lessons supports: it is never shown as «из ваших лекций».
 	UnsupportedMark = " [не подтверждено вашими лекциями — проверьте]"
-	// MissingLabel opens a part of the ticket the lessons do not answer.
-	MissingLabel = "Нет в ваших лекциях: "
+	// MissingLabel opens a part of the ticket the lessons and notes do not answer.
+	MissingLabel = notCovered + ": "
 	// CoverageHeading is the heading of the closing coverage summary.
 	CoverageHeading = "Покрытие лекциями"
 
-	sourceOpen  = "[источник: лекция "
-	sourceClose = "]"
-	dateLayout  = "02.01.2006"
+	sourceOpen   = "[источник: "
+	sourceLesson = "лекция "
+	sourceClose  = "]"
+	dateLayout   = "02.01.2006"
 
 	coverageTotal      = "Всего билетов: "
 	coverageCovered    = "Из ваших лекций: "
 	coveragePartial    = "Частично: "
-	coverageNotCovered = "Нет в ваших лекциях: "
+	coverageNotCovered = notCovered + ": "
 	coverageFailed     = "Ответ не получен: "
 
 	// maxLessonRunes bounds the lesson title in a source label, so a long title cannot blow up the file.
@@ -45,25 +49,35 @@ const (
 	ticketsFile    = "Билеты"
 )
 
-// sectionName is the part of a lesson as a source label names it; "" for none.
-func sectionName(s answer.Section) string {
-	switch s {
+// sectionName is the part of a lesson as a source label names it; "" for none. A part of the student's note is named
+// by its place (answer.Source.OwnNoteLabel), the AI summary is «конспект».
+func sectionName(s TicketSource) string {
+	switch s.Section {
 	case answer.SectionSummary:
 		return "конспект"
 	case answer.SectionLectureText:
 		return "текст лекции"
 	case answer.SectionTranscript:
 		return "расшифровка"
+	case answer.SectionOwnNote:
+		label := answer.Source{Section: answer.SectionOwnNote, Locator: s.Locator, Heading: oneLine(s.Heading)}.OwnNoteLabel()
+		if utf8.RuneCountInString(label) > maxLessonRunes {
+			label = strings.TrimSpace(string([]rune(label)[:maxLessonRunes])) + "…"
+		}
+		return label
 	}
 	return ""
 }
 
 // TicketSource is the place in a lesson a citation opens: the lesson title as the answer kept it ("" for an ad-hoc
-// recording), its start in the student's zone and the part. No recording ID is shown.
+// recording), its start in the student's zone and the part. A part of the student's note also has its Locator and
+// Heading (answer.Source). No recording, note or material ID is shown.
 type TicketSource struct {
 	Lesson  string
 	Date    time.Time
 	Section answer.Section
+	Locator answer.Locator
+	Heading string
 }
 
 // TicketClaim is a claim of an answer with the places its citations open; none: no citation supports it.
@@ -180,9 +194,13 @@ func answerBlocks(e TicketEntry) []values.Block {
 	return out
 }
 
-// sourceLabel is «[источник: лекция «<название>», <дата>, <раздел>]», the parts that are known.
+// sourceLabel is «[источник: лекция «<название>», <дата>, <раздел>]», the parts that are known; a part of the
+// student's note is «[источник: ваш конспект · <место>, «<название>», <дата>]».
 func sourceLabel(s TicketSource) string {
 	var parts []string
+	if s.Section == answer.SectionOwnNote {
+		parts = append(parts, sectionName(s))
+	}
 	if lesson := oneLine(s.Lesson); lesson != "" {
 		if utf8.RuneCountInString(lesson) > maxLessonRunes {
 			lesson = strings.TrimSpace(string([]rune(lesson)[:maxLessonRunes])) + "…"
@@ -192,10 +210,13 @@ func sourceLabel(s TicketSource) string {
 	if !s.Date.IsZero() {
 		parts = append(parts, s.Date.Format(dateLayout))
 	}
-	if name := sectionName(s.Section); name != "" {
+	if s.Section == answer.SectionOwnNote {
+		return sourceOpen + strings.Join(parts, ", ") + sourceClose
+	}
+	if name := sectionName(s); name != "" {
 		parts = append(parts, name)
 	}
-	return strings.TrimSpace(sourceOpen+strings.Join(parts, ", ")) + sourceClose
+	return strings.TrimSpace(sourceOpen+sourceLesson+strings.Join(parts, ", ")) + sourceClose
 }
 
 // TicketsFileName is the name of a tickets file: «Билеты <subject>», safe for Windows, with DocxExtension.
