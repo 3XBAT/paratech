@@ -19,23 +19,47 @@ var _ powerMonitor = (*Monitor)(nil)
 
 const tick = 2 * time.Millisecond
 
-// source is a switchable power reading.
+// source is a switchable power reading that counts reads.
 type source struct {
-	mu  sync.Mutex
-	ac  bool
-	err error
+	mu    sync.Mutex
+	ac    bool
+	err   error
+	reads int
 }
 
-func (s *source) set(ac bool, err error) {
+// set changes the reading and returns the read count at that moment.
+func (s *source) set(ac bool, err error) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ac, s.err = ac, err
+	return s.reads
 }
 
 func (s *source) read() (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reads++
 	return s.ac, s.err
+}
+
+// waitPolled waits until the poller has fully handled the reading set at read count n: read n+1 saw it, and
+// read n+2 starts only after that poll iteration (including its send) finished. Sleeps alone are not enough
+// on a loaded runner, where the poller can be descheduled for longer than any fixed delay.
+func waitPolled(t *testing.T, s *source, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s.mu.Lock()
+		r := s.reads
+		s.mu.Unlock()
+		if r >= n+2 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("poller stopped polling (blocked sender?)")
+		}
+		time.Sleep(tick)
+	}
 }
 
 func recv(t *testing.T, ch <-chan bool) bool {
@@ -130,8 +154,7 @@ func TestSubscribeIgnoresReadErrorsAndRepeats(t *testing.T) {
 		t.Fatal(err)
 	}
 	recv(t, ch)
-	s.set(false, errors.New("transient")) // the failed read must not look like a change
-	time.Sleep(10 * tick)
+	waitPolled(t, s, s.set(false, errors.New("transient"))) // the failed read must not look like a change
 	select {
 	case v := <-ch:
 		t.Fatalf("unexpected event %v", v)
@@ -152,12 +175,9 @@ func TestSubscribeSlowReaderSeesLatestAndSenderDoesNotBlock(t *testing.T) {
 	}
 	// The initial value stays unread while the source flips; the poller must keep running and the
 	// reader must end up with the newest state, not a stale one.
-	s.set(false, nil)
-	time.Sleep(10 * tick)
-	s.set(true, nil)
-	time.Sleep(10 * tick)
-	s.set(false, nil)
-	time.Sleep(10 * tick)
+	waitPolled(t, s, s.set(false, nil))
+	waitPolled(t, s, s.set(true, nil))
+	waitPolled(t, s, s.set(false, nil))
 	if got := recv(t, ch); got {
 		t.Fatal("want the latest state (false)")
 	}
