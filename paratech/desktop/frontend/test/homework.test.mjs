@@ -140,8 +140,9 @@ test("a running generation shows its progress; without one the usual time", () =
 
 // Mirrors AssignmentItem of internal/input/wails/homework.go.
 const assignment = () => ({
-  id: "a1", lessonId: "l1", title: "Задача 1", description: "", due: "", userEdited: false,
-  updatedAt: "2026-10-19T10:00:00Z", subject: "Матанализ", subjectSource: "schedule", kind: "lecture", teacher: "",
+  id: "a1", lessonId: "l1", title: "Задача 1", description: "", due: "", userEdited: false, version: 1,
+  updatedAt: "2026-10-19T10:00:00Z", subject: "Матанализ", subjectSource: "schedule", subjectFromLesson: true,
+  kind: "lecture", teacher: "",
   teacherSource: "", lessonDate: "", correctedSubject: "", correctedTeacher: "",
 });
 

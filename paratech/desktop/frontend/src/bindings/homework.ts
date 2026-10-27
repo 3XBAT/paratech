@@ -17,10 +17,14 @@ export interface AssignmentItem {
   /** Deadline; "" when there is none. */
   due: string;
   userEdited: boolean;
+  /** The stored version: deleteAssignment, restoreAssignment and editAssignment send it back. */
+  version: number;
   updatedAt: string;
   /** The lesson (TASK-092): the shown subject and teacher with their source, the kind and the lesson start. */
   subject: string;
   subjectSource: LessonSource;
+  /** The shown subject is the lesson's (schedule or recording): an empty subject in the edit form keeps showing it. */
+  subjectFromLesson: boolean;
   /** "lecture", "seminar", "practice", "lab" or "". */
   kind: string;
   teacher: string;
@@ -178,6 +182,42 @@ export interface CreateAssignmentResult {
   assignment: AssignmentItem | null;
 }
 
+/** "" = done; the page owns the texts of the others. A reply the binding cannot read is "failed". */
+export type ChangeProblem = "" | "in_use" | "changed" | "not_found" | "failed";
+
+/** «Удалить» and «Вернуть»: assignment (with its new version) is set exactly when problem is "". */
+export interface ChangeAssignmentResult {
+  problem: ChangeProblem;
+  assignment: AssignmentItem | null;
+}
+
+/**
+ * The edit form of an assignment of any origin (ADR-0029). version is AssignmentItem.version the form showed. "" in
+ * subjectId, note, date and time means no value; date is YYYY-MM-DD, time HH:MM (no time: the end of that day).
+ */
+export interface EditAssignmentRequest {
+  id: string;
+  version: number;
+  title: string;
+  note: string;
+  subjectId: string;
+  date: string;
+  time: string;
+}
+
+/** "" = saved; the page owns the texts of the others. A reply the binding cannot read is "failed". */
+export type EditProblem = "" | "invalid" | "subject_not_found" | "changed" | "deleted" | "not_found" | "failed";
+
+/** The input an "invalid" problem names; "" when the core does not know (or the problem is not "invalid"). */
+export type EditField = "" | "title" | "note" | "due" | "time";
+
+/** assignment is set exactly when problem is "". */
+export interface EditAssignmentResult {
+  problem: EditProblem;
+  field: EditField;
+  assignment: AssignmentItem | null;
+}
+
 /** Bound method names: "<Go package path>.<type>.<method>" (checked by a Go test). */
 export const methods = {
   listAssignments: "paratech/desktop/internal/input/wails.HomeworkService.ListAssignments",
@@ -185,6 +225,9 @@ export const methods = {
   draftStatus: "paratech/desktop/internal/input/wails.HomeworkService.DraftStatus",
   correctLesson: "paratech/desktop/internal/input/wails.HomeworkService.CorrectLesson",
   createAssignment: "paratech/desktop/internal/input/wails.HomeworkService.CreateAssignment",
+  deleteAssignment: "paratech/desktop/internal/input/wails.HomeworkService.DeleteAssignment",
+  restoreAssignment: "paratech/desktop/internal/input/wails.HomeworkService.RestoreAssignment",
+  editAssignment: "paratech/desktop/internal/input/wails.HomeworkService.EditAssignment",
   draftVersion: "paratech/desktop/internal/input/wails.HomeworkService.DraftVersion",
   generate: "paratech/desktop/internal/input/wails.HomeworkService.Generate",
   generationStatus: "paratech/desktop/internal/input/wails.HomeworkService.GenerationStatus",
@@ -219,6 +262,8 @@ export const errorMessages = {
   sendCannotConfirm: "Эту отправку уже нельзя подтвердить. Подготовьте её ещё раз.",
   sendAlreadyDecided: "Эта отправка уже подтверждена или отменена.",
   sendStale: "Файл, адрес получателя или тема письма изменились после подтверждения. Проверьте и подтвердите ещё раз.",
+  /** confirmSend refused: the assignment was deleted after the dialog opened (TASK-229); nothing was sent. */
+  sendAssignmentDeleted: "Задание удалено: письмо не отправлено. Верните задание и подготовьте отправку ещё раз.",
   sendUnresolved:
     "Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Сначала разберитесь с ним в списке писем.",
   /** confirmSend failed; repeating it with the same proposalId is safe: no second email. */
@@ -245,6 +290,20 @@ export const sendStatuses: readonly SendStatus[] = ["ready", "rejected"];
 export const createProblems: readonly CreateProblem[] = ["", "invalid", "subject_not_found", "lesson_not_found", "failed"];
 
 export const createFields: readonly CreateField[] = ["", "requestId", "title", "note", "due", "time"];
+
+export const changeProblems: readonly ChangeProblem[] = ["", "in_use", "changed", "not_found", "failed"];
+
+export const editProblems: readonly EditProblem[] = [
+  "",
+  "invalid",
+  "subject_not_found",
+  "changed",
+  "deleted",
+  "not_found",
+  "failed",
+];
+
+export const editFields: readonly EditField[] = ["", "title", "note", "due", "time"];
 
 export const sendFormats: readonly SendFormat[] = ["docx", "txt"];
 
@@ -307,9 +366,11 @@ export function parseAssignment(raw: unknown): AssignmentItem {
     description: str(r, "description", w),
     due: str(r, "due", w),
     userEdited: bool(r, "userEdited", w),
+    version: num(r, "version", w),
     updatedAt: str(r, "updatedAt", w),
     subject: str(r, "subject", w),
     subjectSource: lessonSource(str(r, "subjectSource", w)),
+    subjectFromLesson: bool(r, "subjectFromLesson", w),
     kind: str(r, "kind", w),
     teacher: str(r, "teacher", w),
     teacherSource: lessonSource(str(r, "teacherSource", w)),
@@ -332,6 +393,53 @@ export function parseCreateAssignmentResult(raw: unknown): CreateAssignmentResul
     throw new Error(`${w}: a problem comes with an assignment`);
   }
   return { problem, field, assignment: null };
+}
+
+/** v when it is one of allowed, else fallback: an unknown or missing code is never passed on. */
+function known<T extends string>(v: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof v === "string" && allowed.includes(v as T) ? (v as T) : fallback;
+}
+
+/** The assignment of a reply without a problem; null when it is malformed. */
+function doneAssignment(raw: unknown): AssignmentItem | null {
+  try {
+    return parseAssignment(raw);
+  } catch {
+    return null;
+  }
+}
+
+/** Never throws: a malformed reply, an unknown problem or a missing assignment is "failed". */
+export function parseChangeAssignmentResult(raw: unknown): ChangeAssignmentResult {
+  const failed: ChangeAssignmentResult = { problem: "failed", assignment: null };
+  if (typeof raw !== "object" || raw === null) {
+    return failed;
+  }
+  const r = raw as Record<string, unknown>;
+  const problem = known(r.problem, changeProblems, "failed");
+  if (problem !== "") {
+    return { problem, assignment: null };
+  }
+  const assignment = doneAssignment(r.assignment);
+  return assignment === null ? failed : { problem, assignment };
+}
+
+/** Never throws: like parseChangeAssignmentResult; field is kept only for "invalid" ("" when unknown). */
+export function parseEditAssignmentResult(raw: unknown): EditAssignmentResult {
+  const failed: EditAssignmentResult = { problem: "failed", field: "", assignment: null };
+  if (typeof raw !== "object" || raw === null) {
+    return failed;
+  }
+  const r = raw as Record<string, unknown>;
+  const problem = known(r.problem, editProblems, "failed");
+  if (problem === "invalid") {
+    return { problem, field: known(r.field, editFields, ""), assignment: null };
+  }
+  if (problem !== "") {
+    return { problem, field: "", assignment: null };
+  }
+  const assignment = doneAssignment(r.assignment);
+  return assignment === null ? failed : { problem, field: "", assignment };
 }
 
 export function parseVersionItem(raw: unknown): VersionItem {
@@ -464,6 +572,12 @@ export interface HomeworkApi {
   correctLesson(id: string, subject: string, teacher: string): Promise<AssignmentItem>;
   /** Adds an assignment or a reminder the student typed in; a problem is a code, not a thrown error. */
   createAssignment(req: CreateAssignmentRequest): Promise<CreateAssignmentResult>;
+  /** «Удалить» at the shown version; never rejects: any failure is a problem code. */
+  deleteAssignment(id: string, version: number): Promise<ChangeAssignmentResult>;
+  /** «Вернуть» at the version deleteAssignment returned; never rejects. */
+  restoreAssignment(id: string, version: number): Promise<ChangeAssignmentResult>;
+  /** Stores the edit form; never rejects: any failure is a problem code. */
+  editAssignment(req: EditAssignmentRequest): Promise<EditAssignmentResult>;
   draftVersion(id: string, version: number): Promise<VersionText>;
   /** Generates from version base, the one the page shows (0: no draft yet). */
   generate(id: string, base: number, instruction: string): Promise<GenerateStarted>;
@@ -490,6 +604,15 @@ export interface HomeworkApi {
   sendAgain(deliveryId: string): Promise<DeliveryItem>;
 }
 
+/** The reply of a call, or null when the runtime rejects it: its text is never shown. */
+async function settled(reply: Promise<unknown>): Promise<unknown> {
+  try {
+    return await reply;
+  } catch {
+    return null;
+  }
+}
+
 /** Builds the homework API over a call function (the Wails runtime in the app, a fake in tests). */
 export function homeworkApi(call: CallByName): HomeworkApi {
   return {
@@ -499,6 +622,11 @@ export function homeworkApi(call: CallByName): HomeworkApi {
     correctLesson: async (id, subject, teacher) =>
       parseAssignment(await call(methods.correctLesson, id, subject, teacher)),
     createAssignment: async (req) => parseCreateAssignmentResult(await call(methods.createAssignment, req)),
+    deleteAssignment: async (id, version) =>
+      parseChangeAssignmentResult(await settled(call(methods.deleteAssignment, id, version))),
+    restoreAssignment: async (id, version) =>
+      parseChangeAssignmentResult(await settled(call(methods.restoreAssignment, id, version))),
+    editAssignment: async (req) => parseEditAssignmentResult(await settled(call(methods.editAssignment, req))),
     draftVersion: async (id, version) => parseVersionText(await call(methods.draftVersion, id, version)),
     generate: async (id, base, instruction) =>
       parseGenerateStarted(await call(methods.generate, id, base, instruction)),

@@ -60,6 +60,11 @@ type fakeHWProposals struct {
 	createErr    error                         // returned by CreateAssignment
 	created      map[shared.AssignmentID]homeworkflow.NewAssignment
 	createCalls  []homeworkflow.NewAssignment // every CreateAssignment input
+	deleteErr    error                        // returned by DeleteAssignment
+	restoreErr   error                        // returned by RestoreAssignment
+	editErr      error                        // returned by EditAssignment
+	versions     []int64                      // every expected version DeleteAssignment and RestoreAssignment got
+	edits        []homeworkflow.AssignmentEdit
 }
 
 func (f *fakeHWProposals) ListAssignments(context.Context) ([]homeworkflow.AssignmentView, error) {
@@ -93,6 +98,36 @@ func (f *fakeHWProposals) CreateAssignment(_ context.Context, in homeworkflow.Ne
 	}
 	f.created[in.ID] = in
 	return homeworkflow.AssignmentView{ID: in.ID, Title: in.Title, Description: in.Note, UpdatedAt: hwT0}, nil
+}
+
+// DeleteAssignment and RestoreAssignment bump the version like the use case.
+func (f *fakeHWProposals) DeleteAssignment(_ context.Context, id shared.AssignmentID, v int64) (homeworkflow.AssignmentView, error) {
+	f.log.add("DeleteAssignment")
+	f.versions = append(f.versions, v)
+	if err := cmpErr(f.deleteErr, f.err); err != nil {
+		return homeworkflow.AssignmentView{}, err
+	}
+	return homeworkflow.AssignmentView{ID: id, Title: "Rivers", Version: v + 1, UpdatedAt: hwT0, Deleted: true}, nil
+}
+
+func (f *fakeHWProposals) RestoreAssignment(_ context.Context, id shared.AssignmentID, v int64) (homeworkflow.AssignmentView, error) {
+	f.log.add("RestoreAssignment")
+	f.versions = append(f.versions, v)
+	if err := cmpErr(f.restoreErr, f.err); err != nil {
+		return homeworkflow.AssignmentView{}, err
+	}
+	return homeworkflow.AssignmentView{ID: id, Title: "Rivers", Version: v + 1, UpdatedAt: hwT0}, nil
+}
+
+func (f *fakeHWProposals) EditAssignment(_ context.Context, e homeworkflow.AssignmentEdit) (homeworkflow.AssignmentView, error) {
+	f.log.add("EditAssignment")
+	f.edits = append(f.edits, e)
+	if err := cmpErr(f.editErr, f.err); err != nil {
+		return homeworkflow.AssignmentView{}, err
+	}
+	return homeworkflow.AssignmentView{
+		ID: e.ID, Title: e.Title, Description: e.Note, UserEdited: true, Version: e.ExpectedVersion + 1, UpdatedAt: hwT0,
+	}, nil
 }
 
 func (f *fakeHWProposals) ProposeSend(_ context.Context, _ shared.AssignmentID, format proposal.Format) (homeworkflow.ProposalView, error) {
@@ -316,6 +351,16 @@ var everyHomeworkCall = []hwCall{
 		}
 		return nil
 	}},
+	// An invalid id is not_found before any use case call (TestHomeworkValidatesIDs checks the calls).
+	{"DeleteAssignment", func(s *HomeworkService, id string) error {
+		return changeErr(s.DeleteAssignment(context.Background(), id, 1).Problem)
+	}},
+	{"RestoreAssignment", func(s *HomeworkService, id string) error {
+		return changeErr(s.RestoreAssignment(context.Background(), id, 2).Problem)
+	}},
+	{"EditAssignment", func(s *HomeworkService, id string) error {
+		return changeErr(s.EditAssignment(context.Background(), EditRequest{ID: id, Version: 1, Title: "Read chapter 3"}).Problem)
+	}},
 	{"DraftVersion", func(s *HomeworkService, id string) error {
 		_, err := s.DraftVersion(context.Background(), id, 1)
 		return err
@@ -362,6 +407,19 @@ var everyHomeworkCall = []hwCall{
 	}},
 	{"MarkSent", func(s *HomeworkService, id string) error { _, err := s.MarkSent(context.Background(), id); return err }},
 	{"SendAgain", func(s *HomeworkService, id string) error { _, err := s.SendAgain(context.Background(), id); return err }},
+}
+
+// changeErr shows a problem code of DeleteAssignment, RestoreAssignment or EditAssignment as the page's error.
+func changeErr(problem string) error {
+	switch problem {
+	case "":
+		return nil
+	case changeNotFound:
+		return ErrHomeworkInvalidID
+	case createFailed:
+		return ErrHomeworkUnavailable
+	}
+	return errors.New(problem)
 }
 
 func TestEveryHomeworkMethodIsCovered(t *testing.T) {
@@ -438,6 +496,7 @@ func TestConfirmSendErrors(t *testing.T) {
 		name string
 		edit func(e *hwEnv)
 		want error
+		read bool // reads the proposal after ConfirmSend
 	}{
 		{name: "rejected proposal", edit: func(e *hwEnv) {
 			e.proposals.confirmErr = fmt.Errorf("confirm: %w", proposal.ErrInvalidTransition)
@@ -449,7 +508,7 @@ func TestConfirmSendErrors(t *testing.T) {
 			want: ErrSendNotFound},
 		{name: "stale after the confirmation", edit: func(e *hwEnv) {
 			e.proposals.confirmErr = fmt.Errorf("execute: %w: homework_artifact_changed", proposal.ErrStale)
-		}, want: ErrSendStale},
+		}, want: ErrSendStale, read: true}, // reads the proposal for its reason (TASK-231)
 		{name: "unresolved earlier delivery", edit: func(e *hwEnv) {
 			e.proposals.confirmErr = fmt.Errorf("send: %w", senddelivery.ErrUnresolvedDelivery)
 		}, want: ErrSendUnresolved},
@@ -461,8 +520,12 @@ func TestConfirmSendErrors(t *testing.T) {
 			if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ", "txt"); !errors.Is(err, tt.want) {
 				t.Fatalf("ConfirmSend = %v, want %v", err, tt.want)
 			}
-			if got := e.calls.list(); !slices.Equal(got, []string{"ConfirmSend"}) {
-				t.Fatalf("calls = %v, want only ConfirmSend", got)
+			want := []string{"ConfirmSend"}
+			if tt.read {
+				want = append(want, "Get")
+			}
+			if got := e.calls.list(); !slices.Equal(got, want) {
+				t.Fatalf("calls = %v, want %v", got, want)
 			}
 		})
 	}
@@ -731,10 +794,10 @@ func TestHomeworkJSONNames(t *testing.T) {
 		v    any
 		want string
 	}{
-		{AssignmentItem{}, `{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"updatedAt":"","subject":"","subjectSource":"","kind":"","teacher":"","teacherSource":"","lessonDate":"","correctedSubject":"","correctedTeacher":""}`},
+		{AssignmentItem{}, `{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"version":0,"updatedAt":"","subject":"","subjectSource":"","subjectFromLesson":false,"kind":"","teacher":"","teacherSource":"","lessonDate":"","correctedSubject":"","correctedTeacher":""}`},
 		{VersionItem{}, `{"number":0,"source":"","instruction":"","latest":false,"createdAt":""}`},
 		{VersionText{}, `{"number":0,"source":"","title":"","body":"","instruction":"","latest":false,"createdAt":""}`},
-		{AssignmentDetail{Versions: []VersionItem{}}, `{"assignment":{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"updatedAt":"","subject":"","subjectSource":"","kind":"","teacher":"","teacherSource":"","lessonDate":"","correctedSubject":"","correctedTeacher":""},"versions":[],"latest":null,"generation":null}`},
+		{AssignmentDetail{Versions: []VersionItem{}}, `{"assignment":{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"version":0,"updatedAt":"","subject":"","subjectSource":"","subjectFromLesson":false,"kind":"","teacher":"","teacherSource":"","lessonDate":"","correctedSubject":"","correctedTeacher":""},"versions":[],"latest":null,"generation":null}`},
 		{GenerateStarted{}, `{"jobId":"","base":0}`},
 		{GenerationStatus{}, `{"state":"","message":"","percent":0}`},
 		{ActiveGeneration{}, `{"jobId":"","state":"","message":"","percent":0}`},
@@ -766,6 +829,7 @@ func TestFrontendKnowsHomeworkErrors(t *testing.T) {
 		ErrDraftInvalid, ErrDraftFull, ErrInstructionInvalid, ErrGenerateRetries, ErrGenerationNotFound, ErrSendNotFound,
 		ErrSendCannotConfirm, ErrSendAlreadyDecided, ErrSendStale, ErrSendUnresolved, ErrSendIncomplete, ErrExportLocked,
 		ErrDeliveryNotFound, ErrDeliveryActionInvalid, ErrGenerationRunning, ErrSendFormat, // +2: TASK-094
+		ErrSendAssignmentDeleted, // TASK-231
 	} {
 		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
 			t.Errorf("frontend/src/bindings/homework.ts does not list the error %q", e)
