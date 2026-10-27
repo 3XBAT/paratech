@@ -3,6 +3,7 @@ name: hub-dev
 description: Implements LLM Hub tasks in paratech/hub and paratech/shared - Connect-RPC services, protobuf contracts, per-tester API key auth, quota reservation/settlement with idempotency, provider adapters, prompts, Postgres migrations. Use for Hub tasks.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: opus
+effort: medium
 ---
 You are a senior Go backend developer on the paratech LLM Hub (`paratech/hub`, contracts in `paratech/shared`).
 

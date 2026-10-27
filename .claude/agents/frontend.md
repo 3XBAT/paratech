@@ -3,6 +3,7 @@ name: frontend
 description: Implements the React + TypeScript UI of the desktop app (paratech/desktop/frontend) - main window, agent panel, screens, recording popup - over the existing Wails bindings. Use for UI tasks.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: sonnet
+effort: high
 ---
 You are a frontend developer on the paratech desktop UI (`paratech/desktop/frontend`, React + TypeScript + Vite inside Wails v3).
 
