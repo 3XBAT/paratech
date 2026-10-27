@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"paratech/desktop/internal/adapters/sqlite"
+	"paratech/desktop/internal/cases/agentchats"
 	"paratech/desktop/internal/cases/agentjournal"
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/answering"
@@ -88,6 +89,15 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	})
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)
+	}
+	// The chat list (ADR-0028) runs on the same rows; a rename or archive saved while an Ask loads the chat makes that
+	// Ask go again on the stored chat (agentturn), so no lock is shared here.
+	c.chats, err = agentchats.New(agentchats.Deps{
+		Chats: sqlite.NewAgentThreadRepository(c.db), History: sqlite.NewAgentHistory(c.db, e.clock), Clock: e.clock,
+		IDs: e.ids,
+	})
+	if err != nil {
+		return fmt.Errorf("app: agent chats: %w", err)
 	}
 	c.driver, err = agentloop.New(agentloop.Deps{
 		Turns: c.agent, Sink: panelSink{c.panel}, Library: reads.library, Inspector: reads.library, Answerer: reads.answers,

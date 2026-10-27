@@ -29,6 +29,7 @@ import (
 	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/adapters/zipfile"
 	"paratech/desktop/internal/cases/activity"
+	"paratech/desktop/internal/cases/agentchats"
 	"paratech/desktop/internal/cases/agentjournal"
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/answering"
@@ -115,6 +116,7 @@ type core struct {
 
 	// The agent core (wireAgent): the steps of a request, the action journal and the Driver of the requests.
 	agent     *agentturn.Service
+	chats     *agentchats.Service // the chat list of the agent panel (ADR-0028)
 	journal   *agentjournal.Service
 	driver    *agentloop.Driver
 	panel     *wails.AgentPanel    // the Driver's updates as UI events
@@ -318,9 +320,10 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return fmt.Errorf("app: knowledge base: %w", err)
 	}
 	// Answers with citations (TASK-118): passages of the knowledge base, the ANSWER reader on the Hub, the answers kept
-	// locally for their cards.
+	// locally for their cards; a card marks a citation of a note removed since.
 	answers, err := answering.New(answering.Deps{
-		Knowledge: knowledge, Reader: llm, Answers: sqlite.NewAnswerRepository(db), Clock: e.clock, IDs: e.ids, Log: log,
+		Knowledge: knowledge, Reader: llm, Answers: sqlite.NewAnswerRepository(db), Notes: answerNotes{notes: noteRepo},
+		Clock: e.clock, IDs: e.ids, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: answers: %w", err)
@@ -379,6 +382,10 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	}, recordingdelete.Config{TrackExtension: e.recordings.TrackExtension})
 	if err != nil {
 		return fmt.Errorf("app: recording deletion: %w", err)
+	}
+	recordingImport, err := c.wireRecordingImport(e, recordings, lessons, log)
+	if err != nil {
+		return err
 	}
 
 	c.sound, err = soundcheck.New(soundcheck.Deps{
@@ -460,15 +467,19 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Transcript: viewer,
 		Summary:    summaryViewer,
 		Deletion:   c.deletions,
-		Knowledge:  knowledge,
-		Library:    lib,
+		// «Импортировать запись лекции» (TASK-161).
+		RecordingImport: recordingImport,
+		Knowledge:       knowledge,
+		Library:         lib,
 		// «Открыть в Word / PowerPoint»: a named copy in the artifact store, started below that root only.
 		MaterialViews:   store,
 		Opener:          fileopen.New(filepath.Join(dataDir, artifactsDir)),
 		SubjectOverview: subjectPage,
 		Notes:           ownNotes,
 		// Life is set by openCore: the requests live as long as the app.
-		Agent: wails.AgentCore{Driver: c.driver, Panel: c.panel, Journal: c.journal, Clock: e.clock, FreeWork: c.freeWorks},
+		Agent: wails.AgentCore{
+			Driver: c.driver, Panel: c.panel, Journal: c.journal, Clock: e.clock, Chats: c.chats, FreeWork: c.freeWorks,
+		},
 		Today: todayScreen,
 		// The confirm cards of the agent: only the student's click here confirms what the agent proposed.
 		AgentConfirm: wails.AgentConfirmCore{Proposals: c.proposals, Materials: lib, Deletions: c.deletions},

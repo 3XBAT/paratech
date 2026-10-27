@@ -64,6 +64,7 @@ func (s *Shell) run(ctx context.Context) error {
 	app.RegisterService(application.NewService(b.Summary))
 	app.RegisterService(application.NewService(b.LectureText))
 	app.RegisterService(application.NewService(b.Deletion))
+	app.RegisterService(application.NewService(b.Import))
 	app.RegisterService(application.NewService(b.Knowledge))
 	app.RegisterService(application.NewService(b.Library))
 	app.RegisterService(application.NewService(b.Notes))

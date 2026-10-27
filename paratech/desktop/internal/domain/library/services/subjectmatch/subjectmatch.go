@@ -48,13 +48,43 @@ func NewIndex(entries []Entry) Index {
 	return ix
 }
 
+// Outcome is how a string resolves: to one subject, to none, to several (ambiguous), or not at all as it has no key.
+type Outcome int
+
+// Outcomes of Lookup. The zero value is NoKey.
+const (
+	NoKey     Outcome = iota // the string is empty once cleaned
+	NoMatch                  // no subject has its key
+	Matched                  // exactly one subject has its key
+	Ambiguous                // several subjects have its key: none is chosen
+)
+
+// Resolution is the outcome of a string with its subject; Match is zero unless Outcome is Matched.
+type Resolution struct {
+	Match   Match
+	Outcome Outcome
+}
+
+// Lookup tells how s resolves; it never guesses between subjects that share a key.
+func (ix Index) Lookup(s string) Resolution {
+	key := values.Key(s)
+	if key == "" {
+		return Resolution{Outcome: NoKey}
+	}
+	switch owners := ix.owners[key]; len(owners) {
+	case 0:
+		return Resolution{Outcome: NoMatch}
+	case 1:
+		return Resolution{Match: Match{ID: owners[0], Name: ix.names[owners[0]]}, Outcome: Matched}
+	default:
+		return Resolution{Outcome: Ambiguous}
+	}
+}
+
 // Resolve returns the subject s names; ok is false for an empty string, a string of no subject or of two.
 func (ix Index) Resolve(s string) (Match, bool) {
-	owners := ix.owners[values.Key(s)]
-	if len(owners) != 1 {
-		return Match{}, false
-	}
-	return Match{ID: owners[0], Name: ix.names[owners[0]]}, true
+	r := ix.Lookup(s)
+	return r.Match, r.Outcome == Matched
 }
 
 // TakenByOther reports whether s has the key of a name or alias of a subject other than except: a subject may not

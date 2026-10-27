@@ -504,6 +504,29 @@ func TestSuggestAndResolve(t *testing.T) {
 		t.Fatalf("ResolveSubjects(nil) = %+v, %v", res, err)
 	}
 
+	looked, err := e.svc.LookupSubjects(ctx, []string{"ФИЗИКА", "Химия", " "})
+	wantLooked := map[string]subjectmatch.Resolution{
+		"ФИЗИКА": {Match: subjectmatch.Match{ID: phys.ID(), Name: "Физика"}, Outcome: subjectmatch.Matched},
+		"Химия":  {Outcome: subjectmatch.NoMatch},
+		" ":      {Outcome: subjectmatch.NoKey},
+	}
+	if err != nil || !reflect.DeepEqual(looked, wantLooked) {
+		t.Fatalf("LookupSubjects = %+v, %v; want %+v", looked, err, wantLooked)
+	}
+	if res, err := e.svc.LookupSubjects(ctx, nil); err != nil || len(res) != 0 {
+		t.Fatalf("LookupSubjects(nil) = %+v, %v", res, err)
+	}
+
+	// A row that shares a key with another subject (the service refuses it, an older row may not): ambiguous, no guess.
+	chem := createSubject(t, e, "Химия")
+	st := e.subjects.rows[chem.ID()]
+	st.Aliases = append(st.Aliases, "физика")
+	e.subjects.rows[chem.ID()] = st
+	if res, err := e.svc.LookupSubjects(ctx, []string{"Физика"}); err != nil ||
+		res["Физика"] != (subjectmatch.Resolution{Outcome: subjectmatch.Ambiguous}) {
+		t.Fatalf("LookupSubjects(ambiguous) = %+v, %v", res, err)
+	}
+
 	e.strings.err = errors.New("db")
 	if _, err := e.svc.SuggestSubjects(ctx); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("SuggestSubjects with a failing store = %v", err)
@@ -511,5 +534,8 @@ func TestSuggestAndResolve(t *testing.T) {
 	e.subjects.err = errors.New("db")
 	if _, err := e.svc.ResolveSubjects(ctx, []string{"x"}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("ResolveSubjects with a failing store = %v", err)
+	}
+	if _, err := e.svc.LookupSubjects(ctx, []string{"x"}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("LookupSubjects with a failing store = %v", err)
 	}
 }

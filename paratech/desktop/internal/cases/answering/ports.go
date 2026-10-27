@@ -46,6 +46,13 @@ type Repository interface {
 	Insert(ctx context.Context, a *answer.Answer) error
 }
 
+// Notes tells whether a note of the student is still there, so a citation of a removed one shows as removed
+// (ADR-0027). Implemented by the app over the note repository.
+type Notes interface {
+	// NoteActive reports whether the note exists and is not removed; a note gone is false, not an error.
+	NoteActive(ctx context.Context, id shared.NoteID) (bool, error)
+}
+
 // Clock supplies the current time (ARCH-24).
 type Clock interface {
 	Now() time.Time

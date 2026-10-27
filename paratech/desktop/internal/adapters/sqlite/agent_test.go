@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -325,6 +326,66 @@ func TestAgentRequestScope(t *testing.T) {
 	}
 	if _, err := repo.RequestScope(ctx, "th1", 3); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("scope of a missing request = %v", err)
+	}
+}
+
+// RequestMentions reads the mentions stored with an earlier request of a chat, with their labels, in order.
+func TestAgentRequestMentions(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	repo := NewAgentThreadRepository(db)
+	th := subjectThread(t)
+	if err := repo.Save(ctx, th); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := th.TakeResults(agentAt(7)); !ok {
+		t.Fatal("results not complete")
+	}
+	if err := th.Complete(agentAt(8)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.Ask(thread.Request{Text: "без упоминаний"}, agentAt(9)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, th); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := repo.RequestMentions(ctx, "th1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []values.Mention{
+		agentMention(t, values.KindLesson, "l2", "Лекция 3 «Интегралы»"), agentMention(t, values.KindMaterial, "m1", "Лабы.pdf"),
+	}
+	if !slices.Equal(first, want) {
+		t.Fatalf("mentions of request 1 = %+v, want %+v", first, want)
+	}
+	if second, err := repo.RequestMentions(ctx, "th1", 2); err != nil || len(second) != 0 {
+		t.Fatalf("mentions of request 2 = %+v, %v", second, err)
+	}
+	if _, err := repo.RequestMentions(ctx, "th1", 3); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("mentions of a missing request = %v", err)
+	}
+	if _, err := repo.RequestMentions(ctx, "th404", 1); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("mentions of a missing chat = %v", err)
+	}
+}
+
+// A stored mention that no longer passes the value checks is an error, never a mention with an unchecked label.
+func TestAgentRequestMentionsRefusesBadRows(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	repo := NewAgentThreadRepository(db)
+	if err := repo.Save(ctx, subjectThread(t)); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{`[{"kind":"upload","id":"u1","label":"x"}]`, `[{"kind":"lesson","id":"l2","label":""}]`,
+		`[{"kind":"lesson","id":"l2","label":"x","extra":1}]`} {
+		if _, err := db.sql.ExecContext(ctx, `UPDATE agent_turns SET mentions = ? WHERE thread_id = 'th1' AND number = 1`, bad); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.RequestMentions(ctx, "th1", 1); err == nil {
+			t.Errorf("mentions %s read without an error", bad)
+		}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -96,6 +97,7 @@ func newAgent(t *testing.T, link AgentLink) (*AgentService, *fakeAgentDriver, co
 	d := &fakeAgentDriver{}
 	s := NewAgentService(AgentCore{
 		Driver: d, Link: link, Panel: NewAgentPanel(discard()), Life: life, Journal: &fakeJournal{}, Clock: fixedClock{},
+		Chats: &fakeChats{},
 	}, slog.New(slog.NewTextHandler(&logs, nil)))
 	return s, d, cancel, &logs
 }
@@ -196,6 +198,36 @@ func TestAgentAskScope(t *testing.T) {
 	if sc := d.calls[1].ask.Scope; !sc.Subject().IsZero() || !sc.Lesson().IsZero() || sc.Screen() != "" {
 		t.Errorf("scope without a subject = %+v", sc)
 	}
+	if c := d.calls[1].ask; c.ThreadID != "" || c.Mentions != nil {
+		t.Errorf("Ask without a chat = %+v, want the current chat and no mentions", c)
+	}
+}
+
+// The chat and the mentions of an Ask reach the Driver as typed values, labels included.
+func TestAgentAskChatAndMentions(t *testing.T) {
+	s, d, _, _ := newAgent(t, readyLink())
+	res := s.Ask(context.Background(), AgentAskInput{Text: "сравни", ThreadID: "th7", Mentions: []AgentMention{
+		{Kind: "subject", ID: "s1", Label: "Матан"}, {Kind: "lesson", ID: "les-2", Label: "Лекция 2"},
+	}})
+	if res.Problem != "" || len(d.calls) != 1 {
+		t.Fatalf("Ask = %+v, calls %d", res, len(d.calls))
+	}
+	got := d.calls[0].ask
+	if got.ThreadID != "th7" || len(got.Mentions) != 2 {
+		t.Fatalf("driver got %+v", got)
+	}
+	m0, m1 := got.Mentions[0], got.Mentions[1]
+	if m0.Ref().Kind() != values.KindSubject || m0.Ref().ID() != "s1" || m0.Label() != "Матан" ||
+		m1.Ref().Kind() != values.KindLesson || m1.Ref().ID() != "les-2" || m1.Label() != "Лекция 2" {
+		t.Errorf("mentions = %+v", got.Mentions)
+	}
+	b, err := json.Marshal(AgentAskInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"text":"","subjectId":"","lessonId":"","assignmentId":"","screen":"","threadId":"","mentions":null}`; string(b) != want {
+		t.Errorf("input JSON = %s", b)
+	}
 }
 
 func TestAgentRefusesMalformedInput(t *testing.T) {
@@ -230,6 +262,26 @@ func TestAgentRefusesMalformedInput(t *testing.T) {
 		{"no answers", func(s *AgentService) AgentResult { return s.Answer(context.Background(), good, nil) }},
 		{"too many answers", func(s *AgentService) AgentResult {
 			return s.Answer(context.Background(), good, make([]AgentAnswerInput, values.MaxQuestions+1))
+		}},
+		{"ask chat id", func(s *AgentService) AgentResult {
+			return s.Ask(context.Background(), AgentAskInput{Text: "x", ThreadID: "a/b"})
+		}},
+		{"mention kind", func(s *AgentService) AgentResult {
+			return s.Ask(context.Background(), AgentAskInput{Text: "x", Mentions: []AgentMention{{Kind: "upload", ID: "u1", Label: "Файл"}}})
+		}},
+		{"mention id", func(s *AgentService) AgentResult {
+			return s.Ask(context.Background(), AgentAskInput{Text: "x", Mentions: []AgentMention{{Kind: "subject", ID: "a/b", Label: "Матан"}}})
+		}},
+		{"mention label", func(s *AgentService) AgentResult {
+			bidi := "Ма" + string(rune(0x202e)) + "тан" // a right-to-left override inside the name
+			return s.Ask(context.Background(), AgentAskInput{Text: "x", Mentions: []AgentMention{{Kind: "subject", ID: "s1", Label: bidi}}})
+		}},
+		{"too many mentions", func(s *AgentService) AgentResult {
+			ms := make([]AgentMention, values.MaxMentions+1)
+			for i := range ms {
+				ms[i] = AgentMention{Kind: "material", ID: "m" + string(rune('a'+i)), Label: "Файл"}
+			}
+			return s.Ask(context.Background(), AgentAskInput{Text: "x", Mentions: ms})
 		}},
 	}
 	for _, tt := range tests {
@@ -580,8 +632,12 @@ func TestAgentResultContract(t *testing.T) {
 		t.Errorf("state JSON = %s, %v", b, err)
 	}
 	var in AgentAskInput
-	if err := json.Unmarshal([]byte(`{"text":"t","subjectId":"s","lessonId":"l","assignmentId":"a","screen":"today"}`),
-		&in); err != nil || in != (AgentAskInput{Text: "t", SubjectID: "s", LessonID: "l", AssignmentID: "a", Screen: "today"}) {
+	if err := json.Unmarshal([]byte(`{"text":"t","subjectId":"s","lessonId":"l","assignmentId":"a","screen":"today",`+
+		`"threadId":"th1","mentions":[{"kind":"subject","id":"s1","label":"Матан"}]}`), &in); err != nil ||
+		!reflect.DeepEqual(in, AgentAskInput{
+			Text: "t", SubjectID: "s", LessonID: "l", AssignmentID: "a", Screen: "today", ThreadID: "th1",
+			Mentions: []AgentMention{{Kind: "subject", ID: "s1", Label: "Матан"}},
+		}) {
 		t.Errorf("ask input = %+v, %v", in, err)
 	}
 	var ref AgentTurnRef

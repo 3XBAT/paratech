@@ -84,22 +84,28 @@ type AgentCore struct {
 	Life    context.Context
 	Journal AgentJournal
 	Clock   AgentClock
+	Chats   AgentChats // the chat list (ADR-0028)
 	// FreeWork answers the free-work cards (TASK-188); nil: they answer ErrFreeWorkUnavailable.
 	FreeWork AgentFreeWork
 }
 
 func (c AgentCore) complete() bool {
-	return c.Driver != nil && c.Link != nil && c.Panel != nil && c.Life != nil && c.Journal != nil && c.Clock != nil
+	return c.Driver != nil && c.Link != nil && c.Panel != nil && c.Life != nil && c.Journal != nil && c.Clock != nil &&
+		c.Chats != nil
 }
 
 // AgentAskInput is a request typed in the panel with the context the UI chose. Empty ids mean none; an empty
-// subjectId is the thread «Без предмета». Screen is "", today, subjects, assignments, schedule, journal or settings.
+// subjectId is a request in no subject. Screen is "", today, subjects, assignments, schedule, journal or settings.
+// ThreadID is the chat ("" the current chat, a new one when there is none); Mentions are the «@» objects, at most
+// values.MaxMentions (the ones that no longer exist are dropped).
 type AgentAskInput struct {
-	Text         string `json:"text"`
-	SubjectID    string `json:"subjectId"`
-	LessonID     string `json:"lessonId"`
-	AssignmentID string `json:"assignmentId"`
-	Screen       string `json:"screen"`
+	Text         string         `json:"text"`
+	SubjectID    string         `json:"subjectId"`
+	LessonID     string         `json:"lessonId"`
+	AssignmentID string         `json:"assignmentId"`
+	Screen       string         `json:"screen"`
+	ThreadID     string         `json:"threadId"`
+	Mentions     []AgentMention `json:"mentions"`
 }
 
 // AgentTurnRef names the request a button belongs to.
@@ -133,6 +139,7 @@ type AgentService struct {
 	link     AgentLink
 	journal  AgentJournal
 	clock    AgentClock
+	chats    AgentChats
 	freeWork AgentFreeWork
 	life     context.Context
 	log      *slog.Logger
@@ -142,7 +149,8 @@ type AgentService struct {
 // c.Panel to its events itself.
 func NewAgentService(c AgentCore, log *slog.Logger) *AgentService {
 	return &AgentService{
-		driver: c.Driver, link: c.Link, journal: c.Journal, clock: c.Clock, freeWork: c.FreeWork, life: c.Life, log: log,
+		driver: c.Driver, link: c.Link, journal: c.Journal, clock: c.Clock, chats: c.Chats, freeWork: c.FreeWork,
+		life: c.Life, log: log,
 	}
 }
 
@@ -152,16 +160,28 @@ func (s *AgentService) State(ctx context.Context) AgentState {
 	return AgentState{Link: link, ReadOnly: link != AgentLinkReady}
 }
 
-// Ask starts a request; refused with "offline" while the Hub is not set up.
+// Ask starts a request in the chat of in; refused with "offline" while the Hub is not set up. A chat that does not
+// exist comes back as an update with problem "failed", like any outcome of the request: the update problems
+// (agentUpdateProblems) have no not_found, unlike the chat calls.
 func (s *AgentService) Ask(ctx context.Context, in AgentAskInput) AgentResult {
 	scope, ok := scopeOf(in)
+	if !ok {
+		return AgentResult{Problem: AgentProblemInvalid}
+	}
+	chat := shared.ThreadID(in.ThreadID)
+	if chat != "" && chat.Validate() != nil {
+		return AgentResult{Problem: AgentProblemInvalid}
+	}
+	mentions, ok := mentionsOf(in.Mentions)
 	if !ok {
 		return AgentResult{Problem: AgentProblemInvalid}
 	}
 	if s.linkState(ctx) != AgentLinkReady {
 		return AgentResult{Problem: AgentProblemOffline}
 	}
-	return s.started(opAgentAsk, s.driver.Ask(s.life, agentturn.AskInput{Scope: scope, Text: in.Text}))
+	return s.started(opAgentAsk, s.driver.Ask(s.life, agentturn.AskInput{
+		ThreadID: chat, Scope: scope, Text: in.Text, Mentions: mentions,
+	}))
 }
 
 // ApprovePlan is «Да» on the plan card.

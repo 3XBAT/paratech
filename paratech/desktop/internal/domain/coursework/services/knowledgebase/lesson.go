@@ -49,23 +49,24 @@ type Facts struct {
 // Lesson is one lesson of the knowledge base: a recording with its title, subject and kind, or a lecture the student
 // has only notes of (ADR-0027, WithNotes). Title is "" for an ad-hoc recording (the page names it by its date);
 // Subject is "" for the group NoSubjectName. Library is the subject of the library its Subject string resolves to
-// (ADR-0024); zero when it resolves to none.
+// (ADR-0024); zero when it resolves to none. LibraryAmbiguous: the string names several subjects, so none is chosen.
 //
 // Key identifies the lesson (RecordingKey, LessonKey, DayKey or NoteKey). A note-only lecture has no Recording, starts
 // at the local midnight of its day (zero when undated) and has no Duration nor Ready.
 type Lesson struct {
-	Key            string
-	Recording      shared.RecordingID
-	ScheduleLesson shared.LessonID
-	StartedAt      time.Time
-	Duration       time.Duration
-	Title          string
-	Subject        string
-	Kind           string // lesson kind code; "" if unknown
-	SubjectEdited  bool   // the subject is the user's correction
-	KindEdited     bool   // the kind is the user's correction
-	Ready          Readiness
-	Library        LibrarySubject
+	Key              string
+	Recording        shared.RecordingID
+	ScheduleLesson   shared.LessonID
+	StartedAt        time.Time
+	Duration         time.Duration
+	Title            string
+	Subject          string
+	Kind             string // lesson kind code; "" if unknown
+	SubjectEdited    bool   // the subject is the user's correction
+	KindEdited       bool   // the kind is the user's correction
+	Ready            Readiness
+	Library          LibrarySubject
+	LibraryAmbiguous bool
 	// Notes are the student's own notes of the lesson, as made; nil without any.
 	Notes []Note
 }
@@ -97,15 +98,49 @@ const libraryKeyPrefix = "ID:"
 // LibraryKey is the key of the group of a library subject.
 func LibraryKey(id shared.SubjectID) string { return libraryKeyPrefix + string(id) }
 
+// LibraryMatch is how the subject of a lesson resolves to the library; the values are the binding's wire names.
+type LibraryMatch string
+
+// Outcomes of Lesson.LibraryMatch.
+const (
+	LibraryMatched   LibraryMatch = "matched"    // one library subject: Library
+	LibraryNone      LibraryMatch = "none"       // the string names no library subject
+	LibraryAmbiguous LibraryMatch = "ambiguous"  // the string names several: none is chosen
+	LibraryNoSubject LibraryMatch = "no-subject" // the lesson has no subject string
+)
+
+// LibraryMatch tells how the lesson's subject resolves to the library; it never guesses.
+func (l Lesson) LibraryMatch() LibraryMatch {
+	switch {
+	case l.Library.ID != "":
+		return LibraryMatched
+	case l.LibraryAmbiguous:
+		return LibraryAmbiguous
+	case l.Subject == "":
+		return LibraryNoSubject
+	}
+	return LibraryNone
+}
+
 // WithLibrary returns a copy of the lessons with Library set for those whose Subject is a key of resolved (the
 // subjects their strings resolve to). The strings themselves are kept: a stored subject is never rewritten.
 func WithLibrary(lessons []Lesson, resolved map[string]LibrarySubject) []Lesson {
+	return WithLibraryMatch(lessons, resolved, nil)
+}
+
+// WithLibraryMatch is WithLibrary that also sets LibraryAmbiguous for the lessons whose Subject is in ambiguous
+// (strings of several subjects), so that "none" and "several" stay apart.
+func WithLibraryMatch(lessons []Lesson, resolved map[string]LibrarySubject, ambiguous map[string]bool) []Lesson {
 	out := slices.Clone(lessons)
 	for i, l := range out {
-		if sub, ok := resolved[l.Subject]; ok && l.Subject != "" && sub.ID != "" {
+		out[i].Library, out[i].LibraryAmbiguous = LibrarySubject{}, false
+		if l.Subject == "" {
+			continue
+		}
+		if sub, ok := resolved[l.Subject]; ok && sub.ID != "" {
 			out[i].Library = sub
 		} else {
-			out[i].Library = LibrarySubject{}
+			out[i].LibraryAmbiguous = ambiguous[l.Subject]
 		}
 	}
 	return out

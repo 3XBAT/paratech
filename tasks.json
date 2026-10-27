@@ -3281,7 +3281,7 @@
             "dependencies": [
                 "TASK-152"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-154",
@@ -3452,7 +3452,7 @@
                 "GOOS=windows go vet ./desktop/..."
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-162",
@@ -4484,7 +4484,7 @@
             "dependencies": [
                 "TASK-205"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-207",
@@ -5416,7 +5416,7 @@
             "dependencies": [
                 "TASK-154"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-253",

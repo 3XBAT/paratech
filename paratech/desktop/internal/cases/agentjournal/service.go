@@ -26,6 +26,7 @@ const (
 	opLive         = "agentjournal: live effects"
 	opRecover      = "agentjournal: recover"
 	opLineSubject  = "agentjournal: subject of a journal line unknown"
+	opLineChat     = "agentjournal: chat of a journal line unknown"
 	opObserve      = "agentjournal: pending entry not settled"
 	opUndoRetry    = "agentjournal: undo retry failed"
 	opTargetUnread = "agentjournal: target of an entry unread"
@@ -348,12 +349,14 @@ func (s *Service) List(ctx context.Context, limit int) ([]Line, error) {
 	}
 	lines := make([]Line, 0, len(as))
 	subjects := map[requestOf]shared.SubjectID{}
+	titles := map[shared.ThreadID]string{}
 	for _, a := range as {
 		can, why := a.Undoable(now, s.targetOf(ctx, a))
 		st := a.State()
 		lines = append(lines, Line{
 			Kind: LineAction, At: st.CreatedAt, UpdatedAt: st.UpdatedAt, Action: st.ID, Thread: st.Thread, Turn: st.Turn,
 			Tool: st.Tool, Status: st.Status, CanUndo: can, NoUndo: why, Subject: s.subjectOf(ctx, subjects, requestOf{st.Thread, st.Turn}),
+			ChatTitle: s.titleOf(ctx, titles, st.Thread),
 		})
 	}
 	if s.processing != nil {
@@ -394,6 +397,22 @@ func (s *Service) subjectOf(ctx context.Context, cache map[requestOf]shared.Subj
 	sub := shared.SubjectID(scope.Subject().ID())
 	cache[r] = sub
 	return sub
+}
+
+// titleOf is the title of a line's chat, cached per List; a chat that cannot be read gives none.
+func (s *Service) titleOf(ctx context.Context, cache map[shared.ThreadID]string, id shared.ThreadID) string {
+	if title, ok := cache[id]; ok || s.threads == nil {
+		return title
+	}
+	var title string
+	th, err := s.threads.Get(ctx, id)
+	if err != nil {
+		s.log.WarnContext(ctx, opLineChat, "thread", id.String(), "err", err)
+	} else {
+		title = th.Title()
+	}
+	cache[id] = title
+	return title
 }
 
 func clampLimit(limit int) int {

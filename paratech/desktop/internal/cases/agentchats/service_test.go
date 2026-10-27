@@ -171,6 +171,50 @@ func TestArchiveAndRestore(t *testing.T) {
 	}
 }
 
+// A move that changes nothing is not saved, so a step of the running request that loaded the chat before still saves
+// its reply.
+func TestNoOpChangeKeepsRunningStepSave(t *testing.T) {
+	tests := []struct {
+		name string
+		move func(e *env) (Chat, error)
+	}{
+		{"restore of an unarchived chat", func(e *env) (Chat, error) { return e.svc.Restore(t.Context(), "busy") }},
+		{"archive of an archived chat", func(e *env) (Chat, error) { return e.svc.Archive(t.Context(), "old") }},
+		{"rename to the same title", func(e *env) (Chat, error) { return e.svc.Rename(t.Context(), "old", "старый вопрос") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.chat(t, "busy", false, "вопрос")
+			old := e.chat(t, "old", true, "старый вопрос")
+			if err := old.Archive(e.clock.Now()); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.chats.Save(t.Context(), old); err != nil {
+				t.Fatal(err)
+			}
+			step, err := e.chats.Get(t.Context(), "busy") // the step loop's copy, loaded before the click
+			if err != nil {
+				t.Fatal(err)
+			}
+			saves := e.chats.saves
+
+			if _, err := tt.move(e); err != nil {
+				t.Fatalf("move = %v", err)
+			}
+			if e.chats.saves != saves {
+				t.Fatalf("a no-op move saved the chat (%d saves, want %d)", e.chats.saves, saves)
+			}
+			if err := step.Complete(e.clock.Now()); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.chats.Save(t.Context(), step); err != nil {
+				t.Fatalf("the step's save after a no-op move = %v; its reply would be lost", err)
+			}
+		})
+	}
+}
+
 func mustRef(t *testing.T, kind values.IDKind, id string) values.Ref {
 	t.Helper()
 	r, err := values.NewRef(kind, id)

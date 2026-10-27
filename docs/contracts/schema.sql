@@ -870,6 +870,13 @@ ALTER TABLE subjects ADD COLUMN teacher_email TEXT NOT NULL DEFAULT '' CHECK (le
 -- assignments: when the student deleted the assignment (ms); NULL while it is not deleted.
 ALTER TABLE assignments ADD COLUMN deleted_at INTEGER;
 
+-- Migration 0042.
+-- recordings (migration 0042): origin 'captured' (every earlier row) or 'imported'; source_sha256 is the lowercase hex
+-- digest of an imported file, NULL for a captured recording.
+ALTER TABLE recordings ADD COLUMN origin TEXT NOT NULL DEFAULT 'captured' CHECK (origin IN ('captured', 'imported'));
+ALTER TABLE recordings ADD COLUMN source_sha256 TEXT CHECK (source_sha256 IS NULL OR (length(source_sha256) = 64 AND source_sha256 NOT GLOB '*[^0-9a-f]*'));
+CREATE UNIQUE INDEX idx_recordings_source_sha256 ON recordings (source_sha256) WHERE source_sha256 IS NOT NULL;
+
 -- Migration 0043.
 -- schedule_entries: the call link of the imported event (lesson.Content.CallLink) in the canonical form of
 -- values.CallLink; '' none. Untrusted input, re-checked on read; never written to Google Calendar.
