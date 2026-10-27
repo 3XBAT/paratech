@@ -41,6 +41,30 @@ func (r *NoteRepository) ListBySubject(ctx context.Context, sub shared.SubjectID
 	return notesWithParts(ctx, q, rows, err)
 }
 
+// ListAll returns every note in any status, ordered as ListBySubject, for the knowledge base. A row that cannot be
+// restored is left out and its id goes to unreadable, so one broken row does not hide the others.
+func (r *NoteRepository) ListAll(ctx context.Context) (notes []*note.Note, unreadable []shared.NoteID, err error) {
+	q := r.db.Queries(ctx)
+	rows, err := q.ListNotes(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", opListNotes, MapError(ctx, err))
+	}
+	notes = make([]*note.Note, 0, len(rows))
+	for _, row := range rows {
+		parts, err := q.ListNoteParts(ctx, row.ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s %s: %w", opGetNote, row.ID, MapError(ctx, err))
+		}
+		n, err := restoreNote(row, parts)
+		if err != nil {
+			unreadable = append(unreadable, shared.NoteID(row.ID))
+			continue
+		}
+		notes = append(notes, n)
+	}
+	return notes, unreadable, nil
+}
+
 // ListByRecording returns the notes anchored to the recording in any status, as made. The recording may be gone: the
 // anchor has no foreign key.
 func (r *NoteRepository) ListByRecording(ctx context.Context, rec shared.RecordingID) ([]*note.Note, error) {
@@ -128,6 +152,10 @@ func noteWithParts(ctx context.Context, q *sqlcgen.Queries, row sqlcgen.Note) (*
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", opGetNote, row.ID, MapError(ctx, err))
 	}
+	return restoreNote(row, parts)
+}
+
+func restoreNote(row sqlcgen.Note, parts []string) (*note.Note, error) {
 	anchor, err := noteAnchor(row)
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", opRestoreNote, row.ID, err)

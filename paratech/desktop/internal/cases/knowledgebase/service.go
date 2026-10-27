@@ -33,6 +33,9 @@ const correctAttempts = 3
 // Service is the knowledge base (TASK-091). Everything is local: no port talks to the network.
 type Service struct {
 	library     SubjectResolver // nil: no library, lessons grouped by their free string
+	notes       NoteStore       // nil: no notes of the student
+	noteTexts   NoteTextReader
+	subjects    SubjectLister
 	lessons     LessonStore
 	recordings  RecordingRepository
 	schedule    LessonReader
@@ -51,29 +54,45 @@ func New(d Deps) (*Service, error) {
 		d.Summaries == nil || d.LectureTexts == nil || d.Writer == nil || d.Clock == nil {
 		return nil, fmt.Errorf("%w: every port except the logger is required", ErrInvalidConfig)
 	}
+	if (d.Notes == nil) != (d.NoteTexts == nil) || (d.Notes == nil) != (d.Subjects == nil) {
+		return nil, fmt.Errorf("%w: the notes need their store, texts and subjects", ErrInvalidConfig)
+	}
 	log := d.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Service{
-		library: d.Library, lessons: d.Lessons, recordings: d.Recordings, schedule: d.Schedule, transcripts: d.Transcripts,
+		library: d.Library, notes: d.Notes, noteTexts: d.NoteTexts, subjects: d.Subjects, lessons: d.Lessons, recordings: d.Recordings, schedule: d.Schedule, transcripts: d.Transcripts,
 		artifacts: d.Artifacts, summaries: d.Summaries, lectures: d.LectureTexts, writer: d.Writer, clock: d.Clock, log: log,
 	}, nil
 }
 
-// Subjects lists the subjects that have a lesson, with how many each has; the group kb.NoSubjectName comes last.
+// Subjects lists the subjects that have a lesson, recorded or known only from the student's notes, with how many
+// recorded lessons each has; the group kb.NoSubjectName comes last.
 func (s *Service) Subjects(ctx context.Context) ([]kb.Subject, error) {
-	all, err := s.all(ctx)
+	all, err := s.withNotes(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return kb.Subjects(all), nil
 }
 
-// Lessons lists the lessons of the subject with key (kb.Subject.Key: the library subject, else the free string; "" for
-// kb.NoSubjectName), newest first. A key without lessons gives an empty list.
+// Lessons lists the recorded lessons of the subject with key (kb.Subject.Key: the library subject, else the free
+// string; "" for kb.NoSubjectName), newest first, without the student's notes (Lectures has them). A key without
+// lessons gives an empty list.
 func (s *Service) Lessons(ctx context.Context, key string) ([]kb.Lesson, error) {
 	all, err := s.all(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return kb.LessonsOf(all, key), nil
+}
+
+// Lectures lists every lesson of the subject with key as Lessons does, with the student's notes joined and the
+// lectures known only from notes (ADR-0027): newest first, the undated ones last. A key without lessons gives an
+// empty list.
+func (s *Service) Lectures(ctx context.Context, key string) ([]kb.Lesson, error) {
+	all, err := s.withNotes(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -133,20 +152,20 @@ func (s *Service) SetLessonInfo(ctx context.Context, id shared.RecordingID, subj
 	}
 }
 
-// Search finds query in the titles, summaries, lecture texts and transcripts of every lesson, newest lessons first,
-// within the caps of kb.Search. A transcript file, summary or lecture text that cannot be read is left out of the
-// search, not failed.
+// Search finds query in the titles, summaries, lecture texts, transcripts and the student's notes of every lesson
+// (Lectures), newest lessons first, within the caps of kb.Search. A transcript file, summary, lecture text or part of
+// a note that cannot be read is left out of the search, not failed.
 func (s *Service) Search(ctx context.Context, query string) (SearchResult, error) {
 	search, err := kb.NewSearch(query)
 	if err != nil {
 		return SearchResult{}, ErrInvalidQuery
 	}
-	all, err := s.all(ctx)
+	all, err := s.withNotes(ctx)
 	if err != nil {
 		return SearchResult{}, err
 	}
 
-	byID := make(map[shared.RecordingID]kb.Lesson, len(all))
+	byKey := make(map[string]kb.Lesson, len(all))
 	for _, l := range kb.Newest(all) {
 		if search.Full() {
 			break
@@ -159,21 +178,21 @@ func (s *Service) Search(ctx context.Context, query string) (SearchResult, error
 			return SearchResult{}, err
 		}
 		search.Scan(doc)
-		byID[l.Recording] = l
+		byKey[l.Key] = l
 	}
 
 	out := SearchResult{Hits: []SearchHit{}, Truncated: search.Truncated()}
 	for _, h := range search.Hits() {
-		out.Hits = append(out.Hits, SearchHit{Hit: h, Lesson: byID[h.Recording]})
+		out.Hits = append(out.Hits, SearchHit{Hit: h, Lesson: byKey[h.Key]})
 	}
 	return out, nil
 }
 
-// Texts returns the lessons of a library subject with everything searched of them, newest first, for the answers
-// with citations (TASK-118); a zero subject gives every lesson of the base. Like Search it reads at query time and
-// leaves out a section that cannot be read.
+// Texts returns the lessons of a library subject (Lectures) with everything searched of them, the student's notes
+// included, newest first, for the answers with citations (TASK-118); a zero subject gives every lesson of the base.
+// Like Search it reads at query time and leaves out a section that cannot be read.
 func (s *Service) Texts(ctx context.Context, subject shared.SubjectID) ([]kb.LessonText, error) {
-	all, err := s.all(ctx)
+	all, err := s.withNotes(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -206,8 +225,9 @@ func (s *Service) SubjectFileName(ctx context.Context, key string) (string, erro
 }
 
 // ExportSubject writes the whole subject with key to path, chosen by the user in the save dialog, as one Markdown
-// file: its lessons oldest first, each with its summary and lecture text (summaryexport.RenderSubject). The file is
-// written atomically; on a failure nothing remains under that name.
+// file: its lessons (Lectures) oldest first, the undated ones last, each recorded one with its summary and lecture
+// text, each with the student's notes in a block «Мой конспект» (kb.RenderSubject). A part of a note that cannot be
+// read is left out and logged. The file is written atomically; on a failure nothing remains under that name.
 func (s *Service) ExportSubject(ctx context.Context, key, path string) error {
 	if path == "" {
 		return ErrInvalidRequest
@@ -218,21 +238,34 @@ func (s *Service) ExportSubject(ctx context.Context, key, path string) error {
 	}
 
 	loc := s.clock.Now().Location()
-	doc := summaryexport.SubjectDocument{Subject: sub.Name}
+	var lectures []kb.ExportLecture
 	for _, l := range kb.Oldest(lessons) {
-		sl := summaryexport.SubjectLesson{Title: l.Title, Kind: l.Kind, Start: l.StartedAt.In(loc), Duration: l.Duration}
-		if c, ok, err := s.summary(ctx, l.Ready); err != nil {
-			return err
-		} else if ok {
-			sl.Summary = c
+		sl := summaryexport.SubjectLesson{Title: l.Title, Kind: l.Kind, Duration: l.Duration}
+		if !l.StartedAt.IsZero() {
+			sl.Start = l.StartedAt.In(loc)
 		}
-		if sl.Blocks, err = s.lectureText(ctx, l.Ready); err != nil {
-			return err
+		if l.Recorded() {
+			if c, ok, err := s.summary(ctx, l.Ready); err != nil {
+				return err
+			} else if ok {
+				sl.Summary = c
+			}
+			if sl.Blocks, err = s.lectureText(ctx, l.Ready); err != nil {
+				return err
+			}
 		}
-		doc.Lessons = append(doc.Lessons, sl)
+		lecture := kb.ExportLecture{Lesson: sl, Recorded: l.Recorded()}
+		for _, n := range l.Notes {
+			frags, err := s.noteFragments(ctx, n)
+			if err != nil {
+				return err
+			}
+			lecture.Notes = append(lecture.Notes, kb.ExportNote{Title: n.Title, Fragments: frags})
+		}
+		lectures = append(lectures, lecture)
 	}
 
-	if err := s.writer.WriteFile(ctx, path, []byte(summaryexport.RenderSubject(doc))); err != nil {
+	if err := s.writer.WriteFile(ctx, path, []byte(kb.RenderSubject(sub.Name, lectures))); err != nil {
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	return nil
@@ -240,7 +273,7 @@ func (s *Service) ExportSubject(ctx context.Context, key, path string) error {
 
 // subject returns the subject with key and its lessons; none is ErrSubjectNotFound.
 func (s *Service) subject(ctx context.Context, key string) (kb.Subject, []kb.Lesson, error) {
-	all, err := s.all(ctx)
+	all, err := s.withNotes(ctx)
 	if err != nil {
 		return kb.Subject{}, nil, err
 	}
@@ -320,7 +353,7 @@ func (s *Service) resolve(ctx context.Context, lessons []kb.Lesson) ([]kb.Lesson
 // a failed read only costs the live names.
 func (s *Service) facts(ctx context.Context, rec *recording.Recording, ready kb.Readiness) kb.Facts {
 	d, _ := rec.Duration()
-	f := kb.Facts{Recording: rec.ID(), StartedAt: rec.StartedAt(), Duration: d, Ready: ready}
+	f := kb.Facts{Recording: rec.ID(), ScheduleLesson: rec.LessonID(), StartedAt: rec.StartedAt(), Duration: d, Ready: ready}
 	snap := rec.LessonSnapshot()
 	if !snap.IsZero() {
 		f.Snapshot = &kb.Source{Title: snap.Title(), Subject: snap.Subject(), Kind: snap.Kind()}
@@ -344,9 +377,20 @@ func (s *Service) facts(ctx context.Context, rec *recording.Recording, ready kb.
 	return f
 }
 
-// document gathers the texts of a lesson for the search.
+// document gathers the texts of a lesson for the search: of its recording and of the student's notes.
 func (s *Service) document(ctx context.Context, l kb.Lesson) (kb.Document, error) {
-	doc := kb.Document{Recording: l.Recording, Title: l.Title}
+	doc := kb.Document{Key: l.Key, Recording: l.Recording, Title: l.Title}
+	for _, n := range l.Notes {
+		frags, err := s.noteFragments(ctx, n)
+		if err != nil {
+			return kb.Document{}, err
+		}
+		doc.Notes = append(doc.Notes, frags...)
+	}
+	if !l.Recorded() {
+		return doc, nil
+	}
+
 	c, ok, err := s.summary(ctx, l.Ready)
 	if err = s.skippable(ctx, err, opSummary, l.Recording); err != nil {
 		return kb.Document{}, err

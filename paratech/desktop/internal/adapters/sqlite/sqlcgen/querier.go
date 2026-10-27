@@ -274,6 +274,8 @@ type Querier interface {
 	ListMaterialLessons(ctx context.Context, materialID string) ([]string, error)
 	ListMaterialsOfSubject(ctx context.Context, subjectID sql.NullString) ([]Material, error)
 	ListNoteParts(ctx context.Context, noteID string) ([]string, error)
+	// Every note, for the knowledge base (TASK-152); ordered as ListNotesOfSubject.
+	ListNotes(ctx context.Context) ([]Note, error)
 	ListNotesOfLesson(ctx context.Context, lessonID sql.NullString) ([]Note, error)
 	ListNotesOfRecording(ctx context.Context, recordingID sql.NullString) ([]Note, error)
 	// By the date of the anchor, undated last, then as made.

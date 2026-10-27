@@ -148,6 +148,35 @@ func TestKnowledgeJSON(t *testing.T) {
 	}
 }
 
+// Until the page shows the student's notes (TASK-155), it gets neither their hits, nor hits of lectures without a
+// recording, nor subjects known only from notes: the page opens every lesson by its recording.
+func TestKnowledgeLeavesNotesOut(t *testing.T) {
+	ctx := context.Background()
+	noteOnly := kb.Lesson{Key: "day:phys:2026-09-12", StartedAt: kbStart, Title: "Конспект", Library: kb.LibrarySubject{ID: "phys", Name: "Физика"}}
+	f := &fakeKnowledge{
+		subjects: []kb.Subject{
+			{Key: "физика", Name: "Физика", Lessons: 1, Latest: kbStart},
+			{Key: kb.LibraryKey("chem"), Name: "Химия", SubjectID: "chem"},
+		},
+		result: knowledgebase.SearchResult{Hits: []knowledgebase.SearchHit{
+			{Hit: kb.Hit{Key: "recording:r1", Recording: "r1", Section: kb.SectionOwnNote, Note: "n1", Material: "m1",
+				Locator: kb.Locator{Kind: "page", N: 3}, Snippet: kb.Snippet{Match: "ряды"}}, Lesson: kbLesson()},
+			{Hit: kb.Hit{Key: noteOnly.Key, Section: kb.SectionTitle, Snippet: kb.Snippet{Match: "Конспект"}}, Lesson: noteOnly},
+			{Hit: kb.Hit{Key: "recording:r1", Recording: "r1", Section: kb.SectionSummary, Snippet: kb.Snippet{Match: "ряды"}}, Lesson: kbLesson()},
+		}},
+	}
+	s, _ := newKnowledgeService(f, nil)
+
+	subjects, err := s.Subjects(ctx)
+	if err != nil || len(subjects) != 1 || subjects[0].Name != "Физика" {
+		t.Fatalf("Subjects = %+v, %v", subjects, err)
+	}
+	res, err := s.Search(ctx, "ряды")
+	if err != nil || len(res.Hits) != 1 || res.Hits[0].Section != "summary" || res.Hits[0].RecordingID != "r1" {
+		t.Fatalf("Search = %+v, %v", res, err)
+	}
+}
+
 func TestKnowledgeSetLessonInfo(t *testing.T) {
 	ctx := context.Background()
 	f := &fakeKnowledge{lessons: []kb.Lesson{kbLesson()}}
