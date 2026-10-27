@@ -3325,7 +3325,7 @@
                 "TASK-153",
                 "TASK-154"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-156",
@@ -3499,9 +3499,9 @@
             "id": "TASK-164",
             "category": "functional",
             "priority": "low",
-            "description": "[Старые записи · ядро] Видео и M4A/AAC/WMA: локальное извлечение звука (ЗАБЛОКИРОВАНО: нужен выбор владельца — Media Foundation, ffmpeg или «конвертируйте сами», ADR-0027 вопрос 4)",
+            "description": "[Старые записи · ядро] Видео и M4A/AAC/WMA: локальное извлечение звука (ЗАБЛОКИРОВАНО: владелец отложил, ADR-0027 вопрос 4)",
             "acceptance_criteria": [
-                "Блокировка: решение владельца по ADR-0027 вопрос 4; черновик docs/tasks/TASK-164-video-audio-decode.md предполагает Windows Media Foundation через COM-вызовы без CGO (как WASAPI); при другом выборе переписать",
+                "Блокировка: владелец отложил (2026-10-27, ADR-0027 вопрос 4); черновик docs/tasks/TASK-164-video-audio-decode.md предполагает Windows Media Foundation через COM-вызовы без CGO (как WASAPI); при другом выборе переписать",
                 "Адаптер mediadecode (_windows.go и заглушка _other.go): первая звуковая дорожка в WAV 16 кГц моно в приватном каталоге, потоково, с отменой и пределом времени; кадры видео на диск не пишутся",
                 "Нет Media Foundation (Windows N) — «нужен Media Feature Pack», без падения",
                 "Тесты на Windows на маленьких фикстурах (mp4/aac, m4a, webm/opus при поддержке); проверка отсутствия CGO",
@@ -3563,29 +3563,40 @@
             "id": "TASK-167",
             "category": "functional",
             "priority": "low",
-            "description": "[Фото конспектов · ядро] Распознавание страниц-фото и сканов (ЗАБЛОКИРОВАНО: движок выбирает владелец — Windows OCR, Tesseract или модель через Hub, ADR-0027 вопрос 3)",
+            "description": "[Фото конспектов · ядро] Распознавание страниц-фото движком Windows OCR: задача по странице, «распознано» на проверке, «Принять» делает текст частью конспекта",
             "acceptance_criteria": [
-                "Блокировка: решение владельца по ADR-0027 вопрос 3 (отправлять ли изображения в облако — вопрос приватности и цены); черновик docs/tasks/TASK-167-page-recognition-core.md",
-                "Порт PageReader и задача note_ocr: одна страница за шаг, идемпотентно по дайджесту страницы и версии движка, с отменой; локальный движок — по политике питания",
-                "Распознанный текст с локаторами страниц и пометкой «распознано» ищется и цитируется только после того, как студент открыл и принял (или поправил) его",
-                "С движком Hub — согласие на каждый импорт с пояснением о приватности и оценкой цены, без него ничего не отправляется; распознанный текст — недоверенные данные (фикстура)",
+                "Решение владельца 2026-10-27 (ADR-0027 вопрос 3): сейчас Windows OCR, облачная модель — позже (TASK-168); раздел «Recognition of photos and scans»; жёсткие правила 2, 3, 5",
+                "Новый cases/noterecognition: порт PageReader (изображение → строки и версия движка; реализация — adapters/winocr из TASK-293, связка в app); задача note_ocr — одна страница за шаг, идемпотентно по дайджесту страницы и версии движка, с отменой, по политике питания как STT",
+                "Ставится в очередь при добавлении фото, только когда настройка (TASK-294) = local; Recognize(noteId, pageIds) для уже добавленных фото; выключено — ничего не ставится",
+                "Миграция desktop (следующий свободный номер на момент пуша; не параллельно с другой задачей с миграцией): page_recognitions (photo material_id, engine, engine_version, status pending | done | failed | no_language | accepted | dismissed, text_sha256, created/updated); текст — производный артефакт по sha256 через Storage Manager; docs/contracts/schema.sql — зеркало",
+                "Нет русского распознавателя — статус no_language без падения и без другого языка; Retry после установки",
+                "Accept(pageId, text, expectedVersion): текст (как есть или поправленный, ≤ 1 МиБ) становится TXT-материалом origin recognized, source_material = фото, сразу после фото в конспекте (поля TASK-290); идемпотентно (повтор не создаёт второй); Dismiss — без текста. Пока не принят — не ищется, не цитируется, никуда не уходит",
+                "Распознанный текст — недоверенные данные (фикстура с командой в тексте остаётся данными)",
+                "Привязка NotesService: Recognize, Recognition(pageId) → {status, text}, Accept, Dismiss, Retry; problem-коды; frontend/src/bindings/notes.ts",
+                "Тесты: use case на фейке PageReader (одна страница за шаг, повтор, отмена, no_language, Accept дважды), sqlite roundtrip, привязка",
+                "Файлы: paratech/desktop/internal/cases/noterecognition/* (новый), paratech/desktop/internal/cases/notes/* (только постановка при добавлении фото), adapters/sqlite/* (page_recognitions, queries, sqlcgen), paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/internal/input/wails/notes*.go, paratech/desktop/internal/app/*, paratech/desktop/frontend/src/bindings/notes.ts, paratech/desktop/tests/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
-                "go test -race ./desktop/internal/cases/noterecognition/... ./desktop/internal/domain/library/... и тест архитектуры"
+                "go test -race ./desktop/internal/cases/noterecognition/... ./desktop/internal/cases/notes/... ./desktop/internal/adapters/sqlite/... ./desktop/internal/input/wails/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/...",
+                "npm --prefix paratech/desktop/frontend run test и run build"
             ],
             "dependencies": [
-                "TASK-165"
+                "TASK-165",
+                "TASK-290",
+                "TASK-293",
+                "TASK-294"
             ],
-            "status": "blocked"
+            "status": "pending"
         },
         {
             "id": "TASK-168",
             "category": "functional",
             "priority": "low",
-            "description": "[Фото конспектов · Hub] Операция Hub чтения рукописной страницы моделью со зрением (ЗАБЛОКИРОВАНО: только если владелец выберет вариант D ADR-0027 вопрос 3)",
+            "description": "[Фото конспектов · Hub] Операция Hub чтения рукописной страницы моделью со зрением (ЗАБЛОКИРОВАНО: владелец — позже, после Windows OCR, ADR-0027 вопрос 3)",
             "acceptance_criteria": [
-                "Блокировка: владелец выбирает отправку изображений страниц в облако (вариант D); черновик docs/tasks/TASK-168-hub-read-handwriting.md; PRD §9.2, §13.2; AC-11, AC-25",
+                "Блокировка: владелец 2026-10-27 — облачная модель позже, отдельным значением настройки «ИИ распознаёт фото конспектов» с согласием, пояснением о приватности и ценой; черновик docs/tasks/TASK-168-hub-read-handwriting.md; PRD §9.2, §13.2; AC-11, AC-25",
                 "Одно изображение за вызов, JPEG/PNG ≤ 5 МиБ и предел пикселей провайдера, проверка до резерва квоты; buf breaking зелёный",
                 "Строгая схема вывода (строки с флагом неуверенности), свободный текст отклоняется, без инструментов; факты о вводе изображений — в docs/refs/anthropic.md по официальной документации",
                 "Своя метка операции в журнале квоты, идемпотентность по ключу; изображения не пишутся в лог и не хранятся после вызова",
@@ -3602,21 +3613,26 @@
             "id": "TASK-169",
             "category": "ui",
             "priority": "low",
-            "description": "[Фото конспектов · UI] Проверка распознанных страниц: фото и текст рядом, правка и «Принять» (ЗАБЛОКИРОВАНО вместе с TASK-167)",
+            "description": "[Фото конспектов · UI] Проверка распознанных страниц: фото и текст рядом, правка, «Принять» и «Не нужно», подсказка про русский язык распознавания",
             "acceptance_criteria": [
-                "Блокировка: ждёт решения владельца по ADR-0027 вопрос 3 и TASK-167; черновик docs/tasks/TASK-169-recognized-text-review-ui.md",
-                "«Распознать» (с согласием и ценой для движка Hub), прогресс по страницам, «Принять» / правка; неуверенные строки подсвечены; принятые страницы — «ваш конспект · распознано»",
-                "Тесты",
+                "ADR-0027 «Recognition of photos and scans» (Windows OCR); привязка — TASK-167; черновик docs/tasks/TASK-169-recognized-text-review-ui.md",
+                "У страницы-фото: «Распознать» (когда настройка включена или для прежних фото), «Распознаётся…», затем текст рядом с фото с пометкой «распознано — проверьте»; правка в поле, «Принять» и «Не нужно»; принятый — часть «ваш конспект · распознано» сразу после фото, «текст не распознан» больше не показывается",
+                "no_language: «В Windows нет русского языка распознавания. Добавьте: Параметры → Время и язык → Язык → Русский → Распознавание текста», кнопка «Повторить»; failed — «Не удалось распознать», «Повторить»",
+                "Текст только текстовыми узлами; облачного движка нет (без согласия и цены)",
+                "Безличные тексты, тёмная тема, один акцент, клавиатура и aria; тесты фронтенда",
+                "Файлы: paratech/desktop/frontend/src/pages/OwnNotes*.tsx, src/pages/PageViewer.tsx, src/ownNotesView.ts, src/pages/ownNotes.css, test/* (+ тесты)",
                 "Исполнитель: frontend"
             ],
             "test_steps": [
-                "npm --prefix paratech/desktop/frontend run test и run build"
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Владелец: docs/qa/tasks/TASK-169.md — фото печатной страницы на русском → «Распознать» → текст рядом → поправить → «Принять» → поиск находит слово из него"
             ],
             "dependencies": [
                 "TASK-166",
-                "TASK-167"
+                "TASK-167",
+                "TASK-292"
             ],
-            "status": "blocked"
+            "status": "pending"
         },
         {
             "id": "TASK-170",
@@ -5058,12 +5074,14 @@
             "priority": "medium",
             "description": "[Отправка · ядро] «Отправить преподавателю» — на почту преподавателя предмета, а не на общий адрес из настроек",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open B-1 в docs/adr/0030-subject-teachers-scheduled-send.md (нет почты преподавателя или нет предмета)",
-                "homeworkflow: порт RecipientSource.HomeworkRecipient(ctx) → Recipient(ctx, subject shared.SubjectID) → адрес и имя преподавателя; предмет: у работы — её subject ID, иначе библиотечный предмет задания (по имени, как ADR-0024); выбор «преподаватель, иначе — по Open B-1» — чистая функция в domain/coursework/proposal, не в use case (ARCH-22)",
-                "app/settingsbridge.go: реализация поверх library.Service и настроек; для send_homework_email и send_work_email; адрес закрепляется при проверке и проверяется снова при «Да» (другой адрес — STALE, как сейчас); вид предложения отдаёт recipientName для карточки «Кому»",
+                "Перед запуском: ответ владельца на Open B-5 и B-6 в docs/adr/0030-subject-teachers-scheduled-send.md (лабораторная или неизвестный вид пары; указан только один из двух). B-1 решён (б): нет почты — не отправлять",
+                "homeworkflow: порт RecipientSource.HomeworkRecipient(ctx) → Teachers(ctx, subject shared.SubjectID) (лектор и семинарист); предмет: у работы — её subject ID, иначе библиотечный предмет задания (по имени, как ADR-0024); вид пары — из пары задания (у работы — из её задания); выбор proposal.ChooseRecipient(teachers, kind): lecture → лектор, seminar → семинарист, остальное — по B-5/B-6; чистая функция в domain/coursework/proposal, не в use case (ARCH-22)",
+                "Нет почты нужного преподавателя — предложение отклоняется с причиной no_teacher_email (и ролью), нет предмета — no_subject; общий адрес из настроек для этих двух видов не используется; вид предложения отдаёт subjectId и роль, чтобы карточка вела к полю преподавателя",
+                "app/settingsbridge.go: реализация поверх library.Service (TASK-285); адрес закрепляется при проверке и проверяется снова при «Да» (другой адрес — STALE, как сейчас); вид предложения отдаёт recipientName для карточки «Кому»",
                 "Текст преподавателя у задания (извлечение, CorrectLesson) никогда не адрес; агент и модель адрес не задают (hard rule 3); тест инъекции: адрес в тексте задания не становится получателем",
-                "Тесты: преподаватель есть, нет (по Open B-1), задание без предмета, смена адреса между карточкой и «Да» — STALE, работа без задания (no_assignment как сейчас)",
-                "Файлы: paratech/desktop/internal/domain/coursework/proposal/*, paratech/desktop/internal/cases/homeworkflow/ports.go, proposals.go, worksend.go, types.go, paratech/desktop/internal/app/settingsbridge.go и подключение, paratech/desktop/internal/input/wails/agentconfirm*.go и homework*.go (только поле recipientName), paratech/desktop/frontend/src/bindings/agentConfirm.ts и homework.ts (разбор поля) (+ тесты)",
+                "Тест-перекрёстка: одна выборка адресов через proposal.NewRecipient и через проверку почты library даёт одинаковый ответ (follow-up TASK-235)",
+                "Тесты: лекция → лектор, семинар → семинарист, нет почты — no_teacher_email, задание без предмета — no_subject, B-5/B-6 по ответу, смена адреса между карточкой и «Да» — STALE, работа без задания (no_assignment как сейчас)",
+                "Файлы: paratech/desktop/internal/domain/coursework/proposal/*, paratech/desktop/internal/cases/homeworkflow/ports.go, proposals.go, worksend.go, types.go, paratech/desktop/internal/app/settingsbridge.go и подключение, paratech/desktop/internal/input/wails/agentconfirm*.go и homework*.go (поля recipientName, причина, subjectId, роль), paratech/desktop/frontend/src/bindings/agentConfirm.ts и homework.ts (разбор полей), paratech/desktop/tests/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
@@ -5072,7 +5090,8 @@
                 "npm --prefix paratech/desktop/frontend run test и run build"
             ],
             "dependencies": [
-                "TASK-235"
+                "TASK-235",
+                "TASK-285"
             ],
             "status": "pending"
         },
@@ -5080,23 +5099,24 @@
             "id": "TASK-238",
             "category": "ui",
             "priority": "medium",
-            "description": "[Предметы · UI] Преподаватель на странице предмета (имя и почта) и «Кому: имя <адрес>» в карточке отправки",
+            "description": "[Предметы · UI] Лектор и семинарист на странице предмета (имя и почта), «Кому: имя <адрес>» и «Нет почты преподавателя» в карточке отправки",
             "acceptance_criteria": [
-                "docs/adr/0030-subject-teachers-scheduled-send.md; привязки — TASK-236 (преподаватель), TASK-237 (recipientName); страница предмета — после TASK-227",
-                "Страница предмета: блок «Преподаватель» — имя и почта или «Не указан»; «Указать»/«Изменить» открывает маленькую форму (имя, почта, «Сохранить», «Отмена», «Убрать»); ошибки у поля; тексты как текст",
-                "Карточки отправки (задание и работа): «Кому: <имя> <адрес>», без имени — только адрес",
+                "docs/adr/0030-subject-teachers-scheduled-send.md (B-1 (б), B-4 (б)); привязки — TASK-285 (два преподавателя), TASK-237 (recipientName, причины no_teacher_email / no_subject); страница предмета — после TASK-227",
+                "Страница предмета: блок «Преподаватели» — две строки «Лектор» и «Семинары и практика»: имя и почта или «Не указан»; «Указать»/«Изменить» открывает маленькую форму (имя, почта, «Сохранить», «Отмена», «Убрать»); ошибки у поля; тексты как текст; version и teachers берутся из Subjects() (в SubjectOverview их нет), после failed и changed список перечитывается",
+                "Карточки отправки (задание и работа): «Кому: <имя> <адрес>», без имени — только адрес; no_teacher_email — «Нет почты преподавателя (лектор | семинарист) предмета «<имя>»» и «Указать почту», открывающая форму этой строки на странице предмета; no_subject — «У задания не указан предмет» и выбор предмета (TASK-232)",
                 "Безличные тексты, тёмная тема, один акцент, клавиатура и aria; тесты фронтенда",
                 "Файлы: paratech/desktop/frontend/src/pages/Subject*.tsx, src/agent/AgentCards.tsx и страница задания (только строка «Кому»), src/*View.ts, test/* (+ тесты)",
                 "Исполнитель: frontend"
             ],
             "test_steps": [
                 "npm --prefix paratech/desktop/frontend run test и run build",
-                "Владелец: docs/qa/tasks/TASK-238.md — указать преподавателя Матана с почтой → «Отправить преподавателю» по заданию Матана → в карточке его имя и адрес"
+                "Владелец: docs/qa/tasks/TASK-238.md — указать семинариста Матана с почтой → «Отправить преподавателю» по заданию с семинара → в карточке его имя и адрес; лектор без почты, задание с лекции → «Нет почты преподавателя (лектор)» → «Указать почту» открывает поле"
             ],
             "dependencies": [
                 "TASK-227",
                 "TASK-236",
-                "TASK-237"
+                "TASK-237",
+                "TASK-285"
             ],
             "status": "pending"
         },
@@ -5106,13 +5126,13 @@
             "priority": "medium",
             "description": "[Отправка · ядро] «Отправить в…»: время отправки в подтверждении, доставка не раньше этого времени",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open B-2 в docs/adr/0030-subject-teachers-scheduled-send.md (приложение было закрыто в это время)",
+                "docs/adr/0030-subject-teachers-scheduled-send.md «Отправить в…» и «Late scheduled send» (B-2 (б): опоздавшую отправку не отправлять, при следующем запуске спросить заново)",
                 "proposal: подтверждение отправки (send_homework_email, send_work_email) принимает необязательное sendAt; правило в домене: от now + 5 мин до now + 14 дней, с точностью до минуты; иначе ErrInvalidSendTime; хранится в proposals.send_at; EmailCommand несёт его; CONFIRMED-предложение, продолженное после сбоя, берёт сохранённое время",
-                "delivery: Spec.NotBefore и notBefore в State/Restore; senddelivery.ensureJob ставит job.Spec.RunAt = notBefore (очередь это уже умеет); ключ и правило «один ключ — одна доставка», UNKNOWN и сверка — без изменений (hard rule 7); View отдаёт scheduledAt",
-                "Поведение при опоздании (приложение закрыто, компьютер спал) — по ответу на Open B-2: (а) без изменений очереди; (б)/(в) — правило опоздания в агрегате delivery (время передаётся параметром), отказ без отправки с понятной причиной",
-                "Запланированная доставка — PENDING: блокирует другую отправку того же задания, перегенерацию файла экспорта (HasUnresolved) и удаление задания (TASK-228)",
-                "Миграция desktop (следующий свободный номер на момент пуша; не параллельно с другой задачей с миграцией): proposals.send_at INTEGER NULL, deliveries.not_before INTEGER NULL; docs/contracts/schema.sql — зеркало",
-                "Тесты: домен (границы времени), use case (отложенная задача с RunAt, повтор «Да» — одна доставка, перезапуск до времени — отправка ровно одна в срок на управляемых часах), опоздание по Open B-2, адрес закреплён при «Да»",
+                "delivery: Spec.NotBefore и notBefore в State/Restore; новые статусы MISSED и CANCELLED в таблице переходов (ARCH-19): PENDING → SENDING | MISSED | CANCELLED, MISSED → PENDING | CANCELLED; Start(now) при now > notBefore + 5 мин — ErrMissed и переход в MISSED, письмо не уходит; доставка без notBefore никогда не MISSED; методы Reschedule и Cancel — в TASK-242",
+                "senddelivery: ensureJob ставит job.Spec.RunAt = notBefore; задача при запуске читает доставку: раньше notBefore — переставляет себя на notBefore, CANCELLED — завершается без отправки, опоздала — MISSED; при старте приложения один проход переводит опоздавшие PENDING в MISSED; ключ, Message-ID, «один ключ — одна доставка», UNKNOWN и сверка — без изменений (hard rule 7); View отдаёт scheduledAt и status",
+                "Запланированная доставка (PENDING с notBefore, MISSED) блокирует другую отправку того же задания, перегенерацию файла экспорта (HasUnresolved) и удаление задания (TASK-228); CANCELLED — не блокирует",
+                "Миграция desktop (следующий свободный номер на момент пуша; не параллельно с другой задачей с миграцией): proposals.send_at INTEGER NULL; пересборка deliveries с not_before INTEGER NULL и статусами MISSED, CANCELLED в CHECK; docs/contracts/schema.sql — зеркало",
+                "Тесты: домен (границы времени, все переходы MISSED/CANCELLED, допуск 5 мин), use case (отложенная задача с RunAt, повтор «Да» — одна доставка, перезапуск до времени — отправка ровно одна в срок, приложение закрыто дольше допуска — MISSED и ни одного письма, на управляемых часах), адрес закреплён при «Да»",
                 "Файлы: paratech/desktop/internal/domain/coursework/proposal/*, paratech/desktop/internal/domain/delivery/delivery/*, paratech/desktop/internal/cases/homeworkflow/proposals.go, worksend.go, types.go, paratech/desktop/internal/cases/senddelivery/*, paratech/desktop/internal/adapters/sqlite/proposals*.go и deliveries*.go, adapters/sqlite/queries/*, adapters/sqlite/sqlcgen/*, paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/tests/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
@@ -5132,8 +5152,8 @@
             "description": "[Отправка · привязка Wails] Время отправки в «Да» и «Запланировано на …» в доставках",
             "acceptance_criteria": [
                 "docs/adr/0030-subject-teachers-scheduled-send.md; ядро — TASK-239",
-                "AgentConfirmService/HomeworkService: подтверждение отправки задания и работы принимает sendAt (местное «YYYY-MM-DDTHH:MM», пусто — сейчас); новые problem-коды send_time_past и send_time_far; DTO доставки и предложения несут scheduledAt",
-                "frontend/src/bindings/agentConfirm.ts и homework.ts: передача sendAt и разбор scheduledAt; тексты — в TASK-241",
+                "AgentConfirmService/HomeworkService: подтверждение отправки задания и работы принимает sendAt (местное «YYYY-MM-DDTHH:MM», пусто — сейчас); новые problem-коды send_time_past и send_time_far; DTO доставки и предложения несут scheduledAt и состояние scheduled | missed | cancelled",
+                "frontend/src/bindings/agentConfirm.ts и homework.ts: передача sendAt и разбор scheduledAt и состояния; тексты — в TASK-241",
                 "Тесты: разбор времени и зоны, коды ошибок, разбор в bindings",
                 "Файлы: paratech/desktop/internal/input/wails/agentconfirm*.go, homework*.go, paratech/desktop/frontend/src/bindings/agentConfirm.ts, homework.ts, frontend/test/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
@@ -5155,7 +5175,7 @@
             "acceptance_criteria": [
                 "docs/adr/0030-subject-teachers-scheduled-send.md; привязки — TASK-240",
                 "Карточка подтверждения отправки (задание и работа): «Отправить сейчас» и «Отправить в…»; выбор: «Завтра в 9:00», «Сегодня в …» (ближайший целый час, если он позже чем через 5 минут), дата и время вручную; одна кнопка «Да» подтверждает и время; ошибки send_time_past/send_time_far — у поля времени",
-                "Подсказка в карточке: «Письмо уйдёт, только если приложение будет запущено (можно свернуть в трей)»",
+                "Подсказка в карточке: «Письмо уйдёт, только если приложение будет запущено (можно свернуть в трей). Если в это время оно будет закрыто, paratech спросит снова»",
                 "У задания и работы: «Запланировано на 28.10 в 9:00» вместо «Отправлено», пока доставка ждёт; после отправки — как сейчас (sentAt)",
                 "Безличные тексты, тёмная тема, один акцент, клавиатура и aria; тесты фронтенда",
                 "Файлы: paratech/desktop/frontend/src/agent/AgentCards.tsx, src/pages/HomeworkPage.tsx, src/pages/HomeworkDialogs.tsx, src/homeworkView.ts, src/agentView.ts, страница работы «под ключ» (только строка состояния), test/* (+ тесты)",
@@ -5175,14 +5195,14 @@
             "id": "TASK-242",
             "category": "functional",
             "priority": "medium",
-            "description": "[Отправка · ядро и привязка] Отмена запланированной отправки до её времени (только при ответе владельца «да»)",
+            "description": "[Отправка · ядро и привязка] Запланированные отправки: список, смена времени, отмена, решение по опоздавшей (отправить сейчас / новое время / отменить)",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open B-3 в docs/adr/0030-subject-teachers-scheduled-send.md. Только при варианте (а); при (б) задача не нужна",
-                "delivery: новый статус CANCELLED; переход PENDING → CANCELLED только пока доставка не начала отправку (не SENDING), таблицей переходов (ARCH-19); миграция — пересборка deliveries под CHECK (следующий свободный номер; не параллельно с другой задачей с миграцией); docs/contracts/schema.sql — зеркало",
-                "senddelivery.CancelScheduled(ctx, id): переход в агрегате, затем отмена задачи через jobrunner; гонка с началом отправки — доменная ошибка, письмо не теряется и не дублируется (hard rule 7); отменённая не блокирует новую отправку",
-                "Привязка: CancelScheduledSend(deliveryId) → {problem: '' | already_sending | not_found | failed}; bindings ts",
-                "Тесты: домен (переходы), use case (отмена до времени, гонка с отправкой на управляемых часах), привязка",
-                "Файлы: paratech/desktop/internal/domain/delivery/delivery/*, paratech/desktop/internal/cases/senddelivery/*, paratech/desktop/internal/adapters/sqlite/deliveries*.go, queries, sqlcgen, paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/internal/input/wails/homework*.go, paratech/desktop/frontend/src/bindings/homework.ts, paratech/desktop/tests/* (+ тесты)",
+                "docs/adr/0030-subject-teachers-scheduled-send.md «Changing and cancelling a scheduled send» (B-3: полный CRUD до начала отправки) и «Late scheduled send» (B-2 (б)); статусы и миграция — TASK-239, здесь миграции нет",
+                "delivery: Reschedule(at, now) для PENDING и MISSED (то же окно now + 5 мин … now + 14 дней; «сейчас» из MISSED — notBefore = now) и Cancel(now) → CANCELLED для PENDING и MISSED; после SENDING — ErrAlreadySending; таблицей переходов (ARCH-19); ключ, Message-ID, получатель и содержимое не меняются",
+                "senddelivery: Scheduled(ctx) — все PENDING с notBefore и MISSED (время, получатель, задание или работа); Reschedule(ctx, id, at, expectedVersion) ставит задачу на новое время; Cancel(ctx, id, expectedVersion) — переход в агрегате, задача при запуске видит CANCELLED и ничего не шлёт; гонка с началом отправки — доменная ошибка, письмо не теряется и не дублируется (hard rule 7)",
+                "Привязка: ScheduledSends() → [{deliveryId, version, state: scheduled | missed, at, recipient, recipientName, assignmentId | workId, title}]; RescheduleSend(deliveryId, version, sendAt | 'now') и CancelScheduledSend(deliveryId, version) → {problem: '' | already_sending | changed | send_time_past | send_time_far | not_found | failed}; bindings ts",
+                "Тесты: домен (все переходы, после SENDING — отказ), use case (смена времени и отправка ровно одна в новое время, отмена до времени, MISSED → сейчас, MISSED → новое время, MISSED → отмена, гонка с отправкой на управляемых часах), привязка",
+                "Файлы: paratech/desktop/internal/domain/delivery/delivery/*, paratech/desktop/internal/cases/senddelivery/*, paratech/desktop/internal/adapters/sqlite/deliveries*.go, queries, sqlcgen, paratech/desktop/internal/input/wails/homework*.go, paratech/desktop/internal/app/* (только подключение), paratech/desktop/frontend/src/bindings/homework.ts, paratech/desktop/tests/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
@@ -5199,12 +5219,13 @@
             "id": "TASK-243",
             "category": "ui",
             "priority": "medium",
-            "description": "[Отправка · UI] Кнопка «Отменить отправку» у запланированной отправки (только при ответе владельца «да»)",
+            "description": "[Отправка · UI] «Изменить время» и «Отменить отправку» у запланированной отправки, карточка «Не отправлено вовремя» после запуска",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open B-3 (вариант (а)); привязка — TASK-242",
-                "Рядом с «Запланировано на …»: «Отменить отправку»; после — «Отправка отменена» и снова доступна «Отправить преподавателю»; already_sending — «Письмо уже отправляется»",
-                "Безличные тексты, тёмная тема, один акцент; тесты фронтенда",
-                "Файлы: те же, что у TASK-241 (только эта кнопка и её строки), test/* (+ тесты)",
+                "docs/adr/0030-subject-teachers-scheduled-send.md (B-2 (б), B-3); привязка — TASK-242",
+                "Рядом с «Запланировано на …»: «Изменить время» (тот же выбор времени, что в TASK-241, «Сохранить») и «Отменить отправку»; после отмены — «Отправка отменена» и снова доступна «Отправить преподавателю»; already_sending — «Письмо уже отправляется»; changed — перечитать",
+                "Опоздавшая (missed): у задания или работы и строкой на «Сегодня» — «Не отправлено вовремя: было запланировано на 28.10 в 9:00. Кому: <имя> <адрес>» с «Отправить сейчас», «Выбрать новое время», «Отменить отправку»; строка видна до решения; ничего не уходит без щелчка",
+                "Безличные тексты, тёмная тема, один акцент, клавиатура и aria; тесты фронтенда",
+                "Файлы: те же, что у TASK-241 (только эти кнопки и строки), paratech/desktop/frontend/src/pages/Today*.tsx и src/todayView.ts (только строка опоздавших), test/* (+ тесты)",
                 "Исполнитель: frontend"
             ],
             "test_steps": [
@@ -5496,13 +5517,15 @@
             "priority": "medium",
             "description": "[Ссылки на пару · ICS] Ссылка на звонок из события календаря: список сервисов и извлечение в icsschedule",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open 4 в docs/adr/0032-lesson-call-links.md (список сервисов звонков)",
-                "domain/schedule/values: IsCallHost(host) — хост равен домену из списка или кончается на «.домен» (граница метки: evilzoom.us не zoom.us); список — только в этой функции",
+                "docs/adr/0032-lesson-call-links.md «Value» и «ICS extraction»; список сервисов принят владельцем 2026-10-27 (Open 4)",
+                "domain/schedule/values: IsCallHost(host) — хост равен домену из списка или кончается на «.домен» (граница метки: evilzoom.us не zoom.us); список — только в этой функции: zoom.us, teams.microsoft.com, teams.live.com, meet.google.com, telemost.yandex.ru, telemost.360.yandex.ru, mts-link.ru, webinar.ru, ktalk.ru, meet.jit.si",
+                "importplan.writeContent: токен плана учитывает ссылку (field(c.CallLink)) с тестом — до извлечения из ICS (follow-up TASK-256)",
+                "lesson Restore / чтение: сохранённая ссылка, которая больше не проходит ParseCallLink, читается как «нет ссылки» и не роняет чтение расписания (ADR-0032, замена выбора TASK-256); тест на испорченной строке в sqlite",
                 "adapters/icsschedule: кандидаты по порядку X-GOOGLE-CONFERENCE и X-MICROSOFT-SKYPETEAMSMEETINGURL (только если они есть в настоящих образцах экспорта, положенных в testdata и описанных в docs/refs/schedule-ics.md; ничего не выдумывать), URL, LOCATION, DESCRIPTION; в свободном тексте ссылка начинается с http:// или https:// и кончается на пробеле, <, > или кавычке, хвост .,;:!?)]» отрезается; берётся первая, что проходит ParseCallLink и IsCallHost; иначе ссылки нет; без угадывания (нет схемы — не ссылка)",
                 "Плохая ссылка — не ошибка строки: пара импортируется без ссылки; ссылки на материалы (другие хосты) не берутся; doc.go пакета и docs/refs/schedule-ics.md говорят, что читается",
                 "Тесты: Meet из экспорта Google, Zoom в LOCATION, Teams в DESCRIPTION, Телемост в URL; ссылка на диск или документ не берётся; evilzoom.us и javascript: не берутся; две ссылки — первая по порядку; повторный импорт с другой ссылкой даёт изменение в плане; пропала ссылка — изменение",
                 "Граница доверия: состязательное ревью безопасности (docs/process/security-review.md, security-auditor)",
-                "Файлы: paratech/desktop/internal/domain/schedule/values/callhost*.go, paratech/desktop/internal/adapters/icsschedule/* (и testdata), docs/refs/schedule-ics.md (+ тесты)",
+                "Файлы: paratech/desktop/internal/domain/schedule/values/callhost*.go, paratech/desktop/internal/domain/schedule/services/importplan/*, paratech/desktop/internal/domain/schedule/lesson/* (только чтение ссылки), paratech/desktop/internal/adapters/sqlite/lessons*.go (только тест или чтение ссылки), paratech/desktop/internal/adapters/icsschedule/* (и testdata), docs/refs/schedule-ics.md (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
@@ -5535,7 +5558,7 @@
             "dependencies": [
                 "TASK-256"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-259",
@@ -5543,12 +5566,13 @@
             "priority": "medium",
             "description": "[Ссылки на пару · ядро] Ссылка, которую вписывает студент: хранение и use case calllinks (вписать, убрать)",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open 1 и Open 4-б в docs/adr/0032-lesson-call-links.md (где вписывается ссылка; ограничивать ли её списком сервисов)",
-                "По ответу на Open 1: у предмета — поле library/subject со своей копией проверки формы (ARCH-11, как почта преподавателя в ADR-0030); у пары — поле lesson вне Content, метод SetStudentCallLink/ClearStudentCallLink без роста ревизии, импорт его не трогает; оба — и то и другое",
-                "Новый cases/calllinks: SetStudentLink и ClearStudentLink (ParseCallLink; при ответе 4-б «только из списка» — ещё IsCallHost), ожидаемая версия, ошибки invalid / not_found / changed; агенту инструментов нет, планировщик ссылок не видит (ADR-0022)",
-                "Миграция desktop (следующий свободный номер на момент пуша; не параллельно с другой задачей с миграцией): колонка(и) по Open 1, TEXT NOT NULL DEFAULT ''; docs/contracts/schema.sql — зеркало; sqlite читает и пишет",
-                "Тесты: домен (форма, очистка), use case (вписать, заменить, убрать, версия, неверная ссылка), повторный импорт не стирает ссылку студента, sqlite roundtrip",
-                "Файлы: paratech/desktop/internal/domain/library/subject/* или paratech/desktop/internal/domain/schedule/lesson/* (по Open 1), paratech/desktop/internal/cases/calllinks/* (новый), adapters/sqlite/* (lessons или subjects, queries, sqlcgen), paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/tests/* (+ тесты)",
+                "docs/adr/0032-lesson-call-links.md «Where links live»: владелец 2026-10-27 — Open 1 (в): ссылку вписывают и у предмета, и у пары; Open 4-б (а): ссылка студента — любая http/https, списком сервисов не ограничивается",
+                "У предмета — поле CallLink в library/subject со своей копией проверки формы (ARCH-11, как почта преподавателя в ADR-0030), SetCallLink/ClearCallLink меняют версию; у пары — поле lesson вне Content, SetStudentCallLink/ClearStudentCallLink без роста ревизии, импорт и ChangeContent его не трогают",
+                "Новый cases/calllinks: SetSubjectLink / ClearSubjectLink и SetLessonLink / ClearLessonLink (только ParseCallLink, без IsCallHost), ожидаемая версия, ошибки invalid / not_found / changed; агенту инструментов нет, планировщик ссылок не видит (ADR-0022)",
+                "Миграция desktop (следующий свободный номер на момент пуша; не параллельно с другой задачей с миграцией): subjects.call_link и schedule_entries.student_call_link TEXT NOT NULL DEFAULT '' CHECK (length ≤ 2048); docs/contracts/schema.sql — зеркало; sqlite читает и пишет; испорченное сохранённое значение читается как «нет ссылки»",
+                "Тесты: домен (форма, очистка, обе стороны), use case (вписать, заменить, убрать, версия, неверная ссылка, BigBlueButton вуза принимается), повторный импорт не стирает ссылку студента у пары, sqlite roundtrip",
+                "Не параллельно с TASK-285 и TASK-288 (те же файлы library/subject и sqlite library)",
+                "Файлы: paratech/desktop/internal/domain/library/subject/*, paratech/desktop/internal/domain/schedule/lesson/*, paratech/desktop/internal/cases/calllinks/* (новый), adapters/sqlite/* (library, lessons, queries, sqlcgen), paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/tests/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
@@ -5566,10 +5590,10 @@
             "priority": "medium",
             "description": "[Ссылки на пару · ядро] Какая ссылка показывается и когда: доменный сервис joinlink и чтение в calllinks",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open 2 и Open 3 в docs/adr/0032-lesson-call-links.md (что важнее при двух ссылках; окно показа в «Сегодня»)",
-                "domain/schedule/services/joinlink (чистый): по ссылке из календаря, ссылке(ам) студента и названию пары возвращает Shown{Link, Source (student | calendar), EventTitle} или ничего; порядок — по Open 2; Visible(start, end, now) — окно «Сегодня» по Open 3; каждое сохранённое значение заново проходит ParseCallLink, не прошло — не показывается",
-                "cases/calllinks: Shown(ctx, lessonIDs, place) где place — popup (без окна) или today (окно Visible, время через Clock); порты — чтение пар и ссылок студента; todayfeed и recordingprompt не меняются",
-                "Тесты: сервис — только календарь, только студент, оба (по Open 2), испорченная сохранённая ссылка, границы окна; use case на фейках — удалённая пара, нет ссылки — нет строки",
+                "docs/adr/0032-lesson-call-links.md «Which link is shown, and when»: владелец 2026-10-27 — Open 2 (а) ссылка студента важнее календаря, Open 3 (а) в «Сегодня» — с 10 минут до начала до конца пары",
+                "domain/schedule/services/joinlink (чистый): вход — ссылка студента у пары, ссылка студента у предмета, ссылка из календаря, название пары; порядок: пара студента, иначе предмет студента, иначе календарь; возвращает Shown{Link, Source (student | calendar), EventTitle, CalendarHost} или ничего; CalendarHost — только когда показана ссылка студента, а ссылка календаря есть и отличается (каноническая строка); Visible(start, end, now): start − 10 мин ≤ now < end; каждое сохранённое значение заново проходит ParseCallLink, не прошло — не показывается",
+                "cases/calllinks: Shown(ctx, lessonIDs, place) где place — popup (без окна) или today (окно Visible, время через Clock); порты — чтение пар (с предметом библиотеки пары через subjectmatch) и ссылок предмета; todayfeed и recordingprompt не меняются",
+                "Тесты: сервис — только календарь, только предмет, только пара, пара и предмет (пара), студент и другой календарь (CalendarHost), студент и тот же календарь (без CalendarHost), испорченная сохранённая ссылка, границы окна −10 мин / начало / конец; use case на фейках — удалённая пара, нет ссылки — нет строки",
                 "Файлы: paratech/desktop/internal/domain/schedule/services/joinlink/* (новый), paratech/desktop/internal/cases/calllinks/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
@@ -5590,17 +5614,20 @@
             "description": "[Ссылки на пару · привязка Wails] Ссылка в DTO окна записи и «Сегодня», открыть, копировать, вписать и убрать",
             "acceptance_criteria": [
                 "docs/adr/0032-lesson-call-links.md; ядро — TASK-258, TASK-259, TASK-260",
-                "input/wails: PromptView (только пара, не ad-hoc) и строка пары «Сегодня» получают callLink {host, source: student | calendar, eventTitle} или null; сам URL на страницу не отдаётся",
-                "Новые методы: OpenCallLink(lessonId) и CopyCallLink(lessonId) — Go заново берёт ссылку через calllinks в момент щелчка, страница URL не присылает; открытие через свой интерфейс CallLinkOpener (ARCH-42, app подставляет weblink), копирование через существующий Clipboard; problem: '' | no_link | refused | failed",
-                "SetCallLink / ClearCallLink для ввода студента (по ответу Open 1: subjectId или lessonId, ожидаемая версия) → problem: '' | invalid | changed | not_found | failed",
+                "input/wails: PromptView (только пара, не ad-hoc) и строка пары «Сегодня» получают callLink {host, source: student | calendar, eventTitle, calendarHost} или null; сам URL на страницу не отдаётся",
+                "Новые методы: OpenCallLink(lessonId) и CopyCallLink(lessonId) — страница присылает только ID пары, Go заново берёт ссылку через calllinks в момент щелчка; открытие через свой интерфейс CallLinkOpener (ARCH-42, app подставляет weblink), копирование через существующий Clipboard; problem: '' | no_link | refused | failed",
+                "Перед открытием (follow-ups TASK-256/258): писатель .url пишет только CallLink.String() значения, заново прошедшего ParseCallLink (тест); проверка %NAME% дополнительно сверяет имена из HKCU\\Environment (Explorer может видеть другое окружение после setx); тест на Windows фиксирует, раскрывает ли обработчик .url %VAR% вообще — результат в progress и комментарии; если не раскрывает, проверка остаётся как защита",
+                "SetSubjectCallLink(subjectId, version, link) / ClearSubjectCallLink и SetLessonCallLink(lessonId, version, link) / ClearLessonCallLink → problem: '' | invalid | changed | not_found | failed; вид предмета и пары в расписании отдаёт host своей ссылки (не URL)",
                 "Сервис доступен и окну записи (popup), и главному окну; app — подключение",
                 "frontend/src/bindings: prompt.ts, today.ts (разбор callLink), новый callLinks.ts (open, copy, set, clear); тексты — в задачах UI",
                 "Тесты: каждый problem-код, null без ссылки, страница не может передать URL, разбор в bindings",
-                "Файлы: paratech/desktop/internal/input/wails/calllinks*.go (новый), prompt.go, today.go (только поле), paratech/desktop/internal/app/*, paratech/desktop/frontend/src/bindings/prompt.ts, today.ts, callLinks.ts, frontend/test/* (+ тесты)",
+                "Граница доверия: состязательное ревью безопасности (docs/process/security-review.md, security-auditor)",
+                "Файлы: paratech/desktop/internal/input/wails/calllinks*.go (новый), prompt.go, today.go (только поле), paratech/desktop/internal/adapters/weblink/* (только .url и проверка %NAME%), paratech/desktop/internal/app/*, paratech/desktop/frontend/src/bindings/prompt.ts, today.ts, callLinks.ts, frontend/test/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
                 "go test -race ./desktop/internal/input/wails/... ./desktop/internal/app/..., GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/...",
+                "На Windows: go test ./desktop/internal/adapters/weblink/... (настоящий запуск, проверка %VAR% и HKCU\\Environment)",
                 "npm --prefix paratech/desktop/frontend run test и run build"
             ],
             "dependencies": [
@@ -5617,9 +5644,9 @@
             "description": "[Ссылки на пару · UI] Строка ссылки в окне записи пары",
             "acceptance_criteria": [
                 "docs/adr/0032-lesson-call-links.md; привязка — TASK-261",
-                "Общий компонент frontend/src/components/CallLinkLine.tsx: «Ссылка на пару: <хост> · вписано вами» или «… · из календаря, событие „<название>“», хост целиком, кнопки «Открыть» и «Копировать»; всё — обычный текст (недоверенный), ничего не открывается само; нет ссылки — нет строки",
+                "Общий компонент frontend/src/components/CallLinkLine.tsx: «Ссылка на пару: <хост> · вписано вами» или «… · из календаря, событие „<название>“», хост целиком, кнопки «Открыть» и «Копировать»; при calendarHost — спокойная вторая строка «Ссылка в календаре другая: <хост>» (не красная, не кнопка); всё — обычный текст (недоверенный), ничего не открывается само; нет ссылки — нет строки",
                 "Окно записи (popup) показывает строку под названием пары; ошибки: «Не удалось открыть ссылку», «Ссылка скопирована» / «Не удалось скопировать»",
-                "Тесты фронтенда: есть ссылка (оба источника), нет ссылки, щелчок вызывает OpenCallLink с id пары, ad-hoc без строки",
+                "Тесты фронтенда: есть ссылка (оба источника), вторая строка calendarHost есть и нет, нет ссылки, щелчок вызывает OpenCallLink с id пары, ad-hoc без строки",
                 "Файлы: paratech/desktop/frontend/src/components/CallLinkLine.tsx (новый), frontend/src/popup/*, frontend/test/* (+ тесты)",
                 "Исполнитель: frontend"
             ],
@@ -5638,7 +5665,7 @@
             "description": "[Ссылки на пару · UI] Строка ссылки у пары в «Сегодня»",
             "acceptance_criteria": [
                 "docs/adr/0032-lesson-call-links.md; привязка — TASK-261; компонент — TASK-262",
-                "У пары в «Сегодня» — CallLinkLine, когда ядро отдало callLink (окно показа решает Go, страница не считает время); появляется при обычном опросе страницы",
+                "У пары в «Сегодня» — CallLinkLine, когда ядро отдало callLink (окно показа решает Go: с 10 минут до начала до конца пары; страница не считает время); появляется при обычном опросе страницы",
                 "Тесты фронтенда: строка есть и нет, щелчки открыть и копировать",
                 "Файлы: paratech/desktop/frontend/src/pages/Today*.tsx, today.css, frontend/src/todayView.ts, frontend/test/* (+ тесты)",
                 "Исполнитель: frontend"
@@ -5658,11 +5685,11 @@
             "priority": "medium",
             "description": "[Ссылки на пару · UI] Поле «Ссылка на звонок»: вписать, заменить, убрать",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open 1 в docs/adr/0032-lesson-call-links.md (страница предмета, пара в расписании или обе)",
-                "Поле «Ссылка на звонок» с подсказкой «Вставьте ссылку на Zoom, Teams, Meet или Телемост», кнопки «Сохранить» и «Убрать»; показывает хост сохранённой ссылки; ошибки по problem-кодам TASK-261: «Это не ссылка http или https», «Данные изменились, обновите», «Не удалось сохранить»",
-                "Если на пару есть и ссылка из календаря — подпись, какая показывается (по Open 2)",
-                "Тесты фронтенда: сохранить, неверная ссылка, убрать, изменилось",
-                "Файлы: по Open 1 — paratech/desktop/frontend/src/pages/SubjectsPage.tsx, SubjectsParts.tsx и/или SchedulePage.tsx, frontend/test/* (+ тесты)",
+                "docs/adr/0032-lesson-call-links.md: владелец 2026-10-27 — Open 1 (в) поле и у предмета, и у пары; ссылка пары важнее ссылки предмета; ссылка студента важнее календаря (Open 2 (а))",
+                "Поле «Ссылка на звонок» на странице предмета («для всех пар предмета») и у пары в расписании («только для этой пары»), подсказка «Вставьте ссылку на звонок (Zoom, Teams, Meet, Телемост или ссылку вуза)», кнопки «Сохранить» и «Убрать»; показывает хост сохранённой ссылки; ошибки по problem-кодам TASK-261: «Это не ссылка http или https», «Данные изменились, обновите», «Не удалось сохранить»",
+                "У пары: если у предмета есть своя ссылка — подпись «Иначе используется ссылка предмета: <хост>»; если есть ссылка из календаря — «Ссылка из календаря: <хост> — показывается, только пока вы не вписали свою» (обычный текст, не кнопка)",
+                "Тесты фронтенда: сохранить (предмет и пара), неверная ссылка, убрать, изменилось, подписи",
+                "Файлы: paratech/desktop/frontend/src/pages/SubjectsPage.tsx, SubjectsParts.tsx, SchedulePage.tsx (и его части), frontend/test/* (+ тесты)",
                 "Исполнитель: frontend"
             ],
             "test_steps": [
@@ -5670,6 +5697,440 @@
             ],
             "dependencies": [
                 "TASK-261"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-285",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Предметы · ядро и привязка] Два преподавателя у предмета: лектор и семинарист (домен, миграция subject_teachers, use case, привязка Wails и TS)",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-27 (ADR-0030 B-4 (б)): отдельно лектор и преподаватель семинаров и практики; docs/adr/0030-subject-teachers-scheduled-send.md «Teachers of a subject»; TASK-235/236 сделали одного",
+                "Домен library/subject: TeacherRole lecture | practice; SetTeacher(role, name, email, now), ClearTeacher(role, now), Teacher(role), Teachers(); правила NewTeacher без изменений; неизвестная роль — ErrInvalidTeacher; Restore проверяет обе роли строго",
+                "Миграция desktop (следующий свободный номер на момент пуша; не параллельно с другой задачей с миграцией): subject_teachers(subject_id REFERENCES subjects ON DELETE CASCADE, role CHECK IN ('lecture', 'practice'), name, email с CHECK длины как в 0038) PRIMARY KEY (subject_id, role); перенос: преподаватель из subjects.teacher_* попадает в обе роли, затем subjects.teacher_* = '' и больше не читаются (устаревшие колонки остаются); docs/contracts/schema.sql — зеркало; Down — обратно одна строка (лектор, иначе семинарист)",
+                "cases/library: SetTeacher(ctx, subjectID, role, name, email, expectedVersion) и ClearTeacher(ctx, subjectID, role, expectedVersion); вид предмета отдаёт обе роли; агенту и Hub не передаётся (TestDriverBaseCarriesNoTeacher остаётся)",
+                "input/wails/library_teacher.go: SetSubjectTeacher(subjectId, version, role, name, email) и ClearSubjectTeacher(subjectId, version, role) → те же problem-коды (+ invalid с field role); LibrarySubject несёт teachers {lecture, practice} (null у пустой); bindings/library.ts: разбор teachers и роль в вызовах",
+                "Тесты: домен (обе роли, неизвестная роль, одинаковое значение не меняет версию), миграция (перенос одного преподавателя в обе роли на настоящем SQLite), use case, привязка и разбор в TS",
+                "Не параллельно с TASK-259 и TASK-288 (те же файлы library/subject и sqlite library)",
+                "Файлы: paratech/desktop/internal/domain/library/subject/*, paratech/desktop/internal/cases/library/*, paratech/desktop/internal/adapters/sqlite/library*.go, adapters/sqlite/queries/library.sql, adapters/sqlite/sqlcgen/*, paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/internal/input/wails/library*.go, paratech/desktop/frontend/src/bindings/library.ts, frontend/test/*, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/library/... ./desktop/internal/cases/library/... ./desktop/internal/adapters/sqlite/... ./desktop/internal/input/wails/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/...",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-235",
+                "TASK-236"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-286",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Предметы · ядро] Мелочи после TASK-235/236: Subject не печатает преподавателя в логах, LibraryService.fail без сырой причины, устаревший комментарий",
+            "acceptance_criteria": [
+                "Follow-ups TASK-235/236 (docs/adr/0030-subject-teachers-scheduled-send.md)",
+                "subject.Subject: String() и LogValue() без имени и почты преподавателя (только ID и название предмета); тест, что fmt %v и slog не выводят почту",
+                "input/wails/library.go LibraryService.fail: в лог только код причины (как library_teacher.go), никогда сырая ошибка с данными строк; тест с «протекающей» причиной",
+                "input/wails/subjectoverview.go:65: убрать устаревший комментарий «No teacher: it waits for the owner's decision»",
+                "Файлы: paratech/desktop/internal/domain/library/subject/subject.go (+ тест), paratech/desktop/internal/input/wails/library.go, subjectoverview.go (+ тесты)",
+                "Исполнитель: go-core (sonnet, мелкая задача)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/library/... ./desktop/internal/input/wails/... и тест архитектуры, golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-285"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-287",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Конспекты · ядро + UI] Конспект студента выше «Конспекта» paratech в ответах и поиске; «Мой конспект» — первая вкладка страницы лекции",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-27 (ADR-0027 вопрос 6: да), раздел «Ranking»; TASK-152/153 закрепили старый порядок в тестах",
+                "knowledgebase.Passages и Search: при равном счёте фрагмент ownNote выше раздела конспекта paratech; внутри урока фрагменты конспекта просматриваются первыми, так что предел попаданий (50) не срезает их первыми; тесты TASK-152/153, закреплявшие старый порядок, переписаны (перечислить в progress)",
+                "Страница лекции (KnowledgeLessonPage): отдельная первая вкладка «Мой конспект» с блоком TASK-154 (раньше блок был внутри «Кратко»); открывается по умолчанию, если поиск или цитата не ведут в другую вкладку; у лекции только с конспектом — без изменений (NoteLecturePage)",
+                "Тесты Go (порядок, предел) и фронтенда (порядок вкладок, вкладка по умолчанию, фокус из поиска)",
+                "Файлы: paratech/desktop/internal/domain/coursework/services/knowledgebase/*, paratech/desktop/internal/cases/answering/* и cases/knowledgebase/* (только тесты порядка), paratech/desktop/frontend/src/pages/KnowledgeLessonPage.tsx, src/knowledgeView.ts, test/* (+ тесты)",
+                "Исполнитель: go-core (opus) для ядра, frontend для вкладки"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/coursework/... ./desktop/internal/cases/knowledgebase/... ./desktop/internal/cases/answering/... и тест архитектуры",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-153",
+                "TASK-155"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-288",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Предметы · ядро] Удаление предмета вместе с конспектами: мягкое удаление предмета и «Вернуть» вместо отказа ErrHasNotes",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-27 (К9 (б)): предмет с конспектами удаляется вместе с ними, с предупреждением и «Вернуть»; docs/adr/0027-own-notes.md «Removing a subject that has notes»; заменяет отказ ErrHasNotes TASK-151 для щелчка студента",
+                "Домен library/subject: статус active / removed таблицей (ARCH-19), Remove(now) и Restore(now), removedAt; изменения удалённого предмета (папки, алиасы, преподаватели, ссылка) — ErrRemoved",
+                "Миграция desktop (следующий свободный номер на момент пуша; не параллельно с другой задачей с миграцией): subjects.removed_at INTEGER NULL; docs/contracts/schema.sql — зеркало",
+                "cases/library: DiscardSubject(ctx, id, expectedVersion) → {notes: N} — мягко удаляет предмет, у которого есть конспекты (и предмет без конспектов и файлов); обычные файлы, не входящие в конспекты, по-прежнему отказ ErrNotEmpty (ADR-0027 вопрос 12); RestoreSubject(ctx, id, expectedVersion); RemoveSubject (Undo агента для create_subject) без изменений — с конспектами отказ ErrHasNotes (тест: Undo агента не забирает конспекты студента)",
+                "Удалённый предмет и всё под ним скрыты всеми читателями: списки предметов и материалов библиотеки, конспекты (ForSubject, ForLesson, ListAll для «Базы знаний»), поиск, ответы и Passages, билеты, subjectmatch, инструменты агента, кандидаты упоминаний; строки не переписываются; после RestoreSubject всё видно как было (сценарный тест на настоящем SQLite)",
+                "Создание предмета с именем удалённого — ErrRemovedNameTaken с ID удалённого (чтобы предложить «Вернуть»)",
+                "Окончательное удаление — не здесь (ADR-0027 вопрос 13)",
+                "Не параллельно с TASK-259 и TASK-285 (те же файлы library/subject и sqlite library)",
+                "Файлы: paratech/desktop/internal/domain/library/subject/*, paratech/desktop/internal/cases/library/*, paratech/desktop/internal/cases/notes/*, paratech/desktop/internal/cases/knowledgebase/* (только фильтр), paratech/desktop/internal/adapters/sqlite/library*.go, notes*.go, queries, sqlcgen, paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/library/... ./desktop/internal/cases/... ./desktop/internal/adapters/sqlite/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-151"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-289",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Предметы · привязка + UI] «Удалить предмет» с предупреждением о конспектах и «Вернуть»",
+            "acceptance_criteria": [
+                "docs/adr/0027-own-notes.md «Removing a subject that has notes»; ядро — TASK-288",
+                "input/wails/library.go: DiscardSubject(subjectId, version) → {problem: '' | has_files | changed | not_found | failed, notes}, RestoreSubject(subjectId, version); CreateSubject с именем удалённого → problem removed_name_taken и subjectId; bindings/library.ts",
+                "Страница предмета: «Удалить предмет» → окно «Удалить предмет «<имя>»? Вместе с ним удалятся N конспектов.» с «Удалить» и «Отмена» (без конспектов — без второй фразы); после — строка «Предмет удалён» с «Вернуть» на месте списка предметов; has_files — «В предмете есть файлы. Сначала уберите их.»",
+                "Создание предмета с именем удалённого: «Предмет с таким названием удалён» и «Вернуть»",
+                "Безличные тексты, тёмная тема, один акцент, клавиатура и aria (окно — dialog с ловушкой фокуса); тесты Go (problem-коды) и фронтенда",
+                "Файлы: paratech/desktop/internal/input/wails/library*.go, paratech/desktop/frontend/src/bindings/library.ts, src/pages/Subject*.tsx, src/pages/SubjectsParts.tsx, src/libraryView.ts, test/* (+ тесты)",
+                "Исполнитель: go-core (opus) для привязки, frontend для страницы"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/wails/..., GOOS=windows go vet ./desktop/..., golangci-lint",
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Владелец: docs/qa/tasks/TASK-289.md — предмет с двумя конспектами → «Удалить предмет» → предупреждение с числом 2 → «Удалить» → предмета и конспектов нет в «Базе знаний» → «Вернуть» → всё на месте"
+            ],
+            "dependencies": [
+                "TASK-288"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-290",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Конспекты · ядро] Текст конспекта редактируется на месте: ревизии TXT-материала (blob по sha256), происхождение file/typed/recognized, удаление одной части конспекта",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-27: полноценная правка текста конспекта и удаление отдельных частей; docs/adr/0027-own-notes.md «Editing the text»",
+                "Домен library/material: ReviseText(digest, size, expectedRevision, now) только для TXT; revision (0 — как импортировано или вставлено), origin file | typed | recognized, sourceMaterial (фото, к которому относится текст, необязательно); ревизии — сущность агрегата: сохранение в течение 10 минут после предыдущего заменяет последнюю ревизию, после паузы — новая, хранятся последние 20; RevertText(toRevision, now) делает прежний текст новой ревизией; лимит 1 МиБ; ошибки ErrNotEditable, ErrRevisionChanged, ErrTooBig",
+                "Домен library/note: RemovePart(id, now) → позиция, RestorePart(id, position, now); последняя часть — ErrLastPart; тесты на все ходы (ARCH-62)",
+                "Миграция desktop (следующий свободный номер на момент пуша; не параллельно с другой задачей с миграцией; пересборка materials NO TRANSACTION, как 0041, с проверкой foreign_key_check): revision INTEGER NOT NULL DEFAULT 0, origin TEXT NOT NULL DEFAULT 'file' CHECK IN ('file', 'typed', 'recognized'), source_material TEXT NULL; UNIQUE(sha256) → частичный уникальный индекс WHERE revision = 0; новая material_revisions(material_id CASCADE, rev, sha256, size, saved_at); прежние вставленные тексты (Paste) — origin typed, если их можно отличить надёжно, иначе file (решение в progress); docs/contracts/schema.sql — зеркало",
+                "sqlite: поиск дубля при импорте («уже добавлено») — только среди revision = 0; Save материала с ревизиями по версии; тесты на настоящем SQLite (две строки с одинаковым sha256 при revision > 0, roundtrip ревизий, старая строка)",
+                "Файлы: paratech/desktop/internal/domain/library/material/*, paratech/desktop/internal/domain/library/note/*, paratech/desktop/internal/adapters/sqlite/library*.go, notes*.go, migrate*.go, queries, sqlcgen, paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/tests/schema_test.go (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/library/... ./desktop/internal/adapters/sqlite/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-151",
+                "TASK-165"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-291",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Конспекты · ядро и привязка] Писать и править текст конспекта: новый текст, автосохранение с проверкой версии, «Вернуть предыдущую версию», удалить одну часть с отменой",
+            "acceptance_criteria": [
+                "docs/adr/0027-own-notes.md «Editing the text»; домен и миграция — TASK-290",
+                "cases/notes: WriteText(noteId | лекция, text, forPage?) — новая TXT-часть origin typed (как Paste; forPage — фото конспекта, тогда sourceMaterial = фото и часть сразу после него, follow-up TASK-166); SaveText(noteId, materialId, baseRevision, text) — blob по sha256 пишется до строки, затем ReviseText; другой baseRevision — changed, ничего не перезаписывается; RevertText(noteId, materialId, baseRevision); Revisions(materialId) — время и размер",
+                "RemovePart(noteId, materialId) и RestorePart (отмена); часть origin typed или recognized мягко удаляется вместе с выходом из конспекта, file остаётся в библиотеке (два шага, идемпотентны, сначала конспект); последняя часть — last_part (UI предлагает удалить конспект)",
+                "Blob, на который не ссылается ни материал, ни ревизия, удаляется вместе с кэшем текста (material.TextRef); «Удалить навсегда» удаляет и ревизии (follow-up TASK-150)",
+                "Правится только TXT-часть конспекта студента; DOCX/PPTX/PDF/фото — not_editable; текст — недоверенные данные, планировщику не уходит",
+                "Привязка NotesService: WriteText, SaveText → {problem: '' | changed | too_big | not_editable | removed | not_found | failed, revision, savedAt}, RevertText, Revisions, RemovePart, RestorePart, PartText(noteId, materialId) → {text, revision}; NotePart несёт editable, revision, origin, sourcePageId; frontend/src/bindings/notes.ts",
+                "Тесты: use case на фейках (сохранение, конфликт версии, слияние за 10 минут, откат, удаление части и отмена, последняя часть, сборка мусора blob), привязка, разбор в TS; сценарный тест: правка текста → поиск «Базы знаний» находит новое слово, не находит удалённое",
+                "Файлы: paratech/desktop/internal/cases/notes/*, paratech/desktop/internal/cases/library/* (только порт материалов для правки), paratech/desktop/internal/input/wails/notes*.go, paratech/desktop/internal/app/* (только подключение), paratech/desktop/frontend/src/bindings/notes.ts, frontend/test/*, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/notes/... ./desktop/internal/cases/library/... ./desktop/internal/input/wails/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/...",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-290"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-292",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Конспекты · UI] Редактор текста в «Мой конспект»: «Написать текст», правка на месте с автосохранением, «Вернуть предыдущую версию», удаление одной части",
+            "acceptance_criteria": [
+                "docs/adr/0027-own-notes.md «Editing the text»; привязка — TASK-291. Показ текста вне правки — обычным текстом; вопрос 11 (Markdown) меняет только показ, редактор тот же",
+                "«Написать текст» добавляет пустой редактор; у TXT-части «Редактировать» открывает поле на месте (textarea, обычный текст); счётчик лимита 1 МиБ",
+                "Автосохранение через 1,5 с без ввода и при уходе со страницы или закрытии поля; состояние строкой: «Сохраняется…», «Сохранено в 10:42», «Не сохранено — Повторить»; changed — «Текст изменён в другом окне» с «Загрузить новый» и «Сохранить мой поверх» (второе — новое сохранение с новой базой); текст студента не теряется",
+                "Отмена: своя Ctrl+Z поля при наборе; «Вернуть предыдущую версию» (список последних версий с временем); «Правка меняет копию в paratech, исходный файл не меняется» у части из файла",
+                "У каждой части «Удалить» с «Отменить»; последняя — «Удалить конспект» (как сейчас); у DOCX/PDF/фото «Редактировать» нет",
+                "Тексты только текстовыми узлами; безличные тексты, тёмная тема, один акцент, клавиатура и aria (live region для состояния сохранения); тесты фронтенда (дебаунс на поддельных часах, конфликт, откат, удаление и отмена, нет HTML-инъекции)",
+                "Файлы: paratech/desktop/frontend/src/pages/OwnNotes*.tsx, src/pages/NoteEditor.tsx (новый), src/ownNotesView.ts, src/pages/ownNotes.css, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Владелец: docs/qa/tasks/TASK-292.md — «Написать текст» → набрать абзац → закрыть и открыть приложение → текст на месте → поправить → «Вернуть предыдущую версию» → удалить часть → «Отменить»"
+            ],
+            "dependencies": [
+                "TASK-291"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-293",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Фото конспектов · адаптер] Windows OCR без CGO: adapters/winocr (WinRT через syscalls), русский язык распознавания, проверка осуществимости",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-27 (ADR-0027 вопрос 3): сейчас Windows OCR (Windows.Media.Ocr), локально и бесплатно; раздел «Recognition of photos and scans»; жёсткие правила 1, 2, 9",
+                "Сначала осуществимость: на машине разработчика (Windows 10 19045) из Go без CGO — RoInitialize, фабрика OcrEngine, TryCreateFromLanguage(ru), декодирование PNG/JPEG в SoftwareBitmap, RecognizeAsync с ожиданием IAsyncOperation; IID и порядок методов vtable — только из метаданных Windows SDK (.winmd) или документации Microsoft, источник записан в новом docs/refs/windows-ocr.md; ничего не выдумывать. Если без CGO и без новой зависимости это не получается надёжно — остановиться, описать в progress, что мешает и какие есть варианты (без выбора), задачу пометить blocked",
+                "Зависимость: только golang.org/x/sys/windows (уже есть); если нужна библиотека WinRT — остановиться и спросить (жёсткое правило 9)",
+                "adapters/winocr (//go:build windows, заглушка _other.go → ErrUnsupported): Read(ctx, image) → строки (текст, рамка) и версия движка; AvailableLanguages(); нет русского распознавателя — ErrNoLanguage (никогда не другой язык); изображение больше OcrEngine.MaxImageDimension — уменьшается (значение берётся из API); отмена контекста и предел времени на страницу; паника и ошибки HRESULT переводятся в ошибки адаптера (ARCH-32)",
+                "Тесты на Windows: фикстура печатного русского текста (PNG) распознаётся (проверка ключевых слов), английский-только — ErrNoLanguage (через подмену доступных языков), обрезанное изображение — ошибка без паники; на других ОС — заглушка; тест архитектуры (нет import \"C\")",
+                "Файлы: paratech/desktop/internal/adapters/winocr/* (новый, с testdata), docs/refs/windows-ocr.md (новый) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "На Windows: go test -race ./desktop/internal/adapters/winocr/... (настоящий запуск)",
+                "GOOS=windows go vet ./desktop/..., GOOS=linux go build ./desktop/..., golangci-lint run ./desktop/... и тест архитектуры"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-294",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Настройки] «ИИ распознаёт фото конспектов»: выключено или Windows (на компьютере); настройка в ядре, привязке и на странице «Настройки»",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-27 (ADR-0027 вопрос 3): настройка, потому что подстройка — ключевая черта; значение по умолчанию — ADR-0027 вопрос 14 (одна константа в домене settings; до ответа владельца задача не закрывается)",
+                "settings: NoteRecognition off | local (значение cloud — позже, TASK-168, не добавлять); миграция desktop (следующий свободный номер на момент пуша; не параллельно с другой задачей с миграцией): settings.note_recognition TEXT NOT NULL DEFAULT по ответу CHECK IN ('off', 'local'); docs/contracts/schema.sql — зеркало",
+                "Привязка настроек: чтение и запись значения с версией; страница «Настройки»: переключатель «ИИ распознаёт фото конспектов» с пояснением «Распознаёт Windows на этом компьютере, фото никуда не отправляются. Рукописный текст распознаётся хуже печатного.»; если в Windows нет русского языка распознавания (AvailableLanguages из TASK-293 через узкий интерфейс) — подсказка, как добавить",
+                "Тесты: домен, sqlite roundtrip, привязка, фронтенд",
+                "Файлы: paratech/desktop/internal/domain/settings/*, paratech/desktop/internal/cases/settings*/*, paratech/desktop/internal/adapters/sqlite/settings*.go, queries, sqlcgen, paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/internal/input/wails/settings*.go, paratech/desktop/internal/app/* (только подключение), paratech/desktop/frontend/src/bindings/settings.ts, src/pages/Settings*.tsx, test/* (+ тесты)",
+                "Исполнитель: go-core (opus) для ядра и привязки, frontend для страницы"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/settings/... ./desktop/internal/cases/... ./desktop/internal/adapters/sqlite/... ./desktop/internal/input/wails/... и тест архитектуры, sqlc generate без расхождений",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/...",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-293"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-295",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Конспекты · ядро] Заголовок раздела в попадании поиска: «ваш конспект · раздел „Ряды“» вместо «раздел N»",
+            "acceptance_criteria": [
+                "Follow-up TASK-155 (критерий не выполнен): у kb.Hit нет заголовка; ADR-0027 «Knowledge base, answers, tickets»",
+                "Домен knowledgebase: Search.Scan заполняет Heading у попадания ownNote с локатором section так же, как Passages (одна строка, ≤ 120 рун, без bidi); подпись берётся из answer.Source.OwnNoteLabel() через ownNoteLabel привязки",
+                "Привязка KnowledgeHit отдаёт подпись с заголовком; тесты домена и привязки (раздел с заголовком, без заголовка — «раздел N», заголовок с командой остаётся текстом)",
+                "Файлы: paratech/desktop/internal/domain/coursework/services/knowledgebase/*, paratech/desktop/internal/input/wails/knowledgebase.go (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/coursework/... ./desktop/internal/input/wails/... и тест архитектуры"
+            ],
+            "dependencies": [
+                "TASK-155"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-296",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Ответы · UI] Источники ответа в карточке агента: TS-привязка AnswerService.Answer и подписи «ваш конспект · стр. 3», открытие места",
+            "acceptance_criteria": [
+                "Follow-up TASK-155 и TASK-118/153: у AnswerService.Answer нет TS-привязки, карточка ответа не показывает источники; заготовки citationPlace / citationOpening в knowledgeView.ts",
+                "frontend/src/bindings/answers.ts: answer(id) с разбором источников (section, recording, noteId, materialId, locatorKind, locatorN, label, removed); неверный ответ — failed",
+                "Карточка ответа в панели агента: список источников под текстом — подпись (label) обычным текстом, щелчок открывает место через citationOpening (лекция и вкладка или «Мой конспект» на части); removed — «источник удалён», без щелчка; без записи карточка не падает",
+                "Безличные тексты, тёмная тема, один акцент, клавиатура и aria; тесты фронтенда (разбор, подписи, удалённый источник, открытие, нет HTML-инъекции)",
+                "Файлы: paratech/desktop/frontend/src/bindings/answers.ts (новый), src/agent/AgentCards.tsx (только карточка ответа), src/agentView.ts, src/knowledgeView.ts, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-155"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-297",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Билеты · привязка + UI] Подписи источников ответа на билет («ваш конспект · стр. 3») и текст «Нет в ваших лекциях и конспектах» из ядра",
+            "acceptance_criteria": [
+                "Follow-up TASK-155 и TASK-153: привязка билетов не несёт подписей источников и текста непокрытого, подсказка — константа фронтенда",
+                "input/wails (билеты): источники ответа на билет с label и removed (как AnswerSource), признак covered и текст непокрытого из ядра (homeworkdoc/tickets.go), без своей копии строки в TS; bindings ts",
+                "Экран билетов: подписи источников обычным текстом, «источник удалён», непокрытый — текст ядра; тест, закреплявший константу фронтенда, заменён (перечислить в progress)",
+                "Тесты Go и фронтенда",
+                "Файлы: paratech/desktop/internal/input/wails/tickets*.go, paratech/desktop/frontend/src/bindings/tickets.ts, src/ticketsView.ts, src/pages/Tickets*.tsx, test/* (+ тесты)",
+                "Исполнитель: go-core (opus) для привязки, frontend для экрана"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/wails/..., golangci-lint",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-155"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-298",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Конспекты · привязка + UI] Из попадания поиска и цитаты открыть нужное место внутри части: страницу, слайд, раздел или фрагмент",
+            "acceptance_criteria": [
+                "Follow-up TASK-155: попадание открывает лекцию и прокручивает к файлу, но не к странице N внутри него",
+                "NotesService.PartFragment(noteId, materialId, locatorKind, n) → {heading, text} — текст этого фрагмента из кэша текста (TASK-150); только по ID, путей нет; неверный локатор — not_found",
+                "«Мой конспект»: у части — «Показать текст» с переходом к фрагменту (стр. N / слайд N / раздел / фрагмент N), фрагмент выделен и в фокусе; переход из попадания и цитаты (focusMaterialId + локатор) открывает его сразу",
+                "Тексты только текстовыми узлами; тесты Go (каждый вид локатора, чужой материал, удалённый конспект) и фронтенда",
+                "Файлы: paratech/desktop/internal/cases/notes/* (только чтение фрагмента), paratech/desktop/internal/input/wails/notes*.go, paratech/desktop/frontend/src/bindings/notes.ts, src/pages/OwnNotes*.tsx, src/ownNotesView.ts, src/knowledgeView.ts, test/* (+ тесты)",
+                "Исполнитель: go-core (opus) для привязки, frontend для страницы"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/notes/... ./desktop/internal/input/wails/... и тест архитектуры",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-155",
+                "TASK-291"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-299",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Конспекты · ядро + привязка] Прошедшие пары предмета для «Добавить конспект прошедшей пары» (по недельному шаблону)",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на ADR-0027 вопрос 2 (К5: можно ли достраивать прошедшие пары по недельному шаблону только для подсказки). При «нет» задача не нужна, остаются записанные пары и дата",
+                "Follow-up TASK-155: нет чтения прошедших пар; сейчас — записанные пары без конспекта, дата или «без даты»; введённая дата всегда становится якорем day, даже если в этот день была пара",
+                "Use case чтения (в cases/notes или новый узкий, ARCH-20): PastSlots(subjectId, from, to) → сохранённые пары расписания этого предмета до сегодня и предполагаемые пары schedule/services/pastslots (TASK-157), помеченные «предполагаемая пара»; в расписание и Google не пишутся",
+                "Выбор сохранённой пары даёт якорь lesson, предполагаемой — day со снимком (дата, вид, название); привязка NotesService.PastSlots и разбор в notes.ts; UI «Добавить конспект прошедшей пары» показывает их списком",
+                "Тесты: use case на фейках (сохранённые и предполагаемые, будущие не попадают, предел 400), привязка, фронтенд",
+                "Файлы: paratech/desktop/internal/cases/notes/*, paratech/desktop/internal/input/wails/notes*.go, paratech/desktop/internal/app/* (только подключение), paratech/desktop/frontend/src/bindings/notes.ts, src/pages/KnowledgeLessonPage.tsx и диалог добавления, test/* (+ тесты)",
+                "Исполнитель: go-core (opus) для ядра и привязки, frontend для диалога"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/notes/... ./desktop/internal/input/wails/... и тест архитектуры",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-155",
+                "TASK-157"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-300",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Старые записи · привязка + UI] Пометка «импортирована» переживает перезапуск: origin в элементе активности и bindings/activity.ts",
+            "acceptance_criteria": [
+                "Follow-up TASK-162: пометка «импортирована» держится только в сессии — у RecordingItem нет origin; нужна и строкам TASK-163",
+                "Go: элемент активности записи несёт origin captured | imported (из recording.Origin); bindings/activity.ts разбирает его; строка «Записи и задачи» рисует «импортирована» из поля, сессионная пометка удалена",
+                "Тесты Go (оба значения) и фронтенда (после перезагрузки данных пометка есть)",
+                "Файлы: paratech/desktop/internal/input/wails/activity*.go (и источник элемента в cases, если поля там нет), paratech/desktop/frontend/src/bindings/activity.ts, src/pages/RecordingsPage.tsx, src/recordingsView.ts, test/* (+ тесты)",
+                "Исполнитель: go-core (opus) для поля, frontend для строки"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/wails/... ./desktop/internal/cases/... и тест архитектуры",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-162"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-301",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Старые записи · ядро] Длительность WAV с блоком data дальше 64 КиБ и текст «не удалось узнать длительность» с правильным форматом",
+            "acceptance_criteria": [
+                "Follow-up TASK-162; ADR-0027 «Old recordings» (поправка TASK-162 о файлах с неизвестной длительностью внесена в ADR)",
+                "WAV: блок data ищется через seekable-читатель дальше первых 64 КиБ (большие LIST/JUNK), с пределом числа блоков и без чтения всего файла; длительность из заголовка, как прежде",
+                "Текст ошибки неизвестной длительности называет формат файла («…в этом WAV-файле», «…в этом MP3-файле» и т. д.), а не «в WAV или MP3»; ошибка домена несёт формат, текст — в привязке",
+                "Тесты: WAV с JUNK 100 КиБ перед data, WAV без data — отказ, тексты для каждого формата; fuzz парсера остаётся зелёным",
+                "Файлы: paratech/desktop/internal/domain/recording/audioformat*.go, paratech/desktop/internal/cases/recordingimport/* (только передача формата), paratech/desktop/internal/input/wails/recordingimport.go, paratech/desktop/frontend/src/bindings/recordingImport.ts (только текст), test/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/recording/... ./desktop/internal/cases/recordingimport/... ./desktop/internal/input/wails/... и тест архитектуры",
+                "npm --prefix paratech/desktop/frontend run test"
+            ],
+            "dependencies": [
+                "TASK-162"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-302",
+            "category": "ui",
+            "priority": "low",
+            "description": "[Старые записи · UI] Доступность панели импорта записи: фокус при открытии, aria-controls, переключатель режима недоступен во время работы",
+            "acceptance_criteria": [
+                "Follow-up TASK-162 (замечания ревью low)",
+                "При открытии панели «Импортировать запись» фокус переходит в неё, при закрытии — обратно на кнопку; у кнопки — aria-controls и aria-expanded; переключатель «Пара из расписания / Дата и предмет» недоступен, пока идёт импорт; отступы блока rec-start в RecordingsPage выровнены",
+                "Тесты фронтенда",
+                "Файлы: paratech/desktop/frontend/src/pages/RecordingsPage.tsx, панель импорта записи (src/pages/RecordingImport*.tsx или где она лежит), test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-162"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-303",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Старые записи · ядро] Импорт записи: уборка осиротевших копий при запуске, дубликат до полного копирования, doc.go localfile",
+            "acceptance_criteria": [
+                "Follow-ups TASK-161/162; ADR-0027 «Old recordings», ADR-0018",
+                "При запуске: файл в recordings/, у которого нет строки записи (сбой между копированием и сохранением строки), удаляется через Storage Manager; только файлы импорта по шаблону имени, старше 10 минут; записанные захватом не трогаются; тест",
+                "Дубликат (тот же sha256 у уже импортированной записи) определяется до полного копирования: сначала sha256 исходника потоково (без копии), затем копия; тот же файл дважды — та же запись без второй копии на диске",
+                "adapters/localfile/doc.go описывает SeekReader и Originals.Open как сейчас",
+                "Файлы: paratech/desktop/internal/cases/recordingimport/*, paratech/desktop/internal/adapters/localfile/*, paratech/desktop/internal/app/* (только вызов уборки при запуске), paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/recordingimport/... ./desktop/internal/adapters/localfile/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-162"
             ],
             "status": "pending"
         }
