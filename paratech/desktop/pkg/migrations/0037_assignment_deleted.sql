@@ -1,5 +1,5 @@
--- «Удалить» of any assignment is a soft delete (ADR-0029, addendum 2026-10-27; TASK-228): the row stays, hidden from
--- every reader, and «Вернуть» brings it back. A deleted extracted row is also the tombstone reprocessing never revives.
+-- Deleting any assignment is a soft delete (ADR-0029, addendum 2026-10-27; TASK-228): the row stays, hidden from
+-- every reader, and a restore brings it back. A deleted extracted row is also the tombstone reprocessing never revives.
 --
 -- The statements between the goose Up and Down markers are mirrored VERBATIM at the end of docs/contracts/schema.sql
 -- (TestMigrationMatchesContractSchema).

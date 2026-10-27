@@ -18,14 +18,24 @@ const (
 // so does a deleted one, which every reader skips (ADR-0029: the agent gets unknown_id), and it wraps
 // assignment.ErrDeleted as well for the callers that tell the two apart.
 func (s *Service) Assignment(ctx context.Context, id shared.AssignmentID) (AssignmentView, error) {
-	a, err := s.assignments.Get(ctx, id)
+	a, err := liveAssignment(ctx, s.assignments, id)
 	if err != nil {
 		return AssignmentView{}, err
 	}
-	if a.Deleted() {
-		return AssignmentView{}, fmt.Errorf("assignment %s: %w: %w", id, shared.ErrNotFound, assignment.ErrDeleted)
-	}
 	return s.view(ctx, s.lessons, a)
+}
+
+// liveAssignment reads assignment id for a reader that must not see a deleted one: a deleted one wraps both
+// shared.ErrNotFound and assignment.ErrDeleted, as Service.Assignment.
+func liveAssignment(ctx context.Context, repo AssignmentRepository, id shared.AssignmentID) (*assignment.Assignment, error) {
+	a, err := repo.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if a.Deleted() {
+		return nil, fmt.Errorf("assignment %s: %w: %w", id, shared.ErrNotFound, assignment.ErrDeleted)
+	}
+	return a, nil
 }
 
 // LessonLabel returns what an assignment shows of its lesson (the subject and the teacher), for the title page of a

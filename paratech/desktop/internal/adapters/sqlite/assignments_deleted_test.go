@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/assignment"
+	"paratech/desktop/internal/domain/shared"
 )
 
 // A soft-deleted assignment (ADR-0029) stores deleted_at, reads back the same by id and by source (the tombstone of
@@ -66,6 +67,48 @@ func TestDeletedAssignmentRoundtripAndReaders(t *testing.T) {
 	}
 	if list, err := e.assignments.ListByTranscript(ctx, "t1"); err != nil || len(list) != 2 {
 		t.Fatalf("ListByTranscript after the restore = %v, %v", list, err)
+	}
+}
+
+// A soft-deleted assignment found in a material is read back by its source (the tombstone of a new homework search)
+// and skipped by ListByMaterial.
+func TestDeletedMaterialAssignment(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	if err := NewMaterialRepository(db).Save(ctx, newLibMaterial(t, "m1", "текст")); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewAssignmentRepository(db)
+	var stored []*assignment.Assignment
+	for i, id := range []shared.AssignmentID{"am0", "am1"} {
+		d, err := assignment.NewDetails("Задача "+string(id), "", time.Time{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, err := assignment.NewExtracted(assignment.Spec{
+			ID: id, Origin: assignment.Origin{Material: "m1", Index: i}, PromptVersion: 1, Details: d,
+		}, libT0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Save(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+		stored = append(stored, a)
+	}
+	gone := stored[0]
+	if err := gone.Delete(libT0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, gone); err != nil {
+		t.Fatal(err)
+	}
+
+	if src, err := repo.GetByMaterialSource(ctx, "m1", 0); err != nil || !src.Deleted() || src.State() != gone.State() {
+		t.Fatalf("GetByMaterialSource of the tombstone = %v, %v", src, err)
+	}
+	list, err := repo.ListByMaterial(ctx, "m1")
+	if err != nil || len(list) != 1 || list[0].ID() != "am1" {
+		t.Fatalf("ListByMaterial = %v, %v; want am1 only", list, err)
 	}
 }
 

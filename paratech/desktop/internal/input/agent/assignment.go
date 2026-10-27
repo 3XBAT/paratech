@@ -118,6 +118,31 @@ func (a *Actions) observeAdded(ctx context.Context, in action.Intent) (action.Ob
 	}, nil
 }
 
+// namesDeleted reports whether an ID argument of call (plan steps aside) names an assignment the student deleted:
+// every tool then answers unknown_id before its use case runs, as if the assignment never was (ADR-0029). Any other
+// read error is left to the tool.
+func (t tools) namesDeleted(ctx context.Context, call values.Call) bool {
+	if t.actions == nil {
+		return false
+	}
+	args := call.Args()
+	for _, name := range args.Names() {
+		refs := args.IDs(name)
+		if r, ok := args.ID(name); ok {
+			refs = append(refs, r)
+		}
+		for _, r := range refs {
+			if r.Kind() != values.KindAssignment {
+				continue
+			}
+			if _, err := t.actions.assignments.Assignment(ctx, shared.AssignmentID(r.ID())); errors.Is(err, assignment.ErrDeleted) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // actionLine adds to the action line of create_assignment the assignment as the local data has it: its title, library
 // subject and deadline (ADR-0029, as the lines of a reply). Nothing read here goes to the planner or the log; when the
 // assignment cannot be read (or is gone) the line is shown without it.

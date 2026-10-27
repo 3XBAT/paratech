@@ -110,7 +110,8 @@ type State struct {
 	DeletedAt     time.Time // zero: not deleted
 }
 
-// Restore rebuilds a stored assignment without side effects; it only checks that the state is consistent.
+// Restore rebuilds a stored assignment from its State (the repositories' path), deleted or not, without side
+// effects; it only checks that the state is consistent. It is not «Вернуть»: that is (*Assignment).Restore.
 func Restore(s State) (*Assignment, error) {
 	if s.Version < 1 {
 		return nil, fmt.Errorf("%w: stored version %d", ErrInvalidAssignment, s.Version)
@@ -253,7 +254,8 @@ func (a *Assignment) Delete(now time.Time) error {
 	return nil
 }
 
-// Restore is «Вернуть»: the deleted assignment shows again as it was. One that is not deleted wraps ErrNotDeleted.
+// Restore is «Вернуть», the undo of Delete (not the package-level Restore, which rebuilds a stored State): the deleted
+// assignment shows again as it was. One that is not deleted returns ErrNotDeleted.
 func (a *Assignment) Restore(now time.Time) error {
 	if !a.Deleted() {
 		return ErrNotDeleted

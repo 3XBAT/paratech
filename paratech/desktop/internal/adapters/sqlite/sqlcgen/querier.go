@@ -12,7 +12,7 @@ import (
 type Querier interface {
 	// What in progress keeps the soft delete of an assignment from going through (ADR-0029): a delivery that may still go out or
 	// may have gone out unseen, a work being triaged or written, or an unfinished job (draft generation, writing) whose
-	// payload names it. The caller passes the status and type lists as JSON arrays (see AssignmentInUse).
+	// payload names it. The caller passes the status and type lists as JSON arrays (see AssignmentRepository.Busy).
 	AssignmentBusy(ctx context.Context, arg AssignmentBusyParams) (int64, error)
 	// What references an assignment the student added before the Undo of its creation removes it (ADR-0029). works
 	// cascade on delete and proposals have no foreign key, so both are checked here; the caller passes the proposal

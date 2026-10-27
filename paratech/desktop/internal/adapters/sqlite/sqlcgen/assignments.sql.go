@@ -33,7 +33,7 @@ type AssignmentBusyParams struct {
 
 // What in progress keeps the soft delete of an assignment from going through (ADR-0029): a delivery that may still go out or
 // may have gone out unseen, a work being triaged or written, or an unfinished job (draft generation, writing) whose
-// payload names it. The caller passes the status and type lists as JSON arrays (see AssignmentInUse).
+// payload names it. The caller passes the status and type lists as JSON arrays (see AssignmentRepository.Busy).
 func (q *Queries) AssignmentBusy(ctx context.Context, arg AssignmentBusyParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, assignmentBusy,
 		arg.ID,

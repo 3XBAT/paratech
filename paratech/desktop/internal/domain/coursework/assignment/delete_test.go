@@ -103,7 +103,7 @@ func TestRestoreKeepsDeletedAt(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := a.State()
-	st.Version = 2
+	st.Version = 2 // as the repository stores it after the create and the delete; Restore refuses version 0
 	got, err := Restore(st)
 	if err != nil {
 		t.Fatal(err)
