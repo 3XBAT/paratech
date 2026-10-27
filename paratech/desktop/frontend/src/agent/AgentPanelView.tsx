@@ -1,8 +1,35 @@
 import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
-import { type AgentContext, composerKey, entryModel, inputPlacement, texts } from "../agentView.js";
+import { type AgentContext, chatTexts, composerKey, type EarlierItem, entryModel, inputPlacement, texts } from "../agentView.js";
 import { blockingEntry, draftsFor, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
 import { Icon } from "../ui/Icon.js";
 import { AgentRequest, type CardActions } from "./AgentCards.js";
+import { ChatBar, type ChatBarProps } from "./ChatBar.js";
+
+/** Earlier requests of the open chat: text only (the student's words, the mentions as pills, the reply line). */
+function EarlierRequests(props: { items: EarlierItem[] }) {
+  if (props.items.length === 0) {
+    return null;
+  }
+  return (
+    <section className="ag-earlier" aria-label={chatTexts.earlierCaption}>
+      {props.items.map((it) => (
+        <div className="ag-req ag-earlier-req" key={it.key}>
+          <p className="ag-user">{it.text}</p>
+          {it.mentions.length > 0 && (
+            <ul className="ag-pills" aria-label="Упоминания">
+              {it.mentions.map((m) => (
+                <li key={m.key} className="ag-pill small">
+                  {m.label}
+                </li>
+              ))}
+            </ul>
+          )}
+          {it.reply !== "" && <p className="ag-earlier-reply ag-text small muted">{it.reply}</p>}
+        </div>
+      ))}
+    </section>
+  );
+}
 
 export interface AgentPanelViewProps {
   state: PanelState;
@@ -15,6 +42,10 @@ export interface AgentPanelViewProps {
   onSubmit(): void;
   onRemoveContext(): void;
   actionsFor(entry: Entry): CardActions;
+  /** The chat list of the header; absent: no chat controls. */
+  chat?: ChatBarProps;
+  /** Earlier requests of the open chat, as text. */
+  earlier?: EarlierItem[];
 }
 
 /**
@@ -27,10 +58,11 @@ export function AgentPanelView(props: AgentPanelViewProps) {
   const mode = panelMode(state);
   const entries = orderedEntries(state.entries);
   const last = entries.at(-1);
+  const earlier = props.earlier ?? [];
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: "end" });
-  }, [entries.length]);
+  }, [entries.length, earlier.length]);
 
   // A draft grows often: the panel follows it only when the reader is at the bottom, so reading above never jumps.
   const atBottom = useRef(true);
@@ -52,12 +84,13 @@ export function AgentPanelView(props: AgentPanelViewProps) {
   }, [inputRef, draft]);
 
   return (
-    <aside className={`ag ag-in-${inputPlacement(entries.length)}`} aria-label="Помощник paratech">
+    <aside className={`ag ag-in-${inputPlacement(entries.length + earlier.length)}`} aria-label="Помощник paratech">
       <header className="ag-head">
         <div className="ag-title">
           <span className="ag-name">{texts.title}</span>
           <kbd className="ag-kbd">{texts.hint}</kbd>
         </div>
+        {props.chat && <ChatBar {...props.chat} />}
       </header>
       <form
         className="ag-ask-form"
@@ -121,8 +154,9 @@ export function AgentPanelView(props: AgentPanelViewProps) {
           atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
         }}
       >
-        {entries.length === 0 && <p className="ag-empty muted">{texts.empty}</p>}
+        {entries.length === 0 && earlier.length === 0 && <p className="ag-empty muted">{texts.empty}</p>}
         {mode.staleNote !== "" && <p className="ag-stale small muted">{mode.staleNote}</p>}
+        <EarlierRequests items={earlier} />
         {entries.map((e) => (
           <AgentRequest
             key={e.key}
