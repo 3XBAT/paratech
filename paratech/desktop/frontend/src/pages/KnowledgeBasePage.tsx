@@ -13,10 +13,15 @@ import {
   checkQuery,
   errorText,
   exportResultLine,
-  hitFocus,
+  hitOpening,
+  isNoteOnly,
   type LessonFocus,
   idleFlight,
+  lecturesMeta,
   noFocus,
+  orderLectures,
+  type PastChoice,
+  pastLesson,
   type SearchFlight,
   searchDone,
   searchPauseMs,
@@ -25,8 +30,8 @@ import {
 } from "../knowledgeView";
 import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Input, ResultLine, type ResultKind } from "../ui/controls";
-import { HitList, LessonList, SubjectList } from "./KnowledgeParts";
-import { KnowledgeLessonPage } from "./KnowledgeLessonPage";
+import { AddPastNote, HitList, LessonList, SubjectList } from "./KnowledgeParts";
+import { KnowledgeLessonPage, NoteLecturePage } from "./KnowledgeLessonPage";
 
 type SearchOutcome =
   | { kind: "short" }
@@ -38,6 +43,8 @@ interface OpenLesson {
   lesson: KnowledgeLesson;
   focus: LessonFocus;
   editing: boolean;
+  /** The file of the student's notes to mark (a hit in them); "" for none. */
+  materialId: string;
 }
 
 // «База знаний» (TASK-091): the subjects with their lessons, the search over the whole base and the export of a
@@ -140,10 +147,15 @@ export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (as
     }
   }, [props.visit, runSearch]);
 
-  const openLesson = (lesson: KnowledgeLesson, focus: LessonFocus = noFocus, editing = false) => {
+  const openLesson = (lesson: KnowledgeLesson, focus: LessonFocus = noFocus, editing = false, materialId = "") => {
     changed.current = false;
-    setOpen({ lesson, focus, editing });
+    setOpen({ lesson, focus, editing, materialId });
   };
+
+  if (open !== null && isNoteOnly(open.lesson)) {
+    // No recording: the page reads nothing by a recording id.
+    return <NoteLecturePage key={open.lesson.key} lesson={open.lesson} materialId={open.materialId} onBack={() => setOpen(null)} />;
+  }
 
   if (open !== null) {
     return (
@@ -152,6 +164,7 @@ export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (as
         api={api}
         lesson={open.lesson}
         focus={open.focus}
+        materialId={open.materialId}
         editing={open.editing}
         onBack={() => {
           setOpen(null);
@@ -223,7 +236,14 @@ export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (as
         <SearchResults
           outcome={outcome}
           searching={searching}
-          onOpen={(l, hit: KnowledgeHit | null) => openLesson(l, hit === null ? noFocus : hitFocus(hit))}
+          onOpen={(l, hit: KnowledgeHit | null) => {
+            if (hit === null) {
+              openLesson(l);
+              return;
+            }
+            const o = hitOpening(hit);
+            openLesson(o.lesson, o.focus, false, o.materialId);
+          }}
         />
       ) : (
         <>
@@ -305,10 +325,11 @@ function SubjectView(props: {
   useEffect(() => {
     mounted.current = true;
     let stopped = false;
-    api.lessons(subject.key).then(
+    // Recorded and note-only lectures (the student's notes): a subject known only from notes loads the same way.
+    api.lectures(subject.key).then(
       (list) => {
         if (!stopped) {
-          setLessons(list);
+          setLessons(orderLectures(list));
         }
       },
       (err) => {
@@ -347,7 +368,7 @@ function SubjectView(props: {
     }
   }
 
-  const count = lessons === null ? subject : { lessons: lessons.length, latest: lessons[0]?.startedAt ?? "" };
+  const count = lessons === null ? subject : lecturesMeta(lessons);
   return (
     <section className="page kb">
       <div className="hw-back">
@@ -364,7 +385,7 @@ function SubjectView(props: {
           icon="down"
           busy={exporting}
           busyLabel="Сохранение…"
-          disabled={exporting || lessons === null || lessons.length === 0}
+          disabled={exporting || lessons === null || lessons.every(isNoteOnly)}
           onClick={() => void onExport()}
         >
           Экспорт в .md
@@ -382,6 +403,13 @@ function SubjectView(props: {
         <Banner kind="fail" role="alert">
           {error}
         </Banner>
+      )}
+      {lessons !== null && (
+        <AddPastNote
+          subject={subject}
+          lectures={lessons}
+          onChoose={(c: PastChoice) => props.onOpen(pastLesson(subject, c), false)}
+        />
       )}
       {lessons === null ? (
         error === "" && <p className="muted">Загрузка…</p>

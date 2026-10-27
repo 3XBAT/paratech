@@ -42,6 +42,8 @@ export interface OwnNotesModel {
   lines: ResultLine[];
   pasteOpen: boolean;
   pasteText: string;
+  /** The file a search hit or a citation opened the block at: marked and scrolled to once; "" for none. */
+  focusMaterialId?: string;
 }
 
 export interface OwnNotesActions {
@@ -202,7 +204,7 @@ function PartsList(props: {
       {viewing >= 0 && <PageViewer pages={pages} start={viewing} opener={opener} onClose={() => setViewing(-1)} />}
       <ol ref={list} className="own-parts" aria-label={t.partsLabel}>
           {rows.map((r, i) => (
-            <li key={r.materialId} className="own-part">
+            <li key={r.materialId} className={r.materialId === model.focusMaterialId ? "own-part kb-focus" : "own-part"}>
               {r.page !== null && (
                 <button
                   type="button"
@@ -315,6 +317,19 @@ export function OwnNotesView(props: { model: OwnNotesModel; actions: OwnNotesAct
   const limitId = `${pasteId}-limit`;
   const moved = useRef<{ materialId: string; dir: "up" | "down" } | null>(null);
   const undoFocused = useRef("");
+  const scrolled = useRef(false);
+
+  // The place a hit opened is scrolled to once, when the notes have loaded.
+  useEffect(() => {
+    if (scrolled.current || model.loading || !model.focusMaterialId) {
+      return;
+    }
+    const el = root.current?.querySelector(".kb-focus");
+    if (el) {
+      scrolled.current = true;
+      el.scrollIntoView({ block: "center" });
+    }
+  }, [model.loading, model.notes, model.focusMaterialId]);
 
   // Focus must not fall to the page when the pressed button turns off: it goes to the enabled one of the pair.
   useEffect(() => {
