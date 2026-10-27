@@ -869,3 +869,8 @@ ALTER TABLE subjects ADD COLUMN teacher_email TEXT NOT NULL DEFAULT '' CHECK (le
 -- Migration 0039.
 -- assignments: when the student deleted the assignment (ms); NULL while it is not deleted.
 ALTER TABLE assignments ADD COLUMN deleted_at INTEGER;
+
+-- Migration 0042.
+-- schedule_entries: the call link of the imported event (lesson.Content.CallLink) in the canonical form of
+-- values.CallLink; '' none. Untrusted input, re-checked on read; never written to Google Calendar.
+ALTER TABLE schedule_entries ADD COLUMN call_link TEXT NOT NULL DEFAULT '' CHECK (length(call_link) <= 2048);

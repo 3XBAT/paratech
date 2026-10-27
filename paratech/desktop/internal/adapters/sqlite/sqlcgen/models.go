@@ -313,6 +313,7 @@ type ScheduleEntry struct {
 	Subject                string
 	Kind                   string
 	Teacher                string
+	CallLink               string
 }
 
 type Setting struct {

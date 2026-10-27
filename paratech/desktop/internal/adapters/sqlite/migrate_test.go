@@ -89,8 +89,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != materialImagesVersion {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, materialImagesVersion)
+	if err != nil || first != lessonCallLinkVersion {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, lessonCallLinkVersion)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
@@ -251,8 +251,11 @@ func TestMigrationToVersion8DropsCompletionNotices(t *testing.T) {
 	}
 }
 
-// materialImagesVersion is the migration that rebuilds materials for photos (TASK-165), the newest one.
+// materialImagesVersion is the migration that rebuilds materials for photos (TASK-165).
 const materialImagesVersion = 41
+
+// lessonCallLinkVersion is the migration that adds the call link of a lesson (TASK-256), the newest one.
+const lessonCallLinkVersion = 42
 
 // The rebuild of materials keeps every row and every reference to them (lesson links, note parts), leaves foreign
 // keys on, takes photos only with 'no_text', and goes back down dropping the photos.
