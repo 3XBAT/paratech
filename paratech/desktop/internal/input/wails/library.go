@@ -103,6 +103,8 @@ type LibraryUseCase interface {
 	RemoveMaterial(ctx context.Context, id shared.MaterialID) (*material.Material, error)
 	RestoreMaterial(ctx context.Context, id shared.MaterialID) (*material.Material, error)
 	SuggestSubjects(ctx context.Context) ([]subjectmatch.Suggestion, error)
+	SetTeacher(ctx context.Context, id shared.SubjectID, name, email string, expectedVersion int64) (*subject.Subject, error)
+	ClearTeacher(ctx context.Context, id shared.SubjectID, expectedVersion int64) (*subject.Subject, error)
 }
 
 // MaterialFilePicker shows the native open dialog for a file of the library. It returns the chosen path, or "" when
@@ -132,7 +134,8 @@ type LibraryFolder struct {
 }
 
 // LibrarySubject is a subject of the library. Semester is the code ("2026-autumn"), SemesterLabel the text shown
-// («Осень 2026»). Names are typed text: plain text only.
+// («Осень 2026»). Names are typed text: plain text only. Version is passed back to the teacher calls; Teacher is null
+// when none is set.
 type LibrarySubject struct {
 	ID            string          `json:"id"`
 	Name          string          `json:"name"`
@@ -140,6 +143,8 @@ type LibrarySubject struct {
 	Semester      string          `json:"semester"`
 	SemesterLabel string          `json:"semesterLabel"`
 	Folders       []LibraryFolder `json:"folders"`
+	Version       int64           `json:"version"`
+	Teacher       *LibraryTeacher `json:"teacher"`
 }
 
 // LibraryMaterial is a file of the library. Name is the original file name, shown only (plain text). Type is "docx",
@@ -450,7 +455,10 @@ func (s *LibraryService) fail(op string, err error) error {
 func librarySubject(sub *subject.Subject) LibrarySubject {
 	out := LibrarySubject{
 		ID: string(sub.ID()), Name: sub.Name().String(), Aliases: []string{}, Semester: sub.Semester().Code(),
-		SemesterLabel: sub.Semester().Label(), Folders: []LibraryFolder{},
+		SemesterLabel: sub.Semester().Label(), Folders: []LibraryFolder{}, Version: sub.Version(),
+	}
+	if t := sub.Teacher(); !t.IsZero() {
+		out.Teacher = &LibraryTeacher{Name: t.Name(), Email: t.Email()}
 	}
 	for _, a := range sub.Aliases() {
 		out.Aliases = append(out.Aliases, a.String())
