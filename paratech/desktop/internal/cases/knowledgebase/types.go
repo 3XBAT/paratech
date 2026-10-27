@@ -19,9 +19,13 @@ type SearchResult struct {
 }
 
 // Deps are the ports the Service needs. Log is optional; without Library lessons are grouped by their free subject
-// string only (as before ADR-0024).
+// string only (as before ADR-0024). Notes, NoteTexts and Subjects come together or not at all: without them the base
+// has no notes of the student (as before ADR-0027).
 type Deps struct {
 	Library      SubjectResolver
+	Notes        NoteStore
+	NoteTexts    NoteTextReader
+	Subjects     SubjectLister
 	Lessons      LessonStore
 	Recordings   RecordingRepository
 	Schedule     LessonReader

@@ -142,7 +142,8 @@ func NewKnowledgeBaseService(uc KnowledgeUseCase, picker KnowledgeFilePicker, lo
 	return &KnowledgeBaseService{uc: uc, picker: picker, log: log}
 }
 
-// Subjects lists the subjects with their lesson counts; «Без предмета» comes last.
+// Subjects lists the subjects with their lesson counts; «Без предмета» comes last. The page lists recorded lessons
+// only (the student's notes wait for their page, TASK-155), so a subject known only from notes is left out.
 func (s *KnowledgeBaseService) Subjects(ctx context.Context) ([]KnowledgeSubject, error) {
 	list, err := s.uc.Subjects(ctx)
 	if err != nil {
@@ -150,6 +151,9 @@ func (s *KnowledgeBaseService) Subjects(ctx context.Context) ([]KnowledgeSubject
 	}
 	out := make([]KnowledgeSubject, 0, len(list))
 	for _, sub := range list {
+		if sub.Lessons == 0 {
+			continue
+		}
 		out = append(out, KnowledgeSubject{
 			Key: sub.Key, Name: sub.Name, Lessons: sub.Lessons, Latest: timeText(sub.Latest), NoSubject: sub.NoSubject,
 		})
@@ -183,7 +187,8 @@ func (s *KnowledgeBaseService) Lesson(ctx context.Context, recordingID string) (
 	return knowledgeLesson(l), nil
 }
 
-// Search finds query in the titles, summaries, lecture texts and transcripts of the whole base. Works offline.
+// Search finds query in the titles, summaries, lecture texts and transcripts of the whole base. Works offline. Hits
+// in the student's notes and in lectures without a recording are left out until the page shows them (TASK-155).
 func (s *KnowledgeBaseService) Search(ctx context.Context, query string) (KnowledgeSearchResult, error) {
 	res, err := s.uc.Search(ctx, query)
 	if err != nil {
@@ -191,6 +196,9 @@ func (s *KnowledgeBaseService) Search(ctx context.Context, query string) (Knowle
 	}
 	out := KnowledgeSearchResult{Hits: make([]KnowledgeHit, 0, len(res.Hits)), Truncated: res.Truncated}
 	for _, h := range res.Hits {
+		if h.Section == kb.SectionOwnNote || h.Recording == "" {
+			continue
+		}
 		hit := KnowledgeHit{
 			RecordingID: string(h.Recording), Section: string(h.Section), Index: h.Index, StartMs: h.StartMs,
 			Before: h.Snippet.Before, Match: h.Snippet.Match, After: h.Snippet.After, Lesson: knowledgeLesson(h.Lesson),

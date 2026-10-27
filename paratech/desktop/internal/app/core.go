@@ -306,9 +306,10 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	handlers.works = works
 
 	// The knowledge base reads the same local results at query time and groups lessons by library subject; dates of
-	// the export in the local time zone.
+	// the export in the local time zone. The student's notes (ADR-0027) are read with their texts through the library.
 	knowledge, err := knowledgebase.New(knowledgebase.Deps{
-		Library: lib, Lessons: sqlite.NewKnowledgeBase(db), Recordings: recordings, Schedule: lessons, Transcripts: transcripts,
+		Library: lib, Notes: sqlite.NewNoteRepository(db), NoteTexts: lib, Subjects: lib,
+		Lessons: sqlite.NewKnowledgeBase(db), Recordings: recordings, Schedule: lessons, Transcripts: transcripts,
 		Artifacts: store, Summaries: summaries, LectureTexts: lectureTexts, Writer: textfile.New(), Clock: e.local, Log: log,
 	})
 	if err != nil {

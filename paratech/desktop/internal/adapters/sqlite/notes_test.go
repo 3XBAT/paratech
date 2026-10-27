@@ -237,6 +237,22 @@ func TestNoteLists(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got[0].State(), notes[2].State()) {
 		t.Fatalf("listed note = %+v, want %+v", got[0].State(), notes[2].State())
 	}
+
+	// ListAll lists every subject by date, undated last; a row that cannot be restored is reported, not fatal.
+	all, unreadable, err := repo.ListAll(ctx)
+	if err != nil || len(unreadable) != 0 || !reflect.DeepEqual(ids(all), []shared.NoteID{"early", "other", "late", "lesson2", "undated"}) {
+		t.Fatalf("ListAll = %v, %v, %v", ids(all), unreadable, err)
+	}
+	if !reflect.DeepEqual(all[0].State(), notes[2].State()) {
+		t.Fatalf("ListAll note = %+v, want %+v", all[0].State(), notes[2].State())
+	}
+	if _, err := db.sql.ExecContext(ctx, "UPDATE notes SET title = ' padded' WHERE id = 'late'"); err != nil {
+		t.Fatal(err)
+	}
+	all, unreadable, err = repo.ListAll(ctx)
+	if err != nil || !reflect.DeepEqual(unreadable, []shared.NoteID{"late"}) || len(all) != 4 {
+		t.Fatalf("ListAll with a broken row = %v, %v, %v", ids(all), unreadable, err)
+	}
 }
 
 // The anchor carries no foreign key: purging the recording (ADR-0018) or the lesson of the schedule leaves the notes

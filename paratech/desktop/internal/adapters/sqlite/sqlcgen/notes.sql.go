@@ -132,6 +132,48 @@ func (q *Queries) ListNoteParts(ctx context.Context, noteID string) ([]string, e
 	return items, nil
 }
 
+const listNotes = `-- name: ListNotes :many
+SELECT id, subject_id, title, anchor_kind, recording_id, lesson_id, anchor_date, lesson_kind, lesson_title, status, version, created_at, updated_at FROM notes ORDER BY anchor_date IS NULL, anchor_date, created_at, id
+`
+
+// Every note, for the knowledge base (TASK-152); ordered as ListNotesOfSubject.
+func (q *Queries) ListNotes(ctx context.Context) ([]Note, error) {
+	rows, err := q.db.QueryContext(ctx, listNotes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Note{}
+	for rows.Next() {
+		var i Note
+		if err := rows.Scan(
+			&i.ID,
+			&i.SubjectID,
+			&i.Title,
+			&i.AnchorKind,
+			&i.RecordingID,
+			&i.LessonID,
+			&i.AnchorDate,
+			&i.LessonKind,
+			&i.LessonTitle,
+			&i.Status,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNotesOfLesson = `-- name: ListNotesOfLesson :many
 SELECT id, subject_id, title, anchor_kind, recording_id, lesson_id, anchor_date, lesson_kind, lesson_title, status, version, created_at, updated_at FROM notes WHERE lesson_id = ?1 ORDER BY created_at, id
 `

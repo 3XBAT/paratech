@@ -8,7 +8,10 @@ import (
 	"paratech/desktop/internal/domain/coursework/lecturetext"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
 	"paratech/desktop/internal/domain/coursework/summary"
+	"paratech/desktop/internal/domain/library/material"
+	"paratech/desktop/internal/domain/library/note"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
+	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
@@ -77,6 +80,26 @@ type TextWriter interface {
 // stored string is rewritten.
 type SubjectResolver interface {
 	ResolveSubjects(ctx context.Context, names []string) (map[string]subjectmatch.Match, error)
+}
+
+// NoteStore lists the student's own notes (ADR-0027). Implemented by the sqlite adapter.
+type NoteStore interface {
+	// ListAll returns every note in any status; a row that cannot be read is left out and its id goes to unreadable.
+	ListAll(ctx context.Context) (notes []*note.Note, unreadable []shared.NoteID, err error)
+}
+
+// NoteTextReader reads the text of a part of a note: a material of the library, checked against its sha256, from the
+// text cache or extracted again. Implemented by cases/library (MaterialText), wired by the app. Errors wrap the domain
+// sentinels: shared.ErrNotFound, material.ErrRemoved, material.ErrTextNotExtracted, material.ErrDamaged,
+// material.ErrTextUnreadable.
+type NoteTextReader interface {
+	MaterialText(ctx context.Context, id shared.MaterialID) (*material.Material, material.Text, error)
+}
+
+// SubjectLister lists the subjects of the library, which name the subject of a note. Implemented by cases/library,
+// wired by the app.
+type SubjectLister interface {
+	Subjects(ctx context.Context) ([]*subject.Subject, error)
 }
 
 // Clock supplies the current time; its location is the one exported dates are shown in (ARCH-24). The app wires the
