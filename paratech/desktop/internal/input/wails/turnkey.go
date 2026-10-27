@@ -67,6 +67,13 @@ const (
 	turnkeyProblemGone    = "source_gone"
 )
 
+// turnkeyLastProblems maps the stored problem of a work (TASK-226) to the same codes.
+var turnkeyLastProblems = map[work.Problem]string{
+	work.ProblemOffline: turnkeyProblemOffline, work.ProblemQuota: turnkeyProblemQuota,
+	work.ProblemRefused: turnkeyProblemRefused, work.ProblemNoText: turnkeyProblemNoText,
+	work.ProblemSourceGone: turnkeyProblemGone,
+}
+
 // turnkeyMessages are the texts of the problems.
 var turnkeyMessages = map[string]string{
 	turnkeyProblemOffline: "Нет связи с paratech: разбор не завершён. Повторите позже.",
@@ -124,6 +131,10 @@ type TurnkeyUseCase interface {
 // the agent's words: plain text only) and SubjectID its library subject ("" none, or a subject removed since: the
 // paper goes to «Входящие»). Sendable is true for a work of an assignment only: «Отправить преподавателю» is offered
 // for it alone (work.Sendable).
+//
+// Problem and Message are of this call only. LastProblem (TASK-226) is the stored problem of the last reader call, kept
+// across restarts while the call is due or after the work failed ("" none, or after an answer; codes as Problem), and
+// LastMessage its text. SentAt is when the work was last sent to the teacher (RFC 3339 in UTC, "" never).
 type TurnkeyWork struct {
 	ID                string            `json:"id"`
 	AssignmentID      string            `json:"assignmentId"`
@@ -148,6 +159,9 @@ type TurnkeyWork struct {
 	Version           int64             `json:"version"`
 	Problem           string            `json:"problem"` // "", offline, quota, refused, no_text, source_gone
 	Message           string            `json:"message"`
+	LastProblem       string            `json:"lastProblem"`
+	LastMessage       string            `json:"lastMessage"`
+	SentAt            string            `json:"sentAt"`
 }
 
 // TurnkeyWriting is the writing of a work: the outline the student edits and approves, the progress «Раздел N из M»
@@ -574,8 +588,10 @@ func workView(v turnkey.View) TurnkeyWork {
 		Status: string(v.Status), Round: v.Round, QuestionRound: v.QuestionRound, Questions: []TurnkeyQuestion{},
 		HasCard: v.HasAnswer, Edited: []string{}, Feasibility: string(v.Feasibility),
 		FeasibilityReason: v.FeasibilityReason, Partial: v.Partial, Assumptions: nonNilStrings(v.Assumptions),
-		Answered: []TurnkeyAnswered{}, Version: v.Version,
+		Answered: []TurnkeyAnswered{}, Version: v.Version, LastProblem: turnkeyLastProblems[v.LastProblem],
+		SentAt: rfc3339(v.SentAt),
 	}
+	out.LastMessage = turnkeyMessages[out.LastProblem]
 	for _, q := range v.Questions {
 		out.Questions = append(out.Questions, TurnkeyQuestion{
 			Kind: string(q.Kind), Text: q.Text, Options: nonNilStrings(q.Options), Default: q.DefaultOption,

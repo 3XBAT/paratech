@@ -802,8 +802,14 @@ ALTER TABLE settings ADD COLUMN free_work_notice INTEGER NOT NULL DEFAULT 1 CHEC
 -- the library name, never model text); '' for the other kinds, before validation and for sends stored before 0034.
 ALTER TABLE proposals ADD COLUMN attachment_name TEXT NOT NULL DEFAULT '' CHECK (length(attachment_name) <= 128);
 
+-- Migration 0035.
+-- works: the problem of the last reader call (work.Problem, a code, never model text); NULL after an answer. The time
+-- the delivery of a send of the work was last SENT (ms); NULL if never.
+ALTER TABLE works ADD COLUMN last_problem TEXT CHECK (last_problem IS NULL OR last_problem IN ('offline', 'quota', 'refused', 'no_text', 'source_gone'));
+ALTER TABLE works ADD COLUMN sent_at INTEGER;
+
 -- ---------------------------------------------------------------------------------------------------------------
--- notes (migration 0035): aggregate library/note. A subject that holds a note cannot be deleted (RESTRICT). The anchor
+-- notes (migration 0036): aggregate library/note. A subject that holds a note cannot be deleted (RESTRICT). The anchor
 -- is one of recording (recording_id), lesson (lesson_id), day or undated; recording_id and lesson_id carry NO foreign
 -- key, so the purge of a recording (ADR-0018) and a re-import of the schedule never touch a note: a gone recording or
 -- lesson falls back to the day of the snapshot when read. The snapshot is anchor_date (local YYYY-MM-DD, NULL only for

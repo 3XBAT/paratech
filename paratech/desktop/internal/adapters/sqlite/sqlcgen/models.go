@@ -457,6 +457,8 @@ type Work struct {
 	Version        int64
 	CreatedAt      int64
 	UpdatedAt      int64
+	LastProblem    sql.NullString
+	SentAt         sql.NullInt64
 }
 
 type WorkRound struct {

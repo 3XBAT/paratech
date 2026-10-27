@@ -5,7 +5,7 @@
 
 -- +goose Up
 -- ---------------------------------------------------------------------------------------------------------------
--- notes (migration 0035): aggregate library/note. A subject that holds a note cannot be deleted (RESTRICT). The anchor
+-- notes (migration 0036): aggregate library/note. A subject that holds a note cannot be deleted (RESTRICT). The anchor
 -- is one of recording (recording_id), lesson (lesson_id), day or undated; recording_id and lesson_id carry NO foreign
 -- key, so the purge of a recording (ADR-0018) and a re-import of the schedule never touch a note: a gone recording or
 -- lesson falls back to the day of the snapshot when read. The snapshot is anchor_date (local YYYY-MM-DD, NULL only for
