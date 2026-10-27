@@ -7,8 +7,9 @@
 // separator, a quote or an environment variable is refused. OpenAuthPage is the same launcher for an OAuth
 // authorization page, whose query is checked byte by byte instead (unreserved characters, '=', '&', "%XX").
 // explorer.exe opens a folder instead of the browser for any URL with a query, so an authorization page is written to
-// a temporary Internet Shortcut (.url) file and explorer.exe opens that file. explorer.exe stays the launcher in both
-// cases so the browser is not started in our process tree (ADR-0002: whole-computer capture excludes our tree).
+// a temporary Internet Shortcut (.url) file and explorer.exe opens that file. OpenCallLink takes the same .url path
+// for the link of a lesson call (ADR-0032). explorer.exe stays the launcher in all cases so the browser is not started
+// in our process tree (ADR-0002: whole-computer capture excludes our tree).
 package weblink
 
 import (
