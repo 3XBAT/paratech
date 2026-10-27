@@ -121,6 +121,7 @@ type core struct {
 	driver    *agentloop.Driver
 	panel     *wails.AgentPanel    // the Driver's updates as UI events
 	freeWorks *agentloop.FreeWorks // the free-work cards (TASK-188)
+	mentions  mentionObjects       // whether a mentioned object exists, for the requests and the «@» search
 
 	// cleanups remove what a crashed run left behind; they run at the start, before any job or recording writes.
 	cleanups []cleanup
@@ -479,6 +480,10 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		// Life is set by openCore: the requests live as long as the app.
 		Agent: wails.AgentCore{
 			Driver: c.driver, Panel: c.panel, Journal: c.journal, Clock: e.clock, Chats: c.chats, FreeWork: c.freeWorks,
+			// The «@» search reads the same use cases as the screens; a lesson is checked as a mention of a request is.
+			Mentions: wails.AgentMentionSources{
+				Library: lib, Lectures: knowledge, Assignments: c.proposals, Exists: c.mentions, Local: e.local,
+			},
 		},
 		Today: todayScreen,
 		// The confirm cards of the agent: only the student's click here confirms what the agent proposed.

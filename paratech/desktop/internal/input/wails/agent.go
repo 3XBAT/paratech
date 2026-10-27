@@ -87,6 +87,8 @@ type AgentCore struct {
 	Chats   AgentChats // the chat list (ADR-0028)
 	// FreeWork answers the free-work cards (TASK-188); nil: they answer ErrFreeWorkUnavailable.
 	FreeWork AgentFreeWork
+	// Mentions are what the «@» search reads (TASK-246); incomplete: MentionCandidates answers unavailable.
+	Mentions AgentMentionSources
 }
 
 func (c AgentCore) complete() bool {
@@ -141,6 +143,7 @@ type AgentService struct {
 	clock    AgentClock
 	chats    AgentChats
 	freeWork AgentFreeWork
+	mentions AgentMentionSources
 	life     context.Context
 	log      *slog.Logger
 }
@@ -150,7 +153,7 @@ type AgentService struct {
 func NewAgentService(c AgentCore, log *slog.Logger) *AgentService {
 	return &AgentService{
 		driver: c.Driver, link: c.Link, journal: c.Journal, clock: c.Clock, chats: c.Chats, freeWork: c.FreeWork,
-		life: c.Life, log: log,
+		mentions: c.Mentions, life: c.Life, log: log,
 	}
 }
 

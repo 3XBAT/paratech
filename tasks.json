@@ -4531,10 +4531,10 @@
             "priority": "medium",
             "description": "[Чаты агента · UI] Кольцо заполнения контекста у поля ввода: цвет с 70 %, подсказка «Начать новый чат» с 90 %",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open 4 ADR-0028 (что при заполненном кольце); данные — TASK-251",
+                "Владелец 2026-10-27: кольцо — доля разговора, которую агент ещё помнит (Open 1 → а); при заполнении — уплотнение контекста (Open 4 → б, баннер — TASK-270). docs/adr/0028-agent-chats-context-ring.md, «The ring»; данные — TASK-251",
                 "Небольшое кольцо слева от кнопки отправки, заполнено на fill.percent (не больше 100 %), role=\"img\" и скрытый текст «Контекст чата: N %», такая же подсказка при наведении",
-                "Уровни из Go (fill.level): normal (< 70 %) — второстепенный цвет; high (70–89 %) — акцентный цвет; full (≥ 90 %) — акцент и строка под полем «Начать новый чат» с действием «Новый чат»; overflow — по ответу на Open 4; один акцент, без красного",
-                "Обновляется при открытии чата и по agent:update в конце просьбы, не во время шага; prefers-reduced-motion — без анимации заполнения",
+                "Уровни из Go (fill.level): normal (< 70 %) — второстепенный цвет; high (70–89 %) — акцентный цвет; full (≥ 90 %) — акцент и строка под полем «Начать новый чат» с действием «Новый чат»; overflow (бывает только при неудачном уплотнении) показывается как full; один акцент, без красного",
+                "Обновляется при открытии чата, по agent:update в конце просьбы и после уплотнения (новое, меньшее заполнение), не во время шага; prefers-reduced-motion — без анимации заполнения",
                 "Тесты фронтенда: уровни, подсказка, действие «Новый чат», aria-текст",
                 "Файлы: paratech/desktop/frontend/src/agent/*, src/agentView.ts, test/* (+ тесты)",
                 "Исполнитель: frontend"
@@ -4552,9 +4552,9 @@
             "id": "TASK-209",
             "category": "functional",
             "priority": "low",
-            "description": "[Чаты агента · Hub contract] Только при варианте (б) владельца (Open 1 ADR-0028): размер окна модели в AgentStepResponse",
+            "description": "[Чаты агента · Hub contract] НЕ НУЖНА: владелец выбрал вариант (а) Open 1 ADR-0028. Было: размер окна модели в AgentStepResponse (только для варианта б)",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open 1 ADR-0028. Запускать только при варианте (б) — кольцо по реальным токенам последнего шага против окна модели; при (а) задача не нужна: отметить done с пометкой «не нужна» в progress",
+                "Причина blocked: «не нужна: владелец выбрал вариант а» (2026-10-27, кольцо — доля разговора, которую агент ещё помнит, считается на десктопе через thread.Fill). Статус blocked, не запускать. Ниже — прежний текст для истории",
                 "gateway.proto: AgentStepResponse.context_window_tokens (поле 6, аддитивно, buf breaking зелёный); значение — из конфигурации Hub на профиль/алиас, не из ответа провайдера; при повторе (replayed) — то же значение",
                 "usage.input_tokens уже включает запись и чтение кеша (anthropic wire.go) — это и есть «использовано»; комментарий в proto об этом",
                 "Тесты agentstep и контракта; README Hub — новая настройка",
@@ -4564,7 +4564,7 @@
                 "go test -race ./hub/... ./shared/..., buf generate и buf breaking в shared/, golangci-lint"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "blocked"
         },
         {
             "id": "TASK-210",
@@ -4987,14 +4987,13 @@
             "id": "TASK-233",
             "category": "functional",
             "priority": "high",
-            "description": "[Hub · промпт] Новая версия panel: в просьбе без предмета агент спрашивает предмет перед create_assignment",
+            "description": "[Hub · промпт] panel v8: в просьбе без предмета агент спрашивает предмет перед create_assignment («Без предмета» — последний вариант)",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open C-1 в docs/adr/0029-student-assignments.md (есть ли вариант «Без предмета» в вопросе)",
-                "Решение владельца 2026-10-27: в «Без предмета», если студент не назвал предмет, агент спрашивает (ask_questions), а не сохраняет без предмета. Правила версий — hub/pkg/prompts/doc.go: следующая свободная версия N (ожидается v7) = v(N−1) + одно правило; tools.json без изменений (побайтно), shared/testdata/tool_catalog_vN.json совпадает",
-                "system.md vN: когда в области просьбы нет предмета и студент его не назвал — сначала ask_questions «К какому предмету относится задание?» с вариантами из list_subjects (по ответу на Open C-1 — с «Без предмета» последним или без него), затем create_assignment с выбранным ID; при области с предметом — правило v6 без изменений; без даты — по-прежнему без срока и без вопроса",
-                "Тесты: vN загружается и совпадает с golden; v1…N−1 обслуживаются; eval-кейсы в hub/tests/agent_eval_test.go: просьба без предмета «запиши: решить номер 5 к пятнице» → ask_questions с предметами, ответ → create_assignment{subject}; просьба с предметом в области → create_assignment без вопроса; «по матану нужно решить номер 5» без предмета в области → без вопроса, subject из list_subjects",
-                "Совместимость: Hub разворачивается раньше десктопа на каталоге N (TASK-234); proto не меняется; без новых зависимостей",
-                "Файлы: paratech/hub/pkg/prompts/agent/panel/vN/*, paratech/hub/pkg/prompts/*_test.go, paratech/shared/testdata/tool_catalog_vN.json, paratech/shared/contract_test.go, paratech/hub/tests/agent_eval_test.go (+ тесты)",
+                "Решение владельца 2026-10-27: в «Без предмета», если студент не назвал предмет, агент спрашивает (ask_questions), а не сохраняет без предмета; «Без предмета» — один из вариантов, последним (Open C-1 → а). docs/adr/0029-student-assignments.md, дополнение 2026-10-27 «Ask for the subject». Правила версий — hub/pkg/prompts/doc.go: N = 8 (v7 занята длинными ответами, TASK-223) = v7 + одно правило; tools.json v8 = v7 побайтно, shared/testdata/tool_catalog_v8.json совпадает",
+                "system.md v8: когда в области просьбы нет предмета и студент его не назвал — сначала ask_questions «К какому предмету относится задание?» с вариантами из list_subjects и последним вариантом «Без предмета», затем create_assignment с выбранным ID, а при «Без предмета» — без subject; при области с предметом — правило v7 без изменений; без даты — по-прежнему без срока и без вопроса",
+                "Тесты: v8 загружается и совпадает с golden; v1…v7 обслуживаются; eval-кейсы в hub/tests/agent_eval_test.go: просьба без предмета «запиши: решить номер 5 к пятнице» → ask_questions с предметами и «Без предмета» последним, ответ-предмет → create_assignment{subject}, ответ «Без предмета» → create_assignment без subject; просьба с предметом в области → create_assignment без вопроса; «по матану нужно решить номер 5» без предмета в области → без вопроса, subject из list_subjects",
+                "Совместимость: Hub разворачивается раньше десктопа на каталоге 8 (TASK-234); proto не меняется; без новых зависимостей",
+                "Файлы: paratech/hub/pkg/prompts/agent/panel/v8/*, paratech/hub/pkg/prompts/*_test.go, paratech/shared/testdata/tool_catalog_v8.json, paratech/shared/contract_test.go, paratech/hub/tests/agent_eval_test.go (+ тесты)",
                 "Исполнитель: hub-dev (opus)"
             ],
             "test_steps": [
@@ -5008,12 +5007,12 @@
             "id": "TASK-234",
             "category": "functional",
             "priority": "high",
-            "description": "[Агент · ядро] Десктоп на каталоге 7 (промпт panel v7 из TASK-233: вопрос о предмете в просьбе без предмета)",
+            "description": "[Агент · ядро] Десктоп на каталоге 8 (промпт panel v8 из TASK-233: вопрос о предмете в просьбе без предмета)",
             "acceptance_criteria": [
-                "Hub отдаёт промпт vN только клиентам с CatalogVersion N (как TASK-210); инструменты vN те же, что v(N−1) — проверить побайтно и зафиксировать тестом",
-                "values.CatalogVersion = N; golden-ссылка desktop/tests/agent_catalog_test.go на shared/testdata/tool_catalog_vN.json; agenteval CatalogFile на vN и кейсы TASK-233",
-                "Старые просьбы на каталоге N−1 после обновления: «Продолжить»/«Повторить» — существующий честный отказ, новая просьба работает (как TASK-184); тест",
-                "Развёртывание: Hub с каталогом N раньше десктопа; записать в progress",
+                "docs/adr/0029-student-assignments.md, дополнение 2026-10-27 «Ask for the subject» (каталог 7 — длинные ответы TASK-223, здесь 8). Hub отдаёт промпт v8 только клиентам с CatalogVersion 8 (как TASK-210); инструменты v8 те же, что v7 — проверить побайтно и зафиксировать тестом",
+                "values.CatalogVersion = 8; golden-ссылка desktop/tests/agent_catalog_test.go на shared/testdata/tool_catalog_v8.json; agenteval CatalogFile на v8 и кейсы TASK-233 (в том числе ответ «Без предмета» → create_assignment без subject)",
+                "Старые просьбы на каталоге 7 после обновления: «Продолжить»/«Повторить» — существующий честный отказ, новая просьба работает (как TASK-184); тест",
+                "Развёртывание: Hub с каталогом 8 раньше десктопа; записать в progress",
                 "Файлы: paratech/desktop/internal/domain/agent/values/tool.go, paratech/desktop/tests/agent_catalog_test.go, paratech/desktop/tests/agenteval/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
@@ -5241,15 +5240,16 @@
             "id": "TASK-244",
             "category": "functional",
             "priority": "medium",
-            "description": "[Hub · контракт и промпт] Чаты: упоминания в AgentScope, промпт panel для общих чатов, раскладка кеша (область после истории)",
+            "description": "[Hub · контракт и промпт] Чаты, panel v9: упоминания в AgentScope, ход-сводка history_summary, промпт для общих чатов, раскладка кеша (область после истории)",
             "acceptance_criteria": [
-                "docs/adr/0028-agent-chats-context-ring.md (переработан 2026-10-27): «References, not copies», «History window and prompt cache». Делается после TASK-233: следующая свободная версия N (ожидается v8)",
-                "gateway.proto (аддитивно, buf breaking зелёный): AgentScope.mentions = 5, repeated AgentMention {kind (enum: subject, lesson, material, assignment), id, current (bool)}; не больше 16; только ID, без названий; комментарии «one thread per subject» и «only the current subject» обновлены; buf generate",
-                "Hub проверяет упоминания (вид, формат ID, лимит) и для каталога ≥ N кладёт их в проверку происхождения ID шага наравне с областью",
-                "Раскладка для каталога ≥ N (adapters/anthropic): tools → system → base (точка кеша) → прежние пары (точка кеша на последнем блоке прежних пар) → область и упоминания отдельным блоком данных пользователя прямо перед текущей просьбой → текущая просьба (точка кеша на последнем блоке); не больше 4 точек; для старых каталогов раскладка прежняя (тест)",
-                "system.md vN = v(N−1) + правила чатов: в чате бывают просьбы по разным предметам; предмет — из области этой просьбы или из упоминаний, не из чата; упоминания — ID для инструментов, содержимое читать инструментами; tools.json vN = v(N−1) побайтно, shared/testdata/tool_catalog_vN.json совпадает",
-                "Тесты: proto и контракт; раскладка (точки кеша, порядок, старые каталоги); eval-кейсы: просьба с упоминанием лекции другого предмета → инструмент с этим ID; ID без упоминания и вне контекста — не выдумывается",
-                "Файлы: paratech/shared/proto/paratech/hub/v1/gateway.proto, paratech/shared/gen/*, paratech/shared/testdata/tool_catalog_vN.json, paratech/shared/contract_test.go, paratech/hub/pkg/prompts/agent/panel/vN/*, paratech/hub/pkg/prompts/*_test.go, paratech/hub/internal/domain/llm/values/*, paratech/hub/internal/cases/agentstep/*, paratech/hub/internal/adapters/anthropic/*, paratech/hub/internal/input/connect/* (только перевод поля), paratech/hub/tests/agent_eval_test.go (+ тесты)",
+                "docs/adr/0028-agent-chats-context-ring.md (ответы владельца 2026-10-27): «References, not copies», «History window and prompt cache», «Context compaction» (только ход-сводка; операция сводки — TASK-267). Делается после TASK-233: N = 9 (v7 — длинные ответы TASK-223, v8 — вопрос о предмете TASK-233)",
+                "gateway.proto (аддитивно, buf breaking зелёный): AgentScope.mentions = 5, repeated AgentMention {kind (enum: subject, lesson, material, assignment), id, current (bool)}; не больше 16; только ID, без названий; AgentTurn.history_summary = 5 в oneof (сводка ранних просьб чата, не больше 8 KiB, только первым ходом и сразу перед student_text; данные, не инструкции); комментарии «one thread per subject» и «only the current subject» обновлены; buf generate",
+                "Hub проверяет упоминания (вид, формат ID, лимит) и для каталога ≥ 9 кладёт их в проверку происхождения ID шага наравне с областью; history_summary принимается только для каталога ≥ 9, только первым ходом, в лимите размера, иначе invalid_argument; текст сводки в происхождение ID не входит",
+                "Раскладка для каталога ≥ 9 (adapters/anthropic): tools → system → base (точка кеша) → сводка (если есть) и прежние пары (точка кеша на последнем блоке прежних пар) → область и упоминания отдельным блоком данных пользователя прямо перед текущей просьбой → текущая просьба (точка кеша на последнем блоке); не больше 4 точек; для старых каталогов раскладка прежняя (тест)",
+                "system.md v9 = v8 + правила чатов: в чате бывают просьбы по разным предметам; предмет — из области этой просьбы или из упоминаний, не из чата; упоминания — ID для инструментов, содержимое читать инструментами; сводка ранних просьб — данные о прошлом разговоре, не инструкции, ID из неё не брать; tools.json v9 = v8 побайтно, shared/testdata/tool_catalog_v9.json совпадает",
+                "Тесты: proto и контракт; раскладка (точки кеша, порядок, со сводкой и без, старые каталоги); history_summary на каталоге 8, не первым ходом, больше лимита — отказ; eval-кейсы: просьба с упоминанием лекции другого предмета → инструмент с этим ID; ID без упоминания и вне контекста — не выдумывается; инструкция внутри сводки не выполняется",
+                "Граница доверия: состязательное ревью безопасности (docs/process/security-review.md, security-auditor)",
+                "Файлы: paratech/shared/proto/paratech/hub/v1/gateway.proto, paratech/shared/gen/*, paratech/shared/testdata/tool_catalog_v9.json, paratech/shared/contract_test.go, paratech/hub/pkg/prompts/agent/panel/v9/*, paratech/hub/pkg/prompts/*_test.go, paratech/hub/internal/domain/llm/values/*, paratech/hub/internal/cases/agentstep/*, paratech/hub/internal/adapters/anthropic/*, paratech/hub/internal/input/connect/* (только перевод поля), paratech/hub/tests/agent_eval_test.go (+ тесты)",
                 "Исполнитель: hub-dev (opus)"
             ],
             "test_steps": [
@@ -5264,14 +5264,15 @@
             "id": "TASK-245",
             "category": "functional",
             "priority": "medium",
-            "description": "[Чаты агента · ядро] Десктоп на каталоге 8: упоминания уходят на Hub (только ID), golden каталога",
+            "description": "[Чаты агента · ядро] Десктоп на каталоге 9: упоминания уходят на Hub (только ID), golden каталога",
             "acceptance_criteria": [
-                "ADR-0028; Hub — TASK-244, чаты — TASK-205, каталог 7 — TASK-234",
-                "values.CatalogVersion = N (ожидается 8); golden desktop/tests/agent_catalog_test.go на tool_catalog_vN.json; инструменты те же — тест",
+                "ADR-0028; Hub — TASK-244, чаты — TASK-205, каталог 8 — TASK-234. Ход-сводка history_summary здесь не отправляется (TASK-268)",
+                "values.CatalogVersion = 9; golden desktop/tests/agent_catalog_test.go на tool_catalog_v9.json; инструменты те же, что v8 — тест",
                 "adapters/hubclient: AgentScope.mentions = упоминания текущей просьбы (current = true) и различные упоминания прежних просьб окна (без сброшенных), всего ≤ 16, только kind и id; Label никогда не уходит (тест на JSON запроса)",
+                "Происхождение (follow-up TASK-203): ID упоминаний прежних просьб окна, которые уходят на Hub, принимаются в проверке происхождения десктопа так же, как Hub (правило в домене thread, тест)",
                 "agenteval: кейсы TASK-244 и запись cache_read до и после (в progress)",
-                "Старые просьбы на каталоге N−1: «Продолжить»/«Повторить» — честный отказ, как TASK-184; развёртывание — Hub раньше десктопа",
-                "Файлы: paratech/desktop/internal/domain/agent/values/tool.go, paratech/desktop/internal/adapters/hubclient/*, paratech/desktop/internal/cases/agentturn/* (только передача упоминаний в порт шага), paratech/desktop/tests/agent_catalog_test.go, paratech/desktop/tests/agenteval/* (+ тесты)",
+                "Старые просьбы на каталоге 8: «Продолжить»/«Повторить» — честный отказ, как TASK-184; развёртывание — Hub раньше десктопа",
+                "Файлы: paratech/desktop/internal/domain/agent/values/tool.go, paratech/desktop/internal/domain/agent/thread/* (только правило происхождения упоминаний окна), paratech/desktop/internal/adapters/hubclient/*, paratech/desktop/internal/cases/agentturn/* (только передача упоминаний в порт шага), paratech/desktop/tests/agent_catalog_test.go, paratech/desktop/tests/agenteval/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
@@ -5306,7 +5307,7 @@
                 "TASK-206",
                 "TASK-228"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-247",
@@ -5314,9 +5315,9 @@
             "priority": "medium",
             "description": "[Чаты агента · UI] @-упоминания в поле ввода агента и пилюли упоминаний в сообщениях",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open 2 ADR-0028 (упомянутый объект удалён или переименован); поиск — TASK-246",
+                "Владелец 2026-10-27: упоминание показывает название на момент упоминания (Open 2 → б); ручного выбора области нет, только @-упоминания (Open 5 → а). docs/adr/0028-agent-chats-context-ring.md «References, not copies»; поиск — TASK-246",
                 "«@» в поле ввода открывает список кандидатов (mentionCandidates), стрелки и Enter выбирают, Esc закрывает; выбранное — пилюля с названием; не больше 8 в просьбе; упоминания уходят в Ask (kind, id, label)",
-                "В прежних сообщениях — пилюли с сохранённым названием; клик открывает объект (существующие маршруты App); удалённый или переименованный — по ответу на Open 2",
+                "В прежних сообщениях — пилюли всегда с сохранённым названием (и после переименования, и после удаления объекта), без пометки «удалено»; клик открывает объект (существующие маршруты App), удалённый — обычное состояние «не найдено» его страницы; название — только текстовым узлом",
                 "Безличные тексты, тёмная тема, один акцент, клавиатура и aria (combobox/listbox); тесты фронтенда",
                 "Файлы: paratech/desktop/frontend/src/agent/*, src/agentView.ts, test/* (+ тесты)",
                 "Исполнитель: frontend"
@@ -5335,13 +5336,14 @@
             "id": "TASK-248",
             "category": "functional",
             "priority": "medium",
-            "description": "[Чаты агента · ядро и привязка] Начать заново с прежнего сообщения: всё после него агент забывает",
+            "description": "[Чаты агента · ядро и привязка] «Начать заново отсюда», вариант «Скрыть»: сообщения с выбранного агент забывает, и они скрываются из чата",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open 3 ADR-0028 (что видно из «забытых» сообщений: скрыть, скрытая ветка или новый чат-копия)",
-                "ADR-0028 «Restart from an earlier message»: домен thread.RestartFrom(n, …, now) только когда текущая просьба финальная (иначе ErrInvalidTransition): просьбы n…последняя получают droppedBy = номер новой просьбы, новая просьба добавляется; ничего не удаляется; действия и журнал не трогаются; одна транзакция, один агрегат. При варианте (в) Open 3 — вместо этого новый чат с копией пар до n (без печатей; эхо прежних просьб не отправляются)",
-                "cases/agentturn: AskInput.RestartFrom (номер просьбы, необяз.); cases/agentchats.Earlier помечает сброшенные (показ — по Open 3)",
-                "Привязка: AgentAskInput.restartFrom; ChatEarlier отдаёт dropped; bindings ts",
-                "Тесты: домен (переходы, окно и Fill без сброшенных), use case, привязка; повторный перезапуск",
+                "Владелец 2026-10-27 (Open 3): у «Начать заново отсюда» два выбора — «Скрыть» (эта задача) и «Форк» (новый чат, TASK-271). docs/adr/0028-agent-chats-context-ring.md «Restart from an earlier message»",
+                "Домен thread.RestartFrom(n, …, now) только когда текущая просьба финальная (иначе ErrInvalidTransition): просьбы n…последняя получают droppedBy = номер новой просьбы, новая просьба добавляется; ничего не удаляется; действия и журнал не трогаются; одна транзакция, один агрегат; если n ≤ summary.Through (сводка TASK-265) — сводка очищается",
+                "Fill после перезапуска учитывает начало окна (follow-up TASK-203: Overflow не должен быть false, когда агент уже не видит ранние просьбы)",
+                "cases/agentturn: AskInput.RestartFrom (номер просьбы, необяз.); cases/agentchats.Earlier сброшенные просьбы не отдаёт (скрыты и от агента, и из чата)",
+                "Привязка: AgentAskInput.restartFrom; bindings ts",
+                "Тесты: домен (переходы, окно и Fill без сброшенных, очистка сводки при n ≤ Through и сохранение при n > Through), use case, привязка; повторный перезапуск; Earlier без сброшенных",
                 "Файлы: paratech/desktop/internal/domain/agent/thread/*, paratech/desktop/internal/cases/agentturn/*, paratech/desktop/internal/cases/agentchats/*, paratech/desktop/internal/adapters/sqlite/agent*.go (только dropped_by), paratech/desktop/internal/input/wails/agent*.go, paratech/desktop/internal/input/agent/*, paratech/desktop/frontend/src/bindings/agent.ts (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
@@ -5351,7 +5353,8 @@
                 "npm --prefix paratech/desktop/frontend run test и run build"
             ],
             "dependencies": [
-                "TASK-206"
+                "TASK-206",
+                "TASK-266"
             ],
             "status": "pending"
         },
@@ -5361,10 +5364,11 @@
             "priority": "medium",
             "description": "[Чаты агента · UI] «Начать заново отсюда» у прежнего сообщения с предупреждением",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open 3 ADR-0028; привязка — TASK-248",
-                "У своего прежнего сообщения — «Начать заново отсюда» (только когда текущая просьба завершена); предупреждение «Сообщения после этого агент забудет. Сделанные действия не отменяются.» с «Продолжить» и «Отмена»; текст сообщения переходит в поле ввода для правки; отправка — с restartFrom",
-                "Сброшенные сообщения показываются по ответу на Open 3",
-                "Безличные тексты, тёмная тема, один акцент, клавиатура и aria; тесты фронтенда",
+                "Владелец 2026-10-27 (Open 3): предупреждение с двумя выборами — «Скрыть» и «Форк». docs/adr/0028-agent-chats-context-ring.md «Restart from an earlier message»; привязки — TASK-248 (скрыть), TASK-271 (форк)",
+                "У своего прежнего сообщения — «Начать заново отсюда»; диалог-предупреждение с кнопками «Скрыть», «Форк» и «Отмена»: у «Скрыть» текст «Сообщения после этого агент забудет. Сделанные действия не отменяются.», у «Форк» — «Будет создан новый чат с историей до этого сообщения. Этот чат не изменится.»",
+                "«Скрыть» (только когда текущая просьба завершена, иначе кнопка недоступна с подсказкой): текст сообщения переходит в поле ввода для правки; отправка — с restartFrom; после неё сообщения с выбранного и дальше пропадают из чата (ChatEarlier их не отдаёт)",
+                "«Форк» (доступен всегда): ForkChat(threadId, turn) → открывается новый чат «<название> (fork)», текст сообщения — в его поле ввода; исходный чат в списке без изменений; ошибки — по problem-кодам привязки",
+                "Безличные тексты, тёмная тема, один акцент, клавиатура и aria (фокус в диалоге, Esc = «Отмена»); тесты фронтенда: оба выбора, отмена, недоступное «Скрыть» во время просьбы",
                 "Файлы: paratech/desktop/frontend/src/agent/*, src/agentView.ts, test/* (+ тесты)",
                 "Исполнитель: frontend"
             ],
@@ -5373,7 +5377,8 @@
             ],
             "dependencies": [
                 "TASK-207",
-                "TASK-248"
+                "TASK-248",
+                "TASK-271"
             ],
             "status": "pending"
         },
@@ -5381,19 +5386,24 @@
             "id": "TASK-250",
             "category": "functional",
             "priority": "medium",
-            "description": "[Чаты агента · ядро] Хранение истории агента для чатов «только архив» (вместо очистки через 90 дней)",
+            "description": "[Чаты агента · ядро] Хранение истории чатов: тексты бессрочно, технические детали (шаги, вызовы, результаты) — 90 дней",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open 6 ADR-0028: (а) хранить бессрочно; (б) оставить 90 дней — задача не нужна; (в) бессрочно — тексты студента и строки ответов, вызовы и результаты инструментов — 90 дней",
-                "Очистка agent_steps меняется по ответу; при (в) прежние пары окна строятся из оставшихся записей без ошибок (тест Window на очищенных результатах)",
-                "Тесты: очистка на управляемых часах; старый чат после срока продолжается",
-                "Файлы: место очистки agent_steps (cases и adapters/sqlite/agent*.go, queries), paratech/desktop/internal/domain/agent/thread/* (только если нужно для (в)) (+ тесты)",
+                "Владелец 2026-10-27 (Open 6 → в): тексты истории хранятся бессрочно, технические детали очищаются через 90 дней. docs/adr/0028-agent-chats-context-ring.md «Retention». Очистка agent_steps описана в schema.sql, но кода нет — эта задача её делает",
+                "Бессрочно: agent_threads, agent_turns (текст студента, упоминания, область, reply_line из TASK-266), сводка; очищаются agent_steps (вызовы, результаты, печати) только финальных просьб, закончившихся больше 90 дней назад; текущая и незавершённые просьбы не трогаются",
+                "Перед удалением шагов у просьбы без reply_line (закончены до TASK-266) строка ответа достраивается из её шагов (тот же thread.Reply) и сохраняется; без этого шаги не удаляются",
+                "Window, Fill, Earlier, уплотнение и форк после очистки работают на одних agent_turns (тест на чате, у которого шаги очищены); журнал действий (agent_actions) не трогается",
+                "Запуск: шаг очистки при старте (cleanups в app) и раз в сутки; идемпотентно, порциями",
+                "Холодный архив (таблица или файл) не делается",
+                "Тесты: очистка на управляемых часах (89 и 91 день), достраивание reply_line, старый чат после срока продолжается и показывает прежние сообщения",
+                "Файлы: новый use case или метод в cases/agentchats (очистка), paratech/desktop/internal/adapters/sqlite/agent*.go, adapters/sqlite/queries/agent.sql, adapters/sqlite/sqlcgen/*, paratech/desktop/internal/domain/agent/thread/* (только если нужно), paratech/desktop/internal/app/* (только подключение шага) (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
                 "go test -race затронутых пакетов, GOOS=windows go vet, golangci-lint"
             ],
             "dependencies": [
-                "TASK-204"
+                "TASK-204",
+                "TASK-266"
             ],
             "status": "pending"
         },
@@ -5403,12 +5413,12 @@
             "priority": "medium",
             "description": "[Чаты агента · ядро] Данные кольца контекста: fill {percent, level, overflow} в списке чатов и в конце просьбы",
             "acceptance_criteria": [
-                "Перед запуском: ответ владельца на Open 1 ADR-0028 (что показывает кольцо); при варианте (б) — сначала TASK-209",
-                "percent: (а) из thread.Fill следующей просьбы чата; (б) usage.input_tokens последнего шага чата против context_window_tokens (TASK-209), хранится с просьбой; overflow — всегда из thread.Fill; level — одна функция в Go: < 70 normal, 70–89 high, ≥ 90 full",
-                "AgentService.Chats отдаёт fill каждого чата; agent:update в конце просьбы несёт fill её чата; не во время шага",
+                "Владелец 2026-10-27 (Open 1 → а): кольцо — доля разговора, которую агент ещё помнит; считается только на десктопе, поле Hub не нужно (TASK-209 не нужна). docs/adr/0028-agent-chats-context-ring.md «What context used means», «The ring»",
+                "percent — из thread.Fill следующей просьбы чата (после TASK-265 Fill учитывает сводку), округление вниз до целого, не больше 100; overflow — из thread.Fill; level — одна функция в Go: < 70 normal, 70–89 high, ≥ 90 full",
+                "AgentService.Chats отдаёт fill каждого чата; agent:update в конце просьбы несёт fill её чата; не во время шага (fill после уплотнения — TASK-269)",
                 "frontend/src/bindings/agent.ts: разбор fill (отрисовка — TASK-208)",
-                "Тесты: пороги 69/70/89/90, overflow, разбор",
-                "Файлы: paratech/desktop/internal/cases/agentchats/*, paratech/desktop/internal/input/wails/agent*.go, paratech/desktop/internal/input/agent/* (только конец просьбы), при (б) — cases/agentturn и adapters/sqlite/agent*.go с миграцией (следующий свободный номер), paratech/desktop/frontend/src/bindings/agent.ts (+ тесты)",
+                "Тесты: пороги 69/70/89/90, overflow, округление, разбор",
+                "Файлы: paratech/desktop/internal/cases/agentchats/*, paratech/desktop/internal/input/wails/agent*.go, paratech/desktop/internal/input/agent/* (только конец просьбы), paratech/desktop/frontend/src/bindings/agent.ts (+ тесты); миграции нет",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
@@ -5697,6 +5707,399 @@
             ],
             "dependencies": [
                 "TASK-261"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-265",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Чаты агента · domain] Сводка ранних просьб (уплотнение контекста) и замороженная строка ответа просьбы: HistorySummary, Compact, CompactionPlan, Window и Fill со сводкой",
+            "acceptance_criteria": [
+                "Владелец 2026-10-27: при заполнении кольца агент делает короткую сводку старой части и хранит её (Open 4 → б); тексты истории хранятся бессрочно (Open 6 → в). docs/adr/0028-agent-chats-context-ring.md, «Context compaction», «Retention»",
+                "values.HistorySummary{Through, Text}: ParseHistorySummary — текст 1–4000 рун, не больше 8 KiB UTF-8, печатные символы и переводы строк, без управляющих и bidi (U+202A–202E, U+2066–2069, U+200E, U+200F, U+061C); Through ≥ 1; текст — вывод модели, только данные",
+                "thread: сводка в State/Restore; Compact(summary, now): Through растёт и меньше номера текущей просьбы, иначе доменная ошибка; внутренний метод очистки сводки для RestartFrom (TASK-248)",
+                "Просьба получает replyLine: фиксируется один раз, когда просьба становится финальной (DONE, FAILED, CANCELLED, STOPPED), по тем же правилам, что thread.Reply (≤ 2 KiB), потом не меняется; Window и строки Earlier берут replyLine, если он есть, иначе считают как сейчас (старые просьбы)",
+                "thread.CompactionPlan(entries, current, summary) → (from, through, ok): ok, когда следующая просьба заполнила бы окно (Fill ≥ 1 или Overflow), считая от summary.Through + 1; берутся самые старые 10 несброшенных просьб (меньше, если их меньше), выравнивание по блокам из 5 от начала после сводки; сброшенные в план не входят",
+                "Window: сводка первым ходом нового вида (summary), затем пары после Through; Fill считает сводку одним ходом и её байтами; Overflow — есть прежняя несброшенная просьба, которая не отправляется и не покрыта сводкой; тесты, что Fill, Window и CompactionPlan не расходятся на одних данных; последовательность из 40 просьб с уплотнениями: между уплотнениями префикс истории побайтно растёт только дописыванием",
+                "Текст сводки не попадает в происхождение ID (seen) и ни в какой ход, кроме хода-сводки (тест)",
+                "Без IO и времени внутри; тест архитектуры зелёный; изменённые тесты окна перечислить в progress",
+                "Файлы: paratech/desktop/internal/domain/agent/thread/*, paratech/desktop/internal/domain/agent/values/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/agent/... ./desktop/internal/cases/agentturn/... ./desktop/internal/cases/agentchats/... и тест архитектуры, golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-266",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Чаты агента · storage] Миграция: строка ответа просьбы, сводка чата, источник форка; sqlite-адаптер и запись строки ответа в конце просьбы",
+            "acceptance_criteria": [
+                "docs/adr/0028-agent-chats-context-ring.md «Context compaction», «Retention», «Restart from an earlier message»; домен — TASK-265",
+                "Миграция desktop (следующий свободный номер на момент пуша; не запускать параллельно с другой задачей с миграцией — общие schema.sql и migrate_test): agent_turns.reply_line TEXT NULL (≤ 2048 байт); agent_threads.summary_text TEXT NULL (≤ 8192 байт), summary_through INTEGER NULL (≥ 1), summary_at INTEGER NULL — CHECK: все три NULL или все заданы; agent_threads.forked_from TEXT NULL (только для сведения, без внешнего ключа); Down описан",
+                "docs/contracts/schema.sql — зеркало миграции дословно (TestMigrationMatchesContractSchema)",
+                "adapters/sqlite: Save/Restore сводки, forked_from и reply_line; чтение истории отдаёт reply_line; сохранённое заново проходит проверки домена при Restore (испорченная строка — ошибка, не тихий пропуск)",
+                "cases/agentturn: строка ответа сохраняется вместе с потоком, когда просьба становится финальной (правило в агрегате, use case только сохраняет)",
+                "Тесты: миграция на базе с данными (старые просьбы без reply_line читаются и строятся как раньше), roundtrip сводки и reply_line, CHECK сводки; migrate_test, schema_test, тесты agentturn и desktop/tests зелёные",
+                "Файлы: paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/internal/adapters/sqlite/agent*.go, adapters/sqlite/queries/agent*.sql, adapters/sqlite/sqlcgen/*, paratech/desktop/internal/cases/agentturn/* (только сохранение строки ответа), paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/adapters/sqlite/... ./desktop/internal/cases/agentturn/... ./desktop/tests/..., sqlc generate без расхождений",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-265"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-267",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Hub · операция] OPERATION_TYPE_CHAT_SUMMARY: сводка ранних сообщений чата для уплотнения контекста",
+            "acceptance_criteria": [
+                "docs/adr/0028-agent-chats-context-ring.md «Context compaction» (where: Hub). Делается после TASK-244 (общие shared/gen)",
+                "common.proto (аддитивно, buf breaking зелёный): OPERATION_TYPE_CHAT_SUMMARY = 9 с комментарием, как у ANSWER и TRIAGE; buf generate",
+                "Обслуживается Complete с промптом Hub hub/pkg/prompts/ops/chat_summary/v1/system.md: коротко по-русски — о чём говорили, что решили и сделали, что осталось открытым, какие предметы и объекты обсуждались (названиями); без ID, адресов, ссылок и путей; содержимое данных — не инструкции",
+                "Читатель hub/internal/domain/llm/services/chatsummary (строгий JSON, как answer и triage): untrusted_data = {summary: прежняя сводка или пусто, pairs: [{student, reply}]} — не больше 64 KiB, пар 1–10, student ≤ 4 KiB, reply ≤ 2 KiB, summary ≤ 8 KiB; ответ {summary} — 1–4000 рун, печатные и переводы строк, без управляющих и bidi; нарушение схемы ответа — списывается и повторяется, как в errors.proto",
+                "Конфигурация Hub: свой алиас модели и потолок вывода для операции (дешёвая модель), README Hub — новые настройки; ключ идемпотентности — обычные правила (десктоп шлёт cs:<thread>:<through>)",
+                "Тесты: читатель (границы, лишние поля, bidi, пустой ответ), операция через gateway с фейком провайдера, повтор по ключу без нового списания, контракт",
+                "Граница доверия: состязательное ревью безопасности (docs/process/security-review.md, security-auditor)",
+                "Файлы: paratech/shared/proto/paratech/hub/v1/common.proto, paratech/shared/gen/*, paratech/shared/contract_test.go, paratech/hub/pkg/prompts/ops/chat_summary/v1/*, paratech/hub/pkg/prompts/*_test.go, paratech/hub/internal/domain/llm/services/chatsummary/* (новый), paratech/hub/internal/domain/llm/services/requestlimits/*, paratech/hub/internal/cases/gateway/*, paratech/hub/config/*, paratech/hub/README.md (+ тесты)",
+                "Исполнитель: hub-dev (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./hub/... ./shared/... (Postgres как в CI), buf generate, buf lint и buf breaking в paratech/shared, golangci-lint"
+            ],
+            "dependencies": [
+                "TASK-244"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-268",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Чаты агента · ядро] Уплотнение контекста: use case cases/agentcompact, вызов сводки в hubclient, ход-сводка в запросе шага (каталог 9)",
+            "acceptance_criteria": [
+                "docs/adr/0028-agent-chats-context-ring.md «Context compaction»; домен — TASK-265, хранилище — TASK-266, Hub — TASK-267 (операция) и TASK-244 (ход history_summary), каталог 9 — TASK-245",
+                "Новый use case cases/agentcompact с узкими портами в ports.go: Compact(ctx, threadID) (пусто — текущий чат) → {Compacted, Fill}: загрузить чат, thread.CompactionPlan; не нужно — ничего; нужно — вызвать порт сводки (прежняя сводка + пары плана), ParseHistorySummary, thread.Compact, сохранить; не больше одного вызова Hub за раз; конфликт версии — без повторного вызова Hub (ответ повторится по ключу)",
+                "Ключ идемпотентности cs:<thread>:<through>; ошибка Hub, квоты или схемы — возвращается кодом, ничего не сохраняется, просьба потом идёт без новой сводки",
+                "adapters/hubclient: реализация порта сводки через Complete с OPERATION_TYPE_CHAT_SUMMARY (типы shared/gen не выходят из адаптера, ARCH-36); в запросе шага для каталога ≥ 9 первый ход истории вида summary уходит как AgentTurn.history_summary (тест на JSON запроса); для каталога < 9 сводка не отправляется",
+                "app: только подключение",
+                "Тесты на фейках портов: план есть и нет, ошибка Hub, неверный текст сводки, повтор; hubclient — запрос и разбор ответа",
+                "Граница доверия: состязательное ревью безопасности (docs/process/security-review.md, security-auditor)",
+                "Файлы: paratech/desktop/internal/cases/agentcompact/* (новый), paratech/desktop/internal/adapters/hubclient/*, paratech/desktop/internal/app/* (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/agentcompact/... ./desktop/internal/adapters/hubclient/... ./desktop/internal/app/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-245",
+                "TASK-266",
+                "TASK-267"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-269",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Чаты агента · привязка] Уплотнение перед просьбой в Driver и признак compacting в agent:update",
+            "acceptance_criteria": [
+                "docs/adr/0028-agent-chats-context-ring.md «Context compaction» (UI, Failure); use case — TASK-268; fill — TASK-251",
+                "input/agent.Driver: Ask в чате без выполняющейся просьбы сначала вызывает agentcompact.Compact; перед вызовом — Update{Thread, Compacting: true}, после — Update{Thread, Compacting: false, Fill} и при успехе, и при ошибке; затем Ask как сейчас; ошибка уплотнения не мешает просьбе (только лог с кодом)",
+                "input/wails: AgentUpdate получает compacting и fill чата; ни текста сводки, ни ошибки в UI не уходит",
+                "frontend/src/bindings/agent.ts: разбор compacting (отрисовка — TASK-270)",
+                "Тесты: порядок обновлений, ошибка уплотнения → просьба идёт, просьба в занятом чате — без уплотнения",
+                "Файлы: paratech/desktop/internal/input/agent/*, paratech/desktop/internal/input/wails/agent*.go, paratech/desktop/internal/app/* (только подключение), paratech/desktop/frontend/src/bindings/agent.ts, frontend/test/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/... ./desktop/internal/app/..., GOOS=windows go vet ./desktop/..., golangci-lint",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-268",
+                "TASK-251"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-270",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Чаты агента · UI] Баннер «Уплотнение контекста…» и обновление кольца после уплотнения",
+            "acceptance_criteria": [
+                "Владелец 2026-10-27 (Open 4 → б): пока идёт уплотнение, в панели баннер «Уплотнение контекста…»; после — кольцо показывает новое, меньшее заполнение. Привязка — TASK-269, кольцо — TASK-208",
+                "Баннер над полем ввода открытого чата, только для обновлений с его threadId; role=status, aria-live=polite; пропадает по compacting: false; кольцо перерисовывается по fill того же обновления; prefers-reduced-motion — без анимации",
+                "Безличные тексты, тёмная тема, один акцент; тесты фронтенда: баннер появляется и пропадает, обновление другого чата баннер не показывает, кольцо после уплотнения",
+                "Файлы: paratech/desktop/frontend/src/agent/*, src/agentView.ts, src/agentState.ts, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Владелец: docs/qa/tasks/TASK-270.md — в длинном чате (больше 20 просьб) при новой просьбе мелькает «Уплотнение контекста…», кольцо после него меньше; агент помнит то, что было в начале чата"
+            ],
+            "dependencies": [
+                "TASK-208",
+                "TASK-269"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-271",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Чаты агента · ядро и привязка] «Начать заново отсюда», вариант «Форк»: новый чат с историей до выбранного сообщения",
+            "acceptance_criteria": [
+                "Владелец 2026-10-27 (Open 3): «Форк» как в Claude — создаётся НОВЫЙ чат с историей до этого сообщения, название «<название> (fork)», исходный чат остаётся как есть. docs/adr/0028-agent-chats-context-ring.md «Restart from an earlier message»; написание «(fork)» — Open 9 ADR-0028, до ответа как сказал владелец",
+                "Домен thread: ForkOf(src, n, id, now) — новый чат с копиями просьб 1…n−1 с теми же номерами и отметками сброса (сброшенные остаются скрытыми): текст студента, упоминания, область, строка ответа (нет у исходной — строится тем же правилом из её шагов); без шагов, печатей, плана, бюджета, действий и происхождения; сводка копируется, только если её Through < n; forkedFrom = src; название — название src, обрезанное так, чтобы с « (fork)» было ≤ 80 рун; n — существующая несброшенная прежняя просьба, иначе доменная ошибка",
+                "cases/agentchats.Fork(ctx, threadID, n) → новый чат (он становится текущим) и текст просьбы n для поля ввода; пишется только новый чат (один агрегат), исходный только читается; разрешено в любой момент",
+                "Привязка: AgentService.ForkChat(threadId, turn) → {problem: '' | invalid | not_found | failed, chat, text}; frontend/src/bindings/agent.ts — forkChat с разбором (диалог — TASK-249)",
+                "Тесты: домен (номера, сброшенные, сводка до и после n, обрезка названия, неверный n), use case, привязка; исходный чат не меняется (версия та же); первая просьба в форке уходит на Hub с новым thread_id и без печатей",
+                "Файлы: paratech/desktop/internal/domain/agent/thread/*, paratech/desktop/internal/cases/agentchats/*, paratech/desktop/internal/adapters/sqlite/agent*.go (только если нужно для записи скопированных просьб), paratech/desktop/internal/input/wails/agentchats.go, paratech/desktop/frontend/src/bindings/agent.ts, frontend/test/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/agent/... ./desktop/internal/cases/agentchats/... ./desktop/internal/adapters/sqlite/... ./desktop/internal/input/wails/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/...",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-248",
+                "TASK-266"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-272",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Чаты агента · привязка] Снимок текущей просьбы чата: после перезапуска приложения живая карточка вместо текста",
+            "acceptance_criteria": [
+                "Follow-up TASK-207 (progress/TASK-207.md; paratech-ops/supervisor-decisions.md, TASK-205…207): после перезапуска текущая просьба чата (например, ждёт «Да») показывается текстом без «Да» / «Продолжить» / «Стоп» — ни одна привязка не отдаёт её состояние. Владелец 2026-10-27 (Open 7 → а): прежние просьбы — только текст, у текущей — живая карточка. docs/adr/0028-agent-chats-context-ring.md «Earlier messages and the current request»",
+                "AgentService.ChatCurrent(threadId) → AgentUpdate в том же виде, что agent:update (threadId, turn, scope, status, stopReason, cards), или null, если у чата нет текущей просьбы или она финальная; строится из сохранённого состояния тем же кодом, что карточки agent:update; без вызова Hub, без запуска шага, только чтение",
+                "Карточки — только проверенные ID, перечисления и короткие тексты (как в Update); тексты — данные",
+                "frontend/src/bindings/agent.ts: chatCurrent с тем же разбором, что agent:update",
+                "Тесты: просьба ждёт «Да» (предложение), ждёт ответа на вопросы, остановлена с «Продолжить», финальная → null, чужой или несуществующий чат → null / not_found; ни одного вызова Hub (фейк считает)",
+                "Файлы: paratech/desktop/internal/input/agent/* (снимок), paratech/desktop/internal/cases/agentturn/* (только метод чтения текущей просьбы, если нужен), paratech/desktop/internal/input/wails/agent*.go, paratech/desktop/internal/app/* (только подключение), paratech/desktop/frontend/src/bindings/agent.ts, frontend/test/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/... ./desktop/internal/cases/agentturn/... ./desktop/internal/app/... и тест архитектуры, GOOS=windows go vet ./desktop/..., golangci-lint",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-273",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Чаты агента · UI] Живая карточка текущей просьбы при открытии чата после перезапуска",
+            "acceptance_criteria": [
+                "Привязка — TASK-272; follow-up TASK-207",
+                "При открытии чата, текущая просьба которого не видна вживую в этой сессии, панель вызывает chatCurrent и показывает её существующими карточками («Да», «Продолжить», «Стоп» и т. п.) вместо текстовой строки; дальше — обычные обновления по threadId; прежние просьбы — по-прежнему только текст",
+                "Мелочи TASK-207: ключ «сироты» включает threadId",
+                "Безличные тексты, тёмная тема, один акцент, клавиатура и aria; тесты фронтенда: ждёт «Да» после перезапуска → кнопки работают, null → текст, обновление после снимка не дублирует карточку",
+                "Файлы: paratech/desktop/frontend/src/agent/*, src/agentView.ts, src/agentState.ts, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Владелец: docs/qa/tasks/TASK-273.md — попросить агента предложить срок в календарь, закрыть приложение до «Да», открыть снова → в чате карточка с «Да», «Да» срабатывает"
+            ],
+            "dependencies": [
+                "TASK-272"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-274",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Задания · ядро] «Вернуть» только недолго после удаления, потом задание стирается совсем",
+            "acceptance_criteria": [
+                "Владелец 2026-10-27 (C-2 → а): удалённое задание можно вернуть только короткое время, потом оно стирается полностью (строка и её связи). docs/adr/0029-student-assignments.md, дополнение 2 «Purge of a deleted assignment». Длительность — Open C-3; до ответа константа 7 дней (не выбор варианта)",
+                "Домен coursework/assignment: константа RestoreWindow; Restore(now) позже окна → ErrRestoreExpired; PurgeDue(now) — удалено дольше окна",
+                "cases/homeworkflow.PurgeDeleted(ctx) → число: для каждого такого задания по шагам, каждый в своей транзакции и идемпотентно — предложения задания, его доставки (только финальные; нефинальная — задание пропускается и пишется в лог), черновик с версиями, работы, затем строка задания (в SQL ещё раз условие deleted_at и окна); файлы экспорта и работ — через существующие порты хранения, нет порта — остановиться и описать в progress (жёсткое правило 5)",
+                "Остаются: строки журнала агента (Undo с этим ID — отказ), ждущая строка deadline_event_removals",
+                "Запуск: шаг очистки при старте (cleanups в app) и раз в сутки; миграции нет",
+                "Привязка: RestoreAssignment отвечает problem expired (input/wails/homeworkchange.go), frontend/src/bindings/homework.ts разбирает его (текст — TASK-275)",
+                "Тесты: домен (граница окна), use case на фейках (каждый вид связи, повтор после сбоя на середине, нефинальная доставка), sqlite-сценарий в desktop/tests (после очистки строки нет нигде, журнал на месте), привязка expired",
+                "Файлы: paratech/desktop/internal/domain/coursework/assignment/*, paratech/desktop/internal/cases/homeworkflow/* (новый purge.go, ports.go, types.go, errors.go), paratech/desktop/internal/adapters/sqlite/assignments*.go, proposals*.go, deliveries*.go, drafts*.go, works*.go (только удаление), adapters/sqlite/queries/*, adapters/sqlite/sqlcgen/*, paratech/desktop/internal/input/wails/homeworkchange.go, paratech/desktop/internal/app/* (только шаг очистки), paratech/desktop/frontend/src/bindings/homework.ts, frontend/test/*, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/coursework/... ./desktop/internal/cases/homeworkflow/... ./desktop/internal/adapters/sqlite/... ./desktop/internal/input/wails/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/...",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-275",
+            "category": "ui",
+            "priority": "low",
+            "description": "[Задания · UI] Текст, когда вернуть удалённое задание уже нельзя",
+            "acceptance_criteria": [
+                "docs/adr/0029-student-assignments.md, дополнение 2; привязка — TASK-274",
+                "На problem expired у «Вернуть»: строка «Задание удалено окончательно, вернуть уже нельзя», кнопка «Вернуть» пропадает; остальное поведение «Удалить» / «Вернуть» (TASK-232) не меняется",
+                "Тексты безличные, только текстовыми узлами; тесты фронтенда",
+                "Файлы: paratech/desktop/frontend/src/pages/HomeworkPage.tsx, src/homeworkView.ts, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-274"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-276",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Задания · ядро] Настройка «События в календаре при смене срока», очередь обновлений события и правило eventrefresh (домен, миграция, sqlite)",
+            "acceptance_criteria": [
+                "Владелец 2026-10-27 (З3): гибрид с настройкой — при первой смене срока задания с событием в Google спросить, «Запомнить» — больше не спрашивать; в настройках «спрашивать / обновлять сами / не обновлять», по умолчанию «спрашивать». docs/adr/0029-student-assignments.md, дополнение 2 «Deadline change and the Google event»",
+                "Домен settings/settings: значение CalendarOnDueChange (ask | update | keep, по умолчанию ask), метод установки меняет версию; cases/preferences: установка значения (как SetFreeWorkNotice)",
+                "Новый доменный сервис coursework/services/eventrefresh (чистый): Decide(policy, hasEvent, dueChanged, dueCleared) → nothing | ask | queue_update | queue_removal; своё перечисление политики в coursework (ARCH-11), таблица случаев в тесте",
+                "Миграция desktop (следующий свободный номер на момент пуша; не запускать параллельно с другой задачей с миграцией — общие schema.sql и migrate_test): settings.deadline_event_on_due_change TEXT NOT NULL DEFAULT 'ask' CHECK (… IN ('ask', 'update', 'keep')); таблица deadline_event_updates (assignment_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL; без внешнего ключа, без версии — очередь, как deadline_event_removals); docs/contracts/schema.sql — зеркало",
+                "adapters/sqlite: чтение и запись настройки; очередь — Queue (ON CONFLICT обновляет created_at), List(limit), Purge; признак «у задания есть событие» — есть EXECUTED create_deadline_event этого задания и нет ждущей строки удаления",
+                "Тесты: домен настроек и eventrefresh, sqlite roundtrip, очередь (повтор — одна строка), признак события; migrate_test и schema_test зелёные",
+                "Файлы: paratech/desktop/internal/domain/settings/settings/*, paratech/desktop/internal/domain/coursework/services/eventrefresh/* (новый), paratech/desktop/internal/cases/preferences/*, paratech/desktop/internal/adapters/sqlite/settings*.go, adapters/sqlite/deadlineevents*.go (новый), adapters/sqlite/queries/*, adapters/sqlite/sqlcgen/*, paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/... ./desktop/internal/cases/preferences/... ./desktop/internal/adapters/sqlite/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-277",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Задания · ядро] Смена срока в правке задания: спросить, обновить сами или не трогать событие; UpdateDeadlineEvent по «Да»",
+            "acceptance_criteria": [
+                "docs/adr/0029-student-assignments.md, дополнение 2 «Deadline change and the Google event»; настройка, очередь и eventrefresh — TASK-276",
+                "homeworkflow.EditAssignment: при смене срока — политика через узкий порт (чтение настройки), признак события — через порт репозитория, решение — eventrefresh.Decide (в use case условий нет, ARCH-22); queue_update / queue_removal — строка очереди в транзакции правки и запрос синхронизации после фиксации (как DeleteAssignment); ask — в результате CalendarQuestion = true; nothing — ничего",
+                "homeworkflow.UpdateDeadlineEvent(ctx, id): клик студента «Да» — задание живое и с событием, иначе известная ошибка; срок есть — строка обновления, срока нет — строка удаления; запрос синхронизации; повтор безопасен",
+                "«Запомнить» здесь не обрабатывается: привязка вызывает установку настройки отдельно (другой агрегат, TASK-279)",
+                "Агентский edit_due (SetAssignmentDue) событие не трогает (Open C-4, TASK-281)",
+                "Тесты на фейках: каждая политика × есть/нет события × срок изменён/не изменён/убран; UpdateDeadlineEvent (живое, удалённое, без события, повтор)",
+                "Файлы: paratech/desktop/internal/cases/homeworkflow/assignments.go, ports.go, types.go, errors.go, новый deadlineevent.go, paratech/desktop/internal/app/* (только подключение портов) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/homeworkflow/... ./desktop/internal/app/... ./desktop/tests/... и тест архитектуры",
+                "golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-276"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-278",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Задания · календарь] Синхронизация обрабатывает очередь обновлений событий сроков (идемпотентно)",
+            "acceptance_criteria": [
+                "docs/adr/0029-student-assignments.md, дополнение 2 «Deadline change and the Google event» (Sync); очередь — TASK-276. Google — только представление (жёсткое правило 6), побочный эффект идемпотентен (жёсткое правило 7)",
+                "cases/schedulesync.CalendarSync: рядом с removeDeadlines — updateDeadlines: для каждой строки очереди заново читает задание; удалено, без срока или без события — строка удаляется без вызова Google; иначе UpsertDeadline с подтверждённым заголовком события из выполненного предложения и текущим сроком, затем строка удаляется; временная ошибка — строка остаётся до следующей синхронизации",
+                "Ключ идемпотентности команды — из задания и нового срока; событие по-прежнему по DeadlineEventID задания, повтор после потерянного ответа ничего не удваивает",
+                "Тесты с фейком Google: обновление, потерянный ответ и повтор, задание удалено до синхронизации, срок снова изменён до синхронизации (берётся текущий), нет подключения к Google — строка ждёт",
+                "Файлы: paratech/desktop/internal/cases/schedulesync/* (calendar.go, ports.go, types.go), paratech/desktop/internal/app/calendar.go (только порт), paratech/desktop/internal/adapters/sqlite/deadlineevents*.go (только чтение для синхронизации) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/schedulesync/... ./desktop/internal/app/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-276"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-279",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Задания · привязка Wails] Вопрос об обновлении события после правки срока, «Да» и «Запомнить», настройка в SettingsService",
+            "acceptance_criteria": [
+                "docs/adr/0029-student-assignments.md, дополнение 2; use cases — TASK-276 (настройка), TASK-277 (правка и UpdateDeadlineEvent)",
+                "HomeworkService.EditAssignment: ответ получает calendarQuestion (bool); новый UpdateDeadlineEvent(id) → {problem: '' | not_found | no_event | failed}; новый RememberDeadlineEventChoice(update bool) → устанавливает настройку update или keep через cases/preferences",
+                "SettingsService: в Settings поле calendarOnDueChange (ask | update | keep) и SetCalendarOnDueChange(value) (неизвестное значение — invalid)",
+                "Подтверждение — только клик студента или его настройка; агенту и Hub ничего нового не открывается (жёсткое правило 3)",
+                "frontend/src/bindings/homework.ts и settings.ts: новые поля и методы с разбором; русские тексты — в TASK-280",
+                "Тесты: каждый problem-код, calendarQuestion в ответе правки, запоминание обоих выборов, настройка",
+                "Файлы: paratech/desktop/internal/input/wails/homework*.go, paratech/desktop/internal/input/wails/settings.go, paratech/desktop/internal/app/* (только подключение), paratech/desktop/frontend/src/bindings/homework.ts, src/bindings/settings.ts, frontend/test/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/wails/... ./desktop/internal/app/... и тест архитектуры, GOOS=windows go vet ./desktop/...",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-277"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-280",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Задания · UI] Вопрос «Обновить событие в Google Календаре?» после смены срока и настройка в «Настройках»",
+            "acceptance_criteria": [
+                "Владелец 2026-10-27 (З3); привязки — TASK-279",
+                "После сохранения правки с calendarQuestion: диалог «Обновить событие в Google Календаре?» с кнопками «Да» и «Нет» и флажком «Запомнить»; «Да» → updateDeadlineEvent; с «Запомнить» — ещё rememberDeadlineEventChoice(да или нет); «Нет» без флажка — ничего; Esc = «Нет» без запоминания; ошибки — короткими строками",
+                "«Настройки»: выбор «События в календаре при смене срока» — «спрашивать» / «обновлять сами» / «не обновлять», по умолчанию «спрашивать»",
+                "Безличные тексты, по-русски, текстовыми узлами; тёмная тема, один акцент, клавиатура и aria (фокус в диалоге)",
+                "Тесты фронтенда: диалог и оба ответа с флажком и без, один вызов при двойном клике, настройка",
+                "Файлы: paratech/desktop/frontend/src/pages/HomeworkPage.tsx, src/pages/HomeworkDialogs.tsx, src/homeworkView.ts, src/pages/SettingsPage.tsx, src/pages/SettingsTabs.tsx, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Владелец: docs/qa/tasks/TASK-280.md — задание с событием в Google, сменить срок → вопрос, «Да» → событие в Google на новом сроке; ещё раз с «Нет» и «Запомнить» → вопроса больше нет, событие не меняется; в «Настройках» переключить на «обновлять сами» → смена срока обновляет событие без вопроса"
+            ],
+            "dependencies": [
+                "TASK-275",
+                "TASK-279"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-281",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Агент · ядро] Срок задания поменял агент (edit_due): что делать с событием в Google Календаре",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open C-4 в docs/adr/0029-student-assignments.md (та же настройка с вопросом в строке действия; агент событие не трогает; агент всегда спрашивает). При ответе (б) задача не нужна",
+                "По ответу: после выполненного edit_due — eventrefresh.Decide с политикой по Open C-4; вопрос — только кнопкой студента в строке действия панели («Обновить событие в Google Календаре?», «Да» / «Нет»), вывод модели ничего не запускает (жёсткое правило 3); Undo edit_due возвращает срок и по той же политике ставит обновление события",
+                "Тесты: каждая политика, Undo, ни одного обновления без клика студента или его настройки",
+                "Файлы: paratech/desktop/internal/input/agent/actions.go, paratech/desktop/internal/cases/homeworkflow/* (только SetAssignmentDue), paratech/desktop/internal/input/wails/agent*.go, paratech/desktop/frontend/src/agent/*, src/bindings/agent.ts, test/* (+ тесты)",
+                "Исполнитель: go-core (opus), frontend — для кнопки в строке действия"
+            ],
+            "test_steps": [
+                "go test -race затронутых пакетов и тест архитектуры, GOOS=windows go vet ./desktop/..., golangci-lint",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-277"
             ],
             "status": "pending"
         },

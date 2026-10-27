@@ -63,8 +63,8 @@ button. The student cannot record a task that was said in class but not recorded
 
 ## Open (questions to the owner)
 Answered 2026-10-27: 1 — «Удалить» for every assignment (addendum below); 2 — no notification now (deferred);
-4 — in a request without a subject the agent asks (addendum below); 5 — yes, no date means no deadline and no question.
-3. Due limits −31 days … +2 years and 23:59 for a date without a time. *Not answered; implemented as written.*
+4 — in a request without a subject the agent asks (addendum below); 5 — yes, no date means no deadline and no question;
+3 — the due limits stay: a month back (31 days) … two years ahead, a date without a time is 23:59 local.
 
 ## Addendum (2026-10-27): delete and edit any assignment, ask for the subject
 Source: owner 2026-10-27. Tasks TASK-228…234.
@@ -92,7 +92,9 @@ Source: owner 2026-10-27. Tasks TASK-228…234.
 - **Agent journal**: the delete is the student's own click (`input/wails`), not a journal line. An agent Undo of an
   action on a deleted assignment is refused as `changed` (version moved).
 - **Recording deletion** (ADR-0018) does not offer a deleted assignment and keeps it (transcript link NULL).
-- **UI**: after «Удалить» the list shows «Задание удалено» with «Вернуть». Retention and a list of deleted ones: Open C-2.
+- **UI**: after «Удалить» the list shows «Задание удалено» with «Вернуть». No list of deleted ones (C-2 → а).
+- **Retention** (owner 2026-10-27, C-2 → а): «Вернуть» works only for `assignment.RestoreWindow` after the delete; then
+  the assignment is **purged completely** (addendum 2 below).
 
 ### Edit after creation
 - The student edits title, note, deadline (date and optional time) and subject of any assignment from the UI.
@@ -103,15 +105,60 @@ Source: owner 2026-10-27. Tasks TASK-228…234.
 - A deleted assignment cannot be edited (`ErrDeleted`).
 
 ### Ask for the subject (agent)
-- Panel v7 (= v6 + one rule; tools unchanged, desktop catalog 7): when the request scope has no subject and the
-  student names none, `create_assignment` is preceded by `ask_questions` «К какому предмету относится задание?» with
-  the subjects from `list_subjects` as options (whether «Без предмета» is one of them: Open C-1); the answer's
-  subject ID is used. A scope with a subject keeps the ADR-0029 rule. Only the prompt asks; the desktop does not
-  refuse a subject-less `create_assignment`.
+- Panel **v8** (= v7 + one rule; tools unchanged, desktop catalog 8; v7 is long replies, TASK-223): when the request
+  scope has no subject and the student names none, `create_assignment` is preceded by `ask_questions` «К какому
+  предмету относится задание?» with the subjects from `list_subjects` as options and **«Без предмета» as the last
+  option** (C-1 → а); the answer's subject ID is used, «Без предмета» means no `subject`. A scope with a subject keeps
+  the ADR-0029 rule. Only the prompt asks; the desktop does not refuse a subject-less `create_assignment`.
 
 ### Deferred
 - Windows notifications at the deadline: not now (owner 2026-10-27).
 
 ### Open (owner)
-- C-1. В вопросе «К какому предмету?» есть вариант «Без предмета»? (а) да, последним; (б) нет, только предметы. Цена одинаковая.
-- C-2. Удалённые задания: (а) только «Вернуть» сразу после удаления, хранятся бессрочно и невидимо — дешевле всего; (б) плюс раздел «Удалённые» на странице «Задания»; (в) очищать навсегда через 30 дней.
+Answered 2026-10-27: C-1 — (а) «Без предмета» is the last option; C-2 — (а) only «Вернуть» for a short time, then the
+assignment is purged completely (duration: C-3).
+
+## Addendum 2 (2026-10-27): purge after the restore window, deadline change and the Google event
+Source: owner answers of 2026-10-27 (З1–З3, 6.3). Tasks TASK-274…281 (C-1: TASK-233/234).
+
+### Purge of a deleted assignment (З2)
+- `assignment.RestoreWindow` is a domain constant (C-3; until the owner answers, **7 days** — the longest option, so
+  nothing goes earlier than any answer allows; this is not a choice of the option). `Restore(now)` after the window →
+  `ErrRestoreExpired`; the binding answers `expired`.
+- `homeworkflow.PurgeDeleted(ctx)` removes each assignment deleted longer than the window, **hard**: proposals of it,
+  deliveries (only final ones can exist: delete is refused while one is unresolved), drafts with their versions, works,
+  then the assignment row. Each step is its own transaction and idempotent; the assignment row goes last, so a crash
+  leaves a still-deleted (invisible) assignment and the next run finishes. No ARCH-23 exception is needed. Files of
+  drafts/works/exports go through the existing storage ports; a kind without such a port is reported, not deleted with
+  `os` (hard rule 5).
+- Kept: agent journal lines (IDs only; an Undo naming a purged ID is refused), a still waiting
+  `deadline_event_removals` row (no foreign key; the sync deletes the event later).
+- The sent-email record goes with it (the owner said «completely»; it was kept «as the history of what was sent»).
+- Runs as a startup cleanup and once a day; no migration (rows are deleted).
+
+### Deadline change and the Google event (З3)
+- Google is only a view (hard rule 6). An assignment **has an event** when it has an EXECUTED `create_deadline_event`
+  proposal and no waiting removal; the event id is derived from the assignment (`googlecal.DeadlineEventID`), the
+  write is an upsert.
+- **Setting** (settings aggregate, migration): «События в календаре при смене срока» = `ask` (default, «спрашивать») |
+  `update` («обновлять сами») | `keep` («не обновлять»).
+- **Policy**: a pure domain service `coursework/services/eventrefresh`: (has event, due changed, policy) → nothing |
+  ask | queue. The use case maps the setting to its input; no condition in the use case (ARCH-22).
+- **Student edit** (`homeworkflow.EditAssignment`): `queue` writes a `deadline_event_updates` row (queue table, the
+  ADR-0018 pattern as `deadline_event_removals`) in the edit's transaction and requests a sync after commit; `ask`
+  returns `calendarQuestion` with the result. A removed deadline queues a removal instead of an update.
+- **The question**: «Обновить событие в Google Календаре?» with «Да» / «Нет» and the checkbox «Запомнить». «Да» →
+  `UpdateDeadlineEvent(id)` (queue row + sync). «Запомнить» stores `update` or `keep` through the settings use case
+  (another aggregate, another call); then the question never comes again and the choice acts. The confirmation is the
+  student's click (or the student's setting), never the model's (hard rule 3).
+- **Sync** (`cases/schedulesync`): for each queued row, reads the assignment again; deleted, no due or no event → the
+  row is dropped; else `UpsertDeadline` with the confirmed event title of the executed proposal and the current due,
+  then the row goes. Idempotent by the event id; a lost answer is retried safely (hard rule 7).
+- **Agent `edit_due`**: open (C-4); until answered it never touches the event (as today).
+
+### Due limits (6.3)
+- Stay as written: due within `now − 31 days … now + 2 years`; a date without a time is 23:59 local.
+
+### Open (owner)
+- C-3. Сколько можно «Вернуть» удалённое задание, после чего оно стирается совсем? (а) только до ухода со страницы (стирается при уходе со страницы или при следующем запуске); (б) 1 день; (в) 7 дней. До ответа в коде константа 7 дней.
+- C-4. Срок задания поменял агент (просьба «перенеси срок»): (а) та же настройка — при «спрашивать» в строке действия в панели появляется тот же вопрос с «Да» / «Нет»; (б) правка агента событие не трогает никогда, обновить можно только своей правкой срока; (в) правка агента всегда спрашивает, даже при «обновлять сами».
