@@ -17,7 +17,9 @@ import (
 
 const phys shared.SubjectID = "s-phys"
 
-func recAnchor(id shared.RecordingID) AnchorRef { return AnchorRef{Kind: note.AnchorRecording, Recording: id} }
+func recAnchor(id shared.RecordingID) AnchorRef {
+	return AnchorRef{Kind: note.AnchorRecording, Recording: id}
+}
 
 func TestNewRequiresPorts(t *testing.T) {
 	if _, err := New(Deps{}); !errors.Is(err, ErrInvalidConfig) {

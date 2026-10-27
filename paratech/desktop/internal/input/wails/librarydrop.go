@@ -61,6 +61,71 @@ func (s *LibraryService) dropOutcome(ctx context.Context, paths []string) Librar
 	return out
 }
 
+// NotesDropEvent is emitted after files are dropped on a lecture (TASK-151), with a NotesAdd. It carries no path.
+const NotesDropEvent = "notes:dropped"
+
+// Attributes of an element the page marks as a lecture to drop notes on, next to Wails' data-file-drop-target. Their
+// values are only IDs, a kind and a date, checked by the use case like any call from the page.
+const (
+	dropNoteKind      = "data-note-kind"
+	dropNoteID        = "data-note-id"
+	dropNoteSubject   = "data-note-subject"
+	dropNoteRecording = "data-note-recording"
+	dropNoteLesson    = "data-note-lesson"
+	dropNoteDate      = "data-note-date"
+)
+
+// noteDropTarget reads the lecture of a drop target; ok is false when the element is not a lecture, so the drop goes
+// to «Входящие».
+func noteDropTarget(attrs map[string]string) (NoteTarget, bool) {
+	_, kind := attrs[dropNoteKind]
+	_, id := attrs[dropNoteID]
+	if !kind && !id {
+		return NoteTarget{}, false
+	}
+	return NoteTarget{
+		NoteID: attrs[dropNoteID], SubjectID: attrs[dropNoteSubject], Kind: attrs[dropNoteKind],
+		RecordingID: attrs[dropNoteRecording], LessonID: attrs[dropNoteLesson], Date: attrs[dropNoteDate],
+	}, true
+}
+
+// routeDrop sends a drop on the main window to the notes of a lecture when the element under it is one (attrs are the
+// attributes of the drop target, nil for none), otherwise to «Входящие».
+func routeDrop(ctx context.Context, lib *LibraryService, nts *NotesService, attrs map[string]string, paths []string, emit EventEmitter) {
+	if target, ok := noteDropTarget(attrs); ok {
+		nts.addDropped(ctx, target, paths, emit)
+		return
+	}
+	lib.importDropped(ctx, paths, emit)
+}
+
+// addDropped adds the files dropped on a lecture to its notes, with the allow-list and the bounds of a drop into
+// «Входящие», and emits the outcome. Drops run one at a time; nothing is emitted once ctx is done.
+func (s *NotesService) addDropped(ctx context.Context, target NoteTarget, paths []string, emit EventEmitter) {
+	if len(paths) == 0 {
+		return
+	}
+	s.drop.Lock()
+	defer s.drop.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
+	out := NotesAdd{Files: []NoteFile{}}
+	if len(paths) > maxDroppedFiles {
+		s.log.Info(opNotesDrop, "result", "too many files", "count", len(paths))
+		out.Error = ErrLibraryTooManyDropped.Error()
+	} else if res, err := s.addPaths(ctx, target, paths, droppedPathError); err != nil {
+		out.Error = err.Error()
+	} else {
+		out = res
+	}
+	out.Target = target
+	if ctx.Err() != nil {
+		return
+	}
+	emit.Emit(NotesDropEvent, out)
+}
+
 func (s *LibraryService) dropFile(ctx context.Context, path string) LibraryDropFile {
 	if err := droppedPathError(path); err != nil {
 		s.log.Info(opLibraryDrop, "result", err.Error())
