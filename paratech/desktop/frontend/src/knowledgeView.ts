@@ -134,6 +134,7 @@ export function hitFocus(h: Pick<KnowledgeHit, "section" | "index">): LessonFocu
     case "summary":
       return { tab: "summary", index: h.index };
     case "title":
+    case "ownNote": // opens the note, not a tab (TASK-155 page)
       return noFocus;
   }
 }
@@ -143,6 +144,7 @@ export const sectionLabels: Readonly<Record<KnowledgeSection, string>> = {
   summary: "Кратко",
   lectureText: "Текст лекции",
   transcript: "Расшифровка",
+  ownNote: "Мой конспект",
 };
 
 /** «Расшифровка · 12:05»: the section of a hit and where in it. */

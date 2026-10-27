@@ -48,6 +48,13 @@ const local1405 = new Date(2026, 9, 19, 14, 5).toISOString();
 
 // Mirrors KnowledgeLesson of internal/input/wails/knowledgebase.go.
 const lesson = (over = {}) => ({
+  key: "recording:r1",
+  noteOnly: false,
+  undated: false,
+  anchor: "recording",
+  scheduleLessonId: "",
+  date: "",
+  notes: [],
   recordingId: "r1",
   startedAt: noon,
   durationSeconds: 5400,
@@ -64,7 +71,15 @@ const lesson = (over = {}) => ({
   librarySubjectState: "none",
   ...over,
 });
-const subject = (over = {}) => ({ key: "матанализ", name: "Матанализ", lessons: 5, latest: noon, noSubject: false, ...over });
+const subject = (over = {}) => ({
+  key: "матанализ",
+  name: "Матанализ",
+  lessons: 5,
+  latest: noon,
+  noSubject: false,
+  subjectId: "",
+  ...over,
+});
 const hit = (over = {}) => ({
   recordingId: "r1",
   section: "transcript",
@@ -74,9 +89,48 @@ const hit = (over = {}) => ({
   before: "…предел ",
   match: "функции",
   after: " в точке…",
+  noteId: "",
+  materialId: "",
+  locatorKind: "",
+  locatorN: 0,
+  label: "",
   lesson: lesson(),
   ...over,
 });
+// TASK-155: a lecture known only from the student's notes, of a day (as the binding sends it).
+const note = (over = {}) => ({ id: "n1", title: "Ряды.docx", subjectId: "phys", createdAt: noon, ...over });
+const noteLecture = (over = {}) =>
+  lesson({
+    key: "day:phys:2026-09-12",
+    noteOnly: true,
+    anchor: "day",
+    date: "2026-09-12",
+    notes: [note()],
+    recordingId: "",
+    startedAt: "2026-09-11T21:00:00Z",
+    durationSeconds: 0,
+    transcriptReady: false,
+    summaryReady: false,
+    subjectKey: "ID:phys",
+    librarySubjectId: "phys",
+    librarySubjectState: "matched",
+    ...over,
+  });
+const noteHit = (over = {}) =>
+  hit({
+    recordingId: "",
+    section: "ownNote",
+    index: 2,
+    startMs: 0,
+    time: "",
+    noteId: "n1",
+    materialId: "m1",
+    locatorKind: "page",
+    locatorN: 3,
+    label: "ваш конспект · стр. 3",
+    lesson: noteLecture(),
+    ...over,
+  });
 
 function fakeCall(reply) {
   const calls = [];
@@ -144,6 +198,95 @@ test("the library subject of a lesson comes from the core with its state", async
     assert.equal(got.librarySubjectId, id);
     assert.equal(got.librarySubjectState, state);
   }
+});
+
+test("TASK-155: lectures lists recorded and note-only lectures as the core orders them", async () => {
+  const recorded = lesson({ scheduleLessonId: "l1", notes: [note({ id: "n0" })] });
+  const ofLesson = noteLecture({ key: "lesson:l7", anchor: "lesson", scheduleLessonId: "l7", date: "2026-09-05", notes: [note({ id: "n2" })] });
+  const undated = noteLecture({ key: "note:n3", anchor: "undated", undated: true, date: "", startedAt: "", notes: [note({ id: "n3" })] });
+  const f = fakeCall([recorded, noteLecture(), ofLesson, undated]);
+  const got = await knowledgeBaseApi(f.call).lectures("ID:phys");
+  assert.deepEqual(f.calls, [[methods.lectures, "ID:phys"]]);
+  assert.deepEqual(got, [recorded, noteLecture(), ofLesson, undated]);
+  assert.deepEqual(
+    got.map((l) => [l.key, l.anchor, l.noteOnly, l.date, l.notes.map((n) => n.id).join()]),
+    [
+      ["recording:r1", "recording", false, "", "n0"],
+      ["day:phys:2026-09-12", "day", true, "2026-09-12", "n1"],
+      ["lesson:l7", "lesson", true, "2026-09-05", "n2"],
+      ["note:n3", "undated", true, "", "n3"],
+    ],
+  );
+  // A subject known only from notes: no recorded lesson, its library subject.
+  const s = await knowledgeBaseApi(fakeCall([subject({ key: "ID:chem", lessons: 0, latest: "", subjectId: "chem" })]).call).subjects();
+  assert.deepEqual([s[0].lessons, s[0].latest, s[0].subjectId], [0, "", "chem"]);
+});
+
+test("TASK-155: a lesson whose anchor does not fit its ids is refused", async () => {
+  const bad = [
+    noteLecture({ recordingId: "r1" }), // note-only with a recording
+    lesson({ noteOnly: true }), // a recording marked note-only
+    lesson({ anchor: "day" }), // a recording with another anchor
+    noteLecture({ anchor: "recording" }),
+    noteLecture({ date: "" }), // a day lecture without its date
+    noteLecture({ date: "12.09.2026" }),
+    noteLecture({ anchor: "lesson" }), // a lesson lecture without its lesson
+    noteLecture({ scheduleLessonId: "l7" }), // a day lecture with a lesson
+    noteLecture({ undated: true }), // undated but with a date
+    noteLecture({ key: "note:n3", anchor: "undated", undated: true, date: "" }), // undated with a start
+    noteLecture({ notes: [] }), // a note-only lecture without notes
+    lesson({ date: "2026-09-12" }), // a recording with a date
+  ];
+  for (const l of bad) {
+    await assert.rejects(() => knowledgeBaseApi(fakeCall(l).call).lesson("r1"), /does not fit/, JSON.stringify(l));
+  }
+  const malformed = [
+    [lesson({ anchor: "folder" }), /anchor/],
+    [lesson({ notes: null }), /notes/],
+    [lesson({ notes: [note({ id: "" })] }), /id/],
+    [lesson({ notes: [{ ...note(), title: 1 }] }), /title/],
+    [lesson({ key: undefined }), /key/],
+  ];
+  for (const [l, msg] of malformed) {
+    await assert.rejects(() => knowledgeBaseApi(fakeCall(l).call).lesson("r1"), msg);
+  }
+  await assert.rejects(() => knowledgeBaseApi(fakeCall([subject({ subjectId: null })]).call).subjects(), /subjectId/);
+});
+
+test("TASK-155: a hit in the student's notes carries its place and the core's label", async () => {
+  const kinds = [
+    ["page", 3, "ваш конспект · стр. 3"],
+    ["slide", 2, "ваш конспект · слайд 2"],
+    ["section", 1, "ваш конспект · раздел „Ряды“"],
+    ["fragment", 4, "ваш конспект · фрагмент 4"],
+  ];
+  for (const [locatorKind, locatorN, label] of kinds) {
+    const h = noteHit({ locatorKind, locatorN, label });
+    const got = await knowledgeBaseApi(fakeCall({ hits: [hit(), h], truncated: false }).call).search("ряды");
+    assert.deepEqual(got.hits, [hit(), h]);
+    assert.equal(got.hits[1].label, label);
+  }
+  const bad = [
+    noteHit({ noteId: "" }),
+    noteHit({ materialId: "" }),
+    noteHit({ locatorKind: "" }),
+    noteHit({ locatorN: 0 }),
+    noteHit({ label: "" }),
+    hit({ noteId: "n1" }), // a recording section with a note place
+    hit({ label: "ваш конспект" }),
+    hit({ locatorKind: "page", locatorN: 1 }),
+  ];
+  for (const b of bad) {
+    await assert.rejects(() => knowledgeBaseApi(fakeCall({ hits: [b], truncated: false }).call).search("ab"), /does not fit/);
+  }
+  await assert.rejects(
+    () => knowledgeBaseApi(fakeCall({ hits: [noteHit({ locatorKind: "line" })], truncated: false }).call).search("ab"),
+    /locatorKind/,
+  );
+  await assert.rejects(
+    () => knowledgeBaseApi(fakeCall({ hits: [noteHit({ locatorN: -1 })], truncated: false }).call).search("ab"),
+    /locatorN/,
+  );
 });
 
 test("a lesson is «19.10 · лекция · Название»; an ad-hoc one is «Запись 14:05»", () => {
