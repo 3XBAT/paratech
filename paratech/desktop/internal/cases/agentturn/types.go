@@ -9,7 +9,7 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// Deps are the ports of the service; every one except Progress, Effects and Log is required.
+// Deps are the ports of the service; every one except Progress, Effects, Mentions and Log is required.
 type Deps struct {
 	Model    AgentModel
 	Threads  ThreadRepository
@@ -19,16 +19,19 @@ type Deps struct {
 	Tx       Tx
 	Clock    Clock
 	IDs      IDGenerator
-	Progress Progress // nil: no update before a Hub step
-	Effects  Effects  // nil: Rerun is refused with ErrInvalidConfig
+	Progress Progress  // nil: no update before a Hub step
+	Effects  Effects   // nil: Rerun is refused with ErrInvalidConfig
+	Mentions Mentioned // nil: no mention is kept, as none can be checked
 	Log      *slog.Logger
 }
 
 // AskInput is a request typed in the panel.
 type AskInput struct {
-	Scope   values.Scope // the context chip: the subject of this request, the only one sent
-	Text    string
-	Uploads []values.Ref // files dropped with the request (upload IDs)
+	ThreadID shared.ThreadID // the chat; empty: the current chat (a new one when there is none)
+	Scope    values.Scope    // the context chip: the subject of this request, the only one sent
+	Text     string
+	Uploads  []values.Ref     // files dropped with the request (upload IDs)
+	Mentions []values.Mention // «@» objects, at most values.MaxMentions; the ones that no longer exist are dropped
 }
 
 // TurnRef names the request a button belongs to; a button of an older request is ErrStaleTurn.
