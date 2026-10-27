@@ -812,7 +812,7 @@ export function parseEarlier(raw: unknown): EarlierView {
   }
 }
 
-/** The current state of a chat; update is null when the chat has no request yet. */
+/** The current state of a chat; update is null when the chat has no request or its request ended. */
 export interface CurrentView {
   problem: ChatProblem;
   update: UpdateView | null;
