@@ -1,6 +1,7 @@
 package library
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,9 +13,21 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
+// Operation names of the text cache log.
+const (
+	opTextCacheRead   = "library: cached text not read, extracted again"
+	opTextCacheBroken = "library: cached text broken, extracted again"
+	opTextCacheSave   = "library: text not cached"
+)
+
+// maxCachedTextBytes bounds a cached text read back; the cached form of a text within material.MaxTextBytes is far
+// smaller, so a larger file is broken.
+const maxCachedTextBytes = 4 * material.MaxTextBytes
+
 // MaterialText reads the text of an active material (TASK-122): the stored bytes are read again and checked against
-// the material's sha256, then the extractor reads them. It changes nothing. The homework workflow reads the text of
-// its material jobs through it (wired by the app).
+// the material's sha256, then the text cached for them is used, or the extractor reads them and the text is cached
+// (TASK-150). It changes no material. The homework workflow reads the text of its material jobs through it (wired by
+// the app).
 //
 // Errors (each also wraps the domain sentinel in brackets, for callers that cannot import this package):
 // ErrMaterialNotFound [shared.ErrNotFound], ErrMaterialRemoved [material.ErrRemoved], ErrNoText
@@ -50,6 +63,14 @@ func (s *Service) MaterialText(ctx context.Context, id shared.MaterialID) (*mate
 		return m, material.Text{}, fmt.Errorf("%w: %w", ErrFileDamaged, material.ErrDamaged)
 	}
 
+	cache, err := material.TextRef(m.Digest())
+	if err != nil {
+		return m, material.Text{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+	}
+	if text, ok := s.cachedText(ctx, id, cache); ok {
+		return m, text, nil
+	}
+
 	text, err := s.texts.Extract(ctx, m.Type(), data)
 	switch {
 	case errors.Is(err, material.ErrTextNotExtracted):
@@ -59,22 +80,60 @@ func (s *Service) MaterialText(ctx context.Context, id shared.MaterialID) (*mate
 	case err != nil:
 		return m, material.Text{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
+	s.cacheText(ctx, id, cache, text)
 	return m, text, nil
+}
+
+// cachedText reads the text cached for a file (ADR-0027 «Text»). The cache is derived: a missing one is a miss, a
+// broken one is logged and rebuilt by the caller, which still checks the file itself first.
+func (s *Service) cachedText(ctx context.Context, id shared.MaterialID, ref shared.ArtifactRef) (material.Text, bool) {
+	data, err := s.readArtifact(ctx, ref, maxCachedTextBytes)
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return material.Text{}, false
+	case err != nil:
+		if ctx.Err() == nil {
+			s.log.Warn(opTextCacheRead, slog.String("material", string(id)), slog.Any("cause", err))
+		}
+		return material.Text{}, false
+	}
+	text, err := material.DecodeCache(data)
+	if err != nil {
+		s.log.Warn(opTextCacheBroken, slog.String("material", string(id)), slog.Any("cause", err))
+		return material.Text{}, false
+	}
+	return text, true
+}
+
+// cacheText writes the text read from a file to its cache; a failed write is logged, the next read extracts again.
+func (s *Service) cacheText(ctx context.Context, id shared.MaterialID, ref shared.ArtifactRef, text material.Text) {
+	data, err := text.EncodeCache()
+	if err == nil {
+		err = s.blobs.Write(ctx, ref, bytes.NewReader(data))
+	}
+	if err != nil {
+		s.log.Warn(opTextCacheSave, slog.String("material", string(id)), slog.Any("cause", err))
+	}
 }
 
 // readBlob reads a stored file, at most material.MaxBytes; a larger one is not a file of the library.
 func (s *Service) readBlob(ctx context.Context, ref shared.ArtifactRef) ([]byte, error) {
+	return s.readArtifact(ctx, ref, material.MaxBytes)
+}
+
+// readArtifact reads a stored artifact of at most limit bytes.
+func (s *Service) readArtifact(ctx context.Context, ref shared.ArtifactRef, limit int) ([]byte, error) {
 	rc, err := s.blobs.Open(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rc.Close() }()
-	data, err := io.ReadAll(io.LimitReader(rc, material.MaxBytes+1))
+	data, err := io.ReadAll(io.LimitReader(rc, int64(limit)+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(data) > material.MaxBytes {
-		return nil, fmt.Errorf("stored file larger than %d bytes", material.MaxBytes)
+	if len(data) > limit {
+		return nil, fmt.Errorf("stored artifact larger than %d bytes", limit)
 	}
 	return data, nil
 }

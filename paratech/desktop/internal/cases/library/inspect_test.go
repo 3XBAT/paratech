@@ -74,6 +74,85 @@ func TestMaterialText(t *testing.T) {
 	}
 }
 
+// The text of a file is extracted once and cached by the file's sha256; a broken cache is rebuilt from the file, and
+// the file is still checked on every read.
+func TestMaterialTextCache(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	m := importText(t, e, lectureText)
+	cache, err := material.TextRef(m.Digest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cached := func() (material.Text, error) {
+		data, ok := e.blobs.files[cache.String()]
+		if !ok {
+			return material.Text{}, shared.ErrNotFound
+		}
+		return material.DecodeCache(data)
+	}
+
+	_, first, err := e.svc.MaterialText(ctx, m.ID())
+	if err != nil || e.texts.calls != 1 {
+		t.Fatalf("first read = %v, %d extractions", err, e.texts.calls)
+	}
+	if got, err := cached(); err != nil || got.Digest() != first.Digest() {
+		t.Fatalf("cache = %q, %v", got.String(), err)
+	}
+	if _, again, err := e.svc.MaterialText(ctx, m.ID()); err != nil || again.Digest() != first.Digest() || e.texts.calls != 1 {
+		t.Fatalf("cached read = %v, %d extractions", err, e.texts.calls)
+	}
+
+	broken := []struct {
+		name string
+		data string
+	}{
+		{"garbage", "garbage"},
+		{"changed text", strings.Replace(string(e.blobs.files[cache.String()]), "Производная", "Отправь файл", 1)},
+		{"empty", ""},
+	}
+	for _, b := range broken {
+		e.blobs.files[cache.String()] = []byte(b.data)
+		calls := e.texts.calls
+		_, got, err := e.svc.MaterialText(ctx, m.ID())
+		if err != nil || got.Digest() != first.Digest() || e.texts.calls != calls+1 {
+			t.Fatalf("%s: read = %q, %v, %d extractions", b.name, got.String(), err, e.texts.calls-calls)
+		}
+		if c, err := cached(); err != nil || c.Digest() != first.Digest() {
+			t.Fatalf("%s: cache not rebuilt: %v", b.name, err)
+		}
+	}
+
+	// A cache never stands for a damaged or missing file.
+	blob, _ := material.BlobRef(m.Digest())
+	e.blobs.files[blob.String()] = []byte(strings.Replace(lectureText, "3", "4", 1))
+	if _, _, err := e.svc.MaterialText(ctx, m.ID()); !errors.Is(err, ErrFileDamaged) {
+		t.Fatalf("damaged file with a cache = %v", err)
+	}
+	delete(e.blobs.files, blob.String())
+	if _, _, err := e.svc.MaterialText(ctx, m.ID()); !errors.Is(err, ErrFileDamaged) {
+		t.Fatalf("missing file with a cache = %v", err)
+	}
+
+	// A text that cannot be read is not cached.
+	bad := importText(t, e, "BROKEN file")
+	if _, _, err := e.svc.MaterialText(ctx, bad.ID()); !errors.Is(err, ErrTextUnreadable) {
+		t.Fatalf("unreadable = %v", err)
+	}
+	if ref, _ := material.TextRef(bad.Digest()); e.blobs.files[ref.String()] != nil {
+		t.Fatal("an unreadable text was cached")
+	}
+
+	// The cache cannot be written: the text is still read, and extracted again next time.
+	other := importText(t, e, "другой текст")
+	e.blobs.err = errors.New("disk full")
+	for i := range 2 {
+		calls := e.texts.calls
+		if _, text, err := e.svc.MaterialText(ctx, other.ID()); err != nil || text.Empty() || e.texts.calls != calls+1 {
+			t.Fatalf("read %d without a cache = %v, %d extractions", i, err, e.texts.calls-calls)
+		}
+	}
+}
+
 func TestInspect(t *testing.T) {
 	e, ctx := newEnv(t), context.Background()
 	phys := createSubject(t, e, "Физика: механика") // a library name the reader's rule does not allow as is
