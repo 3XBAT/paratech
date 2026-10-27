@@ -131,6 +131,8 @@ func (s *Service) Restore(ctx context.Context, id shared.ThreadID) (Chat, error)
 }
 
 // update loads the chat, applies move and saves it, again on a version conflict (a request saved in between).
+// A move that changes nothing is not saved: a save bumps the version, and a running step whose save then conflicts
+// drops its reply.
 func (s *Service) update(ctx context.Context, id shared.ThreadID, op string, move func(*thread.Thread, time.Time) error) (Chat, error) {
 	if err := id.Validate(); err != nil {
 		return Chat{}, fmt.Errorf("%s: %w: %w", op, ErrInvalidInput, err)
@@ -140,8 +142,12 @@ func (s *Service) update(ctx context.Context, id shared.ThreadID, op string, mov
 		if err != nil {
 			return Chat{}, fmt.Errorf("%s: %w", op, err)
 		}
+		title, archivedAt := th.Title(), th.ArchivedAt()
 		if err := move(th, s.clock.Now()); err != nil {
 			return Chat{}, fmt.Errorf("%s: %w", op, err)
+		}
+		if th.Title() == title && th.ArchivedAt().Equal(archivedAt) {
+			return chatOf(th), nil
 		}
 		err = s.chats.Save(ctx, th)
 		if errors.Is(err, shared.ErrVersionConflict) && attempt < maxSaves {

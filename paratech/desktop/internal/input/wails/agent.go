@@ -161,7 +161,8 @@ func (s *AgentService) State(ctx context.Context) AgentState {
 }
 
 // Ask starts a request in the chat of in; refused with "offline" while the Hub is not set up. A chat that does not
-// exist comes back as an update with a problem, like any outcome of the request.
+// exist comes back as an update with problem "failed", like any outcome of the request: the update problems
+// (agentUpdateProblems) have no not_found, unlike the chat calls.
 func (s *AgentService) Ask(ctx context.Context, in AgentAskInput) AgentResult {
 	scope, ok := scopeOf(in)
 	if !ok {

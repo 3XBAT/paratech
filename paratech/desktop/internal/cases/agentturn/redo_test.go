@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/agent/thread"
+	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -34,6 +35,53 @@ func competeOnce(t *testing.T, e *env, id shared.ThreadID, move func(*thread.Thr
 }
 
 func rename(th *thread.Thread, now time.Time) error { return th.Rename("Мой чат", now) }
+
+// A rename saved between the load of «Да» or the typed answers and their first save does not lose the click: the
+// answer is applied again on the stored chat, once, and the result reaches the planner once.
+func TestCardAnswerSurvivesARename(t *testing.T) {
+	plan := `{"summary":"План","steps":[{"tool":"create_subject","arguments":{"name":"Химия"}}]}`
+	q := `{"questions":[{"kind":"choice","question":"Какой вариант?","options":["А","Б"],"default":0}]}`
+	tests := []struct {
+		name   string
+		card   values.RawCall
+		answer func(e *env, r TurnRef) (Step, error)
+		want   string
+	}{
+		{"approve plan", raw("p1", "show_plan", plan), func(e *env, r TurnRef) (Step, error) {
+			return e.svc.ApprovePlan(t.Context(), r)
+		}, `{"approved":true}`},
+		{"answer questions", raw("q1", "ask_questions", q), func(e *env, r TurnRef) (Step, error) {
+			return e.svc.AnswerQuestions(t.Context(), r, []values.Answer{{Question: 0, Option: 1}})
+		}, `{"answers":[{"question":0,"option":1}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.model.then(tt.card).then(raw("r1", "reply", `{"text":"ок"}`))
+			st := ask(t, e, "сделай")
+
+			competeOnce(t, e, st.Thread, rename)
+			got, err := tt.answer(e, ref(st))
+			if err != nil {
+				t.Fatalf("answer after a rename = %v", err)
+			}
+			if got.Status != thread.StatusDone {
+				t.Fatalf("step = %+v, want DONE", got)
+			}
+			reqs := e.model.requests()
+			if len(reqs) != 2 {
+				t.Fatalf("Hub steps = %d, want 2", len(reqs))
+			}
+			h := reqs[1].History
+			if a := h[len(h)-1].Results; len(a) != 1 || a[0].ResultJSON != tt.want {
+				t.Fatalf("result sent = %+v, want %s", a, tt.want)
+			}
+			if th := storedThread(t, e, st.Thread); th.Title() != "Мой чат" {
+				t.Fatalf("chat title %q, want the rename kept", th.Title())
+			}
+		})
+	}
+}
 
 // A rename or an archive saved between Ask's load and its first save does not lose the student's message: the request
 // is asked again on the stored chat, once, and reaches the Hub once.

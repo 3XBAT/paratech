@@ -184,8 +184,9 @@ func (s *Service) finish(ctx context.Context, c *change, op string) (Step, error
 	return stepOf(c), nil
 }
 
-// store saves c. The first save of an Ask that meets a version conflict (its chat was saved after the load, nothing
-// of the request is stored yet) rebuilds c on the stored chat once and reports again: the caller goes on with it.
+// store saves c. The first save of an Ask or a card answer that meets a version conflict (its chat was saved after the
+// load, nothing of the change is stored yet) rebuilds c on the stored chat once and reports again: the caller goes on
+// with it.
 func (s *Service) store(ctx context.Context, c *change) (again bool, err error) {
 	err = s.save(ctx, c)
 	redo := c.redo

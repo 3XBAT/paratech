@@ -70,9 +70,12 @@ export interface AskInput {
   assignmentId: string;
   /** "", today, subjects, assignments, schedule, journal or settings. */
   screen: string;
-  /** The chat; absent or "" is the current chat (a new one when there is none). */
+  /**
+   * The chat; absent or "" is the current chat (a new one when there is none). A chat that no longer exists comes back
+   * as an update with problem "failed" (the update problems have no not_found).
+   */
   threadId?: string;
-  /** The «@» objects of the text, at most 5 or so (the core checks); absent means none. */
+  /** The «@» objects of the text, at most 8 (values.MaxMentions; the core checks); absent means none. */
   mentions?: MentionView[];
 }
 

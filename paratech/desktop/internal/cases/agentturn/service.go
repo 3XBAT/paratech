@@ -85,7 +85,8 @@ type change struct {
 	context values.RefSet // IDs of the base and the scope of the current step
 	calls   []Call
 	cards   []values.Card
-	// redo rebuilds an Ask's change on the stored chat when its first save meets a version conflict; nil once stored.
+	// redo rebuilds the change of an Ask or a card answer on the stored chat when its first save meets a version
+	// conflict; nil once stored.
 	redo func() (*change, error)
 }
 
@@ -311,14 +312,27 @@ func (s *Service) AnswerQuestions(ctx context.Context, ref TurnRef, answers []va
 	})
 }
 
-// answerUI answers the open card call of tool with the result of decide, which also moves the request.
+// answerUI answers the open card call of tool with the result of decide, which also moves the request. A rename saved
+// between the load and the first save (allowed while the request waits for the student) would make that save a
+// version conflict and drop the click, so the answer is applied again once on the stored chat, as for Ask.
 func (s *Service) answerUI(ctx context.Context, ref TurnRef, tool values.Tool, op string,
 	decide func(c *change, id string) (values.ToolResult, error)) (Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	c, err := s.load(ctx, ref, op)
+	c, err := s.answered(ctx, ref, tool, op, decide)
 	if err != nil {
 		return Step{}, err
+	}
+	c.redo = func() (*change, error) { return s.answered(ctx, ref, tool, op, decide) }
+	return s.drive(ctx, c, op)
+}
+
+// answered loads the request of ref and answers its open card call of tool, not yet stored.
+func (s *Service) answered(ctx context.Context, ref TurnRef, tool values.Tool, op string,
+	decide func(c *change, id string) (values.ToolResult, error)) (*change, error) {
+	c, err := s.load(ctx, ref, op)
+	if err != nil {
+		return nil, err
 	}
 	turn, _ := c.th.Turn()
 	id := ""
@@ -329,16 +343,16 @@ func (s *Service) answerUI(ctx context.Context, ref TurnRef, tool values.Tool, o
 		}
 	}
 	if id == "" {
-		return Step{}, fmt.Errorf("%s: %w: no open %s card", op, thread.ErrInvalidTransition, tool)
+		return nil, fmt.Errorf("%s: %w: no open %s card", op, thread.ErrInvalidTransition, tool)
 	}
 	res, err := decide(c, id)
 	if err != nil {
-		return Step{}, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 	if err := c.th.Answer(res, values.Ref{}, s.clock.Now()); err != nil {
-		return Step{}, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
-	return s.drive(ctx, c, op)
+	return c, nil
 }
 
 // maxStopSaves bounds the saves of «Стоп» when steps keep saving in between.
