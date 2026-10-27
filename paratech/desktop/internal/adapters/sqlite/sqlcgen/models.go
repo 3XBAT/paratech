@@ -356,13 +356,15 @@ type SttSpeed struct {
 }
 
 type Subject struct {
-	ID        string
-	Name      string
-	NameKey   string
-	Semester  string
-	Version   int64
-	CreatedAt int64
-	UpdatedAt int64
+	ID           string
+	Name         string
+	NameKey      string
+	Semester     string
+	Version      int64
+	CreatedAt    int64
+	UpdatedAt    int64
+	TeacherName  string
+	TeacherEmail string
 }
 
 type SubjectAlias struct {

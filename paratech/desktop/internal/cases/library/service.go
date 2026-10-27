@@ -557,6 +557,10 @@ func domainError(err error) error {
 		to = ErrInvalidName
 	case errors.Is(err, subject.ErrInvalidFolderName):
 		to = ErrInvalidFolderName
+	case errors.Is(err, subject.ErrInvalidTeacherName):
+		to = ErrInvalidTeacherName
+	case errors.Is(err, subject.ErrInvalidTeacherEmail):
+		to = ErrInvalidTeacherEmail
 	case errors.Is(err, subject.ErrFolderExists):
 		to = ErrFolderTaken
 	case errors.Is(err, subject.ErrFolderNotFound):
