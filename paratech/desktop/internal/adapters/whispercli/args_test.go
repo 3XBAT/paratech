@@ -11,8 +11,7 @@ import (
 )
 
 func TestBuildArgs(t *testing.T) {
-	got := buildArgs("/d/models/m.bin", "/d/recordings/-a b.wav", "/d/work/run-1/out", 4, "ru")
-	want := []string{
+	base := []string{
 		"-m", "/d/models/m.bin",
 		"-f", "/d/recordings/-a b.wav",
 		"-of", "/d/work/run-1/out",
@@ -20,8 +19,22 @@ func TestBuildArgs(t *testing.T) {
 		"-t", "4",
 		"-l", "ru",
 	}
-	if !slices.Equal(got, want) {
-		t.Errorf("args = %q, want %q", got, want)
+	tests := []struct {
+		name string
+		vad  string
+		want []string
+	}{
+		{"without VAD", "", base},
+		// Only silence is skipped: no beam or best-of flags, the decoder stays the CLI default (owner, 2026-10-27).
+		{"with VAD", "/app/ggml-silero-v5.1.2.bin", append(slices.Clone(base), "--vad", "-vm", "/app/ggml-silero-v5.1.2.bin")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildArgs("/d/models/m.bin", "/d/recordings/-a b.wav", "/d/work/run-1/out", 4, "ru", tt.vad)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("args = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

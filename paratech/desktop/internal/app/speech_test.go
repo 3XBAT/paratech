@@ -95,18 +95,28 @@ func TestEmbeddedSpeechManifest(t *testing.T) {
 		spec.EntryPrefix() != "Release/" || spec.Executable() != "whisper-cli.exe" {
 		t.Fatalf("manifest %+v", spec)
 	}
-	if got := strings.Join(spec.DownloadHosts().Hosts(), ","); got != "github.com,objects.githubusercontent.com,release-assets.githubusercontent.com" {
+	wantHosts := "cas-bridge.xethub.hf.co,cdn-lfs-eu-1.hf.co,cdn-lfs-us-1.hf.co,cdn-lfs.hf.co,github.com,huggingface.co," +
+		"objects.githubusercontent.com,release-assets.githubusercontent.com,transfer.xethub.hf.co,us.aws.cdn.hf.co"
+	if got := strings.Join(spec.DownloadHosts().Hosts(), ","); got != wantHosts {
 		t.Fatalf("hosts %s", got)
 	}
 	var names []string
-	for _, f := range spec.Files() {
+	for _, f := range spec.ArchiveFiles() {
 		names = append(names, f.Name())
 	}
 	want := "whisper-cli.exe,whisper.dll,ggml.dll,ggml-base.dll,ggml-cpu-alderlake.dll,ggml-cpu-cannonlake.dll," +
 		"ggml-cpu-cascadelake.dll,ggml-cpu-haswell.dll,ggml-cpu-icelake.dll,ggml-cpu-sandybridge.dll," +
 		"ggml-cpu-skylakex.dll,ggml-cpu-sse42.dll,ggml-cpu-x64.dll"
-	if strings.Join(names, ",") != want || spec.TotalBytes() != 11603968 {
+	if strings.Join(names, ",") != want || spec.TotalBytes() != 11603968+885098 {
 		t.Fatalf("files %v (%d bytes)", names, spec.TotalBytes())
+	}
+
+	// TASK-222: the Silero VAD model of whisper.cpp, downloaded on its own (docs/refs/whisper.md, ADR-0030).
+	sep := spec.SeparateFiles()
+	if spec.VADModel() != "ggml-silero-v5.1.2.bin" || len(sep) != 1 || sep[0].Name() != spec.VADModel() ||
+		sep[0].Size() != 885098 || sep[0].SHA256() != "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf" ||
+		sep[0].Source().String() != "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin" {
+		t.Fatalf("VAD model %q, separate files %+v", spec.VADModel(), sep)
 	}
 }
 
@@ -201,6 +211,80 @@ func TestSpeechComponentInstallsWithoutRestart(t *testing.T) {
 	b.env.speech = a.env.speech
 	if st := startCore(t, b).Speech.Status(); st.State != speechcomponent.StateReady {
 		t.Fatalf("after a restart: %+v, want ready", st)
+	}
+}
+
+// TASK-222: the install also downloads the VAD model on its own, puts it next to the program, and the engine passes
+// it to whisper-cli (the fake refuses --vad without an existing -vm file).
+func TestSpeechComponentInstallsTheVADModel(t *testing.T) {
+	ctx := context.Background()
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, size, binSum := hashTestBinary(t, bin)
+	archive := zipOf(t, "Release/"+name, bin)
+	vad := []byte("silero vad model of the test")
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := map[string][]byte{"/release/speech.zip": archive, "/vad/ggml-silero.bin": vad}[r.URL.Path]
+		if body == nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Length", fmt.Sprint(len(body)))
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	sum, vadSum := sha256.Sum256(archive), sha256.Sum256(vad)
+	manifest := fmt.Appendf(nil, `{"schema_version": 1, "version": "test", "source_url": %q, "size_bytes": %d,
+ "sha256": %q, "download_hosts": [], "entry_prefix": "Release/", "executable": %q, "vad_model": "ggml-silero.bin",
+ "files": [{"name": %q, "size_bytes": %d, "sha256": %q},
+ {"name": "ggml-silero.bin", "size_bytes": %d, "sha256": %q, "source_url": %q}]}`,
+		srv.URL+"/release/speech.zip", len(archive), hex.EncodeToString(sum[:]), name, name, size, binSum,
+		len(vad), hex.EncodeToString(vadSum[:]), srv.URL+"/vad/ggml-silero.bin")
+
+	dir := t.TempDir()
+	a, _ := newTestAppWith(t, dir)
+	a.env.speech = speechEnv{
+		manifest: manifest, bundledDir: t.TempDir(), source: httpdownload.New(httpdownload.WithHTTPClient(srv.Client())),
+	}
+	core := startCore(t, a)
+	installModel(t, a, "m1", testenv.WhisperOK)
+	rec := completedRecording(t, a, "rec-1")
+	if err := a.core.transcriptions.RecordingCompleted(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := core.Speech.StartInstall(); err != nil {
+		t.Fatal(err)
+	}
+	testenv.Eventually(t, "the component is installed", func() bool {
+		st := core.Speech.Status()
+		if st.State == speechcomponent.StateFailed {
+			t.Fatalf("install failed: %v", st.Err)
+		}
+		return st.State == speechcomponent.StateReady
+	}, nil)
+	jobs := sqlite.NewJobRepository(a.core.db)
+	stt := onlyJob(t, jobs, transcribe.JobType)
+	testenv.Eventually(t, "the STT job runs with the VAD model", func() bool {
+		j, err := jobs.Get(ctx, stt.ID())
+		if err == nil && j.Status() == job.StatusFailed {
+			t.Fatalf("STT job failed: %s", j.LastError())
+		}
+		return err == nil && j.Status() == job.StatusCompleted
+	}, nil)
+
+	installed := componentstore.InstalledDir(dir)
+	entries, err := os.ReadDir(installed)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("installed folder: %v, %v; want the program and the VAD model", entries, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(installed, "ggml-silero.bin")); err != nil || !bytes.Equal(got, vad) {
+		t.Fatalf("installed VAD model %q, %v", got, err)
+	}
+	if entries, err := os.ReadDir(filepath.Dir(installed)); err != nil || len(entries) != 1 {
+		t.Fatalf("components holds %v, %v; want only the installed folder (the downloads are removed)", entries, err)
 	}
 }
 
