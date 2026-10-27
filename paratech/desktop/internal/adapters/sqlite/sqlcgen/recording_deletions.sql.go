@@ -133,7 +133,7 @@ SELECT a.id, a.title,
        (SELECT COUNT(*) FROM deliveries v WHERE v.assignment_id = a.id) AS deliveries
 FROM assignments a
 JOIN transcripts t ON t.id = a.transcript_id
-WHERE t.recording_id = ?1
+WHERE t.recording_id = ?1 AND a.deleted_at IS NULL
 ORDER BY a.created_at, a.source_index, a.id
 `
 
@@ -144,7 +144,8 @@ type ListRecordingAssignmentsRow struct {
 	Deliveries int64
 }
 
-// The assignments found in the transcripts of the recording, with whether a draft or any email exists.
+// The assignments found in the transcripts of the recording, with whether a draft or any email exists. One the
+// student deleted is neither offered nor purged: it stays, its transcript link set NULL (ADR-0029).
 func (q *Queries) ListRecordingAssignments(ctx context.Context, recordingID string) ([]ListRecordingAssignmentsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listRecordingAssignments, recordingID)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/assignment"
+	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -162,6 +163,167 @@ func TestDeleteAssignmentRefusals(t *testing.T) {
 }
 
 var errBusyRead = errors.New("disk I/O error")
+
+// fakeRemovals is the deadline_event_removals queue; err fails every call.
+type fakeRemovals struct {
+	queued map[shared.AssignmentID]time.Time
+	err    error
+}
+
+func (f *fakeRemovals) QueueDeadlineRemoval(_ context.Context, id shared.AssignmentID, at time.Time) error {
+	if f.err != nil {
+		return f.err
+	}
+	if _, ok := f.queued[id]; !ok {
+		f.queued[id] = at
+	}
+	return nil
+}
+
+func (f *fakeRemovals) PurgeDeadlineRemoval(_ context.Context, id shared.AssignmentID) error {
+	if f.err != nil {
+		return f.err
+	}
+	delete(f.queued, id)
+	return nil
+}
+
+// fakeSyncRequests counts the calendar sync requests.
+type fakeSyncRequests struct{ n int }
+
+func (f *fakeSyncRequests) RequestSync(context.Context) { f.n++ }
+
+var (
+	_ DeadlineRemovals      = (*fakeRemovals)(nil)
+	_ CalendarSyncRequester = (*fakeSyncRequests)(nil)
+)
+
+func withRemovals(e *createEnv) (*fakeRemovals, *fakeSyncRequests) {
+	r, s := &fakeRemovals{queued: map[shared.AssignmentID]time.Time{}}, &fakeSyncRequests{}
+	e.svc.removals, e.svc.sync = r, s
+	return r, s
+}
+
+// «Удалить» queues the removal of the deadline event and asks for a sync after the commit; «Вернуть» before the sync
+// forgets it; a second delete after a restore queues it again (ADR-0029).
+func TestDeleteAssignmentQueuesTheDeadlineEventRemoval(t *testing.T) {
+	e := newCreateEnv(t, testSubjects)
+	removals, syncs := withRemovals(e)
+	ctx := context.Background()
+	v, err := e.svc.CreateAssignment(ctx, NewAssignment{Title: "Задание", Date: "2026-10-30"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	e.clock.Advance(time.Minute)
+	deleted, err := e.svc.DeleteAssignment(ctx, v.ID, v.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if at, ok := removals.queued[v.ID]; !ok || !at.Equal(e.clock.Now()) || syncs.n != 1 {
+		t.Fatalf("after the delete: queued %v (%v), %d sync requests", ok, at, syncs.n)
+	}
+
+	restored, err := e.svc.RestoreAssignment(ctx, v.ID, deleted.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := removals.queued[v.ID]; ok || syncs.n != 1 {
+		t.Fatalf("after the restore: queued %v, %d sync requests", ok, syncs.n)
+	}
+
+	if _, err := e.svc.DeleteAssignment(ctx, restored.ID, restored.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := removals.queued[v.ID]; !ok || syncs.n != 2 {
+		t.Fatalf("after the second delete: queued %v, %d sync requests", ok, syncs.n)
+	}
+}
+
+// A refused delete queues nothing and asks for no sync; a queue that fails fails the delete before the save.
+func TestDeleteAssignmentQueueRefusals(t *testing.T) {
+	cases := []struct {
+		name    string
+		prepare func(e *createEnv, r *fakeRemovals, id shared.AssignmentID)
+		want    error
+	}{
+		{name: "in use", want: assignment.ErrInUse,
+			prepare: func(e *createEnv, _ *fakeRemovals, id shared.AssignmentID) { e.busy[id] = true }},
+		{name: "the queue fails", want: errBusyRead,
+			prepare: func(_ *createEnv, r *fakeRemovals, _ shared.AssignmentID) { r.err = errBusyRead }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newCreateEnv(t, testSubjects)
+			removals, syncs := withRemovals(e)
+			ctx := context.Background()
+			v, err := e.svc.CreateAssignment(ctx, NewAssignment{Title: "Задание"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.prepare(e, removals, v.ID)
+
+			if _, err := e.svc.DeleteAssignment(ctx, v.ID, v.Version); !errors.Is(err, c.want) {
+				t.Fatalf("err = %v, want %v", err, c.want)
+			}
+			if st := e.assignments[v.ID]; !st.DeletedAt.IsZero() || st.Version != v.Version {
+				t.Fatalf("a refused delete changed the assignment: %+v", st)
+			}
+			if len(removals.queued) != 0 || syncs.n != 0 {
+				t.Fatalf("queued %v, %d sync requests", removals.queued, syncs.n)
+			}
+		})
+	}
+
+	t.Run("restore and the queue fails", func(t *testing.T) {
+		e := newCreateEnv(t, testSubjects)
+		removals, _ := withRemovals(e)
+		ctx := context.Background()
+		v, err := e.svc.CreateAssignment(ctx, NewAssignment{Title: "Задание"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, err := e.svc.DeleteAssignment(ctx, v.ID, v.Version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		removals.err = errBusyRead
+		if _, err := e.svc.RestoreAssignment(ctx, v.ID, d.Version); !errors.Is(err, errBusyRead) {
+			t.Fatalf("restore: err = %v", err)
+		}
+		if e.assignments[v.ID].DeletedAt.IsZero() {
+			t.Fatal("a failed restore brought it back")
+		}
+	})
+}
+
+// The delete leaves a proposal of the assignment as it is; its «Да» afterwards goes STALE as assignment_deleted.
+func TestDeleteLeavesProposalsUntilYes(t *testing.T) {
+	e := newCreateEnv(t, testSubjects)
+	withRemovals(e)
+	ctx := context.Background()
+	v, err := e.svc.CreateAssignment(ctx, NewAssignment{Title: "Задание", Date: "2026-10-30"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := e.svc.ProposeDeadline(ctx, v.ID)
+	if err != nil || p.Status != proposal.StatusValidated {
+		t.Fatalf("ProposeDeadline = %+v, %v", p, err)
+	}
+	if _, err := e.svc.DeleteAssignment(ctx, v.ID, v.Version); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e.svc.Get(ctx, p.ID); err != nil || got.Status != proposal.StatusValidated {
+		t.Fatalf("proposal after the delete = %+v, %v; want VALIDATED", got, err)
+	}
+
+	if _, err := e.svc.ConfirmDeadline(ctx, p.ID); !errors.Is(err, proposal.ErrStale) {
+		t.Fatalf("«Да» after the delete = %v, want ErrStale", err)
+	}
+	if got, _ := e.svc.Get(ctx, p.ID); got.Status != proposal.StatusStale || got.Reason != proposal.ReasonAssignmentDeleted {
+		t.Fatalf("proposal after «Да» = %s %q, want STALE assignment_deleted", got.Status, got.Reason)
+	}
+}
 
 func TestRestoreAssignmentChecksTheVersion(t *testing.T) {
 	e := newCreateEnv(t, testSubjects)

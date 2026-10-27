@@ -460,7 +460,7 @@ func (p *Proposal) check(f Facts, now time.Time) RejectReason {
 }
 
 // Recheck compares a CONFIRMED proposal with fresh trusted facts right before execution. If what the user confirmed
-// no longer holds (the assignment is gone; for an email the recipient, the attached content or the subject differs;
+// no longer holds (the assignment is gone or deleted; for an email the recipient, the attached content or the subject differs;
 // for the send of a work also the file the work points at, or the file left «ДЗ»),
 // the proposal moves to the terminal STALE status with the reason and Recheck returns an error wrapping ErrStale; the
 // caller saves the proposal and calls no port. Any other status yields ErrNotConfirmed. The due time is not checked
@@ -483,6 +483,8 @@ func (p *Proposal) Recheck(f Facts, now time.Time) error {
 
 func (p *Proposal) staleReason(f Facts) RejectReason {
 	switch {
+	case f.AssignmentDeleted:
+		return ReasonAssignmentDeleted
 	case !f.AssignmentExists:
 		return ReasonUnknownAssignment
 	case p.kind.NeedsRecipient() && f.Recipient != p.recipient:

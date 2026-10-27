@@ -244,6 +244,28 @@ type DeadlineCalendar interface {
 	UpsertDeadline(ctx context.Context, cmd proposal.CalendarCommand) error
 }
 
+// DeadlineRemovals is the queue of the Google deadline events of deleted assignments (PRD section 11.3; ADR-0029, the
+// deadline_event_removals pattern of ADR-0018): the calendar sync deletes the event (gone is success) and then the row.
+// Google is only a view of local data (hard rule 6). Implemented by the sqlite adapter; both calls join the caller's
+// transaction.
+type DeadlineRemovals interface {
+	// QueueDeadlineRemoval stores the removal of the event of assignment id, queued at at; one already queued stays as
+	// it is (PRD section 11.3; ADR-0029: «Удалить»).
+	QueueDeadlineRemoval(ctx context.Context, id shared.AssignmentID, at time.Time) error
+
+	// PurgeDeadlineRemoval forgets a removal still waiting; none is not an error (PRD section 11.3; ADR-0029:
+	// «Вернуть»).
+	PurgeDeadlineRemoval(ctx context.Context, id shared.AssignmentID) error
+}
+
+// CalendarSyncRequester asks for a calendar sync, which removes the queued deadline events (PRD section 11.3).
+// Implemented in the app over the calendar sync; it only logs, and without a sign-in it does nothing: the queue waits
+// for the next sync.
+type CalendarSyncRequester interface {
+	// RequestSync asks for a sync run (PRD section 11.3).
+	RequestSync(ctx context.Context)
+}
+
 // UnresolvedDeliveries tells whether an email of an assignment may still go out or may have gone out unseen, so that
 // Drafts.ExportDraft does not overwrite the file that email attaches (PRD section 10, AC-15, hard rule 7).
 // Implemented by senddelivery.Service.
