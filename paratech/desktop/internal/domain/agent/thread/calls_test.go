@@ -63,26 +63,29 @@ func TestExpect(t *testing.T) {
 	}
 }
 
+// A chat spans subjects (ADR-0028): the subject belongs to the request's scope, never to the thread's key.
 func TestStartRequestScope(t *testing.T) {
 	s1 := ref(t, values.KindSubject, "s1")
 	scope, err := values.NewScope(s1, values.ScreenToday, values.Ref{}, values.Ref{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	none, err := New("th1", NoSubject, t0)
+	other, err := values.NewScope(ref(t, values.KindSubject, "s2"), values.ScreenSubjects, values.Ref{}, values.Ref{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := none.StartRequest(scope, at(1)); !errors.Is(err, ErrInvalidThread) {
-		t.Fatalf("subject scope in the no-subject thread = %v", err)
-	}
-	key, _ := SubjectKey(s1)
-	th, err := New("th2", key, t0)
+	th, err := New("th1", NoSubject, t0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := th.StartRequest(scope, at(1)); err != nil {
+		t.Fatalf("subject scope in the no-subject thread = %v", err)
+	}
+	if err := th.Complete(at(2)); err != nil {
 		t.Fatal(err)
+	}
+	if err := th.StartRequest(other, at(3)); err != nil {
+		t.Fatalf("another subject in the same chat = %v", err)
 	}
 	st := th.State()
 	st.Version = 1
@@ -90,12 +93,12 @@ func TestStartRequestScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if turn, _ := back.Turn(); turn.Scope() != scope {
+	if turn, _ := back.Turn(); turn.Scope() != other {
 		t.Fatalf("restored scope = %+v", turn.Scope())
 	}
 	st.Current.Scope = values.Scope{}
-	if _, err := Restore(st); !errors.Is(err, ErrInvalidThread) {
-		t.Fatalf("restore with a scope of another thread = %v", err)
+	if _, err := Restore(st); err != nil {
+		t.Fatalf("restore with an empty scope = %v", err)
 	}
 }
 
@@ -532,21 +535,22 @@ func TestWindow(t *testing.T) {
 		entries = append(entries, entry(turn, fmt.Sprintf("просьба %d", turn), nil), entry(turn, "", sealed), entry(turn, "", nil, ok("c")))
 	}
 	got := Window(entries, 20)
-	// Earlier requests shrink to pairs «text, reply» (the last MaxHistoryTurns of them); only the current one has
-	// echoes, so the last echo is always one the Hub still keeps.
-	if len(got) != 2*MaxHistoryTurns+3 || got[0].StudentText != "просьба 8" {
+	// Earlier requests shrink to pairs «text, reply» (all 19 fit MaxHistoryTurns); only the current one has echoes, so
+	// the last echo is always one the Hub still keeps.
+	const earlier = 19
+	if len(got) != 2*earlier+3 || got[0].StudentText != "просьба 1" {
 		t.Fatalf("window has %d entries, first %+v", len(got), got[0])
 	}
-	for i := range MaxHistoryTurns {
+	for i := range earlier {
 		text, reply := got[2*i], got[2*i+1]
-		if text.StudentText != fmt.Sprintf("просьба %d", 8+i) || text.AgentReply != "" || text.Calls != nil || len(text.Results) > 0 {
+		if text.StudentText != fmt.Sprintf("просьба %d", 1+i) || text.AgentReply != "" || text.Calls != nil || len(text.Results) > 0 {
 			t.Fatalf("earlier entry %d = %+v, want a text only", 2*i, text)
 		}
 		if reply.AgentReply != "reply: ответ" || reply.StudentText != "" || reply.Calls != nil || len(reply.Results) > 0 {
 			t.Fatalf("earlier entry %d = %+v, want the reply only", 2*i+1, reply)
 		}
 	}
-	if cur := got[2*MaxHistoryTurns:]; cur[0].StudentText != "просьба 20" || cur[1].Calls == nil || len(cur[2].Results) != 1 {
+	if cur := got[2*earlier:]; cur[0].StudentText != "просьба 20" || cur[1].Calls == nil || len(cur[2].Results) != 1 {
 		t.Fatalf("current request = %+v", cur)
 	}
 

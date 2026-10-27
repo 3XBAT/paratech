@@ -14,7 +14,9 @@ import (
 // MaxSeenRefs bounds the IDs a thread remembers from tool results.
 const MaxSeenRefs = 4096
 
-// Thread is the agent thread of one subject or of no subject. Fields change only through its methods (ARCH-14).
+// Thread is an agent chat (ADR-0028): its title, archive mark and requests of any subjects. The subject key stays
+// until the storage drops it (TASK-204); no rule ties the scope of a request to it. Fields change only through its
+// methods (ARCH-14).
 type Thread struct {
 	version int64 // persisted version for optimistic concurrency; 0 = never stored (ADR-0004)
 	id      shared.ThreadID
@@ -25,11 +27,14 @@ type Thread struct {
 	// historyFrom is the first request whose history is sent to the planner; a restarted request sends no older
 	// echo, whose model turn the Hub no longer keeps (ADR-0023). 0 means all.
 	historyFrom int
+	title       string
+	archivedAt  time.Time // zero: not archived
+	lastActive  time.Time // start of the last request; creation before the first
 	createdAt   time.Time
 	updatedAt   time.Time
 }
 
-// New creates an empty thread.
+// New creates an empty chat titled «Новый чат».
 func New(id shared.ThreadID, key Key, now time.Time) (*Thread, error) {
 	if err := id.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidThread, err)
@@ -40,13 +45,17 @@ func New(id shared.ThreadID, key Key, now time.Time) (*Thread, error) {
 	if now.IsZero() {
 		return nil, fmt.Errorf("%w: no creation time", ErrInvalidThread)
 	}
-	return &Thread{id: id, key: key, seen: values.RefSet{}, createdAt: now, updatedAt: now}, nil
+	return &Thread{
+		id: id, key: key, seen: values.RefSet{}, title: DefaultTitle, lastActive: now, createdAt: now, updatedAt: now,
+	}, nil
 }
 
 // TurnState is the stored form of the current request.
 type TurnState struct {
 	Number       int
 	Scope        values.Scope
+	Mentions     []values.Mention
+	DroppedBy    int // always 0 for the current request: only a later request drops one
 	Status       Status
 	Resume       Status
 	StopReason   values.StopReason
@@ -71,11 +80,16 @@ type State struct {
 	Current     *TurnState // nil when Turns == 0
 	Seen        []values.Ref
 	HistoryFrom int
+	Title       string
+	ArchivedAt  time.Time // zero: not archived
+	LastActive  time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
 
-// Restore rebuilds a stored thread without side effects and checks its invariants.
+// Restore rebuilds a stored thread without side effects and checks its invariants. A state stored before chats has
+// no title and no last activity (the storage gains them in TASK-204): it restores as «Новый чат», last active when its
+// last request started.
 func Restore(s State) (*Thread, error) {
 	bad := func(what string) (*Thread, error) { return nil, fmt.Errorf("%w: %s", ErrInvalidThread, what) }
 	if s.Version < 1 {
@@ -87,6 +101,24 @@ func Restore(s State) (*Thread, error) {
 	}
 	if s.UpdatedAt.Before(s.CreatedAt) {
 		return bad("updated before created")
+	}
+	if s.Title == "" {
+		s.Title = DefaultTitle
+	}
+	if err := checkTitle(s.Title); err != nil {
+		return bad(err.Error())
+	}
+	if s.LastActive.IsZero() {
+		s.LastActive = s.CreatedAt
+		if s.Current != nil {
+			s.LastActive = s.Current.StartedAt
+		}
+	}
+	if s.LastActive.Before(s.CreatedAt) {
+		return bad("last active before created")
+	}
+	if !s.ArchivedAt.IsZero() && s.ArchivedAt.Before(s.CreatedAt) {
+		return bad("archived before created")
 	}
 	if s.Turns < 0 || (s.Turns == 0) != (s.Current == nil) {
 		return bad("a thread has a current request exactly when it has requests")
@@ -107,12 +139,13 @@ func Restore(s State) (*Thread, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := th.inScope(t.scope); err != nil {
-			return nil, err
+		if !s.ArchivedAt.IsZero() && !t.final() {
+			return bad("an archived chat with a request that is not final")
 		}
 		th.current = &t
 	}
 	th.version, th.turns, th.historyFrom, th.updatedAt = s.Version, s.Turns, s.HistoryFrom, s.UpdatedAt
+	th.title, th.archivedAt, th.lastActive = s.Title, s.ArchivedAt, s.LastActive
 	th.seen.Add(s.Seen...)
 	return th, nil
 }
@@ -148,10 +181,15 @@ func restoreTurn(s TurnState, number int) (Turn, error) {
 		return bad("bad open calls")
 	case !validCreated(s.Created, len(s.ApprovedPlan)):
 		return bad("bad created ids")
+	case s.DroppedBy != 0:
+		return bad("the current request is dropped")
+	}
+	if err := values.CheckMentions(s.Mentions); err != nil {
+		return bad(err.Error())
 	}
 	return Turn{
-		number: s.Number, scope: s.Scope, status: s.Status, resume: s.Resume, stopReason: s.StopReason, budget: s.Budget,
-		stepOpen: s.StepOpen, proposed: slices.Clone(s.ProposedPlan), approved: slices.Clone(s.ApprovedPlan),
+		number: s.Number, scope: s.Scope, mentions: slices.Clone(s.Mentions), status: s.Status, resume: s.Resume,
+		stopReason: s.StopReason, budget: s.Budget, stepOpen: s.StepOpen, proposed: slices.Clone(s.ProposedPlan), approved: slices.Clone(s.ApprovedPlan),
 		used: slices.Clone(s.Used), retry: s.Retry, open: slices.Clone(s.Open), created: slices.Clone(s.Created),
 		startedAt: s.StartedAt, updatedAt: s.UpdatedAt,
 	}, nil
@@ -161,13 +199,14 @@ func restoreTurn(s TurnState, number int) (Turn, error) {
 func (th *Thread) State() State {
 	s := State{
 		Version: th.version, ID: th.id, Key: th.key, Turns: th.turns, Seen: th.seen.Sorted(),
-		HistoryFrom: th.historyFrom, CreatedAt: th.createdAt, UpdatedAt: th.updatedAt,
+		HistoryFrom: th.historyFrom, Title: th.title, ArchivedAt: th.archivedAt, LastActive: th.lastActive,
+		CreatedAt: th.createdAt, UpdatedAt: th.updatedAt,
 	}
 	if th.current != nil {
 		t := th.current
 		s.Current = &TurnState{
-			Number: t.number, Scope: t.scope, Status: t.status, Resume: t.resume, StopReason: t.stopReason, Budget: t.budget,
-			StepOpen: t.stepOpen, ProposedPlan: slices.Clone(t.proposed), ApprovedPlan: slices.Clone(t.approved),
+			Number: t.number, Scope: t.scope, Mentions: slices.Clone(t.mentions), Status: t.status, Resume: t.resume,
+			StopReason: t.stopReason, Budget: t.budget, StepOpen: t.stepOpen, ProposedPlan: slices.Clone(t.proposed), ApprovedPlan: slices.Clone(t.approved),
 			Used: slices.Clone(t.used), Retry: t.retry, Open: slices.Clone(t.open), Created: slices.Clone(t.created),
 			StartedAt: t.startedAt, UpdatedAt: t.updatedAt,
 		}
@@ -224,28 +263,47 @@ func (th *Thread) StartTurn(now time.Time) error {
 	}
 	th.turns++
 	th.current = &Turn{number: th.turns, status: StatusPlanning, startedAt: now, updatedAt: now}
-	th.updatedAt = now
+	// «Старый чат можно продолжить»: a new request brings an archived chat back (ADR-0028).
+	th.archivedAt, th.lastActive, th.updatedAt = time.Time{}, now, now
 	return nil
 }
 
-// StartRequest is StartTurn in a scope of this thread: the scope's subject must be the thread's key (the context
-// chip picks the thread), so a request never carries another subject.
-func (th *Thread) StartRequest(scope values.Scope, now time.Time) error {
-	if err := th.inScope(scope); err != nil {
-		return err
+// Request is what the student sends: the scope of the context chip (any subject: a chat spans subjects), the
+// mentioned objects and the text. The text only names a chat still titled «Новый чат»; the case stores it in the
+// history.
+type Request struct {
+	Scope    values.Scope
+	Mentions []values.Mention
+	Text     string
+}
+
+// Ask starts a request (StartTurn) with its scope and mentions. Mentions of the same object count once; more than
+// values.MaxMentions distinct ones are refused and nothing changes.
+func (th *Thread) Ask(r Request, now time.Time) error {
+	var mentions []values.Mention
+	for _, m := range r.Mentions {
+		if !slices.ContainsFunc(mentions, func(x values.Mention) bool { return x.Ref() == m.Ref() }) {
+			mentions = append(mentions, m)
+		}
+	}
+	if err := values.CheckMentions(mentions); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidThread, err)
 	}
 	if err := th.StartTurn(now); err != nil {
 		return err
 	}
-	th.current.scope = scope
+	th.current.scope, th.current.mentions = r.Scope, mentions
+	if th.title == DefaultTitle {
+		if title := autoTitle(r.Text); title != "" {
+			th.title = title
+		}
+	}
 	return nil
 }
 
-func (th *Thread) inScope(scope values.Scope) error {
-	if k, err := KeyOf(scope); err != nil || k != th.key {
-		return fmt.Errorf("%w: the scope belongs to another thread", ErrInvalidThread)
-	}
-	return nil
+// StartRequest is Ask in a scope, without mentions or text.
+func (th *Thread) StartRequest(scope values.Scope, now time.Time) error {
+	return th.Ask(Request{Scope: scope}, now)
 }
 
 func (th *Thread) turn() (*Turn, error) {
@@ -492,16 +550,21 @@ func (t *Turn) admitted(call values.Call, adm Admission) {
 	}
 }
 
+// known is what the provenance check accepts: the IDs of tool results of this chat, the context of the step and the
+// mentions of the current request, which count like the scope (ADR-0028).
 func (th *Thread) known(context values.RefSet) values.RefSet {
 	k := th.seen.Clone()
 	for r := range context {
 		k.Add(r)
 	}
+	if th.current != nil {
+		k.Add(values.MentionRefs(th.current.mentions)...)
+	}
 	return k
 }
 
 // CheckRefs is the provenance check of the IDs a card shows (reply, cannot_do): each must appear with its kind in the
-// context of the step or in a tool result of this thread, as for Admit (ADR-0022).
+// context of the step, among the mentions of the request or in a tool result of this thread, as for Admit (ADR-0022).
 func (th *Thread) CheckRefs(refs []values.Ref, context values.RefSet) error {
 	return actionpolicy.CheckProvenance(refs, th.known(context))
 }
@@ -693,7 +756,8 @@ func (th *Thread) Retry(now time.Time) error {
 }
 
 // Restart starts the request again after its model turn expired on the Hub: the stopped request is cancelled, a new
-// one starts, and only its own history is sent from now on (HistoryFrom). The case adds the student's text again.
+// one starts with the same scope and mentions, and only its own history is sent from now on (HistoryFrom). The case
+// adds the student's text again.
 func (th *Thread) Restart(now time.Time) error {
 	t, err := th.turn()
 	if err != nil {
@@ -705,11 +769,11 @@ func (th *Thread) Restart(now time.Time) error {
 	if len(t.open) > 0 {
 		return ErrResultsPending
 	}
-	scope := t.scope
+	again := Request{Scope: t.scope, Mentions: t.mentions}
 	if err := th.Cancel(now); err != nil {
 		return err
 	}
-	if err := th.StartRequest(scope, now); err != nil {
+	if err := th.Ask(again, now); err != nil {
 		return err
 	}
 	th.historyFrom = th.turns
@@ -718,9 +782,9 @@ func (th *Thread) Restart(now time.Time) error {
 
 // Rerun is «Повторить» of the current request once it is DONE, FAILED, CANCELLED or STOPPED (ADR-0026): a stopped
 // request is cancelled, its calls without a result are answered not done, and a new request (next turn, empty
-// budget) starts in the same scope; the case adds the student's text again. live tells that the request left effects
-// (a journal entry not FAILED or UNDONE, a proposal): a repeat would double them, so it is ErrRerunBlocked and
-// nothing changes. A running request is ErrTurnInProgress (also ErrInvalidTransition). It returns the results of the
+// budget) starts in the same scope with the same mentions; the case adds the student's text again. live tells that
+// the request left effects (a journal entry not FAILED or UNDONE, a proposal): a repeat would double them, so it is
+// ErrRerunBlocked and nothing changes. A running request is ErrTurnInProgress (also ErrInvalidTransition). It returns the results of the
 // closed calls: they belong to the history of the old request, before the new text.
 func (th *Thread) Rerun(live bool, now time.Time) ([]values.ToolResult, error) {
 	t, err := th.turn()
@@ -741,7 +805,7 @@ func (th *Thread) Rerun(live bool, now time.Time) ([]values.ToolResult, error) {
 		return nil, fmt.Errorf("%w: no time", ErrInvalidThread)
 	}
 
-	scope := t.scope
+	again := Request{Scope: t.scope, Mentions: t.mentions}
 	if t.status == StatusStopped {
 		if err := th.Cancel(now); err != nil {
 			return nil, err
@@ -749,7 +813,7 @@ func (th *Thread) Rerun(live bool, now time.Time) ([]values.ToolResult, error) {
 	}
 	th.Abandon(values.RefuseNotDone, now)
 	results, _ := th.TakeResults(now)
-	if err := th.StartRequest(scope, now); err != nil {
+	if err := th.Ask(again, now); err != nil {
 		return nil, err
 	}
 	return results, nil

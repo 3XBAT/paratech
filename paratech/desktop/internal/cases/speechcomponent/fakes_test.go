@@ -71,10 +71,25 @@ type fakeFiles struct {
 	unpackErr  error
 	unpackSet  []values.FoundFile // what Unpack puts into the installed folder; nil: the verified set
 	saveErr    error
+	separate   map[string][]byte // stored separate files by name
 }
 
 func newFakeFiles() *fakeFiles {
-	return &fakeFiles{folders: map[values.ComponentFolder][]values.FoundFile{}, inspectErr: map[values.ComponentFolder]error{}}
+	return &fakeFiles{
+		folders: map[values.ComponentFolder][]values.FoundFile{}, inspectErr: map[values.ComponentFolder]error{},
+		separate: map[string][]byte{},
+	}
+}
+
+func (f *fakeFiles) SaveFile(_ context.Context, cf values.ComponentFile, content io.Reader) (int64, values.SHA256, error) {
+	b, err := io.ReadAll(content)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err != nil {
+		return int64(len(b)), "", err
+	}
+	f.separate[cf.Name()] = b
+	return int64(len(b)), digest(b), nil
 }
 
 func (f *fakeFiles) Inspect(_ context.Context, folder values.ComponentFolder, _ values.SpeechComponent) ([]values.FoundFile, error) {
@@ -111,6 +126,12 @@ func (f *fakeFiles) Unpack(_ context.Context, spec values.SpeechComponent) error
 	if err := spec.VerifyArchive(digest(f.archive), int64(len(f.archive))); err != nil {
 		return fmt.Errorf("unpack of an unverified archive: %w", err)
 	}
+	for _, sf := range spec.SeparateFiles() {
+		b := f.separate[sf.Name()]
+		if err := sf.Verify(digest(b), int64(len(b))); err != nil {
+			return fmt.Errorf("unpack of an unverified separate file: %w", err)
+		}
+	}
 	set := f.unpackSet
 	if set == nil {
 		set = verifiedSet()
@@ -124,6 +145,7 @@ func (f *fakeFiles) DiscardArchive(context.Context) error {
 	defer f.mu.Unlock()
 	f.discarded++
 	f.archive = nil
+	clear(f.separate)
 	return nil
 }
 
@@ -142,19 +164,25 @@ type fakeSource struct {
 	calls   int
 	offsets []int64
 	allow   values.HostAllowlist
-	entered chan struct{} // closed on the first call, if set
+	entered chan struct{}     // closed on the first call, if set
+	others  map[string][]byte // whole files served for other URLs than the archive
+	urls    []string
 }
 
 func newFakeSource() *fakeSource {
 	return &fakeSource{reply: values.RangeReply{Status: values.RangeFull, Total: int64(len(archiveBytes))}}
 }
 
-func (s *fakeSource) Fetch(ctx context.Context, _ values.SourceURL, offset int64, allow values.HostAllowlist) (values.RangeReply, io.ReadCloser, error) {
+func (s *fakeSource) Fetch(ctx context.Context, src values.SourceURL, offset int64, allow values.HostAllowlist) (values.RangeReply, io.ReadCloser, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls++
 	s.offsets = append(s.offsets, offset)
+	s.urls = append(s.urls, src.String())
 	s.allow = allow
+	if b, ok := s.others[src.String()]; ok {
+		return values.RangeReply{Status: values.RangeFull, Total: int64(len(b))}, io.NopCloser(bytes.NewReader(b)), nil
+	}
 	if s.entered != nil && s.calls == 1 {
 		close(s.entered)
 	}

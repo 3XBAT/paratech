@@ -69,6 +69,45 @@ func TestRefSet(t *testing.T) {
 	}
 }
 
+// TestParseReplyText: the reply card's text (catalog v7) is ParseText with 4000 characters and angle brackets.
+func TestParseReplyText(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string // "" when refused
+	}{
+		{"plain", "Ответ.", "Ответ."},
+		{"trimmed", "  Ответ.\n", "Ответ."},
+		{"paragraphs", "Первый.\n\nВторой.", "Первый.\n\nВторой."},
+		{"angles as text", "1 < 2, <b>x</b>", "1 < 2, <b>x</b>"},
+		{"over the card text limit", strings.Repeat("я", MaxTextRunes+1), strings.Repeat("я", MaxTextRunes+1)},
+		{"max", strings.Repeat("я", MaxReplyTextRunes), strings.Repeat("я", MaxReplyTextRunes)},
+		{"too long", strings.Repeat("я", MaxReplyTextRunes+1), ""},
+		{"empty", " \n ", ""},
+		{"tab", "a\tb", ""},
+		{"carriage return", "a\r\nb", ""},
+		{"bidi override", "a\u202eb", ""},
+		{"zero width", "a\u200bb", ""},
+		{"line separator", "a\u2028b", ""},
+		{"invalid utf8", "a\xffb", ""},
+		{"replacement character", "a\ufffdb", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseReplyText(tt.in)
+			if tt.want == "" {
+				if !errors.Is(err, ErrInvalidText) {
+					t.Fatalf("ParseReplyText = %q, %v, want ErrInvalidText", got, err)
+				}
+				return
+			}
+			if err != nil || string(got) != tt.want {
+				t.Fatalf("ParseReplyText = %q, %v, want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseText(t *testing.T) {
 	tests := []struct {
 		name string
@@ -242,6 +281,12 @@ func TestCards(t *testing.T) {
 		{"cannot do empty", CannotDoCard{}, CardCannotDo, false},
 		{"reply", ReplyCard{Text: "Готово"}, CardReply, true},
 		{"reply empty", ReplyCard{}, CardReply, false},
+		{"reply long", ReplyCard{Text: Text(strings.Repeat("я", MaxReplyTextRunes))}, CardReply, true},
+		{"reply too long", ReplyCard{Text: Text(strings.Repeat("я", MaxReplyTextRunes+1))}, CardReply, false},
+		{"reply with angle brackets", ReplyCard{Text: "1 < 2"}, CardReply, true},
+		{"reply with a control character", ReplyCard{Text: "a\x00b"}, CardReply, false},
+		{"plan summary with angle brackets", PlanCard{Summary: "1 < 2", Steps: []PlanStep{{tool: ToolListSubjects}}}, CardPlan, false},
+		{"cannot do over the card text limit", CannotDoCard{YourPart: []Text{Text(strings.Repeat("я", MaxTextRunes+1))}}, CardCannotDo, false},
 		{"reply with lines", ReplyCard{Text: "Два", Assignments: []Ref{a1, a2}, Lines: []AssignmentLine{
 			{Assignment: a2, Title: "Лабораторная 2", Subject: mustRef(t, KindSubject, "s1"), Due: due},
 			{Assignment: a1, Title: "Эссе"},

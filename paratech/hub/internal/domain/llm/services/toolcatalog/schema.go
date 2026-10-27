@@ -87,6 +87,8 @@ func (c *Catalog) typeSchema(a argument) object {
 		return stringSchema(MaxQueryRunes)
 	case typeText:
 		return stringSchema(MaxTextRunes)
+	case typeReplyText:
+		return stringSchema(MaxReplyTextRunes)
 	case typeTextList:
 		return object{"type": "array", "items": stringSchema(MaxTextRunes), "maxItems": maxTextListItems}
 	case typeCardIDs:
@@ -160,6 +162,9 @@ func (c *Catalog) valid(a argument, v any) bool {
 		return ok && boundedText(s, MaxQueryRunes, false)
 	case typeText:
 		return text(v)
+	case typeReplyText:
+		s, ok := v.(string)
+		return ok && boundedText(s, MaxReplyTextRunes, true)
 	case typeTextList:
 		return eachOf(v, 0, maxTextListItems, text)
 	case typeCardIDs:

@@ -94,9 +94,9 @@ func spin(ms string) {
 }
 
 type fakeArgs struct {
-	model, file, out, threads, lang string
-	flags                           []string
-	positional                      []string
+	model, file, out, threads, lang, vad string
+	flags                                []string
+	positional                           []string
 }
 
 // parseFakeArgs follows examples/cli/cli.cpp: a value flag consumes the next argument verbatim, anything not
@@ -132,7 +132,9 @@ func parseFakeArgs(args []string) (fakeArgs, bool) {
 			ok = value(&a.threads)
 		case flagLanguage:
 			ok = value(&a.lang)
-		case flagOutputJSON, flagPrintProgress, flagNoGPU:
+		case flagVADModel:
+			ok = value(&a.vad)
+		case flagOutputJSON, flagPrintProgress, flagNoGPU, flagVAD:
 			a.flags = append(a.flags, arg)
 		default:
 			fmt.Fprintf(os.Stderr, "error: unknown argument: %s\n", arg)
@@ -185,6 +187,9 @@ func fakeWhisper(args []string) int {
 	case modeEcho:
 		cwd, _ := os.Getwd()
 		texts := []string{a.model, a.file, a.out, a.threads, a.lang, cwd, strings.Join(a.flags, " ")}
+		if a.vad != "" {
+			texts = append(texts, a.vad)
+		}
 		writeFile(result, jsonOf(texts))
 		return 0
 

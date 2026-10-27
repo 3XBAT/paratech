@@ -92,6 +92,78 @@ func TestParseSpeechComponent(t *testing.T) {
 	}
 }
 
+// vadJSON is componentJSON with a VAD model downloaded on its own.
+func vadJSON(replace ...string) string {
+	doc := componentJSON(`"executable": "whisper-cli.exe",`, `"executable": "whisper-cli.exe", "vad_model": "vad.bin",`,
+		`"sha256": "`+compSumC+`"}]`,
+		`"sha256": "`+compSumC+`"}, {"name": "vad.bin", "size_bytes": 5, "sha256": "`+compSumA+
+			`", "source_url": "https://huggingface.co/org/vad/resolve/main/vad.bin"}]`)
+	return strings.NewReplacer(replace...).Replace(doc)
+}
+
+func TestSpeechComponentSeparateFiles(t *testing.T) {
+	c := mustComponent(t, vadJSON())
+	if c.VADModel() != "vad.bin" || len(c.Files()) != 3 || c.TotalBytes() != 35 || c.DownloadBytes() != 1005 {
+		t.Fatalf("parsed %+v", c)
+	}
+	if got := len(c.ArchiveFiles()); got != 2 {
+		t.Fatalf("ArchiveFiles = %d, want 2", got)
+	}
+	sep := c.SeparateFiles()
+	if len(sep) != 1 || sep[0].Name() != "vad.bin" || !sep[0].Separate() ||
+		sep[0].Source().String() != "https://huggingface.co/org/vad/resolve/main/vad.bin" {
+		t.Fatalf("SeparateFiles = %+v", sep)
+	}
+	if f, _ := c.File("ggml.dll"); f.Separate() || !f.Source().IsZero() {
+		t.Fatalf("a file of the archive has a source: %+v", f)
+	}
+	if got := strings.Join(c.DownloadHosts().Hosts(), ","); got != "github.com,huggingface.co,release-assets.githubusercontent.com" {
+		t.Fatalf("hosts = %s, want the source hosts of the separate files too", got)
+	}
+	if _, ok := c.EntryFile("Release/vad.bin"); ok {
+		t.Fatal("a separate file must never come from the archive")
+	}
+	if need := int64(1005+35) + DiskSpaceMargin; c.RequiredSpace() != need {
+		t.Fatalf("RequiredSpace = %d, want %d", c.RequiredSpace(), need)
+	}
+	if mustComponent(t, componentJSON()).VADModel() != "" {
+		t.Fatal("a manifest without vad_model must have no VAD model")
+	}
+
+	bad := []struct {
+		name string
+		doc  string
+	}{
+		{"vad model not a file", vadJSON(`"vad_model": "vad.bin"`, `"vad_model": "other.bin"`)},
+		{"http source", vadJSON("https://huggingface.co", "http://huggingface.co")},
+		{"empty source", vadJSON("https://huggingface.co/org/vad/resolve/main/vad.bin", "")},
+		{"executable downloaded on its own", vadJSON(`"executable": "whisper-cli.exe"`, `"executable": "vad.bin"`)},
+		{"unknown file key", vadJSON(`"source_url": "https://huggingface.co`, `"url": "https://huggingface.co`)},
+	}
+	for _, tt := range bad {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := ParseSpeechComponent([]byte(tt.doc)); !errors.Is(err, ErrInvalidComponent) {
+				t.Fatalf("ParseSpeechComponent = %v, want ErrInvalidComponent", err)
+			}
+		})
+	}
+
+	replies := []struct {
+		reply RangeReply
+		want  error
+	}{
+		{RangeReply{Status: RangeFull, Total: 5}, nil},
+		{RangeReply{Status: RangeFull, Total: UnknownTotal}, nil},
+		{RangeReply{Status: RangeFull, Total: 6}, ErrSizeMismatch},
+		{RangeReply{Status: RangePartial, Start: 0, Total: 5}, ErrUnexpectedRange},
+	}
+	for _, tt := range replies {
+		if err := sep[0].CheckReply(tt.reply); !errors.Is(err, tt.want) || (tt.want == nil && err != nil) {
+			t.Errorf("CheckReply(%+v) = %v, want %v", tt.reply, err, tt.want)
+		}
+	}
+}
+
 func TestComponentTotalLimit(t *testing.T) {
 	var files []string
 	for i := range 5 {

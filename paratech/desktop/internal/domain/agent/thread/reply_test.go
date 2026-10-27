@@ -172,6 +172,28 @@ func TestReplyIsCutOnARuneBoundary(t *testing.T) {
 	}
 }
 
+// A long reply (catalog v7, TASK-223) goes into the history as one line cut to MaxAgentReplyBytes; the actions after
+// it are cut away with it, never a broken rune.
+func TestLongReplyIsCutForTheHistory(t *testing.T) {
+	paragraph := strings.Repeat("я", values.MaxReplyTextRunes/4-4)
+	text := strings.Join([]string{paragraph, paragraph, paragraph, paragraph}, "\n\n") + " <b>"
+	if n := utf8.RuneCountInString(text); n > values.MaxReplyTextRunes || n < values.MaxReplyTextRunes-10 {
+		t.Fatalf("text of %d runes", n)
+	}
+	args := argsJSON(t, map[string]string{"text": text})
+	got := Reply(turnsOf([]values.HistoryEntry{
+		entry(1, "x", nil), echo(1, [2]string{"reply", args}, [2]string{"list_subjects", `{}`}),
+		results(1, values.ShownResult("c0"), ok("c1")),
+	}))
+	if len(got) > values.MaxAgentReplyBytes || len(got) < values.MaxAgentReplyBytes-1 || !utf8.ValidString(got) ||
+		!strings.HasPrefix(got, "reply: я") || strings.Contains(got, "\n") {
+		t.Fatalf("reply of %d bytes, valid %v: %.40q", len(got), utf8.ValidString(got), got)
+	}
+	if err := (values.HistoryTurn{AgentReply: got}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Owner bug 2026-10-24 (TASK-140): an earlier request goes with its answer, the current text is last.
 func TestWindowSendsEarlierRequestsAsPairs(t *testing.T) {
 	entries := []values.HistoryEntry{
@@ -238,15 +260,18 @@ func TestWindowCutsWholePairs(t *testing.T) {
 		current int
 		pairs   int
 	}{
-		{"12 requests", append(earlier(15, short), entry(16, "сейчас", nil)), 16, MaxHistoryTurns},
-		{"24 KiB with the replies", append(earlier(10, full), entry(11, "сейчас", nil)), 11, 5},
+		// The start is the first request of a block of WindowStep: 6..25 are 20 pairs.
+		{"20 requests", append(earlier(25, short), entry(26, "сейчас", nil)), 26, MaxHistoryTurns},
+		// 15 full pairs exceed 48 KiB; the next block start (request 6) leaves 10.
+		{"48 KiB with the replies", append(earlier(15, full), entry(16, "сейчас", nil)), 16, 10},
+		// 12 pairs and 41 current turns exceed 64; from request 6 there are 7 pairs.
 		{"64 turns", func() []values.HistoryEntry {
 			out := append(earlier(12, short), entry(13, "сейчас", nil))
 			for range 20 {
 				out = append(out, echo(13, [2]string{"list_subjects", `{}`}), results(13, ok("c0")))
 			}
 			return out
-		}(), 13, (MaxRequestTurns - 41) / 2},
+		}(), 13, 7},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

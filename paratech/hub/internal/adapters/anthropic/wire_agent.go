@@ -174,7 +174,7 @@ type agentWireBlockRead struct {
 // becomes a call with its input re-encoded canonically (sorted keys, no duplicate keys), so the arguments the Hub
 // checks, seals and returns are one exact string. The whole content array is kept raw in the answer (the assistant
 // turn the next step sends back). The stop reason is checked first: a refusal is a refused answer. A block that is
-// not a valid call, or content too large to keep, makes a malformed answer and a text-only answer one without tool
+// not a valid call (arguments over values.MaxReturnedArgumentsBytes included), or content too large to keep, makes a malformed answer and a text-only answer one without tool
 // use, all with their usage and stop reason; a body without usage is a permanent error.
 func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 	if mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err != nil || mt != contentTypeJSON {
@@ -218,7 +218,8 @@ func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 		if !ok {
 			return malformed, nil
 		}
-		call, err := values.NewToolCall(b.ID, b.Name, args)
+		// The larger intake limit lets the catalog cut a long reply text; it still holds every call to 8 KiB.
+		call, err := values.NewReturnedToolCall(b.ID, b.Name, args)
 		if err != nil {
 			return malformed, nil
 		}

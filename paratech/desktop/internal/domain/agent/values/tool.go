@@ -5,14 +5,15 @@ import (
 	"slices"
 )
 
-// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v6.json). v6 is v5
-// plus create_assignment and the argument type time (TASK-216, ADR-0029).
-const CatalogVersion = 6
+// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v7.json). v7 is v6
+// with reply.text of the type reply_text, up to 4000 characters (TASK-223); v6 added create_assignment and the
+// argument type time (TASK-216, ADR-0029).
+const CatalogVersion = 7
 
 // Tool is a tool of the closed catalog. A name outside it is ErrUnknownTool.
 type Tool string
 
-// Tools of catalog v6, in catalog order. ToolGenerateDraft left the catalog in v4 (the assignment page keeps «Быстрый
+// Tools of catalog v7, in catalog order. ToolGenerateDraft left the catalog in v4 (the assignment page keeps «Быстрый
 // черновик»): the planner can no longer call it, but stored actions, plans and calls that name it still read
 // (RetiredTools).
 const (
@@ -92,6 +93,7 @@ const (
 	ArgLabel     ArgType = "label"
 	ArgQuery     ArgType = "query" // the student's question or search text (since catalog v2)
 	ArgText      ArgType = "text"
+	ArgReplyText ArgType = "reply_text" // reply.text only: up to MaxReplyTextRunes, angle brackets allowed (catalog v7)
 	ArgTextList  ArgType = "text_list"
 	ArgCardIDs   ArgType = "card_ids" // 0..MaxCardIDs IDs a card lists; the desktop shows their local data (catalog v3)
 	ArgPlanSteps ArgType = "plan_steps"
@@ -204,7 +206,7 @@ func persistent(name string, required bool) ArgSpec {
 	return ArgSpec{Name: name, Type: ArgLabel, Required: required, Persistent: true}
 }
 
-// catalog is tool catalog v6 (shared/testdata/tool_catalog_v6.json; a test in desktop/tests compares them). It is
+// catalog is tool catalog v7 (shared/testdata/tool_catalog_v7.json; a test in desktop/tests compares them). It is
 // read-only: accessors return copies.
 var catalog = []ToolSpec{
 	{tool: ToolListSubjects},
@@ -257,7 +259,7 @@ var catalog = []ToolSpec{
 	}},
 	{tool: ToolAskQuestions, args: []ArgSpec{typed("questions", ArgQuestions, true)}},
 	{tool: ToolReply, args: []ArgSpec{
-		typed("text", ArgText, true), {Name: "assignments", Type: ArgCardIDs, Kind: KindAssignment},
+		typed("text", ArgReplyText, true), {Name: "assignments", Type: ArgCardIDs, Kind: KindAssignment},
 	}},
 	{tool: ToolCannotDo, args: []ArgSpec{typed("your_part", ArgTextList, true), typed("our_part", ArgTextList, true)}},
 }

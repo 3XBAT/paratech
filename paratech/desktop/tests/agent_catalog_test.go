@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/domain/agent/action"
@@ -20,9 +21,9 @@ import (
 	"paratech/desktop/testenv"
 )
 
-// goldenCatalog is shared/testdata/tool_catalog_v6.json (TASK-113; v2 since TASK-118, v3 since TASK-173, v4 since
-// TASK-184, v5 since TASK-210, v6 since TASK-217), the tool list the Hub serves for the catalog version the desktop
-// sends.
+// goldenCatalog is shared/testdata/tool_catalog_v7.json (TASK-113; v2 since TASK-118, v3 since TASK-173, v4 since
+// TASK-184, v5 since TASK-210, v6 since TASK-217, v7 since TASK-223), the tool list the Hub serves for the catalog
+// version the desktop sends.
 type goldenCatalog struct {
 	CatalogVersion int               `json:"catalog_version"`
 	Types          map[string]string `json:"types"`
@@ -117,6 +118,95 @@ func TestToolCatalogV6AddsCreateAssignment(t *testing.T) {
 	}
 	if v6.Notes["one_of"] != v5.Notes["one_of"] {
 		t.Fatal("the one-of groups changed in v6")
+	}
+}
+
+// TestToolCatalogV7HasALongReplyText: v7 is v6 with reply.text of the new type reply_text (TASK-223); every other
+// tool, argument, type and note stays as in v6, so only the reply card's text grows.
+func TestToolCatalogV7HasALongReplyText(t *testing.T) {
+	v6, v7 := loadGoldenCatalogFile(t, "tool_catalog_v6.json"), loadGoldenCatalogFile(t, "tool_catalog_v7.json")
+	note, text := v7.Types["reply_text"], v7.Types["text"]
+	if v7.CatalogVersion != 7 || v6.Types["reply_text"] != "" || !strings.Contains(note, "without HTML") ||
+		!strings.Contains(note, fmt.Sprintf("at most %d characters", values.MaxReplyTextRunes)) ||
+		!strings.Contains(text, fmt.Sprintf("at most %d characters", values.MaxTextRunes)) {
+		t.Fatalf("v7 types = %v", v7.Types)
+	}
+
+	// v7 with reply.text back to text and without the reply_text type is v6 apart from the version.
+	want := v7
+	want.CatalogVersion = 6
+	want.Tools = slices.Clone(v7.Tools)
+	want.Types = map[string]string{}
+	for k, v := range v7.Types {
+		if k != "reply_text" {
+			want.Types[k] = v
+		}
+	}
+	replies := 0
+	for i, tool := range want.Tools {
+		for j, a := range tool.Arguments {
+			if a.Type != "reply_text" {
+				continue
+			}
+			if tool.Name != string(values.ToolReply) || a.Name != "text" {
+				t.Fatalf("%s.%s is a reply_text", tool.Name, a.Name)
+			}
+			replies++
+			args := slices.Clone(tool.Arguments)
+			args[j].Type = "text"
+			want.Tools[i].Arguments = args
+		}
+	}
+	if replies != 1 {
+		t.Fatalf("%d reply_text arguments, want reply.text only", replies)
+	}
+	got, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := json.Marshal(v6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(old) {
+		t.Fatal("tool_catalog_v7.json differs from tool_catalog_v6.json beyond reply.text")
+	}
+}
+
+// A long reply of catalog v7 (TASK-223) goes through the Hub client, the thread and SQLite whole, in paragraphs and
+// with angle brackets as text; after a restart the next request sends it to the Hub as the 2 KiB history reply only.
+func TestAgentLongReplyOfCatalog7(t *testing.T) {
+	e := newAgentEnv(t)
+	ctx := context.Background()
+	paragraph := strings.Repeat("Длинный ответ по теме. ", 40)
+	text := strings.Join([]string{paragraph, paragraph, paragraph, paragraph}, "\n\n") + "Итог: a < b, b > c."
+	if n := utf8.RuneCountInString(text); n <= values.MaxTextRunes*10 || n > values.MaxReplyTextRunes {
+		t.Fatalf("text of %d runes", n)
+	}
+	e.hub.Then(testenv.AgentCall{ID: "toolu_1", Tool: "reply", Args: `{"text":` + mustQuote(t, text) + `}`})
+	st, err := e.turns.Ask(ctx, agentturn.AskInput{Text: "расскажи подробно"})
+	if err != nil || st.Status != thread.StatusDone || len(st.Cards) != 1 {
+		t.Fatalf("Ask = %+v, %v", st, err)
+	}
+	if card, ok := st.Cards[0].(values.ReplyCard); !ok || string(card.Text) != text || card.Validate() != nil {
+		t.Fatalf("card = %+v", st.Cards[0])
+	}
+
+	e.start(t)
+	e.hub.Then(testenv.AgentCall{ID: "toolu_2", Tool: "reply", Args: `{"text":"Короче: a < b."}`})
+	if st, err = e.turns.Ask(ctx, agentturn.AskInput{Text: "а короче?"}); err != nil || st.Status != thread.StatusDone || st.Turn != 2 {
+		t.Fatalf("second Ask = %+v, %v", st, err)
+	}
+	reqs := e.hub.Requests()
+	var replies []string
+	for _, turn := range reqs[len(reqs)-1].GetTurns() {
+		if r := turn.GetAgentReply(); r != "" {
+			replies = append(replies, r)
+		}
+	}
+	if len(replies) != 1 || len(replies[0]) > values.MaxAgentReplyBytes || !utf8.ValidString(replies[0]) ||
+		!strings.HasPrefix(replies[0], "reply: Длинный ответ по теме.") || strings.Contains(replies[0], "Итог") {
+		t.Fatalf("history replies = %q", replies)
 	}
 }
 
@@ -322,9 +412,9 @@ func TestAgentRequestOfAnOlderCatalogAfterTheUpdate(t *testing.T) {
 	}
 }
 
-// The update to the current catalog (4 -> 5 in TASK-210, 5 -> 6 in TASK-217): calls sealed for a request stopped on
-// the previous catalog no longer pass the Hub's check once the desktop sends the new one, so «Продолжить» and
-// «Повторить» end with the honest «не удалось», and a new request works.
+// The update to the current catalog (4 -> 5 in TASK-210, 5 -> 6 in TASK-217, 6 -> 7 in TASK-223): calls sealed for a
+// request stopped on the previous catalog no longer pass the Hub's check once the desktop sends the new one, so
+// «Продолжить» and «Повторить» end with the honest «не удалось», and a new request works.
 func TestAgentRequestOfThePreviousCatalogAfterTheUpdate(t *testing.T) {
 	e := newAgentEnv(t)
 	ctx := context.Background()

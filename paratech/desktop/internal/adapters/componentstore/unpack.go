@@ -19,9 +19,10 @@ import (
 // zipEncrypted is the general purpose flag of an encrypted entry.
 const zipEncrypted = 0x1
 
-// Unpack takes the component files out of the stored archive into a fresh staging folder and swaps it in as the
-// installed folder only when every file verified. A failure removes the staging folder and leaves the installed
-// folder as it was; only a failed swap itself can leave it missing (the next Detect then says so).
+// Unpack takes the component files out of the stored archive, and the separate files from where SaveFile stored them,
+// into a fresh staging folder and swaps it in as the installed folder only when every file verified. A failure
+// removes the staging folder and leaves the installed folder as it was; only a failed swap itself can leave it
+// missing (the next Detect then says so).
 func (s *Store) Unpack(ctx context.Context, spec values.SpeechComponent) error {
 	data, err := s.readArchive(spec)
 	if err != nil {
@@ -109,7 +110,7 @@ func selectEntries(zr *zip.Reader, spec values.SpeechComponent) (map[string]*zip
 		}
 		out[cf.Name()] = zf
 	}
-	for _, f := range spec.Files() {
+	for _, f := range spec.ArchiveFiles() {
 		if out[f.Name()] == nil {
 			return nil, fmt.Errorf("%w: %s%s is missing", values.ErrInvalidComponentArchive, spec.EntryPrefix(), f.Name())
 		}
@@ -137,11 +138,37 @@ func (s *Store) fill(ctx context.Context, staging string, spec values.SpeechComp
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := writeEntry(ctx, dir, entries[f.Name()], f); err != nil {
+		if f.Separate() {
+			err = s.copyDownload(ctx, dir, f)
+		} else {
+			err = writeEntry(ctx, dir, entries[f.Name()], f)
+		}
+		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// copyDownload copies a separate file stored by SaveFile, which must be a regular file, with the checks of writeEntry.
+func (s *Store) copyDownload(ctx context.Context, dir *os.Root, f values.ComponentFile) error {
+	name := downloadPrefix + f.Name()
+	fi, err := s.root.Lstat(name)
+	if err != nil {
+		return fail(opRead+" "+f.Name(), err)
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("%w: the stored %s is not a regular file", values.ErrInvalidComponentArchive, f.Name())
+	}
+	in, err := s.root.Open(name)
+	if err != nil {
+		return fail(opRead+" "+f.Name(), err)
+	}
+	defer func() { _ = in.Close() }()
+	if st, err := in.Stat(); err != nil || !os.SameFile(fi, st) {
+		return fmt.Errorf("%w: the stored %s changed while it was opened", values.ErrInvalidComponentArchive, f.Name())
+	}
+	return copyVerified(ctx, dir, in, f)
 }
 
 // writeEntry copies one entry, at most one byte over its pinned size, hashing it on the way; a size or digest that
@@ -152,13 +179,17 @@ func writeEntry(ctx context.Context, dir *os.Root, zf *zip.File, f values.Compon
 		return fmt.Errorf("%w: %s: %w", values.ErrInvalidComponentArchive, f.Name(), err)
 	}
 	defer func() { _ = rc.Close() }()
+	return copyVerified(ctx, dir, rc, f)
+}
 
+// copyVerified copies in to the staging file of f, at most one byte over its pinned size, hashing it on the way.
+func copyVerified(ctx context.Context, dir *os.Root, in io.Reader, f values.ComponentFile) error {
 	out, err := dir.OpenFile(f.Name(), os.O_WRONLY|os.O_CREATE|os.O_EXCL, filePerm)
 	if err != nil {
 		return fail(opUnpack+" "+f.Name(), err)
 	}
 	h := sha256.New()
-	src := &ctxReader{ctx: ctx, r: io.LimitReader(rc, f.Size()+1)}
+	src := &ctxReader{ctx: ctx, r: io.LimitReader(in, f.Size()+1)}
 	n, err := io.Copy(io.MultiWriter(out, h), src)
 	if err == nil {
 		err = out.Sync()
@@ -170,7 +201,7 @@ func writeEntry(ctx context.Context, dir *os.Root, zf *zip.File, f values.Compon
 	case ctx.Err() != nil:
 		return ctx.Err()
 	case src.err != nil:
-		// archive/zip reports a bad checksum or a malformed stream here.
+		// archive/zip reports a bad checksum or a malformed stream here; a stored separate file, a read failure.
 		return fmt.Errorf("%w: %s: %w", values.ErrInvalidComponentArchive, f.Name(), src.err)
 	case err != nil:
 		return fail(opUnpack+" "+f.Name(), err)
