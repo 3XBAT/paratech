@@ -1,6 +1,9 @@
 package library
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Errors of the library (ARCH-18). Fixed texts without names or paths; causes go to the log.
 var (
@@ -15,6 +18,19 @@ var (
 
 	// ErrInvalidFolderName means a folder name that is empty, too long or not a valid Windows file name.
 	ErrInvalidFolderName = errors.New("library: invalid folder name")
+
+	// ErrInvalidTeacher means a teacher name or address that breaks its rules (subject.NewTeacher); the error never
+	// holds the typed text. ErrInvalidTeacherName and ErrInvalidTeacherEmail tell the field and wrap it.
+	ErrInvalidTeacher = errors.New("library: invalid teacher")
+
+	// ErrInvalidTeacherName means a bad teacher name; it wraps ErrInvalidTeacher.
+	ErrInvalidTeacherName = fmt.Errorf("%w: name", ErrInvalidTeacher)
+
+	// ErrInvalidTeacherEmail means a bad teacher address; it wraps ErrInvalidTeacher.
+	ErrInvalidTeacherEmail = fmt.Errorf("%w: email", ErrInvalidTeacher)
+
+	// ErrSubjectChanged means the subject is no longer at the version the student saw: the page reloads it.
+	ErrSubjectChanged = errors.New("library: subject changed")
 
 	// ErrNameTaken means another subject already has the name or alias (case-insensitive, «ё» = «е»).
 	ErrNameTaken = errors.New("library: subject name is taken")

@@ -138,7 +138,7 @@ func (q *Queries) GetMaterialBySHA256(ctx context.Context, sha256 string) (Mater
 }
 
 const getSubject = `-- name: GetSubject :one
-SELECT id, name, name_key, semester, version, created_at, updated_at FROM subjects WHERE id = ?1
+SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email FROM subjects WHERE id = ?1
 `
 
 func (q *Queries) GetSubject(ctx context.Context, id string) (Subject, error) {
@@ -152,6 +152,8 @@ func (q *Queries) GetSubject(ctx context.Context, id string) (Subject, error) {
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeacherName,
+		&i.TeacherEmail,
 	)
 	return i, err
 }
@@ -213,17 +215,20 @@ func (q *Queries) InsertMaterialLesson(ctx context.Context, arg InsertMaterialLe
 }
 
 const insertSubject = `-- name: InsertSubject :exec
-INSERT INTO subjects (id, name, name_key, semester, version, created_at, updated_at)
-VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6)
+INSERT INTO subjects (id, name, name_key, semester, teacher_name, teacher_email, version, created_at, updated_at)
+VALUES (?1, ?2, ?3, ?4, ?5,
+        ?6, 1, ?7, ?8)
 `
 
 type InsertSubjectParams struct {
-	ID        string
-	Name      string
-	NameKey   string
-	Semester  string
-	CreatedAt int64
-	UpdatedAt int64
+	ID           string
+	Name         string
+	NameKey      string
+	Semester     string
+	TeacherName  string
+	TeacherEmail string
+	CreatedAt    int64
+	UpdatedAt    int64
 }
 
 // A never-stored subject (version 0) is inserted with version 1.
@@ -233,6 +238,8 @@ func (q *Queries) InsertSubject(ctx context.Context, arg InsertSubjectParams) er
 		arg.Name,
 		arg.NameKey,
 		arg.Semester,
+		arg.TeacherName,
+		arg.TeacherEmail,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -601,7 +608,7 @@ func (q *Queries) ListSubjectFolders(ctx context.Context, subjectID string) ([]S
 
 const listSubjects = `-- name: ListSubjects :many
 
-SELECT id, name, name_key, semester, version, created_at, updated_at FROM subjects ORDER BY name_key, id
+SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email FROM subjects ORDER BY name_key, id
 `
 
 // The library (TASK-121, ADR-0024): subjects with their aliases and folders, materials with their lesson links. Both
@@ -623,6 +630,8 @@ func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeacherName,
+			&i.TeacherEmail,
 		); err != nil {
 			return nil, err
 		}
@@ -695,18 +704,22 @@ func (q *Queries) UpdateMaterialText(ctx context.Context, arg UpdateMaterialText
 
 const updateSubject = `-- name: UpdateSubject :execrows
 UPDATE subjects
-SET name       = ?1,
-    name_key   = ?2,
-    semester   = ?3,
-    version    = version + 1,
-    updated_at = ?4
-WHERE id = ?5 AND version = ?6
+SET name          = ?1,
+    name_key      = ?2,
+    semester      = ?3,
+    teacher_name  = ?4,
+    teacher_email = ?5,
+    version       = version + 1,
+    updated_at    = ?6
+WHERE id = ?7 AND version = ?8
 `
 
 type UpdateSubjectParams struct {
 	Name            string
 	NameKey         string
 	Semester        string
+	TeacherName     string
+	TeacherEmail    string
 	UpdatedAt       int64
 	ID              string
 	ExpectedVersion int64
@@ -717,6 +730,8 @@ func (q *Queries) UpdateSubject(ctx context.Context, arg UpdateSubjectParams) (i
 		arg.Name,
 		arg.NameKey,
 		arg.Semester,
+		arg.TeacherName,
+		arg.TeacherEmail,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.ExpectedVersion,

@@ -9,16 +9,19 @@ SELECT * FROM subjects WHERE id = sqlc.arg(id);
 
 -- A never-stored subject (version 0) is inserted with version 1.
 -- name: InsertSubject :exec
-INSERT INTO subjects (id, name, name_key, semester, version, created_at, updated_at)
-VALUES (sqlc.arg(id), sqlc.arg(name), sqlc.arg(name_key), sqlc.arg(semester), 1, sqlc.arg(created_at), sqlc.arg(updated_at));
+INSERT INTO subjects (id, name, name_key, semester, teacher_name, teacher_email, version, created_at, updated_at)
+VALUES (sqlc.arg(id), sqlc.arg(name), sqlc.arg(name_key), sqlc.arg(semester), sqlc.arg(teacher_name),
+        sqlc.arg(teacher_email), 1, sqlc.arg(created_at), sqlc.arg(updated_at));
 
 -- name: UpdateSubject :execrows
 UPDATE subjects
-SET name       = sqlc.arg(name),
-    name_key   = sqlc.arg(name_key),
-    semester   = sqlc.arg(semester),
-    version    = version + 1,
-    updated_at = sqlc.arg(updated_at)
+SET name          = sqlc.arg(name),
+    name_key      = sqlc.arg(name_key),
+    semester      = sqlc.arg(semester),
+    teacher_name  = sqlc.arg(teacher_name),
+    teacher_email = sqlc.arg(teacher_email),
+    version       = version + 1,
+    updated_at    = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 
 -- Removes the subject with its aliases and folders (CASCADE); a material still filed under it fails the RESTRICT.
