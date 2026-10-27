@@ -263,6 +263,64 @@ func TestFitReturned(t *testing.T) {
 	}
 }
 
+// TestFitReturnedOverEightKiB (TASK-223): a v7 reply whose arguments are over 8 KiB, by its length in Cyrillic or by
+// three-byte characters within 4000 runes, is cut under 8 KiB and passes CheckReturned. Under v6 it is left as it is
+// and refused; a call of another tool over 8 KiB is refused under v7 even when its schema holds.
+func TestFitReturnedOverEightKiB(t *testing.T) {
+	v6, v7 := parseFile(t, goldenV6), parseFile(t, goldenV7)
+	returned := func(tool string, v map[string]any) values.ToolCall {
+		t.Helper()
+		args, err := encodeObject(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(args) <= values.MaxArgumentsBytes {
+			t.Fatalf("fixture of %d bytes is within 8 KiB", len(args))
+		}
+		c, err := values.NewReturnedToolCall("toolu_1", tool, args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	for name, text := range map[string]string{
+		"cyrillic": strings.Repeat("Преобразование Фурье раскладывает сигнал на частоты. ", 114), // ~6000 runes
+		"wide":     strings.TrimSpace(strings.Repeat("漢字。 ", MaxReplyTextRunes/4)),               // 3999 runes, ~10 KB
+	} {
+		calls := []values.ToolCall{returned("reply", map[string]any{"text": text})}
+		got, cut := v7.FitReturned(calls)
+		if !cut || len(got[0].Arguments()) > values.MaxArgumentsBytes || !strings.HasSuffix(replyText(t, got[0], 0), "…") {
+			t.Fatalf("%s: cut %t, %d bytes", name, cut, len(got[0].Arguments()))
+		}
+		if err := v7.CheckReturned(got); err != nil {
+			t.Fatalf("%s: the cut reply fails the check: %v", name, err)
+		}
+		same, cut := v6.FitReturned(calls)
+		if cut || same[0] != calls[0] {
+			t.Fatalf("%s: v6 changed the call", name)
+		}
+		if err := v6.CheckReturned(same); !errors.Is(err, ErrInvalidCall) {
+			t.Fatalf("%s: v6: err = %v, want ErrInvalidCall", name, err)
+		}
+	}
+
+	items := make([]any, 0, 10)
+	for range 10 {
+		items = append(items, strings.Repeat("ш", MaxTextRunes))
+	}
+	other := returned("cannot_do", map[string]any{"your_part": items, "our_part": items})
+	if err := v7.Check(other); err != nil {
+		t.Fatalf("the cannot_do fixture breaks its schema: %v", err)
+	}
+	got, cut := v7.FitReturned([]values.ToolCall{other})
+	if cut || got[0] != other {
+		t.Fatal("FitReturned changed a cannot_do call")
+	}
+	if err := v7.CheckReturned(got); !errors.Is(err, ErrInvalidCall) {
+		t.Fatalf("cannot_do over 8 KiB: err = %v, want ErrInvalidCall", err)
+	}
+}
+
 func mustCall(t *testing.T, id, tool, args string) values.ToolCall {
 	t.Helper()
 	c, err := values.NewToolCall(id, tool, args)

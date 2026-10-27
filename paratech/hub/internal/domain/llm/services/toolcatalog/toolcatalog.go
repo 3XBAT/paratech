@@ -263,8 +263,9 @@ func (c *Catalog) CheckEcho(calls []values.ToolCall) error {
 	return nil
 }
 
-// CheckReturned checks the calls the provider returned: 1..MaxAgentCalls calls with distinct ids, each matching the
-// schema of its tool (Check).
+// CheckReturned checks the calls the provider returned: 1..MaxAgentCalls calls with distinct ids, each with arguments
+// of at most values.MaxArgumentsBytes (the adapter takes up to MaxReturnedArgumentsBytes, for FitReturned) and
+// matching the schema of its tool (Check).
 func (c *Catalog) CheckReturned(calls []values.ToolCall) error {
 	if len(calls) == 0 || len(calls) > values.MaxAgentCalls {
 		return fmt.Errorf("%w: a step returns 1-%d calls", ErrInvalidCall, values.MaxAgentCalls)
@@ -275,6 +276,9 @@ func (c *Catalog) CheckReturned(calls []values.ToolCall) error {
 			return fmt.Errorf("%w: call ids repeat", ErrInvalidCall)
 		}
 		ids[call.CallID()] = true
+		if len(call.Arguments()) > values.MaxArgumentsBytes {
+			return fmt.Errorf("%w: arguments exceed %d bytes", ErrInvalidCall, values.MaxArgumentsBytes)
+		}
 		if err := c.Check(call); err != nil {
 			return err
 		}

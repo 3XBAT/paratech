@@ -31,8 +31,9 @@ func (c *Catalog) longReply() bool {
 	return false
 }
 
-// FitReturned cuts the text of a returned reply call over MaxReplyTextRunes at a sentence and marks it with "…", in a
-// catalog whose reply.text is a reply_text; cut reports whether any call changed. Every other call, and every call of
+// FitReturned cuts the text of a returned reply call over MaxReplyTextRunes, or whose arguments are over
+// values.MaxArgumentsBytes, at a sentence and marks it with "…", in a catalog whose reply.text is a reply_text; cut
+// reports whether any call changed. Every other call, and every call of
 // an older catalog, is returned as it is: CheckReturned still decides about all of them, so a reply whose arguments do
 // not decode or whose text is not a string stays the provider's failure.
 func (c *Catalog) FitReturned(calls []values.ToolCall) (out []values.ToolCall, cut bool) {
@@ -49,7 +50,8 @@ func (c *Catalog) FitReturned(calls []values.ToolCall) (out []values.ToolCall, c
 			continue
 		}
 		text, ok := args[argReplyText].(string)
-		if !ok || !utf8.ValidString(text) || utf8.RuneCountInString(text) <= MaxReplyTextRunes {
+		if !ok || !utf8.ValidString(text) ||
+			(utf8.RuneCountInString(text) <= MaxReplyTextRunes && len(call.Arguments()) <= values.MaxArgumentsBytes) {
 			continue
 		}
 		encoded, changed, err := fitReplyText(args, text)

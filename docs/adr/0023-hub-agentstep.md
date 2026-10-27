@@ -94,6 +94,8 @@ Owner's decision: a big question gets a long answer. Amends "UI-tool text fields
   may have it, from catalog 7. Every other card text stays ≤ 300; catalogs 1–6 are unchanged.
 - **Over the limit** (catalog 7 only): a text-only answer (TASK-200) and a returned `reply` call are cut at a sentence
   with " …" before the schema check, also to keep `arguments_json` ≤ 8 KiB; the cut calls are sealed, stored and
-  echoed. `<` and `>` are allowed in a text-only answer, shown as text. A reply over 8 KiB from the provider is still
-  `PROVIDER_ERROR`.
+  echoed. `<` and `>` are allowed in a text-only answer, shown as text. The adapter takes returned arguments up to
+  32 KiB, so a `reply` over 8 KiB from the provider is cut too; arguments over 32 KiB, and any other call over 8 KiB,
+  stay the charged `PROVIDER_ERROR` (as do all of them on catalogs 1–6).
 - **History**: `agent_reply` stays ≤ 2 KiB; the desktop already cuts a long answer for it.
+- **Deployment**: the Hub with catalog 7 goes out before the desktop that requests it.
