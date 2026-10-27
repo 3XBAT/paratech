@@ -60,3 +60,38 @@ func TestSubjectsGroupByLibrarySubject(t *testing.T) {
 		t.Fatalf("WithLibrary(nil) kept %+v", again[0].Library)
 	}
 }
+
+// The match of a lesson is explicit: one subject, none, several (no guess) or no subject string at all.
+func TestLibraryMatch(t *testing.T) {
+	lessons := WithLibraryMatch([]Lesson{
+		lessonAt("r1", "Физика", t0),
+		lessonAt("r2", "История", t0),
+		lessonAt("r3", "Матан", t0),
+		lessonAt("r4", "", t0),
+	}, map[string]LibrarySubject{"Физика": {ID: "phys", Name: "Физика"}}, map[string]bool{"Матан": true, "": true})
+
+	want := []LibraryMatch{LibraryMatched, LibraryNone, LibraryAmbiguous, LibraryNoSubject}
+	for i, l := range lessons {
+		if got := l.LibraryMatch(); got != want[i] {
+			t.Errorf("%s: LibraryMatch = %q, want %q", l.Recording, got, want[i])
+		}
+	}
+	if lessons[2].SubjectKey() != "матан" || lessons[2].Library != (LibrarySubject{}) {
+		t.Fatalf("an ambiguous lesson keeps its free group: %+v", lessons[2])
+	}
+
+	// A lesson the library now resolves loses its old ambiguity, and the other way round.
+	again := WithLibraryMatch(lessons, map[string]LibrarySubject{"Матан": {ID: "ma", Name: "Матанализ"}}, map[string]bool{"Физика": true})
+	if again[0].LibraryMatch() != LibraryAmbiguous || again[2].LibraryMatch() != LibraryMatched || again[2].Library.ID != "ma" {
+		t.Fatalf("WithLibraryMatch again = %+v", again)
+	}
+	if cleared := WithLibrary(again, nil); cleared[0].LibraryMatch() != LibraryNone || cleared[2].LibraryMatch() != LibraryNone {
+		t.Fatalf("WithLibrary(nil) kept a match: %+v", cleared)
+	}
+
+	// A note-only lecture names its library subject directly.
+	note := Lesson{Key: "note:n1", Subject: "Физика", Library: LibrarySubject{ID: "phys", Name: "Физика"}}
+	if note.LibraryMatch() != LibraryMatched {
+		t.Fatalf("note-only lecture: %q", note.LibraryMatch())
+	}
+}

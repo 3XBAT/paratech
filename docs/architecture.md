@@ -228,7 +228,7 @@ internal/cases/<usecase>/
 | `recording` | `recording` (состояния, чанки, лимит) | `limits` |
 | `jobs` | `job` (статусы PRD §7.2, попытки, ключ идемпотентности) | `backoff`, `powerpolicy` |
 | `transcription` | `sttmodel` (версии, pin), `transcript` | `modelselection` |
-| `schedule` | `lesson` | `importplan` (превью и конфликты) |
+| `schedule` | `lesson` (в том числе ссылка на звонок, ADR-0032) | `importplan` (превью и конфликты), `joinlink` (какую ссылку на звонок показать и когда, ADR-0032) |
 | `coursework` | `assignment`, `homeworkdraft` (версии), `work` (работа под ключ: разбор, вопросы, требования, написание) | `contextselection` (минимальный контекст для LLM), `citation` (проверка цитат) |
 | `delivery` | `delivery` (включая UNKNOWN, сверку и отправку не раньше заданного времени, ADR-0030) | |
 | `settings` | `settings` | |
