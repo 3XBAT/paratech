@@ -1,11 +1,12 @@
 // «Мой конспект» on the lecture page (TASK-154): view model, duplicates, remove/undo, no HTML injection.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   addLines, checkPaste, maxPasteBytes, movedOrder, orderOf, ownNotesTexts as t, partRows, pickSubjectId, recordingTarget,
-  visibleNotes, withNote,
+  undoCall, visibleNotes, withNote,
 } from "../.test-build/ownNotesView.js";
 import { OwnNotesView, AiNoteLabel } from "../.test-build/pages/OwnNotesParts.js";
 
@@ -72,7 +73,8 @@ test("remove keeps the note on screen for «Отменить» only until the un
   const removed = note({ removed: true });
   assert.equal(visibleNotes([removed], "").length, 0);
   assert.equal(visibleNotes([removed], "n1").length, 1);
-  const html = render(model({ notes: [removed], undo: { kind: "remove", noteId: "n1" } }));
+  const html = render(model({ notes: [removed], undo: { kind: "remove", noteId: "n1" }, status: { ok: true, text: t.removedLine } }));
+  assert.ok(html.indexOf('role="status"') < html.indexOf(t.removedLine));
   assert.ok(html.includes(t.removedLine));
   assert.ok(html.includes(t.undo));
   assert.ok(!render(model({ notes: [removed] })).includes(t.undo));
@@ -123,7 +125,41 @@ test("names, titles and refusals render as text: no element is created from them
   assert.ok(!html.includes("<img"));
   assert.ok(html.includes("&lt;img src=x onerror=alert(1)&gt;"));
   assert.ok(!html.includes("<a "));
-  assert.ok(!html.includes("dangerouslySetInnerHTML"));
+  for (const f of ["ownNotesView.ts", "pages/OwnNotes.tsx", "pages/OwnNotesParts.tsx"]) {
+    const src = readFileSync(new URL(`../src/${f}`, import.meta.url), "utf8");
+    assert.ok(!src.includes("dangerouslySetInnerHTML"), f);
+    assert.ok(!src.includes("innerHTML"), f);
+  }
+});
+
+test("the subject match follows the core's key and refuses an ambiguous name", () => {
+  const two = [{ id: "a", name: "Физика", aliases: [] }, { id: "b", name: " физика ", aliases: [] }];
+  assert.equal(pickSubjectId([], two, "Физика"), "");
+  const alias = [{ id: "a", name: "Физика", aliases: ["физика"] }];
+  assert.equal(pickSubjectId([], alias, "ФИЗИКА"), "a");
+  const yo = [{ id: "c", name: "Ёлки  и\tпалки", aliases: [] }];
+  assert.equal(pickSubjectId([], yo, "елки и палки"), "c");
+  assert.equal(pickSubjectId([], yo, "елки​ и палки"), "c");
+});
+
+test("undoCall sends the right call for each action", async () => {
+  const calls = [];
+  const n = note();
+  const api = {
+    restore: async (id) => (calls.push(["restore", id]), n),
+    reorder: async (id, order) => (calls.push(["reorder", id, order]), n),
+    undoReplace: async (id, cur, prev) => (calls.push(["undoReplace", id, cur, prev]), { note: id === "gone" ? null : n }),
+  };
+  assert.equal(await undoCall(api, { kind: "remove", noteId: "n1" }), n);
+  assert.equal(await undoCall(api, { kind: "reorder", noteId: "n1", order: ["m2", "m1"] }), n);
+  assert.equal(await undoCall(api, { kind: "replace", noteId: "n1", currentId: "m4", previousId: "m1" }), n);
+  assert.equal(await undoCall(api, { kind: "replace", noteId: "gone", currentId: "m4", previousId: "m1" }), null);
+  assert.deepEqual(calls.slice(0, 3), [["restore", "n1"], ["reorder", "n1", ["m2", "m1"]], ["undoReplace", "n1", "m4", "m1"]]);
+});
+
+test("a new add clears the undo in the page", () => {
+  const src = readFileSync(new URL("../src/pages/OwnNotes.tsx", import.meta.url), "utf8");
+  assert.match(src, /function applyAdd[\s\S]*?setUndo\(null\)/);
 });
 
 test("a Markdown link in a title stays text", () => {

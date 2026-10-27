@@ -3,7 +3,7 @@
 // text nodes only. The student's notes and paratech's «Конспект» are never merged (ADR-0027, Coexistence).
 
 import type { LibrarySubject } from "./bindings/library.js";
-import { notesErrorText, type NoteFile, type NotePart, type NotesAdd, type NoteTarget, type NoteView } from "./bindings/notes.js";
+import { notesErrorText, type NoteFile, type NotesApi,type NotePart, type NotesAdd, type NoteTarget, type NoteView } from "./bindings/notes.js";
 import { plural } from "./plural.js";
 
 /** Every label of the feature in one place: the owner's naming question is a one-line change here. */
@@ -41,13 +41,19 @@ export const ownNotesTexts = {
   pending: "текст ещё извлекается",
   failed: "текст не извлечён",
   pdfNotExtracted: "текст PDF не извлечён",
+  untitled: "Без названия",
+  tooLong: "Текст больше 1 МБ.",
+  limitPrefix: "Не больше",
+  megabytes: "МБ",
+  kilobytes: "КБ",
+  counterOf: "из",
 } as const;
 
 /** The longest pasted text the core keeps (cases/notes MaxPastedBytes). */
 export const maxPasteBytes = 1024 * 1024;
 
 export function pasteLimitText(): string {
-  return `Не больше ${maxPasteBytes / (1024 * 1024)} МБ.`;
+  return `${ownNotesTexts.limitPrefix} ${maxPasteBytes / (1024 * 1024)} ${ownNotesTexts.megabytes}.`;
 }
 
 export type PasteCheck = { kind: "empty" } | { kind: "long" } | { kind: "ok" };
@@ -64,7 +70,7 @@ export function checkPaste(text: string): PasteCheck {
 export function pasteCounterText(text: string): string {
   const used = new TextEncoder().encode(text).length;
   const kb = Math.ceil(used / 1024);
-  return `${kb} из ${maxPasteBytes / 1024} КБ`;
+  return `${kb} ${ownNotesTexts.counterOf} ${maxPasteBytes / 1024} ${ownNotesTexts.kilobytes}`;
 }
 
 const maxNameLength = 120;
@@ -113,7 +119,7 @@ export function partRows(note: Pick<NoteView, "parts">): PartRow[] {
   const n = note.parts.length;
   return note.parts.map((p, i) => ({
     materialId: p.materialId,
-    name: p.name === "" ? "Без названия" : p.name,
+    name: p.name === "" ? ownNotesTexts.untitled : p.name,
     meta: [partTypeLabel(p.type), partState(p)].filter((s) => s !== "").join(" · "),
     canUp: i > 0,
     canDown: i < n - 1,
@@ -207,12 +213,38 @@ export function pickSubjectId(
   if (notes.length > 0) {
     return notes[0].subjectId;
   }
-  const want = lessonSubject.trim().toLowerCase();
+  const want = subjectKey(lessonSubject);
   if (want === "") {
     return "";
   }
-  const hit = subjects.find((s) => [s.name, ...s.aliases].some((n) => n.trim().toLowerCase() === want));
-  return hit === undefined ? "" : hit.id;
+  const hits = subjects.filter((s) => [s.name, ...s.aliases].some((n) => subjectKey(n) === want));
+  // Two subjects under one name: the page cannot choose for the student.
+  return hits.length === 1 ? hits[0].id : "";
+}
+
+/** The core's subject key (values.Key): format chars dropped, control chars as spaces, spaces collapsed, ё as е. */
+export function subjectKey(name: string): string {
+  return name
+    .replace(/\p{Cf}/gu, "")
+    .replace(/\p{Cc}/gu, " ")
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export type UndoApi = Pick<NotesApi, "restore" | "reorder" | "undoReplace">;
+
+/** Performs the undo; null when the core did not give the note back (the undo is then dropped). */
+export async function undoCall(api: UndoApi, a: UndoAction): Promise<NoteView | null> {
+  switch (a.kind) {
+    case "remove":
+      return api.restore(a.noteId);
+    case "reorder":
+      return api.reorder(a.noteId, a.order);
+    case "replace":
+      return (await api.undoReplace(a.noteId, a.currentId, a.previousId)).note;
+  }
 }
 
 /** The lecture the files go to. */

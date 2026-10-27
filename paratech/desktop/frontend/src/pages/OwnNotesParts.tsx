@@ -1,7 +1,7 @@
+import { useEffect, useId, useRef } from "react";
 import { dropAttributes, type NoteTarget, type NoteView } from "../bindings/notes.js";
 import {
   checkPaste,
-  maxPasteBytes,
   ownNotesTexts as t,
   partCountText,
   partRows,
@@ -46,20 +46,17 @@ export interface OwnNotesActions {
   onUndo(): void;
 }
 
-function NoteCard(props: { note: NoteView; model: OwnNotesModel; actions: OwnNotesActions }) {
+function NoteCard(props: {
+  note: NoteView;
+  model: OwnNotesModel;
+  actions: OwnNotesActions;
+  onMoved(materialId: string, dir: "up" | "down"): void;
+}) {
   const { note, model, actions } = props;
   const off = model.busy;
+  // A removed note is told about in the status region, with its «Отменить».
   if (note.removed) {
-    return (
-      <Card className="box own-note">
-        <p className="own-removed">{t.removedLine}</p>
-        {model.undo?.kind === "remove" && model.undo.noteId === note.id && (
-          <Button variant="secondary" size="sm" disabled={off} onClick={actions.onUndo}>
-            {t.undo}
-          </Button>
-        )}
-      </Card>
-    );
+    return null;
   }
   const rows = partRows(note);
   return (
@@ -94,8 +91,13 @@ function NoteCard(props: { note: NoteView; model: OwnNotesModel; actions: OwnNot
                   size="sm"
                   icon="up"
                   disabled={off || !r.canUp}
+                  data-move="up"
+                  data-mid={r.materialId}
                   aria-label={`${t.moveUp}: ${shortName(r.name)}`}
-                  onClick={() => actions.onMove(note, i, -1)}
+                  onClick={() => {
+                    props.onMoved(r.materialId, "up");
+                    actions.onMove(note, i, -1);
+                  }}
                 >
                   {t.moveUp}
                 </Button>
@@ -104,8 +106,13 @@ function NoteCard(props: { note: NoteView; model: OwnNotesModel; actions: OwnNot
                   size="sm"
                   icon="down"
                   disabled={off || !r.canDown}
+                  data-move="down"
+                  data-mid={r.materialId}
                   aria-label={`${t.moveDown}: ${shortName(r.name)}`}
-                  onClick={() => actions.onMove(note, i, 1)}
+                  onClick={() => {
+                    props.onMoved(r.materialId, "down");
+                    actions.onMove(note, i, 1);
+                  }}
                 >
                   {t.moveDown}
                 </Button>
@@ -134,10 +141,36 @@ export function OwnNotesView(props: { model: OwnNotesModel; actions: OwnNotesAct
   const check = checkPaste(model.pasteText);
   const canAdd = model.subjectId !== "";
   const drop = canAdd ? dropAttributes(model.target) : {};
-  const showUndo = model.undo !== null && model.undo.kind !== "remove";
+  const shown = model.notes.filter((n) => !n.removed);
+  const root = useRef<HTMLElement>(null);
+  const pasteId = useId();
+  const limitId = `${pasteId}-limit`;
+  const moved = useRef<{ materialId: string; dir: "up" | "down" } | null>(null);
+  const undoFocused = useRef("");
+
+  // Focus must not fall to the page when the pressed button turns off: it goes to the enabled one of the pair.
+  useEffect(() => {
+    const el = root.current;
+    if (el === null || model.busy) {
+      return;
+    }
+    const m = moved.current;
+    if (m !== null) {
+      moved.current = null;
+      const pair = Array.from(el.querySelectorAll<HTMLButtonElement>("button[data-move]")).filter(
+        (b) => b.dataset.mid === m.materialId,
+      );
+      const same = pair.find((b) => b.dataset.move === m.dir && !b.disabled);
+      (same ?? pair.find((b) => !b.disabled))?.focus();
+    }
+    if (model.undo?.kind === "remove" && undoFocused.current !== model.undo.noteId) {
+      undoFocused.current = model.undo.noteId;
+      el.querySelector<HTMLButtonElement>("button[data-undo]")?.focus();
+    }
+  }, [model.busy, model.notes, model.undo]);
 
   return (
-    <section className="own-notes" aria-label={t.title} {...drop}>
+    <section ref={root} className="own-notes" aria-label={t.title} {...drop}>
       <div className="own-head">
         <h2 className="own-title">{t.title}</h2>
         <StatusChip kind="neutral" icon="doc">
@@ -161,23 +194,23 @@ export function OwnNotesView(props: { model: OwnNotesModel; actions: OwnNotesAct
       {canAdd ? <p className="small muted">{t.dropHint}</p> : <p className="small muted">{t.noSubject}</p>}
       {model.pasteOpen && canAdd && (
         <div className="own-paste">
-          <label htmlFor="own-paste-text">{t.pasteLabel}</label>
+          <label htmlFor={pasteId}>{t.pasteLabel}</label>
           <textarea
-            id="own-paste-text"
+            id={pasteId}
             className="input own-paste-text"
             value={model.pasteText}
             onChange={(e) => actions.onPasteText(e.target.value)}
-            aria-describedby="own-paste-limit"
+            aria-describedby={limitId}
             aria-invalid={check.kind === "long"}
           />
-          <p id="own-paste-limit" className="small muted">
+          <p id={limitId}className="small muted">
             {pasteLimitText()} {pasteCounterText(model.pasteText)}
           </p>
           <div className="acts start">
             <Button
               variant="primary"
               disabled={model.busy || check.kind !== "ok"}
-              disabledReason={check.kind === "long" ? `Текст больше ${maxPasteBytes / (1024 * 1024)} МБ.` : undefined}
+              disabledReason={check.kind === "long" ? t.tooLong : undefined}
               onClick={actions.onPasteSave}
             >
               {t.pasteSave}
@@ -205,20 +238,28 @@ export function OwnNotesView(props: { model: OwnNotesModel; actions: OwnNotesAct
             ))}
           </ul>
         )}
-        {showUndo && model.undo && (
-          <Button variant="secondary" size="sm" disabled={model.busy} onClick={actions.onUndo}>
+        {model.undo !== null && (
+          <Button variant="secondary" size="sm" data-undo="" disabled={model.busy} onClick={actions.onUndo}>
             {t.undo}
           </Button>
         )}
       </div>
       {model.loading ? (
         <p className="muted">{t.loading}</p>
-      ) : model.notes.length === 0 ? (
+      ) : shown.length === 0 ? (
         <p className="muted">{t.empty}</p>
       ) : (
         <div className="own-list">
-          {model.notes.map((n) => (
-            <NoteCard key={n.id} note={n} model={model} actions={actions} />
+          {shown.map((n) => (
+            <NoteCard
+              key={n.id}
+              note={n}
+              model={model}
+              actions={actions}
+              onMoved={(materialId, dir) => {
+                moved.current = { materialId, dir };
+              }}
+            />
           ))}
         </div>
       )}

@@ -12,6 +12,7 @@ import {
   refusalText,
   type ResultLine,
   type UndoAction,
+  undoCall,
   undoneText,
   visibleNotes,
   withNote,
@@ -180,26 +181,19 @@ export function OwnNotes(props: { recordingId: string; subject: string }) {
       void act(async () => {
         const next = await api.remove(noteId);
         setNotes((list) => withNote(list, next));
-        done({ kind: "remove", noteId }, "");
-        setStatus(null);
+        const a: UndoAction = { kind: "remove", noteId };
+        done(a, undoneText(a));
       }),
     onUndo: () =>
       void act(async () => {
         if (undo === null) {
           return;
         }
-        const a = undo;
-        let next: NoteView;
-        if (a.kind === "remove") {
-          next = await api.restore(a.noteId);
-        } else if (a.kind === "reorder") {
-          next = await api.reorder(a.noteId, a.order);
-        } else {
-          const r = await api.undoReplace(a.noteId, a.currentId, a.previousId);
-          if (r.note === null) {
-            return;
-          }
-          next = r.note;
+        const next = await undoCall(api, undo);
+        if (next === null) {
+          setUndo(null);
+          setStatus({ ok: false, text: refusalText(null) });
+          return;
         }
         setNotes((list) => withNote(list, next));
         done(null, t.undoneLine);
