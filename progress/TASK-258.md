@@ -17,6 +17,8 @@
 ## Hardening (supervisor decision)
 `OpenCallLink` also refuses a link containing `%NAME%` (NAME in `[A-Za-z0-9_()]+`) when an environment variable of that name exists (case-insensitive, seam `environ`). Teams `%22Tid%22` still passes. Still to verify on Windows: whether the .url handler expands variables at all.
 
+Auditor re-check found the name filter too narrow (`%DB-TOKEN%`); fixed: any text between two `%` is compared with the env keys. Open (auditor, ~5/10, unconfirmed): the expanding process may be Explorer, whose environment can differ from ours (setx while running); closing it would also read HKCU\Environment names.
+
 ## Changed existing tests
 `calllink_test.go`: the `%USERPROFILE%` refusal case renamed "non-hex environment variable" with a clarifying comment; input and result unchanged.
 
