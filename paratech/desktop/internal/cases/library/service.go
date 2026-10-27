@@ -41,6 +41,7 @@ type Service struct {
 	texts       TextExtractor
 	reader      MaterialReader
 	inspections InspectionRepository
+	notes       SubjectNotes // optional
 	log         *slog.Logger
 }
 
@@ -56,7 +57,7 @@ func New(d Deps) (*Service, error) {
 	}
 	return &Service{
 		subjects: d.Subjects, materials: d.Materials, blobs: d.Blobs, lessons: d.Lessons, strings: d.Strings,
-		clock: d.Clock, ids: d.IDs, texts: d.Texts, reader: d.Reader, inspections: d.Inspections, log: log,
+		clock: d.Clock, ids: d.IDs, texts: d.Texts, reader: d.Reader, inspections: d.Inspections, notes: d.Notes, log: log,
 	}, nil
 }
 
@@ -161,7 +162,7 @@ func (s *Service) RemoveFolder(ctx context.Context, id shared.SubjectID, folder 
 }
 
 // RemoveSubject removes a subject that holds no file (active or removed), with its own folders. One with files is
-// ErrNotEmpty.
+// ErrNotEmpty, one with notes of the student (active or removed) ErrHasNotes: the notes are never removed with it.
 func (s *Service) RemoveSubject(ctx context.Context, id shared.SubjectID) error {
 	for attempt := 1; ; attempt++ {
 		sub, err := s.subject(ctx, id)
@@ -175,6 +176,9 @@ func (s *Service) RemoveSubject(ctx context.Context, id shared.SubjectID) error 
 		if err := sub.Removable(n); err != nil {
 			return domainError(err)
 		}
+		if err := s.checkNoNotes(ctx, id); err != nil {
+			return err
+		}
 		err = s.subjects.Delete(ctx, sub)
 		switch {
 		case errors.Is(err, shared.ErrVersionConflict) && attempt < saveAttempts:
@@ -183,12 +187,27 @@ func (s *Service) RemoveSubject(ctx context.Context, id shared.SubjectID) error 
 			s.log.Warn(opSubjectBusy, slog.String("subject", string(id)))
 			return ErrBusy
 		case errors.Is(err, shared.ErrConflict):
-			return ErrNotEmpty // a file was filed under it after the count
+			return ErrNotEmpty // a file or a note came under it after the checks
 		case err != nil:
 			return fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
 		return nil
 	}
+}
+
+// checkNoNotes refuses with ErrHasNotes when the subject has notes; without the port the store refuses instead.
+func (s *Service) checkNoNotes(ctx context.Context, id shared.SubjectID) error {
+	if s.notes == nil {
+		return nil
+	}
+	list, err := s.notes.ListBySubject(ctx, id)
+	switch {
+	case err != nil:
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+	case len(list) > 0:
+		return ErrHasNotes
+	}
+	return nil
 }
 
 // Materials lists the files of a subject, or of «Входящие» for "", in any status, newest first.
@@ -352,6 +371,30 @@ func (s *Service) fileInto(ctx context.Context, sub shared.SubjectID, folder sub
 		return im.Material, nil
 	}
 	return s.Place(ctx, im.Material.ID(), sub, f)
+}
+
+// FileNotePart stores a part of the student's own notes of sub (ADR-0027, TASK-151). The bytes are imported as Import
+// does: the same bytes give the material that exists (existing). A material in «Входящие» is then placed in the system
+// folder of sub for lessonKind (filing.NoteFolder); one already filed, in sub or in another subject, stays where it is,
+// so the caller checks its subject. A missing subject is ErrSubjectNotFound, and then nothing is stored.
+func (s *Service) FileNotePart(ctx context.Context, sub shared.SubjectID, lessonKind, name string, data []byte) (*material.Material, bool, error) {
+	target, err := s.subject(ctx, sub)
+	if err != nil {
+		return nil, false, err
+	}
+	im, err := s.Import(ctx, Upload{Name: name, Data: data})
+	if err != nil {
+		return nil, false, err
+	}
+	if !im.Material.InInbox() {
+		return im.Material, im.Existing, nil
+	}
+	folder, _ := filing.Target(sub, target, filing.NoteFolder(lessonKind)) // "" is «Материалы» for Place
+	m, err := s.Place(ctx, im.Material.ID(), sub, folder)
+	if err != nil {
+		return nil, false, err
+	}
+	return m, im.Existing, nil
 }
 
 // MoveToInbox returns a material to «Входящие» (the undo of Place); the file is kept.

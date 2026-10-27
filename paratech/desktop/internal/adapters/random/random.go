@@ -59,6 +59,9 @@ func (IDs) NewFolderID() shared.FolderID { return shared.FolderID(token()) }
 // NewMaterialID returns a fresh material identifier of the library.
 func (IDs) NewMaterialID() shared.MaterialID { return shared.MaterialID(token()) }
 
+// NewNoteID returns a fresh identifier of a student's own note.
+func (IDs) NewNoteID() shared.NoteID { return shared.NoteID(token()) }
+
 // NewWorkID returns a fresh turnkey work identifier.
 func (IDs) NewWorkID() shared.WorkID { return shared.WorkID(token()) }
 

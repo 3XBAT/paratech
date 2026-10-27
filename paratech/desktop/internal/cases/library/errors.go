@@ -53,6 +53,10 @@ var (
 	// ErrNotEmpty means a subject or folder that still holds files was to be removed.
 	ErrNotEmpty = errors.New("library: not empty")
 
+	// ErrHasNotes means a subject that has notes of the student (active or removed) was to be removed; it wraps
+	// ErrNotEmpty, so a caller that knows only that one still reads it as «not empty».
+	ErrHasNotes = fmt.Errorf("%w: the subject has notes", ErrNotEmpty)
+
 	// ErrSystemFolder means a system folder was to be removed.
 	ErrSystemFolder = errors.New("library: system folder")
 
