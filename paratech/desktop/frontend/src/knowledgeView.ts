@@ -11,9 +11,11 @@ import {
   type KnowledgeSubject,
   type LessonKind,
   lessonKinds,
+  type NoteLocatorKind,
 } from "./bindings/knowledgeBase.js";
 import type { SummaryContent, SummaryView } from "./bindings/summary.js";
 import { lectureBlocks } from "./lectureTextView.js";
+import { ownNotesTexts, shortName } from "./ownNotesView.js";
 import { plural } from "./plural.js";
 import { kindLabel } from "./scheduleView.js";
 import { keyPointList, summarySections } from "./summaryView.js";
@@ -96,9 +98,12 @@ export function readyMarks(l: Pick<KnowledgeLesson, "summaryReady" | "lectureTex
   ];
 }
 
-/** «5 занятий · последнее 19.10». */
+/** «5 занятий · последнее 19.10»; a subject known only from the student's notes has no recorded lessons. */
 export function subjectMeta(s: Pick<KnowledgeSubject, "lessons" | "latest">): string {
-  const n = `${s.lessons} ${plural(s.lessons, "занятие", "занятия", "занятий")}`;
+  if (s.lessons === 0) {
+    return ownNotesTexts.ownChip;
+  }
+  const n =`${s.lessons} ${plural(s.lessons, "занятие", "занятия", "занятий")}`;
   const day = dayText(s.latest);
   return day === "" ? n : `${n} · последнее ${day}`;
 }
@@ -124,7 +129,10 @@ export interface LessonFocus {
 
 export const noFocus: LessonFocus = { tab: "summary", index: -1 };
 
-/** The place a search hit opens: the lecture block, the transcript segment, a summary section or a key point. */
+/**
+ * The place a search hit opens in a recording's page: the lecture block, the transcript segment, a summary section or a
+ * key point. A hit in the student's notes opens the notes block, which is not a tab: no focus.
+ */
 export function hitFocus(h: Pick<KnowledgeHit, "section" | "index">): LessonFocus {
   switch (h.section) {
     case "lectureText":
@@ -134,22 +142,42 @@ export function hitFocus(h: Pick<KnowledgeHit, "section" | "index">): LessonFocu
     case "summary":
       return { tab: "summary", index: h.index };
     case "title":
-    case "ownNote": // opens the note, not a tab (TASK-155 page)
+    case "ownNote":
       return noFocus;
   }
 }
 
-export const sectionLabels: Readonly<Record<KnowledgeSection, string>> = {
+/** The section names of a recording; a hit in the student's notes is named by the core's label instead. */
+export const sectionLabels: Readonly<Record<Exclude<KnowledgeSection, "ownNote">, string>> = {
   title: "Название",
   summary: "Кратко",
   lectureText: "Текст лекции",
   transcript: "Расшифровка",
-  ownNote: "Мой конспект",
 };
 
-/** «Расшифровка · 12:05»: the section of a hit and where in it. */
-export function hitPlace(h: Pick<KnowledgeHit, "section" | "time">): string {
+/**
+ * «Расшифровка · 12:05»: the section of a hit and where in it. A hit in the student's notes shows the core's label
+ * («ваш конспект · стр. 3») as it is: plain text, never rebuilt here.
+ */
+export function hitPlace(h: Pick<KnowledgeHit, "section" | "time" | "label">): string {
+  if (h.section === "ownNote") {
+    return h.label !== "" ? h.label : ownNotesTexts.ownChip;
+  }
   return h.time !== "" ? `${sectionLabels[h.section]} · ${h.time}` : sectionLabels[h.section];
+}
+
+/** A lecture known only from notes has no recording: the page must not ask a recording-only binding for it. */
+export function isNoteOnly(l: Pick<KnowledgeLesson, "noteOnly" | "recordingId">): boolean {
+  return l.noteOnly || l.recordingId === "";
+}
+
+/** What a click on a hit opens: the lesson, the place in a recording and, for the student's notes, the file. */
+export function hitOpening(h: Pick<KnowledgeHit, "section" | "index" | "lesson" | "materialId">): {
+  lesson: KnowledgeLesson;
+  focus: LessonFocus;
+  materialId: string;
+} {
+  return { lesson: h.lesson, focus: hitFocus(h), materialId: h.section === "ownNote" ? h.materialId : "" };
 }
 
 export interface HitGroup {
@@ -157,15 +185,16 @@ export interface HitGroup {
   hits: KnowledgeHit[];
 }
 
-/** The hits by lesson, in the order the core sent them (newest lessons first). */
+/** The hits by lesson, in the order the core sent them; a note-only lecture (no recording id) is told apart by its key. */
 export function groupHits(hits: readonly KnowledgeHit[]): HitGroup[] {
   const out: HitGroup[] = [];
   const byId = new Map<string, HitGroup>();
   for (const h of hits) {
-    let g = byId.get(h.recordingId);
+    const id = h.recordingId !== "" ? h.recordingId : h.lesson.key;
+    let g = byId.get(id);
     if (g === undefined) {
       g = { lesson: h.lesson, hits: [] };
-      byId.set(h.recordingId, g);
+      byId.set(id, g);
       out.push(g);
     }
     g.hits.push(h);
@@ -324,6 +353,225 @@ export function paragraphOf(paras: readonly Paragraph[], segment: number): numbe
     const s = p.segments;
     return s.length > 0 && s[0].index <= segment && segment <= s[s.length - 1].index;
   });
+}
+
+// ---- Lectures known only from the student's notes, and «Добавить конспект прошедшей пары» (TASK-155, ADR-0027) ----
+
+/** Every text of the note-only lectures, the add flow and the citations in one place (the naming is the owner's call). */
+export const noteLectureTexts = {
+  ownChip: ownNotesTexts.ownChip,
+  undated: "без даты",
+  pair: "Пара",
+  addPast: "Добавить конспект прошедшей пары",
+  addPastTitle: "Конспект прошедшей пары",
+  pickRecording: "Занятие с записью",
+  pickRecordingNone: "Нет занятий с записью без конспекта.",
+  pickDate: "Дата пары",
+  pickUndated: "Без даты",
+  choose: "Выбрать",
+  close: "Закрыть",
+  dateEmpty: "Укажите дату.",
+  dateInvalid: "Неверная дата.",
+  dateFuture: "Дата не может быть в будущем.",
+  // Fallbacks only: the binding sends the label of a source and «источник удалён» for a removed one.
+  sourceRemoved: "источник удалён",
+} as const;
+
+// Follow-up (ADR-0027 Open 2): the core has no list of a subject's past schedule slots yet, so the add flow offers
+// recorded lessons, a date and «без даты» only.
+
+const dayPattern = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** "12.09" from "2026-09-12" (the day is a plain local date, no time zone involved); "" when it is not one. */
+export function dateText(date: string): string {
+  const m = dayPattern.exec(date);
+  return m === null ? "" : `${m[3]}.${m[2]}`;
+}
+
+/** "12.09.2026" from "2026-09-12". */
+export function dateFullText(date: string): string {
+  const m = dayPattern.exec(date);
+  return m === null ? "" : `${m[3]}.${m[2]}.${m[1]}`;
+}
+
+/** The day of a lecture for its line: «19.10», «12.09» or «без даты». */
+export function lectureDay(l: Pick<KnowledgeLesson, "noteOnly" | "undated" | "date" | "startedAt">): string {
+  if (l.undated) {
+    return noteLectureTexts.undated;
+  }
+  return l.noteOnly || l.date !== "" ? dateText(l.date) : dayText(l.startedAt);
+}
+
+/** The name of a lecture without a recording: its first note's title (typed text or a file name), plain text. */
+export function noteLectureName(l: Pick<KnowledgeLesson, "notes">): string {
+  const t = l.notes[0]?.title.trim() ?? "";
+  const name = t === "" ? ownNotesTexts.untitled : shortName(t);
+  return l.notes.length > 1 ? `${name} и ещё ${l.notes.length - 1}` : name;
+}
+
+/** The line of a lecture in the list: a recording's usual label, or «12.09 · Ряды.docx» / «без даты · Ряды.docx». */
+export function lectureLabel(l: Pick<KnowledgeLesson, "noteOnly" | "recordingId" | "undated" | "date" | "notes" | "title" | "startedAt" | "kind">): string {
+  if (!isNoteOnly(l)) {
+    return lessonLabel(l);
+  }
+  return [lectureDay(l), noteLectureName(l)].filter((p) => p !== "").join(" · ");
+}
+
+/** The heading of a note-only lecture page: «Пара 12.09.2026» / «Пара без даты». */
+export function noteLectureHeading(l: Pick<KnowledgeLesson, "undated" | "date">): string {
+  const day = l.undated || l.date === "" ? noteLectureTexts.undated : dateFullText(l.date);
+  return `${noteLectureTexts.pair} ${day}`;
+}
+
+/** «Матанализ · ваш конспект» under that heading. */
+export function noteLectureMeta(l: Pick<KnowledgeLesson, "subject">): string {
+  return `${subjectName(l)} · ${noteLectureTexts.ownChip}`;
+}
+
+/**
+ * The lectures of a subject by date, newest first, those «без даты» (and any with an unreadable start) last. The core
+ * already sends this order; it is kept here so a page never shows a different one. Stable for equal dates.
+ */
+export function orderLectures<T extends Pick<KnowledgeLesson, "undated" | "startedAt">>(lectures: readonly T[]): T[] {
+  const at = (l: T) => (l.undated ? Number.NaN : (localDate(l.startedAt)?.getTime() ?? Number.NaN));
+  return lectures
+    .map((l, i) => ({ l, i, t: at(l) }))
+    .sort((a, b) => {
+      const an = Number.isNaN(a.t);
+      const bn = Number.isNaN(b.t);
+      if (an !== bn) {
+        return an ? 1 : -1;
+      }
+      return an || a.t === b.t ? a.i - b.i : b.t - a.t;
+    })
+    .map((x) => x.l);
+}
+
+/** The count and the newest start of a subject's lectures for its heading; only recorded ones have a count of lessons. */
+export function lecturesMeta(lectures: readonly KnowledgeLesson[]): Pick<KnowledgeSubject, "lessons" | "latest"> {
+  const recorded = lectures.filter((l) => !isNoteOnly(l));
+  return { lessons: recorded.length, latest: recorded[0]?.startedAt ?? "" };
+}
+
+/** The recorded lessons of the subject that have no notes yet: the ones «Добавить конспект прошедшей пары» offers. */
+export function lessonsWithoutNotes(lectures: readonly KnowledgeLesson[]): KnowledgeLesson[] {
+  return lectures.filter((l) => !isNoteOnly(l) && l.notes.length === 0);
+}
+
+/** What the student picks in «Добавить конспект прошедшей пары». */
+export type PastChoice =
+  | { kind: "recording"; lesson: KnowledgeLesson }
+  | { kind: "day"; date: string }
+  | { kind: "undated" };
+
+/**
+ * The lecture the block opens for a choice. A recorded lesson is itself; a day or «без даты» is a lecture that is not
+ * in the list yet (no notes), opened by the subject's id and the date, never by a path.
+ */
+export function pastLesson(subject: Pick<KnowledgeSubject, "key" | "name" | "noSubject" | "subjectId">, c: PastChoice): KnowledgeLesson {
+  if (c.kind === "recording") {
+    return c.lesson;
+  }
+  const undated = c.kind === "undated";
+  return {
+    key: undated ? `new:undated:${subject.key}` : `new:day:${subject.key}:${c.date}`,
+    noteOnly: true,
+    undated,
+    anchor: undated ? "undated" : "day",
+    scheduleLessonId: "",
+    date: undated ? "" : c.date,
+    notes: [],
+    recordingId: "",
+    startedAt: "",
+    durationSeconds: 0,
+    title: "",
+    subject: subject.noSubject ? "" : subject.name,
+    subjectKey: subject.key,
+    kind: "",
+    subjectEdited: false,
+    kindEdited: false,
+    transcriptReady: false,
+    summaryReady: false,
+    lectureTextReady: false,
+    librarySubjectId: subject.subjectId,
+    librarySubjectState: subject.subjectId !== "" ? "matched" : "none",
+  };
+}
+
+/** "YYYY-MM-DD" of a moment in local time. */
+export function localDay(d: Date): string {
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
+}
+
+export type DateCheck = { kind: "empty" | "invalid" | "future" } | { kind: "ok"; date: string };
+
+/** The typed date of a past pair: a real calendar day, not after today (both "YYYY-MM-DD", local). */
+export function checkPastDate(value: string, today: string): DateCheck {
+  if (value === "") {
+    return { kind: "empty" };
+  }
+  const m = dayPattern.exec(value);
+  if (m === null) {
+    return { kind: "invalid" };
+  }
+  const probe = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (localDay(probe) !== value) {
+    return { kind: "invalid" };
+  }
+  return value > today ? { kind: "future" } : { kind: "ok", date: value };
+}
+
+export function dateCheckText(c: DateCheck): string {
+  switch (c.kind) {
+    case "empty":
+      return noteLectureTexts.dateEmpty;
+    case "invalid":
+      return noteLectureTexts.dateInvalid;
+    case "future":
+      return noteLectureTexts.dateFuture;
+    case "ok":
+      return "";
+  }
+}
+
+/** The part of an answer's source a citation needs (agent answer card, ADR-0027); every text is plain text. */
+export interface CitationSource {
+  section: KnowledgeSection;
+  recordingId: string;
+  index: number;
+  time: string;
+  noteId: string;
+  materialId: string;
+  locatorKind: NoteLocatorKind;
+  locatorN: number;
+  /** The binding's name of the place; «источник удалён» when removed. */
+  label: string;
+  removed: boolean;
+}
+
+/** The text of a citation's place: the binding's label for the student's notes and for a removed source. */
+export function citationPlace(s: CitationSource): string {
+  if (s.removed) {
+    return s.label !== "" ? s.label : noteLectureTexts.sourceRemoved;
+  }
+  return hitPlace(s);
+}
+
+export type CitationOpening =
+  | { kind: "note"; noteId: string; materialId: string; locatorKind: NoteLocatorKind; locatorN: number }
+  | { kind: "recording"; recordingId: string; focus: LessonFocus };
+
+/** What a click on a citation opens, by ids only; a removed source, or one without ids, does not open (null). */
+export function citationOpening(s: CitationSource): CitationOpening | null {
+  if (s.removed) {
+    return null;
+  }
+  if (s.section === "ownNote") {
+    return s.noteId === "" || s.materialId === ""
+      ? null
+      : { kind: "note", noteId: s.noteId, materialId: s.materialId, locatorKind: s.locatorKind, locatorN: s.locatorN };
+  }
+  return s.recordingId === "" ? null : { kind: "recording", recordingId: s.recordingId, focus: hitFocus(s) };
 }
 
 const knownErrors: ReadonlySet<string> = new Set(Object.values(errorMessages));
