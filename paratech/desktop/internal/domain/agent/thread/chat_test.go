@@ -50,8 +50,8 @@ func TestAutoTitle(t *testing.T) {
 		{"exactly 40", strings.Repeat("я", 40), strings.Repeat("я", 40)},
 		{"cut at the last word that fits", "Составь план подготовки к экзамену по линейной алгебре", "Составь план подготовки к экзамену по"},
 		{"one long word is cut", strings.Repeat("ж", 50) + " конец", strings.Repeat("ж", 40)},
-		{"bidi and controls become spaces", "a‮b\u0007c⁦d", "a b c d"},
-		{"nothing left", " \n‮ ", ""},
+		{"bidi and controls become spaces", "a\u202Eb\u0007c\u2066d", "a b c d"},
+		{"nothing left", " \n\u202E ", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -124,13 +124,13 @@ func TestRename(t *testing.T) {
 		"line break":        "две\nстроки",
 		"tab":               "a\tb",
 		"NUL":               "a\x00b",
-		"RLO":               "a‮b",
-		"LRE":               "a‪b",
-		"LRI":               "a⁦b",
-		"PDI":               "a⁩b",
-		"line separator":    "a b",
+		"RLO":               "a\u202Eb",
+		"LRE":               "a\u202Ab",
+		"LRI":               "a\u2066b",
+		"PDI":               "a\u2069b",
+		"line separator":    "a\u2028b",
 		"invalid UTF-8":     "a\xffb",
-		"replacement char":  "a�b",
+		"replacement char":  "a\uFFFDb",
 		"C1 control (U+85)": "a\u0085b",
 	}
 	for name, in := range bad {
@@ -336,7 +336,7 @@ func TestRestoreChat(t *testing.T) {
 		name   string
 		mutate func(s *State)
 	}{
-		{"bidi title", func(s *State) { s.Title = "a‮b" }},
+		{"bidi title", func(s *State) { s.Title = "a\u202Eb" }},
 		{"long title", func(s *State) { s.Title = strings.Repeat("я", MaxTitleRunes+1) }},
 		{"last active before created", func(s *State) { s.LastActive = t0.Add(-time.Minute) }},
 		{"archived before created", func(s *State) { s.ArchivedAt = t0.Add(-time.Minute) }},

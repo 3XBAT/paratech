@@ -17,7 +17,7 @@ func TestNewMention(t *testing.T) {
 		{"subject", mustRef(t, KindSubject, "s1"), "Матан", "Матан"},
 		{"lesson trimmed", lesson, "  Лекция 3: пределы  ", "Лекция 3: пределы"},
 		{"material", mustRef(t, KindMaterial, "m1"), "Конспект <черновик>.pdf", "Конспект <черновик>.pdf"},
-		{"assignment", mustRef(t, KindAssignment, "a1"), "ДЗ №2", "ДЗ №2"},
+		{"assignment", mustRef(t, KindAssignment, "a1"), "ДЗ\u00A0№2", "ДЗ\u00A0№2"},
 		{"200 runes", lesson, strings.Repeat("я", MaxMentionLabelRunes), strings.Repeat("я", MaxMentionLabelRunes)},
 	}
 	for _, tt := range good {
@@ -38,9 +38,9 @@ func TestNewMention(t *testing.T) {
 		{"empty label", lesson, "  "},
 		{"201 runes", lesson, strings.Repeat("я", MaxMentionLabelRunes+1)},
 		{"two lines", lesson, "Лекция\n3"},
-		{"line separator", lesson, "Лекция 3"},
-		{"bidi override", lesson, "Лекция‮3"},
-		{"zero width", lesson, "Лек​ция"},
+		{"line separator", lesson, "Лекция\u20283"},
+		{"bidi override", lesson, "Лекция\u202E3"},
+		{"zero width", lesson, "Лек\u200Bция"},
 		{"invalid UTF-8", lesson, "Лекция\xff"},
 	}
 	for _, tt := range bad {

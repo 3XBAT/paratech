@@ -32,9 +32,9 @@ func checkTitle(s string) error {
 
 func titleRune(r rune) bool {
 	switch {
-	case r == utf8.RuneError, unicode.IsControl(r), r == ' ', r == ' ':
+	case r == utf8.RuneError, unicode.IsControl(r), r == '\u2028', r == '\u2029':
 		return false
-	case r >= '‪' && r <= '‮', r >= '⁦' && r <= '⁩':
+	case r >= '\u202A' && r <= '\u202E', r >= '\u2066' && r <= '\u2069':
 		return false
 	}
 	return true
