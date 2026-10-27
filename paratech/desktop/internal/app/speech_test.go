@@ -111,7 +111,7 @@ func TestEmbeddedSpeechManifest(t *testing.T) {
 		t.Fatalf("files %v (%d bytes)", names, spec.TotalBytes())
 	}
 
-	// TASK-222: the Silero VAD model of whisper.cpp, downloaded on its own (docs/refs/whisper.md, ADR-0030).
+	// TASK-222: the Silero VAD model of whisper.cpp, downloaded on its own (docs/refs/whisper.md, ADR-0031).
 	sep := spec.SeparateFiles()
 	if spec.VADModel() != "ggml-silero-v5.1.2.bin" || len(sep) != 1 || sep[0].Name() != spec.VADModel() ||
 		sep[0].Size() != 885098 || sep[0].SHA256() != "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf" ||

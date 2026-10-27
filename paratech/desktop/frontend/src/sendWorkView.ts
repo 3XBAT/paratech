@@ -4,6 +4,7 @@
 
 import { type AgentConfirmApi, type ConfirmCard, confirmErrorText } from "./bindings/agentConfirm.js";
 import type { TurnkeyWork } from "./bindings/turnkey.js";
+import { formatTime } from "./activityView.js";
 
 export const sendWorkTexts = {
   button: "Отправить преподавателю",
@@ -11,6 +12,7 @@ export const sendWorkTexts = {
   busy: "Подготовка…",
   hint: "Письмо уйдёт только после «Да» на следующей карточке.",
   alreadySent: "Эта работа уже отправлялась преподавателю. Повторная отправка создаст ещё одно письмо.",
+  repeatWarning: "Повторная отправка создаст ещё одно письмо.",
 } as const;
 
 /** The button is offered for a work of an assignment (the core's `sendable`) that is ready. */
@@ -23,8 +25,26 @@ export interface SendWorkState {
   /** The proposal's confirm card, once made. */
   card: ConfirmCard | null;
   error: string;
-  /** The work was sent before (a send of it reached «done» here, or the core answered with a sent one). */
+  /**
+   * A send of this work reached «done» while the card was open, before the work was read again. The source of truth is
+   * the work's `sentAt` (TASK-226); this only bridges the gap until the next read.
+   */
   sentBefore: boolean;
+}
+
+export interface SentNote {
+  /** The work was sent before: the button reads «Отправить ещё раз». */
+  sent: boolean;
+  /** The warning line; "" when the work was never sent. */
+  text: string;
+}
+
+/** What is known about earlier sends: `sentAt` of the work first, the send just confirmed here second. */
+export function sentNote(sentAt: string | undefined, sentHere: boolean): SentNote {
+  if (sentAt) {
+    return { sent: true, text: `Отправлено ${formatTime(sentAt)}. ${sendWorkTexts.repeatWarning}` };
+  }
+  return sentHere ? { sent: true, text: sendWorkTexts.alreadySent } : { sent: false, text: "" };
 }
 
 export const initialSendWork: SendWorkState = { busy: false, card: null, error: "", sentBefore: false };

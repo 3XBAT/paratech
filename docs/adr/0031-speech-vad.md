@@ -1,4 +1,4 @@
-# ADR-0030: Skipping silence in speech recognition (Silero VAD)
+# ADR-0031: Skipping silence in speech recognition (Silero VAD)
 
 - **Status:** Accepted
 - **Date:** 2026-10-27
@@ -23,7 +23,7 @@ only the speech, in fewer 30 s windows: ×2 on 5 min of a real lecture and on sy
   × 0.8), then × 0.6 for the skipped silence: 0.5 was measured on a real lecture, 0.94 on synthetic speech with
   pauses under 2 s, so the estimate errs to the longer side until the first runs here are measured. Example,
   8 processors, gentle: small-q5_1 ≈ 34 min per hour.
-- **Old measurements.** `stt_speeds` measured without VAD would show twice the time: migration 0035 deletes them;
+- **Old measurements.** `stt_speeds` measured without VAD would show twice the time: migration 0037 deletes them;
   the table applies until the next runs. A later change of the arguments that changes the speed does the same.
 - **Time codes.** With VAD the starts stay on the time line of the recording and in order; a segment before a pause
   ends where the next speech starts. The live preview, the document and the lecture text use the starts, so nothing

@@ -24,7 +24,7 @@ const (
 	flagThreads       = "-t"
 	flagLanguage      = "-l"
 
-	// Voice activity detection (TASK-222, ADR-0030): only the speech goes to the model, silence and pauses are
+	// Voice activity detection (TASK-222, ADR-0031): only the speech goes to the model, silence and pauses are
 	// skipped; timestamps stay those of the whole recording. The other -v* options keep the CLI defaults.
 	flagVAD      = "--vad"
 	flagVADModel = "-vm"

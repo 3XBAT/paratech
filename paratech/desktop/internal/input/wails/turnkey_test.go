@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"paratech/desktop/internal/cases/turnkey"
 	cvalues "paratech/desktop/internal/domain/coursework/values"
@@ -410,9 +411,40 @@ func TestTurnkeyWorkJSON(t *testing.T) {
 		`"deadline":"","sources":""},"edited":["file_format"],"feasibility":"impossible",` +
 		`"feasibilityReason":"Чертёж в программе вуза","partial":false,"assumptions":[],` +
 		`"helper":{"steps":["Открыть программу"],"submit":"Файл .dwg","pitfalls":[],"readyParts":["Записка"],"placeholders":[]},` +
-		`"answered":[{"round":1,"question":"Вариант?","answer":"3","default":true}],"writing":null,"version":4,"problem":"","message":""}`
+		`"answered":[{"round":1,"question":"Вариант?","answer":"3","default":true}],"writing":null,"version":4,"problem":"","message":"",` +
+		`"lastProblem":"","lastMessage":"","sentAt":""}`
 	if string(b) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", b, want)
+	}
+}
+
+// TASK-226: the stored problem of the last reader call and the last send reach the page; every stored problem has a
+// code and a fixed text of its own.
+func TestTurnkeyWorkLastProblemAndSent(t *testing.T) {
+	v := helperView()
+	v.Status, v.LastProblem = work.StatusTriage, work.ProblemQuota
+	v.SentAt = time.Date(2026, 10, 27, 15, 4, 5, 0, time.FixedZone("MSK", 3*3600))
+	got, err := NewTurnkeyService(&fakeTurnkey{view: v}, discard()).Work(t.Context(), "w1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const tail = `"problem":"","message":"","lastProblem":"quota","lastMessage":"Лимит запросов исчерпан: разбор не завершён.",` +
+		`"sentAt":"2026-10-27T12:04:05Z"}`
+	if !strings.HasSuffix(string(b), tail) {
+		t.Fatalf("JSON =\n%s\nwant the tail\n%s", b, tail)
+	}
+
+	texts := map[string]bool{}
+	for _, p := range work.Problems() {
+		code := turnkeyLastProblems[p]
+		if code != string(p) || turnkeyMessages[code] == "" || texts[turnkeyMessages[code]] {
+			t.Errorf("%s: code %q, text %q", p, code, turnkeyMessages[code])
+		}
+		texts[turnkeyMessages[code]] = true
 	}
 }
 

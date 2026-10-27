@@ -280,8 +280,9 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	// prints with the one Printer of the process, whose WebView2 profile folder is its own (never the windows' one); off
 	// Windows the printer is a stub that answers unsupported.
 	printer := pdf.NewPrinter(filepath.Join(dataDir, webviewPDFDir), log)
+	workRepo := sqlite.NewWorkRepository(db)
 	works, err := turnkey.New(turnkey.Deps{
-		Works: sqlite.NewWorkRepository(db), Assignments: assignments, Materials: lib, Reader: llm,
+		Works: workRepo, Sends: workRepo, Assignments: assignments, Materials: lib, Reader: llm,
 		Advisor: llm.StepAdvisor(modelAlias), Clock: e.local, IDs: e.ids, Log: log,
 		Writing: &turnkey.WritingDeps{
 			Writer: llm, Jobs: jobs, JobIDs: e.ids, Canceller: runnerCanceller{c: c}, Profiles: settings,
@@ -419,6 +420,10 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return err
 	}
+	subjectPage, err := c.newSubjectView(dataDir, e, lib, knowledge, history, log)
+	if err != nil {
+		return err
+	}
 
 	if err := c.wireAgent(e, llm, agentReads{
 		library: lib, knowledge: knowledge, activity: history, assignments: c.proposals, deliveries: c.deliveries,
@@ -445,8 +450,9 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Knowledge:  knowledge,
 		Library:    lib,
 		// «Открыть в Word / PowerPoint»: a named copy in the artifact store, started below that root only.
-		MaterialViews: store,
-		Opener:        fileopen.New(filepath.Join(dataDir, artifactsDir)),
+		MaterialViews:   store,
+		Opener:          fileopen.New(filepath.Join(dataDir, artifactsDir)),
+		SubjectOverview: subjectPage,
 		// Life is set by openCore: the requests live as long as the app.
 		Agent: wails.AgentCore{Driver: c.driver, Panel: c.panel, Journal: c.journal, Clock: e.clock, FreeWork: c.freeWorks},
 		Today: todayScreen,

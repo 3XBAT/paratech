@@ -36,7 +36,7 @@ const (
 	// quantizedSpeedup: a quantized model (q5, q8) takes about this share of the time of its f16 variant.
 	quantizedSpeedup = 0.8
 
-	// silenceSkip: with voice activity detection (always on, ADR-0030) a run takes about this share of the time
+	// silenceSkip: with voice activity detection (always on, ADR-0031) a run takes about this share of the time
 	// without it, since only the speech is recognised. It depends on the pauses: 0.5 on 5 min of a real lecture,
 	// 0.94 on synthetic speech with pauses under 2 s (2026-10-26/27); 0.6 errs to the longer side until runs here
 	// are measured.
@@ -46,7 +46,7 @@ const (
 // tableFactor is the processing time over audio duration of a full (f16) model of the family with referenceThreads
 // threads on a usual laptop CPU with AVX2, with the default decoder of whisper-cli (beam search) and without voice
 // activity detection; 0 for an unknown family. Calibrated on small-q5_1 and base-q5_1 (RTF 0.80 and 0.28 on an
-// i5-10300H, 2026-10-26); the other families keep their ratio to small. Rough numbers, see ADR-0016 and ADR-0030.
+// i5-10300H, 2026-10-26); the other families keep their ratio to small. Rough numbers, see ADR-0016 and ADR-0031.
 func tableFactor(f values.ModelFamily) float64 {
 	switch f {
 	case values.FamilyTiny:

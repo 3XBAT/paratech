@@ -14,7 +14,7 @@ downloaded into paratech\dist\cache\speech-component\<version> (ignored by git; 
 size and SHA-256 match) and checked BEFORE it is opened; only the manifest files are unpacked, each checked again.
 Nothing from the archive is run. Whisper files already in the output folder are removed first, also with -SkipWhisper. Offline: -WhisperZip
 (a copy of the archive) or -WhisperDir (its unpacked Release folder) pass the same checks. A manifest file with a
-source_url of its own (the Silero VAD model, ADR-0030) is not in the archive: it is taken from -WhisperDir when the
+source_url of its own (the Silero VAD model, ADR-0031) is not in the archive: it is taken from -WhisperDir when the
 folder holds it, else from the same cache or downloaded from that URL, and checked the same way.
 
 -Smoke then checks the component next to the exe, starts the exe headless with a throwaway data directory inside the

@@ -37,7 +37,7 @@ same file). Fields: `schema_version` (1), `version` (build tag), `source_url`, `
 `download_hosts`, `entry_prefix` (`Release/`), `executable` (`whisper-cli.exe`), `vad_model` and `files`: `name`, `size_bytes`,
 `sha256` of each of the 14 files (`whisper-cli.exe`, `whisper.dll`, `ggml.dll`, `ggml-base.dll`, nine `ggml-cpu-*.dll` from the archive,
 and `ggml-silero-v5.1.2.bin`). A file with its own `source_url` is not in the archive and is downloaded on its own (its host must be
-in `download_hosts`): the Silero VAD model (TASK-222, ADR-0030, see "Voice activity detection"). Parsed by `values.ParseSpeechComponent`.
+in `download_hosts`): the Silero VAD model (TASK-222, ADR-0031, see "Voice activity detection"). Parsed by `values.ParseSpeechComponent`.
 
 - **Hosts.** `github.com` answers `302` to `release-assets.githubusercontent.com` (seen 2026-10-18);
   `objects.githubusercontent.com` is the older redirect host. For the VAD model `huggingface.co` and the Hugging Face CDN hosts of the
@@ -58,7 +58,7 @@ in `download_hosts`): the Silero VAD model (TASK-222, ADR-0030, see "Voice activ
   digests from the unpacked `Release/`), check `whisper-cli.exe --help` runs with only these files and still lists the VAD
   options, update `app/speech_test.go` (`TestEmbeddedSpeechManifest`).
 
-## Voice activity detection (TASK-222, ADR-0030)
+## Voice activity detection (TASK-222, ADR-0031)
 
 whisper-cli of b5454 has the VAD options (checked with `whisper-cli.exe --help` of the pinned binary, 2026-10-27):
 

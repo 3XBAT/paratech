@@ -63,7 +63,7 @@ Pinned in `desktop/internal/app/speechcomponent.json` (the manifest the app embe
   reused only if its size and SHA-256 match, else deleted and downloaded again.
 - Size and SHA-256 of the archive are checked before it is opened (mismatch: deleted, error). Only entries named exactly `<entry_prefix><name>` are unpacked,
   each to a path built from the manifest name, bounded by its size, then checked (size, SHA-256). Missing or duplicate entry: error. Nothing from the archive runs.
-- A file with a `source_url` of its own (the Silero VAD model, ADR-0030) is not in the archive: taken from `-WhisperDir` when that folder holds the
+- A file with a `source_url` of its own (the Silero VAD model, ADR-0031) is not in the archive: taken from `-WhisperDir` when that folder holds the
   pinned file, else from the same cache, else downloaded from its URL (TLS 1.2+); kept only with the pinned size and SHA-256.
 - Whisper files already in the target folder are removed first; the copied set is checked again.
 - Offline: `-WhisperZip <archive>` (same checks) or `-WhisperDir <unpacked Release folder>` (each file checked); fully offline the VAD model must be in

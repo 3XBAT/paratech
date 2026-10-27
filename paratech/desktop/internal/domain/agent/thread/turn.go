@@ -13,7 +13,8 @@ const maxRounds = values.MaxQuestionRounds
 // copy returned by Thread.Turn is a read-only view.
 type Turn struct {
 	number     int
-	scope      values.Scope // the context chip and screen of the request
+	scope      values.Scope     // the context chip and screen of the request
+	mentions   []values.Mention // «@» objects of the request; their IDs pass the provenance check like the scope
 	status     Status
 	resume     Status            // STOPPED only: where «Продолжить» goes back to
 	stopReason values.StopReason // STOPPED only
@@ -31,6 +32,9 @@ type Turn struct {
 
 // Scope returns the scope the request was made in.
 func (t Turn) Scope() values.Scope { return t.scope }
+
+// Mentions returns the objects the student mentioned in the request.
+func (t Turn) Mentions() []values.Mention { return slices.Clone(t.mentions) }
 
 // Retry returns how many times the student retried the open step after a permanent failure.
 func (t Turn) Retry() int { return t.retry }
@@ -79,7 +83,17 @@ func (t Turn) StartedAt() time.Time { return t.startedAt }
 // UpdatedAt returns the time of the last change.
 func (t Turn) UpdatedAt() time.Time { return t.updatedAt }
 
+// final reports whether the request ended or stopped, so its chat may be archived.
+func (t Turn) final() bool {
+	switch t.status {
+	case StatusDone, StatusFailed, StatusCancelled, StatusStopped:
+		return true
+	}
+	return false
+}
+
 func (t Turn) clone() Turn {
+	t.mentions = slices.Clone(t.mentions)
 	t.proposed = slices.Clone(t.proposed)
 	t.approved = slices.Clone(t.approved)
 	t.used = slices.Clone(t.used)

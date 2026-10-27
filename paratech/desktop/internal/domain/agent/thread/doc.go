@@ -1,6 +1,8 @@
-// Package thread is the aggregate of an agent thread (ADR-0021, design §2.2, §2.4): the thread of one subject or of
-// no subject (key NONE), its current request (turn) with the step counter, budget, question rounds and plan, and the
-// IDs seen in tool results of this thread (provenance).
+// Package thread is the aggregate of an agent thread (ADR-0021, design §2.2, §2.4), which is an agent chat
+// (ADR-0028): its title (Rename; «Новый чат» until the first text), archive mark (Archive, Restore; a new request
+// brings it back) and last activity, its current request (turn) with its scope and mentions, the step counter,
+// budget, question rounds and plan, and the IDs seen in tool results of this chat (provenance). A chat holds requests
+// of any subjects; the subject key (Key) stays only until the storage drops it.
 //
 // Turn status machine (transitions.go):
 //
@@ -21,5 +23,6 @@
 // per request, so a deferred plan argument binds only to one of them from an earlier step.
 //
 // Older turns are not part of the aggregate: the history sent to the planner is chosen by Window, which sends earlier
-// requests as their texts only (the Hub keeps the model turn of an echo only for a while).
+// requests as their texts and replies only (the Hub keeps the model turn of an echo only for a while), and Fill tells
+// how much of that window the next request would use.
 package thread

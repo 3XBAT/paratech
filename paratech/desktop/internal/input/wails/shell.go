@@ -73,6 +73,8 @@ type Core struct {
 	// «Открыть в Word / PowerPoint» of a library file (TASK-177): the artifact store keeps the copy, Opener starts it.
 	MaterialViews MaterialViews
 	Opener        FileOpener
+	// The page of a subject (TASK-225): «Ближайшее», the schedule line, the lessons and the «новое» marks.
+	SubjectOverview SubjectOverviewUseCase
 
 	Agent AgentCore // the agent panel (TASK-119); the shell attaches its panel to the Wails events
 
@@ -282,7 +284,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Knowledge == nil {
 		return Services{}, errors.New("wails: open core: no knowledge base")
 	}
-	if core.Library == nil || core.MaterialViews == nil || core.Opener == nil {
+	if core.Library == nil || core.MaterialViews == nil || core.Opener == nil || core.SubjectOverview == nil {
 		return Services{}, errors.New("wails: open core: no library")
 	}
 	if !core.Agent.complete() {
@@ -334,7 +336,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		Deletion:  NewRecordingDeleteService(core.Deletion, s.opts.Log),
 		Knowledge: NewKnowledgeBaseService(core.Knowledge, knowledgePickerFunc(s.pickKnowledgeFile), s.opts.Log),
 		Library: NewLibraryService(core.Library, materialPickerFunc(s.pickMaterialFile), core.Files, s.opts.Log).
-			withOpener(core.MaterialViews, core.Opener),
+			withOpener(core.MaterialViews, core.Opener).withOverview(core.SubjectOverview),
 		Agent:      NewAgentService(core.Agent, s.opts.Log),
 		Today:      NewTodayService(core.Today, s.opts.Log),
 		AgentPanel: core.Agent.Panel,

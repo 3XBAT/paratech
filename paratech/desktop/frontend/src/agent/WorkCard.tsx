@@ -587,7 +587,7 @@ export function WorkBody(props: {
             )}
           </div>
           {mode === "view" && props.send !== undefined && (
-            <WorkSend api={props.send.api} deleteApi={props.send.deleteApi} workId={work.id} sendable={canOfferSend(work)} />
+            <WorkSend api={props.send.api} deleteApi={props.send.deleteApi} workId={work.id} sendable={canOfferSend(work)} sentAt={work.sentAt} />
           )}
         </section>
       );

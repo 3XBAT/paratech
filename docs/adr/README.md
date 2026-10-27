@@ -32,6 +32,7 @@ Open decisions are tracked in PRD §19.
 - [0025](0025-turnkey-work.md) Turnkey work: triage, questions, helper mode
 - [0026](0026-agent-stop-rerun-streaming.md) Agent panel: waiting, «Стоп», repeat and streamed answers (Proposed)
 - [0027](0027-own-notes.md) The student's own notes («Мой конспект») for lectures (Proposed)
-- [0028](0028-agent-chats-context-ring.md) Чаты агента и индикатор контекста (Proposed, backlog)
-- [0029](0029-student-assignments.md) Assignments the student adds (by hand or through the agent)
-- [0030](0030-speech-vad.md) Skipping silence in speech recognition (Silero VAD)
+- [0028](0028-agent-chats-context-ring.md) Agent chats and the context ring
+- [0029](0029-student-assignments.md) Assignments the student adds (by hand or through the agent); delete and edit
+- [0030](0030-subject-teachers-scheduled-send.md) Teacher of a subject and «Отправить в…»
+- [0031](0031-speech-vad.md) Skipping silence in speech recognition (Silero VAD)

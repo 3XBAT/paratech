@@ -18,7 +18,7 @@ func TestEstimateTable(t *testing.T) {
 		min, max time.Duration
 		heavy    bool
 	}{
-		// 4 threads is the reference: the table factor with the silence skipped (VAD, ADR-0030).
+		// 4 threads is the reference: the table factor with the silence skipped (VAD, ADR-0031).
 		{"large normal", values.FamilyLargeV3, "f16", shared.LoadNormal, 8, 3*time.Hour + 10*time.Minute + 48*time.Second, 3*time.Hour + 10*time.Minute + 48*time.Second, true},
 		{"medium q5 normal", values.FamilyMedium, "q5_0", shared.LoadNormal, 8, 77*time.Minute + 46*time.Second, 77*time.Minute + 46*time.Second, true},
 		// small-q5_1 with --vad, 4 threads: RTF 0.40 measured on 5 min of a real lecture, 0.48 estimated (errs long).
