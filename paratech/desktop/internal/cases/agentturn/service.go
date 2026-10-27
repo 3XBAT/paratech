@@ -53,8 +53,9 @@ type Service struct {
 	tx       Tx
 	clock    Clock
 	ids      IDGenerator
-	progress Progress // nil: none
-	effects  Effects  // nil: no Rerun
+	progress Progress  // nil: none
+	effects  Effects   // nil: no Rerun
+	mentions Mentioned // nil: mentions are dropped
 	log      *slog.Logger
 
 	mu sync.Mutex
@@ -64,11 +65,11 @@ type Service struct {
 func New(d Deps) (*Service, error) {
 	if d.Model == nil || d.Threads == nil || d.History == nil || d.Subjects == nil || d.Facts == nil || d.Tx == nil ||
 		d.Clock == nil || d.IDs == nil {
-		return nil, fmt.Errorf("%s: %w: every port except Progress, Effects and Log is required", opNew, ErrInvalidConfig)
+		return nil, fmt.Errorf("%s: %w: every port except Progress, Effects, Mentions and Log is required", opNew, ErrInvalidConfig)
 	}
 	s := &Service{
 		model: d.Model, threads: d.Threads, history: d.History, subjects: d.Subjects, facts: d.Facts, tx: d.Tx,
-		clock: d.Clock, ids: d.IDs, progress: d.Progress, effects: d.Effects, log: d.Log,
+		clock: d.Clock, ids: d.IDs, progress: d.Progress, effects: d.Effects, mentions: d.Mentions, log: d.Log,
 	}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
@@ -98,36 +99,43 @@ func (c *change) takeResults(s *Service) {
 	}
 }
 
-// Ask starts a request in the current chat (a new one when there is none) with the scope of the context chip and
-// runs its steps until the request needs the Driver (calls to run) or the student (a plan, questions), or ends. A
-// previous request that waits for the student is cancelled.
+// Ask starts a request in the chat of in (the current chat when none is named, a new one when there is none) with the
+// scope of the context chip and the mentions that still exist, and runs its steps until the request needs the Driver
+// (calls to run) or the student (a plan, questions), or ends. A previous request that waits for the student is
+// cancelled; an archived chat comes back from the archive (thread.Ask). A named chat that does not exist wraps
+// shared.ErrNotFound.
 func (s *Service) Ask(ctx context.Context, in AskInput) (Step, error) {
 	text, err := values.NewStudentText(in.Text, in.Uploads)
 	if err != nil {
 		return Step{}, fmt.Errorf("%s: %w: %w", opAsk, ErrInvalidInput, err)
 	}
+	if in.ThreadID != "" {
+		if err := in.ThreadID.Validate(); err != nil {
+			return Step{}, fmt.Errorf("%s: %w: %w", opAsk, ErrInvalidInput, err)
+		}
+	}
+	mentions, err := s.existing(ctx, in.Mentions)
+	if err != nil {
+		return Step{}, err
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.clock.Now()
-	th, err := s.threads.Current(ctx)
-	switch {
-	case errors.Is(err, shared.ErrNotFound):
-		if th, err = thread.New(s.ids.NewThreadID(), now); err != nil {
-			return Step{}, fmt.Errorf("%s: %w", opAsk, err)
-		}
-	case err != nil:
+	th, err := s.chat(ctx, in.ThreadID, now)
+	if err != nil {
 		return Step{}, fmt.Errorf("%s: %w", opAsk, err)
 	}
 
 	c := &change{th: th}
-	err = th.StartRequest(in.Scope, now)
+	req := thread.Request{Scope: in.Scope, Mentions: mentions, Text: in.Text}
+	err = th.Ask(req, now)
 	if errors.Is(err, thread.ErrResultsPending) {
 		// Calls of the previous request that were never answered (a plan left open, a late Driver) are closed first,
 		// so the history keeps every echo followed by its results.
 		th.Abandon(values.RefuseNotDone, now)
 		c.takeResults(s)
-		err = th.StartRequest(in.Scope, now)
+		err = th.Ask(req, now)
 	}
 	if err != nil {
 		return Step{}, fmt.Errorf("%s: %w", opAsk, err)
@@ -137,6 +145,43 @@ func (s *Service) Ask(ctx context.Context, in AskInput) (Step, error) {
 	}
 	c.add(values.HistoryTurn{StudentText: text})
 	return s.drive(ctx, c, opAsk)
+}
+
+// chat loads the chat named id, or the current chat for an empty id, created when there is none.
+func (s *Service) chat(ctx context.Context, id shared.ThreadID, now time.Time) (*thread.Thread, error) {
+	if id != "" {
+		return s.threads.Get(ctx, id)
+	}
+	th, err := s.threads.Current(ctx)
+	if errors.Is(err, shared.ErrNotFound) {
+		return thread.New(s.ids.NewThreadID(), now)
+	}
+	return th, err
+}
+
+// existing keeps the mentions whose objects still exist; a missing one is dropped without an error (ADR-0028), so the
+// planner never gets its ID. Without the Mentions port none is kept.
+func (s *Service) existing(ctx context.Context, ms []values.Mention) ([]values.Mention, error) {
+	if len(ms) > values.MaxMentions {
+		return nil, fmt.Errorf("%s: %w: at most %d mentions", opAsk, ErrInvalidInput, values.MaxMentions)
+	}
+	var out []values.Mention
+	for _, m := range ms {
+		if m.IsZero() {
+			return nil, fmt.Errorf("%s: %w: an empty mention", opAsk, ErrInvalidInput)
+		}
+		if s.mentions == nil {
+			continue
+		}
+		ok, err := s.mentions.Exists(ctx, m.Ref())
+		if err != nil {
+			return nil, fmt.Errorf("%s: mention %s: %w", opAsk, m.Ref(), err)
+		}
+		if ok {
+			out = append(out, m)
+		}
+	}
+	return out, nil
 }
 
 // maxSubmitSaves bounds the saves of the Driver's results when «Стоп» keeps saving in between.

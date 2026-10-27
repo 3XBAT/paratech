@@ -14,15 +14,25 @@ import {
   type AddForm,
   addSession,
   addTexts,
+  changeTexts,
+  editForm,
+  editOutcome,
+  editRequest,
+  editSubjectId,
   emptyAddForm,
   errorText,
+  missingSubjectName,
+  subjectMissingText,
+  noSubjectLabel,
   noteMax,
   sendFormatLabels,
   sendRetryable,
   sizeText,
   titleMax,
   validateAddForm,
+  validateEditForm,
 } from "../homeworkView.js";
+import { Button } from "../ui/Button.js";
 import { Dialog, Field, Input, ResultLine, Segmented, Select } from "../ui/controls.js";
 
 // The two dialogs that lead to an email. Each one has a single call site of its binding, in its confirm button handler
@@ -249,83 +259,267 @@ export function AddAssignmentDialog(props: {
       onConfirm={() => void submit()}
       onCancel={props.onClose}
     >
-      <div className="hw-add">
-        <Field label={addTexts.what} error={errors.title}>
+      <AssignmentFields
+        form={form}
+        errors={errors}
+        general={general}
+        busy={busy}
+        subjects={subjects}
+        subjectHint={subjectsFailed ? addTexts.subjectsFailed : undefined}
+        noSubject={addTexts.noSubject}
+        onChange={change}
+        onSubmit={() => void submit()}
+      />
+    </Dialog>
+  );
+}
+
+/**
+ * «Задание удалено» with «Вернуть» in place of a deleted assignment; the line stays until the student leaves the page.
+ * The button takes the focus: the «Удалить» that had it is gone.
+ */
+export function RemovedLine(props: { busy: boolean; onRestore: () => void }) {
+  return (
+    <span className="hw-removed">
+      <span role="status">{changeTexts.removed}</span>
+      <Button autoFocus busy={props.busy} busyLabel={changeTexts.restoring} disabled={props.busy} onClick={props.onRestore}>
+        {changeTexts.restore}
+      </Button>
+    </span>
+  );
+}
+
+const unchosenValue = "?";
+
+/** The fields of the add and the edit form: the same form, so the two cannot drift apart. */
+function AssignmentFields(props: {
+  form: AddForm;
+  errors: AddFieldErrors;
+  general: string;
+  busy: boolean;
+  subjects: readonly LibrarySubject[];
+  subjectHint?: string;
+  noSubject: string;
+  /** Set: the select shows this extra option until the student chooses (the stored subject is not in the library). */
+  unchosen?: string;
+  onChange: (patch: Partial<AddForm>, field?: keyof AddFieldErrors) => void;
+  onSubmit: () => void;
+}) {
+  const { form, errors, busy, onChange } = props;
+  return (
+    <div className="hw-add">
+      <Field label={addTexts.what} error={errors.title}>
+        {(id) => (
+          <Input
+            id={id}
+            value={form.title}
+            maxLength={titleMax}
+            disabled={busy}
+            aria-invalid={errors.title !== undefined}
+            onChange={(e) => onChange({ title: e.target.value }, "title")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                props.onSubmit();
+              }
+            }}
+          />
+        )}
+      </Field>
+      <Field label={addTexts.subject} hint={props.subjectHint} error={errors.subject}>
+        {(id) => (
+          <Select
+            id={id}
+            value={props.unchosen !== undefined ? unchosenValue : form.subjectId}
+            disabled={busy}
+            aria-invalid={errors.subject !== undefined}
+            onChange={(e) => onChange({ subjectId: e.target.value }, "subject")}
+          >
+            {props.unchosen !== undefined && <option value={unchosenValue}>{props.unchosen}</option>}
+            <option value="">{props.noSubject}</option>
+            {props.subjects.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </Select>
+        )}
+      </Field>
+      <div className="hw-add-due">
+        <Field label={addTexts.due} error={errors.due}>
           {(id) => (
             <Input
               id={id}
-              value={form.title}
-              maxLength={titleMax}
+              type="date"
+              value={form.date}
               disabled={busy}
-              aria-invalid={errors.title !== undefined}
-              onChange={(e) => change({ title: e.target.value }, "title")}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  void submit();
-                }
-              }}
+              aria-invalid={errors.due !== undefined}
+              onChange={(e) => onChange({ date: e.target.value }, "due")}
             />
           )}
         </Field>
-        <Field label={addTexts.subject} hint={subjectsFailed ? addTexts.subjectsFailed : undefined}>
+        <Field label={addTexts.time} hint={addTexts.timeHint} error={errors.time}>
           {(id) => (
-            <Select id={id} value={form.subjectId} disabled={busy} onChange={(e) => change({ subjectId: e.target.value })}>
-              <option value="">{addTexts.noSubject}</option>
-              {subjects.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
-          )}
-        </Field>
-        <div className="hw-add-due">
-          <Field label={addTexts.due} error={errors.due}>
-            {(id) => (
-              <Input
-                id={id}
-                type="date"
-                value={form.date}
-                disabled={busy}
-                aria-invalid={errors.due !== undefined}
-                onChange={(e) => change({ date: e.target.value }, "due")}
-              />
-            )}
-          </Field>
-          <Field label={addTexts.time} hint={addTexts.timeHint} error={errors.time}>
-            {(id) => (
-              <Input
-                id={id}
-                type="time"
-                value={form.time}
-                disabled={busy}
-                aria-invalid={errors.time !== undefined}
-                onChange={(e) => change({ time: e.target.value }, "time")}
-              />
-            )}
-          </Field>
-        </div>
-        <Field label={addTexts.note} error={errors.note}>
-          {(id) => (
-            <textarea
+            <Input
               id={id}
-              className="input hw-add-note"
-              rows={3}
-              value={form.note}
-              maxLength={noteMax}
+              type="time"
+              value={form.time}
               disabled={busy}
-              aria-invalid={errors.note !== undefined}
-              onChange={(e) => change({ note: e.target.value }, "note")}
+              aria-invalid={errors.time !== undefined}
+              onChange={(e) => onChange({ time: e.target.value }, "time")}
             />
           )}
         </Field>
-        {general && (
-          <ResultLine kind="fail" role="alert">
-            {general}
-          </ResultLine>
-        )}
       </div>
+      <Field label={addTexts.note} error={errors.note}>
+        {(id) => (
+          <textarea
+            id={id}
+            className="input hw-add-note"
+            rows={3}
+            value={form.note}
+            maxLength={noteMax}
+            disabled={busy}
+            aria-invalid={errors.note !== undefined}
+            onChange={(e) => onChange({ note: e.target.value }, "note")}
+          />
+        )}
+      </Field>
+      {props.general && (
+        <ResultLine kind="fail" role="alert">
+          {props.general}
+        </ResultLine>
+      )}
+    </div>
+  );
+}
+
+/**
+ * «Изменить» (TASK-232): the add form prefilled with the stored assignment. The version sent is the one of the
+ * current assignment prop, so after a «changed» refusal the page reloads it (onStale) and the student repeats the
+ * save over the new version with what was typed kept. Subjects are matched by name once they are loaded; until then
+ * and after a failed load nothing can be saved (an empty choice would clear the subject).
+ */
+export function EditAssignmentDialog(props: {
+  api: Pick<HomeworkApi, "editAssignment">;
+  library: Pick<LibraryApi, "subjects">;
+  assignment: AssignmentItem;
+  /** Subjects known up front (tests); the dialog loads them itself otherwise. */
+  initialSubjects?: readonly LibrarySubject[];
+  onSaved: (a: AssignmentItem) => void;
+  /** The shown data is out of date (changed, deleted, not found): reload it; resolves when the new data is in. */
+  onStale: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const [subjects, setSubjects] = useState<readonly LibrarySubject[] | null>(props.initialSubjects ?? null);
+  const [subjectsFailed, setSubjectsFailed] = useState(false);
+  const [form, setForm] = useState<AddForm>(() => editForm(props.assignment, props.initialSubjects ?? []));
+  const [busy, setBusy] = useState(false);
+  const [errors, setErrors] = useState<AddFieldErrors>({});
+  const [general, setGeneral] = useState("");
+  const mounted = useRef(true);
+  const touchedSubject = useRef(false);
+  const [touched, setTouched] = useState(false);
+  const running = useRef(false);
+  const latest = useRef(props.assignment);
+  latest.current = props.assignment;
+
+  useEffect(() => {
+    mounted.current = true;
+    if (props.initialSubjects === undefined) {
+      props.library.subjects().then(
+        (s) => {
+          if (!mounted.current) {
+            return;
+          }
+          setSubjects(s);
+          if (!touchedSubject.current) {
+            setForm((f) => ({ ...f, subjectId: editSubjectId(latest.current, s) }));
+          }
+        },
+        () => mounted.current && setSubjectsFailed(true),
+      );
+    }
+    return () => {
+      mounted.current = false;
+    };
+    // The subjects are read once, when the form opens.
+  }, []);
+
+  function change(patch: Partial<AddForm>, field?: keyof AddFieldErrors) {
+    if (patch.subjectId !== undefined) {
+      touchedSubject.current = true;
+      setTouched(true);
+    }
+    setForm((f) => ({ ...f, ...patch }));
+    setGeneral("");
+    if (field !== undefined) {
+      setErrors((e) => ({ ...e, [field]: undefined }));
+    }
+  }
+
+  const ready = subjects !== null;
+  // The stored subject has no library match: saving the empty choice would silently clear it, so the student chooses.
+  const missing = ready && !touched ? missingSubjectName(props.assignment, subjects) : "";
+
+  async function submit() {
+    if (running.current || !ready || missing !== "") {
+      return;
+    }
+    const local = validateEditForm(form);
+    setErrors(local);
+    setGeneral("");
+    if (Object.keys(local).length > 0) {
+      return;
+    }
+    running.current = true;
+    setBusy(true);
+    try {
+      const out = editOutcome(await props.api.editAssignment(editRequest(latest.current, form)));
+      if (!mounted.current) {
+        return;
+      }
+      if (out.saved !== null) {
+        props.onSaved(out.saved);
+        return;
+      }
+      setErrors(out.fieldErrors);
+      setGeneral(out.general);
+      if (out.reload) {
+        await props.onStale();
+      }
+    } finally {
+      running.current = false;
+      if (mounted.current) {
+        setBusy(false);
+      }
+    }
+  }
+
+  const hint = subjectsFailed ? changeTexts.subjectsFailed : ready ? undefined : changeTexts.subjectsLoading;
+  return (
+    <Dialog
+      open
+      title={changeTexts.editTitle}
+      confirmLabel={busy ? changeTexts.saving : changeTexts.save}
+      cancelLabel={addTexts.cancel}
+      confirmDisabled={busy || !ready || missing !== ""}
+      cancelDisabled={busy}
+      onConfirm={() => void submit()}
+      onCancel={props.onClose}
+    >
+      <AssignmentFields
+        form={form}
+        errors={missing !== "" ? { ...errors, subject: subjectMissingText(missing) } : errors}
+        unchosen={missing !== "" ? "Выберите предмет" : undefined}
+        general={general}
+        busy={busy}
+        subjects={subjects ?? []}
+        subjectHint={hint}
+        noSubject={noSubjectLabel(props.assignment)}
+        onChange={change}
+        onSubmit={() => void submit()}
+      />
     </Dialog>
   );
 }
