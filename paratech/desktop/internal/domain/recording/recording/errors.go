@@ -34,4 +34,23 @@ var (
 	// ErrSourceDidNotStart means the capture of the source a running recording was switched to did not start, so the
 	// capture went back to its old source (TASK-082). Recorder adapters wrap it.
 	ErrSourceDidNotStart = errors.New("the capture of the chosen source did not start")
+
+	// ErrUnsupportedAudio means the content of an imported file is none of the formats whisper-cli decodes itself.
+	ErrUnsupportedAudio = errors.New("the audio format is not supported")
+
+	// ErrEmptyAudio means an imported file is empty.
+	ErrEmptyAudio = errors.New("the audio file is empty")
+
+	// ErrAudioTooLarge means an imported file is larger than MaxImportedBytes.
+	ErrAudioTooLarge = errors.New("the audio file is too large")
+
+	// ErrAudioTooLong means the header of an imported file says it lasts longer than MaxImportedDuration.
+	ErrAudioTooLong = errors.New("the audio file is too long")
+
+	// ErrNoDiskSpace means the copy of an imported file would leave too little free disk space.
+	ErrNoDiskSpace = errors.New("not enough free disk space for the audio file")
+
+	// ErrFutureLecture means an imported recording names a lecture that has not begun yet. NewImported wraps it
+	// together with ErrInvalidRecording.
+	ErrFutureLecture = errors.New("the lecture has not begun yet")
 )

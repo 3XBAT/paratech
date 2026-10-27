@@ -121,6 +121,8 @@ type Querier interface {
 	// Recordings (PRD section 6.2). Writes run through DB.Do; the status machine stays in the aggregate, the queries only
 	// store the result.
 	GetRecording(ctx context.Context, id string) (Recording, error)
+	// The imported recording of the file with this digest (TASK-161: the same bytes are the same recording).
+	GetRecordingBySourceSHA256(ctx context.Context, sourceSha256 sql.NullString) (Recording, error)
 	// The recording a transcript was made from, for the lesson snapshot of its assignments (TASK-092).
 	GetRecordingOfTranscript(ctx context.Context, transcriptID string) (Recording, error)
 	// Settings singleton (row id = 1) of the settings repository, with the optimistic-concurrency protocol of ADR-0004(d).
@@ -369,8 +371,8 @@ type Querier interface {
 	// time never change, so they are not written again.
 	UpdateProposal(ctx context.Context, arg UpdateProposalParams) (int64, error)
 	// Compare-and-swap on the loaded version (ADR-0004). The user's correction of the lesson (TASK-091) is mutable; the
-	// lesson, its snapshot, the cap, the chunk directory and the creation time never change; lesson_id is left alone so
-	// that ON DELETE SET NULL of the lesson is not undone by a stale save.
+	// lesson, its snapshot, the cap, the chunk directory, the origin with its digest and the creation time never change;
+	// lesson_id is left alone so that ON DELETE SET NULL of the lesson is not undone by a stale save.
 	UpdateRecording(ctx context.Context, arg UpdateRecordingParams) (int64, error)
 	// Compare-and-swap on the loaded version. Zero rows affected means a stale version (or no row): the caller maps that
 	// with VersionCAS to shared.ErrVersionConflict.

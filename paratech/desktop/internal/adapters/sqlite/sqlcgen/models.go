@@ -293,6 +293,8 @@ type Recording struct {
 	DeletingAssignments string
 	UserSubject         sql.NullString
 	UserKind            sql.NullString
+	Origin              string
+	SourceSha256        sql.NullString
 }
 
 type ScheduleEntry struct {

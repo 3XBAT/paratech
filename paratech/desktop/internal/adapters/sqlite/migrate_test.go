@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -89,8 +90,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != materialImagesVersion {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, materialImagesVersion)
+	if err != nil || first != recordingOriginVersion {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, recordingOriginVersion)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
@@ -251,8 +252,66 @@ func TestMigrationToVersion8DropsCompletionNotices(t *testing.T) {
 	}
 }
 
-// materialImagesVersion is the migration that rebuilds materials for photos (TASK-165), the newest one.
+// materialImagesVersion is the migration that rebuilds materials for photos (TASK-165).
 const materialImagesVersion = 41
+
+// recordingOriginVersion adds the origin of a recording (TASK-161), the newest migration.
+const recordingOriginVersion = 42
+
+// Version 42 marks every earlier recording captured, takes an imported one with its digest only once, and goes back
+// down keeping the rows.
+func TestMigrationRecordingOrigin(t *testing.T) {
+	t.Parallel() // uses a database of its own
+	ctx := context.Background()
+	db := openTest(t, func(o *Options) { o.Migrate = false })
+	p, err := db.provider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, recordingOriginVersion-1); err != nil {
+		t.Fatalf("up to %d: %v", recordingOriginVersion-1, err)
+	}
+	const insert = `INSERT INTO recordings (id, status, started_at, max_duration_ms, chunks_ref, created_at, updated_at)
+		VALUES ('%s', 'FAILED', 1, 1000, 'recordings/%s', 1, 1)`
+	mustExec(t, db, fmt.Sprintf(insert, "old", "old"))
+
+	if _, err := p.UpTo(ctx, recordingOriginVersion); err != nil {
+		t.Fatalf("migrate to %d: %v", recordingOriginVersion, err)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM recordings WHERE origin = 'captured' AND source_sha256 IS NULL"); n != 1 {
+		t.Fatalf("captured earlier rows = %d, want 1", n)
+	}
+
+	digest := strings.Repeat("0a", 32)
+	imported := func(id, sha string) string {
+		return fmt.Sprintf(`INSERT INTO recordings (id, status, started_at, max_duration_ms, chunks_ref, audio_ref, created_at,
+			updated_at, origin, source_sha256) VALUES ('%s', 'COMPLETED', 1, 1000, 'recordings/%s', 'recordings/%s.mp3', 1, 1,
+			'imported', '%s')`, id, id, id, sha)
+	}
+	mustExec(t, db, imported("imp-1", digest))
+	if _, err := db.sql.ExecContext(ctx, imported("imp-2", digest)); !errors.Is(MapError(ctx, err), shared.ErrConflict) {
+		t.Fatalf("second import of the same digest: %v, want ErrConflict", err)
+	}
+	for _, bad := range []string{
+		imported("imp-3", strings.ToUpper(digest)),
+		imported("imp-4", digest[:62]),
+		strings.Replace(imported("imp-5", strings.Repeat("0b", 32)), "'imported'", "'uploaded'", 1),
+	} {
+		if _, err := db.sql.ExecContext(ctx, bad); !errors.Is(MapError(ctx, err), ErrConstraint) {
+			t.Errorf("%s: %v, want ErrConstraint", bad, err)
+		}
+	}
+
+	if _, err := p.DownTo(ctx, recordingOriginVersion-1); err != nil {
+		t.Fatalf("down to %d: %v", recordingOriginVersion-1, err)
+	}
+	if n := scanInt(t, db.sql, "SELECT count(*) FROM recordings"); n != 2 {
+		t.Fatalf("recordings after down = %d, want 2", n)
+	}
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("up again: %v", err)
+	}
+}
 
 // The rebuild of materials keeps every row and every reference to them (lesson links, note parts), leaves foreign
 // keys on, takes photos only with 'no_text', and goes back down dropping the photos.
