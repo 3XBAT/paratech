@@ -255,7 +255,7 @@ func TestMigrationToVersion8DropsCompletionNotices(t *testing.T) {
 const materialImagesVersion = 41
 
 // lessonCallLinkVersion is the migration that adds the call link of a lesson (TASK-256), the newest one.
-const lessonCallLinkVersion = 42
+const lessonCallLinkVersion = 43
 
 // The rebuild of materials keeps every row and every reference to them (lesson links, note parts), leaves foreign
 // keys on, takes photos only with 'no_text', and goes back down dropping the photos.
