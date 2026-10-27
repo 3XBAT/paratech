@@ -47,6 +47,9 @@ func New() *Extractor { return &Extractor{} }
 // Extract reads the text of data of type typ. A PDF (and any other type) is material.ErrTextNotExtracted; a damaged
 // file, one that is not of its type or one beyond the limits is material.ErrTextUnreadable. A text cut at
 // material.MaxTextBytes is returned marked truncated.
+//
+// The text read is cached per file (ADR-0027 «Text»): a change of what any reader here gives for the same bytes must
+// bump material.TextCacheVersion, or old cached texts stay in use.
 func (e *Extractor) Extract(ctx context.Context, typ material.Type, data []byte) (material.Text, error) {
 	if err := ctx.Err(); err != nil {
 		return material.Text{}, fmt.Errorf("%s: %w", opExtract, err)
@@ -97,6 +100,8 @@ func txt(data []byte) ([]material.Fragment, bool, error) {
 		// of notes, not part of the text.
 		return material.ReadMarkdown(s).Fragments, truncated, nil
 	}
+	// Form feeds mark a paged text (a printout, not a note): its pages are the locators, so their text is kept as it is,
+	// without the Markdown reading that would cut it into sections instead.
 	var fs []material.Fragment
 	for i, page := range strings.Split(s, "\f") {
 		fs = append(fs, material.Fragment{Locator: material.Locator{Kind: material.LocatorPage, N: i + 1}, Lines: strings.Split(page, "\n")})

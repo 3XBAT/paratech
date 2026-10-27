@@ -111,7 +111,7 @@ func (s *Service) cacheText(ctx context.Context, id shared.MaterialID, ref share
 	if err == nil {
 		err = s.blobs.Write(ctx, ref, bytes.NewReader(data))
 	}
-	if err != nil {
+	if err != nil && ctx.Err() == nil {
 		s.log.Warn(opTextCacheSave, slog.String("material", string(id)), slog.Any("cause", err))
 	}
 }

@@ -47,6 +47,20 @@ func TestReadMarkdown(t *testing.T) {
 		{"front matter dropped", "---\ntitle: Лекция\ndate: 2026-09-12\n---\nтекст", "[Фрагмент 1]\nтекст"},
 		{"rules around text are text", "---\nТема лекции\n---\nтекст", "[Фрагмент 1]\n---\nТема лекции\n---\nтекст"},
 		{"unclosed front matter is text", "---\ndate: 2026-09-12\nтекст", "[Фрагмент 1]\n---\ndate: 2026-09-12\nтекст"},
+		{
+			"cyrillic keys are text", "---\nЗадание: решить 5 задач\nСрок: пятница\n---\nтекст",
+			"[Фрагмент 1]\n---\nЗадание: решить 5 задач\nСрок: пятница\n---\nтекст",
+		},
+		{
+			"cyrillic key next to a known one is text", "---\ndate: 1\nЗадание: решить\n---\nx",
+			"[Фрагмент 1]\n---\ndate: 1\nЗадание: решить\n---\nx",
+		},
+		{"no known key is text", "---\nfoo: bar\n---\nx", "[Фрагмент 1]\n---\nfoo: bar\n---\nx"},
+		{
+			"obsidian front matter dropped",
+			"---\nTags:\n  - лекция\ncssclass: wide\npublish: true\n# comment\n...\nтекст",
+			"[Фрагмент 1]\nтекст",
+		},
 	}
 	for _, tt := range tests {
 		if got := textOf(t, tt.in); got != tt.want {

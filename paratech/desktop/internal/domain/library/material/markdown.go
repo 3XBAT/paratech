@@ -2,7 +2,6 @@ package material
 
 import (
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"paratech/desktop/internal/domain/library/values"
@@ -37,7 +36,8 @@ type Markdown struct {
 }
 
 // ReadMarkdown reads a text note (TXT or Markdown, Obsidian or Notion export) as plain text, never as HTML: a front
-// matter (a block between «---» lines at the top whose lines all look like YAML) is dropped and its date, subject and
+// matter (a block between «---» lines at the top whose lines all look like YAML with ASCII keys, one of them a known
+// note key) is dropped and its date, subject and
 // tags become Hints; «[[x|y]]» reads y and «[[x]]» x; embeds «![[…]]» and «![…](…)», HTML tags and comments are
 // dropped; heading markers are dropped. With at least two headings of levels 1–3 the note is cut into sections
 // (SectionsOf), else into fragments (FragmentsOf). Fenced code is kept as it is. Text without Markdown reads as
@@ -88,46 +88,60 @@ func ReadMarkdown(s string) Markdown {
 
 // --- Front matter -------------------------------------------------------------------------------------------
 
-// frontMatter returns the index of the line that closes a front matter opened by the first line.
+// frontMatter returns the index of the line that closes a front matter opened by the first line. A block counts only
+// when every key is ASCII and one of them is a known note key, so a plain text between two rules («Задание: …») stays
+// text.
 func frontMatter(lines []string) (int, bool) {
 	if len(lines) < 2 || strings.TrimRight(lines[0], " \t") != "---" {
 		return 0, false
 	}
+	known := false
 	for i := 1; i < len(lines) && i <= maxFrontMatterLines+1; i++ {
 		l := strings.TrimRight(lines[i], " \t")
 		if l == "---" || l == "..." {
-			return i, true
+			return i, known
 		}
-		if !yamlLine(lines[i]) {
+		key, ok := yamlLine(lines[i])
+		if !ok {
 			return 0, false // a text between two rules, not a front matter
 		}
+		known = known || knownKey(key)
 	}
 	return 0, false
 }
 
 // yamlLine reports whether l looks like a line of a simple YAML map: blank, a comment, an indented or list line, or
-// «key: value».
-func yamlLine(l string) bool {
+// «key: value» with an ASCII key, which it returns.
+func yamlLine(l string) (string, bool) {
 	t := strings.TrimSpace(l)
 	switch {
 	case t == "", t[0] == '#', l[0] == ' ', l[0] == '\t', strings.HasPrefix(t, "- "), t == "-":
-		return true
+		return "", true
 	}
 	key, _, ok := strings.Cut(l, ":")
-	return ok && yamlKey(key)
+	key = strings.TrimSpace(key)
+	return key, ok && yamlKey(key)
 }
 
 func yamlKey(k string) bool {
-	k = strings.TrimSpace(k)
 	if k == "" || len(k) > maxYAMLKeyBytes {
 		return false
 	}
-	for _, r := range k {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '-' && r != ' ' {
+	for i := 0; i < len(k); i++ {
+		if c := k[i]; !isASCIILetter(c) && (c < '0' || c > '9') && c != '_' && c != '-' {
 			return false
 		}
 	}
 	return true
+}
+
+// knownKey reports whether k is a key of a note front matter (Obsidian, Notion export).
+func knownKey(k string) bool {
+	switch strings.ToLower(k) {
+	case "title", "date", "tags", "subject", "aliases", "created":
+		return true
+	}
+	return false
 }
 
 // hintsOf reads date, subject and tags of the front matter lines; anything else is ignored.
