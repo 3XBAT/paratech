@@ -102,6 +102,8 @@
     "src/ticketsView.ts",
     "src/pages/TicketsParts.tsx",
     "src/homeworkTurnkey.ts",
-    "src/pages/HomeworkTurnkey.tsx"
+    "src/pages/HomeworkTurnkey.tsx",
+    "src/pages/SettingsTabs.tsx",
+    "src/pages/AssignmentFilter.tsx"
   ]
 }

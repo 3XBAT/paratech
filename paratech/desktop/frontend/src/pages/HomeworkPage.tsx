@@ -17,7 +17,10 @@ import { callByName } from "../bindings/runtime";
 import { turnkeyApi } from "../bindings/turnkey";
 import {
   addTexts,
+  assignmentCounts,
   assignmentDeliveryView,
+  type AssignmentFilter,
+  filterAssignments,
   blockedByEmail,
   type ChipView,
   defaultSendFormat,
@@ -46,6 +49,7 @@ import { initialListState, type ListState } from "../listView";
 import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Field, Input, ResultLine, type ResultKind, Row } from "../ui/controls";
 import { StatusChip } from "../ui/StatusChip";
+import { FilterCounters, filterEmpty } from "./AssignmentFilter";
 import { AddAssignmentDialog, SendAgainDialog, SendDialog, type SendResult } from "./HomeworkDialogs";
 import { HomeworkTurnkey } from "./HomeworkTurnkey";
 import { LessonCorrection } from "./LessonCorrection";
@@ -94,6 +98,8 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
   const { api } = props;
   const [items, setItems] = useState<AssignmentItem[] | null>(null);
   const [deliveries, setDeliveries] = useState<Readonly<Record<string, DeliveryItem[]>>>({});
+  const [deliveriesLoaded, setDeliveriesLoaded] = useState(false);
+  const [filter, setFilter] = useState<AssignmentFilter>("all");
   const [error, setError] = useState("");
   const [list, setList] = useState<ListState>(initialListState);
   const [adding, setAdding] = useState(false);
@@ -120,6 +126,8 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
           }
         });
         setDeliveries(byId);
+        // When every call was rejected the split is unknown, not «all active»: the counters stay hidden.
+        setDeliveriesLoaded(ds.length === 0 || ds.some((r) => r.status === "fulfilled"));
       } catch (err) {
         if (live) {
           setError(errorText(err));
@@ -149,6 +157,8 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
       />
     );
   };
+
+  const shown = items === null ? [] : filterAssignments(items, filter, deliveries, deliveriesLoaded);
 
   return (
     <section className="page hw">
@@ -185,20 +195,34 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
           и отправить преподавателю по почте.
         </EmptyState>
       ) : (
-        <CollapsibleList
-          items={items}
-          itemKey={(a) => a.id}
-          renderItem={row}
-          renderContainer={(rows) => (
-            <div className="card rows" role="list">
-              {rows}
-            </div>
+        <>
+          <FilterCounters
+            counts={assignmentCounts(items, deliveries, deliveriesLoaded)}
+            value={filter}
+            onChange={(f) => {
+              setFilter(f);
+              setList(initialListState);
+            }}
+          />
+          {shown.length === 0 ? (
+            <p className="muted">{filterEmpty}</p>
+          ) : (
+            <CollapsibleList
+              items={shown}
+              itemKey={(a) => a.id}
+              renderItem={row}
+              renderContainer={(rows) => (
+                <div className="card rows" role="list">
+                  {rows}
+                </div>
+              )}
+              state={list}
+              onStateChange={setList}
+              className="clist-card"
+              classNames={{ button: "btn ghost" }}
+            />
           )}
-          state={list}
-          onStateChange={setList}
-          className="clist-card"
-          classNames={{ button: "btn ghost" }}
-        />
+        </>
       )}
     </section>
   );

@@ -24,7 +24,7 @@ import { DropZone } from "./pages/DropZone";
 import { JournalPage } from "./pages/JournalPage";
 import { SchedulePage } from "./pages/SchedulePage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { SettingsTabs } from "./pages/SettingsTabs";
+import { SettingsHead, SettingsTabs } from "./pages/SettingsTabs";
 import { SubjectsPage } from "./pages/SubjectsPage";
 import { SummaryPage } from "./pages/SummaryPage";
 import { TicketsPage } from "./pages/TicketsPage";
@@ -114,6 +114,25 @@ export function App() {
   const open = panel.pref.open;
   const width = panel.width;
   const overlay = route.transcript !== "" || route.summary !== "";
+  const inSettings = railItemOf(current).id === "settings";
+
+  const pageView = (
+    <OpenTranscriptContext.Provider value={openTranscript}>
+      <OpenSummaryContext.Provider value={openSummary}>
+        <PageView
+          id={current}
+          visit={visit}
+          assignment={route.assignment}
+          subject={route.subject}
+          library={library}
+          onOpen={openPage}
+          onOpenAssignment={openAssignment}
+          onSelectAssignment={selectAssignment}
+          onSelectSubject={selectSubject}
+        />
+      </OpenSummaryContext.Provider>
+    </OpenTranscriptContext.Provider>
+  );
 
   return (
     <div
@@ -132,22 +151,15 @@ export function App() {
         {/* A new key per section replays the entry animation. The section stays mounted under an open transcript or
             summary, so «Назад» finds it as the user left it. */}
         <div key={`${current}:${jump}`} className="screen" hidden={overlay}>
-          {railItemOf(current).id === "settings" && <SettingsTabs current={current} onOpen={openPage} />}
-          <OpenTranscriptContext.Provider value={openTranscript}>
-            <OpenSummaryContext.Provider value={openSummary}>
-              <PageView
-                id={current}
-                visit={visit}
-                assignment={route.assignment}
-                subject={route.subject}
-                library={library}
-                onOpen={openPage}
-                onOpenAssignment={openAssignment}
-                onSelectAssignment={selectAssignment}
-                onSelectSubject={selectSubject}
-              />
-            </OpenSummaryContext.Provider>
-          </OpenTranscriptContext.Provider>
+          {inSettings && <SettingsHead />}
+          {inSettings ? (
+            <div className="set-layout">
+              <SettingsTabs current={current} onOpen={openPage} />
+              <div className="set-body">{pageView}</div>
+            </div>
+          ) : (
+            pageView
+          )}
         </div>
         {route.transcript !== "" && (
           <div key={`transcript:${route.transcript}`} className="screen">

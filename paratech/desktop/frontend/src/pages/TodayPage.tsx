@@ -9,9 +9,11 @@ import { type TodayScreen, todayApi, todayErrorText } from "../bindings/today.js
 import { requestDraft } from "../agentDraft.js";
 import type { PageId } from "../nav.js";
 import { useOpenSummary } from "../openSummary.js";
-import { dayTitle, newestOnly, stagesChanged, stagesKey, texts } from "../todayView.js";
+import { queueLine } from "../recordingRowView.js";
+import { dayTitle, nearestDeadlineText, newestOnly, stagesChanged, stagesKey, statusTexts, texts } from "../todayView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
+import { Icon } from "../ui/Icon.js";
 import { AddAssignmentDialog } from "./HomeworkDialogs.js";
 import { RecordingsPage } from "./RecordingsPage.js";
 import { AskSection, BurningSection, DoneSection, LessonsSection, PostsSection, WaitingSection } from "./TodayParts.js";
@@ -110,6 +112,9 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
     );
   }
 
+  const queue = queueLine(recordings ?? [], []);
+  const nearest = screen === null ? "" : nearestDeadlineText(screen.burning);
+
   return (
     <section className="page today">
       <div className="head">
@@ -166,6 +171,14 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
                 onAdd={() => setAdding(true)}
               />
             </div>
+          </div>
+          <div className="statusbar">
+            {queue !== "" && <span className="num">{queue}</span>}
+            {nearest !== "" && <span className="num">{nearest}</span>}
+            <span className="r">
+              <Icon name="lock" />
+              {statusTexts.local}
+            </span>
           </div>
         </>
       )}
