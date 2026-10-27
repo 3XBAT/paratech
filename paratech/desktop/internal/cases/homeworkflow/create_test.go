@@ -231,7 +231,7 @@ func TestRemoveCreatedAssignment(t *testing.T) {
 	}
 
 	// An edit by the student since moves the version on.
-	edited, err := e.svc.EditAssignment(ctx, AssignmentEdit{ID: v.ID, Title: "Задание 2"})
+	edited, err := e.svc.EditAssignment(ctx, AssignmentEdit{ID: v.ID, ExpectedVersion: v.Version, Title: "Задание 2"})
 	if err != nil {
 		t.Fatal(err)
 	}

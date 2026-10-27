@@ -190,7 +190,7 @@ func TestReextractRefreshesHints(t *testing.T) {
 	e := newLessonEnv(t, nil, hintsAnswer)
 	ctx := context.Background()
 	id := e.first().ID
-	if _, err := e.svc.EditAssignment(ctx, AssignmentEdit{ID: id, Title: "My title"}); err != nil {
+	if _, err := e.svc.EditAssignment(ctx, AssignmentEdit{ID: id, ExpectedVersion: e.first().Version, Title: "My title"}); err != nil {
 		t.Fatal(err)
 	}
 

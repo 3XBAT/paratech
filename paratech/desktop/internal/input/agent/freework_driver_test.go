@@ -31,15 +31,23 @@ func (s *turnStore) Get(_ context.Context, id shared.ThreadID) (*thread.Thread, 
 	return nil, fmt.Errorf("thread %s: %w", id, shared.ErrNotFound)
 }
 
-func (s *turnStore) GetByKey(_ context.Context, key thread.Key) (*thread.Thread, error) {
+// Current is the unarchived thread active last (ties to the greater id), as the sqlite adapter.
+func (s *turnStore) Current(context.Context) (*thread.Thread, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var cur *thread.Thread
 	for _, th := range s.threads {
-		if th.Key() == key {
-			return th, nil
+		if th.Archived() {
+			continue
+		}
+		if cur == nil || th.LastActive().After(cur.LastActive()) || (th.LastActive().Equal(cur.LastActive()) && th.ID() > cur.ID()) {
+			cur = th
 		}
 	}
-	return nil, fmt.Errorf("thread %q: %w", key, shared.ErrNotFound)
+	if cur == nil {
+		return nil, fmt.Errorf("current chat: %w", shared.ErrNotFound)
+	}
+	return cur, nil
 }
 
 func (s *turnStore) Save(_ context.Context, th *thread.Thread) error {

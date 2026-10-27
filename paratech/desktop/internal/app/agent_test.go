@@ -28,7 +28,7 @@ func TestAgentRecoveryAtStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	th, err := thread.New("th1", thread.NoSubject, at)
+	th, err := thread.New("th1", at)
 	if err != nil {
 		t.Fatal(err)
 	}

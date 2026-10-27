@@ -104,6 +104,9 @@
     "src/homeworkTurnkey.ts",
     "src/pages/HomeworkTurnkey.tsx",
     "src/pages/SettingsTabs.tsx",
-    "src/pages/AssignmentFilter.tsx"
+    "src/pages/AssignmentFilter.tsx",
+    "src/bindings/notes.ts",
+    "src/ownNotesView.ts",
+    "src/pages/OwnNotesParts.tsx"
   ]
 }

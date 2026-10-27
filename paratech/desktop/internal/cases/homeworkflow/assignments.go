@@ -3,6 +3,7 @@ package homeworkflow
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"paratech/desktop/internal/domain/coursework/assignment"
 	"paratech/desktop/internal/domain/coursework/values"
@@ -10,8 +11,10 @@ import (
 )
 
 const (
-	opListAssignments = "homeworkflow: list assignments"
-	opCorrectLesson   = "homeworkflow: correct the lesson of an assignment"
+	opListAssignments  = "homeworkflow: list assignments"
+	opCorrectLesson    = "homeworkflow: correct the lesson of an assignment"
+	opEditAssignment   = "homeworkflow: edit assignment"
+	opSetAssignmentDue = "homeworkflow: set the deadline of an assignment"
 )
 
 // Assignment returns an assignment for the UI and the agent (PRD section 10). A missing one wraps shared.ErrNotFound;
@@ -80,17 +83,50 @@ func (s *Service) view(ctx context.Context, lessons lessonFinder, a *assignment.
 	return assignmentViewOf(a, l), nil
 }
 
-// EditAssignment stores what the user entered for an extracted assignment and its deadline (PRD section 10, AC-13).
-// From then on reprocessing the transcript never overwrites it (assignment.Edit). The user's values win over a
-// reprocessing job that saved meanwhile: the load and the save run in one transaction. Invalid details wrap
-// assignment.ErrInvalidDetails and change nothing.
+// EditAssignment stores what the student entered for an assignment of any origin: title, note, deadline and subject
+// (PRD section 10, AC-13; ADR-0029, addendum 2026-10-27). The deadline is read in the zone of the use case's clock,
+// as by CreateAssignment; the subject is resolved to its current library name and stored as the student's subject
+// correction, none removes that correction. From then on reprocessing never overwrites the assignment
+// (assignment.EditByStudent). The load, the version check and the save run in one transaction.
+// Errors: invalid texts or deadline wrap assignment.ErrInvalidDetails (ErrInvalidTitle, ErrInvalidNote, ErrInvalidDue,
+// ErrInvalidTime); an unknown subject is ErrSubjectNotFound; a missing assignment wraps shared.ErrNotFound, a deleted
+// one assignment.ErrDeleted, another version shared.ErrVersionConflict. Nothing changes then.
 func (s *Service) EditAssignment(ctx context.Context, e AssignmentEdit) (AssignmentView, error) {
-	d, err := assignment.NewDetails(e.Title, e.Description, e.Due)
+	op := fmt.Sprintf("%s %s", opEditAssignment, e.ID)
+	now := s.clock.Now()
+	due, err := assignment.StudentDue(e.Date, e.Time, now.Location())
 	if err != nil {
-		return AssignmentView{}, err
+		return AssignmentView{}, fmt.Errorf("%s: %w", op, err)
 	}
-	return s.changeAssignment(ctx, e.ID, func(a *assignment.Assignment) (bool, error) { return true, a.Edit(d, s.clock.Now()) },
-		fmt.Sprintf("edit assignment %s", e.ID))
+	subject, err := s.subjectName(ctx, e.Subject)
+	if err != nil {
+		return AssignmentView{}, fmt.Errorf("%s: %w", op, err)
+	}
+	edit := assignment.StudentEdit{Title: e.Title, Note: e.Note, Due: due, SubjectName: subject}
+	return s.changeAssignment(ctx, e.ID, func(a *assignment.Assignment) (bool, error) {
+		if a.Version() != e.ExpectedVersion {
+			return false, shared.ErrVersionConflict
+		}
+		return true, a.EditByStudent(edit, now)
+	}, op)
+}
+
+// SetAssignmentDue changes only the deadline of an assignment still at expectedVersion to exactly due (zero: none),
+// keeping its title and description: the agent's edit_due and its Undo. The rules are those of assignment.Edit, of
+// any origin; the assignment is user-edited from then on. Errors: invalid details wrap assignment.ErrInvalidDetails, a
+// missing assignment shared.ErrNotFound, a deleted one assignment.ErrDeleted, another version
+// shared.ErrVersionConflict.
+func (s *Service) SetAssignmentDue(ctx context.Context, id shared.AssignmentID, expectedVersion int64, due time.Time) (AssignmentView, error) {
+	return s.changeAssignment(ctx, id, func(a *assignment.Assignment) (bool, error) {
+		if a.Version() != expectedVersion {
+			return false, shared.ErrVersionConflict
+		}
+		d, err := assignment.NewDetails(a.Details().Title(), a.Details().Description(), due)
+		if err != nil {
+			return false, err
+		}
+		return true, a.Edit(d, s.clock.Now())
+	}, fmt.Sprintf("%s %s", opSetAssignmentDue, id))
 }
 
 // CorrectLesson stores the subject and teacher the user entered for an assignment (TASK-092): they win over the

@@ -148,13 +148,16 @@ type PostProcessDeps struct {
 	MaxAttempts int
 }
 
-// AssignmentEdit is what the user entered for an assignment (PRD section 10: review and edit locally, AC-13). A zero
-// Due removes the deadline.
+// AssignmentEdit is what the student entered for an assignment of any origin (PRD section 10: review and edit
+// locally, AC-13; ADR-0029, addendum 2026-10-27). The texts are the student's words: data, never instructions.
 type AssignmentEdit struct {
-	ID          shared.AssignmentID
-	Title       string
-	Description string
-	Due         time.Time
+	ID              shared.AssignmentID
+	ExpectedVersion int64 // the version the form showed; another one is shared.ErrVersionConflict
+	Title           string
+	Note            string           // the description; empty: none
+	Subject         shared.SubjectID // a library subject; empty: no subject correction
+	Date            string           // YYYY-MM-DD in the student's zone; empty: no deadline
+	Time            string           // HH:MM, 24 h, only with Date; without it 23:59
 }
 
 // NewAssignment is an assignment or a reminder the student adds by hand or through the agent (ADR-0029). The texts

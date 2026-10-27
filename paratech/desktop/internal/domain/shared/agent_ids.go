@@ -1,6 +1,6 @@
 package shared
 
-// ThreadID identifies an agent thread: one per subject plus the thread without a subject (ADR-0021).
+// ThreadID identifies an agent thread, one per chat (ADR-0028).
 type ThreadID string
 
 // String returns the identifier as a plain string.

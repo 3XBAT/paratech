@@ -2,7 +2,7 @@
 // (ADR-0028): its title (Rename; «Новый чат» until the first text), archive mark (Archive, Restore; a new request
 // brings it back) and last activity, its current request (turn) with its scope and mentions, the step counter,
 // budget, question rounds and plan, and the IDs seen in tool results of this chat (provenance). A chat holds requests
-// of any subjects; the subject key (Key) stays only until the storage drops it.
+// of any subjects: the subject is part of the scope of each request, never of the chat.
 //
 // Turn status machine (transitions.go):
 //

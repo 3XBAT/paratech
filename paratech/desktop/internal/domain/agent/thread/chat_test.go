@@ -21,7 +21,7 @@ func mention(t *testing.T, kind values.IDKind, id string) values.Mention {
 
 func emptyChat(t *testing.T) *Thread {
 	t.Helper()
-	th, err := New("th1", NoSubject, t0)
+	th, err := New("th1", t0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,16 +316,10 @@ func TestRestoreChat(t *testing.T) {
 		t.Fatalf("restored chat = %+v", st)
 	}
 
-	// A state stored before chats: «Новый чат», last active when its last request started.
-	legacy := good
-	legacy.Title, legacy.LastActive, legacy.ArchivedAt = "", time.Time{}, time.Time{}
-	if back, err := Restore(legacy); err != nil || back.Title() != DefaultTitle || !back.LastActive().Equal(at(1)) {
-		t.Fatalf("legacy restore = %v", err)
-	}
 	empty := emptyChat(t).State()
-	empty.Version, empty.LastActive = 1, time.Time{}
-	if back, err := Restore(empty); err != nil || !back.LastActive().Equal(t0) {
-		t.Fatalf("legacy empty restore = %v", err)
+	empty.Version = 1
+	if back, err := Restore(empty); err != nil || !back.LastActive().Equal(t0) || back.Title() != DefaultTitle {
+		t.Fatalf("empty chat restore = %v", err)
 	}
 
 	many := make([]values.Mention, values.MaxMentions+1)
@@ -339,6 +333,9 @@ func TestRestoreChat(t *testing.T) {
 		{"bidi title", func(s *State) { s.Title = "a\u202Eb" }},
 		{"long title", func(s *State) { s.Title = strings.Repeat("я", MaxTitleRunes+1) }},
 		{"last active before created", func(s *State) { s.LastActive = t0.Add(-time.Minute) }},
+		// The storage keeps a title and the last activity of every chat (TASK-204): no fallback for rows without them.
+		{"no title", func(s *State) { s.Title = "" }},
+		{"no last activity", func(s *State) { s.LastActive = time.Time{} }},
 		{"archived before created", func(s *State) { s.ArchivedAt = t0.Add(-time.Minute) }},
 		{"archived while running", func(s *State) { s.Current.Status = StatusPlanning }},
 		{"too many mentions", func(s *State) { s.Current.Mentions = many }},

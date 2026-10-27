@@ -165,23 +165,34 @@ func TestRecoverIdle(t *testing.T) {
 	noLoop := func(shared.ThreadID) bool { return false }
 	tests := []struct {
 		name    string
-		in      func(st Step) IdleInput
+		in      func(e *env, st Step) IdleInput
 		live    func(shared.ThreadID) bool
 		stopped bool
 	}{
-		{"by scope, no loop", func(Step) IdleInput { return IdleInput{Scope: subjectScope(t)} }, noLoop, true},
-		{"by thread, no loop", func(st Step) IdleInput { return IdleInput{Thread: st.Thread} }, noLoop, true},
-		{"a live loop", func(st Step) IdleInput { return IdleInput{Thread: st.Thread} },
+		{"the current chat, no loop", func(*env, Step) IdleInput { return IdleInput{} }, noLoop, true},
+		{"by thread, no loop", func(_ *env, st Step) IdleInput { return IdleInput{Thread: st.Thread} }, noLoop, true},
+		{"a live loop", func(_ *env, st Step) IdleInput { return IdleInput{Thread: st.Thread} },
 			func(shared.ThreadID) bool { return true }, false},
-		{"another subject", func(Step) IdleInput { return IdleInput{} }, noLoop, false},
+		{"another chat is current", func(e *env, _ Step) IdleInput {
+			// A newer empty chat (same instant, greater id) is the current one; it runs nothing.
+			other, err := thread.New("th9", e.clock.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := e.threads.Save(t.Context(), other); err != nil {
+				t.Fatal(err)
+			}
+			return IdleInput{}
+		}, noLoop, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := newEnv(t)
 			e.model.then(raw("w1", "create_subject", `{"name":"Химия"}`))
 			st := ask(t, e, "создай предмет")
+			in := tt.in(e, st)
 
-			ok, err := e.svc.RecoverIdle(t.Context(), tt.in(st), tt.live)
+			ok, err := e.svc.RecoverIdle(t.Context(), in, tt.live)
 			if err != nil || ok != tt.stopped {
 				t.Fatalf("RecoverIdle = %v, %v; want %v", ok, err, tt.stopped)
 			}
@@ -199,7 +210,7 @@ func TestRecoverIdle(t *testing.T) {
 			if last := all[len(all)-1].Entry; len(last.Results) != 1 || last.Results[0].ResultJSON != `{"error":"outcome_unknown"}` {
 				t.Fatalf("last history entry = %+v", last)
 			}
-			if ok, err := e.svc.RecoverIdle(t.Context(), tt.in(st), noLoop); ok || err != nil {
+			if ok, err := e.svc.RecoverIdle(t.Context(), in, noLoop); ok || err != nil {
 				t.Fatalf("second RecoverIdle = %v, %v", ok, err)
 			}
 			e.model.then(raw("r1", "reply", `{"text":"ок"}`))
