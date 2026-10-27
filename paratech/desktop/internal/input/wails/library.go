@@ -54,7 +54,7 @@ const maxDroppedPath = 32767
 // the type is still told from the content.
 func droppedExtension(ext string) bool {
 	switch ext {
-	case ".docx", ".pptx", ".pdf", ".txt":
+	case ".docx", ".pptx", ".pdf", ".txt", ".md", ".markdown":
 		return true
 	}
 	return false

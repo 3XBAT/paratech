@@ -123,6 +123,8 @@ func TestLibraryDropRefusesPaths(t *testing.T) {
 		{"no extension", dropDir + `\README`, ErrLibraryUnsupported, "README"},
 		{"dot in folder only", `C:\Users\a.docx\README`, ErrLibraryUnsupported, "README"},
 		{"shortcut", dropDir + `\Лекция.docx.lnk`, ErrLibraryUnsupported, "Лекция.docx.lnk"},
+		{"mdx", dropDir + `\Конспект.mdx`, ErrLibraryUnsupported, "Конспект.mdx"},
+		{"markdown executable", dropDir + `\Конспект.md.exe`, ErrLibraryUnsupported, "Конспект.md.exe"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -146,10 +148,46 @@ func TestLibraryDropRefusesPaths(t *testing.T) {
 		})
 	}
 
-	for _, ok := range []string{`c:\a.pdf`, "D:/Учёба/a.txt", `Z:\x/y\Слайды.PPTX`} {
+	for _, ok := range []string{
+		`c:\a.pdf`, "D:/Учёба/a.txt", `Z:\x/y\Слайды.PPTX`, `C:\Obsidian\Тема.md`, `C:\Obsidian\Тема.MD`, `C:\Obsidian\Тема.markdown`,
+	} {
 		if err := droppedPathError(ok); err != nil {
 			t.Fatalf("droppedPathError(%q) = %v, want nil", ok, err)
 		}
+	}
+}
+
+func TestDroppedExtension(t *testing.T) {
+	tests := []struct {
+		ext  string
+		want bool
+	}{
+		{".docx", true}, {".pptx", true}, {".pdf", true}, {".txt", true}, {".md", true}, {".markdown", true},
+		{".mdx", false}, {".exe", false}, {".lnk", false}, {".mkd", false}, {"md", false}, {"", false},
+		// The caller lowers the case.
+		{".MD", false},
+	}
+	for _, tt := range tests {
+		if got := droppedExtension(tt.ext); got != tt.want {
+			t.Errorf("droppedExtension(%q) = %v, want %v", tt.ext, got, tt.want)
+		}
+	}
+}
+
+func TestLibraryDropImportsMarkdown(t *testing.T) {
+	for _, name := range []string{"Тема.md", "Тема.MD", "Тема.markdown"} {
+		t.Run(name, func(t *testing.T) {
+			path := dropDir + `\` + name
+			s, uc, _, _ := newDropBinding(t, map[string][]byte{path: []byte("# Тема\n")})
+			em := &fakeEmitter{}
+
+			s.importDropped(context.Background(), []string{path}, em)
+
+			d := dropped(t, em)
+			if len(d.Files) != 1 || d.Files[0].Error != "" || uc.upload.Name != name {
+				t.Fatalf("drop = %+v, upload %q", d, uc.upload.Name)
+			}
+		})
 	}
 }
 
