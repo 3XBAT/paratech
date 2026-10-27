@@ -37,7 +37,31 @@ export const methods = {
   archiveChat: `${service}.ArchiveChat`,
   restoreChat: `${service}.RestoreChat`,
   chatEarlier: `${service}.ChatEarlier`,
+  mentionCandidates: `${service}.MentionCandidates`,
 } as const;
+
+export type MentionKind = "subject" | "lesson" | "material" | "assignment";
+
+const mentionKinds: readonly MentionKind[] = ["subject", "lesson", "material", "assignment"];
+
+/** The most candidates the core returns (MaxMentionCandidates). */
+export const maxMentionCandidates = 20;
+
+/** An object the «@» search offers; label and hint are untrusted plain text of one line. */
+export interface MentionCandidate {
+  kind: MentionKind;
+  id: string;
+  label: string;
+  /** Subject and date; may be empty. */
+  hint: string;
+}
+
+export type MentionsProblem = "" | "unavailable" | "failed";
+
+export interface MentionsView {
+  problem: MentionsProblem;
+  candidates: MentionCandidate[];
+}
 
 /** Problems of a call (AgentResult.problem); "" when the operation started. */
 export type CallProblem = "" | "invalid" | "offline" | "closed" | "unavailable" | "busy" | "failed";
@@ -725,6 +749,45 @@ function parseMention(raw: unknown): MentionView {
   return { kind: str(r, "kind", w), id: str(r, "id", w), label: optStr(r, "label", w) };
 }
 
+function parseMentionCandidate(raw: unknown): MentionCandidate | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return null;
+  }
+  const r = raw as Record<string, unknown>;
+  const { kind, id, label, hint } = r;
+  if (typeof kind !== "string" || !(mentionKinds as readonly string[]).includes(kind)) {
+    return null;
+  }
+  if (typeof id !== "string" || id === "" || typeof label !== "string" || label === "") {
+    return null;
+  }
+  return { kind: kind as MentionKind, id, label, hint: typeof hint === "string" ? hint : "" };
+}
+
+/** Bad items are dropped, at most 20 are kept; malformed data or an unknown problem reads as failed. */
+export function parseMentions(raw: unknown): MentionsView {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { problem: "failed", candidates: [] };
+  }
+  const r = raw as Record<string, unknown>;
+  const p = r.problem;
+  if (p !== "" && p !== "unavailable") {
+    return { problem: "failed", candidates: [] };
+  }
+  const list = Array.isArray(r.candidates) ? r.candidates : [];
+  const candidates: MentionCandidate[] = [];
+  for (const item of list) {
+    const c = parseMentionCandidate(item);
+    if (c !== null) {
+      candidates.push(c);
+      if (candidates.length === maxMentionCandidates) {
+        break;
+      }
+    }
+  }
+  return { problem: p, candidates };
+}
+
 function parseEarlierRequest(raw: unknown): EarlierRequestView {
   const w = "earlier request";
   const r = record(raw, w);
@@ -749,6 +812,8 @@ export function parseEarlier(raw: unknown): EarlierView {
 }
 
 export interface AgentApi {
+  /** The «@» search: objects whose name contains the query, newest first; reads only the local data. */
+  mentionCandidates(query: string): Promise<MentionsView>;
   /** The chat list; reads only the local data. */
   chats(): Promise<ChatsView>;
   /** «Новый чат»: the current chat when it is still empty, else a new one. */
@@ -796,6 +861,7 @@ function freeWorkArg(ref: FreeWorkRef): FreeWorkRef {
 export function agentApi(call: CallByName): AgentApi {
   const turn = (method: string) => async (ref: TurnRef) => parseCallProblem(await call(method, ref));
   return {
+    mentionCandidates: async (query) => parseMentions(await call(methods.mentionCandidates, query)),
     chats: async () => parseChats(await call(methods.chats)),
     newChat: async () => parseChatResult(await call(methods.newChat)),
     renameChat: async (threadId, title) => parseChatResult(await call(methods.renameChat, threadId, title)),

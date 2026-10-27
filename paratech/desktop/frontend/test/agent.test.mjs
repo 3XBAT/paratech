@@ -68,7 +68,7 @@ function html(u) {
 
 test("bound method names match the Go AgentService", () => {
   // The journal methods (History, Undo, UndoRequest) are in agentjournal.go, the chat methods in agentchats.go.
-  const go = ["agent.go", "agentjournal.go", "agentchats.go"]
+  const go = ["agent.go", "agentjournal.go", "agentchats.go", "agentmentions.go"]
     .map((f) => readFileSync(new URL(`../../internal/input/wails/${f}`, import.meta.url), "utf8"))
     .join("\n");
   const goMethods = [...go.matchAll(/^func \(s \*AgentService\) ([A-Z]\w*)\(/gm)].map((m) => m[1]);
