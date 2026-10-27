@@ -34,6 +34,12 @@ type Effects interface {
 	Live(ctx context.Context, thread shared.ThreadID, turn int) (bool, error)
 }
 
+// Mentioned tells whether an object the student mentioned still exists (ADR-0028): a library subject or material, a
+// schedule lesson, an assignment that is not deleted. Implemented by app over the use cases that own them.
+type Mentioned interface {
+	Exists(ctx context.Context, ref values.Ref) (bool, error)
+}
+
 // ThreadRepository stores agent threads (one per chat, ADR-0028) in the local database. Implemented by the sqlite
 // adapter.
 type ThreadRepository interface {
