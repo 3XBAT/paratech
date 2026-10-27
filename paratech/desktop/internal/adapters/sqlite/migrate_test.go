@@ -20,7 +20,7 @@ import (
 
 var contractTables = []string{
 	"agent_actions", "agent_steps", "agent_threads", "agent_turns", "answers", "assignments", "deadline_event_removals", "deliveries", "homework_draft_revisions", "homework_drafts", "jobs", "lecture_texts",
-	"material_inspections", "material_lessons", "materials", "proposals", "recordings", "schedule_entries", "settings", "stt_models", "stt_speeds",
+	"material_inspections", "material_lessons", "materials", "note_parts", "notes", "proposals", "recordings", "schedule_entries", "settings", "stt_models", "stt_speeds",
 	"subject_aliases", "subject_folders", "subjects", "summaries", "ticket_sets", "today_posts", "transcript_parts",
 	"transcripts", "work_rounds", "works",
 }
@@ -32,11 +32,11 @@ var contractTables = []string{
 // The aliases and folders of a subject and the lesson links of a material are rows of those aggregates, which carry
 // the version (TASK-121). Agent requests are saved with their thread, which carries the version, and the agent
 // history is append-only (TASK-116). The rounds of a turnkey work are rows of that aggregate (TASK-129). An answer
-// with citations is inserted once and never changes (TASK-118).
+// with citations is inserted once and never changes (TASK-118). The parts of a note are rows of the note (TASK-149).
 var unversionedTables = map[string]bool{
 	"homework_draft_revisions": true, "transcript_parts": true, "stt_speeds": true, "deadline_event_removals": true,
 	"subject_aliases": true, "subject_folders": true, "material_lessons": true, "agent_turns": true, "agent_steps": true,
-	"work_rounds": true, "answers": true,
+	"work_rounds": true, "answers": true, "note_parts": true,
 }
 
 func tableNames(t *testing.T, q interface {
@@ -89,8 +89,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != 35 {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want 35", first, err)
+	if err != nil || first != 36 {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want 36", first, err)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
