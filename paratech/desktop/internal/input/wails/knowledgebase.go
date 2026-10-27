@@ -88,6 +88,10 @@ type KnowledgeSubject struct {
 // it «Запись <дата>»); Subject is "" without one. Kind is "lecture", "seminar", "practice", "lab" or "". The *Edited
 // flags mark the user's correction. The *Ready flags say what is stored for the newest transcript. Texts are imported,
 // typed or model text: plain text only.
+//
+// LibrarySubjectState is how the core resolved Subject to the library (ADR-0024), never a guess: "matched" (one
+// subject, LibrarySubjectID), "none" (no subject has that name or alias), "ambiguous" (several have it: the student
+// chooses) or "no-subject" (Subject is ""). LibrarySubjectID is "" unless matched.
 type KnowledgeLesson struct {
 	RecordingID      string `json:"recordingId"`
 	StartedAt        string `json:"startedAt"`
@@ -101,6 +105,9 @@ type KnowledgeLesson struct {
 	TranscriptReady  bool   `json:"transcriptReady"`
 	SummaryReady     bool   `json:"summaryReady"`
 	LectureTextReady bool   `json:"lectureTextReady"`
+
+	LibrarySubjectID    string `json:"librarySubjectId"`
+	LibrarySubjectState string `json:"librarySubjectState"`
 }
 
 // KnowledgeHit is one place the query was found. Section is "title", "summary", "lectureText" or "transcript". Index
@@ -283,6 +290,7 @@ func knowledgeLesson(l kb.Lesson) KnowledgeLesson {
 		Title: l.Title, Subject: l.Subject, SubjectKey: l.SubjectKey(), Kind: l.Kind,
 		SubjectEdited: l.SubjectEdited, KindEdited: l.KindEdited,
 		TranscriptReady: l.Ready.Transcribed(), SummaryReady: l.Ready.Summary, LectureTextReady: l.Ready.LectureText,
+		LibrarySubjectID: string(l.Library.ID), LibrarySubjectState: string(l.LibraryMatch()),
 	}
 }
 

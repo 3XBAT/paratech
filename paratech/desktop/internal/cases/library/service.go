@@ -541,6 +541,23 @@ func (s *Service) ResolveSubjects(ctx context.Context, names []string) (map[stri
 	return out, nil
 }
 
+// LookupSubjects tells how each free subject string resolves: to one subject, to none, to several (ambiguous) or not
+// at all (no key); every name is in the result. Nothing stored is rewritten (ADR-0024).
+func (s *Service) LookupSubjects(ctx context.Context, names []string) (map[string]subjectmatch.Resolution, error) {
+	out := make(map[string]subjectmatch.Resolution, len(names))
+	if len(names) == 0 {
+		return out, nil
+	}
+	ix, err := s.index(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range names {
+		out[n] = ix.Lookup(n)
+	}
+	return out, nil
+}
+
 // index builds the matching index of every subject.
 func (s *Service) index(ctx context.Context) (subjectmatch.Index, error) {
 	list, err := s.subjects.List(ctx)

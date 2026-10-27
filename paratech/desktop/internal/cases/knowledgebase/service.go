@@ -11,6 +11,7 @@ import (
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
 	"paratech/desktop/internal/domain/coursework/services/summaryexport"
 	"paratech/desktop/internal/domain/coursework/summary"
+	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
@@ -322,8 +323,8 @@ func (s *Service) lessonOf(ctx context.Context, rec *recording.Recording) (kb.Le
 	return out[0], nil
 }
 
-// resolve sets the library subject of the lessons whose free subject string names one (ADR-0024). The strings are
-// resolved at every read; nothing stored is rewritten.
+// resolve sets the library subject of the lessons whose free subject string names one, and marks those whose string
+// names several (ADR-0024). The strings are resolved at every read; nothing stored is rewritten.
 func (s *Service) resolve(ctx context.Context, lessons []kb.Lesson) ([]kb.Lesson, error) {
 	if s.library == nil {
 		return lessons, nil
@@ -339,15 +340,20 @@ func (s *Service) resolve(ctx context.Context, lessons []kb.Lesson) ([]kb.Lesson
 	if len(names) == 0 {
 		return lessons, nil
 	}
-	matches, err := s.library.ResolveSubjects(ctx, names)
+	lookups, err := s.library.LookupSubjects(ctx, names)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	resolved := make(map[string]kb.LibrarySubject, len(matches))
-	for name, m := range matches {
-		resolved[name] = kb.LibrarySubject{ID: m.ID, Name: m.Name}
+	resolved, ambiguous := map[string]kb.LibrarySubject{}, map[string]bool{}
+	for name, r := range lookups {
+		switch r.Outcome {
+		case subjectmatch.Matched:
+			resolved[name] = kb.LibrarySubject{ID: r.Match.ID, Name: r.Match.Name}
+		case subjectmatch.Ambiguous:
+			ambiguous[name] = true
+		}
 	}
-	return kb.WithLibrary(lessons, resolved), nil
+	return kb.WithLibraryMatch(lessons, resolved, ambiguous), nil
 }
 
 // facts gathers what is known of the lesson of rec. The live lesson is read only when the snapshot lacks the title;
