@@ -6,7 +6,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   addLines, checkPaste, maxPasteBytes, movedOrder, orderOf, ownNotesTexts as t, partRows, pickSubjectId, recordingTarget,
-  undoCall, visibleNotes, withNote,
+  undoCall, visibleNotes, withNote, photoPages, stepPage, pageAlt, viewerAnnounce, noTextPagesText, orderAfter, pageTextAddedText,
 } from "../.test-build/ownNotesView.js";
 import { OwnNotesView, AiNoteLabel } from "../.test-build/pages/OwnNotesParts.js";
 
@@ -17,7 +17,7 @@ const note = (over = {}) => ({
   createdAt: "", updatedAt: "", ...over,
 });
 const noop = () => undefined;
-const actions = { onAddFiles: noop, onTogglePaste: noop, onPasteText: noop, onPasteSave: noop, onReplace: noop, onMove: noop, onRemove: noop, onUndo: noop };
+const actions = { onPastePage: async () => true, onAddFiles: noop, onTogglePaste: noop, onPasteText: noop, onPasteSave: noop, onReplace: noop, onMove: noop, onRemove: noop, onUndo: noop };
 const model = (over = {}) => ({
   notes: [note()], loading: false, subjectId: "s1", target: recordingTarget("r1", "s1"), busy: false, undo: null,
   status: null, lines: [], pasteOpen: false, pasteText: "", ...over,
@@ -160,6 +160,90 @@ test("undoCall sends the right call for each action", async () => {
 test("a new add clears the undo in the page", () => {
   const src = readFileSync(new URL("../src/pages/OwnNotes.tsx", import.meta.url), "utf8");
   assert.match(src, /function applyAdd[\s\S]*?setUndo\(null\)/);
+});
+
+test("orderAfter puts the new part right after its page", () => {
+  assert.deepEqual(orderAfter(["a", "p", "b", "n"], "p", "n"), ["a", "p", "n", "b"]);
+  assert.deepEqual(orderAfter(["n", "a", "p"], "p", "n"), ["a", "p", "n"]);
+  assert.equal(orderAfter(["a", "p", "n", "b"], "p", "n"), null, "already adjacent");
+  assert.equal(orderAfter(["a", "b", "n"], "p", "n"), null, "page not found");
+  assert.equal(orderAfter(["a", "p"], "p", "n"), null, "new part not found");
+  assert.equal(pageTextAddedText(2), "Текст страницы 2 добавлен");
+});
+
+test("onPastePage stores the text for the note and moves it next to the page", () => {
+  const src = readFileSync(new URL("../src/pages/OwnNotes.tsx", import.meta.url), "utf8");
+  assert.match(src, /onPastePage:[\s\S]*?recordingTarget\([^)]*noteId\)[\s\S]*?orderAfter\([\s\S]*?api\.reorder\(noteId/);
+});
+
+const photo = (id, over = {}) =>
+  part(id, { name: `IMG_${id}.jpg`, type: "jpeg", textStatus: "no_text", pageUrl: `/media/notepage/${id}`, ...over });
+
+test("photo pages are numbered among photo parts only and use the page address", () => {
+  const n = note({ parts: [part("d1"), photo("p1"), part("d2"), photo("p2", { textStatus: "extracted" })] });
+  const pages = photoPages(n);
+  assert.deepEqual(pages.map((p) => [p.materialId, p.number, p.noText, p.src]), [
+    ["p1", 1, true, "/media/notepage/p1"],
+    ["p2", 2, false, "/media/notepage/p2"],
+  ]);
+  assert.equal(pages[0].alt, "Страница 1: фото, текст не распознан");
+  assert.equal(pages[1].alt, "Страница 2: фото");
+  for (const p of pages) {
+    assert.ok(!p.alt.includes("IMG_") && !p.src.includes("IMG_") && !p.src.startsWith("data:") && !p.src.startsWith("blob:"));
+  }
+  const rows = partRows(n);
+  assert.deepEqual(rows.map((r) => r.page?.number ?? 0), [0, 1, 0, 2]);
+  assert.equal(rows[1].meta, "JPEG");
+  assert.equal(pageAlt(3, true), "Страница 3: фото, текст не распознан");
+});
+
+test("a foreign or empty pageUrl is no page", () => {
+  const n = note({ parts: [photo("p1", { pageUrl: "https://x.invalid/a.png" }), photo("p2", { pageUrl: "" }), part("p3")] });
+  assert.deepEqual(photoPages(n), []);
+});
+
+test("viewer paging clamps at the edges and keys map to pages", () => {
+  assert.equal(stepPage(0, 3, "ArrowLeft"), 0);
+  assert.equal(stepPage(2, 3, "ArrowRight"), 2);
+  assert.equal(stepPage(0, 3, "ArrowRight"), 1);
+  assert.equal(stepPage(2, 3, "ArrowLeft"), 1);
+  assert.equal(stepPage(1, 3, "Home"), 0);
+  assert.equal(stepPage(1, 3, "End"), 2);
+  assert.equal(stepPage(0, 0, "End"), 0);
+  assert.equal(viewerAnnounce(2, 5), "Страница 2 из 5");
+  assert.equal(noTextPagesText(0), "");
+  assert.equal(noTextPagesText(2), "2 стр. без текста");
+});
+
+test("a note with photos shows thumbnails, the no-text label and button, and the header count", () => {
+  const n = note({ noTextPages: 1, parts: [photo("p1", { name: evil }), photo("p2", { textStatus: "extracted" })] });
+  const html = render(model({ notes: [n] }));
+  assert.ok(html.includes('src="/media/notepage/p1"'));
+  assert.ok(html.includes('loading="lazy"'));
+  assert.ok(html.includes("1 стр. без текста"));
+  assert.equal(html.split("текст не распознан").length - 1 >= 2, true); // alt and label
+  assert.ok(html.includes(`aria-label="${t.paste}: Страница 1"`)); // only the no-text page has the button
+  assert.ok(!html.includes(`aria-label="${t.paste}: Страница 2"`));
+  assert.ok(!html.includes("src=\"IMG_"));
+  assert.ok(html.includes("&lt;img src=x onerror=alert(1)&gt;"), "the evil name is shown, escaped");
+  assert.ok(!html.includes("<img src=x"), "no raw element from the name");
+  const all = html.split("onerror=").length - 1;
+  const escaped = html.split("&lt;img src=x onerror=").length - 1;
+  assert.equal(all, escaped, "onerror= appears only inside the escaped text");
+  assert.ok(html.includes(">Выше<") && html.includes(">Ниже<"));
+  assert.ok(!html.includes("Распознать"));
+  assert.ok(!render(model()).includes("data-thumb"));
+});
+test("the viewer is a labelled modal dialog with the page image from its address", async () => {
+  const { PageViewer } = await import("../.test-build/pages/PageViewer.js");
+  const pages = photoPages(note({ parts: [photo("p1"), photo("p2")] }));
+  const html = renderToStaticMarkup(h(PageViewer, { pages, start: 1, onClose: noop }));
+  assert.ok(html.includes('role="dialog"') && html.includes('aria-modal="true"'));
+  assert.ok(html.includes('aria-label="Просмотр страниц"'));
+  assert.ok(html.includes('src="/media/notepage/p2"'));
+  assert.ok(html.includes("Страница 2 из 2"));
+  assert.ok(html.includes("Назад") && html.includes("Вперёд") && html.includes("Закрыть"));
+  assert.ok(!html.includes("IMG_"));
 });
 
 test("a Markdown link in a title stays text", () => {

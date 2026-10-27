@@ -81,6 +81,24 @@ test("an add reply keeps known file errors and replaces unknown ones", () => {
   assert.equal(add.error, "");
 });
 
+test("photo pages: pageUrl only from the core's notepage address, noTextPages a non-negative integer", () => {
+  const n = parseNote({
+    id: "n", subjectId: "s", title: "t", anchor: {}, noTextPages: 2,
+    parts: [
+      { materialId: "p1", type: "jpeg", textStatus: "no_text", pageUrl: "/media/notepage/p1" },
+      { materialId: "p2", pageUrl: "https://evil.example/x.png" },
+      { materialId: "p3", pageUrl: "/media/notepage/" },
+      { materialId: "p4", pageUrl: "data:image/png;base64,AAAA" },
+      { materialId: "p5" },
+    ],
+  });
+  assert.deepEqual(n.parts.map((p) => p.pageUrl), ["/media/notepage/p1", "", "", "", ""]);
+  assert.equal(n.noTextPages, 2);
+  for (const bad of [-1, 1.5, "3", null, undefined]) {
+    assert.equal(parseNote({ id: "n", subjectId: "s", title: "t", anchor: {}, noTextPages: bad }).noTextPages, 0);
+  }
+});
+
 test("drop attributes mark the lecture and skip empty ids", () => {
   const a = dropAttributes({ noteId: "", subjectId: "s1", kind: "recording", recordingId: "r1", lessonId: "", date: "" });
   assert.deepEqual(a, {
