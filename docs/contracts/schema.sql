@@ -848,6 +848,6 @@ CREATE TABLE note_parts (
 );
 CREATE INDEX idx_note_parts_material ON note_parts (material_id);
 
--- Migration 0037.
+-- Migration 0038.
 -- assignments: when the student deleted the assignment (ms); NULL while it is not deleted.
 ALTER TABLE assignments ADD COLUMN deleted_at INTEGER;
