@@ -115,6 +115,8 @@ type fakeMaterials struct {
 	n     int
 	kinds []string // lesson kinds FileNotePart was called with
 	err   error    // returned by FileNotePart when set
+	// pageErr is returned by PageImage when set.
+	pageErr error
 }
 
 func newFakeMaterials() *fakeMaterials {
@@ -193,6 +195,20 @@ func (f *fakeMaterials) Material(_ context.Context, id shared.MaterialID) (*mate
 		return nil, fmt.Errorf("fake: %w", shared.ErrNotFound)
 	}
 	return m, nil
+}
+
+// PageImage answers an active photo with its digest as bytes; pageErr, when set, is returned instead.
+func (f *fakeMaterials) PageImage(_ context.Context, id shared.MaterialID) (*material.Material, []byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.pageErr != nil {
+		return nil, nil, f.pageErr
+	}
+	m, ok := f.rows[id]
+	if !ok || !m.Active() || !m.Type().Image() {
+		return nil, nil, fmt.Errorf("fake: %w", shared.ErrNotFound)
+	}
+	return m, []byte(m.Digest()), nil
 }
 
 func (f *fakeMaterials) calls() int {

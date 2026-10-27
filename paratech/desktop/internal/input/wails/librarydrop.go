@@ -3,6 +3,7 @@ package wails
 import (
 	"context"
 	"errors"
+	"strings"
 )
 
 // LibraryDropEvent is emitted after files are dropped on the main window, with a LibraryDrop. It carries no path:
@@ -99,8 +100,29 @@ func routeDrop(ctx context.Context, lib *LibraryService, nts *NotesService, attr
 	lib.importDropped(ctx, paths, emit)
 }
 
-// addDropped adds the files dropped on a lecture to its notes, with the allow-list and the bounds of a drop into
-// «Входящие», and emits the outcome. Drops run one at a time; nothing is emitted once ctx is done.
+// noteDroppedPathError is droppedPathError for a drop on a lecture: photos of handwriting (.jpg, .jpeg, .png) are
+// taken too, and another image is refused with the text that says which photos are. The type is still told from the
+// content.
+func noteDroppedPathError(path string) error {
+	err := droppedPathError(path)
+	if !errors.Is(err, ErrLibraryUnsupported) {
+		return err
+	}
+	name, ext := baseName(path), ""
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		ext = strings.ToLower(name[i:])
+	}
+	switch ext {
+	case ".jpg", ".jpeg", ".png":
+		return nil
+	case ".heic", ".heif", ".avif", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".svg":
+		return ErrNotesImageFormat
+	}
+	return err
+}
+
+// addDropped adds the files dropped on a lecture to its notes, with the allow-list (photos too) and the bounds of a
+// drop into «Входящие», and emits the outcome. Drops run one at a time; nothing is emitted once ctx is done.
 func (s *NotesService) addDropped(ctx context.Context, target NoteTarget, paths []string, emit EventEmitter) {
 	if len(paths) == 0 {
 		return
@@ -114,7 +136,7 @@ func (s *NotesService) addDropped(ctx context.Context, target NoteTarget, paths 
 	if len(paths) > maxDroppedFiles {
 		s.log.Info(opNotesDrop, "result", "too many files", "count", len(paths))
 		out.Error = ErrLibraryTooManyDropped.Error()
-	} else if res, err := s.addPaths(ctx, target, paths, droppedPathError); err != nil {
+	} else if res, err := s.addPaths(ctx, target, paths, noteDroppedPathError); err != nil {
 		out.Error = err.Error()
 	} else {
 		out = res

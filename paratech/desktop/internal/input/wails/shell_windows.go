@@ -74,6 +74,7 @@ func (s *Shell) run(ctx context.Context) error {
 	app.RegisterService(application.NewService(b.Answers))
 	app.RegisterService(application.NewService(b.Tickets))
 	media.setSource(b.Transcript.uc) // the media handler plays recordings through the transcript use case
+	media.setPages(b.Notes.uc)       // and shows the photo pages of notes through the notes use case
 	b.AgentPanel.Attach(app.Event)
 	defer b.AgentPanel.Attach(nil) // also covers a Run that fails before the shutdown hook
 

@@ -93,6 +93,14 @@ type TextExtractor interface {
 	Extract(ctx context.Context, typ material.Type, data []byte) (material.Text, error)
 }
 
+// PageImages encodes a photo of a note again, so that only its pixels are stored and shown (ADR-0027 «Handwriting and
+// scans», TASK-165). Implemented by the imagepage adapter; nothing is recognized or sent. It returns the type and the
+// clean bytes. Errors about the file: material.ErrImageTooLarge, material.ErrUnsupportedImage,
+// material.ErrImageUnreadable; any other (a context that ended) is not about the file.
+type PageImages interface {
+	Clean(ctx context.Context, data []byte) (material.Type, []byte, error)
+}
+
 // MaterialReader is the quarantined reader INSPECT_MATERIAL on the Hub (ADR-0022). Implemented by the hubclient
 // adapter. The output is untrusted model text: only inspection.Request.Parse reads it. Errors follow the Hub client:
 // shared.ErrQuotaExceeded; inspection.ErrInvalidAnswer for any permanent provider error: the Hub's schema refusal of

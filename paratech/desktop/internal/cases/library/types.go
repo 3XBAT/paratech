@@ -32,7 +32,7 @@ type Imported struct {
 // answer. The answer is a suggestion only (ADR-0022): nothing is filed, linked or sent because of it.
 type Inspected struct {
 	Material *material.Material
-	// Text is TextExtracted, TextFailed (the file could not be read) or TextPDFNotExtracted.
+	// Text is TextExtracted, TextFailed (the file could not be read), TextPDFNotExtracted or TextNoText (a photo).
 	Text material.TextStatus
 	// Empty means the text was read and holds nothing, so there was nothing to inspect.
 	Empty bool
@@ -42,9 +42,11 @@ type Inspected struct {
 
 // Deps are the ports the Service needs; Log is optional. Texts, Reader and Inspections are needed only by the reading
 // of the text (MaterialText, Inspect): without them those answer ErrNotConfigured. Notes is optional: without it a
-// subject with notes is still refused by the store, as ErrNotEmpty instead of ErrHasNotes.
+// subject with notes is still refused by the store, as ErrNotEmpty instead of ErrHasNotes. Images is optional: without
+// it a photo is refused (ErrUnsupportedImage), never stored as it came.
 type Deps struct {
 	Notes       SubjectNotes
+	Images      PageImages
 	Subjects    SubjectRepository
 	Materials   MaterialRepository
 	Blobs       BlobStore

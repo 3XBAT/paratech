@@ -483,7 +483,7 @@ func (t tools) inspectUpload(ctx context.Context, call values.Call, _ values.Sco
 
 func textStateOf(in library.Inspected) values.TextState {
 	switch {
-	case in.Text == material.TextPDFNotExtracted:
+	case in.Text == material.TextPDFNotExtracted, in.Text == material.TextNoText:
 		return values.TextNotRead
 	case in.Text == material.TextFailed:
 		return values.TextUnreadable

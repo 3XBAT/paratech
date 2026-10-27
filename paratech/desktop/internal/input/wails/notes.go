@@ -35,6 +35,11 @@ const (
 	ErrNotesChanged       = libraryError("Предмет или файл изменился: обновите страницу.")
 	ErrNotesUnavailable   = libraryError("Не удалось прочитать конспекты. Попробуйте ещё раз.")
 	ErrNotesTooManyPicked = libraryError("За раз можно добавить не больше 200 файлов.")
+
+	// Photos of handwriting (TASK-165); the limits are material.MaxImageBytes and material.MaxImagePixels.
+	ErrNotesImageTooLarge   = libraryError("Фото больше 25 МБ или 40 мегапикселей.")
+	ErrNotesImageFormat     = libraryError("Фото подходят только в JPEG или PNG: HEIC, GIF, WebP, BMP, TIFF и SVG не подходят.")
+	ErrNotesImageUnreadable = libraryError("Не удалось прочитать фото: файл повреждён или обрезан.")
 )
 
 // Operation names of the log.
@@ -68,6 +73,7 @@ type NotesUseCase interface {
 	Restore(ctx context.Context, id shared.NoteID) (notes.View, error)
 	ForLesson(ctx context.Context, l notes.Lecture) ([]notes.View, error)
 	ForSubject(ctx context.Context, sub shared.SubjectID) ([]notes.View, error)
+	PageImage(ctx context.Context, id shared.MaterialID) (notes.Page, error)
 }
 
 // NoteFilePicker shows the native open dialog for files of notes: several when multiple, else one. It returns the
@@ -117,7 +123,8 @@ type NoteAnchor struct {
 }
 
 // NotePart is a part of a note: a file of the library. Name is the file name (plain text). Missing: the file is no
-// longer in the library; Removed: it was removed there.
+// longer in the library; Removed: it was removed there. A photo ("jpeg", "png", textStatus "no_text": «текст не
+// распознан») has PageURL, the address its image is shown from by the material id only; "" for any other part.
 type NotePart struct {
 	MaterialID string `json:"materialId"`
 	Name       string `json:"name"`
@@ -125,18 +132,21 @@ type NotePart struct {
 	TextStatus string `json:"textStatus"`
 	Removed    bool   `json:"removed"`
 	Missing    bool   `json:"missing"`
+	PageURL    string `json:"pageUrl"`
 }
 
 // NoteView is a note of the student. Title is typed text or a file name: plain text only. Times are RFC 3339 in UTC.
+// NoTextPages counts the photo pages without text («N стр. без текста»).
 type NoteView struct {
-	ID        string     `json:"id"`
-	SubjectID string     `json:"subjectId"`
-	Title     string     `json:"title"`
-	Anchor    NoteAnchor `json:"anchor"`
-	Parts     []NotePart `json:"parts"`
-	Removed   bool       `json:"removed"`
-	CreatedAt string     `json:"createdAt"`
-	UpdatedAt string     `json:"updatedAt"`
+	ID          string     `json:"id"`
+	SubjectID   string     `json:"subjectId"`
+	Title       string     `json:"title"`
+	Anchor      NoteAnchor `json:"anchor"`
+	Parts       []NotePart `json:"parts"`
+	NoTextPages int        `json:"noTextPages"`
+	Removed     bool       `json:"removed"`
+	CreatedAt   string     `json:"createdAt"`
+	UpdatedAt   string     `json:"updatedAt"`
 }
 
 // NoteFile is the outcome of one file: MaterialID when it is in the library, or Error, the page's text of the refusal.
@@ -481,7 +491,10 @@ func (s *NotesService) fail(op string, err error) error {
 		{notes.ErrInvalidText, ErrNotesInvalidText},
 		{notes.ErrChanged, ErrNotesChanged},
 		{notes.ErrBusy, ErrLibraryBusy},
-		// The library, through the use case's Materials port.
+		// The library, through the use case's Materials port; the photo errors before the classes they wrap.
+		{library.ErrImageTooLarge, ErrNotesImageTooLarge},
+		{library.ErrUnsupportedImage, ErrNotesImageFormat},
+		{library.ErrImageUnreadable, ErrNotesImageUnreadable},
 		{library.ErrInvalidRequest, ErrNotesInvalidID},
 		{library.ErrSubjectNotFound, ErrLibrarySubjectNotFound},
 		{library.ErrFolderNotFound, ErrNotesChanged},
@@ -520,6 +533,7 @@ func noteViewOf(v notes.View) *NoteView {
 	out := &NoteView{
 		ID: string(n.ID()), SubjectID: string(n.Subject()), Title: n.Title(), Removed: !n.Active(),
 		CreatedAt: timeText(n.CreatedAt()), UpdatedAt: timeText(n.UpdatedAt()), Parts: []NotePart{},
+		NoTextPages: v.NoTextPages,
 		Anchor: NoteAnchor{
 			Kind: string(a.Kind()), RecordingID: string(a.Recording()), LessonID: string(a.Lesson()), Date: a.Date().String(),
 			LessonKind: a.LessonKind(), LessonTitle: a.Title(), Detached: a.Kind() != n.Anchor().Kind(),
@@ -532,6 +546,9 @@ func noteViewOf(v notes.View) *NoteView {
 			p = NotePart{
 				MaterialID: string(id), Name: m.Name(), Type: string(m.Type()), TextStatus: string(m.TextStatus()),
 				Removed: !m.Active(),
+			}
+			if m.Active() && m.Type().Image() {
+				p.PageURL = notePageURL(id)
 			}
 		}
 		out.Parts = append(out.Parts, p)

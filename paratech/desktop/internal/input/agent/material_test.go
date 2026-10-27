@@ -57,6 +57,7 @@ func TestInspectUpload(t *testing.T) {
 		{"answer", library.Inspected{Text: material.TextExtracted, Answer: answer},
 			nil, `{"doc_kind":"homework","has_homework":true,"has_ticket_list":false,"lesson_date":"2026-10-21","material":"u1","mentions_email":true,"subject":"s1","text":"read","upload":"u1"}`},
 		{"pdf", library.Inspected{Text: material.TextPDFNotExtracted}, nil, `{"material":"u1","text":"not_read","upload":"u1"}`},
+		{"photo", library.Inspected{Text: material.TextNoText}, nil, `{"material":"u1","text":"not_read","upload":"u1"}`},
 		{"unreadable", library.Inspected{Text: material.TextFailed}, nil, `{"material":"u1","text":"unreadable","upload":"u1"}`},
 		{"empty", library.Inspected{Text: material.TextExtracted, Empty: true}, nil, `{"material":"u1","text":"empty","upload":"u1"}`},
 		{"gone", library.Inspected{}, library.ErrMaterialNotFound, `{"error":"not_found"}`},
