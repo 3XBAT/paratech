@@ -86,8 +86,12 @@ decoder stays the CLI default (beam search `-bs 5 -bo 5`, owner 2026-10-27).
   75 s pause). A segment before a pause **ends where the next speech starts** (one segment 52.6–132.1 s for about 4 s of speech): ends
   are stretched over the silence, starts are right and never go back. The live preview and the stored document only need ordered
   starts; the lecture text and the summary time codes use the starts.
-- **Speed** (same machine, 4 threads): synthetic 217 s, base-q5_1: 29.3 s without VAD, 14.8 s with it (encoder windows 10 → 3);
-  5 min of a real lecture, small-q5_1: 239.5 s → 120.9 s (research of 2026-10-26).
+- **Speed** (same machine, 4 threads): synthetic 217 s with long pauses, base-q5_1: 29.3 s without VAD, 14.8 s with it (encoder
+  windows 10 → 3); synthetic Russian 279 s, 74 % speech, pauses under 2 s but two of 22 s: 57.0 s → 53.7 s (windows 11 → 8);
+  5 min of a real lecture, small-q5_1: 239.5 s → 120.9 s (research of 2026-10-26). The gain follows the silence.
+- **Progress** with VAD is the share of the speech processed: on the Russian sample 14 % … 100 % in seven steps, as smooth as
+  without VAD; on the sample with long pauses (3 windows) only 89 % and 100 %, then the time left falls back to the estimate
+  less the time since the start (ADR-0016).
 
 ## Models
 

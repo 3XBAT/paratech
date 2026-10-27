@@ -19,20 +19,20 @@ func TestEstimateTable(t *testing.T) {
 		heavy    bool
 	}{
 		// 4 threads is the reference: the table factor with the silence skipped (VAD, ADR-0030).
-		{"large normal", values.FamilyLargeV3, "f16", shared.LoadNormal, 8, 159 * time.Minute, 159 * time.Minute, true},
-		{"medium q5 normal", values.FamilyMedium, "q5_0", shared.LoadNormal, 8, 64*time.Minute + 48*time.Second, 64*time.Minute + 48*time.Second, true},
-		// The calibration: small-q5_1 with --vad, 4 threads, RTF 0.40 measured on 2026-10-26.
-		{"small q5 normal", values.FamilySmall, "q5_1", shared.LoadNormal, 8, 24 * time.Minute, 24 * time.Minute, false},
+		{"large normal", values.FamilyLargeV3, "f16", shared.LoadNormal, 8, 3*time.Hour + 10*time.Minute + 48*time.Second, 3*time.Hour + 10*time.Minute + 48*time.Second, true},
+		{"medium q5 normal", values.FamilyMedium, "q5_0", shared.LoadNormal, 8, 77*time.Minute + 46*time.Second, 77*time.Minute + 46*time.Second, true},
+		// small-q5_1 with --vad, 4 threads: RTF 0.40 measured on 5 min of a real lecture, 0.48 estimated (errs long).
+		{"small q5 normal", values.FamilySmall, "q5_1", shared.LoadNormal, 8, 28*time.Minute + 48*time.Second, 28*time.Minute + 48*time.Second, false},
 		// The owner's computer, 8 CPUs, gentle (4 threads under 3.2 cores): RTF 0.92 measured without VAD.
-		{"small q5 gentle on 8", values.FamilySmall, "q5_1", shared.LoadGentle, 8, 27 * time.Minute, 29 * time.Minute, false},
+		{"small q5 gentle on 8", values.FamilySmall, "q5_1", shared.LoadGentle, 8, 33 * time.Minute, 35 * time.Minute, false},
 		// 6 CPUs: 3 threads capped at 2.4 cores.
-		{"large gentle on 6", values.FamilyLargeV3, "", shared.LoadGentle, 6, 3*time.Hour + 40*time.Minute, 3*time.Hour + 55*time.Minute, true},
-		{"medium gentle on 6 is heavy", values.FamilyMedium, "", shared.LoadGentle, 6, 110 * time.Minute, 120 * time.Minute, true},
-		{"turbo gentle on 8", values.FamilyLargeV3Turbo, "", shared.LoadGentle, 8, 68 * time.Minute, 72 * time.Minute, true},
-		{"base q5 gentle on 8", values.FamilyBase, "q5_1", shared.LoadGentle, 8, 9 * time.Minute, 10 * time.Minute, false},
-		{"tiny max on 16", values.FamilyTiny, "", shared.LoadMax, 16, 110 * time.Second, 2 * time.Minute, false},
-		{"small gentle on 1", values.FamilySmall, "", shared.LoadGentle, 1, 2*time.Hour + 25*time.Minute, 2*time.Hour + 35*time.Minute, true},
-		{"unknown mode is gentle", values.FamilyLargeV3, "", "turbo", 6, 3*time.Hour + 40*time.Minute, 3*time.Hour + 55*time.Minute, true},
+		{"large gentle on 6", values.FamilyLargeV3, "", shared.LoadGentle, 6, 4*time.Hour + 25*time.Minute, 4*time.Hour + 40*time.Minute, true},
+		{"medium gentle on 6 is heavy", values.FamilyMedium, "", shared.LoadGentle, 6, 2*time.Hour + 12*time.Minute, 2*time.Hour + 25*time.Minute, true},
+		{"turbo gentle on 8", values.FamilyLargeV3Turbo, "", shared.LoadGentle, 8, 82 * time.Minute, 86 * time.Minute, true},
+		{"base q5 gentle on 8", values.FamilyBase, "q5_1", shared.LoadGentle, 8, 11 * time.Minute, 13 * time.Minute, false},
+		{"tiny max on 16", values.FamilyTiny, "", shared.LoadMax, 16, 2*time.Minute + 10*time.Second, 2*time.Minute + 25*time.Second, false},
+		{"small gentle on 1", values.FamilySmall, "", shared.LoadGentle, 1, 2*time.Hour + 55*time.Minute, 3*time.Hour + 5*time.Minute, true},
+		{"unknown mode is gentle", values.FamilyLargeV3, "", "turbo", 6, 4*time.Hour + 25*time.Minute, 4*time.Hour + 40*time.Minute, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

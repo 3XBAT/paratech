@@ -6,7 +6,7 @@
 
 ## Context
 A 1 h lecture took about 1 h to recognise (small-q5_1, «Бережная»). With voice activity detection whisper-cli recognises
-only the speech, in about half the 30 s windows: ×2 on 5 min of a real lecture and on synthetic audio. The owner
+only the speech, in fewer 30 s windows: ×2 on 5 min of a real lecture and on synthetic audio with long pauses. The owner
 (2026-10-27) allowed only this: the decoder (`-bs`/`-bo`), the 40 % cap and the thread counts stay as they are.
 
 ## Decision
@@ -20,7 +20,9 @@ only the speech, in about half the 30 s windows: ×2 on 5 min of a real lecture 
   older version is installed again from the page.
 - **Estimate.** The table of ADR-0016 is recalibrated on the measurements of 2026-10-26 (whisper-cli defaults, no
   VAD, 4 threads): tiny 0.17, base 0.35, small 1.0, medium 2.7, large-v3-turbo 2.0, large-v3 5.3 (f16; quantized
-  × 0.8), then × 0.5 for the skipped silence. Example, 8 processors, gentle: small-q5_1 ≈ 28 min per hour.
+  × 0.8), then × 0.6 for the skipped silence: 0.5 was measured on a real lecture, 0.94 on synthetic speech with
+  pauses under 2 s, so the estimate errs to the longer side until the first runs here are measured. Example,
+  8 processors, gentle: small-q5_1 ≈ 34 min per hour.
 - **Old measurements.** `stt_speeds` measured without VAD would show twice the time: migration 0035 deletes them;
   the table applies until the next runs. A later change of the arguments that changes the speed does the same.
 - **Time codes.** With VAD the starts stay on the time line of the recording and in order; a segment before a pause
@@ -28,7 +30,8 @@ only the speech, in about half the 30 s windows: ×2 on 5 min of a real lecture 
   changes there (fixture test `adapters/whispercli/testdata/vad`).
 
 ## Consequences
-- Recognition about twice as fast; short phrases in noise could be lost (not seen on the samples).
+- Recognition up to twice as fast, the more pauses the more; on almost continuous speech only a few percent. Short
+  phrases in noise could be lost (not seen on the samples).
 - Segment ends are not where the speech ends; nothing may rely on them for the length of speech.
 - Install downloads ~0.9 MB more from a second host family (Hugging Face).
 - Open: pin `source_url` to a commit of `ggml-org/whisper-vad` and compare the SHA-256 with its `lfs.oid`.

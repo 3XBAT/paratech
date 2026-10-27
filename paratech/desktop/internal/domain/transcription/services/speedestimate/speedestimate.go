@@ -37,8 +37,10 @@ const (
 	quantizedSpeedup = 0.8
 
 	// silenceSkip: with voice activity detection (always on, ADR-0030) a run takes about this share of the time
-	// without it: only the speech is recognised, in about half the 30 s windows (measured ×2 on 2026-10-26/27).
-	silenceSkip = 0.5
+	// without it, since only the speech is recognised. It depends on the pauses: 0.5 on 5 min of a real lecture,
+	// 0.94 on synthetic speech with pauses under 2 s (2026-10-26/27); 0.6 errs to the longer side until runs here
+	// are measured.
+	silenceSkip = 0.6
 )
 
 // tableFactor is the processing time over audio duration of a full (f16) model of the family with referenceThreads
