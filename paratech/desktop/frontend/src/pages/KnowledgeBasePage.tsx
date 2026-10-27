@@ -7,7 +7,10 @@ import {
   type KnowledgeSearchResult,
   type KnowledgeSubject,
 } from "../bindings/knowledgeBase";
+import { recordingImportApi } from "../bindings/recordingImport";
 import { callByName } from "../bindings/runtime";
+import { todayApi } from "../bindings/today";
+import { importTexts } from "../recordingImportView";
 import {
   askSearch,
   checkQuery,
@@ -31,6 +34,7 @@ import {
 import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Input, ResultLine, type ResultKind } from "../ui/controls";
 import { AddPastNote, HitList, LessonList, SubjectList } from "./KnowledgeParts";
+import { RecordingImportPanel } from "./RecordingImportPanel";
 import { KnowledgeLessonPage, NoteLecturePage } from "./KnowledgeLessonPage";
 
 type SearchOutcome =
@@ -321,6 +325,11 @@ function SubjectView(props: {
   const [message, setMessage] = useState<{ kind: ResultKind; text: string } | null>(null);
   const mounted = useRef(true);
   const acting = useRef(false);
+  // «Импортировать запись» (TASK-162): the panel; the lessons are read again after an import.
+  const importing = useMemo(() => recordingImportApi(callByName), []);
+  const today = useMemo(() => todayApi(callByName), []);
+  const [importOpen, setImportOpen] = useState(false);
+  const [imports, setImports] = useState(0);
 
   useEffect(() => {
     mounted.current = true;
@@ -342,7 +351,7 @@ function SubjectView(props: {
       stopped = true;
       mounted.current = false;
     };
-  }, [api, subject.key]);
+  }, [api, subject.key, imports]);
 
   async function onExport() {
     if (acting.current) {
@@ -381,16 +390,30 @@ function SubjectView(props: {
           <h1 className="kb-heading">{subject.name}</h1>
           <p className="small muted num kb-sub">{subjectMeta(count)}</p>
         </div>
-        <Button
-          icon="down"
-          busy={exporting}
-          busyLabel="Сохранение…"
-          disabled={exporting || lessons === null || lessons.every(isNoteOnly)}
-          onClick={() => void onExport()}
-        >
-          Экспорт в .md
-        </Button>
+        <div className="head-acts">
+          <Button icon="up" aria-expanded={importOpen} onClick={() => setImportOpen((open) => !open)}>
+            {importTexts.open}
+          </Button>
+          <Button
+            icon="down"
+            busy={exporting}
+            busyLabel="Сохранение…"
+            disabled={exporting || lessons === null || lessons.every(isNoteOnly)}
+            onClick={() => void onExport()}
+          >
+            Экспорт в .md
+          </Button>
+        </div>
       </div>
+      {importOpen && (
+        <RecordingImportPanel
+          api={importing}
+          loadLessons={async () => (await today.today()).lessons}
+          subject={subject.noSubject ? "" : subject.name}
+          onImported={() => setImports((n) => n + 1)}
+          onClose={() => setImportOpen(false)}
+        />
+      )}
       {message && (
         <ResultLine kind={message.kind} role={message.kind === "fail" ? "alert" : "status"}>
           {message.text}

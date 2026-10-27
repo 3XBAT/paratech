@@ -35,15 +35,75 @@ func wavFile(seconds int, marker string) []byte {
 	return append(b, data...)
 }
 
-// mp3File is a synthetic MPEG frame header followed by the marker.
-func mp3File(marker string) []byte { return append([]byte{0xFF, 0xFB, 0x90, 0x64}, marker...) }
+// mp3File is a synthetic MP3: frames of the header (silent bodies), the marker in the first body.
+func mp3File(hdr [4]byte, frameLen, frames int, marker string) []byte {
+	frame := append(hdr[:], make([]byte, frameLen-4)...)
+	b := bytes.Repeat(frame, frames)
+	copy(b[4:], marker)
+	return b
+}
 
-// original is a file the fake Originals serves: its bytes, the size it reports and a read error after some bytes.
+// Synthetic MPEG audio frames.
+var (
+	cbr128 = [4]byte{0xFF, 0xFB, 0x90, 0x64} // MPEG-1 layer III, 128 kbit/s, 44.1 kHz: 417 bytes, 1152 samples
+	low8   = [4]byte{0xFF, 0xE3, 0x18, 0xC4} // MPEG-2.5 layer III, 8 kbit/s, 8 kHz: 72 bytes, 576 samples (72 ms)
+	low16  = [4]byte{0xFF, 0xE3, 0x28, 0xC4} // the same at 16 kbit/s: 144 bytes
+)
+
+// flacFile is a synthetic FLAC head: STREAMINFO of mono 16-bit at rate with total samples, then the marker.
+func flacFile(rate uint32, total uint64, marker string) []byte {
+	s := make([]byte, 34)
+	s[10], s[11], s[12] = byte(rate>>12), byte(rate>>4), byte(rate<<4)
+	s[13] = 0xF0 | byte(total>>32)&0x0F
+	binary.BigEndian.PutUint32(s[14:18], uint32(total))
+	b := append([]byte("fLaC\x80\x00\x00\x22"), s...)
+	return append(b, marker...)
+}
+
+// oggPage is a synthetic Ogg page of one short packet; the CRC is not checked.
+func oggPage(granule int64, packet []byte) []byte {
+	b := append([]byte("OggS"), 0, 0)
+	b = binary.LittleEndian.AppendUint64(b, uint64(granule))
+	b = binary.LittleEndian.AppendUint32(b, 7) // serial
+	b = binary.LittleEndian.AppendUint64(b, 0) // sequence and CRC
+	b = append(b, 1, byte(len(packet)))
+	return append(b, packet...)
+}
+
+// oggHead is the first page of a synthetic Ogg Vorbis stream at rate.
+func oggHead(rate uint32) []byte {
+	id := binary.LittleEndian.AppendUint32([]byte("\x01vorbis"), 0)
+	id = append(id, 1)
+	id = binary.LittleEndian.AppendUint32(id, rate)
+	return oggPage(0, append(id, make([]byte, 14)...))
+}
+
+// original is a file the fake Originals serves: its bytes (data, then zeros, then end, length bytes in all), the size
+// it reports and a read error at a position.
 type original struct {
 	data    []byte
-	size    int64 // reported size; -1: len(data)
-	failAt  int   // read error once this many bytes were read; 0: none
+	end     []byte
+	length  int64 // bytes of the file; 0: len(data)+len(end)
+	size    int64 // reported size; -1: the length
+	failAt  int   // a read reaching this position fails; 0: none
 	openErr error
+}
+
+func (o *original) len() int64 {
+	if o.length > 0 {
+		return o.length
+	}
+	return int64(len(o.data) + len(o.end))
+}
+
+func (o *original) at(i int64) byte {
+	switch n := o.len(); {
+	case i < int64(len(o.data)):
+		return o.data[i]
+	case i >= n-int64(len(o.end)):
+		return o.end[i-(n-int64(len(o.end)))]
+	}
+	return 0
 }
 
 type fakeOriginals struct {
@@ -61,7 +121,7 @@ func (f *fakeOriginals) add(path string, data []byte) *original {
 	return o
 }
 
-func (f *fakeOriginals) Open(_ context.Context, path string) (io.ReadCloser, int64, error) {
+func (f *fakeOriginals) Open(_ context.Context, path string) (io.ReadSeekCloser, int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.opened = append(f.opened, path)
@@ -74,25 +134,50 @@ func (f *fakeOriginals) Open(_ context.Context, path string) (io.ReadCloser, int
 	}
 	size := o.size
 	if size < 0 {
-		size = int64(len(o.data))
+		size = o.len()
 	}
-	var r io.Reader = bytes.NewReader(o.data)
-	if o.failAt > 0 {
-		r = io.MultiReader(bytes.NewReader(o.data[:o.failAt]), errReader{})
-	}
-	return &closer{r: r, f: f}, size, nil
+	return &closer{o: o, f: f}, size, nil
 }
-
-type errReader struct{}
-
-func (errReader) Read([]byte) (int, error) { return 0, errors.New("device not ready") }
 
 type closer struct {
-	r io.Reader
-	f *fakeOriginals
+	o   *original
+	pos int64
+	f   *fakeOriginals
 }
 
-func (c *closer) Read(p []byte) (int, error) { return c.r.Read(p) }
+func (c *closer) Read(p []byte) (int, error) {
+	fail := int64(c.o.failAt)
+	switch {
+	case fail > 0 && c.pos == fail:
+		return 0, errors.New("device not ready")
+	case c.pos >= c.o.len():
+		return 0, io.EOF
+	}
+	k := min(int64(len(p)), c.o.len()-c.pos)
+	if fail > c.pos {
+		k = min(k, fail-c.pos)
+	}
+	for i := range k {
+		p[i] = c.o.at(c.pos + i)
+	}
+	c.pos += k
+	return int(k), nil
+}
+
+func (c *closer) Seek(offset int64, whence int) (int64, error) {
+	switch whence {
+	case io.SeekCurrent:
+		offset += c.pos
+	case io.SeekEnd:
+		offset += c.o.len()
+	}
+	if offset < 0 {
+		return 0, errors.New("seek before the start")
+	}
+	c.pos = offset
+	return offset, nil
+}
+
 func (c *closer) Close() error {
 	c.f.mu.Lock()
 	defer c.f.mu.Unlock()

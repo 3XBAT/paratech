@@ -43,6 +43,52 @@ func TestOpenRegularFile(t *testing.T) {
 	}
 }
 
+// The seekable open reads the tail before the rest, as the import of a recording does, and refuses like Open.
+func TestSeekReader(t *testing.T) {
+	content := []byte("head|middle|tail")
+	path := filepath.Join(t.TempDir(), "lecture.ogg")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f, size, err := NewSeekReader().Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := make([]byte, 5)
+	tail := make([]byte, 4)
+	if _, err := io.ReadFull(f, head); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Seek(size-4, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(f, tail); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Seek(5, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	rest, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if size != int64(len(content)) || string(head) != "head|" || string(tail) != "tail" || string(rest) != "middle|tail" {
+		t.Fatalf("size %d, head %q, tail %q, rest %q", size, head, tail, rest)
+	}
+
+	f, _, err = NewSeekReader().Open(context.Background(), filepath.Join(t.TempDir(), "missing-secret-name.ogg"))
+	if f != nil || !errors.Is(err, shared.ErrNotFound) || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("missing file: %v, %v", f, err)
+	}
+	if _, _, err := NewSeekReader().Open(context.Background(), "lecture.ogg"); !errors.Is(err, values.ErrInvalidImportFile) {
+		t.Fatalf("relative path: %v", err)
+	}
+}
+
 func TestOpenRefuses(t *testing.T) {
 	dir := t.TempDir()
 	device := "/dev/null"

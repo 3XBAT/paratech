@@ -132,6 +132,7 @@ func TestRecordingImportErrors(t *testing.T) {
 		{wrap(recording.ErrEmptyAudio), ErrRecordingImportEmpty},
 		{wrap(recording.ErrAudioTooLarge), ErrRecordingImportTooLarge},
 		{wrap(recording.ErrAudioTooLong), ErrRecordingImportTooLong},
+		{wrap(fmt.Errorf("%w: a flac file", recording.ErrAudioDurationUnknown)), ErrRecordingImportNoDuration},
 		{wrap(recording.ErrUnsupportedAudio), ErrRecordingImportFormat},
 		{wrap(recording.ErrNoDiskSpace), ErrRecordingImportNoSpace},
 		{wrap(recordingimport.ErrInvalidRequest), ErrRecordingImportInvalid},
@@ -167,7 +168,7 @@ func TestFrontendKnowsRecordingImport(t *testing.T) {
 	}
 	for _, e := range []error{
 		ErrRecordingImportInvalid, ErrRecordingImportInvalidDate, ErrRecordingImportFuture, ErrRecordingImportNoLesson, ErrRecordingImportUnreadable, ErrRecordingImportEmpty,
-		ErrRecordingImportTooLarge, ErrRecordingImportTooLong, ErrRecordingImportFormat, ErrRecordingImportNoSpace, ErrRecordingImportChanged, ErrRecordingImportDeleting,
+		ErrRecordingImportTooLarge, ErrRecordingImportTooLong, ErrRecordingImportNoDuration, ErrRecordingImportFormat, ErrRecordingImportNoSpace, ErrRecordingImportChanged, ErrRecordingImportDeleting,
 		ErrRecordingImportUnavailable,
 	} {
 		if !strings.Contains(string(src), `"`+e.Error()+`"`) {

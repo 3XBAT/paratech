@@ -3,9 +3,11 @@
 // lecture, and the usual local transcription and everything after it run unchanged.
 //
 // An import runs in this order:
-//  1. The file is opened read-only; its size is checked (recording.CheckImportSize) and its format told from its first
-//     bytes (recording.DetectAudio), never from its name.
-//  2. It is copied into recordings/<id>.<ext> through the Storage Manager (atomic write) while its SHA-256 is computed.
+//  1. The file is opened read-only; its size is checked (recording.CheckImportSize) and its format and duration told
+//     from its first and last bytes (recording.DetectAudio), never from its name.
+//  2. It is copied into recordings/<id>.<ext> through the Storage Manager (atomic write) while its SHA-256 is computed
+//     and, for an MP3, its frames are counted (recording.MP3FrameCounter); a file too long or of unknown duration is
+//     refused and the copy deleted.
 //  3. One transaction finds a recording with the same digest (the same bytes are the same recording: the copy is
 //     deleted and that one is returned) or stores the new one (recording.NewImported).
 //  4. The completion listener enqueues the transcription job (power-aware, model pinned), as after a capture.

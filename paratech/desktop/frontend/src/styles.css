@@ -166,6 +166,15 @@ html, body, #root { height: 100%; }
 .rec-start-panel p.small { margin-top: 8px; }
 .rec-start-panel .note { margin: 12px 0 0; }
 .rec-start-panel .acts { margin-top: 12px; }
+/* «Импортировать запись» (TASK-162): the panel and the mark of an imported row. */
+.rec-import-panel { max-width: 560px; margin-bottom: 16px; }
+.rec-import-step { margin: 16px 0 8px; font-size: var(--fs-body); }
+.rec-import-when { display: flex; flex-wrap: wrap; gap: 0 16px; }
+.rec-import-note { display: flex; align-items: center; gap: 8px; }
+.rec-import-panel .seg { margin-bottom: 12px; }
+.rec-import-panel .acts { margin-top: 12px; }
+.row-imported { display: block; color: var(--muted); }
+.head .head-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 .statusbar span { display: inline-flex; align-items: center; gap: 8px; }
 .statusbar .r { margin-left: auto; }
 .statusbar .i { width: 14px; height: 14px; }

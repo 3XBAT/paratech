@@ -28,7 +28,7 @@ export interface ImportResult {
   name: string;
   /** "" when cancelled. */
   format: ImportFormat | "";
-  /** 0 while unknown (only a WAV header tells it before the transcript). */
+  /** Read from the file; 0 only for an existing import made before its duration was read. */
   durationSeconds: number;
 }
 
@@ -47,6 +47,7 @@ export const errorMessages = {
   empty: "Файл пустой.",
   tooLarge: "Файл больше 2 ГБ.",
   tooLong: "Запись длиннее 4 часов.",
+  noDuration: "Не удалось узнать длительность записи по файлу. Сохраните её заново в WAV или MP3 и попробуйте ещё раз.",
   format: "Подходят только аудиофайлы WAV, FLAC, MP3 и OGG (Vorbis). Видео, M4A, AAC, WMA и Opus пока не подходят.",
   noSpace: "На диске не хватает места для копии записи.",
   changed: "Файл изменился во время копирования. Попробуйте ещё раз.",

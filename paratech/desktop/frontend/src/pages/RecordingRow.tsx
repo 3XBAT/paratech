@@ -16,6 +16,7 @@ import {
   recordingRowView,
   rowActions,
 } from "../recordingRowView.js";
+import { importTexts } from "../recordingImportView.js";
 import type { AdvicePending } from "../sourcePicker/advice.js";
 import { SourceAdvice } from "../sourcePicker/SourceAdvice.js";
 import { jobStatusView, showsProgress, type StatusView } from "../statusPresentation.js";
@@ -55,6 +56,8 @@ export interface RecordingRowProps {
   onSelect?: (selected: boolean) => void;
   /** The live sound of the running recording (TASK-099); the capsule shows only for this row's recording. */
   sound?: RecordingSound | null;
+  /** The recording was imported from a file (TASK-162): the row says «импортирована». */
+  imported?: boolean;
 }
 
 type MenuKey = RowItemKey | "delete";
@@ -167,10 +170,11 @@ export function RecordingRow(props: RecordingRowProps) {
       }
       title={title}
       meta={
-        (v.lesson !== "" || v.meta !== "") && (
+        (v.lesson !== "" || v.meta !== "" || props.imported === true) && (
           <>
             {v.lesson !== "" && <span className="row-lesson">{v.lesson}</span>}
             {v.meta !== "" && <span className="num">{v.meta}</span>}
+            {props.imported === true && <span className="row-imported">{importTexts.imported}</span>}
           </>
         )
       }

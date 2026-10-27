@@ -86,10 +86,11 @@ func TestImportOfAPastLesson(t *testing.T) {
 	}
 }
 
-// A date and a subject without a lesson; an MP3 has no header duration and the extension follows the content.
+// A date and a subject without a lesson; the duration of an MP3 is its frames counted during the copy and the
+// extension follows the content.
 func TestImportOfADateAndSubject(t *testing.T) {
 	w := newWorld(t)
-	audio := mp3File("seminar")
+	audio := mp3File(cbr128, 417, 20, "seminar")
 	w.originals.add(`C:\Users\student\Music\seminar.ogg`, audio) // the name lies, the content decides
 	at := now.Add(-24 * time.Hour)
 
@@ -106,8 +107,67 @@ func TestImportOfADateAndSubject(t *testing.T) {
 	if s := r.LessonSnapshot(); s.Subject() != "Физика" || s.Kind() != "seminar" || s.Title() != "Оптика" {
 		t.Fatalf("snapshot %+v", s)
 	}
-	if _, ok := r.Duration(); ok {
-		t.Fatal("an MP3 has a known duration before its transcript")
+	if d, ok := r.Duration(); !ok || d != 20*1152*time.Second/44100 {
+		t.Fatalf("Duration = %v, %v; want 20 frames of 1152 samples at 44.1 kHz", d, ok)
+	}
+}
+
+// Every format has a duration cap: a file too long, or whose headers do not tell its duration, is refused. The headers
+// of WAV, FLAC and Ogg (and the Xing/VBRI header of an MP3) refuse it before the copy; the frames of any other MP3 are
+// counted during the copy, which is then deleted.
+func TestImportDurationCap(t *testing.T) {
+	const big = int64(1) << 30
+	pairs := bytes.Repeat(append(mp3File(low8, 72, 1, ""), mp3File(low16, 144, 1, "")...), 300) // VBR, 43.2 s
+	tests := []struct {
+		name   string
+		file   original
+		copied bool // the refusal comes after the copy
+		want   error
+		dur    time.Duration // of an accepted file
+	}{
+		{name: "flac over 4 hours", file: original{data: flacFile(8000, 8000*(4*3600+1), "x"), length: big}, want: recording.ErrAudioTooLong},
+		{name: "flac without total samples", file: original{data: flacFile(48000, 0, "x"), length: big}, want: recording.ErrAudioDurationUnknown},
+		{name: "ogg over 4 hours", file: original{data: oggHead(8000), end: oggPage(8000*(4*3600+1), []byte("x")), length: big},
+			want: recording.ErrAudioTooLong},
+		{name: "ogg without a last page", file: original{data: oggHead(8000), length: big}, want: recording.ErrAudioDurationUnknown},
+		{name: "vbr mp3 over 4 hours", file: original{data: append(pairs, mp3File(low8, 72, 199_401, "")...)}, copied: true,
+			want: recording.ErrAudioTooLong},
+		{name: "mp3 without countable frames", file: original{data: append([]byte{0xFF, 0xFB, 0x04, 0x64}, make([]byte, 1000)...)}, copied: true,
+			want: recording.ErrAudioDurationUnknown},
+		{name: "flac within", file: original{data: flacFile(48000, 48000*3600, "x")}, dur: time.Hour},
+		{name: "ogg within", file: original{data: append(oggHead(44100), oggPage(44100*90, []byte("audio"))...)}, dur: 90 * time.Second},
+		{name: "vbr mp3 within", file: original{data: append(pairs, mp3File(low8, 72, 100, "")...)}, dur: 50400 * time.Millisecond},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			o := w.originals.add(path, nil)
+			*o = tc.file
+			o.size = -1
+			writes := 0
+			w.store.onWrite = func() { writes++ }
+
+			res, err := w.svc.Import(context.Background(), Request{Path: path, StartedAt: now.Add(-time.Hour)})
+			if tc.want == nil {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if d, ok := res.Recording.Duration(); !ok || d != tc.dur {
+					t.Fatalf("Duration = %v, %v; want %v", d, ok, tc.dur)
+				}
+				return
+			}
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Import = %+v, %v; want %v", res, err, tc.want)
+			}
+			if len(w.store.files) != 0 || w.recordings.count() != 0 || len(w.completions.ids) != 0 {
+				t.Fatalf("after a refusal: %d files, %d recordings, completions %v", len(w.store.files), w.recordings.count(),
+					w.completions.ids)
+			}
+			if copied := writes > 0; copied != tc.copied || len(w.store.deleted) != writes {
+				t.Fatalf("%d copies written, %d deleted; want a copy %v", writes, len(w.store.deleted), tc.copied)
+			}
+		})
 	}
 }
 
@@ -218,8 +278,8 @@ func TestImportRefusesBeforeTheCopy(t *testing.T) {
 		{"wav over 4 hours", func(w *world) Request {
 			head := wavFile(0, "")
 			binary.LittleEndian.PutUint32(head[40:44], 32000*(4*3600+1)) // the data chunk says 4 h 1 s
-			o := w.originals.add(path, append(head, make([]byte, recording.ImportHeadBytes)...))
-			o.size = 1 << 30 // the rest is never read
+			o := w.originals.add(path, head)
+			o.length = 1 << 30 // zeros after the header; only the head and the tail are read
 			return Request{Path: path, StartedAt: now}
 		}, recording.ErrAudioTooLong},
 		{"header cut short", func(w *world) Request {
@@ -258,7 +318,7 @@ func TestImportRefusesBeforeTheCopy(t *testing.T) {
 
 // A refusal during or after the copy leaves no file and no recording.
 func TestImportFailuresLeaveNothing(t *testing.T) {
-	audio := wavFile(4, "fail") // longer than the head, so the size checks run during the copy
+	audio := wavFile(8, "fail") // longer than the head and the tail, so the read error is met during the copy
 	tests := []struct {
 		name string
 		set  func(w *world)

@@ -3,7 +3,8 @@ package recordingimport
 import "errors"
 
 // Errors of the import (ARCH-18). Fixed texts; causes are wrapped. The refusals of the file itself are the domain's:
-// recording.ErrEmptyAudio, ErrAudioTooLarge, ErrAudioTooLong, ErrUnsupportedAudio, ErrNoDiskSpace and ErrFutureLecture.
+// recording.ErrEmptyAudio, ErrAudioTooLarge, ErrAudioTooLong, ErrAudioDurationUnknown, ErrUnsupportedAudio,
+// ErrNoDiskSpace and ErrFutureLecture.
 var (
 	// ErrInvalidConfig is returned by New when a required port is missing.
 	ErrInvalidConfig = errors.New("recordingimport: invalid configuration")

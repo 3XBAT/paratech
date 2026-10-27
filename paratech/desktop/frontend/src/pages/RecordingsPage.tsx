@@ -2,6 +2,8 @@ import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useStat
 import { activityApi, type AdviceView, type JobItem, type RecordingItem } from "../bindings/activity";
 import { promptApi } from "../bindings/prompt";
 import { recordingDeleteApi } from "../bindings/recordingDelete";
+import { recordingImportApi } from "../bindings/recordingImport";
+import { todayApi } from "../bindings/today";
 import { callByName } from "../bindings/runtime";
 import { actionErrorText, loadErrorText } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
@@ -16,6 +18,7 @@ import {
   selectedText,
   withSelected,
 } from "../recordingDeleteView";
+import { importTexts, withImported } from "../recordingImportView";
 import { anyRecording, pageGroups, queueLine, tasksEmptyText } from "../recordingRowView";
 import { adviceKey, keepSource, switchToSuggestion, type AdvicePending } from "../sourcePicker/advice";
 import { SourceNotes, SourcePicker } from "../sourcePicker/SourcePicker";
@@ -38,6 +41,7 @@ import { useRecordingSound } from "../useRecordingSound";
 import { useOpenSummary } from "../openSummary";
 import { useOpenTranscript } from "../openTranscript";
 import { RecordingDeleteDialog } from "./RecordingDeleteDialog";
+import { RecordingImportPanel } from "./RecordingImportPanel";
 import { JobRow, RecordingRow } from "./RecordingRow";
 
 const pollMs = 3000;
@@ -58,6 +62,8 @@ export function RecordingsPage({
   const api = useMemo(() => activityApi(callByName), []);
   const prompts = useMemo(() => promptApi(callByName), []);
   const deletion = useMemo(() => recordingDeleteApi(callByName), []);
+  const importing = useMemo(() => recordingImportApi(callByName), []);
+  const today = useMemo(() => todayApi(callByName), []);
   const openTranscript = useOpenTranscript();
   const openSummary = useOpenSummary();
   const [recordings, setRecordings] = useState<RecordingItem[] | null>(null);
@@ -174,6 +180,11 @@ export function RecordingsPage({
       void act(`redo:${id}`, () => api.redoSummary(id));
     }
   }
+
+  // «Импортировать запись» (TASK-162): the panel, and the recordings imported in this session (their rows are marked).
+  const [importOpen, setImportOpen] = useState(false);
+  const [importedIds, setImportedIds] = useState<ReadonlySet<string>>(new Set());
+  const loadLessons = useCallback(async () => (await today.today()).lessons, [today]);
 
   // The silent-source advice of the running recording (TASK-082): the click running per recording, and the problem of
   // the last click per advice (a new suggestion starts clean).
@@ -304,6 +315,7 @@ export function RecordingsPage({
       selected={selected.has(r.id)}
       onSelect={(on) => setSelected((sel) => withSelected(sel, r.id, on))}
       sound={sound}
+      imported={importedIds.has(r.id)}
     />
   );
 
@@ -362,6 +374,14 @@ export function RecordingsPage({
     <section className="page recordings">
       <div className="head">
         <h1>Записи и задачи</h1>
+        <div className="head-acts">
+          <Button
+            icon="up"
+            aria-expanded={importOpen}
+            onClick={() => setImportOpen((open) => !open)}
+          >
+            {importTexts.open}
+          </Button>
         <div className="rec-start">
           <Button
             variant="primary"
@@ -381,7 +401,19 @@ export function RecordingsPage({
             </span>
           )}
         </div>
+        </div>
       </div>
+      {importOpen && (
+        <RecordingImportPanel
+          api={importing}
+          loadLessons={loadLessons}
+          onImported={(id) => {
+            setImportedIds((ids) => withImported(ids, id));
+            void refresh();
+          }}
+          onClose={() => setImportOpen(false)}
+        />
+      )}
       {startOpen && (
         <div className="card box rec-start-panel" role="group" aria-label={manualStartTexts.title}>
           <h2>{manualStartTexts.title}</h2>
