@@ -11,11 +11,14 @@ import {
   lessonMeta,
   type LessonTab,
   lessonTabs,
+  noteLectureHeading,
+  noteLectureMeta,
   shownBlock,
   summaryFocus,
 } from "../knowledgeView";
 import { lectureCopiedText } from "../lectureTextView";
 import { useOpenSummary } from "../openSummary";
+import { lectureOf } from "../ownNotesView";
 import { errorText, nextPollMs } from "../summaryView";
 import { saveResultText } from "../transcriptView";
 import { Button } from "../ui/Button";
@@ -34,6 +37,8 @@ export function KnowledgeLessonPage(props: {
   api: KnowledgeBaseApi;
   lesson: KnowledgeLesson;
   focus: LessonFocus;
+  /** The file of the student's notes a search hit opened the page at; "" for none. */
+  materialId?: string;
   /** Opens with the subject and kind form (from «Без предмета»). */
   editing: boolean;
   onBack: () => void;
@@ -200,9 +205,10 @@ export function KnowledgeLessonPage(props: {
                   </div>
                 )}
                 <OwnNotes
-                  recordingId={id}
+                  lecture={{ kind: "recording", recordingId: id }}
                   librarySubjectId={lesson.librarySubjectId}
                   librarySubjectState={lesson.librarySubjectState}
+                  focusMaterialId={props.materialId}
                 />
               </>
             ) : view === null ? (
@@ -223,6 +229,35 @@ export function KnowledgeLessonPage(props: {
           </>
         )}
       </div>
+    </section>
+  );
+}
+
+// A lecture known only from the student's notes (TASK-155): no recording, so no summary, transcript or tabs and no
+// call that needs a recording id; only the «Мой конспект» block, opened by the lecture's ids.
+export function NoteLecturePage(props: { lesson: KnowledgeLesson; materialId?: string; onBack: () => void }) {
+  const l = props.lesson;
+  return (
+    <section className="page tr sm kb-lesson-page">
+      <div className="hw-back">
+        <Button variant="ghost" onClick={props.onBack}>
+          Назад
+        </Button>
+      </div>
+      <div className="head">
+        <div>
+          <h1 className="kb-heading">{noteLectureHeading(l)}</h1>
+          <p className="tr-sub">
+            <span className="tr-title">{noteLectureMeta(l)}</span>
+          </p>
+        </div>
+      </div>
+      <OwnNotes
+        lecture={lectureOf(l)}
+        librarySubjectId={l.librarySubjectId}
+        librarySubjectState={l.librarySubjectState}
+        focusMaterialId={props.materialId}
+      />
     </section>
   );
 }
