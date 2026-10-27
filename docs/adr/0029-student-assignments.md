@@ -19,7 +19,8 @@ button. The student cannot record a task that was said in class but not recorded
 - Extra rules for a student assignment, in the domain: title 1…200 runes one line (as `NewDetails`), note ≤ 2000 runes;
   no control characters except line breaks in the note, no bidi override/isolate characters (U+202A–202E,
   U+2066–2069) in either; due, when given, within `now − 31 days … now + 2 years` (`ErrInvalidDetails` otherwise).
-  A date without a time is 23:59 local of that day (as `edit_due`); the location is passed in, the domain reads no clock.
+  A date without a time is 20:00 local of that day (as `edit_due`; was 23:59 until addendum 3); the location is passed
+  in, the domain reads no clock.
 - The subject is a library subject ID resolved by the use case to its current name (ADR-0024 resolves names back at
   read time, so «Сегодня», «Задания», the subject page and `list_assignments` show it with no reader change). No
   subject and no lesson: «Без предмета». A lesson with no subject argument: the subject of the lesson, as for extracted
@@ -64,7 +65,8 @@ button. The student cannot record a task that was said in class but not recorded
 ## Open (questions to the owner)
 Answered 2026-10-27: 1 — «Удалить» for every assignment (addendum below); 2 — no notification now (deferred);
 4 — in a request without a subject the agent asks (addendum below); 5 — yes, no date means no deadline and no question;
-3 — the due limits stay: a month back (31 days) … two years ahead, a date without a time is 23:59 local.
+3 — the due limits stay: a month back (31 days) … two years ahead; a date without a time was 23:59 local, changed to
+20:00 by addendum 3.
 
 ## Addendum (2026-10-27): delete and edit any assignment, ask for the subject
 Source: owner 2026-10-27. Tasks TASK-228…234.
@@ -99,7 +101,8 @@ Source: owner 2026-10-27. Tasks TASK-228…234.
 ### Edit after creation
 - The student edits title, note, deadline (date and optional time) and subject of any assignment from the UI.
   `homeworkflow.EditAssignment` grows: subject is a library subject ID (or none) stored as the student's subject
-  correction (the name, as `NewByStudent`); date/time follow the `create_assignment` rules (no time → 23:59 local).
+  correction (the name, as `NewByStudent`); date/time follow the `create_assignment` rules (no time → 20:00 local,
+  addendum 3).
   Validation by source, in the domain: a student assignment keeps the ADR-0029 rules; an extracted one `NewDetails`
   plus the same control/bidi ban. The edit marks `user_edited`; `expectedVersion` guards concurrent edits.
 - A deleted assignment cannot be edited (`ErrDeleted`).
@@ -122,9 +125,8 @@ assignment is purged completely (duration: C-3).
 Source: owner answers of 2026-10-27 (З1–З3, 6.3). Tasks TASK-274…281 (C-1: TASK-233/234).
 
 ### Purge of a deleted assignment (З2)
-- `assignment.RestoreWindow` is a domain constant (C-3; until the owner answers, **7 days** — the longest option, so
-  nothing goes earlier than any answer allows; this is not a choice of the option). `Restore(now)` after the window →
-  `ErrRestoreExpired`; the binding answers `expired`.
+- `assignment.RestoreWindow` is a domain constant: **3 days** (owner 2026-10-27, C-3). `Restore(now)` after the window
+  → `ErrRestoreExpired`; the binding answers `expired`.
 - `homeworkflow.PurgeDeleted(ctx)` removes each assignment deleted longer than the window, **hard**: proposals of it,
   deliveries (only final ones can exist: delete is refused while one is unresolved), drafts with their versions, works,
   then the assignment row. Each step is its own transaction and idempotent; the assignment row goes last, so a crash
@@ -154,11 +156,43 @@ Source: owner answers of 2026-10-27 (З1–З3, 6.3). Tasks TASK-274…281 (C-1:
 - **Sync** (`cases/schedulesync`): for each queued row, reads the assignment again; deleted, no due or no event → the
   row is dropped; else `UpsertDeadline` with the confirmed event title of the executed proposal and the current due,
   then the row goes. Idempotent by the event id; a lost answer is retried safely (hard rule 7).
-- **Agent `edit_due`**: open (C-4); until answered it never touches the event (as today).
+- **Agent `edit_due`**: updates the event without asking (C-4, addendum 3).
 
 ### Due limits (6.3)
-- Stay as written: due within `now − 31 days … now + 2 years`; a date without a time is 23:59 local.
+- Due within `now − 31 days … now + 2 years`; a date without a time is 20:00 local (addendum 3; was 23:59).
 
 ### Open (owner)
-- C-3. Сколько можно «Вернуть» удалённое задание, после чего оно стирается совсем? (а) только до ухода со страницы (стирается при уходе со страницы или при следующем запуске); (б) 1 день; (в) 7 дней. До ответа в коде константа 7 дней.
-- C-4. Срок задания поменял агент (просьба «перенеси срок»): (а) та же настройка — при «спрашивать» в строке действия в панели появляется тот же вопрос с «Да» / «Нет»; (б) правка агента событие не трогает никогда, обновить можно только своей правкой срока; (в) правка агента всегда спрашивает, даже при «обновлять сами».
+Answered 2026-10-27: C-3 — «Вернуть» works for 3 days, then the assignment is purged; C-4 — the agent's deadline
+change updates the Google event too, without asking (addendum 3).
+
+## Addendum 3 (2026-10-27): 20:00 for a date without a time, the agent's deadline change and the event
+Source: owner answers of 2026-10-27 (6.3 changed, C-4). Tasks TASK-304, TASK-305, TASK-281.
+
+### A date without a time is 20:00 local
+- One domain constant in `coursework/assignment` (the hour and minute of a date-only deadline, 20:00) replaces
+  `endOfDayHour/Minute`; `StudentDue` (button form, edit, `create_assignment`) and the agent's `edit_due` for an
+  assignment without a deadline (`input/agent` `dueOn`) use it; no other copy of the value in Go.
+- The frontend form reads a deadline at exactly 20:00 as «no time» (the empty time field), as 23:59 before.
+- Stored deadlines are **not** rewritten (no migration): they are instants the student saw and Google events may
+  show; an old assignment at 23:59 now shows the time 23:59 in the form and keeps it on save.
+- Extraction from a recording or a material (the `EXTRACT_HOMEWORK_DEADLINES` prompt says «If only a day is named,
+  use 23:59 of that day»): Open C-5, task TASK-305 waits for it.
+- The planner never computes the time (the desktop does), so served panel versions stay. Panel v9 (TASK-244) says
+  «Without time the deadline is 20:00 of that day» in `system.md`; the `date` type text in `tools.json` («the end of
+  that day») stays byte-identical until a catalog changes tool texts anyway (the v9 = v8 tools rule of ADR-0028).
+
+### The agent's `edit_due` and the Google event (C-4)
+- After a successful `edit_due` on an assignment that has an event, the use case queues a `deadline_event_updates`
+  row in the same transaction and requests a sync after commit (the student-edit path with the fixed policy
+  `update`; `eventrefresh.Decide` with that policy, no condition in the use case). The setting «События в календаре
+  при смене срока» applies to the student's own edits only; the agent path ignores it, including `keep` (owner: «the
+  agent changes it for a reason»).
+- Hard rule 3 holds through policy: the event was created by the student's «Да»; the update only mirrors a local,
+  validated, undoable change (hard rule 6, Google is a view); the title stays the confirmed one and no model text
+  reaches Google. Idempotent as every sync row (hard rule 7).
+- **Undo** of the agent's `edit_due` (the student's click) restores the old deadline and queues the update again, so
+  the event returns to the old time. An Undo refused as `changed` touches nothing.
+- The panel line of the action says «Срок изменён; событие в Google Календаре обновится» when an update was queued.
+
+### Open (owner)
+- C-5. Извлечение заданий из записи и материала: если в лекции назван только день («к пятнице»), сейчас срок 23:59. Тоже ставить 20:00? (а) да, везде одинаково — 20:00 (рекомендуется); (б) нет, у извлечённых оставить 23:59. Уже извлечённые задания не меняются в обоих вариантах. До ответа TASK-305 не запускается.
