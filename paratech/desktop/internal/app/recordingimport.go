@@ -15,7 +15,7 @@ import (
 func (c *core) wireRecordingImport(e env, recordings *sqlite.RecordingRepository, lessons *sqlite.LessonRepository,
 	log *slog.Logger) (*recordingimport.Service, error) {
 	svc, err := recordingimport.New(recordingimport.Deps{
-		Originals: localfile.New(), Store: c.store, Space: c.store, Recordings: recordings, Lessons: lessons,
+		Originals: localfile.NewSeekReader(), Store: c.store, Space: c.store, Recordings: recordings, Lessons: lessons,
 		Completions: c.transcriptions, Clock: e.clock, IDs: e.ids, Tx: c.db, Log: log,
 	})
 	if err != nil {

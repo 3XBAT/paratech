@@ -32,46 +32,76 @@ func (f AudioFormat) Valid() bool {
 // for a usual ID3 tag.
 const ImportHeadBytes = 64 << 10
 
-// ImportedAudio is what the content of a file says: its format and, for WAV, its duration from the header (zero:
-// unknown until the transcript).
+// ImportTailBytes is how much of the end of a file DetectAudio needs: more than the largest Ogg page (65307 bytes).
+const ImportTailBytes = 128 << 10
+
+// ImportedAudio is what the content of a file says: its format and its duration from the headers. An MP3 learns its
+// duration only when its frames are counted during the copy (NeedsFrameCount, Counted).
 type ImportedAudio struct {
 	Format   AudioFormat
 	Duration time.Duration
+
+	counting  bool  // an MP3 whose frames are still to be counted
+	countFrom int64 // the offset of its first frame: after the ID3 tag
 }
 
-// DetectAudio tells the format of a file from its first bytes (head, at most ImportHeadBytes are read) and its size,
-// never from its name: RIFF/WAVE, fLaC, an ID3 tag or an MPEG audio frame, OggS with Vorbis. Anything else is
-// ErrUnsupportedAudio; a WAV whose header says it lasts longer than MaxImportedDuration is ErrAudioTooLong.
-func DetectAudio(head []byte, size int64) (ImportedAudio, error) {
+// NeedsFrameCount reports an MP3 whose duration is known only after an MP3FrameCounter has seen all its bytes.
+func (a ImportedAudio) NeedsFrameCount() bool { return a.counting }
+
+// DetectAudio tells the format of a file from its first bytes (head, at most ImportHeadBytes are read), its last
+// bytes (tail, at most ImportTailBytes; nil when the head holds the whole file) and its size, never from its name:
+// RIFF/WAVE, fLaC, an ID3 tag or an MPEG audio frame, OggS with Vorbis. Anything else is ErrUnsupportedAudio. The
+// duration comes from the headers without decoding: the WAV data chunk, the FLAC STREAMINFO, the granule position of
+// the last Ogg page; one longer than MaxImportedDuration is ErrAudioTooLong, one the headers do not tell is
+// ErrAudioDurationUnknown. An MP3 is refused here only when its Xing/VBRI header, or the size over a bitrate that is
+// the same at the start and at the end, says it is too long; otherwise its frames are counted during the copy.
+func DetectAudio(head, tail []byte, size int64) (ImportedAudio, error) {
 	if len(head) > ImportHeadBytes {
 		head = head[:ImportHeadBytes]
 	}
+	if len(tail) == 0 && int64(len(head)) >= size {
+		tail = head
+	}
+	if len(tail) > ImportTailBytes {
+		tail = tail[len(tail)-ImportTailBytes:]
+	}
+
 	switch {
 	case len(head) >= 12 && string(head[:4]) == "RIFF" && string(head[8:12]) == "WAVE":
-		d := wavDuration(head, size)
-		if d > MaxImportedDuration {
-			return ImportedAudio{}, fmt.Errorf("%w: %v, at most %v", ErrAudioTooLong, d.Round(time.Second), MaxImportedDuration)
-		}
-		return ImportedAudio{Format: FormatWAV, Duration: d}, nil
+		d, ok := wavDuration(head, size)
+		return knownAudio(FormatWAV, d, ok)
 	case bytes.HasPrefix(head, []byte("fLaC")):
-		return ImportedAudio{Format: FormatFLAC}, nil
+		d, ok := flacDuration(head)
+		return knownAudio(FormatFLAC, d, ok)
 	case bytes.HasPrefix(head, []byte("OggS")):
-		if oggVorbis(head) {
-			return ImportedAudio{Format: FormatOGG}, nil
+		if !oggVorbis(head) {
+			return ImportedAudio{}, fmt.Errorf("%w: an Ogg stream that is not Vorbis", ErrUnsupportedAudio)
 		}
-		return ImportedAudio{}, fmt.Errorf("%w: an Ogg stream that is not Vorbis", ErrUnsupportedAudio)
+		d, ok := oggDuration(head, tail)
+		return knownAudio(FormatOGG, d, ok)
 	case bytes.HasPrefix(head, []byte("ID3")):
-		return id3Audio(head)
+		return id3Audio(head, tail, size)
 	case mpegFrame(head):
-		return ImportedAudio{Format: FormatMP3}, nil
+		return mp3Audio(head, tail, size, 0)
 	}
 	return ImportedAudio{}, ErrUnsupportedAudio
 }
 
-// wavDuration reads the fmt and data chunks; zero when the header does not tell (a streamed WAV with a zero or
-// all-ones data size, chunks past the head). The data size is capped by the file size, so a cut file is not longer
-// than what it holds.
-func wavDuration(head []byte, size int64) time.Duration {
+// knownAudio is the audio of a format whose headers told the duration d (ok), within MaxImportedDuration.
+func knownAudio(f AudioFormat, d time.Duration, ok bool) (ImportedAudio, error) {
+	switch {
+	case !ok || d <= 0:
+		return ImportedAudio{}, fmt.Errorf("%w: a %s file", ErrAudioDurationUnknown, f)
+	case d > MaxImportedDuration:
+		return ImportedAudio{}, fmt.Errorf("%w: %v, at most %v", ErrAudioTooLong, d.Round(time.Second), MaxImportedDuration)
+	}
+	return ImportedAudio{Format: f, Duration: d}, nil
+}
+
+// wavDuration reads the fmt and data chunks; not ok when the header does not tell (no byte rate, chunks past the
+// head). A streamed WAV (a zero or all-ones data size, as a recorder that crashed leaves it) lasts what the rest of
+// the file holds; the data size is capped by the file size, so a cut file is not longer than what it holds.
+func wavDuration(head []byte, size int64) (time.Duration, bool) {
 	var byteRate uint32
 	for off := 12; off+8 <= len(head); {
 		id, n := string(head[off:off+4]), int64(binary.LittleEndian.Uint32(head[off+4:off+8]))
@@ -82,29 +112,31 @@ func wavDuration(head []byte, size int64) time.Duration {
 				byteRate = binary.LittleEndian.Uint32(head[body+8 : body+12])
 			}
 		case "data":
-			if byteRate == 0 || n == 0 || n == 0xFFFFFFFF {
-				return 0
+			if byteRate == 0 {
+				return 0, false
 			}
-			n = min(n, size-int64(body))
+			rest := size - int64(body)
+			if n == 0 || n == 0xFFFFFFFF {
+				n = rest
+			}
+			n = min(n, rest)
 			if n <= 0 {
-				return 0
+				return 0, false
 			}
-			// n and the byte rate are below 2^32, so neither product overflows int64.
-			br := int64(byteRate)
-			return time.Duration(n/br)*time.Second + time.Duration(n%br*int64(time.Second)/br)
+			return ratio(uint64(n), uint64(byteRate)), true
 		}
 		next := int64(body) + n + n%2 // chunks are padded to an even size
 		if next > int64(len(head)) {
-			return 0
+			return 0, false
 		}
 		off = int(next)
 	}
-	return 0
+	return 0, false
 }
 
 // id3Audio looks past an ID3v2 tag: FLAC or an MPEG frame after it. A tag longer than the head is taken for MP3, the
-// usual case (a large cover picture).
-func id3Audio(head []byte) (ImportedAudio, error) {
+// usual case (a large cover picture), whose frames are counted from the end of the tag.
+func id3Audio(head, tail []byte, size int64) (ImportedAudio, error) {
 	if len(head) < 10 {
 		return ImportedAudio{}, ErrUnsupportedAudio
 	}
@@ -120,14 +152,15 @@ func id3Audio(head []byte) (ImportedAudio, error) {
 		end += 10 // footer
 	}
 	if end >= len(head) {
-		return ImportedAudio{Format: FormatMP3}, nil
+		return ImportedAudio{Format: FormatMP3, counting: true, countFrom: int64(end)}, nil
 	}
 	rest := head[end:]
 	switch {
 	case bytes.HasPrefix(rest, []byte("fLaC")):
-		return ImportedAudio{Format: FormatFLAC}, nil
+		d, ok := flacDuration(rest)
+		return knownAudio(FormatFLAC, d, ok)
 	case mpegFrame(rest):
-		return ImportedAudio{Format: FormatMP3}, nil
+		return mp3Audio(head, tail, size, end)
 	}
 	return ImportedAudio{}, fmt.Errorf("%w: an ID3 tag before something that is not MP3", ErrUnsupportedAudio)
 }

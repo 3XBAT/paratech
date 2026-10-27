@@ -101,12 +101,13 @@ func (s *Service) importFile(ctx context.Context, req Request) (Result, error) {
 	}
 	head := make([]byte, min(size, recording.ImportHeadBytes))
 	if _, err := io.ReadFull(src, head); err != nil {
-		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			return Result{}, fmt.Errorf("%w: the file ended before its header", ErrChanged)
-		}
-		return Result{}, unreadable(ctx, err)
+		return Result{}, readError(ctx, err, "header")
 	}
-	audio, err := recording.DetectAudio(head, size)
+	tail, err := readTail(ctx, src, size, len(head))
+	if err != nil {
+		return Result{}, err
+	}
+	audio, err := recording.DetectAudio(head, tail, size)
 	if err != nil {
 		return Result{}, err
 	}
@@ -124,9 +125,19 @@ func (s *Service) importFile(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	}
 	h := sha256.New()
-	content := io.TeeReader(exactReader(ctx, io.MultiReader(bytes.NewReader(head), sourceReader{src}), size), h)
+	var sink io.Writer = h
+	var frames *recording.MP3FrameCounter
+	if audio.NeedsFrameCount() {
+		frames = recording.NewMP3FrameCounter(audio)
+		sink = io.MultiWriter(h, frames)
+	}
+	content := io.TeeReader(exactReader(ctx, io.MultiReader(bytes.NewReader(head), sourceReader{src}), size), sink)
 	if err := s.store.Write(ctx, ref, content); err != nil {
 		return Result{}, copyError(ctx, err)
+	}
+	if audio, err = audio.Counted(frames); err != nil {
+		s.discard(ctx, ref)
+		return Result{}, err
 	}
 
 	res, err := s.save(ctx, recording.ImportSpec{
@@ -231,6 +242,34 @@ func (s *Service) enqueue(ctx context.Context, id shared.RecordingID) {
 	if err := s.completions.RecordingCompleted(context.WithoutCancel(ctx), id); err != nil {
 		s.log.Warn(opEnqueue, slog.String("recording", id.String()), slog.Any("error", err))
 	}
+}
+
+// readTail reads the last recording.ImportTailBytes of src and seeks back to the end of the head, where the copy goes
+// on; nil when the head is the whole file.
+func readTail(ctx context.Context, src io.ReadSeeker, size int64, headLen int) ([]byte, error) {
+	if size <= int64(headLen) {
+		return nil, nil
+	}
+	off := max(size-recording.ImportTailBytes, 0)
+	if _, err := src.Seek(off, io.SeekStart); err != nil {
+		return nil, unreadable(ctx, err)
+	}
+	tail := make([]byte, size-off)
+	if _, err := io.ReadFull(src, tail); err != nil {
+		return nil, readError(ctx, err, "end")
+	}
+	if _, err := src.Seek(int64(headLen), io.SeekStart); err != nil {
+		return nil, unreadable(ctx, err)
+	}
+	return tail, nil
+}
+
+// readError wraps a failed read of a part of the original: a file shorter than its size changed.
+func readError(ctx context.Context, err error, part string) error {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return fmt.Errorf("%w: the file ended before its %s", ErrChanged, part)
+	}
+	return unreadable(ctx, err)
 }
 
 // unreadable wraps an error of the original file; a cancellation stays itself.

@@ -13,11 +13,11 @@ import (
 // Originals opens the audio file the student picked outside the data directory (ADR-0027). Implemented by the
 // localfile adapter. The file is only read, never changed, moved or deleted.
 type Originals interface {
-	// Open opens the file at the absolute OS path read-only and returns it with its size; the caller closes it. A path
-	// that is not absolute, not on a local drive or not a regular file is values.ErrInvalidImportFile of the
-	// transcription context, a missing file shared.ErrNotFound and other failures shared.ErrStorage. Errors never
-	// carry the path.
-	Open(ctx context.Context, path string) (io.ReadCloser, int64, error)
+	// Open opens the file at the absolute OS path read-only and returns it with its size; the caller closes it. It is
+	// seekable, so the tail is read before the copy (the duration of an Ogg file). A path that is not absolute, not on
+	// a local drive or not a regular file is values.ErrInvalidImportFile of the transcription context, a missing file
+	// shared.ErrNotFound and other failures shared.ErrStorage. Errors never carry the path.
+	Open(ctx context.Context, path string) (io.ReadSeekCloser, int64, error)
 }
 
 // ArtifactStore writes and deletes the copy through the Storage Manager (PRD section 5.2, hard rule 5). Implemented by

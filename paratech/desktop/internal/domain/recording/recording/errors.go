@@ -47,6 +47,10 @@ var (
 	// ErrAudioTooLong means the header of an imported file says it lasts longer than MaxImportedDuration.
 	ErrAudioTooLong = errors.New("the audio file is too long")
 
+	// ErrAudioDurationUnknown means the headers of an imported file do not tell how long it lasts, so it is refused
+	// rather than transcribed without a bound.
+	ErrAudioDurationUnknown = errors.New("the duration of the audio file is unknown")
+
 	// ErrNoDiskSpace means the copy of an imported file would leave too little free disk space.
 	ErrNoDiskSpace = errors.New("not enough free disk space for the audio file")
 

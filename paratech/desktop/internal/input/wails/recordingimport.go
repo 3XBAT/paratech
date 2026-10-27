@@ -27,6 +27,7 @@ const (
 	ErrRecordingImportEmpty       = recordingImportError("Файл пустой.")
 	ErrRecordingImportTooLarge    = recordingImportError("Файл больше 2 ГБ.")
 	ErrRecordingImportTooLong     = recordingImportError("Запись длиннее 4 часов.")
+	ErrRecordingImportNoDuration  = recordingImportError("Не удалось узнать длительность записи по файлу. Сохраните её заново в WAV или MP3 и попробуйте ещё раз.")
 	ErrRecordingImportFormat      = recordingImportError("Подходят только аудиофайлы WAV, FLAC, MP3 и OGG (Vorbis). Видео, M4A, AAC, WMA и Opus пока не подходят.")
 	ErrRecordingImportNoSpace     = recordingImportError("На диске не хватает места для копии записи.")
 	ErrRecordingImportChanged     = recordingImportError("Файл изменился во время копирования. Попробуйте ещё раз.")
@@ -70,8 +71,8 @@ type RecordingImportLecture struct {
 
 // RecordingImportResult answers Import. Cancelled: the user closed the dialog. Existing: the same file was imported before and
 // RecordingID is that recording; Message is then «Эта запись уже добавлена.». Format is the format told from the
-// content ("wav", "flac", "mp3", "ogg"); DurationSeconds is 0 while the duration is unknown (only a WAV header tells
-// it before the transcript). Name is the base name of the file, plain text.
+// content ("wav", "flac", "mp3", "ogg"); DurationSeconds is the duration read from the file (0 only for an Existing
+// recording imported before TASK-162 that did not know it). Name is the base name of the file, plain text.
 type RecordingImportResult struct {
 	Cancelled       bool   `json:"cancelled"`
 	RecordingID     string `json:"recordingId"`
@@ -164,6 +165,7 @@ func (s *RecordingImportService) fail(err error) error {
 		{recording.ErrEmptyAudio, ErrRecordingImportEmpty},
 		{recording.ErrAudioTooLarge, ErrRecordingImportTooLarge},
 		{recording.ErrAudioTooLong, ErrRecordingImportTooLong},
+		{recording.ErrAudioDurationUnknown, ErrRecordingImportNoDuration},
 		{recording.ErrUnsupportedAudio, ErrRecordingImportFormat},
 		{recording.ErrNoDiskSpace, ErrRecordingImportNoSpace},
 		{recordingimport.ErrInvalidRequest, ErrRecordingImportInvalid},

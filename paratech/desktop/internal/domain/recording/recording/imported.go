@@ -44,8 +44,8 @@ type ImportSpec struct {
 
 // NewImported creates the COMPLETED recording of an imported file (ADR-0027): its track is recordings/<id>.<ext>, it
 // has no chunks and is never captured, so every capture transition is refused (COMPLETED is terminal). The lecture
-// cannot start after now; the duration is the one read from the file header, unknown (zero) for the formats without
-// one.
+// cannot start after now; the duration is the one DetectAudio read from the headers (or Counted from the MP3 frames),
+// and an MP3 whose frames are not counted yet is refused.
 func NewImported(spec ImportSpec, now time.Time) (*Recording, error) {
 	if err := CheckLectureTime(spec.StartedAt, now); err != nil {
 		return nil, err
@@ -53,6 +53,8 @@ func NewImported(spec ImportSpec, now time.Time) (*Recording, error) {
 	switch {
 	case spec.Audio.Duration < 0 || spec.Audio.Duration > MaxImportedDuration:
 		return nil, fmt.Errorf("%w: duration %v", ErrInvalidRecording, spec.Audio.Duration)
+	case spec.Audio.counting:
+		return nil, fmt.Errorf("%w: the MP3 frames are not counted yet", ErrInvalidRecording)
 	}
 	if err := checkSHA256(spec.SHA256); err != nil {
 		return nil, err

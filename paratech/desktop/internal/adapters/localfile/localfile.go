@@ -1,5 +1,6 @@
-// Package localfile is the adapter that reads a model file the user picked outside the data directory, for an import
-// (PRD sections 8 and 8.1). It implements modelcatalog.ImportSource (ARCH-30..33).
+// Package localfile is the adapter that reads a file the user picked outside the data directory, for an import: a
+// model file (PRD sections 8 and 8.1) or an old recording (ADR-0027). It implements modelcatalog.ImportSource (Reader)
+// and recordingimport.Originals (SeekReader) (ARCH-30..33).
 //
 // The path is untrusted input: it is cleaned and must be absolute and free of NUL bytes; on Windows it must be on a
 // drive letter, so UNC, device and namespace paths, reserved device names and streams are refused. A mapped network
@@ -37,6 +38,30 @@ func New() *Reader { return &Reader{} }
 
 // Open opens the regular file at the absolute path and returns it with its size; the caller closes it.
 func (*Reader) Open(ctx context.Context, path string) (io.ReadCloser, int64, error) {
+	f, size, err := open(ctx, path)
+	if err != nil {
+		return nil, 0, err // not a nil *file in a non-nil interface
+	}
+	return f, size, nil
+}
+
+// SeekReader opens picked files that are read out of order: the head and the tail of an audio file before its copy
+// (recordingimport.Originals). The zero value is ready to use.
+type SeekReader struct{}
+
+// NewSeekReader returns a SeekReader.
+func NewSeekReader() *SeekReader { return &SeekReader{} }
+
+// Open opens the regular file at the absolute path as Reader.Open does, seekable.
+func (*SeekReader) Open(ctx context.Context, path string) (io.ReadSeekCloser, int64, error) {
+	f, size, err := open(ctx, path)
+	if err != nil {
+		return nil, 0, err
+	}
+	return f, size, nil
+}
+
+func open(ctx context.Context, path string) (*file, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
 	}
@@ -100,6 +125,11 @@ func (r *file) Read(p []byte) (int, error) {
 		return n, mapErr("read", err)
 	}
 	return n, err
+}
+
+func (r *file) Seek(offset int64, whence int) (int64, error) {
+	n, err := r.f.Seek(offset, whence)
+	return n, mapErr("seek", err)
 }
 
 func (r *file) Close() error { return mapErr("close", r.f.Close()) }
