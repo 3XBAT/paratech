@@ -34,17 +34,18 @@ type Effects interface {
 	Live(ctx context.Context, thread shared.ThreadID, turn int) (bool, error)
 }
 
-// ThreadRepository stores agent threads (one per subject key) in the local database. Implemented by the sqlite
+// ThreadRepository stores agent threads (one per chat, ADR-0028) in the local database. Implemented by the sqlite
 // adapter.
 type ThreadRepository interface {
 	// Get loads a thread. It returns an error wrapping shared.ErrNotFound if there is none.
 	Get(ctx context.Context, id shared.ThreadID) (*thread.Thread, error)
 
-	// GetByKey loads the thread of a subject key. It returns an error wrapping shared.ErrNotFound if there is none.
-	GetByKey(ctx context.Context, key thread.Key) (*thread.Thread, error)
+	// Current loads the current chat: the unarchived one with the newest last activity. It returns an error wrapping
+	// shared.ErrNotFound if there is none.
+	Current(ctx context.Context) (*thread.Thread, error)
 
 	// Save inserts a new thread (version 0) or updates a stored one with a compare-and-swap on its version; a stale
-	// version is shared.ErrVersionConflict, a second thread for the same key is shared.ErrDuplicate.
+	// version or an id stored first is shared.ErrVersionConflict.
 	Save(ctx context.Context, t *thread.Thread) error
 
 	// ListRunning returns the threads whose current request is PLANNING or EXECUTING, for startup recovery.

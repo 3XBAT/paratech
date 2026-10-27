@@ -61,7 +61,7 @@ func context(t *testing.T) values.RefSet {
 
 func newThread(t *testing.T) *Thread {
 	t.Helper()
-	th, err := New("th1", NoSubject, t0)
+	th, err := New("th1", t0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestStartTurn(t *testing.T) {
 		})
 	}
 
-	empty, err := New("th2", NoSubject, t0)
+	empty, err := New("th2", t0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -631,39 +631,12 @@ func TestRevisePlanDropsProposal(t *testing.T) {
 	}
 }
 
-func TestKey(t *testing.T) {
-	s1 := ref(t, values.KindSubject, "s1")
-	k, err := SubjectKey(s1)
-	if err != nil || k != "s1" {
-		t.Fatalf("SubjectKey = %q, %v", k, err)
+func TestNewChecksIDAndTime(t *testing.T) {
+	if _, err := New("a/b", t0); !errors.Is(err, ErrInvalidThread) {
+		t.Fatalf("New with a bad id = %v", err)
 	}
-	if got, ok := k.Subject(); !ok || got != s1 {
-		t.Fatalf("Subject = %v %v", got, ok)
-	}
-	if _, ok := NoSubject.Subject(); ok {
-		t.Fatal("NONE has a subject")
-	}
-	if _, err := SubjectKey(ref(t, values.KindLesson, "l1")); !errors.Is(err, ErrInvalidThread) {
-		t.Fatalf("lesson as key = %v", err)
-	}
-	if _, err := SubjectKey(ref(t, values.KindSubject, "NONE")); !errors.Is(err, ErrInvalidThread) {
-		t.Fatalf("subject NONE = %v", err)
-	}
-
-	scope, _ := values.NewScope(s1, "", values.Ref{}, values.Ref{})
-	if k, err := KeyOf(scope); err != nil || k != "s1" {
-		t.Fatalf("KeyOf = %q, %v", k, err)
-	}
-	if k, err := KeyOf(values.Scope{}); err != nil || k != NoSubject {
-		t.Fatalf("KeyOf(empty) = %q, %v", k, err)
-	}
-	for _, bad := range []string{"", "a/b", "none "} {
-		if _, err := ParseKey(bad); !errors.Is(err, ErrInvalidThread) {
-			t.Fatalf("ParseKey(%q) = %v", bad, err)
-		}
-	}
-	if _, err := New("th1", "a/b", t0); !errors.Is(err, ErrInvalidThread) {
-		t.Fatalf("New with a bad key = %v", err)
+	if _, err := New("th1", time.Time{}); !errors.Is(err, ErrInvalidThread) {
+		t.Fatalf("New without a time = %v", err)
 	}
 }
 
@@ -744,7 +717,6 @@ func TestRestore(t *testing.T) {
 	}{
 		{"version 0", func(s *State) { s.Version = 0 }},
 		{"bad id", func(s *State) { s.ID = "a/b" }},
-		{"bad key", func(s *State) { s.Key = "a b" }},
 		{"turns without current", func(s *State) { s.Current = nil }},
 		{"current without turns", func(s *State) { s.Turns = 0 }},
 		{"number mismatch", func(s *State) { s.Turns = 2 }},

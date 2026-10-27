@@ -98,13 +98,10 @@ func (c *change) takeResults(s *Service) {
 	}
 }
 
-// Ask starts a request in the thread of the scope and runs its steps until the request needs the Driver (calls to
-// run) or the student (a plan, questions), or ends. A previous request that waits for the student is cancelled.
+// Ask starts a request in the current chat (a new one when there is none) with the scope of the context chip and
+// runs its steps until the request needs the Driver (calls to run) or the student (a plan, questions), or ends. A
+// previous request that waits for the student is cancelled.
 func (s *Service) Ask(ctx context.Context, in AskInput) (Step, error) {
-	key, err := thread.KeyOf(in.Scope)
-	if err != nil {
-		return Step{}, fmt.Errorf("%s: %w: %w", opAsk, ErrInvalidInput, err)
-	}
 	text, err := values.NewStudentText(in.Text, in.Uploads)
 	if err != nil {
 		return Step{}, fmt.Errorf("%s: %w: %w", opAsk, ErrInvalidInput, err)
@@ -113,10 +110,10 @@ func (s *Service) Ask(ctx context.Context, in AskInput) (Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.clock.Now()
-	th, err := s.threads.GetByKey(ctx, key)
+	th, err := s.threads.Current(ctx)
 	switch {
 	case errors.Is(err, shared.ErrNotFound):
-		if th, err = thread.New(s.ids.NewThreadID(), key, now); err != nil {
+		if th, err = thread.New(s.ids.NewThreadID(), now); err != nil {
 			return Step{}, fmt.Errorf("%s: %w", opAsk, err)
 		}
 	case err != nil:
@@ -515,11 +512,7 @@ func (s *Service) RecoverIdle(ctx context.Context, in IdleInput, live func(share
 	if in.Thread != "" {
 		th, err = s.threads.Get(ctx, in.Thread)
 	} else {
-		key, kerr := thread.KeyOf(in.Scope)
-		if kerr != nil {
-			return false, fmt.Errorf("%s: %w: %w", opIdle, ErrInvalidInput, kerr)
-		}
-		th, err = s.threads.GetByKey(ctx, key)
+		th, err = s.threads.Current(ctx)
 	}
 	if errors.Is(err, shared.ErrNotFound) {
 		return false, nil

@@ -72,7 +72,7 @@ type Line struct {
 	Kind      LineKind
 	At        time.Time        // when the action was taken or the job created
 	UpdatedAt time.Time        // the last change (an undo, the end of a job)
-	Subject   shared.SubjectID // the subject of the action's thread; empty for none or a job
+	Subject   shared.SubjectID // the subject of the action's request; empty for none or a job
 
 	// An action line.
 	Action  shared.ActionID

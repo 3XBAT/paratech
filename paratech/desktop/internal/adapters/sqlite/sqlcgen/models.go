@@ -35,14 +35,16 @@ type AgentStep struct {
 }
 
 type AgentThread struct {
-	ID          string
-	SubjectKey  string
-	Turns       int64
-	HistoryFrom int64
-	Seen        string
-	Version     int64
-	CreatedAt   int64
-	UpdatedAt   int64
+	ID           string
+	Title        string
+	Turns        int64
+	HistoryFrom  int64
+	Seen         string
+	ArchivedAt   sql.NullInt64
+	LastActiveAt int64
+	Version      int64
+	CreatedAt    int64
+	UpdatedAt    int64
 }
 
 type AgentTurn struct {
@@ -52,6 +54,7 @@ type AgentTurn struct {
 	ResumeStatus   string
 	StopReason     string
 	Scope          string
+	Mentions       string
 	Steps          int64
 	Writes         int64
 	PaidUnplanned  int64
@@ -64,6 +67,7 @@ type AgentTurn struct {
 	Used           string
 	OpenCalls      string
 	CreatedIds     string
+	DroppedBy      int64
 	StartedAt      int64
 	UpdatedAt      int64
 }

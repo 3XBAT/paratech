@@ -199,7 +199,7 @@ func (d *Driver) Ask(ctx context.Context, in agentturn.AskInput) error {
 	at := agentturn.Step{Scope: in.Scope}
 	return d.start(ctx, at, opMarks{}, func(ctx context.Context) (agentturn.Step, error) {
 		st, err := d.turns.Ask(ctx, in)
-		if d.unstick(ctx, err, agentturn.IdleInput{Scope: in.Scope}) {
+		if d.unstick(ctx, err, agentturn.IdleInput{}) { // Ask goes to the current chat
 			st, err = d.turns.Ask(ctx, in)
 		}
 		return st, err

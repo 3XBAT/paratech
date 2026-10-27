@@ -1,4 +1,4 @@
-// Package agent is the bounded context of the agent panel (ADR-0021, ADR-0022): threads per subject, requests and
+// Package agent is the bounded context of the agent panel (ADR-0021, ADR-0022, ADR-0028): chats, requests and
 // their steps, the tool catalog, the action policy and the action journal with Undo.
 // Aggregates: domain/agent/thread, domain/agent/action, domain/agent/post (the post after a lesson, TASK-125). Values:
 // domain/agent/values. Services: domain/agent/services/actionpolicy, domain/agent/services/today (rules of «Сегодня»).
@@ -8,8 +8,8 @@
 //
 // # Glossary
 //
-//   - Thread: the conversation of one subject, or of no subject (key NONE). Only the current subject's thread is sent
-//     to the planner.
+//   - Thread (chat): one conversation, not tied to a subject; each request carries its own scope. Only the history of
+//     the chat of the request is sent to the planner.
 //   - Turn (request): one request of the student and the steps it takes until DONE, STOPPED, FAILED or CANCELLED.
 //   - Step: one planner call on the Hub with the key ag:<thread>:<turn>:<step>; it returns 1 to 4 tool calls.
 //   - Tool: a closed catalog entry (golden list shared/testdata/tool_catalog_v5.json) with strictly typed arguments.

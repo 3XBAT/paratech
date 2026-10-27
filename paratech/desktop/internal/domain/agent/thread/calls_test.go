@@ -63,7 +63,7 @@ func TestExpect(t *testing.T) {
 	}
 }
 
-// A chat spans subjects (ADR-0028): the subject belongs to the request's scope, never to the thread's key.
+// A chat spans subjects (ADR-0028): the subject belongs to each request's scope, the thread has none of its own.
 func TestStartRequestScope(t *testing.T) {
 	s1 := ref(t, values.KindSubject, "s1")
 	scope, err := values.NewScope(s1, values.ScreenToday, values.Ref{}, values.Ref{})
@@ -74,12 +74,12 @@ func TestStartRequestScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	th, err := New("th1", NoSubject, t0)
+	th, err := New("th1", t0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := th.StartRequest(scope, at(1)); err != nil {
-		t.Fatalf("subject scope in the no-subject thread = %v", err)
+		t.Fatalf("subject scope in a new chat = %v", err)
 	}
 	if err := th.Complete(at(2)); err != nil {
 		t.Fatal(err)

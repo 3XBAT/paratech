@@ -26,6 +26,7 @@ func TestIDsAreValidAndDistinct(t *testing.T) {
 		{"subject", func() (string, error) { id := g.NewSubjectID(); return string(id), id.Validate() }},
 		{"folder", func() (string, error) { id := g.NewFolderID(); return string(id), id.Validate() }},
 		{"material", func() (string, error) { id := g.NewMaterialID(); return string(id), id.Validate() }},
+		{"note", func() (string, error) { id := g.NewNoteID(); return string(id), id.Validate() }},
 		{"work", func() (string, error) { id := g.NewWorkID(); return string(id), id.Validate() }},
 		{"answer", func() (string, error) { id := g.NewAnswerID(); return string(id), id.Validate() }},
 		{"ticket set", func() (string, error) { id := g.NewTicketSetID(); return string(id), id.Validate() }},

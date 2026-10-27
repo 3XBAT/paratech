@@ -57,6 +57,26 @@ func TestTarget(t *testing.T) {
 	}
 }
 
+func TestNoteFolder(t *testing.T) {
+	tests := []struct {
+		kind string
+		want subject.System
+	}{
+		{"lecture", subject.SystemLectures},
+		{"seminar", subject.SystemSeminars},
+		{"practice", subject.SystemSeminars},
+		{"lab", subject.SystemLabs},
+		{"unknown", subject.SystemLectures},
+		{"", subject.SystemLectures},
+		{"LAB", subject.SystemLectures}, // codes only: a snapshot keeps them lower-cased
+	}
+	for _, tt := range tests {
+		if got := NoteFolder(tt.kind); got != tt.want {
+			t.Errorf("NoteFolder(%q) = %s, want %s", tt.kind, got, tt.want)
+		}
+	}
+}
+
 func TestFiled(t *testing.T) {
 	math := newSubject(t, "s1", "Математика")
 	phys := newSubject(t, "s2", "Физика")

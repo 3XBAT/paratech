@@ -37,6 +37,7 @@ import (
 	"paratech/desktop/internal/cases/knowledgebase"
 	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/cases/modelcatalog"
+	"paratech/desktop/internal/cases/notes"
 	"paratech/desktop/internal/cases/preferences"
 	"paratech/desktop/internal/cases/recordingdelete"
 	"paratech/desktop/internal/cases/recordingprompt"
@@ -188,13 +189,22 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 
 	// The library of subjects and files (ADR-0024): files in the artifact store by sha256; a new subject's semester in
 	// the local time zone. Its texts are read locally (doctext); only Inspect asks the Hub's reader (TASK-122).
+	// A subject with notes of the student is not removed (ADR-0027).
+	noteRepo := sqlite.NewNoteRepository(db)
 	lib, err := library.New(library.Deps{
 		Subjects: sqlite.NewSubjectRepository(db), Materials: sqlite.NewMaterialRepository(db), Blobs: store,
 		Lessons: lessons, Strings: sqlite.NewSubjectStrings(db), Clock: e.local, IDs: e.ids, Texts: doctext.New(),
-		Reader: llm, Inspections: sqlite.NewInspectionRepository(db), Log: log,
+		Reader: llm, Inspections: sqlite.NewInspectionRepository(db), Notes: noteRepo, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: library: %w", err)
+	}
+	// «Мой конспект» (TASK-151): the files through the library; the date of a lecture in the local time zone.
+	ownNotes, err := notes.New(notes.Deps{
+		Notes: noteRepo, Materials: lib, Recordings: recordings, Lessons: lessons, Clock: e.local, IDs: e.ids, Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: notes: %w", err)
 	}
 
 	// The post-processing also runs the summary and the homework search of a library material (TASK-122).
@@ -454,6 +464,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		MaterialViews:   store,
 		Opener:          fileopen.New(filepath.Join(dataDir, artifactsDir)),
 		SubjectOverview: subjectPage,
+		Notes:           ownNotes,
 		// Life is set by openCore: the requests live as long as the app.
 		Agent: wails.AgentCore{Driver: c.driver, Panel: c.panel, Journal: c.journal, Clock: e.clock, FreeWork: c.freeWorks},
 		Today: todayScreen,

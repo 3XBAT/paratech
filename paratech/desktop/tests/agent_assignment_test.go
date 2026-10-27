@@ -284,7 +284,9 @@ func TestAgentUndoOfAnEditedAssignmentIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.homework.EditAssignment(ctx, homeworkflow.AssignmentEdit{ID: id, Title: "Эссе о Петре", Due: v.Due}); err != nil {
+	if _, err := e.homework.EditAssignment(ctx, homeworkflow.AssignmentEdit{
+		ID: id, ExpectedVersion: v.Version, Title: "Эссе о Петре", Date: "2026-10-30",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	entry, err := e.journal.Find(ctx, "th1", 1, "c1")

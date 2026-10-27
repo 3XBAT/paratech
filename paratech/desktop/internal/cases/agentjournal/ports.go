@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/agent/action"
-	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/shared"
@@ -51,9 +50,10 @@ type Resolver interface {
 	Observe(ctx context.Context, tool values.Tool, in action.Intent, since time.Time) (action.Observation, error)
 }
 
-// Threads reads a thread for the subject of its journal lines. Implemented by the sqlite adapter.
+// Threads reads the scope of the request of a journal line, whose subject the line shows (a chat spans subjects,
+// ADR-0028). A missing request wraps shared.ErrNotFound. Implemented by the sqlite adapter.
 type Threads interface {
-	Get(ctx context.Context, id shared.ThreadID) (*thread.Thread, error)
+	RequestScope(ctx context.Context, id shared.ThreadID, turn int) (values.Scope, error)
 }
 
 // Processing lists the jobs of the processing history for the journal (every type, the newest terminal ones).

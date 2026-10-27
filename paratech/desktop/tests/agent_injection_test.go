@@ -100,11 +100,7 @@ func sweepThread(t *testing.T) (*thread.Thread, values.RefSet) {
 	t.Helper()
 	now := time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)
 	scope := evalScope(t)
-	key, err := thread.KeyOf(scope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	th, err := thread.New("th-sweep", key, now)
+	th, err := thread.New("th-sweep", now)
 	if err != nil {
 		t.Fatal(err)
 	}
