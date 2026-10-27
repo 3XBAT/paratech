@@ -807,3 +807,7 @@ ALTER TABLE proposals ADD COLUMN attachment_name TEXT NOT NULL DEFAULT '' CHECK 
 -- the delivery of a send of the work was last SENT (ms); NULL if never.
 ALTER TABLE works ADD COLUMN last_problem TEXT CHECK (last_problem IS NULL OR last_problem IN ('offline', 'quota', 'refused', 'no_text', 'source_gone'));
 ALTER TABLE works ADD COLUMN sent_at INTEGER;
+
+-- Migration 0036.
+-- assignments: when the student deleted the assignment (ms); NULL while it is not deleted.
+ALTER TABLE assignments ADD COLUMN deleted_at INTEGER;

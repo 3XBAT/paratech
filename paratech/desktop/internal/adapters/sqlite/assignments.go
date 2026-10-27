@@ -11,6 +11,8 @@ import (
 	"paratech/desktop/internal/domain/coursework/assignment"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	cvalues "paratech/desktop/internal/domain/coursework/values"
+	"paratech/desktop/internal/domain/coursework/work"
+	"paratech/desktop/internal/domain/delivery/delivery"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -25,6 +27,7 @@ const (
 	opSaveAssignment         = "sqlite: save assignment"
 	opDeleteAssignment       = "sqlite: delete assignment"
 	opDeleteUnusedAssignment = "sqlite: delete unused assignment"
+	opBusyAssignment         = "sqlite: busy assignment"
 )
 
 // Values of assignment.State that are NULL in the row.
@@ -150,14 +153,14 @@ func (r *AssignmentRepository) Save(ctx context.Context, a *assignment.Assignmen
 				Title:      st.Title, Description: st.Description, DueAt: jobNullMs(st.Due), UserEdited: jobBoolInt(st.UserEdited),
 				SourceIndex: nullSourceIndex(st.SourceIndex), PromptVersion: nullPromptVersion(st.PromptVersion),
 				HintSubject: st.HintSubject, HintTeacher: st.HintTeacher, UserSubject: st.UserSubject, UserTeacher: st.UserTeacher,
-				CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
+				CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt), DeletedAt: jobNullMs(st.DeletedAt),
 			})))
 		}
 		n, err := q.UpdateAssignment(ctx, sqlcgen.UpdateAssignmentParams{
 			Title: st.Title, Description: st.Description, DueAt: jobNullMs(st.Due), UserEdited: jobBoolInt(st.UserEdited),
 			PromptVersion: nullPromptVersion(st.PromptVersion), HintSubject: st.HintSubject, HintTeacher: st.HintTeacher,
-			UserSubject: st.UserSubject, UserTeacher: st.UserTeacher, UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID),
-			ExpectedVersion: st.Version,
+			UserSubject: st.UserSubject, UserTeacher: st.UserTeacher, DeletedAt: jobNullMs(st.DeletedAt),
+			UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID), ExpectedVersion: st.Version,
 		})
 		return VersionCAS(ctx, n, err)
 	})
@@ -245,6 +248,40 @@ func (r *AssignmentRepository) DeleteUnused(ctx context.Context, a *assignment.A
 	return nil
 }
 
+// busyDeliveryStatuses are the delivery statuses that keep an assignment from «Удалить» (ADR-0029): a delivery that may
+// still go out (PENDING, a scheduled one too) or may have gone out unseen.
+var busyDeliveryStatuses = []string{
+	string(delivery.StatusPending), string(delivery.StatusSending), string(delivery.StatusUnknown),
+}
+
+// busyWorkStatuses are the statuses of a work whose triage or writing is under way.
+var busyWorkStatuses = []string{string(work.StatusTriage), string(work.StatusWriting)}
+
+// busyJobTypes are the job types whose payload names an assignment ("assignment_id") and that keep it while active.
+var busyJobTypes = []string{cvalues.HomeworkDraftJobType, cvalues.WorkWritingJobType}
+
+// Busy reports whether something in progress uses assignment id, so that «Удалить» is refused (ADR-0029): a delivery
+// in PENDING, SENDING or UNKNOWN, a work in triage or writing, or an active draft generation or writing job. Called
+// inside Tx.Do it reads in that transaction.
+func (r *AssignmentRepository) Busy(ctx context.Context, id shared.AssignmentID) (bool, error) {
+	lists := make([]string, 0, 4)
+	for _, l := range [][]string{busyDeliveryStatuses, busyWorkStatuses, busyJobTypes, activeJobStatuses} {
+		b, err := json.Marshal(l)
+		if err != nil {
+			return false, fmt.Errorf("%s %s: %w", opBusyAssignment, id, err)
+		}
+		lists = append(lists, string(b))
+	}
+
+	busy, err := r.db.Queries(ctx).AssignmentBusy(ctx, sqlcgen.AssignmentBusyParams{
+		ID: string(id), DeliveryStatuses: lists[0], WorkStatuses: lists[1], JobTypes: lists[2], ActiveJobStatuses: lists[3],
+	})
+	if err != nil {
+		return false, fmt.Errorf("%s %s: %w", opBusyAssignment, id, MapError(ctx, err))
+	}
+	return busy != 0, nil
+}
+
 func nullSourceIndex(i int) sql.NullInt64 {
 	if i == assignmentNotExtracted {
 		return sql.NullInt64{}
@@ -271,7 +308,7 @@ func assignmentFromRow(row sqlcgen.Assignment) (*assignment.Assignment, error) {
 		PromptVersion: int(row.PromptVersion.Int64), Title: row.Title, Description: row.Description,
 		Due: jobFromNullMs(row.DueAt), UserEdited: row.UserEdited != 0,
 		HintSubject: row.HintSubject, HintTeacher: row.HintTeacher, UserSubject: row.UserSubject, UserTeacher: row.UserTeacher,
-		CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
+		CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt), DeletedAt: jobFromNullMs(row.DeletedAt),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("stored assignment %s: %w", row.ID, err)

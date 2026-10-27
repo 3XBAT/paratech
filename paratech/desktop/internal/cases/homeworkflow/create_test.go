@@ -31,7 +31,7 @@ func (f fakeSubjects) SubjectName(_ context.Context, id shared.SubjectID) (strin
 	return name, nil
 }
 
-// allAssignments lists every stored assignment newest first, like the sqlite adapter.
+// allAssignments lists every stored assignment that is not deleted newest first, like the sqlite adapter.
 type allAssignments struct{ s *ppStore }
 
 func (l allAssignments) ListRecent(_ context.Context, limit int) ([]*assignment.Assignment, error) {
@@ -39,7 +39,9 @@ func (l allAssignments) ListRecent(_ context.Context, limit int) ([]*assignment.
 	defer l.s.mu.Unlock()
 	var states []assignment.State
 	for _, st := range l.s.assignments {
-		states = append(states, st)
+		if st.DeletedAt.IsZero() {
+			states = append(states, st)
+		}
 	}
 	slices.SortFunc(states, func(a, b assignment.State) int { return b.CreatedAt.Compare(a.CreatedAt) })
 	out := []*assignment.Assignment{}

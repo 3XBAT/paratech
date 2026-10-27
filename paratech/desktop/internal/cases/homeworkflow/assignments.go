@@ -14,11 +14,16 @@ const (
 	opCorrectLesson   = "homeworkflow: correct the lesson of an assignment"
 )
 
-// Assignment returns an assignment for the UI (PRD section 10). A missing one wraps shared.ErrNotFound.
+// Assignment returns an assignment for the UI and the agent (PRD section 10). A missing one wraps shared.ErrNotFound;
+// so does a deleted one, which every reader skips (ADR-0029: the agent gets unknown_id), and it wraps
+// assignment.ErrDeleted as well for the callers that tell the two apart.
 func (s *Service) Assignment(ctx context.Context, id shared.AssignmentID) (AssignmentView, error) {
 	a, err := s.assignments.Get(ctx, id)
 	if err != nil {
 		return AssignmentView{}, err
+	}
+	if a.Deleted() {
+		return AssignmentView{}, fmt.Errorf("assignment %s: %w: %w", id, shared.ErrNotFound, assignment.ErrDeleted)
 	}
 	return s.view(ctx, s.lessons, a)
 }
@@ -34,7 +39,8 @@ func (s *Service) LessonLabel(ctx context.Context, id shared.AssignmentID) (valu
 }
 
 // ListAssignments returns the newest assignments for the homework screen, at most MaxListedAssignments (PRD section
-// 10 step 1). None is an empty list.
+// 10 step 1); deleted ones are not listed (ADR-0029). It is also what «Сегодня», the subject page and the agent's
+// list_assignments read. None is an empty list.
 func (s *Service) ListAssignments(ctx context.Context) ([]AssignmentView, error) {
 	as, err := s.list.ListRecent(ctx, MaxListedAssignments)
 	if err != nil {
@@ -43,6 +49,9 @@ func (s *Service) ListAssignments(ctx context.Context) ([]AssignmentView, error)
 	lessons := s.lessons.cached()
 	out := make([]AssignmentView, 0, len(as))
 	for _, a := range as {
+		if a.Deleted() { // the store skips them already; a second guard for the readers that rely on it
+			continue
+		}
 		v, err := s.view(ctx, lessons, a)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", opListAssignments, err)
@@ -85,13 +94,16 @@ func (s *Service) CorrectLesson(ctx context.Context, c LessonCorrection) (Assign
 }
 
 // changeAssignment loads an assignment, applies one aggregate method and saves it when it changed, in one
-// transaction, and returns the view of the result.
+// transaction, and returns the view of the result. A deleted assignment is not changed (assignment.ErrDeleted).
 func (s *Service) changeAssignment(ctx context.Context, id shared.AssignmentID, apply func(*assignment.Assignment) (bool, error),
 	op string) (AssignmentView, error) {
 	var a *assignment.Assignment
 	err := s.tx.Do(ctx, func(ctx context.Context) error {
 		var err error
 		if a, err = s.assignments.Get(ctx, id); err != nil {
+			return err
+		}
+		if err := a.NotDeleted(); err != nil {
 			return err
 		}
 		changed, err := apply(a)

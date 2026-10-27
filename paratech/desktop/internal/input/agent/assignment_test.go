@@ -141,7 +141,11 @@ func TestUndoOfAnAddedAssignment(t *testing.T) {
 			v.Version++
 			w.assignments.views[addedID()] = v
 		}, action.StatusUndoRefused, true},
-		"after a draft":        {func(w *world) { w.added.inUse[addedID()] = true }, action.StatusUndoRefused, true},
+		"after a draft": {func(w *world) { w.added.inUse[addedID()] = true }, action.StatusUndoRefused, true},
+		// ADR-0029: a soft delete by the student moves the version on; Undo is refused, not taken as done.
+		"after the student deleted it": {func(w *world) {
+			w.assignments.deleted = map[shared.AssignmentID]bool{addedID(): true}
+		}, action.StatusUndoRefused, true},
 		"after it was removed": {func(w *world) { delete(w.assignments.views, addedID()) }, action.StatusUndone, false},
 	} {
 		t.Run(name, func(t *testing.T) {

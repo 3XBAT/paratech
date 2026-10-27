@@ -69,6 +69,9 @@ func addedAssignmentID(at origin, callID string) shared.AssignmentID {
 // checkAdded reads the version of the assignment a RemoveAssignment compensation removes; a gone one is undone.
 func (a *Actions) checkAdded(ctx context.Context, c action.RemoveAssignment) (action.Target, error) {
 	v, err := a.assignments.Assignment(ctx, shared.AssignmentID(c.Assignment.ID()))
+	if errors.Is(err, assignment.ErrDeleted) {
+		return deletedTarget, nil // the student deleted it: changed, not undone
+	}
 	if errors.Is(err, shared.ErrNotFound) {
 		return action.Target{Compensated: true}, nil
 	}

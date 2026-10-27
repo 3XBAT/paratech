@@ -18,6 +18,7 @@ import (
 	"paratech/desktop/internal/domain/agent/action"
 	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/values"
+	"paratech/desktop/internal/domain/coursework/assignment"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/library/material"
@@ -266,10 +267,14 @@ func (l *memLessons) SetLessonInfo(_ context.Context, id shared.RecordingID, sub
 }
 
 type memAssignments struct {
-	views map[shared.AssignmentID]homeworkflow.AssignmentView
+	views   map[shared.AssignmentID]homeworkflow.AssignmentView
+	deleted map[shared.AssignmentID]bool // deleted by the student: hidden as homeworkflow.Service hides them
 }
 
 func (a *memAssignments) Assignment(_ context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error) {
+	if a.deleted[id] {
+		return homeworkflow.AssignmentView{}, fmt.Errorf("assignment %s: %w: %w", id, shared.ErrNotFound, assignment.ErrDeleted)
+	}
 	if v, ok := a.views[id]; ok {
 		return v, nil
 	}

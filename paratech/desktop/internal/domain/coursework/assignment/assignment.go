@@ -59,6 +59,7 @@ type Assignment struct {
 
 	createdAt time.Time
 	updatedAt time.Time
+	deletedAt time.Time // zero: not deleted (ADR-0029, soft delete)
 }
 
 // Spec is what the creator of an extracted assignment provides to NewExtracted.
@@ -106,6 +107,7 @@ type State struct {
 	UserTeacher   string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	DeletedAt     time.Time // zero: not deleted
 }
 
 // Restore rebuilds a stored assignment without side effects; it only checks that the state is consistent.
@@ -136,7 +138,7 @@ func Restore(s State) (*Assignment, error) {
 		promptVersion: s.PromptVersion, details: d, userEdited: s.UserEdited,
 		hints:      values.NewLessonNames(s.HintSubject, s.HintTeacher),
 		correction: values.NewLessonNames(s.UserSubject, s.UserTeacher),
-		createdAt:  s.CreatedAt, updatedAt: s.UpdatedAt,
+		createdAt:  s.CreatedAt, updatedAt: s.UpdatedAt, deletedAt: s.DeletedAt,
 	}
 	if err := a.validate(); err != nil {
 		return nil, err
@@ -172,7 +174,8 @@ func (a *Assignment) validate() error {
 }
 
 // Reextract applies the details of the same item of a new extraction answer (reprocessing, PRD section 10).
-// An assignment the user edited is kept as it is: the result is false and nothing changes. Otherwise the details and
+// An assignment the user edited or deleted is kept as it is: the result is false and nothing changes (a deleted one is
+// a tombstone, ADR-0029). Otherwise the details and
 // the prompt version are replaced when they differ, and changed tells whether the assignment must be saved.
 func (a *Assignment) Reextract(d Details, promptVersion int, now time.Time) (changed bool, err error) {
 	switch {
@@ -182,7 +185,7 @@ func (a *Assignment) Reextract(d Details, promptVersion int, now time.Time) (cha
 		return false, fmt.Errorf("%w: no details", ErrInvalidDetails)
 	case promptVersion < 1:
 		return false, fmt.Errorf("%w: prompt version %d", ErrInvalidAssignment, promptVersion)
-	case a.userEdited:
+	case a.userEdited || a.Deleted():
 		return false, nil
 	case a.details.Equal(d) && a.promptVersion == promptVersion:
 		return false, nil
@@ -193,12 +196,13 @@ func (a *Assignment) Reextract(d Details, promptVersion int, now time.Time) (cha
 
 // SetHints stores the subject and teacher the extraction of the same item found in the transcript. They are not user
 // data, so a new extraction replaces them even when the user edited the details; they never replace the schedule or
-// the user's correction (values.NewLessonLabel). changed tells whether the assignment must be saved.
+// the user's correction (values.NewLessonLabel). A deleted assignment is not touched. changed tells whether the
+// assignment must be saved.
 func (a *Assignment) SetHints(h values.LessonNames, now time.Time) (changed bool, err error) {
 	if a.source == noSource {
 		return false, ErrNotExtracted
 	}
-	if a.hints == h {
+	if a.hints == h || a.Deleted() {
 		return false, nil
 	}
 	a.hints, a.updatedAt = h, now
@@ -206,9 +210,10 @@ func (a *Assignment) SetHints(h values.LessonNames, now time.Time) (changed bool
 }
 
 // Correct stores the subject and teacher the user entered; an empty field removes the correction of that field, so
-// the schedule or the hint shows again. changed tells whether the assignment must be saved.
+// the schedule or the hint shows again. A deleted assignment is not changed (callers check NotDeleted first). changed
+// tells whether the assignment must be saved.
 func (a *Assignment) Correct(c values.LessonNames, now time.Time) (changed bool) {
-	if a.correction == c {
+	if a.correction == c || a.Deleted() {
 		return false
 	}
 	a.correction, a.updatedAt = c, now
@@ -217,21 +222,59 @@ func (a *Assignment) Correct(c values.LessonNames, now time.Time) (changed bool)
 
 // Superseded reports whether a new extraction answer of the same transcript with items items leaves the assignment
 // behind, so that reprocessing may withdraw (delete) it: it was extracted at a position the answer no longer has and
-// the user never edited it. Matching is by position only (see the package doc).
+// the user never edited or deleted it (a deleted one stays a tombstone). Matching is by position only (see the
+// package doc).
 func (a *Assignment) Superseded(items int) bool {
-	return a.source != noSource && a.source >= items && !a.userEdited
+	return a.source != noSource && a.source >= items && !a.userEdited && !a.Deleted()
 }
 
 // Edit stores the details the user entered (PRD section 10: review and edit locally, AC-13). From then on the
 // assignment is user-edited and reprocessing never overwrites it. Saving unchanged details also counts: the user has
-// confirmed them.
+// confirmed them. A deleted assignment is not edited (ErrDeleted).
 func (a *Assignment) Edit(d Details, now time.Time) error {
+	if err := a.NotDeleted(); err != nil {
+		return err
+	}
 	if d.IsZero() {
 		return fmt.Errorf("%w: no details", ErrInvalidDetails)
 	}
 	a.details, a.userEdited, a.updatedAt = d, true, now
 	return nil
 }
+
+// Delete is «Удалить» of any assignment, whatever its origin (ADR-0029, addendum 2026-10-27): a soft delete that
+// hides it from every reader and keeps what references it. A deleted assignment is not deleted again (ErrDeleted).
+// The caller checks first that nothing in progress uses it (ErrInUse).
+func (a *Assignment) Delete(now time.Time) error {
+	if err := a.NotDeleted(); err != nil {
+		return err
+	}
+	a.deletedAt, a.updatedAt = now, now
+	return nil
+}
+
+// Restore is «Вернуть»: the deleted assignment shows again as it was. One that is not deleted wraps ErrNotDeleted.
+func (a *Assignment) Restore(now time.Time) error {
+	if !a.Deleted() {
+		return ErrNotDeleted
+	}
+	a.deletedAt, a.updatedAt = time.Time{}, now
+	return nil
+}
+
+// NotDeleted returns ErrDeleted for a deleted assignment, which no change but Restore applies to.
+func (a *Assignment) NotDeleted() error {
+	if a.Deleted() {
+		return ErrDeleted
+	}
+	return nil
+}
+
+// Deleted reports whether the student deleted the assignment; every reader skips it.
+func (a *Assignment) Deleted() bool { return !a.deletedAt.IsZero() }
+
+// DeletedAt returns when the assignment was deleted, zero if it is not.
+func (a *Assignment) DeletedAt() time.Time { return a.deletedAt }
 
 // ID returns the assignment identifier.
 func (a *Assignment) ID() shared.AssignmentID { return a.id }
@@ -285,6 +328,7 @@ func (a *Assignment) State() State {
 		PromptVersion: a.promptVersion, Title: a.details.title, Description: a.details.description, Due: a.details.due,
 		UserEdited: a.userEdited, HintSubject: a.hints.Subject(), HintTeacher: a.hints.Teacher(),
 		UserSubject: a.correction.Subject(), UserTeacher: a.correction.Teacher(), CreatedAt: a.createdAt, UpdatedAt: a.updatedAt,
+		DeletedAt: a.deletedAt,
 	}
 }
 

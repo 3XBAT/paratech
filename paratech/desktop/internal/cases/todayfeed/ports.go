@@ -64,7 +64,8 @@ type LessonReader interface {
 
 // AssignmentReader lists the assignments found in a transcript (PRD section 10). Implemented by the sqlite adapter.
 type AssignmentReader interface {
-	// ListByTranscript returns the assignments extracted from transcript t (PRD section 10); none is an empty list.
+	// ListByTranscript returns the assignments extracted from transcript t (PRD section 10), deleted ones skipped
+	// (ADR-0029); none is an empty list.
 	ListByTranscript(ctx context.Context, t shared.TranscriptID) ([]*assignment.Assignment, error)
 }
 
