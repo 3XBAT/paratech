@@ -218,14 +218,14 @@ func TestAnswerStoredBeforeNotes(t *testing.T) {
 // A stored answer that breaks the schema or the aggregate's invariants is refused on reading, never shown.
 func TestAnswerCorruptRow(t *testing.T) {
 	tests := map[string]string{
-		"unknown field":  `UPDATE answers SET claims = '[{"text":"x","cites":[],"send":true}]'`,
-		"bad source":     `UPDATE answers SET sources = '[{"recording":"rec1","section":"title","index":0,"start_ms":0,"title":"","started_at":0}]'`,
+		"unknown field":         `UPDATE answers SET claims = '[{"text":"x","cites":[],"send":true}]'`,
+		"bad source":            `UPDATE answers SET sources = '[{"recording":"rec1","section":"title","index":0,"start_ms":0,"title":"","started_at":0}]'`,
 		"note with a recording": `UPDATE answers SET sources = '[{"recording":"rec1","section":"ownNote","index":0,"start_ms":0,"title":"","started_at":0,"note":"n1","material":"m1","locator_kind":"page","locator_n":1}]'`,
 		"note without locator":  `UPDATE answers SET sources = '[{"recording":"","section":"ownNote","index":0,"start_ms":0,"title":"","started_at":0,"note":"n1","material":"m1"}]'`,
 		"recording with a note": `UPDATE answers SET sources = '[{"recording":"rec1","section":"summary","index":0,"start_ms":0,"title":"","started_at":0,"note":"n1"}]'`,
 		"citation index":        `UPDATE answers SET claims = '[{"text":"x","cites":[{"quote":"q","source":7}]}]'`,
-		"missing object": `UPDATE answers SET missing = '{"a":1}'`,
-		"blank missing":  `UPDATE answers SET missing = '[" "]'`,
+		"missing object":        `UPDATE answers SET missing = '{"a":1}'`,
+		"blank missing":         `UPDATE answers SET missing = '[" "]'`,
 	}
 	for name, stmt := range tests {
 		t.Run(name, func(t *testing.T) {

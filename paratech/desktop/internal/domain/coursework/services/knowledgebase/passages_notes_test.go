@@ -19,7 +19,7 @@ func TestPassagesOwnNotes(t *testing.T) {
 	recorded.Lesson.Key = RecordingKey("r1")
 	// Two note-only lectures: no recording, told apart by their keys.
 	onlyNotes := LessonText{Lesson: Lesson{Key: DayKey("s1", day(15)), StartedAt: day(15)}, Document: Document{Notes: []NoteFragment{
-		{Note: "n2", Material: "m2", Locator: Locator{Kind: "section", N: 2}, Text: "Ряды‮ Тейлора\nРяд Тейлора сходится."},
+		{Note: "n2", Material: "m2", Locator: Locator{Kind: "section", N: 2}, Text: "Ряды\u202e Тейлора\nРяд Тейлора сходится."},
 	}}}
 	undated := LessonText{Lesson: Lesson{Key: NoteKey("n3"), Notes: []Note{{ID: "n3", CreatedAt: day(1)}}}, Document: Document{Notes: []NoteFragment{
 		{Note: "n3", Material: "m3", Locator: Locator{Kind: "fragment", N: 1}, Text: "ряд тейлора без даты"},
