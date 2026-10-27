@@ -55,8 +55,10 @@ export function ChatBar(props: ChatBarProps) {
   const menuRef = useRef<HTMLUListElement>(null);
   const field = useRef<HTMLInputElement>(null);
   const focusRename = useRef(false);
+  const refocusField = useRef(false);
 
-  const items = (): HTMLElement[] => Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+  const items = (): HTMLElement[] =>
+    Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])') ?? []);
 
   // A menu opens with focus on the open chat (or the first item).
   useEffect(() => {
@@ -72,6 +74,13 @@ export function ChatBar(props: ChatBarProps) {
       field.current?.select();
     }
   }, [editing]);
+
+  useEffect(() => {
+    if (editing && !saving && refocusField.current) {
+      refocusField.current = false;
+      field.current?.focus();
+    }
+  }, [editing, saving]);
 
   // Focus goes back to the rename button after the edit ends.
   useEffect(() => {
@@ -94,6 +103,10 @@ export function ChatBar(props: ChatBarProps) {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
+      closeMenu(true);
+    } else if (e.key === "Tab") {
+      // Tab leaves the menu: it closes and focus returns to the toggle.
+      e.preventDefault();
       closeMenu(true);
     } else if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
       e.preventDefault();
@@ -137,7 +150,8 @@ export function ChatBar(props: ChatBarProps) {
       endEdit();
     } else {
       setError(problem);
-      field.current?.focus();
+      // The input is disabled while saving: focus returns once it is enabled again.
+      refocusField.current = true;
     }
   };
 
@@ -243,7 +257,7 @@ export function ChatBar(props: ChatBarProps) {
       {menu && (
         <ul id={menuId} ref={menuRef} className="ag-chat-menu" role="menu" aria-label={chatTexts.list} onKeyDown={onMenuKey}>
           {sections.active.length === 0 && (
-            <li role="none" className="ag-chat-empty small muted">
+            <li role="menuitem" aria-disabled="true" className="ag-chat-empty small muted">
               {chatTexts.noChats}
             </li>
           )}
@@ -274,7 +288,7 @@ export function ChatBar(props: ChatBarProps) {
             {showArchive && (
               <ul id={archiveId} role="group" aria-label={chatTexts.archive} className="ag-chat-group">
                 {archivedCount === 0 && (
-                  <li role="none" className="ag-chat-empty small muted">
+                  <li role="menuitem" aria-disabled="true" className="ag-chat-empty small muted">
                     {chatTexts.emptyArchive}
                   </li>
                 )}

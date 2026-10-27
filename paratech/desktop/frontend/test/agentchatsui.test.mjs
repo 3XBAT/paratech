@@ -3,8 +3,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement as h } from "react";
 import server from "react-dom/server";
-import { initialPanelState, reducePanel } from "../.test-build/agentState.js";
+import { blockingEntry, initialPanelState, isBusyRefused, reducePanel } from "../.test-build/agentState.js";
 import {
+  entryModel,
   chatBusyText,
   chatGoneText,
   chatProblemText,
@@ -226,4 +227,55 @@ test("the panel draws earlier requests as text with mention pills and the reply 
   assert.ok(!html.includes("<b>@") && !html.includes("<i>"));
   assert.ok(!html.includes("Можно задать вопрос"), "the empty hint goes when earlier requests are shown");
   assert.ok(html.includes("ag-in-bottom"));
+});
+
+// A failed Ask of a named chat arrives as {threadId, turn: 0, status: ""}.
+const refusal = (over) => update({ threadId: "b", turn: 0, status: "", problem: "busy", ...over });
+const ask = (s, id, threadId = "b") => reducePanel(s, { type: "asked", id, text: "q" + id, scope: scope({ threadId }) });
+
+test("a busy refusal in a named chat keeps the request unnamed, with Stop and resend", () => {
+  let s = apply(initialPanelState, update({ threadId: "b", turn: 1, status: "EXECUTING" }));
+  s = ask(s, 1);
+  s = apply(s, refusal());
+  const e = s.entries.find((x) => x.key === "local:1");
+  assert.equal(e.threadId, "", "stays unnamed");
+  assert.equal(e.update.problem, "busy");
+  assert.ok(isBusyRefused(e));
+  assert.equal(s.entries.some((x) => x.key === "thread:b:0"), false);
+  const model = entryModel(e, { last: true, blocked: blockingEntry(s.entries, e) !== undefined });
+  const ids = model.cards.find((c) => c.type === "problem").buttons.map((b) => b.id);
+  assert.deepEqual(ids, ["stop", "resend"]);
+});
+
+test("busy twice in the same chat: each refusal lands on its own request", () => {
+  let s = apply(initialPanelState, update({ threadId: "b", turn: 1, status: "EXECUTING" }));
+  s = apply(ask(s, 1), refusal());
+  s = apply(ask(s, 2), refusal());
+  const locals = s.entries.filter((x) => x.key.startsWith("local:"));
+  assert.equal(locals.length, 2);
+  assert.ok(locals.every((x) => x.update !== null && x.threadId === ""));
+});
+
+test("a failed Ask into a missing chat stays visible", () => {
+  let s = apply(ask(initialPanelState, 1, "gone"), refusal({ threadId: "gone", problem: "failed" }));
+  assert.equal(s.entries[0].update.problem, "failed");
+  assert.equal(visibleEntries(s.entries, "a", new Set(["a"])).length, 1);
+  assert.equal(visibleEntries(s.entries, "gone", new Set(["a"])).length, 1);
+  // A request asked in an existing chat is not shown in another one.
+  const t = ask(initialPanelState, 1, "a");
+  assert.equal(visibleEntries(t.entries, "c", new Set(["a", "c"])).length, 0);
+});
+
+test("a request sent with no chat stays visible after the first list read", () => {
+  const s = reducePanel(initialPanelState, { type: "asked", id: 1, text: "q", scope: scope({ threadId: "" }) });
+  assert.equal(visibleEntries(s.entries, "a", new Set(["a"])).length, 1);
+});
+
+test("the blocker of a refused Ask is found in its chat, not by subject", () => {
+  let s = apply(initialPanelState, update({ threadId: "x", turn: 1, status: "EXECUTING" }));
+  s = apply(ask(s, 1, "b"), refusal());
+  const e = s.entries.find((v) => v.key === "local:1");
+  assert.equal(blockingEntry(s.entries, e), undefined);
+  s = apply(s, update({ threadId: "b", turn: 1, status: "EXECUTING" }));
+  assert.equal(blockingEntry(s.entries, e).threadId, "b");
 });

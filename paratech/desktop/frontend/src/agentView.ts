@@ -288,14 +288,19 @@ export function openAfterArchive(chats: readonly ChatView[], openId: string, id:
 /**
  * The requests of the thread that belong to the open chat. Updates carry their own threadId, so the requests of other
  * chats stay in the state untouched and only the open chat's are drawn. A request the core has not named yet belongs to
- * the chat it was asked in; one without a thread or scope (a failed Ask matched by scope) is shown in any chat.
+ * the chat it was asked in (entry.scope.threadId). One without a thread or scope, one asked with no chat (""), and one
+ * asked in a chat that is not in `chatIds` (gone) are shown in whichever chat is open, so a failed Ask is never lost.
  */
-export function visibleEntries(entries: readonly Entry[], openId: string): Entry[] {
+export function visibleEntries(entries: readonly Entry[], openId: string, chatIds?: ReadonlySet<string>): Entry[] {
   return entries.filter((e) => {
     if (e.threadId !== "") {
       return e.threadId === openId;
     }
-    return e.scope === null || (e.scope.threadId ?? "") === openId;
+    const asked = e.scope?.threadId ?? "";
+    if (e.scope === null || asked === "") {
+      return true;
+    }
+    return asked === openId || (chatIds !== undefined && !chatIds.has(asked));
   });
 }
 

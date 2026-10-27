@@ -87,9 +87,14 @@ function clearsDrafts(u: UpdateView): boolean {
   return u.threadId !== "" && !u.progress && !(u.status === "" && u.cards.length === 0);
 }
 
+/** An update of an Ask the core refused: no thread, or the asked chat with turn 0 and no status. */
+function isFailedAsk(u: UpdateView): boolean {
+  return u.threadId === "" || (u.turn === 0 && u.status === "");
+}
+
 function applyUpdate(s: PanelState, u: UpdateView): PanelState {
   const next = applyUpdateEntries(s, u);
-  if (u.threadId === "") {
+  if (isFailedAsk(u)) {
     return next;
   }
   // Older turns of the thread are over; the own turn's drafts end only with a clearing update.
@@ -132,10 +137,11 @@ export function draftsFor(s: PanelState, e: Entry): DraftView[] {
 }
 
 function applyUpdateEntries(s: PanelState, u: UpdateView): PanelState {
-  if (u.threadId === "") {
-    // A failed Ask: the core never named a thread, so the scope is all there is to match.
+  if (isFailedAsk(u)) {
+    // A failed Ask: the core never named a request (threadId "", or the asked chat with turn 0 and no status; real
+    // turns start at 1). The entry keeps threadId "": it stays unnamed, so its buttons act on the blocker, not on turn 0.
     const sc = scopeKey(u);
-    const local = pendingLocal(s.entries, sc);
+    const local = pendingLocal(s.entries, sc, u.threadId);
     if (local) {
       return { ...s, entries: replace(s.entries, local.key, { ...local, update: u }) };
     }
@@ -272,8 +278,16 @@ export function blockingEntry(entries: readonly Entry[], refused: Entry): Entry 
   if (!u) {
     return undefined;
   }
+  // Busy is per chat: the blocker is in the chat the refused request was asked in; subject only when that is unknown.
+  const chat = refused.scope?.threadId || u.threadId;
   return orderedEntries(entries)
-    .filter((e) => e.threadId !== "" && e.update !== null && isRunning(e.update.status) && e.update.subjectId === u.subjectId)
+    .filter(
+      (e) =>
+        e.threadId !== "" &&
+        e.update !== null &&
+        isRunning(e.update.status) &&
+        (chat !== "" ? e.threadId === chat : e.update.subjectId === u.subjectId),
+    )
     .at(-1);
 }
 

@@ -107,26 +107,34 @@ export function AgentPanel(props: {
   const entriesRef = useRef(state.entries);
   entriesRef.current = state.entries;
   const listSeq = useRef(0);
+  // The first chat list read has finished (either way): until then an update does not pick the open chat.
+  const listDone = useRef(false);
+  const [listed, setListed] = useState(false);
 
-  // The newest read wins; `prefer` names the chat to show when the caller just changed it.
+  // The newest read wins; `prefer` names the chat to show when the caller just changed it. A switch the student made
+  // while the call was in flight wins over `prefer`.
   const refreshChats = useCallback((prefer?: string) => {
     const seq = ++listSeq.current;
+    const startedOn = openRef.current;
     const listFailed = chatProblemText("failed", "list");
     return api.chats().then(
       (v) => {
         if (seq !== listSeq.current) {
           return;
         }
+        listDone.current = true;
         if (v.problem !== "") {
           setChatNote(chatProblemText(v.problem, "list"));
           return;
         }
         setChats(v.chats);
+        setListed(true);
         setChatNote((n) => (n === listFailed ? "" : n));
-        setOpenId((cur) => reconcileOpenChat(v.chats, prefer ?? cur, entriesRef.current));
+        setOpenId((cur) => reconcileOpenChat(v.chats, cur !== startedOn || prefer === undefined ? cur : prefer, entriesRef.current));
       },
       () => {
         if (seq === listSeq.current) {
+          listDone.current = true;
           setChatNote(listFailed);
         }
       },
@@ -211,8 +219,8 @@ export function AgentPanel(props: {
       try {
         const update = parseUpdate(data);
         dispatch({ type: "update", update });
-        // With no chat open, the first update names the chat the request created.
-        if (openRef.current === "" && update.threadId !== "") {
+        // With no chat open (and the first list read done), the first real update names the chat the request created.
+        if (openRef.current === "" && update.threadId !== "" && update.turn > 0 && listDone.current) {
           setOpenId(update.threadId);
         }
         // Activity and the running mark change with every real update; a step of progress changes neither.
@@ -462,7 +470,10 @@ export function AgentPanel(props: {
     };
   }, [state.entries, send, loadState, undoNotes, undoOne, undoAll, subjects, props.onOpenAssignment]);
 
-  const shown = useMemo(() => ({ ...state, entries: visibleEntries(state.entries, openId) }), [state, openId]);
+  const shown = useMemo(
+    () => ({ ...state, entries: visibleEntries(state.entries, openId, listed ? new Set(chats.map((c) => c.threadId)) : undefined) }),
+    [state, openId, chats, listed],
+  );
   const sections = useMemo(() => chatSections(chats, state.entries), [chats, state.entries]);
   const openChat = [...sections.active, ...sections.archived].find((r) => r.threadId === openId) ?? null;
   const earlier = useMemo(() => earlierItems(earlierReq, state.entries, openId), [earlierReq, state.entries, openId]);
