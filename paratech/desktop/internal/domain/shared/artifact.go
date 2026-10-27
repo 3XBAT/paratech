@@ -18,11 +18,14 @@ const (
 	ArtifactExports     ArtifactKind = "exports"
 	// ArtifactMaterials holds the files of the library, one per sha256 (ADR-0024).
 	ArtifactMaterials ArtifactKind = "materials"
+	// ArtifactTexts caches the text extracted from a file of the library, one per sha256 of the file; derived and
+	// rebuildable (ADR-0027).
+	ArtifactTexts ArtifactKind = "texts"
 )
 
 func (k ArtifactKind) valid() bool {
 	switch k {
-	case ArtifactRecordings, ArtifactTranscripts, ArtifactModels, ArtifactExports, ArtifactMaterials:
+	case ArtifactRecordings, ArtifactTranscripts, ArtifactModels, ArtifactExports, ArtifactMaterials, ArtifactTexts:
 		return true
 	}
 	return false

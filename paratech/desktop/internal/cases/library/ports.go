@@ -54,8 +54,8 @@ type MaterialRepository interface {
 	SaveText(ctx context.Context, m *material.Material) error
 }
 
-// BlobStore keeps the bytes of the files in the private artifact store (hard rule 5). Implemented by the filestore
-// adapter.
+// BlobStore keeps the bytes of the files in the private artifact store (hard rule 5), and the texts extracted from
+// them (material.TextRef). Implemented by the filestore adapter.
 type BlobStore interface {
 	// Size returns the size of a stored file; a missing one wraps shared.ErrNotFound.
 	Size(ctx context.Context, ref shared.ArtifactRef) (int64, error)
