@@ -28,19 +28,20 @@ var (
 )
 
 // Bounds of the argument types beyond the catalog text. The catalog fixes label (80), query (500, catalog v2), text
-// (300) and card_ids (10, catalog v3); the other list sizes are the Hub's.
+// (300), card_ids (10, catalog v3) and reply_text (4000, catalog v7); the other list sizes are the Hub's.
 const (
-	MaxLabelRunes    = values.MaxLabelRunes
-	MaxQueryRunes    = 500
-	MaxTextRunes     = 300
-	MaxCardIDs       = 10
-	maxIDsItems      = 20
-	maxTextListItems = 10
-	maxPlanSteps     = 8
-	maxStepArguments = 8
-	maxQuestions     = 5
-	maxOptions       = 6
-	maxIDBytes       = 128
+	MaxLabelRunes     = values.MaxLabelRunes
+	MaxQueryRunes     = 500
+	MaxTextRunes      = 300
+	MaxReplyTextRunes = 4000
+	MaxCardIDs        = 10
+	maxIDsItems       = 20
+	maxTextListItems  = 10
+	maxPlanSteps      = 8
+	maxStepArguments  = 8
+	maxQuestions      = 5
+	maxOptions        = 6
+	maxIDBytes        = 128
 )
 
 // Argument types of the catalog.
@@ -53,6 +54,7 @@ const (
 	typeLabel     = "label"
 	typeQuery     = "query"
 	typeText      = "text"
+	typeReplyText = "reply_text"
 	typeTextList  = "text_list"
 	typeCardIDs   = "card_ids"
 	typePlanSteps = "plan_steps"
@@ -69,12 +71,16 @@ const (
 
 var (
 	actionTypes = []string{typeID, typeIDs, typeDate, typeTime, typeEnum, typeLabel, typeQuery}
-	uiTypes     = []string{typeText, typeTextList, typeCardIDs, typePlanSteps, typeQuestions}
+	uiTypes     = []string{typeText, typeReplyText, typeTextList, typeCardIDs, typePlanSteps, typeQuestions}
 )
 
-// timeFrom is the first catalog with the time type (create_assignment.time, TASK-216). An older catalog naming it was
-// never released that way, so it is refused rather than served with a schema its desktop does not know.
-const timeFrom = 6
+// timeFrom is the first catalog with the time type (create_assignment.time, TASK-216), replyTextFrom the first with the
+// reply_text type (reply.text, TASK-223). An older catalog naming one was never released that way, so it is refused
+// rather than served with a schema its desktop does not know.
+const (
+	timeFrom      = 6
+	replyTextFrom = 7
+)
 
 // Question kinds of ask_questions.
 var questionKinds = []string{"choice", "text"}
@@ -194,6 +200,9 @@ func checkTool(t tool, version uint32) error {
 		if a.Type == typeTime && version < timeFrom {
 			return fmt.Errorf("%w: tool %s: argument %s: the time type exists from catalog %d", ErrInvalidCatalog, t.Name, a.Name, timeFrom)
 		}
+		if a.Type == typeReplyText && (version < replyTextFrom || t.Name != toolReply || a.Name != argReplyText) {
+			return fmt.Errorf("%w: tool %s: argument %s: reply_text is only reply.text, from catalog %d", ErrInvalidCatalog, t.Name, a.Name, replyTextFrom)
+		}
 		if (a.Type == typeEnum) != (len(a.Values) > 0) {
 			return fmt.Errorf("%w: tool %s: argument %s: an enum needs values and only an enum has them", ErrInvalidCatalog, t.Name, a.Name)
 		}
@@ -274,7 +283,8 @@ func (c *Catalog) CheckReturned(calls []values.ToolCall) error {
 }
 
 // Check checks one call against the schema of its tool: a known tool, only declared arguments, every required one,
-// each of its type (see schema), exactly one of its one-of group. UI card texts are at most MaxTextRunes characters.
+// each of its type (see schema), exactly one of its one-of group. UI card texts are at most MaxTextRunes characters, a
+// reply_text at most MaxReplyTextRunes.
 func (c *Catalog) Check(call values.ToolCall) error {
 	t, ok := c.tools[call.Tool()]
 	if !ok {
@@ -321,10 +331,11 @@ const (
 )
 
 // TextReply turns the plain text of a planner answer without tool calls into the call reply{text} with callID, checked
-// as a returned reply (CheckReturned: the text type, at most MaxTextRunes characters) and as the desktop checks card
-// text (displayText). It is a display-only card and nothing else: the text never becomes another tool, an argument or
-// an action. A catalog without a UI reply tool, or a text either check refuses, is ErrInvalidCall; its texts never
-// quote the text.
+// as a returned reply (CheckReturned: the type of reply.text) and as the desktop checks card text (displayText). It is
+// a display-only card and nothing else: the text never becomes another tool, an argument or an action. With a
+// reply_text (catalog 7) a text over the limit is cut at a sentence (fitReplyText) instead of refused, and angle
+// brackets are kept as text. A catalog without a UI reply tool, or a text either check refuses, is ErrInvalidCall; its
+// texts never quote the text.
 func (c *Catalog) TextReply(callID, text string) (values.ToolCall, error) {
 	if t, ok := c.tools[toolReply]; !ok || t.Class != classUI {
 		return values.ToolCall{}, fmt.Errorf("%w: the catalog has no reply card", ErrInvalidCall)
@@ -332,16 +343,24 @@ func (c *Catalog) TextReply(callID, text string) (values.ToolCall, error) {
 	if !utf8.ValidString(text) {
 		return values.ToolCall{}, fmt.Errorf("%w: %s: the text is not UTF-8", ErrInvalidCall, toolReply)
 	}
-	if !displayText(text) {
+	long := c.longReply()
+	if !displayText(text, long) {
 		return values.ToolCall{}, fmt.Errorf("%w: %s: the text has a character the card does not show", ErrInvalidCall, toolReply)
 	}
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false) // the canonical form of returned arguments (the anthropic adapter)
-	if err := enc.Encode(map[string]string{argReplyText: text}); err != nil {
+	args := map[string]any{argReplyText: text}
+	var (
+		encoded string
+		err     error
+	)
+	if long {
+		encoded, _, err = fitReplyText(args, text)
+	} else {
+		encoded, err = encodeObject(args)
+	}
+	if err != nil {
 		return values.ToolCall{}, fmt.Errorf("%w: %s: the text cannot be encoded", ErrInvalidCall, toolReply)
 	}
-	call, err := values.NewToolCall(callID, toolReply, strings.TrimSuffix(b.String(), "\n"))
+	call, err := values.NewToolCall(callID, toolReply, encoded)
 	if err != nil {
 		return values.ToolCall{}, fmt.Errorf("%w: %s: %w", ErrInvalidCall, toolReply, err)
 	}
@@ -352,14 +371,15 @@ func (c *Catalog) TextReply(callID, text string) (values.ToolCall, error) {
 }
 
 // displayText is the stricter check of the desktop's card text (desktop values.Text): printable characters and line
-// breaks only, no tab, no U+FFFD, no angle brackets. Only TextReply applies it: a text the desktop refuses would leave
-// the turn with a Hub-made call the desktop cannot answer, so such a text stays the old failure instead.
-func displayText(s string) bool {
+// breaks only, no tab, no U+FFFD, no angle brackets unless angles (a reply_text, shown only as text). Only TextReply
+// applies it: a text the desktop refuses would leave the turn with a Hub-made call the desktop cannot answer, so such
+// a text stays the old failure instead.
+func displayText(s string, angles bool) bool {
 	for _, r := range s {
 		if r == '\n' {
 			continue
 		}
-		if !unicode.IsPrint(r) || r == utf8.RuneError || r == '<' || r == '>' {
+		if !unicode.IsPrint(r) || r == utf8.RuneError || (!angles && (r == '<' || r == '>')) {
 			return false
 		}
 	}

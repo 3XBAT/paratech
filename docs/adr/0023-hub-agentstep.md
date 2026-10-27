@@ -87,3 +87,13 @@ the last request.
   merging them; it counts in the reservation.
 - **Deployment**: the Hub with this change goes out before a desktop that sends `agent_reply`; an older Hub answers
   `invalid_argument` to the unknown turn kind.
+
+## Addendum: Long replies (TASK-223, 2026-10-27)
+Owner's decision: a big question gets a long answer. Amends "UI-tool text fields ≤ 300 characters" for `reply.text`.
+- **Catalog 7**: `reply.text` has the type `reply_text`, ≤ 4000 characters, plain text (no HTML); only `reply.text`
+  may have it, from catalog 7. Every other card text stays ≤ 300; catalogs 1–6 are unchanged.
+- **Over the limit** (catalog 7 only): a text-only answer (TASK-200) and a returned `reply` call are cut at a sentence
+  with " …" before the schema check, also to keep `arguments_json` ≤ 8 KiB; the cut calls are sealed, stored and
+  echoed. `<` and `>` are allowed in a text-only answer, shown as text. A reply over 8 KiB from the provider is still
+  `PROVIDER_ERROR`.
+- **History**: `agent_reply` stays ≤ 2 KiB; the desktop already cuts a long answer for it.

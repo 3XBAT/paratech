@@ -691,14 +691,16 @@ func TestAgentMessagesHaveOnlyAllowlistedStrings(t *testing.T) {
 	}
 }
 
-// Golden tool catalog (design §2.3, ADR-0021), the current version 6 (TASK-216: create_assignment and the time type;
-// v5, TASK-200: the tools of v4, a new server prompt; v4, TASK-182: no generate_draft, triage_assignment by topic; v3,
-// TASK-172: reply lists up to 10 assignment IDs; v2, TASK-118: question and search query of up to 500 characters).
-// Both the Hub catalog (TASK-114) and the desktop Tool enum (TASK-115) must match it. Versions 1 to 5 are frozen: the
-// Hub still serves them to clients of those versions.
+// Golden tool catalog (design §2.3, ADR-0021), the current version 7 (TASK-223: reply.text is a reply_text of up to
+// 4000 characters; v6, TASK-216: create_assignment and the time type; v5, TASK-200: the tools of v4, a new server
+// prompt; v4, TASK-182: no generate_draft, triage_assignment by topic; v3, TASK-172: reply lists up to 10 assignment
+// IDs; v2, TASK-118: question and search query of up to 500 characters). Both the Hub catalog (TASK-114) and the
+// desktop Tool enum (TASK-115) must match it. Versions 1 to 6 are frozen: the Hub still serves them to clients of those
+// versions.
 const (
-	toolCatalogVersion = 6
-	toolCatalogFile    = "testdata/tool_catalog_v6.json"
+	toolCatalogVersion = 7
+	toolCatalogFile    = "testdata/tool_catalog_v7.json"
+	toolCatalogV6File  = "testdata/tool_catalog_v6.json"
 	toolCatalogV5File  = "testdata/tool_catalog_v5.json"
 	toolCatalogV4File  = "testdata/tool_catalog_v4.json"
 	toolCatalogV3File  = "testdata/tool_catalog_v3.json"
@@ -734,9 +736,10 @@ var (
 	// Argument types of tools that act or read: only IDs, enums, dates, times of day, short labels and the student's
 	// question or search text (ADR-0022, TASK-118, TASK-216).
 	actionArgTypes = []string{"id", "ids", "date", "time", "enum", "label", "query"}
-	// Types only UI tools may use: card text written by the model, at most 300 characters each (ADR-0023), and IDs a card
-	// lists, whose titles the desktop draws from local data (TASK-172).
-	uiArgTypes = []string{"text", "text_list", "card_ids", "plan_steps", "questions"}
+	// Types only UI tools may use: card text written by the model, at most 300 characters each (ADR-0023) except the
+	// reply text of at most 4000 (TASK-223), and IDs a card lists, whose titles the desktop draws from local data
+	// (TASK-172).
+	uiArgTypes = []string{"text", "reply_text", "text_list", "card_ids", "plan_steps", "questions"}
 	// Class C tools only name trusted local objects: the confirm card shows trusted data, never model text.
 	confirmArgTypes = []string{"id"}
 	uiTools         = []string{"ask_questions", "cannot_do", "reply", "show_plan"}
@@ -928,6 +931,10 @@ var oneOfGroupPattern = regexp.MustCompile(`([a-z][a-z0-9_]*) \(([a-z][a-z0-9_]*
 // desktop checks their provenance like any ID; a new one must be a conscious edit here.
 var cardIDArguments = []string{"reply.assignments"}
 
+// replyTextArguments are the only arguments of type reply_text: the text of the reply card, plain text of at most 4000
+// characters (TASK-223). Every other card text stays a text of at most 300.
+var replyTextArguments = []string{"reply.text"}
+
 func argumentsOfType(c toolCatalog, typ string) []string {
 	var out []string
 	for _, tool := range c.Tools {
@@ -951,6 +958,11 @@ func TestToolCatalog(t *testing.T) {
 	}
 	if ids := argumentsOfType(c, "card_ids"); !slices.Equal(ids, cardIDArguments) || !strings.Contains(c.Types["card_ids"], "0-10 IDs") {
 		t.Errorf("card_ids arguments %v (%q), want %v of 0-10 IDs", ids, c.Types["card_ids"], cardIDArguments)
+	}
+	if texts := argumentsOfType(c, "reply_text"); !slices.Equal(texts, replyTextArguments) || !strings.Contains(c.Types["reply_text"], "at most 4000 characters") ||
+		!strings.Contains(c.Types["reply_text"], "without HTML") || !strings.Contains(c.Types["text"], "at most 300 characters") {
+		t.Errorf("reply_text arguments %v (%q), want %v of at most 4000 characters without HTML; text %q", texts, c.Types["reply_text"],
+			replyTextArguments, c.Types["text"])
 	}
 	if times := argumentsOfType(c, "time"); !slices.Equal(times, timeArguments) || !strings.Contains(c.Types["time"], "HH:MM, 24 h") ||
 		!strings.Contains(c.Types["time"], "only together with due") {
@@ -1000,10 +1012,30 @@ func TestToolCatalog(t *testing.T) {
 	}
 }
 
+// TestToolCatalogV6IsFrozen: catalog v6 stays as released: catalog v7 without the reply_text type, reply.text a text.
+func TestToolCatalogV6IsFrozen(t *testing.T) {
+	v6, v7 := loadToolCatalogFile(t, toolCatalogV6File), loadToolCatalog(t)
+	if v6.CatalogVersion != 6 || v6.Types["reply_text"] != "" {
+		t.Fatalf("v6: version %d, reply_text type %q", v6.CatalogVersion, v6.Types["reply_text"])
+	}
+	want := cloneCatalog(v7)
+	want.CatalogVersion = 6
+	delete(want.Types, "reply_text")
+	i := toolIndex(t, want, "reply")
+	j := slices.IndexFunc(want.Tools[i].Arguments, func(a catalogArgument) bool { return a.Name == "text" })
+	if j < 0 || want.Tools[i].Arguments[j].Type != "reply_text" {
+		t.Fatalf("v7 reply = %+v", want.Tools[i])
+	}
+	want.Tools[i].Arguments[j].Type = "text"
+	if fmt.Sprint(want) != fmt.Sprint(v6) {
+		t.Errorf("v6 differs from v7 beyond reply_text:\nv6 %+v\nv7 %+v", v6, want)
+	}
+}
+
 // TestToolCatalogV5IsFrozen: catalog v5 stays as released: catalog v6 without create_assignment, the time type and
 // create_assignment in the date description.
 func TestToolCatalogV5IsFrozen(t *testing.T) {
-	v5, v6 := loadToolCatalogFile(t, toolCatalogV5File), loadToolCatalog(t)
+	v5, v6 := loadToolCatalogFile(t, toolCatalogV5File), loadToolCatalogFile(t, toolCatalogV6File)
 	if v5.CatalogVersion != 5 || v5.Types["time"] != "" {
 		t.Fatalf("v5: version %d, time type %q", v5.CatalogVersion, v5.Types["time"])
 	}
@@ -1137,6 +1169,14 @@ func TestCatalogValidatorCatchesBadCatalogs(t *testing.T) {
 			i := toolIndex(t, *c, "search")
 			c.Tools[i].Arguments[0].Type = "text"
 		}, `argument search.query has type "text"`},
+		{"R tool with a reply text", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "search")
+			c.Tools[i].Arguments[0].Type = "reply_text"
+		}, `argument search.query has type "reply_text"`},
+		{"C tool with a reply text", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "propose_send")
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "note", Type: "reply_text"})
+		}, `argument propose_send.note has type "reply_text"`},
 		{"R tool with card IDs", func(t *testing.T, c *toolCatalog) {
 			i := toolIndex(t, *c, "job_status")
 			c.Tools[i].Arguments[0].Type = "card_ids"
