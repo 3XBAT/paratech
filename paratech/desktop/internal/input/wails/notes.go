@@ -125,6 +125,8 @@ type NoteAnchor struct {
 // NotePart is a part of a note: a file of the library. Name is the file name (plain text). Missing: the file is no
 // longer in the library; Removed: it was removed there. A photo ("jpeg", "png", textStatus "no_text": «текст не
 // распознан») has PageURL, the address its image is shown from by the material id only; "" for any other part.
+// Sections and Pages count the sections and pages of its text («N разделов» / «N стр.»), Fragments its pieces of any
+// kind; all 0 for a part without text or not counted yet.
 type NotePart struct {
 	MaterialID string `json:"materialId"`
 	Name       string `json:"name"`
@@ -133,6 +135,9 @@ type NotePart struct {
 	Removed    bool   `json:"removed"`
 	Missing    bool   `json:"missing"`
 	PageURL    string `json:"pageUrl"`
+	Sections   int    `json:"sections"`
+	Pages      int    `json:"pages"`
+	Fragments  int    `json:"fragments"`
 }
 
 // NoteView is a note of the student. Title is typed text or a file name: plain text only. Times are RFC 3339 in UTC.
@@ -549,6 +554,10 @@ func noteViewOf(v notes.View) *NoteView {
 			}
 			if m.Active() && m.Type().Image() {
 				p.PageURL = notePageURL(id)
+			}
+			if m.Active() && i < len(v.Counts) {
+				c := v.Counts[i]
+				p.Sections, p.Pages, p.Fragments = c.Sections, c.Pages, c.Fragments
 			}
 		}
 		out.Parts = append(out.Parts, p)

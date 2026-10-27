@@ -117,10 +117,19 @@ type fakeMaterials struct {
 	err   error    // returned by FileNotePart when set
 	// pageErr is returned by PageImage when set.
 	pageErr error
+	// MaterialText: the bytes of each file (a TXT reads them as Markdown), preset texts and errors by material, and
+	// the number of reads.
+	data      map[material.Digest][]byte
+	texts     map[shared.MaterialID]material.Text
+	textErrs  map[shared.MaterialID]error
+	textReads int
 }
 
 func newFakeMaterials() *fakeMaterials {
-	return &fakeMaterials{rows: map[shared.MaterialID]*material.Material{}}
+	return &fakeMaterials{
+		rows: map[shared.MaterialID]*material.Material{}, data: map[material.Digest][]byte{},
+		texts: map[shared.MaterialID]material.Text{}, textErrs: map[shared.MaterialID]error{},
+	}
 }
 
 func folderOf(kind string) shared.FolderID { return shared.FolderID("folder-" + cmpKind(kind)) }
@@ -156,6 +165,7 @@ func (f *fakeMaterials) FileNotePart(_ context.Context, sub shared.SubjectID, ki
 	if err != nil {
 		return nil, false, err
 	}
+	f.data[d] = data
 	if _, err := m.Place(sub, folderOf(kind), t0); err != nil {
 		return nil, false, err
 	}
@@ -175,12 +185,20 @@ func (f *fakeMaterials) add(d material.Digest, size int64, typ material.Type, na
 // filed stores content as a material filed under sub, as the library would have it from before.
 func (f *fakeMaterials) filed(t *testing.T, sub shared.SubjectID, content string) *material.Material {
 	t.Helper()
+	return f.filedAs(t, sub, material.TypeTXT, "old.txt", content)
+}
+
+// filedAs is filed for a file of type typ named name.
+func (f *fakeMaterials) filedAs(t *testing.T, sub shared.SubjectID, typ material.Type, name, content string) *material.Material {
+	t.Helper()
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	m, err := f.add(material.DigestOf([]byte(content)), int64(len(content)), material.TypeTXT, "old.txt")
+	d := material.DigestOf([]byte(content))
+	m, err := f.add(d, int64(len(content)), typ, name)
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.data[d] = []byte(content)
 	if _, err := m.Place(sub, "folder-own", t0); err != nil {
 		t.Fatal(err)
 	}
@@ -209,6 +227,39 @@ func (f *fakeMaterials) PageImage(_ context.Context, id shared.MaterialID) (*mat
 		return nil, nil, fmt.Errorf("fake: %w", shared.ErrNotFound)
 	}
 	return m, []byte(m.Digest()), nil
+}
+
+// MaterialText answers as the library: textErrs first, then a missing, removed or unreadable material, then the preset
+// text, then the bytes of a TXT read as Markdown; any other type has no text the fake can read.
+func (f *fakeMaterials) MaterialText(_ context.Context, id shared.MaterialID) (*material.Material, material.Text, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.textReads++
+	m, ok := f.rows[id]
+	switch {
+	case !ok:
+		return nil, material.Text{}, fmt.Errorf("fake: %w", shared.ErrNotFound)
+	case f.textErrs[id] != nil:
+		return m, material.Text{}, f.textErrs[id]
+	case !m.Active():
+		return m, material.Text{}, fmt.Errorf("fake: %w", material.ErrRemoved)
+	case !m.Type().Readable():
+		return m, material.Text{}, fmt.Errorf("fake: %w", material.ErrTextNotExtracted)
+	}
+	if text, ok := f.texts[id]; ok {
+		return m, text, nil
+	}
+	if m.Type() != material.TypeTXT {
+		return m, material.Text{}, fmt.Errorf("fake: %w", material.ErrTextUnreadable)
+	}
+	text, err := material.NewText(material.ReadMarkdown(string(f.data[m.Digest()])).Fragments, false)
+	return m, text, err
+}
+
+func (f *fakeMaterials) reads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.textReads
 }
 
 func (f *fakeMaterials) calls() int {

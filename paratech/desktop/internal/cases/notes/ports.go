@@ -39,6 +39,11 @@ type Materials interface {
 	// PageImage loads an active photo with its stored bytes, checked against its sha256. One that is missing, removed
 	// or not a photo wraps shared.ErrNotFound; bytes that are gone or changed material.ErrDamaged.
 	PageImage(ctx context.Context, id shared.MaterialID) (*material.Material, []byte, error)
+
+	// MaterialText returns an active material and its text, from the text cache or extracted again (TASK-150). The
+	// errors wrap the domain sentinels: shared.ErrNotFound, material.ErrRemoved, material.ErrTextNotExtracted (a PDF
+	// or a photo), material.ErrDamaged, material.ErrTextUnreadable.
+	MaterialText(ctx context.Context, id shared.MaterialID) (*material.Material, material.Text, error)
 }
 
 // Recordings reads a recording for its anchor. Implemented by the sqlite adapter.
