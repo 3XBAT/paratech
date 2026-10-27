@@ -130,7 +130,7 @@ export interface NoteView {
   anchor: NoteAnchor;
   parts: NotePart[];
   removed: boolean;
-  /** Photo pages whose text is not recognized (or typed by hand). */
+  /** Photo pages without recognized text. Text typed by hand is a separate part and does not change this count. */
   noTextPages: number;
   createdAt: string;
   updatedAt: string;

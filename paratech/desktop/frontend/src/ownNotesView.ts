@@ -55,6 +55,8 @@ export const ownNotesTexts = {
   viewerNext: "Вперёд",
   viewerClose: "Закрыть",
   pageWord: "Страница",
+  pageTextWord: "Текст страницы",
+  viewerDialog: "Просмотр страниц",
 } as const;
 
 /** «3 стр. без текста» in the note header; "" when every page has text. */
@@ -65,11 +67,6 @@ export function noTextPagesText(n: number): string {
 /** The alt text of a page image: the page number only, never the file name. */
 export function pageAlt(number: number, noText: boolean): string {
   return `${ownNotesTexts.pageWord} ${number}: фото${noText ? `, ${ownNotesTexts.noText}` : ""}`;
-}
-
-/** The accessible name of the viewer dialog. */
-export function viewerLabel(number: number, total: number): string {
-  return `Просмотр страницы ${number} из ${total}`;
 }
 
 /** The live-region line of the viewer. */
@@ -234,7 +231,25 @@ export function movedOrder(order: readonly string[], index: number, delta: -1 | 
   return out;
 }
 
-export const orderOf = (note: Pick<NoteView, "parts">): string[] => note.parts.map((p) => p.materialId);
+/**
+ * The order with newId moved to right after pageId; null when nothing has to change: the page or the new part is
+ * not in the order, they are the same, or the new part is already next to the page.
+ */
+export function orderAfter(order: readonly string[], pageId: string, newId: string): string[] | null {
+  const page = order.indexOf(pageId);
+  const at = order.indexOf(newId);
+  if (page < 0 || at < 0 || pageId === newId || at === page + 1) {
+    return null;
+  }
+  const out = order.filter((id) => id !== newId);
+  out.splice(out.indexOf(pageId) + 1, 0, newId);
+  return out;
+}
+
+/** «Текст страницы 2 добавлен» after a typed text is stored next to its page. */
+export const pageTextAddedText = (number: number): string => `${ownNotesTexts.pageTextWord} ${number} добавлен`;
+
+export const orderOf =(note: Pick<NoteView, "parts">): string[] => note.parts.map((p) => p.materialId);
 
 /** The notes shown: removed ones stay only while their «Отменить» is offered. */
 export function visibleNotes(notes: readonly NoteView[], undoNoteId: string): NoteView[] {

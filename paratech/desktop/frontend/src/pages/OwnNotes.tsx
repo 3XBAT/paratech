@@ -5,8 +5,11 @@ import { callByName, onEventData } from "../bindings/runtime.js";
 import {
   addLines,
   movedOrder,
+  orderAfter,
   orderOf,
   ownNotesTexts as t,
+  pageTextAddedText,
+  photoPages,
   pickSubjectId,
   recordingTarget,
   refusalText,
@@ -153,12 +156,33 @@ export function OwnNotes(props: { recordingId: string; subject: string }) {
           setPasteOpen(false);
         }
       }),
-    onPastePage: async (noteId, text) => {
+    onPastePage: async (noteId, pageMaterialId, text) => {
       let stored = false;
       await act(async () => {
         const add = await api.paste(recordingTarget(props.recordingId, subjectId, noteId), text);
         applyAdd(add);
         stored = add.error === "" && add.files.every((f) => f.error === "");
+        const newId = add.files[0]?.materialId ?? "";
+        if (!stored || add.note === null || newId === "") {
+          return;
+        }
+        // The core appends the text at the end; it is kept next to its photo.
+        const order = orderAfter(orderOf(add.note), pageMaterialId, newId);
+        if (order === null) {
+          return;
+        }
+        const number = photoPages(add.note).find((p) => p.materialId === pageMaterialId)?.number ?? 0;
+        try {
+          const next = await api.reorder(noteId, order);
+          setNotes((list) => withNote(list, next));
+          setLines([]);
+          setStatus({ ok: true, text: pageTextAddedText(number) });
+        } catch (err) {
+          // The text stays in the note, at the end.
+          if (mounted.current) {
+            setStatus({ ok: false, text: refusalText(err) });
+          }
+        }
       });
       return stored;
     },

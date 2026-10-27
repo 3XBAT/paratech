@@ -5,7 +5,6 @@ import {
   stepPage,
   type ViewerKey,
   viewerAnnounce,
-  viewerLabel,
 } from "../ownNotesView.js";
 import { Button } from "../ui/Button.js";
 
@@ -14,16 +13,12 @@ import { Button } from "../ui/Button.js";
 
 const pagingKeys: readonly string[] = ["ArrowLeft", "ArrowRight", "Home", "End"];
 
-export function PageViewer(props: { pages: PhotoPage[]; start: number; onClose(): void }) {
+/** `opener` is the element that was clicked to open the viewer; focus returns to it on close. */
+export function PageViewer(props: { pages: PhotoPage[]; start: number; opener?: HTMLElement | null; onClose(): void }) {
   const { pages } = props;
   const [index, setIndex] = useState(() => Math.max(0, Math.min(props.start, pages.length - 1)));
   const root = useRef<HTMLDivElement>(null);
-  const opener = useRef<Element | null>(null);
-
-  // The opener is read once, before the focus moves into the dialog.
-  if (opener.current === null && typeof document !== "undefined") {
-    opener.current = document.activeElement;
-  }
+  const opener = useRef(props.opener ?? null);
 
   useEffect(() => {
     root.current?.querySelector<HTMLButtonElement>("button[data-close]")?.focus();
@@ -90,7 +85,7 @@ export function PageViewer(props: { pages: PhotoPage[]; start: number; onClose()
       className="page-viewer"
       role="dialog"
       aria-modal="true"
-      aria-label={viewerLabel(page.number, total)}
+      aria-label={t.viewerDialog}
       onKeyDown={onKeyDown}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) {

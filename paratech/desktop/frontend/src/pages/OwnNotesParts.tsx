@@ -50,7 +50,7 @@ export interface OwnNotesActions {
   onRemove(noteId: string): void;
   onUndo(): void;
   /** Text typed for a photo page goes to the note as a TXT part; true when it was stored. */
-  onPastePage(noteId: string, text: string): Promise<boolean>;
+  onPastePage(noteId: string, pageMaterialId: string, text: string): Promise<boolean>;
 }
 
 function NoteCard(props: {
@@ -91,7 +91,7 @@ function NoteCard(props: {
 }
 
 // Text typed by hand for a photo page: the same limit, counter and refusals as the paste above.
-function PagePaste(props: { noteId: string; disabled: boolean; actions: OwnNotesActions; onDone(): void }) {
+function PagePaste(props: { noteId: string; materialId: string; disabled: boolean; actions: OwnNotesActions; onDone(): void }) {
   const [text, setText] = useState("");
   const [sent, setSent] = useState(false);
   const id = useId();
@@ -109,7 +109,7 @@ function PagePaste(props: { noteId: string; disabled: boolean; actions: OwnNotes
       return;
     }
     setSent(true);
-    const ok = await props.actions.onPastePage(props.noteId, text);
+    const ok = await props.actions.onPastePage(props.noteId, props.materialId, text);
     if (ok) {
       props.onDone();
     } else {
@@ -144,7 +144,7 @@ function PagePaste(props: { noteId: string; disabled: boolean; actions: OwnNotes
       </p>
       <div className="acts start">
         <Button
-          variant="primary"
+          variant="secondary"
           size="sm"
           disabled={!canSave}
           disabledReason={check.kind === "long" ? t.tooLong : undefined}
@@ -170,12 +170,14 @@ function PartsList(props: {
   const { note, rows, model, actions } = props;
   const off = model.busy;
   const [viewing, setViewing] = useState(-1);
+  const [opener, setOpener] = useState<HTMLElement | null>(null);
   const [pasting, setPasting] = useState("");
   const pages = photoPages(note);
   const list = useRef<HTMLOListElement>(null);
   const refocus = useRef("");
 
-  // Closing the paste box returns the focus to its button (or, after a save, to the page's thumbnail).
+  // Closing the paste box returns the focus to the page's paste button; when that button is gone (the page no longer
+  // lacks text after a save) the focus goes to the page's thumbnail.
   useEffect(() => {
     if (pasting === "" && refocus.current !== "") {
       const id = refocus.current;
@@ -193,7 +195,7 @@ function PartsList(props: {
 
   return (
     <>
-      {viewing >= 0 && <PageViewer pages={pages} start={viewing} onClose={() => setViewing(-1)} />}
+      {viewing >= 0 && <PageViewer pages={pages} start={viewing} opener={opener} onClose={() => setViewing(-1)} />}
       <ol ref={list} className="own-parts" aria-label={t.partsLabel}>
           {rows.map((r, i) => (
             <li key={r.materialId} className="own-part">
@@ -204,7 +206,10 @@ function PartsList(props: {
                   data-thumb=""
                   data-mid={r.materialId}
                   aria-label={thumbLabel(r.page.number, r.pageTotal)}
-                  onClick={() => setViewing(r.page ? r.page.number - 1 : -1)}
+                  onClick={(e) => {
+                    setOpener(e.currentTarget);
+                    setViewing(r.page ? r.page.number - 1 : -1);
+                  }}
                 >
                   <img src={r.page.src} alt={r.page.alt} loading="lazy" width={72} height={96} />
                 </button>
@@ -276,6 +281,7 @@ function PartsList(props: {
               {pasting === r.materialId && (
                 <PagePaste
                   noteId={note.id}
+                  materialId={r.materialId}
                   disabled={off}
                   actions={actions}
                   onDone={() => closePaste(r.materialId)}
