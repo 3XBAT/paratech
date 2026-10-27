@@ -62,11 +62,56 @@ button. The student cannot record a task that was said in class but not recorded
 - A future subject rename must keep the old name as an alias, or student assignments lose their subject.
 
 ## Open (questions to the owner)
-1. A «Удалить» for an assignment the student added (beyond Undo)? *Proposed: later, own task.*
-2. A Windows notification at the due time («в 9 напомнить»)? *Proposed: no; the assignment shows on «Сегодня» and in
-   «Горит на 7 дней» only (no-toast decision).*
-3. Due limits −31 days … +2 years and 23:59 for a date without a time. *Proposed: as written.*
-4. No subject named in a subject thread: the planner passes the thread's subject. *Proposed: yes; in «Без предмета»
-   thread it stays without a subject.*
-5. A request without any date: added without a deadline, no question. *Proposed: yes; a date with two readings
-   («к пятнице» on a Friday) is asked.*
+Answered 2026-10-27: 1 — «Удалить» for every assignment (addendum below); 2 — no notification now (deferred);
+4 — in a request without a subject the agent asks (addendum below); 5 — yes, no date means no deadline and no question.
+3. Due limits −31 days … +2 years and 23:59 for a date without a time. *Not answered; implemented as written.*
+
+## Addendum (2026-10-27): delete and edit any assignment, ask for the subject
+Source: owner 2026-10-27. Tasks TASK-228…234.
+
+### «Удалить» for every assignment (soft delete)
+- Any assignment — extracted from a recording (Hub `EXTRACT_HOMEWORK_DEADLINES`), found in a material (agent `find_homework`), added
+  by the student (button) or by the agent (`create_assignment`) — gets «Удалить». It is a **soft delete**:
+  `assignment.Delete(now)` sets `deletedAt` (migration: `assignments.deleted_at`), `assignment.Restore(now)` clears
+  it; both bump the version. Rows are never removed by this path (`RemoveCreatedAssignment` stays only for the
+  agent's Undo of its own creation).
+- **Refused** (`assignment.ErrInUse`) while the assignment has an unresolved delivery (PENDING — including a
+  scheduled one of ADR-0030 —, SENDING, UNKNOWN) or an unfinished draft/writing/triage job. Drafts, works, sent
+  deliveries and proposals stay attached and come back with «Вернуть».
+- **Hidden everywhere**: every reader (lists, «Сегодня», «Горит на 7 дней», subject page, deadlines, calendar sync,
+  agent tools `list_assignments` and the ID check) skips deleted rows; an agent call naming one gets `unknown_id`.
+- **Reprocessing** never re-creates or revives a deleted extracted assignment: a deleted row counts as touched by the
+  student (as `user_edited`) and stays a tombstone.
+- **Proposals**: «Да» on a proposal of a deleted assignment goes STALE (reason `assignment_deleted`); nothing is sent
+  or exported. Checked at «Да», so delete touches one aggregate (ARCH-23).
+- **Google Calendar** (hard rule 6, Google is a view): the delete writes a `deadline_event_removals` row in its
+  transaction (a queue row, not an aggregate — the ADR-0018 pattern, extended here to this use case) and requests a
+  sync, which deletes the event (404/410 = success) and then the row. «Вернуть» removes a row still waiting; after
+  the sync the assignment returns without the event and the page offers «Предложить в календарь» again. A restore
+  racing the sync may leave it without the event (accepted).
+- **Agent journal**: the delete is the student's own click (`input/wails`), not a journal line. An agent Undo of an
+  action on a deleted assignment is refused as `changed` (version moved).
+- **Recording deletion** (ADR-0018) does not offer a deleted assignment and keeps it (transcript link NULL).
+- **UI**: after «Удалить» the list shows «Задание удалено» with «Вернуть». Retention and a list of deleted ones: Open C-2.
+
+### Edit after creation
+- The student edits title, note, deadline (date and optional time) and subject of any assignment from the UI.
+  `homeworkflow.EditAssignment` grows: subject is a library subject ID (or none) stored as the student's subject
+  correction (the name, as `NewByStudent`); date/time follow the `create_assignment` rules (no time → 23:59 local).
+  Validation by source, in the domain: a student assignment keeps the ADR-0029 rules; an extracted one `NewDetails`
+  plus the same control/bidi ban. The edit marks `user_edited`; `expectedVersion` guards concurrent edits.
+- A deleted assignment cannot be edited (`ErrDeleted`).
+
+### Ask for the subject (agent)
+- Panel v7 (= v6 + one rule; tools unchanged, desktop catalog 7): when the request scope has no subject and the
+  student names none, `create_assignment` is preceded by `ask_questions` «К какому предмету относится задание?» with
+  the subjects from `list_subjects` as options (whether «Без предмета» is one of them: Open C-1); the answer's
+  subject ID is used. A scope with a subject keeps the ADR-0029 rule. Only the prompt asks; the desktop does not
+  refuse a subject-less `create_assignment`.
+
+### Deferred
+- Windows notifications at the deadline: not now (owner 2026-10-27).
+
+### Open (owner)
+- C-1. В вопросе «К какому предмету?» есть вариант «Без предмета»? (а) да, последним; (б) нет, только предметы. Цена одинаковая.
+- C-2. Удалённые задания: (а) только «Вернуть» сразу после удаления, хранятся бессрочно и невидимо — дешевле всего; (б) плюс раздел «Удалённые» на странице «Задания»; (в) очищать навсегда через 30 дней.

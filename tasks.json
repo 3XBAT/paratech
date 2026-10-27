@@ -4394,20 +4394,22 @@
         {
             "id": "TASK-203",
             "category": "functional",
-            "priority": "low",
-            "description": "[Бэклог · Чаты агента · domain] Чат = поток agent/thread: название, архив, lastActive, переходы и расчёт заполнения окна истории thread.Fill",
+            "priority": "medium",
+            "description": "[Чаты агента · domain] Чат = поток agent/thread без привязки к предмету: название, архив, lastActive, упоминания просьбы, окно 20 ответов со сдвигом порциями по 5, thread.Fill",
             "acceptance_criteria": [
-                "Владелец 2026-10-26: бэклог, не запускать без слова владельца",
-                "Перед запуском: ответы владельца на Open 1–6 в docs/adr/0028-agent-chats-context-ring.md; ADR-0028 переведён в Accepted",
-                "domain/agent/thread: Thread получает title, archived, lastActive (State/Restore); ключ предмета больше не уникален для потока (уникальность — забота хранилища, убирается в TASK-204)",
-                "Переходы в агрегате: Rename (1–80 рун, без управляющих символов), Archive (только когда текущей просьбы нет или она DONE/FAILED/CANCELLED/STOPPED, иначе ErrInvalidTransition), Restore; архивный поток не принимает новую просьбу; название по умолчанию «Новый чат», после первой просьбы — первый текст студента до 40 рун по границе слова (никогда не текст модели)",
-                "Просьба с областью, чей предмет не совпадает с ключом потока, отклоняется ErrInvalidThread (правило в домене, не в use case)",
-                "thread.Fill(entries, current) рядом с Window, на той же группировке пар: доля max(пары/12, байты/24 KiB, ходы/64) для прежних просьб, которые унесёт следующая просьба, и Overflow, если какая-то прежняя пара уже не отправляется; тест, что Fill и Window не расходятся на одних данных",
-                "Без IO и времени внутри (время — параметром), тест архитектуры зелёный",
+                "Решение владельца 2026-10-27 («делаем»): docs/adr/0028-agent-chats-context-ring.md (переработан 2026-10-27). Один общий список чатов, чат может охватывать несколько предметов; предмет — у просьбы (scope), не у чата",
+                "domain/agent/thread: Thread получает title, archivedAt, lastActive (State/Restore); правило «предмет области = ключ потока» не вводится. Ключ предмета (Key, KeyOf, SubjectKey, ParseKey) в этой задаче остаётся — его ещё используют agentturn и sqlite; удаление — TASK-204",
+                "Переходы в агрегате: Rename (1–80 рун, без управляющих и bidi U+202A–202E, U+2066–2069), Archive (только когда текущей просьбы нет или она DONE/FAILED/CANCELLED/STOPPED, иначе ErrInvalidTransition), Restore; новая просьба в архивном чате возвращает его из архива; название «Новый чат», после первой просьбы — первый текст студента до 40 рун по границе слова (никогда не текст модели); IsEmpty для правила «Новый чат»",
+                "values.Mention{Ref (subject | lesson | material | assignment), Label — только для показа}: не больше 8 на просьбу, Label одной строкой ≤ 200 рун; просьба хранит свои упоминания; их ID входят в проверку происхождения просьбы, как ID области; Label никогда не попадает в HistoryTurn и в запрос к Hub (тест)",
+                "Окно: MaxHistoryTurns 20, MaxHistoryBytes 48 KiB, MaxRequestTurns 64; начало окна сдвигается шагами по 5 прежних просьб (выравнивание по номеру просьбы в чате): отправляется 16–20 прежних ответов, и префикс истории побайтно совпадает до 5 просьб подряд; тест на последовательности из 30 просьб",
+                "Просьба получает droppedBy (0 — не сброшена; выставляется только в TASK-248); Window и Fill сброшенные не берут",
+                "thread.Fill(entries, current) рядом с Window, на той же группировке пар: доля max(пары/20, байты/48 KiB, ходы/64) для прежних просьб, которые унесёт следующая просьба, и Overflow, если какая-то прежняя несброшенная просьба уже не отправляется; тест, что Fill и Window не расходятся на одних данных",
+                "Без IO и времени внутри (время — параметром); изменённые тесты окна перечислить в progress; тест архитектуры зелёный",
+                "Файлы: paratech/desktop/internal/domain/agent/thread/*, paratech/desktop/internal/domain/agent/values/* (Mention) (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
-                "go test -race ./desktop/internal/domain/agent/... и тест архитектуры, golangci-lint ./desktop/..."
+                "go test -race ./desktop/internal/domain/agent/... ./desktop/internal/cases/agentturn/... и тест архитектуры, golangci-lint ./desktop/..."
             ],
             "dependencies": [],
             "status": "pending"
@@ -4415,18 +4417,22 @@
         {
             "id": "TASK-204",
             "category": "functional",
-            "priority": "low",
-            "description": "[Бэклог · Чаты агента · storage] Миграция agent_threads под несколько чатов на предмет и sqlite-адаптер потоков",
+            "priority": "medium",
+            "description": "[Чаты агента · storage] Миграция agent_threads без ключа предмета, sqlite-адаптер чатов, agentturn на «текущий чат»",
             "acceptance_criteria": [
-                "Владелец 2026-10-26: бэклог, не запускать без слова владельца",
-                "Миграция desktop (следующий свободный номер): пересборка agent_threads без UNIQUE(subject_key), новые столбцы title, archived_at, last_active_at, индекс (subject_key, archived_at, last_active_at); ссылки agent_turns/agent_steps/agent_actions сохраняются; каждый существующий поток становится первым чатом своего ключа с названием «Основной чат»; Down возвращает прежнюю схему",
+                "ADR-0028 (переработан 2026-10-27), раздел Consequences; домен — TASK-203",
+                "Миграция desktop (следующий свободный номер на момент пуша; не запускать параллельно с другой задачей с миграцией — общие schema.sql и migrate_test): пересборка agent_threads без subject_key, столбцы title, archived_at, last_active_at, индекс (archived_at, last_active_at); agent_turns: mentions TEXT '[]' (JSON-массив {kind, id, label}, CHECK json_type array), dropped_by INTEGER 0; ссылки agent_turns/agent_steps/agent_actions сохраняются (те же id); каждый существующий поток становится чатом с названием — имя его предмета из subjects, для NONE и пропавшего предмета «Без предмета»; last_active_at = updated_at; Down — прежняя схема (с потерей чатов сверх одного на ключ — описать в миграции)",
                 "docs/contracts/schema.sql: зеркало миграции дословно (TestMigrationMatchesContractSchema)",
-                "adapters/sqlite: Save/Get/Restore новых полей; «текущий чат ключа» = неархивный с наибольшим last_active_at; список чатов ключа (неархивные, затем архив); запросы через sqlc",
-                "Тесты адаптера: миграция на базе с данными (потоки, ходы, журнал сохраняются), текущий чат, список, архив; migrate_test и schema_test зелёные",
+                "domain/agent/thread: ключ предмета (Key, KeyOf, SubjectKey, ParseKey, NoSubject как ключ) удаляется; правила, бравшие предмет из потока (тема работы без задания ADR-0025 TASK-187, предмет по умолчанию у create_assignment и т. п.), берут его из области просьбы",
+                "cases/agentturn: порт ThreadRepository.GetByKey → Current(ctx) (неархивный с наибольшим last_active_at; нет — создаётся, как сейчас) и Get(ctx, ThreadID); Ask без выбора чата ведёт себя как сейчас",
+                "adapters/sqlite: Save/Restore новых полей и упоминаний, Current, Get, List (неархивные по last_active_at, затем архив); запросы через sqlc, sqlc generate",
+                "Тесты: миграция на базе с данными (потоки, ходы, шаги, журнал сохраняются; названия из предметов), Current, List, архив; migrate_test, schema_test, тесты agentturn и desktop/tests зелёные",
+                "Файлы: paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/internal/domain/agent/thread/*, paratech/desktop/internal/cases/agentturn/*, paratech/desktop/internal/adapters/sqlite/agent*.go, adapters/sqlite/queries/agent*.sql, adapters/sqlite/sqlcgen/*, paratech/desktop/internal/input/agent/* и paratech/desktop/internal/app/* (только под изменённый порт), paratech/desktop/tests/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
-                "go test -race ./desktop/internal/adapters/sqlite/... ./desktop/tests/..., sqlc generate без расхождений, golangci-lint"
+                "go test -race ./desktop/internal/adapters/sqlite/... ./desktop/internal/domain/agent/... ./desktop/internal/cases/agentturn/... ./desktop/internal/input/agent/... ./desktop/tests/..., sqlc generate без расхождений",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
             ],
             "dependencies": [
                 "TASK-203"
@@ -4436,44 +4442,46 @@
         {
             "id": "TASK-205",
             "category": "functional",
-            "priority": "low",
-            "description": "[Бэклог · Чаты агента · use case] cases/agentchats (список, новый, переименовать, архив, заполнение, прежние просьбы) и выбор чата в agentturn.Ask",
+            "priority": "medium",
+            "description": "[Чаты агента · use case] cases/agentchats (список, новый, переименовать, архив, прежние просьбы) и выбор чата и упоминания в agentturn.Ask",
             "acceptance_criteria": [
-                "Владелец 2026-10-26: бэклог, не запускать без слова владельца",
-                "Новый use case cases/agentchats со своими узкими портами в ports.go (ARCH-21): List(key) с Fill каждого чата, New(key) (если текущий чат ключа пуст — вернуть его), Rename, Archive, Restore, Earlier(thread) — прежние просьбы только для чтения: текст студента и строка из проверенных текстов планировщика (по образцу thread.Reply, русские подписи), без результатов инструментов и ID",
-                "cases/agentturn: AskInput получает необязательный ThreadID; пусто — текущий чат ключа области (создаётся, если нет, как сейчас); порт ThreadRepository.GetByKey становится «текущий чат ключа»; несовпадение предмета области и чата — ошибка домена",
-                "Бюджет, план, provenance и Undo по-прежнему на поток; Hub-контракт не меняется (thread_id уже на поток)",
+                "ADR-0028 (переработан 2026-10-27); домен — TASK-203, хранилище — TASK-204",
+                "Новый use case cases/agentchats со своими узкими портами в ports.go (ARCH-21): List() — все чаты (неархивные по последней активности, затем архив) с признаком running; New() (если текущий чат пуст — вернуть его); Rename, Archive, Restore; Earlier(threadID) — прежние просьбы только для чтения: текст студента, его упоминания (kind, id, label) и строка ответа из проверенных текстов планировщика (по образцу thread.Reply, русские подписи), без результатов инструментов",
+                "cases/agentturn: AskInput получает ThreadID (необязательно; пусто — текущий чат) и Mentions (≤ 8: kind, id, label); каждое упоминание проверяется на существование через узкий порт (реализация в app поверх library, schedule и homeworkflow), несуществующее отбрасывается без ошибки; ID упоминаний — в происхождение просьбы; просьба в архивный чат возвращает его из архива",
+                "Бюджет, план, provenance и Undo — на чат; на Hub упоминания уходят только с каталогом 8 (TASK-245), здесь контракт не меняется",
                 "Правила только в агрегате; use case загружает, вызывает, сохраняет (ARCH-22); один агрегат на транзакцию",
                 "Тесты на фейках портов; существующие тесты agentturn не ослаблены",
+                "Файлы: paratech/desktop/internal/cases/agentchats/* (новый), paratech/desktop/internal/cases/agentturn/*, paratech/desktop/internal/app/* (только подключение и порт проверки упоминаний) (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
-                "go test -race ./desktop/internal/cases/... и тест архитектуры, golangci-lint"
+                "go test -race ./desktop/internal/cases/... ./desktop/internal/app/... и тест архитектуры, golangci-lint"
             ],
             "dependencies": [
-                "TASK-203"
+                "TASK-204"
             ],
             "status": "pending"
         },
         {
             "id": "TASK-206",
             "category": "functional",
-            "priority": "low",
-            "description": "[Бэклог · Чаты агента · binding] Методы чатов в input/wails.AgentService, threadId в Ask, заполнение в agent:update, связывание в app",
+            "priority": "medium",
+            "description": "[Чаты агента · binding] Методы чатов в input/wails.AgentService, threadId и упоминания в Ask, threadId в agent:update, связывание в app",
             "acceptance_criteria": [
-                "Владелец 2026-10-26: бэклог, не запускать без слова владельца",
-                "AgentService: Chats(subjectId) → [{threadId, title, archived, lastActive, running, fill{percent, level: normal|high|full, overflow}}], NewChat(subjectId), RenameChat(threadId, title), ArchiveChat, RestoreChat, ChatEarlier(threadId); AgentAskInput.threadId (пусто — текущий чат)",
-                "Пороги уровня по ADR-0028 (по умолчанию <70 normal, 70–89 high, ≥90 full) — одна функция в Go, не во фронтенде",
-                "agent:update в конце просьбы несёт fill её чата; ошибки — известные problem-коды (invalid, busy, failed), новый код для архивного чата",
-                "input/agent.Driver передаёт ThreadID; app связывает cases/agentchats; input/wails не импортирует input/agent (ADR-0021)",
-                "Привязки Wails перегенерированы; тесты биндинга",
+                "ADR-0028 (переработан 2026-10-27); use case — TASK-205",
+                "AgentService: Chats() → [{threadId, title, archived, lastActive, running}], NewChat(), RenameChat(threadId, title), ArchiveChat(threadId), RestoreChat(threadId), ChatEarlier(threadId) → [{text, mentions[{kind, id, label}], reply}]; AgentAskInput.threadId (пусто — текущий чат) и mentions[{kind, id, label}]; ошибки — известные problem-коды (invalid, busy, failed, not_found)",
+                "agent:update несёт threadId; «Журнал» берёт предмет строки из области её просьбы и показывает название чата",
+                "Заполнение кольца здесь не отдаётся (TASK-251)",
+                "input/agent.Driver передаёт ThreadID и упоминания; app связывает cases/agentchats; input/wails не импортирует input/agent (ADR-0021)",
+                "Привязки Wails перегенерированы; frontend/src/bindings/agent.ts разбирает новые DTO (отрисовка — TASK-207); тесты биндинга и разбора",
+                "Файлы: paratech/desktop/internal/input/wails/agent*.go (в т. ч. agentjournal.go), paratech/desktop/internal/cases/agentjournal/* (только предмет строки из области просьбы и название чата), paratech/desktop/internal/input/agent/*, paratech/desktop/internal/app/*, paratech/desktop/frontend/src/bindings/agent.ts, frontend/test/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
-                "go test -race ./desktop/internal/input/... ./desktop/internal/app/..., GOOS=windows go vet ./desktop/..., golangci-lint"
+                "go test -race ./desktop/internal/input/... ./desktop/internal/app/..., GOOS=windows go vet ./desktop/..., golangci-lint",
+                "npm --prefix paratech/desktop/frontend run test и run build"
             ],
             "dependencies": [
-                "TASK-204",
                 "TASK-205"
             ],
             "status": "pending"
@@ -4481,15 +4489,16 @@
         {
             "id": "TASK-207",
             "category": "ui",
-            "priority": "low",
-            "description": "[Бэклог · Чаты агента · UI] Список чатов в панели агента: новый, переключение, переименование, архив, прежние сообщения",
+            "priority": "medium",
+            "description": "[Чаты агента · UI] Один общий список чатов в панели агента: новый, переключение, переименование, архив, продолжение старого чата, прежние сообщения",
             "acceptance_criteria": [
-                "Владелец 2026-10-26: бэклог, не запускать без слова владельца",
-                "В шапке панели — текущий чат (название) и список чатов выбранного предмета/«Без предмета»: неархивные по последней активности, ниже свёрнутый «Архив»; кнопка «Новый чат»; переименование по месту; «В архив» / «Вернуть»",
-                "Выбор чата ставит его предмет в чип контекста; смена предмета в чипе показывает чаты этого предмета и открывает текущий",
+                "ADR-0028 (переработан 2026-10-27); привязки — TASK-206",
+                "В шапке панели — название текущего чата и общий список чатов (не по предметам): неархивные по последней активности, ниже свёрнутый «Архив»; кнопка «Новый чат»; переименование по месту; «В архив» / «Вернуть»; архивный чат открывается, и новое сообщение в нём возвращает его из архива",
+                "Чип контекста по-прежнему задаёт предмет и экран просьбы и не переключает чат; смена чата не меняет чип",
                 "Переключение во время выполняющейся просьбы разрешено: та продолжается, её чат помечен в списке; обновления применяются к своему чату по threadId",
-                "Прежние просьбы открытого чата — только текст (студент + строка ответа), кнопки только у текущей просьбы; архивный чат только для чтения, ввод отключён с подсказкой «Чат в архиве»",
+                "Прежние просьбы открытого чата — только текст (студент + строка ответа), упоминания — пилюлями с сохранённым названием, кнопки только у текущей просьбы (если владелец выберет (б) в Open 7 ADR-0028 — отдельная задача)",
                 "Безличные тексты, один акцент, тёмная тема, клавиатура и aria; тесты фронтенда",
+                "Файлы: paratech/desktop/frontend/src/agent/*, src/agentView.ts, src/journalView.ts (только название чата), test/* (+ тесты)",
                 "Исполнитель: frontend"
             ],
             "test_steps": [
@@ -4503,21 +4512,23 @@
         {
             "id": "TASK-208",
             "category": "ui",
-            "priority": "low",
-            "description": "[Бэклог · Чаты агента · UI] Кольцо заполнения контекста у поля ввода и подсказка «начать новый чат»",
+            "priority": "medium",
+            "description": "[Чаты агента · UI] Кольцо заполнения контекста у поля ввода: цвет с 70 %, подсказка «Начать новый чат» с 90 %",
             "acceptance_criteria": [
-                "Владелец 2026-10-26: бэклог, не запускать без слова владельца",
+                "Перед запуском: ответ владельца на Open 4 ADR-0028 (что при заполненном кольце); данные — TASK-251",
                 "Небольшое кольцо слева от кнопки отправки, заполнено на fill.percent (не больше 100 %), role=\"img\" и скрытый текст «Контекст чата: N %», такая же подсказка при наведении",
-                "Уровни из Go (fill.level): normal — второстепенный цвет; high — акцент; full — акцент и строка под полем «Чат становится длинным — начать новый чат» с действием «Новый чат»; overflow — полное кольцо и «Ранние сообщения этого чата агент уже не видит — начать новый чат»; без красного",
+                "Уровни из Go (fill.level): normal (< 70 %) — второстепенный цвет; high (70–89 %) — акцентный цвет; full (≥ 90 %) — акцент и строка под полем «Начать новый чат» с действием «Новый чат»; overflow — по ответу на Open 4; один акцент, без красного",
                 "Обновляется при открытии чата и по agent:update в конце просьбы, не во время шага; prefers-reduced-motion — без анимации заполнения",
                 "Тесты фронтенда: уровни, подсказка, действие «Новый чат», aria-текст",
+                "Файлы: paratech/desktop/frontend/src/agent/*, src/agentView.ts, test/* (+ тесты)",
                 "Исполнитель: frontend"
             ],
             "test_steps": [
                 "npm --prefix paratech/desktop/frontend run test и run build"
             ],
             "dependencies": [
-                "TASK-207"
+                "TASK-207",
+                "TASK-251"
             ],
             "status": "pending"
         },
@@ -4525,10 +4536,9 @@
             "id": "TASK-209",
             "category": "functional",
             "priority": "low",
-            "description": "[Бэклог · Чаты агента · Hub contract] Только при варианте «Б» владельца (Open 2 ADR-0028): размер окна модели в AgentStepResponse",
+            "description": "[Чаты агента · Hub contract] Только при варианте (б) владельца (Open 1 ADR-0028): размер окна модели в AgentStepResponse",
             "acceptance_criteria": [
-                "Владелец 2026-10-26: бэклог, не запускать без слова владельца",
-                "Не нужна при выбранной мере ADR-0028 (заполнение окна истории десктопа); запускать только если владелец выберет реальные токены последнего шага против окна модели",
+                "Перед запуском: ответ владельца на Open 1 ADR-0028. Запускать только при варианте (б) — кольцо по реальным токенам последнего шага против окна модели; при (а) задача не нужна: отметить done с пометкой «не нужна» в progress",
                 "gateway.proto: AgentStepResponse.context_window_tokens (поле 6, аддитивно, buf breaking зелёный); значение — из конфигурации Hub на профиль/алиас, не из ответа провайдера; при повторе (replayed) — то же значение",
                 "usage.input_tokens уже включает запись и чтение кеша (anthropic wire.go) — это и есть «использовано»; комментарий в proto об этом",
                 "Тесты agentstep и контракта; README Hub — новая настройка",
@@ -4838,6 +4848,554 @@
             "dependencies": [
                 "TASK-225",
                 "TASK-226"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-228",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Задания · ядро] «Удалить» любое задание: мягкое удаление и «Вернуть» (домен, миграция, use case, все читатели)",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-27: у каждого задания (не только своего и не только сразу после создания) есть «Удалить». docs/adr/0029-student-assignments.md, дополнение 2026-10-27",
+                "Домен coursework/assignment: Delete(now) и Restore(now) для заданий любого происхождения (извлечено из записи, найдено в материале, добавлено студентом или агентом); deletedAt в State/Restore; повторное удаление или восстановление не удалённого — доменная ошибка; удалённое не правится (ErrDeleted); обе операции меняют версию",
+                "Миграция desktop (следующий свободный номер на момент пуша; не запускать параллельно с другой задачей с миграцией — общие schema.sql и migrate_test): assignments.deleted_at INTEGER NULL; docs/contracts/schema.sql — зеркало",
+                "cases/homeworkflow: DeleteAssignment(ctx, id, expectedVersion) и RestoreAssignment(ctx, id, expectedVersion); отказ assignment.ErrInUse при неразрешённой доставке (PENDING, в том числе запланированной, SENDING, UNKNOWN) или незавершённой задаче черновика, написания или разбора; черновики, работы, доставки и предложения не трогаются; одна транзакция, один агрегат; Google и предложения — TASK-229",
+                "Все читатели пропускают удалённые: список «Задания», «Сегодня» и «Горит на 7 дней», страница предмета, сроки, агентские list_assignments и проверка ID (вызов с удалённым ID — unknown_id); повторная обработка записи не создаёт и не оживляет удалённое извлечённое задание (надгробие, как user_edited)",
+                "Тесты: домен (переходы, версия, ErrDeleted), use case (каждый вид происхождения, отказы ErrInUse, версия), sqlite (roundtrip, фильтры читателей), повторная обработка не оживляет, агентский вызов с удалённым ID — unknown_id",
+                "Файлы: paratech/desktop/internal/domain/coursework/assignment/*, paratech/desktop/internal/cases/homeworkflow/* (новый delete.go, ports.go, types.go, errors.go; правило надгробия там, где живёт повторная обработка), paratech/desktop/internal/cases/todayfeed/* (только фильтр, если читает сам), paratech/desktop/internal/adapters/sqlite/assignments*.go, adapters/sqlite/queries/assignments.sql, adapters/sqlite/sqlcgen/*, paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/coursework/... ./desktop/internal/cases/... ./desktop/internal/adapters/sqlite/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-229",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Задания · ядро] Последствия удаления задания: событие в Google Календаре, предложения по удалённому заданию, удаление записи",
+            "acceptance_criteria": [
+                "docs/adr/0029-student-assignments.md, дополнение 2026-10-27 (Google Calendar, Proposals, Recording deletion); ядро удаления — TASK-228",
+                "DeleteAssignment пишет строку deadline_event_removals в своей транзакции (очередь, образец ADR-0018) и просит синхронизацию календаря; RestoreAssignment удаляет ещё ждущую строку; синхронизация удаляет событие (404/410 — успех) и строку, как сейчас",
+                "«Да» на предложении удалённого задания (send_homework_email, send_work_email, export_homework, create_deadline_event) — STALE с причиной assignment_deleted (новое значение proposal.RejectReason; если нужна правка CHECK — остановиться и описать), ничего не отправляется и не экспортируется; проверка при «Да», удаление не трогает предложения",
+                "Удаление записи (ADR-0018): удалённое задание не предлагается к удалению и остаётся (ссылка на транскрипт — NULL)",
+                "Тесты: удаление → строка очереди и синхронизация удаляет событие; «Вернуть» до синхронизации — строки нет, событие на месте; «Да» на каждом виде предложения после удаления — STALE; удаление записи с удалённым заданием",
+                "Файлы: paratech/desktop/internal/cases/homeworkflow/delete.go и proposals.go, worksend.go, paratech/desktop/internal/domain/coursework/proposal/*, paratech/desktop/internal/cases/recordingdelete/*, paratech/desktop/internal/adapters/sqlite/* (только запрос очереди) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/coursework/... ./desktop/internal/cases/... ./desktop/internal/adapters/sqlite/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-228"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-230",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Задания · ядро] Правка задания после создания: название, заметка, срок (дата и время) и предмет из библиотеки",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-27; docs/adr/0029-student-assignments.md, дополнение 2026-10-27 «Edit after creation»",
+                "homeworkflow.EditAssignment принимает ID, expectedVersion, Title, Note, Subject shared.SubjectID (необяз.; пусто — без предмета), Date YYYY-MM-DD (необяз.), Time HH:MM (необяз., только с Date); зона — из часов use case; без времени — 23:59 местного дня (как create_assignment); имя предмета — через порт имени предмета из TASK-215, хранится как исправление предмета студента; неизвестный предмет — ErrSubjectNotFound",
+                "Правила по происхождению в домене: задание студента — правила ADR-0029 (заголовок 1–200 рун одной строкой, заметка ≤ 2000, срок в окне now − 31 день … now + 2 года); извлечённое — NewDetails плюс тот же запрет управляющих и bidi; правка ставит user_edited; несовпадение версии — shared.ErrVersionConflict; удалённое — ErrDeleted",
+                "Существующие вызовы EditAssignment (агентский edit_due в input/agent/actions.go) продолжают работать без изменения поведения (тест)",
+                "Тесты: домен (каждое поле, оба происхождения, bidi, окно срока, 23:59 и HH:MM), use case (предмет, без предмета, неизвестный предмет, версия, удалённое)",
+                "Файлы: paratech/desktop/internal/domain/coursework/assignment/*, paratech/desktop/internal/cases/homeworkflow/assignments.go, types.go, errors.go, paratech/desktop/internal/input/agent/actions.go (только под изменённую сигнатуру) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/coursework/... ./desktop/internal/cases/homeworkflow/... ./desktop/internal/input/agent/... и тест архитектуры",
+                "golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-228"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-231",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Задания · привязка Wails] Методы «Удалить», «Вернуть» и «Изменить» задания в HomeworkService и во фронтенд-привязке",
+            "acceptance_criteria": [
+                "docs/adr/0029-student-assignments.md, дополнение 2026-10-27; use cases — TASK-228/229 (удаление, восстановление), TASK-230 (правка)",
+                "input/wails/homework.go: DeleteAssignment(id, version) и RestoreAssignment(id, version) → {problem: '' | in_use | changed | not_found | failed, assignment}; EditAssignment(req{id, version, title, note, subjectId, date, time}) → {problem: '' | invalid (field: title | note | due | time) | subject_not_found | changed | deleted | not_found | failed, field, assignment}; DTO задания несёт version",
+                "Клик студента — его собственное действие, записи в журнале агента нет (как CreateAssignment, TASK-218); интерфейс use case в input/wails расширен узко, app передаёт тот же homeworkflow.Service",
+                "frontend/src/bindings/homework.ts: deleteAssignment, restoreAssignment, editAssignment с разбором ответа; русские тексты — на странице (TASK-232)",
+                "Тесты: каждый problem-код, повтор удаления, версия, разбор в bindings",
+                "Файлы: paratech/desktop/internal/input/wails/homework*.go, paratech/desktop/internal/app/* (только если нужно подключение), paratech/desktop/frontend/src/bindings/homework.ts, frontend/test/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/wails/... ./desktop/internal/app/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/...",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-229",
+                "TASK-230"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-232",
+            "category": "ui",
+            "priority": "high",
+            "description": "[Задания · UI] Кнопки «Удалить» (с «Вернуть») и «Изменить» у каждого задания",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-27; привязки — TASK-231",
+                "Страница задания и строка списка «Задания»: «Удалить» без диалога; на месте задания строка «Задание удалено» с «Вернуть» (до ухода со страницы); отказы: in_use — «Сначала дождитесь отправки или работы над заданием», changed — обновить и повторить; удалённое пропадает из «Сегодня» и «Горит на 7 дней» после обновления",
+                "«Изменить» на странице задания: та же форма, что «Добавить задание» (TASK-219), заполненная текущими значениями: «Что сделать», «Предмет» (предметы библиотеки и «Без предмета»), «Срок» (дата и необязательное время), «Заметка»; ошибки у поля по field; Enter/Esc как в форме добавления",
+                "Тексты безличные, по-русски, только текстовыми узлами; тёмная тема, один акцент",
+                "Тесты (SSR и чистые функции): удаление и «Вернуть», отказы, форма правки и ошибки по полям, один вызов при двойном клике",
+                "Файлы: paratech/desktop/frontend/src/pages/HomeworkPage.tsx, src/pages/HomeworkDialogs.tsx, src/homeworkView.ts, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Владелец: docs/qa/tasks/TASK-232.md — удалить извлечённое и своё задание → «Вернуть» → оба на месте; изменить предмет, срок (завтра 09:00) и заметку → видно в «Задания», на странице предмета и в «Горит на 7 дней»"
+            ],
+            "dependencies": [
+                "TASK-231"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-233",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Hub · промпт] Новая версия panel: в просьбе без предмета агент спрашивает предмет перед create_assignment",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open C-1 в docs/adr/0029-student-assignments.md (есть ли вариант «Без предмета» в вопросе)",
+                "Решение владельца 2026-10-27: в «Без предмета», если студент не назвал предмет, агент спрашивает (ask_questions), а не сохраняет без предмета. Правила версий — hub/pkg/prompts/doc.go: следующая свободная версия N (ожидается v7) = v(N−1) + одно правило; tools.json без изменений (побайтно), shared/testdata/tool_catalog_vN.json совпадает",
+                "system.md vN: когда в области просьбы нет предмета и студент его не назвал — сначала ask_questions «К какому предмету относится задание?» с вариантами из list_subjects (по ответу на Open C-1 — с «Без предмета» последним или без него), затем create_assignment с выбранным ID; при области с предметом — правило v6 без изменений; без даты — по-прежнему без срока и без вопроса",
+                "Тесты: vN загружается и совпадает с golden; v1…N−1 обслуживаются; eval-кейсы в hub/tests/agent_eval_test.go: просьба без предмета «запиши: решить номер 5 к пятнице» → ask_questions с предметами, ответ → create_assignment{subject}; просьба с предметом в области → create_assignment без вопроса; «по матану нужно решить номер 5» без предмета в области → без вопроса, subject из list_subjects",
+                "Совместимость: Hub разворачивается раньше десктопа на каталоге N (TASK-234); proto не меняется; без новых зависимостей",
+                "Файлы: paratech/hub/pkg/prompts/agent/panel/vN/*, paratech/hub/pkg/prompts/*_test.go, paratech/shared/testdata/tool_catalog_vN.json, paratech/shared/contract_test.go, paratech/hub/tests/agent_eval_test.go (+ тесты)",
+                "Исполнитель: hub-dev (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./hub/... (Postgres как в CI) и golangci-lint",
+                "go test ./shared/... и buf lint в paratech/shared"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-234",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Агент · ядро] Десктоп на каталоге 7 (промпт panel v7 из TASK-233: вопрос о предмете в просьбе без предмета)",
+            "acceptance_criteria": [
+                "Hub отдаёт промпт vN только клиентам с CatalogVersion N (как TASK-210); инструменты vN те же, что v(N−1) — проверить побайтно и зафиксировать тестом",
+                "values.CatalogVersion = N; golden-ссылка desktop/tests/agent_catalog_test.go на shared/testdata/tool_catalog_vN.json; agenteval CatalogFile на vN и кейсы TASK-233",
+                "Старые просьбы на каталоге N−1 после обновления: «Продолжить»/«Повторить» — существующий честный отказ, новая просьба работает (как TASK-184); тест",
+                "Развёртывание: Hub с каталогом N раньше десктопа; записать в progress",
+                "Файлы: paratech/desktop/internal/domain/agent/values/tool.go, paratech/desktop/tests/agent_catalog_test.go, paratech/desktop/tests/agenteval/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race затронутых пакетов, desktop/tests и agenteval, GOOS=windows go vet, golangci-lint"
+            ],
+            "dependencies": [
+                "TASK-233"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-235",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Предметы · ядро] Преподаватель предмета: имя и почта (домен, миграция, use case library)",
+            "acceptance_criteria": [
+                "Решение владельца 2026-10-27: у предмета есть преподаватель — имя и почта, вводятся один раз. docs/adr/0030-subject-teachers-scheduled-send.md",
+                "Домен library/subject: необязательный Teacher{name, email}; имя 1–200 рун одной строкой без управляющих и bidi; почта — те же синтаксические правила, что proposal.NewRecipient (своя проверка в library, ARCH-11); SetTeacher(name, email, now) и ClearTeacher(now) меняют версию; ошибки — ErrInvalidTeacher",
+                "Миграция desktop (следующий свободный номер на момент пуша; не параллельно с другой задачей с миграцией): subjects.teacher_name, subjects.teacher_email TEXT NOT NULL DEFAULT ''; docs/contracts/schema.sql — зеркало",
+                "cases/library: SetTeacher(ctx, subjectID, name, email, expectedVersion) и ClearTeacher; вид предмета отдаёт teacher; агенту и Hub не передаётся (ADR-0022: в AgentBase нет личных данных — тест, что base без имени и почты)",
+                "Тесты: домен (длины, управляющие и bidi, неверная почта), use case (установка, очистка, версия), sqlite (roundtrip)",
+                "Файлы: paratech/desktop/internal/domain/library/subject/*, paratech/desktop/internal/cases/library/*, paratech/desktop/internal/adapters/sqlite/subjects*.go, adapters/sqlite/queries/subjects*.sql, adapters/sqlite/sqlcgen/*, paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/library/... ./desktop/internal/cases/library/... ./desktop/internal/adapters/sqlite/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-236",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Предметы · привязка Wails] Преподаватель предмета в LibraryService и во фронтенд-привязке",
+            "acceptance_criteria": [
+                "docs/adr/0030-subject-teachers-scheduled-send.md; use case — TASK-235",
+                "input/wails/library.go: SetSubjectTeacher(subjectId, version, name, email) → {problem: '' | invalid (field: name | email) | changed | not_found | failed, subject}; ClearSubjectTeacher(subjectId, version); DTO предмета несёт teacher {name, email}",
+                "frontend/src/bindings/library.ts: setSubjectTeacher, clearSubjectTeacher, разбор teacher; тексты — на странице (TASK-238)",
+                "Тесты: каждый problem-код, разбор в bindings",
+                "Файлы: paratech/desktop/internal/input/wails/library*.go, paratech/desktop/internal/app/* (только если нужно подключение), paratech/desktop/frontend/src/bindings/library.ts, frontend/test/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/wails/... ./desktop/internal/app/..., GOOS=windows go vet ./desktop/..., golangci-lint",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-235"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-237",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Отправка · ядро] «Отправить преподавателю» — на почту преподавателя предмета, а не на общий адрес из настроек",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open B-1 в docs/adr/0030-subject-teachers-scheduled-send.md (нет почты преподавателя или нет предмета)",
+                "homeworkflow: порт RecipientSource.HomeworkRecipient(ctx) → Recipient(ctx, subject shared.SubjectID) → адрес и имя преподавателя; предмет: у работы — её subject ID, иначе библиотечный предмет задания (по имени, как ADR-0024); выбор «преподаватель, иначе — по Open B-1» — чистая функция в domain/coursework/proposal, не в use case (ARCH-22)",
+                "app/settingsbridge.go: реализация поверх library.Service и настроек; для send_homework_email и send_work_email; адрес закрепляется при проверке и проверяется снова при «Да» (другой адрес — STALE, как сейчас); вид предложения отдаёт recipientName для карточки «Кому»",
+                "Текст преподавателя у задания (извлечение, CorrectLesson) никогда не адрес; агент и модель адрес не задают (hard rule 3); тест инъекции: адрес в тексте задания не становится получателем",
+                "Тесты: преподаватель есть, нет (по Open B-1), задание без предмета, смена адреса между карточкой и «Да» — STALE, работа без задания (no_assignment как сейчас)",
+                "Файлы: paratech/desktop/internal/domain/coursework/proposal/*, paratech/desktop/internal/cases/homeworkflow/ports.go, proposals.go, worksend.go, types.go, paratech/desktop/internal/app/settingsbridge.go и подключение, paratech/desktop/internal/input/wails/agentconfirm*.go и homework*.go (только поле recipientName), paratech/desktop/frontend/src/bindings/agentConfirm.ts и homework.ts (разбор поля) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/coursework/... ./desktop/internal/cases/homeworkflow/... ./desktop/internal/app/... ./desktop/internal/input/wails/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/...",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-235"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-238",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Предметы · UI] Преподаватель на странице предмета (имя и почта) и «Кому: имя <адрес>» в карточке отправки",
+            "acceptance_criteria": [
+                "docs/adr/0030-subject-teachers-scheduled-send.md; привязки — TASK-236 (преподаватель), TASK-237 (recipientName); страница предмета — после TASK-227",
+                "Страница предмета: блок «Преподаватель» — имя и почта или «Не указан»; «Указать»/«Изменить» открывает маленькую форму (имя, почта, «Сохранить», «Отмена», «Убрать»); ошибки у поля; тексты как текст",
+                "Карточки отправки (задание и работа): «Кому: <имя> <адрес>», без имени — только адрес",
+                "Безличные тексты, тёмная тема, один акцент, клавиатура и aria; тесты фронтенда",
+                "Файлы: paratech/desktop/frontend/src/pages/Subject*.tsx, src/agent/AgentCards.tsx и страница задания (только строка «Кому»), src/*View.ts, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Владелец: docs/qa/tasks/TASK-238.md — указать преподавателя Матана с почтой → «Отправить преподавателю» по заданию Матана → в карточке его имя и адрес"
+            ],
+            "dependencies": [
+                "TASK-227",
+                "TASK-236",
+                "TASK-237"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-239",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Отправка · ядро] «Отправить в…»: время отправки в подтверждении, доставка не раньше этого времени",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open B-2 в docs/adr/0030-subject-teachers-scheduled-send.md (приложение было закрыто в это время)",
+                "proposal: подтверждение отправки (send_homework_email, send_work_email) принимает необязательное sendAt; правило в домене: от now + 5 мин до now + 14 дней, с точностью до минуты; иначе ErrInvalidSendTime; хранится в proposals.send_at; EmailCommand несёт его; CONFIRMED-предложение, продолженное после сбоя, берёт сохранённое время",
+                "delivery: Spec.NotBefore и notBefore в State/Restore; senddelivery.ensureJob ставит job.Spec.RunAt = notBefore (очередь это уже умеет); ключ и правило «один ключ — одна доставка», UNKNOWN и сверка — без изменений (hard rule 7); View отдаёт scheduledAt",
+                "Поведение при опоздании (приложение закрыто, компьютер спал) — по ответу на Open B-2: (а) без изменений очереди; (б)/(в) — правило опоздания в агрегате delivery (время передаётся параметром), отказ без отправки с понятной причиной",
+                "Запланированная доставка — PENDING: блокирует другую отправку того же задания, перегенерацию файла экспорта (HasUnresolved) и удаление задания (TASK-228)",
+                "Миграция desktop (следующий свободный номер на момент пуша; не параллельно с другой задачей с миграцией): proposals.send_at INTEGER NULL, deliveries.not_before INTEGER NULL; docs/contracts/schema.sql — зеркало",
+                "Тесты: домен (границы времени), use case (отложенная задача с RunAt, повтор «Да» — одна доставка, перезапуск до времени — отправка ровно одна в срок на управляемых часах), опоздание по Open B-2, адрес закреплён при «Да»",
+                "Файлы: paratech/desktop/internal/domain/coursework/proposal/*, paratech/desktop/internal/domain/delivery/delivery/*, paratech/desktop/internal/cases/homeworkflow/proposals.go, worksend.go, types.go, paratech/desktop/internal/cases/senddelivery/*, paratech/desktop/internal/adapters/sqlite/proposals*.go и deliveries*.go, adapters/sqlite/queries/*, adapters/sqlite/sqlcgen/*, paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/... ./desktop/internal/cases/... ./desktop/internal/adapters/sqlite/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-237"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-240",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Отправка · привязка Wails] Время отправки в «Да» и «Запланировано на …» в доставках",
+            "acceptance_criteria": [
+                "docs/adr/0030-subject-teachers-scheduled-send.md; ядро — TASK-239",
+                "AgentConfirmService/HomeworkService: подтверждение отправки задания и работы принимает sendAt (местное «YYYY-MM-DDTHH:MM», пусто — сейчас); новые problem-коды send_time_past и send_time_far; DTO доставки и предложения несут scheduledAt",
+                "frontend/src/bindings/agentConfirm.ts и homework.ts: передача sendAt и разбор scheduledAt; тексты — в TASK-241",
+                "Тесты: разбор времени и зоны, коды ошибок, разбор в bindings",
+                "Файлы: paratech/desktop/internal/input/wails/agentconfirm*.go, homework*.go, paratech/desktop/frontend/src/bindings/agentConfirm.ts, homework.ts, frontend/test/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/wails/... ./desktop/internal/app/..., GOOS=windows go vet ./desktop/..., golangci-lint",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-239"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-241",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Отправка · UI] «Отправить в…» в карточке подтверждения и «Запланировано на …» у задания и работы",
+            "acceptance_criteria": [
+                "docs/adr/0030-subject-teachers-scheduled-send.md; привязки — TASK-240",
+                "Карточка подтверждения отправки (задание и работа): «Отправить сейчас» и «Отправить в…»; выбор: «Завтра в 9:00», «Сегодня в …» (ближайший целый час, если он позже чем через 5 минут), дата и время вручную; одна кнопка «Да» подтверждает и время; ошибки send_time_past/send_time_far — у поля времени",
+                "Подсказка в карточке: «Письмо уйдёт, только если приложение будет запущено (можно свернуть в трей)»",
+                "У задания и работы: «Запланировано на 28.10 в 9:00» вместо «Отправлено», пока доставка ждёт; после отправки — как сейчас (sentAt)",
+                "Безличные тексты, тёмная тема, один акцент, клавиатура и aria; тесты фронтенда",
+                "Файлы: paratech/desktop/frontend/src/agent/AgentCards.tsx, src/pages/HomeworkPage.tsx, src/pages/HomeworkDialogs.tsx, src/homeworkView.ts, src/agentView.ts, страница работы «под ключ» (только строка состояния), test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Владелец: docs/qa/tasks/TASK-241.md — «Отправить преподавателю» → «Отправить в…» через 10 минут → «Запланировано на …» → письмо приходит в срок, пока приложение запущено"
+            ],
+            "dependencies": [
+                "TASK-238",
+                "TASK-240"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-242",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Отправка · ядро и привязка] Отмена запланированной отправки до её времени (только при ответе владельца «да»)",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open B-3 в docs/adr/0030-subject-teachers-scheduled-send.md. Только при варианте (а); при (б) задача не нужна",
+                "delivery: новый статус CANCELLED; переход PENDING → CANCELLED только пока доставка не начала отправку (не SENDING), таблицей переходов (ARCH-19); миграция — пересборка deliveries под CHECK (следующий свободный номер; не параллельно с другой задачей с миграцией); docs/contracts/schema.sql — зеркало",
+                "senddelivery.CancelScheduled(ctx, id): переход в агрегате, затем отмена задачи через jobrunner; гонка с началом отправки — доменная ошибка, письмо не теряется и не дублируется (hard rule 7); отменённая не блокирует новую отправку",
+                "Привязка: CancelScheduledSend(deliveryId) → {problem: '' | already_sending | not_found | failed}; bindings ts",
+                "Тесты: домен (переходы), use case (отмена до времени, гонка с отправкой на управляемых часах), привязка",
+                "Файлы: paratech/desktop/internal/domain/delivery/delivery/*, paratech/desktop/internal/cases/senddelivery/*, paratech/desktop/internal/adapters/sqlite/deliveries*.go, queries, sqlcgen, paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, paratech/desktop/internal/input/wails/homework*.go, paratech/desktop/frontend/src/bindings/homework.ts, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/delivery/... ./desktop/internal/cases/senddelivery/... ./desktop/internal/adapters/sqlite/... ./desktop/internal/input/wails/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/...",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-240"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-243",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Отправка · UI] Кнопка «Отменить отправку» у запланированной отправки (только при ответе владельца «да»)",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open B-3 (вариант (а)); привязка — TASK-242",
+                "Рядом с «Запланировано на …»: «Отменить отправку»; после — «Отправка отменена» и снова доступна «Отправить преподавателю»; already_sending — «Письмо уже отправляется»",
+                "Безличные тексты, тёмная тема, один акцент; тесты фронтенда",
+                "Файлы: те же, что у TASK-241 (только эта кнопка и её строки), test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-241",
+                "TASK-242"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-244",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Hub · контракт и промпт] Чаты: упоминания в AgentScope, промпт panel для общих чатов, раскладка кеша (область после истории)",
+            "acceptance_criteria": [
+                "docs/adr/0028-agent-chats-context-ring.md (переработан 2026-10-27): «References, not copies», «History window and prompt cache». Делается после TASK-233: следующая свободная версия N (ожидается v8)",
+                "gateway.proto (аддитивно, buf breaking зелёный): AgentScope.mentions = 5, repeated AgentMention {kind (enum: subject, lesson, material, assignment), id, current (bool)}; не больше 16; только ID, без названий; комментарии «one thread per subject» и «only the current subject» обновлены; buf generate",
+                "Hub проверяет упоминания (вид, формат ID, лимит) и для каталога ≥ N кладёт их в проверку происхождения ID шага наравне с областью",
+                "Раскладка для каталога ≥ N (adapters/anthropic): tools → system → base (точка кеша) → прежние пары (точка кеша на последнем блоке прежних пар) → область и упоминания отдельным блоком данных пользователя прямо перед текущей просьбой → текущая просьба (точка кеша на последнем блоке); не больше 4 точек; для старых каталогов раскладка прежняя (тест)",
+                "system.md vN = v(N−1) + правила чатов: в чате бывают просьбы по разным предметам; предмет — из области этой просьбы или из упоминаний, не из чата; упоминания — ID для инструментов, содержимое читать инструментами; tools.json vN = v(N−1) побайтно, shared/testdata/tool_catalog_vN.json совпадает",
+                "Тесты: proto и контракт; раскладка (точки кеша, порядок, старые каталоги); eval-кейсы: просьба с упоминанием лекции другого предмета → инструмент с этим ID; ID без упоминания и вне контекста — не выдумывается",
+                "Файлы: paratech/shared/proto/paratech/hub/v1/gateway.proto, paratech/shared/gen/*, paratech/shared/testdata/tool_catalog_vN.json, paratech/shared/contract_test.go, paratech/hub/pkg/prompts/agent/panel/vN/*, paratech/hub/pkg/prompts/*_test.go, paratech/hub/internal/domain/llm/values/*, paratech/hub/internal/cases/agentstep/*, paratech/hub/internal/adapters/anthropic/*, paratech/hub/internal/input/connect/* (только перевод поля), paratech/hub/tests/agent_eval_test.go (+ тесты)",
+                "Исполнитель: hub-dev (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./hub/... ./shared/... (Postgres как в CI), buf generate, buf lint и buf breaking в paratech/shared, golangci-lint"
+            ],
+            "dependencies": [
+                "TASK-233"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-245",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Чаты агента · ядро] Десктоп на каталоге 8: упоминания уходят на Hub (только ID), golden каталога",
+            "acceptance_criteria": [
+                "ADR-0028; Hub — TASK-244, чаты — TASK-205, каталог 7 — TASK-234",
+                "values.CatalogVersion = N (ожидается 8); golden desktop/tests/agent_catalog_test.go на tool_catalog_vN.json; инструменты те же — тест",
+                "adapters/hubclient: AgentScope.mentions = упоминания текущей просьбы (current = true) и различные упоминания прежних просьб окна (без сброшенных), всего ≤ 16, только kind и id; Label никогда не уходит (тест на JSON запроса)",
+                "agenteval: кейсы TASK-244 и запись cache_read до и после (в progress)",
+                "Старые просьбы на каталоге N−1: «Продолжить»/«Повторить» — честный отказ, как TASK-184; развёртывание — Hub раньше десктопа",
+                "Файлы: paratech/desktop/internal/domain/agent/values/tool.go, paratech/desktop/internal/adapters/hubclient/*, paratech/desktop/internal/cases/agentturn/* (только передача упоминаний в порт шага), paratech/desktop/tests/agent_catalog_test.go, paratech/desktop/tests/agenteval/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race затронутых пакетов, desktop/tests и agenteval, GOOS=windows go vet, golangci-lint"
+            ],
+            "dependencies": [
+                "TASK-205",
+                "TASK-234",
+                "TASK-244"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-246",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Чаты агента · привязка] Поиск объектов для @-упоминания: предметы, лекции, материалы, задания",
+            "acceptance_criteria": [
+                "ADR-0028 «References, not copies»; привязки чатов — TASK-206",
+                "AgentService.MentionCandidates(query) → не больше 20 [{kind: subject | lesson | material | assignment, id, label, hint}]: поиск без учёта регистра по названию среди предметов библиотеки, лекций (пары с записью или конспектом), материалов и неудалённых заданий; пустой запрос — последние по активности; hint — предмет и дата; только существующие use cases через узкие интерфейсы input/wails",
+                "Тексты — данные, не инструкции; никаких путей к файлам в DTO",
+                "frontend/src/bindings/agent.ts: mentionCandidates с разбором",
+                "Тесты: каждый вид, лимит, регистр, удалённое задание не находится",
+                "Файлы: paratech/desktop/internal/input/wails/agent*.go, paratech/desktop/internal/app/* (только подключение), paratech/desktop/frontend/src/bindings/agent.ts, frontend/test/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/wails/... ./desktop/internal/app/..., GOOS=windows go vet ./desktop/..., golangci-lint",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-206",
+                "TASK-228"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-247",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Чаты агента · UI] @-упоминания в поле ввода агента и пилюли упоминаний в сообщениях",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open 2 ADR-0028 (упомянутый объект удалён или переименован); поиск — TASK-246",
+                "«@» в поле ввода открывает список кандидатов (mentionCandidates), стрелки и Enter выбирают, Esc закрывает; выбранное — пилюля с названием; не больше 8 в просьбе; упоминания уходят в Ask (kind, id, label)",
+                "В прежних сообщениях — пилюли с сохранённым названием; клик открывает объект (существующие маршруты App); удалённый или переименованный — по ответу на Open 2",
+                "Безличные тексты, тёмная тема, один акцент, клавиатура и aria (combobox/listbox); тесты фронтенда",
+                "Файлы: paratech/desktop/frontend/src/agent/*, src/agentView.ts, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Владелец: docs/qa/tasks/TASK-247.md — в одном чате «@Матан … и @Физика …» → агент отвечает по обоим предметам"
+            ],
+            "dependencies": [
+                "TASK-207",
+                "TASK-246"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-248",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Чаты агента · ядро и привязка] Начать заново с прежнего сообщения: всё после него агент забывает",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open 3 ADR-0028 (что видно из «забытых» сообщений: скрыть, скрытая ветка или новый чат-копия)",
+                "ADR-0028 «Restart from an earlier message»: домен thread.RestartFrom(n, …, now) только когда текущая просьба финальная (иначе ErrInvalidTransition): просьбы n…последняя получают droppedBy = номер новой просьбы, новая просьба добавляется; ничего не удаляется; действия и журнал не трогаются; одна транзакция, один агрегат. При варианте (в) Open 3 — вместо этого новый чат с копией пар до n (без печатей; эхо прежних просьб не отправляются)",
+                "cases/agentturn: AskInput.RestartFrom (номер просьбы, необяз.); cases/agentchats.Earlier помечает сброшенные (показ — по Open 3)",
+                "Привязка: AgentAskInput.restartFrom; ChatEarlier отдаёт dropped; bindings ts",
+                "Тесты: домен (переходы, окно и Fill без сброшенных), use case, привязка; повторный перезапуск",
+                "Файлы: paratech/desktop/internal/domain/agent/thread/*, paratech/desktop/internal/cases/agentturn/*, paratech/desktop/internal/cases/agentchats/*, paratech/desktop/internal/adapters/sqlite/agent*.go (только dropped_by), paratech/desktop/internal/input/wails/agent*.go, paratech/desktop/internal/input/agent/*, paratech/desktop/frontend/src/bindings/agent.ts (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/agent/... ./desktop/internal/cases/... ./desktop/internal/adapters/sqlite/... ./desktop/internal/input/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/...",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-206"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-249",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Чаты агента · UI] «Начать заново отсюда» у прежнего сообщения с предупреждением",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open 3 ADR-0028; привязка — TASK-248",
+                "У своего прежнего сообщения — «Начать заново отсюда» (только когда текущая просьба завершена); предупреждение «Сообщения после этого агент забудет. Сделанные действия не отменяются.» с «Продолжить» и «Отмена»; текст сообщения переходит в поле ввода для правки; отправка — с restartFrom",
+                "Сброшенные сообщения показываются по ответу на Open 3",
+                "Безличные тексты, тёмная тема, один акцент, клавиатура и aria; тесты фронтенда",
+                "Файлы: paratech/desktop/frontend/src/agent/*, src/agentView.ts, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-207",
+                "TASK-248"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-250",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Чаты агента · ядро] Хранение истории агента для чатов «только архив» (вместо очистки через 90 дней)",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open 6 ADR-0028: (а) хранить бессрочно; (б) оставить 90 дней — задача не нужна; (в) бессрочно — тексты студента и строки ответов, вызовы и результаты инструментов — 90 дней",
+                "Очистка agent_steps меняется по ответу; при (в) прежние пары окна строятся из оставшихся записей без ошибок (тест Window на очищенных результатах)",
+                "Тесты: очистка на управляемых часах; старый чат после срока продолжается",
+                "Файлы: место очистки agent_steps (cases и adapters/sqlite/agent*.go, queries), paratech/desktop/internal/domain/agent/thread/* (только если нужно для (в)) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race затронутых пакетов, GOOS=windows go vet, golangci-lint"
+            ],
+            "dependencies": [
+                "TASK-204"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-251",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Чаты агента · ядро] Данные кольца контекста: fill {percent, level, overflow} в списке чатов и в конце просьбы",
+            "acceptance_criteria": [
+                "Перед запуском: ответ владельца на Open 1 ADR-0028 (что показывает кольцо); при варианте (б) — сначала TASK-209",
+                "percent: (а) из thread.Fill следующей просьбы чата; (б) usage.input_tokens последнего шага чата против context_window_tokens (TASK-209), хранится с просьбой; overflow — всегда из thread.Fill; level — одна функция в Go: < 70 normal, 70–89 high, ≥ 90 full",
+                "AgentService.Chats отдаёт fill каждого чата; agent:update в конце просьбы несёт fill её чата; не во время шага",
+                "frontend/src/bindings/agent.ts: разбор fill (отрисовка — TASK-208)",
+                "Тесты: пороги 69/70/89/90, overflow, разбор",
+                "Файлы: paratech/desktop/internal/cases/agentchats/*, paratech/desktop/internal/input/wails/agent*.go, paratech/desktop/internal/input/agent/* (только конец просьбы), при (б) — cases/agentturn и adapters/sqlite/agent*.go с миграцией (следующий свободный номер), paratech/desktop/frontend/src/bindings/agent.ts (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/... ./desktop/internal/input/... и тест архитектуры, GOOS=windows go vet ./desktop/..., golangci-lint",
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-206"
             ],
             "status": "pending"
         }
