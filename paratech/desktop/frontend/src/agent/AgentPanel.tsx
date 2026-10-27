@@ -1,11 +1,29 @@
-import { type RefObject, useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { type AgentApi, agentApi, type AskInput, type CallProblem, draftEvent as draftEventName, parseDraft, parseUpdate, updateEvent, type UpdateView } from "../bindings/agent.js";
+import { type RefObject, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { type AgentApi, agentApi, type AskInput, type CallProblem, type ChatResult, type ChatView, draftEvent as draftEventName, type EarlierRequestView, parseDraft, parseUpdate, updateEvent, type UpdateView } from "../bindings/agent.js";
 import { agentConfirmApi } from "../bindings/agentConfirm.js";
 import { libraryApi } from "../bindings/library.js";
 import { turnkeyApi } from "../bindings/turnkey.js";
 import { recordingDeleteApi } from "../bindings/recordingDelete.js";
 import { callByName, onEventData } from "../bindings/runtime.js";
-import { askInput, callProblemText, contextFor, entryModel, isFocusPanelKey, panelShortcut, requestText, type UndoNote, undoableActions } from "../agentView.js";
+import {
+  askInput,
+  callProblemText,
+  type ChatOp,
+  chatProblemText,
+  chatSections,
+  contextFor,
+  earlierItems,
+  entryModel,
+  isFocusPanelKey,
+  openAfterArchive,
+  panelShortcut,
+  reconcileOpenChat,
+  refreshesChats,
+  requestText,
+  type UndoNote,
+  undoableActions,
+  visibleEntries,
+} from "../agentView.js";
 import { draftEvent, draftText } from "../agentDraft.js";
 import { problemText, undoOutcome } from "../journalView.js";
 import { blockingEntry, type Entry, initialPanelState, PressTracker, reducePanel } from "../agentState.js";
@@ -79,6 +97,98 @@ export function AgentPanel(props: {
   const askId = useRef(0);
   useFocusShortcut(input, props.open ?? true, props.reveal, props.hide);
 
+  // Chats: one general list. The open chat only filters what is drawn; every update lands on its own chat by threadId.
+  const [chats, setChats] = useState<ChatView[]>([]);
+  const [openId, setOpenId] = useState("");
+  const [earlierReq, setEarlierReq] = useState<EarlierRequestView[]>([]);
+  const [chatNote, setChatNote] = useState("");
+  const openRef = useRef(openId);
+  openRef.current = openId;
+  const entriesRef = useRef(state.entries);
+  entriesRef.current = state.entries;
+  const listSeq = useRef(0);
+
+  // The newest read wins; `prefer` names the chat to show when the caller just changed it.
+  const refreshChats = useCallback((prefer?: string) => {
+    const seq = ++listSeq.current;
+    const listFailed = chatProblemText("failed", "list");
+    return api.chats().then(
+      (v) => {
+        if (seq !== listSeq.current) {
+          return;
+        }
+        if (v.problem !== "") {
+          setChatNote(chatProblemText(v.problem, "list"));
+          return;
+        }
+        setChats(v.chats);
+        setChatNote((n) => (n === listFailed ? "" : n));
+        setOpenId((cur) => reconcileOpenChat(v.chats, prefer ?? cur, entriesRef.current));
+      },
+      () => {
+        if (seq === listSeq.current) {
+          setChatNote(listFailed);
+        }
+      },
+    );
+  }, []);
+
+  useEffect(() => {
+    void refreshChats();
+  }, [refreshChats]);
+
+  useEffect(() => {
+    const load = () => void refreshChats();
+    window.addEventListener("focus", load);
+    return () => window.removeEventListener("focus", load);
+  }, [refreshChats]);
+
+  // The earlier requests of the opened chat, as text.
+  useEffect(() => {
+    setEarlierReq([]);
+    if (openId === "") {
+      return;
+    }
+    let alive = true;
+    api.chatEarlier(openId).then(
+      (v) => {
+        if (!alive) {
+          return;
+        }
+        if (v.problem === "") {
+          setEarlierReq(v.requests);
+          return;
+        }
+        setChatNote(chatProblemText(v.problem, "open"));
+        if (refreshesChats(v.problem)) {
+          void refreshChats();
+        }
+      },
+      () => alive && setChatNote(chatProblemText("failed", "open")),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [openId, refreshChats]);
+
+  const chatCall = useCallback(
+    async (op: ChatOp, call: () => Promise<ChatResult>): Promise<ChatResult | null> => {
+      setChatNote("");
+      try {
+        const r = await call();
+        setChatNote(chatProblemText(r.problem, op));
+        if (refreshesChats(r.problem)) {
+          void refreshChats();
+        }
+        return r;
+      } catch {
+        setChatNote(chatProblemText("failed", op));
+        return null;
+      }
+    },
+    [refreshChats],
+  );
+
   // A hint chip elsewhere in the window puts its text into the input; sending stays with the user.
   useEffect(() => {
     const onDraft = (e: Event) => {
@@ -99,7 +209,16 @@ export function AgentPanel(props: {
     let closed = false;
     onEventData(updateEvent, (data) => {
       try {
-        dispatch({ type: "update", update: parseUpdate(data) });
+        const update = parseUpdate(data);
+        dispatch({ type: "update", update });
+        // With no chat open, the first update names the chat the request created.
+        if (openRef.current === "" && update.threadId !== "") {
+          setOpenId(update.threadId);
+        }
+        // Activity and the running mark change with every real update; a step of progress changes neither.
+        if (!update.progress) {
+          void refreshChats();
+        }
       } catch {
         // An update the panel cannot read is ignored: the core validated it before it was sent.
       }
@@ -114,7 +233,7 @@ export function AgentPanel(props: {
       closed = true;
       off?.();
     };
-  }, []);
+  }, [refreshChats]);
 
   useEffect(() => {
     let off: (() => void) | undefined;
@@ -184,8 +303,9 @@ export function AgentPanel(props: {
       return;
     }
     setDraft("");
-    send(askInput(ctx, text));
-  }, [draft, ctx, send]);
+    // The chip sets the subject and screen; the chat is the open one.
+    send({ ...askInput(ctx, text), threadId: openId });
+  }, [draft, ctx, send, openId]);
 
   // Requests whose buttons were pressed, with the update they were pressed on: off until a newer update arrives.
   // The tracker is read synchronously, so a double click before the next render makes one call.
@@ -342,9 +462,61 @@ export function AgentPanel(props: {
     };
   }, [state.entries, send, loadState, undoNotes, undoOne, undoAll, subjects, props.onOpenAssignment]);
 
+  const shown = useMemo(() => ({ ...state, entries: visibleEntries(state.entries, openId) }), [state, openId]);
+  const sections = useMemo(() => chatSections(chats, state.entries), [chats, state.entries]);
+  const openChat = [...sections.active, ...sections.archived].find((r) => r.threadId === openId) ?? null;
+  const earlier = useMemo(() => earlierItems(earlierReq, state.entries, openId), [earlierReq, state.entries, openId]);
+
+  const chatBar = {
+    openChat,
+    sections,
+    note: chatNote,
+    onOpen: (id: string) => {
+      setChatNote("");
+      setNotice("");
+      setOpenId(id);
+    },
+    onNew: () => {
+      void chatCall("new", () => api.newChat()).then((r) => {
+        if (r?.chat) {
+          setNotice("");
+          setOpenId(r.chat.threadId);
+          void refreshChats(r.chat.threadId);
+          setTimeout(() => input.current?.focus(), 0);
+        }
+      });
+    },
+    onRename: async (id: string, title: string) => {
+      const r = await chatCall("rename", () => api.renameChat(id, title));
+      if (r?.problem === "") {
+        void refreshChats();
+        return "";
+      }
+      return chatProblemText(r?.problem ?? "failed", "rename");
+    },
+    onArchive: (id: string) => {
+      void chatCall("archive", () => api.archiveChat(id)).then((r) => {
+        if (r?.problem === "") {
+          const next = openAfterArchive(chats, openRef.current, id, entriesRef.current);
+          setOpenId(next);
+          void refreshChats(next);
+        }
+      });
+    },
+    onRestore: (id: string) => {
+      void chatCall("restore", () => api.restoreChat(id)).then((r) => {
+        if (r?.problem === "") {
+          void refreshChats();
+        }
+      });
+    },
+  };
+
   return (
     <AgentPanelView
-      state={state}
+      state={shown}
+      chat={chatBar}
+      earlier={earlier}
       ctx={ctx}
       draft={draft}
       notice={notice}

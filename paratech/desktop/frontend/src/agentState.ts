@@ -63,10 +63,19 @@ function replace(entries: readonly Entry[], key: string, next: Entry): Entry[] {
   return entries.map((e) => (e.key === key ? next : e));
 }
 
-/** The oldest sent request of the scope the core has not named yet. */
-function pendingLocal(entries: readonly Entry[], scope: string): Entry | undefined {
+/**
+ * The oldest sent request of the scope the core has not named yet. A request asked in one chat is never named by an
+ * update of another chat (`threadId` of the update; "" matches by scope only, the rule for a failed Ask).
+ */
+function pendingLocal(entries: readonly Entry[], scope: string, threadId = ""): Entry | undefined {
   return entries.find(
-    (e) => e.key.startsWith("local:") && e.callProblem === "" && e.update === null && e.scope !== null && scopeKey(e.scope) === scope,
+    (e) =>
+      e.key.startsWith("local:") &&
+      e.callProblem === "" &&
+      e.update === null &&
+      e.scope !== null &&
+      scopeKey(e.scope) === scope &&
+      (threadId === "" || (e.scope.threadId ?? "") === "" || e.scope.threadId === threadId),
   );
 }
 
@@ -161,7 +170,7 @@ function applyUpdateEntries(s: PanelState, u: UpdateView): PanelState {
     const pending = threadKey(u.threadId, u.turn + 1);
     return { ...s, entries: u.problem === "" ? replaced : replaced.filter((x) => !(x.key === pending && x.update === null)) };
   }
-  const local = pendingLocal(s.entries, scopeKey(u));
+  const local = pendingLocal(s.entries, scopeKey(u), u.threadId);
   if (local) {
     return { ...s, entries: replace(s.entries, local.key, { ...local, key, threadId: u.threadId, turn: u.turn, update: u }) };
   }
