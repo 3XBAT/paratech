@@ -7,14 +7,16 @@ Reads the version from desktop\VERSION (X.Y.Z; -Version overrides it). If HEAD h
 Then it finds makensis (NSIS 3.x) before anything else, builds the app with build-alpha.ps1 into
 paratech\dist\release\<version>\app (FRONTEND_DEVSERVER_URL, GOFLAGS, GOAMD64, GOEXPERIMENT and GOWORK cleared for
 the build), checks the exe with `go version -m` and runs makensis on desktop\build\windows\nsis\project.nsi.
-build-alpha.ps1 also puts the speech recognition component (whisper-cli.exe and its DLLs, pinned in
-desktop\internal\app\speechcomponent.json) into the staging folder: the official archive is downloaded into
+build-alpha.ps1 also puts the speech recognition component (whisper-cli.exe, its DLLs and the Silero VAD model, pinned
+in desktop\internal\app\speechcomponent.json) into the staging folder: the official archive is downloaded into
 paratech\dist\cache\speech-component, checked (size, SHA-256) before it is opened, and only the pinned files are
-unpacked and checked. The installer always contains them. The plan shows the HEAD commit and whether the tree is dirty. The installer is
+unpacked and checked; the VAD model is downloaded on its own into the same cache and checked. The installer always
+contains them. The plan shows the HEAD commit and whether the tree is dirty. The installer is
 paratech\dist\release\paratech-<version>-windows-amd64-setup.exe (ignored by git).
 
 The WebView2 bootstrapper (MicrosoftEdgeWebview2Setup.exe) is taken from the Wails module in the Go module cache
-(the file `wails3 generate webview2bootstrapper` writes); the whisper.cpp archive is the only download.
+(the file `wails3 generate webview2bootstrapper` writes); the whisper.cpp archive and the VAD model are the only
+downloads.
 Needs Go, Node.js/npm and NSIS 3.x; installs nothing and needs no admin rights. Environment variables are set only
 for the build and restored afterwards. No auto-update. See docs/refs/packaging.md.
 
@@ -25,7 +27,8 @@ Version X.Y.Z to build instead of the one in desktop\VERSION.
 
 .PARAMETER WhisperDir
 Offline: the unpacked Release folder of the pinned whisper.cpp archive instead of the download. Every file must have
-the pinned size and SHA-256. Whisper files already staged are removed first.
+the pinned size and SHA-256. Whisper files already staged are removed first. The VAD model is taken from this folder
+when it holds the pinned file, else from the cache or the download.
 
 .PARAMETER WhisperZip
 Offline: a local copy of the pinned whisper.cpp archive instead of the download (same checks as the download).

@@ -219,6 +219,8 @@ Section "Install"
   File "${APP_DIR}\ggml-cpu-skylakex.dll"
   File "${APP_DIR}\ggml-cpu-sse42.dll"
   File "${APP_DIR}\ggml-cpu-x64.dll"
+  ; The Silero VAD model (ADR-0030): downloaded on its own, not part of the whisper.cpp archive.
+  File "${APP_DIR}\ggml-silero-v5.1.2.bin"
 
   WriteUninstaller "$INSTDIR\uninstall.exe"
   CreateShortcut "$SMPROGRAMS\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXE}" "" "$INSTDIR\${PRODUCT_ICON}" 0
@@ -278,6 +280,7 @@ Section "Uninstall"
   Delete "$INSTDIR\ggml-cpu-skylakex.dll"
   Delete "$INSTDIR\ggml-cpu-sse42.dll"
   Delete "$INSTDIR\ggml-cpu-x64.dll"
+  Delete "$INSTDIR\ggml-silero-v5.1.2.bin"
   ; Leftovers of an older whisper.cpp set.
   Delete "$INSTDIR\ggml-cpu-*.dll"
   Delete "$INSTDIR\uninstall.exe"

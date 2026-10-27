@@ -34,3 +34,4 @@ Open decisions are tracked in PRD §19.
 - [0027](0027-own-notes.md) The student's own notes («Мой конспект») for lectures (Proposed)
 - [0028](0028-agent-chats-context-ring.md) Чаты агента и индикатор контекста (Proposed, backlog)
 - [0029](0029-student-assignments.md) Assignments the student adds (by hand or through the agent)
+- [0030](0030-speech-vad.md) Skipping silence in speech recognition (Silero VAD)

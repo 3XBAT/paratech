@@ -13,7 +13,9 @@ is desktop\internal\app\speechcomponent.json, the manifest the app embeds. The o
 downloaded into paratech\dist\cache\speech-component\<version> (ignored by git; a cached archive is reused only if its
 size and SHA-256 match) and checked BEFORE it is opened; only the manifest files are unpacked, each checked again.
 Nothing from the archive is run. Whisper files already in the output folder are removed first, also with -SkipWhisper. Offline: -WhisperZip
-(a copy of the archive) or -WhisperDir (its unpacked Release folder) pass the same checks.
+(a copy of the archive) or -WhisperDir (its unpacked Release folder) pass the same checks. A manifest file with a
+source_url of its own (the Silero VAD model, ADR-0030) is not in the archive: it is taken from -WhisperDir when the
+folder holds it, else from the same cache or downloaded from that URL, and checked the same way.
 
 -Smoke then checks the component next to the exe, starts the exe headless with a throwaway data directory inside the
 output folder, waits for the start log lines (the speech engine among them) and stops the process again (a hard stop:
@@ -51,7 +53,7 @@ $legacyExeName = 'learning-assistant.exe'
 $manifestPath = Join-Path $desktopDir 'internal\app\speechcomponent.json'
 $cacheRoot = Join-Path $moduleRoot 'dist\cache\speech-component'
 # Removed from the output folder before the component is copied: also any ggml-cpu-*.dll of an older set.
-$whisperStalePatterns = @('whisper-cli.exe', 'whisper.dll', 'ggml.dll', 'ggml-base.dll', 'ggml-cpu-*.dll')
+$whisperStalePatterns = @('whisper-cli.exe', 'whisper.dll', 'ggml.dll', 'ggml-base.dll', 'ggml-cpu-*.dll', 'ggml-silero-*.bin')
 
 # Log lines that prove a successful start (internal/app; the speech lines are in speech.go). smoke-data is not the
 # default data dir, so it must have its own Credential Manager profile and never reach the real secrets (ADR-0014).
@@ -140,12 +142,31 @@ function Read-SpeechManifest {
             [long]$f.size_bytes -le 0 -or $names.ContainsKey(([string]$f.name).ToLowerInvariant())) {
             throw "$bad has an invalid or duplicate file entry '$($f.name)'."
         }
+        # A file downloaded on its own: https on one of the download_hosts, as for the archive.
+        $src = $f.PSObject.Properties['source_url']
+        if ($null -ne $src -and (-not [System.Uri]::TryCreate([string]$src.Value, [System.UriKind]::Absolute, [ref]$uri) -or
+            $uri.Scheme -ne 'https' -or @($m.download_hosts) -notcontains $uri.Host)) {
+            throw "$bad has a source_url '$($src.Value)' of '$($f.name)' that is not https on one of its download_hosts."
+        }
         $names[([string]$f.name).ToLowerInvariant()] = $true
     }
     if (-not $names.ContainsKey(([string]$m.executable).ToLowerInvariant())) {
         throw "$bad does not list its executable '$($m.executable)' in files."
     }
+    $vad = $m.PSObject.Properties['vad_model']
+    if ($null -ne $vad -and -not $names.ContainsKey(([string]$vad.Value).ToLowerInvariant())) {
+        throw "$bad does not list its vad_model '$($vad.Value)' in files."
+    }
     return $m
+}
+
+# The manifest files taken from the archive, and those downloaded on their own (with a source_url).
+function Get-ArchiveFiles([object]$Manifest) {
+    return @(@($Manifest.files) | Where-Object { $null -eq $_.PSObject.Properties['source_url'] })
+}
+
+function Get-SeparateFiles([object]$Manifest) {
+    return @(@($Manifest.files) | Where-Object { $null -ne $_.PSObject.Properties['source_url'] })
 }
 
 # Returns $null when the file is a regular file with the size and SHA-256, else the problem.
@@ -167,10 +188,13 @@ function Test-PinnedFile([string]$Path, [long]$Size, [string]$Sha256) {
     return $null
 }
 
-# Returns the problems of the component files in a folder; empty when all of them verify.
-function Get-SpeechComponentProblems([object]$Manifest, [string]$Dir) {
+# Returns the problems of the component files (by default all of them) in a folder; empty when all of them verify.
+function Get-SpeechComponentProblems([object]$Manifest, [string]$Dir, [object[]]$Files = $null) {
+    if ($null -eq $Files) {
+        $Files = @($Manifest.files)
+    }
     $problems = @()
-    foreach ($f in @($Manifest.files)) {
+    foreach ($f in $Files) {
         $problem = Test-PinnedFile (Join-Path $Dir $f.name) ([long]$f.size_bytes) ([string]$f.sha256)
         if ($null -ne $problem) {
             $problems += "$($f.name): $problem"
@@ -206,11 +230,45 @@ function Get-SpeechArchive([object]$Manifest, [string]$LocalZip) {
     }
 
     $null = New-Item -ItemType Directory -Force -Path $dir
-    $part = "$zip.part"
+    Save-PinnedDownload ([string]$Manifest.source_url) $zip $size $sha ' or use -WhisperZip'
+    return $zip
+}
+
+# Returns the path of a verified file downloaded on its own (the VAD model): from -WhisperDir when the folder holds
+# it, the cached download, or a fresh download from its source_url.
+function Get-SeparateFile([object]$Manifest, [object]$File, [string]$FromDir) {
+    $size = [long]$File.size_bytes
+    $sha = [string]$File.sha256
+    if ($FromDir -ne '') {
+        $local = Join-Path $FromDir $File.name
+        if ((Test-Path -LiteralPath $local) -and $null -eq (Test-PinnedFile $local $size $sha)) {
+            Write-Host "    using $local (size and SHA-256 match)"
+            return $local
+        }
+    }
+    $dir = Join-Path $cacheRoot $Manifest.version
+    $cached = Join-Path $dir $File.name
+    if (Test-Path -LiteralPath $cached) {
+        $problem = Test-PinnedFile $cached $size $sha
+        if ($null -eq $problem) {
+            Write-Host "    using the cached $cached (size and SHA-256 match)"
+            return $cached
+        }
+        Write-Host "    removing the cached $cached ($problem)"
+        Remove-Item -LiteralPath $cached -Force
+    }
+    $null = New-Item -ItemType Directory -Force -Path $dir
+    Save-PinnedDownload ([string]$File.source_url) $cached $size $sha ''
+    return $cached
+}
+
+# Downloads $Url into $Target through a .part file and keeps it only with the pinned size and SHA-256.
+function Save-PinnedDownload([string]$Url, [string]$Target, [long]$Size, [string]$Sha256, [string]$Hint) {
+    $part = "$Target.part"
     if (Test-Path -LiteralPath $part) {
         Remove-Item -LiteralPath $part -Force
     }
-    Write-Host "    downloading $($Manifest.source_url)"
+    Write-Host "    downloading $Url"
     $savedProtocol = [System.Net.ServicePointManager]::SecurityProtocol
     # The progress bar makes Invoke-WebRequest of Windows PowerShell 5.1 many times slower.
     $savedProgress = $ProgressPreference
@@ -222,19 +280,18 @@ function Get-SpeechArchive([object]$Manifest, [string]$LocalZip) {
         }
         [System.Net.ServicePointManager]::SecurityProtocol = $protocol
         $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri $Manifest.source_url -OutFile $part -UseBasicParsing
+        Invoke-WebRequest -Uri $Url -OutFile $part -UseBasicParsing
     } finally {
         $ProgressPreference = $savedProgress
         [System.Net.ServicePointManager]::SecurityProtocol = $savedProtocol
     }
-    $problem = Test-PinnedFile $part $size $sha
+    $problem = Test-PinnedFile $part $Size $Sha256
     if ($null -ne $problem) {
         Remove-Item -LiteralPath $part -Force
-        throw "The downloaded $($Manifest.source_url) is not the pinned archive ($problem); it was deleted. Try again or use -WhisperZip."
+        throw "The downloaded $Url is not the pinned file ($problem); it was deleted. Try again$Hint."
     }
-    Move-Item -LiteralPath $part -Destination $zip -Force
-    Write-Host "    saved $zip (size and SHA-256 match)"
-    return $zip
+    Move-Item -LiteralPath $part -Destination $Target -Force
+    Write-Host "    saved $Target (size and SHA-256 match)"
 }
 
 # Copies at most $Limit bytes; more means the entry is not what the manifest says.
@@ -262,7 +319,7 @@ function Expand-SpeechArchive([object]$Manifest, [string]$Zip, [string]$Dest) {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
     try {
-        foreach ($f in @($Manifest.files)) {
+        foreach ($f in @(Get-ArchiveFiles $Manifest)) {
             $want = [string]$Manifest.entry_prefix + [string]$f.name
             $entries = @($archive.Entries | Where-Object { $_.FullName -ceq $want })
             if ($entries.Count -ne 1) {
@@ -307,26 +364,35 @@ function Remove-StagedWhisper([string]$Dir) {
 # Puts the verified component into $Dir: from -WhisperDir, or unpacked from the pinned archive.
 function Install-SpeechComponent([object]$Manifest, [string]$Dir, [string]$FromDir, [string]$FromZip) {
     $work = $null
+    $archiveFiles = @(Get-ArchiveFiles $Manifest)
     try {
         if ($FromDir -ne '') {
-            $problems = @(Get-SpeechComponentProblems $Manifest $FromDir)
+            $problems = @(Get-SpeechComponentProblems $Manifest $FromDir $archiveFiles)
             if ($problems.Count -gt 0) {
                 throw "-WhisperDir '$FromDir' does not hold the pinned whisper.cpp $($Manifest.version) files:`n  $($problems -join "`n  ")"
             }
-            Write-Host "    using $FromDir (all files match)"
+            Write-Host "    using $FromDir (all files of the archive match)"
             $source = $FromDir
         } else {
             $zip = Get-SpeechArchive $Manifest $FromZip
             $work = Join-Path $cacheRoot ('unpack-' + [guid]::NewGuid().ToString('N'))
             $null = New-Item -ItemType Directory -Path $work
             Expand-SpeechArchive $Manifest $zip $work
-            Write-Host "    unpacked $(@($Manifest.files).Count) files (sizes and SHA-256 match)"
+            Write-Host "    unpacked $($archiveFiles.Count) files (sizes and SHA-256 match)"
             $source = $work
+        }
+        # Checked before the old files of the output folder are removed.
+        $separate = @{}
+        foreach ($f in @(Get-SeparateFiles $Manifest)) {
+            $separate[[string]$f.name] = Get-SeparateFile $Manifest $f $FromDir
         }
         $null = New-Item -ItemType Directory -Force -Path $Dir
         Remove-StagedWhisper $Dir
-        foreach ($f in @($Manifest.files)) {
+        foreach ($f in $archiveFiles) {
             Copy-Item -LiteralPath (Join-Path $source $f.name) -Destination (Join-Path $Dir $f.name) -Force
+        }
+        foreach ($name in $separate.Keys) {
+            Copy-Item -LiteralPath $separate[$name] -Destination (Join-Path $Dir $name) -Force
         }
     } finally {
         if ($null -ne $work -and (Test-Path -LiteralPath $work)) {
