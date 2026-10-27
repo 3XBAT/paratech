@@ -14,8 +14,11 @@
 - The `calllink_test.go` "environment variable" case (`%USERPROFILE%`) is refused only because `U`,`S` are not hex; add a hex-prefixed case if hardening lands.
 - Nit: `ErrRefused` message says "plain https page"; could be generalized.
 
+## Hardening (supervisor decision)
+`OpenCallLink` also refuses a link containing `%NAME%` (NAME in `[A-Za-z0-9_()]+`) when an environment variable of that name exists (case-insensitive, seam `environ`). Teams `%22Tid%22` still passes. Still to verify on Windows: whether the .url handler expands variables at all.
+
 ## Changed existing tests
-None.
+`calllink_test.go`: the `%USERPROFILE%` refusal case renamed "non-hex environment variable" with a clarifying comment; input and result unchanged.
 
 ## Security
 Reviewer: approve. Security-auditor: no confirmed findings; one conditional note above.
