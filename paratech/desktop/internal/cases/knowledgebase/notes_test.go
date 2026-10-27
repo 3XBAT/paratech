@@ -19,14 +19,18 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// memNotes is the notes table.
+// memNotes is the notes table; cancel, if set, is called when it is listed.
 type memNotes struct {
 	rows       []*note.Note
 	unreadable []shared.NoteID
 	err        error
+	cancel     func()
 }
 
 func (m *memNotes) ListAll(context.Context) ([]*note.Note, []shared.NoteID, error) {
+	if m.cancel != nil {
+		m.cancel()
+	}
 	if m.err != nil {
 		return nil, nil, m.err
 	}
@@ -277,9 +281,15 @@ func TestTextsAndExportWithNotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(texts) != 4 || texts[1].Document.Key != "day:phys:2026-09-12" || texts[1].Document.Recording != "" ||
-		len(texts[1].Document.Notes) != 2 || texts[1].Document.Notes[0].Note != "gone" || texts[0].Document.Recording != "r1" {
+	// The answers do not cite notes yet (TASK-153): Texts stays the recorded lessons, without note texts nor reads.
+	if len(texts) != 1 || texts[0].Document.Recording != "r1" || texts[0].Lesson.Notes != nil || texts[0].Document.Notes != nil {
 		t.Fatalf("Texts(phys) = %+v", texts)
+	}
+	if all, err := e.svc.Texts(ctx, ""); err != nil || len(all) != 1 {
+		t.Fatalf("Texts(all) = %+v, %v", all, err)
+	}
+	if len(e.texts.read) != 0 {
+		t.Fatalf("Texts read note parts %v", e.texts.read)
 	}
 
 	if err := e.svc.ExportSubject(ctx, kb.LibraryKey("phys"), `C:\out\Физика.md`); err != nil {
@@ -310,18 +320,55 @@ func TestTextsAndExportWithNotes(t *testing.T) {
 func TestNotesFailures(t *testing.T) {
 	ctx := context.Background()
 
-	e := newNotesEnv(t)
-	e.seedLectures(t)
-	e.notes.err = errDisk
-	if _, err := e.svc.Lectures(ctx, ""); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("notes not listed: %v", err)
+	// Notes or subjects that cannot be listed leave the recorded lessons, logged without texts.
+	for name, tc := range map[string]struct {
+		fail func(*notesEnv)
+		op   string
+	}{
+		"notes not listed":    {func(e *notesEnv) { e.notes.err = errDisk }, opNotesNotListed},
+		"subjects not listed": {func(e *notesEnv) { e.subjects.err = errDisk }, opNoteSubjects},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newNotesEnv(t)
+			e.seedLectures(t)
+			tc.fail(e)
+			recorded := []string{"recording:r1"}
+			if got, err := e.svc.Lectures(ctx, kb.LibraryKey("phys")); err != nil || !reflect.DeepEqual(keysOf(got), recorded) {
+				t.Fatalf("Lectures = %v, %v", keysOf(got), err)
+			}
+			subs, err := e.svc.Subjects(ctx)
+			if err != nil || len(subs) != 1 || subs[0].Key != kb.LibraryKey("phys") {
+				t.Fatalf("Subjects = %+v, %v", subs, err)
+			}
+			res, err := e.svc.Search(ctx, "механика")
+			if err != nil || len(res.Hits) == 0 || res.Hits[0].Lesson.Key != "recording:r1" {
+				t.Fatalf("Search = %+v, %v", res, err)
+			}
+			if name, err := e.svc.SubjectFileName(ctx, kb.LibraryKey("phys")); err != nil || name != "Физика.md" {
+				t.Fatalf("SubjectFileName = %q, %v", name, err)
+			}
+			if _, err := e.svc.SubjectFileName(ctx, kb.LibraryKey("chem")); !errors.Is(err, ErrSubjectNotFound) {
+				t.Fatalf("SubjectFileName(notes only) = %v", err)
+			}
+			if err := e.svc.ExportSubject(ctx, kb.LibraryKey("phys"), `C:\out\Физика.md`); err != nil ||
+				strings.Contains(e.writer.content, "Мой конспект") || !strings.Contains(e.writer.content, "Механика") {
+				t.Fatalf("ExportSubject = %v:\n%s", err, e.writer.content)
+			}
+			logs := e.logs.String()
+			if !strings.Contains(logs, tc.op) || strings.Contains(logs, "Конспект") || strings.Contains(logs, "Ряд") {
+				t.Fatalf("logs = %s", logs)
+			}
+		})
 	}
 
-	e = newNotesEnv(t)
+	// A cancelled listing of the notes fails.
+	e := newNotesEnv(t)
 	e.seedLectures(t)
-	e.subjects.err = errDisk
-	if _, err := e.svc.Search(ctx, "ряды"); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("subjects not listed: %v", err)
+	cancelledList, cancelList := context.WithCancel(ctx)
+	defer cancelList()
+	e.notes.err, e.notes.cancel = context.Canceled, cancelList
+	if _, err := e.svc.Subjects(cancelledList); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled listing: %v", err)
 	}
 
 	// A cancelled read of a part fails the search; a failed read of a lesson only keeps the lesson.

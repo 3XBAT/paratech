@@ -188,11 +188,12 @@ func (s *Service) Search(ctx context.Context, query string) (SearchResult, error
 	return out, nil
 }
 
-// Texts returns the lessons of a library subject (Lectures) with everything searched of them, the student's notes
-// included, newest first, for the answers with citations (TASK-118); a zero subject gives every lesson of the base.
-// Like Search it reads at query time and leaves out a section that cannot be read.
+// Texts returns the recorded lessons of a library subject (Lessons) with everything searched of them, newest first,
+// for the answers with citations (TASK-118); a zero subject gives every recorded lesson of the base. The student's
+// notes are not given: the answers do not cite them yet (TASK-153). Like Search it reads at query time and leaves out
+// a section that cannot be read.
 func (s *Service) Texts(ctx context.Context, subject shared.SubjectID) ([]kb.LessonText, error) {
-	all, err := s.withNotes(ctx)
+	all, err := s.all(ctx)
 	if err != nil {
 		return nil, err
 	}

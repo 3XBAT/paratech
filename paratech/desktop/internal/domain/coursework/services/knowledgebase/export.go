@@ -13,7 +13,7 @@ import (
 const (
 	ownNotesHeading  = "Мой конспект"
 	ownNotesSource   = "_Источник: ваш конспект, текст без изменений._"
-	ownNoteEmpty     = "В этой части конспекта нет текста."
+	ownNoteEmpty     = "В этом конспекте нет текста."
 	undatedText      = "Без даты"
 	noteDateLayout   = "02.01.2006"
 	exportSeparator  = " · "

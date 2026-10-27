@@ -3,7 +3,6 @@ package knowledgebase
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -17,6 +16,8 @@ import (
 // Operation names of the log of the student's notes. Neither note texts nor titles are logged.
 const (
 	opNotesUnreadable = "knowledge base: notes not readable"
+	opNotesNotListed  = "knowledge base: notes not listed, recorded lessons only"
+	opNoteSubjects    = "knowledge base: subjects of the notes not listed, recorded lessons only"
 	opNoteSubject     = "knowledge base: note of an unknown subject left out"
 	opNoteLesson      = "knowledge base: lesson of a note not read"
 	opNotePart        = "knowledge base: part of a note not read"
@@ -41,11 +42,12 @@ func (s *Service) withNotes(ctx context.Context) ([]kb.Lesson, error) {
 }
 
 // noteFacts gathers what kb.WithNotes needs of the active notes. A lesson anchor not met by a recording is looked up
-// in the schedule: a lesson gone falls back to its day; a failed read keeps the lesson.
+// in the schedule: a lesson gone falls back to its day; a failed read keeps the lesson. Notes or subjects that cannot
+// be listed give no facts (notesFailed); only a cancelled read fails.
 func (s *Service) noteFacts(ctx context.Context, recorded []kb.Lesson) ([]kb.NoteFacts, error) {
 	notes, unreadable, err := s.notes.ListAll(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return nil, s.notesFailed(ctx, opNotesNotListed, err)
 	}
 	if len(unreadable) > 0 {
 		s.log.Warn(opNotesUnreadable, slog.Int("count", len(unreadable)), slog.String("first", string(unreadable[0])))
@@ -56,7 +58,7 @@ func (s *Service) noteFacts(ctx context.Context, recorded []kb.Lesson) ([]kb.Not
 
 	subs, err := s.subjects.Subjects(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return nil, s.notesFailed(ctx, opNoteSubjects, err)
 	}
 	names := make(map[shared.SubjectID]string, len(subs))
 	for _, sub := range subs {
@@ -94,6 +96,16 @@ func (s *Service) noteFacts(ctx context.Context, recorded []kb.Lesson) ([]kb.Not
 		out = append(out, f)
 	}
 	return out, nil
+}
+
+// notesFailed isolates a failed read of the notes or of the subjects: it is logged (cause only) and the knowledge base
+// keeps its recorded lessons, so a broken notes table does not hide them. Only a cancelled read is returned.
+func (s *Service) notesFailed(ctx context.Context, op string, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	s.log.Warn(op, slog.Any("cause", err))
+	return nil
 }
 
 // lessonGone reports that the schedule no longer has the lesson of a note. A failed read is logged and keeps the

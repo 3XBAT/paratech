@@ -92,11 +92,14 @@ func TestRenderSubjectWithNotes(t *testing.T) {
 		"текст\n" +
 		"\n## 05\\.09.2026 · семинар · Пара 5 сентября\n" +
 		"\n### Мой конспект\n\n" + ownNotesSource + "\n" +
-		"\n#### \\# Фото\n\n" + ownNoteEmpty + "\n" +
+		"\n#### \\# Фото\n\nВ этом конспекте нет текста.\n" +
 		"\n## Без даты · Без даты лекция\n" +
 		"\n### Мой конспект\n\n" + ownNotesSource + "\n" +
 		"\n#### Старое\n\nПросто текст\n"
 	if got != want {
 		t.Fatalf("RenderSubject =\n%s\nwant\n%s", got, want)
+	}
+	if n := strings.Count(got, ownNoteEmpty); n != 1 {
+		t.Fatalf("empty-note line %d times, want once for the one empty note", n)
 	}
 }
