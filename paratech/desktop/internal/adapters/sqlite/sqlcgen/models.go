@@ -217,6 +217,28 @@ type MaterialLesson struct {
 	Position   int64
 }
 
+type Note struct {
+	ID          string
+	SubjectID   string
+	Title       string
+	AnchorKind  string
+	RecordingID sql.NullString
+	LessonID    sql.NullString
+	AnchorDate  sql.NullString
+	LessonKind  string
+	LessonTitle string
+	Status      string
+	Version     int64
+	CreatedAt   int64
+	UpdatedAt   int64
+}
+
+type NotePart struct {
+	NoteID     string
+	MaterialID string
+	Position   int64
+}
+
 type Proposal struct {
 	ID               string
 	Kind             string

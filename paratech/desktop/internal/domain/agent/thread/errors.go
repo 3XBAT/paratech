@@ -8,6 +8,9 @@ var (
 	// ErrInvalidThread is returned by New and Restore for data that breaks an invariant.
 	ErrInvalidThread = errors.New("invalid agent thread")
 
+	// ErrInvalidTitle is returned for a chat title that breaks its length or character rules.
+	ErrInvalidTitle = errors.New("invalid chat title")
+
 	// ErrInvalidTransition is returned for a status change the transition table does not allow, or an operation the
 	// current status or step does not allow.
 	ErrInvalidTransition = errors.New("invalid agent turn transition")
