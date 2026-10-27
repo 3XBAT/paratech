@@ -1,11 +1,11 @@
 # ADR-0027: The student's own notes («Мой конспект») for lectures
 
 - **Status:** Accepted for the parts the owner answered on 2026-10-27 (naming, ranking, recognition engine, editing,
-  subject removal); Proposed for the rest (see «Open»)
+  subject removal, Open 11–14); Proposed for the rest (see «Open»)
 - **Date:** 2026-10-25, amended 2026-10-27
 - **Source:** owner 2026-10-25 (a student starts mid-semester: notes exist handwritten, typed, in files, some
   lectures recorded elsewhere), owner answers 2026-10-27; ADR-0017, ADR-0018, ADR-0019, ADR-0022, ADR-0024, ADR-0025
-  (tickets); TASK-118, TASK-122, TASK-133, TASK-138. Tasks TASK-149…169, TASK-287…303.
+  (tickets); TASK-118, TASK-122, TASK-133, TASK-138. Tasks TASK-149…169, TASK-287…303, TASK-306…308.
 
 ## Context
 Today a lecture exists in paratech only as a recording: «База знаний», answers with citations (a cite points at a
@@ -59,8 +59,31 @@ The student's notes are «Мой конспект», the chip on sources «ва�
   removed (the UI offers removing the note). A `typed` or `recognized` material removed from its note is soft-removed
   too (it exists only for the note); a `file` material stays in the library.
 - Editing a text from a file changes only paratech's copy, never the original file on disk.
-- Limits: 1 MiB per text part (as paste). The rendering of a text in view mode is Open 11 (plain text vs Markdown);
-  the stored text and the editor are the same in both options.
+- Limits: 1 MiB per text part (as paste). The editor edits the stored plain text; view mode renders it as Markdown
+  (below).
+
+### Showing a note text (owner, Open 11 → б: Markdown)
+- Outside the editor a text part is shown as Markdown: headings, paragraphs, line breaks, bold, italic, strikethrough,
+  inline code and code blocks, block quotes, ordered and unordered lists (nested), task list marks (shown, not
+  clickable), horizontal rules, tables (GFM pipe tables) and links. The text is untrusted (ADR-0022).
+- **Renderer: our own, no dependency.** A small parser in the frontend (`src/markdown/`) turns the text into a tree of
+  allowed node kinds, and React builds elements from that tree; text goes only into text nodes. No
+  `dangerouslySetInnerHTML`, no HTML string, no `eval`, no inline styles from the text. Rejected: `markdown-it` / `marked`
+  (they produce an HTML string, which would need `dangerouslySetInnerHTML` plus a sanitizer dependency) and
+  `react-markdown` (pulls in the unified/remark tree, dozens of packages, for a subset we need). `package.json` has no
+  Markdown package today; none is added.
+- **Raw HTML is never interpreted**: an HTML block or inline tag is shown as its literal text. Entities other than
+  `&amp; &lt; &gt; &quot; &#39;` stay literal.
+- **Links**: only `http:` and `https:` with a host become links; anything else (`javascript:`, `file:`, `data:`,
+  relative, `mailto:`) is shown as text. A link is a button-like element showing its text and, in the tooltip, the
+  full URL; a click calls a binding, the page never navigates. The binding parses the URL into the library value
+  `NoteLink` (http/https, host, no user info, printable ASCII, ≤ 2048 bytes) and opens it in the default browser
+  through `weblink` with the defences of a call link (ADR-0032: a temporary `.url` file, no command line, a `%NAME%`
+  of an existing variable refused). Autolinks of bare URLs: not made (they stay text).
+- **Images are never loaded**: `![alt](url)` is shown as the text «[изображение: alt]»; no `<img>`, no network
+  request, no data URL.
+- The parser is pure, bounded (nesting depth 16, input ≤ 1 MiB as the part limit) and fuzzed; on any internal limit it
+  falls back to plain text. Search sections still come from the `#` lines of the stored text (unchanged).
 - Edits are the student's text: provenance stays «ваш конспект» (and «распознано» for recognised text).
 
 ### Text
@@ -99,8 +122,21 @@ The student's notes are «Мой конспект», the chip on sources «ва�
 - New method `DiscardSubject(ctx, id, expectedVersion)` used only by `input/wails` on the student's click. The old
   `RemoveSubject` (the agent's Undo of `create_subject`) keeps refusing a subject with notes: an agent Undo never
   takes the student's notes with it.
-- A subject without notes and files is removed as before. Ordinary files (not note parts) still block: Open 12. When
-  a removed subject is deleted for good: Open 13.
+- A subject without notes and files is removed as before.
+- **Ordinary files go with the subject** (owner, Open 12 → а): files of the subject that are not note parts, in any of
+  its folders and nested folders, are hidden with it (soft, no row rewritten) and come back with «Вернуть». The warning
+  names both counts («Вместе с предметом удалятся N конспектов и M файлов»). A material's visibility follows the
+  subject of its folder; a material filed under the removed subject that is a part of an active note of another
+  subject stays visible in that note.
+- **Purge after 3 days** (owner, Open 13: «стирается совсем через 3 дня»): `subject.RestoreWindow` = 3 days; `Restore`
+  after it → `ErrRestoreExpired` (the binding answers `expired`). A new use case `cases/subjectpurge` (its own narrow
+  ports over the library repositories and the blob store, no import of another use case, ARCH-20; startup cleanup and
+  once a day, the pattern of the assignment purge of ADR-0029) removes for each subject removed longer than the
+  window, each step its own transaction and idempotent, the subject row last: its notes (rows, parts, revisions,
+  cached text, blobs no other material or revision uses — the same repository methods a later «Удалить навсегда»
+  reuses), its other materials the same way, its folders, aliases and teachers. A material still a part of an active note of another subject is kept
+  and moved to «Входящие». Assignments, recordings and schedule lessons are other contexts and stay; their subject
+  name falls back as for an unknown subject (ADR-0024). After the purge the name is free.
 
 ### Bulk import (mid-semester start)
 - **Aggregate `library/importbatch`**: up to 500 items (digest, size, type, display name, relative folder path,
@@ -135,7 +171,8 @@ The student's notes are «Мой конспект», the chip on sources «ва�
 - Photos (JPEG/PNG, re-encoded by the standard library to drop EXIF/GPS, pixel and size limits) and image-only PDFs
   are pages of a note; until recognised they are shown, not searched, not cited (TASK-165/166).
 - **Setting «ИИ распознаёт фото конспектов»** (`settings`, typed column): `off` | `local` (Windows OCR); a `cloud`
-  value (vision model through the Hub) is added later. The default is Open 14. With `local` a new photo page is
+  value (vision model through the Hub) is added later. The default is `off` (owner, Open 14 → а): the student turns
+  it on. With `local` a new photo page is
   queued for recognition; older pages get «Распознать».
 - **Engine now: Windows OCR** (`Windows.Media.Ocr`): local, free, no network, no CGO — WinRT reached through syscalls
   of `golang.org/x/sys/windows` in `adapters/winocr` (`//go:build windows`, stub elsewhere). TASK-293 proves it on the
@@ -170,7 +207,8 @@ The student's notes are «Мой конспект», the chip on sources «ва�
 ## Consequences
 - Migrations (next free numbers, one at a time): `notes`, `note_parts` (0036), `recordings.origin` (0042),
   `import_batches`, `import_items`; `materials` rebuild with `revision`/`origin`/`source_material` and
-  `material_revisions` (TASK-290); `subjects.removed_at` (TASK-288); `settings.note_recognition` (TASK-294);
+  `material_revisions` (TASK-290); `subjects.removed_at` (TASK-288); `settings.note_recognition` default `off`
+  (TASK-294);
   `page_recognitions` (TASK-167).
 - `docs/architecture.md` §12 names `note`, the editable text of `material`, the subject removal; `importbatch`,
   `notematch`, `pastslots`, `cases/notesimport`, `cases/noterecognition`, `adapters/notesource`, `adapters/winocr` are
@@ -197,12 +235,7 @@ The student's notes are «Мой конспект», the chip on sources «ва�
 9. Subjects from the schedule: inline «создать предмет» in the import review only; a «завести все предметы из
    расписания» button is a separate task on your word. *Proposed: yes.*
 10. The limits above. *Proposed: as listed.*
-11. Как показывать текст конспекта, когда он не редактируется: (а) обычный текст — что напечатано, то и видно
-    (строки с «#» всё равно делят текст на разделы для поиска); (б) Markdown без HTML — заголовки, списки и жирный
-    показываются оформленными, ссылки — просто текстом.
-12. В предмете есть обычные файлы (не части конспектов): (а) удалять их вместе с предметом, тоже с «Вернуть»;
-    (б) как сейчас — сначала убрать файлы, потом удалять предмет.
-13. Когда удалённый предмет с конспектами стирается навсегда: (а) кнопкой «Удалить навсегда» в списке удалённых
-    предметов; (б) сам через 30 дней; (в) никогда, только «Вернуть».
-14. Настройка «ИИ распознаёт фото конспектов» по умолчанию: (а) выключена — студент включает сам; (б) включена
-    (распознаёт Windows на компьютере, ничего не отправляется).
+
+Answered 2026-10-27: 11 — (б) Markdown without raw HTML; links only http/https, opened by a click; images not loaded
+(«Showing a note text»); 12 — (а) ordinary files, nested folders included, go with the subject, soft, with «Вернуть»;
+13 — a removed subject is purged completely after 3 days; 14 — (а) photo recognition is off by default.
