@@ -31,6 +31,12 @@ type WorkRepository interface {
 	Delete(ctx context.Context, id shared.WorkID, expected int64) error
 }
 
+// WorkSends tells when a work was last sent to the teacher (TASK-226): the time the newest delivery of its
+// send_work_email proposals was SENT, zero if none. Implemented by the sqlite work repository.
+type WorkSends interface {
+	LastSent(ctx context.Context, id shared.WorkID) (time.Time, error)
+}
+
 // Assignments reads the assignment a work is made from. Implemented by the sqlite adapter.
 type Assignments interface {
 	// Get loads an assignment; none wraps shared.ErrNotFound.

@@ -58,6 +58,8 @@ type Work struct {
 	rounds  []Round
 	edits   map[Field]string // the student's card where it differs from the reader's
 	writing *Writing         // from StartWriting on (TASK-131)
+	problem Problem          // why the last reader call did not go through; "" after an answer (TASK-226)
+	sentAt  time.Time        // when a send of the work to the teacher was last SENT; zero if never (TASK-226)
 
 	createdAt time.Time
 	updatedAt time.Time
@@ -127,7 +129,8 @@ func (w *Work) Record(round int, a Answer, now time.Time) error {
 }
 
 // Refuse records a refused answer of round (the Hub's schema refusal or this desktop's): the next call is a new
-// attempt; after the last one the work fails. Errors: ErrInvalidTransition, ErrStaleRound.
+// attempt; after the last one the work fails. Either way its problem is ProblemRefused. Errors: ErrInvalidTransition,
+// ErrStaleRound.
 func (w *Work) Refuse(round int, now time.Time) error {
 	if w.status != StatusTriage {
 		return fmt.Errorf("%w: no reader call is due in %s", ErrInvalidTransition, w.status)
@@ -136,6 +139,7 @@ func (w *Work) Refuse(round int, now time.Time) error {
 		return fmt.Errorf("%w: refusal of round %d, due %d", ErrStaleRound, round, w.round)
 	}
 	next := w.clone()
+	next.problem = ProblemRefused
 	if w.attempt == MaxAttempts {
 		return w.move(next, StatusFailed, now)
 	}
@@ -183,12 +187,16 @@ func (w *Work) ConfirmRequirements(now time.Time) error { return w.moveTo(Status
 
 func (w *Work) moveTo(to Status, now time.Time) error { return w.move(w.clone(), to, now) }
 
-// move checks the transition and the state next would have, then takes it.
+// move checks the transition and the state next would have, then takes it. A status past the reader call drops the
+// problem of the call: a recorded answer is the successful triage.
 func (w *Work) move(next *Work, to Status, now time.Time) error {
 	if to != w.status && !CanTransition(w.status, to) {
 		return fmt.Errorf("%w: %s to %s", ErrInvalidTransition, w.status, to)
 	}
 	next.status, next.updatedAt = to, now
+	if !keepsProblem(to) {
+		next.problem = ""
+	}
 	if err := next.validate(); err != nil {
 		return err
 	}
@@ -217,7 +225,9 @@ type State struct {
 	Attempt   int
 	Rounds    []Round
 	Edits     map[Field]string
-	Writing   *Writing // nil before StartWriting
+	Writing   *Writing  // nil before StartWriting
+	Problem   Problem   // "" none
+	SentAt    time.Time // zero: never sent
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -230,7 +240,8 @@ func Restore(st State) (*Work, error) {
 	}
 	w := &Work{
 		version: st.Version, id: st.ID, source: st.Source, status: st.Status, round: st.Round, attempt: st.Attempt,
-		rounds: slices.Clone(st.Rounds), edits: maps.Clone(st.Edits), createdAt: st.CreatedAt, updatedAt: st.UpdatedAt,
+		rounds: slices.Clone(st.Rounds), edits: maps.Clone(st.Edits), problem: st.Problem, sentAt: st.SentAt,
+		createdAt: st.CreatedAt, updatedAt: st.UpdatedAt,
 	}
 	if st.Writing != nil {
 		wr := st.Writing.clone()
@@ -261,6 +272,10 @@ func (w *Work) validate() error {
 		return bad("attempt")
 	case w.createdAt.IsZero() || w.updatedAt.IsZero():
 		return bad("missing time")
+	case w.problem != "" && (!w.problem.Valid() || !keepsProblem(w.status)):
+		return bad("a problem only of a due or failed reader call")
+	case !w.sentAt.IsZero() && w.Sendable() != nil:
+		return bad("only a work of an assignment is sent")
 	}
 	for i, r := range w.rounds {
 		last := i == len(w.rounds)-1
@@ -416,7 +431,8 @@ func (w *Work) Understanding() (Understanding, []Field) {
 func (w *Work) State() State {
 	st := State{
 		Version: w.version, ID: w.id, Source: w.source, Status: w.status, Round: w.round, Attempt: w.attempt,
-		Rounds: w.Rounds(), Edits: maps.Clone(w.edits), CreatedAt: w.createdAt, UpdatedAt: w.updatedAt,
+		Rounds: w.Rounds(), Edits: maps.Clone(w.edits), Problem: w.problem, SentAt: w.sentAt, CreatedAt: w.createdAt,
+		UpdatedAt: w.updatedAt,
 	}
 	if wr, ok := w.Writing(); ok {
 		st.Writing = &wr

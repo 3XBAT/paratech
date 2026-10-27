@@ -29,7 +29,7 @@ func (q *Queries) DeleteWork(ctx context.Context, arg DeleteWorkParams) (int64, 
 }
 
 const getActiveWorkOfAssignment = `-- name: GetActiveWorkOfAssignment :one
-SELECT id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version, created_at, updated_at FROM works WHERE assignment_id = ?1 AND status <> 'failed'
+SELECT id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version, created_at, updated_at, last_problem, sent_at FROM works WHERE assignment_id = ?1 AND status <> 'failed'
 `
 
 // The work of an assignment that has not failed; at most one (idx_works_assignment).
@@ -57,12 +57,14 @@ func (q *Queries) GetActiveWorkOfAssignment(ctx context.Context, assignmentID sq
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastProblem,
+		&i.SentAt,
 	)
 	return i, err
 }
 
 const getActiveWorkOfMaterial = `-- name: GetActiveWorkOfMaterial :one
-SELECT id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version, created_at, updated_at FROM works WHERE material_id = ?1 AND status <> 'failed'
+SELECT id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version, created_at, updated_at, last_problem, sent_at FROM works WHERE material_id = ?1 AND status <> 'failed'
 `
 
 // The work of a library material that has not failed; at most one (idx_works_material).
@@ -90,12 +92,14 @@ func (q *Queries) GetActiveWorkOfMaterial(ctx context.Context, materialID sql.Nu
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastProblem,
+		&i.SentAt,
 	)
 	return i, err
 }
 
 const getActiveWorkOfTopic = `-- name: GetActiveWorkOfTopic :one
-SELECT id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version, created_at, updated_at FROM works WHERE topic_request = ?1 AND status <> 'failed'
+SELECT id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version, created_at, updated_at, last_problem, sent_at FROM works WHERE topic_request = ?1 AND status <> 'failed'
 `
 
 // The work of a topic request that has not failed; at most one (idx_works_topic).
@@ -123,13 +127,15 @@ func (q *Queries) GetActiveWorkOfTopic(ctx context.Context, topicRequest sql.Nul
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastProblem,
+		&i.SentAt,
 	)
 	return i, err
 }
 
 const getWork = `-- name: GetWork :one
 
-SELECT id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version, created_at, updated_at FROM works WHERE id = ?1
+SELECT id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version, created_at, updated_at, last_problem, sent_at FROM works WHERE id = ?1
 `
 
 // Turnkey works (TASK-129, ADR-0025): the aggregate coursework/work with its answered reader rounds, saved with the
@@ -158,6 +164,8 @@ func (q *Queries) GetWork(ctx context.Context, id string) (Work, error) {
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastProblem,
+		&i.SentAt,
 	)
 	return i, err
 }
@@ -165,12 +173,12 @@ func (q *Queries) GetWork(ctx context.Context, id string) (Work, error) {
 const insertWork = `-- name: InsertWork :exec
 INSERT INTO works (id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt,
                    edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline,
-                   edit_sources, writing, version, created_at, updated_at)
+                   edit_sources, writing, last_problem, sent_at, version, created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5,
         ?6, ?7, ?8, ?9, ?10,
         ?11, ?12, ?13, ?14,
-        ?15, ?16, ?17, 1, ?18,
-        ?19)
+        ?15, ?16, ?17, ?18,
+        ?19, 1, ?20, ?21)
 `
 
 type InsertWorkParams struct {
@@ -191,6 +199,8 @@ type InsertWorkParams struct {
 	EditDeadline   sql.NullString
 	EditSources    sql.NullString
 	Writing        sql.NullString
+	LastProblem    sql.NullString
+	SentAt         sql.NullInt64
 	CreatedAt      int64
 	UpdatedAt      int64
 }
@@ -215,10 +225,28 @@ func (q *Queries) InsertWork(ctx context.Context, arg InsertWorkParams) error {
 		arg.EditDeadline,
 		arg.EditSources,
 		arg.Writing,
+		arg.LastProblem,
+		arg.SentAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const lastWorkSentAt = `-- name: LastWorkSentAt :one
+SELECT CAST(COALESCE(MAX(d.sent_at), 0) AS INTEGER) AS sent_at
+FROM proposals p
+JOIN deliveries d ON d.idempotency_key = 'proposal:' || p.id
+WHERE p.kind = 'send_work_email' AND p.work_id = ?1 AND d.status = 'SENT'
+`
+
+// When a send of the work to the teacher was last SENT (TASK-226), 0 if never: a send_work_email proposal of the work
+// and the delivery keyed by it (proposal.EmailCommand.IdempotencyKey is 'proposal:' and the proposal id).
+func (q *Queries) LastWorkSentAt(ctx context.Context, workID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, lastWorkSentAt, workID)
+	var sent_at int64
+	err := row.Scan(&sent_at)
+	return sent_at, err
 }
 
 const listWorkRounds = `-- name: ListWorkRounds :many
@@ -266,9 +294,11 @@ SET status           = ?1,
     edit_deadline    = ?9,
     edit_sources     = ?10,
     writing          = ?11,
+    last_problem     = ?12,
+    sent_at          = ?13,
     version          = version + 1,
-    updated_at       = ?12
-WHERE id = ?13 AND version = ?14
+    updated_at       = ?14
+WHERE id = ?15 AND version = ?16
 `
 
 type UpdateWorkParams struct {
@@ -283,6 +313,8 @@ type UpdateWorkParams struct {
 	EditDeadline    sql.NullString
 	EditSources     sql.NullString
 	Writing         sql.NullString
+	LastProblem     sql.NullString
+	SentAt          sql.NullInt64
 	UpdatedAt       int64
 	ID              string
 	ExpectedVersion int64
@@ -301,6 +333,8 @@ func (q *Queries) UpdateWork(ctx context.Context, arg UpdateWorkParams) (int64, 
 		arg.EditDeadline,
 		arg.EditSources,
 		arg.Writing,
+		arg.LastProblem,
+		arg.SentAt,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.ExpectedVersion,
