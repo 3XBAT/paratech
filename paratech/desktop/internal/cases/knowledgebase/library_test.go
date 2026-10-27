@@ -13,25 +13,64 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// fakeResolver resolves by an exact table and records what it was asked.
+// fakeResolver resolves by an exact table (ambiguous: strings of several subjects) and records what it was asked.
 type fakeResolver struct {
-	table map[string]subjectmatch.Match
-	asked [][]string
-	err   error
+	table     map[string]subjectmatch.Match
+	ambiguous []string
+	asked     [][]string
+	err       error
 }
 
-func (f *fakeResolver) ResolveSubjects(_ context.Context, names []string) (map[string]subjectmatch.Match, error) {
+func (f *fakeResolver) LookupSubjects(_ context.Context, names []string) (map[string]subjectmatch.Resolution, error) {
 	f.asked = append(f.asked, slices.Sorted(slices.Values(names)))
 	if f.err != nil {
 		return nil, f.err
 	}
-	out := map[string]subjectmatch.Match{}
+	out := map[string]subjectmatch.Resolution{}
 	for _, n := range names {
-		if m, ok := f.table[n]; ok {
-			out[n] = m
+		switch m, ok := f.table[n]; {
+		case ok:
+			out[n] = subjectmatch.Resolution{Match: m, Outcome: subjectmatch.Matched}
+		case slices.Contains(f.ambiguous, n):
+			out[n] = subjectmatch.Resolution{Outcome: subjectmatch.Ambiguous}
+		default:
+			out[n] = subjectmatch.Resolution{Outcome: subjectmatch.NoMatch}
 		}
 	}
 	return out, nil
+}
+
+// Every lesson tells how its subject resolves: matched, none, ambiguous (no guess) or no subject string.
+func TestLessonLibraryMatch(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	e.svc.library = &fakeResolver{table: map[string]subjectmatch.Match{"Физика": {ID: "phys", Name: "Физика"}}, ambiguous: []string{"Матан"}}
+	e.add(t, lessonSpec{id: "r1", title: "Механика", subject: "Физика"})
+	e.add(t, lessonSpec{id: "r2", start: time.Hour, title: "Реакции", subject: "Химия"})
+	e.add(t, lessonSpec{id: "r3", start: 2 * time.Hour, title: "Пределы", subject: "Матан"})
+	e.add(t, lessonSpec{id: "r4", start: 3 * time.Hour})
+
+	tests := []struct {
+		id      shared.RecordingID
+		want    kb.LibraryMatch
+		library shared.SubjectID
+	}{
+		{"r1", kb.LibraryMatched, "phys"},
+		{"r2", kb.LibraryNone, ""},
+		{"r3", kb.LibraryAmbiguous, ""},
+		{"r4", kb.LibraryNoSubject, ""},
+	}
+	for _, tt := range tests {
+		l, err := e.svc.Lesson(ctx, tt.id)
+		if err != nil || l.LibraryMatch() != tt.want || l.Library.ID != tt.library {
+			t.Errorf("Lesson(%s) = %q %q, %v; want %q %q", tt.id, l.LibraryMatch(), l.Library.ID, err, tt.want, tt.library)
+		}
+	}
+
+	// The listing carries the same outcome; an ambiguous lesson stays in its free group.
+	lessons, err := e.svc.Lessons(ctx, "матан")
+	if err != nil || len(lessons) != 1 || lessons[0].LibraryMatch() != kb.LibraryAmbiguous {
+		t.Fatalf("Lessons(матан) = %+v, %v", lessons, err)
+	}
 }
 
 // Lessons whose string resolves to a library subject are grouped by its id; the others keep their free-string group

@@ -60,7 +60,18 @@ export interface KnowledgeLesson {
   transcriptReady: boolean;
   summaryReady: boolean;
   lectureTextReady: boolean;
+  /** The library subject the core resolved the subject to; "" unless librarySubjectState is "matched". */
+  librarySubjectId: string;
+  librarySubjectState: LibrarySubjectState;
 }
+
+/**
+ * How the core resolved the lesson's subject to the library, never a guess: one subject, none, several (the student
+ * chooses) or no subject string at all.
+ */
+export type LibrarySubjectState = "matched" | "none" | "ambiguous" | "no-subject";
+
+export const librarySubjectStates: readonly LibrarySubjectState[] = ["matched", "none", "ambiguous", "no-subject"];
 
 export type KnowledgeSection = "title" | "summary" | "lectureText" | "transcript";
 
@@ -164,6 +175,11 @@ export function parseSubject(raw: unknown): KnowledgeSubject {
 export function parseLesson(raw: unknown): KnowledgeLesson {
   const w = "knowledge lesson";
   const r = record(raw, w);
+  const libraryId = str(r, "librarySubjectId", w);
+  const libraryState = oneOf(r, "librarySubjectState", librarySubjectStates, w);
+  if ((libraryState === "matched") !== (libraryId !== "")) {
+    throw new Error(`${w}: librarySubjectId does not fit librarySubjectState`);
+  }
   return {
     recordingId: str(r, "recordingId", w),
     startedAt: str(r, "startedAt", w),
@@ -177,6 +193,8 @@ export function parseLesson(raw: unknown): KnowledgeLesson {
     transcriptReady: bool(r, "transcriptReady", w),
     summaryReady: bool(r, "summaryReady", w),
     lectureTextReady: bool(r, "lectureTextReady", w),
+    librarySubjectId: libraryId,
+    librarySubjectState: libraryState,
   };
 }
 
