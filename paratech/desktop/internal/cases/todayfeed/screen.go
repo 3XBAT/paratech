@@ -11,6 +11,7 @@ import (
 
 	"paratech/desktop/internal/domain/agent/post"
 	"paratech/desktop/internal/domain/agent/services/today"
+	"paratech/desktop/internal/domain/coursework/assignment"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
 	"paratech/desktop/internal/domain/recording/recording"
@@ -167,9 +168,15 @@ func (s *Screen) view(ctx context.Context, p *post.Post, now time.Time) (PostVie
 	case rec.Deleting():
 		return PostView{}, false, nil
 	}
-	list, err := s.homework.ListByTranscript(ctx, p.Transcript())
+	all, err := s.homework.ListByTranscript(ctx, p.Transcript())
 	if err != nil {
 		return PostView{}, false, err
+	}
+	list := make([]*assignment.Assignment, 0, len(all))
+	for _, a := range all {
+		if !a.Deleted() { // a deleted assignment is hidden everywhere (ADR-0029)
+			list = append(list, a)
+		}
 	}
 	shown := p.ShownAt(len(list))
 	if shown.IsZero() {

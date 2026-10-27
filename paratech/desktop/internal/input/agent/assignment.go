@@ -69,6 +69,9 @@ func addedAssignmentID(at origin, callID string) shared.AssignmentID {
 // checkAdded reads the version of the assignment a RemoveAssignment compensation removes; a gone one is undone.
 func (a *Actions) checkAdded(ctx context.Context, c action.RemoveAssignment) (action.Target, error) {
 	v, err := a.assignments.Assignment(ctx, shared.AssignmentID(c.Assignment.ID()))
+	if errors.Is(err, assignment.ErrDeleted) {
+		return deletedTarget, nil // the student deleted it: changed, not undone
+	}
 	if errors.Is(err, shared.ErrNotFound) {
 		return action.Target{Compensated: true}, nil
 	}
@@ -113,6 +116,31 @@ func (a *Actions) observeAdded(ctx context.Context, in action.Intent) (action.Ob
 	return action.Observation{
 		Known: true, Version: createdVersion, Effect: true, Compensation: action.RemoveAssignment{Assignment: in.Target},
 	}, nil
+}
+
+// namesDeleted reports whether an ID argument of call (plan steps aside) names an assignment the student deleted:
+// every tool then answers unknown_id before its use case runs, as if the assignment never was (ADR-0029). Any other
+// read error is left to the tool.
+func (t tools) namesDeleted(ctx context.Context, call values.Call) bool {
+	if t.actions == nil {
+		return false
+	}
+	args := call.Args()
+	for _, name := range args.Names() {
+		refs := args.IDs(name)
+		if r, ok := args.ID(name); ok {
+			refs = append(refs, r)
+		}
+		for _, r := range refs {
+			if r.Kind() != values.KindAssignment {
+				continue
+			}
+			if _, err := t.actions.assignments.Assignment(ctx, shared.AssignmentID(r.ID())); errors.Is(err, assignment.ErrDeleted) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // actionLine adds to the action line of create_assignment the assignment as the local data has it: its title, library
