@@ -5398,6 +5398,76 @@
                 "TASK-206"
             ],
             "status": "pending"
+        },
+        {
+            "id": "TASK-252",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Конспекты · ядро + UI] Предмет лекции определяет ядро: библиотечный ID предмета у KnowledgeLesson / цели записи вместо сопоставления имени во фронтенде",
+            "acceptance_criteria": [
+                "Follow-up TASK-154: страница лекции сейчас ищет предмет библиотеки по имени/алиасу во фронтенде (временное решение, ARCH-44)",
+                "Ядро отдаёт subjectId библиотеки для лекции (запись или пара) через существующее сопоставление subjectmatch; нет совпадения или их несколько — явный признак, не угадывание",
+                "Фронтенд берёт subjectId из DTO, своё сопоставление имён удалено; тесты Go и фронтенда",
+                "Исполнитель: go-core (opus) для ядра и привязки, frontend для страницы"
+            ],
+            "test_steps": [
+                "go test -race затронутых пакетов, тест архитектуры, npm run test/build"
+            ],
+            "dependencies": [
+                "TASK-154"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-253",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Конспекты · ядро + UI] Счётчики частей конспекта: разделы, страницы, фрагменты в NotePart и на странице лекции",
+            "acceptance_criteria": [
+                "Follow-up TASK-154: критерий «счётчики у части» не выполнен — в привязке NotePart нет полей счёта",
+                "NotePart получает sections/pages/fragments из извлечённого текста (кэш TASK-150); страницы — после TASK-156, до этого 0 и не показываются",
+                "UI показывает «N разделов» / «N стр.» у части; тесты",
+                "Исполнитель: go-core (opus), frontend"
+            ],
+            "test_steps": [
+                "go test -race затронутых пакетов, npm run test/build"
+            ],
+            "dependencies": [
+                "TASK-154"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-254",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Конспекты · ядро] Файлы .md в диалоге открытия и при перетаскивании (Obsidian)",
+            "acceptance_criteria": [
+                "Follow-up TASK-151: .md нет в фильтре диалога и в allow-list перетаскивания (TASK-138), хотя чтение Markdown есть (TASK-150)",
+                "Добавить .md (и .markdown) в фильтр и allow-list; определение типа по содержимому не меняется; тесты",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race затронутых пакетов, GOOS=windows go vet"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-255",
+            "category": "ui",
+            "priority": "low",
+            "description": "[Предметы · UI] Мелочи после TASK-227: устаревшие комментарии о проблеме разбора, строка «Отправлено» без секунд",
+            "acceptance_criteria": [
+                "Follow-up TASK-227: комментарии в workView.ts (acceptWork) и homeworkTurnkey.ts:44 говорят, что ядро не хранит проблему — исправить; «Отправлено <дата>» без секунд",
+                "Тесты фронтенда",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [],
+            "status": "pending"
         }
     ]
 }
