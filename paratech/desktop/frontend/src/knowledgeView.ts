@@ -109,9 +109,10 @@ export function subjectMeta(s: Pick<KnowledgeSubject, "lessons" | "latest">): st
 }
 
 /** The tabs of an opened lesson. */
-export type LessonTab = "summary" | "lecture" | "transcript" | "homework";
+export type LessonTab = "notes" | "summary" | "lecture" | "transcript" | "homework";
 
 export const lessonTabs: readonly { value: LessonTab; label: string }[] = [
+  { value: "notes", label: "Мой конспект" },
   { value: "summary", label: "Кратко" },
   { value: "lecture", label: "Текст лекции" },
   { value: "transcript", label: "Расшифровка" },
@@ -127,11 +128,12 @@ export interface LessonFocus {
   index: number;
 }
 
-export const noFocus: LessonFocus = { tab: "summary", index: -1 };
+/** No explicit place: a lesson opens at «Мой конспект», its first tab. */
+export const noFocus: LessonFocus = { tab: "notes", index: -1 };
 
 /**
  * The place a search hit opens in a recording's page: the lecture block, the transcript segment, a summary section or a
- * key point. A hit in the student's notes opens the notes block, which is not a tab: no focus.
+ * key point. A hit in the student's notes (or in the title) opens «Мой конспект»: no place inside it.
  */
 export function hitFocus(h: Pick<KnowledgeHit, "section" | "index">): LessonFocus {
   switch (h.section) {

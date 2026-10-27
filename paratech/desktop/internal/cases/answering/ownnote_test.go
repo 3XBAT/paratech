@@ -91,8 +91,8 @@ func TestAskFromOwnNote(t *testing.T) {
 	}
 }
 
-// Same score in a recorded lesson: the AI summary still comes before the student's note (ADR-0027 Open 6 open).
-func TestAskOrderSummaryBeforeNote(t *testing.T) {
+// Same score in a recorded lesson: the student's note comes before the AI summary (ADR-0027 «Ranking»).
+func TestAskOrderNoteBeforeSummary(t *testing.T) {
 	e := newEnv(t)
 	l := lessons()[:1]
 	l[0].Lesson.Key = kb.RecordingKey("rec1")
@@ -105,8 +105,8 @@ func TestAskOrderSummaryBeforeNote(t *testing.T) {
 		t.Fatal(err)
 	}
 	fr := e.reader.reqs[0].Fragments()
-	if len(fr) != 2 || fr[0].Source.Section != answer.SectionSummary || fr[1].Source.Section != answer.SectionOwnNote ||
-		fr[1].Source.Recording != "" {
+	if len(fr) != 2 || fr[0].Source.Section != answer.SectionOwnNote || fr[1].Source.Section != answer.SectionSummary ||
+		fr[0].Source.Recording != "" || fr[0].Source.Note != "n1" {
 		t.Fatalf("fragments %+v", fr)
 	}
 }
