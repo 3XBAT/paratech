@@ -46,11 +46,12 @@ const (
 	TextExtracted       TextStatus = "extracted"         // read
 	TextFailed          TextStatus = "failed"            // could not be read
 	TextPDFNotExtracted TextStatus = "pdf_not_extracted" // PDF text is not read (ADR-0024): «текст PDF не извлечён»
+	TextNoText          TextStatus = "no_text"           // a photo page, not recognized (ADR-0027): «текст не распознан»
 )
 
 // TextStatuses returns every text status, for the schema checks.
 func TextStatuses() []TextStatus {
-	return []TextStatus{TextPending, TextExtracted, TextFailed, TextPDFNotExtracted}
+	return []TextStatus{TextPending, TextExtracted, TextFailed, TextPDFNotExtracted, TextNoText}
 }
 
 func (s TextStatus) valid() bool { return slices.Contains(TextStatuses(), s) }
@@ -87,14 +88,17 @@ type Spec struct {
 }
 
 // New creates an active material in «Входящие», never stored (Version() == 0). A PDF starts with
-// TextPDFNotExtracted, the others with TextPending.
+// TextPDFNotExtracted, a photo (JPEG, PNG) with TextNoText, the others with TextPending.
 func New(spec Spec, now time.Time) (*Material, error) {
 	m := &Material{
 		id: spec.ID, digest: spec.Digest, size: spec.Size, typ: spec.Type, name: displayName(spec.Name),
 		status: StatusActive, text: TextPending, createdAt: now, updatedAt: now,
 	}
-	if spec.Type == TypePDF {
+	switch {
+	case spec.Type == TypePDF:
 		m.text = TextPDFNotExtracted
+	case spec.Type.Image():
+		m.text = TextNoText
 	}
 	if err := m.validate(); err != nil {
 		return nil, err
@@ -163,6 +167,10 @@ func (m *Material) validate() error {
 		return fmt.Errorf("%w: status %q", ErrInvalidMaterial, m.status)
 	case !m.text.valid():
 		return fmt.Errorf("%w: text status %q", ErrInvalidMaterial, m.text)
+	case m.typ.Image() && m.size > MaxImageBytes:
+		return fmt.Errorf("%w: image size %d", ErrInvalidMaterial, m.size)
+	case m.typ.Image() != (m.text == TextNoText):
+		return fmt.Errorf("%w: text status %q of a %s", ErrInvalidMaterial, m.text, m.typ)
 	case m.createdAt.IsZero() || m.updatedAt.IsZero():
 		return fmt.Errorf("%w: missing time", ErrInvalidMaterial)
 	case (m.subject == "") != (m.folder == ""):
@@ -285,8 +293,8 @@ func (m *Material) Reupload(now time.Time) (changed bool, err error) {
 }
 
 // SetText records how far the text was read: TextExtracted or TextFailed. A PDF keeps TextPDFNotExtracted (its text
-// is not read, ADR-0024). The same status changes nothing. Errors: ErrRemoved, ErrInvalidMaterial for another status
-// or a PDF.
+// is not read, ADR-0024), a photo TextNoText. The same status changes nothing. Errors: ErrRemoved, ErrInvalidMaterial
+// for another status or a type whose text is not read.
 //
 // The status is a fact about the content, which never changes, not a change of the material: it keeps the time of the
 // last change, and the repository saves it apart without a new version, so reading a file does not make an Undo of
@@ -295,8 +303,8 @@ func (m *Material) SetText(s TextStatus) (changed bool, err error) {
 	if s != TextExtracted && s != TextFailed {
 		return false, fmt.Errorf("%w: text status %q", ErrInvalidMaterial, s)
 	}
-	if m.typ == TypePDF {
-		return false, fmt.Errorf("%w: the text of a PDF is not read", ErrInvalidMaterial)
+	if !m.typ.Readable() {
+		return false, fmt.Errorf("%w: the text of a %s is not read", ErrInvalidMaterial, m.typ)
 	}
 	if m.status != StatusActive {
 		return false, ErrRemoved
