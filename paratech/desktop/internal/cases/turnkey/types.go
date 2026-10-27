@@ -18,6 +18,7 @@ type Deps struct {
 	Materials   MaterialTexts
 	Reader      Reader
 	Advisor     StepAdvisor  // nil: AskStep answers ErrNotConfigured
+	Sends       WorkSends    // nil: the last send time is never taken from the deliveries
 	Writing     *WritingDeps // nil: the writing answers ErrNotConfigured
 	Clock       Clock
 	IDs         IDs
@@ -137,6 +138,11 @@ type View struct {
 	Answered []Answered   // the questions of the earlier rounds with the student's answers
 	Writing  *WritingView // from the start of the writing on (TASK-131)
 
+	// TASK-226: why the last reader call did not go through ("" none or after an answer), kept across restarts, and
+	// when the work was last sent to the teacher (zero if never).
+	LastProblem work.Problem
+	SentAt      time.Time
+
 	Version   int64
 	UpdatedAt time.Time
 }
@@ -159,7 +165,8 @@ type Started struct {
 func viewOf(w *work.Work) View {
 	v := View{
 		ID: w.ID(), Source: w.Source(), Status: w.Status(), Round: w.Round(), Attempt: w.Attempt(),
-		Partial: w.Partial(), Writing: writingViewOf(w), Version: w.Version(), UpdatedAt: w.UpdatedAt(),
+		Partial: w.Partial(), Writing: writingViewOf(w), LastProblem: w.LastProblem(), SentAt: w.SentAt(),
+		Version: w.Version(), UpdatedAt: w.UpdatedAt(),
 	}
 	v.Sendable = w.Sendable() == nil
 	v.QuestionRound, v.Questions = w.Questions()

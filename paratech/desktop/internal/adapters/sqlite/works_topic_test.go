@@ -123,8 +123,9 @@ func TestMigration31KeepsWorks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := p.UpTo(ctx, 31); err != nil {
-		t.Fatalf("up to 31: %v", err)
+	// The repository reads the columns of 35 (TASK-226); going down passes 35 first.
+	if _, err := p.UpTo(ctx, 35); err != nil {
+		t.Fatalf("up to 35: %v", err)
 	}
 	repo := NewWorkRepository(db)
 	w, err := repo.Get(ctx, "w1")

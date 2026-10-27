@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"paratech/desktop/internal/adapters/sqlite/sqlcgen"
 	"paratech/desktop/internal/domain/coursework/work"
@@ -17,6 +18,7 @@ const (
 	opSaveWork    = "sqlite: save work"
 	opDeleteWork  = "sqlite: delete work"
 	opRestoreWork = "stored work"
+	opLastSent    = "sqlite: last send of work"
 )
 
 // WorkRepository stores the turnkey works (the turnkey.WorkRepository port, TASK-129). The reader's answer of a round
@@ -86,8 +88,8 @@ func (r *WorkRepository) Save(ctx context.Context, w *work.Work) error {
 				Attempt: int64(st.Attempt), EditWorkType: edit(work.FieldWorkType), EditVolume: edit(work.FieldVolume),
 				EditFileFormat: edit(work.FieldFileFormat), EditFormatting: edit(work.FieldFormatting),
 				EditVariant: edit(work.FieldVariant), EditDeadline: edit(work.FieldDeadline),
-				EditSources: edit(work.FieldSources), Writing: writing, CreatedAt: jobMs(st.CreatedAt),
-				UpdatedAt: jobMs(st.UpdatedAt),
+				EditSources: edit(work.FieldSources), Writing: writing, LastProblem: jobNullString(string(st.Problem)),
+				SentAt: jobNullMs(st.SentAt), CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
 			})
 			if err := DuplicateAsVersionConflict(MapError(ctx, err)); err != nil {
 				return err
@@ -98,8 +100,8 @@ func (r *WorkRepository) Save(ctx context.Context, w *work.Work) error {
 				EditWorkType: edit(work.FieldWorkType), EditVolume: edit(work.FieldVolume),
 				EditFileFormat: edit(work.FieldFileFormat), EditFormatting: edit(work.FieldFormatting),
 				EditVariant: edit(work.FieldVariant), EditDeadline: edit(work.FieldDeadline),
-				EditSources: edit(work.FieldSources), Writing: writing, UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID),
-				ExpectedVersion: st.Version,
+				EditSources: edit(work.FieldSources), Writing: writing, LastProblem: jobNullString(string(st.Problem)),
+				SentAt: jobNullMs(st.SentAt), UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID), ExpectedVersion: st.Version,
 			})
 			if err := VersionCAS(ctx, n, err); err != nil {
 				return err
@@ -133,6 +135,19 @@ func (r *WorkRepository) Delete(ctx context.Context, id shared.WorkID, expected 
 		return fmt.Errorf("%s %s: %w", opDeleteWork, id, err)
 	}
 	return nil
+}
+
+// LastSent returns when a send of work id to the teacher was last SENT: the newest SENT delivery of its send_work_email
+// proposals (the turnkey.WorkSends port, TASK-226); zero if none.
+func (r *WorkRepository) LastSent(ctx context.Context, id shared.WorkID) (time.Time, error) {
+	ms, err := r.db.Queries(ctx).LastWorkSentAt(ctx, string(id))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s %s: %w", opLastSent, id, MapError(ctx, err))
+	}
+	if ms == 0 {
+		return time.Time{}, nil
+	}
+	return jobFromMs(ms), nil
 }
 
 // replyWire is the stored form of a student's reply.
@@ -224,7 +239,8 @@ func (r *WorkRepository) restore(ctx context.Context, row sqlcgen.Work) (*work.W
 	w, err := work.Restore(work.State{
 		Version: row.Version, ID: shared.WorkID(row.ID), Source: src,
 		Status: work.Status(row.Status), Round: int(row.Round), Attempt: int(row.Attempt), Rounds: rounds, Edits: edits,
-		Writing: writing, CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
+		Writing: writing, Problem: work.Problem(row.LastProblem.String), SentAt: jobFromNullMs(row.SentAt),
+		CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 	})
 	if err != nil {
 		return bad("state", err)

@@ -801,3 +801,9 @@ ALTER TABLE settings ADD COLUMN free_work_notice INTEGER NOT NULL DEFAULT 1 CHEC
 -- proposals: the name of the copy a send_work_email attaches (proposal.CopyName, a safe file name the core made from
 -- the library name, never model text); '' for the other kinds, before validation and for sends stored before 0034.
 ALTER TABLE proposals ADD COLUMN attachment_name TEXT NOT NULL DEFAULT '' CHECK (length(attachment_name) <= 128);
+
+-- Migration 0035.
+-- works: the problem of the last reader call (work.Problem, a code, never model text); NULL after an answer. The time
+-- the delivery of a send of the work was last SENT (ms); NULL if never.
+ALTER TABLE works ADD COLUMN last_problem TEXT CHECK (last_problem IS NULL OR last_problem IN ('offline', 'quota', 'refused', 'no_text', 'source_gone'));
+ALTER TABLE works ADD COLUMN sent_at INTEGER;

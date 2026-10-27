@@ -19,6 +19,10 @@ const (
 	opRefused  = "turnkey: reader answer refused"
 	opMaterial = "turnkey: material text not read"
 	opSaveLost = "turnkey: work changed while saved"
+	opProblem  = "turnkey: problem of the reader call not saved"
+
+	opSentNotRead  = "turnkey: last send not read"
+	opSentNotSaved = "turnkey: last send not saved"
 )
 
 // saveAttempts bounds the saves of one change that lose against another save of the same work.
@@ -31,6 +35,7 @@ type Service struct {
 	materials   MaterialTexts
 	reader      Reader
 	advisor     StepAdvisor
+	sends       WorkSends
 	writing     *WritingDeps
 	clock       Clock
 	ids         IDs
@@ -65,7 +70,7 @@ func New(d Deps) (*Service, error) {
 	}
 	return &Service{
 		works: d.Works, assignments: d.Assignments, materials: d.Materials, reader: d.Reader, advisor: d.Advisor,
-		writing: writing, clock: d.Clock, ids: d.IDs, log: log,
+		sends: d.Sends, writing: writing, clock: d.Clock, ids: d.IDs, log: log,
 	}, nil
 }
 
@@ -139,16 +144,18 @@ func (s *Service) ConfirmRequirements(ctx context.Context, id shared.WorkID) (Vi
 	return s.view(ctx, w), nil
 }
 
-// Work returns a work. Errors: ErrNotFound, ErrUnavailable.
+// Work returns a work, with the time of a send to the teacher delivered since it was last read (syncSent). Errors:
+// ErrNotFound, ErrUnavailable.
 func (s *Service) Work(ctx context.Context, id shared.WorkID) (View, error) {
 	w, err := s.get(ctx, id)
 	if err != nil {
 		return View{}, err
 	}
-	return s.view(ctx, w), nil
+	return s.view(ctx, s.syncSent(ctx, w)), nil
 }
 
-// WorkOf returns the work of a source that has not failed. Errors: ErrNotFound, ErrInvalidRequest, ErrUnavailable.
+// WorkOf returns the work of a source that has not failed, as Work. Errors: ErrNotFound, ErrInvalidRequest,
+// ErrUnavailable.
 func (s *Service) WorkOf(ctx context.Context, src work.Source) (View, error) {
 	if err := src.Validate(); err != nil {
 		return View{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
@@ -157,7 +164,30 @@ func (s *Service) WorkOf(ctx context.Context, src work.Source) (View, error) {
 	if err != nil {
 		return View{}, s.loadError(err)
 	}
-	return s.view(ctx, w), nil
+	return s.view(ctx, s.syncSent(ctx, w)), nil
+}
+
+// syncSent takes the time the newest send of w to the teacher was SENT into the work and saves it (TASK-226). The
+// deliveries stay the record of the send, so this is a repeatable step: one that fails is only logged and runs again on
+// the next read, and one that finds nothing newer saves nothing. The view of a work whose save failed still shows the
+// send; its version stays the stored one.
+func (s *Service) syncSent(ctx context.Context, w *work.Work) *work.Work {
+	if s.sends == nil || w.Sendable() != nil {
+		return w
+	}
+	at, err := s.sends.LastSent(ctx, w.ID())
+	if err != nil {
+		s.log.WarnContext(ctx, opSentNotRead, slog.String("work", string(w.ID())), slog.Any("cause", err))
+		return w
+	}
+	changed, err := w.RecordSent(at)
+	if err != nil || !changed {
+		return w
+	}
+	if err := s.works.Save(ctx, w); err != nil {
+		s.log.WarnContext(ctx, opSentNotSaved, slog.String("work", string(w.ID())), slog.Any("cause", err))
+	}
+	return w
 }
 
 // AskStep is «Спросить по шагу»: the student's question about one helper step, answered from that step and the
@@ -251,16 +281,16 @@ func (s *Service) workOf(ctx context.Context, src work.Source) (*work.Work, bool
 }
 
 // ask runs the due reader call of w and records its outcome. It returns the work as stored after it (w unchanged when
-// nothing was recorded) and the error of the call.
+// nothing was recorded) and the error of the call. A call that did not go through keeps its problem (problem).
 func (s *Service) ask(ctx context.Context, w *work.Work) (*work.Work, error) {
 	assignmentText, materialText, err := s.texts(ctx, w.Source())
 	if err != nil {
-		return w, err
+		return s.problem(ctx, w, err)
 	}
 	req, err := w.Request(assignmentText, materialText)
 	switch {
 	case errors.Is(err, work.ErrInvalidRequest):
-		return w, fmt.Errorf("%w: %w", ErrNoText, err)
+		return s.problem(ctx, w, fmt.Errorf("%w: %w", ErrNoText, err))
 	case err != nil:
 		return w, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
@@ -269,7 +299,7 @@ func (s *Service) ask(ctx context.Context, w *work.Work) (*work.Work, error) {
 		return s.refused(ctx, w, req.Round(), err)
 	}
 	if err != nil {
-		return w, s.readerError(err)
+		return s.problem(ctx, w, s.readerError(err))
 	}
 	answer, err := req.Parse(raw)
 	if err != nil {
@@ -293,6 +323,40 @@ func (s *Service) refused(ctx context.Context, w *work.Work, round int, cause er
 		return w, err
 	}
 	return got, fmt.Errorf("%w: %w", ErrReaderRefused, cause)
+}
+
+// problem keeps on w the problem of a reader call that failed with cause (TASK-226), so it is shown after a restart
+// too, and returns cause. A cause that is no problem of the call (a local failure) records nothing; a save that fails
+// is logged and the call's error still comes back.
+func (s *Service) problem(ctx context.Context, w *work.Work, cause error) (*work.Work, error) {
+	p, ok := problemOf(cause)
+	if !ok {
+		return w, cause
+	}
+	got, err := s.save(ctx, w, func(w *work.Work) error { return w.NoteProblem(p, s.clock.Now()) })
+	if err != nil {
+		s.log.WarnContext(ctx, opProblem, slog.String("work", string(w.ID())), slog.String("problem", string(p)),
+			slog.Any("cause", err))
+		return w, cause
+	}
+	return got, cause
+}
+
+// problemOf sorts the error of a reader call that recorded no answer.
+func problemOf(err error) (work.Problem, bool) {
+	switch {
+	case errors.Is(err, ErrReaderUnavailable):
+		return work.ProblemOffline, true
+	case errors.Is(err, ErrQuota):
+		return work.ProblemQuota, true
+	case errors.Is(err, ErrReaderRefused):
+		return work.ProblemRefused, true
+	case errors.Is(err, ErrNoText):
+		return work.ProblemNoText, true
+	case errors.Is(err, ErrSourceNotFound):
+		return work.ProblemSourceGone, true
+	}
+	return "", false
 }
 
 // save applies fn to w and saves it; when another save won meanwhile, fn is applied to the stored work again. A move
