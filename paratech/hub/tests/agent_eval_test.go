@@ -988,6 +988,178 @@ func TestAgentEvalHubV6TimeShape(t *testing.T) {
 	}
 }
 
+// --- panel v8: ask for the subject (TASK-233, ADR-0029) -------------------------------------------------------------
+
+const (
+	v8AskSubject = "К какому предмету относится задание?"
+	v8NoSubject  = "Без предмета"
+	// v8Subjects is the list_subjects result for the two subjects of the v6Request base.
+	v8Subjects = `{"subjects":[{"id":"s1","name":"Физика"},{"id":"s2","name":"Математический анализ"}]}`
+	v8Added    = `{"assignment":"asg-new-1"}`
+)
+
+// v8Request is v6Request on Thursday 2026-10-22; subject is the subject of the thread, "" for a thread «Без предмета».
+func (h *evalHub) v8Request(key, subject string, turns ...*hubv1.AgentTurn) *hubv1.AgentStepRequest {
+	msg := h.v6Request(key, "2026-10-22", turns...)
+	msg.Scope.SubjectId = subject
+	return msg
+}
+
+// v8Step is one recorded planner step: its call and the result the desktop sends back ("" after the last step).
+type v8Step struct {
+	call   [3]string
+	result string
+}
+
+// runSteps plays the steps of one request through AgentStep, each answer unchanged and sealed, and returns every call.
+func (h *evalHub) runSteps(t *testing.T, text, subject string, steps []v8Step) []*hubv1.ToolCall {
+	t.Helper()
+	turns := []*hubv1.AgentTurn{studentText(text)}
+	var all []*hubv1.ToolCall
+	for i, s := range steps {
+		h.provider.Push(answerWith(t, s.call))
+		resp, err := h.step(t, h.v8Request(fmt.Sprintf("ag:th-eval:1:%d", i+1), subject, turns...))
+		h.acceptedAsIs(t, resp, err, s.call)
+		all = append(all, resp.GetCalls().GetCalls()...)
+		if s.result == "" {
+			continue
+		}
+		results := &hubv1.ToolResults{}
+		for _, c := range resp.GetCalls().GetCalls() {
+			results.Results = append(results.Results, &hubv1.ToolResult{CallId: c.GetCallId(), ResultJson: s.result})
+		}
+		turns = append(turns, &hubv1.AgentTurn{Turn: &hubv1.AgentTurn_Calls{Calls: resp.GetCalls()}},
+			&hubv1.AgentTurn{Turn: &hubv1.AgentTurn_Results{Results: results}})
+	}
+	return all
+}
+
+// v8Question is one question of an ask_questions call.
+type v8Question struct {
+	Kind     string   `json:"kind"`
+	Question string   `json:"question"`
+	Options  []string `json:"options"`
+	Default  *int     `json:"default"`
+}
+
+// TestAgentEvalHubV8AskForTheSubject: the owner's decision of 27.10 on catalog 8 (recorded answers that follow the v8
+// prompt; a live model is level 2). In a thread without a subject a request that names none is asked the subject
+// first: one choice question with the subjects of list_subjects and «Без предмета» last; the chosen subject's ID, or
+// no subject after «Без предмета», goes into create_assignment. A thread subject or a named subject is never asked, and
+// a missing date is still neither asked nor set. Every answer passes unchanged and sealed, the provider gets the v8
+// prompt and the tools of catalog 7.
+func TestAgentEvalHubV8AskForTheSubject(t *testing.T) {
+	const ask = "запиши: решить номер 5 к пятнице"
+	list := [3]string{"toolu_01", "list_subjects", `{}`}
+	question := [3]string{"toolu_02", "ask_questions", `{"questions":[{"kind":"choice","question":"` + v8AskSubject + `",` +
+		`"options":["Физика","Математический анализ","` + v8NoSubject + `"]}]}`}
+	picked := func(option int) string { return fmt.Sprintf(`{"answers":[{"question":0,"option":%d}]}`, option) }
+	_, v7, err := testenv.Panel(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name, text, subject, rule string
+		steps                     []v8Step
+		asked                     bool
+		created                   map[string]any
+	}{
+		{name: "answer a subject", text: ask, rule: "the last option is always «Без предмета»", asked: true,
+			steps: []v8Step{{list, v8Subjects}, {question, picked(1)},
+				{[3]string{"toolu_03", "create_assignment", `{"title":"Решить номер 5","subject":"s2","due":"2026-10-23"}`}, v8Added},
+				{[3]string{"toolu_04", "reply", `{"text":"Задание добавлено, срок 2026-10-23."}`}, ""}},
+			created: map[string]any{"title": "Решить номер 5", "subject": "s2", "due": "2026-10-23"}},
+		{name: "answer without a subject", text: ask, rule: "«Без предмета», the last option, means create_assignment without subject", asked: true,
+			steps: []v8Step{{list, v8Subjects}, {question, picked(2)},
+				{[3]string{"toolu_03", "create_assignment", `{"title":"Решить номер 5","due":"2026-10-23"}`}, v8Added},
+				{[3]string{"toolu_04", "reply", `{"text":"Задание добавлено, срок 2026-10-23."}`}, ""}},
+			created: map[string]any{"title": "Решить номер 5", "due": "2026-10-23"}},
+		{name: "subject in the thread", text: ask, subject: "s1", rule: "when the student names none, the subject of the current thread",
+			steps: []v8Step{
+				{[3]string{"toolu_01", "create_assignment", `{"title":"Решить номер 5","subject":"s1","due":"2026-10-23"}`}, v8Added},
+				{[3]string{"toolu_02", "reply", `{"text":"Задание добавлено, срок 2026-10-23."}`}, ""}},
+			created: map[string]any{"title": "Решить номер 5", "subject": "s1", "due": "2026-10-23"}},
+		{name: "subject named in the request", text: "по матану нужно решить номер 5", rule: "is never asked: its ID comes from list_subjects",
+			steps: []v8Step{{list, v8Subjects},
+				{[3]string{"toolu_02", "create_assignment", `{"title":"Решить номер 5","subject":"s2"}`}, v8Added},
+				{[3]string{"toolu_03", "reply", `{"text":"Задание добавлено, срок не указан."}`}, ""}},
+			created: map[string]any{"title": "Решить номер 5", "subject": "s2"}},
+		{name: "no date", text: "запиши: решить номер 5", rule: "a request without a date still gets no question about the date", asked: true,
+			steps: []v8Step{{list, v8Subjects}, {question, picked(0)},
+				{[3]string{"toolu_03", "create_assignment", `{"title":"Решить номер 5","subject":"s1"}`}, v8Added},
+				{[3]string{"toolu_04", "reply", `{"text":"Задание добавлено, срок не указан."}`}, ""}},
+			created: map[string]any{"title": "Решить номер 5", "subject": "s1"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newEvalHubAt(t, 8)
+			if !strings.Contains(h.system, c.rule) {
+				t.Fatalf("the v8 prompt has no rule %q", c.rule)
+			}
+			calls := h.runSteps(t, c.text, c.subject, c.steps)
+
+			var asks, creates []*hubv1.ToolCall
+			for _, call := range calls {
+				switch call.GetTool() {
+				case "ask_questions":
+					asks = append(asks, call)
+				case "create_assignment":
+					creates = append(creates, call)
+				case "propose_send":
+					t.Fatalf("a step proposes sending: %v", call)
+				}
+			}
+			if (len(asks) == 1) != c.asked || len(asks) > 1 || len(creates) != 1 {
+				t.Fatalf("%d questions and %d create_assignment, want asked %v and one", len(asks), len(creates), c.asked)
+			}
+			if c.asked {
+				var a struct {
+					Questions []v8Question `json:"questions"`
+				}
+				if err := json.Unmarshal([]byte(asks[0].GetArgumentsJson()), &a); err != nil {
+					t.Fatal(err)
+				}
+				// Only the subject is asked: one choice, the subjects of list_subjects in order, «Без предмета» last.
+				if len(a.Questions) != 1 || a.Questions[0].Kind != "choice" || a.Questions[0].Question != v8AskSubject || a.Questions[0].Default != nil ||
+					!slices.Equal(a.Questions[0].Options, []string{"Физика", "Математический анализ", v8NoSubject}) {
+					t.Fatalf("question = %+v", a.Questions)
+				}
+			}
+			if got := argsOf(t, creates[0]); fmt.Sprint(got) != fmt.Sprint(c.created) {
+				t.Fatalf("create_assignment arguments %v, want %v", got, c.created)
+			}
+			for i, pc := range h.provider.Calls() {
+				if pc.System() != h.system || fmt.Sprint(pc.Tools()) != fmt.Sprint(v7.Specs()) {
+					t.Fatalf("provider call %d: not the v8 prompt or not the tools of catalog 7", i)
+				}
+			}
+		})
+	}
+}
+
+// TestAgentEvalHubV8SubjectQuestionShape: a choice has at most 6 options, so the prompt offers at most five subjects
+// before «Без предмета»; six subjects and «Без предмета» are an invalid call (a permanent PROVIDER_ERROR). Catalogs 1
+// to 7 stay served next to 8.
+func TestAgentEvalHubV8SubjectQuestionShape(t *testing.T) {
+	h := newEvalHubAt(t, 8)
+	if !strings.Contains(h.system, "at most five") {
+		t.Fatal("the v8 prompt does not cap the subjects of the question")
+	}
+	seven := `{"questions":[{"kind":"choice","question":"` + v8AskSubject + `","options":["a","b","c","d","e","f","` + v8NoSubject + `"]}]}`
+	h.provider.Push(answerWith(t, [3]string{"toolu_01", "ask_questions", seven}))
+	_, err := h.step(t, h.v8Request("ag:th-eval:1:1", "", studentText("запиши: решить номер 5")))
+	refused(t, err)
+
+	reply := [3]string{"toolu_01", "reply", `{"text":"Готово."}`}
+	for v := uint32(1); v <= 8; v++ {
+		h := newEvalHubAt(t, v)
+		h.provider.Push(answerWith(t, reply))
+		resp, err := h.step(t, h.request("ag:th-eval:1:1", studentText("привет")))
+		h.acceptedAsIs(t, resp, err, reply)
+	}
+}
+
 // --- INSPECT_MATERIAL reader (TASK-122) -----------------------------------------------------------------------------
 
 // readerHub is the public listener with Complete wired to the real gateway use case and the embedded
