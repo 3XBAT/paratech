@@ -1,6 +1,6 @@
 # ADR-0030: Teachers of a subject and «Отправить в…»
 
-- **Status:** Accepted (owner 2026-10-27; B-1…B-4 answered 2026-10-27); the items under «Open» wait for the owner
+- **Status:** Accepted (owner 2026-10-27; B-1…B-6 answered 2026-10-27)
 - **Date:** 2026-10-27
 - **Source:** owner 2026-10-27; ADR-0021 (class C), ADR-0022, ADR-0024 (subjects), ADR-0025 addendum TASK-180 (work
   send), ADR-0004(c) (delivery, UNKNOWN); TASK-192, TASK-226 (`sentAt`). Tasks TASK-235…243, TASK-285, TASK-286.
@@ -14,15 +14,17 @@ with UNKNOWN reconciled (hard rule 7). TASK-235 built one teacher per subject (`
 
 ## Decision
 
-### Teachers of a subject (B-4: by lesson kind)
-- `library/subject` holds up to two teachers keyed by `TeacherRole`: `lecture` (лектор) and `practice` (семинары и
-  практика). `Teacher{name, email}` keeps the TASK-235 rules (name 1–200 runes, one line, no control or bidi
+### Teachers of a subject (B-4: by lesson kind; B-5: a third one for labs)
+- `library/subject` holds up to three teachers keyed by `TeacherRole`: `lecture` (лектор), `practice` (семинары и
+  практика) and `lab` (лабораторные). `Teacher{name, email}` keeps the TASK-235 rules (name 1–200 runes, one line, no control or bidi
   characters; email with the same syntax rules as `proposal.NewRecipient`, own copy in `library`, ARCH-11).
   `SetTeacher(role, name, email, now)`, `ClearTeacher(role, now)`, `Teacher(role)`, `Teachers()`.
 - Storage: table `subject_teachers(subject_id, role, name, email)`, PK `(subject_id, role)`, part of the subject
-  aggregate (no version of its own). The migration copies a TASK-235 teacher into **both** roles (the same meaning as
-  before: every send of the subject went to that address) and blanks `subjects.teacher_*` (kept as unused legacy
+  aggregate (no version of its own). The migration copies a TASK-235 teacher into **all three** roles (the same meaning
+  as before: every send of the subject went to that address) and blanks `subjects.teacher_*` (kept as unused legacy
   columns; SQLite cannot drop them because of the shared CHECK).
+- Filling the lab teacher, the form offers «Как у лектора» and «Как у семинариста»: a one-time copy of that row's
+  name and email into the form (a copy, not a link; a later change of the lecturer does not change the lab teacher).
 - Set and cleared only by the student (`input/wails`, subject page). The agent has no tool to read or set a teacher;
   the planner never sees a name or address (ADR-0022, `AgentBase` carries no personal data). The teacher text of an
   assignment (extraction, `CorrectLesson`) is never an address.
@@ -30,12 +32,24 @@ with UNKNOWN reconciled (hard rule 7). TASK-235 built one teacher per subject (`
 ### Recipient of «Отправить преподавателю»
 - For `send_homework_email` and `send_work_email` the subject is the work's subject ID, else the library subject of
   the assignment (its subject name resolved as ADR-0024). The role comes from the lesson kind of the assignment (of
-  the work's assignment): lecture → `lecture`, seminar → `practice`; lab, unknown kind and no lesson: Open B-5.
+  the work's assignment): lecture → `lecture`, seminar and practice → `practice`, lab → `lab`.
+- **B-6: one teacher is everyone.** When exactly one role of the subject has a teacher with an email, that teacher
+  gets every send of the subject, whatever the lesson kind (the card still says «Кому: <имя> <адрес>»).
+- **B-5: no lesson or an unknown kind → the card asks.** With two or three teachers filled in, the confirmation card
+  asks «Кому отправить?» with one option per filled role («Лектор — <имя> <адрес>», …; roles with the same address
+  are one option, and when all filled roles share one address there is no question). «Да» stays disabled until a
+  choice is made; the confirmation carries the chosen role and the address the card showed; a different current
+  address of that role at «Да» → STALE. The choice is the student's click; the agent and the model never pick a role
+  (hard rule 3).
+- Two or three teachers filled in and the kind's own role empty (for example a lab assignment, lecturer and seminar
+  teacher filled, no lab teacher) → `no_teacher_email` with that role (B-1), the card offers «Указать почту».
 - `RecipientSource.HomeworkRecipient(ctx)` becomes `Teachers(ctx, subject shared.SubjectID)`; the choice is a pure
   domain function `proposal.ChooseRecipient(teachers, kind)` returning the address and name, or a reason:
-  `no_subject` or `no_teacher_email` (with the role). Implemented in `app` over `library.Service`.
+  `no_subject`, `no_teacher_email` (with the role) or `choose_teacher` (with the candidate roles); at «Да» a chosen
+  role goes through `proposal.ChosenRecipient(teachers, role, shownAddress)`. Implemented in `app` over
+  `library.Service`.
 - **B-1 (б): no address → no send.** The proposal is refused with that reason (not an error of the model); the card
-  says «Нет почты преподавателя (<лектор|семинарист>) предмета «<имя>»» with «Указать почту», which opens the
+  says «Нет почты преподавателя (<лектор|семинарист|лабораторные>) предмета «<имя>»» with «Указать почту», which opens the
   teacher field of that role on the subject page; with no subject it says «У задания не указан предмет» and offers the
   subject choice (TASK-232). The settings address is never used as a fallback for these two kinds.
 - Unchanged: frozen at validation, checked again at «Да» (another address → STALE), the card shows «Кому: <имя>
@@ -79,12 +93,10 @@ with UNKNOWN reconciled (hard rule 7). TASK-235 built one teacher per subject (`
 - Migrations (next free numbers, one task at a time): `subject_teachers` (TASK-285); `proposals.send_at` and a rebuild
   of `deliveries` with `not_before` and the statuses MISSED and CANCELLED in its CHECK (TASK-239).
 - `homeworkflow` facts take the subject and the lesson kind; `app/settingsbridge.go` gets the library.
-- The subject page (TASK-225/227) shows two teacher rows.
+- The subject page (TASK-225/227) shows three teacher rows: «Лектор», «Семинары и практика», «Лабораторные».
 - A long schedule keeps the export file locked; the 14-day cap bounds that.
 
 ## Open (owner)
-- B-5. Какому преподавателю отправлять, если вид пары у задания — лабораторная, не определён или у задания нет пары:
-  (а) семинаристу; (б) лектору; (в) в карточке спросить, кому из двух (если указан только один — ему).
-- B-6. Указан только один преподаватель из двух, а задание — по виду пары другого: (а) не отправлять, попросить
-  указать почту нужного (как B-1); (б) отправить тому, кто указан, с пометкой в карточке «Кому: лектор (семинарист не
-  указан)».
+Answered 2026-10-27: B-5 — labs get a third teacher (with «Как у лектора» / «Как у семинариста» when filling it in);
+no lesson or an unknown kind — the card asks which teacher; B-6 — when only one teacher is filled in, that teacher
+gets every send. Tasks: TASK-285 (three roles), TASK-237 (choice), TASK-238 (UI).
