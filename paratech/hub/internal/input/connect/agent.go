@@ -3,6 +3,7 @@ package connect
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	connectrpc "connectrpc.com/connect"
@@ -10,6 +11,7 @@ import (
 
 	"paratech/hub/internal/cases/agentstep"
 	"paratech/hub/internal/domain/llm/values"
+	"paratech/hub/internal/domain/shared"
 	hubv1 "paratech/shared/gen/paratech/hub/v1"
 )
 
@@ -20,13 +22,20 @@ const (
 	msgUnknownCatalog = "unknown tool catalog version"
 	msgBadSeal        = "the seal of echoed calls does not match"
 	msgAgentDisabled  = "agent steps are not enabled on this Hub"
-	msgAgentProvider  = "the LLM provider failed or answered without valid tool calls"
-	msgTurnGone       = "the Hub no longer keeps the model turn of the echoed calls; start again from the student's text"
+	// The desktop falls back to AgentStep on unimplemented.
+	msgAgentStreamDisabled = "AgentStepStream is not served by this Hub: use AgentStep"
+	msgAgentProvider       = "the LLM provider failed or answered without valid tool calls"
+	msgTurnGone            = "the Hub no longer keeps the model turn of the echoed calls; start again from the student's text"
 )
 
 // AgentStepper is what the gateway handler needs from the agent step use case (ARCH-42).
 type AgentStepper interface {
 	Step(ctx context.Context, cmd agentstep.Command) (agentstep.Result, error)
+}
+
+// AgentStreamer is what the AgentStepStream handler needs from the agent step use case. onDelta must not block.
+type AgentStreamer interface {
+	StepStream(ctx context.Context, cmd agentstep.Command, onDelta func(chunk string)) (agentstep.Result, error)
 }
 
 // AgentStep runs one planner step for the authenticated caller. The request names no prompt, model or URL: the Hub
@@ -39,7 +48,51 @@ func (g *Gateway) AgentStep(ctx context.Context, req *connectrpc.Request[hubv1.A
 	if g.agent == nil {
 		return nil, connectrpc.NewError(connectrpc.CodeUnimplemented, errors.New(msgAgentDisabled))
 	}
-	m := req.Msg
+	res, err := g.agent.Step(ctx, agentCommand(owner, req.Msg))
+	if err != nil {
+		return nil, g.agentError(ctx, err)
+	}
+	resp, err := g.agentResponse(ctx, res)
+	if err != nil {
+		return nil, err
+	}
+	return connectrpc.NewResponse(resp), nil
+}
+
+// AgentStepStream runs one planner step with the reply streamed (ADR-0026 addendum, gateway.proto): reply deltas,
+// then the result. As in CompleteStream, the use case never waits for the client: chunks are queued and sent by a
+// separate goroutine, each cut only between characters, and after an error no queued delta is sent.
+func (g *Gateway) AgentStepStream(ctx context.Context, req *connectrpc.Request[hubv1.AgentStepStreamRequest],
+	stream *connectrpc.ServerStream[hubv1.AgentStepStreamResponse]) error {
+	owner, ok := APIKeyFrom(ctx)
+	if !ok || owner == "" {
+		return rejectedError() // the auth middleware is missing; fail closed
+	}
+	if g.agentStream == nil {
+		return connectrpc.NewError(connectrpc.CodeUnimplemented, errors.New(msgAgentStreamDisabled))
+	}
+
+	out := newDeltaSender(func(chunk string) error {
+		return stream.Send(&hubv1.AgentStepStreamResponse{Event: &hubv1.AgentStepStreamResponse_Delta{Delta: strings.ToValidUTF8(chunk, "�")}})
+	})
+	res, err := g.agentStream.StepStream(ctx, agentCommand(owner, req.Msg.GetRequest()), out.push)
+	if err != nil {
+		_ = out.finish(true)
+		return g.agentError(ctx, err)
+	}
+	if err := out.finish(false); err != nil {
+		// The client is gone; the step is settled and stored, a retry with the key replays it.
+		return connectrpc.NewError(connectrpc.CodeCanceled, errors.New(msgCanceled))
+	}
+	resp, err := g.agentResponse(ctx, res)
+	if err != nil {
+		return err
+	}
+	return stream.Send(&hubv1.AgentStepStreamResponse{Event: &hubv1.AgentStepStreamResponse_Result{Result: resp}})
+}
+
+// agentCommand maps a request to the use case command of owner.
+func agentCommand(owner shared.APIKeyID, m *hubv1.AgentStepRequest) agentstep.Command {
 	cmd := agentstep.Command{
 		Owner: owner, IdempotencyKey: m.GetIdempotencyKey(), ThreadID: m.GetThreadId(), Profile: profileOf(m.GetProfile()),
 		CatalogVersion: m.GetCatalogVersion(), MaxOutputTokens: int64(m.GetMaxOutputTokens()),
@@ -60,11 +113,11 @@ func (g *Gateway) AgentStep(ctx context.Context, req *connectrpc.Request[hubv1.A
 	for _, t := range m.GetTurns() {
 		cmd.Turns = append(cmd.Turns, turnOf(t))
 	}
+	return cmd
+}
 
-	res, err := g.agent.Step(ctx, cmd)
-	if err != nil {
-		return nil, g.agentError(ctx, err)
-	}
+// agentResponse encodes a result of the use case.
+func (g *Gateway) agentResponse(ctx context.Context, res agentstep.Result) (*hubv1.AgentStepResponse, error) {
 	quota, err := quotaToProto(res.Quota.Unit, res.Quota.Remaining, res.Quota.Reserved, res.Quota.Limit)
 	if err != nil {
 		g.log.ErrorContext(ctx, "agent step quota cannot be encoded", "err", err)
@@ -74,13 +127,13 @@ func (g *Gateway) AgentStep(ctx context.Context, req *connectrpc.Request[hubv1.A
 	for _, c := range res.Calls {
 		sealed.Calls = append(sealed.Calls, &hubv1.ToolCall{CallId: c.ID, Tool: c.Tool, ArgumentsJson: c.Arguments})
 	}
-	return connectrpc.NewResponse(&hubv1.AgentStepResponse{
+	return &hubv1.AgentStepResponse{
 		Calls:         sealed,
 		Usage:         &hubv1.Usage{InputTokens: res.InputTokens, OutputTokens: res.OutputTokens},
 		Quota:         quota,
 		ReservationId: res.ReservationID,
 		Replayed:      res.Replayed,
-	}), nil
+	}, nil
 }
 
 // turnOf maps one history turn; a turn without a kind maps to the zero kind, which the domain rejects.

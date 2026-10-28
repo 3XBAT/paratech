@@ -49,13 +49,16 @@ type Streamer interface {
 	CompleteStream(ctx context.Context, cmd gateway.Command, onDelta func(chunk string)) (gateway.Result, error)
 }
 
-// Gateway serves GatewayService.Complete and, when given, CompleteStream (ADR-0026) and AgentStep (ADR-0023).
+// Gateway serves GatewayService.Complete and, when given, CompleteStream (ADR-0026), AgentStep (ADR-0023) and
+// AgentStepStream (ADR-0026 addendum "Streamed reply").
 type Gateway struct {
 	hubv1connect.UnimplementedGatewayServiceHandler
 	svc    Completer
 	stream Streamer
 	agent  AgentStepper
-	log    *slog.Logger
+	// agentStream serves AgentStepStream; nil answers unimplemented.
+	agentStream AgentStreamer
+	log         *slog.Logger
 }
 
 var _ hubv1connect.GatewayServiceHandler = (*Gateway)(nil)
@@ -66,6 +69,11 @@ type GatewayOption func(*Gateway)
 // WithAgentStep serves AgentStep with a. Without it AgentStep answers unimplemented.
 func WithAgentStep(a AgentStepper) GatewayOption {
 	return func(g *Gateway) { g.agent = a }
+}
+
+// WithAgentStepStream serves AgentStepStream with s. Without it AgentStepStream answers unimplemented.
+func WithAgentStepStream(s AgentStreamer) GatewayOption {
+	return func(g *Gateway) { g.agentStream = s }
 }
 
 // WithCompleteStream serves CompleteStream with s. Without it CompleteStream answers unimplemented.
