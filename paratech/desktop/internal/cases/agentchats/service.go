@@ -21,6 +21,7 @@ const (
 	opArchive = "agentchats: archive"
 	opRestore = "agentchats: restore"
 	opEarlier = "agentchats: earlier requests"
+	opFill    = "agentchats: context fill"
 )
 
 // maxSaves bounds the saves of one change when a request of the chat keeps saving in between.
@@ -45,6 +46,16 @@ type Chat struct {
 	Archived   bool
 	LastActive time.Time
 	Running    bool // the current request is PLANNING or EXECUTING
+	// Fill is the context ring of the chat; nil when its history could not be read (the line is still listed).
+	Fill *Fill
+}
+
+// Fill is the context ring of a chat (ADR-0028 «The ring»): how much of the window its next request would use, in
+// whole percent (≤ 100; 100 on an Overflow), its level, and whether an earlier request is already left out.
+type Fill struct {
+	Percent  int
+	Level    thread.FillLevel
+	Overflow bool
 }
 
 // Request is an earlier request of a chat, read-only: the student's text without the upload IDs, the mentions with
@@ -75,7 +86,8 @@ func New(d Deps) (*Service, error) {
 	return &Service{chats: d.Chats, history: d.History, clock: d.Clock, ids: d.IDs}, nil
 }
 
-// List returns every chat: the unarchived ones by last activity, newest first, then the archive.
+// List returns every chat with its fill: the unarchived ones by last activity, newest first, then the archive. A chat
+// whose history cannot be read is listed with no fill.
 func (s *Service) List(ctx context.Context) ([]Chat, error) {
 	list, err := s.chats.List(ctx)
 	if err != nil {
@@ -83,9 +95,40 @@ func (s *Service) List(ctx context.Context) ([]Chat, error) {
 	}
 	out := make([]Chat, 0, len(list))
 	for _, th := range list {
-		out = append(out, chatOf(th))
+		out = append(out, s.chatOf(ctx, th))
 	}
 	return out, nil
+}
+
+// Fill returns the context ring of a chat, read as the next step of the chat would read its history.
+func (s *Service) Fill(ctx context.Context, id shared.ThreadID) (Fill, error) {
+	if err := id.Validate(); err != nil {
+		return Fill{}, fmt.Errorf("%s: %w: %w", opFill, ErrInvalidInput, err)
+	}
+	th, err := s.chats.Get(ctx, id)
+	if err != nil {
+		return Fill{}, fmt.Errorf("%s: %w", opFill, err)
+	}
+	f, err := s.fillOf(ctx, th)
+	if err != nil {
+		return Fill{}, fmt.Errorf("%s: %w", opFill, err)
+	}
+	return f, nil
+}
+
+// fillOf is the fill of the chat's next request: the history from HistoryFrom on (a restarted request sends only its
+// own), with the summary. An empty chat holds no conversation: 0 %, nothing read.
+func (s *Service) fillOf(ctx context.Context, th *thread.Thread) (Fill, error) {
+	turn, ok := th.Turn()
+	if !ok {
+		return Fill{Level: thread.FillNormal}, nil
+	}
+	entries, err := s.history.Since(ctx, th.ID(), th.HistoryFrom(), thread.HistoryReadLimit)
+	if err != nil {
+		return Fill{}, err
+	}
+	f := thread.Fill(entries, turn.Number()+1, th.Summary())
+	return Fill{Percent: f.Percent(), Level: f.Level(), Overflow: f.Overflow}, nil
 }
 
 // New is «Новый чат»: the current chat when it has no request yet, else a new empty chat, which becomes current.
@@ -95,7 +138,7 @@ func (s *Service) New(ctx context.Context) (Chat, error) {
 	cur, err := s.chats.Current(ctx)
 	switch {
 	case err == nil && cur.IsEmpty():
-		return chatOf(cur), nil
+		return s.chatOf(ctx, cur), nil
 	case err != nil && !errors.Is(err, shared.ErrNotFound):
 		return Chat{}, fmt.Errorf("%s: %w", opNewChat, err)
 	}
@@ -106,7 +149,7 @@ func (s *Service) New(ctx context.Context) (Chat, error) {
 	if err := s.chats.Save(ctx, th); err != nil {
 		return Chat{}, fmt.Errorf("%s: %w", opNewChat, err)
 	}
-	return chatOf(th), nil
+	return s.chatOf(ctx, th), nil
 }
 
 // Rename sets the title the student typed (thread.Rename checks it). While the chat's request runs it is ErrBusy:
@@ -147,7 +190,7 @@ func (s *Service) update(ctx context.Context, id shared.ThreadID, op string, mov
 			return Chat{}, fmt.Errorf("%s: %w", op, err)
 		}
 		if th.Title() == title && th.ArchivedAt().Equal(archivedAt) {
-			return chatOf(th), nil
+			return s.chatOf(ctx, th), nil
 		}
 		err = s.chats.Save(ctx, th)
 		if errors.Is(err, shared.ErrVersionConflict) && attempt < maxSaves {
@@ -156,7 +199,7 @@ func (s *Service) update(ctx context.Context, id shared.ThreadID, op string, mov
 		if err != nil {
 			return Chat{}, fmt.Errorf("%s: %w", op, err)
 		}
-		return chatOf(th), nil
+		return s.chatOf(ctx, th), nil
 	}
 }
 
@@ -191,8 +234,14 @@ func (s *Service) Earlier(ctx context.Context, id shared.ThreadID) ([]Request, e
 	return out, nil
 }
 
-func chatOf(th *thread.Thread) Chat {
-	return Chat{ID: th.ID(), Title: th.Title(), Archived: th.Archived(), LastActive: th.LastActive(), Running: running(th)}
+// chatOf is the list line of th. The service has no logger: a fill that cannot be read is left nil (no ring shown)
+// rather than failing the call, and the next read of the list tries again.
+func (s *Service) chatOf(ctx context.Context, th *thread.Thread) Chat {
+	c := Chat{ID: th.ID(), Title: th.Title(), Archived: th.Archived(), LastActive: th.LastActive(), Running: running(th)}
+	if f, err := s.fillOf(ctx, th); err == nil {
+		c.Fill = &f
+	}
+	return c
 }
 
 // running reports whether the chat's request is PLANNING or EXECUTING, as agentturn tells a running request.
