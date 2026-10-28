@@ -11,6 +11,31 @@ import (
 	"strings"
 )
 
+const deleteFinalDeliveriesOfAssignment = `-- name: DeleteFinalDeliveriesOfAssignment :execrows
+DELETE FROM deliveries
+WHERE assignment_id = ?1
+  AND status IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
+  AND EXISTS (SELECT 1 FROM assignments a
+              WHERE a.id = deliveries.assignment_id AND a.deleted_at IS NOT NULL AND a.deleted_at < ?3)
+`
+
+type DeleteFinalDeliveriesOfAssignmentParams struct {
+	AssignmentID string
+	Statuses     string
+	Cutoff       sql.NullInt64
+}
+
+// The purge of a deleted assignment (ADR-0029 addendum 2): its deliveries in the passed final statuses only, so an
+// unresolved email is never forgotten (hard rule 7); only while the assignment is still deleted before the cutoff.
+// The statuses are a JSON array: a sqlc.slice would renumber the parameters after it.
+func (q *Queries) DeleteFinalDeliveriesOfAssignment(ctx context.Context, arg DeleteFinalDeliveriesOfAssignmentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteFinalDeliveriesOfAssignment, arg.AssignmentID, arg.Statuses, arg.Cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getDelivery = `-- name: GetDelivery :one
 
 SELECT id, assignment_id, recipient, subject, artifact_ref, message_id, idempotency_key, status, attempts, last_error, confirmed_at, sent_at, version, created_at, updated_at, attachment_sha256, attachment_size, send_round FROM deliveries WHERE id = ?1

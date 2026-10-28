@@ -97,16 +97,17 @@ func (f *fakeRetrier) RedoSummary(_ context.Context, rec shared.RecordingID) (sh
 var at = time.Date(2026, 10, 15, 9, 30, 0, 0, time.FixedZone("MSK", 3*3600))
 
 // The page reads these names (frontend/src/bindings/activity.ts). TASK-076 added the lesson title and the chain
-// status fields to every row, TASK-088 the subject, kind and teacher of the lesson.
+// status fields to every row, TASK-088 the subject, kind and teacher of the lesson, TASK-300 the origin (r3 has none
+// set and reads as captured).
 func TestActivityServiceListsRecordings(t *testing.T) {
 	uc := &fakeActivity{recs: []activity.Recording{
 		{
 			ID: "r1", LessonID: "l1", LessonTitle: "История, лекция", LessonSubject: "История", LessonKind: "lecture",
-			LessonTeacher: "Петров", Status: recording.StatusRecording, StartedAt: at,
+			LessonTeacher: "Петров", Status: recording.StatusRecording, Origin: recording.OriginCaptured, StartedAt: at,
 			Stoppable: true, Chain: activity.Chain{Stage: activity.StageRecording},
 		},
 		{
-			ID: "r2", Status: recording.StatusCompleted, StartedAt: at, StoppedAt: at.Add(time.Hour),
+			ID: "r2", Status: recording.StatusCompleted, Origin: recording.OriginImported, StartedAt: at, StoppedAt: at.Add(time.Hour),
 			Duration: 59*time.Minute + 1500*time.Millisecond, HasDuration: true, Problem: "limit reached",
 			Chain: activity.Chain{
 				Stage: activity.StageQueued, Step: activity.StepTranscription, Percent: 40, QueueReason: activity.QueuePower,
@@ -131,21 +132,40 @@ func TestActivityServiceListsRecordings(t *testing.T) {
 	}
 	want := `[` +
 		`{"id":"r1","lessonId":"l1","title":"История, лекция","subject":"История","kind":"lecture","teacher":"Петров",` +
-		`"status":"RECORDING",` +
+		`"status":"RECORDING","origin":"captured",` +
 		`"startedAt":"2026-10-15T06:30:00Z","stoppedAt":"","durationSeconds":0,"hasDuration":false,"problem":"",` +
 		`"stoppable":true,"stage":"recording","step":"","progressPercent":0,"partsDone":0,"parts":0,"queueReason":"","errorCode":"",` +
 		`"jobError":"","action":"","actionJobId":"","retryWork":"","canRedoSummary":false,"lectureTextReady":false,"remainingSeconds":0,"hasRemaining":false,"advice":null},` +
-		`{"id":"r2","lessonId":"","title":"","subject":"","kind":"","teacher":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z",` +
+		`{"id":"r2","lessonId":"","title":"","subject":"","kind":"","teacher":"","status":"COMPLETED","origin":"imported",` +
+		`"startedAt":"2026-10-15T06:30:00Z",` +
 		`"stoppedAt":"2026-10-15T07:30:00Z","durationSeconds":3542,"hasDuration":true,"problem":"limit reached",` +
 		`"stoppable":false,"stage":"queued","step":"transcription","progressPercent":40,"partsDone":0,"parts":0,"queueReason":"power",` +
 		`"errorCode":"","jobError":"on battery","action":"runNow","actionJobId":"j1",` +
 		`"retryWork":"","canRedoSummary":false,"lectureTextReady":false,"remainingSeconds":0,"hasRemaining":false,"advice":null},` +
-		`{"id":"r3","lessonId":"","title":"","subject":"","kind":"","teacher":"","status":"COMPLETED","startedAt":"2026-10-15T06:30:00Z","stoppedAt":"",` +
+		`{"id":"r3","lessonId":"","title":"","subject":"","kind":"","teacher":"","status":"COMPLETED","origin":"captured",` +
+		`"startedAt":"2026-10-15T06:30:00Z","stoppedAt":"",` +
 		`"durationSeconds":0,"hasDuration":false,"problem":"","stoppable":false,"stage":"failed","step":"summary",` +
 		`"progressPercent":0,"partsDone":0,"parts":0,"queueReason":"","errorCode":"summaryFailed","jobError":"","action":"openConnections",` +
 		`"actionJobId":"","retryWork":"summary","canRedoSummary":true,"lectureTextReady":true,"remainingSeconds":0,"hasRemaining":false,"advice":null}]`
 	if string(b) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", b, want)
+	}
+}
+
+// TASK-300: only an imported recording is marked; an empty or unknown origin reads as captured.
+func TestOriginText(t *testing.T) {
+	for _, tc := range []struct {
+		in   recording.Origin
+		want string
+	}{
+		{recording.OriginCaptured, "captured"},
+		{recording.OriginImported, "imported"},
+		{"", "captured"},
+		{"uploaded", "captured"},
+	} {
+		if got := originText(tc.in); got != tc.want {
+			t.Errorf("originText(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 

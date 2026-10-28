@@ -46,7 +46,7 @@ impersonal voice («План: …», never «я»). Tools are the existing use c
 - **Provenance** (typed): an ID in arguments passes only if it appeared in a field of the same ID type in the
   scope/base or in tool results of this thread, else `is_error`.
 - **Budget per request** (`thread`): ≤ 8 steps, ≤ 4 calls per step, ≤ 6 writes, ≤ 1 paid job without a plan,
-  ≤ 60k planner input tokens; ≤ 2 question rounds, a third is refused. Over it: card «Остановлено: лимит просьбы».
+  ≤ 160k planner input tokens (8 × 20k per step); ≤ 2 question rounds, a third is refused. Over it: card «Остановлено: лимит просьбы».
 - **Journal and Undo** (`agent/action`): `PENDING → DONE | FAILED`, `DONE → UNDOING → UNDONE | UNDO_REFUSED`,
   `PROPOSED` for C (status read from the proposal). Two short transactions (record, then outcome). No idempotency key
   is passed to the use case between them: the unique entry per (thread, turn, `call_id`) plus Find/replay make a call

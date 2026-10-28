@@ -196,8 +196,3 @@ export function importOutcome(r: ImportResult): ImportOutcome {
   }
   return { kind: "ok", text: `${parts.join(", ")}. ${importTexts.queued}`, recordingId: r.recordingId };
 }
-
-/** The ids of recordings imported in this session: their rows carry «импортирована». */
-export function withImported(ids: ReadonlySet<string>, id: string): ReadonlySet<string> {
-  return id === "" || ids.has(id) ? ids : new Set(ids).add(id);
-}

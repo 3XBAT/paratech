@@ -26,6 +26,9 @@ var (
 
 	// ErrNotDeleted is returned by Restore of an assignment that is not deleted.
 	ErrNotDeleted = errors.New("assignment is not deleted")
+
+	// ErrRestoreExpired is returned by Restore after the RestoreWindow: the assignment is (or is about to be) purged.
+	ErrRestoreExpired = errors.New("assignment restore window has ended")
 )
 
 // The field of an assignment the student adds or edits that NewByStudent, EditByStudent or StudentDue refused

@@ -36,7 +36,7 @@ const { renderToStaticMarkup } = server;
 
 // Mirrors RecordingItem of internal/input/wails/activity.go.
 const row = (over = {}) => ({
-  id: "r1", lessonId: "l1", title: "Матанализ", subject: "", kind: "", teacher: "",
+  id: "r1", lessonId: "l1", title: "Матанализ", subject: "", kind: "", teacher: "", origin: "captured",
   status: "COMPLETED", startedAt: "2026-10-18T17:19:35Z", stoppedAt: "",
   durationSeconds: 0, hasDuration: false, problem: "", stoppable: false, stage: "done", step: "", progressPercent: 0,
   partsDone: 0, parts: 0, queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", retryWork: "",

@@ -10,6 +10,28 @@ import (
 	"database/sql"
 )
 
+const deleteProposalsOfAssignment = `-- name: DeleteProposalsOfAssignment :execrows
+DELETE FROM proposals
+WHERE assignment_id = ?1
+  AND EXISTS (SELECT 1 FROM assignments a
+              WHERE a.id = proposals.assignment_id AND a.deleted_at IS NOT NULL AND a.deleted_at < ?2)
+`
+
+type DeleteProposalsOfAssignmentParams struct {
+	AssignmentID string
+	Cutoff       sql.NullInt64
+}
+
+// The purge of a deleted assignment (ADR-0029 addendum 2): every proposal naming it, only while the assignment is
+// still deleted before the cutoff.
+func (q *Queries) DeleteProposalsOfAssignment(ctx context.Context, arg DeleteProposalsOfAssignmentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteProposalsOfAssignment, arg.AssignmentID, arg.Cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getProposal = `-- name: GetProposal :one
 
 SELECT id, kind, status, assignment_id, title, body, due_at, reason, recipient, attachment_sha256, attachment_size, assignment_title, confirmed_at, executed_at, version, created_at, updated_at, attachment_format, work_id, attachment_name FROM proposals WHERE id = ?1

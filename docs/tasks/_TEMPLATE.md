@@ -4,6 +4,7 @@
 - **Label:** core | hub | frontend | test | docs | spike
 - **Depends on:** T-xxx, ...
 - **PRD sections / AC:** §x.y, AC-xx
+- **Агент:** <tool, class, wave> | только UI: <reason from ADR-0033 §1>  (update `docs/agent-parity.md`)
 - **Branch:** task/T-000-short-name
 
 ## Goal

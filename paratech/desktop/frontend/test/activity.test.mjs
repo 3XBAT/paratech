@@ -24,7 +24,7 @@ const jobStatuses = [
 ];
 
 const recording = {
-  id: "r1", lessonId: "l1", title: "История", subject: "", kind: "", teacher: "",
+  id: "r1", lessonId: "l1", title: "История", subject: "", kind: "", teacher: "", origin: "captured",
   status: "COMPLETED", startedAt: "2026-10-15T10:00:00Z",
   stoppedAt: "2026-10-15T11:00:00Z", durationSeconds: 3600, hasDuration: true, problem: "", stoppable: false,
   stage: "queued", step: "transcription", progressPercent: 0, partsDone: 0, parts: 0, queueReason: "power", errorCode: "",
@@ -132,6 +132,16 @@ test("parse reads the lesson snapshot and an older core without it as empty (TAS
   assert.deepEqual(parseRecording(older), recording);
   for (const bad of [{ subject: 1 }, { kind: null }, { teacher: ["x"] }]) {
     assert.throws(() => parseRecording({ ...recording, ...bad }), /recording/, JSON.stringify(bad));
+  }
+});
+
+test("parse reads the origin; a missing or unknown one is captured (TASK-300)", () => {
+  assert.equal(parseRecording({ ...recording, origin: "imported" }).origin, "imported");
+  assert.equal(parseRecording({ ...recording, origin: "captured" }).origin, "captured");
+  const { origin, ...older } = recording;
+  assert.equal(parseRecording(older).origin, "captured");
+  for (const bad of ["", "Imported", "cloud", 1, null]) {
+    assert.equal(parseRecording({ ...recording, origin: bad }).origin, "captured", String(bad));
   }
 });
 

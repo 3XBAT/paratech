@@ -28,12 +28,17 @@ const (
 	ErrRecordingImportTooLarge    = recordingImportError("Файл больше 2 ГБ.")
 	ErrRecordingImportTooLong     = recordingImportError("Запись длиннее 4 часов.")
 	ErrRecordingImportNoDuration  = recordingImportError("Не удалось узнать длительность записи по файлу. Сохраните её заново в WAV или MP3 и попробуйте ещё раз.")
-	ErrRecordingImportFormat      = recordingImportError("Подходят только аудиофайлы WAV, FLAC, MP3 и OGG (Vorbis). Видео, M4A, AAC, WMA и Opus пока не подходят.")
-	ErrRecordingImportNoSpace     = recordingImportError("На диске не хватает места для копии записи.")
-	ErrRecordingImportChanged     = recordingImportError("Файл изменился во время копирования. Попробуйте ещё раз.")
-	ErrRecordingImportDeleting    = recordingImportError("Запись этого файла сейчас удаляется. Попробуйте через минуту.")
-	ErrRecordingImportUnavailable = recordingImportError("Не удалось импортировать запись. Попробуйте ещё раз.")
-	msgRecordingImportAdded       = "Эта запись уже добавлена."
+	// The same refusal naming the format: saving into the same container again may not help, so another one is offered.
+	ErrRecordingImportNoDurationWAV  = recordingImportError("Не удалось узнать длительность записи в этом WAV-файле. Сохраните запись заново или преобразуйте её в MP3 и попробуйте ещё раз.")
+	ErrRecordingImportNoDurationMP3  = recordingImportError("Не удалось узнать длительность записи в этом MP3-файле. Сохраните запись заново или преобразуйте её в WAV и попробуйте ещё раз.")
+	ErrRecordingImportNoDurationFLAC = recordingImportError("Не удалось узнать длительность записи в этом FLAC-файле. Сохраните запись заново или преобразуйте её в WAV или MP3 и попробуйте ещё раз.")
+	ErrRecordingImportNoDurationOGG  = recordingImportError("Не удалось узнать длительность записи в этом OGG-файле. Сохраните запись заново или преобразуйте её в WAV или MP3 и попробуйте ещё раз.")
+	ErrRecordingImportFormat         = recordingImportError("Подходят только аудиофайлы WAV, FLAC, MP3 и OGG (Vorbis). Видео, M4A, AAC, WMA и Opus пока не подходят.")
+	ErrRecordingImportNoSpace        = recordingImportError("На диске не хватает места для копии записи.")
+	ErrRecordingImportChanged        = recordingImportError("Файл изменился во время копирования. Попробуйте ещё раз.")
+	ErrRecordingImportDeleting       = recordingImportError("Запись этого файла сейчас удаляется. Попробуйте через минуту.")
+	ErrRecordingImportUnavailable    = recordingImportError("Не удалось импортировать запись. Попробуйте ещё раз.")
+	msgRecordingImportAdded          = "Эта запись уже добавлена."
 )
 
 // Operation names of the log.
@@ -157,6 +162,14 @@ func (s *RecordingImportService) fail(err error) error {
 	if errors.Is(err, context.Canceled) {
 		return ErrRecordingImportUnavailable
 	}
+	var unknown recording.AudioDurationUnknownError
+	if errors.As(err, &unknown) {
+		s.log.Info(opRecordingImport, "result", recording.ErrAudioDurationUnknown.Error(), "format", string(unknown.Format))
+		if text, ok := noDurationTexts[unknown.Format]; ok {
+			return text
+		}
+		return ErrRecordingImportNoDuration
+	}
 	known := []struct {
 		err  error
 		text recordingImportError
@@ -183,6 +196,14 @@ func (s *RecordingImportService) fail(err error) error {
 	}
 	s.log.Error(opRecordingImport, "err", err)
 	return ErrRecordingImportUnavailable
+}
+
+// noDurationTexts name the format of a file whose duration is unknown.
+var noDurationTexts = map[recording.AudioFormat]recordingImportError{
+	recording.FormatWAV:  ErrRecordingImportNoDurationWAV,
+	recording.FormatMP3:  ErrRecordingImportNoDurationMP3,
+	recording.FormatFLAC: ErrRecordingImportNoDurationFLAC,
+	recording.FormatOGG:  ErrRecordingImportNoDurationOGG,
 }
 
 // extOf is the extension of a reference path without the dot; "" without one.

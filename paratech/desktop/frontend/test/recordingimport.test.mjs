@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement as h } from "react";
 import server from "react-dom/server";
+import { activityApi, methods as activityMethods } from "../.test-build/bindings/activity.js";
 import { errorMessages, methods, parseImportResult, recordingImportApi } from "../.test-build/bindings/recordingImport.js";
 import {
   checkLecture,
@@ -13,7 +14,6 @@ import {
   initialForm,
   localRfc3339,
   pastLessonOptions,
-  withImported,
 } from "../.test-build/recordingImportView.js";
 import { RecordingImportPanel } from "../.test-build/pages/RecordingImportPanel.js";
 import { RecordingRow } from "../.test-build/pages/RecordingRow.js";
@@ -107,6 +107,11 @@ test("refusals of the binding are shown in Russian, anything else gets the gener
   for (const key of ["format", "tooLarge", "tooLong", "noDuration", "future"]) {
     assert.match(errorMessages[key], /[а-я]/);
   }
+  // An unknown duration names the format of the file.
+  for (const [key, name] of [["noDurationWav", "WAV"], ["noDurationMp3", "MP3"], ["noDurationFlac", "FLAC"], ["noDurationOgg", "OGG"]]) {
+    assert.ok(errorMessages[key].includes(`в этом ${name}-файле`), key);
+    assert.equal(importErrorText(new Error(errorMessages[key])), errorMessages[key]);
+  }
   assert.equal(importErrorText(new Error("open C:\\secret\\a.wav: access denied")), errorMessages.unavailable);
   assert.equal(importErrorText(undefined), errorMessages.unavailable);
 });
@@ -120,15 +125,6 @@ test("the outcome says what happened, a duplicate gets the core's message", () =
   assert.match(ok.text, /Расшифровка поставлена в очередь/);
   const dup = importOutcome(result({ existing: true, message: "Эта запись уже добавлена.", durationSeconds: 0 }));
   assert.deepEqual([dup.kind, dup.text, dup.recordingId], ["existing", "Эта запись уже добавлена.", "r1"]);
-});
-
-test("imported ids are kept without changing the old set", () => {
-  const a = new Set();
-  const b = withImported(a, "r1");
-  assert.equal(a.size, 0);
-  assert.equal(b.has("r1"), true);
-  assert.equal(withImported(b, "r1"), b);
-  assert.equal(withImported(b, ""), b);
 });
 
 test("the panel shows the steps, the local note and the formats, with names as text", () => {
@@ -176,4 +172,18 @@ test("an imported row says so and still shows the estimate and the power wait", 
   assert.notEqual(v.remaining, "");
   assert.ok(marked.includes(v.remaining), "the recognition estimate is shown");
   assert.ok(marked.includes(v.status.label), "the status with the power wait is shown");
+});
+
+test("the mark comes from the origin of the reloaded list, not from the session (TASK-300)", async () => {
+  const raw = (id, origin) => ({ ...item({ id }), origin });
+  const api = activityApi(async (m) => {
+    assert.equal(m, activityMethods.listRecordings);
+    return [raw("r1", "imported"), raw("r2", "captured"), raw("r3", "weird")];
+  });
+  const [a, b, c] = await api.listRecordings();
+  // The page passes imported={r.origin === "imported"} to the row.
+  const html = (r) => renderRow(r, { imported: r.origin === "imported" });
+  assert.match(html(a), /импортирована/);
+  assert.doesNotMatch(html(b), /импортирована/);
+  assert.doesNotMatch(html(c), /импортирована/);
 });

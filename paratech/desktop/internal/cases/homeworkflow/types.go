@@ -339,3 +339,16 @@ type DraftExport struct {
 	Version int
 	File    shared.ArtifactRef // proposal.ExportRef of the assignment, the file a send attaches
 }
+
+// PurgeDeps are the ports of the Purger (ADR-0029 addendum 2). Log is optional.
+type PurgeDeps struct {
+	Assignments DeletedAssignments
+	Proposals   PurgedProposals
+	Deliveries  PurgedDeliveries
+	Drafts      PurgedDrafts
+	Works       PurgedWorks
+	Files       FileRemover
+	Clock       Clock
+	Tx          Tx
+	Log         *slog.Logger
+}

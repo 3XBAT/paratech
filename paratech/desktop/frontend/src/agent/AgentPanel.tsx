@@ -1,6 +1,8 @@
 import { type RefObject, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { type AgentApi, agentApi, type AskInput, type CallProblem, type ChatResult, type ChatView, draftEvent as draftEventName, type EarlierRequestView, parseDraft, parseUpdate, updateEvent, type UpdateView } from "../bindings/agent.js";
 import { agentConfirmApi } from "../bindings/agentConfirm.js";
+import { answersApi } from "../bindings/answers.js";
+import type { CitationOpening } from "../knowledgeView.js";
 import { libraryApi } from "../bindings/library.js";
 import { turnkeyApi } from "../bindings/turnkey.js";
 import { recordingDeleteApi } from "../bindings/recordingDelete.js";
@@ -35,6 +37,7 @@ import type { CardActions } from "./AgentCards.js";
 const api: AgentApi = agentApi(callByName);
 const turnkey = turnkeyApi(callByName);
 const library = libraryApi(callByName);
+const answers = answersApi(callByName);
 const confirm = { api: agentConfirmApi(callByName), deleteApi: recordingDeleteApi(callByName) };
 
 /** Ctrl+K from anywhere in the window: a closed panel opens with focus in the input, an open one closes. */
@@ -74,6 +77,7 @@ export function AgentPanel(props: {
   reveal?: () => void;
   hide?: () => void;
   onOpenAssignment?: (id: string) => void;
+  onOpenSource?: (o: CitationOpening) => void;
 }) {
   const [state, dispatch] = useReducer(reducePanel, initialPanelState);
   // Subject names for the assignment lists of replies; unreadable subjects just leave the names out.
@@ -477,6 +481,8 @@ export function AgentPanel(props: {
       freeWork: api,
       subjects,
       openAssignment: props.onOpenAssignment,
+      answers,
+      openSource: props.onOpenSource,
       press,
       revise: (wish) => named && run(() => api.revisePlan(ref, wish)),
       answer: (answers) => named && run(() => api.answer(ref, answers)),
@@ -489,7 +495,7 @@ export function AgentPanel(props: {
       },
       undoNote: (actionId) => undoNotes[actionId],
     };
-  }, [state.entries, send, loadState, undoNotes, undoOne, undoAll, subjects, props.onOpenAssignment]);
+  }, [state.entries, send, loadState, undoNotes, undoOne, undoAll, subjects, props.onOpenAssignment, props.onOpenSource]);
 
   const shown = useMemo(
     () => ({ ...state, entries: visibleEntries(state.entries, openId, listed ? new Set(chats.map((c) => c.threadId)) : undefined) }),

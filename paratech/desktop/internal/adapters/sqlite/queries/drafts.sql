@@ -32,3 +32,11 @@ INSERT INTO homework_draft_revisions (assignment_id, number, origin, title, body
                                       created_at)
 VALUES (sqlc.arg(assignment_id), sqlc.arg(number), sqlc.arg(origin), sqlc.arg(title), sqlc.arg(body),
         sqlc.arg(instruction), sqlc.arg(prompt_version), sqlc.arg(job_id), sqlc.arg(created_at));
+
+-- The purge of a deleted assignment (ADR-0029 addendum 2): its draft, the versions go with it (CASCADE). Only while
+-- the assignment is still deleted before the cutoff, so a restore that won keeps its draft.
+-- name: PurgeDraftOfAssignment :execrows
+DELETE FROM homework_drafts
+WHERE assignment_id = sqlc.arg(assignment_id)
+  AND EXISTS (SELECT 1 FROM assignments a
+              WHERE a.id = homework_drafts.assignment_id AND a.deleted_at IS NOT NULL AND a.deleted_at < sqlc.arg(cutoff));

@@ -95,3 +95,23 @@ SELECT CAST(EXISTS (SELECT 1 FROM deliveries v
                WHERE j.type IN (SELECT value FROM json_each(CAST(sqlc.arg(job_types) AS TEXT)))
                  AND j.status IN (SELECT value FROM json_each(CAST(sqlc.arg(active_job_statuses) AS TEXT)))
                  AND json_extract(j.payload, '$.assignment_id') = sqlc.arg(id)) AS INTEGER) AS busy;
+
+-- The purge after the restore window (ADR-0029 addendum 2): the assignments deleted before the cutoff, oldest delete
+-- first, after the keyset (after_at, after_id) of the previous page.
+-- name: ListAssignmentsDeletedBefore :many
+SELECT * FROM assignments
+WHERE deleted_at IS NOT NULL AND deleted_at < sqlc.arg(cutoff)
+  AND (deleted_at > sqlc.arg(after_at) OR (deleted_at = sqlc.arg(after_at) AND id > sqlc.arg(after_id)))
+ORDER BY deleted_at, id
+LIMIT sqlc.arg(max_rows);
+
+-- The re-check of the purge inside its transaction: is assignment id still deleted before the cutoff?
+-- name: AssignmentDeletedBefore :one
+SELECT CAST(EXISTS (SELECT 1 FROM assignments
+                    WHERE id = sqlc.arg(id) AND deleted_at IS NOT NULL AND deleted_at < sqlc.arg(cutoff)) AS INTEGER) AS due;
+
+-- The last step of the purge. The guard is repeated here, so a row restored meanwhile is kept. A draft or a delivery
+-- still referencing it fails the delete (ON DELETE RESTRICT); works cascade.
+-- name: PurgeDeletedAssignment :execrows
+DELETE FROM assignments
+WHERE id = sqlc.arg(id) AND deleted_at IS NOT NULL AND deleted_at < sqlc.arg(cutoff);

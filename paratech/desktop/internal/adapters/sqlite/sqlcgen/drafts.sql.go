@@ -127,6 +127,28 @@ func (q *Queries) LatestDraftRevision(ctx context.Context, assignmentID string) 
 	return latest, err
 }
 
+const purgeDraftOfAssignment = `-- name: PurgeDraftOfAssignment :execrows
+DELETE FROM homework_drafts
+WHERE assignment_id = ?1
+  AND EXISTS (SELECT 1 FROM assignments a
+              WHERE a.id = homework_drafts.assignment_id AND a.deleted_at IS NOT NULL AND a.deleted_at < ?2)
+`
+
+type PurgeDraftOfAssignmentParams struct {
+	AssignmentID string
+	Cutoff       sql.NullInt64
+}
+
+// The purge of a deleted assignment (ADR-0029 addendum 2): its draft, the versions go with it (CASCADE). Only while
+// the assignment is still deleted before the cutoff, so a restore that won keeps its draft.
+func (q *Queries) PurgeDraftOfAssignment(ctx context.Context, arg PurgeDraftOfAssignmentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeDraftOfAssignment, arg.AssignmentID, arg.Cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const updateDraftVersion = `-- name: UpdateDraftVersion :execrows
 UPDATE homework_drafts
 SET version = version + 1

@@ -464,6 +464,40 @@ func TestRequestTimeout(t *testing.T) {
 	}
 }
 
+// The Hub's context ends on the Connect-Timeout-Ms we send, which Connect truncates to whole milliseconds, so the Hub
+// can give up just before our own timer fires and answer canceled (hub gateway.go). The test shortens the header to
+// make that order certain; it is still our timeout, not an unavailable Hub.
+func TestHubDeadlineBeforeOursIsATimeout(t *testing.T) {
+	f := &fakeHub{answer: func(ctx context.Context, _ int) (*hubv1.CompleteResponse, error) {
+		<-ctx.Done()
+		return nil, connect.NewError(connect.CodeCanceled, nil)
+	}}
+	mux := http.NewServeMux()
+	mux.Handle(hubv1connect.NewGatewayServiceHandler(f))
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Connect-Timeout-Ms") == "" {
+			http.Error(w, "no deadline propagated", http.StatusBadRequest)
+			return
+		}
+		r.Header.Set("Connect-Timeout-Ms", "1")
+		mux.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	creds := testenv.NewMemCredentials()
+	if err := creds.Set(t.Context(), DefaultCredentialName, testKey); err != nil {
+		t.Fatal(err)
+	}
+	c, err := New(Config{BaseURL: srv.URL, HTTPClient: srv.Client(), RequestTimeout: 5 * time.Second}, creds)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = c.Complete(t.Context(), request(t))
+	if !errors.Is(err, ErrTimeout) || backoff.Classify(err) != backoff.ClassTransient {
+		t.Fatalf("error = %v, want a transient timeout", err)
+	}
+}
+
 func TestParentCancelIsNotClassifiedAsHubFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	f := &fakeHub{answer: func(rctx context.Context, _ int) (*hubv1.CompleteResponse, error) {

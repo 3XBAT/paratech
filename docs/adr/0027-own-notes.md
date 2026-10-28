@@ -163,7 +163,9 @@ The student's notes are «Мой конспект», the chip on sources «ва�
 - Formats: those whisper-cli v1.9.5 decodes itself (WAV, FLAC, MP3, OGG; `docs/refs/whisper.md`).
 - **Amendment (TASK-162):** the duration must be known from the headers (or counted MP3 frames) and be at most 4 h;
   a file whose headers give no duration (WAV whose data chunk is not found, FLAC with total 0, chained Ogg,
-  free-format MP3, MP3 without two consecutive frames) is refused with «Не удалось узнать длительность записи».
+  free-format MP3, MP3 without two consecutive frames) is refused with «Не удалось узнать длительность записи в этом
+  <формат>-файле» (TASK-301: the refusal names the file format). A WAV data chunk past the first 64 KiB is looked for
+  by a bounded scan of chunk headers (at most 64 reads of 8 bytes, never a chunk body).
 - Video and M4A/AAC/WMA: deferred by the owner (Open 4); TASK-164 stays blocked.
 - Deleting it follows ADR-0018 and removes only the copy, never the student's original file.
 
