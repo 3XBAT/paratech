@@ -18,7 +18,7 @@ import {
   selectedText,
   withSelected,
 } from "../recordingDeleteView";
-import { importTexts, withImported } from "../recordingImportView";
+import { importTexts } from "../recordingImportView";
 import { anyRecording, pageGroups, queueLine, tasksEmptyText } from "../recordingRowView";
 import { adviceKey, keepSource, switchToSuggestion, type AdvicePending } from "../sourcePicker/advice";
 import { SourceNotes, SourcePicker } from "../sourcePicker/SourcePicker";
@@ -181,9 +181,8 @@ export function RecordingsPage({
     }
   }
 
-  // «Импортировать запись» (TASK-162): the panel, and the recordings imported in this session (their rows are marked).
+  // «Импортировать запись» (TASK-162): the panel; the mark of an imported row comes from the recording's origin.
   const [importOpen, setImportOpen] = useState(false);
-  const [importedIds, setImportedIds] = useState<ReadonlySet<string>>(new Set());
   const loadLessons = useCallback(async () => (await today.today()).lessons, [today]);
 
   // The silent-source advice of the running recording (TASK-082): the click running per recording, and the problem of
@@ -315,7 +314,7 @@ export function RecordingsPage({
       selected={selected.has(r.id)}
       onSelect={(on) => setSelected((sel) => withSelected(sel, r.id, on))}
       sound={sound}
-      imported={importedIds.has(r.id)}
+      imported={r.origin === "imported"}
     />
   );
 
@@ -407,10 +406,7 @@ export function RecordingsPage({
         <RecordingImportPanel
           api={importing}
           loadLessons={loadLessons}
-          onImported={(id) => {
-            setImportedIds((ids) => withImported(ids, id));
-            void refresh();
-          }}
+          onImported={() => void refresh()}
           onClose={() => setImportOpen(false)}
         />
       )}

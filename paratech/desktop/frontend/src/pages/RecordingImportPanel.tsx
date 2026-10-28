@@ -29,7 +29,7 @@ export function RecordingImportPanel(props: {
   /** The subject of the page the panel opens on ("" for none): prefilled, and it narrows the lessons. */
   subject?: string;
   now?: () => number;
-  /** A recording was imported (or was already there): the page refreshes and marks the row. */
+  /** A recording was imported (or was already there): the page refreshes; the row is marked by the recording's origin. */
   onImported: (recordingId: string, existing: boolean) => void;
   onClose: () => void;
 }) {
