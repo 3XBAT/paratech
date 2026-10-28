@@ -23,7 +23,7 @@ func TestNewTeacherAccepts(t *testing.T) {
 		wantName, wantEmail string
 	}{
 		{teacherName, teacherEmail, teacherName, teacherEmail},
-		{"  Анна Сергеевна  ", " a.b+c@mail.example.org ", "Анна Сергеевна", "a.b+c@mail.example.org"},
+		{"  Анна\u00a0Сергеевна  ", " a.b+c@mail.example.org ", "Анна\u00a0Сергеевна", "a.b+c@mail.example.org"},
 		{strings.Repeat("я", MaxTeacherNameRunes), "x@y.z", strings.Repeat("я", MaxTeacherNameRunes), "x@y.z"},
 		{"O'Brien", strings.Repeat("a", MaxTeacherEmailLen-len("@b.cd")) + "@b.cd", "O'Brien",
 			strings.Repeat("a", MaxTeacherEmailLen-len("@b.cd")) + "@b.cd"},
@@ -45,7 +45,7 @@ func TestNewTeacherRejects(t *testing.T) {
 		{"long name", strings.Repeat("я", MaxTeacherNameRunes+1), teacherEmail, ErrInvalidTeacherName},
 		{"newline", "Петров\nП.", teacherEmail, ErrInvalidTeacherName},
 		{"tab", "Петров\tП.", teacherEmail, ErrInvalidTeacherName},
-		{"line separator", "Петров П.", teacherEmail, ErrInvalidTeacherName},
+		{"line separator", "Петров\u2028П.", teacherEmail, ErrInvalidTeacherName},
 		{"bidi override", "Петров\u202eП.", teacherEmail, ErrInvalidTeacherName},
 		{"bidi isolate", "\u2066Петров", teacherEmail, ErrInvalidTeacherName},
 		{"zero width", "Пет\u200bров", teacherEmail, ErrInvalidTeacherName},
