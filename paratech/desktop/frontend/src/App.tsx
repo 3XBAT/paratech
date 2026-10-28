@@ -90,7 +90,7 @@ function PageView(props: {
     case "tickets":
       return <TicketsPage onOpen={props.onOpen} />;
     case "schedule":
-      return <SchedulePage />;
+      return <SchedulePage onOpen={props.onOpen} />;
     case "connections":
       return <ConnectionsPage visit={props.visit} />;
     case "models":

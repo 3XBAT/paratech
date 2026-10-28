@@ -4,6 +4,7 @@ import { callByName } from "../bindings/runtime.js";
 import { scheduleApi, type ImportPreview, type LessonText } from "../bindings/schedule.js";
 import { CollapsibleList } from "../CollapsibleList.js";
 import { allCollapsed, type ListStates, listTexts, setCollapsed, stateOf, withState } from "../listView.js";
+import type { PageId } from "../nav.js";
 import {
   applyLabel,
   canApply,
@@ -36,7 +37,7 @@ import { Icon } from "../ui/Icon.js";
 
 // Schedule import (PRD section 11.2): choose a file, see its errors or the preview, then apply it. Every text from the
 // file is rendered as plain text, each piece in its own <bdi>.
-export function SchedulePage() {
+export function SchedulePage(props: { onOpen?: (id: PageId) => void }) {
   const api = useMemo(() => scheduleApi(callByName), []);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   // Kept here, by group, so choosing the file again keeps what the user folded.
@@ -169,6 +170,15 @@ export function SchedulePage() {
         <p className="result" role="status">
           <Icon name="ok" />
           {done}
+        </p>
+      )}
+      {done && props.onOpen && (
+        // TASK-312: the next step after an import, a hint and not a popup.
+        <p className="small muted sched-next">
+          Следующий шаг:
+          <Button size="sm" variant="ghost" onClick={() => props.onOpen?.("subjects")}>
+            Завести предметы из расписания
+          </Button>
         </p>
       )}
       {empty ? (

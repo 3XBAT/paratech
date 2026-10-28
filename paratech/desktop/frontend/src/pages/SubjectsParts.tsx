@@ -19,10 +19,12 @@ import {
   typeLabel,
   weekdayOf,
 } from "../libraryView.js";
+import { reviewTexts } from "../scheduleSubjectsView.js";
 import { Button } from "../ui/Button.js";
 import { Card, EmptyState, Field, Input, ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
 import { StatusChip } from "../ui/StatusChip.js";
+import { EmptySubjectsActions, type ScheduleOffer } from "./ScheduleSubjectsReview.js";
 
 // Names of subjects, folders and files are typed or imported text: only text nodes here, never markup.
 
@@ -59,19 +61,21 @@ export function NameForm(props: {
 }
 
 /** Semesters, each with its subjects. */
-export function SubjectList(props: { subjects: readonly LibrarySubject[]; onOpen(id: string): void; onAdd(): void }) {
+export function SubjectList(props: {
+  subjects: readonly LibrarySubject[];
+  onOpen(id: string): void;
+  onAdd(): void;
+  /** TASK-312: the subjects of the schedule; the primary action of the empty list (see EmptySubjectsActions). */
+  offer?: ScheduleOffer;
+}) {
   if (props.subjects.length === 0) {
     return (
       <EmptyState
         label="Библиотека"
         title={texts.emptyTitle}
-        actions={
-          <Button variant="primary" icon="plus" onClick={props.onAdd}>
-            {texts.addSubject}
-          </Button>
-        }
+        actions={<EmptySubjectsActions offer={props.offer} addLabel={texts.addSubject} onAdd={props.onAdd} />}
       >
-        {texts.emptyText}
+        {props.offer ? reviewTexts.emptyText : texts.emptyText}
       </EmptyState>
     );
   }

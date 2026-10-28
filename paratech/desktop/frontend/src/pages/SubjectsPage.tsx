@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type LibraryMaterial, type LibrarySubject, libraryApi, libraryErrorText } from "../bindings/library.js";
+import { type LibraryMaterial, type LibrarySubject, libraryApi, libraryErrorText, type ScheduleSubjectsReply, scheduleSubjects } from "../bindings/library.js";
 import { callByName } from "../bindings/runtime.js";
 import {
   folderCounts,
@@ -12,9 +12,11 @@ import {
   texts,
 } from "../libraryView.js";
 import type { PageId } from "../nav.js";
+import { type OfferState, offerChecking, offerGroups } from "../scheduleSubjectsView.js";
 import { idleTeacher, TeacherFlow, type TeacherFocus, type TeacherState, teacherFocusStep, teacherStateFor } from "../teachersView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
+import { offerButtonId, ScheduleOfferButton, ScheduleSubjectsReview, scheduleReviewApi } from "./ScheduleSubjectsReview.js";
 import { InboxList, NameForm, OverviewSections, SubjectDetail, SubjectList, SubjectTree } from "./SubjectsParts.js";
 import { type TeacherActions, TeachersBlock } from "./TeachersBlock.js";
 
@@ -47,6 +49,22 @@ export function SubjectsPage(props: {
   const [loadError, setLoadError] = useState("");
   const [note, setNote] = useState("");
   const running = useRef(false); // a double click comes before the re-render that disables the button
+
+  // Subjects from the schedule (TASK-312): the proposal asked for after the subjects (a failure only hides the button),
+  // and the review opened over the list with the proposal it started from.
+  const [offer, setOffer] = useState<OfferState>(offerChecking);
+  const [review, setReview] = useState<ScheduleSubjectsReply | null>(null);
+  const reviewApi = useMemo(() => scheduleReviewApi(callByName), []);
+  const subjectNames = useMemo(() => new Map((subjects ?? []).map((s) => [s.id, s.name])), [subjects]);
+  const openReview = () => offer.reply !== null && setReview(offer.reply);
+  const reviewWasOpen = useRef(false);
+  useEffect(() => {
+    // The panel closed: the focus goes back to the button that opened it (if it is still there).
+    if (review === null && reviewWasOpen.current) {
+      document.getElementById(offerButtonId)?.focus();
+    }
+    reviewWasOpen.current = review !== null;
+  }, [review]);
 
   // The teachers of the open subject (TASK-238). Their version and data come from the list (Subjects()), which the flow
   // re-reads after a call that failed or found the data out of date.
@@ -98,6 +116,10 @@ export function SubjectsPage(props: {
       () => setLoadError(texts.loadFailed),
     );
     api.materials("").then(setInbox, () => undefined);
+    scheduleSubjects(callByName).then(
+      (reply) => setOffer({ loaded: true, reply }),
+      () => setOffer({ loaded: true, reply: null }),
+    );
   }, [api]);
 
   useEffect(load, [load, props.reload]);
@@ -291,6 +313,8 @@ export function SubjectsPage(props: {
     );
   }
 
+  const scheduleGroups = offerGroups(offer) ?? 0;
+
   return (
     <section className="page">
       <div className="head">
@@ -308,7 +332,11 @@ export function SubjectsPage(props: {
           <Button icon="up" disabled={busy} onClick={() => void addFile()}>
             {texts.addFile}
           </Button>
-          <Button variant="primary" icon="plus" disabled={busy} onClick={() => setForm("subject")}>
+          {scheduleGroups > 0 && subjects !== null && subjects.length > 0 && (
+            <ScheduleOfferButton groups={scheduleGroups} variant="secondary" disabled={busy || review !== null} onClick={openReview} />
+          )}
+          {/* One accent: with no subjects the empty state below has the primary action. */}
+          <Button variant={subjects !== null && subjects.length === 0 ? "secondary" : "primary"} icon="plus" disabled={busy} onClick={() => setForm("subject")}>
             {texts.addSubject}
           </Button>
         </div>
@@ -320,9 +348,26 @@ export function SubjectsPage(props: {
         </ResultLine>
       )}
       {subjectForm}
+      {review !== null && (
+        <ScheduleSubjectsReview
+          reply={review}
+          subjectNames={subjectNames}
+          api={reviewApi}
+          onChanged={load}
+          onClose={() => setReview(null)}
+          autoFocus
+        />
+      )}
       {subjects !== null && (
         <>
-          <SubjectList subjects={subjects} onOpen={props.onSelect} onAdd={() => setForm("subject")} />
+          {(review === null || subjects.length > 0) && (
+            <SubjectList
+              subjects={subjects}
+              onOpen={props.onSelect}
+              onAdd={() => setForm("subject")}
+              offer={{ state: offer, onReview: openReview, onImport: () => props.onOpen("schedule") }}
+            />
+          )}
           <InboxList materials={inbox} />
           {note !== "" && (
             <ResultLine kind="ok" role="status">
