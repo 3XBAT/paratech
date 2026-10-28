@@ -3,7 +3,9 @@ import { type AgentContext, chatTexts, composerKey, type EarlierItem, entryModel
 import { blockingEntry, draftsFor, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
 import { Icon } from "../ui/Icon.js";
 import { AgentRequest, type CardActions } from "./AgentCards.js";
+import type { ContextFill } from "../bindings/agent.js";
 import { ChatBar, type ChatBarProps } from "./ChatBar.js";
+import { ContextHint, ContextRing } from "./ContextRing.js";
 
 /** Earlier requests of the open chat: text only (the student's words, the mentions as pills, the reply line). */
 function EarlierRequests(props: { items: EarlierItem[] }) {
@@ -46,6 +48,8 @@ export interface AgentPanelViewProps {
   chat?: ChatBarProps;
   /** Earlier requests of the open chat, as text. */
   earlier?: EarlierItem[];
+  /** The context fill of the open chat; null or absent: no ring. */
+  fill?: ContextFill | null;
 }
 
 /**
@@ -117,6 +121,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
             }
           }}
         />
+        <ContextRing fill={props.fill ?? null} />
         <button
           type="submit"
           className="ag-send"
@@ -129,6 +134,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
           </svg>
         </button>
       </form>
+      <ContextHint fill={props.fill ?? null} onNew={props.chat?.onNew} />
       <div className="ag-ctx-wrap">
         <div className="ag-ctx">
           <span className="ag-chip">
