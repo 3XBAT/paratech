@@ -19,6 +19,7 @@ func insertParams(updatedAt int64) sqlcgen.InsertSettingsParams {
 		RecordingPromptsEnabled: 1,
 		ProcessOnlyOnAcPower:    1,
 		SmtpSecurity:            "starttls", // explicit params skip the column default, and the CHECK refuses ""
+		NoteRecognition:         "off",      // the same for note_recognition (TASK-294)
 		UpdatedAt:               updatedAt,
 	}
 }
@@ -223,7 +224,7 @@ func TestSettingsVersionCAS(t *testing.T) {
 
 	update := func(expected, updatedAt int64) error {
 		rows, err := q.UpdateSettings(ctx, sqlcgen.UpdateSettingsParams{
-			RecordingPromptsEnabled: 0, ProcessOnlyOnAcPower: 1, SmtpSecurity: "starttls",
+			RecordingPromptsEnabled: 0, ProcessOnlyOnAcPower: 1, SmtpSecurity: "starttls", NoteRecognition: "off",
 			UpdatedAt: updatedAt, ExpectedVersion: expected,
 		})
 		return VersionCAS(ctx, rows, err)
@@ -386,7 +387,7 @@ func TestVersionCASInsideTransaction(t *testing.T) {
 	}
 	boom := errors.New("boom")
 	err := db.Do(ctx, func(ctx context.Context) error {
-		rows, err := db.Queries(ctx).UpdateSettings(ctx, sqlcgen.UpdateSettingsParams{SmtpSecurity: "starttls", UpdatedAt: 2, ExpectedVersion: 1})
+		rows, err := db.Queries(ctx).UpdateSettings(ctx, sqlcgen.UpdateSettingsParams{SmtpSecurity: "starttls", NoteRecognition: "off", UpdatedAt: 2, ExpectedVersion: 1})
 		if err := VersionCAS(ctx, rows, err); err != nil {
 			return err
 		}

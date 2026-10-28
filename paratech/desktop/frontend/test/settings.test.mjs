@@ -4,8 +4,15 @@ import assert from "node:assert/strict";
 import { methods, parseSettings, settingsApi } from "../.test-build/bindings/settings.js";
 
 // The load mode fields of every reply (TASK-084): without a model in use there are no estimates; the free-work card
-// setting (TASK-188) comes with them.
-const load = { recognitionLoad: "gentle", loadEstimates: null, loadEstimatesModel: "", freeWorkNotice: true };
+// setting (TASK-188) and the photo recognition (TASK-294, off on a new install) come with them.
+const load = {
+  recognitionLoad: "gentle",
+  loadEstimates: null,
+  loadEstimatesModel: "",
+  freeWorkNotice: true,
+  noteRecognition: "off",
+  noteRecognitionLanguage: "unknown",
+};
 
 function fakeCall(reply) {
   const calls = [];
@@ -72,6 +79,49 @@ test("the free-work card setting is read and set", async () => {
   for (const bad of [{ ...reply, freeWorkNotice: undefined }, { ...reply, freeWorkNotice: "no" }]) {
     assert.throws(() => parseSettings(bad), /freeWorkNotice/);
   }
+});
+
+// TASK-294: «ИИ распознаёт фото конспектов» is read with the toggles and set by its bound method.
+test("the photo recognition mode is read strictly and set by its bound method", async () => {
+  const reply = { recordingPromptsEnabled: true, processOnlyOnAcPower: true, ...load, noteRecognition: "local", noteRecognitionLanguage: "missing" };
+  const { call, calls } = fakeCall(reply);
+  const api = settingsApi(call);
+  const got = await api.setNoteRecognition("local");
+  assert.equal(got.noteRecognition, "local");
+  assert.equal(got.noteRecognitionLanguage, "missing");
+  assert.deepEqual(calls, [["paratech/desktop/internal/input/wails.SettingsService.SetNoteRecognition", "local"]]);
+  assert.equal(methods.setNoteRecognition, calls[0][0]);
+  for (const ok of ["off", "local"]) {
+    assert.equal(parseSettings({ ...reply, noteRecognition: ok }).noteRecognition, ok);
+  }
+  for (const ok of ["available", "missing", "unknown"]) {
+    assert.equal(parseSettings({ ...reply, noteRecognitionLanguage: ok }).noteRecognitionLanguage, ok);
+  }
+  for (const bad of [undefined, null, true, "", "cloud", "LOCAL"]) {
+    assert.throws(() => parseSettings({ ...reply, noteRecognition: bad }), /noteRecognition/);
+  }
+  for (const bad of [undefined, null, false, "", "present", "Missing"]) {
+    assert.throws(() => parseSettings({ ...reply, noteRecognitionLanguage: bad }), /noteRecognitionLanguage/);
+  }
+});
+
+test("the photo recognition switch: off on a new install, sends local or off, hint only for a missing language", async () => {
+  const { noteRecognitionLanguageHint, noteRecognitionModeFor, noteRecognitionOn, noteRecognitionTexts } = await import(
+    "../.test-build/noteRecognitionView.js"
+  );
+  const fresh = parseSettings({ recordingPromptsEnabled: true, processOnlyOnAcPower: false, ...load });
+  assert.equal(noteRecognitionOn(fresh), false);
+  assert.equal(noteRecognitionModeFor(true), "local");
+  assert.equal(noteRecognitionModeFor(false), "off");
+  assert.equal(noteRecognitionOn({ noteRecognition: "local" }), true);
+
+  assert.match(noteRecognitionTexts.label, /^ИИ распознаёт фото конспектов$/);
+  assert.match(noteRecognitionTexts.languageMissing, /Параметры → Время и язык → Язык → Русский → Распознавание текста/);
+  const on = (language) => ({ noteRecognition: "local", noteRecognitionLanguage: language });
+  assert.equal(noteRecognitionLanguageHint(on("missing")), noteRecognitionTexts.languageMissing);
+  assert.equal(noteRecognitionLanguageHint(on("available")), null);
+  assert.equal(noteRecognitionLanguageHint(on("unknown")), null);
+  assert.equal(noteRecognitionLanguageHint({ noteRecognition: "off", noteRecognitionLanguage: "missing" }), null);
 });
 
 test("a failing call rejects", async () => {

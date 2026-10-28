@@ -17,6 +17,14 @@ type SettingsRepository interface {
 	Save(ctx context.Context, s *settings.Settings) error
 }
 
+// RecognitionLanguages tells whether the photo recognition engine can read Russian (TASK-294). Implemented in app over
+// the winocr adapter; it only reads what Windows has installed.
+type RecognitionLanguages interface {
+	// RussianAvailable reports whether a Russian recognizer is installed. An error means it is not known: another OS,
+	// a Windows without OCR, or a failure.
+	RussianAvailable(ctx context.Context) (bool, error)
+}
+
 // Clock supplies the change time of a setting (ARCH-24). Implemented by the clock adapter and by a fake in tests.
 type Clock interface {
 	Now() time.Time

@@ -47,6 +47,7 @@ func (r *fakeRepo) Save(_ context.Context, s *settings.Settings) error {
 		RecognitionLoad:         s.RecognitionLoad(),
 		Profile:                 s.Profile().Fields(),
 		FreeWorkNotice:          s.FreeWorkNotice(),
+		NoteRecognition:         s.NoteRecognition(),
 		UpdatedAt:               s.UpdatedAt(),
 	}
 	s.Persisted(r.stored.Version)
@@ -81,6 +82,7 @@ func TestGetReturnsDefaults(t *testing.T) {
 	want := Toggles{
 		RecordingPromptsEnabled: settings.DefaultRecordingPromptsEnabled, ProcessOnlyOnACPower: settings.DefaultProcessOnlyOnACPower,
 		RecognitionLoad: shared.DefaultRecognitionLoad, FreeWorkNotice: settings.DefaultFreeWorkNotice,
+		NoteRecognition: settings.DefaultNoteRecognition,
 	}
 	if got != want {
 		t.Fatalf("Get = %+v, want %+v", got, want)
@@ -104,7 +106,7 @@ func TestSetToggles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != (Toggles{RecognitionLoad: shared.LoadGentle, FreeWorkNotice: true}) {
+	if got != (Toggles{RecognitionLoad: shared.LoadGentle, FreeWorkNotice: true, NoteRecognition: settings.NoteRecognitionOff}) {
 		t.Fatalf("after AC off: %+v, want both off", got)
 	}
 	if !repo.stored.UpdatedAt.Equal(start) {
@@ -195,6 +197,71 @@ func TestSetFreeWorkNotice(t *testing.T) {
 	}
 	if got, err = s.SetFreeWorkNotice(ctx, true); err != nil || !got.FreeWorkNotice || !repo.stored.FreeWorkNotice {
 		t.Fatalf("on = %+v, %v", got, err)
+	}
+}
+
+// TASK-294: photo recognition is off until the student turns it on; an unknown mode is refused and changes nothing; a
+// version that stays stale fails like every toggle; the other toggles stay.
+func TestSetNoteRecognition(t *testing.T) {
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	s := newService(t, repo)
+
+	if read, err := s.Get(ctx); err != nil || read.NoteRecognition != settings.NoteRecognitionOff {
+		t.Fatalf("fresh = %+v, %v; want off", read, err)
+	}
+	got, err := s.SetNoteRecognition(ctx, settings.NoteRecognitionLocal)
+	if err != nil || got.NoteRecognition != settings.NoteRecognitionLocal || repo.stored.NoteRecognition != settings.NoteRecognitionLocal ||
+		!got.RecordingPromptsEnabled || !got.FreeWorkNotice {
+		t.Fatalf("local = %+v, %v; stored %+v", got, err, repo.stored)
+	}
+	if _, err := s.SetNoteRecognition(ctx, "cloud"); !errors.Is(err, settings.ErrInvalidSettings) {
+		t.Fatalf("unknown mode: err = %v, want ErrInvalidSettings", err)
+	}
+	if read, err := s.Get(ctx); err != nil || read.NoteRecognition != settings.NoteRecognitionLocal {
+		t.Fatalf("Get = %+v, %v; want local kept", read, err)
+	}
+
+	repo.conflicts = conflictAttempts
+	if _, err := s.SetNoteRecognition(ctx, settings.NoteRecognitionOff); !errors.Is(err, shared.ErrVersionConflict) {
+		t.Fatalf("stale every time: err = %v, want ErrVersionConflict", err)
+	}
+	if repo.stored.NoteRecognition != settings.NoteRecognitionLocal {
+		t.Fatalf("stored after the conflicts: %q, want local", repo.stored.NoteRecognition)
+	}
+}
+
+type fakeLanguages struct {
+	ok  bool
+	err error
+}
+
+func (f fakeLanguages) RussianAvailable(context.Context) (bool, error) { return f.ok, f.err }
+
+func TestRecognitionLanguage(t *testing.T) {
+	boom := errors.New("winrt")
+	tests := []struct {
+		name    string
+		port    RecognitionLanguages
+		want    LanguageStatus
+		wantErr bool
+	}{
+		{name: "no check", want: LanguageUnknown},
+		{name: "russian installed", port: fakeLanguages{ok: true}, want: LanguageAvailable},
+		{name: "russian missing", port: fakeLanguages{}, want: LanguageMissing},
+		{name: "check failed", port: fakeLanguages{ok: true, err: boom}, want: LanguageUnknown, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newService(t, &fakeRepo{})
+			if tt.port != nil {
+				s.WithRecognitionLanguages(tt.port)
+			}
+			got, err := s.RecognitionLanguage(context.Background())
+			if got != tt.want || (err != nil) != tt.wantErr || (tt.wantErr && !errors.Is(err, boom)) {
+				t.Fatalf("RecognitionLanguage = %q, %v; want %q, error %v", got, err, tt.want, tt.wantErr)
+			}
+		})
 	}
 }
 
