@@ -387,28 +387,212 @@ func TestCreateFromScheduleDonePartThenUndo(t *testing.T) {
 	}
 }
 
-// A retry with the same token replaces the stored outcome by the newer one, unless the newer did nothing.
-func TestCreateFromScheduleRetryReplaces(t *testing.T) {
+// Retries with the same token merge into the recorded outcome: a retry that fails sooner returns less, and the undo
+// must still take back everything the token did. An empty outcome changes nothing.
+func TestCreateFromScheduleRetryMerges(t *testing.T) {
+	type call struct {
+		res library.ScheduleResult
+		err error
+	}
+	a := library.ScheduleCreated{ID: "sched-1", Key: "a", Name: "А"}
+	b := library.ScheduleCreated{ID: "sched-2", Key: "b", Name: "Б"}
+	c := library.ScheduleCreated{ID: "sched-3", Key: "c", Name: "В"}
+	aRenamed := library.ScheduleCreated{ID: "sched-1", Key: "a", Name: "А2"}
+	skipX := library.ScheduleSkipped{Key: "x", Reason: library.ReasonNameTaken}
+	skipY := library.ScheduleSkipped{Subject: "s-y", Reason: library.ReasonSubjectGone}
+
+	tests := []struct {
+		name  string
+		calls []call
+		want  library.ScheduleResult
+	}{
+		{
+			name: "retry fails sooner",
+			calls: []call{
+				{library.ScheduleResult{Created: []library.ScheduleCreated{a, b}}, fmt.Errorf("%w: disk", library.ErrUnavailable)},
+				{library.ScheduleResult{Created: []library.ScheduleCreated{a}}, library.ErrBusy},
+			},
+			want: library.ScheduleResult{Created: []library.ScheduleCreated{a, b}, Aliased: []library.ScheduleAliased{}},
+		},
+		{
+			name: "retry adds more, newer data for the same id, empty outcome changes nothing",
+			calls: []call{
+				{library.ScheduleResult{Created: []library.ScheduleCreated{a}, Skipped: []library.ScheduleSkipped{skipX}}, library.ErrBusy},
+				{library.ScheduleResult{Created: []library.ScheduleCreated{c, aRenamed}, Skipped: []library.ScheduleSkipped{skipY}}, nil},
+				{library.ScheduleResult{}, library.ErrStale},
+			},
+			want: library.ScheduleResult{
+				Created: []library.ScheduleCreated{aRenamed, c}, Aliased: []library.ScheduleAliased{},
+				Skipped: []library.ScheduleSkipped{skipY},
+			},
+		},
+		{
+			name: "aliases union per subject without duplicate spellings",
+			calls: []call{
+				{library.ScheduleResult{Aliased: []library.ScheduleAliased{
+					{Subject: "s1", Aliases: []string{"x", "y"}}, {Subject: "s2", Aliases: []string{"z"}},
+				}}, library.ErrBusy},
+				{library.ScheduleResult{Aliased: []library.ScheduleAliased{
+					{Subject: "s1", Aliases: []string{"y", "w", "w", "Y"}}, {Subject: "s3", Aliases: []string{"q"}},
+				}}, nil},
+			},
+			want: library.ScheduleResult{Aliased: []library.ScheduleAliased{
+				{Subject: "s1", Aliases: []string{"x", "y", "w", "Y"}}, {Subject: "s2", Aliases: []string{"z"}},
+				{Subject: "s3", Aliases: []string{"q"}},
+			}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			uc := &fakeScheduleSubjects{}
+			s := newScheduleBinding(uc)
+			ctx := context.Background()
+			for _, c := range tt.calls {
+				uc.set(c.res, c.err)
+				s.CreateFromSchedule(ctx, tokA, nil)
+			}
+
+			s.UndoFromSchedule(ctx, tokA)
+			if len(uc.undos) != 1 || !reflect.DeepEqual(uc.undos[0].res, tt.want) {
+				t.Fatalf("undo got %+v, want %+v", uc.undos, tt.want)
+			}
+		})
+	}
+}
+
+// The merge copies: a later change of a result the use case returned does not reach the journal.
+func TestScheduleJournalCopies(t *testing.T) {
+	var j scheduleJournal
+	res := library.ScheduleResult{
+		Created: []library.ScheduleCreated{{ID: "sched-1", Name: "А"}},
+		Aliased: []library.ScheduleAliased{{Subject: "s1", Aliases: []string{"x"}}},
+	}
+	j.record(tokA, res)
+	res.Created[0].Name, res.Aliased[0].Aliases[0] = "changed", "changed"
+
+	got, ok := j.lookup(tokA)
+	if !ok || got.Created[0].Name != "А" || got.Aliased[0].Aliases[0] != "x" {
+		t.Fatalf("journal = %+v", got)
+	}
+}
+
+// An undo while a create of the same token runs answers busy at once (an unknown token too, the busy check comes
+// first); the later undo takes back the merged outcome of both creates.
+func TestUndoFromScheduleWhileCreateRuns(t *testing.T) {
+	a := library.ScheduleCreated{ID: "sched-1", Key: "a", Name: "А"}
+	b := library.ScheduleCreated{ID: "sched-2", Key: "b", Name: "Б"}
 	uc := &fakeScheduleSubjects{}
 	s := newScheduleBinding(uc)
 	ctx := context.Background()
 
-	first := library.ScheduleResult{Created: []library.ScheduleCreated{{ID: "sched-1", Key: "a", Name: "А"}}}
-	uc.set(first, library.ErrBusy)
+	uc.set(library.ScheduleResult{Created: []library.ScheduleCreated{a, b}}, fmt.Errorf("%w: disk", library.ErrUnavailable))
 	s.CreateFromSchedule(ctx, tokA, nil)
 
-	second := library.ScheduleResult{Created: []library.ScheduleCreated{{ID: "sched-1", Key: "a", Name: "А"}, {ID: "sched-2", Key: "b", Name: "Б"}}}
-	uc.set(second, nil)
-	s.CreateFromSchedule(ctx, tokA, nil)
+	uc.set(library.ScheduleResult{Created: []library.ScheduleCreated{a}}, library.ErrBusy)
+	uc.block, uc.started = make(chan struct{}), make(chan struct{}, 1)
+	done := make(chan ScheduleCreateResult, 1)
+	go func() { done <- s.CreateFromSchedule(ctx, tokA, nil) }()
+	<-uc.started
 
-	uc.set(library.ScheduleResult{}, library.ErrStale)
-	if got := s.CreateFromSchedule(ctx, tokA, nil); got.Problem != "stale" {
-		t.Fatalf("third create = %+v", got)
+	answered := make(chan struct{})
+	go func() {
+		defer close(answered)
+		if got := s.UndoFromSchedule(ctx, tokA); got.Problem != "busy" {
+			t.Errorf("undo meanwhile = %+v", got)
+		}
+		if got := s.UndoFromSchedule(ctx, tokB); got.Problem != "busy" {
+			t.Errorf("undo of an unknown token meanwhile = %+v", got)
+		}
+	}()
+	select {
+	case <-answered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the undo meanwhile blocked")
+	}
+
+	close(uc.block)
+	if got := <-done; got.Problem != "busy" {
+		t.Fatalf("retry = %+v", got)
+	}
+	uc.mu.Lock()
+	n := len(uc.undos)
+	uc.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("use case undo called while busy: %d", n)
 	}
 
 	s.UndoFromSchedule(ctx, tokA)
-	if len(uc.undos) != 1 || !reflect.DeepEqual(uc.undos[0].res, second) {
-		t.Fatalf("undo got %+v, want %+v", uc.undos, second)
+	want := []library.ScheduleCreated{a, b}
+	if len(uc.undos) != 1 || !reflect.DeepEqual(uc.undos[0].res.Created, want) {
+		t.Fatalf("undo got %+v, want created %+v", uc.undos, want)
+	}
+}
+
+// Reasons reach the page only as the codes it knows; an unknown one falls back to a known code and the log holds only
+// the count of fallbacks.
+func TestScheduleReasonsWhitelisted(t *testing.T) {
+	odd := library.ScheduleReason("odd\nreason")
+	log, rec := newScheduleRecordLog()
+	uc := &fakeScheduleSubjects{
+		res: library.ScheduleResult{
+			Created: []library.ScheduleCreated{{ID: "sched-1", Key: "a", Name: "А"}},
+			Skipped: []library.ScheduleSkipped{
+				{Key: "k1", Reason: library.ReasonNameTaken}, {Subject: "s1", Reason: library.ReasonTooManyAliases},
+				{Subject: "s2", Reason: library.ReasonSubjectGone}, {Key: "k2", Reason: odd}, {Subject: "s3", Reason: ""},
+			},
+		},
+		undo: library.ScheduleUndo{
+			Kept: []library.ScheduleKept{
+				{ID: "sched-1", Reason: library.ReasonHasFiles}, {ID: "sched-2", Reason: library.ReasonHasNotes},
+				{ID: "sched-3", Reason: odd},
+			},
+			KeptAliases: []library.ScheduleKeptAliases{
+				{Subject: "s1", Reason: library.ReasonStale}, {Subject: "s2", Reason: library.ReasonNameTaken},
+			},
+		},
+	}
+	s := NewLibraryService(&fakeLibrary{}, nil, nil, log).withSchedule(uc)
+	ctx := context.Background()
+
+	created := s.CreateFromSchedule(ctx, tokA, nil)
+	var skipped []string
+	for _, r := range created.Skipped {
+		skipped = append(skipped, r.Reason)
+	}
+	if want := []string{"name_taken", "too_many_aliases", "subject_gone", "name_taken", "name_taken"}; !reflect.DeepEqual(skipped, want) {
+		t.Errorf("skipped reasons = %q, want %q", skipped, want)
+	}
+
+	undone := s.UndoFromSchedule(ctx, tokA)
+	var kept []string
+	for _, k := range undone.Kept {
+		kept = append(kept, k.Reason)
+	}
+	for _, k := range undone.KeptAliases {
+		kept = append(kept, k.Reason)
+	}
+	if want := []string{"has_files", "has_notes", "has_files", "stale", "stale"}; !reflect.DeepEqual(kept, want) {
+		t.Errorf("kept reasons = %q, want %q", kept, want)
+	}
+
+	var counts []string
+	rec.mu.Lock()
+	for _, r := range *rec.records {
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == "unknown_reasons" {
+				counts = append(counts, r.Message+"="+a.Value.String())
+			}
+			return true
+		})
+	}
+	rec.mu.Unlock()
+	if want := []string{opScheduleSubjectsCreate + "=2", opScheduleSubjectsUndo + "=2"}; !reflect.DeepEqual(counts, want) {
+		t.Errorf("logged fallbacks = %q, want %q", counts, want)
+	}
+	for _, text := range rec.texts() {
+		if strings.Contains(text, "odd") {
+			t.Errorf("log holds the reason text: %q", text)
+		}
 	}
 }
 

@@ -3,6 +3,7 @@ package wails
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,6 +47,16 @@ const (
 	ScheduleKindSeminar = "seminar"
 	ScheduleKindLab     = "lab"
 	ScheduleKindUnknown = "unknown"
+)
+
+// Reason codes of skipped rows (the first three), of kept subjects and of kept spellings.
+const (
+	ScheduleReasonNameTaken      = "name_taken"
+	ScheduleReasonTooManyAliases = "too_many_aliases"
+	ScheduleReasonSubjectGone    = "subject_gone"
+	ScheduleReasonHasFiles       = "has_files"
+	ScheduleReasonHasNotes       = "has_notes"
+	ScheduleReasonStale          = "stale"
 )
 
 // Member link codes: why a member is in its group.
@@ -201,7 +212,8 @@ type scheduleJournal struct {
 	byTok map[string]library.ScheduleResult
 }
 
-// record keeps res for token unless it did nothing; a retry replaces the earlier outcome, as it repeats what was done.
+// record keeps res for token unless it did nothing. A retry is merged into the earlier outcome, never replaces it: a
+// retry that fails sooner than the first run returns less, and the undo must still take back all the token did.
 func (j *scheduleJournal) record(token string, res library.ScheduleResult) {
 	if len(res.Created) == 0 && len(res.Aliased) == 0 {
 		return
@@ -218,7 +230,7 @@ func (j *scheduleJournal) record(token string, res library.ScheduleResult) {
 		}
 	}
 	j.order = append(j.order, token)
-	j.byTok[token] = res
+	j.byTok[token] = mergeScheduleResult(j.byTok[token], res)
 	for len(j.order) > scheduleJournalSize {
 		delete(j.byTok, j.order[0])
 		j.order = j.order[1:]
@@ -230,6 +242,48 @@ func (j *scheduleJournal) lookup(token string) (library.ScheduleResult, bool) {
 	defer j.mu.Unlock()
 	res, ok := j.byTok[token]
 	return res, ok
+}
+
+// mergeScheduleResult is the union of two outcomes of one token: Created by ID (first-seen order, newer data for the
+// same ID), Aliased per subject (existing spellings first, exact duplicates dropped), Skipped of the newer outcome.
+func mergeScheduleResult(old, newer library.ScheduleResult) library.ScheduleResult {
+	out := library.ScheduleResult{
+		Created: slices.Clone(old.Created),
+		Aliased: make([]library.ScheduleAliased, 0, len(old.Aliased)+len(newer.Aliased)),
+		Skipped: slices.Clone(newer.Skipped),
+	}
+
+	createdAt := make(map[string]int, len(out.Created)+len(newer.Created))
+	for i, c := range out.Created {
+		createdAt[string(c.ID)] = i
+	}
+	for _, c := range newer.Created {
+		if i, ok := createdAt[string(c.ID)]; ok {
+			out.Created[i] = c
+			continue
+		}
+		createdAt[string(c.ID)] = len(out.Created)
+		out.Created = append(out.Created, c)
+	}
+
+	aliasedAt := map[string]int{}
+	spellings := map[string]map[string]bool{}
+	for _, a := range slices.Concat(old.Aliased, newer.Aliased) {
+		subj := string(a.Subject)
+		i, ok := aliasedAt[subj]
+		if !ok {
+			i = len(out.Aliased)
+			aliasedAt[subj], spellings[subj] = i, map[string]bool{}
+			out.Aliased = append(out.Aliased, library.ScheduleAliased{Subject: a.Subject, Aliases: []string{}})
+		}
+		for _, sp := range a.Aliases {
+			if !spellings[subj][sp] {
+				spellings[subj][sp] = true
+				out.Aliased[i].Aliases = append(out.Aliased[i].Aliases, sp)
+			}
+		}
+	}
+	return out
 }
 
 // scheduleState is the part of LibraryService the schedule calls need. running admits one create or undo at a time
@@ -269,7 +323,7 @@ func (s *LibraryService) ScheduleSubjects(ctx context.Context) ScheduleSubjectsV
 // CreateFromSchedule applies the student's choices to the proposal of token (the one «Да»). It may take seconds; a
 // second create or undo meanwhile answers busy.
 func (s *LibraryService) CreateFromSchedule(ctx context.Context, token string, choices []ScheduleChoice) ScheduleCreateResult {
-	empty := scheduleCreateResult(library.ScheduleResult{})
+	empty, _ := scheduleCreateResult(library.ScheduleResult{})
 	if s.schedule.uc == nil {
 		s.log.Error(opScheduleSubjectsCreate, "problem", ScheduleProblemUnavailable, "cause", "not wired")
 		empty.Problem = ScheduleProblemUnavailable
@@ -293,9 +347,12 @@ func (s *LibraryService) CreateFromSchedule(ctx context.Context, token string, c
 	res, err := s.schedule.uc.CreateFromSchedule(ctx, token, cs)
 	s.schedule.journal.record(token, res)
 
-	out := scheduleCreateResult(res)
+	out, unknown := scheduleCreateResult(res)
 	out.Problem = createProblem(err)
 	counts := []any{"created", len(out.Created), "aliased", len(out.Aliased), "skipped", len(out.Skipped)}
+	if unknown > 0 {
+		counts = append(counts, "unknown_reasons", unknown)
+	}
 	if out.Problem != "" {
 		s.log.Warn(opScheduleSubjectsCreate, append(counts, "problem", out.Problem)...)
 	} else {
@@ -305,19 +362,13 @@ func (s *LibraryService) CreateFromSchedule(ctx context.Context, token string, c
 }
 
 // UndoFromSchedule is «Отменить всё» for token: it takes back the outcome the core recorded for that token in this run
-// of the app; the page passes nothing else. A repeated undo answers the same. It may take seconds; a second create or
-// undo meanwhile answers busy.
+// of the app; the page passes nothing else. A repeated undo is safe and passes the same recorded result. It may take
+// seconds; a second create or undo meanwhile answers busy.
 func (s *LibraryService) UndoFromSchedule(ctx context.Context, token string) ScheduleUndoResult {
-	empty := scheduleUndoResult(library.ScheduleUndo{})
+	empty, _ := scheduleUndoResult(library.ScheduleUndo{})
 	if s.schedule.uc == nil {
 		s.log.Error(opScheduleSubjectsUndo, "problem", ScheduleProblemUnavailable, "cause", "not wired")
 		empty.Problem = ScheduleProblemUnavailable
-		return empty
-	}
-	res, ok := s.schedule.journal.lookup(token)
-	if !ok {
-		s.log.Info(opScheduleSubjectsUndo, "problem", ScheduleProblemInvalid, "cause", "unknown token")
-		empty.Problem = ScheduleProblemInvalid
 		return empty
 	}
 	if !s.schedule.running.CompareAndSwap(false, true) {
@@ -327,14 +378,25 @@ func (s *LibraryService) UndoFromSchedule(ctx context.Context, token string) Sch
 	}
 	defer s.schedule.running.Store(false)
 
+	// Looked up under the guard, so a create of the same token that was running has merged its outcome by now.
+	res, ok := s.schedule.journal.lookup(token)
+	if !ok {
+		s.log.Info(opScheduleSubjectsUndo, "problem", ScheduleProblemInvalid, "cause", "unknown token")
+		empty.Problem = ScheduleProblemInvalid
+		return empty
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, scheduleCallTimeout)
 	defer cancel()
 	undo, err := s.schedule.uc.UndoFromSchedule(ctx, token, res)
 
-	out := scheduleUndoResult(undo)
+	out, unknown := scheduleUndoResult(undo)
 	out.Problem = undoProblem(err)
 	counts := []any{
 		"removed", len(out.Removed), "kept", len(out.Kept), "unaliased", len(out.Unaliased), "kept_aliases", len(out.KeptAliases),
+	}
+	if unknown > 0 {
+		counts = append(counts, "unknown_reasons", unknown)
 	}
 	if out.Problem != "" {
 		s.log.Warn(opScheduleSubjectsUndo, append(counts, "problem", out.Problem)...)
@@ -458,8 +520,40 @@ func scheduleLink(l schedulesubjects.Link) string {
 	return ScheduleLinkSame
 }
 
-func scheduleCreateResult(res library.ScheduleResult) ScheduleCreateResult {
-	out := ScheduleCreateResult{
+// skipReason maps a reason of a skipped row; ok is false for a reason the page does not know. The fallback is
+// name_taken: the only reason the use case gives for both kinds of row (a subject to create and spellings to add).
+func skipReason(r library.ScheduleReason) (string, bool) {
+	switch r {
+	case library.ReasonNameTaken:
+		return ScheduleReasonNameTaken, true
+	case library.ReasonTooManyAliases:
+		return ScheduleReasonTooManyAliases, true
+	case library.ReasonSubjectGone:
+		return ScheduleReasonSubjectGone, true
+	}
+	return ScheduleReasonNameTaken, false
+}
+
+// keptReason maps a reason of a subject the undo left. The fallback is has_files: it claims no notes of the student
+// and only says the subject holds something, which is why it stays.
+func keptReason(r library.ScheduleReason) (string, bool) {
+	switch r {
+	case library.ReasonHasFiles:
+		return ScheduleReasonHasFiles, true
+	case library.ReasonHasNotes:
+		return ScheduleReasonHasNotes, true
+	}
+	return ScheduleReasonHasFiles, false
+}
+
+// keptAliasesReason maps a reason of spellings the undo left; stale is the only one the page knows.
+func keptAliasesReason(r library.ScheduleReason) (string, bool) {
+	return ScheduleReasonStale, r == library.ReasonStale
+}
+
+// scheduleCreateResult maps the outcome for the page; unknown counts the reasons that fell back.
+func scheduleCreateResult(res library.ScheduleResult) (out ScheduleCreateResult, unknown int) {
+	out = ScheduleCreateResult{
 		Created: make([]ScheduleCreatedSubject, 0, len(res.Created)), Aliased: scheduleAliases(res.Aliased),
 		Skipped: make([]ScheduleSkippedRow, 0, len(res.Skipped)),
 	}
@@ -467,13 +561,18 @@ func scheduleCreateResult(res library.ScheduleResult) ScheduleCreateResult {
 		out.Created = append(out.Created, ScheduleCreatedSubject{ID: string(c.ID), Key: c.Key, Name: c.Name})
 	}
 	for _, sk := range res.Skipped {
-		out.Skipped = append(out.Skipped, ScheduleSkippedRow{Key: sk.Key, SubjectID: string(sk.Subject), Reason: string(sk.Reason)})
+		reason, ok := skipReason(sk.Reason)
+		if !ok {
+			unknown++
+		}
+		out.Skipped = append(out.Skipped, ScheduleSkippedRow{Key: sk.Key, SubjectID: string(sk.Subject), Reason: reason})
 	}
-	return out
+	return out, unknown
 }
 
-func scheduleUndoResult(u library.ScheduleUndo) ScheduleUndoResult {
-	out := ScheduleUndoResult{
+// scheduleUndoResult maps the undo for the page; unknown counts the reasons that fell back.
+func scheduleUndoResult(u library.ScheduleUndo) (out ScheduleUndoResult, unknown int) {
+	out = ScheduleUndoResult{
 		Removed: make([]string, 0, len(u.Removed)), Kept: make([]ScheduleKeptSubject, 0, len(u.Kept)),
 		Unaliased: scheduleAliases(u.Unaliased), KeptAliases: make([]ScheduleKeptAliases, 0, len(u.KeptAliases)),
 	}
@@ -481,14 +580,22 @@ func scheduleUndoResult(u library.ScheduleUndo) ScheduleUndoResult {
 		out.Removed = append(out.Removed, string(id))
 	}
 	for _, k := range u.Kept {
-		out.Kept = append(out.Kept, ScheduleKeptSubject{ID: string(k.ID), Name: k.Name, Reason: string(k.Reason)})
+		reason, ok := keptReason(k.Reason)
+		if !ok {
+			unknown++
+		}
+		out.Kept = append(out.Kept, ScheduleKeptSubject{ID: string(k.ID), Name: k.Name, Reason: reason})
 	}
 	for _, k := range u.KeptAliases {
+		reason, ok := keptAliasesReason(k.Reason)
+		if !ok {
+			unknown++
+		}
 		out.KeptAliases = append(out.KeptAliases, ScheduleKeptAliases{
-			SubjectID: string(k.Subject), Aliases: nonNilStrings(k.Aliases), Reason: string(k.Reason),
+			SubjectID: string(k.Subject), Aliases: nonNilStrings(k.Aliases), Reason: reason,
 		})
 	}
-	return out
+	return out, unknown
 }
 
 func scheduleAliases(in []library.ScheduleAliased) []ScheduleAliases {
