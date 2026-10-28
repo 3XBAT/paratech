@@ -216,9 +216,9 @@ button.ag-pill:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .ag-mopt[aria-selected="true"] { background: var(--fill); box-shadow: inset 2px 0 0 var(--accent); }
 .ag-mopt-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .ag-mopt-k { white-space: nowrap; }
-.ag-mopt-h { grid-column: 1 / -1; display: flex; min-width: 0; white-space: pre; }
+.ag-mopt-h { grid-column: 1 / -1; display: flex; min-width: 0; white-space: nowrap; }
 .ag-mopt-ht { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ag-mopt-done { flex: none; }
+.ag-mopt-done { flex: none; white-space: pre; }
 .ag-mopt[aria-disabled="true"] { cursor: default; }
 .ag-mstatus { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 8px; overflow-wrap: anywhere; }
 @media (forced-colors: active) {

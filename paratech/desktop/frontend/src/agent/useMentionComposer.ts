@@ -9,6 +9,7 @@ import {
   createSlowGate,
   idleSearch,
   insertTrigger,
+  isSettledLine,
   maxMentions,
   mentionAddedText,
   mentionRemovedText,
@@ -77,7 +78,14 @@ export function useMentionComposer(d: MentionComposerDeps): MentionComposer {
   const open = fragment !== null && fragment.start !== dismissed;
   const full = pills.length >= maxMentions;
   // `model` drives the keys even while it is not drawn (a search still pending must not let Enter send the request).
-  const model = open ? popupModel(search, pills, slow) : null;
+  // The last settled line (empty / unavailable / failed) stays drawn while the next search has not earned «Поиск…».
+  const settled = useRef<PopupModel | null>(null);
+  const model = open ? popupModel(search, pills, slow, settled.current) : null;
+  if (model === null || (model.kind !== "loading" && !isSettledLine(model))) {
+    settled.current = null;
+  } else if (isSettledLine(model)) {
+    settled.current = model;
+  }
   const popup = popupVisible(model) ? model : null;
   const count = model?.options.length ?? 0;
   const current = clampActive(active, count);

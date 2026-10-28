@@ -412,11 +412,18 @@ export function createSlowGate(d: {
   };
 }
 
+/** The kinds that are a settled line (not options, not a search in progress). */
+export function isSettledLine(m: PopupModel | null): m is PopupModel {
+  return m !== null && (m.kind === "empty" || m.kind === "unavailable" || m.kind === "failed");
+}
+
 /**
  * The list for the search state and the pills already chosen. Every state has its own line; none is a dead end. A search
- * that has not answered yet shows no line until `slow` (see createSlowGate): the previous options stay, or nothing shows.
+ * that has not answered yet shows no «Поиск…» until `slow` (see createSlowGate): the previous options stay, or the
+ * previous settled line `prev` (empty / unavailable / failed) stays, or nothing shows (first open). The kind is still
+ * "loading" then, so the keys see the true state.
  */
-export function popupModel(search: SearchState, picked: readonly MentionView[], slow = false): PopupModel {
+export function popupModel(search: SearchState, picked: readonly MentionView[], slow = false, prev: PopupModel | null = null): PopupModel {
   const status = (kind: PopupKind, text: string, retry = false): PopupModel => ({ kind, text, options: [], retry });
   if (picked.length >= maxMentions) {
     return status("full", mentionTexts.full);
@@ -451,7 +458,11 @@ export function popupModel(search: SearchState, picked: readonly MentionView[], 
   if (search.status === "ready") {
     return status("empty", emptyResultText(search.query));
   }
-  return status("loading", slow ? mentionTexts.loading : "");
+  if (slow) {
+    return status("loading", mentionTexts.loading);
+  }
+  // No retry button on the kept line: the search is already running again.
+  return status("loading", isSettledLine(prev) ? prev.text : "");
 }
 
 // ---- Pills of the thread ----

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { MentionView } from "../bindings/agent.js";
-import { mentionKindCaption, type MentionPill, mentionTexts, type PopupModel, removeMentionLabel } from "../agentMentions.js";
+import { mentionKindCaption, mentionOpening, type MentionPill, mentionTexts, type PopupModel, removeMentionLabel } from "../agentMentions.js";
 import { Button } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
 
@@ -17,12 +17,13 @@ export function MessagePills(props: { pills: MentionPill[]; onOpen?: (kind: stri
     <ul className="ag-pills" aria-label={mentionTexts.pillsLabel}>
       {props.pills.map((m) => (
         <li key={m.key}>
-          {onOpen ? (
+          {onOpen && mentionOpening(m.kind, m.id) !== null ? (
             <button type="button" className="ag-pill small" title={m.title} aria-label={m.aria} onClick={() => onOpen(m.kind, m.id)}>
               {m.label}
             </button>
           ) : (
-            <span className="ag-pill small" title={m.title}>
+            // Nothing opens from here, so the tooltip promises nothing («Откроется …» is for the button only).
+            <span className="ag-pill small" title={`${m.caption}: ${m.label}`}>
               {m.label}
             </span>
           )}

@@ -1,6 +1,6 @@
 import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
 import type { MentionView } from "../bindings/agent.js";
-import { maxMentions, mentionTexts } from "../agentMentions.js";
+import { maxDraftLength, maxMentions, mentionTexts } from "../agentMentions.js";
 import { type AgentContext, chatTexts, composerKey, type EarlierItem, entryModel, inputPlacement, texts } from "../agentView.js";
 import { blockingEntry, draftsFor, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
 import { Icon } from "../ui/Icon.js";
@@ -112,7 +112,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
               placeholder={mode.placeholder}
               aria-label={mode.placeholder}
               disabled={!mode.inputEnabled}
-              maxLength={4000}
+              maxLength={maxDraftLength}
               autoComplete="off"
               {...(mn
                 ? {
@@ -145,7 +145,8 @@ export function AgentPanelView(props: AgentPanelViewProps) {
                 className="ag-at"
                 aria-label={mentionTexts.atLabel}
                 title={mentionTexts.atLabel}
-                disabled={!mode.inputEnabled || mn.pills.length >= maxMentions}
+                // A full field has no room for the space and the «@».
+                disabled={!mode.inputEnabled || mn.pills.length >= maxMentions || props.draft.length > maxDraftLength - 2}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={mn.openList}
               >

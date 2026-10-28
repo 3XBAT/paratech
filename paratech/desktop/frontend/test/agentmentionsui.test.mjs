@@ -16,6 +16,7 @@ import {
   emptyResultText,
   idleSearch,
   insertTrigger,
+  maxDraftLength,
   maxMentions,
   mentionDebounceMs,
   mentionKindCaption,
@@ -216,6 +217,31 @@ test("list: every state says what is going on; a failure offers «Повтори
   assert.equal(popupModel({ status: "loading", query: "фи", candidates: some }, [], true).kind, "options");
   assert.equal(popupVisible(popupModel({ status: "loading", query: "фи", candidates: some }, [])), true);
   assert.equal(popupVisible(null), false);
+});
+
+test("list: a search that is not slow yet keeps the previous settled line; on the first open nothing shows until slow", () => {
+  const loading = { status: "loading", query: "фи", candidates: [] };
+  const kept = (search) => {
+    const before = popupModel(search, []);
+    return popupModel(loading, [], false, before);
+  };
+  const afterEmpty = kept({ status: "ready", query: "ф", candidates: [] });
+  assert.deepEqual([afterEmpty.kind, afterEmpty.text, afterEmpty.retry, popupVisible(afterEmpty)], ["loading", "По «ф» ничего не найдено", false, true]);
+  const afterOff = kept({ status: "unavailable", query: "ф", candidates: [] });
+  assert.deepEqual([afterOff.kind, afterOff.text, popupVisible(afterOff)], ["loading", mentionTexts.unavailable, true]);
+  const afterBad = kept({ status: "failed", query: "ф", candidates: [] });
+  assert.deepEqual([afterBad.kind, afterBad.text, afterBad.retry, popupVisible(afterBad)], ["loading", mentionTexts.failed, false, true], "the line stays, the button is not offered while it searches again");
+  // The key logic still sees a running search (Enter is swallowed).
+  assert.equal(pickerKey(key("Enter"), afterEmpty.options.length, afterEmpty.kind), "swallow");
+  // Slow: the line gives way to «Поиск…».
+  const prevEmpty = popupModel({ status: "ready", query: "ф", candidates: [] }, []);
+  assert.equal(popupModel(loading, [], true, prevEmpty).text, mentionTexts.loading);
+  // First open (no previous line), or a previous that is not a settled line: hidden until slow.
+  assert.equal(popupVisible(popupModel(loading, [], false, null)), false);
+  const withOptions = popupModel({ status: "ready", query: "ф", candidates: [cand("subject", "s")] }, []);
+  assert.equal(popupVisible(popupModel({ status: "loading", query: "фи", candidates: [] }, [], false, withOptions)), false);
+  // The same state without a previous line is as before the fix.
+  assert.equal(popupModel(loading, []).text, "");
 });
 
 test("empty result: the query is quoted and cut to 40 characters; without one the list says why it is empty", () => {
@@ -713,7 +739,39 @@ test("render: earlier requests show their pills as buttons when the panel can op
   assert.ok(html.includes('title="Материал: Конспект.pdf. Откроется «Предметы»"'));
   const plain = panel({ earlier });
   assert.ok(!plain.includes("<button type=\"button\" class=\"ag-pill"), "no dead button without a handler");
-  assert.ok(plain.includes("Конспект.pdf") && plain.includes('<span class="ag-pill small" title="Материал: Конспект.pdf. Откроется «Предметы»">'));
+  // The span opens nothing, so its tooltip does not promise it (R2 of the review).
+  assert.ok(plain.includes("Конспект.pdf") && plain.includes('<span class="ag-pill small" title="Материал: Конспект.pdf">'));
+  assert.ok(!plain.includes("Откроется"));
+});
+
+test("render: a pill that leads nowhere is a span even when the panel can open things (unknown kind, empty id)", () => {
+  const pills = mentionPills([
+    { kind: "weird", id: "w1", label: "Х" },
+    { kind: "subject", id: "", label: "Без ид" },
+    { kind: "subject", id: "s1", label: "Физика" },
+  ]);
+  const html = renderToStaticMarkup(h(MessagePills, { pills, onOpen: noop }));
+  assert.equal(html.split("<button").length - 1, 1, "only the openable one is a button");
+  assert.ok(html.includes('<span class="ag-pill small" title="Объект: Х">'));
+  assert.ok(html.includes('<span class="ag-pill small" title="Предмет: Без ид">'));
+  assert.ok(html.includes('aria-label="Открыть предмет «Физика»"'));
+});
+
+test("render: the «@» button is off when the field has no room for a space and an «@»; the field takes maxDraftLength", () => {
+  assert.equal(maxDraftLength, 4000);
+  const room = panel({ mentions: composer(), draft: "x".repeat(maxDraftLength - 2) });
+  assert.ok(!/class="ag-at"[^>]*disabled/.test(room), "two characters of room: on");
+  const tight = panel({ mentions: composer(), draft: "x".repeat(maxDraftLength - 1) });
+  assert.ok(/class="ag-at"[^>]*disabled/.test(tight), "one character of room: off");
+  assert.ok(/class="ag-at"[^>]*disabled/.test(panel({ mentions: composer(), draft: "x".repeat(maxDraftLength) })));
+  assert.ok(tight.includes(`maxLength="${maxDraftLength}"`));
+});
+
+test("source: the option hint line never wraps (it is data); only the suffix keeps its spaces", () => {
+  const css = readFileSync(new URL("../src/agent/agent.css", import.meta.url), "utf8");
+  assert.match(css, /\.ag-mopt-h \{[^}]*white-space: nowrap/);
+  assert.doesNotMatch(css, /\.ag-mopt-h \{[^}]*white-space: pre/);
+  assert.match(css, /\.ag-mopt-done \{[^}]*white-space: pre/);
 });
 
 // ---- the page code never writes markup from names ----
