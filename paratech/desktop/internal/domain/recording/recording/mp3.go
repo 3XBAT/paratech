@@ -205,8 +205,11 @@ func (c *MP3FrameCounter) header() {
 }
 
 // Counted returns a with the duration of the frames c counted, when a NeedsFrameCount; otherwise a as it is. No frame
-// is ErrAudioDurationUnknown, longer than MaxImportedDuration ErrAudioTooLong.
+// is ErrAudioDurationUnknown, longer than MaxImportedDuration ErrAudioTooLong; so is a WAV whose chunk walk did not end.
 func (a ImportedAudio) Counted(c *MP3FrameCounter) (ImportedAudio, error) {
+	if _, walking := a.WAVChunkAt(); walking {
+		return knownAudio(a.Format, 0, false)
+	}
 	if !a.counting {
 		return a, nil
 	}

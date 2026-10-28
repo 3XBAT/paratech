@@ -58,3 +58,15 @@ var (
 	// together with ErrInvalidRecording.
 	ErrFutureLecture = errors.New("the lecture has not begun yet")
 )
+
+// AudioDurationUnknownError is ErrAudioDurationUnknown of a file of a known format, so the refusal can name it.
+type AudioDurationUnknownError struct {
+	Format AudioFormat
+}
+
+func (e AudioDurationUnknownError) Error() string {
+	return ErrAudioDurationUnknown.Error() + ": a " + string(e.Format) + " file"
+}
+
+// Is makes errors.Is(err, ErrAudioDurationUnknown) hold.
+func (e AudioDurationUnknownError) Is(target error) bool { return target == ErrAudioDurationUnknown }

@@ -607,7 +607,7 @@ export type CardModel =
   | { type: "progress"; caption: string; detail: string; buttons: ButtonModel[] }
   | { type: "waiting"; buttons: ButtonModel[] }
   | { type: "result"; caption: string; artifact: ArtifactLabel | null; fallback: string }
-  | { type: "answer"; caption: string; text: string }
+  | { type: "answer"; caption: string; text: string; answerId: string }
   | { type: "reply"; caption: string; text: string; assignments: AssignmentLineView[] }
   | { type: "cannot_do"; caption: string; yourTitle: string; yourPart: string[]; ourTitle: string; ourPart: string[] }
   | { type: "confirm"; caption: string; text: string; target: { kind: "proposal" | "preview"; id: string } | null }
@@ -660,7 +660,7 @@ function cardModel(c: CardView, status: string): CardModel | null {
     case "result":
       return { type: "result", caption: texts.resultCaption, artifact: parseArtifact(c.artifact), fallback: texts.noArtifact };
     case "answer":
-      return { type: "answer", caption: texts.answerCaption, text: texts.answerReady };
+      return { type: "answer", caption: texts.answerCaption, text: texts.answerReady, answerId: c.answerId };
     case "reply":
       return { type: "reply", caption: texts.replyCaption, text: c.text, assignments: c.assignments ?? [] };
     case "cannot_do":

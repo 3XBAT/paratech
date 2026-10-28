@@ -22,8 +22,10 @@ type Recording struct {
 	LessonKind    string
 	LessonTeacher string
 	Status        recording.Status
-	StartedAt     time.Time
-	StoppedAt     time.Time // zero while capturing or if unknown
+	// Origin: captured by the app or imported from a file (ADR-0027); the row marks an imported one (TASK-300).
+	Origin    recording.Origin
+	StartedAt time.Time
+	StoppedAt time.Time // zero while capturing or if unknown
 	// Duration is the length of the final track; HasDuration is false until the recording is COMPLETED.
 	Duration    time.Duration
 	HasDuration bool

@@ -13,6 +13,7 @@ import {
 } from "./nav";
 import { AgentPanel } from "./agent/AgentPanel";
 import { PanelResizeHandle, useResizablePanel } from "./agent/PanelResizeHandle";
+import type { CitationOpening } from "./knowledgeView";
 import { OpenSummaryContext, type SummarySection } from "./openSummary";
 import { OpenTranscriptContext } from "./openTranscript";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
@@ -47,6 +48,9 @@ function PageView(props: {
   /** Shows a card of «Задания» or a subject of «Предметы» ("" the list): an entry of the history. */
   onSelectAssignment: (id: string) => void;
   onSelectSubject: (id: string) => void;
+  /** The place of an answer's source «База знаний» opens on arrival; cleared once taken. */
+  sourceJump?: CitationOpening;
+  onSourceJumpDone: () => void;
 }) {
   switch (props.id) {
     case "today":
@@ -58,7 +62,7 @@ function PageView(props: {
     case "homework":
       return <HomeworkPage openAssignment={props.assignment} onSelect={props.onSelectAssignment} />;
     case "knowledge":
-      return <KnowledgeBasePage visit={props.visit} onOpenAssignment={props.onOpenAssignment} />;
+      return <KnowledgeBasePage visit={props.visit} onOpenAssignment={props.onOpenAssignment} jump={props.sourceJump} onJumpDone={props.onSourceJumpDone} />;
     case "tickets":
       return <TicketsPage onOpen={props.onOpen} />;
     case "schedule":
@@ -98,6 +102,14 @@ export function App() {
     setRoute(routeToAssignment(id));
     setJump((j) => j + 1);
   }, []);
+  // A place of an answer's source (TASK-296): «База знаний» opens afresh and takes it once.
+  const [sourceJump, setSourceJump] = useState<CitationOpening | undefined>(undefined);
+  const openSource = useCallback((o: CitationOpening) => {
+    setSourceJump(o);
+    setRoute(routeToPage("knowledge"));
+    setJump((j) => j + 1);
+  }, []);
+  const sourceJumpDone = useCallback(() => setSourceJump(undefined), []);
   // A subject or a card opened inside its page is a route too, so «Назад» finds the list again (TASK-202).
   const selectSubject = useCallback((id: string) => setRoute((r) => routeToSubject(r, id)), []);
   const selectAssignment = useCallback((id: string) => setRoute((r) => routeToOpenedAssignment(r, id)), []);
@@ -129,6 +141,8 @@ export function App() {
           onOpenAssignment={openAssignment}
           onSelectAssignment={selectAssignment}
           onSelectSubject={selectSubject}
+          sourceJump={sourceJump}
+          onSourceJumpDone={sourceJumpDone}
         />
       </OpenSummaryContext.Provider>
     </OpenTranscriptContext.Provider>
@@ -184,7 +198,7 @@ export function App() {
           </div>
         )}
       </main>
-      <AgentPanel page={current} assignmentId={route.assignment} open={open} reveal={panel.reveal} hide={panel.hide} onOpenAssignment={openAssignment} />
+      <AgentPanel page={current} assignmentId={route.assignment} open={open} reveal={panel.reveal} hide={panel.hide} onOpenAssignment={openAssignment} onOpenSource={openSource} />
       <PanelResizeHandle panel={panel} />
       <DropZone onImported={() => setLibrary((n) => n + 1)} />
     </div>

@@ -133,6 +133,11 @@ func TestRecordingImportErrors(t *testing.T) {
 		{wrap(recording.ErrAudioTooLarge), ErrRecordingImportTooLarge},
 		{wrap(recording.ErrAudioTooLong), ErrRecordingImportTooLong},
 		{wrap(fmt.Errorf("%w: a flac file", recording.ErrAudioDurationUnknown)), ErrRecordingImportNoDuration},
+		{wrap(recording.AudioDurationUnknownError{Format: recording.FormatWAV}), ErrRecordingImportNoDurationWAV},
+		{wrap(recording.AudioDurationUnknownError{Format: recording.FormatMP3}), ErrRecordingImportNoDurationMP3},
+		{wrap(recording.AudioDurationUnknownError{Format: recording.FormatFLAC}), ErrRecordingImportNoDurationFLAC},
+		{wrap(recording.AudioDurationUnknownError{Format: recording.FormatOGG}), ErrRecordingImportNoDurationOGG},
+		{wrap(recording.AudioDurationUnknownError{Format: "m4a"}), ErrRecordingImportNoDuration},
 		{wrap(recording.ErrUnsupportedAudio), ErrRecordingImportFormat},
 		{wrap(recording.ErrNoDiskSpace), ErrRecordingImportNoSpace},
 		{wrap(recordingimport.ErrInvalidRequest), ErrRecordingImportInvalid},
@@ -153,6 +158,21 @@ func TestRecordingImportErrors(t *testing.T) {
 	}
 }
 
+// The refusal of an unknown duration names the format of the file, not "WAV или MP3".
+func TestRecordingImportNoDurationNamesTheFormat(t *testing.T) {
+	for f, name := range map[recording.AudioFormat]string{
+		recording.FormatWAV: "WAV", recording.FormatMP3: "MP3", recording.FormatFLAC: "FLAC", recording.FormatOGG: "OGG",
+	} {
+		text := noDurationTexts[f].Error()
+		if !strings.Contains(text, "в этом "+name+"-файле") || strings.Contains(text, "заново в") {
+			t.Errorf("%s: %q", f, text)
+		}
+	}
+	if len(noDurationTexts) != 4 {
+		t.Errorf("%d texts, want one for each of the four formats", len(noDurationTexts))
+	}
+}
+
 // The page may call only Import; the frontend wrapper calls it by its bound name and knows every error text.
 func TestFrontendKnowsRecordingImport(t *testing.T) {
 	typ := reflect.TypeFor[*RecordingImportService]()
@@ -169,7 +189,8 @@ func TestFrontendKnowsRecordingImport(t *testing.T) {
 	for _, e := range []error{
 		ErrRecordingImportInvalid, ErrRecordingImportInvalidDate, ErrRecordingImportFuture, ErrRecordingImportNoLesson, ErrRecordingImportUnreadable, ErrRecordingImportEmpty,
 		ErrRecordingImportTooLarge, ErrRecordingImportTooLong, ErrRecordingImportNoDuration, ErrRecordingImportFormat, ErrRecordingImportNoSpace, ErrRecordingImportChanged, ErrRecordingImportDeleting,
-		ErrRecordingImportUnavailable,
+		ErrRecordingImportUnavailable, ErrRecordingImportNoDurationWAV, ErrRecordingImportNoDurationMP3, ErrRecordingImportNoDurationFLAC,
+		ErrRecordingImportNoDurationOGG,
 	} {
 		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
 			t.Errorf("frontend/src/bindings/recordingImport.ts does not list the error %q", e)
