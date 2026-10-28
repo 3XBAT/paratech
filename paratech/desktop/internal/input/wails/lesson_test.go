@@ -23,7 +23,7 @@ func TestAssignmentItemCarriesTheLesson(t *testing.T) {
 		Kind: "lecture", Teacher: "Петров", TeacherSource: values.SourceTranscript,
 		LessonDate: time.Date(2026, 10, 19, 12, 0, 0, 0, msk), CorrectedTeacher: "",
 	}}
-	got, err := e.svc.ListAssignments(context.Background())
+	got, err := e.svc.ListAssignments(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -153,6 +153,15 @@ func (r *memChats) put(t *testing.T, th *thread.Thread) {
 	}
 }
 
+// edit changes the stored state of a chat, as a save of agentturn would (Restart's HistoryFrom).
+func (r *memChats) edit(id shared.ThreadID, change func(*thread.State)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	st := r.states[id]
+	change(&st)
+	r.states[id] = st
+}
+
 // bump saves the stored chat once more, as a step of its request would.
 func (r *memChats) bump(id shared.ThreadID) {
 	r.mu.Lock()
@@ -165,11 +174,22 @@ func (r *memChats) bump(id shared.ThreadID) {
 type memHistory struct {
 	entries map[shared.ThreadID][]values.HistoryEntry
 	err     error
+	errs    map[shared.ThreadID]error // a failed read of one chat
+	reads   []historyRead
+}
+
+type historyRead struct {
+	id          shared.ThreadID
+	from, limit int
 }
 
 func (h *memHistory) Since(_ context.Context, id shared.ThreadID, from, limit int) ([]values.HistoryEntry, error) {
+	h.reads = append(h.reads, historyRead{id, from, limit})
 	if h.err != nil {
 		return nil, h.err
+	}
+	if err := h.errs[id]; err != nil {
+		return nil, err
 	}
 	var out []values.HistoryEntry
 	for _, e := range h.entries[id] {

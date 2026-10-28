@@ -67,10 +67,13 @@ var chatAt = time.Date(2026, 10, 27, 9, 30, 0, 0, time.FixedZone("MSK", 3*3600))
 func TestAgentChatsContract(t *testing.T) {
 	c := &fakeChats{
 		list: []agentchats.Chat{
-			{ID: "th2", Title: "Матан и физика", LastActive: chatAt, Running: true},
-			{ID: "th1", Title: "Новый чат", Archived: true, LastActive: chatAt.Add(-time.Hour)},
+			{ID: "th2", Title: "Матан и физика", LastActive: chatAt, Running: true,
+				Fill: &agentchats.Fill{Percent: 72, Level: thread.FillHigh}},
+			{ID: "th1", Title: "Новый чат", Archived: true, LastActive: chatAt.Add(-time.Hour)}, // its fill was not read
+			{ID: "th4", Title: "Длинный", LastActive: chatAt.Add(-2 * time.Hour),
+				Fill: &agentchats.Fill{Percent: 100, Level: thread.FillFull, Overflow: true}},
 		},
-		chat: agentchats.Chat{ID: "th3", Title: "Новый чат", LastActive: chatAt},
+		chat: agentchats.Chat{ID: "th3", Title: "Новый чат", LastActive: chatAt, Fill: &agentchats.Fill{Level: thread.FillNormal}},
 	}
 	s := newChatsAgent(t, c)
 	got, err := json.Marshal(s.Chats(context.Background()))
@@ -78,8 +81,11 @@ func TestAgentChatsContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"problem":"","chats":[` +
-		`{"threadId":"th2","title":"Матан и физика","archived":false,"lastActive":"2026-10-27T06:30:00Z","running":true},` +
-		`{"threadId":"th1","title":"Новый чат","archived":true,"lastActive":"2026-10-27T05:30:00Z","running":false}]}`
+		`{"threadId":"th2","title":"Матан и физика","archived":false,"lastActive":"2026-10-27T06:30:00Z","running":true,` +
+		`"fill":{"percent":72,"level":"high","overflow":false}},` +
+		`{"threadId":"th1","title":"Новый чат","archived":true,"lastActive":"2026-10-27T05:30:00Z","running":false,"fill":null},` +
+		`{"threadId":"th4","title":"Длинный","archived":false,"lastActive":"2026-10-27T04:30:00Z","running":false,` +
+		`"fill":{"percent":100,"level":"full","overflow":true}}]}`
 	if string(got) != want {
 		t.Errorf("Chats JSON =\n%s\nwant\n%s", got, want)
 	}
@@ -88,7 +94,8 @@ func TestAgentChatsContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want = `{"problem":"","chat":{"threadId":"th3","title":"Новый чат","archived":false,"lastActive":"2026-10-27T06:30:00Z","running":false}}`
+	want = `{"problem":"","chat":{"threadId":"th3","title":"Новый чат","archived":false,"lastActive":"2026-10-27T06:30:00Z",` +
+		`"running":false,"fill":{"percent":0,"level":"normal","overflow":false}}}`
 	if string(got) != want {
 		t.Errorf("NewChat JSON =\n%s\nwant\n%s", got, want)
 	}
@@ -101,12 +108,14 @@ func TestAgentChatsContract(t *testing.T) {
 
 // Rename, archive and restore reach the use case with the chat id; the result is the chat after the call.
 func TestAgentChatCallsForward(t *testing.T) {
-	c := &fakeChats{chat: agentchats.Chat{ID: "th1", Title: "Мой чат", LastActive: chatAt}}
+	c := &fakeChats{chat: agentchats.Chat{ID: "th1", Title: "Мой чат", LastActive: chatAt,
+		Fill: &agentchats.Fill{Percent: 90, Level: thread.FillFull}}}
 	s := newChatsAgent(t, c)
 	ctx := context.Background()
 	results := []AgentChatResult{s.RenameChat(ctx, "th1", "Мой чат"), s.ArchiveChat(ctx, "th1"), s.RestoreChat(ctx, "th1")}
 	for _, r := range results {
-		if r.Problem != "" || r.Chat.ThreadID != "th1" || r.Chat.Title != "Мой чат" {
+		if r.Problem != "" || r.Chat.ThreadID != "th1" || r.Chat.Title != "Мой чат" ||
+			r.Chat.Fill == nil || *r.Chat.Fill != (AgentFillView{Percent: 90, Level: "full"}) {
 			t.Errorf("result = %+v", r)
 		}
 	}

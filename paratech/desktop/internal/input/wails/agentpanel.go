@@ -1,16 +1,31 @@
 package wails
 
 import (
+	"context"
 	"log/slog"
 	"sync"
+	"time"
 
+	"paratech/desktop/internal/cases/agentchats"
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
-// opAgentCard is the log name of a card the panel cannot show.
-const opAgentCard = "ui: agent card dropped"
+// Operation names of the log.
+const (
+	opAgentCard = "ui: agent card dropped"
+	opAgentFill = "ui: agent context fill"
+)
+
+// fillTimeout bounds the local read of a chat's fill at the end of a request: the update is published without it
+// rather than late.
+const fillTimeout = 2 * time.Second
+
+// AgentFills reads the context ring of a chat (ADR-0028 «The ring»); satisfied by agentchats.Service.
+type AgentFills interface {
+	Fill(ctx context.Context, id shared.ThreadID) (agentchats.Fill, error)
+}
 
 // AgentUpdate is one update of a request as the Driver publishes it; app maps the Driver's own type to it. Problem is
 // one of the Driver's problem enums; Progress marks the update of a step that went to the Hub (no cards).
@@ -39,12 +54,20 @@ type AgentPanel struct {
 
 	mu     sync.Mutex
 	emit   EventEmitter
+	fills  AgentFills                     // nil: updates carry no fill
 	drafts map[shared.ThreadID]*draftTurn // the drafts of the latest request of each thread
 }
 
-// NewAgentPanel returns a panel with no emitter.
+// NewAgentPanel returns a panel with no emitter and no fills.
 func NewAgentPanel(log *slog.Logger) *AgentPanel {
 	return &AgentPanel{log: log, clock: wallClock{}, drafts: map[shared.ThreadID]*draftTurn{}}
+}
+
+// SetFills sets where the fill of a request's chat is read when the request ends; nil turns it off.
+func (p *AgentPanel) SetFills(f AgentFills) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.fills = f
 }
 
 // Attach sets the emitter; nil detaches it.
@@ -57,8 +80,10 @@ func (p *AgentPanel) Attach(e EventEmitter) {
 // Publish emits u. It holds the lock while emitting, so no update is emitted after Attach(nil) returns and updates
 // published from one Driver goroutine keep their order. Updates of different operations may interleave: consumers
 // must not rely on arrival order across operations. The drafts of the request are settled first (draftsBefore).
+// An update that ends a request reads the chat's fill from the local database on the Driver's goroutine, bounded by
+// fillTimeout, before the lock is taken.
 func (p *AgentPanel) Publish(u AgentUpdate) {
-	view := p.view(u)
+	view := p.view(context.Background(), u)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.draftsBefore(u)
@@ -71,7 +96,8 @@ func (p *AgentPanel) Publish(u AgentUpdate) {
 // The texts (the model's) must be rendered as plain text. Problem is "" or busy, stale, invalid, budget,
 // retry_required, restart_required or failed; the panel words the status and the stop reason itself (offline:
 // «Не завершено: нет связи · Продолжить»). Progress is true for the update of a step that went to the Hub: it has no
-// cards, and the panel applies its status only and keeps the cards it shows.
+// cards, and the panel applies its status only and keeps the cards it shows. Fill is the context ring of the chat,
+// set only when the request ended (see endsRequest); null otherwise and when it could not be read.
 type AgentUpdateView struct {
 	ThreadID     string          `json:"threadId"` // "" when an Ask failed before its thread existed
 	Turn         int             `json:"turn"`
@@ -84,6 +110,20 @@ type AgentUpdateView struct {
 	Problem      string          `json:"problem"`
 	Progress     bool            `json:"progress"`
 	Cards        []AgentCardView `json:"cards"`
+	Fill         *AgentFillView  `json:"fill"`
+}
+
+// AgentFillView is the context ring of a chat: the share of the window its next request would use in whole percent
+// (0–100; 100 on an overflow), the level normal (< 70), high (70–89) or full (≥ 90: «Начать новый чат»), and overflow
+// when an earlier request is already left out.
+type AgentFillView struct {
+	Percent  int    `json:"percent"`
+	Level    string `json:"level"`
+	Overflow bool   `json:"overflow"`
+}
+
+func fillView(f agentchats.Fill) *AgentFillView {
+	return &AgentFillView{Percent: f.Percent, Level: string(f.Level), Overflow: f.Overflow}
 }
 
 // AgentCardView is one card; Kind says which field is set: plan, questions, progress (jobId), result (artifact,
@@ -193,8 +233,9 @@ type AgentCannotDoView struct {
 	OurPart  []string `json:"ourPart"`
 }
 
-// view maps u; a card that breaks its rules or that the panel does not know is dropped and logged.
-func (p *AgentPanel) view(u AgentUpdate) AgentUpdateView {
+// view maps u; a card that breaks its rules or that the panel does not know is dropped and logged. It reads the fill
+// of an ending request from the local database, so it runs outside p.mu.
+func (p *AgentPanel) view(ctx context.Context, u AgentUpdate) AgentUpdateView {
 	problem := u.Problem
 	if problem != "" && !agentUpdateProblems[problem] {
 		problem = AgentProblemFailed
@@ -212,7 +253,46 @@ func (p *AgentPanel) view(u AgentUpdate) AgentUpdateView {
 		}
 		v.Cards = append(v.Cards, cv)
 	}
+	v.Fill = p.fill(ctx, u)
 	return v
+}
+
+// endsRequest tells an update after which the ring is redrawn (ADR-0028: when a request ends, never during a step):
+// the request reached DONE, STOPPED, FAILED or CANCELLED. A progress update is a step on its way; PLANNING, EXECUTING
+// and AWAITING_* are not over (a plan or questions waiting add nothing to the history before the answer), and an update
+// of a failed operation has no status. STOPPED counts as an end; a «Продолжить» sends that request as the current one,
+// so the ring may overstate by that request's own pair until the next end.
+func endsRequest(u AgentUpdate) bool {
+	if u.Progress || u.Thread == "" {
+		return false
+	}
+	switch u.Status {
+	case thread.StatusDone, thread.StatusStopped, thread.StatusFailed, thread.StatusCancelled:
+		return true
+	}
+	return false
+}
+
+// fill is the ring of the chat of an ending request; nil for any other update, without fills, or when the read failed
+// (logged: the update still goes out).
+func (p *AgentPanel) fill(ctx context.Context, u AgentUpdate) *AgentFillView {
+	if !endsRequest(u) {
+		return nil
+	}
+	p.mu.Lock()
+	fills := p.fills
+	p.mu.Unlock()
+	if fills == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fillTimeout)
+	defer cancel()
+	f, err := fills.Fill(ctx, u.Thread)
+	if err != nil {
+		p.log.Warn(opAgentFill, "thread", u.Thread.String(), "err", err)
+		return nil
+	}
+	return fillView(f)
 }
 
 func cardView(c values.Card) (AgentCardView, bool) {

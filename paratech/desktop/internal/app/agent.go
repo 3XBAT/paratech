@@ -102,6 +102,7 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	if err != nil {
 		return fmt.Errorf("app: agent chats: %w", err)
 	}
+	c.panel.SetFills(c.chats) // the ring of a chat in the update that ends its request (ADR-0028)
 	c.driver, err = agentloop.New(agentloop.Deps{
 		Turns: c.agent, Sink: panelSink{c.panel}, Library: reads.library, Inspector: reads.library, Answerer: reads.answers,
 		Knowledge: reads.knowledge, Activity: reads.activity, Schedule: reads.schedule,

@@ -326,10 +326,10 @@ function Card(props: { card: CardModel; actions: CardActions }) {
       );
     case "waiting":
       return (
-        <section className="ag-card ag-card-wait">
+        <div className="ag-think">
           <Waiting />
           <Buttons buttons={card.buttons} busy={props.actions.busy} onPress={props.actions.press} />
-        </section>
+        </div>
       );
     case "result":
       return (
@@ -357,7 +357,6 @@ function Card(props: { card: CardModel; actions: CardActions }) {
     case "reply":
       return (
         <section className="ag-card">
-          <h3 className="ag-card-h">{card.caption}</h3>
           <p className="ag-text">{card.text}</p>
           <AssignmentList items={card.assignments} actions={props.actions} />
         </section>

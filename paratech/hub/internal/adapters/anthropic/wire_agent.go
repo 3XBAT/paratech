@@ -87,20 +87,30 @@ type wireToolChoice struct {
 // and the shared student context (cache breakpoint), then the thread scope; the history follows with a breakpoint on
 // its last block, so the next step of the same request reads it from the cache. Student texts and tool results go
 // only into user turns, never into system.
+//
+// The chat layout (catalog 9, ADR-0028) moves the scope out of system: the summary and the earlier pairs end with a
+// breakpoint, then the scope with its mentions goes as a user data block right before the current request, so a
+// request about another subject still reads the history from the cache. Three breakpoints, within the API's four.
 func newAgentWireRequest(call values.AgentCall) agentWireRequest {
 	tools := make([]wireTool, 0, len(call.Tools()))
 	for _, t := range call.Tools() {
 		tools = append(tools, wireTool{Name: t.Name(), Description: t.Description(), InputSchema: json.RawMessage(t.Schema())})
 	}
+	system := []agentWireBlock{
+		{Type: blockText, Text: call.System()},
+		{Type: blockText, Text: call.Base(), CacheControl: &wireCacheControl{Type: cacheEphemeral}},
+	}
+	scopeAt := -1
+	if call.ChatLayout() {
+		scopeAt = values.CurrentRequest(call.Turns())
+	} else {
+		system = append(system, agentWireBlock{Type: blockText, Text: call.Scope()})
+	}
 	return agentWireRequest{
-		Model:     call.Model(),
-		MaxTokens: call.MaxOutput(),
-		System: []agentWireBlock{
-			{Type: blockText, Text: call.System()},
-			{Type: blockText, Text: call.Base(), CacheControl: &wireCacheControl{Type: cacheEphemeral}},
-			{Type: blockText, Text: call.Scope()},
-		},
-		Messages:   agentMessages(call.Turns()),
+		Model:      call.Model(),
+		MaxTokens:  call.MaxOutput(),
+		System:     system,
+		Messages:   agentMessages(call.Turns(), scopeAt, call.Scope()),
 		Tools:      tools,
 		ToolChoice: wireToolChoice{Type: toolChoiceAuto},
 	}
@@ -111,8 +121,9 @@ func newAgentWireRequest(call values.AgentCall) agentWireRequest {
 // when the echo carries one. A history without agent replies (an older desktop) gets values.MissingReplyText as an
 // assistant turn between consecutive student texts, so earlier requests read as answered. Consecutive turns of one
 // role share a message (results first, as the API wants tool results at the start of a user message). The last block
-// carries the second cache breakpoint.
-func agentMessages(turns []values.Turn) []agentWireMessage {
+// carries a cache breakpoint. With scopeAt >= 0 (the chat layout) the last block before turn scopeAt carries one too
+// and the scope block goes in right before that turn; a summary turn is a user data block.
+func agentMessages(turns []values.Turn, scopeAt int, scope string) []agentWireMessage {
 	var msgs []agentWireMessage
 	add := func(role string, blocks ...agentWireBlock) {
 		if n := len(msgs); n > 0 && msgs[n-1].Role == role && msgs[n-1].raw == nil {
@@ -123,7 +134,13 @@ func agentMessages(turns []values.Turn) []agentWireMessage {
 	}
 	marks := values.ReplyMarkers(turns)
 	for i, t := range turns {
+		if i == scopeAt {
+			markLast(msgs)
+			add(roleUser, agentWireBlock{Type: blockText, Text: scope})
+		}
 		switch t.Kind() {
+		case values.TurnHistorySummary:
+			add(roleUser, agentWireBlock{Type: blockText, Text: t.SummaryText()})
 		case values.TurnStudentText:
 			add(roleUser, agentWireBlock{Type: blockText, Text: t.Text()})
 			if marks[i] {
@@ -145,12 +162,17 @@ func agentMessages(turns []values.Turn) []agentWireMessage {
 			}
 		}
 	}
-	// The turn order ends every echo with its results, so the last message is never a raw one; checked anyway.
-	if n := len(msgs); n > 0 && msgs[n-1].raw == nil {
+	markLast(msgs)
+	return msgs
+}
+
+// markLast puts a cache breakpoint on the last block of msgs. The turn order ends every echo with its results, and a
+// student text follows only a user turn or an agent reply, so the last message is never a raw one; checked anyway.
+func markLast(msgs []agentWireMessage) {
+	if n := len(msgs); n > 0 && msgs[n-1].raw == nil && len(msgs[n-1].Content) > 0 {
 		last := &msgs[n-1].Content[len(msgs[n-1].Content)-1]
 		last.CacheControl = &wireCacheControl{Type: cacheEphemeral}
 	}
-	return msgs
 }
 
 // agentWireResponse keeps content raw: it is read as blocks and also kept as it is for the next step.
