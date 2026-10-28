@@ -678,6 +678,8 @@ func domainError(err error) error {
 		to = ErrInvalidTeacherName
 	case errors.Is(err, subject.ErrInvalidTeacherEmail):
 		to = ErrInvalidTeacherEmail
+	case errors.Is(err, subject.ErrInvalidTeacherRole):
+		to = ErrInvalidTeacherRole
 	case errors.Is(err, subject.ErrFolderExists):
 		to = ErrFolderTaken
 	case errors.Is(err, subject.ErrFolderNotFound):

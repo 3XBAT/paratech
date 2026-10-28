@@ -155,7 +155,7 @@ export interface QuestionView {
   kind: "choice" | "text";
   text: string;
   options: string[];
-  /** Index of the preselected option of a choice. */
+  /** Index of the preselected option of a choice; -1 preselects nothing (the user must pick). */
   default: number;
   citeRef: string;
 }

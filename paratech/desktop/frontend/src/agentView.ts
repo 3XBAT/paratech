@@ -170,11 +170,12 @@ export const chatTexts = {
 /** The longest chat title, in characters (runes), as the core checks it. */
 export const maxChatTitle = 80;
 
-export type ChatOp = "list" | "open" | "new" | "rename" | "archive" | "restore";
+export type ChatOp = "list" | "open" | "current" | "new" | "rename" | "archive" | "restore";
 
 const chatFailTexts: Record<ChatOp, string> = {
   list: "Не удалось загрузить чаты.",
   open: "Не удалось загрузить прежние просьбы чата.",
+  current: "Не удалось загрузить текущую просьбу чата.",
   new: "Не удалось начать новый чат.",
   rename: "Не удалось переименовать чат.",
   archive: "Не удалось отправить чат в архив.",
@@ -548,16 +549,22 @@ export function parseArtifact(ref: string): ArtifactLabel | null {
 
 // ---- Questions ----
 
-/** The answers of «Пропустить — сделай как считаешь»: the preselected option of a choice, a neutral text otherwise. */
+/** `default` of a choice that preselects nothing (the subject question): the user has to pick. */
+const noDefault = -1;
+
+/**
+ * The answers of «Пропустить — сделай как считаешь»: the preselected option of a choice, a neutral text otherwise.
+ * A choice without a default takes its LAST option (the neutral «Без предмета»), never the first.
+ */
 export function skipAnswers(questions: readonly QuestionView[]): AnswerInput[] {
   return questions.map((q, i) =>
     q.kind === "choice"
-      ? { question: i, option: q.default, text: "" }
+      ? { question: i, option: q.default === noDefault ? q.options.length - 1 : q.default, text: "" }
       : { question: i, option: 0, text: texts.skipTextAnswer },
   );
 }
 
-/** The typed answers; null while a text question is empty (the form stays closed). */
+/** The typed answers; null while a text question is empty or a choice without a default is not picked (the form stays closed). */
 export function collectAnswers(
   questions: readonly QuestionView[],
   picked: Readonly<Record<number, number>>,
@@ -566,7 +573,11 @@ export function collectAnswers(
   const out: AnswerInput[] = [];
   for (const [i, q] of questions.entries()) {
     if (q.kind === "choice") {
-      out.push({ question: i, option: picked[i] ?? q.default, text: "" });
+      const option = picked[i] ?? q.default;
+      if (option === noDefault) {
+        return null;
+      }
+      out.push({ question: i, option, text: "" });
       continue;
     }
     const t = (typed[i] ?? "").trim();

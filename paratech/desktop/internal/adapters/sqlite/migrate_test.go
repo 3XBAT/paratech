@@ -22,7 +22,7 @@ import (
 var contractTables = []string{
 	"agent_actions", "agent_steps", "agent_threads", "agent_turns", "answers", "assignments", "deadline_event_removals", "deliveries", "homework_draft_revisions", "homework_drafts", "jobs", "lecture_texts",
 	"material_inspections", "material_lessons", "materials", "note_parts", "notes", "proposals", "recordings", "schedule_entries", "settings", "stt_models", "stt_speeds",
-	"subject_aliases", "subject_folders", "subjects", "summaries", "ticket_sets", "today_posts", "transcript_parts",
+	"subject_aliases", "subject_folders", "subject_teachers", "subjects", "summaries", "ticket_sets", "today_posts", "transcript_parts",
 	"transcripts", "work_rounds", "works",
 }
 
@@ -34,9 +34,10 @@ var contractTables = []string{
 // the version (TASK-121). Agent requests are saved with their thread, which carries the version, and the agent
 // history is append-only (TASK-116). The rounds of a turnkey work are rows of that aggregate (TASK-129). An answer
 // with citations is inserted once and never changes (TASK-118). The parts of a note are rows of the note (TASK-149).
+// The teachers of a subject are rows of the subject (TASK-285).
 var unversionedTables = map[string]bool{
 	"homework_draft_revisions": true, "transcript_parts": true, "stt_speeds": true, "deadline_event_removals": true,
-	"subject_aliases": true, "subject_folders": true, "material_lessons": true, "agent_turns": true, "agent_steps": true,
+	"subject_aliases": true, "subject_folders": true, "subject_teachers": true, "material_lessons": true, "agent_turns": true, "agent_steps": true,
 	"work_rounds": true, "answers": true, "note_parts": true,
 }
 
@@ -90,8 +91,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != lessonCallLinkVersion {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, lessonCallLinkVersion)
+	if err != nil || first != subjectTeachersVersion {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, subjectTeachersVersion)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
@@ -255,8 +256,11 @@ func TestMigrationToVersion8DropsCompletionNotices(t *testing.T) {
 // materialImagesVersion is the migration that rebuilds materials for photos (TASK-165).
 const materialImagesVersion = 41
 
-// lessonCallLinkVersion is the migration that adds the call link of a lesson (TASK-256), the newest one.
+// lessonCallLinkVersion is the migration that adds the call link of a lesson (TASK-256).
 const lessonCallLinkVersion = 43
+
+// subjectTeachersVersion moves the teacher of a subject into three roles (TASK-285), the newest one.
+const subjectTeachersVersion = 44
 
 // recordingOriginVersion adds the origin of a recording (TASK-161).
 const recordingOriginVersion = 42

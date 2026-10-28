@@ -650,3 +650,23 @@ func TestAgentResultContract(t *testing.T) {
 		t.Errorf("answer = %+v, %v", ans, err)
 	}
 }
+
+// TestQuestionsViewNoDefault: the subject question reaches the page with default -1, nothing preselected (TASK-234).
+func TestQuestionsViewNoDefault(t *testing.T) {
+	call, err := values.ParseCall("c1", "ask_questions", `{"questions":[`+
+		`{"kind":"choice","question":"К какому предмету относится задание?","options":["Математика","Без предмета"]},`+
+		`{"kind":"choice","question":"Когда?","options":["сегодня","завтра"]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.Marshal(questionsView(values.QuestionsCard{Round: 1, Questions: call.Args().Questions("questions")}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"round":1,"questions":[` +
+		`{"kind":"choice","text":"К какому предмету относится задание?","options":["Математика","Без предмета"],"default":-1,"citeRef":""},` +
+		`{"kind":"choice","text":"Когда?","options":["сегодня","завтра"],"default":0,"citeRef":""}]}`
+	if string(got) != want {
+		t.Fatalf("questions view\n got %s\nwant %s", got, want)
+	}
+}

@@ -39,4 +39,7 @@ var (
 
 	// ErrInvalidTeacherEmail means a bad teacher address; it wraps ErrInvalidTeacher.
 	ErrInvalidTeacherEmail = fmt.Errorf("%w: email", ErrInvalidTeacher)
+
+	// ErrInvalidTeacherRole means a role that is not one of TeacherRoles; it wraps ErrInvalidTeacher.
+	ErrInvalidTeacherRole = fmt.Errorf("%w: role", ErrInvalidTeacher)
 )
