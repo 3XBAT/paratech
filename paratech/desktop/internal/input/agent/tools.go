@@ -25,6 +25,7 @@ import (
 	"paratech/desktop/internal/domain/library/material"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
+	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -46,6 +47,12 @@ type Knowledge interface {
 type Activity interface {
 	ListRecordings(ctx context.Context) ([]activity.Recording, error)
 	JobStates(ctx context.Context, ids []shared.JobID) ([]activity.JobState, error)
+}
+
+// Schedule reads the lessons of the local schedule, the system of record (PRD section 11.1): find_lessons lists the ones
+// not recorded within its dates. Implemented over the lesson repository the screens read.
+type Schedule interface {
+	ListStartingBetween(ctx context.Context, from, to time.Time) ([]*lesson.Lesson, error)
 }
 
 // Assignments lists the assignments (cases/homeworkflow).
@@ -74,6 +81,7 @@ type tools struct {
 	answerer    Answerer  // nil: answer_question answers "unavailable"
 	knowledge   Knowledge
 	activity    Activity
+	schedule    Schedule // nil: find_lessons lists the recorded lessons only
 	assignments Assignments
 	deliveries  Deliveries
 	journal     Journal
@@ -220,7 +228,73 @@ func (t tools) findLessons(ctx context.Context, call values.Call, scope values.S
 			rows = append(rows, row)
 		}
 	}
-	return values.LessonsResult(call.ID(), rows)
+	planned, err := t.plannedLessons(ctx, q, entry)
+	if err != nil {
+		return values.ToolResult{}, nil, err
+	}
+	return values.LessonsResult(call.ID(), append(rows, planned...))
+}
+
+// plannedLessonDays is how many days find_lessons reads the schedule from a "from" date without a "to" date.
+const plannedLessonDays = 7
+
+// plannedLessons returns the lessons of the schedule not recorded, oldest first, when the query names dates: from
+// "from" (today without it) through "to" (a week without it), days in the student's zone. Without dates find_lessons
+// stays the list of recorded lessons. recorded maps the recordings to their schedule entries.
+func (t tools) plannedLessons(ctx context.Context, q values.LessonQuery, recorded map[shared.RecordingID]shared.LessonID) ([]values.LessonRow, error) {
+	if t.schedule == nil || (q.From.IsZero() && q.To.IsZero()) {
+		return nil, nil
+	}
+	now := t.clock.Now()
+	loc := now.Location()
+	from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	if !q.From.IsZero() {
+		from = time.Date(q.From.Year(), q.From.Month(), q.From.Day(), 0, 0, 0, 0, loc)
+	}
+	to := from.AddDate(0, 0, plannedLessonDays)
+	if !q.To.IsZero() {
+		to = time.Date(q.To.Year(), q.To.Month(), q.To.Day()+1, 0, 0, 0, 0, loc)
+	}
+	if !from.Before(to) {
+		return nil, nil
+	}
+	lessons, err := t.schedule.ListStartingBetween(ctx, from, to)
+	if err != nil {
+		return nil, err
+	}
+	// The subject of a schedule lesson is a free string; only the library subject it names is shown, never the string.
+	var names []string
+	for _, l := range lessons {
+		if s := l.Content().Subject; s != "" && !slices.Contains(names, s) {
+			names = append(names, s)
+		}
+	}
+	subjects, err := t.library.ResolveSubjects(ctx, names)
+	if err != nil {
+		return nil, err
+	}
+	done := make(map[shared.LessonID]bool, len(recorded))
+	for _, id := range recorded {
+		done[id] = true
+	}
+	var rows []values.LessonRow
+	for _, l := range lessons {
+		id, ok := refOfID(values.KindLesson, string(l.ID()))
+		if !ok || done[l.ID()] {
+			continue
+		}
+		c := l.Content()
+		start := c.Start.In(loc)
+		row := values.LessonRow{Lesson: id, Date: dateOf(start, loc), Kind: c.Kind.String()}
+		row.Time, _ = values.NewTimeOfDay(start.Hour(), start.Minute())
+		if m, ok := subjects[c.Subject]; ok && c.Subject != "" {
+			row.Subject, _ = refOfID(values.KindSubject, string(m.ID))
+		}
+		if q.Match(row) {
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
 }
 
 // lessonsOf returns the lessons of a library subject, or of every subject for a zero ref.

@@ -185,7 +185,7 @@ func newDriverEnv(t *testing.T) *driverEnv {
 	}
 	if e.driver, err = agentloop.New(agentloop.Deps{
 		Turns: e.turns, Sink: e.sink, Library: lib, Knowledge: e.knowledge, Activity: driverActivity{jobs},
-		Assignments: driverAssignments{}, Deliveries: driverDeliveries{}, Clock: e.clock,
+		Schedule: sqlite.NewLessonRepository(e.db), Assignments: driverAssignments{}, Deliveries: driverDeliveries{}, Clock: e.clock,
 	}); err != nil {
 		t.Fatal(err)
 	}

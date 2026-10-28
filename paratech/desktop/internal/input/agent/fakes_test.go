@@ -21,6 +21,7 @@ import (
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
 	libvalues "paratech/desktop/internal/domain/library/values"
+	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -171,6 +172,23 @@ func (a *fakeActivity) JobStates(_ context.Context, ids []shared.JobID) ([]activ
 	return out, a.err
 }
 
+// fakeSchedule holds the lessons of the schedule; asked records the windows read.
+type fakeSchedule struct {
+	lessons []*lesson.Lesson
+	asked   [][2]time.Time
+}
+
+func (s *fakeSchedule) ListStartingBetween(_ context.Context, from, to time.Time) ([]*lesson.Lesson, error) {
+	s.asked = append(s.asked, [2]time.Time{from, to})
+	var out []*lesson.Lesson
+	for _, l := range s.lessons {
+		if st := l.Content().Start; !st.Before(from) && st.Before(to) {
+			out = append(out, l)
+		}
+	}
+	return out, nil
+}
+
 type fakeAssignments struct {
 	views []homeworkflow.AssignmentView
 	err   error
@@ -193,13 +211,14 @@ type reads struct {
 	library     *fakeLibrary
 	knowledge   *fakeKnowledge
 	activity    *fakeActivity
+	schedule    *fakeSchedule
 	assignments *fakeAssignments
 	deliveries  *fakeDeliveries
 }
 
 func newReads() *reads {
 	return &reads{
-		library: &fakeLibrary{}, knowledge: &fakeKnowledge{}, activity: &fakeActivity{}, assignments: &fakeAssignments{},
+		library: &fakeLibrary{}, knowledge: &fakeKnowledge{}, activity: &fakeActivity{}, schedule: &fakeSchedule{}, assignments: &fakeAssignments{},
 		deliveries: &fakeDeliveries{views: map[shared.AssignmentID][]senddelivery.View{}},
 	}
 }
@@ -213,7 +232,7 @@ func (r *reads) tools() tools {
 func (r *reads) deps(turns Turns, sink Sink) Deps {
 	return Deps{
 		Turns: turns, Sink: sink, Library: r.library, Knowledge: r.knowledge, Activity: r.activity,
-		Assignments: r.assignments, Deliveries: r.deliveries, Clock: fixedClock{},
+		Schedule: r.schedule, Assignments: r.assignments, Deliveries: r.deliveries, Clock: fixedClock{},
 	}
 }
 

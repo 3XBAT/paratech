@@ -80,8 +80,18 @@ func TestLessonsResult(t *testing.T) {
 	if len(seen) != 4 {
 		t.Fatalf("seen = %v", seen)
 	}
-	if _, _, err := LessonsResult("c1", []LessonRow{{Lesson: mustRef(t, KindLesson, "l1")}}); !errors.Is(err, ErrInvalidResult) {
-		t.Fatalf("no recording = %v", err)
+	if _, _, err := LessonsResult("c1", []LessonRow{{Date: day(t, "2026-10-20")}}); !errors.Is(err, ErrInvalidResult) {
+		t.Fatalf("neither a recording nor a lesson = %v", err)
+	}
+	// A lesson of the schedule not recorded: its entry and start, no recording.
+	start, err := NewTimeOfDay(9, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, _, err = LessonsResult("c1", []LessonRow{{Lesson: mustRef(t, KindLesson, "l1"), Date: day(t, "2026-10-31"), Time: start, Kind: "seminar"}})
+	if err != nil || res.ResultJSON != `{"count":1,"lessons":[{"lesson":"l1","date":"2026-10-31","time":"09:05","kind":"seminar",`+
+		`"transcribed":false,"summary":false,"lecture_text":false}],"truncated":false}` {
+		t.Fatalf("planned lesson = %s, %v", res.ResultJSON, err)
 	}
 }
 
