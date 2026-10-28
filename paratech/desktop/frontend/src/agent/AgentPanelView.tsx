@@ -1,6 +1,6 @@
 import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
 import { type AgentContext, chatTexts, composerKey, type EarlierItem, entryModel, inputPlacement, texts } from "../agentView.js";
-import { blockingEntry, draftsFor, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
+import { blockingEntry, draftSize, draftsFor, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
 import { Icon } from "../ui/Icon.js";
 import { AgentRequest, type CardActions } from "./AgentCards.js";
 import { ChatBar, type ChatBarProps } from "./ChatBar.js";
@@ -66,12 +66,12 @@ export function AgentPanelView(props: AgentPanelViewProps) {
 
   // A draft grows often: the panel follows it only when the reader is at the bottom, so reading above never jumps.
   const atBottom = useRef(true);
-  const draftSize = state.drafts.reduce((n, d) => n + d.texts.reduce((m, t) => m + t.length, d.texts.length), 0);
+  const size = draftSize(state.drafts);
   useEffect(() => {
-    if (draftSize > 0 && atBottom.current) {
+    if (size > 0 && atBottom.current) {
       end.current?.scrollIntoView?.({ block: "end", behavior: "auto" });
     }
-  }, [draftSize]);
+  }, [size]);
 
   // The field grows with its text; the CSS max-height (six lines) stops it and the rest scrolls.
   const { inputRef, draft } = props;

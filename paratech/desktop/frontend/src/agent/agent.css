@@ -122,6 +122,11 @@
 .ag-vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .ag-draft { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; opacity: .8; overflow-anchor: none; }
 .ag-draft-cap, .ag-draft-line { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* The reply being typed (TASK-340): the look of the final reply card plus a thin cursor; blinks, static under reduced motion. */
+.ag-reply-draft { overflow-anchor: none; }
+.ag-cursor { display: inline-block; width: 2px; height: 1.1em; margin-left: 2px; vertical-align: text-bottom; background: var(--accent-fill); animation: ag-caret 1s steps(1) infinite; }
+@keyframes ag-caret { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ag-cursor { animation: none; } }
 /* «Агент отвечает…»: a small row where the answer will appear (no card, no banner); «Стоп» sits next to the dots. */
 .ag-think { display: flex; align-items: center; gap: 8px; min-height: 28px; }
 .ag-think .ag-actions { margin-top: 0; }

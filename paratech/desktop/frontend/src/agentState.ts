@@ -138,6 +138,25 @@ export function draftsFor(s: PanelState, e: Entry): DraftView[] {
   return s.drafts.filter((d) => d.threadId === e.threadId && d.turn === e.turn && d.texts.length > 0);
 }
 
+/** The text of a reply draft: the whole reply so far (one entry; more entries are joined by line breaks). */
+export function replyDraftText(d: DraftView): string {
+  return d.texts.join("\n");
+}
+
+/**
+ * The drafts of one request split by kind: the reply being typed (at most one; none while it has no text yet, so the
+ * waiting dots stay) and the unchecked answer drafts, in arrival order. Keys are by callId, so they never clobber.
+ */
+export function splitDrafts(drafts: readonly DraftView[]): { reply: DraftView | null; answers: DraftView[] } {
+  const reply = drafts.filter((d) => d.reply === true && replyDraftText(d) !== "").at(-1) ?? null;
+  return { reply, answers: drafts.filter((d) => d.reply !== true) };
+}
+
+/** Grows with every character of every draft (reply or answer): the panel follows it when the reader is at the bottom. */
+export function draftSize(drafts: readonly DraftView[]): number {
+  return drafts.reduce((n, d) => n + d.texts.reduce((m, t) => m + t.length, d.texts.length), 0);
+}
+
 function applyUpdateEntries(s: PanelState, u: UpdateView): PanelState {
   if (isFailedAsk(u)) {
     // A failed Ask: the core never named a request (threadId "", or the asked chat with turn 0 and no status; real
