@@ -157,6 +157,33 @@ func TestReextractKeepsAUserEditedAssignment(t *testing.T) {
 	}
 }
 
+// A done mark belongs to the details it was given for (ADR-0033 §9); «Вернуть в работу» lets reprocessing update them again.
+func TestReextractKeepsADoneAssignment(t *testing.T) {
+	a := extracted(t)
+	orig := a.Details()
+	if _, err := a.MarkDone(t0.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	before := a.State()
+
+	newer := details(t, "Another item", "", time.Time{})
+	changed, err := a.Reextract(newer, 2, t0.Add(time.Hour))
+	if err != nil || changed {
+		t.Fatalf("Reextract of a done assignment = %v, %v; want unchanged", changed, err)
+	}
+	if a.State() != before || !a.Details().Equal(orig) {
+		t.Fatalf("done assignment changed:\n got %+v\nwant %+v", a.State(), before)
+	}
+
+	if _, err := a.MarkUndone(t0.Add(2 * time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	changed, err = a.Reextract(newer, 2, t0.Add(time.Hour))
+	if err != nil || !changed || !a.Details().Equal(newer) || a.PromptVersion() != 2 {
+		t.Fatalf("Reextract after MarkUndone = %v, %v, %+v; want the new details", changed, err, a.State())
+	}
+}
+
 func TestReextractRefusals(t *testing.T) {
 	d := details(t, "x", "", time.Time{})
 	notExtracted, err := Restore(State{
@@ -294,6 +321,20 @@ func TestSuperseded(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	done := func(index int, undo bool) *Assignment {
+		t.Helper()
+		a := at(index, false)
+		if _, err := a.MarkDone(t0.Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if undo {
+			if _, err := a.MarkUndone(t0.Add(2 * time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return a
+	}
+
 	cases := []struct {
 		name  string
 		a     *Assignment
@@ -304,6 +345,8 @@ func TestSuperseded(t *testing.T) {
 		{"every item of an empty answer", at(0, false), 0, true},
 		{"position still in the answer", at(1, false), 2, false},
 		{"edited by the user", at(2, true), 2, false},
+		{"done by the student", done(2, false), 2, false},
+		{"done and back in work", done(2, true), 2, true},
 		{"not extracted", manual, 0, false},
 	}
 	for _, tc := range cases {

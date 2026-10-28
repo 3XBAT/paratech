@@ -87,9 +87,11 @@ type AssignmentRepository interface {
 // AssignmentList lists the stored assignments for the homework screen (PRD section 10 step 1: select an assignment).
 // Implemented by the sqlite adapter. It is a port of its own so that the fakes of AssignmentRepository stay small.
 type AssignmentList interface {
-	// ListRecent returns at most limit assignments, newest first (by creation time; PRD section 10), deleted ones
-	// skipped (ADR-0029); none is an empty list. limit is at least 1.
-	ListRecent(ctx context.Context, limit int) ([]*assignment.Assignment, error)
+	// ListRecentByState returns at most limit assignments, deleted ones skipped (ADR-0029): the open ones (not marked
+	// done) when open is set and the done ones when done is set (ADR-0033 §9), open ones first, each group newest first
+	// (by creation time; PRD section 10). The store filters before the limit, so done ones never crowd out open ones.
+	// None is an empty list. limit is at least 1.
+	ListRecentByState(ctx context.Context, open, done bool, limit int) ([]*assignment.Assignment, error)
 }
 
 // SummaryRepository stores the summaries of transcripts in the local database (PRD sections 5.3 and 9).

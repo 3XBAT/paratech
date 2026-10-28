@@ -54,6 +54,7 @@ type Deadline struct {
 	Title      string
 	Subject    string
 	Due        time.Time // zero: no deadline
+	Done       bool      // marked «Выполнено» (ADR-0033 §9): it burns no more
 }
 
 // Burning is a deadline of «Горит на 7 дней».
@@ -63,11 +64,12 @@ type Burning struct {
 	Urgent   bool // at most UrgentDays away
 }
 
-// BurningOf returns the deadlines not yet passed that fall within BurningDays calendar days, soonest first.
+// BurningOf returns the deadlines not yet passed that fall within BurningDays calendar days, soonest first; a done
+// assignment never burns.
 func BurningOf(ds []Deadline, now time.Time) []Burning {
 	out := []Burning{}
 	for _, d := range ds {
-		if d.Due.IsZero() || d.Due.Before(now) {
+		if d.Done || d.Due.IsZero() || d.Due.Before(now) {
 			continue
 		}
 		left := DaysFrom(now, d.Due)
@@ -86,6 +88,7 @@ func BurningOf(ds []Deadline, now time.Time) []Burning {
 type Homework struct {
 	Assignment shared.AssignmentID
 	Due        time.Time // zero: no deadline
+	Done       bool      // marked «Выполнено» (ADR-0033 §9)
 }
 
 // PostFacts are what is known of a post when it is shown.
@@ -100,17 +103,23 @@ type PostFacts struct {
 type Card struct {
 	Headline    string
 	Summary     bool      // «Открыть» opens the summary
-	Homework    int       // assignments found
-	EarliestDue time.Time // zero: none of them has a deadline
-	// Calendar are the assignments whose deadline is still ahead, soonest first: «Да, в календарь» proposes them. It
-	// only names them; the proposal is checked and confirmed on the existing path (hard rule 3).
+	Homework    int       // assignments found, done ones too: the post is the history of the lesson
+	Done        int       // of them marked «Выполнено» (ADR-0033 §9)
+	EarliestDue time.Time // zero: none of the open ones has a deadline
+	// Calendar are the open assignments whose deadline is still ahead, soonest first: «Да, в календарь» proposes them.
+	// It only names them; the proposal is checked and confirmed on the existing path (hard rule 3).
 	Calendar []Homework
 }
 
-// CardOf builds the card of a post; dates are written in now's location.
+// CardOf builds the card of a post; dates are written in now's location. A done assignment is counted (Homework and
+// Done) but gives no deadline and no calendar hint: it burns no more.
 func CardOf(f PostFacts, now time.Time) Card {
 	c := Card{Summary: f.Summary, Homework: len(f.Homework), Calendar: []Homework{}}
 	for _, h := range f.Homework {
+		if h.Done {
+			c.Done++
+			continue
+		}
 		if h.Due.IsZero() {
 			continue
 		}

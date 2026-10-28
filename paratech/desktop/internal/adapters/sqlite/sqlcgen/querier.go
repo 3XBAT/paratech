@@ -316,6 +316,9 @@ type Querier interface {
 	ListRecentAgentActions(ctx context.Context, maxRows int64) ([]AgentAction, error)
 	// The newest assignments for the homework screen; the items of one extraction keep the order of the answer.
 	ListRecentAssignments(ctx context.Context, maxRows int64) ([]Assignment, error)
+	// The same list filtered by the done mark (ADR-0033 section 9) before the limit: the open rows when with_open is 1, the done
+	// rows when with_done is 1, open rows first.
+	ListRecentAssignmentsByState(ctx context.Context, arg ListRecentAssignmentsByStateParams) ([]Assignment, error)
 	// Ids for the recordings screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
 	// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
 	// active is a JSON array of status names. A recording marked for deletion is left out (TASK-095).

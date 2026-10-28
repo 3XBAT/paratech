@@ -43,13 +43,14 @@ func TestDaysFrom(t *testing.T) {
 
 func TestBurningOf(t *testing.T) {
 	ds := []Deadline{
-		{Assignment: "late", Due: at(28, 23)},     // day 7: in
-		{Assignment: "too-late", Due: at(29, 0)},  // day 8: out
-		{Assignment: "passed", Due: at(21, 9)},    // earlier today: out
-		{Assignment: "none"},                      // no deadline: out
-		{Assignment: "soon", Due: at(23, 23)},     // 2 days: urgent
-		{Assignment: "tonight", Due: at(21, 23)},  // today: urgent
-		{Assignment: "saturday", Due: at(24, 23)}, // 3 days
+		{Assignment: "late", Due: at(28, 23)},             // day 7: in
+		{Assignment: "too-late", Due: at(29, 0)},          // day 8: out
+		{Assignment: "passed", Due: at(21, 9)},            // earlier today: out
+		{Assignment: "none"},                              // no deadline: out
+		{Assignment: "soon", Due: at(23, 23)},             // 2 days: urgent
+		{Assignment: "tonight", Due: at(21, 23)},          // today: urgent
+		{Assignment: "saturday", Due: at(24, 23)},         // 3 days
+		{Assignment: "done", Due: at(22, 23), Done: true}, // marked «Выполнено»: out
 	}
 	got := BurningOf(ds, now)
 	var ids []shared.AssignmentID
@@ -78,13 +79,14 @@ func TestCardOf(t *testing.T) {
 		facts     PostFacts
 		headline  string
 		homework  int
+		done      int
 		calendar  []shared.AssignmentID
 		earliest  time.Time
 		summaryOK bool
 	}{
 		{
 			name:      "summary and homework with deadlines",
-			facts:     PostFacts{Summary: true, HomeworkChecked: true, Homework: []Homework{{"a2", at(27, 23)}, {"a1", at(24, 23)}, {"a0", at(20, 9)}}},
+			facts:     PostFacts{Summary: true, HomeworkChecked: true, Homework: []Homework{{Assignment: "a2", Due: at(27, 23)}, {Assignment: "a1", Due: at(24, 23)}, {Assignment: "a0", Due: at(20, 9)}}},
 			headline:  "Конспект готов · Найдено ДЗ до 20.10",
 			homework:  3,
 			calendar:  []shared.AssignmentID{"a1", "a2"},
@@ -93,8 +95,21 @@ func TestCardOf(t *testing.T) {
 		},
 		{
 			name:     "homework first, no summary yet",
-			facts:    PostFacts{HomeworkChecked: true, Homework: []Homework{{"a1", at(24, 23)}}},
+			facts:    PostFacts{HomeworkChecked: true, Homework: []Homework{{Assignment: "a1", Due: at(24, 23)}}},
 			headline: "Найдено ДЗ до 24.10", homework: 1, calendar: []shared.AssignmentID{"a1"}, earliest: at(24, 23),
+		},
+		{
+			name: "a done assignment is counted, gives no deadline and no calendar hint",
+			facts: PostFacts{Summary: true, HomeworkChecked: true, Homework: []Homework{
+				{Assignment: "a1", Due: at(22, 23), Done: true}, {Assignment: "a2", Due: at(27, 23)},
+			}},
+			headline: "Конспект готов · Найдено ДЗ до 27.10", homework: 2, done: 1, calendar: []shared.AssignmentID{"a2"},
+			earliest: at(27, 23), summaryOK: true,
+		},
+		{
+			name:     "every assignment done",
+			facts:    PostFacts{Summary: true, HomeworkChecked: true, Homework: []Homework{{Assignment: "a1", Due: at(22, 23), Done: true}}},
+			headline: "Конспект готов · Найдено ДЗ", homework: 1, done: 1, summaryOK: true,
 		},
 		{
 			name:     "homework without a deadline",
@@ -119,7 +134,7 @@ func TestCardOf(t *testing.T) {
 			for _, h := range c.Calendar {
 				cal = append(cal, h.Assignment)
 			}
-			if c.Headline != tc.headline || c.Homework != tc.homework || !reflect.DeepEqual(cal, tc.calendar) ||
+			if c.Headline != tc.headline || c.Homework != tc.homework || c.Done != tc.done || !reflect.DeepEqual(cal, tc.calendar) ||
 				!c.EarliestDue.Equal(tc.earliest) || c.Summary != tc.summaryOK {
 				t.Fatalf("card = %+v", c)
 			}

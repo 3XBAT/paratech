@@ -1,4 +1,4 @@
-import { type CSSProperties, useCallback, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
 import {
   closeTranscript,
   initialRoute,
@@ -32,6 +32,8 @@ import { TicketsPage } from "./pages/TicketsPage";
 import { TodayPage } from "./pages/TodayPage";
 import { TranscriptPage } from "./pages/TranscriptPage";
 import { needsRemount } from "./navHistory";
+import { keepAssignmentEdit, type RecipientNav, RecipientNavContext } from "./recipientNav";
+import { keepTeacherFocus, type TeacherFocus } from "./teachersView";
 import { useNavHistory } from "./useNavHistory";
 import { IconSprite } from "./ui/Icon";
 import { Rail } from "./ui/Rail";
@@ -48,6 +50,12 @@ function PageView(props: {
   /** Shows a card of «Задания» or a subject of «Предметы» ("" the list): an entry of the history. */
   onSelectAssignment: (id: string) => void;
   onSelectSubject: (id: string) => void;
+  /** «Указать почту» of a refused send: the form of a teacher to open on the subject page, taken once. */
+  teacherFocus: TeacherFocus | null;
+  onTeacherFocusDone: () => void;
+  /** The assignment whose «Изменить» opens on arrival ("" none), taken once. */
+  assignmentEdit: string;
+  onAssignmentEditDone: () => void;
   /** The place of an answer's source «База знаний» opens on arrival; cleared once taken. */
   sourceJump?: CitationOpening;
   onSourceJumpDone: () => void;
@@ -56,11 +64,27 @@ function PageView(props: {
     case "today":
       return <TodayPage onOpen={props.onOpen} onOpenAssignment={props.onOpenAssignment} />;
     case "subjects":
-      return <SubjectsPage onOpen={props.onOpen} reload={props.library} subjectId={props.subject} onSelect={props.onSelectSubject} />;
+      return (
+        <SubjectsPage
+          onOpen={props.onOpen}
+          reload={props.library}
+          subjectId={props.subject}
+          onSelect={props.onSelectSubject}
+          teacherFocus={props.teacherFocus}
+          onTeacherFocusDone={props.onTeacherFocusDone}
+        />
+      );
     case "journal":
       return <JournalPage />;
     case "homework":
-      return <HomeworkPage openAssignment={props.assignment} onSelect={props.onSelectAssignment} />;
+      return (
+        <HomeworkPage
+          openAssignment={props.assignment}
+          onSelect={props.onSelectAssignment}
+          editAssignment={props.assignmentEdit}
+          onEditTaken={props.onAssignmentEditDone}
+        />
+      );
     case "knowledge":
       return <KnowledgeBasePage visit={props.visit} onOpenAssignment={props.onOpenAssignment} jump={props.sourceJump} onJumpDone={props.onSourceJumpDone} />;
     case "tickets":
@@ -113,6 +137,35 @@ export function App() {
   // A subject or a card opened inside its page is a route too, so «Назад» finds the list again (TASK-202).
   const selectSubject = useCallback((id: string) => setRoute((r) => routeToSubject(r, id)), []);
   const selectAssignment = useCallback((id: string) => setRoute((r) => routeToOpenedAssignment(r, id)), []);
+  // «Указать почту» (TASK-238): opens the subject and asks its page for the form of one teacher. The request is state, not
+  // part of the route: it is taken once, so «Назад» and a later visit never reopen the form, and the window drops it
+  // as soon as the route points elsewhere.
+  const [teacherFocus, setTeacherFocus] = useState<TeacherFocus | null>(null);
+  const openTeacher = useCallback((subjectId: string, role: TeacherFocus["role"]) => {
+    setTeacherFocus({ subjectId, role });
+    setRoute((r) => routeToSubject(r, subjectId));
+  }, []);
+  const teacherFocusDone = useCallback(() => setTeacherFocus(null), []);
+  useEffect(() => {
+    setTeacherFocus((f) => keepTeacherFocus(f, { page: route.page, subject: route.subject }));
+  }, [route.page, route.subject]);
+  // «Выбрать предмет» from the agent's card: the assignment opens with «Изменить» already open; the same one-shot idea.
+  const [assignmentEdit, setAssignmentEdit] = useState("");
+  const openAssignmentFor = useCallback(
+    (id: string, opts?: { edit?: boolean }) => {
+      setAssignmentEdit(opts?.edit === true ? id : "");
+      openAssignment(id);
+    },
+    [openAssignment],
+  );
+  const assignmentEditDone = useCallback(() => setAssignmentEdit(""), []);
+  useEffect(() => {
+    setAssignmentEdit((e) => keepAssignmentEdit(e, { page: route.page, assignment: route.assignment }));
+  }, [route.page, route.assignment]);
+  const recipientNav = useMemo<RecipientNav>(
+    () => ({ openTeacher, openAssignment: openAssignmentFor, openSubjects: () => setRoute(routeToPage("subjects")) }),
+    [openTeacher, openAssignmentFor],
+  );
   // Alt+←/→ and the mouse side buttons walk the history of routes (TASK-201).
   useNavHistory(route, setRoute, (r, from) => {
     setSummarySection(undefined);
@@ -141,6 +194,10 @@ export function App() {
           onOpenAssignment={openAssignment}
           onSelectAssignment={selectAssignment}
           onSelectSubject={selectSubject}
+          teacherFocus={teacherFocus}
+          onTeacherFocusDone={teacherFocusDone}
+          assignmentEdit={assignmentEdit}
+          onAssignmentEditDone={assignmentEditDone}
           sourceJump={sourceJump}
           onSourceJumpDone={sourceJumpDone}
         />
@@ -149,6 +206,7 @@ export function App() {
   );
 
   return (
+    <RecipientNavContext.Provider value={recipientNav}>
     <div
       className={`shell with-agent${open ? "" : " agent-closed"}${panel.dragging ? " agent-dragging" : ""}`}
       style={{ "--ag-w": `${open ? width : 0}px` } as CSSProperties}
@@ -202,5 +260,6 @@ export function App() {
       <PanelResizeHandle panel={panel} />
       <DropZone onImported={() => setLibrary((n) => n + 1)} />
     </div>
+    </RecipientNavContext.Provider>
   );
 }

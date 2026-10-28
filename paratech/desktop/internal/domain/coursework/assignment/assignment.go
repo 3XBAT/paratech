@@ -179,9 +179,10 @@ func (a *Assignment) validate() error {
 }
 
 // Reextract applies the details of the same item of a new extraction answer (reprocessing, PRD section 10).
-// An assignment the user edited or deleted is kept as it is: the result is false and nothing changes (a deleted one is
-// a tombstone, ADR-0029). Otherwise the details and
-// the prompt version are replaced when they differ, and changed tells whether the assignment must be saved.
+// An assignment the user edited, marked done or deleted is kept as it is: the result is false and nothing changes (a
+// deleted one is a tombstone, ADR-0029; the done mark belongs to these details, so another item at the same position
+// must not take them over, ADR-0033 §9). Otherwise the details and the prompt version are replaced when they differ,
+// and changed tells whether the assignment must be saved.
 func (a *Assignment) Reextract(d Details, promptVersion int, now time.Time) (changed bool, err error) {
 	switch {
 	case a.source == noSource:
@@ -190,7 +191,7 @@ func (a *Assignment) Reextract(d Details, promptVersion int, now time.Time) (cha
 		return false, fmt.Errorf("%w: no details", ErrInvalidDetails)
 	case promptVersion < 1:
 		return false, fmt.Errorf("%w: prompt version %d", ErrInvalidAssignment, promptVersion)
-	case a.userEdited || a.Deleted():
+	case a.userEdited || a.Done() || a.Deleted():
 		return false, nil
 	case a.details.Equal(d) && a.promptVersion == promptVersion:
 		return false, nil
@@ -227,10 +228,10 @@ func (a *Assignment) Correct(c values.LessonNames, now time.Time) (changed bool)
 
 // Superseded reports whether a new extraction answer of the same transcript with items items leaves the assignment
 // behind, so that reprocessing may withdraw (delete) it: it was extracted at a position the answer no longer has and
-// the user never edited or deleted it (a deleted one stays a tombstone). Matching is by position only (see the
-// package doc).
+// the user never edited, marked done or deleted it (a done mark is a user act like an edit and keeps the assignment
+// in the list, ADR-0033 §9; a deleted one stays a tombstone). Matching is by position only (see the package doc).
 func (a *Assignment) Superseded(items int) bool {
-	return a.source != noSource && a.source >= items && !a.userEdited && !a.Deleted()
+	return a.source != noSource && a.source >= items && !a.userEdited && !a.Done() && !a.Deleted()
 }
 
 // Edit stores the details the user entered (PRD section 10: review and edit locally, AC-13). From then on the

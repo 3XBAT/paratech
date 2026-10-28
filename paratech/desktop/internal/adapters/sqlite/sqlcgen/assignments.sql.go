@@ -501,6 +501,66 @@ func (q *Queries) ListRecentAssignments(ctx context.Context, maxRows int64) ([]A
 	return items, nil
 }
 
+const listRecentAssignmentsByState = `-- name: ListRecentAssignmentsByState :many
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at, done_at FROM assignments
+WHERE deleted_at IS NULL
+  AND ((done_at IS NULL AND CAST(?1 AS INTEGER) = 1)
+    OR (done_at IS NOT NULL AND CAST(?2 AS INTEGER) = 1))
+ORDER BY done_at IS NOT NULL, created_at DESC, source_index, id
+LIMIT ?3
+`
+
+type ListRecentAssignmentsByStateParams struct {
+	WithOpen int64
+	WithDone int64
+	MaxRows  int64
+}
+
+// The same list filtered by the done mark (ADR-0033 section 9) before the limit: the open rows when with_open is 1, the done
+// rows when with_done is 1, open rows first.
+func (q *Queries) ListRecentAssignmentsByState(ctx context.Context, arg ListRecentAssignmentsByStateParams) ([]Assignment, error) {
+	rows, err := q.db.QueryContext(ctx, listRecentAssignmentsByState, arg.WithOpen, arg.WithDone, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Assignment{}
+	for rows.Next() {
+		var i Assignment
+		if err := rows.Scan(
+			&i.ID,
+			&i.LessonID,
+			&i.TranscriptID,
+			&i.Title,
+			&i.Description,
+			&i.DueAt,
+			&i.UserEdited,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SourceIndex,
+			&i.PromptVersion,
+			&i.HintSubject,
+			&i.HintTeacher,
+			&i.UserSubject,
+			&i.UserTeacher,
+			&i.MaterialID,
+			&i.DeletedAt,
+			&i.DoneAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const purgeDeletedAssignment = `-- name: PurgeDeletedAssignment :execrows
 DELETE FROM assignments
 WHERE id = ?1 AND deleted_at IS NOT NULL AND deleted_at < ?2

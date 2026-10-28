@@ -34,6 +34,16 @@ const DefaultPostProcessAttempts = 5
 // MaxListedAssignments bounds the assignment list of the homework screen (Service.ListAssignments).
 const MaxListedAssignments = 200
 
+// ListState is the filter of Service.ListAssignmentsByState (ADR-0033 §9): «Открытые / Выполненные / Все».
+type ListState string
+
+// The list filters; the empty one is ListOpen.
+const (
+	ListOpen ListState = "open" // not marked done
+	ListDone ListState = "done" // marked done
+	ListAll  ListState = "all"  // open ones first, then done ones
+)
+
 // saveAttempts bounds the reload-and-decide-again loop of one save that keeps meeting conflicts.
 const saveAttempts = 3
 
@@ -227,6 +237,9 @@ type AssignmentView struct {
 	// Deleted is set only in the view DeleteAssignment returns, for «Задание удалено» with «Вернуть» (ADR-0029); other
 	// readers never show a deleted assignment.
 	Deleted bool
+	// Done is «Выполнено» (ADR-0033 §9), marked at DoneAt; zero DoneAt while open.
+	Done   bool
+	DoneAt time.Time
 }
 
 func assignmentViewOf(a *assignment.Assignment, l values.LessonLabel) AssignmentView {
@@ -237,7 +250,7 @@ func assignmentViewOf(a *assignment.Assignment, l values.LessonLabel) Assignment
 		Subject: l.Subject(), SubjectSource: l.SubjectSource(), Kind: l.Kind(), Teacher: l.Teacher(),
 		TeacherSource: l.TeacherSource(), LessonDate: l.Date(),
 		CorrectedSubject: a.Correction().Subject(), CorrectedTeacher: a.Correction().Teacher(), MaterialID: a.MaterialID(),
-		Deleted: a.Deleted(),
+		Deleted: a.Deleted(), Done: a.Done(), DoneAt: a.DoneAt(),
 	}
 }
 

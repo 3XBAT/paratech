@@ -40,8 +40,9 @@ const (
 const MaxOutputTokens = 4096
 
 // historyLimit is the most entries read for a step: enough whole requests (a text, then an echo and results per
-// step) for the texts of the earlier window plus the current request.
-const historyLimit = (thread.MaxHistoryTurns + 1) * (2*thread.MaxSteps + 1)
+// step) for the texts of the earlier window plus the current request, which may run a plan of MaxPlanRunSteps steps.
+// An earlier request that ran a long plan can still push older texts out of the window; the loss stays bounded.
+const historyLimit = thread.MaxHistoryTurns*(2*thread.MaxSteps+1) + 2*thread.MaxPlanRunSteps + 1
 
 // Service runs the steps of agent requests. Operations on threads run one at a time; Stop does not wait for a running
 // step (see Stop).

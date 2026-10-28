@@ -12,9 +12,11 @@ import {
   texts,
 } from "../libraryView.js";
 import type { PageId } from "../nav.js";
+import { idleTeacher, TeacherFlow, type TeacherFocus, type TeacherState, teacherFocusStep, teacherStateFor } from "../teachersView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { InboxList, NameForm, OverviewSections, SubjectDetail, SubjectList, SubjectTree } from "./SubjectsParts.js";
+import { type TeacherActions, TeachersBlock } from "./TeachersBlock.js";
 
 type Form = "none" | "subject" | "folder";
 
@@ -30,6 +32,9 @@ export function SubjectsPage(props: {
   /** The open subject ("" shows the list) and the way to open another one. */
   subjectId: string;
   onSelect: (subjectId: string) => void;
+  /** «Указать почту» of a refused send: the form of one teacher to open on arrival (taken once, then onTeacherFocusDone). */
+  teacherFocus?: TeacherFocus | null;
+  onTeacherFocusDone?: () => void;
 }) {
   const api = useMemo(() => libraryApi(callByName), []);
   const openId = props.subjectId;
@@ -42,6 +47,47 @@ export function SubjectsPage(props: {
   const [loadError, setLoadError] = useState("");
   const [note, setNote] = useState("");
   const running = useRef(false); // a double click comes before the re-render that disables the button
+
+  // The teachers of the open subject (TASK-238). Their version and data come from the list (Subjects()), which the flow
+  // re-reads after a call that failed or found the data out of date.
+  const [teacher, setTeacher] = useState<TeacherState>(idleTeacher);
+  const shown = useRef<LibrarySubject | null>(null);
+  const flow = useMemo(
+    () =>
+      new TeacherFlow(
+        api,
+        {
+          subject: () => shown.current,
+          replace: (s) => setSubjects((list) => (list === null ? list : list.map((x) => (x.id === s.id ? s : x)))),
+          reread: () =>
+            api.subjects().then(
+              (s) => {
+                setSubjects(s);
+                return true;
+              },
+              () => false,
+            ),
+        },
+        setTeacher,
+      ),
+    [api],
+  );
+  useEffect(() => {
+    flow.attach();
+    return () => flow.dispose();
+  }, [flow]);
+  const teacherActions = useMemo<TeacherActions>(
+    () => ({
+      open: (role) => flow.open(role),
+      type: (patch) => flow.type(patch),
+      copy: (source) => flow.copy(source),
+      save: () => void flow.save(),
+      cancel: () => flow.cancel(),
+      clear: () => void flow.clear(),
+      restore: () => void flow.restore(),
+    }),
+    [flow],
+  );
 
   const load = useCallback(() => {
     api.subjects().then(
@@ -62,7 +108,8 @@ export function SubjectsPage(props: {
     setError("");
     setNote("");
     setMaterials(null);
-  }, [openId]);
+    flow.reset();
+  }, [openId, flow]);
 
   // The overview of the open subject: loaded once per opening, then the opening is recorded (see SubjectOverviewFlow).
   // It does not depend on `reload`, so a dropped file does not count as a new visit.
@@ -79,6 +126,7 @@ export function SubjectsPage(props: {
 
   const subject = subjects?.find((s) => s.id === openId) ?? null;
   const known = subject !== null;
+  shown.current = subject;
   const overview = overviewState.overview;
   const schedule = overview ? scheduleLine(overview.schedule) : "";
   const fresh = useMemo(() => freshMarks(overview), [overview]);
@@ -97,6 +145,18 @@ export function SubjectsPage(props: {
       active = false;
     };
   }, [api, openId, known, props.reload]);
+
+  // «Указать почту»: once the subject is in the list, its form for that role opens (and takes the focus); taken once.
+  const { teacherFocus, onTeacherFocusDone } = props;
+  useEffect(() => {
+    const step = teacherFocusStep(teacherFocus ?? null, openId, subjects !== null, known);
+    if (step.role !== null) {
+      flow.open(step.role);
+    }
+    if (step.done) {
+      onTeacherFocusDone?.();
+    }
+  }, [teacherFocus, openId, subjects, known, flow, onTeacherFocusDone]);
 
   // The route points at a subject that does not exist (any more): back to the list.
   const { onSelect } = props;
@@ -193,6 +253,7 @@ export function SubjectsPage(props: {
                 {overviewState.error}
               </ResultLine>
             )}
+            <TeachersBlock key={subject.id} teachers={subject.teachers} state={teacherStateFor(teacher, subject.id)} on={teacherActions} />
             {overview && <OverviewSections overview={overview} />}
             <SubjectDetail
               subject={subject}

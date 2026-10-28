@@ -31,8 +31,9 @@ const (
 )
 
 // maxSubmits bounds the results one loop reports. Every Submit of a request is followed by at most one new step, so
-// a request ends within its step budget; the bound only guards against a broken invariant.
-const maxSubmits = thread.MaxSteps
+// a request ends within its step budget (MaxPlanRunSteps under an approved plan); the bound only guards against a
+// broken invariant.
+const maxSubmits = thread.MaxPlanRunSteps
 
 // Errors of the Driver.
 var (
