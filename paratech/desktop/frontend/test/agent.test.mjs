@@ -463,15 +463,25 @@ test("waiting: job-less PLANNING and EXECUTING give a waiting card, both keep «
   assert.doesNotMatch(out, /Работа идёт/);
 });
 
-test("waiting: three dots, role=status, hidden text, no visible «Отправка…»", () => {
+test("waiting: three dots, polite live region «Агент отвечает…», no visible «Отправка…»", () => {
   const out = renderToStaticMarkup(h(AgentRequest, { model: entryModel(pending({})), actions }));
   assert.match(out, /role="status"/);
-  assert.match(out, /Запрос выполняется/);
+  assert.match(out, /<span class="ag-vh">Агент отвечает…<\/span>/);
   assert.equal((out.match(/class="ag-wdot"/g) ?? []).length, 3);
   assert.doesNotMatch(out, /Отправка…|Работа идёт|ag-callline/);
   const card = html(update({ status: "PLANNING" }));
-  assert.match(card, /Запрос выполняется/);
+  assert.match(card, /Агент отвечает…/);
   assert.doesNotMatch(card, /Работа идёт/);
+});
+
+test("waiting (TASK-337): a small inline row with «Стоп» next to the dots, not a full-width card or banner", () => {
+  const out = html(update({ status: "EXECUTING" }));
+  assert.match(out, /<div class="ag-think">/);
+  assert.doesNotMatch(out, /ag-card|ag-card-wait/);
+  assert.ok(out.indexOf("ag-wait") < out.indexOf(">Стоп<"), "the dots come first, «Стоп» beside them");
+  const css = readFileSync(new URL("../src/agent/agent.css", import.meta.url), "utf8");
+  assert.doesNotMatch(css, /ag-card-wait/);
+  assert.match(css, /\.ag-think\s*\{[^}]*display: flex/);
 });
 
 test("waiting css: staggered breath, static and visible under reduced motion", () => {

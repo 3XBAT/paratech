@@ -3,7 +3,7 @@
 // Model and student text is never formatted here: the page shows it as plain text.
 
 // The .js extensions let the Node test runner load the compiled modules; TypeScript and Vite map them to the .ts files.
-import { formatTime, formatTimeMinutes } from "./activityView.js";
+import { formatTimeMinutes } from "./activityView.js";
 import {
   type ActiveGeneration,
   type AssignmentItem,
@@ -269,9 +269,9 @@ export function versionTitle(v: { number: number; source: VersionSource }): stri
   return `Версия ${v.number} · ${sourceLabels[v.source]}`;
 }
 
-/** "до 18.09.2026, 18:00" or "Без срока". */
+/** "до 18.09.2026, 18:00" (never seconds) or "Без срока". */
 export function dueText(due: string): string {
-  return due === "" ? "Без срока" : `до ${formatTime(due)}`;
+  return due === "" ? "Без срока" : `до ${formatTimeMinutes(due)}`;
 }
 
 /** An attachment size for people: "800 байт", "12,5 КБ", "1,2 МБ". */
