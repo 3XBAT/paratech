@@ -3,7 +3,7 @@
 // impersonal («Создан предмет…», not «Я создал…»). Model text (summary, notes, questions, options, labels, replies) is
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
-import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, EarlierRequestView, FreeWorkRef, PlanStepView, PlanView, QuestionView } from "./bindings/agent.js";
+import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, ContextFill, EarlierRequestView, FreeWorkRef, PlanStepView, PlanView, QuestionView, UpdateView } from "./bindings/agent.js";
 import { approveLabel, type PlanProgress, planProgress, stepMarks, type StepMark, planWindow } from "./planView.js";
 import { type Entry, isBusyRefused, isRunning } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
@@ -285,6 +285,78 @@ export function openAfterArchive(chats: readonly ChatView[], openId: string, id:
     return openId;
   }
   return chatSections(chats, entries).active.find((r) => r.threadId !== id)?.threadId ?? "";
+}
+
+// ---- The context ring (ADR-0028 «The ring», TASK-208) ----
+// The core decides the level (fill.level); the page never turns a percent into a level.
+
+export const ringTexts = {
+  /** The start of the tooltip and of the accessible name. */
+  label: (percent: number) => `Контекст чата: ${percent} %`,
+  normal: "Столько разговора агент помнит сейчас.",
+  high: "Чат заполняется: самое раннее агент скоро начнёт забывать.",
+  full: "Чат почти заполнен: новый чат ответит быстрее и точнее.",
+  hint: "Начать новый чат",
+  hintButton: chatTexts.newChat,
+} as const;
+
+export interface RingModel {
+  /** Integer 0..100, what the arc is filled to. */
+  percent: number;
+  /** An overflow reads as «full». */
+  level: ContextFill["level"];
+  /** The tooltip and the accessible name: «Контекст чата: N %.» and one plain sentence. */
+  text: string;
+  /** The line under the field with «Новый чат». */
+  hint: boolean;
+}
+
+/** The ring for a fill; null (unknown fill) draws nothing. */
+export function ringModel(fill: ContextFill | null): RingModel | null {
+  if (fill === null) {
+    return null;
+  }
+  const percent = Number.isFinite(fill.percent) ? Math.min(100, Math.max(0, Math.floor(fill.percent))) : 0;
+  const level = fill.overflow ? "full" : fill.level;
+  return { percent, level, text: `${ringTexts.label(percent)}. ${ringTexts[level]}`, hint: level === "full" };
+}
+
+/** The last known fill of every chat, by thread id. A chat with an unreadable fill has no entry. */
+export type FillMap = Readonly<Record<string, ContextFill>>;
+
+function sameFill(a: ContextFill | undefined, b: ContextFill | undefined): boolean {
+  return a === b || (a !== undefined && b !== undefined && a.percent === b.percent && a.level === b.level && a.overflow === b.overflow);
+}
+
+/**
+ * The fills after the chat list was read. A chat with a request in flight keeps its last fill (the list may already
+ * count the request being answered); with none known yet it takes the list's. A null fill in the list removes the
+ * entry. Chats that are no longer listed are dropped.
+ */
+export function fillsFromList(prev: FillMap, chats: readonly ChatView[], entries: readonly Entry[]): FillMap {
+  const next: Record<string, ContextFill> = {};
+  for (const c of chats) {
+    const keep = c.running || runsLocally(entries, c.threadId) ? prev[c.threadId] : undefined;
+    const fill = keep ?? c.fill ?? undefined;
+    if (fill !== undefined) {
+      next[c.threadId] = fill;
+    }
+  }
+  const same = Object.keys(next).length === Object.keys(prev).length && Object.keys(next).every((id) => sameFill(prev[id], next[id]));
+  return same ? prev : next;
+}
+
+/** The fills after an update: only an update that carries a fill (the end of a request) changes its own chat's. */
+export function fillsFromUpdate(prev: FillMap, update: Pick<UpdateView, "threadId" | "fill">): FillMap {
+  if (update.fill === null || update.threadId === "" || sameFill(prev[update.threadId], update.fill)) {
+    return prev;
+  }
+  return { ...prev, [update.threadId]: update.fill };
+}
+
+/** The fill to draw for the open chat; null: nothing. */
+export function fillOf(fills: FillMap, openId: string): ContextFill | null {
+  return openId !== "" && Object.prototype.hasOwnProperty.call(fills, openId) ? fills[openId] : null;
 }
 
 /**

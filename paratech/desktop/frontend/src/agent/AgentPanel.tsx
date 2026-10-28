@@ -16,6 +16,10 @@ import {
   contextFor,
   earlierItems,
   entryModel,
+  fillOf,
+  type FillMap,
+  fillsFromList,
+  fillsFromUpdate,
   isFocusPanelKey,
   openAfterArchive,
   panelShortcut,
@@ -106,6 +110,8 @@ export function AgentPanel(props: {
   const [openId, setOpenId] = useState("");
   const [earlierReq, setEarlierReq] = useState<EarlierRequestView[]>([]);
   const [chatNote, setChatNote] = useState("");
+  // The context fill per chat: from the list, and from the update that ends a request.
+  const [fills, setFills] = useState<FillMap>({});
   const openRef = useRef(openId);
   openRef.current = openId;
   const entriesRef = useRef(state.entries);
@@ -132,6 +138,7 @@ export function AgentPanel(props: {
           return;
         }
         setChats(v.chats);
+        setFills((f) => fillsFromList(f, v.chats, entriesRef.current));
         setListed(true);
         setChatNote((n) => (n === listFailed ? "" : n));
         setOpenId((cur) => reconcileOpenChat(v.chats, cur !== startedOn || prefer === undefined ? cur : prefer, entriesRef.current));
@@ -244,6 +251,7 @@ export function AgentPanel(props: {
       try {
         const update = parseUpdate(data);
         dispatch({ type: "update", update });
+        setFills((f) => fillsFromUpdate(f, update));
         // With no chat open (and the first list read done), the first real update names the chat the request created.
         if (openRef.current === "" && update.threadId !== "" && update.turn > 0 && listDone.current) {
           setOpenId(update.threadId);
@@ -555,6 +563,7 @@ export function AgentPanel(props: {
       state={shown}
       chat={chatBar}
       earlier={earlier}
+      fill={fillOf(fills, openId)}
       ctx={ctx}
       draft={draft}
       notice={notice}
