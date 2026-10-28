@@ -149,6 +149,7 @@ html, body, #root { height: 100%; }
 /* Page parts shared by the sections on the new components. */
 .page { display: flex; flex: 1; flex-direction: column; }
 .page h1 { margin: 0; }
+.page[tabindex="-1"]:focus { outline: none; }
 .head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 /* A section heading over its groups; 32px between sections. */
 .page .group-title { margin: 32px 0 12px; font-size: 17px; line-height: 22px; letter-spacing: -0.015em; }
@@ -586,3 +587,47 @@ html, body, #root { height: 100%; }
   .arows > .row { grid-template-columns: minmax(0, 1fr); }
   .arows > .row > .acts { justify-self: end; }
 }
+
+/* «Выполнено» (TASK-316). The check of a row: an empty ring is open, a filled graphite disc is done (the primary
+   colour, no new accent). The focus ring is the global :focus-visible one. */
+.done-check { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; padding: 0; border: 1.5px solid var(--control); border-radius: 50%; background: none; color: transparent; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast); }
+.done-check .i { width: 14px; height: 14px; }
+/* The ring stays 22px; the hit area is 32px (an invisible frame of 5px around it). */
+.done-check::before { content: ""; position: absolute; inset: -5px; border-radius: 50%; }
+.done-check:hover, .done-check:focus-visible { border-color: var(--text); color: var(--muted); }
+.done-check.on { border-color: var(--prim); background: var(--prim); color: var(--on-prim); }
+.done-check.on:hover, .done-check.on:focus-visible { opacity: .85; color: var(--on-prim); }
+.done-check[aria-busy="true"] { opacity: .5; cursor: progress; }
+.row-lead-box > .done-check { margin: 0; }
+.hw-done-title { color: var(--muted); text-decoration: line-through; }
+p.hw-donedate { margin: 0 0 12px; }
+.hw-inline { white-space: nowrap; }
+.hw-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 16px; }
+.hw-filters .hw-filter { margin-bottom: 0; }
+.hw-none { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.hw-none p { margin: 0; }
+.hw-issue { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0 0 12px; }
+.hw-issue .result { margin: 0; }
+.row-below .hw-issue { margin: 4px 0 0; }
+@media (forced-colors: active) {
+  .done-check { border-color: CanvasText; }
+  .done-check.on { forced-color-adjust: none; background: CanvasText; color: Canvas; }
+}
+
+/* The toast: one at a time at the bottom of the content column (ui/Toast.tsx). The host is the live region; it takes no
+   clicks itself, only the toast does. It is fixed inside .shell (a size container, so it is the containing block): the
+   rail (64px) is on the left and the agent panel (--ag-w of the shell, 0 when closed) on the right, so the toast never
+   covers the request field of the panel. It is the inverse surface (--prim on --on-prim, 4.5:1 in both themes), so it
+   stands out from the cards; no new accent colour. */
+.toast-host { position: fixed; left: 64px; right: var(--ag-w, 0px); bottom: 24px; z-index: 30; display: flex; justify-content: center; padding: 0 16px; pointer-events: none; }
+.toast { display: flex; align-items: center; gap: 8px; max-width: min(520px, 100%); padding: 6px 6px 6px 16px; border-radius: var(--r-lg); background: var(--prim); color: var(--on-prim); box-shadow: var(--sh-pop); pointer-events: auto; animation: toast-in var(--t-mid) var(--ease); }
+.toast-text { min-width: 0; overflow-wrap: anywhere; }
+.toast-act, .toast-x { flex: none; display: inline-flex; align-items: center; justify-content: center; min-height: var(--h-sm); border: 0; border-radius: var(--r-md, 8px); background: none; color: inherit; font: inherit; cursor: pointer; }
+.toast-act { padding: 0 8px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.toast-x { width: var(--h-sm); padding: 0; border-radius: 50%; }
+.toast-x .i { width: 16px; height: 16px; }
+.toast-act:hover, .toast-x:hover { background: color-mix(in srgb, var(--on-prim) 16%, transparent); }
+.toast :focus-visible { outline-color: var(--on-prim); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+@media (forced-colors: active) { .toast { border: 1px solid CanvasText; } }
