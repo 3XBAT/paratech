@@ -281,7 +281,7 @@ type PurgedDeliveries interface {
 	ListByAssignment(ctx context.Context, a shared.AssignmentID, limit int) ([]*delivery.Delivery, error)
 
 	// DeleteFinalOfAssignment removes the SENT and FAILED deliveries of assignment a and returns how many; an
-	// unresolved one is never removed (hard rule 7).
+	// unresolved one is never removed (PRD section 10, AC-15, hard rule 7).
 	DeleteFinalOfAssignment(ctx context.Context, a shared.AssignmentID) (int, error)
 }
 
