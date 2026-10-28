@@ -22,6 +22,15 @@ export interface DoneRunnerSink {
   alive(): boolean;
 }
 
+/** The key to report as busy: the newest call still running ("" none). A Set keeps the order of adding. */
+export function newestRunning(running: ReadonlySet<string>): string {
+  let last = "";
+  for (const k of running) {
+    last = k;
+  }
+  return last;
+}
+
 export class DoneRunner {
   private readonly running = new Set<string>();
   private busyKey = "";
@@ -57,10 +66,12 @@ export class DoneRunner {
       res = await call();
     } finally {
       this.running.delete(key);
-      if (this.busyKey === key) {
-        this.busyKey = "";
+      // A mark in flight keeps its «Сохранение…» when another call (an undo of other ids) ends first.
+      const next = newestRunning(this.running);
+      if (this.busyKey !== next) {
+        this.busyKey = next;
         if (this.sink.alive()) {
-          this.sink.busy("");
+          this.sink.busy(next);
         }
       }
     }

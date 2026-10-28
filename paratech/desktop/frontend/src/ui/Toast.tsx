@@ -32,6 +32,38 @@ export function isEditableTarget(t: { tagName?: string; isContentEditable?: bool
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t.isContentEditable === true;
 }
 
+/** What the page says about the toast and the key press, as plain facts (see toastVisibleFor in the component). */
+export interface UndoKeyScene {
+  /** The toast element is in the document. */
+  connected: boolean;
+  /** It has a box (not display:none). */
+  rendered: boolean;
+  /** It sits under a [hidden] ancestor (a page behind an overlay). */
+  insideHidden: boolean;
+  /** The key was pressed inside an open dialog or a modal. */
+  inModal: boolean;
+}
+
+/** Ctrl+Z undoes only a toast the student can see, and not from behind a modal dialog. */
+export function undoKeyAllowed(s: UndoKeyScene): boolean {
+  return s.connected && s.rendered && !s.insideHidden && !s.inModal;
+}
+
+function sceneOf(toast: HTMLElement | null, target: EventTarget | null): UndoKeyScene {
+  const inModal = target instanceof Element && target.closest('dialog[open], [aria-modal="true"]') !== null;
+  return {
+    connected: toast?.isConnected === true,
+    rendered: toast !== null && toast.getClientRects().length > 0,
+    insideHidden: toast?.closest("[hidden]") != null,
+    inModal,
+  };
+}
+
+/** The initial «window is away» state: hidden or without focus, so a toast born in a blurred window waits. */
+export function windowAway(visibility: string, hasFocus: boolean): boolean {
+  return visibility === "hidden" || !hasFocus;
+}
+
 /**
  * One toast at the bottom of the content column; a new one replaces the old. The status region is always there, so a
  * screen reader announces the text when it appears. Page level: each page owns its toast and its state.
@@ -74,8 +106,11 @@ function ToastBody(props: {
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
   // Alt-Tab must not eat the undo: the timer waits while the window is hidden or not the active one.
-  const [away, setAway] = useState(() => typeof document !== "undefined" && document.visibilityState === "hidden");
+  const [away, setAway] = useState(
+    () => typeof document !== "undefined" && windowAway(document.visibilityState, document.hasFocus()),
+  );
   const paused = hover || focus || away;
+  const box = useRef<HTMLDivElement>(null);
   const close = useRef(props.onClose);
   close.current = props.onClose;
   const act = useRef(props.onAction);
@@ -90,11 +125,16 @@ function ToastBody(props: {
   }, [paused, props.ms]);
 
   useEffect(() => {
-    const visibility = () => setAway(document.visibilityState === "hidden");
+    const visibility = () => setAway(windowAway(document.visibilityState, document.hasFocus()));
     const left = () => setAway(true);
     const back = () => setAway(document.visibilityState === "hidden");
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (!e.defaultPrevented && isUndoKey(e) && !isEditableTarget(e.target as HTMLElement | null)) {
+      if (
+        !e.defaultPrevented &&
+        isUndoKey(e) &&
+        !isEditableTarget(e.target as HTMLElement | null) &&
+        undoKeyAllowed(sceneOf(box.current, e.target))
+      ) {
         e.preventDefault();
         act.current();
       }
@@ -126,6 +166,7 @@ function ToastBody(props: {
   return (
     <div
       className="toast"
+      ref={box}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onFocus={() => setFocus(true)}
@@ -141,6 +182,7 @@ function ToastBody(props: {
         type="button"
         className="toast-act"
         title={toastActionTitle(props.toast.actionLabel)}
+        aria-keyshortcuts="Control+Z"
         onClick={props.onAction}
       >
         {props.toast.actionLabel}

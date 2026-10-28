@@ -1,5 +1,5 @@
 import { type RefObject, useEffect, useRef, useState } from "react";
-import { focusTargetAfter } from "../assignmentDoneView.js";
+import { focusSpot, focusTargetAfter, shouldMoveFocus, shouldRestoreFocus } from "../assignmentDoneView.js";
 import type { DoneToast } from "../doneRunner.js";
 
 /** Focuses the check of the row with this id inside root; false when there is none. */
@@ -29,8 +29,14 @@ export function doneToastProps(
     toast: run.toast,
     onAction: () => {
       const id = affected();
+      const pressedOn = typeof document === "undefined" ? null : document.activeElement;
       void run.undo().then((started) => {
-        if (started) {
+        if (!started) {
+          return;
+        }
+        const now = typeof document === "undefined" ? null : document.activeElement;
+        const lost = now === null || now === document.body;
+        if (shouldRestoreFocus(now === pressedOn, lost)) {
           focus.restore(id);
         }
       });
@@ -61,10 +67,10 @@ export function useDoneFocus(root: RefObject<HTMLElement | null>) {
   });
 
   return {
-    /** Rows are about to leave (call before the state changes): only when the focus is inside the page now. */
+    /** Rows are about to leave (call before the state changes): only when the focus is on one of them or lost. */
     rowsLeaving(leaving: readonly string[]) {
       const el = root.current;
-      if (el === null || leaving.length === 0 || !el.contains(document.activeElement)) {
+      if (el === null || !shouldMoveFocus(focusSpot(document.activeElement as HTMLElement | null, document.body), leaving)) {
         return;
       }
       const order = Array.from(el.querySelectorAll<HTMLElement>("[data-done-id]"), (x) => x.dataset.doneId ?? "");

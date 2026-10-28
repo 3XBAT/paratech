@@ -14,9 +14,12 @@ import {
   doneStamp,
   doneTexts,
   emptyTexts,
+  focusSpot,
   focusTargetAfter,
   issueButton,
   listAfterDone,
+  shouldMoveFocus,
+  shouldRestoreFocus,
   listEmpty,
   pageDoneLabel,
   stateGroupLabel,
@@ -24,10 +27,10 @@ import {
   toastTitle,
 } from "../.test-build/assignmentDoneView.js";
 import { doneMessages, parseDoneResult } from "../.test-build/bindings/homework.js";
-import { DoneRunner } from "../.test-build/doneRunner.js";
+import { DoneRunner, newestRunning } from "../.test-build/doneRunner.js";
 import { AssignmentRowView, DoneButton, DoneIssueLine, DoneStamp } from "../.test-build/pages/AssignmentDoneParts.js";
 import { AssignmentStateSwitch, filterReset } from "../.test-build/pages/AssignmentFilter.js";
-import { isEditableTarget, isUndoKey, Toast, toastMs } from "../.test-build/ui/Toast.js";
+import { isEditableTarget, isUndoKey, Toast, toastMs, undoKeyAllowed, windowAway } from "../.test-build/ui/Toast.js";
 
 const noop = () => undefined;
 const DONE_AT = "2026-10-28T12:00:00Z";
@@ -675,6 +678,76 @@ test("the focus goes to the next row's check, else the previous one, else the ma
   assert.equal(focusTargetAfter(order, ["a2", "a3"]), "a4", "the neighbour that stays");
   assert.equal(focusTargetAfter(order, ["zz"]), null, "no row of the screen leaves: nothing to move");
   assert.equal(focusTargetAfter(order, []), null);
+});
+
+test("the focus moves only from a leaving check or from nowhere; any other control keeps it", () => {
+  const leaving = ["a2"];
+  assert.equal(shouldMoveFocus({ kind: "check", id: "a2" }, leaving), true);
+  assert.equal(shouldMoveFocus({ kind: "check", id: "a1" }, leaving), false, "another row's check");
+  assert.equal(shouldMoveFocus({ kind: "other" }, leaving), false, "«Открыть», the filter, the previous toast's «Отменить»");
+  assert.equal(shouldMoveFocus({ kind: "none" }, leaving), true, "the focused element is gone");
+  assert.equal(shouldMoveFocus({ kind: "none" }, []), false, "nothing leaves");
+
+  const body = { dataset: {} };
+  assert.deepEqual(focusSpot(null, body), { kind: "none" });
+  assert.deepEqual(focusSpot(body, body), { kind: "none" });
+  assert.deepEqual(focusSpot({ dataset: { doneId: "a2" } }, body), { kind: "check", id: "a2" });
+  assert.deepEqual(focusSpot({ dataset: {} }, body), { kind: "other" });
+});
+
+test("Ctrl+Z undoes only a toast that is visible, and not from behind a dialog", () => {
+  const ok = { connected: true, rendered: true, insideHidden: false, inModal: false };
+  assert.equal(undoKeyAllowed(ok), true);
+  assert.equal(undoKeyAllowed({ ...ok, connected: false }), false, "not in the document");
+  assert.equal(undoKeyAllowed({ ...ok, rendered: false }), false, "no box (display:none)");
+  assert.equal(undoKeyAllowed({ ...ok, insideHidden: true }), false, "the page is hidden behind an overlay");
+  assert.equal(undoKeyAllowed({ ...ok, inModal: true }), false, "a modal dialog is open");
+});
+
+test("a toast born in a blurred or hidden window does not start its timer", () => {
+  assert.equal(windowAway("visible", true), false);
+  assert.equal(windowAway("visible", false), true);
+  assert.equal(windowAway("hidden", true), true);
+});
+
+test("after «Отменить» the focus returns only if it is still there or lost", () => {
+  assert.equal(shouldRestoreFocus(true, false), true, "still on the pressed control");
+  assert.equal(shouldRestoreFocus(false, true), true, "the button is gone: body");
+  assert.equal(shouldRestoreFocus(false, false), false, "the student moved on");
+});
+
+test("the toast action names its key and the focus regions have a name", () => {
+  const html = renderToStaticMarkup(h(Toast, { toast: { id: 1, text: "Выполнено", actionLabel: "Отменить" }, onAction: noop, onClose: noop }));
+  assert.match(html, /aria-keyshortcuts="Control\+Z"/);
+  const read = (rel) => readFileSync(new URL(`../src/${rel}`, import.meta.url), "utf8");
+  const hw = read("pages/HomeworkPage.tsx");
+  assert.ok(hw.includes('aria-labelledby="hw-list-title"') && hw.includes('id="hw-list-title"'));
+  assert.ok(hw.includes('aria-labelledby="hw-detail-title"') && hw.includes('id="hw-detail-title"'));
+  const today = read("pages/TodayPage.tsx");
+  assert.ok(today.includes('aria-labelledby="today-title"') && today.includes('id="today-title"'));
+});
+
+test("the runner: a mark in flight stays busy when an undo of other ids ends first", async () => {
+  assert.equal(newestRunning(new Set()), "");
+  assert.equal(newestRunning(new Set(["a", "b"])), "b");
+
+  const t = harness();
+  const first = t.runner.mark("a2", true, "Б");
+  t.waits.mark[0].resolve(reply([out("a2", "changed", true, 3)], [{ id: "a2", version: 3 }]));
+  await first;
+
+  const mark = t.runner.mark("a1", true, "А");
+  assert.equal(t.seen.busy.at(-1), "a1");
+  const undo = t.runner.undo();
+  assert.equal(t.seen.busy.at(-1), "a2", "the newest call");
+
+  t.waits.restore[0].resolve(reply([out("a2", "changed", false, 4)], [{ id: "a2", version: 4 }], true));
+  await undo;
+  assert.equal(t.seen.busy.at(-1), "a1", "the mark in flight keeps its «Сохранение…»");
+
+  t.waits.mark[1].resolve(marked());
+  await mark;
+  assert.equal(t.seen.busy.at(-1), "", "released at the end");
 });
 
 test("the pages are wired as agreed: one runner per page, focus kept, the re-read keeps the shown version", () => {

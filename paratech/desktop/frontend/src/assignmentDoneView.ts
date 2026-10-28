@@ -301,6 +301,34 @@ export function focusTargetAfter(order: readonly string[], leaving: readonly str
   return before.length > 0 ? before[before.length - 1] : "";
 }
 
+/** Where the keyboard focus is: on the check of a row, nowhere (body or none: the focused element is gone) or elsewhere. */
+export type FocusSpot = { kind: "check"; id: string } | { kind: "none" } | { kind: "other" };
+
+/** Classifies the focused element (document.activeElement, body of the document) for shouldMoveFocus. */
+export function focusSpot(active: { dataset?: { doneId?: string } } | null, body: unknown): FocusSpot {
+  if (active === null || active === body) {
+    return { kind: "none" };
+  }
+  const id = active.dataset?.doneId;
+  return id === undefined ? { kind: "other" } : { kind: "check", id };
+}
+
+/** Rows leave: the focus moves only when it is on the check of a leaving row or lost; any other control keeps it. */
+export function shouldMoveFocus(spot: FocusSpot, leaving: readonly string[]): boolean {
+  if (leaving.length === 0) {
+    return false;
+  }
+  return spot.kind === "none" || (spot.kind === "check" && leaving.includes(spot.id));
+}
+
+/**
+ * After «Отменить» the focus goes back to the affected row only if it is still where it was when the button was pressed
+ * or it is lost (the button is gone); a control the student moved to in the meantime keeps it.
+ */
+export function shouldRestoreFocus(stillThere: boolean, lost: boolean): boolean {
+  return stillThere || lost;
+}
+
 /** The burning deadlines after a call: a done assignment and a deleted one leave at once (they are done, not late). */
 export function burningAfterDone(burning: readonly TodayDeadline[], res: DoneResult): TodayDeadline[] {
   if (res.problem !== "") {

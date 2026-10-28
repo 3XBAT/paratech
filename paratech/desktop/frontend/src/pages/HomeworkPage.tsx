@@ -381,9 +381,9 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
   const empty = items !== null && items.length === 0 ? listEmpty(state, anyExists) : null;
 
   return (
-    <section className="page hw" tabIndex={-1} ref={rootRef}>
+    <section className="page hw" tabIndex={-1} ref={rootRef} aria-labelledby="hw-list-title">
       <div className="head">
-        <h1>Домашние задания</h1>
+        <h1 id="hw-list-title">Домашние задания</h1>
         <div className="acts">
           <Button icon="plus" onClick={() => setAdding(true)}>
             {addTexts.button}
@@ -1043,14 +1043,16 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
   const doneBusy = doneRun.busyId === id;
 
   return (
-    <section className="page hw" tabIndex={-1} ref={rootRef}>
+    <section className="page hw" tabIndex={-1} ref={rootRef} aria-labelledby="hw-detail-title">
       <div className="hw-back">
         <Button variant="ghost" onClick={props.onBack}>
           Все задания
         </Button>
       </div>
       <div className="head">
-        <h1 className="hw-title">{a.title}</h1>
+        <h1 className="hw-title" id="hw-detail-title">
+          {a.title}
+        </h1>
         <span className="muted num">{dueText(a.due)}</span>
         <div className="acts">
           <DoneButton

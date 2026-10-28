@@ -138,11 +138,11 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
   // The toast is outside .today: that is a size container, which would make it the containing block of the toast.
   return (
     <>
-    <section className="page today" tabIndex={-1} ref={rootRef}>
+    <section className="page today" tabIndex={-1} ref={rootRef} aria-labelledby="today-title">
       <div className="head">
         <div>
           <span className="label num">{screen === null ? "" : dayTitle(screen.day)}</span>
-          <h1>{texts.title}</h1>
+          <h1 id="today-title">{texts.title}</h1>
         </div>
         <div className="acts">
           <Button icon="retry" onClick={load}>
