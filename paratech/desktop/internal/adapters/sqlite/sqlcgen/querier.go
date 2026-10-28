@@ -330,6 +330,10 @@ type Querier interface {
 	ListRunningAgentThreadIDs(ctx context.Context) ([]string, error)
 	// The free subject strings of the live schedule, with how many lessons name each.
 	ListScheduleSubjectCounts(ctx context.Context) ([]ListScheduleSubjectCountsRow, error)
+	// The free subject strings of the live schedule and of the recordings not marked for deletion (the user's correction,
+	// else the lesson snapshot) in one read: per string the lessons by kind (seminar and practice together) and the
+	// recordings, sorted by string.
+	ListScheduleSubjectStrings(ctx context.Context) ([]ListScheduleSubjectStringsRow, error)
 	ListSttModels(ctx context.Context) ([]SttModel, error)
 	ListSttSpeeds(ctx context.Context) ([]ListSttSpeedsRow, error)
 	ListSubjectAliases(ctx context.Context, subjectID string) ([]SubjectAlias, error)
