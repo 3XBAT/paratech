@@ -139,6 +139,10 @@ func TestMigrationToChatsKeepsThreads(t *testing.T) {
 		}
 	}
 
+	// The repository reads the current schema: the rows are checked at the latest version.
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("migrate to the latest: %v", err)
+	}
 	repo := NewAgentThreadRepository(db)
 	for _, id := range []shared.ThreadID{"th-s1", "th-none", "th-gone", "th-long"} {
 		if _, err := repo.Get(ctx, id); err != nil {
@@ -188,7 +192,8 @@ func TestMigrationFromChatsDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentDataAt39(t, db)
-	if err := steps.UpTo(ctx, chatsSchema); err != nil {
+	// The repository writes the current schema; Down below passes the later migrations too.
+	if err := db.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
 	// A newer chat whose request is in s1 too: it wins the key s1 on Down, th-s1 is lost.
@@ -248,7 +253,7 @@ func TestMigrationFromChatsDown(t *testing.T) {
 		t.Fatal("a second thread of key s1 was accepted after Down")
 	}
 
-	if err := steps.UpTo(ctx, chatsSchema); err != nil {
+	if err := db.Migrate(ctx); err != nil {
 		t.Fatalf("up again: %v", err)
 	}
 	if got := scanString(t, db, `SELECT title FROM agent_threads WHERE id = 'th-new'`); got != "Физика" {

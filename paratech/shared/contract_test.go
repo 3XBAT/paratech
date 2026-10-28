@@ -247,10 +247,13 @@ var wantFields = map[string]map[string]string{
 	"AgentSubject": {"subject_id": "string", "name": "string"},
 	"AgentScope": {
 		"subject_id": "string", "screen": "enum paratech.hub.v1.AgentScreen", "lesson_id": "string", "assignment_id": "string",
+		"mentions": "repeated message paratech.hub.v1.AgentMention",
 	},
+	"AgentMention": {"kind": "enum paratech.hub.v1.AgentMentionKind", "id": "string", "current": "bool"},
 	"AgentTurn": {
 		"student_text": "string (oneof turn)", "calls": "message paratech.hub.v1.SealedCalls (oneof turn)",
 		"results": "message paratech.hub.v1.ToolResults (oneof turn)", "agent_reply": "string (oneof turn)",
+		"history_summary": "string (oneof turn)",
 	},
 	"SealedCalls": {"calls": "repeated message paratech.hub.v1.ToolCall", "seal": "bytes"},
 	"ToolCall":    {"call_id": "string", "tool": "string", "arguments_json": "string"},
@@ -278,7 +281,8 @@ var wantStringFields = map[string][]string{
 	"AgentBase":              {"time_zone", "today"},
 	"AgentSubject":           {"name", "subject_id"},
 	"AgentScope":             {"assignment_id", "lesson_id", "subject_id"},
-	"AgentTurn":              {"agent_reply", "student_text"},
+	"AgentMention":           {"id"},
+	"AgentTurn":              {"agent_reply", "history_summary", "student_text"},
 	"SealedCalls":            {"seal"},
 	"ToolCall":               {"arguments_json", "call_id", "tool"},
 	"ToolResult":             {"call_id", "result_json"},
@@ -459,6 +463,10 @@ func TestEnumsOfTheContract(t *testing.T) {
 			"OPERATION_TYPE_TRIAGE_ASSIGNMENT",
 		},
 		"AgentProfile": {"AGENT_PROFILE_UNSPECIFIED", "AGENT_PROFILE_PANEL"},
+		"AgentMentionKind": {
+			"AGENT_MENTION_KIND_UNSPECIFIED", "AGENT_MENTION_KIND_SUBJECT", "AGENT_MENTION_KIND_LESSON",
+			"AGENT_MENTION_KIND_MATERIAL", "AGENT_MENTION_KIND_ASSIGNMENT",
+		},
 		"AgentScreen": {
 			"AGENT_SCREEN_UNSPECIFIED", "AGENT_SCREEN_TODAY", "AGENT_SCREEN_SUBJECTS", "AGENT_SCREEN_ASSIGNMENTS",
 			"AGENT_SCREEN_SCHEDULE", "AGENT_SCREEN_JOURNAL", "AGENT_SCREEN_SETTINGS",
@@ -506,8 +514,10 @@ var agentStringFields = map[string]string{
 	"AgentScope.subject_id":            "opaque desktop ID",
 	"AgentScope.lesson_id":             "opaque desktop ID",
 	"AgentScope.assignment_id":         "opaque desktop ID",
+	"AgentMention.id":                  "opaque desktop ID of a mentioned object, never its name",
 	"AgentTurn.student_text":           "what the student typed, at most 4 KiB",
 	"AgentTurn.agent_reply":            "the app's own answer to an earlier request (desktop-built from checked UI texts), at most 2 KiB",
+	"AgentTurn.history_summary":        "summary of earlier requests of the chat (model output, checked by the desktop), data, at most 8 KiB",
 	"SealedCalls.seal":                 "HMAC with a key version byte",
 	"ToolCall.call_id":                 "opaque call ID",
 	"ToolCall.tool":                    "tool name of the catalog",
@@ -691,15 +701,16 @@ func TestAgentMessagesHaveOnlyAllowlistedStrings(t *testing.T) {
 	}
 }
 
-// Golden tool catalog (design §2.3, ADR-0021), the current version 8 (TASK-233: the tools of v7, a new server prompt;
-// v7, TASK-223: reply.text is a reply_text of up to 4000 characters; v6, TASK-216: create_assignment and the time type;
+// Golden tool catalog (design §2.3, ADR-0021), the current version 9 (TASK-244: the tools of v8, chats with mentions and
+// the summary turn, a new server prompt; v8, TASK-233: the tools of v7, a new server prompt; v7, TASK-223: reply.text is a reply_text of up to 4000 characters; v6, TASK-216: create_assignment and the time type;
 // v5, TASK-200: the tools of v4, a new server prompt; v4, TASK-182: no generate_draft, triage_assignment by topic; v3,
 // TASK-172: reply lists up to 10 assignment IDs; v2, TASK-118: question and search query of up to 500 characters). Both
-// the Hub catalog (TASK-114) and the desktop Tool enum (TASK-115) must match it. Versions 1 to 7 are frozen: the Hub
+// the Hub catalog (TASK-114) and the desktop Tool enum (TASK-115) must match it. Versions 1 to 8 are frozen: the Hub
 // still serves them to clients of those versions.
 const (
-	toolCatalogVersion = 8
-	toolCatalogFile    = "testdata/tool_catalog_v8.json"
+	toolCatalogVersion = 9
+	toolCatalogFile    = "testdata/tool_catalog_v9.json"
+	toolCatalogV8File  = "testdata/tool_catalog_v8.json"
 	toolCatalogV7File  = "testdata/tool_catalog_v7.json"
 	toolCatalogV6File  = "testdata/tool_catalog_v6.json"
 	toolCatalogV5File  = "testdata/tool_catalog_v5.json"
@@ -1013,10 +1024,24 @@ func TestToolCatalog(t *testing.T) {
 	}
 }
 
+// TestToolCatalogV8IsFrozen: catalog v8 stays as released: catalog v9 with version 8 (v9 changed the contract and the
+// server prompt, not the tools, TASK-244).
+func TestToolCatalogV8IsFrozen(t *testing.T) {
+	v8, v9 := loadToolCatalogFile(t, toolCatalogV8File), loadToolCatalog(t)
+	if v8.CatalogVersion != 8 {
+		t.Fatalf("v8: version %d", v8.CatalogVersion)
+	}
+	want := cloneCatalog(v9)
+	want.CatalogVersion = 8
+	if fmt.Sprint(want) != fmt.Sprint(v8) {
+		t.Errorf("v8 differs from v9 beyond the version:\nv8 %+v\nv9 %+v", v8, want)
+	}
+}
+
 // TestToolCatalogV7IsFrozen: catalog v7 stays as released: catalog v8 with version 7 (v8 changed only the server
 // prompt, TASK-233).
 func TestToolCatalogV7IsFrozen(t *testing.T) {
-	v7, v8 := loadToolCatalogFile(t, toolCatalogV7File), loadToolCatalog(t)
+	v7, v8 := loadToolCatalogFile(t, toolCatalogV7File), loadToolCatalogFile(t, toolCatalogV8File)
 	if v7.CatalogVersion != 7 {
 		t.Fatalf("v7: version %d", v7.CatalogVersion)
 	}

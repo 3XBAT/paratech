@@ -2,7 +2,9 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -196,6 +198,8 @@ func (r *AgentThreadRepository) Save(ctx context.Context, th *thread.Thread) err
 		turn = &p
 	}
 
+	// The summary text is untrusted model output: stored as a parameter, never logged or put into SQL.
+	sum := summaryColumns(st)
 	next := st.Version + 1
 	err = r.db.Do(ctx, func(ctx context.Context) error {
 		q := r.db.Queries(ctx)
@@ -203,7 +207,8 @@ func (r *AgentThreadRepository) Save(ctx context.Context, th *thread.Thread) err
 			err := DuplicateAsVersionConflict(MapError(ctx, q.InsertAgentThread(ctx, sqlcgen.InsertAgentThreadParams{
 				ID: string(st.ID), Title: st.Title, Turns: int64(st.Turns), HistoryFrom: int64(st.HistoryFrom),
 				Seen: string(seen), ArchivedAt: jobNullMs(st.ArchivedAt), LastActiveAt: jobMs(st.LastActive),
-				CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
+				SummaryText: sum.text, SummaryThrough: sum.through, SummaryAt: sum.at,
+				ForkedFrom: jobNullString(string(st.ForkedFrom)), CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
 			})))
 			if err != nil {
 				return err
@@ -211,7 +216,9 @@ func (r *AgentThreadRepository) Save(ctx context.Context, th *thread.Thread) err
 		} else {
 			n, err := q.UpdateAgentThread(ctx, sqlcgen.UpdateAgentThreadParams{
 				Title: st.Title, Turns: int64(st.Turns), HistoryFrom: int64(st.HistoryFrom), Seen: string(seen),
-				ArchivedAt: jobNullMs(st.ArchivedAt), LastActiveAt: jobMs(st.LastActive), UpdatedAt: jobMs(st.UpdatedAt),
+				ArchivedAt: jobNullMs(st.ArchivedAt), LastActiveAt: jobMs(st.LastActive),
+				SummaryText: sum.text, SummaryThrough: sum.through, SummaryAt: sum.at,
+				ForkedFrom: jobNullString(string(st.ForkedFrom)), UpdatedAt: jobMs(st.UpdatedAt),
 				ID: string(st.ID), ExpectedVersion: st.Version,
 			})
 			if err := VersionCAS(ctx, n, err); err != nil {
@@ -289,8 +296,44 @@ func turnParams(id shared.ThreadID, t thread.TurnState) (sqlcgen.InsertAgentTurn
 		Writes: int64(t.Budget.Writes), PaidUnplanned: int64(t.Budget.PaidUnplanned), PlannerInput: int64(t.Budget.InputTokens),
 		QuestionRounds: int64(t.Budget.QuestionRounds), StepOpen: stepOpen, Retry: int64(t.Retry), ProposedPlan: proposed,
 		ApprovedPlan: approved, Used: text["used"], OpenCalls: text["open"], CreatedIds: text["created"],
-		StartedAt: jobMs(t.StartedAt), UpdatedAt: jobMs(t.UpdatedAt),
+		// Written on every save as the aggregate holds it: a stopped request that goes on clears its line.
+		ReplyLine: jobNullString(t.ReplyLine), StartedAt: jobMs(t.StartedAt), UpdatedAt: jobMs(t.UpdatedAt),
 	}, nil
+}
+
+// summaryCols are the three summary columns of agent_threads: all NULL without a summary.
+type summaryCols struct {
+	text        sql.NullString
+	through, at sql.NullInt64
+}
+
+func summaryColumns(st thread.State) summaryCols {
+	if st.Summary.IsZero() {
+		return summaryCols{}
+	}
+	return summaryCols{
+		text:    sql.NullString{String: st.Summary.Text(), Valid: true},
+		through: sql.NullInt64{Int64: int64(st.Summary.Through()), Valid: true},
+		at:      jobNullMs(st.SummaryAt),
+	}
+}
+
+// summaryFrom rebuilds the stored summary with the value checks; a partial or changed one is an error.
+func summaryFrom(row sqlcgen.AgentThread) (values.HistorySummary, time.Time, error) {
+	if !row.SummaryText.Valid && !row.SummaryThrough.Valid && !row.SummaryAt.Valid {
+		return values.HistorySummary{}, time.Time{}, nil
+	}
+	if !row.SummaryText.Valid || !row.SummaryThrough.Valid || !row.SummaryAt.Valid {
+		return values.HistorySummary{}, time.Time{}, errors.New("only some of the summary columns are set")
+	}
+	s, err := values.ParseHistorySummary(int(row.SummaryThrough.Int64), row.SummaryText.String)
+	if err != nil {
+		return values.HistorySummary{}, time.Time{}, err
+	}
+	if s.Text() != row.SummaryText.String {
+		return values.HistorySummary{}, time.Time{}, errors.New("the summary text is not in its stored form")
+	}
+	return s, jobFromMs(row.SummaryAt.Int64), nil
 }
 
 func plansWire(steps []values.PlanStep) (string, error) {
@@ -334,6 +377,16 @@ func (r *AgentThreadRepository) restore(ctx context.Context, row sqlcgen.AgentTh
 		Version: row.Version, ID: shared.ThreadID(row.ID), Title: row.Title, Turns: int(row.Turns),
 		HistoryFrom: int(row.HistoryFrom), ArchivedAt: jobFromNullMs(row.ArchivedAt), LastActive: jobFromMs(row.LastActiveAt),
 		CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
+	}
+	var err error
+	if st.Summary, st.SummaryAt, err = summaryFrom(row); err != nil {
+		return bad("summary", err)
+	}
+	if row.ForkedFrom.Valid {
+		if row.ForkedFrom.String == "" {
+			return bad("fork source", errors.New("empty"))
+		}
+		st.ForkedFrom = shared.ThreadID(row.ForkedFrom.String)
 	}
 	for _, w := range seenWire {
 		ref, err := values.NewRef(values.IDKind(w.Kind), w.ID)
@@ -400,7 +453,11 @@ func turnState(row sqlcgen.AgentTurn) (thread.TurnState, error) {
 			InputTokens: int(row.PlannerInput), QuestionRounds: int(row.QuestionRounds),
 		},
 		StepOpen: row.StepOpen == 1, ProposedPlan: proposed, ApprovedPlan: approved, Used: used, Retry: int(row.Retry),
-		DroppedBy: int(row.DroppedBy), StartedAt: jobFromMs(row.StartedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
+		DroppedBy: int(row.DroppedBy), ReplyLine: row.ReplyLine.String, StartedAt: jobFromMs(row.StartedAt),
+		UpdatedAt: jobFromMs(row.UpdatedAt),
+	}
+	if row.ReplyLine.Valid && row.ReplyLine.String == "" {
+		return thread.TurnState{}, errors.New("reply line: empty")
 	}
 	if ts.Mentions, err = mentionsFrom(mentions); err != nil {
 		return thread.TurnState{}, fmt.Errorf("mentions: %w", err)
@@ -510,7 +567,8 @@ func (h *AgentHistory) Append(ctx context.Context, id shared.ThreadID, turn int,
 	return nil
 }
 
-// Since returns the last limit entries of the requests numbered from on, oldest first.
+// Since returns the last limit entries of the requests numbered from on, oldest first, each with the frozen reply line
+// of its request ("" when it has none).
 func (h *AgentHistory) Since(ctx context.Context, id shared.ThreadID, from, limit int) ([]values.HistoryEntry, error) {
 	limit = min(max(limit, 0), maxAgentHistoryRows)
 	rows, err := h.db.Queries(ctx).ListAgentSteps(ctx, sqlcgen.ListAgentStepsParams{
@@ -531,7 +589,12 @@ func (h *AgentHistory) Since(ctx context.Context, id shared.ThreadID, from, limi
 	return out, nil
 }
 
-func entryFrom(row sqlcgen.AgentStep) (values.HistoryEntry, error) {
+func entryFrom(row sqlcgen.ListAgentStepsRow) (values.HistoryEntry, error) {
+	if row.ReplyLine.Valid {
+		if err := (values.HistoryTurn{AgentReply: row.ReplyLine.String}).Validate(); err != nil {
+			return values.HistoryEntry{}, fmt.Errorf("reply line of request %d: %w", row.Turn, err)
+		}
+	}
 	var body stepBodyWire
 	if err := strictJSON(row.Body, &body); err != nil {
 		return values.HistoryEntry{}, err
@@ -556,5 +619,5 @@ func entryFrom(row sqlcgen.AgentStep) (values.HistoryEntry, error) {
 	if err := entry.Validate(); err != nil {
 		return values.HistoryEntry{}, err
 	}
-	return values.HistoryEntry{Turn: int(row.Turn), Entry: entry}, nil
+	return values.HistoryEntry{Turn: int(row.Turn), Entry: entry, ReplyLine: row.ReplyLine.String}, nil
 }

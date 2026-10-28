@@ -27,6 +27,7 @@ type Thread struct {
 	historyFrom int
 	summary     values.HistorySummary // of the earlier requests 1…Through; zero: none (Compact)
 	summaryAt   time.Time             // when the summary was made; zero exactly when there is none
+	forkedFrom  shared.ThreadID       // zero: not a fork
 	title       string
 	archivedAt  time.Time // zero: not archived
 	lastActive  time.Time // start of the last request; creation before the first
@@ -79,6 +80,7 @@ type State struct {
 	HistoryFrom int
 	Summary     values.HistorySummary // zero: none
 	SummaryAt   time.Time             // zero exactly when Summary is
+	ForkedFrom  shared.ThreadID       // zero: not a fork
 	Title       string
 	ArchivedAt  time.Time // zero: not archived
 	LastActive  time.Time
@@ -135,7 +137,10 @@ func Restore(s State) (*Thread, error) {
 	if err := checkSummary(s); err != nil {
 		return bad(err.Error())
 	}
-	th.summary, th.summaryAt = s.Summary, s.SummaryAt
+	if err := checkFork(s); err != nil {
+		return bad(err.Error())
+	}
+	th.summary, th.summaryAt, th.forkedFrom = s.Summary, s.SummaryAt, s.ForkedFrom
 	th.version, th.turns, th.historyFrom, th.updatedAt = s.Version, s.Turns, s.HistoryFrom, s.UpdatedAt
 	th.title, th.archivedAt, th.lastActive = s.Title, s.ArchivedAt, s.LastActive
 	th.seen.Add(s.Seen...)
@@ -195,7 +200,7 @@ func restoreTurn(s TurnState, number int) (Turn, error) {
 func (th *Thread) State() State {
 	s := State{
 		Version: th.version, ID: th.id, Turns: th.turns, Seen: th.seen.Sorted(),
-		HistoryFrom: th.historyFrom, Summary: th.summary, SummaryAt: th.summaryAt, Title: th.title,
+		HistoryFrom: th.historyFrom, Summary: th.summary, SummaryAt: th.summaryAt, ForkedFrom: th.forkedFrom, Title: th.title,
 		ArchivedAt: th.archivedAt, LastActive: th.lastActive, CreatedAt: th.createdAt, UpdatedAt: th.updatedAt,
 	}
 	if th.current != nil {

@@ -82,6 +82,17 @@ func ReplyMarkers(turns []Turn) []bool {
 	return marks
 }
 
+// CurrentRequest is the index of the student text that opens the current request: the last student text of the
+// turns, or -1. The turns before it are the earlier pairs (and the summary), those from it the current request.
+func CurrentRequest(turns []Turn) int {
+	for i := len(turns) - 1; i >= 0; i-- {
+		if turns[i].kind == TurnStudentText {
+			return i
+		}
+	}
+	return -1
+}
+
 // LastCalls is the index of the last echo of calls in the turns, or -1. That echo is the assistant turn the provider
 // sees last, the one whose kept content must be sent back (ADR-0023).
 func LastCalls(turns []Turn) int {
