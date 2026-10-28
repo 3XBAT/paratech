@@ -120,7 +120,8 @@ test("both delete buttons ask first and delete only through the warning or when 
   assert.match(page, /setConfirming\(true\)/);
   // «Отмена» only closes the warning; the confirm button deletes.
   assert.match(page, /onConfirm=\{\(\) => void remove\(a\)\}/);
-  assert.match(page, /onConfirm=\{\(\) => void removeThis\(\)\}/);
+  // (the detail page's «Удалить» of the warning is ignored while the mark is saved, see the overlap test below.)
+  assert.match(page, /onConfirm=\{\(\) => \{\s*if \(!doneBusy\) \{\s*void removeThis\(\);\s*\}\s*\}\}/);
   assert.match(page, /setConfirmId\(""\);\s*setCancelledId\(a\.id\);/);
   assert.match(page, /setConfirming\(false\);\s*setCancelled\(true\);/);
   // A double click is one question and one delete (the same guard the page already uses).
@@ -142,6 +143,26 @@ test("the check shows no «Удаление…»; «Отмена» gives the foc
   assert.match(page, /focusRowMenu\(rootRef\.current, cancelledId\)/);
   assert.match(page, /key=\{cancelled \? "remove-cancelled" : "remove"\}/);
   assert.match(page, /autoFocus=\{restored \|\| cancelled\}/);
+});
+
+test("«Выполнено» and delete do not overlap: during the check, under the warning and while the mark is saved", () => {
+  // List: the mark runs only when nothing of the row is going on; the delete question does not start during a mark.
+  assert.match(
+    page,
+    /if \(busyText === "" && checkingId !== a\.id && confirmId !== a\.id\) \{\s*void doneRun\.mark\(a\.id, !a\.done, a\.title\);/,
+  );
+  assert.match(page, /guard\.current\.has\(a\.id\) \|\| doneRun\.busyId === a\.id\) \{\s*return;/);
+  // Page: the button waits for the check and the warning.
+  assert.match(page, /disabled=\{changing \|\| checking \|\| confirming\}\s*onToggle=\{\(\) => void doneRun\.mark\(id,/);
+});
+
+test("a switch of the mark and a row leaving the list drop the delete question; «Вернуть» gives the row the focus", () => {
+  assert.match(
+    page,
+    /function changeState\(next: AssignmentState\) \{[\s\S]*?setConfirmId\(""\);\s*setCheckingId\(""\);\s*setCancelledId\(""\);/,
+  );
+  assert.match(page, /setConfirmId\(\(c\) => \(leaving\.includes\(c\) \? "" : c\)\)/);
+  assert.match(page, /focusOpen=\{restoredId === a\.id\}/);
 });
 
 test("the refusal button opens the assignment from the list and the emails on the detail page", () => {

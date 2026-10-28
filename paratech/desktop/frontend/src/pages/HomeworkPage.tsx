@@ -249,6 +249,10 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
     setDeliveriesLoaded(false);
     setList(initialListState);
     setRowProblem(null);
+    // A delete question of the old list must not come back for a row after a switch.
+    setConfirmId("");
+    setCheckingId("");
+    setCancelledId("");
     // The email filter is about sending: it starts again with «Все», and a refusal about a gone row is not carried over.
     setFilter("all");
     doneRun.dismissIssue();
@@ -299,7 +303,10 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
       }
       const next = listAfterDone(cur, stateRef.current, res, new Date().toISOString());
       // A row that leaves takes the focus with it: it goes to the next row's check.
-      focus.rowsLeaving(cur.filter((a) => !next.some((n) => n.id === a.id)).map((a) => a.id));
+      const leaving = cur.filter((a) => !next.some((n) => n.id === a.id)).map((a) => a.id);
+      focus.rowsLeaving(leaving);
+      // A delete question of a row that left the list goes with it.
+      setConfirmId((c) => (leaving.includes(c) ? "" : c));
       itemsRef.current = next;
       setItems(next);
     },
@@ -351,7 +358,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
   // «Удалить»: a running work is asked about first (inline), anything else is deleted at once. The impact guard keeps
   // a double click to one question; a failed question counts as «not running».
   async function askRemove(a: AssignmentItem) {
-    if (impactGuard.current.has(a.id) || guard.current.has(a.id)) {
+    if (impactGuard.current.has(a.id) || guard.current.has(a.id) || doneRun.busyId === a.id) {
       return;
     }
     setRowProblem(null);
@@ -440,7 +447,8 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
         focusOpen={restoredId === a.id}
         onOpen={() => props.onOpen(a.id)}
         onToggleDone={() => {
-          if (busyText === "") {
+          // Not while the delete check runs or its warning is open: the mark would change the version the delete uses.
+          if (busyText === "" && checkingId !== a.id && confirmId !== a.id) {
             void doneRun.mark(a.id, !a.done, a.title);
           }
         }}
@@ -1227,7 +1235,7 @@ function AssignmentEditor(props: {
           <DoneButton
             done={a.done}
             busy={doneBusy}
-            disabled={changing || checking}
+            disabled={changing || checking || confirming}
             onToggle={() => void doneRun.mark(id, !a.done, a.title)}
           />
           <Button disabled={changing || checking || doneBusy} onClick={() => setEditing(true)}>
@@ -1252,7 +1260,11 @@ function AssignmentEditor(props: {
       {changeProblem && <ChangeRefusal text={changeProblem} onOpenSend={changeOpenSend ? showDeliveries : undefined} />}
       {confirming && (
         <DeleteWarning
-          onConfirm={() => void removeThis()}
+          onConfirm={() => {
+            if (!doneBusy) {
+              void removeThis();
+            }
+          }}
           onCancel={() => {
             setConfirming(false);
             setCancelled(true);

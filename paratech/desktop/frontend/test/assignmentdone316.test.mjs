@@ -373,9 +373,9 @@ test("the assignment page pieces in both states; edit and delete stay in the hea
   assert.match(page, /api\.deleteAssignment\(id, version\)/);
   assert.match(page, /<DoneStamp assignment=\{a\} \/>/);
   // While the mark is saved the page does not edit or delete (a delete would go out with a stale version); the
-  // delete check (TASK-338) holds «Изменить» and «Отметить выполненным» too.
+  // delete check and its warning (TASK-338, TASK-316) hold «Изменить» and «Отметить выполненным» too.
   assert.equal(head.split("|| doneBusy").length - 1, 2, "«Изменить» and «Удалить» wait for the mark");
-  assert.match(head, /disabled=\{changing \|\| checking\}\s*onToggle/);
+  assert.match(head, /disabled=\{changing \|\| checking \|\| confirming\}\s*onToggle/);
 });
 
 test("a refusal line: the text as an alert and one button out", () => {
