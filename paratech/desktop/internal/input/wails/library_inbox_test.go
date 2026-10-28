@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -57,21 +58,28 @@ func TestLibraryPlacementHint(t *testing.T) {
 			FolderName: folderName(t, subject.SystemLabs),
 		}, LibraryPlacementHint{
 			Kind: "existing", SubjectID: "s1", SubjectName: "Физика", FolderID: "s1-labs", FolderName: "Лабораторные",
-			FolderKind: "labs",
+			FolderKind: "labs", CreateAliases: []string{},
 		}},
 		{"create", library.Placement{
 			Kind: placement.KindCreate, FolderKind: subject.SystemSeminars, FolderName: folderName(t, subject.SystemSeminars),
+			CreateName: "Сети", CreateAliases: []string{"Сети (лаб.)", "Компьютерные сети"},
+		}, LibraryPlacementHint{Kind: "create", FolderName: "Семинары", FolderKind: "seminars", CreateName: "Сети",
+			CreateAliases: []string{"Сети (лаб.)", "Компьютерные сети"}}},
+		{"create without aliases", library.Placement{
+			Kind: placement.KindCreate, FolderKind: subject.SystemSeminars, FolderName: folderName(t, subject.SystemSeminars),
 			CreateName: "Сети",
-		}, LibraryPlacementHint{Kind: "create", FolderName: "Семинары", FolderKind: "seminars", CreateName: "Сети"}},
-		{"none", library.Placement{}, LibraryPlacementHint{Kind: "none"}},
-		{"existing without a subject is none", library.Placement{Kind: placement.KindExisting}, LibraryPlacementHint{Kind: "none"}},
+		}, LibraryPlacementHint{Kind: "create", FolderName: "Семинары", FolderKind: "seminars", CreateName: "Сети",
+			CreateAliases: []string{}}},
+		{"none", library.Placement{}, LibraryPlacementHint{Kind: "none", CreateAliases: []string{}}},
+		{"existing without a subject is none", library.Placement{Kind: placement.KindExisting},
+			LibraryPlacementHint{Kind: "none", CreateAliases: []string{}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s, uc, _ := newLibraryBinding(t, "", &memFiles{})
 			s.uc = &hintLibrary{fakeLibrary: uc, hint: tt.hint}
 			got, err := s.PlacementHint(ctx, "m1")
-			if err != nil || got != tt.want {
+			if err != nil || !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("PlacementHint = %+v, %v; want %+v", got, err, tt.want)
 			}
 			if len(uc.calls) != 1 || uc.calls[0] != "PlacementHint m1" {
@@ -82,13 +90,51 @@ func TestLibraryPlacementHint(t *testing.T) {
 }
 
 func TestLibraryPlacementHintJSON(t *testing.T) {
-	data, err := json.Marshal(LibraryPlacementHint{Kind: "none"})
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		hint library.Placement
+		want string
+	}{
+		{library.Placement{},
+			`{"kind":"none","subjectId":"","subjectName":"","folderId":"","folderName":"","folderKind":"","createName":"","createAliases":[]}`},
+		{library.Placement{Kind: placement.KindCreate, FolderKind: subject.SystemMaterials, CreateName: "Сети"},
+			`{"kind":"create","subjectId":"","subjectName":"","folderId":"","folderName":"","folderKind":"materials","createName":"Сети","createAliases":[]}`},
 	}
-	const want = `{"kind":"none","subjectId":"","subjectName":"","folderId":"","folderName":"","folderKind":"","createName":""}`
-	if string(data) != want {
-		t.Fatalf("json = %s; want %s", data, want)
+	for _, tt := range tests {
+		data, err := json.Marshal(libraryPlacementHint(tt.hint))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != tt.want {
+			t.Errorf("json = %s; want %s", data, tt.want)
+		}
+	}
+}
+
+// notPlacedLibrary stores the file but could not place it.
+type notPlacedLibrary struct{ *fakeLibrary }
+
+func (n notPlacedLibrary) Import(ctx context.Context, up library.Upload) (library.Imported, error) {
+	res, err := n.fakeLibrary.Import(ctx, up)
+	res.NotPlaced = err == nil
+	return res, err
+}
+
+func TestLibraryImportFileToNotPlaced(t *testing.T) {
+	const path = `C:\Users\student\Documents\Сети_лр2.docx`
+	s, uc, _ := newLibraryBinding(t, path, &memFiles{files: map[string][]byte{path: []byte("bytes")}})
+	s.uc = notPlacedLibrary{uc}
+	res, err := s.ImportFileTo(context.Background(), "s1", "s1-labs")
+	if err != nil || !res.NotPlaced || res.Cancelled || res.Material == nil || res.Material.ID != "m1" {
+		t.Fatalf("ImportFileTo = %+v, %v; want the stored material with notPlaced", res, err)
+	}
+	data, err := json.Marshal(res)
+	if err != nil || !strings.Contains(string(data), `"notPlaced":true`) {
+		t.Fatalf("json = %s, %v", data, err)
+	}
+
+	s.uc = uc
+	if res, err := s.ImportFileTo(context.Background(), "s1", "s1-labs"); err != nil || res.NotPlaced {
+		t.Fatalf("placed: %+v, %v; want notPlaced false", res, err)
 	}
 }
 

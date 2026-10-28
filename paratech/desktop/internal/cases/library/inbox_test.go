@@ -3,10 +3,12 @@ package library
 import (
 	"context"
 	"errors"
+	"reflect"
+	"slices"
 	"testing"
 
 	"paratech/desktop/internal/domain/library/services/placement"
-	"paratech/desktop/internal/domain/library/services/subjectmatch"
+	"paratech/desktop/internal/domain/library/services/schedulesubjects"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -88,10 +90,49 @@ func TestImportToRefusesBeforeStoring(t *testing.T) {
 	}
 }
 
+// A target that goes away after the file is stored: the file stays in «Входящие», returned with NotPlaced.
+func TestImportToStoredNotPlaced(t *testing.T) {
+	tests := []struct {
+		name   string
+		meddle func(e *env, sub shared.SubjectID)
+	}{
+		{"subject removed meanwhile", func(e *env, sub shared.SubjectID) {
+			e.materials.beforeSave = func() { delete(e.subjects.rows, sub) } // after the check, before the file is saved
+		}},
+		{"busy", func(e *env, _ shared.SubjectID) {
+			e.materials.beforeSave = func() { // the file is saved; every save of placing it conflicts
+				e.materials.beforeSave = func() {
+					e.materials.saveErrs = slices.Repeat([]error{shared.ErrVersionConflict}, saveAttempts)
+				}
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e, ctx := newEnv(t), context.Background()
+			nets := createSubject(t, e, "Сети")
+			tt.meddle(e, nets.ID())
+
+			res, err := e.svc.Import(ctx, Upload{Name: "лр1.txt", Data: []byte("one"), Subject: nets.ID(),
+				Folder: subject.SystemFolderID(nets.ID(), subject.SystemLabs)})
+			if err != nil || !res.NotPlaced || res.Existing || res.Material == nil || !res.Material.InInbox() {
+				t.Fatalf("Import = %+v, %v; want the stored file, not placed", res, err)
+			}
+			if got, err := e.svc.Material(ctx, res.Material.ID()); err != nil || !got.Active() || !got.InInbox() {
+				t.Fatalf("stored = %+v, %v; want it in «Входящие»", got, err)
+			}
+		})
+	}
+}
+
 func TestPlacementHint(t *testing.T) {
 	e, ctx := newEnv(t), context.Background()
 	nets := createSubject(t, e, "Сети")
-	e.setStrings([]subjectmatch.Candidate{{Name: "Матанализ", Lessons: 3}, {Name: "сети", Lessons: 2}})
+	e.strings.rows = []schedulesubjects.Row{
+		{Name: "Матанализ (лек.)", Lessons: schedulesubjects.Kinds{Lecture: 3}},
+		{Name: "матанализ, сем.", Lessons: schedulesubjects.Kinds{Seminar: 1}},
+		{Name: "Сети (лаб.)", Lessons: schedulesubjects.Kinds{Lab: 2}}, // spellings of an existing subject create nothing
+	}
 
 	lab := importNamed(t, e, "Сети_лр2.docx", "a")
 	got, err := e.svc.PlacementHint(ctx, lab)
@@ -100,11 +141,17 @@ func TestPlacementHint(t *testing.T) {
 		t.Fatalf("PlacementHint(lab) = %+v, %v", got, err)
 	}
 
-	create := importNamed(t, e, "матанализ сем3.pdf", "b")
+	// Named and aliased as the schedule-subjects card proposes it: the name without the mark.
+	create := importNamed(t, e, "МАТАНАЛИЗ сем3.pdf", "b")
 	got, err = e.svc.PlacementHint(ctx, create)
 	if err != nil || got.Kind != placement.KindCreate || got.CreateName != "Матанализ" || got.Subject != nil ||
+		!slices.Equal(got.CreateAliases, []string{"Матанализ (лек.)", "матанализ, сем."}) ||
 		got.FolderKind != subject.SystemSeminars || got.FolderName.String() != "Семинары" {
 		t.Fatalf("PlacementHint(create) = %+v, %v", got, err)
+	}
+	card, err := e.svc.ScheduleSubjects(ctx)
+	if err != nil || len(card.Groups) == 0 || card.Groups[0].Name != got.CreateName {
+		t.Fatalf("ScheduleSubjects = %+v, %v; want the group named %q", card, err, got.CreateName)
 	}
 
 	none := importNamed(t, e, "scan_0001.pdf", "c")
@@ -115,13 +162,13 @@ func TestPlacementHint(t *testing.T) {
 	if _, err := e.svc.Place(ctx, lab, nets.ID(), ""); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := e.svc.PlacementHint(ctx, lab); err != nil || got != (Placement{}) {
+	if got, err := e.svc.PlacementHint(ctx, lab); err != nil || !reflect.DeepEqual(got, Placement{}) {
 		t.Fatalf("PlacementHint(placed) = %+v, %v", got, err)
 	}
 	if _, err := e.svc.RemoveMaterial(ctx, create); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := e.svc.PlacementHint(ctx, create); err != nil || got != (Placement{}) {
+	if got, err := e.svc.PlacementHint(ctx, create); err != nil || !reflect.DeepEqual(got, Placement{}) {
 		t.Fatalf("PlacementHint(removed) = %+v, %v", got, err)
 	}
 

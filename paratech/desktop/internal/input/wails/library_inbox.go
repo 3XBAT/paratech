@@ -26,20 +26,23 @@ const (
 // it and the student confirms.
 //   - Kind "existing": «Похоже на: <SubjectName> → <FolderName>»; the page calls Place(materialID, SubjectID, FolderID).
 //   - Kind "create": no such subject yet, the schedule names it: «Создать предмет „<CreateName>“ и положить»; the page
-//     calls CreateSubject(CreateName, [], "") and then Place(materialID, <new subject id>, <the folder of FolderKind
-//     among its folders>). SubjectID and FolderID are "".
+//     calls CreateSubject(CreateName, CreateAliases, "") and then Place(materialID, <new subject id>, <the folder of
+//     FolderKind among its folders>). SubjectID and FolderID are "".
 //   - Kind "none": no hint (no match, an ambiguous one, a file filed already or removed); all else "".
 //
 // FolderKind is the code of a system folder ("lectures", "seminars", "labs", "materials", "homework", "tickets").
-// SubjectName, FolderName and CreateName are plain text; CreateName is spelled by the schedule, never by the file name.
+// SubjectName, FolderName, CreateName and CreateAliases are plain text. CreateName and CreateAliases are those of the
+// schedule-subjects card (the name without the lesson-kind mark, the schedule's other spellings), never the file
+// name. CreateAliases is never null.
 type LibraryPlacementHint struct {
-	Kind        string `json:"kind"`
-	SubjectID   string `json:"subjectId"`
-	SubjectName string `json:"subjectName"`
-	FolderID    string `json:"folderId"`
-	FolderName  string `json:"folderName"`
-	FolderKind  string `json:"folderKind"`
-	CreateName  string `json:"createName"`
+	Kind          string   `json:"kind"`
+	SubjectID     string   `json:"subjectId"`
+	SubjectName   string   `json:"subjectName"`
+	FolderID      string   `json:"folderId"`
+	FolderName    string   `json:"folderName"`
+	FolderKind    string   `json:"folderKind"`
+	CreateName    string   `json:"createName"`
+	CreateAliases []string `json:"createAliases"`
 }
 
 // PlacementHint proposes where a file of «Входящие» goes. It changes nothing.
@@ -59,6 +62,8 @@ func (s *LibraryService) PlacementHint(ctx context.Context, materialID string) (
 // ImportFileTo is ImportFile into a folder of a subject («Добавить файл» on the page of a subject); folderID "" is
 // «Материалы». The same file filed elsewhere already is not moved: Existing is true and the material tells where it
 // lies (subjectId, folderId differ from the target). A subject or folder that is gone is refused, and nothing is kept.
+// A file stored but not placed (the subject went away meanwhile, or it was busy) is no error: NotPlaced is true and
+// the material lies in «Входящие».
 func (s *LibraryService) ImportFileTo(ctx context.Context, subjectID, folderID string) (LibraryImport, error) {
 	sub, folder := shared.SubjectID(subjectID), shared.FolderID(folderID)
 	if sub.Validate() != nil || (folder != "" && folder.Validate() != nil) {
@@ -94,24 +99,30 @@ func (s *LibraryService) importPathTo(ctx context.Context, path string, sub shar
 	if err != nil {
 		return LibraryImport{}, s.fail(op, err)
 	}
+	if res.NotPlaced {
+		s.log.Info(op, "result", "not_placed")
+	}
 	m := libraryMaterial(res.Material)
-	return LibraryImport{Existing: res.Existing, Material: &m}, nil
+	return LibraryImport{Existing: res.Existing, NotPlaced: res.NotPlaced, Material: &m}, nil
 }
 
 func libraryPlacementHint(p library.Placement) LibraryPlacementHint {
+	none := LibraryPlacementHint{Kind: PlacementNone, CreateAliases: []string{}}
 	switch p.Kind {
 	case placement.KindExisting:
 		if p.Subject == nil {
-			return LibraryPlacementHint{Kind: PlacementNone}
+			return none
 		}
 		return LibraryPlacementHint{
 			Kind: PlacementExisting, SubjectID: string(p.Subject.ID()), SubjectName: p.Subject.Name().String(),
 			FolderID: string(p.Folder.ID()), FolderName: p.FolderName.String(), FolderKind: string(p.FolderKind),
+			CreateAliases: []string{},
 		}
 	case placement.KindCreate:
 		return LibraryPlacementHint{
 			Kind: PlacementCreate, FolderName: p.FolderName.String(), FolderKind: string(p.FolderKind), CreateName: p.CreateName,
+			CreateAliases: append([]string{}, p.CreateAliases...),
 		}
 	}
-	return LibraryPlacementHint{Kind: PlacementNone}
+	return none
 }

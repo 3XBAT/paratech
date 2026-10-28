@@ -2,8 +2,8 @@
 // alias the file name contains as whole words, and a system folder from a lesson-kind marker («ЛР», «сем», «лекция»,
 // «билеты», «ДЗ»). No AI, and nothing is placed by it: the student confirms the hint or ignores it.
 //
-// The file name is untrusted text: it is only compared, never copied into the hint. A subject to create is named as
-// the schedule spells it.
+// The file name is untrusted text: it is only compared, never copied into the hint. A subject to create is named and
+// aliased as the schedule-subjects card would create it (ADR-0033): the caller passes those proposals in.
 package placement
 
 import (
@@ -40,15 +40,24 @@ type Candidate struct {
 	Folders []Folder
 }
 
+// Proposed is a subject the schedule-subjects card proposes to create (a schedulesubjects.Group of no subject): Name
+// without the lesson-kind mark, Spellings the schedule strings it groups (Group.Aliases). Both are matched.
+type Proposed struct {
+	Name      string
+	Spellings []string
+}
+
 // Hint is the proposal. KindExisting: SubjectID and FolderID (a system folder; «Материалы» when there is no marker or
-// the subject lacks the folder), FolderKind its code. KindCreate: CreateName as the schedule spells it and FolderKind
-// (the folder does not exist yet). KindNone: everything zero.
+// the subject lacks the folder), FolderKind its code. KindCreate: CreateName and CreateAliases of the proposed subject
+// (the spellings other than the name, each a valid name, at most subject.MaxAliases) and FolderKind (the folder does
+// not exist yet). KindNone: everything zero.
 type Hint struct {
-	Kind       Kind
-	SubjectID  shared.SubjectID
-	FolderID   shared.FolderID
-	FolderKind subject.System
-	CreateName string
+	Kind          Kind
+	SubjectID     shared.SubjectID
+	FolderID      shared.FolderID
+	FolderKind    subject.System
+	CreateName    string
+	CreateAliases []string
 }
 
 // Bounds of the work on an untrusted name: a material name has at most material.MaxNameRunes runes, so these only
@@ -60,13 +69,14 @@ const (
 	minWeight    = 2 // a single letter («C» of «C++») matches too much
 )
 
-// For proposes where a file named fileName goes. subjects are the subjects of the library; schedule the subject
-// strings of the schedule and the recordings that match no subject (SuggestSubjects).
+// For proposes where a file named fileName goes. subjects are the subjects of the library; schedule the subjects the
+// schedule-subjects card proposes to create.
 //
-// A longer match wins over a shorter one it overlaps («Физика твёрдого тела» over «Физика»). Two subjects matching
-// equally long, or at different places of the name («Физика и химия»), give no hint: never guess. A subject match,
-// even an ambiguous one, is never replaced by a schedule string; the schedule strings are chosen by the same rule.
-func For(fileName string, subjects []Candidate, schedule []string) Hint {
+// A longer match wins over a shorter one it overlaps («Физика твёрдого тела» over «Физика»), and then the shorter one
+// counts nowhere in the name («Физика лек Физика твёрдого тела»). Two subjects matching equally long, or at different
+// places of the name («Физика и химия»), give no hint: never guess. A subject match, even an ambiguous one, is never
+// replaced by a schedule proposal; the proposals are chosen by the same rule.
+func For(fileName string, subjects []Candidate, schedule []Proposed) Hint {
 	file := tokens(stem(fileName))
 	if len(file) == 0 {
 		return Hint{}
@@ -75,9 +85,7 @@ func For(fileName string, subjects []Candidate, schedule []string) Hint {
 	var hits []hit
 	for i, c := range subjects {
 		for _, n := range append([]string{c.Name}, c.Aliases...) {
-			if w, at, ok := find(file, tokens(n)); ok {
-				hits = append(hits, hit{key: string(c.ID), index: i, weight: w, at: at})
-			}
+			hits = appendHits(hits, file, tokens(n), string(c.ID), i)
 		}
 	}
 	if len(hits) > 0 {
@@ -95,29 +103,50 @@ func For(fileName string, subjects []Candidate, schedule []string) Hint {
 		return Hint{Kind: KindExisting, SubjectID: c.ID, FolderID: f, FolderKind: kind}
 	}
 
-	for i, s := range schedule {
-		if _, err := subject.NewName(values.CleanText(s)); err != nil {
+	for i, p := range schedule {
+		name := values.CleanText(p.Name)
+		if _, err := subject.NewName(name); err != nil {
 			continue // the page could not create it
 		}
-		words := trimMarkers(tokens(s))
-		if w, at, ok := find(file, words); ok {
-			hits = append(hits, hit{key: strings.Join(words, " "), index: i, weight: w, at: at})
+		key := strings.Join(tokens(name), " ")
+		for _, s := range append([]string{name}, p.Spellings...) {
+			hits = appendHits(hits, file, trimMarkers(tokens(s)), key, i)
 		}
 	}
 	best, ok := pick(hits)
 	if !ok {
 		return Hint{}
 	}
-	return Hint{Kind: KindCreate, FolderKind: folderKind(file, best.at), CreateName: values.CleanText(schedule[best.index])}
+	p := schedule[best.index]
+	name := values.CleanText(p.Name)
+	return Hint{Kind: KindCreate, FolderKind: folderKind(file, best.at), CreateName: name, CreateAliases: aliasesOf(name, p.Spellings)}
+}
+
+// aliasesOf is the spellings that make valid aliases of a subject named name: one per key, not the key of the name,
+// at most subject.MaxAliases.
+func aliasesOf(name string, spellings []string) []string {
+	var out []string
+	seen := map[string]bool{values.Key(name): true}
+	for _, s := range spellings {
+		s = values.CleanText(s)
+		k := values.Key(s)
+		if len(out) == subject.MaxAliases {
+			break
+		}
+		if _, err := subject.NewName(s); err != nil || seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, s)
+	}
+	return out
 }
 
 // span is where a match lies among the tokens of the file name: [from, to).
 type span struct{ from, to int }
 
-func (s span) overlaps(o span) bool { return s.from < o.to && o.from < s.to }
-
-// hit is a match of one subject (key: its id) or one schedule string (key: its words); index is its place in the
-// input, so the first of several hits with one key is kept.
+// hit is a match of one subject (key: its id) or one proposed subject (key: the words of its name); index is its place
+// in the input, so the first of several hits with one key is kept.
 type hit struct {
 	key    string
 	index  int
@@ -125,7 +154,8 @@ type hit struct {
 	at     span
 }
 
-// pick returns the heaviest hit; ok is false when a hit of another key is as heavy or lies apart from it.
+// pick returns the heaviest hit (the first of them). A key with a lighter hit inside a hit of the best key is a part
+// of it and counts nowhere; ok is false when any other key has a hit (as heavy, or apart from the best key).
 func pick(hits []hit) (hit, bool) {
 	if len(hits) == 0 {
 		return hit{}, false
@@ -136,24 +166,48 @@ func pick(hits []hit) (hit, bool) {
 			best = h
 		}
 	}
+
+	// cover[i] is the weight of the heaviest hit of the best key over token i (file has at most maxTokens tokens).
+	var cover [maxTokens]int
 	for _, h := range hits {
-		if h.key != best.key && (h.weight == best.weight || !h.at.overlaps(best.at)) {
+		if h.key == best.key {
+			for i := h.at.from; i < h.at.to; i++ {
+				cover[i] = max(cover[i], h.weight)
+			}
+		}
+	}
+	part := map[string]bool{}
+	for _, h := range hits {
+		if h.key == best.key || part[h.key] {
+			continue
+		}
+		for i := h.at.from; i < h.at.to; i++ {
+			if cover[i] > h.weight {
+				part[h.key] = true
+				break
+			}
+		}
+	}
+	for _, h := range hits {
+		if h.key != best.key && !part[h.key] {
 			return hit{}, false
 		}
 	}
 	return best, true
 }
 
-// find looks for words as a whole sequence of tokens of file; the weight is the runes of the words.
-func find(file, words []string) (weight int, at span, ok bool) {
+// appendHits adds a hit of key for every place words lie in file as a whole sequence of tokens; the weight is the
+// runes of the words. file has at most maxTokens tokens, so a name adds at most that many hits.
+func appendHits(hits []hit, file, words []string, key string, index int) []hit {
 	if len(words) == 0 || len(words) > len(file) {
-		return 0, span{}, false
+		return hits
 	}
+	weight := 0
 	for _, w := range words {
 		weight += utf8.RuneCountInString(w)
 	}
 	if weight < minWeight {
-		return 0, span{}, false
+		return hits
 	}
 outer:
 	for i := 0; i+len(words) <= len(file); i++ {
@@ -162,9 +216,9 @@ outer:
 				continue outer
 			}
 		}
-		return weight, span{i, i + len(words)}, true
+		hits = append(hits, hit{key: key, index: index, weight: weight, at: span{i, i + len(words)}})
 	}
-	return 0, span{}, false
+	return hits
 }
 
 // stem is the base name of a file without its extension.

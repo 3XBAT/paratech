@@ -28,10 +28,12 @@ type Upload struct {
 
 // Imported is the material of an upload. Existing: the same bytes were in the library already, so no new material
 // was made (a removed one came back into «Входящие», or into the target of the upload). An existing material already
-// filed stays where it is, also for an upload with a target: the caller tells by its subject and folder.
+// filed stays where it is, also for an upload with a target: the caller tells by its subject and folder. NotPlaced:
+// the upload had a target, the file is stored but placing it failed, so it lies in «Входящие».
 type Imported struct {
-	Material *material.Material
-	Existing bool
+	Material  *material.Material
+	Existing  bool
+	NotPlaced bool
 }
 
 // Inspected is what Inspect tells about a material: how far its text was read and, when there was text, the reader's

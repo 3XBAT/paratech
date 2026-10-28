@@ -172,10 +172,12 @@ type LibraryMaterial struct {
 }
 
 // LibraryImport is the outcome of ImportFile. Cancelled: the user closed the dialog (Material is null). Existing: the
-// same file was in the library already; that material is returned (a removed one is back in «Входящие»).
+// same file was in the library already; that material is returned (a removed one is back in «Входящие»). NotPlaced
+// (ImportFileTo only): the file is stored but could not be put into the subject, it lies in «Входящие».
 type LibraryImport struct {
 	Cancelled bool             `json:"cancelled"`
 	Existing  bool             `json:"existing"`
+	NotPlaced bool             `json:"notPlaced"`
 	Material  *LibraryMaterial `json:"material"`
 }
 
