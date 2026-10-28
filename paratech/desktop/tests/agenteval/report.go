@@ -7,15 +7,16 @@ import (
 )
 
 // Outcome is what the planner did with one request: every tool it called in order, the texts of its cards, the
-// assignment IDs its reply listed, the sources its triage_assignment calls gave and the error that ended the run
-// early, if any.
+// assignment IDs its reply listed, the sources its triage_assignment calls gave, the subjects its create_assignment
+// calls gave (NoSubject for none) and the error that ended the run early, if any.
 type Outcome struct {
-	Case    Request
-	Tools   []string
-	Texts   []string
-	Listed  []string
-	Sources []string
-	Err     string
+	Case     Request
+	Tools    []string
+	Texts    []string
+	Listed   []string
+	Sources  []string
+	Assigned []string
+	Err      string
 }
 
 // QuestionOutcome is a lecture question: the tools the planner called and, when the answer was measured, its
@@ -43,6 +44,7 @@ type Metrics struct {
 	Address                    int // texts that address or greet the student
 	Lists, ListsOK             int // requests whose reply should list assignments, and those that did
 	Sources, SourcesOK         int // requests with an expected triage source, and those that gave it
+	Assigned, AssignedOK       int // requests with an expected assignment subject, and those that gave it
 	Questions, AnswerRouted    int
 	Measured, Valid, Citations int
 	Errors                     int
@@ -80,6 +82,12 @@ func (r Report) Metrics() Metrics {
 			m.Sources++
 			if slices.Contains(o.Sources, o.Case.Source) {
 				m.SourcesOK++
+			}
+		}
+		if o.Case.AssignedSubject != "" {
+			m.Assigned++
+			if slices.Contains(o.Assigned, o.Case.AssignedSubject) {
+				m.AssignedOK++
 			}
 		}
 		for _, t := range o.Texts {
@@ -136,6 +144,7 @@ func (r Report) Markdown() string {
 	fmt.Fprintf(&b, "| Тексты с обращением («ты»/«вы»/приветствие) | %s |\n", share(m.Address, m.Texts))
 	fmt.Fprintf(&b, "| reply со списком заданий | %s |\n", share(m.ListsOK, m.Lists))
 	fmt.Fprintf(&b, "| triage_assignment: верный источник | %s |\n", share(m.SourcesOK, m.Sources))
+	fmt.Fprintf(&b, "| create_assignment: верный предмет | %s |\n", share(m.AssignedOK, m.Assigned))
 	fmt.Fprintf(&b, "| Ошибки прогона | %d |\n", m.Errors)
 
 	var misses []string
@@ -151,6 +160,10 @@ func (r Report) Markdown() string {
 		if o.Case.Source != "" && !slices.Contains(o.Sources, o.Case.Source) {
 			misses = append(misses, fmt.Sprintf("- %s «%s»: triage_assignment ждали с %s, получили %v",
 				o.Case.ID, o.Case.Text, o.Case.Source, o.Sources))
+		}
+		if o.Case.AssignedSubject != "" && !slices.Contains(o.Assigned, o.Case.AssignedSubject) {
+			misses = append(misses, fmt.Sprintf("- %s «%s»: create_assignment ждали с предметом %s, получили %v",
+				o.Case.ID, o.Case.Text, o.Case.AssignedSubject, o.Assigned))
 		}
 		for _, t := range o.Texts {
 			if w := FirstPersonWords(t); len(w) > 0 {

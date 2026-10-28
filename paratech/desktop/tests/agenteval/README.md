@@ -10,8 +10,11 @@ an address or greeting (ты/вы/привет), replies that list the assignmen
 citations (not measured until the Hub has the ANSWER prompt, TASK-118). Cases `b01`–`b05` are the beta questions of
 TASK-172/173 (greeting, «где черновики», «что горит», «помоги с пр 2-4», a topic without an assignment, which goes
 to `triage_assignment{topic}` since catalog v4). Cases `w12`, `w13` are the owner's requests that add an assignment
-(`create_assignment`, catalog v6). Since catalog v7 a reply text may have up to 4000 characters (TASK-223). The run
-is scored against `shared/testdata/tool_catalog_v7.json`.
+(`create_assignment`, catalog v6). Since catalog v7 a reply text may have up to 4000 characters (TASK-223). Since
+catalog v8 a request without a subject in a thread without one is asked «К какому предмету относится задание?»
+(TASK-233): a case with `answer` picks that option on the first question (the run sends its index and goes on), and
+`assigned_subject` is the subject `create_assignment` should get (`none` after «Без предмета»); cases `w13`,
+`s01`–`s04`. The run is scored against `shared/testdata/tool_catalog_v8.json`.
 
 CI (no tag) runs the scoring tests, checks the case file and runs the runner on the fake Hub.
 

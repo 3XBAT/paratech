@@ -178,7 +178,7 @@ type AgentQuestionsView struct {
 	Questions []AgentQuestionView `json:"questions"`
 }
 
-// AgentQuestionView is one question: kind choice (options, default index) or text.
+// AgentQuestionView is one question: kind choice (options, default index; -1 preselects nothing) or text.
 type AgentQuestionView struct {
 	Kind    string   `json:"kind"`
 	Text    string   `json:"text"`

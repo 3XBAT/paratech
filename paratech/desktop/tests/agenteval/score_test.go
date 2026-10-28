@@ -97,6 +97,15 @@ func TestParseCaseSetRejects(t *testing.T) {
 		"unknown subject": func(s string) string {
 			return strings.Replace(s, `"subject": "s-math", "class"`, `"subject": "s-chem", "class"`, 1)
 		},
+		"answer outside questions": func(s string) string {
+			return strings.Replace(s, `"class": "write", "tools": ["create_subject"]}`, `"class": "write", "tools": ["create_subject"], "answer": "Физика"}`, 1)
+		},
+		"assigned subject without create_assignment": func(s string) string {
+			return strings.Replace(s, `"class": "write", "tools": ["create_subject"]}`, `"class": "write", "tools": ["create_subject"], "assigned_subject": "none"}`, 1)
+		},
+		"unknown assigned subject": func(s string) string {
+			return strings.Replace(s, `"assigned_subject": "s-math"`, `"assigned_subject": "s-chem"`, 1)
+		},
 	} {
 		mutated := mutate(string(raw))
 		if mutated == string(raw) {
@@ -235,22 +244,76 @@ func TestBetaQuestionsInTheCaseSet(t *testing.T) {
 	}
 }
 
-// TestStudentAssignmentCasesInTheCaseSet: the two requests of the owner (ADR-0029, catalog v6) stay in the live set as
-// a write by create_assignment, never a send proposal; create_assignment is a U tool of the scored catalog.
+// TestStudentAssignmentCasesInTheCaseSet: the two requests of the owner (ADR-0029, catalog v6) stay in the live set
+// and end in create_assignment, never a send proposal; create_assignment is a U tool of the scored catalog. Since
+// catalog v8 the one that names no subject (w13) is asked the subject first and, answered «Без предмета», gets none.
+// The cases of TASK-233 cover a picked subject, «Без предмета», the thread's subject and no date (s01-s04).
 func TestStudentAssignmentCasesInTheCaseSet(t *testing.T) {
 	cs := loadCases(t)
-	for _, id := range []string{"w12", "w13"} {
-		i := slicesIndex(cs.Requests, id)
+	asked := []string{"list_subjects", "create_assignment"}
+	for _, tt := range []struct {
+		id, class, answer, subject string
+		tools                      []string
+	}{
+		{"w12", ClassWrite, "", "s-math", []string{"create_assignment"}},
+		{"w13", ClassQuestions, "Без предмета", NoSubject, asked},
+		{"s01", ClassQuestions, "Математический анализ", "s-math", asked},
+		{"s02", ClassQuestions, "Без предмета", NoSubject, asked},
+		{"s03", ClassWrite, "", "s-phys", []string{"create_assignment"}},
+		{"s04", ClassQuestions, "Физика", "s-phys", asked},
+	} {
+		i := slicesIndex(cs.Requests, tt.id)
 		if i < 0 {
-			t.Fatalf("%s: missing", id)
+			t.Fatalf("%s: missing", tt.id)
 		}
 		r := cs.Requests[i]
-		if r.Class != ClassWrite || len(r.Also) != 0 || !slices.Equal(r.Tools, []string{"create_assignment"}) {
-			t.Errorf("%s: %s %v, want write [create_assignment]", id, r.Expected(), r.Tools)
+		if r.Class != tt.class || len(r.Also) != 0 || !slices.Equal(r.Tools, tt.tools) || r.Answer != tt.answer ||
+			r.AssignedSubject != tt.subject {
+			t.Errorf("%s: %s %v answer %q subject %q, want %s %v %q %q", tt.id, r.Expected(), r.Tools, r.Answer,
+				r.AssignedSubject, tt.class, tt.tools, tt.answer, tt.subject)
+		}
+		if (r.Subject == "") != (tt.id != "s03") {
+			t.Errorf("%s: thread subject %q", tt.id, r.Subject)
 		}
 	}
 	if c := catalogClasses(t)["create_assignment"]; c != "U" {
 		t.Fatalf("create_assignment class = %q", c)
+	}
+}
+
+func TestAssignedSubject(t *testing.T) {
+	for _, tt := range []struct {
+		tool, args, want string
+	}{
+		{"create_assignment", `{"title":"Номер 5","subject":"s-math"}`, "s-math"},
+		{"create_assignment", `{"title":"Номер 5"}`, NoSubject},
+		{"create_assignment", `{"title":"Номер 5","subject":null}`, NoSubject},
+		{"create_assignment", `{"title":"Номер 5","subject":7}`, ""},
+		{"create_assignment", `not json`, ""},
+		{"edit_due", `{"subject":"s-math"}`, ""},
+	} {
+		if got := AssignedSubject(tt.tool, tt.args); got != tt.want {
+			t.Errorf("AssignedSubject(%s, %s) = %q, want %q", tt.tool, tt.args, got, tt.want)
+		}
+	}
+}
+
+func TestAnswerOption(t *testing.T) {
+	qs := `{"questions":[{"kind":"choice","question":"К какому предмету относится задание?","options":["Физика","Без предмета"]},` +
+		`{"kind":"choice","question":"Когда?","options":["Физика","завтра"]}]}`
+	for _, tt := range []struct {
+		args, option string
+		want         int
+	}{
+		{qs, "Физика", 0},
+		{qs, "Без предмета", 1},
+		{qs, "завтра", -1}, // only the first question is answered
+		{`{"questions":[]}`, "Физика", -1},
+		{`not json`, "Физика", -1},
+	} {
+		if got := AnswerOption(tt.args, tt.option); got != tt.want {
+			t.Errorf("AnswerOption(%s, %q) = %d, want %d", tt.args, tt.option, got, tt.want)
+		}
 	}
 }
 
@@ -389,5 +452,21 @@ func TestReport(t *testing.T) {
 	if md := alt.Markdown(); !strings.Contains(md, "ждали questions/read/reply [list_assignments], получили plan") ||
 		strings.Count(md, "b05 «") != 1 {
 		t.Errorf("alternative report:\n%s", md)
+	}
+
+	// Catalog v8: the subject create_assignment gets after the subject question counts; another one is reported.
+	none := Request{ID: "s02", Text: "Запиши", Class: ClassQuestions, Answer: "Без предмета",
+		Tools: []string{"list_subjects", "create_assignment"}, AssignedSubject: NoSubject}
+	asked := []string{"list_subjects", "ask_questions", "create_assignment"}
+	v8 := Report{Classes: classes, Requests: []Outcome{
+		{Case: none, Tools: asked, Assigned: []string{NoSubject}},
+		{Case: none, Tools: asked, Assigned: []string{"s-math"}},
+	}}
+	if m := v8.Metrics(); m.Assigned != 2 || m.AssignedOK != 1 || m.ClassOK != 2 || m.ToolsOK != 2 {
+		t.Fatalf("v8 metrics = %+v", m)
+	}
+	if md := v8.Markdown(); !strings.Contains(md, "| create_assignment: верный предмет | 1/2 (50%) |") ||
+		!strings.Contains(md, "s02 «Запиши»: create_assignment ждали с предметом none, получили [s-math]") {
+		t.Errorf("v8 report:\n%s", md)
 	}
 }
