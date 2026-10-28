@@ -5,7 +5,9 @@ import { type AgentContext, chatTexts, composerKey, type EarlierItem, entryModel
 import { blockingEntry, draftsFor, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
 import { Icon } from "../ui/Icon.js";
 import { AgentRequest, type CardActions } from "./AgentCards.js";
+import type { ContextFill } from "../bindings/agent.js";
 import { ChatBar, type ChatBarProps } from "./ChatBar.js";
+import { ContextHint, ContextRing } from "./ContextRing.js";
 import { ComposerPills, MentionPopup, MessagePills } from "./MentionParts.js";
 import type { MentionComposer } from "./useMentionComposer.js";
 
@@ -48,6 +50,8 @@ export interface AgentPanelViewProps {
   onOpenMention?: (kind: string, id: string) => void;
   /** The mentions of a live request that has no scope of its own (restored after a restart). */
   mentionsFor?: (entry: Entry) => readonly MentionView[] | undefined;
+  /** The context fill of the open chat; null or absent: no ring. */
+  fill?: ContextFill | null;
 }
 
 /**
@@ -163,6 +167,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
             <MentionPopup model={mn.popup} listId={mn.listId} active={mn.active} onPick={mn.pick} onHover={mn.hover} onRetry={mn.retry} />
           )}
         </div>
+        <ContextRing fill={props.fill ?? null} />
         <button
           type="submit"
           className="ag-send"
@@ -175,6 +180,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
           </svg>
         </button>
       </form>
+      <ContextHint fill={props.fill ?? null} onNew={props.chat?.onNew} />
       <div className="ag-ctx-wrap">
         <div className="ag-ctx">
           <span className="ag-chip">

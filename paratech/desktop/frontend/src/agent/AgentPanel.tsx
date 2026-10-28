@@ -16,6 +16,11 @@ import {
   contextFor,
   earlierItems,
   entryModel,
+  fillOf,
+  type FillMap,
+  fillsFromChat,
+  fillsFromList,
+  fillsFromUpdate,
   isFocusPanelKey,
   openAfterArchive,
   panelShortcut,
@@ -110,6 +115,8 @@ export function AgentPanel(props: {
   const [openId, setOpenId] = useState("");
   const [earlierReq, setEarlierReq] = useState<EarlierRequestView[]>([]);
   const [chatNote, setChatNote] = useState("");
+  // The context fill per chat: from the list, and from the update that ends a request.
+  const [fills, setFills] = useState<FillMap>({});
   const openRef = useRef(openId);
   openRef.current = openId;
   const entriesRef = useRef(state.entries);
@@ -136,6 +143,7 @@ export function AgentPanel(props: {
           return;
         }
         setChats(v.chats);
+        setFills((f) => fillsFromList(f, v.chats, entriesRef.current));
         setListed(true);
         setChatNote((n) => (n === listFailed ? "" : n));
         setOpenId((cur) => reconcileOpenChat(v.chats, cur !== startedOn || prefer === undefined ? cur : prefer, entriesRef.current));
@@ -248,6 +256,7 @@ export function AgentPanel(props: {
       try {
         const update = parseUpdate(data);
         dispatch({ type: "update", update });
+        setFills((f) => fillsFromUpdate(f, update));
         // With no chat open (and the first list read done), the first real update names the chat the request created.
         if (openRef.current === "" && update.threadId !== "" && update.turn > 0 && listDone.current) {
           setOpenId(update.threadId);
@@ -535,6 +544,7 @@ export function AgentPanel(props: {
     onNew: () => {
       void chatCall("new", () => api.newChat()).then((r) => {
         if (r?.chat) {
+          setFills((f) => fillsFromChat(f, r.chat!, entriesRef.current));
           setNotice("");
           setOpenId(r.chat.threadId);
           void refreshChats(r.chat.threadId);
@@ -545,6 +555,9 @@ export function AgentPanel(props: {
     onRename: async (id: string, title: string) => {
       const r = await chatCall("rename", () => api.renameChat(id, title));
       if (r?.problem === "") {
+        if (r.chat) {
+          setFills((f) => fillsFromChat(f, r.chat!, entriesRef.current));
+        }
         void refreshChats();
         return "";
       }
@@ -553,6 +566,9 @@ export function AgentPanel(props: {
     onArchive: (id: string) => {
       void chatCall("archive", () => api.archiveChat(id)).then((r) => {
         if (r?.problem === "") {
+          if (r.chat) {
+            setFills((f) => fillsFromChat(f, r.chat!, entriesRef.current));
+          }
           const next = openAfterArchive(chats, openRef.current, id, entriesRef.current);
           setOpenId(next);
           void refreshChats(next);
@@ -562,6 +578,9 @@ export function AgentPanel(props: {
     onRestore: (id: string) => {
       void chatCall("restore", () => api.restoreChat(id)).then((r) => {
         if (r?.problem === "") {
+          if (r.chat) {
+            setFills((f) => fillsFromChat(f, r.chat!, entriesRef.current));
+          }
           void refreshChats();
         }
       });
@@ -576,6 +595,7 @@ export function AgentPanel(props: {
       mentions={composer}
       onOpenMention={props.onOpenMention}
       mentionsFor={(e) => restoredMentions(e, earlierReq, openId)}
+      fill={fillOf(fills, openId)}
       ctx={ctx}
       draft={draft}
       notice={notice}
