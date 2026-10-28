@@ -162,7 +162,7 @@ func (winPlatform) recognize(ctx context.Context, lang string, prepare func(maxD
 		}
 		defer statics.release()
 
-		engine, err := newEngine(statics, lang)
+		engine, engineTag, err := newEngine(statics, lang)
 		if err != nil {
 			return err
 		}
@@ -174,6 +174,9 @@ func (winPlatform) recognize(ctx context.Context, lang string, prepare func(maxD
 		}
 		g, err := prepare(int(maxDim))
 		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil { // decoding may take long: do not start a recognition to cancel it at once
 			return err
 		}
 		bitmap, err := newGrayBitmap(g)
@@ -197,31 +200,38 @@ func (winPlatform) recognize(ctx context.Context, lang string, prepare func(maxD
 		}
 		defer result.release()
 
-		if lines, err = readLines(result); err != nil {
-			return err
-		}
-		tag, err = recognizerTag(engine)
+		lines, err = readLines(result)
+		tag = engineTag
 		return err
 	})
 	return lines, tag, err
 }
 
-// newEngine creates the engine for lang only; a null engine means Windows has no recognizer for it.
-func newEngine(statics *comObject, lang string) (*comObject, error) {
+// newEngine creates the engine for lang only and returns its recognizer tag; a null engine or an engine of another
+// language means Windows has no recognizer for lang.
+func newEngine(statics *comObject, lang string) (*comObject, string, error) {
 	language, err := newLanguage(lang)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer language.release()
 
 	engine, err := statics.getObjectArg("OcrEngine.TryCreateFromLanguage", slotTryCreateFromLanguage, language)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if engine == nil {
-		return nil, ErrNoLanguage
+		return nil, "", ErrNoLanguage
 	}
-	return engine, nil
+	tag, err := recognizerTag(engine)
+	if err == nil && !hasLanguage([]string{tag}, lang) {
+		err = fmt.Errorf("%w: Windows offered the %q recognizer", ErrNoLanguage, tag)
+	}
+	if err != nil {
+		engine.release()
+		return nil, "", err
+	}
+	return engine, tag, nil
 }
 
 func newLanguage(tag string) (*comObject, error) {

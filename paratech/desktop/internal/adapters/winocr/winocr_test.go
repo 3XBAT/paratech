@@ -12,6 +12,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -123,6 +124,10 @@ func TestReadErrors(t *testing.T) {
 	}{
 		{"english only", func() *fakePlatform { p := russianOnly(); p.langs = []string{"en-US"}; return p }, context.Background(), png40, ErrNoLanguage},
 		{"no languages", func() *fakePlatform { p := russianOnly(); p.langs = nil; return p }, context.Background(), png40, ErrNoLanguage},
+		{"engine of another language", func() *fakePlatform { p := russianOnly(); p.tag = "en-US"; return p }, context.Background(), png40, ErrNoLanguage},
+		{"engine without a language", func() *fakePlatform { p := russianOnly(); p.tag = ""; return p }, context.Background(), png40, ErrNoLanguage},
+		{"engine of a look-alike tag", func() *fakePlatform { p := russianOnly(); p.tag = "rus"; return p }, context.Background(), png40, ErrNoLanguage},
+		{"engine of a regional russian", func() *fakePlatform { p := russianOnly(); p.tag = "ru-RU"; return p }, context.Background(), png40, nil},
 		{"truncated png", russianOnly, context.Background(), png40[:len(png40)/2], ErrBadImage},
 		{"truncated jpeg", russianOnly, context.Background(), jpg40[:len(jpg40)/2], ErrBadImage},
 		{"png header only", russianOnly, context.Background(), png40[:33], ErrBadImage},
@@ -141,6 +146,16 @@ func TestReadErrors(t *testing.T) {
 				t.Fatalf("Read = %v, want %v", err, tt.want)
 			}
 		})
+	}
+}
+
+// TestErrNoLanguageTellsHowToInstall: the sentinel is what the user sees until the UI maps it.
+func TestErrNoLanguageTellsHowToInstall(t *testing.T) {
+	msg := ErrNoLanguage.Error()
+	for _, want := range []string{"Time & language", "Russian", "Optical character recognition", "restart"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("ErrNoLanguage = %q, want it to mention %q", msg, want)
+		}
 	}
 }
 

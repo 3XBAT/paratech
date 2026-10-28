@@ -15,8 +15,9 @@ var (
 	// ErrUnsupported means Windows OCR is not available: another OS, or a Windows without the OCR classes.
 	ErrUnsupported = errors.New("winocr: Windows OCR is not available")
 
-	// ErrNoLanguage means Windows has no Russian recognizer; the user adds it in the Windows language settings.
-	ErrNoLanguage = errors.New("winocr: no Russian OCR recognizer installed")
+	// ErrNoLanguage means Windows has no Russian recognizer; the message tells the user how to add it.
+	ErrNoLanguage = errors.New("winocr: no Russian OCR recognizer installed; in Windows Settings > Time & language > " +
+		"Language add Russian (Русский), install its optional feature \"Optical character recognition\", then restart the app")
 
 	// ErrBadImage means the image is not a PNG or JPEG the standard library can decode (truncated, damaged, empty).
 	ErrBadImage = errors.New("winocr: image cannot be decoded")
@@ -185,6 +186,9 @@ func (r *Reader) Read(ctx context.Context, img []byte) (Page, error) {
 		}
 		if bw == 0 || bh == 0 {
 			return fmt.Errorf("%w: the engine returned without the image", ErrEngine)
+		}
+		if !hasLanguage([]string{tag}, Language) {
+			return fmt.Errorf("%w: the engine recognised with %q", ErrNoLanguage, tag)
 		}
 		page = Page{
 			Lines:  toLines(lines, float64(hdr.width)/float64(bw), float64(hdr.height)/float64(bh), hdr.width, hdr.height),

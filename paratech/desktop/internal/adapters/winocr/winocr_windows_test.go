@@ -208,7 +208,7 @@ func TestAwaitCancelsReal(t *testing.T) {
 			return err
 		}
 		defer statics.release()
-		engine, err := newEngine(statics, Language)
+		engine, _, err := newEngine(statics, Language)
 		if err != nil {
 			return err
 		}
@@ -229,6 +229,47 @@ func TestAwaitCancelsReal(t *testing.T) {
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("await = %v, want context.Canceled", err)
+	}
+}
+
+// TestNewEngineIsRussianReal: the engine Windows creates for "ru" reports a Russian recognizer tag.
+func TestNewEngineIsRussianReal(t *testing.T) {
+	requireRussianOCR(t)
+	var tag string
+	err := session(func() error {
+		statics, err := activationFactory(classOcrEngine, &iidIOcrEngineStatics)
+		if err != nil {
+			return err
+		}
+		defer statics.release()
+		engine, got, err := newEngine(statics, Language)
+		if err != nil {
+			return err
+		}
+		engine.release()
+		tag = got
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasLanguage([]string{tag}, Language) {
+		t.Fatalf("recognizer tag = %q, want %q", tag, Language)
+	}
+}
+
+// TestRecognizeStopsAfterPrepareReal cancels the context inside prepare and hands back an empty image: recognize
+// returns the context's error before building the bitmap (which would fail with ErrBadImage).
+func TestRecognizeStopsAfterPrepareReal(t *testing.T) {
+	requireRussianOCR(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, _, err := winPlatform{}.recognize(ctx, Language, func(int) (*image.Gray, error) {
+		cancel()
+		return image.NewGray(image.Rect(0, 0, 0, 0)), nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("recognize = %v, want context.Canceled", err)
 	}
 }
 
@@ -398,7 +439,7 @@ func TestObjectsImplementTheInterfacesReal(t *testing.T) {
 		defer langs.release()
 		expect(langs, "IVectorView<Language>")
 
-		engine, err := newEngine(statics, Language)
+		engine, _, err := newEngine(statics, Language)
 		if err != nil {
 			return err
 		}
