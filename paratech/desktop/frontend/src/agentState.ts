@@ -3,11 +3,11 @@
 // operations, and a failed Ask arrives with an empty threadId. So every update is applied to the request it names
 // (threadId + turn) and does not depend on what came before, except that a finished request stays finished.
 
-import type { AgentState, AskInput, CallProblem, DraftView, UpdateView } from "./bindings/agent.js";
+import type { AgentState, AskInput, CallProblem, ChatProblem, CurrentView, DraftView, EarlierRequestView, UpdateView } from "./bindings/agent.js";
 
 /** One request in the thread: what the student typed (local) and the latest update of the core. */
 export interface Entry {
-  /** "thread:<id>:<turn>", "local:<n>" until the first update of a sent request, or "orphan:<scope>". */
+  /** "thread:<id>:<turn>", "local:<n>" until the first update of a sent request, or "orphan:<threadId>:<scope>". */
   key: string;
   /** Insertion order, for the stable order of the thread. */
   seq: number;
@@ -40,6 +40,8 @@ export type PanelAction =
   | { type: "rerunAsked"; from: { threadId: string; turn: number; text: string; scope: AskInput | null } }
   | { type: "rerunRefused"; key: string }
   | { type: "update"; update: UpdateView }
+  /** The current request of a chat opened after a restart (chatCurrent); `text` is what the student typed, from the history. */
+  | { type: "snapshot"; update: UpdateView; text: string }
   | { type: "draft"; draft: DraftView }
   | { type: "history"; requests: readonly UpdateView[] }
   | { type: "link"; link: AgentState };
@@ -145,7 +147,8 @@ function applyUpdateEntries(s: PanelState, u: UpdateView): PanelState {
     if (local) {
       return { ...s, entries: replace(s.entries, local.key, { ...local, update: u }) };
     }
-    const key = `orphan:${sc}`;
+    // The thread is part of the key: failures of two chats in the same scope must not overwrite each other.
+    const key = `orphan:${u.threadId}:${sc}`;
     const old = s.entries.find((e) => e.key === key);
     const orphan: Entry = { key, seq: old?.seq ?? s.nextSeq, threadId: "", turn: 0, text: "", scope: null, callProblem: "", update: u };
     return old
@@ -233,6 +236,16 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
       return { ...s, entries: s.entries.filter((x) => !(x.key === a.key && x.update === null)) };
     case "update":
       return applyUpdate(s, a.update);
+    case "snapshot": {
+      const u = a.update;
+      // A live update wins: the session already knows the chat, so a late snapshot is dropped, never merged.
+      if (isFailedAsk(u) || hasLiveRequest(s.entries, u.threadId)) {
+        return s;
+      }
+      // Under the same key as a live update, so the next update of this request replaces the card instead of adding one.
+      const entry: Entry = { key: threadKey(u.threadId, u.turn), seq: s.nextSeq, threadId: u.threadId, turn: u.turn, text: a.text, scope: null, callProblem: "", update: u };
+      return { ...s, entries: [...s.entries, entry], nextSeq: s.nextSeq + 1 };
+    }
     case "draft":
       return applyDraft(s, a.draft);
     case "history":
@@ -243,6 +256,75 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
     case "link":
       return { ...s, link: a.link };
   }
+}
+
+// ---- Snapshot of a chat opened after a restart (TASK-273) ----
+
+/**
+ * The panel already knows a request of the chat in this session (an update arrived, a rerun is shown, or a request sent
+ * into the chat is waiting for its first update): the live state is newer than any snapshot.
+ */
+export function hasLiveRequest(entries: readonly Entry[], threadId: string): boolean {
+  return entries.some(
+    (e) =>
+      (e.threadId === threadId && threadId !== "") ||
+      (e.threadId === "" && e.callProblem === "" && e.update === null && e.scope !== null && (e.scope.threadId ?? "") === threadId),
+  );
+}
+
+/** What the student typed in the request of `turn`, from the chat history; "" when the history does not have it. */
+export function snapshotText(requests: readonly EarlierRequestView[], turn: number): string {
+  return requests.find((r) => r.turn === turn)?.text ?? "";
+}
+
+export interface SnapshotDeps {
+  threadId: string;
+  /** The entries of the panel right now. */
+  entries(): readonly Entry[];
+  /** The chat is still the open one. */
+  stillOpen(): boolean;
+  /** chatCurrent of the chat. */
+  current(): Promise<CurrentView>;
+  /** The earlier requests of the chat (empty on failure); the snapshot waits for them to take the student's text. */
+  earlier: Promise<readonly EarlierRequestView[]>;
+  dispatch(a: PanelAction): void;
+  /** A problem of the call; "failed" when it threw. */
+  onProblem(p: ChatProblem): void;
+}
+
+/**
+ * Restores the current request of the opened chat as a live card. Nothing happens when the session already shows the
+ * chat; a snapshot that arrives after a switch of chat is dropped (the reducer drops one that a live update beat).
+ */
+export async function loadSnapshot(d: SnapshotDeps): Promise<void> {
+  if (d.threadId === "" || hasLiveRequest(d.entries(), d.threadId)) {
+    return;
+  }
+  let v: CurrentView;
+  try {
+    v = await d.current();
+  } catch {
+    if (d.stillOpen()) {
+      d.onProblem("failed");
+    }
+    return;
+  }
+  if (!d.stillOpen()) {
+    return;
+  }
+  if (v.problem !== "") {
+    d.onProblem(v.problem);
+    return;
+  }
+  // No request or an ended one: the text line of the history stays. An update of another chat is never taken.
+  if (v.update === null || v.update.threadId !== d.threadId) {
+    return;
+  }
+  const requests = await d.earlier.catch((): readonly EarlierRequestView[] => []);
+  if (!d.stillOpen()) {
+    return;
+  }
+  d.dispatch({ type: "snapshot", update: v.update, text: snapshotText(requests, v.update.turn) });
 }
 
 /** The thread in display order: a thread's requests together by turn, threads by first appearance. */
