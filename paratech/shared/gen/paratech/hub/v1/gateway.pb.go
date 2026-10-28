@@ -827,9 +827,10 @@ type AgentScope struct {
 	// Lesson or assignment open on the screen; empty when none.
 	LessonId     string `protobuf:"bytes,3,opt,name=lesson_id,json=lessonId,proto3" json:"lesson_id,omitempty"`
 	AssignmentId string `protobuf:"bytes,4,opt,name=assignment_id,json=assignmentId,proto3" json:"assignment_id,omitempty"`
-	// Objects the student mentioned with "@" in the current request (current = true) and the distinct mentions of the
-	// earlier requests in the history, at most 16. IDs only, never names or labels. Accepted from catalog_version 9 on;
-	// an older catalog with mentions is "invalid_argument".
+	// Objects the student mentioned with "@" in the current request (current = true) and the mentions of the earlier
+	// requests in the history (current = false), at most 16 in all. The desktop sends each object once; the Hub does not
+	// check for duplicates. IDs only, never names or labels. Accepted from catalog_version 9 on; an older catalog with
+	// mentions is "invalid_argument".
 	Mentions      []*AgentMention `protobuf:"bytes,5,rep,name=mentions,proto3" json:"mentions,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

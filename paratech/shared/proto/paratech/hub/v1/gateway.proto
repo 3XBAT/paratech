@@ -201,9 +201,10 @@ message AgentScope {
   // Lesson or assignment open on the screen; empty when none.
   string lesson_id = 3;
   string assignment_id = 4;
-  // Objects the student mentioned with "@" in the current request (current = true) and the distinct mentions of the
-  // earlier requests in the history, at most 16. IDs only, never names or labels. Accepted from catalog_version 9 on;
-  // an older catalog with mentions is "invalid_argument".
+  // Objects the student mentioned with "@" in the current request (current = true) and the mentions of the earlier
+  // requests in the history (current = false), at most 16 in all. The desktop sends each object once; the Hub does not
+  // check for duplicates. IDs only, never names or labels. Accepted from catalog_version 9 on; an older catalog with
+  // mentions is "invalid_argument".
   repeated AgentMention mentions = 5;
 }
 

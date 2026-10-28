@@ -281,6 +281,85 @@ func TestChatLayoutKeepsTheHistoryPrefix(t *testing.T) {
 	}
 }
 
+// cacheBlocks is the request as the cache sees it: the tools and the system blocks, then every message block as
+// "role:block JSON" in order, all without cache_control (a breakpoint is not part of the cached content), and the
+// indexes of the message blocks that carried a breakpoint.
+func cacheBlocks(t *testing.T, body []byte) (head string, blocks []string, marks []int) {
+	t.Helper()
+	var l struct {
+		Tools    json.RawMessage  `json:"tools"`
+		System   []map[string]any `json:"system"`
+		Messages []struct {
+			Role    string           `json:"role"`
+			Content []map[string]any `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &l); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range l.System {
+		delete(b, "cache_control")
+	}
+	sys, err := json.Marshal(l.System)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range l.Messages {
+		for _, b := range m.Content {
+			if _, ok := b["cache_control"]; ok {
+				marks = append(marks, len(blocks))
+				delete(b, "cache_control")
+			}
+			s, err := json.Marshal(b)
+			if err != nil {
+				t.Fatal(err)
+			}
+			blocks = append(blocks, m.Role+":"+string(s))
+		}
+	}
+	return string(l.Tools) + string(sys), blocks, marks
+}
+
+// TestChatLayoutCacheAcrossRequests: what the cache entries of request N serve to request N+1 of the same chat, where
+// request N has become an earlier pair. Tools, system and base (breakpoint 1) and the earlier pairs up to breakpoint 2
+// of request N are an exact prefix of request N+1, so it reads them from the cache. The scope block of request N is
+// not: in request N+1 that place holds the text of request N (the scope goes only before the current request), so the
+// entry of the last breakpoint of request N (scope, text, tool loop) is never reused by request N+1. Within request N
+// every step reuses the whole previous step.
+func TestChatLayoutCacheAcrossRequests(t *testing.T) {
+	earlier := []values.Turn{student(t, "what is a goroutine"), agentReply(t, "reply: A light thread.")}
+	loop := layoutTurns(t)[4:] // "find the lecture", its calls and results
+	turnsN := append(append([]values.Turn(nil), earlier...), loop...)
+	turnsN1 := append(append([]values.Turn(nil), earlier...), student(t, "find the lecture"), agentReply(t, "reply: Lecture 3."),
+		student(t, "and the seminar?"))
+	mentionsN := []values.Mention{mention(t, values.MentionLesson, "les-9", true)}
+	mentionsN1 := []values.Mention{mention(t, values.MentionLesson, "les-9", false)}
+
+	headN, n, marksN := cacheBlocks(t, sentBody(t, chatCall(t, values.ChatCatalogVersion, mentionsN, turnsN...)))
+	headN1, n1, _ := cacheBlocks(t, sentBody(t, chatCall(t, values.ChatCatalogVersion, mentionsN1, turnsN1...)))
+	if headN != headN1 {
+		t.Fatal("tools, system and base differ between two requests of one chat")
+	}
+	if len(marksN) != 2 || marksN[1] != len(n)-1 {
+		t.Fatalf("breakpoints of request N at %v of %d blocks", marksN, len(n))
+	}
+	pairsEnd := marksN[0] + 1 // the blocks up to breakpoint 2: the earlier pairs
+	if pairsEnd != 2 || len(n1) < pairsEnd || strings.Join(n[:pairsEnd], "\n") != strings.Join(n1[:pairsEnd], "\n") {
+		t.Fatalf("the earlier pairs of request N are not a prefix of request N+1:\n%q\n%q", n, n1)
+	}
+	// Request N continues with its scope; request N+1 with the text of request N, now an earlier pair.
+	if !strings.Contains(n[pairsEnd], "Current request") || !strings.Contains(n1[pairsEnd], "find the lecture") ||
+		strings.Contains(n1[pairsEnd], "Current request") {
+		t.Fatalf("block %d: request N %s, request N+1 %s", pairsEnd, n[pairsEnd], n1[pairsEnd])
+	}
+
+	// Step 1 of request N (its text only) is a prefix of step 2 (text, calls, results).
+	_, step1, _ := cacheBlocks(t, sentBody(t, chatCall(t, values.ChatCatalogVersion, mentionsN, append(append([]values.Turn(nil), earlier...), loop[0])...)))
+	if len(step1) >= len(n) || strings.Join(step1, "\n") != strings.Join(n[:len(step1)], "\n") {
+		t.Fatalf("step 1 is not a prefix of step 2:\n%q\n%q", step1, n)
+	}
+}
+
 // TestSummaryIsDelimitedData: the summary goes as a JSON string under its header, so text in it that imitates a block
 // or an instruction stays inside one string.
 func TestSummaryIsDelimitedData(t *testing.T) {

@@ -1213,7 +1213,7 @@ func TestAgentEvalHubV9MentionOfAnotherSubject(t *testing.T) {
 		steps            []v8Step
 	}{
 		{name: "lecture of another subject", text: "по @Физика @Лекция 3 задали решить номер 5 к пятнице",
-			rule: "lesson: the ID of a mentioned lesson",
+			rule: "lesson: the ID of a lesson mentioned in the last message (current true)",
 			mentions: []*hubv1.AgentMention{mentionOf(hubv1.AgentMentionKind_AGENT_MENTION_KIND_SUBJECT, "s1"),
 				mentionOf(hubv1.AgentMentionKind_AGENT_MENTION_KIND_LESSON, v9Lecture)},
 			steps: []v8Step{
@@ -1260,6 +1260,45 @@ func TestAgentEvalHubV9MentionOfAnotherSubject(t *testing.T) {
 				if !strings.Contains(pc.Scope(), `"subject":"s2"`) || strings.Contains(pc.Scope(), "Лекция") || strings.Contains(pc.Scope(), "Методичка") {
 					t.Fatalf("provider call %d: scope = %s", i, pc.Scope())
 				}
+			}
+		})
+	}
+}
+
+// TestAgentEvalHubV9EarlierMentionIsNotTheSubject: scripted (level 1) answers that follow the v9 prompt. The earlier
+// pair of the chat mentioned Физика (s1, current false in the scope); the new request is on the Матан screen (s2).
+// A last message that does not refer back takes the subject of the current request (s2), never the earlier mention;
+// one that refers back («туда же») may take the earlier mention (s1). The Hub does not check which subject is chosen
+// (both pass unchanged and sealed); it forwards the earlier mention with current false next to the screen subject.
+func TestAgentEvalHubV9EarlierMentionIsNotTheSubject(t *testing.T) {
+	earlier := []*hubv1.AgentTurn{studentText("что задали по @Физика?"), agentReplyTurn("reply: По физике заданий нет.")}
+	physics := []*hubv1.AgentMention{{Kind: hubv1.AgentMentionKind_AGENT_MENTION_KIND_SUBJECT, Id: "s1", Current: false}}
+	cases := []struct {
+		name, text, rule, subject string
+	}{
+		{name: "no reference back", text: "запиши: решить номер 5 к пятнице", subject: "s2",
+			rule: "it is never the subject or the lesson of the last message by itself"},
+		{name: "refers back", text: "запиши туда же: решить номер 5 к пятнице", subject: "s1",
+			rule: "gives the subject or the lesson only when the last message refers back to it"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newEvalHubAt(t, 9)
+			if !strings.Contains(h.system, c.rule) {
+				t.Fatalf("the v9 prompt has no rule %q", c.rule)
+			}
+			create := [3]string{"toolu_01", "create_assignment", `{"title":"Решить номер 5","subject":"` + c.subject + `","due":"2026-10-23"}`}
+			h.provider.Push(answerWith(t, create))
+			turns := append(append([]*hubv1.AgentTurn(nil), earlier...), studentText(c.text))
+			resp, err := h.step(t, h.v9Request("ag:th-eval:4:1", "s2", physics, turns...))
+			h.acceptedAsIs(t, resp, err, create)
+			if got := argsOf(t, resp.GetCalls().GetCalls()[0])["subject"]; got != c.subject {
+				t.Fatalf("subject = %v, want %s", got, c.subject)
+			}
+			pc := h.provider.Calls()[0]
+			if !strings.Contains(pc.Scope(), `"subject":"s2"`) || !strings.Contains(pc.Scope(), `"id":"s1","current":false`) ||
+				strings.Contains(pc.Scope(), `"current":true`) {
+				t.Fatalf("scope = %s", pc.Scope())
 			}
 		})
 	}
