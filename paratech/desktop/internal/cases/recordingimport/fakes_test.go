@@ -87,6 +87,7 @@ type original struct {
 	size    int64 // reported size; -1: the length
 	failAt  int   // a read reaching this position fails; 0: none
 	openErr error
+	read    int64 // bytes read from it
 }
 
 func (o *original) len() int64 {
@@ -161,6 +162,7 @@ func (c *closer) Read(p []byte) (int, error) {
 		p[i] = c.o.at(c.pos + i)
 	}
 	c.pos += k
+	c.o.read += k
 	return int(k), nil
 }
 
