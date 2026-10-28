@@ -85,8 +85,20 @@ type ContextFill struct {
 // text alone. entries are the stored entries of the chat before current; they should reach back past the window
 // (Overflow sees only the requests among them).
 func Fill(entries []values.HistoryEntry, current int, summary values.HistorySummary) ContextFill {
+	return fill(entries, current, 0, summary)
+}
+
+// NextFill is Fill of the chat's next request as its steps will read the history: only requests from HistoryFrom on
+// are sent (a restarted request sends no older one), so an earlier request that is not dropped and not summarized
+// counts as an Overflow. entries are read from the first request, oldest first, with the step's limit.
+func (th *Thread) NextFill(entries []values.HistoryEntry) ContextFill {
+	return fill(entries, th.turns+1, th.historyFrom, th.summary)
+}
+
+// fill is Fill when only requests from from on are sent.
+func fill(entries []values.HistoryEntry, current, from int, summary values.HistorySummary) ContextFill {
 	earlier := entries[:currentIndex(entries, current)]
-	pairs := earlierPairs(earlier, summary.Through())
+	pairs := earlierPairs(earlier[currentIndex(earlier, from):], summary.Through())
 
 	f := ContextFill{Turns: 1}
 	if !summary.IsZero() {

@@ -94,6 +94,10 @@ test("the api sends the typed arguments and reads the problem of the reply", asy
   assert.equal(methods.rerun, "paratech/desktop/internal/input/wails.AgentService.Rerun");
   const odd = agentApi(async () => ({ problem: "something new" }));
   assert.equal(await odd.stop({ threadId: "t", turn: 1 }), "failed");
+  // «Скрыть»: restartFrom goes to the core as typed (TASK-248).
+  const restart = { ...scope, threadId: "t", restartFrom: 3 };
+  assert.equal(await api.ask(restart), "offline");
+  assert.deepEqual(calls[4], [methods.ask, restart]);
 });
 
 test("history, undo and undoRequest call the binding with the new shapes and parse the replies", async () => {

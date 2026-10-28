@@ -233,6 +233,13 @@ func (r *AgentThreadRepository) Save(ctx context.Context, th *thread.Thread) err
 		}); err != nil {
 			return MapError(ctx, err)
 		}
+		if from := st.Current.DropsFrom; from > 0 {
+			if err := q.DropAgentTurns(ctx, sqlcgen.DropAgentTurnsParams{
+				DroppedBy: turn.Number, ThreadID: turn.ThreadID, FromNumber: int64(from),
+			}); err != nil {
+				return MapError(ctx, err)
+			}
+		}
 		if err := q.DeleteAgentTurn(ctx, sqlcgen.DeleteAgentTurnParams{ThreadID: turn.ThreadID, Number: turn.Number}); err != nil {
 			return MapError(ctx, err)
 		}
@@ -404,6 +411,12 @@ func (r *AgentThreadRepository) restore(ctx context.Context, row sqlcgen.AgentTh
 		if err != nil {
 			return bad(fmt.Sprintf("request %d", row.Turns), err)
 		}
+		// The marks of the requests it dropped are the stored form of DropsFrom.
+		from, err := r.db.Queries(ctx).FirstDroppedAgentTurn(ctx, sqlcgen.FirstDroppedAgentTurnParams{ThreadID: row.ID, DroppedBy: row.Turns})
+		if err != nil {
+			return nil, fmt.Errorf("%s %s: request %d: dropped: %w", opGetAgentThread, row.ID, row.Turns, MapError(ctx, err))
+		}
+		ts.DropsFrom = int(from)
 		st.Current = &ts
 	}
 	th, err := thread.Restore(st)

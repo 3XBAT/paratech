@@ -66,6 +66,7 @@ type TurnState struct {
 	Open         []OpenCall
 	Created      []Created
 	ReplyLine    string // set only while the request is final (FreezeReply)
+	DropsFrom    int    // RestartFrom: requests DropsFrom…Number-1 carry DroppedBy = Number; 0: none
 	StartedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -180,6 +181,8 @@ func restoreTurn(s TurnState, number int) (Turn, error) {
 		return bad("bad created ids")
 	case s.DroppedBy != 0:
 		return bad("the current request is dropped")
+	case s.DropsFrom < 0 || s.DropsFrom >= s.Number:
+		return bad("drops a request that is not earlier")
 	case s.ReplyLine != "" && !s.Status.final():
 		return bad("a reply line before the request is final")
 	case s.ReplyLine != "" && (values.HistoryTurn{AgentReply: s.ReplyLine}).Validate() != nil:
@@ -192,7 +195,7 @@ func restoreTurn(s TurnState, number int) (Turn, error) {
 		number: s.Number, scope: s.Scope, mentions: slices.Clone(s.Mentions), status: s.Status, resume: s.Resume,
 		stopReason: s.StopReason, budget: s.Budget, stepOpen: s.StepOpen, proposed: slices.Clone(s.ProposedPlan), approved: slices.Clone(s.ApprovedPlan),
 		used: slices.Clone(s.Used), retry: s.Retry, open: slices.Clone(s.Open), created: slices.Clone(s.Created),
-		replyLine: s.ReplyLine, startedAt: s.StartedAt, updatedAt: s.UpdatedAt,
+		replyLine: s.ReplyLine, dropsFrom: s.DropsFrom, startedAt: s.StartedAt, updatedAt: s.UpdatedAt,
 	}, nil
 }
 
@@ -209,7 +212,7 @@ func (th *Thread) State() State {
 			Number: t.number, Scope: t.scope, Mentions: slices.Clone(t.mentions), Status: t.status, Resume: t.resume,
 			StopReason: t.stopReason, Budget: t.budget, StepOpen: t.stepOpen, ProposedPlan: slices.Clone(t.proposed), ApprovedPlan: slices.Clone(t.approved),
 			Used: slices.Clone(t.used), Retry: t.retry, Open: slices.Clone(t.open), Created: slices.Clone(t.created),
-			ReplyLine: t.replyLine, StartedAt: t.startedAt, UpdatedAt: t.updatedAt,
+			ReplyLine: t.replyLine, DropsFrom: t.dropsFrom, StartedAt: t.startedAt, UpdatedAt: t.updatedAt,
 		}
 	}
 	return s

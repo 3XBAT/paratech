@@ -173,6 +173,9 @@ func (r *memThreads) Save(_ context.Context, th *thread.Thread) error {
 	th.Persisted(st.Version)
 	if r.history != nil && st.Current != nil {
 		r.history.mentioned(st.ID, st.Current.Number, values.MentionRefs(st.Current.Mentions))
+		if st.Current.DropsFrom > 0 {
+			r.history.drop(st.ID, st.Current.DropsFrom, st.Current.Number)
+		}
 	}
 	return nil
 }
@@ -219,6 +222,17 @@ func (h *memHistory) mentioned(id shared.ThreadID, turn int, refs []values.Ref) 
 	h.mentions[id][turn] = refs
 }
 
+// drop marks the stored entries of requests from…by-1 dropped by request by, as the sqlite Save marks agent_turns.
+func (h *memHistory) drop(id shared.ThreadID, from, by int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i, e := range h.entries[id] {
+		if e.Turn >= from && e.Turn < by {
+			h.entries[id][i].DroppedBy = by
+		}
+	}
+}
+
 func (h *memHistory) Append(_ context.Context, id shared.ThreadID, turn int, e values.HistoryTurn) error {
 	if err := e.Validate(); err != nil {
 		return err
@@ -243,7 +257,7 @@ func (h *memHistory) Since(_ context.Context, id shared.ThreadID, from, limit in
 	}
 	var out []values.HistoryEntry
 	for _, e := range h.entries[id] {
-		if e.Turn >= from {
+		if e.Turn >= from && e.DroppedBy == 0 { // dropped requests are left out before the limit, as in SQL
 			if refs := h.mentions[id][e.Turn]; len(refs) > 0 {
 				e.Mentions = slices.Clone(refs)
 			}

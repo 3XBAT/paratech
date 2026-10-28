@@ -67,6 +67,18 @@ SET status = 'CANCELLED', resume_status = '', stop_reason = '', step_open = 0, u
 WHERE thread_id = sqlc.arg(thread_id) AND number < sqlc.arg(number)
   AND status NOT IN ('DONE', 'FAILED', 'CANCELLED');
 
+-- Restart from an earlier message (thread.RestartFrom): requests from_number..dropped_by-1 are dropped by request
+-- dropped_by; nothing is deleted. Requests an earlier restart dropped get the new number, so the current request's
+-- marks are exactly its range.
+-- name: DropAgentTurns :exec
+UPDATE agent_turns SET dropped_by = sqlc.arg(dropped_by)
+WHERE thread_id = sqlc.arg(thread_id) AND number >= sqlc.arg(from_number) AND number < sqlc.arg(dropped_by);
+
+-- The first request a request dropped; 0 when it dropped none.
+-- name: FirstDroppedAgentTurn :one
+SELECT CAST(COALESCE(MIN(number), 0) AS INTEGER) AS number FROM agent_turns
+WHERE thread_id = sqlc.arg(thread_id) AND dropped_by = sqlc.arg(dropped_by);
+
 -- Threads whose current request was running (startup recovery).
 -- name: ListRunningAgentThreadIDs :many
 SELECT t.id FROM agent_threads t

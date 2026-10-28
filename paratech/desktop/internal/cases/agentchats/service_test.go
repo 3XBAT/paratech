@@ -2,6 +2,7 @@ package agentchats
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -342,6 +343,32 @@ func TestEarlierEdges(t *testing.T) {
 	e.history.err = boom
 	if _, err := e.svc.Earlier(t.Context(), "cut"); !errors.Is(err, boom) {
 		t.Fatalf("a failed read = %v", err)
+	}
+}
+
+// Dropped requests are hidden from the chat: neither the read nor, should it return them, the grouping keeps them.
+func TestEarlierWithoutDropped(t *testing.T) {
+	dropped := func(e values.HistoryEntry) values.HistoryEntry { e.DroppedBy = 4; return e }
+	entries := []values.HistoryEntry{
+		student(1, "первый"), calls(1, raw("a1", "reply", `{"text":"ответ 1"}`)), results(1, values.ShownResult("a1")),
+		dropped(student(2, "второй")), dropped(calls(2, raw("b1", "reply", `{"text":"ответ 2"}`))),
+		dropped(student(3, "третий")),
+		student(4, "заново"),
+	}
+	var turns []int
+	for _, r := range requestsOf(entries) {
+		turns = append(turns, r.turn)
+	}
+	if fmt.Sprint(turns) != "[1 4]" {
+		t.Fatalf("grouped requests %v, want [1 4]", turns)
+	}
+
+	e := newEnv(t)
+	e.chat(t, "c1", false, "первый", "второй", "третий", "заново")
+	e.history.entries["c1"] = entries
+	got, err := e.svc.Earlier(t.Context(), "c1")
+	if err != nil || len(got) != 2 || got[0].Turn != 1 || got[0].Reply != "ответ 1" || got[1].Turn != 4 || !got[1].Current {
+		t.Fatalf("Earlier = %+v, %v", got, err)
 	}
 }
 
