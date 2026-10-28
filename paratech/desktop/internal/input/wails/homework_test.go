@@ -832,9 +832,18 @@ func TestFrontendKnowsHomeworkErrors(t *testing.T) {
 		ErrSendCannotConfirm, ErrSendAlreadyDecided, ErrSendStale, ErrSendUnresolved, ErrSendIncomplete, ErrExportLocked,
 		ErrDeliveryNotFound, ErrDeliveryActionInvalid, ErrGenerationRunning, ErrSendFormat, // +2: TASK-094
 		ErrSendAssignmentDeleted, // TASK-231
+		ErrSendChooseTeacher,     // TASK-237
 	} {
 		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
 			t.Errorf("frontend/src/bindings/homework.ts does not list the error %q", e)
 		}
+	}
+	// The agent card lists the texts of its own binding too (TASK-237).
+	agent, err := os.ReadFile("../../../frontend/src/bindings/agentConfirm.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(agent), `"`+ErrSendChooseTeacher.Error()+`"`) {
+		t.Errorf("frontend/src/bindings/agentConfirm.ts does not list the error %q", ErrSendChooseTeacher)
 	}
 }
