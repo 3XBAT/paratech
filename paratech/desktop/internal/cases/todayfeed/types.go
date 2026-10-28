@@ -67,10 +67,11 @@ type PostView struct {
 	Lesson       LessonInfo
 	Headline     string
 	SummaryReady bool
-	Homework     int       // assignments found
-	EarliestDue  time.Time // zero: none has a deadline
-	Calendar     []CalendarAction
-	ShownAt      time.Time // when the post became worth showing
+	Homework     int              // assignments found, done ones too
+	HomeworkDone int              // of them marked «Выполнено» (ADR-0033 §9): the mark of the subject history
+	EarliestDue  time.Time        // zero: no open one has a deadline
+	Calendar     []CalendarAction // open ones only
+	ShownAt      time.Time        // when the post became worth showing
 }
 
 // LessonRow is a lesson of the day with its post, if the post-processing of its recording produced one.

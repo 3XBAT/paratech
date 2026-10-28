@@ -185,13 +185,14 @@ func (s *Screen) view(ctx context.Context, p *post.Post, now time.Time) (PostVie
 
 	facts := today.PostFacts{Summary: p.SummaryReady(), HomeworkChecked: p.HomeworkChecked()}
 	for _, a := range list {
-		facts.Homework = append(facts.Homework, today.Homework{Assignment: a.ID(), Due: a.Details().Due()})
+		facts.Homework = append(facts.Homework, today.Homework{Assignment: a.ID(), Due: a.Details().Due(), Done: a.Done()})
 	}
 	card := today.CardOf(facts, now)
 	v := PostView{
 		Recording: p.Recording(), Transcript: p.Transcript(), Lesson: s.lessonInfo(ctx, rec, now.Location()),
-		Headline: card.Headline, SummaryReady: card.Summary, Homework: card.Homework, EarliestDue: local(card.EarliestDue, now),
-		Calendar: make([]CalendarAction, 0, len(card.Calendar)), ShownAt: local(shown, now),
+		Headline: card.Headline, SummaryReady: card.Summary, Homework: card.Homework, HomeworkDone: card.Done,
+		EarliestDue: local(card.EarliestDue, now),
+		Calendar:    make([]CalendarAction, 0, len(card.Calendar)), ShownAt: local(shown, now),
 	}
 	for _, h := range card.Calendar {
 		v.Calendar = append(v.Calendar, CalendarAction{
