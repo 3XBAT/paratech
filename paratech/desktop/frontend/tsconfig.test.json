@@ -34,6 +34,7 @@
     "src/calendarView.ts",
     "src/homeworkView.ts",
     "src/profileView.ts",
+    "src/noteRecognitionView.ts",
     "src/lessonLabel.ts",
     "src/pages/LessonCorrection.tsx",
     "src/bindings/transcript.ts",

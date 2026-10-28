@@ -23,6 +23,25 @@ export interface Settings {
    * работу» before a work on a topic; off after «Больше не показывать» on that card.
    */
   freeWorkNotice: boolean;
+  /** «ИИ распознаёт фото конспектов» (TASK-294): "off" on a new install; "local" is the Windows recognizer. */
+  noteRecognition: NoteRecognition;
+  /** Whether Windows has the Russian text recognizer; matters only with "local". */
+  noteRecognitionLanguage: NoteRecognitionLanguage;
+}
+
+/** The engines of photo recognition; a later cloud engine is one more value here and in the core. */
+export const noteRecognitions = ["off", "local"] as const;
+export type NoteRecognition = (typeof noteRecognitions)[number];
+
+export const noteRecognitionLanguages = ["available", "missing", "unknown"] as const;
+export type NoteRecognitionLanguage = (typeof noteRecognitionLanguages)[number];
+
+function parseOneOf<T extends string>(raw: unknown, allowed: readonly T[], field: string): T {
+  const found = allowed.find((v) => v === raw);
+  if (found === undefined) {
+    throw new Error(`settings: ${field} is not one of ${allowed.join(", ")}`);
+  }
+  return found;
 }
 
 /** «Профиль студента» (TASK-094): the title page of a homework Word file names these; "" is not set. */
@@ -54,6 +73,7 @@ export const methods = {
   getProfile: "paratech/desktop/internal/input/wails.SettingsService.GetProfile",
   saveProfile: "paratech/desktop/internal/input/wails.SettingsService.SaveProfile",
   setFreeWorkNotice: "paratech/desktop/internal/input/wails.SettingsService.SetFreeWorkNotice",
+  setNoteRecognition: "paratech/desktop/internal/input/wails.SettingsService.SetNoteRecognition",
 } as const;
 
 /** Checks the shape of a reply; a malformed reply is an error, not a default. */
@@ -71,6 +91,8 @@ export function parseSettings(raw: unknown): Settings {
   if (typeof r.freeWorkNotice !== "boolean") {
     throw new Error("settings: freeWorkNotice is not a boolean");
   }
+  const noteRecognition = parseOneOf(r.noteRecognition, noteRecognitions, "noteRecognition");
+  const noteRecognitionLanguage = parseOneOf(r.noteRecognitionLanguage, noteRecognitionLanguages, "noteRecognitionLanguage");
   return {
     recordingPromptsEnabled: r.recordingPromptsEnabled,
     processOnlyOnAcPower: r.processOnlyOnAcPower,
@@ -78,6 +100,8 @@ export function parseSettings(raw: unknown): Settings {
     loadEstimates: parseModelLoadEstimates(r.loadEstimates),
     loadEstimatesModel: r.loadEstimatesModel,
     freeWorkNotice: r.freeWorkNotice,
+    noteRecognition,
+    noteRecognitionLanguage,
   };
 }
 
@@ -104,6 +128,8 @@ export interface SettingsApi {
   setRecognitionLoad(load: RecognitionLoad): Promise<Settings>;
   /** «Предупреждать перед свободной работой» on or off (TASK-188). */
   setFreeWorkNotice(on: boolean): Promise<Settings>;
+  /** The photo recognition engine: "off" or "local" (TASK-294). */
+  setNoteRecognition(mode: NoteRecognition): Promise<Settings>;
   getProfile(): Promise<StudentProfile>;
   /** Stores the profile; returns it as stored (trimmed). */
   saveProfile(profile: StudentProfile): Promise<StudentProfile>;
@@ -118,6 +144,7 @@ export function settingsApi(call: CallByName): SettingsApi {
     setProcessOnlyOnAcPower: async (enabled) => parseSettings(await call(methods.setProcessOnlyOnAcPower, enabled)),
     setRecognitionLoad: async (load) => parseSettings(await call(methods.setRecognitionLoad, load)),
     setFreeWorkNotice: async (on) => parseSettings(await call(methods.setFreeWorkNotice, on)),
+    setNoteRecognition: async (mode) => parseSettings(await call(methods.setNoteRecognition, mode)),
     getProfile: async () => parseProfile(await call(methods.getProfile)),
     saveProfile: async (profile) => parseProfile(await call(methods.saveProfile, profile)),
   };

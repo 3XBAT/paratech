@@ -189,7 +189,7 @@ test("the panel makes a free_work card of the update and skips one without a cal
 // ---- «Настройки» ----
 
 test("the settings switch calls SetFreeWorkNotice and takes the stored value", async () => {
-  const stored = { recordingPromptsEnabled: true, processOnlyOnAcPower: false, recognitionLoad: "gentle", loadEstimates: null, loadEstimatesModel: "", freeWorkNotice: true };
+  const stored = { recordingPromptsEnabled: true, processOnlyOnAcPower: false, recognitionLoad: "gentle", loadEstimates: null, loadEstimatesModel: "", freeWorkNotice: true, noteRecognition: "off", noteRecognitionLanguage: "unknown" };
   const calls = [];
   const api = settingsApi(async (method, ...args) => {
     calls.push([method, ...args]);

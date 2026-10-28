@@ -10,6 +10,7 @@ import {
   type StudentProfile,
 } from "../bindings/settings";
 import { estimatesTip, estimateTexts, loadDescriptions, loadLabels, settingEstimateLine } from "../durationEstimate";
+import { noteRecognitionLanguageHint, noteRecognitionModeFor, noteRecognitionOn, noteRecognitionTexts } from "../noteRecognitionView";
 import {
   emptyProfile,
   maxProfileLength,
@@ -100,6 +101,7 @@ export function SettingsPage(props: { part?: SettingsPart }) {
     void save(() => api.setRecognitionLoad(load));
   }
 
+  const languageHint = settings !== null ? noteRecognitionLanguageHint(settings) : null;
   const estimate =
     settings !== null ? settingEstimateLine(settings.loadEstimates, settings.loadEstimatesModel, settings.recognitionLoad) : null;
 
@@ -162,6 +164,22 @@ export function SettingsPage(props: { part?: SettingsPart }) {
               </div>
             </SettingsGroup>
             <SettingsGroup caption="Помощник">{toggleRow("freeWorkNotice", settings)}</SettingsGroup>
+            <SettingsGroup caption={noteRecognitionTexts.caption}>
+              <Switch
+                label={noteRecognitionTexts.label}
+                checked={noteRecognitionOn(settings)}
+                disabled={saving}
+                hint={noteRecognitionTexts.hint}
+                onChange={(checked) => void save(() => api.setNoteRecognition(noteRecognitionModeFor(checked)))}
+              />
+              {languageHint !== null && (
+                <div className="set">
+                  <span className="small slow" role="status">
+                    {languageHint}
+                  </span>
+                </div>
+              )}
+            </SettingsGroup>
           </>
         )}
         {/* While a change is saved every switch waits for it; this line says why they are dimmed. */}
