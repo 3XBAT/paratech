@@ -38,12 +38,12 @@ func (g *seqIDs) NewThreadID() shared.ThreadID {
 // fakeModel answers steps from a script; each entry is a reply or an error. It records every request.
 type fakeModel struct {
 	mu      sync.Mutex
-	script  []func(req values.StepRequest) (values.StepReply, error)
+	script  []func(ctx context.Context, req values.StepRequest, draft func(string)) (values.StepReply, error)
 	reqs    []values.StepRequest
 	replies map[string]values.StepReply // by key: a repeated key is replayed like the Hub does
 }
 
-func (m *fakeModel) Step(_ context.Context, req values.StepRequest) (values.StepReply, error) {
+func (m *fakeModel) Step(ctx context.Context, req values.StepRequest, draft func(string)) (values.StepReply, error) {
 	m.mu.Lock()
 	m.reqs = append(m.reqs, req)
 	if r, ok := m.replies[req.Key]; ok {
@@ -59,7 +59,7 @@ func (m *fakeModel) Step(_ context.Context, req values.StepRequest) (values.Step
 	m.script = m.script[1:]
 	m.mu.Unlock()
 
-	r, err := next(req)
+	r, err := next(ctx, req, draft)
 	if err == nil {
 		m.mu.Lock()
 		if m.replies == nil {
@@ -72,16 +72,21 @@ func (m *fakeModel) Step(_ context.Context, req values.StepRequest) (values.Step
 }
 
 func (m *fakeModel) then(calls ...values.RawCall) *fakeModel {
-	m.script = append(m.script, func(values.StepRequest) (values.StepReply, error) { return reply(calls...), nil })
-	return m
+	return m.do(func(values.StepRequest) (values.StepReply, error) { return reply(calls...), nil })
 }
 
 func (m *fakeModel) fail(err error) *fakeModel {
-	m.script = append(m.script, func(values.StepRequest) (values.StepReply, error) { return values.StepReply{}, err })
-	return m
+	return m.do(func(values.StepRequest) (values.StepReply, error) { return values.StepReply{}, err })
 }
 
 func (m *fakeModel) do(f func(values.StepRequest) (values.StepReply, error)) *fakeModel {
+	return m.stream(func(_ context.Context, req values.StepRequest, _ func(string)) (values.StepReply, error) {
+		return f(req)
+	})
+}
+
+// stream scripts a step that sees the ctx of the Hub call and the draft of its reply (nil without Drafts).
+func (m *fakeModel) stream(f func(ctx context.Context, req values.StepRequest, draft func(string)) (values.StepReply, error)) *fakeModel {
 	m.script = append(m.script, f)
 	return m
 }
@@ -363,6 +368,12 @@ func (p *recProgress) got() ([]Step, []thread.State) {
 // newEnvWith is newEnv with a Progress port (nil: none).
 func newEnvWith(t *testing.T, progress Progress) *env {
 	t.Helper()
+	return newEnvPorts(t, progress, nil)
+}
+
+// newEnvPorts is newEnv with the optional Progress and Drafts ports (nil: none).
+func newEnvPorts(t *testing.T, progress Progress, drafts Drafts) *env {
+	t.Helper()
 	e := &env{
 		model: &fakeModel{}, threads: &memThreads{}, history: &memHistory{},
 		clock: &fixedClock{now: time.Date(2026, 10, 22, 9, 0, 0, 0, moscow)}, effects: &fakeEffects{},
@@ -372,7 +383,7 @@ func newEnvWith(t *testing.T, progress Progress) *env {
 	svc, err := New(Deps{
 		Model: e.model, Threads: e.threads, History: e.history,
 		Subjects: e.subjects, Facts: zeroFacts{}, Tx: memTx{h: e.history, threads: e.threads}, Clock: e.clock, IDs: &seqIDs{},
-		Progress: progress, Effects: e.effects,
+		Progress: progress, Drafts: drafts, Effects: e.effects,
 	})
 	if err != nil {
 		t.Fatal(err)

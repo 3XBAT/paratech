@@ -266,8 +266,16 @@ func TestPanelSinkMapsUpdates(t *testing.T) {
 		t.Fatalf("draft events = %+v", drafts.data)
 	}
 	d, ok := drafts.data[0].(wails.AgentDraftView)
-	if !ok || d.ThreadID != "th1" || d.Turn != 3 || d.CallID != "c1" || len(d.Texts) != 1 || d.Texts[0] != "черновик" {
+	if !ok || d.ThreadID != "th1" || d.Turn != 3 || d.CallID != "c1" || len(d.Texts) != 1 || d.Texts[0] != "черновик" || d.Reply {
 		t.Errorf("draft event = %+v", drafts.data[0])
+	}
+	// A reply draft keeps its mark.
+	panelSink{p}.Draft(agentloop.Draft{Thread: "th1", Turn: 3, CallID: agentloop.ReplyDraftCall, Texts: []string{"ответ"}, Reply: true})
+	if len(drafts.data) != 2 {
+		t.Fatalf("draft events = %+v", drafts.data)
+	}
+	if d, ok := drafts.data[1].(wails.AgentDraftView); !ok || !d.Reply || d.CallID != agentloop.ReplyDraftCall || d.Texts[0] != "ответ" {
+		t.Errorf("reply draft event = %+v", drafts.data[1])
 	}
 	if wails.AgentDraftAnswered != wails.AgentDraftEnd(agentloop.DraftAnswered) ||
 		wails.AgentDraftDropped != wails.AgentDraftEnd(agentloop.DraftDropped) ||

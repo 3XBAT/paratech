@@ -79,10 +79,7 @@ func (s *Service) drive(ctx context.Context, c *change, op string) (st Step, err
 		if s.progress != nil {
 			s.progress.Started(ctx, progressOf(c.th))
 		}
-		reply, err := s.model.Step(ctx, req)
-		if err == nil {
-			err = reply.Validate()
-		}
+		reply, err := s.callModel(ctx, c, req)
 		if err != nil {
 			reason := reasonOf(ctx, err)
 			again, ferr := s.fail(ctx, c, err, reason, silent)
@@ -99,6 +96,32 @@ func (s *Service) drive(ctx context.Context, c *change, op string) (st Step, err
 			return s.abort(ctx, c, op, values.StopFailed, err)
 		}
 	}
+}
+
+// callModel is the Hub call of the open step of c, with its reply draft when Drafts gives one. The draft is ended
+// whatever happens (a panic too) and only ever shown: nothing here reads it. A call cut by the draft's ctx (a «Стоп»
+// was stored) fails like a lost connection, and the save of that failure finds the stored stop (see conflict).
+func (s *Service) callModel(ctx context.Context, c *change, req values.StepRequest) (values.StepReply, error) {
+	callCtx, draft := ctx, Draft(nil)
+	if s.drafts != nil {
+		dctx, d := s.drafts.Reply(ctx, progressOf(c.th))
+		if d != nil && dctx != nil {
+			callCtx, draft = dctx, d
+		}
+	}
+	var text func(string)
+	answered := false
+	if draft != nil {
+		text = draft.Text
+		defer func() { draft.End(answered) }()
+	}
+
+	reply, err := s.model.Step(callCtx, req, text)
+	if err == nil {
+		err = reply.Validate()
+	}
+	answered = err == nil
+	return reply, err
 }
 
 // stopReasonOf sorts a failed step (ADR-0021, TASK-116 decision d): an answer that may exist or may come later

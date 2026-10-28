@@ -88,20 +88,90 @@ func ended(callID string, end AgentDraftEnd) AgentDraft {
 	return AgentDraft{Thread: "th1", Turn: 1, CallID: callID, End: end}
 }
 
-// The JSON contract of the draft event the panel (TASK-148) reads: strings only.
+// The JSON contract of the draft event the panel (TASK-148, TASK-340) reads: an answer draft and a reply draft.
 func TestAgentDraftEventContract(t *testing.T) {
-	p, em, _ := draftPanel(t)
-	p.Draft(AgentDraft{Thread: "th1", Turn: 2, CallID: "c1", Texts: []string{"Ряд сходится", "второе"}})
-	if len(em.events) != 1 || em.events[0].name != "agent:draft" || len(em.events[0].data) != 1 {
-		t.Fatalf("events = %+v", em.events)
+	tests := []struct {
+		name  string
+		draft AgentDraft
+		want  string
+	}{
+		{
+			"answer", AgentDraft{Thread: "th1", Turn: 2, CallID: "c1", Texts: []string{"Ряд сходится", "второе"}},
+			`{"threadId":"th1","turn":2,"callId":"c1","texts":["Ряд сходится","второе"],"reply":false}`,
+		},
+		{
+			"reply", AgentDraft{Thread: "th1", Turn: 2, CallID: "step:reply", Texts: []string{"Ряд\nсходится"}, Reply: true},
+			`{"threadId":"th1","turn":2,"callId":"step:reply","texts":["Ряд\nсходится"],"reply":true}`,
+		},
 	}
-	got, err := json.Marshal(em.events[0].data[0])
-	if err != nil {
-		t.Fatal(err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, em, _ := draftPanel(t)
+			p.Draft(tt.draft)
+			if len(em.events) != 1 || em.events[0].name != "agent:draft" || len(em.events[0].data) != 1 {
+				t.Fatalf("events = %+v", em.events)
+			}
+			got, err := json.Marshal(em.events[0].data[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tt.want {
+				t.Fatalf("payload = %s\nwant      %s", got, tt.want)
+			}
+		})
 	}
-	const want = `{"threadId":"th1","turn":2,"callId":"c1","texts":["Ряд сходится","второе"]}`
-	if string(got) != want {
-		t.Fatalf("payload = %s\nwant      %s", got, want)
+}
+
+// A reply draft is throttled and cut like an answer draft: the answered end flushes the last text before the update
+// with the reply card; a «Стоп» drops what waits. A progress update of the request lifts the cut, so the reply of the
+// step that «Повторить» sends shows.
+func TestAgentReplyDraft(t *testing.T) {
+	replying := func(text string) AgentDraft {
+		return AgentDraft{Thread: "th1", Turn: 1, CallID: "step:reply", Texts: []string{text}, Reply: true}
+	}
+	replyEnd := func(end AgentDraftEnd) AgentDraft {
+		return AgentDraft{Thread: "th1", Turn: 1, CallID: "step:reply", End: end, Reply: true}
+	}
+	done := AgentUpdate{Thread: "th1", Turn: 1, Status: "DONE", Cards: []values.Card{values.ReplyCard{Text: "Итог"}}}
+
+	p, em, clock := draftPanel(t)
+	p.Draft(replying("Ит"))
+	p.Draft(replying("Ито")) // waits
+	p.Draft(replyEnd(AgentDraftAnswered))
+	p.Publish(done)
+	p.Draft(replying("поздно"))
+	clock.advance(time.Second)
+	if got := shown(t, em); !slices.Equal(got, []string{"Ит|", "Ито|", "update"}) {
+		t.Fatalf("answered reply: %q", got)
+	}
+	em.mu.Lock()
+	if v := em.events[1].data[0].(AgentDraftView); !v.Reply || v.CallID != "step:reply" {
+		t.Fatalf("reply draft = %+v", v)
+	}
+	em.mu.Unlock()
+
+	stopped := AgentUpdate{Thread: "th1", Turn: 1, Status: "STOPPED", StopReason: values.StopFailed,
+		Cards: []values.Card{values.StoppedCard{Reason: values.StopFailed}}}
+	p, em, clock = draftPanel(t)
+	p.Draft(replying("пол"))
+	p.Draft(replying("половина")) // waits
+	p.Publish(stopped)
+	p.Draft(replying("после стопа"))
+	p.Publish(AgentUpdate{Thread: "th1", Turn: 1, Status: "PLANNING", Progress: true}) // «Повторить»
+	p.Draft(replying("заново"))
+	clock.advance(time.Second)
+	if got := shown(t, em); !slices.Equal(got, []string{"пол|", "update", "update", "заново|"}) {
+		t.Fatalf("stopped, then repeated: %q", got)
+	}
+
+	// A progress update of another request lifts nothing.
+	p, em, clock = draftPanel(t)
+	p.Publish(stopped)
+	p.Publish(AgentUpdate{Thread: "th2", Turn: 1, Status: "PLANNING", Progress: true})
+	p.Draft(replying("чужой"))
+	clock.advance(time.Second)
+	if got := shown(t, em); !slices.Equal(got, []string{"update", "update"}) {
+		t.Fatalf("progress of another chat: %q", got)
 	}
 }
 

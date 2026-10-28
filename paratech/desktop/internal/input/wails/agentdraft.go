@@ -8,7 +8,8 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// AgentDraftEvent is the Wails event of the draft of an answer being read (ADR-0026); its data is one AgentDraftView.
+// AgentDraftEvent is the Wails event of the draft of an answer being read or of a reply being written (ADR-0026 and
+// its addendum); its data is one AgentDraftView.
 const AgentDraftEvent = "agent:draft"
 
 // agentDraftEvery bounds the drafts of one call to 10 a second; the last texts win.
@@ -25,23 +26,31 @@ const (
 )
 
 // AgentDraft is a draft as the Driver hands it; app maps the Driver's own type to it. Texts are the claim texts
-// written so far (cleaned by the Driver); a draft with End set has none.
+// written so far (cleaned by the Driver); a draft with End set has none. Reply marks the reply a planner step writes
+// (TASK-340): CallID is the Driver's fixed key of the request's reply and Texts its one whole text so far.
 type AgentDraft struct {
 	Thread shared.ThreadID
 	Turn   int
 	CallID string
 	Texts  []string
 	End    AgentDraftEnd
+	Reply  bool
 }
 
 // AgentDraftView is the JSON form of a draft: the request, the answer_question call and its texts so far. The texts
 // are untrusted model text, unchecked: the panel renders them as plain text marked «черновик» until the update with
 // the answer card of the call (or the stopped request) replaces them.
+//
+// Reply is true for the draft of the reply being written (ADR-0026 addendum): callId is "step:reply" for every step of
+// the request, so a newer text replaces the older, and texts holds one entry, the whole reply so far. The next update
+// of the request that is not a progress or a refused operation replaces it (the reply card, the cards of a step that
+// called tools, or the stopped request).
 type AgentDraftView struct {
 	ThreadID string   `json:"threadId"`
 	Turn     int      `json:"turn"`
 	CallID   string   `json:"callId"`
 	Texts    []string `json:"texts"`
+	Reply    bool     `json:"reply"`
 }
 
 // draftClock gives the time and the timers of the throttle; tests use a fake.
@@ -69,6 +78,7 @@ type draftTurn struct {
 // callDraft is the throttle of one call: texts wait for the timer when a draft was emitted less than agentDraftEvery
 // ago.
 type callDraft struct {
+	reply bool        // the draft of the reply of a step
 	texts []string    // not emitted yet; nil none
 	at    time.Time   // when a draft was last emitted; zero none
 	stop  func() bool // the timer of texts; nil none
@@ -98,7 +108,7 @@ func (p *AgentPanel) Draft(d AgentDraft) {
 		return
 	}
 	if c == nil {
-		c = &callDraft{}
+		c = &callDraft{reply: d.Reply}
 		t.calls[d.CallID] = c
 	}
 	c.texts = slices.Clone(d.Texts)
@@ -129,16 +139,24 @@ func (p *AgentPanel) draftDue(th shared.ThreadID, turn int, id string, c *callDr
 // draftsBefore settles the drafts of the request of u before u is emitted: an update of a running request (its calls
 // ran) emits the texts still waiting, so the last draft comes before the card; an update of a request that stopped
 // or ended drops them and cuts the drafts that come late. Progress updates and refused operations (a problem: another
-// operation of the thread was busy or stale) leave the drafts. p.mu is held.
+// operation of the thread was busy or stale) leave the drafts; a progress update of the request, sent before its next
+// Hub step («Продолжить», «Повторить» of a stopped request), lifts the cut, so the reply that step writes shows (a
+// stopped step's stream is cut by the Driver before). p.mu is held.
 func (p *AgentPanel) draftsBefore(u AgentUpdate) {
-	if u.Progress || u.Problem != "" || u.Thread == "" {
+	if u.Problem != "" || u.Thread == "" {
+		return
+	}
+	running := u.Status == thread.StatusPlanning || u.Status == thread.StatusExecuting
+	if u.Progress {
+		if t := p.drafts[u.Thread]; t != nil && t.turn == u.Turn && running {
+			t.cut = false
+		}
 		return
 	}
 	t := p.draftTurn(u.Thread, u.Turn)
 	if t == nil {
 		return
 	}
-	running := u.Status == thread.StatusPlanning || u.Status == thread.StatusExecuting
 	for id, c := range t.calls {
 		if running {
 			p.flushDraft(u.Thread, t.turn, id, c)
@@ -179,7 +197,7 @@ func (p *AgentPanel) emitDraft(th shared.ThreadID, turn int, id string, c *callD
 	if c.texts == nil {
 		return
 	}
-	v := AgentDraftView{ThreadID: string(th), Turn: turn, CallID: id, Texts: c.texts}
+	v := AgentDraftView{ThreadID: string(th), Turn: turn, CallID: id, Texts: c.texts, Reply: c.reply}
 	c.texts, c.at = nil, now
 	if p.emit != nil {
 		p.emit.Emit(AgentDraftEvent, v)
