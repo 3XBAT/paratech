@@ -21,8 +21,10 @@ func TestChildReportsLevelsWhileCapturing(t *testing.T) {
 	tests := []struct {
 		name  string
 		quiet bool
+		late  time.Duration // the first packet comes this late, as on a loaded machine
 	}{
 		{name: "tone"},
+		{name: "tone after a late first packet", late: 150 * time.Millisecond},
 		{name: "zeros", quiet: true},
 	}
 	for _, tt := range tests {
@@ -33,9 +35,31 @@ func TestChildReportsLevelsWhileCapturing(t *testing.T) {
 			if tt.quiet {
 				src.Gate = func() bool { return false }
 			}
+			if tt.late > 0 {
+				src.OnPacket = func(n int) {
+					if n == 1 {
+						time.Sleep(tt.late)
+					}
+				}
+			}
 			begun := time.Now()
-			run := startChild(t, context.Background(), src, request(t), audiocapture.ChildConfig{CaptureLevelInterval: every})
-			testenv.Eventually(t, "levels come", func() bool { return len(run.out.find(t, "level")) >= 5 }, nil)
+			run := startChild(t, context.Background(), src, request(t),
+				audiocapture.ChildConfig{CaptureLevelInterval: every, StatsInterval: 10 * time.Millisecond})
+			// A window before the first packet reaches the meter is rightly 0, and on a loaded runner that can be many
+			// windows: the levels are judged only once packets were metered and more windows passed after that.
+			testenv.Eventually(t, "packets are metered", func() bool {
+				stats := run.out.find(t, "stats")
+				if len(stats) == 0 {
+					return false
+				}
+				n, _ := stats[len(stats)-1]["packets"].(float64)
+				return n >= 10
+			}, nil)
+			metered := len(run.out.find(t, "level"))
+			testenv.Eventually(t, "levels come", func() bool {
+				levels := run.out.find(t, "level")
+				return len(levels) >= max(metered+2, 5) && (tt.quiet || heardIn(levels))
+			}, nil)
 			_ = run.stdin.Close()
 			if code := run.exit(t); code != audiocapture.ChildExitOK {
 				t.Fatalf("exit code %d", code)
@@ -78,6 +102,16 @@ func TestChildReportsLevelsWhileCapturing(t *testing.T) {
 			}
 		})
 	}
+}
+
+// heardIn reports whether any level event was heard.
+func heardIn(levels []map[string]any) bool {
+	for _, ev := range levels {
+		if l, ok := ev["level"].(float64); ok && values.SoundLevel(l).Heard() {
+			return true
+		}
+	}
+	return false
 }
 
 // TASK-099: the parent keeps the latest level of the running capture and reports nothing once it ended.
