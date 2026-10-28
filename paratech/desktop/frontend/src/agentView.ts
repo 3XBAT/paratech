@@ -3,9 +3,9 @@
 // impersonal («Создан предмет…», not «Я создал…»). Model text (summary, notes, questions, options, labels, replies) is
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
-import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, EarlierRequestView, FreeWorkRef, PlanStepView, PlanView, QuestionView } from "./bindings/agent.js";
+import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, ContextFill, EarlierRequestView, FreeWorkRef, PlanStepView, PlanView, QuestionView, UpdateView } from "./bindings/agent.js";
 import { approveLabel, type PlanProgress, planProgress, stepMarks, type StepMark, planWindow } from "./planView.js";
-import { type Entry, isBusyRefused, isRunning } from "./agentState.js";
+import { type Entry, isBusyRefused, isRunning, orderedEntries } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
 import { daysLeftText, dueText, parseMoment } from "./todayView.js";
 
@@ -285,6 +285,106 @@ export function openAfterArchive(chats: readonly ChatView[], openId: string, id:
     return openId;
   }
   return chatSections(chats, entries).active.find((r) => r.threadId !== id)?.threadId ?? "";
+}
+
+// ---- The context ring (ADR-0028 «The ring», TASK-208) ----
+// The core decides the level (fill.level); the page never turns a percent into a level.
+
+export const ringTexts = {
+  /** The start of the tooltip and of the accessible name; a non-breaking space keeps «%» with the number. */
+  label: (percent: number) => `Контекст чата: ${percent} %`,
+  normal: "Агент помнит весь разговор.",
+  high: "Скоро агент начнёт сжимать начало разговора.",
+  full: "Память чата почти заполнена: новый чат ответит точнее.",
+  hint: "Начать новый чат? Этот чат почти заполнен и останется в списке.",
+  hintButton: chatTexts.newChat,
+} as const;
+
+export interface RingModel {
+  /** Integer 0..100, what the arc is filled to. */
+  percent: number;
+  /** An overflow reads as «full». */
+  level: ContextFill["level"];
+  /** The tooltip and the accessible name: «Контекст чата: N %.» and one plain sentence. */
+  text: string;
+  /** The line under the field with «Новый чат». */
+  hint: boolean;
+}
+
+/** The ring for a fill; null (unknown fill, or an empty chat at 0 %) draws nothing. */
+export function ringModel(fill: ContextFill | null): RingModel | null {
+  if (fill === null) {
+    return null;
+  }
+  const percent = Number.isFinite(fill.percent) ? Math.min(100, Math.max(0, Math.floor(fill.percent))) : 0;
+  if (percent === 0) {
+    return null;
+  }
+  const level = fill.overflow ? "full" : fill.level;
+  return { percent, level, text: `${ringTexts.label(percent)}. ${ringTexts[level]}`, hint: level === "full" };
+}
+
+/** The last known fill of every chat, by thread id. A chat with an unreadable fill has no entry. */
+export type FillMap = Readonly<Record<string, ContextFill>>;
+
+function sameFill(a: ContextFill | undefined, b: ContextFill | undefined): boolean {
+  return a === b || (a !== undefined && b !== undefined && a.percent === b.percent && a.level === b.level && a.overflow === b.overflow);
+}
+
+/**
+ * The chat has a request that is not over: the core sends the update fill only at DONE, STOPPED, FAILED and CANCELLED,
+ * so until then the list (which already counts the request) must not move the ring. Covers a request sent but not yet
+ * named, and plan or question waits.
+ */
+function requestOpen(entries: readonly Entry[], threadId: string): boolean {
+  if (entries.some((e) => e.threadId === "" && e.callProblem === "" && e.update === null && e.scope !== null && (e.scope.threadId ?? "") === threadId)) {
+    return true;
+  }
+  const last = orderedEntries(entries)
+    .filter((e) => e.threadId === threadId && e.update !== null)
+    .at(-1);
+  return last?.update != null && !finishedStatuses.has(last.update.status);
+}
+
+/** The fill of a chat the page already knows is kept while its request is not over; otherwise the given one is taken. */
+function chosenFill(prev: FillMap, c: ChatView, entries: readonly Entry[]): ContextFill | undefined {
+  const keep = c.running || requestOpen(entries, c.threadId) ? prev[c.threadId] : undefined;
+  return keep ?? c.fill ?? undefined;
+}
+
+/**
+ * The fills after the chat list was read. A chat with a request that is not over keeps its last fill; with none known
+ * yet it takes the list's. A null fill in the list removes the entry. Chats that are no longer listed are dropped.
+ */
+export function fillsFromList(prev: FillMap, chats: readonly ChatView[], entries: readonly Entry[]): FillMap {
+  const next: Record<string, ContextFill> = {};
+  for (const c of chats) {
+    const fill = chosenFill(prev, c, entries);
+    if (fill !== undefined) {
+      next[c.threadId] = fill;
+    }
+  }
+  const same = Object.keys(next).length === Object.keys(prev).length && Object.keys(next).every((id) => sameFill(prev[id], next[id]));
+  return same ? prev : next;
+}
+
+/** The fills after a chat call (new, rename, archive, restore) replied with the chat: the ring does not wait for the list read. */
+export function fillsFromChat(prev: FillMap, chat: ChatView, entries: readonly Entry[]): FillMap {
+  const fill = chosenFill(prev, chat, entries);
+  return fill === undefined || sameFill(prev[chat.threadId], fill) ? prev : { ...prev, [chat.threadId]: fill };
+}
+
+/** The fills after an update: only an update that carries a fill (the end of a request) changes its own chat's. */
+export function fillsFromUpdate(prev: FillMap, update: Pick<UpdateView, "threadId" | "fill">): FillMap {
+  if (update.fill === null || update.threadId === "" || sameFill(prev[update.threadId], update.fill)) {
+    return prev;
+  }
+  return { ...prev, [update.threadId]: update.fill };
+}
+
+/** The fill to draw for the open chat; null: nothing. */
+export function fillOf(fills: FillMap, openId: string): ContextFill | null {
+  return openId !== "" && Object.prototype.hasOwnProperty.call(fills, openId) ? fills[openId] : null;
 }
 
 /**
