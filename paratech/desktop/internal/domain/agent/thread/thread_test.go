@@ -358,6 +358,41 @@ func TestBudget(t *testing.T) {
 		_, err := th.BeginStep(at(4))
 		assertBudgetStop(t, th, err)
 	})
+	// Beta 2026-10-28: every planner step resends a ~13k-token prefix (catalog, history window), so a free-topic
+	// request (list_subjects, triage, questions, write_work, reply...) must fit all MaxSteps on input tokens.
+	t.Run("full request of 13k steps fits", func(t *testing.T) {
+		th := newThread(t)
+		for i := range MaxSteps {
+			if _, err := th.BeginStep(at(i)); err != nil {
+				t.Fatalf("step %d: %v", i+1, err)
+			}
+			if err := th.EndStep(1, 13_300, at(i)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, err := th.BeginStep(at(20))
+		assertBudgetStop(t, th, err)
+		if turn, _ := th.Turn(); turn.Budget().Steps != MaxSteps {
+			t.Fatalf("stopped after %d steps, want the step limit", turn.Budget().Steps)
+		}
+	})
+	t.Run("runaway context stops before the step limit", func(t *testing.T) {
+		th := newThread(t)
+		steps := 0
+		var err error
+		for ; steps < MaxSteps; steps++ {
+			if _, err = th.BeginStep(at(steps)); err != nil {
+				break
+			}
+			if err := th.EndStep(1, 3*MaxStepInputTokens, at(steps)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		assertBudgetStop(t, th, err)
+		if steps >= MaxSteps/2 {
+			t.Fatalf("a runaway ran %d steps", steps)
+		}
+	})
 	t.Run("writes", func(t *testing.T) {
 		th := newThread(t)
 		if err := th.ProposePlan(planSteps(t, createSubjects(MaxWrites, "")), nil, at(2)); err != nil {

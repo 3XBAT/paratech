@@ -125,6 +125,8 @@ type core struct {
 
 	// cleanups remove what a crashed run left behind; they run at the start, before any job or recording writes.
 	cleanups []cleanup
+	// purge removes the assignments past the restore window once a day (wirePurge; the first run is a cleanup).
+	purge loop
 
 	ui wails.Core
 }
@@ -284,6 +286,9 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	}
 	handlers.calendar = c.calendarSync
 	if err := c.wireProposals(e, settings, lib, log); err != nil {
+		return err
+	}
+	if err := c.wirePurge(e, log); err != nil {
 		return err
 	}
 

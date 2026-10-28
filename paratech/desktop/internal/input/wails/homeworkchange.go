@@ -22,6 +22,7 @@ const (
 	changeChanged  = "changed"   // the assignment is not at the version the page showed: reload
 	changeDeleted  = "deleted"   // edit of a deleted assignment
 	changeNotFound = "not_found" // no such assignment (also an invalid id, or a delete of a deleted one)
+	changeExpired  = "expired"   // «Вернуть» after assignment.RestoreWindow: the assignment is purged (or soon)
 )
 
 // ChangeResult answers DeleteAssignment and RestoreAssignment: Problem "" with Assignment set (the deleted or the
@@ -83,6 +84,8 @@ func (s *HomeworkService) changeProblem(op string, err error) string {
 	switch {
 	case errors.Is(err, assignment.ErrInUse):
 		code = changeInUse
+	case errors.Is(err, assignment.ErrRestoreExpired):
+		code = changeExpired
 	case errors.Is(err, shared.ErrVersionConflict), errors.Is(err, assignment.ErrNotDeleted):
 		code = changeChanged
 	case errors.Is(err, assignment.ErrDeleted), errors.Is(err, shared.ErrNotFound):
