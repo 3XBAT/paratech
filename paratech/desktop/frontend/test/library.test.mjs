@@ -204,7 +204,8 @@ test("the tree: semesters, the subjects, the folders of the open subject with co
   assert.match(out, /Осень 2026[\s\S]*Весна 2026/);
   assert.match(out, /aria-current="page"[^>]*>[\s\S]*Физика/);
   // Only the open subject shows its folders.
-  assert.equal((out.match(/<div class="ti">/g) ?? []).length, 7, "seven folders of the open subject");
+  // The folders are buttons now (they scroll to their section, TASK-339), so they are counted by their class.
+  assert.equal((out.match(/class="ti fold"/g) ?? []).length, 7, "seven folders of the open subject");
   assert.match(out, /Лекции[\s\S]*?cnt num">2</);
 });
 
