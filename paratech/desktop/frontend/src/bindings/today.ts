@@ -59,7 +59,10 @@ export interface TodayPost {
   lesson: TodayPostLesson;
   headline: string;
   summaryReady: boolean;
+  /** Assignments found, done ones too. */
   homework: number;
+  /** Of them marked «Выполнено» (ADR-0033 §9). */
+  homeworkDone: number;
   /** "" when no homework has a date. */
   earliestDue: string;
   calendar: TodayCalendarAction[];
@@ -192,6 +195,8 @@ export function parsePost(raw: unknown): TodayPost {
     headline: str(r, "headline", w),
     summaryReady: bool(r, "summaryReady", w),
     homework: count(r, "homework", w),
+    // A post without the count (older shape) has none done; a count of another type is an error.
+    homeworkDone: r.homeworkDone === undefined ? 0 : count(r, "homeworkDone", w),
     earliestDue: str(r, "earliestDue", w),
     calendar: list(r.calendar, w, parseCalendar),
     shownAt: str(r, "shownAt", w),

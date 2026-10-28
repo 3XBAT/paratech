@@ -40,6 +40,8 @@ const item = (over = {}) => ({
   subjectFromLesson: true,
   correctedSubject: "",
   correctedTeacher: "",
+  done: false,
+  doneAt: "",
   ...over,
 });
 
