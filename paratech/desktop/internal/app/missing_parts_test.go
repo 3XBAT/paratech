@@ -290,15 +290,11 @@ func sendHomework(t *testing.T, a *App, tr shared.TranscriptID) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recipient, err := proposal.NewRecipient("teacher@school.example")
-	if err != nil {
-		t.Fatal(err)
-	}
 	p, err := proposal.New("p1", cvalues.NewUntrustedOutput(`{"kind":"send_homework_email","assignment_id":"a1"}`), now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.Validate(proposal.Facts{AssignmentExists: true, Recipient: recipient, Attachment: digest}, now); err != nil {
+	if err := p.Validate(proposal.Facts{AssignmentExists: true, Teachers: lecturer("teacher@school.example"), Attachment: digest}, now); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.Confirm(now); err != nil {

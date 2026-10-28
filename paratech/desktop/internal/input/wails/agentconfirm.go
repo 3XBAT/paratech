@@ -72,14 +72,17 @@ const (
 )
 
 // AgentConfirmProposals is the proposal pipeline (cases/homeworkflow) as the confirm card uses it (ARCH-42). Only the
-// student's click calls ConfirmSend, ConfirmSendWork, ConfirmDeadline and Decline; input/agent has no such method.
+// student's click calls ConfirmSendTo, ConfirmSendWorkTo, ConfirmDeadline and Decline; input/agent has no such
+// method, so the agent never chooses a teacher (hard rule 3).
 type AgentConfirmProposals interface {
 	ProposeDeadline(ctx context.Context, a shared.AssignmentID) (homeworkflow.ProposalView, error)
 	ProposeSendWork(ctx context.Context, w shared.WorkID) (homeworkflow.ProposalView, error)
-	ConfirmSendWork(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format) (homeworkflow.ProposalView, error)
+	ConfirmSendWorkTo(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format,
+		chosen homeworkflow.ChosenTeacher) (homeworkflow.ProposalView, error)
 	Get(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
 	Assignment(ctx context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error)
-	ConfirmSend(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format) (homeworkflow.ProposalView, error)
+	ConfirmSendTo(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format,
+		chosen homeworkflow.ChosenTeacher) (homeworkflow.ProposalView, error)
 	ConfirmDeadline(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
 	Decline(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
 }
@@ -110,10 +113,11 @@ func (c AgentConfirmCore) complete() bool {
 // deletion preview only, never from the agent's text: Kind "deadline", "send" or "delete_recording"; State "waiting",
 // "confirmed", "done", "declined", "stale" or "rejected" with Message for the last two.
 //
-// Deadline: Title (the assignment as stored, plain text), Subject, Due. Send: Recipient (the settings' address),
-// EmailSubject, AttachmentName, AttachmentSize, AttachmentFormat and DraftVersion (0: not a draft version as such),
-// Notice «В файле указан другой адрес — не используется» when the reader saw an address in the source file.
-// Confirm sends EmailSubject and AttachmentFormat back. Delete: Deletion, confirmed through RecordingDeleteService.
+// Deadline: Title (the assignment as stored, plain text), Subject, Due. Send: Recipient (a teacher of the subject,
+// with RecipientName, Role, Reason, SubjectID and Options as described in homeworkrecipient.go), EmailSubject,
+// AttachmentName, AttachmentSize, AttachmentFormat and DraftVersion (0: not a draft version as such), Notice «В файле
+// указан другой адрес — не используется» when the reader saw an address in the source file. Confirm sends
+// EmailSubject, AttachmentFormat and the chosen option back. Delete: Deletion, confirmed through RecordingDeleteService.
 type AgentConfirmCard struct {
 	Kind             string           `json:"kind"`
 	TargetKind       string           `json:"targetKind"`
@@ -125,6 +129,11 @@ type AgentConfirmCard struct {
 	Subject          string           `json:"subject"`
 	Due              string           `json:"due"`
 	Recipient        string           `json:"recipient"`
+	RecipientName    string           `json:"recipientName"`
+	Role             string           `json:"role"`
+	Reason           string           `json:"reason"`
+	SubjectID        string           `json:"subjectId"`
+	Options          []TeacherOption  `json:"options"`
 	EmailSubject     string           `json:"emailSubject"`
 	AttachmentName   string           `json:"attachmentName"`
 	AttachmentSize   int64            `json:"attachmentSize"`
@@ -224,7 +233,11 @@ func (s *AgentConfirmService) ProposeSendWork(ctx context.Context, workID string
 // showed (another one by now makes it stale, nothing is sent), a deadline is put into the calendar. A second click is
 // safe: no second email and no second event (hard rule 7); an email whose outcome is unknown is never sent again here,
 // it is resolved in the list of emails. A deletion preview is confirmed in the deletion window instead.
-func (s *AgentConfirmService) Confirm(ctx context.Context, kind, id, emailSubject, format string) (AgentConfirmCard, error) {
+//
+// role and address are the teacher the student clicked when a send card asks «Кому отправить?» (Reason
+// "choose_teacher") and the address that option showed; "" and "" when the card asked nothing. Without a choice such
+// a send is refused with ErrSendChooseTeacher; another current address of the role makes it stale.
+func (s *AgentConfirmService) Confirm(ctx context.Context, kind, id, emailSubject, format, role, address string) (AgentConfirmCard, error) {
 	switch values.IDKind(kind) {
 	case values.KindPreview:
 		return AgentConfirmCard{}, ErrAgentConfirmDeleteHere
@@ -246,13 +259,13 @@ func (s *AgentConfirmService) Confirm(ctx context.Context, kind, id, emailSubjec
 		if ferr != nil {
 			return AgentConfirmCard{}, ferr
 		}
-		v, err = s.core.Proposals.ConfirmSend(ctx, pid, emailSubject, f)
+		v, err = s.core.Proposals.ConfirmSendTo(ctx, pid, emailSubject, f, chosenTeacher(role, address))
 	case proposal.KindSendWork:
 		f, ok := workFormats[format]
 		if !ok {
 			return AgentConfirmCard{}, ErrAgentConfirmInvalid
 		}
-		v, err = s.core.Proposals.ConfirmSendWork(ctx, pid, emailSubject, f)
+		v, err = s.core.Proposals.ConfirmSendWorkTo(ctx, pid, emailSubject, f, chosenTeacher(role, address))
 	case proposal.KindDeadlineEvent:
 		v, err = s.core.Proposals.ConfirmDeadline(ctx, pid)
 	default:
@@ -304,6 +317,8 @@ func (s *AgentConfirmService) proposalCard(ctx context.Context, v homeworkflow.P
 	case proposal.KindSendHomework, proposal.KindSendWork:
 		card.Kind = agentCardSend
 		card.Recipient, card.EmailSubject, card.DraftVersion = v.Recipient, v.Subject, v.DraftVersion
+		card.RecipientName, card.Role, card.Reason = v.RecipientName, string(v.RecipientRole), string(v.RecipientReason)
+		card.SubjectID, card.Options = string(v.SubjectID), teacherOptions(v)
 		card.AttachmentName, card.AttachmentSize, card.AttachmentFormat = v.AttachmentName, v.AttachmentSize, string(v.AttachmentFormat)
 	default:
 		s.log.Warn(opConfirmCard, "result", "not an agent proposal", "kind", v.Kind)
@@ -321,6 +336,9 @@ func (s *AgentConfirmService) proposalCard(ctx context.Context, v homeworkflow.P
 		if v.Reason == proposal.ReasonDueOutOfRange {
 			card.Message = msgDueOutOfRange
 		}
+		if msg, ok := recipientMessage(v.Reason, v.RecipientRole, ""); ok {
+			card.Message = msg // named with the subject below when the assignment is read
+		}
 	case proposal.StatusStale:
 		card.Message = string(ErrSendStale)
 	}
@@ -333,6 +351,9 @@ func (s *AgentConfirmService) proposalCard(ctx context.Context, v homeworkflow.P
 		return AgentConfirmCard{}, s.fail(opConfirmCard, err)
 	}
 	card.Subject = a.Subject
+	if msg, ok := recipientMessage(v.Reason, v.RecipientRole, a.Subject); ok && v.Status == proposal.StatusRejected {
+		card.Message = msg
+	}
 	if card.Kind == agentCardDeadline && card.Title == "" {
 		card.Title = a.Title
 	}
@@ -346,8 +367,8 @@ func (s *AgentConfirmService) proposalCard(ctx context.Context, v homeworkflow.P
 }
 
 // notice is «В файле указан другой адрес — не используется» when the reader saw an address in the material the
-// assignment came from. The address goes nowhere: the recipient is always the one of the settings. A failed read
-// only loses the hint.
+// assignment came from. The address goes nowhere: the recipient is always a teacher of the subject in the library. A
+// failed read only loses the hint.
 func (s *AgentConfirmService) notice(ctx context.Context, m shared.MaterialID) string {
 	if m == "" {
 		return ""
@@ -388,9 +409,12 @@ func (s *AgentConfirmService) confirmError(err error) error {
 	case errors.Is(err, proposal.ErrInvalidTransition):
 		s.log.Info(opAgentConfirm, "result", err)
 		return ErrAgentConfirmDecided
-	case errors.Is(err, proposal.ErrStale):
+	case errors.Is(err, proposal.ErrStale), errors.Is(err, proposal.ErrInvalidRecipient):
 		s.log.Info(opAgentConfirm, "result", err)
 		return ErrSendStale
+	case errors.Is(err, proposal.ErrChooseTeacher):
+		s.log.Info(opAgentConfirm, "result", "choose_teacher")
+		return ErrSendChooseTeacher
 	case errors.Is(err, senddelivery.ErrUnresolvedDelivery):
 		s.log.Info(opAgentConfirm, "result", err)
 		return ErrSendUnresolved

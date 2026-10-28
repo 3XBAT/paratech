@@ -80,7 +80,7 @@ test("binding: method names, arguments and strict parsing", async () => {
   await api.proposeDeadline("a1");
   assert.deepEqual(seen, [
     [methods.card, ["proposal", "p1"]],
-    [methods.confirm, ["proposal", "p1", "ДЗ по матанализу", "txt"]],
+    [methods.confirm, ["proposal", "p1", "ДЗ по матанализу", "txt", "", ""]], // no choice asked: "" and "" (TASK-237)
     [methods.decline, ["preview", "r1"]],
     [methods.proposeDeadline, ["a1"]],
   ]);

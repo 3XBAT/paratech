@@ -25,7 +25,7 @@ func TestSendWithAFormat(t *testing.T) {
 		e.proposals.format != proposal.FormatDocx {
 		t.Fatalf("PrepareSend(docx) = %+v, %v; use case got %q", got, err, e.proposals.format)
 	}
-	if err := e.svc.ConfirmSend(ctx, "p1", got.Subject, got.AttachmentFormat); err != nil || e.proposals.shownFormat != proposal.FormatDocx {
+	if err := e.svc.ConfirmSend(ctx, "p1", got.Subject, got.AttachmentFormat, "", ""); err != nil || e.proposals.shownFormat != proposal.FormatDocx {
 		t.Fatalf("ConfirmSend = %v, shown format %q", err, e.proposals.shownFormat)
 	}
 
@@ -34,7 +34,7 @@ func TestSendWithAFormat(t *testing.T) {
 		if _, err := e.svc.PrepareSend(ctx, "a1", bad); !errors.Is(err, ErrSendFormat) {
 			t.Errorf("PrepareSend(%q) = %v, want ErrSendFormat", bad, err)
 		}
-		if err := e.svc.ConfirmSend(ctx, "p1", "ДЗ", bad); !errors.Is(err, ErrSendFormat) {
+		if err := e.svc.ConfirmSend(ctx, "p1", "ДЗ", bad, "", ""); !errors.Is(err, ErrSendFormat) {
 			t.Errorf("ConfirmSend(%q) = %v, want ErrSendFormat", bad, err)
 		}
 		if calls := e.calls.list(); len(calls) != 0 {

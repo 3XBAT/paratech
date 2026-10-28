@@ -25,8 +25,9 @@ type confirmProposals struct {
 	assignments map[shared.AssignmentID]homeworkflow.AssignmentView
 	sends       int
 	events      int
-	unresolved  bool  // an earlier email of the assignment has an unknown outcome
-	err         error // returned by the confirmations when set
+	unresolved  bool                       // an earlier email of the assignment has an unknown outcome
+	err         error                      // returned by the confirmations when set
+	chosen      homeworkflow.ChosenTeacher // the last ConfirmSendTo or ConfirmSendWorkTo
 }
 
 func newConfirmProposals() *confirmProposals {
@@ -80,7 +81,9 @@ func (f *confirmProposals) Assignment(_ context.Context, id shared.AssignmentID)
 	return a, nil
 }
 
-func (f *confirmProposals) ConfirmSend(_ context.Context, id proposal.ID, subject string, format proposal.Format) (homeworkflow.ProposalView, error) {
+func (f *confirmProposals) ConfirmSendTo(_ context.Context, id proposal.ID, subject string, format proposal.Format,
+	chosen homeworkflow.ChosenTeacher) (homeworkflow.ProposalView, error) {
+	f.chosen = chosen
 	v := f.views[id]
 	switch {
 	case f.err != nil:
@@ -229,11 +232,11 @@ func TestAgentConfirmIsIdempotent(t *testing.T) {
 	p := newConfirmProposals()
 	s := newConfirmService(p)
 	for click := range 2 {
-		got, err := s.Confirm(t.Context(), "proposal", "p-send", "ДЗ · Физика · до 24.10", "txt")
+		got, err := s.Confirm(t.Context(), "proposal", "p-send", "ДЗ · Физика · до 24.10", "txt", "", "")
 		if err != nil || got.State != "done" {
 			t.Fatalf("send click %d = %+v, %v", click+1, got, err)
 		}
-		if got, err := s.Confirm(t.Context(), "proposal", "p-due", "", ""); err != nil || got.State != "done" {
+		if got, err := s.Confirm(t.Context(), "proposal", "p-due", "", "", "", ""); err != nil || got.State != "done" {
 			t.Fatalf("deadline click %d = %+v, %v", click+1, got, err)
 		}
 	}
@@ -273,7 +276,7 @@ func TestAgentConfirmErrors(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup(p)
 			}
-			if _, err := newConfirmService(p).Confirm(t.Context(), tt.kind, tt.id, tt.subj, tt.fmt); !errors.Is(err, tt.want) {
+			if _, err := newConfirmService(p).Confirm(t.Context(), tt.kind, tt.id, tt.subj, tt.fmt, "", ""); !errors.Is(err, tt.want) {
 				t.Fatalf("err = %v, want %v", err, tt.want)
 			}
 			if p.sends != 0 {
@@ -290,7 +293,7 @@ func TestAgentConfirmNeverResendsAnUnknownEmail(t *testing.T) {
 	p.unresolved = true
 	s := newConfirmService(p)
 	for range 2 {
-		if _, err := s.Confirm(t.Context(), "proposal", "p-send", "ДЗ · Физика · до 24.10", "txt"); !errors.Is(err, ErrSendUnresolved) {
+		if _, err := s.Confirm(t.Context(), "proposal", "p-send", "ДЗ · Физика · до 24.10", "txt", "", ""); !errors.Is(err, ErrSendUnresolved) {
 			t.Fatalf("err = %v", err)
 		}
 	}
@@ -309,7 +312,7 @@ func TestAgentDecline(t *testing.T) {
 	if _, err := s.Decline(t.Context(), "proposal", "p-send"); !errors.Is(err, ErrAgentConfirmDecided) {
 		t.Fatalf("second Decline = %v", err)
 	}
-	if _, err := s.Confirm(t.Context(), "proposal", "p-send", "ДЗ · Физика · до 24.10", "txt"); !errors.Is(err, ErrAgentConfirmDecided) {
+	if _, err := s.Confirm(t.Context(), "proposal", "p-send", "ДЗ · Физика · до 24.10", "txt", "", ""); !errors.Is(err, ErrAgentConfirmDecided) {
 		t.Fatalf("Confirm after Decline = %v", err)
 	}
 	if got, err := s.Decline(t.Context(), "preview", "rec1"); err != nil || got.State != "declined" {

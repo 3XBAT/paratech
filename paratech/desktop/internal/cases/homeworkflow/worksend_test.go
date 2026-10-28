@@ -87,7 +87,7 @@ type workEnv struct {
 const paperBytes = "PK paper of the work"
 
 // newWorkEnv is a Service with the works: the done work w1 of assignment a1, whose paper m1 «Реферат.docx» is filed
-// in «ДЗ» of subject s1, and the recipient of the settings.
+// in «ДЗ» of subject s1, whose lecturer has an address.
 func newWorkEnv(t *testing.T) *workEnv {
 	t.Helper()
 	e := &workEnv{env: newEnv(t), works: &fakeWorks{works: map[shared.WorkID]work.State{}, materials: map[shared.MaterialID]material.State{}}}
@@ -369,7 +369,7 @@ func TestSendWorkRejected(t *testing.T) {
 		setup  func(t *testing.T, e *workEnv)
 		reason proposal.RejectReason
 	}{
-		{"no recipient", func(_ *testing.T, e *workEnv) { e.recipient = "" }, proposal.ReasonNoRecipient},
+		{"no teacher email", func(_ *testing.T, e *workEnv) { e.recipient = "" }, proposal.ReasonNoTeacherEmail},
 		{"work not finished", func(t *testing.T, e *workEnv) { e.addDoneWork(t, "w1", work.Source{Assignment: "a1"}, "s1", nil) }, proposal.ReasonNoArtifact},
 		{"not in ДЗ", func(t *testing.T, e *workEnv) {
 			e.works.change(t, "m1", func(m *material.Material) (bool, error) { return m.MoveToInbox(t0) })
@@ -535,10 +535,11 @@ func TestSendWorkKindsAndWiring(t *testing.T) {
 	if _, err := e.svc.ProposeSendWork(ctx, "../w"); err == nil {
 		t.Fatal("an invalid work id was accepted")
 	}
-	// The card needs no read of the work (its name is pinned); «Да» does, and a failed read sends nothing.
+	// The card reads the work for the teachers of its subject (TASK-237), «Да» for its file: a failed read shows and
+	// sends nothing.
 	e.works.err = errors.New("disk I/O error")
-	if got, err := e.svc.Get(ctx, v.ID); err != nil || got.AttachmentName != "Реферат.docx" {
-		t.Fatalf("Get with the works failing = %+v, %v", got, err)
+	if got, err := e.svc.Get(ctx, v.ID); err == nil {
+		t.Fatalf("Get with the works failing = %+v", got)
 	}
 	if _, err := e.svc.ConfirmSendWork(ctx, v.ID, v.Subject, v.AttachmentFormat); err == nil {
 		t.Fatal("a failed read of the work was hidden")

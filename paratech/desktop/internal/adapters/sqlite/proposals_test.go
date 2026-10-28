@@ -23,15 +23,14 @@ const (
 // propFacts are trusted facts under which every kind validates.
 func propFacts(t *testing.T) proposal.Facts {
 	t.Helper()
-	r, err := proposal.NewRecipient("teacher@school.example")
-	if err != nil {
-		t.Fatal(err)
-	}
 	d, err := proposal.NewDigest(strings.Repeat("ab", 32), 42)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return proposal.Facts{AssignmentExists: true, AssignmentTitle: "Rivers", Recipient: r, Attachment: d}
+	return proposal.Facts{
+		AssignmentExists: true, AssignmentTitle: "Rivers", Attachment: d,
+		Teachers: proposal.Teachers{Subject: "s1", Lecture: proposal.Teacher{Name: "Иванова И. И.", Email: "teacher@school.example"}},
+	}
 }
 
 // newProposal parses answer and brings it to want through the domain methods, one minute per step.

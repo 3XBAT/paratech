@@ -6,8 +6,9 @@
 // New parses the untrusted model output strictly: a closed set of kinds, a closed set of fields per kind, bounded text.
 // The model can only name an assignment by id and supply data (a title, a due time, a text body). It can never name a
 // target: recipients, file paths, URLs and calendars are not fields of the schema, so an output that tries to set them
-// is malformed. Targets are derived by the core: the recipient comes from local settings at validation (Facts), the
-// export file is ExportRef of the assignment, the calendar is the app's own one.
+// is malformed. Targets are derived by the core: the recipient is a teacher of the library subject, picked at
+// validation by ChooseRecipient from the lesson kind (Facts), or chosen by the student's click on the card
+// (ConfirmChoice); the export file is ExportRef of the assignment, the calendar is the app's own one.
 //
 // Status machine (transitions.go): PROPOSED -> VALIDATED | REJECTED; VALIDATED -> CONFIRMED | DECLINED;
 // CONFIRMED -> EXECUTED. REJECTED, DECLINED and EXECUTED are terminal.

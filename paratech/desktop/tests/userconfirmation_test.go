@@ -23,6 +23,8 @@ import (
 // userOnlyMethods are the method names only a user's action may call.
 var userOnlyMethods = map[string]bool{
 	"Confirm": true, "Execute": true, "ConfirmSend": true, "ConfirmDeadline": true, "MarkSent": true, "SendAgain": true,
+	// TASK-237: the sends with the student's choice of the teacher, and the aggregate's confirmations behind them.
+	"ConfirmSendTo": true, "ConfirmSendWork": true, "ConfirmSendWorkTo": true, "ConfirmOnce": true, "ConfirmChoice": true,
 }
 
 // userOnlyCallers are the production files (module-relative, slash-separated) where the names may appear.

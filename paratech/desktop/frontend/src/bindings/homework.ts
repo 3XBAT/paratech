@@ -6,6 +6,7 @@
 // confirmSend is the only call that leads to an email; call it only from the dialog's confirm button (AC-14).
 
 import { type LessonSource, lessonSource } from "../lessonLabel.js";
+import { choiceArgs, parseRecipientFields, type RecipientFields, type TeacherChoice } from "./recipient.js";
 import type { CallByName } from "./settings";
 
 /** One assignment, newest first. Times are RFC 3339 in UTC, "" when unset. */
@@ -119,13 +120,20 @@ export interface DocxSaveResult {
 /** "ready": the dialog shows recipient, subject and attachment and offers the confirmation; "rejected": message only. */
 export type SendStatus = "ready" | "rejected";
 
-/** The content of the send confirmation dialog. */
-export interface SendPreparation {
+/**
+ * The content of the send confirmation dialog. The recipient fields (recipientName, role, subjectId, options) are
+ * described in recipient.ts: a ready send with reason "choose_teacher" has no recipient yet and options to click.
+ */
+export interface SendPreparation extends RecipientFields {
   proposalId: string;
   status: SendStatus;
-  /** The core's reason code of a rejected send; "" when ready. */
+  /**
+   * The core's reason code of a rejected send ("no_teacher_email" and "no_subject" among them); "choose_teacher" of a
+   * ready send that asks «Кому отправить?»; "" otherwise. Compare with recipientReason, not as free text.
+   */
   reason: string;
   message: string;
+  /** The address «Кому» shows; "" while the student chooses. */
   recipient: string;
   subject: string;
   attachmentName: string;
@@ -269,6 +277,8 @@ export const errorMessages = {
   sendAssignmentDeleted: "Задание удалено: письмо не отправлено. Верните задание и подготовьте отправку ещё раз.",
   sendUnresolved:
     "Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Сначала разберитесь с ним в списке писем.",
+  /** confirmSend refused: «Кому отправить?» was asked and «Отправить» came without a choice; nothing was sent. */
+  sendChooseTeacher: "Выберите, кому отправить: лектору, семинаристу или преподавателю лабораторных.",
   /** confirmSend failed; repeating it with the same proposalId is safe: no second email. */
   sendIncomplete: "Не удалось завершить отправку. Повторите — второе письмо не уйдёт — или проверьте список писем ниже.",
   /** exportDraft refused: an earlier email of the assignment is unresolved; nothing was written. */
@@ -540,6 +550,7 @@ export function parseSendPreparation(raw: unknown): SendPreparation {
     reason: str(r, "reason", w),
     message: str(r, "message", w),
     recipient: str(r, "recipient", w),
+    ...parseRecipientFields(r),
     subject: str(r, "subject", w),
     attachmentName: str(r, "attachmentName", w),
     attachmentSize: num(r, "attachmentSize", w),
@@ -596,9 +607,10 @@ export interface HomeworkApi {
   prepareSend(id: string, format: SendFormat): Promise<SendPreparation>;
   /**
    * The dialog's confirm button only: confirms the shown send, subject and attachment format, creates the email
-   * (AC-14).
+   * (AC-14). chosen is the option the student clicked when the dialog asked «Кому отправить?» (reason
+   * "choose_teacher"); without it such a send is refused with errorMessages.sendChooseTeacher.
    */
-  confirmSend(proposalId: string, subject: string, format: SendFormat): Promise<void>;
+  confirmSend(proposalId: string, subject: string, format: SendFormat, chosen?: TeacherChoice | null): Promise<void>;
   /** The dialog's cancel button: the send can never happen afterwards. */
   cancelSend(proposalId: string): Promise<void>;
   deliveries(id: string): Promise<DeliveryItem[]>;
@@ -639,8 +651,8 @@ export function homeworkApi(call: CallByName): HomeworkApi {
     exportDocx: async (id, version) => parseExportResult(await call(methods.exportDocx, id, version)),
     saveDocx: async (id, version) => parseDocxSaveResult(await call(methods.saveDocx, id, version)),
     prepareSend: async (id, format) => parseSendPreparation(await call(methods.prepareSend, id, format)),
-    confirmSend: async (proposalId, subject, format) => {
-      await call(methods.confirmSend, proposalId, subject, format);
+    confirmSend: async (proposalId, subject, format, chosen) => {
+      await call(methods.confirmSend, proposalId, subject, format, ...choiceArgs(chosen));
     },
     cancelSend: async (proposalId) => {
       await call(methods.cancelSend, proposalId);

@@ -145,7 +145,8 @@ func TestValidateWorkSend(t *testing.T) {
 		{"filed in ДЗ", nil, ""},
 		{"no assignment", func(f *Facts) { f.AssignmentExists = false }, ReasonUnknownAssignment},
 		{"assignment deleted by the student", studentDeleted, ReasonUnknownAssignment},
-		{"no recipient", func(f *Facts) { f.Recipient = Recipient{} }, ReasonNoRecipient},
+		{"no teacher email", func(f *Facts) { f.Teachers.Lecture = Teacher{} }, ReasonNoTeacherEmail},
+		{"no subject", func(f *Facts) { f.Teachers.Subject = "" }, ReasonNoSubject},
 		{"no file", func(f *Facts) { f.Attachment, f.AttachmentRef = Digest{}, shared.ArtifactRef{} }, ReasonNoArtifact},
 		{"file is not its content", func(f *Facts) { f.AttachmentRef = storedRef(t, shaB) }, ReasonNoArtifact},
 		{"moved from ДЗ", func(f *Facts) { f.Filed = false }, ReasonFileMoved},
@@ -162,7 +163,7 @@ func TestValidateWorkSend(t *testing.T) {
 			}
 			if tc.reason == "" {
 				src, err := p.AttachmentSource()
-				if p.Status() != StatusValidated || p.Recipient() != f.Recipient || p.AttachmentDigest() != f.Attachment ||
+				if p.Status() != StatusValidated || p.Recipient().Address() != "teacher@school.example" || p.AttachmentDigest() != f.Attachment ||
 					err != nil || src != f.AttachmentRef {
 					t.Fatalf("status %s, %+v, source %s %v", p.Status(), p.State(), src, err)
 				}
@@ -185,7 +186,7 @@ func TestRecheckWorkSend(t *testing.T) {
 	}{
 		{"unchanged", nil, ""},
 		{"assignment deleted by the student", studentDeleted, ReasonAssignmentDeleted},
-		{"recipient removed", func(f *Facts) { f.Recipient = Recipient{} }, ReasonRecipientChanged},
+		{"recipient removed", func(f *Facts) { f.Teachers.Lecture = Teacher{} }, ReasonRecipientChanged},
 		{"file deleted", func(f *Facts) { f.Attachment, f.AttachmentRef = Digest{}, shared.ArtifactRef{} }, ReasonNoArtifact},
 		{"file changed", func(f *Facts) { f.Attachment, f.AttachmentRef = mustDigest(t, shaB, 11), storedRef(t, shaB) }, ReasonArtifactChanged},
 		{"file replaced, same bytes elsewhere", func(f *Facts) { f.AttachmentRef = storedRef(t, shaB) }, ReasonArtifactChanged},
