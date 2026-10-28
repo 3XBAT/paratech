@@ -12,17 +12,23 @@ import {
   backspaceRemovesPill,
   clampActive,
   createMentionSearch,
+  createSlowGate,
+  emptyResultText,
   idleSearch,
+  insertTrigger,
   maxMentions,
   mentionDebounceMs,
   mentionKindCaption,
+  mentionLoadingDelayMs,
   mentionOpening,
   mentionPills,
   mentionTexts,
   moveActive,
   pickerKey,
   popupModel,
+  popupVisible,
   removeFragment,
+  removeMentionLabel,
 } from "../.test-build/agentMentions.js";
 import { askInput, contextFor, entryModel, restoredMentions } from "../.test-build/agentView.js";
 import { initialPanelState, reducePanel } from "../.test-build/agentState.js";
@@ -98,11 +104,26 @@ test("pills: at most 8, the same object is not added twice, only kind, id and la
   assert.equal(addMention([{ kind: "subject", id: "x", label: "a" }], { kind: "material", id: "x", label: "b" }).outcome, "added");
 });
 
-test("Backspace removes the last pill only with the caret at the very start", () => {
-  assert.equal(backspaceRemovesPill({ start: 0, end: 0 }, 2), true);
-  assert.equal(backspaceRemovesPill({ start: 0, end: 0 }, 0), false);
-  assert.equal(backspaceRemovesPill({ start: 3, end: 3 }, 2), false);
-  assert.equal(backspaceRemovesPill({ start: 0, end: 4 }, 2), false, "a selection is deleted as text");
+test("Backspace removes the last pill only when the field is EMPTY, not merely with the caret at 0", () => {
+  assert.equal(backspaceRemovesPill("", 2), true);
+  assert.equal(backspaceRemovesPill("", 0), false);
+  assert.equal(backspaceRemovesPill("текст", 2), false, "a caret at 0 in a field with text deletes nothing and keeps the pills");
+  assert.equal(backspaceRemovesPill(" ", 2), false);
+});
+
+test("the «@» button inserts an «@» at the caret, after a space unless at a start or after whitespace", () => {
+  assert.deepEqual(insertTrigger("", 0), { text: "@", caret: 1 });
+  assert.deepEqual(insertTrigger("привет", 6), { text: "привет @", caret: 8 });
+  assert.deepEqual(insertTrigger("привет ", 7), { text: "привет @", caret: 8 });
+  assert.deepEqual(insertTrigger("a\nb", 2), { text: "a\n@b", caret: 3 });
+  assert.deepEqual(insertTrigger("abcdef", 3), { text: "abc @def", caret: 5 });
+  assert.deepEqual(insertTrigger("ab", 99), { text: "ab @", caret: 4 }, "a caret past the end is clamped");
+  // The inserted «@» opens a fragment with an empty query.
+  const r = insertTrigger("привет", 6);
+  assert.deepEqual(activeFragment(r.text, r.caret), { start: 7, end: 8, query: "" });
+  assert.equal(insertTrigger("x".repeat(4000), 4000), null, "no room: nothing is inserted");
+  assert.equal(insertTrigger("x".repeat(3999), 3999), null, "the space and the «@» need two");
+  assert.deepEqual(insertTrigger("x".repeat(3998), 3998)?.text.length, 4000);
 });
 
 test("a request carries kind, id and label only; no key at all without mentions", () => {
@@ -120,28 +141,33 @@ test("a request carries kind, id and label only; no key at all without mentions"
 const key = (k, over = {}) => ({ key: k, ...over });
 
 test("keys: arrows move, Enter and Tab pick, Esc closes", () => {
-  assert.equal(pickerKey(key("ArrowDown"), 3), "next");
-  assert.equal(pickerKey(key("ArrowUp"), 3), "prev");
-  assert.equal(pickerKey(key("Enter"), 3), "pick");
-  assert.equal(pickerKey(key("Tab"), 3), "pick");
-  assert.equal(pickerKey(key("Escape"), 3), "close");
-  assert.equal(pickerKey(key("Escape"), 0), "close");
-  assert.equal(pickerKey(key("a"), 3), "none");
+  assert.equal(pickerKey(key("ArrowDown"), 3, "options"), "next");
+  assert.equal(pickerKey(key("ArrowUp"), 3, "options"), "prev");
+  assert.equal(pickerKey(key("Enter"), 3, "options"), "pick");
+  assert.equal(pickerKey(key("Tab"), 3, "options"), "pick");
+  assert.equal(pickerKey(key("Escape"), 3, "options"), "close");
+  assert.equal(pickerKey(key("Escape"), 0, "empty"), "close");
+  assert.equal(pickerKey(key("a"), 3, "options"), "none");
 });
 
-test("keys: Enter never sends while the list is open; Tab and arrows leave an empty list alone", () => {
-  assert.equal(pickerKey(key("Enter"), 0), "swallow");
-  assert.equal(pickerKey(key("Tab"), 0), "none");
-  assert.equal(pickerKey(key("ArrowDown"), 0), "none");
-  assert.equal(pickerKey(key("Enter", { shiftKey: true }), 3), "none", "Shift+Enter breaks the line");
-  assert.equal(pickerKey(key("Tab", { shiftKey: true }), 3), "none");
+test("keys: Enter with nothing to pick closes the list (a second Enter sends); only a running or failed search swallows it", () => {
+  for (const kind of ["empty", "unavailable", "full"]) {
+    assert.equal(pickerKey(key("Enter"), 0, kind), "close", kind);
+  }
+  assert.equal(pickerKey(key("Enter"), 0, "loading"), "swallow");
+  assert.equal(pickerKey(key("Enter"), 0, "failed"), "swallow", "the caller repeats the search");
+  assert.equal(pickerKey(key("Tab"), 0, "empty"), "none");
+  assert.equal(pickerKey(key("ArrowDown"), 0, "empty"), "none");
+  assert.equal(pickerKey(key("Enter", { shiftKey: true }), 3, "options"), "none", "Shift+Enter breaks the line");
+  assert.equal(pickerKey(key("Enter", { shiftKey: true }), 0, "empty"), "none");
+  assert.equal(pickerKey(key("Tab", { shiftKey: true }), 3, "options"), "none");
 });
 
 test("keys: nothing is intercepted while an IME composes or with Ctrl/Alt/Meta", () => {
   for (const k of ["Enter", "Tab", "ArrowDown", "ArrowUp", "Escape"]) {
-    assert.equal(pickerKey(key(k, { isComposing: true }), 3), "none", k);
-    assert.equal(pickerKey(key(k, { keyCode: 229 }), 3), "none", k);
-    assert.equal(pickerKey(key(k, { ctrlKey: true }), 3), "none", k);
+    assert.equal(pickerKey(key(k, { isComposing: true }), 3, "options"), "none", k);
+    assert.equal(pickerKey(key(k, { keyCode: 229 }), 3, "options"), "none", k);
+    assert.equal(pickerKey(key(k, { ctrlKey: true }), 3, "options"), "none", k);
   }
 });
 
@@ -172,21 +198,44 @@ test("list: options carry the kind caption (Пара for a lesson) and mark what
 
 test("list: every state says what is going on; a failure offers «Повторить»", () => {
   const some = [cand("subject", "s")];
-  assert.deepEqual([popupModel(idleSearch, []).kind, popupModel(idleSearch, []).text], ["loading", "Ищу…"]);
-  assert.equal(popupModel({ status: "loading", query: "ф", candidates: [] }, []).text, mentionTexts.loading);
-  assert.equal(popupModel({ status: "ready", query: "ф", candidates: [] }, []).text, "Ничего не найдено");
+  // A search that has not answered yet is silent until it is slow; then it says «Поиск…».
+  const quiet = popupModel(idleSearch, []);
+  assert.deepEqual([quiet.kind, quiet.text, popupVisible(quiet)], ["loading", "", false], "no empty box flash");
+  assert.equal(popupModel({ status: "loading", query: "ф", candidates: [] }, []).text, "");
+  const slow = popupModel({ status: "loading", query: "ф", candidates: [] }, [], true);
+  assert.deepEqual([slow.kind, slow.text, popupVisible(slow)], ["loading", "Поиск…", true]);
+  assert.equal(mentionTexts.loading, "Поиск…");
+  assert.equal(popupModel({ status: "ready", query: "ф", candidates: [] }, []).text, "По «ф» ничего не найдено");
+  assert.equal(popupModel({ status: "ready", query: "", candidates: [] }, []).text, mentionTexts.emptyNoQuery);
   const off = popupModel({ status: "unavailable", query: "", candidates: [] }, []);
-  assert.deepEqual([off.kind, off.text, off.retry], ["unavailable", "Поиск недоступен: помощник не подключён", false]);
+  assert.deepEqual([off.kind, off.text, off.retry], ["unavailable", "Поиск по предметам сейчас недоступен. Название можно написать словами.", false]);
   const bad = popupModel({ status: "failed", query: "", candidates: [] }, []);
-  assert.deepEqual([bad.kind, bad.text, bad.retry], ["failed", "Не удалось выполнить поиск", true]);
-  // The previous answer stays while the next one is fetched.
+  assert.deepEqual([bad.kind, bad.text, bad.retry], ["failed", "Не удалось выполнить поиск.", true]);
+  // The previous answer stays while the next one is fetched, slow or not.
   assert.equal(popupModel({ status: "loading", query: "фи", candidates: some }, []).kind, "options");
+  assert.equal(popupModel({ status: "loading", query: "фи", candidates: some }, [], true).kind, "options");
+  assert.equal(popupVisible(popupModel({ status: "loading", query: "фи", candidates: some }, [])), true);
+  assert.equal(popupVisible(null), false);
+});
+
+test("empty result: the query is quoted and cut to 40 characters; without one the list says why it is empty", () => {
+  assert.equal(emptyResultText("физ"), "По «физ» ничего не найдено");
+  assert.equal(emptyResultText("ф".repeat(40)), `По «${"ф".repeat(40)}» ничего не найдено`);
+  assert.equal(emptyResultText("ф".repeat(41)), `По «${"ф".repeat(40)}…» ничего не найдено`);
+  assert.equal(emptyResultText("😀".repeat(41)), `По «${"😀".repeat(40)}…» ничего не найдено`, "cut by characters, not by UTF-16 units");
+  assert.equal(emptyResultText("<b>x</b>"), "По «<b>x</b>» ничего не найдено", "the text is passed as it is; the page draws a text node");
+  assert.equal(emptyResultText(""), "Пока нечего указать: предметы, пары, материалы и задания появятся после первых записей");
+  assert.ok(!emptyResultText("").includes("!"));
+});
+
+test("remove label: short, quoted", () => {
+  assert.equal(removeMentionLabel("Физика"), "Убрать «Физика»");
 });
 
 test("list: at 8 pills the list is one non-selectable line instead of options", () => {
   const eight = Array.from({ length: 8 }, (_, i) => ({ kind: "subject", id: `s${i}`, label: `П${i}` }));
   const m = popupModel({ status: "ready", query: "", candidates: [cand("subject", "new")] }, eight);
-  assert.deepEqual([m.kind, m.text, m.options.length, m.retry], ["full", "Не больше 8 упоминаний в одной просьбе", 0, false]);
+  assert.deepEqual([m.kind, m.text, m.options.length, m.retry], ["full", "Можно указать не больше 8. Чтобы добавить другое, нужно убрать одно из выбранных выше.", 0, false]);
 });
 
 test("list: a candidate that repeats in the answer is shown once", () => {
@@ -367,6 +416,65 @@ test("search: a rejected or throwing call reads as failed", async () => {
   assert.equal(states.at(-1).status, "failed");
 });
 
+// ---- «Поиск…» only for a slow search ----
+
+function gateHarness() {
+  const timers = new Map();
+  let next = 0;
+  const changes = [];
+  const gate = createSlowGate({
+    setTimer: (fn, ms) => {
+      timers.set(++next, { fn, ms });
+      return next;
+    },
+    clearTimer: (hd) => timers.delete(hd),
+    onChange: (s) => changes.push(s),
+  });
+  const fire = () => {
+    const [k, t] = [...timers][0];
+    timers.delete(k);
+    t.fn();
+  };
+  return { gate, timers, changes, fire };
+}
+
+test("slow gate: a search that answers in time never says «Поиск…»", () => {
+  const g = gateHarness();
+  assert.equal(mentionLoadingDelayMs, 600);
+  g.gate.set(true);
+  assert.equal(g.timers.size, 1);
+  assert.equal([...g.timers.values()][0].ms, 600);
+  assert.deepEqual(g.changes, []);
+  g.gate.set(false);
+  assert.equal(g.timers.size, 0, "the answer cancels the wait");
+  assert.deepEqual(g.changes, [], "nothing was ever announced slow");
+});
+
+test("slow gate: after the delay it turns slow once, and an answer turns it off", () => {
+  const g = gateHarness();
+  g.gate.set(true);
+  g.gate.set(true);
+  assert.equal(g.timers.size, 1, "a second «running» does not restart the wait");
+  g.fire();
+  assert.deepEqual(g.changes, [true]);
+  g.gate.set(true);
+  assert.equal(g.timers.size, 0, "already slow: no new wait");
+  g.gate.set(false);
+  assert.deepEqual(g.changes, [true, false]);
+  g.gate.set(false);
+  assert.deepEqual(g.changes, [true, false], "no repeated off");
+  // The next search starts its wait from zero.
+  g.gate.set(true);
+  assert.equal(g.timers.size, 1);
+});
+
+test("slow gate: dispose drops the wait", () => {
+  const g = gateHarness();
+  g.gate.set(true);
+  g.gate.dispose();
+  assert.equal(g.timers.size, 0);
+});
+
 // ---- pills of the thread ----
 
 test("pills: the stored name is shown as it is; an empty name reads as the kind", () => {
@@ -381,11 +489,27 @@ test("pills: the stored name is shown as it is; an empty name reads as the kind"
   ]);
   assert.equal(p[0].label, evil, "markup stays data");
   assert.deepEqual(p.map((x) => x.label), [evil, "Пара", "Материал", "Задачи 1-7", "Объект", "Объект"]);
-  assert.equal(p[0].aria, `Открыть: Предмет ${evil}`);
-  assert.equal(p[3].aria, "Открыть: Задание Задачи 1-7");
+  assert.equal(p[0].aria, `Открыть предмет «${evil}»`);
+  assert.equal(p[3].aria, "Открыть задание «Задачи 1-7»");
+  assert.equal(p[3].title, "Задание: Задачи 1-7");
   assert.equal(new Set(p.map((x) => x.key)).size, p.length);
   assert.deepEqual(mentionPills(undefined), []);
   assert.equal(mentionKindCaption("lesson"), "Пара");
+});
+
+test("pills are honest about where they lead: a lesson and a material open a page, not the object", () => {
+  const [s, l, m, a, w] = mentionPills([
+    { kind: "subject", id: "s", label: "Физика" },
+    { kind: "lesson", id: "l", label: "Лекция 3" },
+    { kind: "material", id: "m", label: "Конспект.pdf" },
+    { kind: "assignment", id: "a", label: "Задачи" },
+    { kind: "weird", id: "w", label: "Х" },
+  ]);
+  assert.deepEqual([s.title, s.aria], ["Предмет: Физика", "Открыть предмет «Физика»"]);
+  assert.deepEqual([a.title, a.aria], ["Задание: Задачи", "Открыть задание «Задачи»"]);
+  assert.deepEqual([l.title, l.aria], ["Пара: Лекция 3. Откроется «База знаний»", "Открыть «Базу знаний»: Лекция 3"]);
+  assert.deepEqual([m.title, m.aria], ["Материал: Конспект.pdf. Откроется «Предметы»", "Открыть «Предметы»: Конспект.pdf"]);
+  assert.ok(!w.aria.startsWith("Открыть"), "an unknown kind opens nothing and does not claim to");
 });
 
 test("pills open the object through the routes the window has", () => {
@@ -428,6 +552,8 @@ const composer = (over = {}) => ({
   active: 0,
   listId: ":r1:",
   activeId: undefined,
+  announcement: "",
+  openList: noop,
   onChange: noop,
   onKeyDown: () => false,
   onCaret: noop,
@@ -475,36 +601,80 @@ test("render: the field is a combobox; closed it says so, open it points at the 
 });
 
 test("render: status lines sit inside the popup; «Повторить» only after a failure", () => {
-  const withState = (search, pills = []) => panel({ mentions: composer({ popup: popupModel(search, pills), pills }) });
-  assert.ok(withState({ status: "loading", query: "", candidates: [] }).includes("Ищу…"));
-  assert.ok(withState({ status: "ready", query: "я", candidates: [] }).includes("Ничего не найдено"));
+  const withState = (search, pills = [], slow = true) => {
+    const model = popupModel(search, pills, slow);
+    return panel({ mentions: composer({ popup: popupVisible(model) ? model : null, pills }) });
+  };
+  assert.ok(withState({ status: "loading", query: "", candidates: [] }).includes("Поиск…"));
+  assert.ok(!withState({ status: "loading", query: "", candidates: [] }, [], false).includes("ag-mpop"), "not slow yet: nothing is drawn, no empty box");
+  const none = withState({ status: "ready", query: "я", candidates: [] });
+  assert.ok(none.includes("По «я» ничего не найдено"));
+  const evil = withState({ status: "ready", query: "<b>x</b>", candidates: [] });
+  assert.ok(evil.includes("По «&lt;b&gt;x&lt;/b&gt;» ничего не найдено") && !evil.includes("<b>x"), "the query is a text node");
+  assert.ok(withState({ status: "ready", query: "", candidates: [] }).includes("Пока нечего указать: предметы, пары, материалы и задания появятся после первых записей"));
   const off = withState({ status: "unavailable", query: "", candidates: [] });
-  assert.ok(off.includes("Поиск недоступен: помощник не подключён") && !off.includes("Повторить"));
+  assert.ok(off.includes("Поиск по предметам сейчас недоступен. Название можно написать словами.") && !off.includes("Повторить"));
   const bad = withState({ status: "failed", query: "", candidates: [] });
-  assert.ok(bad.includes("Не удалось выполнить поиск") && bad.includes("Повторить"));
+  assert.ok(bad.includes("Не удалось выполнить поиск.") && bad.includes("Повторить") && bad.includes('title="Повторить поиск (Enter)"'));
   const eight = Array.from({ length: 8 }, (_, i) => ({ kind: "subject", id: `s${i}`, label: `П${i}` }));
   const full = withState({ status: "ready", query: "", candidates: [cand("subject", "x")] }, eight);
-  assert.ok(full.includes("Не больше 8 упоминаний в одной просьбе") && !full.includes('role="option"'));
-  assert.ok(full.includes('role="status"'));
+  assert.ok(full.includes("Можно указать не больше 8. Чтобы добавить другое, нужно убрать одно из выбранных выше.") && !full.includes('role="option"'));
 });
 
-test("render: the chosen mentions are a labelled row of removable pills; the name is escaped", () => {
+test("render: a picked option is aria-disabled with «уже указано» at the end of the hint line, not in the kind column", () => {
+  const search = { status: "ready", query: "", candidates: [cand("subject", "s", "Физика", "Предметы"), cand("lesson", "l", "Лекция"), cand("material", "m", "Конспект", "Физика")] };
+  const popup = popupModel(search, [{ kind: "subject", id: "s", label: "Физика" }, { kind: "lesson", id: "l", label: "Лекция" }]);
+  const html = panel({ mentions: composer({ popup, pills: [{ kind: "subject", id: "s", label: "Физика" }, { kind: "lesson", id: "l", label: "Лекция" }] }) });
+  assert.equal(html.split('aria-disabled="true"').length - 1, 2, "only the picked ones");
+  assert.ok(html.includes('class="ag-mopt-k small muted">Предмет</span>'), "the kind column stays the kind");
+  assert.ok(html.includes('<span class="ag-mopt-ht">Предметы</span><span class="ag-mopt-done"> · уже указано</span>'));
+  assert.ok(html.includes('<span class="ag-mopt-done">уже указано</span>'), "no hint: the suffix stands alone");
+  assert.equal(html.split("уже указано").length - 1, 2, "the free option has none");
+});
+
+test("render: the chosen mentions are a labelled row of removable pills looking like the context chip; the name is escaped", () => {
   const evil = "<img src=x onerror=1>";
   const html = panel({ mentions: composer({ pills: [{ kind: "subject", id: "s", label: evil }, { kind: "lesson", id: "l", label: "Лекция" }] }) });
   assert.ok(html.includes('aria-label="Упоминания"'));
-  assert.ok(html.includes(`aria-label="Убрать упоминание ${evil.replace("<", "&lt;").replace(">", "&gt;")}"`));
-  assert.ok(html.includes('aria-label="Убрать упоминание Лекция"'));
+  assert.ok(html.includes(`aria-label="Убрать «${evil.replace("<", "&lt;").replace(">", "&gt;")}»"`));
+  assert.ok(html.includes('aria-label="Убрать «Лекция»"'));
+  assert.ok(html.includes('class="ag-chip ag-mpill"') && html.includes('class="ag-chip-text"'), "the chip look is reused");
   assert.ok(!html.includes("<img"));
-  assert.ok(!panel({ mentions: composer() }).includes("Убрать упоминание"), "no row without pills");
+  assert.ok(!panel({ mentions: composer() }).includes("Убрать «"), "no row without pills");
 });
 
-test("render: the hint about «@» shows in an empty chat only, with the field on", () => {
-  assert.ok(panel({ mentions: composer() }).includes(mentionTexts.hint));
-  assert.equal(mentionTexts.hint, "Напишите @, чтобы указать предмет, пару, материал или задание");
-  assert.ok(!panel({ mentions: composer(), state: offline }).includes(mentionTexts.hint));
-  assert.ok(!panel({}).includes(mentionTexts.hint), "no hint without mentions");
+test("render: the hint about «@» is one paragraph with the empty-chat line, in an empty chat with the field on", () => {
+  const full = `${"Можно задать вопрос или попросить что-нибудь сделать."} Через @ — указать предмет, пару, материал или задание.`;
+  assert.equal(mentionTexts.hint, "Через @ — указать предмет, пару, материал или задание.");
+  assert.ok(panel({ mentions: composer() }).includes(`<p class="ag-empty muted">${full}</p>`));
+  assert.equal(panel({ mentions: composer() }).split("Можно задать вопрос").length - 1, 1, "one paragraph, not two");
+  const off = panel({ mentions: composer(), state: offline });
+  assert.ok(off.includes("Можно задать вопрос или попросить что-нибудь сделать.") && !off.includes(mentionTexts.hint), "offline: the old line only");
+  const bare = panel({});
+  assert.ok(bare.includes("Можно задать вопрос или попросить что-нибудь сделать.") && !bare.includes(mentionTexts.hint), "no hint without mentions");
   const asked = reducePanel(ready, { type: "asked", id: 1, text: "q", scope: scope({}) });
   assert.ok(!panel({ mentions: composer(), state: asked }).includes(mentionTexts.hint));
+});
+
+test("render: the «@» button stays in the field; off when the field is off or 8 are chosen", () => {
+  const html = panel({ mentions: composer() });
+  assert.ok(html.includes('class="ag-at"') && html.includes('aria-label="Указать предмет, пару, материал или задание (@)"') && html.includes('title="Указать предмет, пару, материал или задание (@)"'));
+  assert.ok(html.indexOf("<textarea") < html.indexOf('class="ag-at"') && html.indexOf('class="ag-at"') < html.indexOf("</form>"), "inside the form, after the field");
+  assert.ok(!/class="ag-at"[^>]*disabled/.test(html), "on when the field is on");
+  const thread = panel({ mentions: composer(), state: reducePanel(ready, { type: "asked", id: 1, text: "q", scope: scope({}) }) });
+  assert.ok(thread.includes('class="ag-at"'), "stays after the first message");
+  assert.ok(/class="ag-at"[^>]*disabled/.test(panel({ mentions: composer(), state: offline })), "off with the field");
+  const eight = Array.from({ length: 8 }, (_, i) => ({ kind: "subject", id: `s${i}`, label: `П${i}` }));
+  assert.ok(/class="ag-at"[^>]*disabled/.test(panel({ mentions: composer({ pills: eight }) })), "off at 8");
+  assert.ok(!panel({}).includes("ag-at"), "no button without mentions");
+});
+
+test("render: the live region is always mounted, polite, and carries the announcement as text", () => {
+  const quiet = panel({ mentions: composer() });
+  assert.ok(quiet.includes('class="ag-vh" role="status" aria-live="polite" aria-atomic="true"></div>'), "mounted while empty");
+  const said = panel({ mentions: composer({ announcement: "Указано: <i>Физика</i>" }) });
+  assert.ok(said.includes("Указано: &lt;i&gt;Физика&lt;/i&gt;</div>") && !said.includes("<i>Физика"));
+  assert.ok(!panel({}).includes('aria-live="polite" aria-atomic'), "no region without mentions");
 });
 
 test("render: the pills of a request are buttons with the stored name and open the object", () => {
@@ -516,7 +686,8 @@ test("render: the pills of a request are buttons with the stored name and open t
   );
   assert.ok(html.includes('<button type="button" class="ag-pill small"'));
   assert.ok(html.includes("Старое имя &lt;i&gt;x&lt;/i&gt;") && !html.includes("<i>x"));
-  assert.ok(html.includes('aria-label="Открыть: Предмет Старое имя &lt;i&gt;x&lt;/i&gt;"'));
+  assert.ok(html.includes('aria-label="Открыть предмет «Старое имя &lt;i&gt;x&lt;/i&gt;»"'));
+  assert.ok(html.includes('aria-label="Открыть задание «Задачи»"'));
   assert.ok(!html.includes("удалено"));
   // The user's text comes first, the pills under it.
   assert.ok(html.indexOf("что задали") < html.indexOf("ag-pill"));
@@ -538,11 +709,11 @@ test("render: the pills of a request are buttons with the stored name and open t
 test("render: earlier requests show their pills as buttons when the panel can open them", () => {
   const earlier = [{ key: "e1", turn: 1, text: "q", mentions: mentionPills([{ kind: "material", id: "m1", label: "Конспект.pdf" }]), reply: "" }];
   const html = panel({ earlier, onOpenMention: noop });
-  assert.ok(html.includes('<button type="button" class="ag-pill small"') && html.includes('aria-label="Открыть: Материал Конспект.pdf"'));
-  assert.ok(html.includes('title="Материал: Конспект.pdf"'));
+  assert.ok(html.includes('<button type="button" class="ag-pill small"') && html.includes('aria-label="Открыть «Предметы»: Конспект.pdf"'));
+  assert.ok(html.includes('title="Материал: Конспект.pdf. Откроется «Предметы»"'));
   const plain = panel({ earlier });
   assert.ok(!plain.includes("<button type=\"button\" class=\"ag-pill"), "no dead button without a handler");
-  assert.ok(plain.includes("Конспект.pdf"));
+  assert.ok(plain.includes("Конспект.pdf") && plain.includes('<span class="ag-pill small" title="Материал: Конспект.pdf. Откроется «Предметы»">'));
 });
 
 // ---- the page code never writes markup from names ----

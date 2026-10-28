@@ -1,6 +1,6 @@
 import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
 import type { MentionView } from "../bindings/agent.js";
-import { mentionTexts } from "../agentMentions.js";
+import { maxMentions, mentionTexts } from "../agentMentions.js";
 import { type AgentContext, chatTexts, composerKey, type EarlierItem, entryModel, inputPlacement, texts } from "../agentView.js";
 import { blockingEntry, draftsFor, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
 import { Icon } from "../ui/Icon.js";
@@ -103,40 +103,61 @@ export function AgentPanelView(props: AgentPanelViewProps) {
       >
         <div className="ag-compose" onFocus={mn?.onFocus} onBlur={mn?.onBlur}>
           {mn && <ComposerPills pills={mn.pills} onRemove={mn.remove} />}
-          <textarea
-            ref={props.inputRef}
-            className="ag-input"
-            rows={1}
-            value={props.draft}
-            placeholder={mode.placeholder}
-            aria-label={mode.placeholder}
-            disabled={!mode.inputEnabled}
-            maxLength={4000}
-            autoComplete="off"
-            {...(mn
-              ? {
-                  role: "combobox",
-                  "aria-autocomplete": "list" as const,
-                  "aria-haspopup": "listbox" as const,
-                  "aria-expanded": mn.popup !== null,
-                  "aria-controls": mn.popup !== null ? mn.listId : undefined,
-                  "aria-activedescendant": mn.activeId,
-                  onKeyUp: mn.onCaret,
-                  onClick: mn.onCaret,
-                  onSelect: mn.onCaret,
+          <div className="ag-field">
+            <textarea
+              ref={props.inputRef}
+              className="ag-input"
+              rows={1}
+              value={props.draft}
+              placeholder={mode.placeholder}
+              aria-label={mode.placeholder}
+              disabled={!mode.inputEnabled}
+              maxLength={4000}
+              autoComplete="off"
+              {...(mn
+                ? {
+                    role: "combobox",
+                    "aria-autocomplete": "list" as const,
+                    "aria-haspopup": "listbox" as const,
+                    "aria-expanded": mn.popup !== null,
+                    "aria-controls": mn.popup !== null ? mn.listId : undefined,
+                    "aria-activedescendant": mn.activeId,
+                    onKeyUp: mn.onCaret,
+                    onClick: mn.onCaret,
+                    onSelect: mn.onCaret,
+                  }
+                : {})}
+              onChange={(e) => (mn ? mn.onChange(e) : props.onDraft(e.target.value))}
+              onKeyDown={(e) => {
+                if (mn?.onKeyDown(e)) {
+                  return;
                 }
-              : {})}
-            onChange={(e) => (mn ? mn.onChange(e) : props.onDraft(e.target.value))}
-            onKeyDown={(e) => {
-              if (mn?.onKeyDown(e)) {
-                return;
-              }
-              if (composerKey({ key: e.key, shiftKey: e.shiftKey, isComposing: e.nativeEvent.isComposing, keyCode: e.keyCode }) === "send") {
-                e.preventDefault();
-                props.onSubmit();
-              }
-            }}
-          />
+                if (composerKey({ key: e.key, shiftKey: e.shiftKey, isComposing: e.nativeEvent.isComposing, keyCode: e.keyCode }) === "send") {
+                  e.preventDefault();
+                  props.onSubmit();
+                }
+              }}
+            />
+            {mn && (
+              // A press must not take focus from the field (the caret and the list stay); the field is focused by the click itself.
+              <button
+                type="button"
+                className="ag-at"
+                aria-label={mentionTexts.atLabel}
+                title={mentionTexts.atLabel}
+                disabled={!mode.inputEnabled || mn.pills.length >= maxMentions}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={mn.openList}
+              >
+                <span aria-hidden="true">@</span>
+              </button>
+            )}
+          </div>
+          {mn && (
+            <div className="ag-vh" role="status" aria-live="polite" aria-atomic="true">
+              {mn.announcement}
+            </div>
+          )}
           {mn?.popup && mode.inputEnabled && (
             <MentionPopup model={mn.popup} listId={mn.listId} active={mn.active} onPick={mn.pick} onHover={mn.hover} onRetry={mn.retry} />
           )}
@@ -178,8 +199,9 @@ export function AgentPanelView(props: AgentPanelViewProps) {
           atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
         }}
       >
-        {entries.length === 0 && earlier.length === 0 && <p className="ag-empty muted">{texts.empty}</p>}
-        {entries.length === 0 && earlier.length === 0 && mn && mode.inputEnabled && <p className="ag-empty ag-mhint small muted">{mentionTexts.hint}</p>}
+        {entries.length === 0 && earlier.length === 0 && (
+          <p className="ag-empty muted">{mn && mode.inputEnabled ? `${texts.empty} ${mentionTexts.hint}` : texts.empty}</p>
+        )}
         {mode.staleNote !== "" && <p className="ag-stale small muted">{mode.staleNote}</p>}
         <EarlierRequests items={earlier} onOpenMention={props.onOpenMention} />
         {entries.map((e) => (

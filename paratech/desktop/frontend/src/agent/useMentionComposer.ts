@@ -6,12 +6,17 @@ import {
   backspaceRemovesPill,
   clampActive,
   createMentionSearch,
+  createSlowGate,
   idleSearch,
+  insertTrigger,
   maxMentions,
+  mentionAddedText,
+  mentionRemovedText,
   moveActive,
   pickerKey,
   type PopupModel,
   popupModel,
+  popupVisible,
   removeFragment,
   type SearchState,
 } from "../agentMentions.js";
@@ -31,12 +36,14 @@ export interface MentionComposerDeps {
 export interface MentionComposer {
   /** The chosen mentions of the request being written. */
   pills: MentionView[];
-  /** The list; null while closed. */
+  /** The list as drawn; null while closed or while a fast search has nothing to show yet. */
   popup: PopupModel | null;
   active: number;
   listId: string;
   /** Id of the active option, for aria-activedescendant. */
   activeId: string | undefined;
+  /** The text of the always-mounted live region: the last pill change or the last status line of the list. */
+  announcement: string;
   onChange(e: ChangeEvent<HTMLTextAreaElement>): void;
   /** True when the key was used by the list or the pills (the caller then does nothing else). */
   onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): boolean;
@@ -48,6 +55,8 @@ export interface MentionComposer {
   hover(index: number): void;
   remove(index: number): void;
   retry(): void;
+  /** The «@» button: puts an «@» at the caret, focuses the field and opens the list. */
+  openList(): void;
   /** After a send: the pills go. */
   clear(): void;
 }
@@ -60,13 +69,17 @@ export function useMentionComposer(d: MentionComposerDeps): MentionComposer {
   const [dismissed, setDismissed] = useState(-1);
   const [active, setActive] = useState(0);
   const [search, setSearch] = useState<SearchState>(idleSearch);
+  const [slow, setSlow] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
   const listId = useId();
 
   const fragment = d.enabled && focused ? activeFragment(d.draft, caret) : null;
   const open = fragment !== null && fragment.start !== dismissed;
   const full = pills.length >= maxMentions;
-  const popup = open ? popupModel(search, pills) : null;
-  const count = popup?.options.length ?? 0;
+  // `model` drives the keys even while it is not drawn (a search still pending must not let Enter send the request).
+  const model = open ? popupModel(search, pills, slow) : null;
+  const popup = popupVisible(model) ? model : null;
+  const count = model?.options.length ?? 0;
   const current = clampActive(active, count);
   const query = fragment?.query ?? "";
 
@@ -97,6 +110,35 @@ export function useMentionComposer(d: MentionComposerDeps): MentionComposer {
     }
   }, [searching, query, searcher]);
 
+  // «Поиск…» only for a search that takes long.
+  const gate = useMemo(
+    () =>
+      createSlowGate({
+        setTimer: (fn, ms) => setTimeout(fn, ms),
+        clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
+        onChange: setSlow,
+      }),
+    [],
+  );
+  useEffect(() => () => gate.dispose(), [gate]);
+  const running = searching && search.status === "loading";
+  useEffect(() => {
+    gate.set(running);
+  }, [gate, running]);
+
+  // The status line of the list goes to the live region too; the region itself stays mounted, so it is announced.
+  const line = popup?.text ?? "";
+  const lastLine = useRef("");
+  useEffect(() => {
+    if (line !== "") {
+      lastLine.current = line;
+      setAnnouncement(line);
+    } else {
+      // The line is gone: forget it, so the same line later (a second failure) is announced again.
+      setAnnouncement((cur) => (cur === lastLine.current ? "" : cur));
+    }
+  }, [line]);
+
   const noFragment = fragment === null;
   useEffect(() => {
     if (noFragment) {
@@ -122,40 +164,66 @@ export function useMentionComposer(d: MentionComposerDeps): MentionComposer {
     }
   }, [d.draft, d.input]);
 
+  const { draft, setDraft } = d;
   const pick = useCallback(
     (index: number) => {
-      const o = popup?.options[index];
+      const o = model?.options[index];
       if (!o || fragment === null) {
         return;
       }
       const r = addMention(pills, o);
-      if (r.outcome === "added") {
-        setPills(r.pills);
+      if (r.outcome !== "added") {
+        // Already among the pills: the list only closes, the typed «@query» stays.
+        setDismissed(fragment.start);
+        return;
       }
-      // A repeated object adds nothing; the fragment goes either way and the list closes.
-      const next = removeFragment(d.draft, fragment);
+      setPills(r.pills);
+      setAnnouncement(mentionAddedText(o.label));
+      const next = removeFragment(draft, fragment);
       caretTo.current = next.caret;
       setCaret(next.caret);
-      d.setDraft(next.text);
+      setDraft(next.text);
     },
-    [popup, fragment, pills, d],
+    [model, fragment, pills, draft, setDraft],
   );
 
+  const input = d.input;
   const remove = useCallback(
     (index: number) => {
+      const gone = pills[index];
+      if (gone) {
+        setAnnouncement(mentionRemovedText(gone.label));
+      }
       setPills((p) => p.filter((_, i) => i !== index));
-      d.input.current?.focus();
+      input.current?.focus();
     },
-    [d.input],
+    [pills, input],
   );
+
+  const openList = useCallback(() => {
+    const el = input.current;
+    if (!el || !d.enabled || full) {
+      return;
+    }
+    // Focus first: its focus handler reads the old caret, the new one is set after it.
+    el.focus();
+    const next = insertTrigger(draft, el.selectionEnd ?? draft.length);
+    if (next === null) {
+      return;
+    }
+    caretTo.current = next.caret;
+    setCaret(next.caret);
+    setDismissed(-1);
+    setDraft(next.text);
+  }, [input, d.enabled, full, draft, setDraft]);
 
   const retry = useCallback(() => searcher.retry(), [searcher]);
   const clear = useCallback(() => setPills([]), []);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
     const composing = e.nativeEvent.isComposing;
-    if (popup !== null && fragment !== null) {
-      const k = pickerKey({ key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, altKey: e.altKey, metaKey: e.metaKey, isComposing: composing, keyCode: e.keyCode }, count);
+    if (model !== null && fragment !== null) {
+      const k = pickerKey({ key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, altKey: e.altKey, metaKey: e.metaKey, isComposing: composing, keyCode: e.keyCode }, count, model.kind);
       switch (k) {
         case "next":
         case "prev":
@@ -167,15 +235,15 @@ export function useMentionComposer(d: MentionComposerDeps): MentionComposer {
           pick(current);
           return true;
         case "close":
-          // Only the list closes: not the draft, not the panel.
+          // Only the list closes: not the draft, not the panel. Enter with nothing to pick does the same, so a second Enter sends.
           e.preventDefault();
           e.stopPropagation();
           setDismissed(fragment.start);
           return true;
         case "swallow":
-          // Enter must not send the request while the list is open; after a failure it repeats the search.
+          // Enter must not send the request while the list searches; after a failure it repeats the search.
           e.preventDefault();
-          if (popup.retry) {
+          if (model.retry) {
             searcher.retry();
           }
           return true;
@@ -184,9 +252,9 @@ export function useMentionComposer(d: MentionComposerDeps): MentionComposer {
       }
     }
     if (e.key === "Backspace" && !composing && e.keyCode !== 229) {
-      const el = e.currentTarget;
-      if (backspaceRemovesPill({ start: el.selectionStart, end: el.selectionEnd }, pills.length)) {
+      if (backspaceRemovesPill(d.draft, pills.length)) {
         e.preventDefault();
+        setAnnouncement(mentionRemovedText(pills[pills.length - 1].label));
         setPills((p) => p.slice(0, -1));
         return true;
       }
@@ -200,6 +268,7 @@ export function useMentionComposer(d: MentionComposerDeps): MentionComposer {
     active: current,
     listId,
     activeId: popup !== null && count > 0 ? `${listId}-${current}` : undefined,
+    announcement,
     onChange: (e) => {
       setCaret(e.target.selectionStart);
       d.setDraft(e.target.value);
@@ -222,6 +291,7 @@ export function useMentionComposer(d: MentionComposerDeps): MentionComposer {
     hover: setActive,
     remove,
     retry,
+    openList,
     clear,
   };
 }

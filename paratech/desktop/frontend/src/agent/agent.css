@@ -182,8 +182,11 @@
 .ag-pill { max-width: 100%; padding: 0 8px; border-radius: 999px; background: var(--raised); box-shadow: 0 0 0 1px var(--edge); color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ag-pills > li { min-width: 0; max-width: 100%; }
 /* A pill of the thread is a button that opens the object (TASK-247); the name is cut with an ellipsis. */
-button.ag-pill { display: block; height: 22px; border: 0; font: inherit; font-size: var(--fs-small); cursor: pointer; }
-button.ag-pill:hover { background: var(--fill); }
+button.ag-pill, span.ag-pill { display: block; height: 22px; font-size: var(--fs-small); }
+span.ag-pill { box-sizing: border-box; line-height: 22px; }
+button.ag-pill { border: 0; font: inherit; font-size: var(--fs-small); cursor: pointer; }
+/* Accent text stays on --raised: on --fill it is 4.37:1 in the light theme, so hover is a ring only. */
+button.ag-pill:hover { box-shadow: 0 0 0 1px var(--btn-line); }
 button.ag-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (forced-colors: active) {
   .ag-chat-item[aria-current="true"] { outline: 2px solid Highlight; }
@@ -192,10 +195,17 @@ button.ag-pill:focus-visible { outline: 2px solid var(--accent); outline-offset:
 /* «@» mentions (TASK-247): the chosen ones above the field, the list of candidates as a popup next to it. */
 .ag-compose { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 /* In the column the field keeps the height the script gives it (it grows with its text). */
-.ag-compose > .ag-input { flex: none; }
+.ag-field { position: relative; display: flex; }
+.ag-field > .ag-input { flex: 1; padding-right: 40px; }
+/* The way into «@» that stays after the first message: sits inside the field, at its bottom right. */
+.ag-at { position: absolute; right: 10px; bottom: 6px; display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); font: inherit; font-size: var(--fs-small); font-weight: 600; cursor: pointer; }
+.ag-at:hover:not(:disabled) { background: var(--fill); color: var(--text); }
+.ag-at:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ag-at:disabled { opacity: .5; cursor: not-allowed; }
 .ag-mpills { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.ag-mpill { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; height: 24px; padding: 0 2px 0 8px; border-radius: 999px; background: var(--raised); box-shadow: 0 0 0 1px var(--edge); color: var(--accent); font-size: var(--fs-small); font-weight: 500; }
-.ag-mpill-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 2px; }
+/* The chosen ones look like the context chip (.ag-chip): both are «what the agent takes into account». */
+.ag-mpill { min-width: 0; }
+.ag-mpill .ag-chip-text { min-width: 0; }
 .ag-mpill-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ag-mpop { position: absolute; z-index: 6; left: 0; right: 0; box-sizing: border-box; max-height: 240px; padding: 4px; overflow-y: auto; border-radius: var(--r-md); background: var(--panel); box-shadow: 0 0 0 1px var(--edge), 0 8px 24px rgb(0 0 0 / 0.35); scrollbar-width: thin; }
 .ag-in-bottom .ag-mpop { bottom: calc(100% + 6px); }
@@ -206,9 +216,11 @@ button.ag-pill:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .ag-mopt[aria-selected="true"] { background: var(--fill); box-shadow: inset 2px 0 0 var(--accent); }
 .ag-mopt-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .ag-mopt-k { white-space: nowrap; }
-.ag-mopt-h { grid-column: 1 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-mopt-h { grid-column: 1 / -1; display: flex; min-width: 0; white-space: pre; }
+.ag-mopt-ht { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ag-mopt-done { flex: none; }
+.ag-mopt[aria-disabled="true"] { cursor: default; }
 .ag-mstatus { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 8px; overflow-wrap: anywhere; }
-.ag-mhint { text-align: left; }
 @media (forced-colors: active) {
   .ag-mopt[aria-selected="true"] { outline: 2px solid Highlight; }
 }

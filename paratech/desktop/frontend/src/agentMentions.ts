@@ -10,19 +10,38 @@ import type { PageId } from "./nav.js";
 export const maxMentions = 8;
 
 export const mentionTexts = {
-  hint: "Напишите @, чтобы указать предмет, пару, материал или задание",
-  loading: "Ищу…",
-  empty: "Ничего не найдено",
-  unavailable: "Поиск недоступен: помощник не подключён",
-  failed: "Не удалось выполнить поиск",
-  full: `Не больше ${maxMentions} упоминаний в одной просьбе`,
+  /** Appended to the empty-chat line, so the chat shows one paragraph. */
+  hint: "Через @ — указать предмет, пару, материал или задание.",
+  loading: "Поиск…",
+  emptyNoQuery: "Пока нечего указать: предметы, пары, материалы и задания появятся после первых записей",
+  unavailable: "Поиск по предметам сейчас недоступен. Название можно написать словами.",
+  failed: "Не удалось выполнить поиск.",
+  full: `Можно указать не больше ${maxMentions}. Чтобы добавить другое, нужно убрать одно из выбранных выше.`,
   retry: "Повторить",
+  retryTitle: "Повторить поиск (Enter)",
   picked: "уже указано",
   pillsLabel: "Упоминания",
   listLabel: "Что указать",
+  atLabel: "Указать предмет, пару, материал или задание (@)",
 } as const;
 
-export const removeMentionLabel = (label: string) => `Убрать упоминание ${label}`;
+export const removeMentionLabel = (label: string) => `Убрать «${label}»`;
+
+/** The announcements of the always-mounted live region. */
+export const mentionAddedText = (label: string) => `Указано: ${label}`;
+export const mentionRemovedText = (label: string) => `Убрано: ${label}`;
+
+const queryCut = 40;
+
+/** «По «физ» ничего не найдено»; the query is the student's text, cut to 40 characters. Without a query: why the list is empty. */
+export function emptyResultText(query: string): string {
+  const q = query.trim();
+  if (q === "") {
+    return mentionTexts.emptyNoQuery;
+  }
+  const chars = Array.from(q);
+  return `По «${chars.length > queryCut ? `${chars.slice(0, queryCut).join("")}…` : q}» ничего не найдено`;
+}
 
 const kindCaptions: Record<string, string> = {
   subject: "Предмет",
@@ -79,6 +98,22 @@ export function removeFragment(text: string, f: MentionFragment): { text: string
   return { text: text.slice(0, f.start) + text.slice(end), caret: f.start };
 }
 
+/** The field takes at most this many characters (maxLength of the textarea). */
+export const maxDraftLength = 4000;
+
+/**
+ * The «@» button: inserts an «@» at the caret, with a space before it when the previous character is not a whitespace
+ * (so it opens a fragment). Null when the text has no room for it.
+ */
+export function insertTrigger(text: string, caret: number): { text: string; caret: number } | null {
+  const at = Math.min(Math.max(caret, 0), text.length);
+  const prefix = at > 0 && !isSpace(text[at - 1]) ? " " : "";
+  if (text.length + prefix.length + 1 > maxDraftLength) {
+    return null;
+  }
+  return { text: text.slice(0, at) + prefix + "@" + text.slice(at), caret: at + prefix.length + 1 };
+}
+
 // ---- The chosen pills ----
 
 export interface AddResult {
@@ -97,9 +132,9 @@ export function addMention(pills: readonly MentionView[], c: { kind: string; id:
   return { pills: [...pills, { kind: c.kind, id: c.id, label: c.label }], outcome: "added" };
 }
 
-/** Backspace with the caret at the very start of the field removes the last pill. */
-export function backspaceRemovesPill(sel: { start: number; end: number }, pillCount: number): boolean {
-  return pillCount > 0 && sel.start === 0 && sel.end === 0;
+/** Backspace in an EMPTY field removes the last pill; with any text it only deletes text (a caret at 0 is not enough). */
+export function backspaceRemovesPill(draft: string, pillCount: number): boolean {
+  return pillCount > 0 && draft === "";
 }
 
 /** What a request is asked with: kind, id and label only. Absent when there is none. */
@@ -122,10 +157,11 @@ export interface KeyLike {
 }
 
 /**
- * What a key does while the list is open. Enter with nothing to pick is swallowed (it must not send the request); Tab
- * with nothing to pick moves focus on. Nothing is intercepted while an IME composes.
+ * What a key does while the list is open. Enter with nothing to pick closes the list (a second Enter sends), except
+ * while searching or after a failure, where it is swallowed (after a failure the caller repeats the search); Tab with
+ * nothing to pick moves focus on. Nothing is intercepted while an IME composes.
  */
-export function pickerKey(e: KeyLike, optionCount: number): PickerKey {
+export function pickerKey(e: KeyLike, optionCount: number, kind: PopupKind): PickerKey {
   if (e.isComposing === true || e.keyCode === 229 || e.ctrlKey === true || e.altKey === true || e.metaKey === true) {
     return "none";
   }
@@ -135,7 +171,13 @@ export function pickerKey(e: KeyLike, optionCount: number): PickerKey {
     case "ArrowUp":
       return optionCount > 0 ? "prev" : "none";
     case "Enter":
-      return e.shiftKey === true ? "none" : optionCount > 0 ? "pick" : "swallow";
+      if (e.shiftKey === true) {
+        return "none";
+      }
+      if (optionCount > 0) {
+        return "pick";
+      }
+      return kind === "loading" || kind === "failed" ? "swallow" : "close";
     case "Tab":
       return e.shiftKey === true || optionCount === 0 ? "none" : "pick";
     case "Escape":
@@ -306,21 +348,75 @@ export interface PopupOption {
   label: string;
   caption: string;
   hint: string;
-  /** The object is already among the pills. */
+  /** The object is already among the pills: shown as a muted suffix of the hint line, and picking it only closes the list. */
   picked: boolean;
 }
 
 export interface PopupModel {
   kind: PopupKind;
-  /** The status line; "" when options are shown. */
+  /** The status line; "" when options are shown (or while a fast search has not yet earned a line). */
   text: string;
   options: PopupOption[];
   /** «Повторить» is offered. */
   retry: boolean;
 }
 
-/** The list for the search state and the pills already chosen. Every state has its own line; none is a dead end. */
-export function popupModel(search: SearchState, picked: readonly MentionView[]): PopupModel {
+/** The popup is drawn only when it has options or a line to say; otherwise there is no empty box. */
+export function popupVisible(m: PopupModel | null): boolean {
+  return m !== null && (m.options.length > 0 || m.text !== "");
+}
+
+/** The search reads the local DB and is usually instant: «Поиск…» is shown only after this long. */
+export const mentionLoadingDelayMs = 600;
+
+export interface SlowGate {
+  /** The search is (not) running. Running for `delay` without a break makes the gate slow. */
+  set(running: boolean): void;
+  dispose(): void;
+}
+
+/** Tells when a running search has taken long enough to say so. Pure apart from the injected timer. */
+export function createSlowGate(d: {
+  setTimer(fn: () => void, ms: number): unknown;
+  clearTimer(handle: unknown): void;
+  onChange(slow: boolean): void;
+  delay?: number;
+}): SlowGate {
+  let timer: unknown = null;
+  let slow = false;
+  const stop = () => {
+    if (timer !== null) {
+      d.clearTimer(timer);
+      timer = null;
+    }
+  };
+  return {
+    set(running) {
+      if (running) {
+        if (!slow && timer === null) {
+          timer = d.setTimer(() => {
+            timer = null;
+            slow = true;
+            d.onChange(true);
+          }, d.delay ?? mentionLoadingDelayMs);
+        }
+        return;
+      }
+      stop();
+      if (slow) {
+        slow = false;
+        d.onChange(false);
+      }
+    },
+    dispose: stop,
+  };
+}
+
+/**
+ * The list for the search state and the pills already chosen. Every state has its own line; none is a dead end. A search
+ * that has not answered yet shows no line until `slow` (see createSlowGate): the previous options stay, or nothing shows.
+ */
+export function popupModel(search: SearchState, picked: readonly MentionView[], slow = false): PopupModel {
   const status = (kind: PopupKind, text: string, retry = false): PopupModel => ({ kind, text, options: [], retry });
   if (picked.length >= maxMentions) {
     return status("full", mentionTexts.full);
@@ -352,7 +448,10 @@ export function popupModel(search: SearchState, picked: readonly MentionView[]):
     // Results of the previous query stay while the next one is being fetched.
     return { kind: "options", text: "", options, retry: false };
   }
-  return search.status === "ready" ? status("empty", mentionTexts.empty) : status("loading", mentionTexts.loading);
+  if (search.status === "ready") {
+    return status("empty", emptyResultText(search.query));
+  }
+  return status("loading", slow ? mentionTexts.loading : "");
 }
 
 // ---- Pills of the thread ----
@@ -364,8 +463,26 @@ export interface MentionPill {
   /** The stored name, untouched; the kind when the stored name is empty. Plain text only. */
   label: string;
   caption: string;
-  /** «Открыть: Предмет Физика». */
+  /** The tooltip; says where a press leads when that is only a page («Откроется «База знаний»»). */
+  title: string;
+  /** «Открыть предмет «Физика»»; for a lesson and a material the page that really opens. */
   aria: string;
+}
+
+/** What a pill says about itself and about where it leads. The lesson and the material open a page, not the object. */
+function pillWording(kind: string, caption: string, label: string): { title: string; aria: string } {
+  switch (kind) {
+    case "subject":
+      return { title: `${caption}: ${label}`, aria: `Открыть предмет «${label}»` };
+    case "assignment":
+      return { title: `${caption}: ${label}`, aria: `Открыть задание «${label}»` };
+    case "lesson":
+      return { title: `${caption}: ${label}. Откроется «База знаний»`, aria: `Открыть «Базу знаний»: ${label}` };
+    case "material":
+      return { title: `${caption}: ${label}. Откроется «Предметы»`, aria: `Открыть «Предметы»: ${label}` };
+    default:
+      return { title: `${caption}: ${label}`, aria: `${caption}: ${label}` };
+  }
 }
 
 /** The pills of a request: always the name stored at mention time, whatever happened to the object since. */
@@ -373,7 +490,7 @@ export function mentionPills(list: readonly MentionView[] | undefined): MentionP
   return (list ?? []).map((m, i) => {
     const caption = mentionKindCaption(m.kind);
     const label = m.label.trim() !== "" ? m.label : caption;
-    return { key: `${m.kind}:${m.id}:${i}`, kind: m.kind, id: m.id, label, caption, aria: `Открыть: ${caption} ${label}` };
+    return { key: `${m.kind}:${m.id}:${i}`, kind: m.kind, id: m.id, label, caption, ...pillWording(m.kind, caption, label) };
   });
 }
 
