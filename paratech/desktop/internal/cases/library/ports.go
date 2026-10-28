@@ -8,6 +8,7 @@ import (
 	"paratech/desktop/internal/domain/library/inspection"
 	"paratech/desktop/internal/domain/library/material"
 	"paratech/desktop/internal/domain/library/note"
+	"paratech/desktop/internal/domain/library/services/schedulesubjects"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/schedule/lesson"
@@ -78,6 +79,10 @@ type LessonReader interface {
 // the sqlite adapter.
 type SubjectStrings interface {
 	ListSubjectStrings(ctx context.Context) ([]subjectmatch.Candidate, error)
+
+	// ListScheduleSubjectStrings returns every distinct string as stored, with its live lessons by kind and its
+	// recordings (one read), for the subjects from the schedule (ScheduleSubjects).
+	ListScheduleSubjectStrings(ctx context.Context) ([]schedulesubjects.Row, error)
 }
 
 // Clock supplies the current time; its location is the one a new subject's semester is derived in (ARCH-24). The app

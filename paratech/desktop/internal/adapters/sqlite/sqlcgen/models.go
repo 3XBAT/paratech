@@ -35,16 +35,20 @@ type AgentStep struct {
 }
 
 type AgentThread struct {
-	ID           string
-	Title        string
-	Turns        int64
-	HistoryFrom  int64
-	Seen         string
-	ArchivedAt   sql.NullInt64
-	LastActiveAt int64
-	Version      int64
-	CreatedAt    int64
-	UpdatedAt    int64
+	ID             string
+	Title          string
+	Turns          int64
+	HistoryFrom    int64
+	Seen           string
+	ArchivedAt     sql.NullInt64
+	LastActiveAt   int64
+	Version        int64
+	CreatedAt      int64
+	UpdatedAt      int64
+	SummaryText    sql.NullString
+	SummaryThrough sql.NullInt64
+	SummaryAt      sql.NullInt64
+	ForkedFrom     sql.NullString
 }
 
 type AgentTurn struct {
@@ -70,6 +74,7 @@ type AgentTurn struct {
 	DroppedBy      int64
 	StartedAt      int64
 	UpdatedAt      int64
+	ReplyLine      sql.NullString
 }
 
 type Answer struct {
