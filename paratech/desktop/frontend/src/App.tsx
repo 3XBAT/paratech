@@ -12,6 +12,7 @@ import {
   routeToTranscript,
 } from "./nav";
 import { AgentPanel } from "./agent/AgentPanel";
+import { mentionOpening } from "./agentMentions";
 import { PanelResizeHandle, useResizablePanel } from "./agent/PanelResizeHandle";
 import type { CitationOpening } from "./knowledgeView";
 import { OpenSummaryContext, type SummarySection } from "./openSummary";
@@ -137,6 +138,23 @@ export function App() {
   // A subject or a card opened inside its page is a route too, so «Назад» finds the list again (TASK-202).
   const selectSubject = useCallback((id: string) => setRoute((r) => routeToSubject(r, id)), []);
   const selectAssignment = useCallback((id: string) => setRoute((r) => routeToOpenedAssignment(r, id)), []);
+  // A mention pill of the agent's thread (TASK-247): the closest existing page; a deleted object meets its normal state.
+  const openMention = useCallback(
+    (kind: string, id: string) => {
+      const o = mentionOpening(kind, id);
+      if (o === null) {
+        return;
+      }
+      if (o.type === "subject") {
+        selectSubject(o.id);
+      } else if (o.type === "assignment") {
+        openAssignment(o.id);
+      } else {
+        openPage(o.page);
+      }
+    },
+    [selectSubject, openAssignment, openPage],
+  );
   // «Указать почту» (TASK-238): opens the subject and asks its page for the form of one teacher. The request is state, not
   // part of the route: it is taken once, so «Назад» and a later visit never reopen the form, and the window drops it
   // as soon as the route points elsewhere.
@@ -256,7 +274,7 @@ export function App() {
           </div>
         )}
       </main>
-      <AgentPanel page={current} assignmentId={route.assignment} open={open} reveal={panel.reveal} hide={panel.hide} onOpenAssignment={openAssignment} onOpenSource={openSource} />
+      <AgentPanel page={current} assignmentId={route.assignment} open={open} reveal={panel.reveal} hide={panel.hide} onOpenAssignment={openAssignment} onOpenSource={openSource} onOpenMention={openMention} />
       <PanelResizeHandle panel={panel} />
       <DropZone onImported={() => setLibrary((n) => n + 1)} />
     </div>

@@ -22,13 +22,15 @@ import {
   reconcileOpenChat,
   refreshesChats,
   requestText,
+  restoredMentions,
   type UndoNote,
   undoableActions,
   visibleEntries,
 } from "../agentView.js";
 import { draftEvent, draftText } from "../agentDraft.js";
 import { problemText, undoOutcome } from "../journalView.js";
-import { blockingEntry, type Entry, initialPanelState, loadSnapshot, PressTracker, reducePanel } from "../agentState.js";
+import { blockingEntry, type Entry, initialPanelState, loadSnapshot, panelMode, PressTracker, reducePanel } from "../agentState.js";
+import { useMentionComposer } from "./useMentionComposer.js";
 import type { PageId } from "../nav.js";
 import type { ButtonId } from "../agentView.js";
 import { AgentPanelView } from "./AgentPanelView.js";
@@ -78,6 +80,8 @@ export function AgentPanel(props: {
   hide?: () => void;
   onOpenAssignment?: (id: string) => void;
   onOpenSource?: (o: CitationOpening) => void;
+  /** A mention pill of the thread was pressed (kind and id as stored). */
+  onOpenMention?: (kind: string, id: string) => void;
 }) {
   const [state, dispatch] = useReducer(reducePanel, initialPanelState);
   // Subject names for the assignment lists of replies; unreadable subjects just leave the names out.
@@ -330,15 +334,32 @@ export function AgentPanel(props: {
     [loadState],
   );
 
+  const shown = useMemo(
+    () => ({ ...state, entries: visibleEntries(state.entries, openId, listed ? new Set(chats.map((c) => c.threadId)) : undefined) }),
+    [state, openId, chats, listed],
+  );
+
+  // «@» in the field: the list of objects and the pills of the request being written.
+  const composer = useMentionComposer({
+    enabled: panelMode(shown).inputEnabled,
+    draft,
+    setDraft,
+    input,
+    search: api.mentionCandidates,
+    resetKey: openId,
+  });
+  const clearMentions = composer.clear;
+
   const submit = useCallback(() => {
     const text = requestText(draft);
     if (text === null) {
       return;
     }
     setDraft("");
-    // The chip sets the subject and screen; the chat is the open one.
-    send({ ...askInput(ctx, text), threadId: openId });
-  }, [draft, ctx, send, openId]);
+    // The chip sets the subject and screen; the chat is the open one. The mentions go with the request, the pills clear.
+    send({ ...askInput(ctx, text, composer.pills), threadId: openId });
+    clearMentions();
+  }, [draft, ctx, send, openId, composer.pills, clearMentions]);
 
   // Requests whose buttons were pressed, with the update they were pressed on: off until a newer update arrives.
   // The tracker is read synchronously, so a double click before the next render makes one call.
@@ -481,6 +502,7 @@ export function AgentPanel(props: {
       freeWork: api,
       subjects,
       openAssignment: props.onOpenAssignment,
+      openMention: props.onOpenMention,
       answers,
       openSource: props.onOpenSource,
       press,
@@ -495,12 +517,8 @@ export function AgentPanel(props: {
       },
       undoNote: (actionId) => undoNotes[actionId],
     };
-  }, [state.entries, send, loadState, undoNotes, undoOne, undoAll, subjects, props.onOpenAssignment, props.onOpenSource]);
+  }, [state.entries, send, loadState, undoNotes, undoOne, undoAll, subjects, props.onOpenAssignment, props.onOpenMention, props.onOpenSource]);
 
-  const shown = useMemo(
-    () => ({ ...state, entries: visibleEntries(state.entries, openId, listed ? new Set(chats.map((c) => c.threadId)) : undefined) }),
-    [state, openId, chats, listed],
-  );
   const sections = useMemo(() => chatSections(chats, state.entries), [chats, state.entries]);
   const openChat = [...sections.active, ...sections.archived].find((r) => r.threadId === openId) ?? null;
   const earlier = useMemo(() => earlierItems(earlierReq, state.entries, openId), [earlierReq, state.entries, openId]);
@@ -555,6 +573,9 @@ export function AgentPanel(props: {
       state={shown}
       chat={chatBar}
       earlier={earlier}
+      mentions={composer}
+      onOpenMention={props.onOpenMention}
+      mentionsFor={(e) => restoredMentions(e, earlierReq, openId)}
       ctx={ctx}
       draft={draft}
       notice={notice}

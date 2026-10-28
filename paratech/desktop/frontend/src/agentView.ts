@@ -3,7 +3,8 @@
 // impersonal («Создан предмет…», not «Я создал…»). Model text (summary, notes, questions, options, labels, replies) is
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
-import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, EarlierRequestView, FreeWorkRef, PlanStepView, PlanView, QuestionView } from "./bindings/agent.js";
+import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, EarlierRequestView, FreeWorkRef, MentionView, PlanStepView, PlanView, QuestionView } from "./bindings/agent.js";
+import { askMentions, type MentionPill, mentionPills } from "./agentMentions.js";
 import { approveLabel, type PlanProgress, planProgress, stepMarks, type StepMark, planWindow } from "./planView.js";
 import { type Entry, isBusyRefused, isRunning } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
@@ -112,8 +113,10 @@ export function contextFor(page: PageId, assignmentId: string, removed: boolean)
   };
 }
 
-export function askInput(ctx: AgentContext, text: string): AskInput {
-  return { ...ctx.ask, text };
+/** The request with the chosen «@» objects (kind, id and label only); no `mentions` key when there are none. */
+export function askInput(ctx: AgentContext, text: string, mentions: readonly MentionView[] = []): AskInput {
+  const list = askMentions(mentions);
+  return list === undefined ? { ...ctx.ask, text } : { ...ctx.ask, text, mentions: list };
 }
 
 /**
@@ -306,19 +309,12 @@ export function visibleEntries(entries: readonly Entry[], openId: string, chatId
   });
 }
 
-const mentionKindLabels: Record<string, string> = {
-  subject: "Предмет",
-  lesson: "Занятие",
-  material: "Материал",
-  assignment: "Задание",
-};
-
 export interface EarlierItem {
   key: string;
   turn: number;
   text: string;
   /** The names stored at mention time; a missing one reads as the kind. */
-  mentions: { key: string; label: string }[];
+  mentions: MentionPill[];
   /** The reply line; "" when no card was shown. */
   reply: string;
 }
@@ -334,13 +330,21 @@ export function earlierItems(requests: readonly EarlierRequestView[], entries: r
       key: `earlier:${openId}:${r.turn}`,
       turn: r.turn,
       text: r.text,
-      mentions: r.mentions.map((m, i) => ({
-        key: `${m.kind}:${m.id}:${i}`,
-        label: m.label.trim() !== "" ? m.label : (mentionKindLabels[m.kind] ?? "Объект"),
-      })),
+      mentions: mentionPills(r.mentions),
       reply: r.reply,
     }))
     .sort((a, b) => a.turn - b.turn);
+}
+
+/**
+ * The mentions of a live request that has no scope of its own (the current request of a chat opened after a restart):
+ * the history holds them under the same turn. A request asked in this session keeps them in its scope.
+ */
+export function restoredMentions(e: Entry, requests: readonly EarlierRequestView[], openId: string): readonly MentionView[] | undefined {
+  if (e.scope !== null || e.threadId === "" || e.threadId !== openId) {
+    return undefined;
+  }
+  return requests.find((r) => r.turn === e.turn)?.mentions;
 }
 
 // ---- Texts ----
@@ -740,6 +744,8 @@ export interface EntryModel {
   key: string;
   /** What the student typed; "" for a request from the history. */
   userText: string;
+  /** The «@» objects of the request, with the names stored at mention time. */
+  mentions: MentionPill[];
   /** The refusal text when the call failed, "" otherwise. */
   callLine: string;
   /** The call runs and nothing has come back yet: the waiting dots show instead of a line. */
@@ -755,13 +761,15 @@ export interface EntryContext {
   last: boolean;
   /** A running request blocks this refused one, and «Стоп» can stop it. */
   blocked: boolean;
+  /** The mentions of a request restored after a restart (no scope of its own); the scope's own win. */
+  mentions?: readonly MentionView[];
 }
 
 const finishedStatuses = new Set(["DONE", "FAILED", "CANCELLED", "STOPPED"]);
 
 export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked: false }): EntryModel {
   const callLine = e.callProblem !== "" ? callProblemText(e.callProblem) : "";
-  const base = { key: e.key, userText: e.text, callLine, waiting: e.callProblem === "" && e.update === null, rerun: false };
+  const base = { key: e.key, userText: e.text, mentions: mentionPills(e.scope?.mentions ?? ctx.mentions), callLine, waiting: e.callProblem === "" && e.update === null, rerun: false };
   const u = e.update;
   if (u === null) {
     return { ...base, cards: [] };

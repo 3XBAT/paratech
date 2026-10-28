@@ -151,7 +151,7 @@ test("earlier requests: text, mentions with the stored label, live requests left
     "a",
   );
   assert.deepEqual(items.map((i) => i.turn), [1, 2]);
-  assert.deepEqual(items[1].mentions.map((m) => m.label), ["Физика", "Занятие", "Объект"]);
+  assert.deepEqual(items[1].mentions.map((m) => m.label), ["Физика", "Пара", "Объект"]);
   assert.equal(items[0].reply, "");
   // Entries of another chat do not hide the same turn here.
   assert.equal(earlierItems([req(3)], live, "b").length, 1);
