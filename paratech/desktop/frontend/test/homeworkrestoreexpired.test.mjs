@@ -9,10 +9,12 @@ test("expired is a known change problem", () => {
   assert.deepEqual(parseChangeAssignmentResult({ problem: "expired", assignment: null }), {
     problem: "expired",
     assignment: null,
+    stopped: false,
   });
   assert.deepEqual(parseChangeAssignmentResult({ problem: "expired", assignment: { id: "a1" } }), {
     problem: "expired",
     assignment: null,
+    stopped: false,
   });
 });
 
@@ -23,7 +25,7 @@ test("restoreAssignment answers expired", async () => {
     return { problem: "expired", assignment: null };
   });
   const res = await api.restoreAssignment("a1", 5);
-  assert.deepEqual(res, { problem: "expired", assignment: null });
+  assert.deepEqual(res, { problem: "expired", assignment: null, stopped: false });
   assert.deepEqual(calls, [[methods.restoreAssignment, "a1", 5]]);
 });
 

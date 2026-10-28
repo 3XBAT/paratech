@@ -18,6 +18,8 @@ export function RowMenu<K extends string>(props: {
   /** The tooltip of the «⋯» button. */
   title: string;
   items: readonly RowMenuItem<K>[];
+  /** The row of the menu: the page finds the «⋯» button by it to give it the focus. */
+  rowId?: string;
   onPick: (key: K) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -87,6 +89,7 @@ export function RowMenu<K extends string>(props: {
         ref={button}
         type="button"
         className="btn ghost mmenu-btn"
+        data-menu-id={props.rowId}
         aria-label={props.label}
         title={props.title}
         aria-haspopup="menu"

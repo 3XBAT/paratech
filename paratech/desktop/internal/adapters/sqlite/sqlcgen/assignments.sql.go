@@ -13,35 +13,19 @@ import (
 const assignmentBusy = `-- name: AssignmentBusy :one
 SELECT CAST(EXISTS (SELECT 1 FROM deliveries v
                     WHERE v.assignment_id = ?1
-                      AND v.status IN (SELECT value FROM json_each(CAST(?2 AS TEXT))))
-    OR EXISTS (SELECT 1 FROM works w
-               WHERE w.assignment_id = ?1
-                 AND w.status IN (SELECT value FROM json_each(CAST(?3 AS TEXT))))
-    OR EXISTS (SELECT 1 FROM jobs j
-               WHERE j.type IN (SELECT value FROM json_each(CAST(?4 AS TEXT)))
-                 AND j.status IN (SELECT value FROM json_each(CAST(?5 AS TEXT)))
-                 AND json_extract(j.payload, '$.assignment_id') = ?1) AS INTEGER) AS busy
+                      AND v.status IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))) AS INTEGER) AS busy
 `
 
 type AssignmentBusyParams struct {
-	ID                string
-	DeliveryStatuses  string
-	WorkStatuses      string
-	JobTypes          string
-	ActiveJobStatuses string
+	ID               string
+	DeliveryStatuses string
 }
 
-// What in progress keeps the soft delete of an assignment from going through (ADR-0029): a delivery that may still go out or
-// may have gone out unseen, a work being triaged or written, or an unfinished job (draft generation, writing) whose
-// payload names it. The caller passes the status and type lists as JSON arrays (see AssignmentRepository.Busy).
+// What keeps the soft delete of an assignment from going through (ADR-0029, hard rule 7): a delivery that may still go
+// out or may have gone out unseen. A work or a job does not: the delete stops them (TASK-338). The caller passes the
+// statuses as a JSON array (see AssignmentRepository.Busy).
 func (q *Queries) AssignmentBusy(ctx context.Context, arg AssignmentBusyParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, assignmentBusy,
-		arg.ID,
-		arg.DeliveryStatuses,
-		arg.WorkStatuses,
-		arg.JobTypes,
-		arg.ActiveJobStatuses,
-	)
+	row := q.db.QueryRowContext(ctx, assignmentBusy, arg.ID, arg.DeliveryStatuses)
 	var busy int64
 	err := row.Scan(&busy)
 	return busy, err
@@ -100,6 +84,38 @@ func (q *Queries) AssignmentInUse(ctx context.Context, arg AssignmentInUseParams
 	var in_use int64
 	err := row.Scan(&in_use)
 	return in_use, err
+}
+
+const assignmentWorking = `-- name: AssignmentWorking :one
+SELECT CAST(EXISTS (SELECT 1 FROM works w
+                    WHERE w.assignment_id = ?1
+                      AND w.status IN (SELECT value FROM json_each(CAST(?2 AS TEXT))))
+    OR EXISTS (SELECT 1 FROM jobs j
+               WHERE j.type IN (SELECT value FROM json_each(CAST(?3 AS TEXT)))
+                 AND j.status IN (SELECT value FROM json_each(CAST(?4 AS TEXT)))
+                 AND json_extract(j.payload, '$.assignment_id') = ?1) AS INTEGER) AS working
+`
+
+type AssignmentWorkingParams struct {
+	ID                sql.NullString
+	WorkStatuses      string
+	JobTypes          string
+	ActiveJobStatuses string
+}
+
+// What the soft delete of an assignment stops (TASK-338): a work being triaged or written, or an unfinished job (draft
+// generation, writing) whose payload names it. The caller passes the lists as JSON arrays (see
+// AssignmentRepository.Working).
+func (q *Queries) AssignmentWorking(ctx context.Context, arg AssignmentWorkingParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, assignmentWorking,
+		arg.ID,
+		arg.WorkStatuses,
+		arg.JobTypes,
+		arg.ActiveJobStatuses,
+	)
+	var working int64
+	err := row.Scan(&working)
+	return working, err
 }
 
 const deleteAssignment = `-- name: DeleteAssignment :execrows
@@ -285,6 +301,45 @@ func (q *Queries) InsertAssignment(ctx context.Context, arg InsertAssignmentPara
 		arg.DoneAt,
 	)
 	return err
+}
+
+const listActiveAssignmentJobs = `-- name: ListActiveAssignmentJobs :many
+SELECT j.id FROM jobs j
+WHERE j.type IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+  AND j.status IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
+  AND json_extract(j.payload, '$.assignment_id') = ?3
+ORDER BY j.created_at, j.id
+`
+
+type ListActiveAssignmentJobsParams struct {
+	JobTypes          string
+	ActiveJobStatuses string
+	ID                string
+}
+
+// The unfinished jobs (draft generation, writing) whose payload names an assignment, oldest first, which its soft
+// delete cancels (TASK-338).
+func (q *Queries) ListActiveAssignmentJobs(ctx context.Context, arg ListActiveAssignmentJobsParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listActiveAssignmentJobs, arg.JobTypes, arg.ActiveJobStatuses, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAssignmentsByMaterial = `-- name: ListAssignmentsByMaterial :many

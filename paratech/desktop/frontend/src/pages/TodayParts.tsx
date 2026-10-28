@@ -13,8 +13,10 @@ import {
   texts,
   waitingLine,
 } from "../todayView.js";
+import { type ActiveIssue, doneTexts } from "../assignmentDoneView.js";
 import { Button } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
+import { DoneCheck, DoneIssueLine } from "./AssignmentDoneParts.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
 import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
 import { isDeadlineAction } from "../agentConfirmView.js";
@@ -195,13 +197,31 @@ export function WaitingSection(props: { waiting: readonly TodayWaiting[]; onOpen
   );
 }
 
+/** «Выполнено» in the rows of «Горит на 7 дней» (TASK-316): the page owns the calls, the toast and the refusal. */
+export interface BurningDone {
+  /** The assignment whose call runs, "" none. */
+  busyId: string;
+  /** The refusal of the last call, with its repeat. */
+  issue: ActiveIssue | null;
+  /** title is the one of the row, for the toast. */
+  onMark: (assignmentId: string, title: string) => void;
+  /** «Закрыть» of a refusal that stays above the rows. */
+  onDismissIssue?: () => void;
+}
+
 export function BurningSection(props: {
   burning: readonly TodayDeadline[];
   onOpenAssignment: (id: string) => void;
   /** «Добавить задание» next to the title; without it the button is not offered. */
   onAdd?: () => void;
+  /** The check in every row; without it the rows only open the assignment. */
+  done?: BurningDone;
 }) {
   const onAdd = props.onAdd;
+  const done = props.done;
+  const issue = done?.issue ?? null;
+  // A refusal about a row that left the list stays above the rows.
+  const strayIssue = issue !== null && !props.burning.some((b) => issue.ids.includes(b.assignmentId)) ? issue : null;
   return (
     <Section
       title={texts.burning}
@@ -214,14 +234,38 @@ export function BurningSection(props: {
         )
       }
     >
+      {strayIssue !== null && (
+        <DoneIssueLine
+          issue={strayIssue}
+          where="list"
+          onRetry={strayIssue.retry}
+          onOpen={props.onOpenAssignment}
+          onClose={done?.onDismissIssue}
+        />
+      )}
       {props.burning.length === 0 ? (
         <Empty>{texts.burningEmpty}</Empty>
       ) : (
         <div className="card" role="list">
           {props.burning.map((b) => {
             const m = deadlineLine(b);
+            const rowIssue = issue !== null && issue.ids.includes(b.assignmentId) ? issue : null;
+            // The check is a sibling of the open button: no interactive element inside another.
             return (
-              <div key={m.key} role="listitem">
+              <div key={m.key} className={done === undefined ? undefined : "today-dlitem"} role="listitem">
+                {done !== undefined && (
+                  <DoneCheck
+                    title={m.title}
+                    done={false}
+                    busy={done.busyId === b.assignmentId}
+                    rowId={b.assignmentId}
+                    onToggle={() => {
+                      if (done.busyId === "") {
+                        done.onMark(b.assignmentId, m.title);
+                      }
+                    }}
+                  />
+                )}
                 <button type="button" className="today-row today-dl" onClick={() => props.onOpenAssignment(b.assignmentId)}>
                   <div className="today-day num">
                     {m.weekday}
@@ -235,6 +279,16 @@ export function BurningSection(props: {
                     <span className="num">{m.chip}</span>
                   </StatusChip>
                 </button>
+                {done?.busyId === b.assignmentId && (
+                  <span className="small muted today-dlnote" role="status">
+                    {doneTexts.saving}
+                  </span>
+                )}
+                {rowIssue !== null && (
+                  <div className="today-dlissue">
+                    <DoneIssueLine issue={rowIssue} where="list" onRetry={rowIssue.retry} onOpen={props.onOpenAssignment} />
+                  </div>
+                )}
               </div>
             );
           })}

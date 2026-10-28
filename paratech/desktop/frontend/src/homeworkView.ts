@@ -509,6 +509,13 @@ export const changeTexts = {
   subjectsLoading: "Загрузка предметов…",
   /** An empty subject of a lesson's assignment shows the lesson's subject, so «Без предмета» would be untrue. */
   lessonSubject: "Предмет занятия",
+  /** Asked before «Удалить» of an assignment whose work or draft is running (TASK-338). */
+  stopWarning: "Работа над заданием будет остановлена. Вернуть задание можно в течение 3 дней, работа сама не продолжится.",
+  /** Next to «Задание удалено» when the delete stopped a running work. */
+  stopped: "Работа остановлена",
+  cancel: "Отмена",
+  /** The way out of the in_use refusal: where the state of the email is shown. */
+  openSend: "Открыть отправку",
 } as const;
 
 /** The aria-label of a row's delete button: the visible word first, then which assignment. */
@@ -517,7 +524,7 @@ export function removeLabel(title: string): string {
 }
 
 const changeProblemTexts: Readonly<Record<string, string>> = {
-  in_use: "Сначала дождитесь отправки или работы над заданием",
+  in_use: "Письмо преподавателю ещё отправляется — удалить можно после",
   changed: "Задание уже изменилось. Данные обновлены, повторите действие",
   deleted: "Задание уже удалено",
   not_found: "Задание не найдено",
@@ -539,13 +546,35 @@ export interface ChangeOutcome {
   assignment: AssignmentItem | null;
   text: string;
   reload: boolean;
+  /** A delete stopped a running work: the removed line says so. */
+  stopped: boolean;
+  /** The refusal comes with «Открыть отправку»: an email of the assignment is not settled yet. */
+  openSend: boolean;
 }
 
 export function changeOutcome(r: ChangeAssignmentResult): ChangeOutcome {
   if (r.problem === "" && r.assignment !== null) {
-    return { assignment: r.assignment, text: "", reload: false };
+    return { assignment: r.assignment, text: "", reload: false, stopped: r.stopped, openSend: false };
   }
-  return { assignment: null, text: changeProblemText(r.problem), reload: changeNeedsReload(r.problem) };
+  return {
+    assignment: null,
+    text: changeProblemText(r.problem),
+    reload: changeNeedsReload(r.problem),
+    stopped: false,
+    openSend: r.problem === "in_use",
+  };
+}
+
+/**
+ * Whether «Удалить» must first warn that a running work will be stopped. A failed or odd reply is «no»: the check
+ * is a courtesy and never blocks the delete.
+ */
+export async function deleteNeedsWarning(impact: () => Promise<{ working: boolean }>): Promise<boolean> {
+  try {
+    return (await impact()).working === true;
+  } catch {
+    return false;
+  }
 }
 
 /**

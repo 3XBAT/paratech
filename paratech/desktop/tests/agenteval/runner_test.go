@@ -71,14 +71,20 @@ func (r *liveRun) request(req Request) Outcome {
 		o.Err = err.Error()
 		return o
 	}
+	history, mentions, err := liveChat(req)
+	if err != nil {
+		o.Err = err.Error()
+		return o
+	}
 	thread := shared.ThreadID("live-" + r.id + "-" + req.ID)
-	history := []values.HistoryTurn{{StudentText: text}}
+	number := len(req.Earlier) + 1
+	history = append(history, values.HistoryTurn{StudentText: text})
 	answered := false
 	for step := 1; step <= maxLiveSteps; step++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		reply, err := r.client.Step(ctx, values.StepRequest{
-			Key: fmt.Sprintf("ag:%s:1:%d", thread, step), Thread: thread, Base: r.base, Scope: scope, History: history,
-			MaxOutputTokens: agentturn.MaxOutputTokens,
+			Key: fmt.Sprintf("ag:%s:%d:%d", thread, number, step), Thread: thread, Base: r.base, Scope: scope,
+			Mentions: mentions, History: history, MaxOutputTokens: agentturn.MaxOutputTokens,
 		})
 		cancel()
 		if err != nil {
@@ -133,6 +139,35 @@ func liveAnswer(callID, argumentsJSON, option string) (string, error) {
 		return "", err
 	}
 	return res.ResultJSON, nil
+}
+
+// liveChat is the chat part of a case (catalog v9): the summary turn and the earlier pairs before the text, as
+// thread.Window sends them, and the mentions of the step as thread.StepMentions orders them, the current first.
+func liveChat(req Request) ([]values.HistoryTurn, []values.StepMention, error) {
+	var history []values.HistoryTurn
+	if req.Summary != "" {
+		s, err := values.ParseHistorySummary(1, req.Summary) // the covered count is not sent
+		if err != nil {
+			return nil, nil, err
+		}
+		history = append(history, s.Turn())
+	}
+	for _, x := range req.Earlier {
+		history = append(history, values.HistoryTurn{StudentText: x.Text}, values.HistoryTurn{AgentReply: x.Reply})
+	}
+	var current, earlier []values.StepMention
+	for _, m := range req.Mentions {
+		ref, err := values.NewRef(values.IDKind(m.Kind), m.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if m.Earlier {
+			earlier = append(earlier, values.StepMention{Ref: ref})
+		} else {
+			current = append(current, values.StepMention{Ref: ref, Current: true})
+		}
+	}
+	return history, append(current, earlier...), nil
 }
 
 func liveInput(req Request) (values.Scope, string, error) {
@@ -280,6 +315,43 @@ func TestRunnerOnTheFakeHub(t *testing.T) {
 	hub.Then(testenv.AgentCall{ID: "toolu_13", Tool: "ask_questions", Args: `{"questions":[{"kind":"choice","question":"Q","options":["a","b"]}]}`})
 	if o := r.request(cs.Requests[slicesIndex(cs.Requests, "s04")]); o.Err == "" || fmt.Sprint(o.Tools) != "[ask_questions]" {
 		t.Fatalf("s04 without its option: outcome = %+v", o)
+	}
+
+	// Catalog v9: a case's chat goes as the Hub expects it: the summary first, the earlier pairs, then the text; the
+	// mentions in the scope with IDs only, the current ones flagged, an earlier one not.
+	v9 := map[string]struct {
+		create   string
+		mentions string
+		turns    int
+	}{
+		"m01": {`{"title":"Решить номер 5","subject":"s-phys","lesson":"l-31","due":"2026-10-23"}`, "[s-phys:true l-31:true]", 3},
+		"m04": {`{"title":"Решить номер 5","subject":"s-math","due":"2026-10-23"}`, "[s-phys:false]", 3},
+	}
+	for _, id := range []string{"m01", "m04"} {
+		hub.Then(testenv.AgentCall{ID: "toolu_20", Tool: "create_assignment", Args: v9[id].create})
+		c := cs.Requests[slicesIndex(cs.Requests, id)]
+		o := r.request(c)
+		if o.Err != "" || fmt.Sprint(o.Tools) != "[create_assignment]" || fmt.Sprint(o.Assigned) != "["+c.AssignedSubject+"]" {
+			t.Fatalf("%s: outcome = %+v", id, o)
+		}
+		reqs := hub.Requests()
+		last := reqs[len(reqs)-1]
+		var got []string
+		for _, m := range last.GetScope().GetMentions() {
+			got = append(got, fmt.Sprintf("%s:%v", m.GetId(), m.GetCurrent()))
+		}
+		turns := last.GetTurns()
+		if fmt.Sprint(got) != v9[id].mentions || len(turns) != v9[id].turns || turns[len(turns)-1].GetStudentText() != c.Text ||
+			turns[0].GetStudentText() != c.Earlier[0].Text || turns[1].GetAgentReply() != c.Earlier[0].Reply {
+			t.Fatalf("%s: mentions %v, turns %v", id, got, turns)
+		}
+	}
+	// The fake Hub still wants a student text first (it predates the summary turn), so only the shape sent is checked.
+	m03 := cs.Requests[slicesIndex(cs.Requests, "m03")]
+	r.request(m03)
+	if turns := hub.Requests()[len(hub.Requests())-1].GetTurns(); len(turns) != 4 || turns[0].GetHistorySummary() != m03.Summary ||
+		turns[1].GetStudentText() != m03.Earlier[0].Text || turns[3].GetStudentText() != m03.Text {
+		t.Fatalf("m03: turns %v", turns)
 	}
 
 	// Every case of the file can be sent: the fake Hub has no script left and answers unavailable. A new run ID, so

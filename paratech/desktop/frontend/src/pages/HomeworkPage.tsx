@@ -2,8 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatTime } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
 import {
+  assignmentAfterDone,
+  defaultState,
+  doneTexts,
+  focusRowMenu,
+  listAfterDone,
+  listEmpty,
+} from "../assignmentDoneView";
+import {
   type AssignmentDetail,
   type AssignmentItem,
+  type AssignmentState,
   type ChangeAssignmentResult,
   type DeliveryItem,
   type GenerationStatus,
@@ -23,6 +32,7 @@ import {
   type AssignmentFilter,
   changeOutcome,
   changeTexts,
+  deleteNeedsWarning,
   flightGuard,
   removeLabel,
   filterAssignments,
@@ -53,15 +63,29 @@ import { lessonText } from "../lessonLabel";
 import { initialListState, type ListState } from "../listView";
 import { useRecipientNav } from "../recipientNav";
 import { isRefusal, type RecipientView, recipientView, refusalAction } from "../recipientView";
+import { newestOnly } from "../todayView";
 import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Field, Input, ResultLine, type ResultKind, Row } from "../ui/controls";
 import { StatusChip } from "../ui/StatusChip";
-import { FilterCounters, filterEmpty } from "./AssignmentFilter";
-import { AddAssignmentDialog, EditAssignmentDialog, RemovedLine, SendAgainDialog, SendDialog, type SendResult } from "./HomeworkDialogs";
+import { Toast } from "../ui/Toast";
+import { AssignmentRowView, DoneButton, DoneIssueLine, DoneStamp } from "./AssignmentDoneParts";
+import { AssignmentStateSwitch, FilterCounters, filterEmpty, filterReset } from "./AssignmentFilter";
+import {
+  AddAssignmentDialog,
+  ChangeRefusal,
+  DeleteWarning,
+  EditAssignmentDialog,
+  RemovedLine,
+  SendAgainDialog,
+  SendDialog,
+  type SendResult,
+} from "./HomeworkDialogs";
 import { HomeworkTurnkey } from "./HomeworkTurnkey";
 import { LessonCorrection } from "./LessonCorrection";
 import { RefusalButton } from "./RecipientParts";
 import { TranscriptLinks } from "./TranscriptLinks";
+import { doneToastProps, useDoneFocus } from "./useDoneFocus";
+import { useDoneRunner } from "./useDoneRunner";
 
 // «Домашние задания» (PRD section 10): the assignments, and for the opened one the draft editor, the extra
 // instructions with «Сгенерировать заново», the version history, the export to a file and the send by email through
@@ -79,19 +103,30 @@ export function HomeworkPage(props: { openAssignment?: string; onSelect?: (id: s
   const [own, setOwn] = useState(props.openAssignment ?? "");
   const openId = props.onSelect ? (props.openAssignment ?? "") : own;
   const select = props.onSelect ?? setOwn;
+  // «Открыть отправку» of a list row: the assignment whose page lands on the emails (the route carries only the id).
+  const [mailFor, setMailFor] = useState("");
+  const open = (id: string, target?: OpenTarget) => {
+    setMailFor(target === "mail" ? id : "");
+    select(id);
+  };
 
   return openId === "" ? (
-    <AssignmentList api={api} onOpen={select} />
+    <AssignmentList api={api} onOpen={open} />
   ) : (
     <AssignmentEditor
       api={api}
       id={openId}
       editOnOpen={props.editAssignment === openId}
       onEditTaken={props.onEditTaken}
+      showMail={mailFor === openId}
+      onMailShown={() => setMailFor("")}
       onBack={() => select("")}
     />
   );
 }
+
+/** Where an opened assignment page lands: «mail» is the emails block. */
+type OpenTarget = "mail";
 
 function Chip(props: { view: ChipView }) {
   return (
@@ -110,17 +145,37 @@ function MessageLine(props: { message: Message }) {
   );
 }
 
-function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void }) {
+/** The chip of a row is its newest email; a failed load leaves the row without a chip. */
+async function fetchDeliveries(api: HomeworkApi, as: readonly AssignmentItem[]) {
+  const ds = await Promise.allSettled(as.map((a) => api.deliveries(a.id)));
+  const byId: Record<string, DeliveryItem[]> = {};
+  ds.forEach((r, i) => {
+    if (r.status === "fulfilled") {
+      byId[as[i].id] = r.value;
+    }
+  });
+  // When every call was rejected the split is unknown, not «all active»: the counters stay hidden.
+  return { byId, loaded: ds.length === 0 || ds.some((r) => r.status === "fulfilled") };
+}
+
+function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?: OpenTarget) => void }) {
   const { api } = props;
+  const [checkingId, setCheckingId] = useState(""); // the running-work check of «Удалить» is on its way: no delete yet
+  const [cancelledId, setCancelledId] = useState(""); // «Отмена» of the warning: the «⋯» button of the row takes the focus back
   const [items, setItems] = useState<AssignmentItem[] | null>(null);
   // Deleted in this visit: the stored assignment at its new version, which «Вернуть» sends back.
   const [removed, setRemoved] = useState<Readonly<Record<string, AssignmentItem>>>({});
   const [restoredId, setRestoredId] = useState("");
   const [busyId, setBusyId] = useState("");
-  const [rowProblem, setRowProblem] = useState<{ id: string; text: string } | null>(null);
+  const [rowProblem, setRowProblem] = useState<{ id: string; text: string; openSend: boolean } | null>(null);
+  // Deleted with a stop of a running work: the removed line says so.
+  const [stoppedIds, setStoppedIds] = useState<Readonly<Record<string, boolean>>>({});
+  // The row that asks «Работа остановится — удалить?» (its work is running).
+  const [confirmId, setConfirmId] = useState("");
   const removedRef = useRef(removed);
   removedRef.current = removed;
   const guard = useRef(flightGuard());
+  const impactGuard = useRef(flightGuard());
   const [deliveries, setDeliveries] = useState<Readonly<Record<string, DeliveryItem[]>>>({});
   const [deliveriesLoaded, setDeliveriesLoaded] = useState(false);
   const [filter, setFilter] = useState<AssignmentFilter>("all");
@@ -128,32 +183,52 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
   const [list, setList] = useState<ListState>(initialListState);
   const [adding, setAdding] = useState(false);
   const library = useMemo(() => libraryApi(callByName), []);
+  // «Открытые / Выполненные / Все» (TASK-316). A slow answer of an earlier request never replaces a newer one.
+  const [state, setState] = useState<AssignmentState>(defaultState);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const requests = useRef(newestOnly());
+  // Whether the student has any assignment at all (null: not known): an empty «Открытые» is not the first run.
+  const [anyExists, setAnyExists] = useState<boolean | null>(null);
+  const [shownOnce, setShownOnce] = useState(false);
 
   useEffect(() => {
     let live = true;
+    const token = requests.current.next();
     void (async () => {
       try {
-        const as = await api.listAssignments();
-        if (!live) {
+        const as = await api.listAssignments(state);
+        if (!live || !requests.current.isNewest(token)) {
           return;
+        }
+        if (as.length > 0) {
+          setAnyExists(true);
+        } else if (state === "open") {
+          // Nothing open: ask once whether anything exists, to tell «все выполнены» from the first run.
+          const everything = await api.listAssignments("all").then(
+            (all) => all.length > 0,
+            () => null,
+          );
+          if (!live || !requests.current.isNewest(token)) {
+            return;
+          }
+          setAnyExists(everything);
+        } else if (state === "all") {
+          setAnyExists(false);
         }
         setItems(as);
-        // The chip of a row is its newest email; a failed load leaves the row without a chip.
-        const ds = await Promise.allSettled(as.map((a) => api.deliveries(a.id)));
-        if (!live) {
+        setShownOnce(true);
+        setError("");
+        const d = await fetchDeliveries(api, as);
+        if (!live || !requests.current.isNewest(token)) {
           return;
         }
-        const byId: Record<string, DeliveryItem[]> = {};
-        ds.forEach((r, i) => {
-          if (r.status === "fulfilled") {
-            byId[as[i].id] = r.value;
-          }
-        });
-        setDeliveries(byId);
-        // When every call was rejected the split is unknown, not «all active»: the counters stay hidden.
-        setDeliveriesLoaded(ds.length === 0 || ds.some((r) => r.status === "fulfilled"));
+        setDeliveries(d.byId);
+        setDeliveriesLoaded(d.loaded);
       } catch (err) {
-        if (live) {
+        if (live && requests.current.isNewest(token)) {
           setError(errorText(err));
         }
       }
@@ -161,12 +236,36 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
     return () => {
       live = false;
     };
-  }, [api]);
+  }, [api, state]);
+
+  // Another mark: the list of that mark is read; until it comes the rows of the old one are not shown.
+  function changeState(next: AssignmentState) {
+    if (next === state) {
+      return;
+    }
+    setState(next);
+    setItems(null);
+    setDeliveries({});
+    setDeliveriesLoaded(false);
+    setList(initialListState);
+    setRowProblem(null);
+    // A delete question of the old list must not come back for a row after a switch.
+    setConfirmId("");
+    setCheckingId("");
+    setCancelledId("");
+    // The email filter is about sending: it starts again with «Все», and a refusal about a gone row is not carried over.
+    setFilter("all");
+    doneRun.dismissIssue();
+  }
 
   // After a refusal that says the list is out of date, the list is read again (the removed lines stay).
   async function reloadItems() {
+    const token = requests.current.next();
     try {
-      const as = await api.listAssignments();
+      const as = await api.listAssignments(stateRef.current);
+      if (!requests.current.isNewest(token)) {
+        return;
+      }
       // An assignment that is live in the fresh list was restored elsewhere: its «Вернуть» line goes.
       if (as.some((x) => Object.hasOwn(removedRef.current, x.id))) {
         setRemoved((cur) => Object.fromEntries(Object.entries(cur).filter(([rid]) => !as.some((y) => y.id === rid))));
@@ -176,12 +275,49 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
         ...as,
         ...(prev ?? []).filter((x) => Object.hasOwn(removedRef.current, x.id) && !as.some((y) => y.id === x.id)),
       ]);
-    } catch {
-      // The old list stays; the refusal text already asks to repeat.
+      setShownOnce(true);
+      // This call took the token of a load that may still be on its way (it would have set the chips): the chips and
+      // counters are read here too, or they would stay hidden.
+      const d = await fetchDeliveries(api, as);
+      if (requests.current.isNewest(token)) {
+        setDeliveries(d.byId);
+        setDeliveriesLoaded(d.loaded);
+      }
+    } catch (err) {
+      // The old list stays; the refusal text already asks to repeat. Without an old list (it was being read when this
+      // call took over) the reason is shown instead of an endless «Загрузка…».
+      if (itemsRef.current === null && requests.current.isNewest(token)) {
+        setError(errorText(err));
+      }
     }
   }
 
-  async function change(a: AssignmentItem, call: () => Promise<ChangeAssignmentResult>, done: (next: AssignmentItem) => void) {
+  // «Выполнено» of a row (TASK-316): the row takes the stored state at once, the list is read again after it.
+  const rootRef = useRef<HTMLElement>(null);
+  const focus = useDoneFocus(rootRef);
+  const doneRun = useDoneRunner(api, {
+    apply: (res) => {
+      const cur = itemsRef.current;
+      if (cur === null) {
+        return;
+      }
+      const next = listAfterDone(cur, stateRef.current, res, new Date().toISOString());
+      // A row that leaves takes the focus with it: it goes to the next row's check.
+      const leaving = cur.filter((a) => !next.some((n) => n.id === a.id)).map((a) => a.id);
+      focus.rowsLeaving(leaving);
+      // A delete question of a row that left the list goes with it.
+      setConfirmId((c) => (leaving.includes(c) ? "" : c));
+      itemsRef.current = next;
+      setItems(next);
+    },
+    refresh: reloadItems,
+  });
+
+  async function change(
+    a: AssignmentItem,
+    call: () => Promise<ChangeAssignmentResult>,
+    done: (next: AssignmentItem, stopped: boolean) => void,
+  ) {
     if (guard.current.has(a.id)) {
       return; // a second click while the first call runs: it must not touch the first one's busy state
     }
@@ -194,10 +330,10 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
       }
       const out = changeOutcome(r);
       if (out.assignment !== null) {
-        done(out.assignment);
+        done(out.assignment, out.stopped);
         return;
       }
-      setRowProblem({ id: a.id, text: out.text });
+      setRowProblem({ id: a.id, text: out.text, openSend: out.openSend });
       if (out.reload) {
         await reloadItems();
       }
@@ -206,15 +342,41 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
     }
   }
 
-  const remove = (a: AssignmentItem) =>
-    change(
+  const remove = (a: AssignmentItem) => {
+    setConfirmId("");
+    return change(
       a,
       () => api.deleteAssignment(a.id, a.version),
-      (next) => {
+      (next, stopped) => {
         setRestoredId("");
+        setStoppedIds((cur) => ({ ...cur, [a.id]: stopped }));
         setRemoved((cur) => ({ ...cur, [a.id]: next }));
       },
     );
+  };
+
+  // «Удалить»: a running work is asked about first (inline), anything else is deleted at once. The impact guard keeps
+  // a double click to one question; a failed question counts as «not running».
+  async function askRemove(a: AssignmentItem) {
+    if (impactGuard.current.has(a.id) || guard.current.has(a.id) || doneRun.busyId === a.id) {
+      return;
+    }
+    setRowProblem(null);
+    setCancelledId("");
+    setCheckingId(a.id);
+    try {
+      await impactGuard.current.run(a.id, async () => {
+        if (await deleteNeedsWarning(() => api.deleteImpact(a.id))) {
+          setConfirmId(a.id);
+        } else {
+          setCheckingId("");
+          await remove(a);
+        }
+      });
+    } finally {
+      setCheckingId((cur) => (cur === a.id ? "" : cur));
+    }
+  }
 
   const restore = (a: AssignmentItem, gone: AssignmentItem) =>
     change(
@@ -230,63 +392,97 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
       },
     );
 
+  // «Отмена» of the delete question: the question that had the focus is gone, so the row's «⋯» button takes it.
+  useEffect(() => {
+    if (cancelledId !== "") {
+      focusRowMenu(rootRef.current, cancelledId);
+      setCancelledId("");
+    }
+  }, [cancelledId]);
+
   const row = (a: AssignmentItem) => {
-    const problem = rowProblem !== null && rowProblem.id === a.id ? rowProblem.text : "";
-    const problemLine = problem !== "" && (
-      <ResultLine kind="fail" role="alert">
-        {problem}
-      </ResultLine>
-    );
+    const problem = rowProblem !== null && rowProblem.id === a.id ? rowProblem : null;
+    const problemLine = (problem !== null && problem.text !== "") || confirmId === a.id ? (
+      <>
+        {problem !== null && problem.text !== "" && (
+          <ChangeRefusal text={problem.text} onOpenSend={problem.openSend ? () => props.onOpen(a.id, "mail") : undefined} />
+        )}
+        {confirmId === a.id && (
+          <DeleteWarning
+            onConfirm={() => void remove(a)}
+            onCancel={() => {
+              setConfirmId("");
+              setCancelledId(a.id);
+            }}
+          />
+        )}
+      </>
+    ) : null;
     if (Object.hasOwn(removed, a.id)) {
       return (
         <Row
           key={a.id}
-          title={<RemovedLine busy={busyId === a.id} onRestore={() => void restore(a, removed[a.id])} />}
+          title={
+            <RemovedLine
+              busy={busyId === a.id}
+              stopped={stoppedIds[a.id] === true}
+              onRestore={() => void restore(a, removed[a.id])}
+            />
+          }
           below={problemLine}
         />
       );
     }
     const chip = assignmentDeliveryView(Object.hasOwn(deliveries, a.id) ? deliveries[a.id] : undefined);
-    const lesson = lessonText(a);
+    // A call of this row runs: the small text says which. Deleting and marking do not run together.
+    const doneBusy = doneRun.busyId === a.id;
+    const busyText = doneBusy ? doneTexts.saving : busyId === a.id ? changeTexts.removing : "";
+    const doneIssue = doneRun.issue !== null && doneRun.issue.ids.includes(a.id) ? doneRun.issue : null;
     return (
-      <Row
+      <AssignmentRowView
         key={a.id}
-        title={a.title}
-        meta={
-          <>
-            {lesson !== "" && <span className="hw-lesson">{lesson}</span>}
-            <span className="num">{dueText(a.due)}</span>
-          </>
-        }
+        assignment={a}
         status={chip && <Chip view={chip} />}
-        actions={
+        busyText={busyText}
+        focusOpen={restoredId === a.id}
+        onOpen={() => props.onOpen(a.id)}
+        onToggleDone={() => {
+          // Not while the delete check runs or its warning is open: the mark would change the version the delete uses.
+          if (busyText === "" && checkingId !== a.id && confirmId !== a.id) {
+            void doneRun.mark(a.id, !a.done, a.title);
+          }
+        }}
+        removeLock={checkingId === a.id ? "checking" : confirmId === a.id ? "confirm" : ""}
+        onRemove={() => void askRemove(a)}
+        below={
           <>
-            <Button onClick={() => props.onOpen(a.id)}>Открыть</Button>
-            <Button
-              variant="danger"
-              aria-label={removeLabel(a.title)}
-              autoFocus={restoredId === a.id}
-              busy={busyId === a.id}
-              busyLabel={changeTexts.removing}
-              disabled={busyId === a.id}
-              onClick={() => void remove(a)}
-            >
-              {changeTexts.remove}
-            </Button>
+            {problemLine}
+            {doneIssue !== null && (
+              <DoneIssueLine issue={doneIssue} where="list" onRetry={doneIssue.retry} onOpen={props.onOpen} />
+            )}
           </>
         }
-        below={problemLine}
       />
     );
   };
 
+  // The way out of an empty email group.
+  const resetFilter = () => {
+    setFilter("all");
+    setList(initialListState);
+  };
+
   const live = items === null ? [] : items.filter((a) => !Object.hasOwn(removed, a.id));
   const shown = items === null ? [] : filterAssignments(items, filter, deliveries, deliveriesLoaded);
+  // A refusal about a row that is no longer in the list (it was deleted elsewhere) stays above the list.
+  const strayIssue =
+    doneRun.issue !== null && !(items ?? []).some((x) => doneRun.issue?.ids.includes(x.id)) ? doneRun.issue : null;
+  const empty = items !== null && items.length === 0 ? listEmpty(state, anyExists) : null;
 
   return (
-    <section className="page hw">
+    <section className="page hw" tabIndex={-1} ref={rootRef} aria-labelledby="hw-list-title">
       <div className="head">
-        <h1>Домашние задания</h1>
+        <h1 id="hw-list-title">Домашние задания</h1>
         <div className="acts">
           <Button icon="plus" onClick={() => setAdding(true)}>
             {addTexts.button}
@@ -310,25 +506,61 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
           {error}
         </Banner>
       )}
-      {items === null ? (
-        !error && <p className="muted">Загрузка…</p>
-      ) : items.length === 0 ? (
+      {strayIssue !== null && (
+        <DoneIssueLine
+          issue={strayIssue}
+          where="list"
+          onRetry={strayIssue.retry}
+          onOpen={props.onOpen}
+          onClose={doneRun.dismissIssue}
+        />
+      )}
+      {!shownOnce ? (
+        items === null && !error && <p className="muted">Загрузка…</p>
+      ) : empty !== null && empty.kind === "first-run" ? (
         <EmptyState label="Заданий пока нет" title="Здесь появятся домашние задания">
           Задание находится само в записи пары, после конспекта. Здесь можно сгенерировать по нему черновик, поправить его
           и отправить преподавателю по почте.
         </EmptyState>
       ) : (
         <>
-          <FilterCounters
-            counts={assignmentCounts(live, deliveries, deliveriesLoaded)}
-            value={filter}
-            onChange={(f) => {
-              setFilter(f);
-              setList(initialListState);
-            }}
-          />
-          {shown.length === 0 ? (
-            <p className="muted">{filterEmpty}</p>
+          <div className="hw-filters">
+            <AssignmentStateSwitch value={state} onChange={changeState} />
+            {/* The email filter is about sending: it makes no sense for the done ones. */}
+            {items !== null && items.length > 0 && state !== "done" && (
+              <FilterCounters
+                counts={assignmentCounts(live, deliveries, deliveriesLoaded)}
+                value={filter}
+                onChange={(f) => {
+                  setFilter(f);
+                  setList(initialListState);
+                }}
+              />
+            )}
+          </div>
+          {items === null ? (
+            !error && <p className="muted">Загрузка…</p>
+          ) : empty !== null && empty.kind === "note" ? (
+            <div className="hw-none">
+              <p className="muted">{empty.text}</p>
+              {empty.hint !== "" && <p className="small muted">{empty.hint}</p>}
+              {empty.action !== null && (
+                <Button
+                  onClick={() => {
+                    if (empty.action !== null) {
+                      changeState(empty.action.state);
+                    }
+                  }}
+                >
+                  {empty.action.label}
+                </Button>
+              )}
+            </div>
+          ) : shown.length === 0 ? (
+            <div className="hw-none">
+              <p className="muted">{filterEmpty}</p>
+              <Button onClick={resetFilter}>{filterReset}</Button>
+            </div>
           ) : (
             <CollapsibleList
               items={shown}
@@ -347,6 +579,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
           )}
         </>
       )}
+      <Toast {...doneToastProps(doneRun, focus)} />
     </section>
   );
 }
@@ -369,8 +602,17 @@ interface SendOpen {
   problem: string;
 }
 
-function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: boolean; onEditTaken?: () => void; onBack: () => void }) {
-  const { api, id, editOnOpen, onEditTaken } = props;
+// showMail: the page lands on the emails once loaded (the list's «Открыть отправку»); onMailShown tells it was done.
+function AssignmentEditor(props: {
+  api: HomeworkApi;
+  id: string;
+  editOnOpen?: boolean;
+  onEditTaken?: () => void;
+  showMail?: boolean;
+  onMailShown?: () => void;
+  onBack: () => void;
+}) {
+  const { api, id, editOnOpen, onEditTaken, showMail, onMailShown } = props;
   const turnkey = useMemo(() => turnkeyApi(callByName), []);
   const [detail, setDetail] = useState<AssignmentDetail | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -401,8 +643,14 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
   }, [editOnOpen, onEditTaken]);
   const [gone, setGone] = useState<AssignmentItem | null>(null);
   const [changing, setChanging] = useState(false);
+  const [checking, setChecking] = useState(false); // the running-work check of «Удалить» is on its way: no delete yet
   const [restored, setRestored] = useState(false); // «Вернуть» was pressed: «Удалить» takes the focus
   const [changeProblem, setChangeProblem] = useState("");
+  const [changeOpenSend, setChangeOpenSend] = useState(false); // the refusal comes with «Открыть отправку»
+  const [confirming, setConfirming] = useState(false); // «Работа остановится» is asked before the delete
+  const [goneStopped, setGoneStopped] = useState(false); // the delete stopped a running work
+  const [cancelled, setCancelled] = useState(false); // «Отмена» of the warning: «Удалить» takes the focus back
+  const mailRef = useRef<HTMLHeadingElement>(null);
   const library = useMemo(() => libraryApi(callByName), []);
   const mounted = useRef(true);
   const acting = useRef(false); // one action at a time; a double click must not start a second one
@@ -811,11 +1059,13 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
   // «Удалить» and «Вернуть» of this assignment; gone is the stored assignment at its new version, shown until the
   // student leaves the page. The guard keeps a double click to one call.
   const removeGuard = useRef(flightGuard());
-  async function changeThis(call: () => Promise<ChangeAssignmentResult>, done: (next: AssignmentItem) => void) {
+  const impactGuard = useRef(flightGuard());
+  async function changeThis(call: () => Promise<ChangeAssignmentResult>, done: (next: AssignmentItem, stopped: boolean) => void) {
     if (removeGuard.current.has(id)) {
       return; // a second click while the first call runs: it must not touch the first one's busy state
     }
     setChangeProblem("");
+    setChangeOpenSend(false);
     setChanging(true);
     try {
       const r = await removeGuard.current.run(id, call);
@@ -824,10 +1074,11 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
       }
       const out = changeOutcome(r);
       if (out.assignment !== null) {
-        done(out.assignment);
+        done(out.assignment, out.stopped);
         return;
       }
       setChangeProblem(out.text);
+      setChangeOpenSend(out.openSend);
       if (out.reload) {
         await reload(true).catch(() => undefined);
       }
@@ -837,6 +1088,82 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
       }
     }
   }
+
+  // «Выполнено» / «Вернуть в работу» of this assignment (TASK-316): the page takes the stored state at once and reads
+  // the assignment again; the toast and a refusal belong to this page.
+  // The re-read keeps the version the student is looking at (keepShown): marking done is not a change of the draft.
+  const rootRef = useRef<HTMLElement>(null);
+  const focus = useDoneFocus(rootRef);
+  const doneRun = useDoneRunner(api, {
+    apply: (res) =>
+      setDetail((d) =>
+        d === null ? d : { ...d, assignment: assignmentAfterDone(d.assignment, res, new Date().toISOString()) },
+      ),
+    refresh: () => reload(true, true).catch(() => undefined),
+  });
+
+  function removeThis() {
+    if (detail === null) {
+      return Promise.resolve();
+    }
+    const version = detail.assignment.version;
+    setConfirming(false);
+    return changeThis(
+      () => api.deleteAssignment(id, version),
+      (next, stopped) => {
+        setEditing(false);
+        setRestored(false);
+        setGoneStopped(stopped);
+        setGone(next);
+      },
+    );
+  }
+
+  // «Удалить»: a running work is asked about first (inline), anything else is deleted at once; a failed question
+  // counts as «not running». The impact guard keeps a double click to one question.
+  async function askRemoveThis() {
+    if (impactGuard.current.has(id) || removeGuard.current.has(id)) {
+      return;
+    }
+    setChangeProblem("");
+    setChangeOpenSend(false);
+    setCancelled(false);
+    setChecking(true);
+    try {
+      await impactGuard.current.run(id, async () => {
+        const warn = await deleteNeedsWarning(() => api.deleteImpact(id));
+        if (!mounted.current) {
+          return;
+        }
+        if (warn) {
+          setConfirming(true);
+        } else {
+          setChecking(false);
+          await removeThis();
+        }
+      });
+    } finally {
+      if (mounted.current) {
+        setChecking(false);
+      }
+    }
+  }
+
+  // «Открыть отправку»: the emails list is where the state of the unsettled email is shown.
+  function showDeliveries() {
+    void loadDeliveries();
+    mailRef.current?.scrollIntoView({ block: "start" });
+    mailRef.current?.focus();
+  }
+
+  // Once the assignment is drawn (the emails heading exists) the page lands on the emails, as «Открыть отправку» does.
+  const loaded = detail !== null && gone === null;
+  useEffect(() => {
+    if (showMail === true && loaded) {
+      showDeliveries();
+      onMailShown?.();
+    }
+  }, [showMail, loaded]); // once per arrival: showDeliveries is a new function on every render
 
   if (detail === null) {
     return (
@@ -872,6 +1199,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
         </div>
         <RemovedLine
           busy={changing}
+          stopped={goneStopped}
           onRestore={() =>
             void changeThis(
               () => api.restoreAssignment(id, gone.version),
@@ -883,55 +1211,74 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
             )
           }
         />
-        {changeProblem && (
-          <ResultLine kind="fail" role="alert">
-            {changeProblem}
-          </ResultLine>
-        )}
+        {changeProblem && <ChangeRefusal text={changeProblem} />}
       </section>
     );
   }
 
+  // While the mark is saved, «Изменить» and «Удалить» wait: a delete would go out with a version the mark is changing.
+  const doneBusy = doneRun.busyId === id;
+
   return (
-    <section className="page hw">
+    <section className="page hw" tabIndex={-1} ref={rootRef} aria-labelledby="hw-detail-title">
       <div className="hw-back">
         <Button variant="ghost" onClick={props.onBack}>
           Все задания
         </Button>
       </div>
       <div className="head">
-        <h1 className="hw-title">{a.title}</h1>
+        <h1 className="hw-title" id="hw-detail-title">
+          {a.title}
+        </h1>
         <span className="muted num">{dueText(a.due)}</span>
         <div className="acts">
-          <Button disabled={changing} onClick={() => setEditing(true)}>
+          <DoneButton
+            done={a.done}
+            busy={doneBusy}
+            disabled={changing || checking || confirming}
+            onToggle={() => void doneRun.mark(id, !a.done, a.title)}
+          />
+          <Button disabled={changing || checking || doneBusy} onClick={() => setEditing(true)}>
             {changeTexts.edit}
           </Button>
           <Button
+            // A new key after «Отмена» mounts the button again, so autoFocus gives it the focus.
+            key={cancelled ? "remove-cancelled" : "remove"}
             variant="danger"
             aria-label={removeLabel(a.title)}
-            autoFocus={restored}
+            autoFocus={restored || cancelled}
             busy={changing}
             busyLabel={changeTexts.removing}
-            disabled={changing}
-            onClick={() =>
-              void changeThis(
-                () => api.deleteAssignment(id, a.version),
-                (next) => {
-                  setEditing(false);
-                  setRestored(false);
-                  setGone(next);
-                },
-              )
-            }
+            disabled={changing || checking || confirming || doneBusy}
+            onClick={() => void askRemoveThis()}
           >
             {changeTexts.remove}
           </Button>
         </div>
       </div>
-      {changeProblem && (
-        <ResultLine kind="fail" role="alert">
-          {changeProblem}
-        </ResultLine>
+      <DoneStamp assignment={a} />
+      {changeProblem && <ChangeRefusal text={changeProblem} onOpenSend={changeOpenSend ? showDeliveries : undefined} />}
+      {confirming && (
+        <DeleteWarning
+          onConfirm={() => {
+            if (!doneBusy) {
+              void removeThis();
+            }
+          }}
+          onCancel={() => {
+            setConfirming(false);
+            setCancelled(true);
+          }}
+        />
+      )}
+      {doneRun.issue !== null && (
+        <DoneIssueLine
+          issue={doneRun.issue}
+          where="page"
+          onRetry={doneRun.issue.retry}
+          onOpen={() => reload(true, true).catch(() => undefined)}
+          onBack={props.onBack}
+        />
       )}
       {editing && (
         <EditAssignmentDialog
@@ -1140,7 +1487,9 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
         </>
       )}
 
-      <h2 className="group-title">Письма</h2>
+      <h2 className="group-title" ref={mailRef} tabIndex={-1}>
+        Письма
+      </h2>
       {deliveriesError && (
         <Banner kind="fail" role="alert">
           {deliveriesError}
@@ -1204,6 +1553,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
         />
       )}
       {sendAgain && <SendAgainDialog api={api} delivery={sendAgain} onClose={sendAgainClosed} />}
+      <Toast {...doneToastProps(doneRun, focus)} />
     </section>
   );
 }

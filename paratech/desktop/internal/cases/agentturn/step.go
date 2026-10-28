@@ -69,11 +69,18 @@ func (s *Service) drive(ctx context.Context, c *change, op string) (st Step, err
 		if err != nil {
 			return s.abort(ctx, c, op, values.StopOffline, err)
 		}
+		mentions, err := s.present(ctx, thread.StepMentions(entries, turn.Number(), c.th.Summary(), values.MentionRefs(turn.Mentions())))
+		if err != nil {
+			return s.abort(ctx, c, op, values.StopOffline, err)
+		}
+		// What the step sends is what it accepts: the base, the scope and the mentions of the step. (Thread.known also
+		// keeps the current request's mentions whose object was deleted mid-request; no longer sent, harmless.)
 		c.context = values.NewRefSet(base.Refs()...)
 		c.context.Add(turn.Scope().Refs()...)
+		c.context.Add(values.StepMentionRefs(mentions)...)
 		req := values.StepRequest{
-			Key: key, Thread: c.th.ID(), Base: base, Scope: turn.Scope(), History: thread.Window(entries, turn.Number(), c.th.Summary()),
-			MaxOutputTokens: MaxOutputTokens,
+			Key: key, Thread: c.th.ID(), Base: base, Scope: turn.Scope(), Mentions: mentions,
+			History: thread.Window(entries, turn.Number(), c.th.Summary()), MaxOutputTokens: MaxOutputTokens,
 		}
 
 		if s.progress != nil {
@@ -217,6 +224,29 @@ func (s *Service) conflict(ctx context.Context, c *change, op string, err error)
 		return stepOf(&change{th: th}), nil
 	}
 	return stepOf(&change{th: th}), fmt.Errorf("%s: %w", op, err)
+}
+
+// present keeps the step mentions whose objects still exist: a deleted one is dropped (not replaced), so it is neither
+// sent nor accepted by the provenance check. Every step checks them again, as an earlier request may name an object
+// deleted since. Without the Mentions port no earlier mention is kept.
+func (s *Service) present(ctx context.Context, ms []values.StepMention) ([]values.StepMention, error) {
+	var out []values.StepMention
+	for _, m := range ms {
+		if s.mentions == nil {
+			if m.Current {
+				out = append(out, m)
+			}
+			continue
+		}
+		ok, err := s.mentions.Exists(ctx, m.Ref)
+		if err != nil {
+			return nil, fmt.Errorf("mention %s: %w", m.Ref, err)
+		}
+		if ok {
+			out = append(out, m)
+		}
+	}
+	return out, nil
 }
 
 // base is the shared context of every step: the subjects, today and the time zone of the student.
