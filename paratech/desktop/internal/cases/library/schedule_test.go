@@ -461,9 +461,10 @@ func TestUndoFromSchedule(t *testing.T) {
 		t.Fatal("the empty subject was not removed")
 	}
 
-	// Again: the removed one counts as removed, nothing else changes.
+	// Again: the removed one counts as removed, the spellings are gone already, so none is listed as unaliased.
+	want.Unaliased = nil
 	if again, err := e.svc.UndoFromSchedule(ctx, p.Token, res); err != nil || !reflect.DeepEqual(again, want) {
-		t.Fatalf("undo again = %+v, %v", again, err)
+		t.Fatalf("undo again = %+v, %v\nwant %+v", again, err, want)
 	}
 
 	t.Run("notes", func(t *testing.T) {
@@ -483,19 +484,116 @@ func TestUndoFromScheduleStale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	createSubject(t, e, "Химия")
-	if _, err := e.svc.UndoFromSchedule(ctx, p.Token, res); !errors.Is(err, ErrStale) {
-		t.Fatalf("UndoFromSchedule = %v, want ErrStale", err)
+	createSubject(t, e, "Химия") // the proposal of the token is not found again
+
+	// Malformed input is still refused, before anything is removed.
+	bad := ScheduleResult{Created: res.Created, Aliased: []ScheduleAliased{{Subject: hist.ID()}}}
+	if _, err := e.svc.UndoFromSchedule(ctx, p.Token, bad); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("UndoFromSchedule(empty aliases) = %v, want ErrInvalidRequest", err)
 	}
-	h, _ := e.subjects.Get(ctx, hist.ID())
-	if len(e.subjects.rows) != 4 || len(h.Aliases()) != 2 {
-		t.Fatal("a stale undo changed the library")
+	if len(e.subjects.rows) != 4 {
+		t.Fatalf("a refused undo removed subjects: %d left", len(e.subjects.rows))
 	}
 
-	// Without spellings to take back the subjects need no proposal: their IDs prove they are of the package.
-	undo, err := e.svc.UndoFromSchedule(ctx, p.Token, ScheduleResult{Created: res.Created})
-	if err != nil || len(undo.Removed) != 2 {
-		t.Fatalf("UndoFromSchedule(subjects only) = %+v, %v", undo, err)
+	// The subjects are taken back by their derived IDs; the spellings stay and are reported as stale.
+	undo, err := e.svc.UndoFromSchedule(ctx, p.Token, res)
+	want := ScheduleUndo{
+		Removed:     []shared.SubjectID{res.Created[0].ID, res.Created[1].ID},
+		KeptAliases: []ScheduleKeptAliases{{Subject: hist.ID(), Aliases: []string{"История (лек.)"}, Reason: ReasonStale}},
+	}
+	if err != nil || !reflect.DeepEqual(undo, want) {
+		t.Fatalf("UndoFromSchedule = %+v, %v\nwant %+v", undo, err, want)
+	}
+	h, _ := e.subjects.Get(ctx, hist.ID())
+	if len(e.subjects.rows) != 2 || len(h.Aliases()) != 2 {
+		t.Fatalf("after a stale undo: %d subjects, История aliases %v", len(e.subjects.rows), names(h.Aliases()))
+	}
+
+	t.Run("notes and files", func(t *testing.T) {
+		e, hist := scheduleEnv(t)
+		notes := &fakeNotes{of: map[shared.SubjectID]int{}}
+		withNotes(t, e, notes)
+		p := propose(t, e)
+		res, err := e.svc.CreateFromSchedule(ctx, p.Token, nil)
+		if err != nil || len(res.Created) != 2 {
+			t.Fatalf("CreateFromSchedule = %+v, %v", res, err)
+		}
+		matan, phys := res.Created[0], res.Created[1]
+		notes.of[matan.ID] = 1
+		m := importText(t, e, "конспект")
+		if _, err := e.svc.Place(ctx, m.ID(), phys.ID, ""); err != nil {
+			t.Fatal(err)
+		}
+		e.strings.rows[2].Recordings++ // a new recording: the proposal of the token is not found again
+
+		undo, err := e.svc.UndoFromSchedule(ctx, p.Token, res)
+		want := ScheduleUndo{
+			Kept: []ScheduleKept{
+				{ID: matan.ID, Name: "Матанализ", Reason: ReasonHasNotes},
+				{ID: phys.ID, Name: "Физика", Reason: ReasonHasFiles},
+			},
+			KeptAliases: []ScheduleKeptAliases{{Subject: hist.ID(), Aliases: []string{"История (лек.)"}, Reason: ReasonStale}},
+		}
+		if err != nil || !reflect.DeepEqual(undo, want) {
+			t.Fatalf("UndoFromSchedule = %+v, %v\nwant %+v", undo, err, want)
+		}
+		if len(e.subjects.rows) != 3 {
+			t.Fatalf("%d subjects left, want 3", len(e.subjects.rows))
+		}
+	})
+
+	t.Run("unavailable", func(t *testing.T) {
+		e, _ := scheduleEnv(t)
+		p := propose(t, e)
+		res, err := e.svc.CreateFromSchedule(ctx, p.Token, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.strings.err = errors.New("disk")
+		if _, err := e.svc.UndoFromSchedule(ctx, p.Token, res); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("UndoFromSchedule = %v, want ErrUnavailable", err)
+		}
+		if len(e.subjects.rows) != 3 {
+			t.Fatalf("an undo that could not read the strings removed subjects: %d left", len(e.subjects.rows))
+		}
+	})
+}
+
+// conflictOnce returns err from the next Save, without trying it.
+type conflictOnce struct {
+	*fakeSubjects
+	err error
+}
+
+func (c *conflictOnce) Save(ctx context.Context, s *subject.Subject) error {
+	if err := c.err; err != nil {
+		c.err = nil
+		return err
+	}
+	return c.fakeSubjects.Save(ctx, s)
+}
+
+// A save conflict that is neither a duplicate nor a lost version is ErrBusy, as in CreateSubject.
+func TestCreateFromScheduleConflict(t *testing.T) {
+	ctx := context.Background()
+	e, _ := scheduleEnv(t)
+	subjects := &conflictOnce{fakeSubjects: e.subjects, err: shared.ErrConflict}
+	svc, err := New(Deps{
+		Subjects: subjects, Materials: e.materials, Blobs: e.blobs, Lessons: e.lessons, Strings: e.strings,
+		Clock: e.clock, IDs: &seqIDs{n: 100}, Log: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateSubject(ctx, NewSubject{Name: "Химия"}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("CreateSubject = %v, want ErrBusy", err)
+	}
+
+	p := propose(t, e)
+	subjects.err = shared.ErrConflict
+	res, err := svc.CreateFromSchedule(ctx, p.Token, nil)
+	if !errors.Is(err, ErrBusy) || len(res.Created)+len(res.Skipped) != 0 {
+		t.Fatalf("CreateFromSchedule = %+v, %v, want ErrBusy", res, err)
 	}
 }
 

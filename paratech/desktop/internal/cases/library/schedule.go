@@ -59,6 +59,7 @@ const (
 	ReasonSubjectGone    ScheduleReason = "subject_gone"     // the subject to add the spellings to was removed
 	ReasonHasFiles       ScheduleReason = "has_files"        // undo: the subject holds files, it stays
 	ReasonHasNotes       ScheduleReason = "has_notes"        // undo: the subject has notes of the student, it stays
+	ReasonStale          ScheduleReason = "stale"            // undo: the proposal is not found again, the spellings stay
 )
 
 // ScheduleProposal is the package to show: the groups and the token CreateFromSchedule needs. Omitted is how many
@@ -103,11 +104,19 @@ type ScheduleKept struct {
 	Reason ScheduleReason
 }
 
-// ScheduleUndo is what UndoFromSchedule did.
+// ScheduleKeptAliases is the spellings of a subject the undo left, as the caller gave them.
+type ScheduleKeptAliases struct {
+	Subject shared.SubjectID
+	Aliases []string
+	Reason  ScheduleReason
+}
+
+// ScheduleUndo is what UndoFromSchedule did: Unaliased holds only the spellings it removed.
 type ScheduleUndo struct {
-	Removed   []shared.SubjectID
-	Kept      []ScheduleKept
-	Unaliased []ScheduleAliased
+	Removed     []shared.SubjectID
+	Kept        []ScheduleKept
+	Unaliased   []ScheduleAliased
+	KeptAliases []ScheduleKeptAliases
 }
 
 // ScheduleSubjects proposes the subjects to create from the free subject strings of the schedule and the recordings,
@@ -210,10 +219,11 @@ func (s *Service) createScheduled(ctx context.Context, token string, c schedules
 	if err == nil {
 		return created(sub.Name().String())
 	}
-	if !errors.Is(err, shared.ErrDuplicate) && !errors.Is(err, shared.ErrVersionConflict) {
+	if !errors.Is(err, shared.ErrConflict) {
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	// Another call of the same package created it meanwhile, or another subject took a spelling.
+	// Another call of the same package created it meanwhile, or another subject took a spelling; any other conflict is
+	// ErrBusy, as in CreateSubject.
 	switch got, gerr := s.subjects.Get(ctx, id); {
 	case gerr == nil:
 		return created(got.Name().String())
@@ -268,9 +278,10 @@ func (s *Service) addScheduled(ctx context.Context, a schedulesubjects.Addition,
 // UndoFromSchedule takes back the result of CreateFromSchedule with token («Отменить всё»). A subject is removed only
 // when its ID is the one derived from the token and its key and it is still empty (the checks of RemoveSubject); one
 // with notes or files stays and is listed in Kept. The added spellings are removed again; they must be spellings the
-// proposal of the token gave to that subject, so the proposal is found again (ErrStale when the schedule or the
-// subjects changed meanwhile). Removed and gone subjects both count as removed, so a retry is safe. Errors:
-// ErrInvalidRequest (a bad token, an ID or spelling not of this package), ErrStale, ErrBusy, ErrUnavailable.
+// proposal of the token gave to that subject, so the proposal is found again. When it is not (the schedule or the
+// subjects changed meanwhile) the subjects are still taken back, their IDs prove they are of the package, and the
+// spellings stay, listed in KeptAliases as stale. Errors: ErrInvalidRequest (a bad token, an ID or spelling not of
+// this package), ErrBusy, ErrUnavailable.
 func (s *Service) UndoFromSchedule(ctx context.Context, token string, res ScheduleResult) (ScheduleUndo, error) {
 	if !validScheduleToken(token) || len(res.Created) > maxScheduleRows || len(res.Aliased) > maxScheduleRows {
 		return ScheduleUndo{}, ErrInvalidRequest
@@ -285,14 +296,17 @@ func (s *Service) UndoFromSchedule(ctx context.Context, token string, res Schedu
 			ids = append(ids, c.ID)
 		}
 	}
-	if err := s.checkScheduleAliases(ctx, token, res.Aliased); err != nil {
+	// Checked before anything is removed, so a refused undo changes nothing.
+	stale, err := s.checkScheduleAliases(ctx, token, res.Aliased)
+	if err != nil {
 		return ScheduleUndo{}, err
 	}
 
 	var undo ScheduleUndo
-	err := s.undoScheduled(ctx, ids, res.Aliased, &undo)
+	err = s.undoScheduled(ctx, ids, res.Aliased, stale, &undo)
 	counts := []any{
 		slog.Int("removed", len(undo.Removed)), slog.Int("kept", len(undo.Kept)), slog.Int("unaliased", len(undo.Unaliased)),
+		slog.Int("kept_aliases", len(undo.KeptAliases)),
 	}
 	if err != nil {
 		s.log.Warn(opScheduleStopped, counts...)
@@ -302,11 +316,12 @@ func (s *Service) UndoFromSchedule(ctx context.Context, token string, res Schedu
 	return undo, nil
 }
 
-func (s *Service) undoScheduled(ctx context.Context, ids []shared.SubjectID, aliased []ScheduleAliased, undo *ScheduleUndo) error {
+func (s *Service) undoScheduled(ctx context.Context, ids []shared.SubjectID, aliased []ScheduleAliased, stale bool, undo *ScheduleUndo) error {
 	for _, id := range ids {
 		sub, err := s.subject(ctx, id)
 		switch {
 		case errors.Is(err, ErrSubjectNotFound):
+			// Gone counts as removed: a retry after a failure midway answers as the first call.
 			undo.Removed = append(undo.Removed, id)
 			continue
 		case err != nil:
@@ -325,42 +340,57 @@ func (s *Service) undoScheduled(ctx context.Context, ids []shared.SubjectID, ali
 	}
 
 	for _, a := range aliased {
+		if stale {
+			undo.KeptAliases = append(undo.KeptAliases, ScheduleKeptAliases{Subject: a.Subject, Aliases: slices.Clone(a.Aliases), Reason: ReasonStale})
+			continue
+		}
 		now := s.clock.Now()
+		var removed []string
 		_, err := s.changeSubject(ctx, a.Subject, func(sub *subject.Subject) (bool, error) {
-			changed := false
+			removed = removed[:0] // the subject is loaded again after a lost save
 			for _, alias := range a.Aliases {
-				changed = sub.RemoveAlias(alias, now) || changed
+				if sub.RemoveAlias(alias, now) {
+					removed = append(removed, alias)
+				}
 			}
-			return changed, nil
+			return len(removed) > 0, nil
 		})
-		if err != nil && !errors.Is(err, ErrSubjectNotFound) {
+		switch {
+		case errors.Is(err, ErrSubjectNotFound):
+			continue
+		case err != nil:
 			return err
 		}
-		undo.Unaliased = append(undo.Unaliased, ScheduleAliased{Subject: a.Subject, Aliases: slices.Clone(a.Aliases)})
+		if len(removed) > 0 {
+			undo.Unaliased = append(undo.Unaliased, ScheduleAliased{Subject: a.Subject, Aliases: removed})
+		}
 	}
 	return nil
 }
 
 // checkScheduleAliases checks that every spelling to remove is one the proposal of token gave to that subject: a
-// caller cannot remove the student's own aliases through the undo.
-func (s *Service) checkScheduleAliases(ctx context.Context, token string, aliased []ScheduleAliased) error {
+// caller cannot remove the student's own aliases through the undo. A proposal not found again is stale, not an error.
+func (s *Service) checkScheduleAliases(ctx context.Context, token string, aliased []ScheduleAliased) (bool, error) {
 	if len(aliased) == 0 {
-		return nil
+		return false, nil
 	}
 	total := 0
 	for _, a := range aliased {
 		total += len(a.Aliases)
 		if a.Subject.Validate() != nil || len(a.Aliases) == 0 || total > maxScheduleRows {
-			return ErrInvalidRequest
+			return false, ErrInvalidRequest
 		}
 	}
 	rows, _, list, err := s.scheduleState(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	p, err := scheduleBase(ctx, token, rows, list)
-	if err != nil {
-		return err
+	switch {
+	case errors.Is(err, ErrStale):
+		return true, nil
+	case err != nil:
+		return false, err
 	}
 	given := map[shared.SubjectID]map[string]bool{}
 	for _, g := range p.Groups {
@@ -379,11 +409,11 @@ func (s *Service) checkScheduleAliases(ctx context.Context, token string, aliase
 	for _, a := range aliased {
 		for _, alias := range a.Aliases {
 			if !given[a.Subject][values.Key(alias)] {
-				return ErrInvalidRequest
+				return false, ErrInvalidRequest
 			}
 		}
 	}
-	return nil
+	return false, nil
 }
 
 // scheduleState reads the strings (capped, see maxScheduleRows) and the subjects.
