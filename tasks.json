@@ -5900,7 +5900,7 @@
                 "npm --prefix paratech/desktop/frontend run test и run build"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-273",
@@ -6331,7 +6331,7 @@
                 "GOOS=windows go vet ./desktop/..., GOOS=linux go build ./desktop/..., golangci-lint run ./desktop/... и тест архитектуры"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-294",

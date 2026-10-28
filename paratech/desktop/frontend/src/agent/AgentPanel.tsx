@@ -28,7 +28,7 @@ import {
 } from "../agentView.js";
 import { draftEvent, draftText } from "../agentDraft.js";
 import { problemText, undoOutcome } from "../journalView.js";
-import { blockingEntry, type Entry, initialPanelState, PressTracker, reducePanel } from "../agentState.js";
+import { blockingEntry, type Entry, initialPanelState, loadSnapshot, PressTracker, reducePanel } from "../agentState.js";
 import type { PageId } from "../nav.js";
 import type { ButtonId } from "../agentView.js";
 import { AgentPanelView } from "./AgentPanelView.js";
@@ -155,29 +155,50 @@ export function AgentPanel(props: {
     return () => window.removeEventListener("focus", load);
   }, [refreshChats]);
 
-  // The earlier requests of the opened chat, as text.
+  // The earlier requests of the opened chat, as text; its current request, when the session does not show it live
+  // (after a restart), comes as a card from the snapshot.
   useEffect(() => {
     setEarlierReq([]);
     if (openId === "") {
       return;
     }
     let alive = true;
-    api.chatEarlier(openId).then(
+    const earlier = api.chatEarlier(openId).then(
       (v) => {
         if (!alive) {
-          return;
+          return [];
         }
         if (v.problem === "") {
           setEarlierReq(v.requests);
-          return;
+          return v.requests;
         }
         setChatNote(chatProblemText(v.problem, "open"));
         if (refreshesChats(v.problem)) {
           void refreshChats();
         }
+        return [];
       },
-      () => alive && setChatNote(chatProblemText("failed", "open")),
+      () => {
+        if (alive) {
+          setChatNote(chatProblemText("failed", "open"));
+        }
+        return [];
+      },
     );
+    void loadSnapshot({
+      threadId: openId,
+      entries: () => entriesRef.current,
+      stillOpen: () => alive && openRef.current === openId,
+      current: () => api.chatCurrent(openId),
+      earlier,
+      dispatch,
+      onProblem: (p) => {
+        setChatNote(chatProblemText(p, "current"));
+        if (refreshesChats(p)) {
+          void refreshChats();
+        }
+      },
+    });
     return () => {
       alive = false;
     };

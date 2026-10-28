@@ -170,11 +170,12 @@ export const chatTexts = {
 /** The longest chat title, in characters (runes), as the core checks it. */
 export const maxChatTitle = 80;
 
-export type ChatOp = "list" | "open" | "new" | "rename" | "archive" | "restore";
+export type ChatOp = "list" | "open" | "current" | "new" | "rename" | "archive" | "restore";
 
 const chatFailTexts: Record<ChatOp, string> = {
   list: "Не удалось загрузить чаты.",
   open: "Не удалось загрузить прежние просьбы чата.",
+  current: "Не удалось загрузить текущую просьбу чата.",
   new: "Не удалось начать новый чат.",
   rename: "Не удалось переименовать чат.",
   archive: "Не удалось отправить чат в архив.",
