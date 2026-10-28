@@ -196,10 +196,19 @@ export interface CreateAssignmentResult {
  */
 export type ChangeProblem = "" | "in_use" | "changed" | "not_found" | "expired" | "failed";
 
-/** «Удалить» and «Вернуть»: assignment (with its new version) is set exactly when problem is "". */
+/**
+ * «Удалить» and «Вернуть»: assignment (with its new version) is set exactly when problem is "". stopped is true only
+ * for a delete that stopped a running work or draft of the assignment.
+ */
 export interface ChangeAssignmentResult {
   problem: ChangeProblem;
   assignment: AssignmentItem | null;
+  stopped: boolean;
+}
+
+/** What «Удалить» would do to the assignment's work; working: a turnkey work or a draft job is running. */
+export interface DeleteImpact {
+  working: boolean;
 }
 
 /**
@@ -237,6 +246,7 @@ export const methods = {
   correctLesson: "paratech/desktop/internal/input/wails.HomeworkService.CorrectLesson",
   createAssignment: "paratech/desktop/internal/input/wails.HomeworkService.CreateAssignment",
   deleteAssignment: "paratech/desktop/internal/input/wails.HomeworkService.DeleteAssignment",
+  deleteImpact: "paratech/desktop/internal/input/wails.HomeworkService.DeleteImpact",
   restoreAssignment: "paratech/desktop/internal/input/wails.HomeworkService.RestoreAssignment",
   editAssignment: "paratech/desktop/internal/input/wails.HomeworkService.EditAssignment",
   draftVersion: "paratech/desktop/internal/input/wails.HomeworkService.DraftVersion",
@@ -424,17 +434,26 @@ function doneAssignment(raw: unknown): AssignmentItem | null {
 
 /** Never throws: a malformed reply, an unknown problem or a missing assignment is "failed". */
 export function parseChangeAssignmentResult(raw: unknown): ChangeAssignmentResult {
-  const failed: ChangeAssignmentResult = { problem: "failed", assignment: null };
+  const failed: ChangeAssignmentResult = { problem: "failed", assignment: null, stopped: false };
   if (typeof raw !== "object" || raw === null) {
     return failed;
   }
   const r = raw as Record<string, unknown>;
   const problem = known(r.problem, changeProblems, "failed");
   if (problem !== "") {
-    return { problem, assignment: null };
+    return { problem, assignment: null, stopped: false };
   }
   const assignment = doneAssignment(r.assignment);
-  return assignment === null ? failed : { problem, assignment };
+  // Only a literal true counts: a missing or odd flag never claims that a work was stopped.
+  return assignment === null ? failed : { problem, assignment, stopped: r.stopped === true };
+}
+
+/** Never throws: anything but a literal working:true is "not working", so a failed check never blocks a delete. */
+export function parseDeleteImpact(raw: unknown): DeleteImpact {
+  if (typeof raw !== "object" || raw === null) {
+    return { working: false };
+  }
+  return { working: (raw as Record<string, unknown>).working === true };
 }
 
 /** Never throws: like parseChangeAssignmentResult; field is kept only for "invalid" ("" when unknown). */
@@ -588,6 +607,8 @@ export interface HomeworkApi {
   createAssignment(req: CreateAssignmentRequest): Promise<CreateAssignmentResult>;
   /** «Удалить» at the shown version; never rejects: any failure is a problem code. */
   deleteAssignment(id: string, version: number): Promise<ChangeAssignmentResult>;
+  /** Whether «Удалить» would stop a running work or draft: asked before the delete; never rejects (failure: not working). */
+  deleteImpact(id: string): Promise<DeleteImpact>;
   /** «Вернуть» at the version deleteAssignment returned; never rejects. */
   restoreAssignment(id: string, version: number): Promise<ChangeAssignmentResult>;
   /** Stores the edit form; never rejects: any failure is a problem code. */
@@ -639,6 +660,7 @@ export function homeworkApi(call: CallByName): HomeworkApi {
     createAssignment: async (req) => parseCreateAssignmentResult(await call(methods.createAssignment, req)),
     deleteAssignment: async (id, version) =>
       parseChangeAssignmentResult(await settled(call(methods.deleteAssignment, id, version))),
+    deleteImpact: async (id) => parseDeleteImpact(await settled(call(methods.deleteImpact, id))),
     restoreAssignment: async (id, version) =>
       parseChangeAssignmentResult(await settled(call(methods.restoreAssignment, id, version))),
     editAssignment: async (req) => parseEditAssignmentResult(await settled(call(methods.editAssignment, req))),

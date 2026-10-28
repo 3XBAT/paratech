@@ -342,6 +342,7 @@ html, body, #root { height: 100%; }
 .hw-lesson-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0 0 12px; }
 .hw-lesson-head .hw-lesson { color: var(--text); }
 .hw-removed { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; color: var(--muted); }
+.hw-delete-warning .acts, .hw-refusal .acts { margin-top: 8px; }
 .hw-send { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 16px; margin: 0 0 12px; color: var(--text); }
 .hw-send dt { color: var(--muted); }
 .hw-send dd { margin: 0; overflow-wrap: anywhere; }
