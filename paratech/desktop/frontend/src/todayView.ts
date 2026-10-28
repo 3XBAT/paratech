@@ -137,12 +137,24 @@ export function titleOf(title: string): string {
   return title.trim() === "" ? texts.noTitle : title;
 }
 
-/** «1 задание · до сб, 24 окт.»; "" when no homework was found. */
-export function homeworkText(count: number, earliestDue: string): string {
+/** «28 окт.» in the local time zone, "" when unknown. */
+export function dayMonthText(s: string): string {
+  const d = parseMoment(s);
+  return d === null ? "" : `${d.getDate()} ${monthsShort[d.getMonth()]}`;
+}
+
+/**
+ * «1 задание · до сб, 24 окт.»; "" when no homework was found. When all of it is marked done (done is the count of
+ * the done ones) the deadline is of no use: «1 задание · выполнено».
+ */
+export function homeworkText(count: number, earliestDue: string, done = 0): string {
   if (count <= 0) {
     return "";
   }
   const n = `${count} ${plural(count, "задание", "задания", "заданий")}`;
+  if (done >= count) {
+    return `${n} · ${plural(count, "выполнено", "выполнены", "выполнено")}`;
+  }
   const due = dueText(earliestDue);
   return due === "" ? n : `${n} · ${due}`;
 }
@@ -277,7 +289,7 @@ export function postLine(p: TodayPost): PostLine {
     key: p.recordingId,
     headline: p.headline,
     meta,
-    homework: homeworkText(p.homework, p.earliestDue),
+    homework: homeworkText(p.homework, p.earliestDue, p.homeworkDone),
     canOpen: p.summaryReady,
     recordingId: p.recordingId,
   };
@@ -311,7 +323,7 @@ export function lessonLine(l: TodayLesson, recordings: readonly RecordingItem[],
         ? null
         : {
             text: l.post.summaryReady ? texts.summaryReady : texts.summaryPending,
-            homework: homeworkText(l.post.homework, l.post.earliestDue),
+            homework: homeworkText(l.post.homework, l.post.earliestDue, l.post.homeworkDone),
             canOpen: l.post.summaryReady,
             recordingId: l.post.recordingId,
           },

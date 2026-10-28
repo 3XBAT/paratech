@@ -14,9 +14,12 @@ import { dayTitle, nearestDeadlineText, newestOnly, stagesChanged, stagesKey, st
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { Toast } from "../ui/Toast.js";
+import { burningAfterDone } from "../assignmentDoneView.js";
 import { AddAssignmentDialog } from "./HomeworkDialogs.js";
 import { RecordingsPage } from "./RecordingsPage.js";
 import { AskSection, BurningSection, DoneSection, LessonsSection, PostsSection, WaitingSection } from "./TodayParts.js";
+import { useDoneRunner } from "./useDoneRunner.js";
 
 const pollMs = 3000;
 
@@ -58,6 +61,12 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
       mounted.current = false;
     };
   }, []);
+
+  // «Выполнено» in «Горит на 7 дней» (TASK-316): the row leaves at once, the screen is read again; «Отменить» brings it back.
+  const doneRun = useDoneRunner(homework, {
+    apply: (res) => setScreen((s) => (s === null ? s : { ...s, burning: burningAfterDone(s.burning, res) })),
+    refresh: load,
+  });
 
   // Read on each visit of the section and when the window gets back the focus.
   useEffect(() => {
@@ -169,6 +178,7 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
                 burning={screen.burning}
                 onOpenAssignment={props.onOpenAssignment}
                 onAdd={() => setAdding(true)}
+                done={{ busyId: doneRun.busyId, issue: doneRun.issue, onMark: (id) => void doneRun.mark(id, true) }}
               />
             </div>
           </div>
@@ -182,6 +192,7 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
           </div>
         </>
       )}
+      <Toast toast={doneRun.toast} onAction={() => void doneRun.undo()} onClose={doneRun.closeToast} />
     </section>
   );
 }

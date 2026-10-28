@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatTime } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
+import { assignmentAfterDone, defaultState, doneTexts, listAfterDone, listEmpty } from "../assignmentDoneView";
 import {
   type AssignmentDetail,
   type AssignmentItem,
+  type AssignmentState,
   type ChangeAssignmentResult,
   type DeliveryItem,
   type GenerationStatus,
@@ -53,15 +55,19 @@ import { lessonText } from "../lessonLabel";
 import { initialListState, type ListState } from "../listView";
 import { useRecipientNav } from "../recipientNav";
 import { isRefusal, type RecipientView, recipientView, refusalAction } from "../recipientView";
+import { newestOnly } from "../todayView";
 import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Field, Input, ResultLine, type ResultKind, Row } from "../ui/controls";
 import { StatusChip } from "../ui/StatusChip";
-import { FilterCounters, filterEmpty } from "./AssignmentFilter";
+import { Toast } from "../ui/Toast";
+import { AssignmentRowView, DoneButton, DoneIssueLine, DoneStamp } from "./AssignmentDoneParts";
+import { AssignmentStateSwitch, FilterCounters, filterEmpty } from "./AssignmentFilter";
 import { AddAssignmentDialog, EditAssignmentDialog, RemovedLine, SendAgainDialog, SendDialog, type SendResult } from "./HomeworkDialogs";
 import { HomeworkTurnkey } from "./HomeworkTurnkey";
 import { LessonCorrection } from "./LessonCorrection";
 import { RefusalButton } from "./RecipientParts";
 import { TranscriptLinks } from "./TranscriptLinks";
+import { useDoneRunner } from "./useDoneRunner";
 
 // «Домашние задания» (PRD section 10): the assignments, and for the opened one the draft editor, the extra
 // instructions with «Сгенерировать заново», the version history, the export to a file and the send by email through
@@ -128,19 +134,47 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
   const [list, setList] = useState<ListState>(initialListState);
   const [adding, setAdding] = useState(false);
   const library = useMemo(() => libraryApi(callByName), []);
+  // «Открытые / Выполненные / Все» (TASK-316). A slow answer of an earlier request never replaces a newer one.
+  const [state, setState] = useState<AssignmentState>(defaultState);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const requests = useRef(newestOnly());
+  // Whether the student has any assignment at all (null: not known): an empty «Открытые» is not the first run.
+  const [anyExists, setAnyExists] = useState<boolean | null>(null);
+  const [shownOnce, setShownOnce] = useState(false);
 
   useEffect(() => {
     let live = true;
+    const token = requests.current.next();
     void (async () => {
       try {
-        const as = await api.listAssignments();
-        if (!live) {
+        const as = await api.listAssignments(state);
+        if (!live || !requests.current.isNewest(token)) {
           return;
         }
+        if (as.length > 0) {
+          setAnyExists(true);
+        } else if (state === "open") {
+          // Nothing open: ask once whether anything exists, to tell «все выполнены» from the first run.
+          const everything = await api.listAssignments("all").then(
+            (all) => all.length > 0,
+            () => null,
+          );
+          if (!live || !requests.current.isNewest(token)) {
+            return;
+          }
+          setAnyExists(everything);
+        } else if (state === "all") {
+          setAnyExists(false);
+        }
         setItems(as);
+        setShownOnce(true);
+        setError("");
         // The chip of a row is its newest email; a failed load leaves the row without a chip.
         const ds = await Promise.allSettled(as.map((a) => api.deliveries(a.id)));
-        if (!live) {
+        if (!live || !requests.current.isNewest(token)) {
           return;
         }
         const byId: Record<string, DeliveryItem[]> = {};
@@ -153,7 +187,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
         // When every call was rejected the split is unknown, not «all active»: the counters stay hidden.
         setDeliveriesLoaded(ds.length === 0 || ds.some((r) => r.status === "fulfilled"));
       } catch (err) {
-        if (live) {
+        if (live && requests.current.isNewest(token)) {
           setError(errorText(err));
         }
       }
@@ -161,12 +195,29 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
     return () => {
       live = false;
     };
-  }, [api]);
+  }, [api, state]);
+
+  // Another mark: the list of that mark is read; until it comes the rows of the old one are not shown.
+  function changeState(next: AssignmentState) {
+    if (next === state) {
+      return;
+    }
+    setState(next);
+    setItems(null);
+    setDeliveries({});
+    setDeliveriesLoaded(false);
+    setList(initialListState);
+    setRowProblem(null);
+  }
 
   // After a refusal that says the list is out of date, the list is read again (the removed lines stay).
   async function reloadItems() {
+    const token = requests.current.next();
     try {
-      const as = await api.listAssignments();
+      const as = await api.listAssignments(stateRef.current);
+      if (!requests.current.isNewest(token)) {
+        return;
+      }
       // An assignment that is live in the fresh list was restored elsewhere: its «Вернуть» line goes.
       if (as.some((x) => Object.hasOwn(removedRef.current, x.id))) {
         setRemoved((cur) => Object.fromEntries(Object.entries(cur).filter(([rid]) => !as.some((y) => y.id === rid))));
@@ -176,10 +227,22 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
         ...as,
         ...(prev ?? []).filter((x) => Object.hasOwn(removedRef.current, x.id) && !as.some((y) => y.id === x.id)),
       ]);
-    } catch {
-      // The old list stays; the refusal text already asks to repeat.
+      setShownOnce(true);
+    } catch (err) {
+      // The old list stays; the refusal text already asks to repeat. Without an old list (it was being read when this
+      // call took over) the reason is shown instead of an endless «Загрузка…».
+      if (itemsRef.current === null && requests.current.isNewest(token)) {
+        setError(errorText(err));
+      }
     }
   }
+
+  // «Выполнено» of a row (TASK-316): the row takes the stored state at once, the list is read again after it.
+  const doneRun = useDoneRunner(api, {
+    apply: (res) =>
+      setItems((cur) => (cur === null ? cur : listAfterDone(cur, stateRef.current, res, new Date().toISOString()))),
+    refresh: reloadItems,
+  });
 
   async function change(a: AssignmentItem, call: () => Promise<ChangeAssignmentResult>, done: (next: AssignmentItem) => void) {
     if (guard.current.has(a.id)) {
@@ -247,41 +310,42 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
       );
     }
     const chip = assignmentDeliveryView(Object.hasOwn(deliveries, a.id) ? deliveries[a.id] : undefined);
-    const lesson = lessonText(a);
+    // A call of this row runs: the small text says which. Deleting and marking do not run together.
+    const doneBusy = doneRun.busyId === a.id;
+    const busyText = doneBusy ? doneTexts.saving : busyId === a.id ? changeTexts.removing : "";
+    const doneIssue = doneRun.issue !== null && doneRun.issue.ids.includes(a.id) ? doneRun.issue : null;
     return (
-      <Row
+      <AssignmentRowView
         key={a.id}
-        title={a.title}
-        meta={
-          <>
-            {lesson !== "" && <span className="hw-lesson">{lesson}</span>}
-            <span className="num">{dueText(a.due)}</span>
-          </>
-        }
+        assignment={a}
         status={chip && <Chip view={chip} />}
-        actions={
+        busyText={busyText}
+        focusOpen={restoredId === a.id}
+        onOpen={() => props.onOpen(a.id)}
+        onToggleDone={() => {
+          if (busyText === "") {
+            void doneRun.mark(a.id, !a.done);
+          }
+        }}
+        onRemove={() => void remove(a)}
+        below={
           <>
-            <Button onClick={() => props.onOpen(a.id)}>Открыть</Button>
-            <Button
-              variant="danger"
-              aria-label={removeLabel(a.title)}
-              autoFocus={restoredId === a.id}
-              busy={busyId === a.id}
-              busyLabel={changeTexts.removing}
-              disabled={busyId === a.id}
-              onClick={() => void remove(a)}
-            >
-              {changeTexts.remove}
-            </Button>
+            {problemLine}
+            {doneIssue !== null && (
+              <DoneIssueLine issue={doneIssue} where="list" onRetry={doneIssue.retry} onOpen={props.onOpen} />
+            )}
           </>
         }
-        below={problemLine}
       />
     );
   };
 
   const live = items === null ? [] : items.filter((a) => !Object.hasOwn(removed, a.id));
   const shown = items === null ? [] : filterAssignments(items, filter, deliveries, deliveriesLoaded);
+  // A refusal about a row that is no longer in the list (it was deleted elsewhere) stays above the list.
+  const strayIssue =
+    doneRun.issue !== null && !(items ?? []).some((x) => doneRun.issue?.ids.includes(x.id)) ? doneRun.issue : null;
+  const empty = items !== null && items.length === 0 ? listEmpty(state, anyExists) : null;
 
   return (
     <section className="page hw">
@@ -310,24 +374,50 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
           {error}
         </Banner>
       )}
-      {items === null ? (
-        !error && <p className="muted">Загрузка…</p>
-      ) : items.length === 0 ? (
+      {strayIssue !== null && (
+        <DoneIssueLine issue={strayIssue} where="list" onRetry={strayIssue.retry} onOpen={props.onOpen} />
+      )}
+      {!shownOnce ? (
+        items === null && !error && <p className="muted">Загрузка…</p>
+      ) : empty !== null && empty.kind === "first-run" ? (
         <EmptyState label="Заданий пока нет" title="Здесь появятся домашние задания">
           Задание находится само в записи пары, после конспекта. Здесь можно сгенерировать по нему черновик, поправить его
           и отправить преподавателю по почте.
         </EmptyState>
       ) : (
         <>
-          <FilterCounters
-            counts={assignmentCounts(live, deliveries, deliveriesLoaded)}
-            value={filter}
-            onChange={(f) => {
-              setFilter(f);
-              setList(initialListState);
-            }}
-          />
-          {shown.length === 0 ? (
+          <div className="hw-filters">
+            <AssignmentStateSwitch value={state} onChange={changeState} />
+            {items !== null && items.length > 0 && (
+              <FilterCounters
+                counts={assignmentCounts(live, deliveries, deliveriesLoaded)}
+                value={filter}
+                onChange={(f) => {
+                  setFilter(f);
+                  setList(initialListState);
+                }}
+              />
+            )}
+          </div>
+          {items === null ? (
+            !error && <p className="muted">Загрузка…</p>
+          ) : empty !== null && empty.kind === "note" ? (
+            <div className="hw-none">
+              <p className="muted">{empty.text}</p>
+              {empty.hint !== "" && <p className="small muted">{empty.hint}</p>}
+              {empty.action !== null && (
+                <Button
+                  onClick={() => {
+                    if (empty.action !== null) {
+                      changeState(empty.action.state);
+                    }
+                  }}
+                >
+                  {empty.action.label}
+                </Button>
+              )}
+            </div>
+          ) : shown.length === 0 ? (
             <p className="muted">{filterEmpty}</p>
           ) : (
             <CollapsibleList
@@ -347,6 +437,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
           )}
         </>
       )}
+      <Toast toast={doneRun.toast} onAction={() => void doneRun.undo()} onClose={doneRun.closeToast} />
     </section>
   );
 }
@@ -838,6 +929,16 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
     }
   }
 
+  // «Выполнено» / «Вернуть в работу» of this assignment (TASK-316): the page takes the stored state at once and reads
+  // the assignment again; the toast and a refusal belong to this page.
+  const doneRun = useDoneRunner(api, {
+    apply: (res) =>
+      setDetail((d) =>
+        d === null ? d : { ...d, assignment: assignmentAfterDone(d.assignment, res, new Date().toISOString()) },
+      ),
+    refresh: () => reload(true).catch(() => undefined),
+  });
+
   if (detail === null) {
     return (
       <section className="page hw">
@@ -903,6 +1004,12 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
         <h1 className="hw-title">{a.title}</h1>
         <span className="muted num">{dueText(a.due)}</span>
         <div className="acts">
+          <DoneButton
+            done={a.done}
+            busy={doneRun.busyId === id}
+            disabled={changing}
+            onToggle={() => void doneRun.mark(id, !a.done)}
+          />
           <Button disabled={changing} onClick={() => setEditing(true)}>
             {changeTexts.edit}
           </Button>
@@ -928,10 +1035,20 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
           </Button>
         </div>
       </div>
+      <DoneStamp assignment={a} />
       {changeProblem && (
         <ResultLine kind="fail" role="alert">
           {changeProblem}
         </ResultLine>
+      )}
+      {doneRun.issue !== null && (
+        <DoneIssueLine
+          issue={doneRun.issue}
+          where="page"
+          onRetry={doneRun.issue.retry}
+          onOpen={() => reload(true).catch(() => undefined)}
+          onBack={props.onBack}
+        />
       )}
       {editing && (
         <EditAssignmentDialog
@@ -1204,6 +1321,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
         />
       )}
       {sendAgain && <SendAgainDialog api={api} delivery={sendAgain} onClose={sendAgainClosed} />}
+      <Toast toast={doneRun.toast} onAction={() => void doneRun.undo()} onClose={doneRun.closeToast} />
     </section>
   );
 }
