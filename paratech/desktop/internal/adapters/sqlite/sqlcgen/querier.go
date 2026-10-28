@@ -10,9 +10,9 @@ import (
 )
 
 type Querier interface {
-	// What in progress keeps the soft delete of an assignment from going through (ADR-0029): a delivery that may still go out or
-	// may have gone out unseen, a work being triaged or written, or an unfinished job (draft generation, writing) whose
-	// payload names it. The caller passes the status and type lists as JSON arrays (see AssignmentRepository.Busy).
+	// What keeps the soft delete of an assignment from going through (ADR-0029, hard rule 7): a delivery that may still go
+	// out or may have gone out unseen. A work or a job does not: the delete stops them (TASK-338). The caller passes the
+	// statuses as a JSON array (see AssignmentRepository.Busy).
 	AssignmentBusy(ctx context.Context, arg AssignmentBusyParams) (int64, error)
 	// The re-check of the purge inside its transaction: is assignment id still deleted before the cutoff?
 	AssignmentDeletedBefore(ctx context.Context, arg AssignmentDeletedBeforeParams) (int64, error)
@@ -22,6 +22,10 @@ type Querier interface {
 	// so a job of the draft type in one of the passed active statuses whose payload names the assignment counts too.
 	// Both status lists are JSON arrays: sqlc.slice next to a repeated named argument binds the wrong values.
 	AssignmentInUse(ctx context.Context, arg AssignmentInUseParams) (int64, error)
+	// What the soft delete of an assignment stops (TASK-338): a work being triaged or written, or an unfinished job (draft
+	// generation, writing) whose payload names it. The caller passes the lists as JSON arrays (see
+	// AssignmentRepository.Working).
+	AssignmentWorking(ctx context.Context, arg AssignmentWorkingParams) (int64, error)
 	// Runs before PurgeDeletedLesson: the FK cascade drops material_lessons rows silently, so the materials linked to
 	// a soft-deleted lesson get a new version (Undo compares material versions).
 	BumpMaterialsLinkedToDeletedLesson(ctx context.Context, id string) error
@@ -242,6 +246,9 @@ type Querier interface {
 	LatestTranscriptByRecording(ctx context.Context, recordingID string) (Transcript, error)
 	// Tells "already purged" from "still live" after PurgeDeletedLesson changed no row.
 	LessonExists(ctx context.Context, id string) (bool, error)
+	// The unfinished jobs (draft generation, writing) whose payload names an assignment, oldest first, which its soft
+	// delete cancels (TASK-338).
+	ListActiveAssignmentJobs(ctx context.Context, arg ListActiveAssignmentJobsParams) ([]string, error)
 	// Entries of the same instant follow the insert order (rowid; ids are random), so "undo the request" goes exactly
 	// in reverse.
 	ListAgentActionsByThread(ctx context.Context, arg ListAgentActionsByThreadParams) ([]AgentAction, error)

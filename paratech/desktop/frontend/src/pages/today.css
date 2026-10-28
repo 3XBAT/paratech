@@ -32,6 +32,17 @@
 .today-wait > .i { color: var(--muted); }
 .today-dl { grid-template-columns: 3.5rem minmax(0, 1fr) auto; width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .today-dl:hover { background: var(--fill); }
+/* A burning row with its check (TASK-316): the check beside the open button, the separator on the item itself. */
+.today-dlitem { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; }
+.today-dlitem > .done-check { margin-left: 16px; }
+.today-dlitem > .today-row::before { display: none; }
+/* The hover is of the whole item, so the ring does not look detached from its row. */
+.today-dlitem:hover { background: var(--fill); }
+.today-dlitem > .today-dl:hover { background: none; }
+.today-dlitem + .today-dlitem::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 1px; background: var(--sep); }
+.today-dlitem > .today-dl { padding-left: 12px; }
+.today-dlnote, .today-dlissue { grid-column: 2; padding: 0 16px 8px 12px; }
+.today-dlissue .hw-issue { margin: 0; }
 .today-wait.today-dl { grid-template-columns: auto minmax(0, 1fr); }
 .today-tm, .today-day { font-weight: 600; font-size: 13.5px; font-variant-numeric: tabular-nums; }
 .today-tm span, .today-day span { display: block; font-weight: 500; font-size: 12.5px; color: var(--muted); }
