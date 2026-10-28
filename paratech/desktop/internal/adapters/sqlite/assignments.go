@@ -154,12 +154,14 @@ func (r *AssignmentRepository) Save(ctx context.Context, a *assignment.Assignmen
 				SourceIndex: nullSourceIndex(st.SourceIndex), PromptVersion: nullPromptVersion(st.PromptVersion),
 				HintSubject: st.HintSubject, HintTeacher: st.HintTeacher, UserSubject: st.UserSubject, UserTeacher: st.UserTeacher,
 				CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt), DeletedAt: jobNullMs(st.DeletedAt),
+				DoneAt: jobNullMs(st.DoneAt),
 			})))
 		}
 		n, err := q.UpdateAssignment(ctx, sqlcgen.UpdateAssignmentParams{
 			Title: st.Title, Description: st.Description, DueAt: jobNullMs(st.Due), UserEdited: jobBoolInt(st.UserEdited),
 			PromptVersion: nullPromptVersion(st.PromptVersion), HintSubject: st.HintSubject, HintTeacher: st.HintTeacher,
 			UserSubject: st.UserSubject, UserTeacher: st.UserTeacher, DeletedAt: jobNullMs(st.DeletedAt),
+			DoneAt:    jobNullMs(st.DoneAt),
 			UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID), ExpectedVersion: st.Version,
 		})
 		return VersionCAS(ctx, n, err)
@@ -309,6 +311,7 @@ func assignmentFromRow(row sqlcgen.Assignment) (*assignment.Assignment, error) {
 		Due: jobFromNullMs(row.DueAt), UserEdited: row.UserEdited != 0,
 		HintSubject: row.HintSubject, HintTeacher: row.HintTeacher, UserSubject: row.UserSubject, UserTeacher: row.UserTeacher,
 		CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt), DeletedAt: jobFromNullMs(row.DeletedAt),
+		DoneAt: jobFromNullMs(row.DoneAt),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("stored assignment %s: %w", row.ID, err)

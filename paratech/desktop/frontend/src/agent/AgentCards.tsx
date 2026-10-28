@@ -12,6 +12,7 @@ import { ConfirmCard } from "./ConfirmCard.js";
 import { WorkWritingCard } from "./WorkCard.js";
 import { FreeWorkCard } from "./FreeWorkCard.js";
 import { Waiting } from "./Waiting.js";
+import { failedStepIndex, moreStepsLabel, planCollapseLimit, planTexts, planWindow, progressLabel, type StepMark } from "../planView.js";
 import {
   addedAssignmentText,
   assignmentRow,
@@ -114,16 +115,106 @@ export function AssignmentList(props: { items: AssignmentLineView[]; actions: Ca
   );
 }
 
+/** The marker in front of a step of an executing plan: an icon or the dot, and a text for readers of the screen. */
+function StepMarker(props: { mark: StepMark }) {
+  switch (props.mark) {
+    case "done":
+      return <Icon name="ok" className="ag-plan-ok" />;
+    case "failed":
+      return <Icon name="x" className="ag-plan-bad" />;
+    case "current":
+      return <span className="ag-dot ag-plan-dot" aria-hidden="true" />;
+    default:
+      return null;
+  }
+}
+
+function StepMarkText(props: { mark: StepMark }) {
+  switch (props.mark) {
+    case "done":
+      return (
+        <>
+          {" "}
+          <span className="ag-vh">{planTexts.done}</span>
+        </>
+      );
+    case "failed":
+      return (
+        <>
+          {" "}
+          <span className="ag-plan-bad">{planTexts.failed}</span>
+        </>
+      );
+    case "current":
+      return (
+        <>
+          {" "}
+          <span className="ag-vh">{planTexts.running}</span>
+        </>
+      );
+    default:
+      return null;
+  }
+}
+
+/**
+ * The steps of a plan. A plan of more than 8 steps shows the first 8 and a quiet «Ещё N шагов»; opened, the list
+ * scrolls inside the card. A failed step beyond the first 8 opens the list (and takes the toggle away).
+ */
+export function PlanSteps(props: { steps: readonly string[]; marks?: readonly StepMark[]; expanded: boolean; onToggle: () => void }) {
+  const listId = useId();
+  const marks = props.marks ?? [];
+  const w = planWindow(props.steps.length, props.expanded, failedStepIndex(marks));
+  if (props.steps.length === 0) {
+    return null;
+  }
+  const list = (
+    <ol id={listId} className={marks.length > 0 ? "ag-list ag-plan-steps" : "ag-list"}>
+      {props.steps.slice(0, w.shown).map((t, i) => (
+        <li key={i} className={marks[i] === "failed" ? "ag-plan-fail" : undefined}>
+          {marks.length > 0 && <StepMarker mark={marks[i] ?? "pending"} />}
+          {t}
+          {marks.length > 0 && <StepMarkText mark={marks[i] ?? "pending"} />}
+        </li>
+      ))}
+    </ol>
+  );
+  if (props.steps.length <= planCollapseLimit) {
+    return list;
+  }
+  return (
+    <>
+      <div className={w.scroll ? "ag-plan-scroll" : undefined} {...(w.scroll ? { tabIndex: 0, role: "region", "aria-label": planTexts.stepsLabel } : {})}>
+        {list}
+      </div>
+      {w.canToggle && (
+        <button type="button" className="ag-plan-more" aria-expanded={w.expanded} aria-controls={listId} onClick={props.onToggle}>
+          {w.expanded ? planTexts.collapse : moreStepsLabel(w.hidden)}
+        </button>
+      )}
+    </>
+  );
+}
+
 function PlanCard(props: { card: Extract<CardModel, { type: "plan" }>; actions: CardActions }) {
   const { card } = props;
   const [revising, setRevising] = useState(false);
   const [wish, setWish] = useState("");
+  const [expanded, setExpanded] = useState(false);
   const wishId = useId();
+  const head = <h3 className="ag-card-h">{card.caption}</h3>;
   return (
     <section className="ag-card">
-      <h3 className="ag-card-h">{card.caption}</h3>
+      {card.progress ? (
+        <div className="ag-plan-head">
+          {head}
+          <span className="ag-plan-prog small muted">{progressLabel(card.progress)}</span>
+        </div>
+      ) : (
+        head
+      )}
       <p className="ag-lead">{card.summary}</p>
-      {card.steps.length > 0 && <Lines items={card.steps} ordered />}
+      <PlanSteps steps={card.steps} marks={card.marks} expanded={expanded} onToggle={() => setExpanded((e) => !e)} />
       {card.notes.map((n, i) => (
         <p key={i} className="ag-note">
           <Icon name="info" />

@@ -6698,7 +6698,7 @@
                 "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-310",
@@ -6801,7 +6801,7 @@
                 "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-314",
@@ -6928,7 +6928,7 @@
                 "go test -race ./desktop/internal/input/wails/... (если Go менялся)"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-319",

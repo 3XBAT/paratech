@@ -97,13 +97,14 @@ type SubjectRow struct {
 	Semester string // code "<year>-autumn|spring"; anything else is left out
 }
 
-// LessonRow is one recorded lesson of find_lessons.
+// LessonRow is one lesson of find_lessons: a recorded lesson, or a lesson of the schedule not recorded (no Recording).
 type LessonRow struct {
-	Recording   Ref
+	Recording   Ref // zero for a lesson of the schedule not recorded
 	Lesson      Ref // the schedule entry; zero for an ad-hoc recording
 	Subject     Ref // zero when the lesson names no subject of the library
 	Date        Date
-	Kind        string // a lesson kind code; anything else is left out
+	Time        TimeOfDay // the start in the student's zone: of the recording, or of a lesson of the schedule not recorded
+	Kind        string    // a lesson kind code; anything else is left out
 	Transcribed bool
 	Summary     bool
 	LectureText bool
@@ -253,10 +254,11 @@ func SubjectsResult(callID string, rows []SubjectRow) (ToolResult, []Ref, error)
 // LessonsResult is the result of find_lessons and the IDs it shows.
 func LessonsResult(callID string, rows []LessonRow) (ToolResult, []Ref, error) {
 	type item struct {
-		Recording   string `json:"recording"`
+		Recording   string `json:"recording,omitempty"`
 		Lesson      string `json:"lesson,omitempty"`
 		Subject     string `json:"subject,omitempty"`
 		Date        string `json:"date,omitempty"`
+		Time        string `json:"time,omitempty"`
 		Kind        string `json:"kind,omitempty"`
 		Transcribed bool   `json:"transcribed"`
 		Summary     bool   `json:"summary"`
@@ -265,12 +267,13 @@ func LessonsResult(callID string, rows []LessonRow) (ToolResult, []Ref, error) {
 	items := make([]item, 0, len(rows))
 	refs := make([][]Ref, 0, len(rows)) // per row
 	for _, r := range rows {
-		if err := errorsOf(wantRef(r.Recording, KindRecording, true), wantRef(r.Lesson, KindLesson, false),
+		// A row is a recording or, not recorded, a schedule entry.
+		if err := errorsOf(wantRef(r.Recording, KindRecording, r.Lesson.IsZero()), wantRef(r.Lesson, KindLesson, false),
 			wantRef(r.Subject, KindSubject, false)); err != nil {
 			return ToolResult{}, nil, err
 		}
 		it := item{
-			Recording: r.Recording.ID(), Lesson: r.Lesson.ID(), Subject: r.Subject.ID(), Date: r.Date.String(),
+			Recording: r.Recording.ID(), Lesson: r.Lesson.ID(), Subject: r.Subject.ID(), Date: r.Date.String(), Time: r.Time.String(),
 			Transcribed: r.Transcribed, Summary: r.Summary, LectureText: r.LectureText,
 		}
 		if slices.Contains(lessonKinds, r.Kind) {

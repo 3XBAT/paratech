@@ -91,8 +91,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != noteRecognitionVersion {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, noteRecognitionVersion)
+	if err != nil || first != assignmentDoneVersion {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, assignmentDoneVersion)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
@@ -262,8 +262,11 @@ const lessonCallLinkVersion = 43
 // subjectTeachersVersion moves the teacher of a subject into three roles (TASK-285).
 const subjectTeachersVersion = 44
 
-// noteRecognitionVersion adds the photo recognition setting (TASK-294), the newest one.
+// noteRecognitionVersion adds the photo recognition setting (TASK-294).
 const noteRecognitionVersion = 45
+
+// assignmentDoneVersion adds the «Выполнено» mark of an assignment (TASK-313), the newest one.
+const assignmentDoneVersion = 46
 
 // recordingOriginVersion adds the origin of a recording (TASK-161).
 const recordingOriginVersion = 42

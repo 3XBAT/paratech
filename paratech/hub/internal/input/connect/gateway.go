@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	connectrpc "connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -219,6 +220,13 @@ func (d *deltaSender) loop() {
 		d.mu.Lock()
 		chunk, closed := d.pending.String(), d.closed
 		d.pending.Reset()
+		if !closed {
+			// Each delta is made valid UTF-8 on its own, so one cut inside a character would show it as two U+FFFD:
+			// its incomplete end waits for the next chunk.
+			var tail string
+			chunk, tail = cutIncompleteRune(chunk)
+			d.pending.WriteString(tail)
+		}
 		d.mu.Unlock()
 
 		if chunk != "" {
@@ -233,6 +241,20 @@ func (d *deltaSender) loop() {
 			return
 		}
 	}
+}
+
+// cutIncompleteRune splits s before a trailing UTF-8 sequence that is not complete yet but may still become a valid
+// character; invalid bytes stay in head.
+func cutIncompleteRune(s string) (head, tail string) {
+	for i := len(s) - 1; i >= 0 && i > len(s)-utf8.UTFMax; i-- {
+		if utf8.RuneStart(s[i]) {
+			if !utf8.FullRuneInString(s[i:]) {
+				return s[:i], s[i:]
+			}
+			break
+		}
+	}
+	return s, ""
 }
 
 // completeError maps a gateway error to its Connect code and ErrorDetail (ADR-0005(c), errors.proto).
