@@ -220,11 +220,24 @@ func TestDraftsOfApprovedPlan(t *testing.T) {
 		return s + `]`
 	}
 
-	t.Run("paid steps are capped by the write limit", func(t *testing.T) {
+	// ADR-0033 §4: the «Да» covers every step; only the quota limits paid steps.
+	t.Run("paid steps are not capped by the write limit", func(t *testing.T) {
 		th := newThread(t)
 		observeAssignments(t, th, MaxWrites+1)
-		if err := th.ProposePlan(planSteps(t, plan(MaxWrites+1)), ctx, at(2)); !errors.Is(err, ErrInvalidPlan) {
+		if err := th.ProposePlan(planSteps(t, plan(MaxWrites+1)), ctx, at(2)); err != nil {
 			t.Fatalf("plan of %d drafts = %v", MaxWrites+1, err)
+		}
+		if err := th.ApprovePlan(at(3)); err != nil {
+			t.Fatal(err)
+		}
+		for i := 1; i <= MaxWrites+1; i++ {
+			c := callID(t, fmt.Sprintf("c%d", i), "triage_assignment", fmt.Sprintf(`{"assignment":"a%d"}`, i))
+			if _, err := th.Admit(c, f, at(4)); err != nil {
+				t.Fatalf("draft %d: %v", i, err)
+			}
+		}
+		if turn, _ := th.Turn(); turn.Budget() != (Budget{}) || turn.Status() != StatusExecuting {
+			t.Fatalf("after the plan: %s %+v", turn.Status(), turn.Budget())
 		}
 	})
 
@@ -273,7 +286,7 @@ func TestDraftsOfApprovedPlan(t *testing.T) {
 			t.Fatalf("refused %v, %v", refused, refused2)
 		}
 		turn, _ := th.Turn()
-		if b := turn.Budget(); b.Writes != 5 || b.PaidUnplanned != 0 {
+		if b := turn.Budget(); b.Writes != 0 || b.PaidUnplanned != 0 {
 			t.Fatalf("budget = %+v", b)
 		}
 

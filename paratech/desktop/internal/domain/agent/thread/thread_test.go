@@ -393,20 +393,16 @@ func TestBudget(t *testing.T) {
 			t.Fatalf("a runaway ran %d steps", steps)
 		}
 	})
-	t.Run("writes", func(t *testing.T) {
+	t.Run("unplanned writes", func(t *testing.T) {
 		th := newThread(t)
-		if err := th.ProposePlan(planSteps(t, createSubjects(MaxWrites, "")), nil, at(2)); err != nil {
+		s := th.State()
+		s.Version = 1
+		s.Current.Budget.Writes = MaxWrites
+		th, err := Restore(s)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if err := th.ApprovePlan(at(3)); err != nil {
-			t.Fatal(err)
-		}
-		for i := range MaxWrites {
-			if _, err := th.Admit(call(t, "create_subject", `{"name":"`+subjectName(i)+`"}`), Facts{}, at(4)); err != nil {
-				t.Fatalf("write %d: %v", i+1, err)
-			}
-		}
-		_, err := th.Admit(call(t, "create_subject", `{"name":"Ещё"}`), Facts{}, at(5))
+		_, err = th.Admit(call(t, "create_subject", `{"name":"Ещё"}`), Facts{}, at(5))
 		assertBudgetStop(t, th, err)
 	})
 	t.Run("question rounds", func(t *testing.T) {
@@ -566,7 +562,7 @@ func TestApprovedPlan(t *testing.T) {
 			t.Fatalf("%s: step = %d, want %d", s.name, adm.PlanStep, s.step)
 		}
 	}
-	if turn, _ := th.Turn(); turn.Budget().Writes != 2 || turn.Budget().PaidUnplanned != 0 {
+	if turn, _ := th.Turn(); turn.Budget().Writes != 0 || turn.Budget().PaidUnplanned != 0 {
 		t.Fatalf("budget = %+v", turn.Budget())
 	}
 
@@ -591,7 +587,7 @@ func TestProposePlanRules(t *testing.T) {
 	}{
 		{"read step", `[{"tool":"list_subjects"}]`, ErrInvalidPlan},
 		{"unknown id", `[{"tool":"make_summary","arguments":{"recording":"r7"}}]`, actionpolicy.ErrUnknownID},
-		{"too many writes", createSubjects(MaxWrites+1, ""), ErrInvalidPlan},
+		{"more writes than MaxWrites", createSubjects(MaxWrites+1, ""), nil},
 		{"C steps do not count as writes", createSubjects(MaxWrites, `{"tool":"propose_delete_recording","arguments":{"recording":"r1"}}`), nil},
 		{"created subject", `[{"tool":"create_subject","arguments":{"name":"Физика"}},{"tool":"create_folder","arguments":{"name":"Лекции"}}]`, nil},
 	}
@@ -760,7 +756,7 @@ func TestRestore(t *testing.T) {
 		{"resume to a waiting status", func(s *State) { s.Current.Resume = StatusAwaitingPlan }},
 		{"bad stop reason", func(s *State) { s.Current.StopReason = "x" }},
 		{"stop reason while running", func(s *State) { s.Current.Status, s.Current.Resume = StatusExecuting, "" }},
-		{"steps over budget", func(s *State) { s.Current.Budget.Steps = MaxSteps + 1 }},
+		{"steps over budget", func(s *State) { s.Current.Budget.Steps = MaxPlanRunSteps + 1 }},
 		{"writes over budget", func(s *State) { s.Current.Budget.Writes = MaxWrites + 1 }},
 		{"third round", func(s *State) { s.Current.Budget.QuestionRounds = 3 }},
 		{"negative tokens", func(s *State) { s.Current.Budget.InputTokens = -1 }},

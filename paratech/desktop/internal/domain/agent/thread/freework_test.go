@@ -50,7 +50,7 @@ func TestFreeTopicAdmission(t *testing.T) {
 		{"a step of the approved plan runs without the card", topicPlan, []admit{
 			{"c1", "triage_assignment", topicArgs, notice, actionpolicy.ClassU, ""},
 			{"c2", "triage_assignment", topicArgs, notice, "", values.RefuseNotInPlan},
-		}, 1, 0},
+		}, 0, 0}, // a plan step is not a write of the budget (ADR-0033 §4)
 		{"outside the approved plan: not in plan", subjectPlan, []admit{
 			{"c1", "triage_assignment", topicArgs, notice, "", values.RefuseNotInPlan},
 		}, 0, 0},
