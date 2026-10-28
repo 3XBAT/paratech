@@ -499,6 +499,10 @@ export const changeTexts = {
   remove: "Удалить",
   removing: "Удаление…",
   removed: "Задание удалено",
+  /** A muted hint next to «Задание удалено» while «Вернуть» still works (ADR-0029 addendum 2: 72 hours). */
+  restoreWindow: "Вернуть можно в течение 3 дней",
+  /** «Вернуть» after the window: the removed line says this instead of «Задание удалено», without the button. */
+  expired: "Задание удалено окончательно, вернуть уже нельзя",
   restore: "Вернуть",
   restoring: "Возврат…",
   edit: "Изменить",
@@ -527,6 +531,7 @@ const changeProblemTexts: Readonly<Record<string, string>> = {
   in_use: "Письмо преподавателю ещё отправляется — удалить можно после",
   changed: "Задание уже изменилось. Данные обновлены, повторите действие",
   deleted: "Задание уже удалено",
+  expired: changeTexts.expired,
   not_found: "Задание не найдено",
   failed: "Не удалось выполнить действие. Попробуйте ещё раз",
 };
@@ -550,11 +555,13 @@ export interface ChangeOutcome {
   stopped: boolean;
   /** The refusal comes with «Открыть отправку»: an email of the assignment is not settled yet. */
   openSend: boolean;
+  /** «Вернуть» came after the restore window: the removed line itself turns permanent, no separate refusal line. */
+  expired: boolean;
 }
 
 export function changeOutcome(r: ChangeAssignmentResult): ChangeOutcome {
   if (r.problem === "" && r.assignment !== null) {
-    return { assignment: r.assignment, text: "", reload: false, stopped: r.stopped, openSend: false };
+    return { assignment: r.assignment, text: "", reload: false, stopped: r.stopped, openSend: false, expired: false };
   }
   return {
     assignment: null,
@@ -562,6 +569,7 @@ export function changeOutcome(r: ChangeAssignmentResult): ChangeOutcome {
     reload: changeNeedsReload(r.problem),
     stopped: false,
     openSend: r.problem === "in_use",
+    expired: r.problem === "expired",
   };
 }
 
