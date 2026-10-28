@@ -13,6 +13,7 @@ import { todayApi } from "../bindings/today";
 import { importTexts } from "../recordingImportView";
 import {
   askSearch,
+  type CitationOpening,
   checkQuery,
   errorText,
   exportResultLine,
@@ -20,11 +21,14 @@ import {
   isNoteOnly,
   type LessonFocus,
   idleFlight,
+  jumpTicket,
   lecturesMeta,
   noFocus,
+  noteJumpTexts,
   orderLectures,
   type PastChoice,
   pastLesson,
+  runJump,
   type SearchFlight,
   searchDone,
   searchPauseMs,
@@ -54,8 +58,20 @@ interface OpenLesson {
 // «База знаний» (TASK-091): the subjects with their lessons, the search over the whole base and the export of a
 // subject. The core groups, searches and writes the file; the page only shows and asks. A lesson opens here, over the
 // list it came from, so «Назад» finds the list or the search as the user left it.
-export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (assignmentId: string) => void }) {
+export function KnowledgeBasePage(props: {
+  visit?: number;
+  onOpenAssignment: (assignmentId: string) => void;
+  /** A place of an answer's source to open on arrival (TASK-296); the page takes it once and App clears it. */
+  jump?: CitationOpening;
+  onJumpDone?: () => void;
+}) {
   const api = useMemo(() => knowledgeBaseApi(callByName), []);
+  const [ticket] = useState(() => jumpTicket(props.jump));
+  const [jumping, setJumping] = useState(false);
+  const mounted = useRef(true);
+  const [jumpError, setJumpError] = useState("");
+  const jumpDone = useRef(props.onJumpDone);
+  jumpDone.current = props.onJumpDone;
   const [subjects, setSubjects] = useState<KnowledgeSubject[] | null>(null);
   const [listError, setListError] = useState("");
   const [reload, setReload] = useState(0);
@@ -138,20 +154,52 @@ export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (as
     return () => clearTimeout(t);
   }, [query, runSearch]);
 
+  // The user chose something else: a late result of the jump is dropped, its busy line and error go.
+  const leaveJump = useCallback(() => {
+    ticket.cancel();
+    setJumping(false);
+    setJumpError("");
+  }, [ticket]);
+
+  // Opens the place a citation names, by ids. Taken once, so a later visit never reopens it.
+  useEffect(() => {
+    mounted.current = true;
+    void runJump(ticket, api, {
+      started: () => {
+        jumpDone.current?.();
+        setJumping(true);
+      },
+      opened: (r) => {
+        if (mounted.current) {
+          changed.current = false;
+          setJumpError("");
+          setOpen({ lesson: r.lesson, focus: r.focus, editing: false, materialId: r.materialId });
+        }
+      },
+      failed: (text) => mounted.current && setJumpError(text),
+      settled: () => mounted.current && setJumping(false),
+    });
+    return () => {
+      mounted.current = false;
+    };
+  }, [api, ticket]);
+
   // A click on «База знаний» in the rail while here goes back to the subjects.
   const firstVisit = useRef(props.visit);
   useEffect(() => {
     if (props.visit !== firstVisit.current) {
       firstVisit.current = props.visit;
+      leaveJump();
       setOpen(null);
       setSubject(null);
       setQuery("");
       void runSearch("", false);
       setReload((n) => n + 1);
     }
-  }, [props.visit, runSearch]);
+  }, [props.visit, runSearch, leaveJump]);
 
   const openLesson = (lesson: KnowledgeLesson, focus: LessonFocus = noFocus, editing = false, materialId = "") => {
+    leaveJump();
     changed.current = false;
     setOpen({ lesson, focus, editing, materialId });
   };
@@ -208,6 +256,16 @@ export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (as
           <p className="small muted kb-sub">Занятия по предметам: кратко, текст лекции, расшифровка и задания.</p>
         </div>
       </div>
+      {jumpError !== "" && (
+        <Banner kind="fail" role="alert">
+          {jumpError}
+        </Banner>
+      )}
+      {jumping && (
+        <p className="small muted" role="status">
+          {noteJumpTexts.busy}
+        </p>
+      )}
       <Card className="box kb-search">
         <div className="tr-search">
           <Input
@@ -217,6 +275,7 @@ export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (as
             maxLength={200}
             value={query}
             onChange={(e) => {
+              leaveJump();
               setQuery(e.target.value);
               // A cleared field shows the subjects at once, without the pause.
               if (e.target.value.trim() === "") {
@@ -226,11 +285,19 @@ export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (as
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
+                leaveJump();
                 void runSearch(query, true);
               }
             }}
           />
-          <Button busy={searching} busyLabel="Поиск…" onClick={() => void runSearch(query, true)}>
+          <Button
+            busy={searching}
+            busyLabel="Поиск…"
+            onClick={() => {
+              leaveJump();
+              void runSearch(query, true);
+            }}
+          >
             Найти
           </Button>
         </div>
@@ -266,7 +333,13 @@ export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (as
           ) : (
             <>
               <h2 className="group-title">Предметы</h2>
-              <SubjectList subjects={subjects} onOpen={setSubject} />
+              <SubjectList
+                subjects={subjects}
+                onOpen={(s) => {
+                  leaveJump();
+                  setSubject(s);
+                }}
+              />
             </>
           )}
         </>
