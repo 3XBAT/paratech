@@ -118,15 +118,36 @@ test("both delete buttons ask first and delete only through the warning or when 
   assert.match(page, /setConfirmId\(a\.id\)/);
   assert.match(page, /setConfirming\(true\)/);
   // «Отмена» only closes the warning; the confirm button deletes.
-  assert.match(page, /onConfirm=\{\(\) => void remove\(a\)\} onCancel=\{\(\) => setConfirmId\(""\)\}/);
-  assert.match(page, /onConfirm=\{\(\) => void removeThis\(\)\} onCancel=\{\(\) => setConfirming\(false\)\}/);
+  assert.match(page, /onConfirm=\{\(\) => void remove\(a\)\}/);
+  assert.match(page, /onConfirm=\{\(\) => void removeThis\(\)\}/);
+  assert.match(page, /setConfirmId\(""\);\s*setCancelledId\(a\.id\);/);
+  assert.match(page, /setConfirming\(false\);\s*setCancelled\(true\);/);
   // A double click is one question and one delete (the same guard the page already uses).
   assert.match(page, /impactGuard\.current\.has\(a\.id\)/);
   assert.match(page, /impactGuard\.current\.has\(id\)/);
 });
 
+test("the check shows no «Удаление…»; «Отмена» gives the focus back to «Удалить»", () => {
+  // The check only disables the button (checkingId / checking); the busy label is the real delete's (busyId / changing).
+  assert.match(page, /disabled=\{busyId === a\.id \|\| checkingId === a\.id \|\| confirmId === a\.id\}/);
+  assert.match(page, /disabled=\{changing \|\| checking \|\| confirming\}/);
+  assert.match(page, /busy=\{busyId === a\.id\}/);
+  assert.match(page, /busy=\{changing\}\s*busyLabel=\{changeTexts\.removing\}/);
+  assert.doesNotMatch(page, /setBusyId\(a\.id\);\s*try \{\s*await impactGuard/);
+  assert.doesNotMatch(page, /setChanging\(true\);\s*try \{\s*await impactGuard/);
+  // After «Отмена» the button is mounted again (new key) with autoFocus, as after «Вернуть».
+  assert.match(page, /key=\{cancelledId === a\.id \? "remove-cancelled" : "remove"\}/);
+  assert.match(page, /autoFocus=\{restoredId === a\.id \|\| cancelledId === a\.id\}/);
+  assert.match(page, /key=\{cancelled \? "remove-cancelled" : "remove"\}/);
+  assert.match(page, /autoFocus=\{restored \|\| cancelled\}/);
+});
+
 test("the refusal button opens the assignment from the list and the emails on the detail page", () => {
-  assert.match(page, /onOpenSend=\{problem\.openSend \? \(\) => props\.onOpen\(a\.id\) : undefined\}/);
+  assert.match(page, /onOpenSend=\{problem\.openSend \? \(\) => props\.onOpen\(a\.id, "mail"\) : undefined\}/);
+  // The list's button lands on the emails: the page remembers the target, the editor shows the emails once loaded.
+  assert.match(page, /setMailFor\(target === "mail" \? id : ""\)/);
+  assert.match(page, /showMail=\{mailFor === openId\}/);
+  assert.match(page, /if \(showMail === true && loaded\) \{\s*showDeliveries\(\);\s*onMailShown\?\.\(\);/);
   assert.match(page, /onOpenSend=\{changeOpenSend \? showDeliveries : undefined\}/);
   assert.match(page, /ref=\{mailRef\}/);
   assert.match(page, /mailRef\.current\?\.scrollIntoView/);

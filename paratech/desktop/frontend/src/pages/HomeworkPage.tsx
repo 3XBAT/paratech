@@ -89,19 +89,30 @@ export function HomeworkPage(props: { openAssignment?: string; onSelect?: (id: s
   const [own, setOwn] = useState(props.openAssignment ?? "");
   const openId = props.onSelect ? (props.openAssignment ?? "") : own;
   const select = props.onSelect ?? setOwn;
+  // «Открыть отправку» of a list row: the assignment whose page lands on the emails (the route carries only the id).
+  const [mailFor, setMailFor] = useState("");
+  const open = (id: string, target?: OpenTarget) => {
+    setMailFor(target === "mail" ? id : "");
+    select(id);
+  };
 
   return openId === "" ? (
-    <AssignmentList api={api} onOpen={select} />
+    <AssignmentList api={api} onOpen={open} />
   ) : (
     <AssignmentEditor
       api={api}
       id={openId}
       editOnOpen={props.editAssignment === openId}
       onEditTaken={props.onEditTaken}
+      showMail={mailFor === openId}
+      onMailShown={() => setMailFor("")}
       onBack={() => select("")}
     />
   );
 }
+
+/** Where an opened assignment page lands: «mail» is the emails block. */
+type OpenTarget = "mail";
 
 function Chip(props: { view: ChipView }) {
   return (
@@ -120,8 +131,10 @@ function MessageLine(props: { message: Message }) {
   );
 }
 
-function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void }) {
+function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?: OpenTarget) => void }) {
   const { api } = props;
+  const [checkingId, setCheckingId] = useState(""); // the running-work check of «Удалить» is on its way: no delete yet
+  const [cancelledId, setCancelledId] = useState(""); // «Отмена» of the warning: «Удалить» of the row takes the focus back
   const [items, setItems] = useState<AssignmentItem[] | null>(null);
   // Deleted in this visit: the stored assignment at its new version, which «Вернуть» sends back.
   const [removed, setRemoved] = useState<Readonly<Record<string, AssignmentItem>>>({});
@@ -245,17 +258,19 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
       return;
     }
     setRowProblem(null);
-    setBusyId(a.id);
+    setCancelledId("");
+    setCheckingId(a.id);
     try {
       await impactGuard.current.run(a.id, async () => {
         if (await deleteNeedsWarning(() => api.deleteImpact(a.id))) {
           setConfirmId(a.id);
         } else {
+          setCheckingId("");
           await remove(a);
         }
       });
     } finally {
-      setBusyId((cur) => (cur === a.id ? "" : cur));
+      setCheckingId((cur) => (cur === a.id ? "" : cur));
     }
   }
 
@@ -278,9 +293,17 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
     const problemLine = (problem !== null && problem.text !== "") || confirmId === a.id ? (
       <>
         {problem !== null && problem.text !== "" && (
-          <ChangeRefusal text={problem.text} onOpenSend={problem.openSend ? () => props.onOpen(a.id) : undefined} />
+          <ChangeRefusal text={problem.text} onOpenSend={problem.openSend ? () => props.onOpen(a.id, "mail") : undefined} />
         )}
-        {confirmId === a.id && <DeleteWarning onConfirm={() => void remove(a)} onCancel={() => setConfirmId("")} />}
+        {confirmId === a.id && (
+          <DeleteWarning
+            onConfirm={() => void remove(a)}
+            onCancel={() => {
+              setConfirmId("");
+              setCancelledId(a.id);
+            }}
+          />
+        )}
       </>
     ) : null;
     if (Object.hasOwn(removed, a.id)) {
@@ -315,12 +338,14 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
           <>
             <Button onClick={() => props.onOpen(a.id)}>Открыть</Button>
             <Button
+              // A new key after «Отмена» mounts the button again, so autoFocus gives it the focus.
+              key={cancelledId === a.id ? "remove-cancelled" : "remove"}
               variant="danger"
               aria-label={removeLabel(a.title)}
-              autoFocus={restoredId === a.id}
+              autoFocus={restoredId === a.id || cancelledId === a.id}
               busy={busyId === a.id}
               busyLabel={changeTexts.removing}
-              disabled={busyId === a.id || confirmId === a.id}
+              disabled={busyId === a.id || checkingId === a.id || confirmId === a.id}
               onClick={() => void askRemove(a)}
             >
               {changeTexts.remove}
@@ -421,8 +446,17 @@ interface SendOpen {
   problem: string;
 }
 
-function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: boolean; onEditTaken?: () => void; onBack: () => void }) {
-  const { api, id, editOnOpen, onEditTaken } = props;
+// showMail: the page lands on the emails once loaded (the list's «Открыть отправку»); onMailShown tells it was done.
+function AssignmentEditor(props: {
+  api: HomeworkApi;
+  id: string;
+  editOnOpen?: boolean;
+  onEditTaken?: () => void;
+  showMail?: boolean;
+  onMailShown?: () => void;
+  onBack: () => void;
+}) {
+  const { api, id, editOnOpen, onEditTaken, showMail, onMailShown } = props;
   const turnkey = useMemo(() => turnkeyApi(callByName), []);
   const [detail, setDetail] = useState<AssignmentDetail | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -453,11 +487,13 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
   }, [editOnOpen, onEditTaken]);
   const [gone, setGone] = useState<AssignmentItem | null>(null);
   const [changing, setChanging] = useState(false);
+  const [checking, setChecking] = useState(false); // the running-work check of «Удалить» is on its way: no delete yet
   const [restored, setRestored] = useState(false); // «Вернуть» was pressed: «Удалить» takes the focus
   const [changeProblem, setChangeProblem] = useState("");
   const [changeOpenSend, setChangeOpenSend] = useState(false); // the refusal comes with «Открыть отправку»
   const [confirming, setConfirming] = useState(false); // «Работа остановится» is asked before the delete
   const [goneStopped, setGoneStopped] = useState(false); // the delete stopped a running work
+  const [cancelled, setCancelled] = useState(false); // «Отмена» of the warning: «Удалить» takes the focus back
   const mailRef = useRef<HTMLHeadingElement>(null);
   const library = useMemo(() => libraryApi(callByName), []);
   const mounted = useRef(true);
@@ -922,7 +958,8 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
     }
     setChangeProblem("");
     setChangeOpenSend(false);
-    setChanging(true);
+    setCancelled(false);
+    setChecking(true);
     try {
       await impactGuard.current.run(id, async () => {
         const warn = await deleteNeedsWarning(() => api.deleteImpact(id));
@@ -932,12 +969,13 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
         if (warn) {
           setConfirming(true);
         } else {
+          setChecking(false);
           await removeThis();
         }
       });
     } finally {
       if (mounted.current) {
-        setChanging(false);
+        setChecking(false);
       }
     }
   }
@@ -948,6 +986,15 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
     mailRef.current?.scrollIntoView({ block: "start" });
     mailRef.current?.focus();
   }
+
+  // Once the assignment is drawn (the emails heading exists) the page lands on the emails, as «Открыть отправку» does.
+  const loaded = detail !== null && gone === null;
+  useEffect(() => {
+    if (showMail === true && loaded) {
+      showDeliveries();
+      onMailShown?.();
+    }
+  }, [showMail, loaded]); // once per arrival: showDeliveries is a new function on every render
 
   if (detail === null) {
     return (
@@ -1011,16 +1058,18 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
         <h1 className="hw-title">{a.title}</h1>
         <span className="muted num">{dueText(a.due)}</span>
         <div className="acts">
-          <Button disabled={changing} onClick={() => setEditing(true)}>
+          <Button disabled={changing || checking} onClick={() => setEditing(true)}>
             {changeTexts.edit}
           </Button>
           <Button
+            // A new key after «Отмена» mounts the button again, so autoFocus gives it the focus.
+            key={cancelled ? "remove-cancelled" : "remove"}
             variant="danger"
             aria-label={removeLabel(a.title)}
-            autoFocus={restored}
+            autoFocus={restored || cancelled}
             busy={changing}
             busyLabel={changeTexts.removing}
-            disabled={changing || confirming}
+            disabled={changing || checking || confirming}
             onClick={() => void askRemoveThis()}
           >
             {changeTexts.remove}
@@ -1028,7 +1077,15 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
         </div>
       </div>
       {changeProblem && <ChangeRefusal text={changeProblem} onOpenSend={changeOpenSend ? showDeliveries : undefined} />}
-      {confirming && <DeleteWarning onConfirm={() => void removeThis()} onCancel={() => setConfirming(false)} />}
+      {confirming && (
+        <DeleteWarning
+          onConfirm={() => void removeThis()}
+          onCancel={() => {
+            setConfirming(false);
+            setCancelled(true);
+          }}
+        />
+      )}
       {editing && (
         <EditAssignmentDialog
           api={api}
