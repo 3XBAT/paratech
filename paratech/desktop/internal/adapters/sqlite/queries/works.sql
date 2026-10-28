@@ -67,6 +67,10 @@ INSERT INTO work_rounds (work_id, round, answer, replies)
 VALUES (sqlc.arg(work_id), sqlc.arg(round), sqlc.arg(answer), sqlc.arg(replies))
 ON CONFLICT (work_id, round) DO UPDATE SET answer = excluded.answer, replies = excluded.replies;
 
--- The purge of a deleted assignment (ADR-0029 addendum 2): its works, the rounds go with them (CASCADE).
+-- The purge of a deleted assignment (ADR-0029 addendum 2): its works, the rounds go with them (CASCADE); only while
+-- the assignment is still deleted before the cutoff.
 -- name: DeleteWorksOfAssignment :execrows
-DELETE FROM works WHERE assignment_id = sqlc.arg(assignment_id);
+DELETE FROM works
+WHERE assignment_id = sqlc.arg(assignment_id)
+  AND EXISTS (SELECT 1 FROM assignments a
+              WHERE a.id = works.assignment_id AND a.deleted_at IS NOT NULL AND a.deleted_at < sqlc.arg(cutoff));

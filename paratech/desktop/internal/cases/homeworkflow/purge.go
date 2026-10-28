@@ -16,11 +16,18 @@ const opPurge = "homeworkflow: purge deleted assignment"
 
 // Bounds of one purge run. What is left over goes in the next run (the next start or the next day).
 const (
-	maxPurgeBatch = 200
+	// purgePage is the page of the keyset listing: a skipped or failing assignment never hides the later ones.
+	purgePage = 100
+	// maxPurgeExamined bounds the assignments one run looks at.
+	maxPurgeExamined = 2000
 	// maxPurgeDeliveries bounds the deliveries read for one assignment; one that has more is skipped, since an
 	// unresolved one could hide behind the limit.
 	maxPurgeDeliveries = 1000
 )
+
+// errPurgeKept rolls the purge transaction of one assignment back without an error for the run: it is no longer due
+// (restored, or deleted again later, e.g. after the clock was set back) or it is kept for now (logged).
+var errPurgeKept = errors.New("assignment kept")
 
 // Purger removes the assignments deleted longer than assignment.RestoreWindow, completely (ADR-0029 addendum 2):
 // proposals, the export files and the email attachments, deliveries, the draft with its versions, works, then the
@@ -54,85 +61,110 @@ func NewPurger(d PurgeDeps) (*Purger, error) {
 }
 
 // PurgeDeleted removes every assignment whose restore window ended (assignment.PurgeDue) and returns how many were
-// removed completely. Each step is its own transaction and idempotent, and the assignment row goes last: a failure or
-// a crash in the middle leaves a still deleted (invisible) assignment that the next run finishes. One with an
-// unresolved delivery (PENDING, SENDING, UNKNOWN) is skipped and logged, never purged (hard rule 7). A failure of one
-// assignment does not stop the others; the failures are returned joined.
+// removed completely. The listing goes by keyset pages, so the assignments skipped or failing in this run never hide
+// the later ones. One with an unresolved delivery (PENDING, SENDING, UNKNOWN) is skipped and logged, never purged
+// (hard rule 7). A failure of one assignment does not stop the others; the failures are returned joined.
 func (p *Purger) PurgeDeleted(ctx context.Context) (int, error) {
 	now := p.clock.Now()
 	cutoff := assignment.PurgeCutoff(now)
-	list, err := p.assignments.ListDeletedBefore(ctx, cutoff, maxPurgeBatch)
-	if err != nil {
-		return 0, fmt.Errorf("%s: %w", opPurge, err)
-	}
 
 	purged := 0
 	var errs []error
-	for _, a := range list {
-		if err := ctx.Err(); err != nil {
-			errs = append(errs, err)
+	var afterAt time.Time
+	var afterID shared.AssignmentID
+	for examined := 0; examined < maxPurgeExamined; {
+		limit := min(purgePage, maxPurgeExamined-examined)
+		page, err := p.assignments.ListDeletedBefore(ctx, cutoff, afterAt, afterID, limit)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", opPurge, err))
 			break
 		}
-		if !a.PurgeDue(now) {
-			continue
+		for _, a := range page {
+			if err := ctx.Err(); err != nil {
+				return purged, errors.Join(append(errs, err)...)
+			}
+			examined++
+			afterAt, afterID = a.DeletedAt(), a.ID()
+			if !a.PurgeDue(now) {
+				continue
+			}
+			done, err := p.purge(ctx, a.ID(), cutoff)
+			switch {
+			case err != nil: // the next run tries again
+				errs = append(errs, fmt.Errorf("%s %s: %w", opPurge, a.ID(), err))
+			case done:
+				purged++
+			}
 		}
-		done, err := p.purge(ctx, a.ID(), cutoff)
-		switch {
-		case err != nil: // the next run tries again
-			errs = append(errs, fmt.Errorf("%s %s: %w", opPurge, a.ID(), err))
-		case done:
-			purged++
+		if len(page) < limit {
+			break
 		}
 	}
 	return purged, errors.Join(errs...)
 }
 
-// purge runs the steps for assignment id; done is false when it was skipped or its row is no longer due.
+// purge removes assignment id in one write transaction; done is false when it was kept (no longer due, or skipped).
+//
+// Order: re-check, read the file refs, the child rows, the assignment row, then the files, all before the commit. A
+// restore takes the same write lock, so it either commits before (the re-check, and the guard every delete repeats,
+// see it and nothing is touched) or after (the row is gone: not found). The files go after the rows: a delete that
+// fails rolls the rows back, and a failed commit or a crash after the files leaves the assignment deleted and due with
+// some files missing, which the next run (the startup cleanup comes first) finishes; the refs are read again from the
+// delivery rows that the rollback kept.
 func (p *Purger) purge(ctx context.Context, id shared.AssignmentID, cutoff time.Time) (bool, error) {
-	files, ok, err := p.filesOf(ctx, id)
-	if err != nil || !ok {
+	err := p.tx.Do(ctx, func(ctx context.Context) error {
+		due, err := p.assignments.StillDeletedBefore(ctx, id, cutoff)
+		if err != nil {
+			return fmt.Errorf("re-check: %w", err)
+		}
+		if !due {
+			return errPurgeKept
+		}
+		files, ok, err := p.filesOf(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errPurgeKept
+		}
+
+		if _, err := p.proposals.DeleteOfAssignment(ctx, id, cutoff); err != nil {
+			return fmt.Errorf("proposals: %w", err)
+		}
+		if _, err := p.deliveries.DeleteFinalOfAssignment(ctx, id, cutoff); err != nil {
+			return fmt.Errorf("deliveries: %w", err)
+		}
+		if _, err := p.drafts.DeleteOfAssignment(ctx, id, cutoff); err != nil {
+			return fmt.Errorf("draft: %w", err)
+		}
+		if _, err := p.works.DeleteOfAssignment(ctx, id, cutoff); err != nil {
+			return fmt.Errorf("works: %w", err)
+		}
+		done, err := p.assignments.PurgeDeleted(ctx, id, cutoff)
+		if err != nil {
+			return fmt.Errorf("assignment: %w", err)
+		}
+		if !done { // the guard of the row failed after the re-check passed: undo the deletes above
+			return errPurgeKept
+		}
+
+		for _, ref := range files {
+			if err := p.files.Delete(ctx, ref); err != nil {
+				return fmt.Errorf("delete a file: %w", err)
+			}
+		}
+		return nil
+	})
+	switch {
+	case errors.Is(err, errPurgeKept):
+		return false, nil
+	case err != nil:
 		return false, err
 	}
-	// The files go first: their refs are read from the delivery rows removed below.
-	for _, ref := range files {
-		if err := p.files.Delete(ctx, ref); err != nil {
-			return false, fmt.Errorf("delete a file: %w", err)
-		}
-	}
-
-	var done bool
-	steps := []struct {
-		name string
-		run  func(ctx context.Context) error
-	}{
-		{"proposals", func(ctx context.Context) error {
-			_, err := p.proposals.DeleteOfAssignment(ctx, id)
-			return err
-		}},
-		{"deliveries", func(ctx context.Context) error {
-			_, err := p.deliveries.DeleteFinalOfAssignment(ctx, id)
-			return err
-		}},
-		{"draft", func(ctx context.Context) error { return p.drafts.DeleteOfAssignment(ctx, id) }},
-		{"works", func(ctx context.Context) error {
-			_, err := p.works.DeleteOfAssignment(ctx, id)
-			return err
-		}},
-		{"assignment", func(ctx context.Context) error {
-			var err error
-			done, err = p.assignments.PurgeDeleted(ctx, id, cutoff)
-			return err
-		}},
-	}
-	for _, s := range steps {
-		if err := p.tx.Do(ctx, s.run); err != nil {
-			return false, fmt.Errorf("%s: %w", s.name, err)
-		}
-	}
-	return done, nil
+	return true, nil
 }
 
-// filesOf returns the files of assignment id to delete before its rows: the text and Word exports and the attachments
+// filesOf returns the files of assignment id to delete with its rows: the text and Word exports and the attachments
 // of its emails (the copies of a work's file). Only files below exports are deleted: a library material stays. ok is
 // false, with a log line, when a delivery is unresolved or there are too many to check: the assignment is skipped.
 func (p *Purger) filesOf(ctx context.Context, id shared.AssignmentID) (refs []shared.ArtifactRef, ok bool, err error) {

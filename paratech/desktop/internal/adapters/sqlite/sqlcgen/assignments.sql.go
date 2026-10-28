@@ -47,6 +47,24 @@ func (q *Queries) AssignmentBusy(ctx context.Context, arg AssignmentBusyParams) 
 	return busy, err
 }
 
+const assignmentDeletedBefore = `-- name: AssignmentDeletedBefore :one
+SELECT CAST(EXISTS (SELECT 1 FROM assignments
+                    WHERE id = ?1 AND deleted_at IS NOT NULL AND deleted_at < ?2) AS INTEGER) AS due
+`
+
+type AssignmentDeletedBeforeParams struct {
+	ID     string
+	Cutoff sql.NullInt64
+}
+
+// The re-check of the purge inside its transaction: is assignment id still deleted before the cutoff?
+func (q *Queries) AssignmentDeletedBefore(ctx context.Context, arg AssignmentDeletedBeforeParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, assignmentDeletedBefore, arg.ID, arg.Cutoff)
+	var due int64
+	err := row.Scan(&due)
+	return due, err
+}
+
 const assignmentInUse = `-- name: AssignmentInUse :one
 SELECT CAST(EXISTS (SELECT 1 FROM homework_drafts d WHERE d.assignment_id = ?1)
     OR EXISTS (SELECT 1 FROM deliveries v WHERE v.assignment_id = ?1)
@@ -363,19 +381,27 @@ func (q *Queries) ListAssignmentsByTranscript(ctx context.Context, transcriptID 
 const listAssignmentsDeletedBefore = `-- name: ListAssignmentsDeletedBefore :many
 SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments
 WHERE deleted_at IS NOT NULL AND deleted_at < ?1
+  AND (deleted_at > ?2 OR (deleted_at = ?2 AND id > ?3))
 ORDER BY deleted_at, id
-LIMIT ?2
+LIMIT ?4
 `
 
 type ListAssignmentsDeletedBeforeParams struct {
 	Cutoff  sql.NullInt64
+	AfterAt sql.NullInt64
+	AfterID string
 	MaxRows int64
 }
 
 // The purge after the restore window (ADR-0029 addendum 2): the assignments deleted before the cutoff, oldest delete
-// first.
+// first, after the keyset (after_at, after_id) of the previous page.
 func (q *Queries) ListAssignmentsDeletedBefore(ctx context.Context, arg ListAssignmentsDeletedBeforeParams) ([]Assignment, error) {
-	rows, err := q.db.QueryContext(ctx, listAssignmentsDeletedBefore, arg.Cutoff, arg.MaxRows)
+	rows, err := q.db.QueryContext(ctx, listAssignmentsDeletedBefore,
+		arg.Cutoff,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.MaxRows,
+	)
 	if err != nil {
 		return nil, err
 	}

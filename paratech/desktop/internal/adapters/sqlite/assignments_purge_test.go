@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -95,22 +96,42 @@ func TestPurgeDeletedAssignmentQueries(t *testing.T) {
 	}
 	cutoff := deletedAt.Add(time.Minute) // s-old and s-held are before it, s-new after
 
-	list, err := e.assignments.ListDeletedBefore(ctx, cutoff, 10)
-	if err != nil {
-		t.Fatal(err)
+	ids := func(after time.Time, afterID shared.AssignmentID, limit int) []shared.AssignmentID {
+		t.Helper()
+		list, err := e.assignments.ListDeletedBefore(ctx, cutoff, after, afterID, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := []shared.AssignmentID{}
+		for _, a := range list {
+			out = append(out, a.ID())
+		}
+		return out
 	}
-	var ids []shared.AssignmentID
-	for _, a := range list {
-		ids = append(ids, a.ID())
+	if got := ids(time.Time{}, "", 10); !slices.Equal(got, []shared.AssignmentID{"s-held", "s-old"}) {
+		t.Fatalf("ListDeletedBefore = %v, want [s-held s-old]", got)
 	}
-	if len(ids) != 2 || ids[0] != "s-held" || ids[1] != "s-old" {
-		t.Fatalf("ListDeletedBefore = %v, want [s-held s-old]", ids)
+	if got := ids(time.Time{}, "", 1); !slices.Equal(got, []shared.AssignmentID{"s-held"}) {
+		t.Fatalf("limit 1 = %v", got)
 	}
-	if one, err := e.assignments.ListDeletedBefore(ctx, cutoff, 1); err != nil || len(one) != 1 {
-		t.Fatalf("limit 1 = %v, %v", one, err)
+	// The keyset: after s-held (same time, greater id) comes s-old, after s-old nothing; an earlier time lists both.
+	if got := ids(deletedAt, "s-held", 10); !slices.Equal(got, []shared.AssignmentID{"s-old"}) {
+		t.Fatalf("after s-held = %v, want [s-old]", got)
 	}
-	if _, err := e.assignments.ListDeletedBefore(ctx, cutoff, 0); err == nil {
+	if got := ids(deletedAt, "s-old", 10); len(got) != 0 {
+		t.Fatalf("after s-old = %v, want none", got)
+	}
+	if got := ids(deletedAt.Add(-time.Millisecond), "zzz", 10); len(got) != 2 {
+		t.Fatalf("after an earlier time = %v, want both", got)
+	}
+	if _, err := e.assignments.ListDeletedBefore(ctx, cutoff, time.Time{}, "", 0); err == nil {
 		t.Fatal("limit 0 accepted")
+	}
+
+	for id, want := range map[shared.AssignmentID]bool{"s-old": true, "s-held": true, "s-new": false, "s-live": false, "missing": false} {
+		if got, err := e.assignments.StillDeletedBefore(ctx, id, cutoff); err != nil || got != want {
+			t.Fatalf("StillDeletedBefore %s = %v, %v; want %v", id, got, err, want)
+		}
 	}
 
 	// The row is refused while a draft or a delivery references it.
@@ -121,16 +142,16 @@ func TestPurgeDeletedAssignmentQueries(t *testing.T) {
 	proposals, deliveries := NewProposalRepository(e.db), NewDeliveryRepository(e.db)
 	drafts, works := NewDraftRepository(e.db), NewWorkRepository(e.db)
 	for _, id := range []shared.AssignmentID{"s-old", "s-held"} {
-		if n, err := proposals.DeleteOfAssignment(ctx, id); err != nil || n != 1 {
+		if n, err := proposals.DeleteOfAssignment(ctx, id, cutoff); err != nil || n != 1 {
 			t.Fatalf("proposals of %s = %d, %v", id, n, err)
 		}
-		if n, err := deliveries.DeleteFinalOfAssignment(ctx, id); err != nil || n != 2 {
+		if n, err := deliveries.DeleteFinalOfAssignment(ctx, id, cutoff); err != nil || n != 2 {
 			t.Fatalf("final deliveries of %s = %d, %v; want SENT and FAILED", id, n, err)
 		}
-		if err := drafts.DeleteOfAssignment(ctx, id); err != nil {
-			t.Fatal(err)
+		if n, err := drafts.DeleteOfAssignment(ctx, id, cutoff); err != nil || n != 1 {
+			t.Fatalf("draft of %s = %d, %v", id, n, err)
 		}
-		if n, err := works.DeleteOfAssignment(ctx, id); err != nil || n != 1 {
+		if n, err := works.DeleteOfAssignment(ctx, id, cutoff); err != nil || n != 1 {
 			t.Fatalf("works of %s = %d, %v", id, n, err)
 		}
 	}
@@ -161,11 +182,25 @@ func TestPurgeDeletedAssignmentQueries(t *testing.T) {
 	if done, err := e.assignments.PurgeDeleted(ctx, "s-old", cutoff); err != nil || done {
 		t.Fatalf("repeat = %v, %v", done, err)
 	}
-	if n, err := proposals.DeleteOfAssignment(ctx, "s-old"); err != nil || n != 0 {
+	if n, err := proposals.DeleteOfAssignment(ctx, "s-old", cutoff); err != nil || n != 0 {
 		t.Fatalf("repeat proposals = %d, %v", n, err)
 	}
-	if err := drafts.DeleteOfAssignment(ctx, "s-old"); err != nil {
-		t.Fatal(err)
+	if n, err := drafts.DeleteOfAssignment(ctx, "s-old", cutoff); err != nil || n != 0 {
+		t.Fatalf("repeat draft = %d, %v", n, err)
+	}
+
+	// The guard of every delete: a later delete and a live one lose nothing.
+	for _, id := range []shared.AssignmentID{"s-new", "s-live"} {
+		for step, del := range map[string]func() (int, error){
+			"proposals":  func() (int, error) { return proposals.DeleteOfAssignment(ctx, id, cutoff) },
+			"deliveries": func() (int, error) { return deliveries.DeleteFinalOfAssignment(ctx, id, cutoff) },
+			"draft":      func() (int, error) { return drafts.DeleteOfAssignment(ctx, id, cutoff) },
+			"works":      func() (int, error) { return works.DeleteOfAssignment(ctx, id, cutoff) },
+		} {
+			if n, err := del(); err != nil || n != 0 {
+				t.Fatalf("%s of %s = %d, %v; want nothing (not due)", step, id, n, err)
+			}
+		}
 	}
 
 	want := map[string]int64{
@@ -177,6 +212,66 @@ func TestPurgeDeletedAssignmentQueries(t *testing.T) {
 			if got[kind] != n {
 				t.Errorf("%s: %s = %d, want %d (untouched)", id, kind, got[kind], n)
 			}
+		}
+	}
+}
+
+// A restore committed after the listing: the purge deletes, run in one transaction, remove nothing of it.
+func TestPurgeDeletesKeepAnAssignmentRestoredAfterTheListing(t *testing.T) {
+	e, ctx := newCourseworkEnv(t), context.Background()
+	deletedAt := asgT0.Add(time.Hour)
+	a := newByStudent(t, "s1")
+	if err := e.assignments.Save(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Delete(deletedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.assignments.Save(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	seedPurgeLinks(t, e.db, "s1", "")
+	cutoff := deletedAt.Add(time.Minute)
+	if list, err := e.assignments.ListDeletedBefore(ctx, cutoff, time.Time{}, "", 10); err != nil || len(list) != 1 {
+		t.Fatalf("ListDeletedBefore = %v, %v", list, err)
+	}
+	before := purgeCounts(t, e.db, "s1")
+
+	if err := a.Restore(deletedAt.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.assignments.Save(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	proposals, deliveries := NewProposalRepository(e.db), NewDeliveryRepository(e.db)
+	drafts, works := NewDraftRepository(e.db), NewWorkRepository(e.db)
+	err := e.db.Do(ctx, func(ctx context.Context) error {
+		if due, err := e.assignments.StillDeletedBefore(ctx, "s1", cutoff); err != nil || due {
+			t.Errorf("StillDeletedBefore after the restore = %v, %v", due, err)
+		}
+		for step, del := range map[string]func() (int, error){
+			"proposals":  func() (int, error) { return proposals.DeleteOfAssignment(ctx, "s1", cutoff) },
+			"deliveries": func() (int, error) { return deliveries.DeleteFinalOfAssignment(ctx, "s1", cutoff) },
+			"draft":      func() (int, error) { return drafts.DeleteOfAssignment(ctx, "s1", cutoff) },
+			"works":      func() (int, error) { return works.DeleteOfAssignment(ctx, "s1", cutoff) },
+		} {
+			if n, err := del(); err != nil || n != 0 {
+				t.Errorf("%s = %d, %v; want nothing removed", step, n, err)
+			}
+		}
+		if done, err := e.assignments.PurgeDeleted(ctx, "s1", cutoff); err != nil || done {
+			t.Errorf("PurgeDeleted = %v, %v; want false", done, err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := purgeCounts(t, e.db, "s1")
+	for kind, n := range before {
+		if after[kind] != n {
+			t.Errorf("%s = %d, was %d", kind, after[kind], n)
 		}
 	}
 }

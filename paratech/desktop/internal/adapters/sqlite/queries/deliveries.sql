@@ -43,6 +43,11 @@ SET status     = sqlc.arg(status),
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 
 -- The purge of a deleted assignment (ADR-0029 addendum 2): its deliveries in the passed final statuses only, so an
--- unresolved email is never forgotten (hard rule 7).
+-- unresolved email is never forgotten (hard rule 7); only while the assignment is still deleted before the cutoff.
+-- The statuses are a JSON array: a sqlc.slice would renumber the parameters after it.
 -- name: DeleteFinalDeliveriesOfAssignment :execrows
-DELETE FROM deliveries WHERE assignment_id = sqlc.arg(assignment_id) AND status IN (sqlc.slice('statuses'));
+DELETE FROM deliveries
+WHERE assignment_id = sqlc.arg(assignment_id)
+  AND status IN (SELECT value FROM json_each(CAST(sqlc.arg(statuses) AS TEXT)))
+  AND EXISTS (SELECT 1 FROM assignments a
+              WHERE a.id = deliveries.assignment_id AND a.deleted_at IS NOT NULL AND a.deleted_at < sqlc.arg(cutoff));

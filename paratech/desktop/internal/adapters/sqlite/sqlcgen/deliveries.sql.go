@@ -12,29 +12,24 @@ import (
 )
 
 const deleteFinalDeliveriesOfAssignment = `-- name: DeleteFinalDeliveriesOfAssignment :execrows
-DELETE FROM deliveries WHERE assignment_id = ?1 AND status IN (/*SLICE:statuses*/?)
+DELETE FROM deliveries
+WHERE assignment_id = ?1
+  AND status IN (SELECT value FROM json_each(CAST(?2 AS TEXT)))
+  AND EXISTS (SELECT 1 FROM assignments a
+              WHERE a.id = deliveries.assignment_id AND a.deleted_at IS NOT NULL AND a.deleted_at < ?3)
 `
 
 type DeleteFinalDeliveriesOfAssignmentParams struct {
 	AssignmentID string
-	Statuses     []string
+	Statuses     string
+	Cutoff       sql.NullInt64
 }
 
 // The purge of a deleted assignment (ADR-0029 addendum 2): its deliveries in the passed final statuses only, so an
-// unresolved email is never forgotten (hard rule 7).
+// unresolved email is never forgotten (hard rule 7); only while the assignment is still deleted before the cutoff.
+// The statuses are a JSON array: a sqlc.slice would renumber the parameters after it.
 func (q *Queries) DeleteFinalDeliveriesOfAssignment(ctx context.Context, arg DeleteFinalDeliveriesOfAssignmentParams) (int64, error) {
-	query := deleteFinalDeliveriesOfAssignment
-	var queryParams []interface{}
-	queryParams = append(queryParams, arg.AssignmentID)
-	if len(arg.Statuses) > 0 {
-		for _, v := range arg.Statuses {
-			queryParams = append(queryParams, v)
-		}
-		query = strings.Replace(query, "/*SLICE:statuses*/?", strings.Repeat(",?", len(arg.Statuses))[1:], 1)
-	} else {
-		query = strings.Replace(query, "/*SLICE:statuses*/?", "NULL", 1)
-	}
-	result, err := q.db.ExecContext(ctx, query, queryParams...)
+	result, err := q.db.ExecContext(ctx, deleteFinalDeliveriesOfAssignment, arg.AssignmentID, arg.Statuses, arg.Cutoff)
 	if err != nil {
 		return 0, err
 	}

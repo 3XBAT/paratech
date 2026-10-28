@@ -38,6 +38,10 @@ SET status            = sqlc.arg(status),
     updated_at        = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 
--- The purge of a deleted assignment (ADR-0029 addendum 2): every proposal naming it.
+-- The purge of a deleted assignment (ADR-0029 addendum 2): every proposal naming it, only while the assignment is
+-- still deleted before the cutoff.
 -- name: DeleteProposalsOfAssignment :execrows
-DELETE FROM proposals WHERE assignment_id = sqlc.arg(assignment_id);
+DELETE FROM proposals
+WHERE assignment_id = sqlc.arg(assignment_id)
+  AND EXISTS (SELECT 1 FROM assignments a
+              WHERE a.id = proposals.assignment_id AND a.deleted_at IS NOT NULL AND a.deleted_at < sqlc.arg(cutoff));

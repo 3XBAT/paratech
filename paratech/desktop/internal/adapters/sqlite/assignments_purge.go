@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"paratech/desktop/internal/adapters/sqlite/sqlcgen"
@@ -15,17 +16,25 @@ import (
 // Operation names of the purge of deleted assignments (ADR-0029 addendum 2).
 const (
 	opListDeletedAssignments = "sqlite: list deleted assignments"
+	opCheckDeletedAssignment = "sqlite: check deleted assignment"
 	opPurgeAssignment        = "sqlite: purge deleted assignment"
 )
 
-// ListDeletedBefore returns at most limit assignments deleted before cutoff, oldest delete first (the purge after the
-// restore window); none is an empty list. limit must be at least 1.
-func (r *AssignmentRepository) ListDeletedBefore(ctx context.Context, cutoff time.Time, limit int) ([]*assignment.Assignment, error) {
+// ListDeletedBefore returns at most limit assignments deleted before cutoff and after the keyset (afterAt, afterID),
+// the last row of the previous page (zero afterAt: from the start), oldest delete first, for the purge after the
+// restore window; none is an empty list. limit must be at least 1.
+func (r *AssignmentRepository) ListDeletedBefore(ctx context.Context, cutoff, afterAt time.Time, afterID shared.AssignmentID,
+	limit int) ([]*assignment.Assignment, error) {
 	if limit < 1 {
 		return nil, fmt.Errorf("%s: limit %d, want at least 1", opListDeletedAssignments, limit)
 	}
+	// A zero keyset sorts before every stored time.
+	after := sql.NullInt64{Int64: math.MinInt64, Valid: true}
+	if !afterAt.IsZero() {
+		after.Int64 = afterAt.UnixMilli()
+	}
 	rows, err := r.db.Queries(ctx).ListAssignmentsDeletedBefore(ctx, sqlcgen.ListAssignmentsDeletedBeforeParams{
-		Cutoff: cutoffMs(cutoff), MaxRows: int64(limit),
+		Cutoff: cutoffMs(cutoff), AfterAt: after, AfterID: string(afterID), MaxRows: int64(limit),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", opListDeletedAssignments, MapError(ctx, err))
@@ -39,6 +48,18 @@ func (r *AssignmentRepository) ListDeletedBefore(ctx context.Context, cutoff tim
 		out = append(out, a)
 	}
 	return out, nil
+}
+
+// StillDeletedBefore reports whether assignment id is still deleted before cutoff; false when it is gone, restored or
+// deleted later. Called inside Tx.Do it reads in that (write-locked) transaction.
+func (r *AssignmentRepository) StillDeletedBefore(ctx context.Context, id shared.AssignmentID, cutoff time.Time) (bool, error) {
+	due, err := r.db.Queries(ctx).AssignmentDeletedBefore(ctx, sqlcgen.AssignmentDeletedBeforeParams{
+		ID: string(id), Cutoff: cutoffMs(cutoff),
+	})
+	if err != nil {
+		return false, fmt.Errorf("%s %s: %w", opCheckDeletedAssignment, id, MapError(ctx, err))
+	}
+	return due != 0, nil
 }
 
 // PurgeDeleted removes the row of assignment id if it is still deleted before cutoff; false when no such row is left

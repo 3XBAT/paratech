@@ -260,14 +260,21 @@ type DeadlineRemovals interface {
 }
 
 // The ports of the Purger (ADR-0029 addendum 2): an assignment deleted longer than assignment.RestoreWindow is removed
-// step by step, each step idempotent, the assignment row last. Implemented by the sqlite repositories and the
-// filestore; each call is one statement, joining the caller's transaction.
+// in one transaction, the assignment row last. Implemented by the sqlite repositories and the filestore; each call is
+// one statement, joining the caller's transaction. Every delete repeats the guard "still deleted before cutoff", so a
+// restore that won keeps everything.
 
 // DeletedAssignments finds the deleted assignments whose restore window ended and removes their rows (PRD section 10).
 type DeletedAssignments interface {
-	// ListDeletedBefore returns at most limit assignments deleted before cutoff, oldest delete first; none is an empty
-	// list (PRD section 10).
-	ListDeletedBefore(ctx context.Context, cutoff time.Time, limit int) ([]*assignment.Assignment, error)
+	// ListDeletedBefore returns at most limit assignments deleted before cutoff, oldest delete first, after the keyset
+	// (afterAt, afterID) of the last one of the previous page (zero afterAt: from the start); none is an empty list
+	// (PRD section 10).
+	ListDeletedBefore(ctx context.Context, cutoff, afterAt time.Time, afterID shared.AssignmentID,
+		limit int) ([]*assignment.Assignment, error)
+
+	// StillDeletedBefore reports whether assignment id is still deleted before cutoff; false when it is gone, restored
+	// or deleted later (PRD section 10).
+	StillDeletedBefore(ctx context.Context, id shared.AssignmentID, cutoff time.Time) (bool, error)
 
 	// PurgeDeleted removes the row of assignment id only if it is still deleted before cutoff, so a restore racing the
 	// purge keeps it; false when no such row is left. A draft or a delivery still referencing it keeps the row and
@@ -280,27 +287,30 @@ type PurgedDeliveries interface {
 	// ListByAssignment returns at most limit deliveries of assignment a, newest first (PRD section 10).
 	ListByAssignment(ctx context.Context, a shared.AssignmentID, limit int) ([]*delivery.Delivery, error)
 
-	// DeleteFinalOfAssignment removes the SENT and FAILED deliveries of assignment a and returns how many; an
-	// unresolved one is never removed (PRD section 10, AC-15, hard rule 7).
-	DeleteFinalOfAssignment(ctx context.Context, a shared.AssignmentID) (int, error)
+	// DeleteFinalOfAssignment removes the SENT and FAILED deliveries of assignment a, only while a is still deleted
+	// before cutoff, and returns how many; an unresolved one is never removed (PRD section 10, AC-15, hard rule 7).
+	DeleteFinalOfAssignment(ctx context.Context, a shared.AssignmentID, cutoff time.Time) (int, error)
 }
 
 // PurgedProposals removes the action proposals naming a deleted assignment (PRD section 13.3).
 type PurgedProposals interface {
-	// DeleteOfAssignment removes every proposal of assignment a and returns how many (PRD section 13.3).
-	DeleteOfAssignment(ctx context.Context, a shared.AssignmentID) (int, error)
+	// DeleteOfAssignment removes every proposal of assignment a, only while a is still deleted before cutoff, and
+	// returns how many (PRD section 13.3).
+	DeleteOfAssignment(ctx context.Context, a shared.AssignmentID, cutoff time.Time) (int, error)
 }
 
 // PurgedDrafts removes the draft of a deleted assignment with its versions (PRD section 10).
 type PurgedDrafts interface {
-	// DeleteOfAssignment removes the draft of assignment a; none is not an error (PRD section 10).
-	DeleteOfAssignment(ctx context.Context, a shared.AssignmentID) error
+	// DeleteOfAssignment removes the draft of assignment a, only while a is still deleted before cutoff, and returns
+	// how many drafts went; none is not an error (PRD section 10).
+	DeleteOfAssignment(ctx context.Context, a shared.AssignmentID, cutoff time.Time) (int, error)
 }
 
 // PurgedWorks removes the turnkey works of a deleted assignment with their rounds (PRD section 10, ADR-0025).
 type PurgedWorks interface {
-	// DeleteOfAssignment removes the works of assignment a and returns how many (PRD section 10).
-	DeleteOfAssignment(ctx context.Context, a shared.AssignmentID) (int, error)
+	// DeleteOfAssignment removes the works of assignment a, only while a is still deleted before cutoff, and returns
+	// how many (PRD section 10).
+	DeleteOfAssignment(ctx context.Context, a shared.AssignmentID, cutoff time.Time) (int, error)
 }
 
 // FileRemover deletes files through the Storage Manager (PRD section 5.2, hard rule 5). Implemented by the filestore

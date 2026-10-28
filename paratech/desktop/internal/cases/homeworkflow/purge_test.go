@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -25,6 +26,7 @@ var purgeNow = t0.Add(30 * 24 * time.Hour)
 // Steps of the purge fake, for the failure injection and the checks.
 const (
 	pstepList       = "list"
+	pstepCheck      = "re-check"
 	pstepDeliveries = "list deliveries"
 	pstepFile       = "file"
 	pstepProposals  = "proposals"
@@ -48,69 +50,117 @@ type purgeDB struct {
 	works       map[shared.AssignmentID]int
 	files       map[shared.ArtifactRef]bool
 
-	failStep string              // the step that fails, "" none
-	failFor  shared.AssignmentID // only for this assignment, "" any
-	before   map[string]func()   // runs before a step (a restore racing the purge)
-	ran      []string            // steps that ran inside a transaction
+	failStep string                                 // the step that fails, "" none
+	failFor  shared.AssignmentID                    // only for this assignment, "" any
+	before   map[string]func(a shared.AssignmentID) // runs before a step (a restore racing the purge)
+	ran      []string                               // steps that ran inside a transaction
+	lists    int                                    // calls of ListDeletedBefore
 }
 
 func newPurgeDB(t *testing.T) *purgeDB {
 	return &purgeDB{
 		t: t, assignments: map[shared.AssignmentID]assignment.State{}, proposals: map[shared.AssignmentID]int{},
 		deliveries: map[shared.AssignmentID][]delivery.State{}, drafts: map[shared.AssignmentID]int{},
-		works: map[shared.AssignmentID]int{}, files: map[shared.ArtifactRef]bool{}, before: map[string]func(){},
+		works: map[shared.AssignmentID]int{}, files: map[shared.ArtifactRef]bool{},
+		before: map[string]func(shared.AssignmentID){},
 	}
 }
 
-// step checks a write runs in a transaction, runs the hook and the injected failure of step for a.
-func (db *purgeDB) step(ctx context.Context, step string, a shared.AssignmentID, write bool) error {
-	if write && ctx.Value(purgeTxKey{}) == nil {
+// step checks a step of one assignment runs in a transaction, runs the hook and the injected failure of step for a.
+func (db *purgeDB) step(ctx context.Context, step string, a shared.AssignmentID, inTx bool) error {
+	if inTx && ctx.Value(purgeTxKey{}) == nil {
 		db.t.Errorf("step %s of %s ran outside a transaction", step, a)
 	}
 	if hook := db.before[step]; hook != nil {
-		hook()
+		hook(a)
 	}
 	if db.failStep == step && (db.failFor == "" || db.failFor == a) {
 		return fmt.Errorf("%s %s: %w", step, a, errInjected)
 	}
-	if write {
+	if inTx {
 		db.ran = append(db.ran, step)
 	}
 	return nil
 }
 
+// due is the guard every delete of the store repeats: id is still deleted before cutoff.
+func (db *purgeDB) due(id shared.AssignmentID, cutoff time.Time) bool {
+	st, ok := db.assignments[id]
+	return ok && !st.DeletedAt.IsZero() && st.DeletedAt.Before(cutoff)
+}
+
 type purgeTxKey struct{}
 
+// purgeTx rolls the rows back when fn fails, as SQLite does; files are not transactional. A row changed by a hook (a
+// restore committed by somebody else) keeps that change: only the rows the purge removed come back.
 type purgeTx struct{ db *purgeDB }
 
 func (x purgeTx) Do(ctx context.Context, fn func(ctx context.Context) error) error {
-	return fn(context.WithValue(ctx, purgeTxKey{}, true))
+	db := x.db
+	db.mu.Lock()
+	rows, proposals, drafts, works := maps.Clone(db.assignments), maps.Clone(db.proposals), maps.Clone(db.drafts), maps.Clone(db.works)
+	deliveries := maps.Clone(db.deliveries)
+	db.mu.Unlock()
+
+	err := fn(context.WithValue(ctx, purgeTxKey{}, true))
+	if err != nil {
+		db.mu.Lock()
+		defer db.mu.Unlock()
+		for id, st := range rows {
+			if _, ok := db.assignments[id]; !ok {
+				db.assignments[id] = st
+			}
+		}
+		db.proposals, db.drafts, db.works, db.deliveries = proposals, drafts, works, deliveries
+	}
+	return err
 }
 
 type purgeAssignments struct{ db *purgeDB }
 
-func (r purgeAssignments) ListDeletedBefore(ctx context.Context, cutoff time.Time, limit int) ([]*assignment.Assignment, error) {
+func (r purgeAssignments) ListDeletedBefore(ctx context.Context, cutoff, afterAt time.Time, afterID shared.AssignmentID,
+	limit int) ([]*assignment.Assignment, error) {
 	db := r.db
 	db.mu.Lock()
 	defer db.mu.Unlock()
+	db.lists++
 	if err := db.step(ctx, pstepList, "", false); err != nil {
 		return nil, err
 	}
 	var out []*assignment.Assignment
 	for _, st := range db.assignments {
-		if !st.DeletedAt.IsZero() && st.DeletedAt.Before(cutoff) {
-			a, err := assignment.Restore(st)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, a)
+		if st.DeletedAt.IsZero() || !st.DeletedAt.Before(cutoff) {
+			continue
 		}
+		if !afterAt.IsZero() && (st.DeletedAt.Before(afterAt) || st.DeletedAt.Equal(afterAt) && st.ID <= afterID) {
+			continue
+		}
+		a, err := assignment.Restore(st)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
 	}
-	slices.SortFunc(out, func(a, b *assignment.Assignment) int { return strings.Compare(a.ID().String(), b.ID().String()) })
+	slices.SortFunc(out, func(a, b *assignment.Assignment) int {
+		if c := a.DeletedAt().Compare(b.DeletedAt()); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID().String(), b.ID().String())
+	})
 	if len(out) > limit {
 		out = out[:limit]
 	}
 	return out, nil
+}
+
+func (r purgeAssignments) StillDeletedBefore(ctx context.Context, id shared.AssignmentID, cutoff time.Time) (bool, error) {
+	db := r.db
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if err := db.step(ctx, pstepCheck, id, true); err != nil {
+		return false, err
+	}
+	return db.due(id, cutoff), nil
 }
 
 func (r purgeAssignments) PurgeDeleted(ctx context.Context, id shared.AssignmentID, cutoff time.Time) (bool, error) {
@@ -120,8 +170,7 @@ func (r purgeAssignments) PurgeDeleted(ctx context.Context, id shared.Assignment
 	if err := db.step(ctx, pstepAssignment, id, true); err != nil {
 		return false, err
 	}
-	st, ok := db.assignments[id]
-	if !ok || st.DeletedAt.IsZero() || !st.DeletedAt.Before(cutoff) {
+	if !db.due(id, cutoff) {
 		return false, nil
 	}
 	if len(db.deliveries[id]) > 0 || db.drafts[id] > 0 { // ON DELETE RESTRICT
@@ -134,11 +183,14 @@ func (r purgeAssignments) PurgeDeleted(ctx context.Context, id shared.Assignment
 
 type purgeProposals struct{ db *purgeDB }
 
-func (r purgeProposals) DeleteOfAssignment(ctx context.Context, a shared.AssignmentID) (int, error) {
+func (r purgeProposals) DeleteOfAssignment(ctx context.Context, a shared.AssignmentID, cutoff time.Time) (int, error) {
 	r.db.mu.Lock()
 	defer r.db.mu.Unlock()
 	if err := r.db.step(ctx, pstepProposals, a, true); err != nil {
 		return 0, err
+	}
+	if !r.db.due(a, cutoff) {
+		return 0, nil
 	}
 	n := r.db.proposals[a]
 	delete(r.db.proposals, a)
@@ -150,7 +202,7 @@ type purgeDeliveries struct{ db *purgeDB }
 func (r purgeDeliveries) ListByAssignment(ctx context.Context, a shared.AssignmentID, limit int) ([]*delivery.Delivery, error) {
 	r.db.mu.Lock()
 	defer r.db.mu.Unlock()
-	if err := r.db.step(ctx, pstepDeliveries, a, false); err != nil {
+	if err := r.db.step(ctx, pstepDeliveries, a, true); err != nil {
 		return nil, err
 	}
 	var out []*delivery.Delivery
@@ -167,11 +219,14 @@ func (r purgeDeliveries) ListByAssignment(ctx context.Context, a shared.Assignme
 	return out, nil
 }
 
-func (r purgeDeliveries) DeleteFinalOfAssignment(ctx context.Context, a shared.AssignmentID) (int, error) {
+func (r purgeDeliveries) DeleteFinalOfAssignment(ctx context.Context, a shared.AssignmentID, cutoff time.Time) (int, error) {
 	r.db.mu.Lock()
 	defer r.db.mu.Unlock()
 	if err := r.db.step(ctx, pstepDelivRows, a, true); err != nil {
 		return 0, err
+	}
+	if !r.db.due(a, cutoff) {
+		return 0, nil
 	}
 	var kept []delivery.State
 	n := 0
@@ -192,23 +247,29 @@ func (r purgeDeliveries) DeleteFinalOfAssignment(ctx context.Context, a shared.A
 
 type purgeDrafts struct{ db *purgeDB }
 
-func (r purgeDrafts) DeleteOfAssignment(ctx context.Context, a shared.AssignmentID) error {
+func (r purgeDrafts) DeleteOfAssignment(ctx context.Context, a shared.AssignmentID, cutoff time.Time) (int, error) {
 	r.db.mu.Lock()
 	defer r.db.mu.Unlock()
 	if err := r.db.step(ctx, pstepDraft, a, true); err != nil {
-		return err
+		return 0, err
+	}
+	if !r.db.due(a, cutoff) || r.db.drafts[a] == 0 {
+		return 0, nil
 	}
 	delete(r.db.drafts, a)
-	return nil
+	return 1, nil
 }
 
 type purgeWorks struct{ db *purgeDB }
 
-func (r purgeWorks) DeleteOfAssignment(ctx context.Context, a shared.AssignmentID) (int, error) {
+func (r purgeWorks) DeleteOfAssignment(ctx context.Context, a shared.AssignmentID, cutoff time.Time) (int, error) {
 	r.db.mu.Lock()
 	defer r.db.mu.Unlock()
 	if err := r.db.step(ctx, pstepWorks, a, true); err != nil {
 		return 0, err
+	}
+	if !r.db.due(a, cutoff) {
+		return 0, nil
 	}
 	n := r.db.works[a]
 	delete(r.db.works, a)
@@ -221,7 +282,7 @@ func (f purgeFiles) Delete(ctx context.Context, ref shared.ArtifactRef) error {
 	f.db.mu.Lock()
 	defer f.db.mu.Unlock()
 	// The file names the assignment in exports/<id>/...; a copy of a work's file is matched by the fake's own map.
-	if err := f.db.step(ctx, pstepFile, fileOwner(ref), false); err != nil {
+	if err := f.db.step(ctx, pstepFile, fileOwner(ref), true); err != nil {
 		return err
 	}
 	delete(f.db.files, ref)
@@ -401,9 +462,10 @@ func TestPurgeDeletedRemovesEveryLink(t *testing.T) {
 	if !e.db.files[library] {
 		t.Fatal("a library file was deleted: only files below exports go")
 	}
-	want := []string{pstepProposals, pstepDelivRows, pstepDraft, pstepWorks, pstepAssignment}
+	want := []string{pstepCheck, pstepDeliveries, pstepProposals, pstepDelivRows, pstepDraft, pstepWorks, pstepAssignment,
+		pstepFile, pstepFile, pstepFile}
 	if !slices.Equal(e.db.ran, want) {
-		t.Fatalf("steps = %v, want %v, the row last", e.db.ran, want)
+		t.Fatalf("steps = %v, want %v: the re-check first, the rows, the row last of them, then the files", e.db.ran, want)
 	}
 
 	// A second run finds nothing.
@@ -443,10 +505,11 @@ func TestPurgeDeletedSkipsAnUnresolvedDelivery(t *testing.T) {
 	}
 }
 
-// A failure (or a crash) at any step leaves the assignment deleted, so still invisible, and the next run finishes it:
-// every step is idempotent.
+// A failure (or a crash) at any step rolls the rows back and leaves the assignment deleted, so still invisible, and the
+// next run finishes it: every step is idempotent.
 func TestPurgeDeletedFinishesAfterAFailedStep(t *testing.T) {
-	for _, step := range []string{pstepDeliveries, pstepFile, pstepProposals, pstepDelivRows, pstepDraft, pstepWorks, pstepAssignment} {
+	for _, step := range []string{pstepCheck, pstepDeliveries, pstepProposals, pstepDelivRows, pstepDraft, pstepWorks,
+		pstepAssignment, pstepFile} {
 		t.Run(step, func(t *testing.T) {
 			e := newPurgeEnv(t)
 			deletedAt := purgeNow.Add(-4 * 24 * time.Hour)
@@ -464,6 +527,7 @@ func TestPurgeDeletedFinishesAfterAFailedStep(t *testing.T) {
 			if !ok || !st.DeletedAt.Equal(deletedAt) {
 				t.Fatalf("after a failed step the row is %+v, %v; want it still deleted", st, ok)
 			}
+			e.assertWhole(t, "a1") // the rows rolled back; the files go only after the rows
 
 			e.db.failStep = ""
 			if n, err := e.p.PurgeDeleted(context.Background()); err != nil || n != 1 {
@@ -503,22 +567,90 @@ func TestPurgeDeletedListFailure(t *testing.T) {
 	e.assertWhole(t, "a1")
 }
 
-// A restore that races the purge (a clock set back) keeps the row: the last step repeats the guard. It is not counted.
-func TestPurgeDeletedKeepsARowRestoredMeanwhile(t *testing.T) {
+// An assignment that is no longer due when a step runs (restored after the listing, or deleted again later after the
+// clock was set back) keeps its row, every link and every file, whichever step finds it; it is not counted, is no
+// error, and the others are purged.
+func TestPurgeDeletedKeepsEverythingOfARowNoLongerDue(t *testing.T) {
+	changes := map[string]func(st *assignment.State){
+		"restored":      func(st *assignment.State) { st.DeletedAt = time.Time{} },
+		"deleted later": func(st *assignment.State) { st.DeletedAt = purgeNow.Add(-time.Hour) },
+	}
+	for name, change := range changes {
+		for _, step := range []string{pstepCheck, pstepDeliveries, pstepProposals, pstepDelivRows, pstepDraft, pstepWorks,
+			pstepAssignment} {
+			t.Run(name+" before "+step, func(t *testing.T) {
+				e := newPurgeEnv(t)
+				e.add(t, "a1", purgeNow.Add(-5*24*time.Hour))
+				e.add(t, "a2", purgeNow.Add(-4*24*time.Hour))
+				var want assignment.State
+				e.db.before[step] = func(a shared.AssignmentID) {
+					if a != "a1" {
+						return
+					}
+					st := e.db.assignments[a]
+					change(&st)
+					e.db.assignments[a], want = st, st
+				}
+
+				n, err := e.p.PurgeDeleted(context.Background())
+				if err != nil || n != 1 {
+					t.Fatalf("PurgeDeleted = %d, %v; want 1 (a2), nil", n, err)
+				}
+				e.assertWhole(t, "a1")
+				if got := e.db.assignments["a1"]; !got.DeletedAt.Equal(want.DeletedAt) {
+					t.Fatalf("a1 deleted at %v, want %v: the change made meanwhile was undone", got.DeletedAt, want.DeletedAt)
+				}
+				e.assertGone(t, "a2")
+			})
+		}
+	}
+}
+
+// The listing goes by keyset pages: a full page of assignments kept for an unresolved email does not hide the later
+// ones, and each one is looked at once.
+func TestPurgeDeletedReachesPastAPageOfKeptOnes(t *testing.T) {
 	e := newPurgeEnv(t)
-	e.add(t, "a1", purgeNow.Add(-5*24*time.Hour))
-	e.db.before[pstepAssignment] = func() {
-		st := e.db.assignments["a1"]
-		st.DeletedAt = time.Time{}
-		e.db.assignments["a1"] = st
+	old := purgeNow.Add(-20 * 24 * time.Hour)
+	held := purgePage + purgePage/2
+	for i := range held + 3 {
+		id := shared.AssignmentID(fmt.Sprintf("a%03d", i))
+		e.add(t, id, old.Add(time.Duration(i)*time.Minute))
+		if i < held {
+			ref := mustRef(t, shared.ArtifactExports, id.String()+"/homework.md")
+			e.db.deliveries[id] = append(e.db.deliveries[id], deliveryState("d-"+id.String()+"-3", id, delivery.StatusUnknown, ref))
+		}
 	}
 
 	n, err := e.p.PurgeDeleted(context.Background())
-	if err != nil || n != 0 {
-		t.Fatalf("PurgeDeleted = %d, %v; want 0, nil", n, err)
+	if err != nil || n != 3 {
+		t.Fatalf("PurgeDeleted = %d, %v; want the 3 after the kept ones", n, err)
 	}
-	if _, ok := e.db.assignments["a1"]; !ok {
-		t.Fatal("a restored row was purged")
+	if e.db.lists != 2 {
+		t.Fatalf("ListDeletedBefore called %d times, want 2 pages", e.db.lists)
+	}
+	if left := len(e.db.assignments); left != held {
+		t.Fatalf("%d rows left, want the %d kept", left, held)
+	}
+	if checks := strings.Count(strings.Join(e.db.ran, ","), pstepCheck); checks != held+3 {
+		t.Fatalf("%d re-checks, want each of the %d once", checks, held+3)
+	}
+}
+
+// One run looks at maxPurgeExamined assignments at most; the next run goes on.
+func TestPurgeDeletedExaminesABoundedNumber(t *testing.T) {
+	e := newPurgeEnv(t)
+	old := purgeNow.Add(-20 * 24 * time.Hour)
+	for i := range maxPurgeExamined + 1 {
+		id := shared.AssignmentID(fmt.Sprintf("a%05d", i))
+		e.db.assignments[id] = assignment.State{
+			Version: 2, ID: id, SourceIndex: -1, Title: "Задание", CreatedAt: t0, UpdatedAt: t0, DeletedAt: old,
+		}
+	}
+	if n, err := e.p.PurgeDeleted(context.Background()); err != nil || n != maxPurgeExamined {
+		t.Fatalf("first run = %d, %v; want %d", n, err, maxPurgeExamined)
+	}
+	if n, err := e.p.PurgeDeleted(context.Background()); err != nil || n != 1 {
+		t.Fatalf("second run = %d, %v; want 1", n, err)
 	}
 }
 

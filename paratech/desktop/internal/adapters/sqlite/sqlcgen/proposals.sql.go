@@ -11,12 +11,21 @@ import (
 )
 
 const deleteProposalsOfAssignment = `-- name: DeleteProposalsOfAssignment :execrows
-DELETE FROM proposals WHERE assignment_id = ?1
+DELETE FROM proposals
+WHERE assignment_id = ?1
+  AND EXISTS (SELECT 1 FROM assignments a
+              WHERE a.id = proposals.assignment_id AND a.deleted_at IS NOT NULL AND a.deleted_at < ?2)
 `
 
-// The purge of a deleted assignment (ADR-0029 addendum 2): every proposal naming it.
-func (q *Queries) DeleteProposalsOfAssignment(ctx context.Context, assignmentID string) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteProposalsOfAssignment, assignmentID)
+type DeleteProposalsOfAssignmentParams struct {
+	AssignmentID string
+	Cutoff       sql.NullInt64
+}
+
+// The purge of a deleted assignment (ADR-0029 addendum 2): every proposal naming it, only while the assignment is
+// still deleted before the cutoff.
+func (q *Queries) DeleteProposalsOfAssignment(ctx context.Context, arg DeleteProposalsOfAssignmentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteProposalsOfAssignment, arg.AssignmentID, arg.Cutoff)
 	if err != nil {
 		return 0, err
 	}

@@ -2,7 +2,9 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"time"
 
 	"paratech/desktop/internal/adapters/sqlite/sqlcgen"
 	"paratech/desktop/internal/domain/delivery/delivery"
@@ -23,11 +25,15 @@ var finalDeliveryStatuses = func() []string {
 }()
 
 // DeleteFinalOfAssignment removes the deliveries of assignment a that are SENT or FAILED (the purge of a deleted
-// assignment, ADR-0029 addendum 2) and returns how many; a PENDING, SENDING or UNKNOWN one is never touched (hard
-// rule 7). None is not an error.
-func (r *DeliveryRepository) DeleteFinalOfAssignment(ctx context.Context, a shared.AssignmentID) (int, error) {
+// assignment, ADR-0029 addendum 2) and returns how many, only while a is still deleted before cutoff; a PENDING,
+// SENDING or UNKNOWN one is never touched (hard rule 7). None is not an error.
+func (r *DeliveryRepository) DeleteFinalOfAssignment(ctx context.Context, a shared.AssignmentID, cutoff time.Time) (int, error) {
+	statuses, err := json.Marshal(finalDeliveryStatuses)
+	if err != nil {
+		return 0, fmt.Errorf("%s %s: %w", opPurgeDeliveries, a, err)
+	}
 	n, err := r.db.Queries(ctx).DeleteFinalDeliveriesOfAssignment(ctx, sqlcgen.DeleteFinalDeliveriesOfAssignmentParams{
-		AssignmentID: string(a), Statuses: finalDeliveryStatuses,
+		AssignmentID: string(a), Statuses: string(statuses), Cutoff: cutoffMs(cutoff),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("%s %s: %w", opPurgeDeliveries, a, MapError(ctx, err))
