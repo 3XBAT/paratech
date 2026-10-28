@@ -17,8 +17,9 @@ const conflictAttempts = 3
 // Service reads and changes the toggles of the settings page. Every change is one load, one aggregate method and one
 // compare-and-swap save of the settings singleton (ARCH-23).
 type Service struct {
-	repo  SettingsRepository
-	clock Clock
+	repo      SettingsRepository
+	clock     Clock
+	languages RecognitionLanguages // nil: the language is unknown
 }
 
 // New builds the Service.
@@ -28,6 +29,9 @@ func New(repo SettingsRepository, clock Clock) (*Service, error) {
 	}
 	return &Service{repo: repo, clock: clock}, nil
 }
+
+// WithRecognitionLanguages adds the check of the Russian recognizer of photo recognition (TASK-294).
+func (s *Service) WithRecognitionLanguages(l RecognitionLanguages) { s.languages = l }
 
 // Get returns the current toggles, the defaults while nothing is stored.
 func (s *Service) Get(ctx context.Context) (Toggles, error) {
@@ -67,6 +71,31 @@ func (s *Service) SetFreeWorkNotice(ctx context.Context, on bool) (Toggles, erro
 	return s.change(ctx, "set free work notice", func(st *settings.Settings, now time.Time) error {
 		return st.SetFreeWorkNotice(on, now)
 	})
+}
+
+// SetNoteRecognition sets who recognises photo pages of notes (TASK-294) and returns the stored toggles. An unknown
+// mode wraps settings.ErrInvalidSettings and nothing is stored. Nothing is recognised or sent here.
+func (s *Service) SetNoteRecognition(ctx context.Context, mode settings.NoteRecognition) (Toggles, error) {
+	return s.change(ctx, "set note recognition", func(st *settings.Settings, now time.Time) error {
+		return st.SetNoteRecognition(mode, now)
+	})
+}
+
+// RecognitionLanguage tells whether photo recognition can read Russian. It is LanguageUnknown without the check or
+// when the check fails; the error is returned with it for the log only.
+func (s *Service) RecognitionLanguage(ctx context.Context) (LanguageStatus, error) {
+	if s.languages == nil {
+		return LanguageUnknown, nil
+	}
+	ok, err := s.languages.RussianAvailable(ctx)
+	switch {
+	case err != nil:
+		return LanguageUnknown, fmt.Errorf("preferences: recognition language: %w", err)
+	case ok:
+		return LanguageAvailable, nil
+	default:
+		return LanguageMissing, nil
+	}
 }
 
 // Profile returns the student profile (TASK-094); every field is empty while none is set.
@@ -138,5 +167,6 @@ func toggles(st *settings.Settings) Toggles {
 		ProcessOnlyOnACPower:    st.ProcessOnlyOnACPower(),
 		RecognitionLoad:         st.RecognitionLoad(),
 		FreeWorkNotice:          st.FreeWorkNotice(),
+		NoteRecognition:         st.NoteRecognition(),
 	}
 }

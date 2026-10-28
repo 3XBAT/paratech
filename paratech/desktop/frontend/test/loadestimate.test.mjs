@@ -121,6 +121,7 @@ test("settings: the load mode is sent by its bound method and parsed strictly", 
   const reply = {
     recordingPromptsEnabled: true, processOnlyOnAcPower: false, recognitionLoad: "max",
     loadEstimates: large, loadEstimatesModel: "large-v3-f16", freeWorkNotice: true,
+    noteRecognition: "off", noteRecognitionLanguage: "unknown",
   };
   const calls = [];
   const api = settingsApi(async (method, ...args) => {

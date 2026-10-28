@@ -46,6 +46,9 @@ type Settings struct {
 	// topic (TASK-188); off after «Больше не показывать», back on from «Настройки».
 	freeWorkNotice bool
 
+	// noteRecognition: who recognises the text of photo pages of a note (TASK-294).
+	noteRecognition NoteRecognition
+
 	updatedAt time.Time // zero: never changed by the user
 }
 
@@ -57,6 +60,7 @@ func New() *Settings {
 		smtpSecurity:            DefaultMailSecurity,
 		recognitionLoad:         shared.DefaultRecognitionLoad,
 		freeWorkNotice:          DefaultFreeWorkNotice,
+		noteRecognition:         DefaultNoteRecognition,
 	}
 }
 
@@ -76,6 +80,7 @@ type State struct {
 	RecognitionLoad         shared.RecognitionLoad // empty or unknown: shared.DefaultRecognitionLoad
 	Profile                 ProfileFields          // the student profile; empty fields: not set
 	FreeWorkNotice          bool                   // the free-work card before a work on a topic
+	NoteRecognition         NoteRecognition        // empty or unknown: DefaultNoteRecognition
 	UpdatedAt               time.Time              // zero: stored defaults that the user never changed
 }
 
@@ -124,6 +129,8 @@ func Restore(s State) (*Settings, error) {
 		recognitionLoad: s.RecognitionLoad.OrDefault(),
 		profile:         profile,
 		freeWorkNotice:  s.FreeWorkNotice,
+		// An unknown stored mode falls back to off: nothing is recognised that the student did not turn on.
+		noteRecognition: s.NoteRecognition.OrDefault(),
 		updatedAt:       s.UpdatedAt,
 	}, nil
 }

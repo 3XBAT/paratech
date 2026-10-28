@@ -262,8 +262,11 @@ const lessonCallLinkVersion = 43
 // subjectTeachersVersion moves the teacher of a subject into three roles (TASK-285).
 const subjectTeachersVersion = 44
 
+// noteRecognitionVersion adds the photo recognition setting (TASK-294).
+const noteRecognitionVersion = 45
+
 // assignmentDoneVersion adds the «Выполнено» mark of an assignment (TASK-313), the newest one.
-const assignmentDoneVersion = 45
+const assignmentDoneVersion = 46
 
 // recordingOriginVersion adds the origin of a recording (TASK-161).
 const recordingOriginVersion = 42

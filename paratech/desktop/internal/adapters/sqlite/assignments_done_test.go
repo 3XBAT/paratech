@@ -114,7 +114,7 @@ func TestAssignmentDoneVersionConflict(t *testing.T) {
 	}
 }
 
-// Version 45 adds done_at as NULL to every earlier assignment and goes back down keeping the rows.
+// Version 46 adds done_at as NULL to every earlier assignment and goes back down keeping the rows.
 func TestMigrationAssignmentDone(t *testing.T) {
 	t.Parallel() // uses a database of its own
 	ctx := context.Background()

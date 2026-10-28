@@ -15,7 +15,7 @@ const getSettings = `-- name: GetSettings :one
 SELECT id, recording_prompts_enabled, process_only_on_ac_power, default_stt_model_id, version, updated_at,
        homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username, hub_url, recording_source_app,
        recognition_load, student_full_name, student_group, student_university, student_faculty, student_city,
-       free_work_notice
+       free_work_notice, note_recognition
 FROM settings
 WHERE id = 1
 `
@@ -46,6 +46,7 @@ func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
 		&i.StudentFaculty,
 		&i.StudentCity,
 		&i.FreeWorkNotice,
+		&i.NoteRecognition,
 	)
 	return i, err
 }
@@ -54,12 +55,14 @@ const insertSettings = `-- name: InsertSettings :exec
 INSERT INTO settings (id, recording_prompts_enabled, process_only_on_ac_power, default_stt_model_id,
                       homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username, hub_url,
                       recording_source_app, recognition_load, student_full_name, student_group,
-                      student_university, student_faculty, student_city, free_work_notice, version, updated_at)
+                      student_university, student_faculty, student_city, free_work_notice, note_recognition, version,
+                      updated_at)
 VALUES (1, ?1, ?2, ?3,
         ?4, ?5, ?6, ?7,
         ?8, ?9, ?10,
         ?11, ?12, ?13, ?14,
-        ?15, ?16, ?17, 1, ?18)
+        ?15, ?16, ?17, ?18, 1,
+        ?19)
 `
 
 type InsertSettingsParams struct {
@@ -80,6 +83,7 @@ type InsertSettingsParams struct {
 	StudentFaculty          string
 	StudentCity             string
 	FreeWorkNotice          int64
+	NoteRecognition         string
 	UpdatedAt               int64
 }
 
@@ -104,6 +108,7 @@ func (q *Queries) InsertSettings(ctx context.Context, arg InsertSettingsParams) 
 		arg.StudentFaculty,
 		arg.StudentCity,
 		arg.FreeWorkNotice,
+		arg.NoteRecognition,
 		arg.UpdatedAt,
 	)
 	return err
@@ -128,9 +133,10 @@ SET recording_prompts_enabled = ?1,
     student_faculty           = ?15,
     student_city              = ?16,
     free_work_notice          = ?17,
+    note_recognition          = ?18,
     version                   = version + 1,
-    updated_at                = ?18
-WHERE id = 1 AND version = ?19
+    updated_at                = ?19
+WHERE id = 1 AND version = ?20
 `
 
 type UpdateSettingsParams struct {
@@ -151,6 +157,7 @@ type UpdateSettingsParams struct {
 	StudentFaculty          string
 	StudentCity             string
 	FreeWorkNotice          int64
+	NoteRecognition         string
 	UpdatedAt               int64
 	ExpectedVersion         int64
 }
@@ -176,6 +183,7 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		arg.StudentFaculty,
 		arg.StudentCity,
 		arg.FreeWorkNotice,
+		arg.NoteRecognition,
 		arg.UpdatedAt,
 		arg.ExpectedVersion,
 	)

@@ -895,6 +895,11 @@ CREATE TABLE subject_teachers (
     PRIMARY KEY (subject_id, role)
 );
 
--- Migration 0045 (TASK-313).
+-- Migration 0045.
+-- settings: who recognises the text of photo pages of a note (settings.NoteRecognition): 'off' (the default, also of
+-- the existing row) or 'local' (Windows OCR on this computer).
+ALTER TABLE settings ADD COLUMN note_recognition TEXT NOT NULL DEFAULT 'off' CHECK (note_recognition IN ('off', 'local'));
+
+-- Migration 0046 (TASK-313).
 -- assignments: when the student marked the assignment done (ms); NULL while it is not done.
 ALTER TABLE assignments ADD COLUMN done_at INTEGER;
