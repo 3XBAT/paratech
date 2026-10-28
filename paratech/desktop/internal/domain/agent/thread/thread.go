@@ -613,6 +613,7 @@ func (th *Thread) ApprovePlan(now time.Time) error {
 	if err := th.move(StatusExecuting, now); err != nil {
 		return err
 	}
+	t.keepPlanWrite()
 	t.approved, t.proposed = t.proposed, nil
 	t.used = make([]bool, len(t.approved))
 	t.created = nil // step indexes refer to the plan they were created under
@@ -632,13 +633,17 @@ func (th *Thread) RevisePlan(now time.Time) error {
 	if err := th.move(StatusPlanning, now); err != nil {
 		return err
 	}
-	// Plan steps are not counted as writes (only U calls mark a step used); one that ran still makes a later
-	// unplanned write the second one, which needs a plan.
+	t.keepPlanWrite()
+	t.proposed, t.approved, t.used, t.created = nil, nil, nil, nil
+	return nil
+}
+
+// keepPlanWrite records that a plan step ran before t.used is dropped: plan steps are not counted as writes
+// (only U calls mark a step used), yet one that ran makes a later unplanned write the second one, which needs a plan.
+func (t *Turn) keepPlanWrite() {
 	if t.budget.Writes == 0 && slices.Contains(t.used, true) {
 		t.budget.Writes = 1
 	}
-	t.proposed, t.approved, t.used, t.created = nil, nil, nil, nil
-	return nil
 }
 
 // --- questions ---------------------------------------------------------------------------------------

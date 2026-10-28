@@ -165,6 +165,48 @@ func TestRevisedPlanLimits(t *testing.T) {
 	assertBudgetStop(t, th, err)
 }
 
+// A second «Да» resets the used steps of the first plan; a step that ran under it still counts after «Изменить».
+func TestRevisedPlanAfterSecondApproval(t *testing.T) {
+	th := approved(t, 1)
+	if err := runStep(t, th, 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := th.Admit(call(t, "create_subject", `{"name":"`+planSubject(0)+`"}`), Facts{}, at(5)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.ProposePlan(planSteps(t, subjectsPlan(1)), nil, at(6)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.ApprovePlan(at(7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.ProposePlan(planSteps(t, subjectsPlan(1)), nil, at(8)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.RevisePlan(at(9)); err != nil {
+		t.Fatal(err)
+	}
+	if turn, _ := th.Turn(); turn.Budget().Writes != 1 {
+		t.Fatalf("after «Изменить»: %+v", turn.Budget())
+	}
+	if _, err := th.Admit(call(t, "create_subject", `{"name":"Химия"}`), Facts{}, at(10)); !errors.Is(err, ErrPlanRequired) {
+		t.Fatalf("unplanned write after a plan ran = %v", err)
+	}
+}
+
+func TestApprovePlanWithoutWrites(t *testing.T) {
+	th := approved(t, 1)
+	if err := th.ProposePlan(planSteps(t, subjectsPlan(1)), nil, at(6)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.ApprovePlan(at(7)); err != nil {
+		t.Fatal(err)
+	}
+	if turn, _ := th.Turn(); turn.Budget() != (Budget{}) {
+		t.Fatalf("budget = %+v", turn.Budget())
+	}
+}
+
 func TestRevisedPlanWithoutWrites(t *testing.T) {
 	th := approved(t, 1)
 	if err := th.ProposePlan(planSteps(t, subjectsPlan(1)), nil, at(6)); err != nil {
