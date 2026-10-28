@@ -22,8 +22,9 @@ export type PlacementKind = "none" | "existing" | "create";
 
 /**
  * Where a file of «Входящие» may go (from its name, no AI). It places nothing: the page offers it and the student clicks.
- * "existing": Place(material, subjectId, folderId). "create": CreateSubject(createName, [], ""), then Place into the folder of
- * the new subject whose `system` is folderKind. Names are plain text.
+ * "existing": Place(material, subjectId, folderId). "create": CreateSubject(createName, createAliases, ""), then Place into
+ * the folder of the new subject whose `system` is folderKind. createName is the name without the lesson-kind mark;
+ * createAliases are the schedule's other spellings (never null). Names are plain text.
  */
 export interface PlacementHint {
   kind: PlacementKind;
@@ -33,6 +34,7 @@ export interface PlacementHint {
   folderName: string;
   folderKind: string;
   createName: string;
+  createAliases: string[];
 }
 
 export const noHint: PlacementHint = {
@@ -43,10 +45,16 @@ export const noHint: PlacementHint = {
   folderName: "",
   folderKind: "",
   createName: "",
+  createAliases: [],
 };
 
 function text(r: Record<string, unknown>, key: string): string {
   return typeof r[key] === "string" ? (r[key] as string) : "";
+}
+
+/** The strings of a list; a missing or non-list value is empty, non-string items are left out. */
+function texts(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
 }
 
 /** Reads a hint defensively: anything unknown or incomplete is "none" (no hint), never a half-filled offer. */
@@ -63,6 +71,7 @@ export function parsePlacementHint(raw: unknown): PlacementHint {
     folderName: text(r, "folderName"),
     folderKind: text(r, "folderKind"),
     createName: text(r, "createName"),
+    createAliases: texts(r.createAliases),
   };
   if (hint.kind === "existing" && (hint.subjectId === "" || hint.subjectName === "" || hint.folderId === "" || hint.folderName === "")) {
     return noHint;

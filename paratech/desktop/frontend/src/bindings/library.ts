@@ -139,6 +139,8 @@ export interface LibraryMaterial {
 export interface LibraryImport {
   cancelled: boolean;
   existing: boolean;
+  /** ImportFileTo only: the file is kept but did not land in the target; it lies in «Входящие» (no error was returned). */
+  notPlaced: boolean;
   material: LibraryMaterial | null;
 }
 
@@ -255,6 +257,7 @@ export function parseImport(raw: unknown): LibraryImport {
   return {
     cancelled: r.cancelled === true,
     existing: r.existing === true,
+    notPlaced: r.notPlaced === true,
     material: r.material === null || r.material === undefined ? null : parseMaterial(r.material),
   };
 }
@@ -417,8 +420,8 @@ export interface LibraryApi {
   /** Records the opening once the overview is shown, so the next visit marks only what is newer. */
   markSubjectOpened(subjectId: string): Promise<void>;
   subjects(): Promise<LibrarySubject[]>;
-  /** semester is a code or "" for the current one. */
-  createSubject(name: string, semester: string): Promise<LibrarySubject>;
+  /** semester is a code or "" for the current one; aliases are other spellings of the name (none by default). */
+  createSubject(name: string, semester: string, aliases?: readonly string[]): Promise<LibrarySubject>;
   createFolder(subjectId: string, name: string): Promise<LibraryFolder>;
   /** The files of a subject, or of «Входящие» for "". */
   materials(subjectId: string): Promise<LibraryMaterial[]>;
@@ -439,7 +442,7 @@ export function libraryApi(call: CallByName): LibraryApi {
       await call(methods.markSubjectOpened, subjectId);
     },
     subjects: async () => list(await call(methods.subjects), "subjects", parseSubject),
-    createSubject: async (name, semester) => parseSubject(await call(methods.createSubject, name, [], semester)),
+    createSubject: async (name, semester, aliases = []) => parseSubject(await call(methods.createSubject, name, [...aliases], semester)),
     createFolder: async (subjectId, name) => parseFolder(await call(methods.createFolder, subjectId, name)),
     materials: async (subjectId) => list(await call(methods.materials, subjectId), "materials", parseMaterial),
     importFile: async () => parseImport(await call(methods.importFile)),
