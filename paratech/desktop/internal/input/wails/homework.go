@@ -46,6 +46,14 @@ const (
 	ErrExportLocked          = homeworkError("Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Пока оно не решено, файл задания менять нельзя.")
 	ErrDeliveryNotFound      = homeworkError("Письмо не найдено: обновите список.")
 	ErrDeliveryActionInvalid = homeworkError("Это действие для письма уже недоступно: обновите список.")
+	ErrHomeworkListState     = homeworkError("Неизвестный фильтр списка заданий: обновите страницу.")
+)
+
+// Filters of ListAssignments as the page sends them; "" is listOpen.
+const (
+	listOpen = "open"
+	listDone = "done"
+	listAll  = "all"
 )
 
 // Send preparation statuses as the page reads them.
@@ -137,7 +145,9 @@ const (
 // HomeworkProposals is the part of homeworkflow.Service the page uses (ARCH-42): the assignments and the send
 // proposal. ConfirmSend is called only by the binding of the same name, on the user's click in the confirmation dialog.
 type HomeworkProposals interface {
-	ListAssignments(ctx context.Context) ([]homeworkflow.AssignmentView, error)
+	ListAssignmentsByState(ctx context.Context, state homeworkflow.ListState) ([]homeworkflow.AssignmentView, error)
+	MarkDone(ctx context.Context, ids []shared.AssignmentID, done bool) (homeworkflow.DoneMarks, error)
+	RestoreDone(ctx context.Context, prior []homeworkflow.DonePrior) (homeworkflow.DoneMarks, error)
 	Assignment(ctx context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error)
 	CorrectLesson(ctx context.Context, c homeworkflow.LessonCorrection) (homeworkflow.AssignmentView, error)
 	CreateAssignment(ctx context.Context, in homeworkflow.NewAssignment) (homeworkflow.AssignmentView, error)
@@ -210,6 +220,8 @@ func (c HomeworkCore) complete() bool {
 // Version is the stored version; delete, restore and edit send it back (ADR-0029). SubjectFromLesson: the shown
 // subject is the lesson's (schedule or recording), not one the student chose, so an empty subject in the edit form
 // keeps showing it.
+//
+// Done is «Выполнено» (ADR-0033 §9), marked at DoneAt ("" while open).
 type AssignmentItem struct {
 	ID                string `json:"id"`
 	LessonID          string `json:"lessonId"`
@@ -228,6 +240,8 @@ type AssignmentItem struct {
 	LessonDate        string `json:"lessonDate"`
 	CorrectedSubject  string `json:"correctedSubject"`
 	CorrectedTeacher  string `json:"correctedTeacher"`
+	Done              bool   `json:"done"`
+	DoneAt            string `json:"doneAt"`
 }
 
 // VersionItem is one draft version in the history list.
@@ -367,9 +381,25 @@ func (s *HomeworkService) withDocxPicker(p DocxFilePicker) *HomeworkService {
 	return s
 }
 
-// ListAssignments returns the newest assignments, newest first.
-func (s *HomeworkService) ListAssignments(ctx context.Context) ([]AssignmentItem, error) {
-	as, err := s.proposals.ListAssignments(ctx)
+// ListAssignments returns the newest assignments, newest first, of the filter «Открытые / Выполненные / Все»: state
+// "open" (also ""), "done" or "all" (the open ones first).
+func (s *HomeworkService) ListAssignments(ctx context.Context, state string) ([]AssignmentItem, error) {
+	var ls homeworkflow.ListState
+	switch state {
+	case "", listOpen:
+		ls = homeworkflow.ListOpen
+	case listDone:
+		ls = homeworkflow.ListDone
+	case listAll:
+		ls = homeworkflow.ListAll
+	default:
+		return nil, ErrHomeworkListState
+	}
+	as, err := s.proposals.ListAssignmentsByState(ctx, ls)
+	if errors.Is(err, homeworkflow.ErrInvalidRequest) {
+		s.log.Warn(opListAssignments, "err", err)
+		return nil, ErrHomeworkListState
+	}
 	if err != nil {
 		s.log.Error(opListAssignments, "err", err)
 		return nil, ErrHomeworkUnavailable
@@ -868,6 +898,7 @@ func assignmentItem(a homeworkflow.AssignmentView) AssignmentItem {
 		TeacherSource: string(a.TeacherSource), LessonDate: rfc3339(a.LessonDate),
 		CorrectedSubject: a.CorrectedSubject, CorrectedTeacher: a.CorrectedTeacher,
 		SubjectFromLesson: a.SubjectSource == values.SourceSchedule || a.SubjectSource == values.SourceTranscript,
+		Done:              a.Done, DoneAt: rfc3339(a.DoneAt),
 	}
 }
 

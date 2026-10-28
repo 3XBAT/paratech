@@ -53,6 +53,7 @@ type fakeHWProposals struct {
 	declineErr   error
 	proposal     homeworkflow.ProposalView // returned by ProposeSend and Get
 	list         []homeworkflow.AssignmentView
+	one          *homeworkflow.AssignmentView  // returned by Assignment when set
 	corrected    homeworkflow.LessonCorrection // the last CorrectLesson
 	shownSubject string                        // the last ConfirmSend
 	shownFormat  proposal.Format               // the last ConfirmSend
@@ -66,15 +67,81 @@ type fakeHWProposals struct {
 	editErr      error                        // returned by EditAssignment
 	versions     []int64                      // every expected version DeleteAssignment and RestoreAssignment got
 	edits        []homeworkflow.AssignmentEdit
+	states       []homeworkflow.ListState                            // every ListAssignmentsByState filter
+	doneCodes    map[shared.AssignmentID]homeworkflow.DoneCode       // MarkDone and RestoreDone codes; default changed
+	doneErr      error                                               // returned by MarkDone and RestoreDone
+	marked       [][]shared.AssignmentID                             // every MarkDone list
+	markedDone   []bool                                              // every MarkDone state
+	restored     [][]homeworkflow.DonePrior                          // every RestoreDone prior
+	doneOutcomes func(homeworkflow.DoneMarks) homeworkflow.DoneMarks // edits what MarkDone and RestoreDone return
 }
 
-func (f *fakeHWProposals) ListAssignments(context.Context) ([]homeworkflow.AssignmentView, error) {
+func (f *fakeHWProposals) ListAssignmentsByState(_ context.Context, state homeworkflow.ListState) ([]homeworkflow.AssignmentView, error) {
 	f.log.add("ListAssignments")
+	f.states = append(f.states, state)
 	return f.list, f.err
+}
+
+// MarkDone answers like the use case: one outcome per distinct id, changed ones at version 8 with their prior.
+func (f *fakeHWProposals) MarkDone(_ context.Context, ids []shared.AssignmentID, done bool) (homeworkflow.DoneMarks, error) {
+	f.log.add("MarkDone")
+	f.marked, f.markedDone = append(f.marked, ids), append(f.markedDone, done)
+	if err := cmpErr(f.doneErr, f.err); err != nil {
+		return homeworkflow.DoneMarks{}, err
+	}
+	var m homeworkflow.DoneMarks
+	for _, id := range ids {
+		f.doneOutcome(&m, id, done, 8)
+	}
+	return f.edited(m), nil
+}
+
+// RestoreDone answers like the use case: a changed one is saved at the expected version + 1.
+func (f *fakeHWProposals) RestoreDone(_ context.Context, prior []homeworkflow.DonePrior) (homeworkflow.DoneMarks, error) {
+	f.log.add("RestoreDone")
+	f.restored = append(f.restored, prior)
+	if err := cmpErr(f.doneErr, f.err); err != nil {
+		return homeworkflow.DoneMarks{}, err
+	}
+	var m homeworkflow.DoneMarks
+	for _, p := range prior {
+		f.doneOutcome(&m, p.ID, p.Done, p.Version+1)
+	}
+	return f.edited(m), nil
+}
+
+func (f *fakeHWProposals) doneOutcome(m *homeworkflow.DoneMarks, id shared.AssignmentID, done bool, version int64) {
+	code, ok := f.doneCodes[id]
+	if !ok {
+		code = homeworkflow.DoneChanged
+	}
+	o := homeworkflow.DoneOutcome{ID: id, Code: code}
+	switch code {
+	case homeworkflow.DoneChanged:
+		o.Done, o.Version = done, version
+		m.Prior = append(m.Prior, homeworkflow.DonePrior{ID: id, Done: !done, Version: version})
+	case homeworkflow.DoneUnchanged:
+		o.Done, o.Version = done, 3
+	case homeworkflow.DoneFailed:
+		o.Err = errors.New(`save: open C:\Users\student\db: locked`)
+	default:
+		o.Err = errors.New(string(code))
+	}
+	m.Outcomes = append(m.Outcomes, o)
+}
+
+func (f *fakeHWProposals) edited(m homeworkflow.DoneMarks) homeworkflow.DoneMarks {
+	if f.doneOutcomes != nil {
+		return f.doneOutcomes(m)
+	}
+	return m
 }
 
 func (f *fakeHWProposals) Assignment(_ context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error) {
 	f.log.add("Assignment")
+	if f.one != nil {
+		return *f.one, f.err
+	}
 	return homeworkflow.AssignmentView{ID: id, Title: "Rivers", UpdatedAt: hwT0}, f.err
 }
 
@@ -329,8 +396,15 @@ type hwCall struct {
 // everyHomeworkCall calls every method of HomeworkService; the id argument is the one the method validates.
 var everyHomeworkCall = []hwCall{
 	{"ListAssignments", func(s *HomeworkService, _ string) error {
-		_, err := s.ListAssignments(context.Background())
+		_, err := s.ListAssignments(context.Background(), "")
 		return err
+	}},
+	// A malformed id is not_found before any use case call; a failure is a problem code, shown as the page's error.
+	{"MarkDone", func(s *HomeworkService, id string) error {
+		return doneErr(s.MarkDone(context.Background(), []string{id}, true))
+	}},
+	{"RestoreDone", func(s *HomeworkService, id string) error {
+		return doneErr(s.RestoreDone(context.Background(), false, []DonePriorItem{{ID: id, Version: 8}}))
 	}},
 	{"OpenAssignment", func(s *HomeworkService, id string) error {
 		_, err := s.OpenAssignment(context.Background(), id)
@@ -422,6 +496,21 @@ func changeErr(problem string) error {
 		return ErrHomeworkUnavailable
 	}
 	return errors.New(problem)
+}
+
+// doneErr shows a DoneResult of one id as the page's error.
+func doneErr(res DoneResult) error {
+	switch {
+	case res.Problem == doneUnavailable:
+		return ErrHomeworkUnavailable
+	case res.Problem != "":
+		return errors.New(res.Problem)
+	case len(res.Outcomes) == 1 && res.Outcomes[0].Code == string(homeworkflow.DoneNotFound):
+		return ErrHomeworkInvalidID
+	case len(res.Outcomes) != 1 || res.Outcomes[0].Code != string(homeworkflow.DoneChanged):
+		return fmt.Errorf("outcomes %+v", res.Outcomes)
+	}
+	return nil
 }
 
 func TestEveryHomeworkMethodIsCovered(t *testing.T) {
@@ -796,10 +885,10 @@ func TestHomeworkJSONNames(t *testing.T) {
 		v    any
 		want string
 	}{
-		{AssignmentItem{}, `{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"version":0,"updatedAt":"","subject":"","subjectSource":"","subjectFromLesson":false,"kind":"","teacher":"","teacherSource":"","lessonDate":"","correctedSubject":"","correctedTeacher":""}`},
+		{AssignmentItem{}, `{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"version":0,"updatedAt":"","subject":"","subjectSource":"","subjectFromLesson":false,"kind":"","teacher":"","teacherSource":"","lessonDate":"","correctedSubject":"","correctedTeacher":"","done":false,"doneAt":""}`},
 		{VersionItem{}, `{"number":0,"source":"","instruction":"","latest":false,"createdAt":""}`},
 		{VersionText{}, `{"number":0,"source":"","title":"","body":"","instruction":"","latest":false,"createdAt":""}`},
-		{AssignmentDetail{Versions: []VersionItem{}}, `{"assignment":{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"version":0,"updatedAt":"","subject":"","subjectSource":"","subjectFromLesson":false,"kind":"","teacher":"","teacherSource":"","lessonDate":"","correctedSubject":"","correctedTeacher":""},"versions":[],"latest":null,"generation":null}`},
+		{AssignmentDetail{Versions: []VersionItem{}}, `{"assignment":{"id":"","lessonId":"","title":"","description":"","due":"","userEdited":false,"version":0,"updatedAt":"","subject":"","subjectSource":"","subjectFromLesson":false,"kind":"","teacher":"","teacherSource":"","lessonDate":"","correctedSubject":"","correctedTeacher":"","done":false,"doneAt":""},"versions":[],"latest":null,"generation":null}`},
 		{GenerateStarted{}, `{"jobId":"","base":0}`},
 		{GenerationStatus{}, `{"state":"","message":"","percent":0}`},
 		{ActiveGeneration{}, `{"jobId":"","state":"","message":"","percent":0}`},
@@ -807,6 +896,9 @@ func TestHomeworkJSONNames(t *testing.T) {
 		{ExportResult{}, `{"version":0,"fileName":""}`},
 		{DocxSaveResult{}, `{"status":"","message":"","name":""}`},
 		{SendPreparation{}, `{"proposalId":"","status":"","reason":"","message":"","recipient":"","recipientName":"","role":"","subjectId":"","options":null,"subject":"","attachmentName":"","attachmentSize":0,"attachmentFormat":""}`},
+		{DoneResult{}, `{"problem":"","outcomes":null,"prior":null,"priorDone":false}`},
+		{DoneOutcomeItem{}, `{"id":"","code":"","done":false,"version":0}`},
+		{DonePriorItem{}, `{"id":"","version":0}`},
 		{DeliveryItem{}, `{"id":"","status":"","recipient":"","subject":"","attempts":0,"lastError":"","confirmedAt":"","sentAt":"","createdAt":"","canMarkSent":false,"canSendAgain":false,"notice":""}`},
 	}
 	for _, tt := range tests {
@@ -833,6 +925,7 @@ func TestFrontendKnowsHomeworkErrors(t *testing.T) {
 		ErrDeliveryNotFound, ErrDeliveryActionInvalid, ErrGenerationRunning, ErrSendFormat, // +2: TASK-094
 		ErrSendAssignmentDeleted, // TASK-231
 		ErrSendChooseTeacher,     // TASK-237
+		ErrHomeworkListState,     // TASK-315
 	} {
 		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
 			t.Errorf("frontend/src/bindings/homework.ts does not list the error %q", e)
