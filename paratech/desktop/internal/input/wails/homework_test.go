@@ -56,6 +56,7 @@ type fakeHWProposals struct {
 	corrected    homeworkflow.LessonCorrection // the last CorrectLesson
 	shownSubject string                        // the last ConfirmSend
 	shownFormat  proposal.Format               // the last ConfirmSend
+	chosen       homeworkflow.ChosenTeacher    // the last ConfirmSend
 	format       proposal.Format               // the last ProposeSend
 	createErr    error                         // returned by CreateAssignment
 	created      map[shared.AssignmentID]homeworkflow.NewAssignment
@@ -141,9 +142,10 @@ func (f *fakeHWProposals) Get(context.Context, proposal.ID) (homeworkflow.Propos
 	return f.proposal, f.err
 }
 
-func (f *fakeHWProposals) ConfirmSend(_ context.Context, _ proposal.ID, subject string, format proposal.Format) (homeworkflow.ProposalView, error) {
+func (f *fakeHWProposals) ConfirmSendTo(_ context.Context, _ proposal.ID, subject string, format proposal.Format,
+	chosen homeworkflow.ChosenTeacher) (homeworkflow.ProposalView, error) {
 	f.log.add("ConfirmSend")
-	f.shownSubject, f.shownFormat = subject, format
+	f.shownSubject, f.shownFormat, f.chosen = subject, format, chosen
 	return f.proposal, cmpErr(f.confirmErr, f.err)
 }
 
@@ -398,7 +400,7 @@ var everyHomeworkCall = []hwCall{
 		return err
 	}},
 	{"ConfirmSend", func(s *HomeworkService, id string) error {
-		return s.ConfirmSend(context.Background(), id, "ДЗ", "txt")
+		return s.ConfirmSend(context.Background(), id, "ДЗ", "txt", "", "")
 	}},
 	{"CancelSend", func(s *HomeworkService, id string) error { return s.CancelSend(context.Background(), id) }},
 	{"Deliveries", func(s *HomeworkService, id string) error {
@@ -517,7 +519,7 @@ func TestConfirmSendErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			e := newHWEnv()
 			tt.edit(e)
-			if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ", "txt"); !errors.Is(err, tt.want) {
+			if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ", "txt", "", ""); !errors.Is(err, tt.want) {
 				t.Fatalf("ConfirmSend = %v, want %v", err, tt.want)
 			}
 			want := []string{"ConfirmSend"}
@@ -536,7 +538,7 @@ func TestConfirmSendErrors(t *testing.T) {
 func TestConfirmSendCanBeRepeatedAfterAFailure(t *testing.T) {
 	e := newHWEnv()
 	e.proposals.confirmErr = errors.New("execute: mark executed: database is locked")
-	err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ", "txt")
+	err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ", "txt", "", "")
 	if !errors.Is(err, ErrSendIncomplete) || strings.Contains(err.Error(), "locked") {
 		t.Fatalf("failed ConfirmSend = %v, want ErrSendIncomplete", err)
 	}
@@ -545,7 +547,7 @@ func TestConfirmSendCanBeRepeatedAfterAFailure(t *testing.T) {
 	}
 
 	e.proposals.confirmErr = nil
-	if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ", "txt"); err != nil {
+	if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ", "txt", "", ""); err != nil {
 		t.Fatalf("repeated ConfirmSend = %v", err)
 	}
 	if got := e.calls.list(); !slices.Equal(got, []string{"ConfirmSend", "ConfirmSend"}) {
@@ -584,7 +586,7 @@ func TestPrepareSend(t *testing.T) {
 		ProposalID: "p1", Status: "ready", Recipient: "teacher@school.example", Subject: "Домашнее задание",
 		AttachmentName: "homework.md", AttachmentSize: 42, AttachmentFormat: "txt",
 	}
-	if err != nil || got != want {
+	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("PrepareSend = %+v, %v\nwant %+v", got, err, want)
 	}
 	if calls := e.calls.list(); !slices.Equal(calls, []string{"ProposeSend"}) {
@@ -804,7 +806,7 @@ func TestHomeworkJSONNames(t *testing.T) {
 		{DraftStatus{}, `{"latestVersion":0,"generation":null}`},
 		{ExportResult{}, `{"version":0,"fileName":""}`},
 		{DocxSaveResult{}, `{"status":"","message":"","name":""}`},
-		{SendPreparation{}, `{"proposalId":"","status":"","reason":"","message":"","recipient":"","subject":"","attachmentName":"","attachmentSize":0,"attachmentFormat":""}`},
+		{SendPreparation{}, `{"proposalId":"","status":"","reason":"","message":"","recipient":"","recipientName":"","role":"","subjectId":"","options":null,"subject":"","attachmentName":"","attachmentSize":0,"attachmentFormat":""}`},
 		{DeliveryItem{}, `{"id":"","status":"","recipient":"","subject":"","attempts":0,"lastError":"","confirmedAt":"","sentAt":"","createdAt":"","canMarkSent":false,"canSendAgain":false,"notice":""}`},
 	}
 	for _, tt := range tests {
@@ -830,9 +832,18 @@ func TestFrontendKnowsHomeworkErrors(t *testing.T) {
 		ErrSendCannotConfirm, ErrSendAlreadyDecided, ErrSendStale, ErrSendUnresolved, ErrSendIncomplete, ErrExportLocked,
 		ErrDeliveryNotFound, ErrDeliveryActionInvalid, ErrGenerationRunning, ErrSendFormat, // +2: TASK-094
 		ErrSendAssignmentDeleted, // TASK-231
+		ErrSendChooseTeacher,     // TASK-237
 	} {
 		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
 			t.Errorf("frontend/src/bindings/homework.ts does not list the error %q", e)
 		}
+	}
+	// The agent card lists the texts of its own binding too (TASK-237).
+	agent, err := os.ReadFile("../../../frontend/src/bindings/agentConfirm.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(agent), `"`+ErrSendChooseTeacher.Error()+`"`) {
+		t.Errorf("frontend/src/bindings/agentConfirm.ts does not list the error %q", ErrSendChooseTeacher)
 	}
 }

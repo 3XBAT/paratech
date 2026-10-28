@@ -218,14 +218,14 @@ func TestConfirmSendOfDeletedAssignment(t *testing.T) {
 	e := newHWEnv()
 	e.proposals.confirmErr = fmt.Errorf("execute: %w: %s", proposal.ErrStale, proposal.ReasonAssignmentDeleted)
 	e.proposals.proposal.Status, e.proposals.proposal.Reason = proposal.StatusStale, proposal.ReasonAssignmentDeleted
-	if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ", "txt"); !errors.Is(err, ErrSendAssignmentDeleted) {
+	if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ", "txt", "", ""); !errors.Is(err, ErrSendAssignmentDeleted) {
 		t.Fatalf("ConfirmSend = %v, want ErrSendAssignmentDeleted", err)
 	}
 
 	e = newHWEnv()
 	e.proposals.confirmErr = fmt.Errorf("execute: %w: %s", proposal.ErrStale, proposal.ReasonSubjectChanged)
 	e.proposals.proposal.Status, e.proposals.proposal.Reason = proposal.StatusStale, proposal.ReasonSubjectChanged
-	if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ", "txt"); !errors.Is(err, ErrSendStale) {
+	if err := e.svc.ConfirmSend(context.Background(), "p1", "ДЗ", "txt", "", ""); !errors.Is(err, ErrSendStale) {
 		t.Fatalf("ConfirmSend of another stale reason = %v, want ErrSendStale", err)
 	}
 }

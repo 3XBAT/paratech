@@ -45,8 +45,8 @@ func docxBytes(t *testing.T, text string) []byte {
 	return b.Bytes()
 }
 
-// doneWork files data as the paper «Реферат.docx» in «ДЗ» of a new subject and stores the done work id of src whose
-// file it is.
+// doneWork files data as the paper «Реферат.docx» in «ДЗ» of a new subject, whose lecturer is teacher, and stores the
+// done work id of src whose file it is.
 func doneWork(t *testing.T, a *App, id shared.WorkID, src work.Source, data []byte) *material.Material {
 	t.Helper()
 	ctx := context.Background()
@@ -59,6 +59,7 @@ func doneWork(t *testing.T, a *App, id shared.WorkID, src work.Source, data []by
 	if err != nil {
 		t.Fatal(err)
 	}
+	setTeacher(t, a, sub.ID(), teacher)
 	dz, _ := sub.SystemFolder(subject.SystemHomework)
 	m, err := lib.Place(ctx, im.Material.ID(), sub.ID(), dz.ID())
 	if err != nil {
@@ -128,7 +129,7 @@ func TestWiredSendWorkCreatesOneDelivery(t *testing.T) {
 		t.Fatalf("%d deliveries, %d jobs before «Да»", d, j)
 	}
 	for click := range 2 {
-		if done, err := cards.Confirm(ctx, "proposal", card.TargetID, card.EmailSubject, card.AttachmentFormat); err != nil || done.State != "done" {
+		if done, err := cards.Confirm(ctx, "proposal", card.TargetID, card.EmailSubject, card.AttachmentFormat, "", ""); err != nil || done.State != "done" {
 			t.Fatalf("click %d = %+v, %v", click+1, done, err)
 		}
 	}
@@ -192,7 +193,7 @@ func TestWiredSendWorkUnknownOutcomeIsNotResent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cards.Confirm(ctx, "proposal", card.TargetID, card.EmailSubject, card.AttachmentFormat); err != nil {
+	if _, err := cards.Confirm(ctx, "proposal", card.TargetID, card.EmailSubject, card.AttachmentFormat, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	raw := rawDB(t, dir)
@@ -203,7 +204,7 @@ func TestWiredSendWorkUnknownOutcomeIsNotResent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if done, err := cards.Confirm(ctx, "proposal", card.TargetID, card.EmailSubject, card.AttachmentFormat); err != nil || done.State != "done" {
+	if done, err := cards.Confirm(ctx, "proposal", card.TargetID, card.EmailSubject, card.AttachmentFormat, "", ""); err != nil || done.State != "done" {
 		t.Fatalf("«Да» after the crash = %+v, %v", done, err)
 	}
 	if n := count(t, raw, "SELECT count(*) FROM deliveries WHERE status = 'UNKNOWN' AND attempts = 1"); n != 1 {
@@ -240,7 +241,7 @@ func TestWiredSendWorkRefusals(t *testing.T) {
 	if _, err := a.core.ui.Library.MoveToInbox(ctx, m.ID()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cards.Confirm(ctx, "proposal", card.TargetID, card.EmailSubject, card.AttachmentFormat); !errors.Is(err, wails.ErrSendStale) {
+	if _, err := cards.Confirm(ctx, "proposal", card.TargetID, card.EmailSubject, card.AttachmentFormat, "", ""); !errors.Is(err, wails.ErrSendStale) {
 		t.Fatalf("«Да» after the move = %v", err)
 	}
 	if got, err := a.core.proposals.Get(ctx, proposal.ID(card.TargetID)); err != nil || got.Reason != proposal.ReasonFileMoved {

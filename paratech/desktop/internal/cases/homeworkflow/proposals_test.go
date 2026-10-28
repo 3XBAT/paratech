@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -47,7 +48,8 @@ func TestProposeValidatesAgainstLocalState(t *testing.T) {
 		{"export ready", outExport, nil, proposal.StatusValidated, ""},
 		{"deadline ready", outDeadline, nil, proposal.StatusValidated, ""},
 		{"unknown assignment", outEmail, func(e *env) { delete(e.assignments, "a1") }, proposal.StatusRejected, proposal.ReasonUnknownAssignment},
-		{"no recipient configured", outEmail, func(e *env) { e.recipient = "" }, proposal.StatusRejected, proposal.ReasonNoRecipient},
+		{"no teacher email", outEmail, func(e *env) { e.recipient = "" }, proposal.StatusRejected, proposal.ReasonNoTeacherEmail},
+		{"no subject", outEmail, func(e *env) { e.subject = "" }, proposal.StatusRejected, proposal.ReasonNoSubject},
 		{"nothing exported yet", outEmail, func(e *env) {
 			ref, _ := proposal.ExportRef("a1")
 			_ = e.files.Delete(context.Background(), ref)
@@ -65,7 +67,7 @@ func TestProposeValidatesAgainstLocalState(t *testing.T) {
 				t.Fatalf("view %+v, want %s %q", v, tc.status, tc.reason)
 			}
 			stored, err := e.svc.Get(context.Background(), v.ID)
-			if err != nil || stored != v {
+			if err != nil || !reflect.DeepEqual(stored, v) {
 				t.Fatalf("stored %+v, %v; want %+v", stored, err, v)
 			}
 			if n := e.sideEffects(); n != 0 {
@@ -82,8 +84,8 @@ func TestProposeEmailFreezesTrustedRecipient(t *testing.T) {
 		t.Fatalf("recipient = %q", v.Recipient)
 	}
 
-	// Changing the settings afterwards does not change what the user confirms, and nothing is sent to either address:
-	// the confirmed recipient is no longer the configured one.
+	// Changing the teacher's address afterwards does not change what the user confirms, and nothing is sent to either
+	// address: the confirmed recipient is no longer the teacher's.
 	e.recipient = "other@school.example"
 	if _, err := e.svc.Confirm(context.Background(), v.ID); err != nil {
 		t.Fatal(err)
@@ -195,10 +197,10 @@ func TestExecuteStaleSaveFails(t *testing.T) {
 	}
 }
 
-// Facts are read per kind: only an email needs the recipient settings and the export file.
+// Facts are read per kind: only an email needs the teachers and the export file.
 func TestFactsArePerKind(t *testing.T) {
 	ctx := context.Background()
-	boom := errors.New("settings unreadable")
+	boom := errors.New("library unreadable")
 	for _, out := range []string{outExport, outDeadline} {
 		e := newEnv(t).withHomework(t)
 		ref, _ := proposal.ExportRef("a1")
@@ -220,7 +222,7 @@ func TestFactsArePerKind(t *testing.T) {
 	e := newEnv(t).withHomework(t)
 	e.recipErr = boom
 	if _, err := e.svc.Propose(ctx, values.NewUntrustedOutput(outEmail)); !errors.Is(err, boom) {
-		t.Fatalf("email Propose = %v, want the settings error", err)
+		t.Fatalf("email Propose = %v, want the library error", err)
 	}
 }
 

@@ -203,13 +203,17 @@ type SubjectNames interface {
 	SubjectName(ctx context.Context, id shared.SubjectID) (string, error)
 }
 
-// RecipientSource reads the configured homework recipient from the local settings, the trusted source of the address a
-// homework is emailed to (PRD sections 10 and 13.3). The model never supplies it. Implemented over the settings by a
-// later task (TASK-044).
+// RecipientSource reads the teachers of a library subject, the trusted source of the address a homework or a work is
+// emailed to (PRD sections 10 and 13.3, ADR-0030). The model never supplies it, and the settings address is never
+// used for a send. Implemented by the app over cases/library.
 type RecipientSource interface {
-	// HomeworkRecipient returns the configured recipient, or the zero proposal.Recipient when none is configured
-	// (PRD section 10). An error means the settings could not be read.
-	HomeworkRecipient(ctx context.Context) (proposal.Recipient, error)
+	// Teachers returns the teachers of subject id by role (PRD section 10, ADR-0030) with Subject set to id; an
+	// unknown or removed subject is the zero proposal.Teachers. An error means the library could not be read.
+	Teachers(ctx context.Context, id shared.SubjectID) (proposal.Teachers, error)
+
+	// SubjectNamed resolves the subject name of an assignment to a library subject (PRD section 10, ADR-0024: by name
+	// or alias); "" for an empty name, no subject or an ambiguous one. An error means the library could not be read.
+	SubjectNamed(ctx context.Context, name string) (shared.SubjectID, error)
 }
 
 // The three side-effect ports below are the only way an action proposal reaches the outside world (PRD section 13.3,

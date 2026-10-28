@@ -13,17 +13,21 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
 	"paratech/desktop/internal/adapters/googlecal"
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/homeworkflow"
+	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/delivery/delivery"
 	"paratech/desktop/internal/domain/jobs/job"
+	"paratech/desktop/internal/domain/library/subject"
+	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/testenv"
 )
 
@@ -34,7 +38,8 @@ const (
 	homeworkTitle = "Rivers"
 )
 
-// proposalCore is an opened core with the assignment a1 and, if recipient is not empty, the homework recipient.
+// proposalCore is an opened core with the assignment a1 of the library subject «География» and, if recipient is not
+// empty, its lecturer with that address: the teacher a send goes to (ADR-0030).
 func proposalCore(t *testing.T, recipient string) (*App, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -43,26 +48,47 @@ func proposalCore(t *testing.T, recipient string) (*App, string) {
 		t.Fatal(err)
 	}
 	insertAssignment(t, dir, "a1", homeworkTitle)
-	if recipient != "" {
-		setRecipient(t, a, recipient)
-	}
+	teacherOfA1(t, a, dir, recipient)
 	return a, dir
 }
 
-func setRecipient(t *testing.T, a *App, address string) {
+// teacherOfA1 names the new library subject «География» on assignment a1 and, if address is not empty, makes it the
+// address of the subject's lecturer.
+func teacherOfA1(t *testing.T, a *App, dir, address string) {
 	t.Helper()
-	ctx := context.Background()
-	repo := sqlite.NewSettingsRepository(a.core.db)
-	s, err := repo.Load(ctx)
+	sub, err := a.core.ui.Library.CreateSubject(context.Background(), library.NewSubject{Name: recipientSubject})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetHomeworkRecipient(address, time.Now()); err != nil {
+	if _, err := rawDB(t, dir).Exec(`UPDATE assignments SET user_subject = ? WHERE id = 'a1'`, recipientSubject); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Save(ctx, s); err != nil {
+	if address != "" {
+		setTeacher(t, a, sub.ID(), address)
+	}
+}
+
+// recipientSubject is the library subject of assignment a1 of proposalCore.
+const recipientSubject = "География"
+
+// setTeacher makes address the lecturer of library subject id.
+func setTeacher(t *testing.T, a *App, id shared.SubjectID, address string) {
+	t.Helper()
+	ctx := context.Background()
+	lib := a.core.ui.Library
+	list, err := lib.Subjects(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
+	for _, s := range list {
+		if s.ID() == id {
+			if _, err := lib.SetTeacher(ctx, id, subject.TeacherLecture, "Иванова И. И.", address, s.Version()); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+	}
+	t.Fatalf("no subject %s", id)
 }
 
 func propose(t *testing.T, a *App, answer string) homeworkflow.ProposalView {
@@ -590,7 +616,7 @@ func TestWiredProposalsSurviveARestart(t *testing.T) {
 	}
 	for id, want := range before {
 		got, err := b.core.proposals.Get(ctx, id)
-		if err != nil || got != want {
+		if err != nil || !reflect.DeepEqual(got, want) {
 			t.Fatalf("after the restart %s = %+v, %v; want %+v", id, got, err, want)
 		}
 	}

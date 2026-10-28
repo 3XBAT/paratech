@@ -352,11 +352,8 @@ func validated(t *testing.T, id proposal.ID, a shared.AssignmentID, content stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := proposal.NewRecipient("teacher@school.example")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := p.Validate(proposal.Facts{AssignmentExists: true, Recipient: r, Attachment: digestOf(t, content)},
+	ts := proposal.Teachers{Subject: "s1", Lecture: proposal.Teacher{Name: "Иванова И. И.", Email: "teacher@school.example"}}
+	if err := p.Validate(proposal.Facts{AssignmentExists: true, Teachers: ts, Attachment: digestOf(t, content)},
 		t0.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}

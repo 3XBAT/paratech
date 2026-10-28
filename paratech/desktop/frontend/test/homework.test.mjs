@@ -334,7 +334,7 @@ test("the bindings call the bound Go methods with the page's arguments", async (
   assert.deepEqual(calls, [
     [methods.generate, "a1", 2, "короче"],
     [methods.prepareSend, "a1", "docx"],
-    [methods.confirmSend, "p1", "ДЗ", "docx"],
+    [methods.confirmSend, "p1", "ДЗ", "docx", "", ""], // no choice asked: "" and "" (TASK-237)
     [methods.cancelSend, "p2"],
     [methods.deliveries, "a1"],
     [methods.sendAgain, "d1"],
