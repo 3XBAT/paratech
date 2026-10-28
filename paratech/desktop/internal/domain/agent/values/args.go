@@ -12,14 +12,18 @@ import (
 // Limits of a tool call (gateway.proto ToolCall and the catalog types).
 const (
 	MaxArgumentsBytes = 8 << 10 // arguments_json of one call
-	MaxCallIDBytes    = 64
-	MaxIDsPerArg      = 20 // job_status.ids
-	MaxCardIDs        = 10 // reply.assignments (card_ids, since catalog v3)
-	MaxTextListItems  = 10 // 0..10 as the Hub; cannot_do needs one item in either list
-	MaxPlanSteps      = 8
-	MaxQuestions      = 3 // stricter than the Hub (5): the planner is told at most 3 per round
-	MinOptions        = 2
-	MaxOptions        = 6
+	// MaxPlanArgumentsBytes is arguments_json of show_plan, which carries up to MaxPlanSteps steps.
+	MaxPlanArgumentsBytes = 32 << 10
+	MaxCallIDBytes        = 64
+	MaxIDsPerArg          = 20 // job_status.ids
+	MaxCardIDs            = 10 // reply.assignments (card_ids, since catalog v3)
+	MaxTextListItems      = 10 // 0..10 as the Hub; cannot_do needs one item in either list
+	// MaxPlanSteps is a runaway guard, not a product limit: an approved plan has no step limit of its own besides the
+	// quota (ADR-0033 §4). Before catalog 10 the Hub itself caps a plan at 8 steps.
+	MaxPlanSteps = 200
+	MaxQuestions = 3 // stricter than the Hub (5): the planner is told at most 3 per round
+	MinOptions   = 2
+	MaxOptions   = 6
 )
 
 // Call is a tool call of the planner after strict parsing: a catalog tool and arguments that match its schema.
@@ -30,9 +34,9 @@ type Call struct {
 }
 
 // ParseCall checks a call proposed by the planner (untrusted, hard rule 3): the call ID, the tool name and the
-// arguments JSON. The arguments must be one JSON object of at most MaxArgumentsBytes with only catalog arguments,
-// no duplicates, every required argument, exactly one of each one-of group, and values of the catalog type. A null
-// optional argument counts as absent.
+// arguments JSON. The arguments must be one JSON object of at most MaxArgumentsBytes (MaxPlanArgumentsBytes for
+// show_plan) with only catalog arguments, no duplicates, every required argument, exactly one of each one-of group,
+// and values of the catalog type. A null optional argument counts as absent.
 func ParseCall(callID, tool, argumentsJSON string) (Call, error) {
 	if err := checkCallID(callID); err != nil {
 		return Call{}, err
@@ -41,8 +45,12 @@ func ParseCall(callID, tool, argumentsJSON string) (Call, error) {
 	if err != nil {
 		return Call{}, err
 	}
-	if len(argumentsJSON) > MaxArgumentsBytes {
-		return Call{}, fmt.Errorf("%w: arguments are larger than %d bytes", ErrInvalidArguments, MaxArgumentsBytes)
+	limit := MaxArgumentsBytes
+	if t == ToolShowPlan {
+		limit = MaxPlanArgumentsBytes
+	}
+	if len(argumentsJSON) > limit {
+		return Call{}, fmt.Errorf("%w: arguments are larger than %d bytes", ErrInvalidArguments, limit)
 	}
 	spec, _ := specOf(t)
 	args, err := parseArgs(spec, []byte(argumentsJSON))
