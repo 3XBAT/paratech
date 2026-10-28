@@ -29,6 +29,9 @@ func TestRelated(t *testing.T) {
 		{"Физика", "Физики", LinkTypo, true, "one letter, six letters"},
 		{"Теория вероятностей", "Теория вероятности", LinkTypo, true, "two edits in a long key"},
 		{"Мат анализ", "Мат-анализ", LinkTypo, true, "only punctuation differs"},
+		{"Матанализ", "Матонализ", LinkTypo, true, "one substitution in nine letters"},
+		{"Математика", "Матемтаика", LinkTypo, true, "two neighbours swapped"},
+		{"Электротехника", "Электротехнка", LinkTypo, true, "one letter missing in a long key"},
 		{"Ёлки-палки", "Елки-палки", LinkSame, false, "one key: not a doubtful link (related is called on keys)"},
 
 		// Consciously separate.
@@ -44,6 +47,10 @@ func TestRelated(t *testing.T) {
 		{"ОБЖ", "Основы бухгалтерии", 0, false, "initials must cover every word and nothing more"},
 		{"Матем", "Математика", 0, false, "a truncated word: one word, not a typo"},
 		{"Физика", "Философия", 0, false, "unrelated"},
+		{"Философия", "Филология", 0, false, "two plain substitutions: two disciplines"},
+		{"Этология", "Этнология", 0, false, "a typo never touches the first three letters"},
+		{"Электротехника", "Электротахнико", 0, false, "two plain substitutions, even in a long key"},
+		{"Химия", "Химик", 0, false, "one edit needs six letters"},
 	}
 	for _, tt := range tests {
 		a, b := values.Key(tt.a), values.Key(tt.b)
@@ -104,17 +111,21 @@ func TestShortFormIsPolynomial(t *testing.T) {
 	}
 }
 
-func TestLevenshtein(t *testing.T) {
+func TestEditDistance(t *testing.T) {
 	tests := []struct {
-		a, b string
-		want int
+		a, b  string
+		want  int
+		plain bool
 	}{
-		{"", "", 0}, {"физика", "", 6}, {"физика", "физики", 1}, {"программирование", "програмирование", 1},
-		{"право", "правда", 2}, {"ёлка", "елка", 1},
+		{"", "", 0, true}, {"физика", "", 6, false}, {"физика", "физики", 1, true},
+		{"программирование", "програмирование", 1, false}, {"право", "правда", 2, false}, {"ёлка", "елка", 1, true},
+		{"философия", "филология", 2, true}, {"математика", "матемтаика", 1, false}, {"абвг", "абгв", 1, false},
+		{"абвг", "бавг", 1, false}, {"абвг", "аббб", 2, true},
 	}
 	for _, tt := range tests {
-		if got := levenshtein([]rune(tt.a), []rune(tt.b)); got != tt.want {
-			t.Errorf("levenshtein(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
+		got, plain := editDistance([]rune(tt.a), []rune(tt.b))
+		if got != tt.want || plain != tt.plain {
+			t.Errorf("editDistance(%q, %q) = %d, %v; want %d, %v", tt.a, tt.b, got, plain, tt.want, tt.plain)
 		}
 	}
 }

@@ -233,11 +233,11 @@ func TestExistingSubjects(t *testing.T) {
 
 func TestRepeatedSubjectIDUnionsKeys(t *testing.T) {
 	// As subjectmatch.NewIndex: the keys of both entries, the name of the last one.
-	p := Propose([]Row{{Name: "Химии", Lessons: lec(1)}}, []subjectmatch.Entry{
-		{ID: "s1", Name: "Химия"},
-		{ID: "s1", Name: "Общая химия"},
+	p := Propose([]Row{{Name: "Биологии", Lessons: lec(1)}}, []subjectmatch.Entry{
+		{ID: "s1", Name: "Биология"},
+		{ID: "s1", Name: "Общая биология"},
 	})
-	if len(p.Groups) != 1 || p.Groups[0].Subject != "s1" || p.Groups[0].Name != "Общая химия" {
+	if len(p.Groups) != 1 || p.Groups[0].Subject != "s1" || p.Groups[0].Name != "Общая биология" {
 		t.Fatalf("groups = %+v", p.Groups)
 	}
 }

@@ -101,9 +101,16 @@ func matchWords(s []rune, ws [][]rune, step func(i int, w []rune, next []bool) b
 // («Микроэкономика» and «Макроэкономика», «Органическая химия» and «Неорганическая химия»).
 const typoPrefix = 3
 
-// isTypo reports whether a and b differ by a typo: only by spaces and punctuation, or, word by word, by at most one
-// edit for keys of 5 to 8 letters and two for longer ones (the shorter key counts), never in the first typoPrefix
-// letters of a word.
+// Typo limits by the letters of the shorter key: one edit from typoOneFrom, two from typoTwoFrom. Two edits are a typo
+// only when one of them is not a plain substitution: «Философия» and «Филология» (two substitutions) are different
+// disciplines, «Програмирование» and «Программирование» are one.
+const (
+	typoOneFrom = 6
+	typoTwoFrom = 12
+)
+
+// isTypo reports whether a and b differ by a typo: only by spaces and punctuation, or, word by word, by few edits
+// (see typoOneFrom), never in the first typoPrefix letters of a word.
 func isTypo(a, b string) bool {
 	if a == b || !sameNumerals(a, b) {
 		return false
@@ -115,16 +122,16 @@ func isTypo(a, b string) bool {
 
 	limit := 0
 	switch n := min(len(ca), len(cb)); {
-	case n > 8:
+	case n >= typoTwoFrom:
 		limit = 2
-	case n >= 5:
+	case n >= typoOneFrom:
 		limit = 1
 	}
 	wa, wb := words(a), words(b)
 	if limit == 0 || len(wa) != len(wb) {
 		return false
 	}
-	total := 0
+	total, plain := 0, true
 	for i := range wa {
 		if wa[i] == wb[i] {
 			continue
@@ -133,11 +140,13 @@ func isTypo(a, b string) bool {
 		if len(ra) < typoPrefix || len(rb) < typoPrefix || !slices.Equal(ra[:typoPrefix], rb[:typoPrefix]) {
 			return false
 		}
-		if total += levenshtein(ra, rb); total > limit {
+		d, onlySubstitutions := editDistance(ra, rb)
+		if total += d; total > limit {
 			return false
 		}
+		plain = plain && onlySubstitutions
 	}
-	return total > 0
+	return total == 1 || (total == 2 && !plain)
 }
 
 // sameNumerals reports whether a and b have the same numbers (digits or Roman numerals in Latin letters): «Физика 1»
@@ -154,21 +163,39 @@ func numerals(key string) []string {
 	return out
 }
 
-func levenshtein(a, b []rune) int {
-	prev, cur := make([]int, len(b)+1), make([]int, len(b)+1)
-	for j := range prev {
-		prev[j] = j
+// editDistance is the optimal string alignment distance (an insertion, a deletion, a substitution or a swap of two
+// neighbours costs 1); onlySubstitutions tells that the words have the same length and differ in exactly that many
+// places, so every edit is a plain substitution.
+func editDistance(a, b []rune) (dist int, onlySubstitutions bool) {
+	d := make([][]int, len(a)+1)
+	for i := range d {
+		d[i] = make([]int, len(b)+1)
+		d[i][0] = i
+	}
+	for j := range d[0] {
+		d[0][j] = j
 	}
 	for i := 1; i <= len(a); i++ {
-		cur[0] = i
 		for j := 1; j <= len(b); j++ {
 			cost := 1
 			if a[i-1] == b[j-1] {
 				cost = 0
 			}
-			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+			d[i][j] = min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+cost)
+			if i > 1 && j > 1 && a[i-1] == b[j-2] && a[i-2] == b[j-1] {
+				d[i][j] = min(d[i][j], d[i-2][j-2]+1)
+			}
 		}
-		prev, cur = cur, prev
 	}
-	return prev[len(b)]
+	dist = d[len(a)][len(b)]
+	if len(a) != len(b) {
+		return dist, false
+	}
+	diff := 0
+	for i := range a {
+		if a[i] != b[i] {
+			diff++
+		}
+	}
+	return dist, diff == dist
 }

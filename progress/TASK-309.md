@@ -4,7 +4,7 @@
 - New pure package `domain/library/services/schedulesubjects` (std, `values`, `subjectmatch`, `subject`, `shared`; no time/IO/randomness): `Propose(rows, subjects)` -> `Proposal` of groups; `Apply(proposal, choices)` -> `Outcome` (Creates, Additions); `DeriveSubjectID(token, key)` (`sched-` + 32 hex of sha256 over length-prefixed token and key).
 - Lesson-kind marks: ONE table (`marks.go`), cut at the start or end, in brackets, after a separator (`, - – — : /`); plain space + mark at the end cuts only abbreviations; two-letter ones (`пр`, `пз`, `лр`) need a dot. «Учебная практика», «Семинар по физике» stay as they are. Kind-less lessons of a marked row count as the mark's kind.
 - Obvious group = same key after the cut; name = most used cleaned spelling; raw spellings are aliases (not those with the name's key); kinds = union.
-- Doubtful: abbreviation (initials, «и» skippable; or prefixes >= 2 letters per word, ≥ 2 significant words) and typo (Levenshtein 1 for 5-8 runes, 2 for longer; guards: same word count, first 3 letters of each word, equal numerals incl. Roman). Merged by default (`Doubtful`), member choice «Отдельно» / «Не заводить». Two rounds (typos, then abbreviations), a string joins only a lead and only when exactly one lead fits (no chains). Same rules against names and aliases of existing subjects; one match -> add to that subject; ambiguous or already matched strings are left out.
+- Doubtful: abbreviation (initials, «и» skippable; or prefixes >= 2 letters per word, ≥ 2 significant words) and typo (1 edit from 6 letters, 2 edits from 12 letters and not two plain substitutions, see decisions; guards: same word count, first 3 letters of each word, equal numerals incl. Roman). Merged by default (`Doubtful`), member choice «Отдельно» / «Не заводить». Two rounds (typos, then abbreviations), a string joins only a lead and only when exactly one lead fits (no chains). Same rules against names and aliases of existing subjects; one match -> add to that subject; ambiguous or already matched strings are left out.
 - `Apply`: defaults when no choice; renames checked with `subject.NewName`; unknown group/member, bad action, duplicate choice -> sentinels (no schedule text in any error); `ErrNameTaken` for shared spellings; `ErrProposalNotBuilt` for a hand-built proposal. Deterministic order (lessons + recordings desc, then name).
 - `subject.RemoveAlias(alias, now) bool` (by key, never the name, `updatedAt` untouched when nothing changed).
 - `docs/architecture.md` §12: `schedulesubjects` added to the library row.
@@ -14,7 +14,7 @@
 - `Propose` takes `[]subjectmatch.Entry` (not an `Index`): `Index` has no exported fields, so names and aliases could not be compared for abbreviations and typos. `subjectmatch` untouched.
 - The package imports `library/subject` (for `subject.NewName`, `MaxAliases`): ARCH-10, same context.
 - Review fixes: abbreviation matching was exponential on crafted strings (HIGH) -> shared DP `matchWords`, regression test with a 5 s bound; `Create.Aliases` capped at `subject.MaxAliases` (spellings beyond it are dropped but their counts stay); `subjectKeysOf` unions keys of a repeated id like `subjectmatch.NewIndex`.
-- Owner question: the typo rule as specified merges «Философия» / «Филология» (distance 2, 9 letters) and «Этология» / «Этнология» by default (doubtful, the student can split). Tighten (distance 2 only from 12 letters, or no double substitutions)?
+- Supervisor decision (typo rule tightened after the review): one edit only from 6 letters of the shorter key; two edits only from 12 letters and only when not both are plain substitutions (an insertion, deletion or neighbour swap must be among them; swap counts 1, so distance is optimal string alignment). So «Философия» / «Филология» (two substitutions) and «Этология» / «Этнология» (first three letters differ) stay separate, «Програмирование» / «Программирование» and «Матанализ» / «Матонализ» still link. `levenshtein` replaced by `editDistance`; `TestLevenshtein` became `TestEditDistance`; `TestRepeatedSubjectIDUnionsKeys` uses «Биология» (the 5-letter «Химия» no longer typo-links).
 
 ## Follow-ups
 - TASK-310: re-run `Propose` with the current subjects right before `Apply` (a proposal not built by `Propose` is refused); handle `subject.ErrTooMany` on `Additions`; cap the number of distinct rows given to `Propose` (worst case is polynomial, O(rows² · 200²)).
@@ -24,7 +24,7 @@
 - Optional: precompute words/compact per cluster.
 
 ## Changed existing tests
-None (`TestRemoveAlias` added to `subject_test.go`).
+`TestLevenshtein` -> `TestEditDistance` (the function was replaced); `TestRepeatedSubjectIDUnionsKeys` fixture «Химия» -> «Биология» (5 letters no longer typo-link). `TestRemoveAlias` added to `subject_test.go`.
 
 ## Security
 Auditor: no High/Medium; one CPU-exhaustion finding (exponential backtracking in the abbreviation matcher), fixed with a DP and a regression test; the reviewer re-checked the fix (approve). ID derivation, determinism, error text (no schedule strings) and purity found clean.
