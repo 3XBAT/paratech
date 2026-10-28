@@ -108,3 +108,32 @@ contract but is not implemented. Streaming through the owner's gateway (`ai.star
 - **Deltas vs result** (TASK-145): deltas are untrusted draft text. The joined deltas may differ from
   `CompletionResult.output` (for example a code fence the check strips); the checked result is what is stored, settled
   and replayed.
+
+## Addendum: streamed reply (TASK-340, owner's beta feedback 2026-10-28)
+Long replies (catalog 7+, up to 4000 characters) appeared whole at the end of a step. Supersedes «Planner steps
+(`AgentStep`) stay unimplemented / `reply` appears whole» above for clients that use the new RPC.
+- **Contract**: additive server-streaming `AgentStepStream(AgentStepStreamRequest{AgentStepRequest request})` returns
+  `stream AgentStepStreamResponse{oneof event: string delta | AgentStepResponse result}` (a wrapper, as buf lint
+  forbids one request type for two RPCs). Same validation, fingerprint, key and ledger as `AgentStep`: one logical
+  request, either replays the other's stored result. Deltas, then exactly one `result`; a failure is a Connect error
+  with the ErrorDetail of `AgentStep`, no `result`; a stream without `result` is failed, the client drops the draft.
+- **What streams**: only the visible reply: the top-level `text` argument of `reply` calls (read incrementally from
+  `input_json_delta`: escapes, `\uXXXX` with surrogate pairs and UTF-8 split across chunks) and the text blocks of
+  the answer (a text-only answer becomes a reply, TASK-200). A later part starts with a blank line. Other tools'
+  arguments and thinking never stream. Control characters except line breaks and tabs are dropped; at most 4000
+  characters in all; chunks are joined until 64 bytes are pending or 50 ms have passed (the first goes at once), and
+  the handler cuts them only between characters (PR #331 rule).
+- **Trust** (hard rule 3): deltas are display-only draft text, never stored, never sent to the planner, never a cause
+  of an action. The result is built exactly as `AgentStep` builds it (whole-answer parse, catalog check, cut at a
+  sentence, seal, kept turn, settle); the joined deltas may differ from it (cut, trimmed, preamble text before tool
+  calls) and the result wins. A preamble text of a tool-call answer shows as draft until the result replaces it.
+- **No deltas** on a replay, with `provider_stream` off (unary `Step`) and on a provider JSON answer to the stream
+  (fallback of TASK-190, one paid call): the stream holds only the result. The desktop renders the result either way.
+- **Provider**: port `agentstep.StreamingProvider.StepStream(ctx, call, onDelta)`; the anthropic adapter sends
+  `"stream": true` and rebuilds the content array from the events (thinking with its signature, text, tool_use with
+  its parsed input), so the kept turn of the thinking loop is the one a unary answer gives. Cancel, timeout, `message_stop`
+  and settlement rules as for `CompleteStream` above. Prompts, catalog, caching, rate limit and reservation unchanged.
+- **Desktop** (go-core): uses `AgentStepStream` for planner steps, falls back to `AgentStep` with the same key on
+  `unimplemented` (an older Hub).
+- To verify live: whether the planner model streams a tool's string argument in small pieces (the docs say current
+  models may emit one whole key/value per `input_json_delta`); if not, a reply appears in one or few deltas.
