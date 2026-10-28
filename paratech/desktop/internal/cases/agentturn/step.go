@@ -73,7 +73,8 @@ func (s *Service) drive(ctx context.Context, c *change, op string) (st Step, err
 		if err != nil {
 			return s.abort(ctx, c, op, values.StopOffline, err)
 		}
-		// What the step sends is what it accepts: the base, the scope and the mentions of the step.
+		// What the step sends is what it accepts: the base, the scope and the mentions of the step. (Thread.known also
+		// keeps the current request's mentions whose object was deleted mid-request; no longer sent, harmless.)
 		c.context = values.NewRefSet(base.Refs()...)
 		c.context.Add(turn.Scope().Refs()...)
 		c.context.Add(values.StepMentionRefs(mentions)...)
