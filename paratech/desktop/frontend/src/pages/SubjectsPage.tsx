@@ -12,7 +12,7 @@ import {
   texts,
 } from "../libraryView.js";
 import type { PageId } from "../nav.js";
-import { idleTeacher, TeacherFlow, type TeacherFocus, type TeacherState, teacherFocusStep } from "../teachersView.js";
+import { idleTeacher, TeacherFlow, type TeacherFocus, type TeacherState, teacherFocusStep, teacherStateFor } from "../teachersView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { InboxList, NameForm, OverviewSections, SubjectDetail, SubjectList, SubjectTree } from "./SubjectsParts.js";
@@ -84,6 +84,7 @@ export function SubjectsPage(props: {
       save: () => void flow.save(),
       cancel: () => flow.cancel(),
       clear: () => void flow.clear(),
+      restore: () => void flow.restore(),
     }),
     [flow],
   );
@@ -252,7 +253,7 @@ export function SubjectsPage(props: {
                 {overviewState.error}
               </ResultLine>
             )}
-            <TeachersBlock teachers={subject.teachers} state={teacher} on={teacherActions} />
+            <TeachersBlock key={subject.id} teachers={subject.teachers} state={teacherStateFor(teacher, subject.id)} on={teacherActions} />
             {overview && <OverviewSections overview={overview} />}
             <SubjectDetail
               subject={subject}

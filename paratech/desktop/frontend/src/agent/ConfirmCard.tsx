@@ -8,7 +8,7 @@ import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
 import { type RecipientNav, useRecipientNav } from "../recipientNav.js";
-import { isRefusal, recipientTexts, refusalAction } from "../recipientView.js";
+import { isRefusal, refusalAction } from "../recipientView.js";
 import { RecipientName, RefusalButton, TeacherChoiceGroup } from "../pages/RecipientParts.js";
 import { RecordingDeleteDialog } from "../pages/RecordingDeleteDialog.js";
 
@@ -27,8 +27,6 @@ export function ConfirmCardView(props: {
   onChoose?: (role: TeacherRole) => void;
   /** The way out of a refusal («Указать почту», «Открыть задание»); without it the buttons do nothing. */
   nav?: RecipientNav;
-  /** «Обновить карточку» of a question with nothing to choose from. */
-  onRefresh?: () => void;
 }) {
   const { model: m } = props;
   const off = props.busy !== "";
@@ -56,20 +54,6 @@ export function ConfirmCardView(props: {
           disabled={off || props.onChoose === undefined}
           onChange={(role) => props.onChoose?.(role)}
         />
-      )}
-      {rv.kind === "choice_changed" && (
-        <>
-          <ResultLine kind="fail" role="alert">
-            {recipientTexts.choiceChanged}
-          </ResultLine>
-          {props.onRefresh !== undefined && (
-            <div className="ag-actions">
-              <Button size="sm" disabled={off} busy={props.busy === "refresh"} busyLabel={confirmTexts.working} onClick={props.onRefresh}>
-                {recipientTexts.refresh}
-              </Button>
-            </div>
-          )}
-        </>
       )}
       {m.items.length > 0 && (
         <ul className="ag-list small">
@@ -200,7 +184,6 @@ export function ConfirmCard(props: {
         chosenRole={state.chosenRole}
         nav={nav}
         onChoose={(role) => flow.choose(role)}
-        onRefresh={() => void flow.refresh()}
         onYes={() => void flow.yes()}
         onNo={() => void flow.no()}
       />

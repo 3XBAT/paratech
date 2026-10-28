@@ -33,7 +33,7 @@ import {
   validateAddForm,
   validateEditForm,
 } from "../homeworkView.js";
-import { choiceOf, recipientTexts, recipientView, sendBlocked } from "../recipientView.js";
+import { choiceOf, pickedRole, recipientTexts, recipientView, sendBlocked } from "../recipientView.js";
 import { Button } from "../ui/Button.js";
 import { Dialog, Field, Input, ResultLine, Segmented, Select } from "../ui/controls.js";
 import { RecipientName, TeacherChoiceGroup } from "./RecipientParts.js";
@@ -59,8 +59,6 @@ export function SendDialog(props: {
   switching?: boolean;
   problem?: string;
   onFormat?: (format: SendFormat) => void;
-  /** Asks the page for a new preparation of the same send (the teachers changed while the question was open). */
-  onRefresh?: () => void;
   onClose: (result: SendResult) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -68,7 +66,10 @@ export function SendDialog(props: {
   const [retry, setRetry] = useState(false);
   const [error, setError] = useState("");
   // «Кому отправить?»: the role clicked; the address that goes back is the one that option shows now.
-  const [role, setRole] = useState<TeacherRole | "">("");
+  // It belongs to one preparation: a new one (another format) has a fresh question and needs a fresh click.
+  const [picked, setPicked] = useState<{ proposalId: string; role: TeacherRole } | null>(null);
+  const role = pickedRole(picked, props.prep.proposalId);
+  const setRole = (r: TeacherRole) => setPicked({ proposalId: props.prep.proposalId, role: r });
   const view = recipientView(props.prep);
   const choice = view.kind === "choose" ? choiceOf(props.prep.options, role) : null;
   const blocked = sendBlocked(view, choice);
@@ -134,18 +135,6 @@ export function SendDialog(props: {
         <>
           <TeacherChoiceGroup options={view.options} value={role} disabled={busy || tried || switching} onChange={setRole} />
           {choice === null && <p className="small muted">{recipientTexts.chooseHintDialog}</p>}
-        </>
-      )}
-      {view.kind === "choice_changed" && (
-        <>
-          <ResultLine kind="fail" role="alert">
-            {recipientTexts.choiceChangedDialog}
-          </ResultLine>
-          {props.onRefresh !== undefined && (
-            <Button size="sm" disabled={busy || tried || switching} onClick={props.onRefresh}>
-              {recipientTexts.refreshDialog}
-            </Button>
-          )}
         </>
       )}
       {(view.kind === "no_email" || view.kind === "no_subject") && (

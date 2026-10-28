@@ -72,7 +72,9 @@ import { TranscriptLinks } from "./TranscriptLinks";
 // openAssignment: the assignment shown (a jump from the summary, TASK-087, or a card opened from the list); "" shows the
 // list. It comes from the window route, so «Назад» and «Вперёд» restore it (TASK-202); onSelect asks the route to change.
 // Without onSelect (a test, a bare page) the page keeps the choice itself.
-export function HomeworkPage(props: { openAssignment?: string; onSelect?: (id: string) => void }) {
+// editAssignment: the assignment whose «Изменить» opens on arrival (TASK-238, «Выбрать предмет» of the agent's card);
+// onEditTaken tells the window the request was taken, so it fires once.
+export function HomeworkPage(props: { openAssignment?: string; onSelect?: (id: string) => void; editAssignment?: string; onEditTaken?: () => void }) {
   const api = useMemo(() => homeworkApi(callByName), []);
   const [own, setOwn] = useState(props.openAssignment ?? "");
   const openId = props.onSelect ? (props.openAssignment ?? "") : own;
@@ -81,7 +83,13 @@ export function HomeworkPage(props: { openAssignment?: string; onSelect?: (id: s
   return openId === "" ? (
     <AssignmentList api={api} onOpen={select} />
   ) : (
-    <AssignmentEditor api={api} id={openId} onBack={() => select("")} />
+    <AssignmentEditor
+      api={api}
+      id={openId}
+      editOnOpen={props.editAssignment === openId}
+      onEditTaken={props.onEditTaken}
+      onBack={() => select("")}
+    />
   );
 }
 
@@ -361,8 +369,8 @@ interface SendOpen {
   problem: string;
 }
 
-function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => void }) {
-  const { api, id } = props;
+function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: boolean; onEditTaken?: () => void; onBack: () => void }) {
+  const { api, id, editOnOpen, onEditTaken } = props;
   const turnkey = useMemo(() => turnkeyApi(callByName), []);
   const [detail, setDetail] = useState<AssignmentDetail | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -384,7 +392,13 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
   const [sendFormat, setSendFormat] = useState<SendFormat>(defaultSendFormat);
   const [sendAgain, setSendAgain] = useState<DeliveryItem | null>(null);
   const [correcting, setCorrecting] = useState(false);
-  const [editing, setEditing] = useState(false);
+  // The dialog is drawn once the assignment is loaded, so a request made at arrival simply starts it open.
+  const [editing, setEditing] = useState(editOnOpen === true);
+  useEffect(() => {
+    if (editOnOpen === true) {
+      onEditTaken?.();
+    }
+  }, [editOnOpen, onEditTaken]);
   const [gone, setGone] = useState<AssignmentItem | null>(null);
   const [changing, setChanging] = useState(false);
   const [restored, setRestored] = useState(false); // «Вернуть» was pressed: «Удалить» takes the focus
@@ -726,12 +740,10 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
     });
 
   // Another attachment format in the dialog: a new export and preparation of the same version. Only a ready one
-  // replaces the shown send, which is then cancelled; otherwise the dialog keeps it and says why. `again` prepares the
-  // same format anew («Обновить» of a question whose teachers changed); a refusal then closes the dialog.
-  async function switchFormat(format: SendFormat, again = false) {
+  // replaces the shown send, which is then cancelled; otherwise the dialog keeps it and says why.
+  async function switchFormat(format: SendFormat) {
     const open = sendOpen;
-    const allowed = open !== null && (again ? !open.switching : sendFormatChange(open.prep.attachmentFormat, format, open.switching));
-    if (open === null || switchingFormat.current || !allowed) {
+    if (open === null || switchingFormat.current || !sendFormatChange(open.prep.attachmentFormat, format, open.switching)) {
       return;
     }
     switchingFormat.current = true;
@@ -752,14 +764,6 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
         if (old !== "") {
           void api.cancelSend(old).catch(() => undefined);
         }
-      } else if (again) {
-        const gone = pendingSend.current;
-        pendingSend.current = "";
-        setSendOpen(null);
-        if (gone !== "") {
-          void api.cancelSend(gone).catch(() => undefined);
-        }
-        showRefused(next.prep);
       } else {
         setSendOpen({ ...open, switching: false, problem: next.prep.message });
       }
@@ -1196,7 +1200,6 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
           switching={sendOpen.switching}
           problem={sendOpen.problem}
           onFormat={(f) => void switchFormat(f)}
-          onRefresh={() => void switchFormat(sendOpen.prep.attachmentFormat, true)}
           onClose={sendClosed}
         />
       )}

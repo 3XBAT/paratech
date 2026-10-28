@@ -27,6 +27,8 @@ export interface TeacherActions {
   save(): void;
   cancel(): void;
   clear(): void;
+  /** «Вернуть» next to «Преподаватель убран.». */
+  restore(): void;
 }
 
 function RowView(props: { row: TeacherRow; disabled: boolean; onOpen: () => void }) {
@@ -184,6 +186,13 @@ export function TeachersBlock(props: { teachers: LibraryTeachers; state: Teacher
       <p className="small muted group-foot teachers-note" role="status">
         {state.note}
       </p>
+      {state.removed !== null && state.form === null && (
+        <div className="acts start">
+          <Button size="sm" variant="ghost" disabled={busy} busy={state.busy === "save"} busyLabel={teacherTexts.saving} onClick={on.restore}>
+            {teacherTexts.undo}
+          </Button>
+        </div>
+      )}
     </section>
   );
 }

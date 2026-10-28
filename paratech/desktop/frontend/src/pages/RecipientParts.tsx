@@ -62,7 +62,7 @@ export function RefusalButton(props: {
         nav.openTeacher(action.subjectId, action.role);
         break;
       case "assignment":
-        nav.openAssignment(action.assignmentId);
+        nav.openAssignment(action.assignmentId, { edit: action.edit });
         break;
       case "subjects":
         nav.openSubjects();

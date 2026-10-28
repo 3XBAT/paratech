@@ -8,6 +8,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ConfirmFlow, confirmCardModel, confirmTexts } from "../.test-build/agentConfirmView.js";
 import { ConfirmCardView } from "../.test-build/agent/ConfirmCard.js";
+import { keepAssignmentEdit } from "../.test-build/recipientNav.js";
 import { RefusalButton } from "../.test-build/pages/RecipientParts.js";
 import { SendDialog } from "../.test-build/pages/HomeworkDialogs.js";
 import {
@@ -15,6 +16,7 @@ import {
   choiceOptions,
   choiceText,
   noEmailText,
+  pickedRole,
   recipientText,
   recipientTexts,
   recipientView,
@@ -61,7 +63,7 @@ const nav = () => {
   return {
     seen,
     openTeacher: (subjectId, role) => seen.push(["teacher", subjectId, role]),
-    openAssignment: (id) => seen.push(["assignment", id]),
+    openAssignment: (id, opts) => seen.push(opts === undefined ? ["assignment", id] : ["assignment", id, opts]),
     openSubjects: () => seen.push(["subjects"]),
   };
 };
@@ -229,32 +231,67 @@ test("a refused «Да» (the address changed) re-reads the card and drops the c
   assert.equal(confirmCardModel(flow.state.card, flow.state.chosenRole).yesBlocked, recipientTexts.chooseNeeded);
 });
 
-test("a question with fewer than two teachers is no dead end: it says why and offers «Обновить карточку»", async () => {
-  for (const few of [[], [options[0]]]) {
-    const c = choose({ options: few });
-    const m = confirmCardModel(c);
-    assert.equal(m.recipient.kind, "choice_changed");
-    assert.equal(m.yes, false);
-    assert.equal(m.no, true, "«Нет» stays");
-    const out = cardView(c, { onRefresh: noop });
-    assert.match(out, /Преподаватели предмета изменились, выбирать больше не из чего/);
-    assert.match(out, />Обновить карточку</);
-    assert.match(out, />Нет</);
-    assert.doesNotMatch(out, />Да</);
-    assert.doesNotMatch(out, /type="radio"/);
-  }
-  const core = fakeCore(choose({ options: [options[0]] }), [choose()]);
+test("a question with one teacher left is still a question: one radio, «Да» off until the click, then role and address go back", async () => {
+  const one = choose({ options: [options[1]] });
+  const m = confirmCardModel(one);
+  assert.equal(m.recipient.kind, "choose");
+  assert.deepEqual([m.yes, m.no, m.yesBlocked], [true, true, recipientTexts.chooseNeeded]);
+  const out = cardView(one, { onChoose: noop });
+  assert.equal((out.match(/type="radio"/g) ?? []).length, 1);
+  assert.doesNotMatch(out, /checked=""/, "even a single option is not chosen for the student");
+  assert.match(out, /Семинарист — <bdi>petrov@example\.test<\/bdi>/);
+  assert.match(out, /<button[^>]*disabled=""[^>]*><span class="btn-labels"><span>Да</);
+  assert.doesNotMatch(out, /изменились|Обновить/, "no refresh loop");
+
+  const core = fakeCore(one);
   const flow = new ConfirmFlow(core.api, noop);
-  flow.show(choose({ options: [options[0]] }));
-  await flow.refresh();
-  assert.equal(core.calls.card, 1);
-  assert.equal(flow.state.card.options.length, 3, "the card is read again and asks again");
-  assert.equal(flow.state.busy, "");
-  const dialog = html(h(SendDialog, { api: {}, prep: prep({ recipient: "", reason: "choose_teacher", options: [options[0]] }), version: 1, onRefresh: noop, onClose: noop }));
-  assert.match(dialog, /выбирать больше не из чего/);
-  assert.match(dialog, />Обновить</);
+  flow.show(one);
+  await flow.yes();
+  assert.deepEqual(core.calls.confirm, [], "no click, no call");
+  flow.choose("practice");
+  await flow.yes();
+  assert.deepEqual(core.calls.confirm, [["p1", { role: "practice", address: "petrov@example.test" }]]);
+  assert.equal("refresh" in flow, false);
+
+  const dialog = html(h(SendDialog, { api: {}, prep: prep({ recipient: "", reason: "choose_teacher", subjectId: "s1", options: [options[1]] }), version: 1, onClose: noop }));
+  assert.equal((dialog.match(/type="radio"/g) ?? []).length, 1);
+  assert.match(dialog, /<button type="button" class="btn primary" disabled="">Отправить</);
+  assert.match(dialog, /станет доступна после выбора/);
+});
+
+test("a question with no teacher left is a refusal with «Указать почту»; «Нет» stays, «Да» is gone", () => {
+  const none = choose({ options: [] });
+  const v = recipientView(none);
+  assert.equal(v.kind, "no_email");
+  assert.equal(v.text, recipientTexts.noTeachersLeft);
+  assert.match(v.text, /^У предмета не осталось почты преподавателей/);
+  const m = confirmCardModel(none);
+  assert.deepEqual([m.yes, m.no], [false, true]);
+  const out = cardView(none, { nav: nav() });
+  assert.match(out, /У предмета не осталось почты преподавателей/);
+  assert.match(out, />Указать почту</);
+  assert.match(out, />Нет</);
+  assert.doesNotMatch(out, />Да</);
+  assert.doesNotMatch(out, /type="radio"/);
+  assert.deepEqual(refusalAction(v, "card"), { kind: "teacher", label: "Указать почту", subjectId: "s1", role: "lecture" });
+  const lost = recipientView(choose({ options: [], subjectId: "" }));
+  assert.deepEqual(refusalAction(lost, "card"), { kind: "subjects", label: recipientTexts.openSubjects });
+  const dialog = html(h(SendDialog, { api: {}, prep: prep({ recipient: "", reason: "choose_teacher", subjectId: "s1", options: [] }), version: 1, onClose: noop }));
+  assert.match(dialog, /У предмета не осталось почты преподавателей/);
   assert.match(dialog, /<button type="button" class="btn primary" disabled="">Отправить</);
   assert.match(dialog, />Отмена</);
+});
+
+test("the choice belongs to one preparation: another proposal starts unchosen", () => {
+  const pick = { proposalId: "p1", role: "lab" };
+  assert.equal(pickedRole(pick, "p1"), "lab");
+  assert.equal(pickedRole(pick, "p2"), "", "a format switch makes a new proposal and needs a fresh click");
+  assert.equal(pickedRole(null, "p1"), "");
+  const dialogs = readFileSync(new URL("../src/pages/HomeworkDialogs.tsx", import.meta.url), "utf8");
+  assert.match(dialogs, /pickedRole\(picked, props\.prep\.proposalId\)/);
+  assert.match(dialogs, /setPicked\(\{ proposalId: props\.prep\.proposalId, role: r \}\)/);
+  // The dialog stays mounted (tried and retry are kept), so the choice is derived, not remounted.
+  assert.doesNotMatch(dialogs, /key=\{props\.prep\.proposalId\}/);
 });
 
 test("a question answered or declined no longer asks", () => {
@@ -302,20 +339,38 @@ test("«Указать почту» asks the window for the subject and the role
 test("no subject: the text and a way to choose it; on the assignment page the subject is chosen in place", () => {
   const out = cardView(noSubject(), { nav: nav() });
   assert.match(out, /У задания не указан предмет/);
-  assert.match(out, />Открыть задание</);
+  assert.match(out, />Выбрать предмет</);
+  assert.doesNotMatch(out, />Открыть задание</);
   assert.doesNotMatch(out, />Да</);
   const v = recipientView(noSubject());
-  assert.deepEqual(refusalAction(v, "card"), { kind: "assignment", label: "Открыть задание", assignmentId: "a1" });
+  assert.deepEqual(refusalAction(v, "card"), { kind: "assignment", label: "Выбрать предмет", assignmentId: "a1", edit: true });
   assert.deepEqual(refusalAction(v, "page"), { kind: "choose_subject", label: "Выбрать предмет" });
   assert.deepEqual(refusalAction(recipientView(noSubject({ assignmentId: "" })), "card"), { kind: "subjects", label: recipientTexts.openSubjects });
   const n = nav();
   RefusalButton({ action: refusalAction(v, "card"), nav: n }).props.onClick();
-  assert.deepEqual(n.seen, [["assignment", "a1"]]);
+  assert.deepEqual(n.seen, [["assignment", "a1", { edit: true }]], "the assignment opens on the action: «Изменить» with the subject choice");
   let chosen = 0;
   RefusalButton({ action: refusalAction(v, "page"), nav: n, onChooseSubject: () => chosen++ }).props.onClick();
   assert.equal(chosen, 1);
   assert.equal(recipientView({ reason: "no_subject", message: "" }).text, recipientTexts.noSubject);
   assert.match(recipientTexts.noSubject, /^У задания не указан предмет/);
+});
+
+test("«Выбрать предмет» of the agent's card is a one-shot request: kept only while the route shows that assignment", () => {
+  assert.equal(keepAssignmentEdit("a1", { page: "homework", assignment: "a1" }), "a1");
+  assert.equal(keepAssignmentEdit("a1", { page: "homework", assignment: "" }), "", "back to the list");
+  assert.equal(keepAssignmentEdit("a1", { page: "homework", assignment: "a2" }), "");
+  assert.equal(keepAssignmentEdit("a1", { page: "today", assignment: "a1" }), "", "the route moved away");
+  assert.equal(keepAssignmentEdit("", { page: "homework", assignment: "a1" }), "");
+  const read = (rel) => readFileSync(new URL(`../src/${rel}`, import.meta.url), "utf8");
+  const app = read("App.tsx");
+  assert.match(app, /setAssignmentEdit\(opts\?\.edit === true \? id : ""\)/);
+  assert.match(app, /keepAssignmentEdit\(e,/);
+  assert.match(app, /onEditTaken=\{props\.onAssignmentEditDone\}/);
+  const homework = read("pages/HomeworkPage.tsx");
+  assert.match(homework, /editOnOpen=\{props\.editAssignment === openId\}/, "only for the assignment the request names");
+  assert.match(homework, /useState\(editOnOpen === true\)/, "«Изменить» starts open on arrival");
+  assert.match(homework, /onEditTaken\?\.\(\)/, "taken once");
 });
 
 test("a refusal can never be confirmed: no «Да»/«Отправить» for no address and no subject", () => {

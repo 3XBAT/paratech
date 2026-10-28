@@ -21,15 +21,11 @@ export const recipientTexts = {
   to: "Кому",
   chooseTitle: "Кому отправить?",
   chooseNeeded: "Выберите, кому отправить.",
-  choiceChanged: "Преподаватели предмета изменились, выбирать больше не из чего.",
-  choiceChangedDialog: "Преподаватели предмета изменились, выбирать больше не из чего. Обновите окно или закройте его.",
+  noTeachersLeft: "У предмета не осталось почты преподавателей: укажите её на странице предмета.",
   chooseHintDialog: "Кнопка «Отправить» станет доступна после выбора.",
-  refresh: "Обновить карточку",
-  refreshDialog: "Обновить",
   specifyEmail: "Указать почту",
   noSubject: "У задания не указан предмет: выберите предмет, и письмо уйдёт его преподавателю.",
   chooseSubject: "Выбрать предмет",
-  openAssignment: "Открыть задание",
   openSubjects: "Открыть предметы",
   noEmailBlocked: "Отправить нельзя: нет почты преподавателя.",
   noSubjectBlocked: "Отправить нельзя: у задания не указан предмет.",
@@ -66,6 +62,11 @@ export function choiceOf(options: readonly TeacherOption[] | undefined, role: Te
   return o === undefined ? null : { role: o.role, address: o.email };
 }
 
+/** A click on an option belongs to the preparation it was made on: another preparation (proposalId) starts unchosen. */
+export function pickedRole(picked: { proposalId: string; role: TeacherRole } | null, proposalId: string): TeacherRole | "" {
+  return picked !== null && picked.proposalId === proposalId ? picked.role : "";
+}
+
 /** The fields of a send preparation or a send card that name its recipient (all optional: older replies lack some). */
 export interface RecipientSource {
   reason?: string;
@@ -81,11 +82,9 @@ export interface RecipientSource {
 export type RecipientView =
   /** «Кому: <имя> <адрес>». */
   | { kind: "to"; name: string; address: string }
-  /** «Кому отправить?»: two or three options, one is to be clicked. */
+  /** «Кому отправить?»: one to three options (the teachers may have changed since the question was asked), one is clicked. */
   | { kind: "choose"; options: ChoiceOption[] }
-  /** The question has fewer than two options now (the teachers changed meanwhile): nothing to choose, refresh. */
-  | { kind: "choice_changed" }
-  /** No address for the role: «Указать почту» opens that role's form on the page of the subject. */
+  /** No address for the role (or none left for the question): «Указать почту» opens that role's form on the subject page. */
   | { kind: "no_email"; text: string; subjectId: string; role: TeacherRole | "" }
   /** The assignment has no subject: the subject is chosen on the assignment. */
   | { kind: "no_subject"; text: string; assignmentId: string }
@@ -107,7 +106,11 @@ export function recipientView(c: RecipientSource, asking = true): RecipientView 
   const message = (c.message ?? "").trim();
   if (reason === "choose_teacher" && asking) {
     const options = choiceOptions(c.options);
-    return options.length >= 2 ? { kind: "choose", options } : { kind: "choice_changed" };
+    // The core accepts any teacher it still has an address for: even one option is a click, never a UI-made dead end.
+    // Nothing left is a refusal with the way out of «Указать почту».
+    return options.length >= 1
+      ? { kind: "choose", options }
+      : { kind: "no_email", text: recipientTexts.noTeachersLeft, subjectId: c.subjectId ?? "", role: "" };
   }
   if (reason === "no_teacher_email") {
     const role = teacherRole(c.role);
@@ -133,8 +136,6 @@ export function sendBlocked(v: RecipientView, chosen: TeacherChoice | null): str
   switch (v.kind) {
     case "choose":
       return chosen === null ? recipientTexts.chooseNeeded : "";
-    case "choice_changed":
-      return recipientTexts.choiceChanged;
     case "no_email":
       return recipientTexts.noEmailBlocked;
     case "no_subject":
@@ -148,12 +149,12 @@ export function sendBlocked(v: RecipientView, chosen: TeacherChoice | null): str
 export type RefusalAction =
   | { kind: "teacher"; label: string; subjectId: string; role: TeacherRole }
   | { kind: "choose_subject"; label: string }
-  | { kind: "assignment"; label: string; assignmentId: string }
+  | { kind: "assignment"; label: string; assignmentId: string; edit: true }
   | { kind: "subjects"; label: string };
 
 /**
  * The button of a refusal. "page" is the assignment page, where the subject is chosen in place («Изменить»); "card" is
- * the agent's card, which can only lead to the assignment (or to the subjects when it names none).
+ * the agent's card, which leads to the assignment with «Изменить» already open (or to the subjects when it names none).
  */
 export function refusalAction(v: Extract<RecipientView, { kind: "no_email" | "no_subject" }>, where: "page" | "card"): RefusalAction {
   if (v.kind === "no_email") {
@@ -167,7 +168,7 @@ export function refusalAction(v: Extract<RecipientView, { kind: "no_email" | "no
   }
   return v.assignmentId === ""
     ? { kind: "subjects", label: recipientTexts.openSubjects }
-    : { kind: "assignment", label: recipientTexts.openAssignment, assignmentId: v.assignmentId };
+    : { kind: "assignment", label: recipientTexts.chooseSubject, assignmentId: v.assignmentId, edit: true };
 }
 
 /** What «Указать почту» asks of the window: the role to open, «Лектор» when the core named none. */

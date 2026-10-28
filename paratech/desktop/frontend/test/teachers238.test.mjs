@@ -18,6 +18,7 @@ import {
   rowLabels,
   teacherFocusStep,
   teacherRows,
+  teacherStateFor,
   teacherTexts,
   triggerId,
 } from "../.test-build/teachersView.js";
@@ -308,6 +309,7 @@ test("«not_found» closes the form, re-reads and says so", async () => {
   page.flow.type({ name: "Иванов", email: "ivanov@example.test" });
   await page.flow.save();
   assert.deepEqual([page.flow.state.form, page.flow.state.errors.general, page.rereads], [null, teacherTexts.notFound, 1]);
+  assert.equal(page.flow.state.focusRole, "lecture", "the closed form leaves the focus on the button of its row");
 });
 
 test("a throwing call is «failed» too", async () => {
@@ -367,6 +369,57 @@ test("«Убрать» calls clear with the role and the version, only for a fil
   assert.equal(page.subject.version, 4);
 });
 
+test("«Убрать» can be undone: «Вернуть» saves the removed name and address over the current version", async () => {
+  const page = setup(withTeachers({ lecture: lecturer }), [ok(subject({ version: 4 })), ok(withTeachers({ lecture: lecturer }, { version: 5 }))]);
+  page.flow.open("lecture");
+  await page.flow.clear();
+  assert.deepEqual(page.flow.state.removed, { role: "lecture", ...lecturer });
+  assert.equal(page.flow.state.note, teacherTexts.cleared);
+  const out = view(none, page.flow.state);
+  assert.match(out, />Вернуть</);
+  assert.match(out, /Преподаватель убран\./);
+  await Promise.all([page.flow.restore(), page.flow.restore()]);
+  assert.deepEqual(page.calls[1], ["set", "s1", 4, "lecture", lecturer.name, lecturer.email], "the version of the last answer, one call");
+  assert.equal(page.calls.length, 2);
+  assert.deepEqual([page.flow.state.removed, page.flow.state.note, page.flow.state.focusRole], [null, teacherTexts.restored, "lecture"]);
+  assert.equal(teacherTexts.restored, "Преподаватель восстановлен.");
+  assert.doesNotMatch(view(none, page.flow.state), />Вернуть</);
+  await page.flow.restore();
+  assert.equal(page.calls.length, 2, "nothing to return any more");
+});
+
+test("the undo offer stays after a refused «Вернуть» and goes away with the next action or another subject", async () => {
+  const page = setup(withTeachers({ lecture: lecturer }), [ok(subject({ version: 4 })), refused("changed")]);
+  page.flow.open("lecture");
+  await page.flow.clear();
+  await page.flow.restore();
+  assert.equal(page.flow.state.errors.general, teacherTexts.changed);
+  assert.equal(page.rereads, 1, "re-read, so the next try goes over the real version");
+  assert.notEqual(page.flow.state.removed, null);
+  page.flow.open("practice");
+  assert.equal(page.flow.state.removed, null, "another form is the next action");
+  assert.doesNotMatch(view(none, { ...idleTeacher, form: page.flow.state.form, removed: { role: "lecture", ...lecturer } }), />Вернуть</, "not next to an open form");
+
+  const other = setup(withTeachers({ lecture: lecturer }));
+  other.flow.open("lecture");
+  await other.flow.clear();
+  assert.notEqual(other.flow.state.removed, null);
+  other.flow.reset();
+  assert.equal(other.flow.state.removed, null);
+  await other.flow.restore();
+  assert.equal(other.calls.length, 1, "no offer, no call");
+});
+
+test("a role filled meanwhile is not overwritten by «Вернуть»", async () => {
+  const page = setup(withTeachers({ lecture: lecturer }), [ok(subject({ version: 4 }))]);
+  page.flow.open("lecture");
+  await page.flow.clear();
+  page.subject = withTeachers({ lecture: seminar }, { version: 6 });
+  await page.flow.restore();
+  assert.equal(page.calls.length, 1);
+  assert.equal(page.flow.state.removed, null);
+});
+
 test("a failed clear says so and re-reads", async () => {
   const page = setup(withTeachers({ lecture: lecturer }), [refused("changed"), refused("failed")]);
   page.flow.open("lecture");
@@ -391,12 +444,51 @@ test("another subject: reset drops the form, and a late reply no longer touches 
   page.flow.type({ name: "Иванов", email: "ivanov@example.test" });
   const running = page.flow.save();
   page.flow.reset();
-  assert.deepEqual(page.flow.state, idleTeacher);
+  assert.deepEqual(page.flow.state, { ...idleTeacher, owner: "s1" }, "idle, stamped with the subject it was made on");
   release();
   await running;
   assert.equal(page.flow.state.form, null);
   assert.equal(page.flow.state.note, "");
   assert.equal(page.subject.version, 4, "the list still learns the saved subject");
+});
+
+test("a call running when another subject opens does not refuse the new subject's form, and its end does not unlock a newer call", async () => {
+  const page = setup();
+  const holds = [];
+  page.flow = new TeacherFlow(
+    {
+      setSubjectTeacher: (...a) => new Promise((r) => holds.push(() => r(ok(withTeachers({ lecture: lecturer }, { version: 4 }))))),
+      clearSubjectTeacher: async () => refused("failed"),
+    },
+    { subject: () => page.subject, replace: (s) => (page.subject = s), reread: async () => true },
+    (s) => page.states.push(s),
+  );
+  page.flow.open("lecture");
+  page.flow.type({ name: "Иванов", email: "ivanov@example.test" });
+  const old = page.flow.save();
+  page.flow.reset();
+  page.subject = subject({ id: "s2", name: "Химия" });
+  page.flow.open("practice");
+  assert.equal(page.flow.state.form?.role, "practice", "the form of the new subject opens while the old call runs");
+  page.flow.type({ name: "Петров", email: "petrov@example.test" });
+  const fresh = page.flow.save();
+  holds[0](); // the old call ends first
+  await old;
+  page.flow.open("lab");
+  assert.equal(page.flow.state.form.role, "practice", "the newer call still runs: the buttons stay off");
+  holds[1]();
+  await fresh;
+  assert.equal(page.flow.state.form, null);
+});
+
+test("the state made on another subject is shown as idle, so the old form never flashes", () => {
+  const state = { ...idleTeacher, owner: "s1", form: { role: "lecture", name: "Иванов", email: "i@example.test" }, note: "x" };
+  assert.equal(teacherStateFor(state, "s1"), state);
+  assert.deepEqual(teacherStateFor(state, "s2"), idleTeacher);
+  assert.equal(teacherStateFor(idleTeacher, "s2"), idleTeacher);
+  const src = readFileSync(new URL("../src/pages/SubjectsPage.tsx", import.meta.url), "utf8");
+  assert.match(src, /<TeachersBlock key=\{subject\.id\} /);
+  assert.match(src, /teacherStateFor\(teacher, subject\.id\)/);
 });
 
 test("a disposed flow reports nothing", async () => {

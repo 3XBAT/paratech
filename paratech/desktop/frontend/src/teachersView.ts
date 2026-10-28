@@ -41,6 +41,8 @@ export const teacherTexts = {
   rereadFailed: "Не удалось обновить данные предмета. Откройте страницу заново.",
   saved: "Преподаватель сохранён.",
   cleared: "Преподаватель убран.",
+  undo: "Вернуть",
+  restored: "Преподаватель восстановлен.",
 } as const;
 
 /** The titles of the three rows. */
@@ -135,9 +137,20 @@ export interface TeacherErrors {
 
 export const noErrors: TeacherErrors = { name: "", email: "", general: "" };
 
+/** A teacher the student just removed: «Вернуть» saves it back. Typed text, kept only in memory. */
+export interface RemovedTeacher {
+  role: TeacherRole;
+  name: string;
+  email: string;
+}
+
 export interface TeacherState {
+  /** The subject this state was made on; a page showing another subject must not show it. */
+  owner: string;
   /** The open form; at most one. */
   form: TeacherForm | null;
+  /** The last removed teacher, offered back until the next action or another subject. */
+  removed: RemovedTeacher | null;
   /** A call runs: the buttons are off. */
   busy: "" | "save" | "clear";
   errors: TeacherErrors;
@@ -147,7 +160,12 @@ export interface TeacherState {
   focusRole: TeacherRole | "";
 }
 
-export const idleTeacher: TeacherState = { form: null, busy: "", errors: noErrors, note: "", focusRole: "" };
+export const idleTeacher: TeacherState = { owner: "", form: null, removed: null, busy: "", errors: noErrors, note: "", focusRole: "" };
+
+/** What the page shows for a subject: the state made on another subject is an idle block (no one-frame flash of its form). */
+export function teacherStateFor(state: TeacherState, subjectId: string): TeacherState {
+  return state.owner === "" || state.owner === subjectId ? state : idleTeacher;
+}
 
 /** The error of the field the core refused; a role or an unknown field is not the student's to fix. */
 function fieldErrors(field: TeacherResult["field"], general: string): TeacherErrors {
@@ -200,15 +218,19 @@ export class TeacherFlow {
   }
 
   private set(patch: Partial<TeacherState>): void {
-    this.current = { ...this.current, ...patch };
+    this.current = { ...this.current, ...patch, owner: this.host.subject()?.id ?? "" };
     if (!this.disposed) {
       this.onChange(this.current);
     }
   }
 
-  /** Another subject (or the list) is shown: the form, errors and note of the previous one go away. */
+  /**
+   * Another subject (or the list) is shown: the form, errors, note and undo offer of the previous one go away. A call
+   * still running no longer blocks the new subject; its late result only updates the list (see `epoch`).
+   */
   reset(): void {
     this.epoch++;
+    this.pending = false;
     this.set(idleTeacher);
   }
 
@@ -218,7 +240,7 @@ export class TeacherFlow {
     if (this.pending || subject === null) {
       return;
     }
-    this.set({ form: formFor(role, subject.teachers), errors: noErrors, note: "", focusRole: "" });
+    this.set({ form: formFor(role, subject.teachers), errors: noErrors, note: "", removed: null, focusRole: "" });
   }
 
   cancel(): void {
@@ -275,13 +297,39 @@ export class TeacherFlow {
     if (this.pending || form === null || subject === null || subject.teachers[form.role] === null) {
       return;
     }
-    await this.run("clear", form.role, () => this.api.clearSubjectTeacher(subject.id, subject.version, form.role));
+    const old = subject.teachers[form.role];
+    const prev = old === null ? null : { role: form.role, name: old.name, email: old.email };
+    await this.run("clear", form.role, () => this.api.clearSubjectTeacher(subject.id, subject.version, form.role), { prev });
   }
 
-  private async run(kind: "save" | "clear", role: TeacherRole, call: () => Promise<TeacherResult>): Promise<void> {
+  /**
+   * «Вернуть»: saves the removed teacher again over the version of the last read (a stale one is refused by the core and
+   * the list is read again, the offer stays). Nothing to do once the role has another teacher.
+   */
+  async restore(): Promise<void> {
+    const back = this.current.removed;
+    const subject = this.host.subject();
+    if (this.pending || this.current.form !== null || back === null || subject === null) {
+      return;
+    }
+    if (subject.teachers[back.role] !== null) {
+      this.set({ removed: null });
+      return;
+    }
+    await this.run("save", back.role, () => this.api.setSubjectTeacher(subject.id, subject.version, back.role, back.name, back.email), {
+      restore: true,
+    });
+  }
+
+  private async run(
+    kind: "save" | "clear",
+    role: TeacherRole,
+    call: () => Promise<TeacherResult>,
+    opts: { prev?: RemovedTeacher | null; restore?: boolean } = {},
+  ): Promise<void> {
     this.pending = true;
     const epoch = this.epoch;
-    this.set({ busy: kind, errors: noErrors, note: "" });
+    this.set({ busy: kind, errors: noErrors, note: "", ...(opts.restore === true ? {} : { removed: null }) });
     try {
       let result: TeacherResult;
       try {
@@ -289,13 +337,22 @@ export class TeacherFlow {
       } catch {
         result = { problem: "failed", field: "", subject: null };
       }
-      await this.finish(result, kind, role, epoch);
+      await this.finish(result, kind, role, epoch, opts);
     } finally {
-      this.pending = false;
+      // After reset() the flag belongs to the call of the new subject, not to this late one.
+      if (epoch === this.epoch) {
+        this.pending = false;
+      }
     }
   }
 
-  private async finish(result: TeacherResult, kind: "save" | "clear", role: TeacherRole, epoch: number): Promise<void> {
+  private async finish(
+    result: TeacherResult,
+    kind: "save" | "clear",
+    role: TeacherRole,
+    epoch: number,
+    opts: { prev?: RemovedTeacher | null; restore?: boolean },
+  ): Promise<void> {
     const fresh = () => epoch === this.epoch;
     if (result.problem === "" && result.subject !== null) {
       this.host.replace(result.subject);
@@ -304,7 +361,8 @@ export class TeacherFlow {
           form: null,
           busy: "",
           errors: noErrors,
-          note: kind === "save" ? teacherTexts.saved : teacherTexts.cleared,
+          note: kind === "clear" ? teacherTexts.cleared : opts.restore === true ? teacherTexts.restored : teacherTexts.saved,
+          removed: kind === "clear" ? (opts.prev ?? null) : null,
           focusRole: role,
         });
       }
@@ -326,7 +384,8 @@ export class TeacherFlow {
     this.set({
       busy: "",
       errors: { ...noErrors, general: text },
-      ...(result.problem === "not_found" ? { form: null } : {}),
+      // The form closes without a result to point at: the focus goes to the button of its row.
+      ...(result.problem === "not_found" ? { form: null, focusRole: role } : {}),
     });
   }
 }

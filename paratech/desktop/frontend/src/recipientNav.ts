@@ -7,10 +7,15 @@ import type { TeacherRole } from "./bindings/recipient.js";
 export interface RecipientNav {
   /** «Указать почту»: the page of the subject with the form of that teacher's role open and focused. */
   openTeacher(subjectId: string, role: TeacherRole): void;
-  /** «Открыть задание»: «Задания» on that assignment (where «Изменить» chooses the subject). */
-  openAssignment(assignmentId: string): void;
+  /** «Задания» on that assignment; edit also opens «Изменить» there (where the subject is chosen), once. */
+  openAssignment(assignmentId: string, opts?: { edit?: boolean }): void;
   /** The list of subjects, when a refusal names no subject. */
   openSubjects(): void;
+}
+
+/** The window keeps a request to open «Изменить» only while the route still shows that assignment ("" none). */
+export function keepAssignmentEdit(editId: string, route: { page: string; assignment: string }): string {
+  return editId !== "" && route.page === "homework" && route.assignment === editId ? editId : "";
 }
 
 const none: RecipientNav = { openTeacher: () => undefined, openAssignment: () => undefined, openSubjects: () => undefined };

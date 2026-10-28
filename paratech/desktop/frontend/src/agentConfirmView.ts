@@ -152,7 +152,7 @@ export function confirmCardModel(c: ConfirmCard, chosenRole: TeacherRole | "" = 
       const refused = isRefusal(rv);
       const to: CardRow[] =
         rv.kind === "to" ? [{ label: "Кому", value: rv.name !== "" ? rv.name : rv.address, ...(rv.name !== "" ? { address: rv.address } : {}) }] : [];
-      const yes = base.yes && !refused && rv.kind !== "choice_changed";
+      const yes = base.yes && !refused;
       return {
         ...base,
         title: confirmTexts.sendTitle,
@@ -192,7 +192,7 @@ export function confirmCardModel(c: ConfirmCard, chosenRole: TeacherRole | "" = 
 export interface FlowState {
   card: ConfirmCard | null;
   /** A call runs: the buttons are off. */
-  busy: "" | "confirm" | "decline" | "refresh";
+  busy: "" | "confirm" | "decline";
   /** A fixed Russian text of a refused call; "" when none. */
   error: string;
   /** The deletion window is open (a deletion is confirmed there). */
@@ -266,22 +266,6 @@ export class ConfirmFlow {
       return;
     }
     this.set({ chosenRole: role, error: "" });
-  }
-
-  /** «Обновить карточку» of a question that has nothing to choose from any more: the card is read again. */
-  async refresh(): Promise<void> {
-    const card = this.current.card;
-    if (this.pending || card === null) {
-      return;
-    }
-    this.pending = true;
-    this.set({ busy: "refresh", error: "" });
-    try {
-      await this.load({ kind: card.targetKind as ConfirmTarget["kind"], id: card.targetId });
-    } finally {
-      this.set({ busy: "" });
-      this.pending = false;
-    }
   }
 
   /** «Да». A send or a deadline goes to the core; a deletion opens the deletion window. */
