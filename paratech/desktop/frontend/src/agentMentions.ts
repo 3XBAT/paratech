@@ -412,16 +412,28 @@ export function createSlowGate(d: {
   };
 }
 
-/** The kinds that are a settled line (not options, not a search in progress). */
+/**
+ * The lines kept on screen while the next search runs: «ничего не найдено» and «недоступен». «failed» is not one of them:
+ * a retry that fails again must pass through a hidden line, or the live region would not announce it and the «Повторить»
+ * button would blink away and back.
+ */
 export function isSettledLine(m: PopupModel | null): m is PopupModel {
-  return m !== null && (m.kind === "empty" || m.kind === "unavailable" || m.kind === "failed");
+  return m !== null && (m.kind === "empty" || m.kind === "unavailable");
+}
+
+/** The settled line to keep after this render: cleared by null / options / full / failed, kept across loading, replaced by a new one. */
+export function nextSettled(prev: PopupModel | null, model: PopupModel | null): PopupModel | null {
+  if (model !== null && model.kind === "loading") {
+    return prev;
+  }
+  return isSettledLine(model) ? model : null;
 }
 
 /**
  * The list for the search state and the pills already chosen. Every state has its own line; none is a dead end. A search
  * that has not answered yet shows no «Поиск…» until `slow` (see createSlowGate): the previous options stay, or the
- * previous settled line `prev` (empty / unavailable / failed) stays, or nothing shows (first open). The kind is still
- * "loading" then, so the keys see the true state.
+ * previous settled line `prev` (empty / unavailable) stays, or nothing shows (first open, after a failure). The kind is
+ * still "loading" then, so the keys see the true state.
  */
 export function popupModel(search: SearchState, picked: readonly MentionView[], slow = false, prev: PopupModel | null = null): PopupModel {
   const status = (kind: PopupKind, text: string, retry = false): PopupModel => ({ kind, text, options: [], retry });

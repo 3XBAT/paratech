@@ -25,6 +25,7 @@ import {
   mentionPills,
   mentionTexts,
   moveActive,
+  nextSettled,
   pickerKey,
   popupModel,
   popupVisible,
@@ -229,8 +230,13 @@ test("list: a search that is not slow yet keeps the previous settled line; on th
   assert.deepEqual([afterEmpty.kind, afterEmpty.text, afterEmpty.retry, popupVisible(afterEmpty)], ["loading", "По «ф» ничего не найдено", false, true]);
   const afterOff = kept({ status: "unavailable", query: "ф", candidates: [] });
   assert.deepEqual([afterOff.kind, afterOff.text, popupVisible(afterOff)], ["loading", mentionTexts.unavailable, true]);
-  const afterBad = kept({ status: "failed", query: "ф", candidates: [] });
-  assert.deepEqual([afterBad.kind, afterBad.text, afterBad.retry, popupVisible(afterBad)], ["loading", mentionTexts.failed, false, true], "the line stays, the button is not offered while it searches again");
+  // «failed» is not kept: a retry that fails again must pass through a hidden line (announcement, no button blink).
+  const failedModel = popupModel({ status: "failed", query: "ф", candidates: [] }, []);
+  const loadingAfterRetry = { status: "loading", query: "", candidates: [] };
+  const afterBad = popupModel(loadingAfterRetry, [], false, failedModel);
+  assert.deepEqual([afterBad.kind, afterBad.text, afterBad.retry, popupVisible(afterBad)], ["loading", "", false, false]);
+  assert.equal(popupModel(loadingAfterRetry, [], false, failedModel).text, "");
+  assert.equal(popupModel(loadingAfterRetry, [], true, failedModel).text, mentionTexts.loading, "slow: «Поиск…»");
   // The key logic still sees a running search (Enter is swallowed).
   assert.equal(pickerKey(key("Enter"), afterEmpty.options.length, afterEmpty.kind), "swallow");
   // Slow: the line gives way to «Поиск…».
@@ -242,6 +248,22 @@ test("list: a search that is not slow yet keeps the previous settled line; on th
   assert.equal(popupVisible(popupModel({ status: "loading", query: "фи", candidates: [] }, [], false, withOptions)), false);
   // The same state without a previous line is as before the fix.
   assert.equal(popupModel(loading, []).text, "");
+});
+
+test("nextSettled: cleared by null / options / full / failed, kept across loading, replaced by a new settled line", () => {
+  const empty = popupModel({ status: "ready", query: "ф", candidates: [] }, []);
+  const off = popupModel({ status: "unavailable", query: "ф", candidates: [] }, []);
+  const failed = popupModel({ status: "failed", query: "ф", candidates: [] }, []);
+  const options = popupModel({ status: "ready", query: "ф", candidates: [cand("subject", "s")] }, []);
+  const loading = popupModel({ status: "loading", query: "фи", candidates: [] }, []);
+  assert.equal(nextSettled(null, empty), empty);
+  assert.equal(nextSettled(empty, off), off);
+  assert.equal(nextSettled(empty, loading), empty);
+  assert.equal(nextSettled(null, loading), null);
+  assert.equal(nextSettled(empty, failed), null);
+  assert.equal(nextSettled(empty, options), null);
+  assert.equal(nextSettled(empty, null), null);
+  assert.equal(nextSettled(empty, popupModel({ status: "ready", query: "ф", candidates: [] }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => ({ kind: "subject", id: `s${i}` })))), null);
 });
 
 test("empty result: the query is quoted and cut to 40 characters; without one the list says why it is empty", () => {
