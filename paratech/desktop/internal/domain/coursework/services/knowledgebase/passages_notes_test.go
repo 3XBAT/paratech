@@ -38,19 +38,19 @@ func TestPassagesOwnNotes(t *testing.T) {
 		places = append(places, place{p.Lesson.Key, p.Section, p.Index, string(p.Note), p.Locator})
 	}
 	want := []place{
-		// Equal score: the newer lesson first; within it the summary, the transcript, then the student's note
-		// (the order of TASK-152 stays: ADR-0027 Open 6 is open).
+		// Equal score: the newer lesson first; within it the student's note, then the summary and the transcript
+		// (ADR-0027 «Ranking»).
+		{RecordingKey("r1"), SectionOwnNote, 0, "n1", Locator{Kind: "page", N: 3}},
 		{RecordingKey("r1"), SectionSummary, 0, "", Locator{}},
 		{RecordingKey("r1"), SectionTranscript, 0, "", Locator{}},
-		{RecordingKey("r1"), SectionOwnNote, 0, "n1", Locator{Kind: "page", N: 3}},
 		{DayKey("s1", day(15)), SectionOwnNote, 0, "n2", Locator{Kind: "section", N: 2}},
 		{NoteKey("n3"), SectionOwnNote, 0, "n3", Locator{Kind: "fragment", N: 1}},
 	}
 	if !slices.Equal(places, want) {
 		t.Fatalf("places =\n%v\nwant\n%v", places, want)
 	}
-	if got[2].Material != "m1" || got[2].Recording() != "r1" || got[2].Heading != "" || got[2].StartMs != 0 {
-		t.Fatalf("note passage of a recorded lesson %+v", got[2])
+	if got[0].Material != "m1" || got[0].Recording() != "r1" || got[0].Heading != "" || got[0].StartMs != 0 {
+		t.Fatalf("note passage of a recorded lesson %+v", got[0])
 	}
 	// A section keeps its heading line, cleaned; the text is cleaned as any lesson text.
 	if got[3].Heading != "Ряды Тейлора" || got[3].Text != "Ряды Тейлора\nРяд Тейлора сходится." || got[3].Recording() != "" {

@@ -27,6 +27,9 @@ func chatHistory(n int, text func(int) string) []values.HistoryEntry {
 
 func numbered(turn int) string { return fmt.Sprintf("просьба %d", turn) }
 
+// noSummary is a chat without a summary: the window as before compaction existed.
+var noSummary values.HistorySummary
+
 // earlierOf returns the history part of a window (everything before the current text) and the numbers of the
 // requests it carries.
 func earlierOf(t *testing.T, w []values.HistoryTurn) ([]values.HistoryTurn, []int) {
@@ -50,7 +53,7 @@ func TestWindowShiftsBySteps(t *testing.T) {
 	prevFirst, run := 0, 0
 	for n := 1; n <= 30; n++ {
 		entries := append(chatHistory(n-1, numbered), entry(n, numbered(n), nil))
-		got := Window(entries, n)
+		got := Window(entries, n, noSummary)
 		if last := got[len(got)-1]; last.StudentText != numbered(n) {
 			t.Fatalf("request %d: last turn %+v", n, last)
 		}
@@ -98,11 +101,11 @@ func TestWindowSkipsDroppedRequests(t *testing.T) {
 		}
 	}
 	entries = append(entries, entry(7, numbered(7), nil))
-	_, nums := earlierOf(t, Window(entries, 7))
+	_, nums := earlierOf(t, Window(entries, 7, noSummary))
 	if fmt.Sprint(nums) != "[1 2 6]" {
 		t.Fatalf("window carries %v, want [1 2 6]", nums)
 	}
-	if f := Fill(entries[:len(entries)-1], 7); f.Pairs != 3 || f.Overflow {
+	if f := Fill(entries[:len(entries)-1], 7, noSummary); f.Pairs != 3 || f.Overflow {
 		t.Fatalf("Fill = %+v", f)
 	}
 }
@@ -140,8 +143,8 @@ func TestFillMatchesWindow(t *testing.T) {
 			if len(tt.entries) > 0 {
 				next = tt.entries[len(tt.entries)-1].Turn + 1
 			}
-			f := Fill(tt.entries, next)
-			w := Window(append(tt.entries, entry(next, numbered(next), nil)), next)
+			f := Fill(tt.entries, next, noSummary)
+			w := Window(append(tt.entries, entry(next, numbered(next), nil)), next, noSummary)
 			history, _ := earlierOf(t, w)
 			bytes := 0
 			for _, h := range history {
@@ -160,7 +163,7 @@ func TestFillMatchesWindow(t *testing.T) {
 		})
 	}
 
-	if f := Fill(chatHistory(20, numbered), 21); f.Share != 1 {
+	if f := Fill(chatHistory(20, numbered), 21, noSummary); f.Share != 1 {
 		t.Fatalf("20 pairs fill %v, want the whole window", f.Share)
 	}
 }
@@ -181,7 +184,7 @@ func TestLabelNeverReachesTheHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := append(chatRequest(1, "что было на лекции"), entry(2, "а ещё", nil))
-	got := Window(entries, 2)
+	got := Window(entries, 2, noSummary)
 	if s := fmt.Sprintf("%#v", got); strings.Contains(s, label) {
 		t.Fatalf("the window holds the label: %s", s)
 	}

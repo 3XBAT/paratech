@@ -676,7 +676,7 @@ func TestWindowStart(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := windowStart(tt.pairs, tt.nowTurns); got != tt.want {
+			if got := windowStart(tt.pairs, 0, tt.nowTurns, 0); got != tt.want {
 				t.Fatalf("windowStart = %d, want %d", got, tt.want)
 			}
 		})

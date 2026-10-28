@@ -121,6 +121,10 @@ func (s *stopTurns) RecoverIdle(context.Context, agentturn.IdleInput, func(share
 	return false, nil
 }
 
+func (s *stopTurns) Current(context.Context, shared.ThreadID) (agentturn.Step, bool, error) {
+	return agentturn.Step{}, false, errNotScripted
+}
+
 type stopReport struct {
 	stops, continues, reruns int
 	submitted, interrupted   []agentturn.SubmitInput

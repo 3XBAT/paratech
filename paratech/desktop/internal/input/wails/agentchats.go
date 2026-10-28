@@ -18,6 +18,7 @@ const (
 	opAgentArchive = "ui: agent archive chat"
 	opAgentRestore = "ui: agent restore chat"
 	opAgentEarlier = "ui: agent earlier requests"
+	opAgentCurrent = "ui: agent current request"
 )
 
 // AgentProblemNotFound is the problem of a chat call naming a chat that does not exist.
@@ -31,6 +32,13 @@ type AgentChats interface {
 	Archive(ctx context.Context, id shared.ThreadID) (agentchats.Chat, error)
 	Restore(ctx context.Context, id shared.ThreadID) (agentchats.Chat, error)
 	Earlier(ctx context.Context, id shared.ThreadID) ([]agentchats.Request, error)
+}
+
+// AgentCurrent reads the current request of a chat (input/agent.Driver.Current) as the update the Driver would publish;
+// app maps it in, as input/wails must not import input/agent. ok is false when the chat has no request or it ended; a
+// chat that does not exist wraps shared.ErrNotFound. It calls no Hub and starts nothing.
+type AgentCurrent interface {
+	Current(ctx context.Context, id shared.ThreadID) (u AgentUpdate, ok bool, err error)
 }
 
 // AgentMention is an object the student mentioned with «@»: kind is subject, lesson, material or assignment; label is
@@ -142,6 +150,37 @@ func (s *AgentService) ChatEarlier(ctx context.Context, threadID string) AgentEa
 		})
 	}
 	return AgentEarlierView{Requests: out}
+}
+
+// AgentCurrentView is the current request of a chat. Update has the form of an AgentUpdateEvent (problem "", progress
+// false; the same checked cards, model texts as plain text) and is null when the chat has no request or its request
+// ended. Problem is "", invalid, not_found, unavailable or failed.
+type AgentCurrentView struct {
+	Problem string           `json:"problem"`
+	Update  *AgentUpdateView `json:"update"`
+}
+
+// ChatCurrent returns the live card of a chat's current request, for a chat opened without its updates (after a
+// restart, ADR-0028): «Да» of a plan, the questions, «Продолжить» of a stopped request. Its later updates come as
+// AgentUpdateEvent with the same threadId and turn. It reads the local database only: no Hub call, no step.
+func (s *AgentService) ChatCurrent(ctx context.Context, threadID string) AgentCurrentView {
+	id := shared.ThreadID(threadID)
+	if id.Validate() != nil {
+		return AgentCurrentView{Problem: AgentProblemInvalid}
+	}
+	if s.current == nil || s.panel == nil {
+		return AgentCurrentView{Problem: AgentProblemUnavailable}
+	}
+	u, ok, err := s.current.Current(ctx, id)
+	if err != nil {
+		return AgentCurrentView{Problem: s.chatProblem(opAgentCurrent, err)}
+	}
+	if !ok {
+		return AgentCurrentView{}
+	}
+	u.Problem, u.Progress = "", false
+	v := s.panel.view(u)
+	return AgentCurrentView{Update: &v}
 }
 
 func (s *AgentService) onChat(op, threadID string, run func(shared.ThreadID) (agentchats.Chat, error)) AgentChatResult {

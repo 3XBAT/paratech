@@ -72,7 +72,7 @@ func (s *Service) drive(ctx context.Context, c *change, op string) (st Step, err
 		c.context = values.NewRefSet(base.Refs()...)
 		c.context.Add(turn.Scope().Refs()...)
 		req := values.StepRequest{
-			Key: key, Thread: c.th.ID(), Base: base, Scope: turn.Scope(), History: thread.Window(entries, turn.Number()),
+			Key: key, Thread: c.th.ID(), Base: base, Scope: turn.Scope(), History: thread.Window(entries, turn.Number(), c.th.Summary()),
 			MaxOutputTokens: MaxOutputTokens,
 		}
 
@@ -275,8 +275,7 @@ func (s *Service) decide(ctx context.Context, c *change, raw values.RawCall) err
 	args := call.Args()
 	switch call.Tool() {
 	case values.ToolShowPlan:
-		summary, _ := args.Text("summary")
-		card := values.PlanCard{Summary: summary, Steps: args.PlanSteps("steps"), Notes: args.TextList("notes")}
+		card := planCard(args)
 		if err := card.Validate(); err != nil {
 			return c.answer(values.RefusalResult(call.ID(), values.RefuseInvalidPlan), now)
 		}
@@ -290,7 +289,7 @@ func (s *Service) decide(ctx context.Context, c *change, raw values.RawCall) err
 			// A third round is refused with a note: the planner goes on with stated assumptions (decision c).
 			return c.refuse(call.ID(), err, now)
 		}
-		c.cards = append(c.cards, values.QuestionsCard{Round: round, Questions: args.Questions("questions")})
+		c.cards = append(c.cards, questionsCard(round, args))
 	case values.ToolReply, values.ToolCannotDo:
 		// The assignments a reply lists pass the provenance check as any ID (ADR-0022); a refused reply shows nothing and
 		// the planner goes on.
@@ -322,6 +321,18 @@ func (s *Service) decide(ctx context.Context, c *change, raw values.RawCall) err
 		c.calls = append(c.calls, Call{Call: call, Class: adm.Class, Paid: adm.Paid, PlanStep: adm.PlanStep})
 	}
 	return nil
+}
+
+// planCard is the card of a show_plan call; the step that shows it and Current build it here.
+func planCard(args values.Args) values.PlanCard {
+	summary, _ := args.Text("summary")
+	return values.PlanCard{Summary: summary, Steps: args.PlanSteps("steps"), Notes: args.TextList("notes")}
+}
+
+// questionsCard is the card of question round round of an ask_questions call; the step that shows it and Current
+// build it here.
+func questionsCard(round int, args values.Args) values.QuestionsCard {
+	return values.QuestionsCard{Round: round, Questions: args.Questions("questions")}
 }
 
 func (c *change) answer(r values.ToolResult, now time.Time) error {
