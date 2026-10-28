@@ -60,6 +60,7 @@ type Assignment struct {
 	createdAt time.Time
 	updatedAt time.Time
 	deletedAt time.Time // zero: not deleted (ADR-0029, soft delete)
+	doneAt    time.Time // zero: not done (ADR-0033 §9)
 }
 
 // Spec is what the creator of an extracted assignment provides to NewExtracted.
@@ -108,6 +109,7 @@ type State struct {
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 	DeletedAt     time.Time // zero: not deleted
+	DoneAt        time.Time // zero: not done
 }
 
 // Restore rebuilds a stored assignment from its State (the repositories' path), deleted or not, without side
@@ -139,7 +141,7 @@ func Restore(s State) (*Assignment, error) {
 		promptVersion: s.PromptVersion, details: d, userEdited: s.UserEdited,
 		hints:      values.NewLessonNames(s.HintSubject, s.HintTeacher),
 		correction: values.NewLessonNames(s.UserSubject, s.UserTeacher),
-		createdAt:  s.CreatedAt, updatedAt: s.UpdatedAt, deletedAt: s.DeletedAt,
+		createdAt:  s.CreatedAt, updatedAt: s.UpdatedAt, deletedAt: s.DeletedAt, doneAt: s.DoneAt,
 	}
 	if err := a.validate(); err != nil {
 		return nil, err
@@ -170,6 +172,8 @@ func (a *Assignment) validate() error {
 		return bad("prompt version %d", a.promptVersion)
 	case a.createdAt.IsZero() || a.updatedAt.IsZero():
 		return bad("missing time")
+	case !a.doneAt.IsZero() && a.doneAt.Before(a.createdAt):
+		return bad("done before created")
 	}
 	return nil
 }
@@ -350,7 +354,7 @@ func (a *Assignment) State() State {
 		PromptVersion: a.promptVersion, Title: a.details.title, Description: a.details.description, Due: a.details.due,
 		UserEdited: a.userEdited, HintSubject: a.hints.Subject(), HintTeacher: a.hints.Teacher(),
 		UserSubject: a.correction.Subject(), UserTeacher: a.correction.Teacher(), CreatedAt: a.createdAt, UpdatedAt: a.updatedAt,
-		DeletedAt: a.deletedAt,
+		DeletedAt: a.deletedAt, DoneAt: a.doneAt,
 	}
 }
 
