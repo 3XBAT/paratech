@@ -208,7 +208,7 @@ test("a work card reaches the panel with its workId; an older core without the f
 
 test("without the turnkey calls a work card shows nothing", () => {
   const actions = { press: noop, revise: noop, answer: noop, undo: noop, undoAll: noop, undoNote: () => undefined };
-  const out = renderToStaticMarkup(h(AgentRequest, { model: { key: "k", userText: "", callLine: "", waiting: false, cards: [{ type: "work", workId: "w1" }] }, actions }));
+  const out = renderToStaticMarkup(h(AgentRequest, { model: { key: "k", userText: "", mentions: [], callLine: "", waiting: false, cards: [{ type: "work", workId: "w1" }] }, actions }));
   assert.ok(!out.includes("ag-card"));
 });
 
