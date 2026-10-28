@@ -15,6 +15,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"paratech/desktop/internal/adapters/icsschedule"
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/activity"
 	"paratech/desktop/internal/cases/agentturn"
@@ -30,6 +31,7 @@ import (
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
 	libvalues "paratech/desktop/internal/domain/library/values"
+	"paratech/desktop/internal/domain/schedule/services/importplan"
 	"paratech/desktop/internal/domain/shared"
 	agentloop "paratech/desktop/internal/input/agent"
 	"paratech/desktop/testenv"
@@ -140,6 +142,7 @@ type driverEnv struct {
 	knowledge *driverKnowledge
 	driver    *agentloop.Driver
 	sink      *driverSink
+	schedule  *schedulesync.Service // the schedule use case on the database of the env
 }
 
 // newDriverEnv builds the agent env with the real CallFacts and base subjects of input/agent and the Driver.
@@ -178,6 +181,16 @@ func newDriverEnv(t *testing.T) *driverEnv {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	ics, err := icsschedule.New(e.clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.schedule, err = schedulesync.New(schedulesync.Deps{
+		Lessons: sqlite.NewLessonRepository(e.db), Parsers: map[importplan.Source]schedulesync.ScheduleParser{importplan.SourceICS: ics},
+		Clock: e.clock, IDs: &lessonIDGen{}, Tx: e.db,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	jobs, err := activity.New(sqlite.NewRecordingRepository(e.db), sqlite.NewJobRepository(e.db),
 		sqlite.NewLessonRepository(e.db), nil, schedulesync.CalendarSyncJobType)
 	if err != nil {
@@ -185,7 +198,7 @@ func newDriverEnv(t *testing.T) *driverEnv {
 	}
 	if e.driver, err = agentloop.New(agentloop.Deps{
 		Turns: e.turns, Sink: e.sink, Library: lib, Knowledge: e.knowledge, Activity: driverActivity{jobs},
-		Schedule: sqlite.NewLessonRepository(e.db), Assignments: driverAssignments{}, Deliveries: driverDeliveries{}, Clock: e.clock,
+		Schedule: e.schedule, Assignments: driverAssignments{}, Deliveries: driverDeliveries{}, Clock: e.clock,
 	}); err != nil {
 		t.Fatal(err)
 	}

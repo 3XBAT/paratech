@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"paratech/desktop/internal/adapters/icsschedule"
-	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/schedulesync"
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/schedule/services/importplan"
@@ -29,17 +27,7 @@ const icsFridaySaturday = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-TIMEZONE:Europ
 // importSchedule imports file as ICS into the database of e, as the schedule page does.
 func (e *driverEnv) importSchedule(t *testing.T, file string) {
 	t.Helper()
-	ics, err := icsschedule.New(e.clock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	svc, err := schedulesync.New(schedulesync.Deps{
-		Lessons: sqlite.NewLessonRepository(e.db), Parsers: map[importplan.Source]schedulesync.ScheduleParser{importplan.SourceICS: ics},
-		Clock: e.clock, IDs: &lessonIDGen{}, Tx: e.db,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	svc := e.schedule
 	ctx := context.Background()
 	p, err := svc.PreviewImport(ctx, schedulesync.ImportRequest{Source: importplan.SourceICS, Data: []byte(file)})
 	if err != nil || !p.Plan.Valid() {

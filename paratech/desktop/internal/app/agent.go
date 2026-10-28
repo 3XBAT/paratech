@@ -14,6 +14,7 @@ import (
 	"paratech/desktop/internal/cases/knowledgebase"
 	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/cases/preferences"
+	"paratech/desktop/internal/cases/schedulesync"
 	"paratech/desktop/internal/cases/senddelivery"
 	"paratech/desktop/internal/cases/turnkey"
 	"paratech/desktop/internal/domain/shared"
@@ -22,11 +23,12 @@ import (
 )
 
 // agentReads are the use cases the agent works through: the library and the knowledge base, the recordings and jobs,
-// the assignments and their deliveries, and for the actions the reruns of post-processing and the drafts.
+// the schedule, the assignments and their deliveries, and for the actions the reruns of post-processing and the drafts.
 type agentReads struct {
 	library     *library.Service
 	knowledge   *knowledgebase.Service
 	activity    agentloop.Activity
+	schedule    *schedulesync.Service // the lessons of the schedule find_lessons lists
 	assignments *homeworkflow.Service
 	deliveries  *senddelivery.Service
 	rerunner    *homeworkflow.Rerunner
@@ -102,7 +104,7 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	}
 	c.driver, err = agentloop.New(agentloop.Deps{
 		Turns: c.agent, Sink: panelSink{c.panel}, Library: reads.library, Inspector: reads.library, Answerer: reads.answers,
-		Knowledge: reads.knowledge, Activity: reads.activity, Schedule: sqlite.NewLessonRepository(c.db),
+		Knowledge: reads.knowledge, Activity: reads.activity, Schedule: reads.schedule,
 		Assignments: reads.assignments, Deliveries: reads.deliveries, Journal: c.journal, Actions: actions,
 		Proposals: reads.assignments, Deletions: c.deletions, Drafts: c.drafts, Clock: e.local, Log: log,
 	})

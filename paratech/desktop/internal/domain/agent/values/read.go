@@ -103,7 +103,7 @@ type LessonRow struct {
 	Lesson      Ref // the schedule entry; zero for an ad-hoc recording
 	Subject     Ref // zero when the lesson names no subject of the library
 	Date        Date
-	Time        TimeOfDay // the start of a lesson of the schedule not recorded; zero otherwise
+	Time        TimeOfDay // the start in the student's zone: of the recording, or of a lesson of the schedule not recorded
 	Kind        string    // a lesson kind code; anything else is left out
 	Transcribed bool
 	Summary     bool

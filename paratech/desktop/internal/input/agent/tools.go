@@ -49,10 +49,10 @@ type Activity interface {
 	JobStates(ctx context.Context, ids []shared.JobID) ([]activity.JobState, error)
 }
 
-// Schedule reads the lessons of the local schedule, the system of record (PRD section 11.1): find_lessons lists the ones
-// not recorded within its dates. Implemented over the lesson repository the screens read.
+// Schedule reads the lessons of the local schedule, the system of record (cases/schedulesync, PRD section 11.1):
+// find_lessons lists the ones not recorded within its dates.
 type Schedule interface {
-	ListStartingBetween(ctx context.Context, from, to time.Time) ([]*lesson.Lesson, error)
+	LessonsStartingBetween(ctx context.Context, from, to time.Time) ([]*lesson.Lesson, error)
 }
 
 // Assignments lists the assignments (cases/homeworkflow).
@@ -212,36 +212,58 @@ func (t tools) findLessons(ctx context.Context, call values.Call, scope values.S
 	}
 
 	loc := t.clock.Now().Location()
-	var rows []values.LessonRow
+	var found []foundLesson
+	// recorded are the schedule entries of the recordings the knowledge base lists: those lessons show as recordings.
+	recorded := map[shared.LessonID]bool{}
 	for _, l := range kb.Newest(lessons) {
 		rec, ok := refOfID(values.KindRecording, string(l.Recording))
 		if !ok {
 			continue
 		}
+		if id := entry[l.Recording]; id != "" {
+			recorded[id] = true
+		}
+		start := l.StartedAt.In(loc)
 		row := values.LessonRow{
-			Recording: rec, Date: dateOf(l.StartedAt, loc), Kind: l.Kind, Transcribed: l.Ready.Transcribed(),
+			Recording: rec, Date: dateOf(start, loc), Kind: l.Kind, Transcribed: l.Ready.Transcribed(),
 			Summary: l.Ready.Summary, LectureText: l.Ready.LectureText,
+		}
+		if !l.StartedAt.IsZero() {
+			row.Time, _ = values.NewTimeOfDay(start.Hour(), start.Minute())
 		}
 		row.Lesson, _ = refOfID(values.KindLesson, string(entry[l.Recording]))
 		row.Subject, _ = refOfID(values.KindSubject, string(l.Library.ID))
 		if q.Match(row) {
-			rows = append(rows, row)
+			found = append(found, foundLesson{start: l.StartedAt, row: row})
 		}
 	}
-	planned, err := t.plannedLessons(ctx, q, entry)
+	planned, err := t.plannedLessons(ctx, q, recorded)
 	if err != nil {
 		return values.ToolResult{}, nil, err
 	}
-	return values.LessonsResult(call.ID(), append(rows, planned...))
+	// Newest first, recorded and planned together, so the cut at MaxReadItems drops the oldest, never the upcoming.
+	found = append(found, planned...)
+	slices.SortStableFunc(found, func(a, b foundLesson) int { return b.start.Compare(a.start) })
+	rows := make([]values.LessonRow, 0, len(found))
+	for _, f := range found {
+		rows = append(rows, f.row)
+	}
+	return values.LessonsResult(call.ID(), rows)
+}
+
+// foundLesson is a row of find_lessons with the instant it is ordered by.
+type foundLesson struct {
+	start time.Time
+	row   values.LessonRow
 }
 
 // plannedLessonDays is how many days find_lessons reads the schedule from a "from" date without a "to" date.
 const plannedLessonDays = 7
 
-// plannedLessons returns the lessons of the schedule not recorded, oldest first, when the query names dates: from
-// "from" (today without it) through "to" (a week without it), days in the student's zone. Without dates find_lessons
-// stays the list of recorded lessons. recorded maps the recordings to their schedule entries.
-func (t tools) plannedLessons(ctx context.Context, q values.LessonQuery, recorded map[shared.RecordingID]shared.LessonID) ([]values.LessonRow, error) {
+// plannedLessons returns the lessons of the schedule not recorded when the query names dates: from "from" (today
+// without it) through "to" (a week without it), days in the student's zone. Without dates find_lessons stays the list
+// of recorded lessons. recorded are the schedule entries already shown as recordings.
+func (t tools) plannedLessons(ctx context.Context, q values.LessonQuery, recorded map[shared.LessonID]bool) ([]foundLesson, error) {
 	if t.schedule == nil || (q.From.IsZero() && q.To.IsZero()) {
 		return nil, nil
 	}
@@ -258,7 +280,7 @@ func (t tools) plannedLessons(ctx context.Context, q values.LessonQuery, recorde
 	if !from.Before(to) {
 		return nil, nil
 	}
-	lessons, err := t.schedule.ListStartingBetween(ctx, from, to)
+	lessons, err := t.schedule.LessonsStartingBetween(ctx, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -273,14 +295,10 @@ func (t tools) plannedLessons(ctx context.Context, q values.LessonQuery, recorde
 	if err != nil {
 		return nil, err
 	}
-	done := make(map[shared.LessonID]bool, len(recorded))
-	for _, id := range recorded {
-		done[id] = true
-	}
-	var rows []values.LessonRow
+	var out []foundLesson
 	for _, l := range lessons {
 		id, ok := refOfID(values.KindLesson, string(l.ID()))
-		if !ok || done[l.ID()] {
+		if !ok || recorded[l.ID()] {
 			continue
 		}
 		c := l.Content()
@@ -291,10 +309,10 @@ func (t tools) plannedLessons(ctx context.Context, q values.LessonQuery, recorde
 			row.Subject, _ = refOfID(values.KindSubject, string(m.ID))
 		}
 		if q.Match(row) {
-			rows = append(rows, row)
+			out = append(out, foundLesson{start: c.Start, row: row})
 		}
 	}
-	return rows, nil
+	return out, nil
 }
 
 // lessonsOf returns the lessons of a library subject, or of every subject for a zero ref.

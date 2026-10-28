@@ -178,7 +178,7 @@ type fakeSchedule struct {
 	asked   [][2]time.Time
 }
 
-func (s *fakeSchedule) ListStartingBetween(_ context.Context, from, to time.Time) ([]*lesson.Lesson, error) {
+func (s *fakeSchedule) LessonsStartingBetween(_ context.Context, from, to time.Time) ([]*lesson.Lesson, error) {
 	s.asked = append(s.asked, [2]time.Time{from, to})
 	var out []*lesson.Lesson
 	for _, l := range s.lessons {
