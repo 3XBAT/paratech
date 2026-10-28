@@ -64,8 +64,32 @@ service GatewayService {
   // AgentStep runs one step of the agent planner (ADR-0023) and returns 1 to 4 sealed tool calls. The Hub chooses the
   // prompt, the tool catalog and the model alias by profile; the client sends neither a prompt nor an alias. Each step is
   // one ledger attempt keyed by AgentStepRequest.idempotency_key with the key life cycle above; the fingerprint covers
-  // the whole AgentStepRequest and never matches a CompletionSpec fingerprint. No streaming: a step is short.
+  // the whole AgentStepRequest and never matches a CompletionSpec fingerprint. AgentStepStream is the same step with the
+  // visible reply streamed.
   rpc AgentStep(AgentStepRequest) returns (AgentStepResponse);
+
+  // AgentStepStream is AgentStep with the visible reply text streamed while the model writes it (ADR-0026 addendum
+  // "Streamed reply"). Its request wraps an AgentStepRequest, which has the validation, prompt, catalog, fingerprint,
+  // ledger and key life cycle of AgentStep: AgentStep and AgentStepStream with the same idempotency key and
+  // AgentStepRequest are one logical request, and either replays the result the other stored. Stream semantics:
+  //   - zero or more messages with "delta", in order, then exactly one message with "result", then the stream ends;
+  //   - the deltas are UNTRUSTED, display-only draft text: the "text" argument of a "reply" call and the plain text of
+  //     an answer without tool calls as the model writes them (parts after the first one start with a blank line). They
+  //     carry no other tool call or argument, at most 4000 characters in all, and are never a cause of any action. The
+  //     sealed calls of AgentStepResponse are what the Hub checked against the catalog (a long reply cut at a
+  //     sentence, a plain text turned into a reply) and may differ from the concatenation of the deltas; the client
+  //     shows and executes only AgentStepResponse.calls;
+  //   - no delta is sent for a replay (same idempotency key, completed attempt), when the Hub does not stream from the
+  //     provider, or when the provider answers without streaming: then the stream holds only the result;
+  //   - a failure is delivered as a Connect error with the codes and ErrorDetail of AgentStep (in the end-of-stream
+  //     error for a stream that already started); no delta follows it. A stream without a final "result" is a failed
+  //     call; the client must discard the deltas it received. A provider stream that ends before its end event is
+  //     ERROR_CODE_PROVIDER_ERROR and releases the reservation;
+  //   - when the client cancels or the connection drops, the Hub does as for CompleteStream: a provider call that has
+  //     started is read to the end on a context that is not tied to the request, settled in full and its result
+  //     stored, so a retry with the same key replays it free; if the provider was never called, the reservation is
+  //     released.
+  rpc AgentStepStream(AgentStepStreamRequest) returns (stream AgentStepStreamResponse);
 }
 
 // CompletionSpec describes one LLM operation. It is shared by Complete and CompleteStream so that both validate the same
@@ -282,4 +306,17 @@ message AgentStepResponse {
   string reservation_id = 4;
   // True when this answer is the stored result of an earlier call with the same idempotency key.
   bool replayed = 5;
+}
+
+message AgentStepStreamRequest {
+  AgentStepRequest request = 1;
+}
+
+message AgentStepStreamResponse {
+  oneof event {
+    // Next chunk of the visible reply text; UNTRUSTED, display-only, never parsed or acted on.
+    string delta = 1;
+    // Always the last message of a successful stream.
+    AgentStepResponse result = 2;
+  }
 }
