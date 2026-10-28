@@ -280,7 +280,9 @@ func (a *Assignment) PurgeDue(now time.Time) bool { return a.Deleted() && a.wind
 // (PurgeDue decides); one deleted at it or later is not.
 func PurgeCutoff(now time.Time) time.Time { return now.Add(-RestoreWindow) }
 
-func (a *Assignment) windowEnded(now time.Time) bool { return now.After(a.deletedAt.Add(RestoreWindow)) }
+func (a *Assignment) windowEnded(now time.Time) bool {
+	return now.After(a.deletedAt.Add(RestoreWindow))
+}
 
 // NotDeleted returns ErrDeleted for a deleted assignment, which no change but Restore applies to.
 func (a *Assignment) NotDeleted() error {
