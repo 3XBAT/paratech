@@ -2,11 +2,13 @@ import { type DragEvent, type KeyboardEvent, useState, useRef } from "react";
 import type { LibraryMaterial, LibrarySubject } from "../bindings/library.js";
 import type { PlacementHint } from "../bindings/libraryInbox.js";
 import {
+  addFileTexts,
   errorWay,
   fileMenu,
   fileTexts,
   folderChoices,
   hintLine,
+  type ImportElsewhere,
   materialDragType,
   moreLabel,
   panelChoice,
@@ -65,6 +67,53 @@ export function ErrorLine(props: { text: string; onRefresh(): void; onRetry?: ()
         )
       )}
     </div>
+  );
+}
+
+/**
+ * The result of «Добавить файл» on the page of a subject: the line (nothing when the dialog was cancelled), the way on
+ * when the file lies elsewhere («Переложить сюда», «Открыть предмет») or unplaced («Перейти во «Входящие»»), and a
+ * refusal in plain words with «Повторить» / «Обновить список». Nothing here moves a file by itself.
+ */
+export function AddFileLines(props: {
+  note: string;
+  elsewhere: ImportElsewhere | null;
+  toInbox: boolean;
+  busy: boolean;
+  error: string;
+  onMoveHere(): void;
+  onOpenSubject(subjectId: string): void;
+  onOpenInbox(): void;
+  onRetry(): void;
+  onRefresh(): void;
+}) {
+  const e = props.elsewhere;
+  return (
+    <>
+      {props.note !== "" && (
+        <div className="lrow-error">
+          <ResultLine kind="ok" role="status">
+            {props.note}
+          </ResultLine>
+          {e !== null && (
+            <Button size="sm" disabled={props.busy} onClick={props.onMoveHere}>
+              {addFileTexts.moveHere}
+            </Button>
+          )}
+          {e !== null && e.openSubjectId !== "" && (
+            <Button size="sm" variant="ghost" onClick={() => props.onOpenSubject(e.openSubjectId)}>
+              {addFileTexts.openSubject}
+            </Button>
+          )}
+          {props.toInbox && (
+            <Button size="sm" onClick={props.onOpenInbox}>
+              {addFileTexts.openInbox}
+            </Button>
+          )}
+        </div>
+      )}
+      {props.error !== "" && <ErrorLine text={props.error} onRefresh={props.onRefresh} onRetry={props.onRetry} />}
+    </>
   );
 }
 

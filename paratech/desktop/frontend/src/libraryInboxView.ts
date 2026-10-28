@@ -176,6 +176,11 @@ export interface UndoItem {
   error: string;
 }
 
+/** Where a file lies now, as the way back for «Вернуть». */
+export function backOf(m: LibraryMaterial): UndoBack {
+  return m.inbox || m.subjectId === "" ? { kind: "inbox" } : { kind: "place", subjectId: m.subjectId, folderId: m.folderId };
+}
+
 export const undoMs = 10_000;
 export const undoMax = 3;
 
@@ -243,32 +248,96 @@ export function addToFolderLabel(folderName: string): string {
   return `Добавить файл в папку «${folderName}»`;
 }
 
+/** The title of the folder a target means ("" when the subject or the folder is gone). */
+function targetFolderTitle(subjects: readonly LibrarySubject[], subjectId: string, folderId: string): string {
+  const here = targetFolderId(subjects, subjectId, folderId);
+  const f = subjects.find((s) => s.id === subjectId)?.folders.find((x) => x.id === here);
+  return f ? folderTitle(f) : "";
+}
+
+/** «Добавить файл» ended with a file the core kept but did not put into the target; it lies in «Входящие». */
+export function notPlacedNote(folderName: string): string {
+  const where = folderName === "" ? "нужную папку" : `«${folderName}»`;
+  return `Файл добавлен, но не лёг в ${where}: он во «Входящих». Разложите его вручную.`;
+}
+
+/** The file of an import that was known already and lies elsewhere than the target, with the offers that follow. */
+export interface ImportElsewhere {
+  material: LibraryMaterial;
+  /** «Физика → Лекции» or «Входящие»; "" when the place is unknown to the page. */
+  label: string;
+  /** The subject to open; "" for «Входящие» or a subject the page does not know. */
+  openSubjectId: string;
+}
+
+export interface ImportOutcome {
+  /** The line to show; "" when the dialog was cancelled. */
+  note: string;
+  elsewhere: ImportElsewhere | null;
+  /** The file lies in «Входящие» unplaced: the line offers to go there. */
+  toInbox: boolean;
+}
+
 /**
- * The line after «Добавить файл» on the page of a subject: nothing when the dialog was cancelled; where the file already
- * lies when it was known and so was not moved.
+ * What «Добавить файл» on the page of a subject says: nothing when the dialog was cancelled; that the file did not land
+ * in its folder (it lies in «Входящие»); where the file already lies when it was known and so was not moved, with the
+ * way to bring it here or to look at it there.
  */
-export function importToNote(
-  r: Pick<LibraryImport, "cancelled" | "existing" | "material">,
+export function importOutcome(
+  r: Pick<LibraryImport, "cancelled" | "existing" | "material"> & { notPlaced?: boolean },
   target: { subjectId: string; folderId: string },
   subjects: readonly LibrarySubject[],
-): string {
+): ImportOutcome {
+  const none = { elsewhere: null, toInbox: false };
   if (r.cancelled) {
-    return "";
+    return { note: "", ...none };
   }
   const here = targetFolderId(subjects, target.subjectId, target.folderId);
   const m = r.material;
+  if (r.notPlaced === true) {
+    return { note: notPlacedNote(targetFolderTitle(subjects, target.subjectId, target.folderId)), elsewhere: null, toInbox: true };
+  }
   if (!r.existing || m === null) {
     const where = placeLabel(subjects, target.subjectId, here);
-    return where === "" ? texts.fileAdded : `Файл добавлен в «${where}».`;
+    return { note: where === "" ? texts.fileAdded : `Файл добавлен в «${where}».`, ...none };
   }
   if (m.subjectId === target.subjectId && m.folderId === here) {
-    return texts.fileExisting;
+    return { note: texts.fileExisting, ...none };
   }
-  const where = m.inbox || m.subjectId === "" ? fileTexts.inboxPlace : placeLabel(subjects, m.subjectId, m.folderId);
-  return where === "" ? texts.fileExisting : `Этот файл уже есть: «${where}».`;
+  const inbox = m.inbox || m.subjectId === "";
+  const label = inbox ? fileTexts.inboxPlace : placeLabel(subjects, m.subjectId, m.folderId);
+  const open = !inbox && subjects.some((s) => s.id === m.subjectId) ? m.subjectId : "";
+  return {
+    note: label === "" ? texts.fileExisting : `Этот файл уже есть: «${label}».`,
+    elsewhere: { material: m, label, openSubjectId: open },
+    toInbox: false,
+  };
 }
+
+/** The line only, see importOutcome. */
+export function importToNote(
+  r: Pick<LibraryImport, "cancelled" | "existing" | "material"> & { notPlaced?: boolean },
+  target: { subjectId: string; folderId: string },
+  subjects: readonly LibrarySubject[],
+): string {
+  return importOutcome(r, target, subjects).note;
+}
+
+export const addFileTexts = {
+  moveHere: "Переложить сюда",
+  openSubject: "Открыть предмет",
+  openInbox: "Перейти во «Входящие»",
+} as const;
 
 /** The anchor of the section of a folder on the page of a subject (the tree scrolls to it). */
 export function folderAnchor(folderId: string): string {
   return `folder-${folderId}`;
+}
+
+/** Scrolls the section of a folder into view; nothing without a document (the tests) or without the section. */
+export function scrollToFolder(
+  doc: { getElementById(id: string): { scrollIntoView?: (o: { block: "start" }) => void } | null } | undefined,
+  folderId: string,
+): void {
+  doc?.getElementById(folderAnchor(folderId))?.scrollIntoView?.({ block: "start" });
 }

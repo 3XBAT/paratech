@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type LibraryMaterial, type LibrarySubject, libraryApi, libraryErrorText } from "../bindings/library.js";
 import { libraryInboxApi } from "../bindings/libraryInbox.js";
 import { callByName } from "../bindings/runtime.js";
-import { fileTexts, importToNote } from "../libraryInboxView.js";
+import { fileTexts, type ImportElsewhere } from "../libraryInboxView.js";
+import { addFileInto, CardDrop } from "../materialFlow.js";
 import {
   folderCounts,
   freshMarks,
@@ -17,12 +18,22 @@ import type { PageId } from "../nav.js";
 import { idleTeacher, TeacherFlow, type TeacherFocus, type TeacherState, teacherFocusStep, teacherStateFor } from "../teachersView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
-import { ErrorLine, UndoLines } from "./FileRows.js";
+import { AddFileLines, ErrorLine, UndoLines } from "./FileRows.js";
 import { InboxList, NameForm, OverviewSections, SubjectDetail, SubjectList, SubjectTree } from "./SubjectsParts.js";
 import { type TeacherActions, TeachersBlock } from "./TeachersBlock.js";
 import { useMaterialActions } from "./useMaterialActions.js";
 
 type Form = "none" | "subject" | "folder";
+
+interface AddedState {
+  note: string;
+  elsewhere: ImportElsewhere | null;
+  toInbox: boolean;
+  /** Where «Добавить файл» aimed (the folder resolved), for «Переложить сюда». */
+  target: { subjectId: string; folderId: string } | null;
+}
+
+const noAdded: AddedState = { note: "", elsewhere: null, toInbox: false, target: null };
 
 /**
  * «Предметы»: the subjects as cards by semester, and the page of a subject (a tree on the left, the folders with their
@@ -56,9 +67,10 @@ export function SubjectsPage(props: {
   const [dropError, setDropError] = useState("");
   // Changes made here (a file placed, deleted, added into a subject): the files of the open subject are read again.
   const [changes, setChanges] = useState(0);
+  // The result of «Добавить файл» on the page of a subject, and the refusal (with how to repeat it).
+  const [added, setAdded] = useState<AddedState>(noAdded);
+  const [addError, setAddError] = useState<{ text: string; again: () => void } | null>(null);
   const running = useRef(false); // a double click comes before the re-render that disables the button
-  const dropping = useRef(false);
-  const lastDrop = useRef<{ s: LibrarySubject; materialId: string } | null>(null);
 
   // The teachers of the open subject (TASK-238). Their version and data come from the list (Subjects()), which the flow
   // re-reads after a call that failed or found the data out of date.
@@ -125,6 +137,8 @@ export function SubjectsPage(props: {
     setForm("none");
     setError("");
     setNote("");
+    setAdded(noAdded);
+    setAddError(null);
     setDropError("");
     setDragging("");
     setMaterials(null);
@@ -229,27 +243,64 @@ export function SubjectsPage(props: {
       load();
     });
 
-  // «Добавить файл» on the page of a subject: the file lands in the subject (folder "" is «Материалы»).
-  const addFileTo = (folderId: string) =>
-    run(async () => {
-      const r = await inboxApi.importFileTo(openId, folderId);
-      setNote(importToNote(r, { subjectId: openId, folderId }, subjects ?? []));
-      refresh();
-    });
-
-  // A row of «Входящие» dropped on a card: the same as «Разложить» into «Материалы», with the same undo line.
-  const dropOnCard = async (s: LibrarySubject, materialId: string) => {
-    const m = inbox.find((x) => x.id === materialId);
-    if (!m || dropping.current) {
+  // «Добавить файл» on the page of a subject: the file lands in the subject (folder "" is «Материалы»). A refusal is
+  // shown with «Повторить» or «Обновить список» (see ErrorLine); a cancelled dialog says nothing.
+  const addFileTo = async (folderId: string) => {
+    if (running.current) {
       return;
     }
-    lastDrop.current = { s, materialId };
-    dropping.current = true;
-    setDropError("");
+    running.current = true;
+    setBusy(true);
+    setError("");
+    setAdded(noAdded);
+    setAddError(null);
     try {
-      setDropError(await mat.actions.place(m, s.id, ""));
+      const r = await addFileInto(inboxApi, openId, folderId, subjects ?? []);
+      if (r.kind === "done") {
+        setAdded({ ...r.outcome, target: r.target });
+        refresh();
+      } else if (r.kind === "refused") {
+        setAddError({ text: r.text, again: () => void addFileTo(folderId) });
+      }
     } finally {
-      dropping.current = false;
+      running.current = false;
+      setBusy(false);
+    }
+  };
+
+  // A row of «Входящие» dropped on a card: the same as «Разложить» into «Материалы», with the same undo line.
+  const live = useRef({ inbox, place: mat.actions.place });
+  live.current = { inbox, place: mat.actions.place };
+  const cardDrop = useMemo(
+    () =>
+      new CardDrop({
+        find: (id) => live.current.inbox.find((x) => x.id === id),
+        place: (m, subjectId, folderId) => live.current.place(m, subjectId, folderId),
+        setError: setDropError,
+      }),
+    [],
+  );
+
+  // «Переложить сюда»: the file the import found filed elsewhere goes into the target; «Вернуть» puts it back.
+  const moveHere = async () => {
+    const e = added.elsewhere;
+    const t = added.target;
+    if (e === null || t === null || running.current) {
+      return;
+    }
+    running.current = true;
+    setBusy(true);
+    setAddError(null);
+    try {
+      const text = await mat.placeInto(e.material, t.subjectId, t.folderId);
+      if (text === "") {
+        setAdded(noAdded);
+      } else {
+        setAddError({ text, again: () => void moveHere() });
+      }
+    } finally {
+      running.current = false;
+      setBusy(false);
     }
   };
 
@@ -304,11 +355,18 @@ export function SubjectsPage(props: {
                 </Button>
               </div>
             </div>
-            {note !== "" && (
-              <ResultLine kind="ok" role="status">
-                {note}
-              </ResultLine>
-            )}
+            <AddFileLines
+              note={added.note}
+              elsewhere={added.elsewhere}
+              toInbox={added.toInbox}
+              busy={busy}
+              error={addError?.text ?? ""}
+              onMoveHere={() => void moveHere()}
+              onOpenSubject={props.onSelect}
+              onOpenInbox={() => props.onSelect("")}
+              onRetry={() => addError?.again()}
+              onRefresh={refresh}
+            />
             {subjectForm}
             {overviewState.status === "failed" && (
               <ResultLine kind="fail" role="alert">
@@ -394,7 +452,7 @@ export function SubjectsPage(props: {
             drop={{
               dragging: dragging !== "",
               inboxIds,
-              onDrop: (s, id) => void dropOnCard(s, id),
+              onDrop: (s, id) => void cardDrop.drop(s.id, id),
               onEnd: () => setDragging(""),
             }}
           />
@@ -413,12 +471,7 @@ export function SubjectsPage(props: {
             <ErrorLine
               text={dropError}
               onRefresh={refresh}
-              onRetry={() => {
-                const again = lastDrop.current;
-                if (again) {
-                  void dropOnCard(again.s, again.materialId);
-                }
-              }}
+              onRetry={() => void cardDrop.again()}
             />
           )}
           {undoLines}

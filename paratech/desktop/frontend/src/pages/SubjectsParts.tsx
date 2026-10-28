@@ -1,6 +1,14 @@
 import { type DragEvent, useState } from "react";
 import type { LibraryMaterial, LibrarySubject, SubjectOverview } from "../bindings/library.js";
-import { dropCue, folderAnchor, addToFolderLabel, isMaterialDrag, materialDragType, readMaterialDrop } from "../libraryInboxView.js";
+import {
+  addToFolderLabel,
+  dropCue,
+  folderAnchor,
+  isMaterialDrag,
+  materialDragType,
+  readMaterialDrop,
+  scrollToFolder as scrollToFolderIn,
+} from "../libraryInboxView.js";
 import {
   dayMonth,
   daysChip,
@@ -120,12 +128,8 @@ export function SubjectList(props: { subjects: readonly LibrarySubject[]; onOpen
   );
 }
 
-/** Scrolls the section of a folder into view; nothing without a DOM (the tests) or without the section. */
 function scrollToFolder(folderId: string) {
-  if (typeof document === "undefined") {
-    return;
-  }
-  document.getElementById(folderAnchor(folderId))?.scrollIntoView?.({ block: "start" });
+  scrollToFolderIn(typeof document === "undefined" ? undefined : document, folderId);
 }
 
 /**
