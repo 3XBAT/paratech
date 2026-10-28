@@ -1,6 +1,7 @@
 # Agent parity: what the student can do in the UI and what the agent can do
 
-- **Date:** 2026-10-28 (catalog 8 on master; TASK-308 is the latest task)
+- **Date:** 2026-10-28 (catalog 8 on master; TASK-308 was the latest task; owner answers the same day, tasks from
+  TASK-309)
 - **Rule and mechanics:** [ADR-0033](adr/0033-agent-parity.md). Classes: ADR-0021 (`actionpolicy`).
 - **Source of the rows:** every exported method of the services in `paratech/desktop/internal/input/wails/*.go`
   (a binding = a UI action), the pages in `paratech/desktop/frontend/src/pages/`, and the pending tasks that add
@@ -14,7 +15,8 @@ Legend
   (`offer_button`, ADR-0033), and the student's click is the action.
 - **«Да» / план** — **—** none; **план** = a plan card with one «Да» (a second write, a costly paid job, replacing a
   ready result, `AlwaysPlan`); **«Да»** = a confirmation card per effect; **клик** = the button itself is the consent.
-- Paid U jobs: as today, one cheap job (≤ $0.05) without a plan; above it a plan (ADR-0021; see ADR-0033 Open О-1).
+- Paid U jobs: one cheap job (≤ $0.05) without a plan; above it a plan (ADR-0021; ADR-0033 О-1 а).
+- **Волна** — the catalog that brings the tool (ADR-0033 §10, §11): **10**, **11**; empty = later or never.
 
 ## 1. Предметы и папки
 
@@ -23,15 +25,15 @@ Legend
 | Список предметов | `LibraryService.Subjects` | `list_subjects` | R | — | |
 | Обзор предмета | `LibraryService.SubjectOverview`, `MarkSubjectOpened` | частично: `list_subjects`, `find_lessons`, `list_assignments` | R | — | `MarkSubjectOpened` is view state, not an action |
 | Создать предмет | `LibraryService.CreateSubject` | `create_subject` (без написаний) | U | 2-я запись → план | |
-| **Завести предметы из расписания** | нет (по одному: `Suggestions` + `CreateSubject` / `AddAlias`) | нет | C (пакет) | один «Да» | gap P1; the desktop builds the list, see §11 |
+| **Завести предметы из расписания** | нет (по одному: `Suggestions` + `CreateSubject` / `AddAlias`) | нет → `propose_subjects_from_schedule` (10) | C (пакет) | один «Да» | gap P1; the desktop builds the list, see §11; doubtful rows merged by default (О-12 б) |
 | Подсказки «предмет из расписания» | `LibraryService.Suggestions` | нет | R | — | result to the planner: IDs and counters only, never the strings (ADR-0022) |
 | Добавить написание (алиас) | `LibraryService.AddAlias` | нет | U | 2-я запись → план | the alias is a suggestion ID, never model text |
 | Создать папку | `LibraryService.CreateFolder` | `create_folder` | U | 2-я запись → план | |
 | Удалить пустую папку | `LibraryService.RemoveFolder` | нет | U | — | Undo re-creates the folder with the same ID |
 | Удалить пустой предмет | `LibraryService.RemoveSubject` | нет (только «Отменить» у `create_subject`) | U | — | |
 | Удалить предмет с конспектами и файлами, «Вернуть» 3 дня | TASK-288/289, в работе | нет | U | план всегда | hides N notes and M files; Undo = restore within the window |
-| Лектор / семинарист / лабораторные: задать, очистить | `LibraryService.SetSubjectTeacher`, `ClearSubjectTeacher` | нет (ADR-0030: намеренно) | C | «Да» | an e-mail address is a recipient; ADR-0033 Open О-4 |
-| Ссылка на звонок у предмета: вписать, убрать | TASK-259/261/264, в работе | нет (ADR-0032: намеренно) | C | «Да» | a URL; Open О-4 |
+| Лектор / семинарист / лабораторные: задать, очистить | `LibraryService.SetSubjectTeacher`, `ClearSubjectTeacher` | нет → `set_teacher` (11) | C | «Да» с точным адресом | О-4 в: the model passes the address; validated, never logged |
+| Ссылка на звонок у предмета: вписать, убрать | TASK-259/261/264, в работе | нет → `set_call_link` (11) | C | «Да» с точной ссылкой | О-4 в |
 
 ## 2. Файлы (библиотека)
 
@@ -52,8 +54,8 @@ Legend
 |---|---|---|---|---|---|
 | Конспекты пары / предмета | `NotesService.ForLesson`, `ForSubject` | нет | R | — | IDs, anchor date and kind, part counters; no titles |
 | Добавить файлы к паре | `NotesService.AddFiles` (диалог) | нет | U для файла из панели; диалог — только UI | — | gap P3: an upload dropped in the panel becomes a part |
-| Вставить текст | `NotesService.Paste` | нет | U | — | whose words go in: ADR-0033 Open О-5 |
-| Написать / править текст, «Вернуть предыдущую версию» | TASK-291/292, в работе | нет | только UI | — | editor with autosave; the model never writes note text |
+| Вставить текст / «запиши в конспект: …» | `NotesService.Paste` | нет → `note{add_text}` (10) | U | — | О-5 в: the model passes the text; the result line shows it with «Отменить» |
+| Написать / править текст, «Вернуть предыдущую версию» | TASK-291/292, в работе | нет | только UI | — | editor with autosave; the agent only appends a new text part |
 | Заменить файл / отменить замену | `NotesService.ReplaceFile`, `UndoReplace` | нет | U | — | from an upload |
 | Порядок частей | `NotesService.Reorder` | нет | только UI | — | drag and drop; low value for the agent |
 | Перенести к другой паре / дню | `NotesService.Reanchor` | нет | U | — | |
@@ -69,11 +71,13 @@ Legend
 | Список заданий | `HomeworkService.ListAssignments` | `list_assignments` | R | — | |
 | Открыть задание | `HomeworkService.OpenAssignment` | частично: `reply.assignments` (карточка) | R | — | |
 | Добавить задание | `HomeworkService.CreateAssignment` | `create_assignment` | U | 2-я → план | |
-| Изменить название, заметку, срок, предмет | `HomeworkService.EditAssignment` | `edit_due` (только срок) | U | — | gap P2 |
-| Удалить / «Вернуть» (3 дня) | `HomeworkService.DeleteAssignment`, `RestoreAssignment` | нет | U | — | gap P2; with a Google event see Open О-6; the agent can restore only what it deleted in this chat (no list of deleted ones, ADR-0029 C-2) |
+| Изменить название, заметку, срок, предмет | `HomeworkService.EditAssignment` | `edit_due` (только срок) → `change_assignment{edit}` (10) | U | — | gap P2 |
+| Удалить / «Вернуть» (3 дня) | `HomeworkService.DeleteAssignment`, `RestoreAssignment` | нет → `change_assignment{delete, restore}` (10) | U; с событием в Google — C | с событием — «Да» (О-6 б) | gap P2; the agent can restore only what it deleted in this chat (no list of deleted ones, ADR-0029 C-2) |
+| **Отметить «Выполнено» / «Вернуть в работу»** | нет (ADR-0033 §9, новое) | нет → `mark_assignments_done` (10, списком) | U | — | a done assignment leaves «Сегодня» and «Горит», stays in the list («Выполненные») and history; Google event unchanged (О-13) |
+| Выполненные задания (фильтр) | нет (ADR-0033 §9) | `list_assignments{state}` (10) | R | — | |
 | Исправить предмет / преподавателя у извлечённого | `HomeworkService.CorrectLesson` | нет | U | — | subject: through `edit_assignment`; the teacher text stays manual (ADR-0030) |
 | Предложить срок в Google Календарь | `AgentConfirmService.ProposeDeadline` | `propose_deadline` | C | «Да» | |
-| «Обновить событие в Google Календаре?» после правки срока | TASK-277/279, в работе | нет (агентский `edit_due` обновляет сам, C-4) | C | «Да» | Open О-2 |
+| «Обновить событие в Google Календаре?» после правки срока | TASK-277/279, в работе | нет (агентский `edit_due` обновляет сам, C-4) | C | «Да» (только в UI) | О-2 а: the agent's change updates the event without asking |
 | Быстрый черновик | `HomeworkService.Generate` | нет (убран из агента, владелец 2026-10-26) | U (платно) | — | stays UI by the owner's decision |
 | Правка черновика | `HomeworkService.EditDraft` | — | только UI | — | the student's text in the editor |
 | Версии и статус черновика | `DraftVersion`, `DraftStatus`, `GenerationStatus` | `job_status` | R | — | |
@@ -112,10 +116,10 @@ Legend
 
 | Действие в UI | Binding | Инструмент агента сейчас | Класс | «Да» / план | Notes |
 |---|---|---|---|---|---|
-| Начать запись (окно перед парой / вручную) | `PromptService.Start`, `StartRecording` | нет | Open О-7 | Open О-7 | system audio capture |
+| Начать запись (окно перед парой / вручную) | `PromptService.Start`, `StartRecording` | нет → `recording{start}` (10) | U | — | О-7 а; Undo = stop and keep the audio |
 | Пропустить пару в окне записи | `PromptService.Skip` | — | только UI | — | popup control |
 | Сменить источник звука | `PromptService.SelectSource`, `ActivityService.SwitchSource` | нет | U | — | |
-| Остановить запись | `ActivityService.StopRecording` | нет | Open О-7 | Open О-7 | the rest of the lesson is lost if wrong |
+| Остановить запись | `ActivityService.StopRecording` | нет → `recording{stop}` (10) | U без «Отменить» | — | О-7 а; the result line offers «Начать запись» |
 | Удалить записи | `RecordingDeleteService.Preview`, `Delete` | `propose_delete_recording` | C | «Да» | |
 | Импорт старой записи | `RecordingImportService.Import` (диалог) | нет | только UI, *кнопка*; аудио из панели — U позже | — | audio stays local (hard rule 2) |
 | Записи и задачи | `ActivityService.ListRecordings`, `ListJobs` | `find_lessons`, `job_status` | R | — | |
@@ -133,7 +137,7 @@ Legend
 | Действие в UI | Binding | Инструмент агента сейчас | Класс | «Да» / план | Notes |
 |---|---|---|---|---|---|
 | Поиск | `KnowledgeBaseService.Search` | `search` | R | — | |
-| Вопрос по лекциям | `AnswerService.Answer` | `answer_question` | R (платно) | — | Open О-1 |
+| Вопрос по лекциям | `AnswerService.Answer` | `answer_question` | R (платно) | — | О-1 а |
 | Предметы и лекции базы | `KnowledgeBaseService.Subjects/Lessons/Lectures/Lesson` | частично `find_lessons` | R | — | |
 | Билеты из вставленного списка | `TicketService.Propose` | нет | U | — | the pasted list is foreign text: only from an upload, never through the planner |
 | Билеты из файла | `TicketService.ProposeFromMaterial` | нет | U | — | |
@@ -150,7 +154,7 @@ Legend
 | Отменить импорт | `ScheduleImportService.Discard` | — | UI | клик | |
 | Пары на сегодня / неделю | `TodayService.Today`, `SubjectPosts` | `find_lessons`, `list_assignments` | R | — | |
 | Ссылка на пару: «Открыть», «Копировать» | TASK-261, в работе | нет | UI, *кнопка* | клик | Go resolves the link by lesson ID; the planner never sees it |
-| Ссылка на пару: вписать, убрать | TASK-261/264, в работе | нет | C | «Да» | Open О-4 |
+| Ссылка на пару: вписать, убрать | TASK-261/264, в работе | нет → `set_call_link` (11) | C | «Да» с точной ссылкой | О-4 в |
 | Синхронизировать с Google | `GoogleCalendarService.GoogleCalendarSync` | нет | C, *кнопка* | клик | network; mirrors confirmed state |
 | Статус календаря | `GoogleCalendarService.GoogleCalendarStatus` | нет | R | — | |
 
@@ -159,7 +163,8 @@ Legend
 | Действие в UI | Binding | Инструмент агента сейчас | Класс | «Да» / план | Notes |
 |---|---|---|---|---|---|
 | Новый чат | `AgentService.NewChat` | — | только UI | — | the request already lives in a chat |
-| Переименовать чат | `AgentService.RenameChat` | нет | U | — | Open О-8 (ADR-0028: a title is never model text) |
+| Переименовать чат | `AgentService.RenameChat` | — | только UI | — | О-8: the agent never renames an existing chat |
+| Название нового чата | — | `reply.chat_title` (11) | U | — | О-8: only on the first request of a new chat |
 | Архивировать / вернуть чат | `AgentService.ArchiveChat`, `RestoreChat` | нет | U | — | only other chats: the current one has a running request |
 | Форк, «Начать заново отсюда» | TASK-248/271, в работе | — | только UI | — | picks a message |
 | Список чатов, ранние сообщения | `Chats`, `ChatEarlier`, `ChatCurrent`, `MentionCandidates` | — | только UI | — | |
@@ -167,20 +172,20 @@ Legend
 | «Отменить» действие / всё | `AgentService.Undo`, `UndoRequest` | нет | UI, *кнопка* | клик | |
 | «Да», «Стоп», «Продолжить», «Повторить», «Начать заново», «Отмена», ответы | `ApprovePlan`, `RevisePlan`, `Answer`, `Stop`, `Continue`, `Retry`, `Restart`, `Rerun`, `Cancel` | — | только UI | клик | control of the agent itself |
 | Карточка бесплатной работы | `FreeWorkCard`, `FreeWork` | — | UI | клик | |
-| Окно записи перед парой: вкл / выкл | `SettingsService.SetRecordingPromptsEnabled` | нет | U | — | gap P6 `set_setting` |
-| Обрабатывать только от сети | `SettingsService.SetProcessOnlyOnACPower` | нет | U | — | |
-| Нагрузка распознавания | `SettingsService.SetRecognitionLoad` | нет | U | — | |
-| Предупреждать о работе на свободную тему | `SettingsService.SetFreeWorkNotice` | нет | U | — | |
-| События в календаре при смене срока | TASK-276/279, в работе | нет | U | — | |
+| Окно записи перед парой: вкл / выкл | `SettingsService.SetRecordingPromptsEnabled` | нет → `set_setting` (10) | U | — | gap P6 |
+| Обрабатывать только от сети | `SettingsService.SetProcessOnlyOnACPower` | нет → `set_setting` (10) | U | — | |
+| Нагрузка распознавания | `SettingsService.SetRecognitionLoad` | нет → `set_setting` (10) | U | — | |
+| Предупреждать о работе на свободную тему | `SettingsService.SetFreeWorkNotice` | нет → `set_setting` (10) | U | — | |
+| События в календаре при смене срока | TASK-276/279, в работе | нет → `set_setting` (11) | U | — | |
 | «ИИ распознаёт фото конспектов» | TASK-294, в работе | нет | U (`off`/`local`); будущий `cloud` — C | «Да» для `cloud` | images would leave the PC |
-| Настройки (чтение) | `SettingsService.GetSettings` | нет | R | — | |
-| Профиль (ФИО, группа, вуз, факультет, город) | `SettingsService.GetProfile`, `SaveProfile` | нет | U | — | personal data through the planner: Open О-4 |
+| Настройки (чтение) | `SettingsService.GetSettings` | нет → `get_settings` (10) | R | — | enums only |
+| Профиль (ФИО, группа, вуз, факультет, город) | `SettingsService.GetProfile`, `SaveProfile` | нет → `set_profile_field` (11) | C | «Да» с точным значением | О-4 в; reading the values back: О-14 |
 | Почта: адрес получателя, SMTP | `ConnectionsService.SaveMailSettings` | — | только UI | — | addresses and servers (ADR-0022) |
 | Пароль почты | `SetMailPassword`, `RemoveMailPassword` | — | только UI | — | secret (hard rule 4) |
 | Проверить почту | `ConnectionsService.CheckMail` | нет | C, *кнопка* | клик | network |
 | Адрес Hub | `ConnectionsService.SaveHubURL` | — | только UI | — | trust boundary |
 | Ключ Hub | `SetHubKey`, `RemoveHubKey` | — | только UI | — | secret |
-| Квота | `GetConnections`, `RefreshQuota` | нет | R | — | «сколько осталось» |
+| Квота | `GetConnections`, `RefreshQuota` | нет → `quota_status` (10) | R | — | «сколько осталось» |
 | Google: Client ID / secret | `GoogleService.SetGoogleClient`, `ClearGoogleClient` | — | только UI | — | secret |
 | Войти в Google | `GoogleService.GoogleSignIn`, `GoogleCancelSignIn` | — | только UI, *кнопка* | клик | OAuth consent in the browser |
 | Выйти из Google | `GoogleService.GoogleSignOut` | нет | C, *кнопка* | клик | |
@@ -197,7 +202,21 @@ Not actions (no row): `Shell.*`, `PopupWindowService.Fit`, `AgentPanel.Publish/D
 
 ## 11. Gaps in priority order
 
-Each gap becomes tasks only after the owner has seen this table (tasks.json is not changed in this round).
+Owner answers 2026-10-28 are in ADR-0033 («Answered»). Tasks (tasks.json):
+- Предметы из расписания: TASK-309 (domain), TASK-310 (use case), TASK-311 (binding), TASK-312 (UI).
+- «Выполнено»: TASK-313 (domain, migration), TASK-314 (use cases, «Сегодня»), TASK-315 (binding), TASK-316 (UI).
+- Plan budget (О-9 в): TASK-317 (domain), TASK-318 (long plan card).
+- Wave 10: TASK-319 (desktop specs and policy), TASK-320 (assignments), TASK-321 (notes), TASK-322 (settings, quota,
+  recording), TASK-323 (schedule-subjects card, `offer_button`), TASK-324 (cards UI), TASK-325 (Hub panel v10),
+  TASK-326 (desktop switch to catalog 10).
+- Wave 11: TASK-327 (specs), TASK-328 (teacher, call link, profile cards), TASK-329 (library), TASK-330 (new chat
+  title), TASK-331 (two more settings), TASK-332 (cards UI), TASK-333 (Hub `plan_run`), TASK-334 (Hub panel v11),
+  TASK-335 (plan runner), TASK-336 (desktop switch to catalog 11).
+- Not filed yet: sending (time, reschedule, «Отправлено вручную» / «Отправить ещё раз» buttons, after TASK-239/242),
+  tickets from a file, «Переписать», «Остановить написание», source switch, default model, archive chat, journal as R.
+
+The items below are the original audit; the classes and decisions above (tables, ADR-0033 §8–§11) win where they
+differ.
 
 1. **Предметы из расписания** (owner 2026-10-28).
    - A pure domain service `library/services/schedulesubjects` groups the free schedule strings
