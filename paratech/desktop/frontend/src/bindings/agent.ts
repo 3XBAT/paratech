@@ -138,11 +138,16 @@ export interface ArgView {
   values: string[];
 }
 
+/** How far a step is: "" is pending. The core does not send it yet (TASK-318 reads it when it does). */
+export type StepState = "" | "done" | "failed";
+
 export interface PlanStepView {
   tool: string;
   args: ArgView[];
   /** Names of id arguments an earlier step creates. */
   deferred: string[];
+  /** Absent when the core does not report step states; then the card shows no markers. */
+  state?: StepState;
 }
 
 export interface PlanView {
@@ -451,10 +456,24 @@ function parseArg(raw: unknown): ArgView {
   };
 }
 
+/** Lenient: absent or null stays absent, anything but "done" and "failed" reads as pending; never throws. */
+function parseStepState(v: unknown): StepState | undefined {
+  if (v === undefined || v === null) {
+    return undefined;
+  }
+  return v === "done" || v === "failed" ? v : "";
+}
+
 function parseStep(raw: unknown): PlanStepView {
   const w = "plan step";
   const r = record(raw, w);
-  return { tool: str(r, "tool", w), args: items(r.args, w, parseArg), deferred: strings(r, "deferred", w) };
+  const state = parseStepState(r.state);
+  return {
+    tool: str(r, "tool", w),
+    args: items(r.args, w, parseArg),
+    deferred: strings(r, "deferred", w),
+    ...(state === undefined ? {} : { state }),
+  };
 }
 
 function parsePlan(raw: unknown): PlanView {
