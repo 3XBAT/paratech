@@ -3,6 +3,7 @@
 // sends a path; it shows the outcome. File names are text nodes only.
 
 import { genericError, libraryErrorText } from "./bindings/library.js";
+import { isMaterialDrag } from "./libraryInboxView.js";
 
 export const droppedEvent = "library:dropped";
 
@@ -93,6 +94,61 @@ export function nextDepth(depth: number, event: "enter" | "leave" | "reset"): nu
     return 0;
   }
   return event === "enter" ? depth + 1 : Math.max(0, depth - 1);
+}
+
+/** The part of a DOM drag event the window handlers use. */
+export interface DragLike {
+  dataTransfer: { types?: ArrayLike<string> } | null;
+  preventDefault(): void;
+}
+
+/**
+ * The drag handlers of the whole window (DropZone adds them as listeners). A drag of files is always cancelled, or the
+ * WebView navigates to the dropped file. The drag of a row of «Входящие» (TASK-339) is not a file: it is left alone, so the
+ * cards of the subjects take it, and it never shows the overlay. A drag that carries both (never made by the page) is
+ * cancelled all the same, the safe side, but leaves the overlay and the depth counter untouched.
+ */
+export function windowDragHandlers(setOver: (over: boolean) => void) {
+  let depth = 0;
+  const cancels = (e: DragLike) => !isMaterialDrag(e.dataTransfer) || hasFiles(e.dataTransfer);
+  const tracks = (e: DragLike) => !isMaterialDrag(e.dataTransfer);
+  return {
+    enter(e: DragLike) {
+      if (hasFiles(e.dataTransfer)) {
+        e.preventDefault();
+        if (tracks(e)) {
+          depth = nextDepth(depth, "enter");
+          setOver(true);
+        }
+      }
+    },
+    dragover(e: DragLike) {
+      if (cancels(e)) {
+        e.preventDefault();
+      }
+    },
+    leave(e: DragLike) {
+      if (tracks(e)) {
+        depth = nextDepth(depth, "leave");
+        setOver(depth > 0);
+      }
+    },
+    drop(e: DragLike) {
+      if (cancels(e)) {
+        // Only so the WebView does not navigate to the file; the real drop is handled in Go ("library:dropped").
+        e.preventDefault();
+      }
+      if (tracks(e)) {
+        depth = nextDepth(depth, "reset");
+        setOver(false);
+      }
+    },
+    /** The outcome of a native drop came: no drag is going on. */
+    reset() {
+      depth = nextDepth(depth, "reset");
+      setOver(false);
+    },
+  };
 }
 
 /** Subscribes to the outcome of a native drop. Without a Wails runtime (a browser, a test) it does nothing. */

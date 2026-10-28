@@ -1,14 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { onEventData } from "../bindings/runtime.js";
-import {
-  type DropLine,
-  dropTargetAttr,
-  dropTexts,
-  hasFiles,
-  nextDepth,
-  subscribeDropped,
-} from "../dropFiles.js";
-import { isMaterialDrag } from "../libraryInboxView.js";
+import { type DropLine, dropTargetAttr, dropTexts, subscribeDropped, windowDragHandlers } from "../dropFiles.js";
 import { Icon } from "../ui/Icon.js";
 
 /** The report of a drop: fixed texts, one line per file. */
@@ -40,7 +32,7 @@ export function DropReport(props: { lines: readonly DropLine[]; onClose(): void 
 export function DropZone(props: { onImported?: () => void }) {
   const [over, setOver] = useState(false);
   const [lines, setLines] = useState<DropLine[]>([]);
-  const depth = useRef(0);
+  const drag = useRef<ReturnType<typeof windowDragHandlers> | null>(null);
   const done = useRef(props.onImported);
   done.current = props.onImported;
 
@@ -53,46 +45,17 @@ export function DropZone(props: { onImported?: () => void }) {
   }, []);
 
   useEffect(() => {
-    const enter =(e: DragEvent) => {
-      if (hasFiles(e.dataTransfer)) {
-        e.preventDefault();
-        depth.current = nextDepth(depth.current, "enter");
-        setOver(true);
-      }
-    };
-    const dragover = (e: DragEvent) => {
-      // Always cancelled: otherwise the drop navigates the WebView to the file. Not for the drag of a row of «Входящие»
-      // (TASK-339): it is not a file, only the cards of the subjects take it, and the overlay above never shows for it.
-      if (!isMaterialDrag(e.dataTransfer)) {
-        e.preventDefault();
-      }
-    };
-    const leave = (e: DragEvent) => {
-      if (isMaterialDrag(e.dataTransfer)) {
-        return;
-      }
-      depth.current = nextDepth(depth.current, "leave");
-      setOver(depth.current > 0);
-    };
-    const drop = (e: DragEvent) => {
-      if (isMaterialDrag(e.dataTransfer)) {
-        return;
-      }
-      // Cancelled only so the WebView does not navigate to the file; the real drop is handled in Go and arrives as
-      // the "library:dropped" event below.
-      e.preventDefault();
-      depth.current = nextDepth(depth.current, "reset");
-      setOver(false);
-    };
-    window.addEventListener("dragenter", enter);
-    window.addEventListener("dragover", dragover);
-    window.addEventListener("dragleave", leave);
-    window.addEventListener("drop", drop);
+    const h = windowDragHandlers(setOver);
+    drag.current = h;
+    window.addEventListener("dragenter", h.enter);
+    window.addEventListener("dragover", h.dragover);
+    window.addEventListener("dragleave", h.leave);
+    window.addEventListener("drop", h.drop);
     return () => {
-      window.removeEventListener("dragenter", enter);
-      window.removeEventListener("dragover", dragover);
-      window.removeEventListener("dragleave", leave);
-      window.removeEventListener("drop", drop);
+      window.removeEventListener("dragenter", h.enter);
+      window.removeEventListener("dragover", h.dragover);
+      window.removeEventListener("dragleave", h.leave);
+      window.removeEventListener("drop", h.drop);
     };
   }, []);
 
@@ -100,8 +63,7 @@ export function DropZone(props: { onImported?: () => void }) {
     let off: (() => void) | undefined;
     let closed = false;
     void subscribeDropped(onEventData, (outcome) => {
-      depth.current = nextDepth(depth.current, "reset");
-      setOver(false);
+      drag.current?.reset();
       setLines(outcome.lines);
       if (outcome.imported) {
         done.current?.();
