@@ -3,6 +3,7 @@ package hubclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	agent "paratech/desktop/internal/domain/agent/values"
@@ -263,6 +265,15 @@ func TestStepRefusesBadRequestsLocally(t *testing.T) {
 			r.History[1] = agent.HistoryTurn{AgentReply: strings.Repeat("a", agent.MaxAgentReplyBytes+1)}
 		},
 		"reply and text": func(r *agent.StepRequest) { r.History[0].AgentReply = "reply: x" },
+		"mention of an upload": func(r *agent.StepRequest) {
+			r.Mentions = []agent.StepMention{{Ref: mustRef(t, agent.KindUpload, "u1"), Current: true}}
+		},
+		"repeated mention": func(r *agent.StepRequest) {
+			l := mustRef(t, agent.KindLesson, "l1")
+			r.Mentions = []agent.StepMention{{Ref: l, Current: true}, {Ref: l}}
+		},
+		"too many mentions":         func(r *agent.StepRequest) { r.Mentions = lessonMentions(t, agent.MaxStepMentions+1, 0) },
+		"too many current mentions": func(r *agent.StepRequest) { r.Mentions = lessonMentions(t, agent.MaxMentions+1, agent.MaxMentions+1) },
 	} {
 		req := stepRequest(t)
 		mut(&req)
@@ -272,6 +283,108 @@ func TestStepRefusesBadRequestsLocally(t *testing.T) {
 	}
 	if len(f.seen()) != 0 {
 		t.Fatal("a refused request reached the Hub")
+	}
+}
+
+func mustRef(t *testing.T, kind agent.IDKind, id string) agent.Ref {
+	t.Helper()
+	r, err := agent.NewRef(kind, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// lessonMentions returns n distinct lesson mentions, the first current of them current.
+func lessonMentions(t *testing.T, n, current int) []agent.StepMention {
+	t.Helper()
+	out := make([]agent.StepMention, n)
+	for i := range out {
+		out[i] = agent.StepMention{Ref: mustRef(t, agent.KindLesson, fmt.Sprintf("l%d", i)), Current: i < current}
+	}
+	return out
+}
+
+// TestStepSendsMentionsAsIDs: every mention kind maps to its enum, the current flag goes along, and the label of a
+// mention appears nowhere in the request, in proto or in JSON form.
+func TestStepSendsMentionsAsIDs(t *testing.T) {
+	const label = "Метка-упоминания-только-для-показа"
+	f := &fakeAgentHub{answer: agentOK}
+	c := startAgentHub(t, f)
+
+	var refs []agent.Ref
+	for _, kr := range []struct {
+		kind agent.IDKind
+		id   string
+	}{{agent.KindSubject, "s2"}, {agent.KindLesson, "l2"}, {agent.KindMaterial, "m2"}, {agent.KindAssignment, "a2"}} {
+		m, err := agent.NewMention(mustRef(t, kr.kind, kr.id), label)
+		if err != nil {
+			t.Fatal(err)
+		}
+		refs = append(refs, m.Ref())
+	}
+	req := stepRequest(t)
+	req.Mentions = []agent.StepMention{{Ref: refs[0], Current: true}, {Ref: refs[1], Current: true}, {Ref: refs[2]}, {Ref: refs[3]}}
+
+	if _, err := c.Step(t.Context(), req); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	reqs := f.seen()
+	if len(reqs) != 1 {
+		t.Fatalf("%d requests", len(reqs))
+	}
+	want := []*hubv1.AgentMention{
+		{Kind: hubv1.AgentMentionKind_AGENT_MENTION_KIND_SUBJECT, Id: "s2", Current: true},
+		{Kind: hubv1.AgentMentionKind_AGENT_MENTION_KIND_LESSON, Id: "l2", Current: true},
+		{Kind: hubv1.AgentMentionKind_AGENT_MENTION_KIND_MATERIAL, Id: "m2"},
+		{Kind: hubv1.AgentMentionKind_AGENT_MENTION_KIND_ASSIGNMENT, Id: "a2"},
+	}
+	got := reqs[0].GetScope().GetMentions()
+	if len(got) != len(want) {
+		t.Fatalf("mentions = %v", got)
+	}
+	for i := range want {
+		if !proto.Equal(got[i], want[i]) {
+			t.Fatalf("mention %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+
+	wire, err := proto.Marshal(reqs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	asJSON, err := protojson.Marshal(reqs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(wire), label) || strings.Contains(string(asJSON), label) {
+		t.Fatal("the request holds the label of a mention")
+	}
+}
+
+// TestStepSendsTheSummaryFirst: the summary turn of a chat goes as history_summary, first and right before a student
+// text, as the Hub requires.
+func TestStepSendsTheSummaryFirst(t *testing.T) {
+	f := &fakeAgentHub{answer: agentOK}
+	c := startAgentHub(t, f)
+	sum, err := agent.ParseHistorySummary(3, "сводка просьб 1–3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := stepRequest(t)
+	req.History = append([]agent.HistoryTurn{sum.Turn(), {StudentText: "что такое горутина"}, {AgentReply: "reply: это"}}, req.History...)
+
+	if _, err := c.Step(t.Context(), req); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	turns := f.seen()[0].GetTurns()
+	if len(turns) != 6 || turns[0].GetHistorySummary() != "сводка просьб 1–3" || turns[1].GetStudentText() != "что такое горутина" {
+		t.Fatalf("turns = %v", turns)
+	}
+	for _, turn := range turns[1:] {
+		if _, ok := turn.GetTurn().(*hubv1.AgentTurn_HistorySummary); ok {
+			t.Fatalf("a second summary turn: %v", turns)
+		}
 	}
 }
 

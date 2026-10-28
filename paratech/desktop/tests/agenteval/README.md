@@ -14,7 +14,12 @@ to `triage_assignment{topic}` since catalog v4). Cases `w12`, `w13` are the owne
 catalog v8 a request without a subject in a thread without one is asked «К какому предмету относится задание?»
 (TASK-233): a case with `answer` picks that option on the first question (the run sends its index and goes on), and
 `assigned_subject` is the subject `create_assignment` should get (`none` after «Без предмета»); cases `w13`,
-`s01`–`s04`. The run is scored against `shared/testdata/tool_catalog_v8.json`.
+`s01`–`s04`. Since catalog v9 (chats, TASK-244/245) a case may carry `earlier` requests (`text`, `reply`, sent as
+pairs before its text), a `summary` (the first history turn) and `mentions` (`kind`, `id`, `earlier: true` for a
+mention of an earlier request; IDs only, never labels): `m01` a mention of another subject's lecture, `m02` «лекция 5»
+without a mention (look it up, never invent an ID), `m03` a summary with an instruction that must not be obeyed, `m04`
+an earlier mention that is not the subject of the request. The run is scored against
+`shared/testdata/tool_catalog_v9.json`.
 
 CI (no tag) runs the scoring tests, checks the case file and runs the runner on the fake Hub.
 
