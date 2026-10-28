@@ -107,6 +107,7 @@ type LibraryUseCase interface {
 	RemoveMaterial(ctx context.Context, id shared.MaterialID) (*material.Material, error)
 	RestoreMaterial(ctx context.Context, id shared.MaterialID) (*material.Material, error)
 	SuggestSubjects(ctx context.Context) ([]subjectmatch.Suggestion, error)
+	PlacementHint(ctx context.Context, id shared.MaterialID) (library.Placement, error)
 	SetTeacher(ctx context.Context, id shared.SubjectID, role subject.TeacherRole, name, email string, expectedVersion int64) (*subject.Subject, error)
 	ClearTeacher(ctx context.Context, id shared.SubjectID, role subject.TeacherRole, expectedVersion int64) (*subject.Subject, error)
 }
@@ -331,22 +332,9 @@ func driveLetterPath(path string) bool {
 
 func isPathSeparator(r rune) bool { return r == '/' || r == '\\' }
 
-// importPath reads the file at path and imports it.
+// importPath reads the file at path and imports it into «Входящие».
 func (s *LibraryService) importPath(ctx context.Context, path string) (LibraryImport, error) {
-	data, err := s.files.ReadFile(ctx, path, material.MaxBytes)
-	switch {
-	case err != nil:
-		s.log.Warn(opLibraryRead, "err", err) // the reader's errors never carry the path
-		return LibraryImport{}, ErrLibraryFileUnreadable
-	case len(data) > material.MaxBytes:
-		return LibraryImport{}, ErrLibraryFileTooLarge
-	}
-	res, err := s.uc.Import(ctx, library.Upload{Name: baseName(path), Data: data})
-	if err != nil {
-		return LibraryImport{}, s.fail(opLibraryImport, err)
-	}
-	m := libraryMaterial(res.Material)
-	return LibraryImport{Existing: res.Existing, Material: &m}, nil
+	return s.importPathTo(ctx, path, "", "")
 }
 
 // Place files a material in a folder of a subject; folderID "" is «Материалы».
