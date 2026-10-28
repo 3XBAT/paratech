@@ -94,7 +94,7 @@ func TestSetTeacherRejects(t *testing.T) {
 		want        error
 	}{
 		{"empty name", phys.ID(), lecture, " ", teacherEmail, 1, ErrInvalidTeacherName},
-		{"bidi name", phys.ID(), lecture, "‮" + teacherName, teacherEmail, 1, ErrInvalidTeacherName},
+		{"bidi name", phys.ID(), lecture, "\u202e" + teacherName, teacherEmail, 1, ErrInvalidTeacherName},
 		{"control in name", phys.ID(), lecture, "Петров\nП.", teacherEmail, 1, ErrInvalidTeacherName},
 		{"long name", phys.ID(), lecture, strings.Repeat("я", 201), teacherEmail, 1, ErrInvalidTeacherName},
 		{"bad email", phys.ID(), lecture, teacherName, "petrov@example", 1, ErrInvalidTeacherEmail},

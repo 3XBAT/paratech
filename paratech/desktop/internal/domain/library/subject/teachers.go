@@ -99,7 +99,9 @@ type TeacherState struct {
 }
 
 // Format prints the role only, for every verb.
-func (t TeacherState) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, "teacher "+string(t.Role)) }
+func (t TeacherState) Format(f fmt.State, _ rune) {
+	_, _ = io.WriteString(f, "teacher "+string(t.Role))
+}
 
 // LogValue keeps the data out of slog.
 func (t TeacherState) LogValue() slog.Value { return slog.StringValue("teacher " + string(t.Role)) }
