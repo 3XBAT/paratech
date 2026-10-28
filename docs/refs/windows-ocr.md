@@ -54,4 +54,7 @@ OcrEngine, OcrResult/Line/Word, Language, SoftwareBitmap: `ThreadingModel.Both`,
   hand-made COM object).
 - Apartment: each call locks its goroutine to the OS thread, `RoInitialize(MTA)` … `RoUninitialize`, unlocks. Calls
   are serialised by the Reader (one page at a time).
+- Test fixture `adapters/winocr/testdata/printed-ru.png`: synthetic 1400×420 8-bit grey PNG, four lines of printed
+  Russian (Arial, 52 px, black on white), rendered once with Windows GDI by a throwaway generator and saved with
+  `image/png`. No photos of real notes.
 - `REGDB_E_CLASSNOTREG` from activation → `ErrUnsupported`; a null engine from `TryCreateFromLanguage(ru)` → `ErrNoLanguage`.
