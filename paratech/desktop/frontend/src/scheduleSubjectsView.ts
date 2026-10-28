@@ -29,17 +29,17 @@ export const reviewTexts = {
   addSubject: "Добавить предмет",
   checking: "Проверяется расписание…",
   checkFailed: "Не удалось проверить расписание",
-  emptyWithGroups: (n: number) => `В расписании есть предметы без карточки: ${n}. Их можно создать за один шаг`,
+  emptyWithGroups: (n: number) => `В расписании найдено предметов: ${n}. Их можно создать за один шаг`,
   emptyPlain: "Предметы создаются из расписания или вручную",
   offerLine: (n: number) => `Из расписания можно создать предметы: ${n}`,
-  nextHint: (n: number) => `В расписании предметов без карточки: ${n}`,
+  nextHint: (n: number) => `Из расписания можно создать предметы: ${n}`,
   doubtful: "Похоже, это один предмет. Если нет — выберите «Отдельно»",
   together: "Вместе",
   separate: "Отдельно",
-  skip: "Не заводить",
+  skip: "Не создавать",
   memberChoice: "Что сделать с названием",
-  skipped: "Не будет заведено",
-  checkboxAria: (name: string) => `Завести предмет «${name}»`,
+  skipped: "Не будет создан",
+  checkboxAria: (name: string) => `Создать предмет «${name}»`,
   checkboxAddAria: (subject: string) => `Добавить названия к «${subject}»`,
   addTo: "Добавить к",
   nameLabel: "Название предмета",
@@ -62,7 +62,8 @@ export const reviewTexts = {
   tooLong: "Не больше 200 знаков",
   duplicate: "Такое название уже есть в этом списке",
   exists: "Предмет с таким названием уже есть",
-  nameTaken: "Такое название уже занято. Измените название в строке и повторите",
+  nameTaken: "Пока шёл выбор, появился предмет с таким же названием. Исправьте название в отмеченной строке",
+  nothingCreated: "Ничего не создано",
   stale: "Расписание или предметы изменились",
   createInvalid: "Список уже нельзя применить — он устарел",
   busy: "Ещё выполняется предыдущее действие — повторите через пару секунд",
@@ -138,6 +139,13 @@ export function omittedNote(n: number): string {
   const names = plural(n, "название", "названия", "названий");
   const verb = plural(n, "появится", "появятся", "появятся");
   return `Ещё ${n} ${names} из расписания ${verb} в списке после создания этих предметов`;
+}
+
+/** After a create: the omitted names are not «going to appear»; they wait for the student's choice. */
+export function omittedAfter(n: number): string {
+  const names = plural(n, "название", "названия", "названий");
+  const verb = plural(n, "ждёт", "ждут", "ждут");
+  return `Ещё ${n} ${names} из расписания ${verb} выбора`;
 }
 
 /** When there is no list to create from: the omitted names are only counted. */
@@ -609,7 +617,9 @@ export type Action =
   /** The page hands over (or takes back) the batches when the panel closes (or opens). */
   | { type: "adopt"; batches: readonly Batch[]; notice?: Notice | null }
   /** The student closes the outcome line of the page. */
-  | { type: "dismiss" };
+  | { type: "dismiss" }
+  /** The student closes the page's «Создано предметов» line: no undo any more (the core's journal keeps the record). */
+  | { type: "forget" };
 
 /** The name a skipped row is called by: the edited name of its group or member, else the proposed one. */
 function skippedName(state: ReviewState, key: string): string {
@@ -633,7 +643,7 @@ export function skippedLines(state: ReviewState, skipped: readonly ScheduleSkipp
       case "name_taken": {
         const name = skippedName(state, s.key);
         if (name !== "") {
-          return `«${name}» не заведён: такое название уже занято`;
+          return `«${name}» не создан: такое название уже занято`;
         }
         const subject = names.get(s.subjectId);
         return subject === undefined
@@ -657,11 +667,11 @@ function createNotice(state: ReviewState, reply: CreateFromScheduleReply): { vie
     case "": {
       // A clean success still tells about the names the proposal left out, with the button that shows them.
       const rest = state.omitted > 0;
-      const lines = [...skippedLines(state, reply.skipped), ...(rest ? [omittedNote(state.omitted)] : [])];
+      const lines = [...skippedLines(state, reply.skipped), ...(rest ? [omittedAfter(state.omitted)] : [])];
       const nothing = reply.created.length === 0 && reply.aliased.length === 0;
       return {
         view: "result",
-        notice: lines.length === 0 ? null : { tone: "ok", text: reply.skipped.length > 0 && nothing ? "Ничего не заведено" : "", lines, steps: [rest ? "rest" : "refresh"] },
+        notice: lines.length === 0 ? null : { tone: "ok", text: reply.skipped.length > 0 && nothing ? reviewTexts.nothingCreated : "", lines, steps: [rest ? "rest" : "refresh"] },
       };
     }
     case "stale":
@@ -669,8 +679,8 @@ function createNotice(state: ReviewState, reply: CreateFromScheduleReply): { vie
     case "invalid":
       return fail(reviewTexts.createInvalid, ["refresh"], "result");
     case "name_taken":
-      // No row is named by the core here: the text says what to do, «Повторить» sends the (edited) list again.
-      return fail(reviewTexts.nameTaken, ["retryCreate"], "list");
+      // Nothing was created; the page reloads the subjects, so the clashing row is marked and the main button is the way on.
+      return fail(reviewTexts.nameTaken, [], "list");
     case "busy":
       return fail(reviewTexts.busy, ["retryCreate"], "list");
     case "unavailable":
@@ -759,6 +769,10 @@ export function reduce(state: ReviewState, action: Action): ReviewState {
     case "refreshing":
       return state.phase === "idle" ? { ...state, phase: "refreshing" } : state;
     case "refreshed": {
+      // An answer with a problem is no proposal: the groups, the edits and the token stay, as after an unreadable answer.
+      if (action.reply.problem !== "") {
+        return reduce(state, { type: "refreshThrown" });
+      }
       // The student's edits stay for the groups that are still proposed.
       const next = listed(action.reply);
       return { ...state, phase: "idle", ...next, selection: carrySelection(state.groups, state.selection, next.groups) };
@@ -771,9 +785,28 @@ export function reduce(state: ReviewState, action: Action): ReviewState {
         notice: { tone: "fail", text: reviewTexts.listUnavailable, lines: [], steps: ["refresh"] },
       };
     case "adopt":
-      return { ...state, phase: "idle", batches: action.batches, notice: action.notice ?? null };
+      // Not while the page's own undo runs: the batches it works on must not change under it.
+      return state.phase === "idle" ? { ...state, batches: action.batches, notice: action.notice ?? null } : state;
     case "dismiss":
       return state.phase === "idle" ? { ...state, notice: null } : state;
+    case "forget":
+      return state.phase === "idle" ? { ...state, batches: [], notice: null } : state;
+  }
+}
+
+/**
+ * Whether the page must read the subjects again after this outcome. A reply-level name_taken creates nothing, yet the
+ * reload is what lets the plan mark the row that clashes with the subject that appeared meanwhile.
+ */
+export function subjectsChanged(done: Action): boolean {
+  switch (done.type) {
+    case "created":
+      return done.reply.created.length + done.reply.aliased.length > 0 || done.reply.problem === "name_taken";
+    case "createThrown":
+    case "undone":
+      return true;
+    default:
+      return false;
   }
 }
 
@@ -876,6 +909,36 @@ export function offerGroups(o: OfferState): number | null {
     return null;
   }
   return o.reply !== null && o.reply.problem === "" ? o.reply.groups.length : 0;
+}
+
+/**
+ * «Не удалось проверить расписание» + «Повторить» above the list: shown when subjects exist (the empty state shows the
+ * failure itself) and the check failed, so a request for the review never ends in silence.
+ */
+export function showCheckFailed(o: OfferState, subjectCount: number): boolean {
+  return subjectCount > 0 && offerStatus(o) === "failed";
+}
+
+/** One accent per screen: the header «Предмет» yields to the empty state's action and to the open review's button. */
+export function addSubjectVariant(subjectCount: number | null, reviewOpen: boolean): "primary" | "secondary" {
+  return subjectCount === 0 || reviewOpen ? "secondary" : "primary";
+}
+
+/** The window's one-shot request to open the review: kept only while «Предметы» shows its list. */
+export function keepScheduleReview(wanted: boolean, route: { page: string; subject: string }): boolean {
+  return wanted && route.page === "subjects" && route.subject === "";
+}
+
+const modeOrder: readonly MemberMode[] = ["keep", "separate", "skip"];
+
+/** The mode an arrow key moves a «Вместе / Отдельно / Не создавать» group to (wrapping); null for any other key. */
+export function nextMode(current: MemberMode, key: string): MemberMode | null {
+  const step = key === "ArrowRight" || key === "ArrowDown" ? 1 : key === "ArrowLeft" || key === "ArrowUp" ? -1 : 0;
+  if (step === 0) {
+    return null;
+  }
+  const i = modeOrder.indexOf(current);
+  return modeOrder[(i + step + modeOrder.length) % modeOrder.length] ?? null;
 }
 
 /** The buttons of an outcome line of the page (no proposal there to refresh): what is left, or «Закрыть». */

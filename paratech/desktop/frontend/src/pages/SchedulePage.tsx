@@ -228,7 +228,7 @@ export function SchedulePage(props: {
   );
 }
 
-/** «В расписании предметов без карточки: N» and the button that opens the review on «Предметы». */
+/** «Из расписания можно создать предметы: N» and the button that opens the review on «Предметы». */
 export function ScheduleNextHint(props: { groups: number; onClick(): void }) {
   return (
     <p className="small muted sched-next">

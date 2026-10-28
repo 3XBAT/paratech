@@ -12,13 +12,14 @@ import {
   texts,
 } from "../libraryView.js";
 import type { PageId } from "../nav.js";
-import { type Batch, type OfferState, offerChecking, offerStatus, type SubjectRef } from "../scheduleSubjectsView.js";
+import { addSubjectVariant, type Batch, type OfferState, offerChecking, offerStatus, showCheckFailed, type SubjectRef } from "../scheduleSubjectsView.js";
 import { idleTeacher, TeacherFlow, type TeacherFocus, type TeacherState, teacherFocusStep, teacherStateFor } from "../teachersView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import {
   KeptUndoLine,
   offerButtonId,
+  ScheduleCheckFailedLine,
   ScheduleOfferLine,
   ScheduleSubjectsReview,
   scheduleReviewApi,
@@ -140,8 +141,10 @@ export function SubjectsPage(props: {
   // «Отменить всё» stays on the page after the panel is closed; opening the panel again takes the batches back, so the
   // undo still goes newest first.
   const kept = useKeptUndo(subjectRefs, reviewApi, load);
+  // The page's own «Отменить всё» runs: the review may not open over it (it would take the batches under the undo).
+  const undoBusy = kept.state.phase !== "idle";
   const openReview = () => {
-    if (offer.reply !== null) {
+    if (offer.reply !== null && !undoBusy) {
       setReview({ reply: offer.reply, batches: kept.state.batches });
       kept.adopt([]);
     }
@@ -151,15 +154,31 @@ export function SubjectsPage(props: {
     load();
   };
   // «Завести предметы из расписания» of the schedule page: the review opens as soon as the proposal has loaded (an empty
-  // or unavailable one shows its own notice in it; a failed check shows the page's «Повторить»); taken once.
+  // one shows its own notice in it); taken once. When the check failed the request waits (`pendingReview`) behind the
+  // line «Не удалось проверить расписание» / «Повторить», and a retry that succeeds opens the review.
   const { openReview: reviewWanted, onReviewTaken } = props;
+  const [pendingReview, setPendingReview] = useState(false);
   useEffect(() => {
-    if (!reviewWanted || !offer.loaded || subjects === null || openId !== "") {
+    if (openId !== "") {
+      setPendingReview(false);
       return;
     }
+    if (!(reviewWanted || pendingReview) || !offer.loaded || subjects === null || undoBusy) {
+      return;
+    }
+    if (offerStatus(offer) === "failed") {
+      if (reviewWanted) {
+        setPendingReview(true);
+        onReviewTaken?.();
+      }
+      return;
+    }
+    setPendingReview(false);
     openReview();
-    onReviewTaken?.();
-  }, [reviewWanted, offer, subjects, openId]);
+    if (reviewWanted) {
+      onReviewTaken?.();
+    }
+  }, [reviewWanted, pendingReview, offer, subjects, openId, undoBusy]);
 
   // Another subject (or the list): the form, the error and the note of the previous one go away.
   useEffect(() => {
@@ -371,8 +390,8 @@ export function SubjectsPage(props: {
           <Button icon="up" disabled={busy} onClick={() => void addFile()}>
             {texts.addFile}
           </Button>
-          {/* One accent: with no subjects the empty state below has the primary action. */}
-          <Button id={addSubjectId} variant={subjects !== null && subjects.length === 0 ? "secondary" : "primary"} icon="plus" disabled={busy} onClick={() => setForm("subject")}>
+          {/* One accent: with no subjects the empty state below has the primary action, an open review its own button. */}
+          <Button id={addSubjectId} variant={addSubjectVariant(subjects?.length ?? null, review !== null)} icon="plus" disabled={busy} onClick={() => setForm("subject")}>
             {texts.addSubject}
           </Button>
         </div>
@@ -400,14 +419,17 @@ export function SubjectsPage(props: {
       )}
       {subjects !== null && (
         <>
-          {review === null && <KeptUndoLine state={kept.state} onUndo={kept.undo} onDismiss={kept.dismiss} />}
-          {review === null && subjects.length > 0 && scheduleGroups > 0 && <ScheduleOfferLine groups={scheduleGroups} onClick={openReview} />}
+          {review === null && <KeptUndoLine state={kept.state} onUndo={kept.undo} onDismiss={kept.dismiss} onForget={kept.forget} />}
+          {review === null && subjects.length > 0 && scheduleGroups > 0 && (
+            <ScheduleOfferLine groups={scheduleGroups} disabled={undoBusy} onClick={openReview} />
+          )}
+          {review === null && showCheckFailed(offer, subjects.length) && <ScheduleCheckFailedLine onRetry={retryOffer} />}
           {(review === null || subjects.length > 0) && (
             <SubjectList
               subjects={subjects}
               onOpen={props.onSelect}
               onAdd={() => setForm("subject")}
-              offer={{ state: offer, onReview: openReview, onImport: () => props.onOpen("schedule"), onRetry: retryOffer }}
+              offer={{ state: offer, onReview: openReview, onImport: () => props.onOpen("schedule"), onRetry: retryOffer, disabled: undoBusy }}
             />
           )}
           <InboxList materials={inbox} />

@@ -14,6 +14,7 @@ import {
 import { AgentPanel } from "./agent/AgentPanel";
 import { PanelResizeHandle, useResizablePanel } from "./agent/PanelResizeHandle";
 import type { CitationOpening } from "./knowledgeView";
+import { keepScheduleReview } from "./scheduleSubjectsView";
 import { OpenSummaryContext, type SummarySection } from "./openSummary";
 import { OpenTranscriptContext } from "./openTranscript";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
@@ -156,7 +157,8 @@ export function App() {
     setTeacherFocus((f) => keepTeacherFocus(f, { page: route.page, subject: route.subject }));
   }, [route.page, route.subject]);
   // «Завести предметы из расписания» (TASK-312): «Предметы» opens with the review open. Same one-shot idea: state, not
-  // route; taken once, and dropped as soon as the route leaves «Предметы».
+  // route; taken once, and dropped as soon as the route leaves the list of «Предметы» (a page or an open subject), so
+  // coming back to the list later does not open the panel late.
   const [scheduleReview, setScheduleReview] = useState(false);
   const openScheduleReview = useCallback(() => {
     setScheduleReview(true);
@@ -164,8 +166,8 @@ export function App() {
   }, []);
   const scheduleReviewTaken = useCallback(() => setScheduleReview(false), []);
   useEffect(() => {
-    setScheduleReview((r) => r && route.page === "subjects");
-  }, [route.page]);
+    setScheduleReview((r) => keepScheduleReview(r, { page: route.page, subject: route.subject }));
+  }, [route.page, route.subject]);
   // «Выбрать предмет» from the agent's card: the assignment opens with «Изменить» already open; the same one-shot idea.
   const [assignmentEdit, setAssignmentEdit] = useState("");
   const openAssignmentFor = useCallback(
