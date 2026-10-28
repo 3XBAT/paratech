@@ -70,6 +70,58 @@ func TestAgentRecoveryAtStart(t *testing.T) {
 	}
 }
 
+// ChatCurrent is wired to the stored chats (TASK-272): after a restart the request the recovery stopped comes back
+// with its «Продолжить» card, a missing chat is not_found.
+func TestAgentChatCurrentWiring(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	at := time.Now().Add(-time.Hour).UTC()
+
+	db, err := sqlite.Open(ctx, sqlite.Options{Path: filepath.Join(dir, dbFile), Migrate: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	th, err := thread.New("th1", at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := th.StartRequest(values.Scope{}, at); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := th.BeginStep(at); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlite.NewAgentThreadRepository(db).Save(ctx, th); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	a, _ := newTestAppWith(t, dir)
+	ui := startCore(t, a)
+	if ui.Agent.Current == nil {
+		t.Fatal("ChatCurrent not wired")
+	}
+	panel := wails.NewAgentService(ui.Agent, slog.New(slog.DiscardHandler))
+
+	got := panel.ChatCurrent(ctx, "th1")
+	if got.Problem != "" || got.Update == nil {
+		t.Fatalf("ChatCurrent = %+v", got)
+	}
+	u := got.Update
+	if u.ThreadID != "th1" || u.Turn != 1 || u.Status != "STOPPED" || u.StopReason != "offline" || u.Problem != "" ||
+		len(u.Cards) != 1 || u.Cards[0].Kind != "stopped" || u.Cards[0].StopReason != "offline" {
+		t.Errorf("update = %+v", u)
+	}
+	if got := panel.ChatCurrent(ctx, "th-none"); got.Problem != wails.AgentProblemNotFound || got.Update != nil {
+		t.Errorf("ChatCurrent of a missing chat = %+v", got)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type panelEvents struct {
 	mu   sync.Mutex
 	data []any

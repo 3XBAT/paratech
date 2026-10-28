@@ -15,6 +15,10 @@ var (
 	// current status or step does not allow.
 	ErrInvalidTransition = errors.New("invalid agent turn transition")
 
+	// ErrInvalidCompaction means a new summary does not cover more requests than the previous one, or covers a request
+	// that is not over (Compact).
+	ErrInvalidCompaction = errors.New("invalid context compaction")
+
 	// ErrNoTurn means the thread has no request yet.
 	ErrNoTurn = errors.New("thread has no request")
 

@@ -1,7 +1,9 @@
 package thread
 
 import (
+	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"paratech/desktop/internal/domain/agent/values"
@@ -65,6 +67,36 @@ func Reply(request []values.HistoryTurn) string {
 		lines = append(lines, labelActions+strings.Join(actions, ", "))
 	}
 	return cutRunes(strings.Join(lines, "\n"), values.MaxAgentReplyBytes)
+}
+
+// FreezeReply fixes the reply line of the current request once it is final (DONE, FAILED, CANCELLED, STOPPED): Reply
+// of its entries among entries, which may hold other requests too. The line is kept forever (ADR-0028 «Retention»)
+// and Window uses it instead of the steps, which are purged later. A line already frozen does not change; a request
+// that is not final is ErrInvalidTransition. A STOPPED request that goes on loses its line (move) and is frozen again
+// when it ends.
+func (th *Thread) FreezeReply(entries []values.HistoryEntry, now time.Time) error {
+	t, err := th.turn()
+	if err != nil {
+		return err
+	}
+	if !t.final() {
+		return fmt.Errorf("%w: reply line of a request that is %s", ErrInvalidTransition, t.status)
+	}
+	if now.IsZero() {
+		return fmt.Errorf("%w: no time", ErrInvalidThread)
+	}
+	if t.replyLine != "" {
+		return nil
+	}
+	var request []values.HistoryTurn
+	for _, e := range entries {
+		if e.Turn == t.number {
+			request = append(request, e.Entry)
+		}
+	}
+	// The request keeps its own end time; only the thread changed.
+	t.replyLine, th.updatedAt = Reply(request), now
+	return nil
 }
 
 // cardLine is the line of a card call the student was shown; a refused card or one with invalid arguments has none.

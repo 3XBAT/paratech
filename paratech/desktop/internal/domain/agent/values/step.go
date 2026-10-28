@@ -34,11 +34,13 @@ type ToolResult struct {
 // MaxAgentReplyBytes bounds the agent reply of an earlier request (gateway.proto AgentTurn.agent_reply).
 const MaxAgentReplyBytes = 2 << 10
 
-// HistoryTurn is one history entry of the thread: exactly one of StudentText, AgentReply, Calls or Results is set.
-// AgentReply is never stored: thread.Window builds it from the stored entries of an earlier request.
+// HistoryTurn is one history entry of the thread: exactly one of StudentText, AgentReply, Summary, Calls or Results
+// is set. AgentReply is never stored as a turn: thread.Window takes it from the frozen reply line of an earlier request
+// or builds it from its stored entries. Summary is the HistorySummary text, only ever the first turn of a window.
 type HistoryTurn struct {
 	StudentText string
 	AgentReply  string
+	Summary     string
 	Calls       *SealedCalls
 	Results     []ToolResult
 }
@@ -46,6 +48,12 @@ type HistoryTurn struct {
 // Validate checks that exactly one part of the entry is set and that it is within the Hub limits.
 func (h HistoryTurn) Validate() error {
 	set := 0
+	if h.Summary != "" {
+		set++
+		if err := checkSummaryText(h.Summary); err != nil {
+			return fmt.Errorf("%w: %w", ErrInvalidResult, err)
+		}
+	}
 	if h.StudentText != "" {
 		set++
 		if len(h.StudentText) > MaxStudentTextBytes {
@@ -74,14 +82,14 @@ func (h HistoryTurn) Validate() error {
 		}
 	}
 	if set != 1 {
-		return fmt.Errorf("%w: a history entry holds exactly one of text, reply, calls and results", ErrInvalidResult)
+		return fmt.Errorf("%w: a history entry holds exactly one of text, reply, summary, calls and results", ErrInvalidResult)
 	}
 	return nil
 }
 
 // Size returns the bytes of the entry that count toward the history window.
 func (h HistoryTurn) Size() int {
-	n := len(h.StudentText) + len(h.AgentReply)
+	n := len(h.StudentText) + len(h.AgentReply) + len(h.Summary)
 	if h.Calls != nil {
 		n += len(h.Calls.Seal)
 		for _, c := range h.Calls.Calls {
@@ -96,11 +104,13 @@ func (h HistoryTurn) Size() int {
 
 // HistoryEntry is a stored history entry with the number of the request it belongs to. DroppedBy is the number of the
 // request that restarted the chat from an earlier message (ADR-0028), 0 when the request is not dropped; the window
-// skips dropped requests.
+// skips dropped requests. ReplyLine is the reply line frozen when the request became final (thread.FreezeReply), set
+// by the store on the entries of its request; empty for a request that is not final or ended before the line existed.
 type HistoryEntry struct {
 	Turn      int
 	Entry     HistoryTurn
 	DroppedBy int
+	ReplyLine string
 }
 
 // StepRequest is one planner step: the key ag:<thread>:<turn>:<step>, the shared base, the current scope and the

@@ -38,6 +38,7 @@ export const methods = {
   restoreChat: `${service}.RestoreChat`,
   chatEarlier: `${service}.ChatEarlier`,
   mentionCandidates: `${service}.MentionCandidates`,
+  chatCurrent: `${service}.ChatCurrent`,
 } as const;
 
 export type MentionKind = "subject" | "lesson" | "material" | "assignment";
@@ -811,7 +812,29 @@ export function parseEarlier(raw: unknown): EarlierView {
   }
 }
 
+/** The current state of a chat; update is null when the chat has no request or its request ended. */
+export interface CurrentView {
+  problem: ChatProblem;
+  update: UpdateView | null;
+}
+
+/** The update is parsed like the "agent:update" event; malformed data reads as a failed call with no update. */
+export function parseCurrent(raw: unknown): CurrentView {
+  try {
+    const r = record(raw, "chat current");
+    const problem = chatProblemOf(r);
+    if (problem !== "") {
+      return { problem, update: null };
+    }
+    return { problem, update: r.update === null || r.update === undefined ? null : parseUpdate(r.update) };
+  } catch {
+    return { problem: "failed", update: null };
+  }
+}
+
 export interface AgentApi {
+  /** The current state of a chat as an update, to restore its cards; reads only the local data. */
+  chatCurrent(threadId: string): Promise<CurrentView>;
   /** The «@» search: objects whose name contains the query, newest first; reads only the local data. */
   mentionCandidates(query: string): Promise<MentionsView>;
   /** The chat list; reads only the local data. */
@@ -868,6 +891,7 @@ export function agentApi(call: CallByName): AgentApi {
     archiveChat: async (threadId) => parseChatResult(await call(methods.archiveChat, threadId)),
     restoreChat: async (threadId) => parseChatResult(await call(methods.restoreChat, threadId)),
     chatEarlier: async (threadId) => parseEarlier(await call(methods.chatEarlier, threadId)),
+    chatCurrent: async (threadId) => parseCurrent(await call(methods.chatCurrent, threadId)),
     state: async () => parseState(await call(methods.state)),
     ask: async (input) => parseCallProblem(await call(methods.ask, input)),
     approvePlan: turn(methods.approvePlan),

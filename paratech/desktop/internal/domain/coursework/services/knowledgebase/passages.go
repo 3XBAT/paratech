@@ -99,11 +99,11 @@ func Terms(question string) []string {
 }
 
 // Passages picks the passages of the lessons that best match the question (ADR-0019: no index, a scan at query
-// time). The candidates are every summary text, every lecture text block and, for a lesson without a lecture text
-// (which is its full text), windows of consecutive transcript segments, then every fragment of the student's notes
-// (SectionOwnNote, ADR-0027). A candidate matches when it holds a term of the question; the most terms win, then the
-// newer lesson, then the earlier place: within a lesson the notes come after the sections of its recording, as the
-// search scans them (ADR-0027 Open 6 keeps that order). At most MaxPassages; none when the question has no terms.
+// time). The candidates are every fragment of the student's notes (SectionOwnNote, ADR-0027), then every summary
+// text, every lecture text block and, for a lesson without a lecture text (which is its full text), windows of
+// consecutive transcript segments. A candidate matches when it holds a term of the question; the most terms win, then
+// the newer lesson, then the earlier place: within a lesson the notes come before the sections of its recording, as
+// the search scans them (ADR-0027 «Ranking»). At most MaxPassages; none when the question has no terms.
 // Texts are cleaned (no control or format characters, lines kept) and cut to MaxPassageBytes.
 //
 // Lessons are told apart by Lesson.Key (a note-only lecture has no recording); a lesson without a key by its
@@ -144,6 +144,13 @@ func Passages(question string, lessons []LessonText) []Passage {
 			p.Lesson, p.Text = l, cut(text, first)
 			found = append(found, scored{p: p, score: score, rank: rank, order: order})
 		}
+		for i, f := range d.Notes {
+			p := Passage{Section: SectionOwnNote, Index: i, Note: f.Note, Material: f.Material, Locator: f.Locator}
+			if f.Locator.Kind == locatorSection {
+				p.Heading = headingOf(f.Text)
+			}
+			add(p, f.Text)
+		}
 		for i, text := range d.Summary {
 			add(Passage{Section: SectionSummary, Index: i}, text)
 		}
@@ -161,13 +168,6 @@ func Passages(question string, lessons []LessonText) []Passage {
 				}
 				add(Passage{Section: SectionTranscript, Index: i, StartMs: win[0].StartMs}, strings.Join(texts, " "))
 			}
-		}
-		for i, f := range d.Notes {
-			p := Passage{Section: SectionOwnNote, Index: i, Note: f.Note, Material: f.Material, Locator: f.Locator}
-			if f.Locator.Kind == locatorSection {
-				p.Heading = headingOf(f.Text)
-			}
-			add(p, f.Text)
 		}
 	}
 

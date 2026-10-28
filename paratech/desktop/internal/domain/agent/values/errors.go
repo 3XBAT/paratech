@@ -33,6 +33,9 @@ var (
 	// ErrInvalidMention is returned for a mention of a wrong kind, a bad label or too many mentions in a request.
 	ErrInvalidMention = errors.New("invalid mention")
 
+	// ErrInvalidSummary is returned for a history summary that breaks its range, length or character rules.
+	ErrInvalidSummary = errors.New("invalid history summary")
+
 	// ErrInvalidResult is returned for a tool result or a history entry that breaks its limits.
 	ErrInvalidResult = errors.New("invalid tool result")
 

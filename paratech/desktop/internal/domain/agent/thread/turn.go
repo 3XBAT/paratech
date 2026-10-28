@@ -26,6 +26,7 @@ type Turn struct {
 	retry      int               // «Повторить» of the open step after a permanent failure; part of its key
 	open       []OpenCall        // calls of the last step waiting for results
 	created    []Created         // IDs created by approved create steps of this request
+	replyLine  string            // frozen by FreezeReply while the request is final
 	startedAt  time.Time
 	updatedAt  time.Time
 }
@@ -83,9 +84,15 @@ func (t Turn) StartedAt() time.Time { return t.startedAt }
 // UpdatedAt returns the time of the last change.
 func (t Turn) UpdatedAt() time.Time { return t.updatedAt }
 
+// ReplyLine returns the reply line frozen when the request became final; "" before.
+func (t Turn) ReplyLine() string { return t.replyLine }
+
 // final reports whether the request ended or stopped, so its chat may be archived.
-func (t Turn) final() bool {
-	switch t.status {
+func (t Turn) final() bool { return t.status.final() }
+
+// final reports whether a request in this status ended or stopped.
+func (s Status) final() bool {
+	switch s {
 	case StatusDone, StatusFailed, StatusCancelled, StatusStopped:
 		return true
 	}

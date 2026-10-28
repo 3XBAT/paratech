@@ -5001,7 +5001,7 @@
                 "go test ./shared/... и buf lint в paratech/shared"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-234",
@@ -5733,7 +5733,7 @@
                 "go test -race ./desktop/internal/domain/agent/... ./desktop/internal/cases/agentturn/... ./desktop/internal/cases/agentchats/... и тест архитектуры, golangci-lint run ./desktop/..."
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-266",
@@ -5922,7 +5922,7 @@
             "dependencies": [
                 "TASK-272"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-274",
@@ -6181,7 +6181,7 @@
                 "TASK-153",
                 "TASK-155"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-288",
