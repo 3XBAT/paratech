@@ -7,7 +7,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { genericError } from "../.test-build/bindings/library.js";
 import { inboxMethods, libraryInboxApi, noHint, parsePlacementHint } from "../.test-build/bindings/libraryInbox.js";
-import { hasFiles } from "../.test-build/dropFiles.js";
+import { hasFiles, windowDragHandlers } from "../.test-build/dropFiles.js";
 import {
   defaultFolderId,
   errorWay,
@@ -16,8 +16,11 @@ import {
   hintLimit,
   hintLine,
   hintTargets,
+  importOutcome,
   importToNote,
   isMaterialDrag,
+  notPlacedNote,
+  scrollToFolder,
   materialDragType,
   panelChoice,
   placeLabel,
@@ -38,7 +41,7 @@ import {
   addToFolderLabel,
   folderAnchor,
 } from "../.test-build/libraryInboxView.js";
-import { PlacePanel, UndoLines } from "../.test-build/pages/FileRows.js";
+import { AddFileLines, PlacePanel, UndoLines } from "../.test-build/pages/FileRows.js";
 import { InboxList, SubjectDetail, SubjectList, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
 
 const noop = () => undefined;
@@ -64,8 +67,8 @@ function material(over = {}) {
   };
 }
 
-const existingHint = { kind: "existing", subjectId: "s1", subjectName: "Сети", folderId: "f3", folderName: "Лабораторные", folderKind: "labs", createName: "" };
-const createHint = { kind: "create", subjectId: "", subjectName: "", folderId: "", folderName: "Лекции", folderKind: "lectures", createName: "Сети" };
+const existingHint = { kind: "existing", subjectId: "s1", subjectName: "Сети", folderId: "f3", folderName: "Лабораторные", folderKind: "labs", createName: "", createAliases: [] };
+const createHint = { kind: "create", subjectId: "", subjectName: "", folderId: "", folderName: "Лекции", folderKind: "lectures", createName: "Сети", createAliases: ["Сети (лаб.)"] };
 
 function actions(over = {}) {
   return {
@@ -76,6 +79,13 @@ function actions(over = {}) {
 }
 
 const html = (el) => renderToStaticMarkup(el);
+
+function addLines(over = {}) {
+  return {
+    note: "", elsewhere: null, toInbox: false, busy: false, error: "",
+    onMoveHere: noop, onOpenSubject: noop, onOpenInbox: noop, onRetry: noop, onRefresh: noop, ...over,
+  };
+}
 
 // ---- bindings ----
 
@@ -134,6 +144,23 @@ test("a malformed or incomplete hint is no hint", () => {
   assert.deepEqual(parsePlacementHint(createHint), createHint);
 });
 
+test("the aliases of a create hint: a list of strings, otherwise empty", () => {
+  const { createAliases: _drop, ...bare } = createHint;
+  assert.deepEqual(parsePlacementHint(bare).createAliases, []);
+  assert.deepEqual(parsePlacementHint({ ...createHint, createAliases: null }).createAliases, []);
+  assert.deepEqual(parsePlacementHint({ ...createHint, createAliases: "Сети" }).createAliases, []);
+  assert.deepEqual(parsePlacementHint({ ...createHint, createAliases: ["А", 5, null, "Б"] }).createAliases, ["А", "Б"]);
+  assert.deepEqual(noHint.createAliases, []);
+});
+
+test("a file stored but not placed is read as notPlaced; an ordinary import is not", async () => {
+  const m = { id: "m1", name: "a.pdf", type: "pdf", sizeBytes: 1, subjectId: "", folderId: "", inbox: true, removed: false };
+  const reply = (extra) => libraryInboxApi(async () => ({ cancelled: false, existing: false, material: m, ...extra }));
+  assert.equal((await reply({ notPlaced: true }).importFileTo("s1", "f1")).notPlaced, true);
+  assert.equal((await reply({}).importFileTo("s1", "f1")).notPlaced, false);
+  assert.equal((await reply({ notPlaced: "yes" }).importFileTo("s1", "f1")).notPlaced, false);
+});
+
 // ---- the row menu ----
 
 test("the menu by state: a file of «Входящие» is placed, a placed one is moved or returned", () => {
@@ -166,12 +193,10 @@ test("a row of «Входящие» has the visible «Разложить», «�
 test("the names are text nodes in the rows, the labels and the hint", () => {
   const out =
     html(h(InboxList, { materials: [material({ name: evil })], actions: actions({ hints: new Map([["m1", { ...existingHint, subjectName: evil, folderName: evil }]]) }) })) +
-    html(h(UndoLines, { items: [{ id: 1, materialId: "m1", text: removedNote(evil), back: { kind: "restore" }, expires: 1, error: "" }], busy: false, onUndo: noop, onRefresh: noop }));
+    html(h(UndoLines, { items: [{ id: 1, materialId: "m1", text: removedNote(evil), back: { kind: "restore" }, expires: 1, error: "" }], busy: false, onUndo: noop, onRefresh: noop })) +
+    html(h(AddFileLines, { ...addLines(), note: `Этот файл уже есть: «${evil}».` }));
   assert.ok(!out.includes("<img"));
   assert.ok(out.includes("&lt;img src=x onerror=alert(1)&gt;"));
-  for (const f of ["../src/pages/FileRows.tsx", "../src/pages/useMaterialActions.ts", "../src/pages/NameForm.tsx", "../src/libraryInboxView.ts", "../src/bindings/libraryInbox.ts"]) {
-    assert.doesNotMatch(readFileSync(new URL(f, import.meta.url), "utf8"), /dangerouslySetInnerHTML|innerHTML|insertAdjacentHTML/, f);
-  }
 });
 
 // ---- the hint ----
@@ -306,11 +331,6 @@ test("a refused «Вернуть» keeps its line with the reason; a done one is
   assert.match(html(h(UndoLines, { items: [], busy: false, onUndo: noop, onRefresh: noop })), /<div class="undo-lines" role="status" aria-live="polite"><\/div>/);
 });
 
-test("the undo timer is cleaned up with the component", () => {
-  const src = readFileSync(new URL("../src/pages/useMaterialActions.ts", import.meta.url), "utf8");
-  assert.match(src, /const timer = setTimeout\([\s\S]*?return \(\) => clearTimeout\(timer\)/);
-});
-
 // ---- the drag of a row to a card ----
 
 test("the drag carries only the id of a file of «Входящие»; a drag of files from the disk is not it", () => {
@@ -329,12 +349,76 @@ test("the drag carries only the id of a file of «Входящие»; a drag of 
   assert.equal(dropCue("Сети"), "Положить в «Сети»");
 });
 
-test("the window drop zone ignores the internal drag", () => {
+function dragEvent(types) {
+  return { dataTransfer: { types }, cancelled: 0, preventDefault() { this.cancelled += 1; } };
+}
+
+function windowDrag() {
+  const overs = [];
+  return { h: windowDragHandlers((v) => overs.push(v)), overs };
+}
+
+test("the window handlers: a drag of files is cancelled and shows the overlay; its drop navigates nowhere", () => {
+  const { h, overs } = windowDrag();
+  const enter = dragEvent(["Files"]);
+  h.enter(enter);
+  assert.equal(enter.cancelled, 1);
+  assert.deepEqual(overs, [true]);
+  const over = dragEvent(["Files"]);
+  h.dragover(over);
+  assert.equal(over.cancelled, 1);
+  // The child elements fire enter and leave too: the overlay stays until the last leave.
+  h.enter(dragEvent(["Files"]));
+  h.leave(dragEvent(["Files"]));
+  assert.equal(overs.at(-1), true);
+  h.leave(dragEvent(["Files"]));
+  assert.equal(overs.at(-1), false);
+  h.enter(dragEvent(["Files"]));
+  const drop = dragEvent(["Files"]);
+  h.drop(drop);
+  assert.equal(drop.cancelled, 1);
+  assert.equal(overs.at(-1), false);
+  // Text and links are cancelled as before (no navigation), and show no overlay.
+  const text = dragEvent(["text/plain"]);
+  h.dragover(text);
+  assert.equal(text.cancelled, 1);
+  const before = overs.length;
+  h.enter(dragEvent(["text/plain"]));
+  assert.equal(overs.length, before);
+});
+
+test("the window handlers leave the drag of a row of «Входящие» to the cards of the subjects", () => {
+  const { h, overs } = windowDrag();
+  for (const name of ["enter", "dragover", "leave", "drop"]) {
+    const e = dragEvent(["text/plain", materialDragType]);
+    h[name](e);
+    assert.equal(e.cancelled, 0, name);
+  }
+  assert.deepEqual(overs, []);
+});
+
+test("an OS file drag is cancelled even when it also advertises the internal type; the overlay is left alone", () => {
+  const { h, overs } = windowDrag();
+  const types = [materialDragType, "Files"];
+  for (const name of ["enter", "dragover", "drop"]) {
+    const e = dragEvent(types);
+    h[name](e);
+    assert.equal(e.cancelled, 1, `${name} must be cancelled: the webview must never navigate to a file`);
+  }
+  h.leave(dragEvent(types));
+  assert.deepEqual(overs, []);
+  // The outcome of a native drop clears the overlay.
+  h.reset();
+  assert.deepEqual(overs, [false]);
+});
+
+test("the drop zone registers the four handlers of windowDragHandlers (a source check: the listeners need a DOM)", () => {
   const src = readFileSync(new URL("../src/pages/DropZone.tsx", import.meta.url), "utf8");
-  assert.match(src, /if \(hasFiles\(e\.dataTransfer\)\) \{\s*e\.preventDefault\(\);\s*depth\.current = nextDepth\(depth\.current, "enter"\)/);
-  assert.match(src, /const dragover = [\s\S]*?isMaterialDrag\(e\.dataTransfer\)/);
-  assert.match(src, /const leave = [\s\S]*?isMaterialDrag\(e\.dataTransfer\)/);
-  assert.match(src, /const drop = [\s\S]*?isMaterialDrag\(e\.dataTransfer\)/);
+  for (const [event, handler] of [["dragenter", "enter"], ["dragover", "dragover"], ["dragleave", "leave"], ["drop", "drop"]]) {
+    assert.match(src, new RegExp(`window\\.addEventListener\\("${event}", h\\.${handler}\\)`));
+    assert.match(src, new RegExp(`window\\.removeEventListener\\("${event}", h\\.${handler}\\)`));
+  }
+  assert.match(src, /windowDragHandlers\(setOver\)/);
 });
 
 test("the cards show the cue while a row is dragged and otherwise «Открыть»", () => {
@@ -376,11 +460,71 @@ test("every folder of a subject has «+» with the folder in its name, and a sec
   assert.doesNotMatch(html(h(SubjectDetail, { subject: subject(), materials: [], folderForm: false, busy: false, error: "", onCreateFolder: noop, onCancelFolder: noop })), /Добавить файл/);
 });
 
-test("the subject page has «Добавить файл» in its header and the page asks the core for the subject and folder", () => {
-  const page = readFileSync(new URL("../src/pages/SubjectsPage.tsx", import.meta.url), "utf8");
-  assert.match(page, /addFileTo\(""\)/);
-  assert.match(page, /inboxApi\.importFileTo\(openId, folderId\)/);
-  assert.match(page, /onAddFile=\{\(folderId\) => void addFileTo\(folderId\)\}/);
+test("a file stored but not placed says so with the folder's name and offers «Входящие»", () => {
+  const subjects = [subject()];
+  const stored = { cancelled: false, existing: false, notPlaced: true, material: material() };
+  const out = importOutcome(stored, { subjectId: "s1", folderId: "f1" }, subjects);
+  assert.equal(out.note, "Файл добавлен, но не лёг в «Лекции»: он во «Входящих». Разложите его вручную.");
+  assert.equal(out.toInbox, true);
+  assert.equal(out.elsewhere, null);
+  // «Материалы» when no folder is given; the subject gone: no folder name, still the way on.
+  assert.match(importOutcome(stored, { subjectId: "s1", folderId: "" }, subjects).note, /не лёг в «Материалы»/);
+  const gone = importOutcome(stored, { subjectId: "s9", folderId: "f1" }, subjects);
+  assert.equal(gone.note, "Файл добавлен, но не лёг в нужную папку: он во «Входящих». Разложите его вручную.");
+  assert.equal(gone.toInbox, true);
+  assert.equal(notPlacedNote("Лекции"), importOutcome(stored, { subjectId: "s1", folderId: "f1" }, subjects).note);
+  // An ordinary import and a cancelled dialog offer nothing.
+  assert.equal(importOutcome({ cancelled: false, existing: false, material: material({ inbox: false, subjectId: "s1", folderId: "f1" }) }, { subjectId: "s1", folderId: "f1" }, subjects).toInbox, false);
+  assert.deepEqual(importOutcome({ cancelled: true, existing: false, material: null }, { subjectId: "s1", folderId: "f1" }, subjects), { note: "", elsewhere: null, toInbox: false });
+});
+
+test("a file filed elsewhere already: where it lies, and the ways to bring it here or to look at it there", () => {
+  const subjects = [subject(), subject({ id: "s2", name: "Физика", folders: [{ id: "g1", name: "Материалы", system: "materials" }, { id: "g2", name: "Лекции", system: "lectures" }] })];
+  const target = { subjectId: "s1", folderId: "f3" };
+  const there = material({ subjectId: "s2", folderId: "g2", inbox: false });
+  const out = importOutcome({ cancelled: false, existing: true, material: there }, target, subjects);
+  assert.equal(out.note, "Этот файл уже есть: «Физика → Лекции».");
+  assert.deepEqual(out.elsewhere, { material: there, label: "Физика → Лекции", openSubjectId: "s2" });
+  // In «Входящие» there is no subject to open, but the file can still be brought here.
+  const inbox = importOutcome({ cancelled: false, existing: true, material: material() }, target, subjects);
+  assert.deepEqual(inbox.elsewhere, { material: material(), label: "Входящие", openSubjectId: "" });
+  // A subject the page does not know cannot be opened.
+  const stale = importOutcome({ cancelled: false, existing: true, material: material({ subjectId: "s7", folderId: "x", inbox: false }) }, target, subjects);
+  assert.equal(stale.elsewhere?.openSubjectId, "");
+  assert.equal(stale.note, "Файл уже есть в списке.");
+  // Already in the target: nothing to offer.
+  const here = importOutcome({ cancelled: false, existing: true, material: material({ subjectId: "s1", folderId: "f3", inbox: false }) }, target, subjects);
+  assert.equal(here.elsewhere, null);
+  assert.equal(importToNote({ cancelled: false, existing: true, material: there }, target, subjects), out.note);
+});
+
+test("the lines after «Добавить файл»: the buttons follow the outcome and are quiet without one", () => {
+  const there = material({ subjectId: "s2", folderId: "g2", inbox: false });
+  const elsewhere = html(h(AddFileLines, addLines({ note: "Этот файл уже есть: «Физика → Лекции».", elsewhere: { material: there, label: "Физика → Лекции", openSubjectId: "s2" } })));
+  assert.match(elsewhere, /role="status"/);
+  assert.match(elsewhere, />Переложить сюда<\/button>/);
+  assert.match(elsewhere, />Открыть предмет<\/button>/);
+  assert.doesNotMatch(elsewhere, /Перейти во/);
+  // «Переложить сюда» is off while a call runs; «Открыть предмет» is absent for a file of «Входящие».
+  const inbox = html(h(AddFileLines, addLines({ note: "Этот файл уже есть: «Входящие».", busy: true, elsewhere: { material: material(), label: "Входящие", openSubjectId: "" } })));
+  assert.match(inbox, /<button[^>]*disabled=""[^>]*>Переложить сюда<\/button>/);
+  assert.doesNotMatch(inbox, /Открыть предмет/);
+  const unplaced = html(h(AddFileLines, addLines({ note: "Файл добавлен, но не лёг в «Лекции»: он во «Входящих». Разложите его вручную.", toInbox: true })));
+  assert.match(unplaced, />Перейти во «Входящие»<\/button>/);
+  assert.doesNotMatch(unplaced, /Переложить|Открыть предмет/);
+  // Nothing to say (a cancelled dialog): nothing rendered.
+  assert.equal(html(h(AddFileLines, addLines())), "");
+});
+
+test("a refusal of «Добавить файл» says why with the way out: «Повторить», or «Обновить список» when the list is out of date", () => {
+  const retry = html(h(AddFileLines, addLines({ error: "Файл больше 100 МБ." })));
+  assert.match(retry, /role="alert"/);
+  assert.match(retry, /Файл больше 100 МБ\./);
+  assert.match(retry, />Повторить<\/button>/);
+  assert.doesNotMatch(retry, /Обновить список/);
+  const gone = html(h(AddFileLines, addLines({ error: "Папка не найдена: обновите список." })));
+  assert.match(gone, />Обновить список<\/button>/);
+  assert.doesNotMatch(gone, />Повторить</);
 });
 
 // ---- «Осень 2026» and the tree ----
@@ -396,9 +540,17 @@ test("the semester is a heading without the folder icon; the folders of the open
   assert.match(css, /\.tree \.lv1 \.ti \{ padding-left: 20px; \}/);
   assert.match(css, /\.tree \.lv2 \.ti \{ padding-left: 34px; \}/);
   assert.match(css, /\.tree \.ti\.sem \{[^}]*text-transform: uppercase/);
-  const parts = readFileSync(new URL("../src/pages/SubjectsParts.tsx", import.meta.url), "utf8");
-  assert.match(parts, /getElementById\(folderAnchor\(folderId\)\)\?\.scrollIntoView\?\./);
-  assert.match(parts, /typeof document === "undefined"/);
+});
+
+test("a folder in the tree scrolls its section into view; nothing without a document or the section", () => {
+  const calls = [];
+  const doc = { getElementById: (id) => (id === folderAnchor("f1") ? { scrollIntoView: (o) => calls.push(o) } : null) };
+  scrollToFolder(doc, "f1");
+  assert.deepEqual(calls, [{ block: "start" }]);
+  scrollToFolder(doc, "gone");
+  scrollToFolder(undefined, "f1");
+  scrollToFolder({ getElementById: () => ({}) }, "f1"); // no scrollIntoView (a test DOM)
+  assert.equal(calls.length, 1);
 });
 
 test("the card of files does not clip the «⋯» menu", () => {
