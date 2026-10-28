@@ -2,8 +2,13 @@
 // answer and lists its sources. Every text (question, claims, quotes, labels, titles) is model, lesson or imported
 // text: plain text only. A note is opened by ids, never by a path.
 
-import { type KnowledgeSection, knowledgeSections, type NoteLocatorKind, noteLocatorKinds } from "./knowledgeBase.js";
+import { type KnowledgeSection, type NoteLocatorKind, noteLocatorKinds } from "./knowledgeBase.js";
 import type { CallByName } from "./settings.js";
+
+/** The sections a source can come from: a lesson's title is never one. */
+export type SourceSection = Exclude<KnowledgeSection, "title">;
+
+const sourceSections: readonly SourceSection[] = ["summary", "lectureText", "transcript", "ownNote"];
 
 /** Bound method names: "<Go package path>.<type>.<method>". */
 export const methods = {
@@ -23,7 +28,7 @@ export const errorMessages = {
  */
 export interface AnswerSource {
   recordingId: string;
-  section: KnowledgeSection;
+  section: SourceSection;
   index: number;
   startMs: number;
   /** "12:05" for a lecture block or a transcript segment, "" otherwise. */
@@ -118,7 +123,7 @@ function items<T>(r: Record<string, unknown>, key: string, what: string, parse: 
 export function parseSource(raw: unknown): AnswerSource {
   const w = "answer source";
   const r = record(raw, w);
-  const section = oneOf(r, "section", knowledgeSections, w);
+  const section = oneOf(r, "section", sourceSections, w);
   const noteId = str(r, "noteId", w);
   const materialId = str(r, "materialId", w);
   const locatorKind = oneOf(r, "locatorKind", noteLocatorKinds, w);

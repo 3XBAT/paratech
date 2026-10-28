@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 // The .js extensions let the Node test runner load the compiled component.
-import { type AnswerSource, type AnswersApi, errorText } from "../bindings/answers.js";
+import type { AnswerSource, AnswersApi } from "../bindings/answers.js";
 import { type CitationOpening, citationLesson, citationOpening, citationPlace } from "../knowledgeView.js";
 
 // The sources of an answer on its card (TASK-296). Every text (label, lesson title) is model, lesson or imported text:
@@ -10,9 +10,10 @@ export const answerSourcesTexts = {
   list: "Источники ответа",
   loading: "Загрузка источников…",
   open: "Открыть",
+  failed: "Источники не загрузились.",
 } as const;
 
-export type SourcesState = { kind: "loading" } | { kind: "failed"; text: string } | { kind: "ready"; sources: AnswerSource[] };
+export type SourcesState = { kind: "loading" } | { kind: "failed" } | { kind: "ready"; sources: AnswerSource[] };
 
 /** The list for a state (no hooks: the tests render it directly). A source that cannot open is plain text. */
 export function AnswerSourcesView(props: { state: SourcesState; onOpen?: (o: CitationOpening) => void }) {
@@ -23,7 +24,7 @@ export function AnswerSourcesView(props: { state: SourcesState; onOpen?: (o: Cit
   if (state.kind === "failed") {
     return (
       <p className="ag-src-note small muted" role="status">
-        {state.text}
+        {answerSourcesTexts.failed}
       </p>
     );
   }
@@ -35,9 +36,16 @@ export function AnswerSourcesView(props: { state: SourcesState; onOpen?: (o: Cit
       {state.sources.map((s, i) => {
         const place = citationPlace(s);
         const opening = citationOpening(s);
-        if (opening === null || onOpen === undefined) {
+        if (opening === null) {
           return (
-            <li key={i} className="ag-src-row ag-src-gone muted">
+            <li key={i} className="ag-src-row ag-src-gone">
+              {place}
+            </li>
+          );
+        }
+        if (onOpen === undefined) {
+          return (
+            <li key={i} className="ag-src-row ag-src-plain">
               {place}
             </li>
           );
@@ -77,7 +85,7 @@ export function AnswerSources(props: { api?: AnswersApi; answerId: string; onOpe
     setState({ kind: "loading" });
     api.answer(answerId).then(
       (v) => alive && setState({ kind: "ready", sources: v.sources }),
-      (err) => alive && setState({ kind: "failed", text: errorText(err) }),
+      () => alive && setState({ kind: "failed" }),
     );
     return () => {
       alive = false;

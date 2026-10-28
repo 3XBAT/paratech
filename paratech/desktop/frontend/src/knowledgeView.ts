@@ -582,11 +582,12 @@ export function citationLesson(s: { title: string; startedAt: string }): string 
   return [dayText(s.startedAt), s.title.trim()].filter((p) => p !== "").join(" · ");
 }
 
-/** The most subjects the note lookup reads (one call each); it stops at the first match. */
+/** The most subjects the note lookup reads (one call each): the core's 100 subjects plus «Без предмета». */
 export const maxNoteScanSubjects = 101;
 
 export const noteJumpTexts = {
   notFound: "Конспект не найден: обновите список.",
+  busy: "Открывается…",
 } as const;
 
 /**
@@ -624,6 +625,75 @@ export async function resolveOpening(
   }
   const lecture = await findNoteLecture(api, o.noteId);
   return lecture === null ? null : { lesson: lecture, focus: noFocus, materialId: o.materialId };
+}
+
+/**
+ * The one jump an answer's source asks for: taken once, and live only while it is the latest intent. The page cancels
+ * it on any other choice of the user, so a late result is never applied over that choice.
+ */
+export interface JumpTicket {
+  /** The opening the first time, then undefined (also after a cancel); the ticket is live from the take. */
+  take(): CitationOpening | undefined;
+  cancel(): void;
+  isLive(): boolean;
+}
+
+export function jumpTicket(opening?: CitationOpening): JumpTicket {
+  let left = opening;
+  let live = false;
+  return {
+    take() {
+      const o = left;
+      left = undefined;
+      live = o !== undefined;
+      return o;
+    },
+    cancel() {
+      left = undefined;
+      live = false;
+    },
+    isLive: () => live,
+  };
+}
+
+export interface JumpHandlers {
+  started(): void;
+  /** Only while the ticket is live. */
+  opened(r: ResolvedOpening): void;
+  /** Only while the ticket is live; the text is the core's fixed text or noteJumpTexts.notFound. */
+  failed(text: string): void;
+  /** Always once at the end of a started jump, cancelled or not. */
+  settled(): void;
+}
+
+/** Runs the jump of the ticket, if it still has one: resolves the place and reports it only while the ticket is live. */
+export async function runJump(
+  ticket: JumpTicket,
+  api: Pick<KnowledgeBaseApi, "subjects" | "lectures" | "lesson">,
+  h: JumpHandlers,
+): Promise<void> {
+  const o = ticket.take();
+  if (o === undefined) {
+    return;
+  }
+  h.started();
+  try {
+    const r = await resolveOpening(api, o);
+    if (ticket.isLive()) {
+      if (r === null) {
+        h.failed(noteJumpTexts.notFound);
+      } else {
+        h.opened(r);
+      }
+    }
+  } catch (err) {
+    if (ticket.isLive()) {
+      h.failed(errorText(err));
+    }
+  } finally {
+    ticket.cancel();
+    h.settled();
+  }
 }
 
 const knownErrors: ReadonlySet<string> = new Set(Object.values(errorMessages));

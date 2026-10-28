@@ -6,7 +6,8 @@ import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { answersApi, errorMessages, methods, parseAnswer, parseSource, errorText } from "../.test-build/bindings/answers.js";
-import { AnswerSources, AnswerSourcesView, answerSourcesTexts } from "../.test-build/agent/AnswerSources.js";
+import { errorMessages as kbErrors } from "../.test-build/bindings/knowledgeBase.js";
+import { AnswerSources,AnswerSourcesView, answerSourcesTexts } from "../.test-build/agent/AnswerSources.js";
 import { AgentRequest } from "../.test-build/agent/AgentCards.js";
 import { entryModel } from "../.test-build/agentView.js";
 import {
@@ -14,11 +15,13 @@ import {
   citationOpening,
   citationPlace,
   findNoteLecture,
+  jumpTicket,
   maxNoteScanSubjects,
   noFocus,
   noteJumpTexts,
   noteLectureTexts,
   resolveOpening,
+  runJump,
 } from "../.test-build/knowledgeView.js";
 
 const html = (el) => renderToStaticMarkup(el);
@@ -80,6 +83,8 @@ test("a malformed reply throws", () => {
     reply({ claims: [{ text: "t", fromLessons: true, cites: [{ quote: "q", source: 0.5 }] }] }),
     reply({ claims: [null] }),
     reply({ sources: [recSource({ section: "other" })] }),
+    // A lesson's title is a search-hit section, never a source of an answer.
+    reply({ sources: [recSource({ section: "title" })] }),
     reply({ sources: [recSource({ index: -1 })] }),
     reply({ sources: [recSource({ startMs: "0" })] }),
     reply({ sources: [recSource({ time: 5 })] }),
@@ -165,7 +170,7 @@ test("the list: a button per openable source, plain muted text for a removed one
   );
   assert.match(out, /<ul[^>]*aria-label="Источники ответа"/);
   assert.equal(out.match(/<button/g).length, 2);
-  assert.match(out, /<li class="ag-src-row ag-src-gone muted">источник удалён<\/li>/);
+  assert.match(out, /<li class="ag-src-row ag-src-gone">источник удалён<\/li>/);
   assert.ok(out.indexOf("источник удалён") < out.indexOf("Расшифровка · 12:05"));
   assert.ok(out.indexOf("Расшифровка · 12:05") < out.indexOf("ваш конспект · стр. 3"));
   assert.match(out, /<button type="button"[^>]*aria-label="Открыть: Расшифровка · 12:05, \d\d\.\d\d · Ряды"/);
@@ -182,13 +187,18 @@ test("without a click handler a source is plain text, not a dead button", () => 
   const out = html(h(AnswerSourcesView, { state: ready([recSource()]) }));
   assert.doesNotMatch(out, /<button/);
   assert.match(out, /Расшифровка · 12:05/);
+  // Not styled as a removed source.
+  assert.match(out, /<li class="ag-src-row ag-src-plain">/);
+  assert.doesNotMatch(out, /muted|ag-src-gone/);
 });
 
 test("loading, failed and empty states", () => {
   assert.match(html(h(AnswerSourcesView, { state: { kind: "loading" } })), /Загрузка источников…/);
-  const failed = html(h(AnswerSourcesView, { state: { kind: "failed", text: errorMessages.unavailable } }));
-  assert.match(failed, /Не удалось открыть ответ\. Попробуйте ещё раз\./);
-  assert.doesNotMatch(failed, /<button|<ul/);
+  // One fixed line for every failure, no core text and no retry offered.
+  const failed = html(h(AnswerSourcesView, { state: { kind: "failed" } }));
+  assert.match(failed, />Источники не загрузились\.</);
+  assert.doesNotMatch(failed, /Попробуйте|Не удалось|<button|<ul/);
+  assert.equal(answerSourcesTexts.failed, "Источники не загрузились.");
   assert.equal(html(h(AnswerSourcesView, { state: ready([]) })), "");
   assert.equal(answerSourcesTexts.loading, "Загрузка источников…");
 });
@@ -226,13 +236,14 @@ test("no HTML is built from a label or a title: markup stays visible text", () =
   assert.match(out, /&lt;img src=x onerror=alert\(1\)&gt;&lt;b&gt;bold&lt;\/b&gt;/);
 });
 
-test("the sources code has no raw HTML, links or paths", () => {
+// The one source-text guard: a label or title must never reach the DOM as markup or a link.
+test("the sources code has no raw HTML or links", () => {
   for (const f of ["agent/AnswerSources.tsx", "bindings/answers.ts", "knowledgeView.ts", "pages/KnowledgeBasePage.tsx", "agent/AgentCards.tsx"]) {
     const s = readFileSync(new URL(`../src/${f}`, import.meta.url), "utf8");
     assert.ok(!s.includes("dangerouslySetInnerHTML") && !s.includes("innerHTML"), f);
   }
   const s = readFileSync(new URL("../src/agent/AnswerSources.tsx", import.meta.url), "utf8");
-  assert.ok(!/href=|<a[ >]|window\.open|location\./.test(s));
+  assert.ok(!s.includes("href"));
 });
 
 // ---- The card ----
@@ -358,15 +369,98 @@ test("resolveOpening: a recording is read by its id with the place; a note opens
   assert.equal(noteJumpTexts.notFound, "Конспект не найден: обновите список.");
 });
 
-test("the wiring: the panel and App pass the opening on; the page takes it once", () => {
-  const read = (f) => readFileSync(new URL(`../src/${f}`, import.meta.url), "utf8");
-  assert.match(read("agent/AgentPanel.tsx"), /answers,\s*openSource: props\.onOpenSource/);
-  assert.match(read("agent/AgentPanel.tsx"), /answersApi\(callByName\)/);
-  const app = read("App.tsx");
-  assert.match(app, /routeToPage\("knowledge"\)/);
-  assert.match(app, /onOpenSource=\{openSource\}/);
-  assert.match(app, /setSourceJump\(undefined\)/);
-  const page = read("pages/KnowledgeBasePage.tsx");
-  assert.match(page, /resolveOpening\(api, pending\)/);
-  assert.match(page, /jumpDone\.current\?\.\(\)/);
+// ---- The jump ticket: taken once, applied only while it is the latest intent ----
+
+const noteOpening = { kind: "note", noteId: "n1", materialId: "m1", locatorKind: "page", locatorN: 3 };
+const recOpening = { kind: "recording", recordingId: "r9", focus: { tab: "transcript", index: 4 } };
+const handlers = () => {
+  const log = [];
+  return {
+    log,
+    h: {
+      started: () => log.push("started"),
+      opened: (r) => log.push(["opened", r.lesson.recordingId || r.lesson.key, r.materialId]),
+      failed: (t) => log.push(["failed", t]),
+      settled: () => log.push("settled"),
+    },
+  };
+};
+// A call that returns only when the test lets it (a slow note scan).
+const gate = () => {
+  let release;
+  const wait = new Promise((r) => (release = r));
+  return { wait, release };
+};
+
+test("a ticket gives its opening once; a ticket without one gives nothing", () => {
+  const t = jumpTicket(recOpening);
+  assert.equal(t.isLive(), false);
+  assert.equal(t.take(), recOpening);
+  assert.equal(t.isLive(), true);
+  assert.equal(t.take(), undefined);
+  const none = jumpTicket(undefined);
+  assert.equal(none.take(), undefined);
+  assert.equal(none.isLive(), false);
+  // Cancelled before the take: nothing to take.
+  const c = jumpTicket(recOpening);
+  c.cancel();
+  assert.equal(c.take(), undefined);
+  assert.equal(c.isLive(), false);
+});
+
+test("runJump applies the result while the ticket is live", async () => {
+  const api = fakeKb([subject("a")], { a: [lecture("L1", ["n1"])] });
+  const { log, h: hs } = handlers();
+  await runJump(jumpTicket(noteOpening), api, hs);
+  assert.deepEqual(log, ["started", ["opened", "L1", "m1"], "settled"]);
+
+  const rec = handlers();
+  await runJump(jumpTicket(recOpening), api, rec.h);
+  assert.deepEqual(rec.log, ["started", ["opened", "r9", ""], "settled"]);
+});
+
+test("runJump: a note not found and a failed call raise the error", async () => {
+  const a = handlers();
+  await runJump(jumpTicket({ ...noteOpening, noteId: "gone" }), fakeKb([subject("a")], {}), a.h);
+  assert.deepEqual(a.log, ["started", ["failed", noteJumpTexts.notFound], "settled"]);
+
+  const b = handlers();
+  await runJump(jumpTicket(recOpening), fakeKb([], {}, { failLesson: true }), b.h);
+  assert.deepEqual(b.log, ["started", ["failed", kbErrors.unavailable], "settled"]);
+});
+
+test("a cancel before the late result applies nothing: no open, no error", async () => {
+  for (const [opening, api] of [
+    [noteOpening, fakeKb([subject("a")], { a: [lecture("L1", ["n1"])] })],
+    [recOpening, fakeKb([], {})],
+    [noteOpening, fakeKb([subject("a")], {}, { failSubjects: true })],
+    [{ ...noteOpening, noteId: "gone" }, fakeKb([subject("a")], {})],
+  ]) {
+    const g = gate();
+    const slow = { ...api, subjects: async () => (await g.wait, api.subjects()), lesson: async (id) => (await g.wait, api.lesson(id)) };
+    const ticket = jumpTicket(opening);
+    const { log, h: hs } = handlers();
+    const running = runJump(ticket, slow, hs);
+    assert.deepEqual(log, ["started"]);
+    ticket.cancel();
+    g.release();
+    await running;
+    assert.deepEqual(log, ["started", "settled"]);
+    assert.equal(ticket.isLive(), false);
+  }
+});
+
+test("a second run with the same ticket, or a page mounted without a jump, opens nothing", async () => {
+  const api = fakeKb([subject("a")], { a: [lecture("L1", ["n1"])] });
+  const ticket = jumpTicket(noteOpening);
+  await runJump(ticket, api, handlers().h);
+  const again = handlers();
+  await runJump(ticket, api, again.h);
+  assert.deepEqual(again.log, []);
+
+  const fresh = handlers();
+  const calls = api.calls.length;
+  await runJump(jumpTicket(undefined), api, fresh.h);
+  assert.deepEqual(fresh.log, []);
+  assert.equal(api.calls.length, calls);
 });

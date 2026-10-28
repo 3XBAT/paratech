@@ -21,13 +21,14 @@ import {
   isNoteOnly,
   type LessonFocus,
   idleFlight,
+  jumpTicket,
   lecturesMeta,
   noFocus,
   noteJumpTexts,
   orderLectures,
   type PastChoice,
   pastLesson,
-  resolveOpening,
+  runJump,
   type SearchFlight,
   searchDone,
   searchPauseMs,
@@ -65,7 +66,9 @@ export function KnowledgeBasePage(props: {
   onJumpDone?: () => void;
 }) {
   const api = useMemo(() => knowledgeBaseApi(callByName), []);
-  const [pending] = useState(props.jump);
+  const [ticket] = useState(() => jumpTicket(props.jump));
+  const [jumping, setJumping] = useState(false);
+  const mounted = useRef(true);
   const [jumpError, setJumpError] = useState("");
   const jumpDone = useRef(props.onJumpDone);
   jumpDone.current = props.onJumpDone;
@@ -151,46 +154,52 @@ export function KnowledgeBasePage(props: {
     return () => clearTimeout(t);
   }, [query, runSearch]);
 
-  // Opens the place a citation names, by ids. Taken at once, so a later visit never reopens it.
+  // The user chose something else: a late result of the jump is dropped, its busy line and error go.
+  const leaveJump = useCallback(() => {
+    ticket.cancel();
+    setJumping(false);
+    setJumpError("");
+  }, [ticket]);
+
+  // Opens the place a citation names, by ids. Taken once, so a later visit never reopens it.
   useEffect(() => {
-    if (pending === undefined) {
-      return;
-    }
-    jumpDone.current?.();
-    let stopped = false;
-    resolveOpening(api, pending).then(
-      (r) => {
-        if (stopped) {
-          return;
-        }
-        if (r === null) {
-          setJumpError(noteJumpTexts.notFound);
-          return;
-        }
-        changed.current = false;
-        setOpen({ lesson: r.lesson, focus: r.focus, editing: false, materialId: r.materialId });
+    mounted.current = true;
+    void runJump(ticket, api, {
+      started: () => {
+        jumpDone.current?.();
+        setJumping(true);
       },
-      (err) => !stopped && setJumpError(errorText(err)),
-    );
+      opened: (r) => {
+        if (mounted.current) {
+          changed.current = false;
+          setJumpError("");
+          setOpen({ lesson: r.lesson, focus: r.focus, editing: false, materialId: r.materialId });
+        }
+      },
+      failed: (text) => mounted.current && setJumpError(text),
+      settled: () => mounted.current && setJumping(false),
+    });
     return () => {
-      stopped = true;
+      mounted.current = false;
     };
-  }, [api, pending]);
+  }, [api, ticket]);
 
   // A click on «База знаний» in the rail while here goes back to the subjects.
   const firstVisit = useRef(props.visit);
   useEffect(() => {
     if (props.visit !== firstVisit.current) {
       firstVisit.current = props.visit;
+      leaveJump();
       setOpen(null);
       setSubject(null);
       setQuery("");
       void runSearch("", false);
       setReload((n) => n + 1);
     }
-  }, [props.visit, runSearch]);
+  }, [props.visit, runSearch, leaveJump]);
 
   const openLesson = (lesson: KnowledgeLesson, focus: LessonFocus = noFocus, editing = false, materialId = "") => {
+    leaveJump();
     changed.current = false;
     setOpen({ lesson, focus, editing, materialId });
   };
@@ -252,6 +261,11 @@ export function KnowledgeBasePage(props: {
           {jumpError}
         </Banner>
       )}
+      {jumping && (
+        <p className="small muted" role="status">
+          {noteJumpTexts.busy}
+        </p>
+      )}
       <Card className="box kb-search">
         <div className="tr-search">
           <Input
@@ -261,6 +275,7 @@ export function KnowledgeBasePage(props: {
             maxLength={200}
             value={query}
             onChange={(e) => {
+              leaveJump();
               setQuery(e.target.value);
               // A cleared field shows the subjects at once, without the pause.
               if (e.target.value.trim() === "") {
@@ -270,11 +285,19 @@ export function KnowledgeBasePage(props: {
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
+                leaveJump();
                 void runSearch(query, true);
               }
             }}
           />
-          <Button busy={searching} busyLabel="Поиск…" onClick={() => void runSearch(query, true)}>
+          <Button
+            busy={searching}
+            busyLabel="Поиск…"
+            onClick={() => {
+              leaveJump();
+              void runSearch(query, true);
+            }}
+          >
             Найти
           </Button>
         </div>
@@ -310,7 +333,13 @@ export function KnowledgeBasePage(props: {
           ) : (
             <>
               <h2 className="group-title">Предметы</h2>
-              <SubjectList subjects={subjects} onOpen={setSubject} />
+              <SubjectList
+                subjects={subjects}
+                onOpen={(s) => {
+                  leaveJump();
+                  setSubject(s);
+                }}
+              />
             </>
           )}
         </>
