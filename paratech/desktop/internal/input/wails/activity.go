@@ -87,10 +87,13 @@ type RecordingItem struct {
 	Title string `json:"title"`
 	// Subject, Kind and Teacher of the lesson as kept at the start (TASK-088), "" if unknown: «Матанализ · лекция».
 	// Kind is a short code (lecture, seminar, ...); Subject and Teacher are imported text: plain text only.
-	Subject   string `json:"subject"`
-	Kind      string `json:"kind"`
-	Teacher   string `json:"teacher"`
-	Status    string `json:"status"`
+	Subject string `json:"subject"`
+	Kind    string `json:"kind"`
+	Teacher string `json:"teacher"`
+	Status  string `json:"status"`
+	// Origin is "captured" (recorded by the app) or "imported" (a file recorded elsewhere, TASK-161): the row marks an
+	// imported one «импортирована» (TASK-300).
+	Origin    string `json:"origin"`
 	StartedAt string `json:"startedAt"`
 	StoppedAt string `json:"stoppedAt"`
 	// DurationSeconds is the final duration; hasDuration is false until the recording is COMPLETED.
@@ -231,7 +234,7 @@ func (s *ActivityService) ListRecordings(ctx context.Context) ([]RecordingItem, 
 		c := r.Chain
 		out = append(out, RecordingItem{
 			ID: string(r.ID), LessonID: string(r.LessonID), Title: r.LessonTitle, Subject: r.LessonSubject,
-			Kind: r.LessonKind, Teacher: r.LessonTeacher, Status: string(r.Status),
+			Kind: r.LessonKind, Teacher: r.LessonTeacher, Status: string(r.Status), Origin: originText(r.Origin),
 			StartedAt: timeText(r.StartedAt), StoppedAt: timeText(r.StoppedAt),
 			DurationSeconds: int64(r.Duration.Round(time.Second) / time.Second), HasDuration: r.HasDuration,
 			Problem: r.Problem, Stoppable: r.Stoppable,
@@ -246,6 +249,14 @@ func (s *ActivityService) ListRecordings(ctx context.Context) ([]RecordingItem, 
 		}
 	}
 	return out, nil
+}
+
+// originText is the origin of a row for the page; anything but imported reads as captured, as the store does.
+func originText(o recording.Origin) string {
+	if o == recording.OriginImported {
+		return string(recording.OriginImported)
+	}
+	return string(recording.OriginCaptured)
 }
 
 // adviceView is the JSON form of an advice; nil for none.

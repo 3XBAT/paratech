@@ -46,6 +46,9 @@ export type ChainAction = "" | "runNow" | "openModels" | "openConnections" | "ch
 /** The failed post-processing work the row may start again (TASK-086); "" for none. */
 export type RetryWork = "" | "summary" | "homework" | "lectureText";
 
+/** Where a recording comes from. */
+export type RecordingOrigin = "captured" | "imported";
+
 /** One recording with the status of its whole chain, newest first. Times are RFC 3339 in UTC, "" when unknown. */
 export interface RecordingItem {
   id: string;
@@ -57,6 +60,8 @@ export interface RecordingItem {
   /** Lesson kind code ("lecture", "seminar", "practice", "lab", "other", "unknown"); "" when unknown. */
   kind: string;
   teacher: string;
+  /** "imported": a file recorded elsewhere (TASK-161), the row says «импортирована»; "captured": recorded by the app. */
+  origin: RecordingOrigin;
   status: string;
   startedAt: string;
   stoppedAt: string;
@@ -208,6 +213,11 @@ function optStr(r: Record<string, unknown>, key: string, what: string): string {
   return r[key] === undefined ? "" : str(r, key, what);
 }
 
+// Anything but "imported" (a missing field of an older core, an unknown value) reads as captured, as the core does.
+function origin(r: Record<string, unknown>): RecordingOrigin {
+  return r.origin === "imported" ? "imported" : "captured";
+}
+
 function num(r: Record<string, unknown>, key: string, what: string): number {
   const v = r[key];
   if (typeof v !== "number" || !Number.isFinite(v)) {
@@ -335,6 +345,7 @@ export function parseRecording(raw: unknown): RecordingItem {
     subject: optStr(r, "subject", w),
     kind: optStr(r, "kind", w),
     teacher: optStr(r, "teacher", w),
+    origin: origin(r),
     status: str(r, "status", w),
     startedAt: str(r, "startedAt", w),
     stoppedAt: str(r, "stoppedAt", w),

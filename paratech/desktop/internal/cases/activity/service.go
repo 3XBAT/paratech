@@ -172,7 +172,7 @@ func recordingRow(r *recording.Recording) Recording {
 	return Recording{
 		ID: r.ID(), LessonID: r.LessonID(), LessonTitle: lesson.Title(), LessonSubject: lesson.Subject(),
 		LessonKind: lesson.Kind(), LessonTeacher: lesson.Teacher(),
-		Status: r.Status(), StartedAt: r.StartedAt(), StoppedAt: r.StoppedAt(),
+		Status: r.Status(), Origin: r.Origin(), StartedAt: r.StartedAt(), StoppedAt: r.StoppedAt(),
 		Duration: d, HasDuration: ok, Problem: r.Problem(),
 		Stoppable: recording.CanTransition(r.Status(), recording.StatusStopping),
 	}
