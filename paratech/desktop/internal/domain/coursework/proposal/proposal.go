@@ -313,7 +313,10 @@ func Restore(s State) (*Proposal, error) {
 		}
 		recipient = r
 	}
-	if wantRecipient := p.kind.NeedsRecipient() && past[s.Status]; wantRecipient == recipient.IsZero() {
+	// A send that waits for the student's choice of the teacher (or was declined while waiting) has none yet.
+	mayWait := s.Status == StatusValidated || s.Status == StatusDeclined
+	if wantRecipient := p.kind.NeedsRecipient() && past[s.Status]; (!wantRecipient && !recipient.IsZero()) ||
+		(wantRecipient && !mayWait && recipient.IsZero()) {
 		return bad("a recipient exists exactly for a validated email proposal")
 	}
 	var attachment Digest
@@ -389,9 +392,11 @@ func (p *Proposal) move(to Status, now time.Time) error {
 // is an outcome, not an error: the reason is kept for the user. The checks are:
 //
 //   - the assignment exists locally;
-//   - send_homework_email: a recipient is configured and the export of the assignment exists; the recipient and the
-//     digest of the export are frozen into the proposal, so the user confirms exactly the address and the content
-//     that will be sent;
+//   - send_homework_email: the subject has a teacher to send to (ChooseRecipient: else ReasonNoSubject or
+//     ReasonNoTeacherEmail) and the export of the assignment exists; the recipient and the digest of the export are
+//     frozen into the proposal, so the user confirms exactly the address and the content that will be sent. When the
+//     student has to choose the teacher (ReasonChooseTeacher) the proposal is VALIDATED without a recipient
+//     (AwaitsTeacherChoice) and ConfirmChoice pins the chosen one;
 //   - export_homework: the stored title of the assignment is frozen into the proposal as the heading of the file (the
 //     model may not send one);
 //   - create_deadline_event: the due time is not in the past and at most MaxDueAhead ahead;
@@ -421,7 +426,7 @@ func (p *Proposal) Validate(f Facts, now time.Time) error {
 		return err
 	}
 	if p.kind.NeedsRecipient() {
-		p.recipient = f.Recipient
+		p.recipient = ChooseRecipient(f.Teachers, f.Lesson).Recipient // zero while the student chooses
 	}
 	if p.kind.NeedsAttachment() {
 		p.attachment = f.Attachment
@@ -439,8 +444,10 @@ func (p *Proposal) check(f Facts, now time.Time) RejectReason {
 	if !f.AssignmentExists {
 		return ReasonUnknownAssignment
 	}
-	if p.kind.NeedsRecipient() && f.Recipient.IsZero() {
-		return ReasonNoRecipient
+	if p.kind.NeedsRecipient() {
+		if r := ChooseRecipient(f.Teachers, f.Lesson).Reason; r == ReasonNoSubject || r == ReasonNoTeacherEmail {
+			return r
+		}
 	}
 	if p.kind.NeedsAttachment() && f.Attachment.IsZero() {
 		return ReasonNoArtifact
@@ -487,7 +494,7 @@ func (p *Proposal) staleReason(f Facts) RejectReason {
 		return ReasonAssignmentDeleted
 	case !f.AssignmentExists:
 		return ReasonUnknownAssignment
-	case p.kind.NeedsRecipient() && f.Recipient != p.recipient:
+	case p.kind.NeedsRecipient() && !p.recipientHolds(f):
 		return ReasonRecipientChanged
 	case p.kind.NeedsAttachment() && f.Attachment.IsZero():
 		return ReasonNoArtifact
@@ -509,7 +516,11 @@ func (p *Proposal) staleReason(f Facts) RejectReason {
 func (p *Proposal) Confirm(now time.Time) error { return p.confirm(now) }
 
 // confirm is the body of Confirm; ConfirmOnce calls it so the user-only source test does not see a Confirm call here.
+// A send waiting for the choice of the teacher is refused (ErrChooseTeacher): only ConfirmChoice confirms it.
 func (p *Proposal) confirm(now time.Time) error {
+	if p.AwaitsTeacherChoice() {
+		return fmt.Errorf("%w: no role chosen", ErrChooseTeacher)
+	}
 	if err := p.move(StatusConfirmed, now); err != nil {
 		return err
 	}
@@ -517,9 +528,104 @@ func (p *Proposal) confirm(now time.Time) error {
 	return nil
 }
 
+// ConfirmChoice is ConfirmOnce of a send with the teacher the student clicked on the card (B-5): role is the chosen
+// option and shown the address the card showed for it. A send waiting for the choice pins shown as its recipient (a
+// valid address, else ErrInvalidRecipient) and is confirmed; Recheck then makes it STALE unless shown is still the
+// address of role (ChosenRecipient). Without a valid role it is refused with ErrChooseTeacher and nothing changes. A
+// send with its recipient pinned already behaves as ConfirmOnce: the role is only checked again by Recheck.
+func (p *Proposal) ConfirmChoice(role TeacherRole, shown string, now time.Time) (changed bool, err error) {
+	if !p.AwaitsTeacherChoice() {
+		if role != "" && !role.Valid() {
+			return false, fmt.Errorf("%w: unknown role", ErrChooseTeacher)
+		}
+		return p.confirmOnce(now)
+	}
+	if !role.Valid() {
+		return false, fmt.Errorf("%w: no role chosen", ErrChooseTeacher)
+	}
+	r, err := NewRecipient(shown)
+	if err != nil {
+		return false, err
+	}
+	if err := p.move(StatusConfirmed, now); err != nil {
+		return false, err
+	}
+	p.recipient, p.confirmedAt = r, now
+	return true, nil
+}
+
+// AwaitsTeacherChoice reports whether the proposal is a VALIDATED send whose teacher the student still has to choose
+// (ReasonChooseTeacher): it has no recipient until ConfirmChoice.
+func (p *Proposal) AwaitsTeacherChoice() bool {
+	return p.kind.NeedsRecipient() && p.status == StatusValidated && p.recipient.IsZero()
+}
+
+// recipientHolds reports whether the pinned recipient is still where the send goes: the address of the role the
+// student chose when the confirmation carries one, else the teacher ChooseRecipient picks now, or, when the student
+// has to choose again (a confirmed send executed without the role, after a crash), one of the options.
+func (p *Proposal) recipientHolds(f Facts) bool {
+	if p.recipient.IsZero() {
+		return false
+	}
+	if f.ChosenRole != "" {
+		c := ChosenRecipient(f.Teachers, f.ChosenRole, p.recipient.Address())
+		return c.Reason == "" && c.Recipient == p.recipient
+	}
+	c := ChooseRecipient(f.Teachers, f.Lesson)
+	switch c.Reason {
+	case "":
+		return c.Recipient == p.recipient
+	case ReasonChooseTeacher:
+		for _, o := range c.Options {
+			if o.Recipient == p.recipient {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// RecipientView describes the recipient of a send for the card from the teachers read now (display only, it
+// decides nothing): the pinned recipient with its teacher's name and role, the options while the student chooses
+// (Reason ReasonChooseTeacher), and for a send rejected for its recipient the role that has no address. Another kind
+// gets the zero choice.
+func (p *Proposal) RecipientView(ts Teachers, k values.LessonKind) RecipientChoice {
+	if !p.kind.NeedsRecipient() {
+		return RecipientChoice{}
+	}
+	now := ChooseRecipient(ts, k)
+	switch {
+	case p.AwaitsTeacherChoice():
+		if now.Reason != ReasonChooseTeacher {
+			now.Options = ts.options() // the choice changed since; Recheck decides at «Да»
+		}
+		return RecipientChoice{Reason: ReasonChooseTeacher, Options: now.Options}
+	case !p.recipient.IsZero():
+		out := RecipientChoice{Recipient: p.recipient}
+		if now.Reason == "" && now.Recipient == p.recipient {
+			out.Name, out.Role = now.Name, now.Role
+		} else if o, ok := ts.Find(p.recipient); ok {
+			out.Name, out.Role = o.Name, o.Role
+		}
+		return out
+	case p.reason == ReasonNoSubject || p.reason == ReasonNoTeacherEmail:
+		out := RecipientChoice{Reason: p.reason}
+		if now.Reason == p.reason {
+			out.Role = now.Role
+		} else if p.reason == ReasonNoTeacherEmail {
+			out.Role = RoleOf(k)
+		}
+		return out
+	}
+	return RecipientChoice{}
+}
+
 // ConfirmOnce is Confirm for a repeated user click: a proposal that is already CONFIRMED or EXECUTED stays as it is
 // and changed is false; any other status behaves as Confirm.
-func (p *Proposal) ConfirmOnce(now time.Time) (changed bool, err error) {
+func (p *Proposal) ConfirmOnce(now time.Time) (changed bool, err error) { return p.confirmOnce(now) }
+
+// confirmOnce is the body of ConfirmOnce, also for ConfirmChoice (the user-only source test reads names).
+func (p *Proposal) confirmOnce(now time.Time) (changed bool, err error) {
 	if p.status == StatusConfirmed || p.status == StatusExecuted {
 		return false, nil
 	}

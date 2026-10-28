@@ -24,10 +24,11 @@ const (
 // ProposeSendWork is the student's «Отправить преподавателю» on a finished turnkey work (TASK-180); the agent never
 // calls it. Only a work of an assignment may be sent: another one yields work.ErrNoAssignment (wrapped) and nothing is
 // stored. The proposal (class C, ADR-0021) attaches the work's file in the library (.docx, a presentation .pptx),
-// pinned by its stored reference, SHA-256 and size; the recipient comes from the settings and the subject from the
-// assignment, as for the homework send. The result is VALIDATED or REJECTED (no recipient, no finished file, the file
-// moved out of «ДЗ»); a send of the same file that already waits for «Да» is returned instead of a second one. A
-// missing work wraps shared.ErrNotFound. Nothing is sent: only ConfirmSendWork sends.
+// pinned by its stored reference, SHA-256 and size; the recipient is a teacher of the work's subject (else of the
+// assignment's) by the kind of the assignment's lesson, and the email subject comes from the assignment, as for the
+// homework send. The result is VALIDATED (maybe waiting for the student's choice of the teacher) or REJECTED (no
+// subject, no teacher address, no finished file, the file moved out of «ДЗ»); a send of the same file that already
+// waits for «Да» is returned instead of a second one. A missing work wraps shared.ErrNotFound. Nothing is sent: only ConfirmSendWork sends.
 func (s *Service) ProposeSendWork(ctx context.Context, id shared.WorkID) (ProposalView, error) {
 	if s.works == nil {
 		return ProposalView{}, fmt.Errorf("%s: %w", opProposeSendWork, ErrNoWorks)
@@ -89,24 +90,31 @@ func (s *Service) ProposeSendWork(ctx context.Context, id shared.WorkID) (Propos
 // second email, and an email whose outcome is unknown is never sent again here. Another kind yields ErrNotASend before
 // any change; other statuses the error of proposal.Confirm.
 func (s *Service) ConfirmSendWork(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format) (ProposalView, error) {
-	err := s.tx.Do(ctx, func(ctx context.Context) error {
-		p, err := s.proposals.Get(ctx, id)
-		if err != nil {
-			return err
-		}
-		if p.Kind() != proposal.KindSendWork {
-			return fmt.Errorf("%w: %s", ErrNotASend, p.Kind())
-		}
-		changed, err := p.ConfirmOnce(s.clock.Now())
-		if err != nil || !changed {
-			return err
-		}
-		return s.proposals.Save(ctx, p)
-	})
-	if err != nil {
-		return ProposalView{}, fmt.Errorf("%s: %w", opConfirmSendWork, err)
+	return s.confirmSend(ctx, opConfirmSendWork, proposal.KindSendWork, id, shown{subject: shownSubject, format: shownFormat})
+}
+
+// ConfirmSendWorkTo is ConfirmSendWork with the teacher the student chose on the card, as ConfirmSendTo.
+func (s *Service) ConfirmSendWorkTo(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format, chosen ChosenTeacher) (ProposalView, error) {
+	return s.confirmSend(ctx, opConfirmSendWork, proposal.KindSendWork, id,
+		shown{subject: shownSubject, format: shownFormat, chosen: chosen})
+}
+
+// workSubject is the library subject of work id (its writing snapshot), "" when it has none or the work is gone.
+func (s *Service) workSubject(ctx context.Context, id shared.WorkID) (shared.SubjectID, error) {
+	if s.works == nil {
+		return "", nil
 	}
-	return s.execute(ctx, id, &shown{subject: shownSubject, format: shownFormat})
+	w, err := s.works.Work(ctx, id)
+	if errors.Is(err, shared.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if wr, ok := w.Writing(); ok {
+		return wr.Snapshot.Subject, nil
+	}
+	return "", nil
 }
 
 // workFile is what the send of a work reads about the work's file now.

@@ -33,4 +33,8 @@ var (
 
 	// ErrWrongKind means a command of another kind was requested than the proposal has.
 	ErrWrongKind = errors.New("proposal has another kind")
+
+	// ErrChooseTeacher means a send whose recipient the student has to choose (ReasonChooseTeacher) was confirmed
+	// without a valid role: nothing changes, the card asks «Кому отправить?».
+	ErrChooseTeacher = errors.New("choose the teacher to send to")
 )

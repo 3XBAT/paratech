@@ -51,7 +51,7 @@ var (
 	_ homeworkflow.DraftRepository          = (*sqlite.DraftRepository)(nil)
 	_ hubclient.URLSource                   = hubSettings{}
 	_ smtp.AccountSource                    = mailSettings{}
-	_ homeworkflow.RecipientSource          = recipientSettings{}
+	_ homeworkflow.RecipientSource          = subjectTeachers{}
 	_ homeworkflow.ProposalRepository       = (*sqlite.ProposalRepository)(nil)
 	_ homeworkflow.HomeworkMailer           = (*senddelivery.Service)(nil)
 	_ homeworkflow.HomeworkExporter         = (*filestore.Store)(nil)

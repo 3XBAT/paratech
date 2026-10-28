@@ -236,7 +236,7 @@ func TestProposeEmailOfVersion(t *testing.T) {
 		{"an older version exported", 1, 2, nil, "", "", ErrVersionNotExported},
 		{"another text exported", 0, 1, nil, "", "", ErrVersionNotExported},
 		{"no such version", 2, 3, nil, "", "", shared.ErrNotFound},
-		{"no recipient", 2, 2, func(e *agentEnv) { e.recipient = "" }, proposal.StatusRejected, proposal.ReasonNoRecipient, nil},
+		{"no teacher email", 2, 2, func(e *agentEnv) { e.recipient = "" }, proposal.StatusRejected, proposal.ReasonNoTeacherEmail, nil},
 		{"nothing exported", 2, 2, func(e *agentEnv) {
 			ref, _ := proposal.ExportRef("a1")
 			_ = e.files.Delete(t.Context(), ref)

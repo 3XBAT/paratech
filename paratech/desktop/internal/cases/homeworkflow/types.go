@@ -84,10 +84,21 @@ type ProposalView struct {
 	Title        string
 	Body         string
 	Due          time.Time
-	Recipient    string // the trusted address for send_homework_email, set once validated
+	Recipient    string // the trusted address of a send, set once validated (and, while choosing, once confirmed)
 	Subject      string // the email subject of a validated send_homework_email, built by the core (TASK-092)
-	CreatedAt    time.Time
-	ConfirmedAt  time.Time
+
+	// The recipient of a send for the card «Кому» (ADR-0030), read again from the library: the name and role of the
+	// teacher with the Recipient address; RecipientReason "choose_teacher" with TeacherOptions while the student
+	// chooses (no Recipient yet), or "no_subject" / "no_teacher_email" (RecipientRole: the role without an address)
+	// for a send rejected for them; SubjectID is the library subject the teachers come from ("" none).
+	RecipientName   string
+	RecipientRole   proposal.TeacherRole
+	RecipientReason proposal.RejectReason
+	SubjectID       shared.SubjectID
+	TeacherOptions  []TeacherOptionView
+
+	CreatedAt   time.Time
+	ConfirmedAt time.Time
 
 	// The attachment of send_homework_email pinned at validation: the file name of proposal.ExportRefOf and the size of
 	// the pinned content. Empty and 0 while nothing is pinned. AttachmentFormat is the format the user chose (TASK-094).
@@ -100,6 +111,21 @@ type ProposalView struct {
 	// WorkID is the work whose file a send_work_email sends (TASK-180); its AttachmentName is the name the copy and the
 	// email give the file.
 	WorkID shared.WorkID
+}
+
+// TeacherOptionView is one teacher the card offers when it asks «Кому отправить?»: the role it confirms with, the
+// name and the address it shows (and sends back as ChosenTeacher.Address).
+type TeacherOptionView struct {
+	Role  proposal.TeacherRole
+	Name  string
+	Email string
+}
+
+// ChosenTeacher is the student's click on an option of «Кому отправить?» (ConfirmSendTo): the role and the address
+// the card showed for it. The zero value is no choice.
+type ChosenTeacher struct {
+	Role    proposal.TeacherRole
+	Address string
 }
 
 func viewOf(p *proposal.Proposal) ProposalView {

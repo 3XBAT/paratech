@@ -24,11 +24,16 @@ var (
 	_ homeworkflow.HomeworkExporter   = (*filestore.Store)(nil)
 )
 
-// fixedRecipient is the configured homework recipient.
+// fixedRecipient is the homeworkflow.RecipientSource where every subject name resolves to one library subject whose
+// only teacher, the lecturer, has address r (ADR-0030 B-6: they get every send).
 type fixedRecipient struct{ r proposal.Recipient }
 
-func (f fixedRecipient) HomeworkRecipient(context.Context) (proposal.Recipient, error) {
-	return f.r, nil
+func (f fixedRecipient) Teachers(_ context.Context, id shared.SubjectID) (proposal.Teachers, error) {
+	return proposal.Teachers{Subject: id, Lecture: proposal.Teacher{Name: "Иванова И. И.", Email: f.r.Address()}}, nil
+}
+
+func (f fixedRecipient) SubjectNamed(context.Context, string) (shared.SubjectID, error) {
+	return "s1", nil
 }
 
 type proposalsEnv struct {

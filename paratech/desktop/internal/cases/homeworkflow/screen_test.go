@@ -129,8 +129,10 @@ func TestProposeSend(t *testing.T) {
 		reason proposal.RejectReason
 	}{
 		{name: "ready", status: proposal.StatusValidated},
-		{name: "no recipient", setup: func(e *env) { e.recipient = "" }, status: proposal.StatusRejected,
-			reason: proposal.ReasonNoRecipient},
+		{name: "no teacher email", setup: func(e *env) { e.recipient = "" }, status: proposal.StatusRejected,
+			reason: proposal.ReasonNoTeacherEmail},
+		{name: "no subject", setup: func(e *env) { e.subject = "" }, status: proposal.StatusRejected,
+			reason: proposal.ReasonNoSubject},
 		{name: "nothing exported", setup: func(e *env) {
 			ref, _ := proposal.ExportRef("a1")
 			_ = e.files.Delete(context.Background(), ref)

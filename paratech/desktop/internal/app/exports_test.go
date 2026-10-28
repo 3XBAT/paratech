@@ -57,17 +57,12 @@ func confirmedEmail(t *testing.T, a *App, id shared.AssignmentID, recipient stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := proposal.NewRecipient(recipient)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	now := a.env.clock.Now()
 	p, err := proposal.New("p-"+proposal.ID(id), values.NewUntrustedOutput(`{"kind":"send_homework_email","assignment_id":"`+string(id)+`"}`), now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.Validate(proposal.Facts{AssignmentExists: true, Recipient: r, Attachment: digest}, now); err != nil {
+	if err := p.Validate(proposal.Facts{AssignmentExists: true, Teachers: lecturer(recipient), Attachment: digest}, now); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.Confirm(now); err != nil {

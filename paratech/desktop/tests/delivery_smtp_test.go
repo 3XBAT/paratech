@@ -240,16 +240,14 @@ func (e *deliveryEnv) validated(id proposal.ID, a shared.AssignmentID) *proposal
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	r, err := proposal.NewRecipient("teacher@school.example")
-	if err != nil {
-		e.t.Fatal(err)
-	}
 	sum := sha256.Sum256([]byte(mailContent))
 	dg, err := proposal.NewDigest(hex.EncodeToString(sum[:]), int64(len(mailContent)))
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	if err := p.Validate(proposal.Facts{AssignmentExists: true, Recipient: r, Attachment: dg}, e.clock.Now()); err != nil {
+	if err := p.Validate(proposal.Facts{AssignmentExists: true, Teachers: proposal.Teachers{
+		Subject: "s1", Lecture: proposal.Teacher{Name: "Иванова И. И.", Email: "teacher@school.example"},
+	}, Attachment: dg}, e.clock.Now()); err != nil {
 		e.t.Fatal(err)
 	}
 	return p
