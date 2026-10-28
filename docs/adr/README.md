@@ -37,3 +37,4 @@ Open decisions are tracked in PRD §19.
 - [0030](0030-subject-teachers-scheduled-send.md) Teacher of a subject and «Отправить в…»
 - [0031](0031-speech-vad.md) Skipping silence in speech recognition (Silero VAD)
 - [0032](0032-lesson-call-links.md) Call link of a lesson (Proposed)
+- [0033](0033-agent-parity.md) Agent parity: everything the student does in the UI, the agent can do (Proposed)
