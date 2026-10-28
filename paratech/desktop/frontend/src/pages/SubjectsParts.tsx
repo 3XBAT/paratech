@@ -1,9 +1,10 @@
-import { type DragEvent, useState } from "react";
+import { type DragEvent, type ReactNode, useState } from "react";
 import type { LibraryMaterial, LibrarySubject, SubjectOverview } from "../bindings/library.js";
 import {
   addToFolderLabel,
   dropCue,
   folderAnchor,
+  inboxAnchor,
   isMaterialDrag,
   materialDragType,
   readMaterialDrop,
@@ -295,6 +296,8 @@ export function SubjectDetail(props: {
   actions?: FileActions;
   /** «+» in the header of a folder: the file dialog, the file lands in this folder. */
   onAddFile?(folderId: string): void;
+  /** What to show under the header of a folder (the result of its «+»); null for nothing. */
+  folderExtra?(folderId: string): ReactNode;
 }) {
   const { subject } = props;
   const fresh = props.fresh ?? noFresh;
@@ -312,6 +315,7 @@ export function SubjectDetail(props: {
               </h2>
               {onAddFile && <IconButton icon="plus" label={addToFolderLabel(folderTitle(f))} disabled={props.busy} onClick={() => onAddFile(f.id)} />}
             </div>
+            {props.folderExtra?.(f.id)}
             <Card className="lrows" label={folderTitle(f)}>
               {files.length === 0 ? (
                 <p className="small muted empty-folder">{texts.emptyFolder}</p>
@@ -341,7 +345,7 @@ export function InboxList(props: { materials: readonly LibraryMaterial[]; action
     return null;
   }
   return (
-    <section className="section">
+    <section className="section" id={inboxAnchor}>
       <h2 className="sec-h">
         {texts.inbox} <span className="cnt num">· {folderCountText(files.length)}</span>
       </h2>
@@ -350,5 +354,25 @@ export function InboxList(props: { materials: readonly LibraryMaterial[]; action
       </Card>
       <p className="small muted group-foot">{texts.inboxHint}</p>
     </section>
+  );
+}
+
+/**
+ * The body of the list page: «Входящие» first (files waiting for a decision are what needs attention, and a long list of
+ * semesters would push them out of sight), then the subjects by semester. «Входящие» is not drawn while empty.
+ */
+export function SubjectsListBody(props: {
+  subjects: readonly LibrarySubject[];
+  inbox: readonly LibraryMaterial[];
+  inboxActions?: FileActions;
+  onOpen(id: string): void;
+  onAdd(): void;
+  drop?: CardDrop;
+}) {
+  return (
+    <>
+      <InboxList materials={props.inbox} actions={props.inboxActions} />
+      <SubjectList subjects={props.subjects} onOpen={props.onOpen} onAdd={props.onAdd} drop={props.drop} />
+    </>
   );
 }

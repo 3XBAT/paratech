@@ -11,7 +11,12 @@ import {
   type ImportElsewhere,
   materialDragType,
   moreLabel,
+  newSubjectValue,
+  type PanelPick,
   panelChoice,
+  panelCreated,
+  panelPickSubject,
+  panelStart,
   primaryAction,
   type UndoItem,
 } from "../libraryInboxView.js";
@@ -39,12 +44,18 @@ export interface FileActions {
   placeHint(m: LibraryMaterial, hint: PlacementHint): Promise<string>;
   toInbox(m: LibraryMaterial): Promise<string>;
   remove(m: LibraryMaterial): Promise<string>;
-  /** Creates a subject for the panel «Разложить» when there is none; it does not open it. */
-  createSubject(name: string): Promise<string>;
+  /** Creates a subject for the panel «Разложить» («Новый предмет…»); it neither opens it nor places anything into it. */
+  createSubject(name: string): Promise<CreatedSubject>;
   /** Re-reads the lists: the way out of a refusal that says the list is out of date. */
   refresh(): void;
   dragStart?(materialId: string): void;
   dragEnd?(): void;
+}
+
+/** The answer of a subject creation: the subject, or the Russian text of the refusal. */
+export interface CreatedSubject {
+  error: string;
+  subject: LibrarySubject | null;
 }
 
 /** A refusal in plain words and the way out as a button: «Обновить список» or «Повторить». */
@@ -72,13 +83,17 @@ export function ErrorLine(props: { text: string; onRefresh(): void; onRetry?: ()
 
 /**
  * The result of «Добавить файл» on the page of a subject: the line (nothing when the dialog was cancelled), the way on
- * when the file lies elsewhere («Переложить сюда», «Открыть предмет») or unplaced («Перейти во «Входящие»»), and a
- * refusal in plain words with «Повторить» / «Обновить список». Nothing here moves a file by itself.
+ * when the file lies elsewhere («Переместить сюда», «Открыть предмет») or unplaced («Разложить» in the line,
+ * «Перейти во «Входящие»»), and a refusal in plain words with «Повторить» / «Обновить список». Nothing here moves a
+ * file by itself.
  */
 export function AddFileLines(props: {
   note: string;
   elsewhere: ImportElsewhere | null;
   toInbox: boolean;
+  /** The file that did not land and the place it was meant for; with `placing` the line offers «Разложить». */
+  unplaced?: { material: LibraryMaterial; subjectId: string; folderId: string } | null;
+  placing?: Placing;
   busy: boolean;
   error: string;
   onMoveHere(): void;
@@ -90,7 +105,17 @@ export function AddFileLines(props: {
   const e = props.elsewhere;
   return (
     <>
-      {props.note !== "" && (
+      {props.note !== "" && props.toInbox && (
+        <NotPlacedLine
+          note={props.note}
+          unplaced={props.unplaced ?? null}
+          placing={props.placing}
+          busy={props.busy}
+          onOpenInbox={props.onOpenInbox}
+          onRefresh={props.onRefresh}
+        />
+      )}
+      {props.note !== "" && !props.toInbox && (
         <div className="lrow-error">
           <ResultLine kind="ok" role="status">
             {props.note}
@@ -105,11 +130,6 @@ export function AddFileLines(props: {
               {addFileTexts.openSubject}
             </Button>
           )}
-          {props.toInbox && (
-            <Button size="sm" onClick={props.onOpenInbox}>
-              {addFileTexts.openInbox}
-            </Button>
-          )}
         </div>
       )}
       {props.error !== "" && <ErrorLine text={props.error} onRefresh={props.onRefresh} onRetry={props.onRetry} />}
@@ -117,7 +137,82 @@ export function AddFileLines(props: {
   );
 }
 
-/** The panel under a row: the subject and the folder, «Положить» and «Отмена». Esc cancels; the focus starts in the first field. */
+/** What the line of an unplaced file needs to place it: the lists and the calls of the page. */
+export interface Placing {
+  subjects: readonly LibrarySubject[];
+  /** Places the file; resolves to "" or the Russian text of the refusal. */
+  place(subjectId: string, folderId: string): Promise<string>;
+  createSubject(name: string): Promise<CreatedSubject>;
+}
+
+/**
+ * The file was kept but did not land where it was meant to: a neutral (warning) line with «Разложить», which opens the
+ * panel of the row right here with that subject and folder chosen, and «Перейти во «Входящие»».
+ */
+function NotPlacedLine(props: {
+  note: string;
+  unplaced: { subjectId: string; folderId: string } | null;
+  placing?: Placing;
+  busy: boolean;
+  onOpenInbox(): void;
+  onRefresh(): void;
+}) {
+  const [panel, setPanel] = useState(false);
+  const [working, setWorking] = useState(false);
+  const [problem, setProblem] = useState("");
+  const { placing, unplaced } = props;
+  const submit = async (subjectId: string, folderId: string) => {
+    if (!placing) {
+      return;
+    }
+    setWorking(true);
+    setProblem("");
+    const text = await placing.place(subjectId, folderId);
+    setWorking(false);
+    if (text !== "") {
+      setProblem(text);
+    }
+  };
+  const canPlace = placing !== undefined && unplaced !== null;
+  return (
+    <>
+      <div className="lrow-error">
+        <ResultLine kind="wait" role="status">
+          {props.note}
+        </ResultLine>
+        {canPlace && !panel && (
+          <Button size="sm" disabled={props.busy} onClick={() => setPanel(true)}>
+            {addFileTexts.place}
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={props.onOpenInbox}>
+          {addFileTexts.openInbox}
+        </Button>
+      </div>
+      {canPlace && panel && (
+        <div className="place-inline">
+          <PlacePanel
+            subjects={placing.subjects}
+            subjectId={unplaced.subjectId}
+            folderId={unplaced.folderId}
+            busy={props.busy || working}
+            onSubmit={(s, f) => void submit(s, f)}
+            onCancel={() => setPanel(false)}
+            onCreateSubject={placing.createSubject}
+          />
+          {problem !== "" && <ErrorLine text={problem} onRefresh={props.onRefresh} />}
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * The panel under a row: the subject and the folder, «Положить» and «Отмена». Esc cancels; the focus starts in the first
+ * field. The subject starts on «Выберите предмет» unless one is given (a hint, the place of a placed file), and «Положить»
+ * stays off until a subject is chosen. «Новый предмет…» turns the subject part into the name form; the subject made
+ * there is selected, nothing is placed by it.
+ */
 export function PlacePanel(props: {
   subjects: readonly LibrarySubject[];
   subjectId: string;
@@ -125,15 +220,14 @@ export function PlacePanel(props: {
   busy: boolean;
   onSubmit(subjectId: string, folderId: string): void;
   onCancel(): void;
-  onCreateSubject(name: string): Promise<string>;
+  onCreateSubject(name: string): Promise<CreatedSubject>;
 }) {
-  const [subjectId, setSubjectId] = useState(props.subjectId);
-  const [folderId, setFolderId] = useState(props.folderId);
-  const [creating, setCreating] = useState(false);
+  const [pick, setPick] = useState<PanelPick>(() => panelStart(props.subjectId, props.folderId));
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState("");
-  const choice = panelChoice(props.subjects, subjectId, folderId);
+  const choice = panelChoice(props.subjects, pick.subjectId, pick.folderId);
   const subject = props.subjects.find((s) => s.id === choice.subjectId);
+  const creating = pick.creating;
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
@@ -145,16 +239,16 @@ export function PlacePanel(props: {
   const create = async (name: string) => {
     setCreateBusy(true);
     setCreateError("");
-    const text = await props.onCreateSubject(name);
+    const r = await props.onCreateSubject(name);
     setCreateBusy(false);
-    if (text === "") {
-      setCreating(false);
+    if (r.subject !== null) {
+      setPick(panelCreated(r.subject.id));
     } else {
-      setCreateError(text);
+      setCreateError(r.error);
     }
   };
 
-  if (props.subjects.length === 0) {
+  if (creating || props.subjects.length === 0) {
     return (
       <div className="place-panel" role="group" aria-label={fileTexts.place} onKeyDown={onKeyDown}>
         {creating ? (
@@ -164,12 +258,15 @@ export function PlacePanel(props: {
             error={createError}
             primary={false}
             onSubmit={(n) => void create(n)}
-            onCancel={() => setCreating(false)}
+            onCancel={() => {
+              setCreateError("");
+              setPick((p) => ({ ...p, creating: false }));
+            }}
           />
         ) : (
           <>
             <span className="muted">{fileTexts.noSubjects}</span>
-            <Button size="sm" autoFocus onClick={() => setCreating(true)}>
+            <Button size="sm" autoFocus onClick={() => setPick((p) => ({ ...p, creating: true }))}>
               {fileTexts.createSubject}
             </Button>
             <Button size="sm" variant="ghost" onClick={props.onCancel}>
@@ -185,26 +282,26 @@ export function PlacePanel(props: {
     <div className="place-panel" role="group" aria-label={fileTexts.place} onKeyDown={onKeyDown}>
       <Field label={fileTexts.subject}>
         {(id) => (
-          <Select
-            id={id}
-            autoFocus
-            value={choice.subjectId}
-            onChange={(e) => {
-              setSubjectId(e.target.value);
-              setFolderId("");
-            }}
-          >
+          <Select id={id} autoFocus value={choice.subjectId} onChange={(e) => setPick((p) => panelPickSubject(p, e.target.value))}>
+            <option value="">{fileTexts.pickSubject}</option>
             {props.subjects.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>
             ))}
+            <option value={newSubjectValue}>{fileTexts.newSubject}</option>
           </Select>
         )}
       </Field>
       <Field label={fileTexts.folder}>
         {(id) => (
-          <Select id={id} value={choice.folderId} onChange={(e) => setFolderId(e.target.value)}>
+          <Select
+            id={id}
+            value={choice.folderId}
+            disabled={subject === undefined}
+            onChange={(e) => setPick((p) => ({ ...p, subjectId: choice.subjectId, folderId: e.target.value }))}
+          >
+            {subject === undefined && <option value="">{fileTexts.noFolder}</option>}
             {folderChoices(subject).map((f) => (
               <option key={f.id} value={f.id}>
                 {f.title}
@@ -214,7 +311,11 @@ export function PlacePanel(props: {
         )}
       </Field>
       <div className="acts start">
-        <Button size="sm" disabled={props.busy || choice.folderId === ""} onClick={() => props.onSubmit(choice.subjectId, choice.folderId)}>
+        <Button
+          size="sm"
+          disabled={props.busy || choice.subjectId === "" || choice.folderId === ""}
+          onClick={() => props.onSubmit(choice.subjectId, choice.folderId)}
+        >
           {fileTexts.putHere}
         </Button>
         <Button size="sm" variant="ghost" disabled={props.busy} onClick={props.onCancel}>
@@ -295,7 +396,8 @@ export function FileRow(props: { m: LibraryMaterial; where: "inbox" | "folder"; 
     a?.dragStart?.(m.id);
   };
 
-  const hint = a && !placed && !panel ? a.hints.get(m.id) : undefined;
+  const known = a && !placed ? a.hints.get(m.id) : undefined; // also while the panel is open: it starts on the hint
+  const hint = panel ? undefined : known;
   const line = hintLine(hint);
   const hintPending = a !== undefined && !placed && !panel && line === null && a.hintPending.has(m.id);
   const primary = primaryAction(placed);
@@ -317,7 +419,7 @@ export function FileRow(props: { m: LibraryMaterial; where: "inbox" | "folder"; 
     >
       {a && !placed ? (
         // Only the icon is the handle, so the name stays selectable and the buttons keep working.
-        <span className="lrow-grip" draggable onDragStart={dragStart} onDragEnd={() => a.dragEnd?.()}>
+        <span className="lrow-grip" draggable title={fileTexts.dragTitle} onDragStart={dragStart} onDragEnd={() => a.dragEnd?.()}>
           {icon}
         </span>
       ) : (
@@ -340,11 +442,8 @@ export function FileRow(props: { m: LibraryMaterial; where: "inbox" | "folder"; 
             </Button>
           </div>
         )}
-        {hintPending && (
-          <div className="lrow-hint small muted" aria-hidden="true">
-            {fileTexts.hintLoading}
-          </div>
-        )}
+        {/* Nothing is written while the hint loads: the line only keeps its height, so the rows do not jump. */}
+        {hintPending && <div className="lrow-hint small" aria-hidden="true" />}
       </div>
       {props.fresh === true && <span className="fresh">{texts.fresh}</span>}
       {a && (
@@ -372,8 +471,8 @@ export function FileRow(props: { m: LibraryMaterial; where: "inbox" | "folder"; 
           {panel && (
             <PlacePanel
               subjects={a.subjects}
-              subjectId={hint?.kind === "existing" ? hint.subjectId : placed ? m.subjectId : ""}
-              folderId={hint?.kind === "existing" ? hint.folderId : placed ? m.folderId : ""}
+              subjectId={known?.kind === "existing" ? known.subjectId : placed ? m.subjectId : ""}
+              folderId={known?.kind === "existing" ? known.folderId : placed ? m.folderId : ""}
               busy={busy}
               onSubmit={(s, f) => void act(() => a.place(m, s, f))}
               onCancel={closePanel}

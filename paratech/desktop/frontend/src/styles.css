@@ -127,6 +127,7 @@ html, body, #root { height: 100%; }
 .place-panel { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; }
 .place-panel .ui-field { margin-bottom: 0; min-width: 180px; }
 .place-panel .name-form { margin-bottom: 0; }
+.place-inline { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; }
 .sec-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; padding-right: 8px; }
 .sec-head .sec-h { flex: 1; margin: 0; }
 .subj-card.drop { box-shadow: 0 0 0 2px var(--accent-fill); }

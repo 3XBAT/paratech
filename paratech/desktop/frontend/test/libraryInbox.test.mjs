@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { genericError } from "../.test-build/bindings/library.js";
+import { errorTexts, genericError, openTexts, refreshTexts } from "../.test-build/bindings/library.js";
 import { inboxMethods, libraryInboxApi, noHint, parsePlacementHint } from "../.test-build/bindings/libraryInbox.js";
 import { hasFiles, windowDragHandlers } from "../.test-build/dropFiles.js";
 import {
@@ -164,7 +164,7 @@ test("a file stored but not placed is read as notPlaced; an ordinary import is n
 // ---- the row menu ----
 
 test("the menu by state: a file of «Входящие» is placed, a placed one is moved or returned", () => {
-  assert.deepEqual(fileMenu(false).map((i) => [i.key, i.label]), [["open", "Открыть"], ["place", "Разложить"], ["remove", "Удалить"]]);
+  assert.deepEqual(fileMenu(false).map((i) => [i.key, i.label]), [["open", "Открыть"], ["place", "Разложить…"], ["remove", "Удалить"]]);
   assert.deepEqual(fileMenu(true).map((i) => [i.key, i.label]), [
     ["open", "Открыть"], ["place", "Переместить…"], ["toInbox", "Вернуть во «Входящие»"], ["remove", "Удалить"],
   ]);
@@ -176,7 +176,7 @@ test("a row of «Входящие» has the visible «Разложить», «�
   const inbox = html(h(InboxList, { materials: [material()], actions: actions() }));
   assert.match(inbox, /<button[^>]*aria-label="Разложить: лаба1\.pdf"[^>]*>Разложить<\/button>/);
   assert.match(inbox, /aria-label="Ещё действия: лаба1\.pdf"/);
-  assert.match(inbox, /class="lrow-grip" draggable="true"/);
+  assert.match(inbox, /class="lrow-grip" draggable="true" title="Перетащите на карточку предмета"/);
   const folder = html(
     h(SubjectDetail, {
       subject: subject(), materials: [material({ subjectId: "s1", folderId: "f1", inbox: false })], folderForm: false, busy: false, error: "",
@@ -203,7 +203,7 @@ test("the names are text nodes in the rows, the labels and the hint", () => {
 
 test("the hint line: «Похоже на» with «Положить», or «Создать предмет … и положить», or nothing", () => {
   assert.deepEqual(hintLine(existingHint), { text: "Похоже на: Сети → Лабораторные", action: "Положить" });
-  assert.deepEqual(hintLine(createHint), { text: "", action: "Создать предмет „Сети“ и положить" });
+  assert.deepEqual(hintLine(createHint), { text: "Есть в расписании: «Сети»", action: "Создать предмет «Сети» и положить" });
   assert.equal(hintLine(noHint), null);
   assert.equal(hintLine(undefined), null);
 });
@@ -213,12 +213,13 @@ test("the hint is shown under the name only for a file of «Входящие» a
   assert.match(withHint, /Похоже на: Сети → Лабораторные ·/);
   assert.match(withHint, /aria-label="Положить: лаба1\.pdf"[^>]*>Положить<\/button>/);
   const create = html(h(InboxList, { materials: [material()], actions: actions({ hints: new Map([["m1", createHint]]) }) }));
-  assert.match(create, />Создать предмет „Сети“ и положить<\/button>/);
-  // A file in a folder has no hint line even when a hint is known; a failed hint (none) shows nothing; a pending one shows «…».
+  assert.match(create, />Создать предмет «Сети» и положить<\/button>/);
+  assert.match(create, /Есть в расписании: «Сети» ·/);
+  // A file in a folder has no hint line even when a hint is known; a failed hint (none) shows nothing; a pending one keeps the height and writes nothing.
   const folder = html(h(SubjectDetail, { subject: subject(), materials: [material({ subjectId: "s1", folderId: "f1", inbox: false })], folderForm: false, busy: false, error: "", onCreateFolder: noop, onCancelFolder: noop, actions: actions({ hints: new Map([["m1", existingHint]]) }) }));
   assert.doesNotMatch(folder, /Похоже на/);
   assert.doesNotMatch(html(h(InboxList, { materials: [material()], actions: actions({ hints: new Map([["m1", noHint]]) }) })), /Похоже|lrow-hint/);
-  assert.match(html(h(InboxList, { materials: [material()], actions: actions({ hintPending: new Set(["m1"]) }) })), /lrow-hint small muted" aria-hidden="true">…</);
+  assert.match(html(h(InboxList, { materials: [material()], actions: actions({ hintPending: new Set(["m1"]) }) })), /<div class="lrow-hint small" aria-hidden="true"><\/div>/);
 });
 
 test("at most hintLimit files are hinted, those known are not asked again, removed ones never", () => {
@@ -245,26 +246,28 @@ test("the panel offers the subjects and the folders of the chosen one; «Мат�
   assert.equal(defaultFolderId(undefined), "");
   const other = subject({ id: "s2", name: "Физика" });
   assert.deepEqual(panelChoice([s, other], "s2", ""), { subjectId: "s2", folderId: "f4" });
-  assert.deepEqual(panelChoice([s, other], "gone", "f3"), { subjectId: "s1", folderId: "f3" });
+  // No guessing: an unknown or unwished subject leaves the choice empty.
+  assert.deepEqual(panelChoice([s, other], "gone", "f3"), { subjectId: "", folderId: "" });
+  assert.deepEqual(panelChoice([s, other], "", ""), { subjectId: "", folderId: "" });
   assert.deepEqual(panelChoice([], "s1", "f3"), { subjectId: "", folderId: "" });
 });
 
 test("the panel: two selects, «Положить» and «Отмена»; without subjects it says so and offers «Создать предмет»", () => {
-  const out = html(h(PlacePanel, { subjects: [subject(), subject({ id: "s2", name: evil })], subjectId: "s1", folderId: "f3", busy: false, onSubmit: noop, onCancel: noop, onCreateSubject: async () => "" }));
+  const out = html(h(PlacePanel, { subjects: [subject(), subject({ id: "s2", name: evil })], subjectId: "s1", folderId: "f3", busy: false, onSubmit: noop, onCancel: noop, onCreateSubject: async () => ({ error: "", subject: null }) }));
   assert.match(out, />Предмет</);
   assert.match(out, />Папка</);
   assert.match(out, /<option value="f3" selected="">Лабораторные<\/option>/);
   assert.match(out, />Положить<\/button>/);
   assert.match(out, />Отмена<\/button>/);
   assert.ok(!out.includes("<img"));
-  const none = html(h(PlacePanel, { subjects: [], subjectId: "", folderId: "", busy: false, onSubmit: noop, onCancel: noop, onCreateSubject: async () => "" }));
+  const none = html(h(PlacePanel, { subjects: [], subjectId: "", folderId: "", busy: false, onSubmit: noop, onCancel: noop, onCreateSubject: async () => ({ error: "", subject: null }) }));
   assert.match(none, /Предметов пока нет/);
   assert.match(none, />Создать предмет<\/button>/);
   assert.doesNotMatch(none, /<select/);
 });
 
 test("the panel's «Положить» is off while the call runs", () => {
-  const out = html(h(PlacePanel, { subjects: [subject()], subjectId: "s1", folderId: "f4", busy: true, onSubmit: noop, onCancel: noop, onCreateSubject: async () => "" }));
+  const out = html(h(PlacePanel, { subjects: [subject()], subjectId: "s1", folderId: "f4", busy: true, onSubmit: noop, onCancel: noop, onCreateSubject: async () => ({ error: "", subject: null }) }));
   assert.match(out, /<button[^>]*disabled=""[^>]*>Положить<\/button>/);
 });
 
@@ -280,13 +283,51 @@ test("where a file lies is worded from the subjects; the notes", () => {
   assert.equal(removedNote("лаба1.pdf"), "Удалено «лаба1.pdf».");
 });
 
-test("a refusal either says the list is out of date («Обновить список») or can be repeated", () => {
-  for (const t of ["Предмет не найден: обновите список.", "Папка не найдена: обновите список.", "Файл не найден: обновите список.", "Неверный идентификатор: обновите список.", "Предмет с таким названием уже есть."]) {
-    assert.equal(errorWay(t), "refresh", t);
+test("every known refusal of the library has its way out, pinned by the exact text", () => {
+  // The table is the contract: a reworded message (here or in Go) fails this test instead of silently flipping the button.
+  const way = {
+    "Неверный идентификатор: обновите список.": "refresh",
+    "Название предмета: от 1 до 200 символов.": "retry",
+    "Недопустимое имя папки: до 64 символов, без \\ / : * ? \" < > |, не CON, NUL и т. п., без точки в конце.": "retry",
+    "Предмет с таким названием уже есть.": "refresh",
+    "Папка с таким именем уже есть.": "refresh",
+    "Предмет не найден: обновите список.": "refresh",
+    "Папка не найдена: обновите список.": "refresh",
+    "Файл не найден: обновите список.": "refresh",
+    "Занятие не найдено в расписании.": "refresh",
+    "Сначала уберите отсюда все файлы, в том числе удалённые.": "retry",
+    "У предмета есть конспекты, в том числе удалённые: такой предмет удалить нельзя.": "retry",
+    "Эту папку удалить нельзя.": "retry",
+    "Достигнут предел: слишком много папок, названий или связей.": "retry",
+    "Файл удалён: сначала восстановите его.": "retry",
+    "Файл пустой.": "retry",
+    "Файл больше 100 МБ.": "retry",
+    "Подходят только DOCX, PPTX, PDF и текст в UTF-8.": "retry",
+    "Не удалось прочитать файл.": "retry",
+    "Данные сейчас меняются. Попробуйте ещё раз.": "retry",
+    "Не удалось прочитать библиотеку. Попробуйте ещё раз.": "retry",
+    "Этот файл добавить нельзя: перетащите файл с диска этого компьютера.": "retry",
+    "За раз можно перетащить не больше 10 файлов.": "retry",
+    [openTexts.not_found]: "refresh",
+    [openTexts.refused]: "retry",
+    [openTexts.failed]: "retry",
+    [genericError]: "retry",
+  };
+  for (const t of errorTexts) {
+    assert.ok(t in way, `a new library text needs a way out: ${t}`);
   }
-  for (const t of ["Данные сейчас меняются. Попробуйте ещё раз.", "Не удалось прочитать библиотеку. Попробуйте ещё раз.", genericError]) {
-    assert.equal(errorWay(t), "retry", t);
+  for (const [t, expected] of Object.entries(way)) {
+    assert.equal(errorWay(t), expected, t);
   }
+  // Every text that sends the student to «Обновить список» is still a text the core says (or one of openTexts).
+  const known = new Set([...errorTexts, ...Object.values(openTexts)]);
+  for (const t of refreshTexts) {
+    assert.ok(known.has(t), `refreshTexts holds a text nobody says: ${t}`);
+  }
+  assert.equal(refreshTexts.length, Object.values(way).filter((x) => x === "refresh").length);
+  // A text that is not exactly a known one is a plain retry, however much it looks like a stale list.
+  assert.equal(errorWay("Предмет не найден: обновите список"), "retry");
+  assert.equal(errorWay("обновите список"), "retry");
 });
 
 // ---- undo ----
@@ -346,7 +387,7 @@ test("the drag carries only the id of a file of «Входящие»; a drag of 
   assert.equal(readMaterialDrop("", ids), null);
   assert.equal(readMaterialDrop(undefined, ids), null);
   assert.equal(readMaterialDrop("x".repeat(200), new Set(["x".repeat(200)])), null);
-  assert.equal(dropCue("Сети"), "Положить в «Сети»");
+  assert.equal(dropCue("Сети"), "Положить в «Сети → Материалы»");
 });
 
 function dragEvent(types) {
@@ -424,7 +465,7 @@ test("the drop zone registers the four handlers of windowDragHandlers (a source 
 test("the cards show the cue while a row is dragged and otherwise «Открыть»", () => {
   const drop = (dragging) => ({ dragging, inboxIds: new Set(["m1"]), onDrop: noop, onEnd: noop });
   const dragging = html(h(SubjectList, { subjects: [subject()], onOpen: noop, onAdd: noop, drop: drop(true) }));
-  assert.match(dragging, /Положить в «Сети»/);
+  assert.match(dragging, /Положить в «Сети → Материалы»/);
   assert.doesNotMatch(dragging, />Открыть</);
   const idle = html(h(SubjectList, { subjects: [subject()], onOpen: noop, onAdd: noop, drop: drop(false) }));
   assert.match(idle, />Открыть</);
@@ -464,13 +505,13 @@ test("a file stored but not placed says so with the folder's name and offers «�
   const subjects = [subject()];
   const stored = { cancelled: false, existing: false, notPlaced: true, material: material() };
   const out = importOutcome(stored, { subjectId: "s1", folderId: "f1" }, subjects);
-  assert.equal(out.note, "Файл добавлен, но не лёг в «Лекции»: он во «Входящих». Разложите его вручную.");
+  assert.equal(out.note, "Файл добавлен во «Входящие»: положить его в «Лекции» не получилось.");
   assert.equal(out.toInbox, true);
   assert.equal(out.elsewhere, null);
   // «Материалы» when no folder is given; the subject gone: no folder name, still the way on.
-  assert.match(importOutcome(stored, { subjectId: "s1", folderId: "" }, subjects).note, /не лёг в «Материалы»/);
+  assert.match(importOutcome(stored, { subjectId: "s1", folderId: "" }, subjects).note, /положить его в «Материалы» не получилось/);
   const gone = importOutcome(stored, { subjectId: "s9", folderId: "f1" }, subjects);
-  assert.equal(gone.note, "Файл добавлен, но не лёг в нужную папку: он во «Входящих». Разложите его вручную.");
+  assert.equal(gone.note, "Файл добавлен во «Входящие»: положить его в нужную папку не получилось.");
   assert.equal(gone.toInbox, true);
   assert.equal(notPlacedNote("Лекции"), importOutcome(stored, { subjectId: "s1", folderId: "f1" }, subjects).note);
   // An ordinary import and a cancelled dialog offer nothing.
@@ -502,16 +543,16 @@ test("the lines after «Добавить файл»: the buttons follow the outc
   const there = material({ subjectId: "s2", folderId: "g2", inbox: false });
   const elsewhere = html(h(AddFileLines, addLines({ note: "Этот файл уже есть: «Физика → Лекции».", elsewhere: { material: there, label: "Физика → Лекции", openSubjectId: "s2" } })));
   assert.match(elsewhere, /role="status"/);
-  assert.match(elsewhere, />Переложить сюда<\/button>/);
+  assert.match(elsewhere, />Переместить сюда<\/button>/);
   assert.match(elsewhere, />Открыть предмет<\/button>/);
   assert.doesNotMatch(elsewhere, /Перейти во/);
-  // «Переложить сюда» is off while a call runs; «Открыть предмет» is absent for a file of «Входящие».
+  // «Переместить сюда» is off while a call runs; «Открыть предмет» is absent for a file of «Входящие».
   const inbox = html(h(AddFileLines, addLines({ note: "Этот файл уже есть: «Входящие».", busy: true, elsewhere: { material: material(), label: "Входящие", openSubjectId: "" } })));
-  assert.match(inbox, /<button[^>]*disabled=""[^>]*>Переложить сюда<\/button>/);
+  assert.match(inbox, /<button[^>]*disabled=""[^>]*>Переместить сюда<\/button>/);
   assert.doesNotMatch(inbox, /Открыть предмет/);
-  const unplaced = html(h(AddFileLines, addLines({ note: "Файл добавлен, но не лёг в «Лекции»: он во «Входящих». Разложите его вручную.", toInbox: true })));
+  const unplaced = html(h(AddFileLines, addLines({ note: "Файл добавлен во «Входящие»: положить его в «Лекции» не получилось.", toInbox: true })));
   assert.match(unplaced, />Перейти во «Входящие»<\/button>/);
-  assert.doesNotMatch(unplaced, /Переложить|Открыть предмет/);
+  assert.doesNotMatch(unplaced, /Переместить|Открыть предмет/);
   // Nothing to say (a cancelled dialog): nothing rendered.
   assert.equal(html(h(AddFileLines, addLines())), "");
 });

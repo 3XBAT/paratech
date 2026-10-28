@@ -2,13 +2,15 @@
 // «Разложить», the undo lines, the drag of a row to a subject. Pure, no React. Names of files, subjects and folders are
 // typed or imported text: they are passed through untouched and shown as text nodes.
 
-import type { LibraryImport, LibraryMaterial, LibrarySubject } from "./bindings/library.js";
+import { type LibraryImport, type LibraryMaterial, type LibrarySubject, refreshTexts } from "./bindings/library.js";
 import type { PlacementHint } from "./bindings/libraryInbox.js";
 import { folderTitle, orderedFolders, texts } from "./libraryView.js";
 
 export const fileTexts = {
   open: "Открыть",
   place: "Разложить",
+  /** In the «⋯» menu «Разложить» opens a panel, hence the dots; the visible button of the row stays «Разложить». */
+  placeMenu: "Разложить…",
   move: "Переместить…",
   toInbox: "Вернуть во «Входящие»",
   remove: "Удалить",
@@ -22,9 +24,14 @@ export const fileTexts = {
   undo: "Вернуть",
   refresh: "Обновить список",
   retry: "Повторить",
-  hintLoading: "…",
   addFileTo: "Добавить файл",
   inboxPlace: "Входящие",
+  pickSubject: "Выберите предмет",
+  newSubject: "Новый предмет…",
+  noFolder: "—",
+  dragTitle: "Перетащите на карточку предмета",
+  addToInboxTip: "Файл попадёт во «Входящие»",
+  addToMaterialsTip: "Файл попадёт в «Материалы»",
 } as const;
 
 /** The accessible name of the «⋯» button of a file row. */
@@ -46,7 +53,7 @@ export interface FileMenuItem {
 export function fileMenu(placed: boolean): FileMenuItem[] {
   const items: FileMenuItem[] = [
     { key: "open", label: fileTexts.open },
-    { key: "place", label: placed ? fileTexts.move : fileTexts.place },
+    { key: "place", label: placed ? fileTexts.move : fileTexts.placeMenu },
   ];
   if (placed) {
     items.push({ key: "toInbox", label: fileTexts.toInbox });
@@ -77,6 +84,11 @@ export function placedNote(label: string): string {
   return label === "" ? "Файл положен." : `Положено в «${label}».`;
 }
 
+/** «Создан предмет «Сети», файл положен в «Лабораторные».» after a «create» hint. */
+export function createdNote(subjectName: string, folderName: string): string {
+  return `Создан предмет «${subjectName}», файл положен в «${folderName}».`;
+}
+
 /** «Удалено «имя».» */
 export function removedNote(name: string): string {
   return `Удалено «${name}».`;
@@ -101,7 +113,7 @@ export function hintLine(h: PlacementHint | undefined): HintLine | null {
   if (h.kind === "existing") {
     return { text: `Похоже на: ${h.subjectName} → ${h.folderName}`, action: fileTexts.putHere };
   }
-  return { text: "", action: `Создать предмет „${h.createName}“ и положить` };
+  return { text: `Есть в расписании: «${h.createName}»`, action: `Создать предмет «${h.createName}» и положить` };
 }
 
 /** How many rows of «Входящие» are hinted (the hints are requested one by one). */
@@ -149,21 +161,49 @@ export interface PanelChoice {
   folderId: string;
 }
 
-/** The subject and folder of the panel for the wished ones: unknown ones fall back to the first subject, «Материалы». */
+/**
+ * The subject and folder of the panel for the wished ones. A subject that is not wished (or not there) is not guessed:
+ * the choice is empty ("Выберите предмет") and «Положить» stays off. A chosen subject opens on the wished folder, else
+ * «Материалы».
+ */
 export function panelChoice(subjects: readonly LibrarySubject[], wantedSubject: string, wantedFolder: string): PanelChoice {
-  const s = subjects.find((x) => x.id === wantedSubject) ?? subjects[0];
+  const s = subjects.find((x) => x.id === wantedSubject);
   return { subjectId: s?.id ?? "", folderId: defaultFolderId(s, wantedFolder) };
 }
 
-/** What a refusal leaves to do: the list is out of date ("refresh") or the call may simply be repeated ("retry"). */
+/** The value of the last option of the subject select, «Новый предмет…» (never a real subject id). */
+export const newSubjectValue = "__new-subject__";
+
+/** What the panel holds: the wished subject and folder (""), and whether the name of a new subject is being typed. */
+export interface PanelPick {
+  subjectId: string;
+  folderId: string;
+  creating: boolean;
+}
+
+export function panelStart(subjectId: string, folderId: string): PanelPick {
+  return { subjectId, folderId, creating: false };
+}
+
+/** The subject select changed: «Новый предмет…» turns it into the name form, any other value is the new subject (folder reset). */
+export function panelPickSubject(prev: PanelPick, value: string): PanelPick {
+  return value === newSubjectValue ? { ...prev, creating: true } : { subjectId: value, folderId: "", creating: false };
+}
+
+/** The new subject was made: it is selected (the file is not placed yet), the form closes. */
+export function panelCreated(subjectId: string): PanelPick {
+  return { subjectId, folderId: "", creating: false };
+}
+
+/** The refusals after which the list is out of date ("refresh") or the call may simply be repeated ("retry"). */
 export function errorWay(text: string): "refresh" | "retry" {
-  return /обновите список|не найден|удалили|уже есть/i.test(text) ? "refresh" : "retry";
+  return refreshTexts.includes(text) ? "refresh" : "retry";
 }
 
 // ---- Undo ----
 
 /** How a change is taken back. */
-export type UndoBack = { kind: "inbox" } | { kind: "place"; subjectId: string; folderId: string } | { kind: "restore" };
+export type UndoBack = { kind: "inbox"; removeSubject?: string } | { kind: "place"; subjectId: string; folderId: string } | { kind: "restore" };
 
 export interface UndoItem {
   id: number;
@@ -231,9 +271,9 @@ export function readMaterialDrop(raw: unknown, inboxIds: ReadonlySet<string>): s
   return typeof raw === "string" && raw !== "" && raw.length <= 128 && inboxIds.has(raw) ? raw : null;
 }
 
-/** The cue on a subject card while a row is dragged. */
+/** The cue on a subject card while a row is dragged: the drop lands in «Материалы», so the cue says it. */
 export function dropCue(subjectName: string): string {
-  return `Положить в «${subjectName}»`;
+  return `Положить в «${subjectName} → Материалы»`;
 }
 
 // ---- «Добавить файл» on the page of a subject ----
@@ -258,7 +298,7 @@ function targetFolderTitle(subjects: readonly LibrarySubject[], subjectId: strin
 /** «Добавить файл» ended with a file the core kept but did not put into the target; it lies in «Входящие». */
 export function notPlacedNote(folderName: string): string {
   const where = folderName === "" ? "нужную папку" : `«${folderName}»`;
-  return `Файл добавлен, но не лёг в ${where}: он во «Входящих». Разложите его вручную.`;
+  return `Файл добавлен во «Входящие»: положить его в ${where} не получилось.`;
 }
 
 /** The file of an import that was known already and lies elsewhere than the target, with the offers that follow. */
@@ -276,6 +316,8 @@ export interface ImportOutcome {
   elsewhere: ImportElsewhere | null;
   /** The file lies in «Входящие» unplaced: the line offers to go there. */
   toInbox: boolean;
+  /** With `toInbox`: the file and the wished place (the folder resolved), for «Разложить» in the line. */
+  unplaced?: { material: LibraryMaterial; subjectId: string; folderId: string };
 }
 
 /**
@@ -295,7 +337,12 @@ export function importOutcome(
   const here = targetFolderId(subjects, target.subjectId, target.folderId);
   const m = r.material;
   if (r.notPlaced === true) {
-    return { note: notPlacedNote(targetFolderTitle(subjects, target.subjectId, target.folderId)), elsewhere: null, toInbox: true };
+    return {
+      note: notPlacedNote(targetFolderTitle(subjects, target.subjectId, target.folderId)),
+      elsewhere: null,
+      toInbox: true,
+      ...(m === null ? {} : { unplaced: { material: m, subjectId: target.subjectId, folderId: here } }),
+    };
   }
   if (!r.existing || m === null) {
     const where = placeLabel(subjects, target.subjectId, here);
@@ -324,10 +371,29 @@ export function importToNote(
 }
 
 export const addFileTexts = {
-  moveHere: "Переложить сюда",
+  moveHere: "Переместить сюда",
   openSubject: "Открыть предмет",
   openInbox: "Перейти во «Входящие»",
+  place: "Разложить",
 } as const;
+
+type Scrollable = { getElementById(id: string): { scrollIntoView?: (o: { block: "start" }) => void } | null };
+
+/** The anchor of the section «Входящие» on the list page. */
+export const inboxAnchor = "inbox-section";
+
+/** Scrolls the section «Входящие» into view; nothing without a document or the section. */
+export function scrollToInbox(doc: Scrollable | undefined): void {
+  doc?.getElementById(inboxAnchor)?.scrollIntoView?.({ block: "start" });
+}
+
+/**
+ * «Перейти во «Входящие»» opens the list page first, so the scroll waits for it: true when the list is shown and loaded
+ * and a scroll is pending (the page then scrolls and clears the flag).
+ */
+export function inboxScrollDue(pending: boolean, openId: string, listLoaded: boolean): boolean {
+  return pending && openId === "" && listLoaded;
+}
 
 /** The anchor of the section of a folder on the page of a subject (the tree scrolls to it). */
 export function folderAnchor(folderId: string): string {

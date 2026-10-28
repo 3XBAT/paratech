@@ -4,8 +4,10 @@
 
 import { genericError, type LibraryApi, type LibraryMaterial, libraryErrorText, type LibrarySubject } from "./bindings/library.js";
 import { type LibraryInboxApi, noHint, type PlacementHint } from "./bindings/libraryInbox.js";
+import { folderTitle } from "./libraryView.js";
 import {
   backOf,
+  createdNote,
   hintLimit,
   hintTargets,
   type ImportOutcome,
@@ -40,7 +42,7 @@ export interface FlowState {
 }
 
 export interface FlowDeps {
-  api: Pick<LibraryApi, "createSubject">;
+  api: Pick<LibraryApi, "createSubject" | "removeSubject">;
   inboxApi: Pick<LibraryInboxApi, "place" | "moveToInbox" | "removeMaterial" | "restoreMaterial">;
   /** The subjects the page knows now. */
   subjects(): readonly LibrarySubject[];
@@ -61,6 +63,8 @@ export class MaterialFlow {
   private readonly listeners = new Set<() => void>();
   private seq = 0;
   private undoing = false;
+  /** Ids of the subjects a «create» hint made and no file was placed into yet. */
+  private readonly made = new Set<string>();
   private timer: unknown = null;
   private disposed = false;
   private readonly now: () => number;
@@ -125,6 +129,7 @@ export class MaterialFlow {
     try {
       if (it.back.kind === "inbox") {
         await this.d.inboxApi.moveToInbox(it.materialId);
+        await this.removeMade(it.back.removeSubject);
       } else if (it.back.kind === "place") {
         await this.d.inboxApi.place(it.materialId, it.back.subjectId, it.back.folderId);
       } else {
@@ -137,6 +142,21 @@ export class MaterialFlow {
     } finally {
       this.undoing = false;
       this.set({ undoBusy: false });
+    }
+  }
+
+  /**
+   * «Вернуть» after a «create» hint also removes the subject the hint made. The core removes only an empty subject; a
+   * subject that got files, notes or other content stays, and that refusal is not shown (the file is back anyway).
+   */
+  private async removeMade(subjectId: string | undefined): Promise<void> {
+    if (subjectId === undefined) {
+      return;
+    }
+    try {
+      await this.d.api.removeSubject(subjectId);
+    } catch {
+      // Silent on purpose, see above.
     }
   }
 
@@ -157,12 +177,11 @@ export class MaterialFlow {
     }
   }
 
-  /** `extra` is a subject created a moment ago that the page's list does not hold yet (for the words of the line). */
-  placeInto(m: LibraryMaterial, subjectId: string, folderId: string, extra?: LibrarySubject): Promise<string> {
+  placeInto(m: LibraryMaterial, subjectId: string, folderId: string): Promise<string> {
     return this.change(
       m,
       () => this.d.inboxApi.place(m.id, subjectId, folderId),
-      (r) => placedNote(placeLabel(extra ? [...this.d.subjects(), extra] : this.d.subjects(), r.subjectId, r.folderId)),
+      (r) => placedNote(placeLabel(this.d.subjects(), r.subjectId, r.folderId)),
       backOf(m),
     );
   }
@@ -178,17 +197,35 @@ export class MaterialFlow {
     if (h.kind !== "create") {
       return genericError;
     }
-    let s = this.d.subjects().find((x) => x.name === h.createName);
-    if (!s) {
+    let found = this.d.subjects().find((x) => x.name === h.createName);
+    if (!found) {
       try {
-        s = await this.d.api.createSubject(h.createName, "", h.createAliases);
+        found = await this.d.api.createSubject(h.createName, "", h.createAliases);
       } catch (err) {
         return libraryErrorText(err);
       }
-      this.d.addSubject(s);
+      this.made.add(found.id);
+      this.d.addSubject(found);
     }
+    const s = found;
     const folder = s.folders.find((f) => f.system === h.folderKind) ?? s.folders.find((f) => f.system === "materials");
-    return folder ? this.placeInto(m, s.id, folder.id, s) : genericError;
+    if (!folder) {
+      return genericError;
+    }
+
+    // A subject this flow made (also in an attempt that was refused) goes with «Вернуть»; one that was there before stays.
+    const fresh = this.made.has(s.id);
+    const back = backOf(m);
+    const text = await this.change(
+      m,
+      () => this.d.inboxApi.place(m.id, s.id, folder.id),
+      (r) => (fresh ? createdNote(s.name, folderTitle(folder)) : placedNote(placeLabel([...this.d.subjects(), s], r.subjectId, r.folderId))),
+      fresh && back.kind === "inbox" ? { ...back, removeSubject: s.id } : back,
+    );
+    if (text === "") {
+      this.made.delete(s.id);
+    }
+    return text;
   }
 
   toInbox(m: LibraryMaterial): Promise<string> {
@@ -312,7 +349,7 @@ export type AddFileResult =
 /**
  * Asks the core to import a file the student picks into a folder of a subject (folderId "" is «Материалы»). A cancelled
  * dialog is no result to show; a refusal carries its Russian text (the page offers «Повторить» / «Обновить список»).
- * `target.folderId` is the folder resolved, where «Переложить сюда» puts a file that lies elsewhere.
+ * `target.folderId` is the folder resolved, where «Переместить сюда» puts a file that lies elsewhere.
  */
 export async function addFileInto(
   api: Pick<LibraryInboxApi, "importFileTo">,

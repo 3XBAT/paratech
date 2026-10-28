@@ -71,9 +71,9 @@ export function useMaterialActions(p: {
       try {
         const s = await api.createSubject(name, "");
         setSubjects((l) => [...(l ?? []), s]);
-        return "";
+        return { error: "", subject: s };
       } catch (err) {
-        return libraryErrorText(err);
+        return { error: libraryErrorText(err), subject: null };
       }
     },
     refresh,

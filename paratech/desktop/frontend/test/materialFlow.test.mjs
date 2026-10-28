@@ -216,8 +216,8 @@ test("a «create» hint creates the subject with the hint's aliases, then places
   assert.deepEqual(log.created, [["Сети", "", ["Сети (лаб.)"]]], "name and aliases of the hint, the current semester");
   assert.deepEqual(log.placed, [["m1", "s-new", "f3"]], "the folder whose system is the hint's folderKind");
   assert.deepEqual(log.added, ["s-new"]);
-  assert.equal(flow.getState().undo[0].text, "Положено в «Сети → Лабораторные».");
-  assert.deepEqual(flow.getState().undo[0].back, { kind: "inbox" });
+  assert.equal(flow.getState().undo[0].text, "Создан предмет «Сети», файл положен в «Лабораторные».");
+  assert.deepEqual(flow.getState().undo[0].back, { kind: "inbox", removeSubject: "s-new" }, "«Вернуть» removes the subject it made");
   assert.equal(log.refreshed, 1);
 });
 
@@ -298,7 +298,7 @@ test("the way back by kind: delete restores, a placed file goes back where it wa
   assert.equal(flow.getState().undo[0].text, "Удалено «лаба1.pdf».");
   await flow.undoOne(flow.getState().undo[0]);
   assert.deepEqual(log.restored, ["m2"]);
-  // «Переложить сюда» of a file that lies in another subject: «Вернуть» puts it back there.
+  // «Переместить сюда» of a file that lies in another subject: «Вернуть» puts it back there.
   assert.equal(await flow.placeInto(placed, "s1", "f3"), "");
   assert.equal(flow.getState().undo[0].text, "Положено в «Сети → Лабораторные».");
   await flow.undoOne(flow.getState().undo[0]);
@@ -411,7 +411,7 @@ test("«Добавить файл» asks the core for the subject and the folder
   assert.deepEqual(calls, [["s1", "f1"], ["s1", ""]]);
   assert.equal(done.kind, "done");
   assert.equal(done.outcome.note, "Файл добавлен в «Сети → Материалы».");
-  assert.deepEqual(done.target, { subjectId: "s1", folderId: "f4" }, "the folder is resolved for «Переложить сюда»");
+  assert.deepEqual(done.target, { subjectId: "s1", folderId: "f4" }, "the folder is resolved for «Переместить сюда»");
 });
 
 test("a refused «Добавить файл» carries the core's text, or a generic one for any other", async () => {
@@ -427,5 +427,6 @@ test("a file not placed arrives as «done» with the way to «Входящие»
   const r = await addFileInto(api, "s1", "f1", [subject()]);
   assert.equal(r.kind, "done");
   assert.equal(r.outcome.toInbox, true);
-  assert.match(r.outcome.note, /не лёг в «Лекции»/);
+  assert.match(r.outcome.note, /положить его в «Лекции» не получилось/);
+  assert.equal(r.outcome.unplaced.material.id, "m1", "the line can place the file itself");
 });

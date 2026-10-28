@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type LibraryMaterial, type LibrarySubject, libraryApi, libraryErrorText } from "../bindings/library.js";
 import { libraryInboxApi } from "../bindings/libraryInbox.js";
 import { callByName } from "../bindings/runtime.js";
-import { fileTexts, type ImportElsewhere } from "../libraryInboxView.js";
+import { fileTexts, type ImportElsewhere, type ImportOutcome, inboxScrollDue, scrollToInbox } from "../libraryInboxView.js";
 import { addFileInto, CardDrop } from "../materialFlow.js";
 import {
   folderCounts,
@@ -19,7 +19,7 @@ import { idleTeacher, TeacherFlow, type TeacherFocus, type TeacherState, teacher
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { AddFileLines, ErrorLine, UndoLines } from "./FileRows.js";
-import { InboxList, NameForm, OverviewSections, SubjectDetail, SubjectList, SubjectTree } from "./SubjectsParts.js";
+import { NameForm, OverviewSections, SubjectDetail, SubjectsListBody, SubjectTree } from "./SubjectsParts.js";
 import { type TeacherActions, TeachersBlock } from "./TeachersBlock.js";
 import { useMaterialActions } from "./useMaterialActions.js";
 
@@ -29,11 +29,15 @@ interface AddedState {
   note: string;
   elsewhere: ImportElsewhere | null;
   toInbox: boolean;
-  /** Where «Добавить файл» aimed (the folder resolved), for «Переложить сюда». */
+  /** The file that did not land and where it was meant to go (for «Разложить» in the line). */
+  unplaced: ImportOutcome["unplaced"] | null;
+  /** Where «Добавить файл» aimed (the folder resolved), for «Переместить сюда». */
   target: { subjectId: string; folderId: string } | null;
+  /** The folder whose «+» started it, where the result is drawn; "" for the header button (the result is under the head). */
+  origin: string;
 }
 
-const noAdded: AddedState = { note: "", elsewhere: null, toInbox: false, target: null };
+const noAdded: AddedState = { note: "", elsewhere: null, toInbox: false, unplaced: null, target: null, origin: "" };
 
 /**
  * «Предметы»: the subjects as cards by semester, and the page of a subject (a tree on the left, the folders with their
@@ -69,7 +73,9 @@ export function SubjectsPage(props: {
   const [changes, setChanges] = useState(0);
   // The result of «Добавить файл» on the page of a subject, and the refusal (with how to repeat it).
   const [added, setAdded] = useState<AddedState>(noAdded);
-  const [addError, setAddError] = useState<{ text: string; again: () => void } | null>(null);
+  const [addError, setAddError] = useState<{ text: string; again: () => void; origin: string } | null>(null);
+  // «Перейти во «Входящие»» from a subject page: the list page opens first, then the scroll (see inboxScrollDue).
+  const [inboxScroll, setInboxScroll] = useState(false);
   const running = useRef(false); // a double click comes before the re-render that disables the button
 
   // The teachers of the open subject (TASK-238). Their version and data come from the list (Subjects()), which the flow
@@ -162,6 +168,12 @@ export function SubjectsPage(props: {
   const known = subject !== null;
   shown.current = subject;
   const mat = useMaterialActions({ api, inboxApi, subjects, setSubjects, inbox, hintsOn: openId === "", refresh });
+  useEffect(() => {
+    if (inboxScrollDue(inboxScroll, openId, subjects !== null)) {
+      scrollToInbox(typeof document === "undefined" ? undefined : document);
+      setInboxScroll(false);
+    }
+  }, [inboxScroll, openId, subjects, inbox]);
   const overview = overviewState.overview;
   const schedule = overview ? scheduleLine(overview.schedule) : "";
   const fresh = useMemo(() => freshMarks(overview), [overview]);
@@ -257,10 +269,10 @@ export function SubjectsPage(props: {
     try {
       const r = await addFileInto(inboxApi, openId, folderId, subjects ?? []);
       if (r.kind === "done") {
-        setAdded({ ...r.outcome, target: r.target });
+        setAdded({ ...r.outcome, unplaced: r.outcome.unplaced ?? null, target: r.target, origin: folderId });
         refresh();
       } else if (r.kind === "refused") {
-        setAddError({ text: r.text, again: () => void addFileTo(folderId) });
+        setAddError({ text: r.text, again: () => void addFileTo(folderId), origin: folderId });
       }
     } finally {
       running.current = false;
@@ -281,7 +293,7 @@ export function SubjectsPage(props: {
     [],
   );
 
-  // «Переложить сюда»: the file the import found filed elsewhere goes into the target; «Вернуть» puts it back.
+  // «Переместить сюда»: the file the import found filed elsewhere goes into the target; «Вернуть» puts it back.
   const moveHere = async () => {
     const e = added.elsewhere;
     const t = added.target;
@@ -296,13 +308,54 @@ export function SubjectsPage(props: {
       if (text === "") {
         setAdded(noAdded);
       } else {
-        setAddError({ text, again: () => void moveHere() });
+        setAddError({ text, again: () => void moveHere(), origin: added.origin });
       }
     } finally {
       running.current = false;
       setBusy(false);
     }
   };
+
+  // «Разложить» in the line of a file that did not land: the same placing as «Разложить» in «Входящие» (with «Вернуть»).
+  const placeUnplaced = async (subjectId: string, folderId: string): Promise<string> => {
+    const m = added.unplaced?.material;
+    if (!m || running.current) {
+      return "";
+    }
+    running.current = true;
+    setBusy(true);
+    try {
+      const text = await mat.placeInto(m, subjectId, folderId);
+      if (text === "") {
+        setAdded(noAdded);
+      }
+      return text;
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  };
+
+  // The result of «Добавить файл»: under the head for the header button, inside the section of the folder for its «+».
+  const addLines = (origin: string) => (
+    <AddFileLines
+      note={added.origin === origin ? added.note : ""}
+      elsewhere={added.origin === origin ? added.elsewhere : null}
+      toInbox={added.origin === origin && added.toInbox}
+      unplaced={added.origin === origin ? added.unplaced : null}
+      placing={{ subjects: subjects ?? [], place: placeUnplaced, createSubject: mat.actions.createSubject }}
+      busy={busy}
+      error={addError !== null && addError.origin === origin ? addError.text : ""}
+      onMoveHere={() => void moveHere()}
+      onOpenSubject={props.onSelect}
+      onOpenInbox={() => {
+        setInboxScroll(true);
+        props.onSelect("");
+      }}
+      onRetry={() => addError?.again()}
+      onRefresh={refresh}
+    />
+  );
 
   const undoLines = <UndoLines items={mat.undo} busy={mat.undoBusy} onUndo={(it) => void mat.undoOne(it)} onRefresh={mat.refreshUndo} />;
   const inboxIds = useMemo(() => new Set(inbox.filter((m) => !m.removed).map((m) => m.id)), [inbox]);
@@ -347,7 +400,7 @@ export function SubjectsPage(props: {
                 {schedule !== "" && <p className="small muted sub-line">{schedule}</p>}
               </div>
               <div className="acts">
-                <Button icon="up" disabled={busy} onClick={() => void addFileTo("")}>
+                <Button icon="up" disabled={busy} title={fileTexts.addToMaterialsTip} onClick={() => void addFileTo("")}>
                   {fileTexts.addFileTo}
                 </Button>
                 <Button icon="back" onClick={() => props.onSelect("")}>
@@ -355,18 +408,7 @@ export function SubjectsPage(props: {
                 </Button>
               </div>
             </div>
-            <AddFileLines
-              note={added.note}
-              elsewhere={added.elsewhere}
-              toInbox={added.toInbox}
-              busy={busy}
-              error={addError?.text ?? ""}
-              onMoveHere={() => void moveHere()}
-              onOpenSubject={props.onSelect}
-              onOpenInbox={() => props.onSelect("")}
-              onRetry={() => addError?.again()}
-              onRefresh={refresh}
-            />
+            {addLines("")}
             {subjectForm}
             {overviewState.status === "failed" && (
               <ResultLine kind="fail" role="alert">
@@ -386,6 +428,7 @@ export function SubjectsPage(props: {
               onCancelFolder={() => setForm("none")}
               actions={mat.actions}
               onAddFile={(folderId) => void addFileTo(folderId)}
+              folderExtra={(folderId) => addLines(folderId)}
             />
             {form !== "folder" && form !== "subject" && error !== "" && (
               <ResultLine kind="fail" role="alert">
@@ -428,7 +471,7 @@ export function SubjectsPage(props: {
           <Button icon="doc" onClick={() => props.onOpen("tickets")}>
             Билеты
           </Button>
-          <Button icon="up" disabled={busy} onClick={() => void addFile()}>
+          <Button icon="up" disabled={busy} title={fileTexts.addToInboxTip} onClick={() => void addFile()}>
             {texts.addFile}
           </Button>
           <Button variant="primary" icon="plus" disabled={busy} onClick={() => setForm("subject")}>
@@ -445,8 +488,10 @@ export function SubjectsPage(props: {
       {subjectForm}
       {subjects !== null && (
         <>
-          <SubjectList
+          <SubjectsListBody
             subjects={subjects}
+            inbox={inbox}
+            inboxActions={{ ...mat.actions, dragStart: setDragging, dragEnd: () => setDragging("") }}
             onOpen={props.onSelect}
             onAdd={() => setForm("subject")}
             drop={{
@@ -456,7 +501,6 @@ export function SubjectsPage(props: {
               onEnd: () => setDragging(""),
             }}
           />
-          <InboxList materials={inbox} actions={{ ...mat.actions, dragStart: setDragging, dragEnd: () => setDragging("") }} />
           {note !== "" && (
             <ResultLine kind="ok" role="status">
               {note}
