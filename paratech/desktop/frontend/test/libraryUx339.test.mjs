@@ -13,10 +13,13 @@ import {
   fileTexts,
   inboxAnchor,
   inboxScrollDue,
+  inboxScrollSettled,
   importOutcome,
   newSubjectValue,
+  panelBack,
   panelChoice,
   panelCreated,
+  panelEscape,
   panelPickSubject,
   panelStart,
   scrollToInbox,
@@ -77,6 +80,28 @@ test("the scroll to «Входящие» waits for the list page, then runs once
   scrollToInbox({ getElementById: () => ({}) });
   scrollToInbox(undefined);
   assert.equal(calls.length, 1);
+});
+
+test("scrollToInbox tells whether it scrolled; the pending flag is settled only then or when the inbox list is loaded", () => {
+  const calls = [];
+  const drawn = { getElementById: (id) => (id === inboxAnchor ? { scrollIntoView: (o) => calls.push(o) } : null) };
+  assert.equal(scrollToInbox(drawn), true);
+  assert.equal(calls.length, 1);
+  assert.equal(scrollToInbox({ getElementById: () => null }), false, "the section is not drawn yet");
+  assert.equal(scrollToInbox({ getElementById: () => ({}) }), false, "an element that cannot scroll");
+  assert.equal(scrollToInbox(undefined), false, "no document");
+  assert.equal(inboxScrollSettled(false, false), false, "subjects are there, the inbox list is still on its way: keep waiting");
+  assert.equal(inboxScrollSettled(true, false), true);
+  assert.equal(inboxScrollSettled(false, true), true, "the inbox is loaded and empty: no section, no stuck flag");
+});
+
+test("Esc in the panel steps back out of the «Новый предмет…» form and closes the panel only otherwise", () => {
+  assert.equal(panelEscape(panelStart("", "")), "close");
+  assert.equal(panelEscape(panelPickSubject(panelStart("", ""), newSubjectValue)), "back");
+  const creating = panelPickSubject(panelStart("s1", "f1"), newSubjectValue);
+  const back = panelBack(creating);
+  assert.equal(back.creating, false);
+  assert.equal(panelEscape(back), "close", "the second Esc closes");
 });
 
 // ---- 2. the panel ----

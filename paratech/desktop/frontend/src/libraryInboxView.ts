@@ -190,6 +190,16 @@ export function panelPickSubject(prev: PanelPick, value: string): PanelPick {
   return value === newSubjectValue ? { ...prev, creating: true } : { subjectId: value, folderId: "", creating: false };
 }
 
+/** Esc in the panel: inside the name form of «Новый предмет…» it steps back to the select, otherwise it closes the panel. */
+export function panelEscape(pick: PanelPick): "back" | "close" {
+  return pick.creating ? "back" : "close";
+}
+
+/** The name form was left («Отмена» or Esc): the select is shown again, the choice made before stays. */
+export function panelBack(pick: PanelPick): PanelPick {
+  return { ...pick, creating: false };
+}
+
 /** The new subject was made: it is selected (the file is not placed yet), the form closes. */
 export function panelCreated(subjectId: string): PanelPick {
   return { subjectId, folderId: "", creating: false };
@@ -382,9 +392,22 @@ type Scrollable = { getElementById(id: string): { scrollIntoView?: (o: { block: 
 /** The anchor of the section «Входящие» on the list page. */
 export const inboxAnchor = "inbox-section";
 
-/** Scrolls the section «Входящие» into view; nothing without a document or the section. */
-export function scrollToInbox(doc: Scrollable | undefined): void {
-  doc?.getElementById(inboxAnchor)?.scrollIntoView?.({ block: "start" });
+/** Scrolls the section «Входящие» into view; false when there is no document or the section is not drawn (yet). */
+export function scrollToInbox(doc: Scrollable | undefined): boolean {
+  const el = doc?.getElementById(inboxAnchor);
+  if (!el || typeof el.scrollIntoView !== "function") {
+    return false;
+  }
+  el.scrollIntoView({ block: "start" });
+  return true;
+}
+
+/**
+ * Whether the pending scroll is used up: it was done, or the lists are loaded and the section is not there (an empty
+ * «Входящие» has no section), so the flag does not wait for ever. While the inbox list is on its way it stays.
+ */
+export function inboxScrollSettled(scrolled: boolean, inboxLoaded: boolean): boolean {
+  return scrolled || inboxLoaded;
 }
 
 /**

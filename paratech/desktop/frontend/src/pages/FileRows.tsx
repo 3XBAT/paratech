@@ -13,8 +13,10 @@ import {
   moreLabel,
   newSubjectValue,
   type PanelPick,
+  panelBack,
   panelChoice,
   panelCreated,
+  panelEscape,
   panelPickSubject,
   panelStart,
   primaryAction,
@@ -174,14 +176,20 @@ function NotPlacedLine(props: {
     }
   };
   const canPlace = placing !== undefined && unplaced !== null;
+  const line = useRef<HTMLDivElement>(null);
+  const closePanel = () => {
+    setPanel(false);
+    // The button is drawn again only after this render, so the focus moves once it is there.
+    setTimeout(() => line.current?.querySelector<HTMLButtonElement>(".place-open")?.focus(), 0);
+  };
   return (
     <>
-      <div className="lrow-error">
+      <div className="lrow-error" ref={line}>
         <ResultLine kind="wait" role="status">
           {props.note}
         </ResultLine>
         {canPlace && !panel && (
-          <Button size="sm" disabled={props.busy} onClick={() => setPanel(true)}>
+          <Button size="sm" className="place-open" disabled={props.busy} onClick={() => setPanel(true)}>
             {addFileTexts.place}
           </Button>
         )}
@@ -197,7 +205,7 @@ function NotPlacedLine(props: {
             folderId={unplaced.folderId}
             busy={props.busy || working}
             onSubmit={(s, f) => void submit(s, f)}
-            onCancel={() => setPanel(false)}
+            onCancel={closePanel}
             onCreateSubject={placing.createSubject}
           />
           {problem !== "" && <ErrorLine text={problem} onRefresh={props.onRefresh} />}
@@ -229,10 +237,19 @@ export function PlacePanel(props: {
   const subject = props.subjects.find((s) => s.id === choice.subjectId);
   const creating = pick.creating;
 
+  const backToSelect = () => {
+    setCreateError("");
+    setPick(panelBack);
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
       e.stopPropagation();
-      props.onCancel();
+      if (panelEscape(pick) === "back") {
+        backToSelect();
+      } else {
+        props.onCancel();
+      }
     }
   };
 
@@ -258,10 +275,7 @@ export function PlacePanel(props: {
             error={createError}
             primary={false}
             onSubmit={(n) => void create(n)}
-            onCancel={() => {
-              setCreateError("");
-              setPick((p) => ({ ...p, creating: false }));
-            }}
+            onCancel={backToSelect}
           />
         ) : (
           <>

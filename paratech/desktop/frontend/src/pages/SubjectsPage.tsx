@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type LibraryMaterial, type LibrarySubject, libraryApi, libraryErrorText } from "../bindings/library.js";
 import { libraryInboxApi } from "../bindings/libraryInbox.js";
 import { callByName } from "../bindings/runtime.js";
-import { fileTexts, type ImportElsewhere, type ImportOutcome, inboxScrollDue, scrollToInbox } from "../libraryInboxView.js";
+import { fileTexts, type ImportElsewhere, type ImportOutcome, inboxScrollDue, inboxScrollSettled, scrollToInbox } from "../libraryInboxView.js";
 import { addFileInto, CardDrop } from "../materialFlow.js";
 import {
   folderCounts,
@@ -60,6 +60,7 @@ export function SubjectsPage(props: {
   const openId = props.subjectId;
   const [subjects, setSubjects] = useState<LibrarySubject[] | null>(null);
   const [inbox, setInbox] = useState<LibraryMaterial[]>([]);
+  const [inboxLoaded, setInboxLoaded] = useState(false); // the first answer for «Входящие» (a failure counts: nothing to wait for)
   const [materials, setMaterials] = useState<LibraryMaterial[] | null>(null);
   const [form, setForm] = useState<Form>("none");
   const [busy, setBusy] = useState(false);
@@ -127,7 +128,13 @@ export function SubjectsPage(props: {
       },
       () => setLoadError(texts.loadFailed),
     );
-    api.materials("").then(setInbox, () => undefined);
+    api.materials("").then(
+      (m) => {
+        setInbox(m);
+        setInboxLoaded(true);
+      },
+      () => setInboxLoaded(true),
+    );
   }, [api]);
 
   useEffect(load, [load, props.reload]);
@@ -170,10 +177,12 @@ export function SubjectsPage(props: {
   const mat = useMaterialActions({ api, inboxApi, subjects, setSubjects, inbox, hintsOn: openId === "", refresh });
   useEffect(() => {
     if (inboxScrollDue(inboxScroll, openId, subjects !== null)) {
-      scrollToInbox(typeof document === "undefined" ? undefined : document);
-      setInboxScroll(false);
+      const scrolled = scrollToInbox(typeof document === "undefined" ? undefined : document);
+      if (inboxScrollSettled(scrolled, inboxLoaded)) {
+        setInboxScroll(false);
+      }
     }
-  }, [inboxScroll, openId, subjects, inbox]);
+  }, [inboxScroll, openId, subjects, inbox, inboxLoaded]);
   const overview = overviewState.overview;
   const schedule = overview ? scheduleLine(overview.schedule) : "";
   const fresh = useMemo(() => freshMarks(overview), [overview]);
