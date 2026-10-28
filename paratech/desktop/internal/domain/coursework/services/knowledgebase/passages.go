@@ -35,7 +35,8 @@ type LessonText struct {
 // Passage is a text of a lesson that may answer a question, with its place as a Hit counts it: Index is the summary
 // text, the lecture text block, the first transcript segment or the fragment in Document.Notes; StartMs is 0 for the
 // summary and a note. Note, Material and Locator name the fragment of SectionOwnNote, zero for the other sections;
-// Heading is the first line of a note fragment of a section (its heading, one plain line), "" otherwise. Text and
+// Heading is the first line of a note fragment of a section (its heading, one plain line of at most
+// MaxHeadingRunes), "" otherwise. Text and
 // Heading are untrusted.
 type Passage struct {
 	Lesson   Lesson
@@ -195,10 +196,10 @@ func passageKey(l Lesson) string {
 	return RecordingKey(l.Recording)
 }
 
-// headingOf is the first line of a note fragment of a section, one plain line.
+// headingOf is the first line of a note fragment of a section, one plain line cut to MaxHeadingRunes.
 func headingOf(text string) string {
 	line, _, _ := strings.Cut(cleanText(text), "\n")
-	return strings.TrimSpace(plain([]rune(line)))
+	return cutHeading(strings.TrimSpace(plain([]rune(line))))
 }
 
 // match returns how many terms text holds and the rune position of the first match (of any term), -1 for none.

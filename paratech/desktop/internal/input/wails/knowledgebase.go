@@ -285,11 +285,14 @@ func (s *KnowledgeBaseService) Search(ctx context.Context, query string) (Knowle
 }
 
 // ownNoteLabel names the place of a hit in the student's notes with the words of an answer's citation, so the two
-// never differ. kb.Hit keeps no heading, so a section reads «раздел N».
+// never differ: a section with a heading reads «раздел „Ряды“», one without «раздел N».
 func ownNoteLabel(h kb.Hit) string {
 	src := answer.Source{
 		Section: answer.SectionOwnNote, Note: h.Note, Material: h.Material,
 		Locator: answer.Locator{Kind: answer.LocatorKind(h.Locator.Kind), N: h.Locator.N},
+	}
+	if src.Locator.Kind == answer.LocatorSection {
+		src.Heading = h.Heading
 	}
 	return src.OwnNoteLabel()
 }
