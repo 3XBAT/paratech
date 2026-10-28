@@ -5430,7 +5430,7 @@
             "dependencies": [
                 "TASK-206"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-252",
