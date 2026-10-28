@@ -418,6 +418,33 @@ test("a role filled meanwhile is not overwritten by «Вернуть»", async (
   await page.flow.restore();
   assert.equal(page.calls.length, 1);
   assert.equal(page.flow.state.removed, null);
+  assert.equal(page.flow.state.note, teacherTexts.alreadySet, "the offer does not vanish silently");
+  assert.equal(teacherTexts.alreadySet, "Преподаватель уже указан заново.");
+});
+
+test("every result moves the focus again: focusRole is empty while busy, the role at the end (also for «Вернуть»)", async () => {
+  const page = setup(withTeachers({ lecture: lecturer }), [ok(subject({ version: 4 })), ok(withTeachers({ lecture: lecturer }, { version: 5 }))]);
+  page.flow.open("lecture");
+  await page.flow.clear();
+  assert.equal(page.flow.state.focusRole, "lecture");
+  const before = page.states.length;
+  await page.flow.restore();
+  const during = page.states.slice(before);
+  assert.equal(during[0].busy, "save");
+  assert.equal(during[0].focusRole, "", "reset while busy, so the effect runs again on the same role");
+  assert.equal(page.flow.state.focusRole, "lecture");
+});
+
+test("a refused «Вернуть» with a field error is told in the block line, not at a closed form's field", async () => {
+  const page = setup(withTeachers({ lecture: lecturer }), [ok(subject({ version: 4 })), refused("invalid", "email")]);
+  page.flow.open("lecture");
+  await page.flow.clear();
+  await page.flow.restore();
+  const { errors } = page.flow.state;
+  assert.equal(errors.email, "");
+  assert.equal(errors.name, "");
+  assert.equal(errors.general, teacherTexts.restoreFailed);
+  assert.notEqual(page.flow.state.removed, null, "the offer stays");
 });
 
 test("a failed clear says so and re-reads", async () => {

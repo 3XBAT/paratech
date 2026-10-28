@@ -43,6 +43,8 @@ export const teacherTexts = {
   cleared: "Преподаватель убран.",
   undo: "Вернуть",
   restored: "Преподаватель восстановлен.",
+  restoreFailed: "Не удалось вернуть преподавателя: данные не приняты.",
+  alreadySet: "Преподаватель уже указан заново.",
 } as const;
 
 /** The titles of the three rows. */
@@ -313,7 +315,7 @@ export class TeacherFlow {
       return;
     }
     if (subject.teachers[back.role] !== null) {
-      this.set({ removed: null });
+      this.set({ removed: null, note: teacherTexts.alreadySet });
       return;
     }
     await this.run("save", back.role, () => this.api.setSubjectTeacher(subject.id, subject.version, back.role, back.name, back.email), {
@@ -329,7 +331,8 @@ export class TeacherFlow {
   ): Promise<void> {
     this.pending = true;
     const epoch = this.epoch;
-    this.set({ busy: kind, errors: noErrors, note: "", ...(opts.restore === true ? {} : { removed: null }) });
+    // focusRole is reset so that every result moves the focus again, even to the same role.
+    this.set({ busy: kind, errors: noErrors, note: "", focusRole: "", ...(opts.restore === true ? {} : { removed: null }) });
     try {
       let result: TeacherResult;
       try {
@@ -371,7 +374,8 @@ export class TeacherFlow {
     const failed = kind === "save" ? teacherTexts.saveFailed : teacherTexts.clearFailed;
     if (result.problem === "invalid") {
       if (fresh()) {
-        this.set({ busy: "", errors: fieldErrors(result.field, failed) });
+        // A restore has no open form: a field error would be invisible, so the text goes to the block line.
+        this.set({ busy: "", errors: opts.restore === true ? { ...noErrors, general: teacherTexts.restoreFailed } : fieldErrors(result.field, failed) });
       }
       return;
     }
