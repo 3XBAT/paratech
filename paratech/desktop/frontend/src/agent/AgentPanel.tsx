@@ -18,6 +18,7 @@ import {
   entryModel,
   fillOf,
   type FillMap,
+  fillsFromChat,
   fillsFromList,
   fillsFromUpdate,
   isFocusPanelKey,
@@ -525,6 +526,7 @@ export function AgentPanel(props: {
     onNew: () => {
       void chatCall("new", () => api.newChat()).then((r) => {
         if (r?.chat) {
+          setFills((f) => fillsFromChat(f, r.chat!, entriesRef.current));
           setNotice("");
           setOpenId(r.chat.threadId);
           void refreshChats(r.chat.threadId);
@@ -535,6 +537,9 @@ export function AgentPanel(props: {
     onRename: async (id: string, title: string) => {
       const r = await chatCall("rename", () => api.renameChat(id, title));
       if (r?.problem === "") {
+        if (r.chat) {
+          setFills((f) => fillsFromChat(f, r.chat!, entriesRef.current));
+        }
         void refreshChats();
         return "";
       }
@@ -543,6 +548,9 @@ export function AgentPanel(props: {
     onArchive: (id: string) => {
       void chatCall("archive", () => api.archiveChat(id)).then((r) => {
         if (r?.problem === "") {
+          if (r.chat) {
+            setFills((f) => fillsFromChat(f, r.chat!, entriesRef.current));
+          }
           const next = openAfterArchive(chats, openRef.current, id, entriesRef.current);
           setOpenId(next);
           void refreshChats(next);
@@ -552,6 +560,9 @@ export function AgentPanel(props: {
     onRestore: (id: string) => {
       void chatCall("restore", () => api.restoreChat(id)).then((r) => {
         if (r?.problem === "") {
+          if (r.chat) {
+            setFills((f) => fillsFromChat(f, r.chat!, entriesRef.current));
+          }
           void refreshChats();
         }
       });

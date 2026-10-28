@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import server from "react-dom/server";
 import { initialPanelState, reducePanel } from "../.test-build/agentState.js";
-import { fillOf, fillsFromList, fillsFromUpdate, ringModel, ringTexts } from "../.test-build/agentView.js";
+import { fillOf, fillsFromChat, fillsFromList, fillsFromUpdate, ringModel, ringTexts } from "../.test-build/agentView.js";
 import { parseFill } from "../.test-build/bindings/agent.js";
 import { ContextHint, ContextRing } from "../.test-build/agent/ContextRing.js";
 import { Button } from "../.test-build/ui/Button.js";
@@ -48,36 +48,42 @@ test("an unknown fill draws nothing: no ring, no hint", () => {
   assert.equal(renderToStaticMarkup(h(ContextRing, { fill: null })), "");
 });
 
-test("0 % is a quiet empty ring with its text", () => {
-  const html = ring(fill(0, "normal"));
-  assert.match(html, /stroke-dasharray="0 100"/);
-  assert.match(html, /aria-label="Контекст чата: 0 %\./);
+test("0 % (an empty chat) draws no ring; the first percent does", () => {
+  assert.equal(ringModel(fill(0, "normal")), null);
+  assert.equal(ring(fill(0, "normal")), "");
+  assert.equal(ringModel(fill(0.7, "normal")), null);
+  assert.equal(ringModel(fill(Number.NaN, "normal")), null);
+  assert.match(ring(fill(1, "normal")), /stroke-dasharray="1 100"/);
+  assert.equal(hint(fill(0, "full")), "");
 });
 
 test("the arc is filled to the percent and never past 100", () => {
   assert.match(ring(fill(42, "normal")), /stroke-dasharray="42 100"/);
   assert.match(ring(fill(100, "full")), /stroke-dasharray="100 100"/);
   assert.equal(ringModel(fill(250, "full")).percent, 100);
-  assert.equal(ringModel(fill(-3, "normal")).percent, 0);
+  assert.equal(ringModel(fill(-3, "normal")), null);
   assert.equal(ringModel(fill(41.9, "normal")).percent, 41);
-  assert.equal(ringModel(fill(Number.NaN, "normal")).percent, 0);
-  assert.match(ring(fill(250, "full")), /Контекст чата: 100 %/);
+  assert.match(ring(fill(250, "full")), /Контекст чата: 100 %/);
 });
 
-test("tooltip and accessible name start with «Контекст чата: N %»; the sentence follows at every level", () => {
+test("tooltip and accessible name start with «Контекст чата: N %» (non-breaking space); the sentence follows at every level", () => {
   for (const [f, sentence] of [
     [fill(12, "normal"), ringTexts.normal],
     [fill(72, "high"), ringTexts.high],
     [fill(93, "full"), ringTexts.full],
   ]) {
     const m = ringModel(f);
-    assert.equal(m.text, `Контекст чата: ${f.percent} %. ${sentence}`);
+    assert.equal(m.text, `Контекст чата: ${f.percent} %. ${sentence}`);
+    assert.ok(m.text.startsWith(`Контекст чата: ${f.percent} %`));
     const html = ring(f);
     assert.ok(html.includes(`role="img"`));
     assert.ok(html.includes(`aria-label="${m.text}"`));
     assert.ok(html.includes(`title="${m.text}"`));
   }
-  assert.equal(ringTexts.label(7), "Контекст чата: 7 %");
+  assert.equal(ringTexts.label(7), "Контекст чата: 7 %");
+  assert.equal(ringTexts.normal, "Агент помнит весь разговор.");
+  assert.equal(ringTexts.high, "Скоро агент начнёт сжимать начало разговора.");
+  assert.equal(ringTexts.full, "Память чата почти заполнена: новый чат ответит точнее.");
 });
 
 test("the hidden text sits inside the role=img element, once (children of an img are presentational)", () => {
@@ -95,7 +101,7 @@ test("the sentences are short, impersonal and name no colour", () => {
     assert.doesNotMatch(s, /(^|[^а-яё])(я|мы|вам|вы)([^а-яё]|$)/i);
     assert.doesNotMatch(s, /красн|оранж|жёлт|цвет/i);
   }
-  assert.equal(ringTexts.hint, "Начать новый чат");
+  assert.equal(ringTexts.hint, "Начать новый чат? Этот чат почти заполнен и останется в списке.");
   assert.equal(ringTexts.hintButton, "Новый чат");
 });
 
@@ -103,8 +109,8 @@ test("the hint appears only at full; normal and high have none", () => {
   assert.equal(hint(fill(20, "normal")), "");
   assert.equal(hint(fill(80, "high")), "");
   const html = hint(fill(95, "full"));
-  assert.match(html, /class="ag-fullhint small"/);
-  assert.match(html, /Начать новый чат/);
+  assert.match(html, /class="ag-fullhint small" role="status"/);
+  assert.match(html, /Начать новый чат\? Этот чат почти заполнен и останется в списке\./);
   assert.match(html, /<button[^>]*type="button"[^>]*>Новый чат<\/button>/);
   // No chat controls (no onNew): no dead button.
   assert.equal(renderToStaticMarkup(h(ContextHint, { fill: fill(95, "full") })), "");
@@ -230,6 +236,44 @@ test("during a step the last fill stays: a chat with a request in flight ignores
   assert.equal(fillOf(fillsFromList(prev, [chat({ fill: fill(55, "normal") })], done), "a").percent, 55);
 });
 
+test("the ring holds while the request waits for a plan, answers or a «Да»; a final request takes the list value", () => {
+  const prev = { a: fill(40, "normal") };
+  const listed = [chat({ running: false, fill: fill(55, "normal") })];
+  const entriesOf = (status, extra = {}) => reducePanel(initialPanelState, { type: "update", update: update({ status, ...extra }) }).entries;
+  for (const status of ["PLANNING", "AWAITING_PLAN", "AWAITING_ANSWERS", "EXECUTING"]) {
+    assert.equal(fillOf(fillsFromList(prev, listed, entriesOf(status)), "a").percent, 40, status);
+  }
+  for (const status of ["DONE", "STOPPED", "FAILED", "CANCELLED"]) {
+    assert.equal(fillOf(fillsFromList(prev, listed, entriesOf(status)), "a").percent, 55, status);
+  }
+  // Only the last request of the chat counts: an older open one does not hold the ring.
+  const two = reducePanel(reducePanel(initialPanelState, { type: "update", update: update({ turn: 1, status: "AWAITING_PLAN" }) }), {
+    type: "update",
+    update: update({ turn: 2, status: "DONE" }),
+  }).entries;
+  assert.equal(fillOf(fillsFromList(prev, listed, two), "a").percent, 55);
+  // A request of another chat does not hold this one.
+  const other = reducePanel(initialPanelState, { type: "update", update: update({ threadId: "b", status: "AWAITING_PLAN" }) }).entries;
+  assert.equal(fillOf(fillsFromList(prev, listed, other), "a").percent, 55);
+  // A request sent but not named yet holds the ring of its chat.
+  const sent = reducePanel(initialPanelState, { type: "asked", id: 1, text: "x", scope: { subjectId: "", lessonId: "", assignmentId: "", screen: "today", threadId: "a" } }).entries;
+  assert.equal(fillOf(fillsFromList(prev, listed, sent), "a").percent, 40);
+  // With no fill known yet the list value is taken even while the plan waits.
+  assert.equal(fillOf(fillsFromList({}, listed, entriesOf("AWAITING_PLAN")), "a").percent, 55);
+});
+
+test("a chat call's reply seeds the ring at once; it never moves a chat whose request is open", () => {
+  const fresh = chat({ threadId: "n", fill: fill(3, "normal") });
+  assert.equal(fillOf(fillsFromChat({}, fresh, []), "n").percent, 3);
+  const prev = { a: fill(40, "normal") };
+  assert.equal(fillsFromChat(prev, chat({ fill: fill(40, "normal") }), []), prev);
+  assert.equal(fillOf(fillsFromChat(prev, chat({ fill: fill(45, "normal") }), []), "a").percent, 45);
+  // No fill in the reply: nothing changes.
+  assert.equal(fillsFromChat(prev, chat({ fill: null }), []), prev);
+  const open = reducePanel(initialPanelState, { type: "update", update: update({ status: "AWAITING_PLAN" }) }).entries;
+  assert.equal(fillsFromChat(prev, chat({ fill: fill(45, "normal") }), open), prev);
+});
+
 test("unchanged fills keep the same object, so the panel does not redraw", () => {
   const prev = fillsFromList({}, [chat({ fill: fill(10, "normal") })], []);
   assert.equal(fillsFromList(prev, [chat({ fill: fill(10, "normal") })], []), prev);
@@ -247,7 +291,10 @@ test("no 70/90 threshold in the TS that draws the ring: the level is the core's"
   const view = readFileSync(new URL("../src/agentView.ts", import.meta.url), "utf8");
   const start = view.indexOf("// ---- The context ring");
   assert.ok(start > 0);
-  const section = view.slice(start);
+  // Up to the next section marker, so other sections' numbers do not count.
+  const next = view.indexOf("\n// ----", start + 1);
+  const section = view.slice(start, next < 0 ? undefined : next);
+  assert.match(section, /export function fillsFromChat/);
   const component = readFileSync(new URL("../src/agent/ContextRing.tsx", import.meta.url), "utf8");
   for (const src of [section, component]) {
     // Comments may mention the thresholds; code may not use them.

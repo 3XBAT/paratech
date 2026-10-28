@@ -8,7 +8,7 @@ const startTurn = 270;
 
 /**
  * How much of the conversation the agent still holds in context, as a small ring by the send button. Nothing is drawn
- * while the fill is unknown. The text (tooltip and accessible name) carries the percent, so colour is never the only
+ * while the fill is unknown or the chat is empty (0 %). The text (tooltip and accessible name) carries the percent, so colour is never the only
  * signal. The visually hidden copy sits inside the role="img" element: its children are presentational, so a reader
  * says the text once (the name), while the words stay in the page text.
  */
@@ -35,7 +35,7 @@ export function ContextHint(props: { fill: ContextFill | null; onNew?: () => voi
     return null;
   }
   return (
-    <div className="ag-fullhint small">
+    <div className="ag-fullhint small" role="status">
       <span className="ag-fullhint-tx">{ringTexts.hint}</span>
       <Button size="sm" variant="secondary" onClick={props.onNew}>
         {ringTexts.hintButton}
