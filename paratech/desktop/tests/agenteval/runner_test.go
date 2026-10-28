@@ -27,7 +27,7 @@ var cannedResults = map[string]string{
 	// The names are those of the case file: the subject question of catalog v8 offers them.
 	"list_subjects": `{"subjects":[{"id":"s-math","name":"Математический анализ"},{"id":"s-phys","name":"Физика"},` +
 		`{"id":"s-prog","name":"Программирование"},{"id":"s-hist","name":"История"}]}`,
-	"find_lessons":  `{"lessons":[{"id":"l-7","date":"2026-10-21","kind":"lecture","recording":"rec-7","has_summary":false,"has_text":false}]}`,
+	"find_lessons": `{"lessons":[{"id":"l-7","date":"2026-10-21","kind":"lecture","recording":"rec-7","has_summary":false,"has_text":false}]}`,
 	"list_assignments": `{"assignments":[{"id":"a-12","due":"2026-10-24","status":"upcoming","subject":"s-math"},` +
 		`{"id":"a-20","due":"2026-10-27","status":"upcoming","subject":"s-phys"}]}`,
 	"job_status":      `{"jobs":[{"id":"j-1","status":"running","done":3,"total":8}]}`,
