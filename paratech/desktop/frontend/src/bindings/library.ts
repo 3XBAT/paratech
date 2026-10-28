@@ -17,7 +17,7 @@ export const methods = {
   // TASK-225: the page of a subject.
   subjectOverview: `${service}.SubjectOverview`,
   markSubjectOpened: `${service}.MarkSubjectOpened`,
-  // TASK-236: the teacher of a subject.
+  // TASK-236, TASK-285: the teachers of a subject.
   setSubjectTeacher: `${service}.SetSubjectTeacher`,
   clearSubjectTeacher: `${service}.ClearSubjectTeacher`,
 } as const;
@@ -87,15 +87,22 @@ export interface LibrarySubject {
   folders: LibraryFolder[];
   /** Passed back to setSubjectTeacher / clearSubjectTeacher; 0 when the reply has none. */
   version: number;
-  /** null when no teacher is set. */
-  teacher: LibraryTeacher | null;
+  /** The teacher of each role; null for a role without one. */
+  teachers: LibraryTeachers;
 }
 
-/** The teacher of a subject: personal data typed by the student, text nodes only. */
+/** A teacher of a subject: personal data typed by the student, text nodes only. */
 export interface LibraryTeacher {
   name: string;
   email: string;
 }
+
+/** The roles of the teachers of a subject (TASK-285): лектор, семинары и практика, лабораторные. */
+export type TeacherRole = "lecture" | "practice" | "lab";
+
+export const teacherRoles: readonly TeacherRole[] = ["lecture", "practice", "lab"];
+
+export type LibraryTeachers = Record<TeacherRole, LibraryTeacher | null>;
 
 export type TeacherProblem = "" | "invalid" | "changed" | "not_found" | "failed";
 
@@ -104,8 +111,8 @@ export const teacherProblems: readonly TeacherProblem[] = ["", "invalid", "chang
 /** The reply of setSubjectTeacher / clearSubjectTeacher; the page owns the texts (TASK-238). */
 export interface TeacherResult {
   problem: TeacherProblem;
-  /** "name" or "email" for "invalid"; "" otherwise. */
-  field: "" | "name" | "email";
+  /** "name", "email" or "role" for "invalid"; "" otherwise. */
+  field: "" | "name" | "email" | "role";
   /** Set only when problem is "". */
   subject: LibrarySubject | null;
 }
@@ -177,8 +184,14 @@ export function parseSubject(raw: unknown): LibrarySubject {
     semesterLabel: optStr(r, "semesterLabel"),
     folders: list(r.folders, w, parseFolder),
     version: typeof r.version === "number" && Number.isSafeInteger(r.version) && r.version >= 0 ? r.version : 0,
-    teacher: parseTeacher(r.teacher),
+    teachers: parseTeachers(r.teachers),
   };
+}
+
+/** The teachers of a subject; a missing or malformed reply is null in every role. */
+export function parseTeachers(raw: unknown): LibraryTeachers {
+  const r = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  return { lecture: parseTeacher(r.lecture), practice: parseTeacher(r.practice), lab: parseTeacher(r.lab) };
 }
 
 /** A teacher of a subject; null for none or for a reply without both texts. */
@@ -210,7 +223,7 @@ export function parseTeacherResult(raw: unknown): TeacherResult {
       return failed;
     }
   }
-  const field = problem === "invalid" && (r.field === "name" || r.field === "email") ? r.field : "";
+  const field = problem === "invalid" && (r.field === "name" || r.field === "email" || r.field === "role") ? r.field : "";
   return { problem: problem as TeacherProblem, field, subject: null };
 }
 
@@ -409,10 +422,10 @@ export interface LibraryApi {
   importFile(): Promise<LibraryImport>;
   /** «Открыть в Word / PowerPoint»: only the ID crosses; a failed call is "failed". */
   openMaterial(id: string): Promise<LibraryOpen>;
-  /** Sets the teacher while the subject is at version (the one shown); a failed call is "failed". */
-  setSubjectTeacher(subjectId: string, version: number, name: string, email: string): Promise<TeacherResult>;
-  /** Removes the teacher while the subject is at version; a failed call is "failed". */
-  clearSubjectTeacher(subjectId: string, version: number): Promise<TeacherResult>;
+  /** Sets the teacher of role while the subject is at version (the one shown); a failed call is "failed". */
+  setSubjectTeacher(subjectId: string, version: number, role: TeacherRole, name: string, email: string): Promise<TeacherResult>;
+  /** Removes the teacher of role while the subject is at version; a failed call is "failed". */
+  clearSubjectTeacher(subjectId: string, version: number, role: TeacherRole): Promise<TeacherResult>;
 }
 
 export function libraryApi(call: CallByName): LibraryApi {
@@ -433,16 +446,16 @@ export function libraryApi(call: CallByName): LibraryApi {
         return parseOpen(null);
       }
     },
-    setSubjectTeacher: async (subjectId, version, name, email) => {
+    setSubjectTeacher: async (subjectId, version, role, name, email) => {
       try {
-        return parseTeacherResult(await call(methods.setSubjectTeacher, subjectId, version, name, email));
+        return parseTeacherResult(await call(methods.setSubjectTeacher, subjectId, version, role, name, email));
       } catch {
         return parseTeacherResult(null);
       }
     },
-    clearSubjectTeacher: async (subjectId, version) => {
+    clearSubjectTeacher: async (subjectId, version, role) => {
       try {
-        return parseTeacherResult(await call(methods.clearSubjectTeacher, subjectId, version));
+        return parseTeacherResult(await call(methods.clearSubjectTeacher, subjectId, version, role));
       } catch {
         return parseTeacherResult(null);
       }
