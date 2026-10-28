@@ -14,17 +14,20 @@ import {
   doneStamp,
   doneTexts,
   emptyTexts,
+  focusTargetAfter,
   issueButton,
   listAfterDone,
   listEmpty,
   pageDoneLabel,
   stateGroupLabel,
   stateOptions,
+  toastTitle,
 } from "../.test-build/assignmentDoneView.js";
 import { doneMessages, parseDoneResult } from "../.test-build/bindings/homework.js";
+import { DoneRunner } from "../.test-build/doneRunner.js";
 import { AssignmentRowView, DoneButton, DoneIssueLine, DoneStamp } from "../.test-build/pages/AssignmentDoneParts.js";
-import { AssignmentStateSwitch } from "../.test-build/pages/AssignmentFilter.js";
-import { Toast, toastMs } from "../.test-build/ui/Toast.js";
+import { AssignmentStateSwitch, filterReset } from "../.test-build/pages/AssignmentFilter.js";
+import { isEditableTarget, isUndoKey, Toast, toastMs } from "../.test-build/ui/Toast.js";
 
 const noop = () => undefined;
 const DONE_AT = "2026-10-28T12:00:00Z";
@@ -79,16 +82,20 @@ test("the state switch: three options, «Открытые» first and the defaul
 test("the toast: only when something changed and the reply can be put back", () => {
   const marked = reply([out("a1", "changed", true, 8)], [{ id: "a1", version: 8 }], false);
   const t = doneOutcome("mark", marked).toast;
-  assert.equal(t.text, "Отмечено выполненным");
+  assert.equal(t.text, "Выполнено", "no title known: the short text");
   // «Отменить» sends back exactly what the call returned: the same values, not a rebuilt list.
   assert.equal(t.undo.prior, marked.prior);
   assert.equal(t.undo.priorDone, marked.priorDone);
   assert.deepEqual(t.undo, { priorDone: false, prior: [{ id: "a1", version: 8 }] });
 
+  // One assignment is named by the title of the row the student clicked.
+  assert.equal(doneOutcome("mark", marked, { a1: "Реферат" }).toast.text, "Выполнено: «Реферат»");
+
   const back = reply([out("a1", "changed", false, 9)], [{ id: "a1", version: 9 }], true);
   const u = doneOutcome("unmark", back).toast;
   assert.equal(u.text, "Возвращено в работу");
   assert.equal(u.undo.priorDone, true);
+  assert.equal(doneOutcome("unmark", back, { a1: "Реферат" }).toast.text, "Возвращено в работу: «Реферат»");
 
   const several = reply(
     [out("a1", "changed", true, 8), out("a2", "changed", true, 3), out("a3", "changed", true, 4), out("a4", "unchanged", true, 1)],
@@ -98,8 +105,27 @@ test("the toast: only when something changed and the reply can be put back", () 
       { id: "a3", version: 4 },
     ],
   );
-  assert.equal(doneOutcome("mark", several).toast.text, "Отмечено выполненным: 3");
-  assert.equal(doneOutcome("unmark", several).toast.text, "Возвращено в работу: 3");
+  assert.equal(doneOutcome("mark", several).toast.text, "Отмечены выполненными: 3");
+  assert.equal(doneOutcome("unmark", several).toast.text, "Возвращены в работу: 3");
+  // several are counted, never named
+  assert.equal(doneOutcome("mark", several, { a1: "Реферат" }).toast.text, "Отмечены выполненными: 3");
+});
+
+test("the title in the toast is one short line of plain text", () => {
+  assert.equal(toastTitle("  Реферат\n по   физике "), "Реферат по физике");
+  const long = "Подготовить доклад по истории математики за второй семестр обучения";
+  const cut = toastTitle(long);
+  assert.equal(Array.from(cut).length, 41, "40 characters and «…»");
+  assert.ok(cut.endsWith("…"));
+  assert.equal(toastTitle("а".repeat(40)), "а".repeat(40), "exactly 40 stays");
+  // no cut inside a surrogate pair
+  assert.equal(toastTitle("😀".repeat(41)), `${"😀".repeat(40)}…`);
+  // a title with markup stays text (React escapes it; here it is only a string)
+  const html = renderToStaticMarkup(
+    h(Toast, { toast: { id: 1, text: `Выполнено: «${toastTitle("<img src=x>")}»`, actionLabel: "Отменить" }, onAction: noop, onClose: noop }),
+  );
+  assert.ok(html.includes("&lt;img src=x&gt;"));
+  assert.ok(!html.includes("<img"));
 });
 
 test("no change or no undo means no toast; an undo gets none either", () => {
@@ -146,6 +172,13 @@ test("each refusal says why and names its way out", () => {
   assert.equal(cu.openId, "a2", "the first one opens");
   assert.deepEqual(issueButton(cu, "list"), { kind: "open", label: "Открыть задание" });
   assert.equal(issueButton(cu, "page"), null, "the page already shows the assignment");
+  // The page does not tell the student to open what is open.
+  assert.equal(
+    cu.pageText,
+    "Задание изменилось, поэтому отменить нельзя. Отметку можно поставить или снять кнопкой выше.",
+  );
+  assert.doesNotMatch(cu.pageText, /Откройте/);
+  assert.equal(c.pageText, c.text, "the other refusals read the same everywhere");
 
   const f = issue("mark", [out("a1", "failed")]);
   assert.equal(f.text, doneMessages.failed);
@@ -183,7 +216,7 @@ test("a mixed result: the changed ones get the toast, each distinct refusal one 
     [{ id: "a1", version: 8 }],
   );
   const o = doneOutcome("mark", res);
-  assert.equal(o.toast.text, "Отмечено выполненным");
+  assert.equal(o.toast.text, "Выполнено");
   // not_found and deleted share one text; the repeat is offered because a plain mark can be sent again
   assert.equal(o.issue.text, ["Задание уже удалено", doneTexts.conflict, doneMessages.failed].join(" "));
   assert.equal(o.issue.way, "retry");
@@ -238,24 +271,29 @@ test("the names are the action, not the state", () => {
   assert.equal(checkLabel("Задача", true), "Вернуть в работу: Задача");
   assert.equal(checkTitle(false), "Отметить выполненным");
   assert.equal(checkTitle(true), "Вернуть в работу");
-  assert.equal(pageDoneLabel(false), "Выполнено");
+  // The button of the page is an action; the status is the stamp «Выполнено 28 окт.».
+  assert.equal(pageDoneLabel(false), "Отметить выполненным");
   assert.equal(pageDoneLabel(true), "Вернуть в работу");
 });
 
 test("empty lists: first run only for a student without any assignment", () => {
   assert.deepEqual(listEmpty("done", true), {
     kind: "note",
-    text: "Пока ничего не отмечено",
-    hint: "Отметить можно галочкой в строке задания.",
-    action: null,
+    text: "Пока ничего не отмечено.",
+    hint: "Отметить задание можно кружком слева от названия.",
+    action: { label: "Показать открытые", state: "open" },
   });
   assert.equal(listEmpty("done", false).text, emptyTexts.done, "an empty «Выполненные» is never the first run");
   // everything done: the open list is empty but the student has assignments
   const open = listEmpty("open", true);
   assert.equal(open.kind, "note");
-  assert.equal(open.text, "Открытых заданий нет");
+  assert.equal(open.text, "Открытых заданий нет — всё выполнено.");
   assert.deepEqual(open.action, { label: "Показать выполненные", state: "done" });
-  assert.equal(listEmpty("open", null).kind, "note", "unknown is not the first run");
+  // not known whether any exist: the short line, still with the way to the done ones
+  const unknown = listEmpty("open", null);
+  assert.equal(unknown.kind, "note", "unknown is not the first run");
+  assert.equal(unknown.text, "Открытых заданий нет");
+  assert.deepEqual(unknown.action, { label: "Показать выполненные", state: "done" });
   assert.equal(listEmpty("open", false).kind, "first-run");
   assert.equal(listEmpty("all", false).kind, "first-run");
 });
@@ -274,7 +312,7 @@ const row = (over = {}, props = {}) =>
 
 test("an open row: a ring check, «Открыть» and «⋯» with the delete inside, no red button", () => {
   const html = row();
-  assert.match(html, /<button type="button" class="done-check" aria-label="Отметить выполненным: Задачи 1–5" title="Отметить выполненным">/);
+  assert.match(html, /<button type="button" class="done-check" aria-label="Отметить выполненным: Задачи 1–5" title="Отметить выполненным" data-done-id="a1">/);
   assert.ok(html.includes("row-lead"), "the check is the lead of the row");
   assert.match(html, />Открыть</);
   assert.ok(html.includes('aria-label="Ещё действия: Задачи 1–5"'));
@@ -307,12 +345,14 @@ test("a busy row says so in small text and marks the check busy; the title is te
 test("the assignment page pieces in both states; edit and delete stay in the header", () => {
   const open = renderToStaticMarkup(h(DoneButton, { done: false, busy: false, onToggle: noop }));
   // The label shares a grid cell with «Сохранение…» (Button's busyLabel): the visible one is the first span.
-  assert.match(open, /<button type="button" class="btn"[^>]*><svg[^>]*><use href="#i-ok"><\/use><\/svg><span class="btn-labels"><span>Выполнено<\/span>/);
+  assert.match(open, /<button type="button" class="btn"[^>]*><svg[^>]*><use href="#i-ok"><\/use><\/svg><span class="btn-labels"><span>Отметить выполненным<\/span>/);
   assert.ok(!open.includes("primary"), "not the accent button");
   assert.equal(renderToStaticMarkup(h(DoneStamp, { assignment: item() })), "");
 
   const done = renderToStaticMarkup(h(DoneButton, { done: true, busy: false, onToggle: noop }));
   assert.ok(done.includes("Вернуть в работу"));
+  assert.ok(!done.includes("#i-retry"), "no «try again» icon on the way back");
+  assert.ok(!done.includes("#i-ok"), "the check icon is for marking only");
   const stamp = renderToStaticMarkup(h(DoneStamp, { assignment: item({ done: true, doneAt: DONE_AT }) }));
   assert.match(stamp, /<p class="small muted hw-donedate">Выполнено 28 окт\.<\/p>/);
 
@@ -327,6 +367,8 @@ test("the assignment page pieces in both states; edit and delete stay in the hea
   assert.ok(head.indexOf("changeTexts.remove") > head.indexOf("changeTexts.edit"), "«Удалить» follows");
   assert.match(head, /api\.deleteAssignment\(id, a\.version\)/);
   assert.match(page, /<DoneStamp assignment=\{a\} \/>/);
+  // While the mark is saved the page does not edit or delete (a delete would go out with a stale version).
+  assert.equal(head.split("changing || doneBusy").length - 1, 2, "«Изменить» and «Удалить» wait for the mark");
 });
 
 test("a refusal line: the text as an alert and one button out", () => {
@@ -337,7 +379,21 @@ test("a refusal line: the text as an alert and one button out", () => {
   assert.match(html, />Повторить</);
 
   const undo = doneOutcome("undo", reply([out("a1", "conflict")])).issue;
-  assert.match(renderToStaticMarkup(h(DoneIssueLine, { issue: undo, where: "list", onRetry: noop, onOpen: noop })), />Открыть задание</);
+  const undoList = renderToStaticMarkup(h(DoneIssueLine, { issue: undo, where: "list", onRetry: noop, onOpen: noop }));
+  assert.match(undoList, />Открыть задание</);
+  assert.ok(undoList.includes("Откройте задание"));
+  // On the assignment page the text does not send the student to what is open, and there is no such button.
+  const undoPage = renderToStaticMarkup(h(DoneIssueLine, { issue: undo, where: "page", onRetry: noop, onOpen: noop }));
+  assert.ok(undoPage.includes("Отметку можно поставить или снять кнопкой выше."));
+  assert.ok(!undoPage.includes("Откройте"));
+  assert.ok(!undoPage.includes("<button"));
+
+  // A line left above the list after its row is gone can be closed.
+  const closable = renderToStaticMarkup(
+    h(DoneIssueLine, { issue: doneOutcome("mark", reply([out("a1", "deleted")])).issue, where: "list", onRetry: noop, onOpen: noop, onClose: noop }),
+  );
+  assert.match(closable, />Закрыть</);
+  assert.ok(!renderToStaticMarkup(h(DoneIssueLine, { issue: undo, where: "list", onRetry: noop, onOpen: noop })).includes("Закрыть"));
 
   const gone = doneOutcome("mark", reply([out("a1", "deleted")])).issue;
   const page = renderToStaticMarkup(h(DoneIssueLine, { issue: gone, where: "page", onRetry: noop, onOpen: noop, onBack: noop }));
@@ -347,11 +403,13 @@ test("a refusal line: the text as an alert and one button out", () => {
 
 test("the toast is a polite status with «Отменить» and a close button", () => {
   const html = renderToStaticMarkup(
-    h(Toast, { toast: { id: 1, text: "Отмечено выполненным", actionLabel: doneTexts.undo }, onAction: noop, onClose: noop }),
+    h(Toast, { toast: { id: 1, text: "Выполнено: «Реферат»", actionLabel: doneTexts.undo }, onAction: noop, onClose: noop }),
   );
   assert.match(html, /role="status" aria-live="polite"/);
-  assert.ok(html.includes("Отмечено выполненным"));
+  assert.ok(html.includes("Выполнено: «Реферат»"));
   assert.match(html, />Отменить</);
+  assert.ok(html.includes('title="Отменить (Ctrl+Z)"'), "the key is told in the tooltip");
+  assert.equal(doneTexts.undoTitle, "Отменить (Ctrl+Z)");
   assert.match(html, /aria-label="Закрыть"/);
   assert.equal(toastMs, 10_000);
 
@@ -361,17 +419,290 @@ test("the toast is a polite status with «Отменить» and a close button"
   assert.ok(!none.includes("<button"));
 });
 
-test("the pages are wired as agreed: one runner per page, the undo sends back the returned values", () => {
+test("Ctrl+Z undoes while the toast is shown, but never inside a text field", () => {
+  const key = (over = {}) => ({ key: "z", code: "KeyZ", ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, ...over });
+  assert.equal(isUndoKey(key()), true);
+  assert.equal(isUndoKey(key({ key: "я" })), true, "the Russian layout: the physical key");
+  assert.equal(isUndoKey(key({ key: "Z", code: "KeyZ" })), true);
+  assert.equal(isUndoKey(key({ ctrlKey: false })), false, "plain z is a letter");
+  assert.equal(isUndoKey(key({ shiftKey: true })), false, "Ctrl+Shift+Z is redo");
+  assert.equal(isUndoKey(key({ altKey: true })), false);
+  assert.equal(isUndoKey(key({ repeat: true })), false, "a held key does not repeat the undo");
+  assert.equal(isUndoKey(key({ key: "y", code: "KeyY" })), false);
+
+  assert.equal(isEditableTarget({ tagName: "TEXTAREA" }), true);
+  assert.equal(isEditableTarget({ tagName: "input" }), true);
+  assert.equal(isEditableTarget({ tagName: "DIV", isContentEditable: true }), true);
+  assert.equal(isEditableTarget({ tagName: "BUTTON" }), false);
+  assert.equal(isEditableTarget(null), false);
+
+  // The timer waits while the window is hidden or not the active one (Alt-Tab), and starts again on the return.
+  const src = readFileSync(new URL("../src/ui/Toast.tsx", import.meta.url), "utf8");
+  assert.ok(src.includes('"visibilitychange"') && src.includes('"blur"') && src.includes('"focus"'));
+  assert.ok(src.includes("hover || focus || away"));
+});
+
+test("the toast sits in the content column on the inverse surface, and the check has a 32px hit area", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const host = css.match(/\.toast-host \{([^}]*)\}/)[1];
+  assert.match(host, /left: 64px/, "right of the rail");
+  assert.match(host, /right: var\(--ag-w, 0px\)/, "left of the agent panel (the shell sets --ag-w, 0 when closed)");
+  const toast = css.match(/\n\.toast \{([^}]*)\}/)[1];
+  assert.match(toast, /background: var\(--prim\)/);
+  assert.match(toast, /color: var\(--on-prim\)/);
+  assert.match(css, /\.done-check::before \{[^}]*inset: -5px/, "22px ring + 2 x 5px = 32px");
+  assert.match(css, /\.done-check \{[^}]*width: 22px; height: 22px/, "the visible ring stays 22px");
+  const shell = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.ok(shell.includes('"--ag-w"'), "the variable the toast uses is the shell's own");
+  const today = readFileSync(new URL("../src/pages/today.css", import.meta.url), "utf8");
+  assert.match(today, /\.today-dlitem:hover \{ background: var\(--fill\)/, "the whole item lights up");
+});
+
+// A fake core: markDone and restoreDone wait for the test to answer, so the order of events is the test's.
+function deferred() {
+  let resolve;
+  const promise = new Promise((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+function harness(over = {}) {
+  const calls = { mark: [], restore: [] };
+  const waits = { mark: [], restore: [] };
+  const api = {
+    markDone: (ids, done) => {
+      calls.mark.push([ids, done]);
+      const d = deferred();
+      waits.mark.push(d);
+      return d.promise;
+    },
+    restoreDone: (priorDone, prior) => {
+      calls.restore.push([priorDone, prior]);
+      const d = deferred();
+      waits.restore.push(d);
+      return d.promise;
+    },
+  };
+  const seen = { busy: [], issues: [], toasts: [], applied: [], refreshes: 0 };
+  const state = { toast: null, issue: null, alive: true };
+  const sink = {
+    busy: (k) => seen.busy.push(k),
+    issue: (i) => {
+      state.issue = i;
+      seen.issues.push(i);
+    },
+    toast: (t) => {
+      state.toast = t;
+      seen.toasts.push(t);
+    },
+    apply: (res) => seen.applied.push(res),
+    refresh: () => {
+      seen.refreshes++;
+      return over.refresh?.(seen.refreshes);
+    },
+    alive: () => state.alive,
+  };
+  return { runner: new DoneRunner(api, sink), calls, waits, seen, state };
+}
+
+const marked = () => reply([out("a1", "changed", true, 8)], [{ id: "a1", version: 8 }], false);
+
+test("the runner: a double click starts one call, and the outcome reaches the page once", async () => {
+  const t = harness();
+  const first = t.runner.mark("a1", true, "Реферат");
+  const second = t.runner.mark("a1", true, "Реферат");
+  assert.equal(t.calls.mark.length, 1, "the second click started nothing");
+  assert.deepEqual(t.seen.busy, ["a1"]);
+
+  t.waits.mark[0].resolve(marked());
+  await Promise.all([first, second]);
+  assert.equal(t.seen.applied.length, 1);
+  assert.equal(t.seen.refreshes, 1);
+  assert.equal(t.state.toast.text, "Выполнено: «Реферат»");
+  assert.equal(t.state.issue, null);
+  assert.equal(t.seen.busy.at(-1), "", "the busy mark is released");
+
+  // After it is over a new click is a new call.
+  void t.runner.mark("a1", false, "Реферат");
+  assert.equal(t.calls.mark.length, 2);
+});
+
+test("the runner: «Отменить» sends back exactly the objects the call returned", async () => {
+  const t = harness();
+  const res = marked();
+  const run = t.runner.mark("a1", true, "Реферат");
+  t.waits.mark[0].resolve(res);
+  await run;
+
+  const undo = t.runner.undo();
+  assert.equal(t.calls.restore.length, 1);
+  assert.equal(t.calls.restore[0][0], res.priorDone);
+  assert.equal(t.calls.restore[0][1], res.prior, "the same array, not a rebuilt list");
+  assert.equal(t.calls.restore[0][1][0], res.prior[0], "and the same object in it");
+  assert.equal(t.state.toast, null, "the toast closes while the undo runs");
+
+  t.waits.restore[0].resolve(reply([out("a1", "changed", false, 9)], [{ id: "a1", version: 9 }], true));
+  assert.equal(await undo, true);
+  assert.equal(t.state.toast, null, "an undo gets no toast of its own");
+  assert.equal(t.seen.applied.length, 2);
+  assert.equal(await t.runner.undo(), false, "nothing left to undo");
+});
+
+test("the runner: a click on «Отменить» while the screen is re-read is not lost", async () => {
+  const refresh = deferred();
+  const t = harness({ refresh: (n) => (n === 1 ? refresh.promise : undefined) });
+  const res = marked();
+  const run = t.runner.mark("a1", true, "Реферат");
+  t.waits.mark[0].resolve(res);
+  await tick();
+  assert.ok(t.state.toast !== null, "the toast is up while the re-read runs");
+  assert.equal(t.seen.refreshes, 1);
+
+  const undo = t.runner.undo();
+  assert.equal(t.calls.restore.length, 1, "the undo started although the re-read is not over");
+  assert.equal(t.calls.restore[0][1], res.prior);
+  assert.equal(t.state.toast, null);
+
+  t.waits.restore[0].resolve(reply([out("a1", "changed", false, 9)], [{ id: "a1", version: 9 }], true));
+  assert.equal(await undo, true);
+  refresh.resolve();
+  await run;
+});
+
+test("the runner: when the undo cannot start the toast stays", async () => {
+  const t = harness();
+  const run = t.runner.mark("a1", true, "Реферат");
+  t.waits.mark[0].resolve(marked());
+  await run;
+  const shown = t.state.toast;
+
+  // The same assignment is being saved again (the student clicked its check): the undo has to wait.
+  const again = t.runner.mark("a1", false, "Реферат");
+  assert.equal(await t.runner.undo(), false);
+  assert.equal(t.calls.restore.length, 0, "no call was made");
+  assert.equal(t.state.toast, shown, "the toast is still there, with its «Отменить»");
+
+  t.waits.mark[1].resolve(reply([out("a1", "unchanged", false, 9)]));
+  await again;
+});
+
+test("the runner: a refusal shows its line, the repeat works, and a success clears the line", async () => {
+  const t = harness();
+  const run = t.runner.mark("a1", true, "Реферат");
+  t.waits.mark[0].resolve(reply([out("a1", "conflict")]));
+  await run;
+  assert.equal(t.state.toast, null);
+  assert.equal(t.state.issue.text, "Задание изменилось, попробуйте ещё раз");
+  assert.deepEqual(t.state.issue.ids, ["a1"]);
+  assert.equal(t.seen.busy.at(-1), "", "a refusal releases the row");
+  assert.equal(t.seen.refreshes, 1, "the stored state is read");
+
+  t.state.issue.retry();
+  assert.equal(t.calls.mark.length, 2, "the same call again");
+  assert.deepEqual(t.calls.mark[1], [["a1"], true]);
+  assert.equal(t.state.issue, null, "the old line goes when the repeat starts");
+  t.waits.mark[1].resolve(marked());
+  await tick();
+  assert.equal(t.state.issue, null);
+  assert.equal(t.state.toast.text, "Выполнено: «Реферат»", "the title survives the repeat");
+
+  t.runner.dismissIssue();
+  assert.equal(t.state.issue, null);
+});
+
+test("the runner: the screen is read again only when the core answered per assignment", async () => {
+  const t = harness();
+  const run = t.runner.mark("a1", true);
+  t.waits.mark[0].resolve(parseDoneResult({ problem: "unavailable" }));
+  await run;
+  assert.equal(t.seen.refreshes, 0);
+  assert.equal(t.state.issue.way, "retry");
+  assert.equal(t.state.toast, null);
+
+  const ok = t.runner.mark("a1", true);
+  t.waits.mark[1].resolve(marked());
+  await ok;
+  assert.equal(t.seen.refreshes, 1);
+  assert.equal(t.state.toast.text, "Выполнено", "no title given: the short text");
+});
+
+test("the runner: a refusal of the undo keeps the page text, a failed re-read changes nothing, a closed page hears nothing", async () => {
+  const t = harness({
+    refresh: () => {
+      throw new Error("offline");
+    },
+  });
+  const run = t.runner.mark("a1", true, "Реферат");
+  t.waits.mark[0].resolve(marked());
+  await run; // the failed re-read did not throw out of the runner
+  const undo = t.runner.undo();
+  t.waits.restore[0].resolve(reply([out("a1", "conflict")]));
+  await undo;
+  assert.equal(t.state.issue.way, "open");
+  assert.equal(t.state.issue.pageText, doneTexts.pageUndoConflict);
+
+  const gone = harness();
+  const p = gone.runner.mark("a1", true);
+  gone.state.alive = false;
+  gone.waits.mark[0].resolve(marked());
+  await p;
+  assert.equal(gone.seen.applied.length, 0);
+  assert.equal(gone.state.toast, null);
+
+  // A newer toast replaces the older one; the undo is of the newest.
+  const two = harness();
+  const a = two.runner.mark("a1", true, "А");
+  two.waits.mark[0].resolve(marked());
+  await a;
+  const first = two.state.toast;
+  const b = two.runner.mark("a2", true, "Б");
+  two.waits.mark[1].resolve(reply([out("a2", "changed", true, 3)], [{ id: "a2", version: 3 }]));
+  await b;
+  assert.ok(two.state.toast.id > first.id);
+  void two.runner.undo();
+  assert.deepEqual(two.calls.restore[0][1], [{ id: "a2", version: 3 }]);
+});
+
+test("the focus goes to the next row's check, else the previous one, else the main region", () => {
+  const order = ["a1", "a2", "a3", "a4"];
+  assert.equal(focusTargetAfter(order, ["a2"]), "a3", "the next one");
+  assert.equal(focusTargetAfter(order, ["a4"]), "a3", "the last row: the previous one");
+  assert.equal(focusTargetAfter(order, ["a1"]), "a2");
+  assert.equal(focusTargetAfter(["a1"], ["a1"]), "", "the list is empty now: the region");
+  assert.equal(focusTargetAfter(order, ["a3", "a4"]), "a2", "several leave together");
+  assert.equal(focusTargetAfter(order, ["a2", "a3"]), "a4", "the neighbour that stays");
+  assert.equal(focusTargetAfter(order, ["zz"]), null, "no row of the screen leaves: nothing to move");
+  assert.equal(focusTargetAfter(order, []), null);
+});
+
+test("the pages are wired as agreed: one runner per page, focus kept, the re-read keeps the shown version", () => {
   const read = (rel) => readFileSync(new URL(`../src/${rel}`, import.meta.url), "utf8");
-  const runner = read("pages/useDoneRunner.ts");
-  assert.ok(runner.includes("api.restoreDone(t.undo.priorDone, t.undo.prior)"));
-  assert.ok(runner.includes("setToast(null)"), "the toast closes while the undo runs");
+  const hook = read("pages/useDoneRunner.ts");
+  assert.ok(hook.includes("new DoneRunner("), "the hook only maps the tested runner to state");
+  assert.ok(!hook.includes("api.restoreDone"), "the sequencing is not in the hook");
 
   const page = read("pages/HomeworkPage.tsx");
   assert.equal(page.split("useDoneRunner(api,").length - 1, 2, "list and assignment page");
   assert.equal(page.split("<Toast ").length - 1, 2);
+  assert.equal(page.split("doneToastProps(doneRun, focus)").length - 1, 2, "Отменить and the close restore the focus");
   assert.ok(page.includes("requests.current.isNewest(token)"), "a stale answer of the list is dropped");
   assert.ok(page.includes("api.listAssignments(state)"));
   assert.match(page, /api\.deleteAssignment\(a\.id, a\.version\)/, "the delete flow stays");
-  assert.ok(read("pages/TodayPage.tsx").includes("<Toast "));
+  // The page keeps the version being viewed when the mark is saved.
+  assert.ok(page.includes("refresh: () => reload(true, true).catch"));
+  assert.ok(page.includes("onOpen={() => reload(true, true).catch"));
+  // The list: the re-read also reads the chips, the email filter starts again with a new mark.
+  assert.equal(page.split("fetchDeliveries(api, as)").length - 1, 2, "the load and the re-read both read the chips");
+  assert.match(page, /function changeState[\s\S]*setFilter\("all"\)[\s\S]*doneRun\.dismissIssue\(\)/);
+  assert.ok(page.includes('state !== "done" && ('), "no email filter among the done ones");
+  assert.ok(page.includes("filterReset"), "the empty group has a way back");
+  assert.ok(page.includes("onClose={doneRun.dismissIssue}"), "a stray refusal can be closed");
+  assert.equal(filterReset, "Сбросить фильтр");
+
+  const today = read("pages/TodayPage.tsx");
+  assert.ok(today.includes("doneToastProps(doneRun, focus)"));
+  assert.ok(today.indexOf("<Toast ") > today.indexOf("</section>"), "outside .today, a size container");
+  assert.ok(today.includes("onMark: (id, title) =>"));
 });

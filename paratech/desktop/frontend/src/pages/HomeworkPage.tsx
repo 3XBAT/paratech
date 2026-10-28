@@ -61,12 +61,13 @@ import { Banner, Card, EmptyState, Field, Input, ResultLine, type ResultKind, Ro
 import { StatusChip } from "../ui/StatusChip";
 import { Toast } from "../ui/Toast";
 import { AssignmentRowView, DoneButton, DoneIssueLine, DoneStamp } from "./AssignmentDoneParts";
-import { AssignmentStateSwitch, FilterCounters, filterEmpty } from "./AssignmentFilter";
+import { AssignmentStateSwitch, FilterCounters, filterEmpty, filterReset } from "./AssignmentFilter";
 import { AddAssignmentDialog, EditAssignmentDialog, RemovedLine, SendAgainDialog, SendDialog, type SendResult } from "./HomeworkDialogs";
 import { HomeworkTurnkey } from "./HomeworkTurnkey";
 import { LessonCorrection } from "./LessonCorrection";
 import { RefusalButton } from "./RecipientParts";
 import { TranscriptLinks } from "./TranscriptLinks";
+import { doneToastProps, useDoneFocus } from "./useDoneFocus";
 import { useDoneRunner } from "./useDoneRunner";
 
 // «Домашние задания» (PRD section 10): the assignments, and for the opened one the draft editor, the extra
@@ -114,6 +115,19 @@ function MessageLine(props: { message: Message }) {
       {m.text}
     </ResultLine>
   );
+}
+
+/** The chip of a row is its newest email; a failed load leaves the row without a chip. */
+async function fetchDeliveries(api: HomeworkApi, as: readonly AssignmentItem[]) {
+  const ds = await Promise.allSettled(as.map((a) => api.deliveries(a.id)));
+  const byId: Record<string, DeliveryItem[]> = {};
+  ds.forEach((r, i) => {
+    if (r.status === "fulfilled") {
+      byId[as[i].id] = r.value;
+    }
+  });
+  // When every call was rejected the split is unknown, not «all active»: the counters stay hidden.
+  return { byId, loaded: ds.length === 0 || ds.some((r) => r.status === "fulfilled") };
 }
 
 function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void }) {
@@ -172,20 +186,12 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
         setItems(as);
         setShownOnce(true);
         setError("");
-        // The chip of a row is its newest email; a failed load leaves the row without a chip.
-        const ds = await Promise.allSettled(as.map((a) => api.deliveries(a.id)));
+        const d = await fetchDeliveries(api, as);
         if (!live || !requests.current.isNewest(token)) {
           return;
         }
-        const byId: Record<string, DeliveryItem[]> = {};
-        ds.forEach((r, i) => {
-          if (r.status === "fulfilled") {
-            byId[as[i].id] = r.value;
-          }
-        });
-        setDeliveries(byId);
-        // When every call was rejected the split is unknown, not «all active»: the counters stay hidden.
-        setDeliveriesLoaded(ds.length === 0 || ds.some((r) => r.status === "fulfilled"));
+        setDeliveries(d.byId);
+        setDeliveriesLoaded(d.loaded);
       } catch (err) {
         if (live && requests.current.isNewest(token)) {
           setError(errorText(err));
@@ -208,6 +214,9 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
     setDeliveriesLoaded(false);
     setList(initialListState);
     setRowProblem(null);
+    // The email filter is about sending: it starts again with «Все», and a refusal about a gone row is not carried over.
+    setFilter("all");
+    doneRun.dismissIssue();
   }
 
   // After a refusal that says the list is out of date, the list is read again (the removed lines stay).
@@ -228,6 +237,13 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
         ...(prev ?? []).filter((x) => Object.hasOwn(removedRef.current, x.id) && !as.some((y) => y.id === x.id)),
       ]);
       setShownOnce(true);
+      // This call took the token of a load that may still be on its way (it would have set the chips): the chips and
+      // counters are read here too, or they would stay hidden.
+      const d = await fetchDeliveries(api, as);
+      if (requests.current.isNewest(token)) {
+        setDeliveries(d.byId);
+        setDeliveriesLoaded(d.loaded);
+      }
     } catch (err) {
       // The old list stays; the refusal text already asks to repeat. Without an old list (it was being read when this
       // call took over) the reason is shown instead of an endless «Загрузка…».
@@ -238,9 +254,20 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
   }
 
   // «Выполнено» of a row (TASK-316): the row takes the stored state at once, the list is read again after it.
+  const rootRef = useRef<HTMLElement>(null);
+  const focus = useDoneFocus(rootRef);
   const doneRun = useDoneRunner(api, {
-    apply: (res) =>
-      setItems((cur) => (cur === null ? cur : listAfterDone(cur, stateRef.current, res, new Date().toISOString()))),
+    apply: (res) => {
+      const cur = itemsRef.current;
+      if (cur === null) {
+        return;
+      }
+      const next = listAfterDone(cur, stateRef.current, res, new Date().toISOString());
+      // A row that leaves takes the focus with it: it goes to the next row's check.
+      focus.rowsLeaving(cur.filter((a) => !next.some((n) => n.id === a.id)).map((a) => a.id));
+      itemsRef.current = next;
+      setItems(next);
+    },
     refresh: reloadItems,
   });
 
@@ -324,7 +351,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
         onOpen={() => props.onOpen(a.id)}
         onToggleDone={() => {
           if (busyText === "") {
-            void doneRun.mark(a.id, !a.done);
+            void doneRun.mark(a.id, !a.done, a.title);
           }
         }}
         onRemove={() => void remove(a)}
@@ -340,6 +367,12 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
     );
   };
 
+  // The way out of an empty email group.
+  const resetFilter = () => {
+    setFilter("all");
+    setList(initialListState);
+  };
+
   const live = items === null ? [] : items.filter((a) => !Object.hasOwn(removed, a.id));
   const shown = items === null ? [] : filterAssignments(items, filter, deliveries, deliveriesLoaded);
   // A refusal about a row that is no longer in the list (it was deleted elsewhere) stays above the list.
@@ -348,7 +381,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
   const empty = items !== null && items.length === 0 ? listEmpty(state, anyExists) : null;
 
   return (
-    <section className="page hw">
+    <section className="page hw" tabIndex={-1} ref={rootRef}>
       <div className="head">
         <h1>Домашние задания</h1>
         <div className="acts">
@@ -375,7 +408,13 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
         </Banner>
       )}
       {strayIssue !== null && (
-        <DoneIssueLine issue={strayIssue} where="list" onRetry={strayIssue.retry} onOpen={props.onOpen} />
+        <DoneIssueLine
+          issue={strayIssue}
+          where="list"
+          onRetry={strayIssue.retry}
+          onOpen={props.onOpen}
+          onClose={doneRun.dismissIssue}
+        />
       )}
       {!shownOnce ? (
         items === null && !error && <p className="muted">Загрузка…</p>
@@ -388,7 +427,8 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
         <>
           <div className="hw-filters">
             <AssignmentStateSwitch value={state} onChange={changeState} />
-            {items !== null && items.length > 0 && (
+            {/* The email filter is about sending: it makes no sense for the done ones. */}
+            {items !== null && items.length > 0 && state !== "done" && (
               <FilterCounters
                 counts={assignmentCounts(live, deliveries, deliveriesLoaded)}
                 value={filter}
@@ -418,7 +458,10 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
               )}
             </div>
           ) : shown.length === 0 ? (
-            <p className="muted">{filterEmpty}</p>
+            <div className="hw-none">
+              <p className="muted">{filterEmpty}</p>
+              <Button onClick={resetFilter}>{filterReset}</Button>
+            </div>
           ) : (
             <CollapsibleList
               items={shown}
@@ -437,7 +480,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
           )}
         </>
       )}
-      <Toast toast={doneRun.toast} onAction={() => void doneRun.undo()} onClose={doneRun.closeToast} />
+      <Toast {...doneToastProps(doneRun, focus)} />
     </section>
   );
 }
@@ -931,12 +974,15 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
 
   // «Выполнено» / «Вернуть в работу» of this assignment (TASK-316): the page takes the stored state at once and reads
   // the assignment again; the toast and a refusal belong to this page.
+  // The re-read keeps the version the student is looking at (keepShown): marking done is not a change of the draft.
+  const rootRef = useRef<HTMLElement>(null);
+  const focus = useDoneFocus(rootRef);
   const doneRun = useDoneRunner(api, {
     apply: (res) =>
       setDetail((d) =>
         d === null ? d : { ...d, assignment: assignmentAfterDone(d.assignment, res, new Date().toISOString()) },
       ),
-    refresh: () => reload(true).catch(() => undefined),
+    refresh: () => reload(true, true).catch(() => undefined),
   });
 
   if (detail === null) {
@@ -993,8 +1039,11 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
     );
   }
 
+  // While the mark is saved, «Изменить» and «Удалить» wait: a delete would go out with a version the mark is changing.
+  const doneBusy = doneRun.busyId === id;
+
   return (
-    <section className="page hw">
+    <section className="page hw" tabIndex={-1} ref={rootRef}>
       <div className="hw-back">
         <Button variant="ghost" onClick={props.onBack}>
           Все задания
@@ -1006,11 +1055,11 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
         <div className="acts">
           <DoneButton
             done={a.done}
-            busy={doneRun.busyId === id}
+            busy={doneBusy}
             disabled={changing}
-            onToggle={() => void doneRun.mark(id, !a.done)}
+            onToggle={() => void doneRun.mark(id, !a.done, a.title)}
           />
-          <Button disabled={changing} onClick={() => setEditing(true)}>
+          <Button disabled={changing || doneBusy} onClick={() => setEditing(true)}>
             {changeTexts.edit}
           </Button>
           <Button
@@ -1019,7 +1068,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
             autoFocus={restored}
             busy={changing}
             busyLabel={changeTexts.removing}
-            disabled={changing}
+            disabled={changing || doneBusy}
             onClick={() =>
               void changeThis(
                 () => api.deleteAssignment(id, a.version),
@@ -1046,7 +1095,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
           issue={doneRun.issue}
           where="page"
           onRetry={doneRun.issue.retry}
-          onOpen={() => reload(true).catch(() => undefined)}
+          onOpen={() => reload(true, true).catch(() => undefined)}
           onBack={props.onBack}
         />
       )}
@@ -1321,7 +1370,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
         />
       )}
       {sendAgain && <SendAgainDialog api={api} delivery={sendAgain} onClose={sendAgainClosed} />}
-      <Toast toast={doneRun.toast} onAction={() => void doneRun.undo()} onClose={doneRun.closeToast} />
+      <Toast {...doneToastProps(doneRun, focus)} />
     </section>
   );
 }

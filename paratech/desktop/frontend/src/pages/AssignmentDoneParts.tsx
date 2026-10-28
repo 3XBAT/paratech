@@ -28,6 +28,8 @@ export function DoneCheck(props: {
   title: string;
   done: boolean;
   busy?: boolean;
+  /** The assignment of the row: the page finds the check by it to keep the focus when the row leaves. */
+  rowId?: string;
   onToggle: () => void;
 }) {
   return (
@@ -37,6 +39,7 @@ export function DoneCheck(props: {
       aria-label={checkLabel(props.title, props.done)}
       title={checkTitle(props.done)}
       aria-busy={props.busy || undefined}
+      data-done-id={props.rowId}
       onClick={props.onToggle}
     >
       <Icon name="ok" />
@@ -44,11 +47,14 @@ export function DoneCheck(props: {
   );
 }
 
-/** «Выполнено» next to «Изменить» and «Удалить» on the assignment page; «Вернуть в работу» when it is done. */
+/**
+ * «Отметить выполненным» next to «Изменить» and «Удалить» on the assignment page; «Вернуть в работу» when it is done
+ * (no icon: the only one that fits, "retry", reads as "try again").
+ */
 export function DoneButton(props: { done: boolean; busy: boolean; disabled?: boolean; onToggle: () => void }) {
   return (
     <Button
-      icon={props.done ? "retry" : "ok"}
+      icon={props.done ? undefined : "ok"}
       busy={props.busy}
       busyLabel={doneTexts.saving}
       aria-busy={props.busy || undefined}
@@ -73,6 +79,8 @@ export function DoneIssueLine(props: {
   onRetry: () => void;
   onOpen: (id: string) => void;
   onBack?: () => void;
+  /** «Закрыть» for a line that stays above the list after its row is gone. */
+  onClose?: () => void;
 }) {
   const button = issueButton(props.issue, props.where);
   const click = () => {
@@ -87,11 +95,16 @@ export function DoneIssueLine(props: {
   return (
     <div className="hw-issue">
       <ResultLine kind="fail" role="alert">
-        {props.issue.text}
+        {props.where === "page" ? props.issue.pageText : props.issue.text}
       </ResultLine>
       {button !== null && (button.kind !== "back" || props.onBack !== undefined) && (
         <Button size="sm" onClick={click}>
           {button.label}
+        </Button>
+      )}
+      {props.onClose !== undefined && (
+        <Button size="sm" variant="ghost" onClick={props.onClose}>
+          {doneTexts.close}
         </Button>
       )}
     </div>
@@ -122,7 +135,7 @@ export function AssignmentRowView(props: {
   const busy = props.busyText !== "";
   return (
     <Row
-      lead={<DoneCheck title={a.title} done={a.done} busy={busy} onToggle={props.onToggleDone} />}
+      lead={<DoneCheck title={a.title} done={a.done} busy={busy} rowId={a.id} onToggle={props.onToggleDone} />}
       title={a.done ? <span className="hw-done-title">{a.title}</span> : a.title}
       meta={
         <>
@@ -145,7 +158,7 @@ export function AssignmentRowView(props: {
           <RowMenu
             label={`${doneTexts.moreActions}: ${a.title}`}
             title={doneTexts.moreActions}
-            items={[{ key: "remove", label: changeTexts.remove, disabled: busy }]}
+            items={[{ key: "remove", label: changeTexts.remove, disabled: busy, hint: doneTexts.busyHint }]}
             onPick={props.onRemove}
           />
         </>

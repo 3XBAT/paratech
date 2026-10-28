@@ -3,6 +3,7 @@ import type { AssignmentState } from "../bindings/homework.js";
 import { type AssignmentCounts, type AssignmentFilter, assignmentFilterOptions } from "../homeworkView.js";
 
 export const filterEmpty = "В этой группе заданий нет.";
+export const filterReset = "Сбросить фильтр";
 
 /** «Открытые / Выполненные / Все»: which assignments the core lists. Next to the email filter, which works on them. */
 export function AssignmentStateSwitch(props: { value: AssignmentState; onChange: (s: AssignmentState) => void }) {

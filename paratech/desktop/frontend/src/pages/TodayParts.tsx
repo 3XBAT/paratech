@@ -203,7 +203,10 @@ export interface BurningDone {
   busyId: string;
   /** The refusal of the last call, with its repeat. */
   issue: ActiveIssue | null;
-  onMark: (assignmentId: string) => void;
+  /** title is the one of the row, for the toast. */
+  onMark: (assignmentId: string, title: string) => void;
+  /** «Закрыть» of a refusal that stays above the rows. */
+  onDismissIssue?: () => void;
 }
 
 export function BurningSection(props: {
@@ -232,7 +235,13 @@ export function BurningSection(props: {
       }
     >
       {strayIssue !== null && (
-        <DoneIssueLine issue={strayIssue} where="list" onRetry={strayIssue.retry} onOpen={props.onOpenAssignment} />
+        <DoneIssueLine
+          issue={strayIssue}
+          where="list"
+          onRetry={strayIssue.retry}
+          onOpen={props.onOpenAssignment}
+          onClose={done?.onDismissIssue}
+        />
       )}
       {props.burning.length === 0 ? (
         <Empty>{texts.burningEmpty}</Empty>
@@ -249,9 +258,10 @@ export function BurningSection(props: {
                     title={m.title}
                     done={false}
                     busy={done.busyId === b.assignmentId}
+                    rowId={b.assignmentId}
                     onToggle={() => {
                       if (done.busyId === "") {
-                        done.onMark(b.assignmentId);
+                        done.onMark(b.assignmentId, m.title);
                       }
                     }}
                   />

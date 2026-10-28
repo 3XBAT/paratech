@@ -119,6 +119,7 @@
     "src/recordingImportView.ts",
     "src/pages/RecordingImportPanel.tsx",
     "src/assignmentDoneView.ts",
+    "src/doneRunner.ts",
     "src/ui/Toast.tsx",
     "src/pages/AssignmentDoneParts.tsx"
   ]

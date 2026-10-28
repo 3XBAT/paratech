@@ -102,8 +102,8 @@ test("the row leaves at once when it is marked or gone; a refusal and others sta
 
 test("the toast of a mark in «Сегодня» comes from the same model and carries the undo", () => {
   const res = reply([out("a1", "changed", true, 8)], [{ id: "a1", version: 8 }]);
-  const o = doneOutcome("mark", res);
-  assert.equal(o.toast.text, "Отмечено выполненным");
+  const o = doneOutcome("mark", res, { a1: "Реферат" });
+  assert.equal(o.toast.text, "Выполнено: «Реферат»", "named by the title of the clicked row");
   assert.equal(o.toast.undo.prior, res.prior);
   assert.equal(o.refresh, true, "the screen is read again");
 });
@@ -139,4 +139,26 @@ test("the Today page wires the runner, the local removal and the toast", () => {
   assert.ok(page.includes("burningAfterDone(s.burning, res)"));
   assert.match(page, /refresh: load/);
   assert.ok(page.includes("<Toast "));
+});
+
+test("the check carries its row id for the focus; the title of the row goes to the toast; a stray line can be closed", () => {
+  const html = renderToStaticMarkup(
+    h(BurningSection, {
+      burning: [deadline("a1", "Реферат")],
+      onOpenAssignment: noop,
+      done: { busyId: "", issue: null, onMark: noop },
+    }),
+  );
+  assert.ok(html.includes('data-done-id="a1"'));
+  assert.ok(readFileSync(new URL("../src/pages/TodayParts.tsx", import.meta.url), "utf8").includes("done.onMark(b.assignmentId, m.title)"));
+
+  const gone = { ...doneOutcome("mark", reply([out("zz", "not_found")])).issue, ids: ["zz"], retry: noop };
+  const withClose = renderToStaticMarkup(
+    h(BurningSection, {
+      burning: [deadline("a1")],
+      onOpenAssignment: noop,
+      done: { busyId: "", issue: gone, onMark: noop, onDismissIssue: noop },
+    }),
+  );
+  assert.match(withClose, />Закрыть</);
 });

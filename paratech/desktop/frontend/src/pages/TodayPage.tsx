@@ -19,6 +19,7 @@ import { burningAfterDone } from "../assignmentDoneView.js";
 import { AddAssignmentDialog } from "./HomeworkDialogs.js";
 import { RecordingsPage } from "./RecordingsPage.js";
 import { AskSection, BurningSection, DoneSection, LessonsSection, PostsSection, WaitingSection } from "./TodayParts.js";
+import { doneToastProps, useDoneFocus } from "./useDoneFocus.js";
 import { useDoneRunner } from "./useDoneRunner.js";
 
 const pollMs = 3000;
@@ -36,6 +37,8 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
   const [adding, setAdding] = useState(false);
   const [all, setAll] = useState(false);
   const [screen, setScreen] = useState<TodayScreen | null>(null);
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
   const [error, setError] = useState("");
   const [recordings, setRecordings] = useState<RecordingItem[] | null>(null);
   const mounted = useRef(true);
@@ -63,8 +66,16 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
   }, []);
 
   // «Выполнено» in «Горит на 7 дней» (TASK-316): the row leaves at once, the screen is read again; «Отменить» brings it back.
+  const rootRef = useRef<HTMLElement>(null);
+  const focus = useDoneFocus(rootRef);
   const doneRun = useDoneRunner(homework, {
-    apply: (res) => setScreen((s) => (s === null ? s : { ...s, burning: burningAfterDone(s.burning, res) })),
+    apply: (res) => {
+      // A row that leaves takes the focus with it: it goes to the next row's check.
+      const cur = screenRef.current?.burning ?? [];
+      const next = burningAfterDone(cur, res);
+      focus.rowsLeaving(cur.filter((b) => !next.some((x) => x.assignmentId === b.assignmentId)).map((b) => b.assignmentId));
+      setScreen((s) => (s === null ? s : { ...s, burning: burningAfterDone(s.burning, res) }));
+    },
     refresh: load,
   });
 
@@ -124,8 +135,10 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
   const queue = queueLine(recordings ?? [], []);
   const nearest = screen === null ? "" : nearestDeadlineText(screen.burning);
 
+  // The toast is outside .today: that is a size container, which would make it the containing block of the toast.
   return (
-    <section className="page today">
+    <>
+    <section className="page today" tabIndex={-1} ref={rootRef}>
       <div className="head">
         <div>
           <span className="label num">{screen === null ? "" : dayTitle(screen.day)}</span>
@@ -178,7 +191,12 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
                 burning={screen.burning}
                 onOpenAssignment={props.onOpenAssignment}
                 onAdd={() => setAdding(true)}
-                done={{ busyId: doneRun.busyId, issue: doneRun.issue, onMark: (id) => void doneRun.mark(id, true) }}
+                done={{
+                  busyId: doneRun.busyId,
+                  issue: doneRun.issue,
+                  onMark: (id, title) => void doneRun.mark(id, true, title),
+                  onDismissIssue: doneRun.dismissIssue,
+                }}
               />
             </div>
           </div>
@@ -192,7 +210,8 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
           </div>
         </>
       )}
-      <Toast toast={doneRun.toast} onAction={() => void doneRun.undo()} onClose={doneRun.closeToast} />
     </section>
+    <Toast {...doneToastProps(doneRun, focus)} />
+    </>
   );
 }

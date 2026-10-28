@@ -36,6 +36,9 @@
 .today-dlitem { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; }
 .today-dlitem > .done-check { margin-left: 16px; }
 .today-dlitem > .today-row::before { display: none; }
+/* The hover is of the whole item, so the ring does not look detached from its row. */
+.today-dlitem:hover { background: var(--fill); }
+.today-dlitem > .today-dl:hover { background: none; }
 .today-dlitem + .today-dlitem::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 1px; background: var(--sep); }
 .today-dlitem > .today-dl { padding-left: 12px; }
 .today-dlnote, .today-dlissue { grid-column: 2; padding: 0 16px 8px 12px; }

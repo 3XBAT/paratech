@@ -19,21 +19,39 @@ export type DoneAction = "mark" | "unmark" | "undo";
 export const doneTexts = {
   markTitle: "Отметить выполненным",
   unmarkTitle: "Вернуть в работу",
-  /** The button of the assignment page. */
-  pageMark: "Выполнено",
+  /** The button of the assignment page: an action, so it does not read as the status next to «Выполнено 28 окт.». */
+  pageMark: "Отметить выполненным",
   pageUnmark: "Вернуть в работу",
   saving: "Сохранение…",
   moreActions: "Ещё действия",
-  marked: "Отмечено выполненным",
+  /** The toast of a call without a known title, and the toast of several. */
+  marked: "Выполнено",
   unmarked: "Возвращено в работу",
+  markedMany: "Отмечены выполненными",
+  unmarkedMany: "Возвращены в работу",
   undo: "Отменить",
+  /** The tooltip of «Отменить» in the toast: the key works while the toast is shown. */
+  undoTitle: "Отменить (Ctrl+Z)",
   close: "Закрыть",
   retry: "Повторить",
   openAssignment: "Открыть задание",
   back: "Все задания",
   gone: "Задание уже удалено",
   conflict: "Задание изменилось, попробуйте ещё раз",
+  /** The conflict of «Отменить» on the assignment page, which already shows the assignment. */
+  pageUndoConflict: "Задание изменилось, поэтому отменить нельзя. Отметку можно поставить или снять кнопкой выше.",
+  busyHint: "Идёт сохранение",
 } as const;
+
+/** The longest title the toast names; a longer one is cut with «…». */
+export const toastTitleMax = 40;
+
+/** A title for the toast: one line, at most toastTitleMax characters (by code points). Plain text only. */
+export function toastTitle(title: string): string {
+  const flat = title.replace(/\s+/g, " ").trim();
+  const chars = Array.from(flat);
+  return chars.length <= toastTitleMax ? flat : `${chars.slice(0, toastTitleMax).join("").trimEnd()}…`;
+}
 
 /** The accessible name of the check in a row: the action first, then which assignment («Отметить выполненным: Задача»). */
 export function checkLabel(title: string, done: boolean): string {
@@ -76,24 +94,33 @@ export type ListEmpty =
   | { kind: "note"; text: string; hint: string; action: { label: string; state: AssignmentState } | null };
 
 export const emptyTexts = {
-  done: "Пока ничего не отмечено",
-  doneHint: "Отметить можно галочкой в строке задания.",
+  done: "Пока ничего не отмечено.",
+  doneHint: "Отметить задание можно кружком слева от названия.",
+  showOpen: "Показать открытые",
   open: "Открытых заданий нет",
+  openAllDone: "Открытых заданий нет — всё выполнено.",
   showDone: "Показать выполненные",
 } as const;
 
 /**
  * The empty list of a state. The first-run text («Заданий пока нет») is only for a student who has no assignment at
- * all: anyExists is that fact (null: not known), and an empty «Открытые» does not tell it by itself.
+ * all: anyExists is that fact (null: not known), and an empty «Открытые» does not tell it by itself. Open and empty
+ * while assignments exist means every one of them is done.
  */
 export function listEmpty(state: AssignmentState, anyExists: boolean | null): ListEmpty {
   if (state === "done") {
-    return { kind: "note", text: emptyTexts.done, hint: emptyTexts.doneHint, action: null };
+    return {
+      kind: "note",
+      text: emptyTexts.done,
+      hint: emptyTexts.doneHint,
+      action: { label: emptyTexts.showOpen, state: "open" },
+    };
   }
   if (state === "all" || anyExists === false) {
     return { kind: "first-run" };
   }
-  return { kind: "note", text: emptyTexts.open, hint: "", action: { label: emptyTexts.showDone, state: "done" } };
+  const text = anyExists === true ? emptyTexts.openAllDone : emptyTexts.open;
+  return { kind: "note", text, hint: "", action: { label: emptyTexts.showDone, state: "done" } };
 }
 
 /** The toast of a call that changed something and can be put back; the undo is what the call returned, as it is. */
@@ -107,6 +134,8 @@ export type IssueWay = "retry" | "open" | "none";
 
 export interface DoneIssue {
   text: string;
+  /** The same on the assignment page, which already shows the assignment (no «open it» in the text). */
+  pageText: string;
   way: IssueWay;
   /** The assignment «Открыть задание» opens (the first one of the refusal); "" otherwise. */
   openId: string;
@@ -127,13 +156,22 @@ export interface DoneOutcomeView {
   refresh: boolean;
 }
 
-/** The toast text of a call; "" when nothing changed or the call does not get one (undo). */
-function toastText(action: DoneAction, changed: number): string {
-  if (action === "undo" || changed === 0) {
+/**
+ * The toast text of a call; "" when nothing changed or the call does not get one (undo). One assignment is named
+ * («Выполнено: «Реферат»»), several are counted. titles are the titles of the rows the student clicked, by id.
+ */
+function toastText(action: DoneAction, res: DoneResult, titles: Readonly<Record<string, string>>): string {
+  const changed = res.outcomes.filter((o) => o.code === "changed");
+  if (action === "undo" || changed.length === 0) {
     return "";
   }
-  const base = action === "mark" ? doneTexts.marked : doneTexts.unmarked;
-  return changed > 1 ? `${base}: ${changed}` : base;
+  const mark = action === "mark";
+  if (changed.length > 1) {
+    return `${mark ? doneTexts.markedMany : doneTexts.unmarkedMany}: ${changed.length}`;
+  }
+  const base = mark ? doneTexts.marked : doneTexts.unmarked;
+  const title = Object.hasOwn(titles, changed[0].id) ? toastTitle(titles[changed[0].id]) : "";
+  return title === "" ? base : `${base}: «${title}»`;
 }
 
 /**
@@ -143,20 +181,27 @@ function toastText(action: DoneAction, changed: number): string {
  * check); conflict of an undo - open the assignment (a repeat conflicts again); failed, unavailable, invalid - repeat.
  * "unchanged" is no error: the row simply takes the stored state.
  */
-export function doneOutcome(action: DoneAction, res: DoneResult): DoneOutcomeView {
+export function doneOutcome(
+  action: DoneAction,
+  res: DoneResult,
+  titles: Readonly<Record<string, string>> = {},
+): DoneOutcomeView {
   const sum = doneSummary(res);
-  const text = toastText(action, sum.changed);
+  const text = toastText(action, res, titles);
   const toast: ToastModel | null =
     text !== "" && sum.undo ? { text, undo: { priorDone: res.priorDone, prior: res.prior } } : null;
 
   if (res.problem !== "") {
-    return { toast: null, issue: { text: sum.messages[0], way: "retry", openId: "", gone: false }, refresh: false };
+    const problem = sum.messages[0];
+    return { toast: null, issue: { text: problem, pageText: problem, way: "retry", openId: "", gone: false }, refresh: false };
   }
 
   const texts: string[] = [];
-  const add = (t: string) => {
+  const pageTexts: string[] = [];
+  const add = (t: string, page = t) => {
     if (!texts.includes(t)) {
       texts.push(t);
+      pageTexts.push(page);
     }
   };
   let retry = false;
@@ -168,7 +213,7 @@ export function doneOutcome(action: DoneAction, res: DoneResult): DoneOutcomeVie
       add(doneTexts.gone);
     } else if (o.code === "conflict") {
       if (action === "undo") {
-        add(doneMessages.conflict);
+        add(doneMessages.conflict, doneTexts.pageUndoConflict);
         openId = openId === "" ? o.id : openId;
       } else {
         add(doneTexts.conflict);
@@ -180,7 +225,8 @@ export function doneOutcome(action: DoneAction, res: DoneResult): DoneOutcomeVie
     }
   }
   const way: IssueWay = retry ? "retry" : openId !== "" ? "open" : "none";
-  const issue: DoneIssue | null = texts.length === 0 ? null : { text: texts.join(" "), way, openId, gone };
+  const issue: DoneIssue | null =
+    texts.length === 0 ? null : { text: texts.join(" "), pageText: pageTexts.join(" "), way, openId, gone };
   return { toast, issue, refresh: res.outcomes.length > 0 };
 }
 
@@ -234,6 +280,25 @@ export function listAfterDone(
     .filter((a) => !isGone(res, a.id))
     .map((a) => assignmentAfterDone(a, res, now))
     .filter((a) => state === "all" || (state === "done") === a.done);
+}
+
+/**
+ * Where the focus goes when rows leave a list (the focus was on the check of one of them): the check of the next row
+ * that stays, else of the previous one, else "" (nothing left: the page's main region). null: no row of order leaves.
+ * order is the ids of the checks on the screen, top to bottom, before the rows are removed.
+ */
+export function focusTargetAfter(order: readonly string[], leaving: readonly string[]): string | null {
+  const first = order.findIndex((id) => leaving.includes(id));
+  if (first < 0) {
+    return null;
+  }
+  const stays = (id: string) => !leaving.includes(id);
+  const next = order.slice(first + 1).find(stays);
+  if (next !== undefined) {
+    return next;
+  }
+  const before = order.slice(0, first).filter(stays);
+  return before.length > 0 ? before[before.length - 1] : "";
 }
 
 /** The burning deadlines after a call: a done assignment and a deleted one leave at once (they are done, not late). */
