@@ -64,7 +64,8 @@ type DoneMarks struct {
 // transaction per assignment: a missing or deleted one gets its code and the others go on. An id given twice is
 // handled once. Marking one already in that state changes nothing (DoneUnchanged, idempotent), so a repeated call has
 // no Prior. Nothing is sent to Google Calendar and the deadline events are not touched (ADR-0033 О-13 is open).
-// Reprocessing never changes the mark either: the aggregate keeps it through Reextract, SetHints, Edit and Correct.
+// Reprocessing does not change the mark: the aggregate keeps it through Reextract, SetHints, Edit and Correct (but a
+// re-extraction with fewer items still withdraws a never-edited one, done or not: assignment.Superseded, follow-up).
 // An empty list or more than MaxMarkDone ids is ErrInvalidRequest and nothing changes.
 func (s *Service) MarkDone(ctx context.Context, ids []shared.AssignmentID, done bool) (DoneMarks, error) {
 	if len(ids) == 0 || len(ids) > MaxMarkDone {
