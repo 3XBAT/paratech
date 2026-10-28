@@ -118,16 +118,25 @@ type streamState struct {
 	stop    *string
 }
 
-// readStream reads the SSE body line by line (docs/refs/anthropic.md section 8). A read failure or an end before
-// message_stop is errRead; a malformed or oversized stream is permanent.
+// readStream reads the SSE body of a completion (docs/refs/anthropic.md section 8).
 func readStream(resp *http.Response, onDelta func(string)) (values.Completion, error) {
+	st := &streamState{onDelta: onDelta}
+	if err := readSSE(resp, st.dispatch); err != nil {
+		return values.Completion{}, err
+	}
+	return st.result()
+}
+
+// readSSE reads the SSE body line by line and hands every event to dispatch until it reports message_stop. An event
+// without an event line is named by the type of its data. A read failure or an end before message_stop is errRead; a
+// malformed or oversized stream is permanent.
+func readSSE(resp *http.Response, dispatch func(event string, data []byte) (done bool, err error)) error {
 	if mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err != nil || mt != contentTypeSSE {
-		return values.Completion{}, permanent("unexpected content type")
+		return permanent("unexpected content type")
 	}
 	sc := bufio.NewScanner(&cappedReader{r: resp.Body, left: maxStreamBytes})
 	sc.Buffer(make([]byte, 0, 64<<10), maxStreamLineBytes)
 
-	st := &streamState{onDelta: onDelta}
 	var (
 		event   string
 		data    bytes.Buffer
@@ -136,13 +145,13 @@ func readStream(resp *http.Response, onDelta func(string)) (values.Completion, e
 	for sc.Scan() {
 		line := sc.Bytes()
 		if len(line) == 0 { // a blank line dispatches the event
-			if hasData {
-				done, err := st.dispatch(event, data.Bytes())
+			if name := eventName(event, data.Bytes()); hasData && name != "" {
+				done, err := dispatch(name, data.Bytes())
 				if err != nil {
-					return values.Completion{}, err
+					return err
 				}
 				if done {
-					return st.result()
+					return nil
 				}
 			}
 			event, hasData = "", false
@@ -165,11 +174,26 @@ func readStream(resp *http.Response, onDelta func(string)) (values.Completion, e
 	err := sc.Err()
 	switch {
 	case errors.Is(err, bufio.ErrTooLong):
-		return values.Completion{}, permanent("stream line too long")
+		return permanent("stream line too long")
 	case errors.Is(err, errStreamTooLarge):
-		return values.Completion{}, permanent("response too large")
+		return permanent("response too large")
 	}
-	return values.Completion{}, errRead // broken, or ended without message_stop
+	return errRead // broken, or ended without message_stop
+}
+
+// eventName is event, or the type of data when there was no event line (the docs always send both); "" when neither
+// names the event, which is then ignored.
+func eventName(event string, data []byte) string {
+	if event != "" {
+		return event
+	}
+	var head struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(data, &head) != nil {
+		return ""
+	}
+	return head.Type
 }
 
 // sseField splits an SSE line into field and value (one leading space of the value dropped); a comment line (":")
@@ -185,15 +209,6 @@ func sseField(line []byte) (string, []byte) {
 // dispatch applies one event and reports whether it was message_stop. ping and unknown events are ignored.
 func (st *streamState) dispatch(event string, data []byte) (bool, error) {
 	switch event {
-	case "":
-		// No event line: the data's type names the event (the docs always send both).
-		var head struct {
-			Type string `json:"type"`
-		}
-		if json.Unmarshal(data, &head) != nil || head.Type == "" {
-			return false, nil
-		}
-		return st.dispatch(head.Type, data)
 	case eventError:
 		return false, streamError(data)
 	case eventMessageStart, eventBlockStart, eventBlockDelta, eventMessageDelta, eventMessageStop:
@@ -245,16 +260,18 @@ func (st *streamState) emit(chunk string) {
 	st.onDelta(chunk)
 }
 
-// mergeUsage keeps the latest value of every field: message_delta counts are cumulative.
-func (st *streamState) mergeUsage(u *wireUsage) {
+func (st *streamState) mergeUsage(u *wireUsage) { mergeUsage(&st.usage, u) }
+
+// mergeUsage keeps the latest value of every field of u in dst: message_delta counts are cumulative.
+func mergeUsage(dst, u *wireUsage) {
 	if u == nil {
 		return
 	}
 	for _, f := range []struct{ dst, src **int64 }{
-		{&st.usage.InputTokens, &u.InputTokens},
-		{&st.usage.OutputTokens, &u.OutputTokens},
-		{&st.usage.CacheCreationInputTokens, &u.CacheCreationInputTokens},
-		{&st.usage.CacheReadInputTokens, &u.CacheReadInputTokens},
+		{&dst.InputTokens, &u.InputTokens},
+		{&dst.OutputTokens, &u.OutputTokens},
+		{&dst.CacheCreationInputTokens, &u.CacheCreationInputTokens},
+		{&dst.CacheReadInputTokens, &u.CacheReadInputTokens},
 	} {
 		if *f.src != nil {
 			*f.dst = *f.src

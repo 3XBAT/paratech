@@ -26,8 +26,8 @@ type FakeToolUse struct {
 // FakeMessagesAPI is a local Messages API for planner steps that behaves like the real one with adaptive thinking on
 // (docs/refs/anthropic.md section 7): every answer starts with a signed thinking block, and a request whose last
 // assistant message holds tool_use must start that message with a thinking block it issued, text and signature
-// unchanged; otherwise it answers 400 invalid_request_error. Answers are scripted; each call takes the next one.
-// Safe for concurrent use.
+// unchanged; otherwise it answers 400 invalid_request_error. Answers are scripted; each call takes the next one. A
+// request with "stream": true gets the same answer as SSE. Safe for concurrent use.
 type FakeMessagesAPI struct {
 	URL string
 
@@ -100,6 +100,13 @@ func (f *FakeMessagesAPI) serve(w http.ResponseWriter, r *http.Request) {
 	for _, c := range calls {
 		content = append(content, map[string]any{"type": "tool_use", "id": c.ID, "name": c.Name, "input": json.RawMessage(c.Input)})
 	}
+	var head struct {
+		Stream bool `json:"stream"`
+	}
+	if json.Unmarshal(body, &head) == nil && head.Stream {
+		writeSSE(w, n, thinking, signature, calls)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": fmt.Sprintf("msg_%d", n), "type": "message", "role": "assistant", "model": "claude-fake",
 		"content": content, "stop_reason": "tool_use", "stop_sequence": nil,
@@ -160,6 +167,59 @@ type contentBlock struct {
 	Type      string `json:"type"`
 	Thinking  string `json:"thinking"`
 	Signature string `json:"signature"`
+}
+
+// writeSSE sends the same answer as a stream (docs/refs/anthropic.md section 8): the thinking text and every input in
+// pieces of a few characters, the signature as one signature_delta, usage in message_start and message_delta.
+func writeSSE(w http.ResponseWriter, n int, thinking, signature string, calls []FakeToolUse) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+	send := func(event string, data map[string]any) {
+		data["type"] = event
+		b, _ := json.Marshal(data)
+		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
+	}
+	delta := func(i int, d map[string]any) { send("content_block_delta", map[string]any{"index": i, "delta": d}) }
+	stop := func(i int) { send("content_block_stop", map[string]any{"index": i}) }
+
+	send("message_start", map[string]any{"message": map[string]any{
+		"id": fmt.Sprintf("msg_%d", n), "type": "message", "role": "assistant", "model": "claude-fake", "content": []any{},
+		"stop_reason": nil, "usage": map[string]any{"input_tokens": 900, "output_tokens": 1},
+	}})
+	send("ping", map[string]any{})
+	send("content_block_start", map[string]any{"index": 0, "content_block": map[string]any{"type": "thinking", "thinking": "", "signature": ""}})
+	for _, p := range pieces(thinking, 9) {
+		delta(0, map[string]any{"type": "thinking_delta", "thinking": p})
+	}
+	delta(0, map[string]any{"type": "signature_delta", "signature": signature})
+	stop(0)
+	send("content_block_start", map[string]any{"index": 1, "content_block": map[string]any{"type": "text", "text": ""}})
+	delta(1, map[string]any{"type": "text_delta", "text": "Calling tools."})
+	stop(1)
+	for i, c := range calls {
+		send("content_block_start", map[string]any{"index": i + 2, "content_block": map[string]any{
+			"type": "tool_use", "id": c.ID, "name": c.Name, "input": map[string]any{},
+		}})
+		delta(i+2, map[string]any{"type": "input_json_delta", "partial_json": ""})
+		for _, p := range pieces(c.Input, 5) {
+			delta(i+2, map[string]any{"type": "input_json_delta", "partial_json": p})
+		}
+		stop(i + 2)
+	}
+	send("message_delta", map[string]any{"delta": map[string]any{"stop_reason": "tool_use", "stop_sequence": nil},
+		"usage": map[string]any{"output_tokens": 60}})
+	send("message_stop", map[string]any{})
+}
+
+// pieces cuts s into parts of at most n characters.
+func pieces(s string, n int) []string {
+	var out []string
+	runes := []rune(s)
+	for len(runes) > n {
+		out = append(out, string(runes[:n]))
+		runes = runes[n:]
+	}
+	return append(out, string(runes))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
