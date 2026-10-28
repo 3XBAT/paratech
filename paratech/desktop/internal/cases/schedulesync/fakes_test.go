@@ -2,7 +2,6 @@ package schedulesync
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -139,8 +138,19 @@ func (s *lessonStore) ListLive(context.Context) ([]*lesson.Lesson, error) {
 	return out, nil
 }
 
-func (s *lessonStore) ListStartingBetween(context.Context, time.Time, time.Time) ([]*lesson.Lesson, error) {
-	return nil, errors.New("not used")
+// ListStartingBetween returns the live lessons starting in [from, to), ordered by start, as the sqlite query does.
+func (s *lessonStore) ListStartingBetween(ctx context.Context, from, to time.Time) ([]*lesson.Lesson, error) {
+	live, err := s.ListLive(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []*lesson.Lesson
+	for _, l := range live {
+		if st := l.Content().Start; !st.Before(from) && st.Before(to) {
+			out = append(out, l)
+		}
+	}
+	return out, nil
 }
 
 // ListPendingCalendarSync applies the rule of the sqlite query (lesson.CalendarPending), ordered by start and id.

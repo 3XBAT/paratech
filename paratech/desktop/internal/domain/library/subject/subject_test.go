@@ -225,6 +225,43 @@ func TestAddAlias(t *testing.T) {
 	}
 }
 
+func TestRemoveAlias(t *testing.T) {
+	t1 := t0.Add(time.Minute)
+	tests := []struct {
+		name    string
+		alias   string
+		changed bool
+		left    []string
+	}{
+		{"by key", " общая  ФИЗИКА ", true, []string{"Физика (лаб.)"}},
+		{"case", "ФИЗИКА (ЛАБ.)", true, []string{"Общая физика"}},
+		{"the name stays", "физика", false, []string{"Общая физика", "Физика (лаб.)"}},
+		{"no such alias", "Химия", false, []string{"Общая физика", "Физика (лаб.)"}},
+		{"blank", "  ", false, []string{"Общая физика", "Физика (лаб.)"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newSubject(t, "Общая физика", "Физика (лаб.)")
+			if got := s.RemoveAlias(tt.alias, t1); got != tt.changed {
+				t.Fatalf("RemoveAlias = %v, want %v", got, tt.changed)
+			}
+			if got := s.State().Aliases; !reflect.DeepEqual(got, tt.left) {
+				t.Fatalf("aliases = %q, want %q", got, tt.left)
+			}
+			if s.Name().String() != "Физика" {
+				t.Fatalf("name = %q", s.Name())
+			}
+			wantUpdated := t0
+			if tt.changed {
+				wantUpdated = t1
+			}
+			if !s.UpdatedAt().Equal(wantUpdated) {
+				t.Fatalf("updatedAt = %v, want %v", s.UpdatedAt(), wantUpdated)
+			}
+		})
+	}
+}
+
 func TestRestoreRoundTripAndRejects(t *testing.T) {
 	s := newSubject(t, "Физ")
 	if _, err := s.AddFolder("f1", folderName(t, "Конспекты"), t0); err != nil {
