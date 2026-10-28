@@ -360,7 +360,7 @@ func TestMarkDoneLeavesTheCalendarAlone(t *testing.T) {
 	}
 }
 
-// Reprocessing a transcript updates a done assignment it did not withdraw and keeps its mark.
+// Reprocessing a transcript keeps a done assignment as it is, with its mark, and updates the open ones.
 func TestReprocessingKeepsTheDoneMark(t *testing.T) {
 	e := newCreateEnv(t, testSubjects)
 	e.llm.Answer(values.OperationExtractHomework, extractAnswer)
@@ -375,12 +375,16 @@ func TestReprocessingKeepsTheDoneMark(t *testing.T) {
 
 	e.llm.Answer(values.OperationExtractHomework, `{"assignments":[`+
 		`{"title":"Read chapter 5","description":"","due":"2026-10-17T23:59:00+03:00"},`+
-		`{"title":"Map of rivers","description":"","due":null}]}`)
+		`{"title":"Map of rivers and lakes","description":"","due":null}]}`)
 	if err := e.handle(e.snapshot("j2", ExtractHomeworkJobType, "t1")); err != nil {
 		t.Fatal(err)
 	}
-	if st := e.assignmentsOf("t1")[0]; st.ID != id || st.Title != "Read chapter 5" || !st.DoneAt.Equal(doneAt) {
-		t.Fatalf("after reprocessing = %+v, want the new title and the mark kept at %v", st, doneAt)
+	got := e.assignmentsOf("t1")
+	if st := got[0]; st.ID != id || st.Title != "Read chapter 4" || !st.DoneAt.Equal(doneAt) {
+		t.Fatalf("after reprocessing = %+v, want the old title and the mark kept at %v", st, doneAt)
+	}
+	if st := got[1]; st.Title != "Map of rivers and lakes" || !st.DoneAt.IsZero() {
+		t.Fatalf("open assignment after reprocessing = %+v, want the new title", st)
 	}
 }
 

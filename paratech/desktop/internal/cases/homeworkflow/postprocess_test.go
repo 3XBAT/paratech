@@ -344,6 +344,76 @@ func TestShorterAnswerWithdrawsSupersededAssignments(t *testing.T) {
 	}
 }
 
+// A shorter answer keeps an extracted assignment the student marked done, with its details (ADR-0033 §9), and
+// withdraws a not-done one past the answer; «Вернуть в работу» lets it be withdrawn again.
+func TestShorterAnswerKeepsADoneAssignment(t *testing.T) {
+	tests := []struct {
+		name     string
+		undo     bool
+		wantKept bool
+	}{
+		{"done", false, true},
+		{"done and back in work", true, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newPPEnv(t)
+			e.llm.Answer(values.OperationExtractHomework, `{"assignments":[`+
+				`{"title":"Item 0","description":"","due":null},{"title":"Item 1","description":"","due":null},`+
+				`{"title":"Item 2","description":"","due":null}]}`)
+			if err := e.handle(e.snapshot("j1", ExtractHomeworkJobType, "t1")); err != nil {
+				t.Fatal(err)
+			}
+			first := e.assignmentsOf("t1")
+			e.markAssignment(first[1], tc.undo)
+
+			e.llm.Answer(values.OperationExtractHomework, `{"assignments":[`+
+				`{"title":"Item 0 again","description":"","due":null},{"title":"Other item","description":"","due":null}]}`)
+			if err := e.handle(e.snapshot("j2", ExtractHomeworkJobType, "t1")); err != nil {
+				t.Fatalf("Handle: %v", err)
+			}
+			e.llm.Answer(values.OperationExtractHomework, `{"assignments":[{"title":"Item 0 again","description":"","due":null}]}`)
+			if err := e.handle(e.snapshot("j3", ExtractHomeworkJobType, "t1")); err != nil {
+				t.Fatalf("Handle: %v", err)
+			}
+
+			got := e.assignmentsOf("t1")
+			if !tc.wantKept {
+				if len(got) != 1 || got[0].ID != first[0].ID {
+					t.Fatalf("assignments = %+v, want only item 0: the open one is withdrawn", got)
+				}
+				return
+			}
+			if len(got) != 2 || got[0].Title != "Item 0 again" || got[1].ID != first[1].ID {
+				t.Fatalf("assignments = %+v, want item 0 updated, item 1 (done) kept, item 2 withdrawn", got)
+			}
+			if got[1].Title != "Item 1" || got[1].DoneAt.IsZero() {
+				t.Fatalf("done assignment = %+v, want its own title and the mark kept", got[1])
+			}
+		})
+	}
+}
+
+// markAssignment marks st done, as «Выполнено» does, and back in work when undo is set.
+func (e *ppEnv) markAssignment(st assignment.State, undo bool) {
+	e.t.Helper()
+	a, err := assignment.Restore(st)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if _, err := a.MarkDone(ppT0.Add(time.Hour)); err != nil {
+		e.t.Fatal(err)
+	}
+	if undo {
+		if _, err := a.MarkUndone(ppT0.Add(2 * time.Hour)); err != nil {
+			e.t.Fatal(err)
+		}
+	}
+	if err := (ppAssignments{e.ppStore}).Save(context.Background(), a); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
 // A delete that meets a concurrent change reloads and lets the aggregate decide again; a storage failure is retried.
 func TestWithdrawAfterAConflictOrAFailure(t *testing.T) {
 	setup := func(t *testing.T) *ppEnv {
