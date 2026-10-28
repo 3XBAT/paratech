@@ -1,0 +1,133 @@
+{
+  "catalog_version": 9,
+  "types": {
+    "id": "opaque desktop ID; must pass the typed provenance check",
+    "ids": "list of IDs, each as id",
+    "date": "calendar date YYYY-MM-DD; as a deadline (edit_due.due, create_assignment.due without time) it means the end of that day in the student's time zone; clearing a deadline is not an agent action",
+    "time": "time of day HH:MM, 24 h, in the student's time zone; only together with due",
+    "enum": "one of values",
+    "label": "short text from the student's request, at most 80 characters",
+    "query": "the student's question or search text in the student's own words, one line, at most 500 characters",
+    "text": "UI card text, at most 300 characters, no HTML",
+    "reply_text": "text of the reply card, at most 4000 characters, plain text without HTML or Markdown; paragraphs are separated by an empty line; a longer text is cut at a sentence",
+    "text_list": "list of text",
+    "card_ids": "list of 0-10 IDs, each as id, that a card shows as a list; the desktop draws their titles and dates from local data, the model never writes them",
+    "plan_steps": "planned calls: tool name plus argument IDs, rendered by desktop templates",
+    "questions": "questions of a card: kind choice|text, options as text, default option index"
+  },
+  "notes": {
+    "agent_can_execute": "false means the planner still calls the tool, but the call only creates a proposal card; nothing happens until the student clicks it",
+    "one_of": "optional argument groups of make_summary (recording|material), find_homework (recording|material), triage_assignment (assignment|upload|topic) and place_upload (folder|lesson) take exactly one of the group; the desktop parser enforces it (TASK-115) and the Hub refuses a returned call that breaks it (catalog 4)"
+  },
+  "tools": [
+    {"name": "list_subjects", "class": "R", "paid": false, "agent_can_execute": true, "arguments": []},
+    {"name": "find_lessons", "class": "R", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "subject", "type": "id", "required": false},
+      {"name": "from", "type": "date", "required": false},
+      {"name": "to", "type": "date", "required": false},
+      {"name": "kind", "type": "enum", "required": false, "values": ["lecture", "seminar", "practice", "lab"]}
+    ]},
+    {"name": "list_assignments", "class": "R", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "subject", "type": "id", "required": false},
+      {"name": "due_before", "type": "date", "required": false},
+      {"name": "status", "type": "enum", "required": false, "values": ["upcoming", "overdue", "any"]}
+    ]},
+    {"name": "job_status", "class": "R", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "ids", "type": "ids", "required": true}
+    ]},
+    {"name": "delivery_status", "class": "R", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "assignment", "type": "id", "required": true}
+    ]},
+    {"name": "search", "class": "R", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "query", "type": "query", "required": true},
+      {"name": "scope", "type": "enum", "required": false, "values": ["subject", "all"]}
+    ]},
+    {"name": "answer_question", "class": "R", "paid": true, "agent_can_execute": true, "arguments": [
+      {"name": "question", "type": "query", "required": true},
+      {"name": "scope", "type": "enum", "required": false, "values": ["subject", "all"]}
+    ]},
+    {"name": "inspect_upload", "class": "R", "paid": true, "agent_can_execute": true, "arguments": [
+      {"name": "upload", "type": "id", "required": true}
+    ]},
+    {"name": "create_subject", "class": "U", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "name", "type": "label", "required": true},
+      {"name": "semester", "type": "label", "required": false}
+    ]},
+    {"name": "create_folder", "class": "U", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "subject", "type": "id", "required": true},
+      {"name": "name", "type": "label", "required": true}
+    ]},
+    {"name": "place_upload", "class": "U", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "upload", "type": "id", "required": true},
+      {"name": "subject", "type": "id", "required": true},
+      {"name": "folder", "type": "id", "required": false},
+      {"name": "lesson", "type": "id", "required": false}
+    ]},
+    {"name": "link_material", "class": "U", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "material", "type": "id", "required": true},
+      {"name": "lesson", "type": "id", "required": true}
+    ]},
+    {"name": "set_lesson_info", "class": "U", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "recording", "type": "id", "required": true},
+      {"name": "subject", "type": "id", "required": true},
+      {"name": "kind", "type": "enum", "required": true, "values": ["lecture", "seminar", "practice", "lab"]}
+    ]},
+    {"name": "make_summary", "class": "U", "paid": true, "agent_can_execute": true, "arguments": [
+      {"name": "recording", "type": "id", "required": false},
+      {"name": "material", "type": "id", "required": false}
+    ]},
+    {"name": "make_lecture_text", "class": "U", "paid": true, "agent_can_execute": true, "arguments": [
+      {"name": "recording", "type": "id", "required": true}
+    ]},
+    {"name": "find_homework", "class": "U", "paid": true, "agent_can_execute": true, "arguments": [
+      {"name": "recording", "type": "id", "required": false},
+      {"name": "material", "type": "id", "required": false}
+    ]},
+    {"name": "edit_due", "class": "U", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "assignment", "type": "id", "required": true},
+      {"name": "due", "type": "date", "required": true}
+    ]},
+    {"name": "create_assignment", "class": "U", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "title", "type": "label", "required": true},
+      {"name": "subject", "type": "id", "required": false},
+      {"name": "lesson", "type": "id", "required": false},
+      {"name": "due", "type": "date", "required": false},
+      {"name": "time", "type": "time", "required": false},
+      {"name": "note", "type": "query", "required": false}
+    ]},
+    {"name": "triage_assignment", "class": "U", "paid": true, "agent_can_execute": true, "arguments": [
+      {"name": "assignment", "type": "id", "required": false},
+      {"name": "upload", "type": "id", "required": false},
+      {"name": "topic", "type": "query", "required": false}
+    ]},
+    {"name": "write_work", "class": "U", "paid": true, "agent_can_execute": true, "arguments": [
+      {"name": "work", "type": "id", "required": true}
+    ]},
+    {"name": "propose_deadline", "class": "C", "paid": false, "agent_can_execute": false, "arguments": [
+      {"name": "assignment", "type": "id", "required": true}
+    ]},
+    {"name": "propose_send", "class": "C", "paid": false, "agent_can_execute": false, "arguments": [
+      {"name": "assignment", "type": "id", "required": true},
+      {"name": "version", "type": "id", "required": true}
+    ]},
+    {"name": "propose_delete_recording", "class": "C", "paid": false, "agent_can_execute": false, "arguments": [
+      {"name": "recording", "type": "id", "required": true}
+    ]},
+    {"name": "show_plan", "class": "UI", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "summary", "type": "text", "required": true},
+      {"name": "steps", "type": "plan_steps", "required": true},
+      {"name": "notes", "type": "text_list", "required": false}
+    ]},
+    {"name": "ask_questions", "class": "UI", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "questions", "type": "questions", "required": true}
+    ]},
+    {"name": "reply", "class": "UI", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "text", "type": "reply_text", "required": true},
+      {"name": "assignments", "type": "card_ids", "required": false}
+    ]},
+    {"name": "cannot_do", "class": "UI", "paid": false, "agent_can_execute": true, "arguments": [
+      {"name": "your_part", "type": "text_list", "required": true},
+      {"name": "our_part", "type": "text_list", "required": true}
+    ]}
+  ]
+}
