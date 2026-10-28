@@ -3,6 +3,7 @@ package agentturn
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 
@@ -94,8 +95,9 @@ func TestAskKeepsExistingMentions(t *testing.T) {
 				if len(st.Calls) != 1 || st.Calls[0].Call.ID() != "c1" {
 					t.Fatalf("calls = %+v, want only the call with the kept mention", st.Calls)
 				}
-				if len(tt.port.asked) != 2 {
-					t.Fatalf("asked = %v", tt.port.asked)
+				// Ask checks both; the step checks the kept one again before it is sent (TASK-245).
+				if want := []values.Ref{kept.Ref(), gone.Ref(), kept.Ref()}; !slices.Equal(tt.port.asked, want) {
+					t.Fatalf("asked = %v, want %v", tt.port.asked, want)
 				}
 				return
 			}

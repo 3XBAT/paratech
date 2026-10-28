@@ -84,7 +84,7 @@ func New(d Deps) (*Service, error) {
 type change struct {
 	th      *thread.Thread
 	entries []values.HistoryEntry
-	context values.RefSet // IDs of the base and the scope of the current step
+	context values.RefSet // IDs of the base, the scope and the mentions of the current step
 	calls   []Call
 	cards   []values.Card
 	// redo rebuilds the change of an Ask or a card answer on the stored chat when its first save meets a version

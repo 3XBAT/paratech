@@ -445,7 +445,7 @@ func (q *Queries) ListAgentActionsByThread(ctx context.Context, arg ListAgentAct
 }
 
 const listAgentSteps = `-- name: ListAgentSteps :many
-SELECT s.thread_id, s.seq, s.turn, s.entry, s.body, s.created_at, u.reply_line FROM agent_steps s
+SELECT s.thread_id, s.seq, s.turn, s.entry, s.body, s.created_at, u.reply_line, u.mentions FROM agent_steps s
 LEFT JOIN agent_turns u ON u.thread_id = s.thread_id AND u.number = s.turn
 WHERE s.thread_id = ?1 AND s.turn >= ?2
   AND (u.dropped_by IS NULL OR u.dropped_by = 0)
@@ -467,11 +467,12 @@ type ListAgentStepsRow struct {
 	Body      string
 	CreatedAt int64
 	ReplyLine sql.NullString
+	Mentions  sql.NullString
 }
 
 // The newest entries of the requests from a number on, newest first (the adapter returns them oldest first), each
-// with the frozen reply line of its request. Entries of dropped requests are left out here, so they never take a place
-// under the limit (ADR-0028).
+// with the frozen reply line and the mentions of its request. Entries of dropped requests are left out here, so they
+// never take a place under the limit (ADR-0028).
 func (q *Queries) ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) ([]ListAgentStepsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAgentSteps, arg.ThreadID, arg.FromTurn, arg.MaxRows)
 	if err != nil {
@@ -489,6 +490,7 @@ func (q *Queries) ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) 
 			&i.Body,
 			&i.CreatedAt,
 			&i.ReplyLine,
+			&i.Mentions,
 		); err != nil {
 			return nil, err
 		}

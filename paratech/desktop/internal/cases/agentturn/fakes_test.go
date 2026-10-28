@@ -116,6 +116,8 @@ type memThreads struct {
 	// afterGet, when set, runs after every Get (outside the lock), so a test can save a competing change between a
 	// load and a save.
 	afterGet func()
+	// history, when set, keeps the mentions of every saved request, as the agent_turns rows the history read joins.
+	history *memHistory
 }
 
 func (r *memThreads) Get(_ context.Context, id shared.ThreadID) (*thread.Thread, error) {
@@ -169,6 +171,9 @@ func (r *memThreads) Save(_ context.Context, th *thread.Thread) error {
 	st.Version++
 	r.states[st.ID] = st
 	th.Persisted(st.Version)
+	if r.history != nil && st.Current != nil {
+		r.history.mentioned(st.ID, st.Current.Number, values.MentionRefs(st.Current.Mentions))
+	}
 	return nil
 }
 
@@ -198,6 +203,20 @@ type memHistory struct {
 	entries map[shared.ThreadID][]values.HistoryEntry
 	failing error // returned by Append when set
 	reading error // returned by Since when set
+	// mentions of each stored request, set on its entries by Since like the sqlite join
+	mentions map[shared.ThreadID]map[int][]values.Ref
+}
+
+func (h *memHistory) mentioned(id shared.ThreadID, turn int, refs []values.Ref) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.mentions == nil {
+		h.mentions = map[shared.ThreadID]map[int][]values.Ref{}
+	}
+	if h.mentions[id] == nil {
+		h.mentions[id] = map[int][]values.Ref{}
+	}
+	h.mentions[id][turn] = refs
 }
 
 func (h *memHistory) Append(_ context.Context, id shared.ThreadID, turn int, e values.HistoryTurn) error {
@@ -225,6 +244,9 @@ func (h *memHistory) Since(_ context.Context, id shared.ThreadID, from, limit in
 	var out []values.HistoryEntry
 	for _, e := range h.entries[id] {
 		if e.Turn >= from {
+			if refs := h.mentions[id][e.Turn]; len(refs) > 0 {
+				e.Mentions = slices.Clone(refs)
+			}
 			out = append(out, e)
 		}
 	}
@@ -364,9 +386,10 @@ func (p *recProgress) got() ([]Step, []thread.State) {
 func newEnvWith(t *testing.T, progress Progress) *env {
 	t.Helper()
 	e := &env{
-		model: &fakeModel{}, threads: &memThreads{}, history: &memHistory{},
+		model: &fakeModel{}, history: &memHistory{},
 		clock: &fixedClock{now: time.Date(2026, 10, 22, 9, 0, 0, 0, moscow)}, effects: &fakeEffects{},
 	}
+	e.threads = &memThreads{history: e.history}
 	s1, _ := values.NewRef(values.KindSubject, "s1")
 	e.subjects = &subjects{list: []values.BaseSubject{{ID: s1, Name: "Физика"}}}
 	svc, err := New(Deps{
