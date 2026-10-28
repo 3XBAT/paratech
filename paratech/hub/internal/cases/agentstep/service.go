@@ -18,8 +18,9 @@ import (
 
 // Operation names used in errors and logs.
 const (
-	opStep    = "step"
-	opStart   = "start"
+	opStep       = "step"
+	opStepStream = "step stream"
+	opStart      = "start"
 	opSettle  = "settle"
 	opRelease = "release"
 	opReplay  = "replay"
@@ -59,6 +60,7 @@ type Service struct {
 	accounts    Accounts
 	turns       AssistantTurns
 	provider    Provider
+	streamer    StreamingProvider // nil when provider streaming is off
 	limiter     RateLimiter
 	clock       Clock
 	random      Random
@@ -81,6 +83,13 @@ func New(d Deps, cfg Config) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
 	}
+	if cfg.ProviderStream && d.Streamer == nil {
+		return nil, fmt.Errorf("%w: provider streaming needs a streaming provider", ErrInvalidConfig)
+	}
+	streamer := d.Streamer
+	if !cfg.ProviderStream {
+		streamer = nil
+	}
 	if cfg.CallTimeout <= 0 || cfg.CallTimeout+2*ledgerTimeout > cfg.ReservationTTL {
 		return nil, fmt.Errorf("%w: the call timeout plus %s must be above 0 and within the reservation TTL", ErrInvalidConfig, 2*ledgerTimeout)
 	}
@@ -89,7 +98,7 @@ func New(d Deps, cfg Config) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		accounts: d.Accounts, turns: d.Turns, provider: d.Provider, limiter: d.Limiter, clock: d.Clock, random: d.Random, models: d.Models,
+		accounts: d.Accounts, turns: d.Turns, provider: d.Provider, streamer: streamer, limiter: d.Limiter, clock: d.Clock, random: d.Random, models: d.Models,
 		sealer: d.Sealer, log: d.Log, policy: p, callTimeout: cfg.CallTimeout, profiles: profiles,
 	}, nil
 }
@@ -151,16 +160,37 @@ type step struct {
 // context error; anything else is a Hub failure. A provider call that has started is finished, settled and stored even
 // if the client goes away.
 func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
+	return s.run(ctx, cmd, opStep, nil)
+}
+
+// StepStream is Step with the visible reply streamed (ADR-0026 addendum "Streamed reply"): the same validation, key
+// life cycle and ledger, so Step and StepStream with one key and request replay each other's stored result. With
+// provider streaming on, onDelta gets the reply text as the model writes it: UNTRUSTED display-only draft text, at
+// most toolcatalog.MaxReplyTextRunes characters in all, joined into chunks of at least draftFlushBytes unless
+// draftFlushEvery has passed, in order, from the calling goroutine, before StepStream returns; it must not block, as
+// the provider call waits for it. The result is built as Step builds it and may differ from the joined chunks, and a
+// failure may follow them. A replay, a step with provider streaming off and a provider answer without SSE send no
+// chunk. A client that goes away mid-stream does not stop the call: it is read to the end, settled in full and stored.
+func (s *Service) StepStream(ctx context.Context, cmd Command, onDelta func(chunk string)) (Result, error) {
+	if onDelta == nil {
+		onDelta = func(string) {}
+	}
+	return s.run(ctx, cmd, opStepStream, onDelta)
+}
+
+// run is Step (onDelta nil) or StepStream.
+func (s *Service) run(ctx context.Context, cmd Command, op string, onDelta func(string)) (Result, error) {
 	// One log line per step: outcome, profile, catalog version, alias, reservation, usage, stop reason of a provider
 	// answer, number of calls, duration; never texts, arguments, results or prompts.
 	begin := s.clock.Now()
+	streaming := onDelta != nil
 	logStep := func(outcome string, attrs ...any) {
-		attrs = append([]any{"outcome", outcome, "duration", s.clock.Now().Sub(begin)}, attrs...)
+		attrs = append([]any{"outcome", outcome, "duration", s.clock.Now().Sub(begin), "stream", streaming}, attrs...)
 		s.log.InfoContext(ctx, "agent step", attrs...)
 	}
 	if err := cmd.Owner.Validate(); err != nil {
 		logStep(outcomeInvalid)
-		return Result{}, fmt.Errorf("agentstep: %s: %w: %w", opStep, ErrInvalidRequest, err)
+		return Result{}, fmt.Errorf("agentstep: %s: %w: %w", op, ErrInvalidRequest, err)
 	}
 	// Before anything else, so a limited call costs no validation of a large body and writes no ledger row.
 	if wait, ok := s.limiter.Allow(cmd.Owner, begin); !ok {
@@ -174,7 +204,7 @@ func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
 			outcome = outcomeBadSeal
 		}
 		logStep(outcome)
-		return Result{}, fmt.Errorf("agentstep: %s: %w", opStep, err)
+		return Result{}, fmt.Errorf("agentstep: %s: %w", op, err)
 	}
 	attrs := []any{"profile", string(st.binding.Profile), "catalog_version", st.binding.CatalogVersion,
 		"alias", string(st.reserve.Fingerprint().Alias)}
@@ -217,7 +247,7 @@ func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		s.release(ctx, st, rec.ID, account.ReasonExplicit)
 		logStep(outcomeCanceled, attrs...)
-		return Result{}, fmt.Errorf("agentstep: %s: %w", opStep, err)
+		return Result{}, fmt.Errorf("agentstep: %s: %w", op, err)
 	}
 	// Looked up only now, so a replay never depends on the kept turn. Without it the provider would refuse the
 	// continuation (or lose the model's reasoning), so the step fails instead and nothing is charged.
@@ -236,11 +266,21 @@ func (s *Service) Step(ctx context.Context, cmd Command) (Result, error) {
 	if timeout <= 0 {
 		s.release(ctx, st, rec.ID, account.ReasonFailed)
 		logStep(outcomeFailed, attrs...)
-		return Result{}, fmt.Errorf("agentstep: %s: no time left for the provider call before the reservation expires", opStep)
+		return Result{}, fmt.Errorf("agentstep: %s: no time left for the provider call before the reservation expires", op)
 	}
-	// Detached from the client (unary rule, gateway.proto): a started call finishes and is paid for and stored.
+	// Detached from the client (gateway.proto): a started call finishes, also mid-stream, and is paid for and stored.
 	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
-	answer, err := s.provider.Step(callCtx, call)
+	var answer values.AgentAnswer
+	if streaming && s.streamer != nil {
+		d := newDraft(s.clock, onDelta)
+		answer, err = s.streamer.StepStream(callCtx, call, d.push)
+		if err == nil {
+			d.flush()
+		}
+		attrs = append(attrs, "provider_stream", true, "chunks", d.chunks)
+	} else {
+		answer, err = s.provider.Step(callCtx, call)
+	}
 	cancel()
 	if err == nil {
 		// Says why a step failed, for example an answer cut at the output cap.

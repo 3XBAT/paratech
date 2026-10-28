@@ -17,6 +17,16 @@ type Provider interface {
 	Step(ctx context.Context, call values.AgentCall) (values.AgentAnswer, error)
 }
 
+// StreamingProvider runs one planner call with the visible reply streamed (ADR-0026 addendum "Streamed reply").
+// Implemented by the anthropic adapter; testenv has a scripted fake.
+type StreamingProvider interface {
+	// StepStream is Provider.Step with the same call, answer and error rules. onDelta gets the reply text as the model
+	// writes it (the top-level text argument of values.ReplyTool calls and the text of text blocks, never another
+	// argument), in order, from the calling goroutine, before StepStream returns. The chunks are UNTRUSTED draft text
+	// and may differ from the answer; a failure may follow them.
+	StepStream(ctx context.Context, call values.AgentCall, onDelta func(chunk string)) (values.AgentAnswer, error)
+}
+
 // Accounts stores quota accounts; the same shape as the gateway's and the quota use case's port (ARCH-20 forbids
 // importing them). The postgres adapter serves all three.
 type Accounts interface {

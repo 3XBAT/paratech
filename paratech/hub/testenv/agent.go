@@ -17,14 +17,19 @@ type AgentProviderStep struct {
 	Entered chan struct{}
 	// Wait, when not nil, holds the call until Wait is closed or its context ends (then it fails like the adapter).
 	Wait chan struct{}
+	// Chunks are the reply deltas StepStream sends first, before Entered and Wait, so a test can act mid-stream. Step
+	// ignores them.
+	Chunks []string
 }
 
-// FakeAgentProvider is a scripted provider for the agent step's Provider port. Each call takes the next step; a call
-// without a step left fails with a permanent error. Calls are recorded. Safe for concurrent use.
+// FakeAgentProvider is a scripted provider for the agent step's Provider and StreamingProvider ports. Each call takes
+// the next step; a call without a step left fails with a permanent error. Calls of both methods are recorded together.
+// Safe for concurrent use.
 type FakeAgentProvider struct {
-	mu    sync.Mutex
-	steps []AgentProviderStep
-	calls []values.AgentCall
+	mu      sync.Mutex
+	steps   []AgentProviderStep
+	calls   []values.AgentCall
+	streams int
 }
 
 // NewFakeAgentProvider returns a provider that answers with steps in order.
@@ -42,8 +47,31 @@ func (p *FakeAgentProvider) Push(steps ...AgentProviderStep) {
 // Step records call and plays the next step. A context that has already ended fails the call without consuming a
 // step.
 func (p *FakeAgentProvider) Step(ctx context.Context, call values.AgentCall) (values.AgentAnswer, error) {
+	return p.play(ctx, call, nil)
+}
+
+// StepStream is Step for the StreamingProvider port: it sends the step's chunks to onDelta from the calling goroutine,
+// then plays the step like Step. Streams counts these calls.
+func (p *FakeAgentProvider) StepStream(ctx context.Context, call values.AgentCall, onDelta func(chunk string)) (values.AgentAnswer, error) {
+	if onDelta == nil {
+		onDelta = func(string) {}
+	}
+	return p.play(ctx, call, onDelta)
+}
+
+// Streams returns how many recorded calls were StepStream calls.
+func (p *FakeAgentProvider) Streams() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.streams
+}
+
+func (p *FakeAgentProvider) play(ctx context.Context, call values.AgentCall, onDelta func(string)) (values.AgentAnswer, error) {
 	p.mu.Lock()
 	p.calls = append(p.calls, call)
+	if onDelta != nil {
+		p.streams++
+	}
 	if err := ctx.Err(); err != nil {
 		p.mu.Unlock()
 		return values.AgentAnswer{}, cutShort(err)
@@ -56,6 +84,11 @@ func (p *FakeAgentProvider) Step(ctx context.Context, call values.AgentCall) (va
 	p.steps = p.steps[1:]
 	p.mu.Unlock()
 
+	if onDelta != nil {
+		for _, c := range step.Chunks {
+			onDelta(c)
+		}
+	}
 	if step.Entered != nil {
 		close(step.Entered)
 	}
