@@ -26,10 +26,15 @@ type store struct {
 	mu          sync.Mutex
 	proposals   map[proposal.ID]proposal.State
 	assignments map[shared.AssignmentID]bool
-	recipient   string
-	recipErr    error // returned by HomeworkRecipient when set
+	recipient   string             // the lecturer's address of every subject; "" none
+	teachers    *proposal.Teachers // when set, the teachers of every subject instead
+	subject     shared.SubjectID   // what every subject name resolves to; "" none
+	recipErr    error              // returned by RecipientSource when set
 	nextID      int
-	saveErr     error // returned by the next proposal saves
+
+	askedTeachers []shared.SubjectID // the subjects RecipientSource.Teachers was asked for
+	askedNames    []string           // the names RecipientSource.SubjectNamed was asked for
+	saveErr       error              // returned by the next proposal saves
 
 	txMu sync.Mutex
 }
@@ -37,7 +42,9 @@ type store struct {
 type txKey struct{}
 
 func newStore(t *testing.T) *store {
-	return &store{t: t, proposals: map[proposal.ID]proposal.State{}, assignments: map[shared.AssignmentID]bool{}}
+	return &store{
+		t: t, proposals: map[proposal.ID]proposal.State{}, assignments: map[shared.AssignmentID]bool{}, subject: fakeSubject,
+	}
 }
 
 // ProposalRepository.
@@ -122,21 +129,45 @@ func (r assignmentRepo) Save(context.Context, *assignment.Assignment) error {
 	return nil
 }
 
-// RecipientSource.
+// RecipientSource: every subject name resolves to store.subject; the subject's lecturer has the address
+// store.recipient (only the lecturer: B-6 sends everything to them), unless store.teachers is set.
 
 type recipients struct{ s *store }
 
-func (r recipients) HomeworkRecipient(context.Context) (proposal.Recipient, error) {
+func (r recipients) Teachers(_ context.Context, id shared.SubjectID) (proposal.Teachers, error) {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
+	r.s.askedTeachers = append(r.s.askedTeachers, id)
 	if r.s.recipErr != nil {
-		return proposal.Recipient{}, r.s.recipErr
+		return proposal.Teachers{}, r.s.recipErr
 	}
-	if r.s.recipient == "" {
-		return proposal.Recipient{}, nil
+	if r.s.teachers != nil {
+		ts := *r.s.teachers
+		ts.Subject = id
+		return ts, nil
 	}
-	return proposal.NewRecipient(r.s.recipient)
+	ts := proposal.Teachers{Subject: id}
+	if r.s.recipient != "" {
+		ts.Lecture = proposal.Teacher{Name: fakeTeacherName, Email: r.s.recipient}
+	}
+	return ts, nil
 }
+
+func (r recipients) SubjectNamed(_ context.Context, name string) (shared.SubjectID, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	r.s.askedNames = append(r.s.askedNames, name)
+	if r.s.recipErr != nil {
+		return "", r.s.recipErr
+	}
+	return r.s.subject, nil
+}
+
+// The library subject every name resolves to and the name of its fake lecturer.
+const (
+	fakeSubject     shared.SubjectID = "s1"
+	fakeTeacherName string           = "Иванова И. И."
+)
 
 // TranscriptRecordings and LessonReader: the assignments of the proposal pipeline have no lesson.
 

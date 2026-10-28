@@ -292,7 +292,7 @@ func TestAgentSendIsProposedConfirmedOnceAndNeverToTheFileAddress(t *testing.T) 
 	}
 
 	for click := range 2 {
-		got, err := e.confirm.Confirm(ctx, "proposal", card.TargetID, card.EmailSubject, card.AttachmentFormat)
+		got, err := e.confirm.Confirm(ctx, "proposal", card.TargetID, card.EmailSubject, card.AttachmentFormat, "", "")
 		if err != nil || got.State != "done" {
 			t.Fatalf("click %d = %+v, %v", click+1, got, err)
 		}
@@ -318,14 +318,14 @@ func TestAgentSendIsProposedConfirmedOnceAndNeverToTheFileAddress(t *testing.T) 
 	}
 
 	// «Да» on the old card again: nothing new. A new proposal of the same send: refused until it is resolved.
-	if got, err := e.confirm.Confirm(ctx, "proposal", card.TargetID, card.EmailSubject, card.AttachmentFormat); err != nil || got.State != "done" {
+	if got, err := e.confirm.Confirm(ctx, "proposal", card.TargetID, card.EmailSubject, card.AttachmentFormat, "", ""); err != nil || got.State != "done" {
 		t.Fatalf("old card again = %+v, %v", got, err)
 	}
 	again, err := e.homework.ProposeEmailOfVersion(ctx, e.assignment, 1)
 	if err != nil || again.Status != proposal.StatusValidated {
 		t.Fatalf("second proposal = %+v, %v", again, err)
 	}
-	if _, err := e.confirm.Confirm(ctx, "proposal", string(again.ID), again.Subject, "txt"); !errors.Is(err, wails.ErrSendUnresolved) {
+	if _, err := e.confirm.Confirm(ctx, "proposal", string(again.ID), again.Subject, "txt", "", ""); !errors.Is(err, wails.ErrSendUnresolved) {
 		t.Fatalf("send while the first is unknown = %v, want ErrSendUnresolved", err)
 	}
 	if list, _ := e.dlv.ListByAssignment(ctx, e.assignment, 10); len(list) != 1 || !list[0].OutcomeUnknown() {
@@ -361,7 +361,7 @@ func TestAgentDeadlineIsProposedAndConfirmedOnce(t *testing.T) {
 	}
 
 	for click := range 2 {
-		got, err := e.confirm.Confirm(ctx, "proposal", targets[0].ID(), "", "")
+		got, err := e.confirm.Confirm(ctx, "proposal", targets[0].ID(), "", "", "", "")
 		if err != nil || got.State != "done" || got.Kind != "deadline" {
 			t.Fatalf("click %d = %+v, %v", click+1, got, err)
 		}

@@ -3,6 +3,14 @@
 // message are stored or imported text: show them as text nodes only. Confirm is the only call that leads to an email
 // or a calendar event, and only a click on «Да» makes it.
 
+import {
+  choiceArgs,
+  parseRecipientFields,
+  type RecipientFields,
+  type RecipientReason,
+  recipientReason,
+  type TeacherChoice,
+} from "./recipient.js";
 import type { CallByName } from "./settings";
 
 const service = "paratech/desktop/internal/input/wails.AgentConfirmService";
@@ -40,7 +48,13 @@ export interface ConfirmDeletion {
   deletes: string[];
 }
 
-export interface ConfirmCard {
+/**
+ * A send card also carries the recipient fields of recipient.ts: with reason "choose_teacher" the card asks «Кому
+ * отправить?» (recipient is "" until a click, «Да» stays disabled); "no_teacher_email" and "no_subject" come with
+ * state "rejected" and the message.
+ */
+export interface ConfirmCard extends RecipientFields {
+  reason: RecipientReason;
   kind: CardKind;
   targetKind: string;
   targetId: string;
@@ -78,6 +92,7 @@ export const errorTexts: readonly string[] = [
   "Не удалось выполнить. Нажмите «Да» ещё раз — повторного действия не будет.",
   "Файл, адрес получателя или тема письма изменились после подтверждения. Проверьте и подтвердите ещё раз.",
   "Неизвестный формат вложения: выберите .docx или .txt.",
+  "Выберите, кому отправить: лектору, семинаристу или преподавателю лабораторных.",
   "Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Сначала разберитесь с ним в списке писем.",
   noAssignmentText,
 ];
@@ -178,6 +193,8 @@ export function parseConfirmCard(raw: unknown): ConfirmCard {
     subject: str(r, "subject", w),
     due: str(r, "due", w),
     recipient: str(r, "recipient", w),
+    ...parseRecipientFields(r),
+    reason: recipientReason(r.reason),
     emailSubject: str(r, "emailSubject", w),
     attachmentName: str(r, "attachmentName", w),
     attachmentSize: count(r, "attachmentSize", w),
@@ -191,8 +208,11 @@ export function parseConfirmCard(raw: unknown): ConfirmCard {
 export interface AgentConfirmApi {
   /** The card of a proposal or of a deletion preview. */
   card(target: ConfirmTarget): Promise<ConfirmCard>;
-  /** «Да»: for a send, with the subject and format the card showed. A deletion is confirmed in the deletion window. */
-  confirm(card: ConfirmCard): Promise<ConfirmCard>;
+  /**
+   * «Да»: for a send, with the subject and format the card showed and, when the card asked «Кому отправить?», the
+   * option the student clicked (without it such a send is refused). A deletion is confirmed in the deletion window.
+   */
+  confirm(card: ConfirmCard, chosen?: TeacherChoice | null): Promise<ConfirmCard>;
   /** «Нет»: the proposal can never run afterwards; a preview has nothing stored. */
   decline(target: ConfirmTarget): Promise<ConfirmCard>;
   /** «Да, в календарь» of «Сегодня»: the stored deadline of the assignment becomes a proposal; nothing goes out yet. */
@@ -208,8 +228,10 @@ export interface AgentConfirmApi {
 export function agentConfirmApi(call: CallByName): AgentConfirmApi {
   return {
     card: async (t) => parseConfirmCard(await call(methods.card, t.kind, t.id)),
-    confirm: async (c) =>
-      parseConfirmCard(await call(methods.confirm, c.targetKind, c.targetId, c.emailSubject, c.attachmentFormat)),
+    confirm: async (c, chosen) =>
+      parseConfirmCard(
+        await call(methods.confirm, c.targetKind, c.targetId, c.emailSubject, c.attachmentFormat, ...choiceArgs(chosen)),
+      ),
     decline: async (t) => parseConfirmCard(await call(methods.decline, t.kind, t.id)),
     proposeDeadline: async (id) => parseConfirmCard(await call(methods.proposeDeadline, id)),
     proposeSendWork: async (id) => parseConfirmCard(await call(methods.proposeSendWork, id)),

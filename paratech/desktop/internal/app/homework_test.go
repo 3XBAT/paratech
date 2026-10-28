@@ -33,6 +33,7 @@ func TestHomeworkPageSendsOnlyAfterTheConfirmation(t *testing.T) {
 	a.env.mailRoots = mail.RootCAs()
 	startCore(t, a)
 	insertAssignment(t, dir, "a1", homeworkTitle)
+	teacherOfA1(t, a, dir, teacher)
 	if err := a.core.deliveries.SetMailPassword(ctx, testMailPassword); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +62,7 @@ func TestHomeworkPageSendsOnlyAfterTheConfirmation(t *testing.T) {
 	}
 
 	prep, err := page.PrepareSend(ctx, "a1", "txt")
-	if err != nil || prep.Status != "ready" || prep.Recipient != teacher || prep.Subject != "Домашнее задание" || // TASK-092: no subject, no deadline
+	if err != nil || prep.Status != "ready" || prep.Recipient != teacher || prep.Subject != "География: домашнее задание" || // TASK-092: no deadline
 		prep.AttachmentName != "homework.md" || prep.AttachmentSize != info.Size() {
 		t.Fatalf("PrepareSend = %+v, %v", prep, err)
 	}
@@ -69,7 +70,7 @@ func TestHomeworkPageSendsOnlyAfterTheConfirmation(t *testing.T) {
 		t.Fatalf("before the confirmation: %d deliveries, %d messages", deliveries, len(mail.Messages()))
 	}
 
-	if err := page.ConfirmSend(ctx, prep.ProposalID, prep.Subject, prep.AttachmentFormat); err != nil {
+	if err := page.ConfirmSend(ctx, prep.ProposalID, prep.Subject, prep.AttachmentFormat, "", ""); err != nil {
 		t.Fatalf("ConfirmSend: %v", err)
 	}
 	testenv.Eventually(t, "the email is sent", func() bool {
@@ -82,7 +83,7 @@ func TestHomeworkPageSendsOnlyAfterTheConfirmation(t *testing.T) {
 		t.Fatalf("Deliveries = %+v, %v, messages %d", ds, err, len(mail.Messages()))
 	}
 
-	if err := page.ConfirmSend(ctx, prep.ProposalID, prep.Subject, prep.AttachmentFormat); err != nil {
+	if err := page.ConfirmSend(ctx, prep.ProposalID, prep.Subject, prep.AttachmentFormat, "", ""); err != nil {
 		t.Fatalf("second ConfirmSend = %v, want nil: the send is done", err)
 	}
 	again, err := page.PrepareSend(ctx, "a1", "txt")
@@ -92,7 +93,7 @@ func TestHomeworkPageSendsOnlyAfterTheConfirmation(t *testing.T) {
 	if err := page.CancelSend(ctx, again.ProposalID); err != nil {
 		t.Fatal(err)
 	}
-	if err := page.ConfirmSend(ctx, again.ProposalID, again.Subject, again.AttachmentFormat); !errors.Is(err, wails.ErrSendCannotConfirm) {
+	if err := page.ConfirmSend(ctx, again.ProposalID, again.Subject, again.AttachmentFormat, "", ""); !errors.Is(err, wails.ErrSendCannotConfirm) {
 		t.Fatalf("ConfirmSend after CancelSend = %v", err)
 	}
 	if deliveries, _, _ := sideEffects(t, dir); deliveries != 1 || len(mail.Messages()) != 1 {
@@ -111,6 +112,7 @@ func TestHomeworkPageRepeatsAFailedConfirmationWithoutASecondEmail(t *testing.T)
 	a.env.mailRoots = mail.RootCAs()
 	startCore(t, a)
 	insertAssignment(t, dir, "a1", homeworkTitle)
+	teacherOfA1(t, a, dir, teacher)
 	if err := a.core.deliveries.SetMailPassword(ctx, testMailPassword); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +147,7 @@ func TestHomeworkPageRepeatsAFailedConfirmationWithoutASecondEmail(t *testing.T)
 	}
 
 	for i := range 2 {
-		if err := page.ConfirmSend(ctx, prep.ProposalID, prep.Subject, prep.AttachmentFormat); err != nil {
+		if err := page.ConfirmSend(ctx, prep.ProposalID, prep.Subject, prep.AttachmentFormat, "", ""); err != nil {
 			t.Fatalf("repeated ConfirmSend %d = %v", i+1, err)
 		}
 	}
@@ -180,7 +182,7 @@ func TestHomeworkPageKeepsTheExportOfAnUnresolvedEmail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := page.ConfirmSend(ctx, prep.ProposalID, prep.Subject, prep.AttachmentFormat); err != nil {
+	if err := page.ConfirmSend(ctx, prep.ProposalID, prep.Subject, prep.AttachmentFormat, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	attached, err := os.ReadFile(exportFile(dir))
@@ -218,7 +220,7 @@ func TestHomeworkPageKeepsTheExportOfAnUnresolvedEmail(t *testing.T) {
 	}
 }
 
-// Without a recipient or an export the dialog explains why and offers nothing to confirm; nothing is stored as a
+// Without a teacher's address or an export the dialog explains why and offers nothing to confirm; nothing is stored as a
 // delivery.
 func TestHomeworkPageRejectsASendItCannotMake(t *testing.T) {
 	ctx := context.Background()
@@ -232,10 +234,10 @@ func TestHomeworkPageRejectsASendItCannotMake(t *testing.T) {
 			t.Fatal(err)
 		}
 		prep, err := page.PrepareSend(ctx, "a1", "txt")
-		if err != nil || prep.Status != "rejected" || !strings.Contains(prep.Message, "«Подключения»") || prep.Recipient != "" {
+		if err != nil || prep.Status != "rejected" || !strings.Contains(prep.Message, "Нет почты преподавателя") || prep.Recipient != "" {
 			t.Fatalf("PrepareSend = %+v, %v", prep, err)
 		}
-		if err := page.ConfirmSend(ctx, prep.ProposalID, prep.Subject, prep.AttachmentFormat); !errors.Is(err, wails.ErrSendCannotConfirm) {
+		if err := page.ConfirmSend(ctx, prep.ProposalID, prep.Subject, prep.AttachmentFormat, "", ""); !errors.Is(err, wails.ErrSendCannotConfirm) {
 			t.Fatalf("ConfirmSend of a rejected send = %v", err)
 		}
 		if deliveries, jobs, _ := sideEffects(t, dir); deliveries != 0 || jobs != 0 {
@@ -270,7 +272,7 @@ func TestHomeworkPageResolvesAnUnknownOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := page.ConfirmSend(ctx, prep.ProposalID, prep.Subject, prep.AttachmentFormat); err != nil {
+	if err := page.ConfirmSend(ctx, prep.ProposalID, prep.Subject, prep.AttachmentFormat, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := rawDB(t, dir).Exec("UPDATE deliveries SET status = 'UNKNOWN', attempts = 1, version = version + 1"); err != nil {
@@ -288,7 +290,7 @@ func TestHomeworkPageResolvesAnUnknownOutcome(t *testing.T) {
 	}
 	if again, err := page.PrepareSend(ctx, "a1", "txt"); err != nil {
 		t.Fatal(err)
-	} else if err := page.ConfirmSend(ctx, again.ProposalID, again.Subject, again.AttachmentFormat); !errors.Is(err, wails.ErrSendUnresolved) {
+	} else if err := page.ConfirmSend(ctx, again.ProposalID, again.Subject, again.AttachmentFormat, "", ""); !errors.Is(err, wails.ErrSendUnresolved) {
 		t.Fatalf("a new send while one is unknown = %v, want ErrSendUnresolved", err)
 	}
 

@@ -19,15 +19,6 @@ const (
 	outDeadline = `{"kind":"create_deadline_event","assignment_id":"a1","title":"Algebra homework","due":"2026-10-20T18:00:00+03:00"}`
 )
 
-func mustRecipient(t *testing.T, s string) Recipient {
-	t.Helper()
-	r, err := NewRecipient(s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return r
-}
-
 // Digests of two different export contents.
 const (
 	shaA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -45,7 +36,7 @@ func mustDigest(t *testing.T, sha string, size int64) Digest {
 
 func goodFacts(t *testing.T) Facts {
 	return Facts{
-		AssignmentExists: true, AssignmentTitle: "Algebra", Recipient: mustRecipient(t, "teacher@school.example"),
+		AssignmentExists: true, AssignmentTitle: "Algebra", Teachers: oneTeacher, Lesson: values.LessonKindLecture,
 		Attachment: mustDigest(t, shaA, 11), ShownFormat: FormatText,
 	}
 }
@@ -332,7 +323,8 @@ func TestValidate(t *testing.T) {
 		{"deadline unknown assignment", outDeadline, func(f *Facts) { f.AssignmentExists = false }, t0, StatusRejected, ReasonUnknownAssignment},
 		// Hidden like any reader's (ADR-0029): a new proposal of a deleted assignment is unknown.
 		{"assignment deleted by the student", outEmail, studentDeleted, t0, StatusRejected, ReasonUnknownAssignment},
-		{"email no recipient", outEmail, func(f *Facts) { f.Recipient = Recipient{} }, t0, StatusRejected, ReasonNoRecipient},
+		{"email no teacher email", outEmail, func(f *Facts) { f.Teachers.Lecture = Teacher{} }, t0, StatusRejected, ReasonNoTeacherEmail},
+		{"email no subject", outEmail, func(f *Facts) { f.Teachers.Subject = "" }, t0, StatusRejected, ReasonNoSubject},
 		{"email no artifact", outEmail, func(f *Facts) { f.Attachment = Digest{} }, t0, StatusRejected, ReasonNoArtifact},
 		{"export needs no artifact or recipient", outExport, func(f *Facts) { *f = Facts{AssignmentExists: true, AssignmentTitle: "Algebra"} }, t0, StatusValidated, ""},
 		{"deadline in the past", outDeadline, nil, t0.AddDate(0, 0, 7), StatusRejected, ReasonDueOutOfRange},
@@ -352,7 +344,7 @@ func TestValidate(t *testing.T) {
 				t.Fatalf("status %s reason %q, want %s %q", p.Status(), p.Reason(), tc.status, tc.reason)
 			}
 			pinned := p.Kind() == KindSendHomework && tc.status == StatusValidated
-			if pinned != (p.Recipient() == f.Recipient && !p.Recipient().IsZero()) {
+			if pinned != (p.Recipient().Address() == "teacher@school.example") {
 				t.Fatalf("recipient = %q", p.Recipient().Address())
 			}
 			if pinned != (p.AttachmentDigest() == f.Attachment && !p.AttachmentDigest().IsZero()) {
@@ -536,10 +528,11 @@ func TestRecheck(t *testing.T) {
 		{"deadline assignment deleted by the student", outDeadline, studentDeleted, ReasonAssignmentDeleted},
 		{"deleted by the student wins over a changed recipient", outEmail, func(f *Facts) {
 			studentDeleted(f)
-			f.Recipient = Recipient{}
+			f.Teachers = Teachers{}
 		}, ReasonAssignmentDeleted},
-		{"recipient changed", outEmail, func(f *Facts) { f.Recipient = mustRecipient(t, "other@school.example") }, ReasonRecipientChanged},
-		{"recipient removed", outEmail, func(f *Facts) { f.Recipient = Recipient{} }, ReasonRecipientChanged},
+		{"recipient changed", outEmail, func(f *Facts) { f.Teachers.Lecture.Email = "other@school.example" }, ReasonRecipientChanged},
+		{"recipient removed", outEmail, func(f *Facts) { f.Teachers.Lecture = Teacher{} }, ReasonRecipientChanged},
+		{"subject gone", outEmail, func(f *Facts) { f.Teachers.Subject = "" }, ReasonRecipientChanged},
 		{"attachment removed", outEmail, func(f *Facts) { f.Attachment = Digest{} }, ReasonNoArtifact},
 		{"attachment content changed", outEmail, func(f *Facts) { f.Attachment = mustDigest(t, shaB, 11) }, ReasonArtifactChanged},
 		{"attachment size changed", outEmail, func(f *Facts) { f.Attachment = mustDigest(t, shaA, 12) }, ReasonArtifactChanged},

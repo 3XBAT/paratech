@@ -41,8 +41,10 @@ func (f *confirmProposals) ProposeSendWork(_ context.Context, w shared.WorkID) (
 	return homeworkflow.ProposalView{}, fmt.Errorf("work %s: %w", w, shared.ErrNotFound)
 }
 
-// ConfirmSendWork of the fake acts like ConfirmSend on the send of a work.
-func (f *confirmProposals) ConfirmSendWork(_ context.Context, id proposal.ID, subject string, format proposal.Format) (homeworkflow.ProposalView, error) {
+// ConfirmSendWorkTo of the fake acts like ConfirmSendTo on the send of a work.
+func (f *confirmProposals) ConfirmSendWorkTo(_ context.Context, id proposal.ID, subject string, format proposal.Format,
+	chosen homeworkflow.ChosenTeacher) (homeworkflow.ProposalView, error) {
+	f.chosen = chosen
 	v := f.views[id]
 	switch {
 	case f.err != nil:
@@ -80,7 +82,7 @@ func TestAgentProposeSendWork(t *testing.T) {
 		t.Fatalf("ProposeSendWork = %+v, %v; sends %d\nwant %+v", got, err, p.sends, want)
 	}
 	for click := range 2 {
-		done, err := s.Confirm(t.Context(), "proposal", "p-work", workSubject, "docx")
+		done, err := s.Confirm(t.Context(), "proposal", "p-work", workSubject, "docx", "", "")
 		if err != nil || done.State != "done" {
 			t.Fatalf("click %d = %+v, %v", click+1, done, err)
 		}
@@ -123,7 +125,7 @@ func TestAgentConfirmSendWorkErrors(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup(p)
 			}
-			if _, err := newConfirmService(p).Confirm(t.Context(), "proposal", "p-work", tt.subj, tt.format); !errors.Is(err, tt.want) {
+			if _, err := newConfirmService(p).Confirm(t.Context(), "proposal", "p-work", tt.subj, tt.format, "", ""); !errors.Is(err, tt.want) {
 				t.Fatalf("err = %v, want %v", err, tt.want)
 			}
 			if p.sends != 0 {

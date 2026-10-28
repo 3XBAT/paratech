@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -56,7 +57,7 @@ func (k Kind) Valid() bool { return slices.Contains(AllKinds(), k) }
 // fromModel reports whether a model answer may propose k.
 func (k Kind) fromModel() bool { return slices.Contains(Kinds(), k) }
 
-// NeedsRecipient reports whether the kind is checked against the configured recipient.
+// NeedsRecipient reports whether the kind is sent to a teacher of the subject (ChooseRecipient).
 func (k Kind) NeedsRecipient() bool { return k == KindSendHomework || k == KindSendWork }
 
 // NeedsAttachment reports whether the kind is checked against the content of the file it attaches: the export file of
@@ -91,9 +92,21 @@ type RejectReason string
 // Reject reasons.
 const (
 	ReasonUnknownAssignment RejectReason = "unknown_assignment"        // the referenced assignment does not exist locally
-	ReasonNoRecipient       RejectReason = "no_recipient_configured"   // no homework recipient in the local settings
 	ReasonNoArtifact        RejectReason = "homework_artifact_missing" // nothing was exported for the assignment (yet)
 	ReasonDueOutOfRange     RejectReason = "due_out_of_range"          // the deadline is in the past or too far ahead
+
+	// ReasonNoRecipient: no homework recipient in the settings. Proposals before TASK-237 only: a send now goes to the
+	// teacher of its subject (ADR-0030), the settings address is never used for it.
+	ReasonNoRecipient RejectReason = "no_recipient_configured"
+
+	// Send, rejected (ChooseRecipient, ADR-0030 B-1): the assignment (or the work) has no library subject, or the
+	// teacher of the role of its lesson kind has no address.
+	ReasonNoSubject      RejectReason = "no_subject"
+	ReasonNoTeacherEmail RejectReason = "no_teacher_email"
+
+	// ReasonChooseTeacher: the student chooses the teacher on the card (B-5). Never stored: such a send is VALIDATED
+	// without a recipient until «Да» carries the chosen role (ConfirmChoice).
+	ReasonChooseTeacher RejectReason = "choose_teacher"
 
 	// Stale only: the trusted state the user confirmed changed before execution.
 	ReasonRecipientChanged RejectReason = "recipient_changed"         // the configured recipient is not the confirmed one
@@ -114,7 +127,7 @@ func (r RejectReason) validFor(s Status) bool {
 	switch s {
 	case StatusRejected:
 		return r == ReasonUnknownAssignment || r == ReasonNoRecipient || r == ReasonNoArtifact || r == ReasonDueOutOfRange ||
-			r == ReasonFileMoved
+			r == ReasonFileMoved || r == ReasonNoSubject || r == ReasonNoTeacherEmail
 	case StatusStale:
 		return r == ReasonUnknownAssignment || r == ReasonRecipientChanged || r == ReasonNoArtifact ||
 			r == ReasonArtifactChanged || r == ReasonSubjectChanged || r == ReasonFormatChanged || r == ReasonFileMoved ||
@@ -123,7 +136,8 @@ func (r RejectReason) validFor(s Status) bool {
 	return false
 }
 
-// Recipient is an email address taken from trusted local settings, never from model output.
+// Recipient is an email address taken from trusted local data (the teachers of the subject in the library), never
+// from model output.
 type Recipient struct {
 	address string
 }
@@ -192,13 +206,19 @@ func (d Digest) Size() int64 { return d.size }
 func (d Digest) IsZero() bool { return d == Digest{} }
 
 // Facts is the trusted local state a proposal is validated and, before execution, re-checked against. The use case
-// reads it from local ports (the assignment repository, the settings, the Storage Manager), only what the kind needs
+// reads it from local ports (the assignment repository, the library, the Storage Manager), only what the kind needs
 // (Kind.NeedsRecipient, Kind.NeedsAttachment, Kind.NeedsAssignmentTitle); nothing in it comes from the model.
 type Facts struct {
-	AssignmentExists bool      // the referenced assignment is in the local database
-	AssignmentTitle  string    // its stored title, when it exists
-	Recipient        Recipient // the configured homework recipient; zero if none
-	Attachment       Digest    // the content of ExportRef of the assignment; zero if the file does not exist
+	AssignmentExists bool   // the referenced assignment is in the local database
+	AssignmentTitle  string // its stored title, when it exists
+	Attachment       Digest // the content of ExportRef of the assignment; zero if the file does not exist
+
+	// Send only (Kind.NeedsRecipient): the teachers of the library subject (of the work, else of the assignment) and
+	// the kind of the assignment's lesson; the aggregate picks the recipient from them (ChooseRecipient). ChosenRole is
+	// the role the student clicked on the card, carried back by the confirmation like ShownSubject; "" when none was asked.
+	Teachers   Teachers
+	Lesson     values.LessonKind
+	ChosenRole TeacherRole
 
 	// AssignmentDeleted: the student deleted it (ADR-0029); AssignmentExists is false then. Validate treats it as
 	// unknown, Recheck makes the proposal STALE with ReasonAssignmentDeleted.

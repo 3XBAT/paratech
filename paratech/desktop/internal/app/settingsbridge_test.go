@@ -57,14 +57,11 @@ func TestBridgesMapTheSettings(t *testing.T) {
 		if url, err := (hubSettings{src}).HubURL(ctx); err != nil || url != "https://hub.example.com" {
 			t.Fatalf("HubURL = %q, %v", url, err)
 		}
-		if r, err := (recipientSettings{src}).HomeworkRecipient(ctx); err != nil || r.Address() != "teacher@school.example" {
-			t.Fatalf("HomeworkRecipient = %q, %v", r.Address(), err)
-		}
 	}
 }
 
 // A delivery keeps the recipient frozen at confirmation: clearing the recipient setting leaves the SMTP account, so a
-// pending send still goes out; the proposals see no recipient.
+// pending send still goes out.
 func TestClearedRecipientKeepsTheMailAccount(t *testing.T) {
 	ctx := context.Background()
 	s := mailConfigured(t, settings.MailSecurityStartTLS)
@@ -77,9 +74,6 @@ func TestClearedRecipientKeepsTheMailAccount(t *testing.T) {
 	if err != nil || acc != want {
 		t.Fatalf("MailAccount = %+v, %v; want %+v", acc, err, want)
 	}
-	if r, err := (recipientSettings{src}).HomeworkRecipient(ctx); err != nil || !r.IsZero() {
-		t.Fatalf("HomeworkRecipient = %q, %v; want none", r.Address(), err)
-	}
 }
 
 // Not configured is the zero value for every bridge; a failed read is an error.
@@ -91,9 +85,6 @@ func TestBridgesWithoutSettings(t *testing.T) {
 	}
 	if url, err := (hubSettings{fresh}).HubURL(ctx); err != nil || url != "" {
 		t.Fatalf("HubURL = %q, %v", url, err)
-	}
-	if r, err := (recipientSettings{fresh}).HomeworkRecipient(ctx); err != nil || !r.IsZero() {
-		t.Fatalf("HomeworkRecipient = %q, %v", r.Address(), err)
 	}
 
 	// A login that is not an address gives no sender: mail is not configured.
@@ -112,9 +103,6 @@ func TestBridgesWithoutSettings(t *testing.T) {
 	}
 	if _, err := (hubSettings{broken}).HubURL(ctx); !errors.Is(err, boom) {
 		t.Fatalf("HubURL = %v", err)
-	}
-	if _, err := (recipientSettings{broken}).HomeworkRecipient(ctx); !errors.Is(err, boom) {
-		t.Fatalf("HomeworkRecipient = %v", err)
 	}
 }
 

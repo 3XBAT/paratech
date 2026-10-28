@@ -146,7 +146,8 @@ type HomeworkProposals interface {
 	EditAssignment(ctx context.Context, e homeworkflow.AssignmentEdit) (homeworkflow.AssignmentView, error)
 	ProposeSend(ctx context.Context, a shared.AssignmentID, format proposal.Format) (homeworkflow.ProposalView, error)
 	Get(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
-	ConfirmSend(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format) (homeworkflow.ProposalView, error)
+	ConfirmSendTo(ctx context.Context, id proposal.ID, shownSubject string, shownFormat proposal.Format,
+		chosen homeworkflow.ChosenTeacher) (homeworkflow.ProposalView, error)
 	Decline(ctx context.Context, id proposal.ID) (homeworkflow.ProposalView, error)
 }
 
@@ -306,18 +307,24 @@ type DocxSaveResult struct {
 }
 
 // SendPreparation is the content of the confirmation dialog. Status "ready": the dialog shows recipient, subject and
-// attachment and the user may confirm ProposalID; "rejected": it shows Message (Reason is the core's code).
-// AttachmentFormat is the format the preparation is for ("txt" or "docx"); ConfirmSend sends it back.
+// attachment and the user may confirm ProposalID (with Reason "choose_teacher" only after a click on one of Options);
+// "rejected": it shows Message (Reason is the core's code). AttachmentFormat is the format the preparation is for
+// ("txt" or "docx"); ConfirmSend sends it back with the clicked option. The recipient fields are described in
+// homeworkrecipient.go.
 type SendPreparation struct {
-	ProposalID       string `json:"proposalId"`
-	Status           string `json:"status"`
-	Reason           string `json:"reason"`
-	Message          string `json:"message"`
-	Recipient        string `json:"recipient"`
-	Subject          string `json:"subject"`
-	AttachmentName   string `json:"attachmentName"`
-	AttachmentSize   int64  `json:"attachmentSize"`
-	AttachmentFormat string `json:"attachmentFormat"`
+	ProposalID       string          `json:"proposalId"`
+	Status           string          `json:"status"`
+	Reason           string          `json:"reason"`
+	Message          string          `json:"message"`
+	Recipient        string          `json:"recipient"`
+	RecipientName    string          `json:"recipientName"`
+	Role             string          `json:"role"`
+	SubjectID        string          `json:"subjectId"`
+	Options          []TeacherOption `json:"options"`
+	Subject          string          `json:"subject"`
+	AttachmentName   string          `json:"attachmentName"`
+	AttachmentSize   int64           `json:"attachmentSize"`
+	AttachmentFormat string          `json:"attachmentFormat"`
 }
 
 // DeliveryItem is the JSON form of a delivery (AC-15). Status is the core's code (PENDING, SENDING, SENT, FAILED,
@@ -648,7 +655,10 @@ func (s *HomeworkService) PrepareSend(ctx context.Context, id, format string) (S
 	if err != nil {
 		return SendPreparation{}, s.fail(opPrepareSend, err, ErrHomeworkNotFound)
 	}
-	out := SendPreparation{ProposalID: string(v.ID), Reason: string(v.Reason), AttachmentFormat: format}
+	out := SendPreparation{
+		ProposalID: string(v.ID), Reason: string(v.Reason), AttachmentFormat: format, RecipientName: v.RecipientName,
+		Role: string(v.RecipientRole), SubjectID: string(v.SubjectID), Options: teacherOptions(v),
+	}
 	if v.Status != proposal.StatusValidated {
 		out.Status, out.Message = sendRejected, msgRejectedDefault
 		if msg, ok := rejectMessages[v.Reason]; ok {
@@ -657,10 +667,16 @@ func (s *HomeworkService) PrepareSend(ctx context.Context, id, format string) (S
 		if v.Reason == proposal.ReasonNoArtifact && f == proposal.FormatDocx {
 			out.Message = msgNoDocx
 		}
+		if v.Reason == proposal.ReasonNoSubject || v.Reason == proposal.ReasonNoTeacherEmail {
+			out.Message, _ = recipientMessage(v.Reason, v.RecipientRole, s.subjectName(ctx, aid))
+		}
 		s.log.Info(opPrepareSend, "result", v.Status, "reason", v.Reason)
 		return out, nil
 	}
 	out.Status = sendReady
+	if v.RecipientReason == proposal.ReasonChooseTeacher {
+		out.Reason = string(v.RecipientReason)
+	}
 	out.Recipient, out.Subject = v.Recipient, v.Subject
 	if out.Subject == "" {
 		out.Subject = s.deliveries.Subject()
@@ -674,7 +690,11 @@ func (s *HomeworkService) PrepareSend(ctx context.Context, id, format string) (S
 // email. subject and format are the ones the dialog showed (SendPreparation.Subject and AttachmentFormat): if the
 // core's subject changed meanwhile or the format is not the prepared one, nothing is sent (ErrSendStale). Repeating it
 // with the same proposal after a failure creates no second email (ErrSendIncomplete says so).
-func (s *HomeworkService) ConfirmSend(ctx context.Context, proposalID, subject, format string) error {
+//
+// role and address are the teacher the student clicked in «Кому отправить?» (SendPreparation.Reason "choose_teacher")
+// and the address that option showed; "" and "" when the dialog asked nothing. Without a choice such a send is
+// refused with ErrSendChooseTeacher; another current address of the role makes it ErrSendStale.
+func (s *HomeworkService) ConfirmSend(ctx context.Context, proposalID, subject, format, role, address string) error {
 	pid := proposal.ID(proposalID)
 	if pid.Validate() != nil {
 		return ErrHomeworkInvalidID
@@ -683,10 +703,16 @@ func (s *HomeworkService) ConfirmSend(ctx context.Context, proposalID, subject, 
 	if err != nil {
 		return err
 	}
-	_, err = s.proposals.ConfirmSend(ctx, pid, subject, f)
+	_, err = s.proposals.ConfirmSendTo(ctx, pid, subject, f, chosenTeacher(role, address))
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, proposal.ErrChooseTeacher):
+		s.log.Info(opConfirmSend, "result", "choose_teacher")
+		return ErrSendChooseTeacher
+	case errors.Is(err, proposal.ErrInvalidRecipient):
+		s.log.Warn(opConfirmSend, "result", "invalid chosen address")
+		return ErrSendStale
 	case errors.Is(err, homeworkflow.ErrNotASend):
 		s.log.Warn(opConfirmSend, "result", err)
 		return ErrSendNotFound
@@ -705,6 +731,16 @@ func (s *HomeworkService) ConfirmSend(ctx context.Context, proposalID, subject, 
 	}
 	s.log.Error(opConfirmSend, "err", err)
 	return ErrSendIncomplete
+}
+
+// subjectName is the subject the assignment shows, for the text of a send refused for its teacher; a failed read only
+// leaves the name out.
+func (s *HomeworkService) subjectName(ctx context.Context, id shared.AssignmentID) string {
+	a, err := s.proposals.Assignment(ctx, id)
+	if err != nil {
+		return ""
+	}
+	return a.Subject
 }
 
 // staleSend explains a send that went STALE at the confirmation: its own text when the assignment was deleted
