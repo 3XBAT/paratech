@@ -35,7 +35,7 @@ func TestRestoreAssignmentExpired(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if want := `{"problem":"` + tc.want + `","assignment":null}`; string(raw) != want {
+			if want := `{"problem":"` + tc.want + `","assignment":null,"stopped":false}`; string(raw) != want {
 				t.Fatalf("JSON = %s, want %s", raw, want)
 			}
 		})

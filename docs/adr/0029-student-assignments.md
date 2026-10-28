@@ -203,3 +203,9 @@ Source: owner answers of 2026-10-27 (6.3 changed, C-4). Tasks TASK-304, TASK-305
 
 ### Open (owner)
 - C-5. Извлечение заданий из записи и материала: если в лекции назван только день («к пятнице»), сейчас срок 23:59. Тоже ставить 20:00? (а) да, везде одинаково — 20:00 (рекомендуется); (б) нет, у извлечённых оставить 23:59. Уже извлечённые задания не меняются в обоих вариантах. До ответа TASK-305 не запускается.
+
+
+## Addendum 4 (2026-10-28): deleting a busy assignment (TASK-338)
+Supersedes the busy rule of the first addendum. Delete is always allowed except while a delivery of the assignment is PENDING (a scheduled one too), SENDING or UNKNOWN (hard rule 7; PENDING stays because a delivery has no cancel).
+A work in triage/writing and an active homework_draft / work_writing job no longer refuse: after the soft delete commits, the jobs naming the assignment are cancelled (idempotent, outside the transaction; a failed cancel is logged and never undoes the delete). The handlers of those jobs fail closed for a deleted assignment (no model call, nothing stored).
+Restore brings the assignment back only; the work stays stopped and the student continues it by hand. A triage call already in flight is not a job and may still save its answer. The delete card says upfront that the work will be stopped.

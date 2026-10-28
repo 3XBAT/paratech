@@ -92,9 +92,13 @@ func agentRequestOf(req agent.StepRequest) (*hubv1.AgentStepRequest, error) {
 	if !ok {
 		return nil, permanent(opAgentStep, ErrInvalidRequest)
 	}
+	var err error
 	msg.Scope = &hubv1.AgentScope{
 		SubjectId: req.Scope.Subject().ID(), Screen: screen, LessonId: req.Scope.Lesson().ID(),
 		AssignmentId: req.Scope.Assignment().ID(),
+	}
+	if msg.Scope.Mentions, err = mentionsOf(req.Mentions); err != nil {
+		return nil, err
 	}
 	for _, h := range req.History {
 		t, err := turnOf(h)
@@ -116,11 +120,45 @@ var screens = map[agent.Screen]hubv1.AgentScreen{
 	agent.ScreenSettings:    hubv1.AgentScreen_AGENT_SCREEN_SETTINGS,
 }
 
+var mentionKinds = map[agent.IDKind]hubv1.AgentMentionKind{
+	agent.KindSubject:    hubv1.AgentMentionKind_AGENT_MENTION_KIND_SUBJECT,
+	agent.KindLesson:     hubv1.AgentMentionKind_AGENT_MENTION_KIND_LESSON,
+	agent.KindMaterial:   hubv1.AgentMentionKind_AGENT_MENTION_KIND_MATERIAL,
+	agent.KindAssignment: hubv1.AgentMentionKind_AGENT_MENTION_KIND_ASSIGNMENT,
+}
+
+// mentionsOf copies kind, ID and the current flag of each mention, never more (the label stays local). An unknown
+// kind, a repeated object or too many mentions is never sent: the kind is not guessed.
+func mentionsOf(ms []agent.StepMention) ([]*hubv1.AgentMention, error) {
+	if len(ms) > agent.MaxStepMentions {
+		return nil, permanent(opAgentStep, ErrInvalidRequest)
+	}
+	var out []*hubv1.AgentMention
+	current, seen := 0, agent.RefSet{}
+	for _, m := range ms {
+		kind, ok := mentionKinds[m.Ref.Kind()]
+		if !ok || m.Ref.ID() == "" || seen.Has(m.Ref) {
+			return nil, permanent(opAgentStep, ErrInvalidRequest)
+		}
+		seen.Add(m.Ref)
+		if m.Current {
+			current++
+		}
+		out = append(out, &hubv1.AgentMention{Kind: kind, Id: m.Ref.ID(), Current: m.Current})
+	}
+	if current > agent.MaxMentions {
+		return nil, permanent(opAgentStep, ErrInvalidRequest)
+	}
+	return out, nil
+}
+
 func turnOf(h agent.HistoryTurn) (*hubv1.AgentTurn, error) {
 	if h.Validate() != nil {
 		return nil, permanent(opAgentStep, ErrInvalidRequest)
 	}
 	switch {
+	case h.Summary != "":
+		return &hubv1.AgentTurn{Turn: &hubv1.AgentTurn_HistorySummary{HistorySummary: h.Summary}}, nil
 	case h.StudentText != "":
 		return &hubv1.AgentTurn{Turn: &hubv1.AgentTurn_StudentText{StudentText: h.StudentText}}, nil
 	case h.AgentReply != "":
