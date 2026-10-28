@@ -129,8 +129,15 @@ Source: owner answers of 2026-10-27 (З1–З3, 6.3). Tasks TASK-274…281 (C-1:
   → `ErrRestoreExpired`; the binding answers `expired`.
 - `homeworkflow.PurgeDeleted(ctx)` removes each assignment deleted longer than the window, **hard**: proposals of it,
   deliveries (only final ones can exist: delete is refused while one is unresolved), drafts with their versions, works,
-  then the assignment row. Each step is its own transaction and idempotent; the assignment row goes last, so a crash
-  leaves a still-deleted (invisible) assignment and the next run finishes. No ARCH-23 exception is needed. Files of
+  then the assignment row. The steps are idempotent and the assignment row goes last, so a crash leaves a
+  still-deleted (invisible) assignment and the next run finishes. **Amended in TASK-274 (review):** the steps of one
+  assignment run in ONE write transaction (`BEGIN IMMEDIATE`), every delete repeats the "deleted before the cutoff"
+  guard, and the files are removed after the rows and before the commit. Separate transactions let a «Вернуть» that
+  wins a clock race lose the children of the restored assignment; one transaction closes that race. This is a third
+  ARCH-23 exception in the sense of ADR-0004(a): delete-only, one assignment at a time, nothing is created or updated
+  (to be listed in `docs/architecture.md` ARCH-23 by the architect/supervisor). A failed commit after the file removal
+  leaves a due, invisible assignment with some files missing; the next run finishes it (a file delete of a missing
+  file succeeds). The write lock is held for one assignment (bounded by 1000 deliveries). Files of
   drafts/works/exports go through the existing storage ports; a kind without such a port is reported, not deleted with
   `os` (hard rule 5).
 - Kept: agent journal lines (IDs only; an Undo naming a purged ID is refused), a still waiting

@@ -254,14 +254,34 @@ func (a *Assignment) Delete(now time.Time) error {
 	return nil
 }
 
+// RestoreWindow is how long after Delete «Вернуть» works (owner 2026-10-27, ADR-0029 addendum 2); after it the
+// assignment is purged completely.
+const RestoreWindow = 72 * time.Hour
+
 // Restore is «Вернуть», the undo of Delete (not the package-level Restore, which rebuilds a stored State): the deleted
-// assignment shows again as it was. One that is not deleted returns ErrNotDeleted.
+// assignment shows again as it was. One that is not deleted returns ErrNotDeleted; after the RestoreWindow (now later
+// than the delete plus the window; exactly at its end it still works) ErrRestoreExpired.
 func (a *Assignment) Restore(now time.Time) error {
-	if !a.Deleted() {
+	switch {
+	case !a.Deleted():
 		return ErrNotDeleted
+	case a.windowEnded(now):
+		return ErrRestoreExpired
 	}
 	a.deletedAt, a.updatedAt = time.Time{}, now
 	return nil
+}
+
+// PurgeDue reports whether the assignment is deleted and its RestoreWindow ended at now, so it may be purged: exactly
+// when Restore returns ErrRestoreExpired.
+func (a *Assignment) PurgeDue(now time.Time) bool { return a.Deleted() && a.windowEnded(now) }
+
+// PurgeCutoff is the bound of a store query for the purge at now: an assignment deleted before it may be due
+// (PurgeDue decides); one deleted at it or later is not.
+func PurgeCutoff(now time.Time) time.Time { return now.Add(-RestoreWindow) }
+
+func (a *Assignment) windowEnded(now time.Time) bool {
+	return now.After(a.deletedAt.Add(RestoreWindow))
 }
 
 // NotDeleted returns ErrDeleted for a deleted assignment, which no change but Restore applies to.
