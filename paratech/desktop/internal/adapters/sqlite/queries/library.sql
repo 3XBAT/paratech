@@ -7,24 +7,24 @@ SELECT * FROM subjects ORDER BY name_key, id;
 -- name: GetSubject :one
 SELECT * FROM subjects WHERE id = sqlc.arg(id);
 
--- A never-stored subject (version 0) is inserted with version 1.
+-- A never-stored subject (version 0) is inserted with version 1. subjects.teacher_* are legacy since migration 0044
+-- (always '', never read): the teachers are rows of subject_teachers.
 -- name: InsertSubject :exec
-INSERT INTO subjects (id, name, name_key, semester, teacher_name, teacher_email, version, created_at, updated_at)
-VALUES (sqlc.arg(id), sqlc.arg(name), sqlc.arg(name_key), sqlc.arg(semester), sqlc.arg(teacher_name),
-        sqlc.arg(teacher_email), 1, sqlc.arg(created_at), sqlc.arg(updated_at));
+INSERT INTO subjects (id, name, name_key, semester, version, created_at, updated_at)
+VALUES (sqlc.arg(id), sqlc.arg(name), sqlc.arg(name_key), sqlc.arg(semester), 1, sqlc.arg(created_at),
+        sqlc.arg(updated_at));
 
 -- name: UpdateSubject :execrows
 UPDATE subjects
-SET name          = sqlc.arg(name),
-    name_key      = sqlc.arg(name_key),
-    semester      = sqlc.arg(semester),
-    teacher_name  = sqlc.arg(teacher_name),
-    teacher_email = sqlc.arg(teacher_email),
-    version       = version + 1,
-    updated_at    = sqlc.arg(updated_at)
+SET name       = sqlc.arg(name),
+    name_key   = sqlc.arg(name_key),
+    semester   = sqlc.arg(semester),
+    version    = version + 1,
+    updated_at = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 
--- Removes the subject with its aliases and folders (CASCADE); a material still filed under it fails the RESTRICT.
+-- Removes the subject with its aliases, folders and teachers (CASCADE); a material still filed under it fails the
+-- RESTRICT.
 -- name: DeleteSubject :execrows
 DELETE FROM subjects WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 
@@ -56,6 +56,20 @@ VALUES (sqlc.arg(id), sqlc.arg(subject_id), sqlc.arg(name), sqlc.arg(name_key), 
 -- Folders are never renamed, so a save only inserts and deletes them; a folder that holds a file fails the RESTRICT.
 -- name: DeleteSubjectFolder :exec
 DELETE FROM subject_folders WHERE subject_id = sqlc.arg(subject_id) AND id = sqlc.arg(id);
+
+-- The teachers of a subject (TASK-285): rewritten with the subject on every save, under its version check.
+-- name: ListAllSubjectTeachers :many
+SELECT * FROM subject_teachers ORDER BY subject_id, role;
+
+-- name: ListSubjectTeachers :many
+SELECT * FROM subject_teachers WHERE subject_id = sqlc.arg(subject_id) ORDER BY role;
+
+-- name: DeleteSubjectTeachers :exec
+DELETE FROM subject_teachers WHERE subject_id = sqlc.arg(subject_id);
+
+-- name: InsertSubjectTeacher :exec
+INSERT INTO subject_teachers (subject_id, role, name, email)
+VALUES (sqlc.arg(subject_id), sqlc.arg(role), sqlc.arg(name), sqlc.arg(email));
 
 -- name: GetMaterial :one
 SELECT * FROM materials WHERE id = sqlc.arg(id);

@@ -53,11 +53,13 @@ type Querier interface {
 	DeleteRecording(ctx context.Context, arg DeleteRecordingParams) (int64, error)
 	// The settings default references the model ON DELETE RESTRICT: the delete then fails with a foreign key error.
 	DeleteSttModel(ctx context.Context, id string) (int64, error)
-	// Removes the subject with its aliases and folders (CASCADE); a material still filed under it fails the RESTRICT.
+	// Removes the subject with its aliases, folders and teachers (CASCADE); a material still filed under it fails the
+	// RESTRICT.
 	DeleteSubject(ctx context.Context, arg DeleteSubjectParams) (int64, error)
 	DeleteSubjectAliases(ctx context.Context, subjectID string) error
 	// Folders are never renamed, so a save only inserts and deletes them; a folder that holds a file fails the RESTRICT.
 	DeleteSubjectFolder(ctx context.Context, arg DeleteSubjectFolderParams) error
+	DeleteSubjectTeachers(ctx context.Context, subjectID string) error
 	DeleteSummariesOfRecording(ctx context.Context, recordingID string) error
 	DeleteTranscriptParts(ctx context.Context, recordingID string) error
 	DeleteTranscriptsByRecording(ctx context.Context, recordingID string) error
@@ -193,11 +195,13 @@ type Querier interface {
 	// A never-stored model (version 0) is inserted with version 1. A second (name, model_version) violates the UNIQUE
 	// rule and surfaces as shared.ErrDuplicate.
 	InsertSttModel(ctx context.Context, arg InsertSttModelParams) error
-	// A never-stored subject (version 0) is inserted with version 1.
+	// A never-stored subject (version 0) is inserted with version 1. subjects.teacher_* are legacy since migration 0044
+	// (always '', never read): the teachers are rows of subject_teachers.
 	InsertSubject(ctx context.Context, arg InsertSubjectParams) error
 	InsertSubjectAlias(ctx context.Context, arg InsertSubjectAliasParams) error
 	// A folder goes after the others: its position is one more than the largest of its subject.
 	InsertSubjectFolder(ctx context.Context, arg InsertSubjectFolderParams) error
+	InsertSubjectTeacher(ctx context.Context, arg InsertSubjectTeacherParams) error
 	// A never-stored summary (version 0) is inserted with version 1.
 	InsertSummary(ctx context.Context, arg InsertSummaryParams) error
 	// A never-stored set (version 0) is inserted with version 1.
@@ -237,6 +241,8 @@ type Querier interface {
 	ListAgentThreadIDs(ctx context.Context) ([]string, error)
 	ListAllSubjectAliases(ctx context.Context) ([]SubjectAlias, error)
 	ListAllSubjectFolders(ctx context.Context) ([]SubjectFolder, error)
+	// The teachers of a subject (TASK-285): rewritten with the subject on every save, under its version check.
+	ListAllSubjectTeachers(ctx context.Context) ([]SubjectTeacher, error)
 	ListAssignmentsByMaterial(ctx context.Context, materialID sql.NullString) ([]Assignment, error)
 	ListAssignmentsByTranscript(ctx context.Context, transcriptID sql.NullString) ([]Assignment, error)
 	// The deadline events left to remove, oldest first (the calendar sync).
@@ -313,6 +319,7 @@ type Querier interface {
 	ListSttSpeeds(ctx context.Context) ([]ListSttSpeedsRow, error)
 	ListSubjectAliases(ctx context.Context, subjectID string) ([]SubjectAlias, error)
 	ListSubjectFolders(ctx context.Context, subjectID string) ([]SubjectFolder, error)
+	ListSubjectTeachers(ctx context.Context, subjectID string) ([]SubjectTeacher, error)
 	// The library (TASK-121, ADR-0024): subjects with their aliases and folders, materials with their lesson links. Both
 	// aggregates follow the optimistic-concurrency protocol of ADR-0004(d); child rows carry no version of their own.
 	ListSubjects(ctx context.Context) ([]Subject, error)

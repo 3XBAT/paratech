@@ -5022,7 +5022,7 @@
             "dependencies": [
                 "TASK-233"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-235",
@@ -6137,7 +6137,7 @@
                 "TASK-235",
                 "TASK-236"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-286",
@@ -6331,7 +6331,7 @@
                 "GOOS=windows go vet ./desktop/..., GOOS=linux go build ./desktop/..., golangci-lint run ./desktop/... и тест архитектуры"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-294",

@@ -2,6 +2,8 @@ package subject
 
 import (
 	"fmt"
+	"io"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -18,7 +20,8 @@ const (
 	MaxOwnFolders = 50
 )
 
-// Subject is a subject of the library. Fields change only through the methods below.
+// Subject is a subject of the library. Fields change only through the methods below. It prints (fmt, slog) only its
+// id and name: the teachers are personal data.
 type Subject struct {
 	version int64 // persisted version for optimistic concurrency; 0 = never stored (ADR-0004)
 	id      shared.SubjectID
@@ -27,7 +30,7 @@ type Subject struct {
 	aliases  []Name
 	semester values.Semester
 	folders  []Folder // the system folders first, in the order of Systems, then own folders in the order added
-	teacher  Teacher  // zero while none is set
+	teachers Teachers
 
 	createdAt time.Time
 	updatedAt time.Time
@@ -71,11 +74,15 @@ type State struct {
 	Aliases  []string
 	Semester values.Semester
 	Folders  []FolderState
-	// TeacherName and TeacherEmail are both "" while no teacher is set.
-	TeacherName  string
-	TeacherEmail string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// Teachers holds one entry per role that has a teacher, in the order of TeacherRoles.
+	Teachers  []TeacherState
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// LogValue is the id and name only: a JSON log would marshal the teachers' fields.
+func (st State) LogValue() slog.Value {
+	return slog.GroupValue(slog.String("id", string(st.ID)), slog.String("name", st.Name))
 }
 
 // Restore rebuilds a stored subject without side effects; it only checks that the state is consistent.
@@ -104,12 +111,16 @@ func Restore(st State) (*Subject, error) {
 		}
 		s.folders = append(s.folders, Folder{id: f.ID, name: n, system: f.System})
 	}
-	if st.TeacherName != "" || st.TeacherEmail != "" {
-		t, err := NewTeacher(st.TeacherName, st.TeacherEmail)
-		if err != nil || t.name != st.TeacherName || t.email != st.TeacherEmail {
+	for _, ts := range st.Teachers {
+		i, ok := ts.Role.index()
+		if !ok || !s.teachers.byRole[i].IsZero() {
+			return nil, fmt.Errorf("%w: stored teacher role", ErrInvalidSubject)
+		}
+		t, err := NewTeacher(ts.Name, ts.Email)
+		if err != nil || t.name != ts.Name || t.email != ts.Email {
 			return nil, fmt.Errorf("%w: stored teacher", ErrInvalidSubject)
 		}
-		s.teacher = t
+		s.teachers.byRole[i] = t
 	}
 	if err := s.validate(); err != nil {
 		return nil, err
@@ -184,29 +195,39 @@ func (s *Subject) AddAlias(alias string, now time.Time) (changed bool, err error
 	return true, nil
 }
 
-// SetTeacher sets the teacher of the subject (ADR-0030), replacing the one set before; the same name and address
-// again change nothing (changed is false). Errors wrap ErrInvalidTeacherName or ErrInvalidTeacherEmail.
-func (s *Subject) SetTeacher(name, email string, now time.Time) (changed bool, err error) {
+// SetTeacher sets the teacher of role (ADR-0030), replacing the one set before; the same name and address again
+// change nothing (changed is false). Errors wrap ErrInvalidTeacherRole, ErrInvalidTeacherName or
+// ErrInvalidTeacherEmail.
+func (s *Subject) SetTeacher(role TeacherRole, name, email string, now time.Time) (changed bool, err error) {
+	i, ok := role.index()
+	if !ok {
+		return false, ErrInvalidTeacherRole
+	}
 	t, err := NewTeacher(name, email)
 	if err != nil {
 		return false, err
 	}
-	if t == s.teacher {
+	if t == s.teachers.byRole[i] {
 		return false, nil
 	}
-	s.teacher = t
+	s.teachers.byRole[i] = t
 	s.updatedAt = now
 	return true, nil
 }
 
-// ClearTeacher removes the teacher of the subject; a subject without one changes nothing (changed is false).
-func (s *Subject) ClearTeacher(now time.Time) (changed bool) {
-	if s.teacher.IsZero() {
-		return false
+// ClearTeacher removes the teacher of role; a role without one changes nothing (changed is false). Error:
+// ErrInvalidTeacherRole.
+func (s *Subject) ClearTeacher(role TeacherRole, now time.Time) (changed bool, err error) {
+	i, ok := role.index()
+	if !ok {
+		return false, ErrInvalidTeacherRole
 	}
-	s.teacher = Teacher{}
+	if s.teachers.byRole[i].IsZero() {
+		return false, nil
+	}
+	s.teachers.byRole[i] = Teacher{}
 	s.updatedAt = now
-	return true
+	return true, nil
 }
 
 // HasKey reports whether key (values.Key) is the key of the name or of an alias.
@@ -302,8 +323,30 @@ func (s *Subject) Semester() values.Semester { return s.semester }
 // Folders returns a copy of the folders: the system folders first, then own folders in the order added.
 func (s *Subject) Folders() []Folder { return slices.Clone(s.folders) }
 
-// Teacher returns the teacher of the subject; the zero Teacher while none is set.
-func (s *Subject) Teacher() Teacher { return s.teacher }
+// Teacher returns the teacher of role; the zero Teacher while none is set or for an unknown role.
+func (s *Subject) Teacher(role TeacherRole) Teacher { return s.teachers.Of(role) }
+
+// Teachers returns the teachers of every role (a copy).
+func (s *Subject) Teachers() Teachers { return s.teachers }
+
+// String names the subject by id and name only, never its teachers.
+func (s *Subject) String() string {
+	if s == nil {
+		return "<nil subject>"
+	}
+	return fmt.Sprintf("subject %s %q", s.id, s.name.text)
+}
+
+// Format prints String for every verb: %+v and %#v would print the teachers in the unexported fields.
+func (s *Subject) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, s.String()) }
+
+// LogValue is the id and name only.
+func (s *Subject) LogValue() slog.Value {
+	if s == nil {
+		return slog.StringValue(s.String())
+	}
+	return slog.GroupValue(slog.String("id", string(s.id)), slog.String("name", s.name.text))
+}
 
 // CreatedAt returns the creation time.
 func (s *Subject) CreatedAt() time.Time { return s.createdAt }
@@ -315,7 +358,11 @@ func (s *Subject) UpdatedAt() time.Time { return s.updatedAt }
 func (s *Subject) State() State {
 	st := State{
 		Version: s.version, ID: s.id, Name: s.name.text, Semester: s.semester, CreatedAt: s.createdAt, UpdatedAt: s.updatedAt,
-		TeacherName: s.teacher.name, TeacherEmail: s.teacher.email,
+	}
+	for i, t := range s.teachers.byRole {
+		if !t.IsZero() {
+			st.Teachers = append(st.Teachers, TeacherState{Role: teacherRoles[i], Name: t.name, Email: t.email})
+		}
 	}
 	for _, a := range s.aliases {
 		st.Aliases = append(st.Aliases, a.text)

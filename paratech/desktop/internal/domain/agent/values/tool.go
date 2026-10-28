@@ -5,10 +5,11 @@ import (
 	"slices"
 )
 
-// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v7.json). v7 is v6
+// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v8.json). v8 has
+// the tools of v7 and selects panel prompt v8, which asks the subject of an assignment (TASK-233, TASK-234); v7 is v6
 // with reply.text of the type reply_text, up to 4000 characters (TASK-223); v6 added create_assignment and the
 // argument type time (TASK-216, ADR-0029).
-const CatalogVersion = 7
+const CatalogVersion = 8
 
 // Tool is a tool of the closed catalog. A name outside it is ErrUnknownTool.
 type Tool string
@@ -206,7 +207,7 @@ func persistent(name string, required bool) ArgSpec {
 	return ArgSpec{Name: name, Type: ArgLabel, Required: required, Persistent: true}
 }
 
-// catalog is tool catalog v7 (shared/testdata/tool_catalog_v7.json; a test in desktop/tests compares them). It is
+// catalog is tool catalog v8 (shared/testdata/tool_catalog_v8.json; a test in desktop/tests compares them). It is
 // read-only: accessors return copies.
 var catalog = []ToolSpec{
 	{tool: ToolListSubjects},

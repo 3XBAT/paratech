@@ -158,8 +158,10 @@ func newDriverEnv(t *testing.T) *driverEnv {
 		t.Fatal(err)
 	}
 	// Personal data the agent must never see (ADR-0022, ADR-0030).
-	if _, err := phys.SetTeacher(driverTeacherName, driverTeacherEmail, at); err != nil {
-		t.Fatal(err)
+	for _, role := range subject.TeacherRoles() {
+		if _, err := phys.SetTeacher(role, driverTeacherName, driverTeacherEmail, at); err != nil {
+			t.Fatal(err)
+		}
 	}
 	lib := driverLibrary{subjects: []*subject.Subject{phys}}
 	facts, err := agentloop.NewFacts(e.knowledge)

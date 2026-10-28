@@ -2,6 +2,8 @@ package subject
 
 import (
 	"fmt"
+	"io"
+	"log/slog"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -16,8 +18,9 @@ const (
 	MaxTeacherEmailLen = 254
 )
 
-// Teacher is the teacher of a subject the student typed once (ADR-0030): a name and an email address. It is personal
-// data: errors name the rule that failed, never the text. The zero value is no teacher.
+// Teacher is a teacher of a subject the student typed once (ADR-0030): a name and an email address. It is personal
+// data: errors name the rule that failed, never the text, and it prints redacted (fmt, slog). The zero value is no
+// teacher.
 type Teacher struct {
 	name  string
 	email string
@@ -99,3 +102,9 @@ func (t Teacher) String() string {
 	}
 	return "teacher"
 }
+
+// Format prints String for every verb: without it %+v and %#v would print the fields.
+func (t Teacher) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, t.String()) }
+
+// LogValue keeps the data out of slog.
+func (t Teacher) LogValue() slog.Value { return slog.StringValue(t.String()) }

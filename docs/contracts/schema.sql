@@ -860,7 +860,7 @@ CREATE TABLE note_parts (
 );
 CREATE INDEX idx_note_parts_material ON note_parts (material_id);
 
--- Migration 0038.
+-- Migration 0038 (legacy since 0044: always '', never read; the teachers are in subject_teachers).
 -- subjects: the teacher (subject.Teacher); both '' while none is set, never one without the other. Personal data
 -- typed by the student, not a secret; never sent to the agent or the Hub (ADR-0022).
 ALTER TABLE subjects ADD COLUMN teacher_name TEXT NOT NULL DEFAULT '' CHECK (length(teacher_name) <= 200);
@@ -881,3 +881,16 @@ CREATE UNIQUE INDEX idx_recordings_source_sha256 ON recordings (source_sha256) W
 -- schedule_entries: the call link of the imported event (lesson.Content.CallLink) in the canonical form of
 -- values.CallLink; '' none. Untrusted input, re-checked on read; never written to Google Calendar.
 ALTER TABLE schedule_entries ADD COLUMN call_link TEXT NOT NULL DEFAULT '' CHECK (length(call_link) <= 2048);
+
+-- Migration 0044 (TASK-285). It moves the teacher of subjects.teacher_* (0038) into all three roles and blanks those
+-- columns: they stay as unused legacy columns.
+-- subject_teachers: the teachers of a subject (subject.Teachers), part of the subject aggregate (no version of their
+-- own): one row per role that has a teacher. Personal data typed by the student, not a secret; never sent to the
+-- agent or the Hub (ADR-0022).
+CREATE TABLE subject_teachers (
+    subject_id TEXT NOT NULL REFERENCES subjects (id) ON DELETE CASCADE,
+    role       TEXT NOT NULL CHECK (role IN ('lecture', 'practice', 'lab')),
+    name       TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 200),
+    email      TEXT NOT NULL CHECK (length(email) BETWEEN 1 AND 254),
+    PRIMARY KEY (subject_id, role)
+);
