@@ -110,7 +110,8 @@ test("the in_use refusal is an alert with «Открыть отправку»; o
 
 test("both delete buttons ask first and delete only through the warning or when nothing is running", () => {
   // The buttons call the asking functions, never the delete directly.
-  assert.match(page, /onClick=\{\(\) => void askRemove\(a\)\}/);
+  // (in the list the «Удалить» is an item of the row's «⋯» menu, which the row view gets as onRemove, TASK-316.)
+  assert.match(page, /onRemove=\{\(\) => void askRemove\(a\)\}/);
   assert.match(page, /onClick=\{\(\) => void askRemoveThis\(\)\}/);
   // Asking: the check comes first; a running work shows the warning, otherwise the delete follows at once.
   assert.match(page, /deleteNeedsWarning\(\(\) => api\.deleteImpact\(a\.id\)\)/);
@@ -119,7 +120,8 @@ test("both delete buttons ask first and delete only through the warning or when 
   assert.match(page, /setConfirming\(true\)/);
   // «Отмена» only closes the warning; the confirm button deletes.
   assert.match(page, /onConfirm=\{\(\) => void remove\(a\)\}/);
-  assert.match(page, /onConfirm=\{\(\) => void removeThis\(\)\}/);
+  // (the detail page's «Удалить» of the warning is ignored while the mark is saved, see the overlap test below.)
+  assert.match(page, /onConfirm=\{\(\) => \{\s*if \(!doneBusy\) \{\s*void removeThis\(\);\s*\}\s*\}\}/);
   assert.match(page, /setConfirmId\(""\);\s*setCancelledId\(a\.id\);/);
   assert.match(page, /setConfirming\(false\);\s*setCancelled\(true\);/);
   // A double click is one question and one delete (the same guard the page already uses).
@@ -128,18 +130,39 @@ test("both delete buttons ask first and delete only through the warning or when 
 });
 
 test("the check shows no «Удаление…»; «Отмена» gives the focus back to «Удалить»", () => {
-  // The check only disables the button (checkingId / checking); the busy label is the real delete's (busyId / changing).
-  assert.match(page, /disabled=\{busyId === a\.id \|\| checkingId === a\.id \|\| confirmId === a\.id\}/);
-  assert.match(page, /disabled=\{changing \|\| checking \|\| confirming\}/);
-  assert.match(page, /busy=\{busyId === a\.id\}/);
+  // The check only disables the control (checkingId / checking); the busy text is the real delete's (busyId / changing).
+  // In the list the control is the «Удалить» item of the row's menu (TASK-316): the page passes the lock (the
+  // item's state is tested in assignmentrowdelete316.test.mjs), and «Отмена» gives the focus to the row's «⋯» button.
+  assert.match(page, /removeLock=\{checkingId === a\.id \? "checking" : confirmId === a\.id \? "confirm" : ""\}/);
+  assert.match(page, /busyText = doneBusy \? doneTexts\.saving : busyId === a\.id \? changeTexts\.removing : ""/);
+  assert.match(page, /disabled=\{changing \|\| checking \|\| confirming( \|\| doneBusy)?\}/);
   assert.match(page, /busy=\{changing\}\s*busyLabel=\{changeTexts\.removing\}/);
   assert.doesNotMatch(page, /setBusyId\(a\.id\);\s*try \{\s*await impactGuard/);
   assert.doesNotMatch(page, /setChanging\(true\);\s*try \{\s*await impactGuard/);
-  // After «Отмена» the button is mounted again (new key) with autoFocus, as after «Вернуть».
-  assert.match(page, /key=\{cancelledId === a\.id \? "remove-cancelled" : "remove"\}/);
-  assert.match(page, /autoFocus=\{restoredId === a\.id \|\| cancelledId === a\.id\}/);
+  // After «Отмена» the «⋯» button of the row takes the focus, once the question is gone.
+  assert.match(page, /focusRowMenu\(rootRef\.current, cancelledId\)/);
   assert.match(page, /key=\{cancelled \? "remove-cancelled" : "remove"\}/);
   assert.match(page, /autoFocus=\{restored \|\| cancelled\}/);
+});
+
+test("«Выполнено» and delete do not overlap: during the check, under the warning and while the mark is saved", () => {
+  // List: the mark runs only when nothing of the row is going on; the delete question does not start during a mark.
+  assert.match(
+    page,
+    /if \(busyText === "" && checkingId !== a\.id && confirmId !== a\.id\) \{\s*void doneRun\.mark\(a\.id, !a\.done, a\.title\);/,
+  );
+  assert.match(page, /guard\.current\.has\(a\.id\) \|\| doneRun\.busyId === a\.id\) \{\s*return;/);
+  // Page: the button waits for the check and the warning.
+  assert.match(page, /disabled=\{changing \|\| checking \|\| confirming\}\s*onToggle=\{\(\) => void doneRun\.mark\(id,/);
+});
+
+test("a switch of the mark and a row leaving the list drop the delete question; «Вернуть» gives the row the focus", () => {
+  assert.match(
+    page,
+    /function changeState\(next: AssignmentState\) \{[\s\S]*?setConfirmId\(""\);\s*setCheckingId\(""\);\s*setCancelledId\(""\);/,
+  );
+  assert.match(page, /setConfirmId\(\(c\) => \(leaving\.includes\(c\) \? "" : c\)\)/);
+  assert.match(page, /focusOpen=\{restoredId === a\.id\}/);
 });
 
 test("the refusal button opens the assignment from the list and the emails on the detail page", () => {
