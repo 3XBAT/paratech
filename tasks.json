@@ -5260,7 +5260,7 @@
             "dependencies": [
                 "TASK-233"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-245",

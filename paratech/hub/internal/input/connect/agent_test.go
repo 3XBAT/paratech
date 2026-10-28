@@ -135,6 +135,45 @@ func TestAgentStepMapsTheAgentReply(t *testing.T) {
 	}
 }
 
+// TestAgentStepMapsTheChatFields: mentions map with their kinds, IDs and current flag, and history_summary to its own
+// turn kind; an unknown mention kind maps to one the domain rejects.
+func TestAgentStepMapsTheChatFields(t *testing.T) {
+	for codec, opts := range codecs {
+		svc := &fakeStepper{err: agentstep.ErrInvalidRequest}
+		client := agentServer(t, svc, nil, opts...)
+		req := agentRequest()
+		req.Msg.Scope.Mentions = []*hubv1.AgentMention{
+			{Kind: hubv1.AgentMentionKind_AGENT_MENTION_KIND_SUBJECT, Id: "s2"},
+			{Kind: hubv1.AgentMentionKind_AGENT_MENTION_KIND_LESSON, Id: "l2", Current: true},
+			{Kind: hubv1.AgentMentionKind_AGENT_MENTION_KIND_MATERIAL, Id: "m2", Current: true},
+			{Kind: hubv1.AgentMentionKind_AGENT_MENTION_KIND_ASSIGNMENT, Id: "a2"},
+			{Kind: hubv1.AgentMentionKind_AGENT_MENTION_KIND_UNSPECIFIED, Id: "x"},
+			{Kind: hubv1.AgentMentionKind(9), Id: "y"},
+		}
+		req.Msg.Turns = []*hubv1.AgentTurn{
+			{Turn: &hubv1.AgentTurn_HistorySummary{HistorySummary: "Ранее: пределы."}},
+			{Turn: &hubv1.AgentTurn_StudentText{StudentText: "что задали?"}},
+		}
+		_, _ = client.AgentStep(t.Context(), req)
+		cmd := svc.cmds[0]
+		wantMentions := []agentstep.Mention{
+			{Kind: values.MentionSubject, ID: "s2"}, {Kind: values.MentionLesson, ID: "l2", Current: true},
+			{Kind: values.MentionMaterial, ID: "m2", Current: true}, {Kind: values.MentionAssignment, ID: "a2"},
+			{Kind: "", ID: "x"}, {Kind: "", ID: "y"},
+		}
+		if !reflect.DeepEqual(cmd.Scope.Mentions, wantMentions) {
+			t.Fatalf("%s: mentions = %+v", codec, cmd.Scope.Mentions)
+		}
+		wantTurns := []agentstep.Turn{
+			{Kind: values.TurnHistorySummary, Summary: "Ранее: пределы."},
+			{Kind: values.TurnStudentText, StudentText: "что задали?"},
+		}
+		if !reflect.DeepEqual(cmd.Turns, wantTurns) {
+			t.Fatalf("%s: turns = %+v", codec, cmd.Turns)
+		}
+	}
+}
+
 func TestAgentStepMapsEnums(t *testing.T) {
 	svc := &fakeStepper{err: agentstep.ErrInvalidRequest}
 	client := agentServer(t, svc, nil)

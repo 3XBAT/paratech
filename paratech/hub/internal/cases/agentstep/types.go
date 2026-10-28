@@ -77,20 +77,29 @@ type Base struct {
 	TimeZone string
 }
 
-// Scope is the context of the current thread.
+// Scope is the context of the current request; Mentions are accepted from values.ChatCatalogVersion on.
 type Scope struct {
 	SubjectID    string
 	Screen       values.Screen
 	LessonID     string
 	AssignmentID string
+	Mentions     []Mention
+}
+
+// Mention is one mentioned object: kind, desktop ID and whether the current request mentioned it.
+type Mention struct {
+	Kind    values.MentionKind
+	ID      string
+	Current bool
 }
 
 // Turn is one history turn: StudentText for values.TurnStudentText, AgentReply for values.TurnAgentReply, Calls and
-// Seal for values.TurnCalls, Results for values.TurnResults.
+// Seal for values.TurnCalls, Results for values.TurnResults, Summary for values.TurnHistorySummary.
 type Turn struct {
 	Kind        values.TurnKind
 	StudentText string
 	AgentReply  string
+	Summary     string
 	Calls       []Call
 	Seal        []byte
 	Results     []ToolResult

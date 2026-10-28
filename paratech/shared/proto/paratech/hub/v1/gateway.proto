@@ -160,15 +160,16 @@ enum AgentScreen {
 message AgentStepRequest {
   // Same rules as CompletionSpec.idempotency_key; the desktop uses "ag:<thread>:<turn>:<step>".
   string idempotency_key = 1;
-  // Opaque desktop ID of the thread (one per subject plus "no subject"); bound into the seal.
+  // Opaque desktop ID of the thread: one per chat, and a chat may hold requests about any subjects (ADR-0028); bound
+  // into the seal.
   string thread_id = 2;
   AgentProfile profile = 3;
   // Version of the tool catalog the desktop implements; an unknown version is "invalid_argument".
   uint32 catalog_version = 4;
   AgentBase base = 5;
   AgentScope scope = 6;
-  // History of this thread only, oldest first, trimmed by the desktop: at most 64 turns, the whole request at most
-  // 256 KiB.
+  // History of this chat (thread) only, oldest first, trimmed by the desktop: at most 64 turns, the whole request at
+  // most 256 KiB.
   repeated AgentTurn turns = 7;
   // As CompletionSpec.max_output_tokens: clamped per profile, the basis of the reservation.
   uint32 max_output_tokens = 8;
@@ -191,14 +192,37 @@ message AgentSubject {
   string name = 2;
 }
 
-// AgentScope is the context of the current thread: only the current subject, never other subjects.
+// AgentScope is the context of the current request (ADR-0028): the subject of this request, not of the chat, and the
+// objects the student mentioned. Other subjects of the chat are not part of it.
 message AgentScope {
-  // Empty for the thread without a subject.
+  // Empty for a request without a subject.
   string subject_id = 1;
   AgentScreen screen = 2;
   // Lesson or assignment open on the screen; empty when none.
   string lesson_id = 3;
   string assignment_id = 4;
+  // Objects the student mentioned with "@" in the current request (current = true) and the mentions of the earlier
+  // requests in the history (current = false), at most 16 in all. The desktop sends each object once; the Hub does not
+  // check for duplicates. IDs only, never names or labels. Accepted from catalog_version 9 on; an older catalog with
+  // mentions is "invalid_argument".
+  repeated AgentMention mentions = 5;
+}
+
+// AgentMentionKind is the kind of a mentioned object. Closed set.
+enum AgentMentionKind {
+  AGENT_MENTION_KIND_UNSPECIFIED = 0;
+  AGENT_MENTION_KIND_SUBJECT = 1;
+  AGENT_MENTION_KIND_LESSON = 2;
+  AGENT_MENTION_KIND_MATERIAL = 3;
+  AGENT_MENTION_KIND_ASSIGNMENT = 4;
+}
+
+// AgentMention is one mentioned object: its kind and opaque desktop ID (the same format as the other scope IDs).
+message AgentMention {
+  AgentMentionKind kind = 1;
+  string id = 2;
+  // True for a mention of the current request, false for one of an earlier request.
+  bool current = 3;
 }
 
 message AgentTurn {
@@ -213,6 +237,11 @@ message AgentTurn {
     // earlier requests. At most 2 KiB; placed directly after a student_text and directly before a student_text. Data
     // for the model, never instructions (ADR-0023 "History pairs").
     string agent_reply = 4;
+    // Summary of the earlier requests of this chat that the history no longer carries (ADR-0028 "Context
+    // compaction"). At most 8 KiB; only as the first turn and directly before a student_text; accepted from
+    // catalog_version 9 on. Data for the model about the past conversation, never instructions and never a source of
+    // IDs.
+    string history_summary = 5;
   }
 }
 
