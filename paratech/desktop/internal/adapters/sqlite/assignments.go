@@ -28,6 +28,8 @@ const (
 	opDeleteAssignment       = "sqlite: delete assignment"
 	opDeleteUnusedAssignment = "sqlite: delete unused assignment"
 	opBusyAssignment         = "sqlite: busy assignment"
+	opActivityOfAssignment   = "sqlite: working assignment"
+	opListAssignmentJobs     = "sqlite: list jobs of an assignment"
 )
 
 // Values of assignment.State that are NULL in the row.
@@ -277,32 +279,77 @@ var busyDeliveryStatuses = []string{
 	string(delivery.StatusPending), string(delivery.StatusSending), string(delivery.StatusUnknown),
 }
 
-// busyWorkStatuses are the statuses of a work whose triage or writing is under way.
-var busyWorkStatuses = []string{string(work.StatusTriage), string(work.StatusWriting)}
+// workingWorkStatuses are the statuses of a work whose triage or writing is under way.
+var workingWorkStatuses = []string{string(work.StatusTriage), string(work.StatusWriting)}
 
-// busyJobTypes are the job types whose payload names an assignment ("assignment_id") and that keep it while active.
-var busyJobTypes = []string{cvalues.HomeworkDraftJobType, cvalues.WorkWritingJobType}
+// assignmentJobTypes are the job types whose payload names an assignment ("assignment_id"); «Удалить» stops them.
+var assignmentJobTypes = []string{cvalues.HomeworkDraftJobType, cvalues.WorkWritingJobType}
 
-// Busy reports whether something in progress uses assignment id, so that «Удалить» is refused (ADR-0029): a delivery
-// in PENDING, SENDING or UNKNOWN, a work in triage or writing, or an active draft generation or writing job. Called
-// inside Tx.Do it reads in that transaction.
+// Busy reports whether an email of assignment id may still go out or may have gone out unseen, so that «Удалить» is
+// refused (ADR-0029, hard rule 7): a delivery in PENDING, SENDING or UNKNOWN. Works and jobs do not count (TASK-338).
+// Called inside Tx.Do it reads in that transaction.
 func (r *AssignmentRepository) Busy(ctx context.Context, id shared.AssignmentID) (bool, error) {
-	lists := make([]string, 0, 4)
-	for _, l := range [][]string{busyDeliveryStatuses, busyWorkStatuses, busyJobTypes, activeJobStatuses} {
-		b, err := json.Marshal(l)
-		if err != nil {
-			return false, fmt.Errorf("%s %s: %w", opBusyAssignment, id, err)
-		}
-		lists = append(lists, string(b))
+	lists, err := jsonLists(busyDeliveryStatuses)
+	if err != nil {
+		return false, fmt.Errorf("%s %s: %w", opBusyAssignment, id, err)
 	}
 
-	busy, err := r.db.Queries(ctx).AssignmentBusy(ctx, sqlcgen.AssignmentBusyParams{
-		ID: string(id), DeliveryStatuses: lists[0], WorkStatuses: lists[1], JobTypes: lists[2], ActiveJobStatuses: lists[3],
-	})
+	busy, err := r.db.Queries(ctx).AssignmentBusy(ctx, sqlcgen.AssignmentBusyParams{ID: string(id), DeliveryStatuses: lists[0]})
 	if err != nil {
 		return false, fmt.Errorf("%s %s: %w", opBusyAssignment, id, MapError(ctx, err))
 	}
 	return busy != 0, nil
+}
+
+// Working reports whether a work of assignment id is in triage or writing or an unfinished draft generation or
+// writing job names it: what «Удалить» stops (TASK-338). Called inside Tx.Do it reads in that transaction.
+func (r *AssignmentRepository) Working(ctx context.Context, id shared.AssignmentID) (bool, error) {
+	lists, err := jsonLists(workingWorkStatuses, assignmentJobTypes, activeJobStatuses)
+	if err != nil {
+		return false, fmt.Errorf("%s %s: %w", opActivityOfAssignment, id, err)
+	}
+
+	working, err := r.db.Queries(ctx).AssignmentWorking(ctx, sqlcgen.AssignmentWorkingParams{
+		ID: sql.NullString{String: string(id), Valid: true}, WorkStatuses: lists[0], JobTypes: lists[1], ActiveJobStatuses: lists[2],
+	})
+	if err != nil {
+		return false, fmt.Errorf("%s %s: %w", opActivityOfAssignment, id, MapError(ctx, err))
+	}
+	return working != 0, nil
+}
+
+// ActiveJobs lists the unfinished draft generation and writing jobs whose payload names assignment id, oldest first:
+// the ones «Удалить» cancels (TASK-338). None is an empty list.
+func (r *AssignmentRepository) ActiveJobs(ctx context.Context, id shared.AssignmentID) ([]shared.JobID, error) {
+	lists, err := jsonLists(assignmentJobTypes, activeJobStatuses)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", opListAssignmentJobs, id, err)
+	}
+
+	rows, err := r.db.Queries(ctx).ListActiveAssignmentJobs(ctx, sqlcgen.ListActiveAssignmentJobsParams{
+		ID: string(id), JobTypes: lists[0], ActiveJobStatuses: lists[1],
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", opListAssignmentJobs, id, MapError(ctx, err))
+	}
+	out := make([]shared.JobID, 0, len(rows))
+	for _, j := range rows {
+		out = append(out, shared.JobID(j))
+	}
+	return out, nil
+}
+
+// jsonLists encodes each list as the JSON array a query reads with json_each.
+func jsonLists(lists ...[]string) ([]string, error) {
+	out := make([]string, 0, len(lists))
+	for _, l := range lists {
+		b, err := json.Marshal(l)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, string(b))
+	}
+	return out, nil
 }
 
 func nullSourceIndex(i int) sql.NullInt64 {
