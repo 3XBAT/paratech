@@ -5,6 +5,7 @@
 import {
   errorMessages,
   type ExportResult,
+  type KnowledgeBaseApi,
   type KnowledgeHit,
   type KnowledgeLesson,
   type KnowledgeSection,
@@ -574,6 +575,55 @@ export function citationOpening(s: CitationSource): CitationOpening | null {
       : { kind: "note", noteId: s.noteId, materialId: s.materialId, locatorKind: s.locatorKind, locatorN: s.locatorN };
   }
   return s.recordingId === "" ? null : { kind: "recording", recordingId: s.recordingId, focus: hitFocus(s) };
+}
+
+/** The lesson a source came from for its quiet second line: «19.10 · Название»; empty parts are skipped. */
+export function citationLesson(s: { title: string; startedAt: string }): string {
+  return [dayText(s.startedAt), s.title.trim()].filter((p) => p !== "").join(" · ");
+}
+
+/** The most subjects the note lookup reads (one call each); it stops at the first match. */
+export const maxNoteScanSubjects = 101;
+
+export const noteJumpTexts = {
+  notFound: "Конспект не найден: обновите список.",
+} as const;
+
+/**
+ * Stopgap (the core has no call from a note id to its lecture): the first lecture, over the subjects in the core's
+ * order, whose notes hold noteId; null when none does. By ids only. A failed call rejects.
+ */
+export async function findNoteLecture(api: Pick<KnowledgeBaseApi, "subjects" | "lectures">, noteId: string): Promise<KnowledgeLesson | null> {
+  if (noteId === "") {
+    return null;
+  }
+  const subjects = (await api.subjects()).slice(0, maxNoteScanSubjects);
+  for (const s of subjects) {
+    const found = (await api.lectures(s.key)).find((l) => l.notes.some((n) => n.id === noteId));
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return null;
+}
+
+/** Where a citation lands on «База знаний»: the lesson, the place in it and the file of the notes to mark. */
+export interface ResolvedOpening {
+  lesson: KnowledgeLesson;
+  focus: LessonFocus;
+  materialId: string;
+}
+
+/** Resolves a citation to its lecture by ids; null when a note is not found. A failed call rejects. */
+export async function resolveOpening(
+  api: Pick<KnowledgeBaseApi, "subjects" | "lectures" | "lesson">,
+  o: CitationOpening,
+): Promise<ResolvedOpening | null> {
+  if (o.kind === "recording") {
+    return { lesson: await api.lesson(o.recordingId), focus: o.focus, materialId: "" };
+  }
+  const lecture = await findNoteLecture(api, o.noteId);
+  return lecture === null ? null : { lesson: lecture, focus: noFocus, materialId: o.materialId };
 }
 
 const knownErrors: ReadonlySet<string> = new Set(Object.values(errorMessages));

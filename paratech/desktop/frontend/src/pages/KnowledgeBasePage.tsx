@@ -13,6 +13,7 @@ import { todayApi } from "../bindings/today";
 import { importTexts } from "../recordingImportView";
 import {
   askSearch,
+  type CitationOpening,
   checkQuery,
   errorText,
   exportResultLine,
@@ -22,9 +23,11 @@ import {
   idleFlight,
   lecturesMeta,
   noFocus,
+  noteJumpTexts,
   orderLectures,
   type PastChoice,
   pastLesson,
+  resolveOpening,
   type SearchFlight,
   searchDone,
   searchPauseMs,
@@ -54,8 +57,18 @@ interface OpenLesson {
 // «База знаний» (TASK-091): the subjects with their lessons, the search over the whole base and the export of a
 // subject. The core groups, searches and writes the file; the page only shows and asks. A lesson opens here, over the
 // list it came from, so «Назад» finds the list or the search as the user left it.
-export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (assignmentId: string) => void }) {
+export function KnowledgeBasePage(props: {
+  visit?: number;
+  onOpenAssignment: (assignmentId: string) => void;
+  /** A place of an answer's source to open on arrival (TASK-296); the page takes it once and App clears it. */
+  jump?: CitationOpening;
+  onJumpDone?: () => void;
+}) {
   const api = useMemo(() => knowledgeBaseApi(callByName), []);
+  const [pending] = useState(props.jump);
+  const [jumpError, setJumpError] = useState("");
+  const jumpDone = useRef(props.onJumpDone);
+  jumpDone.current = props.onJumpDone;
   const [subjects, setSubjects] = useState<KnowledgeSubject[] | null>(null);
   const [listError, setListError] = useState("");
   const [reload, setReload] = useState(0);
@@ -138,6 +151,32 @@ export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (as
     return () => clearTimeout(t);
   }, [query, runSearch]);
 
+  // Opens the place a citation names, by ids. Taken at once, so a later visit never reopens it.
+  useEffect(() => {
+    if (pending === undefined) {
+      return;
+    }
+    jumpDone.current?.();
+    let stopped = false;
+    resolveOpening(api, pending).then(
+      (r) => {
+        if (stopped) {
+          return;
+        }
+        if (r === null) {
+          setJumpError(noteJumpTexts.notFound);
+          return;
+        }
+        changed.current = false;
+        setOpen({ lesson: r.lesson, focus: r.focus, editing: false, materialId: r.materialId });
+      },
+      (err) => !stopped && setJumpError(errorText(err)),
+    );
+    return () => {
+      stopped = true;
+    };
+  }, [api, pending]);
+
   // A click on «База знаний» in the rail while here goes back to the subjects.
   const firstVisit = useRef(props.visit);
   useEffect(() => {
@@ -208,6 +247,11 @@ export function KnowledgeBasePage(props: { visit?: number; onOpenAssignment: (as
           <p className="small muted kb-sub">Занятия по предметам: кратко, текст лекции, расшифровка и задания.</p>
         </div>
       </div>
+      {jumpError !== "" && (
+        <Banner kind="fail" role="alert">
+          {jumpError}
+        </Banner>
+      )}
       <Card className="box kb-search">
         <div className="tr-search">
           <Input
