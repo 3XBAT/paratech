@@ -195,6 +195,19 @@ func (s *Subject) AddAlias(alias string, now time.Time) (changed bool, err error
 	return true, nil
 }
 
+// RemoveAlias removes the alias with the key of alias (values.Key), for undoing aliases added from the schedule. The
+// name is never removed: a spelling with its key, or with no alias's key, changes nothing (changed is false).
+func (s *Subject) RemoveAlias(alias string, now time.Time) (changed bool) {
+	key := values.Key(alias)
+	i := slices.IndexFunc(s.aliases, func(a Name) bool { return a.Key() == key })
+	if key == "" || i < 0 {
+		return false
+	}
+	s.aliases = slices.Delete(s.aliases, i, i+1)
+	s.updatedAt = now
+	return true
+}
+
 // SetTeacher sets the teacher of role (ADR-0030), replacing the one set before; the same name and address again
 // change nothing (changed is false). Errors wrap ErrInvalidTeacherRole, ErrInvalidTeacherName or
 // ErrInvalidTeacherEmail.
