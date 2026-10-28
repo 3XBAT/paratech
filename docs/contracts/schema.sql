@@ -894,3 +894,7 @@ CREATE TABLE subject_teachers (
     email      TEXT NOT NULL CHECK (length(email) BETWEEN 1 AND 254),
     PRIMARY KEY (subject_id, role)
 );
+
+-- Migration 0045 (TASK-313).
+-- assignments: when the student marked the assignment done (ms); NULL while it is not done.
+ALTER TABLE assignments ADD COLUMN done_at INTEGER;

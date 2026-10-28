@@ -103,6 +103,7 @@ type Assignment struct {
 	UserTeacher   string
 	MaterialID    sql.NullString
 	DeletedAt     sql.NullInt64
+	DoneAt        sql.NullInt64
 }
 
 type DeadlineEventRemoval struct {

@@ -91,8 +91,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != subjectTeachersVersion {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, subjectTeachersVersion)
+	if err != nil || first != assignmentDoneVersion {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, assignmentDoneVersion)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
@@ -259,8 +259,11 @@ const materialImagesVersion = 41
 // lessonCallLinkVersion is the migration that adds the call link of a lesson (TASK-256).
 const lessonCallLinkVersion = 43
 
-// subjectTeachersVersion moves the teacher of a subject into three roles (TASK-285), the newest one.
+// subjectTeachersVersion moves the teacher of a subject into three roles (TASK-285).
 const subjectTeachersVersion = 44
+
+// assignmentDoneVersion adds the «Выполнено» mark of an assignment (TASK-313), the newest one.
+const assignmentDoneVersion = 45
 
 // recordingOriginVersion adds the origin of a recording (TASK-161).
 const recordingOriginVersion = 42

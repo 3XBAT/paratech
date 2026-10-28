@@ -124,7 +124,7 @@ func (q *Queries) DeleteAssignment(ctx context.Context, arg DeleteAssignmentPara
 
 const getAssignment = `-- name: GetAssignment :one
 
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments WHERE id = ?1
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at, done_at FROM assignments WHERE id = ?1
 `
 
 // Assignments, the local homework (PRD section 10) with the optimistic-concurrency protocol of ADR-0004(d). The
@@ -153,12 +153,13 @@ func (q *Queries) GetAssignment(ctx context.Context, id string) (Assignment, err
 		&i.UserTeacher,
 		&i.MaterialID,
 		&i.DeletedAt,
+		&i.DoneAt,
 	)
 	return i, err
 }
 
 const getAssignmentByMaterialSource = `-- name: GetAssignmentByMaterialSource :one
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments WHERE material_id = ?1 AND source_index = ?2
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at, done_at FROM assignments WHERE material_id = ?1 AND source_index = ?2
 `
 
 type GetAssignmentByMaterialSourceParams struct {
@@ -189,12 +190,13 @@ func (q *Queries) GetAssignmentByMaterialSource(ctx context.Context, arg GetAssi
 		&i.UserTeacher,
 		&i.MaterialID,
 		&i.DeletedAt,
+		&i.DoneAt,
 	)
 	return i, err
 }
 
 const getAssignmentBySource = `-- name: GetAssignmentBySource :one
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments WHERE transcript_id = ?1 AND source_index = ?2
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at, done_at FROM assignments WHERE transcript_id = ?1 AND source_index = ?2
 `
 
 type GetAssignmentBySourceParams struct {
@@ -224,6 +226,7 @@ func (q *Queries) GetAssignmentBySource(ctx context.Context, arg GetAssignmentBy
 		&i.UserTeacher,
 		&i.MaterialID,
 		&i.DeletedAt,
+		&i.DoneAt,
 	)
 	return i, err
 }
@@ -231,11 +234,11 @@ func (q *Queries) GetAssignmentBySource(ctx context.Context, arg GetAssignmentBy
 const insertAssignment = `-- name: InsertAssignment :exec
 INSERT INTO assignments (id, lesson_id, transcript_id, material_id, title, description, due_at, user_edited, source_index,
                          prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, version, created_at,
-                         updated_at, deleted_at)
+                         updated_at, deleted_at, done_at)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6,
         ?7, ?8, ?9, ?10,
         ?11, ?12, ?13, ?14, 1,
-        ?15, ?16, ?17)
+        ?15, ?16, ?17, ?18)
 `
 
 type InsertAssignmentParams struct {
@@ -256,6 +259,7 @@ type InsertAssignmentParams struct {
 	CreatedAt     int64
 	UpdatedAt     int64
 	DeletedAt     sql.NullInt64
+	DoneAt        sql.NullInt64
 }
 
 // A never-stored assignment (version 0) is inserted with version 1.
@@ -278,12 +282,13 @@ func (q *Queries) InsertAssignment(ctx context.Context, arg InsertAssignmentPara
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.DeletedAt,
+		arg.DoneAt,
 	)
 	return err
 }
 
 const listAssignmentsByMaterial = `-- name: ListAssignmentsByMaterial :many
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at, done_at FROM assignments
 WHERE material_id = ?1 AND deleted_at IS NULL
 ORDER BY source_index, id
 `
@@ -316,6 +321,7 @@ func (q *Queries) ListAssignmentsByMaterial(ctx context.Context, materialID sql.
 			&i.UserTeacher,
 			&i.MaterialID,
 			&i.DeletedAt,
+			&i.DoneAt,
 		); err != nil {
 			return nil, err
 		}
@@ -331,7 +337,7 @@ func (q *Queries) ListAssignmentsByMaterial(ctx context.Context, materialID sql.
 }
 
 const listAssignmentsByTranscript = `-- name: ListAssignmentsByTranscript :many
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at, done_at FROM assignments
 WHERE transcript_id = ?1 AND deleted_at IS NULL
 ORDER BY source_index, id
 `
@@ -364,6 +370,7 @@ func (q *Queries) ListAssignmentsByTranscript(ctx context.Context, transcriptID 
 			&i.UserTeacher,
 			&i.MaterialID,
 			&i.DeletedAt,
+			&i.DoneAt,
 		); err != nil {
 			return nil, err
 		}
@@ -379,7 +386,7 @@ func (q *Queries) ListAssignmentsByTranscript(ctx context.Context, transcriptID 
 }
 
 const listAssignmentsDeletedBefore = `-- name: ListAssignmentsDeletedBefore :many
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at, done_at FROM assignments
 WHERE deleted_at IS NOT NULL AND deleted_at < ?1
   AND (deleted_at > ?2 OR (deleted_at = ?2 AND id > ?3))
 ORDER BY deleted_at, id
@@ -428,6 +435,7 @@ func (q *Queries) ListAssignmentsDeletedBefore(ctx context.Context, arg ListAssi
 			&i.UserTeacher,
 			&i.MaterialID,
 			&i.DeletedAt,
+			&i.DoneAt,
 		); err != nil {
 			return nil, err
 		}
@@ -443,7 +451,7 @@ func (q *Queries) ListAssignmentsDeletedBefore(ctx context.Context, arg ListAssi
 }
 
 const listRecentAssignments = `-- name: ListRecentAssignments :many
-SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at, done_at FROM assignments
 WHERE deleted_at IS NULL
 ORDER BY created_at DESC, source_index, id
 LIMIT ?1
@@ -478,6 +486,7 @@ func (q *Queries) ListRecentAssignments(ctx context.Context, maxRows int64) ([]A
 			&i.UserTeacher,
 			&i.MaterialID,
 			&i.DeletedAt,
+			&i.DoneAt,
 		); err != nil {
 			return nil, err
 		}
@@ -524,9 +533,10 @@ SET title          = ?1,
     user_subject   = ?8,
     user_teacher   = ?9,
     deleted_at     = ?10,
-    version        = version + 1,
-    updated_at     = ?11
-WHERE id = ?12 AND version = ?13
+    done_at        = ?11,
+    version       = version + 1,
+    updated_at     = ?12
+WHERE id = ?13 AND version = ?14
 `
 
 type UpdateAssignmentParams struct {
@@ -540,6 +550,7 @@ type UpdateAssignmentParams struct {
 	UserSubject     string
 	UserTeacher     string
 	DeletedAt       sql.NullInt64
+	DoneAt          sql.NullInt64
 	UpdatedAt       int64
 	ID              string
 	ExpectedVersion int64
@@ -559,6 +570,7 @@ func (q *Queries) UpdateAssignment(ctx context.Context, arg UpdateAssignmentPara
 		arg.UserSubject,
 		arg.UserTeacher,
 		arg.DeletedAt,
+		arg.DoneAt,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.ExpectedVersion,
