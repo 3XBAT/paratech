@@ -245,9 +245,10 @@ type Querier interface {
 	// Entries of the same instant follow the insert order (rowid; ids are random), so "undo the request" goes exactly
 	// in reverse.
 	ListAgentActionsByThread(ctx context.Context, arg ListAgentActionsByThreadParams) ([]AgentAction, error)
-	// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first). Entries
-	// of dropped requests are left out here, so they never take a place under the limit (ADR-0028).
-	ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) ([]AgentStep, error)
+	// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first), each
+	// with the frozen reply line of its request. Entries of dropped requests are left out here, so they never take a place
+	// under the limit (ADR-0028).
+	ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) ([]ListAgentStepsRow, error)
 	// Every chat: the unarchived ones by their last activity, newest first, then the archived ones in the same order.
 	// (Comments of this file stay ASCII: sqlc rewrites queries by byte offset.)
 	ListAgentThreadIDs(ctx context.Context) ([]string, error)
