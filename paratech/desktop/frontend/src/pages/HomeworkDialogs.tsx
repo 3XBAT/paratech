@@ -320,12 +320,9 @@ export function RemovedLine(props: { busy: boolean; stopped?: boolean; expired?:
         {props.stopped === true && ` · ${changeTexts.stopped}`}
       </span>
       {!expired && (
-        <>
-          <span className="small muted">{changeTexts.restoreWindow}</span>
-          <Button autoFocus busy={props.busy} busyLabel={changeTexts.restoring} disabled={props.busy} onClick={props.onRestore}>
-            {changeTexts.restore}
-          </Button>
-        </>
+        <Button autoFocus busy={props.busy} busyLabel={changeTexts.restoring} disabled={props.busy} onClick={props.onRestore}>
+          {changeTexts.restore}
+        </Button>
       )}
     </span>
   );

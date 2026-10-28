@@ -499,8 +499,6 @@ export const changeTexts = {
   remove: "Удалить",
   removing: "Удаление…",
   removed: "Задание удалено",
-  /** A muted hint next to «Задание удалено» while «Вернуть» still works (ADR-0029 addendum 2: 72 hours). */
-  restoreWindow: "Вернуть можно в течение 3 дней",
   /** «Вернуть» after the window: the removed line says this instead of «Задание удалено», without the button. */
   expired: "Задание удалено окончательно, вернуть уже нельзя",
   restore: "Вернуть",

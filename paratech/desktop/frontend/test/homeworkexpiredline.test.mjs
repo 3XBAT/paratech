@@ -1,5 +1,5 @@
 // «Вернуть» after the restore window (TASK-275, ADR-0029 addendum 2): the removed line itself turns permanent and loses
-// its button, and while the delete is restorable the line carries the 3-day hint. The page has no DOM test harness:
+// its button (no return-window hint: the line lives only while the student stays on the page). The page has no DOM test harness:
 // the logic sits in the helpers and the component tested here, the wiring is checked in the page source.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -16,7 +16,7 @@ const noop = () => undefined;
 
 test("the texts are exact", () => {
   assert.equal(changeTexts.expired, "Задание удалено окончательно, вернуть уже нельзя");
-  assert.equal(changeTexts.restoreWindow, "Вернуть можно в течение 3 дней");
+  assert.equal(changeTexts.restoreWindow, undefined);
   assert.equal(changeProblemText("expired"), changeTexts.expired);
   // The generic refusal is not what an expired reply falls into any more.
   assert.notEqual(changeProblemText("expired"), changeProblemText("failed"));
@@ -40,21 +40,21 @@ test("other replies are not expired", () => {
   assert.equal(done.expired, false);
 });
 
-test("a restorable line shows the 3-day hint (muted, outside the status) and «Вернуть»", () => {
+test("a restorable line shows the «Задание удалено» status and «Вернуть», with no hint span", () => {
   const html = renderToStaticMarkup(h(RemovedLine, { busy: false, onRestore: noop }));
   assert.match(html, /role="status"[^>]*>Задание удалено</);
-  assert.match(html, /class="small muted">Вернуть можно в течение 3 дней</);
   assert.match(html, />Вернуть</);
   assert.ok(!html.includes(changeTexts.expired));
-  // The hint is not inside the live status: «Задание удалено» alone is announced.
-  assert.doesNotMatch(html, /role="status"[^>]*>[^<]*Вернуть можно/);
+  // No promise of a return window: the line is only there while the student stays on the page.
+  assert.ok(!html.includes("small muted"));
+  assert.ok(!html.includes("дней"));
 });
 
-test("the busy restore keeps «Возврат…» and the hint", () => {
+test("the busy restore keeps «Возврат…» on a disabled button", () => {
   const html = renderToStaticMarkup(h(RemovedLine, { busy: true, onRestore: noop }));
   assert.match(html, /disabled/);
   assert.match(html, /Возврат…/);
-  assert.ok(html.includes(changeTexts.restoreWindow));
+  assert.match(html, /role="status"[^>]*>Задание удалено</);
 });
 
 test("an expired line says it is final, has no button and no hint, stays a focusable status", () => {
@@ -64,7 +64,6 @@ test("an expired line says it is final, has no button and no hint, stays a focus
   assert.ok(html.includes(changeTexts.expired));
   assert.ok(!html.includes("<button"));
   assert.ok(!html.includes("Вернуть"));
-  assert.ok(!html.includes(changeTexts.restoreWindow));
   assert.ok(!html.includes(`>${changeTexts.removed}<`));
 });
 
