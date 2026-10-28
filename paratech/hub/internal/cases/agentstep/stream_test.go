@@ -48,7 +48,7 @@ func newStreamFixture(t *testing.T, on bool, steps ...testenv.AgentProviderStep)
 // deltas records the chunks of a StepStream; the use case calls it from one goroutine (-race checks it).
 type deltas struct{ got []string }
 
-func (d *deltas) add(c string)    { d.got = append(d.got, c) }
+func (d *deltas) add(c string)   { d.got = append(d.got, c) }
 func (d *deltas) joined() string { return strings.Join(d.got, "") }
 
 func (f fixture) stream(t *testing.T, ctx context.Context, cmd agentstep.Command) (agentstep.Result, *deltas, error) {

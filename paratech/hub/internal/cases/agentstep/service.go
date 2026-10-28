@@ -21,11 +21,11 @@ const (
 	opStep       = "step"
 	opStepStream = "step stream"
 	opStart      = "start"
-	opSettle  = "settle"
-	opRelease = "release"
-	opReplay  = "replay"
-	opTurn    = "kept turn"
-	opPurge   = "purge kept turns"
+	opSettle     = "settle"
+	opRelease    = "release"
+	opReplay     = "replay"
+	opTurn       = "kept turn"
+	opPurge      = "purge kept turns"
 )
 
 // Outcomes in the log line of a step.

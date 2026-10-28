@@ -170,7 +170,7 @@ func (r *replyText) escape(out *strings.Builder, c byte) {
 	r.inEscape = false
 	var v rune
 	for _, h := range r.esc[1:] {
-		v = v<<4 | rune(hexValue(h))
+		v = v<<4 | hexValue(h)
 	}
 	switch {
 	case utf16.IsSurrogate(v) && v < 0xDC00: // high half
@@ -199,14 +199,14 @@ func (r *replyText) lone(out *strings.Builder) {
 
 var simpleEscapes = map[byte]byte{'"': '"', '\\': '\\', '/': '/', 'b': '\b', 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t'}
 
-func hexValue(c byte) int {
+func hexValue(c byte) rune {
 	switch {
 	case c >= '0' && c <= '9':
-		return int(c - '0')
+		return rune(c - '0')
 	case c >= 'a' && c <= 'f':
-		return int(c-'a') + 10
+		return rune(c-'a') + 10
 	case c >= 'A' && c <= 'F':
-		return int(c-'A') + 10
+		return rune(c-'A') + 10
 	}
 	return -1
 }

@@ -273,24 +273,24 @@ var wantFields = map[string]map[string]string{
 // a secret or transcript-derived text could travel: adding one must be a conscious edit here, with a review of what the
 // Hub does with it. Sorted by field name.
 var wantStringFields = map[string][]string{
-	"CompletionSpec":         {"idempotency_key", "instructions", "model_alias", "untrusted_data"},
-	"CompletionResult":       {"output", "reservation_id"},
-	"CompleteStreamResponse": {"delta"},
-	"ErrorDetail":            {"message"},
-	"Reservation":            {"reservation_id"},
-	"ReserveRequest":         {"idempotency_key", "model_alias"},
-	"SettleRequest":          {"reservation_id"},
-	"ReleaseRequest":         {"reservation_id"},
-	"AgentStepRequest":       {"idempotency_key", "thread_id"},
-	"AgentBase":              {"time_zone", "today"},
-	"AgentSubject":           {"name", "subject_id"},
-	"AgentScope":             {"assignment_id", "lesson_id", "subject_id"},
-	"AgentMention":           {"id"},
-	"AgentTurn":              {"agent_reply", "history_summary", "student_text"},
-	"SealedCalls":            {"seal"},
-	"ToolCall":               {"arguments_json", "call_id", "tool"},
-	"ToolResult":             {"call_id", "result_json"},
-	"AgentStepResponse":      {"reservation_id"},
+	"CompletionSpec":          {"idempotency_key", "instructions", "model_alias", "untrusted_data"},
+	"CompletionResult":        {"output", "reservation_id"},
+	"CompleteStreamResponse":  {"delta"},
+	"ErrorDetail":             {"message"},
+	"Reservation":             {"reservation_id"},
+	"ReserveRequest":          {"idempotency_key", "model_alias"},
+	"SettleRequest":           {"reservation_id"},
+	"ReleaseRequest":          {"reservation_id"},
+	"AgentStepRequest":        {"idempotency_key", "thread_id"},
+	"AgentBase":               {"time_zone", "today"},
+	"AgentSubject":            {"name", "subject_id"},
+	"AgentScope":              {"assignment_id", "lesson_id", "subject_id"},
+	"AgentMention":            {"id"},
+	"AgentTurn":               {"agent_reply", "history_summary", "student_text"},
+	"SealedCalls":             {"seal"},
+	"ToolCall":                {"arguments_json", "call_id", "tool"},
+	"ToolResult":              {"call_id", "result_json"},
+	"AgentStepResponse":       {"reservation_id"},
 	"AgentStepStreamResponse": {"delta"},
 }
 
@@ -390,14 +390,14 @@ type rpcShape struct {
 }
 
 var wantRPCs = map[string]rpcShape{
-	"GatewayService.Complete":       {"CompleteRequest", "CompleteResponse", false, public},
-	"GatewayService.CompleteStream": {"CompleteStreamRequest", "CompleteStreamResponse", true, public},
-	"GatewayService.AgentStep":      {"AgentStepRequest", "AgentStepResponse", false, public},
+	"GatewayService.Complete":        {"CompleteRequest", "CompleteResponse", false, public},
+	"GatewayService.CompleteStream":  {"CompleteStreamRequest", "CompleteStreamResponse", true, public},
+	"GatewayService.AgentStep":       {"AgentStepRequest", "AgentStepResponse", false, public},
 	"GatewayService.AgentStepStream": {"AgentStepStreamRequest", "AgentStepStreamResponse", true, public},
-	"QuotaService.Reserve":          {"ReserveRequest", "ReserveResponse", false, internal},
-	"QuotaService.Settle":           {"SettleRequest", "SettleResponse", false, internal},
-	"QuotaService.Release":          {"ReleaseRequest", "ReleaseResponse", false, internal},
-	"QuotaService.GetRemaining":     {"GetRemainingRequest", "GetRemainingResponse", false, public},
+	"QuotaService.Reserve":           {"ReserveRequest", "ReserveResponse", false, internal},
+	"QuotaService.Settle":            {"SettleRequest", "SettleResponse", false, internal},
+	"QuotaService.Release":           {"ReleaseRequest", "ReleaseResponse", false, internal},
+	"QuotaService.GetRemaining":      {"GetRemainingRequest", "GetRemainingResponse", false, public},
 }
 
 func TestServicesRPCsAndExposure(t *testing.T) {
