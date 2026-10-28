@@ -112,8 +112,8 @@ func (r *AssignmentRepository) ListByTranscript(ctx context.Context, t shared.Tr
 	return out, nil
 }
 
-// ListRecent returns at most limit assignments, newest first (the homeworkflow.AssignmentList port); none is an empty
-// list. limit must be at least 1.
+// ListRecent returns at most limit assignments that are not deleted, done or not, newest first; none is an empty list.
+// limit must be at least 1. The screens read ListRecentByState.
 func (r *AssignmentRepository) ListRecent(ctx context.Context, limit int) ([]*assignment.Assignment, error) {
 	if limit < 1 {
 		return nil, fmt.Errorf("%s: limit %d, want at least 1", opListRecentAssignments, limit)
@@ -122,6 +122,27 @@ func (r *AssignmentRepository) ListRecent(ctx context.Context, limit int) ([]*as
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", opListRecentAssignments, MapError(ctx, err))
 	}
+	return assignmentsFromRows(rows)
+}
+
+// ListRecentByState returns at most limit assignments that are not deleted: the open ones when open is set and the
+// done ones when done is set, filtered before the limit, open ones first, each group newest first (the
+// homeworkflow.AssignmentList port); none is an empty list. limit must be at least 1.
+func (r *AssignmentRepository) ListRecentByState(ctx context.Context, open, done bool, limit int) ([]*assignment.Assignment, error) {
+	if limit < 1 {
+		return nil, fmt.Errorf("%s: limit %d, want at least 1", opListRecentAssignments, limit)
+	}
+	rows, err := r.db.Queries(ctx).ListRecentAssignmentsByState(ctx, sqlcgen.ListRecentAssignmentsByStateParams{
+		WithOpen: jobBoolInt(open), WithDone: jobBoolInt(done), MaxRows: int64(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", opListRecentAssignments, MapError(ctx, err))
+	}
+	return assignmentsFromRows(rows)
+}
+
+// assignmentsFromRows converts listed rows.
+func assignmentsFromRows(rows []sqlcgen.Assignment) ([]*assignment.Assignment, error) {
 	out := make([]*assignment.Assignment, 0, len(rows))
 	for _, row := range rows {
 		a, err := assignmentFromRow(row)

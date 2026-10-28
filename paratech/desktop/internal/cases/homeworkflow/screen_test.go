@@ -21,9 +21,13 @@ import (
 )
 
 // assignmentList is the AssignmentList over the proposal fakes: the assignments of the store, ids in reverse order.
+// None of them is ever done.
 type assignmentList struct{ s *store }
 
-func (l assignmentList) ListRecent(_ context.Context, limit int) ([]*assignment.Assignment, error) {
+func (l assignmentList) ListRecentByState(_ context.Context, open, _ bool, limit int) ([]*assignment.Assignment, error) {
+	if !open {
+		return []*assignment.Assignment{}, nil
+	}
 	l.s.mu.Lock()
 	ids := make([]shared.AssignmentID, 0, len(l.s.assignments))
 	for id, ok := range l.s.assignments {
@@ -48,11 +52,14 @@ func (l assignmentList) ListRecent(_ context.Context, limit int) ([]*assignment.
 // ppAssignmentList is the AssignmentList over the post-processing fakes, in the order of the extraction of t1.
 type ppAssignmentList struct{ s *ppStore }
 
-func (l ppAssignmentList) ListRecent(_ context.Context, limit int) ([]*assignment.Assignment, error) {
+func (l ppAssignmentList) ListRecentByState(_ context.Context, open, done bool, limit int) ([]*assignment.Assignment, error) {
 	out := []*assignment.Assignment{}
 	for _, st := range l.s.assignmentsOf("t1") {
 		if len(out) == limit {
 			break
+		}
+		if isDone := !st.DoneAt.IsZero(); (isDone && !done) || (!isDone && !open) {
+			continue
 		}
 		a, err := assignment.Restore(st)
 		if err != nil {
@@ -66,7 +73,7 @@ func (l ppAssignmentList) ListRecent(_ context.Context, limit int) ([]*assignmen
 // failingList records the limit and fails.
 type failingList struct{ limits *[]int }
 
-func (l failingList) ListRecent(_ context.Context, limit int) ([]*assignment.Assignment, error) {
+func (l failingList) ListRecentByState(_ context.Context, _, _ bool, limit int) ([]*assignment.Assignment, error) {
 	*l.limits = append(*l.limits, limit)
 	return nil, errDiskFull
 }

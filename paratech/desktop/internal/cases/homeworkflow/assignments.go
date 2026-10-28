@@ -51,18 +51,37 @@ func (s *Service) LessonLabel(ctx context.Context, id shared.AssignmentID) (valu
 	return s.lessons.label(ctx, a)
 }
 
-// ListAssignments returns the newest assignments for the homework screen, at most MaxListedAssignments (PRD section
-// 10 step 1); deleted ones are not listed (ADR-0029). It is also what «Сегодня», the subject page and the agent's
-// list_assignments read. None is an empty list.
+// ListAssignments returns the newest open assignments (not marked done, ADR-0033 §9) for the homework screen, at most
+// MaxListedAssignments (PRD section 10 step 1); deleted ones are not listed (ADR-0029). It is also what «Сегодня» («Горит
+// на 7 дней»), the subject page and the agent's list_assignments (catalog 9: open ones only) read. None is an empty list.
 func (s *Service) ListAssignments(ctx context.Context) ([]AssignmentView, error) {
-	as, err := s.list.ListRecent(ctx, MaxListedAssignments)
+	return s.ListAssignmentsByState(ctx, ListOpen)
+}
+
+// ListAssignmentsByState is ListAssignments with the filter «Открытые / Выполненные / Все» (ADR-0033 §9): the empty
+// state is ListOpen; in ListAll the open ones come first, then the done ones, each newest first. The store filters
+// before the MaxListedAssignments cap. An unknown state is ErrInvalidRequest.
+func (s *Service) ListAssignmentsByState(ctx context.Context, state ListState) ([]AssignmentView, error) {
+	open, done := false, false
+	switch state {
+	case ListOpen, "":
+		open = true
+	case ListDone:
+		done = true
+	case ListAll:
+		open, done = true, true
+	default:
+		return nil, fmt.Errorf("%s: %w: state %q", opListAssignments, ErrInvalidRequest, state)
+	}
+	as, err := s.list.ListRecentByState(ctx, open, done, MaxListedAssignments)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", opListAssignments, err)
 	}
 	lessons := s.lessons.cached()
 	out := make([]AssignmentView, 0, len(as))
 	for _, a := range as {
-		if a.Deleted() { // the store skips them already; a second guard for the readers that rely on it
+		// The store filters already; a second guard for the readers that rely on it.
+		if a.Deleted() || (a.Done() && !done) || (!a.Done() && !open) {
 			continue
 		}
 		v, err := s.view(ctx, lessons, a)
@@ -90,7 +109,8 @@ func (s *Service) view(ctx context.Context, lessons lessonFinder, a *assignment.
 // (assignment.EditByStudent). The load, the version check and the save run in one transaction.
 // Errors: invalid texts or deadline wrap assignment.ErrInvalidDetails (ErrInvalidTitle, ErrInvalidNote, ErrInvalidDue,
 // ErrInvalidTime); an unknown subject is ErrSubjectNotFound; a missing assignment wraps shared.ErrNotFound, a deleted
-// one assignment.ErrDeleted, another version shared.ErrVersionConflict. Nothing changes then.
+// one assignment.ErrDeleted, another version shared.ErrVersionConflict. Nothing changes then. The done mark (ADR-0033
+// §9) is kept: only MarkDone changes it.
 func (s *Service) EditAssignment(ctx context.Context, e AssignmentEdit) (AssignmentView, error) {
 	op := fmt.Sprintf("%s %s", opEditAssignment, e.ID)
 	now := s.clock.Now()
@@ -131,7 +151,7 @@ func (s *Service) SetAssignmentDue(ctx context.Context, id shared.AssignmentID, 
 
 // CorrectLesson stores the subject and teacher the user entered for an assignment (TASK-092): they win over the
 // schedule and the transcript hint; an empty field removes the correction of that field. The texts are cleaned to one
-// line of at most values.MaxNameRunes characters. A missing assignment wraps shared.ErrNotFound.
+// line of at most values.MaxNameRunes characters. A missing assignment wraps shared.ErrNotFound. The done mark is kept.
 func (s *Service) CorrectLesson(ctx context.Context, c LessonCorrection) (AssignmentView, error) {
 	names := values.NewLessonNames(c.Subject, c.Teacher)
 	return s.changeAssignment(ctx, c.ID, func(a *assignment.Assignment) (bool, error) {
