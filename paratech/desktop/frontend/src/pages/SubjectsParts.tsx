@@ -1,5 +1,6 @@
-import { type FormEvent, useState } from "react";
+import { type DragEvent, useState } from "react";
 import type { LibraryMaterial, LibrarySubject, SubjectOverview } from "../bindings/library.js";
+import { dropCue, folderAnchor, addToFolderLabel, isMaterialDrag, materialDragType, readMaterialDrop } from "../libraryInboxView.js";
 import {
   dayMonth,
   daysChip,
@@ -13,53 +14,34 @@ import {
   lessonTitle,
   noFresh,
   orderedFolders,
-  sizeText,
   texts,
   treeCount,
-  typeLabel,
   weekdayOf,
 } from "../libraryView.js";
-import { Button } from "../ui/Button.js";
-import { Card, EmptyState, Field, Input, ResultLine } from "../ui/controls.js";
+import { Button, IconButton } from "../ui/Button.js";
+import { Card, EmptyState, ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
 import { StatusChip } from "../ui/StatusChip.js";
+import { type FileActions, FileRows } from "./FileRows.js";
+import { NameForm } from "./NameForm.js";
+
+export { NameForm };
 
 // Names of subjects, folders and files are typed or imported text: only text nodes here, never markup.
 
-/** One-line form: a name and «Создать». The core checks the name; its refusal comes back as `error`. */
-export function NameForm(props: {
-  label: string;
-  busy: boolean;
-  error: string;
-  onSubmit(name: string): void;
-  onCancel(): void;
-}) {
-  const [name, setName] = useState("");
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (name.trim() !== "" && !props.busy) {
-      props.onSubmit(name.trim());
-    }
-  };
-  return (
-    <form className="name-form" onSubmit={submit}>
-      <Field label={props.label} error={props.error || undefined}>
-        {(id) => <Input id={id} value={name} maxLength={200} autoFocus onChange={(e) => setName(e.target.value)} />}
-      </Field>
-      <div className="acts start">
-        <Button type="submit" variant="primary" size="sm" disabled={props.busy || name.trim() === ""}>
-          {texts.create}
-        </Button>
-        <Button size="sm" variant="ghost" disabled={props.busy} onClick={props.onCancel}>
-          {texts.cancel}
-        </Button>
-      </div>
-    </form>
-  );
+/** A row of «Входящие» dragged onto the cards of the list (TASK-339). */
+export interface CardDrop {
+  /** A row is being dragged: the cards show the cue. */
+  dragging: boolean;
+  /** The files of «Входящие» a drop may carry. */
+  inboxIds: ReadonlySet<string>;
+  onDrop(subject: LibrarySubject, materialId: string): void;
+  onEnd(): void;
 }
 
-/** Semesters, each with its subjects. */
-export function SubjectList(props: { subjects: readonly LibrarySubject[]; onOpen(id: string): void; onAdd(): void }) {
+/** Semesters, each with its subjects. With `drop` the cards take a dragged file of «Входящие». */
+export function SubjectList(props: { subjects: readonly LibrarySubject[]; onOpen(id: string): void; onAdd(): void; drop?: CardDrop }) {
+  const [over, setOver] = useState("");
   if (props.subjects.length === 0) {
     return (
       <EmptyState
@@ -75,6 +57,26 @@ export function SubjectList(props: { subjects: readonly LibrarySubject[]; onOpen
       </EmptyState>
     );
   }
+  const drop = props.drop;
+  const onDragOver = (e: DragEvent<HTMLButtonElement>, id: string) => {
+    if (drop && isMaterialDrag(e.dataTransfer)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      setOver(id);
+    }
+  };
+  const onDrop = (e: DragEvent<HTMLButtonElement>, s: LibrarySubject) => {
+    if (!drop || !isMaterialDrag(e.dataTransfer)) {
+      return;
+    }
+    e.preventDefault();
+    setOver("");
+    drop.onEnd();
+    const id = readMaterialDrop(e.dataTransfer.getData(materialDragType), drop.inboxIds);
+    if (id !== null) {
+      drop.onDrop(s, id);
+    }
+  };
   return (
     <>
       {groupBySemester(props.subjects).map((g) => (
@@ -85,16 +87,29 @@ export function SubjectList(props: { subjects: readonly LibrarySubject[]; onOpen
           <ul className="subj-cards">
             {g.subjects.map((s) => (
               <li key={s.id}>
-                <button type="button" className="subj-card" onClick={() => props.onOpen(s.id)}>
+                <button
+                  type="button"
+                  className={over === s.id ? "subj-card drop" : "subj-card"}
+                  onClick={() => props.onOpen(s.id)}
+                  onDragOver={(e) => onDragOver(e, s.id)}
+                  onDragLeave={() => setOver((o) => (o === s.id ? "" : o))}
+                  onDrop={(e) => onDrop(e, s)}
+                >
                   <span className="subj-card-head">
                     <Icon name="folder" />
                     <span className="t">{s.name}</span>
                   </span>
                   <span className="small muted">{orderedFolders(s.folders).map(folderTitle).join(" · ")}</span>
-                  <span className="subj-card-open small">
-                    <span>Открыть</span>
-                    <Icon name="chevr" />
-                  </span>
+                  {drop?.dragging === true ? (
+                    <span className="subj-card-open small">
+                      <span>{dropCue(s.name)}</span>
+                    </span>
+                  ) : (
+                    <span className="subj-card-open small">
+                      <span>Открыть</span>
+                      <Icon name="chevr" />
+                    </span>
+                  )}
                 </button>
               </li>
             ))}
@@ -105,9 +120,18 @@ export function SubjectList(props: { subjects: readonly LibrarySubject[]; onOpen
   );
 }
 
+/** Scrolls the section of a folder into view; nothing without a DOM (the tests) or without the section. */
+function scrollToFolder(folderId: string) {
+  if (typeof document === "undefined") {
+    return;
+  }
+  document.getElementById(folderAnchor(folderId))?.scrollIntoView?.({ block: "start" });
+}
+
 /**
- * The tree of the subject page: semesters (collapsible), their subjects, and the folders of the open subject with the
- * number of files in each. `counts` maps a folder id to its files; null while the files are being read.
+ * The tree of the subject page: semesters (collapsible headings), their subjects, and the folders of the open subject with
+ * the number of files in each; a folder scrolls to its section. `counts` maps a folder id to its files; null while the
+ * files are being read.
  */
 export function SubjectTree(props: {
   subjects: readonly LibrarySubject[];
@@ -136,6 +160,7 @@ export function SubjectTree(props: {
           const shut = collapsed.has(g.code);
           return (
             <li key={g.code}>
+              {/* A heading of the group, not a row: it has no folder icon and the subjects below are indented under it. */}
               <button type="button" className="ti sem" aria-expanded={!shut} onClick={() => toggle(g.code)}>
                 <Icon name={shut ? "chevr" : "chev"} />
                 <span className="nm">{g.label}</span>
@@ -158,12 +183,12 @@ export function SubjectTree(props: {
                         <ul className="lv2">
                           {orderedFolders(s.folders).map((f) => (
                             <li key={f.id}>
-                              <div className="ti">
+                              <button type="button" className="ti fold" onClick={() => scrollToFolder(f.id)}>
                                 <Icon name="folder" />
                                 <span className="nm">{folderTitle(f)}</span>
                                 {props.freshFolders?.has(f.id) === true && <span className="fresh">{texts.fresh}</span>}
                                 <span className="cnt num">{treeCount(props.counts?.get(f.id))}</span>
-                              </div>
+                              </button>
                             </li>
                           ))}
                         </ul>
@@ -187,31 +212,6 @@ export function SubjectTree(props: {
         )}
       </div>
     </nav>
-  );
-}
-
-function FileRow(props: { m: LibraryMaterial; fresh?: boolean }) {
-  const { m } = props;
-  const meta = [typeLabel(m.type), sizeText(m.sizeBytes), m.textNote].filter((x) => x !== "").join(" · ");
-  return (
-    <div className="lrow" role="listitem">
-      <Icon name="doc" />
-      <div className="tx">
-        <p className="t">{m.name}</p>
-        {meta !== "" && <div className="meta num">{meta}</div>}
-      </div>
-      {props.fresh === true && <span className="fresh">{texts.fresh}</span>}
-    </div>
-  );
-}
-
-function FileRows(props: { files: readonly LibraryMaterial[]; fresh?: ReadonlySet<string> }) {
-  return (
-    <div role="list">
-      {props.files.map((m) => (
-        <FileRow key={m.id} m={m} fresh={props.fresh?.has(m.id)} />
-      ))}
-    </div>
   );
 }
 
@@ -287,6 +287,10 @@ export function SubjectDetail(props: {
   error: string;
   onCreateFolder(name: string): void;
   onCancelFolder(): void;
+  /** What the rows can do (open, move, delete); without it the rows only show the files. */
+  actions?: FileActions;
+  /** «+» in the header of a folder: the file dialog, the file lands in this folder. */
+  onAddFile?(folderId: string): void;
 }) {
   const { subject } = props;
   const fresh = props.fresh ?? noFresh;
@@ -294,17 +298,21 @@ export function SubjectDetail(props: {
     <>
       {orderedFolders(subject.folders).map((f) => {
         const files = filesOfFolder(props.materials, f.id);
+        const onAddFile = props.onAddFile;
         return (
-          <section className="section" key={f.id}>
-            <h2 className="sec-h">
-              {folderTitle(f)} <span className="cnt num">· {folderCountText(files.length)}</span>
-              {fresh.folders.has(f.id) && <span className="fresh">{texts.fresh}</span>}
-            </h2>
+          <section className="section" key={f.id} id={folderAnchor(f.id)}>
+            <div className="sec-head">
+              <h2 className="sec-h">
+                {folderTitle(f)} <span className="cnt num">· {folderCountText(files.length)}</span>
+                {fresh.folders.has(f.id) && <span className="fresh">{texts.fresh}</span>}
+              </h2>
+              {onAddFile && <IconButton icon="plus" label={addToFolderLabel(folderTitle(f))} disabled={props.busy} onClick={() => onAddFile(f.id)} />}
+            </div>
             <Card className="lrows" label={folderTitle(f)}>
               {files.length === 0 ? (
                 <p className="small muted empty-folder">{texts.emptyFolder}</p>
               ) : (
-                <FileRows files={files} fresh={fresh.materials} />
+                <FileRows files={files} where="folder" fresh={fresh.materials} actions={props.actions} />
               )}
             </Card>
           </section>
@@ -323,7 +331,7 @@ export function SubjectDetail(props: {
 }
 
 /** «Входящие»: files that no subject holds yet (dropped on the window or added by hand). */
-export function InboxList(props: { materials: readonly LibraryMaterial[] }) {
+export function InboxList(props: { materials: readonly LibraryMaterial[]; actions?: FileActions }) {
   const files = props.materials.filter((m) => !m.removed);
   if (files.length === 0) {
     return null;
@@ -334,7 +342,7 @@ export function InboxList(props: { materials: readonly LibraryMaterial[] }) {
         {texts.inbox} <span className="cnt num">· {folderCountText(files.length)}</span>
       </h2>
       <Card className="lrows" label={texts.inbox}>
-        <FileRows files={files} />
+        <FileRows files={files} where="inbox" actions={props.actions} />
       </Card>
       <p className="small muted group-foot">{texts.inboxHint}</p>
     </section>

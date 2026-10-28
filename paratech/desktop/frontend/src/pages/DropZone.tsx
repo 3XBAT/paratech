@@ -8,6 +8,7 @@ import {
   nextDepth,
   subscribeDropped,
 } from "../dropFiles.js";
+import { isMaterialDrag } from "../libraryInboxView.js";
 import { Icon } from "../ui/Icon.js";
 
 /** The report of a drop: fixed texts, one line per file. */
@@ -60,14 +61,23 @@ export function DropZone(props: { onImported?: () => void }) {
       }
     };
     const dragover = (e: DragEvent) => {
-      // Always cancelled: otherwise the drop navigates the WebView to the file.
-      e.preventDefault();
+      // Always cancelled: otherwise the drop navigates the WebView to the file. Not for the drag of a row of «Входящие»
+      // (TASK-339): it is not a file, only the cards of the subjects take it, and the overlay above never shows for it.
+      if (!isMaterialDrag(e.dataTransfer)) {
+        e.preventDefault();
+      }
     };
-    const leave = () => {
+    const leave = (e: DragEvent) => {
+      if (isMaterialDrag(e.dataTransfer)) {
+        return;
+      }
       depth.current = nextDepth(depth.current, "leave");
       setOver(depth.current > 0);
     };
     const drop = (e: DragEvent) => {
+      if (isMaterialDrag(e.dataTransfer)) {
+        return;
+      }
       // Cancelled only so the WebView does not navigate to the file; the real drop is handled in Go and arrives as
       // the "library:dropped" event below.
       e.preventDefault();

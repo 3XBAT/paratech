@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type LibraryMaterial, type LibrarySubject, libraryApi, libraryErrorText } from "../bindings/library.js";
+import { libraryInboxApi } from "../bindings/libraryInbox.js";
 import { callByName } from "../bindings/runtime.js";
+import { fileTexts, importToNote } from "../libraryInboxView.js";
 import {
   folderCounts,
   freshMarks,
@@ -15,8 +17,10 @@ import type { PageId } from "../nav.js";
 import { idleTeacher, TeacherFlow, type TeacherFocus, type TeacherState, teacherFocusStep, teacherStateFor } from "../teachersView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
+import { ErrorLine, UndoLines } from "./FileRows.js";
 import { InboxList, NameForm, OverviewSections, SubjectDetail, SubjectList, SubjectTree } from "./SubjectsParts.js";
 import { type TeacherActions, TeachersBlock } from "./TeachersBlock.js";
+import { useMaterialActions } from "./useMaterialActions.js";
 
 type Form = "none" | "subject" | "folder";
 
@@ -37,6 +41,7 @@ export function SubjectsPage(props: {
   onTeacherFocusDone?: () => void;
 }) {
   const api = useMemo(() => libraryApi(callByName), []);
+  const inboxApi = useMemo(() => libraryInboxApi(callByName), []);
   const openId = props.subjectId;
   const [subjects, setSubjects] = useState<LibrarySubject[] | null>(null);
   const [inbox, setInbox] = useState<LibraryMaterial[]>([]);
@@ -46,7 +51,14 @@ export function SubjectsPage(props: {
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [note, setNote] = useState("");
+  // The file being dragged from «Входящие» (the cards of the list show the cue) and the refusal of a drop on a card.
+  const [dragging, setDragging] = useState("");
+  const [dropError, setDropError] = useState("");
+  // Changes made here (a file placed, deleted, added into a subject): the files of the open subject are read again.
+  const [changes, setChanges] = useState(0);
   const running = useRef(false); // a double click comes before the re-render that disables the button
+  const dropping = useRef(false);
+  const lastDrop = useRef<{ s: LibrarySubject; materialId: string } | null>(null);
 
   // The teachers of the open subject (TASK-238). Their version and data come from the list (Subjects()), which the flow
   // re-reads after a call that failed or found the data out of date.
@@ -102,11 +114,19 @@ export function SubjectsPage(props: {
 
   useEffect(load, [load, props.reload]);
 
+  const refresh = useCallback(() => {
+    setDropError("");
+    load();
+    setChanges((n) => n + 1);
+  }, [load]);
+
   // Another subject (or the list): the form, the error and the note of the previous one go away.
   useEffect(() => {
     setForm("none");
     setError("");
     setNote("");
+    setDropError("");
+    setDragging("");
     setMaterials(null);
     flow.reset();
   }, [openId, flow]);
@@ -127,6 +147,7 @@ export function SubjectsPage(props: {
   const subject = subjects?.find((s) => s.id === openId) ?? null;
   const known = subject !== null;
   shown.current = subject;
+  const mat = useMaterialActions({ api, inboxApi, subjects, setSubjects, inbox, hintsOn: openId === "", refresh });
   const overview = overviewState.overview;
   const schedule = overview ? scheduleLine(overview.schedule) : "";
   const fresh = useMemo(() => freshMarks(overview), [overview]);
@@ -144,7 +165,7 @@ export function SubjectsPage(props: {
     return () => {
       active = false;
     };
-  }, [api, openId, known, props.reload]);
+  }, [api, openId, known, props.reload, changes]);
 
   // «Указать почту»: once the subject is in the list, its form for that role opens (and takes the focus); taken once.
   const { teacherFocus, onTeacherFocusDone } = props;
@@ -208,6 +229,39 @@ export function SubjectsPage(props: {
       load();
     });
 
+  // «Добавить файл» on the page of a subject: the file lands in the subject (folder "" is «Материалы»).
+  const addFileTo = (folderId: string) =>
+    run(async () => {
+      const r = await inboxApi.importFileTo(openId, folderId);
+      setNote(importToNote(r, { subjectId: openId, folderId }, subjects ?? []));
+      refresh();
+    });
+
+  // A row of «Входящие» dropped on a card: the same as «Разложить» into «Материалы», with the same undo line.
+  const dropOnCard = async (s: LibrarySubject, materialId: string) => {
+    const m = inbox.find((x) => x.id === materialId);
+    if (!m || dropping.current) {
+      return;
+    }
+    lastDrop.current = { s, materialId };
+    dropping.current = true;
+    setDropError("");
+    try {
+      setDropError(await mat.actions.place(m, s.id, ""));
+    } finally {
+      dropping.current = false;
+    }
+  };
+
+  const undoLines = <UndoLines items={mat.undo} busy={mat.undoBusy} onUndo={(it) => void mat.undoOne(it)} onRefresh={mat.refreshUndo} />;
+  const inboxIds = useMemo(() => new Set(inbox.filter((m) => !m.removed).map((m) => m.id)), [inbox]);
+  // The dragged row left «Входящие» (the drop took it): no dragend may come from a row that is gone.
+  useEffect(() => {
+    if (dragging !== "" && !inboxIds.has(dragging)) {
+      setDragging("");
+    }
+  }, [dragging, inboxIds]);
+
   const subjectForm = form === "subject" && (
     <NameForm label={texts.subjectName} busy={busy} error={error} onSubmit={(n) => void createSubject(n)} onCancel={() => setForm("none")} />
   );
@@ -242,11 +296,19 @@ export function SubjectsPage(props: {
                 {schedule !== "" && <p className="small muted sub-line">{schedule}</p>}
               </div>
               <div className="acts">
+                <Button icon="up" disabled={busy} onClick={() => void addFileTo("")}>
+                  {fileTexts.addFileTo}
+                </Button>
                 <Button icon="back" onClick={() => props.onSelect("")}>
                   {texts.back}
                 </Button>
               </div>
             </div>
+            {note !== "" && (
+              <ResultLine kind="ok" role="status">
+                {note}
+              </ResultLine>
+            )}
             {subjectForm}
             {overviewState.status === "failed" && (
               <ResultLine kind="fail" role="alert">
@@ -264,12 +326,15 @@ export function SubjectsPage(props: {
               error={error}
               onCreateFolder={(n) => void createFolder(n)}
               onCancelFolder={() => setForm("none")}
+              actions={mat.actions}
+              onAddFile={(folderId) => void addFileTo(folderId)}
             />
             {form !== "folder" && form !== "subject" && error !== "" && (
               <ResultLine kind="fail" role="alert">
                 {error}
               </ResultLine>
             )}
+            {undoLines}
           </div>
         </div>
       </section>
@@ -322,8 +387,18 @@ export function SubjectsPage(props: {
       {subjectForm}
       {subjects !== null && (
         <>
-          <SubjectList subjects={subjects} onOpen={props.onSelect} onAdd={() => setForm("subject")} />
-          <InboxList materials={inbox} />
+          <SubjectList
+            subjects={subjects}
+            onOpen={props.onSelect}
+            onAdd={() => setForm("subject")}
+            drop={{
+              dragging: dragging !== "",
+              inboxIds,
+              onDrop: (s, id) => void dropOnCard(s, id),
+              onEnd: () => setDragging(""),
+            }}
+          />
+          <InboxList materials={inbox} actions={{ ...mat.actions, dragStart: setDragging, dragEnd: () => setDragging("") }} />
           {note !== "" && (
             <ResultLine kind="ok" role="status">
               {note}
@@ -334,6 +409,19 @@ export function SubjectsPage(props: {
               {error}
             </ResultLine>
           )}
+          {dropError !== "" && (
+            <ErrorLine
+              text={dropError}
+              onRefresh={refresh}
+              onRetry={() => {
+                const again = lastDrop.current;
+                if (again) {
+                  void dropOnCard(again.s, again.materialId);
+                }
+              }}
+            />
+          )}
+          {undoLines}
         </>
       )}
     </section>
