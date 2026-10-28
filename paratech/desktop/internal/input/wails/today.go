@@ -53,7 +53,8 @@ type TodayCalendarAction struct {
 }
 
 // TodayPost is a post after a lesson: «Конспект готов · Найдено ДЗ до 24.10 · [Да, в календарь] [Открыть]».
-// «Открыть» opens the summary of RecordingID when SummaryReady.
+// «Открыть» opens the summary of RecordingID when SummaryReady. Homework counts the assignments found, done ones too;
+// HomeworkDone how many of them are marked «Выполнено» (ADR-0033 §9).
 type TodayPost struct {
 	RecordingID  string                `json:"recordingId"`
 	TranscriptID string                `json:"transcriptId"`
@@ -61,6 +62,7 @@ type TodayPost struct {
 	Headline     string                `json:"headline"`
 	SummaryReady bool                  `json:"summaryReady"`
 	Homework     int                   `json:"homework"`
+	HomeworkDone int                   `json:"homeworkDone"`
 	EarliestDue  string                `json:"earliestDue"`
 	Calendar     []TodayCalendarAction `json:"calendar"`
 	ShownAt      string                `json:"shownAt"`
@@ -208,8 +210,9 @@ func todayPosts(list []todayfeed.PostView) []TodayPost {
 func todayPost(p todayfeed.PostView) TodayPost {
 	out := TodayPost{
 		RecordingID: p.Recording.String(), TranscriptID: p.Transcript.String(), Lesson: todayLesson(p.Lesson),
-		Headline: p.Headline, SummaryReady: p.SummaryReady, Homework: p.Homework, EarliestDue: timeText(p.EarliestDue),
-		Calendar: make([]TodayCalendarAction, 0, len(p.Calendar)), ShownAt: timeText(p.ShownAt),
+		Headline: p.Headline, SummaryReady: p.SummaryReady, Homework: p.Homework, HomeworkDone: p.HomeworkDone,
+		EarliestDue: timeText(p.EarliestDue),
+		Calendar:    make([]TodayCalendarAction, 0, len(p.Calendar)), ShownAt: timeText(p.ShownAt),
 	}
 	for _, c := range p.Calendar {
 		out.Calendar = append(out.Calendar, TodayCalendarAction{

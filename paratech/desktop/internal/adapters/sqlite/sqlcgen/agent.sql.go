@@ -106,7 +106,7 @@ func (q *Queries) GetAgentActionByCall(ctx context.Context, arg GetAgentActionBy
 
 const getAgentThread = `-- name: GetAgentThread :one
 
-SELECT id, title, turns, history_from, seen, archived_at, last_active_at, version, created_at, updated_at FROM agent_threads WHERE id = ?1
+SELECT id, title, turns, history_from, seen, archived_at, last_active_at, version, created_at, updated_at, summary_text, summary_through, summary_at, forked_from FROM agent_threads WHERE id = ?1
 `
 
 // The agent panel (TASK-116): chats (threads) with their current request, the history sent to the planner and the
@@ -125,12 +125,16 @@ func (q *Queries) GetAgentThread(ctx context.Context, id string) (AgentThread, e
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SummaryText,
+		&i.SummaryThrough,
+		&i.SummaryAt,
+		&i.ForkedFrom,
 	)
 	return i, err
 }
 
 const getAgentTurn = `-- name: GetAgentTurn :one
-SELECT thread_id, number, status, resume_status, stop_reason, scope, mentions, steps, writes, paid_unplanned, planner_input, question_rounds, step_open, retry, proposed_plan, approved_plan, used, open_calls, created_ids, dropped_by, started_at, updated_at FROM agent_turns WHERE thread_id = ?1 AND number = ?2
+SELECT thread_id, number, status, resume_status, stop_reason, scope, mentions, steps, writes, paid_unplanned, planner_input, question_rounds, step_open, retry, proposed_plan, approved_plan, used, open_calls, created_ids, dropped_by, started_at, updated_at, reply_line FROM agent_turns WHERE thread_id = ?1 AND number = ?2
 `
 
 type GetAgentTurnParams struct {
@@ -164,12 +168,13 @@ func (q *Queries) GetAgentTurn(ctx context.Context, arg GetAgentTurnParams) (Age
 		&i.DroppedBy,
 		&i.StartedAt,
 		&i.UpdatedAt,
+		&i.ReplyLine,
 	)
 	return i, err
 }
 
 const getCurrentAgentThread = `-- name: GetCurrentAgentThread :one
-SELECT id, title, turns, history_from, seen, archived_at, last_active_at, version, created_at, updated_at FROM agent_threads
+SELECT id, title, turns, history_from, seen, archived_at, last_active_at, version, created_at, updated_at, summary_text, summary_through, summary_at, forked_from FROM agent_threads
 WHERE archived_at IS NULL
 ORDER BY last_active_at DESC, id DESC
 LIMIT 1
@@ -190,6 +195,10 @@ func (q *Queries) GetCurrentAgentThread(ctx context.Context) (AgentThread, error
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SummaryText,
+		&i.SummaryThrough,
+		&i.SummaryAt,
+		&i.ForkedFrom,
 	)
 	return i, err
 }
@@ -265,22 +274,27 @@ func (q *Queries) InsertAgentStep(ctx context.Context, arg InsertAgentStepParams
 }
 
 const insertAgentThread = `-- name: InsertAgentThread :exec
-INSERT INTO agent_threads (id, title, turns, history_from, seen, archived_at, last_active_at, version, created_at,
-                           updated_at)
+INSERT INTO agent_threads (id, title, turns, history_from, seen, archived_at, last_active_at, summary_text,
+                           summary_through, summary_at, forked_from, version, created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6,
-        ?7, 1, ?8, ?9)
+        ?7, ?8, ?9, ?10,
+        ?11, 1, ?12, ?13)
 `
 
 type InsertAgentThreadParams struct {
-	ID           string
-	Title        string
-	Turns        int64
-	HistoryFrom  int64
-	Seen         string
-	ArchivedAt   sql.NullInt64
-	LastActiveAt int64
-	CreatedAt    int64
-	UpdatedAt    int64
+	ID             string
+	Title          string
+	Turns          int64
+	HistoryFrom    int64
+	Seen           string
+	ArchivedAt     sql.NullInt64
+	LastActiveAt   int64
+	SummaryText    sql.NullString
+	SummaryThrough sql.NullInt64
+	SummaryAt      sql.NullInt64
+	ForkedFrom     sql.NullString
+	CreatedAt      int64
+	UpdatedAt      int64
 }
 
 // A never-stored thread (version 0) is inserted with version 1.
@@ -293,6 +307,10 @@ func (q *Queries) InsertAgentThread(ctx context.Context, arg InsertAgentThreadPa
 		arg.Seen,
 		arg.ArchivedAt,
 		arg.LastActiveAt,
+		arg.SummaryText,
+		arg.SummaryThrough,
+		arg.SummaryAt,
+		arg.ForkedFrom,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -302,12 +320,12 @@ func (q *Queries) InsertAgentThread(ctx context.Context, arg InsertAgentThreadPa
 const insertAgentTurn = `-- name: InsertAgentTurn :exec
 INSERT INTO agent_turns (thread_id, number, status, resume_status, stop_reason, scope, mentions, steps, writes,
                          paid_unplanned, planner_input, question_rounds, step_open, retry, proposed_plan, approved_plan,
-                         used, open_calls, created_ids, started_at, updated_at)
+                         used, open_calls, created_ids, reply_line, started_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5,
         ?6, ?7, ?8, ?9, ?10, ?11,
         ?12, ?13, ?14, ?15,
         ?16, ?17, ?18, ?19, ?20,
-        ?21)
+        ?21, ?22)
 `
 
 type InsertAgentTurnParams struct {
@@ -330,6 +348,7 @@ type InsertAgentTurnParams struct {
 	Used           string
 	OpenCalls      string
 	CreatedIds     string
+	ReplyLine      sql.NullString
 	StartedAt      int64
 	UpdatedAt      int64
 }
@@ -355,6 +374,7 @@ func (q *Queries) InsertAgentTurn(ctx context.Context, arg InsertAgentTurnParams
 		arg.Used,
 		arg.OpenCalls,
 		arg.CreatedIds,
+		arg.ReplyLine,
 		arg.StartedAt,
 		arg.UpdatedAt,
 	)
@@ -425,9 +445,10 @@ func (q *Queries) ListAgentActionsByThread(ctx context.Context, arg ListAgentAct
 }
 
 const listAgentSteps = `-- name: ListAgentSteps :many
-SELECT s.thread_id, s.seq, s.turn, s.entry, s.body, s.created_at FROM agent_steps s
+SELECT s.thread_id, s.seq, s.turn, s.entry, s.body, s.created_at, u.reply_line FROM agent_steps s
+LEFT JOIN agent_turns u ON u.thread_id = s.thread_id AND u.number = s.turn
 WHERE s.thread_id = ?1 AND s.turn >= ?2
-  AND NOT EXISTS (SELECT 1 FROM agent_turns u WHERE u.thread_id = s.thread_id AND u.number = s.turn AND u.dropped_by > 0)
+  AND (u.dropped_by IS NULL OR u.dropped_by = 0)
 ORDER BY s.seq DESC
 LIMIT ?3
 `
@@ -438,17 +459,28 @@ type ListAgentStepsParams struct {
 	MaxRows  int64
 }
 
-// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first). Entries
-// of dropped requests are left out here, so they never take a place under the limit (ADR-0028).
-func (q *Queries) ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) ([]AgentStep, error) {
+type ListAgentStepsRow struct {
+	ThreadID  string
+	Seq       int64
+	Turn      int64
+	Entry     string
+	Body      string
+	CreatedAt int64
+	ReplyLine sql.NullString
+}
+
+// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first), each
+// with the frozen reply line of its request. Entries of dropped requests are left out here, so they never take a place
+// under the limit (ADR-0028).
+func (q *Queries) ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) ([]ListAgentStepsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAgentSteps, arg.ThreadID, arg.FromTurn, arg.MaxRows)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AgentStep{}
+	items := []ListAgentStepsRow{}
 	for rows.Next() {
-		var i AgentStep
+		var i ListAgentStepsRow
 		if err := rows.Scan(
 			&i.ThreadID,
 			&i.Seq,
@@ -456,6 +488,7 @@ func (q *Queries) ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) 
 			&i.Entry,
 			&i.Body,
 			&i.CreatedAt,
+			&i.ReplyLine,
 		); err != nil {
 			return nil, err
 		}
@@ -658,15 +691,19 @@ func (q *Queries) UpdateAgentAction(ctx context.Context, arg UpdateAgentActionPa
 
 const updateAgentThread = `-- name: UpdateAgentThread :execrows
 UPDATE agent_threads
-SET title          = ?1,
-    turns          = ?2,
-    history_from   = ?3,
-    seen           = ?4,
-    archived_at    = ?5,
-    last_active_at = ?6,
-    version        = version + 1,
-    updated_at     = ?7
-WHERE id = ?8 AND version = ?9
+SET title           = ?1,
+    turns           = ?2,
+    history_from    = ?3,
+    seen            = ?4,
+    archived_at     = ?5,
+    last_active_at  = ?6,
+    summary_text    = ?7,
+    summary_through = ?8,
+    summary_at      = ?9,
+    forked_from     = ?10,
+    version         = version + 1,
+    updated_at      = ?11
+WHERE id = ?12 AND version = ?13
 `
 
 type UpdateAgentThreadParams struct {
@@ -676,6 +713,10 @@ type UpdateAgentThreadParams struct {
 	Seen            string
 	ArchivedAt      sql.NullInt64
 	LastActiveAt    int64
+	SummaryText     sql.NullString
+	SummaryThrough  sql.NullInt64
+	SummaryAt       sql.NullInt64
+	ForkedFrom      sql.NullString
 	UpdatedAt       int64
 	ID              string
 	ExpectedVersion int64
@@ -690,6 +731,10 @@ func (q *Queries) UpdateAgentThread(ctx context.Context, arg UpdateAgentThreadPa
 		arg.Seen,
 		arg.ArchivedAt,
 		arg.LastActiveAt,
+		arg.SummaryText,
+		arg.SummaryThrough,
+		arg.SummaryAt,
+		arg.ForkedFrom,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.ExpectedVersion,

@@ -391,6 +391,20 @@ func request(cmd Command) (values.AgentRequest, error) {
 	if err != nil {
 		return values.AgentRequest{}, err
 	}
+	if len(cmd.Scope.Mentions) > values.MaxAgentMentions {
+		return values.AgentRequest{}, fmt.Errorf("%w: more than %d mentions", values.ErrInvalidAgentRequest, values.MaxAgentMentions)
+	}
+	mentions := make([]values.Mention, 0, len(cmd.Scope.Mentions))
+	for _, m := range cmd.Scope.Mentions {
+		mention, err := values.NewMention(m.Kind, m.ID, m.Current)
+		if err != nil {
+			return values.AgentRequest{}, err
+		}
+		mentions = append(mentions, mention)
+	}
+	if scope, err = scope.WithMentions(mentions); err != nil {
+		return values.AgentRequest{}, err
+	}
 	if len(cmd.Turns) > values.MaxAgentTurns {
 		return values.AgentRequest{}, fmt.Errorf("%w: a request holds 1-%d turns", values.ErrInvalidAgentRequest, values.MaxAgentTurns)
 	}
@@ -411,6 +425,8 @@ func turnOf(t Turn) (values.Turn, error) {
 		return values.StudentTurn(t.StudentText)
 	case values.TurnAgentReply:
 		return values.AgentReplyTurn(t.AgentReply)
+	case values.TurnHistorySummary:
+		return values.HistorySummaryTurn(t.Summary)
 	case values.TurnCalls:
 		if len(t.Calls) > values.MaxAgentCalls {
 			return values.Turn{}, fmt.Errorf("%w: an echo holds 1-%d calls", values.ErrInvalidAgentRequest, values.MaxAgentCalls)

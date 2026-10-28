@@ -320,6 +320,42 @@ export interface UpdateView {
   /** A step went to the Hub: no cards; apply the status only and keep the cards shown. False from an older core. */
   progress: boolean;
   cards: CardView[];
+  /** How full the context of the chat is; non-null only once the request has ended. Null: unknown, leave the ring as is. */
+  fill: ContextFill | null;
+}
+
+/** How full the model context of a chat is. The core decides the level; the page never derives it from the percent. */
+export type ContextFillLevel = "normal" | "high" | "full";
+
+export const contextFillLevels: readonly ContextFillLevel[] = ["normal", "high", "full"];
+
+export interface ContextFill {
+  /** Integer 0..100. */
+  percent: number;
+  level: ContextFillLevel;
+  /** The context overflowed and was cut. */
+  overflow: boolean;
+}
+
+/**
+ * Strict and never throws: absent, null or malformed (percent not an integer 0..100, unknown level, overflow not a
+ * boolean) reads as null, so the ring stays as it was.
+ */
+export function parseFill(raw: unknown): ContextFill | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return null;
+  }
+  const { percent, level, overflow } = raw as Record<string, unknown>;
+  if (typeof percent !== "number" || !Number.isInteger(percent) || percent < 0 || percent > 100) {
+    return null;
+  }
+  if (typeof level !== "string" || !(contextFillLevels as readonly string[]).includes(level)) {
+    return null;
+  }
+  if (typeof overflow !== "boolean") {
+    return null;
+  }
+  return { percent, level: level as ContextFillLevel, overflow };
 }
 
 /**
@@ -597,6 +633,7 @@ export function parseUpdate(raw: unknown): UpdateView {
     problem: str(r, "problem", w),
     progress: flag(r, "progress"),
     cards,
+    fill: parseFill(r.fill),
   };
 }
 
@@ -690,6 +727,8 @@ export interface ChatView {
   archived: boolean;
   lastActive: string;
   running: boolean;
+  /** Context fill at the end of the chat's last request; null when the fill could not be read. */
+  fill: ContextFill | null;
 }
 
 /** The chat list: unarchived chats newest first, then the archive. */
@@ -735,6 +774,7 @@ export function parseChat(raw: unknown): ChatView {
     archived: flag(r, "archived"),
     lastActive: optStr(r, "lastActive", w),
     running: flag(r, "running"),
+    fill: parseFill(r.fill),
   };
 }
 

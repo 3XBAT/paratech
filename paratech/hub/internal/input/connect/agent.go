@@ -49,6 +49,11 @@ func (g *Gateway) AgentStep(ctx context.Context, req *connectrpc.Request[hubv1.A
 			LessonID: m.GetScope().GetLessonId(), AssignmentID: m.GetScope().GetAssignmentId(),
 		},
 	}
+	for _, mention := range m.GetScope().GetMentions() {
+		cmd.Scope.Mentions = append(cmd.Scope.Mentions, agentstep.Mention{
+			Kind: mentionKindOf(mention.GetKind()), ID: mention.GetId(), Current: mention.GetCurrent(),
+		})
+	}
 	for _, s := range m.GetBase().GetSubjects() {
 		cmd.Base.Subjects = append(cmd.Base.Subjects, values.Subject{ID: s.GetSubjectId(), Name: s.GetName()})
 	}
@@ -85,6 +90,8 @@ func turnOf(t *hubv1.AgentTurn) agentstep.Turn {
 		return agentstep.Turn{Kind: values.TurnStudentText, StudentText: v.StudentText}
 	case *hubv1.AgentTurn_AgentReply:
 		return agentstep.Turn{Kind: values.TurnAgentReply, AgentReply: v.AgentReply}
+	case *hubv1.AgentTurn_HistorySummary:
+		return agentstep.Turn{Kind: values.TurnHistorySummary, Summary: v.HistorySummary}
 	case *hubv1.AgentTurn_Calls:
 		out := agentstep.Turn{Kind: values.TurnCalls, Seal: v.Calls.GetSeal()}
 		for _, c := range v.Calls.GetCalls() {
@@ -109,6 +116,23 @@ func profileOf(p hubv1.AgentProfile) string {
 		return string(values.ProfilePanel)
 	}
 	return ""
+}
+
+// mentionKindOf maps the contract enum to the domain kind; UNSPECIFIED and unknown values map to "", which the domain
+// rejects.
+func mentionKindOf(k hubv1.AgentMentionKind) values.MentionKind {
+	switch k {
+	case hubv1.AgentMentionKind_AGENT_MENTION_KIND_SUBJECT:
+		return values.MentionSubject
+	case hubv1.AgentMentionKind_AGENT_MENTION_KIND_LESSON:
+		return values.MentionLesson
+	case hubv1.AgentMentionKind_AGENT_MENTION_KIND_MATERIAL:
+		return values.MentionMaterial
+	case hubv1.AgentMentionKind_AGENT_MENTION_KIND_ASSIGNMENT:
+		return values.MentionAssignment
+	default:
+		return ""
+	}
 }
 
 // screenOf maps the contract enum to the domain screen; an unknown value maps to a name the domain rejects.
