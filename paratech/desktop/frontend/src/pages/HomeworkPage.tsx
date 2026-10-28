@@ -51,6 +51,8 @@ import {
 } from "../homeworkView";
 import { lessonText } from "../lessonLabel";
 import { initialListState, type ListState } from "../listView";
+import { useRecipientNav } from "../recipientNav";
+import { isRefusal, type RecipientView, recipientView, refusalAction } from "../recipientView";
 import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Field, Input, ResultLine, type ResultKind, Row } from "../ui/controls";
 import { StatusChip } from "../ui/StatusChip";
@@ -58,6 +60,7 @@ import { FilterCounters, filterEmpty } from "./AssignmentFilter";
 import { AddAssignmentDialog, EditAssignmentDialog, RemovedLine, SendAgainDialog, SendDialog, type SendResult } from "./HomeworkDialogs";
 import { HomeworkTurnkey } from "./HomeworkTurnkey";
 import { LessonCorrection } from "./LessonCorrection";
+import { RefusalButton } from "./RecipientParts";
 import { TranscriptLinks } from "./TranscriptLinks";
 
 // «Домашние задания» (PRD section 10): the assignments, and for the opened one the draft editor, the extra
@@ -374,6 +377,9 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState<Message | null>(null);
   const [sendOpen, setSendOpen] = useState<SendOpen | null>(null);
+  // A send the core refused for its recipient (no address, no subject): the text and the way out, under the buttons.
+  const [refusal, setRefusal] = useState<Extract<RecipientView, { kind: "no_email" | "no_subject" }> | null>(null);
+  const nav = useRecipientNav();
   // The attachment the next send dialog starts with: the student's last choice on this page.
   const [sendFormat, setSendFormat] = useState<SendFormat>(defaultSendFormat);
   const [sendAgain, setSendAgain] = useState<DeliveryItem | null>(null);
@@ -575,6 +581,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
     acting.current = true;
     setBusy(key);
     setMessage(null);
+    setRefusal(null);
     try {
       await action();
     } catch (err) {
@@ -687,6 +694,16 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
     return { prep, version: exported.version, switching: false, problem: "" };
   }
 
+  // A refused preparation: a refusal for its recipient comes with its way out, any other reason is the core's message.
+  const showRefused = (prep: SendPreparation) => {
+    const v = recipientView(prep);
+    if (isRefusal(v)) {
+      setRefusal(v);
+    } else {
+      setMessage({ kind: "fail", text: prep.message, at: "draft" });
+    }
+  };
+
   const startSend = () =>
     act("send", async () => {
       if (shown === null) {
@@ -704,15 +721,17 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
         pendingSend.current = prep.proposalId;
         setSendOpen(open);
       } else {
-        setMessage({ kind: "fail", text: prep.message, at: "draft" });
+        showRefused(prep);
       }
     });
 
   // Another attachment format in the dialog: a new export and preparation of the same version. Only a ready one
-  // replaces the shown send, which is then cancelled; otherwise the dialog keeps it and says why.
-  async function switchFormat(format: SendFormat) {
+  // replaces the shown send, which is then cancelled; otherwise the dialog keeps it and says why. `again` prepares the
+  // same format anew («Обновить» of a question whose teachers changed); a refusal then closes the dialog.
+  async function switchFormat(format: SendFormat, again = false) {
     const open = sendOpen;
-    if (open === null || switchingFormat.current || !sendFormatChange(open.prep.attachmentFormat, format, open.switching)) {
+    const allowed = open !== null && (again ? !open.switching : sendFormatChange(open.prep.attachmentFormat, format, open.switching));
+    if (open === null || switchingFormat.current || !allowed) {
       return;
     }
     switchingFormat.current = true;
@@ -733,6 +752,14 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
         if (old !== "") {
           void api.cancelSend(old).catch(() => undefined);
         }
+      } else if (again) {
+        const gone = pendingSend.current;
+        pendingSend.current = "";
+        setSendOpen(null);
+        if (gone !== "") {
+          void api.cancelSend(gone).catch(() => undefined);
+        }
+        showRefused(next.prep);
       } else {
         setSendOpen({ ...open, switching: false, problem: next.prep.message });
       }
@@ -1016,6 +1043,23 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
           </>
         )}
         {message?.at === "draft" && <MessageLine message={message} />}
+        {refusal !== null && (
+          <div className="rcp-refusal">
+            <ResultLine kind="fail" role="alert">
+              {refusal.text}
+            </ResultLine>
+            <div className="acts start">
+              <RefusalButton
+                action={refusalAction(refusal, "page")}
+                nav={nav}
+                onChooseSubject={() => {
+                  setRefusal(null);
+                  setEditing(true);
+                }}
+              />
+            </div>
+          </div>
+        )}
       </Card>
 
       <Card className="box">
@@ -1152,6 +1196,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
           switching={sendOpen.switching}
           problem={sendOpen.problem}
           onFormat={(f) => void switchFormat(f)}
+          onRefresh={() => void switchFormat(sendOpen.prep.attachmentFormat, true)}
           onClose={sendClosed}
         />
       )}

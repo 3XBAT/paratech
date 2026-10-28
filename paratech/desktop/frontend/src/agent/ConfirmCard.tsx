@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 // The .js extensions let the Node test runner load the compiled card.
 import type { AgentConfirmApi, ConfirmCard as CardData, ConfirmTarget } from "../bindings/agentConfirm.js";
+import type { TeacherRole } from "../bindings/recipient.js";
 import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
 import { type ConfirmCardModel, ConfirmFlow, confirmCardModel, confirmTexts, type FlowState, initialFlow } from "../agentConfirmView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { type RecipientNav, useRecipientNav } from "../recipientNav.js";
+import { isRefusal, recipientTexts, refusalAction } from "../recipientView.js";
+import { RecipientName, RefusalButton, TeacherChoiceGroup } from "../pages/RecipientParts.js";
 import { RecordingDeleteDialog } from "../pages/RecordingDeleteDialog.js";
 
 // Every value of the card is a React text node: React escapes it, so markup in a title, an address or a file name
@@ -18,9 +22,17 @@ export function ConfirmCardView(props: {
   error: string;
   onYes: () => void;
   onNo: () => void;
+  /** «Кому отправить?»: the role clicked so far ("" none) and the click. Without onChoose the options are read-only. */
+  chosenRole?: TeacherRole | "";
+  onChoose?: (role: TeacherRole) => void;
+  /** The way out of a refusal («Указать почту», «Открыть задание»); without it the buttons do nothing. */
+  nav?: RecipientNav;
+  /** «Обновить карточку» of a question with nothing to choose from. */
+  onRefresh?: () => void;
 }) {
   const { model: m } = props;
   const off = props.busy !== "";
+  const rv = m.recipient;
   return (
     <section className="ag-card ag-confirm">
       <h3 className="ag-card-h">
@@ -32,10 +44,32 @@ export function ConfirmCardView(props: {
           {m.rows.map((r) => (
             <div key={r.label} className="ag-conf-row">
               <dt className="small muted">{r.label}</dt>
-              <dd>{r.value}</dd>
+              <dd>{r.address === undefined ? r.value : <RecipientName name={r.value} address={r.address} />}</dd>
             </div>
           ))}
         </dl>
+      )}
+      {rv.kind === "choose" && (
+        <TeacherChoiceGroup
+          options={rv.options}
+          value={props.chosenRole ?? ""}
+          disabled={off || props.onChoose === undefined}
+          onChange={(role) => props.onChoose?.(role)}
+        />
+      )}
+      {rv.kind === "choice_changed" && (
+        <>
+          <ResultLine kind="fail" role="alert">
+            {recipientTexts.choiceChanged}
+          </ResultLine>
+          {props.onRefresh !== undefined && (
+            <div className="ag-actions">
+              <Button size="sm" disabled={off} busy={props.busy === "refresh"} busyLabel={confirmTexts.working} onClick={props.onRefresh}>
+                {recipientTexts.refresh}
+              </Button>
+            </div>
+          )}
+        </>
       )}
       {m.items.length > 0 && (
         <ul className="ag-list small">
@@ -55,11 +89,21 @@ export function ConfirmCardView(props: {
           {m.outcome}
         </p>
       )}
-      {m.outcome === "" && <p className="small muted">{m.note}</p>}
+      {m.outcome === "" && isRefusal(rv) && (
+        <ResultLine kind="fail" role="alert">
+          {rv.text}
+        </ResultLine>
+      )}
+      {m.outcome === "" && !isRefusal(rv) && <p className="small muted">{m.note}</p>}
       {props.error !== "" && (
         <ResultLine kind="fail" role="alert">
           {props.error}
         </ResultLine>
+      )}
+      {isRefusal(rv) && props.nav !== undefined && (
+        <div className="ag-actions">
+          <RefusalButton action={refusalAction(rv, "card")} nav={props.nav} disabled={off} />
+        </div>
       )}
       {(m.yes || m.no) && (
         <div className="ag-actions">
@@ -70,7 +114,15 @@ export function ConfirmCardView(props: {
             </Button>
           )}
           {m.yes && (
-            <Button size="sm" variant="danger" disabled={off} busy={props.busy === "confirm"} busyLabel={confirmTexts.working} onClick={props.onYes}>
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={off || m.yesBlocked !== ""}
+              disabledReason={m.yesBlocked !== "" ? m.yesBlocked : undefined}
+              busy={props.busy === "confirm"}
+              busyLabel={confirmTexts.working}
+              onClick={props.onYes}
+            >
               {confirmTexts.yes}
             </Button>
           )}
@@ -92,6 +144,7 @@ export function ConfirmCard(props: {
   onCard?: (card: CardData) => void;
 }) {
   const [state, setState] = useState<FlowState>(initialFlow);
+  const nav = useRecipientNav();
   const { onCard } = props;
   const shown = state.card;
   useEffect(() => {
@@ -141,9 +194,13 @@ export function ConfirmCard(props: {
   return (
     <>
       <ConfirmCardView
-        model={confirmCardModel(card)}
+        model={confirmCardModel(card, state.chosenRole)}
         busy={state.busy}
         error={state.error}
+        chosenRole={state.chosenRole}
+        nav={nav}
+        onChoose={(role) => flow.choose(role)}
+        onRefresh={() => void flow.refresh()}
         onYes={() => void flow.yes()}
         onNo={() => void flow.no()}
       />
