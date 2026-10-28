@@ -339,6 +339,7 @@ type Setting struct {
 	StudentFaculty          string
 	StudentCity             string
 	FreeWorkNotice          int64
+	NoteRecognition         string
 }
 
 type SttModel struct {

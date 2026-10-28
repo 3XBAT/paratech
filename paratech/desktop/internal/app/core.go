@@ -408,6 +408,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return fmt.Errorf("app: preferences: %w", err)
 	}
+	prefs.WithRecognitionLanguages(newOCRLanguages())
 	// The time estimates use the processor count the engine runs with (ADR-0016).
 	speed, err := sttspeed.New(sttspeed.Deps{
 		Models: sqlite.NewModelRepository(db), Catalog: embeddedCatalog{}, Speeds: speeds, Settings: settings,

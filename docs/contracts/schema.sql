@@ -894,3 +894,8 @@ CREATE TABLE subject_teachers (
     email      TEXT NOT NULL CHECK (length(email) BETWEEN 1 AND 254),
     PRIMARY KEY (subject_id, role)
 );
+
+-- Migration 0045.
+-- settings: who recognises the text of photo pages of a note (settings.NoteRecognition): 'off' (the default, also of
+-- the existing row) or 'local' (Windows OCR on this computer).
+ALTER TABLE settings ADD COLUMN note_recognition TEXT NOT NULL DEFAULT 'off' CHECK (note_recognition IN ('off', 'local'));

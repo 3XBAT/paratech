@@ -88,8 +88,9 @@ func settingsFromRow(row sqlcgen.Setting) (*settings.Settings, error) {
 			FullName: row.StudentFullName, Group: row.StudentGroup, University: row.StudentUniversity,
 			Faculty: row.StudentFaculty, City: row.StudentCity,
 		},
-		FreeWorkNotice: row.FreeWorkNotice != 0,
-		UpdatedAt:      settingsFromMs(row.UpdatedAt),
+		FreeWorkNotice:  row.FreeWorkNotice != 0,
+		NoteRecognition: settings.NoteRecognition(row.NoteRecognition),
+		UpdatedAt:       settingsFromMs(row.UpdatedAt),
 	})
 }
 
@@ -113,6 +114,7 @@ func settingsInsertParams(s *settings.Settings) sqlcgen.InsertSettingsParams {
 		StudentFaculty:          profile.Faculty,
 		StudentCity:             profile.City,
 		FreeWorkNotice:          settingsBool(s.FreeWorkNotice()),
+		NoteRecognition:         s.NoteRecognition().String(),
 		UpdatedAt:               settingsMs(s.UpdatedAt()),
 	}
 }
@@ -137,6 +139,7 @@ func settingsUpdateParams(s *settings.Settings) sqlcgen.UpdateSettingsParams {
 		StudentFaculty:          p.StudentFaculty,
 		StudentCity:             p.StudentCity,
 		FreeWorkNotice:          p.FreeWorkNotice,
+		NoteRecognition:         p.NoteRecognition,
 		UpdatedAt:               p.UpdatedAt,
 		ExpectedVersion:         s.Version(),
 	}
