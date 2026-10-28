@@ -11,6 +11,7 @@ export const methods = {
   subjects: `${service}.Subjects`,
   createSubject: `${service}.CreateSubject`,
   createFolder: `${service}.CreateFolder`,
+  removeSubject: `${service}.RemoveSubject`,
   materials: `${service}.Materials`,
   importFile: `${service}.ImportFile`,
   openMaterial: `${service}.OpenMaterial`,
@@ -53,6 +54,22 @@ export const errorTexts: readonly string[] = [
 ];
 
 export const genericError = "Не удалось выполнить действие.";
+
+/**
+ * The refusals after which the lists are out of date: the way out is «Обновить список», not a repeat. Exact texts (the
+ * ones above and in openTexts), so a reworded message cannot silently change the button; test/libraryInbox.test.mjs
+ * checks that every known text has its way and that each of these is still a known text.
+ */
+export const refreshTexts: readonly string[] = [
+  "Неверный идентификатор: обновите список.",
+  "Предмет с таким названием уже есть.",
+  "Папка с таким именем уже есть.",
+  "Предмет не найден: обновите список.",
+  "Папка не найдена: обновите список.",
+  "Файл не найден: обновите список.",
+  "Занятие не найдено в расписании.",
+  "Файл не найден: возможно, его удалили.",
+];
 
 function errorMessage(err: unknown): string {
   if (typeof err === "string") {
@@ -139,6 +156,8 @@ export interface LibraryMaterial {
 export interface LibraryImport {
   cancelled: boolean;
   existing: boolean;
+  /** ImportFileTo only: the file is kept but did not land in the target; it lies in «Входящие» (no error was returned). */
+  notPlaced: boolean;
   material: LibraryMaterial | null;
 }
 
@@ -255,6 +274,7 @@ export function parseImport(raw: unknown): LibraryImport {
   return {
     cancelled: r.cancelled === true,
     existing: r.existing === true,
+    notPlaced: r.notPlaced === true,
     material: r.material === null || r.material === undefined ? null : parseMaterial(r.material),
   };
 }
@@ -417,9 +437,11 @@ export interface LibraryApi {
   /** Records the opening once the overview is shown, so the next visit marks only what is newer. */
   markSubjectOpened(subjectId: string): Promise<void>;
   subjects(): Promise<LibrarySubject[]>;
-  /** semester is a code or "" for the current one. */
-  createSubject(name: string, semester: string): Promise<LibrarySubject>;
+  /** semester is a code or "" for the current one; aliases are other spellings of the name (none by default). */
+  createSubject(name: string, semester: string, aliases?: readonly string[]): Promise<LibrarySubject>;
   createFolder(subjectId: string, name: string): Promise<LibraryFolder>;
+  /** Removes a subject that holds nothing; the core refuses otherwise (a rejected call). */
+  removeSubject(subjectId: string): Promise<void>;
   /** The files of a subject, or of «Входящие» for "". */
   materials(subjectId: string): Promise<LibraryMaterial[]>;
   /** «Добавить файл»: the native open dialog. */
@@ -439,8 +461,11 @@ export function libraryApi(call: CallByName): LibraryApi {
       await call(methods.markSubjectOpened, subjectId);
     },
     subjects: async () => list(await call(methods.subjects), "subjects", parseSubject),
-    createSubject: async (name, semester) => parseSubject(await call(methods.createSubject, name, [], semester)),
+    createSubject: async (name, semester, aliases = []) => parseSubject(await call(methods.createSubject, name, [...aliases], semester)),
     createFolder: async (subjectId, name) => parseFolder(await call(methods.createFolder, subjectId, name)),
+    removeSubject: async (subjectId) => {
+      await call(methods.removeSubject, subjectId);
+    },
     materials: async (subjectId) => list(await call(methods.materials, subjectId), "materials", parseMaterial),
     importFile: async () => parseImport(await call(methods.importFile)),
     openMaterial: async (id) => {
