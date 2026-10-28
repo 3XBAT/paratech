@@ -497,9 +497,9 @@ test("a retry repeats the same send; a refused export opens no send dialog", () 
   const dialogs = code("pages/HomeworkDialogs.tsx");
   assert.equal(count(dialogs, ".prepareSend("), 0, "the dialog never prepares a new send");
   assert.equal(
-    count(dialogs, ".confirmSend(props.prep.proposalId, props.prep.subject, props.prep.attachmentFormat)"),
+    count(dialogs, ".confirmSend(props.prep.proposalId, props.prep.subject, props.prep.attachmentFormat, choice)"),
     1,
-    "confirmSend takes the dialog's own send, the subject and the format it shows",
+    "confirmSend takes the dialog's own send, the subject and the format it shows, and the option clicked (TASK-238)",
   );
   assert.match(dialogs, /retry \? "Повторить" : "Отправить"/);
 

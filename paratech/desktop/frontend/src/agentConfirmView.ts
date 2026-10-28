@@ -8,6 +8,8 @@ import {
   confirmErrorText,
   type ConfirmTarget,
 } from "./bindings/agentConfirm.js";
+import type { TeacherRole } from "./bindings/recipient.js";
+import { choiceOf, isRefusal, type RecipientView, recipientView, sendBlocked } from "./recipientView.js";
 import { dueText, shortDate, timeText } from "./todayView.js";
 
 export const confirmTexts = {
@@ -21,7 +23,7 @@ export const confirmTexts = {
   sendTitle: "Отправка письма",
   deleteTitle: "Удаление записи",
   deadlineNote: "Событие появится в Google Календаре только после «Да».",
-  sendNote: "Письмо уйдёт только после «Да», на адрес из настроек.",
+  sendNote: "Письмо уйдёт только после «Да» — на указанный адрес.",
   deleteNote: "Удаление без возможности восстановления. «Да» откроет окно удаления.",
   doneDeadline: "Срок добавлен в календарь.",
   doneSend: "Письмо отправлено.",
@@ -36,6 +38,8 @@ export const confirmTexts = {
 export interface CardRow {
   label: string;
   value: string;
+  /** The address after the name of «Кому»: a text node of its own; absent when the name is unknown. */
+  address?: string;
 }
 
 /** What the card shows. Every value is text from a file, the settings or a model: a text node only. */
@@ -54,6 +58,10 @@ export interface ConfirmCardModel {
   /** Which buttons: both while waiting, only «Да» when a confirmed action did not finish. */
   yes: boolean;
   no: boolean;
+  /** Why «Да» is shown but off («Выберите, кому отправить.»); "" when it may be pressed. */
+  yesBlocked: string;
+  /** The recipient part of a send: the question, a refusal with its way out, or nothing more than the «Кому» row. */
+  recipient: RecipientView;
 }
 
 /** «12 КБ», «1,4 МБ»; "" when the size is unknown. */
@@ -110,10 +118,21 @@ function outcomeOf(c: ConfirmCard): string {
   }
 }
 
-export function confirmCardModel(c: ConfirmCard): ConfirmCardModel {
+/**
+ * chosenRole is the option of «Кому отправить?» the student clicked ("" none yet): «Да» of such a card is shown but off
+ * until then, and the address that goes back is read from the option as the card shows it now.
+ */
+export function confirmCardModel(c: ConfirmCard, chosenRole: TeacherRole | "" = ""): ConfirmCardModel {
   const waiting = c.state === "waiting";
   const open = waiting || c.state === "confirmed";
-  const base = { outcome: outcomeOf(c), yes: open, no: waiting, notice: c.notice };
+  const base = {
+    outcome: outcomeOf(c),
+    yes: open,
+    no: waiting,
+    notice: c.notice,
+    yesBlocked: "",
+    recipient: { kind: "none" } as RecipientView,
+  };
   switch (c.kind) {
     case "deadline":
       return {
@@ -128,12 +147,17 @@ export function confirmCardModel(c: ConfirmCard): ConfirmCardModel {
         items: [],
         note: confirmTexts.deadlineNote,
       };
-    case "send":
+    case "send": {
+      const rv = recipientView(c, waiting);
+      const refused = isRefusal(rv);
+      const to: CardRow[] =
+        rv.kind === "to" ? [{ label: "Кому", value: rv.name !== "" ? rv.name : rv.address, ...(rv.name !== "" ? { address: rv.address } : {}) }] : [];
+      const yes = base.yes && !refused;
       return {
         ...base,
         title: confirmTexts.sendTitle,
         rows: [
-          ...row("Кому", c.recipient),
+          ...to,
           ...row("Тема", c.emailSubject),
           ...row("Задание", c.title),
           ...row("Вложение", attachment(c)),
@@ -141,7 +165,12 @@ export function confirmCardModel(c: ConfirmCard): ConfirmCardModel {
         ],
         items: [],
         note: confirmTexts.sendNote,
+        recipient: rv,
+        outcome: refused && c.state === "rejected" ? rv.text : base.outcome,
+        yes,
+        yesBlocked: yes ? sendBlocked(rv, choiceOf(c.options, chosenRole)) : "",
       };
+    }
     case "delete_recording": {
       const refused = c.deletion !== null && !c.deletion.deletable;
       return {
@@ -168,9 +197,18 @@ export interface FlowState {
   error: string;
   /** The deletion window is open (a deletion is confirmed there). */
   deleteOpen: boolean;
+  /** The role of the option of «Кому отправить?» the student clicked; "" none. */
+  chosenRole: TeacherRole | "";
 }
 
-export const initialFlow: FlowState = { card: null, busy: "", error: "", deleteOpen: false };
+export const initialFlow: FlowState = { card: null, busy: "", error: "", deleteOpen: false, chosenRole: "" };
+
+/** The chosen role while the same card still offers that option with the same address; anything else drops the choice. */
+function keepRole(prev: ConfirmCard | null, next: ConfirmCard, role: TeacherRole | ""): TeacherRole | "" {
+  const was = choiceOf(prev?.options, role);
+  const now = choiceOf(next.options, role);
+  return prev !== null && prev.targetId === next.targetId && was !== null && now !== null && was.address === now.address ? role : "";
+}
 
 /**
  * The buttons of one card. Keeps a guard outside the rendering: a second click arriving before the page re-rendered
@@ -208,16 +246,26 @@ export class ConfirmFlow {
 
   /** Shows a card the page already has (a proposal just made). */
   show(card: ConfirmCard): void {
-    this.set({ card, error: "" });
+    this.set({ card, error: "", chosenRole: keepRole(this.current.card, card, this.current.chosenRole) });
   }
 
   /** Reads the card of a target of the agent's confirm card. */
   async load(target: ConfirmTarget): Promise<void> {
     try {
-      this.set({ card: await this.api.card(target), error: "" });
+      const card = await this.api.card(target);
+      this.set({ card, error: "", chosenRole: keepRole(this.current.card, card, this.current.chosenRole) });
     } catch (err) {
       this.set({ error: confirmErrorText(err) });
     }
+  }
+
+  /** A click on an option of «Кому отправить?»; nothing runs, «Да» is the student's next click. */
+  choose(role: TeacherRole): void {
+    const card = this.current.card;
+    if (this.pending || card === null || card.state !== "waiting" || choiceOf(card.options, role) === null) {
+      return;
+    }
+    this.set({ chosenRole: role, error: "" });
   }
 
   /** «Да». A send or a deadline goes to the core; a deletion opens the deletion window. */
@@ -226,8 +274,8 @@ export class ConfirmFlow {
     if (this.pending || card === null || this.current.deleteOpen) {
       return;
     }
-    const model = confirmCardModel(card);
-    if (!model.yes) {
+    const model = confirmCardModel(card, this.current.chosenRole);
+    if (!model.yes || model.yesBlocked !== "") {
       return;
     }
     if (card.kind === "delete_recording") {
@@ -237,7 +285,9 @@ export class ConfirmFlow {
     this.pending = true;
     this.set({ busy: "confirm", error: "" });
     try {
-      this.set({ card: await this.api.confirm(card), busy: "" });
+      // The role and the address of the clicked option go back with «Да»; a card that asked nothing sends none.
+      const choice = card.reason === "choose_teacher" ? choiceOf(card.options, this.current.chosenRole) : null;
+      this.set({ card: await this.api.confirm(card, choice), busy: "" });
     } catch (err) {
       await this.refused(card, err);
     } finally {
@@ -267,9 +317,10 @@ export class ConfirmFlow {
     const error = confirmErrorText(err);
     try {
       const fresh = await this.api.card({ kind: card.targetKind as ConfirmTarget["kind"], id: card.targetId });
-      this.set({ card: fresh, error, busy: "" });
+      // The choice is dropped: if the address changed, the student clicks the option again and sees what goes out.
+      this.set({ card: fresh, error, busy: "", chosenRole: "" });
     } catch {
-      this.set({ error, busy: "" });
+      this.set({ error, busy: "", chosenRole: "" });
     }
   }
 
