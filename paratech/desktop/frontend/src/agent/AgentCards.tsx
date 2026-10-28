@@ -5,6 +5,9 @@ import { Icon } from "../ui/Icon.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
 import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
 import type { TurnkeyApi } from "../bindings/turnkey.js";
+import type { AnswersApi } from "../bindings/answers.js";
+import type { CitationOpening } from "../knowledgeView.js";
+import { AnswerSources } from "./AnswerSources.js";
 import { ConfirmCard } from "./ConfirmCard.js";
 import { WorkWritingCard } from "./WorkCard.js";
 import { FreeWorkCard } from "./FreeWorkCard.js";
@@ -43,6 +46,10 @@ export interface CardActions {
   now?: Date;
   /** Opens the assignment on «Домашние задания». */
   openAssignment?: (id: string) => void;
+  /** The core call of the `answer` cards; without it a card lists no sources. */
+  answers?: AnswersApi;
+  /** Opens the place of a source on «База знаний», by ids. */
+  openSource?: (o: CitationOpening) => void;
   press(id: ButtonId): void;
   revise(wish: string): void;
   answer(answers: AnswerInput[]): void;
@@ -253,6 +260,7 @@ function Card(props: { card: CardModel; actions: CardActions }) {
         <section className="ag-card">
           <h3 className="ag-card-h">{card.caption}</h3>
           <p>{card.text}</p>
+          <AnswerSources api={props.actions.answers} answerId={card.answerId} onOpen={props.actions.openSource} />
         </section>
       );
     case "reply":

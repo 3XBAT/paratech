@@ -385,6 +385,31 @@ test("question card: round N of 2, skip text, defaults and typed answers", () =>
   assert.doesNotMatch(html({ ...u, status: "EXECUTING" }), /Пропустить/);
 });
 
+test("question card: default -1 preselects nothing, blocks submit, skip takes the last option", () => {
+  const subject = {
+    kind: "choice",
+    text: "К какому предмету относится задание?",
+    options: ["Матан", "Физика", "Без предмета"],
+    default: -1,
+    citeRef: "",
+  };
+  const normal = { kind: "choice", text: "Какой формат?", options: ["Word", "Текст"], default: 1, citeRef: "" };
+  const qs = [subject, normal];
+  assert.equal(collectAnswers(qs, {}, {}), null);
+  assert.deepEqual(collectAnswers(qs, { 0: 1 }, {}), [
+    { question: 0, option: 1, text: "" },
+    { question: 1, option: 1, text: "" },
+  ]);
+  assert.deepEqual(skipAnswers(qs), [
+    { question: 0, option: 2, text: "" },
+    { question: 1, option: 1, text: "" },
+  ]);
+  const u = update({ status: "AWAITING_ANSWERS", cards: [card({ kind: "questions", questions: { round: 1, questions: [subject] } })] });
+  const out = html(u);
+  assert.doesNotMatch(out, /checked/);
+  assert.match(out, /Без предмета/);
+});
+
 // ---- Progress card ----
 
 test("progress card: shown while working, with «Стоп» (TASK-143: also while planning)", () => {

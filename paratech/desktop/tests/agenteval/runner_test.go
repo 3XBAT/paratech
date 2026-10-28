@@ -24,8 +24,10 @@ var liveToday = time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
 
 // cannedResults are what read tools return in the run (fake data, the shapes the Driver will send).
 var cannedResults = map[string]string{
-	"list_subjects": `{"subjects":[{"id":"s-math"},{"id":"s-phys"},{"id":"s-prog"},{"id":"s-hist"}]}`,
-	"find_lessons":  `{"lessons":[{"id":"l-7","date":"2026-10-21","kind":"lecture","recording":"rec-7","has_summary":false,"has_text":false}]}`,
+	// The names are those of the case file: the subject question of catalog v8 offers them.
+	"list_subjects": `{"subjects":[{"id":"s-math","name":"Математический анализ"},{"id":"s-phys","name":"Физика"},` +
+		`{"id":"s-prog","name":"Программирование"},{"id":"s-hist","name":"История"}]}`,
+	"find_lessons": `{"lessons":[{"id":"l-7","date":"2026-10-21","kind":"lecture","recording":"rec-7","has_summary":false,"has_text":false}]}`,
 	"list_assignments": `{"assignments":[{"id":"a-12","due":"2026-10-24","status":"upcoming","subject":"s-math"},` +
 		`{"id":"a-20","due":"2026-10-27","status":"upcoming","subject":"s-phys"}]}`,
 	"job_status":      `{"jobs":[{"id":"j-1","status":"running","done":3,"total":8}]}`,
@@ -60,7 +62,8 @@ func liveBase(subjects []Subject) (values.Base, error) {
 }
 
 // request runs one request until the planner shows a card or proposes an action. Nothing runs: read tools get canned
-// results, and the first action or card ends the request.
+// results, and the first action or card ends the request; only the first ask_questions of a case with an Answer is
+// answered (catalog v8) and the run goes on.
 func (r *liveRun) request(req Request) Outcome {
 	o := Outcome{Case: req}
 	scope, text, err := liveInput(req)
@@ -70,6 +73,7 @@ func (r *liveRun) request(req Request) Outcome {
 	}
 	thread := shared.ThreadID("live-" + r.id + "-" + req.ID)
 	history := []values.HistoryTurn{{StudentText: text}}
+	answered := false
 	for step := 1; step <= maxLiveSteps; step++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		reply, err := r.client.Step(ctx, values.StepRequest{
@@ -90,10 +94,20 @@ func (r *liveRun) request(req Request) Outcome {
 			if s := TriageSource(c.Tool, c.ArgumentsJSON); s != "" {
 				o.Sources = append(o.Sources, s)
 			}
+			if s := AssignedSubject(c.Tool, c.ArgumentsJSON); s != "" {
+				o.Assigned = append(o.Assigned, s)
+			}
 			result, ok := cannedResults[c.Tool]
-			if r.classes[c.Tool] != "R" {
+			switch {
+			case c.Tool == string(values.ToolAskQuestions) && req.Answer != "" && !answered:
+				if result, err = liveAnswer(c.CallID, c.ArgumentsJSON, req.Answer); err != nil {
+					o.Err = err.Error()
+					return o
+				}
+				answered = true
+			case r.classes[c.Tool] != "R":
 				stop, result = true, `{"ok":true}`
-			} else if !ok {
+			case !ok:
 				result = `{"items":[]}`
 			}
 			results = append(results, values.ToolResult{CallID: c.CallID, ResultJSON: result})
@@ -105,6 +119,20 @@ func (r *liveRun) request(req Request) Outcome {
 		history = append(history, values.HistoryTurn{Calls: &calls}, values.HistoryTurn{Results: results})
 	}
 	return o
+}
+
+// liveAnswer is the result of an ask_questions call when the student picks option on its first question, encoded by
+// the core as the Driver sends it.
+func liveAnswer(callID, argumentsJSON, option string) (string, error) {
+	i := AnswerOption(argumentsJSON, option)
+	if i < 0 {
+		return "", fmt.Errorf("ask_questions has no option %q", option)
+	}
+	res, err := values.AnswersResult(callID, []values.Answer{{Question: 0, Option: i}})
+	if err != nil {
+		return "", err
+	}
+	return res.ResultJSON, nil
 }
 
 func liveInput(req Request) (values.Scope, string, error) {
@@ -204,20 +232,54 @@ func TestRunnerOnTheFakeHub(t *testing.T) {
 		t.Fatalf("v4 metrics = %+v", m)
 	}
 
-	// Catalog v6: the two requests of the owner add an assignment (the subject from the base, tomorrow at 09:00); the
-	// action ends the run, no send is proposed.
-	hub.Then(testenv.AgentCall{ID: "toolu_8", Tool: "create_assignment", Args: `{"title":"Решить номер 5","subject":"s-math","due":"2026-10-30"}`}).
-		Then(testenv.AgentCall{ID: "toolu_9", Tool: "create_assignment", Args: `{"title":"Скинуть проверочную Иванову","due":"2026-10-23","time":"09:00"}`})
-	var v6 []Outcome
-	for _, id := range []string{"w12", "w13"} {
+	// Catalog v6: a request of the owner adds an assignment (the subject named, from the base); the action ends the
+	// run, no send is proposed. Its other request (w13) names no subject, so since v8 it is asked first (below).
+	hub.Then(testenv.AgentCall{ID: "toolu_8", Tool: "create_assignment", Args: `{"title":"Решить номер 5","subject":"s-math","due":"2026-10-30"}`})
+	o = r.request(cs.Requests[slicesIndex(cs.Requests, "w12")])
+	if o.Err != "" || fmt.Sprint(o.Tools) != "[create_assignment]" || fmt.Sprint(o.Assigned) != "[s-math]" {
+		t.Fatalf("w12: outcome = %+v", o)
+	}
+	if m := (Report{Classes: r.classes, Requests: []Outcome{o}}).Metrics(); m.ClassOK != 1 || m.ToolsOK != 1 || m.AssignedOK != 1 {
+		t.Fatalf("v6 metrics = %+v", m)
+	}
+
+	// Catalog v8: no subject in the thread and none named, so the subject is asked; the run answers with the index of
+	// the case's option, and create_assignment gets that subject or none after «Без предмета» (the last option).
+	subjectQuestion := `{"questions":[{"kind":"choice","question":"` + values.SubjectQuestion + `",` +
+		`"options":["Математический анализ","Физика","Программирование","История","` + values.NoSubjectOption + `"]}]}`
+	type answered struct {
+		option int    // the index the run sends
+		create string // the arguments the planner then gives
+	}
+	v8 := map[string]answered{
+		"s01": {0, `{"title":"Решить номер 5","subject":"s-math","due":"2026-10-23"}`},
+		"s02": {4, `{"title":"Решить номер 5","due":"2026-10-23"}`},
+		"w13": {4, `{"title":"Скинуть проверочную Иванову","due":"2026-10-23","time":"09:00"}`},
+	}
+	var asked []Outcome
+	for _, id := range []string{"s01", "s02", "w13"} {
+		hub.Then(testenv.AgentCall{ID: "toolu_10", Tool: "list_subjects", Args: `{}`}).
+			Then(testenv.AgentCall{ID: "toolu_11", Tool: "ask_questions", Args: subjectQuestion}).
+			Then(testenv.AgentCall{ID: "toolu_12", Tool: "create_assignment", Args: v8[id].create})
 		o := r.request(cs.Requests[slicesIndex(cs.Requests, id)])
-		if o.Err != "" || fmt.Sprint(o.Tools) != "[create_assignment]" {
+		if o.Err != "" || fmt.Sprint(o.Tools) != "[list_subjects ask_questions create_assignment]" {
 			t.Fatalf("%s: outcome = %+v", id, o)
 		}
-		v6 = append(v6, o)
+		reqs := hub.Requests()
+		results := reqs[len(reqs)-1].GetTurns()
+		if got := results[len(results)-1].GetResults().GetResults()[0].GetResultJson(); got != fmt.Sprintf(`{"answers":[{"question":0,"option":%d}]}`, v8[id].option) {
+			t.Fatalf("%s: answer = %s", id, got)
+		}
+		asked = append(asked, o)
 	}
-	if m := (Report{Classes: r.classes, Requests: v6}).Metrics(); m.ClassOK != 2 || m.ToolsOK != 2 {
-		t.Fatalf("v6 metrics = %+v", m)
+	if m := (Report{Classes: r.classes, Requests: asked}).Metrics(); m.ClassOK != 3 || m.ToolsOK != 3 || m.Assigned != 3 || m.AssignedOK != 3 {
+		t.Fatalf("v8 metrics = %+v", m)
+	}
+
+	// An option the question does not offer ends the run with an error instead of a guessed answer.
+	hub.Then(testenv.AgentCall{ID: "toolu_13", Tool: "ask_questions", Args: `{"questions":[{"kind":"choice","question":"Q","options":["a","b"]}]}`})
+	if o := r.request(cs.Requests[slicesIndex(cs.Requests, "s04")]); o.Err == "" || fmt.Sprint(o.Tools) != "[ask_questions]" {
+		t.Fatalf("s04 without its option: outcome = %+v", o)
 	}
 
 	// Every case of the file can be sent: the fake Hub has no script left and answers unavailable. A new run ID, so

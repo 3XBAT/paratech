@@ -1,6 +1,8 @@
 import { type RefObject, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { type AgentApi, agentApi, type AskInput, type CallProblem, type ChatResult, type ChatView, draftEvent as draftEventName, type EarlierRequestView, parseDraft, parseUpdate, updateEvent, type UpdateView } from "../bindings/agent.js";
 import { agentConfirmApi } from "../bindings/agentConfirm.js";
+import { answersApi } from "../bindings/answers.js";
+import type { CitationOpening } from "../knowledgeView.js";
 import { libraryApi } from "../bindings/library.js";
 import { turnkeyApi } from "../bindings/turnkey.js";
 import { recordingDeleteApi } from "../bindings/recordingDelete.js";
@@ -26,7 +28,7 @@ import {
 } from "../agentView.js";
 import { draftEvent, draftText } from "../agentDraft.js";
 import { problemText, undoOutcome } from "../journalView.js";
-import { blockingEntry, type Entry, initialPanelState, PressTracker, reducePanel } from "../agentState.js";
+import { blockingEntry, type Entry, initialPanelState, loadSnapshot, PressTracker, reducePanel } from "../agentState.js";
 import type { PageId } from "../nav.js";
 import type { ButtonId } from "../agentView.js";
 import { AgentPanelView } from "./AgentPanelView.js";
@@ -35,6 +37,7 @@ import type { CardActions } from "./AgentCards.js";
 const api: AgentApi = agentApi(callByName);
 const turnkey = turnkeyApi(callByName);
 const library = libraryApi(callByName);
+const answers = answersApi(callByName);
 const confirm = { api: agentConfirmApi(callByName), deleteApi: recordingDeleteApi(callByName) };
 
 /** Ctrl+K from anywhere in the window: a closed panel opens with focus in the input, an open one closes. */
@@ -74,6 +77,7 @@ export function AgentPanel(props: {
   reveal?: () => void;
   hide?: () => void;
   onOpenAssignment?: (id: string) => void;
+  onOpenSource?: (o: CitationOpening) => void;
 }) {
   const [state, dispatch] = useReducer(reducePanel, initialPanelState);
   // Subject names for the assignment lists of replies; unreadable subjects just leave the names out.
@@ -151,29 +155,50 @@ export function AgentPanel(props: {
     return () => window.removeEventListener("focus", load);
   }, [refreshChats]);
 
-  // The earlier requests of the opened chat, as text.
+  // The earlier requests of the opened chat, as text; its current request, when the session does not show it live
+  // (after a restart), comes as a card from the snapshot.
   useEffect(() => {
     setEarlierReq([]);
     if (openId === "") {
       return;
     }
     let alive = true;
-    api.chatEarlier(openId).then(
+    const earlier = api.chatEarlier(openId).then(
       (v) => {
         if (!alive) {
-          return;
+          return [];
         }
         if (v.problem === "") {
           setEarlierReq(v.requests);
-          return;
+          return v.requests;
         }
         setChatNote(chatProblemText(v.problem, "open"));
         if (refreshesChats(v.problem)) {
           void refreshChats();
         }
+        return [];
       },
-      () => alive && setChatNote(chatProblemText("failed", "open")),
+      () => {
+        if (alive) {
+          setChatNote(chatProblemText("failed", "open"));
+        }
+        return [];
+      },
     );
+    void loadSnapshot({
+      threadId: openId,
+      entries: () => entriesRef.current,
+      stillOpen: () => alive && openRef.current === openId,
+      current: () => api.chatCurrent(openId),
+      earlier,
+      dispatch,
+      onProblem: (p) => {
+        setChatNote(chatProblemText(p, "current"));
+        if (refreshesChats(p)) {
+          void refreshChats();
+        }
+      },
+    });
     return () => {
       alive = false;
     };
@@ -456,6 +481,8 @@ export function AgentPanel(props: {
       freeWork: api,
       subjects,
       openAssignment: props.onOpenAssignment,
+      answers,
+      openSource: props.onOpenSource,
       press,
       revise: (wish) => named && run(() => api.revisePlan(ref, wish)),
       answer: (answers) => named && run(() => api.answer(ref, answers)),
@@ -468,7 +495,7 @@ export function AgentPanel(props: {
       },
       undoNote: (actionId) => undoNotes[actionId],
     };
-  }, [state.entries, send, loadState, undoNotes, undoOne, undoAll, subjects, props.onOpenAssignment]);
+  }, [state.entries, send, loadState, undoNotes, undoOne, undoAll, subjects, props.onOpenAssignment, props.onOpenSource]);
 
   const shown = useMemo(
     () => ({ ...state, entries: visibleEntries(state.entries, openId, listed ? new Set(chats.map((c) => c.threadId)) : undefined) }),

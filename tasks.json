@@ -5022,7 +5022,7 @@
             "dependencies": [
                 "TASK-233"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-235",
@@ -5900,7 +5900,7 @@
                 "npm --prefix paratech/desktop/frontend run test и run build"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-273",
@@ -6137,7 +6137,7 @@
                 "TASK-235",
                 "TASK-236"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-286",
@@ -6331,7 +6331,7 @@
                 "GOOS=windows go vet ./desktop/..., GOOS=linux go build ./desktop/..., golangci-lint run ./desktop/... и тест архитектуры"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-294",
@@ -6395,7 +6395,7 @@
             "dependencies": [
                 "TASK-155"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-297",
@@ -6485,7 +6485,7 @@
             "dependencies": [
                 "TASK-162"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-301",
@@ -6507,7 +6507,7 @@
             "dependencies": [
                 "TASK-162"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-302",

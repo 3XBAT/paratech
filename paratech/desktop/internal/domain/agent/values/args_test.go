@@ -468,3 +468,72 @@ func TestQuestions(t *testing.T) {
 		t.Fatalf("choice without a default = %+v, want the first option preselected", q)
 	}
 }
+
+// TestSubjectQuestionNoDefault: the subject question of prompt v8 preselects nothing, even with a planner default, so a
+// fast click cannot file the assignment under a subject (TASK-234). Every other choice keeps its default or option 0;
+// an out-of-range planner default is refused on any question.
+func TestSubjectQuestionNoDefault(t *testing.T) {
+	tests := []struct {
+		name    string
+		q       string
+		want    int
+		wantErr bool
+	}{
+		{"subject question", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Математика","Физика","Без предмета"]}`, NoDefault, false},
+		{"subject question with spaces", `{"kind":"choice","question":"  К какому предмету относится задание?  ","options":["Математика"," Без предмета "]}`, NoDefault, false},
+		{"other text", `{"kind":"choice","question":"Какой предмет?","options":["Математика","Физика","Без предмета"]}`, 0, false},
+		{"no subject option not last", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Без предмета","Математика"]}`, 0, false},
+		{"no no-subject option", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Математика","Физика"]}`, 0, false},
+		{"explicit default wins", `{"kind":"choice","question":"Какой предмет?","options":["Математика","Физика","Без предмета"],"default":2}`, 2, false},
+		{"explicit default zero wins", `{"kind":"choice","question":"Какой предмет?","options":["Математика","Без предмета"],"default":0}`, 0, false},
+		{"subject question ignores default zero", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Математика","Физика","Без предмета"],"default":0}`, NoDefault, false},
+		{"subject question ignores default last", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Математика","Физика","Без предмета"],"default":2}`, NoDefault, false},
+		{"planner cannot send no default", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Математика","Без предмета"],"default":-1}`, 0, true},
+		{"planner default out of range", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Математика","Без предмета"],"default":2}`, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			call, err := ParseCall("c1", "ask_questions", `{"questions":[`+tt.q+`]}`)
+			if tt.wantErr {
+				if !errors.Is(err, ErrInvalidArguments) {
+					t.Fatalf("error = %v, want ErrInvalidArguments", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			q := call.Args().Questions("questions")[0]
+			if q.Default != tt.want {
+				t.Fatalf("default = %d, want %d", q.Default, tt.want)
+			}
+			if err := q.Validate(); err != nil {
+				t.Fatalf("Validate = %v", err)
+			}
+		})
+	}
+}
+
+func TestQuestionValidateDefault(t *testing.T) {
+	opts := []Text{"a", "b"}
+	tests := []struct {
+		name string
+		q    Question
+		ok   bool
+	}{
+		{"choice no default", Question{Kind: QuestionChoice, Text: "Q", Options: opts, Default: NoDefault}, true},
+		{"choice first", Question{Kind: QuestionChoice, Text: "Q", Options: opts, Default: 0}, true},
+		{"choice last", Question{Kind: QuestionChoice, Text: "Q", Options: opts, Default: 1}, true},
+		{"choice past the end", Question{Kind: QuestionChoice, Text: "Q", Options: opts, Default: 2}, false},
+		{"choice below no default", Question{Kind: QuestionChoice, Text: "Q", Options: opts, Default: -2}, false},
+		{"text zero", Question{Kind: QuestionText, Text: "Q"}, true},
+		{"text no default", Question{Kind: QuestionText, Text: "Q", Default: NoDefault}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.q.Validate(); tt.ok != (err == nil) {
+				t.Fatalf("Validate = %v, want ok=%v", err, tt.ok)
+			}
+		})
+	}
+}

@@ -56,7 +56,8 @@ type DeleteSubjectParams struct {
 	ExpectedVersion int64
 }
 
-// Removes the subject with its aliases and folders (CASCADE); a material still filed under it fails the RESTRICT.
+// Removes the subject with its aliases, folders and teachers (CASCADE); a material still filed under it fails the
+// RESTRICT.
 func (q *Queries) DeleteSubject(ctx context.Context, arg DeleteSubjectParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteSubject, arg.ID, arg.ExpectedVersion)
 	if err != nil {
@@ -86,6 +87,15 @@ type DeleteSubjectFolderParams struct {
 // Folders are never renamed, so a save only inserts and deletes them; a folder that holds a file fails the RESTRICT.
 func (q *Queries) DeleteSubjectFolder(ctx context.Context, arg DeleteSubjectFolderParams) error {
 	_, err := q.db.ExecContext(ctx, deleteSubjectFolder, arg.SubjectID, arg.ID)
+	return err
+}
+
+const deleteSubjectTeachers = `-- name: DeleteSubjectTeachers :exec
+DELETE FROM subject_teachers WHERE subject_id = ?1
+`
+
+func (q *Queries) DeleteSubjectTeachers(ctx context.Context, subjectID string) error {
+	_, err := q.db.ExecContext(ctx, deleteSubjectTeachers, subjectID)
 	return err
 }
 
@@ -215,31 +225,28 @@ func (q *Queries) InsertMaterialLesson(ctx context.Context, arg InsertMaterialLe
 }
 
 const insertSubject = `-- name: InsertSubject :exec
-INSERT INTO subjects (id, name, name_key, semester, teacher_name, teacher_email, version, created_at, updated_at)
-VALUES (?1, ?2, ?3, ?4, ?5,
-        ?6, 1, ?7, ?8)
+INSERT INTO subjects (id, name, name_key, semester, version, created_at, updated_at)
+VALUES (?1, ?2, ?3, ?4, 1, ?5,
+        ?6)
 `
 
 type InsertSubjectParams struct {
-	ID           string
-	Name         string
-	NameKey      string
-	Semester     string
-	TeacherName  string
-	TeacherEmail string
-	CreatedAt    int64
-	UpdatedAt    int64
+	ID        string
+	Name      string
+	NameKey   string
+	Semester  string
+	CreatedAt int64
+	UpdatedAt int64
 }
 
-// A never-stored subject (version 0) is inserted with version 1.
+// A never-stored subject (version 0) is inserted with version 1. subjects.teacher_* are legacy since migration 0044
+// (always ”, never read): the teachers are rows of subject_teachers.
 func (q *Queries) InsertSubject(ctx context.Context, arg InsertSubjectParams) error {
 	_, err := q.db.ExecContext(ctx, insertSubject,
 		arg.ID,
 		arg.Name,
 		arg.NameKey,
 		arg.Semester,
-		arg.TeacherName,
-		arg.TeacherEmail,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -290,6 +297,28 @@ func (q *Queries) InsertSubjectFolder(ctx context.Context, arg InsertSubjectFold
 		arg.Name,
 		arg.NameKey,
 		arg.System,
+	)
+	return err
+}
+
+const insertSubjectTeacher = `-- name: InsertSubjectTeacher :exec
+INSERT INTO subject_teachers (subject_id, role, name, email)
+VALUES (?1, ?2, ?3, ?4)
+`
+
+type InsertSubjectTeacherParams struct {
+	SubjectID string
+	Role      string
+	Name      string
+	Email     string
+}
+
+func (q *Queries) InsertSubjectTeacher(ctx context.Context, arg InsertSubjectTeacherParams) error {
+	_, err := q.db.ExecContext(ctx, insertSubjectTeacher,
+		arg.SubjectID,
+		arg.Role,
+		arg.Name,
+		arg.Email,
 	)
 	return err
 }
@@ -346,6 +375,39 @@ func (q *Queries) ListAllSubjectFolders(ctx context.Context) ([]SubjectFolder, e
 			&i.NameKey,
 			&i.System,
 			&i.Position,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllSubjectTeachers = `-- name: ListAllSubjectTeachers :many
+SELECT subject_id, role, name, email FROM subject_teachers ORDER BY subject_id, role
+`
+
+// The teachers of a subject (TASK-285): rewritten with the subject on every save, under its version check.
+func (q *Queries) ListAllSubjectTeachers(ctx context.Context) ([]SubjectTeacher, error) {
+	rows, err := q.db.QueryContext(ctx, listAllSubjectTeachers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SubjectTeacher{}
+	for rows.Next() {
+		var i SubjectTeacher
+		if err := rows.Scan(
+			&i.SubjectID,
+			&i.Role,
+			&i.Name,
+			&i.Email,
 		); err != nil {
 			return nil, err
 		}
@@ -606,6 +668,38 @@ func (q *Queries) ListSubjectFolders(ctx context.Context, subjectID string) ([]S
 	return items, nil
 }
 
+const listSubjectTeachers = `-- name: ListSubjectTeachers :many
+SELECT subject_id, role, name, email FROM subject_teachers WHERE subject_id = ?1 ORDER BY role
+`
+
+func (q *Queries) ListSubjectTeachers(ctx context.Context, subjectID string) ([]SubjectTeacher, error) {
+	rows, err := q.db.QueryContext(ctx, listSubjectTeachers, subjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SubjectTeacher{}
+	for rows.Next() {
+		var i SubjectTeacher
+		if err := rows.Scan(
+			&i.SubjectID,
+			&i.Role,
+			&i.Name,
+			&i.Email,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSubjects = `-- name: ListSubjects :many
 
 SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email FROM subjects ORDER BY name_key, id
@@ -704,22 +798,18 @@ func (q *Queries) UpdateMaterialText(ctx context.Context, arg UpdateMaterialText
 
 const updateSubject = `-- name: UpdateSubject :execrows
 UPDATE subjects
-SET name          = ?1,
-    name_key      = ?2,
-    semester      = ?3,
-    teacher_name  = ?4,
-    teacher_email = ?5,
-    version       = version + 1,
-    updated_at    = ?6
-WHERE id = ?7 AND version = ?8
+SET name       = ?1,
+    name_key   = ?2,
+    semester   = ?3,
+    version    = version + 1,
+    updated_at = ?4
+WHERE id = ?5 AND version = ?6
 `
 
 type UpdateSubjectParams struct {
 	Name            string
 	NameKey         string
 	Semester        string
-	TeacherName     string
-	TeacherEmail    string
 	UpdatedAt       int64
 	ID              string
 	ExpectedVersion int64
@@ -730,8 +820,6 @@ func (q *Queries) UpdateSubject(ctx context.Context, arg UpdateSubjectParams) (i
 		arg.Name,
 		arg.NameKey,
 		arg.Semester,
-		arg.TeacherName,
-		arg.TeacherEmail,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.ExpectedVersion,

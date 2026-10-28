@@ -256,13 +256,25 @@ const (
 	QuestionText   QuestionKind = "text"
 )
 
+// NoDefault is Question.Default of a choice with no option preselected: the student has to pick one. Only the desktop
+// sets it (the subject question); a planner default is always an option index.
+const NoDefault = -1
+
+// SubjectQuestion and NoSubjectOption are the subject question of panel prompt v8 (TASK-233), which pins this text
+// and puts «Без предмета» last. A fast click must not file the assignment under any subject, so this question always
+// gets NoDefault, whatever default the planner gives.
+const (
+	SubjectQuestion = "К какому предмету относится задание?"
+	NoSubjectOption = "Без предмета"
+)
+
 // Question is one question of a Questions card. The planner gets back only {question index, option index} or the
 // student's own typed text, never the question or option text (ADR-0022).
 type Question struct {
 	Kind    QuestionKind
 	Text    Text
 	Options []Text // choice only, MinOptions..MaxOptions
-	Default int    // choice only: index of the default option (0 when the planner gave none)
+	Default int    // choice only: index of the default option (0 when the planner gave none) or NoDefault (subject question)
 	CiteRef string // optional reference to the place in a source, set by the desktop (triage questions), never by the planner
 }
 
@@ -281,7 +293,7 @@ func (q Question) Validate() error {
 				return fmt.Errorf("%w: option: %w", ErrInvalidCard, err)
 			}
 		}
-		if q.Default < 0 || q.Default >= len(q.Options) {
+		if q.Default != NoDefault && (q.Default < 0 || q.Default >= len(q.Options)) {
 			return fmt.Errorf("%w: default option out of range", ErrInvalidCard)
 		}
 	case QuestionText:
@@ -311,6 +323,12 @@ func parseQuestions(raw json.RawMessage) ([]Question, error) {
 		out = append(out, q)
 	}
 	return out, nil
+}
+
+// isSubjectQuestion reports whether choice q is the subject question of prompt v8: its exact text, «Без предмета» last.
+func isSubjectQuestion(q Question) bool {
+	return q.Kind == QuestionChoice && string(q.Text) == SubjectQuestion && len(q.Options) > 0 &&
+		string(q.Options[len(q.Options)-1]) == NoSubjectOption
 }
 
 func parseQuestion(raw json.RawMessage) (Question, error) {
@@ -362,6 +380,14 @@ func parseQuestion(raw json.RawMessage) (Question, error) {
 			if q.Default, err = decodeInt(rawDef); err != nil {
 				return Question{}, err
 			}
+			if q.Default < 0 || q.Default >= len(q.Options) {
+				return Question{}, fmt.Errorf("%w: default option out of range", ErrInvalidArguments)
+			}
+		}
+
+		// The subject question never preselects: a planner default there is untrusted and ignored.
+		if isSubjectQuestion(q) {
+			q.Default = NoDefault
 		}
 	case QuestionText:
 		// The Hub admits "options": [] on a text question; options with items or a default have no meaning here.

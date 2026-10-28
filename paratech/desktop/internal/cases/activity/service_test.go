@@ -173,16 +173,17 @@ func TestListRecordings(t *testing.T) {
 	want := []Recording{
 		{
 			ID: "r-recording", LessonID: "l1", LessonTitle: "История", Status: recording.StatusRecording,
-			StartedAt: t0.Add(time.Second), Stoppable: true, Chain: Chain{Stage: StageRecording},
+			Origin: recording.OriginCaptured, StartedAt: t0.Add(time.Second), Stoppable: true,
+			Chain: Chain{Stage: StageRecording},
 		},
 		{
-			ID: "r-completed", LessonID: "l1", LessonTitle: "История", Status: recording.StatusCompleted, StartedAt: t0,
-			StoppedAt: t0.Add(time.Hour), Duration: 59 * time.Minute, HasDuration: true,
-			Chain: Chain{Stage: StageQueued, Step: StepTranscription, QueueReason: QueueInLine},
+			ID: "r-completed", LessonID: "l1", LessonTitle: "История", Status: recording.StatusCompleted,
+			Origin: recording.OriginCaptured, StartedAt: t0, StoppedAt: t0.Add(time.Hour), Duration: 59 * time.Minute,
+			HasDuration: true, Chain: Chain{Stage: StageQueued, Step: StepTranscription, QueueReason: QueueInLine},
 		},
 		{
-			ID: "r-failed", LessonID: "l1", LessonTitle: "История", Status: recording.StatusFailed, StartedAt: t0,
-			Problem: "device lost", Chain: Chain{Stage: StageFailed, ErrorCode: ErrorRecordingFailed, Action: ActionCheckSound},
+			ID: "r-failed", LessonID: "l1", LessonTitle: "История", Status: recording.StatusFailed,
+			Origin: recording.OriginCaptured, StartedAt: t0, Problem: "device lost", Chain: Chain{Stage: StageFailed, ErrorCode: ErrorRecordingFailed, Action: ActionCheckSound},
 		},
 	}
 	if len(got) != len(want) {
