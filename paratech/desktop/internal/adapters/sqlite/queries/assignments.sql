@@ -55,7 +55,7 @@ SET title          = sqlc.arg(title),
     user_teacher   = sqlc.arg(user_teacher),
     deleted_at     = sqlc.arg(deleted_at),
     done_at        = sqlc.arg(done_at),
-    version       = version + 1,
+    version        = version + 1,
     updated_at     = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 

@@ -534,7 +534,7 @@ SET title          = ?1,
     user_teacher   = ?9,
     deleted_at     = ?10,
     done_at        = ?11,
-    version       = version + 1,
+    version        = version + 1,
     updated_at     = ?12
 WHERE id = ?13 AND version = ?14
 `
