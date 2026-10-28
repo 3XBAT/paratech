@@ -6752,7 +6752,7 @@
             "dependencies": [
                 "TASK-310"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-312",
