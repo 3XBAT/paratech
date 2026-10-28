@@ -349,8 +349,8 @@ export const texts = {
   title: "paratech",
   hint: "Ctrl+K",
   send: "Отправить",
-  /** Visually hidden text of the waiting dots. */
-  waiting: "Запрос выполняется",
+  /** Visually hidden text of the waiting dots (the polite live region). */
+  waiting: "Агент отвечает…",
   draftCaption: "Ответ пишется · черновик",
   removeContext: "Убрать контекст",
   offlineBanner: "Нет связи с paratech",
@@ -359,7 +359,6 @@ export const texts = {
   progressCaption: "Работа идёт",
   resultCaption: "Готово",
   answerCaption: "Ответ по материалам",
-  replyCaption: "Ответ",
   assignmentsLabel: "Задания",
   cannotDoCaption: "Целиком не получится",
   yourPart: "Остаётся на вашей стороне",
@@ -624,7 +623,7 @@ export type CardModel =
   | { type: "waiting"; buttons: ButtonModel[] }
   | { type: "result"; caption: string; artifact: ArtifactLabel | null; fallback: string }
   | { type: "answer"; caption: string; text: string; answerId: string }
-  | { type: "reply"; caption: string; text: string; assignments: AssignmentLineView[] }
+  | { type: "reply"; text: string; assignments: AssignmentLineView[] }
   | { type: "cannot_do"; caption: string; yourTitle: string; yourPart: string[]; ourTitle: string; ourPart: string[] }
   | { type: "confirm"; caption: string; text: string; target: { kind: "proposal" | "preview"; id: string } | null }
   | { type: "action"; text: string; actionId: string; undo: { label: string; enabled: boolean }; assignment: AddedAssignmentView | null }
@@ -690,7 +689,7 @@ function cardModel(c: CardView, status: string): CardModel | null {
     case "answer":
       return { type: "answer", caption: texts.answerCaption, text: texts.answerReady, answerId: c.answerId };
     case "reply":
-      return { type: "reply", caption: texts.replyCaption, text: c.text, assignments: c.assignments ?? [] };
+      return { type: "reply", text: c.text, assignments: c.assignments ?? [] };
     case "cannot_do":
       if (!c.cannotDo) {
         return null;
