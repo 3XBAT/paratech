@@ -42,7 +42,9 @@ type Subject struct {
 // Request is a student request and the expected routing: the class and the non-card tools in order (others may
 // come in between). Also are other classes the prompt allows as well. ListsAssignments marks a request whose reply
 // should list the assignments found (catalog v3). Source is the argument triage_assignment should be given (one of
-// TriageSources, catalog v4).
+// TriageSources, catalog v4). Answer is the option the student picks on the first question of the first
+// ask_questions card: the run answers it by its index and goes on instead of stopping (the subject question, catalog
+// v8). AssignedSubject is the subject create_assignment should get: a subject ID, or NoSubject for none (catalog v8).
 type Request struct {
 	ID               string   `json:"id"`
 	Text             string   `json:"text"`
@@ -54,7 +56,12 @@ type Request struct {
 	Tools            []string `json:"tools"`
 	ListsAssignments bool     `json:"lists_assignments,omitempty"`
 	Source           string   `json:"source,omitempty"`
+	Answer           string   `json:"answer,omitempty"`
+	AssignedSubject  string   `json:"assigned_subject,omitempty"`
 }
+
+// NoSubject is the AssignedSubject of an assignment added without a subject («Без предмета»).
+const NoSubject = "none"
 
 // Accepts reports whether a run of class class routed the request right.
 func (r Request) Accepts(class string) bool {
@@ -97,10 +104,10 @@ type CaseSet struct {
 }
 
 // CatalogFile is the golden catalog the run is scored against, in shared/testdata: the version the desktop sends.
-const CatalogFile = "tool_catalog_v7.json"
+const CatalogFile = "tool_catalog_v8.json"
 
 // CatalogClasses reads the tool classes (tool -> R, U, C, UI) of a tool catalog file
-// (shared/testdata/tool_catalog_v7.json).
+// (shared/testdata/tool_catalog_v8.json).
 func CatalogClasses(raw []byte) (map[string]string, error) {
 	var doc struct {
 		Tools []struct {
@@ -176,6 +183,12 @@ func ParseCaseSet(raw []byte, toolClasses map[string]string) (CaseSet, error) {
 		}
 		if r.Source != "" && (!slices.Contains(TriageSources(), r.Source) || !slices.Contains(r.Tools, triageTool)) {
 			return bad("request %s: source %q needs triage_assignment and one of %v", r.ID, r.Source, TriageSources())
+		}
+		if r.Answer != "" && r.Class != ClassQuestions {
+			return bad("request %s: an answer needs the class questions", r.ID)
+		}
+		if s := r.AssignedSubject; s != "" && (!slices.Contains(r.Tools, assignTool) || s != NoSubject && !subjects[s]) {
+			return bad("request %s: assigned subject %q needs create_assignment and a known subject or %s", r.ID, s, NoSubject)
 		}
 	}
 	for _, r := range cs.CannotDo {

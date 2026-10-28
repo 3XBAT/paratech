@@ -21,8 +21,8 @@ import (
 	"paratech/desktop/testenv"
 )
 
-// goldenCatalog is shared/testdata/tool_catalog_v7.json (TASK-113; v2 since TASK-118, v3 since TASK-173, v4 since
-// TASK-184, v5 since TASK-210, v6 since TASK-217, v7 since TASK-223), the tool list the Hub serves for the catalog
+// goldenCatalog is shared/testdata/tool_catalog_v8.json (TASK-113; v2 since TASK-118, v3 since TASK-173, v4 since
+// TASK-184, v5 since TASK-210, v6 since TASK-217, v7 since TASK-223, v8 since TASK-234), the tool list the Hub serves for the catalog
 // version the desktop sends.
 type goldenCatalog struct {
 	CatalogVersion int               `json:"catalog_version"`
@@ -170,6 +170,44 @@ func TestToolCatalogV7HasALongReplyText(t *testing.T) {
 	}
 	if string(got) != string(old) {
 		t.Fatal("tool_catalog_v7.json differs from tool_catalog_v6.json beyond reply.text")
+	}
+}
+
+// TestToolCatalogV8KeepsTheToolsOfV7: v8 changed only the Hub panel prompt (it asks the subject of an assignment,
+// TASK-233), so a desktop on v8 runs the same tools, arguments and policy as on v7: the files differ only in
+// catalog_version.
+func TestToolCatalogV8KeepsTheToolsOfV7(t *testing.T) {
+	dir := filepath.Join(codeRoot(t), "shared", "testdata")
+	v7, err := os.ReadFile(filepath.Join(dir, "tool_catalog_v7.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v8, err := os.ReadFile(filepath.Join(dir, "tool_catalog_v8.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const v7Line, v8Line = `"catalog_version": 7,`, `"catalog_version": 8,`
+	if strings.Count(string(v7), v7Line) != 1 || strings.Count(string(v8), v8Line) != 1 {
+		t.Fatal("catalog_version lines changed")
+	}
+	if strings.Replace(string(v7), v7Line, v8Line, 1) != string(v8) {
+		t.Fatal("tool_catalog_v8.json differs from tool_catalog_v7.json beyond catalog_version")
+	}
+}
+
+// TestPanelPromptV8PinsTheSubjectQuestion: the desktop recognizes the subject question by its exact text and last
+// option (TASK-234), so the Hub panel prompt v8 must spell both the same way, or nothing preselected silently breaks.
+func TestPanelPromptV8PinsTheSubjectQuestion(t *testing.T) {
+	prompt, err := os.ReadFile(filepath.Join(codeRoot(t), "hub", "pkg", "prompts", "agent", "panel", "v8", "system.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, s := range []string{values.SubjectQuestion, values.NoSubjectOption} {
+		if !strings.Contains(string(prompt), "«"+s+"»") {
+			t.Errorf("panel prompt v8 does not contain «%s»", s)
+		}
 	}
 }
 
@@ -412,7 +450,8 @@ func TestAgentRequestOfAnOlderCatalogAfterTheUpdate(t *testing.T) {
 	}
 }
 
-// The update to the current catalog (4 -> 5 in TASK-210, 5 -> 6 in TASK-217, 6 -> 7 in TASK-223): calls sealed for a
+// The update to the current catalog (4 -> 5 in TASK-210, 5 -> 6 in TASK-217, 6 -> 7 in TASK-223, 7 -> 8 in TASK-234,
+// where the tools stay the same and only the seal's catalog differs): calls sealed for a
 // request stopped on the previous catalog no longer pass the Hub's check once the desktop sends the new one, so
 // «Продолжить» and «Повторить» end with the honest «не удалось», and a new request works.
 func TestAgentRequestOfThePreviousCatalogAfterTheUpdate(t *testing.T) {
