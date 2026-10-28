@@ -352,7 +352,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		{file: "calendar.ts", typ: reflect.TypeFor[*GoogleCalendarService](), methods: 2},
 		{file: "diagnostics.ts", typ: reflect.TypeFor[*DiagnosticsService](), methods: 4},
 		{file: "help.ts", typ: reflect.TypeFor[*HelpService](), methods: 1},
-		{file: "homework.ts", typ: reflect.TypeFor[*HomeworkService](), methods: 22}, // +CorrectLesson (TASK-092), +DraftStatus, ExportDocx, SaveDocx (TASK-094), +CreateAssignment (TASK-218), +Delete, Restore, EditAssignment (TASK-231), +DeleteImpact (TASK-338)
+		{file: "homework.ts", typ: reflect.TypeFor[*HomeworkService](), methods: 24}, // +CorrectLesson (TASK-092), +DraftStatus, ExportDocx, SaveDocx (TASK-094), +CreateAssignment (TASK-218), +Delete, Restore, EditAssignment (TASK-231), +MarkDone, RestoreDone (TASK-315), +DeleteImpact (TASK-338)
 		{file: "transcript.ts", typ: reflect.TypeFor[*TranscriptService](), methods: 6},
 		{file: "summary.ts", typ: reflect.TypeFor[*SummaryService](), methods: 3},                 // TASK-087
 		{file: "summary.ts", typ: reflect.TypeFor[*LectureTextService](), methods: 2},             // TASK-090

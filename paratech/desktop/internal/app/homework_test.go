@@ -40,7 +40,7 @@ func TestHomeworkPageSendsOnlyAfterTheConfirmation(t *testing.T) {
 	configureMailAndHub(t, a, "", mail.Host(), mail.Port())
 	page := homeworkPage(a)
 
-	list, err := page.ListAssignments(ctx)
+	list, err := page.ListAssignments(ctx, "")
 	if err != nil || len(list) != 1 || list[0].ID != "a1" || list[0].Title != homeworkTitle {
 		t.Fatalf("ListAssignments = %+v, %v", list, err)
 	}

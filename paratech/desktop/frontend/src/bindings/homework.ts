@@ -34,6 +34,44 @@ export interface AssignmentItem {
   /** The student's correction, "" when none: the values of the correction form. */
   correctedSubject: string;
   correctedTeacher: string;
+  /** «Выполнено» (ADR-0033 §9), marked at doneAt ("" while open). */
+  done: boolean;
+  doneAt: string;
+}
+
+/** The filter of listAssignments: «Открытые / Выполненные / Все» ("all": the open ones first). */
+export type AssignmentState = "open" | "done" | "all";
+
+/** "" = the call went through and outcomes say what happened to each assignment; the others come without outcomes. */
+export type DoneProblem = "" | "invalid" | "unavailable";
+
+/** What happened to one assignment; "unchanged" (already in that state) is not an error. */
+export type DoneCode = "changed" | "unchanged" | "not_found" | "deleted" | "conflict" | "failed";
+
+/** One assignment of markDone or restoreDone; done and version are the stored state for "changed" and "unchanged". */
+export interface DoneOutcome {
+  id: string;
+  code: DoneCode;
+  done: boolean;
+  version: number;
+}
+
+/** One changed assignment with the version the call saved; «Отменить» sends it back as it is. */
+export interface DonePrior {
+  id: string;
+  version: number;
+}
+
+/**
+ * The reply of markDone and restoreDone: one outcome per distinct id in the order sent. «Отменить» is
+ * restoreDone(priorDone, prior) with exactly these values, offered only when prior is not empty.
+ */
+export interface DoneResult {
+  problem: DoneProblem;
+  outcomes: DoneOutcome[];
+  prior: DonePrior[];
+  /** The state before the call, the one «Отменить» puts back. */
+  priorDone: boolean;
 }
 
 /** How a draft version was made. */
@@ -262,6 +300,8 @@ export const methods = {
   deliveries: "paratech/desktop/internal/input/wails.HomeworkService.Deliveries",
   markSent: "paratech/desktop/internal/input/wails.HomeworkService.MarkSent",
   sendAgain: "paratech/desktop/internal/input/wails.HomeworkService.SendAgain",
+  markDone: "paratech/desktop/internal/input/wails.HomeworkService.MarkDone",
+  restoreDone: "paratech/desktop/internal/input/wails.HomeworkService.RestoreDone",
 } as const;
 
 /** Messages of the errors the Go binding returns (checked by a Go test); the page shows them as they are. */
@@ -296,7 +336,26 @@ export const errorMessages = {
     "Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Пока оно не решено, файл задания менять нельзя.",
   deliveryNotFound: "Письмо не найдено: обновите список.",
   deliveryActionInvalid: "Это действие для письма уже недоступно: обновите список.",
+  /** listAssignments refused an unknown filter. */
+  listState: "Неизвестный фильтр списка заданий: обновите страницу.",
 } as const;
+
+/** The texts of the problems of markDone and restoreDone; "changed" and "unchanged" need none. */
+export const doneMessages = {
+  not_found: "Задание уже удалено: обновите список.",
+  deleted: "Задание уже удалено: обновите список.",
+  conflict:
+    "Задание изменилось (например, после повторной обработки записи), поэтому отменить нельзя. Откройте задание и поставьте или снимите отметку «Выполнено» вручную.",
+  failed: "Не удалось сохранить отметку. Попробуйте ещё раз.",
+  invalid: "Не удалось отметить задания: обновите список и попробуйте ещё раз.",
+  unavailable: "Не удалось выполнить действие. Попробуйте ещё раз.",
+} as const;
+
+export const assignmentStates: readonly AssignmentState[] = ["open", "done", "all"];
+
+export const doneProblems: readonly DoneProblem[] = ["", "invalid", "unavailable"];
+
+export const doneCodes: readonly DoneCode[] = ["changed", "unchanged", "not_found", "deleted", "conflict", "failed"];
 
 export const versionSources: readonly VersionSource[] = ["generated", "edited"];
 
@@ -400,6 +459,9 @@ export function parseAssignment(raw: unknown): AssignmentItem {
     lessonDate: str(r, "lessonDate", w),
     correctedSubject: str(r, "correctedSubject", w),
     correctedTeacher: str(r, "correctedTeacher", w),
+    // A reply without the mark (older shape) is an open assignment; a mark of another type is an error.
+    done: r.done === undefined ? false : bool(r, "done", w),
+    doneAt: r.doneAt === undefined ? "" : str(r, "doneAt", w),
   };
 }
 
@@ -472,6 +534,97 @@ export function parseEditAssignmentResult(raw: unknown): EditAssignmentResult {
   }
   const assignment = doneAssignment(r.assignment);
   return assignment === null ? failed : { problem, field: "", assignment };
+}
+
+function doneProblem(problem: DoneProblem): DoneResult {
+  return { problem, outcomes: [], prior: [], priorDone: false };
+}
+
+function isVersion(v: unknown): v is number {
+  return typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+}
+
+/** One outcome; null when it names no id. An unknown code, or a stored state that is not one, is "failed". */
+function parseDoneOutcome(raw: unknown): DoneOutcome | null {
+  if (typeof raw !== "object" || raw === null) {
+    return null;
+  }
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== "string") {
+    return null;
+  }
+  const code = known(r.code, doneCodes, "failed");
+  if (code !== "changed" && code !== "unchanged") {
+    return { id: r.id, code, done: false, version: 0 };
+  }
+  if (typeof r.done !== "boolean" || !isVersion(r.version)) {
+    return { id: r.id, code: "failed", done: false, version: 0 };
+  }
+  return { id: r.id, code, done: r.done, version: r.version };
+}
+
+/**
+ * Never throws: a malformed reply or an unknown problem is "unavailable". The prior is kept only when every entry
+ * is well formed and names a "changed" outcome: otherwise no «Отменить» is offered rather than a partial one.
+ */
+export function parseDoneResult(raw: unknown): DoneResult {
+  if (typeof raw !== "object" || raw === null) {
+    return doneProblem("unavailable");
+  }
+  const r = raw as Record<string, unknown>;
+  const problem = known(r.problem, doneProblems, "unavailable");
+  if (problem !== "") {
+    return doneProblem(problem);
+  }
+  if (!Array.isArray(r.outcomes) || !Array.isArray(r.prior) || typeof r.priorDone !== "boolean") {
+    return doneProblem("unavailable");
+  }
+  const outcomes: DoneOutcome[] = [];
+  for (const item of r.outcomes) {
+    const o = parseDoneOutcome(item);
+    if (o === null) {
+      return doneProblem("unavailable");
+    }
+    outcomes.push(o);
+  }
+  const changed = new Set(outcomes.filter((o) => o.code === "changed").map((o) => o.id));
+  const prior: DonePrior[] = [];
+  for (const item of r.prior) {
+    const p = item as Record<string, unknown> | null;
+    if (typeof p !== "object" || p === null || typeof p.id !== "string" || !changed.has(p.id) || !isVersion(p.version)) {
+      return { problem, outcomes, prior: [], priorDone: r.priorDone };
+    }
+    prior.push({ id: p.id, version: p.version });
+  }
+  return { problem, outcomes, prior, priorDone: r.priorDone };
+}
+
+/** What the page shows after markDone or restoreDone. */
+export interface DoneSummary {
+  changed: number;
+  unchanged: number;
+  /** The distinct texts of the problems, in the order they first came; empty when everything went through. */
+  messages: string[];
+  /** «Отменить» is offered: something changed and the reply says how to put it back. */
+  undo: boolean;
+}
+
+/** Counts the outcomes and collects the texts of the problems once each (not_found and deleted share one). */
+export function doneSummary(res: DoneResult): DoneSummary {
+  if (res.problem !== "") {
+    return { changed: 0, unchanged: 0, messages: [doneMessages[res.problem]], undo: false };
+  }
+  const out: DoneSummary = { changed: 0, unchanged: 0, messages: [], undo: res.prior.length > 0 };
+  for (const o of res.outcomes) {
+    if (o.code === "changed") {
+      out.changed++;
+    } else if (o.code === "unchanged") {
+      out.unchanged++;
+    } else if (!out.messages.includes(doneMessages[o.code])) {
+      out.messages.push(doneMessages[o.code]);
+    }
+  }
+  return out;
 }
 
 export function parseVersionItem(raw: unknown): VersionItem {
@@ -597,7 +750,15 @@ export function parseDelivery(raw: unknown): DeliveryItem {
 }
 
 export interface HomeworkApi {
-  listAssignments(): Promise<AssignmentItem[]>;
+  /** The filter «Открытые / Выполненные / Все»; the open ones when none is given. */
+  listAssignments(state?: AssignmentState): Promise<AssignmentItem[]>;
+  /**
+   * «Выполнено» (done) or «Вернуть в работу» (not done) of 1..50 assignments; never rejects: a failure is a problem
+   * or a per-assignment code. Offer «Отменить» only when doneSummary(result).undo.
+   */
+  markDone(ids: string[], done: boolean): Promise<DoneResult>;
+  /** «Отменить»: exactly priorDone and prior of the previous markDone or restoreDone; never rejects. */
+  restoreDone(priorDone: boolean, prior: DonePrior[]): Promise<DoneResult>;
   openAssignment(id: string): Promise<AssignmentDetail>;
   /** The cheap poll of an open assignment: a larger latestVersion than shown means reload with openAssignment. */
   draftStatus(id: string): Promise<DraftStatus>;
@@ -652,7 +813,13 @@ async function settled(reply: Promise<unknown>): Promise<unknown> {
 /** Builds the homework API over a call function (the Wails runtime in the app, a fake in tests). */
 export function homeworkApi(call: CallByName): HomeworkApi {
   return {
-    listAssignments: async () => list(await call(methods.listAssignments), "assignments", parseAssignment),
+    listAssignments: async (state = "open") =>
+      list(await call(methods.listAssignments, state), "assignments", parseAssignment),
+    markDone: async (ids, done) => parseDoneResult(await settled(call(methods.markDone, ids, done))),
+    restoreDone: async (priorDone, prior) =>
+      parseDoneResult(
+        await settled(call(methods.restoreDone, priorDone, prior.map((p) => ({ id: p.id, version: p.version })))),
+      ),
     openAssignment: async (id) => parseAssignmentDetail(await call(methods.openAssignment, id)),
     draftStatus: async (id) => parseDraftStatus(await call(methods.draftStatus, id)),
     correctLesson: async (id, subject, teacher) =>

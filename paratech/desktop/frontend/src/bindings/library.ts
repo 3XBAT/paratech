@@ -20,6 +20,10 @@ export const methods = {
   // TASK-236, TASK-285: the teachers of a subject.
   setSubjectTeacher: `${service}.SetSubjectTeacher`,
   clearSubjectTeacher: `${service}.ClearSubjectTeacher`,
+  // TASK-311: subjects from the schedule.
+  scheduleSubjects: `${service}.ScheduleSubjects`,
+  createFromSchedule: `${service}.CreateFromSchedule`,
+  undoFromSchedule: `${service}.UndoFromSchedule`,
 } as const;
 
 /** The error texts of the Go binding (library.go); a Go test pins the same strings. */
@@ -461,4 +465,295 @@ export function libraryApi(call: CallByName): LibraryApi {
       }
     },
   };
+}
+
+// Subjects from the schedule (TASK-311, ADR-0033). The names, spellings and aliases are schedule text (untrusted):
+// plain text nodes only, never logged and never put into an error message. The parsers are strict: any unknown code,
+// wrong type, missing field or null list is an error (the page shows its generic text), not a default.
+
+export type ScheduleKind = "lecture" | "seminar" | "lab" | "unknown";
+
+export const scheduleKinds: readonly ScheduleKind[] = ["lecture", "seminar", "lab", "unknown"];
+
+/** Kind words for a count of lessons; «пары» is a lesson of an unknown kind. */
+export const scheduleKindWords: Readonly<Record<ScheduleKind, string>> = {
+  lecture: "лекции",
+  seminar: "семинары",
+  lab: "лабораторные",
+  unknown: "пары",
+};
+
+export type ScheduleLink = "same" | "abbreviation" | "typo";
+
+export const scheduleLinks: readonly ScheduleLink[] = ["same", "abbreviation", "typo"];
+
+export type ScheduleGroupAction = "create" | "alias_of";
+
+export const scheduleGroupActions: readonly ScheduleGroupAction[] = ["create", "alias_of"];
+
+export type ScheduleChoiceAction = "create" | "alias_of" | "skip";
+
+export type ScheduleMemberAction = "keep" | "separate" | "skip";
+
+export type ScheduleSkipReason = "name_taken" | "too_many_aliases" | "subject_gone";
+
+export const scheduleSkipReasons: readonly ScheduleSkipReason[] = ["name_taken", "too_many_aliases", "subject_gone"];
+
+export type ScheduleKeptReason = "has_files" | "has_notes";
+
+export const scheduleKeptReasons: readonly ScheduleKeptReason[] = ["has_files", "has_notes"];
+
+export type ScheduleListProblem = "" | "unavailable";
+
+export type ScheduleCreateProblem = "" | "stale" | "invalid" | "name_taken" | "busy" | "unavailable";
+
+export type ScheduleUndoProblem = "" | "invalid" | "busy" | "unavailable";
+
+export const scheduleListProblems: readonly ScheduleListProblem[] = ["", "unavailable"];
+
+export const scheduleCreateProblems: readonly ScheduleCreateProblem[] = ["", "stale", "invalid", "name_taken", "busy", "unavailable"];
+
+export const scheduleUndoProblems: readonly ScheduleUndoProblem[] = ["", "invalid", "busy", "unavailable"];
+
+export interface ScheduleKindCount {
+  kind: ScheduleKind;
+  lessons: number;
+}
+
+/** An obvious group inside a proposed group; "abbreviation" and "typo" links are the doubtful ones. */
+export interface ScheduleMember {
+  key: string;
+  name: string;
+  spellings: string[];
+  kinds: ScheduleKindCount[];
+  lessons: number;
+  recordings: number;
+  doubtful: boolean;
+  link: ScheduleLink;
+}
+
+/** A proposed subject; action is the default: a new subject «name» or the spellings added to the subject subjectId. */
+export interface ScheduleGroup {
+  key: string;
+  name: string;
+  aliases: string[];
+  kinds: ScheduleKindCount[];
+  lessons: number;
+  recordings: number;
+  doubtful: boolean;
+  members: ScheduleMember[];
+  action: ScheduleGroupAction;
+  /** "" for a group to create. */
+  subjectId: string;
+  subjectName: string;
+}
+
+export interface ScheduleSubjectsReply {
+  /** Goes back to createFromSchedule and undoFromSchedule. */
+  token: string;
+  groups: ScheduleGroup[];
+  /** The least used strings left out. */
+  omitted: number;
+  problem: ScheduleListProblem;
+}
+
+export interface ScheduleMemberChoice {
+  key: string;
+  action: ScheduleMemberAction;
+  /** A new name for "separate"; "" keeps the proposed one. */
+  name: string;
+}
+
+export interface ScheduleChoice {
+  group: string;
+  action: ScheduleChoiceAction;
+  /** A new name for "create"; "" keeps the proposed one. */
+  name: string;
+  members: ScheduleMemberChoice[];
+}
+
+export interface ScheduleCreated {
+  id: string;
+  key: string;
+  name: string;
+}
+
+export interface ScheduleAliased {
+  subjectId: string;
+  aliases: string[];
+}
+
+export interface ScheduleSkipped {
+  key: string;
+  subjectId: string;
+  reason: ScheduleSkipReason;
+}
+
+/** With a problem the lists still hold what was done before it; undoFromSchedule takes that back. */
+export interface CreateFromScheduleReply {
+  created: ScheduleCreated[];
+  aliased: ScheduleAliased[];
+  skipped: ScheduleSkipped[];
+  problem: ScheduleCreateProblem;
+}
+
+export interface ScheduleKept {
+  id: string;
+  name: string;
+  reason: ScheduleKeptReason;
+}
+
+export interface ScheduleKeptAliases {
+  subjectId: string;
+  aliases: string[];
+  reason: "stale";
+}
+
+export interface UndoFromScheduleReply {
+  /** IDs of the removed subjects. */
+  removed: string[];
+  kept: ScheduleKept[];
+  unaliased: ScheduleAliased[];
+  keptAliases: ScheduleKeptAliases[];
+  problem: ScheduleUndoProblem;
+}
+
+/** A required list: unlike list(), null or a missing list is an error. */
+function strictList<T>(r: Record<string, unknown>, key: string, what: string, parse: (item: unknown) => T): T[] {
+  const v = r[key];
+  if (!Array.isArray(v)) {
+    throw new Error(`${what}: ${key} is not a list`);
+  }
+  return v.map(parse);
+}
+
+function strings(r: Record<string, unknown>, key: string, what: string): string[] {
+  return strictList(r, key, what, (s) => {
+    if (typeof s !== "string") {
+      throw new Error(`${what}: ${key} holds a non-string`);
+    }
+    return s;
+  });
+}
+
+function oneOf<T extends string>(r: Record<string, unknown>, key: string, what: string, allowed: readonly T[]): T {
+  const v = r[key];
+  if (typeof v !== "string" || !allowed.includes(v as T)) {
+    throw new Error(`${what}: ${key} is not a known code`);
+  }
+  return v as T;
+}
+
+function parseKindCount(raw: unknown): ScheduleKindCount {
+  const w = "schedule kind";
+  const r = record(raw, w);
+  return { kind: oneOf(r, "kind", w, scheduleKinds), lessons: count(r, "lessons", w) };
+}
+
+export function parseScheduleMember(raw: unknown): ScheduleMember {
+  const w = "schedule member";
+  const r = record(raw, w);
+  return {
+    key: str(r, "key", w),
+    name: str(r, "name", w),
+    spellings: strings(r, "spellings", w),
+    kinds: strictList(r, "kinds", w, parseKindCount),
+    lessons: count(r, "lessons", w),
+    recordings: count(r, "recordings", w),
+    doubtful: bool(r, "doubtful", w),
+    link: oneOf(r, "link", w, scheduleLinks),
+  };
+}
+
+export function parseScheduleGroup(raw: unknown): ScheduleGroup {
+  const w = "schedule group";
+  const r = record(raw, w);
+  return {
+    key: str(r, "key", w),
+    name: str(r, "name", w),
+    aliases: strings(r, "aliases", w),
+    kinds: strictList(r, "kinds", w, parseKindCount),
+    lessons: count(r, "lessons", w),
+    recordings: count(r, "recordings", w),
+    doubtful: bool(r, "doubtful", w),
+    members: strictList(r, "members", w, parseScheduleMember),
+    action: oneOf(r, "action", w, scheduleGroupActions),
+    subjectId: str(r, "subjectId", w),
+    subjectName: str(r, "subjectName", w),
+  };
+}
+
+export function parseScheduleSubjects(raw: unknown): ScheduleSubjectsReply {
+  const w = "schedule subjects";
+  const r = record(raw, w);
+  return {
+    token: str(r, "token", w),
+    groups: strictList(r, "groups", w, parseScheduleGroup),
+    omitted: count(r, "omitted", w),
+    problem: oneOf(r, "problem", w, scheduleListProblems),
+  };
+}
+
+function parseAliased(raw: unknown): ScheduleAliased {
+  const w = "schedule aliases";
+  const r = record(raw, w);
+  return { subjectId: str(r, "subjectId", w), aliases: strings(r, "aliases", w) };
+}
+
+export function parseCreateFromSchedule(raw: unknown): CreateFromScheduleReply {
+  const w = "schedule create";
+  const r = record(raw, w);
+  return {
+    created: strictList(r, "created", w, (c) => {
+      const cw = "schedule created";
+      const cr = record(c, cw);
+      return { id: str(cr, "id", cw), key: str(cr, "key", cw), name: str(cr, "name", cw) };
+    }),
+    aliased: strictList(r, "aliased", w, parseAliased),
+    skipped: strictList(r, "skipped", w, (s) => {
+      const sw = "schedule skipped";
+      const sr = record(s, sw);
+      return { key: str(sr, "key", sw), subjectId: str(sr, "subjectId", sw), reason: oneOf(sr, "reason", sw, scheduleSkipReasons) };
+    }),
+    problem: oneOf(r, "problem", w, scheduleCreateProblems),
+  };
+}
+
+export function parseUndoFromSchedule(raw: unknown): UndoFromScheduleReply {
+  const w = "schedule undo";
+  const r = record(raw, w);
+  return {
+    removed: strings(r, "removed", w),
+    kept: strictList(r, "kept", w, (k) => {
+      const kw = "schedule kept";
+      const kr = record(k, kw);
+      return { id: str(kr, "id", kw), name: str(kr, "name", kw), reason: oneOf(kr, "reason", kw, scheduleKeptReasons) };
+    }),
+    unaliased: strictList(r, "unaliased", w, parseAliased),
+    keptAliases: strictList(r, "keptAliases", w, (k) => {
+      const kw = "schedule kept aliases";
+      const kr = record(k, kw);
+      return {
+        subjectId: str(kr, "subjectId", kw),
+        aliases: strings(kr, "aliases", kw),
+        reason: oneOf(kr, "reason", kw, ["stale"] as const),
+      };
+    }),
+    problem: oneOf(r, "problem", w, scheduleUndoProblems),
+  };
+}
+
+/** The proposal of subjects from the schedule; it changes nothing. A malformed reply rejects. */
+export async function scheduleSubjects(call: CallByName): Promise<ScheduleSubjectsReply> {
+  return parseScheduleSubjects(await call(methods.scheduleSubjects));
+}
+
+/** Applies the choices to the proposal of token (the one «Да»); the choices go to the core as they are. */
+export async function createFromSchedule(call: CallByName, token: string, choices: ScheduleChoice[]): Promise<CreateFromScheduleReply> {
+  return parseCreateFromSchedule(await call(methods.createFromSchedule, token, choices));
+}
+
+/** «Отменить всё»: only the token crosses; the core keeps what it did and takes that back. */
+export async function undoFromSchedule(call: CallByName, token: string): Promise<UndoFromScheduleReply> {
+  return parseUndoFromSchedule(await call(methods.undoFromSchedule, token));
 }

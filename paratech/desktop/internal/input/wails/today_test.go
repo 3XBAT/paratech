@@ -83,6 +83,26 @@ func TestTodayScreenMapping(t *testing.T) {
 	}
 }
 
+// TASK-315: a post counts its assignments marked «Выполнено», in «Сегодня» and in a subject thread.
+func TestTodayPostHomeworkDone(t *testing.T) {
+	p := samplePost()
+	p.Homework, p.HomeworkDone = 3, 2
+	uc := &fakeToday{today: todayfeed.Today{Posts: []todayfeed.PostView{p}}, posts: []todayfeed.PostView{p}}
+	s := NewTodayService(uc, discard())
+	got, err := s.Today(context.Background())
+	if err != nil || got.Posts[0].Homework != 3 || got.Posts[0].HomeworkDone != 2 {
+		t.Fatalf("Today posts = %+v, %v", got.Posts, err)
+	}
+	thread, err := s.SubjectPosts(context.Background(), "s1")
+	if err != nil || thread[0].HomeworkDone != 2 {
+		t.Fatalf("SubjectPosts = %+v, %v", thread, err)
+	}
+	raw, err := json.Marshal(thread[0])
+	if err != nil || !strings.Contains(string(raw), `"homework":3,"homeworkDone":2,`) {
+		t.Fatalf("post JSON = %s, %v", raw, err)
+	}
+}
+
 // An empty day is empty lists for the page, never null.
 func TestTodayScreenEmptyListsAreArrays(t *testing.T) {
 	got, err := NewTodayService(&fakeToday{}, discard()).Today(context.Background())

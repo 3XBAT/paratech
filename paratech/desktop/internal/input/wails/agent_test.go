@@ -522,7 +522,7 @@ func TestAgentPanelEventContract(t *testing.T) {
 			`{"id":"a-1","title":"Лабораторная 2","subjectId":"sub-1","due":"2026-10-24"}]`) + "," +
 		card(`"kind":"stopped","stopReason":"offline"`) + "," +
 		card(`"kind":"work","workId":"w-1","outcome":"helper"`) + "," +
-		card(`"kind":"free_work","freeWork":{"threadId":"th1","turn":3,"callId":"c1"}`) + `]}`
+		card(`"kind":"free_work","freeWork":{"threadId":"th1","turn":3,"callId":"c1"}`) + `],"fill":null}`
 	if string(got) != want {
 		t.Errorf("event JSON =\n%s\nwant\n%s", got, want)
 	}
@@ -542,7 +542,7 @@ func TestAgentPanelProgressContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"threadId":"th1","turn":2,"subjectId":"","lessonId":"","assignmentId":"","screen":"",` +
-		`"status":"PLANNING","stopReason":"","problem":"","progress":true,"cards":[]}`
+		`"status":"PLANNING","stopReason":"","problem":"","progress":true,"cards":[],"fill":null}`
 	if string(got) != want {
 		t.Errorf("event JSON =\n%s\nwant\n%s", got, want)
 	}
