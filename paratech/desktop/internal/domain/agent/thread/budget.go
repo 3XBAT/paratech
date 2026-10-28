@@ -6,8 +6,13 @@ const (
 	MaxCallsPerStep  = 4
 	MaxWrites        = 6
 	MaxPaidUnplanned = 1 // paid jobs without an approved plan
-	MaxInputTokens   = 60_000
 	MaxRetries       = 3 // «Повторить» of one failed step; each retry is a new paid attempt on the Hub
+
+	// MaxStepInputTokens is the planner input allowance of one step. Every step resends the whole prefix (catalog,
+	// history window, ~13k tokens since catalog 8) and the Hub reports cache reads/writes as input, so the request
+	// limit is the allowance of all MaxSteps: a normal request fits, a growing context still stops early.
+	MaxStepInputTokens = 20_000
+	MaxInputTokens     = MaxSteps * MaxStepInputTokens
 )
 
 // Budget is what a request has used so far.

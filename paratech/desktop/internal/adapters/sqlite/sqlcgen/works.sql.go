@@ -28,6 +28,28 @@ func (q *Queries) DeleteWork(ctx context.Context, arg DeleteWorkParams) (int64, 
 	return result.RowsAffected()
 }
 
+const deleteWorksOfAssignment = `-- name: DeleteWorksOfAssignment :execrows
+DELETE FROM works
+WHERE assignment_id = ?1
+  AND EXISTS (SELECT 1 FROM assignments a
+              WHERE a.id = works.assignment_id AND a.deleted_at IS NOT NULL AND a.deleted_at < ?2)
+`
+
+type DeleteWorksOfAssignmentParams struct {
+	AssignmentID sql.NullString
+	Cutoff       sql.NullInt64
+}
+
+// The purge of a deleted assignment (ADR-0029 addendum 2): its works, the rounds go with them (CASCADE); only while
+// the assignment is still deleted before the cutoff.
+func (q *Queries) DeleteWorksOfAssignment(ctx context.Context, arg DeleteWorksOfAssignmentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteWorksOfAssignment, arg.AssignmentID, arg.Cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getActiveWorkOfAssignment = `-- name: GetActiveWorkOfAssignment :one
 SELECT id, assignment_id, material_id, topic_request, topic, topic_subject_id, status, round, attempt, edit_work_type, edit_volume, edit_file_format, edit_formatting, edit_variant, edit_deadline, edit_sources, writing, version, created_at, updated_at, last_problem, sent_at FROM works WHERE assignment_id = ?1 AND status <> 'failed'
 `

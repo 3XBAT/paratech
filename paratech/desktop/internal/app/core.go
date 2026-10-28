@@ -125,6 +125,8 @@ type core struct {
 
 	// cleanups remove what a crashed run left behind; they run at the start, before any job or recording writes.
 	cleanups []cleanup
+	// purge removes the assignments past the restore window once a day (wirePurge; the first run is a cleanup).
+	purge loop
 
 	ui wails.Core
 }
@@ -286,6 +288,9 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err := c.wireProposals(e, settings, lib, log); err != nil {
 		return err
 	}
+	if err := c.wirePurge(e, log); err != nil {
+		return err
+	}
 
 	// Turnkey works (TASK-129): the triage reader on the Hub, texts from the assignments and the library;
 	// «Спросить по шагу» (TASK-179) on homework_draft with the desktop's prompt and the writing alias. The writing
@@ -408,6 +413,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return fmt.Errorf("app: preferences: %w", err)
 	}
+	prefs.WithRecognitionLanguages(newOCRLanguages())
 	// The time estimates use the processor count the engine runs with (ADR-0016).
 	speed, err := sttspeed.New(sttspeed.Deps{
 		Models: sqlite.NewModelRepository(db), Catalog: embeddedCatalog{}, Speeds: speeds, Settings: settings,

@@ -17,6 +17,9 @@ var ErrSettingsUnavailable = errors.New("settings are unavailable")
 // ErrUnknownRecognitionLoad is what the UI sees for a load mode other than gentle, normal or max.
 var ErrUnknownRecognitionLoad = errors.New("unknown recognition load")
 
+// ErrUnknownNoteRecognition is what the UI sees for a photo recognition mode other than off or local.
+var ErrUnknownNoteRecognition = errors.New("unknown note recognition")
+
 // settingsError is an error of the settings page: a fixed Russian text the page shows as it is (like homeworkError).
 type settingsError string
 
@@ -32,6 +35,8 @@ type SettingsUseCase interface {
 	SetProcessOnlyOnACPower(ctx context.Context, enabled bool) (preferences.Toggles, error)
 	SetRecognitionLoad(ctx context.Context, load shared.RecognitionLoad) (preferences.Toggles, error)
 	SetFreeWorkNotice(ctx context.Context, on bool) (preferences.Toggles, error)
+	SetNoteRecognition(ctx context.Context, mode settings.NoteRecognition) (preferences.Toggles, error)
+	RecognitionLanguage(ctx context.Context) (preferences.LanguageStatus, error)
 	Profile(ctx context.Context) (settings.ProfileFields, error)
 	SaveProfile(ctx context.Context, f settings.ProfileFields) (settings.ProfileFields, error)
 }
@@ -63,6 +68,13 @@ type Settings struct {
 	// FreeWorkNotice («Предупреждать перед свободной работой», TASK-188): the agent shows «Такого задания нет — могу
 	// сделать как свободную работу» before a work on a topic; off after «Больше не показывать» on that card.
 	FreeWorkNotice bool `json:"freeWorkNotice"`
+
+	// NoteRecognition («ИИ распознаёт фото конспектов», TASK-294): "off" (the default) or "local" (Windows OCR on this
+	// computer, the photos never leave it).
+	NoteRecognition string `json:"noteRecognition"`
+	// NoteRecognitionLanguage: "available" (Windows has the Russian recognizer), "missing" (it has not: the page says
+	// how to add it) or "unknown" (another OS, no OCR, a failure: the page says nothing).
+	NoteRecognitionLanguage string `json:"noteRecognitionLanguage"`
 }
 
 // SettingsService is bound to the UI: every exported method is callable from the page by its full name
@@ -119,6 +131,16 @@ func (s *SettingsService) SetFreeWorkNotice(ctx context.Context, on bool) (Setti
 	return s.reply(ctx, "set free work notice", t, err)
 }
 
+// SetNoteRecognition sets who recognises photo pages of notes: "off" or "local" (TASK-294).
+func (s *SettingsService) SetNoteRecognition(ctx context.Context, mode string) (Settings, error) {
+	m := settings.NoteRecognition(mode)
+	if !m.Valid() {
+		return Settings{}, ErrUnknownNoteRecognition
+	}
+	t, err := s.uc.SetNoteRecognition(ctx, m)
+	return s.reply(ctx, "set note recognition", t, err)
+}
+
 // GetProfile returns the student profile.
 func (s *SettingsService) GetProfile(ctx context.Context) (StudentProfile, error) {
 	f, err := s.uc.Profile(ctx)
@@ -157,7 +179,15 @@ func (s *SettingsService) reply(ctx context.Context, op string, t preferences.To
 	out := Settings{
 		RecordingPromptsEnabled: t.RecordingPromptsEnabled, ProcessOnlyOnACPower: t.ProcessOnlyOnACPower,
 		RecognitionLoad: t.RecognitionLoad.String(), FreeWorkNotice: t.FreeWorkNotice,
+		NoteRecognition: t.NoteRecognition.String(),
 	}
+	// The language is extra too: unknown hides the hint, it does not fail the page.
+	lang, err := s.uc.RecognitionLanguage(ctx)
+	if err != nil {
+		s.log.Warn("ui: recognition language", "err", err)
+	}
+	out.NoteRecognitionLanguage = string(lang)
+
 	if s.speed == nil {
 		return out, nil
 	}

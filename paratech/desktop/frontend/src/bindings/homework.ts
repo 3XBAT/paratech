@@ -182,8 +182,11 @@ export interface CreateAssignmentResult {
   assignment: AssignmentItem | null;
 }
 
-/** "" = done; the page owns the texts of the others. A reply the binding cannot read is "failed". */
-export type ChangeProblem = "" | "in_use" | "changed" | "not_found" | "failed";
+/**
+ * "" = done; the page owns the texts of the others. "expired": «Вернуть» after the restore window (ADR-0029
+ * addendum 2), the assignment is purged. A reply the binding cannot read is "failed".
+ */
+export type ChangeProblem = "" | "in_use" | "changed" | "not_found" | "expired" | "failed";
 
 /** «Удалить» and «Вернуть»: assignment (with its new version) is set exactly when problem is "". */
 export interface ChangeAssignmentResult {
@@ -291,7 +294,7 @@ export const createProblems: readonly CreateProblem[] = ["", "invalid", "subject
 
 export const createFields: readonly CreateField[] = ["", "requestId", "title", "note", "due", "time"];
 
-export const changeProblems: readonly ChangeProblem[] = ["", "in_use", "changed", "not_found", "failed"];
+export const changeProblems: readonly ChangeProblem[] = ["", "in_use", "changed", "not_found", "expired", "failed"];
 
 export const editProblems: readonly EditProblem[] = [
   "",

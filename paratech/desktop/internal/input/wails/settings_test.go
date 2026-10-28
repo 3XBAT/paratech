@@ -21,6 +21,8 @@ type fakeSettings struct {
 	t       preferences.Toggles
 	profile settings.ProfileFields
 	err     error
+	lang    preferences.LanguageStatus
+	langErr error
 }
 
 func (f *fakeSettings) Get(context.Context) (preferences.Toggles, error) { return f.t, f.err }
@@ -55,6 +57,113 @@ func (f *fakeSettings) SetFreeWorkNotice(_ context.Context, on bool) (preference
 	}
 	f.t.FreeWorkNotice = on
 	return f.t, nil
+}
+
+func (f *fakeSettings) SetNoteRecognition(_ context.Context, m settings.NoteRecognition) (preferences.Toggles, error) {
+	if f.err != nil {
+		return preferences.Toggles{}, f.err
+	}
+	f.t.NoteRecognition = m
+	return f.t, nil
+}
+
+func (f *fakeSettings) RecognitionLanguage(context.Context) (preferences.LanguageStatus, error) {
+	return f.lang, f.langErr
+}
+
+// TASK-294: «ИИ распознаёт фото конспектов» is read and changed with the other toggles; an unknown mode does not reach
+// the core; the language of the recognizer comes with every reply and a failed check only hides the hint.
+func TestSettingsServiceNoteRecognition(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeSettings{
+		t:    preferences.Toggles{RecordingPromptsEnabled: true, NoteRecognition: settings.NoteRecognitionOff},
+		lang: preferences.LanguageMissing,
+	}
+	s := NewSettingsService(f, discard())
+
+	got, err := s.GetSettings(ctx)
+	if err != nil || got.NoteRecognition != "off" || got.NoteRecognitionLanguage != "missing" || !got.RecordingPromptsEnabled {
+		t.Fatalf("GetSettings = %+v, %v", got, err)
+	}
+	if got, err = s.SetNoteRecognition(ctx, "local"); err != nil || got.NoteRecognition != "local" || got.NoteRecognitionLanguage != "missing" {
+		t.Fatalf("SetNoteRecognition(local) = %+v, %v", got, err)
+	}
+	for _, bad := range []string{"cloud", "", "Local"} {
+		if _, err := s.SetNoteRecognition(ctx, bad); !errors.Is(err, ErrUnknownNoteRecognition) {
+			t.Errorf("SetNoteRecognition(%q): err = %v, want ErrUnknownNoteRecognition", bad, err)
+		}
+	}
+	if f.t.NoteRecognition != settings.NoteRecognitionLocal {
+		t.Fatalf("an unknown mode reached the core: %q", f.t.NoteRecognition)
+	}
+
+	var logs bytes.Buffer
+	f.lang, f.langErr = preferences.LanguageUnknown, errors.New("winrt down")
+	s = NewSettingsService(f, slog.New(slog.NewTextHandler(&logs, nil)))
+	if got, err = s.GetSettings(ctx); err != nil || got.NoteRecognitionLanguage != "unknown" || got.NoteRecognition != "local" {
+		t.Fatalf("failed language check: %+v, %v", got, err)
+	}
+	if !strings.Contains(logs.String(), "winrt down") {
+		t.Fatalf("the cause must be logged, got %q", logs.String())
+	}
+}
+
+// TASK-294: a new installation reads off through the real use case; a version that stays stale is
+// ErrSettingsUnavailable as for every toggle, and the stored mode is kept.
+func TestSettingsServiceNoteRecognitionWithUseCase(t *testing.T) {
+	ctx := context.Background()
+	repo := &settingsStore{}
+	uc, err := preferences.New(repo, fixedClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewSettingsService(uc, discard())
+
+	got, err := s.GetSettings(ctx)
+	if err != nil || got.NoteRecognition != "off" || got.NoteRecognitionLanguage != "unknown" {
+		t.Fatalf("new installation = %+v, %v; want off, unknown language", got, err)
+	}
+	if got, err = s.SetNoteRecognition(ctx, "local"); err != nil || got.NoteRecognition != "local" {
+		t.Fatalf("SetNoteRecognition(local) = %+v, %v", got, err)
+	}
+	repo.stale = true
+	if _, err := s.SetNoteRecognition(ctx, "off"); !errors.Is(err, ErrSettingsUnavailable) {
+		t.Fatalf("stale version: err = %v, want ErrSettingsUnavailable", err)
+	}
+	repo.stale = false
+	if got, err = s.GetSettings(ctx); err != nil || got.NoteRecognition != "local" {
+		t.Fatalf("after the stale write = %+v, %v; want local kept", got, err)
+	}
+}
+
+// settingsStore keeps the settings in memory with the compare-and-swap contract of the sqlite adapter.
+type settingsStore struct {
+	stored *settings.State // nil: nothing stored
+	stale  bool            // every save meets a newer version
+}
+
+func (r *settingsStore) Load(context.Context) (*settings.Settings, error) {
+	if r.stored == nil {
+		return settings.New(), nil
+	}
+	return settings.Restore(*r.stored)
+}
+
+func (r *settingsStore) Save(_ context.Context, s *settings.Settings) error {
+	var version int64
+	if r.stored != nil {
+		version = r.stored.Version
+	}
+	if r.stale || s.Version() != version {
+		return shared.ErrVersionConflict
+	}
+	r.stored = &settings.State{
+		Version: version + 1, RecordingPromptsEnabled: s.RecordingPromptsEnabled(), ProcessOnlyOnACPower: s.ProcessOnlyOnACPower(),
+		RecognitionLoad: s.RecognitionLoad(), FreeWorkNotice: s.FreeWorkNotice(), NoteRecognition: s.NoteRecognition(),
+		UpdatedAt: s.UpdatedAt(),
+	}
+	s.Persisted(version + 1)
+	return nil
 }
 
 // TASK-188: «Предупреждать перед свободной работой» is read and changed with the other toggles.
@@ -99,7 +208,8 @@ func TestSettingsJSONNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"recordingPromptsEnabled":true,"processOnlyOnAcPower":true,"recognitionLoad":"",` +
-		`"loadEstimates":null,"loadEstimatesModel":"","freeWorkNotice":false}`
+		`"loadEstimates":null,"loadEstimatesModel":"","freeWorkNotice":false,"noteRecognition":"",` +
+		`"noteRecognitionLanguage":""}`
 	if string(raw) != want {
 		t.Fatalf("JSON = %s, want %s (frontend/src/bindings/settings.ts reads these names)", raw, want)
 	}
@@ -115,6 +225,7 @@ func TestSettingsServiceHidesErrorDetails(t *testing.T) {
 		"SetRecordingPromptsEnabled": func() (Settings, error) { return s.SetRecordingPromptsEnabled(context.Background(), true) },
 		"SetProcessOnlyOnACPower":    func() (Settings, error) { return s.SetProcessOnlyOnACPower(context.Background(), true) },
 		"SetFreeWorkNotice":          func() (Settings, error) { return s.SetFreeWorkNotice(context.Background(), true) },
+		"SetNoteRecognition":         func() (Settings, error) { return s.SetNoteRecognition(context.Background(), "local") },
 	}
 	for name, call := range calls {
 		_, err := call()
@@ -229,7 +340,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		typ     reflect.Type
 		methods int
 	}{
-		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 7}, // SetRecognitionLoad: TASK-084, +GetProfile, SaveProfile (TASK-094), +SetFreeWorkNotice (TASK-188)
+		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 8}, // SetRecognitionLoad: TASK-084, +GetProfile, SaveProfile (TASK-094), +SetFreeWorkNotice (TASK-188), +SetNoteRecognition (TASK-294)
 		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 9}, // +SwitchSource, DismissAdvice (TASK-082), +RetryPostProcessing, RedoSummary (TASK-086), +RecordingSound (TASK-099)
 		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 7},     // -Snooze (TASK-076), +2 (TASK-081), +Advice (TASK-082)
 		{file: "prompt.ts", typ: reflect.TypeFor[*PopupWindowService](), methods: 1},
