@@ -10,9 +10,9 @@
 // (hard rule 3): they never trigger a side effect.
 //
 // Matching on reprocessing is by position only, not by content: item i of the new answer updates the assignment of
-// item i of the earlier one. A user-edited assignment keeps its slot, so a different new item at that position is not
-// stored. Assignments at positions the new answer no longer has are withdrawn unless the user edited them
-// (Superseded) or a delivery still references them.
+// item i of the earlier one. A user-edited or done assignment keeps its slot, so a different new item at that position
+// is not stored. Assignments at positions the new answer no longer has are withdrawn unless the user edited them or
+// marked them done (Superseded) or a delivery still references them.
 //
 // The subject and teacher of the lesson come from the recording's lesson snapshot (outside this context). The
 // extraction may add hints found in the transcript (model output, SetHints) and the user may correct both (Correct);
@@ -20,4 +20,5 @@
 // assignment: they are not user data.
 //
 // Invariant: once the user edited an assignment (Edit), reprocessing never changes it again (Reextract keeps it).
+// While it is marked done (MarkDone), reprocessing neither changes nor withdraws it.
 package assignment

@@ -31,6 +31,7 @@ const (
 	opRecover   = "agentturn: recover"
 	opIdle      = "agentturn: recover idle request"
 	opPanic     = "agentturn: step panicked"
+	opFreeze    = "agentturn: freeze reply line"
 )
 
 // MaxOutputTokens is the output cap of one planner step; the Hub raises it to its floor and clamps it to its cap.
@@ -39,8 +40,9 @@ const (
 const MaxOutputTokens = 4096
 
 // historyLimit is the most entries read for a step: enough whole requests (a text, then an echo and results per
-// step) for the texts of the earlier window plus the current request.
-const historyLimit = (thread.MaxHistoryTurns + 1) * (2*thread.MaxSteps + 1)
+// step) for the texts of the earlier window plus the current request, which may run a plan of MaxPlanRunSteps steps.
+// An earlier request that ran a long plan can still push older texts out of the window; the loss stays bounded.
+const historyLimit = thread.MaxHistoryTurns*(2*thread.MaxSteps+1) + 2*thread.MaxPlanRunSteps + 1
 
 // Service runs the steps of agent requests. Operations on threads run one at a time; Stop does not wait for a running
 // step (see Stop).
@@ -623,11 +625,15 @@ func (s *Service) load(ctx context.Context, ref TurnRef, op string) (*change, er
 	return &change{th: th}, nil
 }
 
-// save writes the thread and its new history entries in one transaction.
+// save writes the thread and its new history entries in one transaction. A request that became final gets its reply
+// line frozen first (thread.FreezeReply), so the line is stored with the request's last step.
 func (s *Service) save(ctx context.Context, c *change) error {
 	// The thread first: a new thread must exist before its history refers to it.
 	before := c.th.Version()
 	err := s.tx.Do(ctx, func(ctx context.Context) error {
+		if err := s.freezeReply(ctx, c); err != nil {
+			return err
+		}
 		if err := s.threads.Save(ctx, c.th); err != nil {
 			return err
 		}
@@ -645,6 +651,29 @@ func (s *Service) save(ctx context.Context, c *change) error {
 	}
 	c.entries = nil
 	return nil
+}
+
+// freezeReply freezes the reply line of the current request once it is final and has none: from its stored entries
+// and those of the change not yet appended. The aggregate decides what the line is and keeps a frozen one; a request
+// a later one cancels (CancelEarlierAgentTurns) keeps none, and Window builds its reply from the steps.
+//
+// A failed history read fails the save, except for a stop: a request must never stay running for want of its line
+// (abort, TASK-171). The stopped request is saved without a line, the next save of it tries again, and Window builds
+// its reply from the steps meanwhile.
+func (s *Service) freezeReply(ctx context.Context, c *change) error {
+	if !c.th.NeedsReplyLine() {
+		return nil
+	}
+	turn, _ := c.th.Turn()
+	stored, err := s.history.Since(ctx, c.th.ID(), turn.Number(), historyLimit)
+	if err != nil && turn.Status() == thread.StatusStopped {
+		s.log.WarnContext(ctx, opFreeze, "thread", c.th.ID().String(), "turn", turn.Number(), "err", err)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("%s: history of request %d: %w", opFreeze, turn.Number(), err)
+	}
+	return c.th.FreezeReply(append(stored, c.entries...), s.clock.Now())
 }
 
 // stepOf is what the panel and the Driver get: the request state, the calls to run and the cards to show.

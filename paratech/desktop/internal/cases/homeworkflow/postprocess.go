@@ -54,10 +54,10 @@ const (
 // Idempotency (hard rule 7): the job keys are derived from the transcript and the prompts version, so a repeated
 // event creates no second job; the LLM idempotency key is a digest of the job and the built request (llmKey), so a
 // retry of the job is not charged twice (AC-11); the summary id is the transcript id and an assignment is found
-// again by its origin (transcript, item index), so a rerun updates instead of adding. An assignment the user edited is
-// kept as it is (assignment.Reextract). Extracted assignments at positions a shorter answer no longer has are
-// withdrawn unless the user edited them or a delivery uses them (assignment.Superseded). Saves and deletes are one
-// aggregate each (ARCH-23) and repeatable.
+// again by its origin (transcript, item index), so a rerun updates instead of adding. An assignment the user edited or
+// marked done is kept as it is (assignment.Reextract). Extracted assignments at positions a shorter answer no longer
+// has are withdrawn unless the user edited them, marked them done or a delivery uses them (assignment.Superseded).
+// Saves and deletes are one aggregate each (ARCH-23) and repeatable.
 //
 // Errors: no network or no quota make the runner park the job (WAITING_FOR_NETWORK, WAITING_FOR_QUOTA, see
 // backoff.WaitStatus); missing inputs and invalid answers fail it; storage errors are retried.

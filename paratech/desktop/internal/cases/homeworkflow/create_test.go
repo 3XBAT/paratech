@@ -1,6 +1,7 @@
 package homeworkflow
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -31,19 +32,24 @@ func (f fakeSubjects) SubjectName(_ context.Context, id shared.SubjectID) (strin
 	return name, nil
 }
 
-// allAssignments lists every stored assignment that is not deleted newest first, like the sqlite adapter.
+// allAssignments lists the stored assignments that are not deleted, filtered by done before the limit, open ones
+// first, each group newest first, like the sqlite adapter.
 type allAssignments struct{ s *ppStore }
 
-func (l allAssignments) ListRecent(_ context.Context, limit int) ([]*assignment.Assignment, error) {
+func (l allAssignments) ListRecentByState(_ context.Context, open, done bool, limit int) ([]*assignment.Assignment, error) {
 	l.s.mu.Lock()
 	defer l.s.mu.Unlock()
 	var states []assignment.State
 	for _, st := range l.s.assignments {
-		if st.DeletedAt.IsZero() {
+		isDone := !st.DoneAt.IsZero()
+		if st.DeletedAt.IsZero() && ((isDone && done) || (!isDone && open)) {
 			states = append(states, st)
 		}
 	}
-	slices.SortFunc(states, func(a, b assignment.State) int { return b.CreatedAt.Compare(a.CreatedAt) })
+	slices.SortFunc(states, func(a, b assignment.State) int {
+		return cmp.Or(cmp.Compare(boolRank(!a.DoneAt.IsZero()), boolRank(!b.DoneAt.IsZero())),
+			b.CreatedAt.Compare(a.CreatedAt), cmp.Compare(a.ID, b.ID))
+	})
 	out := []*assignment.Assignment{}
 	for _, st := range states[:min(limit, len(states))] {
 		a, err := assignment.Restore(st)
@@ -53,6 +59,14 @@ func (l allAssignments) ListRecent(_ context.Context, limit int) ([]*assignment.
 		out = append(out, a)
 	}
 	return out, nil
+}
+
+// boolRank orders false before true.
+func boolRank(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 type createEnv struct {

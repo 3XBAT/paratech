@@ -392,7 +392,7 @@ func TestAgentEvalThirdQuestionRound(t *testing.T) {
 }
 
 // TestAgentEvalBudget: paid reads do not count as the paid job without a plan, a second paid job needs a plan, a paid
-// job of unknown cost needs a plan, and the step, retry and plan size limits stop or refuse.
+// job of unknown cost needs a plan, the step and retry limits stop, and an approved plan runs past the write and step limits.
 func TestAgentEvalBudget(t *testing.T) {
 	ctx := context.Background()
 
@@ -463,16 +463,41 @@ func TestAgentEvalBudget(t *testing.T) {
 		}
 	})
 
-	t.Run("plan with too many writes", func(t *testing.T) {
+	// ADR-0033 §4: one «Да» covers a plan of any number of writes; each step is still its own Hub call.
+	t.Run("long plan runs past the write and step limits", func(t *testing.T) {
 		e := newEvalEnv(t, evalFacts{cost: evalCost})
+		const n = 30
 		var steps []string
-		for i := range thread.MaxWrites + 1 {
-			steps = append(steps, desktopStep("create_subject", fmt.Sprintf(`{"name":"Предмет %c"}`, 'А'+rune(i))))
+		writes := make([]testenv.AgentCall, n)
+		for i := range n {
+			args := fmt.Sprintf(`{"name":"Предмет %d"}`, i)
+			steps = append(steps, desktopStep("create_subject", args))
+			writes[i] = testenv.AgentCall{ID: fmt.Sprintf("w%d", i), Tool: "create_subject", Args: args}
 		}
-		e.hub.Then(testenv.AgentCall{ID: "p1", Tool: "show_plan", Args: desktopPlan("План: много предметов.", steps...)}).Then(evalEnd)
-		st, _ := play(t, e, evalAsk(t, e, "заведи семь предметов"))
-		if r, ok := resultOf(e, "p1"); st.Status != thread.StatusDone || !ok || refusalOf(t, r) != string(values.RefuseInvalidPlan) {
-			t.Fatalf("plan of %d writes: %v, %+v", thread.MaxWrites+1, r, st)
+		e.hub.Then(testenv.AgentCall{ID: "p1", Tool: "show_plan", Args: desktopPlan("План: много предметов.", steps...)})
+		for _, w := range writes {
+			e.hub.Then(w)
+		}
+		e.hub.Then(evalEnd)
+
+		st := evalAsk(t, e, "заведи тридцать предметов")
+		if st.Status != thread.StatusAwaitingPlan {
+			t.Fatalf("plan step = %+v", st)
+		}
+		st, err := e.turns.ApprovePlan(ctx, turnOf(st))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ran := 0
+		for len(st.Calls) > 0 {
+			if st.Calls[0].PlanStep != ran {
+				t.Fatalf("call %d = %+v", ran, st.Calls[0])
+			}
+			ran++
+			st = e.submit(t, st, okOutcome(st.Calls[0]))
+		}
+		if st.Status != thread.StatusDone || ran != n || len(e.hub.Requests()) != n+2 {
+			t.Fatalf("after %d writes and %d Hub steps: %+v", ran, len(e.hub.Requests()), st)
 		}
 	})
 }

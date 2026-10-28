@@ -903,3 +903,14 @@ ALTER TABLE settings ADD COLUMN note_recognition TEXT NOT NULL DEFAULT 'off' CHE
 -- Migration 0046 (TASK-313).
 -- assignments: when the student marked the assignment done (ms); NULL while it is not done.
 ALTER TABLE assignments ADD COLUMN done_at INTEGER;
+
+-- Migration 0047 (TASK-266).
+-- agent_turns: the reply line frozen when the request became final (thread.FreezeReply); NULL before, and for requests
+-- that ended before this migration or were cancelled by a later request.
+ALTER TABLE agent_turns ADD COLUMN reply_line TEXT CHECK (reply_line IS NULL OR length(CAST(reply_line AS BLOB)) BETWEEN 1 AND 2048);
+-- agent_threads: the summary of requests 1..summary_through (untrusted model output, data only) and when it was made
+-- (ms); all three NULL without a summary. forked_from: the chat this one was forked from, informational, no foreign key.
+ALTER TABLE agent_threads ADD COLUMN summary_text TEXT CHECK (summary_text IS NULL OR length(CAST(summary_text AS BLOB)) BETWEEN 1 AND 8192);
+ALTER TABLE agent_threads ADD COLUMN summary_through INTEGER CHECK (summary_through IS NULL OR summary_through >= 1);
+ALTER TABLE agent_threads ADD COLUMN summary_at INTEGER CHECK ((summary_at IS NULL) = (summary_text IS NULL) AND (summary_at IS NULL) = (summary_through IS NULL));
+ALTER TABLE agent_threads ADD COLUMN forked_from TEXT CHECK (forked_from IS NULL OR length(forked_from) BETWEEN 1 AND 128);

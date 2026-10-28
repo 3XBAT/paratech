@@ -60,6 +60,10 @@ var (
 	// ErrGenerationRunning is returned by Drafts.Generate while another generation of the assignment is pending or
 	// running (TASK-094): one draft job per assignment at a time. The same request again returns that job instead.
 	ErrGenerationRunning = errors.New("homework draft: a generation of the assignment is already running")
+
+	// ErrInvalidRequest is returned by Service.MarkDone and Service.RestoreDone for a list of assignments that is empty
+	// (MarkDone) or longer than MaxMarkDone, and by Service.ListAssignmentsByState for an unknown filter; nothing changes.
+	ErrInvalidRequest = errors.New("homework workflow: invalid request")
 )
 
 // Errors of the post-processing jobs (PostProcessor). They are stored as the job's last error and shown in the UI, so

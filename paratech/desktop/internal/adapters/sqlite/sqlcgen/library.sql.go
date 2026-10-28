@@ -602,6 +602,68 @@ func (q *Queries) ListScheduleSubjectCounts(ctx context.Context) ([]ListSchedule
 	return items, nil
 }
 
+const listScheduleSubjectStrings = `-- name: ListScheduleSubjectStrings :many
+SELECT CAST(subject AS TEXT) AS subject,
+       CAST(sum(kind = 'lecture') AS INTEGER) AS lectures,
+       CAST(sum(kind IN ('seminar', 'practice')) AS INTEGER) AS seminars,
+       CAST(sum(kind = 'lab') AS INTEGER) AS labs,
+       CAST(sum(kind = 'unknown') AS INTEGER) AS unknown,
+       CAST(sum(recording) AS INTEGER) AS recordings
+FROM (
+    SELECT subject AS subject, kind AS kind, 0 AS recording
+    FROM schedule_entries
+    WHERE deleted_at IS NULL AND subject <> ''
+    UNION ALL
+    SELECT COALESCE(user_subject, lesson_subject) AS subject, '' AS kind, 1 AS recording
+    FROM recordings
+    WHERE deleting_at IS NULL AND COALESCE(user_subject, lesson_subject, '') <> ''
+) AS strings
+GROUP BY subject
+ORDER BY subject
+`
+
+type ListScheduleSubjectStringsRow struct {
+	Subject    string
+	Lectures   int64
+	Seminars   int64
+	Labs       int64
+	Unknown    int64
+	Recordings int64
+}
+
+// The free subject strings of the live schedule and of the recordings not marked for deletion (the user's correction,
+// else the lesson snapshot) in one read: per string the lessons by kind (seminar and practice together) and the
+// recordings, sorted by string.
+func (q *Queries) ListScheduleSubjectStrings(ctx context.Context) ([]ListScheduleSubjectStringsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listScheduleSubjectStrings)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListScheduleSubjectStringsRow{}
+	for rows.Next() {
+		var i ListScheduleSubjectStringsRow
+		if err := rows.Scan(
+			&i.Subject,
+			&i.Lectures,
+			&i.Seminars,
+			&i.Labs,
+			&i.Unknown,
+			&i.Recordings,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSubjectAliases = `-- name: ListSubjectAliases :many
 SELECT alias_key, subject_id, alias, position FROM subject_aliases WHERE subject_id = ?1 ORDER BY position
 `

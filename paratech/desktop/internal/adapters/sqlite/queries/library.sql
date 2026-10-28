@@ -138,3 +138,25 @@ SELECT CAST(COALESCE(user_subject, lesson_subject) AS TEXT) AS subject, CAST(cou
 FROM recordings
 WHERE deleting_at IS NULL AND COALESCE(user_subject, lesson_subject, '') <> ''
 GROUP BY COALESCE(user_subject, lesson_subject);
+
+-- The free subject strings of the live schedule and of the recordings not marked for deletion (the user's correction,
+-- else the lesson snapshot) in one read: per string the lessons by kind (seminar and practice together) and the
+-- recordings, sorted by string.
+-- name: ListScheduleSubjectStrings :many
+SELECT CAST(subject AS TEXT) AS subject,
+       CAST(sum(kind = 'lecture') AS INTEGER) AS lectures,
+       CAST(sum(kind IN ('seminar', 'practice')) AS INTEGER) AS seminars,
+       CAST(sum(kind = 'lab') AS INTEGER) AS labs,
+       CAST(sum(kind = 'unknown') AS INTEGER) AS unknown,
+       CAST(sum(recording) AS INTEGER) AS recordings
+FROM (
+    SELECT subject AS subject, kind AS kind, 0 AS recording
+    FROM schedule_entries
+    WHERE deleted_at IS NULL AND subject <> ''
+    UNION ALL
+    SELECT COALESCE(user_subject, lesson_subject) AS subject, '' AS kind, 1 AS recording
+    FROM recordings
+    WHERE deleting_at IS NULL AND COALESCE(user_subject, lesson_subject, '') <> ''
+) AS strings
+GROUP BY subject
+ORDER BY subject;

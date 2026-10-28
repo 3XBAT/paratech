@@ -12,6 +12,7 @@ import (
 
 	"paratech/desktop/internal/domain/library/inspection"
 	"paratech/desktop/internal/domain/library/material"
+	"paratech/desktop/internal/domain/library/services/schedulesubjects"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/library/values"
@@ -438,11 +439,16 @@ func (f fakeLessons) Get(_ context.Context, id shared.LessonID) (*lesson.Lesson,
 
 type fakeStrings struct {
 	list []subjectmatch.Candidate
+	rows []schedulesubjects.Row // the schedule strings by kind (ListScheduleSubjectStrings)
 	err  error
 }
 
 func (f fakeStrings) ListSubjectStrings(context.Context) ([]subjectmatch.Candidate, error) {
 	return f.list, f.err
+}
+
+func (f fakeStrings) ListScheduleSubjectStrings(context.Context) ([]schedulesubjects.Row, error) {
+	return slices.Clone(f.rows), f.err
 }
 
 type fakeClock struct{ now time.Time }

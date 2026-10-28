@@ -7,6 +7,7 @@ import (
 
 	"paratech/desktop/internal/adapters/sqlite/sqlcgen"
 	"paratech/desktop/internal/domain/library/material"
+	"paratech/desktop/internal/domain/library/services/schedulesubjects"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/library/values"
@@ -25,6 +26,7 @@ const (
 	opSaveMaterial     = "sqlite: save material"
 	opSaveMaterialText = "sqlite: save material text status"
 	opSubjectStrings   = "sqlite: list subject strings"
+	opScheduleStrings  = "sqlite: list schedule subject strings"
 	opRestoreSubject   = "stored subject"
 	opRestoreMaterial  = "stored material"
 )
@@ -422,5 +424,25 @@ func (s *SubjectStrings) ListSubjectStrings(ctx context.Context) ([]subjectmatch
 		out = append(out, *c)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// ListScheduleSubjectStrings returns every distinct string as stored, with its live lessons of the schedule by kind
+// and the recordings not marked for deletion that name it, sorted by string; one read, so the counts agree.
+func (s *SubjectStrings) ListScheduleSubjectStrings(ctx context.Context) ([]schedulesubjects.Row, error) {
+	rows, err := s.db.Queries(ctx).ListScheduleSubjectStrings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", opScheduleStrings, MapError(ctx, err))
+	}
+	out := make([]schedulesubjects.Row, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, schedulesubjects.Row{
+			Name: r.Subject,
+			Lessons: schedulesubjects.Kinds{
+				Lecture: int(r.Lectures), Seminar: int(r.Seminars), Lab: int(r.Labs), Unknown: int(r.Unknown),
+			},
+			Recordings: int(r.Recordings),
+		})
+	}
 	return out, nil
 }

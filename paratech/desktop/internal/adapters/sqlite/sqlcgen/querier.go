@@ -245,9 +245,10 @@ type Querier interface {
 	// Entries of the same instant follow the insert order (rowid; ids are random), so "undo the request" goes exactly
 	// in reverse.
 	ListAgentActionsByThread(ctx context.Context, arg ListAgentActionsByThreadParams) ([]AgentAction, error)
-	// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first). Entries
-	// of dropped requests are left out here, so they never take a place under the limit (ADR-0028).
-	ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) ([]AgentStep, error)
+	// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first), each
+	// with the frozen reply line of its request. Entries of dropped requests are left out here, so they never take a place
+	// under the limit (ADR-0028).
+	ListAgentSteps(ctx context.Context, arg ListAgentStepsParams) ([]ListAgentStepsRow, error)
 	// Every chat: the unarchived ones by their last activity, newest first, then the archived ones in the same order.
 	// (Comments of this file stay ASCII: sqlc rewrites queries by byte offset.)
 	ListAgentThreadIDs(ctx context.Context) ([]string, error)
@@ -315,6 +316,9 @@ type Querier interface {
 	ListRecentAgentActions(ctx context.Context, maxRows int64) ([]AgentAction, error)
 	// The newest assignments for the homework screen; the items of one extraction keep the order of the answer.
 	ListRecentAssignments(ctx context.Context, maxRows int64) ([]Assignment, error)
+	// The same list filtered by the done mark (ADR-0033 section 9) before the limit: the open rows when with_open is 1, the done
+	// rows when with_done is 1, open rows first.
+	ListRecentAssignmentsByState(ctx context.Context, arg ListRecentAssignmentsByStateParams) ([]Assignment, error)
 	// Ids for the recordings screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
 	// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).
 	// active is a JSON array of status names. A recording marked for deletion is left out (TASK-095).
@@ -330,6 +334,10 @@ type Querier interface {
 	ListRunningAgentThreadIDs(ctx context.Context) ([]string, error)
 	// The free subject strings of the live schedule, with how many lessons name each.
 	ListScheduleSubjectCounts(ctx context.Context) ([]ListScheduleSubjectCountsRow, error)
+	// The free subject strings of the live schedule and of the recordings not marked for deletion (the user's correction,
+	// else the lesson snapshot) in one read: per string the lessons by kind (seminar and practice together) and the
+	// recordings, sorted by string.
+	ListScheduleSubjectStrings(ctx context.Context) ([]ListScheduleSubjectStringsRow, error)
 	ListSttModels(ctx context.Context) ([]SttModel, error)
 	ListSttSpeeds(ctx context.Context) ([]ListSttSpeedsRow, error)
 	ListSubjectAliases(ctx context.Context, subjectID string) ([]SubjectAlias, error)

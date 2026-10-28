@@ -306,7 +306,8 @@ func TestDriverClose(t *testing.T) {
 }
 
 // A step use case that never ends a request (a broken invariant) cannot keep the loop going: it stops after the step
-// budget and cancels the request.
+// budget of a request with an approved plan (the larger one, so a long plan is never cut by the guard) and cancels
+// the request.
 func TestDriverLoopIsBounded(t *testing.T) {
 	turns := &scriptedTurns{endless: step(thread.StatusExecuting, []agentturn.Call{readCall(t, "c1", values.ToolListSubjects, `{}`)})}
 	d, _ := newDriver(t, newReads(), turns)
@@ -314,7 +315,7 @@ func TestDriverLoopIsBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Wait()
-	if rep := turns.report(); len(rep.submitted) != thread.MaxSteps || len(rep.cancelled) != 1 || len(rep.stopped) != 0 {
+	if rep := turns.report(); len(rep.submitted) != thread.MaxPlanRunSteps || len(rep.cancelled) != 1 || len(rep.stopped) != 0 {
 		t.Fatalf("submitted %d, cancelled %d, stopped %d", len(rep.submitted), len(rep.cancelled), len(rep.stopped))
 	}
 }

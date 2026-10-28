@@ -30,6 +30,16 @@ WHERE deleted_at IS NULL
 ORDER BY created_at DESC, source_index, id
 LIMIT sqlc.arg(max_rows);
 
+-- The same list filtered by the done mark (ADR-0033 section 9) before the limit: the open rows when with_open is 1, the done
+-- rows when with_done is 1, open rows first.
+-- name: ListRecentAssignmentsByState :many
+SELECT * FROM assignments
+WHERE deleted_at IS NULL
+  AND ((done_at IS NULL AND CAST(sqlc.arg(with_open) AS INTEGER) = 1)
+    OR (done_at IS NOT NULL AND CAST(sqlc.arg(with_done) AS INTEGER) = 1))
+ORDER BY done_at IS NOT NULL, created_at DESC, source_index, id
+LIMIT sqlc.arg(max_rows);
+
 -- A never-stored assignment (version 0) is inserted with version 1.
 -- name: InsertAssignment :exec
 INSERT INTO assignments (id, lesson_id, transcript_id, material_id, title, description, due_at, user_edited, source_index,

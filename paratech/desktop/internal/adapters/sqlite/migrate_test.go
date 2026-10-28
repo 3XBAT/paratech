@@ -91,8 +91,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != assignmentDoneVersion {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, assignmentDoneVersion)
+	if err != nil || first != agentReplyVersion {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, agentReplyVersion)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
@@ -265,8 +265,12 @@ const subjectTeachersVersion = 44
 // noteRecognitionVersion adds the photo recognition setting (TASK-294).
 const noteRecognitionVersion = 45
 
-// assignmentDoneVersion adds the «Выполнено» mark of an assignment (TASK-313), the newest one.
+// assignmentDoneVersion adds the «Выполнено» mark of an assignment (TASK-313).
 const assignmentDoneVersion = 46
+
+// agentReplyVersion adds the reply line of a request, the summary and the fork source of a chat (TASK-266), the newest
+// one.
+const agentReplyVersion = 47
 
 // recordingOriginVersion adds the origin of a recording (TASK-161).
 const recordingOriginVersion = 42

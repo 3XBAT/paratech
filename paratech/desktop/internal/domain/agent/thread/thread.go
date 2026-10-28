@@ -27,6 +27,7 @@ type Thread struct {
 	historyFrom int
 	summary     values.HistorySummary // of the earlier requests 1…Through; zero: none (Compact)
 	summaryAt   time.Time             // when the summary was made; zero exactly when there is none
+	forkedFrom  shared.ThreadID       // zero: not a fork
 	title       string
 	archivedAt  time.Time // zero: not archived
 	lastActive  time.Time // start of the last request; creation before the first
@@ -79,6 +80,7 @@ type State struct {
 	HistoryFrom int
 	Summary     values.HistorySummary // zero: none
 	SummaryAt   time.Time             // zero exactly when Summary is
+	ForkedFrom  shared.ThreadID       // zero: not a fork
 	Title       string
 	ArchivedAt  time.Time // zero: not archived
 	LastActive  time.Time
@@ -135,7 +137,10 @@ func Restore(s State) (*Thread, error) {
 	if err := checkSummary(s); err != nil {
 		return bad(err.Error())
 	}
-	th.summary, th.summaryAt = s.Summary, s.SummaryAt
+	if err := checkFork(s); err != nil {
+		return bad(err.Error())
+	}
+	th.summary, th.summaryAt, th.forkedFrom = s.Summary, s.SummaryAt, s.ForkedFrom
 	th.version, th.turns, th.historyFrom, th.updatedAt = s.Version, s.Turns, s.HistoryFrom, s.UpdatedAt
 	th.title, th.archivedAt, th.lastActive = s.Title, s.ArchivedAt, s.LastActive
 	th.seen.Add(s.Seen...)
@@ -195,7 +200,7 @@ func restoreTurn(s TurnState, number int) (Turn, error) {
 func (th *Thread) State() State {
 	s := State{
 		Version: th.version, ID: th.id, Turns: th.turns, Seen: th.seen.Sorted(),
-		HistoryFrom: th.historyFrom, Summary: th.summary, SummaryAt: th.summaryAt, Title: th.title,
+		HistoryFrom: th.historyFrom, Summary: th.summary, SummaryAt: th.summaryAt, ForkedFrom: th.forkedFrom, Title: th.title,
 		ArchivedAt: th.archivedAt, LastActive: th.lastActive, CreatedAt: th.createdAt, UpdatedAt: th.updatedAt,
 	}
 	if th.current != nil {
@@ -356,7 +361,7 @@ func (th *Thread) stopBudget(what string, now time.Time) error {
 // --- steps -------------------------------------------------------------------------------------------
 
 // BeginStep opens the next planner step and returns its key ag:<thread>:<turn>:<step>. Over the step or input
-// token limit the request stops (budget) and ErrBudgetExceeded is returned.
+// token limit (stepLimits) the request stops (budget) and ErrBudgetExceeded is returned.
 func (th *Thread) BeginStep(now time.Time) (string, error) {
 	t, err := th.ready()
 	if err != nil {
@@ -365,10 +370,11 @@ func (th *Thread) BeginStep(now time.Time) (string, error) {
 	if len(t.open) > 0 {
 		return "", ErrResultsPending
 	}
-	if t.budget.Steps >= MaxSteps {
+	maxSteps, maxTokens := t.stepLimits()
+	if t.budget.Steps >= maxSteps {
 		return "", th.stopBudget("steps", now)
 	}
-	if t.budget.InputTokens >= MaxInputTokens {
+	if t.budget.InputTokens >= maxTokens {
 		return "", th.stopBudget("input tokens", now)
 	}
 	t.budget.Steps++
@@ -463,11 +469,12 @@ type Admission struct {
 	PlanStep int // index of the approved step it executes; -1 when there is no approved plan
 }
 
-// Admit decides whether a call may run (ADR-0021, ADR-0022): every ID must have typed provenance; a U call counts
-// as a write, must match an unused step when a plan is approved and otherwise must not need a plan (replacing a
-// ready result needs one too); a paid U call without a plan counts toward MaxPaidUnplanned. C calls only
-// create a proposal (Admission.Class tells), UI calls are handled by ProposePlan, AskQuestions and Complete. A
-// refused call is never executed; over the write limit the request stops (budget).
+// Admit decides whether a call may run (ADR-0021, ADR-0022): every ID must have typed provenance; a U call must
+// match an unused step when a plan is approved (not counted: the «Да» covers the whole plan, ADR-0033 §4) and
+// otherwise must not need a plan (replacing a ready result needs one too) and counts as a write; a paid U call
+// without a plan counts toward MaxPaidUnplanned. C calls only create a proposal (Admission.Class tells), UI calls are
+// handled by ProposePlan, AskQuestions and Complete. A refused call is never executed; over the write limit the
+// request stops (budget).
 //
 // A work on a free topic (actionpolicy.FreeTopic, TASK-188) outside an approved plan is admitted as class UI while
 // the student wants the free-work card: nothing runs and nothing is counted; the card's «Сделать» is the student's one
@@ -499,9 +506,6 @@ func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, er
 		return adm, nil
 	}
 
-	if t.budget.Writes >= MaxWrites {
-		return Admission{}, th.stopBudget("writes", now)
-	}
 	if len(t.approved) > 0 {
 		for i, s := range t.approved {
 			if !t.used[i] && s.Matches(call) && t.deferredBound(s, i, call) {
@@ -514,6 +518,9 @@ func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, er
 		}
 		t.used[adm.PlanStep] = true
 	} else {
+		if t.budget.Writes >= MaxWrites {
+			return Admission{}, th.stopBudget("writes", now)
+		}
 		reason, err := actionpolicy.NeedsPlan(call.Tool(), actionpolicy.Facts{
 			WritesBefore: t.budget.Writes, CostMicroUSD: f.CostMicroUSD, Triage: f.Triage, ReplacesReady: f.ReplacesReady,
 			FreeTopic: free,
@@ -530,8 +537,8 @@ func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, er
 			}
 			t.budget.PaidUnplanned++
 		}
+		t.budget.Writes++
 	}
-	t.budget.Writes++
 	if t.status == StatusPlanning {
 		if err := th.move(StatusExecuting, now); err != nil {
 			return Admission{}, err
@@ -570,8 +577,8 @@ func (th *Thread) CheckRefs(refs []values.Ref, context values.RefSet) error {
 
 // --- plan --------------------------------------------------------------------------------------------
 
-// ProposePlan records the steps of show_plan and waits for «Да». Steps are U or C tools only, at most MaxWrites
-// writes, and their IDs pass the provenance check.
+// ProposePlan records the steps of show_plan and waits for «Да». Steps are 1..values.MaxPlanSteps U or C tools,
+// and their IDs pass the provenance check. The number of writes is not limited: the one «Да» covers them all.
 func (th *Thread) ProposePlan(steps []values.PlanStep, context values.RefSet, now time.Time) error {
 	if _, err := th.ready(); err != nil {
 		return err
@@ -579,7 +586,6 @@ func (th *Thread) ProposePlan(steps []values.PlanStep, context values.RefSet, no
 	if len(steps) == 0 || len(steps) > values.MaxPlanSteps {
 		return fmt.Errorf("%w: a plan has 1..%d steps", ErrInvalidPlan, values.MaxPlanSteps)
 	}
-	writes := 0
 	known := th.known(context)
 	for _, s := range steps {
 		r, err := actionpolicy.Of(s.Tool())
@@ -589,15 +595,9 @@ func (th *Thread) ProposePlan(steps []values.PlanStep, context values.RefSet, no
 		if r.Class != actionpolicy.ClassU && r.Class != actionpolicy.ClassC {
 			return fmt.Errorf("%w: step %s is not an action", ErrInvalidPlan, s.Tool())
 		}
-		if r.Class == actionpolicy.ClassU {
-			writes++
-		}
 		if err := actionpolicy.CheckProvenance(s.Args().Refs(), known); err != nil {
 			return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 		}
-	}
-	if writes > MaxWrites {
-		return fmt.Errorf("%w: more than %d writes", ErrInvalidPlan, MaxWrites)
 	}
 	if err := th.move(StatusAwaitingPlan, now); err != nil {
 		return err
@@ -618,6 +618,7 @@ func (th *Thread) ApprovePlan(now time.Time) error {
 	if err := th.move(StatusExecuting, now); err != nil {
 		return err
 	}
+	t.keepPlanWrite()
 	t.approved, t.proposed = t.proposed, nil
 	t.used = make([]bool, len(t.approved))
 	t.created = nil // step indexes refer to the plan they were created under
@@ -625,7 +626,7 @@ func (th *Thread) ApprovePlan(now time.Time) error {
 }
 
 // RevisePlan is «Изменить»: the proposed plan and any earlier approved plan are dropped and the planner continues,
-// so later writes need a new «Да».
+// so later writes need a new «Да». The request is back to the limits without a plan (stepLimits).
 func (th *Thread) RevisePlan(now time.Time) error {
 	t, err := th.turn()
 	if err != nil {
@@ -637,8 +638,17 @@ func (th *Thread) RevisePlan(now time.Time) error {
 	if err := th.move(StatusPlanning, now); err != nil {
 		return err
 	}
+	t.keepPlanWrite()
 	t.proposed, t.approved, t.used, t.created = nil, nil, nil, nil
 	return nil
+}
+
+// keepPlanWrite records that a plan step ran before t.used is dropped: plan steps are not counted as writes
+// (only U calls mark a step used), yet one that ran makes a later unplanned write the second one, which needs a plan.
+func (t *Turn) keepPlanWrite() {
+	if t.budget.Writes == 0 && slices.Contains(t.used, true) {
+		t.budget.Writes = 1
+	}
 }
 
 // --- questions ---------------------------------------------------------------------------------------
