@@ -57,9 +57,10 @@ type AssignmentRepository interface {
 	// (ADR-0029; reprocessing never withdraws them anyway). None is an empty list.
 	ListByTranscript(ctx context.Context, t shared.TranscriptID) ([]*assignment.Assignment, error)
 
-	// Busy reports whether something in progress uses assignment id, so that DeleteAssignment refuses it with
-	// assignment.ErrInUse (PRD section 10, ADR-0029): a delivery in PENDING (a scheduled one too), SENDING or UNKNOWN, a work in triage
-	// or writing, or an unfinished draft generation or writing job. Called inside Tx.Do it reads in that transaction.
+	// Busy reports whether an email of assignment id may still go out or may have gone out unseen, so that
+	// DeleteAssignment refuses it with assignment.ErrInUse (PRD section 10, ADR-0029, hard rule 7): a delivery in
+	// PENDING (a scheduled one too), SENDING or UNKNOWN. A work or a job of it does not count: the delete stops them
+	// (TASK-338, AssignmentActivity). Called inside Tx.Do it reads in that transaction.
 	Busy(ctx context.Context, id shared.AssignmentID) (bool, error)
 
 	// Delete removes an assignment reprocessing withdrew (PRD section 10, assignment.Superseded). It is a version
@@ -332,6 +333,27 @@ type FileRemover interface {
 type CalendarSyncRequester interface {
 	// RequestSync asks for a sync run (PRD section 11.3).
 	RequestSync(ctx context.Context)
+}
+
+// AssignmentActivity tells what is under way for an assignment, which its «Удалить» stops (PRD section 10, TASK-338):
+// a turnkey work in triage or writing and the unfinished homework_draft and work_writing jobs whose payload names it.
+// Implemented by the sqlite assignment repository.
+type AssignmentActivity interface {
+	// Working reports whether a work of assignment id is in triage or writing or an unfinished job names it
+	// (PRD section 10). Called inside Tx.Do it reads in that transaction.
+	Working(ctx context.Context, id shared.AssignmentID) (bool, error)
+
+	// ActiveJobs lists the unfinished homework_draft and work_writing jobs whose payload names assignment id
+	// (PRD sections 7.2 and 10); none is an empty list.
+	ActiveJobs(ctx context.Context, id shared.AssignmentID) ([]shared.JobID, error)
+}
+
+// JobCanceller cancels a job (PRD section 7.2; cases/jobrunner, wired by the app): a queued or waiting job at once, a
+// running one gets its context cancelled and ends without storing its result. A job that cannot be cancelled
+// (finished meanwhile, or RUNNING with no handler of this process) is an error.
+type JobCanceller interface {
+	// Cancel cancels job id (PRD section 7.2).
+	Cancel(ctx context.Context, id shared.JobID) error
 }
 
 // UnresolvedDeliveries tells whether an email of an assignment may still go out or may have gone out unseen, so that

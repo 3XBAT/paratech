@@ -61,10 +61,12 @@ type fakeHWProposals struct {
 	createErr    error                         // returned by CreateAssignment
 	created      map[shared.AssignmentID]homeworkflow.NewAssignment
 	createCalls  []homeworkflow.NewAssignment // every CreateAssignment input
-	deleteErr    error                        // returned by DeleteAssignment
+	deleteErr    error                        // returned by DeleteAndStop
 	restoreErr   error                        // returned by RestoreAssignment
 	editErr      error                        // returned by EditAssignment
-	versions     []int64                      // every expected version DeleteAssignment and RestoreAssignment got
+	impactErr    error                        // returned by DeletionImpact
+	working      map[shared.AssignmentID]bool // what DeletionImpact and DeleteAndStop report as under way
+	versions     []int64                      // every expected version DeleteAndStop and RestoreAssignment got
 	edits        []homeworkflow.AssignmentEdit
 }
 
@@ -101,14 +103,25 @@ func (f *fakeHWProposals) CreateAssignment(_ context.Context, in homeworkflow.Ne
 	return homeworkflow.AssignmentView{ID: in.ID, Title: in.Title, Description: in.Note, UpdatedAt: hwT0}, nil
 }
 
-// DeleteAssignment and RestoreAssignment bump the version like the use case.
-func (f *fakeHWProposals) DeleteAssignment(_ context.Context, id shared.AssignmentID, v int64) (homeworkflow.AssignmentView, error) {
-	f.log.add("DeleteAssignment")
+// DeleteAndStop and RestoreAssignment bump the version like the use case; the delete stops what f.working names.
+func (f *fakeHWProposals) DeleteAndStop(_ context.Context, id shared.AssignmentID, v int64) (homeworkflow.Deletion, error) {
+	f.log.add("DeleteAndStop")
 	f.versions = append(f.versions, v)
 	if err := cmpErr(f.deleteErr, f.err); err != nil {
-		return homeworkflow.AssignmentView{}, err
+		return homeworkflow.Deletion{Stopped: f.working[id]}, err // a refusal never reports a stop; the binding must not either
 	}
-	return homeworkflow.AssignmentView{ID: id, Title: "Rivers", Version: v + 1, UpdatedAt: hwT0, Deleted: true}, nil
+	return homeworkflow.Deletion{
+		Assignment: homeworkflow.AssignmentView{ID: id, Title: "Rivers", Version: v + 1, UpdatedAt: hwT0, Deleted: true},
+		Stopped:    f.working[id],
+	}, nil
+}
+
+func (f *fakeHWProposals) DeletionImpact(_ context.Context, id shared.AssignmentID) (homeworkflow.DeleteImpact, error) {
+	f.log.add("DeletionImpact")
+	if err := cmpErr(f.impactErr, f.err); err != nil {
+		return homeworkflow.DeleteImpact{}, err
+	}
+	return homeworkflow.DeleteImpact{Working: f.working[id]}, nil
 }
 
 func (f *fakeHWProposals) RestoreAssignment(_ context.Context, id shared.AssignmentID, v int64) (homeworkflow.AssignmentView, error) {
@@ -359,6 +372,18 @@ var everyHomeworkCall = []hwCall{
 	}},
 	{"RestoreAssignment", func(s *HomeworkService, id string) error {
 		return changeErr(s.RestoreAssignment(context.Background(), id, 2).Problem)
+	}},
+	// No error crosses: an invalid id and a failed read are both Working false; shown here as the page's errors.
+	{"DeleteImpact", func(s *HomeworkService, id string) error {
+		switch _, invalid := assignmentID(id); {
+		case s.DeleteImpact(context.Background(), id).Working:
+			return errors.New("working with nothing under way")
+		case invalid != nil:
+			return ErrHomeworkInvalidID
+		case s.proposals.(*fakeHWProposals).err != nil:
+			return ErrHomeworkUnavailable
+		}
+		return nil
 	}},
 	{"EditAssignment", func(s *HomeworkService, id string) error {
 		return changeErr(s.EditAssignment(context.Background(), EditRequest{ID: id, Version: 1, Title: "Read chapter 3"}).Problem)

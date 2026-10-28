@@ -33,8 +33,56 @@ func TestDeleteAndRestoreAssignment(t *testing.T) {
 	if !slices.Equal(e.proposals.versions, []int64{4, 5}) {
 		t.Fatalf("versions = %v, want the ones the page sent", e.proposals.versions)
 	}
-	if got := e.calls.list(); !slices.Equal(got, []string{"DeleteAssignment", "RestoreAssignment"}) {
+	if del.Stopped {
+		t.Fatal("Stopped is set with nothing under way")
+	}
+	if got := e.calls.list(); !slices.Equal(got, []string{"DeleteAndStop", "RestoreAssignment"}) {
 		t.Fatalf("calls = %v, want only the use cases (no journal)", got)
+	}
+}
+
+// A delete that stopped a work or a draft generation says so; a refused one never does (TASK-338).
+func TestDeleteAssignmentStopped(t *testing.T) {
+	e := newHWEnv()
+	e.proposals.working = map[shared.AssignmentID]bool{"a1": true}
+	if res := e.svc.DeleteAssignment(context.Background(), "a1", 1); res.Problem != "" || !res.Stopped || res.Assignment == nil {
+		t.Fatalf("delete of a working assignment = %+v, want Stopped", res)
+	}
+
+	e.proposals.deleteErr = fmt.Errorf("homeworkflow: delete assignment a1: %w", assignment.ErrInUse)
+	if res := e.svc.DeleteAssignment(context.Background(), "a1", 2); res != (ChangeResult{Problem: changeInUse}) {
+		t.Fatalf("refused delete = %+v, want in_use only", res)
+	}
+}
+
+func TestDeleteImpact(t *testing.T) {
+	tests := []struct {
+		name    string
+		id      string
+		working map[shared.AssignmentID]bool
+		err     error
+		want    DeleteImpact
+		calls   int
+	}{
+		{name: "a work under way", id: "a1", working: map[shared.AssignmentID]bool{"a1": true}, want: DeleteImpact{Working: true}, calls: 1},
+		{name: "nothing under way", id: "a1", calls: 1},
+		{name: "invalid id", id: "a b", working: map[shared.AssignmentID]bool{"a b": true}},
+		{name: "the read fails", id: "a1", working: map[shared.AssignmentID]bool{"a1": true}, err: errors.New(rawCause), calls: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newHWEnv()
+			e.proposals.working, e.proposals.impactErr = tt.working, tt.err
+			if got := e.svc.DeleteImpact(context.Background(), tt.id); got != tt.want {
+				t.Fatalf("DeleteImpact = %+v, want %+v", got, tt.want)
+			}
+			if got := e.calls.list(); len(got) != tt.calls {
+				t.Fatalf("calls = %v, want %d", got, tt.calls)
+			}
+			if tt.err != nil && !strings.Contains(e.logs.String(), "locked") {
+				t.Fatalf("the failure is not logged: %q", e.logs.String())
+			}
+		})
 	}
 }
 
@@ -236,7 +284,8 @@ func TestChangeJSONNames(t *testing.T) {
 		v    any
 		want string
 	}{
-		{ChangeResult{}, `{"problem":"","assignment":null}`},
+		{ChangeResult{}, `{"problem":"","assignment":null,"stopped":false}`},
+		{DeleteImpact{}, `{"working":false}`},
 		{EditResult{}, `{"problem":"","field":"","assignment":null}`},
 		{EditRequest{}, `{"id":"","version":0,"title":"","note":"","subjectId":"","date":"","time":""}`},
 	}
