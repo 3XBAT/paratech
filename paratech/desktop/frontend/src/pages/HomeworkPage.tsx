@@ -170,6 +170,8 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
   const [rowProblem, setRowProblem] = useState<{ id: string; text: string; openSend: boolean } | null>(null);
   // Deleted with a stop of a running work: the removed line says so.
   const [stoppedIds, setStoppedIds] = useState<Readonly<Record<string, boolean>>>({});
+  // «Вернуть» came after the restore window: the removed line says the delete is final and has no button.
+  const [expiredIds, setExpiredIds] = useState<Readonly<Record<string, boolean>>>({});
   // The row that asks «Работа остановится — удалить?» (its work is running).
   const [confirmId, setConfirmId] = useState("");
   const removedRef = useRef(removed);
@@ -317,6 +319,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
     a: AssignmentItem,
     call: () => Promise<ChangeAssignmentResult>,
     done: (next: AssignmentItem, stopped: boolean) => void,
+    expired?: () => void,
   ) {
     if (guard.current.has(a.id)) {
       return; // a second click while the first call runs: it must not touch the first one's busy state
@@ -331,6 +334,11 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
       const out = changeOutcome(r);
       if (out.assignment !== null) {
         done(out.assignment, out.stopped);
+        return;
+      }
+      if (out.expired && expired !== undefined) {
+        // The removed line itself says it: no refusal line and no reload (the reload would drop the line).
+        expired();
         return;
       }
       setRowProblem({ id: a.id, text: out.text, openSend: out.openSend });
@@ -350,6 +358,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
       (next, stopped) => {
         setRestoredId("");
         setStoppedIds((cur) => ({ ...cur, [a.id]: stopped }));
+        setExpiredIds((cur) => ({ ...cur, [a.id]: false }));
         setRemoved((cur) => ({ ...cur, [a.id]: next }));
       },
     );
@@ -390,6 +399,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
         setItems((cur) => (cur === null ? cur : cur.map((x) => (x.id === a.id ? next : x))));
         setRestoredId(a.id);
       },
+      () => setExpiredIds((cur) => ({ ...cur, [a.id]: true })),
     );
 
   // «Отмена» of the delete question: the question that had the focus is gone, so the row's «⋯» button takes it.
@@ -426,6 +436,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
             <RemovedLine
               busy={busyId === a.id}
               stopped={stoppedIds[a.id] === true}
+              expired={expiredIds[a.id] === true}
               onRestore={() => void restore(a, removed[a.id])}
             />
           }
@@ -649,6 +660,7 @@ function AssignmentEditor(props: {
   const [changeOpenSend, setChangeOpenSend] = useState(false); // the refusal comes with «Открыть отправку»
   const [confirming, setConfirming] = useState(false); // «Работа остановится» is asked before the delete
   const [goneStopped, setGoneStopped] = useState(false); // the delete stopped a running work
+  const [goneExpired, setGoneExpired] = useState(false); // «Вернуть» came after the restore window
   const [cancelled, setCancelled] = useState(false); // «Отмена» of the warning: «Удалить» takes the focus back
   const mailRef = useRef<HTMLHeadingElement>(null);
   const library = useMemo(() => libraryApi(callByName), []);
@@ -1060,7 +1072,11 @@ function AssignmentEditor(props: {
   // student leaves the page. The guard keeps a double click to one call.
   const removeGuard = useRef(flightGuard());
   const impactGuard = useRef(flightGuard());
-  async function changeThis(call: () => Promise<ChangeAssignmentResult>, done: (next: AssignmentItem, stopped: boolean) => void) {
+  async function changeThis(
+    call: () => Promise<ChangeAssignmentResult>,
+    done: (next: AssignmentItem, stopped: boolean) => void,
+    expired?: () => void,
+  ) {
     if (removeGuard.current.has(id)) {
       return; // a second click while the first call runs: it must not touch the first one's busy state
     }
@@ -1075,6 +1091,11 @@ function AssignmentEditor(props: {
       const out = changeOutcome(r);
       if (out.assignment !== null) {
         done(out.assignment, out.stopped);
+        return;
+      }
+      if (out.expired && expired !== undefined) {
+        // The removed line itself says it: no refusal line and no reload (the reload would drop the line).
+        expired();
         return;
       }
       setChangeProblem(out.text);
@@ -1114,6 +1135,7 @@ function AssignmentEditor(props: {
         setEditing(false);
         setRestored(false);
         setGoneStopped(stopped);
+        setGoneExpired(false);
         setGone(next);
       },
     );
@@ -1200,6 +1222,7 @@ function AssignmentEditor(props: {
         <RemovedLine
           busy={changing}
           stopped={goneStopped}
+          expired={goneExpired}
           onRestore={() =>
             void changeThis(
               () => api.restoreAssignment(id, gone.version),
@@ -1208,6 +1231,7 @@ function AssignmentEditor(props: {
                 setGone(null);
                 setRestored(true);
               },
+              () => setGoneExpired(true),
             )
           }
         />
