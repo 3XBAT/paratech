@@ -49,6 +49,7 @@ type AgentCall struct {
 	tools     []ToolSpec
 	turns     []Turn
 	maxOutput int64
+	chat      bool
 }
 
 // NewAgentCall builds the provider call of req: model is the allowlisted provider model id of the profile alias,
@@ -69,9 +70,14 @@ func NewAgentCall(model, system string, tools []ToolSpec, req AgentRequest, maxO
 	}
 	return AgentCall{
 		model: model, system: system, base: req.BaseText(), scope: req.ScopeText(), tools: append([]ToolSpec(nil), tools...),
-		turns: req.Turns(), maxOutput: maxOutput,
+		turns: req.Turns(), maxOutput: maxOutput, chat: req.chat(),
 	}, nil
 }
+
+// ChatLayout reports whether the call is of the chat catalog (ADR-0028 "History window and prompt cache"): the scope
+// goes after the earlier pairs, right before the current request (CurrentRequest), so a request of another subject
+// keeps the history prefix cached. Older catalogs keep the scope next to the base.
+func (c AgentCall) ChatLayout() bool { return c.chat }
 
 // Model is the provider model id.
 func (c AgentCall) Model() string { return c.model }
@@ -116,6 +122,10 @@ func (c AgentCall) InputBytes() int64 {
 	}
 	marks := ReplyMarkers(c.turns)
 	for i, t := range c.turns {
+		if t.kind == TurnHistorySummary {
+			n += int64(len(t.SummaryText()))
+			continue
+		}
 		n += t.bytes()
 		if marks[i] {
 			n += int64(len(MissingReplyText))
