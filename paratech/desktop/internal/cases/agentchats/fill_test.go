@@ -171,10 +171,9 @@ func TestFillWithSummary(t *testing.T) {
 	if err := e.chats.Save(t.Context(), th); err != nil {
 		t.Fatal(err)
 	}
-	f := thread.Fill(historyOf(21), 22, long)
 	got, err = e.svc.Fill(t.Context(), "c1")
-	if err != nil || got.Percent != f.Percent() || f.Bytes < long.Turn().Size() || f.Pairs != 1 {
-		t.Fatalf("Fill with a long summary = %+v, %v; domain %+v", got, err, f)
+	if err != nil || got != (Fill{Percent: 16, Level: thread.FillNormal}) {
+		t.Fatalf("Fill with a long summary = %+v, %v", got, err)
 	}
 }
 

@@ -727,7 +727,7 @@ export interface ChatView {
   archived: boolean;
   lastActive: string;
   running: boolean;
-  /** Context fill at the end of the chat's last request; null when unknown or not at the end of a request. */
+  /** Context fill at the end of the chat's last request; null when the fill could not be read. */
   fill: ContextFill | null;
 }
 

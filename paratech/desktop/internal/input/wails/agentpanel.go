@@ -80,6 +80,8 @@ func (p *AgentPanel) Attach(e EventEmitter) {
 // Publish emits u. It holds the lock while emitting, so no update is emitted after Attach(nil) returns and updates
 // published from one Driver goroutine keep their order. Updates of different operations may interleave: consumers
 // must not rely on arrival order across operations. The drafts of the request are settled first (draftsBefore).
+// An update that ends a request reads the chat's fill from the local database on the Driver's goroutine, bounded by
+// fillTimeout, before the lock is taken.
 func (p *AgentPanel) Publish(u AgentUpdate) {
 	view := p.view(context.Background(), u)
 	p.mu.Lock()
@@ -258,7 +260,8 @@ func (p *AgentPanel) view(ctx context.Context, u AgentUpdate) AgentUpdateView {
 // endsRequest tells an update after which the ring is redrawn (ADR-0028: when a request ends, never during a step):
 // the request reached DONE, STOPPED, FAILED or CANCELLED. A progress update is a step on its way; PLANNING, EXECUTING
 // and AWAITING_* are not over (a plan or questions waiting add nothing to the history before the answer), and an update
-// of a failed operation has no status.
+// of a failed operation has no status. STOPPED counts as an end; a «Продолжить» sends that request as the current one,
+// so the ring may overstate by that request's own pair until the next end.
 func endsRequest(u AgentUpdate) bool {
 	if u.Progress || u.Thread == "" {
 		return false
