@@ -51,6 +51,7 @@ func TestAnswersResult(t *testing.T) {
 	bad := [][]Answer{
 		nil,
 		{{Question: 0, Option: MaxOptions}},
+		{{Question: 0, Option: NoDefault}}, // a choice with nothing preselected is never sent unanswered (TASK-234)
 		{{Question: MaxQuestions}},
 		{{Question: 0}, {Question: 0}},
 		{{Question: 0, Text: "<b>"}},

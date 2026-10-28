@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -270,6 +271,73 @@ func TestAgentAddsAnAssignmentInASubject(t *testing.T) {
 	}
 	if _, err := e.homework.Assignment(ctx, id); err != nil {
 		t.Fatalf("a refused Undo removed the assignment: %v", err)
+	}
+}
+
+// Catalog 8 (TASK-233, TASK-234): a request that names no subject in a chat without one gets «К какому предмету
+// относится задание?» with nothing preselected, so a fast click cannot file it under the first subject. An option
+// index outside the question (-1 included) is refused and the card keeps waiting; the picked subject's ID, or none
+// after «Без предмета», goes into create_assignment.
+func TestAgentAsksTheSubjectOfAnAssignment(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		option  int
+		subject string // the subject name the assignment gets, "" for none
+	}{
+		{"a subject", 0, "Математический анализ"},
+		{"no subject", 1, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newAssignmentEnv(t)
+			ctx := t.Context()
+			question := `{"questions":[{"kind":"choice","question":"` + values.SubjectQuestion + `",` +
+				`"options":["Математический анализ","` + values.NoSubjectOption + `"]}]}`
+			e.hub.Then(testenv.AgentCall{ID: "l1", Tool: "list_subjects", Args: `{}`}).
+				Then(testenv.AgentCall{ID: "q1", Tool: "ask_questions", Args: question})
+			cards := e.ask(t, "запиши: решить номер 5 к пятнице")
+
+			var asked []values.Question
+			for _, c := range cards {
+				if q, ok := c.(values.QuestionsCard); ok {
+					asked = q.Questions
+				}
+			}
+			if len(asked) != 1 || asked[0].Default != values.NoDefault || len(asked[0].Options) != 2 {
+				t.Fatalf("questions = %+v", asked)
+			}
+			if st := e.sink.last(t); st.Status != thread.StatusAwaitingAnswers {
+				t.Fatalf("update = %+v", st)
+			}
+
+			ref := agentturn.TurnRef{Thread: "th1", Turn: 1}
+			for _, bad := range []int{values.NoDefault, values.MaxOptions} {
+				if _, err := e.turns.AnswerQuestions(ctx, ref, []values.Answer{{Question: 0, Option: bad}}); !errors.Is(err, agentturn.ErrInvalidInput) {
+					t.Fatalf("answer %d = %v, want invalid input", bad, err)
+				}
+			}
+
+			args := `{"title":"Решить номер 5","due":"2026-10-23"}`
+			if tt.subject != "" {
+				args = `{"title":"Решить номер 5","subject":"` + string(e.math.ID()) + `","due":"2026-10-23"}`
+			}
+			e.hub.Then(testenv.AgentCall{ID: "c1", Tool: "create_assignment", Args: args}).
+				Then(testenv.AgentCall{ID: "r1", Tool: "reply", Args: `{"text":"Задание добавлено, срок 2026-10-23."}`})
+			if err := e.driver.AnswerQuestions(ctx, ref, []values.Answer{{Question: 0, Option: tt.option}}); err != nil {
+				t.Fatal(err)
+			}
+			e.driver.Wait()
+
+			if got := e.plannerResults()["q1"]; got != fmt.Sprintf(`{"answers":[{"question":0,"option":%d}]}`, tt.option) {
+				t.Fatalf("answers result = %s", got)
+			}
+			v, err := e.homework.Assignment(ctx, addedAssignmentID("th1", 1, "c1"))
+			if err != nil || v.Title != "Решить номер 5" || v.Subject != tt.subject {
+				t.Fatalf("assignment = %+v, %v", v, err)
+			}
+			if st := e.sink.last(t); st.Status != thread.StatusDone {
+				t.Fatalf("last update = %+v", st)
+			}
+		})
 	}
 }
 

@@ -137,6 +137,44 @@ func TriageSource(tool, argumentsJSON string) string {
 	return found
 }
 
+// assignTool is the tool whose subject a case may check.
+const assignTool = "create_assignment"
+
+// AssignedSubject returns the subject a create_assignment call gives, NoSubject when it gives none (catalog v8);
+// other tools and unreadable arguments give "".
+func AssignedSubject(tool, argumentsJSON string) string {
+	if tool != assignTool {
+		return ""
+	}
+	var args map[string]json.RawMessage
+	if json.Unmarshal([]byte(argumentsJSON), &args) != nil {
+		return ""
+	}
+	raw, ok := args["subject"]
+	if !ok || string(raw) == "null" {
+		return NoSubject
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil || s == "" {
+		return ""
+	}
+	return s
+}
+
+// AnswerOption returns the index of option among the options of the first question of an ask_questions call, -1
+// when it has no such option or the arguments are unreadable.
+func AnswerOption(argumentsJSON, option string) int {
+	var args struct {
+		Questions []struct {
+			Options []string `json:"options"`
+		} `json:"questions"`
+	}
+	if json.Unmarshal([]byte(argumentsJSON), &args) != nil || len(args.Questions) == 0 {
+		return -1
+	}
+	return slices.Index(args.Questions[0].Options, option)
+}
+
 // CardTexts returns the model texts of a card call that the student reads: reply text, plan summary and notes,
 // cannot_do parts, question texts and options. Other tools and unreadable arguments give none.
 func CardTexts(tool, argumentsJSON string) []string {
