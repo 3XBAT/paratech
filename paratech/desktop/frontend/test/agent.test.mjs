@@ -345,13 +345,15 @@ test("plan card: caption, steps in impersonal words, buttons only while the plan
     "Размещение файла · файл · после предыдущих шагов",
     "Изменение срока · срок 03.11.2026",
   ]);
-  assert.deepEqual(m.buttons.map((b) => b.label), ["Да", "Изменить", "Отмена"]);
+  // TASK-318: the one «Да» of the plan names the number of steps (this plan has 3); the button id stays "approve".
+  assert.deepEqual(m.buttons.map((b) => b.label), ["Да, выполнить 3 шага", "Изменить", "Отмена"]);
+  assert.equal(m.buttons[0].id, "approve");
   const later = modelOf(update({ status: "EXECUTING", cards: [card({ kind: "plan", plan })] })).cards[0];
   assert.deepEqual(later.buttons, []);
   assert.equal(stepText({ tool: "new_tool", args: [], deferred: [] }), "Шаг");
   const out = html(update({ status: "AWAITING_PLAN", cards: [card({ kind: "plan", plan })] }));
   assert.match(out, /Понял так/);
-  assert.match(out, />Да</);
+  assert.match(out, />Да, выполнить 3 шага</);
 });
 
 // ---- Question card ----
