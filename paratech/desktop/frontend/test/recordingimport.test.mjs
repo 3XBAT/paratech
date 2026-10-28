@@ -107,6 +107,11 @@ test("refusals of the binding are shown in Russian, anything else gets the gener
   for (const key of ["format", "tooLarge", "tooLong", "noDuration", "future"]) {
     assert.match(errorMessages[key], /[а-я]/);
   }
+  // An unknown duration names the format of the file.
+  for (const [key, name] of [["noDurationWav", "WAV"], ["noDurationMp3", "MP3"], ["noDurationFlac", "FLAC"], ["noDurationOgg", "OGG"]]) {
+    assert.ok(errorMessages[key].includes(`в этом ${name}-файле`), key);
+    assert.equal(importErrorText(new Error(errorMessages[key])), errorMessages[key]);
+  }
   assert.equal(importErrorText(new Error("open C:\\secret\\a.wav: access denied")), errorMessages.unavailable);
   assert.equal(importErrorText(undefined), errorMessages.unavailable);
 });

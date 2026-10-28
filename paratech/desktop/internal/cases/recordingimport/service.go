@@ -111,6 +111,9 @@ func (s *Service) importFile(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if audio, err = walkWAVChunks(ctx, src, audio, len(head)); err != nil {
+		return Result{}, err
+	}
 	free, err := s.space.FreeBytes(ctx)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrStorage, err)
@@ -262,6 +265,32 @@ func readTail(ctx context.Context, src io.ReadSeeker, size int64, headLen int) (
 		return nil, unreadable(ctx, err)
 	}
 	return tail, nil
+}
+
+// walkWAVChunks reads the chunk headers of a WAV whose data chunk lies past the head, as the domain asks (a bounded
+// number, never a chunk body), and seeks back to the end of the head, where the copy goes on.
+func walkWAVChunks(ctx context.Context, src io.ReadSeeker, a recording.ImportedAudio, headLen int) (recording.ImportedAudio, error) {
+	off, ok := a.WAVChunkAt()
+	if !ok {
+		return a, nil
+	}
+	hdr := make([]byte, recording.WAVChunkHeaderBytes)
+	for ; ok; off, ok = a.WAVChunkAt() {
+		if _, err := src.Seek(off, io.SeekStart); err != nil {
+			return a, unreadable(ctx, err)
+		}
+		if _, err := io.ReadFull(src, hdr); err != nil {
+			return a, readError(ctx, err, "chunks")
+		}
+		var err error
+		if a, err = a.WAVChunk(hdr); err != nil {
+			return a, err
+		}
+	}
+	if _, err := src.Seek(int64(headLen), io.SeekStart); err != nil {
+		return a, unreadable(ctx, err)
+	}
+	return a, nil
 }
 
 // readError wraps a failed read of a part of the original: a file shorter than its size changed.

@@ -3,6 +3,7 @@ package recording
 import (
 	"encoding/binary"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -59,7 +60,9 @@ func TestDetectAudio(t *testing.T) {
 		{"wav with a zero data size", wavHeader(0), 44 + 32000*30, ImportedAudio{Format: FormatWAV, Duration: 30 * time.Second}, nil},
 		{"wav streamed into a huge file", wavHeader(0xFFFFFFFF), big, ImportedAudio{}, ErrAudioTooLong},
 		{"wav without data", wavHeader(0), 44, ImportedAudio{}, ErrAudioDurationUnknown},
-		{"wav data past the head", wavHeader(32000, ImportHeadBytes), big, ImportedAudio{}, ErrAudioDurationUnknown},
+		{"wav data past the head of the whole file", wavHeader(32000, ImportHeadBytes), ImportHeadBytes, ImportedAudio{}, ErrAudioDurationUnknown},
+		{"wav without fmt before a chunk past the head", append([]byte("RIFF\x00\x00\x00\x00WAVE"), wavHeader(32000, ImportHeadBytes)[36:]...), big,
+			ImportedAudio{}, ErrAudioDurationUnknown},
 		{"wav header only", []byte("RIFF\x00\x00\x00\x00WAVE"), big, ImportedAudio{}, ErrAudioDurationUnknown},
 		{"flac", flacHead(48000, 48000*3600), big, ImportedAudio{Format: FormatFLAC, Duration: time.Hour}, nil},
 		{"flac over four hours", flacHead(8000, 8000*(4*3600+1)), big, ImportedAudio{}, ErrAudioTooLong},
@@ -137,6 +140,36 @@ func TestDetectAudioOggTail(t *testing.T) {
 	}
 }
 
+// The refusal of an unknown duration carries the format, so the page can name it; errors.Is still holds.
+func TestDurationUnknownNamesTheFormat(t *testing.T) {
+	refusal := func(a ImportedAudio, err error) error {
+		if err == nil {
+			_, err = a.Counted(nil)
+		}
+		return err
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+		want AudioFormat
+	}{
+		{"wav", refusal(DetectAudio(wavHeader(0), nil, 44)), FormatWAV},
+		{"flac", refusal(DetectAudio(flacHead(48000, 0), nil, 1<<20)), FormatFLAC},
+		{"ogg", refusal(DetectAudio(oggPage(7, 0, vorbisID(48000)), nil, 1<<20)), FormatOGG},
+		{"mp3", refusal(DetectAudio(mp3Frames(cbr128, 3), nil, 1<<20)), FormatMP3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var e AudioDurationUnknownError
+			if !errors.Is(tc.err, ErrAudioDurationUnknown) || !errors.As(tc.err, &e) || e.Format != tc.want {
+				t.Fatalf("refusal %v (%+v), want the unknown duration of a %s file", tc.err, e, tc.want)
+			}
+			if !strings.Contains(tc.err.Error(), "a "+string(tc.want)+" file") {
+				t.Fatalf("Error() = %q", tc.err)
+			}
+		})
+	}
+}
+
 func TestAudioFormatValid(t *testing.T) {
 	for f, want := range map[AudioFormat]bool{
 		FormatWAV: true, FormatFLAC: true, FormatMP3: true, FormatOGG: true, "m4a": false, "": false, "WAV": false,
@@ -161,8 +194,12 @@ func FuzzDetectAudio(f *testing.F) {
 		if err != nil {
 			return
 		}
+		at, walking := got.WAVChunkAt()
+		if walking && (got.Format != FormatWAV || at <= int64(min(len(head), ImportHeadBytes))-WAVChunkHeaderBytes || at+WAVChunkHeaderBytes > size) {
+			t.Fatalf("DetectAudio = %+v: a walk at %d", got, at)
+		}
 		if !got.Format.Valid() || got.Duration < 0 || got.Duration > MaxImportedDuration ||
-			(got.Duration == 0) != got.NeedsFrameCount() || got.NeedsFrameCount() != (got.Format == FormatMP3) {
+			(got.Duration == 0) != (got.NeedsFrameCount() || walking) || got.NeedsFrameCount() != (got.Format == FormatMP3) {
 			t.Fatalf("DetectAudio = %+v", got)
 		}
 	})

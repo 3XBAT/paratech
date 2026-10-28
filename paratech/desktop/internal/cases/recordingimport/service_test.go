@@ -18,6 +18,14 @@ import (
 
 const path = `C:\Users\student\Music\lecture.wav` // a fake path: the fake Originals serves it from memory
 
+// wavWithJunk is wavFile with a JUNK chunk of n bytes before the data chunk, so the data may lie past the head.
+func wavWithJunk(seconds, n int, marker string) []byte {
+	w := wavFile(seconds, marker)
+	junk := binary.LittleEndian.AppendUint32([]byte("JUNK"), uint32(n))
+	junk = append(junk, make([]byte, n+n%2)...)
+	return append(append(w[:36:36], junk...), w[36:]...)
+}
+
 func digest(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
@@ -134,6 +142,10 @@ func TestImportDurationCap(t *testing.T) {
 			want: recording.ErrAudioTooLong},
 		{name: "mp3 without countable frames", file: original{data: append([]byte{0xFF, 0xFB, 0x04, 0x64}, make([]byte, 1000)...)}, copied: true,
 			want: recording.ErrAudioDurationUnknown},
+		{name: "wav without data past the head", file: original{data: wavWithJunk(0, 100<<10, "")[:36+8+100<<10], length: big},
+			want: recording.ErrAudioDurationUnknown},
+		{name: "wav with a chunk past the file", file: original{data: wavWithJunk(0, 1<<20, "")[:recording.ImportHeadBytes+100]}, want: recording.ErrAudioDurationUnknown},
+		{name: "wav with junk of 100 KiB before the data", file: original{data: wavWithJunk(2, 100<<10, "x")}, dur: 2 * time.Second},
 		{name: "flac within", file: original{data: flacFile(48000, 48000*3600, "x")}, dur: time.Hour},
 		{name: "ogg within", file: original{data: append(oggHead(44100), oggPage(44100*90, []byte("audio"))...)}, dur: 90 * time.Second},
 		{name: "vbr mp3 within", file: original{data: append(pairs, mp3File(low8, 72, 100, "")...)}, dur: 50400 * time.Millisecond},
@@ -168,6 +180,37 @@ func TestImportDurationCap(t *testing.T) {
 				t.Fatalf("%d copies written, %d deleted; want a copy %v", writes, len(w.store.deleted), tc.copied)
 			}
 		})
+	}
+}
+
+// The data chunk of a WAV past the head is found by reading chunk headers only: the copy is the whole file, and a file
+// without data is refused after a bounded number of header reads, not read through.
+func TestImportWAVDataPastTheHead(t *testing.T) {
+	w := newWorld(t)
+	audio := wavWithJunk(2, 100<<10, "junk")
+	o := w.originals.add(path, audio)
+	res, err := w.svc.Import(context.Background(), Request{Path: path, StartedAt: now.Add(-time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, ok := res.Recording.Duration(); !ok || d != 2*time.Second {
+		t.Fatalf("Duration = %v, %v; want 2s", d, ok)
+	}
+	if copied := w.store.files[res.Recording.Audio()]; !bytes.Equal(copied, audio) {
+		t.Fatalf("the copy has %d bytes, want the %d of the file", len(copied), len(audio))
+	}
+	if want := int64(len(audio)) + recording.ImportTailBytes + recording.WAVChunkHeaderBytes; o.read != want {
+		t.Fatalf("%d bytes read, want the file, its tail and one chunk header: %d", o.read, want)
+	}
+
+	w = newWorld(t)
+	o = w.originals.add(path, wavWithJunk(0, 100<<10, "")[:36+8+100<<10])
+	o.length = 1 << 30 // zeros after the junk: empty chunk headers
+	if _, err := w.svc.Import(context.Background(), Request{Path: path, StartedAt: now.Add(-time.Hour)}); !errors.Is(err, recording.ErrAudioDurationUnknown) {
+		t.Fatalf("Import = %v, want ErrAudioDurationUnknown", err)
+	}
+	if most := int64(recording.ImportHeadBytes + recording.ImportTailBytes + 64*recording.WAVChunkHeaderBytes); o.read > most {
+		t.Fatalf("%d bytes read, want at most %d", o.read, most)
 	}
 }
 
@@ -282,6 +325,10 @@ func TestImportRefusesBeforeTheCopy(t *testing.T) {
 			o.length = 1 << 30 // zeros after the header; only the head and the tail are read
 			return Request{Path: path, StartedAt: now}
 		}, recording.ErrAudioTooLong},
+		{"chunk headers cut short", func(w *world) Request {
+			w.originals.add(path, wavWithJunk(0, 100<<10, "")[:36+8+100<<10]).size = 36 + 8 + 100<<10 + 4
+			return Request{Path: path, StartedAt: now}
+		}, ErrChanged},
 		{"header cut short", func(w *world) Request {
 			w.originals.add(path, ok[:10]).size = 1000
 			return Request{Path: path, StartedAt: now}
