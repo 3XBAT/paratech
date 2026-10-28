@@ -245,7 +245,50 @@ func (s *Service) Material(ctx context.Context, id shared.MaterialID) (*material
 // sha256. A photo (JPEG, PNG) is encoded again first (PageImages) and only the clean bytes are kept, under their own
 // sha256; it has no text. The same bytes uploaded again return the material that exists (Existing), a removed one back
 // in «Входящие». A stored file that is missing or has another size is written again.
+//
+// An upload with a target (Subject, Folder) is then placed as Place does, unless the material existed and is filed
+// already: it is not moved. An unknown subject or folder is refused before anything is stored.
 func (s *Service) Import(ctx context.Context, up Upload) (Imported, error) {
+	if up.Subject == "" && up.Folder == "" {
+		return s.importInbox(ctx, up)
+	}
+	if err := s.checkTarget(ctx, up.Subject, up.Folder); err != nil {
+		return Imported{}, err
+	}
+	im, err := s.importInbox(ctx, up)
+	if err != nil {
+		return Imported{}, err
+	}
+	if im.Existing && im.Material.Active() && !im.Material.InInbox() {
+		return im, nil
+	}
+	m, err := s.Place(ctx, im.Material.ID(), up.Subject, up.Folder)
+	if err != nil {
+		return Imported{}, err
+	}
+	return Imported{Material: m, Existing: im.Existing}, nil
+}
+
+// checkTarget checks that folder (or «Материалы» for "") of subject sub exists, as Place would.
+func (s *Service) checkTarget(ctx context.Context, sub shared.SubjectID, folder shared.FolderID) error {
+	if sub.Validate() != nil || (folder != "" && folder.Validate() != nil) {
+		return ErrInvalidRequest
+	}
+	target, err := s.subject(ctx, sub)
+	if err != nil {
+		return err
+	}
+	if _, ok := target.Folder(folder); folder != "" && !ok {
+		return ErrFolderNotFound
+	}
+	if _, ok := target.SystemFolder(subject.SystemMaterials); folder == "" && !ok {
+		return ErrFolderNotFound
+	}
+	return nil
+}
+
+// importInbox is Import into «Входящие».
+func (s *Service) importInbox(ctx context.Context, up Upload) (Imported, error) {
 	typ, err := material.DetectType(up.Data)
 	if err != nil {
 		return Imported{}, domainError(err)
@@ -564,6 +607,11 @@ func (s *Service) index(ctx context.Context) (subjectmatch.Index, error) {
 	if err != nil {
 		return subjectmatch.Index{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
+	return indexOf(list), nil
+}
+
+// indexOf builds the matching index of the subjects.
+func indexOf(list []*subject.Subject) subjectmatch.Index {
 	entries := make([]subjectmatch.Entry, 0, len(list))
 	for _, sub := range list {
 		e := subjectmatch.Entry{ID: sub.ID(), Name: sub.Name().String()}
@@ -572,7 +620,7 @@ func (s *Service) index(ctx context.Context) (subjectmatch.Index, error) {
 		}
 		entries = append(entries, e)
 	}
-	return subjectmatch.NewIndex(entries), nil
+	return subjectmatch.NewIndex(entries)
 }
 
 // subject loads a subject; a missing one is ErrSubjectNotFound.

@@ -47,6 +47,10 @@ func systemName(code System) (FolderName, bool) {
 	return FolderName{}, false
 }
 
+// SystemFolderName returns the name of a system folder, for a folder of a subject that does not exist yet; ok is false
+// for an unknown code.
+func SystemFolderName(code System) (FolderName, bool) { return systemName(code) }
+
 // SystemFolderID is the id of a system folder of a subject: derived, so the six folders need no generated ids.
 func SystemFolderID(subject shared.SubjectID, code System) shared.FolderID {
 	return shared.FolderID(string(subject) + "-" + string(code))

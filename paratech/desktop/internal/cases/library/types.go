@@ -5,6 +5,7 @@ import (
 
 	"paratech/desktop/internal/domain/library/inspection"
 	"paratech/desktop/internal/domain/library/material"
+	"paratech/desktop/internal/domain/shared"
 )
 
 // NewSubject is what CreateSubject needs. Semester is a values.Semester code ("2026-autumn"); "" is the semester of
@@ -15,14 +16,19 @@ type NewSubject struct {
 	Semester string
 }
 
-// Upload is a file the student chose: its bytes and its original name (shown only).
+// Upload is a file the student chose: its bytes and its original name (shown only). Subject and Folder are where it
+// goes («Добавить файл» on the page of a subject, TASK-339); both "" is «Входящие», Folder "" with a subject is
+// «Материалы».
 type Upload struct {
-	Name string
-	Data []byte
+	Name    string
+	Data    []byte
+	Subject shared.SubjectID
+	Folder  shared.FolderID
 }
 
 // Imported is the material of an upload. Existing: the same bytes were in the library already, so no new material
-// was made (a removed one came back into «Входящие»).
+// was made (a removed one came back into «Входящие», or into the target of the upload). An existing material already
+// filed stays where it is, also for an upload with a target: the caller tells by its subject and folder.
 type Imported struct {
 	Material *material.Material
 	Existing bool
