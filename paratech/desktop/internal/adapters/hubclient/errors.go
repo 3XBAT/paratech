@@ -169,6 +169,11 @@ func mapCallError(op string, err error) *Error {
 	case connect.CodeAborted:
 		return unavailable(op, ErrBusy)
 	case connect.CodeCanceled:
+		// The Hub answers canceled when its context ends; while we still wait, that is the deadline we sent it
+		// (Connect-Timeout-Ms, truncated to whole milliseconds, so it can fire just before ours).
+		if connect.IsWireError(err) {
+			return unavailable(op, ErrTimeout)
+		}
 		// The parent context is not done (checked by the caller), so the stream was reset by the other side.
 		return unavailable(op, ErrUnavailable)
 	}
