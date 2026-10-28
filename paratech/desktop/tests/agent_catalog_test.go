@@ -196,6 +196,21 @@ func TestToolCatalogV8KeepsTheToolsOfV7(t *testing.T) {
 	}
 }
 
+// TestPanelPromptV8PinsTheSubjectQuestion: the desktop recognizes the subject question by its exact text and last
+// option (TASK-234), so the Hub panel prompt v8 must spell both the same way, or nothing preselected silently breaks.
+func TestPanelPromptV8PinsTheSubjectQuestion(t *testing.T) {
+	prompt, err := os.ReadFile(filepath.Join(codeRoot(t), "hub", "pkg", "prompts", "agent", "panel", "v8", "system.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, s := range []string{values.SubjectQuestion, values.NoSubjectOption} {
+		if !strings.Contains(string(prompt), "«"+s+"»") {
+			t.Errorf("panel prompt v8 does not contain «%s»", s)
+		}
+	}
+}
+
 // A long reply of catalog v7 (TASK-223) goes through the Hub client, the thread and SQLite whole, in paragraphs and
 // with angle brackets as text; after a restart the next request sends it to the Hub as the 2 KiB history reply only.
 func TestAgentLongReplyOfCatalog7(t *testing.T) {

@@ -469,8 +469,9 @@ func TestQuestions(t *testing.T) {
 	}
 }
 
-// TestSubjectQuestionNoDefault: the subject question of prompt v8 without a planner default preselects nothing, so a
-// fast click cannot file the assignment under the first subject (TASK-234). Every other choice keeps option 0.
+// TestSubjectQuestionNoDefault: the subject question of prompt v8 preselects nothing, even with a planner default, so a
+// fast click cannot file the assignment under a subject (TASK-234). Every other choice keeps its default or option 0;
+// an out-of-range planner default is refused on any question.
 func TestSubjectQuestionNoDefault(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -483,8 +484,10 @@ func TestSubjectQuestionNoDefault(t *testing.T) {
 		{"other text", `{"kind":"choice","question":"Какой предмет?","options":["Математика","Физика","Без предмета"]}`, 0, false},
 		{"no subject option not last", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Без предмета","Математика"]}`, 0, false},
 		{"no no-subject option", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Математика","Физика"]}`, 0, false},
-		{"explicit default wins", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Математика","Физика","Без предмета"],"default":2}`, 2, false},
-		{"explicit default zero wins", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Математика","Без предмета"],"default":0}`, 0, false},
+		{"explicit default wins", `{"kind":"choice","question":"Какой предмет?","options":["Математика","Физика","Без предмета"],"default":2}`, 2, false},
+		{"explicit default zero wins", `{"kind":"choice","question":"Какой предмет?","options":["Математика","Без предмета"],"default":0}`, 0, false},
+		{"subject question ignores default zero", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Математика","Физика","Без предмета"],"default":0}`, NoDefault, false},
+		{"subject question ignores default last", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Математика","Физика","Без предмета"],"default":2}`, NoDefault, false},
 		{"planner cannot send no default", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Математика","Без предмета"],"default":-1}`, 0, true},
 		{"planner default out of range", `{"kind":"choice","question":"К какому предмету относится задание?","options":["Математика","Без предмета"],"default":2}`, 0, true},
 	}

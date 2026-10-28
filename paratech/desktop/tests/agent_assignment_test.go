@@ -276,7 +276,7 @@ func TestAgentAddsAnAssignmentInASubject(t *testing.T) {
 
 // Catalog 8 (TASK-233, TASK-234): a request that names no subject in a chat without one gets «К какому предмету
 // относится задание?» with nothing preselected, so a fast click cannot file it under the first subject. An option
-// index outside the question (-1 included) is refused and the card keeps waiting; the picked subject's ID, or none
+// index below 0 or at least MaxOptions is refused and the card keeps waiting; the picked subject's ID, or none
 // after «Без предмета», goes into create_assignment.
 func TestAgentAsksTheSubjectOfAnAssignment(t *testing.T) {
 	for _, tt := range []struct {

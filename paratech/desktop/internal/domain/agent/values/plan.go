@@ -261,8 +261,8 @@ const (
 const NoDefault = -1
 
 // SubjectQuestion and NoSubjectOption are the subject question of panel prompt v8 (TASK-233), which pins this text
-// and puts «Без предмета» last. A fast click must not file the assignment under the first subject, so this question
-// gets NoDefault when the planner gives no default.
+// and puts «Без предмета» last. A fast click must not file the assignment under any subject, so this question always
+// gets NoDefault, whatever default the planner gives.
 const (
 	SubjectQuestion = "К какому предмету относится задание?"
 	NoSubjectOption = "Без предмета"
@@ -274,7 +274,7 @@ type Question struct {
 	Kind    QuestionKind
 	Text    Text
 	Options []Text // choice only, MinOptions..MaxOptions
-	Default int    // choice only: index of the default option (0 when the planner gave none) or NoDefault
+	Default int    // choice only: index of the default option (0 when the planner gave none) or NoDefault (subject question)
 	CiteRef string // optional reference to the place in a source, set by the desktop (triage questions), never by the planner
 }
 
@@ -375,17 +375,18 @@ func parseQuestion(raw json.RawMessage) (Question, error) {
 			}
 			q.Options = append(q.Options, o)
 		}
-		// The Hub makes default optional; without one the first option is preselected, except on the subject question.
-		rawDef, ok := fields[keyDefault]
-		switch {
-		case ok:
+		// The Hub makes default optional; without one the first option is preselected.
+		if rawDef, ok := fields[keyDefault]; ok {
 			if q.Default, err = decodeInt(rawDef); err != nil {
 				return Question{}, err
 			}
-			if q.Default < 0 {
+			if q.Default < 0 || q.Default >= len(q.Options) {
 				return Question{}, fmt.Errorf("%w: default option out of range", ErrInvalidArguments)
 			}
-		case isSubjectQuestion(q):
+		}
+
+		// The subject question never preselects: a planner default there is untrusted and ignored.
+		if isSubjectQuestion(q) {
 			q.Default = NoDefault
 		}
 	case QuestionText:
