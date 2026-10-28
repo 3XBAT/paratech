@@ -56,29 +56,45 @@ func isShortForm(short, long string) bool {
 	return initials(s, ws) || prefixes(s, ws)
 }
 
+// initials and prefixes are dynamic programs over (word, position in s), not a backtracking search: schedule strings
+// are untrusted, and «А и и … и Б» against «Аии…иВ» would try exponentially many splits.
+
 func initials(s []rune, ws [][]rune) bool {
-	if len(ws) == 0 {
-		return len(s) == 0
-	}
-	if string(ws[0]) == conjunction && initials(s, ws[1:]) {
-		return true
-	}
-	return len(s) > 0 && s[0] == ws[0][0] && initials(s[1:], ws[1:])
+	return matchWords(s, ws, func(i int, w []rune, next []bool) bool {
+		if string(w) == conjunction && next[i] {
+			return true
+		}
+		return i < len(s) && s[i] == w[0] && next[i+1]
+	})
 }
 
 func prefixes(s []rune, ws [][]rune) bool {
-	if len(ws) == 0 {
-		return len(s) == 0
-	}
-	if string(ws[0]) == conjunction {
-		return prefixes(s, ws[1:])
-	}
-	for n := 2; n <= len(ws[0]) && n <= len(s); n++ {
-		if slices.Equal(s[:n], ws[0][:n]) && prefixes(s[n:], ws[1:]) {
-			return true
+	return matchWords(s, ws, func(i int, w []rune, next []bool) bool {
+		if string(w) == conjunction {
+			return next[i]
 		}
+		for n := 1; n <= len(w) && i+n <= len(s) && s[i+n-1] == w[n-1]; n++ {
+			if n >= 2 && next[i+n] {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// matchWords tells whether all words match all of s. It goes from the last word back: next[i] is whether the words
+// after the current one match s from i on, and step tells whether word w matches s from i on given next.
+func matchWords(s []rune, ws [][]rune, step func(i int, w []rune, next []bool) bool) bool {
+	next := make([]bool, len(s)+1)
+	next[len(s)] = true
+	for j := len(ws) - 1; j >= 0; j-- {
+		cur := make([]bool, len(s)+1)
+		for i := range cur {
+			cur[i] = step(i, ws[j], next)
+		}
+		next = cur
 	}
-	return false
+	return next[0]
 }
 
 // typoPrefix is how many first letters of a word a typo never touches: a different start is a different word

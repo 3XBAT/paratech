@@ -26,6 +26,10 @@ var (
 
 	// ErrNameTaken means two subjects of the outcome, or a new one and an existing one, would share a spelling.
 	ErrNameTaken = errors.New("schedule subject name is taken")
+
+	// ErrProposalNotBuilt means a proposal with groups that Propose did not make: its new names cannot be checked
+	// against the existing subjects.
+	ErrProposalNotBuilt = errors.New("schedule proposal not built by Propose")
 )
 
 // GroupAction is what to do with a group. The zero value is the group's default: create it, or add its spellings to
@@ -66,7 +70,9 @@ type Choice struct {
 	Members []MemberChoice
 }
 
-// Create is a subject to create. Key is the key to derive its id from (DeriveSubjectID).
+// Create is a subject to create. Key is the key to derive its id from (DeriveSubjectID). Aliases are at most
+// subject.MaxAliases, so subject.New takes them: the first spellings by member (the lead first, then the more used),
+// each member's most used first.
 type Create struct {
 	Key        string
 	Name       string
@@ -76,7 +82,8 @@ type Create struct {
 	Recordings int
 }
 
-// Addition is spellings to add as aliases to an existing subject; Name is the subject's name.
+// Addition is spellings to add as aliases to an existing subject; Name is the subject's name. The free alias slots
+// of the subject are unknown here, so the caller handles subject.ErrTooMany of AddAlias.
 type Addition struct {
 	Subject    shared.SubjectID
 	Name       string
@@ -92,9 +99,15 @@ type Outcome struct {
 	Additions []Addition
 }
 
-// Apply turns the proposal and the student's choices into the subjects to create and the aliases to add. Errors:
-// ErrUnknownGroup, ErrUnknownMember, ErrInvalidChoice, ErrNameTaken, subject.ErrInvalidName for a new name.
+// Apply turns the proposal and the student's choices into the subjects to create and the aliases to add. The
+// proposal must come from Propose run with the current subjects right before Apply: the names are checked against
+// the subjects it was made for. Errors: ErrProposalNotBuilt, ErrUnknownGroup, ErrUnknownMember, ErrInvalidChoice,
+// ErrNameTaken, subject.ErrInvalidName for a new name.
 func Apply(p Proposal, choices []Choice) (Outcome, error) {
+	if len(p.Groups) > 0 && !p.built {
+		return Outcome{}, ErrProposalNotBuilt
+	}
+
 	byGroup := map[string]Choice{}
 	for _, c := range choices {
 		if _, dup := byGroup[c.Group]; dup {
@@ -200,7 +213,8 @@ func newCreate(key, name, rename string, members []Member) (Create, error) {
 		}
 		name = n.String()
 	}
-	cr := Create{Key: key, Name: name, Aliases: aliasesOf(members, values.Key(name))}
+	aliases := aliasesOf(members, values.Key(name))
+	cr := Create{Key: key, Name: name, Aliases: aliases[:min(len(aliases), subject.MaxAliases)]}
 	cr.Kinds, cr.Recordings = sum(members)
 	cr.Lessons = cr.Kinds.Total()
 	return cr, nil

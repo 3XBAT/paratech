@@ -75,11 +75,14 @@ type Group struct {
 	Doubtful   bool // a member is doubtful
 }
 
-// Proposal is the groups, the most lessons and recordings first, then by name.
+// Proposal is the groups, the most lessons and recordings first, then by name. Only Propose builds one that Apply
+// takes; it holds the subjects of that moment, so the use case re-runs Propose with the current subjects right
+// before Apply (the library may change between the card and «Да»).
 type Proposal struct {
 	Groups []Group
 
 	index subjectmatch.Index // of the subjects the proposal was made for, to check the new names
+	built bool               // made by Propose: index is set
 }
 
 // spelling is one key of the rows.
@@ -125,7 +128,7 @@ func Propose(rows []Row, subjects []subjectmatch.Entry) Proposal {
 		}
 	}
 
-	p := Proposal{index: ix}
+	p := Proposal{index: ix, built: true}
 	for _, lead := range leads(free) {
 		p.Groups = append(p.Groups, newGroup(lead.Name, "", append([]*cluster{lead}, lead.members...)))
 	}
@@ -214,11 +217,13 @@ type subjectKeys struct {
 	keys []string
 }
 
-// subjectKeysOf is the subjects by id; a repeated id keeps its last entry, as subjectmatch.NewIndex.
+// subjectKeysOf is the subjects by id. As subjectmatch.NewIndex, a repeated id unions the keys of its entries and
+// takes the name of its last one.
 func subjectKeysOf(entries []subjectmatch.Entry) []subjectKeys {
 	byID := map[shared.SubjectID]subjectKeys{}
 	for _, e := range entries {
-		k := subjectKeys{id: e.ID, name: values.CleanText(e.Name)}
+		k := byID[e.ID]
+		k.id, k.name = e.ID, values.CleanText(e.Name)
 		for _, s := range append([]string{e.Name}, e.Aliases...) {
 			base, _, _ := cutMarks(s)
 			if key := values.Key(base); key != "" && !slices.Contains(k.keys, key) {

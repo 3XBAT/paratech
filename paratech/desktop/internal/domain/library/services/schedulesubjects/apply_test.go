@@ -3,6 +3,7 @@ package schedulesubjects
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"unicode"
 
@@ -204,6 +205,50 @@ func TestApplyRejects(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestApplyNeedsAProposalOfPropose(t *testing.T) {
+	built := fixture()
+	tests := []struct {
+		name string
+		p    Proposal
+		want error
+	}{
+		{"hand-built groups", Proposal{Groups: built.Groups}, ErrProposalNotBuilt},
+		{"a copy of a built proposal", built, nil},
+		{"zero value: nothing to apply", Proposal{}, nil},
+		{"built from no rows", Propose(nil, nil), nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := Apply(tt.p, nil); !errors.Is(err, tt.want) {
+				t.Fatalf("Apply = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateAliasesAreCapped(t *testing.T) {
+	spelling := func(i int) string { return "Химия" + strings.Repeat(" -", i+1) + " лек" }
+	rows := []Row{{Name: "Химия", Lessons: lec(100)}}
+	for i := range subject.MaxAliases + 5 {
+		// Spellings with one key once the mark is cut: one obvious group, the more lessons the earlier.
+		rows = append(rows, Row{Name: spelling(i), Lessons: lec(50 - i)})
+	}
+	out, err := Apply(Propose(rows, nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Creates) != 1 {
+		t.Fatalf("creates %d subjects, want 1", len(out.Creates))
+	}
+	c := out.Creates[0]
+	if c.Name != "Химия" || len(c.Aliases) != subject.MaxAliases {
+		t.Fatalf("create %q with %d aliases, want «Химия» with %d", c.Name, len(c.Aliases), subject.MaxAliases)
+	}
+	if c.Aliases[0] != spelling(0) || c.Aliases[subject.MaxAliases-1] != spelling(subject.MaxAliases-1) {
+		t.Fatalf("aliases are not the most used first: %q", c.Aliases)
 	}
 }
 
