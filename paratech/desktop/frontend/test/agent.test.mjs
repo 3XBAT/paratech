@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { createElement as h } from "react";
 import server from "react-dom/server";
-import { agentApi, draftEvent, emptyFilter, methods, parseDraft, parseHistory, parseState, parseUndo, parseUndoRequest, parseUpdate, updateEvent } from "../.test-build/bindings/agent.js";
+import { agentApi, draftEvent, emptyFilter, methods, parseChat, parseChatResult, parseChats, parseCurrent, parseDraft, parseFill, parseHistory, parseState, parseUndo, parseUndoRequest, parseUpdate, updateEvent } from "../.test-build/bindings/agent.js";
 import {
   initialPanelState,
   orderedEntries,
@@ -740,4 +740,72 @@ test("the panel code never builds markup from text", () => {
   for (const f of files) {
     assert.doesNotMatch(readFileSync(new URL(f, dir), "utf8"), /DOMParser|document\.write|createContextualFragment/, f);
   }
+});
+
+// TASK-251: the context fill of a chat / of an ended request. Parsed only; the level comes from the core.
+const fillRaw = { percent: 70, level: "high", overflow: false };
+const chatRaw = { threadId: "th1", title: "Чат", archived: false, lastActive: "2026-10-28T10:00:00Z", running: false };
+const updateRaw = {
+  threadId: "t", turn: 1, subjectId: "", lessonId: "", assignmentId: "", screen: "today", status: "DONE", stopReason: "",
+  problem: "", progress: false, cards: [],
+};
+const badFills = [
+  { ...fillRaw, percent: 101 },
+  { ...fillRaw, percent: -1 },
+  { ...fillRaw, percent: 1.5 },
+  { ...fillRaw, percent: "70" },
+  { ...fillRaw, percent: null },
+  { ...fillRaw, level: "critical" },
+  { ...fillRaw, level: undefined },
+  { ...fillRaw, overflow: "yes" },
+  { ...fillRaw, overflow: undefined },
+  "70",
+  70,
+  [],
+  {},
+];
+
+test("parseFill reads the three levels and the bounds; anything malformed or missing is null", () => {
+  assert.deepEqual(parseFill(fillRaw), fillRaw);
+  for (const [percent, level, overflow] of [[0, "normal", false], [100, "full", true], [85, "high", false]]) {
+    assert.deepEqual(parseFill({ percent, level, overflow }), { percent, level, overflow });
+  }
+  // The level is the core's: a 99 % «normal» stays «normal», nothing is derived from the percent.
+  assert.equal(parseFill({ percent: 99, level: "normal", overflow: false }).level, "normal");
+  assert.equal(parseFill(null), null);
+  assert.equal(parseFill(undefined), null);
+  for (const bad of badFills) {
+    assert.equal(parseFill(bad), null, JSON.stringify(bad));
+  }
+});
+
+test("a chat carries its fill; null, missing and malformed fill read as null and never throw", () => {
+  assert.deepEqual(parseChat({ ...chatRaw, fill: fillRaw }).fill, fillRaw);
+  assert.equal(parseChat({ ...chatRaw, fill: null }).fill, null);
+  assert.equal(parseChat(chatRaw).fill, null);
+  for (const bad of badFills) {
+    const c = parseChat({ ...chatRaw, fill: bad });
+    assert.equal(c.fill, null, JSON.stringify(bad));
+    assert.equal(c.threadId, "th1"); // the rest of the chat survives
+  }
+});
+
+test("the chat list and the chat results carry the fill", () => {
+  const v = parseChats({ problem: "", chats: [{ ...chatRaw, fill: fillRaw }, { ...chatRaw, threadId: "th2", fill: null }, { ...chatRaw, threadId: "th3" }] });
+  assert.deepEqual(v.chats.map((c) => c.fill), [fillRaw, null, null]);
+  assert.deepEqual(parseChatResult({ problem: "", chat: { ...chatRaw, fill: fillRaw } }).chat.fill, fillRaw);
+  assert.equal(parseChatResult({ problem: "", chat: { ...chatRaw, fill: { ...fillRaw, level: "x" } } }).chat.fill, null);
+  assert.equal(parseChatResult({ problem: "", chat: chatRaw }).problem, "");
+});
+
+test("an update carries the fill at the end of a request; null, missing and malformed read as null", () => {
+  assert.deepEqual(parseUpdate({ ...updateRaw, fill: fillRaw }).fill, fillRaw);
+  assert.equal(parseUpdate({ ...updateRaw, status: "EXECUTING", progress: true, fill: null }).fill, null);
+  assert.equal(parseUpdate(updateRaw).fill, null);
+  for (const bad of badFills) {
+    assert.equal(parseUpdate({ ...updateRaw, fill: bad }).fill, null, JSON.stringify(bad));
+  }
+  // ChatCurrent parses its update the same way.
+  assert.deepEqual(parseCurrent({ problem: "", update: { ...updateRaw, fill: fillRaw } }).update.fill, fillRaw);
+  assert.equal(parseCurrent({ problem: "", update: updateRaw }).update.fill, null);
 });

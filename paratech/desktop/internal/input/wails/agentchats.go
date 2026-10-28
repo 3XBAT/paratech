@@ -50,13 +50,15 @@ type AgentMention struct {
 }
 
 // AgentChatView is a line of the chat list. LastActive is RFC 3339 in UTC; Running is true while the chat's request
-// runs (its updates keep coming with its threadId). Title is the student's text or «Новый чат», plain text only.
+// runs (its updates keep coming with its threadId). Title is the student's text or «Новый чат», plain text only. Fill
+// is the chat's context ring, null when its history could not be read.
 type AgentChatView struct {
-	ThreadID   string `json:"threadId"`
-	Title      string `json:"title"`
-	Archived   bool   `json:"archived"`
-	LastActive string `json:"lastActive"`
-	Running    bool   `json:"running"`
+	ThreadID   string         `json:"threadId"`
+	Title      string         `json:"title"`
+	Archived   bool           `json:"archived"`
+	LastActive string         `json:"lastActive"`
+	Running    bool           `json:"running"`
+	Fill       *AgentFillView `json:"fill"`
 }
 
 // AgentChatsView is the chat list: the unarchived chats by last activity, newest first, then the archive. Problem is ""
@@ -133,7 +135,8 @@ func (s *AgentService) RestoreChat(ctx context.Context, threadID string) AgentCh
 	})
 }
 
-// ChatEarlier returns the requests of a chat as text only (ADR-0028); the context ring is not here (TASK-251).
+// ChatEarlier returns the requests of a chat as text only (ADR-0028); the context ring comes with the chat list and
+// with the update that ends a request.
 func (s *AgentService) ChatEarlier(ctx context.Context, threadID string) AgentEarlierView {
 	id := shared.ThreadID(threadID)
 	if id.Validate() != nil {
@@ -179,7 +182,7 @@ func (s *AgentService) ChatCurrent(ctx context.Context, threadID string) AgentCu
 		return AgentCurrentView{}
 	}
 	u.Problem, u.Progress = "", false
-	v := s.panel.view(u)
+	v := s.panel.view(ctx, u)
 	return AgentCurrentView{Update: &v}
 }
 
@@ -215,9 +218,13 @@ func (s *AgentService) chatProblem(op string, err error) string {
 }
 
 func chatView(c agentchats.Chat) AgentChatView {
-	return AgentChatView{
+	v := AgentChatView{
 		ThreadID: string(c.ID), Title: c.Title, Archived: c.Archived, LastActive: timeText(c.LastActive), Running: c.Running,
 	}
+	if c.Fill != nil {
+		v.Fill = fillView(*c.Fill)
+	}
+	return v
 }
 
 func mentionViews(ms []values.Mention) []AgentMention {
