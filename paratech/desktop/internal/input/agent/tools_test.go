@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
+	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -115,6 +117,104 @@ func TestFindLessons(t *testing.T) {
 	}
 	if got := read(values.Scope{}, `{"to":"2026-10-19"}`); len(got) != 1 || got[0].Recording != "r3" || got[0].Subject != "" {
 		t.Fatalf("lesson without a subject = %+v", got)
+	}
+}
+
+// planned is a lesson of the schedule whose title was written by others.
+func planned(t *testing.T, id, sub string, start time.Time, kind lesson.Kind) *lesson.Lesson {
+	t.Helper()
+	l, err := lesson.New(lesson.Spec{ID: shared.LessonID(id), Content: lesson.Content{
+		Title: injection, Start: start, End: start.Add(90 * time.Minute), TimeZone: "Europe/Moscow", Subject: sub, Kind: kind,
+	}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l
+}
+
+// Beta 2026-10-28: «расписание пар на субботу» found nothing, as find_lessons read only recordings. With dates it
+// lists the lessons of the schedule not recorded too, days in the student's zone.
+func TestFindLessonsListsPlannedLessons(t *testing.T) {
+	r := newReads()
+	r.library.resolve = map[string]subjectmatch.Match{"Физика": {ID: "s1", Name: "Физика"}}
+	r.knowledge.lessons = []kb.Lesson{
+		kbLesson("r1", "s1", time.Date(2026, 10, 30, 10, 0, 0, 0, moscow), "lecture", kb.Readiness{}),
+	}
+	r.activity.recordings = []activity.Recording{{ID: "r1", LessonID: "l-fri"}}
+	r.schedule.lessons = []*lesson.Lesson{
+		planned(t, "l-fri", "Физика", time.Date(2026, 10, 30, 10, 0, 0, 0, moscow), lesson.KindLecture), // recorded
+		// Saturday 00:30 in Moscow is still Friday in UTC.
+		planned(t, "l-sat-night", "Физика", time.Date(2026, 10, 31, 0, 30, 0, 0, moscow), lesson.KindPractice),
+		planned(t, "l-sat", "Физика", time.Date(2026, 10, 31, 12, 0, 0, 0, moscow), lesson.KindSeminar),
+		planned(t, "l-sat-other", injection, time.Date(2026, 10, 31, 15, 0, 0, 0, moscow), lesson.KindUnknown),
+		planned(t, "l-sun", "Физика", time.Date(2026, 11, 1, 0, 0, 0, 0, moscow), lesson.KindLecture),
+		planned(t, "l-nov", "Физика", time.Date(2026, 11, 7, 12, 0, 0, 0, moscow), lesson.KindSeminar),
+	}
+	type row struct {
+		Recording, Lesson, Subject, Date, Time, Kind string
+	}
+	read := func(scope values.Scope, args string) []row {
+		t.Helper()
+		raw := runRead(t, r, scope, values.ToolFindLessons, args).Result.ResultJSON
+		// Neither the title nor the subject string of the schedule reaches the planner.
+		if strings.Contains(raw, injection) || strings.Contains(raw, "Физика") {
+			t.Fatalf("%s: result carries a text of others: %s", args, raw)
+		}
+		var body struct{ Lessons []row }
+		decode(t, raw, &body)
+		return body.Lessons
+	}
+
+	// Newest first; Sunday 00:00 is not Saturday.
+	if got := read(values.Scope{}, `{"from":"2026-10-31","to":"2026-10-31"}`); !slices.Equal(got, []row{
+		{Lesson: "l-sat-other", Date: "2026-10-31", Time: "15:00"},
+		{Lesson: "l-sat", Subject: "s1", Date: "2026-10-31", Time: "12:00", Kind: "seminar"},
+		{Lesson: "l-sat-night", Subject: "s1", Date: "2026-10-31", Time: "00:30", Kind: "practice"},
+	}) {
+		t.Fatalf("saturday = %+v", got)
+	}
+	// A recorded lesson shows once, as its recording, with its start.
+	if got := read(values.Scope{}, `{"from":"2026-10-30","to":"2026-10-30"}`); len(got) != 1 || got[0].Recording != "r1" ||
+		got[0].Lesson != "l-fri" || got[0].Time != "10:00" {
+		t.Fatalf("friday = %+v", got)
+	}
+	// A "to" before today reads no planned lessons.
+	if got := read(values.Scope{}, `{"to":"2026-10-21"}`); len(got) != 0 {
+		t.Fatalf("to before today = %+v", got)
+	}
+	if got := read(subjectScope(t, "s1"), `{"from":"2026-10-31","to":"2026-10-31","kind":"seminar"}`); len(got) != 1 || got[0].Lesson != "l-sat" {
+		t.Fatalf("seminars of the subject = %+v", got)
+	}
+	// From a day without "to": a week; to a day without "from": from today.
+	if got := read(values.Scope{}, `{"from":"2026-11-01"}`); len(got) != 2 || got[0].Lesson != "l-nov" || got[1].Lesson != "l-sun" {
+		t.Fatalf("week from 2026-11-01 = %+v", got)
+	}
+	if got := read(values.Scope{}, `{"to":"2026-10-31"}`); len(got) != 4 {
+		t.Fatalf("until saturday = %+v", got)
+	}
+	// Without dates find_lessons stays the list of recorded lessons.
+	asked := len(r.schedule.asked)
+	if got := read(values.Scope{}, `{}`); len(got) != 1 || len(r.schedule.asked) != asked {
+		t.Fatalf("no dates = %+v, schedule read %d times", got, len(r.schedule.asked)-asked)
+	}
+}
+
+// A semester of recordings does not push the upcoming lessons out of the result: the cut drops the oldest rows.
+func TestFindLessonsKeepsPlannedPastTheCut(t *testing.T) {
+	r := newReads()
+	for i := range values.MaxReadItems + 10 {
+		start := time.Date(2026, 9, 1, 10, 0, 0, 0, moscow).Add(time.Duration(i) * time.Hour)
+		r.knowledge.lessons = append(r.knowledge.lessons, kbLesson(fmt.Sprintf("r%d", i), "s1", start, "lecture", kb.Readiness{}))
+	}
+	r.schedule.lessons = []*lesson.Lesson{planned(t, "l-sat", "", time.Date(2026, 10, 31, 12, 0, 0, 0, moscow), lesson.KindSeminar)}
+
+	var body struct {
+		Lessons   []struct{ Recording, Lesson string }
+		Truncated bool
+	}
+	decode(t, runRead(t, r, values.Scope{}, values.ToolFindLessons, `{"to":"2026-10-31"}`).Result.ResultJSON, &body)
+	if !body.Truncated || len(body.Lessons) == 0 || body.Lessons[0].Lesson != "l-sat" || body.Lessons[0].Recording != "" {
+		t.Fatalf("lessons = %+v", body)
 	}
 }
 

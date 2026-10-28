@@ -51,6 +51,8 @@ import {
 } from "../homeworkView";
 import { lessonText } from "../lessonLabel";
 import { initialListState, type ListState } from "../listView";
+import { useRecipientNav } from "../recipientNav";
+import { isRefusal, type RecipientView, recipientView, refusalAction } from "../recipientView";
 import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Field, Input, ResultLine, type ResultKind, Row } from "../ui/controls";
 import { StatusChip } from "../ui/StatusChip";
@@ -58,6 +60,7 @@ import { FilterCounters, filterEmpty } from "./AssignmentFilter";
 import { AddAssignmentDialog, EditAssignmentDialog, RemovedLine, SendAgainDialog, SendDialog, type SendResult } from "./HomeworkDialogs";
 import { HomeworkTurnkey } from "./HomeworkTurnkey";
 import { LessonCorrection } from "./LessonCorrection";
+import { RefusalButton } from "./RecipientParts";
 import { TranscriptLinks } from "./TranscriptLinks";
 
 // «Домашние задания» (PRD section 10): the assignments, and for the opened one the draft editor, the extra
@@ -69,7 +72,9 @@ import { TranscriptLinks } from "./TranscriptLinks";
 // openAssignment: the assignment shown (a jump from the summary, TASK-087, or a card opened from the list); "" shows the
 // list. It comes from the window route, so «Назад» and «Вперёд» restore it (TASK-202); onSelect asks the route to change.
 // Without onSelect (a test, a bare page) the page keeps the choice itself.
-export function HomeworkPage(props: { openAssignment?: string; onSelect?: (id: string) => void }) {
+// editAssignment: the assignment whose «Изменить» opens on arrival (TASK-238, «Выбрать предмет» of the agent's card);
+// onEditTaken tells the window the request was taken, so it fires once.
+export function HomeworkPage(props: { openAssignment?: string; onSelect?: (id: string) => void; editAssignment?: string; onEditTaken?: () => void }) {
   const api = useMemo(() => homeworkApi(callByName), []);
   const [own, setOwn] = useState(props.openAssignment ?? "");
   const openId = props.onSelect ? (props.openAssignment ?? "") : own;
@@ -78,7 +83,13 @@ export function HomeworkPage(props: { openAssignment?: string; onSelect?: (id: s
   return openId === "" ? (
     <AssignmentList api={api} onOpen={select} />
   ) : (
-    <AssignmentEditor api={api} id={openId} onBack={() => select("")} />
+    <AssignmentEditor
+      api={api}
+      id={openId}
+      editOnOpen={props.editAssignment === openId}
+      onEditTaken={props.onEditTaken}
+      onBack={() => select("")}
+    />
   );
 }
 
@@ -358,8 +369,8 @@ interface SendOpen {
   problem: string;
 }
 
-function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => void }) {
-  const { api, id } = props;
+function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: boolean; onEditTaken?: () => void; onBack: () => void }) {
+  const { api, id, editOnOpen, onEditTaken } = props;
   const turnkey = useMemo(() => turnkeyApi(callByName), []);
   const [detail, setDetail] = useState<AssignmentDetail | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -374,11 +385,20 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState<Message | null>(null);
   const [sendOpen, setSendOpen] = useState<SendOpen | null>(null);
+  // A send the core refused for its recipient (no address, no subject): the text and the way out, under the buttons.
+  const [refusal, setRefusal] = useState<Extract<RecipientView, { kind: "no_email" | "no_subject" }> | null>(null);
+  const nav = useRecipientNav();
   // The attachment the next send dialog starts with: the student's last choice on this page.
   const [sendFormat, setSendFormat] = useState<SendFormat>(defaultSendFormat);
   const [sendAgain, setSendAgain] = useState<DeliveryItem | null>(null);
   const [correcting, setCorrecting] = useState(false);
-  const [editing, setEditing] = useState(false);
+  // The dialog is drawn once the assignment is loaded, so a request made at arrival simply starts it open.
+  const [editing, setEditing] = useState(editOnOpen === true);
+  useEffect(() => {
+    if (editOnOpen === true) {
+      onEditTaken?.();
+    }
+  }, [editOnOpen, onEditTaken]);
   const [gone, setGone] = useState<AssignmentItem | null>(null);
   const [changing, setChanging] = useState(false);
   const [restored, setRestored] = useState(false); // «Вернуть» was pressed: «Удалить» takes the focus
@@ -575,6 +595,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
     acting.current = true;
     setBusy(key);
     setMessage(null);
+    setRefusal(null);
     try {
       await action();
     } catch (err) {
@@ -687,6 +708,16 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
     return { prep, version: exported.version, switching: false, problem: "" };
   }
 
+  // A refused preparation: a refusal for its recipient comes with its way out, any other reason is the core's message.
+  const showRefused = (prep: SendPreparation) => {
+    const v = recipientView(prep);
+    if (isRefusal(v)) {
+      setRefusal(v);
+    } else {
+      setMessage({ kind: "fail", text: prep.message, at: "draft" });
+    }
+  };
+
   const startSend = () =>
     act("send", async () => {
       if (shown === null) {
@@ -704,7 +735,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
         pendingSend.current = prep.proposalId;
         setSendOpen(open);
       } else {
-        setMessage({ kind: "fail", text: prep.message, at: "draft" });
+        showRefused(prep);
       }
     });
 
@@ -1016,6 +1047,23 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; onBack: () => v
           </>
         )}
         {message?.at === "draft" && <MessageLine message={message} />}
+        {refusal !== null && (
+          <div className="rcp-refusal">
+            <ResultLine kind="fail" role="alert">
+              {refusal.text}
+            </ResultLine>
+            <div className="acts start">
+              <RefusalButton
+                action={refusalAction(refusal, "page")}
+                nav={nav}
+                onChooseSubject={() => {
+                  setRefusal(null);
+                  setEditing(true);
+                }}
+              />
+            </div>
+          </div>
+        )}
       </Card>
 
       <Card className="box">

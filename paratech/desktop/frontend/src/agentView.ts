@@ -3,7 +3,8 @@
 // impersonal («Создан предмет…», not «Я создал…»). Model text (summary, notes, questions, options, labels, replies) is
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
-import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, EarlierRequestView, FreeWorkRef, PlanStepView, QuestionView } from "./bindings/agent.js";
+import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, EarlierRequestView, FreeWorkRef, PlanStepView, PlanView, QuestionView } from "./bindings/agent.js";
+import { approveLabel, type PlanProgress, planProgress, stepMarks, type StepMark, planWindow } from "./planView.js";
 import { type Entry, isBusyRefused, isRunning } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
 import { daysLeftText, dueText, parseMoment } from "./todayView.js";
@@ -602,7 +603,22 @@ export interface ButtonModel {
 }
 
 export type CardModel =
-  | { type: "plan"; caption: string; summary: string; steps: string[]; notes: string[]; buttons: ButtonModel[] }
+  | {
+      type: "plan";
+      caption: string;
+      summary: string;
+      steps: string[];
+      notes: string[];
+      buttons: ButtonModel[];
+      /** Number of steps. */
+      total: number;
+      /** Steps a collapsed list leaves out (0 up to the limit). */
+      hidden: number;
+      /** Marker of every step, or [] while the core sends no step states. */
+      marks: StepMark[];
+      /** «Шаг k из N» while executing; null otherwise. */
+      progress: PlanProgress | null;
+    }
   | { type: "questions"; caption: string; questions: QuestionView[]; active: boolean; skip: string; submit: string }
   | { type: "progress"; caption: string; detail: string; buttons: ButtonModel[] }
   | { type: "waiting"; buttons: ButtonModel[] }
@@ -629,20 +645,32 @@ function confirmTarget(c: CardView): { kind: "proposal" | "preview"; id: string 
 
 const activeStatuses = new Set(["PLANNING", "EXECUTING"]);
 
+/** The plan card: one «Да» for the whole plan, named by the number of steps. */
+function planModel(plan: PlanView, status: string): Extract<CardModel, { type: "plan" }> {
+  const total = plan.steps.length;
+  const states = plan.steps.map((s) => s.state);
+  const awaiting = buttons(["approve", "revise", "cancel"]).map((b) => (b.id === "approve" ? { ...b, label: approveLabel(total) } : b));
+  return {
+    type: "plan",
+    caption: texts.planCaption,
+    summary: plan.summary,
+    steps: plan.steps.map(stepText),
+    notes: plan.notes,
+    buttons: status === "AWAITING_PLAN" ? awaiting : [],
+    total,
+    hidden: planWindow(total, false, -1).hidden,
+    marks: stepMarks(states, status),
+    progress: planProgress(states, status),
+  };
+}
+
 function cardModel(c: CardView, status: string): CardModel | null {
   switch (c.kind) {
     case "plan":
       if (!c.plan) {
         return null;
       }
-      return {
-        type: "plan",
-        caption: texts.planCaption,
-        summary: c.plan.summary,
-        steps: c.plan.steps.map(stepText),
-        notes: c.plan.notes,
-        buttons: status === "AWAITING_PLAN" ? buttons(["approve", "revise", "cancel"]) : [],
-      };
+      return planModel(c.plan, status);
     case "questions":
       if (!c.questions) {
         return null;

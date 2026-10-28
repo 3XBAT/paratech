@@ -452,9 +452,13 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return err
 	}
 
+	schedule, err := c.newSchedule(e, log)
+	if err != nil {
+		return err
+	}
 	if err := c.wireAgent(e, llm, agentReads{
-		library: lib, knowledge: knowledge, activity: history, assignments: c.proposals, deliveries: c.deliveries,
-		rerunner: rerunner, materials: materialJobs, turnkey: works, answers: answers, prefs: prefs,
+		library: lib, knowledge: knowledge, activity: history, schedule: schedule, assignments: c.proposals,
+		deliveries: c.deliveries, rerunner: rerunner, materials: materialJobs, turnkey: works, answers: answers, prefs: prefs,
 	}, log); err != nil {
 		return err
 	}
@@ -503,7 +507,8 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return err
 	}
 	c.ui.Agent.Link = c.ui.Connections // whether the Hub address and key are set
-	return c.wireSchedule(e, log)
+	c.wireSchedule(schedule)
+	return nil
 }
 
 // wireModels builds the model manager (PRD section 8): the installed models, the default, the pin of an STT job, the
