@@ -37,3 +37,7 @@ SET status            = sqlc.arg(status),
     version           = version + 1,
     updated_at        = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
+
+-- The purge of a deleted assignment (ADR-0029 addendum 2): every proposal naming it.
+-- name: DeleteProposalsOfAssignment :execrows
+DELETE FROM proposals WHERE assignment_id = sqlc.arg(assignment_id);

@@ -10,6 +10,19 @@ import (
 	"database/sql"
 )
 
+const deleteProposalsOfAssignment = `-- name: DeleteProposalsOfAssignment :execrows
+DELETE FROM proposals WHERE assignment_id = ?1
+`
+
+// The purge of a deleted assignment (ADR-0029 addendum 2): every proposal naming it.
+func (q *Queries) DeleteProposalsOfAssignment(ctx context.Context, assignmentID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteProposalsOfAssignment, assignmentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getProposal = `-- name: GetProposal :one
 
 SELECT id, kind, status, assignment_id, title, body, due_at, reason, recipient, attachment_sha256, attachment_size, assignment_title, confirmed_at, executed_at, version, created_at, updated_at, attachment_format, work_id, attachment_name FROM proposals WHERE id = ?1

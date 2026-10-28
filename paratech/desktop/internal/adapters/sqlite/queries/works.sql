@@ -66,3 +66,7 @@ SELECT * FROM work_rounds WHERE work_id = sqlc.arg(work_id) ORDER BY round;
 INSERT INTO work_rounds (work_id, round, answer, replies)
 VALUES (sqlc.arg(work_id), sqlc.arg(round), sqlc.arg(answer), sqlc.arg(replies))
 ON CONFLICT (work_id, round) DO UPDATE SET answer = excluded.answer, replies = excluded.replies;
+
+-- The purge of a deleted assignment (ADR-0029 addendum 2): its works, the rounds go with them (CASCADE).
+-- name: DeleteWorksOfAssignment :execrows
+DELETE FROM works WHERE assignment_id = sqlc.arg(assignment_id);

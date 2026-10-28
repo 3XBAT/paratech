@@ -11,6 +11,36 @@ import (
 	"strings"
 )
 
+const deleteFinalDeliveriesOfAssignment = `-- name: DeleteFinalDeliveriesOfAssignment :execrows
+DELETE FROM deliveries WHERE assignment_id = ?1 AND status IN (/*SLICE:statuses*/?)
+`
+
+type DeleteFinalDeliveriesOfAssignmentParams struct {
+	AssignmentID string
+	Statuses     []string
+}
+
+// The purge of a deleted assignment (ADR-0029 addendum 2): its deliveries in the passed final statuses only, so an
+// unresolved email is never forgotten (hard rule 7).
+func (q *Queries) DeleteFinalDeliveriesOfAssignment(ctx context.Context, arg DeleteFinalDeliveriesOfAssignmentParams) (int64, error) {
+	query := deleteFinalDeliveriesOfAssignment
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.AssignmentID)
+	if len(arg.Statuses) > 0 {
+		for _, v := range arg.Statuses {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:statuses*/?", strings.Repeat(",?", len(arg.Statuses))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:statuses*/?", "NULL", 1)
+	}
+	result, err := q.db.ExecContext(ctx, query, queryParams...)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getDelivery = `-- name: GetDelivery :one
 
 SELECT id, assignment_id, recipient, subject, artifact_ref, message_id, idempotency_key, status, attempts, last_error, confirmed_at, sent_at, version, created_at, updated_at, attachment_sha256, attachment_size, send_round FROM deliveries WHERE id = ?1

@@ -360,6 +360,62 @@ func (q *Queries) ListAssignmentsByTranscript(ctx context.Context, transcriptID 
 	return items, nil
 }
 
+const listAssignmentsDeletedBefore = `-- name: ListAssignmentsDeletedBefore :many
+SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments
+WHERE deleted_at IS NOT NULL AND deleted_at < ?1
+ORDER BY deleted_at, id
+LIMIT ?2
+`
+
+type ListAssignmentsDeletedBeforeParams struct {
+	Cutoff  sql.NullInt64
+	MaxRows int64
+}
+
+// The purge after the restore window (ADR-0029 addendum 2): the assignments deleted before the cutoff, oldest delete
+// first.
+func (q *Queries) ListAssignmentsDeletedBefore(ctx context.Context, arg ListAssignmentsDeletedBeforeParams) ([]Assignment, error) {
+	rows, err := q.db.QueryContext(ctx, listAssignmentsDeletedBefore, arg.Cutoff, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Assignment{}
+	for rows.Next() {
+		var i Assignment
+		if err := rows.Scan(
+			&i.ID,
+			&i.LessonID,
+			&i.TranscriptID,
+			&i.Title,
+			&i.Description,
+			&i.DueAt,
+			&i.UserEdited,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SourceIndex,
+			&i.PromptVersion,
+			&i.HintSubject,
+			&i.HintTeacher,
+			&i.UserSubject,
+			&i.UserTeacher,
+			&i.MaterialID,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentAssignments = `-- name: ListRecentAssignments :many
 SELECT id, lesson_id, transcript_id, title, description, due_at, user_edited, version, created_at, updated_at, source_index, prompt_version, hint_subject, hint_teacher, user_subject, user_teacher, material_id, deleted_at FROM assignments
 WHERE deleted_at IS NULL
@@ -408,6 +464,26 @@ func (q *Queries) ListRecentAssignments(ctx context.Context, maxRows int64) ([]A
 		return nil, err
 	}
 	return items, nil
+}
+
+const purgeDeletedAssignment = `-- name: PurgeDeletedAssignment :execrows
+DELETE FROM assignments
+WHERE id = ?1 AND deleted_at IS NOT NULL AND deleted_at < ?2
+`
+
+type PurgeDeletedAssignmentParams struct {
+	ID     string
+	Cutoff sql.NullInt64
+}
+
+// The last step of the purge. The guard is repeated here, so a row restored meanwhile is kept. A draft or a delivery
+// still referencing it fails the delete (ON DELETE RESTRICT); works cascade.
+func (q *Queries) PurgeDeletedAssignment(ctx context.Context, arg PurgeDeletedAssignmentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeDeletedAssignment, arg.ID, arg.Cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateAssignment = `-- name: UpdateAssignment :execrows

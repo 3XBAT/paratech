@@ -45,11 +45,16 @@ type Querier interface {
 	DeleteDeadlineEventRemoval(ctx context.Context, assignmentID string) error
 	// The draft of an assignment chosen for deletion; its versions go with it (CASCADE).
 	DeleteDraftOfAssignment(ctx context.Context, assignmentID string) error
+	// The purge of a deleted assignment (ADR-0029 addendum 2): its deliveries in the passed final statuses only, so an
+	// unresolved email is never forgotten (hard rule 7).
+	DeleteFinalDeliveriesOfAssignment(ctx context.Context, arg DeleteFinalDeliveriesOfAssignmentParams) (int64, error)
 	// A job of the recording, only once it is finished (statuses is the list of terminal statuses).
 	DeleteFinishedJob(ctx context.Context, arg DeleteFinishedJobParams) error
 	DeleteLectureTextsOfRecording(ctx context.Context, recordingID string) error
 	DeleteMaterialLessons(ctx context.Context, materialID string) error
 	DeleteNoteParts(ctx context.Context, noteID string) error
+	// The purge of a deleted assignment (ADR-0029 addendum 2): every proposal naming it.
+	DeleteProposalsOfAssignment(ctx context.Context, assignmentID string) (int64, error)
 	DeleteRecording(ctx context.Context, arg DeleteRecordingParams) (int64, error)
 	// The settings default references the model ON DELETE RESTRICT: the delete then fails with a foreign key error.
 	DeleteSttModel(ctx context.Context, id string) (int64, error)
@@ -63,6 +68,8 @@ type Querier interface {
 	DeleteTranscriptsByRecording(ctx context.Context, recordingID string) error
 	// Removes the work with its rounds (CASCADE) if it is still at the version the caller saw.
 	DeleteWork(ctx context.Context, arg DeleteWorkParams) (int64, error)
+	// The purge of a deleted assignment (ADR-0029 addendum 2): its works, the rounds go with them (CASCADE).
+	DeleteWorksOfAssignment(ctx context.Context, assignmentID sql.NullString) (int64, error)
 	// The work of an assignment that has not failed; at most one (idx_works_assignment).
 	GetActiveWorkOfAssignment(ctx context.Context, assignmentID sql.NullString) (Work, error)
 	// The work of a library material that has not failed; at most one (idx_works_material).
@@ -239,6 +246,9 @@ type Querier interface {
 	ListAllSubjectFolders(ctx context.Context) ([]SubjectFolder, error)
 	ListAssignmentsByMaterial(ctx context.Context, materialID sql.NullString) ([]Assignment, error)
 	ListAssignmentsByTranscript(ctx context.Context, transcriptID sql.NullString) ([]Assignment, error)
+	// The purge after the restore window (ADR-0029 addendum 2): the assignments deleted before the cutoff, oldest delete
+	// first.
+	ListAssignmentsDeletedBefore(ctx context.Context, arg ListAssignmentsDeletedBeforeParams) ([]Assignment, error)
 	// The deadline events left to remove, oldest first (the calendar sync).
 	ListDeadlineEventRemovals(ctx context.Context, maxRows int64) ([]string, error)
 	// The recordings marked for deletion, oldest mark first (TASK-095: the deletion resumed at the start).
@@ -333,6 +343,9 @@ type Querier interface {
 	// unlike an empty IN list): a heavy type needs heavy_allowed or the run_now override of the job (AC-22).
 	// skip_ids lists rows the caller found unusable (corrupt) so that they do not block the jobs behind them.
 	NextClaimableJob(ctx context.Context, arg NextClaimableJobParams) (Job, error)
+	// The last step of the purge. The guard is repeated here, so a row restored meanwhile is kept. A draft or a delivery
+	// still referencing it fails the delete (ON DELETE RESTRICT); works cascade.
+	PurgeDeletedAssignment(ctx context.Context, arg PurgeDeletedAssignmentParams) (int64, error)
 	PurgeDeletedLesson(ctx context.Context, id string) (int64, error)
 	// The deletion of a recording with what was made from it (TASK-095, ADR-0018). The rows go in one transaction after
 	// the files; summaries and lecture texts are keyed by the transcript id.
