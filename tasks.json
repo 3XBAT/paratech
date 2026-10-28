@@ -5285,7 +5285,7 @@
                 "TASK-234",
                 "TASK-244"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-246",
@@ -6752,7 +6752,7 @@
             "dependencies": [
                 "TASK-310"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-312",
@@ -7422,7 +7422,7 @@
                 "go test -race затронутых пакетов, тест архитектуры, npm run test/build"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-339",

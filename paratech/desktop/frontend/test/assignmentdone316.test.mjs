@@ -368,10 +368,14 @@ test("the assignment page pieces in both states; edit and delete stay in the hea
   const head = page.slice(page.indexOf("<DoneButton"), page.indexOf("<DoneStamp"));
   assert.ok(head.indexOf("changeTexts.edit") > 0, "«Изменить» follows");
   assert.ok(head.indexOf("changeTexts.remove") > head.indexOf("changeTexts.edit"), "«Удалить» follows");
-  assert.match(head, /api\.deleteAssignment\(id, a\.version\)/);
+  // «Удалить» asks the core first (TASK-338): it goes through askRemoveThis, which deletes with the version at that time.
+  assert.match(head, /onClick=\{\(\) => void askRemoveThis\(\)\}/);
+  assert.match(page, /api\.deleteAssignment\(id, version\)/);
   assert.match(page, /<DoneStamp assignment=\{a\} \/>/);
-  // While the mark is saved the page does not edit or delete (a delete would go out with a stale version).
-  assert.equal(head.split("changing || doneBusy").length - 1, 2, "«Изменить» and «Удалить» wait for the mark");
+  // While the mark is saved the page does not edit or delete (a delete would go out with a stale version); the
+  // delete check (TASK-338) holds «Изменить» and «Отметить выполненным» too.
+  assert.equal(head.split("|| doneBusy").length - 1, 2, "«Изменить» and «Удалить» wait for the mark");
+  assert.match(head, /disabled=\{changing \|\| checking\}\s*onToggle/);
 });
 
 test("a refusal line: the text as an alert and one button out", () => {

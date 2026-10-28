@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatTime } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
-import { assignmentAfterDone, defaultState, doneTexts, listAfterDone, listEmpty } from "../assignmentDoneView";
+import {
+  assignmentAfterDone,
+  defaultState,
+  doneTexts,
+  focusRowMenu,
+  listAfterDone,
+  listEmpty,
+} from "../assignmentDoneView";
 import {
   type AssignmentDetail,
   type AssignmentItem,
@@ -25,6 +32,7 @@ import {
   type AssignmentFilter,
   changeOutcome,
   changeTexts,
+  deleteNeedsWarning,
   flightGuard,
   removeLabel,
   filterAssignments,
@@ -62,7 +70,16 @@ import { StatusChip } from "../ui/StatusChip";
 import { Toast } from "../ui/Toast";
 import { AssignmentRowView, DoneButton, DoneIssueLine, DoneStamp } from "./AssignmentDoneParts";
 import { AssignmentStateSwitch, FilterCounters, filterEmpty, filterReset } from "./AssignmentFilter";
-import { AddAssignmentDialog, EditAssignmentDialog, RemovedLine, SendAgainDialog, SendDialog, type SendResult } from "./HomeworkDialogs";
+import {
+  AddAssignmentDialog,
+  ChangeRefusal,
+  DeleteWarning,
+  EditAssignmentDialog,
+  RemovedLine,
+  SendAgainDialog,
+  SendDialog,
+  type SendResult,
+} from "./HomeworkDialogs";
 import { HomeworkTurnkey } from "./HomeworkTurnkey";
 import { LessonCorrection } from "./LessonCorrection";
 import { RefusalButton } from "./RecipientParts";
@@ -86,19 +103,30 @@ export function HomeworkPage(props: { openAssignment?: string; onSelect?: (id: s
   const [own, setOwn] = useState(props.openAssignment ?? "");
   const openId = props.onSelect ? (props.openAssignment ?? "") : own;
   const select = props.onSelect ?? setOwn;
+  // «Открыть отправку» of a list row: the assignment whose page lands on the emails (the route carries only the id).
+  const [mailFor, setMailFor] = useState("");
+  const open = (id: string, target?: OpenTarget) => {
+    setMailFor(target === "mail" ? id : "");
+    select(id);
+  };
 
   return openId === "" ? (
-    <AssignmentList api={api} onOpen={select} />
+    <AssignmentList api={api} onOpen={open} />
   ) : (
     <AssignmentEditor
       api={api}
       id={openId}
       editOnOpen={props.editAssignment === openId}
       onEditTaken={props.onEditTaken}
+      showMail={mailFor === openId}
+      onMailShown={() => setMailFor("")}
       onBack={() => select("")}
     />
   );
 }
+
+/** Where an opened assignment page lands: «mail» is the emails block. */
+type OpenTarget = "mail";
 
 function Chip(props: { view: ChipView }) {
   return (
@@ -130,17 +158,24 @@ async function fetchDeliveries(api: HomeworkApi, as: readonly AssignmentItem[]) 
   return { byId, loaded: ds.length === 0 || ds.some((r) => r.status === "fulfilled") };
 }
 
-function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void }) {
+function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?: OpenTarget) => void }) {
   const { api } = props;
+  const [checkingId, setCheckingId] = useState(""); // the running-work check of «Удалить» is on its way: no delete yet
+  const [cancelledId, setCancelledId] = useState(""); // «Отмена» of the warning: the «⋯» button of the row takes the focus back
   const [items, setItems] = useState<AssignmentItem[] | null>(null);
   // Deleted in this visit: the stored assignment at its new version, which «Вернуть» sends back.
   const [removed, setRemoved] = useState<Readonly<Record<string, AssignmentItem>>>({});
   const [restoredId, setRestoredId] = useState("");
   const [busyId, setBusyId] = useState("");
-  const [rowProblem, setRowProblem] = useState<{ id: string; text: string } | null>(null);
+  const [rowProblem, setRowProblem] = useState<{ id: string; text: string; openSend: boolean } | null>(null);
+  // Deleted with a stop of a running work: the removed line says so.
+  const [stoppedIds, setStoppedIds] = useState<Readonly<Record<string, boolean>>>({});
+  // The row that asks «Работа остановится — удалить?» (its work is running).
+  const [confirmId, setConfirmId] = useState("");
   const removedRef = useRef(removed);
   removedRef.current = removed;
   const guard = useRef(flightGuard());
+  const impactGuard = useRef(flightGuard());
   const [deliveries, setDeliveries] = useState<Readonly<Record<string, DeliveryItem[]>>>({});
   const [deliveriesLoaded, setDeliveriesLoaded] = useState(false);
   const [filter, setFilter] = useState<AssignmentFilter>("all");
@@ -271,7 +306,11 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
     refresh: reloadItems,
   });
 
-  async function change(a: AssignmentItem, call: () => Promise<ChangeAssignmentResult>, done: (next: AssignmentItem) => void) {
+  async function change(
+    a: AssignmentItem,
+    call: () => Promise<ChangeAssignmentResult>,
+    done: (next: AssignmentItem, stopped: boolean) => void,
+  ) {
     if (guard.current.has(a.id)) {
       return; // a second click while the first call runs: it must not touch the first one's busy state
     }
@@ -284,10 +323,10 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
       }
       const out = changeOutcome(r);
       if (out.assignment !== null) {
-        done(out.assignment);
+        done(out.assignment, out.stopped);
         return;
       }
-      setRowProblem({ id: a.id, text: out.text });
+      setRowProblem({ id: a.id, text: out.text, openSend: out.openSend });
       if (out.reload) {
         await reloadItems();
       }
@@ -296,15 +335,41 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
     }
   }
 
-  const remove = (a: AssignmentItem) =>
-    change(
+  const remove = (a: AssignmentItem) => {
+    setConfirmId("");
+    return change(
       a,
       () => api.deleteAssignment(a.id, a.version),
-      (next) => {
+      (next, stopped) => {
         setRestoredId("");
+        setStoppedIds((cur) => ({ ...cur, [a.id]: stopped }));
         setRemoved((cur) => ({ ...cur, [a.id]: next }));
       },
     );
+  };
+
+  // «Удалить»: a running work is asked about first (inline), anything else is deleted at once. The impact guard keeps
+  // a double click to one question; a failed question counts as «not running».
+  async function askRemove(a: AssignmentItem) {
+    if (impactGuard.current.has(a.id) || guard.current.has(a.id)) {
+      return;
+    }
+    setRowProblem(null);
+    setCancelledId("");
+    setCheckingId(a.id);
+    try {
+      await impactGuard.current.run(a.id, async () => {
+        if (await deleteNeedsWarning(() => api.deleteImpact(a.id))) {
+          setConfirmId(a.id);
+        } else {
+          setCheckingId("");
+          await remove(a);
+        }
+      });
+    } finally {
+      setCheckingId((cur) => (cur === a.id ? "" : cur));
+    }
+  }
 
   const restore = (a: AssignmentItem, gone: AssignmentItem) =>
     change(
@@ -320,18 +385,43 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
       },
     );
 
+  // «Отмена» of the delete question: the question that had the focus is gone, so the row's «⋯» button takes it.
+  useEffect(() => {
+    if (cancelledId !== "") {
+      focusRowMenu(rootRef.current, cancelledId);
+      setCancelledId("");
+    }
+  }, [cancelledId]);
+
   const row = (a: AssignmentItem) => {
-    const problem = rowProblem !== null && rowProblem.id === a.id ? rowProblem.text : "";
-    const problemLine = problem !== "" && (
-      <ResultLine kind="fail" role="alert">
-        {problem}
-      </ResultLine>
-    );
+    const problem = rowProblem !== null && rowProblem.id === a.id ? rowProblem : null;
+    const problemLine = (problem !== null && problem.text !== "") || confirmId === a.id ? (
+      <>
+        {problem !== null && problem.text !== "" && (
+          <ChangeRefusal text={problem.text} onOpenSend={problem.openSend ? () => props.onOpen(a.id, "mail") : undefined} />
+        )}
+        {confirmId === a.id && (
+          <DeleteWarning
+            onConfirm={() => void remove(a)}
+            onCancel={() => {
+              setConfirmId("");
+              setCancelledId(a.id);
+            }}
+          />
+        )}
+      </>
+    ) : null;
     if (Object.hasOwn(removed, a.id)) {
       return (
         <Row
           key={a.id}
-          title={<RemovedLine busy={busyId === a.id} onRestore={() => void restore(a, removed[a.id])} />}
+          title={
+            <RemovedLine
+              busy={busyId === a.id}
+              stopped={stoppedIds[a.id] === true}
+              onRestore={() => void restore(a, removed[a.id])}
+            />
+          }
           below={problemLine}
         />
       );
@@ -354,7 +444,8 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string) => void 
             void doneRun.mark(a.id, !a.done, a.title);
           }
         }}
-        onRemove={() => void remove(a)}
+        removeLock={checkingId === a.id ? "checking" : confirmId === a.id ? "confirm" : ""}
+        onRemove={() => void askRemove(a)}
         below={
           <>
             {problemLine}
@@ -503,8 +594,17 @@ interface SendOpen {
   problem: string;
 }
 
-function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: boolean; onEditTaken?: () => void; onBack: () => void }) {
-  const { api, id, editOnOpen, onEditTaken } = props;
+// showMail: the page lands on the emails once loaded (the list's «Открыть отправку»); onMailShown tells it was done.
+function AssignmentEditor(props: {
+  api: HomeworkApi;
+  id: string;
+  editOnOpen?: boolean;
+  onEditTaken?: () => void;
+  showMail?: boolean;
+  onMailShown?: () => void;
+  onBack: () => void;
+}) {
+  const { api, id, editOnOpen, onEditTaken, showMail, onMailShown } = props;
   const turnkey = useMemo(() => turnkeyApi(callByName), []);
   const [detail, setDetail] = useState<AssignmentDetail | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -535,8 +635,14 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
   }, [editOnOpen, onEditTaken]);
   const [gone, setGone] = useState<AssignmentItem | null>(null);
   const [changing, setChanging] = useState(false);
+  const [checking, setChecking] = useState(false); // the running-work check of «Удалить» is on its way: no delete yet
   const [restored, setRestored] = useState(false); // «Вернуть» was pressed: «Удалить» takes the focus
   const [changeProblem, setChangeProblem] = useState("");
+  const [changeOpenSend, setChangeOpenSend] = useState(false); // the refusal comes with «Открыть отправку»
+  const [confirming, setConfirming] = useState(false); // «Работа остановится» is asked before the delete
+  const [goneStopped, setGoneStopped] = useState(false); // the delete stopped a running work
+  const [cancelled, setCancelled] = useState(false); // «Отмена» of the warning: «Удалить» takes the focus back
+  const mailRef = useRef<HTMLHeadingElement>(null);
   const library = useMemo(() => libraryApi(callByName), []);
   const mounted = useRef(true);
   const acting = useRef(false); // one action at a time; a double click must not start a second one
@@ -945,11 +1051,13 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
   // «Удалить» and «Вернуть» of this assignment; gone is the stored assignment at its new version, shown until the
   // student leaves the page. The guard keeps a double click to one call.
   const removeGuard = useRef(flightGuard());
-  async function changeThis(call: () => Promise<ChangeAssignmentResult>, done: (next: AssignmentItem) => void) {
+  const impactGuard = useRef(flightGuard());
+  async function changeThis(call: () => Promise<ChangeAssignmentResult>, done: (next: AssignmentItem, stopped: boolean) => void) {
     if (removeGuard.current.has(id)) {
       return; // a second click while the first call runs: it must not touch the first one's busy state
     }
     setChangeProblem("");
+    setChangeOpenSend(false);
     setChanging(true);
     try {
       const r = await removeGuard.current.run(id, call);
@@ -958,10 +1066,11 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
       }
       const out = changeOutcome(r);
       if (out.assignment !== null) {
-        done(out.assignment);
+        done(out.assignment, out.stopped);
         return;
       }
       setChangeProblem(out.text);
+      setChangeOpenSend(out.openSend);
       if (out.reload) {
         await reload(true).catch(() => undefined);
       }
@@ -984,6 +1093,69 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
       ),
     refresh: () => reload(true, true).catch(() => undefined),
   });
+
+  function removeThis() {
+    if (detail === null) {
+      return Promise.resolve();
+    }
+    const version = detail.assignment.version;
+    setConfirming(false);
+    return changeThis(
+      () => api.deleteAssignment(id, version),
+      (next, stopped) => {
+        setEditing(false);
+        setRestored(false);
+        setGoneStopped(stopped);
+        setGone(next);
+      },
+    );
+  }
+
+  // «Удалить»: a running work is asked about first (inline), anything else is deleted at once; a failed question
+  // counts as «not running». The impact guard keeps a double click to one question.
+  async function askRemoveThis() {
+    if (impactGuard.current.has(id) || removeGuard.current.has(id)) {
+      return;
+    }
+    setChangeProblem("");
+    setChangeOpenSend(false);
+    setCancelled(false);
+    setChecking(true);
+    try {
+      await impactGuard.current.run(id, async () => {
+        const warn = await deleteNeedsWarning(() => api.deleteImpact(id));
+        if (!mounted.current) {
+          return;
+        }
+        if (warn) {
+          setConfirming(true);
+        } else {
+          setChecking(false);
+          await removeThis();
+        }
+      });
+    } finally {
+      if (mounted.current) {
+        setChecking(false);
+      }
+    }
+  }
+
+  // «Открыть отправку»: the emails list is where the state of the unsettled email is shown.
+  function showDeliveries() {
+    void loadDeliveries();
+    mailRef.current?.scrollIntoView({ block: "start" });
+    mailRef.current?.focus();
+  }
+
+  // Once the assignment is drawn (the emails heading exists) the page lands on the emails, as «Открыть отправку» does.
+  const loaded = detail !== null && gone === null;
+  useEffect(() => {
+    if (showMail === true && loaded) {
+      showDeliveries();
+      onMailShown?.();
+    }
+  }, [showMail, loaded]); // once per arrival: showDeliveries is a new function on every render
 
   if (detail === null) {
     return (
@@ -1019,6 +1191,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
         </div>
         <RemovedLine
           busy={changing}
+          stopped={goneStopped}
           onRestore={() =>
             void changeThis(
               () => api.restoreAssignment(id, gone.version),
@@ -1030,11 +1203,7 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
             )
           }
         />
-        {changeProblem && (
-          <ResultLine kind="fail" role="alert">
-            {changeProblem}
-          </ResultLine>
-        )}
+        {changeProblem && <ChangeRefusal text={changeProblem} />}
       </section>
     );
   }
@@ -1058,39 +1227,37 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
           <DoneButton
             done={a.done}
             busy={doneBusy}
-            disabled={changing}
+            disabled={changing || checking}
             onToggle={() => void doneRun.mark(id, !a.done, a.title)}
           />
-          <Button disabled={changing || doneBusy} onClick={() => setEditing(true)}>
+          <Button disabled={changing || checking || doneBusy} onClick={() => setEditing(true)}>
             {changeTexts.edit}
           </Button>
           <Button
+            // A new key after «Отмена» mounts the button again, so autoFocus gives it the focus.
+            key={cancelled ? "remove-cancelled" : "remove"}
             variant="danger"
             aria-label={removeLabel(a.title)}
-            autoFocus={restored}
+            autoFocus={restored || cancelled}
             busy={changing}
             busyLabel={changeTexts.removing}
-            disabled={changing || doneBusy}
-            onClick={() =>
-              void changeThis(
-                () => api.deleteAssignment(id, a.version),
-                (next) => {
-                  setEditing(false);
-                  setRestored(false);
-                  setGone(next);
-                },
-              )
-            }
+            disabled={changing || checking || confirming || doneBusy}
+            onClick={() => void askRemoveThis()}
           >
             {changeTexts.remove}
           </Button>
         </div>
       </div>
       <DoneStamp assignment={a} />
-      {changeProblem && (
-        <ResultLine kind="fail" role="alert">
-          {changeProblem}
-        </ResultLine>
+      {changeProblem && <ChangeRefusal text={changeProblem} onOpenSend={changeOpenSend ? showDeliveries : undefined} />}
+      {confirming && (
+        <DeleteWarning
+          onConfirm={() => void removeThis()}
+          onCancel={() => {
+            setConfirming(false);
+            setCancelled(true);
+          }}
+        />
       )}
       {doneRun.issue !== null && (
         <DoneIssueLine
@@ -1308,7 +1475,9 @@ function AssignmentEditor(props: { api: HomeworkApi; id: string; editOnOpen?: bo
         </>
       )}
 
-      <h2 className="group-title">Письма</h2>
+      <h2 className="group-title" ref={mailRef} tabIndex={-1}>
+        Письма
+      </h2>
       {deliveriesError && (
         <Banner kind="fail" role="alert">
           {deliveriesError}

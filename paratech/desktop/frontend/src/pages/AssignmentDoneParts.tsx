@@ -11,6 +11,8 @@ import {
   doneTexts,
   issueButton,
   pageDoneLabel,
+  type RemoveLock,
+  removeItem,
 } from "../assignmentDoneView.js";
 import { changeTexts, dueText } from "../homeworkView.js";
 import { lessonText } from "../lessonLabel.js";
@@ -125,6 +127,8 @@ export function AssignmentRowView(props: {
   /** The line under the row: a refusal. */
   below?: ReactNode;
   focusOpen?: boolean;
+  /** The delete check runs or its question is open: «Удалить» of the menu is off. */
+  removeLock?: RemoveLock;
   onOpen: () => void;
   onToggleDone: () => void;
   onRemove: () => void;
@@ -156,9 +160,10 @@ export function AssignmentRowView(props: {
             Открыть
           </Button>
           <RowMenu
+            rowId={a.id}
             label={`${doneTexts.moreActions}: ${a.title}`}
             title={doneTexts.moreActions}
-            items={[{ key: "remove", label: changeTexts.remove, disabled: busy, hint: doneTexts.busyHint }]}
+            items={[{ key: "remove", label: changeTexts.remove, ...removeItem(busy, props.removeLock ?? "") }]}
             onPick={props.onRemove}
           />
         </>

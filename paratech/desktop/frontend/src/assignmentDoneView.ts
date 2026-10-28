@@ -41,7 +41,40 @@ export const doneTexts = {
   /** The conflict of «Отменить» on the assignment page, which already shows the assignment. */
   pageUndoConflict: "Задание изменилось, поэтому отменить нельзя. Отметку можно поставить или снять кнопкой выше.",
   busyHint: "Идёт сохранение",
+  /** Under the disabled «Удалить» of the «⋯» menu while the running-work check is on its way, and while its question is open. */
+  removeChecking: "Проверяется…",
+  removeAsked: "Ответьте на вопрос ниже",
 } as const;
+
+/** Focuses the «⋯» button of the row with this id inside root (after «Отмена» of the delete question); false when none. */
+export function focusRowMenu(
+  root: { querySelectorAll(selector: string): Iterable<{ dataset: { menuId?: string }; focus(): void }> } | null,
+  id: string,
+): boolean {
+  if (root === null || id === "") {
+    return false;
+  }
+  for (const el of root.querySelectorAll("[data-menu-id]")) {
+    if (el.dataset.menuId === id) {
+      el.focus();
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Why «Удалить» of a row is off: a call of the row runs, the delete check runs, or its question waits for an answer. */
+export type RemoveLock = "" | "checking" | "confirm";
+
+export function removeItem(busy: boolean, lock: RemoveLock): { disabled: boolean; hint: string } {
+  if (busy) {
+    return { disabled: true, hint: doneTexts.busyHint };
+  }
+  if (lock === "checking") {
+    return { disabled: true, hint: doneTexts.removeChecking };
+  }
+  return lock === "confirm" ? { disabled: true, hint: doneTexts.removeAsked } : { disabled: false, hint: "" };
+}
 
 /** The longest title the toast names; a longer one is cut with «…». */
 export const toastTitleMax = 40;

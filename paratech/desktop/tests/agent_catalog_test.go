@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,6 +14,9 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"google.golang.org/protobuf/proto"
+
+	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/domain/agent/action"
 	"paratech/desktop/internal/domain/agent/services/actionpolicy"
@@ -21,9 +25,9 @@ import (
 	"paratech/desktop/testenv"
 )
 
-// goldenCatalog is shared/testdata/tool_catalog_v8.json (TASK-113; v2 since TASK-118, v3 since TASK-173, v4 since
-// TASK-184, v5 since TASK-210, v6 since TASK-217, v7 since TASK-223, v8 since TASK-234), the tool list the Hub serves for the catalog
-// version the desktop sends.
+// goldenCatalog is shared/testdata/tool_catalog_v9.json (TASK-113; v2 since TASK-118, v3 since TASK-173, v4 since
+// TASK-184, v5 since TASK-210, v6 since TASK-217, v7 since TASK-223, v8 since TASK-234, v9 since TASK-245), the tool
+// list the Hub serves for the catalog version the desktop sends.
 type goldenCatalog struct {
 	CatalogVersion int               `json:"catalog_version"`
 	Types          map[string]string `json:"types"`
@@ -193,6 +197,28 @@ func TestToolCatalogV8KeepsTheToolsOfV7(t *testing.T) {
 	}
 	if strings.Replace(string(v7), v7Line, v8Line, 1) != string(v8) {
 		t.Fatal("tool_catalog_v8.json differs from tool_catalog_v7.json beyond catalog_version")
+	}
+}
+
+// TestToolCatalogV9KeepsTheToolsOfV8: v9 added chats to the Hub panel prompt and the step fields mentions and
+// history_summary (TASK-244, TASK-245), not tools: the files differ only in catalog_version.
+func TestToolCatalogV9KeepsTheToolsOfV8(t *testing.T) {
+	dir := filepath.Join(codeRoot(t), "shared", "testdata")
+	v8, err := os.ReadFile(filepath.Join(dir, "tool_catalog_v8.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v9, err := os.ReadFile(filepath.Join(dir, "tool_catalog_v9.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const v8Line, v9Line = `"catalog_version": 8,`, `"catalog_version": 9,`
+	if strings.Count(string(v8), v8Line) != 1 || strings.Count(string(v9), v9Line) != 1 {
+		t.Fatal("catalog_version lines changed")
+	}
+	if strings.Replace(string(v8), v8Line, v9Line, 1) != string(v9) {
+		t.Fatal("tool_catalog_v9.json differs from tool_catalog_v8.json beyond catalog_version")
 	}
 }
 
@@ -451,7 +477,7 @@ func TestAgentRequestOfAnOlderCatalogAfterTheUpdate(t *testing.T) {
 }
 
 // The update to the current catalog (4 -> 5 in TASK-210, 5 -> 6 in TASK-217, 6 -> 7 in TASK-223, 7 -> 8 in TASK-234,
-// where the tools stay the same and only the seal's catalog differs): calls sealed for a
+// 8 -> 9 in TASK-245, where the tools stay the same and only the seal's catalog differs): calls sealed for a
 // request stopped on the previous catalog no longer pass the Hub's check once the desktop sends the new one, so
 // «Продолжить» and «Повторить» end with the honest «не удалось», and a new request works.
 func TestAgentRequestOfThePreviousCatalogAfterTheUpdate(t *testing.T) {
@@ -496,5 +522,94 @@ func TestAgentRequestOfThePreviousCatalogAfterTheUpdate(t *testing.T) {
 	st, err = e.turns.Ask(ctx, agentturn.AskInput{Text: "а что сейчас?"})
 	if err != nil || st.Status != thread.StatusDone || st.Turn != 2 {
 		t.Fatalf("new request = %+v, %v", st, err)
+	}
+}
+
+// existingObjects is the Mentions port of the app: every object exists but those deleted.
+type existingObjects struct{ deleted values.RefSet }
+
+func (o existingObjects) Exists(_ context.Context, r values.Ref) (bool, error) {
+	return !o.deleted.Has(r), nil
+}
+
+// Catalog 9 through SQLite and the Hub client (TASK-245): the mentions of a request go to the Hub as IDs with
+// current true; the next request of the chat sends them again with current false (one history read, joined with the
+// stored requests) and accepts their IDs in a reply; an object deleted since is neither sent nor accepted. No label
+// reaches the Hub.
+func TestAgentMentionsOfCatalog9(t *testing.T) {
+	const label = "Лекция-метка-только-для-показа"
+	e := newAgentEnv(t)
+	ctx := context.Background()
+	objects := existingObjects{deleted: values.RefSet{}}
+	s1 := agentRef(t, values.KindSubject, "s1")
+	var err error
+	if e.turns, err = agentturn.New(agentturn.Deps{
+		Model: e.model, Threads: sqlite.NewAgentThreadRepository(e.db), History: sqlite.NewAgentHistory(e.db, e.clock),
+		Subjects: baseSubjects{{ID: s1, Name: "Физика"}}, Facts: zeroFacts{}, Tx: e.db, Clock: e.clock, IDs: e.ids,
+		Mentions: objects, Log: slog.New(slog.DiscardHandler),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lecture, err := values.NewMention(agentRef(t, values.KindLesson, "l7"), label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := values.NewMention(agentRef(t, values.KindAssignment, "a7"), "Лаба 7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mentionsOf := func() string {
+		reqs := e.hub.Requests()
+		var out []string
+		for _, m := range reqs[len(reqs)-1].GetScope().GetMentions() {
+			out = append(out, fmt.Sprintf("%s:%s:%v", m.GetKind(), m.GetId(), m.GetCurrent()))
+		}
+		return strings.Join(out, " ")
+	}
+
+	e.hub.Then(testenv.AgentCall{ID: "toolu_1", Tool: "reply", Args: `{"text":"Смотрю."}`})
+	first, err := e.turns.Ask(ctx, agentturn.AskInput{Text: "что задали к этой лекции?", Mentions: []values.Mention{lecture, task}})
+	if err != nil || first.Status != thread.StatusDone {
+		t.Fatalf("request 1 = %+v, %v", first, err)
+	}
+	if got := mentionsOf(); got != "AGENT_MENTION_KIND_LESSON:l7:true AGENT_MENTION_KIND_ASSIGNMENT:a7:true" {
+		t.Fatalf("request 1 mentions = %s", got)
+	}
+
+	// The lesson is deleted before the next request; the assignment stays.
+	objects.deleted.Add(lecture.Ref())
+	e.hub.Then(testenv.AgentCall{ID: "toolu_2", Tool: "reply", Args: `{"text":"Вот оно.","assignments":["a7"]}`})
+	st, err := e.turns.Ask(ctx, agentturn.AskInput{ThreadID: first.Thread, Text: "а срок у него какой?"})
+	if err != nil || st.Status != thread.StatusDone || len(st.Cards) != 1 {
+		t.Fatalf("request 2 = %+v, %v", st, err)
+	}
+	if got := mentionsOf(); got != "AGENT_MENTION_KIND_ASSIGNMENT:a7:false" {
+		t.Fatalf("request 2 mentions = %s", got)
+	}
+	if card, ok := st.Cards[0].(values.ReplyCard); !ok || len(card.Assignments) != 1 {
+		t.Fatalf("card = %+v, want the reply listing a7", st.Cards[0])
+	}
+
+	// A call that takes the deleted lesson is refused (unknown ID), so it never reaches the Driver.
+	e.hub.Then(testenv.AgentCall{ID: "toolu_3", Tool: "create_assignment", Args: `{"title":"Решить номер 5","lesson":"l7"}`}).
+		Then(testenv.AgentCall{ID: "toolu_4", Tool: "reply", Args: `{"text":"Лекции больше нет."}`})
+	st, err = e.turns.Ask(ctx, agentturn.AskInput{ThreadID: first.Thread, Text: "добавь к той лекции задание"})
+	if err != nil || st.Status != thread.StatusDone || len(st.Calls) != 0 || len(st.Cards) != 1 {
+		t.Fatalf("request 3 = %+v, %v", st, err)
+	}
+	reqs := e.hub.Requests()
+	results := reqs[len(reqs)-1].GetTurns()
+	if got := results[len(results)-1].GetResults().GetResults()[0]; !got.GetIsError() || got.GetResultJson() != `{"error":"unknown_id"}` {
+		t.Fatalf("result = %v, want unknown_id", got)
+	}
+
+	for i, r := range e.hub.Requests() {
+		wire, err := proto.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(wire), label) || strings.Contains(string(wire), "Лаба 7") {
+			t.Fatalf("request %d holds a mention label", i)
+		}
 	}
 }
