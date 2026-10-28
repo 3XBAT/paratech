@@ -1,5 +1,5 @@
 // TASK-312: the view model of the review of subjects from the schedule (selection, counters, choices, the state machine
-// and its outcomes) and the SSR of the panel, the empty list and the page header parts.
+// and its outcomes, the undo) and the SSR of the panel, the line after it, the empty list and the page hints.
 // Runs on the modules compiled by `npm run test` (tsconfig.test.json).
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -7,34 +7,48 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   buildChoices,
+  carrySelection,
+  closedState,
   createFlow,
+  createGate,
   doneText,
+  escCloses,
+  groupItem,
   initialSelection,
   initialState,
   kindsText,
   lessonsWord,
+  lineSteps,
   mainButton,
+  memberItem,
   mergeBatch,
   metaText,
   nameKey,
   offerChecking,
   offerGroups,
+  offerStatus,
+  omittedLeft,
   omittedNote,
   planOf,
   reduce,
   refreshFlow,
   reviewTexts,
   setChecked,
+  setMemberMode,
   setMemberName,
   setName,
-  subjectNameKeys,
   subjectsWord,
-  toggleMember,
+  takenOf,
   undoFlow,
-  groupItem,
-  memberItem,
 } from "../.test-build/scheduleSubjectsView.js";
-import { EmptySubjectsActions, ReviewView, ScheduleSubjectsReview } from "../.test-build/pages/ScheduleSubjectsReview.js";
+import {
+  EmptySubjectsActions,
+  KeptUndoLine,
+  ReviewView,
+  ScheduleOfferLine,
+  ScheduleSubjectsReview,
+} from "../.test-build/pages/ScheduleSubjectsReview.js";
+import { ScheduleNextHint } from "../.test-build/pages/SchedulePage.js";
 import { SubjectList } from "../.test-build/pages/SubjectsParts.js";
 
 const html = (el) => renderToStaticMarkup(el);
@@ -62,8 +76,13 @@ const seti = (over = {}) => ({
   action: "alias_of", subjectId: "s9", subjectName: "Компьютерные сети", ...over,
 });
 const reply = (over = {}) => ({ token: "tok1", groups: [matan(), fizika(), seti()], omitted: 0, problem: "", ...over });
-const names = new Map([["s9", "Компьютерные сети"], ["s1", "Алгебра"]]);
-const taken = subjectNameKeys(names);
+const subjects = [
+  { id: "s9", name: "Компьютерные сети", aliases: [] },
+  { id: "s1", name: "Алгебра", aliases: ["Алг."] },
+];
+const names = new Map(subjects.map((s) => [s.id, s.name]));
+const noState = { token: "tok1", batches: [], attempt: [] };
+const taken = takenOf(subjects, noState);
 
 const created = (id = "sched-1", key = "matan", name = "Матан") => ({ id, key, name });
 const createReply = (over = {}) => ({ created: [created()], aliased: [], skipped: [], problem: "", ...over });
@@ -79,18 +98,33 @@ test("plural helpers: subjects and lessons", () => {
   assert.deepEqual([1, 2, 5, 14].map(lessonsWord), ["1 пара", "2 пары", "5 пар", "14 пар"]);
 });
 
-test("kinds in words with counts; unknown alone says nothing the lessons do not", () => {
+test("kinds in words with counts, the unknown kind last and called «без типа»", () => {
   assert.equal(kindsText([kc("lecture", 12), kc("seminar", 6), kc("lab", 1)]), "лекции 12 · семинары 6 · лабораторные 1");
   assert.equal(kindsText([kc("unknown", 5)]), "");
-  assert.equal(kindsText([kc("lecture", 2), kc("unknown", 1)]), "лекции 2 · пары 1");
+  assert.equal(kindsText([kc("lecture", 2), kc("unknown", 1)]), "лекции 2 · без типа 1");
+  assert.equal(kindsText([kc("unknown", 2), kc("seminar", 6), kc("lecture", 8)]), "лекции 8 · семинары 6 · без типа 2");
   assert.equal(metaText(matan()), "14 пар · лекции 12 · семинары 2");
+  assert.equal(metaText({ lessons: 14, recordings: 0, kinds: [kc("unknown", 2), kc("seminar", 6), kc("lecture", 8)] }), "14 пар · лекции 8 · семинары 6 · без типа 2");
   assert.equal(metaText({ lessons: 0, recordings: 2, kinds: [] }), "2 записи");
 });
 
-test("the note about omitted rows agrees with the number", () => {
-  assert.equal(omittedNote(1), "Ещё 1 редкая строка расписания не показана");
-  assert.equal(omittedNote(3), "Ещё 3 редкие строки расписания не показаны");
-  assert.equal(omittedNote(7), "Ещё 7 редких строк расписания не показаны");
+test("the notes about omitted names agree with the number and avoid «редкие строки»", () => {
+  assert.equal(omittedNote(1), "Ещё 1 название из расписания появится в списке после создания этих предметов");
+  assert.equal(omittedNote(3), "Ещё 3 названия из расписания появятся в списке после создания этих предметов");
+  assert.equal(omittedNote(7), "Ещё 7 названий из расписания появятся в списке после создания этих предметов");
+  assert.equal(omittedLeft(1), "Ещё 1 название из расписания не показано");
+  assert.equal(omittedLeft(2), "Ещё 2 названия из расписания не показаны");
+  for (const n of [1, 2, 5]) {
+    assert.doesNotMatch(omittedNote(n) + omittedLeft(n), /редк|„|“/);
+  }
+});
+
+test("no German quotes and no storage jargon in any text of the review", () => {
+  const all = Object.values(reviewTexts).map((t) => (typeof t === "function" ? t(3) : t));
+  all.push(reviewTexts.checkboxAria("Х"), reviewTexts.checkboxAddAria("Х"));
+  for (const t of all) {
+    assert.doesNotMatch(t, /„|“|локальн/i);
+  }
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -105,7 +139,7 @@ test("everything is checked by default and doubtful members are merged", () => {
   assert.equal(plan.additions, 2); // two spellings go to «Компьютерные сети»
   assert.equal(plan.problems.size, 0);
   const b = mainButton(plan);
-  assert.deepEqual([b.label, b.disabled, b.reason, b.extra], ["Создать 2 предмета", false, "", "и добавить названия: 2"]);
+  assert.deepEqual([b.label, b.disabled, b.reason, b.extra], ["Создать 2 предмета", false, "", "и добавить другие названия: 2"]);
 });
 
 test("unchecked rows are not counted", () => {
@@ -118,25 +152,25 @@ test("unchecked rows are not counted", () => {
   assert.deepEqual([b.label, b.disabled, b.reason], ["Создать предметы", true, "Отметьте хотя бы один предмет"]);
 });
 
-test("only additions: the button is about the names", () => {
+test("only additions: the button is about the other names", () => {
   const groups = reply().groups;
-  let sel = setChecked(setChecked(initialSelection(groups), "matan", false), "fizika", false);
+  const sel = setChecked(setChecked(initialSelection(groups), "matan", false), "fizika", false);
   const b = mainButton(planOf(groups, sel, taken));
-  assert.deepEqual([b.label, b.disabled, b.reason], ["Добавить названия: 2", false, ""]);
+  assert.deepEqual([b.label, b.disabled, b.reason], ["Добавить другие названия: 2", false, ""]);
 });
 
-test("a member taken separately is one more subject; skipped, none; a second click returns it", () => {
+test("a member taken separately is one more subject; skipped, none; «Вместе» returns it", () => {
   const groups = reply().groups;
-  let sel = toggleMember(initialSelection(groups), "fizika", "fizka", "separate");
+  let sel = setMemberMode(initialSelection(groups), "fizika", "fizka", "separate");
   assert.equal(sel.get("fizika").members.get("fizka").mode, "separate");
   assert.equal(planOf(groups, sel, taken).creates, 3);
-  sel = toggleMember(sel, "fizika", "fizka", "skip");
+  sel = setMemberMode(sel, "fizika", "fizka", "skip");
   assert.equal(sel.get("fizika").members.get("fizka").mode, "skip");
   assert.equal(planOf(groups, sel, taken).creates, 2);
-  sel = toggleMember(sel, "fizika", "fizka", "skip");
+  sel = setMemberMode(sel, "fizika", "fizka", "keep");
   assert.equal(sel.get("fizika").members.get("fizka").mode, "keep");
   // An unchecked group takes its separate members with it.
-  sel = setChecked(toggleMember(sel, "fizika", "fizka", "separate"), "fizika", false);
+  sel = setChecked(setMemberMode(sel, "fizika", "fizka", "separate"), "fizika", false);
   assert.equal(planOf(groups, sel, taken).creates, 1);
 });
 
@@ -144,7 +178,7 @@ test("a group whose members all left adds nothing (an alias_of group with one do
   const g = seti({ doubtful: true, members: [member({ key: "seti", name: "Сети", spellings: ["Сети"], doubtful: true, link: "typo" })] });
   let sel = initialSelection([g]);
   assert.equal(planOf([g], sel, taken).additions, 1);
-  sel = toggleMember(sel, "seti", "seti", "separate");
+  sel = setMemberMode(sel, "seti", "seti", "separate");
   const plan = planOf([g], sel, taken);
   assert.deepEqual([plan.creates, plan.additions], [1, 0]);
 });
@@ -181,6 +215,32 @@ test("an empty name, a name equal to another new one or to an existing subject b
 
   sel = setName(initialSelection(groups), "matan", "я".repeat(201));
   assert.equal(planOf(groups, sel, taken).problems.get(groupItem("matan")), "tooLong");
+  // The field has no length cap, so the plan counts characters: 200 are fine.
+  sel = setName(initialSelection(groups), "matan", "я".repeat(200));
+  assert.equal(planOf(groups, sel, taken).problems.size, 0);
+});
+
+test("the other names of an existing subject are taken too (the core refuses a new name equal to one)", () => {
+  assert.ok(taken.has(nameKey("Алг.")));
+  const groups = reply().groups;
+  const sel = setName(initialSelection(groups), "matan", " алг. ");
+  assert.equal(planOf(groups, sel, taken).problems.get(groupItem("matan")), "exists");
+});
+
+test("a new name equal to a spelling that goes to another row is a duplicate", () => {
+  const groups = reply().groups;
+  // «Физ-ка» is merged into the row «Физика»: the core would refuse a second subject with that name.
+  let sel = setName(initialSelection(groups), "matan", "физ-ка");
+  assert.equal(planOf(groups, sel, taken).problems.get(groupItem("matan")), "duplicate");
+  // A spelling added to an existing subject counts as well.
+  sel = setName(initialSelection(groups), "matan", "Сети");
+  assert.equal(planOf(groups, sel, taken).problems.get(groupItem("matan")), "duplicate");
+  // The row's own spellings are not a clash with its own name.
+  sel = setName(initialSelection(groups), "fizika", "Физ-ка");
+  assert.equal(planOf(groups, sel, taken).problems.size, 0);
+  // Once the member goes its own way, its spelling goes with it.
+  sel = setMemberName(setMemberMode(initialSelection(groups), "fizika", "fizka", "separate"), "fizika", "fizka", "Физ-ка");
+  assert.equal(planOf(groups, sel, taken).problems.size, 0);
 });
 
 test("a problem of an unchecked row, or of a name not used, does not block", () => {
@@ -189,17 +249,85 @@ test("a problem of an unchecked row, or of a name not used, does not block", () 
   assert.equal(planOf(groups, sel, taken).problems.size, 0);
   // The name of a group whose members all left is not created.
   const only = fizika({ members: [member({ key: "fizka", name: "Физ-ка", doubtful: true, link: "typo" })] });
-  const s2 = toggleMember(setName(initialSelection([only]), "fizika", ""), "fizika", "fizka", "skip");
+  const s2 = setMemberMode(setName(initialSelection([only]), "fizika", ""), "fizika", "fizka", "skip");
   assert.equal(planOf([only], s2, taken).problems.size, 0);
 });
 
 test("a member taken separately is named and checked like a row", () => {
   const groups = reply().groups;
-  let sel = toggleMember(initialSelection(groups), "fizika", "fizka", "separate");
+  let sel = setMemberMode(initialSelection(groups), "fizika", "fizka", "separate");
   sel = setMemberName(sel, "fizika", "fizka", "физика");
   assert.equal(planOf(groups, sel, taken).problems.get(memberItem("fizika", "fizka")), "duplicate");
   sel = setMemberName(sel, "fizika", "fizka", "Физкультура");
   assert.equal(planOf(groups, sel, taken).problems.size, 0);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// the subjects this very token made are not «already existing» (a retry after a partial create)
+
+test("takenOf leaves out the subjects the reply listed for this token, and only for this token", () => {
+  const list = [...subjects, { id: "sched-1", name: "Матан", aliases: ["Матанализ"] }];
+  const batches = [{ token: "tok1", created: [created("sched-1")], aliased: [] }];
+  const own = takenOf(list, { token: "tok1", batches, attempt: [] });
+  assert.ok(!own.has("матан") && !own.has("матанализ"));
+  assert.ok(own.has("алгебра"));
+  // Another token's batch is a real subject now.
+  assert.ok(takenOf(list, { token: "tok2", batches, attempt: [] }).has("матан"));
+});
+
+test("takenOf: after an unreadable reply the derived ids of the names just sent are left out; other ids are not", () => {
+  const list = [...subjects, { id: "sched-77", name: "Физика", aliases: [] }, { id: "s5", name: "Химия", aliases: [] }];
+  const t = takenOf(list, { token: "tok1", batches: [], attempt: ["физика", "химия"] });
+  assert.ok(!t.has("физика"));
+  assert.ok(t.has("химия")); // not a subject of the schedule: a real clash
+  assert.ok(takenOf(list, noState).has("физика")); // nothing pending: it exists
+});
+
+test("retry after a partial create (unavailable, 1 of 2 created) still sends the call after the subjects reload", async () => {
+  let s = reduce(reduce(initialState(reply({ groups: [matan(), fizika()] })), { type: "saving" }), {
+    type: "created",
+    reply: createReply({ created: [created("sched-1", "matan", "Матан")], problem: "unavailable" }),
+  });
+  assert.equal(s.view, "list");
+  const reloaded = [...subjects, { id: "sched-1", name: "Матан", aliases: [] }];
+  const gate = createGate(s, reloaded);
+  assert.equal(gate.plan.problems.size, 0);
+  assert.equal(gate.plan.creates, 2);
+  assert.equal(gate.ok, true);
+  assert.equal(mainButton(gate.plan).disabled, false);
+  // The same list without the exclusion would block the button: the exclusion is what lets the retry through.
+  assert.equal(planOf(s.groups, s.selection, takenOf(reloaded, { ...noState, token: "other" })).problems.get(groupItem("matan")), "exists");
+  const calls = [];
+  const action = await createFlow({ create: async (t, c) => (calls.push([t, c]), createReply()) }, s);
+  assert.equal(action.type, "created");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], "tok1"); // the same token: the core finds its own work
+  // The panel shows an enabled button, not the «exists» error.
+  const out = html(h(ReviewView, { state: s, subjects: reloaded, on, autoFocus: false }));
+  assert.doesNotMatch(out, /Предмет с таким названием уже есть/);
+  assert.doesNotMatch(out, /<button[^>]*disabled=""[^>]*>[^]*?Создать 2 предмета/);
+  // A clean finish forgets what was pending.
+  s = reduce(reduce(s, { type: "saving" }), { type: "created", reply: createReply({ created: [created("sched-2", "fizika", "Физика")] }) });
+  assert.deepEqual(s.attempt, []);
+});
+
+test("retry after an unreadable reply: the subjects the core made under derived ids do not block it", () => {
+  const s = reduce(reduce(initialState(reply({ groups: [matan(), fizika()] })), { type: "saving" }), { type: "createThrown" });
+  const reloaded = [...subjects, { id: "sched-aa", name: "Матан", aliases: [] }, { id: "sched-bb", name: "Физика", aliases: [] }];
+  const gate = createGate(s, reloaded);
+  assert.deepEqual([gate.ok, gate.plan.problems.size], [true, 0]);
+  // A subject of the same name that the schedule did not make still blocks.
+  assert.equal(createGate(s, [...subjects, { id: "s5", name: "Матан", aliases: [] }]).ok, false);
+});
+
+test("the gate: no call while saving, outside the list, with a problem or with nothing chosen", () => {
+  const s = initialState(reply());
+  assert.equal(createGate(s, subjects).ok, true);
+  assert.equal(createGate(reduce(s, { type: "saving" }), subjects).ok, false);
+  assert.equal(createGate({ ...s, view: "result" }, subjects).ok, false);
+  assert.equal(createGate(reduce(s, { type: "rename", group: "matan", name: "" }), subjects).ok, false);
+  const none = { ...s, selection: setChecked(setChecked(setChecked(s.selection, "matan", false), "fizika", false), "seti", false) };
+  assert.equal(createGate(none, subjects).ok, false);
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -208,7 +336,7 @@ test("a member taken separately is named and checked like a row", () => {
 test("buildChoices: the exact shape for unchecked, renamed, separate and skipped", () => {
   const groups = reply().groups;
   let sel = setName(initialSelection(groups), "matan", "  Математический анализ ");
-  sel = toggleMember(sel, "fizika", "fizka", "separate");
+  sel = setMemberMode(sel, "fizika", "fizka", "separate");
   sel = setChecked(sel, "seti", false);
   assert.deepEqual(buildChoices(groups, sel), [
     { group: "matan", action: "create", name: "Математический анализ", members: [] },
@@ -225,10 +353,10 @@ test("buildChoices: untouched names are empty, alias_of keeps its action, skip a
     { group: "seti", action: "alias_of", name: "", members: [] },
   ]);
   let sel = setName(initialSelection(groups), "seti", "не уйдёт"); // an alias_of group has no name to send
-  sel = toggleMember(sel, "fizika", "fizka", "skip");
+  sel = setMemberMode(sel, "fizika", "fizka", "skip");
   assert.deepEqual(buildChoices(groups, sel)[2], { group: "seti", action: "alias_of", name: "", members: [] });
   assert.deepEqual(buildChoices(groups, sel)[1].members, [{ key: "fizka", action: "skip", name: "" }]);
-  sel = setMemberName(toggleMember(initialSelection(groups), "fizika", "fizka", "separate"), "fizika", "fizka", " Физкультура ");
+  sel = setMemberName(setMemberMode(initialSelection(groups), "fizika", "fizka", "separate"), "fizika", "fizka", " Физкультура ");
   assert.deepEqual(buildChoices(groups, sel)[1].members, [{ key: "fizka", action: "separate", name: "Физкультура" }]);
 });
 
@@ -248,8 +376,8 @@ test("an empty proposal says everything is done, with only «Закрыть»", 
   assert.equal(s.view, "result");
   assert.deepEqual(s.notice, { tone: "ok", text: "Все предметы из расписания уже заведены", lines: [], steps: [] });
   const o = initialState(reply({ groups: [], omitted: 4 }));
-  assert.deepEqual(o.notice.lines, ["Ещё 4 редкие строки расписания не показаны"]);
-  assert.deepEqual(o.notice.steps, ["refresh"]);
+  assert.deepEqual(o.notice.lines, ["Ещё 4 названия из расписания не показаны"]);
+  assert.deepEqual(o.notice.steps, ["rest"]);
 });
 
 test("an unavailable proposal offers «Повторить»-like refresh with plain words", () => {
@@ -260,7 +388,12 @@ test("an unavailable proposal offers «Повторить»-like refresh with pl
   assert.doesNotMatch(s.notice.text, /unavailable/);
 });
 
-test("the offer: checking, none, groups; a failed call or an unavailable core offers nothing", () => {
+test("the offer: checking, none, groups, failed; a failed call or an unavailable core is not «no schedule»", () => {
+  assert.equal(offerStatus(offerChecking), "checking");
+  assert.equal(offerStatus({ loaded: true, reply: null }), "failed");
+  assert.equal(offerStatus({ loaded: true, reply: reply({ groups: [], problem: "unavailable" }) }), "failed");
+  assert.equal(offerStatus({ loaded: true, reply: reply({ groups: [] }) }), "none");
+  assert.equal(offerStatus({ loaded: true, reply: reply() }), "groups");
   assert.equal(offerGroups(offerChecking), null);
   assert.equal(offerGroups({ loaded: true, reply: null }), 0);
   assert.equal(offerGroups({ loaded: true, reply: reply({ groups: [], problem: "unavailable" }) }), 0);
@@ -294,10 +427,10 @@ test("success: the done line, «Отменить всё» only when something wa
     }),
   });
   assert.deepEqual([s.phase, s.view], ["idle", "result"]);
-  assert.equal(doneText(s.batches), "Заведено 1 предмет · Добавлено названий: 1");
+  assert.equal(doneText(s.batches), "Создано предметов: 1 · Добавлено названий: 1");
   assert.deepEqual(s.notice.lines, [
-    "„Физика“ не заведён: такое название уже занято",
-    "У предмета уже много написаний — новые не добавлены",
+    "«Физика» не заведён: такое название уже занято",
+    "У предмета уже много других названий — новые не добавлены",
     "Предмет был удалён — строка пропущена",
   ]);
   assert.deepEqual(s.notice.steps, ["refresh"]);
@@ -310,24 +443,42 @@ test("a skipped row is named as the student renamed it", () => {
     reply: createReply({ created: [], skipped: [{ key: "matan", subjectId: "", reason: "name_taken" }] }),
   });
   assert.equal(s.notice.text, "Ничего не заведено");
-  assert.deepEqual(s.notice.lines, ["„Мой матан“ не заведён: такое название уже занято"]);
+  assert.deepEqual(s.notice.lines, ["«Мой матан» не заведён: такое название уже занято"]);
   assert.equal(doneText(s.batches), "");
   assert.equal(s.batches.length, 0);
 });
 
-test("a plain success with nothing skipped has no notice besides the done line", () => {
+test("a plain success with nothing skipped has no notice besides the done line; counters, not «Заведено 1 предмет»", () => {
   const s = reduce(reduce(initialState(reply()), { type: "saving" }), { type: "created", reply: createReply() });
   assert.equal(s.notice, null);
-  assert.equal(doneText(s.batches), "Заведено 1 предмет");
-  assert.equal(doneText([mergeBatch([], "t", { created: [created("a"), created("b")], aliased: [] })[0]]), "Заведено 2 предмета");
+  assert.equal(doneText(s.batches), "Создано предметов: 1");
+  assert.equal(doneText([mergeBatch([], "t", { created: [created("a"), created("b")], aliased: [] })[0]]), "Создано предметов: 2");
+  assert.equal(doneText([{ token: "t", created: [], aliased: [{ subjectId: "s9", aliases: ["a", "b"] }] }]), "Добавлено названий: 2");
+});
+
+test("a clean success with omitted names carries «Показать остальные» and the new note", () => {
+  const s = reduce(reduce(initialState(reply({ omitted: 3 })), { type: "saving" }), { type: "created", reply: createReply() });
+  assert.deepEqual(s.notice, { tone: "ok", text: "", lines: [omittedNote(3)], steps: ["rest"] });
+  const withSkip = reduce(reduce(initialState(reply({ omitted: 1 })), { type: "saving" }), {
+    type: "created",
+    reply: createReply({ skipped: [{ key: "", subjectId: "s1", reason: "subject_gone" }] }),
+  });
+  assert.deepEqual(withSkip.notice.steps, ["rest"]);
+  assert.equal(withSkip.notice.lines.length, 2);
+  // Nothing omitted: «Обновить список» as before, and nothing at all for a plain success.
+  const none = reduce(reduce(initialState(reply()), { type: "saving" }), {
+    type: "created",
+    reply: createReply({ skipped: [{ key: "", subjectId: "s1", reason: "subject_gone" }] }),
+  });
+  assert.deepEqual(none.notice.steps, ["refresh"]);
 });
 
 const problems = [
   ["stale", "result", "Расписание или предметы изменились", ["refresh"]],
   ["invalid", "result", "Список уже нельзя применить — он устарел", ["refresh"]],
-  ["name_taken", "list", "Такое название уже занято. Измените название в строке и повторите", []],
-  ["busy", "list", "Предыдущее действие ещё выполняется", ["retryCreate"]],
-  ["unavailable", "list", reviewTexts.unavailable, ["retryCreate"]],
+  ["name_taken", "list", "Такое название уже занято. Измените название в строке и повторите", ["retryCreate"]],
+  ["busy", "list", "Ещё выполняется предыдущее действие — повторите через пару секунд", ["retryCreate"]],
+  ["unavailable", "list", "Не удалось сохранить. Выбор сохранён — можно повторить", ["retryCreate"]],
 ];
 
 for (const [problem, view, text, steps] of problems) {
@@ -343,11 +494,20 @@ for (const [problem, view, text, steps] of problems) {
   });
 }
 
-test("create problems say nothing technical", () => {
+test("a name_taken that names no row has «Повторить» beside its text", () => {
+  const s = reduce(reduce(initialState(reply()), { type: "saving" }), { type: "created", reply: createReply({ created: [], problem: "name_taken" }) });
+  const out = html(h(ReviewView, { state: s, subjects, on }));
+  assert.match(out, /role="alert"[^]*Такое название уже занято[^]*Повторить/);
+});
+
+test("create problems say nothing technical and have one text each", () => {
   for (const [, , text] of problems) {
     assert.doesNotMatch(text, /stale|invalid|name_taken|busy|unavailable|token/i);
   }
-  assert.doesNotMatch(reviewTexts.thrown, /error|reject|parse/i);
+  assert.doesNotMatch(reviewTexts.unavailable, /error|reject|parse|хранилищ/i);
+  assert.doesNotMatch(reviewTexts.undoUnavailable, /error|reject|parse|хранилищ/i);
+  assert.equal(reviewTexts.undoUnavailable, "Не удалось отменить. Можно повторить");
+  assert.equal(reviewTexts.creating, "Создание…");
 });
 
 test("unavailable with a done part keeps «Отменить всё» (the done part comes with the problem)", () => {
@@ -357,7 +517,7 @@ test("unavailable with a done part keeps «Отменить всё» (the done p
   });
   assert.equal(s.view, "list");
   assert.deepEqual(s.notice.steps, ["retryCreate"]);
-  assert.equal(doneText(s.batches), "Заведено 1 предмет · Добавлено названий: 1");
+  assert.equal(doneText(s.batches), "Создано предметов: 1 · Добавлено названий: 1");
 });
 
 test("a retry merges into the batch of its token; a new token is a new batch", () => {
@@ -378,19 +538,51 @@ test("an unreadable reply of create is treated like unavailable and keeps the ea
   });
   const s = reduce(reduce(partial, { type: "saving" }), { type: "createThrown" });
   assert.equal(s.view, "list");
-  assert.equal(s.notice.text, reviewTexts.thrown);
+  assert.equal(s.notice.text, reviewTexts.unavailable);
   assert.deepEqual(s.notice.steps, ["retryCreate"]);
-  assert.equal(doneText(s.batches), "Заведено 1 предмет");
+  assert.equal(doneText(s.batches), "Создано предметов: 1");
 });
 
 test("stale after a done part: the list is rebuilt from scratch, the done part and its undo stay", () => {
   let s = reduce(reduce(initialState(reply()), { type: "saving" }), { type: "created", reply: createReply({ problem: "stale" }) });
   assert.equal(s.view, "result");
-  assert.equal(doneText(s.batches), "Заведено 1 предмет");
+  assert.equal(doneText(s.batches), "Создано предметов: 1");
   s = reduce(reduce(s, { type: "refreshing" }), { type: "refreshed", reply: reply({ token: "tok2", groups: [seti()] }) });
   assert.deepEqual([s.view, s.token, s.groups.length, s.notice], ["list", "tok2", 1, null]);
   assert.equal(s.selection.get("seti").checked, true);
-  assert.equal(doneText(s.batches), "Заведено 1 предмет");
+  assert.equal(doneText(s.batches), "Создано предметов: 1");
+});
+
+test("«Обновить список» keeps the student's edits for the groups that are still proposed", () => {
+  let s = initialState(reply());
+  s = reduce(s, { type: "rename", group: "matan", name: "Мой матан" });
+  s = reduce(s, { type: "check", group: "seti", checked: false });
+  s = reduce(s, { type: "member", group: "fizika", member: "fizka", mode: "separate" });
+  s = reduce(s, { type: "renameMember", group: "fizika", member: "fizka", name: "Физкультура" });
+  const him = matan({ key: "him", name: "Химия", members: [member({ key: "him", name: "Химия" })] });
+  const next = reduce(reduce(s, { type: "refreshing" }), { type: "refreshed", reply: reply({ token: "tok2", groups: [matan(), fizika(), seti(), him] }) });
+  assert.equal(next.token, "tok2");
+  assert.equal(next.selection.get("matan").name, "Мой матан");
+  assert.equal(next.selection.get("seti").checked, false);
+  assert.deepEqual(next.selection.get("fizika").members.get("fizka"), { mode: "separate", name: "Физкультура" });
+  // A new group gets the defaults.
+  assert.deepEqual([next.selection.get("him").checked, next.selection.get("him").name], [true, "Химия"]);
+  // A group that is gone is gone; the choices follow the rest.
+  const fewer = reduce(next, { type: "refreshed", reply: reply({ token: "tok3", groups: [matan()] }) });
+  assert.deepEqual([...fewer.selection.keys()], ["matan"]);
+  assert.equal(fewer.selection.get("matan").name, "Мой матан");
+});
+
+test("carrySelection: a name nobody edited follows the new proposal; an edited one stays", () => {
+  const old = [matan()];
+  const fresh = [matan({ name: "Математика" })];
+  assert.equal(carrySelection(old, initialSelection(old), fresh).get("matan").name, "Математика");
+  assert.equal(carrySelection(old, setName(initialSelection(old), "matan", "Мой"), fresh).get("matan").name, "Мой");
+  // The same for a separate member.
+  const f0 = [fizika()];
+  const sel = setMemberMode(initialSelection(f0), "fizika", "fizka", "separate");
+  const f1 = [fizika({ members: [f0[0].members[0], { ...f0[0].members[1], name: "Физ-ра" }] })];
+  assert.deepEqual(carrySelection(f0, sel, f1).get("fizika").members.get("fizka"), { mode: "separate", name: "Физ-ра" });
 });
 
 test("a refresh that cannot read the answer offers the refresh again", () => {
@@ -424,7 +616,14 @@ const withBatch = () =>
     reply: createReply({ aliased: [{ subjectId: "s9", aliases: ["Сети"] }] }),
   });
 
-test("undo success: what was removed and what was kept, one line each", async () => {
+const threeBatches = () => [
+  { token: "t1", created: [created("a")], aliased: [] },
+  { token: "t2", created: [created("b")], aliased: [] },
+  { token: "t3", created: [created("c")], aliased: [] },
+];
+const withBatches = (batches) => ({ ...initialState(reply()), batches });
+
+test("undo success: what was removed and what was kept, counters and one line each", async () => {
   const s0 = withBatch();
   const action = await undoFlow(
     {
@@ -448,12 +647,12 @@ test("undo success: what was removed and what was kept, one line each", async ()
   assert.equal(doneText(s.batches), ""); // no second «Отменить всё»
   assert.deepEqual(s.notice, {
     tone: "ok",
-    text: "Отменено: убрано 2 предмета · убрано названий: 1",
+    text: "Отменено: предметов 2 · названий 1",
     lines: [
-      "В „Матан“ уже есть файл — оставлен",
-      "В „Физика“ уже есть конспект — оставлен",
-      "Названия у „Компьютерные сети“ оставлены: расписание изменилось",
-      "Названия у предмета оставлены: расписание изменилось",
+      "В «Матан» уже есть файл — оставлен",
+      "В «Физика» уже есть конспект — оставлен",
+      "Другие названия у «Компьютерные сети» оставлены: расписание изменилось",
+      "Другие названия у предмета оставлены: расписание изменилось",
     ],
     steps: ["refresh"],
   });
@@ -465,19 +664,23 @@ test("undo with nothing removed says so", async () => {
   assert.equal(reduce(s0, action).notice.text, "Ничего не убрано");
 });
 
-test("undo invalid: «Отменить» is gone for good, the way out is the list of subjects", async () => {
+test("undo invalid for every batch: «Отменить» is gone for good, only «Закрыть» (no «К предметам»)", async () => {
   const s0 = withBatch();
   const s = reduce(reduce(s0, { type: "undoing" }), await undoFlow({ undo: async () => undoReply({ problem: "invalid" }) }, s0.batches, names));
   assert.deepEqual(s.notice, {
     tone: "fail",
-    text: "Отменить уже нельзя — приложение перезапускалось. Заведённые предметы остались в списке",
+    text: "Отменить уже нельзя: приложение перезапускалось. Заведённые предметы остались в списке",
     lines: [],
-    steps: ["toSubjects"],
+    steps: [],
   });
   assert.equal(s.batches.length, 0);
+  assert.equal(s.view, "result");
+  const out = html(h(ReviewView, { state: s, subjects, on }));
+  assert.doesNotMatch(out, /К предметам/);
+  assert.match(out, />Закрыть</);
 });
 
-for (const [problem, text] of [["busy", "Ещё идёт предыдущее действие"], ["unavailable", reviewTexts.unavailable]]) {
+for (const [problem, text] of [["busy", reviewTexts.busy], ["unavailable", reviewTexts.undoUnavailable]]) {
   test(`undo ${problem}: the text, «Повторить», and the token is kept`, async () => {
     const s0 = withBatch();
     const s = reduce(reduce(s0, { type: "undoing" }), await undoFlow({ undo: async () => undoReply({ problem }) }, s0.batches, names));
@@ -490,26 +693,82 @@ for (const [problem, text] of [["busy", "Ещё идёт предыдущее д
 test("an unreadable reply of undo keeps the token and «Отменить всё»", async () => {
   const s0 = withBatch();
   const s = reduce(reduce(s0, { type: "undoing" }), await undoFlow({ undo: async () => { throw new Error("x"); } }, s0.batches, names));
-  assert.equal(s.notice.text, reviewTexts.thrown);
+  assert.equal(s.notice.text, reviewTexts.undoUnavailable);
   assert.deepEqual(s.notice.steps, ["retryUndo"]);
   assert.deepEqual(s.batches, s0.batches);
 });
 
-test("undo of several batches goes in order and stops at the first problem, keeping the rest", async () => {
-  const batches = [
-    { token: "t1", created: [created("a")], aliased: [] },
-    { token: "t2", created: [created("b")], aliased: [] },
-    { token: "t3", created: [created("c")], aliased: [] },
-  ];
+test("undo of several batches goes newest first and stops at the first problem, keeping that batch and the older ones", async () => {
   const calls = [];
   const action = await undoFlow(
     { undo: async (t) => (calls.push(t), t === "t2" ? undoReply({ problem: "busy" }) : undoReply({ removed: [t] })) },
-    batches,
+    threeBatches(),
     names,
   );
-  assert.deepEqual(calls, ["t1", "t2"]);
-  assert.deepEqual(action.result.remaining.map((b) => b.token), ["t2", "t3"]);
+  assert.deepEqual(calls, ["t3", "t2"]);
+  assert.deepEqual(action.result.remaining.map((b) => b.token), ["t1", "t2"]);
   assert.equal(action.result.reply.problem, "busy");
+  // All the way: newest first, then nothing is left.
+  const all = [];
+  const done = await undoFlow({ undo: async (t) => (all.push(t), undoReply({ removed: [t] })) }, threeBatches(), names);
+  assert.deepEqual(all, ["t3", "t2", "t1"]);
+  assert.deepEqual(done.result.remaining, []);
+  assert.deepEqual(done.result.reply.removed, ["t3", "t2", "t1"]);
+});
+
+test("a problem in a later batch keeps and shows what was undone before it, and what its own reply reports", async () => {
+  const s0 = withBatches(threeBatches());
+  const action = await undoFlow(
+    {
+      undo: async (t) =>
+        t === "t3"
+          ? undoReply({ removed: ["c"], kept: [{ id: "k", name: "Матан", reason: "has_files" }] })
+          : undoReply({ removed: ["b"], unaliased: [{ subjectId: "s9", aliases: ["Сети"] }], problem: "busy" }),
+    },
+    s0.batches,
+    names,
+  );
+  const s = reduce(reduce(s0, { type: "undoing" }), action);
+  assert.deepEqual(s.batches.map((b) => b.token), ["t1", "t2"]);
+  assert.deepEqual(s.notice, {
+    tone: "fail",
+    text: reviewTexts.busy,
+    lines: ["Отменено: предметов 2 · названий 1", "В «Матан» уже есть файл — оставлен"],
+    steps: ["retryUndo"],
+  });
+  assert.equal(doneText(s.batches), "Создано предметов: 2");
+  // The same through an unreadable reply of the second call.
+  const thrown = await undoFlow({ undo: async (t) => { if (t === "t2") { throw new Error("x"); } return undoReply({ removed: [t] }); } }, s0.batches, names);
+  const s2 = reduce(s0, thrown);
+  assert.equal(s2.notice.text, reviewTexts.undoUnavailable);
+  assert.deepEqual(s2.notice.lines, ["Отменено: предметов 1"]);
+  assert.deepEqual(s2.batches.map((b) => b.token), ["t1", "t2"]);
+});
+
+test("an invalid batch is dropped alone: the rest is undone and the notice says what could not be", async () => {
+  const calls = [];
+  const s0 = withBatches(threeBatches());
+  const action = await undoFlow(
+    { undo: async (t) => (calls.push(t), t === "t2" ? undoReply({ problem: "invalid" }) : undoReply({ removed: [t] })) },
+    s0.batches,
+    names,
+  );
+  assert.deepEqual(calls, ["t3", "t2", "t1"]);
+  const s = reduce(reduce(s0, { type: "undoing" }), action);
+  assert.deepEqual(s.batches, []);
+  assert.equal(s.view, "result");
+  assert.deepEqual(s.notice, {
+    tone: "ok",
+    text: "Отменено: предметов 2",
+    lines: [reviewTexts.undoPartInvalid],
+    steps: ["refresh"],
+  });
+  // Invalid first, then a real problem: the invalid one is gone, the failing one stays with the older ones.
+  const mixed = await undoFlow({ undo: async (t) => (t === "t3" ? undoReply({ problem: "invalid" }) : undoReply({ problem: "unavailable" })) }, s0.batches, names);
+  const m = reduce(s0, mixed);
+  assert.deepEqual(m.batches.map((b) => b.token), ["t1", "t2"]);
+  assert.equal(m.notice.text, reviewTexts.undoUnavailable);
+  assert.ok(m.notice.lines.includes(reviewTexts.undoPartInvalid));
 });
 
 test("undo without anything done is not started", () => {
@@ -518,10 +777,88 @@ test("undo without anything done is not started", () => {
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
+// «Отменить всё» after the panel closed
+
+const keptBatch = { token: "t1", created: [created("a"), created("b", "fizika", "Физика")], aliased: [{ subjectId: "s9", aliases: ["Сети"] }] };
+
+test("the closed state: the batches come back from the panel and go back to it", () => {
+  const s = closedState([keptBatch]);
+  assert.equal(doneText(s.batches), "Создано предметов: 2 · Добавлено названий: 1");
+  assert.equal(reduce(s, { type: "adopt", batches: [] }).batches.length, 0);
+  assert.deepEqual(reduce(s, { type: "adopt", batches: [keptBatch, { ...keptBatch, token: "t2" }] }).batches.map((b) => b.token), ["t1", "t2"]);
+  // A panel opened with batches shows their line and keeps the order: the older come first.
+  const opened = initialState(reply(), [keptBatch]);
+  assert.equal(doneText(opened.batches), "Создано предметов: 2 · Добавлено названий: 1");
+  const more = reduce(reduce(opened, { type: "saving" }), { type: "created", reply: createReply({ created: [created("z")] }) });
+  assert.deepEqual(more.batches.map((b) => b.token), ["t1", "tok1"]);
+});
+
+test("the line on the page: «Создано предметов: N · Отменить всё», nothing when there is nothing", () => {
+  const out = html(h(KeptUndoLine, { state: closedState([keptBatch]), onUndo: noop, onDismiss: noop }));
+  assert.match(out, /Создано предметов: 2 · Добавлено названий: 1/);
+  assert.match(out, />Отменить всё</);
+  assert.match(out, /role="status"/);
+  assert.equal(html(h(KeptUndoLine, { state: closedState([]), onUndo: noop, onDismiss: noop })), "");
+  const undoing = html(h(KeptUndoLine, { state: reduce(closedState([keptBatch]), { type: "undoing" }), onUndo: noop, onDismiss: noop }));
+  assert.match(undoing, /Отменяется…/);
+  assert.match(undoing, /<button[^>]*disabled=""/);
+});
+
+test("the line on the page: the outcome of the undo with kept lines and a way out", async () => {
+  const s0 = closedState([keptBatch]);
+  const ok = reduce(
+    reduce(s0, { type: "undoing" }),
+    await undoFlow({ undo: async () => undoReply({ removed: ["a"], kept: [{ id: "b", name: "Физика", reason: "has_files" }] }) }, s0.batches, names),
+  );
+  const out = html(h(KeptUndoLine, { state: ok, onUndo: noop, onDismiss: noop }));
+  assert.doesNotMatch(out, />Отменить всё</);
+  assert.match(out, /Отменено: предметов 1/);
+  assert.match(out, /В «Физика» уже есть файл — оставлен/);
+  assert.match(out, />Закрыть</); // there is no proposal here to refresh
+  assert.doesNotMatch(out, /Обновить список|Показать остальные/);
+  // A problem keeps «Отменить всё» and offers «Повторить».
+  const busy = reduce(
+    reduce(s0, { type: "undoing" }),
+    await undoFlow({ undo: async () => undoReply({ problem: "busy" }) }, s0.batches, names),
+  );
+  const bo = html(h(KeptUndoLine, { state: busy, onUndo: noop, onDismiss: noop }));
+  assert.match(bo, /role="alert"[^]*Ещё выполняется предыдущее действие[^]*Повторить/);
+  assert.match(bo, />Отменить всё</);
+  // The app was restarted: only «Закрыть».
+  const gone = reduce(reduce(s0, { type: "undoing" }), await undoFlow({ undo: async () => undoReply({ problem: "invalid" }) }, s0.batches, names));
+  const go = html(h(KeptUndoLine, { state: gone, onUndo: noop, onDismiss: noop }));
+  assert.match(go, /Отменить уже нельзя: приложение перезапускалось/);
+  assert.match(go, />Закрыть</);
+  assert.doesNotMatch(go, /Повторить|К предметам/);
+  // «Закрыть» drops the notice.
+  assert.equal(reduce(ok, { type: "dismiss" }).notice, null);
+  assert.equal(html(h(KeptUndoLine, { state: reduce(ok, { type: "dismiss" }), onUndo: noop, onDismiss: noop })), "");
+});
+
+test("lineSteps: the page's line never offers a refresh of a proposal it does not hold", () => {
+  assert.deepEqual(lineSteps({ tone: "ok", text: "", lines: [], steps: ["refresh"] }), ["close"]);
+  assert.deepEqual(lineSteps({ tone: "ok", text: "", lines: [], steps: ["rest"] }), ["close"]);
+  assert.deepEqual(lineSteps({ tone: "fail", text: "", lines: [], steps: [] }), ["close"]);
+  assert.deepEqual(lineSteps({ tone: "fail", text: "", lines: [], steps: ["retryUndo"] }), ["retryUndo"]);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Esc
+
+test("Esc closes the panel except inside a text field or while a call runs", () => {
+  assert.equal(escCloses({ tagName: "SECTION" }, false), true);
+  assert.equal(escCloses({ tagName: "BUTTON" }, false), true);
+  assert.equal(escCloses({ tagName: "INPUT", type: "checkbox" }, false), true);
+  assert.equal(escCloses({ tagName: "INPUT", type: "text" }, false), false);
+  assert.equal(escCloses({ tagName: "INPUT" }, false), false);
+  assert.equal(escCloses({ tagName: "SECTION" }, true), false);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
 // SSR of the panel
 
 const on = new Proxy({}, { get: () => noop });
-const view = (state, extra = {}) => html(h(ReviewView, { state, names, on, ...extra }));
+const view = (state, extra = {}) => html(h(ReviewView, { state, subjects, on, ...extra }));
 const count = (s, re) => (s.match(re) ?? []).length;
 
 test("the panel: a row per group, all checked, names editable, facts and spellings small, one primary button", () => {
@@ -531,7 +868,8 @@ test("the panel: a row per group, all checked, names editable, facts and spellin
   assert.match(out, /value="Матан"/);
   assert.match(out, /value="Физика"/);
   assert.match(out, /14 пар · лекции 12 · семинары 2/);
-  assert.match(out, /Написания: Матанализ \(лек\.\)/);
+  assert.match(out, /Другие названия: Матанализ \(лек\.\)/);
+  assert.doesNotMatch(out, /Написания/);
   assert.match(out, /Создать 2 предмета/);
   assert.equal(count(out, /class="btn primary/g), 1);
   assert.match(out, /Закрыть/);
@@ -539,28 +877,50 @@ test("the panel: a row per group, all checked, names editable, facts and spellin
   assert.match(out, /aria-label="Предметы из расписания"/);
 });
 
-test("the panel: the doubtful group is marked and its member has two toggles", () => {
+test("the panel: no length cap in the name field (the plan counts characters)", () => {
+  assert.doesNotMatch(view(initialState(reply())), /maxlength/i);
+});
+
+test("the panel: the checkbox and the name field are named, and the checkbox sits in a label with the facts", () => {
   const out = view(initialState(reply()));
-  assert.match(out, /похоже на один предмет/);
+  assert.match(out, /aria-label="Завести предмет «Матан»"/);
+  assert.match(out, /aria-label="Название предмета «Матан»"/);
+  assert.match(out, /aria-label="Добавить названия к «Компьютерные сети»"/);
+  assert.equal(count(out, /<label class="sched-chk-hit"><input[^>]*type="checkbox"/g), 3);
+  // The facts are labels of the checkbox: a click on them toggles it.
+  assert.match(out, /<label for="[^"]+" id="[^"]+" class="small muted">14 пар/);
+});
+
+test("the panel: the doubtful group is marked and its member has one three-way choice", () => {
+  const out = view(initialState(reply()));
+  assert.match(out, /Похоже, это один предмет\. Если нет — выберите «Отдельно»/);
   assert.match(out, /Физ-ка/);
-  assert.equal(count(out, /aria-pressed="false"/g), 2);
-  assert.match(out, />Отдельно</);
-  assert.match(out, />Не заводить</);
-  // A pressed «Отдельно» turns the member's name into a field.
-  const sel = toggleMember(initialSelection(reply().groups), "fizika", "fizka", "separate");
+  assert.equal(count(out, /role="radiogroup"/g), 1);
+  assert.equal(count(out, /role="radio"/g), 3);
+  assert.match(out, /aria-checked="true"[^>]*>Вместе</);
+  assert.match(out, /aria-checked="false"[^>]*>Отдельно</);
+  assert.match(out, /aria-checked="false"[^>]*>Не заводить</);
+  assert.equal(count(out, /aria-checked="true"/g), 1);
+  assert.doesNotMatch(out, /aria-pressed/);
+  // «Отдельно» turns the member's name into a field.
+  const sel = setMemberMode(initialSelection(reply().groups), "fizika", "fizka", "separate");
   const out2 = view({ ...initialState(reply()), selection: sel });
-  assert.match(out2, /aria-pressed="true"/);
-  assert.match(out2, /aria-label="Название отдельного предмета"/);
+  assert.match(out2, /aria-checked="true"[^>]*>Отдельно</);
+  assert.match(out2, /aria-label="Название отдельного предмета «Физ-ка»"/);
   assert.match(out2, /Создать 3 предмета/);
+  // «Не заводить» strikes the name and says so.
+  const out3 = view({ ...initialState(reply()), selection: setMemberMode(initialSelection(reply().groups), "fizika", "fizka", "skip") });
+  assert.match(out3, /aria-checked="true"[^>]*>Не заводить</);
+  assert.match(out3, /Не будет заведено/);
 });
 
 test("the panel: a group of an existing subject says where it goes and has no name field", () => {
   const out = view(initialState(reply({ groups: [seti()] })));
-  assert.match(out, /Добавить к „Компьютерные сети“/);
-  assert.doesNotMatch(out, /aria-label="Название предмета"/);
-  assert.match(out, /Сети \(лек\.\) · Сети/);
-  assert.match(out, /Добавить названия: 2/);
-  assert.match(out, /aria-label="Добавить названия к предмету"/);
+  assert.match(out, /Добавить к «Компьютерные сети»/);
+  assert.doesNotMatch(out, /aria-label="Название предмета/);
+  assert.match(out, /Другие названия: Сети \(лек\.\) · Сети/);
+  assert.match(out, /Добавить другие названия: 2/);
+  assert.match(out, /aria-label="Добавить названия к «Компьютерные сети»"/);
 });
 
 test("the panel: nothing selected disables the button and says why in the text beside it", () => {
@@ -581,36 +941,48 @@ test("the panel: a name error stands beside the field with aria-invalid and aria
   assert.match(out, /Исправьте названия в отмеченных строках/);
 });
 
-test("the panel: saving shows «Создаётся…», disables the controls and sets aria-busy", () => {
+test("the panel: an other name of an existing subject is an error beside the field", () => {
+  const s = initialState(reply());
+  const out = view({ ...s, selection: setName(s.selection, "matan", "Алг.") });
+  assert.match(out, /Предмет с таким названием уже есть/);
+});
+
+test("the panel: saving shows «Создание…», disables the controls and sets aria-busy", () => {
   const out = view(reduce(initialState(reply()), { type: "saving" }));
   assert.match(out, /aria-busy="true"/);
-  assert.match(out, /Создаётся…/);
+  assert.match(out, /Создание…/);
   assert.equal(count(out, /<input[^>]*disabled=""/g), 5); // 3 checkboxes and the 2 name fields
-  assert.equal(count(out, /<button[^>]*disabled=""/g), 4); // the main button, «Закрыть» and the 2 member toggles
+  assert.equal(count(out, /<button[^>]*disabled=""/g), 5); // the main button, «Закрыть» and the 3 choices of the member
 });
 
 test("the panel: the outcome is announced in a polite status, failures in an alert, each with its button", () => {
   const ok = view(withBatch());
   assert.match(ok, /role="status" aria-live="polite"/);
-  assert.match(ok, /Заведено 1 предмет · Добавлено названий: 1/);
+  assert.match(ok, /Создано предметов: 1 · Добавлено названий: 1/);
   assert.match(ok, />Отменить всё</);
   assert.doesNotMatch(ok, /Создать \d/); // the list is gone, only «Закрыть» remains
   const stale = view(reduce(reduce(initialState(reply()), { type: "saving" }), { type: "created", reply: createReply({ created: [], problem: "stale" }) }));
   assert.match(stale, /role="alert"[^]*Расписание или предметы изменились[^]*Обновить список/);
   assert.doesNotMatch(stale, />Отменить всё</);
   const busy = view(reduce(reduce(initialState(reply()), { type: "saving" }), { type: "created", reply: createReply({ created: [], problem: "busy" }) }));
-  assert.match(busy, /Предыдущее действие ещё выполняется[^]*Повторить/);
+  assert.match(busy, /Ещё выполняется предыдущее действие — повторите через пару секунд[^]*Повторить/);
   assert.match(busy, /Создать 2 предмета/); // the choices stay
 });
 
-test("the panel: empty proposal and omitted rows", () => {
+test("the panel: empty proposal and omitted names", () => {
   const out = view(initialState(reply({ groups: [], omitted: 2 })));
   assert.match(out, /Все предметы из расписания уже заведены/);
-  assert.match(out, /Ещё 2 редкие строки расписания не показаны/);
-  assert.match(out, />Обновить список</);
+  assert.match(out, /Ещё 2 названия из расписания не показаны/);
+  assert.match(out, />Показать остальные</);
   assert.doesNotMatch(out, /class="btn primary/);
   const withRows = view(initialState(reply({ omitted: 3 })));
-  assert.match(withRows, /Ещё 3 редкие строки расписания не показаны — после создания нажмите „Обновить список“/);
+  assert.match(withRows, /Ещё 3 названия из расписания появятся в списке после создания этих предметов/);
+  assert.doesNotMatch(withRows, /„|“/);
+  // After a clean create the button to show the rest is there as well.
+  const after = view(reduce(reduce(initialState(reply({ omitted: 3 })), { type: "saving" }), { type: "created", reply: createReply() }));
+  assert.match(after, /Создано предметов: 1/);
+  assert.match(after, /Ещё 3 названия из расписания появятся в списке/);
+  assert.match(after, />Показать остальные</);
 });
 
 test("the panel: untrusted schedule strings are text, never markup", () => {
@@ -630,23 +1002,26 @@ test("the panel: untrusted schedule strings are text, never markup", () => {
   // Kept subjects and skipped rows of the outcome are text too.
   const result = reduce(withBatch(), {
     type: "undone",
-    result: { reply: undoReply({ removed: ["a"], kept: [{ id: "c", name: evil, reason: "has_files" }] }), remaining: [], thrown: false, names },
+    result: { reply: undoReply({ removed: ["a"], kept: [{ id: "c", name: evil, reason: "has_files" }] }), remaining: [], thrown: false, names, invalid: 0, tried: 1 },
   });
   const out2 = view(result);
   assert.doesNotMatch(out2, /<img/);
-  assert.match(out2, /В „&lt;img/);
+  assert.match(out2, /В «&lt;img/);
 });
 
 test("the controller renders its first state without a DOM", () => {
-  const out = html(h(ScheduleSubjectsReview, { reply: reply(), subjectNames: names, api: {}, onChanged: noop, onClose: noop }));
+  const out = html(h(ScheduleSubjectsReview, { reply: reply(), subjects, api: {}, onChanged: noop, onClose: noop }));
   assert.match(out, /Создать 2 предмета/);
+  const again = html(h(ScheduleSubjectsReview, { reply: reply(), subjects, initialBatches: [keptBatch], api: {}, onChanged: noop, onClose: noop }));
+  assert.match(again, /Создано предметов: 2 · Добавлено названий: 1/);
+  assert.match(again, />Отменить всё</);
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
-// the empty list and the page's offer
+// the empty list, the line above the list and the page hints
 
-const offer = (state) => ({ state, onReview: noop, onImport: noop });
-const actions = (state) => html(h(EmptySubjectsActions, { offer: offer(state), addLabel: "Предмет", onAdd: noop }));
+const offer = (state) => ({ state, onReview: noop, onImport: noop, onRetry: noop });
+const actions = (state) => html(h(EmptySubjectsActions, { offer: offer(state), addLabel: "Добавить предмет", onAdd: noop }));
 const primaries = (s) => count(s, /class="btn primary/g);
 
 test("empty list with groups: the schedule button with the count is the only primary", () => {
@@ -654,39 +1029,72 @@ test("empty list with groups: the schedule button with the count is the only pri
   assert.match(out, /Завести предметы из расписания/);
   assert.match(out, /<span class="sched-cnt num">2<\/span>/);
   assert.equal(primaries(out), 1);
-  assert.ok(out.indexOf("Завести предметы") < out.indexOf("Предмет<")); // the primary first
-  assert.match(out, /class="btn"[^>]*>[^]*Предмет/); // «Предмет» is secondary
+  assert.ok(out.indexOf("Завести предметы") < out.indexOf("Добавить предмет<")); // the primary first
+  assert.match(out, /class="btn"[^>]*>[^]*Добавить предмет/); // «Добавить предмет» is secondary
 });
 
-test("empty list without a schedule: «Импортировать расписание» is the primary", () => {
-  for (const o of [{ loaded: true, reply: reply({ groups: [] }) }, { loaded: true, reply: null }, { loaded: true, reply: reply({ groups: [], problem: "unavailable" }) }]) {
+test("empty list when the call succeeded with no groups: «Импортировать расписание» is the primary", () => {
+  const out = actions({ loaded: true, reply: reply({ groups: [] }) });
+  assert.match(out, /Импортировать расписание/);
+  assert.doesNotMatch(out, /Завести предметы|Не удалось проверить/);
+  assert.equal(primaries(out), 1);
+  assert.match(out, /class="btn primary"[^>]*>[^]*?Импортировать расписание/);
+});
+
+test("empty list when the check failed: «Не удалось проверить расписание», «Повторить», «Добавить предмет» is the only primary", () => {
+  for (const o of [{ loaded: true, reply: null }, { loaded: true, reply: reply({ groups: [], problem: "unavailable" }) }]) {
     const out = actions(o);
-    assert.match(out, /Импортировать расписание/);
-    assert.doesNotMatch(out, /Завести предметы/);
+    assert.match(out, /Не удалось проверить расписание/);
+    assert.match(out, />Повторить</);
+    assert.doesNotMatch(out, /Импортировать расписание|Завести предметы/);
     assert.equal(primaries(out), 1);
+    assert.match(out, /class="btn primary"[^>]*>[^]*?Добавить предмет</);
   }
 });
 
-test("empty list while checking: a small indicator, no second primary", () => {
+test("empty list while checking: a small indicator, no schedule button, no second primary", () => {
   const out = actions(offerChecking);
   assert.match(out, /Проверяется расписание…/);
+  assert.doesNotMatch(out, /Импортировать расписание|Завести предметы/);
   assert.equal(primaries(out), 0);
 });
 
 test("the empty state of «Предметы» through SubjectList: why it is empty and one primary", () => {
   const out = html(h(SubjectList, { subjects: [], onOpen: noop, onAdd: noop, offer: offer({ loaded: true, reply: reply() }) }));
   assert.match(out, /Предметов пока нет/);
-  assert.match(out, /Предметы заводятся из расписания и записей, либо вручную/);
+  assert.match(out, /В расписании есть предметы без карточки: 3\. Их можно создать за один шаг/);
   assert.equal(primaries(out), 1);
   assert.match(out, /Завести предметы из расписания/);
+  assert.match(out, />Добавить предмет</);
+  for (const o of [offerChecking, { loaded: true, reply: reply({ groups: [] }) }, { loaded: true, reply: null }]) {
+    const plainText = html(h(SubjectList, { subjects: [], onOpen: noop, onAdd: noop, offer: offer(o) }));
+    assert.match(plainText, /Предметы создаются из расписания или вручную/);
+  }
   // Without an offer the list is as before.
   const plain = html(h(SubjectList, { subjects: [], onOpen: noop, onAdd: noop }));
   assert.equal(primaries(plain), 1);
   assert.doesNotMatch(plain, /Завести предметы/);
 });
 
-test("a list with subjects shows no schedule button of its own (the header has it)", () => {
+test("a list with subjects has no schedule button in SubjectList itself (the page shows one quiet line)", () => {
   const s = { id: "s1", name: "Алгебра", semester: "2026-autumn", semesterLabel: "Осень 2026", aliases: [], folders: [], teachers: [], schedule: [], version: 1 };
   const out = html(h(SubjectList, { subjects: [s], onOpen: noop, onAdd: noop, offer: offer({ loaded: true, reply: reply() }) }));
   assert.doesNotMatch(out, /Завести предметы/);
+});
+
+test("the quiet line above the list: the count and a secondary button", () => {
+  const out = html(h(ScheduleOfferLine, { groups: 4, onClick: noop }));
+  assert.match(out, /Из расписания можно создать предметы: 4/);
+  assert.match(out, /Завести предметы из расписания/);
+  assert.equal(primaries(out), 0);
+  assert.match(out, /id="subjects-schedule-offer"/);
+  assert.doesNotMatch(out, /sched-cnt/);
+});
+
+test("the hint after an import: the count of subjects without a card and a secondary button", () => {
+  const out = html(h(ScheduleNextHint, { groups: 5, onClick: noop }));
+  assert.match(out, /В расписании предметов без карточки: 5/);
+  assert.match(out, />Завести предметы из расписания</);
+  assert.equal(primaries(out), 0);
+  assert.doesNotMatch(out, /Следующий шаг/);
 });

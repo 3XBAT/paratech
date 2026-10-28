@@ -19,7 +19,7 @@ import {
   typeLabel,
   weekdayOf,
 } from "../libraryView.js";
-import { reviewTexts } from "../scheduleSubjectsView.js";
+import { offerGroups, reviewTexts } from "../scheduleSubjectsView.js";
 import { Button } from "../ui/Button.js";
 import { Card, EmptyState, Field, Input, ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
@@ -69,13 +69,14 @@ export function SubjectList(props: {
   offer?: ScheduleOffer;
 }) {
   if (props.subjects.length === 0) {
+    const groups = props.offer === undefined ? 0 : (offerGroups(props.offer.state) ?? 0);
     return (
       <EmptyState
         label="Библиотека"
         title={texts.emptyTitle}
-        actions={<EmptySubjectsActions offer={props.offer} addLabel={texts.addSubject} onAdd={props.onAdd} />}
+        actions={<EmptySubjectsActions offer={props.offer} addLabel={props.offer ? reviewTexts.addSubject : texts.addSubject} onAdd={props.onAdd} />}
       >
-        {props.offer ? reviewTexts.emptyText : texts.emptyText}
+        {props.offer === undefined ? texts.emptyText : groups > 0 ? reviewTexts.emptyWithGroups(groups) : reviewTexts.emptyPlain}
       </EmptyState>
     );
   }

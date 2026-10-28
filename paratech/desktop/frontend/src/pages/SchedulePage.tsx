@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 // The .js extensions let the Node test runner load the compiled page (test/list.test.mjs renders PreviewView).
 import { callByName } from "../bindings/runtime.js";
+import { scheduleSubjects } from "../bindings/library.js";
 import { scheduleApi, type ImportPreview, type LessonText } from "../bindings/schedule.js";
 import { CollapsibleList } from "../CollapsibleList.js";
 import { allCollapsed, type ListStates, listTexts, setCollapsed, stateOf, withState } from "../listView.js";
@@ -32,13 +33,21 @@ import {
   windowText,
 } from "../scheduleView.js";
 import { Button } from "../ui/Button.js";
+import { offerGroups, reviewTexts } from "../scheduleSubjectsView.js";
 import { Banner, Card, CountTiles, EmptyState } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
 
 // Schedule import (PRD section 11.2): choose a file, see its errors or the preview, then apply it. Every text from the
 // file is rendered as plain text, each piece in its own <bdi>.
-export function SchedulePage(props: { onOpen?: (id: PageId) => void }) {
+export function SchedulePage(props: {
+  onOpen?: (id: PageId) => void;
+  /** «Завести предметы из расписания» of the hint: opens «Предметы» with the review already open. */
+  onReview?: () => void;
+}) {
   const api = useMemo(() => scheduleApi(callByName), []);
+  // The subjects the schedule can still make, asked for after an import (a failure shows no hint).
+  const [hint, setHint] = useState(0);
+  const hintSeq = useRef(0);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   // Kept here, by group, so choosing the file again keeps what the user folded.
   const [lists, setLists] = useState<ListStates>({});
@@ -80,6 +89,8 @@ export function SchedulePage(props: { onOpen?: (id: PageId) => void }) {
     setBusy(true);
     setError("");
     setDone("");
+    setHint(0);
+    hintSeq.current++;
     try {
       await action();
     } finally {
@@ -88,6 +99,14 @@ export function SchedulePage(props: { onOpen?: (id: PageId) => void }) {
         setBusy(false);
       }
     }
+  }
+
+  function loadHint() {
+    const seq = hintSeq.current;
+    scheduleSubjects(callByName).then(
+      (reply) => mounted.current && seq === hintSeq.current && setHint(offerGroups({ loaded: true, reply }) ?? 0),
+      () => undefined,
+    );
   }
 
   const choose = () =>
@@ -124,6 +143,7 @@ export function SchedulePage(props: { onOpen?: (id: PageId) => void }) {
         const r = await api.commit(p.selectionId);
         if (mounted.current) {
           setDone(resultText(r));
+          loadHint();
         }
       } catch (err) {
         if (mounted.current) {
@@ -172,14 +192,9 @@ export function SchedulePage(props: { onOpen?: (id: PageId) => void }) {
           {done}
         </p>
       )}
-      {done && props.onOpen && (
-        // TASK-312: the next step after an import, a hint and not a popup.
-        <p className="small muted sched-next">
-          Следующий шаг:
-          <Button size="sm" variant="ghost" onClick={() => props.onOpen?.("subjects")}>
-            Завести предметы из расписания
-          </Button>
-        </p>
+      {done && hint > 0 && (props.onReview || props.onOpen) && (
+        // TASK-312: the next step after an import, a hint and not a popup; only when there is something to create.
+        <ScheduleNextHint groups={hint} onClick={() => (props.onReview ? props.onReview() : props.onOpen?.("subjects"))} />
       )}
       {empty ? (
         <EmptyState label="Файл ICS, CSV или XLSX" title="Загрузите расписание из файла">
@@ -210,6 +225,18 @@ export function SchedulePage(props: { onOpen?: (id: PageId) => void }) {
         <p className="small muted">{notes.noNotifications}</p>
       </Card>
     </section>
+  );
+}
+
+/** «В расписании предметов без карточки: N» and the button that opens the review on «Предметы». */
+export function ScheduleNextHint(props: { groups: number; onClick(): void }) {
+  return (
+    <p className="small muted sched-next">
+      <span>{reviewTexts.nextHint(props.groups)}</span>
+      <Button size="sm" onClick={props.onClick}>
+        {reviewTexts.open}
+      </Button>
+    </p>
   );
 }
 

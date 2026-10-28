@@ -3,36 +3,45 @@ import {
   createFromSchedule,
   type ScheduleGroup,
   type ScheduleMember,
-  type ScheduleSubjectsReply,
   scheduleSubjects,
+  type ScheduleSubjectsReply,
   undoFromSchedule,
 } from "../bindings/library.js";
 import type { CallByName } from "../bindings/settings.js";
 import {
   type Action,
+  type Batch,
+  closedState,
   createFlow,
+  createGate,
   doneText,
+  escCloses,
   groupItem,
   initialState,
+  lineSteps,
   mainButton,
+  type MemberMode,
   memberItem,
   metaText,
   type NameProblem,
   nameProblemTexts,
   type Notice,
-  omittedNote,
-  type OfferState,
   offerGroups,
+  type OfferState,
+  offerStatus,
+  omittedNote,
   planOf,
   reduce,
   refreshFlow,
   type ReviewApi,
   type ReviewState,
-  type RowSel,
   reviewTexts,
+  type RowSel,
   spellingsText,
   type Step,
-  subjectNameKeys,
+  type SubjectRef,
+  subjectNamesOf,
+  takenOf,
   undoFlow,
 } from "../scheduleSubjectsView.js";
 import { Button } from "../ui/Button.js";
@@ -40,7 +49,8 @@ import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
 
 // The review of subjects proposed from the schedule (TASK-312; the agent card of TASK-324 reuses it). The names,
-// spellings and subject names are schedule text: text nodes and input values only, never markup, never logged.
+// spellings and subject names are schedule text: text nodes and input values only, never markup, never logged. Fixed
+// aria-label templates may hold a name as plain string interpolation.
 
 /** The calls of the review over the Wails bindings; the strict parsers reject an unreadable reply. */
 export function scheduleReviewApi(call: CallByName): ReviewApi {
@@ -54,7 +64,7 @@ export function scheduleReviewApi(call: CallByName): ReviewApi {
 export interface ReviewHandlers {
   check(group: string, checked: boolean): void;
   rename(group: string, name: string): void;
-  member(group: string, member: string, mode: "separate" | "skip"): void;
+  member(group: string, member: string, mode: MemberMode): void;
   renameMember(group: string, member: string, name: string): void;
   create(): void;
   undo(): void;
@@ -66,25 +76,27 @@ export interface ReviewHandlers {
  * The controller: the state machine of scheduleSubjectsView in a reducer, the calls, and a guard against a second call
  * before the re-render that disables the buttons. `reply` is the proposal the review starts from; after that the
  * review holds its own (its «Обновить список» asks again), so a reload of the page does not drop an outcome on screen.
- * `onChanged` tells the page that subjects were created or removed.
+ * `onChanged` tells the page that subjects were created or removed; `onClose` hands back what is left to undo, so the
+ * page can keep «Отменить всё» after the panel is gone and give it back when the panel opens again.
  */
 export function ScheduleSubjectsReview(props: {
   reply: ScheduleSubjectsReply;
-  /** Names of the existing subjects by id. */
-  subjectNames: ReadonlyMap<string, string>;
+  /** The existing subjects: their names and other names are taken, and the outcomes call them by name. */
+  subjects: readonly SubjectRef[];
+  /** What earlier panels created and did not undo (the undo goes newest first, so they come first). */
+  initialBatches?: readonly Batch[];
   api: ReviewApi;
   onChanged(): void;
-  onClose(): void;
+  onClose(batches: readonly Batch[]): void;
   /** Moves the focus into the panel on arrival (the page does; a card in the chat must not). */
   autoFocus?: boolean;
 }) {
-  const [state, dispatch] = useReducer(reduce, props.reply, initialState);
+  const [state, dispatch] = useReducer(reduce, props, (p) => initialState(p.reply, p.initialBatches));
   const current = useRef(state);
   current.current = state;
   const running = useRef(false);
   const latest = useRef(props);
   latest.current = props;
-  const taken = useMemo(() => subjectNameKeys(props.subjectNames), [props.subjectNames]);
 
   async function run(start: Action, flow: () => Promise<Action>) {
     if (running.current) {
@@ -109,20 +121,15 @@ export function ScheduleSubjectsReview(props: {
 
   const create = () => {
     const s = current.current;
-    if (s.phase !== "idle" || s.view !== "list") {
-      return;
+    if (createGate(s, latest.current.subjects).ok) {
+      void run({ type: "saving" }, () => createFlow(latest.current.api, s));
     }
-    const plan = planOf(s.groups, s.selection, taken);
-    if (plan.problems.size > 0 || plan.creates + plan.additions === 0) {
-      return;
-    }
-    void run({ type: "saving" }, () => createFlow(latest.current.api, s));
   };
 
   const undo = () => {
     const s = current.current;
     if (s.phase === "idle" && s.batches.length > 0) {
-      void run({ type: "undoing" }, () => undoFlow(latest.current.api, s.batches, latest.current.subjectNames));
+      void run({ type: "undoing" }, () => undoFlow(latest.current.api, s.batches, subjectNamesOf(latest.current.subjects)));
     }
   };
 
@@ -142,42 +149,81 @@ export function ScheduleSubjectsReview(props: {
           undo();
           return;
         case "refresh":
+        case "rest":
           if (current.current.phase === "idle") {
             void run({ type: "refreshing" }, () => refreshFlow(latest.current.api));
           }
           return;
-        case "toSubjects":
-          latest.current.onClose();
+        case "close":
+          on.close();
           return;
       }
     },
     close: () => {
       if (current.current.phase === "idle") {
-        latest.current.onClose();
+        latest.current.onClose(current.current.batches);
       }
     },
   };
 
-  return <ReviewView state={state} names={props.subjectNames} on={on} autoFocus={props.autoFocus} />;
+  return <ReviewView state={state} subjects={props.subjects} on={on} autoFocus={props.autoFocus} />;
 }
 
 const stepLabels: Readonly<Record<Step, string>> = {
   retryCreate: reviewTexts.retry,
   retryUndo: reviewTexts.retry,
   refresh: reviewTexts.refresh,
-  toSubjects: reviewTexts.toSubjects,
+  rest: reviewTexts.showRest,
+  close: reviewTexts.close,
 };
+
+/** The buttons of an outcome; they are off while a call runs. */
+function StepButtons(props: { steps: readonly Step[]; phase: ReviewState["phase"]; onStep(step: Step): void }) {
+  const busy = props.phase !== "idle";
+  return (
+    <>
+      {props.steps.map((s) => (
+        <Button
+          key={s}
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          busy={(s === "refresh" || s === "rest") && props.phase === "refreshing"}
+          busyLabel={s === "refresh" || s === "rest" ? reviewTexts.refreshing : undefined}
+          onClick={() => props.onStep(s)}
+        >
+          {stepLabels[s]}
+        </Button>
+      ))}
+    </>
+  );
+}
+
+/** «Создано предметов: 3 · [Отменить всё]»; the same line in the panel and on the page after the panel is closed. */
+function DoneRow(props: { text: string; phase: ReviewState["phase"]; onUndo(): void }) {
+  return (
+    <div className="sched-done">
+      <ResultLine kind="ok">{props.text}</ResultLine>
+      <Button size="sm" variant="ghost" disabled={props.phase !== "idle"} busy={props.phase === "undoing"} busyLabel={reviewTexts.undoing} onClick={props.onUndo}>
+        {reviewTexts.undoAll}
+      </Button>
+    </div>
+  );
+}
 
 /** The panel for any state: the controller above and the tests render it. */
 export function ReviewView(props: {
   state: ReviewState;
-  names: ReadonlyMap<string, string>;
+  subjects: readonly SubjectRef[];
   on: ReviewHandlers;
   autoFocus?: boolean;
 }) {
   const { state, on } = props;
   const panel = useRef<HTMLElement>(null);
-  const taken = useMemo(() => subjectNameKeys(props.names), [props.names]);
+  const taken = useMemo(
+    () => takenOf(props.subjects, { token: state.token, batches: state.batches, attempt: state.attempt }),
+    [props.subjects, state.token, state.batches, state.attempt],
+  );
   const plan = useMemo(() => planOf(state.groups, state.selection, taken), [state.groups, state.selection, taken]);
   const main = mainButton(plan);
   const saving = state.phase === "saving";
@@ -191,28 +237,16 @@ export function ReviewView(props: {
     }
   }, [props.autoFocus]);
 
-  // Esc closes the panel when nothing is being saved; the choices are cheap to redo, so there is no confirmation.
+  // Esc closes the panel when nothing is being saved; the choices are cheap to redo, so there is no confirmation. Inside
+  // a text field it does nothing, so a stray Esc cannot throw the edits away.
   const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
-    if (e.key === "Escape" && !busy) {
+    if (e.key === "Escape" && escCloses(e.target as HTMLInputElement, busy)) {
       e.stopPropagation();
       on.close();
     }
   };
 
-  const stepButtons = (steps: readonly Step[]): ReactNode =>
-    steps.map((s) => (
-      <Button
-        key={s}
-        size="sm"
-        variant="ghost"
-        disabled={busy}
-        busy={s === "refresh" && state.phase === "refreshing"}
-        busyLabel={s === "refresh" ? reviewTexts.refreshing : undefined}
-        onClick={() => on.step(s)}
-      >
-        {stepLabels[s]}
-      </Button>
-    ));
+  const steps = (n: Notice) => <StepButtons steps={n.steps} phase={state.phase} onStep={on.step} />;
 
   return (
     <section
@@ -224,15 +258,8 @@ export function ReviewView(props: {
       onKeyDown={onKeyDown}
     >
       <div className="sched-status" role="status" aria-live="polite">
-        {done !== "" && (
-          <div className="sched-done">
-            <ResultLine kind="ok">{done}</ResultLine>
-            <Button size="sm" variant="ghost" disabled={busy} busy={state.phase === "undoing"} busyLabel={reviewTexts.undoing} onClick={on.undo}>
-              {reviewTexts.undoAll}
-            </Button>
-          </div>
-        )}
-        {notice !== null && notice.tone === "ok" && <NoticeBody notice={notice} steps={stepButtons(notice.steps)} />}
+        {done !== "" && <DoneRow text={done} phase={state.phase} onUndo={on.undo} />}
+        {notice !== null && notice.tone === "ok" && <NoticeBody notice={notice} steps={steps(notice)} />}
       </div>
 
       {state.view === "list" && (
@@ -253,16 +280,12 @@ export function ReviewView(props: {
               );
             })}
           </ul>
-          {state.omitted > 0 && (
-            <p className="small muted">
-              {omittedNote(state.omitted)} — после создания нажмите „{reviewTexts.refresh}“
-            </p>
-          )}
+          {state.omitted > 0 && <p className="small muted">{omittedNote(state.omitted)}</p>}
         </>
       )}
 
       <div className="sched-alert" role="alert">
-        {notice !== null && notice.tone === "fail" && <NoticeBody notice={notice} steps={stepButtons(notice.steps)} />}
+        {notice !== null && notice.tone === "fail" && <NoticeBody notice={notice} steps={steps(notice)} />}
       </div>
 
       <div className="sched-foot acts start">
@@ -319,7 +342,7 @@ function FieldError(props: { id: string; problem: NameProblem | undefined }) {
   );
 }
 
-/** An editable name in a row, with its error beside it. */
+/** An editable name in a row, with its error beside it. No length cap in the field: the plan counts the characters. */
 function NameInput(props: {
   value: string;
   label: string;
@@ -333,7 +356,6 @@ function NameInput(props: {
       <input
         className="input"
         value={props.value}
-        maxLength={200}
         disabled={props.disabled}
         aria-label={props.label}
         aria-invalid={props.problem !== undefined || undefined}
@@ -353,37 +375,45 @@ function GroupRow(props: {
   on: ReviewHandlers;
 }) {
   const { group: g, row, on } = props;
+  const chkId = useId();
   const metaId = useId();
   const aliasOf = g.action === "alias_of";
   const spellings = spellingsText(g.aliases);
   const doubtful = g.members.filter((m) => m.doubtful);
   return (
     <li className={row.checked ? "sched-row" : "sched-row off"}>
-      <input
-        type="checkbox"
-        className="sched-chk"
-        checked={row.checked}
-        disabled={props.disabled}
-        aria-label={aliasOf ? reviewTexts.checkboxAdd : reviewTexts.checkbox}
-        aria-describedby={metaId}
-        onChange={(e) => on.check(g.key, e.target.checked)}
-      />
+      <label className="sched-chk-hit">
+        <input
+          id={chkId}
+          type="checkbox"
+          className="sched-chk"
+          checked={row.checked}
+          disabled={props.disabled}
+          aria-label={aliasOf ? reviewTexts.checkboxAddAria(g.subjectName) : reviewTexts.checkboxAria(g.name)}
+          aria-describedby={metaId}
+          onChange={(e) => on.check(g.key, e.target.checked)}
+        />
+      </label>
       <div className="sched-body">
         {aliasOf ? (
-          <p className="sched-to">Добавить к „{g.subjectName}“</p>
+          <label htmlFor={chkId} className="sched-to">{`${reviewTexts.addTo} «${g.subjectName}»`}</label>
         ) : (
           <NameInput
             value={row.name}
-            label={reviewTexts.nameLabel}
+            label={`${reviewTexts.nameLabel} «${g.name}»`}
             problem={row.checked ? props.problems.get(groupItem(g.key)) : undefined}
             disabled={props.disabled || !row.checked}
             onChange={(name) => on.rename(g.key, name)}
           />
         )}
-        <p id={metaId} className="small muted">
+        <label htmlFor={chkId} id={metaId} className="small muted">
           {metaText(g)}
-        </p>
-        {spellings !== "" && <p className="small muted sched-spell">{spellings}</p>}
+        </label>
+        {spellings !== "" && (
+          <label htmlFor={chkId} className="small muted sched-spell">
+            {spellings}
+          </label>
+        )}
         {g.doubtful && (
           <p className="small sched-mark">
             <Icon name="info" />
@@ -402,6 +432,12 @@ function GroupRow(props: {
   );
 }
 
+const memberModes: readonly (readonly [MemberMode, string])[] = [
+  ["keep", reviewTexts.together],
+  ["separate", reviewTexts.separate],
+  ["skip", reviewTexts.skip],
+];
+
 function MemberRow(props: {
   group: ScheduleGroup;
   member: ScheduleMember;
@@ -419,7 +455,7 @@ function MemberRow(props: {
         {separate ? (
           <NameInput
             value={sel.name}
-            label={reviewTexts.separateLabel}
+            label={`${reviewTexts.separateLabel} «${m.name}»`}
             problem={row.checked ? props.problems.get(memberItem(g.key, m.key)) : undefined}
             disabled={props.disabled}
             onChange={(name) => on.renameMember(g.key, m.key, name)}
@@ -432,20 +468,96 @@ function MemberRow(props: {
           {sel.mode === "skip" ? `${metaText(m) === "" ? "" : " · "}${reviewTexts.skipped}` : ""}
         </span>
       </div>
-      <div className="sched-m-acts">
-        <Button size="sm" disabled={props.disabled} aria-pressed={separate} onClick={() => on.member(g.key, m.key, "separate")}>
-          {reviewTexts.separate}
-        </Button>
-        <Button size="sm" disabled={props.disabled} aria-pressed={sel.mode === "skip"} onClick={() => on.member(g.key, m.key, "skip")}>
-          {reviewTexts.skip}
-        </Button>
+      <div className="sched-seg" role="radiogroup" aria-label={`${reviewTexts.memberChoice} «${m.name}»`}>
+        {memberModes.map(([mode, label]) => (
+          <Button
+            key={mode}
+            size="sm"
+            role="radio"
+            aria-checked={sel.mode === mode}
+            disabled={props.disabled}
+            onClick={() => on.member(g.key, m.key, mode)}
+          >
+            {label}
+          </Button>
+        ))}
       </div>
     </li>
   );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// The page's entry points: the button, and the actions of the empty list.
+// After the panel closed: «Отменить всё» stays on the page until the student leaves or undoes.
+
+/**
+ * The batches of the closed panel and the undo flow over them, for the page. The same reducer and flow as the panel's, so
+ * the outcomes (kept lines, problems with their buttons) read the same. `adopt` hands the batches over when the panel
+ * closes, and takes them back (with `[]`) when it opens again.
+ */
+export function useKeptUndo(subjects: readonly SubjectRef[], api: ReviewApi, onChanged: () => void) {
+  const [state, dispatch] = useReducer(reduce, [] as readonly Batch[], closedState);
+  const current = useRef(state);
+  current.current = state;
+  const running = useRef(false);
+  const latest = useRef({ subjects, api, onChanged });
+  latest.current = { subjects, api, onChanged };
+
+  const undo = () => {
+    const s = current.current;
+    if (running.current || s.phase !== "idle" || s.batches.length === 0) {
+      return;
+    }
+    running.current = true;
+    dispatch({ type: "undoing" });
+    void undoFlow(latest.current.api, s.batches, subjectNamesOf(latest.current.subjects))
+      .then((done) => {
+        dispatch(done);
+        latest.current.onChanged();
+      })
+      .finally(() => {
+        running.current = false;
+      });
+  };
+
+  return {
+    state,
+    undo,
+    adopt: (batches: readonly Batch[]) => dispatch({ type: "adopt", batches }),
+    dismiss: () => dispatch({ type: "dismiss" }),
+  };
+}
+
+/** «Создано предметов: N · [Отменить всё]» and the outcome of the undo; nothing when there is nothing to show. */
+export function KeptUndoLine(props: { state: ReviewState; onUndo(): void; onDismiss(): void }) {
+  const { state } = props;
+  const done = doneText(state.batches);
+  const notice = state.notice;
+  if (done === "" && notice === null) {
+    return null;
+  }
+  const onStep = (s: Step) => {
+    if (s === "retryUndo") {
+      props.onUndo();
+    } else {
+      props.onDismiss();
+    }
+  };
+  const shown = notice === null ? null : { ...notice, steps: lineSteps(notice) };
+  return (
+    <div className="sched-kept">
+      <div role="status" aria-live="polite">
+        {done !== "" && <DoneRow text={done} phase={state.phase} onUndo={props.onUndo} />}
+        {shown !== null && shown.tone === "ok" && <NoticeBody notice={shown} steps={<StepButtons steps={shown.steps} phase={state.phase} onStep={onStep} />} />}
+      </div>
+      <div role="alert">
+        {shown !== null && shown.tone === "fail" && <NoticeBody notice={shown} steps={<StepButtons steps={shown.steps} phase={state.phase} onStep={onStep} />} />}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The page's entry points: the button, the line above the list, and the actions of the empty list.
 
 /** What the list of subjects needs to offer the review; undefined: no offer (the list as before). */
 export interface ScheduleOffer {
@@ -453,28 +565,40 @@ export interface ScheduleOffer {
   onReview(): void;
   /** «Импортировать расписание»: opens the page of the schedule. */
   onImport(): void;
+  /** «Повторить» after a check that failed. */
+  onRetry(): void;
 }
 
 /** The id the focus returns to when the panel closes. */
 export const offerButtonId = "subjects-schedule-offer";
 
-/** «Завести предметы из расписания» with the number of groups; nothing when the schedule has none. */
-export function ScheduleOfferButton(props: { groups: number; variant: "primary" | "secondary"; disabled?: boolean; onClick(): void }) {
+/** «Завести предметы из расписания», with the number of groups when `groups` is given. */
+export function ScheduleOfferButton(props: { groups?: number; variant: "primary" | "secondary"; onClick(): void }) {
   return (
-    <Button id={offerButtonId} variant={props.variant} icon="cal" disabled={props.disabled} onClick={props.onClick}>
+    <Button id={offerButtonId} variant={props.variant} icon="cal" onClick={props.onClick}>
       {reviewTexts.open}
-      <span className="sched-cnt num">{props.groups}</span>
+      {props.groups !== undefined && <span className="sched-cnt num">{props.groups}</span>}
     </Button>
   );
 }
 
+/** One quiet line above the list of subjects: what the schedule can still make, and the button. */
+export function ScheduleOfferLine(props: { groups: number; onClick(): void }) {
+  return (
+    <p className="sched-offer small muted">
+      <span>{reviewTexts.offerLine(props.groups)}</span>
+      <ScheduleOfferButton variant="secondary" onClick={props.onClick} />
+    </p>
+  );
+}
+
 /**
- * The actions of the empty «Предметов пока нет»: with groups the schedule button is the primary one, without a schedule
- * «Импортировать расписание» is; «Добавить предмет» is always the secondary one. Never two primaries.
+ * The actions of the empty «Предметов пока нет»: with groups the schedule button is the primary one; with a schedule that
+ * has nothing to create, or none, «Импортировать расписание» is; when the check failed «Добавить предмет» is the only
+ * primary and «Повторить» asks again. Never two primaries.
  */
 export function EmptySubjectsActions(props: { offer?: ScheduleOffer; addLabel: string; onAdd(): void }) {
   const offer = props.offer;
-  const groups = offer === undefined ? 0 : offerGroups(offer.state);
   const add = (primary: boolean) => (
     <Button variant={primary ? "primary" : "secondary"} icon="plus" onClick={props.onAdd}>
       {props.addLabel}
@@ -483,30 +607,43 @@ export function EmptySubjectsActions(props: { offer?: ScheduleOffer; addLabel: s
   if (offer === undefined) {
     return add(true);
   }
-  if (groups === null) {
-    return (
-      <>
-        {add(false)}
-        <span className="small muted" role="status">
-          {reviewTexts.checking}
-        </span>
-      </>
-    );
+  switch (offerStatus(offer.state)) {
+    case "checking":
+      return (
+        <>
+          {add(false)}
+          <span className="small muted" role="status">
+            {reviewTexts.checking}
+          </span>
+        </>
+      );
+    case "failed":
+      return (
+        <>
+          {add(true)}
+          <span className="small muted" role="status">
+            {reviewTexts.checkFailed}
+          </span>
+          <Button size="sm" variant="ghost" onClick={offer.onRetry}>
+            {reviewTexts.retry}
+          </Button>
+        </>
+      );
+    case "groups":
+      return (
+        <>
+          <ScheduleOfferButton groups={offerGroups(offer.state) ?? 0} variant="primary" onClick={offer.onReview} />
+          {add(false)}
+        </>
+      );
+    case "none":
+      return (
+        <>
+          <Button variant="primary" icon="up" onClick={offer.onImport}>
+            {reviewTexts.importSchedule}
+          </Button>
+          {add(false)}
+        </>
+      );
   }
-  if (groups > 0) {
-    return (
-      <>
-        <ScheduleOfferButton groups={groups} variant="primary" onClick={offer.onReview} />
-        {add(false)}
-      </>
-    );
-  }
-  return (
-    <>
-      <Button variant="primary" icon="up" onClick={offer.onImport}>
-        {reviewTexts.importSchedule}
-      </Button>
-      {add(false)}
-    </>
-  );
 }

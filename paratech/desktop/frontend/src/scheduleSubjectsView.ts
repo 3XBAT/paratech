@@ -14,6 +14,7 @@ import {
   type ScheduleMemberChoice,
   type ScheduleSkipped,
   type ScheduleSubjectsReply,
+  type ScheduleKind,
   scheduleKindWords,
   type UndoFromScheduleReply,
 } from "./bindings/library.js";
@@ -25,25 +26,33 @@ export const reviewTexts = {
   intro: "Отмеченные предметы будут созданы. Название можно поправить прямо в строке.",
   open: "Завести предметы из расписания",
   importSchedule: "Импортировать расписание",
+  addSubject: "Добавить предмет",
   checking: "Проверяется расписание…",
-  emptyText: "Предметы заводятся из расписания и записей, либо вручную. В каждом предмете появятся папки для лекций, семинаров, материалов и заданий.",
-  doubtful: "похоже на один предмет",
+  checkFailed: "Не удалось проверить расписание",
+  emptyWithGroups: (n: number) => `В расписании есть предметы без карточки: ${n}. Их можно создать за один шаг`,
+  emptyPlain: "Предметы создаются из расписания или вручную",
+  offerLine: (n: number) => `Из расписания можно создать предметы: ${n}`,
+  nextHint: (n: number) => `В расписании предметов без карточки: ${n}`,
+  doubtful: "Похоже, это один предмет. Если нет — выберите «Отдельно»",
+  together: "Вместе",
   separate: "Отдельно",
   skip: "Не заводить",
+  memberChoice: "Что сделать с названием",
   skipped: "Не будет заведено",
-  checkbox: "Завести предмет",
-  checkboxAdd: "Добавить названия к предмету",
+  checkboxAria: (name: string) => `Завести предмет «${name}»`,
+  checkboxAddAria: (subject: string) => `Добавить названия к «${subject}»`,
+  addTo: "Добавить к",
   nameLabel: "Название предмета",
   separateLabel: "Название отдельного предмета",
-  spellings: "Написания",
+  spellings: "Другие названия",
   close: "Закрыть",
-  creating: "Создаётся…",
+  creating: "Создание…",
   undoAll: "Отменить всё",
   undoing: "Отменяется…",
   retry: "Повторить",
   refresh: "Обновить список",
+  showRest: "Показать остальные",
   refreshing: "Обновляется…",
-  toSubjects: "К предметам",
   nothingSelected: "Отметьте хотя бы один предмет",
   fixNames: "Исправьте названия в отмеченных строках",
   createPlain: "Создать предметы",
@@ -56,16 +65,20 @@ export const reviewTexts = {
   nameTaken: "Такое название уже занято. Измените название в строке и повторите",
   stale: "Расписание или предметы изменились",
   createInvalid: "Список уже нельзя применить — он устарел",
-  busy: "Предыдущее действие ещё выполняется",
-  unavailable: "Не удалось связаться с локальным хранилищем. Выбор сохранён, действие можно повторить",
-  thrown: "Не удалось получить ответ от локального хранилища. Выбор сохранён, действие можно повторить",
-  undoBusy: "Ещё идёт предыдущее действие",
-  undoInvalid: "Отменить уже нельзя — приложение перезапускалось. Заведённые предметы остались в списке",
+  busy: "Ещё выполняется предыдущее действие — повторите через пару секунд",
+  unavailable: "Не удалось сохранить. Выбор сохранён — можно повторить",
+  undoUnavailable: "Не удалось отменить. Можно повторить",
+  undoInvalid: "Отменить уже нельзя: приложение перезапускалось. Заведённые предметы остались в списке",
+  undoPartInvalid: "Часть изменений отменить уже нельзя: приложение перезапускалось",
   nothingRemoved: "Ничего не убрано",
-  tooManyAliases: "У предмета уже много написаний — новые не добавлены",
+  tooManyAliases: "У предмета уже много других названий — новые не добавлены",
   subjectGone: "Предмет был удалён — строка пропущена",
   fallbackKeptAliasesSubject: "предмета",
+  kindUnknown: "без типа",
 } as const;
+
+/** The core's prefix of the ids it derives for subjects created from the schedule (DeriveSubjectID). */
+const derivedIdPrefix = "sched-";
 
 /** The most spellings shown under a row. */
 const maxSpellingsShown = 5;
@@ -88,13 +101,19 @@ function recordingsWord(n: number): string {
   return `${n} ${plural(n, "запись", "записи", "записей")}`;
 }
 
-/** «лекции 12 · семинары 6»; one kind of unknown lessons says nothing the count of lessons does not. */
+const kindOrder: Readonly<Record<ScheduleKind, number>> = { lecture: 0, seminar: 1, lab: 2, unknown: 3 };
+
+function kindWord(k: ScheduleKind): string {
+  return k === "unknown" ? reviewTexts.kindUnknown : scheduleKindWords[k];
+}
+
+/** «лекции 12 · семинары 6 · без типа 2»; one kind of unknown lessons says nothing the count of lessons does not. */
 export function kindsText(kinds: readonly ScheduleKindCount[]): string {
-  const shown = kinds.filter((k) => k.lessons > 0);
+  const shown = kinds.filter((k) => k.lessons > 0).sort((a, b) => kindOrder[a.kind] - kindOrder[b.kind]);
   if (shown.length === 0 || (shown.length === 1 && shown[0]?.kind === "unknown")) {
     return "";
   }
-  return shown.map((k) => `${scheduleKindWords[k.kind]} ${k.lessons}`).join(" · ");
+  return shown.map((k) => `${kindWord(k.kind)} ${k.lessons}`).join(" · ");
 }
 
 /** «14 пар · лекции 12 · семинары 6 · 2 записи» for a group or a member. */
@@ -114,10 +133,18 @@ export function spellingsText(spellings: readonly string[]): string {
   return `${reviewTexts.spellings}: ${shown}${more > 0 ? ` и ещё ${more}` : ""}`;
 }
 
+/** Under the rows: what the omitted names of the schedule wait for. */
 export function omittedNote(n: number): string {
-  const rows = plural(n, "редкая строка", "редкие строки", "редких строк");
-  const verb = plural(n, "не показана", "не показаны", "не показаны");
-  return `Ещё ${n} ${rows} расписания ${verb}`;
+  const names = plural(n, "название", "названия", "названий");
+  const verb = plural(n, "появится", "появятся", "появятся");
+  return `Ещё ${n} ${names} из расписания ${verb} в списке после создания этих предметов`;
+}
+
+/** When there is no list to create from: the omitted names are only counted. */
+export function omittedLeft(n: number): string {
+  const names = plural(n, "название", "названия", "названий");
+  const verb = plural(n, "не показано", "не показаны", "не показаны");
+  return `Ещё ${n} ${names} из расписания ${verb}`;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -177,9 +204,43 @@ export function setName(sel: Selection, group: string, name: string): Selection 
   return withRow(sel, group, (r) => ({ ...r, name }));
 }
 
-/** A second click on the pressed button returns the member to «вместе». */
-export function toggleMember(sel: Selection, group: string, member: string, mode: "separate" | "skip"): Selection {
-  return withMember(sel, group, member, (m) => ({ ...m, mode: m.mode === mode ? "keep" : mode }));
+/** The choice of a doubtful member: together with its group, apart as its own subject, or not created. */
+export function setMemberMode(sel: Selection, group: string, member: string, mode: MemberMode): Selection {
+  return withMember(sel, group, member, (m) => ({ ...m, mode }));
+}
+
+/**
+ * The selection of a rebuilt proposal: what the student edited stays for the groups and members that still exist (a
+ * name nobody edited follows the new proposal); new groups get the defaults.
+ */
+export function carrySelection(oldGroups: readonly ScheduleGroup[], old: Selection, groups: readonly ScheduleGroup[]): Selection {
+  const fresh = initialSelection(groups);
+  const out = new Map<string, RowSel>();
+  for (const g of groups) {
+    const base = fresh.get(g.key);
+    const prev = old.get(g.key);
+    const prevGroup = oldGroups.find((x) => x.key === g.key);
+    if (base === undefined || prev === undefined) {
+      if (base !== undefined) {
+        out.set(g.key, base);
+      }
+      continue;
+    }
+    const members = new Map(base.members);
+    for (const m of g.members) {
+      const pm = prev.members.get(m.key);
+      const pmGroup = prevGroup?.members.find((x) => x.key === m.key);
+      if (pm !== undefined) {
+        members.set(m.key, { mode: pm.mode, name: pmGroup !== undefined && pm.name === pmGroup.name ? m.name : pm.name });
+      }
+    }
+    out.set(g.key, {
+      checked: prev.checked,
+      name: prevGroup !== undefined && prev.name === prevGroup.name ? g.name : prev.name,
+      members,
+    });
+  }
+  return out;
 }
 
 export function setMemberName(sel: Selection, group: string, member: string, name: string): Selection {
@@ -224,10 +285,21 @@ export interface Plan {
   problems: ReadonlyMap<string, NameProblem>;
 }
 
-/** What the selection makes of the proposal. `taken` holds the nameKey of the names of existing subjects. */
-export function planOf(groups: readonly ScheduleGroup[], sel: Selection, taken: ReadonlySet<string>): Plan {
-  const items: { id: string; name: string }[] = [];
-  const spellings = new Set<string>();
+interface PlanItem {
+  id: string;
+  name: string;
+}
+
+/** A spelling that goes along with an item (as its alias) or to an existing subject; `owner` is the item's id. */
+interface Carried {
+  owner: string;
+  key: string;
+}
+
+function planItems(groups: readonly ScheduleGroup[], sel: Selection): { items: PlanItem[]; additions: Set<string>; carried: Carried[] } {
+  const items: PlanItem[] = [];
+  const additions = new Set<string>();
+  const carried: Carried[] = [];
   for (const g of groups) {
     const row = sel.get(g.key);
     if (row === undefined || !row.checked) {
@@ -238,22 +310,38 @@ export function planOf(groups: readonly ScheduleGroup[], sel: Selection, taken: 
     for (const m of g.members) {
       const ms = modeOf(row, m);
       if (ms.mode === "separate") {
-        items.push({ id: memberItem(g.key, m.key), name: ms.name });
+        const id = memberItem(g.key, m.key);
+        items.push({ id, name: ms.name });
+        m.spellings.forEach((s) => carried.push({ owner: id, key: nameKey(s) }));
       } else if (ms.mode === "keep") {
         merged++;
-        m.spellings.forEach((s) => own.add(`${g.key}\u0000${nameKey(s)}`));
+        m.spellings.forEach((s) => own.add(nameKey(s)));
       }
     }
     if (merged === 0) {
       continue;
     }
+    own.forEach((s) => carried.push({ owner: groupItem(g.key), key: s }));
     if (g.action === "create") {
       items.push({ id: groupItem(g.key), name: row.name });
     } else {
-      own.forEach((s) => spellings.add(s));
+      own.forEach((s) => additions.add(`${g.key}\u0000${s}`));
     }
   }
+  return { items, additions, carried };
+}
 
+/** The names the selection would create, as nameKeys. */
+export function plannedKeys(groups: readonly ScheduleGroup[], sel: Selection): string[] {
+  return planItems(groups, sel).items.map((it) => nameKey(it.name));
+}
+
+/**
+ * What the selection makes of the proposal. `taken` holds the nameKey of the names and the other names of existing
+ * subjects (see takenOf); a new name may not equal one, nor another new name, nor a spelling that goes to another row.
+ */
+export function planOf(groups: readonly ScheduleGroup[], sel: Selection, taken: ReadonlySet<string>): Plan {
+  const { items, additions, carried } = planItems(groups, sel);
   const counts = new Map<string, number>();
   for (const it of items) {
     counts.set(nameKey(it.name), (counts.get(nameKey(it.name)) ?? 0) + 1);
@@ -267,11 +355,11 @@ export function planOf(groups: readonly ScheduleGroup[], sel: Selection, taken: 
       problems.set(it.id, "tooLong");
     } else if (taken.has(key)) {
       problems.set(it.id, "exists");
-    } else if ((counts.get(key) ?? 0) > 1) {
+    } else if ((counts.get(key) ?? 0) > 1 || carried.some((c) => c.key === key && c.owner !== it.id)) {
       problems.set(it.id, "duplicate");
     }
   }
-  return { creates: items.length, additions: spellings.size, problems };
+  return { creates: items.length, additions: additions.size, problems };
 }
 
 export interface MainButton {
@@ -279,7 +367,7 @@ export interface MainButton {
   disabled: boolean;
   /** Shown next to a disabled button. */
   reason: string;
-  /** A second small fact next to an enabled button («и добавить названия: 3»). */
+  /** A second small fact next to an enabled button («и добавить другие названия: 3»). */
   extra: string;
 }
 
@@ -291,11 +379,11 @@ export function mainButton(plan: Plan): MainButton {
       label: `Создать ${subjectsWord(plan.creates)}`,
       disabled: blocked !== "",
       reason: blocked,
-      extra: plan.additions > 0 ? `и добавить названия: ${plan.additions}` : "",
+      extra: plan.additions > 0 ? `и добавить другие названия: ${plan.additions}` : "",
     };
   }
   if (plan.additions > 0) {
-    return { label: `Добавить названия: ${plan.additions}`, disabled: false, reason: "", extra: "" };
+    return { label: `Добавить другие названия: ${plan.additions}`, disabled: false, reason: "", extra: "" };
   }
   return { label: reviewTexts.createPlain, disabled: true, reason: reviewTexts.nothingSelected, extra: "" };
 }
@@ -364,13 +452,57 @@ export function mergeBatch(batches: readonly Batch[], token: string, reply: Pick
   return old === undefined ? [...batches, merged] : batches.map((b) => (b.token === token ? merged : b));
 }
 
-/** «Заведено 3 предмета · Добавлено названий: 2»; "" when nothing was done. «Отменить всё» is offered exactly then. */
+/** The part of a subject the review needs: its id, its name and its other names (the core refuses a new name equal to any). */
+export interface SubjectRef {
+  id: string;
+  name: string;
+  aliases: readonly string[];
+}
+
+/** The names of subjects by id, for the texts of the outcomes. */
+export function subjectNamesOf(subjects: readonly SubjectRef[]): Map<string, string> {
+  return new Map(subjects.map((s) => [s.id, s.name]));
+}
+
+/**
+ * The nameKeys a new subject may not take: the names and the other names of the existing subjects. The subjects this very
+ * token made are left out, or a retry after a partial create would find its own work «already existing» (the ones the
+ * reply listed by id; after an unreadable reply the core's derived ids, which start with a fixed prefix, whose name is
+ * among the ones just sent). The core stays the judge: a real clash comes back as `name_taken`.
+ */
+export function takenOf(subjects: readonly SubjectRef[], state: Pick<ReviewState, "token" | "batches" | "attempt">): Set<string> {
+  const own = new Set((state.batches.find((b) => b.token === state.token)?.created ?? []).map((c) => c.id));
+  const sent = new Set(state.attempt);
+  const out = new Set<string>();
+  for (const s of subjects) {
+    if (own.has(s.id) || (s.id.startsWith(derivedIdPrefix) && sent.has(nameKey(s.name)))) {
+      continue;
+    }
+    out.add(nameKey(s.name));
+    s.aliases.forEach((a) => out.add(nameKey(a)));
+  }
+  return out;
+}
+
+/** What a press on the main button does now: the plan, and whether the call may start (idle, in the list, no name problem). */
+export function createGate(state: ReviewState, subjects: readonly SubjectRef[]): { plan: Plan; ok: boolean } {
+  const plan = planOf(state.groups, state.selection, takenOf(subjects, state));
+  return { plan, ok: state.phase === "idle" && state.view === "list" && plan.problems.size === 0 && plan.creates + plan.additions > 0 };
+}
+
+/** Esc closes the panel unless a call runs or the focus is in a text field (a stray Esc must not discard the edits). */
+export function escCloses(target: { tagName: string; type?: string }, busy: boolean): boolean {
+  const typing = target.tagName === "INPUT" && target.type !== "checkbox";
+  return !busy && !typing;
+}
+
+/** «Создано предметов: 3 · Добавлено названий: 2»; "" when nothing was done. «Отменить всё» is offered exactly then. */
 export function doneText(batches: readonly Batch[]): string {
   const created = batches.reduce((n, b) => n + b.created.length, 0);
   const aliases = batches.reduce((n, b) => n + aliasCount(b.aliased), 0);
   const parts: string[] = [];
   if (created > 0) {
-    parts.push(`Заведено ${subjectsWord(created)}`);
+    parts.push(`Создано предметов: ${created}`);
   }
   if (aliases > 0) {
     parts.push(`Добавлено названий: ${aliases}`);
@@ -378,8 +510,9 @@ export function doneText(batches: readonly Batch[]): string {
   return parts.join(" · ");
 }
 
-/** A button of an outcome; the controller maps it to a call. */
-export type Step = "retryCreate" | "retryUndo" | "refresh" | "toSubjects";
+/** A button of an outcome; the controller maps it to a call. `rest` asks the proposal again for the omitted names;
+ * `close` only closes the page's outcome line (the panel has its own «Закрыть»). */
+export type Step = "retryCreate" | "retryUndo" | "refresh" | "rest" | "close";
 
 export interface Notice {
   tone: "ok" | "fail";
@@ -404,6 +537,8 @@ export interface ReviewState {
   selection: Selection;
   batches: readonly Batch[];
   notice: Notice | null;
+  /** The nameKeys of the names sent by the last create that did not finish cleanly (see takenOf). */
+  attempt: readonly string[];
 }
 
 function listNotice(reply: ScheduleSubjectsReply): Notice | null {
@@ -414,14 +549,14 @@ function listNotice(reply: ScheduleSubjectsReply): Notice | null {
     return {
       tone: "ok",
       text: reviewTexts.allDone,
-      lines: reply.omitted > 0 ? [omittedNote(reply.omitted)] : [],
-      steps: reply.omitted > 0 ? ["refresh"] : [],
+      lines: reply.omitted > 0 ? [omittedLeft(reply.omitted)] : [],
+      steps: reply.omitted > 0 ? ["rest"] : [],
     };
   }
   return null;
 }
 
-function listed(reply: ScheduleSubjectsReply): Pick<ReviewState, "view" | "token" | "groups" | "omitted" | "selection" | "notice"> {
+function listed(reply: ScheduleSubjectsReply): Pick<ReviewState, "view" | "token" | "groups" | "omitted" | "selection" | "notice" | "attempt"> {
   const groups = reply.problem === "" ? reply.groups : [];
   return {
     view: groups.length > 0 ? "list" : "result",
@@ -430,28 +565,38 @@ function listed(reply: ScheduleSubjectsReply): Pick<ReviewState, "view" | "token
     omitted: reply.omitted,
     selection: initialSelection(groups),
     notice: listNotice(reply),
+    attempt: [],
   };
 }
 
-export function initialState(reply: ScheduleSubjectsReply): ReviewState {
-  return { phase: "idle", batches: [], ...listed(reply) };
+/** `batches`: what earlier panels of the page created and has not undone yet (the undo goes newest first). */
+export function initialState(reply: ScheduleSubjectsReply, batches: readonly Batch[] = []): ReviewState {
+  return { phase: "idle", batches, ...listed(reply) };
 }
 
-/** The merged answer of the undo of every batch; `problem` is the one that stopped the loop. */
+/** The page's own state after the panel closed with something to undo: no list, only what was done. */
+export function closedState(batches: readonly Batch[], notice: Notice | null = null): ReviewState {
+  return { phase: "idle", view: "result", token: "", groups: [], omitted: 0, selection: new Map(), batches, notice, attempt: [] };
+}
+
+/** The merged answer of the undo of every batch; `reply.problem` is the one that stopped the loop. */
 export interface UndoResult {
   reply: UndoFromScheduleReply;
-  /** The batches not undone yet. */
+  /** The batches not undone yet (the one that stopped the loop and the older ones). */
   remaining: Batch[];
   /** The reply could not be read: the core may have done part of it. */
   thrown: boolean;
   /** The names of the subjects by id, for the spellings that were kept. */
   names: ReadonlyMap<string, string>;
+  /** How many batches the core no longer knew (`invalid`), of `tried`. */
+  invalid: number;
+  tried: number;
 }
 
 export type Action =
   | { type: "check"; group: string; checked: boolean }
   | { type: "rename"; group: string; name: string }
-  | { type: "member"; group: string; member: string; mode: "separate" | "skip" }
+  | { type: "member"; group: string; member: string; mode: MemberMode }
   | { type: "renameMember"; group: string; member: string; name: string }
   | { type: "saving" }
   | { type: "created"; reply: CreateFromScheduleReply }
@@ -460,7 +605,11 @@ export type Action =
   | { type: "undone"; result: UndoResult }
   | { type: "refreshing" }
   | { type: "refreshed"; reply: ScheduleSubjectsReply }
-  | { type: "refreshThrown" };
+  | { type: "refreshThrown" }
+  /** The page hands over (or takes back) the batches when the panel closes (or opens). */
+  | { type: "adopt"; batches: readonly Batch[]; notice?: Notice | null }
+  /** The student closes the outcome line of the page. */
+  | { type: "dismiss" };
 
 /** The name a skipped row is called by: the edited name of its group or member, else the proposed one. */
 function skippedName(state: ReviewState, key: string): string {
@@ -484,12 +633,12 @@ export function skippedLines(state: ReviewState, skipped: readonly ScheduleSkipp
       case "name_taken": {
         const name = skippedName(state, s.key);
         if (name !== "") {
-          return `„${name}“ не заведён: такое название уже занято`;
+          return `«${name}» не заведён: такое название уже занято`;
         }
         const subject = names.get(s.subjectId);
         return subject === undefined
           ? "Одно название не добавлено: оно уже занято"
-          : `Названия для „${subject}“ не добавлены: одно из них уже занято`;
+          : `Названия для «${subject}» не добавлены: одно из них уже занято`;
       }
       case "too_many_aliases":
         return reviewTexts.tooManyAliases;
@@ -505,25 +654,23 @@ function createNotice(state: ReviewState, reply: CreateFromScheduleReply): { vie
     notice: { tone: "fail", text, lines: [], steps },
   });
   switch (reply.problem) {
-    case "":
+    case "": {
+      // A clean success still tells about the names the proposal left out, with the button that shows them.
+      const rest = state.omitted > 0;
+      const lines = [...skippedLines(state, reply.skipped), ...(rest ? [omittedNote(state.omitted)] : [])];
+      const nothing = reply.created.length === 0 && reply.aliased.length === 0;
       return {
         view: "result",
-        notice:
-          reply.skipped.length === 0
-            ? null
-            : {
-                tone: "ok",
-                text: reply.created.length === 0 && reply.aliased.length === 0 ? "Ничего не заведено" : "",
-                lines: skippedLines(state, reply.skipped),
-                steps: ["refresh"],
-              },
+        notice: lines.length === 0 ? null : { tone: "ok", text: reply.skipped.length > 0 && nothing ? "Ничего не заведено" : "", lines, steps: [rest ? "rest" : "refresh"] },
       };
+    }
     case "stale":
       return fail(reviewTexts.stale, ["refresh"], "result");
     case "invalid":
       return fail(reviewTexts.createInvalid, ["refresh"], "result");
     case "name_taken":
-      return fail(reviewTexts.nameTaken, [], "list");
+      // No row is named by the core here: the text says what to do, «Повторить» sends the (edited) list again.
+      return fail(reviewTexts.nameTaken, ["retryCreate"], "list");
     case "busy":
       return fail(reviewTexts.busy, ["retryCreate"], "list");
     case "unavailable":
@@ -532,45 +679,52 @@ function createNotice(state: ReviewState, reply: CreateFromScheduleReply): { vie
 }
 
 function keptLine(k: ScheduleKept): string {
-  return k.reason === "has_notes" ? `В „${k.name}“ уже есть конспект — оставлен` : `В „${k.name}“ уже есть файл — оставлен`;
+  return k.reason === "has_notes" ? `В «${k.name}» уже есть конспект — оставлен` : `В «${k.name}» уже есть файл — оставлен`;
 }
 
-function undoNotice(r: UndoResult): Notice {
-  const reply = r.reply;
+/** «Отменено: предметов 2 · названий 1»; "" when nothing was taken back. */
+function undoSummary(reply: UndoFromScheduleReply): string {
   const unaliased = aliasCount(reply.unaliased);
   const parts: string[] = [];
   if (reply.removed.length > 0) {
-    parts.push(`убрано ${subjectsWord(reply.removed.length)}`);
+    parts.push(`предметов ${reply.removed.length}`);
   }
   if (unaliased > 0) {
-    parts.push(`убрано названий: ${unaliased}`);
+    parts.push(`названий ${unaliased}`);
   }
-  const lines = [
-    ...reply.kept.map(keptLine),
-    ...reply.keptAliases.map(
-      (k) => `Названия у ${r.names.has(k.subjectId) ? `„${r.names.get(k.subjectId)}“` : reviewTexts.fallbackKeptAliasesSubject} оставлены: расписание изменилось`,
-    ),
-  ];
-  return {
-    tone: "ok",
-    text: parts.length > 0 ? `Отменено: ${parts.join(" · ")}` : reviewTexts.nothingRemoved,
-    lines,
-    steps: ["refresh"],
-  };
+  return parts.length > 0 ? `Отменено: ${parts.join(" · ")}` : "";
 }
 
-function undoProblemNotice(r: UndoResult): Notice {
-  if (r.thrown) {
-    return { tone: "fail", text: reviewTexts.thrown, lines: [], steps: ["retryUndo"] };
+/** What stayed: one plain line per subject or name kept, and a word about batches the core no longer knew. */
+function undoLines(r: UndoResult): string[] {
+  const reply = r.reply;
+  return [
+    ...reply.kept.map(keptLine),
+    ...reply.keptAliases.map(
+      (k) => `Другие названия у ${r.names.has(k.subjectId) ? `«${r.names.get(k.subjectId)}»` : reviewTexts.fallbackKeptAliasesSubject} оставлены: расписание изменилось`,
+    ),
+    ...(r.invalid > 0 && r.invalid < r.tried ? [reviewTexts.undoPartInvalid] : []),
+  ];
+}
+
+/** The outcome of the undo of every batch: what was undone, what was kept and what could not be, and the way out. */
+function undoNotice(r: UndoResult): Notice {
+  const reply = r.reply;
+  const summary = undoSummary(reply);
+  const lines = undoLines(r);
+  if (r.thrown || reply.problem !== "") {
+    return {
+      tone: "fail",
+      text: !r.thrown && reply.problem === "busy" ? reviewTexts.busy : reviewTexts.undoUnavailable,
+      lines: [...(summary !== "" ? [summary] : []), ...lines],
+      steps: ["retryUndo"],
+    };
   }
-  switch (r.reply.problem) {
-    case "invalid":
-      return { tone: "fail", text: reviewTexts.undoInvalid, lines: [], steps: ["toSubjects"] };
-    case "busy":
-      return { tone: "fail", text: reviewTexts.undoBusy, lines: [], steps: ["retryUndo"] };
-    default:
-      return { tone: "fail", text: reviewTexts.unavailable, lines: [], steps: ["retryUndo"] };
+  if (r.tried > 0 && r.invalid === r.tried) {
+    // Nothing to retry or refresh: the panel's own «Закрыть» is the way out (the page's line adds one, see lineSteps).
+    return { tone: "fail", text: reviewTexts.undoInvalid, lines: [], steps: [] };
   }
+  return { tone: "ok", text: summary !== "" ? summary : reviewTexts.nothingRemoved, lines, steps: ["refresh"] };
 }
 
 /** The state machine. Edits are accepted only while idle in the list; a call is started only from idle. */
@@ -582,31 +736,33 @@ export function reduce(state: ReviewState, action: Action): ReviewState {
     case "rename":
       return editable ? { ...state, selection: setName(state.selection, action.group, action.name) } : state;
     case "member":
-      return editable ? { ...state, selection: toggleMember(state.selection, action.group, action.member, action.mode) } : state;
+      return editable ? { ...state, selection: setMemberMode(state.selection, action.group, action.member, action.mode) } : state;
     case "renameMember":
       return editable ? { ...state, selection: setMemberName(state.selection, action.group, action.member, action.name) } : state;
     case "saving":
-      return editable ? { ...state, phase: "saving", notice: null } : state;
+      return editable ? { ...state, phase: "saving", notice: null, attempt: plannedKeys(state.groups, state.selection) } : state;
     case "created": {
       const batches = mergeBatch(state.batches, state.token, action.reply);
-      return { ...state, phase: "idle", batches, ...createNotice(state, action.reply) };
+      const attempt = action.reply.problem === "" ? [] : state.attempt;
+      return { ...state, phase: "idle", batches, attempt, ...createNotice(state, action.reply) };
     }
     case "createThrown":
-      return { ...state, phase: "idle", view: "list", notice: { tone: "fail", text: reviewTexts.thrown, lines: [], steps: ["retryCreate"] } };
+      return { ...state, phase: "idle", view: "list", notice: { tone: "fail", text: reviewTexts.unavailable, lines: [], steps: ["retryCreate"] } };
     case "undoing":
       return state.phase === "idle" && state.batches.length > 0 ? { ...state, phase: "undoing", notice: null } : state;
     case "undone": {
+      // What was undone before a problem stays on screen with it; the batches left are the ones to try again.
       const r = action.result;
-      if (r.thrown || r.reply.problem !== "") {
-        const gone = r.reply.problem === "invalid" && !r.thrown;
-        return { ...state, phase: "idle", batches: gone ? [] : r.remaining, notice: undoProblemNotice(r) };
-      }
-      return { ...state, phase: "idle", view: "result", batches: r.remaining, notice: undoNotice(r) };
+      const stopped = r.thrown || r.reply.problem !== "";
+      return { ...state, phase: "idle", view: stopped ? state.view : "result", batches: r.remaining, notice: undoNotice(r) };
     }
     case "refreshing":
       return state.phase === "idle" ? { ...state, phase: "refreshing" } : state;
-    case "refreshed":
-      return { ...state, phase: "idle", ...listed(action.reply) };
+    case "refreshed": {
+      // The student's edits stay for the groups that are still proposed.
+      const next = listed(action.reply);
+      return { ...state, phase: "idle", ...next, selection: carrySelection(state.groups, state.selection, next.groups) };
+    }
     case "refreshThrown":
       return {
         ...state,
@@ -614,6 +770,10 @@ export function reduce(state: ReviewState, action: Action): ReviewState {
         view: "result",
         notice: { tone: "fail", text: reviewTexts.listUnavailable, lines: [], steps: ["refresh"] },
       };
+    case "adopt":
+      return { ...state, phase: "idle", batches: action.batches, notice: action.notice ?? null };
+    case "dismiss":
+      return state.phase === "idle" ? { ...state, notice: null } : state;
   }
 }
 
@@ -635,27 +795,47 @@ export async function createFlow(api: Pick<ReviewApi, "create">, state: ReviewSt
   }
 }
 
-/** Takes back every batch, one token after another; stops at the first problem and keeps the batches not undone. */
+/**
+ * Takes back every batch, newest first (the core rebuilds each token's base state by removing only that token's
+ * subjects). A batch the core no longer knows is dropped and the rest goes on; any other problem stops the loop. What
+ * was undone before it, and what the stopping reply itself reports, is kept in the result.
+ */
 export async function undoFlow(api: Pick<ReviewApi, "undo">, batches: readonly Batch[], names: ReadonlyMap<string, string>): Promise<Action> {
   const total: UndoFromScheduleReply = { removed: [], kept: [], unaliased: [], keptAliases: [], problem: "" };
-  let remaining = [...batches];
-  for (const b of batches) {
+  const left = [...batches];
+  let invalid = 0;
+  let tried = 0;
+  const finish = (problem: UndoFromScheduleReply["problem"], thrown: boolean): Action => ({
+    type: "undone",
+    result: { reply: { ...total, problem }, remaining: [...left], thrown, names, invalid, tried },
+  });
+  for (let i = batches.length - 1; i >= 0; i--) {
+    const b = batches[i];
+    if (b === undefined) {
+      continue;
+    }
+    tried++;
     let reply: UndoFromScheduleReply;
     try {
       reply = await api.undo(b.token);
     } catch {
-      return { type: "undone", result: { reply: { ...total, problem: "unavailable" }, remaining, thrown: true, names } };
-    }
-    if (reply.problem !== "") {
-      return { type: "undone", result: { reply: { ...total, problem: reply.problem }, remaining, thrown: false, names } };
+      return finish("unavailable", true);
     }
     total.removed.push(...reply.removed);
     total.kept.push(...reply.kept);
     total.unaliased.push(...reply.unaliased);
     total.keptAliases.push(...reply.keptAliases);
-    remaining = remaining.slice(1);
+    if (reply.problem === "invalid") {
+      invalid++;
+      left.pop();
+      continue;
+    }
+    if (reply.problem !== "") {
+      return finish(reply.problem, false);
+    }
+    left.pop();
   }
-  return { type: "undone", result: { reply: total, remaining, thrown: false, names } };
+  return finish("", false);
 }
 
 export async function refreshFlow(api: Pick<ReviewApi, "refresh">): Promise<Action> {
@@ -677,7 +857,20 @@ export interface OfferState {
 
 export const offerChecking: OfferState = { loaded: false, reply: null };
 
-/** The number of groups to offer; null while it is being checked, 0 when there is nothing (or the core is unavailable). */
+/** "failed": the check itself did not work; "none": it worked and the schedule has nothing to create. */
+export type OfferStatus = "checking" | "failed" | "none" | "groups";
+
+export function offerStatus(o: OfferState): OfferStatus {
+  if (!o.loaded) {
+    return "checking";
+  }
+  if (o.reply === null || o.reply.problem !== "") {
+    return "failed";
+  }
+  return o.reply.groups.length > 0 ? "groups" : "none";
+}
+
+/** The number of groups to offer; null while it is being checked, 0 when there is nothing (or the check failed). */
 export function offerGroups(o: OfferState): number | null {
   if (!o.loaded) {
     return null;
@@ -685,7 +878,8 @@ export function offerGroups(o: OfferState): number | null {
   return o.reply !== null && o.reply.problem === "" ? o.reply.groups.length : 0;
 }
 
-/** The ids of the names of subjects, for the exists check and for the texts. */
-export function subjectNameKeys(names: ReadonlyMap<string, string>): Set<string> {
-  return new Set([...names.values()].map(nameKey));
+/** The buttons of an outcome line of the page (no proposal there to refresh): what is left, or «Закрыть». */
+export function lineSteps(n: Notice): Step[] {
+  const steps = n.steps.filter((s) => s !== "refresh" && s !== "rest");
+  return steps.length > 0 ? steps : ["close"];
 }
