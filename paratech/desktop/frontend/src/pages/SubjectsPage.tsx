@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type LibraryMaterial, type LibrarySubject, libraryApi, libraryErrorText } from "../bindings/library.js";
+import { type LibraryMaterial, type LibrarySubject, libraryApi, libraryErrorText, type ScheduleSubjectsReply, scheduleSubjects } from "../bindings/library.js";
 import { libraryInboxApi } from "../bindings/libraryInbox.js";
 import { callByName } from "../bindings/runtime.js";
 import { fileTexts, type ImportElsewhere, type ImportOutcome, inboxScrollDue, inboxScrollSettled, scrollToInbox } from "../libraryInboxView.js";
@@ -15,15 +15,29 @@ import {
   texts,
 } from "../libraryView.js";
 import type { PageId } from "../nav.js";
+import { addSubjectVariant, type Batch, type OfferState, offerChecking, offerStatus, showCheckFailed, type SubjectRef } from "../scheduleSubjectsView.js";
 import { idleTeacher, TeacherFlow, type TeacherFocus, type TeacherState, teacherFocusStep, teacherStateFor } from "../teachersView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { AddFileLines, ErrorLine, UndoLines } from "./FileRows.js";
+import {
+  KeptUndoLine,
+  offerButtonId,
+  ScheduleCheckFailedLine,
+  ScheduleOfferLine,
+  ScheduleSubjectsReview,
+  scheduleReviewApi,
+  useKeptUndo,
+} from "./ScheduleSubjectsReview.js";
 import { NameForm, OverviewSections, SubjectDetail, SubjectsListBody, SubjectTree } from "./SubjectsParts.js";
 import { type TeacherActions, TeachersBlock } from "./TeachersBlock.js";
 import { useMaterialActions } from "./useMaterialActions.js";
 
 type Form = "none" | "subject" | "folder";
+
+/** Where the focus goes when the review closes and its opener is gone. */
+const addSubjectId = "subjects-add";
+const titleId = "subjects-title";
 
 interface AddedState {
   note: string;
@@ -54,6 +68,9 @@ export function SubjectsPage(props: {
   /** «Указать почту» of a refused send: the form of one teacher to open on arrival (taken once, then onTeacherFocusDone). */
   teacherFocus?: TeacherFocus | null;
   onTeacherFocusDone?: () => void;
+  /** «Завести предметы из расписания» of the schedule page: the review opens on arrival (taken once, then onReviewTaken). */
+  openReview?: boolean;
+  onReviewTaken?: () => void;
 }) {
   const api = useMemo(() => libraryApi(callByName), []);
   const inboxApi = useMemo(() => libraryInboxApi(callByName), []);
@@ -78,6 +95,21 @@ export function SubjectsPage(props: {
   // «Перейти во «Входящие»» from a subject page: the list page opens first, then the scroll (see inboxScrollDue).
   const [inboxScroll, setInboxScroll] = useState(false);
   const running = useRef(false); // a double click comes before the re-render that disables the button
+
+  // Subjects from the schedule (TASK-312): the proposal asked for after the subjects (a failure shows «Не удалось
+  // проверить расписание»), and the review opened over the list with the proposal it started from.
+  const [offer, setOffer] = useState<OfferState>(offerChecking);
+  const [review, setReview] = useState<{ reply: ScheduleSubjectsReply; batches: readonly Batch[] } | null>(null);
+  const reviewApi = useMemo(() => scheduleReviewApi(callByName), []);
+  const subjectRefs = useMemo<SubjectRef[]>(() => (subjects ?? []).map((s) => ({ id: s.id, name: s.name, aliases: s.aliases })), [subjects]);
+  const reviewWasOpen = useRef(false);
+  useEffect(() => {
+    // The panel closed: the focus goes back to the button that opened it, else to «Предмет», else to the title.
+    if (review === null && reviewWasOpen.current) {
+      (document.getElementById(offerButtonId) ?? document.getElementById(addSubjectId) ?? document.getElementById(titleId))?.focus();
+    }
+    reviewWasOpen.current = review !== null;
+  }, [review]);
 
   // The teachers of the open subject (TASK-238). Their version and data come from the list (Subjects()), which the flow
   // re-reads after a call that failed or found the data out of date.
@@ -135,6 +167,10 @@ export function SubjectsPage(props: {
       },
       () => setInboxLoaded(true),
     );
+    scheduleSubjects(callByName).then(
+      (reply) => setOffer({ loaded: true, reply }),
+      () => setOffer({ loaded: true, reply: null }),
+    );
   }, [api]);
 
   useEffect(load, [load, props.reload]);
@@ -144,6 +180,48 @@ export function SubjectsPage(props: {
     load();
     setChanges((n) => n + 1);
   }, [load]);
+
+  // «Отменить всё» stays on the page after the panel is closed; opening the panel again takes the batches back, so the
+  // undo still goes newest first. A change of subjects reloads the page the same way as a file action does.
+  const kept = useKeptUndo(subjectRefs, reviewApi, refresh);
+  // The page's own «Отменить всё» runs: the review may not open over it (it would take the batches under the undo).
+  const undoBusy = kept.state.phase !== "idle";
+  const openReview = () => {
+    if (offer.reply !== null && !undoBusy) {
+      setReview({ reply: offer.reply, batches: kept.state.batches });
+      kept.adopt([]);
+    }
+  };
+  const retryOffer = () => {
+    setOffer(offerChecking);
+    load();
+  };
+  // «Завести предметы из расписания» of the schedule page: the review opens as soon as the proposal has loaded (an empty
+  // one shows its own notice in it); taken once. When the check failed the request waits (`pendingReview`) behind the
+  // line «Не удалось проверить расписание» / «Повторить», and a retry that succeeds opens the review.
+  const { openReview: reviewWanted, onReviewTaken } = props;
+  const [pendingReview, setPendingReview] = useState(false);
+  useEffect(() => {
+    if (openId !== "") {
+      setPendingReview(false);
+      return;
+    }
+    if (!(reviewWanted || pendingReview) || !offer.loaded || subjects === null || undoBusy) {
+      return;
+    }
+    if (offerStatus(offer) === "failed") {
+      if (reviewWanted) {
+        setPendingReview(true);
+        onReviewTaken?.();
+      }
+      return;
+    }
+    setPendingReview(false);
+    openReview();
+    if (reviewWanted) {
+      onReviewTaken?.();
+    }
+  }, [reviewWanted, pendingReview, offer, subjects, openId, undoBusy]);
 
   // Another subject (or the list): the form, the error and the note of the previous one go away.
   useEffect(() => {
@@ -466,12 +544,16 @@ export function SubjectsPage(props: {
     );
   }
 
+  const scheduleGroups = offer.reply !== null && offerStatus(offer) === "groups" ? offer.reply.groups.length : 0;
+
   return (
     <section className="page">
       <div className="head">
         <div>
           <span className="label">Библиотека</span>
-          <h1>{texts.title}</h1>
+          <h1 id={titleId} tabIndex={-1}>
+            {texts.title}
+          </h1>
         </div>
         <div className="acts">
           <Button icon="book" onClick={() => props.onOpen("knowledge")}>
@@ -483,7 +565,8 @@ export function SubjectsPage(props: {
           <Button icon="up" disabled={busy} title={fileTexts.addToInboxTip} onClick={() => void addFile()}>
             {texts.addFile}
           </Button>
-          <Button variant="primary" icon="plus" disabled={busy} onClick={() => setForm("subject")}>
+          {/* One accent: with no subjects the empty state below has the primary action, an open review its own button. */}
+          <Button id={addSubjectId} variant={addSubjectVariant(subjects?.length ?? null, review !== null)} icon="plus" disabled={busy} onClick={() => setForm("subject")}>
             {texts.addSubject}
           </Button>
         </div>
@@ -495,8 +578,27 @@ export function SubjectsPage(props: {
         </ResultLine>
       )}
       {subjectForm}
+      {review !== null && (
+        <ScheduleSubjectsReview
+          reply={review.reply}
+          initialBatches={review.batches}
+          subjects={subjectRefs}
+          api={reviewApi}
+          onChanged={refresh}
+          onClose={(batches) => {
+            kept.adopt(batches);
+            setReview(null);
+          }}
+          autoFocus
+        />
+      )}
       {subjects !== null && (
         <>
+          {review === null && <KeptUndoLine state={kept.state} onUndo={kept.undo} onDismiss={kept.dismiss} onForget={kept.forget} />}
+          {review === null && subjects.length > 0 && scheduleGroups > 0 && (
+            <ScheduleOfferLine groups={scheduleGroups} disabled={undoBusy} onClick={openReview} />
+          )}
+          {review === null && showCheckFailed(offer, subjects.length) && <ScheduleCheckFailedLine onRetry={retryOffer} />}
           <SubjectsListBody
             subjects={subjects}
             inbox={inbox}
@@ -509,6 +611,8 @@ export function SubjectsPage(props: {
               onDrop: (s, id) => void cardDrop.drop(s.id, id),
               onEnd: () => setDragging(""),
             }}
+            offer={{ state: offer, onReview: openReview, onImport: () => props.onOpen("schedule"), onRetry: retryOffer, disabled: undoBusy }}
+            hideList={review !== null && subjects.length === 0}
           />
           {note !== "" && (
             <ResultLine kind="ok" role="status">

@@ -27,12 +27,14 @@ import {
   treeCount,
   weekdayOf,
 } from "../libraryView.js";
+import { offerGroups, reviewTexts } from "../scheduleSubjectsView.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Card, EmptyState, ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
 import { StatusChip } from "../ui/StatusChip.js";
 import { type FileActions, FileRows } from "./FileRows.js";
 import { NameForm } from "./NameForm.js";
+import { EmptySubjectsActions, type ScheduleOffer } from "./ScheduleSubjectsReview.js";
 
 export { NameForm };
 
@@ -49,20 +51,24 @@ export interface CardDrop {
 }
 
 /** Semesters, each with its subjects. With `drop` the cards take a dragged file of «Входящие». */
-export function SubjectList(props: { subjects: readonly LibrarySubject[]; onOpen(id: string): void; onAdd(): void; drop?: CardDrop }) {
+export function SubjectList(props: {
+  subjects: readonly LibrarySubject[];
+  onOpen(id: string): void;
+  onAdd(): void;
+  drop?: CardDrop;
+  /** TASK-312: the subjects of the schedule; the primary action of the empty list (see EmptySubjectsActions). */
+  offer?: ScheduleOffer;
+}) {
   const [over, setOver] = useState("");
   if (props.subjects.length === 0) {
+    const groups = props.offer === undefined ? 0 : (offerGroups(props.offer.state) ?? 0);
     return (
       <EmptyState
         label="Библиотека"
         title={texts.emptyTitle}
-        actions={
-          <Button variant="primary" icon="plus" onClick={props.onAdd}>
-            {texts.addSubject}
-          </Button>
-        }
+        actions={<EmptySubjectsActions offer={props.offer} addLabel={props.offer ? reviewTexts.addSubject : texts.addSubject} onAdd={props.onAdd} />}
       >
-        {texts.emptyText}
+        {props.offer === undefined ? texts.emptyText : groups > 0 ? reviewTexts.emptyWithGroups(groups) : reviewTexts.emptyPlain}
       </EmptyState>
     );
   }
@@ -368,11 +374,16 @@ export function SubjectsListBody(props: {
   onOpen(id: string): void;
   onAdd(): void;
   drop?: CardDrop;
+  offer?: ScheduleOffer;
+  /** The review is open over an empty list: its own empty state is not repeated (TASK-312). */
+  hideList?: boolean;
 }) {
   return (
     <>
       <InboxList materials={props.inbox} actions={props.inboxActions} />
-      <SubjectList subjects={props.subjects} onOpen={props.onOpen} onAdd={props.onAdd} drop={props.drop} />
+      {props.hideList !== true && (
+        <SubjectList subjects={props.subjects} onOpen={props.onOpen} onAdd={props.onAdd} drop={props.drop} offer={props.offer} />
+      )}
     </>
   );
 }

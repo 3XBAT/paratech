@@ -183,3 +183,18 @@
 @media (forced-colors: active) {
   .ag-chat-item[aria-current="true"] { outline: 2px solid Highlight; }
 }
+
+/* The context ring (TASK-208): by the send button; muted below the core's «high» level, then the one accent. */
+.ag-ring { position: relative; flex: none; align-self: flex-end; display: inline-grid; place-items: center; width: 24px; height: var(--h-lg); color: var(--muted); }
+.ag-ring-high, .ag-ring-full { color: var(--accent); }
+.ag-ring-track { stroke: var(--fill-2); }
+.ag-ring-arc { stroke: currentColor; stroke-linecap: butt; transition: stroke-dasharray var(--t-mid, 120ms) ease-out; }
+@media (prefers-reduced-motion: reduce) { .ag-ring-arc { transition: none; } }
+@media (forced-colors: active) {
+  .ag-ring-track { stroke: GrayText; }
+  .ag-ring-arc { stroke: CanvasText; }
+}
+/* The hint of a full chat: one quiet line right under the field, wherever the field is. */
+.ag-fullhint { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 12px 0 16px; color: var(--muted); }
+.ag-fullhint-tx { min-width: 0; overflow-wrap: anywhere; }
+.ag-in-bottom .ag-fullhint { order: 4; margin-top: -6px; padding-bottom: 12px; }

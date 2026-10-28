@@ -615,6 +615,47 @@ html, body, #root { height: 100%; }
   .arows > .row > .acts { justify-self: end; }
 }
 
+/* Subjects from the schedule (TASK-312): a panel over the list of «Предметы» (not a modal), rows with a checkbox, an
+   editable name, small muted facts, and the doubtful members with a three-way choice. One accent: the primary button. */
+.sched-cnt { margin-left: 8px; padding: 0 6px; border-radius: var(--r-sm); background: var(--fill); color: var(--muted); font-size: var(--fs-small); line-height: var(--lh-small); }
+.sched-next { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.sched-review { margin: 0 0 24px; padding: 12px 16px 16px; border-radius: var(--r-lg); background: var(--raised); box-shadow: 0 0 0 1px var(--edge); }
+.sched-review:focus { outline: none; }
+.sched-intro { margin: 0 0 8px; }
+.sched-rows, .sched-members, .sched-lines { margin: 0; padding: 0; list-style: none; }
+.sched-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 12px; padding: 12px 0; }
+.sched-row + .sched-row { border-top: 1px solid var(--sep); }
+/* An unticked row dims only its name; the facts keep their contrast. */
+.sched-row.off .sched-to, .sched-row.off .input { color: var(--muted); }
+.sched-chk-hit { display: flex; align-items: center; justify-content: center; align-self: start; min-width: 24px; min-height: 24px; margin-top: 3px; cursor: pointer; }
+.sched-chk { margin: 0; width: 16px; height: 16px; accent-color: var(--prim); cursor: pointer; }
+.sched-body label { cursor: pointer; }
+.sched-offer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0 0 16px; }
+.sched-kept { margin: 0 0 16px; }
+#subjects-title:focus { outline: none; }
+.sched-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sched-body p { margin: 0; }
+.sched-name { display: flex; flex-direction: column; gap: 4px; max-width: 420px; }
+.sched-to { font-weight: 600; overflow-wrap: anywhere; }
+.sched-spell { overflow-wrap: anywhere; }
+.sched-mark { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.sched-mark .i { width: 14px; height: 14px; }
+.sched-members { margin-top: 4px; padding-left: 12px; border-left: 2px solid var(--sep); }
+.sched-member { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 4px 0; }
+.sched-m-main { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.sched-m-name { overflow-wrap: anywhere; }
+.sched-m-name.off { text-decoration: line-through; color: var(--muted); }
+.sched-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--r-md); background: var(--fill); }
+.sched-seg .btn { background: transparent; box-shadow: none; }
+.sched-seg .btn[aria-checked="true"] { background: var(--fill-2); font-weight: 600; box-shadow: inset 0 0 0 1px var(--control); }
+.sched-done { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; }
+.sched-done .result { margin-bottom: 4px; }
+.sched-notice { margin: 8px 0 0; }
+.sched-notice .result { margin-bottom: 4px; }
+.sched-lines { margin: 0 0 8px; padding-left: 40px; list-style: disc; }
+.sched-foot { margin-top: 16px; }
+.sched-alert:empty, .sched-status:empty { display: none; }
+
 /* «Выполнено» (TASK-316). The check of a row: an empty ring is open, a filled graphite disc is done (the primary
    colour, no new accent). The focus ring is the global :focus-visible one. */
 .done-check { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; padding: 0; border: 1.5px solid var(--control); border-radius: 50%; background: none; color: transparent; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast); }

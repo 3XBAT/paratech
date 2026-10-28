@@ -14,6 +14,7 @@ import {
 import { AgentPanel } from "./agent/AgentPanel";
 import { PanelResizeHandle, useResizablePanel } from "./agent/PanelResizeHandle";
 import type { CitationOpening } from "./knowledgeView";
+import { keepScheduleReview } from "./scheduleSubjectsView";
 import { OpenSummaryContext, type SummarySection } from "./openSummary";
 import { OpenTranscriptContext } from "./openTranscript";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
@@ -53,6 +54,10 @@ function PageView(props: {
   /** «Указать почту» of a refused send: the form of a teacher to open on the subject page, taken once. */
   teacherFocus: TeacherFocus | null;
   onTeacherFocusDone: () => void;
+  /** «Завести предметы из расписания» of the schedule page: «Предметы» opens with the review open, taken once. */
+  scheduleReview: boolean;
+  onOpenScheduleReview: () => void;
+  onScheduleReviewTaken: () => void;
   /** The assignment whose «Изменить» opens on arrival ("" none), taken once. */
   assignmentEdit: string;
   onAssignmentEditDone: () => void;
@@ -72,6 +77,8 @@ function PageView(props: {
           onSelect={props.onSelectSubject}
           teacherFocus={props.teacherFocus}
           onTeacherFocusDone={props.onTeacherFocusDone}
+          openReview={props.scheduleReview}
+          onReviewTaken={props.onScheduleReviewTaken}
         />
       );
     case "journal":
@@ -90,7 +97,7 @@ function PageView(props: {
     case "tickets":
       return <TicketsPage onOpen={props.onOpen} />;
     case "schedule":
-      return <SchedulePage />;
+      return <SchedulePage onOpen={props.onOpen} onReview={props.onOpenScheduleReview} />;
     case "connections":
       return <ConnectionsPage visit={props.visit} />;
     case "models":
@@ -149,6 +156,18 @@ export function App() {
   useEffect(() => {
     setTeacherFocus((f) => keepTeacherFocus(f, { page: route.page, subject: route.subject }));
   }, [route.page, route.subject]);
+  // «Завести предметы из расписания» (TASK-312): «Предметы» opens with the review open. Same one-shot idea: state, not
+  // route; taken once, and dropped as soon as the route leaves the list of «Предметы» (a page or an open subject), so
+  // coming back to the list later does not open the panel late.
+  const [scheduleReview, setScheduleReview] = useState(false);
+  const openScheduleReview = useCallback(() => {
+    setScheduleReview(true);
+    setRoute(routeToPage("subjects"));
+  }, []);
+  const scheduleReviewTaken = useCallback(() => setScheduleReview(false), []);
+  useEffect(() => {
+    setScheduleReview((r) => keepScheduleReview(r, { page: route.page, subject: route.subject }));
+  }, [route.page, route.subject]);
   // «Выбрать предмет» from the agent's card: the assignment opens with «Изменить» already open; the same one-shot idea.
   const [assignmentEdit, setAssignmentEdit] = useState("");
   const openAssignmentFor = useCallback(
@@ -196,6 +215,9 @@ export function App() {
           onSelectSubject={selectSubject}
           teacherFocus={teacherFocus}
           onTeacherFocusDone={teacherFocusDone}
+          scheduleReview={scheduleReview}
+          onOpenScheduleReview={openScheduleReview}
+          onScheduleReviewTaken={scheduleReviewTaken}
           assignmentEdit={assignmentEdit}
           onAssignmentEditDone={assignmentEditDone}
           sourceJump={sourceJump}
