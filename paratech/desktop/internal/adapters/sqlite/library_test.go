@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/library/material"
+	"paratech/desktop/internal/domain/library/services/schedulesubjects"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/library/values"
@@ -375,5 +376,42 @@ func TestSubjectStrings(t *testing.T) {
 	}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("ListSubjectStrings = %+v, %v; want %+v", got, err, want)
+	}
+}
+
+func TestScheduleSubjectStrings(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	if got, err := NewSubjectStrings(db).ListScheduleSubjectStrings(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("empty store = %+v, %v; want none", got, err)
+	}
+
+	const lesson = `INSERT INTO schedule_entries (id, title, starts_at, ends_at, timezone, subject, kind, deleted_at,
+		created_at, updated_at) VALUES (?, 'x', 1, 2, 'UTC', ?, ?, ?, 1, 1)`
+	mustExec(t, db, lesson, "l1", "Матанализ", "lecture", nil)
+	mustExec(t, db, lesson, "l2", "Матанализ", "lecture", nil)
+	mustExec(t, db, lesson, "l3", "Матанализ", "seminar", nil)
+	mustExec(t, db, lesson, "l4", "Матанализ", "practice", nil)
+	mustExec(t, db, lesson, "l5", "Матанализ", "lab", nil)
+	mustExec(t, db, lesson, "l6", "Матанализ", "unknown", nil)
+	mustExec(t, db, lesson, "l7", "Матанализ", "lecture", 5) // deleted
+	mustExec(t, db, lesson, "l8", "матанализ (лек.)", "unknown", nil)
+	mustExec(t, db, lesson, "l9", "История", "seminar", 5) // deleted: the string is gone
+	mustExec(t, db, lesson, "l10", "", "lecture", nil)
+	const rec = `INSERT INTO recordings (id, status, started_at, max_duration_ms, chunks_ref, lesson_subject, user_subject,
+		deleting_at, created_at, updated_at) VALUES (?, 'FAILED', 1, 1000, 'recordings/x', ?, ?, ?, 1, 1)`
+	mustExec(t, db, rec, "r1", "Матанализ", nil, nil)
+	mustExec(t, db, rec, "r2", "Матанализ", "Химия", nil) // the correction wins
+	mustExec(t, db, rec, "r3", "Биология", nil, 9)        // marked for deletion
+	mustExec(t, db, rec, "r4", nil, nil, nil)
+	mustExec(t, db, rec, "r5", nil, "Химия", nil)
+
+	got, err := NewSubjectStrings(db).ListScheduleSubjectStrings(ctx)
+	want := []schedulesubjects.Row{
+		{Name: "Матанализ", Lessons: schedulesubjects.Kinds{Lecture: 2, Seminar: 2, Lab: 1, Unknown: 1}, Recordings: 1},
+		{Name: "Химия", Recordings: 2},
+		{Name: "матанализ (лек.)", Lessons: schedulesubjects.Kinds{Unknown: 1}},
+	}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListScheduleSubjectStrings = %+v, %v; want %+v", got, err, want)
 	}
 }
