@@ -198,13 +198,19 @@ type LibraryService struct {
 	opener FileOpener
 	// overview is the page of a subject (TASK-225): set by withOverview.
 	overview SubjectOverviewUseCase
+	// schedule is subjects from the schedule (TASK-311): attached when uc has it, or by withSchedule.
+	schedule scheduleState
 	log      *slog.Logger
 	drop     sync.Mutex // one drop at a time, so concurrent drops never hold many files in memory
 }
 
 // NewLibraryService returns the binding of the library; all arguments are required.
 func NewLibraryService(uc LibraryUseCase, picker MaterialFilePicker, files MaterialFileReader, log *slog.Logger) *LibraryService {
-	return &LibraryService{uc: uc, picker: picker, files: files, log: log}
+	s := &LibraryService{uc: uc, picker: picker, files: files, log: log}
+	if sc, ok := uc.(LibraryScheduleUseCase); ok {
+		s.schedule.uc = sc
+	}
+	return s
 }
 
 // Subjects lists the subjects by name with their folders.

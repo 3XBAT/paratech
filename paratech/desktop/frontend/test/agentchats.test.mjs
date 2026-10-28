@@ -12,7 +12,7 @@ import {
   parseUpdate,
 } from "../.test-build/bindings/agent.js";
 
-const chat = { threadId: "th1", title: "Новый чат", archived: false, lastActive: "2026-10-27T10:00:00Z", running: true };
+const chat = { threadId: "th1", title: "Новый чат", archived: false, lastActive: "2026-10-27T10:00:00Z", running: true, fill: null };
 
 test("the chat list parses; malformed data reads as failed", () => {
   const v = parseChats({ problem: "", chats: [chat, { ...chat, threadId: "th2", archived: true, running: false }] });
