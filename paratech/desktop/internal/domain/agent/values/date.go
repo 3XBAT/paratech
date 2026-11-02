@@ -7,8 +7,8 @@ import (
 
 const dateLayout = "2006-01-02"
 
-// Date is a calendar date without a time zone. As a deadline it means the end of that day in the student's time
-// zone (catalog type "date").
+// Date is a calendar date without a time zone. As a deadline without a time it means 20:00 of that day in the
+// student's time zone (catalog type "date"; ADR-0029 addendum 3).
 type Date struct {
 	year  int
 	month time.Month
