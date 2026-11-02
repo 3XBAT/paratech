@@ -97,11 +97,19 @@ func wantKind(t *testing.T, err error, kind values.ErrorKind) {
 
 func TestNewValidatesOptions(t *testing.T) {
 	ok := anthropic.Options{APIKey: testKey, BaseURL: "https://api.anthropic.com", Timeout: time.Minute}
-	for _, base := range []string{"https://api.anthropic.com", "https://api.anthropic.com/", "http://127.0.0.1:8081"} {
+	for _, base := range []string{"https://api.anthropic.com", "https://api.anthropic.com/", "http://127.0.0.1:8081",
+		"https://gw.example.ru/anthropic", "https://gw.example.ru/anthropic/", "https://gw.example.ru/a-b/c_d.e~f/v2"} {
 		o := ok
 		o.BaseURL = base
 		if _, err := anthropic.New(o); err != nil {
 			t.Errorf("base URL %q rejected: %v", base, err)
+		}
+	}
+	for _, auth := range []anthropic.Auth{"", anthropic.AuthXAPIKey, anthropic.AuthBearer} {
+		o := ok
+		o.Auth = auth
+		if _, err := anthropic.New(o); err != nil {
+			t.Errorf("auth %q rejected: %v", auth, err)
 		}
 	}
 
@@ -119,8 +127,23 @@ func TestNewValidatesOptions(t *testing.T) {
 		{name: "ftp scheme", edit: func(o *anthropic.Options) { o.BaseURL = "ftp://api.anthropic.com" }},
 		{name: "no host", edit: func(o *anthropic.Options) { o.BaseURL = "https:///v1" }},
 		{name: "user info", edit: func(o *anthropic.Options) { o.BaseURL = "https://u:pw-marker@api.anthropic.com" }},
-		{name: "path", edit: func(o *anthropic.Options) { o.BaseURL = "https://api.anthropic.com/other" }},
+		{name: "unknown auth", edit: func(o *anthropic.Options) { o.Auth = "Bearer" }},
+		{name: "bearer key with space", edit: func(o *anthropic.Options) { o.Auth, o.APIKey = anthropic.AuthBearer, "test key" }},
+		{name: "dot-dot path", edit: func(o *anthropic.Options) { o.BaseURL = "https://gw.example.ru/a/../b" }},
+		{name: "dot path", edit: func(o *anthropic.Options) { o.BaseURL = "https://gw.example.ru/a/./b" }},
+		{name: "double slash", edit: func(o *anthropic.Options) { o.BaseURL = "https://gw.example.ru//a" }},
+		{name: "only slashes", edit: func(o *anthropic.Options) { o.BaseURL = "https://gw.example.ru//" }},
+		{name: "encoded slash", edit: func(o *anthropic.Options) { o.BaseURL = "https://gw.example.ru/a%2fb" }},
+		{name: "encoded dot", edit: func(o *anthropic.Options) { o.BaseURL = "https://gw.example.ru/%2e%2e/b" }},
+		{name: "encoded letter", edit: func(o *anthropic.Options) { o.BaseURL = "https://gw.example.ru/%61" }},
+		{name: "backslash", edit: func(o *anthropic.Options) { o.BaseURL = `https://gw.example.ru/a\b` }},
+		{name: "space", edit: func(o *anthropic.Options) { o.BaseURL = "https://gw.example.ru/a%20b" }},
+		{name: "control char", edit: func(o *anthropic.Options) { o.BaseURL = "https://gw.example.ru/a\x7fb" }},
+		{name: "semicolon", edit: func(o *anthropic.Options) { o.BaseURL = "https://gw.example.ru/a;b" }},
+		{name: "long path", edit: func(o *anthropic.Options) { o.BaseURL = "https://gw.example.ru/" + strings.Repeat("a", 300) }},
 		{name: "query", edit: func(o *anthropic.Options) { o.BaseURL = "https://api.anthropic.com?x=1" }},
+		{name: "path and query", edit: func(o *anthropic.Options) { o.BaseURL = "https://gw.example.ru/anthropic?x=1" }},
+		{name: "path and fragment", edit: func(o *anthropic.Options) { o.BaseURL = "https://gw.example.ru/anthropic#f" }},
 		{name: "empty query", edit: func(o *anthropic.Options) { o.BaseURL = "https://api.anthropic.com/?" }},
 		{name: "fragment", edit: func(o *anthropic.Options) { o.BaseURL = "https://api.anthropic.com#f" }},
 		{name: "unparsable", edit: func(o *anthropic.Options) { o.BaseURL = "https://api.anthropic.com:port" }},

@@ -31,6 +31,7 @@ const (
 
 	EnvAnthropicAPIKey  = "HUB_ANTHROPIC_API_KEY" //nolint:gosec // G101: the name of the variable, not a credential
 	EnvAnthropicBaseURL = "HUB_ANTHROPIC_BASE_URL"
+	EnvAnthropicAuth    = "HUB_ANTHROPIC_AUTH"
 	EnvLLMTimeout       = "HUB_LLM_TIMEOUT"
 	EnvLLMModels        = "HUB_LLM_MODELS"
 	EnvProviderStream   = "HUB_PROVIDER_STREAM"
@@ -52,6 +53,14 @@ const (
 	DefaultLLMModels        = "default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:4096"
 	minLLMTimeout           = 10 * time.Second
 	maxLLMTimeout           = 10 * time.Minute
+	// maxBasePath bounds the gateway path of the base URL (the adapter has the same bound).
+	maxBasePath = 256
+)
+
+// Header of the provider key (AnthropicAuth). The values match the adapter's auth modes; app converts them.
+const (
+	AnthropicAuthXAPIKey = "x-api-key"
+	AnthropicAuthBearer  = "bearer"
 )
 
 const maxShutdownTimeout = 5 * time.Minute
@@ -137,8 +146,12 @@ type Config struct {
 	// AnthropicAPIKey is the LLM provider key. It is a secret: read only from the environment and never printed.
 	// Required to serve: app.New refuses to build the server without it; the key commands do not need it.
 	AnthropicAPIKey string
-	// AnthropicBaseURL is the provider API base URL: https, or http to a loopback host for local testing.
+	// AnthropicBaseURL is the provider API base URL: https, or http to a loopback host for local testing. It may have
+	// a plain path (a gateway prefix such as /anthropic); /v1/messages is appended to it.
 	AnthropicBaseURL string
+	// AnthropicAuth is the header of the provider key: x-api-key (the Anthropic API) or bearer (Authorization:
+	// Bearer, for gateways). Not a secret.
+	AnthropicAuth string
 	// LLMTimeout bounds one provider call.
 	LLMTimeout time.Duration
 	// LLMModels is the model allowlist, "alias=model-id:max_output_tokens[,...]" (see Models). Kept as text so that
@@ -181,7 +194,7 @@ func Default() Config {
 	return Config{
 		LogLevel: "info", ListenAddr: ":8080", ShutdownTimeout: 15 * time.Second,
 		QuotaUnit: QuotaUnitTokens, QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
-		AnthropicBaseURL: DefaultAnthropicBaseURL, LLMTimeout: 5 * time.Minute, LLMModels: DefaultLLMModels, ProviderStream: true,
+		AnthropicBaseURL: DefaultAnthropicBaseURL, AnthropicAuth: AnthropicAuthXAPIKey, LLMTimeout: 5 * time.Minute, LLMModels: DefaultLLMModels, ProviderStream: true,
 		RateLimitPerMinute: 30, RateLimitBurst: 10,
 		AgentPlannerAlias: DefaultAgentPlannerAlias, AgentStrongAlias: DefaultAgentStrongAlias,
 	}
@@ -241,6 +254,9 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 	if v := getenv(EnvAnthropicBaseURL); v != "" {
 		cfg.AnthropicBaseURL = v
 	}
+	if v := getenv(EnvAnthropicAuth); v != "" {
+		cfg.AnthropicAuth = v
+	}
 	if v := getenv(EnvLLMModels); v != "" {
 		cfg.LLMModels = v
 	}
@@ -281,7 +297,9 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 	fs.DurationVar(&cfg.IdempotencyRetention, "idempotency-retention", cfg.IdempotencyRetention,
 		"how long an idempotency key is remembered, 1h..24h (env "+EnvIdempotencyRetention+")")
 	fs.StringVar(&cfg.AnthropicBaseURL, "anthropic-base-url", cfg.AnthropicBaseURL,
-		"LLM provider API base URL, https or http to loopback (env "+EnvAnthropicBaseURL+"); the key is read only from env "+EnvAnthropicAPIKey)
+		"LLM provider API base URL, https or http to loopback, may have a gateway path (env "+EnvAnthropicBaseURL+"); the key is read only from env "+EnvAnthropicAPIKey)
+	fs.StringVar(&cfg.AnthropicAuth, "anthropic-auth", cfg.AnthropicAuth,
+		"header of the provider key: "+AnthropicAuthXAPIKey+" or "+AnthropicAuthBearer+" for Authorization: Bearer (env "+EnvAnthropicAuth+")")
 	fs.DurationVar(&cfg.LLMTimeout, "llm-timeout", cfg.LLMTimeout,
 		"limit of one provider call, 10s..10m, at most half the reservation TTL (env "+EnvLLMTimeout+")")
 	fs.StringVar(&cfg.LLMModels, "llm-models", cfg.LLMModels,
@@ -449,6 +467,10 @@ func (c Config) validateLLM() []error {
 	if err := validateBaseURL(c.AnthropicBaseURL); err != nil {
 		errs = append(errs, err)
 	}
+	if c.AnthropicAuth != AnthropicAuthXAPIKey && c.AnthropicAuth != AnthropicAuthBearer {
+		// The value is not quoted: a key pasted into the wrong variable must not reach the log.
+		errs = append(errs, fmt.Errorf("%s: unknown value, want %s or %s", EnvAnthropicAuth, AnthropicAuthXAPIKey, AnthropicAuthBearer))
+	}
 	if c.LLMTimeout < minLLMTimeout || c.LLMTimeout > maxLLMTimeout {
 		errs = append(errs, fmt.Errorf("LLM timeout %s: must be within %s..%s", c.LLMTimeout, minLLMTimeout, maxLLMTimeout))
 	} else if 2*c.LLMTimeout > c.QuotaReservationTTL {
@@ -502,8 +524,9 @@ func (c Config) SealKeys() ([]SealKey, error) {
 	return keys, nil
 }
 
-// validateBaseURL accepts an https URL, or http to a loopback host (local fake provider), without user info, path,
-// query or fragment. The adapter appends the fixed API path.
+// validateBaseURL accepts an https URL, or http to a loopback host (local fake provider), without user info, query
+// or fragment. A path is a gateway prefix: plain segments of unreserved characters, no escapes, no empty, "." or ".."
+// segment; one trailing slash is ignored. The adapter appends the fixed API path and checks the same rules.
 func validateBaseURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || u.Opaque != "" {
@@ -512,11 +535,37 @@ func validateBaseURL(raw string) error {
 	if u.Scheme != "https" && (u.Scheme != "http" || !isLoopback(u.Hostname())) {
 		return fmt.Errorf("%s: scheme must be https (http only to a loopback host)", EnvAnthropicBaseURL)
 	}
-	if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-		return fmt.Errorf("%s: must not contain user info, a path, a query or a fragment", EnvAnthropicBaseURL)
+	if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return fmt.Errorf("%s: must not contain user info, a query or a fragment", EnvAnthropicBaseURL)
+	}
+	if !plainPath(u) {
+		return fmt.Errorf("%s: the path must be segments of letters, digits and -._~ (such as /anthropic), without dot segments, "+
+			"escapes or empty segments, at most %d characters", EnvAnthropicBaseURL, maxBasePath)
 	}
 	return nil
 }
+
+// plainPath reports whether the path of u is empty, "/" or plain segments of unreserved characters.
+func plainPath(u *url.URL) bool {
+	p := strings.TrimSuffix(u.Path, "/")
+	if u.RawPath != "" {
+		return false
+	}
+	if p == "" {
+		return true
+	}
+	if len(p) > maxBasePath || !strings.HasPrefix(p, "/") {
+		return false
+	}
+	for _, seg := range strings.Split(p[1:], "/") {
+		if seg == "" || seg == "." || seg == ".." || strings.TrimLeft(seg, unreservedChars) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+const unreservedChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
 
 func isLoopback(host string) bool {
 	if host == "localhost" {
@@ -617,10 +666,11 @@ func validateDatabaseURL(raw string) error {
 // Config cannot leak them.
 func (c Config) String() string {
 	return fmt.Sprintf("{Command:%s LogLevel:%s ListenAddr:%s DatabaseURL:%s ShutdownTimeout:%s QuotaUnit:%s QuotaLimit:%d "+
-		"QuotaReservationTTL:%s IdempotencyRetention:%s AnthropicAPIKey:%s AnthropicBaseURL:%s LLMTimeout:%s LLMModels:%s "+
+		"QuotaReservationTTL:%s IdempotencyRetention:%s AnthropicAPIKey:%s AnthropicBaseURL:%s AnthropicAuth:%s LLMTimeout:%s LLMModels:%s "+
 		"ProviderStream:%t RateLimitPerMinute:%d RateLimitBurst:%d AgentPlannerAlias:%s AgentStrongAlias:%s AgentSealKeys:%s}",
 		c.Command, c.LogLevel, c.ListenAddr, redacted(c.DatabaseURL), c.ShutdownTimeout, c.QuotaUnit, c.QuotaLimit,
-		c.QuotaReservationTTL, c.IdempotencyRetention, redacted(c.AnthropicAPIKey), printableURL(c.AnthropicBaseURL), c.LLMTimeout, c.LLMModels,
+		c.QuotaReservationTTL, c.IdempotencyRetention, redacted(c.AnthropicAPIKey), printableURL(c.AnthropicBaseURL),
+		printableAuth(c.AnthropicAuth), c.LLMTimeout, c.LLMModels,
 		c.ProviderStream, c.RateLimitPerMinute, c.RateLimitBurst, c.AgentPlannerAlias, c.AgentStrongAlias, redacted(c.AgentSealKeys))
 }
 
@@ -643,6 +693,7 @@ func (c Config) LogValue() slog.Value {
 		slog.Duration("idempotency_retention", c.IdempotencyRetention),
 		slog.String("anthropic_api_key", redacted(c.AnthropicAPIKey)),
 		slog.String("anthropic_base_url", printableURL(c.AnthropicBaseURL)),
+		slog.String("anthropic_auth", printableAuth(c.AnthropicAuth)),
 		slog.Duration("llm_timeout", c.LLMTimeout),
 		slog.String("llm_models", c.LLMModels),
 		slog.Bool("provider_stream", c.ProviderStream),
@@ -660,6 +711,14 @@ func printableURL(raw string) string {
 		return "(invalid)"
 	}
 	return raw
+}
+
+// printableAuth shows only a known auth mode; anything else could be a misplaced key.
+func printableAuth(mode string) string {
+	if mode != AnthropicAuthXAPIKey && mode != AnthropicAuthBearer {
+		return "(invalid)"
+	}
+	return mode
 }
 
 func redacted(secret string) string {

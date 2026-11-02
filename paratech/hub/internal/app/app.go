@@ -115,8 +115,9 @@ func newLLMParts(cfg config.Config, log *slog.Logger) (*llmParts, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: %s: %w", config.EnvLLMModels, err)
 	}
-	provider, err := anthropic.New(anthropic.Options{APIKey: cfg.AnthropicAPIKey, BaseURL: cfg.AnthropicBaseURL, Timeout: cfg.LLMTimeout,
-		Log: log})
+	// config keeps the mode as text (ARCH-52: std only); its values are the adapter's, which checks them again.
+	provider, err := anthropic.New(anthropic.Options{APIKey: cfg.AnthropicAPIKey, Auth: anthropic.Auth(cfg.AnthropicAuth),
+		BaseURL: cfg.AnthropicBaseURL, Timeout: cfg.LLMTimeout, Log: log})
 	if err != nil {
 		return nil, fmt.Errorf("app: %w", err)
 	}
