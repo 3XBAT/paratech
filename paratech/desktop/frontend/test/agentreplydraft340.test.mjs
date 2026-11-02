@@ -103,7 +103,8 @@ test("«Стоп» keeps the reply text as UI-only state, shown muted above the 
   assert.ok(!html.includes("ag-reply-draft"));
   assert.ok(html.indexOf("ag-reply-kept") < html.indexOf("ag-stop"));
   assert.ok(html.includes("Остановлено"));
-  assert.ok(html.includes(">Повторить<"));
+  assert.ok(html.includes(">Продолжить<"));
+  assert.ok(!html.includes(">Повторить<"));
   assert.ok(!html.includes("Ответ прервался"));
 });
 

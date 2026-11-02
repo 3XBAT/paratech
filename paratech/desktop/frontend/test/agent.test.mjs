@@ -613,8 +613,15 @@ test("stop reasons: offline repeats (continue), failed retries, expired restarts
   assert.deepEqual(stop("failed").buttons.map((b) => b.label), ["Повторить"]);
   assert.deepEqual(stop("expired").buttons.map((b) => b.label), ["Начать заново"]);
   assert.deepEqual(stop("budget").buttons, []);
-  assert.deepEqual(stop("user").buttons.map((b) => b.label), ["Повторить", "Отмена"]);
+  // «Стоп» resumes («Продолжить», id resume); offline and quota repeat («Повторить», id continue).
+  assert.deepEqual(stop("user").buttons.map((b) => b.label), ["Продолжить", "Отмена"]);
+  assert.deepEqual(stop("user").buttons.map((b) => b.id), ["resume", "cancel"]);
   assert.deepEqual(stop("quota").buttons.map((b) => b.label), ["Повторить", "Отмена"]);
+  assert.deepEqual(stop("quota").buttons.map((b) => b.id), ["continue", "cancel"]);
+  // A problem that offers its own next step leaves no second way on in the stop card.
+  const stopCardOf = (reason, problem) => modelOf(update({ status: "STOPPED", stopReason: reason, problem })).cards.find((c) => c.type === "stopped");
+  assert.deepEqual(stopCardOf("offline", "retry_required").buttons.map((b) => b.id), ["cancel"]);
+  assert.deepEqual(stopCardOf("user", "restart_required").buttons.map((b) => b.id), ["cancel"]);
   // A stopped card and the update's reason are one card, not two.
   const both = modelOf(update({ status: "STOPPED", stopReason: "offline", cards: [card({ kind: "stopped", stopReason: "offline" })] }));
   assert.equal(both.cards.filter((c) => c.type === "stopped").length, 1);

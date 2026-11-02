@@ -472,6 +472,7 @@ export function AgentPanel(props: {
       cancel: () => api.cancel(ref),
       stop: () => api.stop(ref),
       continue: () => api.continueTurn(ref),
+      resume: () => api.continueTurn(ref),
       retry: () => api.retry(ref),
       restart: () => api.restart(ref),
       rerun: () => api.rerun(ref),

@@ -495,7 +495,7 @@ export const texts = {
 } as const;
 
 /** Button ids of a request; the panel maps them to the calls. */
-export type ButtonId = "approve" | "revise" | "cancel" | "stop" | "continue" | "retry" | "restart" | "rerun" | "resend";
+export type ButtonId = "approve" | "revise" | "cancel" | "stop" | "continue" | "resume" | "retry" | "restart" | "rerun" | "resend";
 
 export const buttonLabels: Record<ButtonId, string> = {
   approve: "Да",
@@ -503,6 +503,7 @@ export const buttonLabels: Record<ButtonId, string> = {
   cancel: "Отмена",
   stop: "Стоп",
   continue: "Повторить",
+  resume: "Продолжить",
   retry: "Повторить",
   restart: "Начать заново",
   rerun: "Повторить",
@@ -537,7 +538,8 @@ const updateProblemTexts: Record<string, string> = {
 /** Why a request stopped: the text of the stop card and the buttons it offers. */
 const stopTexts: Record<string, { text: string; buttons: ButtonId[] }> = {
   offline: { text: "Не завершено: нет связи", buttons: ["continue", "cancel"] },
-  user: { text: "Остановлено", buttons: ["continue", "cancel"] },
+  // «Стоп» keeps «Продолжить» (the same free replay): «Повторить» would promise another attempt, which is the rerun button.
+  user: { text: "Остановлено", buttons: ["resume", "cancel"] },
   quota: { text: "Не завершено: исчерпан лимит", buttons: ["continue", "cancel"] },
   failed: { text: "Не получилось выполнить шаг", buttons: ["retry"] },
   expired: { text: "Просьба устарела", buttons: ["restart"] },
@@ -915,9 +917,13 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
   const stopCard = running ? undefined : u.cards.find((c) => c.kind === "stopped");
   const reason = running ? "" : stopCard?.stopReason || u.stopReason;
   let stop = reason !== "" ? (stopTexts[reason] ?? { text: "Остановлено", buttons: [] }) : null;
-  // A reply that broke off in the middle: the same «Повторить», a clearer line.
+  // A reply that broke off in the middle: the same retry button, a clearer line.
   if (stop && reason === "failed" && ctx.replyCut === true) {
     stop = { ...stop, text: texts.replyCut };
+  }
+  // The problem's own «Повторить»/«Начать заново» is the next step: the stop card must not offer a second way on.
+  if (stop && (problem === "retry_required" || problem === "restart_required")) {
+    stop = { ...stop, buttons: stop.buttons.filter((b) => b !== "continue" && b !== "resume") };
   }
   if (stop) {
     cards.push({ type: "stopped", text: stop.text, buttons: buttons(stop.buttons) });
@@ -943,6 +949,7 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
     !offered.includes("retry") &&
     !offered.includes("restart") &&
     // The stop card's `continue` button is worded «Повторить» too: two of them under one request would be confusing.
+    // `resume` («Продолжить», after «Стоп») does not clash: the rerun stays.
     !offered.includes("continue");
   return { ...base, cards, rerun };
 }
