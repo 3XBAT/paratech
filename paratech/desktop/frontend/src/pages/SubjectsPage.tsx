@@ -545,6 +545,7 @@ export function SubjectsPage(props: {
   const tilesBody = (
     <>
       {subjectForm}
+      {inboxError && <ErrorLine text={inboxFailedText} onRefresh={load} onRetry={load} />}
       <InboxList materials={inbox} actions={inboxActions} />
       {review === null && <EmptySubjects onAdd={() => setForm("subject")} offer={{ state: offer, onReview: openReview, onImport: () => props.onOpen("schedule"), onRetry: retryOffer, disabled: undoBusy }} />}
       {note !== "" && (
@@ -577,12 +578,17 @@ export function SubjectsPage(props: {
       }}
       inbox={inboxEntry(inboxFiles(inbox), view.kind === "inbox", inboxLoaded && !inboxError)}
       onOpenInbox={openInbox}
-      drop={{
-        dragging: dragging !== "",
-        inboxIds,
-        onDrop: (s, id) => void cardDrop.drop(s.id, id),
-        onEnd: () => setDragging(""),
-      }}
+      drop={
+        // Only «Входящие» holds draggable rows, so only there the tree reserves the line for the cue.
+        view.kind === "inbox"
+          ? {
+              dragging: dragging !== "",
+              inboxIds,
+              onDrop: (s, id) => void cardDrop.drop(s.id, id),
+              onEnd: () => setDragging(""),
+            }
+          : undefined
+      }
       addId={addSubjectId}
     />
   );

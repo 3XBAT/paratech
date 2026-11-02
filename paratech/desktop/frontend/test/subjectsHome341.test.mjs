@@ -295,7 +295,9 @@ test("a failed «Входящие» is not drawn as an empty one; the files of a
   const detail = (props) => html(h(SubjectDetail, { subject: list[1], folderForm: false, busy: false, error: "", onCreateFolder: noop, onCancelFolder: noop, ...props }));
   const loading = detail({ materials: null });
   assert.doesNotMatch(loading, /пока нет файлов/);
-  assert.match(loading, /Загрузка…/);
+  assert.doesNotMatch(loading, /Загрузка…/, "no flashing line per folder while loading");
+  assert.doesNotMatch(loading, /empty-folder/);
+  assert.match(loading, /Материалы/, "the folders themselves stay");
   assert.doesNotMatch(loading, /· 0 файлов/, "no count while unknown");
   const failed = detail({ materials: null, failed: true });
   assert.doesNotMatch(failed, /пока нет файлов|Загрузка…/);
@@ -352,12 +354,24 @@ test("a failed read of the files of a subject is one line under the head with «
   assert.equal(texts.filesFailed, "Не удалось загрузить файлы предмета.");
 });
 
+test("the empty screen shows the failed read of «Входящие» above its list (the bare list is empty then)", () => {
+  const page = src("pages/SubjectsPage.tsx");
+  const body = page.slice(page.indexOf("const tilesBody"), page.indexOf("const tree = ("));
+  assert.match(body, /\{inboxError && <ErrorLine text=\{inboxFailedText\} onRefresh=\{load\} onRetry=\{load\} \/>\}\s*<InboxList /);
+});
+
+test("the tree gets the drop (and so the reserved cue line) only in the view «Входящие»", () => {
+  const page = src("pages/SubjectsPage.tsx");
+  assert.match(page, /drop=\{\s*(\/\/[^\n]*\n\s*)?view\.kind === "inbox"\s*\?\s*\{[^}]*inboxIds,[^}]*\}\s*:\s*undefined\s*\}/);
+});
+
 test("the tree is sticky with its own scroll, off in the narrow layout, and the .sheet is its only scroll ancestor", () => {
   const css = src("styles.css");
   assert.match(css, /\.tree \{ position: sticky; top: 16px; max-height: calc\(100vh - [^;]*; overflow: auto;/);
   assert.match(css, /@container app \(max-width: 900px\) \{ \.tree \{ position: static;/);
   assert.match(css, /\.subj \{[^}]*align-items: start;/, "the grid cell is as tall as the tree, so it can stick");
   assert.match(css, /\.tree-cue \{ height: 36px;/, "the cue line has a fixed height");
+  assert.match(css, /\.tree \{[^}]*padding: 4px; margin: -4px;/, "room for the 2px drop ring and the outline offset");
   assert.match(css, /@media \(forced-colors: active\) \{\s*\.tree \.ti\.cur \{ outline: 2px solid Highlight; \}\s*\.tree \.ti\.drop \{ outline: 2px solid Highlight;/);
 });
 

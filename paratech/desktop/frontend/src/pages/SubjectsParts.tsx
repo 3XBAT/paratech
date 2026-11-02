@@ -322,7 +322,7 @@ export function SubjectDetail(props: {
   subject: LibrarySubject;
   /** The files of the subject; null while they are being read or when reading failed (see `failed`). */
   materials: readonly LibraryMaterial[] | null;
-  /** The files could not be read: the page says so once, so the folders neither say «пока нет файлов» nor «Загрузка…». */
+  /** The files could not be read: the page says so once, so the folders say nothing about their files (neither «пока нет файлов» nor «Загрузка…», which they do not show while loading either). */
   failed?: boolean;
   /** The «новое» marks of this visit (TASK-227); none without the overview. */
   fresh?: FreshMarks;
@@ -355,10 +355,8 @@ export function SubjectDetail(props: {
               {onAddFile && <IconButton icon="plus" label={addToFolderLabel(folderTitle(f))} disabled={props.busy} onClick={() => onAddFile(f.id)} />}
             </div>
             {props.folderExtra?.(f.id)}
-            {/* Unknown files (loading, failed): no «пусто» claim; a failure is one line under the head of the page. */}
-            {files === null ? (
-              props.failed !== true && <p className="small muted empty-folder">{texts.loading}</p>
-            ) : (
+            {/* Unknown files (loading, failed): no «пусто» claim and no per-folder «Загрузка…»; a failure is one line under the head of the page. */}
+            {files === null ? null : (
               <Card className="lrows" label={folderTitle(f)}>
                 {files.length === 0 ? (
                   <p className="small muted empty-folder">{texts.emptyFolder}</p>
