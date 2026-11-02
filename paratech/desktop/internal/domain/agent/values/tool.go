@@ -5,7 +5,8 @@ import (
 	"slices"
 )
 
-// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v9.json). v9 has
+// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v9.json). Catalog
+// v10 (ADR-0033 §10, wave10.go) is declared but not served until this constant becomes CatalogWave10 (TASK-326). v9 has
 // the tools of v8 and lets a step carry mentions and a history summary turn (panel prompt v9, chats; TASK-244,
 // TASK-245); v8 has the tools of v7 and asks the subject of an assignment (TASK-233, TASK-234); v7 is v6 with
 // reply.text of the type reply_text, up to 4000 characters (TASK-223); v6 added create_assignment and the argument type
@@ -49,8 +50,12 @@ const (
 	ToolCannotDo               Tool = "cannot_do"
 )
 
-// Tools returns every tool in catalog order.
-func Tools() []Tool { return toolsOf(catalog) }
+// Tools returns every tool of CatalogVersion in catalog order.
+func Tools() []Tool { return ToolsAt(CatalogVersion) }
+
+// ToolsAt returns every tool of catalog version v in catalog order. Versions below CatalogWave10 are catalog v9, the
+// oldest one served; versions from CatalogWave10 on are catalog v10 (the newest declared).
+func ToolsAt(v int) []Tool { return toolsOf(specsAt(v)) }
 
 // RetiredTools returns the tools that left the catalog but may still be named by stored data.
 func RetiredTools() []Tool { return toolsOf(retired) }
@@ -63,10 +68,13 @@ func toolsOf(specs []ToolSpec) []Tool {
 	return out
 }
 
-// ParseTool returns the tool named s. A retired tool is ErrUnknownTool: the planner cannot call it.
-func ParseTool(s string) (Tool, error) {
+// ParseTool returns the tool named s in CatalogVersion. A retired tool is ErrUnknownTool: the planner cannot call it.
+func ParseTool(s string) (Tool, error) { return ParseToolAt(s, CatalogVersion) }
+
+// ParseToolAt returns the tool named s in catalog version v (as ToolsAt); a tool of a later catalog is ErrUnknownTool.
+func ParseToolAt(s string, v int) (Tool, error) {
 	t := Tool(s)
-	if _, ok := specOf(t); !ok {
+	if _, ok := findSpec(specsAt(v), t); !ok {
 		return "", fmt.Errorf("%w: %q", ErrUnknownTool, s)
 	}
 	return t, nil
@@ -100,6 +108,7 @@ const (
 	ArgCardIDs   ArgType = "card_ids" // 0..MaxCardIDs IDs a card lists; the desktop shows their local data (catalog v3)
 	ArgPlanSteps ArgType = "plan_steps"
 	ArgQuestions ArgType = "questions"
+	ArgBool      ArgType = "bool" // JSON true or false (catalog v10: mark_assignments_done.done)
 )
 
 // ArgSpec describes one argument of a tool.
@@ -109,6 +118,7 @@ type ArgSpec struct {
 	Required bool
 	Values   []string // enum values
 	Kind     IDKind   // ID kind of an id, ids or card_ids argument
+	MaxItems int      // ids only: at most this many IDs; 0 means MaxIDsPerArg
 	// Persistent marks a label that is stored and later shown to the planner (subject, folder and semester names);
 	// it is parsed as a Name, not a Label.
 	Persistent bool
@@ -162,23 +172,34 @@ func (s ToolSpec) arg(name string) (ArgSpec, bool) {
 	return ArgSpec{}, false
 }
 
-// SpecOf returns the schema of a tool.
-func SpecOf(t Tool) (ToolSpec, error) {
-	s, ok := specOf(t)
+// SpecOf returns the schema of a tool in CatalogVersion.
+func SpecOf(t Tool) (ToolSpec, error) { return SpecAt(t, CatalogVersion) }
+
+// SpecAt returns the schema of a tool in catalog version v (as ToolsAt).
+func SpecAt(t Tool, v int) (ToolSpec, error) {
+	s, ok := findSpec(specsAt(v), t)
 	if !ok {
 		return ToolSpec{}, fmt.Errorf("%w: %q", ErrUnknownTool, string(t))
 	}
 	return s, nil
 }
 
-func specOf(t Tool) (ToolSpec, bool) { return findSpec(catalog, t) }
+func specOf(t Tool) (ToolSpec, bool) { return findSpec(specsAt(CatalogVersion), t) }
 
 // storedSpecOf finds the schema of a tool in the catalog or among the retired ones, for stored data only.
 func storedSpecOf(t Tool) (ToolSpec, bool) {
-	if s, ok := findSpec(catalog, t); ok {
+	if s, ok := specOf(t); ok {
 		return s, true
 	}
 	return findSpec(retired, t)
+}
+
+// specsAt returns the schemas of catalog version v: v9 below CatalogWave10, else v10.
+func specsAt(v int) []ToolSpec {
+	if v >= CatalogWave10 {
+		return catalog10
+	}
+	return catalog
 }
 
 func findSpec(specs []ToolSpec, t Tool) (ToolSpec, bool) {

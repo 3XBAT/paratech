@@ -362,12 +362,17 @@ export function parseFill(raw: unknown): ContextFill | null {
  * The draft of an answer being read by answer_question callId of a request (agentdraft.go): the claim texts so far,
  * at most 10 a second, the last texts winning. Unchecked model text: show it as plain text marked «черновик»; the
  * update with the call's answer card, or the request stopped, replaces it.
+ *
+ * `reply` (TASK-340) marks the draft of the reply a planner step is writing: callId is "step:reply" for every step of
+ * the request (a newer text replaces the older) and texts holds one entry, the whole reply so far (line breaks kept).
+ * The next update of the request that is not a progress or a refused operation replaces it. A missing field reads false.
  */
 export interface DraftView {
   threadId: string;
   turn: number;
   callId: string;
   texts: string[];
+  reply: boolean;
 }
 
 /** What «Журнал» reads: a line is an action of paratech or a processing job. Empty fields match everything. */
@@ -646,6 +651,7 @@ export function parseDraft(raw: unknown): DraftView {
     turn: num(r, "turn", w),
     callId: str(r, "callId", w),
     texts: strings(r, "texts", w),
+    reply: flag(r, "reply"),
   };
 }
 

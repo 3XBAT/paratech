@@ -57,6 +57,7 @@ func TestAuthRejectsBeforeReadingTheBody(t *testing.T) {
 		hubv1connect.GatewayServiceCompleteProcedure,
 		hubv1connect.GatewayServiceCompleteStreamProcedure,
 		hubv1connect.GatewayServiceAgentStepProcedure,
+		hubv1connect.GatewayServiceAgentStepStreamProcedure,
 		hubv1connect.QuotaServiceGetRemainingProcedure,
 	}
 	for _, p := range protocols {

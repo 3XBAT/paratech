@@ -184,6 +184,8 @@ func (a *Action) Undoable(now time.Time, t Target) (bool, NoUndo) {
 	switch {
 	case a.CheckUndo(t) != nil:
 		return false, NoUndoResultReady
+	case a.status == StatusDone && a.comp == nil:
+		return false, NoUndoIrreversible // recording{stop} (ADR-0033 О-7 а)
 	case a.status == StatusDone, a.undoStale(now):
 		return true, NoUndoNone
 	}

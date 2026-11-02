@@ -85,14 +85,27 @@ func (s *turnStore) NewThreadID() shared.ThreadID {
 	return shared.ThreadID(fmt.Sprintf("th%d", s.next))
 }
 
-// scriptModel answers each planner step with the next calls of its script and keeps the requests.
+// scriptModel answers each planner step with the next calls of its script and keeps the requests. stream, when set,
+// runs first with the ctx and the draft of the step (outside the lock); an error it returns fails the step.
 type scriptModel struct {
-	mu    sync.Mutex
-	steps [][]values.RawCall
-	reqs  []values.StepRequest
+	mu     sync.Mutex
+	steps  [][]values.RawCall
+	reqs   []values.StepRequest
+	stream func(ctx context.Context, draft func(string)) error
 }
 
-func (m *scriptModel) Step(_ context.Context, req values.StepRequest) (values.StepReply, error) {
+func (m *scriptModel) Step(ctx context.Context, req values.StepRequest, draft func(string)) (values.StepReply, error) {
+	m.mu.Lock()
+	stream := m.stream
+	m.mu.Unlock()
+	if stream != nil {
+		if err := stream(ctx, draft); err != nil {
+			m.mu.Lock()
+			m.reqs = append(m.reqs, req)
+			m.mu.Unlock()
+			return values.StepReply{}, err
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.reqs = append(m.reqs, req)

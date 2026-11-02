@@ -39,7 +39,7 @@ type agentReads struct {
 }
 
 // wireAgent builds the agent core (TASK-116, TASK-117, TASK-123, TASK-127, ADR-0021): the steps of a request on the
-// Hub's AgentStep, the action journal with Undo and the Driver that runs the read tools, the reversible actions and
+// Hub's AgentStepStream (its reply shown as a draft while written, TASK-340), the action journal with Undo and the Driver that runs the read tools, the reversible actions and
 // the proposals (a confirm card only: the proposals service and the deletion preview, never their confirmation); its
 // updates go to the agent panel of the UI (TASK-119). Today and the zone of the base come from the student's clock.
 // It needs c.drafts and c.deletions.
@@ -57,6 +57,11 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	// goes straight to the panel, not through the Driver, so the Driver and the step use case form no cycle.
 	c.panel = wails.NewAgentPanel(log)
 	progress, err := agentloop.NewProgress(panelSink{c.panel})
+	if err != nil {
+		return fmt.Errorf("app: agent: %w", err)
+	}
+	// The reply a step writes goes to the panel as a draft the same way (TASK-340); the Driver only cuts it on «Стоп».
+	replies, err := agentloop.NewReplies(panelSink{c.panel})
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)
 	}
@@ -87,8 +92,8 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	}
 	c.agent, err = agentturn.New(agentturn.Deps{
 		Model: model, Threads: sqlite.NewAgentThreadRepository(c.db), History: sqlite.NewAgentHistory(c.db, e.clock),
-		Subjects: subjects, Facts: facts, Tx: c.db, Clock: e.local, IDs: e.ids, Progress: progress, Effects: c.journal,
-		Mentions: c.mentions, Log: log,
+		Subjects: subjects, Facts: facts, Tx: c.db, Clock: e.local, IDs: e.ids, Progress: progress, Drafts: replies,
+		Effects: c.journal, Mentions: c.mentions, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)
@@ -107,7 +112,7 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 		Turns: c.agent, Sink: panelSink{c.panel}, Library: reads.library, Inspector: reads.library, Answerer: reads.answers,
 		Knowledge: reads.knowledge, Activity: reads.activity, Schedule: reads.schedule,
 		Assignments: reads.assignments, Deliveries: reads.deliveries, Journal: c.journal, Actions: actions,
-		Proposals: reads.assignments, Deletions: c.deletions, Drafts: c.drafts, Clock: e.local, Log: log,
+		Proposals: reads.assignments, Deletions: c.deletions, Drafts: c.drafts, Replies: replies, Clock: e.local, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: agent driver: %w", err)
@@ -165,6 +170,6 @@ func (d driverCurrent) Current(ctx context.Context, id shared.ThreadID) (wails.A
 // Draft forwards d.
 func (s panelSink) Draft(d agentloop.Draft) {
 	s.panel.Draft(wails.AgentDraft{
-		Thread: d.Thread, Turn: d.Turn, CallID: d.CallID, Texts: d.Texts, End: wails.AgentDraftEnd(d.End),
+		Thread: d.Thread, Turn: d.Turn, CallID: d.CallID, Texts: d.Texts, End: wails.AgentDraftEnd(d.End), Reply: d.Reply,
 	})
 }

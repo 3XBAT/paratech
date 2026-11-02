@@ -2,6 +2,7 @@ package action
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"paratech/desktop/internal/domain/agent/services/actionpolicy"
@@ -144,6 +145,9 @@ func Restore(s State) (*Action, error) {
 		if err := checkCompensation(s.Tool, s.Intent, s.Compensation, s.TargetVersion); err != nil {
 			return nil, err
 		}
+		if s.Compensation == nil && s.Status != StatusDone {
+			return bad("an entry without a compensation is never undone")
+		}
 	} else if s.Compensation != nil || s.TargetVersion != 0 {
 		return bad("a compensation exists only after DONE")
 	}
@@ -205,8 +209,11 @@ func (a *Action) Proposal() values.Ref { return a.proposal }
 // another thread). No use case takes it: the one entry per call makes a repeated call act at most once.
 func (a *Action) Key() string { return fmt.Sprintf("ag:%s:act:%s", a.thread, a.id) }
 
-// CanUndo reports whether «Отменить» is offered at now: DONE, or UNDOING whose compensation stopped (a retry).
-func (a *Action) CanUndo(now time.Time) bool { return a.status == StatusDone || a.undoStale(now) }
+// CanUndo reports whether «Отменить» is offered at now: DONE with a compensation, or UNDOING whose compensation
+// stopped (a retry).
+func (a *Action) CanUndo(now time.Time) bool {
+	return (a.status == StatusDone && a.comp != nil) || a.undoStale(now)
+}
 
 // StaleUndo is how long an UNDOING entry counts as running. After it the compensation is taken as stopped (a failed
 // Apply leaves the entry UNDOING) and «Отменить» retries it.
@@ -229,25 +236,28 @@ func (a *Action) move(to Status, now time.Time) error {
 }
 
 // checkCompensation checks the compensation of a DONE action of tool t with intent in. A create of createsTarget
-// undoes exactly the target its intent named, never another one.
+// undoes exactly the target its intent named, never another one. A tool of noUndoTools may complete without one.
 func checkCompensation(t values.Tool, in Intent, c Compensation, targetVersion int64) error {
-	if err := checkKind(t, c); err != nil {
-		return err
-	}
 	if targetVersion < 1 {
 		return fmt.Errorf("%w: no target version", ErrInvalidCompensation)
+	}
+	if c == nil && noUndoTools[t] {
+		return nil
+	}
+	if err := checkKind(t, c); err != nil {
+		return err
 	}
 	if _, creates := createsTarget[t]; creates && targetOf(c) != in.Target {
 		return fmt.Errorf("%w: %s undoes only the target of its intent", ErrInvalidCompensation, t)
 	}
-	return nil
+	return checkTrusted(in, c, targetVersion)
 }
 
-// checkKind checks that c is a valid compensation of the kind tool t needs.
+// checkKind checks that c is a valid compensation of a kind tool t has.
 func checkKind(t values.Tool, c Compensation) error {
 	want, ok := compensationOf[t]
-	if !ok || c == nil || c.Kind() != want {
-		return fmt.Errorf("%w: %s needs %s", ErrInvalidCompensation, t, want)
+	if !ok || c == nil || !slices.Contains(want, c.Kind()) {
+		return fmt.Errorf("%w: %s needs one of %v", ErrInvalidCompensation, t, want)
 	}
 	return c.validate()
 }
@@ -286,8 +296,14 @@ func (a *Action) Recover(now time.Time) (retryUndo bool, err error) {
 	return false, nil
 }
 
-// BeginUndo is «Отменить»: DONE -> UNDOING, saved before the compensation runs.
-func (a *Action) BeginUndo(now time.Time) error { return a.move(StatusUndoing, now) }
+// BeginUndo is «Отменить»: DONE -> UNDOING, saved before the compensation runs. An entry without a compensation
+// (recording{stop}) has no Undo.
+func (a *Action) BeginUndo(now time.Time) error {
+	if a.status == StatusDone && a.comp == nil {
+		return fmt.Errorf("%w: %s has no undo", ErrInvalidTransition, a.tool)
+	}
+	return a.move(StatusUndoing, now)
+}
 
 // StartUndo is «Отменить» including its retry: DONE -> UNDOING, or a stale UNDOING entry stays UNDOING with its time
 // renewed, so a second click while the retry runs sees it running (and the CAS save lets one of them win). Saved
@@ -323,7 +339,7 @@ func targetOf(c Compensation) values.Ref {
 	case RemoveAssignment:
 		return v.Assignment
 	}
-	return values.Ref{}
+	return targetOfWave10(c)
 }
 
 // Rebase lets a DONE action follow its target through the Undo of a later action of the same request on the same

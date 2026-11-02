@@ -9,14 +9,35 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// AgentModel runs one planner step on the Hub (GatewayService.AgentStep, ADR-0023). Implemented by the hubclient
-// adapter. Errors are those of Complete: shared.ErrNetworkUnavailable, shared.ErrServiceNotConfigured,
+// AgentModel runs one planner step on the Hub (GatewayService.AgentStepStream or AgentStep, ADR-0023, ADR-0026).
+// Implemented by the hubclient adapter. Errors are those of Complete: shared.ErrNetworkUnavailable, shared.ErrServiceNotConfigured,
 // shared.ErrServiceUnavailable, shared.ErrQuotaExceeded, backoff-classified transient and permanent failures, and
 // values.ErrTurnGone when the Hub no longer keeps the model turn of the last echo. A repeated key returns the stored
 // reply (Replayed), so «Продолжить» after a lost answer does not pay twice. The reply is untrusted: every call goes
 // through values.ParseCall and the thread's Admit before anything runs (hard rule 3).
+//
+// A non-nil draft gets the visible reply text written so far, whole each time, in order, from the calling goroutine,
+// while the Hub streams it (ADR-0026 addendum). It is untrusted display-only text: the reply is the returned calls.
 type AgentModel interface {
-	Step(ctx context.Context, req values.StepRequest) (values.StepReply, error)
+	Step(ctx context.Context, req values.StepRequest, draft func(soFar string)) (values.StepReply, error)
+}
+
+// Drafts shows the reply a planner step writes while the Hub streams it (ADR-0026 addendum, TASK-340). Reply is called
+// under the service's lock after Progress.Started, for the step that goes to the Hub; like Progress it must only
+// publish, never block and never call back into the service. Implemented by input/agent over its Sink; optional.
+//
+// The returned ctx is the one of the Hub call: the implementation ends it when the request is stopped, so the stream is
+// cut at once (the Hub finishes and stores the step; «Продолжить» replays it). The draft text never reaches the use
+// case (hard rule 3): it is not stored, not sent to the planner and causes nothing.
+type Drafts interface {
+	Reply(ctx context.Context, st Step) (context.Context, Draft)
+}
+
+// Draft is the reply draft of one step. Text gets the reply so far; End is called once the Hub call returned,
+// answered when a reply came that the step goes on with (its update follows), else the draft is dropped.
+type Draft interface {
+	Text(soFar string)
+	End(answered bool)
 }
 
 // Progress learns that a step of a request goes to the Hub, after the open step is stored and before the call, so the

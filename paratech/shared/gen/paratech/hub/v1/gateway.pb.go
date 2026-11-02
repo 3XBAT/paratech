@@ -1405,6 +1405,134 @@ func (x *AgentStepResponse) GetReplayed() bool {
 	return false
 }
 
+type AgentStepStreamRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Request       *AgentStepRequest      `protobuf:"bytes,1,opt,name=request,proto3" json:"request,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentStepStreamRequest) Reset() {
+	*x = AgentStepStreamRequest{}
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentStepStreamRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentStepStreamRequest) ProtoMessage() {}
+
+func (x *AgentStepStreamRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentStepStreamRequest.ProtoReflect.Descriptor instead.
+func (*AgentStepStreamRequest) Descriptor() ([]byte, []int) {
+	return file_paratech_hub_v1_gateway_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *AgentStepStreamRequest) GetRequest() *AgentStepRequest {
+	if x != nil {
+		return x.Request
+	}
+	return nil
+}
+
+type AgentStepStreamResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Event:
+	//
+	//	*AgentStepStreamResponse_Delta
+	//	*AgentStepStreamResponse_Result
+	Event         isAgentStepStreamResponse_Event `protobuf_oneof:"event"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentStepStreamResponse) Reset() {
+	*x = AgentStepStreamResponse{}
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentStepStreamResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentStepStreamResponse) ProtoMessage() {}
+
+func (x *AgentStepStreamResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_paratech_hub_v1_gateway_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentStepStreamResponse.ProtoReflect.Descriptor instead.
+func (*AgentStepStreamResponse) Descriptor() ([]byte, []int) {
+	return file_paratech_hub_v1_gateway_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *AgentStepStreamResponse) GetEvent() isAgentStepStreamResponse_Event {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+func (x *AgentStepStreamResponse) GetDelta() string {
+	if x != nil {
+		if x, ok := x.Event.(*AgentStepStreamResponse_Delta); ok {
+			return x.Delta
+		}
+	}
+	return ""
+}
+
+func (x *AgentStepStreamResponse) GetResult() *AgentStepResponse {
+	if x != nil {
+		if x, ok := x.Event.(*AgentStepStreamResponse_Result); ok {
+			return x.Result
+		}
+	}
+	return nil
+}
+
+type isAgentStepStreamResponse_Event interface {
+	isAgentStepStreamResponse_Event()
+}
+
+type AgentStepStreamResponse_Delta struct {
+	// Next chunk of the visible reply text; UNTRUSTED, display-only, never parsed or acted on.
+	Delta string `protobuf:"bytes,1,opt,name=delta,proto3,oneof"`
+}
+
+type AgentStepStreamResponse_Result struct {
+	// Always the last message of a successful stream.
+	Result *AgentStepResponse `protobuf:"bytes,2,opt,name=result,proto3,oneof"`
+}
+
+func (*AgentStepStreamResponse_Delta) isAgentStepStreamResponse_Event() {}
+
+func (*AgentStepStreamResponse_Result) isAgentStepStreamResponse_Event() {}
+
 var File_paratech_hub_v1_gateway_proto protoreflect.FileDescriptor
 
 const file_paratech_hub_v1_gateway_proto_rawDesc = "" +
@@ -1491,7 +1619,13 @@ const file_paratech_hub_v1_gateway_proto_rawDesc = "" +
 	"\x05usage\x18\x02 \x01(\v2\x16.paratech.hub.v1.UsageR\x05usage\x124\n" +
 	"\x05quota\x18\x03 \x01(\v2\x1e.paratech.hub.v1.QuotaSnapshotR\x05quota\x12%\n" +
 	"\x0ereservation_id\x18\x04 \x01(\tR\rreservationId\x12\x1a\n" +
-	"\breplayed\x18\x05 \x01(\bR\breplayed*F\n" +
+	"\breplayed\x18\x05 \x01(\bR\breplayed\"U\n" +
+	"\x16AgentStepStreamRequest\x12;\n" +
+	"\arequest\x18\x01 \x01(\v2!.paratech.hub.v1.AgentStepRequestR\arequest\"x\n" +
+	"\x17AgentStepStreamResponse\x12\x16\n" +
+	"\x05delta\x18\x01 \x01(\tH\x00R\x05delta\x12<\n" +
+	"\x06result\x18\x02 \x01(\v2\".paratech.hub.v1.AgentStepResponseH\x00R\x06resultB\a\n" +
+	"\x05event*F\n" +
 	"\fAgentProfile\x12\x1d\n" +
 	"\x19AGENT_PROFILE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13AGENT_PROFILE_PANEL\x10\x01*\xcc\x01\n" +
@@ -1508,11 +1642,12 @@ const file_paratech_hub_v1_gateway_proto_rawDesc = "" +
 	"\x1aAGENT_MENTION_KIND_SUBJECT\x10\x01\x12\x1d\n" +
 	"\x19AGENT_MENTION_KIND_LESSON\x10\x02\x12\x1f\n" +
 	"\x1bAGENT_MENTION_KIND_MATERIAL\x10\x03\x12!\n" +
-	"\x1dAGENT_MENTION_KIND_ASSIGNMENT\x10\x042\x9a\x02\n" +
+	"\x1dAGENT_MENTION_KIND_ASSIGNMENT\x10\x042\x82\x03\n" +
 	"\x0eGatewayService\x12O\n" +
 	"\bComplete\x12 .paratech.hub.v1.CompleteRequest\x1a!.paratech.hub.v1.CompleteResponse\x12c\n" +
 	"\x0eCompleteStream\x12&.paratech.hub.v1.CompleteStreamRequest\x1a'.paratech.hub.v1.CompleteStreamResponse0\x01\x12R\n" +
-	"\tAgentStep\x12!.paratech.hub.v1.AgentStepRequest\x1a\".paratech.hub.v1.AgentStepResponseB\xac\x01\n" +
+	"\tAgentStep\x12!.paratech.hub.v1.AgentStepRequest\x1a\".paratech.hub.v1.AgentStepResponse\x12f\n" +
+	"\x0fAgentStepStream\x12'.paratech.hub.v1.AgentStepStreamRequest\x1a(.paratech.hub.v1.AgentStepStreamResponse0\x01B\xac\x01\n" +
 	"\x13com.paratech.hub.v1B\fGatewayProtoP\x01Z)paratech/shared/gen/paratech/hub/v1;hubv1\xa2\x02\x03PHX\xaa\x02\x0fParatech.Hub.V1\xca\x02\x0fParatech\\Hub\\V1\xe2\x02\x1bParatech\\Hub\\V1\\GPBMetadata\xea\x02\x11Paratech::Hub::V1b\x06proto3"
 
 var (
@@ -1528,36 +1663,38 @@ func file_paratech_hub_v1_gateway_proto_rawDescGZIP() []byte {
 }
 
 var file_paratech_hub_v1_gateway_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_paratech_hub_v1_gateway_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_paratech_hub_v1_gateway_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_paratech_hub_v1_gateway_proto_goTypes = []any{
-	(AgentProfile)(0),              // 0: paratech.hub.v1.AgentProfile
-	(AgentScreen)(0),               // 1: paratech.hub.v1.AgentScreen
-	(AgentMentionKind)(0),          // 2: paratech.hub.v1.AgentMentionKind
-	(*CompletionSpec)(nil),         // 3: paratech.hub.v1.CompletionSpec
-	(*CompletionResult)(nil),       // 4: paratech.hub.v1.CompletionResult
-	(*CompleteRequest)(nil),        // 5: paratech.hub.v1.CompleteRequest
-	(*CompleteResponse)(nil),       // 6: paratech.hub.v1.CompleteResponse
-	(*CompleteStreamRequest)(nil),  // 7: paratech.hub.v1.CompleteStreamRequest
-	(*CompleteStreamResponse)(nil), // 8: paratech.hub.v1.CompleteStreamResponse
-	(*AgentStepRequest)(nil),       // 9: paratech.hub.v1.AgentStepRequest
-	(*AgentBase)(nil),              // 10: paratech.hub.v1.AgentBase
-	(*AgentSubject)(nil),           // 11: paratech.hub.v1.AgentSubject
-	(*AgentScope)(nil),             // 12: paratech.hub.v1.AgentScope
-	(*AgentMention)(nil),           // 13: paratech.hub.v1.AgentMention
-	(*AgentTurn)(nil),              // 14: paratech.hub.v1.AgentTurn
-	(*SealedCalls)(nil),            // 15: paratech.hub.v1.SealedCalls
-	(*ToolCall)(nil),               // 16: paratech.hub.v1.ToolCall
-	(*ToolResults)(nil),            // 17: paratech.hub.v1.ToolResults
-	(*ToolResult)(nil),             // 18: paratech.hub.v1.ToolResult
-	(*AgentStepResponse)(nil),      // 19: paratech.hub.v1.AgentStepResponse
-	(OperationType)(0),             // 20: paratech.hub.v1.OperationType
-	(*Usage)(nil),                  // 21: paratech.hub.v1.Usage
-	(*QuotaSnapshot)(nil),          // 22: paratech.hub.v1.QuotaSnapshot
+	(AgentProfile)(0),               // 0: paratech.hub.v1.AgentProfile
+	(AgentScreen)(0),                // 1: paratech.hub.v1.AgentScreen
+	(AgentMentionKind)(0),           // 2: paratech.hub.v1.AgentMentionKind
+	(*CompletionSpec)(nil),          // 3: paratech.hub.v1.CompletionSpec
+	(*CompletionResult)(nil),        // 4: paratech.hub.v1.CompletionResult
+	(*CompleteRequest)(nil),         // 5: paratech.hub.v1.CompleteRequest
+	(*CompleteResponse)(nil),        // 6: paratech.hub.v1.CompleteResponse
+	(*CompleteStreamRequest)(nil),   // 7: paratech.hub.v1.CompleteStreamRequest
+	(*CompleteStreamResponse)(nil),  // 8: paratech.hub.v1.CompleteStreamResponse
+	(*AgentStepRequest)(nil),        // 9: paratech.hub.v1.AgentStepRequest
+	(*AgentBase)(nil),               // 10: paratech.hub.v1.AgentBase
+	(*AgentSubject)(nil),            // 11: paratech.hub.v1.AgentSubject
+	(*AgentScope)(nil),              // 12: paratech.hub.v1.AgentScope
+	(*AgentMention)(nil),            // 13: paratech.hub.v1.AgentMention
+	(*AgentTurn)(nil),               // 14: paratech.hub.v1.AgentTurn
+	(*SealedCalls)(nil),             // 15: paratech.hub.v1.SealedCalls
+	(*ToolCall)(nil),                // 16: paratech.hub.v1.ToolCall
+	(*ToolResults)(nil),             // 17: paratech.hub.v1.ToolResults
+	(*ToolResult)(nil),              // 18: paratech.hub.v1.ToolResult
+	(*AgentStepResponse)(nil),       // 19: paratech.hub.v1.AgentStepResponse
+	(*AgentStepStreamRequest)(nil),  // 20: paratech.hub.v1.AgentStepStreamRequest
+	(*AgentStepStreamResponse)(nil), // 21: paratech.hub.v1.AgentStepStreamResponse
+	(OperationType)(0),              // 22: paratech.hub.v1.OperationType
+	(*Usage)(nil),                   // 23: paratech.hub.v1.Usage
+	(*QuotaSnapshot)(nil),           // 24: paratech.hub.v1.QuotaSnapshot
 }
 var file_paratech_hub_v1_gateway_proto_depIdxs = []int32{
-	20, // 0: paratech.hub.v1.CompletionSpec.operation_type:type_name -> paratech.hub.v1.OperationType
-	21, // 1: paratech.hub.v1.CompletionResult.usage:type_name -> paratech.hub.v1.Usage
-	22, // 2: paratech.hub.v1.CompletionResult.quota:type_name -> paratech.hub.v1.QuotaSnapshot
+	22, // 0: paratech.hub.v1.CompletionSpec.operation_type:type_name -> paratech.hub.v1.OperationType
+	23, // 1: paratech.hub.v1.CompletionResult.usage:type_name -> paratech.hub.v1.Usage
+	24, // 2: paratech.hub.v1.CompletionResult.quota:type_name -> paratech.hub.v1.QuotaSnapshot
 	3,  // 3: paratech.hub.v1.CompleteRequest.spec:type_name -> paratech.hub.v1.CompletionSpec
 	4,  // 4: paratech.hub.v1.CompleteResponse.result:type_name -> paratech.hub.v1.CompletionResult
 	3,  // 5: paratech.hub.v1.CompleteStreamRequest.spec:type_name -> paratech.hub.v1.CompletionSpec
@@ -1575,19 +1712,23 @@ var file_paratech_hub_v1_gateway_proto_depIdxs = []int32{
 	16, // 17: paratech.hub.v1.SealedCalls.calls:type_name -> paratech.hub.v1.ToolCall
 	18, // 18: paratech.hub.v1.ToolResults.results:type_name -> paratech.hub.v1.ToolResult
 	15, // 19: paratech.hub.v1.AgentStepResponse.calls:type_name -> paratech.hub.v1.SealedCalls
-	21, // 20: paratech.hub.v1.AgentStepResponse.usage:type_name -> paratech.hub.v1.Usage
-	22, // 21: paratech.hub.v1.AgentStepResponse.quota:type_name -> paratech.hub.v1.QuotaSnapshot
-	5,  // 22: paratech.hub.v1.GatewayService.Complete:input_type -> paratech.hub.v1.CompleteRequest
-	7,  // 23: paratech.hub.v1.GatewayService.CompleteStream:input_type -> paratech.hub.v1.CompleteStreamRequest
-	9,  // 24: paratech.hub.v1.GatewayService.AgentStep:input_type -> paratech.hub.v1.AgentStepRequest
-	6,  // 25: paratech.hub.v1.GatewayService.Complete:output_type -> paratech.hub.v1.CompleteResponse
-	8,  // 26: paratech.hub.v1.GatewayService.CompleteStream:output_type -> paratech.hub.v1.CompleteStreamResponse
-	19, // 27: paratech.hub.v1.GatewayService.AgentStep:output_type -> paratech.hub.v1.AgentStepResponse
-	25, // [25:28] is the sub-list for method output_type
-	22, // [22:25] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	23, // 20: paratech.hub.v1.AgentStepResponse.usage:type_name -> paratech.hub.v1.Usage
+	24, // 21: paratech.hub.v1.AgentStepResponse.quota:type_name -> paratech.hub.v1.QuotaSnapshot
+	9,  // 22: paratech.hub.v1.AgentStepStreamRequest.request:type_name -> paratech.hub.v1.AgentStepRequest
+	19, // 23: paratech.hub.v1.AgentStepStreamResponse.result:type_name -> paratech.hub.v1.AgentStepResponse
+	5,  // 24: paratech.hub.v1.GatewayService.Complete:input_type -> paratech.hub.v1.CompleteRequest
+	7,  // 25: paratech.hub.v1.GatewayService.CompleteStream:input_type -> paratech.hub.v1.CompleteStreamRequest
+	9,  // 26: paratech.hub.v1.GatewayService.AgentStep:input_type -> paratech.hub.v1.AgentStepRequest
+	20, // 27: paratech.hub.v1.GatewayService.AgentStepStream:input_type -> paratech.hub.v1.AgentStepStreamRequest
+	6,  // 28: paratech.hub.v1.GatewayService.Complete:output_type -> paratech.hub.v1.CompleteResponse
+	8,  // 29: paratech.hub.v1.GatewayService.CompleteStream:output_type -> paratech.hub.v1.CompleteStreamResponse
+	19, // 30: paratech.hub.v1.GatewayService.AgentStep:output_type -> paratech.hub.v1.AgentStepResponse
+	21, // 31: paratech.hub.v1.GatewayService.AgentStepStream:output_type -> paratech.hub.v1.AgentStepStreamResponse
+	28, // [28:32] is the sub-list for method output_type
+	24, // [24:28] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_paratech_hub_v1_gateway_proto_init() }
@@ -1607,13 +1748,17 @@ func file_paratech_hub_v1_gateway_proto_init() {
 		(*AgentTurn_AgentReply)(nil),
 		(*AgentTurn_HistorySummary)(nil),
 	}
+	file_paratech_hub_v1_gateway_proto_msgTypes[18].OneofWrappers = []any{
+		(*AgentStepStreamResponse_Delta)(nil),
+		(*AgentStepStreamResponse_Result)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_paratech_hub_v1_gateway_proto_rawDesc), len(file_paratech_hub_v1_gateway_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   17,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

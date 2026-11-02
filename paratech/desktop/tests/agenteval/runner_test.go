@@ -85,7 +85,7 @@ func (r *liveRun) request(req Request) Outcome {
 		reply, err := r.client.Step(ctx, values.StepRequest{
 			Key: fmt.Sprintf("ag:%s:%d:%d", thread, number, step), Thread: thread, Base: r.base, Scope: scope,
 			Mentions: mentions, History: history, MaxOutputTokens: agentturn.MaxOutputTokens,
-		})
+		}, nil)
 		cancel()
 		if err != nil {
 			o.Err = err.Error()

@@ -25,6 +25,11 @@ const (
 	CardStopped    CardKind = "stopped"
 	CardWork       CardKind = "work"      // a turnkey work: questions, «Как я понял задание» or the helper mode (TASK-129)
 	CardFreeWork   CardKind = "free_work" // a work on a topic waits for the student's «Сделать» (TASK-188)
+
+	// Catalog v10 (ADR-0033 §3, §4, §10).
+	CardScheduleSubjects CardKind = "schedule_subjects" // the desktop-built subjects-from-schedule package, one «Да»
+	CardDeleteAssignment CardKind = "delete_assignment" // «Да» to delete an assignment that has a Google event (О-6 б)
+	CardOfferButton      CardKind = "offer_button"      // the page's own button; the click is the action
 )
 
 // Card is a typed card. Texts other than the model fields of show_plan, reply, cannot_do and ask_questions are
@@ -300,6 +305,79 @@ func (StoppedCard) Kind() CardKind { return CardStopped }
 func (c StoppedCard) Validate() error {
 	if !c.Reason.Valid() {
 		return fmt.Errorf("%w: unknown stop reason", ErrInvalidCard)
+	}
+	return nil
+}
+
+// MaxScheduleGroups bounds the groups of a schedule-subjects card: the proposal has at most 200 distinct schedule
+// strings (cases/library), so at most as many groups.
+const MaxScheduleGroups = 200
+
+// ScheduleSubjectsCard is the package of subjects from the schedule the desktop built (ADR-0033 §4): the stored
+// proposal and its groups; the card shows them from local data with per-row choices, and one «Да» in input/wails
+// applies the checked rows. Nothing of the groups comes from or goes to the planner.
+type ScheduleSubjectsCard struct {
+	Proposal Ref
+	Groups   []Ref
+}
+
+// Kind returns CardScheduleSubjects.
+func (ScheduleSubjectsCard) Kind() CardKind { return CardScheduleSubjects }
+
+// Validate checks the card: a proposal and 1..MaxScheduleGroups distinct groups.
+func (c ScheduleSubjectsCard) Validate() error {
+	if c.Proposal.Kind() != KindProposal {
+		return fmt.Errorf("%w: a schedule-subjects card refers to a proposal", ErrInvalidCard)
+	}
+	if len(c.Groups) == 0 || len(c.Groups) > MaxScheduleGroups {
+		return fmt.Errorf("%w: a schedule-subjects card has 1..%d groups", ErrInvalidCard, MaxScheduleGroups)
+	}
+	seen := RefSet{}
+	for _, g := range c.Groups {
+		if g.Kind() != KindScheduleGroup || seen.Has(g) {
+			return fmt.Errorf("%w: a schedule-subjects card lists distinct groups", ErrInvalidCard)
+		}
+		seen.Add(g)
+	}
+	return nil
+}
+
+// DeleteAssignmentCard asks «Да» before an assignment with a Google Calendar event is deleted (ADR-0033 О-6 б): the
+// title, the deadline and the event shown come from local data; the click in input/wails deletes it.
+type DeleteAssignmentCard struct {
+	Assignment Ref
+}
+
+// Kind returns CardDeleteAssignment.
+func (DeleteAssignmentCard) Kind() CardKind { return CardDeleteAssignment }
+
+// Validate checks the card.
+func (c DeleteAssignmentCard) Validate() error {
+	if c.Assignment.Kind() != KindAssignment {
+		return fmt.Errorf("%w: a delete card refers to an assignment", ErrInvalidCard)
+	}
+	return nil
+}
+
+// OfferButtonCard shows the page's own button for Action (ADR-0033 §3): the desktop renders it from a template and
+// the click calls the same binding as the page. Target is the one ID the action needs (OfferTarget), zero when it
+// needs none; the model never gives a URL, a path or a label.
+type OfferButtonCard struct {
+	Action OfferAction
+	Target Ref
+}
+
+// Kind returns CardOfferButton.
+func (OfferButtonCard) Kind() CardKind { return CardOfferButton }
+
+// Validate checks the card: a known action and exactly the ID kind it needs.
+func (c OfferButtonCard) Validate() error {
+	_, kind, ok := OfferTarget(c.Action)
+	if !ok {
+		return fmt.Errorf("%w: unknown button", ErrInvalidCard)
+	}
+	if (kind == "" && !c.Target.IsZero()) || (kind != "" && c.Target.Kind() != kind) {
+		return fmt.Errorf("%w: the button %s needs %q", ErrInvalidCard, c.Action, kind)
 	}
 	return nil
 }

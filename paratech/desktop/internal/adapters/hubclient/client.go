@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"connectrpc.com/connect"
@@ -81,6 +82,10 @@ type Client struct {
 	creds    Credentials
 	credName string
 	timeout  time.Duration
+
+	// noStepStream is set once the Hub answered AgentStepStream with unimplemented: later steps go straight to
+	// AgentStep for the life of the process instead of paying a refused round trip each time.
+	noStepStream atomic.Bool
 }
 
 // fixedURL is the URLSource of Config.BaseURL.

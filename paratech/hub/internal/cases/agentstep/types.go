@@ -12,11 +12,13 @@ import (
 	"paratech/hub/internal/domain/shared"
 )
 
-// Deps are the ports and domain services of the step; all are required.
+// Deps are the ports and domain services of the step; all are required, except Streamer, which is required only when
+// Config.ProviderStream is on.
 type Deps struct {
 	Accounts Accounts
 	Turns    AssistantTurns
 	Provider Provider
+	Streamer StreamingProvider
 	Limiter  RateLimiter
 	Clock    Clock
 	Random   Random
@@ -34,6 +36,9 @@ type Config struct {
 	KeyRetention   time.Duration
 	CallTimeout    time.Duration
 	Profiles       []Profile
+	// ProviderStream makes StepStream call StreamingProvider.StepStream (HUB_PROVIDER_STREAM, ADR-0026); off, it calls
+	// Provider.Step and sends no delta.
+	ProviderStream bool
 }
 
 // Profile is what the Hub uses for one agent profile: the model alias from the server configuration (the client
