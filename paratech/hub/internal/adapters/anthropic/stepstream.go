@@ -23,9 +23,10 @@ const (
 // StepStream is Step with "stream": true: the same request, deadline and error rules, and the same answer, its kept
 // raw turn assembled from the events (thinking with its signature, text, tool_use with its parsed input). onDelta
 // (may be nil) gets the visible reply as the model writes it, in order, from the calling goroutine, before StepStream
-// returns: the top-level text argument of every reply call and the text blocks, a later part after a blank line. No
-// other tool argument and no thinking is ever passed to it. The chunks are untrusted draft text and may differ from
-// the answer's calls. A stream that ends or breaks before message_stop is the transient "answer interrupted" (probably
+// returns: only the top-level text argument of the reply calls, a later call's after a blank line (parallel calls may
+// hold several). Text blocks are never passed on: with tool_choice auto they are often a preamble before the calls,
+// and a text-only answer shows whole from the result (TASK-200). No other tool argument and no thinking is ever
+// passed either. The chunks are untrusted draft text and may differ from the answer's calls. A stream that ends or breaks before message_stop is the transient "answer interrupted" (probably
 // billed), unless ctx ended it. A 200 JSON answer is read as Step reads it, with no chunk (TASK-190 fallback).
 func (c *Client) StepStream(ctx context.Context, call values.AgentCall, onDelta func(chunk string)) (values.AgentAnswer, error) {
 	if call.Model() == "" || call.System() == "" || call.MaxOutput() <= 0 || len(call.Tools()) == 0 || len(call.Turns()) == 0 {
@@ -91,7 +92,7 @@ type streamBlock struct {
 	signature strings.Builder
 	input     strings.Builder
 	hasInput  bool
-	reply     *replyText // set for a reply tool_use
+	reply     *replyText // set for a reply tool_use, the only block whose text is streamed
 	shown     bool       // a chunk of this block went to onDelta
 }
 
@@ -159,9 +160,7 @@ func (st *agentStream) start(e agentStreamEvent) error {
 	st.blocks = append(st.blocks, b)
 	switch b.typ {
 	case blockText:
-		text := stringField(b.fields, "text")
-		b.text.WriteString(text)
-		st.show(b, draftText(text))
+		b.text.WriteString(stringField(b.fields, "text"))
 	case blockThinking:
 		b.thinking.WriteString(stringField(b.fields, "thinking"))
 		b.signature.WriteString(stringField(b.fields, "signature"))
@@ -182,7 +181,6 @@ func (st *agentStream) delta(e agentStreamEvent) error {
 	switch {
 	case e.Delta.Type == deltaText && b.typ == blockText:
 		b.text.WriteString(e.Delta.Text)
-		st.show(b, draftText(e.Delta.Text))
 	case e.Delta.Type == deltaThinking && b.typ == blockThinking:
 		b.thinking.WriteString(e.Delta.Thinking)
 	case e.Delta.Type == deltaSignature && b.typ == blockThinking:
@@ -197,7 +195,7 @@ func (st *agentStream) delta(e agentStreamEvent) error {
 	return nil
 }
 
-// show passes a non-empty chunk of b on; the first chunk of a later block starts with a blank line.
+// show passes a non-empty chunk of the reply call b on; the first chunk of a later reply call starts with a blank line.
 func (st *agentStream) show(b *streamBlock, chunk string) {
 	if chunk == "" {
 		return

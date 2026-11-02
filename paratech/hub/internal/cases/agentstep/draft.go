@@ -9,7 +9,9 @@ import (
 )
 
 // Coalescing of the streamed reply: the provider writes a few characters per event, so chunks are joined until
-// draftFlushBytes are pending or draftFlushEvery has passed since the last flush. The first chunk goes at once.
+// draftFlushBytes are pending or draftFlushEvery has passed since the last flush. The first chunk goes at once. The
+// time is checked only when a chunk arrives (no timer): when the model pauses, up to draftFlushBytes-1 bytes wait for
+// the next chunk or the end of the step.
 const (
 	draftFlushBytes = 64
 	draftFlushEvery = 50 * time.Millisecond

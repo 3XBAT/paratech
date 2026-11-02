@@ -21,9 +21,9 @@ type Provider interface {
 // Implemented by the anthropic adapter; testenv has a scripted fake.
 type StreamingProvider interface {
 	// StepStream is Provider.Step with the same call, answer and error rules. onDelta gets the reply text as the model
-	// writes it (the top-level text argument of values.ReplyTool calls and the text of text blocks, never another
-	// argument), in order, from the calling goroutine, before StepStream returns. The chunks are UNTRUSTED draft text
-	// and may differ from the answer; a failure may follow them.
+	// writes it (only the top-level text argument of values.ReplyTool calls; never a text block, another argument or
+	// the thinking), in order, from the calling goroutine, before StepStream returns. The chunks are UNTRUSTED draft
+	// text and may differ from the answer; a failure may follow them.
 	StepStream(ctx context.Context, call values.AgentCall, onDelta func(chunk string)) (values.AgentAnswer, error)
 }
 

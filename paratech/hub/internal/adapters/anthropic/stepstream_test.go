@@ -97,8 +97,8 @@ func TestStepStreamReadsTheAnswerLikeStep(t *testing.T) {
 	if !reflect.DeepEqual(decode(t, streamed.Assistant().Raw()), decode(t, unary.Assistant().Raw())) {
 		t.Fatalf("kept turn\n%s\nwant\n%s", streamed.Assistant().Raw(), unary.Assistant().Raw())
 	}
-	// The text block, then the reply text after a blank line; never the other call's arguments or the thinking.
-	if strings.Join(*got, "") != "ignored\n\na <b> & c" {
+	// Only the reply text: never the preamble text block, the other call's arguments or the thinking.
+	if strings.Join(*got, "") != "a <b> & c" {
 		t.Fatalf("deltas %q", *got)
 	}
 	var req map[string]any
@@ -134,7 +134,7 @@ func TestStepStreamDraftIsOnlyTheReply(t *testing.T) {
 	}
 }
 
-// TestStepStreamTextOnlyAnswer: the text of an answer without calls streams and is the answer's plain text.
+// TestStepStreamTextOnlyAnswer: the text of an answer without calls never streams; it is the answer's plain text.
 func TestStepStreamTextOnlyAnswer(t *testing.T) {
 	stream := sseEvent("message_start", startEvent) + sseBlockStart(0, thinkingBlock) + sseSig(0, "s") + sseBlockStop(0) +
 		sseBlockStart(1, `{"type":"text","text":"Сей"}`) + sseText(1, "час ") + sseText(1, "отвечу.") + sseBlockStop(1) +
@@ -145,8 +145,30 @@ func TestStepStreamTextOnlyAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	text, ok := answer.PlainText()
-	if !ok || text != "Сейчас отвечу." || strings.Join(*got, "") != text || answer.Stop() != values.StopEnd {
+	if !ok || text != "Сейчас отвечу." || len(*got) != 0 || answer.Stop() != values.StopEnd {
 		t.Fatalf("text %q %v, deltas %q, stop %v", text, ok, *got, answer.Stop())
+	}
+}
+
+// TestStepStreamPreambleIsNotStreamed: a preamble text block before the calls never streams; the reply text does, and
+// a second reply call of the step starts after a blank line. The kept text block is in the answer's turn.
+func TestStepStreamPreambleIsNotStreamed(t *testing.T) {
+	stream := sseEvent("message_start", startEvent) +
+		sseBlockStart(0, `{"type":"text","text":"Сейчас "}`) + sseText(0, "посмотрю расписание.") + sseBlockStop(0) +
+		sseBlockStart(1, toolBlock("toolu_1", "reply")) + sseInput(1, `{"text":"Первый"}`) + sseBlockStop(1) +
+		sseBlockStart(2, textBlock) + sseText(2, "между") + sseBlockStop(2) +
+		sseBlockStart(3, toolBlock("toolu_2", "reply")) + sseInput(3, `{"text":"Второй"}`) + sseBlockStop(3) +
+		sseMessageDelta(`"tool_use"`, 7) + sseEvent("message_stop", sseStop)
+	got, onDelta := collect()
+	answer, err := newClient(t, serveSSE(t, stream).URL, time.Minute).StepStream(t.Context(), agentCall(t), onDelta)
+	if err != nil || answer.Failure() != nil || len(answer.Calls()) != 2 {
+		t.Fatalf("answer %v, %v", answer, err)
+	}
+	if want := []string{"Первый", "\n\nВторой"}; !reflect.DeepEqual(*got, want) {
+		t.Fatalf("deltas %q, want %q", *got, want)
+	}
+	if raw := answer.Assistant().Raw(); !strings.Contains(raw, "Сейчас посмотрю расписание.") {
+		t.Fatalf("kept turn %s", raw)
 	}
 }
 
@@ -231,7 +253,8 @@ func TestStepStreamKeepsTheThinkingTurn(t *testing.T) {
 	if err != nil || second.Failure() != nil || api.Rejected() != 0 {
 		t.Fatalf("second %v, %v, rejected %d", second, err, api.Rejected())
 	}
-	if strings.Join(*got, "") != "Calling tools.\n\nНашёл два урока <по матану> & всё" {
+	// The fake's "Calling tools." text block is a preamble: only the reply text streams.
+	if strings.Join(*got, "") != "Нашёл два урока <по матану> & всё" {
 		t.Fatalf("deltas %q", *got)
 	}
 	for _, d := range *got {
