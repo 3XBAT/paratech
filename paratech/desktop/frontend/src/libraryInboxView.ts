@@ -29,7 +29,8 @@ export const fileTexts = {
   pickSubject: "Выберите предмет",
   newSubject: "Новый предмет…",
   noFolder: "—",
-  dragTitle: "Перетащите на карточку предмета",
+  dragTitle: "Перетащите на предмет в списке",
+  dropOnSubject: "Перетащите файл на предмет в списке",
   addToInboxTip: "Файл попадёт во «Входящие»",
   addToMaterialsTip: "Файл попадёт в «Материалы»",
 } as const;
@@ -281,7 +282,7 @@ export function readMaterialDrop(raw: unknown, inboxIds: ReadonlySet<string>): s
   return typeof raw === "string" && raw !== "" && raw.length <= 128 && inboxIds.has(raw) ? raw : null;
 }
 
-/** The cue on a subject card while a row is dragged: the drop lands in «Материалы», so the cue says it. */
+/** The cue on a subject of the tree while a row is dragged over it: the drop lands in «Материалы», so the cue says it. */
 export function dropCue(subjectName: string): string {
   return `Положить в «${subjectName} → Материалы»`;
 }
@@ -386,37 +387,6 @@ export const addFileTexts = {
   openInbox: "Перейти во «Входящие»",
   place: "Разложить",
 } as const;
-
-type Scrollable = { getElementById(id: string): { scrollIntoView?: (o: { block: "start" }) => void } | null };
-
-/** The anchor of the section «Входящие» on the list page. */
-export const inboxAnchor = "inbox-section";
-
-/** Scrolls the section «Входящие» into view; false when there is no document or the section is not drawn (yet). */
-export function scrollToInbox(doc: Scrollable | undefined): boolean {
-  const el = doc?.getElementById(inboxAnchor);
-  if (!el || typeof el.scrollIntoView !== "function") {
-    return false;
-  }
-  el.scrollIntoView({ block: "start" });
-  return true;
-}
-
-/**
- * Whether the pending scroll is used up: it was done, or the lists are loaded and the section is not there (an empty
- * «Входящие» has no section), so the flag does not wait for ever. While the inbox list is on its way it stays.
- */
-export function inboxScrollSettled(scrolled: boolean, inboxLoaded: boolean): boolean {
-  return scrolled || inboxLoaded;
-}
-
-/**
- * «Перейти во «Входящие»» opens the list page first, so the scroll waits for it: true when the list is shown and loaded
- * and a scroll is pending (the page then scrolls and clears the flag).
- */
-export function inboxScrollDue(pending: boolean, openId: string, listLoaded: boolean): boolean {
-  return pending && openId === "" && listLoaded;
-}
 
 /** The anchor of the section of a folder on the page of a subject (the tree scrolls to it). */
 export function folderAnchor(folderId: string): string {

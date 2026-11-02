@@ -74,6 +74,7 @@ function PageView(props: {
         <SubjectsPage
           onOpen={props.onOpen}
           reload={props.library}
+          visit={props.visit}
           subjectId={props.subject}
           onSelect={props.onSelectSubject}
           teacherFocus={props.teacherFocus}
@@ -181,6 +182,7 @@ export function App() {
   const openScheduleReview = useCallback(() => {
     setScheduleReview(true);
     setRoute(routeToPage("subjects"));
+    setVisit((v) => v + 1); // "" shows the last opened subject again
   }, []);
   const scheduleReviewTaken = useCallback(() => setScheduleReview(false), []);
   useEffect(() => {
@@ -200,7 +202,14 @@ export function App() {
     setAssignmentEdit((e) => keepAssignmentEdit(e, { page: route.page, assignment: route.assignment }));
   }, [route.page, route.assignment]);
   const recipientNav = useMemo<RecipientNav>(
-    () => ({ openTeacher, openAssignment: openAssignmentFor, openSubjects: () => setRoute(routeToPage("subjects")) }),
+    () => ({
+      openTeacher,
+      openAssignment: openAssignmentFor,
+      openSubjects: () => {
+        setRoute(routeToPage("subjects"));
+        setVisit((v) => v + 1);
+      },
+    }),
     [openTeacher, openAssignmentFor],
   );
   // Alt+←/→ and the mouse side buttons walk the history of routes (TASK-201).

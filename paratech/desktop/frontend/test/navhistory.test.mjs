@@ -117,7 +117,8 @@ test("a subject does not leak into other routes: a summary over «Предмет
   assert.equal(toSubject.subject, "s2");
 });
 
-test("a rail click to «Предметы» from an open subject shows the list; back returns to the subject", () => {
+// TASK-341: the route without a choice ("") is not a list any more but the section's default (the last opened subject).
+test("a rail click to «Предметы» from an open subject is the route without a choice; back returns to the subject", () => {
   let hist = newHistory(routeToPage("subjects"));
   hist = pushRoute(hist, routeToSubject(currentRoute(hist), "s1"));
   hist = pushRoute(hist, routeToPage("subjects"));

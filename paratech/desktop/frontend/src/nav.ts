@@ -96,8 +96,9 @@ export function pageById(id: string): Page {
 /**
  * Where the window is: a page and, over it, the transcript (TASK-079) or the summary (TASK-087) of a recording.
  * Neither is a page: they open from a recording ("" when closed), one at a time, and the page under them
- * stays as the user left it. assignment: the assignment «Задания» shows ("" for the list). subject: the subject
- * «Предметы» shows ("" for the list of subjects).
+ * stays as the user left it. assignment: the assignment «Задания» shows ("" for the list). subject: what «Предметы»
+ * shows: a subject id, `inboxRoute` of subjectsHome.ts for «Входящие», or "" for no choice yet (the last opened subject,
+ * no entry of its own in the history; TASK-341).
  */
 export interface Route {
   page: PageId;
@@ -114,7 +115,7 @@ export function routeToPage(id: PageId): Route {
   return { page: id, transcript: "", summary: "", assignment: "", subject: "" };
 }
 
-/** Opens a subject in «Предметы» ("" returns to the list); an entry of its own in the history. */
+/** Opens a subject (or «Входящие») in «Предметы»; "" is no choice. An entry of its own in the history. */
 export function routeToSubject(_r: Route, subjectId: string): Route {
   return { ...routeToPage("subjects"), subject: subjectId };
 }

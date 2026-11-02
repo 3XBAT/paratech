@@ -42,7 +42,7 @@ import {
   folderAnchor,
 } from "../.test-build/libraryInboxView.js";
 import { AddFileLines, PlacePanel, UndoLines } from "../.test-build/pages/FileRows.js";
-import { InboxList, SubjectDetail, SubjectList, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
+import { InboxList, SubjectDetail, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
 
 const noop = () => undefined;
 const evil = "<img src=x onerror=alert(1)>";
@@ -176,7 +176,7 @@ test("a row of «Входящие» has the visible «Разложить», «�
   const inbox = html(h(InboxList, { materials: [material()], actions: actions() }));
   assert.match(inbox, /<button[^>]*aria-label="Разложить: лаба1\.pdf"[^>]*>Разложить<\/button>/);
   assert.match(inbox, /aria-label="Ещё действия: лаба1\.pdf"/);
-  assert.match(inbox, /class="lrow-grip" draggable="true" title="Перетащите на карточку предмета"/);
+  assert.match(inbox, /class="lrow-grip" draggable="true" title="Перетащите на предмет в списке"/);
   const folder = html(
     h(SubjectDetail, {
       subject: subject(), materials: [material({ subjectId: "s1", folderId: "f1", inbox: false })], folderForm: false, busy: false, error: "",
@@ -462,14 +462,14 @@ test("the drop zone registers the four handlers of windowDragHandlers (a source 
   assert.match(src, /windowDragHandlers\(setOver\)/);
 });
 
-test("the cards show the cue while a row is dragged and otherwise «Открыть»", () => {
+// TASK-341: the subjects of the tree take the dragged row (it was the cards of the list). The cue of the subject under the
+// cursor needs a hover (no DOM here): dropCue is checked as a function, the line under the tree as markup.
+test("the tree shows the drop line while a row is dragged and nothing otherwise", () => {
   const drop = (dragging) => ({ dragging, inboxIds: new Set(["m1"]), onDrop: noop, onEnd: noop });
-  const dragging = html(h(SubjectList, { subjects: [subject()], onOpen: noop, onAdd: noop, drop: drop(true) }));
-  assert.match(dragging, /Положить в «Сети → Материалы»/);
-  assert.doesNotMatch(dragging, />Открыть</);
-  const idle = html(h(SubjectList, { subjects: [subject()], onOpen: noop, onAdd: noop, drop: drop(false) }));
-  assert.match(idle, />Открыть</);
-  assert.doesNotMatch(idle, /Положить в/);
+  const tree = (d) => html(h(SubjectTree, { subjects: [subject()], currentId: "", counts: null, busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop, drop: d }));
+  assert.match(tree(drop(true)), /<p class="tree-cue small muted">Перетащите файл на предмет в списке<\/p>/);
+  assert.doesNotMatch(tree(drop(false)), /tree-cue/);
+  assert.doesNotMatch(tree(undefined), /tree-cue/);
 });
 
 // ---- «Добавить файл» into a subject ----

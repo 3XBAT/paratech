@@ -19,7 +19,7 @@ export function useMaterialActions(p: {
   setSubjects: Dispatch<SetStateAction<LibrarySubject[] | null>>;
   /** The files of «Входящие». */
   inbox: readonly LibraryMaterial[];
-  /** Hints are asked only on the list page, where «Входящие» is shown. */
+  /** Hints are asked only where the files of «Входящие» are shown (its view, the screen without subjects). */
   hintsOn: boolean;
   refresh(): void;
 }) {
