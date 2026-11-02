@@ -56,7 +56,7 @@ import {
   ScheduleSubjectsReview,
 } from "../.test-build/pages/ScheduleSubjectsReview.js";
 import { ScheduleNextHint } from "../.test-build/pages/SchedulePage.js";
-import { SubjectList } from "../.test-build/pages/SubjectsParts.js";
+import { EmptySubjects, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
 
 const html = (el) => renderToStaticMarkup(el);
 const noop = () => undefined;
@@ -1105,26 +1105,27 @@ test("empty list while checking: a small indicator, no schedule button, no secon
   assert.equal(primaries(out), 0);
 });
 
-test("the empty state of «Предметы» through SubjectList: why it is empty and one primary", () => {
-  const out = html(h(SubjectList, { subjects: [], onOpen: noop, onAdd: noop, offer: offer({ loaded: true, reply: reply() }) }));
+// TASK-341: the tile list is gone; EmptySubjects is its empty state, shown only when there are no subjects.
+test("the empty state of «Предметы» through EmptySubjects: why it is empty and one primary", () => {
+  const out = html(h(EmptySubjects, { onAdd: noop, offer: offer({ loaded: true, reply: reply() }) }));
   assert.match(out, /Предметов пока нет/);
   assert.match(out, /В расписании найдено предметов: 3\. Их можно создать за один шаг/);
   assert.equal(primaries(out), 1);
   assert.match(out, /Завести предметы из расписания/);
   assert.match(out, />Добавить предмет</);
   for (const o of [offerChecking, { loaded: true, reply: reply({ groups: [] }) }, { loaded: true, reply: null }]) {
-    const plainText = html(h(SubjectList, { subjects: [], onOpen: noop, onAdd: noop, offer: offer(o) }));
+    const plainText = html(h(EmptySubjects, { onAdd: noop, offer: offer(o) }));
     assert.match(plainText, /Предметы создаются из расписания или вручную/);
   }
   // Without an offer the list is as before.
-  const plain = html(h(SubjectList, { subjects: [], onOpen: noop, onAdd: noop }));
+  const plain = html(h(EmptySubjects, { onAdd: noop }));
   assert.equal(primaries(plain), 1);
   assert.doesNotMatch(plain, /Завести предметы/);
 });
 
-test("a list with subjects has no schedule button in SubjectList itself (the page shows one quiet line)", () => {
+test("a library with subjects has no schedule button in the tree itself (the page shows one quiet line above it)", () => {
   const s = { id: "s1", name: "Алгебра", semester: "2026-autumn", semesterLabel: "Осень 2026", aliases: [], folders: [], teachers: [], schedule: [], version: 1 };
-  const out = html(h(SubjectList, { subjects: [s], onOpen: noop, onAdd: noop, offer: offer({ loaded: true, reply: reply() }) }));
+  const out = html(h(SubjectTree, { subjects: [s], currentId: "s1", counts: null, busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop }));
   assert.doesNotMatch(out, /Завести предметы/);
 });
 

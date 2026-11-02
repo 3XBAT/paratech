@@ -3,8 +3,8 @@ import type { LibraryMaterial, LibrarySubject, SubjectOverview } from "../bindin
 import {
   addToFolderLabel,
   dropCue,
+  fileTexts,
   folderAnchor,
-  inboxAnchor,
   isMaterialDrag,
   materialDragType,
   readMaterialDrop,
@@ -27,7 +27,9 @@ import {
   treeCount,
   weekdayOf,
 } from "../libraryView.js";
+import type { PageId } from "../nav.js";
 import { offerGroups, reviewTexts } from "../scheduleSubjectsView.js";
+import { emptyInboxText, type InboxEntry } from "../subjectsHome.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Card, EmptyState, ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
@@ -40,9 +42,9 @@ export { NameForm };
 
 // Names of subjects, folders and files are typed or imported text: only text nodes here, never markup.
 
-/** A row of «Входящие» dragged onto the cards of the list (TASK-339). */
-export interface CardDrop {
-  /** A row is being dragged: the cards show the cue. */
+/** A row of «Входящие» dragged onto the subjects of the tree (TASK-339, TASK-341). */
+export interface TreeDrop {
+  /** A row is being dragged: the tree shows the cue. */
   dragging: boolean;
   /** The files of «Входящие» a drop may carry. */
   inboxIds: ReadonlySet<string>;
@@ -50,29 +52,101 @@ export interface CardDrop {
   onEnd(): void;
 }
 
-/** Semesters, each with its subjects. With `drop` the cards take a dragged file of «Входящие». */
-export function SubjectList(props: {
-  subjects: readonly LibrarySubject[];
-  onOpen(id: string): void;
+/**
+ * The screen of a library without subjects: why it is empty and how to make the first ones (TASK-312). With subjects the
+ * section shows the tree instead (TASK-341), so there is nothing else here.
+ */
+export function EmptySubjects(props: {
   onAdd(): void;
-  drop?: CardDrop;
-  /** TASK-312: the subjects of the schedule; the primary action of the empty list (see EmptySubjectsActions). */
+  /** TASK-312: the subjects of the schedule; the primary action of the empty screen (see EmptySubjectsActions). */
   offer?: ScheduleOffer;
 }) {
+  const groups = props.offer === undefined ? 0 : (offerGroups(props.offer.state) ?? 0);
+  return (
+    <EmptyState
+      label="Библиотека"
+      title={texts.emptyTitle}
+      actions={<EmptySubjectsActions offer={props.offer} addLabel={props.offer ? reviewTexts.addSubject : texts.addSubject} onAdd={props.onAdd} />}
+    >
+      {props.offer === undefined ? texts.emptyText : groups > 0 ? reviewTexts.emptyWithGroups(groups) : reviewTexts.emptyPlain}
+    </EmptyState>
+  );
+}
+
+/**
+ * The buttons in the head of every screen of the section: «База знаний» and «Билеты» (the pages that belong to the
+ * library), «Добавить файл» (its tooltip says where the file goes), and what the screen adds (`children`). With
+ * `links={false}` (the library without subjects, where both pages are empty) only «Добавить файл» is left.
+ */
+export function LibraryActions(props: {
+  onOpen(id: PageId): void;
+  onAddFile(): void;
+  addTip: string;
+  busy: boolean;
+  links?: boolean;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="acts">
+      {props.links !== false && (
+        <>
+          <Button icon="book" onClick={() => props.onOpen("knowledge")}>
+            {texts.knowledge}
+          </Button>
+          <Button icon="doc" onClick={() => props.onOpen("tickets")}>
+            Билеты
+          </Button>
+        </>
+      )}
+      <Button icon="up" disabled={props.busy} title={props.addTip} onClick={props.onAddFile}>
+        {texts.addFile}
+      </Button>
+      {props.children}
+    </div>
+  );
+}
+
+function scrollToFolder(folderId: string) {
+  scrollToFolderIn(typeof document === "undefined" ? undefined : document, folderId);
+}
+
+/**
+ * The tree of the section: «Входящие» first (like the inbox of a mail client), then the semesters (collapsible headings),
+ * their subjects, and the folders of the open subject with the number of files in each; a folder scrolls to its section.
+ * `counts` maps a folder id to its files; null while the files are being read. With `drop` the subjects take a dragged
+ * file of «Входящие».
+ */
+export function SubjectTree(props: {
+  subjects: readonly LibrarySubject[];
+  /** The subject on screen; "" when it is «Входящие». */
+  currentId: string;
+  counts: ReadonlyMap<string, number> | null;
+  /** Folders with fresh files get «новое»; optional so the tree works without the overview. */
+  freshFolders?: ReadonlySet<string>;
+  busy: boolean;
+  onOpen(id: string): void;
+  onAddSubject(): void;
+  onAddFolder(): void;
+  /** The first item; without it the tree starts with the semesters. */
+  inbox?: InboxEntry;
+  onOpenInbox?(): void;
+  drop?: TreeDrop;
+  /** The id of the «Предмет» button (the focus returns to it when the review of the schedule closes). */
+  addId?: string;
+}) {
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [over, setOver] = useState("");
-  if (props.subjects.length === 0) {
-    const groups = props.offer === undefined ? 0 : (offerGroups(props.offer.state) ?? 0);
-    return (
-      <EmptyState
-        label="Библиотека"
-        title={texts.emptyTitle}
-        actions={<EmptySubjectsActions offer={props.offer} addLabel={props.offer ? reviewTexts.addSubject : texts.addSubject} onAdd={props.onAdd} />}
-      >
-        {props.offer === undefined ? texts.emptyText : groups > 0 ? reviewTexts.emptyWithGroups(groups) : reviewTexts.emptyPlain}
-      </EmptyState>
-    );
-  }
+  const toggle = (code: string) =>
+    setCollapsed((c) => {
+      const next = new Set(c);
+      if (!next.delete(code)) {
+        next.add(code);
+      }
+      return next;
+    });
+
   const drop = props.drop;
+  const overNow = drop?.dragging === true ? over : "";
   const onDragOver = (e: DragEvent<HTMLButtonElement>, id: string) => {
     if (drop && isMaterialDrag(e.dataTransfer)) {
       e.preventDefault();
@@ -92,81 +166,33 @@ export function SubjectList(props: {
       drop.onDrop(s, id);
     }
   };
-  return (
-    <>
-      {groupBySemester(props.subjects).map((g) => (
-        <section className="section" key={g.code}>
-          <h2 className="sec-h">
-            {g.label} <span className="cnt num">· {g.subjects.length}</span>
-          </h2>
-          <ul className="subj-cards">
-            {g.subjects.map((s) => (
-              <li key={s.id}>
-                <button
-                  type="button"
-                  className={over === s.id ? "subj-card drop" : "subj-card"}
-                  onClick={() => props.onOpen(s.id)}
-                  onDragOver={(e) => onDragOver(e, s.id)}
-                  onDragLeave={() => setOver((o) => (o === s.id ? "" : o))}
-                  onDrop={(e) => onDrop(e, s)}
-                >
-                  <span className="subj-card-head">
-                    <Icon name="folder" />
-                    <span className="t">{s.name}</span>
-                  </span>
-                  <span className="small muted">{orderedFolders(s.folders).map(folderTitle).join(" · ")}</span>
-                  {drop?.dragging === true ? (
-                    <span className="subj-card-open small">
-                      <span>{dropCue(s.name)}</span>
-                    </span>
-                  ) : (
-                    <span className="subj-card-open small">
-                      <span>Открыть</span>
-                      <Icon name="chevr" />
-                    </span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-    </>
-  );
-}
-
-function scrollToFolder(folderId: string) {
-  scrollToFolderIn(typeof document === "undefined" ? undefined : document, folderId);
-}
-
-/**
- * The tree of the subject page: semesters (collapsible headings), their subjects, and the folders of the open subject with
- * the number of files in each; a folder scrolls to its section. `counts` maps a folder id to its files; null while the
- * files are being read.
- */
-export function SubjectTree(props: {
-  subjects: readonly LibrarySubject[];
-  currentId: string;
-  counts: ReadonlyMap<string, number> | null;
-  /** Folders with fresh files get «новое»; optional so the tree works without the overview. */
-  freshFolders?: ReadonlySet<string>;
-  busy: boolean;
-  onOpen(id: string): void;
-  onAddSubject(): void;
-  onAddFolder(): void;
-}) {
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
-  const toggle = (code: string) =>
-    setCollapsed((c) => {
-      const next = new Set(c);
-      if (!next.delete(code)) {
-        next.add(code);
-      }
-      return next;
-    });
+  const overName = props.subjects.find((s) => s.id === overNow)?.name;
+  const entry = props.inbox;
   return (
     <nav className="tree" aria-label={texts.title}>
+      {/* Above the items, in a line that is always there once a file can be dragged, so nothing shifts when the drag starts. */}
+      {drop !== undefined && drop.inboxIds.size > 0 && (
+        <p className="tree-cue small muted" aria-live="polite">
+          {drop.dragging ? (overName === undefined ? fileTexts.dropOnSubject : dropCue(overName)) : ""}
+        </p>
+      )}
       <ul className="lv0">
+        {entry && (
+          <li>
+            <button
+              type="button"
+              className={["ti", "inbox", entry.current ? "cur" : "", entry.quiet ? "quiet" : "", entry.count !== "" ? "has" : ""].filter((c) => c !== "").join(" ")}
+              aria-current={entry.current ? "page" : undefined}
+              aria-label={entry.title}
+              title={entry.title}
+              onClick={props.onOpenInbox}
+            >
+              <Icon name="down" />
+              <span className="nm">{entry.label}</span>
+              {entry.count !== "" && <span className="cnt num">{entry.count}</span>}
+            </button>
+          </li>
+        )}
         {groupBySemester(props.subjects).map((g) => {
           const shut = collapsed.has(g.code);
           return (
@@ -183,9 +209,12 @@ export function SubjectTree(props: {
                     <li key={s.id}>
                       <button
                         type="button"
-                        className={s.id === props.currentId ? "ti cur" : "ti"}
+                        className={["ti", s.id === props.currentId ? "cur" : "", overNow === s.id ? "drop" : ""].filter((c) => c !== "").join(" ")}
                         aria-current={s.id === props.currentId ? "page" : undefined}
                         onClick={() => props.onOpen(s.id)}
+                        onDragOver={(e) => onDragOver(e, s.id)}
+                        onDragLeave={() => setOver((o) => (o === s.id ? "" : o))}
+                        onDrop={(e) => onDrop(e, s)}
                       >
                         <Icon name={s.id === props.currentId ? "chev" : "chevr"} />
                         <span className="nm">{s.name}</span>
@@ -198,7 +227,8 @@ export function SubjectTree(props: {
                                 <Icon name="folder" />
                                 <span className="nm">{folderTitle(f)}</span>
                                 {props.freshFolders?.has(f.id) === true && <span className="fresh">{texts.fresh}</span>}
-                                <span className="cnt num">{treeCount(props.counts?.get(f.id))}</span>
+                                {/* Blank while the files are being read (or failed to load): «—» would claim an empty folder. */}
+                                {props.counts !== null && <span className="cnt num">{treeCount(props.counts.get(f.id))}</span>}
                               </button>
                             </li>
                           ))}
@@ -213,7 +243,7 @@ export function SubjectTree(props: {
         })}
       </ul>
       <div className="tree-acts">
-        <Button size="sm" icon="plus" disabled={props.busy} onClick={props.onAddSubject}>
+        <Button id={props.addId} size="sm" icon="plus" disabled={props.busy} onClick={props.onAddSubject}>
           {texts.addSubject}
         </Button>
         {props.currentId !== "" && (
@@ -290,7 +320,10 @@ export function OverviewSections(props: { overview: SubjectOverview }) {
 /** The page of a subject: its folders (system ones first), the files of each, «＋ Папка». */
 export function SubjectDetail(props: {
   subject: LibrarySubject;
-  materials: readonly LibraryMaterial[];
+  /** The files of the subject; null while they are being read or when reading failed (see `failed`). */
+  materials: readonly LibraryMaterial[] | null;
+  /** The files could not be read: the page says so once, so the folders say nothing about their files (neither «пока нет файлов» nor «Загрузка…», which they do not show while loading either). */
+  failed?: boolean;
   /** The «новое» marks of this visit (TASK-227); none without the overview. */
   fresh?: FreshMarks;
   folderForm: boolean;
@@ -310,25 +343,28 @@ export function SubjectDetail(props: {
   return (
     <>
       {orderedFolders(subject.folders).map((f) => {
-        const files = filesOfFolder(props.materials, f.id);
+        const files = props.materials === null ? null : filesOfFolder(props.materials, f.id);
         const onAddFile = props.onAddFile;
         return (
           <section className="section" key={f.id} id={folderAnchor(f.id)}>
             <div className="sec-head">
               <h2 className="sec-h">
-                {folderTitle(f)} <span className="cnt num">· {folderCountText(files.length)}</span>
+                {folderTitle(f)} {files !== null && <span className="cnt num">· {folderCountText(files.length)}</span>}
                 {fresh.folders.has(f.id) && <span className="fresh">{texts.fresh}</span>}
               </h2>
               {onAddFile && <IconButton icon="plus" label={addToFolderLabel(folderTitle(f))} disabled={props.busy} onClick={() => onAddFile(f.id)} />}
             </div>
             {props.folderExtra?.(f.id)}
-            <Card className="lrows" label={folderTitle(f)}>
-              {files.length === 0 ? (
-                <p className="small muted empty-folder">{texts.emptyFolder}</p>
-              ) : (
-                <FileRows files={files} where="folder" fresh={fresh.materials} actions={props.actions} />
-              )}
-            </Card>
+            {/* Unknown files (loading, failed): no «пусто» claim and no per-folder «Загрузка…»; a failure is one line under the head of the page. */}
+            {files === null ? null : (
+              <Card className="lrows" label={folderTitle(f)}>
+                {files.length === 0 ? (
+                  <p className="small muted empty-folder">{texts.emptyFolder}</p>
+                ) : (
+                  <FileRows files={files} where="folder" fresh={fresh.materials} actions={props.actions} />
+                )}
+              </Card>
+            )}
           </section>
         );
       })}
@@ -344,46 +380,38 @@ export function SubjectDetail(props: {
   );
 }
 
-/** «Входящие»: files that no subject holds yet (dropped on the window or added by hand). */
-export function InboxList(props: { materials: readonly LibraryMaterial[]; actions?: FileActions }) {
+/**
+ * «Входящие»: files that no subject holds yet (dropped on the window or added by hand). On the screen without subjects it
+ * is a section above the empty state and is not drawn while empty. With `bare` it is the content of the view «Входящие»
+ * (the head of the page already names it): no section heading, and while empty it says how files get here.
+ */
+export function InboxList(props: {
+  materials: readonly LibraryMaterial[];
+  actions?: FileActions;
+  bare?: boolean;
+  /** The first answer for «Входящие» has not come yet: an empty list is not announced as empty. */
+  loading?: boolean;
+  /** Reading «Входящие» failed: the page says so with «Повторить», an empty list must not read as «nothing here». */
+  failed?: boolean;
+}) {
   const files = props.materials.filter((m) => !m.removed);
   if (files.length === 0) {
-    return null;
+    if (props.bare !== true || props.failed === true) {
+      return null;
+    }
+    return <p className="muted inbox-empty">{props.loading === true ? texts.loading : emptyInboxText}</p>;
   }
   return (
-    <section className="section" id={inboxAnchor}>
-      <h2 className="sec-h">
-        {texts.inbox} <span className="cnt num">· {folderCountText(files.length)}</span>
-      </h2>
+    <section className="section">
+      {props.bare !== true && (
+        <h2 className="sec-h">
+          {texts.inbox} <span className="cnt num">· {folderCountText(files.length)}</span>
+        </h2>
+      )}
       <Card className="lrows" label={texts.inbox}>
         <FileRows files={files} where="inbox" actions={props.actions} />
       </Card>
       <p className="small muted group-foot">{texts.inboxHint}</p>
     </section>
-  );
-}
-
-/**
- * The body of the list page: «Входящие» first (files waiting for a decision are what needs attention, and a long list of
- * semesters would push them out of sight), then the subjects by semester. «Входящие» is not drawn while empty.
- */
-export function SubjectsListBody(props: {
-  subjects: readonly LibrarySubject[];
-  inbox: readonly LibraryMaterial[];
-  inboxActions?: FileActions;
-  onOpen(id: string): void;
-  onAdd(): void;
-  drop?: CardDrop;
-  offer?: ScheduleOffer;
-  /** The review is open over an empty list: its own empty state is not repeated (TASK-312). */
-  hideList?: boolean;
-}) {
-  return (
-    <>
-      <InboxList materials={props.inbox} actions={props.inboxActions} />
-      {props.hideList !== true && (
-        <SubjectList subjects={props.subjects} onOpen={props.onOpen} onAdd={props.onAdd} drop={props.drop} offer={props.offer} />
-      )}
-    </>
   );
 }

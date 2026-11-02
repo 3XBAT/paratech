@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { errorTexts, genericError, libraryApi, libraryErrorText, methods, parseImport, parseSubject } from "../.test-build/bindings/library.js";
 import { folderCountText, folderCounts, folderTitle, groupBySemester, importNote, orderedFolders, sizeText, treeCount } from "../.test-build/libraryView.js";
 import { SubjectsPage } from "../.test-build/pages/SubjectsPage.js";
-import { InboxList,SubjectDetail, SubjectList, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
+import { EmptySubjects, InboxList, SubjectDetail, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
 
 const noop = () => undefined;
 
@@ -97,13 +97,13 @@ test("sizes and counts are worded in Russian", () => {
   assert.deepEqual([1, 2, 5, 11, 21].map(folderCountText), ["1 файл", "2 файла", "5 файлов", "11 файлов", "21 файл"]);
 });
 
-test("the list shows semesters and subjects with «Открыть»; an empty library offers «Предмет»", () => {
-  const out = renderToStaticMarkup(h(SubjectList, { subjects: [subject()], onOpen: noop, onAdd: noop }));
+// TASK-341: the tiles of the old list page are gone; the tree shows the semesters and subjects, and the empty state is
+// only for a library without subjects (it was SubjectList with the cards).
+test("the tree shows semesters and subjects; an empty library offers «Предмет»", () => {
+  const out = renderToStaticMarkup(h(SubjectTree, { subjects: [subject()], currentId: "s1", counts: null, busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop }));
   assert.match(out, /Осень 2026/);
   assert.match(out, /Матанализ/);
-  assert.match(out, /Лекции · Семинары · Лабораторные · Материалы · ДЗ · Билеты · Шпаргалки/);
-  assert.match(out, />Открыть</);
-  const empty = renderToStaticMarkup(h(SubjectList, { subjects: [], onOpen: noop, onAdd: noop }));
+  const empty = renderToStaticMarkup(h(EmptySubjects, { onAdd: noop }));
   assert.match(empty, /Предметов пока нет/);
   assert.match(empty, />Предмет</);
 });
@@ -140,7 +140,6 @@ test("names of subjects, folders and files are text nodes, never markup", () => 
   const evil = "<img src=x onerror=alert(1)>";
   const s = subject({ name: evil, aliases: [evil], folders: [folder("f1", "", evil)] });
   const out =
-    renderToStaticMarkup(h(SubjectList, { subjects: [s], onOpen: noop, onAdd: noop })) +
     renderToStaticMarkup(
       h(SubjectDetail, {
         subject: s, materials: [material({ name: evil, folderId: "f1" })], folderForm: false, busy: false, error: "",
@@ -167,18 +166,20 @@ test("the line after «Добавить файл»: added, already there, nothin
   assert.equal(importNote({ cancelled: false, existing: false }), "Файл добавлен.");
 });
 
-test("an open subject that is not loaded yet shows only the loading line, not the list", () => {
-  const out = renderToStaticMarkup(h(SubjectsPage, { onOpen: noop, reload: 0, subjectId: "s1", onSelect: noop }));
-  assert.match(out, /class="muted"/);
-  assert.doesNotMatch(out, /subj-cards|<h1|<button/);
-  const list = renderToStaticMarkup(h(SubjectsPage, { onOpen: noop, reload: 0, subjectId: "", onSelect: noop }));
-  assert.match(list, /<h1/);
+// TASK-341: while the subjects load, every route (a subject, «Входящие», none) shows the same small inline line; no title
+// or button of the old list page flashes before the tree.
+test("while the subjects load the section shows only the small loading line, whatever the route", () => {
+  for (const subjectId of ["s1", "", "__inbox__"]) {
+    const out = renderToStaticMarkup(h(SubjectsPage, { onOpen: noop, reload: 0, subjectId, onSelect: noop }));
+    assert.match(out, /<p class="muted">Загрузка…<\/p>/);
+    assert.doesNotMatch(out, /<h1|<button|result/);
+  }
 });
 
-test("the cards are a list of buttons: ul/li, the button is not a listitem", () => {
-  const out = renderToStaticMarkup(h(SubjectList, { subjects: [subject()], onOpen: noop, onAdd: noop }));
-  assert.match(out, /<ul class="subj-cards"><li><button type="button" class="subj-card">/);
-  assert.doesNotMatch(out, /role="listitem"[^>]*subj-card|subj-card[^>]*role="listitem"/);
+test("the subjects of the tree are a list of buttons: ul/li, the button is not a listitem", () => {
+  const out = renderToStaticMarkup(h(SubjectTree, { subjects: [subject()], currentId: "", counts: null, busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop }));
+  assert.match(out, /<ul class="lv1"><li><button type="button" class="ti"><svg/);
+  assert.doesNotMatch(out, /role="listitem"/);
 });
 
 test("the files of a folder are a list with items", () => {
@@ -186,7 +187,7 @@ test("the files of a folder are a list with items", () => {
   assert.match(out, /role="list"><div class="lrow" role="listitem">/);
 });
 
-test("the open subject is part of the window route: a rail click returns to the list, «Назад» restores it", () => {
+test("the open subject is part of the window route: «Назад» restores it (a rail click shows the last opened one)", () => {
   assert.match(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"), /<SubjectsPage[^>]*subjectId=\{props\.subject\}[^>]*onSelect=\{props\.onSelectSubject\}/);
 });
 
@@ -210,8 +211,10 @@ test("the tree: semesters, the subjects, the folders of the open subject with co
   assert.match(out, /Лекции[\s\S]*?cnt num">2</);
 });
 
-test("the cards of the list open a subject by a click on the card", () => {
-  const out = renderToStaticMarkup(h(SubjectList, { subjects: [subject(), subject({ id: "s2", name: "Физика" })], onOpen: noop, onAdd: noop }));
-  assert.equal((out.match(/class="subj-card"/g) ?? []).length, 2);
-  assert.match(out, /Осень 2026 <span class="cnt num">· (<!-- -->)?2</);
+test("every subject of the tree is a button that opens it; a semester is a heading, not a subject", () => {
+  const out = renderToStaticMarkup(
+    h(SubjectTree, { subjects: [subject(), subject({ id: "s2", name: "Физика" })], currentId: "s1", counts: null, busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop }),
+  );
+  assert.equal((out.match(/class="ti( cur)?"/g) ?? []).length, 2, "two subjects");
+  assert.equal((out.match(/class="ti sem"/g) ?? []).length, 1, "one semester heading");
 });

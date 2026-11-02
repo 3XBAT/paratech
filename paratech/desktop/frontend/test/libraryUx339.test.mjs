@@ -11,9 +11,6 @@ import {
   createdNote,
   fileMenu,
   fileTexts,
-  inboxAnchor,
-  inboxScrollDue,
-  inboxScrollSettled,
   importOutcome,
   newSubjectValue,
   panelBack,
@@ -22,12 +19,10 @@ import {
   panelEscape,
   panelPickSubject,
   panelStart,
-  scrollToInbox,
 } from "../.test-build/libraryInboxView.js";
 import { texts } from "../.test-build/libraryView.js";
 import { AddFileLines, PlacePanel } from "../.test-build/pages/FileRows.js";
-import { SubjectDetail, SubjectsListBody } from "../.test-build/pages/SubjectsParts.js";
-import { SubjectsPage } from "../.test-build/pages/SubjectsPage.js";
+import { InboxList, LibraryActions, SubjectDetail } from "../.test-build/pages/SubjectsParts.js";
 
 const noop = () => undefined;
 const html = (el) => renderToStaticMarkup(el);
@@ -55,44 +50,40 @@ const create = async () => ({ error: "", subject: null });
 const panel = (over = {}) =>
   html(h(PlacePanel, { subjects: [subject(), subject({ id: "s2", name: "Физика" })], subjectId: "", folderId: "", busy: false, onSubmit: noop, onCancel: noop, onCreateSubject: create, ...over }));
 
-// ---- 1. «Входящие» on top ----
+// ---- 1. «Входящие» ----
+// TASK-341: «Входящие» is the first item of the tree and its own view (no list page to scroll to any more), so the three
+// tests of the section anchor and of the pending scroll are replaced by tests of the two forms of InboxList.
 
-test("«Входящие» is drawn above the subjects when it holds files, and not at all when empty", () => {
-  const actions = { subjects: [subject()], hints: new Map(), hintPending: new Set(), open: noop, place: noop, placeHint: noop, toInbox: noop, remove: noop, createSubject: create, refresh: noop };
-  const body = (inbox) => html(h(SubjectsListBody, { subjects: [subject()], inbox, inboxActions: actions, onOpen: noop, onAdd: noop }));
-  const full = body([material()]);
-  assert.ok(full.indexOf(`id="${inboxAnchor}"`) >= 0, "the section has the anchor");
-  assert.ok(full.indexOf(`id="${inboxAnchor}"`) < full.indexOf("Осень 2026"), "before the first semester");
-  const empty = body([]);
-  assert.doesNotMatch(empty, new RegExp(inboxAnchor));
-  assert.match(empty, /Осень 2026/);
+test("on the screen without subjects «Входящие» is a section above the empty state, and nothing while empty", () => {
+  const actions = { subjects: [], hints: new Map(), hintPending: new Set(), open: noop, place: noop, placeHint: noop, toInbox: noop, remove: noop, createSubject: create, refresh: noop };
+  const full = html(h(InboxList, { materials: [material()], actions }));
+  assert.match(full, /<h2 class="sec-h">Входящие/);
+  assert.match(full, /лаба1\.pdf/);
+  assert.equal(html(h(InboxList, { materials: [] })), "");
+  assert.equal(html(h(InboxList, { materials: [material({ removed: true })] })), "", "a deleted file does not count");
 });
 
-test("the scroll to «Входящие» waits for the list page, then runs once; guarded without a document or the section", () => {
-  assert.equal(inboxScrollDue(true, "s1", true), false, "the subject page is still open");
-  assert.equal(inboxScrollDue(true, "", false), false, "the list is not loaded yet");
-  assert.equal(inboxScrollDue(false, "", true), false, "nobody asked");
-  assert.equal(inboxScrollDue(true, "", true), true);
-  const calls = [];
-  scrollToInbox({ getElementById: (id) => (id === inboxAnchor ? { scrollIntoView: (o) => calls.push(o) } : null) });
-  assert.deepEqual(calls, [{ block: "start" }]);
-  scrollToInbox({ getElementById: () => null });
-  scrollToInbox({ getElementById: () => ({}) });
-  scrollToInbox(undefined);
-  assert.equal(calls.length, 1);
+test("the view «Входящие» has no heading of its own (the head names it) and tells how files get there while empty", () => {
+  const view = (materials, over = {}) => html(h(InboxList, { materials, bare: true, ...over }));
+  const full = view([material()]);
+  assert.doesNotMatch(full, /<h2/);
+  assert.match(full, /лаба1\.pdf/);
+  assert.match(full, new RegExp(texts.inboxHint.slice(0, 30)), "the hint line stays under the rows");
+  const empty = view([]);
+  assert.match(empty, /Здесь собираются файлы без предмета/);
+  assert.doesNotMatch(empty, /<h2|<button|<ul/);
+  assert.match(view([], { loading: true }), /Загрузка…/);
+  assert.doesNotMatch(view([], { loading: true }), /собираются/, "an empty list is not announced before the answer");
 });
 
-test("scrollToInbox tells whether it scrolled; the pending flag is settled only then or when the inbox list is loaded", () => {
-  const calls = [];
-  const drawn = { getElementById: (id) => (id === inboxAnchor ? { scrollIntoView: (o) => calls.push(o) } : null) };
-  assert.equal(scrollToInbox(drawn), true);
-  assert.equal(calls.length, 1);
-  assert.equal(scrollToInbox({ getElementById: () => null }), false, "the section is not drawn yet");
-  assert.equal(scrollToInbox({ getElementById: () => ({}) }), false, "an element that cannot scroll");
-  assert.equal(scrollToInbox(undefined), false, "no document");
-  assert.equal(inboxScrollSettled(false, false), false, "subjects are there, the inbox list is still on its way: keep waiting");
-  assert.equal(inboxScrollSettled(true, false), true);
-  assert.equal(inboxScrollSettled(false, true), true, "the inbox is loaded and empty: no section, no stuck flag");
+test("«Добавить файл» in the head: the tooltip says where the file goes, in «Входящие» and in a subject", () => {
+  const head = (addTip) => html(h(LibraryActions, { onOpen: noop, onAddFile: noop, addTip, busy: false }));
+  assert.match(head(fileTexts.addToInboxTip), /<button[^>]*title="Файл попадёт во «Входящие»"[^>]*>(<svg.*?<\/svg>)?Добавить файл<\/button>/);
+  assert.match(head(fileTexts.addToMaterialsTip), /title="Файл попадёт в «Материалы»"/);
+  const out = head(fileTexts.addToInboxTip);
+  assert.match(out, />База знаний</);
+  assert.match(out, />Билеты</);
+  assert.match(html(h(LibraryActions, { onOpen: noop, onAddFile: noop, addTip: "", busy: true })), /<button[^>]*disabled=""[^>]*>(<svg.*?<\/svg>)?Добавить файл/, "off while a call runs");
 });
 
 test("Esc in the panel steps back out of the «Новый предмет…» form and closes the panel only otherwise", () => {
@@ -318,13 +309,12 @@ test("a file that did not land: a warning line with the reason, «Разложи
 // ---- minors ----
 
 test("the inbox footer tells how to place a file and the grip has a tooltip", () => {
-  assert.match(texts.inboxHint, /Разложить можно кнопкой справа или перетащив значок файла на карточку предмета\.$/);
-  assert.equal(fileTexts.dragTitle, "Перетащите на карточку предмета");
+  // The cards are gone (TASK-341): the file is dragged onto a subject of the tree.
+  assert.match(texts.inboxHint, /Разложить можно кнопкой справа или перетащив значок файла на предмет слева\.$/);
+  assert.equal(fileTexts.dragTitle, "Перетащите на предмет слева");
 });
 
 test("the tooltips of «Добавить файл» say where the file goes", () => {
   assert.equal(fileTexts.addToInboxTip, "Файл попадёт во «Входящие»");
   assert.equal(fileTexts.addToMaterialsTip, "Файл попадёт в «Материалы»");
-  const list = html(h(SubjectsPage, { onOpen: noop, reload: 0, subjectId: "", onSelect: noop }));
-  assert.match(list, /<button[^>]*title="Файл попадёт во «Входящие»"[^>]*>(<svg.*?<\/svg>)?Добавить файл<\/button>/);
 });
