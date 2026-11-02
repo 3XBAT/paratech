@@ -32,22 +32,26 @@ import {
   panelShortcut,
   reconcileOpenChat,
   refreshesChats,
-  refuseRestart,
   requestText,
   restartBlock,
   type RestartFlow,
   restartOnChat,
+  restartOnOutsideDraft,
   type RestartPending,
+  restartRefusal,
   type RestartStep,
   restoredMentions,
+  restoreUnsent,
   spendRestart,
   startRestart,
   type UndoNote,
   undoableActions,
   visibleEntries,
   withRestart,
+  withoutRestartFrom,
   withoutRestarted,
 } from "../agentView.js";
+import { maxDraftLength } from "../agentMentions.js";
 import { draftEvent, draftText } from "../agentDraft.js";
 import { problemText, undoOutcome } from "../journalView.js";
 import { blockingEntry, type Entry, initialPanelState, loadSnapshot, maxKnownTurn, panelMode, PressTracker, reducePanel, restartOutcome } from "../agentState.js";
@@ -260,21 +264,6 @@ export function AgentPanel(props: {
     [refreshChats],
   );
 
-  // A hint chip elsewhere in the window puts its text into the input; sending stays with the user.
-  useEffect(() => {
-    const onDraft = (e: Event) => {
-      const text = draftText(e);
-      if (text !== "") {
-        setDraft(text.slice(0, 4000));
-        // A closed panel opens first; the input can take focus once it is shown again.
-        props.reveal?.();
-        setTimeout(() => input.current?.focus(), 0);
-      }
-    };
-    window.addEventListener(draftEvent, onDraft);
-    return () => window.removeEventListener(draftEvent, onDraft);
-  }, [props.reveal]);
-
   useEffect(() => {
     let off: (() => void) | undefined;
     let closed = false;
@@ -413,6 +402,27 @@ export function AgentPanel(props: {
     [setPills, focusInput],
   );
 
+  // A hint chip elsewhere in the window puts its text into the input; sending stays with the user. It also ends a
+  // pending edit: the text is not the message's any more.
+  useEffect(() => {
+    const onDraft = (e: Event) => {
+      const text = draftText(e);
+      if (text !== "") {
+        const step = restartOnOutsideDraft(flowRef.current, text.slice(0, maxDraftLength));
+        if (step.field === null) {
+          setDraft(text.slice(0, maxDraftLength));
+        } else {
+          applyStep(step);
+        }
+        // A closed panel opens first; the input can take focus once it is shown again.
+        props.reveal?.();
+        setTimeout(() => input.current?.focus(), 0);
+      }
+    };
+    window.addEventListener(draftEvent, onDraft);
+    return () => window.removeEventListener(draftEvent, onDraft);
+  }, [props.reveal, applyStep]);
+
   const submit = useCallback(() => {
     const text = requestText(draft);
     if (text === null) {
@@ -446,8 +456,8 @@ export function AgentPanel(props: {
     );
   }, []);
 
-  // The request sent with restartFrom: once the core named it the hidden requests leave the view; a refusal puts the text
-  // back into the field with the edit still pending (only into an untouched field and the same chat: nothing is overwritten).
+  // The request sent with restartFrom: once the core named it the hidden requests leave the view; a refusal brings the edit
+  // back with the reason (the text into an untouched field, else behind «Вернуть текст сообщения»; none if the chat is closed).
   useEffect(() => {
     const f = flight.current;
     if (f === null) {
@@ -467,11 +477,15 @@ export function AgentPanel(props: {
       }
       return;
     }
-    if (openRef.current !== chat || draftRef.current !== "" || pillsRef.current.length > 0) {
-      return;
+    const r = restartRefusal(flowRef.current, f.pending, o.problem, {
+      open: openRef.current === chat,
+      field: { draft: draftRef.current, pills: pillsRef.current },
+      unsent: { draft: f.scope.text.slice(0, maxDraftLength), pills: f.scope.mentions ?? [] },
+    });
+    if (r.discard) {
+      dispatch({ type: "discard", key: o.key });
     }
-    dispatch({ type: "discard", key: o.key });
-    applyStep(refuseRestart(flowRef.current, f.pending, o.problem), true);
+    applyStep(r.step, r.step.field !== null);
   }, [state.entries, reloadEarlier, applyStep]);
 
   const closeDialog = useCallback(
@@ -607,7 +621,8 @@ export function AgentPanel(props: {
           run(() => api.stop({ threadId: blocking.threadId, turn: blocking.turn }), { key: blocking.key, update: blocking.update });
         } else if (id === "resend" && e.scope !== null && e.text !== "" && pressed.current.mark(e.key, e.update)) {
           redraw();
-          send(e.scope);
+          // A refused restart is started again from the note, not by this button.
+          send(withoutRestartFrom(e.scope));
         }
         return;
       }
@@ -670,7 +685,14 @@ export function AgentPanel(props: {
             onCancel: () => closeDialog(true),
             onFix: () => block?.fix && fixActions?.press(block.fix.kind),
           },
-    pending: restart.pending === null ? null : { problem: restart.pending.problem, onCancel: () => applyStep(cancelRestartEdit(flowRef.current), true) },
+    pending:
+      restart.pending === null
+        ? null
+        : {
+            problem: restart.pending.problem,
+            onCancel: () => applyStep(cancelRestartEdit(flowRef.current), true),
+            onRestoreText: restart.pending.unsent === null ? null : () => applyStep(restoreUnsent(flowRef.current, { draft: draftRef.current, pills: pillsRef.current }), true),
+          },
   };
 
   const chatBar = {

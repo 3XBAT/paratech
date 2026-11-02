@@ -1,6 +1,7 @@
 // TASK-249: «Начать заново отсюда» → «Скрыть»: where the action is offered, the dialog, why «Скрыть» can be off,
 // the pending edit, restartFrom in the request and what the panel does with the outcome.
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { createElement as h } from "react";
 import server from "react-dom/server";
@@ -20,10 +21,14 @@ import {
   restartDraft,
   restartLabel,
   restartOnChat,
+  restartOnOutsideDraft,
+  restartRefusal,
   restartRefusalText,
   restartTarget,
   restartTexts,
+  restoreUnsent,
   spendRestart,
+  withoutRestartFrom,
   withoutRestarted,
   withRestart,
 } from "../.test-build/agentView.js";
@@ -76,6 +81,11 @@ test("a live request of the open chat is offered only with a known number; the u
   // A request restored after a restart has no text of its own: the history supplies it.
   const bare = { ...e2, text: "" };
   assert.equal(liveRestartTarget(bare, [], "a"), null);
+  // The placeholder «Повторить» shows has a thread and the next number, but the core has not named it: no action.
+  const placeholder = reducePanel(s, { type: "rerunAsked", from: { threadId: "a", turn: 2, text: "вопрос 2", scope: null } });
+  const ph = placeholder.entries.find((e) => e.turn === 3);
+  assert.ok(ph !== undefined && ph.update === null, "the placeholder exists");
+  assert.equal(liveRestartTarget(ph, [req(3)], "a"), null);
   assert.equal(liveRestartTarget(bare, [req(2, { mentions: [mention] })], "a").text, "вопрос 2");
   assert.deepEqual(liveRestartTarget(bare, [req(2, { mentions: [mention] })], "a").mentions, [mention]);
 });
@@ -219,9 +229,12 @@ test("sending spends the pending edit; a refusal brings it back with the reason 
 test("refusal texts say why in plain Russian and where to go on", () => {
   assert.match(restartRefusalText("busy"), /Дождитесь конца или остановите/);
   assert.match(restartRefusalText("invalid"), /чат изменился/);
-  assert.match(restartRefusalText("offline"), /Нет связи/);
+  assert.match(restartRefusalText("offline"), /нет связи/);
   for (const p of ["failed", "unavailable", "", "weird"]) {
-    assert.match(restartRefusalText(p), /Текст остался в поле/);
+    assert.match(restartRefusalText(p), /Можно попробовать ещё раз/);
+  }
+  for (const p of ["busy", "invalid", "offline", "closed", "failed", ""]) {
+    assert.ok(restartRefusalText(p).startsWith("Не удалось "), `the opening of «${p}» is the same`);
   }
   for (const p of ["busy", "invalid", "offline", "closed", "failed"]) {
     assert.doesNotMatch(restartRefusalText(p).replace("paratech", ""), /[A-Za-z]{3}/, `no codes or English in «${p}»`);
@@ -353,7 +366,8 @@ test("a live request of the open chat shows the action under its text", () => {
 
 test("the pending edit shows a note by the field with «Отменить»; the refusal is written there", () => {
   const html = panel({ draft: "старый", restart: restartUi({ pending: { problem: "", onCancel: noop } }) });
-  assert.ok(html.includes("Правка сообщения: сообщения после него будут скрыты"));
+  assert.ok(html.includes("Правка сообщения. После отправки всё, что ниже него, пропадёт из чата."));
+  assert.ok(!html.includes("Вернуть текст сообщения"), "nothing to bring back without a refusal");
   assert.ok(/<button[^>]*aria-label="Отменить правку"[^>]*>Отменить<\/button>/.test(html));
   assert.ok(/aria-describedby="[^"]+"/.test(html), "the field points at the note");
   const failed = panel({ draft: "старый", restart: restartUi({ pending: { problem: restartRefusalText("busy"), onCancel: noop } }) });
@@ -417,6 +431,110 @@ test("keys of the dialog: Esc cancels, Tab and Shift+Tab stay among the buttons"
   assert.deepEqual(dialogKey({ key: "Tab", shiftKey: true }, -1, 3), { act: "focus", index: 2 });
   assert.equal(dialogKey({ key: "Enter", shiftKey: false }, 0, 2), null);
   assert.equal(dialogKey({ key: "Tab", shiftKey: false }, 0, 0), null, "no buttons, nothing to trap");
+});
+
+// ---- A refused restart (TASK-249 review) ----
+
+const pendingFlow = () => hideRestart(openRestart(noRestart, target).flow, { draft: "", pills: [] }, null).flow;
+const sentText = { draft: "правка студента", pills: [mention] };
+
+test("a refusal with an untouched field puts the sent text back and keeps the edit pending with the reason", () => {
+  const flow = spendRestart(pendingFlow()).flow;
+  const r = restartRefusal(flow, pendingFlow().pending, "busy", { open: true, field: { draft: "", pills: [] }, unsent: sentText });
+  assert.equal(r.discard, true);
+  assert.deepEqual(r.step.field, sentText, "what the student sent returns, not the old message");
+  assert.match(r.step.flow.pending.problem, /^Не удалось отправить: агент ещё занят/);
+  assert.equal(r.step.flow.pending.unsent, null);
+  assert.equal(r.step.flow.pending.turn, 2, "the edit still points at the same message");
+});
+
+test("a refusal with a busy field leaves the field alone, keeps the reason and the refused text for «Вернуть текст сообщения»", () => {
+  const flow = spendRestart(pendingFlow()).flow;
+  const busy = { draft: "уже набрано заново", pills: [] };
+  const r = restartRefusal(flow, pendingFlow().pending, "busy", { open: true, field: busy, unsent: sentText });
+  assert.equal(r.step.field, null, "typed text is not overwritten");
+  assert.equal(r.discard, true);
+  const p = r.step.flow.pending;
+  assert.match(p.problem, /занят/);
+  assert.deepEqual(p.unsent, sentText);
+  assert.deepEqual(p.before, busy, "«Отменить» returns the field as it is now");
+  // Pills alone make the field busy as well.
+  const pills = restartRefusal(flow, pendingFlow().pending, "offline", { open: true, field: { draft: "", pills: [mention] }, unsent: sentText });
+  assert.equal(pills.step.field, null);
+  assert.deepEqual(pills.step.flow.pending.unsent, sentText);
+  // The note offers the action only while there is something to bring back.
+  const html = panel({ draft: "уже набрано заново", restart: restartUi({ pending: { problem: p.problem, onCancel: noop, onRestoreText: noop } }) });
+  assert.ok(html.includes(">Вернуть текст сообщения</button>"));
+  assert.ok(html.includes("Не удалось отправить: агент ещё занят"));
+});
+
+test("«Вернуть текст сообщения» replaces the field with the refused text; «Отменить» then brings the typed text back", () => {
+  const flow = spendRestart(pendingFlow()).flow;
+  const busy = { draft: "уже набрано заново", pills: [] };
+  const refused = restartRefusal(flow, pendingFlow().pending, "busy", { open: true, field: busy, unsent: sentText }).step.flow;
+  const back = restoreUnsent(refused, busy);
+  assert.deepEqual(back.field, sentText);
+  assert.equal(back.flow.pending.unsent, null, "the action is gone once used");
+  assert.equal(back.flow.pending.problem, "");
+  assert.deepEqual(cancelRestartEdit(back.flow).field, busy);
+  assert.equal(restoreUnsent(pendingFlow(), busy).field, null, "nothing refused, nothing to bring back");
+  assert.equal(restoreUnsent(noRestart, busy).field, null);
+});
+
+test("a refusal restores nothing when the chat is closed or another edit has started", () => {
+  const flow = spendRestart(pendingFlow()).flow;
+  const closed = restartRefusal(flow, pendingFlow().pending, "busy", { open: false, field: { draft: "", pills: [] }, unsent: sentText });
+  assert.deepEqual(closed.step, { flow, field: null });
+  assert.equal(closed.discard, false, "the refused request stays where it was");
+  const again = pendingFlow();
+  const other = restartRefusal(again, pendingFlow().pending, "busy", { open: true, field: { draft: "x", pills: [] }, unsent: sentText });
+  assert.equal(other.step.flow, again, "the newer edit is kept as it is");
+  assert.equal(other.discard, false);
+});
+
+test("«Отправить ещё раз» of a refused restart sends an ordinary request", () => {
+  const scope = sendScope({ restartFrom: 2 });
+  const plain = withoutRestartFrom(scope);
+  assert.equal("restartFrom" in plain, false);
+  assert.equal(plain.text, scope.text);
+  assert.equal(plain.threadId, "a");
+  assert.equal(scope.restartFrom, 2, "the original scope is not changed");
+});
+
+test("a hint text from outside ends the pending edit and its pills; with no edit the field is left to the caller", () => {
+  const step = restartOnOutsideDraft(pendingFlow(), "подсказка");
+  assert.equal(step.flow.pending, null);
+  assert.deepEqual(step.field, { draft: "подсказка", pills: [] });
+  const none = restartOnOutsideDraft(noRestart, "подсказка");
+  assert.deepEqual(none, { flow: noRestart, field: null });
+});
+
+test("the action under a message is always visible (quiet, not hidden) and its tooltip says what it does", () => {
+  const css = readFileSync(new URL("../src/agent/agent.css", import.meta.url), "utf8");
+  const rule = css.split("\n").filter((l) => l.startsWith(".ag-restart "));
+  assert.equal(rule.length, 1);
+  assert.match(rule[0], /opacity: 0\.6/);
+  assert.match(rule[0], /min-height: 24px/);
+  assert.doesNotMatch(css, /\.ag-restart \{ opacity: 0; \}/);
+  const html = panel({ earlier: earlierItems([req(1)], [], "a"), restart: restartUi() });
+  assert.ok(html.includes(`title="${restartTexts.actionHint}"`));
+  assert.notEqual(restartTexts.actionHint, restartTexts.action);
+});
+
+test("the dialog points only at its body; the reason is a live region; «Скрыть» has no pointer of its own", () => {
+  const running = restartBlock(apply(initialPanelState, update({ status: "EXECUTING" })).entries, "a", live);
+  const html = dialog({ block: running });
+  const described = /role="dialog"[^>]*aria-describedby="([^"]+)"/.exec(html);
+  assert.ok(described, "the dialog is described");
+  assert.ok(!described[1].includes(" "), "one id: the body");
+  assert.ok(html.includes('role="status"'));
+  assert.ok(!/<button[^>]*aria-describedby/.test(html));
+});
+
+test("while «Отменить просьбу» runs it says «Отменяется…» and is off", () => {
+  const waiting = restartBlock(apply(initialPanelState, update({ status: "AWAITING_PLAN" })).entries, "a", live);
+  const html = dialog({ block: waiting, fixBusy: true });
+  assert.ok(/<button[^>]*disabled=""[^>]*>Отменяется…<\/button>/.test(html));
 });
 
 test("texts are impersonal and the dialog's words are as agreed", () => {

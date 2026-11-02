@@ -20,7 +20,7 @@ export interface RestartUi {
   /** The warning dialog; null while closed. */
   dialog: RestartDialogProps | null;
   /** The pending edit; null when none. */
-  pending: { problem: string; onCancel(): void } | null;
+  pending: { problem: string; onCancel(): void; onRestoreText?: (() => void) | null } | null;
 }
 
 /** Earlier requests of the open chat: text only (the student's words, the mentions as pills, the reply line). */
@@ -127,7 +127,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
         }}
       >
         <div className="ag-compose" onFocus={mn?.onFocus} onBlur={mn?.onBlur}>
-          {restart?.pending && <RestartNote id={noteId} problem={restart.pending.problem} onCancel={restart.pending.onCancel} />}
+          {restart?.pending && <RestartNote id={noteId} problem={restart.pending.problem} onCancel={restart.pending.onCancel} onRestoreText={restart.pending.onRestoreText} />}
           {mn && <ComposerPills pills={mn.pills} onRemove={mn.remove} />}
           <div className="ag-field">
             <textarea

@@ -4,11 +4,11 @@ import { dialogKey, type RestartBlock, restartLabel, type RestartTarget, restart
 
 // «Начать заново отсюда» (TASK-249): a quiet action under a message of the student and the warning dialog it opens.
 
-/** The action under the student's message: quiet, shown on hover and on keyboard focus (always present for the keyboard). */
+/** The action under the student's message: always visible but quiet, full on hover and keyboard focus. */
 export function RestartButton(props: { target: RestartTarget; onOpen(target: RestartTarget, opener: HTMLElement): void }) {
   const label = restartLabel(props.target);
   return (
-    <button type="button" className="ag-restart" aria-label={label} title={restartTexts.action} onClick={(e) => props.onOpen(props.target, e.currentTarget)}>
+    <button type="button" className="ag-restart" aria-label={label} title={restartTexts.actionHint} onClick={(e) => props.onOpen(props.target, e.currentTarget)}>
       {restartTexts.action}
     </button>
   );
@@ -72,7 +72,7 @@ export function RestartDialog(props: RestartDialogProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        aria-describedby={block ? `${bodyId} ${reasonId}` : bodyId}
+        aria-describedby={bodyId}
         onKeyDown={onKeyDown}
       >
         <h2 id={titleId} className="ag-restart-title">
@@ -87,7 +87,7 @@ export function RestartDialog(props: RestartDialogProps) {
           </p>
         )}
         <div className="ag-actions">
-          <Button size="sm" variant="primary" disabled={block !== null} aria-describedby={block ? reasonId : undefined} onClick={props.onHide}>
+          <Button size="sm" variant="primary" disabled={block !== null} onClick={props.onHide}>
             {restartTexts.hide}
           </Button>
           {block?.fix && (
@@ -100,7 +100,7 @@ export function RestartDialog(props: RestartDialogProps) {
                 cancel.current?.focus();
               }}
             >
-              {props.fixBusy && block.fix.kind === "stop" ? restartTexts.stopping : block.fix.label}
+              {props.fixBusy ? (block.fix.kind === "stop" ? restartTexts.stopping : restartTexts.cancelling) : block.fix.label}
             </Button>
           )}
           <button ref={cancel} type="button" className="btn ghost sm" onClick={props.onCancel}>
@@ -113,16 +113,23 @@ export function RestartDialog(props: RestartDialogProps) {
 }
 
 /** The note next to the field while an edit is pending: what the send will do, how to back out, and a refusal if any. */
-export function RestartNote(props: { id: string; problem: string; onCancel(): void }) {
+export function RestartNote(props: { id: string; problem: string; onCancel(): void; onRestoreText?: (() => void) | null }) {
   return (
     <div className="ag-restart-note small" id={props.id}>
       <span className="ag-restart-note-t" role="status">
         {restartTexts.note}
         {props.problem !== "" && <span className="ag-restart-problem">{props.problem}</span>}
       </span>
-      <button type="button" className="ag-restart-undo" aria-label="Отменить правку" onClick={props.onCancel}>
-        {restartTexts.undoNote}
-      </button>
+      <span className="ag-restart-acts">
+        {props.onRestoreText && (
+          <button type="button" className="ag-restart-undo" onClick={props.onRestoreText}>
+            {restartTexts.restoreText}
+          </button>
+        )}
+        <button type="button" className="ag-restart-undo" aria-label={restartTexts.undoLabel} onClick={props.onCancel}>
+          {restartTexts.undoNote}
+        </button>
+      </span>
     </div>
   );
 }
