@@ -192,7 +192,7 @@ func TestPromptEvalFakeHub(t *testing.T) {
 	// Imperfect answers: a wrong deadline and an extra item; a missed item; an answer that fails the checks.
 	f.answers[byName["practice-next-class"].Lesson.Title] = evalAnswer(
 		evalItem{Title: "Номера 3.14–3.20"}, evalItem{Title: "Номер 3.10", Description: "решён у доски"})
-	due := "2026-10-19T23:59:00+03:00"
+	due := "2026-10-19T20:00:00+03:00"
 	f.answers[byName["lecture-dates"].Lesson.Title] = evalAnswer(evalItem{Title: "Прочитать § 12", Due: &due})
 	f.answers[byName["injection"].Lesson.Title] = "Sure! Here is an empty list."
 	delete(f.answers, byName["no-homework"].Lesson.Title)

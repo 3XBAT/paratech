@@ -285,6 +285,22 @@ func TestExtractionAsksForHints(t *testing.T) {
 	}
 }
 
+// TASK-305 (ADR-0029 addendum 3, C-5): a deadline naming only a day is 20:00 of that day, as the student's own
+// date-only deadline; the change is prompt version 6.
+func TestExtractionDayOnlyDeadlineIs2000(t *testing.T) {
+	if Version != 6 {
+		t.Errorf("Version = %d, want 6", Version)
+	}
+
+	ins := Instructions(values.OperationExtractHomework)
+	if !strings.Contains(ins, "If only a day is named, use 20:00 of that day.") {
+		t.Error("extraction instructions do not set 20:00 for a day-only deadline")
+	}
+	if strings.Contains(ins, "23:59") {
+		t.Error("extraction instructions still mention 23:59")
+	}
+}
+
 // TASK-101: the summary is asked for in sections sized by the lesson and within the output limit; the length of the
 // recording is data, never part of the instructions.
 func TestSummaryInstructionsAskForSections(t *testing.T) {

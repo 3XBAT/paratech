@@ -10,8 +10,9 @@ import (
 )
 
 // Version identifies the prompts and schemas of this package. Bump it on any change of the instructions, the data
-// layout or a schema, so that results produced by different prompts can be told apart.
-const Version = 5
+// layout or a schema, so that results produced by different prompts can be told apart. Version 6: a deadline that
+// names only a day is 20:00 of that day, as a student's date-only deadline (ADR-0029 addendum 3, C-5; TASK-305).
+const Version = 6
 
 // Markers around the untrusted data. The data between them is one JSON object; encoding/json escapes '<' and '>',
 // so the data cannot contain a marker and cannot close the block early.
@@ -64,7 +65,7 @@ Homework is work the students are to do after the lesson. Typical phrasings: «�
 
 List one item per piece of work; do not merge different works or split one. title is short and names the work, for example «Задачи 3.14–3.20 из задачника»; description keeps the details as said: numbers, pages, paragraphs, the topic, the format and how to hand it in. Work given only to some students (a group, a subgroup, a variant, those who missed a class) is still listed: description starts with whom it is for, for example «Только для 2-й подгруппы:».
 
-Deadlines: due is an RFC 3339 date-time with the same UTC offset as lesson_start. Resolve relative dates such as "by next Monday" or «через неделю» against lesson_start and lesson_weekday. "By the next class" («к следующей паре», «к следующему занятию», «на следующем занятии») means next_lesson_start; without next_lesson_start, due is null. A deadline that names a kind of lesson («к следующей лекции», «к следующему семинару», «к следующей лабораторной», «к следующей практике») means next_lesson_start only when next_lesson_kind is that kind (lecture, seminar, lab, practice); otherwise due is null. If only a day is named, use 23:59 of that day. If no deadline is named, due is null. If a deadline is named but unclear (for example «на днях», «после праздников», two different dates, «к следующему занятию» without next_lesson_start, or «к следующему семинару» when next_lesson_kind is not seminar), due is null and description ends with a short note of what was said, for example «Срок: к следующему занятию».
+Deadlines: due is an RFC 3339 date-time with the same UTC offset as lesson_start. Resolve relative dates such as "by next Monday" or «через неделю» against lesson_start and lesson_weekday. "By the next class" («к следующей паре», «к следующему занятию», «на следующем занятии») means next_lesson_start; without next_lesson_start, due is null. A deadline that names a kind of lesson («к следующей лекции», «к следующему семинару», «к следующей лабораторной», «к следующей практике») means next_lesson_start only when next_lesson_kind is that kind (lecture, seminar, lab, practice); otherwise due is null. If only a day is named, use 20:00 of that day. If no deadline is named, due is null. If a deadline is named but unclear (for example «на днях», «после праздников», two different dates, «к следующему занятию» without next_lesson_start, or «к следующему семинару» when next_lesson_kind is not seminar), due is null and description ends with a short note of what was said, for example «Срок: к следующему занятию».
 
 subject_hint is the subject (course) of the lesson and teacher_hint the teacher's name, each only when it is said in the transcript, as short plain text; otherwise an empty string; never guess them and never copy lesson_subject or lesson_teacher. List only homework the teacher actually assigned; an empty list is a valid answer. Write titles and descriptions in the language of the transcript. The student reviews your answer before anything is saved.
 
