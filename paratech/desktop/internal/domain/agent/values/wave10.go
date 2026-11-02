@@ -65,7 +65,7 @@ const (
 	StateAll  = "all"
 )
 
-// Setting is a setting set_setting may change (wave 10: the four toggles of «Настройки»).
+// Setting is a setting set_setting may change (wave 10: the three toggles of «Настройки»).
 type Setting string
 
 // Settings of wave 10.
@@ -73,7 +73,6 @@ const (
 	SettingRecordingPrompts Setting = "recording_prompts" // the popup before a lesson (AC-02)
 	SettingACPowerOnly      Setting = "ac_power_only"     // heavy jobs wait for AC power (AC-21)
 	SettingRecognitionLoad  Setting = "recognition_load"  // shared.RecognitionLoad
-	SettingFreeWorkNotice   Setting = "free_work_notice"  // the free-work card before a work on a topic (TASK-188)
 )
 
 // Values of an on/off setting.
@@ -84,7 +83,7 @@ const (
 
 // Settings returns every setting of wave 10.
 func Settings() []Setting {
-	return []Setting{SettingRecordingPrompts, SettingACPowerOnly, SettingRecognitionLoad, SettingFreeWorkNotice}
+	return []Setting{SettingRecordingPrompts, SettingACPowerOnly, SettingRecognitionLoad}
 }
 
 // Valid reports whether s is one of the settings.
@@ -94,7 +93,7 @@ func (s Setting) Valid() bool { return slices.Contains(Settings(), s) }
 // for an unknown setting.
 func SettingValues(s Setting) []string {
 	switch s {
-	case SettingRecordingPrompts, SettingACPowerOnly, SettingFreeWorkNotice:
+	case SettingRecordingPrompts, SettingACPowerOnly:
 		return []string{SettingOn, SettingOff}
 	case SettingRecognitionLoad:
 		loads := shared.RecognitionLoads()

@@ -65,14 +65,6 @@ func (s *Service) SetRecognitionLoad(ctx context.Context, load shared.Recognitio
 	})
 }
 
-// SetFreeWorkNotice turns the free-work card of the agent on or off (TASK-188): off is «Больше не показывать» on the
-// card, on is the toggle in «Настройки». It returns the stored toggles.
-func (s *Service) SetFreeWorkNotice(ctx context.Context, on bool) (Toggles, error) {
-	return s.change(ctx, "set free work notice", func(st *settings.Settings, now time.Time) error {
-		return st.SetFreeWorkNotice(on, now)
-	})
-}
-
 // SetNoteRecognition sets who recognises photo pages of notes (TASK-294) and returns the stored toggles. An unknown
 // mode wraps settings.ErrInvalidSettings and nothing is stored. Nothing is recognised or sent here.
 func (s *Service) SetNoteRecognition(ctx context.Context, mode settings.NoteRecognition) (Toggles, error) {
@@ -166,7 +158,6 @@ func toggles(st *settings.Settings) Toggles {
 		RecordingPromptsEnabled: st.RecordingPromptsEnabled(),
 		ProcessOnlyOnACPower:    st.ProcessOnlyOnACPower(),
 		RecognitionLoad:         st.RecognitionLoad(),
-		FreeWorkNotice:          st.FreeWorkNotice(),
 		NoteRecognition:         st.NoteRecognition(),
 	}
 }

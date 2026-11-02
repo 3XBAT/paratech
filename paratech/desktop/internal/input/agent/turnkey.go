@@ -69,9 +69,9 @@ func originOf(st agentturn.Step) origin {
 }
 
 // triageTopic starts a work on a free topic (TASK-187, TASK-188), in the subject of the call's request. It runs as a
-// step of an approved plan, as the paid job of a request whose student turned the free-work card off, or after «Сделать»
-// on the card (FreeWorks): each is the student's consent. The request key is the call's (thread, request, call ID), so
-// a replay or a second «Сделать» finds the same work, and a call of another request never does. The topic is free
+// step of an approved plan or as the one paid job of a request without a plan (no notice card since TASK-342). The
+// request key is the call's (thread, request, call ID), so a replay finds the same work, and a call of another request
+// never does. The topic is free
 // model text: data for the reader, never logged here; file names and titles take it through the safe-name rules of
 // the work (TASK-187).
 func (a *Actions) triageTopic(at origin, call values.Call) (prepared, error) {

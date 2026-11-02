@@ -115,13 +115,12 @@ type core struct {
 	advice adviceRelay
 
 	// The agent core (wireAgent): the steps of a request, the action journal and the Driver of the requests.
-	agent     *agentturn.Service
-	chats     *agentchats.Service // the chat list of the agent panel (ADR-0028)
-	journal   *agentjournal.Service
-	driver    *agentloop.Driver
-	panel     *wails.AgentPanel    // the Driver's updates as UI events
-	freeWorks *agentloop.FreeWorks // the free-work cards (TASK-188)
-	mentions  mentionObjects       // whether a mentioned object exists, for the requests and the «@» search
+	agent    *agentturn.Service
+	chats    *agentchats.Service // the chat list of the agent panel (ADR-0028)
+	journal  *agentjournal.Service
+	driver   *agentloop.Driver
+	panel    *wails.AgentPanel // the Driver's updates as UI events
+	mentions mentionObjects    // whether a mentioned object exists, for the requests and the «@» search
 
 	// cleanups remove what a crashed run left behind; they run at the start, before any job or recording writes.
 	cleanups []cleanup
@@ -458,7 +457,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	}
 	if err := c.wireAgent(e, llm, agentReads{
 		library: lib, knowledge: knowledge, activity: history, schedule: schedule, assignments: c.proposals,
-		deliveries: c.deliveries, rerunner: rerunner, materials: materialJobs, turnkey: works, answers: answers, prefs: prefs,
+		deliveries: c.deliveries, rerunner: rerunner, materials: materialJobs, turnkey: works, answers: answers,
 	}, log); err != nil {
 		return err
 	}
@@ -489,7 +488,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Notes:           ownNotes,
 		// Life is set by openCore: the requests live as long as the app.
 		Agent: wails.AgentCore{
-			Driver: c.driver, Panel: c.panel, Journal: c.journal, Clock: e.clock, Chats: c.chats, FreeWork: c.freeWorks,
+			Driver: c.driver, Panel: c.panel, Journal: c.journal, Clock: e.clock, Chats: c.chats,
 			Current: driverCurrent{c.driver},
 			// The «@» search reads the same use cases as the screens; a lesson is checked as a mention of a request is.
 			Mentions: wails.AgentMentionSources{

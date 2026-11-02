@@ -46,7 +46,6 @@ func (r *fakeRepo) Save(_ context.Context, s *settings.Settings) error {
 		DefaultSttModel:         s.DefaultSttModel(),
 		RecognitionLoad:         s.RecognitionLoad(),
 		Profile:                 s.Profile().Fields(),
-		FreeWorkNotice:          s.FreeWorkNotice(),
 		NoteRecognition:         s.NoteRecognition(),
 		UpdatedAt:               s.UpdatedAt(),
 	}
@@ -81,8 +80,7 @@ func TestGetReturnsDefaults(t *testing.T) {
 	}
 	want := Toggles{
 		RecordingPromptsEnabled: settings.DefaultRecordingPromptsEnabled, ProcessOnlyOnACPower: settings.DefaultProcessOnlyOnACPower,
-		RecognitionLoad: shared.DefaultRecognitionLoad, FreeWorkNotice: settings.DefaultFreeWorkNotice,
-		NoteRecognition: settings.DefaultNoteRecognition,
+		RecognitionLoad: shared.DefaultRecognitionLoad, NoteRecognition: settings.DefaultNoteRecognition,
 	}
 	if got != want {
 		t.Fatalf("Get = %+v, want %+v", got, want)
@@ -106,7 +104,7 @@ func TestSetToggles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != (Toggles{RecognitionLoad: shared.LoadGentle, FreeWorkNotice: true, NoteRecognition: settings.NoteRecognitionOff}) {
+	if got != (Toggles{RecognitionLoad: shared.LoadGentle, NoteRecognition: settings.NoteRecognitionOff}) {
 		t.Fatalf("after AC off: %+v, want both off", got)
 	}
 	if !repo.stored.UpdatedAt.Equal(start) {
@@ -181,25 +179,6 @@ func TestSetRecognitionLoad(t *testing.T) {
 	}
 }
 
-// TASK-188: «Больше не показывать» turns the free-work card off, the toggle of «Настройки» on again; the other
-// toggles stay.
-func TestSetFreeWorkNotice(t *testing.T) {
-	ctx := context.Background()
-	repo := &fakeRepo{}
-	s := newService(t, repo)
-
-	got, err := s.SetFreeWorkNotice(ctx, false)
-	if err != nil || got.FreeWorkNotice || repo.stored.FreeWorkNotice || !got.RecordingPromptsEnabled {
-		t.Fatalf("off = %+v, %v; stored %+v", got, err, repo.stored)
-	}
-	if read, err := s.Get(ctx); err != nil || read.FreeWorkNotice {
-		t.Fatalf("Get = %+v, %v; want off", read, err)
-	}
-	if got, err = s.SetFreeWorkNotice(ctx, true); err != nil || !got.FreeWorkNotice || !repo.stored.FreeWorkNotice {
-		t.Fatalf("on = %+v, %v", got, err)
-	}
-}
-
 // TASK-294: photo recognition is off until the student turns it on; an unknown mode is refused and changes nothing; a
 // version that stays stale fails like every toggle; the other toggles stay.
 func TestSetNoteRecognition(t *testing.T) {
@@ -212,7 +191,7 @@ func TestSetNoteRecognition(t *testing.T) {
 	}
 	got, err := s.SetNoteRecognition(ctx, settings.NoteRecognitionLocal)
 	if err != nil || got.NoteRecognition != settings.NoteRecognitionLocal || repo.stored.NoteRecognition != settings.NoteRecognitionLocal ||
-		!got.RecordingPromptsEnabled || !got.FreeWorkNotice {
+		!got.RecordingPromptsEnabled || !got.ProcessOnlyOnACPower {
 		t.Fatalf("local = %+v, %v; stored %+v", got, err, repo.stored)
 	}
 	if _, err := s.SetNoteRecognition(ctx, "cloud"); !errors.Is(err, settings.ErrInvalidSettings) {
