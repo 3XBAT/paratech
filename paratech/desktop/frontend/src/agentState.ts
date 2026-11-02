@@ -30,9 +30,22 @@ export interface PanelState {
   link: AgentState | null;
   /** Unchecked answer texts being read (agent:draft), one per (thread, turn, call), the last one winning. */
   drafts: readonly DraftView[];
+  /** Requests whose reply was typing when they stopped or failed (UI only, never stored or sent), at most one per thread. */
+  cuts: readonly CutReply[];
 }
 
-export const initialPanelState: PanelState = { entries: [], nextSeq: 1, link: null, drafts: [] };
+/**
+ * A reply cut short. `text` is what the student had read, kept only when they pressed «Стоп» (stopReason "user") and
+ * shown muted above the stopped line; "" for a failure or an offline cut (the unchecked fragment is dropped, only the
+ * wording of the stopped card changes).
+ */
+export interface CutReply {
+  threadId: string;
+  turn: number;
+  text: string;
+}
+
+export const initialPanelState: PanelState = { entries: [], nextSeq: 1, link: null, drafts: [], cuts: [] };
 
 export type PanelAction =
   | { type: "asked"; id: number; text: string; scope: AskInput }
@@ -99,12 +112,45 @@ function applyUpdate(s: PanelState, u: UpdateView): PanelState {
   if (isFailedAsk(u)) {
     return next;
   }
+  const cuts = nextCuts(s, u);
   // Older turns of the thread are over; the own turn's drafts end only with a clearing update.
   const drop = (d: DraftView) => d.threadId === u.threadId && (d.turn < u.turn || (clearsDrafts(u) && d.turn === u.turn));
   if (!next.drafts.some(drop)) {
-    return next;
+    return cuts === s.cuts ? next : { ...next, cuts };
   }
-  return { ...next, drafts: next.drafts.filter((d) => !drop(d)) };
+  return { ...next, drafts: next.drafts.filter((d) => !drop(d)), cuts };
+}
+
+/** The reason of a request that ended: the stopped card's own, else the update's. */
+function endReason(u: UpdateView): string {
+  return u.cards.find((c) => c.kind === "stopped")?.stopReason || u.stopReason;
+}
+
+/**
+ * The cut replies after an update. A stopped or failed request whose reply was typing is recorded (the text only for «Стоп»);
+ * a repeat of the same end keeps the record; any other update of the thread (Продолжить, Повторить, Отменить, a new turn)
+ * ends it. A problem-only update (a refused button) leaves it.
+ */
+function nextCuts(s: PanelState, u: UpdateView): readonly CutReply[] {
+  const mine = s.cuts.find((c) => c.threadId === u.threadId);
+  if (u.status === "" && u.cards.length === 0) {
+    return s.cuts;
+  }
+  const ended = u.status === "STOPPED" || u.status === "FAILED";
+  const typed = ended && clearsDrafts(u) ?s.drafts.filter((d) => d.threadId === u.threadId && d.turn === u.turn && d.reply === true && replyDraftText(d) !== "").at(-1) : undefined;
+  if (typed) {
+    const cut: CutReply = { threadId: u.threadId, turn: u.turn, text: endReason(u) === "user" ? replyDraftText(typed) : "" };
+    return [...s.cuts.filter((c) => c !== mine), cut];
+  }
+  if (mine === undefined || (ended && mine.turn === u.turn)) {
+    return s.cuts;
+  }
+  return s.cuts.filter((c) => c !== mine);
+}
+
+/** The cut reply of a request, if its reply was typing when it stopped or failed. */
+export function cutFor(s: PanelState, e: Entry): CutReply | undefined {
+  return e.threadId === "" ? undefined : s.cuts.find((c) => c.threadId === e.threadId && c.turn === e.turn);
 }
 
 /** The newest turn the thread has shown or been told about, -1 if none. */
@@ -155,6 +201,11 @@ export function splitDrafts(drafts: readonly DraftView[]): { reply: DraftView | 
 /** Grows with every character of every draft (reply or answer): the panel follows it when the reader is at the bottom. */
 export function draftSize(drafts: readonly DraftView[]): number {
   return drafts.reduce((n, d) => n + d.texts.reduce((m, t) => m + t.length, d.texts.length), 0);
+}
+
+/** Changes when the last request moves to another step (status or number of cards): the panel then follows to the end. */
+export function endSignature(last: Entry | undefined): string {
+  return `${last?.key ?? ""}|${last?.update?.status ?? ""}|${last?.update?.cards.length ?? 0}`;
 }
 
 function applyUpdateEntries(s: PanelState, u: UpdateView): PanelState {
@@ -219,7 +270,9 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
         callProblem: "",
         update: null,
       };
-      return { ...s, entries: [...s.entries, e], nextSeq: s.nextSeq + 1 };
+      // A new request in the chat ends the kept text of the stopped one.
+      const asked = a.scope.threadId ?? "";
+      return { ...s, entries: [...s.entries, e], nextSeq: s.nextSeq + 1, cuts: asked === "" ? s.cuts : s.cuts.filter((c) => c.threadId !== asked) };
     }
     case "askResult": {
       const e = s.entries.find((x) => x.key === localKey(a.id));
@@ -248,7 +301,7 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
         callProblem: "",
         update: null,
       };
-      return { ...s, entries: [...entries, e], nextSeq: s.nextSeq + 1 };
+      return { ...s, entries: [...entries, e], nextSeq: s.nextSeq + 1, cuts: s.cuts.filter((c) => c.threadId !== a.from.threadId) };
     }
     case "rerunRefused":
       // Only a request the core never answered for is taken back.
