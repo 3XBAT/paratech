@@ -213,7 +213,7 @@ type ReplyCard struct {
 
 // AssignmentLine is one assignment a reply lists (or an action line shows), as the local data has it: its title
 // (trusted local data, shown as plain text), its library subject (zero when none) and its deadline (zero when none).
-// DueTime is the time of day of the deadline, set on an action line only (zero on a reply's lines).
+// DueTime is the time of day of the deadline (zero when there is no deadline), on a reply's and an action line alike.
 type AssignmentLine struct {
 	Assignment Ref
 	Title      string

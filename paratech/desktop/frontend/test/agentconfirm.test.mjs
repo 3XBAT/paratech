@@ -137,6 +137,14 @@ test("deadline card shows the calendar, the assignment and the date", () => {
   assert.match(view(deadline()), /Google Календарь/);
 });
 
+test("deadline card shows the date with the time, no «до» (TASK-343)", () => {
+  const at = (d, hh, mm) => new Date(2026, 9, d, hh, mm).toISOString(); // local time, zone independent
+  assert.equal(confirmCardModel(deadline({ due: at(24, 18, 30) })).rows[3].value, "сб, 24 окт., 18:30");
+  assert.equal(confirmCardModel(deadline({ due: at(24, 20, 0) })).rows[3].value, "сб, 24 окт., 20:00");
+  // Unknown due: the row is left out.
+  assert.deepEqual(confirmCardModel(deadline({ due: "" })).rows.map((r) => r.label), ["Куда", "Что", "Предмет"]);
+});
+
 test("delete card lists what goes and says it is irreversible; a refusal has no buttons", () => {
   const out = view(deletion());
   assert.match(out, /Лекция 5/);

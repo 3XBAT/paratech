@@ -455,6 +455,10 @@ func TestAgentPanelEventContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	twenty, err := values.NewTimeOfDay(20, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	scope, err := values.NewScope(mustRef(t, values.KindSubject, "sub-1"), values.ScreenToday,
 		mustRef(t, values.KindLesson, "les-1"), values.Ref{})
 	if err != nil {
@@ -491,7 +495,7 @@ func TestAgentPanelEventContract(t *testing.T) {
 			values.ReplyCard{Text: "Готово"},
 			values.ReplyCard{Text: "Два задания.", Assignments: []values.Ref{a2, a1, a3}, Lines: []values.AssignmentLine{
 				{Assignment: a2, Title: "Эссе"},
-				{Assignment: a1, Title: "Лабораторная 2", Subject: mustRef(t, values.KindSubject, "sub-1"), Due: due},
+				{Assignment: a1, Title: "Лабораторная 2", Subject: mustRef(t, values.KindSubject, "sub-1"), Due: due, DueTime: twenty},
 			}},
 			values.StoppedCard{Reason: values.StopOffline},
 			values.WorkCard{Work: mustRef(t, values.KindWork, "w-1"), Outcome: values.TriageHelper},
@@ -541,8 +545,8 @@ func TestAgentPanelEventContract(t *testing.T) {
 		card(`"kind":"cannot_do","cannotDo":{"yourPart":["сдать лично"],"ourPart":[]}`) + "," +
 		card(`"kind":"reply","text":"Готово","assignments":[]`) + "," +
 		card(`"kind":"reply","text":"Два задания.","assignments":[`+
-			`{"id":"a-2","title":"Эссе","subjectId":"","due":""},`+
-			`{"id":"a-1","title":"Лабораторная 2","subjectId":"sub-1","due":"2026-10-24"}]`) + "," +
+			`{"id":"a-2","title":"Эссе","subjectId":"","due":"","time":""},`+
+			`{"id":"a-1","title":"Лабораторная 2","subjectId":"sub-1","due":"2026-10-24","time":"20:00"}]`) + "," +
 		card(`"kind":"stopped","stopReason":"offline"`) + "," +
 		card(`"kind":"work","workId":"w-1","outcome":"helper"`) + `],"fill":null}`
 	if string(got) != want {

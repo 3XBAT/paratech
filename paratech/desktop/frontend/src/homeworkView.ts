@@ -357,7 +357,7 @@ export const addTexts = {
   noSubject: "Без предмета",
   due: "Срок",
   time: "Время",
-  timeHint: "Необязательно. Если время не указано, срок — 20:00.",
+  timeHint: "По умолчанию — 20:00.",
   note: "Заметка",
   add: "Добавить",
   adding: "Добавление…",
@@ -371,9 +371,27 @@ export interface AddForm {
   date: string;
   time: string;
   note: string;
+  /**
+   * The date input holds a half-typed date: it reports "" as its value, which must not read as «no date». Never stored
+   * in the form state (a change event does not fire for "" -> ""): set at submit time by withDateBad.
+   */
+  dateBad?: boolean;
 }
 
-export const emptyAddForm: AddForm = { title: "", subjectId: "", date: "", time: "", note: "" };
+/** The form to validate: input is the date input element (or null); its validity.badInput is read right now. */
+export function withDateBad(f: AddForm, input: { validity: { badInput: boolean } } | null | undefined): AddForm {
+  return { ...f, dateBad: input?.validity.badInput === true };
+}
+
+/**
+ * The time a deadline given as a date alone gets. Mirrors the Go constant in domain/coursework/assignment: keep them
+ * in step.
+ */
+export const DEFAULT_DUE_TIME = "20:00";
+
+// The time field starts with the default shown (a native time input has no placeholder): left alone, it stores the same
+// 20:00 as an empty field would.
+export const emptyAddForm: AddForm = { title: "", subjectId: "", date: "", time: DEFAULT_DUE_TIME, note: "" };
 
 /** subject: only the edit form (subject_not_found). */
 export type AddFieldErrors = Partial<Record<"title" | "note" | "due" | "time" | "subject", string>>;
@@ -402,7 +420,9 @@ export function validateAddForm(f: AddForm): AddFieldErrors {
   if ([...f.note].length > noteMax) {
     errors.note = `Заметка не длиннее ${noteMax} символов.`;
   }
-  if (f.date === "") {
+  if (f.dateBad === true) {
+    errors.due = "Дата указана неверно.";
+  } else if (f.date === "") {
     errors.due = "Укажите срок.";
   } else if (!realDate(f.date)) {
     errors.due = "Дата указана неверно.";
@@ -610,22 +630,15 @@ function two(n: number): string {
 }
 
 /**
- * The time a deadline given as a date alone gets. Mirrors the Go constant in domain/coursework/assignment: keep them
- * in step.
- */
-export const DEFAULT_DUE_TIME = "20:00";
-
-/**
- * The deadline as the form fields: local date YYYY-MM-DD and time HH:MM; DEFAULT_DUE_TIME (20:00) is the default for a
- * date without a time, so it shows as no time. Any other time, 23:59 included, is shown and kept.
+ * The deadline as the form fields: local date YYYY-MM-DD and time HH:MM. The time is always shown, DEFAULT_DUE_TIME
+ * (20:00) included: the student sees the moment the deadline has, not an empty field.
  */
 export function dueFields(due: string): { date: string; time: string } {
   const d = new Date(due);
   if (due === "" || Number.isNaN(d.getTime())) {
     return { date: "", time: "" };
   }
-  const time = `${two(d.getHours())}:${two(d.getMinutes())}`;
-  return { date: `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`, time: time === DEFAULT_DUE_TIME ? "" : time };
+  return { date: `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`, time: `${two(d.getHours())}:${two(d.getMinutes())}` };
 }
 
 /**
@@ -656,17 +669,33 @@ export function editForm(a: AssignmentItem, subjects: readonly LibrarySubject[])
   return { title: a.title, subjectId: editSubjectId(a, subjects), date, time, note: a.description };
 }
 
-/** Like validateAddForm, but an assignment may have no deadline: an empty date is left to the core. */
+/**
+ * Like validateAddForm, but an assignment may have no deadline: an empty date with an empty or the app-filled default
+ * time (DEFAULT_DUE_TIME) means «no deadline». Another time without a date says how to remove the deadline. A
+ * half-typed date (dateBad) is an error, never «no deadline».
+ */
 export function validateEditForm(f: AddForm): AddFieldErrors {
   const errors = validateAddForm(f);
-  if (f.date === "" && errors.due !== undefined) {
-    if (f.time !== "" && errors.time === undefined) {
-      errors.due = "Укажите дату.";
+  if (f.date === "" && f.dateBad !== true && errors.due !== undefined) {
+    if (f.time !== "" && f.time !== DEFAULT_DUE_TIME && errors.time === undefined) {
+      errors.due = "Укажите дату или очистите время, чтобы убрать срок.";
     } else {
       delete errors.due;
     }
   }
   return errors;
+}
+
+/**
+ * The edit form after a change. When the date goes from empty to set and the time is empty, the time becomes
+ * DEFAULT_DUE_TIME: the same as the add form shows.
+ */
+export function applyEditChange(f: AddForm, patch: Partial<AddForm>): AddForm {
+  const next = { ...f, ...patch };
+  if (f.date === "" && next.date !== "" && next.time === "") {
+    next.time = DEFAULT_DUE_TIME;
+  }
+  return next;
 }
 
 /**
@@ -683,7 +712,9 @@ export function subjectMissingText(name: string): string {
 }
 
 export function editRequest(a: { id: string; version: number }, f: AddForm): EditAssignmentRequest {
-  return { id: a.id, version: a.version, title: f.title.trim(), note: f.note, subjectId: f.subjectId, date: f.date, time: f.time };
+  // No date and the app-filled default time: no deadline, so no time is sent.
+  const time = f.date === "" && f.time === DEFAULT_DUE_TIME ? "" : f.time;
+  return { id: a.id, version: a.version, title: f.title.trim(), note: f.note, subjectId: f.subjectId, date: f.date, time };
 }
 
 const editFieldTexts: Readonly<Record<"title" | "note" | "due" | "time", string>> = {

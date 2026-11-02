@@ -8,6 +8,7 @@ import { draftEvent, draftText, requestDraft } from "../.test-build/agentDraft.j
 import {
   dayTitle,
   daysLeftText,
+  deadlineChip,
   deadlineLine,
   doneLine,
   dueText,
@@ -15,6 +16,7 @@ import {
   lessonLine,
   liveStatus,
   looseProblems,
+  nearestDeadlineText,
   newestOnly,
   problemFor,
   stagesChanged,
@@ -25,6 +27,7 @@ import {
   titleOf,
   waitingLine,
 } from "../.test-build/todayView.js";
+import { assignmentRow } from "../.test-build/agentView.js";
 import { AskSection, BurningSection, DoneSection, LessonsSection, PostsSection, WaitingSection } from "../.test-build/pages/TodayParts.js";
 
 const noop = () => undefined;
@@ -109,8 +112,36 @@ test("times, dates and due texts", () => {
   assert.equal(timeText("not a date"), "");
   assert.equal(shortDate(at(21)), "21.10");
   assert.equal(dayTitle(at(21)), "Среда, 21 октября");
-  assert.equal(dueText(at(24, 23, 59)), "до сб, 24 окт.");
+  assert.equal(dueText(at(24, 23, 59)), "до сб, 24 окт., 23:59");
+  assert.equal(dueText(at(24, 20, 0)), "до сб, 24 окт., 20:00");
   assert.equal(dueText(""), "");
+  assert.equal(dueText("not a date"), "");
+});
+
+test("deadline text carries the time: today, tomorrow, later, passed (TASK-343)", () => {
+  const now = new Date(2026, 9, 21, 12, 0); // Wed 21 Oct 12:00, local
+  assert.equal(dueText(at(21, 20, 0), now), "сегодня до 20:00");
+  assert.equal(dueText(at(22, 18, 30), now), "завтра до 18:30");
+  assert.equal(dueText(at(24, 18, 30), now), "до сб, 24 окт., 18:30");
+  // A passed moment is never «до …»: «просрочено» with the full date and time.
+  assert.equal(dueText(at(21, 9, 0), now), "просрочено, ср, 21 окт., 09:00");
+  assert.equal(dueText(at(21, 12, 0), now), "просрочено, ср, 21 окт., 12:00");
+  assert.equal(dueText(at(20, 20, 0), now), "просрочено, вт, 20 окт., 20:00");
+  // Midnight edges: 23:59 of today is still today, 00:00 of tomorrow is tomorrow, a minute before midnight "now" too.
+  assert.equal(dueText(at(21, 23, 59), new Date(2026, 9, 21, 23, 58)), "сегодня до 23:59");
+  assert.equal(dueText(at(22, 0, 0), new Date(2026, 9, 21, 23, 58)), "завтра до 00:00");
+  assert.equal(dueText(at(22, 0, 0), new Date(2026, 9, 22, 0, 1)), "просрочено, чт, 22 окт., 00:00");
+  // Without `now` the wording stays «до …» (the calendar confirm card strips the «до »).
+  assert.equal(dueText(at(21, 9, 0)), "до ср, 21 окт., 09:00");
+});
+
+test("a date-only text is read as a local day, whatever the zone (TASK-343)", () => {
+  // The date-only form of the agent rows is parsed by calendar parts, never as UTC midnight.
+  const early = new Date(2026, 9, 26, 0, 30);
+  const row = (due, time) => assignmentRow({ id: "a", title: "t", subjectId: "", due, time }, {}, early);
+  assert.equal(row("2026-10-26", "").due, "сегодня");
+  assert.equal(row("2026-10-26", "20:00").due, "сегодня до 20:00");
+  assert.equal(row("2026-10-27", "20:00").due, "завтра до 20:00");
 });
 
 test("days left: today, tomorrow, plural forms, overdue", () => {
@@ -124,7 +155,11 @@ test("days left: today, tomorrow, plural forms, overdue", () => {
 
 test("homework text and titles", () => {
   assert.equal(homeworkText(0, at(24)), "");
-  assert.equal(homeworkText(1, at(24)), "1 задание · до сб, 24 окт.");
+  assert.equal(homeworkText(1, at(24, 20, 0)), "1 задание · до сб, 24 окт., 20:00");
+  assert.equal(homeworkText(1, at(24, 20, 0), 0, new Date(2026, 9, 24, 9, 0)), "1 задание · сегодня до 20:00");
+  assert.equal(homeworkText(1, at(24, 20, 0), 0, new Date(2026, 9, 24, 21, 0)), "1 задание · просрочено, сб, 24 окт., 20:00");
+  assert.equal(homeworkText(2, at(25, 18, 30), 0, new Date(2026, 9, 24, 9, 0)), "2 задания · завтра до 18:30");
+  assert.equal(homeworkText(1, at(24, 20, 0), 1, new Date(2026, 9, 24, 9, 0)), "1 задание · выполнено");
   assert.equal(homeworkText(3, ""), "3 задания");
   assert.equal(homeworkText(5, ""), "5 заданий");
   assert.equal(titleOf("  "), "Без названия");
@@ -145,7 +180,7 @@ test("live status comes from the recordings of the lesson", () => {
 test("lesson, waiting, deadline, done and post lines", () => {
   const l = lessonLine(lesson({ post: post() }), []);
   assert.deepEqual([l.start, l.end, l.title, l.meta], ["10:30", "11:50", "Матанализ", "Лекция · Петров А. В."]);
-  assert.deepEqual(l.post, { text: "Конспект готов", homework: "1 задание · до сб, 24 окт.", canOpen: true, recordingId: "r1" });
+  assert.deepEqual(l.post, { text: "Конспект готов", homework: "1 задание · до сб, 24 окт., 23:59", canOpen: true, recordingId: "r1" });
   assert.equal(lessonLine(lesson({ post: post({ summaryReady: false }) }), []).post.canOpen, false);
   assert.equal(lessonLine(lesson({ kind: "", teacher: "" }), []).meta, "");
 
@@ -153,11 +188,15 @@ test("lesson, waiting, deadline, done and post lines", () => {
   assert.equal(w.label, "Письмо преподавателю");
   assert.equal(w.subject, "История");
   assert.equal(w.meta, "→ teacher@example.test");
-  assert.equal(waitingLine({ proposalId: "p2", kind: "create_deadline_event", assignmentId: "a1", title: "ДЗ", subject: "", due: at(24), recipient: "", createdAt: "" }).meta, "до сб, 24 окт.");
+  assert.equal(waitingLine({ proposalId: "p2", kind: "create_deadline_event", assignmentId: "a1", title: "ДЗ", subject: "", due: at(24, 20, 0), recipient: "", createdAt: "" }).meta, "до сб, 24 окт., 20:00");
+  const wd = { proposalId: "p2", kind: "create_deadline_event", assignmentId: "a1", title: "ДЗ", subject: "", due: at(21, 20, 0), recipient: "", createdAt: "" };
+  assert.equal(waitingLine(wd, new Date(2026, 9, 21, 9, 0)).meta, "сегодня до 20:00");
+  assert.equal(waitingLine({ ...wd, recipient: "t@example.test" }, new Date(2026, 9, 21, 9, 0)).meta, "сегодня до 20:00 · → t@example.test");
+  assert.equal(waitingLine({ ...wd, due: at(22, 18, 30) }, new Date(2026, 9, 21, 9, 0)).meta, "завтра до 18:30");
   assert.equal(waitingLine({ proposalId: "p3", kind: "unknown", assignmentId: "", title: "", subject: "", due: "", recipient: "", createdAt: "" }).label, "Действие");
 
-  const d = deadlineLine({ assignmentId: "a1", title: "Реферат", subject: "История", due: at(23), daysLeft: 2, urgent: true });
-  assert.deepEqual([d.weekday, d.date, d.chip, d.urgent], ["пт", "23.10", "через 2 дня", true]);
+  const d = deadlineLine({ assignmentId: "a1", title: "Реферат", subject: "История", due: at(23, 20, 0), daysLeft: 2, urgent: true }, new Date(2026, 9, 21, 12, 0));
+  assert.deepEqual([d.weekday, d.date, d.chip, d.urgent], ["пт", "23.10", "через 2 дня, до 20:00", true]);
 
   const done = doneLine({ recordingId: "r1", lesson: post().lesson, summaryReady: true, homework: 1, at: at(21, 11, 52) });
   assert.equal(done.title, "Конспект · Матанализ");
@@ -172,6 +211,43 @@ test("lesson, waiting, deadline, done and post lines", () => {
   const p = postLine(post());
   assert.equal(p.headline, "Конспект готов");
   assert.equal(p.meta, "Матанализ · 11:52");
+});
+
+test("the «Горит» chip carries the time of today and tomorrow, and is «просрочено» once the moment has passed (TASK-343)", () => {
+  const chip = (day, hh, mm, daysLeft, now) => deadlineChip({ due: at(day, hh, mm), daysLeft }, now);
+  const noon = new Date(2026, 9, 21, 12, 0);
+  assert.equal(chip(21, 20, 0, 0, noon), "сегодня до 20:00");
+  assert.equal(chip(22, 18, 30, 1, noon), "завтра до 18:30");
+  assert.equal(chip(23, 20, 0, 2, noon), "через 2 дня, до 20:00");
+  assert.equal(chip(26, 18, 30, 5, noon), "через 5 дней, до 18:30");
+  // The days come from the local clock: a stale snapshot never says «завтра» for today, or «сегодня» for tomorrow.
+  assert.equal(chip(21, 20, 0, 1, noon), "сегодня до 20:00");
+  assert.equal(chip(22, 18, 30, 0, noon), "завтра до 18:30");
+  assert.equal(chip(24, 18, 30, 1, noon), "через 3 дня, до 18:30");
+  // After 20:00 the core may still count the day as today: the passed moment wins.
+  assert.equal(chip(21, 20, 0, 0, new Date(2026, 9, 21, 20, 0)), "просрочено");
+  assert.equal(chip(21, 20, 0, 0, new Date(2026, 9, 21, 23, 59)), "просрочено");
+  assert.equal(chip(21, 20, 0, 0, new Date(2026, 9, 21, 19, 59)), "сегодня до 20:00");
+  assert.equal(chip(21, 9, 0, -1, noon), "просрочено");
+  assert.equal(chip(20, 20, 0, -1, noon), "просрочено");
+  // Midnight: 00:00 tomorrow is «завтра до 00:00», and at 00:01 on that day it has passed.
+  assert.equal(chip(22, 0, 0, 1, new Date(2026, 9, 21, 23, 58)), "завтра до 00:00");
+  assert.equal(chip(22, 0, 0, 0, new Date(2026, 9, 22, 0, 1)), "просрочено");
+  // An unreadable due keeps the day count of the core.
+  assert.equal(deadlineChip({ due: "", daysLeft: 0 }, noon), "сегодня");
+  assert.equal(deadlineChip({ due: "", daysLeft: 1 }, noon), "завтра");
+  assert.equal(deadlineLine({ assignmentId: "a", title: "ЛР", subject: "", due: at(21, 20, 0), daysLeft: 0, urgent: true }, noon).chip, "сегодня до 20:00");
+});
+
+test("the nearest deadline of the week is named with its time (TASK-343)", () => {
+  const d = (day, hh, mm) => ({ due: at(day, hh, mm) });
+  assert.equal(nearestDeadlineText([]), "");
+  assert.equal(nearestDeadlineText([d(23, 20, 0), d(25, 9, 5)]), "Ближайший срок — пт, 23 окт., 20:00");
+  assert.equal(nearestDeadlineText([d(23, 20, 0), d(23, 18, 30)]), "Ближайший срок — пт, 23 окт., 18:30");
+  // With `now` a deadline that has passed is skipped; when all have passed there is no text.
+  const noon = new Date(2026, 9, 23, 19, 0);
+  assert.equal(nearestDeadlineText([d(23, 18, 30), d(23, 20, 0), d(25, 9, 5)], noon), "Ближайший срок — пт, 23 окт., 20:00");
+  assert.equal(nearestDeadlineText([d(23, 18, 30)], noon), "");
 });
 
 test("the hint chip text goes to the panel through an event", () => {
@@ -223,7 +299,7 @@ test("rows: live chip, urgent chip, open only for a ready summary, no confirm bu
   const pending = html(h(LessonsSection, { lessons: [lesson({ post: post({ summaryReady: false }) })], recordings: [], onOpenSummary: noop }));
   assert.ok(!pending.includes("Открыть"));
 
-  const burning = html(h(BurningSection, { burning: [{ assignmentId: "a", title: "Реферат", subject: "", due: at(23), daysLeft: 2, urgent: true }, { assignmentId: "b", title: "ЛР", subject: "", due: at(26), daysLeft: 5, urgent: false }], onOpenAssignment: noop }));
+  const burning = html(h(BurningSection, { now: new Date(2026, 9, 21, 12, 0), burning: [{ assignmentId: "a", title: "Реферат", subject: "", due: at(23), daysLeft: 2, urgent: true }, { assignmentId: "b", title: "ЛР", subject: "", due: at(26), daysLeft: 5, urgent: false }], onOpenAssignment: noop }));
   assert.match(burning, /s-run[^>]*>.*через 2 дня/);
   assert.match(burning, /s-neutral[^>]*>.*через 5 дней/);
 

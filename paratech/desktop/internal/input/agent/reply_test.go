@@ -71,9 +71,10 @@ func TestReplyShowsTitlesFromLocalData(t *testing.T) {
 
 	r := lastReply(t, sink)
 	due, _ := values.NewDate(2026, time.October, 24)
+	six, _ := values.NewTimeOfDay(18, 0)
 	want := []values.AssignmentLine{
 		{Assignment: a2, Title: "Эссе о реформах"},
-		{Assignment: a1, Title: "Лабораторная 2", Subject: mustRef(t, values.KindSubject, "s1"), Due: due},
+		{Assignment: a1, Title: "Лабораторная 2", Subject: mustRef(t, values.KindSubject, "s1"), Due: due, DueTime: six},
 	}
 	if len(r.Lines) != len(want) || r.Lines[0] != want[0] || r.Lines[1] != want[1] || r.Validate() != nil {
 		t.Fatalf("lines = %+v", r.Lines)
@@ -144,6 +145,45 @@ func TestReplySkipsACorruptTitle(t *testing.T) {
 			got := lastReply(t, sink)
 			if got.Text != "Два задания." || len(got.Lines) != 1 || got.Lines[0].Assignment != a1 || got.Validate() != nil {
 				t.Fatalf("reply = %+v", got)
+			}
+		})
+	}
+}
+
+// TestReplyLineDueInTheClockLocation: the day and time of a reply line's deadline are those of the clock's location,
+// not of the stored instant (TASK-343): 21:30 UTC is 00:30 the next day in Moscow.
+func TestReplyLineDueInTheClockLocation(t *testing.T) {
+	a1 := mustRef(t, values.KindAssignment, "a1")
+	turns := (&scriptedTurns{}).then(step(thread.StatusDone, nil, values.ReplyCard{Text: "Одно задание.", Assignments: []values.Ref{a1}}), nil)
+	d, sink, r, _ := replyDriver(t, turns)
+	r.assignments.views[0].Due = time.Date(2026, 10, 24, 21, 30, 0, 0, time.UTC)
+	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "что горит"}); err != nil {
+		t.Fatal(err)
+	}
+	d.Wait()
+
+	got := lastReply(t, sink)
+	if len(got.Lines) != 1 || got.Lines[0].Due.String() != "2026-10-25" || got.Lines[0].DueTime.String() != "00:30" || got.Validate() != nil {
+		t.Fatalf("lines = %+v", got.Lines)
+	}
+}
+
+func TestDueOf(t *testing.T) {
+	tests := map[string]struct {
+		due      time.Time
+		wantDate string
+		wantTime string
+	}{
+		"default hour":          {time.Date(2026, 10, 24, 20, 0, 0, 0, moscow), "2026-10-24", "20:00"},
+		"midnight is a time":    {time.Date(2026, 10, 24, 0, 0, 0, 0, moscow), "2026-10-24", "00:00"},
+		"shifted to clock zone": {time.Date(2026, 10, 24, 21, 30, 0, 0, time.UTC), "2026-10-25", "00:30"},
+		"year out of range":     {time.Date(2200, 1, 1, 9, 0, 0, 0, moscow), "", ""},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			d, tod := dueOf(tt.due, moscow)
+			if d.String() != tt.wantDate || tod.String() != tt.wantTime {
+				t.Fatalf("dueOf = %q %q, want %q %q", d.String(), tod.String(), tt.wantDate, tt.wantTime)
 			}
 		})
 	}

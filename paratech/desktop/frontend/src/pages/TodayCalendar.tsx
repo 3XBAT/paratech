@@ -7,14 +7,14 @@ import { dueText } from "../todayView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 
-/** The text of the button's due date: «до сб, 24 окт.», "" when unknown. */
-export function calendarDue(due: string): string {
-  return dueText(due);
+/** The text of the button's due date: «до сб, 24 окт., 20:00», «сегодня до 20:00», «просрочено, …»; "" when unknown. */
+export function calendarDue(due: string, now?: Date): string {
+  return dueText(due, now);
 }
 
 /** The button of the markup: only a click makes the proposal (no calendar write yet). */
 export function CalendarButton(props: { due: string; busy: boolean; error: string; onClick: () => void }) {
-  const due = calendarDue(props.due);
+  const due = calendarDue(props.due, new Date());
   return (
     <div className="today-cal">
       <Button size="sm" disabled={props.busy} busy={props.busy} busyLabel={calendarTexts.busy} onClick={props.onClick}>
