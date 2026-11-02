@@ -38,3 +38,4 @@ Open decisions are tracked in PRD §19.
 - [0031](0031-speech-vad.md) Skipping silence in speech recognition (Silero VAD)
 - [0032](0032-lesson-call-links.md) Call link of a lesson (Proposed)
 - [0033](0033-agent-parity.md) Agent parity: everything the student does in the UI, the agent can do (Proposed)
+- [0034](0034-navigation.md) Navigation of the main window, settings and permissions (Proposed)
