@@ -460,13 +460,17 @@ type Facts struct {
 	CostMicroUSD  int64         // estimate for a paid call; zero means unknown
 	ReplacesReady bool          // the call would replace a ready result
 	Triage        actionpolicy.Triage
+	// HasCalendarEvent: the assignment a change_assignment{delete} names has a Google event (local projection).
+	HasCalendarEvent bool
 }
 
 // Admission is the decision on one call.
 type Admission struct {
 	Class    actionpolicy.Class
 	Paid     bool
-	PlanStep int // index of the approved step it executes; -1 when there is no approved plan
+	PlanStep int             // index of the approved step it executes; -1 when there is no approved plan
+	Card     values.CardKind // the card a C or UI call creates; "" for R and U
+	NoUndo   bool            // a U call without a compensation (recording{stop})
 }
 
 // Admit decides whether a call may run (ADR-0021, ADR-0022): every ID must have typed provenance; a U call must
@@ -484,16 +488,18 @@ func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, er
 	if err != nil {
 		return Admission{}, err
 	}
-	rule, err := actionpolicy.Of(call.Tool())
+	// The class is per call: a delete of an assignment with a Google event is C (ADR-0033 О-6 б), so it only makes
+	// its card, inside an approved plan too (C is no write and matches no step, as propose_send).
+	d, err := actionpolicy.Decide(call, actionpolicy.Facts{HasCalendarEvent: f.HasCalendarEvent})
 	if err != nil {
 		return Admission{}, err
 	}
-	class := rule.Class
+	rule, class := d.Rule, d.Class
 	if err := actionpolicy.CheckProvenance(call.Refs(), th.known(f.Context)); err != nil {
 		return Admission{}, err
 	}
 	free := actionpolicy.FreeTopic(call)
-	adm := Admission{Class: class, Paid: rule.Paid, PlanStep: -1}
+	adm := Admission{Class: class, Paid: rule.Paid, PlanStep: -1, Card: d.Card, NoUndo: d.NoUndo}
 	if !class.IsWrite() {
 		// Paid R calls (answer_question, inspect_upload) are reads: they do not count as the paid job without a plan.
 		t.admitted(call, adm)
@@ -582,7 +588,8 @@ func (th *Thread) ProposePlan(steps []values.PlanStep, context values.RefSet, no
 	}
 	known := th.known(context)
 	for _, s := range steps {
-		r, err := actionpolicy.Of(s.Tool())
+		// No facts yet: Admit decides the step again with them when it runs.
+		r, err := actionpolicy.DecideStep(s, actionpolicy.Facts{})
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 		}
@@ -875,7 +882,7 @@ func RefusalOf(err error) (values.Refusal, bool) {
 		return values.RefuseUnknownID, true
 	case errors.Is(err, values.ErrUnknownTool), errors.Is(err, actionpolicy.ErrUnknownTool):
 		return values.RefuseUnknownTool, true
-	case errors.Is(err, values.ErrInvalidArguments), errors.Is(err, values.ErrInvalidRef),
+	case errors.Is(err, values.ErrInvalidArguments), errors.Is(err, values.ErrInvalidRef), errors.Is(err, actionpolicy.ErrUnknownAction),
 		errors.Is(err, values.ErrInvalidDate), errors.Is(err, values.ErrInvalidText):
 		return values.RefuseInvalidArgs, true
 	case errors.Is(err, ErrBudgetExceeded):
