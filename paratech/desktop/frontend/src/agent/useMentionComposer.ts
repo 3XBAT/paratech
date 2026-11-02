@@ -60,6 +60,8 @@ export interface MentionComposer {
   openList(): void;
   /** After a send: the pills go. */
   clear(): void;
+  /** Puts these pills in the field (the text of an earlier request being edited, or the content before the edit). */
+  set(pills: readonly MentionView[]): void;
 }
 
 export function useMentionComposer(d: MentionComposerDeps): MentionComposer {
@@ -223,6 +225,7 @@ export function useMentionComposer(d: MentionComposerDeps): MentionComposer {
 
   const retry = useCallback(() => searcher.retry(), [searcher]);
   const clear = useCallback(() => setPills([]), []);
+  const set = useCallback((list: readonly MentionView[]) => setPills(list.slice(0, maxMentions)), []);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
     const composing = e.nativeEvent.isComposing;
@@ -297,5 +300,6 @@ export function useMentionComposer(d: MentionComposerDeps): MentionComposer {
     retry,
     openList,
     clear,
+    set,
   };
 }

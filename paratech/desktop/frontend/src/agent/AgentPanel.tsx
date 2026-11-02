@@ -21,24 +21,40 @@ import {
   fillsFromChat,
   fillsFromList,
   fillsFromUpdate,
+  cancelRestartEdit,
+  closeRestartDialog,
+  hideRestart,
   isFocusPanelKey,
+  liveRestartTarget,
+  noRestart,
   openAfterArchive,
+  openRestart,
   panelShortcut,
   reconcileOpenChat,
   refreshesChats,
+  refuseRestart,
   requestText,
+  restartBlock,
+  type RestartFlow,
+  restartOnChat,
+  type RestartPending,
+  type RestartStep,
   restoredMentions,
+  spendRestart,
+  startRestart,
   type UndoNote,
   undoableActions,
   visibleEntries,
+  withRestart,
+  withoutRestarted,
 } from "../agentView.js";
 import { draftEvent, draftText } from "../agentDraft.js";
 import { problemText, undoOutcome } from "../journalView.js";
-import { blockingEntry, type Entry, initialPanelState, loadSnapshot, panelMode, PressTracker, reducePanel } from "../agentState.js";
+import { blockingEntry, type Entry, initialPanelState, loadSnapshot, maxKnownTurn, panelMode, PressTracker, reducePanel, restartOutcome } from "../agentState.js";
 import { useMentionComposer } from "./useMentionComposer.js";
 import type { PageId } from "../nav.js";
 import type { ButtonId } from "../agentView.js";
-import { AgentPanelView } from "./AgentPanelView.js";
+import { AgentPanelView, type RestartUi } from "./AgentPanelView.js";
 import type { CardActions } from "./AgentCards.js";
 
 const api: AgentApi = agentApi(callByName);
@@ -121,6 +137,16 @@ export function AgentPanel(props: {
   openRef.current = openId;
   const entriesRef = useRef(state.entries);
   entriesRef.current = state.entries;
+  const earlierRef = useRef(earlierReq);
+  earlierRef.current = earlierReq;
+  // «Начать заново отсюда» (TASK-249): the dialog, the pending edit (agentView: RestartFlow) and the request sent with restartFrom.
+  const [restart, setFlow] = useState<RestartFlow>(noRestart);
+  const flowRef = useRef(restart);
+  flowRef.current = restart;
+  const opener = useRef<HTMLElement | null>(null);
+  const flight = useRef<{ scope: AskInput; pending: RestartPending; upTo: number } | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const listSeq = useRef(0);
   // The first chat list read has finished (either way): until then an update does not pick the open chat.
   const listDone = useRef(false);
@@ -325,8 +351,15 @@ export function AgentPanel(props: {
   }, [loadState]);
 
   const send = useCallback(
-    (ask: AskInput) => {
+    (input: AskInput, pending?: RestartPending) => {
       const id = ++askId.current;
+      // A copy per send: the request is found again by this object when the core answers (restartOutcome).
+      const ask = { ...input };
+      const chat = ask.threadId ?? "";
+      if ((ask.restartFrom ?? 0) > 0 && chat !== "") {
+        const own = pending ?? startRestart({ threadId: chat, turn: ask.restartFrom ?? 0, text: ask.text, mentions: ask.mentions ?? [] }, { draft: "", pills: [] });
+        flight.current = { scope: ask, pending: own, upTo: maxKnownTurn(entriesRef.current, earlierRef.current, chat) };
+      }
       dispatch({ type: "asked", id, text: ask.text, scope: ask });
       setNotice("");
       api.ask(ask).then(
@@ -358,6 +391,27 @@ export function AgentPanel(props: {
     resetKey: openId,
   });
   const clearMentions = composer.clear;
+  const setPills = composer.set;
+  const pillsRef = useRef(composer.pills);
+  pillsRef.current = composer.pills;
+
+  const focusInput = useCallback(() => setTimeout(() => input.current?.focus(), 0), []);
+
+  // A step of the restart flow; the field changes with it (the text of the old message, or what it held before).
+  const applyStep = useCallback(
+    (step: RestartStep, focus = false) => {
+      flowRef.current = step.flow;
+      setFlow(step.flow);
+      if (step.field !== null) {
+        setDraft(step.field.draft);
+        setPills(step.field.pills);
+      }
+      if (focus) {
+        focusInput();
+      }
+    },
+    [setPills, focusInput],
+  );
 
   const submit = useCallback(() => {
     const text = requestText(draft);
@@ -366,9 +420,75 @@ export function AgentPanel(props: {
     }
     setDraft("");
     // The chip sets the subject and screen; the chat is the open one. The mentions go with the request, the pills clear.
-    send({ ...askInput(ctx, text, composer.pills), threadId: openId });
+    // A pending «Начать заново отсюда» of this chat rides along as restartFrom and is spent with the send.
+    const pending = restart.pending !== null && restart.pending.threadId === openId ? restart.pending : null;
+    send(withRestart({ ...askInput(ctx, text, composer.pills), threadId: openId }, pending, openId), pending ?? undefined);
+    if (restart.pending !== null) {
+      applyStep(spendRestart(restart));
+    }
     clearMentions();
-  }, [draft, ctx, send, openId, composer.pills, clearMentions]);
+  }, [draft, ctx, send, openId, composer.pills, clearMentions, restart, applyStep]);
+
+  // Another chat (opened, new, or the open one gone) ends the dialog and the pending edit: the text would not belong there.
+  useEffect(() => {
+    applyStep(restartOnChat(flowRef.current, openId));
+  }, [openId, applyStep]);
+
+  // The newest read of the earlier requests after the core hid some of them.
+  const reloadEarlier = useCallback((threadId: string) => {
+    api.chatEarlier(threadId).then(
+      (v) => {
+        if (v.problem === "" && openRef.current === threadId) {
+          setEarlierReq(v.requests);
+        }
+      },
+      () => undefined,
+    );
+  }, []);
+
+  // The request sent with restartFrom: once the core named it the hidden requests leave the view; a refusal puts the text
+  // back into the field with the edit still pending (only into an untouched field and the same chat: nothing is overwritten).
+  useEffect(() => {
+    const f = flight.current;
+    if (f === null) {
+      return;
+    }
+    const o = restartOutcome(f.scope, state.entries, f.upTo);
+    if (o.state === "wait") {
+      return;
+    }
+    flight.current = null;
+    const chat = f.pending.threadId;
+    if (o.state === "accepted") {
+      dispatch({ type: "restarted", threadId: chat, from: f.pending.turn, upTo: f.upTo });
+      if (openRef.current === chat) {
+        setEarlierReq((r) => withoutRestarted(r, f.pending.turn));
+        reloadEarlier(chat);
+      }
+      return;
+    }
+    if (openRef.current !== chat || draftRef.current !== "" || pillsRef.current.length > 0) {
+      return;
+    }
+    dispatch({ type: "discard", key: o.key });
+    applyStep(refuseRestart(flowRef.current, f.pending, o.problem), true);
+  }, [state.entries, reloadEarlier, applyStep]);
+
+  const closeDialog = useCallback(
+    (back: boolean) => {
+      applyStep(closeRestartDialog(flowRef.current));
+      if (back) {
+        setTimeout(() => (opener.current?.isConnected ? opener.current : input.current)?.focus(), 0);
+      }
+    },
+    [applyStep],
+  );
+
+  // «Скрыть»: the text (and mentions) of the message go into the field; the next send carries restartFrom.
+  const hideFrom = () => {
+    const block = restartBlock(shown.entries, openId, panelMode(shown));
+    applyStep(hideRestart(restart, { draft: draftRef.current, pills: pillsRef.current }, block), block === null);
+  };
 
   // Requests whose buttons were pressed, with the update they were pressed on: off until a newer update arrives.
   // The tracker is read synchronously, so a double click before the next render makes one call.
@@ -532,6 +652,27 @@ export function AgentPanel(props: {
   const openChat = [...sections.active, ...sections.archived].find((r) => r.threadId === openId) ?? null;
   const earlier = useMemo(() => earlierItems(earlierReq, state.entries, openId), [earlierReq, state.entries, openId]);
 
+  const block = restart.asking === null ? null : restartBlock(shown.entries, openId, panelMode(shown));
+  const fixActions = block?.fix ? actionsFor(block.fix.entry) : null;
+  const restartUi: RestartUi = {
+    targetFor: (e) => liveRestartTarget(e, earlierReq, openId),
+    open: (target, el) => {
+      opener.current = el;
+      applyStep(openRestart(flowRef.current, target));
+    },
+    dialog:
+      restart.asking === null
+        ? null
+        : {
+            block,
+            fixBusy: fixActions?.busy === true,
+            onHide: hideFrom,
+            onCancel: () => closeDialog(true),
+            onFix: () => block?.fix && fixActions?.press(block.fix.kind),
+          },
+    pending: restart.pending === null ? null : { problem: restart.pending.problem, onCancel: () => applyStep(cancelRestartEdit(flowRef.current), true) },
+  };
+
   const chatBar = {
     openChat,
     sections,
@@ -596,6 +737,7 @@ export function AgentPanel(props: {
       onOpenMention={props.onOpenMention}
       mentionsFor={(e) => restoredMentions(e, earlierReq, openId)}
       fill={fillOf(fills, openId)}
+      restart={restartUi}
       ctx={ctx}
       draft={draft}
       notice={notice}

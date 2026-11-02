@@ -1,4 +1,4 @@
-import { Fragment, useId, useRef, useState } from "react";
+import { Fragment, type ReactNode, useId, useRef, useState } from "react";
 import type { AnswerInput, AssignmentLineView, DraftView } from "../bindings/agent.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
@@ -496,7 +496,7 @@ function ReplyStatus(props: { typing: boolean; replyCard: boolean; running: bool
 }
 
 /** One request of the thread: the student's text, then the cards. `cut`: its reply was typing when it stopped. */
-export function AgentRequest(props: { model: EntryModel; actions: CardActions; drafts?: readonly DraftView[]; cut?: CutReply }) {
+export function AgentRequest(props: { model: EntryModel; actions: CardActions; drafts?: readonly DraftView[]; cut?: CutReply; underUser?: ReactNode }) {
   const { model } = props;
   const { reply, answers } = splitDrafts(props.drafts ?? []);
   // The kept text goes right above the first stopped line.
@@ -509,6 +509,7 @@ export function AgentRequest(props: { model: EntryModel; actions: CardActions; d
     <article className="ag-req">
       {model.userText !== "" && <p className="ag-user">{model.userText}</p>}
       <MessagePills pills={model.mentions} onOpen={props.actions.openMention} />
+      {props.underUser}
       {model.waiting && <Waiting />}
       {model.callLine !== "" && (
         <p className="ag-callline small muted" role="status">

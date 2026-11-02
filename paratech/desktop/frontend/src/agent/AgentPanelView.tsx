@@ -1,7 +1,7 @@
-import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
+import { type RefObject, useEffect, useId, useLayoutEffect, useRef } from "react";
 import type { MentionView } from "../bindings/agent.js";
 import { maxDraftLength, maxMentions, mentionTexts } from "../agentMentions.js";
-import { type AgentContext, chatTexts, composerKey, type EarlierItem, entryModel, inputPlacement, texts } from "../agentView.js";
+import { type AgentContext, chatTexts, composerKey, type EarlierItem, entryModel, inputPlacement, type RestartTarget, texts } from "../agentView.js";
 import { blockingEntry, cutFor, draftSize, draftsFor, endSignature, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
 import { Icon } from "../ui/Icon.js";
 import { AgentRequest, type CardActions } from "./AgentCards.js";
@@ -9,19 +9,33 @@ import type { ContextFill } from "../bindings/agent.js";
 import { ChatBar, type ChatBarProps } from "./ChatBar.js";
 import { ContextHint, ContextRing } from "./ContextRing.js";
 import { ComposerPills, MentionPopup, MessagePills } from "./MentionParts.js";
+import { RestartButton, RestartDialog, type RestartDialogProps, RestartNote } from "./RestartDialog.js";
 import type { MentionComposer } from "./useMentionComposer.js";
 
+/** «Начать заново отсюда» of the panel: where it is offered, the dialog it opens and the edit it leaves next to the field. */
+export interface RestartUi {
+  /** The target of a live request of the open chat; null: not offered there. */
+  targetFor(entry: Entry): RestartTarget | null;
+  open(target: RestartTarget, opener: HTMLElement): void;
+  /** The warning dialog; null while closed. */
+  dialog: RestartDialogProps | null;
+  /** The pending edit; null when none. */
+  pending: { problem: string; onCancel(): void } | null;
+}
+
 /** Earlier requests of the open chat: text only (the student's words, the mentions as pills, the reply line). */
-function EarlierRequests(props: { items: EarlierItem[]; onOpenMention?: (kind: string, id: string) => void }) {
+function EarlierRequests(props: { items: EarlierItem[]; onOpenMention?: (kind: string, id: string) => void; restart?: RestartUi }) {
   if (props.items.length === 0) {
     return null;
   }
+  const { restart } = props;
   return (
     <section className="ag-earlier" aria-label={chatTexts.earlierCaption}>
       {props.items.map((it) => (
         <div className="ag-req ag-earlier-req" key={it.key}>
           <p className="ag-user">{it.text}</p>
           <MessagePills pills={it.mentions} onOpen={props.onOpenMention} />
+          {restart && it.restart && <RestartButton target={it.restart} onOpen={restart.open} />}
           {it.reply !== "" && <p className="ag-earlier-reply ag-text small muted">{it.reply}</p>}
         </div>
       ))}
@@ -52,6 +66,8 @@ export interface AgentPanelViewProps {
   mentionsFor?: (entry: Entry) => readonly MentionView[] | undefined;
   /** The context fill of the open chat; null or absent: no ring. */
   fill?: ContextFill | null;
+  /** «Начать заново отсюда»; absent: the action is not offered. */
+  restart?: RestartUi;
 }
 
 /**
@@ -66,6 +82,8 @@ export function AgentPanelView(props: AgentPanelViewProps) {
   const last = entries.at(-1);
   const earlier = props.earlier ?? [];
   const end = useRef<HTMLDivElement>(null);
+  const noteId = useId();
+  const { restart } = props;
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: "end" });
   }, [entries.length, earlier.length]);
@@ -109,6 +127,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
         }}
       >
         <div className="ag-compose" onFocus={mn?.onFocus} onBlur={mn?.onBlur}>
+          {restart?.pending && <RestartNote id={noteId} problem={restart.pending.problem} onCancel={restart.pending.onCancel} />}
           {mn && <ComposerPills pills={mn.pills} onRemove={mn.remove} />}
           <div className="ag-field">
             <textarea
@@ -118,6 +137,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
               value={props.draft}
               placeholder={mode.placeholder}
               aria-label={mode.placeholder}
+              aria-describedby={restart?.pending ? noteId : undefined}
               disabled={!mode.inputEnabled}
               maxLength={maxDraftLength}
               autoComplete="off"
@@ -213,21 +233,25 @@ export function AgentPanelView(props: AgentPanelViewProps) {
           <p className="ag-empty muted">{mn && mode.inputEnabled ? `${texts.empty} ${mentionTexts.hint}` : texts.empty}</p>
         )}
         {mode.staleNote !== "" && <p className="ag-stale small muted">{mode.staleNote}</p>}
-        <EarlierRequests items={earlier} onOpenMention={props.onOpenMention} />
-        {entries.map((e) => (
-          <AgentRequest
-            key={e.key}
-            model={entryModel(e, {
-              last: e.key === last?.key,
-              blocked: blockingEntry(entries, e) !== undefined,
-              mentions: props.mentionsFor?.(e),
-              replyCut: cutFor(state, e) !== undefined,
-            })}
-            actions={props.actionsFor(e)}
-            drafts={draftsFor(state, e)}
-            cut={cutFor(state, e)}
-          />
-        ))}
+        <EarlierRequests items={earlier} onOpenMention={props.onOpenMention} restart={restart} />
+        {entries.map((e) => {
+          const target = restart?.targetFor(e) ?? null;
+          return (
+            <AgentRequest
+              key={e.key}
+              underUser={restart && target ? <RestartButton target={target} onOpen={restart.open} /> : undefined}
+              model={entryModel(e, {
+                last: e.key === last?.key,
+                blocked: blockingEntry(entries, e) !== undefined,
+                mentions: props.mentionsFor?.(e),
+                replyCut: cutFor(state, e) !== undefined,
+              })}
+              actions={props.actionsFor(e)}
+              drafts={draftsFor(state, e)}
+              cut={cutFor(state, e)}
+            />
+          );
+        })}
         {props.notice !== "" && (
           <p className="ag-callline small muted" role="status">
             {props.notice}
@@ -235,6 +259,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
         )}
         <div ref={end} />
       </div>
+      {restart?.dialog && <RestartDialog {...restart.dialog} />}
     </aside>
   );
 }

@@ -4,9 +4,9 @@
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
 import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, ContextFill, EarlierRequestView, MentionView, PlanStepView, PlanView, QuestionView, UpdateView } from "./bindings/agent.js";
-import { askMentions, type MentionPill, mentionPills } from "./agentMentions.js";
+import { askMentions, maxDraftLength, maxMentions, type MentionPill, mentionPills } from "./agentMentions.js";
 import { approveLabel, type PlanProgress, planProgress, stepMarks, type StepMark, planWindow } from "./planView.js";
-import { type Entry, isBusyRefused, isRunning, orderedEntries } from "./agentState.js";
+import { type Entry, isBusyRefused, isFinalStatus, isRunning, orderedEntries } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
 import { daysLeftText, dueText, parseMoment } from "./todayView.js";
 
@@ -417,6 +417,8 @@ export interface EarlierItem {
   mentions: MentionPill[];
   /** The reply line; "" when no card was shown. */
   reply: string;
+  /** «Начать заново отсюда» from this request; null when it cannot be offered (no number or no text). */
+  restart: RestartTarget | null;
 }
 
 /**
@@ -432,6 +434,7 @@ export function earlierItems(requests: readonly EarlierRequestView[], entries: r
       text: r.text,
       mentions: mentionPills(r.mentions),
       reply: r.reply,
+      restart: restartTarget(openId, r.turn, r.text, r.mentions),
     }))
     .sort((a, b) => a.turn - b.turn);
 }
@@ -445,6 +448,226 @@ export function restoredMentions(e: Entry, requests: readonly EarlierRequestView
     return undefined;
   }
   return requests.find((r) => r.turn === e.turn)?.mentions;
+}
+
+// ---- «Начать заново отсюда» → «Скрыть» (ADR-0028, TASK-249) ----
+// The core hides the requests from the chosen one on when the next request is sent with `restartFrom`. Here: where the
+// action is offered, why «Скрыть» is not available, the pending edit and the request that carries `restartFrom`.
+
+export const restartTexts = {
+  action: "Начать заново отсюда",
+  title: "Начать заново отсюда?",
+  body: "Сообщения после этого агент забудет. Сделанные действия не отменяются.",
+  hide: "Скрыть",
+  cancel: "Отмена",
+  stop: "Остановить",
+  stopping: "Останавливается…",
+  cancelRequest: "Отменить просьбу",
+  note: "Правка сообщения: сообщения после него будут скрыты",
+  undoNote: "Отменить",
+} as const;
+
+/** The earlier request «Начать заново отсюда» starts from. */
+export interface RestartTarget {
+  threadId: string;
+  /** The number the core knows the request by (from 1). */
+  turn: number;
+  text: string;
+  mentions: MentionView[];
+}
+
+/** The target of a request of the open chat; null without a known number (turn < 1) or without a text to put into the field. */
+export function restartTarget(openId: string, turn: number, text: string, mentions: readonly MentionView[] | undefined): RestartTarget | null {
+  if (openId === "" || !Number.isInteger(turn) || turn < 1 || text.trim() === "") {
+    return null;
+  }
+  return { threadId: openId, turn, text, mentions: (mentions ?? []).slice(0, maxMentions).map((m) => ({ kind: m.kind, id: m.id, label: m.label })) };
+}
+
+/** The target of a request the panel holds live; one the core has not named yet (no number) or of another chat has none. */
+export function liveRestartTarget(e: Entry, requests: readonly EarlierRequestView[], openId: string): RestartTarget | null {
+  if (e.threadId === "" || e.threadId !== openId) {
+    return null;
+  }
+  const own = requests.find((r) => r.turn === e.turn);
+  return restartTarget(openId, e.turn, e.text !== "" ? e.text : (own?.text ?? ""), e.scope?.mentions ?? own?.mentions);
+}
+
+/** The accessible name of the action: the visible words first, then which message (the start of its text). */
+export function restartLabel(t: Pick<RestartTarget, "text">): string {
+  const flat = t.text.replace(/\s+/g, " ").trim();
+  const cut = Array.from(flat);
+  return `${restartTexts.action}: ${cut.length > 40 ? `${cut.slice(0, 40).join("")}…` : flat}`;
+}
+
+/** What stops «Скрыть» and the way out: the request to stop or cancel, as a button of the dialog. */
+export interface RestartBlock {
+  reason: string;
+  /** The button that removes the cause; null when waiting is the only way (sending, loading, no connection). */
+  fix: { kind: "stop" | "cancel"; label: string; entry: Entry } | null;
+}
+
+const restartReasons = {
+  running: "Агент ещё работает над просьбой. Дождитесь конца или остановите её.",
+  plan: "Агент ждёт решения по плану: подтвердите его или отмените просьбу.",
+  answers: "Агент ждёт ответов на вопросы: ответьте на них или отмените просьбу.",
+  waiting: "Просьба ещё не закончена: дождитесь конца или отмените её.",
+  sending: "Просьба ещё отправляется. Подождите несколько секунд.",
+  offline: "Нет связи с paratech. Начать заново можно, когда связь появится.",
+  loading: "Панель ещё загружается. Подождите несколько секунд.",
+} as const;
+
+/**
+ * Why «Скрыть» is unavailable right now, null when it is. The same rule as the core's (the current request must be over),
+ * read from the requests the panel shows: running, waiting for «Да» or for answers, or just sent. `entries` are those of the
+ * open chat; `mode` is the panel mode (the field must accept a request).
+ */
+export function restartBlock(entries: readonly Entry[], openId: string, mode: { inputEnabled: boolean; offline: boolean }): RestartBlock | null {
+  if (!mode.inputEnabled) {
+    return { reason: mode.offline ? restartReasons.offline : restartReasons.loading, fix: null };
+  }
+  if (entries.some((e) => e.threadId === "" && e.callProblem === "" && e.update === null && e.scope !== null && (e.scope.threadId ?? "") === openId)) {
+    return { reason: restartReasons.sending, fix: null };
+  }
+  const current = orderedEntries(entries)
+    .filter((e) => e.threadId === openId && e.update !== null && e.update.status !== "")
+    .at(-1);
+  const status = current?.update?.status ?? "";
+  if (current === undefined || isFinalStatus(status)) {
+    return null;
+  }
+  if (isRunning(status)) {
+    return { reason: restartReasons.running, fix: { kind: "stop", label: restartTexts.stop, entry: current } };
+  }
+  const reason = status === "AWAITING_PLAN" ? restartReasons.plan : status === "AWAITING_ANSWERS" ? restartReasons.answers : restartReasons.waiting;
+  return { reason, fix: { kind: "cancel", label: restartTexts.cancelRequest, entry: current } };
+}
+
+/** The edit «Скрыть» started: the field holds the text of `turn` until it is sent or taken back. */
+export interface RestartPending extends RestartTarget {
+  /** What the field held before the text replaced it; «Отменить» brings it back. */
+  before: { draft: string; pills: MentionView[] };
+  /** Why the last send was refused ("" when none): shown next to the field. */
+  problem: string;
+}
+
+/** The pending edit for a target: the field's old content is kept for «Отменить». */
+export function startRestart(target: RestartTarget, before: { draft: string; pills: readonly MentionView[] }): RestartPending {
+  return { ...target, before: { draft: before.draft, pills: [...before.pills] }, problem: "" };
+}
+
+/** The text that goes into the field for editing (cut to the field's limit). */
+export function restartDraft(target: RestartTarget): string {
+  return target.text.slice(0, maxDraftLength);
+}
+
+/** What the field holds: the text and the «@» pills. */
+export interface FieldContent {
+  draft: string;
+  pills: MentionView[];
+}
+
+/** The dialog (`asking`) and the pending edit; one per panel. */
+export interface RestartFlow {
+  asking: RestartTarget | null;
+  pending: RestartPending | null;
+}
+
+/** A step of the flow and the new content of the field, or null when the field stays as it is. */
+export interface RestartStep {
+  flow: RestartFlow;
+  field: FieldContent | null;
+}
+
+export const noRestart: RestartFlow = { asking: null, pending: null };
+
+const keep = (flow: RestartFlow): RestartStep => ({ flow, field: null });
+
+/** «Начать заново отсюда» was pressed: the dialog opens, nothing else changes. */
+export function openRestart(s: RestartFlow, target: RestartTarget): RestartStep {
+  return keep({ ...s, asking: target });
+}
+
+/** «Отмена», Esc or a click outside: the dialog closes, nothing else changes. */
+export function closeRestartDialog(s: RestartFlow): RestartStep {
+  return keep({ ...s, asking: null });
+}
+
+/**
+ * «Скрыть»: only when nothing blocks it. The message goes into the field (its mentions as pills) and the edit is pending.
+ * What the field held is kept for «Отменить» — from the first edit on, so a second pick does not lose it.
+ */
+export function hideRestart(s: RestartFlow, field: FieldContent, block: RestartBlock | null): RestartStep {
+  if (s.asking === null || block !== null) {
+    return keep(s);
+  }
+  const pending = startRestart(s.asking, s.pending?.before ?? field);
+  return { flow: { asking: null, pending }, field: { draft: restartDraft(s.asking), pills: s.asking.mentions } };
+}
+
+/** «Отменить» next to the field: no restart, the field returns to what it held. */
+export function cancelRestartEdit(s: RestartFlow): RestartStep {
+  if (s.pending === null) {
+    return keep(s);
+  }
+  return { flow: { ...s, pending: null }, field: { draft: s.pending.before.draft, pills: s.pending.before.pills } };
+}
+
+/** Another chat is open (or the open one is gone): the dialog closes and an edit of a different chat is taken back. */
+export function restartOnChat(s: RestartFlow, openId: string): RestartStep {
+  const closed = { ...s, asking: null };
+  return s.pending !== null && s.pending.threadId !== openId ? cancelRestartEdit(closed) : keep(closed);
+}
+
+/** The edit goes with the send: it is spent (the field is emptied by the send itself). */
+export function spendRestart(s: RestartFlow): RestartStep {
+  return keep({ ...s, pending: null });
+}
+
+/** The send was refused: the edit is pending again with the reason, and the text is back in the field. */
+export function refuseRestart(s: RestartFlow, sent: RestartPending, problem: string): RestartStep {
+  return { flow: { ...s, pending: { ...sent, problem: restartRefusalText(problem) } }, field: { draft: restartDraft(sent), pills: sent.mentions } };
+}
+
+/** The request with `restartFrom` when an edit of the open chat is pending; otherwise as it came. */
+export function withRestart(ask: AskInput, pending: RestartPending | null, openId: string): AskInput {
+  if (pending === null || openId === "" || pending.threadId !== openId) {
+    return ask;
+  }
+  return { ...ask, threadId: openId, restartFrom: pending.turn };
+}
+
+/** The earlier requests as the chat will show them once the core hid the ones from `from` on. */
+export function withoutRestarted<T extends { turn: number }>(requests: readonly T[], from: number): T[] {
+  return requests.filter((r) => r.turn < from);
+}
+
+/** Why a restart request was refused, in plain words, with the way on. The text stays in the field. */
+export function restartRefusalText(problem: string): string {
+  switch (problem) {
+    case "busy":
+      return "Не получилось: агент ещё занят просьбой. Дождитесь конца или остановите её и отправьте снова.";
+    case "invalid":
+      return "Не получилось: чат изменился. Отмените правку и выберите сообщение ещё раз.";
+    case "offline":
+      return "Нет связи с paratech. Текст остался в поле: отправьте его, когда связь появится.";
+    case "closed":
+      return "Приложение закрывается. Текст остался в поле.";
+    default:
+      return "Не удалось отправить. Текст остался в поле: можно попробовать ещё раз или отменить правку.";
+  }
+}
+
+/** Keys of the warning dialog: Esc takes it back, Tab stays among its `count` buttons, Shift+Tab goes backwards. */
+export function dialogKey(e: { key: string; shiftKey: boolean }, at: number, count: number): { act: "cancel" } | { act: "focus"; index: number } | null {
+  if (e.key === "Escape") {
+    return { act: "cancel" };
+  }
+  if (e.key === "Tab" && count > 0) {
+    const next = e.shiftKey ? (at <= 0 ? count - 1 : at - 1) : at < 0 || at >= count - 1 ? 0 : at + 1;
+    return { act: "focus", index: next };
+  }
+  return null;
 }
 
 // ---- Texts ----
