@@ -128,7 +128,7 @@ function endReason(u: UpdateView): string {
 
 /**
  * The cut replies after an update. A stopped or failed request whose reply was typing is recorded (the text only for «Стоп»);
- * a repeat of the same end keeps the record; any other update of the thread (Продолжить, Повторить, Отменить, a new turn)
+ * a repeat of the same end keeps the record; any other update of the thread (Продолжить/Повторить of a stopped request, Повторить of a finished one, Отменить, a new turn)
  * ends it. A problem-only update (a refused button) leaves it.
  */
 function nextCuts(s: PanelState, u: UpdateView): readonly CutReply[] {

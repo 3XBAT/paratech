@@ -184,7 +184,7 @@ func TestWave10Arguments(t *testing.T) {
 
 		{"prompts off", "set_setting", `{"setting":"recording_prompts","value":"off"}`, true},
 		{"ac power on", "set_setting", `{"setting":"ac_power_only","value":"on"}`, true},
-		{"free work notice off", "set_setting", `{"setting":"free_work_notice","value":"off"}`, true},
+		{"free work notice is gone (TASK-342)", "set_setting", `{"setting":"free_work_notice","value":"off"}`, false},
 		{"load max", "set_setting", `{"setting":"recognition_load","value":"max"}`, true},
 		{"load gentle", "set_setting", `{"setting":"recognition_load","value":"gentle"}`, true},
 		{"load on", "set_setting", `{"setting":"recognition_load","value":"on"}`, false},
@@ -272,7 +272,6 @@ func TestSettingValues(t *testing.T) {
 		SettingRecordingPrompts: {"on", "off"},
 		SettingACPowerOnly:      {"on", "off"},
 		SettingRecognitionLoad:  {"gentle", "normal", "max"},
-		SettingFreeWorkNotice:   {"on", "off"},
 	}
 	if len(Settings()) != len(want) {
 		t.Fatalf("settings = %v", Settings())
@@ -282,8 +281,10 @@ func TestSettingValues(t *testing.T) {
 			t.Fatalf("%s values = %v", s, SettingValues(s))
 		}
 	}
-	if Setting("hub_url").Valid() || SettingValues("hub_url") != nil || ValidSettingValue("hub_url", "on") {
-		t.Fatal("an unknown setting has values")
+	for _, unknown := range []Setting{"hub_url", "free_work_notice"} {
+		if unknown.Valid() || SettingValues(unknown) != nil || ValidSettingValue(unknown, "on") {
+			t.Fatalf("an unknown setting %s has values", unknown)
+		}
 	}
 	spec, _ := SpecAt(ToolSetSetting, CatalogWave10)
 	if args := spec.Args(); !slices.Equal(args[1].Values, []string{"on", "off", "gentle", "normal", "max"}) {

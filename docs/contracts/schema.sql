@@ -914,3 +914,7 @@ ALTER TABLE agent_threads ADD COLUMN summary_text TEXT CHECK (summary_text IS NU
 ALTER TABLE agent_threads ADD COLUMN summary_through INTEGER CHECK (summary_through IS NULL OR summary_through >= 1);
 ALTER TABLE agent_threads ADD COLUMN summary_at INTEGER CHECK ((summary_at IS NULL) = (summary_text IS NULL) AND (summary_at IS NULL) = (summary_through IS NULL));
 ALTER TABLE agent_threads ADD COLUMN forked_from TEXT CHECK (forked_from IS NULL OR length(forked_from) BETWEEN 1 AND 128);
+
+-- Migration 0048 (TASK-342).
+-- settings: the free-work notice of 0032 is gone (a work on a free topic runs at once, no card).
+ALTER TABLE settings DROP COLUMN free_work_notice;

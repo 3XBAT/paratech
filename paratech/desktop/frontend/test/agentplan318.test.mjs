@@ -32,7 +32,7 @@ const step = (i, over = {}) => ({
 
 const rawCard = (plan) => ({
   kind: "plan", plan, questions: null, jobId: "", artifact: "", target: null, actionId: "", answerId: "", cannotDo: null,
-  text: "", assignments: [], assignment: null, stopReason: "", workId: "", outcome: "", freeWork: null,
+  text: "", assignments: [], assignment: null, stopReason: "", workId: "", outcome: "",
 });
 
 /** A plan of n steps; `states` (optional) gives the state of every step. */

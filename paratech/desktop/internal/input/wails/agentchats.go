@@ -164,7 +164,7 @@ type AgentCurrentView struct {
 }
 
 // ChatCurrent returns the live card of a chat's current request, for a chat opened without its updates (after a
-// restart, ADR-0028): «Да» of a plan, the questions, «Продолжить» of a stopped request. Its later updates come as
+// restart, ADR-0028): «Да» of a plan, the questions, «Повторить» of a stopped request. Its later updates come as
 // AgentUpdateEvent with the same threadId and turn. It reads the local database only: no Hub call, no step.
 func (s *AgentService) ChatCurrent(ctx context.Context, threadID string) AgentCurrentView {
 	id := shared.ThreadID(threadID)

@@ -460,9 +460,6 @@ type Facts struct {
 	CostMicroUSD  int64         // estimate for a paid call; zero means unknown
 	ReplacesReady bool          // the call would replace a ready result
 	Triage        actionpolicy.Triage
-	// FreeWorkNotice: the student wants the free-work card before a work on a free topic (the setting, on by default;
-	// off after «Больше не показывать», TASK-188).
-	FreeWorkNotice bool
 }
 
 // Admission is the decision on one call.
@@ -479,10 +476,9 @@ type Admission struct {
 // handled by ProposePlan, AskQuestions and Complete. A refused call is never executed; over the write limit the
 // request stops (budget).
 //
-// A work on a free topic (actionpolicy.FreeTopic, TASK-188) outside an approved plan is admitted as class UI while
-// the student wants the free-work card: nothing runs and nothing is counted; the card's «Сделать» is the student's one
-// confirmation, no plan card comes on top. Without the card it is the paid job without a plan (counted); a second
-// write of the request still needs a plan. As a step of an approved plan it runs as any step.
+// A work on a free topic (actionpolicy.FreeTopic, TASK-188) outside an approved plan is the paid job without a plan
+// (counted; no notice card since TASK-342); a second write of the request still needs a plan. As a step of an
+// approved plan it runs as any step.
 func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, error) {
 	t, err := th.ready()
 	if err != nil {
@@ -497,11 +493,6 @@ func (th *Thread) Admit(call values.Call, f Facts, now time.Time) (Admission, er
 		return Admission{}, err
 	}
 	free := actionpolicy.FreeTopic(call)
-	if free && len(t.approved) == 0 && f.FreeWorkNotice {
-		adm := Admission{Class: actionpolicy.ClassUI, PlanStep: -1}
-		t.admitted(call, adm)
-		return adm, nil
-	}
 	adm := Admission{Class: class, Paid: rule.Paid, PlanStep: -1}
 	if !class.IsWrite() {
 		// Paid R calls (answer_question, inspect_upload) are reads: they do not count as the paid job without a plan.
@@ -725,7 +716,7 @@ func (th *Thread) Stop(reason values.StopReason, now time.Time) error {
 	return nil
 }
 
-// Continue is «Продолжить»: the request goes back where it stopped. A request stopped by its budget cannot continue.
+// Continue is «Повторить» of a stopped request on the panel: the request goes back where it stopped. A request stopped by its budget cannot continue.
 func (th *Thread) Continue(now time.Time) error {
 	t, err := th.turn()
 	if err != nil {

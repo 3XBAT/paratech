@@ -495,7 +495,6 @@ func TestAgentPanelEventContract(t *testing.T) {
 			}},
 			values.StoppedCard{Reason: values.StopOffline},
 			values.WorkCard{Work: mustRef(t, values.KindWork, "w-1"), Outcome: values.TriageHelper},
-			values.FreeWorkCard{Thread: "th1", Turn: 3, CallID: "c1"},
 		},
 	}
 	panel := NewAgentPanel(discard())
@@ -545,8 +544,7 @@ func TestAgentPanelEventContract(t *testing.T) {
 			`{"id":"a-2","title":"Эссе","subjectId":"","due":""},`+
 			`{"id":"a-1","title":"Лабораторная 2","subjectId":"sub-1","due":"2026-10-24"}]`) + "," +
 		card(`"kind":"stopped","stopReason":"offline"`) + "," +
-		card(`"kind":"work","workId":"w-1","outcome":"helper"`) + "," +
-		card(`"kind":"free_work","freeWork":{"threadId":"th1","turn":3,"callId":"c1"}`) + `],"fill":null}`
+		card(`"kind":"work","workId":"w-1","outcome":"helper"`) + `],"fill":null}`
 	if string(got) != want {
 		t.Errorf("event JSON =\n%s\nwant\n%s", got, want)
 	}
@@ -582,7 +580,7 @@ func card(fields string) string {
 		{"kind", `""`}, {"plan", "null"}, {"questions", "null"}, {"jobId", `""`}, {"artifact", `""`}, {"target", "null"},
 		{"actionId", `""`}, {"answerId", `""`}, {"cannotDo", "null"}, {"text", `""`}, {"assignments", "null"},
 		{"assignment", "null"}, {"stopReason", `""`},
-		{"workId", `""`}, {"outcome", `""`}, {"freeWork", "null"},
+		{"workId", `""`}, {"outcome", `""`},
 	}
 	parts := make([]string, 0, len(zero))
 	for _, z := range zero {

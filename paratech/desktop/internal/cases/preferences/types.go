@@ -13,8 +13,6 @@ type Toggles struct {
 	ProcessOnlyOnACPower bool
 	// RecognitionLoad: how hard speech recognition may load the computer; applies from the next run (TASK-084).
 	RecognitionLoad shared.RecognitionLoad
-	// FreeWorkNotice: the agent shows the free-work card before a work on a topic (TASK-188).
-	FreeWorkNotice bool
 	// NoteRecognition: who recognises the text of photo pages of notes (TASK-294); off by default.
 	NoteRecognition settings.NoteRecognition
 }

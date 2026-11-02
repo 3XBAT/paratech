@@ -209,7 +209,8 @@ func TestWave10CompensationRules(t *testing.T) {
 		}, false},
 
 		{"toggle back on", values.ToolSetSetting, pinned(setting(values.SettingACPowerOnly, "on")), true},
-		{"notice back off", values.ToolSetSetting, pinned(setting(values.SettingFreeWorkNotice, "off")), true},
+		{"prompts back off", values.ToolSetSetting, pinned(setting(values.SettingRecordingPrompts, "off")), true},
+		{"the removed free-work notice", values.ToolSetSetting, pinned(setting("free_work_notice", "off")), false},
 		{"load back to a toggle value", values.ToolSetSetting, pinned(setting(values.SettingRecognitionLoad, "on")), false},
 		{"toggle back to a load", values.ToolSetSetting, pinned(setting(values.SettingRecordingPrompts, "max")), false},
 		{"unknown setting", values.ToolSetSetting, pinned(setting("hub_url", "on")), false},

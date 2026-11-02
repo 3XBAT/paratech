@@ -9,10 +9,73 @@ import (
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/turnkey"
 	"paratech/desktop/internal/domain/agent/action"
+	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/shared"
 )
+
+const freeTopic = "Реформы Петра I, презентация"
+
+func mustScope(t *testing.T, subject string) values.Scope {
+	t.Helper()
+	var sub values.Ref
+	if subject != "" {
+		sub = mustRef(t, values.KindSubject, subject)
+	}
+	s, err := values.NewScope(sub, "", values.Ref{}, values.Ref{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// TASK-342: the Driver runs a topic call admitted as the paid job without a plan at once (journaled, a work started,
+// the work card shown); no notice card comes and nothing waits on the student. A card admission (class UI) of a
+// triage is never run.
+func TestFreeTopicRunsAtOnce(t *testing.T) {
+	w, f := withTurnkey(t, turnkey.Started{View: questionsView(2), Created: true}, nil)
+	c := writeCall(t, "c1", values.ToolTriageAssignment, `{"topic":"`+freeTopic+`"}`)
+	at := req
+	at.Scope = mustScope(t, "s1")
+	r := w.tools(t).run(t.Context(), at, c)
+	if r.out.Result.IsError || !r.write {
+		t.Fatalf("outcome = %+v", r)
+	}
+	for _, card := range r.cards {
+		if k := card.Kind(); k != values.CardActionLine && k != values.CardWork {
+			t.Fatalf("cards = %+v, want the action line and the work card", r.cards)
+		}
+	}
+	e, err := w.journal.Find(t.Context(), req.Thread, req.Turn, "c1")
+	if err != nil || e.Status != action.StatusDone || e.Tool != values.ToolTriageAssignment {
+		t.Fatalf("journal = %+v, %v", e, err)
+	}
+	if len(f.topics) != 1 || f.topics[0].text != freeTopic || f.topics[0].subject != "s1" {
+		t.Fatalf("topic calls = %+v", f.topics)
+	}
+
+	ui := writeCall(t, "c2", values.ToolTriageAssignment, `{"topic":"`+freeTopic+`"}`)
+	ui.Class, ui.Paid = actionpolicy.ClassUI, false
+	if r := w.tools(t).run(t.Context(), at, ui); r.out.Result.ResultJSON != `{"error":"unavailable"}` || len(r.cards) != 0 {
+		t.Fatalf("a card admission = %+v", r)
+	}
+	if len(f.topics) != 1 {
+		t.Fatalf("a card admission ran: %+v", f.topics)
+	}
+}
+
+// A topic call has no facts to report: no setting is read for it.
+func TestFactsOfAFreeTopic(t *testing.T) {
+	facts, err := NewFacts(&memLessons{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic := mustCall(t, "c1", values.ToolTriageAssignment, `{"topic":"`+freeTopic+`"}`)
+	if f, err := facts.Facts(t.Context(), topic); err != nil || f.ReplacesReady || f.Context != nil || f.CostMicroUSD != 0 {
+		t.Fatalf("facts = %+v, %v", f, err)
+	}
+}
 
 // turnStore keeps the threads and the history of the real step use case in memory.
 type turnStore struct {
@@ -121,10 +184,10 @@ type noSubjects struct{}
 
 func (noSubjects) BaseSubjects(context.Context) ([]values.BaseSubject, error) { return nil, nil }
 
-// With the free-work card turned off («Больше не показывать»), the real step use case and the Driver run a topic call
-// at once as the request's one paid write without a plan (journaled, a work started); a second paid write of the same
-// request needs a plan and runs nothing.
-func TestFreeTopicWithoutTheCardThroughTheDriver(t *testing.T) {
+// The real step use case and the Driver run a topic call at once as the request's one paid write without a plan
+// (journaled, a work started; TASK-342: no notice card, no setting); a second paid write of the same request needs a
+// plan and runs nothing.
+func TestFreeTopicThroughTheDriver(t *testing.T) {
 	w, f := withTurnkey(t, turnkey.Started{View: questionsView(2), Created: true}, nil)
 	facts, err := NewFacts(&memLessons{})
 	if err != nil {
@@ -138,7 +201,7 @@ func TestFreeTopicWithoutTheCardThroughTheDriver(t *testing.T) {
 	}}
 	turns, err := agentturn.New(agentturn.Deps{
 		Model: model, Threads: store, History: store, Subjects: noSubjects{},
-		Facts: facts.WithNotice(&memNotice{on: false}), Tx: &directTx{}, Clock: fixedClock{}, IDs: store,
+		Facts: facts, Tx: &directTx{}, Clock: fixedClock{}, IDs: store,
 	})
 	if err != nil {
 		t.Fatal(err)
