@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"paratech/desktop/internal/domain/agent/values"
@@ -57,7 +58,7 @@ func (t tools) replyLines(ctx context.Context, card values.ReplyCard) values.Rep
 		v := views[i]
 		line := values.AssignmentLine{Assignment: r, Title: v.Title}
 		if !v.Due.IsZero() {
-			line.Due = dateOf(v.Due, loc)
+			line.Due, line.DueTime = dueOf(v.Due, loc)
 		}
 		if m, ok := subjects[v.Subject]; ok && v.Subject != "" {
 			line.Subject, _ = refOfID(values.KindSubject, string(m.ID))
@@ -66,4 +67,15 @@ func (t tools) replyLines(ctx context.Context, card values.ReplyCard) values.Rep
 	}
 	card.Lines = lines
 	return card
+}
+
+// dueOf is the day and the time of day of a deadline in loc; both zero when the day is outside the years a Date holds.
+func dueOf(due time.Time, loc *time.Location) (values.Date, values.TimeOfDay) {
+	d := dateOf(due, loc)
+	if d.IsZero() {
+		return values.Date{}, values.TimeOfDay{}
+	}
+	local := due.In(loc)
+	tod, _ := values.NewTimeOfDay(local.Hour(), local.Minute())
+	return d, tod
 }

@@ -152,12 +152,14 @@ type AgentCardView struct {
 }
 
 // AgentAssignmentView is an assignment a reply lists, from the local data, never from the model (TASK-173): its title
-// (plain text only), its library subject ("" none) and its deadline (YYYY-MM-DD, "" none).
+// (plain text only), its library subject ("" none), its deadline date (YYYY-MM-DD, "" none) and time of day (HH:MM
+// local, "" none; 20:00 when no time was named), so the panel can call it overdue once that moment has passed.
 type AgentAssignmentView struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
 	SubjectID string `json:"subjectId"`
 	Due       string `json:"due"`
+	Time      string `json:"time"`
 }
 
 // AgentAddedAssignmentView is the assignment create_assignment added, from the local data, never from the model: its
@@ -317,7 +319,7 @@ func cardView(c values.Card) (AgentCardView, bool) {
 		v.Assignments = make([]AgentAssignmentView, 0, len(c.Lines))
 		for _, l := range c.Lines {
 			v.Assignments = append(v.Assignments, AgentAssignmentView{
-				ID: l.Assignment.ID(), Title: l.Title, SubjectID: l.Subject.ID(), Due: l.Due.String(),
+				ID: l.Assignment.ID(), Title: l.Title, SubjectID: l.Subject.ID(), Due: l.Due.String(), Time: l.DueTime.String(),
 			})
 		}
 	case values.StoppedCard:
