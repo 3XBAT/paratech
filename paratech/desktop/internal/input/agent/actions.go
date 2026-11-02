@@ -417,7 +417,7 @@ func (a *Actions) setLessonInfo(ctx context.Context, call values.Call) (prepared
 	}, nil
 }
 
-// editDue sets the deadline of an assignment to a day; the time of day stays what it was (23:59 for a new one) in the
+// editDue sets the deadline of an assignment to a day; the time of day stays what it was (20:00 for a new one) in the
 // student's zone. Undo restores the old deadline exactly (D7).
 func (a *Actions) editDue(ctx context.Context, call values.Call) (prepared, error) {
 	aRef, _ := call.Args().ID("assignment")
@@ -467,9 +467,9 @@ func (a *Actions) setDue(ctx context.Context, id shared.AssignmentID, before int
 	return v.Version, nil
 }
 
-// dueOn is the deadline on day at the time of day of old in loc, or 23:59 without an old one.
+// dueOn is the deadline on day at the time of day of old in loc, or 20:00 (the domain default) without an old one.
 func dueOn(day values.Date, old time.Time, loc *time.Location) time.Time {
-	h, m := 23, 59
+	h, m := assignment.DefaultDueHour, assignment.DefaultDueMinute
 	if !old.IsZero() {
 		o := old.In(loc)
 		h, m = o.Hour(), o.Minute()

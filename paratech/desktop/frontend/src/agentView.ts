@@ -52,7 +52,7 @@ export const openAssignmentLabel = "Открыть";
 
 /**
  * «Задание добавлено: <название> · <предмет> · срок <дата>, <время>». The DTO does not say whether the student named a
- * time (none arrives as 23:59), so date and time are always shown; the parts that are absent are left out.
+ * time (none arrives as 20:00), so date and time are always shown; the parts that are absent are left out.
  */
 export function addedAssignmentText(a: AddedAssignmentView, subjects: Readonly<Record<string, string>>, now: Date): string {
   const title = a.title.trim() === "" ? noTitleLabel : a.title;

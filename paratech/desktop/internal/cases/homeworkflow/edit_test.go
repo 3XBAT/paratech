@@ -23,8 +23,8 @@ func TestEditAssignmentByStudent(t *testing.T) {
 		wantDue     time.Time
 	}{
 		{
-			name: "subject and a date: 23:59", edit: AssignmentEdit{Title: "Решить 6", Note: "Стр. 12", Subject: "s1", Date: "2026-10-30"},
-			wantSubject: "Матанализ", wantSource: values.SourceUser, wantDue: time.Date(2026, 10, 30, 23, 59, 0, 0, msk),
+			name: "subject and a date: 20:00", edit: AssignmentEdit{Title: "Решить 6", Note: "Стр. 12", Subject: "s1", Date: "2026-10-30"},
+			wantSubject: "Матанализ", wantSource: values.SourceUser, wantDue: time.Date(2026, 10, 30, 20, 0, 0, 0, msk),
 		},
 		{
 			name: "a time of day", edit: AssignmentEdit{Title: "Решить 6", Subject: "s1", Date: "2026-10-15", Time: "09:00"},

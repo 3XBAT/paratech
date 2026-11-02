@@ -130,8 +130,8 @@ func TestEveryActionAndItsUndo(t *testing.T) {
 			}},
 		{"set a first due", values.ToolEditDue, `{"assignment":"a2","due":"2026-11-02"}`, `{"changed":true,"done":true}`,
 			func(t *testing.T, w *world) {
-				if got := w.assignments.views["a2"].Due; !got.Equal(time.Date(2026, 11, 2, 23, 59, 0, 0, msk)) {
-					t.Fatalf("due = %v", got)
+				if got := w.assignments.views["a2"].Due; !got.Equal(time.Date(2026, 11, 2, 20, 0, 0, 0, msk)) {
+					t.Fatalf("due = %v, want 20:00 of that day", got)
 				}
 			},
 			func(t *testing.T, w *world) {
@@ -793,5 +793,30 @@ func TestDriverInterruptKeepsTheOutcomeOfAnAction(t *testing.T) {
 	}
 	if lines != 1 {
 		t.Fatalf("action lines shown = %d", lines)
+	}
+}
+
+// edit_due without a deadline sets 20:00 of the day; with one it keeps the old time of day in the student's zone.
+func TestDueOn(t *testing.T) {
+	msk := time.FixedZone("MSK", 3*60*60)
+	day, err := values.NewDate(2026, 11, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		old  time.Time
+		want time.Time
+	}{
+		{"no old deadline: 20:00", time.Time{}, time.Date(2026, 11, 2, 20, 0, 0, 0, msk)},
+		{"old 23:59 stays", time.Date(2026, 10, 20, 23, 59, 0, 0, msk), time.Date(2026, 11, 2, 23, 59, 0, 0, msk)},
+		{"old time in another zone", time.Date(2026, 10, 20, 6, 15, 0, 0, time.UTC), time.Date(2026, 11, 2, 9, 15, 0, 0, msk)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := dueOn(day, c.old, msk); !got.Equal(c.want) {
+				t.Fatalf("dueOn = %v, want %v", got, c.want)
+			}
+		})
 	}
 }
