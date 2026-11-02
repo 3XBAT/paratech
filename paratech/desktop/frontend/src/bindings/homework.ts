@@ -203,7 +203,7 @@ export interface DeliveryItem {
 /**
  * The add-assignment form (ADR-0029). requestId is the form's token (crypto.randomUUID when the form opens; 1..64
  * characters of [A-Za-z0-9-]): sending the same form again stores one assignment. "" in subjectId, lessonId, date and
- * time means no value; date is YYYY-MM-DD, time HH:MM (no time: the end of that day).
+ * time means no value; date is YYYY-MM-DD, time HH:MM (no time: 20:00 of that day).
  */
 export interface CreateAssignmentRequest {
   requestId: string;
@@ -251,7 +251,7 @@ export interface DeleteImpact {
 
 /**
  * The edit form of an assignment of any origin (ADR-0029). version is AssignmentItem.version the form showed. "" in
- * subjectId, note, date and time means no value; date is YYYY-MM-DD, time HH:MM (no time: the end of that day).
+ * subjectId, note, date and time means no value; date is YYYY-MM-DD, time HH:MM (no time: 20:00 of that day).
  */
 export interface EditAssignmentRequest {
   id: string;

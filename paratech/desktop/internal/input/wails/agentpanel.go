@@ -162,7 +162,7 @@ type AgentAssignmentView struct {
 
 // AgentAddedAssignmentView is the assignment create_assignment added, from the local data, never from the model: its
 // title (plain text only), its library subject ("" none), its deadline date (YYYY-MM-DD, "" none) and time of day
-// (HH:MM, "" none; 23:59 when the student named no time).
+// (HH:MM, "" none; 20:00 when the student named no time).
 type AgentAddedAssignmentView struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`

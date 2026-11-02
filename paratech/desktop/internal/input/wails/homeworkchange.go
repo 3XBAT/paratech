@@ -42,7 +42,7 @@ type DeleteImpact struct {
 }
 
 // EditRequest is the edit form of an assignment of any origin. Version is AssignmentItem.Version the form showed.
-// Empty SubjectID, Date and Time mean no value; Date is YYYY-MM-DD and Time HH:MM (no time: the end of that day).
+// Empty SubjectID, Date and Time mean no value; Date is YYYY-MM-DD and Time HH:MM (no time: 20:00 of that day).
 type EditRequest struct {
 	ID        string `json:"id"`
 	Version   int64  `json:"version"`

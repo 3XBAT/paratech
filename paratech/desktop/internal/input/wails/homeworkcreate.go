@@ -36,7 +36,7 @@ const (
 )
 
 // CreateRequest is the add-assignment form. Empty SubjectID, LessonID, Date and Time mean no value; Date is
-// YYYY-MM-DD and Time HH:MM (no time: the end of that day). RequestID is the form's token: sending the same form
+// YYYY-MM-DD and Time HH:MM (no time: 20:00 of that day). RequestID is the form's token: sending the same form
 // again stores one assignment.
 type CreateRequest struct {
 	RequestID string `json:"requestId"`

@@ -357,7 +357,7 @@ export const addTexts = {
   noSubject: "Без предмета",
   due: "Срок",
   time: "Время",
-  timeHint: "Необязательно. Без времени срок — конец дня.",
+  timeHint: "Необязательно. Если время не указано, срок — 20:00.",
   note: "Заметка",
   add: "Добавить",
   adding: "Добавление…",
@@ -609,14 +609,23 @@ function two(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-/** The deadline as the form fields: local date YYYY-MM-DD and time HH:MM; 23:59 is the end of the day, no time. */
+/**
+ * The time a deadline given as a date alone gets. Mirrors the Go constant in domain/coursework/assignment: keep them
+ * in step.
+ */
+export const DEFAULT_DUE_TIME = "20:00";
+
+/**
+ * The deadline as the form fields: local date YYYY-MM-DD and time HH:MM; DEFAULT_DUE_TIME (20:00) is the default for a
+ * date without a time, so it shows as no time. Any other time, 23:59 included, is shown and kept.
+ */
 export function dueFields(due: string): { date: string; time: string } {
   const d = new Date(due);
   if (due === "" || Number.isNaN(d.getTime())) {
     return { date: "", time: "" };
   }
   const time = `${two(d.getHours())}:${two(d.getMinutes())}`;
-  return { date: `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`, time: time === "23:59" ? "" : time };
+  return { date: `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`, time: time === DEFAULT_DUE_TIME ? "" : time };
 }
 
 /**

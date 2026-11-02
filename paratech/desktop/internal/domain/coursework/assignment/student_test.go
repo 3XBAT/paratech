@@ -105,7 +105,7 @@ func TestStudentDue(t *testing.T) {
 		err               error
 	}{
 		{"no date", "", "", time.Time{}, nil},
-		{"end of the day", "2026-10-30", "", time.Date(2026, 10, 30, 23, 59, 0, 0, msk), nil},
+		{"date only: 20:00", "2026-10-30", "", time.Date(2026, 10, 30, 20, 0, 0, 0, msk), nil},
 		{"at nine", "2026-10-28", "09:00", time.Date(2026, 10, 28, 9, 0, 0, 0, msk), nil},
 		{"midnight", "2026-10-28", "00:00", time.Date(2026, 10, 28, 0, 0, 0, 0, msk), nil},
 		{"last minute", "2026-10-28", "23:59", time.Date(2026, 10, 28, 23, 59, 0, 0, msk), nil},
@@ -133,6 +133,37 @@ func TestStudentDue(t *testing.T) {
 	}
 	if _, err := StudentDue("2026-10-28", "", nil); !errors.Is(err, ErrInvalidDue) {
 		t.Fatalf("no zone: err = %v", err)
+	}
+}
+
+// A date-only deadline 31 days back is judged by its 20:00 instant against the window now - 31 days ... now + 2 years.
+func TestStudentDueWindowWithDefaultTime(t *testing.T) {
+	msk := time.FixedZone("MSK", 3*60*60)
+	cases := []struct {
+		name, date string
+		now        time.Time
+		want       error
+	}{
+		{"31 days back, now before 20:00", "2026-09-30", time.Date(2026, 10, 31, 19, 59, 0, 0, msk), nil},
+		{"31 days back, now at 20:00", "2026-09-30", time.Date(2026, 10, 31, 20, 0, 0, 0, msk), nil},
+		{"31 days back, now after 20:00", "2026-09-30", time.Date(2026, 10, 31, 20, 1, 0, 0, msk), ErrInvalidDue},
+		{"2 years ahead, now at 20:00", "2028-10-31", time.Date(2026, 10, 31, 20, 0, 0, 0, msk), nil},
+		{"2 years ahead, now before 20:00", "2028-10-31", time.Date(2026, 10, 31, 19, 59, 0, 0, msk), ErrInvalidDue},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			due, err := StudentDue(c.date, "", msk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if due.Hour() != DefaultDueHour || due.Minute() != DefaultDueMinute {
+				t.Fatalf("due = %v, want %02d:%02d", due, DefaultDueHour, DefaultDueMinute)
+			}
+			_, err = NewByStudent(StudentSpec{ID: "a1", Title: "ok", Due: due}, c.now)
+			if !errors.Is(err, c.want) || (c.want == nil && err != nil) {
+				t.Fatalf("err = %v, want %v", err, c.want)
+			}
+		})
 	}
 }
 
