@@ -414,7 +414,8 @@ func (s *Drafts) load(ctx context.Context, a shared.AssignmentID) (*homeworkdraf
 
 // Handle runs one attempt of a homework_draft job (jobrunner.Handler): it selects the minimal context (the lesson
 // title, the assignment, the lesson summary, the base version and the instructions), calls the LLM and adds the
-// checked answer as a generated version. Nothing is stored unless the whole answer passed the checks.
+// checked answer as a generated version. Nothing is stored unless the whole answer passed the checks. An assignment
+// missing or deleted, before the call or after it, fails the job with ErrDraftAssignmentGone.
 func (s *Drafts) Handle(ctx context.Context, snap job.Snapshot, report func(ctx context.Context, pr job.Progress) error) error {
 	if report == nil {
 		report = func(context.Context, job.Progress) error { return nil }
@@ -427,12 +428,10 @@ func (s *Drafts) Handle(ctx context.Context, snap job.Snapshot, report func(ctx 
 		return s.permanent(snap, stepPayload, ErrDraftPayload, err)
 	}
 
-	a, err := s.assignments.Get(ctx, req.Assignment())
-	switch {
-	case errors.Is(err, shared.ErrNotFound):
-		return s.permanent(snap, stepAssignment, ErrDraftAssignmentGone, err)
-	case err != nil:
-		return s.retry(snap, stepAssignment, ErrDraftStorage, err)
+	// A deleted assignment ends the job (TASK-338): its delete may have failed to cancel it.
+	a, err := s.live(ctx, snap, req.Assignment())
+	if err != nil {
+		return err
 	}
 	d, err := s.load(ctx, a.ID())
 	if err != nil {
@@ -470,11 +469,26 @@ func (s *Drafts) Handle(ctx context.Context, snap job.Snapshot, report func(ctx 
 	if err := s.answered(ctx, snap, report); err != nil {
 		return err
 	}
+	if _, err := s.live(ctx, snap, a.ID()); err != nil {
+		return err // deleted during the call: the answer is not stored
+	}
 
 	return s.store(ctx, snap, a.ID(), homeworkdraft.Generation{
 		Base: req.Base(), Job: snap.ID(), Title: answer.Title(), Body: answer.Body(), Instruction: req.Instruction(),
 		PromptVersion: prompts.Version,
 	})
+}
+
+// live loads the assignment of a job; one missing or deleted fails the job at once.
+func (s *Drafts) live(ctx context.Context, snap job.Snapshot, id shared.AssignmentID) (*assignment.Assignment, error) {
+	a, err := liveAssignment(ctx, s.assignments, id)
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return nil, s.permanent(snap, stepAssignment, ErrDraftAssignmentGone, err)
+	case err != nil:
+		return nil, s.retry(snap, stepAssignment, ErrDraftStorage, err)
+	}
+	return a, nil
 }
 
 // material gathers what the generation may send: the lesson title, subject, teacher and summary are optional context.

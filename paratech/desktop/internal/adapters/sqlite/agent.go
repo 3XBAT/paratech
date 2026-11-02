@@ -568,7 +568,7 @@ func (h *AgentHistory) Append(ctx context.Context, id shared.ThreadID, turn int,
 }
 
 // Since returns the last limit entries of the requests numbered from on, oldest first, each with the frozen reply line
-// of its request ("" when it has none).
+// of its request ("" when it has none) and the IDs its request mentioned (one read for all requests, TASK-245).
 func (h *AgentHistory) Since(ctx context.Context, id shared.ThreadID, from, limit int) ([]values.HistoryEntry, error) {
 	limit = min(max(limit, 0), maxAgentHistoryRows)
 	rows, err := h.db.Queries(ctx).ListAgentSteps(ctx, sqlcgen.ListAgentStepsParams{
@@ -579,14 +579,43 @@ func (h *AgentHistory) Since(ctx context.Context, id shared.ThreadID, from, limi
 	}
 	slices.Reverse(rows)
 	out := make([]values.HistoryEntry, 0, len(rows))
+	mentions := map[int64][]values.Ref{} // the column of a request is decoded once
 	for _, row := range rows {
 		e, err := entryFrom(row)
 		if err != nil {
 			return nil, fmt.Errorf("stored agent history %s/%d: %w", id, row.Seq, err)
 		}
+		refs, ok := mentions[row.Turn]
+		if !ok {
+			if refs, err = mentionRefsFrom(row.Mentions); err != nil {
+				return nil, fmt.Errorf("stored agent history %s/%d: mentions of request %d: %w", id, row.Seq, row.Turn, err)
+			}
+			mentions[row.Turn] = refs
+		}
+		e.Mentions = slices.Clone(refs)
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// mentionRefsFrom decodes the mentions column of a request into IDs; the labels stay here. No stored request (an
+// entry without its row) has none.
+func mentionRefsFrom(col sql.NullString) ([]values.Ref, error) {
+	if !col.Valid {
+		return nil, nil
+	}
+	var ws []mentionWire
+	if err := strictJSON(col.String, &ws); err != nil {
+		return nil, err
+	}
+	ms, err := mentionsFrom(ws)
+	if err != nil {
+		return nil, err
+	}
+	if len(ms) == 0 {
+		return nil, nil
+	}
+	return values.MentionRefs(ms), nil
 }
 
 func entryFrom(row sqlcgen.ListAgentStepsRow) (values.HistoryEntry, error) {

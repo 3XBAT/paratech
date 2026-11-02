@@ -106,20 +106,24 @@ func (h HistoryTurn) Size() int {
 // request that restarted the chat from an earlier message (ADR-0028), 0 when the request is not dropped; the window
 // skips dropped requests. ReplyLine is the reply line frozen when the request became final (thread.FreezeReply), set
 // by the store on the entries of its request; empty for a request that is not final or ended before the line existed.
+// Mentions are the IDs of the objects the request mentioned (ADR-0028), also set by the store on every entry of its
+// request; labels stay in the store.
 type HistoryEntry struct {
 	Turn      int
 	Entry     HistoryTurn
 	DroppedBy int
 	ReplyLine string
+	Mentions  []Ref
 }
 
-// StepRequest is one planner step: the key ag:<thread>:<turn>:<step>, the shared base, the current scope and the
-// history window of this thread only.
+// StepRequest is one planner step: the key ag:<thread>:<turn>:<step>, the shared base, the current scope, the mentions
+// of the step (thread.StepMentions, IDs only) and the history window of this thread only.
 type StepRequest struct {
 	Key             string
 	Thread          shared.ThreadID
 	Base            Base
 	Scope           Scope
+	Mentions        []StepMention
 	History         []HistoryTurn
 	MaxOutputTokens int
 }

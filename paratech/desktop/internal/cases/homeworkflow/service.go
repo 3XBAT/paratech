@@ -1,6 +1,9 @@
 package homeworkflow
 
-import "fmt"
+import (
+	"fmt"
+	"log/slog"
+)
 
 // Service runs the homework workflow (PRD sections 9, 10 and 13.3): the action proposal pipeline (proposals.go) and
 // the user's edits of assignments (assignments.go). The post-processing jobs of a transcript run in PostProcessor
@@ -24,14 +27,21 @@ type Service struct {
 	subjects    SubjectNames     // nil: CreateAssignment with a subject is ErrInvalidConfig
 	removals    DeadlineRemovals // nil: a delete leaves the deadline event in Google
 	sync        CalendarSyncRequester
+	activity    AssignmentActivity // nil (or no jobs): a delete stops nothing itself
+	jobs        JobCanceller
+	log         *slog.Logger
 }
 
-// New builds the Service; Drafts, Waiting, Works, Subjects, Removals and Sync are optional.
+// New builds the Service; Drafts, Waiting, Works, Subjects, Removals, Sync, Activity, Jobs and Log are optional.
 func New(d Deps) (*Service, error) {
 	if d.Proposals == nil || d.Assignments == nil || d.AssignmentList == nil || d.Artifacts == nil ||
 		d.Recipients == nil || d.Mailer == nil || d.Exporter == nil || d.Calendar == nil || d.Recordings == nil ||
 		d.Lessons == nil || d.Clock == nil || d.IDs == nil || d.Tx == nil {
 		return nil, fmt.Errorf("%w: every port is required", ErrInvalidConfig)
+	}
+	log := d.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
 	}
 
 	return &Service{
@@ -39,5 +49,6 @@ func New(d Deps) (*Service, error) {
 		recipients: d.Recipients, mailer: d.Mailer, exporter: d.Exporter, calendar: d.Calendar, clock: d.Clock,
 		ids: d.IDs, tx: d.Tx, lessons: lessonFinder{recordings: d.Recordings, lessons: d.Lessons, clock: d.Clock},
 		drafts: d.Drafts, waiting: d.Waiting, works: d.Works, subjects: d.Subjects, removals: d.Removals, sync: d.Sync,
+		activity: d.Activity, jobs: d.Jobs, log: log,
 	}, nil
 }

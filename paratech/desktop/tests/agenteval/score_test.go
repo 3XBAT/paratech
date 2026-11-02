@@ -106,6 +106,18 @@ func TestParseCaseSetRejects(t *testing.T) {
 		"unknown assigned subject": func(s string) string {
 			return strings.Replace(s, `"assigned_subject": "s-math"`, `"assigned_subject": "s-chem"`, 1)
 		},
+		"mention of an upload": func(s string) string {
+			return strings.Replace(s, `{"kind": "lesson", "id": "l-31"}`, `{"kind": "upload", "id": "u-1"}`, 1)
+		},
+		"repeated mention": func(s string) string {
+			return strings.Replace(s, `{"kind": "lesson", "id": "l-31"}`, `{"kind": "subject", "id": "s-phys", "earlier": true}`, 1)
+		},
+		"earlier mention without an earlier request": func(s string) string {
+			return strings.Replace(s, `"earlier": [{"text": "что задали по @Физика?", "reply": "reply: По физике заданий нет."}], `, ``, 1)
+		},
+		"earlier request without a reply": func(s string) string {
+			return strings.Replace(s, `"reply": "reply: Пожалуйста."`, `"reply": " "`, 1)
+		},
 	} {
 		mutated := mutate(string(raw))
 		if mutated == string(raw) {

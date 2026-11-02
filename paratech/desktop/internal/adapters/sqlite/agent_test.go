@@ -443,6 +443,11 @@ func TestAgentHistory(t *testing.T) {
 			t.Fatalf("Append: %v", err)
 		}
 	}
+	// Request 1 is stored with two mentions: each of its entries carries their IDs, never the labels.
+	mentioned := []values.Ref{agentRef(t, values.KindLesson, "l2"), agentRef(t, values.KindMaterial, "m1")}
+	for i := range entries[:3] {
+		entries[i].Mentions = mentioned
+	}
 	got, err := h.Since(ctx, "th1", 0, 100)
 	if err != nil || !reflect.DeepEqual(got, entries) {
 		t.Fatalf("Since = %+v, %v", got, err)
@@ -458,6 +463,14 @@ func TestAgentHistory(t *testing.T) {
 	}
 	if err := h.Append(ctx, "nope", 1, entries[0].Entry); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("Append to a missing thread = %v", err)
+	}
+
+	// A stored mention that no longer decodes fails the read instead of sending a guess.
+	if _, err := db.sql.ExecContext(ctx, `UPDATE agent_turns SET mentions = '[{"kind":"upload","id":"u1","label":"x"}]'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Since(ctx, "th1", 0, 100); err == nil {
+		t.Fatal("Since read a mention of an upload")
 	}
 }
 

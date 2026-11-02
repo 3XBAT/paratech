@@ -18,7 +18,11 @@ export function RowMenu<K extends string>(props: {
   /** The tooltip of the «⋯» button. */
   title: string;
   items: readonly RowMenuItem<K>[];
+  /** The row of the menu: the page finds the «⋯» button by it to give it the focus. */
+  rowId?: string;
   onPick: (key: K) => void;
+  /** Opens the menu each time the number grows (a right click on the row); 0 or undefined never does. */
+  openRequest?: number;
 }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -35,6 +39,13 @@ export function RowMenu<K extends string>(props: {
       setOpen(false);
     }
   }, [count]);
+
+  const request = props.openRequest ?? 0;
+  useEffect(() => {
+    if (request > 0) {
+      setOpen(true);
+    }
+  }, [request]);
 
   useEffect(() => {
     if (!shown) {
@@ -87,6 +98,7 @@ export function RowMenu<K extends string>(props: {
         ref={button}
         type="button"
         className="btn ghost mmenu-btn"
+        data-menu-id={props.rowId}
         aria-label={props.label}
         title={props.title}
         aria-haspopup="menu"

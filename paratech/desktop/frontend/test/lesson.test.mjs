@@ -190,7 +190,9 @@ const src = (rel) => readFileSync(new URL(`../src/${rel}`, import.meta.url), "ut
 
 test("the list, the assignment screen and the summary show the lesson; the form saves through correctLesson", () => {
   const page = src("pages/HomeworkPage.tsx");
-  assert.equal(page.split("lessonText(a)").length - 1, 2, "the list row and the assignment screen");
+  // TASK-316: the list row moved to AssignmentRowView (pages/AssignmentDoneParts.tsx); the page keeps the assignment screen.
+  assert.equal(page.split("lessonText(a)").length - 1, 1, "the assignment screen");
+  assert.equal(src("pages/AssignmentDoneParts.tsx").split("lessonText(a)").length - 1, 1, "the list row");
   assert.match(page, /correct=\{api\.correctLesson\}/);
   assert.match(page, /assignment: next/, "the shown assignment is replaced by the core's reply");
   assert.match(src("pages/SummaryParts.tsx"), /lessonText\(a\)/);

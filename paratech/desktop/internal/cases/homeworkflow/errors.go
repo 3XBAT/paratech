@@ -141,7 +141,7 @@ var (
 	// ErrDraftPayload means the job payload is not a valid draft request or the job is not a draft job. Permanent.
 	ErrDraftPayload = errors.New("homework draft: invalid job")
 
-	// ErrDraftAssignmentGone means the assignment of the draft no longer exists. Permanent.
+	// ErrDraftAssignmentGone means the assignment of the draft no longer exists or was deleted. Permanent.
 	ErrDraftAssignmentGone = errors.New("homework draft: the assignment no longer exists")
 
 	// ErrDraftChanged means the draft got a new version (a user edit or another generation) after the job was

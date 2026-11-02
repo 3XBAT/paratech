@@ -302,16 +302,67 @@ export function AddAssignmentDialog(props: {
 
 /**
  * «Задание удалено» with «Вернуть» in place of a deleted assignment; the line stays until the student leaves the page.
- * The button takes the focus: the «Удалить» that had it is gone.
+ * The button takes the focus: the «Удалить» that had it is gone. After the restore window (expired) the same line says
+ * the delete is final and the button goes; the status text takes the focus, so it is not lost and the text is read out.
  */
-export function RemovedLine(props: { busy: boolean; onRestore: () => void }) {
+export function RemovedLine(props: { busy: boolean; stopped?: boolean; expired?: boolean; onRestore: () => void }) {
+  const expired = props.expired === true;
+  const statusRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (expired) {
+      statusRef.current?.focus();
+    }
+  }, [expired]);
   return (
     <span className="hw-removed">
-      <span role="status">{changeTexts.removed}</span>
-      <Button autoFocus busy={props.busy} busyLabel={changeTexts.restoring} disabled={props.busy} onClick={props.onRestore}>
-        {changeTexts.restore}
-      </Button>
+      <span role="status" tabIndex={-1} ref={statusRef}>
+        {expired ? changeTexts.expired : changeTexts.removed}
+        {props.stopped === true && ` · ${changeTexts.stopped}`}
+      </span>
+      {!expired && (
+        <Button autoFocus busy={props.busy} busyLabel={changeTexts.restoring} disabled={props.busy} onClick={props.onRestore}>
+          {changeTexts.restore}
+        </Button>
+      )}
     </span>
+  );
+}
+
+/**
+ * The inline question before «Удалить» of an assignment whose work is running: what happens and that it can be undone.
+ * «Отмена» has the focus, so a stray Enter deletes nothing; «Удалить» is the only danger button.
+ */
+export function DeleteWarning(props: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div className="hw-delete-warning">
+      <ResultLine kind="wait" role="status">
+        {changeTexts.stopWarning}
+      </ResultLine>
+      <div className="acts start">
+        <Button variant="danger" onClick={props.onConfirm}>
+          {changeTexts.remove}
+        </Button>
+        <Button autoFocus onClick={props.onCancel}>
+          {changeTexts.cancel}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** A refused delete or restore: why, and for an unsettled email the button that opens where its state is shown. */
+export function ChangeRefusal(props: { text: string; onOpenSend?: () => void }) {
+  return (
+    <div className="hw-refusal">
+      <ResultLine kind="fail" role="alert">
+        {props.text}
+      </ResultLine>
+      {props.onOpenSend && (
+        <div className="acts start">
+          <Button onClick={props.onOpenSend}>{changeTexts.openSend}</Button>
+        </div>
+      )}
+    </div>
   );
 }
 

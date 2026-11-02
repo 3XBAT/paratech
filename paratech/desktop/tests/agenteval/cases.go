@@ -45,20 +45,48 @@ type Subject struct {
 // TriageSources, catalog v4). Answer is the option the student picks on the first question of the first
 // ask_questions card: the run answers it by its index and goes on instead of stopping (the subject question, catalog
 // v8). AssignedSubject is the subject create_assignment should get: a subject ID, or NoSubject for none (catalog v8).
+// Chats (catalog v9): Earlier are earlier requests of the chat sent as pairs before the text, Summary the summary turn
+// before them, Mentions the «@» objects of the request (IDs only; Earlier marks a mention of an earlier request).
 type Request struct {
-	ID               string   `json:"id"`
-	Text             string   `json:"text"`
-	Subject          string   `json:"subject,omitempty"`
-	Assignment       string   `json:"assignment,omitempty"`
-	Uploads          []string `json:"uploads,omitempty"`
-	Class            string   `json:"class"`
-	Also             []string `json:"also,omitempty"`
-	Tools            []string `json:"tools"`
-	ListsAssignments bool     `json:"lists_assignments,omitempty"`
-	Source           string   `json:"source,omitempty"`
-	Answer           string   `json:"answer,omitempty"`
-	AssignedSubject  string   `json:"assigned_subject,omitempty"`
+	ID               string     `json:"id"`
+	Text             string     `json:"text"`
+	Subject          string     `json:"subject,omitempty"`
+	Assignment       string     `json:"assignment,omitempty"`
+	Uploads          []string   `json:"uploads,omitempty"`
+	Class            string     `json:"class"`
+	Also             []string   `json:"also,omitempty"`
+	Tools            []string   `json:"tools"`
+	ListsAssignments bool       `json:"lists_assignments,omitempty"`
+	Source           string     `json:"source,omitempty"`
+	Answer           string     `json:"answer,omitempty"`
+	AssignedSubject  string     `json:"assigned_subject,omitempty"`
+	Summary          string     `json:"summary,omitempty"`
+	Earlier          []Exchange `json:"earlier,omitempty"`
+	Mentions         []Mention  `json:"mentions,omitempty"`
 }
+
+// Exchange is an earlier request of the chat: the student's text and the reply line the history carries.
+type Exchange struct {
+	Text  string `json:"text"`
+	Reply string `json:"reply"`
+}
+
+// Mention is an object mentioned with «@»: its kind (MentionKinds) and fake ID, of the current request or, with
+// Earlier, of an earlier one.
+type Mention struct {
+	Kind    string `json:"kind"`
+	ID      string `json:"id"`
+	Earlier bool   `json:"earlier,omitempty"`
+}
+
+// MentionKinds are the kinds a case may mention (values.MentionKinds).
+func MentionKinds() []string { return []string{"subject", "lesson", "material", "assignment"} }
+
+// Mention limits of one step (values.MaxMentions, values.MaxStepMentions).
+const (
+	maxCurrentMentions = 8
+	maxStepMentions    = 16
+)
 
 // NoSubject is the AssignedSubject of an assignment added without a subject («Без предмета»).
 const NoSubject = "none"
@@ -104,10 +132,41 @@ type CaseSet struct {
 }
 
 // CatalogFile is the golden catalog the run is scored against, in shared/testdata: the version the desktop sends.
-const CatalogFile = "tool_catalog_v8.json"
+const CatalogFile = "tool_catalog_v9.json"
+
+// checkChat checks the chat fields of a case: earlier requests with a text and a reply, known mention kinds with an
+// ID, each object once, within the step limits, and an earlier mention only after an earlier request.
+func checkChat(r Request) error {
+	for _, x := range r.Earlier {
+		if strings.TrimSpace(x.Text) == "" || strings.TrimSpace(x.Reply) == "" {
+			return errors.New("an earlier request needs a text and a reply")
+		}
+	}
+	if r.Summary != "" && strings.TrimSpace(r.Summary) == "" {
+		return errors.New("a blank summary")
+	}
+	current, seen := 0, map[Mention]bool{}
+	for _, m := range r.Mentions {
+		key := Mention{Kind: m.Kind, ID: m.ID}
+		if !slices.Contains(MentionKinds(), m.Kind) || m.ID == "" || seen[key] {
+			return fmt.Errorf("mention %s:%s: a known kind, an ID, each object once", m.Kind, m.ID)
+		}
+		seen[key] = true
+		if m.Earlier && len(r.Earlier) == 0 {
+			return fmt.Errorf("mention %s of an earlier request without one", m.ID)
+		}
+		if !m.Earlier {
+			current++
+		}
+	}
+	if current > maxCurrentMentions || len(r.Mentions) > maxStepMentions {
+		return fmt.Errorf("at most %d current and %d mentions", maxCurrentMentions, maxStepMentions)
+	}
+	return nil
+}
 
 // CatalogClasses reads the tool classes (tool -> R, U, C, UI) of a tool catalog file
-// (shared/testdata/tool_catalog_v8.json).
+// (shared/testdata/tool_catalog_v9.json).
 func CatalogClasses(raw []byte) (map[string]string, error) {
 	var doc struct {
 		Tools []struct {
@@ -189,6 +248,9 @@ func ParseCaseSet(raw []byte, toolClasses map[string]string) (CaseSet, error) {
 		}
 		if s := r.AssignedSubject; s != "" && (!slices.Contains(r.Tools, assignTool) || s != NoSubject && !subjects[s]) {
 			return bad("request %s: assigned subject %q needs create_assignment and a known subject or %s", r.ID, s, NoSubject)
+		}
+		if err := checkChat(r); err != nil {
+			return bad("request %s: %v", r.ID, err)
 		}
 	}
 	for _, r := range cs.CannotDo {

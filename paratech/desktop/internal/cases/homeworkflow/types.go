@@ -81,6 +81,13 @@ type Deps struct {
 	// RestoreAssignment forgets a removal still waiting. Without Removals the event stays in Google.
 	Removals DeadlineRemovals
 	Sync     CalendarSyncRequester
+
+	// Optional (TASK-338): DeleteAssignment cancels the draft and writing jobs of the assignment after the commit.
+	// Without both nothing is stopped there (the job handlers still refuse a deleted assignment). Log records a cancel
+	// that failed; nil discards it.
+	Activity AssignmentActivity
+	Jobs     JobCanceller
+	Log      *slog.Logger
 }
 
 // ProposalView is a proposal as the confirmation dialog shows it (PRD section 13.3, AC-14): what will happen, to which

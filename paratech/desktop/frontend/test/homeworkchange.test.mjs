@@ -6,6 +6,7 @@ import {
   homeworkApi,
   methods,
   parseChangeAssignmentResult,
+  parseDeleteImpact,
   parseEditAssignmentResult,
 } from "../.test-build/bindings/homework.js";
 
@@ -60,6 +61,34 @@ test("deleteAssignment and restoreAssignment send the id and the shown version",
   ]);
 });
 
+test("stopped is read only as a literal true on a done delete", async () => {
+  const stopped = parseChangeAssignmentResult({ problem: "", assignment: item(), stopped: true });
+  assert.equal(stopped.stopped, true);
+  assert.equal(stopped.assignment.version, 5);
+  for (const odd of [false, undefined, null, "true", 1, {}]) {
+    assert.equal(parseChangeAssignmentResult({ problem: "", assignment: item(), stopped: odd }).stopped, false);
+  }
+  const { api } = recorder({ problem: "", assignment: item(), stopped: true });
+  assert.equal((await api.deleteAssignment("a1", 5)).stopped, true);
+});
+
+test("deleteImpact asks by id and reads working only as a literal true", async () => {
+  assert.equal(methods.deleteImpact, "paratech/desktop/internal/input/wails.HomeworkService.DeleteImpact");
+  const { api, calls } = recorder({ working: true });
+  assert.deepEqual(await api.deleteImpact("a1"), { working: true });
+  assert.deepEqual(calls, [[methods.deleteImpact, "a1"]]);
+  for (const raw of [{ working: false }, {}, { working: "true" }, { working: 1 }, null, undefined, "x", 7]) {
+    assert.deepEqual(parseDeleteImpact(raw), { working: false }, JSON.stringify(raw));
+  }
+});
+
+test("a rejected deleteImpact is not working, never a thrown core text", async () => {
+  const rejecting = homeworkApi(async () => {
+    throw new Error(String.raw`open C:\Users\student\db: locked`);
+  });
+  assert.deepEqual(await rejecting.deleteImpact("a1"), { working: false });
+});
+
 test("editAssignment sends the form as given", async () => {
   const req = { id: "a1", version: 5, title: "Задачи 1–6", note: "", subjectId: "", date: "2026-10-30", time: "" };
   const { api, calls } = recorder({ problem: "", field: "", assignment: item({ title: "Задачи 1–6", version: 6 }) });
@@ -72,8 +101,11 @@ test("editAssignment sends the form as given", async () => {
 
 test("every change problem comes without an assignment", () => {
   for (const problem of ["in_use", "changed", "not_found", "failed"]) {
-    assert.deepEqual(parseChangeAssignmentResult({ problem, assignment: null }), { problem, assignment: null });
-    assert.deepEqual(parseChangeAssignmentResult({ problem, assignment: item() }), { problem, assignment: null });
+    const want = { problem, assignment: null, stopped: false };
+    assert.deepEqual(parseChangeAssignmentResult({ problem, assignment: null }), want);
+    assert.deepEqual(parseChangeAssignmentResult({ problem, assignment: item() }), want);
+    // A refusal never claims that a work was stopped.
+    assert.deepEqual(parseChangeAssignmentResult({ problem, assignment: null, stopped: true }), want);
   }
 });
 
@@ -100,7 +132,7 @@ test("every edit problem comes without an assignment; the field only for invalid
 });
 
 test("an unknown, missing or malformed reply is failed, never a thrown core text", async () => {
-  const failedChange = { problem: "failed", assignment: null };
+  const failedChange = { problem: "failed", assignment: null, stopped: false };
   const failedEdit = { problem: "failed", field: "", assignment: null };
   for (const raw of [
     null,

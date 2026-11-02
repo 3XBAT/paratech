@@ -11,6 +11,7 @@ import (
 
 const (
 	opDeleteAssignment  = "ui: delete assignment"
+	opDeleteImpact      = "ui: what a delete of an assignment stops"
 	opRestoreAssignment = "ui: restore assignment"
 	opEditAssignment    = "ui: edit assignment"
 )
@@ -18,7 +19,7 @@ const (
 // Problems of DeleteAssignment, RestoreAssignment and EditAssignment as the page reads them, besides createInvalid,
 // createSubjectNotFound and createFailed. The page owns the Russian texts.
 const (
-	changeInUse    = "in_use"    // something in progress uses the assignment (an unresolved email, a running draft)
+	changeInUse    = "in_use"    // an email of the assignment is waiting, being sent or has an unknown outcome
 	changeChanged  = "changed"   // the assignment is not at the version the page showed: reload
 	changeDeleted  = "deleted"   // edit of a deleted assignment
 	changeNotFound = "not_found" // no such assignment (also an invalid id, or a delete of a deleted one)
@@ -26,10 +27,18 @@ const (
 )
 
 // ChangeResult answers DeleteAssignment and RestoreAssignment: Problem "" with Assignment set (the deleted or the
-// restored assignment, with its new version for «Вернуть»), or a problem code with Assignment null.
+// restored assignment, with its new version for «Вернуть»), or a problem code with Assignment null. Stopped is true
+// when the delete stopped a turnkey work or a draft generation of the assignment.
 type ChangeResult struct {
 	Problem    string          `json:"problem"`
 	Assignment *AssignmentItem `json:"assignment"`
+	Stopped    bool            `json:"stopped"`
+}
+
+// DeleteImpact answers DeleteImpact: Working is true when «Удалить» would stop a turnkey work in triage or writing or
+// a draft generation, so the card warns before the click.
+type DeleteImpact struct {
+	Working bool `json:"working"`
 }
 
 // EditRequest is the edit form of an assignment of any origin. Version is AssignmentItem.Version the form showed.
@@ -54,9 +63,33 @@ type EditResult struct {
 
 // DeleteAssignment is «Удалить» (ADR-0029, addendum 2026-10-27): a soft delete of the assignment at version. The
 // click is the student's own action: nothing is written to the agent journal. A repeated click carries the old
-// version and gets "changed"; nothing is deleted twice.
+// version and gets "changed"; nothing is deleted twice. A work or a draft generation of it is stopped (Stopped); only
+// an email that may still go out refuses it ("in_use").
 func (s *HomeworkService) DeleteAssignment(ctx context.Context, id string, version int64) ChangeResult {
-	return s.change(ctx, opDeleteAssignment, id, version, s.proposals.DeleteAssignment)
+	var stopped bool
+	res := s.change(ctx, opDeleteAssignment, id, version,
+		func(ctx context.Context, aid shared.AssignmentID, v int64) (homeworkflow.AssignmentView, error) {
+			d, err := s.proposals.DeleteAndStop(ctx, aid, v)
+			stopped = d.Stopped
+			return d.Assignment, err
+		})
+	res.Stopped = stopped && res.Problem == ""
+	return res
+}
+
+// DeleteImpact tells the delete card whether «Удалить» would stop a work or a draft generation. An invalid or unknown
+// id, or a failed read, is Working false: the delete itself still answers.
+func (s *HomeworkService) DeleteImpact(ctx context.Context, id string) DeleteImpact {
+	aid, err := assignmentID(id)
+	if err != nil {
+		return DeleteImpact{}
+	}
+	impact, err := s.proposals.DeletionImpact(ctx, aid)
+	if err != nil {
+		s.log.Error(opDeleteImpact, "err", err)
+		return DeleteImpact{}
+	}
+	return DeleteImpact{Working: impact.Working}
 }
 
 // RestoreAssignment is «Вернуть»: the deleted assignment at version shows again.

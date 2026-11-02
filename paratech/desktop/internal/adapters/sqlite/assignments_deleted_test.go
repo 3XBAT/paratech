@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -132,27 +133,32 @@ func TestAssignmentBusy(t *testing.T) {
 			finished_at, version, updated_at) VALUES ('j1', '` + typ + `', '` + status + `', 'k1',
 			'{"assignment_id":"` + assignmentID + `"}', 3, 0, 0, ` + finished + `, 1, 0)`
 	}
+	// Busy (the delete is refused) is only an email that may still go out or may have gone out unseen; a work or a job
+	// is what the delete stops (Working, ActiveJobs; TASK-338).
 	cases := []struct {
-		name   string
-		insert string // "" : nothing references the assignment
-		want   bool
+		name    string
+		insert  string // "" : nothing references the assignment
+		busy    bool
+		working bool
+		jobs    []shared.JobID
 	}{
-		{"nothing", "", false},
-		{"a pending delivery", delivery("PENDING"), true},
-		{"a sending delivery", delivery("SENDING"), true},
-		{"a delivery with an unknown outcome", delivery("UNKNOWN"), true},
-		{"a sent delivery", delivery("SENT"), false},
-		{"a failed delivery", delivery("FAILED"), false},
-		{"a work in triage", work("triage"), true},
-		{"a work being written", work("writing"), true},
-		{"a work waiting for answers", work("questions"), false},
-		{"a done work", work("done"), false},
-		{"a queued draft generation", job("homework_draft", "QUEUED", "a1"), true},
-		{"a draft generation waiting for the network", job("homework_draft", "WAITING_FOR_NETWORK", "a1"), true},
-		{"a running writing job", job("work_writing", "RUNNING", "a1"), true},
-		{"a failed draft generation", job("homework_draft", "FAILED", "a1"), false},
-		{"a draft generation of another assignment", job("homework_draft", "RUNNING", "a2"), false},
-		{"another job type naming it", job("summarize", "RUNNING", "a1"), false},
+		{name: "nothing"},
+		{name: "a pending delivery", insert: delivery("PENDING"), busy: true},
+		{name: "a sending delivery", insert: delivery("SENDING"), busy: true},
+		{name: "a delivery with an unknown outcome", insert: delivery("UNKNOWN"), busy: true},
+		{name: "a sent delivery", insert: delivery("SENT")},
+		{name: "a failed delivery", insert: delivery("FAILED")},
+		{name: "a work in triage", insert: work("triage"), working: true},
+		{name: "a work being written", insert: work("writing"), working: true},
+		{name: "a work waiting for answers", insert: work("questions")},
+		{name: "a done work", insert: work("done")},
+		{name: "a queued draft generation", insert: job("homework_draft", "QUEUED", "a1"), working: true, jobs: []shared.JobID{"j1"}},
+		{name: "a draft generation waiting for the network", insert: job("homework_draft", "WAITING_FOR_NETWORK", "a1"),
+			working: true, jobs: []shared.JobID{"j1"}},
+		{name: "a running writing job", insert: job("work_writing", "RUNNING", "a1"), working: true, jobs: []shared.JobID{"j1"}},
+		{name: "a failed draft generation", insert: job("homework_draft", "FAILED", "a1")},
+		{name: "a draft generation of another assignment", insert: job("homework_draft", "RUNNING", "a2")},
+		{name: "another job type naming it", insert: job("summarize", "RUNNING", "a1")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -164,9 +170,41 @@ func TestAssignmentBusy(t *testing.T) {
 				mustExec(t, e.db, tc.insert)
 			}
 			busy, err := e.assignments.Busy(ctx, "a1")
-			if err != nil || busy != tc.want {
-				t.Fatalf("Busy = %v, %v; want %v", busy, err, tc.want)
+			if err != nil || busy != tc.busy {
+				t.Fatalf("Busy = %v, %v; want %v", busy, err, tc.busy)
+			}
+			working, err := e.assignments.Working(ctx, "a1")
+			if err != nil || working != tc.working {
+				t.Fatalf("Working = %v, %v; want %v", working, err, tc.working)
+			}
+			jobs, err := e.assignments.ActiveJobs(ctx, "a1")
+			if err != nil || !slices.Equal(jobs, tc.jobs) {
+				t.Fatalf("ActiveJobs = %v, %v; want %v", jobs, err, tc.jobs)
 			}
 		})
+	}
+}
+
+// ActiveJobs lists every unfinished draft and writing job of the assignment, oldest first, and no finished one.
+func TestAssignmentActiveJobsOrder(t *testing.T) {
+	e, ctx := newCourseworkEnv(t), context.Background()
+	if err := e.assignments.Save(ctx, newByStudent(t, "a1")); err != nil {
+		t.Fatal(err)
+	}
+	for _, j := range []struct {
+		id, typ, status, finished string
+		created                   int
+	}{
+		{"j-late", "work_writing", "RETRY_WAIT", "NULL", 30},
+		{"j-early", "homework_draft", "RUNNING", "NULL", 10},
+		{"j-done", "work_writing", "CANCELLED", "20", 20},
+	} {
+		mustExec(t, e.db, `INSERT INTO jobs (id, type, status, idempotency_key, payload, max_attempts, next_run_at,
+			created_at, finished_at, version, updated_at) VALUES (?, ?, ?, ?, '{"assignment_id":"a1"}', 3, 0, ?, `+
+			j.finished+`, 1, 0)`, j.id, j.typ, j.status, "k-"+j.id, j.created)
+	}
+	jobs, err := e.assignments.ActiveJobs(ctx, "a1")
+	if err != nil || !slices.Equal(jobs, []shared.JobID{"j-early", "j-late"}) {
+		t.Fatalf("ActiveJobs = %v, %v; want j-early, j-late", jobs, err)
 	}
 }

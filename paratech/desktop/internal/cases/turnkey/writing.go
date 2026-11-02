@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"paratech/desktop/internal/domain/coursework/assignment"
 	"paratech/desktop/internal/domain/coursework/services/homeworkdoc"
 	"paratech/desktop/internal/domain/coursework/services/prompts"
 	cvalues "paratech/desktop/internal/domain/coursework/values"
@@ -415,8 +416,8 @@ func (s *Service) enqueueWriting(ctx context.Context, w *work.Work) (WritingStar
 // no attempt is used meanwhile). After each section the job yields (job.ErrContinueLater), so other jobs run in
 // between; a repeated step asks the Hub under the same key (a free replay) and a stored section is never asked again.
 // The model answer is data (hard rule 3): it is checked strictly and only rendered into the paper. A refused answer
-// uses an attempt of the step (a new key); after the last one the job fails. A work gone (its assignment deleted)
-// ends the job.
+// uses an attempt of the step (a new key); after the last one the job fails. A work gone, or its assignment deleted
+// (TASK-338: checked before the call and again before a section or the file is stored), ends the job.
 func (s *Service) Handle(ctx context.Context, snap job.Snapshot, report func(ctx context.Context, pr job.Progress) error) error {
 	if report == nil {
 		report = func(context.Context, job.Progress) error { return nil }
@@ -441,6 +442,9 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, report func(ctx
 	case work.StatusWriting:
 	default:
 		return s.permanent(snap, ErrWriteGone, fmt.Errorf("work in %s", w.Status()))
+	}
+	if err := s.assignmentLive(ctx, snap, w); err != nil {
+		return err
 	}
 
 	switch st := w.Next(); st.Kind {
@@ -488,6 +492,9 @@ func (s *Service) writeStep(ctx context.Context, snap job.Snapshot, report func(
 
 	// The unchanged progress first: a job cancelled during the call stores nothing.
 	if err := s.progress(ctx, snap, report, w); err != nil {
+		return err
+	}
+	if err := s.assignmentLive(ctx, snap, w); err != nil {
 		return err
 	}
 	got, err := s.saveStep(ctx, w, change)
@@ -708,6 +715,9 @@ func (s *Service) fileWriting(ctx context.Context, snap job.Snapshot, report fun
 	if err := s.progress(ctx, snap, report, w); err != nil {
 		return err
 	}
+	if err := s.assignmentLive(ctx, snap, w); err != nil {
+		return err
+	}
 	wr, _ := w.Writing()
 	for _, prev := range wr.Files() {
 		if err := s.unfile(ctx, prev.Material); err != nil {
@@ -899,6 +909,25 @@ func (s *Service) progress(ctx context.Context, snap job.Snapshot, report func(c
 	if err := report(ctx, pr); err != nil {
 		s.log.InfoContext(ctx, opWriteStopped, slog.String("job", snap.ID().String()), slog.Any("reason", err))
 		return fail(ErrWriteStopped, err)
+	}
+	return nil
+}
+
+// assignmentLive fails the job of a work whose assignment was deleted (TASK-338): the delete may have failed to
+// cancel it, and nothing more is asked or stored. A work of a file or a topic has no assignment.
+func (s *Service) assignmentLive(ctx context.Context, snap job.Snapshot, w *work.Work) error {
+	id := w.Source().Assignment
+	if id == "" {
+		return nil
+	}
+	a, err := s.assignments.Get(ctx, id)
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return s.permanent(snap, ErrWriteGone, err)
+	case err != nil:
+		return s.retry(snap, ErrWriteStorage, err)
+	case a.Deleted():
+		return s.permanent(snap, ErrWriteGone, assignment.ErrDeleted)
 	}
 	return nil
 }

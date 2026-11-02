@@ -10,7 +10,7 @@ import (
 // TestRetiredTool: generate_draft left the catalog in v4. The planner cannot call or plan it, but a stored plan, open
 // call or action that names it still restores (TASK-184).
 func TestRetiredTool(t *testing.T) {
-	if CatalogVersion != 8 {
+	if CatalogVersion != 9 {
 		t.Fatalf("CatalogVersion = %d", CatalogVersion)
 	}
 	if slices.Contains(Tools(), ToolGenerateDraft) || !slices.Equal(RetiredTools(), []Tool{ToolGenerateDraft}) {

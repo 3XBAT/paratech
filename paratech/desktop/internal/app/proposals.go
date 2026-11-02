@@ -21,7 +21,8 @@ import (
 // only this path writes a deadline, hard rule 3). The drafts let the agent's send name a draft version and the confirmation show it; the
 // waiting proposals let the same deadline proposed again reuse its card (TASK-127). The works and the library let the
 // student send the file of a finished work (TASK-180). «Удалить» of an assignment queues the removal of its deadline
-// event for the calendar sync (ADR-0029). It needs c.deliveries and c.calendar.
+// event for the calendar sync (ADR-0029) and cancels its draft and writing jobs through the runner (TASK-338). It
+// needs c.deliveries and c.calendar.
 func (c *core) wireProposals(e env, lib *library.Service, log *slog.Logger) error {
 	var err error
 	assignments := sqlite.NewAssignmentRepository(c.db)
@@ -35,6 +36,7 @@ func (c *core) wireProposals(e env, lib *library.Service, log *slog.Logger) erro
 		Works:    workFiles{works: sqlite.NewWorkRepository(c.db), lib: lib},
 		Subjects: subjectNames{lib},
 		Removals: sqlite.NewDeadlineEventRemovals(c.db), Sync: calendarRequest{c: c, log: log, why: "assignment deletion"},
+		Activity: assignments, Jobs: runnerCanceller{c: c}, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: action proposals: %w", err)

@@ -50,11 +50,11 @@ const item = (over = {}) => ({
 const subj = (id, name) => ({ id, name, aliases: [], semester: "", semesterLabel: "", folders: [] });
 const subjects = [subj("s1", "Математика"), subj("s2", "Физика")];
 
-const changeBad = (problem) => ({ problem, assignment: null });
+const changeBad = (problem) => ({ problem, assignment: null, stopped: false });
 const editBad = (problem, field = "") => ({ problem, field, assignment: null });
 
 test("delete and restore refusals have their own Russian text", () => {
-  assert.equal(changeProblemText("in_use"), "Сначала дождитесь отправки или работы над заданием");
+  assert.equal(changeProblemText("in_use"), "Письмо преподавателю ещё отправляется — удалить можно после");
   assert.match(changeProblemText("changed"), /изменилось.*повторите/);
   assert.equal(changeProblemText("not_found"), "Задание не найдено");
   assert.match(changeProblemText("failed"), /Не удалось выполнить действие/);
@@ -63,7 +63,7 @@ test("delete and restore refusals have their own Russian text", () => {
 });
 
 test("a change outcome carries the new assignment or the text; stale data is reloaded", () => {
-  const done = changeOutcome({ problem: "", assignment: item({ version: 4 }) });
+  const done = changeOutcome({ problem: "", assignment: item({ version: 4 }), stopped: false });
   assert.equal(done.assignment.version, 4);
   assert.equal(done.text, "");
   for (const p of ["changed", "not_found"]) {
@@ -277,10 +277,10 @@ test("the dialog can be saved only after the subjects are known", () => {
   assert.match(html, /<button[^>]*disabled=""[^>]*>Сохранить</);
 });
 
-test("the pages wire the buttons to the bindings without a confirmation", () => {
+test("the pages wire the buttons to the bindings (a delete asks only while its work runs, TASK-338)", () => {
   const page = readFileSync(new URL("../src/pages/HomeworkPage.tsx", import.meta.url), "utf8");
   assert.match(page, /api\.deleteAssignment\(a\.id, a\.version\)/);
-  assert.match(page, /api\.deleteAssignment\(id, a\.version\)/);
+  assert.match(page, /api\.deleteAssignment\(id, version\)/);
   assert.match(page, /api\.restoreAssignment\(/);
   assert.match(page, /changeTexts\.edit/);
   assert.match(page, /<EditAssignmentDialog/);

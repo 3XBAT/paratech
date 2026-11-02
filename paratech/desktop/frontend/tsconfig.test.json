@@ -80,6 +80,8 @@
     "src/libraryView.ts",
     "src/dropFiles.ts",
     "src/journalView.ts",
+    "src/scheduleSubjectsView.ts",
+    "src/pages/ScheduleSubjectsReview.tsx",
     "src/pages/SubjectsParts.tsx",
     "src/pages/SubjectsPage.tsx",
     "src/bindings/recipient.ts",
@@ -117,6 +119,10 @@
     "src/pages/OwnNotesParts.tsx",
     "src/bindings/recordingImport.ts",
     "src/recordingImportView.ts",
-    "src/pages/RecordingImportPanel.tsx"
+    "src/pages/RecordingImportPanel.tsx",
+    "src/assignmentDoneView.ts",
+    "src/doneRunner.ts",
+    "src/ui/Toast.tsx",
+    "src/pages/AssignmentDoneParts.tsx"
   ]
 }

@@ -12,8 +12,10 @@ import {
   routeToTranscript,
 } from "./nav";
 import { AgentPanel } from "./agent/AgentPanel";
+import { mentionOpening } from "./agentMentions";
 import { PanelResizeHandle, useResizablePanel } from "./agent/PanelResizeHandle";
 import type { CitationOpening } from "./knowledgeView";
+import { keepScheduleReview } from "./scheduleSubjectsView";
 import { OpenSummaryContext, type SummarySection } from "./openSummary";
 import { OpenTranscriptContext } from "./openTranscript";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
@@ -53,6 +55,10 @@ function PageView(props: {
   /** «Указать почту» of a refused send: the form of a teacher to open on the subject page, taken once. */
   teacherFocus: TeacherFocus | null;
   onTeacherFocusDone: () => void;
+  /** «Завести предметы из расписания» of the schedule page: «Предметы» opens with the review open, taken once. */
+  scheduleReview: boolean;
+  onOpenScheduleReview: () => void;
+  onScheduleReviewTaken: () => void;
   /** The assignment whose «Изменить» opens on arrival ("" none), taken once. */
   assignmentEdit: string;
   onAssignmentEditDone: () => void;
@@ -72,6 +78,8 @@ function PageView(props: {
           onSelect={props.onSelectSubject}
           teacherFocus={props.teacherFocus}
           onTeacherFocusDone={props.onTeacherFocusDone}
+          openReview={props.scheduleReview}
+          onReviewTaken={props.onScheduleReviewTaken}
         />
       );
     case "journal":
@@ -90,7 +98,7 @@ function PageView(props: {
     case "tickets":
       return <TicketsPage onOpen={props.onOpen} />;
     case "schedule":
-      return <SchedulePage />;
+      return <SchedulePage onOpen={props.onOpen} onReview={props.onOpenScheduleReview} />;
     case "connections":
       return <ConnectionsPage visit={props.visit} />;
     case "models":
@@ -137,6 +145,23 @@ export function App() {
   // A subject or a card opened inside its page is a route too, so «Назад» finds the list again (TASK-202).
   const selectSubject = useCallback((id: string) => setRoute((r) => routeToSubject(r, id)), []);
   const selectAssignment = useCallback((id: string) => setRoute((r) => routeToOpenedAssignment(r, id)), []);
+  // A mention pill of the agent's thread (TASK-247): the closest existing page; a deleted object meets its normal state.
+  const openMention = useCallback(
+    (kind: string, id: string) => {
+      const o = mentionOpening(kind, id);
+      if (o === null) {
+        return;
+      }
+      if (o.type === "subject") {
+        selectSubject(o.id);
+      } else if (o.type === "assignment") {
+        openAssignment(o.id);
+      } else {
+        openPage(o.page);
+      }
+    },
+    [selectSubject, openAssignment, openPage],
+  );
   // «Указать почту» (TASK-238): opens the subject and asks its page for the form of one teacher. The request is state, not
   // part of the route: it is taken once, so «Назад» and a later visit never reopen the form, and the window drops it
   // as soon as the route points elsewhere.
@@ -148,6 +173,18 @@ export function App() {
   const teacherFocusDone = useCallback(() => setTeacherFocus(null), []);
   useEffect(() => {
     setTeacherFocus((f) => keepTeacherFocus(f, { page: route.page, subject: route.subject }));
+  }, [route.page, route.subject]);
+  // «Завести предметы из расписания» (TASK-312): «Предметы» opens with the review open. Same one-shot idea: state, not
+  // route; taken once, and dropped as soon as the route leaves the list of «Предметы» (a page or an open subject), so
+  // coming back to the list later does not open the panel late.
+  const [scheduleReview, setScheduleReview] = useState(false);
+  const openScheduleReview = useCallback(() => {
+    setScheduleReview(true);
+    setRoute(routeToPage("subjects"));
+  }, []);
+  const scheduleReviewTaken = useCallback(() => setScheduleReview(false), []);
+  useEffect(() => {
+    setScheduleReview((r) => keepScheduleReview(r, { page: route.page, subject: route.subject }));
   }, [route.page, route.subject]);
   // «Выбрать предмет» from the agent's card: the assignment opens with «Изменить» already open; the same one-shot idea.
   const [assignmentEdit, setAssignmentEdit] = useState("");
@@ -196,6 +233,9 @@ export function App() {
           onSelectSubject={selectSubject}
           teacherFocus={teacherFocus}
           onTeacherFocusDone={teacherFocusDone}
+          scheduleReview={scheduleReview}
+          onOpenScheduleReview={openScheduleReview}
+          onScheduleReviewTaken={scheduleReviewTaken}
           assignmentEdit={assignmentEdit}
           onAssignmentEditDone={assignmentEditDone}
           sourceJump={sourceJump}
@@ -256,7 +296,7 @@ export function App() {
           </div>
         )}
       </main>
-      <AgentPanel page={current} assignmentId={route.assignment} open={open} reveal={panel.reveal} hide={panel.hide} onOpenAssignment={openAssignment} onOpenSource={openSource} />
+      <AgentPanel page={current} assignmentId={route.assignment} open={open} reveal={panel.reveal} hide={panel.hide} onOpenAssignment={openAssignment} onOpenSource={openSource} onOpenMention={openMention} />
       <PanelResizeHandle panel={panel} />
       <DropZone onImported={() => setLibrary((n) => n + 1)} />
     </div>

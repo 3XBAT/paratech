@@ -32,6 +32,27 @@ const (
 // reply, because the Hub merges consecutive texts once any reply is present. The current request is always sent
 // whole; the summary and the pairs only before its text (a summary turn is always followed by a student text).
 func Window(entries []values.HistoryEntry, current int, summary values.HistorySummary) []values.HistoryTurn {
+	w := layout(entries, current, summary)
+	out := make([]values.HistoryTurn, 0, len(w.head)+len(w.now)+2*len(w.pairs))
+	out = append(out, w.head...)
+	for _, p := range w.pairs {
+		out = append(out, p.turns...)
+	}
+	for _, e := range w.now {
+		out = append(out, e.Entry)
+	}
+	return out
+}
+
+// sent is what a window carries: the summary turn (if any), the earlier pairs and the entries of the current request.
+type sent struct {
+	head  []values.HistoryTurn
+	pairs []pair
+	now   []values.HistoryEntry
+}
+
+// layout selects the window of Window; StepMentions reads the same selection, so the two never disagree.
+func layout(entries []values.HistoryEntry, current int, summary values.HistorySummary) sent {
 	cur := currentIndex(entries, current)
 	now := entries[cur:]
 
@@ -45,16 +66,7 @@ func Window(entries []values.HistoryEntry, current int, summary values.HistorySu
 		}
 	}
 	start := windowStart(pairs, summary.Through(), len(now)+len(head), sizeOf(head))
-
-	out := make([]values.HistoryTurn, 0, len(head)+len(now)+2*(len(pairs)-start))
-	out = append(out, head...)
-	for _, p := range pairs[start:] {
-		out = append(out, p.turns...)
-	}
-	for _, e := range now {
-		out = append(out, e.Entry)
-	}
-	return out
+	return sent{head: head, pairs: pairs[start:], now: now}
 }
 
 // ContextFill is how much of the history window the next request of a chat would use (ADR-0028 «What context used
@@ -132,11 +144,13 @@ func sizeOf(turns []values.HistoryTurn) int {
 	return n
 }
 
-// pair is an earlier request as sent: its number, its student texts and the reply, and their bytes.
+// pair is an earlier request as sent: its number, its student texts and the reply, and their bytes; mentions are the
+// IDs the request mentioned.
 type pair struct {
-	number int
-	turns  []values.HistoryTurn
-	size   int
+	number   int
+	turns    []values.HistoryTurn
+	size     int
+	mentions []values.Ref
 }
 
 // earlierPairs groups the entries of earlier requests after request covered (the summary's Through) by request: its
@@ -158,6 +172,11 @@ func earlierPairs(entries []values.HistoryEntry, covered int) []pair {
 		line := ""
 		for _, e := range entries[i:j] {
 			request = append(request, e.Entry)
+			for _, r := range e.Mentions {
+				if !slices.Contains(p.mentions, r) {
+					p.mentions = append(p.mentions, r)
+				}
+			}
 			if e.Entry.StudentText != "" {
 				p.turns = append(p.turns, values.HistoryTurn{StudentText: e.Entry.StudentText})
 			}

@@ -92,20 +92,34 @@ SELECT CAST(EXISTS (SELECT 1 FROM homework_drafts d WHERE d.assignment_id = sqlc
                  AND j.status IN (SELECT value FROM json_each(CAST(sqlc.arg(active_job_statuses) AS TEXT)))
                  AND json_extract(j.payload, '$.assignment_id') = sqlc.arg(id)) AS INTEGER) AS in_use;
 
--- What in progress keeps the soft delete of an assignment from going through (ADR-0029): a delivery that may still go out or
--- may have gone out unseen, a work being triaged or written, or an unfinished job (draft generation, writing) whose
--- payload names it. The caller passes the status and type lists as JSON arrays (see AssignmentRepository.Busy).
+-- What keeps the soft delete of an assignment from going through (ADR-0029, hard rule 7): a delivery that may still go
+-- out or may have gone out unseen. A work or a job does not: the delete stops them (TASK-338). The caller passes the
+-- statuses as a JSON array (see AssignmentRepository.Busy).
 -- name: AssignmentBusy :one
 SELECT CAST(EXISTS (SELECT 1 FROM deliveries v
                     WHERE v.assignment_id = sqlc.arg(id)
-                      AND v.status IN (SELECT value FROM json_each(CAST(sqlc.arg(delivery_statuses) AS TEXT))))
-    OR EXISTS (SELECT 1 FROM works w
-               WHERE w.assignment_id = sqlc.arg(id)
-                 AND w.status IN (SELECT value FROM json_each(CAST(sqlc.arg(work_statuses) AS TEXT))))
+                      AND v.status IN (SELECT value FROM json_each(CAST(sqlc.arg(delivery_statuses) AS TEXT)))) AS INTEGER) AS busy;
+
+-- What the soft delete of an assignment stops (TASK-338): a work being triaged or written, or an unfinished job (draft
+-- generation, writing) whose payload names it. The caller passes the lists as JSON arrays (see
+-- AssignmentRepository.Working).
+-- name: AssignmentWorking :one
+SELECT CAST(EXISTS (SELECT 1 FROM works w
+                    WHERE w.assignment_id = sqlc.arg(id)
+                      AND w.status IN (SELECT value FROM json_each(CAST(sqlc.arg(work_statuses) AS TEXT))))
     OR EXISTS (SELECT 1 FROM jobs j
                WHERE j.type IN (SELECT value FROM json_each(CAST(sqlc.arg(job_types) AS TEXT)))
                  AND j.status IN (SELECT value FROM json_each(CAST(sqlc.arg(active_job_statuses) AS TEXT)))
-                 AND json_extract(j.payload, '$.assignment_id') = sqlc.arg(id)) AS INTEGER) AS busy;
+                 AND json_extract(j.payload, '$.assignment_id') = sqlc.arg(id)) AS INTEGER) AS working;
+
+-- The unfinished jobs (draft generation, writing) whose payload names an assignment, oldest first, which its soft
+-- delete cancels (TASK-338).
+-- name: ListActiveAssignmentJobs :many
+SELECT j.id FROM jobs j
+WHERE j.type IN (SELECT value FROM json_each(CAST(sqlc.arg(job_types) AS TEXT)))
+  AND j.status IN (SELECT value FROM json_each(CAST(sqlc.arg(active_job_statuses) AS TEXT)))
+  AND json_extract(j.payload, '$.assignment_id') = sqlc.arg(id)
+ORDER BY j.created_at, j.id;
 
 -- The purge after the restore window (ADR-0029 addendum 2): the assignments deleted before the cutoff, oldest delete
 -- first, after the keyset (after_at, after_id) of the previous page.

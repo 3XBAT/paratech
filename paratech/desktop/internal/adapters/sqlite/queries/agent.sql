@@ -82,10 +82,10 @@ INSERT INTO agent_steps (thread_id, seq, turn, entry, body, created_at)
 VALUES (sqlc.arg(thread_id), sqlc.arg(seq), sqlc.arg(turn), sqlc.arg(entry), sqlc.arg(body), sqlc.arg(created_at));
 
 -- The newest entries of the requests from a number on, newest first (the adapter returns them oldest first), each
--- with the frozen reply line of its request. Entries of dropped requests are left out here, so they never take a place
--- under the limit (ADR-0028).
+-- with the frozen reply line and the mentions of its request. Entries of dropped requests are left out here, so they
+-- never take a place under the limit (ADR-0028).
 -- name: ListAgentSteps :many
-SELECT s.thread_id, s.seq, s.turn, s.entry, s.body, s.created_at, u.reply_line FROM agent_steps s
+SELECT s.thread_id, s.seq, s.turn, s.entry, s.body, s.created_at, u.reply_line, u.mentions FROM agent_steps s
 LEFT JOIN agent_turns u ON u.thread_id = s.thread_id AND u.number = s.turn
 WHERE s.thread_id = sqlc.arg(thread_id) AND s.turn >= sqlc.arg(from_turn)
   AND (u.dropped_by IS NULL OR u.dropped_by = 0)
