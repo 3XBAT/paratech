@@ -27,7 +27,8 @@ func TestLoadLLM(t *testing.T) {
 		{
 			name: "defaults",
 			want: func(c config.Config) bool {
-				return c.AnthropicAPIKey == "" && c.AnthropicBaseURL == "https://api.anthropic.com" && c.LLMTimeout == 5*time.Minute &&
+				return c.AnthropicAPIKey == "" && c.AnthropicBaseURL == "https://api.anthropic.com" && c.AnthropicAuth == config.AnthropicAuthXAPIKey &&
+					c.LLMTimeout == 5*time.Minute &&
 					c.LLMModels == "default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:4096"
 			},
 		},
@@ -55,6 +56,44 @@ func TestLoadLLM(t *testing.T) {
 		},
 		{name: "localhost over http", env: map[string]string{config.EnvAnthropicBaseURL: "http://localhost:9"}, want: func(config.Config) bool { return true }},
 		{name: "ipv6 loopback over http", env: map[string]string{config.EnvAnthropicBaseURL: "http://[::1]:9/"}, want: func(config.Config) bool { return true }},
+		{
+			name: "bearer gateway with a path",
+			env:  map[string]string{config.EnvAnthropicAuth: "bearer", config.EnvAnthropicBaseURL: "https://gw.example.ru/anthropic/"},
+			want: func(c config.Config) bool {
+				return c.AnthropicAuth == config.AnthropicAuthBearer && c.AnthropicBaseURL == "https://gw.example.ru/anthropic/"
+			},
+		},
+		{
+			name: "explicit x-api-key",
+			env:  map[string]string{config.EnvAnthropicAuth: "x-api-key"},
+			want: func(c config.Config) bool { return c.AnthropicAuth == config.AnthropicAuthXAPIKey },
+		},
+		{
+			name: "auth flag wins",
+			args: []string{"--anthropic-auth", "bearer"},
+			env:  map[string]string{config.EnvAnthropicAuth: "x-api-key"},
+			want: func(c config.Config) bool { return c.AnthropicAuth == config.AnthropicAuthBearer },
+		},
+		{
+			name: "path over http to loopback",
+			env:  map[string]string{config.EnvAnthropicBaseURL: "http://127.0.0.1:9/a-b/c_d.e~f"},
+			want: func(config.Config) bool { return true },
+		},
+		{name: "unknown auth", env: map[string]string{config.EnvAnthropicAuth: "Bearer"}, wantErr: config.EnvAnthropicAuth + ": unknown value, want x-api-key or bearer"},
+		{name: "key pasted as auth", env: map[string]string{config.EnvAnthropicAuth: fakeKey}, wantErr: config.EnvAnthropicAuth},
+		{name: "unknown auth flag", args: []string{"-anthropic-auth", "basic"}, wantErr: config.EnvAnthropicAuth},
+		{name: "path with query", env: map[string]string{config.EnvAnthropicBaseURL: "https://gw.example.ru/anthropic?a=1"}, wantErr: "query"},
+		{name: "path with fragment", env: map[string]string{config.EnvAnthropicBaseURL: "https://gw.example.ru/anthropic#f"}, wantErr: "fragment"},
+		{name: "path with user info", env: map[string]string{config.EnvAnthropicBaseURL: "https://u:pw-marker@gw.example.ru/anthropic"}, wantErr: "user info"},
+		{name: "http to a remote gateway", env: map[string]string{config.EnvAnthropicBaseURL: "http://gw.example.ru/anthropic"}, wantErr: "scheme must be https"},
+		{name: "dot-dot path", env: map[string]string{config.EnvAnthropicBaseURL: "https://gw.example.ru/a/../b"}, wantErr: "path"},
+		{name: "dot path", env: map[string]string{config.EnvAnthropicBaseURL: "https://gw.example.ru/./b"}, wantErr: "path"},
+		{name: "double slash", env: map[string]string{config.EnvAnthropicBaseURL: "https://gw.example.ru//a"}, wantErr: "path"},
+		{name: "encoded slash", env: map[string]string{config.EnvAnthropicBaseURL: "https://gw.example.ru/a%2Fb"}, wantErr: "path"},
+		{name: "encoded dots", env: map[string]string{config.EnvAnthropicBaseURL: "https://gw.example.ru/%2e%2e"}, wantErr: "path"},
+		{name: "backslash", env: map[string]string{config.EnvAnthropicBaseURL: `https://gw.example.ru/a\b`}, wantErr: config.EnvAnthropicBaseURL},
+		{name: "semicolon", env: map[string]string{config.EnvAnthropicBaseURL: "https://gw.example.ru/a;b"}, wantErr: "path"},
+		{name: "long path", env: map[string]string{config.EnvAnthropicBaseURL: "https://gw.example.ru/" + strings.Repeat("a", 300)}, wantErr: "path"},
 
 		{name: "timeout not a duration", env: map[string]string{config.EnvLLMTimeout: "long"}, wantErr: config.EnvLLMTimeout},
 		{name: "timeout too short", env: map[string]string{config.EnvLLMTimeout: "9s"}, wantErr: "LLM timeout"},
@@ -66,7 +105,6 @@ func TestLoadLLM(t *testing.T) {
 		{name: "ftp", env: map[string]string{config.EnvAnthropicBaseURL: "ftp://api.anthropic.com"}, wantErr: "scheme must be https"},
 		{name: "relative base URL", env: map[string]string{config.EnvAnthropicBaseURL: "api.anthropic.com"}, wantErr: config.EnvAnthropicBaseURL},
 		{name: "base URL with user info", env: map[string]string{config.EnvAnthropicBaseURL: "https://u:pw-marker@api.anthropic.com"}, wantErr: "user info"},
-		{name: "base URL with path", env: map[string]string{config.EnvAnthropicBaseURL: "https://api.anthropic.com/v1"}, wantErr: "path"},
 		{name: "base URL with query", env: map[string]string{config.EnvAnthropicBaseURL: "https://api.anthropic.com?a=1"}, wantErr: "query"},
 		{name: "base URL unparsable", env: map[string]string{config.EnvAnthropicBaseURL: "https://h:port"}, wantErr: config.EnvAnthropicBaseURL},
 		{name: "key with a space", env: map[string]string{config.EnvAnthropicAPIKey: "test key-not-real"}, wantErr: config.EnvAnthropicAPIKey},
@@ -133,12 +171,13 @@ func TestConfigModels(t *testing.T) {
 }
 
 func TestLLMSettingsAreCheckedOnlyForServe(t *testing.T) {
-	env := withDB(map[string]string{config.EnvLLMTimeout: "1h", config.EnvAnthropicBaseURL: "http://remote.example", config.EnvLLMModels: "x"})
+	env := withDB(map[string]string{config.EnvLLMTimeout: "1h", config.EnvAnthropicBaseURL: "http://remote.example", config.EnvLLMModels: "x",
+		config.EnvAnthropicAuth: "x"})
 	if _, err := config.Load([]string{"keys", "list"}, io.Discard, func(k string) string { return env[k] }); err != nil {
 		t.Fatalf("keys list with bad LLM settings: %v", err)
 	}
 	_, err := config.Load(nil, io.Discard, func(k string) string { return env[k] })
-	for _, want := range []string{"LLM timeout", config.EnvAnthropicBaseURL, config.EnvLLMModels} {
+	for _, want := range []string{"LLM timeout", config.EnvAnthropicBaseURL, config.EnvLLMModels, config.EnvAnthropicAuth} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("serve: error = %v, want containing %q", err, want)
 		}
@@ -156,7 +195,7 @@ func TestAnthropicKeyIsNotAFlag(t *testing.T) {
 
 	var out bytes.Buffer
 	_, _ = config.Load([]string{"--help"}, &out, getenv)
-	for _, want := range []string{"-anthropic-base-url", "-llm-timeout", "-llm-models", config.EnvAnthropicAPIKey} {
+	for _, want := range []string{"-anthropic-base-url", "-anthropic-auth", config.EnvAnthropicAuth, "-llm-timeout", "-llm-models", config.EnvAnthropicAPIKey} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("usage does not mention %q: %s", want, out.String())
 		}
@@ -195,5 +234,40 @@ func TestConfigDoesNotPrintTheAnthropicKey(t *testing.T) {
 	cfg.AnthropicBaseURL = "https://u:pw-marker@api.anthropic.com"
 	if out := cfg.String(); strings.Contains(out, "pw-marker") {
 		t.Errorf("output leaks base URL credentials: %s", out)
+	}
+}
+
+func TestConfigPrintsTheAuthModeNotTheKey(t *testing.T) {
+	for _, mode := range []string{config.AnthropicAuthXAPIKey, config.AnthropicAuthBearer} {
+		env := withDB(map[string]string{config.EnvAnthropicAPIKey: fakeKey, config.EnvAnthropicAuth: mode,
+			config.EnvAnthropicBaseURL: "https://gw.example.ru/anthropic"})
+		cfg, err := config.Load(nil, io.Discard, func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatal(err)
+		}
+		var logged bytes.Buffer
+		slog.New(slog.NewJSONHandler(&logged, nil)).Info("cfg", "cfg", cfg)
+		for _, out := range []string{fmt.Sprint(cfg), fmt.Sprintf("%#v", cfg), logged.String()} {
+			if strings.Contains(out, fakeKey) {
+				t.Errorf("%s: output leaks the provider key: %s", mode, out)
+			}
+			if !strings.Contains(out, "AnthropicAuth:"+mode) && !strings.Contains(out, `"anthropic_auth":"`+mode+`"`) {
+				t.Errorf("%s: output does not show the auth mode: %s", mode, out)
+			}
+			if !strings.Contains(out, "gw.example.ru/anthropic") {
+				t.Errorf("%s: output does not show the base URL path: %s", mode, out)
+			}
+		}
+	}
+
+	// A key pasted into the auth variable by mistake is printed as invalid, not as is.
+	cfg := config.Default()
+	cfg.AnthropicAuth = fakeKey
+	var logged bytes.Buffer
+	slog.New(slog.NewJSONHandler(&logged, nil)).Info("cfg", "cfg", cfg)
+	for _, out := range []string{cfg.String(), logged.String()} {
+		if strings.Contains(out, fakeKey) {
+			t.Errorf("output leaks a misplaced key: %s", out)
+		}
 	}
 }

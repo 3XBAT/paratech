@@ -14,8 +14,9 @@ import (
 
 // Probe environment (TASK-144). The probe runs only when URL and key are both set, so CI skips it.
 const (
-	probeURLEnv     = "PARATECH_PROBE_ANTHROPIC_URL"   // base URL without path, e.g. the owner's gateway
+	probeURLEnv     = "PARATECH_PROBE_ANTHROPIC_URL"   // base URL, e.g. the owner's gateway
 	probeKeyEnv     = "PARATECH_PROBE_ANTHROPIC_KEY"   // never logged
+	probeAuthEnv    = "PARATECH_PROBE_ANTHROPIC_AUTH"  // optional: x-api-key (default) or bearer
 	probeModelEnv   = "PARATECH_PROBE_ANTHROPIC_MODEL" // optional
 	probeModel      = "claude-haiku-5-5"
 	probeTimeout    = 2 * time.Minute
@@ -39,7 +40,7 @@ func TestProbeGatewayStreaming(t *testing.T) {
 
 	start := time.Now()
 	events := &eventLog{t: t, start: start}
-	c, err := anthropic.New(anthropic.Options{APIKey: key, BaseURL: base, Timeout: probeTimeout,
+	c, err := anthropic.New(anthropic.Options{APIKey: key, Auth: anthropic.Auth(os.Getenv(probeAuthEnv)), BaseURL: base, Timeout: probeTimeout,
 		Transport: &eventTap{next: http.DefaultTransport, log: events}})
 	if err != nil {
 		t.Fatalf("client options rejected: %v", err)
