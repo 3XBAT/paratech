@@ -128,6 +128,56 @@ func TestAgentRestartFromMarksDroppedRequests(t *testing.T) {
 	}
 }
 
+// A restart before the history start of an expired-request Restart stores the start back at 0 in the save of the new
+// request (TASK-249).
+func TestAgentRestartFromStoresHistoryStart(t *testing.T) {
+	db, ctx := openTest(t, nil), context.Background()
+	repo := NewAgentThreadRepository(db)
+	h := NewAgentHistory(db, fixedNow{agentT0})
+	th, err := thread.New("th1", agentT0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for turn := 1; turn <= 4; turn++ {
+		endedRequest(t, repo, h, th, turn, fmt.Sprintf("ответ %d", turn))
+	}
+	st := th.State()
+	st.HistoryFrom = 4
+	if th, err = thread.Restore(st); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, th); err != nil {
+		t.Fatal(err)
+	}
+	if n := scanInt(t, db.sql, "SELECT history_from FROM agent_threads WHERE id = 'th1'"); n != 4 {
+		t.Fatalf("history_from before the restart = %d", n)
+	}
+
+	if err := th.RestartFrom(2, thread.Request{Text: "заново"}, agentAt(100)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, th); err != nil {
+		t.Fatal(err)
+	}
+	if n := scanInt(t, db.sql, "SELECT history_from FROM agent_threads WHERE id = 'th1'"); n != 0 {
+		t.Fatalf("history_from after the restart = %d, want 0", n)
+	}
+	back, err := repo.Get(ctx, "th1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn, _ := back.Turn(); back.HistoryFrom() != 0 || turn.DropsFrom() != 2 {
+		t.Fatalf("restored history from %d, drops from %d", back.HistoryFrom(), turn.DropsFrom())
+	}
+	if err := h.Append(ctx, "th1", 5, values.HistoryTurn{StudentText: "заново"}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := h.Since(ctx, "th1", back.HistoryFrom(), 100)
+	if err != nil || fmt.Sprint(turnsOfEntries(entries)) != "[1 5]" {
+		t.Fatalf("Since = %v, %v", turnsOfEntries(entries), err)
+	}
+}
+
 // The marks belong to the transaction of the new request: when it rolls back, nothing is dropped.
 func TestAgentRestartFromRollsBack(t *testing.T) {
 	db, ctx := openTest(t, nil), context.Background()

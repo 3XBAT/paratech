@@ -205,6 +205,92 @@ func TestRingDropsAfterRestart(t *testing.T) {
 	}
 }
 
+// A restart from n at or before the history start an expired-request Restart set brings back everything before n
+// (TASK-249): the start goes to 0, is stored, and NextFill counts the earlier requests instead of an overflow. A start
+// before n stays.
+func TestRestartFromRestoresHistoryStart(t *testing.T) {
+	tests := []struct {
+		name      string
+		start, n  int
+		wantStart int
+		pairs     int // earlier pairs NextFill counts after the restarted request completes
+		overflow  bool
+	}{
+		{"all stays all", 0, 3, 0, 2, false},
+		{"restart before the start", 5, 3, 0, 2, false},
+		{"restart at the start", 5, 5, 0, 4, false},
+		{"restart after the start", 5, 8, 5, 3, true},
+		{"restart from the first request", 12, 1, 0, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st := chatOf(t, 12).State()
+			st.Version, st.HistoryFrom = 1, tt.start
+			th, err := Restore(st)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := th.RestartFrom(tt.n, Request{Text: numbered(13)}, at(60)); err != nil {
+				t.Fatal(err)
+			}
+			if th.HistoryFrom() != tt.wantStart {
+				t.Fatalf("history from %d, want %d", th.HistoryFrom(), tt.wantStart)
+			}
+			if back := roundTrip(t, th); back.HistoryFrom() != tt.wantStart {
+				t.Fatalf("restored history from %d", back.HistoryFrom())
+			}
+			if err := th.Complete(at(61)); err != nil {
+				t.Fatal(err)
+			}
+
+			// Requests n…12 are dropped by 13; the restarted request itself is the last pair.
+			entries := chatHistory(12, numbered)
+			for i := range entries {
+				if entries[i].Turn >= tt.n {
+					entries[i].DroppedBy = 13
+				}
+			}
+			entries = append(entries, chatRequest(13, numbered(13))...)
+			f := th.NextFill(entries)
+			if f.Pairs != tt.pairs+1 || f.Overflow != tt.overflow {
+				t.Fatalf("%+v, want %d pairs, overflow %v", f, tt.pairs+1, tt.overflow)
+			}
+			if !tt.overflow && f != Fill(entries, 14, noSummary) {
+				t.Fatalf("%+v differs from Fill", f)
+			}
+		})
+	}
+}
+
+// The same through the real paths: an expired request restarts (history start 2), then the student restarts from it.
+func TestRestartFromAfterExpiredRestart(t *testing.T) {
+	th := chatOf(t, 1)
+	if err := th.Ask(Request{Text: "второй"}, at(50)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := th.BeginStep(at(51)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.Stop(values.StopExpired, at(52)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.Restart(at(53)); err != nil {
+		t.Fatal(err)
+	}
+	if th.HistoryFrom() != 3 {
+		t.Fatalf("after the expired restart history from %d", th.HistoryFrom())
+	}
+	if err := th.Complete(at(54)); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.RestartFrom(2, Request{Text: "заново"}, at(55)); err != nil {
+		t.Fatal(err)
+	}
+	if turn, _ := th.Turn(); turn.Number() != 4 || turn.DropsFrom() != 2 || th.HistoryFrom() != 0 {
+		t.Fatalf("restarted = request %d drops from %d, history from %d", turn.Number(), turn.DropsFrom(), th.HistoryFrom())
+	}
+}
+
 // After an expired request restarted (HistoryFrom) the earlier requests are no longer sent: NextFill reports them as
 // an overflow instead of counting them (TASK-203 follow-up), while the pairs from HistoryFrom on are what a step sends.
 func TestNextFillHonoursHistoryStart(t *testing.T) {
