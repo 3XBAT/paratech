@@ -27,7 +27,10 @@ var createdKinds = map[Tool]IDKind{
 // unplannedArgs are the arguments a call may give, leave out or change against its approved step: free text the plan
 // step cannot carry, as plan-step arguments are at most 80 characters on the Hub (TASK-216). The note of an assignment
 // is its display text only; what the step fixes (title, subject, lesson, due, time) still has to match.
-var unplannedArgs = map[Tool][]string{ToolCreateAssignment: {"note"}}
+// The same holds for the note of change_assignment and the text of note (catalog v10).
+var unplannedArgs = map[Tool][]string{
+	ToolCreateAssignment: {"note"}, ToolChangeAssignment: {"note"}, ToolNote: {"text"},
+}
 
 // IsCreatedKind reports whether a create tool of the catalog makes IDs of kind k for later plan steps.
 func IsCreatedKind(k IDKind) bool {
@@ -123,6 +126,8 @@ func EncodePlanSteps(steps []PlanStep) (string, error) {
 				args[name] = v.date.String()
 			case ArgTime:
 				args[name] = v.tod.String()
+			case ArgBool:
+				args[name] = v.b
 			case ArgEnum, ArgLabel, ArgQuery:
 				args[name] = v.str
 			default:
@@ -140,15 +145,19 @@ func EncodePlanSteps(steps []PlanStep) (string, error) {
 
 // DecodePlanSteps parses stored steps with the same strict rules as the planner's plan_steps, except that a step may
 // name a retired tool: a plan stored under an older catalog still restores (its step can no longer be called).
-func DecodePlanSteps(s string) ([]PlanStep, error) { return decodePlanSteps(json.RawMessage(s), true) }
+func DecodePlanSteps(s string) ([]PlanStep, error) {
+	return decodePlanSteps(json.RawMessage(s), true, CatalogVersion)
+}
 
 // planStepArgTypes are the argument types a plan step may carry.
-var planStepArgTypes = []ArgType{ArgID, ArgIDs, ArgDate, ArgTime, ArgEnum, ArgLabel, ArgQuery}
+var planStepArgTypes = []ArgType{ArgID, ArgIDs, ArgDate, ArgTime, ArgEnum, ArgLabel, ArgQuery, ArgBool}
 
-// parsePlanSteps parses the planner's plan_steps: current catalog tools only.
-func parsePlanSteps(raw json.RawMessage) ([]PlanStep, error) { return decodePlanSteps(raw, false) }
+// parsePlanSteps parses the planner's plan_steps: tools of catalog version cat only.
+func parsePlanSteps(raw json.RawMessage, cat int) ([]PlanStep, error) {
+	return decodePlanSteps(raw, false, cat)
+}
 
-func decodePlanSteps(raw json.RawMessage, stored bool) ([]PlanStep, error) {
+func decodePlanSteps(raw json.RawMessage, stored bool, cat int) ([]PlanStep, error) {
 	items, err := decodeArray(raw, 1, MaxPlanSteps)
 	if err != nil {
 		return nil, err
@@ -156,7 +165,7 @@ func decodePlanSteps(raw json.RawMessage, stored bool) ([]PlanStep, error) {
 	out := make([]PlanStep, 0, len(items))
 	created := map[IDKind]bool{}
 	for _, it := range items {
-		s, err := parsePlanStep(it, created, stored)
+		s, err := parsePlanStep(it, created, stored, cat)
 		if err != nil {
 			return nil, err
 		}
@@ -168,8 +177,9 @@ func decodePlanSteps(raw json.RawMessage, stored bool) ([]PlanStep, error) {
 	return out, nil
 }
 
-// parsePlanStep parses one step; created holds the ID kinds that earlier steps create; stored allows a retired tool.
-func parsePlanStep(raw json.RawMessage, created map[IDKind]bool, stored bool) (PlanStep, error) {
+// parsePlanStep parses one step of catalog version cat; created holds the ID kinds that earlier steps create; stored
+// allows a retired tool.
+func parsePlanStep(raw json.RawMessage, created map[IDKind]bool, stored bool, cat int) (PlanStep, error) {
 	fields, err := decodeObject(raw)
 	if err != nil {
 		return PlanStep{}, err
@@ -184,9 +194,9 @@ func parsePlanStep(raw json.RawMessage, created map[IDKind]bool, stored bool) (P
 		return PlanStep{}, fmt.Errorf("%w: plan step tool: %w", ErrInvalidArguments, err)
 	}
 	t := Tool(name)
-	spec, ok := specOf(t)
+	spec, ok := findSpec(specsAt(cat), t)
 	if !ok && stored {
-		spec, ok = storedSpecOf(t)
+		spec, ok = findSpec(retired, t)
 	}
 	if !ok {
 		return PlanStep{}, fmt.Errorf("%w: %q", ErrUnknownTool, name)
@@ -202,7 +212,7 @@ func parsePlanStep(raw json.RawMessage, created map[IDKind]bool, stored bool) (P
 			if !ok || !slices.Contains(planStepArgTypes, as.Type) {
 				return PlanStep{}, fmt.Errorf("%w: plan step argument %q is not allowed", ErrInvalidArguments, n)
 			}
-			v, err := parseValue(as, rv)
+			v, err := parseValue(as, rv, cat)
 			if err != nil {
 				return PlanStep{}, fmt.Errorf("%w: plan step %s: %w", ErrInvalidArguments, n, err)
 			}
@@ -234,6 +244,11 @@ func parsePlanStep(raw json.RawMessage, created map[IDKind]bool, stored bool) (P
 			return PlanStep{}, fmt.Errorf("%w: plan step %s needs exactly one of %s", ErrInvalidArguments, t,
 				strings.Join(group, ", "))
 		}
+	}
+	// A deferred ID and the free text the call adds count as given for the rules of the tool.
+	open := append(slices.Clone(deferred), unplannedArgs[t]...)
+	if err := checkToolArgs(t, vals, open); err != nil {
+		return PlanStep{}, fmt.Errorf("%w: plan step %s: %w", ErrInvalidArguments, t, err)
 	}
 	return PlanStep{tool: t, args: Args{vals: vals}, deferred: deferred}, nil
 }

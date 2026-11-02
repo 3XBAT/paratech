@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -38,10 +39,16 @@ type Call struct {
 // show_plan) with only catalog arguments, no duplicates, every required argument, exactly one of each one-of group,
 // and values of the catalog type. A null optional argument counts as absent.
 func ParseCall(callID, tool, argumentsJSON string) (Call, error) {
+	return ParseCallAt(callID, tool, argumentsJSON, CatalogVersion)
+}
+
+// ParseCallAt is ParseCall against catalog version v (as ToolsAt): the tool and the tools of plan steps must be in
+// it, and the argument rules of its tools apply.
+func ParseCallAt(callID, tool, argumentsJSON string, v int) (Call, error) {
 	if err := checkCallID(callID); err != nil {
 		return Call{}, err
 	}
-	t, err := ParseTool(tool)
+	t, err := ParseToolAt(tool, v)
 	if err != nil {
 		return Call{}, err
 	}
@@ -52,8 +59,8 @@ func ParseCall(callID, tool, argumentsJSON string) (Call, error) {
 	if len(argumentsJSON) > limit {
 		return Call{}, fmt.Errorf("%w: arguments are larger than %d bytes", ErrInvalidArguments, limit)
 	}
-	spec, _ := specOf(t)
-	args, err := parseArgs(spec, []byte(argumentsJSON))
+	spec, _ := findSpec(specsAt(v), t)
+	args, err := parseArgs(spec, []byte(argumentsJSON), v)
 	if err != nil {
 		return Call{}, err
 	}
@@ -101,6 +108,7 @@ type argValue struct {
 	refs      []Ref
 	date      Date
 	tod       TimeOfDay
+	b         bool
 	str       string // enum, label, name or text
 	texts     []Text
 	steps     []PlanStep
@@ -163,6 +171,12 @@ func (a Args) Date(name string) (Date, bool) {
 func (a Args) Time(name string) (TimeOfDay, bool) {
 	v, ok := a.vals[name]
 	return v.tod, ok && v.typ == ArgTime
+}
+
+// Bool returns a bool argument.
+func (a Args) Bool(name string) (value, ok bool) {
+	v, ok := a.vals[name]
+	return v.b, ok && v.typ == ArgBool
 }
 
 // Enum returns an enum argument.
@@ -255,7 +269,8 @@ func (a Args) Refs() []Ref {
 	return set.Sorted()
 }
 
-func parseArgs(spec ToolSpec, raw []byte) (Args, error) {
+// parseArgs parses the arguments of a call of spec in catalog version cat.
+func parseArgs(spec ToolSpec, raw []byte, cat int) (Args, error) {
 	fields, err := decodeObject(raw)
 	if err != nil {
 		return Args{}, err
@@ -272,7 +287,7 @@ func parseArgs(spec ToolSpec, raw []byte) (Args, error) {
 			}
 			continue
 		}
-		v, err := parseValue(as, rv)
+		v, err := parseValue(as, rv, cat)
 		if err != nil {
 			return Args{}, fmt.Errorf("%w: %s: %w", ErrInvalidArguments, name, err)
 		}
@@ -294,6 +309,9 @@ func parseArgs(spec ToolSpec, raw []byte) (Args, error) {
 		}
 	}
 	if err := checkTimeWithDue(vals); err != nil {
+		return Args{}, err
+	}
+	if err := checkToolArgs(spec.tool, vals, nil); err != nil {
 		return Args{}, err
 	}
 	return Args{vals: vals}, nil
@@ -327,7 +345,8 @@ func given(vals map[string]argValue, names []string) int {
 	return n
 }
 
-func parseValue(as ArgSpec, raw json.RawMessage) (argValue, error) {
+// parseValue parses one argument; cat is the catalog version the tools of plan steps must be in.
+func parseValue(as ArgSpec, raw json.RawMessage, cat int) (argValue, error) {
 	v := argValue{typ: as.Type}
 	switch as.Type {
 	case ArgID:
@@ -339,8 +358,21 @@ func parseValue(as ArgSpec, raw json.RawMessage) (argValue, error) {
 			return v, err
 		}
 		v.canon = v.ref.String()
+	case ArgBool:
+		switch string(bytes.TrimSpace(raw)) {
+		case "true":
+			v.b = true
+		case "false":
+		default:
+			return v, fmt.Errorf("%w: want true or false", ErrInvalidArguments)
+		}
+		v.canon = strconv.FormatBool(v.b)
 	case ArgIDs:
-		items, err := decodeArray(raw, 1, MaxIDsPerArg)
+		maxItems := MaxIDsPerArg
+		if as.MaxItems > 0 {
+			maxItems = as.MaxItems
+		}
+		items, err := decodeArray(raw, 1, maxItems)
 		if err != nil {
 			return v, err
 		}
@@ -470,7 +502,7 @@ func parseValue(as ArgSpec, raw json.RawMessage) (argValue, error) {
 		}
 		v.texts = texts
 	case ArgPlanSteps:
-		steps, err := parsePlanSteps(raw)
+		steps, err := parsePlanSteps(raw, cat)
 		if err != nil {
 			return v, err
 		}
