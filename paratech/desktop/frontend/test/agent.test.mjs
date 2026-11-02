@@ -611,7 +611,7 @@ test("stop reasons: offline repeats (continue), failed retries, expired restarts
   assert.deepEqual(off.buttons.map((b) => b.label), ["Повторить", "Отмена"]);
   assert.deepEqual(off.buttons.map((b) => b.id), ["continue", "cancel"]);
   assert.deepEqual(stop("failed").buttons.map((b) => b.label), ["Повторить"]);
-  assert.deepEqual(stop("expired").buttons.map((b) => b.label), ["Начать заново"]);
+  assert.deepEqual(stop("expired").buttons.map((b) => b.label), ["Запустить снова"]);
   assert.deepEqual(stop("budget").buttons, []);
   // «Стоп» resumes («Продолжить», id resume); offline and quota repeat («Повторить», id continue).
   assert.deepEqual(stop("user").buttons.map((b) => b.label), ["Продолжить", "Отмена"]);
@@ -633,7 +633,7 @@ test("stop reasons: offline repeats (continue), failed retries, expired restarts
 test("update problems explain themselves and offer the next step", () => {
   const p = (problem) => modelOf(update({ status: "", problem })).cards.at(-1);
   assert.deepEqual(p("retry_required").buttons.map((b) => b.label), ["Повторить"]);
-  assert.deepEqual(p("restart_required").buttons.map((b) => b.label), ["Начать заново"]);
+  assert.deepEqual(p("restart_required").buttons.map((b) => b.label), ["Запустить снова"]);
   assert.equal(p("busy").type, "problem");
   assert.equal(p("something unknown").text, "Не удалось выполнить просьбу.");
 });
