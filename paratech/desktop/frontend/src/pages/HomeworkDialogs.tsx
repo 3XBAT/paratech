@@ -432,7 +432,7 @@ function AssignmentFields(props: {
               value={form.date}
               disabled={busy}
               aria-invalid={errors.due !== undefined}
-              onChange={(e) => onChange({ date: e.target.value }, "due")}
+              onChange={(e) => onChange({ date: e.target.value, dateBad: e.target.validity.badInput }, "due")}
             />
           )}
         </Field>

@@ -19,6 +19,7 @@ import {
   subjectMissingText,
   noSubjectLabel,
   removeLabel,
+  validateAddForm,
   validateEditForm,
 } from "../.test-build/homeworkView.js";
 import { EditAssignmentDialog, RemovedLine } from "../.test-build/pages/HomeworkDialogs.js";
@@ -159,18 +160,29 @@ test("an assignment without a deadline can be edited; other fields are still che
   assert.ok(validateEditForm({ ...f, date: "2026-02-30" }).due);
 });
 
-test("a time without a date asks for the date at the date field", () => {
+test("a time without a date says how to remove the deadline, at the date field", () => {
   const f = { title: "Задача", subjectId: "", date: "", time: "09:00", note: "" };
-  assert.equal(validateEditForm(f).due, "Укажите дату.");
+  assert.equal(validateEditForm(f).due, "Укажите дату или очистите время, чтобы убрать срок.");
   assert.equal(validateEditForm({ ...f, time: "99:00" }).due, undefined);
   assert.ok(validateEditForm({ ...f, time: "99:00" }).time);
+});
+
+test("a half-typed date is an error, never «no deadline» (TASK-343)", () => {
+  const f = { title: "Задача", subjectId: "", date: "", time: "20:00", note: "", dateBad: true };
+  assert.equal(validateEditForm(f).due, "Дата указана неверно.");
+  assert.equal(validateEditForm({ ...f, time: "" }).due, "Дата указана неверно.");
+  assert.equal(validateEditForm({ ...f, time: "09:00" }).due, "Дата указана неверно.");
+  // The flag is cleared by the next valid change: back to «no deadline».
+  assert.deepEqual(validateEditForm({ ...f, dateBad: false }), {});
+  assert.equal(validateAddForm(f).due, "Дата указана неверно.");
+  assert.equal(validateAddForm({ ...f, dateBad: false }).due, "Укажите срок.");
 });
 
 test("an emptied date with the prefilled 20:00 means «no deadline», not an error (TASK-343)", () => {
   const f = { title: "Задача", subjectId: "", date: "", time: "20:00", note: "" };
   assert.deepEqual(validateEditForm(f), {});
   // Another time without a date still asks for the date.
-  assert.equal(validateEditForm({ ...f, time: "20:01" }).due, "Укажите дату.");
+  assert.equal(validateEditForm({ ...f, time: "20:01" }).due, "Укажите дату или очистите время, чтобы убрать срок.");
   // The default time is not sent when there is no date; with a date it is sent as shown.
   assert.deepEqual(editRequest(item(), f), { id: "ui-1", version: 3, title: "Задача", note: "", subjectId: "", date: "", time: "" });
   assert.equal(editRequest(item(), { ...f, date: "2026-10-29" }).time, "20:00");

@@ -124,13 +124,13 @@ test("deadline text carries the time: today, tomorrow, later, passed (TASK-343)"
   assert.equal(dueText(at(22, 18, 30), now), "завтра до 18:30");
   assert.equal(dueText(at(24, 18, 30), now), "до сб, 24 окт., 18:30");
   // A passed moment is never «до …»: «просрочено» with the full date and time.
-  assert.equal(dueText(at(21, 9, 0), now), "просрочено · ср, 21 окт., 09:00");
-  assert.equal(dueText(at(21, 12, 0), now), "просрочено · ср, 21 окт., 12:00");
-  assert.equal(dueText(at(20, 20, 0), now), "просрочено · вт, 20 окт., 20:00");
+  assert.equal(dueText(at(21, 9, 0), now), "просрочено, ср, 21 окт., 09:00");
+  assert.equal(dueText(at(21, 12, 0), now), "просрочено, ср, 21 окт., 12:00");
+  assert.equal(dueText(at(20, 20, 0), now), "просрочено, вт, 20 окт., 20:00");
   // Midnight edges: 23:59 of today is still today, 00:00 of tomorrow is tomorrow, a minute before midnight "now" too.
   assert.equal(dueText(at(21, 23, 59), new Date(2026, 9, 21, 23, 58)), "сегодня до 23:59");
   assert.equal(dueText(at(22, 0, 0), new Date(2026, 9, 21, 23, 58)), "завтра до 00:00");
-  assert.equal(dueText(at(22, 0, 0), new Date(2026, 9, 22, 0, 1)), "просрочено · чт, 22 окт., 00:00");
+  assert.equal(dueText(at(22, 0, 0), new Date(2026, 9, 22, 0, 1)), "просрочено, чт, 22 окт., 00:00");
   // Without `now` the wording stays «до …» (the calendar confirm card strips the «до »).
   assert.equal(dueText(at(21, 9, 0)), "до ср, 21 окт., 09:00");
 });
@@ -157,7 +157,7 @@ test("homework text and titles", () => {
   assert.equal(homeworkText(0, at(24)), "");
   assert.equal(homeworkText(1, at(24, 20, 0)), "1 задание · до сб, 24 окт., 20:00");
   assert.equal(homeworkText(1, at(24, 20, 0), 0, new Date(2026, 9, 24, 9, 0)), "1 задание · сегодня до 20:00");
-  assert.equal(homeworkText(1, at(24, 20, 0), 0, new Date(2026, 9, 24, 21, 0)), "1 задание · просрочено · сб, 24 окт., 20:00");
+  assert.equal(homeworkText(1, at(24, 20, 0), 0, new Date(2026, 9, 24, 21, 0)), "1 задание · просрочено, сб, 24 окт., 20:00");
   assert.equal(homeworkText(2, at(25, 18, 30), 0, new Date(2026, 9, 24, 9, 0)), "2 задания · завтра до 18:30");
   assert.equal(homeworkText(1, at(24, 20, 0), 1, new Date(2026, 9, 24, 9, 0)), "1 задание · выполнено");
   assert.equal(homeworkText(3, ""), "3 задания");
@@ -242,11 +242,11 @@ test("the «Горит» chip carries the time of today and tomorrow, and is «�
 test("the nearest deadline of the week is named with its time (TASK-343)", () => {
   const d = (day, hh, mm) => ({ due: at(day, hh, mm) });
   assert.equal(nearestDeadlineText([]), "");
-  assert.equal(nearestDeadlineText([d(23, 20, 0), d(25, 9, 5)]), "Ближайший срок — пт, 23.10, 20:00");
-  assert.equal(nearestDeadlineText([d(23, 20, 0), d(23, 18, 30)]), "Ближайший срок — пт, 23.10, 18:30");
+  assert.equal(nearestDeadlineText([d(23, 20, 0), d(25, 9, 5)]), "Ближайший срок — пт, 23 окт., 20:00");
+  assert.equal(nearestDeadlineText([d(23, 20, 0), d(23, 18, 30)]), "Ближайший срок — пт, 23 окт., 18:30");
   // With `now` a deadline that has passed is skipped; when all have passed there is no text.
   const noon = new Date(2026, 9, 23, 19, 0);
-  assert.equal(nearestDeadlineText([d(23, 18, 30), d(23, 20, 0), d(25, 9, 5)], noon), "Ближайший срок — пт, 23.10, 20:00");
+  assert.equal(nearestDeadlineText([d(23, 18, 30), d(23, 20, 0), d(25, 9, 5)], noon), "Ближайший срок — пт, 23 окт., 20:00");
   assert.equal(nearestDeadlineText([d(23, 18, 30)], noon), "");
 });
 

@@ -103,7 +103,7 @@ export function dayAndTime(d: Date): string {
 /**
  * The deadline as one tidy phrase, always with the time (a date alone reads as «до конца дня»): «до сб, 24 окт., 18:30».
  * With `now`: a coming today reads «сегодня до 20:00», tomorrow «завтра до 18:30», a moment that has passed
- * «просрочено · пт, 23 окт., 20:00» (never «до …» for the past). "" when unknown.
+ * «просрочено, пт, 23 окт., 20:00» (never «до …» for the past). "" when unknown.
  */
 export function dueText(due: string, now?: Date): string {
   const d = parseMoment(due);
@@ -112,7 +112,7 @@ export function dueText(due: string, now?: Date): string {
   }
   if (now !== undefined) {
     if (d.getTime() <= now.getTime()) {
-      return `${daysLeftText(-1)} · ${dayAndTime(d)}`;
+      return `${daysLeftText(-1)}, ${dayAndTime(d)}`;
     }
     const days = daysBetween(d, now);
     if (days === 0) {
@@ -296,7 +296,7 @@ export function deadlineLine(b: TodayDeadline, now: Date): DeadlineLine {
 }
 
 /**
- * «Ближайший срок — пт, 23.10, 20:00» from the deadlines of the week (the earliest one); "" when there is none. With
+ * «Ближайший срок — пт, 23 окт., 20:00» from the deadlines of the week (the earliest one); "" when there is none. With
  * `now` the deadlines that have passed are skipped.
  */
 export function nearestDeadlineText(burning: readonly Pick<TodayDeadline, "due">[], now?: Date): string {
@@ -307,9 +307,7 @@ export function nearestDeadlineText(burning: readonly Pick<TodayDeadline, "due">
     return "";
   }
   const first = dues.reduce((a, b) => ((b.at as Date) < (a.at as Date) ? b : a));
-  const { weekday, date } = deadlineDay(first.due);
-  const time = timeText(first.due);
-  return `Ближайший срок — ${weekday}, ${date}${time === "" ? "" : `, ${time}`}`;
+  return `Ближайший срок — ${dayAndTime(first.at as Date)}`;
 }
 
 export const statusTexts = { local: "Звук обрабатывается только на этом компьютере" } as const;

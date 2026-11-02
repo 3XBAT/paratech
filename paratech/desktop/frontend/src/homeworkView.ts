@@ -371,6 +371,8 @@ export interface AddForm {
   date: string;
   time: string;
   note: string;
+  /** The date input holds a half-typed date: it reports "" as its value, which must not read as «no date». */
+  dateBad?: boolean;
 }
 
 /**
@@ -410,7 +412,9 @@ export function validateAddForm(f: AddForm): AddFieldErrors {
   if ([...f.note].length > noteMax) {
     errors.note = `Заметка не длиннее ${noteMax} символов.`;
   }
-  if (f.date === "") {
+  if (f.dateBad === true) {
+    errors.due = "Дата указана неверно.";
+  } else if (f.date === "") {
     errors.due = "Укажите срок.";
   } else if (!realDate(f.date)) {
     errors.due = "Дата указана неверно.";
@@ -659,13 +663,14 @@ export function editForm(a: AssignmentItem, subjects: readonly LibrarySubject[])
 
 /**
  * Like validateAddForm, but an assignment may have no deadline: an empty date with an empty or the app-filled default
- * time (DEFAULT_DUE_TIME) means «no deadline». Another time without a date asks for the date.
+ * time (DEFAULT_DUE_TIME) means «no deadline». Another time without a date says how to remove the deadline. A
+ * half-typed date (dateBad) is an error, never «no deadline».
  */
 export function validateEditForm(f: AddForm): AddFieldErrors {
   const errors = validateAddForm(f);
-  if (f.date === "" && errors.due !== undefined) {
+  if (f.date === "" && f.dateBad !== true && errors.due !== undefined) {
     if (f.time !== "" && f.time !== DEFAULT_DUE_TIME && errors.time === undefined) {
-      errors.due = "Укажите дату.";
+      errors.due = "Укажите дату или очистите время, чтобы убрать срок.";
     } else {
       delete errors.due;
     }
