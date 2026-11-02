@@ -196,7 +196,7 @@ export interface AssignmentLineView {
 /**
  * The assignment an `action_line` of create_assignment added (catalog v6). The core reads it from the local data,
  * never from the model; the title is still shown as plain text. subjectId, due ("YYYY-MM-DD") and time ("HH:MM";
- * "23:59" when the student named no time) are "" when there is none.
+ * "20:00" when the student named no time) are "" when there is none.
  */
 export interface AddedAssignmentView {
   id: string;

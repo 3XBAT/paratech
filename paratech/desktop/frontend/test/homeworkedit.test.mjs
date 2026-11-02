@@ -124,9 +124,11 @@ test("the delete button names the assignment as text", () => {
   assert.equal(changeTexts.remove, "Удалить");
 });
 
-test("due date and time are prefilled in local time; the end of the day is no time", () => {
+test("due date and time are prefilled in local time; the default 20:00 is no time, 23:59 is a time", () => {
   assert.deepEqual(dueFields(local(2026, 10, 28, 9, 5)), { date: "2026-10-28", time: "09:05" });
-  assert.deepEqual(dueFields(local(2026, 10, 28, 23, 59)), { date: "2026-10-28", time: "" });
+  assert.deepEqual(dueFields(local(2026, 10, 28, 9, 0)), { date: "2026-10-28", time: "09:00" });
+  assert.deepEqual(dueFields(local(2026, 10, 28, 20, 0)), { date: "2026-10-28", time: "" });
+  assert.deepEqual(dueFields(local(2026, 10, 28, 23, 59)), { date: "2026-10-28", time: "23:59" });
   assert.deepEqual(dueFields(""), { date: "", time: "" });
   assert.deepEqual(dueFields("not a date"), { date: "", time: "" });
 });
