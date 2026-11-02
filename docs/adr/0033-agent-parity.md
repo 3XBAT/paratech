@@ -144,8 +144,8 @@ cannot be marked done.
 | `list_assignments` (changed) | R | + `state` | rows + `done` |
 | `list_notes` | R | `lesson` id or `subject` id | IDs, anchor date and kind, part counters; no titles, no text |
 | `note` | U | `action` add_text/add_upload/move/rename/remove, `note` id, `lesson` id, `date`, `upload` id, `text`, `title` | §8; remove = soft, Undo = restore |
-| `get_settings` | R | none | the four toggles below as enums |
-| `set_setting` | U | `setting` (recording_prompts, ac_power_only, recognition_load, free_work_notice), `value` enum | Undo = old value; later settings join in wave 11 |
+| `get_settings` | R | none | the three toggles below as enums |
+| `set_setting` | U | `setting` (recording_prompts, ac_power_only, recognition_load), `value` enum | Undo = old value; later settings join in wave 11 |
 | `quota_status` | R | none | remaining share and reset date only |
 | `recording` | U (start) / U without Undo (stop) | `action` start/stop | start: Undo = stop and keep the audio; stop: О-7 а |
 | `offer_button` | UI | `action` enum, one id | §3 |

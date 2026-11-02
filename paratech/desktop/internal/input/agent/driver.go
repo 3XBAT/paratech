@@ -253,7 +253,7 @@ func (d *Driver) Stop(ctx context.Context, ref agentturn.TurnRef) error {
 	return err
 }
 
-// Continue is «Продолжить» after a stop, a lost connection or the quota: the same step key, a free replay.
+// Continue is «Повторить» of a stopped request (the panel button) after a stop, a lost connection or the quota: the same step key, a free replay.
 func (d *Driver) Continue(ctx context.Context, ref agentturn.TurnRef) error {
 	return d.start(ctx, stepAt(ref), resumes, func(ctx context.Context) (agentturn.Step, error) {
 		return d.turns.Continue(ctx, ref)

@@ -95,7 +95,7 @@ func (p *AgentPanel) Publish(u AgentUpdate) {
 // AgentUpdateView is the JSON form of an update: ids, enums and the checked plain texts of the cards, never HTML.
 // The texts (the model's) must be rendered as plain text. Problem is "" or busy, stale, invalid, budget,
 // retry_required, restart_required or failed; the panel words the status and the stop reason itself (offline:
-// «Не завершено: нет связи · Продолжить»). Progress is true for the update of a step that went to the Hub: it has no
+// «Не завершено: нет связи · Повторить»). Progress is true for the update of a step that went to the Hub: it has no
 // cards, and the panel applies its status only and keeps the cards it shows. Fill is the context ring of the chat,
 // set only when the request ended (see endsRequest); null otherwise and when it could not be read.
 type AgentUpdateView struct {
@@ -130,8 +130,7 @@ func fillView(f agentchats.Fill) *AgentFillView {
 // "<kind>/<path>" of the artifact store), confirm (target), action_line (actionId; assignment for create_assignment),
 // answer (answerId), cannot_do
 // (cannotDo), reply (text and assignments), stopped (stopReason) or work (workId and outcome: questions, review,
-// helper, pending, failed or confirmed; the texts come from TurnkeyService.Work) or free_work (freeWork: the call the
-// card names, answered with AgentService.FreeWork; the page words the card itself, the topic never comes here).
+// helper, pending, failed or confirmed; the texts come from TurnkeyService.Work).
 type AgentCardView struct {
 	Kind        string                `json:"kind"`
 	Plan        *AgentPlanView        `json:"plan"`
@@ -150,15 +149,6 @@ type AgentCardView struct {
 	StopReason string                    `json:"stopReason"`
 	WorkID     string                    `json:"workId"`
 	Outcome    string                    `json:"outcome"`
-	FreeWork   *AgentFreeWorkRef         `json:"freeWork"`
-}
-
-// AgentFreeWorkRef names a free-work card «Такого задания нет — могу сделать как свободную работу» (TASK-188): the
-// request and the call that waits on it.
-type AgentFreeWorkRef struct {
-	ThreadID string `json:"threadId"`
-	Turn     int    `json:"turn"`
-	CallID   string `json:"callId"`
 }
 
 // AgentAssignmentView is an assignment a reply lists, from the local data, never from the model (TASK-173): its title
@@ -172,7 +162,7 @@ type AgentAssignmentView struct {
 
 // AgentAddedAssignmentView is the assignment create_assignment added, from the local data, never from the model: its
 // title (plain text only), its library subject ("" none), its deadline date (YYYY-MM-DD, "" none) and time of day
-// (HH:MM, "" none; 23:59 when the student named no time).
+// (HH:MM, "" none; 20:00 when the student named no time).
 type AgentAddedAssignmentView struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
@@ -260,7 +250,7 @@ func (p *AgentPanel) view(ctx context.Context, u AgentUpdate) AgentUpdateView {
 // endsRequest tells an update after which the ring is redrawn (ADR-0028: when a request ends, never during a step):
 // the request reached DONE, STOPPED, FAILED or CANCELLED. A progress update is a step on its way; PLANNING, EXECUTING
 // and AWAITING_* are not over (a plan or questions waiting add nothing to the history before the answer), and an update
-// of a failed operation has no status. STOPPED counts as an end; a «Продолжить» sends that request as the current one,
+// of a failed operation has no status. STOPPED counts as an end; a «Повторить» (Continue) sends that request as the current one,
 // so the ring may overstate by that request's own pair until the next end.
 func endsRequest(u AgentUpdate) bool {
 	if u.Progress || u.Thread == "" {
@@ -334,8 +324,6 @@ func cardView(c values.Card) (AgentCardView, bool) {
 		v.StopReason = string(c.Reason)
 	case values.WorkCard:
 		v.WorkID, v.Outcome = c.Work.ID(), string(c.Outcome)
-	case values.FreeWorkCard:
-		v.FreeWork = &AgentFreeWorkRef{ThreadID: string(c.Thread), Turn: c.Turn, CallID: c.CallID}
 	default:
 		return AgentCardView{}, false
 	}

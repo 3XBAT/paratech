@@ -38,7 +38,8 @@ type Turnkey interface {
 // work's ID, where it stands, the feasibility enum and the number of waiting questions, never a text (ADR-0022);
 // the panel gets a work card that the turnkey binding fills. A work this call created is undone by removing it while
 // the student has not touched it; an existing work is not this action's (no Undo). A reader call that did not finish
-// leaves the work with its call due: outcome «pending», not a failure of the action.
+// leaves the work with its call due: outcome «pending», journaled as this action's (Undo removes the work), but an
+// is_error result for the planner (values.TriageResult): nothing started for the student.
 func (a *Actions) triage(call values.Call) (prepared, error) {
 	if a.turnkey == nil {
 		return prepared{}, errUnavailable
@@ -69,9 +70,9 @@ func originOf(st agentturn.Step) origin {
 }
 
 // triageTopic starts a work on a free topic (TASK-187, TASK-188), in the subject of the call's request. It runs as a
-// step of an approved plan, as the paid job of a request whose student turned the free-work card off, or after «Сделать»
-// on the card (FreeWorks): each is the student's consent. The request key is the call's (thread, request, call ID), so
-// a replay or a second «Сделать» finds the same work, and a call of another request never does. The topic is free
+// step of an approved plan or as the one paid job of a request without a plan (no notice card since TASK-342). The
+// request key is the call's (thread, request, call ID), so a replay finds the same work, and a call of another request
+// never does. The topic is free
 // model text: data for the reader, never logged here; file names and titles take it through the safe-name rules of
 // the work (TASK-187).
 func (a *Actions) triageTopic(at origin, call values.Call) (prepared, error) {

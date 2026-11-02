@@ -18,11 +18,17 @@ const (
 	dueBackDays   = 31 // a deadline may lie this many days before now
 	dueAheadYears = 2  // and at most this many years after it
 
-	// A date without a time of day is due at the end of that day (as the agent's edit_due).
-	endOfDayHour   = 23
-	endOfDayMinute = 59
+	maxClockHour   = 23 // the latest valid HH:MM is 23:59
+	maxClockMinute = 59
 
 	dateLayout = "2006-01-02"
+)
+
+// A deadline given as a date without a time of day is due at DefaultDueHour:DefaultDueMinute local of that day
+// (ADR-0029 addendum 3): the form, the agent's create_assignment and edit_due all use it.
+const (
+	DefaultDueHour   = 20
+	DefaultDueMinute = 0
 )
 
 // StudentSpec is what the student provides to NewByStudent (ADR-0029). Title, Note and SubjectName are the student's
@@ -67,9 +73,9 @@ func NewByStudent(spec StudentSpec, now time.Time) (*Assignment, error) {
 	return a, nil
 }
 
-// StudentDue is the deadline the student named: date (YYYY-MM-DD) at timeOfDay (HH:MM, 24 h) in loc, or 23:59 of that
-// day without a time. No date is no deadline (zero); a time without a date wraps ErrInvalidTime, a malformed date
-// ErrInvalidDue.
+// StudentDue is the deadline the student named: date (YYYY-MM-DD) at timeOfDay (HH:MM, 24 h) in loc, or 20:00 of that
+// day without a time (DefaultDueHour, DefaultDueMinute). No date is no deadline (zero); a time without a date wraps
+// ErrInvalidTime, a malformed date ErrInvalidDue.
 func StudentDue(date, timeOfDay string, loc *time.Location) (time.Time, error) {
 	switch {
 	case date == "" && timeOfDay != "":
@@ -83,7 +89,7 @@ func StudentDue(date, timeOfDay string, loc *time.Location) (time.Time, error) {
 	if err != nil || len(date) != len(dateLayout) {
 		return time.Time{}, fmt.Errorf("%w: date must be YYYY-MM-DD", ErrInvalidDue)
 	}
-	h, m := endOfDayHour, endOfDayMinute
+	h, m := DefaultDueHour, DefaultDueMinute
 	if timeOfDay != "" {
 		var ok bool
 		if h, m, ok = parseClock(timeOfDay); !ok {
@@ -152,5 +158,5 @@ func parseClock(s string) (h, m int, ok bool) {
 		}
 	}
 	h, m = int(s[0]-'0')*10+int(s[1]-'0'), int(s[3]-'0')*10+int(s[4]-'0')
-	return h, m, h <= endOfDayHour && m <= endOfDayMinute
+	return h, m, h <= maxClockHour && m <= maxClockMinute
 }

@@ -113,7 +113,7 @@ test("«Стоп» is a real quiet button; the stop card follows a stopped reque
   const html = renderToStaticMarkup(h(AgentRequest, { model: modelOf(update({ status: "EXECUTING" })), actions }));
   assert.match(html, /<button[^>]*class="btn ghost sm"[^>]*>Стоп<\/button>/);
   const stopped = modelOf(update({ status: "STOPPED", stopReason: "user" }));
-  assert.deepEqual(buttonIds(stopped), ["continue", "cancel"]);
+  assert.deepEqual(buttonIds(stopped), ["resume", "cancel"]);
   assert.equal(stopped.cards[0].text, "Остановлено");
 });
 
@@ -133,7 +133,7 @@ test("«Повторить» for DONE, FAILED, CANCELLED and STOPPED of the last
   }
 });
 
-test("«Повторить» is not offered where the stop card offers the next step", () => {
+test("the new-request «Повторить» is not offered where the stop card offers the next step", () => {
   assert.equal(modelOf(update({ status: "FAILED", stopReason: "failed" })).rerun, false);
   assert.equal(modelOf(update({ status: "STOPPED", stopReason: "expired" })).rerun, false);
   assert.equal(modelOf(update({ status: "FAILED", problem: "retry_required" })).rerun, false);
@@ -142,10 +142,57 @@ test("«Повторить» is not offered where the stop card offers the next 
   const blocked = modelOf(update({ status: "STOPPED", problem: "rerun_blocked" }));
   assert.equal(blocked.rerun, true);
   assert.match(blocked.cards.find((c) => c.type === "problem").text, /Повтор недоступен/);
-  // The other stop reasons keep it next to «Продолжить».
-  for (const stopReason of ["user", "offline", "quota", "budget"]) {
+  // The stop reasons whose stop card offers «Повторить» (id continue) never get a second one.
+  for (const stopReason of ["offline", "quota"]) {
+    assert.equal(modelOf(update({ status: "STOPPED", stopReason })).rerun, false, stopReason);
+  }
+  // «Стоп» offers «Продолжить» (resume): the rerun, another attempt, stays. Budget offers nothing.
+  for (const stopReason of ["user", "budget"]) {
     assert.equal(modelOf(update({ status: "STOPPED", stopReason })).rerun, true, stopReason);
   }
+});
+
+test("never two «Повторить» under one request: the stop card's button and the rerun exclude each other", () => {
+  const variants = [
+    { status: "STOPPED", stopReason: "user" },
+    { status: "STOPPED", stopReason: "offline" },
+    { status: "STOPPED", stopReason: "quota" },
+    { status: "STOPPED", stopReason: "offline", problem: "retry_required" },
+    { status: "STOPPED", stopReason: "budget" },
+    { status: "FAILED", stopReason: "failed" },
+    { status: "STOPPED", stopReason: "expired" },
+    { status: "FAILED", problem: "retry_required" },
+    { status: "FAILED", problem: "restart_required" },
+    { status: "STOPPED", problem: "rerun_blocked" },
+    { status: "DONE" },
+  ];
+  for (const v of variants) {
+    const m = modelOf(update(v));
+    const labels = m.cards.flatMap((c) => ("buttons" in c ? c.buttons.map((b) => b.label) : []));
+    const repeats = labels.filter((l) => l === "Повторить").length + (m.rerun ? 1 : 0);
+    assert.ok(repeats <= 1, JSON.stringify(v));
+  }
+  // The stop card's button is the one shown, and it is still the continue call.
+  const stopped = modelOf(update({ status: "STOPPED", stopReason: "offline" }));
+  assert.deepEqual(stopped.cards.at(-1).buttons.map((b) => [b.id, b.label]), [["continue", "Повторить"], ["cancel", "Отмена"]]);
+  assert.equal(stopped.rerun, false);
+  const html = renderToStaticMarkup(h(AgentRequest, { model: stopped, actions }));
+  assert.equal(html.split(">Повторить<").length - 1, 1);
+  assert.doesNotMatch(html, /Запустить просьбу заново/);
+  // A retry_required problem on a stopped-offline card shows one «Повторить» (the problem's retry), not two.
+  const withProblem = modelOf(update({ status: "STOPPED", stopReason: "offline", problem: "retry_required" }));
+  assert.deepEqual(withProblem.cards.flatMap((c) => ("buttons" in c ? c.buttons.map((b) => b.id) : [])), ["cancel", "retry"]);
+  assert.equal(withProblem.rerun, false);
+  assert.equal(renderToStaticMarkup(h(AgentRequest, { model: withProblem, actions })).split(">Повторить<").length - 1, 1);
+});
+
+test("«Стоп» offers «Продолжить» and keeps the rerun under the last request", () => {
+  const m = modelOf(update({ status: "STOPPED", stopReason: "user" }));
+  assert.deepEqual(m.cards.at(-1).buttons.map((b) => [b.id, b.label]), [["resume", "Продолжить"], ["cancel", "Отмена"]]);
+  assert.equal(m.rerun, true);
+  const html = renderToStaticMarkup(h(AgentRequest, { model: m, actions }));
+  assert.equal(html.split(">Повторить<").length - 1, 0);
+  assert.match(html, /Запустить просьбу заново/);
 });
 
 test("only the last request offers «Повторить»", () => {

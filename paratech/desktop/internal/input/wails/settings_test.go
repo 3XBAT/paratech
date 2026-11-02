@@ -51,14 +51,6 @@ func (f *fakeSettings) SetRecognitionLoad(_ context.Context, l shared.Recognitio
 	return f.t, nil
 }
 
-func (f *fakeSettings) SetFreeWorkNotice(_ context.Context, on bool) (preferences.Toggles, error) {
-	if f.err != nil {
-		return preferences.Toggles{}, f.err
-	}
-	f.t.FreeWorkNotice = on
-	return f.t, nil
-}
-
 func (f *fakeSettings) SetNoteRecognition(_ context.Context, m settings.NoteRecognition) (preferences.Toggles, error) {
 	if f.err != nil {
 		return preferences.Toggles{}, f.err
@@ -159,28 +151,11 @@ func (r *settingsStore) Save(_ context.Context, s *settings.Settings) error {
 	}
 	r.stored = &settings.State{
 		Version: version + 1, RecordingPromptsEnabled: s.RecordingPromptsEnabled(), ProcessOnlyOnACPower: s.ProcessOnlyOnACPower(),
-		RecognitionLoad: s.RecognitionLoad(), FreeWorkNotice: s.FreeWorkNotice(), NoteRecognition: s.NoteRecognition(),
+		RecognitionLoad: s.RecognitionLoad(), NoteRecognition: s.NoteRecognition(),
 		UpdatedAt: s.UpdatedAt(),
 	}
 	s.Persisted(version + 1)
 	return nil
-}
-
-// TASK-188: «Предупреждать перед свободной работой» is read and changed with the other toggles.
-func TestSettingsServiceFreeWorkNotice(t *testing.T) {
-	ctx := context.Background()
-	f := &fakeSettings{t: preferences.Toggles{RecordingPromptsEnabled: true, FreeWorkNotice: true}}
-	s := NewSettingsService(f, discard())
-	if got, err := s.GetSettings(ctx); err != nil || !got.FreeWorkNotice {
-		t.Fatalf("GetSettings = %+v, %v", got, err)
-	}
-	got, err := s.SetFreeWorkNotice(ctx, false)
-	if err != nil || got != (Settings{RecordingPromptsEnabled: true}) {
-		t.Fatalf("SetFreeWorkNotice(false) = %+v, %v", got, err)
-	}
-	if got, err = s.SetFreeWorkNotice(ctx, true); err != nil || !got.FreeWorkNotice {
-		t.Fatalf("SetFreeWorkNotice(true) = %+v, %v", got, err)
-	}
 }
 
 func TestSettingsServiceMapsToggles(t *testing.T) {
@@ -208,7 +183,7 @@ func TestSettingsJSONNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"recordingPromptsEnabled":true,"processOnlyOnAcPower":true,"recognitionLoad":"",` +
-		`"loadEstimates":null,"loadEstimatesModel":"","freeWorkNotice":false,"noteRecognition":"",` +
+		`"loadEstimates":null,"loadEstimatesModel":"","noteRecognition":"",` +
 		`"noteRecognitionLanguage":""}`
 	if string(raw) != want {
 		t.Fatalf("JSON = %s, want %s (frontend/src/bindings/settings.ts reads these names)", raw, want)
@@ -224,7 +199,6 @@ func TestSettingsServiceHidesErrorDetails(t *testing.T) {
 		"GetSettings":                func() (Settings, error) { return s.GetSettings(context.Background()) },
 		"SetRecordingPromptsEnabled": func() (Settings, error) { return s.SetRecordingPromptsEnabled(context.Background(), true) },
 		"SetProcessOnlyOnACPower":    func() (Settings, error) { return s.SetProcessOnlyOnACPower(context.Background(), true) },
-		"SetFreeWorkNotice":          func() (Settings, error) { return s.SetFreeWorkNotice(context.Background(), true) },
 		"SetNoteRecognition":         func() (Settings, error) { return s.SetNoteRecognition(context.Background(), "local") },
 	}
 	for name, call := range calls {
@@ -340,7 +314,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		typ     reflect.Type
 		methods int
 	}{
-		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 8}, // SetRecognitionLoad: TASK-084, +GetProfile, SaveProfile (TASK-094), +SetFreeWorkNotice (TASK-188), +SetNoteRecognition (TASK-294)
+		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 7}, // SetRecognitionLoad: TASK-084, +GetProfile, SaveProfile (TASK-094), +SetNoteRecognition (TASK-294); -SetFreeWorkNotice (TASK-342)
 		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 9}, // +SwitchSource, DismissAdvice (TASK-082), +RetryPostProcessing, RedoSummary (TASK-086), +RecordingSound (TASK-099)
 		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 7},     // -Snooze (TASK-076), +2 (TASK-081), +Advice (TASK-082)
 		{file: "prompt.ts", typ: reflect.TypeFor[*PopupWindowService](), methods: 1},

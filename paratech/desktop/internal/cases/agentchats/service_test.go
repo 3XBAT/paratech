@@ -372,6 +372,24 @@ func TestEarlierWithoutDropped(t *testing.T) {
 	}
 }
 
+// TASK-342: a request stored while the free-work card existed (a topic call answered {"status":"awaiting_student"})
+// opens without an error; the old card shows nothing, only the reply the planner gave after it.
+func TestEarlierWithAnOldFreeWorkCall(t *testing.T) {
+	e := newEnv(t)
+	e.chat(t, "c1", true, "сделай презентацию про Петра")
+	e.history.entries["c1"] = []values.HistoryEntry{
+		student(1, "сделай презентацию про Петра"),
+		calls(1, raw("a1", "triage_assignment", `{"topic":"Реформы Петра I"}`)),
+		results(1, values.ToolResult{CallID: "a1", ResultJSON: `{"status":"awaiting_student"}`}),
+		calls(1, raw("a2", "reply", `{"text":"Можно сделать как свободную работу."}`)),
+		results(1, values.ShownResult("a2")),
+	}
+	got, err := e.svc.Earlier(t.Context(), "c1")
+	if err != nil || len(got) != 1 || got[0].Reply != "Можно сделать как свободную работу." {
+		t.Fatalf("Earlier = %+v, %v", got, err)
+	}
+}
+
 func TestStudentText(t *testing.T) {
 	tests := []struct{ stored, want string }{
 		{"привет", "привет"},

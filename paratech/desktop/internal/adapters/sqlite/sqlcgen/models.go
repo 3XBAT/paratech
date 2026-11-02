@@ -344,7 +344,6 @@ type Setting struct {
 	StudentUniversity       string
 	StudentFaculty          string
 	StudentCity             string
-	FreeWorkNotice          int64
 	NoteRecognition         string
 }
 

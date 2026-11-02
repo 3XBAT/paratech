@@ -23,8 +23,7 @@ const (
 	CardCannotDo   CardKind = "cannot_do"
 	CardReply      CardKind = "reply"
 	CardStopped    CardKind = "stopped"
-	CardWork       CardKind = "work"      // a turnkey work: questions, «Как я понял задание» or the helper mode (TASK-129)
-	CardFreeWork   CardKind = "free_work" // a work on a topic waits for the student's «Сделать» (TASK-188)
+	CardWork       CardKind = "work" // a turnkey work: questions, «Как я понял задание» or the helper mode (TASK-129)
 
 	// Catalog v10 (ADR-0033 §3, §4, §10).
 	CardScheduleSubjects CardKind = "schedule_subjects" // the desktop-built subjects-from-schedule package, one «Да»
@@ -277,9 +276,9 @@ type StopReason string
 // Stop reasons.
 const (
 	StopBudget  StopReason = "budget"  // «Остановлено: лимит просьбы»; cannot be continued
-	StopOffline StopReason = "offline" // «Не завершено: нет связи · Продолжить»
+	StopOffline StopReason = "offline" // «Не завершено: нет связи · Повторить» (Continue: the same key)
 	StopUser    StopReason = "user"    // the student pressed «Стоп»; may be continued
-	StopQuota   StopReason = "quota"   // the quota is used up; «Продолжить» repeats the same key later
+	StopQuota   StopReason = "quota"   // the quota is used up; «Повторить» (Continue) repeats the same key later
 	StopFailed  StopReason = "failed"  // the step failed for good; «Повторить» sends it again with a new key
 	StopExpired StopReason = "expired" // the Hub no longer keeps the model turn; the request starts again from its text
 )

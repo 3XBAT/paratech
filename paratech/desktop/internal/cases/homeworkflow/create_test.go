@@ -114,8 +114,12 @@ func TestCreateAssignment(t *testing.T) {
 		wantDue     time.Time
 	}{
 		{
-			name: "with a subject and a date", in: NewAssignment{Title: "Решить номер 5", Subject: "s1", Date: "2026-10-30"},
-			wantSubject: "Матанализ", wantSource: values.SourceUser, wantDue: time.Date(2026, 10, 30, 23, 59, 0, 0, msk),
+			name: "with a subject and a date: 20:00", in: NewAssignment{Title: "Решить номер 5", Subject: "s1", Date: "2026-10-30"},
+			wantSubject: "Матанализ", wantSource: values.SourceUser, wantDue: time.Date(2026, 10, 30, 20, 0, 0, 0, msk),
+		},
+		{
+			name: "an explicit 23:59 stays", in: NewAssignment{Title: "Решить номер 5", Date: "2026-10-30", Time: "23:59"},
+			wantDue: time.Date(2026, 10, 30, 23, 59, 0, 0, msk),
 		},
 		{
 			name: "a reminder at nine", in: NewAssignment{Title: "Скинуть проверочную Иванову", Date: "2026-10-15", Time: "09:00"},

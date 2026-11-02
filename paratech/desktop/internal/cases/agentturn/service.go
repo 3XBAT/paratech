@@ -392,7 +392,7 @@ func (s *Service) Stop(ctx context.Context, ref TurnRef) (Step, error) {
 	}
 }
 
-// Continue is «Продолжить» after a stop by the student, a lost connection or the quota: an open step is sent again
+// Continue («Повторить» of a stopped request on the panel) runs after a stop by the student, a lost connection or the quota: an open step is sent again
 // under the SAME key, so a reply the Hub already produced is replayed for free. A step that failed for good needs
 // Retry, an expired one Restart.
 func (s *Service) Continue(ctx context.Context, ref TurnRef) (Step, error) {

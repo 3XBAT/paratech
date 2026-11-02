@@ -56,7 +56,7 @@ func TestSettingsNoteRecognitionStaleVersion(t *testing.T) {
 	first, second := loadSettings(t, r), loadSettings(t, r)
 	mustChange(t, first.SetNoteRecognition(settings.NoteRecognitionLocal, settingsT0))
 	saveSettings(t, r, first)
-	mustChange(t, second.SetFreeWorkNotice(false, settingsT0))
+	mustChange(t, second.SetRecordingPromptsEnabled(false, settingsT0))
 	if err := r.Save(t.Context(), second); err == nil {
 		t.Fatal("a stale version was saved")
 	}
@@ -93,10 +93,10 @@ func TestMigrationNoteRecognition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.NoteRecognition() != settings.NoteRecognitionOff || got.RecordingPromptsEnabled() || got.FreeWorkNotice() ||
+	if got.NoteRecognition() != settings.NoteRecognitionOff || got.RecordingPromptsEnabled() ||
 		got.HubURL() != "https://hub.example" || got.Version() != 3 {
-		t.Fatalf("settings after the migration: recognition %q, prompts %v, free work %v, hub %q, version %d",
-			got.NoteRecognition(), got.RecordingPromptsEnabled(), got.FreeWorkNotice(), got.HubURL(), got.Version())
+		t.Fatalf("settings after the migration: recognition %q, prompts %v, hub %q, version %d",
+			got.NoteRecognition(), got.RecordingPromptsEnabled(), got.HubURL(), got.Version())
 	}
 
 	if _, err := p.DownTo(ctx, noteRecognitionVersion-1); err != nil {

@@ -251,7 +251,7 @@ func TestAgentAddsAnAssignmentInASubject(t *testing.T) {
 
 	list, err := e.homework.ListAssignments(ctx)
 	if err != nil || len(list) != 1 || list[0].ID != id || list[0].Subject != "Математический анализ" ||
-		!list[0].Due.Equal(time.Date(2026, 10, 30, 23, 59, 0, 0, time.UTC)) {
+		!list[0].Due.Equal(time.Date(2026, 10, 30, 20, 0, 0, 0, time.UTC)) {
 		t.Fatalf("assignments = %+v, %v", list, err)
 	}
 	if lines := actionLines(cards); len(lines) != 1 || lines[0].Assignment.Subject.ID() != string(e.math.ID()) {

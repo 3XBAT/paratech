@@ -130,8 +130,8 @@ func TestEveryActionAndItsUndo(t *testing.T) {
 			}},
 		{"set a first due", values.ToolEditDue, `{"assignment":"a2","due":"2026-11-02"}`, `{"changed":true,"done":true}`,
 			func(t *testing.T, w *world) {
-				if got := w.assignments.views["a2"].Due; !got.Equal(time.Date(2026, 11, 2, 23, 59, 0, 0, msk)) {
-					t.Fatalf("due = %v", got)
+				if got := w.assignments.views["a2"].Due; !got.Equal(time.Date(2026, 11, 2, 20, 0, 0, 0, msk)) {
+					t.Fatalf("due = %v, want 20:00 of that day", got)
 				}
 			},
 			func(t *testing.T, w *world) {
@@ -498,7 +498,7 @@ func TestDeletedAssignmentIsAnUnknownID(t *testing.T) {
 }
 
 // triage_assignment with a topic (TASK-188) runs the topic triage with the call's key and the request's subject, as a
-// free call (the card was off) and as a step of an approved plan: journaled with Undo RemoveWork, the planner sees the
+// free call (no notice card since TASK-342) and as a step of an approved plan: journaled with Undo RemoveWork, the planner sees the
 // work and enums only, never the topic.
 func TestTriageTopicRuns(t *testing.T) {
 	for _, step := range []int{-1, 0} {
@@ -523,6 +523,26 @@ func TestTriageTopicRuns(t *testing.T) {
 		if err != nil || u.Status != action.StatusUndone {
 			t.Fatalf("plan step %d: Undo = %+v, %v", step, u, err)
 		}
+	}
+}
+
+// A topic from a request «Без предмета» (empty scope) gives a work without a subject.
+func TestTriageTopicWithoutSubject(t *testing.T) {
+	w, f := withTurnkey(t, turnkey.Started{View: questionsView(2), Created: true}, nil)
+	c := writeCall(t, "c7", values.ToolTriageAssignment, `{"topic":"Реформы Петра I, презентация"}`)
+	at := req
+	at.Scope = mustScope(t, "")
+	r := w.tools(t).write(t.Context(), at, c)
+	if r.out.Result.IsError {
+		t.Fatalf("result %+v", r.out.Result)
+	}
+	e, err := w.journal.Find(t.Context(), req.Thread, req.Turn, "c7")
+	if err != nil || e.Status != action.StatusDone {
+		t.Fatalf("journal %+v, %v", e, err)
+	}
+	want := topicCall{request: "ag:" + string(req.Thread) + ":1:c7", text: "Реформы Петра I, презентация"}
+	if len(f.topics) != 1 || f.topics[0] != want || len(f.calls) != 0 {
+		t.Fatalf("topic calls %+v, triage calls %+v", f.topics, f.calls)
 	}
 }
 
@@ -773,5 +793,30 @@ func TestDriverInterruptKeepsTheOutcomeOfAnAction(t *testing.T) {
 	}
 	if lines != 1 {
 		t.Fatalf("action lines shown = %d", lines)
+	}
+}
+
+// edit_due without a deadline sets 20:00 of the day; with one it keeps the old time of day in the student's zone.
+func TestDueOn(t *testing.T) {
+	msk := time.FixedZone("MSK", 3*60*60)
+	day, err := values.NewDate(2026, 11, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		old  time.Time
+		want time.Time
+	}{
+		{"no old deadline: 20:00", time.Time{}, time.Date(2026, 11, 2, 20, 0, 0, 0, msk)},
+		{"old 23:59 stays", time.Date(2026, 10, 20, 23, 59, 0, 0, msk), time.Date(2026, 11, 2, 23, 59, 0, 0, msk)},
+		{"old time in another zone", time.Date(2026, 10, 20, 6, 15, 0, 0, time.UTC), time.Date(2026, 11, 2, 9, 15, 0, 0, msk)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := dueOn(day, c.old, msk); !got.Equal(c.want) {
+				t.Fatalf("dueOn = %v, want %v", got, c.want)
+			}
+		})
 	}
 }

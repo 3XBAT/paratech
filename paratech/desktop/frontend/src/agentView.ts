@@ -3,7 +3,7 @@
 // impersonal («Создан предмет…», not «Я создал…»). Model text (summary, notes, questions, options, labels, replies) is
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
-import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, ContextFill, EarlierRequestView, FreeWorkRef, MentionView, PlanStepView, PlanView, QuestionView, UpdateView } from "./bindings/agent.js";
+import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, ContextFill, EarlierRequestView, MentionView, PlanStepView, PlanView, QuestionView, UpdateView } from "./bindings/agent.js";
 import { askMentions, type MentionPill, mentionPills } from "./agentMentions.js";
 import { approveLabel, type PlanProgress, planProgress, stepMarks, type StepMark, planWindow } from "./planView.js";
 import { type Entry, isBusyRefused, isRunning, orderedEntries } from "./agentState.js";
@@ -52,7 +52,7 @@ export const openAssignmentLabel = "Открыть";
 
 /**
  * «Задание добавлено: <название> · <предмет> · срок <дата>, <время>». The DTO does not say whether the student named a
- * time (none arrives as 23:59), so date and time are always shown; the parts that are absent are left out.
+ * time (none arrives as 20:00), so date and time are always shown; the parts that are absent are left out.
  */
 export function addedAssignmentText(a: AddedAssignmentView, subjects: Readonly<Record<string, string>>, now: Date): string {
   const title = a.title.trim() === "" ? noTitleLabel : a.title;
@@ -495,14 +495,15 @@ export const texts = {
 } as const;
 
 /** Button ids of a request; the panel maps them to the calls. */
-export type ButtonId = "approve" | "revise" | "cancel" | "stop" | "continue" | "retry" | "restart" | "rerun" | "resend";
+export type ButtonId = "approve" | "revise" | "cancel" | "stop" | "continue" | "resume" | "retry" | "restart" | "rerun" | "resend";
 
 export const buttonLabels: Record<ButtonId, string> = {
   approve: "Да",
   revise: "Изменить",
   cancel: "Отмена",
   stop: "Стоп",
-  continue: "Продолжить",
+  continue: "Повторить",
+  resume: "Продолжить",
   retry: "Повторить",
   restart: "Начать заново",
   rerun: "Повторить",
@@ -537,7 +538,8 @@ const updateProblemTexts: Record<string, string> = {
 /** Why a request stopped: the text of the stop card and the buttons it offers. */
 const stopTexts: Record<string, { text: string; buttons: ButtonId[] }> = {
   offline: { text: "Не завершено: нет связи", buttons: ["continue", "cancel"] },
-  user: { text: "Остановлено", buttons: ["continue", "cancel"] },
+  // «Стоп» keeps «Продолжить» (the same free replay): «Повторить» would promise another attempt, which is the rerun button.
+  user: { text: "Остановлено", buttons: ["resume", "cancel"] },
   quota: { text: "Не завершено: исчерпан лимит", buttons: ["continue", "cancel"] },
   failed: { text: "Не получилось выполнить шаг", buttons: ["retry"] },
   expired: { text: "Просьба устарела", buttons: ["restart"] },
@@ -740,7 +742,6 @@ export type CardModel =
   | { type: "action"; text: string; actionId: string; undo: { label: string; enabled: boolean }; assignment: AddedAssignmentView | null }
   | { type: "stopped"; text: string; buttons: ButtonModel[] }
   | { type: "work"; workId: string }
-  | { type: "free_work"; ref: FreeWorkRef }
   | { type: "problem"; text: string; buttons: ButtonModel[] };
 
 function buttons(ids: ButtonId[]): ButtonModel[] {
@@ -828,9 +829,6 @@ function cardModel(c: CardView, status: string): CardModel | null {
       return c.workId !== "" ? { type: "work", workId: c.workId } : null;
     case "stopped":
       return null; // Built once from the stop reason below.
-    case "free_work":
-      // The card reads its own state (AgentApi.freeWorkCard); a card without the call it names has nothing to answer.
-      return c.freeWork !== null ? { type: "free_work", ref: c.freeWork } : null;
   }
 }
 
@@ -919,9 +917,13 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
   const stopCard = running ? undefined : u.cards.find((c) => c.kind === "stopped");
   const reason = running ? "" : stopCard?.stopReason || u.stopReason;
   let stop = reason !== "" ? (stopTexts[reason] ?? { text: "Остановлено", buttons: [] }) : null;
-  // A reply that broke off in the middle: the same «Повторить», a clearer line.
+  // A reply that broke off in the middle: the same retry button, a clearer line.
   if (stop && reason === "failed" && ctx.replyCut === true) {
     stop = { ...stop, text: texts.replyCut };
+  }
+  // The problem's own «Повторить»/«Начать заново» is the next step: the stop card must not offer a second way on.
+  if (stop && (problem === "retry_required" || problem === "restart_required")) {
+    stop = { ...stop, buttons: stop.buttons.filter((b) => b !== "continue" && b !== "resume") };
   }
   if (stop) {
     cards.push({ type: "stopped", text: stop.text, buttons: buttons(stop.buttons) });
@@ -937,7 +939,7 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
     cards.push({ type: "stopped", text: "Отменено", buttons: [] });
   }
 
-  // «Повторить» only under the last request, and not where the stop card or the problem already offers the next step.
+  // The new-request «Повторить» only under the last request, and not where the stop card or the problem already offers the next step.
   const offered = [...(stop?.buttons ?? []), ...(problem === "retry_required" ? ["retry" as const] : []), ...(problem === "restart_required" ? ["restart" as const] : [])];
   // After rerun_blocked it stays: the core checks again (the effects may have been undone since).
   const rerun =
@@ -945,6 +947,9 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
     e.threadId !== "" &&
     finishedStatuses.has(u.status) &&
     !offered.includes("retry") &&
-    !offered.includes("restart");
+    !offered.includes("restart") &&
+    // The stop card's `continue` button is worded «Повторить» too: two of them under one request would be confusing.
+    // `resume` («Продолжить», after «Стоп») does not clash: the rerun stays.
+    !offered.includes("continue");
   return { ...base, cards, rerun };
 }

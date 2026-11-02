@@ -190,7 +190,7 @@ func TestTriageOutcomes(t *testing.T) {
 	}{
 		{"reader offline: the created work waits", turnkey.Started{View: pending, Created: true},
 			fmt.Errorf("%w: offline", turnkey.ErrReaderUnavailable),
-			`{"changed":true,"outcome":"pending","questions":0,"round":1,"work":"w1"}`, action.StatusDone, 2},
+			`{"changed":true,"error":"failed","outcome":"pending","questions":0,"round":1,"work":"w1"}`, action.StatusDone, 2},
 		{"impossible: the helper mode", turnkey.Started{View: helper, Created: true}, nil,
 			`{"changed":true,"feasibility":"impossible","outcome":"helper","questions":0,"round":1,"work":"w1"}`, action.StatusDone, 2},
 		{"an existing work is not this action's", turnkey.Started{View: questionsView(4)}, nil,
@@ -204,6 +204,39 @@ func TestTriageOutcomes(t *testing.T) {
 			r, e := act(t, w, writeCall(t, "c1", values.ToolTriageAssignment, `{"assignment":"a1"}`))
 			if r.out.Result.ResultJSON != tt.result || e.Status != tt.journal || len(r.cards) != tt.cards {
 				t.Fatalf("result %s journal %s cards %d", r.out.Result.ResultJSON, e.Status, len(r.cards))
+			}
+		})
+	}
+}
+
+// Beta 2026-10-28: «сделай работу», the reader refused, and the agent told the student the work started. The work
+// the call created stays (Undo, the card with its problem and «Повторить»), but the planner gets an is_error result.
+func TestTriageWhoseReaderFailedIsAnErrorForThePlanner(t *testing.T) {
+	pending := questionsView(1)
+	pending.Status, pending.Questions, pending.QuestionRound, pending.HasAnswer = work.StatusTriage, nil, 0, false
+	pending.LastProblem = work.ProblemRefused
+	failed := pending
+	failed.Status = work.StatusFailed
+	for _, v := range []turnkey.View{pending, failed} {
+		t.Run(string(v.Status), func(t *testing.T) {
+			w, _ := withTurnkey(t, turnkey.Started{View: v, Created: true},
+				fmt.Errorf("%w: hubclient: triage assignment: llm provider failed", turnkey.ErrReaderRefused))
+			r, e := act(t, w, writeCall(t, "c1", values.ToolTriageAssignment, `{"assignment":"a1"}`))
+			if !r.out.Result.IsError {
+				t.Fatalf("a triage whose reader failed reached the planner as a success: %s", r.out.Result.ResultJSON)
+			}
+			if e.Status != action.StatusDone || len(r.out.Seen) != 1 {
+				t.Fatalf("journal %s, seen %v", e.Status, r.out.Seen)
+			}
+			last := r.cards[len(r.cards)-1]
+			if wc, ok := last.(values.WorkCard); !ok || wc.Outcome == values.TriageConfirmed {
+				t.Fatalf("cards = %+v", r.cards)
+			}
+
+			// A replayed step answers from the work as it is: still an error while the reader call is due.
+			again, _ := act(t, w, writeCall(t, "c1", values.ToolTriageAssignment, `{"assignment":"a1"}`))
+			if !again.out.Result.IsError || again.out.Result.ResultJSON != r.out.Result.ResultJSON {
+				t.Fatalf("replay = %s (is_error %t)", again.out.Result.ResultJSON, again.out.Result.IsError)
 			}
 		})
 	}

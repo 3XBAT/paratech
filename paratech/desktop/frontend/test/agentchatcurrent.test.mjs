@@ -20,7 +20,6 @@ const card = {
   stopReason: "",
   workId: "",
   outcome: "",
-  freeWork: null,
 };
 
 const update = {

@@ -103,7 +103,8 @@ test("«Стоп» keeps the reply text as UI-only state, shown muted above the 
   assert.ok(!html.includes("ag-reply-draft"));
   assert.ok(html.indexOf("ag-reply-kept") < html.indexOf("ag-stop"));
   assert.ok(html.includes("Остановлено"));
-  assert.ok(html.includes("Продолжить"));
+  assert.ok(html.includes(">Продолжить<"));
+  assert.ok(!html.includes(">Повторить<"));
   assert.ok(!html.includes("Ответ прервался"));
 });
 
@@ -119,7 +120,7 @@ test("a repeated stopped update, a progress-free problem and a late draft keep t
   assert.equal(cutFor(s, s.entries[0]).text, "Привет, мир");
 });
 
-test("the next update of the thread removes the kept text: Продолжить, Повторить, Отменить, a new turn", () => {
+test("the next update of the thread removes the kept text: Повторить a stopped request, Повторить a finished one, Отменить, a new turn", () => {
   for (const next of [
     upd({ status: "EXECUTING", progress: true }),
     upd({ status: "EXECUTING" }),

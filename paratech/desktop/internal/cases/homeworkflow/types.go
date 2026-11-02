@@ -200,7 +200,7 @@ type AssignmentEdit struct {
 	Note            string           // the description; empty: none
 	Subject         shared.SubjectID // a library subject; empty: no subject correction
 	Date            string           // YYYY-MM-DD in the student's zone; empty: no deadline
-	Time            string           // HH:MM, 24 h, only with Date; without it 23:59
+	Time            string           // HH:MM, 24 h, only with Date; without it 20:00
 }
 
 // NewAssignment is an assignment or a reminder the student adds by hand or through the agent (ADR-0029). The texts
@@ -214,7 +214,7 @@ type NewAssignment struct {
 	Subject shared.SubjectID // optional: a library subject; it wins over the lesson's
 	Lesson  shared.LessonID  // optional: a lesson of the schedule
 	Date    string           // optional: YYYY-MM-DD in the student's zone
-	Time    string           // optional: HH:MM, 24 h, only with Date; without it 23:59
+	Time    string           // optional: HH:MM, 24 h, only with Date; without it 20:00
 }
 
 // AssignmentView is an assignment as the UI shows it. Title and Description may be model text: show them as data.

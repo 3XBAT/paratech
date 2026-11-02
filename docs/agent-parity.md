@@ -171,11 +171,9 @@ Legend
 | Журнал действий агента | `AgentService.History` | нет | R | — | |
 | «Отменить» действие / всё | `AgentService.Undo`, `UndoRequest` | нет | UI, *кнопка* | клик | |
 | «Да», «Стоп», «Продолжить», «Повторить», «Начать заново», «Отмена», ответы | `ApprovePlan`, `RevisePlan`, `Answer`, `Stop`, `Continue`, `Retry`, `Restart`, `Rerun`, `Cancel` | — | только UI | клик | control of the agent itself |
-| Карточка бесплатной работы | `FreeWorkCard`, `FreeWork` | — | UI | клик | |
 | Окно записи перед парой: вкл / выкл | `SettingsService.SetRecordingPromptsEnabled` | нет → `set_setting` (10) | U | — | gap P6 |
 | Обрабатывать только от сети | `SettingsService.SetProcessOnlyOnACPower` | нет → `set_setting` (10) | U | — | |
 | Нагрузка распознавания | `SettingsService.SetRecognitionLoad` | нет → `set_setting` (10) | U | — | |
-| Предупреждать о работе на свободную тему | `SettingsService.SetFreeWorkNotice` | нет → `set_setting` (10) | U | — | |
 | События в календаре при смене срока | TASK-276/279, в работе | нет → `set_setting` (11) | U | — | |
 | «ИИ распознаёт фото конспектов» | TASK-294, в работе | нет | U (`off`/`local`); будущий `cloud` — C | «Да» для `cloud` | images would leave the PC |
 | Настройки (чтение) | `SettingsService.GetSettings` | нет → `get_settings` (10) | R | — | enums only |
