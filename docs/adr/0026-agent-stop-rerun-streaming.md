@@ -116,17 +116,18 @@ Long replies (catalog 7+, up to 4000 characters) appeared whole at the end of a 
   `stream AgentStepStreamResponse{oneof event: string delta | AgentStepResponse result}` (a wrapper, as buf lint
   forbids one request type for two RPCs). Same validation, fingerprint, key and ledger as `AgentStep`: one logical
   request, either replays the other's stored result. Deltas, then exactly one `result`; a failure is a Connect error
-  with the ErrorDetail of `AgentStep`, no `result`; a stream without `result` is failed, the client drops the draft.
-- **What streams**: only the visible reply: the top-level `text` argument of `reply` calls (read incrementally from
-  `input_json_delta`: escapes, `\uXXXX` with surrogate pairs and UTF-8 split across chunks) and the text blocks of
-  the answer (a text-only answer becomes a reply, TASK-200). A later part starts with a blank line. Other tools'
-  arguments and thinking never stream. Control characters except line breaks and tabs are dropped; at most 4000
-  characters in all; chunks are joined until 64 bytes are pending or 50 ms have passed (the first goes at once), and
-  the handler cuts them only between characters (PR #331 rule).
+  with the ErrorDetail of `AgentStep`, no `result`; a stream without `result` is failed, the client drops the draft (offline, see Desktop).
+- **What streams**: only the top-level `text` argument of `reply` calls (read incrementally from `input_json_delta`:
+  escapes, `\uXXXX` with surrogate pairs and UTF-8 split across chunks); a later `reply` call of the same step starts
+  with a blank line. Text blocks never stream: with `tool_choice: auto` they are often a preamble before tool calls
+  («Сейчас посмотрю расписание.») that would show as the reply and vanish; a text-only answer (TASK-200) appears whole
+  in the result. Other tools' arguments and thinking never stream. Control characters except line breaks and tabs
+  are dropped; at most 4000 characters in all; chunks are joined until 64 bytes are pending or 50 ms have passed (the
+  first goes at once), and the handler cuts them only between characters (PR #331 rule). The 50 ms are checked only
+  when the next chunk arrives (no timer), so after the model's last chunk up to 63 bytes may wait until the step ends.
 - **Trust** (hard rule 3): deltas are display-only draft text, never stored, never sent to the planner, never a cause
   of an action. The result is built exactly as `AgentStep` builds it (whole-answer parse, catalog check, cut at a
-  sentence, seal, kept turn, settle); the joined deltas may differ from it (cut, trimmed, preamble text before tool
-  calls) and the result wins. A preamble text of a tool-call answer shows as draft until the result replaces it.
+  sentence, seal, kept turn, settle); the joined deltas may differ from it (cut, trimmed) and the result wins.
 - **No deltas** on a replay, with `provider_stream` off (unary `Step`) and on a provider JSON answer to the stream
   (fallback of TASK-190, one paid call): the stream holds only the result. The desktop renders the result either way.
 - **Provider**: port `agentstep.StreamingProvider.StepStream(ctx, call, onDelta)`; the anthropic adapter sends
@@ -134,6 +135,13 @@ Long replies (catalog 7+, up to 4000 characters) appeared whole at the end of a 
   its parsed input), so the kept turn of the thinking loop is the one a unary answer gives. Cancel, timeout, `message_stop`
   and settlement rules as for `CompleteStream` above. Prompts, catalog, caching, rate limit and reservation unchanged.
 - **Desktop** (go-core): uses `AgentStepStream` for planner steps, falls back to `AgentStep` with the same key on
-  `unimplemented` (an older Hub).
-- To verify live: whether the planner model streams a tool's string argument in small pieces (the docs say current
+  `unimplemented` (an older Hub). A stored «Стоп» now cuts the step's stream on the client; the Hub still finishes,
+  settles and stores the step, and «Продолжить» replays it free (refines «the Hub call is not cancelled» above). A
+  stream that breaks without `result` ends the step as offline and offers «Продолжить» (same key, free replay), not
+  «Повторить».
+- **Stopped reply on screen**: after a student's «Стоп» the panel may keep the last shown reply draft, muted and
+  labelled «Ответ остановлен». It is UI state only: never stored, never sent to the planner, removed by the next
+  update of the thread. This refines «On a failure or «Стоп» the draft is removed» above for the reply draft only;
+  answer drafts are still removed.
+- To verify live: whether the planner model streams the `reply` argument in small pieces (the docs say current
   models may emit one whole key/value per `input_json_delta`); if not, a reply appears in one or few deltas.
