@@ -96,8 +96,12 @@ html, body, #root { height: 100%; }
 .tree .ti .nm { overflow: hidden; text-overflow: ellipsis; }
 .tree .ti .cnt { margin-left: auto; font-size: 12.5px; color: var(--muted); }
 .tree .ti.cur { background: var(--raised); box-shadow: 0 0 0 1px var(--edge); font-weight: 600; }
-.tree .ti.sem { font-size: 12.5px; font-weight: 600; color: var(--muted); }
-.tree .lv2 .ti { padding-left: 28px; }
+/* The semester is a heading of its group (small caps, no folder icon), the subjects sit under it and the folders under
+   the open subject, so «Осень 2026» cannot be taken for one of the folders (TASK-339). */
+.tree .ti.sem { height: 24px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.tree .lv1 .ti { padding-left: 20px; }
+.tree .lv2 .ti { padding-left: 34px; }
+.tree button.ti.fold { cursor: pointer; }
 .tree .lv0 > li + li { margin-top: 8px; }
 .tree-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--sep); }
 .lrows { display: block; }
@@ -108,6 +112,29 @@ html, body, #root { height: 100%; }
 .lrow .t { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
 .lrow .meta { font-size: 12.5px; line-height: 18px; color: var(--muted); }
 .lrow .chip { flex: none; }
+/* Files (TASK-339): the actions of a row, the hint under the name, the panel «Разложить» and the refusals under the row.
+   The menu of «⋯» may reach out of the card, so the card of files does not clip. */
+.card.lrows { overflow: visible; }
+.lrow { flex-wrap: wrap; }
+.lrow-grip { display: inline-flex; cursor: grab; }
+.lrow-grip > .i { color: var(--muted); }
+.lrow > .btn, .lrow > .mmenu { flex: none; }
+.lrow-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; min-height: 24px; }
+.lrow-hint .btn.ghost { padding: 0 4px; }
+.lrow-extra { flex: 0 0 100%; order: 9; display: flex; flex-direction: column; gap: 8px; padding: 0 0 8px 28px; }
+.lrow-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lrow-error .result { margin: 0; }
+.place-panel { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; }
+.place-panel .ui-field { margin-bottom: 0; min-width: 180px; }
+.place-panel .name-form { margin-bottom: 0; }
+.place-inline { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; }
+.sec-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; padding-right: 8px; }
+.sec-head .sec-h { flex: 1; margin: 0; }
+.subj-card.drop { box-shadow: 0 0 0 2px var(--accent-fill); }
+.undo-lines { position: sticky; bottom: 12px; z-index: 6; display: flex; flex-direction: column; gap: 6px; margin-top: 16px; }
+.undo-lines:empty { display: none; }
+.undo-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 6px 16px; border-radius: var(--r-lg); background: var(--raised); box-shadow: 0 0 0 1px var(--edge), var(--sh-pop); font-size: var(--fs-small); line-height: var(--lh-small); }
+.undo-line > span { min-width: 0; overflow-wrap: anywhere; }
 .drow .d { display: flex; flex-direction: column; min-width: 40px; font-size: 12.5px; line-height: 16px; font-weight: 600; color: var(--muted); }
 .drow .d span { color: var(--text); font-size: 14px; }
 /* «новое»: accent text, never colour alone (the word is the mark). */

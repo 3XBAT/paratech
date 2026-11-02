@@ -11,6 +11,7 @@ import { AnswerSources } from "./AnswerSources.js";
 import { ConfirmCard } from "./ConfirmCard.js";
 import { WorkWritingCard } from "./WorkCard.js";
 import { FreeWorkCard } from "./FreeWorkCard.js";
+import { MessagePills } from "./MentionParts.js";
 import { Waiting } from "./Waiting.js";
 import { failedStepIndex, moreStepsLabel, planCollapseLimit, planTexts, planWindow, progressLabel, type StepMark } from "../planView.js";
 import {
@@ -47,6 +48,8 @@ export interface CardActions {
   now?: Date;
   /** Opens the assignment on «Домашние задания». */
   openAssignment?: (id: string) => void;
+  /** Opens the object of a mention pill under the student's text (kind and id as stored). */
+  openMention?: (kind: string, id: string) => void;
   /** The core call of the `answer` cards; without it a card lists no sources. */
   answers?: AnswersApi;
   /** Opens the place of a source on «База знаний», by ids. */
@@ -461,6 +464,7 @@ export function AgentRequest(props: { model: EntryModel; actions: CardActions; d
   return (
     <article className="ag-req">
       {model.userText !== "" && <p className="ag-user">{model.userText}</p>}
+      <MessagePills pills={model.mentions} onOpen={props.actions.openMention} />
       {model.waiting && <Waiting />}
       {model.callLine !== "" && (
         <p className="ag-callline small muted" role="status">
