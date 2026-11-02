@@ -88,11 +88,12 @@ export type SubjectsView =
   /** No subjects at all: the tiles with the ways to make the first ones. */
   | { kind: "empty" }
   | { kind: "inbox" }
-  | { kind: "subject"; id: string }
-  /** The route names a subject that is not in the list (deleted): the page drops it. */
-  | { kind: "unknown" };
+  | { kind: "subject"; id: string };
 
-/** What the section shows for a route, the subjects and the remembered subject of this arrival (see landingFor). */
+/**
+ * What the section shows for a route, the subjects and the remembered subject of this arrival (see landingFor). A route to
+ * a subject that is gone shows what "" shows: nothing is navigated, so «Назад» is not trapped by a redirect.
+ */
 export function resolveView(route: string, subjects: readonly LibrarySubject[] | null, landing: string): SubjectsView {
   if (subjects === null) {
     return { kind: "loading" };
@@ -103,20 +104,12 @@ export function resolveView(route: string, subjects: readonly LibrarySubject[] |
   if (route === inboxRoute) {
     return { kind: "inbox" };
   }
-  if (route === "") {
-    return { kind: "subject", id: homeSubjectId(subjects, landing) };
-  }
-  return subjects.some((s) => s.id === route) ? { kind: "subject", id: route } : { kind: "unknown" };
+  return { kind: "subject", id: subjects.some((s) => s.id === route) ? route : homeSubjectId(subjects, landing) };
 }
 
 /** The tiles are only for a library with no subjects. */
 export function showsTiles(view: SubjectsView): boolean {
   return view.kind === "empty";
-}
-
-/** The route points at a subject that the loaded list does not have: it goes back to "" (which cannot be gone). */
-export function routeIsGone(route: string, subjects: readonly LibrarySubject[] | null): boolean {
-  return subjects !== null && isSubjectRoute(route) && !subjects.some((s) => s.id === route);
 }
 
 /** The subject on screen ("" for «Входящие», the tiles and the waiting states). */
@@ -148,20 +141,28 @@ export function inboxFiles(inbox: readonly LibraryMaterial[]): number {
   return inbox.filter((m) => !m.removed).length;
 }
 
-export function inboxEntry(files: number, current: boolean): InboxEntry {
-  const quiet = files <= 0;
+/**
+ * `known` is false while «Входящие» is not read yet or failed to load: then nothing is claimed (no number, not quiet),
+ * so an unknown state does not look like an empty inbox.
+ */
+export function inboxEntry(files: number, current: boolean, known = true): InboxEntry {
+  const empty = known && files <= 0;
+  const counted = known && files > 0;
   return {
     label: inboxLabel,
-    count: quiet ? "" : String(files),
-    quiet,
+    count: counted ? String(files) : "",
+    quiet: empty,
     current,
-    title: quiet ? inboxLabel : `${inboxLabel} · ${files}`,
+    title: counted ? `${inboxLabel} · ${files}` : inboxLabel,
   };
 }
 
 /** What «Входящие» says while it holds nothing, and how files get there. */
 export const emptyInboxText =
-  "Файлы без предмета появятся здесь: сюда попадает всё, что добавлено кнопкой «Добавить файл» или брошено на окно. Отсюда файл можно разложить по предметам.";
+  "Здесь собираются файлы без предмета: добавленные кнопкой «Добавить файл» или перетащенные в окно. Отсюда их можно разложить по предметам.";
+
+/** «Входящие» did not load: said instead of an empty list. */
+export const inboxFailedText = "Не удалось загрузить «Входящие».";
 
 /** The state that tells the page a new view started (the form, the notes and the loaded files of the previous one go). */
 export function viewKey(view: SubjectsView, route: string): string {

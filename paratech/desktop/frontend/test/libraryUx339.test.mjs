@@ -70,10 +70,10 @@ test("the view «Входящие» has no heading of its own (the head names it
   assert.match(full, /лаба1\.pdf/);
   assert.match(full, new RegExp(texts.inboxHint.slice(0, 30)), "the hint line stays under the rows");
   const empty = view([]);
-  assert.match(empty, /Файлы без предмета появятся здесь/);
+  assert.match(empty, /Здесь собираются файлы без предмета/);
   assert.doesNotMatch(empty, /<h2|<button|<ul/);
   assert.match(view([], { loading: true }), /Загрузка…/);
-  assert.doesNotMatch(view([], { loading: true }), /появятся/, "an empty list is not announced before the answer");
+  assert.doesNotMatch(view([], { loading: true }), /собираются/, "an empty list is not announced before the answer");
 });
 
 test("«Добавить файл» in the head: the tooltip says where the file goes, in «Входящие» and in a subject", () => {
@@ -310,8 +310,8 @@ test("a file that did not land: a warning line with the reason, «Разложи
 
 test("the inbox footer tells how to place a file and the grip has a tooltip", () => {
   // The cards are gone (TASK-341): the file is dragged onto a subject of the tree.
-  assert.match(texts.inboxHint, /Разложить можно кнопкой справа или перетащив значок файла на предмет в списке\.$/);
-  assert.equal(fileTexts.dragTitle, "Перетащите на предмет в списке");
+  assert.match(texts.inboxHint, /Разложить можно кнопкой справа или перетащив значок файла на предмет слева\.$/);
+  assert.equal(fileTexts.dragTitle, "Перетащите на предмет слева");
 });
 
 test("the tooltips of «Добавить файл» say where the file goes", () => {

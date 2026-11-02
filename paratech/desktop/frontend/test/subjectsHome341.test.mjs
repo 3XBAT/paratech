@@ -8,6 +8,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { initialRoute, routeToPage, routeToSubject } from "../.test-build/nav.js";
 import { currentRoute, goBack, goForward, newHistory, pushRoute } from "../.test-build/navHistory.js";
+import { texts } from "../.test-build/libraryView.js";
 import { keepScheduleReview } from "../.test-build/scheduleSubjectsView.js";
 import { keepTeacherFocus } from "../.test-build/teachersView.js";
 import {
@@ -22,13 +23,13 @@ import {
   opensNewPlace,
   readLastSubject,
   rememberSubject,
+  inboxFailedText,
   resolveView,
-  routeIsGone,
   shownSubjectId,
   showsTiles,
   viewKey,
 } from "../.test-build/subjectsHome.js";
-import { SubjectTree } from "../.test-build/pages/SubjectsParts.js";
+import { InboxList, LibraryActions, SubjectDetail, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
 
 const noop = () => undefined;
 const html = (el) => renderToStaticMarkup(el);
@@ -73,7 +74,10 @@ test("a route resolves to the subject, «Входящие», the remembered or f
   assert.deepEqual(resolveView("", list, "a"), { kind: "subject", id: "a" }, "no choice: the remembered subject");
   assert.deepEqual(resolveView("", list, ""), { kind: "subject", id: "b" }, "nothing remembered: the first");
   assert.deepEqual(resolveView("", list, "gone"), { kind: "subject", id: "b" }, "the remembered one is not listed any more: the first");
-  assert.deepEqual(resolveView("gone", list, "a"), { kind: "unknown" });
+  // A deleted subject in the route shows what "" shows; nothing is navigated (see the history test below).
+  assert.deepEqual(resolveView("gone", list, "a"), { kind: "subject", id: "a" }, "unknown route: the remembered subject");
+  assert.deepEqual(resolveView("gone", list, ""), { kind: "subject", id: "b" }, "unknown route, nothing remembered: the first");
+  assert.deepEqual(resolveView("gone", [], "a"), { kind: "empty" });
 });
 
 test("the tiles are shown only when there are no subjects", () => {
@@ -168,15 +172,18 @@ test("opening the section pushes nothing for the resolved subject: the same rout
   assert.equal(opensNewPlace(inbox, "a"), true);
 });
 
-test("a route to a deleted subject is dropped once and cannot loop", () => {
-  assert.equal(routeIsGone("gone", list), true);
-  assert.equal(routeIsGone("gone", []), true, "no subjects at all: the stale id goes too");
-  assert.equal(routeIsGone("gone", null), false, "not before the list is read");
-  assert.equal(routeIsGone("", list), false, "the target of the drop always resolves");
-  assert.equal(routeIsGone(inboxRoute, list), false);
-  assert.equal(routeIsGone("a", list), false);
-  // The page answers a gone route with onSelect(""), and "" is never gone: one step, no cycle.
-  assert.equal(routeIsGone(routeToSubject(initialRoute, "").subject, list), false);
+test("a route to a deleted subject shows the home subject and pushes no history entry, so «Назад» is not trapped", () => {
+  let hist = newHistory(routeToPage("subjects"));
+  hist = pushRoute(hist, routeToSubject(currentRoute(hist), "gone"));
+  assert.deepEqual(resolveView(currentRoute(hist).subject, list, "a"), { kind: "subject", id: "a" });
+  // The page no longer redirects: the shown subject is not a new place, a click on it adds nothing, «Назад» works.
+  const view = resolveView(currentRoute(hist).subject, list, "a");
+  assert.equal(opensNewPlace(view, "a"), false);
+  hist = goBack(hist);
+  assert.equal(currentRoute(hist).subject, "", "one step back leaves the stale route");
+  const page = src("pages/SubjectsPage.tsx");
+  assert.doesNotMatch(page, /routeIsGone|onSelect\(""\)/, "no redirect effect");
+  assert.doesNotMatch(src("subjectsHome.ts"), /routeIsGone|kind: "unknown"/);
 });
 
 test("the sentinel is a route of its own: a subject and the inbox differ, and a subject leaves the one-shot requests alone", () => {
@@ -201,6 +208,12 @@ test("«Входящие · N»: the count of files that are not deleted; with n
   assert.deepEqual(inboxEntry(0, true), { label: "Входящие", count: "", quiet: true, current: true, title: "Входящие" });
 });
 
+test("«Входящие» whose state is unknown (not read yet, or failed) claims nothing: no number, not quiet", () => {
+  assert.deepEqual(inboxEntry(0, false, false), { label: "Входящие", count: "", quiet: false, current: false, title: "Входящие" });
+  assert.deepEqual(inboxEntry(5, false, false), { label: "Входящие", count: "", quiet: false, current: false, title: "Входящие" }, "a stale list is not a count");
+  assert.equal(inboxEntry(5, false, true).count, "5");
+});
+
 function tree(over = {}) {
   return html(
     h(SubjectTree, { subjects: list, currentId: "b", counts: null, busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop, inbox: inboxEntry(2, false), onOpenInbox: noop, ...over }),
@@ -211,8 +224,31 @@ test("the tree starts with «Входящие» (before the first semester) and 
   const out = tree();
   assert.ok(out.indexOf("Входящие") >= 0);
   assert.ok(out.indexOf("Входящие") < out.indexOf("Осень 2026"), "before the first semester");
-  assert.match(out, /<button[^>]*class="ti inbox"[^>]*aria-label="Входящие · 2"[^>]*>.*?<span class="nm">Входящие<\/span><span class="cnt num">2<\/span><\/button>/);
+  // «has»: files to look at, drawn heavier with the count as a pill (styles.css); the label and the tooltip name the count.
+  assert.match(out, /<button[^>]*class="ti inbox has"[^>]*aria-label="Входящие · 2"[^>]*title="Входящие · 2"[^>]*>.*?<span class="nm">Входящие<\/span><span class="cnt num">2<\/span><\/button>/);
   assert.doesNotMatch(out, /ti inbox cur/);
+});
+
+test("the unknown state of «Входящие» in the tree: neither the emphasis nor the quiet look, no number", () => {
+  const out = tree({ inbox: inboxEntry(0, false, false) });
+  assert.match(out, /class="ti inbox"/);
+  assert.doesNotMatch(out, /ti inbox (has|quiet)/);
+  assert.match(out, /<span class="nm">Входящие<\/span><\/button>/);
+});
+
+test("the pill and the heavier name belong to «Входящие» with files only; the quiet one has neither", () => {
+  assert.doesNotMatch(tree({ inbox: inboxEntry(0, false) }), /ti inbox [^"]*has/);
+  const css = src("styles.css");
+  assert.match(css, /\.tree \.ti\.inbox\.has \{ font-weight: 600; \}/);
+  assert.match(css, /\.tree \.ti\.inbox\.has \.cnt \{[^}]*border-radius: 999px[^}]*background: var\(--fill\)[^}]*color: var\(--text\)/);
+});
+
+test("the folder counts of the tree are blank while the files are read, «—» only for a folder known to be empty", () => {
+  const open = (counts) => html(h(SubjectTree, { subjects: list, currentId: "b", counts, busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop }));
+  assert.doesNotMatch(open(null), /<span class="cnt num">—<\/span>/);
+  assert.match(open(null), /<span class="nm">Материалы<\/span><\/button>/, "no number after the folder");
+  assert.match(open(new Map([["b-f", 0]])), /<span class="cnt num">—<\/span>/);
+  assert.match(open(new Map([["b-f", 4]])), /<span class="cnt num">4<\/span>/);
 });
 
 test("with no files «Входящие» stays in the tree, quiet and without a count", () => {
@@ -223,7 +259,7 @@ test("with no files «Входящие» stays in the tree, quiet and without a 
 
 test("when «Входящие» is on screen it is the current item, no subject is, and «Папка» (of a subject) is not offered", () => {
   const out = tree({ currentId: "", inbox: inboxEntry(2, true) });
-  assert.match(out, /class="ti inbox cur"[^>]*aria-current="page"|aria-current="page"[^>]*class="ti inbox cur"/);
+  assert.match(out, /class="ti inbox cur has"[^>]*aria-current="page"/);
   assert.equal((out.match(/aria-current="page"/g) ?? []).length, 1);
   assert.equal((out.match(/class="ti fold"/g) ?? []).length, 0, "no folders: no subject is open");
   assert.doesNotMatch(out, />Папка</);
@@ -244,9 +280,35 @@ test("the state of the tree and of the semester headings stays: semesters are he
 // ---- texts ----
 
 test("the empty «Входящие» tells how files get there and what to do with them", () => {
-  assert.match(emptyInboxText, /^Файлы без предмета появятся здесь/);
-  assert.match(emptyInboxText, /Добавить файл/);
-  assert.match(emptyInboxText, /разложить по предметам/);
+  assert.equal(
+    emptyInboxText,
+    "Здесь собираются файлы без предмета: добавленные кнопкой «Добавить файл» или перетащенные в окно. Отсюда их можно разложить по предметам.",
+  );
+  assert.equal(inboxFailedText, "Не удалось загрузить «Входящие».");
+});
+
+test("a failed «Входящие» is not drawn as an empty one; the files of a subject keep no empty claim while unknown", () => {
+  const inboxHtml = (props) => html(h(InboxList, { materials: [], bare: true, ...props }));
+  assert.match(inboxHtml({}), /Здесь собираются файлы без предмета/);
+  assert.match(inboxHtml({ loading: true }), /Загрузка…/);
+  assert.equal(inboxHtml({ failed: true }), "", "failed: no «empty» text");
+  const detail = (props) => html(h(SubjectDetail, { subject: list[1], folderForm: false, busy: false, error: "", onCreateFolder: noop, onCancelFolder: noop, ...props }));
+  const loading = detail({ materials: null });
+  assert.doesNotMatch(loading, /пока нет файлов/);
+  assert.match(loading, /Загрузка…/);
+  assert.doesNotMatch(loading, /· 0 файлов/, "no count while unknown");
+  const failed = detail({ materials: null, failed: true });
+  assert.doesNotMatch(failed, /пока нет файлов|Загрузка…/);
+  assert.match(detail({ materials: [] }), /В этой папке пока нет файлов\./);
+  assert.match(detail({ materials: [] }), /· 0 файлов/);
+});
+
+test("the head of the library without subjects has no «База знаний» and «Билеты» (both are empty there)", () => {
+  const head = (props) => html(h(LibraryActions, { onOpen: noop, onAddFile: noop, addTip: "", busy: false, ...props }));
+  assert.match(head({}), /База знаний/);
+  assert.match(head({}), /Билеты/);
+  assert.doesNotMatch(head({ links: false }), /База знаний|Билеты/);
+  assert.match(head({ links: false }), /Добавить файл/);
 });
 
 // ---- the page and the window (source checks: no DOM harness) ----
@@ -254,11 +316,49 @@ test("the empty «Входящие» tells how files get there and what to do wi
 test("the page shows the tree for any route with subjects and the tiles only for none; no «Все предметы» button is left", () => {
   const page = src("pages/SubjectsPage.tsx");
   assert.doesNotMatch(page, /Все предметы|texts\.back|icon="back"/);
-  assert.match(page, /view\.kind === "empty"/);
+  assert.match(page, /showsTiles\(view\)/);
+  assert.doesNotMatch(page, /view\.kind === "empty" *\)/, "the tiles are decided by showsTiles");
   assert.match(page, /<EmptySubjects /);
   assert.equal((page.match(/<EmptySubjects /g) ?? []).length, 1, "the tiles are drawn in one place only");
   assert.match(page, /resolveView\(openId, subjects,/);
-  assert.match(page, /routeIsGone\(openId, subjects\)/);
+});
+
+test("the empty screen has «Добавить предмет» of EmptySubjects only: no «Предмет» button and no library links in its head", () => {
+  const page = src("pages/SubjectsPage.tsx");
+  assert.match(page, /busy=\{busy\} links=\{false\} \/>/);
+  assert.doesNotMatch(page, /addSubjectVariant|<Button/);
+});
+
+test("the schedule review keeps its state when the first subjects are made: one return, the same slot in both views", () => {
+  const page = src("pages/SubjectsPage.tsx");
+  // The empty view and the tree view are the last child of one <section>; the review is its 3rd child (after the
+  // optional head and the load error) in both, so React does not remount it when view.kind goes empty -> subject.
+  assert.equal((page.match(/\{reviewPanel\}/g) ?? []).length, 1, "drawn in one place only");
+  assert.equal((page.match(/<section className="page">/g) ?? []).length, 2, "the loading return and the one return of the views");
+  assert.match(page, /<section className="page">\s*\{tilesHead\}\s*\{loadFailed\}\s*\{reviewPanel\}\s*\{scheduleLines\}\s*\{tiles \? tilesBody : treeView\}\s*<\/section>/);
+  assert.match(page, /<ScheduleSubjectsReview\s+key="schedule-review"/, "and an explicit key besides");
+});
+
+test("a failed read of the files of a subject is one line under the head with «Повторить»; the load of «Входящие» likewise", () => {
+  const page = src("pages/SubjectsPage.tsx");
+  assert.match(page, /setFilesFailed\(true\)/);
+  assert.doesNotMatch(page, /setError\(texts\.filesFailed\)/, "not the shared error line");
+  assert.match(page, /<ErrorLine text=\{texts\.filesFailed\} onRefresh=\{refresh\} onRetry=\{refresh\} \/>/);
+  assert.match(page, /materials=\{materials\}\s+failed=\{filesFailed\}/, "null stays null: nothing is claimed about the folders");
+  assert.doesNotMatch(page, /materials \?\? \[\]/);
+  assert.match(page, /setInboxError\(true\)/);
+  assert.match(page, /<ErrorLine text=\{inboxFailedText\}/);
+  assert.match(page, /inboxEntry\(inboxFiles\(inbox\), view\.kind === "inbox", inboxLoaded && !inboxError\)/);
+  assert.equal(texts.filesFailed, "Не удалось загрузить файлы предмета.");
+});
+
+test("the tree is sticky with its own scroll, off in the narrow layout, and the .sheet is its only scroll ancestor", () => {
+  const css = src("styles.css");
+  assert.match(css, /\.tree \{ position: sticky; top: 16px; max-height: calc\(100vh - [^;]*; overflow: auto;/);
+  assert.match(css, /@container app \(max-width: 900px\) \{ \.tree \{ position: static;/);
+  assert.match(css, /\.subj \{[^}]*align-items: start;/, "the grid cell is as tall as the tree, so it can stick");
+  assert.match(css, /\.tree-cue \{ height: 36px;/, "the cue line has a fixed height");
+  assert.match(css, /@media \(forced-colors: active\) \{\s*\.tree \.ti\.cur \{ outline: 2px solid Highlight; \}\s*\.tree \.ti\.drop \{ outline: 2px solid Highlight;/);
 });
 
 test("the page remembers the shown subject, opens «Входящие» by the route and shows its hints there", () => {
@@ -279,10 +379,11 @@ test("«Добавить файл» in the head of a subject puts the file into 
 
 test("the schedule lines, the review and the load error sit above the tree, so they stay reachable", () => {
   const page = src("pages/SubjectsPage.tsx");
-  const treeStart = page.lastIndexOf('<div className="subj">');
+  const layout = page.indexOf("{tiles ? tilesBody : treeView}");
+  assert.ok(layout > 0);
   for (const piece of ["{loadFailed}", "{reviewPanel}", "{scheduleLines}"]) {
-    const at = page.lastIndexOf(piece, treeStart);
-    assert.ok(at > 0 && at < treeStart, `${piece} before the layout`);
+    const at = page.indexOf(piece);
+    assert.ok(at > 0 && at < layout, `${piece} before the layout`);
   }
   assert.match(page, /<ScheduleOfferLine /);
   assert.match(page, /<KeptUndoLine /);

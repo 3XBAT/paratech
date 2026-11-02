@@ -75,17 +75,29 @@ export function EmptySubjects(props: {
 
 /**
  * The buttons in the head of every screen of the section: «База знаний» and «Билеты» (the pages that belong to the
- * library), «Добавить файл» (its tooltip says where the file goes), and what the screen adds (`children`).
+ * library), «Добавить файл» (its tooltip says where the file goes), and what the screen adds (`children`). With
+ * `links={false}` (the library without subjects, where both pages are empty) only «Добавить файл» is left.
  */
-export function LibraryActions(props: { onOpen(id: PageId): void; onAddFile(): void; addTip: string; busy: boolean; children?: ReactNode }) {
+export function LibraryActions(props: {
+  onOpen(id: PageId): void;
+  onAddFile(): void;
+  addTip: string;
+  busy: boolean;
+  links?: boolean;
+  children?: ReactNode;
+}) {
   return (
     <div className="acts">
-      <Button icon="book" onClick={() => props.onOpen("knowledge")}>
-        {texts.knowledge}
-      </Button>
-      <Button icon="doc" onClick={() => props.onOpen("tickets")}>
-        Билеты
-      </Button>
+      {props.links !== false && (
+        <>
+          <Button icon="book" onClick={() => props.onOpen("knowledge")}>
+            {texts.knowledge}
+          </Button>
+          <Button icon="doc" onClick={() => props.onOpen("tickets")}>
+            Билеты
+          </Button>
+        </>
+      )}
       <Button icon="up" disabled={props.busy} title={props.addTip} onClick={props.onAddFile}>
         {texts.addFile}
       </Button>
@@ -158,14 +170,21 @@ export function SubjectTree(props: {
   const entry = props.inbox;
   return (
     <nav className="tree" aria-label={texts.title}>
+      {/* Above the items, in a line that is always there once a file can be dragged, so nothing shifts when the drag starts. */}
+      {drop !== undefined && drop.inboxIds.size > 0 && (
+        <p className="tree-cue small muted" aria-live="polite">
+          {drop.dragging ? (overName === undefined ? fileTexts.dropOnSubject : dropCue(overName)) : ""}
+        </p>
+      )}
       <ul className="lv0">
         {entry && (
           <li>
             <button
               type="button"
-              className={["ti", "inbox", entry.current ? "cur" : "", entry.quiet ? "quiet" : ""].filter((c) => c !== "").join(" ")}
+              className={["ti", "inbox", entry.current ? "cur" : "", entry.quiet ? "quiet" : "", entry.count !== "" ? "has" : ""].filter((c) => c !== "").join(" ")}
               aria-current={entry.current ? "page" : undefined}
               aria-label={entry.title}
+              title={entry.title}
               onClick={props.onOpenInbox}
             >
               <Icon name="down" />
@@ -208,7 +227,8 @@ export function SubjectTree(props: {
                                 <Icon name="folder" />
                                 <span className="nm">{folderTitle(f)}</span>
                                 {props.freshFolders?.has(f.id) === true && <span className="fresh">{texts.fresh}</span>}
-                                <span className="cnt num">{treeCount(props.counts?.get(f.id))}</span>
+                                {/* Blank while the files are being read (or failed to load): «—» would claim an empty folder. */}
+                                {props.counts !== null && <span className="cnt num">{treeCount(props.counts.get(f.id))}</span>}
                               </button>
                             </li>
                           ))}
@@ -222,8 +242,6 @@ export function SubjectTree(props: {
           );
         })}
       </ul>
-      {/* Under the list, so that the subjects do not move under the cursor when the drag starts. */}
-      {drop?.dragging === true && <p className="tree-cue small muted">{overName === undefined ? fileTexts.dropOnSubject : dropCue(overName)}</p>}
       <div className="tree-acts">
         <Button id={props.addId} size="sm" icon="plus" disabled={props.busy} onClick={props.onAddSubject}>
           {texts.addSubject}
@@ -302,7 +320,10 @@ export function OverviewSections(props: { overview: SubjectOverview }) {
 /** The page of a subject: its folders (system ones first), the files of each, «＋ Папка». */
 export function SubjectDetail(props: {
   subject: LibrarySubject;
-  materials: readonly LibraryMaterial[];
+  /** The files of the subject; null while they are being read or when reading failed (see `failed`). */
+  materials: readonly LibraryMaterial[] | null;
+  /** The files could not be read: the page says so once, so the folders neither say «пока нет файлов» nor «Загрузка…». */
+  failed?: boolean;
   /** The «новое» marks of this visit (TASK-227); none without the overview. */
   fresh?: FreshMarks;
   folderForm: boolean;
@@ -322,25 +343,30 @@ export function SubjectDetail(props: {
   return (
     <>
       {orderedFolders(subject.folders).map((f) => {
-        const files = filesOfFolder(props.materials, f.id);
+        const files = props.materials === null ? null : filesOfFolder(props.materials, f.id);
         const onAddFile = props.onAddFile;
         return (
           <section className="section" key={f.id} id={folderAnchor(f.id)}>
             <div className="sec-head">
               <h2 className="sec-h">
-                {folderTitle(f)} <span className="cnt num">· {folderCountText(files.length)}</span>
+                {folderTitle(f)} {files !== null && <span className="cnt num">· {folderCountText(files.length)}</span>}
                 {fresh.folders.has(f.id) && <span className="fresh">{texts.fresh}</span>}
               </h2>
               {onAddFile && <IconButton icon="plus" label={addToFolderLabel(folderTitle(f))} disabled={props.busy} onClick={() => onAddFile(f.id)} />}
             </div>
             {props.folderExtra?.(f.id)}
-            <Card className="lrows" label={folderTitle(f)}>
-              {files.length === 0 ? (
-                <p className="small muted empty-folder">{texts.emptyFolder}</p>
-              ) : (
-                <FileRows files={files} where="folder" fresh={fresh.materials} actions={props.actions} />
-              )}
-            </Card>
+            {/* Unknown files (loading, failed): no «пусто» claim; a failure is one line under the head of the page. */}
+            {files === null ? (
+              props.failed !== true && <p className="small muted empty-folder">{texts.loading}</p>
+            ) : (
+              <Card className="lrows" label={folderTitle(f)}>
+                {files.length === 0 ? (
+                  <p className="small muted empty-folder">{texts.emptyFolder}</p>
+                ) : (
+                  <FileRows files={files} where="folder" fresh={fresh.materials} actions={props.actions} />
+                )}
+              </Card>
+            )}
           </section>
         );
       })}
@@ -367,10 +393,12 @@ export function InboxList(props: {
   bare?: boolean;
   /** The first answer for «Входящие» has not come yet: an empty list is not announced as empty. */
   loading?: boolean;
+  /** Reading «Входящие» failed: the page says so with «Повторить», an empty list must not read as «nothing here». */
+  failed?: boolean;
 }) {
   const files = props.materials.filter((m) => !m.removed);
   if (files.length === 0) {
-    if (props.bare !== true) {
+    if (props.bare !== true || props.failed === true) {
       return null;
     }
     return <p className="muted inbox-empty">{props.loading === true ? texts.loading : emptyInboxText}</p>;

@@ -15,7 +15,7 @@ import {
   texts,
 } from "../libraryView.js";
 import type { PageId } from "../nav.js";
-import { addSubjectVariant, type Batch, type OfferState, offerChecking, offerStatus, showCheckFailed, type SubjectRef } from "../scheduleSubjectsView.js";
+import { type Batch, type OfferState, offerChecking, offerStatus, showCheckFailed, type SubjectRef } from "../scheduleSubjectsView.js";
 import {
   browserStore,
   inboxEntry,
@@ -23,15 +23,15 @@ import {
   inboxRoute,
   type Landing,
   landingFor,
+  inboxFailedText,
   opensNewPlace,
   rememberSubject,
   resolveView,
-  routeIsGone,
   shownSubjectId,
+  showsTiles,
   viewKey,
 } from "../subjectsHome.js";
 import { idleTeacher, TeacherFlow, type TeacherFocus, type TeacherState, teacherFocusStep, teacherStateFor } from "../teachersView.js";
-import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { AddFileLines, ErrorLine, UndoLines } from "./FileRows.js";
 import {
@@ -96,7 +96,9 @@ export function SubjectsPage(props: {
   const [subjects, setSubjects] = useState<LibrarySubject[] | null>(null);
   const [inbox, setInbox] = useState<LibraryMaterial[]>([]);
   const [inboxLoaded, setInboxLoaded] = useState(false); // the first answer for «Входящие» (a failure counts: nothing to wait for)
+  const [inboxError, setInboxError] = useState(false); // the last read of «Входящие» failed: its state is unknown
   const [materials, setMaterials] = useState<LibraryMaterial[] | null>(null);
+  const [filesFailed, setFilesFailed] = useState(false); // the last read of the open subject's files failed
   const [form, setForm] = useState<Form>("none");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -131,7 +133,7 @@ export function SubjectsPage(props: {
   const subjectRefs = useMemo<SubjectRef[]>(() => (subjects ?? []).map((s) => ({ id: s.id, name: s.name, aliases: s.aliases })), [subjects]);
   const reviewWasOpen = useRef(false);
   useEffect(() => {
-    // The panel closed: the focus goes back to the button that opened it, else to «Предмет», else to the title.
+    // The panel closed: the focus goes back to the button that opened it, else to «Предмет» of the tree, else to the title.
     if (review === null && reviewWasOpen.current) {
       (document.getElementById(offerButtonId) ?? document.getElementById(addSubjectId) ?? document.getElementById(titleId))?.focus();
     }
@@ -190,9 +192,13 @@ export function SubjectsPage(props: {
     api.materials("").then(
       (m) => {
         setInbox(m);
+        setInboxError(false);
         setInboxLoaded(true);
       },
-      () => setInboxLoaded(true),
+      () => {
+        setInboxError(true);
+        setInboxLoaded(true);
+      },
     );
     scheduleSubjects(callByName).then(
       (reply) => setOffer({ loaded: true, reply }),
@@ -261,6 +267,7 @@ export function SubjectsPage(props: {
     setDropError("");
     setDragging("");
     setMaterials(null);
+    setFilesFailed(false);
     flow.reset();
   }, [key, flow]);
 
@@ -292,8 +299,13 @@ export function SubjectsPage(props: {
     }
     let active = true;
     api.materials(subject.id).then(
-      (m) => active && setMaterials(m),
-      () => active && setError(texts.filesFailed),
+      (m) => {
+        if (active) {
+          setMaterials(m);
+          setFilesFailed(false);
+        }
+      },
+      () => active && setFilesFailed(true),
     );
     return () => {
       active = false;
@@ -311,14 +323,6 @@ export function SubjectsPage(props: {
       onTeacherFocusDone?.();
     }
   }, [teacherFocus, openId, subjects, known, flow, onTeacherFocusDone]);
-
-  // The route points at a subject that does not exist (any more): back to "", which always resolves (no loop).
-  const { onSelect } = props;
-  useEffect(() => {
-    if (routeIsGone(openId, subjects)) {
-      onSelect("");
-    }
-  }, [openId, subjects, onSelect]);
 
   const counts = useMemo(() => (subject && materials ? folderCounts(subject.folders, materials) : null), [subject, materials]);
 
@@ -498,18 +502,11 @@ export function SubjectsPage(props: {
   if (subjects === null) {
     return <section className="page">{loadError !== "" ? loadFailed : <p className="muted">{texts.loading}</p>}</section>;
   }
-  if (view.kind === "unknown") {
-    // The unknown id being dropped by the effect above: nothing flashes under a route that is going away.
-    return (
-      <section className="page">
-        <p className="muted">{texts.loading}</p>
-      </section>
-    );
-  }
 
   const scheduleGroups = offer.reply !== null && offerStatus(offer) === "groups" ? offer.reply.groups.length : 0;
   const reviewPanel = review !== null && (
     <ScheduleSubjectsReview
+      key="schedule-review"
       reply={review.reply}
       initialBatches={review.batches}
       subjects={subjectRefs}
@@ -531,45 +528,39 @@ export function SubjectsPage(props: {
     </>
   );
 
-  if (view.kind === "empty") {
-    // No subjects: the tiles with the ways to make the first ones, and «Входящие» above them when it holds files.
-    return (
-      <section className="page">
-        <div className="head">
-          <div>
-            <span className="label">Библиотека</span>
-            <h1 id={titleId} tabIndex={-1}>
-              {texts.title}
-            </h1>
-          </div>
-          <LibraryActions onOpen={props.onOpen} onAddFile={() => void addFile()} addTip={fileTexts.addToInboxTip} busy={busy}>
-            {/* One accent: here the empty state below has the primary action, an open review its own button. */}
-            <Button id={addSubjectId} variant={addSubjectVariant(0, review !== null)} icon="plus" disabled={busy} onClick={() => setForm("subject")}>
-              {texts.addSubject}
-            </Button>
-          </LibraryActions>
-        </div>
-        {loadFailed}
-        {subjectForm}
-        {reviewPanel}
-        {scheduleLines}
-        <InboxList materials={inbox} actions={inboxActions} />
-        {review === null && <EmptySubjects onAdd={() => setForm("subject")} offer={{ state: offer, onReview: openReview, onImport: () => props.onOpen("schedule"), onRetry: retryOffer, disabled: undoBusy }} />}
-        {note !== "" && (
-          <ResultLine kind="ok" role="status">
-            {note}
-          </ResultLine>
-        )}
-        {form !== "subject" && error !== "" && (
-          <ResultLine kind="fail" role="alert">
-            {error}
-          </ResultLine>
-        )}
-        {dropError !== "" && <ErrorLine text={dropError} onRefresh={refresh} onRetry={() => void cardDrop.again()} />}
-        {undoLines}
-      </section>
-    );
-  }
+  // No subjects: the tiles with the ways to make the first ones, and «Входящие» above them when it holds files. «Предмет»
+  // is not in the head (EmptySubjects owns «Добавить предмет»), nor are «База знаний» and «Билеты» (both are empty here).
+  const tiles = showsTiles(view);
+  const tilesHead = tiles && (
+    <div className="head">
+      <div>
+        <span className="label">Библиотека</span>
+        <h1 id={titleId} tabIndex={-1}>
+          {texts.title}
+        </h1>
+      </div>
+      <LibraryActions onOpen={props.onOpen} onAddFile={() => void addFile()} addTip={fileTexts.addToInboxTip} busy={busy} links={false} />
+    </div>
+  );
+  const tilesBody = (
+    <>
+      {subjectForm}
+      <InboxList materials={inbox} actions={inboxActions} />
+      {review === null && <EmptySubjects onAdd={() => setForm("subject")} offer={{ state: offer, onReview: openReview, onImport: () => props.onOpen("schedule"), onRetry: retryOffer, disabled: undoBusy }} />}
+      {note !== "" && (
+        <ResultLine kind="ok" role="status">
+          {note}
+        </ResultLine>
+      )}
+      {form !== "subject" && error !== "" && (
+        <ResultLine kind="fail" role="alert">
+          {error}
+        </ResultLine>
+      )}
+      {dropError !== "" && <ErrorLine text={dropError} onRefresh={refresh} onRetry={() => void cardDrop.again()} />}
+      {undoLines}
+    </>
+  );
 
   const tree = (
     <SubjectTree
@@ -584,7 +575,7 @@ export function SubjectsPage(props: {
         setError("");
         setForm("folder");
       }}
-      inbox={inboxEntry(inboxFiles(inbox), view.kind === "inbox")}
+      inbox={inboxEntry(inboxFiles(inbox), view.kind === "inbox", inboxLoaded && !inboxError)}
       onOpenInbox={openInbox}
       drop={{
         dragging: dragging !== "",
@@ -596,85 +587,95 @@ export function SubjectsPage(props: {
     />
   );
 
+  const treeView = (
+    <div className="subj">
+      {tree}
+      <div className="subj-main">
+        {view.kind === "inbox" && (
+          <>
+            <div className="head">
+              <div>
+                <h1>{texts.inbox}</h1>
+              </div>
+              <LibraryActions onOpen={props.onOpen} onAddFile={() => void addFile()} addTip={fileTexts.addToInboxTip} busy={busy} />
+            </div>
+            {subjectForm}
+            {inboxError && <ErrorLine text={inboxFailedText} onRefresh={load} onRetry={load} />}
+            {note !== "" && (
+              <ResultLine kind="ok" role="status">
+                {note}
+              </ResultLine>
+            )}
+            <InboxList materials={inbox} actions={inboxActions} bare loading={!inboxLoaded} failed={inboxError} />
+            {form !== "subject" && error !== "" && (
+              <ResultLine kind="fail" role="alert">
+                {error}
+              </ResultLine>
+            )}
+            {dropError !== "" && <ErrorLine text={dropError} onRefresh={refresh} onRetry={() => void cardDrop.again()} />}
+            {undoLines}
+          </>
+        )}
+        {view.kind === "subject" && subject !== null && (
+          <>
+            <div className="head">
+              <div>
+                <span className="label">{subject.semesterLabel || subject.semester}</span>
+                <h1>{subject.name}</h1>
+                {subject.aliases.length > 0 && (
+                  <p className="small muted sub-line">
+                    {texts.aliases}: {subject.aliases.join(", ")}
+                  </p>
+                )}
+                {schedule !== "" && <p className="small muted sub-line">{schedule}</p>}
+              </div>
+              <LibraryActions onOpen={props.onOpen} onAddFile={() => void addFileTo("")} addTip={fileTexts.addToMaterialsTip} busy={busy} />
+            </div>
+            {filesFailed && <ErrorLine text={texts.filesFailed} onRefresh={refresh} onRetry={refresh} />}
+            {addLines("")}
+            {subjectForm}
+            {overviewState.status === "failed" && (
+              <ResultLine kind="fail" role="alert">
+                {overviewState.error}
+              </ResultLine>
+            )}
+            <TeachersBlock key={subject.id} teachers={subject.teachers} state={teacherStateFor(teacher, subject.id)} on={teacherActions} />
+            {overview && <OverviewSections overview={overview} />}
+            <SubjectDetail
+              subject={subject}
+              materials={materials}
+              failed={filesFailed}
+              fresh={fresh}
+              folderForm={form === "folder"}
+              busy={busy}
+              error={error}
+              onCreateFolder={(n) => void createFolder(n)}
+              onCancelFolder={() => setForm("none")}
+              actions={mat.actions}
+              onAddFile={(folderId) => void addFileTo(folderId)}
+              folderExtra={(folderId) => addLines(folderId)}
+            />
+            {form !== "folder" && form !== "subject" && error !== "" && (
+              <ResultLine kind="fail" role="alert">
+                {error}
+              </ResultLine>
+            )}
+            {undoLines}
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  // One return for both views: the schedule review sits at the same place of the same element, so it keeps its state
+  // when the first subjects are made from it (the empty view turns into the tree view without remounting it).
   return (
     <section className="page">
+      {tilesHead}
       {loadFailed}
       {reviewPanel}
       {scheduleLines}
-      <div className="subj">
-        {tree}
-        <div className="subj-main">
-          {view.kind === "inbox" && (
-            <>
-              <div className="head">
-                <div>
-                  <h1>{texts.inbox}</h1>
-                </div>
-                <LibraryActions onOpen={props.onOpen} onAddFile={() => void addFile()} addTip={fileTexts.addToInboxTip} busy={busy} />
-              </div>
-              {subjectForm}
-              {note !== "" && (
-                <ResultLine kind="ok" role="status">
-                  {note}
-                </ResultLine>
-              )}
-              <InboxList materials={inbox} actions={inboxActions} bare loading={!inboxLoaded} />
-              {form !== "subject" && error !== "" && (
-                <ResultLine kind="fail" role="alert">
-                  {error}
-                </ResultLine>
-              )}
-              {dropError !== "" && <ErrorLine text={dropError} onRefresh={refresh} onRetry={() => void cardDrop.again()} />}
-              {undoLines}
-            </>
-          )}
-          {view.kind === "subject" && subject !== null && (
-            <>
-              <div className="head">
-                <div>
-                  <span className="label">{subject.semesterLabel || subject.semester}</span>
-                  <h1>{subject.name}</h1>
-                  {subject.aliases.length > 0 && (
-                    <p className="small muted sub-line">
-                      {texts.aliases}: {subject.aliases.join(", ")}
-                    </p>
-                  )}
-                  {schedule !== "" && <p className="small muted sub-line">{schedule}</p>}
-                </div>
-                <LibraryActions onOpen={props.onOpen} onAddFile={() => void addFileTo("")} addTip={fileTexts.addToMaterialsTip} busy={busy} />
-              </div>
-              {addLines("")}
-              {subjectForm}
-              {overviewState.status === "failed" && (
-                <ResultLine kind="fail" role="alert">
-                  {overviewState.error}
-                </ResultLine>
-              )}
-              <TeachersBlock key={subject.id} teachers={subject.teachers} state={teacherStateFor(teacher, subject.id)} on={teacherActions} />
-              {overview && <OverviewSections overview={overview} />}
-              <SubjectDetail
-                subject={subject}
-                materials={materials ?? []}
-                fresh={fresh}
-                folderForm={form === "folder"}
-                busy={busy}
-                error={error}
-                onCreateFolder={(n) => void createFolder(n)}
-                onCancelFolder={() => setForm("none")}
-                actions={mat.actions}
-                onAddFile={(folderId) => void addFileTo(folderId)}
-                folderExtra={(folderId) => addLines(folderId)}
-              />
-              {form !== "folder" && form !== "subject" && error !== "" && (
-                <ResultLine kind="fail" role="alert">
-                  {error}
-                </ResultLine>
-              )}
-              {undoLines}
-            </>
-          )}
-        </div>
-      </div>
+      {tiles ? tilesBody : treeView}
     </section>
   );
 }

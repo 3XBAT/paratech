@@ -29,8 +29,8 @@ export const fileTexts = {
   pickSubject: "Выберите предмет",
   newSubject: "Новый предмет…",
   noFolder: "—",
-  dragTitle: "Перетащите на предмет в списке",
-  dropOnSubject: "Перетащите файл на предмет в списке",
+  dragTitle: "Перетащите на предмет слева",
+  dropOnSubject: "Перетащите файл на предмет слева",
   addToInboxTip: "Файл попадёт во «Входящие»",
   addToMaterialsTip: "Файл попадёт в «Материалы»",
 } as const;

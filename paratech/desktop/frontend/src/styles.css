@@ -87,7 +87,12 @@ html, body, #root { height: 100%; }
 .rcp-choose legend { margin: 0 0 4px; padding: 0; font-weight: 600; }
 .rcp-choose .ag-opt span { overflow-wrap: anywhere; }
 .rcp-refusal .acts { margin-top: 8px; }
-.tree { font-size: 13.5px; line-height: 18px; }
+/* The tree stays in view while the content scrolls (a long «Входящие» has its drop targets on screen). It sticks to the
+   scrollport of .sheet (the only scroll ancestor; .screen, .page and the grid do not clip), 16px below its top, and scrolls
+   itself when taller than the window (100vh minus the shell's 8px top padding and 16px above and below). The padding
+   with the negative margin keeps the rings of .cur and .drop from being clipped by the overflow. */
+.tree { position: sticky; top: 16px; max-height: calc(100vh - 8px - 32px); overflow: auto; padding: 3px; margin: -3px; font-size: 13.5px; line-height: 18px; }
+@container app (max-width: 900px) { .tree { position: static; max-height: none; overflow: visible; } }
 .tree ul { list-style: none; margin: 0; padding: 0; }
 .tree .ti { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text); font: inherit; text-align: left; white-space: nowrap; }
 .tree button.ti { cursor: pointer; }
@@ -106,9 +111,17 @@ html, body, #root { height: 100%; }
 /* «Входящие» (TASK-341) is the first item and stays when empty, only quiet. A subject takes a dragged file of «Входящие»:
    the children do not take the pointer, so the cue does not flicker when it moves over the icon and the name. */
 .tree .ti.inbox.quiet, .tree .ti.inbox.quiet > .i { color: var(--muted); }
+/* With files it is the one thing to notice: heavier name, the count as a filled pill. */
+.tree .ti.inbox.has { font-weight: 600; }
+.tree .ti.inbox.has .cnt { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--fill); color: var(--text); font-weight: 600; text-align: center; box-shadow: inset 0 0 0 1px var(--edge); }
 .tree button.ti > * { pointer-events: none; }
 .tree button.ti.drop { box-shadow: 0 0 0 2px var(--accent-fill); }
-.tree-cue { margin: 8px 0 0; padding: 0 8px; }
+/* The drag cue is above the items, in two lines of reserved height: nothing moves when the drag starts or the subject changes. */
+.tree-cue { height: 36px; margin: 0 0 8px; padding: 0 8px; overflow: hidden; }
+@media (forced-colors: active) {
+  .tree .ti.cur { outline: 2px solid Highlight; }
+  .tree .ti.drop { outline: 2px solid Highlight; outline-offset: 2px; }
+}
 .inbox-empty { margin: 0; padding: 12px 16px; max-width: 56ch; }
 .tree-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--sep); }
 .lrows { display: block; }
