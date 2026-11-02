@@ -51,7 +51,7 @@ func TestQueryArguments(t *testing.T) {
 	}
 
 	// A planned answer_question keeps its question; the call matches it exactly.
-	steps, err := parsePlanSteps([]byte(`[{"tool":"answer_question","arguments":{"question":"Что такое ряд?","scope":"all"}}]`))
+	steps, err := parsePlanSteps([]byte(`[{"tool":"answer_question","arguments":{"question":"Что такое ряд?","scope":"all"}}]`), CatalogVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
