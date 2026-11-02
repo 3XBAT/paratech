@@ -80,7 +80,7 @@ type draftTurn struct {
 
 // blocked tells whether a draft of the kind reply is dropped.
 func (t *draftTurn) blocked(reply bool) bool {
-	return t.cut && !(reply && t.replyLive)
+	return t.cut && (!reply || !t.replyLive)
 }
 
 // callDraft is the throttle of one call: texts wait for the timer when a draft was emitted less than agentDraftEvery
