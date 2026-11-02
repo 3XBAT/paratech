@@ -74,8 +74,8 @@ func NewByStudent(spec StudentSpec, now time.Time) (*Assignment, error) {
 }
 
 // StudentDue is the deadline the student named: date (YYYY-MM-DD) at timeOfDay (HH:MM, 24 h) in loc, or 20:00 of that
-// day without a time (DefaultDueHour, DefaultDueMinute). No date is no deadline (zero); a time without a date wraps ErrInvalidTime, a malformed date
-// ErrInvalidDue.
+// day without a time (DefaultDueHour, DefaultDueMinute). No date is no deadline (zero); a time without a date wraps
+// ErrInvalidTime, a malformed date ErrInvalidDue.
 func StudentDue(date, timeOfDay string, loc *time.Location) (time.Time, error) {
 	switch {
 	case date == "" && timeOfDay != "":
