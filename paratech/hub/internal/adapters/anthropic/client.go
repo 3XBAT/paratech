@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,16 +27,32 @@ const (
 const (
 	messagesPath = "/v1/messages"
 	apiVersion   = "2023-06-01"
+	// maxBasePath bounds the path of the base URL; a gateway prefix is short.
+	maxBasePath = 256
 )
 
 // ErrInvalidOptions means New got options it cannot work with.
 var ErrInvalidOptions = errors.New("invalid anthropic options")
 
+// Auth selects the header that carries the API key.
+type Auth string
+
+// Auth modes. The empty value is AuthXAPIKey.
+const (
+	// AuthXAPIKey sends the key in x-api-key (the Anthropic API).
+	AuthXAPIKey Auth = "x-api-key"
+	// AuthBearer sends the key in Authorization: Bearer (gateways, like ANTHROPIC_AUTH_TOKEN of Claude Code).
+	AuthBearer Auth = "bearer"
+)
+
 // Options configure a Client.
 type Options struct {
 	// APIKey is the provider key from the server configuration (secret).
 	APIKey string
-	// BaseURL is the absolute http(s) URL of the API without path, query or user info, e.g. https://api.anthropic.com.
+	// Auth is the header of the key; empty means AuthXAPIKey.
+	Auth Auth
+	// BaseURL is the absolute http(s) URL of the API without query, fragment or user info, e.g.
+	// https://api.anthropic.com or https://gw.example.ru/anthropic; /v1/messages is appended to its path.
 	BaseURL string
 	// Timeout bounds one call, on top of the caller's context.
 	Timeout time.Duration
@@ -48,7 +65,7 @@ type Options struct {
 
 // String prints the options without the key.
 func (o Options) String() string {
-	return fmt.Sprintf("{APIKey:%s BaseURL:%s Timeout:%s}", redacted(o.APIKey), o.BaseURL, o.Timeout)
+	return fmt.Sprintf("{APIKey:%s Auth:%s BaseURL:%s Timeout:%s}", redacted(o.APIKey), o.Auth.printable(), o.BaseURL, o.Timeout)
 }
 
 // GoString is String for %#v.
@@ -56,13 +73,14 @@ func (o Options) GoString() string { return "anthropic.Options" + o.String() }
 
 // LogValue is String for slog handlers that do not use fmt.
 func (o Options) LogValue() slog.Value {
-	return slog.GroupValue(slog.String("api_key", redacted(o.APIKey)), slog.String("base_url", o.BaseURL),
-		slog.Duration("timeout", o.Timeout))
+	return slog.GroupValue(slog.String("api_key", redacted(o.APIKey)), slog.String("auth", o.Auth.printable()),
+		slog.String("base_url", o.BaseURL), slog.Duration("timeout", o.Timeout))
 }
 
 // Client calls the Messages API. It is safe for concurrent use.
 type Client struct {
 	key      string
+	auth     Auth
 	endpoint string
 	timeout  time.Duration
 	http     *http.Client
@@ -75,6 +93,13 @@ type Client struct {
 func New(o Options) (*Client, error) {
 	if !validKey(o.APIKey) {
 		return nil, fmt.Errorf("%s: %w: the API key must be non-empty printable ASCII without spaces", opNew, ErrInvalidOptions)
+	}
+	auth := o.Auth
+	if auth == "" {
+		auth = AuthXAPIKey
+	}
+	if auth != AuthXAPIKey && auth != AuthBearer {
+		return nil, fmt.Errorf("%s: %w: the auth mode must be %s or %s", opNew, ErrInvalidOptions, AuthXAPIKey, AuthBearer)
 	}
 	if o.Timeout <= 0 {
 		return nil, fmt.Errorf("%s: %w: the timeout must be above 0", opNew, ErrInvalidOptions)
@@ -93,6 +118,7 @@ func New(o Options) (*Client, error) {
 	}
 	return &Client{
 		key:      o.APIKey,
+		auth:     auth,
 		endpoint: endpoint,
 		timeout:  o.Timeout,
 		log:      log,
@@ -106,7 +132,7 @@ func New(o Options) (*Client, error) {
 
 // String prints the client without the key. Value receivers, so a dereferenced client is redacted too.
 func (c Client) String() string {
-	return fmt.Sprintf("anthropic.Client{Endpoint:%s Timeout:%s APIKey:%s}", c.endpoint, c.timeout, redacted(c.key))
+	return fmt.Sprintf("anthropic.Client{Endpoint:%s Auth:%s Timeout:%s APIKey:%s}", c.endpoint, c.auth, c.timeout, redacted(c.key))
 }
 
 // GoString is String for %#v.
@@ -114,8 +140,8 @@ func (c Client) GoString() string { return c.String() }
 
 // LogValue is String for slog handlers that do not use fmt.
 func (c Client) LogValue() slog.Value {
-	return slog.GroupValue(slog.String("endpoint", c.endpoint), slog.Duration("timeout", c.timeout),
-		slog.String("api_key", redacted(c.key)))
+	return slog.GroupValue(slog.String("endpoint", c.endpoint), slog.String("auth", string(c.auth)),
+		slog.Duration("timeout", c.timeout), slog.String("api_key", redacted(c.key)))
 }
 
 // Complete sends one Messages API call. The deadline is the earlier of ctx and the client timeout. A failure is a
@@ -173,7 +199,7 @@ func (c *Client) post(ctx context.Context, body []byte, accept string, read func
 	if err != nil {
 		return permanent("request build failed")
 	}
-	httpReq.Header.Set("x-api-key", c.key)
+	c.authorize(httpReq.Header)
 	httpReq.Header.Set("anthropic-version", apiVersion)
 	httpReq.Header.Set("content-type", "application/json")
 	httpReq.Header.Set("accept", accept)
@@ -193,6 +219,15 @@ func (c *Client) post(ctx context.Context, body []byte, accept string, read func
 		return interruptedError(ctx, callCtx)
 	}
 	return perr
+}
+
+// authorize puts the key in exactly one header of the mode; every request goes through post and so through here.
+func (c *Client) authorize(h http.Header) {
+	if c.auth == AuthBearer {
+		h.Set("Authorization", "Bearer "+c.key)
+		return
+	}
+	h.Set("x-api-key", c.key)
 }
 
 // fail adds the operation name; errors.Is/As still see the ProviderError.
@@ -246,10 +281,46 @@ func messagesURL(base string) (string, error) {
 		return "", errors.New("the base URL must not contain user info")
 	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
 		return "", errors.New("the base URL must not contain a query or fragment")
-	case u.Path != "" && u.Path != "/":
-		return "", errors.New("the base URL must not contain a path")
 	}
-	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: messagesPath}).String(), nil
+	prefix, ok := basePath(u)
+	if !ok {
+		return "", errors.New("the base URL path must be segments of letters, digits and -._~ without dot segments or escapes")
+	}
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: prefix + messagesPath}).String(), nil
+}
+
+// basePath returns the gateway prefix of u without its trailing slash ("" for none). Only plain segments of
+// unreserved characters pass: no percent escapes (an encoded slash or dot), no empty, "." or ".." segment, no
+// backslash, so the endpoint path is exactly what the operator wrote.
+func basePath(u *url.URL) (string, bool) {
+	p := strings.TrimSuffix(u.Path, "/")
+	if p == "" {
+		return "", u.RawPath == ""
+	}
+	if u.RawPath != "" || len(p) > maxBasePath || !strings.HasPrefix(p, "/") {
+		return "", false
+	}
+	for _, seg := range strings.Split(p[1:], "/") {
+		if seg == "" || seg == "." || seg == ".." || strings.TrimLeft(seg, unreservedChars) != "" {
+			return "", false
+		}
+	}
+	return p, true
+}
+
+// unreservedChars are the unreserved characters of RFC 3986.
+const unreservedChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+
+// printable shows only a known auth mode; anything else could be a misplaced key.
+func (a Auth) printable() string {
+	switch a {
+	case "", AuthXAPIKey:
+		return string(AuthXAPIKey)
+	case AuthBearer:
+		return string(AuthBearer)
+	default:
+		return "(invalid)"
+	}
 }
 
 // validKey accepts printable ASCII without spaces, so the key is a valid header value.

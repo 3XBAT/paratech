@@ -41,6 +41,10 @@ hash, an upper-bound reservation and a deadline below the reservation TTL.
   anything unknown are `internal`.
 - **Logs:** one line per call (outcome, operation, alias, reservation, token counts, duration); never texts, output or keys.
 - `CompleteStream` stays unimplemented: the provider port has no streaming yet.
+- **Provider gateway** (*amended by TASK-085*). `HUB_ANTHROPIC_BASE_URL` may carry a plain path prefix (a gateway such as
+  `https://gw.example.ru/anthropic` -> `.../anthropic/v1/messages`); `HUB_ANTHROPIC_AUTH` = `x-api-key` (default) or `bearer`
+  (`Authorization: Bearer`, like `ANTHROPIC_AUTH_TOKEN` in Claude Code). The key goes in exactly one header; redirects stay
+  refused. Setup: `paratech/README.md`, «Hub LLM provider».
 
 ## Accepted gaps
 - A provider failure after it generated output ("answer interrupted", network error after send, refusal) is released, not

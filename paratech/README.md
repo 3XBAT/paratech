@@ -96,12 +96,24 @@ through its allowlist and never takes a model id or URL from a client. Settings 
 | Env | Flag | Default | Rule |
 |---|---|---|---|
 | `HUB_ANTHROPIC_API_KEY` | none (env only) | none | required to serve (the `keys` commands do not need it); secret, never printed |
-| `HUB_ANTHROPIC_BASE_URL` | `-anthropic-base-url` | `https://api.anthropic.com` | https; http only to a loopback host (local fake) |
+| `HUB_ANTHROPIC_BASE_URL` | `-anthropic-base-url` | `https://api.anthropic.com` | https; http only to a loopback host (local fake); may have a plain gateway path, `/v1/messages` is appended; no user info, query or fragment |
+| `HUB_ANTHROPIC_AUTH` | `-anthropic-auth` | `x-api-key` | header of the key: `x-api-key`, or `bearer` for `Authorization: Bearer <key>`; another value stops `serve` |
 | `HUB_LLM_TIMEOUT` | `-llm-timeout` | `5m` | 10s..10m, at most half of `HUB_QUOTA_RESERVATION_TTL` |
 | `HUB_LLM_MODELS` | `-llm-models` | `default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:4096` | `alias=model-id:max_output_tokens[,...]`; config checks the syntax, the alias, model id and cap rules are checked at startup |
 | `HUB_PROVIDER_STREAM` | `-provider-stream` | `true` | `CompleteStream` and `AgentStepStream` stream from the provider (a JSON answer from a buffering gateway is sent as one delta, or as the step result alone); `HUB_PROVIDER_STREAM=false` or `-provider-stream=false` makes one unary call and sends the whole answer (ADR-0026) |
 
 A requested `max_output_tokens` of 0 means the alias cap; a larger value is clamped to it.
+
+Gateway (a proxy of the Messages API that takes the key as a Bearer token, like `ANTHROPIC_AUTH_TOKEN` in Claude Code):
+
+```
+HUB_ANTHROPIC_BASE_URL=https://gw.example.ru/anthropic   # calls https://gw.example.ru/anthropic/v1/messages
+HUB_ANTHROPIC_AUTH=bearer                                # Authorization: Bearer <key>, no x-api-key
+HUB_ANTHROPIC_API_KEY=<gateway token>
+```
+
+The path is plain segments of letters, digits and `-._~` (no `..`, `//`, `%`-escapes or backslashes, up to 256 characters);
+give it without `/v1`. The key goes in exactly one header, redirects are refused in both modes.
 
 ## Hub LLM gateway
 `GatewayService.Complete` (ADR-0010): rate limit per API key, validation (1 MiB payload), reservation of the most the call may
