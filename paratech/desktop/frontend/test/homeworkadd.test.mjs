@@ -204,7 +204,7 @@ test("the form shows its fields, subjects as text nodes and the two buttons", ()
 
 test("the time field opens with 20:00 shown; left alone it sends that default, cleared it sends nothing (TASK-343)", () => {
   assert.equal(emptyAddForm.time, "20:00");
-  assert.equal(addTexts.timeHint, "Если очистить поле, срок — 20:00.");
+  assert.equal(addTexts.timeHint, "По умолчанию — 20:00.");
   const html = renderToStaticMarkup(
     h(AddAssignmentDialog, { api: { createAssignment: () => Promise.reject(new Error("x")) }, library: { subjects: () => Promise.resolve([]) }, initialSubjects: [], onCreated: () => undefined, onClose: () => undefined }),
   );

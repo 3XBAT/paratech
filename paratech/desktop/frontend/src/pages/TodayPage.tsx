@@ -133,7 +133,7 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
   }
 
   const queue = queueLine(recordings ?? [], []);
-  const nearest = screen === null ? "" : nearestDeadlineText(screen.burning);
+  const nearest = screen === null ? "" : nearestDeadlineText(screen.burning, new Date());
 
   // The toast is outside .today: that is a size container, which would make it the containing block of the toast.
   return (

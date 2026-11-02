@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import server from "react-dom/server";
 import {
+  applyEditChange,
   changeOutcome,
   changeProblemText,
   changeTexts,
@@ -163,6 +164,28 @@ test("a time without a date asks for the date at the date field", () => {
   assert.equal(validateEditForm(f).due, "Укажите дату.");
   assert.equal(validateEditForm({ ...f, time: "99:00" }).due, undefined);
   assert.ok(validateEditForm({ ...f, time: "99:00" }).time);
+});
+
+test("an emptied date with the prefilled 20:00 means «no deadline», not an error (TASK-343)", () => {
+  const f = { title: "Задача", subjectId: "", date: "", time: "20:00", note: "" };
+  assert.deepEqual(validateEditForm(f), {});
+  // Another time without a date still asks for the date.
+  assert.equal(validateEditForm({ ...f, time: "20:01" }).due, "Укажите дату.");
+  // The default time is not sent when there is no date; with a date it is sent as shown.
+  assert.deepEqual(editRequest(item(), f), { id: "ui-1", version: 3, title: "Задача", note: "", subjectId: "", date: "", time: "" });
+  assert.equal(editRequest(item(), { ...f, date: "2026-10-29" }).time, "20:00");
+  assert.equal(editRequest(item(), { ...f, time: "09:00" }).time, "09:00");
+});
+
+test("setting a date in an empty-date edit form fills the empty time with 20:00 (TASK-343)", () => {
+  const f = { title: "Задача", subjectId: "", date: "", time: "", note: "" };
+  assert.deepEqual(applyEditChange(f, { date: "2026-10-29" }), { ...f, date: "2026-10-29", time: "20:00" });
+  // A time the student typed is kept; a changed date or an emptied time later does not refill.
+  assert.equal(applyEditChange({ ...f, time: "09:00" }, { date: "2026-10-29" }).time, "09:00");
+  assert.equal(applyEditChange({ ...f, date: "2026-10-29", time: "" }, { date: "2026-10-30" }).time, "");
+  assert.equal(applyEditChange({ ...f, date: "2026-10-29" }, { time: "" }).time, "");
+  assert.equal(applyEditChange(f, { title: "Другое" }).time, "");
+  assert.equal(applyEditChange({ ...f, date: "2026-10-29" }, { date: "" }).date, "");
 });
 
 test("a stored subject with no library match is reported; the first of equal names is taken", () => {

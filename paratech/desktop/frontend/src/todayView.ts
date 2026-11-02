@@ -102,8 +102,8 @@ export function dayAndTime(d: Date): string {
 
 /**
  * The deadline as one tidy phrase, always with the time (a date alone reads as «до конца дня»): «до сб, 24 окт., 18:30».
- * With `now` a coming today reads «до 20:00» and tomorrow «завтра до 18:30»; a moment that has passed keeps the full
- * date and time (never «сегодня»). "" when unknown.
+ * With `now`: a coming today reads «сегодня до 20:00», tomorrow «завтра до 18:30», a moment that has passed
+ * «просрочено · пт, 23 окт., 20:00» (never «до …» for the past). "" when unknown.
  */
 export function dueText(due: string, now?: Date): string {
   const d = parseMoment(due);
@@ -111,9 +111,12 @@ export function dueText(due: string, now?: Date): string {
     return "";
   }
   if (now !== undefined) {
+    if (d.getTime() <= now.getTime()) {
+      return `${daysLeftText(-1)} · ${dayAndTime(d)}`;
+    }
     const days = daysBetween(d, now);
-    if (days === 0 && d.getTime() > now.getTime()) {
-      return `до ${timeText(due)}`;
+    if (days === 0) {
+      return `сегодня до ${timeText(due)}`;
     }
     if (days === 1) {
       return `завтра до ${timeText(due)}`;
@@ -264,22 +267,27 @@ export interface DeadlineLine {
 }
 
 /**
- * The chip of a «Горит» row. Today and tomorrow carry the time, a date alone reads as «до конца дня»: «сегодня до 20:00»,
- * «завтра до 18:30». A moment that has passed reads «просрочено» even when the core still counts the day as today.
+ * The chip of a «Горит» row. The days come from the local `now` (a stale snapshot never says «завтра» for today); the
+ * core's daysLeft is only the fallback for an unreadable due. A date alone reads as «до конца дня», so the time is
+ * always there: «сегодня до 20:00», «завтра до 18:30», «через 3 дня, до 18:30». A moment that has passed reads «просрочено».
  */
 export function deadlineChip(b: Pick<TodayDeadline, "due" | "daysLeft">, now: Date): string {
   const d = parseMoment(b.due);
-  if (d !== null && d.getTime() <= now.getTime()) {
+  if (d === null) {
+    return daysLeftText(b.daysLeft);
+  }
+  if (d.getTime() <= now.getTime()) {
     return daysLeftText(-1);
   }
+  const days = daysBetween(d, now);
   const time = timeText(b.due);
-  if (time !== "" && b.daysLeft === 0) {
+  if (days === 0) {
     return `сегодня до ${time}`;
   }
-  if (time !== "" && b.daysLeft === 1) {
+  if (days === 1) {
     return `завтра до ${time}`;
   }
-  return daysLeftText(b.daysLeft);
+  return `${daysLeftText(days)}, до ${time}`;
 }
 
 export function deadlineLine(b: TodayDeadline, now: Date): DeadlineLine {
@@ -287,9 +295,14 @@ export function deadlineLine(b: TodayDeadline, now: Date): DeadlineLine {
   return { key: b.assignmentId, weekday, date, title: titleOf(b.title), subject: b.subject.trim(), chip: deadlineChip(b, now), urgent: b.urgent };
 }
 
-/** «Ближайший срок — пт, 23.10, 20:00» from the deadlines of the week (the earliest one); "" when there is none. */
-export function nearestDeadlineText(burning: readonly Pick<TodayDeadline, "due">[]): string {
-  const dues = burning.map((b) => ({ due: b.due, at: parseMoment(b.due) })).filter((b) => b.at !== null);
+/**
+ * «Ближайший срок — пт, 23.10, 20:00» from the deadlines of the week (the earliest one); "" when there is none. With
+ * `now` the deadlines that have passed are skipped.
+ */
+export function nearestDeadlineText(burning: readonly Pick<TodayDeadline, "due">[], now?: Date): string {
+  const dues = burning
+    .map((b) => ({ due: b.due, at: parseMoment(b.due) }))
+    .filter((b) => b.at !== null && (now === undefined || b.at.getTime() > now.getTime()));
   if (dues.length === 0) {
     return "";
   }

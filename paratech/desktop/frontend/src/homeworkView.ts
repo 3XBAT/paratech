@@ -357,7 +357,7 @@ export const addTexts = {
   noSubject: "Без предмета",
   due: "Срок",
   time: "Время",
-  timeHint: "Если очистить поле, срок — 20:00.",
+  timeHint: "По умолчанию — 20:00.",
   note: "Заметка",
   add: "Добавить",
   adding: "Добавление…",
@@ -657,17 +657,32 @@ export function editForm(a: AssignmentItem, subjects: readonly LibrarySubject[])
   return { title: a.title, subjectId: editSubjectId(a, subjects), date, time, note: a.description };
 }
 
-/** Like validateAddForm, but an assignment may have no deadline: an empty date is left to the core. */
+/**
+ * Like validateAddForm, but an assignment may have no deadline: an empty date with an empty or the app-filled default
+ * time (DEFAULT_DUE_TIME) means «no deadline». Another time without a date asks for the date.
+ */
 export function validateEditForm(f: AddForm): AddFieldErrors {
   const errors = validateAddForm(f);
   if (f.date === "" && errors.due !== undefined) {
-    if (f.time !== "" && errors.time === undefined) {
+    if (f.time !== "" && f.time !== DEFAULT_DUE_TIME && errors.time === undefined) {
       errors.due = "Укажите дату.";
     } else {
       delete errors.due;
     }
   }
   return errors;
+}
+
+/**
+ * The edit form after a change. When the date goes from empty to set and the time is empty, the time becomes
+ * DEFAULT_DUE_TIME: the same as the add form shows.
+ */
+export function applyEditChange(f: AddForm, patch: Partial<AddForm>): AddForm {
+  const next = { ...f, ...patch };
+  if (f.date === "" && next.date !== "" && next.time === "") {
+    next.time = DEFAULT_DUE_TIME;
+  }
+  return next;
 }
 
 /**
@@ -684,7 +699,9 @@ export function subjectMissingText(name: string): string {
 }
 
 export function editRequest(a: { id: string; version: number }, f: AddForm): EditAssignmentRequest {
-  return { id: a.id, version: a.version, title: f.title.trim(), note: f.note, subjectId: f.subjectId, date: f.date, time: f.time };
+  // No date and the app-filled default time: no deadline, so no time is sent.
+  const time = f.date === "" && f.time === DEFAULT_DUE_TIME ? "" : f.time;
+  return { id: a.id, version: a.version, title: f.title.trim(), note: f.note, subjectId: f.subjectId, date: f.date, time };
 }
 
 const editFieldTexts: Readonly<Record<"title" | "note" | "due" | "time", string>> = {

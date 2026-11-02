@@ -7,7 +7,7 @@ import { dueText } from "../todayView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 
-/** The text of the button's due date: «до сб, 24 окт., 20:00», "" when unknown. */
+/** The text of the button's due date: «до сб, 24 окт., 20:00», «сегодня до 20:00», «просрочено · …»; "" when unknown. */
 export function calendarDue(due: string, now?: Date): string {
   return dueText(due, now);
 }

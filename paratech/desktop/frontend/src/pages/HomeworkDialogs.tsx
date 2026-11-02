@@ -18,6 +18,7 @@ import {
   changeTexts,
   editForm,
   editOutcome,
+  applyEditChange,
   editRequest,
   editSubjectId,
   emptyAddForm,
@@ -528,7 +529,7 @@ export function EditAssignmentDialog(props: {
       touchedSubject.current = true;
       setTouched(true);
     }
-    setForm((f) => ({ ...f, ...patch }));
+    setForm((f) => applyEditChange(f, patch));
     setGeneral("");
     if (field !== undefined) {
       setErrors((e) => ({ ...e, [field]: undefined }));
