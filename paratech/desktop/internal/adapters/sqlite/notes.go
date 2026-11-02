@@ -25,7 +25,7 @@ type NoteRepository struct{ db *DB }
 // NewNoteRepository returns the note repository of db.
 func NewNoteRepository(db *DB) *NoteRepository { return &NoteRepository{db: db} }
 
-// Get loads a note; a missing one wraps shared.ErrNotFound.
+// Get loads a note; one missing or under a removed subject wraps shared.ErrNotFound.
 func (r *NoteRepository) Get(ctx context.Context, id shared.NoteID) (*note.Note, error) {
 	q := r.db.Queries(ctx)
 	row, err := q.GetNote(ctx, string(id))

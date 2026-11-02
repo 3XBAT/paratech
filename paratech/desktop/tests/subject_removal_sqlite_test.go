@@ -209,8 +209,9 @@ func TestSubjectRemovalHidesEverythingAndRestoreBringsItBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The note, and the files not in it: the nested one, the plan and the one in the note of «Химия».
-	if got.Notes != 1 || got.Files != 3 {
+	// The note, and the files not in a note: the nested one and the plan; the one in the note of «Химия» stays shown
+	// there, so it does not go.
+	if got.Notes != 1 || got.Files != 2 {
 		t.Fatalf("DiscardSubject = notes %d, files %d", got.Notes, got.Files)
 	}
 

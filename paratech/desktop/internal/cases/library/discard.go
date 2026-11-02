@@ -87,22 +87,33 @@ func (s *Service) saveSeen(ctx context.Context, sub *subject.Subject) error {
 	return nil
 }
 
-// contents counts what goes with the subject id: its active notes, and its active files that are no part of them
-// (a part filed under another subject stays where it is and is not counted).
+// contents counts what goes with the subject id: its active notes, and its active files that are no part of an active
+// note. A part of its own note goes with the note; a part of a note of another subject stays visible there (the
+// readers keep it, see MaterialRepository), so neither is a file that goes. A part filed under another subject stays
+// where it is and is not counted either.
 func (s *Service) contents(ctx context.Context, id shared.SubjectID) (notes, files int, err error) {
 	inNotes := map[shared.MaterialID]bool{}
 	if s.notes != nil {
-		list, err := s.notes.ListBySubject(ctx, id)
+		// The notes of every subject: a few dozen subjects, read once per click of the student.
+		subs, err := s.subjects.List(ctx)
 		if err != nil {
 			return 0, 0, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
-		for _, n := range list {
-			if !n.Active() {
-				continue
+		for _, sub := range subs {
+			list, err := s.notes.ListBySubject(ctx, sub.ID())
+			if err != nil {
+				return 0, 0, fmt.Errorf("%w: %w", ErrUnavailable, err)
 			}
-			notes++
-			for _, p := range n.Parts() {
-				inNotes[p] = true
+			for _, n := range list {
+				if !n.Active() {
+					continue
+				}
+				if sub.ID() == id {
+					notes++
+				}
+				for _, p := range n.Parts() {
+					inNotes[p] = true
+				}
 			}
 		}
 	}

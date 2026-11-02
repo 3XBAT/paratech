@@ -137,6 +137,39 @@ func TestDiscardSubjectHidesEverythingAndRestoreBringsItBack(t *testing.T) {
 	}
 }
 
+// A file of the subject that is a part of an active note of another subject stays visible there: it does not go, so
+// it is not counted; a part of a removed note of another subject is a file that goes.
+func TestDiscardSubjectKeepsPartsOfOtherNotes(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	phys, chem := createSubject(t, e, "Физика"), createSubject(t, e, "Химия")
+	place := func(text string) shared.MaterialID {
+		m, err := e.svc.Place(ctx, importText(t, e, text).ID(), phys.ID(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m.ID()
+	}
+	inOther, inGone := place("общая часть"), place("часть удалённого конспекта")
+	place("свой файл")
+	gone := newTestNote(t, "n2", chem.ID(), inGone)
+	if _, err := gone.Remove(t0); err != nil {
+		t.Fatal(err)
+	}
+	withNotes(t, e, &fakeNotes{list: map[shared.SubjectID][]*note.Note{
+		chem.ID(): {newTestNote(t, "n1", chem.ID(), inOther), gone},
+		phys.ID(): {},
+	}})
+
+	sub, err := e.svc.subject(ctx, phys.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.svc.DiscardSubject(ctx, phys.ID(), sub.Version())
+	if err != nil || got.Notes != 0 || got.Files != 2 {
+		t.Fatalf("DiscardSubject = notes %d, files %d, %v; want 0 notes, 2 files", got.Notes, got.Files, err)
+	}
+}
+
 func TestRestoreSubjectAfterTheWindow(t *testing.T) {
 	e, ctx := newEnv(t), context.Background()
 	phys := createSubject(t, e, "Физика")
