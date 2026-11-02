@@ -39,10 +39,9 @@ const (
 // Hub's planner alias is still capped at 4096, so a reply of catalog v7 (up to 4000 characters) is not asked more here.
 const MaxOutputTokens = 4096
 
-// historyLimit is the most entries read for a step: enough whole requests (a text, then an echo and results per
-// step) for the texts of the earlier window plus the current request, which may run a plan of MaxPlanRunSteps steps.
-// An earlier request that ran a long plan can still push older texts out of the window; the loss stays bounded.
-const historyLimit = thread.MaxHistoryTurns*(2*thread.MaxSteps+1) + 2*thread.MaxPlanRunSteps + 1
+// historyLimit is the most entries read for a step (thread.HistoryReadLimit, which the context ring reads too). An
+// earlier request that ran a long plan can still push older texts out of the window; the loss stays bounded.
+const historyLimit = thread.HistoryReadLimit
 
 // Service runs the steps of agent requests. Operations on threads run one at a time; Stop does not wait for a running
 // step (see Stop).
@@ -110,7 +109,8 @@ func (c *change) takeResults(s *Service) {
 // scope of the context chip and the mentions that still exist, and runs its steps until the request needs the Driver
 // (calls to run) or the student (a plan, questions), or ends. A previous request that waits for the student is
 // cancelled; an archived chat comes back from the archive (thread.Ask). A named chat that does not exist wraps
-// shared.ErrNotFound.
+// shared.ErrNotFound. With RestartFrom the request drops the requests from that number on (thread.RestartFrom): the
+// marks are stored in the same transaction as the new request.
 func (s *Service) Ask(ctx context.Context, in AskInput) (Step, error) {
 	text, err := values.NewStudentText(in.Text, in.Uploads)
 	if err != nil {
@@ -120,6 +120,10 @@ func (s *Service) Ask(ctx context.Context, in AskInput) (Step, error) {
 		if err := in.ThreadID.Validate(); err != nil {
 			return Step{}, fmt.Errorf("%s: %w: %w", opAsk, ErrInvalidInput, err)
 		}
+	}
+	// A restart names its chat: the current chat may have changed since the student chose the message.
+	if in.RestartFrom < 0 || (in.RestartFrom > 0 && in.ThreadID == "") {
+		return Step{}, fmt.Errorf("%s: %w: restart from request %d of chat %q", opAsk, ErrInvalidInput, in.RestartFrom, in.ThreadID)
 	}
 	mentions, err := s.existing(ctx, in.Mentions)
 	if err != nil {
@@ -149,13 +153,17 @@ func (s *Service) asked(ctx context.Context, in AskInput, text string, mentions 
 
 	c := &change{th: th}
 	req := thread.Request{Scope: in.Scope, Mentions: mentions, Text: in.Text}
-	err = th.Ask(req, now)
+	start := func() error { return th.Ask(req, now) }
+	if in.RestartFrom > 0 {
+		start = func() error { return th.RestartFrom(in.RestartFrom, req, now) }
+	}
+	err = start()
 	if errors.Is(err, thread.ErrResultsPending) {
 		// Calls of the previous request that were never answered (a plan left open, a late Driver) are closed first,
 		// so the history keeps every echo followed by its results.
 		th.Abandon(values.RefuseNotDone, now)
 		c.takeResults(s)
-		err = th.Ask(req, now)
+		err = start()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", opAsk, err)

@@ -116,18 +116,18 @@ func (s *Service) Fill(ctx context.Context, id shared.ThreadID) (Fill, error) {
 	return f, nil
 }
 
-// fillOf is the fill of the chat's next request: the history from HistoryFrom on (a restarted request sends only its
-// own), with the summary. An empty chat holds no conversation: 0 %, nothing read.
+// fillOf is the fill of the chat's next request (thread.NextFill), with the summary. The history is read from the
+// first request with the step's limit: the entries from HistoryFrom on are the ones a step reads, and the older ones
+// show an Overflow when a restart left them out. An empty chat holds no conversation: 0 %, nothing read.
 func (s *Service) fillOf(ctx context.Context, th *thread.Thread) (Fill, error) {
-	turn, ok := th.Turn()
-	if !ok {
+	if _, ok := th.Turn(); !ok {
 		return Fill{Level: thread.FillNormal}, nil
 	}
-	entries, err := s.history.Since(ctx, th.ID(), th.HistoryFrom(), thread.HistoryReadLimit)
+	entries, err := s.history.Since(ctx, th.ID(), 1, thread.HistoryReadLimit)
 	if err != nil {
 		return Fill{}, err
 	}
-	f := thread.Fill(entries, turn.Number()+1, th.Summary())
+	f := th.NextFill(entries)
 	return Fill{Percent: f.Percent(), Level: f.Level(), Overflow: f.Overflow}, nil
 }
 

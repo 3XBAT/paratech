@@ -26,5 +26,7 @@
 // requests as their texts and replies only (the Hub keeps the model turn of an echo only for a while), and Fill tells
 // how much of that window the next request would use. A final request freezes its reply line (FreezeReply), kept
 // after its steps are purged. When the window would be full, CompactionPlan names the oldest pairs that become the
-// chat's summary (Compact, ADR-0028): untrusted model text, sent only as the first turn of the window.
+// chat's summary (Compact, ADR-0028): untrusted model text, sent only as the first turn of the window. «Начать заново
+// отсюда» → «Скрыть» (RestartFrom) starts a request that drops the earlier ones from a number on: the store marks
+// them (DroppedBy), nothing is deleted, and Window, Fill and the chat view skip them.
 package thread

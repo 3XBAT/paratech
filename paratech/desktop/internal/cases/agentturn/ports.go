@@ -72,7 +72,8 @@ type ThreadRepository interface {
 	Current(ctx context.Context) (*thread.Thread, error)
 
 	// Save inserts a new thread (version 0) or updates a stored one with a compare-and-swap on its version; a stale
-	// version or an id stored first is shared.ErrVersionConflict.
+	// version or an id stored first is shared.ErrVersionConflict. A current request that dropped earlier ones
+	// (TurnState.DropsFrom) marks them dropped by its number in the same write.
 	Save(ctx context.Context, t *thread.Thread) error
 
 	// ListRunning returns the threads whose current request is PLANNING or EXECUTING, for startup recovery.
@@ -84,7 +85,8 @@ type History interface {
 	// Append adds an entry of request turn at the end of the thread's history.
 	Append(ctx context.Context, id shared.ThreadID, turn int, entry values.HistoryTurn) error
 
-	// Since returns the last limit entries of the requests numbered from on, oldest first.
+	// Since returns the last limit entries of the requests numbered from on, oldest first; dropped requests are left
+	// out before the limit.
 	Since(ctx context.Context, id shared.ThreadID, from, limit int) ([]values.HistoryEntry, error)
 }
 

@@ -225,8 +225,26 @@ func TestAgentAskChatAndMentions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `{"text":"","subjectId":"","lessonId":"","assignmentId":"","screen":"","threadId":"","mentions":null}`; string(b) != want {
+	if want := `{"text":"","subjectId":"","lessonId":"","assignmentId":"","screen":"","threadId":"","mentions":null,"restartFrom":0}`; string(b) != want {
 		t.Errorf("input JSON = %s", b)
+	}
+	if got.RestartFrom != 0 {
+		t.Errorf("an ordinary Ask restarts from %d", got.RestartFrom)
+	}
+}
+
+// «Скрыть»: restartFrom reaches the Driver with the chat; the JSON of the panel decodes into it.
+func TestAgentAskRestartFrom(t *testing.T) {
+	s, d, _, _ := newAgent(t, readyLink())
+	var in AgentAskInput
+	if err := json.Unmarshal([]byte(`{"text":"иначе","threadId":"th7","restartFrom":3}`), &in); err != nil {
+		t.Fatal(err)
+	}
+	if res := s.Ask(context.Background(), in); res.Problem != "" || len(d.calls) != 1 {
+		t.Fatalf("Ask = %+v, calls %d", res, len(d.calls))
+	}
+	if got := d.calls[0].ask; got.ThreadID != "th7" || got.RestartFrom != 3 || got.Text != "иначе" {
+		t.Fatalf("driver got %+v", got)
 	}
 }
 
@@ -275,6 +293,12 @@ func TestAgentRefusesMalformedInput(t *testing.T) {
 		{"mention label", func(s *AgentService) AgentResult {
 			bidi := "Ма" + string(rune(0x202e)) + "тан" // a right-to-left override inside the name
 			return s.Ask(context.Background(), AgentAskInput{Text: "x", Mentions: []AgentMention{{Kind: "subject", ID: "s1", Label: bidi}}})
+		}},
+		{"negative restart", func(s *AgentService) AgentResult {
+			return s.Ask(context.Background(), AgentAskInput{Text: "x", ThreadID: "th1", RestartFrom: -1})
+		}},
+		{"restart without a chat", func(s *AgentService) AgentResult {
+			return s.Ask(context.Background(), AgentAskInput{Text: "x", RestartFrom: 2})
 		}},
 		{"too many mentions", func(s *AgentService) AgentResult {
 			ms := make([]AgentMention, values.MaxMentions+1)
