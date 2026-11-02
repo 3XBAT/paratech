@@ -122,7 +122,7 @@ Not stated for the API. (Only the docs site redirects: `docs.claude.com` -> `pla
 
 ## Notes for the adapter
 
-- Send `x-api-key`, `anthropic-version: 2023-06-01`, `content-type: application/json`. Do not send `temperature`/`top_p`/`top_k` (400 on current models unless default).
+- Send the key in `x-api-key` (or `Authorization: Bearer` in the gateway mode, see «Gateway» below), `anthropic-version: 2023-06-01`, `content-type: application/json`. Do not send `temperature`/`top_p`/`top_k` (400 on current models unless default).
 - Parse errors by HTTP status first, then `error.type`; keep `request-id` (header) for logs. Treat unknown `error.type` / `stop_reason` / block types as possible (docs say enums grow).
 - Retry policy (our choice, from doc facts): 429 is transient unless `error.details.error_code` = `enforced_spend_limit_reached`; `retry-after`, when present, says how long to wait. Also retry 500, 504, 529 and connection errors with backoff; do not retry 400/401/402/403/404/413 or a 429 with `enforced_spend_limit_reached`.
 - Billing: settle quota from `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` and `output_tokens` (nullable cache fields -> 0).
@@ -131,6 +131,17 @@ Not stated for the API. (Only the docs site redirects: `docs.claude.com` -> `pla
 - **Our inference, not a doc fact:** Go's `http.Client` strips only `Authorization`/`Cookie`-like sensitive headers on cross-domain redirects; a custom `x-api-key` header is forwarded. Since the docs never mention API redirects, the client should refuse redirects (`CheckRedirect` returning `http.ErrUseLastResponse` or an error) so the key cannot leak.
 - Cap response body read size (our inference; no response size limit is documented, max output is 128K tokens).
 - Used by `hub/internal/adapters/anthropic` (TASK-034): instructions go to `system`, untrusted data to the one user text block; 8 MiB response cap; redirects refused; a 200 answer cut off mid-body is the transient "answer interrupted" (probably billed).
+
+### Gateway (TASK-085)
+
+Gateways that proxy the Messages API often sit under a path and take the key as a Bearer token (Claude Code: `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`). The API accepts `Authorization: Bearer <key>` as well as `x-api-key` (section 1). Hub settings:
+
+```
+HUB_ANTHROPIC_BASE_URL=https://gw.example.ru/anthropic   # -> POST https://gw.example.ru/anthropic/v1/messages
+HUB_ANTHROPIC_AUTH=bearer                                # default x-api-key
+```
+
+Our rules: the key goes in exactly one of the two headers; the path is plain unreserved segments (no `..`, `//`, `%`-escapes, backslashes), given without `/v1`; redirects stay refused (Go strips `Authorization` only on a cross-host redirect, not on a same-host one).
 
 ## 7. Tool use and prompt caching (used by TASK-114, `Step`)
 
