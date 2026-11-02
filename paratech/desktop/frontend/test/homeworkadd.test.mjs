@@ -202,6 +202,19 @@ test("the form shows its fields, subjects as text nodes and the two buttons", ()
   assert.equal(emptyAddForm.subjectId, "");
 });
 
+test("the time field opens with 20:00 shown; left alone it sends that default, cleared it sends nothing (TASK-343)", () => {
+  assert.equal(emptyAddForm.time, "20:00");
+  assert.equal(addTexts.timeHint, "Если очистить поле, срок — 20:00.");
+  const html = renderToStaticMarkup(
+    h(AddAssignmentDialog, { api: { createAssignment: () => Promise.reject(new Error("x")) }, library: { subjects: () => Promise.resolve([]) }, initialSubjects: [], onCreated: () => undefined, onClose: () => undefined }),
+  );
+  assert.match(html, /type="time"[^>]*value="20:00"|value="20:00"[^>]*type="time"/);
+  assert.ok(html.includes(addTexts.timeHint));
+  // The form stays valid with the field cleared (the core then takes 20:00 as before).
+  assert.deepEqual(validateAddForm({ ...valid, time: "" }), {});
+  assert.deepEqual(validateAddForm({ ...emptyAddForm, title: "Задача", date: "2026-10-28" }), {});
+});
+
 test("«Горит на 7 дней» offers the button only with a handler", () => {
   const without = renderToStaticMarkup(h(BurningSection, { burning: [], onOpenAssignment: () => undefined }));
   assert.ok(!without.includes(addTexts.button));

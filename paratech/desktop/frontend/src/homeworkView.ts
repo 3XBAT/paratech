@@ -357,7 +357,7 @@ export const addTexts = {
   noSubject: "Без предмета",
   due: "Срок",
   time: "Время",
-  timeHint: "Необязательно. Если время не указано, срок — 20:00.",
+  timeHint: "Если очистить поле, срок — 20:00.",
   note: "Заметка",
   add: "Добавить",
   adding: "Добавление…",
@@ -373,7 +373,15 @@ export interface AddForm {
   note: string;
 }
 
-export const emptyAddForm: AddForm = { title: "", subjectId: "", date: "", time: "", note: "" };
+/**
+ * The time a deadline given as a date alone gets. Mirrors the Go constant in domain/coursework/assignment: keep them
+ * in step.
+ */
+export const DEFAULT_DUE_TIME = "20:00";
+
+// The time field starts with the default shown (a native time input has no placeholder): left alone, it stores the same
+// 20:00 as an empty field would.
+export const emptyAddForm: AddForm = { title: "", subjectId: "", date: "", time: DEFAULT_DUE_TIME, note: "" };
 
 /** subject: only the edit form (subject_not_found). */
 export type AddFieldErrors = Partial<Record<"title" | "note" | "due" | "time" | "subject", string>>;
@@ -610,22 +618,15 @@ function two(n: number): string {
 }
 
 /**
- * The time a deadline given as a date alone gets. Mirrors the Go constant in domain/coursework/assignment: keep them
- * in step.
- */
-export const DEFAULT_DUE_TIME = "20:00";
-
-/**
- * The deadline as the form fields: local date YYYY-MM-DD and time HH:MM; DEFAULT_DUE_TIME (20:00) is the default for a
- * date without a time, so it shows as no time. Any other time, 23:59 included, is shown and kept.
+ * The deadline as the form fields: local date YYYY-MM-DD and time HH:MM. The time is always shown, DEFAULT_DUE_TIME
+ * (20:00) included: the student sees the moment the deadline has, not an empty field.
  */
 export function dueFields(due: string): { date: string; time: string } {
   const d = new Date(due);
   if (due === "" || Number.isNaN(d.getTime())) {
     return { date: "", time: "" };
   }
-  const time = `${two(d.getHours())}:${two(d.getMinutes())}`;
-  return { date: `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`, time: time === DEFAULT_DUE_TIME ? "" : time };
+  return { date: `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`, time: `${two(d.getHours())}:${two(d.getMinutes())}` };
 }
 
 /**

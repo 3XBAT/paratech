@@ -204,12 +204,17 @@ test("parseDraft reads the draft event: ids, turn and texts as strings only", ()
 test("parseUpdate reads the assignments of a reply; null or missing is an empty list, a broken line drops the card", () => {
   const reply = { kind: "reply", plan: null, questions: null, jobId: "", artifact: "", target: null, actionId: "", answerId: "", cannotDo: null, text: "Два задания.", stopReason: "" };
   const lines = [
-    { id: "a2", title: "Эссе", subjectId: "", due: "" },
-    { id: "a1", title: "Лабораторная 2", subjectId: "s1", due: "2026-10-24" },
+    { id: "a2", title: "Эссе", subjectId: "", due: "", time: "" },
+    { id: "a1", title: "Лабораторная 2", subjectId: "s1", due: "2026-10-24", time: "18:30" },
   ];
   const u = parseUpdate(update({ cards: [{ ...reply, assignments: lines }, { ...reply, assignments: null }, reply] }));
   assert.equal(u.cards.length, 3);
   assert.deepEqual(u.cards[0].assignments, lines);
+  // An older core sends no time: it reads as "".
+  const older = parseUpdate(update({ cards: [{ ...reply, assignments: [{ id: "a1", title: "Т", subjectId: "", due: "2026-10-24" }] }] }));
+  assert.equal(older.cards[0].assignments[0].time, "");
+  const badTime = parseUpdate(update({ cards: [{ ...reply, assignments: [{ id: "a1", title: "Т", subjectId: "", due: "", time: 9 }] }] }));
+  assert.equal(badTime.cards.length, 0);
   assert.deepEqual(u.cards[1].assignments, []);
   assert.deepEqual(u.cards[2].assignments, []);
   const broken = parseUpdate(update({ cards: [{ ...reply, assignments: [{ id: "a1", title: 5, subjectId: "", due: "" }] }] }));

@@ -8,7 +8,7 @@ import { askMentions, type MentionPill, mentionPills } from "./agentMentions.js"
 import { approveLabel, type PlanProgress, planProgress, stepMarks, type StepMark, planWindow } from "./planView.js";
 import { type Entry, isBusyRefused, isRunning, orderedEntries } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
-import { daysLeftText, dueText, parseMoment } from "./todayView.js";
+import { dayText, daysBetween, daysLeftText, dueText, parseMoment, timeText } from "./todayView.js";
 
 /** One row of the assignment list of a reply card. */
 export interface AssignmentRow {
@@ -16,7 +16,7 @@ export interface AssignmentRow {
   title: string;
   /** "" when the subject is unknown. */
   subject: string;
-  /** «сегодня», «завтра», «до сб, 24 окт.» or «просрочено»; "" without a date. */
+  /** «сегодня до 20:00», «завтра до 18:30», «до сб, 24 окт., 18:30» or «просрочено»; "" without a date. */
   due: string;
   /** Overdue: drawn with the urgent colour of «Сегодня». */
   overdue: boolean;
@@ -32,16 +32,43 @@ function parseDue(s: string): Date | null {
   return m === null ? parseMoment(s) : new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
 }
 
-/** The row of an assignment; the subject name comes from the student's subjects, the due date is read against `now`. */
+/** The local day `d` at "HH:MM"; null when the time is empty or unreadable. */
+function atTime(d: Date, time: string): Date | null {
+  const m = /^(\d{2}):(\d{2})$/.exec(time);
+  if (m === null || Number(m[1]) > 23 || Number(m[2]) > 59) {
+    return null;
+  }
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), Number(m[1]), Number(m[2]));
+}
+
+/**
+ * The row of an assignment; the subject name comes from the student's subjects, the deadline moment (date and time)
+ * is read against `now`: «сегодня до 20:00», «завтра до 18:30», «до сб, 24 окт., 18:30»; a moment that has passed
+ * reads «просрочено». Without a time (an older core) only the day counts.
+ */
 export function assignmentRow(a: AssignmentLineView, subjects: Readonly<Record<string, string>>, now: Date): AssignmentRow {
   const d = parseDue(a.due);
   let due = "";
   let overdue = false;
   if (d !== null) {
-    const days = Math.round((dayStart(d) - dayStart(now)) / 86_400_000);
-    overdue = days < 0;
-    // The ISO text of a local date reads back as the same local day.
-    due = days < 2 ? daysLeftText(days) : dueText(d.toISOString());
+    const days = daysBetween(d, now);
+    const at = atTime(d, a.time);
+    if (at === null) {
+      overdue = days < 0;
+      due = days < 2 ? daysLeftText(days) : `до ${dayText(d)}`;
+    } else {
+      const time = timeText(at.toISOString());
+      overdue = at.getTime() <= now.getTime();
+      if (overdue) {
+        due = daysLeftText(-1);
+      } else if (days === 0) {
+        due = `сегодня до ${time}`;
+      } else if (days === 1) {
+        due = `завтра до ${time}`;
+      } else {
+        due = dueText(at.toISOString());
+      }
+    }
   }
   const subject = Object.prototype.hasOwnProperty.call(subjects, a.subjectId) ? subjects[a.subjectId] : "";
   return { id: a.id, title: a.title.trim() === "" ? noTitleLabel : a.title, subject, due, overdue };
@@ -64,7 +91,7 @@ export function addedAssignmentText(a: AddedAssignmentView, subjects: Readonly<R
   if (d !== null) {
     const days = Math.round((dayStart(d) - dayStart(now)) / 86_400_000);
     // «до пт, 30 окт.» without «до ».
-    const day = days === 0 || days === 1 ? daysLeftText(days) : dueText(d.toISOString()).slice(3);
+    const day = days === 0 || days === 1 ? daysLeftText(days) : dayText(d);
     parts.push(`срок ${day}${a.time === "" ? "" : `, ${a.time}`}`);
   }
   return `${addedAssignmentPrefix}: ${parts.join(" · ")}`;

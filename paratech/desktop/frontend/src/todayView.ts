@@ -83,10 +83,43 @@ export function dayTitle(day: string): string {
   return d === null ? "" : `${weekdaysLong[d.getDay()]}, ${d.getDate()} ${monthsGen[d.getMonth()]}`;
 }
 
-/** «до сб, 24 окт.» for a due date, "" when unknown. */
-export function dueText(due: string): string {
+const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+/** Whole local calendar days from `now` to `d` (negative for the past). */
+export function daysBetween(d: Date, now: Date): number {
+  return Math.round((dayStart(d) - dayStart(now)) / 86_400_000);
+}
+
+/** «сб, 24 окт.»: the day of a moment in the local zone. */
+export function dayText(d: Date): string {
+  return `${weekdaysShort[d.getDay()]}, ${d.getDate()} ${monthsShort[d.getMonth()]}`;
+}
+
+/** «сб, 24 окт., 18:30»: the day and the time of a moment in the local zone. */
+export function dayAndTime(d: Date): string {
+  return `${dayText(d)}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * The deadline as one tidy phrase, always with the time (a date alone reads as «до конца дня»): «до сб, 24 окт., 18:30».
+ * With `now` a coming today reads «до 20:00» and tomorrow «завтра до 18:30»; a moment that has passed keeps the full
+ * date and time (never «сегодня»). "" when unknown.
+ */
+export function dueText(due: string, now?: Date): string {
   const d = parseMoment(due);
-  return d === null ? "" : `до ${weekdaysShort[d.getDay()]}, ${d.getDate()} ${monthsShort[d.getMonth()]}`;
+  if (d === null) {
+    return "";
+  }
+  if (now !== undefined) {
+    const days = daysBetween(d, now);
+    if (days === 0 && d.getTime() > now.getTime()) {
+      return `до ${timeText(due)}`;
+    }
+    if (days === 1) {
+      return `завтра до ${timeText(due)}`;
+    }
+  }
+  return `до ${dayAndTime(d)}`;
 }
 
 /** The weekday and the date of a deadline row: «пт» over «23.10». */
@@ -144,10 +177,10 @@ export function dayMonthText(s: string): string {
 }
 
 /**
- * «1 задание · до сб, 24 окт.»; "" when no homework was found. When all of it is marked done (done is the count of
- * the done ones) the deadline is of no use: «1 задание · выполнено».
+ * «1 задание · до сб, 24 окт., 20:00»; "" when no homework was found. When all of it is marked done (done is the count of
+ * the done ones) the deadline is of no use: «1 задание · выполнено». `now` makes today and tomorrow read shorter.
  */
-export function homeworkText(count: number, earliestDue: string, done = 0): string {
+export function homeworkText(count: number, earliestDue: string, done = 0, now?: Date): string {
   if (count <= 0) {
     return "";
   }
@@ -155,7 +188,7 @@ export function homeworkText(count: number, earliestDue: string, done = 0): stri
   if (done >= count) {
     return `${n} · ${plural(count, "выполнено", "выполнены", "выполнено")}`;
   }
-  const due = dueText(earliestDue);
+  const due = dueText(earliestDue, now);
   return due === "" ? n : `${n} · ${due}`;
 }
 
@@ -207,7 +240,7 @@ const waitingKinds: Readonly<Record<string, { label: string; icon: WaitingLine["
   export_homework: { label: "Выгрузка задания", icon: "tasks" },
 };
 
-export function waitingLine(w: TodayWaiting): WaitingLine {
+export function waitingLine(w: TodayWaiting, now?: Date): WaitingLine {
   const k = waitingKinds[w.kind] ?? { label: "Действие", icon: "tasks" as const };
   const recipient = w.recipient === "" ? "" : `→ ${w.recipient}`;
   return {
@@ -215,7 +248,7 @@ export function waitingLine(w: TodayWaiting): WaitingLine {
     label: k.label,
     title: titleOf(w.title),
     subject: w.subject.trim(),
-    meta: [dueText(w.due), recipient].filter((p) => p !== "").join(" · "),
+    meta: [dueText(w.due, now), recipient].filter((p) => p !== "").join(" · "),
     icon: k.icon,
   };
 }
@@ -230,12 +263,31 @@ export interface DeadlineLine {
   urgent: boolean;
 }
 
-export function deadlineLine(b: TodayDeadline): DeadlineLine {
-  const { weekday, date } = deadlineDay(b.due);
-  return { key: b.assignmentId, weekday, date, title: titleOf(b.title), subject: b.subject.trim(), chip: daysLeftText(b.daysLeft), urgent: b.urgent };
+/**
+ * The chip of a «Горит» row. Today and tomorrow carry the time, a date alone reads as «до конца дня»: «сегодня до 20:00»,
+ * «завтра до 18:30». A moment that has passed reads «просрочено» even when the core still counts the day as today.
+ */
+export function deadlineChip(b: Pick<TodayDeadline, "due" | "daysLeft">, now: Date): string {
+  const d = parseMoment(b.due);
+  if (d !== null && d.getTime() <= now.getTime()) {
+    return daysLeftText(-1);
+  }
+  const time = timeText(b.due);
+  if (time !== "" && b.daysLeft === 0) {
+    return `сегодня до ${time}`;
+  }
+  if (time !== "" && b.daysLeft === 1) {
+    return `завтра до ${time}`;
+  }
+  return daysLeftText(b.daysLeft);
 }
 
-/** «Ближайший срок — пт, 23.10» from the deadlines of the week (the earliest one); "" when there is none. */
+export function deadlineLine(b: TodayDeadline, now: Date): DeadlineLine {
+  const { weekday, date } = deadlineDay(b.due);
+  return { key: b.assignmentId, weekday, date, title: titleOf(b.title), subject: b.subject.trim(), chip: deadlineChip(b, now), urgent: b.urgent };
+}
+
+/** «Ближайший срок — пт, 23.10, 20:00» from the deadlines of the week (the earliest one); "" when there is none. */
 export function nearestDeadlineText(burning: readonly Pick<TodayDeadline, "due">[]): string {
   const dues = burning.map((b) => ({ due: b.due, at: parseMoment(b.due) })).filter((b) => b.at !== null);
   if (dues.length === 0) {
@@ -243,7 +295,8 @@ export function nearestDeadlineText(burning: readonly Pick<TodayDeadline, "due">
   }
   const first = dues.reduce((a, b) => ((b.at as Date) < (a.at as Date) ? b : a));
   const { weekday, date } = deadlineDay(first.due);
-  return `Ближайший срок — ${weekday}, ${date}`;
+  const time = timeText(first.due);
+  return `Ближайший срок — ${weekday}, ${date}${time === "" ? "" : `, ${time}`}`;
 }
 
 export const statusTexts = { local: "Звук обрабатывается только на этом компьютере" } as const;
@@ -283,13 +336,13 @@ export interface PostLine {
 }
 
 /** A post of the agent after a lesson: the headline is the core's text; «Открыть» only for a ready summary. */
-export function postLine(p: TodayPost): PostLine {
+export function postLine(p: TodayPost, now?: Date): PostLine {
   const meta = [titleOf(p.lesson.title), timeText(p.shownAt)].filter((x) => x !== "").join(" · ");
   return {
     key: p.recordingId,
     headline: p.headline,
     meta,
-    homework: homeworkText(p.homework, p.earliestDue, p.homeworkDone),
+    homework: homeworkText(p.homework, p.earliestDue, p.homeworkDone, now),
     canOpen: p.summaryReady,
     recordingId: p.recordingId,
   };
@@ -308,7 +361,7 @@ export interface LessonLine {
   post: { text: string; homework: string; canOpen: boolean; recordingId: string } | null;
 }
 
-export function lessonLine(l: TodayLesson, recordings: readonly RecordingItem[], day = ""): LessonLine {
+export function lessonLine(l: TodayLesson, recordings: readonly RecordingItem[], day = "", now?: Date): LessonLine {
   const { start, end } = lessonTimes(l);
   return {
     key: l.id,
@@ -323,7 +376,7 @@ export function lessonLine(l: TodayLesson, recordings: readonly RecordingItem[],
         ? null
         : {
             text: l.post.summaryReady ? texts.summaryReady : texts.summaryPending,
-            homework: homeworkText(l.post.homework, l.post.earliestDue, l.post.homeworkDone),
+            homework: homeworkText(l.post.homework, l.post.earliestDue, l.post.homeworkDone, now),
             canOpen: l.post.summaryReady,
             recordingId: l.post.recordingId,
           },

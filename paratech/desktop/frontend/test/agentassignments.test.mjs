@@ -25,7 +25,8 @@ function render(assignments, actions = {}) {
   return renderToStaticMarkup(h(AgentRequest, { model, actions: { ...base, ...actions } }));
 }
 
-const line = (over) => ({ id: "a1", title: "Задачи 1-7", subjectId: "s1", due: iso(30), ...over });
+// time "" is a line of an older core: the rows then read the day only.
+const line = (over) => ({ id: "a1", title: "Задачи 1-7", subjectId: "s1", due: iso(30), time: "", ...over });
 
 test("the card parser keeps the assignment lines", () => {
   const c = parseCard(raw([line()]));
@@ -53,6 +54,39 @@ test("a date-only due is a local day, not shifted by the zone", () => {
   assert.equal(assignmentRow(line({ due: "2026-10-30" }), {}, early).due, "до пт, 30 окт.");
   const late = new Date(2026, 9, 26, 23, 30);
   assert.equal(assignmentRow(line({ due: "2026-10-26" }), {}, late).due, "сегодня");
+});
+
+test("rows with a time: today before it, past it, tomorrow, a later day (TASK-343)", () => {
+  const row = (due, time, at = now) => assignmentRow(line({ due, time }), {}, at);
+  // now is Mon 26 Oct 12:00.
+  assert.deepEqual([row(iso(26), "20:00").due, row(iso(26), "20:00").overdue], ["сегодня до 20:00", false]);
+  assert.deepEqual([row(iso(26), "09:00").due, row(iso(26), "09:00").overdue], ["просрочено", true]);
+  assert.equal(row(iso(27), "18:30").due, "завтра до 18:30");
+  assert.equal(row(iso(24), "18:30").due, "просрочено");
+  assert.equal(row(iso(30), "18:30").due, "до пт, 30 окт., 18:30");
+  assert.equal(row(iso(30), "18:30").overdue, false);
+});
+
+test("rows with a time: the moment is read against now, also at the midnight edges", () => {
+  const row = (due, time, at) => assignmentRow(line({ due, time }), {}, at);
+  // 20:00 deadline: one minute before it is still today, at 20:00 and later it has passed (the old text said «сегодня»).
+  assert.equal(row(iso(26), "20:00", new Date(2026, 9, 26, 19, 59)).due, "сегодня до 20:00");
+  assert.equal(row(iso(26), "20:00", new Date(2026, 9, 26, 20, 0)).due, "просрочено");
+  assert.equal(row(iso(26), "20:00", new Date(2026, 9, 26, 23, 59)).due, "просрочено");
+  // Just after midnight the deadline of yesterday evening is overdue, today's evening is today.
+  const night = new Date(2026, 9, 27, 0, 1);
+  assert.equal(row(iso(26), "20:00", night).due, "просрочено");
+  assert.equal(row(iso(27), "20:00", night).due, "сегодня до 20:00");
+  assert.equal(row(iso(28), "00:00", night).due, "завтра до 00:00");
+  // A 00:00 deadline of today has passed at once.
+  assert.equal(row(iso(27), "00:00", night).due, "просрочено");
+  // A broken time falls back to the day.
+  assert.equal(row(iso(27), "25:00", night).due, "сегодня");
+});
+
+test("a row without a time keeps the day-only wording", () => {
+  assert.equal(assignmentRow(line({ due: iso(26), time: "" }), {}, now).due, "сегодня");
+  assert.equal(assignmentRow(line({ due: iso(30), time: "" }), {}, now).due, "до пт, 30 окт.");
 });
 
 test("the list renders title, subject and due; overdue gets the urgent class", () => {
