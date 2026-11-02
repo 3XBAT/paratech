@@ -21,6 +21,7 @@ import {
   removeLabel,
   validateAddForm,
   validateEditForm,
+  withDateBad,
 } from "../.test-build/homeworkView.js";
 import { EditAssignmentDialog, RemovedLine } from "../.test-build/pages/HomeworkDialogs.js";
 
@@ -176,6 +177,27 @@ test("a half-typed date is an error, never «no deadline» (TASK-343)", () => {
   assert.deepEqual(validateEditForm({ ...f, dateBad: false }), {});
   assert.equal(validateAddForm(f).due, "Дата указана неверно.");
   assert.equal(validateAddForm({ ...f, dateBad: false }).due, "Укажите срок.");
+});
+
+test("the date input is read at submit time, never a stale flag (TASK-343)", () => {
+  const form = { title: "Задача", subjectId: "", date: "", time: "20:00", note: "", dateBad: true };
+  const input = (badInput) => ({ validity: { badInput } });
+  // Half-typed segments, no change event: the typed input is an error, not «no deadline».
+  assert.equal(validateEditForm(withDateBad(form, input(true))).due, "Дата указана неверно.");
+  // Cleared segment by segment: a stale true in the form must not survive; the deadline can be removed.
+  assert.deepEqual(validateEditForm(withDateBad(form, input(false))), {});
+  assert.equal(withDateBad(form, input(false)).dateBad, false);
+  // No input element (not mounted): not bad.
+  assert.equal(withDateBad(form, null).dateBad, false);
+  assert.equal(withDateBad(form, undefined).dateBad, false);
+  // The other fields stay as they were.
+  assert.deepEqual(withDateBad({ ...form, date: "2026-10-29" }, input(true)), { ...form, date: "2026-10-29", dateBad: true });
+});
+
+test("both dialogs validate through withDateBad and do not store the flag (TASK-343)", () => {
+  const src = readFileSync(new URL("../src/pages/HomeworkDialogs.tsx", import.meta.url), "utf8");
+  assert.equal(src.match(/withDateBad\(form, dateRef\.current\)/g)?.length, 2);
+  assert.ok(!/onChange\(\{[^}]*dateBad/.test(src));
 });
 
 test("an emptied date with the prefilled 20:00 means «no deadline», not an error (TASK-343)", () => {

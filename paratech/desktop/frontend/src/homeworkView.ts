@@ -371,8 +371,16 @@ export interface AddForm {
   date: string;
   time: string;
   note: string;
-  /** The date input holds a half-typed date: it reports "" as its value, which must not read as «no date». */
+  /**
+   * The date input holds a half-typed date: it reports "" as its value, which must not read as «no date». Never stored
+   * in the form state (a change event does not fire for "" -> ""): set at submit time by withDateBad.
+   */
   dateBad?: boolean;
+}
+
+/** The form to validate: input is the date input element (or null); its validity.badInput is read right now. */
+export function withDateBad(f: AddForm, input: { validity: { badInput: boolean } } | null | undefined): AddForm {
+  return { ...f, dateBad: input?.validity.badInput === true };
 }
 
 /**

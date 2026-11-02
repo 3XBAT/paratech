@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 // The .js extensions let the Node test runner load the compiled dialogs (test/homework.test.mjs renders them).
 import {
   type AssignmentItem,
@@ -33,6 +33,7 @@ import {
   titleMax,
   validateAddForm,
   validateEditForm,
+  withDateBad,
 } from "../homeworkView.js";
 import { choiceOf, pickedRole, recipientTexts, recipientView, sendBlocked } from "../recipientView.js";
 import { Button } from "../ui/Button.js";
@@ -218,6 +219,7 @@ export function AddAssignmentDialog(props: {
   const [errors, setErrors] = useState<AddFieldErrors>({});
   const [general, setGeneral] = useState("");
   const mounted = useRef(true);
+  const dateRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -246,7 +248,9 @@ export function AddAssignmentDialog(props: {
     if (busy) {
       return;
     }
-    const local = validateAddForm(form);
+    // The date input knows about half-typed segments only now; no change event reports "" -> "".
+    const checked = withDateBad(form, dateRef.current);
+    const local = validateAddForm(checked);
     setErrors(local);
     setGeneral("");
     if (Object.keys(local).length > 0) {
@@ -254,7 +258,7 @@ export function AddAssignmentDialog(props: {
     }
     setBusy(true);
     try {
-      const out = await session.submit(props.api, form);
+      const out = await session.submit(props.api, checked);
       if (out === null || !mounted.current) {
         return;
       }
@@ -294,6 +298,7 @@ export function AddAssignmentDialog(props: {
         subjects={subjects}
         subjectHint={subjectsFailed ? addTexts.subjectsFailed : undefined}
         noSubject={addTexts.noSubject}
+        dateRef={dateRef}
         onChange={change}
         onSubmit={() => void submit()}
       />
@@ -380,6 +385,8 @@ function AssignmentFields(props: {
   noSubject: string;
   /** Set: the select shows this extra option until the student chooses (the stored subject is not in the library). */
   unchosen?: string;
+  /** The date input, read at submit time for validity.badInput. */
+  dateRef: RefObject<HTMLInputElement | null>;
   onChange: (patch: Partial<AddForm>, field?: keyof AddFieldErrors) => void;
   onSubmit: () => void;
 }) {
@@ -428,11 +435,12 @@ function AssignmentFields(props: {
           {(id) => (
             <Input
               id={id}
+              ref={props.dateRef}
               type="date"
               value={form.date}
               disabled={busy}
               aria-invalid={errors.due !== undefined}
-              onChange={(e) => onChange({ date: e.target.value, dateBad: e.target.validity.badInput }, "due")}
+              onChange={(e) => onChange({ date: e.target.value }, "due")}
             />
           )}
         </Field>
@@ -499,6 +507,7 @@ export function EditAssignmentDialog(props: {
   const touchedSubject = useRef(false);
   const [touched, setTouched] = useState(false);
   const running = useRef(false);
+  const dateRef = useRef<HTMLInputElement>(null);
   const latest = useRef(props.assignment);
   latest.current = props.assignment;
 
@@ -544,7 +553,9 @@ export function EditAssignmentDialog(props: {
     if (running.current || !ready || missing !== "") {
       return;
     }
-    const local = validateEditForm(form);
+    // The date input knows about half-typed segments only now; no change event reports "" -> "".
+    const checked = withDateBad(form, dateRef.current);
+    const local = validateEditForm(checked);
     setErrors(local);
     setGeneral("");
     if (Object.keys(local).length > 0) {
@@ -553,7 +564,7 @@ export function EditAssignmentDialog(props: {
     running.current = true;
     setBusy(true);
     try {
-      const out = editOutcome(await props.api.editAssignment(editRequest(latest.current, form)));
+      const out = editOutcome(await props.api.editAssignment(editRequest(latest.current, checked)));
       if (!mounted.current) {
         return;
       }
@@ -595,6 +606,7 @@ export function EditAssignmentDialog(props: {
         subjects={subjects ?? []}
         subjectHint={hint}
         noSubject={noSubjectLabel(props.assignment)}
+        dateRef={dateRef}
         onChange={change}
         onSubmit={() => void submit()}
       />
