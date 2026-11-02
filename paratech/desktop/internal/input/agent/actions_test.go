@@ -526,6 +526,26 @@ func TestTriageTopicRuns(t *testing.T) {
 	}
 }
 
+// A topic from a request «Без предмета» (empty scope) gives a work without a subject.
+func TestTriageTopicWithoutSubject(t *testing.T) {
+	w, f := withTurnkey(t, turnkey.Started{View: questionsView(2), Created: true}, nil)
+	c := writeCall(t, "c7", values.ToolTriageAssignment, `{"topic":"Реформы Петра I, презентация"}`)
+	at := req
+	at.Scope = mustScope(t, "")
+	r := w.tools(t).write(t.Context(), at, c)
+	if r.out.Result.IsError {
+		t.Fatalf("result %+v", r.out.Result)
+	}
+	e, err := w.journal.Find(t.Context(), req.Thread, req.Turn, "c7")
+	if err != nil || e.Status != action.StatusDone {
+		t.Fatalf("journal %+v, %v", e, err)
+	}
+	want := topicCall{request: "ag:" + string(req.Thread) + ":1:c7", text: "Реформы Петра I, презентация"}
+	if len(f.topics) != 1 || f.topics[0] != want || len(f.calls) != 0 {
+		t.Fatalf("topic calls %+v, triage calls %+v", f.topics, f.calls)
+	}
+}
+
 // The request key of a topic work fits the work's limit: a long one is hashed, and keys of other calls differ.
 func TestTopicRequestKey(t *testing.T) {
 	short := topicRequest(origin{thread: "th1", turn: 3}, "toolu_01")
