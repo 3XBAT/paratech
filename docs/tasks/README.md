@@ -73,6 +73,29 @@ photos; recognition is blocked on the owner's decision (ADR-0027 Open 3), video 
 | [TASK-168](TASK-168-hub-read-handwriting.md) | Hub handwriting reader (blocked: Open 3 = D) | hub-dev | - |
 | [TASK-169](TASK-169-recognized-text-review-ui.md) | Check recognized pages (blocked) | frontend | 166, 167 |
 
+## UX quick fixes, navigation and permissions (ADR-0034, 2026-11-03)
+| ID | Title | Agent | Depends |
+|---|---|---|---|
+| [TASK-344](TASK-344-ui-words.md) | One word per thing (glossary pass) | frontend | - |
+| [TASK-345](TASK-345-today-quick-fixes.md) | «Сегодня» quieter and clearer | frontend | 344 |
+| [TASK-346](TASK-346-homework-journal-quick-fixes.md) | «Задания» and «Журнал» quick fixes | frontend | 344 |
+| [TASK-347](TASK-347-recordings-subjects-quick-fixes.md) | «Записи», «Предметы», dialogs | frontend | 344 |
+| [TASK-348](TASK-348-rail-labels-recordings.md) | Rail labels, «Записи» section, «Записать пару» | frontend | 345, 347 |
+| [TASK-349](TASK-349-busy-pill.md) | Busy pill in the rail | frontend | 348 |
+| [TASK-350](TASK-350-breadcrumbs.md) | Breadcrumbs | frontend | 346, 347, 348 |
+| [TASK-351](TASK-351-lesson-route.md) | One lesson screen: route and page | frontend | 350 |
+| [TASK-352](TASK-352-lesson-entry-points.md) | All entry points to the lesson screen | frontend | 351 |
+| [TASK-353](TASK-353-subject-tabs.md) | Subject tabs and «Билеты к экзамену» | frontend | 352 |
+| [TASK-354](TASK-354-fold-knowledge-base.md) | «База знаний» folded into «Предметы» (В1) | frontend | 353 |
+| [TASK-355](TASK-355-agent-panel-context.md) | Agent panel context chip and suggestions | frontend | 345, 352 |
+| [TASK-356](TASK-356-settings-structure.md) | Settings menu structure | frontend | 348 |
+| [TASK-357](TASK-357-first-run-checklist.md) | «Начало работы» checklist | frontend | 348, 355 |
+| [TASK-358](TASK-358-permissions-domain.md) | Permissions: domain and storage | go-core | - |
+| [TASK-359](TASK-359-permissions-usecases.md) | Permissions: use cases | go-core | 358 |
+| [TASK-360](TASK-360-permissions-binding.md) | Permissions: bindings and trigger | go-core | 359 |
+| [TASK-361](TASK-361-permissions-ui.md) | «Разрешения» and «Больше не спрашивать» (UI) | frontend | 356, 360 |
+| [TASK-362](TASK-362-do-assignment-entry.md) | One entry «Сделать задание» (В2) | frontend | 346 |
+
 ## Next tasks to be written by `architect` after T-002
 - T-003 SQLite schema, migrations and Storage Manager
 - T-004 Persistent Job Store and worker pool (with power-aware states)

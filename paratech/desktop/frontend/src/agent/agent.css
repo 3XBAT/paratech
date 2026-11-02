@@ -246,3 +246,21 @@ button.ag-pill:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .ag-fullhint { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 12px 0 16px; color: var(--muted); }
 .ag-fullhint-tx { min-width: 0; overflow-wrap: anywhere; }
 .ag-in-bottom .ag-fullhint { order: 4; margin-top: -6px; padding-bottom: 12px; }
+
+/* «Начать заново отсюда» (TASK-249): a quiet action under a message of the student, the warning dialog, and the note by the field. */
+.ag { position: relative; }
+.ag-restart { align-self: flex-end; min-height: 24px; margin: -2px 0 0; padding: 2px 6px; border: 0; border-radius: var(--r-xs); background: none; color: var(--muted); opacity: 0.6; font: inherit; font-size: var(--fs-small); line-height: var(--lh-small); cursor: pointer; }
+.ag-restart:hover, .ag-restart:focus-visible { background: var(--fill); color: var(--text); opacity: 1; }
+.ag-restart:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ag-restart-scrim { position: absolute; z-index: 7; inset: 0; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--bg) 72%, transparent); }
+.ag-restart-dlg { box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; width: min(100%, 320px); padding: 16px; border-radius: var(--r-lg); background: var(--panel); box-shadow: 0 0 0 1px var(--edge), 0 8px 24px rgb(0 0 0 / 0.35); }
+.ag-restart-title { margin: 0; font-size: var(--fs-h3); line-height: var(--lh-h3); font-weight: 600; }
+.ag-restart-body, .ag-restart-reason { margin: 0; overflow-wrap: anywhere; }
+.ag-restart-dlg .ag-actions { margin-top: 4px; }
+.ag-restart-note { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 8px; color: var(--muted); }
+.ag-restart-note-t { min-width: 0; overflow-wrap: anywhere; }
+.ag-restart-problem { display: block; color: var(--text); }
+.ag-restart-acts { display: flex; flex: none; flex-wrap: wrap; gap: 0 8px; }
+.ag-restart-undo { flex: none; min-height: 24px; padding: 0 4px; border: 0; border-radius: var(--r-xs); background: none; color: var(--text); font: inherit; text-decoration: underline; cursor: pointer; }
+.ag-restart-undo:hover { background: var(--fill); }
+.ag-restart-undo:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

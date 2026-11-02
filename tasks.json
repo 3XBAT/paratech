@@ -5382,7 +5382,7 @@
                 "TASK-248",
                 "TASK-271"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-250",
@@ -7531,6 +7531,461 @@
             ],
             "dependencies": [
                 "TASK-304"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-344",
+            "category": "ui",
+            "priority": "high",
+            "description": "[UX · слова] Одно слово для одной вещи: проход по текстам UI по глоссарию docs/design/glossary.md",
+            "acceptance_criteria": [
+                "Владелец 02.11: «да» UX-аудиту (быстрые правки); docs/adr/0034-navigation.md §6, docs/design/glossary.md, черновик docs/tasks/TASK-344-ui-words.md",
+                "«Кратко», «Краткое содержание» → «Конспект»; «Мой конспект» остаётся; «Занятия», «Начинается занятие» → «Пары», «Начинается пара»",
+                "Один словарь src/statusWords.ts для ожиданий: «Ждёт интернет», «Ждёт пополнения минут», «Ждёт зарядки» — его используют activityView, journalView, recordingRowView, homeworkView",
+                "«Распознавание (речи)» → «Расшифровка», «компонент распознавания речи» → «модуль расшифровки»",
+                "«Записи и задачи», «Записи и задания» → «Записи» (заголовки, тексты окна записи и выбора источника); «Домашние задания» → «Задания»",
+                "«Предмет», «Папка» → «Добавить предмет», «Новая папка»; «Предмет и тип» → «Исправить предмет или тип пары»",
+                "«Сгенерировать ДЗ» → «Написать черновик»; «…подготовит сервис конспектов…» → «Черновика пока нет. paratech может написать его по тексту задания.»; «Адрес получателя домашки» → «Адрес получателя заданий»; «ДЗ» в текстах журнала → «задание» (системная папка «ДЗ» не меняется)",
+                "Под ключ: подпись «paratech задаст 1–2 вопроса и напишет работу файлом (Word или PowerPoint). Разбор расходует минуты обработки.», кнопка «Начать разбор»; подпись «Ответ» над ответом убрана (turnkeyView, workView)",
+                "Все пропуски — «Пропустить вопросы»; «Понял так» → «План»; «Стоп» → «Остановить»; «Да» плана → «Да, выполнить»; «идёт просьба» → «идёт запрос»",
+                "Билеты: «Найти билеты» → «Разобрать список», «Застряло» → «Подбор остановлен»; журнал: «Оценено задание» → «Задание разобрано», «Запущен поиск ДЗ» → «Поиск заданий в записи пары»",
+                "Только тексты: раскладка и кнопки не меняются; текст модели и импортированный текст не трогаются",
+                "Файлы: paratech/desktop/frontend/src/*View.ts, src/homeworkTurnkey.ts, src/popup/view.ts, src/sourcePicker/view.ts, src/nav.ts (подписи), новый src/statusWords.ts, строковые литералы в src/pages/{RecordingsPage,HomeworkPage,KnowledgeLessonPage,SummaryParts,KnowledgeBasePage}.tsx, тесты",
+                "UX-проверка coordinator-round.md 3a: находимость, нет тупиков, состояния, тихий интерфейс",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-345",
+            "category": "ui",
+            "priority": "high",
+            "description": "[UX · Сегодня] Тише и понятнее: без «Обновить», «Нужно ваше решение», «Сроки на неделе», «Итоги дня», модуль расшифровки виден",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §2; черновик docs/tasks/TASK-345-today-quick-fixes.md; аудит А-0.10, 0.12, 1.2, 1.5, 1.6, 1.7, 2.7",
+                "Нет кнопки «Обновить»; ошибка загрузки — «Не удалось загрузить день.» и «Повторить» на месте",
+                "«Ждёт вашего «Да»» → «Нужно ваше решение»; «Горит на 7 дней» → «Сроки на неделе»; срочный чип с иконкой часов и словом («сегодня», «завтра»), не только цветом",
+                "«Сообщения paratech» и «Готово за день» — один блок «Итоги дня» в конце левой колонки; пустой — не показывается",
+                "Блок «Спросить paratech» скрыт, пока нет подсказок",
+                "Строка состояния без «Звук обрабатывается только на этом компьютере»: только очередь и ближайший срок, пустая — скрыта",
+                "SpeechComponentNotice показывается на «Сегодня», если модуль расшифровки не установлен",
+                "Не трогать: кнопку «Записи и задания» и режим all (TASK-348), кликабельные строки пар (TASK-352), перенос подсказок в панель (TASK-355)",
+                "Файлы: paratech/desktop/frontend/src/pages/{TodayPage,TodayParts}.tsx, src/todayView.ts, src/styles.css (только правила today), тесты",
+                "UX-проверка coordinator-round.md 3a: находимость, нет тупиков, состояния, тихий интерфейс",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-344"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-346",
+            "category": "ui",
+            "priority": "high",
+            "description": "[UX · Задания и Журнал] Одна главная кнопка, список по срокам, редкое — в «⋯», причины отказа на месте",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §2; черновик docs/tasks/TASK-346-homework-journal-quick-fixes.md; аудит А-6.4, 6.5, 6.7, 6.9, 6.10, 6.11, 11.2, 11.3, 11.5",
+                "«Добавить задание» — primary в списке; пустой первый список: «Задания находятся сами в записи пары после конспекта.» и «Добавить задание вручную»",
+                "Список по группам «Просрочено · На этой неделе · Позже · Без срока» (выполненные — как в TASK-316); пустые группы не рисуются",
+                "Шапка задания: «Выполнено» на виду; «Изменить», «Поправить предмет и преподавателя», «Удалить» — в «⋯» (Удалить последним, предупреждение TASK-338 без изменений)",
+                "Черновик: «Сохранить в файл» и «Сохранить в Word (.docx)» → одна «Сохранить ▾» (Файл .txt / Word); «Отправить по почте…» → «Отправить преподавателю…»",
+                "«Отправить ещё раз…» — обычная, не красная; у «Письмо дошло» строка «Почта не подтвердила доставку. Если преподаватель письмо получил — отметьте.»",
+                "Журнал: без «Обновить», при ошибке «Повторить» рядом; «Отменить нельзя» — текст с причиной («Нельзя отменить: письмо уже отправлено»), общая причина, если ядро её не дало; «Действие отменено» — в строке; видны «Период» и «Только отменяемые», остальное под «Ещё фильтры»",
+                "Файлы: paratech/desktop/frontend/src/pages/{HomeworkPage,HomeworkDialogs,AssignmentFilter,JournalPage,JournalParts}.tsx, src/{homeworkView,journalView,listView}.ts, src/styles.css (только свои правила), тесты",
+                "UX-проверка coordinator-round.md 3a: находимость, нет тупиков, состояния, тихий интерфейс",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-344"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-347",
+            "category": "ui",
+            "priority": "high",
+            "description": "[UX · Записи, Предметы, диалоги] Пустые «Записи» с одним путём, «Фоновая обработка» свёрнута, пустые папки в одну строку, кнопки диалога по-Windows",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §2; черновик docs/tasks/TASK-347-recordings-subjects-quick-fixes.md; аудит А-0.11, 0.12, 2.2, 2.3, 2.4, 4.2, 4.6, 9.3",
+                "Пустые «Записи»: «Здесь будут записи пар. Записать можно сейчас — кнопкой «Начать запись», или загрузить расписание, и paratech сам предложит запись в начале пары.» и кнопки «Начать запись» (primary), «Загрузить расписание», «Импортировать запись»; primary в шапке скрыта, пока список пуст",
+                "«Задачи» → «Фоновая обработка», свёрнута по умолчанию со счётчиком; сбои по-прежнему видны в строке записи",
+                "Подсказки «Нажмите круглую стрелку…» и «Проверьте подключения (меню «⋯»)» → текстовые кнопки «Повторить» и «Открыть подключения»",
+                "Строка «Звук обрабатывается только на этом компьютере» убрана из строки состояния (остаётся один раз в пустом состоянии)",
+                "Страница предмета: пустые папки — одна строка «Пусто: Семинары, Лабораторные, Билеты», «+» папки по-прежнему доступен; строки «Ближайшее» открывают задание",
+                "Абзац про экспорт в «Базе знаний» → подсказка у кнопки экспорта",
+                "Dialog: кнопка действия слева, «Отмена» справа; начальный фокус на безопасной кнопке; тесты диалогов обновлены",
+                "Файлы: paratech/desktop/frontend/src/pages/{RecordingsPage,RecordingRow,SubjectsPage,SubjectsParts,KnowledgeBasePage}.tsx, src/{recordingRowView,activityView,libraryView}.ts, src/ui/controls.tsx (только Dialog), src/App.tsx (только onOpenAssignment для «Предметов»), src/styles.css (только свои правила), тесты",
+                "UX-проверка coordinator-round.md 3a: находимость, нет тупиков, состояния, тихий интерфейс",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-344"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-348",
+            "category": "ui",
+            "priority": "high",
+            "description": "[Навигация · шаг 1] Подписи в боковой панели, «Записи» — отдельный раздел, «Журнал» вниз, «Записать пару» на «Сегодня»",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §1, §2; черновик docs/tasks/TASK-348-rail-labels-recordings.md; аудит А-0.1, 0.2, 1.1, 11.1, 14.1",
+                "Боковая панель: значок и подпись под ним (72 px); сверху «Сегодня, Записи, Предметы, Задания, Расписание», снизу «Журнал, Настройки»; клавиатура и aria как сейчас; подписи не переносятся при масштабе 100–200 %",
+                "Новая страница recordings («Записи») показывает нынешний RecordingsPage; режим all и кнопки «Записи и задания», «К сегодняшнему дню» на «Сегодня» убраны; «Проблема с записью» открывает «Записи»",
+                "На «Сегодня» primary «Записать пару»: открывает «Записи» с открытой панелью старта (разовое состояние, как scheduleReview, не маршрут); во время записи — «● Идёт запись 00:41 · Остановить» и остановка той же привязкой",
+                "Alt+← и боковые кнопки мыши, повторный клик по разделу работают для нового раздела; контекст панели агента на recordings — «Записи»",
+                "Файлы: paratech/desktop/frontend/src/{nav.ts,App.tsx,navHistory.ts,useNavHistory.ts,todayView.ts}, src/agentView.ts (только карта screens), src/ui/{Rail,Icon}.tsx, src/pages/{TodayPage,TodayParts,RecordingsPage}.tsx, src/styles.css, тесты",
+                "UX-проверка coordinator-round.md 3a; ux-expert «ок»",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-345",
+                "TASK-347"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-349",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Навигация · шаг 1] Фоновая работа видна с любого экрана: значок записи и обработки в боковой панели",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §1; черновик docs/tasks/TASK-349-busy-pill.md; аудит А-0.13; PRD §15 (без уведомлений — статус в окне)",
+                "Над «Журналом»: «● 12:40» во время записи, иначе «⟳ N», пока N записей или задач в работе, иначе ничего (панель не прыгает)",
+                "Клик открывает «Записи»; подсказка и aria-label говорят, что идёт («Идёт запись 12:40», «В обработке: 2»)",
+                "Опрос только при видимом окне, не чаще раза в 3 с, существующими привязками (activityApi), без новых; prefers-reduced-motion — без мигания",
+                "Файлы: paratech/desktop/frontend/src/ui/Rail.tsx, новые src/ui/BusyPill.tsx и src/busyView.ts, src/App.tsx (только подключение), src/styles.css, тесты",
+                "UX-проверка coordinator-round.md 3a: находимость, нет тупиков, состояния, тихий интерфейс",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-348"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-350",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Навигация · шаг 2] Один путь назад: «хлебные крошки» над заголовком вместо разных кнопок «Назад»",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §2; черновик docs/tasks/TASK-350-breadcrumbs.md; аудит А-0.8, 0.9",
+                "Один компонент src/ui/Breadcrumbs.tsx: строка слева над h1, ссылки на все уровни, кроме последнего («Задания / Реферат по истории», «Предметы / Матанализ / Билеты»); переход как у нынешних кнопок, история маршрутов работает",
+                "Кнопки «Все задания», «Назад», «Предметы», «Все предметы» убраны там, где их заменила крошка",
+                "Надстрочник над h1 — только крошка; пояснения — одной приглушённой строкой под h1",
+                "Крошки — ссылки в порядке Tab, nav с aria-label «Путь»",
+                "Файлы: новый src/ui/Breadcrumbs.tsx, src/pages/{HomeworkPage,TicketsPage,KnowledgeBasePage,KnowledgeLessonPage,SummaryPage,TranscriptPage,SubjectsPage}.tsx, src/styles.css, тесты",
+                "UX-проверка coordinator-round.md 3a: находимость, нет тупиков, состояния, тихий интерфейс",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-346",
+                "TASK-347",
+                "TASK-348"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-351",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Навигация · шаг 3] Один экран пары: маршрут lesson и вкладки «Мой конспект · Конспект · Текст лекции · Расшифровка · Задания»",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §2; черновик docs/tasks/TASK-351-lesson-route.md; аудит А-5.1, 5.2, 5.5, 9.2",
+                "Route.lesson — ключ пары базы знаний (KnowledgeLesson.key), Route.tab — вкладка; страница загружает пару по нему (пары с записью — через lesson() по recordingId); если пару только с конспектом нельзя открыть по ключу нынешней привязкой — остановиться и сообщить",
+                "Экран — KnowledgeLessonPage, панель конспекта из SummaryPage внутри вкладки «Конспект»: одна «Скопировать» и «⋯» (Сохранить .txt / .md); абзац про хранение и кнопка «Открыть конспект» убраны",
+                "Открывается на «Мой конспект», если в нём есть части, иначе на «Конспект», если готов, иначе на первой вкладке с содержимым",
+                "«Исправить предмет или тип пары» — в «⋯» шапки; крошки «Предметы / <предмет> / <пара>»",
+                "Открытие пары — запись в истории, смена вкладки — нет; найденное поиском место прокручивается",
+                "Файлы: src/nav.ts, src/navHistory.ts, src/App.tsx, src/pages/{KnowledgeLessonPage,SummaryPage,SummaryParts,TranscriptPage}.tsx, src/{knowledgeView,summaryView}.ts, src/styles.css, тесты",
+                "UX-проверка coordinator-round.md 3a; ux-expert «ок»",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-350"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-352",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Навигация · шаг 3] Все «Открыть конспект / расшифровку» ведут на экран пары; накладные экраны конспекта и расшифровки убраны",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §2; черновик docs/tasks/TASK-352-lesson-entry-points.md; аудит А-1.3, 4.1, 5.1, 5.7",
+                "«Сегодня»: вся строка пары открывает пару; до и во время пары без записи — «Записать»",
+                "Строки «Записей», пары предмета (строки SubjectsParts становятся кликабельными), TranscriptLinks задания, упоминание «Пара» и источники ответа агента открывают экран пары на нужной вкладке и месте",
+                "routeToTranscript, routeToSummary и накладные экраны убраны; у каждой старой ссылки одна замена",
+                "Удаление записи на экране пары возвращает на предыдущий маршрут, а не всегда на «Сегодня»",
+                "Файлы: src/App.tsx, src/nav.ts, src/{openSummary,openTranscript,agentMentions}.ts, src/pages/{TodayParts,RecordingRow,RecordingsPage,SubjectsParts,TranscriptLinks,HomeworkPage}.tsx, тесты",
+                "UX-проверка coordinator-round.md 3a: находимость, нет тупиков, состояния, тихий интерфейс",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-351"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-353",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Навигация · шаг 4] Страница предмета с вкладками «Пары · Файлы · Задания» и кнопкой «Билеты к экзамену»",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §2, §3; ADR-0024; черновик docs/tasks/TASK-353-subject-tabs.md; аудит А-4.1, 4.2, 4.7, 4.8",
+                "Шапка: название, преподаватели (как сейчас), «Билеты к экзамену» (TicketsPage с этим предметом), «⋯»",
+                "«Пары»: пары базы знаний этого предмета (по subjectId), строка открывает экран пары; «Импортировать запись» и «Добавить конспект прошедшей пары» как сейчас; «Сохранить все конспекты одним файлом» в «⋯» вкладки; пусто — «Записей по предмету пока нет.» с этими двумя кнопками",
+                "«Файлы»: папки TASK-341/347 без изменений; папки дерева прокручивают внутри этой вкладки",
+                "«Задания»: открытые задания предмета по сроку, строка открывает задание; «Добавить задание» с предметом",
+                "Вкладка в маршруте (Alt+← работает); по умолчанию «Пары», если есть пары, иначе «Файлы»",
+                "Файлы: src/pages/{SubjectsPage,SubjectsParts,KnowledgeBasePage,KnowledgeParts,TicketsPage}.tsx, src/{libraryView,knowledgeView,ticketsView}.ts, src/nav.ts, src/App.tsx, src/styles.css, тесты",
+                "UX-проверка coordinator-round.md 3a; ux-expert «ок»",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-352"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-354",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Навигация · шаг 4] «База знаний» входит в «Предметы»: поле поиска в шапке, «Пары без предмета» во «Входящих» (по ответу В1)",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §3; черновик docs/tasks/TASK-354-fold-knowledge-base.md; аудит А-3.1, 4.8, 9.1, 9.6. Делается по рекомендованному ответу В1 (а); если владелец выберет б или в — задачу переписать до старта",
+                "В шапке «Предметов» поле поиска (Ctrl+F); результаты вместо правой части (маршрут subjects + search); попадание открывает экран пары на месте; под полем «Нужен ответ, а не место в тексте? Спросите в панели справа» с кнопкой, которая подставляет запрос в поле панели (не отправляет)",
+                "«Входящие»: две группы — файлы (TASK-339) и «Пары без предмета» (пары «Без предмета» и групп со свободным названием) с «Указать предмет»; счётчик считает обе",
+                "Страница knowledge и её место в covers убраны; кнопки «База знаний» и «Билеты» ушли из LibraryActions; источники ответа и упоминания ведут на экран пары; ничего доступного не потеряно (список проверки в отчёте)",
+                "Файлы: src/pages/{SubjectsPage,SubjectsParts,KnowledgeBasePage,KnowledgeParts}.tsx, src/{nav.ts,App.tsx,agentMentions.ts,knowledgeView.ts,libraryView.ts,libraryInboxView.ts}, src/styles.css, тесты",
+                "UX-проверка coordinator-round.md 3a; ux-expert «ок»",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-353"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-355",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Навигация · шаг 5] Панель агента: чип открытого объекта, подсказки в пустом состоянии, поле ввода всегда внизу; «Спросить paratech» уходит с «Сегодня»",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §2; ADR-0021, ADR-0028; черновик docs/tasks/TASK-355-agent-panel-context.md; аудит А-1.2, 15.1, 15.2, 15.3",
+                "Чип называет открытый объект: «Матанализ», «Матанализ · пара 21.10», «Реферат по истории»; без объекта чипа нет; крестик «Не учитывать» убирает ID; AskInput несёт subjectId, lessonId, assignmentId открытого объекта",
+                "Пустое состояние: 3–4 подсказки по экрану; на «Сегодня» — screen.chips от ядра, на других — постоянные тексты в agentView.ts; подсказка заполняет поле и не отправляет",
+                "Поле ввода всегда внизу панели; блока «Спросить paratech» на «Сегодня» нет; Ctrl+K по-прежнему открывает панель",
+                "Файлы: src/agent/{AgentPanel,AgentPanelView,ChatBar}.tsx, src/{agentView,agentState,todayView}.ts, src/App.tsx (передать открытый предмет, пару, задание), src/pages/{TodayPage,TodayParts}.tsx, тесты",
+                "UX-проверка coordinator-round.md 3a: находимость, нет тупиков, состояния, тихий интерфейс",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-345",
+                "TASK-352"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-356",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Навигация · шаг 6] Меню «Настроек»: группа «Дополнительно» (Модели речи, Диагностика), адрес сервера свёрнут",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §4; черновик docs/tasks/TASK-356-settings-structure.md; аудит А-0.9, 12.1, 12.2",
+                "Меню: «Основные, Подключения, Профиль, Оформление», разделитель с подписью «Дополнительно», «Модели речи, Диагностика»; место после «Основных» оставлено для «Разрешений» (TASK-361)",
+                "Надстрочник «Изменения сохраняются сразу» убран",
+                "«Подключения»: «Ключ доступа» на виду с подсказкой, где его взять; «Адрес сервера» под свёрнутым «Дополнительно», которое раскрыто само, если адрес не по умолчанию или неверен",
+                "Файлы: src/nav.ts, src/pages/{SettingsTabs,ConnectionsPage}.tsx, src/connectionsView.ts, src/styles.css, тесты",
+                "UX-проверка coordinator-round.md 3a: находимость, нет тупиков, состояния, тихий интерфейс",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-348"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-357",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Навигация · шаг 6] Чек-лист «Начало работы» на «Сегодня» вместо пустых блоков",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §2; черновик docs/tasks/TASK-357-first-run-checklist.md; аудит А-1.9, 2.7, 12.3, «Итог 2» A; без карусели-туториала",
+                "Шаги, каждый — одна кнопка прямо в действие, отмечаются по факту: «Проверить звук», «Установить модуль расшифровки» (только если не установлен, прогресс в шаге), «Загрузить расписание», «Записать первую пару» (открывает «Записи» с панелью старта), «Указать почту преподавателя» (после первого задания)",
+                "Нет ключа доступа: строка над списком «Конспекты недоступны без ключа доступа. Запись и расшифровка работают.» и «Ввести ключ»",
+                "Показывается, пока выполнено меньше 3 шагов; «Скрыть» навсегда (локальная настройка UI, try/catch); сворачивается; заменяет пустые блоки пустого дня",
+                "Без новых привязок: шаг без доступного факта не показывается и записывается в отчёт",
+                "Файлы: новые src/pages/StartChecklist.tsx и src/startChecklistView.ts, src/pages/{TodayPage,TodayParts}.tsx, src/styles.css, тесты",
+                "UX-проверка coordinator-round.md 3a; ux-expert «ок»",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-348",
+                "TASK-355"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-358",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Разрешения · домен] Разрешения на внешние отправки: значения в settings, сервис autoconfirm, отметка «по разрешению» у предложения, миграция и хранение",
+            "acceptance_criteria": [
+                "Владелец 02.11, О10 = б: своё «Да» на каждую отправку, в первый раз — «Больше не спрашивать», раздел настроек разрешений. docs/adr/0034-navigation.md §5; черновик docs/tasks/TASK-358-permissions-domain.md; по ответу В3 (а) — одно разрешение на все предметы",
+                "domain/settings/settings: PermissionKind (send_to_teacher, deadline_to_calendar — закрытый набор), PermissionMode (ask по умолчанию, allow), Permission(kind) с Mode и Offered, SetPermission и MarkPermissionOffered меняют версию; неизвестные значения — доменная ошибка; табличные тесты",
+                "Новый чистый сервис domain/coursework/services/autoconfirm со своим перечислением (ARCH-11): Decide(mode, kind, needsChoice) → Ask | Confirm; Confirm только для allow и send_homework_email / send_work_email / create_deadline_event без выбора преподавателя; табличный тест всех случаев",
+                "domain/coursework/proposal: подтверждение помнит ByPermission (статусная машина та же), Restore читает его; тест обоих путей",
+                "Миграция desktop (следующий свободный номер на момент пуша; не параллельно с другой задачей с миграцией): колонки settings permission_send_to_teacher, permission_deadline_to_calendar TEXT NOT NULL DEFAULT 'ask' CHECK (IN ('ask','allow')) и *_offered INTEGER NOT NULL DEFAULT 0; proposals.confirmed_by_permission INTEGER NOT NULL DEFAULT 0; старые БД открываются; docs/contracts/schema.sql — зеркало",
+                "Файлы: paratech/desktop/internal/domain/settings/settings/*, новый domain/coursework/services/autoconfirm/*, domain/coursework/proposal/* (только ByPermission), adapters/sqlite/{settings*,proposals*}.go, adapters/sqlite/queries/*, adapters/sqlite/sqlcgen/*, paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql (+ тесты)",
+                "Агент: только UI — управление самим агентом (разрешения никогда не инструмент и не set_setting)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/... ./desktop/internal/adapters/sqlite/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-359",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Разрешения · ядро] Установка разрешения, отметка «уже предлагали» и ConfirmByPermission: карточка разрешённого вида подтверждается ядром с теми же данными",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §5; черновик docs/tasks/TASK-359-permissions-usecases.md; жёсткие правила 3 и 7; домен — TASK-358",
+                "cases/preferences: SetPermission(kind, mode), MarkPermissionOffered(kind), Permissions()",
+                "cases/homeworkflow.ConfirmByPermission(ctx, id): режим через узкий порт, решение autoconfirm.Decide (условий в use case нет, ARCH-22); Ask — ничего; Confirm — то же подтверждение, что «Да» карточки, с доверенными данными на сейчас (получатель, тема письма = ShownSubject, закреплённый формат, срок), ByPermission = true, затем обычное выполнение (перепроверка, идемпотентная задача, сверка UNKNOWN); повтор и не-VALIDATED — ничего",
+                "Подтверждение по клику принимает dontAskAgain: с «Да» ставит allow (отдельный агрегат, отдельная транзакция после подтверждения; сбой не отменяет отправку и сообщается); любой ответ на карточке с флажком отмечает offered",
+                "Сценарные тесты с фейками SMTP и Google: разрешённая отправка уходит один раз; ask — ничего; отправка с выбором преподавателя и «Отправить ещё раз» после UNKNOWN никогда не подтверждаются сами; изменённое вложение — STALE, не отправлено",
+                "Ревью безопасности docs/process/security-review.md вместе с TASK-360",
+                "Файлы: paratech/desktop/internal/cases/preferences/*, cases/homeworkflow/{proposals.go,worksend.go,ports.go,types.go,errors.go}, новый cases/homeworkflow/permission.go, internal/app/* (только подключение), paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/... ./desktop/internal/app/... ./desktop/tests/... и тест архитектуры",
+                "golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-358"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-360",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Разрешения · привязка] SettingsService.Permissions/SetPermission, флажок на карточке, вызов ConfirmByPermission только из input/wails",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §5; ADR-0021 (в input/agent нет Confirm/Execute); черновик docs/tasks/TASK-360-permissions-binding.md; use cases — TASK-359",
+                "SettingsService.Permissions() → список {kind, mode, offered}; SetPermission(kind, mode), неизвестное — invalid",
+                "Чтение карточки подтверждения возвращает offerDontAsk (вид с разрешением, ask, ещё не предлагали, не карточка выбора преподавателя) и после автоматического подтверждения — итог с byPermission: true; подтверждение принимает dontAskAgain (с «Нет» игнорируется)",
+                "ConfirmByPermission вызывается только здесь: когда пересылка обновлений агента выдаёт новую карточку подтверждения и сразу после того, как привязка создала предложение отправки по кнопке студента; если обновления агента идут мимо input/wails — остановиться и сообщить, input/agent не менять",
+                "set_setting и get_settings агента не принимают и не возвращают разрешения (тест)",
+                "Файлы: paratech/desktop/internal/input/wails/{agentconfirm.go,agent.go,settings.go,homework*.go} и тесты, internal/app/* (только подключение), frontend/src/bindings/{agentConfirm,settings}.ts и их тесты",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/wails/... ./desktop/internal/app/... и тест архитектуры, GOOS=windows go vet ./desktop/...",
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-359"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-361",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Разрешения · UI] Раздел «Настройки → Разрешения» и флажок «Больше не спрашивать» на первой карточке отправки",
+            "acceptance_criteria": [
+                "Владелец 02.11, О10 = б; docs/adr/0034-navigation.md §4, §5; черновик docs/tasks/TASK-361-permissions-ui.md; привязки — TASK-360",
+                "Карточка с offerDontAsk: флажок «Больше не спрашивать» под кнопками и подсказка «Можно вернуть в Настройки → Разрешения»; уходит только с «Да»; кнопки «Да, отправить письмо» / «Не отправлять», «Да, добавить в календарь» / «Не добавлять»",
+                "Карточка, подтверждённая по разрешению: «Письмо отправлено без вопроса» (или «Срок добавлен в календарь без вопроса») и ссылка «Спрашивать снова» (ставит ask, итог строкой на месте)",
+                "«Настройки → Разрешения» после «Основных»: строки «Отправлять работы преподавателю» и «Добавлять сроки в Google Календарь» с «Спрашивать / Не спрашивать» и строкой о смысле («paratech отправит письмо сразу, без карточки. Адрес и файл берутся из предмета, как на карточке.»); сноска «Агент не может менять эти настройки.»",
+                "Если TASK-280 уже сделана — её выбор «Обновлять событие при смене срока» переезжает на эту страницу; если нет — отметить в отчёте, что TASK-280 кладёт его сюда",
+                "Тексты безличные, по-русски, текстовыми узлами; клавиатура, aria, тёмная тема",
+                "Файлы: src/agent/{ConfirmCard,WorkSend}.tsx, src/{agentConfirmView,sendWorkView}.ts, новые src/pages/PermissionsPage.tsx и src/permissionsView.ts, src/nav.ts, src/App.tsx, src/pages/{SettingsTabs,SettingsPage}.tsx, src/styles.css, тесты",
+                "UX-проверка coordinator-round.md 3a; ux-expert «ок»",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build",
+                "Владелец: docs/qa/tasks/TASK-361.md — первая карточка отправки с флажком и «Да» → письмо ушло; следующая отправка уходит без карточки с пометкой «без вопроса»; в «Разрешениях» вернуть «Спрашивать» → снова карточка"
+            ],
+            "dependencies": [
+                "TASK-356",
+                "TASK-360"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-362",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Навигация · шаг 8] Одна точка «Сделать задание» на странице задания: «Короткий ответ» или «Работа под ключ» (по ответу В2)",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md §2, §7; ADR-0025; черновик docs/tasks/TASK-362-do-assignment-entry.md; аудит А-6.6, 7.4, 7.5. Делается по рекомендованному ответу В2 (а); если владелец выберет б или в — задачу переписать до старта",
+                "Один блок «Сделать задание» с выбором: «Короткий ответ (текстом, ~1 мин)» — нынешний черновик; «Работа под ключ (файл Word или PowerPoint, с вопросами, дороже)» — нынешний поток под ключ; у каждого до клика видно, что расходуются минуты обработки",
+                "Когда черновик или работа есть, блок показывает их и их действия; «Версии» и «Письма» — свёрнутые разделы в конце со счётчиками",
+                "Карточка работы в панели агента компактная: состояние и «Открыть в задании»; управление — только на странице",
+                "Без изменений ядра и Hub",
+                "Файлы: src/pages/{HomeworkPage,HomeworkTurnkey}.tsx, src/{homeworkView,homeworkTurnkey,turnkeyView}.ts, src/agent/{WorkCard,AgentCards}.tsx (только компактная карточка), src/styles.css, тесты",
+                "UX-проверка coordinator-round.md 3a; ux-expert «ок»",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm run test и run build"
+            ],
+            "dependencies": [
+                "TASK-346"
             ],
             "status": "pending"
         }

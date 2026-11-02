@@ -4,9 +4,9 @@
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
 import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, ContextFill, EarlierRequestView, MentionView, PlanStepView, PlanView, QuestionView, UpdateView } from "./bindings/agent.js";
-import { askMentions, type MentionPill, mentionPills } from "./agentMentions.js";
+import { askMentions, maxDraftLength, maxMentions, type MentionPill, mentionPills } from "./agentMentions.js";
 import { approveLabel, type PlanProgress, planProgress, stepMarks, type StepMark, planWindow } from "./planView.js";
-import { type Entry, isBusyRefused, isRunning, orderedEntries } from "./agentState.js";
+import { type Entry, isBusyRefused, isFinalStatus, isRunning, orderedEntries } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
 import { dayText, daysBetween, daysLeftText, dueText, parseMoment, timeText } from "./todayView.js";
 
@@ -444,6 +444,8 @@ export interface EarlierItem {
   mentions: MentionPill[];
   /** The reply line; "" when no card was shown. */
   reply: string;
+  /** «Начать заново отсюда» from this request; null when it cannot be offered (no number or no text). */
+  restart: RestartTarget | null;
 }
 
 /**
@@ -459,6 +461,7 @@ export function earlierItems(requests: readonly EarlierRequestView[], entries: r
       text: r.text,
       mentions: mentionPills(r.mentions),
       reply: r.reply,
+      restart: restartTarget(openId, r.turn, r.text, r.mentions),
     }))
     .sort((a, b) => a.turn - b.turn);
 }
@@ -472,6 +475,290 @@ export function restoredMentions(e: Entry, requests: readonly EarlierRequestView
     return undefined;
   }
   return requests.find((r) => r.turn === e.turn)?.mentions;
+}
+
+// ---- «Начать заново отсюда» → «Скрыть» (ADR-0028, TASK-249) ----
+// The core hides the requests from the chosen one on when the next request is sent with `restartFrom`. Here: where the
+// action is offered, why «Скрыть» is not available, the pending edit and the request that carries `restartFrom`.
+
+export const restartTexts = {
+  action: "Начать заново отсюда",
+  actionHint: "Изменить это сообщение и скрыть всё, что после него",
+  title: "Начать заново отсюда?",
+  body: "Сообщения после этого агент забудет. Сделанные действия не отменяются.",
+  hide: "Скрыть",
+  cancel: "Отмена",
+  stop: "Остановить",
+  stopping: "Останавливается…",
+  cancelRequest: "Отменить просьбу",
+  cancelling: "Отменяется…",
+  note: "Правка сообщения. После отправки всё, что ниже него, пропадёт из чата.",
+  undoNote: "Отменить",
+  undoLabel: "Отменить правку",
+  restoreText: "Вернуть текст сообщения",
+} as const;
+
+/** The earlier request «Начать заново отсюда» starts from. */
+export interface RestartTarget {
+  threadId: string;
+  /** The number the core knows the request by (from 1). */
+  turn: number;
+  text: string;
+  mentions: MentionView[];
+}
+
+/** The target of a request of the open chat; null without a known number (turn < 1) or without a text to put into the field. */
+export function restartTarget(openId: string, turn: number, text: string, mentions: readonly MentionView[] | undefined): RestartTarget | null {
+  if (openId === "" || !Number.isInteger(turn) || turn < 1 || text.trim() === "") {
+    return null;
+  }
+  return { threadId: openId, turn, text, mentions: (mentions ?? []).slice(0, maxMentions).map((m) => ({ kind: m.kind, id: m.id, label: m.label })) };
+}
+
+/**
+ * The target of a request the panel holds live; one the core has not named yet (no number, or a placeholder made by
+ * «Повторить» that has no update yet) or of another chat has none.
+ */
+export function liveRestartTarget(e: Entry, requests: readonly EarlierRequestView[], openId: string): RestartTarget | null {
+  if (e.threadId === "" || e.threadId !== openId || e.update === null) {
+    return null;
+  }
+  const own = requests.find((r) => r.turn === e.turn);
+  return restartTarget(openId, e.turn, e.text !== "" ? e.text : (own?.text ?? ""), e.scope?.mentions ?? own?.mentions);
+}
+
+/** The accessible name of the action: the visible words first, then which message (the start of its text). */
+export function restartLabel(t: Pick<RestartTarget, "text">): string {
+  const flat = t.text.replace(/\s+/g, " ").trim();
+  const cut = Array.from(flat);
+  return `${restartTexts.action}: ${cut.length > 40 ? `${cut.slice(0, 40).join("")}…` : flat}`;
+}
+
+/** What stops «Скрыть» and the way out: the request to stop or cancel, as a button of the dialog. */
+export interface RestartBlock {
+  reason: string;
+  /** The button that removes the cause; null when waiting is the only way (sending, loading, no connection). */
+  fix: { kind: "stop" | "cancel"; label: string; entry: Entry } | null;
+}
+
+const restartReasons = {
+  running: "Агент ещё работает над просьбой. Дождитесь конца или остановите её.",
+  plan: "Агент ждёт решения по плану: подтвердите его или отмените просьбу.",
+  answers: "Агент ждёт ответов на вопросы: ответьте на них или отмените просьбу.",
+  waiting: "Просьба ещё не закончена: дождитесь конца или отмените её.",
+  sending: "Просьба ещё отправляется. Подождите несколько секунд.",
+  offline: "Нет связи с paratech. Начать заново можно, когда связь появится.",
+  loading: "Панель ещё загружается. Подождите несколько секунд.",
+} as const;
+
+/**
+ * Why «Скрыть» is unavailable right now, null when it is. The same rule as the core's (the current request must be over),
+ * read from the requests the panel shows: running, waiting for «Да» or for answers, or just sent. `entries` are those of the
+ * open chat; `mode` is the panel mode (the field must accept a request).
+ */
+export function restartBlock(entries: readonly Entry[], openId: string, mode: { inputEnabled: boolean; offline: boolean }): RestartBlock | null {
+  if (!mode.inputEnabled) {
+    return { reason: mode.offline ? restartReasons.offline : restartReasons.loading, fix: null };
+  }
+  if (entries.some((e) => e.threadId === "" && e.callProblem === "" && e.update === null && e.scope !== null && (e.scope.threadId ?? "") === openId)) {
+    return { reason: restartReasons.sending, fix: null };
+  }
+  const current = orderedEntries(entries)
+    .filter((e) => e.threadId === openId && e.update !== null && e.update.status !== "")
+    .at(-1);
+  const status = current?.update?.status ?? "";
+  if (current === undefined || isFinalStatus(status)) {
+    return null;
+  }
+  if (isRunning(status)) {
+    return { reason: restartReasons.running, fix: { kind: "stop", label: restartTexts.stop, entry: current } };
+  }
+  const reason = status === "AWAITING_PLAN" ? restartReasons.plan : status === "AWAITING_ANSWERS" ? restartReasons.answers : restartReasons.waiting;
+  return { reason, fix: { kind: "cancel", label: restartTexts.cancelRequest, entry: current } };
+}
+
+/** The edit «Скрыть» started: the field holds the text of `turn` until it is sent or taken back. */
+export interface RestartPending extends RestartTarget {
+  /** What the field held before the text replaced it; «Отменить» brings it back. */
+  before: { draft: string; pills: MentionView[] };
+  /** Why the last send was refused ("" when none): shown next to the field. */
+  problem: string;
+  /** The refused send, kept when the field was busy and could not take it back: «Вернуть текст сообщения» puts it there. */
+  unsent: FieldContent | null;
+}
+
+/** The pending edit for a target: the field's old content is kept for «Отменить». */
+export function startRestart(target: RestartTarget, before: { draft: string; pills: readonly MentionView[] }): RestartPending {
+  return { ...target, before: { draft: before.draft, pills: [...before.pills] }, problem: "", unsent: null };
+}
+
+/** The text that goes into the field for editing (cut to the field's limit). */
+export function restartDraft(target: RestartTarget): string {
+  return target.text.slice(0, maxDraftLength);
+}
+
+/** What the field holds: the text and the «@» pills. */
+export interface FieldContent {
+  draft: string;
+  pills: MentionView[];
+}
+
+/** The dialog (`asking`) and the pending edit; one per panel. */
+export interface RestartFlow {
+  asking: RestartTarget | null;
+  pending: RestartPending | null;
+}
+
+/** A step of the flow and the new content of the field, or null when the field stays as it is. */
+export interface RestartStep {
+  flow: RestartFlow;
+  field: FieldContent | null;
+}
+
+export const noRestart: RestartFlow = { asking: null, pending: null };
+
+const keep = (flow: RestartFlow): RestartStep => ({ flow, field: null });
+
+/** «Начать заново отсюда» was pressed: the dialog opens, nothing else changes. */
+export function openRestart(s: RestartFlow, target: RestartTarget): RestartStep {
+  return keep({ ...s, asking: target });
+}
+
+/** «Отмена», Esc or a click outside: the dialog closes, nothing else changes. */
+export function closeRestartDialog(s: RestartFlow): RestartStep {
+  return keep({ ...s, asking: null });
+}
+
+/**
+ * «Скрыть»: only when nothing blocks it. The message goes into the field (its mentions as pills) and the edit is pending.
+ * What the field held is kept for «Отменить» — from the first edit on, so a second pick does not lose it.
+ */
+export function hideRestart(s: RestartFlow, field: FieldContent, block: RestartBlock | null): RestartStep {
+  if (s.asking === null || block !== null) {
+    return keep(s);
+  }
+  const pending = startRestart(s.asking, s.pending?.before ?? field);
+  return { flow: { asking: null, pending }, field: { draft: restartDraft(s.asking), pills: s.asking.mentions } };
+}
+
+/** «Отменить» next to the field: no restart, the field returns to what it held. */
+export function cancelRestartEdit(s: RestartFlow): RestartStep {
+  if (s.pending === null) {
+    return keep(s);
+  }
+  return { flow: { ...s, pending: null }, field: { draft: s.pending.before.draft, pills: s.pending.before.pills } };
+}
+
+/** Another chat is open (or the open one is gone): the dialog closes and an edit of a different chat is taken back. */
+export function restartOnChat(s: RestartFlow, openId: string): RestartStep {
+  const closed = { ...s, asking: null };
+  return s.pending !== null && s.pending.threadId !== openId ? cancelRestartEdit(closed) : keep(closed);
+}
+
+/** The edit goes with the send: it is spent (the field is emptied by the send itself). */
+export function spendRestart(s: RestartFlow): RestartStep {
+  return keep({ ...s, pending: null });
+}
+
+/**
+ * The send was refused: the edit is pending again with the reason. `field` is what the field holds now: empty, the text
+ * is back in it (`unsent`, the refused send; default the message's own text). Not empty (typed again, pills), the field
+ * is left alone, «Отменить» returns it as it is and «Вернуть текст сообщения» offers the refused text.
+ */
+export function refuseRestart(s: RestartFlow, sent: RestartPending, problem: string, now?: { field?: FieldContent; unsent?: FieldContent }): RestartStep {
+  const field = now?.field ?? { draft: "", pills: [] };
+  const text = now?.unsent ?? { draft: restartDraft(sent), pills: sent.mentions };
+  const why = restartRefusalText(problem);
+  if (field.draft === "" && field.pills.length === 0) {
+    return { flow: { ...s, pending: { ...sent, problem: why, unsent: null } }, field: text };
+  }
+  return { flow: { ...s, pending: { ...sent, before: { draft: field.draft, pills: [...field.pills] }, problem: why, unsent: text } }, field: null };
+}
+
+/** «Вернуть текст сообщения»: the refused text replaces what the field holds now; «Отменить» brings that back. */
+export function restoreUnsent(s: RestartFlow, field: FieldContent): RestartStep {
+  const p = s.pending;
+  if (p === null || p.unsent === null) {
+    return keep(s);
+  }
+  return { flow: { ...s, pending: { ...p, before: { draft: field.draft, pills: [...field.pills] }, problem: "", unsent: null } }, field: p.unsent };
+}
+
+/** What the panel does when the core refused the request sent with `restartFrom`. */
+export interface RestartRefusal {
+  step: RestartStep;
+  /** The refused request leaves the thread (its text is in the field or kept for «Вернуть текст сообщения»). */
+  discard: boolean;
+}
+
+/**
+ * Nothing is restored when the chat is no longer open or another edit has started meanwhile: the refused request stays
+ * where it is (its «Отправить ещё раз» sends it without `restartFrom`). Otherwise the edit comes back, whatever the field holds.
+ */
+export function restartRefusal(s: RestartFlow, sent: RestartPending, problem: string, now: { open: boolean; field: FieldContent; unsent: FieldContent }): RestartRefusal {
+  if (!now.open || s.pending !== null) {
+    return { step: keep(s), discard: false };
+  }
+  return { step: refuseRestart(s, sent, problem, now), discard: true };
+}
+
+/**
+ * A hint text arrived from outside and replaces the field: a pending edit ends there (its pills go too), or the send would
+ * hide messages for unrelated text. With no edit the step leaves the field to the caller.
+ */
+export function restartOnOutsideDraft(s: RestartFlow, text: string): RestartStep {
+  if (s.pending === null) {
+    return keep(s);
+  }
+  return { flow: { ...s, pending: null }, field: { draft: text, pills: [] } };
+}
+
+/** The request as «Отправить ещё раз» sends it: an ordinary one, a restart is started again from the note. */
+export function withoutRestartFrom(ask: AskInput): AskInput {
+  const plain = { ...ask };
+  delete plain.restartFrom;
+  return plain;
+}
+
+/** The request with `restartFrom` when an edit of the open chat is pending; otherwise as it came. */
+export function withRestart(ask: AskInput, pending: RestartPending | null, openId: string): AskInput {
+  if (pending === null || openId === "" || pending.threadId !== openId) {
+    return ask;
+  }
+  return { ...ask, threadId: openId, restartFrom: pending.turn };
+}
+
+/** The earlier requests as the chat will show them once the core hid the ones from `from` on. */
+export function withoutRestarted<T extends { turn: number }>(requests: readonly T[], from: number): T[] {
+  return requests.filter((r) => r.turn < from);
+}
+
+/** Why a restart request was refused, in plain words, with the way on. */
+export function restartRefusalText(problem: string): string {
+  switch (problem) {
+    case "busy":
+      return "Не удалось отправить: агент ещё занят просьбой. Дождитесь конца или остановите её и отправьте снова.";
+    case "invalid":
+      return "Не удалось отправить: чат изменился. Отмените правку и выберите сообщение ещё раз.";
+    case "offline":
+      return "Не удалось отправить: нет связи с paratech. Можно повторить, когда связь появится.";
+    case "closed":
+      return "Не удалось отправить: приложение закрывается.";
+    default:
+      return "Не удалось отправить. Можно попробовать ещё раз или отменить правку.";
+  }
+}
+
+/** Keys of the warning dialog: Esc takes it back, Tab stays among its `count` buttons, Shift+Tab goes backwards. */
+export function dialogKey(e: { key: string; shiftKey: boolean }, at: number, count: number): { act: "cancel" } | { act: "focus"; index: number } | null {
+  if (e.key === "Escape") {
+    return { act: "cancel" };
+  }
+  if (e.key === "Tab" && count > 0) {
+    const next = e.shiftKey ? (at <= 0 ? count - 1 : at - 1) : at < 0 || at >= count - 1 ? 0 : at + 1;
+    return { act: "focus", index: next };
+  }
+  return null;
 }
 
 // ---- Texts ----
@@ -532,7 +819,7 @@ export const buttonLabels: Record<ButtonId, string> = {
   continue: "Повторить",
   resume: "Продолжить",
   retry: "Повторить",
-  restart: "Начать заново",
+  restart: "Запустить снова",
   rerun: "Повторить",
   resend: "Отправить ещё раз",
 };
@@ -948,7 +1235,7 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
   if (stop && reason === "failed" && ctx.replyCut === true) {
     stop = { ...stop, text: texts.replyCut };
   }
-  // The problem's own «Повторить»/«Начать заново» is the next step: the stop card must not offer a second way on.
+  // The problem's own «Повторить»/«Запустить снова» is the next step: the stop card must not offer a second way on.
   if (stop && (problem === "retry_required" || problem === "restart_required")) {
     stop = { ...stop, buttons: stop.buttons.filter((b) => b !== "continue" && b !== "resume") };
   }

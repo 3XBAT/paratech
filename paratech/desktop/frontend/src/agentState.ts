@@ -56,6 +56,10 @@ export type PanelAction =
   /** The current request of a chat opened after a restart (chatCurrent); `text` is what the student typed, from the history. */
   | { type: "snapshot"; update: UpdateView; text: string }
   | { type: "draft"; draft: DraftView }
+  /** «Начать заново отсюда» was accepted: the requests `from`…`upTo` of the chat are hidden by the core (TASK-249). */
+  | { type: "restarted"; threadId: string; from: number; upTo: number }
+  /** A refused restart request is taken back from the thread (its text returns to the field). */
+  | { type: "discard"; key: string }
   | { type: "history"; requests: readonly UpdateView[] }
   | { type: "link"; link: AgentState };
 
@@ -320,6 +324,17 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
     }
     case "draft":
       return applyDraft(s, a.draft);
+    case "restarted": {
+      const gone = (x: { threadId: string; turn: number }) => x.threadId === a.threadId && x.turn >= a.from && x.turn <= a.upTo;
+      return {
+        ...s,
+        entries: s.entries.filter((e) => !gone(e)),
+        drafts: s.drafts.filter((d) => !gone(d)),
+        cuts: s.cuts.filter((c) => !gone(c)),
+      };
+    }
+    case "discard":
+      return { ...s, entries: s.entries.filter((e) => e.key !== a.key) };
     case "history":
       return a.requests.reduce(
         (acc, u) => (acc.entries.some((e) => e.threadId === u.threadId && e.turn === u.turn && e.update !== null) ? acc : applyUpdate(acc, u)),
@@ -448,6 +463,41 @@ export function blockingEntry(entries: readonly Entry[], refused: Entry): Entry 
 /** A refused-as-busy request that never got a thread, with the text it can be sent with again. */
 export function isBusyRefused(e: Entry): boolean {
   return e.threadId === "" && e.update?.problem === "busy";
+}
+
+/** The request is over (done, failed, cancelled or stopped): the core's `final`; a new one may start from an earlier message. */
+export function isFinalStatus(status: string): boolean {
+  return status === "DONE" || status === "FAILED" || status === "CANCELLED" || status === "STOPPED";
+}
+
+/** The newest request number of the chat that the panel knows (live requests and the earlier ones); 0 if none. */
+export function maxKnownTurn(entries: readonly Entry[], earlier: readonly { turn: number }[], threadId: string): number {
+  return Math.max(0, ...entries.filter((e) => e.threadId === threadId).map((e) => e.turn), ...earlier.map((r) => r.turn));
+}
+
+/** What became of a request asked with `restartFrom`: not known yet, taken by the core, or refused (with the problem code). */
+export type RestartOutcome = { state: "wait" } | { state: "accepted" } | { state: "refused"; key: string; problem: string };
+
+/**
+ * Reads the outcome from the thread. The request is found by its own scope object (one per send). The core names it with
+ * its first real update, which comes after the restart was stored; a refusal arrives as a failed Ask (no thread) or as a
+ * refused call. `upTo` is the newest number known at send time: a named request must be newer.
+ */
+export function restartOutcome(scope: AskInput, entries: readonly Entry[], upTo: number): RestartOutcome {
+  const e = entries.find((x) => x.scope === scope);
+  if (e === undefined) {
+    return { state: "wait" };
+  }
+  if (e.threadId !== "") {
+    return e.turn > upTo ? { state: "accepted" } : { state: "wait" };
+  }
+  if (e.callProblem !== "") {
+    return { state: "refused", key: e.key, problem: e.callProblem };
+  }
+  if (e.update !== null) {
+    return { state: "refused", key: e.key, problem: e.update.problem || "failed" };
+  }
+  return { state: "wait" };
 }
 
 /**

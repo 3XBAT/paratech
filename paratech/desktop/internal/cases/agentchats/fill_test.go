@@ -182,6 +182,38 @@ func TestRingDropsAfterRestart(t *testing.T) {
 	}
 }
 
+// «Скрыть» from a request before the history start an expired-request Restart set brings the earlier requests back
+// (TASK-249): the ring counts 1–4 again instead of an overflow.
+func TestRestartFromBeforeHistoryStart(t *testing.T) {
+	e := newEnv(t)
+	e.longChat(t, "c1", 21, true)
+	e.chats.edit("c1", func(st *thread.State) { st.HistoryFrom = 12 })
+	th, err := e.chats.Get(t.Context(), "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := th.RestartFrom(5, thread.Request{Text: numbered(22)}, e.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.Complete(e.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.chats.Save(t.Context(), th); err != nil {
+		t.Fatal(err)
+	}
+	for i, en := range e.history.entries["c1"] {
+		if en.Turn >= 5 {
+			e.history.entries["c1"][i].DroppedBy = 22
+		}
+	}
+	e.history.entries["c1"] = append(e.history.entries["c1"], historyOf(22)[3*21:]...)
+
+	got, err := e.svc.Fill(t.Context(), "c1")
+	if err != nil || got != (Fill{Percent: 25, Level: thread.FillNormal}) {
+		t.Fatalf("Fill after the restart = %+v, %v", got, err)
+	}
+}
+
 // A summary lowers the fill: it counts as one turn and its bytes, the requests it covers are neither pairs nor an
 // overflow.
 func TestFillWithSummary(t *testing.T) {

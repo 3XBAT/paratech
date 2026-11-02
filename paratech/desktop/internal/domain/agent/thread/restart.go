@@ -11,7 +11,10 @@ import (
 // deleted and actions stay; the store marks the dropped requests with the new number in the save that stores the new
 // request (TurnState.DropsFrom), and Window, Fill and the history read skip them. A summary that covers a dropped
 // request is cleared (the next compaction rebuilds it); one of earlier requests only is kept. Requests an earlier
-// restart dropped are marked again with the new number. HistoryFrom does not change.
+// restart dropped are marked again with the new number.
+//
+// The agent sees everything the chat shows before n: the history start an expired-request Restart set always goes
+// back to 0 (all). The history is stored, and earlier requests are sent only as text pairs.
 func (th *Thread) RestartFrom(n int, r Request, now time.Time) error {
 	t, err := th.turn()
 	if err != nil {
@@ -30,6 +33,7 @@ func (th *Thread) RestartFrom(n int, r Request, now time.Time) error {
 		return err
 	}
 	th.current.dropsFrom = n
+	th.historyFrom = 0
 	th.clearSummaryFrom(n)
 	return nil
 }
