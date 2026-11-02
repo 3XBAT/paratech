@@ -70,6 +70,8 @@ type Call struct {
 	Class    actionpolicy.Class
 	Paid     bool
 	PlanStep int // the approved step it executes; -1 none
+	Card     values.CardKind // the card a C call makes (thread.Admission)
+	NoUndo   bool            // a U call without a compensation
 }
 
 // Step is the state of the request after an operation: the calls to run and the cards to show, in order. Scope is
