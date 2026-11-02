@@ -47,7 +47,8 @@ calls in the history; the seal stops that. It does not stop free text in student
   so a tiny cap cannot buy a free call; the reservation uses the raised cap.
   TASK-172: floor 2048 and planner cap 4096 (a beta step cut at 1024); the log line has the stop reason.
 - **No streaming**: a planner step is short (~400 output tokens, up to the 4096 cap, TASK-172); the desktop shows progress between steps.
-  `CompleteStream` stays unimplemented.
+  `CompleteStream` stays unimplemented. Amended by ADR-0026 (`CompleteStream` for `ANSWER`) and its addendum «Streamed
+  reply» (TASK-340: `AgentStepStream` streams the reply text; `AgentStep` stays as it is).
 - **Prompts in `hub/pkg/prompts`** (`go:embed`, ARCH-04): `agent/<profile>/v<N>/` (`system.md`, `tools.json`) and
   `ops/<op>/v<N>/`. The version is in the path; `app` loads and validates them at start and hands them to the use case
   as data. The client sends only the version.

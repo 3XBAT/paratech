@@ -26,13 +26,17 @@ const (
 	KindProposal   IDKind = "proposal"
 	KindPreview    IDKind = "preview"
 	KindAnswer     IDKind = "answer"
+	// Since catalog v10 (ADR-0033 §7): a note of «Мой конспект» and a group of a desktop-built schedule-subjects
+	// proposal (the row a choice on its card refers to).
+	KindNote          IDKind = "note"
+	KindScheduleGroup IDKind = "schedule_group"
 )
 
 // IDKinds returns every kind.
 func IDKinds() []IDKind {
 	return []IDKind{
 		KindSubject, KindFolder, KindLesson, KindRecording, KindMaterial, KindUpload, KindAssignment, KindJob,
-		KindWork, KindVersion, KindProposal, KindPreview, KindAnswer,
+		KindWork, KindVersion, KindProposal, KindPreview, KindAnswer, KindNote, KindScheduleGroup,
 	}
 }
 

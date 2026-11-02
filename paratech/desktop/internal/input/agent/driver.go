@@ -94,7 +94,8 @@ type Update struct {
 }
 
 // Sink receives the updates of every request, from the Driver's goroutines; it must not block for long. Draft gets
-// the draft of an answer being read (answer.go); the drafts of a call come before the update that shows its outcome.
+// the draft of an answer being read (answer.go) or of a reply being written (replydraft.go, from the step use case's
+// goroutine); the drafts of a call or a step come before the update that shows its outcome.
 type Sink interface {
 	Publish(u Update)
 	Draft(d Draft)
@@ -106,7 +107,8 @@ type Clock interface {
 }
 
 // Deps are the dependencies of the Driver; every one except Journal, Actions, Inspector, Answerer, Proposals,
-// Deletions, Drafts and Log is required. Without Journal and Actions the actions (class U) answer "unavailable",
+// Deletions, Drafts, Replies and Log is required. Replies is the reply draft wired into the step use case: a stored
+// «Стоп» cuts its stream. Without Journal and Actions the actions (class U) answer "unavailable",
 // without Inspector inspect_upload does, without Answerer answer_question does, without Journal and Proposals or
 // Deletions the proposals (class C) do.
 type Deps struct {
@@ -125,6 +127,7 @@ type Deps struct {
 	Proposals   Proposals
 	Deletions   DeletionPreviews
 	Drafts      DraftVersions
+	Replies     *Replies
 	Clock       Clock
 	Log         *slog.Logger
 }
@@ -134,10 +137,11 @@ type Deps struct {
 // ctx of a Wails call, which ends with the call). When it ends while calls wait to run, the calls are answered as not
 // done and the request stops continuable, so it never stays running with calls nobody runs; only Cancel ends it.
 type Driver struct {
-	turns Turns
-	sink  Sink
-	tools tools
-	log   *slog.Logger
+	turns   Turns
+	sink    Sink
+	tools   tools
+	replies *Replies // nil: no reply drafts
+	log     *slog.Logger
 
 	mu      sync.Mutex
 	closed  bool
@@ -174,7 +178,7 @@ func New(d Deps) (*Driver, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Driver{
-		turns: d.Turns, sink: d.Sink, log: log, cancels: map[uint64]context.CancelFunc{},
+		turns: d.Turns, sink: d.Sink, replies: d.Replies, log: log, cancels: map[uint64]context.CancelFunc{},
 		stops: map[agentturn.TurnRef]*stopping{}, inflight: map[agentturn.TurnRef]map[uint64]context.CancelFunc{},
 		loops: map[uint64]shared.ThreadID{},
 		tools: tools{
@@ -231,10 +235,11 @@ func (d *Driver) AnswerQuestions(ctx context.Context, ref agentturn.TurnRef, ans
 	})
 }
 
-// Stop is «Стоп». A Hub step in flight is not cancelled: its reply is dropped and «Продолжить» replays its key. From
-// now on the loop of the request starts no further call; once the stop is stored, a read in flight is cut (not done)
-// and an action in flight finishes with its real outcome, then the loop closes the step (ADR-0026). Paid jobs the
-// request started keep running.
+// Stop is «Стоп». A Hub step in flight is paid once: once the stop is stored its stream is cut (Replies.Cut: the reply
+// draft goes, the Hub finishes and stores the step), its reply is dropped and «Продолжить» replays its key. From now on
+// the loop of the request starts no further call; once the stop is stored, a read in flight is cut (not done) and an
+// action in flight finishes with its real outcome, then the loop closes the step (ADR-0026). Paid jobs the request
+// started keep running.
 func (d *Driver) Stop(ctx context.Context, ref agentturn.TurnRef) error {
 	m := &stopping{done: make(chan struct{})}
 	err := d.start(ctx, stepAt(ref), opMarks{stop: m}, func(ctx context.Context) (agentturn.Step, error) {
@@ -403,6 +408,9 @@ func (d *Driver) start(ctx context.Context, at agentturn.Step, marks opMarks, op
 
 // stopped settles a «Стоп» of ref: when it is stored the calls in flight of the request are cut.
 func (d *Driver) stopped(ref agentturn.TurnRef, m *stopping, ok bool) {
+	if ok && d.replies != nil {
+		d.replies.Cut(ref) // outside d.mu: it hands the end of the draft to the sink
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	m.ok = ok

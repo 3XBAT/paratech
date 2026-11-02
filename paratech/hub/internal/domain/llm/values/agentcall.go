@@ -156,6 +156,13 @@ type AgentAnswer struct {
 	text      string
 }
 
+// The catalog's reply card and its text argument: the visible answer of a planner step, the only argument a streamed
+// step shows as draft text (ADR-0026 addendum "Streamed reply").
+const (
+	ReplyTool         = "reply"
+	ReplyTextArgument = "text"
+)
+
 // WithText records the plain text of an answer without tool calls. UNTRUSTED; never logged.
 func (a AgentAnswer) WithText(text string) AgentAnswer {
 	a.text = text

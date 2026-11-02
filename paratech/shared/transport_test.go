@@ -3,6 +3,7 @@ package shared_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,6 +28,12 @@ type fakeGateway struct {
 	hubv1connect.UnimplementedGatewayServiceHandler
 	complete       func(*connect.Request[hubv1.CompleteRequest]) (*connect.Response[hubv1.CompleteResponse], error)
 	completeStream func(*connect.ServerStream[hubv1.CompleteStreamResponse]) error
+	agentStream    func(*connect.Request[hubv1.AgentStepStreamRequest], *connect.ServerStream[hubv1.AgentStepStreamResponse]) error
+}
+
+func (f *fakeGateway) AgentStepStream(_ context.Context, r *connect.Request[hubv1.AgentStepStreamRequest],
+	s *connect.ServerStream[hubv1.AgentStepStreamResponse]) error {
+	return f.agentStream(r, s)
 }
 
 func (f *fakeGateway) Complete(_ context.Context, r *connect.Request[hubv1.CompleteRequest]) (*connect.Response[hubv1.CompleteResponse], error) {
@@ -236,5 +243,74 @@ func TestStreamSuccessDeliversDeltasThenResult(t *testing.T) {
 	}
 	if got == nil || !proto.Equal(got, result) || deltas != got.GetOutput() {
 		t.Fatalf("result %v with deltas %q, want %v and deltas equal to its output", got, deltas, result)
+	}
+}
+
+// AgentStepStream in both codecs: the wrapped request arrives whole, reply deltas come first and the sealed result last,
+// intact; a failure after a delta keeps its ErrorDetail and sends no result.
+func TestAgentStepStreamRoundTrip(t *testing.T) {
+	result := &hubv1.AgentStepResponse{
+		Calls: &hubv1.SealedCalls{Calls: []*hubv1.ToolCall{{CallId: "toolu_1", Tool: "reply", ArgumentsJson: `{"text":"Привет"}`}},
+			Seal: []byte{1, 2, 3}},
+		Usage: &hubv1.Usage{InputTokens: 10, OutputTokens: 2}, ReservationId: "res-1",
+	}
+	failure := &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Message: "provider failed mid-stream"}
+	for codecName, opts := range codecs() {
+		for _, fail := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/fail=%v", codecName, fail), func(t *testing.T) {
+				srv := startGateway(t, &fakeGateway{
+					agentStream: func(r *connect.Request[hubv1.AgentStepStreamRequest], s *connect.ServerStream[hubv1.AgentStepStreamResponse]) error {
+						if r.Msg.GetRequest().GetIdempotencyKey() != "ag:t:1:1" || r.Msg.GetRequest().GetThreadId() != "t" {
+							t.Errorf("handler saw request %v", r.Msg)
+						}
+						for _, d := range []string{"При", "вет"} {
+							if err := s.Send(&hubv1.AgentStepStreamResponse{Event: &hubv1.AgentStepStreamResponse_Delta{Delta: d}}); err != nil {
+								return err
+							}
+						}
+						if fail {
+							return detailError(t, connect.CodeUnavailable, failure)
+						}
+						return s.Send(&hubv1.AgentStepStreamResponse{Event: &hubv1.AgentStepStreamResponse_Result{Result: result}})
+					},
+				})
+				client := hubv1connect.NewGatewayServiceClient(srv.Client(), srv.URL, opts...)
+				req := &hubv1.AgentStepStreamRequest{Request: &hubv1.AgentStepRequest{IdempotencyKey: "ag:t:1:1", ThreadId: "t"}}
+				stream, err := client.AgentStepStream(t.Context(), connect.NewRequest(req))
+				if err != nil {
+					t.Fatalf("AgentStepStream: %v", err)
+				}
+				defer func() { _ = stream.Close() }()
+
+				var deltas string
+				var got *hubv1.AgentStepResponse
+				for stream.Receive() {
+					switch ev := stream.Msg().GetEvent().(type) {
+					case *hubv1.AgentStepStreamResponse_Delta:
+						if got != nil {
+							t.Fatal("delta after the result")
+						}
+						deltas += ev.Delta
+					case *hubv1.AgentStepStreamResponse_Result:
+						got = ev.Result
+					}
+				}
+				if deltas != "Привет" {
+					t.Fatalf("deltas %q", deltas)
+				}
+				if fail {
+					if got != nil {
+						t.Fatalf("result %v after a failure", got)
+					}
+					if d := readDetail(t, stream.Err(), connect.CodeUnavailable); !proto.Equal(d, failure) {
+						t.Fatalf("detail %v", d)
+					}
+					return
+				}
+				if err := stream.Err(); err != nil || !proto.Equal(got, result) {
+					t.Fatalf("result %v, err %v", got, err)
+				}
+			})
+		}
 	}
 }

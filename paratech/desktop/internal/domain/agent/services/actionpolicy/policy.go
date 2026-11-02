@@ -36,7 +36,7 @@ type Rule struct {
 // ErrUnknownTool is returned for a tool outside the table.
 var ErrUnknownTool = errors.New("tool has no policy")
 
-// rules is the class table of catalog v6 (a test in desktop/tests compares it with the golden catalog) and of the
+// rules is the class table of the catalog (a test in desktop/tests compares it with the golden catalog) and of the
 // retired tools (values.RetiredTools), so the journal entries and Undo of their stored actions keep working.
 var rules = map[values.Tool]Rule{
 	values.ToolListSubjects:           {Class: ClassR},
@@ -67,6 +67,19 @@ var rules = map[values.Tool]Rule{
 	values.ToolAskQuestions:           {Class: ClassUI},
 	values.ToolReply:                  {Class: ClassUI},
 	values.ToolCannotDo:               {Class: ClassUI},
+
+	// Catalog v10 (ADR-0033 §10), declared before it is served. The class here is the tool's class in the catalog;
+	// Decide gives the class of one call, which depends on its action and the facts (change_assignment, recording).
+	values.ToolProposeSubjectsFromSchedule: {Class: ClassC},
+	values.ToolChangeAssignment:            {Class: ClassU},
+	values.ToolMarkAssignmentsDone:         {Class: ClassU},
+	values.ToolListNotes:                   {Class: ClassR},
+	values.ToolNote:                        {Class: ClassU},
+	values.ToolGetSettings:                 {Class: ClassR},
+	values.ToolSetSetting:                  {Class: ClassU},
+	values.ToolQuotaStatus:                 {Class: ClassR},
+	values.ToolRecording:                   {Class: ClassU},
+	values.ToolOfferButton:                 {Class: ClassUI},
 }
 
 // Of returns the policy entry of a tool; a tool outside the table is ErrUnknownTool.
@@ -100,6 +113,9 @@ type Facts struct {
 	// FreeTopic: the call is a work on a free topic (FreeTopic) the student allowed without the free-work card
 	// («Больше не показывать», TASK-188): its unknown cost does not ask for a plan; it is the paid job without a plan.
 	FreeTopic bool
+	// HasCalendarEvent: the assignment a change_assignment{delete} names has a Google Calendar event, read from local
+	// data by the case (never from the model): deleting it then needs «Да» (ADR-0033 О-6 б).
+	HasCalendarEvent bool
 }
 
 // FreeTopic reports whether call is a work on a free topic: triage_assignment with a topic instead of an assignment

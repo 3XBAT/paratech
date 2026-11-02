@@ -72,6 +72,12 @@ func (g *recordingGateway) CompleteStream(ctx context.Context, _ *connectrpc.Req
 	return nil
 }
 
+func (g *recordingGateway) AgentStepStream(ctx context.Context, _ *connectrpc.Request[hubv1.AgentStepStreamRequest],
+	_ *connectrpc.ServerStream[hubv1.AgentStepStreamResponse]) error {
+	g.record(ctx)
+	return nil
+}
+
 func (g *recordingGateway) calls() []shared.APIKeyID {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -174,6 +180,18 @@ var protectedRPCs = []rpc{
 		req := connectrpc.NewRequest(&hubv1.CompleteStreamRequest{})
 		setAuthorization(req.Header(), a)
 		stream, err := hubv1connect.NewGatewayServiceClient(srv.Client(), srv.URL, opts...).CompleteStream(ctx, req)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = stream.Close() }()
+		for stream.Receive() {
+		}
+		return stream.Err()
+	}},
+	{"AgentStepStream", func(ctx context.Context, srv *httptest.Server, opts []connectrpc.ClientOption, a []string) error {
+		req := connectrpc.NewRequest(&hubv1.AgentStepStreamRequest{})
+		setAuthorization(req.Header(), a)
+		stream, err := hubv1connect.NewGatewayServiceClient(srv.Client(), srv.URL, opts...).AgentStepStream(ctx, req)
 		if err != nil {
 			return err
 		}
@@ -301,14 +319,14 @@ func TestAuthLetsAValidKeyThrough(t *testing.T) {
 	t.Run("handlers see the key id", func(t *testing.T) {
 		gw := &recordingGateway{}
 		srv := authServer(t, keyAuth(t, k.store), gw, nil)
-		for _, r := range protectedRPCs[:2] { // Complete and CompleteStream reach the recording gateway
+		for _, r := range protectedRPCs[:3] { // Complete, CompleteStream and AgentStepStream reach the recording gateway
 			if err := r.call(t.Context(), srv, nil, []string{"Bearer " + valid}); err != nil {
 				t.Fatalf("%s: %v", r.name, err)
 			}
 		}
 		calls := gw.calls()
-		if len(calls) != 2 || calls[0] != k.valid.ID() || calls[1] != k.valid.ID() {
-			t.Fatalf("handlers saw %v, want the key id twice", calls)
+		if len(calls) != 3 || calls[0] != k.valid.ID() || calls[1] != k.valid.ID() || calls[2] != k.valid.ID() {
+			t.Fatalf("handlers saw %v, want the key id three times", calls)
 		}
 	})
 }

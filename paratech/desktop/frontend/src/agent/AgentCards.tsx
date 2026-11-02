@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { Fragment, useId, useRef, useState } from "react";
 import type { AgentApi, AnswerInput, AssignmentLineView, DraftView } from "../bindings/agent.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
@@ -7,6 +7,7 @@ import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
 import type { TurnkeyApi } from "../bindings/turnkey.js";
 import type { AnswersApi } from "../bindings/answers.js";
 import type { CitationOpening } from "../knowledgeView.js";
+import { type CutReply, replyDraftText, splitDrafts } from "../agentState.js";
 import { AnswerSources } from "./AnswerSources.js";
 import { ConfirmCard } from "./ConfirmCard.js";
 import { WorkWritingCard } from "./WorkCard.js";
@@ -18,6 +19,7 @@ import {
   addedAssignmentText,
   assignmentRow,
   openAssignmentLabel,
+  replyStatus,
   type ButtonId,
   type ButtonModel,
   type CardModel,
@@ -310,7 +312,8 @@ function QuestionsCard(props: { card: Extract<CardModel, { type: "questions" }>;
   );
 }
 
-function Card(props: { card: CardModel; actions: CardActions }) {
+/** `typing`: the reply is being typed above, so the waiting row keeps only «Стоп» (the text is the progress). */
+function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }) {
   const { card } = props;
   switch (card.type) {
     case "plan":
@@ -330,7 +333,7 @@ function Card(props: { card: CardModel; actions: CardActions }) {
     case "waiting":
       return (
         <div className="ag-think">
-          <Waiting />
+          {!props.typing && <Waiting />}
           <Buttons buttons={card.buttons} busy={props.actions.busy} onPress={props.actions.press} />
         </div>
       );
@@ -455,9 +458,57 @@ export function AnswerDraft(props: { draft: DraftView; dots: boolean }) {
   );
 }
 
-/** One request of the thread: the student's text, then the cards. */
-export function AgentRequest(props: { model: EntryModel; actions: CardActions; drafts?: readonly DraftView[] }) {
+/**
+ * The reply being typed: the same card as the final reply (no caption, no jump when it replaces this one), the whole text
+ * so far as one plain text node, a cursor after it. Silent for screen readers: the text is never in a live region, the
+ * request's own status line («Ответ печатается…» / «Ответ готов») tells that it is typing and that it is ready.
+ */
+export function ReplyDraft(props: { text: string }) {
+  return (
+    <section className="ag-card ag-reply-draft" aria-live="off">
+      <p className="ag-text">
+        {props.text}
+        <span className="ag-cursor" aria-hidden="true" />
+      </p>
+    </section>
+  );
+}
+
+/** What the student had read when they pressed «Стоп»: muted plain text, no cursor, a small caption. UI only. */
+export function StoppedReply(props: { text: string }) {
+  return (
+    <section className="ag-card ag-reply-kept">
+      <p className="ag-text muted">{props.text}</p>
+      <p className="ag-draft-cap small muted">{texts.replyStopped}</p>
+    </section>
+  );
+}
+
+/**
+ * The one polite status of a request, in place from the start of a running one so its later texts are announced; it
+ * never carries the reply itself. It stays mounted for the whole life of the request, so it remembers that a draft was
+ * shown: «Ответ готов» only then, once the final reply card has arrived.
+ */
+function ReplyStatus(props: { typing: boolean; replyCard: boolean; running: boolean }) {
+  const wasTyping = useRef(false);
+  const status = replyStatus({ ...props, wasTyping: wasTyping.current });
+  if (props.typing) {
+    wasTyping.current = true;
+  }
+  return status === null ? null : (
+    <span className="ag-vh" role="status">
+      {status}
+    </span>
+  );
+}
+
+/** One request of the thread: the student's text, then the cards. `cut`: its reply was typing when it stopped. */
+export function AgentRequest(props: { model: EntryModel; actions: CardActions; drafts?: readonly DraftView[]; cut?: CutReply }) {
   const { model } = props;
+  const { reply, answers } = splitDrafts(props.drafts ?? []);
+  // The kept text goes right above the first stopped line.
+  const keptText = props.cut?.text ?? "";
+  const keptAt = keptText === "" ? -1 : model.cards.findIndex((c) => c.type === "stopped");
   // «Отменить всё» only when there is more than one action left to undo.
   const open = undoableActions(model.cards).filter((id) => !props.actions.undoNote(id)?.done);
   const hasWaitingCard = model.cards.some((c) => c.type === "waiting");
@@ -474,12 +525,20 @@ export function AgentRequest(props: { model: EntryModel; actions: CardActions; d
       {model.cards.map((c, i) =>
         // Kind and caption (the question round) are in the key so a new card does not inherit the typed state of the old one.
         // The draft goes before the waiting card, so its dots (with «Стоп») stay after the last line.
-        c.type === "waiting" ? null : <Card key={`${c.type}:${"caption" in c ? c.caption : ""}:${i}`} card={c} actions={props.actions} />,
+        c.type === "waiting" ? null : (
+          <Fragment key={`${c.type}:${"caption" in c ? c.caption : ""}:${i}`}>
+            {i === keptAt && <StoppedReply text={keptText} />}
+            <Card card={c} actions={props.actions} />
+          </Fragment>
+        ),
       )}
-      {(props.drafts ?? []).map((d, i) => (
-        <AnswerDraft key={i} draft={d} dots={!hasWaitingCard && i === (props.drafts ?? []).length - 1} />
+      <ReplyStatus typing={reply !== null} replyCard={model.cards.some((c) => c.type === "reply")} running={hasWaitingCard} />
+      {/* The reply sits where its final card will be, before the answer drafts, so it does not jump over them. */}
+      {reply !== null && <ReplyDraft text={replyDraftText(reply)} />}
+      {answers.map((d, i) => (
+        <AnswerDraft key={d.callId || i} draft={d} dots={!hasWaitingCard && reply === null && i === answers.length - 1} />
       ))}
-      {model.cards.map((c, i) => (c.type === "waiting" ? <Card key={`w:${i}`} card={c} actions={props.actions} /> : null))}
+      {model.cards.map((c, i) => (c.type === "waiting" ? <Card key={`w:${i}`} card={c} actions={props.actions} typing={reply !== null} /> : null))}
       {model.rerun && (
         <div className="ag-rerun">
           <IconButton icon="retry" label={texts.rerunTitle} busy={props.actions.busy} onClick={() => props.actions.press("rerun")} />

@@ -9,7 +9,7 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// Deps are the ports of the service; every one except Progress, Effects, Mentions and Log is required.
+// Deps are the ports of the service; every one except Progress, Drafts, Effects, Mentions and Log is required.
 type Deps struct {
 	Model    AgentModel
 	Threads  ThreadRepository
@@ -20,6 +20,7 @@ type Deps struct {
 	Clock    Clock
 	IDs      IDGenerator
 	Progress Progress  // nil: no update before a Hub step
+	Drafts   Drafts    // nil: the reply of a step is not shown while it is written
 	Effects  Effects   // nil: Rerun is refused with ErrInvalidConfig
 	Mentions Mentioned // nil: no mention is kept, as none can be checked
 	Log      *slog.Logger

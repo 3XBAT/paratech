@@ -263,30 +263,35 @@ var wantFields = map[string]map[string]string{
 		"calls": "message paratech.hub.v1.SealedCalls", "usage": "message paratech.hub.v1.Usage",
 		"quota": "message paratech.hub.v1.QuotaSnapshot", "reservation_id": "string", "replayed": "bool",
 	},
+	"AgentStepStreamRequest": {"request": "message paratech.hub.v1.AgentStepRequest"},
+	"AgentStepStreamResponse": {
+		"delta": "string (oneof event)", "result": "message paratech.hub.v1.AgentStepResponse (oneof event)",
+	},
 }
 
 // Every string and bytes field of the contract. These carry free text, so a new one is a new place where a destination,
 // a secret or transcript-derived text could travel: adding one must be a conscious edit here, with a review of what the
 // Hub does with it. Sorted by field name.
 var wantStringFields = map[string][]string{
-	"CompletionSpec":         {"idempotency_key", "instructions", "model_alias", "untrusted_data"},
-	"CompletionResult":       {"output", "reservation_id"},
-	"CompleteStreamResponse": {"delta"},
-	"ErrorDetail":            {"message"},
-	"Reservation":            {"reservation_id"},
-	"ReserveRequest":         {"idempotency_key", "model_alias"},
-	"SettleRequest":          {"reservation_id"},
-	"ReleaseRequest":         {"reservation_id"},
-	"AgentStepRequest":       {"idempotency_key", "thread_id"},
-	"AgentBase":              {"time_zone", "today"},
-	"AgentSubject":           {"name", "subject_id"},
-	"AgentScope":             {"assignment_id", "lesson_id", "subject_id"},
-	"AgentMention":           {"id"},
-	"AgentTurn":              {"agent_reply", "history_summary", "student_text"},
-	"SealedCalls":            {"seal"},
-	"ToolCall":               {"arguments_json", "call_id", "tool"},
-	"ToolResult":             {"call_id", "result_json"},
-	"AgentStepResponse":      {"reservation_id"},
+	"CompletionSpec":          {"idempotency_key", "instructions", "model_alias", "untrusted_data"},
+	"CompletionResult":        {"output", "reservation_id"},
+	"CompleteStreamResponse":  {"delta"},
+	"ErrorDetail":             {"message"},
+	"Reservation":             {"reservation_id"},
+	"ReserveRequest":          {"idempotency_key", "model_alias"},
+	"SettleRequest":           {"reservation_id"},
+	"ReleaseRequest":          {"reservation_id"},
+	"AgentStepRequest":        {"idempotency_key", "thread_id"},
+	"AgentBase":               {"time_zone", "today"},
+	"AgentSubject":            {"name", "subject_id"},
+	"AgentScope":              {"assignment_id", "lesson_id", "subject_id"},
+	"AgentMention":            {"id"},
+	"AgentTurn":               {"agent_reply", "history_summary", "student_text"},
+	"SealedCalls":             {"seal"},
+	"ToolCall":                {"arguments_json", "call_id", "tool"},
+	"ToolResult":              {"call_id", "result_json"},
+	"AgentStepResponse":       {"reservation_id"},
+	"AgentStepStreamResponse": {"delta"},
 }
 
 func localName(m protoreflect.MessageDescriptor) string {
@@ -385,13 +390,14 @@ type rpcShape struct {
 }
 
 var wantRPCs = map[string]rpcShape{
-	"GatewayService.Complete":       {"CompleteRequest", "CompleteResponse", false, public},
-	"GatewayService.CompleteStream": {"CompleteStreamRequest", "CompleteStreamResponse", true, public},
-	"GatewayService.AgentStep":      {"AgentStepRequest", "AgentStepResponse", false, public},
-	"QuotaService.Reserve":          {"ReserveRequest", "ReserveResponse", false, internal},
-	"QuotaService.Settle":           {"SettleRequest", "SettleResponse", false, internal},
-	"QuotaService.Release":          {"ReleaseRequest", "ReleaseResponse", false, internal},
-	"QuotaService.GetRemaining":     {"GetRemainingRequest", "GetRemainingResponse", false, public},
+	"GatewayService.Complete":        {"CompleteRequest", "CompleteResponse", false, public},
+	"GatewayService.CompleteStream":  {"CompleteStreamRequest", "CompleteStreamResponse", true, public},
+	"GatewayService.AgentStep":       {"AgentStepRequest", "AgentStepResponse", false, public},
+	"GatewayService.AgentStepStream": {"AgentStepStreamRequest", "AgentStepStreamResponse", true, public},
+	"QuotaService.Reserve":           {"ReserveRequest", "ReserveResponse", false, internal},
+	"QuotaService.Settle":            {"SettleRequest", "SettleResponse", false, internal},
+	"QuotaService.Release":           {"ReleaseRequest", "ReleaseResponse", false, internal},
+	"QuotaService.GetRemaining":      {"GetRemainingRequest", "GetRemainingResponse", false, public},
 }
 
 func TestServicesRPCsAndExposure(t *testing.T) {
@@ -446,7 +452,8 @@ func TestOnlyGatewayAndGetRemainingArePublic(t *testing.T) {
 	slices.Sort(publicRPCs)
 	slices.Sort(internalRPCs)
 	if want := []string{
-		"GatewayService.AgentStep", "GatewayService.Complete", "GatewayService.CompleteStream", "QuotaService.GetRemaining",
+		"GatewayService.AgentStep", "GatewayService.AgentStepStream", "GatewayService.Complete", "GatewayService.CompleteStream",
+		"QuotaService.GetRemaining",
 	}; !slices.Equal(publicRPCs, want) {
 		t.Errorf("public RPCs are %v, want %v", publicRPCs, want)
 	}
@@ -525,6 +532,7 @@ var agentStringFields = map[string]string{
 	"ToolResult.call_id":               "opaque call ID",
 	"ToolResult.result_json":           "JSON built from an allowlist of typed fields",
 	"AgentStepResponse.reservation_id": "quota reservation ID",
+	"AgentStepStreamResponse.delta":    "display-only draft of the reply text (model output, untrusted), at most 4000 characters in all",
 }
 
 // agentMessages returns the messages of the Hub package reachable from the agent RPC, roots included.
@@ -547,6 +555,8 @@ func agentMessages(t *testing.T) []protoreflect.MessageDescriptor {
 	}
 	visit((&hubv1.AgentStepRequest{}).ProtoReflect().Descriptor())
 	visit((&hubv1.AgentStepResponse{}).ProtoReflect().Descriptor())
+	visit((&hubv1.AgentStepStreamRequest{}).ProtoReflect().Descriptor())
+	visit((&hubv1.AgentStepStreamResponse{}).ProtoReflect().Descriptor())
 	if len(out) < 10 {
 		t.Fatalf("only %d agent messages reachable, the walk is broken", len(out))
 	}

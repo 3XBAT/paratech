@@ -41,6 +41,9 @@ const (
 	// GatewayServiceAgentStepProcedure is the fully-qualified name of the GatewayService's AgentStep
 	// RPC.
 	GatewayServiceAgentStepProcedure = "/paratech.hub.v1.GatewayService/AgentStep"
+	// GatewayServiceAgentStepStreamProcedure is the fully-qualified name of the GatewayService's
+	// AgentStepStream RPC.
+	GatewayServiceAgentStepStreamProcedure = "/paratech.hub.v1.GatewayService/AgentStepStream"
 )
 
 // GatewayServiceClient is a client for the paratech.hub.v1.GatewayService service.
@@ -74,8 +77,31 @@ type GatewayServiceClient interface {
 	// AgentStep runs one step of the agent planner (ADR-0023) and returns 1 to 4 sealed tool calls. The Hub chooses the
 	// prompt, the tool catalog and the model alias by profile; the client sends neither a prompt nor an alias. Each step is
 	// one ledger attempt keyed by AgentStepRequest.idempotency_key with the key life cycle above; the fingerprint covers
-	// the whole AgentStepRequest and never matches a CompletionSpec fingerprint. No streaming: a step is short.
+	// the whole AgentStepRequest and never matches a CompletionSpec fingerprint. AgentStepStream is the same step with the
+	// visible reply streamed.
 	AgentStep(context.Context, *connect.Request[v1.AgentStepRequest]) (*connect.Response[v1.AgentStepResponse], error)
+	// AgentStepStream is AgentStep with the visible reply text streamed while the model writes it (ADR-0026 addendum
+	// "Streamed reply"). Its request wraps an AgentStepRequest, which has the validation, prompt, catalog, fingerprint,
+	// ledger and key life cycle of AgentStep: AgentStep and AgentStepStream with the same idempotency key and
+	// AgentStepRequest are one logical request, and either replays the result the other stored. Stream semantics:
+	//   - zero or more messages with "delta", in order, then exactly one message with "result", then the stream ends;
+	//   - the deltas are UNTRUSTED, display-only draft text: the "text" argument of a "reply" call and the plain text of
+	//     an answer without tool calls as the model writes them (parts after the first one start with a blank line). They
+	//     carry no other tool call or argument, at most 4000 characters in all, and are never a cause of any action. The
+	//     sealed calls of AgentStepResponse are what the Hub checked against the catalog (a long reply cut at a
+	//     sentence, a plain text turned into a reply) and may differ from the concatenation of the deltas; the client
+	//     shows and executes only AgentStepResponse.calls;
+	//   - no delta is sent for a replay (same idempotency key, completed attempt), when the Hub does not stream from the
+	//     provider, or when the provider answers without streaming: then the stream holds only the result;
+	//   - a failure is delivered as a Connect error with the codes and ErrorDetail of AgentStep (in the end-of-stream
+	//     error for a stream that already started); no delta follows it. A stream without a final "result" is a failed
+	//     call; the client must discard the deltas it received. A provider stream that ends before its end event is
+	//     ERROR_CODE_PROVIDER_ERROR and releases the reservation;
+	//   - when the client cancels or the connection drops, the Hub does as for CompleteStream: a provider call that has
+	//     started is read to the end on a context that is not tied to the request, settled in full and its result
+	//     stored, so a retry with the same key replays it free; if the provider was never called, the reservation is
+	//     released.
+	AgentStepStream(context.Context, *connect.Request[v1.AgentStepStreamRequest]) (*connect.ServerStreamForClient[v1.AgentStepStreamResponse], error)
 }
 
 // NewGatewayServiceClient constructs a client for the paratech.hub.v1.GatewayService service. By
@@ -107,14 +133,21 @@ func NewGatewayServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(gatewayServiceMethods.ByName("AgentStep")),
 			connect.WithClientOptions(opts...),
 		),
+		agentStepStream: connect.NewClient[v1.AgentStepStreamRequest, v1.AgentStepStreamResponse](
+			httpClient,
+			baseURL+GatewayServiceAgentStepStreamProcedure,
+			connect.WithSchema(gatewayServiceMethods.ByName("AgentStepStream")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // gatewayServiceClient implements GatewayServiceClient.
 type gatewayServiceClient struct {
-	complete       *connect.Client[v1.CompleteRequest, v1.CompleteResponse]
-	completeStream *connect.Client[v1.CompleteStreamRequest, v1.CompleteStreamResponse]
-	agentStep      *connect.Client[v1.AgentStepRequest, v1.AgentStepResponse]
+	complete        *connect.Client[v1.CompleteRequest, v1.CompleteResponse]
+	completeStream  *connect.Client[v1.CompleteStreamRequest, v1.CompleteStreamResponse]
+	agentStep       *connect.Client[v1.AgentStepRequest, v1.AgentStepResponse]
+	agentStepStream *connect.Client[v1.AgentStepStreamRequest, v1.AgentStepStreamResponse]
 }
 
 // Complete calls paratech.hub.v1.GatewayService.Complete.
@@ -130,6 +163,11 @@ func (c *gatewayServiceClient) CompleteStream(ctx context.Context, req *connect.
 // AgentStep calls paratech.hub.v1.GatewayService.AgentStep.
 func (c *gatewayServiceClient) AgentStep(ctx context.Context, req *connect.Request[v1.AgentStepRequest]) (*connect.Response[v1.AgentStepResponse], error) {
 	return c.agentStep.CallUnary(ctx, req)
+}
+
+// AgentStepStream calls paratech.hub.v1.GatewayService.AgentStepStream.
+func (c *gatewayServiceClient) AgentStepStream(ctx context.Context, req *connect.Request[v1.AgentStepStreamRequest]) (*connect.ServerStreamForClient[v1.AgentStepStreamResponse], error) {
+	return c.agentStepStream.CallServerStream(ctx, req)
 }
 
 // GatewayServiceHandler is an implementation of the paratech.hub.v1.GatewayService service.
@@ -163,8 +201,31 @@ type GatewayServiceHandler interface {
 	// AgentStep runs one step of the agent planner (ADR-0023) and returns 1 to 4 sealed tool calls. The Hub chooses the
 	// prompt, the tool catalog and the model alias by profile; the client sends neither a prompt nor an alias. Each step is
 	// one ledger attempt keyed by AgentStepRequest.idempotency_key with the key life cycle above; the fingerprint covers
-	// the whole AgentStepRequest and never matches a CompletionSpec fingerprint. No streaming: a step is short.
+	// the whole AgentStepRequest and never matches a CompletionSpec fingerprint. AgentStepStream is the same step with the
+	// visible reply streamed.
 	AgentStep(context.Context, *connect.Request[v1.AgentStepRequest]) (*connect.Response[v1.AgentStepResponse], error)
+	// AgentStepStream is AgentStep with the visible reply text streamed while the model writes it (ADR-0026 addendum
+	// "Streamed reply"). Its request wraps an AgentStepRequest, which has the validation, prompt, catalog, fingerprint,
+	// ledger and key life cycle of AgentStep: AgentStep and AgentStepStream with the same idempotency key and
+	// AgentStepRequest are one logical request, and either replays the result the other stored. Stream semantics:
+	//   - zero or more messages with "delta", in order, then exactly one message with "result", then the stream ends;
+	//   - the deltas are UNTRUSTED, display-only draft text: the "text" argument of a "reply" call and the plain text of
+	//     an answer without tool calls as the model writes them (parts after the first one start with a blank line). They
+	//     carry no other tool call or argument, at most 4000 characters in all, and are never a cause of any action. The
+	//     sealed calls of AgentStepResponse are what the Hub checked against the catalog (a long reply cut at a
+	//     sentence, a plain text turned into a reply) and may differ from the concatenation of the deltas; the client
+	//     shows and executes only AgentStepResponse.calls;
+	//   - no delta is sent for a replay (same idempotency key, completed attempt), when the Hub does not stream from the
+	//     provider, or when the provider answers without streaming: then the stream holds only the result;
+	//   - a failure is delivered as a Connect error with the codes and ErrorDetail of AgentStep (in the end-of-stream
+	//     error for a stream that already started); no delta follows it. A stream without a final "result" is a failed
+	//     call; the client must discard the deltas it received. A provider stream that ends before its end event is
+	//     ERROR_CODE_PROVIDER_ERROR and releases the reservation;
+	//   - when the client cancels or the connection drops, the Hub does as for CompleteStream: a provider call that has
+	//     started is read to the end on a context that is not tied to the request, settled in full and its result
+	//     stored, so a retry with the same key replays it free; if the provider was never called, the reservation is
+	//     released.
+	AgentStepStream(context.Context, *connect.Request[v1.AgentStepStreamRequest], *connect.ServerStream[v1.AgentStepStreamResponse]) error
 }
 
 // NewGatewayServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -192,6 +253,12 @@ func NewGatewayServiceHandler(svc GatewayServiceHandler, opts ...connect.Handler
 		connect.WithSchema(gatewayServiceMethods.ByName("AgentStep")),
 		connect.WithHandlerOptions(opts...),
 	)
+	gatewayServiceAgentStepStreamHandler := connect.NewServerStreamHandler(
+		GatewayServiceAgentStepStreamProcedure,
+		svc.AgentStepStream,
+		connect.WithSchema(gatewayServiceMethods.ByName("AgentStepStream")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/paratech.hub.v1.GatewayService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case GatewayServiceCompleteProcedure:
@@ -200,6 +267,8 @@ func NewGatewayServiceHandler(svc GatewayServiceHandler, opts ...connect.Handler
 			gatewayServiceCompleteStreamHandler.ServeHTTP(w, r)
 		case GatewayServiceAgentStepProcedure:
 			gatewayServiceAgentStepHandler.ServeHTTP(w, r)
+		case GatewayServiceAgentStepStreamProcedure:
+			gatewayServiceAgentStepStreamHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -219,4 +288,8 @@ func (UnimplementedGatewayServiceHandler) CompleteStream(context.Context, *conne
 
 func (UnimplementedGatewayServiceHandler) AgentStep(context.Context, *connect.Request[v1.AgentStepRequest]) (*connect.Response[v1.AgentStepResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("paratech.hub.v1.GatewayService.AgentStep is not implemented"))
+}
+
+func (UnimplementedGatewayServiceHandler) AgentStepStream(context.Context, *connect.Request[v1.AgentStepStreamRequest], *connect.ServerStream[v1.AgentStepStreamResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("paratech.hub.v1.GatewayService.AgentStepStream is not implemented"))
 }

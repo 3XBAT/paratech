@@ -23,7 +23,8 @@ import (
 	"paratech/shared/gen/paratech/hub/v1/hubv1connect"
 )
 
-// fakeAgentHub serves AgentStep; answer runs on the server goroutine and must not call t.Fatal.
+// fakeAgentHub serves AgentStep only (AgentStepStream is unimplemented, as on an older Hub, so these tests run the
+// fallback); answer runs on the server goroutine and must not call t.Fatal.
 type fakeAgentHub struct {
 	hubv1connect.UnimplementedGatewayServiceHandler
 
@@ -52,6 +53,11 @@ func (f *fakeAgentHub) seen() []*hubv1.AgentStepRequest {
 }
 
 func startAgentHub(t *testing.T, f *fakeAgentHub) *Client {
+	t.Helper()
+	return startGateway(t, f)
+}
+
+func startGateway(t *testing.T, f hubv1connect.GatewayServiceHandler) *Client {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.Handle(hubv1connect.NewGatewayServiceHandler(f))
@@ -108,7 +114,7 @@ func TestStepSendsExactlyTheContractFields(t *testing.T) {
 	f := &fakeAgentHub{answer: agentOK}
 	c := startAgentHub(t, f)
 
-	got, err := c.Step(t.Context(), stepRequest(t))
+	got, err := c.Step(t.Context(), stepRequest(t), nil)
 	if err != nil {
 		t.Fatalf("Step: %v", err)
 	}
@@ -149,7 +155,7 @@ func TestStepSendsHistoryPairs(t *testing.T) {
 	req := stepRequest(t)
 	req.History = append([]agent.HistoryTurn{{StudentText: "что такое горутина"}, {AgentReply: "reply: горутина — это"}}, req.History...)
 
-	if _, err := c.Step(t.Context(), req); err != nil {
+	if _, err := c.Step(t.Context(), req, nil); err != nil {
 		t.Fatalf("Step: %v", err)
 	}
 	reqs := f.seen()
@@ -219,7 +225,7 @@ func TestStepErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := startAgentHub(t, &fakeAgentHub{answer: func() (*hubv1.AgentStepResponse, error) { return nil, tt.err }})
-			_, err := c.Step(t.Context(), stepRequest(t))
+			_, err := c.Step(t.Context(), stepRequest(t), nil)
 			for _, w := range tt.want {
 				if !errors.Is(err, w) {
 					t.Errorf("error %v does not match %v", err, w)
@@ -244,7 +250,7 @@ func TestStepBadResponses(t *testing.T) {
 	for name, resp := range bad {
 		t.Run(name, func(t *testing.T) {
 			c := startAgentHub(t, &fakeAgentHub{answer: func() (*hubv1.AgentStepResponse, error) { return resp, nil }})
-			if _, err := c.Step(t.Context(), stepRequest(t)); !errors.Is(err, ErrBadResponse) || !errors.Is(err, backoff.ErrPermanent) {
+			if _, err := c.Step(t.Context(), stepRequest(t), nil); !errors.Is(err, ErrBadResponse) || !errors.Is(err, backoff.ErrPermanent) {
 				t.Fatalf("Step = %v, want a permanent ErrBadResponse", err)
 			}
 		})
@@ -277,7 +283,7 @@ func TestStepRefusesBadRequestsLocally(t *testing.T) {
 	} {
 		req := stepRequest(t)
 		mut(&req)
-		if _, err := c.Step(t.Context(), req); !errors.Is(err, ErrInvalidRequest) {
+		if _, err := c.Step(t.Context(), req, nil); !errors.Is(err, ErrInvalidRequest) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -326,7 +332,7 @@ func TestStepSendsMentionsAsIDs(t *testing.T) {
 	req := stepRequest(t)
 	req.Mentions = []agent.StepMention{{Ref: refs[0], Current: true}, {Ref: refs[1], Current: true}, {Ref: refs[2]}, {Ref: refs[3]}}
 
-	if _, err := c.Step(t.Context(), req); err != nil {
+	if _, err := c.Step(t.Context(), req, nil); err != nil {
 		t.Fatalf("Step: %v", err)
 	}
 	reqs := f.seen()
@@ -374,7 +380,7 @@ func TestStepSendsTheSummaryFirst(t *testing.T) {
 	req := stepRequest(t)
 	req.History = append([]agent.HistoryTurn{sum.Turn(), {StudentText: "что такое горутина"}, {AgentReply: "reply: это"}}, req.History...)
 
-	if _, err := c.Step(t.Context(), req); err != nil {
+	if _, err := c.Step(t.Context(), req, nil); err != nil {
 		t.Fatalf("Step: %v", err)
 	}
 	turns := f.seen()[0].GetTurns()
@@ -393,7 +399,7 @@ func TestStepNotConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Step(t.Context(), stepRequest(t)); !errors.Is(err, ErrNotConfigured) || !errors.Is(err, shared.ErrNetworkUnavailable) {
+	if _, err := c.Step(t.Context(), stepRequest(t), nil); !errors.Is(err, ErrNotConfigured) || !errors.Is(err, shared.ErrNetworkUnavailable) {
 		t.Fatalf("Step without a key = %v", err)
 	}
 }

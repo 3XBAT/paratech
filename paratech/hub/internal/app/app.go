@@ -192,16 +192,17 @@ func (a *App) runServer(ctx context.Context) error {
 	toPurge := purgers{gatewaySvc}
 	if a.agent.sealer != nil {
 		agentSvc, err := agentstep.New(agentstep.Deps{
-			Accounts: db.QuotaAccounts(), Turns: db.AgentTurns(), Provider: a.llm.provider, Limiter: a.llm.limiter, Clock: clock.System{},
-			Random: random.Source{}, Models: a.llm.models, Sealer: a.agent.sealer, Log: a.log,
+			Accounts: db.QuotaAccounts(), Turns: db.AgentTurns(), Provider: a.llm.provider, Streamer: a.llm.provider, Limiter: a.llm.limiter,
+			Clock: clock.System{}, Random: random.Source{}, Models: a.llm.models, Sealer: a.agent.sealer, Log: a.log,
 		}, agentstep.Config{
 			Unit: a.cfg.QuotaUnit, Limit: a.cfg.QuotaLimit, ReservationTTL: a.cfg.QuotaReservationTTL,
 			KeyRetention: a.cfg.IdempotencyRetention, CallTimeout: a.cfg.LLMTimeout, Profiles: a.agent.profiles,
+			ProviderStream: a.cfg.ProviderStream,
 		})
 		if err != nil {
 			return err
 		}
-		gatewayOpts = append(gatewayOpts, connect.WithAgentStep(agentSvc))
+		gatewayOpts = append(gatewayOpts, connect.WithAgentStep(agentSvc), connect.WithAgentStepStream(agentSvc))
 		toPurge = append(toPurge, agentSvc)
 	} else {
 		a.log.Warn("agent steps disabled: no seal key", "env", config.EnvAgentSealKeys)
