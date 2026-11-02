@@ -160,9 +160,14 @@ test("parseUpdate checks the shape, tolerates null lists and drops unknown cards
 
 test("parseDraft reads the draft event: ids, turn and texts as strings only", () => {
   assert.equal(draftEvent, "agent:draft");
-  const raw = { threadId: "th1", turn: 2, callId: "c1", texts: ["Ряд сходится", "второе"] };
+  const raw = { threadId: "th1", turn: 2, callId: "c1", texts: ["Ряд сходится", "второе"], reply: false };
   assert.deepEqual(parseDraft(raw), raw);
   assert.deepEqual(parseDraft({ ...raw, texts: null }).texts, []);
+  // The reply draft of a step (TASK-340); an older core sends no reply field.
+  const reply = { threadId: "th1", turn: 2, callId: "step:reply", texts: ["Ряд\nсходится"], reply: true };
+  assert.deepEqual(parseDraft(reply), reply);
+  const { reply: _, ...old } = raw;
+  assert.equal(parseDraft(old).reply, false);
   assert.throws(() => parseDraft({ ...raw, texts: ["ok", { html: "<b>x</b>" }] }));
   assert.throws(() => parseDraft({ ...raw, turn: "2" }));
   assert.throws(() => parseDraft({ ...raw, callId: 1 }));

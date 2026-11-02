@@ -21,10 +21,15 @@ const maxOutputTokens = 1 << 20
 // ErrorDetail, ADR-0023): the request starts again from the student's text. It also matches agent.ErrTurnGone.
 var ErrTurnGone = errors.New("hub no longer keeps the model turn")
 
-// Step runs one planner step (GatewayService.AgentStep; the agentturn.AgentModel port) with the URL, key, limits and
-// error classes of Complete. Only the contract fields are sent; the profile is PANEL and the catalog version the one
-// this desktop implements, so the Hub picks the prompt and the model. The calls in the reply stay untrusted.
-func (c *Client) Step(ctx context.Context, req agent.StepRequest) (agent.StepReply, error) {
+// Step runs one planner step (the agentturn.AgentModel port) with the URL, key, limits and error classes of Complete.
+// Only the contract fields are sent; the profile is PANEL and the catalog version the one this desktop implements, so
+// the Hub picks the prompt and the model. The calls in the reply stay untrusted.
+//
+// It reads GatewayService.AgentStepStream (ADR-0026 addendum) and hands the reply text written so far, whole and
+// cleaned (see replyDraft), to a non-nil draft, in order, from the calling goroutine; a Hub without it (unimplemented)
+// is asked through AgentStep with the same request, so the same key, and so is every later step of this client. The reply is the stream's result, never the
+// deltas; a stream that ends without a result is a lost answer (unavailable, «Продолжить» replays the key).
+func (c *Client) Step(ctx context.Context, req agent.StepRequest, draft func(soFar string)) (agent.StepReply, error) {
 	if err := ctx.Err(); err != nil {
 		return agent.StepReply{}, fmt.Errorf("%s: %w", opAgentStep, err)
 	}
@@ -44,24 +49,94 @@ func (c *Client) Step(ctx context.Context, req agent.StepRequest) (agent.StepRep
 	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	gateway := hubv1connect.NewGatewayServiceClient(c.http, base, connect.WithReadMaxBytes(maxResponseBytes))
+	var resp *hubv1.AgentStepResponse
+	if c.noStepStream.Load() {
+		resp, err = unaryStep(callCtx, gateway, msg, key)
+	} else {
+		resp, err = streamStep(callCtx, gateway, msg, key, draft)
+		if connect.CodeOf(err) == connect.CodeUnimplemented && ctx.Err() == nil {
+			c.noStepStream.Store(true)
+			resp, err = unaryStep(callCtx, gateway, msg, key)
+		}
+	}
+	if err != nil {
+		return agent.StepReply{}, stepError(ctx, callCtx, err)
+	}
+	return agentReplyOf(resp)
+}
+
+// streamStep reads AgentStepStream. Errors are those of the generated client, or an *Error of a broken stream.
+func streamStep(ctx context.Context, gateway hubv1connect.GatewayServiceClient, msg *hubv1.AgentStepRequest, key string,
+	draft func(string),
+) (*hubv1.AgentStepResponse, error) {
+	sreq := connect.NewRequest(&hubv1.AgentStepStreamRequest{Request: msg})
+	sreq.Header().Set("Authorization", "Bearer "+key)
+	stream, err := gateway.AgentStepStream(ctx, sreq)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = stream.Close() }()
+
+	var (
+		text replyDraft
+		res  *hubv1.AgentStepResponse
+	)
+	for stream.Receive() {
+		if res != nil {
+			return nil, permanent(opAgentStep, ErrBadResponse) // the result is the last message
+		}
+		switch ev := stream.Msg().GetEvent().(type) {
+		case *hubv1.AgentStepStreamResponse_Delta:
+			if text.add(ev.Delta) && draft != nil {
+				draft(text.String())
+			}
+		case *hubv1.AgentStepStreamResponse_Result:
+			if ev.Result == nil {
+				return nil, permanent(opAgentStep, ErrBadResponse)
+			}
+			res = ev.Result
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return nil, err
+	}
+	if res == nil {
+		// The Hub keeps the step it finished under the key: a lost result is replayed by «Продолжить».
+		return nil, unavailable(opAgentStep, ErrUnavailable)
+	}
+	return res, nil
+}
+
+// unaryStep is the step of a Hub without AgentStepStream.
+func unaryStep(ctx context.Context, gateway hubv1connect.GatewayServiceClient, msg *hubv1.AgentStepRequest, key string,
+) (*hubv1.AgentStepResponse, error) {
 	creq := connect.NewRequest(msg)
 	creq.Header().Set("Authorization", "Bearer "+key)
-	resp, err := gateway.AgentStep(callCtx, creq)
+	resp, err := gateway.AgentStep(ctx, creq)
 	if err != nil {
-		if perr := ctx.Err(); perr != nil {
-			return agent.StepReply{}, fmt.Errorf("%s: %w", opAgentStep, perr)
-		}
-		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
-			return agent.StepReply{}, unavailable(opAgentStep, ErrTimeout)
-		}
-		if turnGone(err) {
-			e := permanent(opAgentStep, ErrTurnGone)
-			e.extra = []error{agent.ErrTurnGone}
-			return agent.StepReply{}, e
-		}
-		return agent.StepReply{}, mapCallError(opAgentStep, err)
+		return nil, err
 	}
-	return agentReplyOf(resp.Msg)
+	return resp.Msg, nil
+}
+
+// stepError classifies a failed step like Complete; the Hub's own failed_precondition is a model turn it forgot.
+func stepError(ctx, callCtx context.Context, err error) error {
+	if perr := ctx.Err(); perr != nil {
+		return fmt.Errorf("%s: %w", opAgentStep, perr)
+	}
+	if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+		return unavailable(opAgentStep, ErrTimeout)
+	}
+	var own *Error
+	if errors.As(err, &own) {
+		return own
+	}
+	if turnGone(err) {
+		e := permanent(opAgentStep, ErrTurnGone)
+		e.extra = []error{agent.ErrTurnGone}
+		return e
+	}
+	return mapCallError(opAgentStep, err)
 }
 
 // turnGone recognizes the Hub's own failed_precondition without a detail; the idempotency conflict carries one.

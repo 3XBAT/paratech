@@ -12,10 +12,11 @@
 //     key never goes to another host. No URL, a refused stored URL or no key is "hub: not configured", which waits
 //     like a network failure.
 //
-// Step runs one agent planner step (GatewayService.AgentStep, ADR-0023; the agentturn.AgentModel port) with the same
-// URL, key, limits and error classes. Its key ag:<thread>:<turn>:<step> comes from the agent thread. The Hub's
-// failed_precondition without a detail («the model turn is gone») is ErrTurnGone, which also matches the agent
-// domain's values.ErrTurnGone.
+// Step runs one agent planner step (GatewayService.AgentStepStream, falling back to AgentStep on an older Hub;
+// ADR-0023, ADR-0026; the agentturn.AgentModel port) with the same URL, key, limits and error classes. Its key
+// ag:<thread>:<turn>:<step> comes from the agent thread. The Hub's failed_precondition without a detail («the model
+// turn is gone») is ErrTurnGone, which also matches the agent domain's values.ErrTurnGone. The streamed reply text is
+// only handed to the caller's draft, bounded and cleaned (replydraft.go).
 //
 // InspectMaterial runs the quarantined reader of a library material (OPERATION_TYPE_INSPECT_MATERIAL, ADR-0022) with
 // the same URL, key, limits and error classes; it sends no instructions or alias (the Hub's own prompt), and its output

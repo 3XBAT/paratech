@@ -7463,7 +7463,7 @@
                 "go test -race ./hub/... ./shared/... и затронутых desktop пакетов, npm run test/build"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-341",

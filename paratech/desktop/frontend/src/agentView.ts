@@ -456,6 +456,13 @@ export const texts = {
   /** Visually hidden text of the waiting dots (the polite live region). */
   waiting: "Агент отвечает…",
   draftCaption: "Ответ пишется · черновик",
+  /** Visually hidden status of a typing reply (the reply text itself is never in a live region). */
+  replyTyping: "Ответ печатается…",
+  replyReady: "Ответ готов",
+  /** Small caption under the text a student had read when they pressed «Стоп». */
+  replyStopped: "Ответ остановлен",
+  /** The stopped card of a request that failed or was cut while its reply was typing. */
+  replyCut: "Ответ прервался. Можно повторить.",
   removeContext: "Убрать контекст",
   offlineBanner: "Нет связи с paratech",
   empty: "Можно задать вопрос или попросить что-нибудь сделать.",
@@ -863,6 +870,24 @@ export interface EntryContext {
   blocked: boolean;
   /** The mentions of a request restored after a restart (no scope of its own); the scope's own win. */
   mentions?: readonly MentionView[];
+  /** The request failed or was cut while its reply was typing: the stopped card says the reply broke off. */
+  replyCut?: boolean;
+}
+
+/**
+ * The visually hidden status of one request (a polite live region that stays in place, so its texts are announced as it
+ * changes): null when the request has none. «Ответ печатается…» while the reply draft is shown, «Ответ готов» when the
+ * final reply card has replaced it; empty while a request runs without a draft (the waiting dots speak). The reply text
+ * itself never goes here.
+ */
+export function replyStatus(s: { typing: boolean; wasTyping: boolean; replyCard: boolean; running: boolean }): string | null {
+  if (s.typing) {
+    return texts.replyTyping;
+  }
+  if (s.wasTyping && s.replyCard) {
+    return texts.replyReady;
+  }
+  return s.running ? "" : null;
 }
 
 const finishedStatuses = new Set(["DONE", "FAILED", "CANCELLED", "STOPPED"]);
@@ -893,7 +918,11 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
   const problem = u.problem;
   const stopCard = running ? undefined : u.cards.find((c) => c.kind === "stopped");
   const reason = running ? "" : stopCard?.stopReason || u.stopReason;
-  const stop = reason !== "" ? (stopTexts[reason] ?? { text: "Остановлено", buttons: [] }) : null;
+  let stop = reason !== "" ? (stopTexts[reason] ?? { text: "Остановлено", buttons: [] }) : null;
+  // A reply that broke off in the middle: the same «Повторить», a clearer line.
+  if (stop && reason === "failed" && ctx.replyCut === true) {
+    stop = { ...stop, text: texts.replyCut };
+  }
   if (stop) {
     cards.push({ type: "stopped", text: stop.text, buttons: buttons(stop.buttons) });
   }

@@ -34,6 +34,7 @@ type agentWireRequest struct {
 	Messages   []agentWireMessage `json:"messages"`
 	Tools      []wireTool         `json:"tools"`
 	ToolChoice wireToolChoice     `json:"tool_choice"`
+	Stream     bool               `json:"stream,omitempty"`
 }
 
 type agentWireMessage struct {
@@ -209,26 +210,30 @@ func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 	if len(body) > maxResponseBytes {
 		return values.AgentAnswer{}, permanent("response too large")
 	}
-	var (
-		r      agentWireResponse
-		blocks []agentWireBlockRead
-	)
+	var r agentWireResponse
 	if err := json.Unmarshal(body, &r); err != nil || r.Type != responseTypeMessage || r.Usage == nil {
 		return values.AgentAnswer{}, permanent("malformed response")
 	}
-	if len(r.Content) > 0 && string(r.Content) != "null" {
-		if err := json.Unmarshal(r.Content, &blocks); err != nil {
+	return agentAnswerOf(r.Content, r.StopReason, r.Usage)
+}
+
+// agentAnswerOf reads the content, stop reason and usage of a planner answer, unary or assembled from a stream, by the
+// rules of readAgentAnswer.
+func agentAnswerOf(content json.RawMessage, stopRaw *string, wu *wireUsage) (values.AgentAnswer, error) {
+	var blocks []agentWireBlockRead
+	if len(content) > 0 && string(content) != "null" {
+		if err := json.Unmarshal(content, &blocks); err != nil {
 			return values.AgentAnswer{}, permanent("malformed response")
 		}
 	}
-	usage, ok := r.Usage.toUsage()
+	usage, ok := wu.toUsage()
 	if !ok {
 		return values.AgentAnswer{}, permanent("malformed usage")
 	}
-	if r.StopReason != nil && *r.StopReason == stopReasonRefusal {
+	if stopRaw != nil && *stopRaw == stopReasonRefusal {
 		return values.RefusedAgentAnswer(usage), nil
 	}
-	stop := agentStopReason(r.StopReason)
+	stop := agentStopReason(stopRaw)
 	malformed := values.MalformedAgentAnswer(usage).WithStop(stop)
 	var calls []values.ToolCall
 	for _, b := range blocks {
@@ -263,7 +268,7 @@ func readAgentAnswer(resp *http.Response) (values.AgentAnswer, error) {
 		}
 		return answer, nil
 	}
-	turn, err := values.NewAssistantTurn(string(r.Content))
+	turn, err := values.NewAssistantTurn(string(content))
 	if err != nil {
 		return malformed, nil
 	}

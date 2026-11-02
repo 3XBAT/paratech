@@ -25,12 +25,16 @@ type Answerer interface {
 // texts written so far, untrusted model text for display as «черновик» only, never stored, logged or sent to the
 // planner. Texts are cleaned of format characters (bidi controls and the like) and never empty: the drafts of a call
 // are its texts, then one Draft with End set and no texts.
+//
+// Reply marks the draft of the reply a planner step writes (replydraft.go, TASK-340): CallID is ReplyDraftCall and
+// Texts holds one entry, the whole reply so far.
 type Draft struct {
 	Thread shared.ThreadID
 	Turn   int
 	CallID string
 	Texts  []string
 	End    DraftEnd
+	Reply  bool
 }
 
 // DraftEnd says how the read of a call ended; the zero value marks a draft of a read still running.

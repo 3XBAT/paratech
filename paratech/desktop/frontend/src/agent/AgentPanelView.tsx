@@ -2,7 +2,7 @@ import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
 import type { MentionView } from "../bindings/agent.js";
 import { maxDraftLength, maxMentions, mentionTexts } from "../agentMentions.js";
 import { type AgentContext, chatTexts, composerKey, type EarlierItem, entryModel, inputPlacement, texts } from "../agentView.js";
-import { blockingEntry, draftsFor, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
+import { blockingEntry, cutFor, draftSize, draftsFor, endSignature, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
 import { Icon } from "../ui/Icon.js";
 import { AgentRequest, type CardActions } from "./AgentCards.js";
 import type { ContextFill } from "../bindings/agent.js";
@@ -71,13 +71,16 @@ export function AgentPanelView(props: AgentPanelViewProps) {
   }, [entries.length, earlier.length]);
 
   // A draft grows often: the panel follows it only when the reader is at the bottom, so reading above never jumps.
+  // The last request's status and card count are in the key too: when the final card replaces the draft, what comes
+  // under it (the assignment list, «Отменить всё», the stopped line) must be in view.
   const atBottom = useRef(true);
-  const draftSize = state.drafts.reduce((n, d) => n + d.texts.reduce((m, t) => m + t.length, d.texts.length), 0);
+  const size = draftSize(state.drafts);
+  const lastSig = endSignature(last);
   useEffect(() => {
-    if (draftSize > 0 && atBottom.current) {
+    if (atBottom.current) {
       end.current?.scrollIntoView?.({ block: "end", behavior: "auto" });
     }
-  }, [draftSize]);
+  }, [size, lastSig]);
 
   // The field grows with its text; the CSS max-height (six lines) stops it and the rest scrolls.
   const { inputRef, draft } = props;
@@ -214,9 +217,15 @@ export function AgentPanelView(props: AgentPanelViewProps) {
         {entries.map((e) => (
           <AgentRequest
             key={e.key}
-            model={entryModel(e, { last: e.key === last?.key, blocked: blockingEntry(entries, e) !== undefined, mentions: props.mentionsFor?.(e) })}
+            model={entryModel(e, {
+              last: e.key === last?.key,
+              blocked: blockingEntry(entries, e) !== undefined,
+              mentions: props.mentionsFor?.(e),
+              replyCut: cutFor(state, e) !== undefined,
+            })}
             actions={props.actionsFor(e)}
             drafts={draftsFor(state, e)}
+            cut={cutFor(state, e)}
           />
         ))}
         {props.notice !== "" && (

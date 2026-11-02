@@ -330,8 +330,8 @@ func (c *Catalog) Check(call values.ToolCall) error {
 
 // The card a plain text answer of the planner becomes, and its text argument (TASK-200).
 const (
-	toolReply    = "reply"
-	argReplyText = "text"
+	toolReply    = values.ReplyTool
+	argReplyText = values.ReplyTextArgument
 )
 
 // TextReply turns the plain text of a planner answer without tool calls into the call reply{text} with callID, checked
