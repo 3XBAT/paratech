@@ -27,7 +27,7 @@ var ErrTurnGone = errors.New("hub no longer keeps the model turn")
 //
 // It reads GatewayService.AgentStepStream (ADR-0026 addendum) and hands the reply text written so far, whole and
 // cleaned (see replyDraft), to a non-nil draft, in order, from the calling goroutine; a Hub without it (unimplemented)
-// is asked through AgentStep with the same request, so the same key. The reply is the stream's result, never the
+// is asked through AgentStep with the same request, so the same key, and so is every later step of this client. The reply is the stream's result, never the
 // deltas; a stream that ends without a result is a lost answer (unavailable, «Продолжить» replays the key).
 func (c *Client) Step(ctx context.Context, req agent.StepRequest, draft func(soFar string)) (agent.StepReply, error) {
 	if err := ctx.Err(); err != nil {
@@ -49,9 +49,15 @@ func (c *Client) Step(ctx context.Context, req agent.StepRequest, draft func(soF
 	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	gateway := hubv1connect.NewGatewayServiceClient(c.http, base, connect.WithReadMaxBytes(maxResponseBytes))
-	resp, err := streamStep(callCtx, gateway, msg, key, draft)
-	if connect.CodeOf(err) == connect.CodeUnimplemented && ctx.Err() == nil {
+	var resp *hubv1.AgentStepResponse
+	if c.noStepStream.Load() {
 		resp, err = unaryStep(callCtx, gateway, msg, key)
+	} else {
+		resp, err = streamStep(callCtx, gateway, msg, key, draft)
+		if connect.CodeOf(err) == connect.CodeUnimplemented && ctx.Err() == nil {
+			c.noStepStream.Store(true)
+			resp, err = unaryStep(callCtx, gateway, msg, key)
+		}
 	}
 	if err != nil {
 		return agent.StepReply{}, stepError(ctx, callCtx, err)

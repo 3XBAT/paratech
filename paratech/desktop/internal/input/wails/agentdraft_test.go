@@ -123,8 +123,8 @@ func TestAgentDraftEventContract(t *testing.T) {
 }
 
 // A reply draft is throttled and cut like an answer draft: the answered end flushes the last text before the update
-// with the reply card; a «Стоп» drops what waits. A progress update of the request lifts the cut, so the reply of the
-// step that «Повторить» sends shows.
+// with the reply card; a «Стоп» drops what waits. A progress update of the request lifts the cut for the reply, so the
+// reply of the step that «Повторить» sends shows.
 func TestAgentReplyDraft(t *testing.T) {
 	replying := func(text string) AgentDraft {
 		return AgentDraft{Thread: "th1", Turn: 1, CallID: "step:reply", Texts: []string{text}, Reply: true}
@@ -172,6 +172,46 @@ func TestAgentReplyDraft(t *testing.T) {
 	clock.advance(time.Second)
 	if got := shown(t, em); !slices.Equal(got, []string{"update", "update"}) {
 		t.Fatalf("progress of another chat: %q", got)
+	}
+}
+
+// The progress update of a stopped request lifts the cut for the reply draft only: a late answer draft of the stopped
+// step stays dropped, before and after the progress update, while the reply of the continued request shows. An update
+// of the running request then lets answer drafts through again.
+func TestAgentDraftProgressLiftsOnlyTheReply(t *testing.T) {
+	stopped := AgentUpdate{Thread: "th1", Turn: 1, Status: "STOPPED", StopReason: values.StopUser,
+		Cards: []values.Card{values.StoppedCard{Reason: values.StopUser}}}
+	replying := AgentDraft{Thread: "th1", Turn: 1, CallID: "step:reply", Texts: []string{"продолжение"}, Reply: true}
+
+	p, em, clock := draftPanel(t)
+	p.Draft(reading("c1", "а"))
+	p.Publish(stopped)
+	p.Draft(reading("c1", "поздно")) // late, after «Стоп»
+
+	// «Продолжить»: the progress update before the next Hub step.
+	p.Publish(AgentUpdate{Thread: "th1", Turn: 1, Status: "PLANNING", Progress: true})
+	p.Draft(reading("c1", "ещё позже"))
+	p.Draft(reading("c2", "x"))
+	p.Draft(ended("c1", AgentDraftAnswered))
+	p.Draft(replying)
+	clock.advance(time.Second)
+	if got := shown(t, em); !slices.Equal(got, []string{"а|", "update", "update", "продолжение|"}) {
+		t.Fatalf("after «Стоп» and progress: %q", got)
+	}
+
+	p.Publish(AgentUpdate{Thread: "th1", Turn: 1, Status: "EXECUTING"})
+	p.Draft(reading("c3", "новый"))
+	clock.advance(time.Second)
+	if got := shown(t, em); !slices.Equal(got, []string{"а|", "update", "update", "продолжение|", "update", "новый|"}) {
+		t.Fatalf("after the running update: %q", got)
+	}
+
+	// A second «Стоп» cuts the reply again until the next progress update.
+	p.Publish(stopped)
+	p.Draft(replying)
+	clock.advance(time.Second)
+	if got := shown(t, em); got[len(got)-1] != "update" {
+		t.Fatalf("reply after a second stop: %q", got)
 	}
 }
 

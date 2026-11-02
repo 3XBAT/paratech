@@ -68,11 +68,19 @@ func (wallClock) AfterFunc(d time.Duration, f func()) func() bool { return time.
 // draftTurn is the drafts of the latest request (turn) of a thread; one per thread is kept. cut is set by an update of
 // the request that is no longer running (a «Стоп», a cut or ended request): its drafts are dropped until it runs
 // again. The «Стоп» update comes from another operation than the read, so a draft may race it; the Driver itself hands
-// no draft of a call after its end, which comes before the update with the call's outcome.
+// no draft of a call after its end, which comes before the update with the call's outcome. replyLive lifts the cut for
+// the reply draft only: a progress update of the cut request starts its next Hub step, whose reply shows, while a late
+// answer draft of the stopped step stays dropped until an update of the running request clears the cut.
 type draftTurn struct {
-	turn  int
-	cut   bool
-	calls map[string]*callDraft
+	turn      int
+	cut       bool
+	replyLive bool
+	calls     map[string]*callDraft
+}
+
+// blocked tells whether a draft of the kind reply is dropped.
+func (t *draftTurn) blocked(reply bool) bool {
+	return t.cut && !(reply && t.replyLive)
 }
 
 // callDraft is the throttle of one call: texts wait for the timer when a draft was emitted less than agentDraftEvery
@@ -96,7 +104,7 @@ func (p *AgentPanel) Draft(d AgentDraft) {
 	c := t.calls[d.CallID]
 	if d.End != AgentDraftReading {
 		if c != nil {
-			if d.End == AgentDraftAnswered && !t.cut {
+			if d.End == AgentDraftAnswered && !t.blocked(c.reply) {
 				p.flushDraft(d.Thread, t.turn, d.CallID, c)
 			}
 			c.halt()
@@ -104,7 +112,7 @@ func (p *AgentPanel) Draft(d AgentDraft) {
 		}
 		return
 	}
-	if t.cut || len(d.Texts) == 0 {
+	if t.blocked(d.Reply) || len(d.Texts) == 0 {
 		return
 	}
 	if c == nil {
@@ -129,7 +137,7 @@ func (p *AgentPanel) draftDue(th shared.ThreadID, turn int, id string, c *callDr
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	t := p.drafts[th]
-	if t == nil || t.turn != turn || t.cut || t.calls[id] != c {
+	if t == nil || t.turn != turn || t.blocked(c.reply) || t.calls[id] != c {
 		return
 	}
 	c.stop = nil
@@ -140,8 +148,8 @@ func (p *AgentPanel) draftDue(th shared.ThreadID, turn int, id string, c *callDr
 // ran) emits the texts still waiting, so the last draft comes before the card; an update of a request that stopped
 // or ended drops them and cuts the drafts that come late. Progress updates and refused operations (a problem: another
 // operation of the thread was busy or stale) leave the drafts; a progress update of the request, sent before its next
-// Hub step («Продолжить», «Повторить» of a stopped request), lifts the cut, so the reply that step writes shows (a
-// stopped step's stream is cut by the Driver before). p.mu is held.
+// Hub step («Продолжить», «Повторить» of a stopped request), lifts the cut for the reply draft only, so the reply that
+// step writes shows (a stopped step's stream is cut by the Driver before). p.mu is held.
 func (p *AgentPanel) draftsBefore(u AgentUpdate) {
 	if u.Problem != "" || u.Thread == "" {
 		return
@@ -149,7 +157,7 @@ func (p *AgentPanel) draftsBefore(u AgentUpdate) {
 	running := u.Status == thread.StatusPlanning || u.Status == thread.StatusExecuting
 	if u.Progress {
 		if t := p.drafts[u.Thread]; t != nil && t.turn == u.Turn && running {
-			t.cut = false
+			t.replyLive = true
 		}
 		return
 	}
@@ -164,7 +172,7 @@ func (p *AgentPanel) draftsBefore(u AgentUpdate) {
 		c.halt()
 		delete(t.calls, id)
 	}
-	t.cut = !running
+	t.cut, t.replyLive = !running, false
 }
 
 // draftTurn returns the drafts of request turn of thread th, replacing those of an older request; nil for a request

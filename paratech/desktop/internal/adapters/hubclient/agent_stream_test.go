@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"unicode/utf8"
 
@@ -128,6 +129,106 @@ func TestStepFallsBackToUnary(t *testing.T) {
 	if len(streamed) != 1 || len(unary) != 1 || !proto.Equal(streamed[0].GetRequest(), unary[0]) ||
 		unary[0].GetIdempotencyKey() != "ag:th1:1:2" {
 		t.Fatalf("stream %v, unary %v", streamed, unary)
+	}
+}
+
+// The stream carries the scope mentions of the unary request, and the fallback to AgentStep sends the same mentions
+// under the same key.
+func TestStepStreamSendsTheMentions(t *testing.T) {
+	want := []*hubv1.AgentMention{
+		{Kind: hubv1.AgentMentionKind_AGENT_MENTION_KIND_LESSON, Id: "l0", Current: true},
+		{Kind: hubv1.AgentMentionKind_AGENT_MENTION_KIND_LESSON, Id: "l1"},
+	}
+	tests := []struct {
+		name     string
+		serve    func(context.Context, func(*hubv1.AgentStepStreamResponse) error) error
+		fallback bool
+	}{
+		{"streaming hub", serveAll(nil, stepResult(okResponse())), false},
+		{"older hub", serveAll(connect.NewError(connect.CodeUnimplemented, errors.New("older hub"))), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeStreamHub{fakeAgentHub: fakeAgentHub{answer: agentOK}, serve: tt.serve}
+			c := startGateway(t, f)
+			req := stepRequest(t)
+			req.Mentions = lessonMentions(t, 2, 1)
+
+			if _, err := c.Step(t.Context(), req, nil); err != nil {
+				t.Fatalf("Step: %v", err)
+			}
+			streamed := f.streamed()
+			if len(streamed) != 1 {
+				t.Fatalf("%d stream requests", len(streamed))
+			}
+			assertMentions(t, streamed[0].GetRequest().GetScope().GetMentions(), want)
+
+			unary := f.seen()
+			if !tt.fallback {
+				if len(unary) != 0 {
+					t.Fatal("a streaming Hub got the unary call too")
+				}
+				return
+			}
+			if len(unary) != 1 || unary[0].GetIdempotencyKey() != streamed[0].GetRequest().GetIdempotencyKey() {
+				t.Fatalf("unary %v after stream %v", unary, streamed)
+			}
+			assertMentions(t, unary[0].GetScope().GetMentions(), want)
+		})
+	}
+}
+
+func assertMentions(t *testing.T, got, want []*hubv1.AgentMention) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("mentions = %v, want %v", got, want)
+	}
+	for i := range want {
+		if !proto.Equal(got[i], want[i]) {
+			t.Fatalf("mention %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+// After an unimplemented AgentStepStream the client remembers the older Hub: the next step goes straight to AgentStep,
+// without another refused stream call.
+func TestStepRemembersAnOlderHub(t *testing.T) {
+	f := &fakeStreamHub{
+		fakeAgentHub: fakeAgentHub{answer: agentOK},
+		serve:        serveAll(connect.NewError(connect.CodeUnimplemented, errors.New("older hub"))),
+	}
+	c := startGateway(t, f)
+	for i := range 2 {
+		if _, err := c.Step(t.Context(), stepRequest(t), (&drafts{}).add); err != nil {
+			t.Fatalf("step %d: %v", i, err)
+		}
+	}
+	if s, u := len(f.streamed()), len(f.seen()); s != 1 || u != 2 {
+		t.Fatalf("%d stream calls, %d unary calls; want 1 and 2", s, u)
+	}
+}
+
+// Other stream failures are not remembered: the next step streams again.
+func TestStepKeepsStreamingAfterOtherFailures(t *testing.T) {
+	var calls atomic.Int32
+	f := &fakeStreamHub{
+		fakeAgentHub: fakeAgentHub{answer: agentOK},
+		serve: func(ctx context.Context, send func(*hubv1.AgentStepStreamResponse) error) error {
+			if calls.Add(1) == 1 {
+				return connect.NewError(connect.CodeAborted, errors.New("running"))
+			}
+			return serveAll(nil, stepResult(okResponse()))(ctx, send)
+		},
+	}
+	c := startGateway(t, f)
+	if _, err := c.Step(t.Context(), stepRequest(t), nil); !errors.Is(err, ErrBusy) {
+		t.Fatalf("first step: %v", err)
+	}
+	if _, err := c.Step(t.Context(), stepRequest(t), nil); err != nil {
+		t.Fatalf("second step: %v", err)
+	}
+	if s, u := len(f.streamed()), len(f.seen()); s != 2 || u != 0 {
+		t.Fatalf("%d stream calls, %d unary calls; want 2 and 0", s, u)
 	}
 }
 

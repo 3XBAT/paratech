@@ -332,7 +332,7 @@ func TestStepSendsMentionsAsIDs(t *testing.T) {
 	req := stepRequest(t)
 	req.Mentions = []agent.StepMention{{Ref: refs[0], Current: true}, {Ref: refs[1], Current: true}, {Ref: refs[2]}, {Ref: refs[3]}}
 
-	if _, err := c.Step(t.Context(), req); err != nil {
+	if _, err := c.Step(t.Context(), req, nil); err != nil {
 		t.Fatalf("Step: %v", err)
 	}
 	reqs := f.seen()
@@ -380,7 +380,7 @@ func TestStepSendsTheSummaryFirst(t *testing.T) {
 	req := stepRequest(t)
 	req.History = append([]agent.HistoryTurn{sum.Turn(), {StudentText: "что такое горутина"}, {AgentReply: "reply: это"}}, req.History...)
 
-	if _, err := c.Step(t.Context(), req); err != nil {
+	if _, err := c.Step(t.Context(), req, nil); err != nil {
 		t.Fatalf("Step: %v", err)
 	}
 	turns := f.seen()[0].GetTurns()
