@@ -1,4 +1,4 @@
-// TASK-193: follow-ups of 26.10 on the work card, «Сегодня», the turnkey start, «Спросить по шагу» and the free-work card.
+// TASK-193: follow-ups of 26.10 on the work card, «Сегодня», the turnkey start, «Спросить по шагу» and the failed stop.
 // Runs on the modules compiled by `npm run test` (tsconfig.test.json).
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -11,11 +11,8 @@ import { metaLine, retryOffered, workMeta, notStoppedText } from "../.test-build
 import { canOfferSend, SendWorkFlow, sendWorkTexts, initialSendWork } from "../.test-build/sendWorkView.js";
 import { startTurnkeyOnce } from "../.test-build/homeworkTurnkey.js";
 import { waitingLine } from "../.test-build/todayView.js";
-import { FreeWorkFlow, freeWorkModel, initialFreeWorkFlow } from "../.test-build/freeWorkView.js";
-import { freeWorkErrors } from "../.test-build/bindings/agent.js";
 import { WorkBody, WorkWritingCard } from "../.test-build/agent/WorkCard.js";
 import { WorkSendView } from "../.test-build/agent/WorkSend.js";
-import { FreeWorkCardView } from "../.test-build/agent/FreeWorkCard.js";
 
 const noop = () => undefined;
 const html = (el) => renderToStaticMarkup(el);
@@ -201,52 +198,7 @@ test("the new AskStep texts are known and shown as they are; no «backend missin
   assert.deepEqual(ok, { kind: "answer", text: evil });
 });
 
-// ---- 5. Free work in failed state, the failed stop ----
-
-const ref = { threadId: "th1", turn: 3, callId: "toolu_01" };
-function freeApi(cards) {
-  const calls = [];
-  return {
-    calls,
-    freeWorkCard: async () => {
-      calls.push("card");
-      return cards.shift() ?? { state: "waiting", workId: "" };
-    },
-    freeWork: async () => {
-      calls.push("freeWork");
-      return { state: "failed", workId: "" };
-    },
-  };
-}
-
-test("a stored failed free work offers «Обновить»", async () => {
-  const api = freeApi([{ state: "failed", workId: "" }, { state: "waiting", workId: "" }]);
-  const flow = new FreeWorkFlow(api, ref, noop);
-  await flow.load();
-  assert.equal(flow.state.phase, "failed");
-  assert.equal(flow.state.error, freeWorkErrors.failed);
-  const out = html(h(FreeWorkCardView, { state: flow.state, onDontShow: noop, onYes: noop, onNo: noop, onReload: noop }));
-  assert.match(out, /Обновить/);
-  assert.doesNotMatch(out, /Сделать|Не надо|checkbox/);
-  assert.ok(out.includes(freeWorkErrors.failed));
-  // The press cannot replay the failure.
-  await flow.answer(true);
-  assert.deepEqual(api.calls, ["card"]);
-  // «Обновить» reads again.
-  await flow.load();
-  assert.equal(flow.state.phase, "waiting");
-});
-
-test("a second press that finds the failure stored also ends in the failed state", async () => {
-  const api = freeApi([{ state: "waiting", workId: "" }, { state: "failed", workId: "" }]);
-  const flow = new FreeWorkFlow(api, ref, noop);
-  await flow.load();
-  await flow.answer(true);
-  assert.equal(flow.state.phase, "failed");
-  assert.equal(freeWorkModel(flow.state).kind, "unknown");
-  assert.equal(flow.state.busy, false);
-  assert.equal(initialFreeWorkFlow.phase, "loading");
-});
+// ---- 5. The failed stop ----
 
 test("«Повторить» is not offered next to a failed stop, nor next to any error of the stop call", () => {
   assert.equal(retryOffered(notStoppedText, false), false);

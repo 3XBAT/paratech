@@ -508,7 +508,6 @@ export function AgentPanel(props: {
       busy,
       confirm,
       turnkey,
-      freeWork: api,
       subjects,
       openAssignment: props.onOpenAssignment,
       openMention: props.onOpenMention,

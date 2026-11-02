@@ -3,13 +3,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { methods, parseSettings, settingsApi } from "../.test-build/bindings/settings.js";
 
-// The load mode fields of every reply (TASK-084): without a model in use there are no estimates; the free-work card
-// setting (TASK-188) and the photo recognition (TASK-294, off on a new install) come with them.
+// The load mode fields of every reply (TASK-084): without a model in use there are no estimates; the photo
+// recognition (TASK-294, off on a new install) comes with them.
 const load = {
   recognitionLoad: "gentle",
   loadEstimates: null,
   loadEstimatesModel: "",
-  freeWorkNotice: true,
   noteRecognition: "off",
   noteRecognitionLanguage: "unknown",
 };
@@ -69,16 +68,15 @@ test("extra fields of a reply are dropped", () => {
   assert.deepEqual(got, { recordingPromptsEnabled: true, processOnlyOnAcPower: true, ...load });
 });
 
-// TASK-188: «Предупреждать перед свободной работой» is read with the toggles and set by its bound method.
-test("the free-work card setting is read and set", async () => {
-  const reply = { recordingPromptsEnabled: true, processOnlyOnAcPower: true, ...load, freeWorkNotice: false };
-  const { call, calls } = fakeCall(reply);
-  const api = settingsApi(call);
-  assert.equal((await api.setFreeWorkNotice(false)).freeWorkNotice, false);
-  assert.deepEqual(calls, [["paratech/desktop/internal/input/wails.SettingsService.SetFreeWorkNotice", false]]);
-  for (const bad of [{ ...reply, freeWorkNotice: undefined }, { ...reply, freeWorkNotice: "no" }]) {
-    assert.throws(() => parseSettings(bad), /freeWorkNotice/);
-  }
+// TASK-342: the free-work notice setting is gone; a reply of an older core that still carries it reads fine and the
+// page neither exposes the field nor offers a setter or a bound method for it.
+test("the removed free-work notice setting is neither required nor exposed", async () => {
+  const reply = { recordingPromptsEnabled: true, processOnlyOnAcPower: true, ...load };
+  assert.deepEqual(parseSettings({ ...reply, freeWorkNotice: true }), reply);
+  assert.deepEqual(parseSettings(reply), reply);
+  assert.equal("freeWorkNotice" in parseSettings({ ...reply, freeWorkNotice: false }), false);
+  assert.equal("setFreeWorkNotice" in settingsApi(fakeCall(reply).call), false);
+  assert.equal("setFreeWorkNotice" in methods, false);
 });
 
 // TASK-294: «ИИ распознаёт фото конспектов» is read with the toggles and set by its bound method.

@@ -162,6 +162,29 @@ test("parseUpdate checks the shape, tolerates null lists and drops unknown cards
   assert.throws(() => parseState({ link: "weird", readOnly: false }));
 });
 
+// TASK-342: the free-work card is gone, but a stored request (history, journal) can still carry one.
+test("an old free_work card is dropped without an error and renders nothing", () => {
+  const stored = {
+    kind: "free_work", plan: null, questions: null, jobId: "", artifact: "", target: null, actionId: "", answerId: "",
+    cannotDo: null, text: "", stopReason: "", freeWork: { threadId: "t", turn: 1, callId: "c1" },
+  };
+  const reply = { ...stored, kind: "reply", freeWork: null, text: "ok" };
+  const raw = {
+    threadId: "t", turn: 1, subjectId: "", lessonId: "", assignmentId: "", screen: "today", status: "DONE",
+    stopReason: "", problem: "", cards: [stored],
+  };
+  const only = parseUpdate(raw);
+  assert.deepEqual(only.cards, []);
+  // The other cards of the same update stay.
+  assert.deepEqual(parseUpdate({ ...raw, cards: [stored, reply] }).cards.map((c) => c.kind), ["reply"]);
+  // The panel shows no card, no placeholder and no button for it.
+  const s = reducePanel(initialPanelState, { type: "update", update: only });
+  const model = entryModel(orderedEntries(s.entries)[0], { last: true, blocked: false });
+  assert.deepEqual(model.cards, []);
+  const out = renderToStaticMarkup(h(AgentRequest, { model, actions: { press: noop, revise: noop, answer: noop, undo: noop, undoAll: noop, undoNote: () => undefined } }));
+  assert.doesNotMatch(out, /свободн|Сделать|Не надо|<section/);
+});
+
 test("parseDraft reads the draft event: ids, turn and texts as strings only", () => {
   assert.equal(draftEvent, "agent:draft");
   const raw = { threadId: "th1", turn: 2, callId: "c1", texts: ["Ряд сходится", "второе"], reply: false };
@@ -580,23 +603,24 @@ test("confirm card without the confirm calls offers no buttons", () => {
 
 // ---- Stop reasons ----
 
-test("stop reasons: offline continues, failed retries, expired restarts, budget has no button", () => {
+test("stop reasons: offline repeats (continue), failed retries, expired restarts, budget has no button", () => {
   const stop = (reason, over = {}) => modelOf(update({ status: "STOPPED", stopReason: reason, ...over })).cards.at(-1);
   const off = stop("offline");
   assert.equal(off.type, "stopped");
   assert.equal(off.text, "Не завершено: нет связи");
-  assert.deepEqual(off.buttons.map((b) => b.label), ["Продолжить", "Отмена"]);
+  assert.deepEqual(off.buttons.map((b) => b.label), ["Повторить", "Отмена"]);
+  assert.deepEqual(off.buttons.map((b) => b.id), ["continue", "cancel"]);
   assert.deepEqual(stop("failed").buttons.map((b) => b.label), ["Повторить"]);
   assert.deepEqual(stop("expired").buttons.map((b) => b.label), ["Начать заново"]);
   assert.deepEqual(stop("budget").buttons, []);
-  assert.deepEqual(stop("user").buttons.map((b) => b.label), ["Продолжить", "Отмена"]);
-  assert.deepEqual(stop("quota").buttons.map((b) => b.label), ["Продолжить", "Отмена"]);
+  assert.deepEqual(stop("user").buttons.map((b) => b.label), ["Повторить", "Отмена"]);
+  assert.deepEqual(stop("quota").buttons.map((b) => b.label), ["Повторить", "Отмена"]);
   // A stopped card and the update's reason are one card, not two.
   const both = modelOf(update({ status: "STOPPED", stopReason: "offline", cards: [card({ kind: "stopped", stopReason: "offline" })] }));
   assert.equal(both.cards.filter((c) => c.type === "stopped").length, 1);
   const out = html(update({ status: "STOPPED", stopReason: "offline" }));
   assert.match(out, /Не завершено: нет связи/);
-  assert.match(out, />Продолжить</);
+  assert.match(out, />Повторить</);
 });
 
 test("update problems explain themselves and offer the next step", () => {

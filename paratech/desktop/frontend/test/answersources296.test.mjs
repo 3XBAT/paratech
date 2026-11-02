@@ -251,7 +251,7 @@ test("the sources code has no raw HTML or links", () => {
 const actionsBase = { press: noop, revise: noop, answer: noop, undo: noop, undoAll: noop, undoNote: () => undefined };
 const answerCard = (answerId) => ({
   kind: "answer", plan: null, questions: null, jobId: "", artifact: "", target: null, actionId: "", answerId, cannotDo: null,
-  text: "", assignments: [], stopReason: "", workId: "", outcome: "", freeWork: null,
+  text: "", assignments: [], stopReason: "", workId: "", outcome: "",
 });
 const update = (cards) => ({
   threadId: "th1", turn: 3, subjectId: "", lessonId: "", assignmentId: "", screen: "", status: "DONE", stopReason: "", problem: "", progress: false, cards,

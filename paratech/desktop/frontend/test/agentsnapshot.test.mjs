@@ -28,7 +28,6 @@ const planCard = {
   stopReason: "",
   workId: "",
   outcome: "",
-  freeWork: null,
 };
 
 const update = (over) => ({
@@ -90,7 +89,7 @@ test("«Да» of the snapshot card calls approvePlan with the request's thread 
   assert.deepEqual(calls, [[methods.approvePlan, { threadId: "a", turn: 2 }]]);
 });
 
-test("a stopped request restored from the snapshot offers «Продолжить»; a running one only the status", () => {
+test("a stopped request restored from the snapshot offers «Повторить» (continue); a running one only the status", () => {
   const stopped = snap(initialPanelState, update({ status: "STOPPED", stopReason: "user", cards: [] })).entries[0];
   assert.deepEqual(ids(stopped), ["continue", "cancel"]);
   const running = snap(initialPanelState, update({ status: "EXECUTING", cards: [] })).entries[0];

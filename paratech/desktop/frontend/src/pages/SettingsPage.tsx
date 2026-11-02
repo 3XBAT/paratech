@@ -32,19 +32,16 @@ export type SettingsPart = "settings" | "profile" | "appearance";
 const labels: Record<Toggle, string> = {
   recordingPromptsEnabled: "Автоматически предлагать запись в начале занятия",
   processOnlyOnAcPower: "Обрабатывать только от розетки",
-  freeWorkNotice: "Предупреждать перед свободной работой",
 };
 
 const hints: Record<Toggle, string> = {
   recordingPromptsEnabled: "Перед началом пары появится окно с кнопкой «Начать запись».",
   processOnlyOnAcPower: "На батарее расшифровка ждёт подключения питания и начнётся сама.",
-  freeWorkNotice: "Если задания нет, перед работой по теме в панели помощника появится карточка с вопросом.",
 };
 
-const setters: Record<Toggle, "setRecordingPromptsEnabled" | "setProcessOnlyOnAcPower" | "setFreeWorkNotice"> = {
+const setters: Record<Toggle, "setRecordingPromptsEnabled" | "setProcessOnlyOnAcPower"> = {
   recordingPromptsEnabled: "setRecordingPromptsEnabled",
   processOnlyOnAcPower: "setProcessOnlyOnAcPower",
-  freeWorkNotice: "setFreeWorkNotice",
 };
 
 const themeOptions: readonly { value: ThemeChoice; label: string }[] = [
@@ -163,7 +160,6 @@ export function SettingsPage(props: { part?: SettingsPart }) {
                   ))}
               </div>
             </SettingsGroup>
-            <SettingsGroup caption="Помощник">{toggleRow("freeWorkNotice", settings)}</SettingsGroup>
             <SettingsGroup caption={noteRecognitionTexts.caption}>
               <Switch
                 label={noteRecognitionTexts.label}

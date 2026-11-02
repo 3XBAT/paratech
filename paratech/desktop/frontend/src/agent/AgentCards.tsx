@@ -1,5 +1,5 @@
 import { Fragment, useId, useRef, useState } from "react";
-import type { AgentApi, AnswerInput, AssignmentLineView, DraftView } from "../bindings/agent.js";
+import type { AnswerInput, AssignmentLineView, DraftView } from "../bindings/agent.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
@@ -11,7 +11,6 @@ import { type CutReply, replyDraftText, splitDrafts } from "../agentState.js";
 import { AnswerSources } from "./AnswerSources.js";
 import { ConfirmCard } from "./ConfirmCard.js";
 import { WorkWritingCard } from "./WorkCard.js";
-import { FreeWorkCard } from "./FreeWorkCard.js";
 import { MessagePills } from "./MentionParts.js";
 import { Waiting } from "./Waiting.js";
 import { failedStepIndex, moreStepsLabel, planCollapseLimit, planTexts, planWindow, progressLabel, type StepMark } from "../planView.js";
@@ -42,8 +41,6 @@ export interface CardActions {
   confirm?: { api: AgentConfirmApi; deleteApi: RecordingDeleteApi };
   /** The core calls of the `work` cards; without them such a card shows nothing. */
   turnkey?: TurnkeyApi;
-  /** The core calls of the `free_work` cards; without them such a card shows nothing. */
-  freeWork?: Pick<AgentApi, "freeWork" | "freeWorkCard">;
   /** Subject names by id, for the assignment list of a reply; an unknown subject is left out. */
   subjects?: Readonly<Record<string, string>>;
   /** «Сегодня» for the due dates; the current time when absent. */
@@ -397,10 +394,6 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
       );
     case "work":
       return props.actions.turnkey ? <WorkWritingCard key={card.workId} api={props.actions.turnkey} workId={card.workId} /> : null;
-    case "free_work":
-      return props.actions.freeWork ? (
-        <FreeWorkCard key={`${card.ref.threadId}:${card.ref.turn}:${card.ref.callId}`} api={props.actions.freeWork} fwRef={card.ref} turnkey={props.actions.turnkey} />
-      ) : null;
     case "action": {
       const note = props.actions.undoNote(card.actionId);
       return (

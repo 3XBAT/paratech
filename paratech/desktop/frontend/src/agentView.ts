@@ -3,7 +3,7 @@
 // impersonal («Создан предмет…», not «Я создал…»). Model text (summary, notes, questions, options, labels, replies) is
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
-import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, ContextFill, EarlierRequestView, FreeWorkRef, MentionView, PlanStepView, PlanView, QuestionView, UpdateView } from "./bindings/agent.js";
+import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, ContextFill, EarlierRequestView, MentionView, PlanStepView, PlanView, QuestionView, UpdateView } from "./bindings/agent.js";
 import { askMentions, type MentionPill, mentionPills } from "./agentMentions.js";
 import { approveLabel, type PlanProgress, planProgress, stepMarks, type StepMark, planWindow } from "./planView.js";
 import { type Entry, isBusyRefused, isRunning, orderedEntries } from "./agentState.js";
@@ -502,7 +502,7 @@ export const buttonLabels: Record<ButtonId, string> = {
   revise: "Изменить",
   cancel: "Отмена",
   stop: "Стоп",
-  continue: "Продолжить",
+  continue: "Повторить",
   retry: "Повторить",
   restart: "Начать заново",
   rerun: "Повторить",
@@ -740,7 +740,6 @@ export type CardModel =
   | { type: "action"; text: string; actionId: string; undo: { label: string; enabled: boolean }; assignment: AddedAssignmentView | null }
   | { type: "stopped"; text: string; buttons: ButtonModel[] }
   | { type: "work"; workId: string }
-  | { type: "free_work"; ref: FreeWorkRef }
   | { type: "problem"; text: string; buttons: ButtonModel[] };
 
 function buttons(ids: ButtonId[]): ButtonModel[] {
@@ -828,9 +827,6 @@ function cardModel(c: CardView, status: string): CardModel | null {
       return c.workId !== "" ? { type: "work", workId: c.workId } : null;
     case "stopped":
       return null; // Built once from the stop reason below.
-    case "free_work":
-      // The card reads its own state (AgentApi.freeWorkCard); a card without the call it names has nothing to answer.
-      return c.freeWork !== null ? { type: "free_work", ref: c.freeWork } : null;
   }
 }
 
@@ -937,7 +933,7 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
     cards.push({ type: "stopped", text: "Отменено", buttons: [] });
   }
 
-  // «Повторить» only under the last request, and not where the stop card or the problem already offers the next step.
+  // The new-request «Повторить» only under the last request, and not where the stop card or the problem already offers the next step.
   const offered = [...(stop?.buttons ?? []), ...(problem === "retry_required" ? ["retry" as const] : []), ...(problem === "restart_required" ? ["restart" as const] : [])];
   // After rerun_blocked it stays: the core checks again (the effects may have been undone since).
   const rerun =
@@ -945,6 +941,8 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
     e.threadId !== "" &&
     finishedStatuses.has(u.status) &&
     !offered.includes("retry") &&
-    !offered.includes("restart");
+    !offered.includes("restart") &&
+    // The stop card's `continue` button is worded «Повторить» too: two of them under one request would be confusing.
+    !offered.includes("continue");
   return { ...base, cards, rerun };
 }
