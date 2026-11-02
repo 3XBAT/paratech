@@ -100,9 +100,20 @@ func (q *Queries) DeleteSubjectTeachers(ctx context.Context, subjectID string) e
 }
 
 const getMaterial = `-- name: GetMaterial :one
-SELECT id, sha256, size_bytes, type, original_name, subject_id, folder_id, status, text_status, version, created_at, updated_at FROM materials WHERE id = ?1
+SELECT id, sha256, size_bytes, type, original_name, subject_id, folder_id, status, text_status, version, created_at, updated_at FROM materials
+WHERE materials.id = ?1
+  AND (subject_id IS NULL
+    OR EXISTS (SELECT 1 FROM subjects s WHERE s.id = materials.subject_id AND s.removed_at IS NULL)
+    OR EXISTS (SELECT 1
+               FROM note_parts p
+               JOIN notes n ON n.id = p.note_id
+               JOIN subjects ns ON ns.id = n.subject_id
+               WHERE p.material_id = materials.id AND n.status = 'active' AND ns.removed_at IS NULL))
 `
 
+// A material is visible while it is in the inbox or its subject is not removed; one filed under a removed subject
+// stays visible while it is a part of an active note of a subject that is not removed (ADR-0027). (Comments here stay
+// ASCII: sqlc v1.31.1 counts the offsets of its rewrites in bytes.)
 func (q *Queries) GetMaterial(ctx context.Context, id string) (Material, error) {
 	row := q.db.QueryRowContext(ctx, getMaterial, id)
 	var i Material
@@ -127,6 +138,7 @@ const getMaterialBySHA256 = `-- name: GetMaterialBySHA256 :one
 SELECT id, sha256, size_bytes, type, original_name, subject_id, folder_id, status, text_status, version, created_at, updated_at FROM materials WHERE sha256 = ?1
 `
 
+// In any visibility: the same bytes are one material (import dedupe).
 func (q *Queries) GetMaterialBySHA256(ctx context.Context, sha256 string) (Material, error) {
 	row := q.db.QueryRowContext(ctx, getMaterialBySHA256, sha256)
 	var i Material
@@ -148,7 +160,7 @@ func (q *Queries) GetMaterialBySHA256(ctx context.Context, sha256 string) (Mater
 }
 
 const getSubject = `-- name: GetSubject :one
-SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email FROM subjects WHERE id = ?1
+SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email, removed_at FROM subjects WHERE id = ?1 AND removed_at IS NULL
 `
 
 func (q *Queries) GetSubject(ctx context.Context, id string) (Subject, error) {
@@ -164,6 +176,29 @@ func (q *Queries) GetSubject(ctx context.Context, id string) (Subject, error) {
 		&i.UpdatedAt,
 		&i.TeacherName,
 		&i.TeacherEmail,
+		&i.RemovedAt,
+	)
+	return i, err
+}
+
+const getSubjectAnyStatus = `-- name: GetSubjectAnyStatus :one
+SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email, removed_at FROM subjects WHERE id = ?1
+`
+
+func (q *Queries) GetSubjectAnyStatus(ctx context.Context, id string) (Subject, error) {
+	row := q.db.QueryRowContext(ctx, getSubjectAnyStatus, id)
+	var i Subject
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.NameKey,
+		&i.Semester,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeacherName,
+		&i.TeacherEmail,
+		&i.RemovedAt,
 	)
 	return i, err
 }
@@ -490,7 +525,10 @@ func (q *Queries) ListMaterialLessons(ctx context.Context, materialID string) ([
 }
 
 const listMaterialsOfSubject = `-- name: ListMaterialsOfSubject :many
-SELECT id, sha256, size_bytes, type, original_name, subject_id, folder_id, status, text_status, version, created_at, updated_at FROM materials WHERE subject_id = ?1 ORDER BY created_at DESC, id
+SELECT id, sha256, size_bytes, type, original_name, subject_id, folder_id, status, text_status, version, created_at, updated_at FROM materials
+WHERE subject_id = ?1
+  AND EXISTS (SELECT 1 FROM subjects s WHERE s.id = materials.subject_id AND s.removed_at IS NULL)
+ORDER BY created_at DESC, id
 `
 
 func (q *Queries) ListMaterialsOfSubject(ctx context.Context, subjectID sql.NullString) ([]Material, error) {
@@ -553,6 +591,44 @@ func (q *Queries) ListRecordingSubjectCounts(ctx context.Context) ([]ListRecordi
 	for rows.Next() {
 		var i ListRecordingSubjectCountsRow
 		if err := rows.Scan(&i.Subject, &i.Recordings); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRemovedSubjects = `-- name: ListRemovedSubjects :many
+SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email, removed_at FROM subjects WHERE removed_at IS NOT NULL ORDER BY removed_at, id
+`
+
+func (q *Queries) ListRemovedSubjects(ctx context.Context) ([]Subject, error) {
+	rows, err := q.db.QueryContext(ctx, listRemovedSubjects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Subject{}
+	for rows.Next() {
+		var i Subject
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.NameKey,
+			&i.Semester,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeacherName,
+			&i.TeacherEmail,
+			&i.RemovedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -764,11 +840,13 @@ func (q *Queries) ListSubjectTeachers(ctx context.Context, subjectID string) ([]
 
 const listSubjects = `-- name: ListSubjects :many
 
-SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email FROM subjects ORDER BY name_key, id
+SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email, removed_at FROM subjects WHERE removed_at IS NULL ORDER BY name_key, id
 `
 
 // The library (TASK-121, ADR-0024): subjects with their aliases and folders, materials with their lesson links. Both
 // aggregates follow the optimistic-concurrency protocol of ADR-0004(d); child rows carry no version of their own.
+// A removed subject (removed_at set, TASK-288) and everything filed under it are hidden from every reader; only
+// GetSubjectAnyStatus and ListRemovedSubjects see it. Its rows are never rewritten by the removal.
 func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
 	rows, err := q.db.QueryContext(ctx, listSubjects)
 	if err != nil {
@@ -788,6 +866,7 @@ func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
 			&i.UpdatedAt,
 			&i.TeacherName,
 			&i.TeacherEmail,
+			&i.RemovedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -863,15 +942,17 @@ UPDATE subjects
 SET name       = ?1,
     name_key   = ?2,
     semester   = ?3,
+    removed_at = ?4,
     version    = version + 1,
-    updated_at = ?4
-WHERE id = ?5 AND version = ?6
+    updated_at = ?5
+WHERE id = ?6 AND version = ?7
 `
 
 type UpdateSubjectParams struct {
 	Name            string
 	NameKey         string
 	Semester        string
+	RemovedAt       sql.NullInt64
 	UpdatedAt       int64
 	ID              string
 	ExpectedVersion int64
@@ -882,6 +963,7 @@ func (q *Queries) UpdateSubject(ctx context.Context, arg UpdateSubjectParams) (i
 		arg.Name,
 		arg.NameKey,
 		arg.Semester,
+		arg.RemovedAt,
 		arg.UpdatedAt,
 		arg.ID,
 		arg.ExpectedVersion,

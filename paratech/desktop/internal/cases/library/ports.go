@@ -15,13 +15,20 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// SubjectRepository stores the subjects. Implemented by the sqlite adapter.
+// SubjectRepository stores the subjects. Implemented by the sqlite adapter. A removed subject (ADR-0027) is seen only
+// by GetAny and ListRemoved.
 type SubjectRepository interface {
-	// List returns every subject.
+	// List returns every subject that is not removed.
 	List(ctx context.Context) ([]*subject.Subject, error)
 
-	// Get loads a subject; none wraps shared.ErrNotFound.
+	// ListRemoved returns the removed subjects; they keep their names and aliases until they are purged.
+	ListRemoved(ctx context.Context) ([]*subject.Subject, error)
+
+	// Get loads a subject that is not removed; none wraps shared.ErrNotFound.
 	Get(ctx context.Context, id shared.SubjectID) (*subject.Subject, error)
+
+	// GetAny loads a subject in any status; none wraps shared.ErrNotFound.
+	GetAny(ctx context.Context, id shared.SubjectID) (*subject.Subject, error)
 
 	// Save writes it under its version: a stale one wraps shared.ErrVersionConflict, a taken name or alias key
 	// shared.ErrDuplicate, a removed folder that holds a file shared.ErrConflict.
@@ -32,15 +39,16 @@ type SubjectRepository interface {
 	Delete(ctx context.Context, s *subject.Subject) error
 }
 
-// MaterialRepository stores the files of the library. Implemented by the sqlite adapter.
+// MaterialRepository stores the files of the library. Implemented by the sqlite adapter. A material filed under a
+// removed subject is hidden, unless it is a part of an active note of a subject that is not removed (ADR-0027).
 type MaterialRepository interface {
-	// Get loads a material; none wraps shared.ErrNotFound.
+	// Get loads a visible material in any status; none, or a hidden one, wraps shared.ErrNotFound.
 	Get(ctx context.Context, id shared.MaterialID) (*material.Material, error)
 
-	// GetByDigest loads the material with the sha256; none wraps shared.ErrNotFound.
+	// GetByDigest loads the material with the sha256, also a hidden one; none wraps shared.ErrNotFound.
 	GetByDigest(ctx context.Context, d material.Digest) (*material.Material, error)
 
-	// ListIn returns the materials of a subject, or of «Входящие» for "", in any status.
+	// ListIn returns the materials of a subject, or of «Входящие» for "", in any status; none for a removed subject.
 	ListIn(ctx context.Context, sub shared.SubjectID) ([]*material.Material, error)
 
 	// Count returns how many materials (any status) are in folder of sub, or under sub at all for folder "".
@@ -124,8 +132,8 @@ type InspectionRepository interface {
 	Save(ctx context.Context, i *inspection.Inspection) error
 }
 
-// SubjectNotes lists the student's own notes of a subject in any status (ADR-0027), so a subject that has them is
-// not removed. Implemented by the sqlite adapter.
+// SubjectNotes lists the student's own notes of a subject in any status (ADR-0027): RemoveSubject refuses a subject
+// that has them, DiscardSubject counts them. Implemented by the sqlite adapter.
 type SubjectNotes interface {
 	ListBySubject(ctx context.Context, sub shared.SubjectID) ([]*note.Note, error)
 }

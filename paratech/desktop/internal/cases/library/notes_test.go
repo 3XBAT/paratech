@@ -11,17 +11,22 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// fakeNotes answers the notes of a subject as counted.
+// fakeNotes answers the notes of a subject: the ones in list, else as many as counted in of (nil notes: only the count
+// is read).
 type fakeNotes struct {
-	of  map[shared.SubjectID]int
-	err error
+	of   map[shared.SubjectID]int
+	list map[shared.SubjectID][]*note.Note
+	err  error
 }
 
 func (f *fakeNotes) ListBySubject(_ context.Context, sub shared.SubjectID) ([]*note.Note, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	return make([]*note.Note, f.of[sub]), nil // only the count is read
+	if l, ok := f.list[sub]; ok {
+		return l, nil
+	}
+	return make([]*note.Note, f.of[sub]), nil
 }
 
 // withNotes rebuilds the service of e with the notes port.

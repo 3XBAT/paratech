@@ -16,19 +16,20 @@ import (
 
 // Operation names of the library repositories, used in their error messages.
 const (
-	opListSubjects     = "sqlite: list subjects"
-	opGetSubject       = "sqlite: get subject"
-	opSaveSubject      = "sqlite: save subject"
-	opDeleteSubject    = "sqlite: delete subject"
-	opGetMaterial      = "sqlite: get material"
-	opListMaterials    = "sqlite: list materials"
-	opCountMaterials   = "sqlite: count materials"
-	opSaveMaterial     = "sqlite: save material"
-	opSaveMaterialText = "sqlite: save material text status"
-	opSubjectStrings   = "sqlite: list subject strings"
-	opScheduleStrings  = "sqlite: list schedule subject strings"
-	opRestoreSubject   = "stored subject"
-	opRestoreMaterial  = "stored material"
+	opListSubjects        = "sqlite: list subjects"
+	opListRemovedSubjects = "sqlite: list removed subjects"
+	opGetSubject          = "sqlite: get subject"
+	opSaveSubject         = "sqlite: save subject"
+	opDeleteSubject       = "sqlite: delete subject"
+	opGetMaterial         = "sqlite: get material"
+	opListMaterials       = "sqlite: list materials"
+	opCountMaterials      = "sqlite: count materials"
+	opSaveMaterial        = "sqlite: save material"
+	opSaveMaterialText    = "sqlite: save material text status"
+	opSubjectStrings      = "sqlite: list subject strings"
+	opScheduleStrings     = "sqlite: list schedule subject strings"
+	opRestoreSubject      = "stored subject"
+	opRestoreMaterial     = "stored material"
 )
 
 // SubjectRepository stores the subjects of the library with their aliases and folders (the library.SubjectRepository
@@ -38,13 +39,31 @@ type SubjectRepository struct{ db *DB }
 // NewSubjectRepository returns the subject repository of db.
 func NewSubjectRepository(db *DB) *SubjectRepository { return &SubjectRepository{db: db} }
 
-// List returns every subject by name key. A row that cannot be restored fails the list: the library is small and a
-// broken subject must not silently vanish from the choices.
+// List returns every subject that is not removed, by name key. A row that cannot be restored fails the list: the
+// library is small and a broken subject must not silently vanish from the choices.
 func (r *SubjectRepository) List(ctx context.Context) ([]*subject.Subject, error) {
 	q := r.db.Queries(ctx)
 	rows, err := q.ListSubjects(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", opListSubjects, MapError(ctx, err))
+	}
+	return subjectsWithChildren(ctx, q, rows)
+}
+
+// ListRemoved returns the removed subjects (TASK-288), the earliest removed first; they keep their names and aliases.
+func (r *SubjectRepository) ListRemoved(ctx context.Context) ([]*subject.Subject, error) {
+	q := r.db.Queries(ctx)
+	rows, err := q.ListRemovedSubjects(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", opListRemovedSubjects, MapError(ctx, err))
+	}
+	return subjectsWithChildren(ctx, q, rows)
+}
+
+// subjectsWithChildren restores the subjects of rows with their aliases, folders and teachers.
+func subjectsWithChildren(ctx context.Context, q *sqlcgen.Queries, rows []sqlcgen.Subject) ([]*subject.Subject, error) {
+	if len(rows) == 0 {
+		return []*subject.Subject{}, nil
 	}
 	aliases, err := q.ListAllSubjectAliases(ctx)
 	if err != nil {
@@ -82,13 +101,29 @@ func (r *SubjectRepository) List(ctx context.Context) ([]*subject.Subject, error
 	return out, nil
 }
 
-// Get loads a subject; a missing one wraps shared.ErrNotFound.
+// Get loads a subject that is not removed; a missing or removed one wraps shared.ErrNotFound.
 func (r *SubjectRepository) Get(ctx context.Context, id shared.SubjectID) (*subject.Subject, error) {
 	q := r.db.Queries(ctx)
 	row, err := q.GetSubject(ctx, string(id))
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", opGetSubject, id, MapError(ctx, err))
 	}
+	return subjectWithChildren(ctx, q, row)
+}
+
+// GetAny loads a subject also when it is removed, for removing and restoring it; a missing one wraps
+// shared.ErrNotFound.
+func (r *SubjectRepository) GetAny(ctx context.Context, id shared.SubjectID) (*subject.Subject, error) {
+	q := r.db.Queries(ctx)
+	row, err := q.GetSubjectAnyStatus(ctx, string(id))
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", opGetSubject, id, MapError(ctx, err))
+	}
+	return subjectWithChildren(ctx, q, row)
+}
+
+func subjectWithChildren(ctx context.Context, q *sqlcgen.Queries, row sqlcgen.Subject) (*subject.Subject, error) {
+	id := row.ID
 	aliases, err := q.ListSubjectAliases(ctx, row.ID)
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", opGetSubject, id, MapError(ctx, err))
@@ -110,8 +145,11 @@ func (r *SubjectRepository) Get(ctx context.Context, id shared.SubjectID) (*subj
 // exists or a stale version shared.ErrVersionConflict; a removed folder that holds a file shared.ErrConflict.
 func (r *SubjectRepository) Save(ctx context.Context, s *subject.Subject) error {
 	st := s.State()
-	if st.Version < 0 {
+	switch {
+	case st.Version < 0:
 		return fmt.Errorf("%s: negative version %d", opSaveSubject, st.Version)
+	case st.Version == 0 && !st.RemovedAt.IsZero():
+		return fmt.Errorf("%s %s: a subject never stored cannot be removed", opSaveSubject, st.ID)
 	}
 	err := r.db.Do(ctx, func(ctx context.Context) error {
 		q := r.db.Queries(ctx)
@@ -125,8 +163,8 @@ func (r *SubjectRepository) Save(ctx context.Context, s *subject.Subject) error 
 			}
 		} else {
 			n, err := q.UpdateSubject(ctx, sqlcgen.UpdateSubjectParams{
-				Name: st.Name, NameKey: values.Key(st.Name), Semester: st.Semester.Code(), UpdatedAt: jobMs(st.UpdatedAt),
-				ID: string(st.ID), ExpectedVersion: st.Version,
+				Name: st.Name, NameKey: values.Key(st.Name), Semester: st.Semester.Code(), RemovedAt: jobNullMs(st.RemovedAt),
+				UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID), ExpectedVersion: st.Version,
 			})
 			if err := VersionCAS(ctx, n, err); err != nil {
 				return err
@@ -213,7 +251,7 @@ func subjectFromRows(row sqlcgen.Subject, aliases []sqlcgen.SubjectAlias, folder
 	}
 	st := subject.State{
 		Version: row.Version, ID: shared.SubjectID(row.ID), Name: row.Name, Semester: sem,
-		CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
+		RemovedAt: jobFromNullMs(row.RemovedAt), CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 	}
 	for _, t := range teachers {
 		st.Teachers = append(st.Teachers, subject.TeacherState{Role: subject.TeacherRole(t.Role), Name: t.Name, Email: t.Email})
@@ -238,7 +276,8 @@ type MaterialRepository struct{ db *DB }
 // NewMaterialRepository returns the material repository of db.
 func NewMaterialRepository(db *DB) *MaterialRepository { return &MaterialRepository{db: db} }
 
-// Get loads a material; a missing one wraps shared.ErrNotFound.
+// Get loads a visible material in any status: one in «Входящие» or filed under a subject that is not removed, or a part
+// of an active note of such a subject (ADR-0027). A missing or hidden one wraps shared.ErrNotFound.
 func (r *MaterialRepository) Get(ctx context.Context, id shared.MaterialID) (*material.Material, error) {
 	q := r.db.Queries(ctx)
 	row, err := q.GetMaterial(ctx, string(id))
@@ -248,7 +287,8 @@ func (r *MaterialRepository) Get(ctx context.Context, id shared.MaterialID) (*ma
 	return materialWithLessons(ctx, q, row)
 }
 
-// GetByDigest loads the material with the sha256 d (one per sha256); none wraps shared.ErrNotFound.
+// GetByDigest loads the material with the sha256 d (one per sha256), also a hidden one: the same bytes are one
+// material; none wraps shared.ErrNotFound.
 func (r *MaterialRepository) GetByDigest(ctx context.Context, d material.Digest) (*material.Material, error) {
 	q := r.db.Queries(ctx)
 	row, err := q.GetMaterialBySHA256(ctx, string(d))
@@ -258,7 +298,8 @@ func (r *MaterialRepository) GetByDigest(ctx context.Context, d material.Digest)
 	return materialWithLessons(ctx, q, row)
 }
 
-// ListIn returns the materials filed under subject, or those in «Входящие» for "", in any status, newest first.
+// ListIn returns the materials filed under subject, or those in «Входящие» for "", in any status, newest first; none
+// for a removed subject.
 func (r *MaterialRepository) ListIn(ctx context.Context, sub shared.SubjectID) ([]*material.Material, error) {
 	q := r.db.Queries(ctx)
 	var rows []sqlcgen.Material

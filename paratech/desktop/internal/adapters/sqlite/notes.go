@@ -18,7 +18,8 @@ const (
 )
 
 // NoteRepository stores the student's own notes with their ordered parts (TASK-149, ADR-0027). Validation stays in
-// note.Note: the repository only converts rows.
+// note.Note: the repository only converts rows. Every read hides the notes of a removed subject (TASK-288): Get does
+// not find them and the lists leave them out, until the subject is restored.
 type NoteRepository struct{ db *DB }
 
 // NewNoteRepository returns the note repository of db.

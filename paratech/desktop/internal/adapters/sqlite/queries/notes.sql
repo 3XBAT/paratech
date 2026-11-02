@@ -1,23 +1,36 @@
 -- The student's own notes (TASK-149, ADR-0027): a note with its anchor and its ordered parts. The note follows the
--- optimistic-concurrency protocol of ADR-0004(d); its parts carry no version of their own.
+-- optimistic-concurrency protocol of ADR-0004(d); its parts carry no version of their own. The notes of a removed
+-- subject (TASK-288) are hidden from every read below; their rows are not rewritten.
 
 -- name: GetNote :one
-SELECT * FROM notes WHERE id = sqlc.arg(id);
+SELECT * FROM notes
+WHERE notes.id = sqlc.arg(id)
+  AND EXISTS (SELECT 1 FROM subjects s WHERE s.id = notes.subject_id AND s.removed_at IS NULL);
 
 -- By the date of the anchor, undated last, then as made.
 -- name: ListNotesOfSubject :many
-SELECT * FROM notes WHERE subject_id = sqlc.arg(subject_id)
+SELECT * FROM notes
+WHERE subject_id = sqlc.arg(subject_id)
+  AND EXISTS (SELECT 1 FROM subjects s WHERE s.id = notes.subject_id AND s.removed_at IS NULL)
 ORDER BY anchor_date IS NULL, anchor_date, created_at, id;
 
 -- Every note, for the knowledge base (TASK-152); ordered as ListNotesOfSubject.
 -- name: ListNotes :many
-SELECT * FROM notes ORDER BY anchor_date IS NULL, anchor_date, created_at, id;
+SELECT * FROM notes
+WHERE EXISTS (SELECT 1 FROM subjects s WHERE s.id = notes.subject_id AND s.removed_at IS NULL)
+ORDER BY anchor_date IS NULL, anchor_date, created_at, id;
 
 -- name: ListNotesOfRecording :many
-SELECT * FROM notes WHERE recording_id = sqlc.arg(recording_id) ORDER BY created_at, id;
+SELECT * FROM notes
+WHERE recording_id = sqlc.arg(recording_id)
+  AND EXISTS (SELECT 1 FROM subjects s WHERE s.id = notes.subject_id AND s.removed_at IS NULL)
+ORDER BY created_at, id;
 
 -- name: ListNotesOfLesson :many
-SELECT * FROM notes WHERE lesson_id = sqlc.arg(lesson_id) ORDER BY created_at, id;
+SELECT * FROM notes
+WHERE lesson_id = sqlc.arg(lesson_id)
+  AND EXISTS (SELECT 1 FROM subjects s WHERE s.id = notes.subject_id AND s.removed_at IS NULL)
+ORDER BY created_at, id;
 
 -- A never-stored note (version 0) is inserted with version 1.
 -- name: InsertNote :exec

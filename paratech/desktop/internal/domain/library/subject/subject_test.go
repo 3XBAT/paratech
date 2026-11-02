@@ -242,8 +242,8 @@ func TestRemoveAlias(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newSubject(t, "Общая физика", "Физика (лаб.)")
-			if got := s.RemoveAlias(tt.alias, t1); got != tt.changed {
-				t.Fatalf("RemoveAlias = %v, want %v", got, tt.changed)
+			if got, err := s.RemoveAlias(tt.alias, t1); err != nil || got != tt.changed {
+				t.Fatalf("RemoveAlias = %v, %v; want %v", got, err, tt.changed)
 			}
 			if got := s.State().Aliases; !reflect.DeepEqual(got, tt.left) {
 				t.Fatalf("aliases = %q, want %q", got, tt.left)

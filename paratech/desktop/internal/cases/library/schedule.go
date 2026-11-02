@@ -205,7 +205,7 @@ func (s *Service) createScheduled(ctx context.Context, token string, c schedules
 	if err != nil {
 		return domainError(err)
 	}
-	ix, err := s.index(ctx)
+	ix, err := s.names(ctx) // a removed subject keeps its spellings too
 	if err != nil {
 		return err
 	}
@@ -239,14 +239,14 @@ func (s *Service) createScheduled(ctx context.Context, token string, c schedules
 // none, so a retry finds the subject as before or as done.
 func (s *Service) addScheduled(ctx context.Context, a schedulesubjects.Addition, now time.Time, res *ScheduleResult) error {
 	_, err := s.changeSubject(ctx, a.Subject, func(sub *subject.Subject) (bool, error) {
-		ix, err := s.index(ctx)
+		ix, err := s.names(ctx)
 		if err != nil {
 			return false, err
 		}
 		changed := false
 		for _, alias := range a.Aliases {
-			if ix.TakenByOther(alias, a.Subject) {
-				return false, ErrNameTaken
+			if err := ix.taken(alias, a.Subject); err != nil {
+				return false, err
 			}
 			c, err := sub.AddAlias(alias, now)
 			if err != nil {
@@ -349,7 +349,11 @@ func (s *Service) undoScheduled(ctx context.Context, ids []shared.SubjectID, ali
 		_, err := s.changeSubject(ctx, a.Subject, func(sub *subject.Subject) (bool, error) {
 			removed = removed[:0] // the subject is loaded again after a lost save
 			for _, alias := range a.Aliases {
-				if sub.RemoveAlias(alias, now) {
+				changed, err := sub.RemoveAlias(alias, now)
+				if err != nil {
+					return false, domainError(err)
+				}
+				if changed {
 					removed = append(removed, alias)
 				}
 			}
