@@ -43,3 +43,27 @@ func TestTriageResult(t *testing.T) {
 		}
 	}
 }
+
+// A triage whose reader call did not finish (pending) or kept refusing (failed) did not start the work: the planner
+// gets an is_error result, so it cannot tell the student the work started (beta 2026-10-28). The work stays visible.
+func TestTriageResultOfAReaderThatFailedIsAnError(t *testing.T) {
+	w := mustRef(t, KindWork, "w1")
+	for _, o := range []TriageOutcome{TriagePending, TriageFailed} {
+		res, refs, err := TriageResult("toolu_1", TriageRow{Work: w, Outcome: o, Round: 1, Changed: true})
+		if err != nil || len(refs) != 1 || refs[0] != w {
+			t.Fatalf("%s: TriageResult = %v, %v, %v", o, res, refs, err)
+		}
+		want := `{"changed":true,"error":"failed","outcome":"` + string(o) + `","questions":0,"round":1,"work":"w1"}`
+		if !res.IsError || res.ResultJSON != want {
+			t.Fatalf("%s: result %s (is_error %t), want %s", o, res.ResultJSON, res.IsError, want)
+		}
+		if _, ok := RefusalOf(res); ok {
+			t.Fatalf("%s: read as a refusal of a call that did not run", o)
+		}
+	}
+	for _, o := range []TriageOutcome{TriageReview, TriageHelper, TriageConfirmed} {
+		if res, _, err := TriageResult("toolu_1", TriageRow{Work: w, Outcome: o, Round: 1}); err != nil || res.IsError {
+			t.Fatalf("%s: %+v, %v", o, res, err)
+		}
+	}
+}

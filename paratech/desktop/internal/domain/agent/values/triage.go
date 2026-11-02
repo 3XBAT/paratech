@@ -59,7 +59,13 @@ func TriageResult(callID string, r TriageRow) (ToolResult, []Ref, error) {
 	if r.Feasibility != "" {
 		body["feasibility"] = r.Feasibility
 	}
-	res := ToolResult{CallID: callID, ResultJSON: mustJSON(body)}
+	// A reader call that did not finish or kept refusing started nothing for the student: the planner must not read it
+	// as a success (the work stays for its card and Undo, so it is not a RefusalResult either).
+	failed := r.Outcome == TriagePending || r.Outcome == TriageFailed
+	if failed {
+		body["error"] = string(RefuseFailed)
+	}
+	res := ToolResult{CallID: callID, ResultJSON: mustJSON(body), IsError: failed}
 	if err := res.Validate(); err != nil {
 		return ToolResult{}, nil, err
 	}
