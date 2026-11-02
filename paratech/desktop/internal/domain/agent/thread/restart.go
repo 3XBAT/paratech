@@ -13,10 +13,8 @@ import (
 // request is cleared (the next compaction rebuilds it); one of earlier requests only is kept. Requests an earlier
 // restart dropped are marked again with the new number.
 //
-// The agent sees again what the chat shows before n: a history start an expired-request Restart set at n or later
-// goes back to 0 (all), since the requests from it on are all dropped and the ones before n are kept in the history;
-// a start before n stays, as it cuts only requests the restart does not touch. Lowering it to n would show nothing
-// older: the requests from n on are dropped.
+// The agent sees everything the chat shows before n: the history start an expired-request Restart set always goes
+// back to 0 (all). The history is stored, and earlier requests are sent only as text pairs.
 func (th *Thread) RestartFrom(n int, r Request, now time.Time) error {
 	t, err := th.turn()
 	if err != nil {
@@ -35,9 +33,7 @@ func (th *Thread) RestartFrom(n int, r Request, now time.Time) error {
 		return err
 	}
 	th.current.dropsFrom = n
-	if n <= th.historyFrom {
-		th.historyFrom = 0
-	}
+	th.historyFrom = 0
 	th.clearSummaryFrom(n)
 	return nil
 }

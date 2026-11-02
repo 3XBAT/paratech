@@ -205,22 +205,19 @@ func TestRingDropsAfterRestart(t *testing.T) {
 	}
 }
 
-// A restart from n at or before the history start an expired-request Restart set brings back everything before n
-// (TASK-249): the start goes to 0, is stored, and NextFill counts the earlier requests instead of an overflow. A start
-// before n stays.
+// A restart from n brings back everything before n whatever history start an expired-request Restart set (TASK-249):
+// the start goes to 0, is stored, and NextFill counts the earlier requests instead of an overflow.
 func TestRestartFromRestoresHistoryStart(t *testing.T) {
 	tests := []struct {
-		name      string
-		start, n  int
-		wantStart int
-		pairs     int // earlier pairs NextFill counts after the restarted request completes
-		overflow  bool
+		name     string
+		start, n int
+		pairs    int // earlier pairs NextFill counts after the restarted request completes
 	}{
-		{"all stays all", 0, 3, 0, 2, false},
-		{"restart before the start", 5, 3, 0, 2, false},
-		{"restart at the start", 5, 5, 0, 4, false},
-		{"restart after the start", 5, 8, 5, 3, true},
-		{"restart from the first request", 12, 1, 0, 0, false},
+		{"all stays all", 0, 3, 2},
+		{"restart before the start", 5, 3, 2},
+		{"restart at the start", 5, 5, 4},
+		{"restart after the start", 5, 8, 7},
+		{"restart from the first request", 12, 1, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -233,10 +230,10 @@ func TestRestartFromRestoresHistoryStart(t *testing.T) {
 			if err := th.RestartFrom(tt.n, Request{Text: numbered(13)}, at(60)); err != nil {
 				t.Fatal(err)
 			}
-			if th.HistoryFrom() != tt.wantStart {
-				t.Fatalf("history from %d, want %d", th.HistoryFrom(), tt.wantStart)
+			if th.HistoryFrom() != 0 {
+				t.Fatalf("history from %d, want 0", th.HistoryFrom())
 			}
-			if back := roundTrip(t, th); back.HistoryFrom() != tt.wantStart {
+			if back := roundTrip(t, th); back.HistoryFrom() != 0 {
 				t.Fatalf("restored history from %d", back.HistoryFrom())
 			}
 			if err := th.Complete(at(61)); err != nil {
@@ -252,10 +249,10 @@ func TestRestartFromRestoresHistoryStart(t *testing.T) {
 			}
 			entries = append(entries, chatRequest(13, numbered(13))...)
 			f := th.NextFill(entries)
-			if f.Pairs != tt.pairs+1 || f.Overflow != tt.overflow {
-				t.Fatalf("%+v, want %d pairs, overflow %v", f, tt.pairs+1, tt.overflow)
+			if f.Pairs != tt.pairs+1 || f.Overflow {
+				t.Fatalf("%+v, want %d pairs, no overflow", f, tt.pairs+1)
 			}
-			if !tt.overflow && f != Fill(entries, 14, noSummary) {
+			if f != Fill(entries, 14, noSummary) {
 				t.Fatalf("%+v differs from Fill", f)
 			}
 		})
