@@ -102,6 +102,12 @@ export interface AskInput {
   threadId?: string;
   /** The «@» objects of the text, at most 8 (values.MaxMentions; the core checks); absent means none. */
   mentions?: MentionView[];
+  /**
+   * «Начать заново отсюда» → «Скрыть»: the turn of the earlier request of chat threadId from which the agent forgets;
+   * those requests are hidden from the chat too. Absent or 0 is an ordinary request. Needs threadId; only when the
+   * current request is over (else problem "busy" or "invalid" in the update).
+   */
+  restartFrom?: number;
 }
 
 /** An «@» object: kind is subject, lesson, material or assignment; label is the name shown at mention time (plain text). */

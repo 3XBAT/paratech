@@ -27,6 +27,7 @@ type Turn struct {
 	open       []OpenCall        // calls of the last step waiting for results
 	created    []Created         // IDs created by approved create steps of this request
 	replyLine  string            // frozen by FreezeReply while the request is final
+	dropsFrom  int               // RestartFrom: requests dropsFrom…number-1 are dropped by this one; 0: none
 	startedAt  time.Time
 	updatedAt  time.Time
 }

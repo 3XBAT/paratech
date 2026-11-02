@@ -33,6 +33,9 @@ type AskInput struct {
 	Text     string
 	Uploads  []values.Ref     // files dropped with the request (upload IDs)
 	Mentions []values.Mention // «@» objects, at most values.MaxMentions; the ones that no longer exist are dropped
+	// RestartFrom is «Начать заново отсюда» → «Скрыть» from this request number of the chat (thread.RestartFrom): the
+	// requests from it on are dropped by the new one. 0: an ordinary request. It needs ThreadID.
+	RestartFrom int
 }
 
 // TurnRef names the request a button belongs to; a button of an older request is ErrStaleTurn.

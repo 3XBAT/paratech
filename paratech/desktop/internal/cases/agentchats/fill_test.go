@@ -117,22 +117,68 @@ func TestFill(t *testing.T) {
 	}
 }
 
-// After a Restart only the restarted request's own history is sent (HistoryFrom): the older requests do not count
-// and are no overflow (TASK-203 follow-up).
+// After a Restart only the restarted request's own history is sent (HistoryFrom): the older requests the agent no
+// longer sees are an overflow, not a fuller window (TASK-203 follow-up, TASK-248). The read starts at the first
+// request with the step's limit.
 func TestFillFromHistoryStart(t *testing.T) {
 	e := newEnv(t)
-	e.longChat(t, "c1", 22, true)
+	e.longChat(t, "c1", 12, true)
+	if f, _ := e.svc.Fill(t.Context(), "c1"); f != (Fill{Percent: 60, Level: thread.FillNormal}) {
+		t.Fatalf("before the restart %+v", f)
+	}
+	e.chats.edit("c1", func(st *thread.State) { st.HistoryFrom = 12 })
+
+	got, err := e.svc.Fill(t.Context(), "c1")
+	if err != nil || got != (Fill{Percent: 100, Level: thread.FillFull, Overflow: true}) {
+		t.Fatalf("Fill after the restart = %+v, %v", got, err)
+	}
+	if r := e.history.reads[len(e.history.reads)-1]; r.from != 1 || r.limit != thread.HistoryReadLimit {
+		t.Fatalf("read from request %d with limit %d", r.from, r.limit)
+	}
+}
+
+// «Скрыть» drops requests 5…21 of a full chat: the ring drops to the requests left (1–4 and the new 22).
+func TestRingDropsAfterRestart(t *testing.T) {
+	e := newEnv(t)
+	e.longChat(t, "c1", 21, true)
 	if f, _ := e.svc.Fill(t.Context(), "c1"); !f.Overflow {
 		t.Fatalf("before the restart %+v, want an overflow", f)
 	}
-	e.chats.edit("c1", func(st *thread.State) { st.HistoryFrom = 22 })
+	th, err := e.chats.Get(t.Context(), "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := th.RestartFrom(5, thread.Request{Text: numbered(22)}, e.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.Complete(e.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.chats.Save(t.Context(), th); err != nil {
+		t.Fatal(err)
+	}
+	// What the sqlite Save marks for the new request, then the history of request 22.
+	for i, en := range e.history.entries["c1"] {
+		if en.Turn >= 5 {
+			e.history.entries["c1"][i].DroppedBy = 22
+		}
+	}
+	e.history.entries["c1"] = append(e.history.entries["c1"], historyOf(22)[3*21:]...)
 
 	got, err := e.svc.Fill(t.Context(), "c1")
-	if err != nil || got != (Fill{Percent: 5, Level: thread.FillNormal}) {
+	if err != nil || got != (Fill{Percent: 25, Level: thread.FillNormal}) {
 		t.Fatalf("Fill after the restart = %+v, %v", got, err)
 	}
-	if r := e.history.reads[len(e.history.reads)-1]; r.from != 22 {
-		t.Fatalf("read from request %d, want 22", r.from)
+	earlier, err := e.svc.Earlier(t.Context(), "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var turns []int
+	for _, r := range earlier {
+		turns = append(turns, r.Turn)
+	}
+	if fmt.Sprint(turns) != "[1 2 3 4 22]" || !earlier[len(earlier)-1].Current {
+		t.Fatalf("earlier requests %v, want [1 2 3 4 22] with 22 current", turns)
 	}
 }
 

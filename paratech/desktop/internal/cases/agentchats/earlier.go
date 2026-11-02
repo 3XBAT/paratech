@@ -23,10 +23,13 @@ type request struct {
 }
 
 // requestsOf groups history entries by request; a request whose text was not read (the oldest one of a cut read) is
-// left out.
+// left out, and so is a dropped one («Скрыть»: hidden from the chat as from the agent), should the read return it.
 func requestsOf(entries []values.HistoryEntry) []request {
 	var out []request
 	for _, e := range entries {
+		if e.DroppedBy != 0 {
+			continue
+		}
 		if n := len(out); n == 0 || out[n-1].turn != e.Turn {
 			out = append(out, request{turn: e.Turn})
 		}

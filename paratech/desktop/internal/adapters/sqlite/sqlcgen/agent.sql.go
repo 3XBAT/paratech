@@ -45,6 +45,43 @@ func (q *Queries) DeleteAgentTurn(ctx context.Context, arg DeleteAgentTurnParams
 	return err
 }
 
+const dropAgentTurns = `-- name: DropAgentTurns :exec
+UPDATE agent_turns SET dropped_by = ?1
+WHERE thread_id = ?2 AND number >= ?3 AND number < ?1
+`
+
+type DropAgentTurnsParams struct {
+	DroppedBy  int64
+	ThreadID   string
+	FromNumber int64
+}
+
+// Restart from an earlier message (thread.RestartFrom): requests from_number..dropped_by-1 are dropped by request
+// dropped_by; nothing is deleted. Requests an earlier restart dropped get the new number, so the current request's
+// marks are exactly its range.
+func (q *Queries) DropAgentTurns(ctx context.Context, arg DropAgentTurnsParams) error {
+	_, err := q.db.ExecContext(ctx, dropAgentTurns, arg.DroppedBy, arg.ThreadID, arg.FromNumber)
+	return err
+}
+
+const firstDroppedAgentTurn = `-- name: FirstDroppedAgentTurn :one
+SELECT CAST(COALESCE(MIN(number), 0) AS INTEGER) AS number FROM agent_turns
+WHERE thread_id = ?1 AND dropped_by = ?2
+`
+
+type FirstDroppedAgentTurnParams struct {
+	ThreadID  string
+	DroppedBy int64
+}
+
+// The first request a request dropped; 0 when it dropped none.
+func (q *Queries) FirstDroppedAgentTurn(ctx context.Context, arg FirstDroppedAgentTurnParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, firstDroppedAgentTurn, arg.ThreadID, arg.DroppedBy)
+	var number int64
+	err := row.Scan(&number)
+	return number, err
+}
+
 const getAgentAction = `-- name: GetAgentAction :one
 SELECT id, thread_id, turn, call_id, tool, status, compensation, target_version, proposal, version, created_at, updated_at, intent, undo_refusal FROM agent_actions WHERE id = ?1
 `

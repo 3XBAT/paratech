@@ -81,6 +81,12 @@ type Querier interface {
 	// The purge of a deleted assignment (ADR-0029 addendum 2): its works, the rounds go with them (CASCADE); only while
 	// the assignment is still deleted before the cutoff.
 	DeleteWorksOfAssignment(ctx context.Context, arg DeleteWorksOfAssignmentParams) (int64, error)
+	// Restart from an earlier message (thread.RestartFrom): requests from_number..dropped_by-1 are dropped by request
+	// dropped_by; nothing is deleted. Requests an earlier restart dropped get the new number, so the current request's
+	// marks are exactly its range.
+	DropAgentTurns(ctx context.Context, arg DropAgentTurnsParams) error
+	// The first request a request dropped; 0 when it dropped none.
+	FirstDroppedAgentTurn(ctx context.Context, arg FirstDroppedAgentTurnParams) (int64, error)
 	// The work of an assignment that has not failed; at most one (idx_works_assignment).
 	GetActiveWorkOfAssignment(ctx context.Context, assignmentID sql.NullString) (Work, error)
 	// The work of a library material that has not failed; at most one (idx_works_material).

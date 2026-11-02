@@ -101,7 +101,9 @@ func (c AgentCore) complete() bool {
 // AgentAskInput is a request typed in the panel with the context the UI chose. Empty ids mean none; an empty
 // subjectId is a request in no subject. Screen is "", today, subjects, assignments, schedule, journal or settings.
 // ThreadID is the chat ("" the current chat, a new one when there is none); Mentions are the «@» objects, at most
-// values.MaxMentions (the ones that no longer exist are dropped).
+// values.MaxMentions (the ones that no longer exist are dropped). RestartFrom is «Начать заново отсюда» → «Скрыть»:
+// the number of the earlier request of chat ThreadID from which the agent forgets (0: an ordinary request); it needs
+// threadId.
 type AgentAskInput struct {
 	Text         string         `json:"text"`
 	SubjectID    string         `json:"subjectId"`
@@ -110,6 +112,7 @@ type AgentAskInput struct {
 	Screen       string         `json:"screen"`
 	ThreadID     string         `json:"threadId"`
 	Mentions     []AgentMention `json:"mentions"`
+	RestartFrom  int            `json:"restartFrom"`
 }
 
 // AgentTurnRef names the request a button belongs to.
@@ -179,6 +182,9 @@ func (s *AgentService) Ask(ctx context.Context, in AgentAskInput) AgentResult {
 	if chat != "" && chat.Validate() != nil {
 		return AgentResult{Problem: AgentProblemInvalid}
 	}
+	if in.RestartFrom < 0 || (in.RestartFrom > 0 && chat == "") {
+		return AgentResult{Problem: AgentProblemInvalid}
+	}
 	mentions, ok := mentionsOf(in.Mentions)
 	if !ok {
 		return AgentResult{Problem: AgentProblemInvalid}
@@ -187,7 +193,7 @@ func (s *AgentService) Ask(ctx context.Context, in AgentAskInput) AgentResult {
 		return AgentResult{Problem: AgentProblemOffline}
 	}
 	return s.started(opAgentAsk, s.driver.Ask(s.life, agentturn.AskInput{
-		ThreadID: chat, Scope: scope, Text: in.Text, Mentions: mentions,
+		ThreadID: chat, Scope: scope, Text: in.Text, Mentions: mentions, RestartFrom: in.RestartFrom,
 	}))
 }
 
