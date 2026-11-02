@@ -28,28 +28,41 @@ const (
 	CompRemoveAssignment  CompensationKind = "remove_assignment"   // the added assignment, if unchanged and unused (ADR-0029)
 )
 
-// compensationOf is the compensation kind of every U tool; a tool not listed has no Undo.
-var compensationOf = map[values.Tool]CompensationKind{
-	values.ToolCreateSubject:    CompRemoveSubject,
-	values.ToolCreateFolder:     CompRemoveFolder,
-	values.ToolPlaceUpload:      CompReturnToInbox,
-	values.ToolLinkMaterial:     CompUnlinkMaterial,
-	values.ToolSetLessonInfo:    CompRestoreLessonInfo,
-	values.ToolEditDue:          CompRestoreDue,
-	values.ToolCreateAssignment: CompRemoveAssignment,
-	values.ToolMakeSummary:      CompCancelJob,
-	values.ToolMakeLectureText:  CompCancelJob,
-	values.ToolFindHomework:     CompCancelJob,
-	values.ToolGenerateDraft:    CompCancelJob,
-	values.ToolTriageAssignment: CompRemoveWork,
-	values.ToolWriteWork:        CompStopWork,
+// compensationOf is the compensation kind of every U tool; a tool not listed has no Undo. A tool with an action enum
+// (catalog v10) has one kind per action: the dispatch picks the kind of its action.
+var compensationOf = map[values.Tool][]CompensationKind{
+	values.ToolCreateSubject:    {CompRemoveSubject},
+	values.ToolCreateFolder:     {CompRemoveFolder},
+	values.ToolPlaceUpload:      {CompReturnToInbox},
+	values.ToolLinkMaterial:     {CompUnlinkMaterial},
+	values.ToolSetLessonInfo:    {CompRestoreLessonInfo},
+	values.ToolEditDue:          {CompRestoreDue},
+	values.ToolCreateAssignment: {CompRemoveAssignment},
+	values.ToolMakeSummary:      {CompCancelJob},
+	values.ToolMakeLectureText:  {CompCancelJob},
+	values.ToolFindHomework:     {CompCancelJob},
+	values.ToolGenerateDraft:    {CompCancelJob},
+	values.ToolTriageAssignment: {CompRemoveWork},
+	values.ToolWriteWork:        {CompStopWork},
+
+	values.ToolChangeAssignment:    {CompRevertAssignment, CompRestoreAssignment, CompDeleteAssignment},
+	values.ToolMarkAssignmentsDone: {CompRestoreDone},
+	values.ToolNote:                {CompRemoveNotePart, CompRemoveNote, CompReanchorNote, CompRetitleNote, CompRestoreNote},
+	values.ToolSetSetting:          {CompRestoreSetting},
+	values.ToolRecording:           {CompStopRecording}, // recording{stop} has none (noUndoTools)
 }
 
-// CompensationFor returns the compensation kind of a tool.
+// CompensationFor returns the compensation kind of a tool, the first one of a tool with an action enum.
 func CompensationFor(t values.Tool) (CompensationKind, bool) {
-	k, ok := compensationOf[t]
-	return k, ok
+	ks, ok := compensationOf[t]
+	if !ok {
+		return "", false
+	}
+	return ks[0], true
 }
+
+// CompensationsFor returns every compensation kind of a tool.
+func CompensationsFor(t values.Tool) []CompensationKind { return slices.Clone(compensationOf[t]) }
 
 // Compensation is the typed data Undo needs. The set is closed: only the types below implement it.
 type Compensation interface {
