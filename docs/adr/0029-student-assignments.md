@@ -182,8 +182,9 @@ Source: owner answers of 2026-10-27 (6.3 changed, C-4). Tasks TASK-304, TASK-305
 - The frontend form reads a deadline at exactly 20:00 as «no time» (the empty time field), as 23:59 before.
 - Stored deadlines are **not** rewritten (no migration): they are instants the student saw and Google events may
   show; an old assignment at 23:59 now shows the time 23:59 in the form and keeps it on save.
-- Extraction from a recording or a material (the `EXTRACT_HOMEWORK_DEADLINES` prompt says «If only a day is named,
-  use 23:59 of that day»): Open C-5, task TASK-305 waits for it.
+- Extraction from a recording or a material (the `EXTRACT_HOMEWORK_DEADLINES` prompt said «If only a day is named,
+  use 23:59 of that day»): owner answered C-5 = (а) on 2026-11-02, so the prompt says 20:00 since `prompts.Version` 6
+  (TASK-305). Already extracted assignments are not rewritten.
 - The planner never computes the time (the desktop does), so served panel versions stay. Panel v9 (TASK-244) says
   «Without time the deadline is 20:00 of that day» in `system.md`; the `date` type text in `tools.json` («the end of
   that day») stays byte-identical until a catalog changes tool texts anyway (the v9 = v8 tools rule of ADR-0028).
@@ -202,7 +203,7 @@ Source: owner answers of 2026-10-27 (6.3 changed, C-4). Tasks TASK-304, TASK-305
 - The panel line of the action says «Срок изменён; событие в Google Календаре обновится» when an update was queued.
 
 ### Open (owner)
-- C-5. Извлечение заданий из записи и материала: если в лекции назван только день («к пятнице»), сейчас срок 23:59. Тоже ставить 20:00? (а) да, везде одинаково — 20:00 (рекомендуется); (б) нет, у извлечённых оставить 23:59. Уже извлечённые задания не меняются в обоих вариантах. До ответа TASK-305 не запускается.
+- C-5. Извлечение заданий из записи и материала: если в лекции назван только день («к пятнице»), сейчас срок 23:59. Тоже ставить 20:00? (а) да, везде одинаково — 20:00 (рекомендуется); (б) нет, у извлечённых оставить 23:59. Уже извлечённые задания не меняются в обоих вариантах. Ответ владельца 2026-11-02: (а), 20:00 везде; сделано в TASK-305.
 
 
 ## Addendum 4 (2026-10-28): deleting a busy assignment (TASK-338)
