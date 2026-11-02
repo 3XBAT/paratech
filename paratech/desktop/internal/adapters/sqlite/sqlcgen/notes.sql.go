@@ -21,11 +21,14 @@ func (q *Queries) DeleteNoteParts(ctx context.Context, noteID string) error {
 
 const getNote = `-- name: GetNote :one
 
-SELECT id, subject_id, title, anchor_kind, recording_id, lesson_id, anchor_date, lesson_kind, lesson_title, status, version, created_at, updated_at FROM notes WHERE id = ?1
+SELECT id, subject_id, title, anchor_kind, recording_id, lesson_id, anchor_date, lesson_kind, lesson_title, status, version, created_at, updated_at FROM notes
+WHERE notes.id = ?1
+  AND EXISTS (SELECT 1 FROM subjects s WHERE s.id = notes.subject_id AND s.removed_at IS NULL)
 `
 
 // The student's own notes (TASK-149, ADR-0027): a note with its anchor and its ordered parts. The note follows the
-// optimistic-concurrency protocol of ADR-0004(d); its parts carry no version of their own.
+// optimistic-concurrency protocol of ADR-0004(d); its parts carry no version of their own. The notes of a removed
+// subject (TASK-288) are hidden from every read below; their rows are not rewritten.
 func (q *Queries) GetNote(ctx context.Context, id string) (Note, error) {
 	row := q.db.QueryRowContext(ctx, getNote, id)
 	var i Note
@@ -133,7 +136,9 @@ func (q *Queries) ListNoteParts(ctx context.Context, noteID string) ([]string, e
 }
 
 const listNotes = `-- name: ListNotes :many
-SELECT id, subject_id, title, anchor_kind, recording_id, lesson_id, anchor_date, lesson_kind, lesson_title, status, version, created_at, updated_at FROM notes ORDER BY anchor_date IS NULL, anchor_date, created_at, id
+SELECT id, subject_id, title, anchor_kind, recording_id, lesson_id, anchor_date, lesson_kind, lesson_title, status, version, created_at, updated_at FROM notes
+WHERE EXISTS (SELECT 1 FROM subjects s WHERE s.id = notes.subject_id AND s.removed_at IS NULL)
+ORDER BY anchor_date IS NULL, anchor_date, created_at, id
 `
 
 // Every note, for the knowledge base (TASK-152); ordered as ListNotesOfSubject.
@@ -175,7 +180,10 @@ func (q *Queries) ListNotes(ctx context.Context) ([]Note, error) {
 }
 
 const listNotesOfLesson = `-- name: ListNotesOfLesson :many
-SELECT id, subject_id, title, anchor_kind, recording_id, lesson_id, anchor_date, lesson_kind, lesson_title, status, version, created_at, updated_at FROM notes WHERE lesson_id = ?1 ORDER BY created_at, id
+SELECT id, subject_id, title, anchor_kind, recording_id, lesson_id, anchor_date, lesson_kind, lesson_title, status, version, created_at, updated_at FROM notes
+WHERE lesson_id = ?1
+  AND EXISTS (SELECT 1 FROM subjects s WHERE s.id = notes.subject_id AND s.removed_at IS NULL)
+ORDER BY created_at, id
 `
 
 func (q *Queries) ListNotesOfLesson(ctx context.Context, lessonID sql.NullString) ([]Note, error) {
@@ -216,7 +224,10 @@ func (q *Queries) ListNotesOfLesson(ctx context.Context, lessonID sql.NullString
 }
 
 const listNotesOfRecording = `-- name: ListNotesOfRecording :many
-SELECT id, subject_id, title, anchor_kind, recording_id, lesson_id, anchor_date, lesson_kind, lesson_title, status, version, created_at, updated_at FROM notes WHERE recording_id = ?1 ORDER BY created_at, id
+SELECT id, subject_id, title, anchor_kind, recording_id, lesson_id, anchor_date, lesson_kind, lesson_title, status, version, created_at, updated_at FROM notes
+WHERE recording_id = ?1
+  AND EXISTS (SELECT 1 FROM subjects s WHERE s.id = notes.subject_id AND s.removed_at IS NULL)
+ORDER BY created_at, id
 `
 
 func (q *Queries) ListNotesOfRecording(ctx context.Context, recordingID sql.NullString) ([]Note, error) {
@@ -257,7 +268,9 @@ func (q *Queries) ListNotesOfRecording(ctx context.Context, recordingID sql.Null
 }
 
 const listNotesOfSubject = `-- name: ListNotesOfSubject :many
-SELECT id, subject_id, title, anchor_kind, recording_id, lesson_id, anchor_date, lesson_kind, lesson_title, status, version, created_at, updated_at FROM notes WHERE subject_id = ?1
+SELECT id, subject_id, title, anchor_kind, recording_id, lesson_id, anchor_date, lesson_kind, lesson_title, status, version, created_at, updated_at FROM notes
+WHERE subject_id = ?1
+  AND EXISTS (SELECT 1 FROM subjects s WHERE s.id = notes.subject_id AND s.removed_at IS NULL)
 ORDER BY anchor_date IS NULL, anchor_date, created_at, id
 `
 

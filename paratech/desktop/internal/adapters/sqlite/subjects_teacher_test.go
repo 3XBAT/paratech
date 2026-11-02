@@ -260,7 +260,11 @@ func TestMigrationSubjectTeachers(t *testing.T) {
 		}
 	}
 
-	// The repository reads the moved teachers: the one teacher in every role.
+	// The repository reads the moved teachers: the one teacher in every role. Its queries need the newest schema
+	// (subjects.removed_at of version 49).
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("up to the newest: %v", err)
+	}
 	got, err := repo.Get(ctx, "pl")
 	if err != nil {
 		t.Fatal(err)

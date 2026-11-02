@@ -20,6 +20,24 @@ const (
 	MaxOwnFolders = 50
 )
 
+// RestoreWindow is how long a removed subject can be restored; from then on it is due to be purged (ADR-0027).
+const RestoreWindow = 72 * time.Hour
+
+// Status is whether the subject is in the library or removed softly with everything filed under it (ADR-0027).
+type Status string
+
+// Statuses of a subject.
+const (
+	StatusActive  Status = "active"
+	StatusRemoved Status = "removed"
+)
+
+// transitions is the status machine (ARCH-19).
+var transitions = map[Status][]Status{
+	StatusActive:  {StatusRemoved},
+	StatusRemoved: {StatusActive},
+}
+
 // Subject is a subject of the library. Fields change only through the methods below. It prints (fmt, slog) only its
 // id and name: the teachers are personal data.
 type Subject struct {
@@ -31,6 +49,9 @@ type Subject struct {
 	semester values.Semester
 	folders  []Folder // the system folders first, in the order of Systems, then own folders in the order added
 	teachers Teachers
+
+	status    Status
+	removedAt time.Time // zero while active
 
 	createdAt time.Time
 	updatedAt time.Time
@@ -50,7 +71,7 @@ func New(spec Spec, now time.Time) (*Subject, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Subject{id: spec.ID, name: name, semester: spec.Semester, createdAt: now, updatedAt: now}
+	s := &Subject{id: spec.ID, name: name, semester: spec.Semester, status: StatusActive, createdAt: now, updatedAt: now}
 	for _, code := range Systems() {
 		n, _ := systemName(code)
 		s.folders = append(s.folders, Folder{id: SystemFolderID(spec.ID, code), name: n, system: code})
@@ -75,7 +96,9 @@ type State struct {
 	Semester values.Semester
 	Folders  []FolderState
 	// Teachers holds one entry per role that has a teacher, in the order of TeacherRoles.
-	Teachers  []TeacherState
+	Teachers []TeacherState
+	// RemovedAt is when the subject was removed; zero while it is active (the status follows from it).
+	RemovedAt time.Time
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -95,7 +118,11 @@ func Restore(st State) (*Subject, error) {
 		return nil, fmt.Errorf("%w: stored name", ErrInvalidSubject)
 	}
 	s := &Subject{
-		version: st.Version, id: st.ID, name: name, semester: st.Semester, createdAt: st.CreatedAt, updatedAt: st.UpdatedAt,
+		version: st.Version, id: st.ID, name: name, semester: st.Semester, status: StatusActive, removedAt: st.RemovedAt,
+		createdAt: st.CreatedAt, updatedAt: st.UpdatedAt,
+	}
+	if !st.RemovedAt.IsZero() {
+		s.status = StatusRemoved
 	}
 	for _, a := range st.Aliases {
 		n, err := NewName(a)
@@ -140,6 +167,9 @@ func (s *Subject) validate() error {
 	if s.createdAt.IsZero() || s.updatedAt.IsZero() {
 		return fmt.Errorf("%w: missing time", ErrInvalidSubject)
 	}
+	if (s.status == StatusRemoved) == s.removedAt.IsZero() || (s.status != StatusActive && s.status != StatusRemoved) {
+		return fmt.Errorf("%w: status %q with removal time %v", ErrInvalidSubject, s.status, s.removedAt)
+	}
 
 	if len(s.aliases) > MaxAliases {
 		return fmt.Errorf("%w: more than %d aliases", ErrInvalidSubject, MaxAliases)
@@ -177,9 +207,66 @@ func (s *Subject) validate() error {
 	return nil
 }
 
+// Remove removes the subject softly (ADR-0027): its notes and files are hidden with it and nothing else changes, so
+// Restore brings everything back as it was. A removed subject changes nothing (changed is false).
+func (s *Subject) Remove(now time.Time) (changed bool, err error) {
+	if s.status == StatusRemoved {
+		return false, nil
+	}
+	if now.IsZero() {
+		return false, fmt.Errorf("%w: removal without a time", ErrInvalidSubject)
+	}
+	if err := s.transition(StatusRemoved, now); err != nil {
+		return false, err
+	}
+	s.removedAt = now
+	return true, nil
+}
+
+// Restore brings a removed subject back while RestoreWindow has not passed since its removal; an active one changes
+// nothing (changed is false). Error: ErrRestoreExpired.
+func (s *Subject) Restore(now time.Time) (changed bool, err error) {
+	if s.status == StatusActive {
+		return false, nil
+	}
+	if s.PurgeDue(now) {
+		return false, ErrRestoreExpired
+	}
+	if err := s.transition(StatusActive, now); err != nil {
+		return false, err
+	}
+	s.removedAt = time.Time{}
+	return true, nil
+}
+
+// PurgeDue reports whether the subject was removed at least RestoreWindow before now, so it can no longer be restored
+// and is to be purged.
+func (s *Subject) PurgeDue(now time.Time) bool {
+	return s.status == StatusRemoved && !now.Before(s.removedAt.Add(RestoreWindow))
+}
+
+func (s *Subject) transition(to Status, now time.Time) error {
+	if !slices.Contains(transitions[s.status], to) {
+		return fmt.Errorf("%w: status %s to %s", ErrInvalidSubject, s.status, to)
+	}
+	s.status, s.updatedAt = to, now
+	return nil
+}
+
+// active refuses a change of a removed subject.
+func (s *Subject) active() error {
+	if s.status != StatusActive {
+		return ErrRemoved
+	}
+	return nil
+}
+
 // AddAlias adds another spelling of the subject. A spelling with the key of the name or of an alias changes nothing
-// (changed is false). Errors: ErrInvalidName, ErrTooMany.
+// (changed is false). Errors: ErrRemoved, ErrInvalidName, ErrTooMany.
 func (s *Subject) AddAlias(alias string, now time.Time) (changed bool, err error) {
+	if err := s.active(); err != nil {
+		return false, err
+	}
 	n, err := NewName(alias)
 	if err != nil {
 		return false, err
@@ -196,22 +283,29 @@ func (s *Subject) AddAlias(alias string, now time.Time) (changed bool, err error
 }
 
 // RemoveAlias removes the alias with the key of alias (values.Key), for undoing aliases added from the schedule. The
-// name is never removed: a spelling with its key, or with no alias's key, changes nothing (changed is false).
-func (s *Subject) RemoveAlias(alias string, now time.Time) (changed bool) {
+// name is never removed: a spelling with its key, or with no alias's key, changes nothing (changed is false). Error:
+// ErrRemoved.
+func (s *Subject) RemoveAlias(alias string, now time.Time) (changed bool, err error) {
+	if err := s.active(); err != nil {
+		return false, err
+	}
 	key := values.Key(alias)
 	i := slices.IndexFunc(s.aliases, func(a Name) bool { return a.Key() == key })
 	if key == "" || i < 0 {
-		return false
+		return false, nil
 	}
 	s.aliases = slices.Delete(s.aliases, i, i+1)
 	s.updatedAt = now
-	return true
+	return true, nil
 }
 
 // SetTeacher sets the teacher of role (ADR-0030), replacing the one set before; the same name and address again
-// change nothing (changed is false). Errors wrap ErrInvalidTeacherRole, ErrInvalidTeacherName or
-// ErrInvalidTeacherEmail.
+// change nothing (changed is false). Errors: ErrRemoved, or errors wrapping ErrInvalidTeacherRole,
+// ErrInvalidTeacherName or ErrInvalidTeacherEmail.
 func (s *Subject) SetTeacher(role TeacherRole, name, email string, now time.Time) (changed bool, err error) {
+	if err := s.active(); err != nil {
+		return false, err
+	}
 	i, ok := role.index()
 	if !ok {
 		return false, ErrInvalidTeacherRole
@@ -228,9 +322,12 @@ func (s *Subject) SetTeacher(role TeacherRole, name, email string, now time.Time
 	return true, nil
 }
 
-// ClearTeacher removes the teacher of role; a role without one changes nothing (changed is false). Error:
+// ClearTeacher removes the teacher of role; a role without one changes nothing (changed is false). Errors: ErrRemoved,
 // ErrInvalidTeacherRole.
 func (s *Subject) ClearTeacher(role TeacherRole, now time.Time) (changed bool, err error) {
+	if err := s.active(); err != nil {
+		return false, err
+	}
 	i, ok := role.index()
 	if !ok {
 		return false, ErrInvalidTeacherRole
@@ -252,8 +349,11 @@ func (s *Subject) HasKey(key string) bool {
 }
 
 // AddFolder adds an own folder with id. Errors: ErrFolderExists for a name key that a folder (also a system one)
-// has, ErrTooMany, ErrInvalidSubject for a bad or repeated id.
+// has, ErrTooMany, ErrInvalidSubject for a bad or repeated id, ErrRemoved.
 func (s *Subject) AddFolder(id shared.FolderID, name FolderName, now time.Time) (Folder, error) {
+	if err := s.active(); err != nil {
+		return Folder{}, err
+	}
 	if err := id.Validate(); err != nil {
 		return Folder{}, fmt.Errorf("%w: %w", ErrInvalidSubject, err)
 	}
@@ -278,10 +378,12 @@ func (s *Subject) AddFolder(id shared.FolderID, name FolderName, now time.Time) 
 }
 
 // RemoveFolder removes the own folder id; files is how many files (active or removed) the folder holds. Errors:
-// ErrFolderNotFound, ErrSystemFolder, ErrNotEmpty.
+// ErrRemoved, ErrFolderNotFound, ErrSystemFolder, ErrNotEmpty.
 func (s *Subject) RemoveFolder(id shared.FolderID, files int, now time.Time) error {
 	i := slices.IndexFunc(s.folders, func(f Folder) bool { return f.id == id })
 	switch {
+	case s.status != StatusActive:
+		return ErrRemoved
 	case i < 0:
 		return ErrFolderNotFound
 	case s.folders[i].IsSystem():
@@ -294,9 +396,13 @@ func (s *Subject) RemoveFolder(id shared.FolderID, files int, now time.Time) err
 	return nil
 }
 
-// Removable reports whether the subject may be removed: files is how many files (active or removed) it holds, and a
-// removed file still needs its subject to be restored. Own folders go with the subject. Error: ErrNotEmpty.
+// Removable reports whether the subject may be deleted for good at once (the agent's undo of creating it): files is
+// how many files (active or removed) it holds, and a removed file still needs its subject to be restored. Own folders
+// go with the subject. Errors: ErrRemoved (a removed subject waits for its purge), ErrNotEmpty.
 func (s *Subject) Removable(files int) error {
+	if err := s.active(); err != nil {
+		return err
+	}
 	if files > 0 {
 		return fmt.Errorf("%w: %d files", ErrNotEmpty, files)
 	}
@@ -361,6 +467,15 @@ func (s *Subject) LogValue() slog.Value {
 	return slog.GroupValue(slog.String("id", string(s.id)), slog.String("name", s.name.text))
 }
 
+// Status returns the status.
+func (s *Subject) Status() Status { return s.status }
+
+// Active reports whether the subject is not removed.
+func (s *Subject) Active() bool { return s.status == StatusActive }
+
+// RemovedAt returns when the subject was removed; zero while it is active.
+func (s *Subject) RemovedAt() time.Time { return s.removedAt }
+
 // CreatedAt returns the creation time.
 func (s *Subject) CreatedAt() time.Time { return s.createdAt }
 
@@ -370,7 +485,8 @@ func (s *Subject) UpdatedAt() time.Time { return s.updatedAt }
 // State returns the stored form, for the repositories.
 func (s *Subject) State() State {
 	st := State{
-		Version: s.version, ID: s.id, Name: s.name.text, Semester: s.semester, CreatedAt: s.createdAt, UpdatedAt: s.updatedAt,
+		Version: s.version, ID: s.id, Name: s.name.text, Semester: s.semester, RemovedAt: s.removedAt,
+		CreatedAt: s.createdAt, UpdatedAt: s.updatedAt,
 	}
 	for i, t := range s.teachers.byRole {
 		if !t.IsZero() {

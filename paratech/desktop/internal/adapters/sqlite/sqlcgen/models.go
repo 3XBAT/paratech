@@ -379,6 +379,7 @@ type Subject struct {
 	UpdatedAt    int64
 	TeacherName  string
 	TeacherEmail string
+	RemovedAt    sql.NullInt64
 }
 
 type SubjectAlias struct {

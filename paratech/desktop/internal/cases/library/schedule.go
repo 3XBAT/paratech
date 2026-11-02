@@ -83,10 +83,13 @@ type ScheduleAliased struct {
 	Aliases []string
 }
 
-// ScheduleSkipped is a row not done: Key for a subject to create, Subject for spellings to add.
+// ScheduleSkipped is a row not done: Key for a subject to create, Subject for spellings to add. Removed is set with
+// name_taken when only a removed subject holds the spelling (also the subject of this row, removed by the student), so
+// the student may restore it («Вернуть») instead.
 type ScheduleSkipped struct {
 	Key     string
 	Subject shared.SubjectID
+	Removed shared.SubjectID
 	Reason  ScheduleReason
 }
 
@@ -135,8 +138,9 @@ func (s *Service) ScheduleSubjects(ctx context.Context) (ScheduleProposal, error
 // stored strings and subjects, never taken from the caller; one of another token is ErrStale. Each subject is its own
 // transaction with the ID derived from the token and its key, so a retry with the same token creates nothing twice and
 // does the rest (the subjects and spellings this package made already are taken out to find its proposal again). A
-// row whose name or alias another subject took meanwhile is skipped (name_taken), spellings for a subject at its alias
-// limit too (too_many_aliases). A failure midway returns what was done with the error; the done part stays.
+// row whose name or alias another subject took meanwhile is skipped (name_taken, with Removed when only a removed
+// subject holds it, also its own subject the student removed), spellings for a subject at its alias limit too
+// (too_many_aliases). A failure midway returns what was done with the error; the done part stays.
 // Errors: ErrInvalidRequest (a bad token or choice), ErrStale, ErrNameTaken and ErrInvalidName (a rename),
 // ErrBusy, ErrUnavailable.
 func (s *Service) CreateFromSchedule(ctx context.Context, token string, choices []schedulesubjects.Choice) (ScheduleResult, error) {
@@ -189,14 +193,22 @@ func (s *Service) createScheduled(ctx context.Context, token string, c schedules
 		res.Created = append(res.Created, ScheduleCreated{ID: id, Key: c.Key, Name: name})
 		return nil
 	}
-	skipped := func(r ScheduleReason) error {
-		res.Skipped = append(res.Skipped, ScheduleSkipped{Key: c.Key, Reason: r})
+	skipped := func(removed shared.SubjectID) error {
+		res.Skipped = append(res.Skipped, ScheduleSkipped{Key: c.Key, Removed: removed, Reason: ReasonNameTaken})
 		return nil
 	}
-
-	switch sub, err := s.subjects.Get(ctx, id); {
-	case err == nil:
+	// existing is the subject under the derived ID in any status: an active one was created by this package before, a
+	// removed one too and the student removed it; it keeps its name, so the row is skipped with it to restore.
+	existing := func(sub *subject.Subject) error {
+		if sub.Status() == subject.StatusRemoved {
+			return skipped(id)
+		}
 		return created(sub.Name().String())
+	}
+
+	switch sub, err := s.subjects.GetAny(ctx, id); {
+	case err == nil:
+		return existing(sub)
 	case !errors.Is(err, shared.ErrNotFound):
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
@@ -205,14 +217,12 @@ func (s *Service) createScheduled(ctx context.Context, token string, c schedules
 	if err != nil {
 		return domainError(err)
 	}
-	ix, err := s.index(ctx)
+	ix, err := s.names(ctx) // a removed subject keeps its spellings too
 	if err != nil {
 		return err
 	}
-	if ix.TakenByOther(sub.Name().String(), id) || slices.ContainsFunc(sub.Aliases(), func(a subject.Name) bool {
-		return ix.TakenByOther(a.String(), id)
-	}) {
-		return skipped(ReasonNameTaken)
+	if taken, removed := scheduleNameTaken(ix, sub, id); taken {
+		return skipped(removed)
 	}
 
 	err = s.subjects.Save(ctx, sub)
@@ -224,29 +234,52 @@ func (s *Service) createScheduled(ctx context.Context, token string, c schedules
 	}
 	// Another call of the same package created it meanwhile, or another subject took a spelling; any other conflict is
 	// ErrBusy, as in CreateSubject.
-	switch got, gerr := s.subjects.Get(ctx, id); {
+	switch got, gerr := s.subjects.GetAny(ctx, id); {
 	case gerr == nil:
-		return created(got.Name().String())
+		return existing(got)
 	case !errors.Is(gerr, shared.ErrNotFound):
 		return fmt.Errorf("%w: %w", ErrUnavailable, gerr)
 	case errors.Is(err, shared.ErrDuplicate):
-		return skipped(ReasonNameTaken)
+		return skipped("")
 	}
 	return ErrBusy
+}
+
+// scheduleNameTaken reports whether a subject other than id has the name or an alias of sub. removed is the removed
+// subject holding one of them, only when no active subject holds any: restoring it is then the way out.
+func scheduleNameTaken(ix nameIndex, sub *subject.Subject, id shared.SubjectID) (taken bool, removed shared.SubjectID) {
+	spellings := []string{sub.Name().String()}
+	for _, a := range sub.Aliases() {
+		spellings = append(spellings, a.String())
+	}
+	for _, sp := range spellings {
+		var gone *RemovedNameError
+		switch err := ix.taken(sp, id); {
+		case err == nil:
+		case errors.As(err, &gone):
+			taken = true
+			if removed == "" {
+				removed = gone.Subject
+			}
+		default:
+			return true, ""
+		}
+	}
+	return taken, removed
 }
 
 // addScheduled adds the spellings of a to its subject in one transaction, with the checks of AddAlias; all of them or
 // none, so a retry finds the subject as before or as done.
 func (s *Service) addScheduled(ctx context.Context, a schedulesubjects.Addition, now time.Time, res *ScheduleResult) error {
 	_, err := s.changeSubject(ctx, a.Subject, func(sub *subject.Subject) (bool, error) {
-		ix, err := s.index(ctx)
+		ix, err := s.names(ctx)
 		if err != nil {
 			return false, err
 		}
 		changed := false
 		for _, alias := range a.Aliases {
-			if ix.TakenByOther(alias, a.Subject) {
-				return false, ErrNameTaken
+			if err := ix.taken(alias, a.Subject); err != nil {
+				return false, err
 			}
 			c, err := sub.AddAlias(alias, now)
 			if err != nil {
@@ -258,9 +291,13 @@ func (s *Service) addScheduled(ctx context.Context, a schedulesubjects.Addition,
 	})
 
 	reason := ScheduleReason("")
+	var gone *RemovedNameError
 	switch {
 	case err == nil:
 		res.Aliased = append(res.Aliased, ScheduleAliased{Subject: a.Subject, Aliases: slices.Clone(a.Aliases)})
+		return nil
+	case errors.As(err, &gone):
+		res.Skipped = append(res.Skipped, ScheduleSkipped{Subject: a.Subject, Removed: gone.Subject, Reason: ReasonNameTaken})
 		return nil
 	case errors.Is(err, ErrNameTaken):
 		reason = ReasonNameTaken
@@ -349,7 +386,11 @@ func (s *Service) undoScheduled(ctx context.Context, ids []shared.SubjectID, ali
 		_, err := s.changeSubject(ctx, a.Subject, func(sub *subject.Subject) (bool, error) {
 			removed = removed[:0] // the subject is loaded again after a lost save
 			for _, alias := range a.Aliases {
-				if sub.RemoveAlias(alias, now) {
+				changed, err := sub.RemoveAlias(alias, now)
+				if err != nil {
+					return false, domainError(err)
+				}
+				if changed {
 					removed = append(removed, alias)
 				}
 			}
