@@ -91,16 +91,16 @@ test("step counter and «Ещё N шагов» use the Russian plural", () => {
   }
 });
 
-test("approve label names the number of steps; a plan with no steps keeps «Да»", () => {
+test("approve label names the number of steps; a plan with no steps keeps «Да, выполнить»", () => {
   assert.equal(approveLabel(1), "Да, выполнить 1 шаг");
   assert.equal(approveLabel(2), "Да, выполнить 2 шага");
   assert.equal(approveLabel(5), "Да, выполнить 5 шагов");
   assert.equal(approveLabel(30), "Да, выполнить 30 шагов");
-  assert.equal(approveLabel(0), "Да");
+  assert.equal(approveLabel(0), "Да, выполнить");
 
   const m = modelOf(plan(5)).cards[0];
   assert.deepEqual(m.buttons.map((b) => [b.id, b.label]), [["approve", "Да, выполнить 5 шагов"], ["revise", "Изменить"], ["cancel", "Отмена"]]);
-  assert.equal(modelOf(plan(0)).cards[0].buttons[0].label, "Да");
+  assert.equal(modelOf(plan(0)).cards[0].buttons[0].label, "Да, выполнить");
   // Only while the plan awaits an answer.
   assert.deepEqual(modelOf(plan(5), "EXECUTING").cards[0].buttons, []);
 });
@@ -222,7 +222,7 @@ test("executing plan: «Шаг 3 из 8» without a live region, done / current 
   assert.ok(out.includes("выполняется"));
   assert.ok(!out.includes("не удался"));
   assert.ok(!out.includes("Да, выполнить") && !out.includes("Изменить"), "no confirm buttons while executing");
-  assert.ok(out.includes("Понял так"));
+  assert.ok(out.includes("План"));
 
   const failed = html(plan(8, ["done", "failed", "", "", "", "", "", ""]), "EXECUTING");
   assert.ok(failed.includes("#i-x") && failed.includes(">не удался<"));

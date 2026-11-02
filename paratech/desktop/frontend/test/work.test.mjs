@@ -278,12 +278,12 @@ test("approve with no sections does not crash and cannot be approved", () => {
   assert.match(out, /<button[^>]*disabled=""[^>]*>Утвердить план/);
 });
 
-test("blocked: the text, the note field with its limit and «Сгенерировать заново»", () => {
+test("blocked: the text, the note field with its limit and «Написать заново»", () => {
   const out = render(work({ writing: writing({ step: "blocked", sections: [section({ written: true }), section({ number: 2 })] }) }));
-  assert.match(out, /Не удалось написать раздел\. Можно сгенерировать заново\./);
+  assert.match(out, /Не удалось написать раздел\. Можно написать заново\./);
   assert.match(out, /Дополнительные указания/);
   assert.match(out, /maxLength="1000"/);
-  assert.match(out, /Сгенерировать заново/);
+  assert.match(out, /Написать заново/);
 });
 
 test("blocked outline (no sections) says so and offers to make the plan again", () => {

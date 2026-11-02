@@ -8,7 +8,8 @@ import { askMentions, maxDraftLength, maxMentions, type MentionPill, mentionPill
 import { approveLabel, type PlanProgress, planProgress, stepMarks, type StepMark, planWindow } from "./planView.js";
 import { type Entry, isBusyRefused, isFinalStatus, isRunning, orderedEntries } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
-import { dayText, daysBetween, daysLeftText, dueText, parseMoment, timeText } from "./todayView.js";
+import { waitingInline } from "./statusWords.js";
+import { dayText, daysBetween, daysLeftText, dueText, parseMoment } from "./dueText.js";
 
 /** One row of the assignment list of a reply card. */
 export interface AssignmentRow {
@@ -16,15 +17,13 @@ export interface AssignmentRow {
   title: string;
   /** "" when the subject is unknown. */
   subject: string;
-  /** «сегодня до 20:00», «завтра до 18:30», «до сб, 24 окт., 18:30» or «просрочено»; "" without a date. */
+  /** «сегодня до 20:00», «завтра до 18:30», «до сб, 24 окт., 18:30» or «просрочено, пт, 23 окт., 20:00»; "" without a date. */
   due: string;
   /** Overdue: drawn with the urgent colour of «Сегодня». */
   overdue: boolean;
 }
 
 export const noTitleLabel = "Без названия";
-
-const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 
 /** A date-only "YYYY-MM-DD" is a local calendar day (not UTC midnight, which shifts the day west of UTC). */
 function parseDue(s: string): Date | null {
@@ -42,34 +41,28 @@ function atTime(d: Date, time: string): Date | null {
 }
 
 /**
- * The row of an assignment; the subject name comes from the student's subjects, the deadline moment (date and time)
- * is read against `now`: «сегодня до 20:00», «завтра до 18:30», «до сб, 24 окт., 18:30»; a moment that has passed
- * reads «просрочено». Without a time (an older core) only the day counts.
+ * The deadline moment (date and time) read against `now` in the one wording of dueText: «сегодня до 20:00»,
+ * «завтра до 18:30», «до сб, 24 окт., 18:30»; a moment that has passed keeps its date: «просрочено, пт, 23 окт., 20:00».
+ * Without a time (an older core) only the day counts.
  */
+function dueWhen(d: Date, time: string, now: Date): { text: string; overdue: boolean } {
+  const at = atTime(d, time);
+  if (at !== null) {
+    return { text: dueText(at.toISOString(), now), overdue: at.getTime() <= now.getTime() };
+  }
+  const days = daysBetween(d, now);
+  if (days < 0) {
+    return { text: `${daysLeftText(days)}, ${dayText(d)}`, overdue: true };
+  }
+  return { text: days < 2 ? daysLeftText(days) : `до ${dayText(d)}`, overdue: false };
+}
+
+/** The row of an assignment; the subject name comes from the student's subjects. */
 export function assignmentRow(a: AssignmentLineView, subjects: Readonly<Record<string, string>>, now: Date): AssignmentRow {
   const d = parseDue(a.due);
-  let due = "";
-  let overdue = false;
-  if (d !== null) {
-    const days = daysBetween(d, now);
-    const at = atTime(d, a.time);
-    if (at === null) {
-      overdue = days < 0;
-      due = days < 2 ? daysLeftText(days) : `до ${dayText(d)}`;
-    } else {
-      const time = timeText(at.toISOString());
-      overdue = at.getTime() <= now.getTime();
-      if (overdue) {
-        due = daysLeftText(-1);
-      } else if (days === 0) {
-        due = `сегодня до ${time}`;
-      } else if (days === 1) {
-        due = `завтра до ${time}`;
-      } else {
-        due = dueText(at.toISOString());
-      }
-    }
-  }
+  const when = d === null ? null : dueWhen(d, a.time, now);
+  const due = when?.text ?? "";
+  const overdue = when?.overdue ?? false;
   const subject = Object.prototype.hasOwnProperty.call(subjects, a.subjectId) ? subjects[a.subjectId] : "";
   return { id: a.id, title: a.title.trim() === "" ? noTitleLabel : a.title, subject, due, overdue };
 }
@@ -78,7 +71,7 @@ export const addedAssignmentPrefix = "Задание добавлено";
 export const openAssignmentLabel = "Открыть";
 
 /**
- * «Задание добавлено: <название> · <предмет> · срок <дата>, <время>». The DTO does not say whether the student named a
+ * «Задание добавлено: <название> · <предмет> · завтра до 18:30». The DTO does not say whether the student named a
  * time (none arrives as 20:00), so date and time are always shown; the parts that are absent are left out.
  */
 export function addedAssignmentText(a: AddedAssignmentView, subjects: Readonly<Record<string, string>>, now: Date): string {
@@ -89,10 +82,7 @@ export function addedAssignmentText(a: AddedAssignmentView, subjects: Readonly<R
   }
   const d = parseDue(a.due);
   if (d !== null) {
-    const days = Math.round((dayStart(d) - dayStart(now)) / 86_400_000);
-    // «до пт, 30 окт.» without «до ».
-    const day = days === 0 || days === 1 ? daysLeftText(days) : dayText(d);
-    parts.push(`срок ${day}${a.time === "" ? "" : `, ${a.time}`}`);
+    parts.push(dueWhen(d, a.time, now).text);
   }
   return `${addedAssignmentPrefix}: ${parts.join(" · ")}`;
 }
@@ -191,7 +181,7 @@ export const chatTexts = {
   restore: "Вернуть",
   rename: "Переименовать",
   renameLabel: "Название чата",
-  running: "идёт просьба",
+  running: "идёт запрос",
   archivedMark: "в архиве",
   noChats: "Чатов пока нет.",
   emptyArchive: "Архив пуст.",
@@ -205,15 +195,15 @@ export type ChatOp = "list" | "open" | "current" | "new" | "rename" | "archive" 
 
 const chatFailTexts: Record<ChatOp, string> = {
   list: "Не удалось загрузить чаты.",
-  open: "Не удалось загрузить прежние просьбы чата.",
-  current: "Не удалось загрузить текущую просьбу чата.",
+  open: "Не удалось загрузить прежние запросы чата.",
+  current: "Не удалось загрузить текущий запрос чата.",
   new: "Не удалось начать новый чат.",
   rename: "Не удалось переименовать чат.",
   archive: "Не удалось отправить чат в архив.",
   restore: "Не удалось вернуть чат из архива.",
 };
 
-export const chatBusyText = "Чат занят: дождитесь конца просьбы или остановите её.";
+export const chatBusyText = "Чат занят: дождитесь конца запроса или остановите его.";
 export const chatGoneText = "Чат не найден: список обновлён.";
 
 /** The wording of a problem of a chat call; "" for no problem. An unknown code reads as a failure of the operation. */
@@ -490,7 +480,7 @@ export const restartTexts = {
   cancel: "Отмена",
   stop: "Остановить",
   stopping: "Останавливается…",
-  cancelRequest: "Отменить просьбу",
+  cancelRequest: "Отменить запрос",
   cancelling: "Отменяется…",
   note: "Правка сообщения. После отправки всё, что ниже него, пропадёт из чата.",
   undoNote: "Отменить",
@@ -542,11 +532,11 @@ export interface RestartBlock {
 }
 
 const restartReasons = {
-  running: "Агент ещё работает над просьбой. Дождитесь конца или остановите её.",
-  plan: "Агент ждёт решения по плану: подтвердите его или отмените просьбу.",
-  answers: "Агент ждёт ответов на вопросы: ответьте на них или отмените просьбу.",
-  waiting: "Просьба ещё не закончена: дождитесь конца или отмените её.",
-  sending: "Просьба ещё отправляется. Подождите несколько секунд.",
+  running: "Агент ещё работает над запросом. Дождитесь конца или остановите его.",
+  plan: "Агент ждёт решения по плану: подтвердите его или отмените запрос.",
+  answers: "Агент ждёт ответов на вопросы: ответьте на них или отмените запрос.",
+  waiting: "Запрос ещё не закончен: дождитесь конца или отмените его.",
+  sending: "Запрос ещё отправляется. Подождите несколько секунд.",
   offline: "Нет связи с paratech. Начать заново можно, когда связь появится.",
   loading: "Панель ещё загружается. Подождите несколько секунд.",
 } as const;
@@ -737,7 +727,7 @@ export function withoutRestarted<T extends { turn: number }>(requests: readonly 
 export function restartRefusalText(problem: string): string {
   switch (problem) {
     case "busy":
-      return "Не удалось отправить: агент ещё занят просьбой. Дождитесь конца или остановите её и отправьте снова.";
+      return "Не удалось отправить: агент ещё занят запросом. Дождитесь конца или остановите его и отправьте снова.";
     case "invalid":
       return "Не удалось отправить: чат изменился. Отмените правку и выберите сообщение ещё раз.";
     case "offline":
@@ -773,14 +763,14 @@ export const texts = {
   /** Visually hidden status of a typing reply (the reply text itself is never in a live region). */
   replyTyping: "Ответ печатается…",
   replyReady: "Ответ готов",
-  /** Small caption under the text a student had read when they pressed «Стоп». */
+  /** Small caption under the text a student had read when they pressed «Остановить». */
   replyStopped: "Ответ остановлен",
   /** The stopped card of a request that failed or was cut while its reply was typing. */
   replyCut: "Ответ прервался. Можно повторить.",
   removeContext: "Убрать контекст",
   offlineBanner: "Нет связи с paratech",
   empty: "Можно задать вопрос или попросить что-нибудь сделать.",
-  planCaption: "Понял так",
+  planCaption: "План",
   progressCaption: "Работа идёт",
   resultCaption: "Готово",
   answerCaption: "Ответ по материалам",
@@ -795,7 +785,7 @@ export const texts = {
   undoAll: "Отменить всё",
   undoBusy: "Отмена…",
   undoDone: "Отменено",
-  skip: "Пропустить — сделай как считаешь",
+  skip: "Пропустить вопросы",
   submitAnswers: "Ответить",
   reviseLabel: "Что изменить в плане",
   reviseSend: "Отправить",
@@ -805,32 +795,32 @@ export const texts = {
   answerReady: "Ответ с источниками подготовлен.",
   stale: "нет связи — может быть неактуально",
   threadNote: "Последняя беседа",
-  rerunTitle: "Запустить просьбу заново",
+  rerunTitle: "Запустить запрос заново",
 } as const;
 
 /** Button ids of a request; the panel maps them to the calls. */
 export type ButtonId = "approve" | "revise" | "cancel" | "stop" | "continue" | "resume" | "retry" | "restart" | "rerun" | "resend";
 
 export const buttonLabels: Record<ButtonId, string> = {
-  approve: "Да",
+  approve: "Да, выполнить",
   revise: "Изменить",
   cancel: "Отмена",
-  stop: "Стоп",
+  stop: "Остановить",
   continue: "Повторить",
   resume: "Продолжить",
   retry: "Повторить",
-  restart: "Запустить снова",
+  restart: "Повторить",
   rerun: "Повторить",
   resend: "Отправить ещё раз",
 };
 
 const callProblemTexts: Record<Exclude<CallProblem, "">, string> = {
-  invalid: "Просьба не принята: проверьте текст.",
+  invalid: "Запрос не принят: проверьте текст.",
   offline: "Нет связи с paratech.",
   closed: "Приложение закрывается.",
   unavailable: "Пока недоступно.",
   busy: "Действие уже меняется, попробуйте ещё раз.",
-  failed: "Не удалось отправить просьбу.",
+  failed: "Не удалось отправить запрос.",
 };
 
 /** The wording of a refused call. */
@@ -839,25 +829,25 @@ export function callProblemText(p: CallProblem): string {
 }
 
 const updateProblemTexts: Record<string, string> = {
-  busy: "Предыдущая просьба ещё выполняется.",
-  stale: "Просьба устарела: нужно задать её заново.",
-  invalid: "Просьба не принята: проверьте текст.",
-  budget: "Остановлено: лимит просьбы.",
+  busy: "Предыдущий запрос ещё выполняется.",
+  stale: "Запрос устарел: нужно задать его заново.",
+  invalid: "Запрос не принят: проверьте текст.",
+  budget: "Остановлено: лимит запроса.",
   retry_required: "Шаг не удался.",
-  restart_required: "Просьба устарела.",
-  rerun_blocked: "Повтор недоступен: просьба уже изменила данные. Можно отменить действия или задать вопрос заново.",
-  failed: "Не удалось выполнить просьбу.",
+  restart_required: "Запрос устарел.",
+  rerun_blocked: "Повтор недоступен: запрос уже изменил данные. Можно отменить действия или задать вопрос заново.",
+  failed: "Не удалось выполнить запрос.",
 };
 
 /** Why a request stopped: the text of the stop card and the buttons it offers. */
 const stopTexts: Record<string, { text: string; buttons: ButtonId[] }> = {
   offline: { text: "Не завершено: нет связи", buttons: ["continue", "cancel"] },
-  // «Стоп» keeps «Продолжить» (the same free replay): «Повторить» would promise another attempt, which is the rerun button.
+  // «Остановить» keeps «Продолжить» (the same free replay): «Повторить» would promise another attempt, which is the rerun button.
   user: { text: "Остановлено", buttons: ["resume", "cancel"] },
-  quota: { text: "Не завершено: исчерпан лимит", buttons: ["continue", "cancel"] },
+  quota: { text: `Не завершено: ${waitingInline("quota")}`, buttons: ["continue", "cancel"] },
   failed: { text: "Не получилось выполнить шаг", buttons: ["retry"] },
-  expired: { text: "Просьба устарела", buttons: ["restart"] },
-  budget: { text: "Остановлено: лимит просьбы", buttons: [] },
+  expired: { text: "Запрос устарел", buttons: ["restart"] },
+  budget: { text: "Остановлено: лимит запроса", buttons: [] },
 };
 
 // ---- Plan ----
@@ -865,7 +855,7 @@ const stopTexts: Record<string, { text: string; buttons: ButtonId[] }> = {
 /** Impersonal names of the steps of a plan. */
 const toolTexts: Record<string, string> = {
   list_subjects: "Просмотр предметов",
-  find_lessons: "Поиск занятий",
+  find_lessons: "Поиск пар",
   list_assignments: "Просмотр заданий",
   job_status: "Проверка хода работы",
   delivery_status: "Проверка отправки письма",
@@ -877,10 +867,10 @@ const toolTexts: Record<string, string> = {
   create_folder: "Создание папки",
   place_upload: "Размещение файла",
   link_material: "Привязка материала",
-  set_lesson_info: "Уточнение данных занятия",
+  set_lesson_info: "Уточнение данных пары",
   make_summary: "Подготовка конспекта",
   make_lecture_text: "Подготовка текста лекции",
-  find_homework: "Поиск домашнего задания",
+  find_homework: "Поиск заданий",
   generate_draft: "Подготовка решения",
   edit_due: "Изменение срока",
   triage_assignment: "Разбор задания",
@@ -893,7 +883,7 @@ const toolTexts: Record<string, string> = {
 const idKindTexts: Record<string, string> = {
   subject: "предмет",
   folder: "папка",
-  lesson: "занятие",
+  lesson: "пара",
   recording: "запись",
   material: "материал",
   upload: "файл",
@@ -980,7 +970,7 @@ export function parseArtifact(ref: string): ArtifactLabel | null {
 const noDefault = -1;
 
 /**
- * The answers of «Пропустить — сделай как считаешь»: the preselected option of a choice, a neutral text otherwise.
+ * The answers of «Пропустить вопросы»: the preselected option of a choice, a neutral text otherwise.
  * A choice without a default takes its LAST option (the neutral «Без предмета»), never the first.
  */
 export function skipAnswers(questions: readonly QuestionView[]): AnswerInput[] {
@@ -1178,7 +1168,7 @@ export interface EntryModel {
 export interface EntryContext {
   /** The request is the last one of the thread. */
   last: boolean;
-  /** A running request blocks this refused one, and «Стоп» can stop it. */
+  /** A running request blocks this refused one, and «Остановить» can stop it. */
   blocked: boolean;
   /** The mentions of a request restored after a restart (no scope of its own); the scope's own win. */
   mentions?: readonly MentionView[];
@@ -1235,7 +1225,7 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
   if (stop && reason === "failed" && ctx.replyCut === true) {
     stop = { ...stop, text: texts.replyCut };
   }
-  // The problem's own «Повторить»/«Запустить снова» is the next step: the stop card must not offer a second way on.
+  // The problem's own «Повторить» is the next step: the stop card must not offer a second way on.
   if (stop && (problem === "retry_required" || problem === "restart_required")) {
     stop = { ...stop, buttons: stop.buttons.filter((b) => b !== "continue" && b !== "resume") };
   }
@@ -1263,7 +1253,7 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
     !offered.includes("retry") &&
     !offered.includes("restart") &&
     // The stop card's `continue` button is worded «Повторить» too: two of them under one request would be confusing.
-    // `resume` («Продолжить», after «Стоп») does not clash: the rerun stays.
+    // `resume` («Продолжить», after «Остановить») does not clash: the rerun stays.
     !offered.includes("continue");
   return { ...base, cards, rerun };
 }

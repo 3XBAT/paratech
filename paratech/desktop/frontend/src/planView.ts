@@ -41,9 +41,9 @@ export function moreStepsLabel(hidden: number): string {
   return `Ещё ${stepsWord(hidden)}`;
 }
 
-/** The first button of an awaiting plan; one «Да» covers the whole plan. A plan with no steps keeps the plain «Да». */
+/** The first button of an awaiting plan; one «Да» covers the whole plan. A plan with no steps keeps the plain «Да, выполнить». */
 export function approveLabel(total: number): string {
-  return total > 0 ? `Да, выполнить ${stepsWord(total)}` : "Да";
+  return total > 0 ? `Да, выполнить ${stepsWord(total)}` : "Да, выполнить";
 }
 
 export interface PlanWindow {

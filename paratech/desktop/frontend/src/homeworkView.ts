@@ -23,7 +23,9 @@ import {
   type VersionSource,
 } from "./bindings/homework.js";
 import type { LibrarySubject } from "./bindings/library.js";
+import { dueText as dueMoment } from "./dueText.js";
 import { plural } from "./plural.js";
+import { waitingWords } from "./statusWords.js";
 import type { ResultKind } from "./ui/controls.js";
 import type { IconName } from "./ui/Icon.js";
 import type { ChipKind } from "./ui/StatusChip.js";
@@ -50,8 +52,8 @@ interface Look {
 
 const generationLooks: Readonly<Record<GenerationState, Look>> = {
   generating: { kind: "run", icon: "wave", label: "Готовим черновик…" },
-  waitingNetwork: { kind: "net", icon: "off", label: "Ждёт интернет" },
-  waitingQuota: { kind: "wait", icon: "clock", label: "Лимит обработки исчерпан" },
+  waitingNetwork: { kind: "net", icon: "off", label: waitingWords.network },
+  waitingQuota: { kind: "wait", icon: "clock", label: waitingWords.quota },
   failed: { kind: "fail", icon: "warn", label: "Черновик не готов" },
   done: { kind: "ok", icon: "ok", label: "Черновик готов" },
 };
@@ -105,7 +107,7 @@ export interface GenerateOffer {
 }
 
 export function generateOffer(o: { hasDraft: boolean; generating: boolean; olderShown: boolean; dirty: boolean }): GenerateOffer {
-  const label = o.hasDraft ? "Сгенерировать заново" : "Сгенерировать ДЗ";
+  const label = o.hasDraft ? "Написать заново" : "Написать черновик";
   if (o.generating) {
     // The button's busy label says why.
     return { label, disabled: true, reason: undefined, instructionDisabled: true };
@@ -269,9 +271,9 @@ export function versionTitle(v: { number: number; source: VersionSource }): stri
   return `Версия ${v.number} · ${sourceLabels[v.source]}`;
 }
 
-/** "до 18.09.2026, 18:00" (never seconds) or "Без срока". */
+/** "до сб, 24 окт., 18:00" (never seconds, the one wording of the deadline everywhere) or "Без срока". */
 export function dueText(due: string): string {
-  return due === "" ? "Без срока" : `до ${formatTimeMinutes(due)}`;
+  return due === "" ? "Без срока" : dueMoment(due) || "до —";
 }
 
 /** An attachment size for people: "800 байт", "12,5 КБ", "1,2 МБ". */
@@ -319,7 +321,7 @@ export function blockedByEmail(err: unknown): boolean {
 }
 
 /**
- * Why «Сгенерировать заново» is off, undefined when it is on. A new version always continues the latest one, so it is
+ * Why «Написать заново» is off, undefined when it is on. A new version always continues the latest one, so it is
  * off while an older version is shown: the student picks «К последней версии» or «Взять этот текст» first.
  */
 export function regenerateBlockedReason(olderShown: boolean, dirty: boolean): string | undefined {
@@ -530,7 +532,7 @@ export const changeTexts = {
   subjectsFailed: "Список предметов не загрузился: изменить задание сейчас нельзя.",
   subjectsLoading: "Загрузка предметов…",
   /** An empty subject of a lesson's assignment shows the lesson's subject, so «Без предмета» would be untrue. */
-  lessonSubject: "Предмет занятия",
+  lessonSubject: "Предмет пары",
   /** Asked before «Удалить» of an assignment whose work or draft is running (TASK-338). */
   stopWarning: "Работа над заданием будет остановлена. Вернуть задание можно в течение 3 дней, работа сама не продолжится.",
   /** Next to «Задание удалено» when the delete stopped a running work. */

@@ -39,7 +39,7 @@ test("rows say today, tomorrow, a date, overdue; unknown subject is omitted", ()
   assert.equal(assignmentRow(line({ due: iso(27) }), subjects, now).due, "завтра");
   assert.match(assignmentRow(line({ due: iso(30) }), subjects, now).due, /^до /);
   const late = assignmentRow(line({ due: iso(24) }), subjects, now);
-  assert.equal(late.due, "просрочено");
+  assert.equal(late.due, "просрочено, сб, 24 окт.");
   assert.equal(late.overdue, true);
   assert.equal(assignmentRow(line({ due: "" }), subjects, now).due, "");
   assert.equal(assignmentRow(line(), subjects, now).subject, "Матанализ");
@@ -60,40 +60,41 @@ test("rows with a time: today before it, past it, tomorrow, a later day (TASK-34
   const row = (due, time, at = now) => assignmentRow(line({ due, time }), {}, at);
   // now is Mon 26 Oct 12:00.
   assert.deepEqual([row(iso(26), "20:00").due, row(iso(26), "20:00").overdue], ["сегодня до 20:00", false]);
-  assert.deepEqual([row(iso(26), "09:00").due, row(iso(26), "09:00").overdue], ["просрочено", true]);
+  assert.deepEqual([row(iso(26), "09:00").due, row(iso(26), "09:00").overdue], ["просрочено, пн, 26 окт., 09:00", true]);
   assert.equal(row(iso(27), "18:30").due, "завтра до 18:30");
-  assert.equal(row(iso(24), "18:30").due, "просрочено");
+  assert.equal(row(iso(24), "18:30").due, "просрочено, сб, 24 окт., 18:30");
   assert.equal(row(iso(30), "18:30").due, "до пт, 30 окт., 18:30");
   assert.equal(row(iso(30), "18:30").overdue, false);
 });
 
 test("rows with a time: the moment is read against now, also at the midnight edges", () => {
   const row = (due, time, at) => assignmentRow(line({ due, time }), {}, at);
-  // 20:00 deadline: one minute before it is still today, at 20:00 and later it has passed (the old text said «сегодня»).
+  // 20:00 deadline: one minute before it is still today, at 20:00 and later it has passed and keeps its date.
   assert.equal(row(iso(26), "20:00", new Date(2026, 9, 26, 19, 59)).due, "сегодня до 20:00");
-  assert.equal(row(iso(26), "20:00", new Date(2026, 9, 26, 20, 0)).due, "просрочено");
-  assert.equal(row(iso(26), "20:00", new Date(2026, 9, 26, 23, 59)).due, "просрочено");
+  assert.equal(row(iso(26), "20:00", new Date(2026, 9, 26, 20, 0)).due, "просрочено, пн, 26 окт., 20:00");
+  assert.equal(row(iso(26), "20:00", new Date(2026, 9, 26, 23, 59)).due, "просрочено, пн, 26 окт., 20:00");
   // Just after midnight the deadline of yesterday evening is overdue, today's evening is today.
   const night = new Date(2026, 9, 27, 0, 1);
-  assert.equal(row(iso(26), "20:00", night).due, "просрочено");
+  assert.equal(row(iso(26), "20:00", night).due, "просрочено, пн, 26 окт., 20:00");
   assert.equal(row(iso(27), "20:00", night).due, "сегодня до 20:00");
   assert.equal(row(iso(28), "00:00", night).due, "завтра до 00:00");
   // A 00:00 deadline of today has passed at once.
-  assert.equal(row(iso(27), "00:00", night).due, "просрочено");
+  assert.equal(row(iso(27), "00:00", night).due, "просрочено, вт, 27 окт., 00:00");
   // A broken time falls back to the day.
   assert.equal(row(iso(27), "25:00", night).due, "сегодня");
 });
 
-test("a row without a time keeps the day-only wording", () => {
+test("a row without a time keeps the day-only wording; a passed day keeps its date", () => {
   assert.equal(assignmentRow(line({ due: iso(26), time: "" }), {}, now).due, "сегодня");
   assert.equal(assignmentRow(line({ due: iso(30), time: "" }), {}, now).due, "до пт, 30 окт.");
+  assert.equal(assignmentRow(line({ due: iso(25), time: "" }), {}, now).due, "просрочено, вс, 25 окт.");
 });
 
 test("the list renders title, subject and due; overdue gets the urgent class", () => {
   const out = render([line({ due: iso(24) }), line({ id: "a2", title: "Эссе", due: iso(27) })], { subjects: { s1: "Матанализ" } });
   assert.match(out, /Задачи 1-7/);
   assert.match(out, /Матанализ/);
-  assert.match(out, /ag-asg-late[^>]*>просрочено</);
+  assert.match(out, /ag-asg-late[^>]*>просрочено, сб, 24 окт\.</);
   assert.match(out, />завтра</);
   assert.equal((out.match(/<button/g) ?? []).length, 2);
 });

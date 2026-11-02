@@ -3,6 +3,7 @@
 
 // The .js extension lets the Node test runner load the compiled module; TypeScript and Vite map it to the .ts file.
 import { errorMessages } from "./bindings/activity.js";
+import { waitingWords } from "./statusWords.js";
 
 /** Labels of the recording statuses (domain/recording/recording). */
 export const recordingStatusLabels: Readonly<Record<string, string>> = {
@@ -20,24 +21,24 @@ export const jobStatusLabels: Readonly<Record<string, string>> = {
   QUEUED: "В очереди",
   RUNNING: "Выполняется",
   COMPLETED: "Готово",
-  RETRY_WAIT: "Ждёт повторной попытки",
+  RETRY_WAIT: waitingWords.retry,
   CANCELLED: "Отменена",
   FAILED: "Ошибка",
-  WAITING_FOR_NETWORK: "Ждёт интернет",
-  WAITING_FOR_QUOTA: "Минуты обработки закончились",
-  WAITING_FOR_POWER: "Ждёт зарядку",
+  WAITING_FOR_NETWORK: waitingWords.network,
+  WAITING_FOR_QUOTA: waitingWords.quota,
+  WAITING_FOR_POWER: waitingWords.power,
 };
 
 /** The waiting statuses that must each have their own reason text (AC of TASK-023). */
 export const waitingStatuses = ["WAITING_FOR_POWER", "WAITING_FOR_NETWORK", "WAITING_FOR_QUOTA"] as const;
 
 export const jobTypeLabels: Readonly<Record<string, string>> = {
-  stt: "Распознавание речи",
+  stt: "Расшифровка",
   summarize: "Конспект",
-  extract_homework: "Поиск домашнего задания",
+  extract_homework: "Поиск заданий",
   calendar_sync: "Синхронизация календаря",
   // The jobs the page still lists since TASK-076 (the chain jobs are inside their recording rows).
-  homework_draft: "Решение домашнего задания",
+  homework_draft: "Решение задания",
   send_email: "Отправка письма",
 };
 
@@ -60,12 +61,12 @@ export function jobTypeLabel(type: string): string {
   return lookup(jobTypeLabels, type);
 }
 
-/** The title of a job row: the core's label of a draft job («ДЗ: <задание> · <предмет>»), else its type. */
+/** The title of a job row: the core's label of a draft job (from Go), else its type. */
 export function jobTitle(j: { type: string; label: string }): string {
   return j.label !== "" ? j.label : jobTypeLabel(j.type);
 }
 
-/** The assignment a job row opens in «Домашние задания»; "" when the row opens nothing. */
+/** The assignment a job row opens in «Задания»; "" when the row opens nothing. */
 export function jobAssignment(j: { assignmentId: string }): string {
   return j.assignmentId;
 }
@@ -142,7 +143,7 @@ export function formatTimeMinutes(rfc3339: string): string {
 }
 
 const actionErrors: Readonly<Record<string, string>> = {
-  [errorMessages.unavailable]: "Записи и задачи сейчас недоступны.",
+  [errorMessages.unavailable]: "Записи сейчас недоступны.",
   [errorMessages.invalidId]: "Неверный идентификатор.",
   [errorMessages.notFound]: "Не найдено. Обновите список.",
   [errorMessages.recordingNotRunning]: "Запись не идёт в этом сеансе.",
@@ -156,7 +157,7 @@ const genericActionError = "Не удалось выполнить действ�
 
 const loadErrors: Readonly<Record<"recordings" | "jobs", string>> = {
   recordings: "Не удалось загрузить записи.",
-  jobs: "Не удалось загрузить задачи.",
+  jobs: "Не удалось загрузить фоновую обработку.",
 };
 
 /** Russian text for a failed load of one list; the raw error text is not shown. */

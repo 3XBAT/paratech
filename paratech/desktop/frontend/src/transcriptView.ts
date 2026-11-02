@@ -43,7 +43,7 @@ export function canOpenTranscript(st: TranscriptStatus): boolean {
 }
 
 /**
- * Whether a row of «Записи и задачи» offers «Открыть расшифровку», from the chain the list already has (no call per
+ * Whether a row of «Записи» offers «Открыть расшифровку», from the chain the list already has (no call per
  * row). The recording is saved and recognition is queued, running or past (also when the summary or the homework
  * waits or failed); hidden while recording or saving and for a failed recording. A failed recognition keeps the
  * button: the parts recognised before the failure are kept.
@@ -138,13 +138,13 @@ export interface StatusView {
   empty: string;
 }
 
-export const partialNote = "Показан текст, распознанный на сейчас: новые фразы появляются сами, после окончания текст обновится.";
+export const partialNote = "Показан текст, расшифрованный на сейчас: новые фразы появляются сами, после окончания текст обновится.";
 
 const emptyTexts: Readonly<Record<TranscriptState, string>> = {
   none: "",
-  waiting: "Текст появится, когда начнётся распознавание.",
+  waiting: "Текст появится, когда начнётся расшифровка.",
   recognising: "Первые фразы появятся через несколько секунд.",
-  done: "В записи не распознано ни одной фразы.",
+  done: "В записи не расшифровано ни одной фразы.",
   failed: "",
 };
 

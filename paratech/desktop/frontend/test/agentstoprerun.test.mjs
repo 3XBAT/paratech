@@ -1,4 +1,4 @@
-// «Стоп» at the waiting line and «Повторить» at the last request (TASK-143): progress merge, who offers what,
+// «Остановить» at the waiting line and «Повторить» at the last request (TASK-143): progress merge, who offers what,
 // the busy-refused request and the double-click guard.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -98,7 +98,7 @@ test("history fills an entry that still awaits its first update", () => {
 
 // ---- Стоп ----
 
-test("«Стоп» is offered at the waiting line only while PLANNING or EXECUTING", () => {
+test("«Остановить» is offered at the waiting line only while PLANNING or EXECUTING", () => {
   for (const status of ["PLANNING", "EXECUTING"]) {
     const m = modelOf(update({ status }));
     assert.deepEqual(buttonIds(m), ["stop"], status);
@@ -109,9 +109,9 @@ test("«Стоп» is offered at the waiting line only while PLANNING or EXECUTI
   }
 });
 
-test("«Стоп» is a real quiet button; the stop card follows a stopped request", () => {
+test("«Остановить» is a real quiet button; the stop card follows a stopped request", () => {
   const html = renderToStaticMarkup(h(AgentRequest, { model: modelOf(update({ status: "EXECUTING" })), actions }));
-  assert.match(html, /<button[^>]*class="btn ghost sm"[^>]*>Стоп<\/button>/);
+  assert.match(html, /<button[^>]*class="btn ghost sm"[^>]*>Остановить<\/button>/);
   const stopped = modelOf(update({ status: "STOPPED", stopReason: "user" }));
   assert.deepEqual(buttonIds(stopped), ["resume", "cancel"]);
   assert.equal(stopped.cards[0].text, "Остановлено");
@@ -119,7 +119,7 @@ test("«Стоп» is a real quiet button; the stop card follows a stopped reque
 
 test("the buttons are off while a call runs", () => {
   const html = renderToStaticMarkup(h(AgentRequest, { model: modelOf(update({ status: "EXECUTING" })), actions: { ...actions, busy: true } }));
-  assert.match(html, /<button[^>]*disabled=""[^>]*>Стоп<\/button>/);
+  assert.match(html, /<button[^>]*disabled=""[^>]*>Остановить<\/button>/);
 });
 
 // ---- Повторить ----
@@ -146,7 +146,7 @@ test("the new-request «Повторить» is not offered where the stop card 
   for (const stopReason of ["offline", "quota"]) {
     assert.equal(modelOf(update({ status: "STOPPED", stopReason })).rerun, false, stopReason);
   }
-  // «Стоп» offers «Продолжить» (resume): the rerun, another attempt, stays. Budget offers nothing.
+  // «Остановить» offers «Продолжить» (resume): the rerun, another attempt, stays. Budget offers nothing.
   for (const stopReason of ["user", "budget"]) {
     assert.equal(modelOf(update({ status: "STOPPED", stopReason })).rerun, true, stopReason);
   }
@@ -178,7 +178,7 @@ test("never two «Повторить» under one request: the stop card's button
   assert.equal(stopped.rerun, false);
   const html = renderToStaticMarkup(h(AgentRequest, { model: stopped, actions }));
   assert.equal(html.split(">Повторить<").length - 1, 1);
-  assert.doesNotMatch(html, /Запустить просьбу заново/);
+  assert.doesNotMatch(html, /Запустить запрос заново/);
   // A retry_required problem on a stopped-offline card shows one «Повторить» (the problem's retry), not two.
   const withProblem = modelOf(update({ status: "STOPPED", stopReason: "offline", problem: "retry_required" }));
   assert.deepEqual(withProblem.cards.flatMap((c) => ("buttons" in c ? c.buttons.map((b) => b.id) : [])), ["cancel", "retry"]);
@@ -186,13 +186,13 @@ test("never two «Повторить» under one request: the stop card's button
   assert.equal(renderToStaticMarkup(h(AgentRequest, { model: withProblem, actions })).split(">Повторить<").length - 1, 1);
 });
 
-test("«Стоп» offers «Продолжить» and keeps the rerun under the last request", () => {
+test("«Остановить» offers «Продолжить» and keeps the rerun under the last request", () => {
   const m = modelOf(update({ status: "STOPPED", stopReason: "user" }));
   assert.deepEqual(m.cards.at(-1).buttons.map((b) => [b.id, b.label]), [["resume", "Продолжить"], ["cancel", "Отмена"]]);
   assert.equal(m.rerun, true);
   const html = renderToStaticMarkup(h(AgentRequest, { model: m, actions }));
   assert.equal(html.split(">Повторить<").length - 1, 0);
-  assert.match(html, /Запустить просьбу заново/);
+  assert.match(html, /Запустить запрос заново/);
 });
 
 test("only the last request offers «Повторить»", () => {
@@ -206,15 +206,15 @@ test("only the last request offers «Повторить»", () => {
 
 test("«Повторить» is a button with the round arrow, title and name", () => {
   const html = renderToStaticMarkup(h(AgentRequest, { model: modelOf(update()), actions }));
-  assert.match(html, /<button[^>]*aria-label="Запустить просьбу заново"[^>]*title="Запустить просьбу заново"/);
-  assert.equal(texts.rerunTitle, "Запустить просьбу заново");
+  assert.match(html, /<button[^>]*aria-label="Запустить запрос заново"[^>]*title="Запустить запрос заново"/);
+  assert.equal(texts.rerunTitle, "Запустить запрос заново");
 });
 
 test("a rerun refused over effects says why, impersonally; stale and busy keep their texts", () => {
   const text = (problem) => modelOf(update({ status: "DONE", problem })).cards.find((c) => c.type === "problem").text;
-  assert.equal(text("rerun_blocked"), "Повтор недоступен: просьба уже изменила данные. Можно отменить действия или задать вопрос заново.");
-  assert.equal(text("stale"), "Просьба устарела: нужно задать её заново.");
-  assert.equal(text("busy"), "Предыдущая просьба ещё выполняется.");
+  assert.equal(text("rerun_blocked"), "Повтор недоступен: запрос уже изменил данные. Можно отменить действия или задать вопрос заново.");
+  assert.equal(text("stale"), "Запрос устарел: нужно задать его заново.");
+  assert.equal(text("busy"), "Предыдущий запрос ещё выполняется.");
 });
 
 test("the new request of a rerun is a new entry; the old one loses «Повторить»", () => {
@@ -260,7 +260,7 @@ function busyState() {
   return s;
 }
 
-test("a request refused as busy offers «Стоп» for the running request and «Отправить ещё раз»", () => {
+test("a request refused as busy offers «Остановить» for the running request and «Отправить ещё раз»", () => {
   const s = busyState();
   const refused = orderedEntries(s.entries).at(-1);
   assert.equal(refused.text, "сделай");
@@ -270,7 +270,7 @@ test("a request refused as busy offers «Стоп» for the running request and 
   assert.deepEqual(buttonIds(entryModel(refused, { last: true, blocked: false })), ["resend"]);
   assert.deepEqual(buttonIds(entryModel(refused, { last: false, blocked: true })), [], "only while it is the last one");
   assert.equal(entryModel(refused, last).rerun, false);
-  assert.equal(entryModel(refused, last).cards[0].text, "Предыдущая просьба ещё выполняется.");
+  assert.equal(entryModel(refused, last).cards[0].text, "Предыдущий запрос ещё выполняется.");
 });
 
 test("once the running request is stopped it no longer blocks", () => {
@@ -305,13 +305,13 @@ test("a second press on the same update is not a second call", () => {
   assert.equal(calls, 2, "a refused call frees the buttons");
 });
 
-test("both «Стоп» of a busy-refused request are one mark on the blocker; «Отправить ещё раз» has its own key", () => {
+test("both «Остановить» of a busy-refused request are one mark on the blocker; «Отправить ещё раз» has its own key", () => {
   const s = busyState();
   const refused = orderedEntries(s.entries).at(-1);
   const blocking = blockingEntry(s.entries, refused);
   const t = new PressTracker();
   assert.equal(t.mark(blocking.key, blocking.update), true);
-  assert.equal(t.mark(blocking.key, blocking.update), false, "the blocker's own «Стоп» is a repeat");
+  assert.equal(t.mark(blocking.key, blocking.update), false, "the blocker's own «Остановить» is a repeat");
   assert.equal(t.mark(refused.key, refused.update), true, "resend is separate");
   const stopped = reducePanel(s, { type: "update", update: update({ status: "STOPPED", stopReason: "user" }) });
   const now = stopped.entries.find((x) => x.key === blocking.key);

@@ -148,11 +148,11 @@ test("lessons, changes and conflicts are plain text", () => {
     "строка 2: Математика <b>, 14.10.2026 09:00–10:30 (Europe/Moscow) — пересекается со строкой 6: " +
       "Лаба, 14.10.2026 10:00–11:30 (Europe/Moscow)",
   );
-  assert.match(plain(conflictParts(preview.conflicts[1])), /пересекается с занятием в расписании: Математика <b>/);
+  assert.match(plain(conflictParts(preview.conflicts[1])), /пересекается с парой в расписании: Математика <b>/);
   assert.equal(summaryText(preview), "Добавится: 1, изменится: 1, удалится: 1, без изменений: 2.");
   assert.equal(hasChanges(preview), true);
   assert.equal(hasChanges({ ...preview, added: [], changed: [], removed: [] }), false);
-  assert.match(windowText({ from: "a", to: "b" }), /с a до b; удаляются только занятия внутри этого периода/);
+  assert.match(windowText({ from: "a", to: "b" }), /с a до b; удаляются только пары внутри этого периода/);
   assert.equal(resultText({ added: 1, changed: 2, removed: 3 }), "Расписание обновлено: добавлено 1, изменено 2, удалено 3.");
 });
 
@@ -246,7 +246,7 @@ test("the page states the owner's decisions and the template", () => {
   assert.match(notes.filledDetails, /предметом, типом и преподавателем/);
   assert.match(notes.allDay, /весь день/);
   assert.match(notes.uid, /uid/);
-  assert.match(notes.uid, /Без uid изменение названия, даты или начала занятия выглядит как «удалено \+ добавлено»/);
+  assert.match(notes.uid, /Без uid изменение названия, даты или начала пары выглядит как «удалено \+ добавлено»/);
   assert.match(notes.formats, /до 2 МиБ\./);
   assert.equal(errorText(errorMessages.fileTooLarge), "Файл слишком большой: не более 2 МиБ.");
   assert.match(notes.noNotifications, /Уведомления/);
@@ -279,11 +279,11 @@ test("week dividers start every run of lessons in one Monday–Sunday week", () 
     at("31.12.2026 09:00"), at("01.01.2027 09:00"), at("31.02.2026 09:00"),
   ]);
   assert.deepEqual(h.map((x) => x && [x.label, x.countText]), [
-    ["31.08–06.09", "2 занятия"], null, ["07.09–13.09", "1 занятие"], null, ["07.09–13.09", "1 занятие"],
-    ["28.12–03.01", "2 занятия"], null, null,
+    ["31.08–06.09", "2 пары"], null, ["07.09–13.09", "1 пара"], null, ["07.09–13.09", "1 пара"],
+    ["28.12–03.01", "2 пары"], null, null,
   ]);
   assert.deepEqual(weekHeaders([]), []);
-  assert.equal(weekHeaders(Array(5).fill(at("14.10.2026 09:00")))[0].countText, "5 занятий");
+  assert.equal(weekHeaders(Array(5).fill(at("14.10.2026 09:00")))[0].countText, "5 пар");
 });
 
 // 12:00 on Friday 16.10.2026 in Moscow (UTC+3), 16:00 in Novosibirsk (UTC+7).

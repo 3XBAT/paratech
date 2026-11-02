@@ -28,7 +28,7 @@ test("waiting jobs say what they wait for and that they go on by themselves", ()
       const v = jobStatusView(job(s));
       return [v.kind, v.label];
     }),
-    [["wait", "Ждёт зарядку"], ["net", "Ждёт интернет"], ["wait", "Минуты обработки закончились"]],
+    [["wait", "Ждёт зарядки"], ["net", "Ждёт интернет"], ["wait", "Ждёт пополнения минут"]],
   );
   assert.match(jobStatusView(job("WAITING_FOR_NETWORK")).hint, /само/);
   assert.match(jobStatusView(job("WAITING_FOR_POWER")).hint, /сама после подключения питания/);

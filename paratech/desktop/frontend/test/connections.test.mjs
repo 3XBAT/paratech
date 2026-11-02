@@ -254,7 +254,7 @@ test("every field code of the Go use case has a place on the page", () => {
   const placed = [...hubFields, ...mailFields.map((f) => f.code)];
   assert.deepEqual([...placed].sort(), [...codes].sort());
   assert.deepEqual(mailFields.map((f) => f.label), [
-    "Адрес получателя домашки", "SMTP-сервер", "Порт", "Режим TLS", "Логин (адрес почты)",
+    "Адрес получателя заданий", "SMTP-сервер", "Порт", "Режим TLS", "Логин (адрес почты)",
   ]);
 
   const errors = [
@@ -523,7 +523,7 @@ test("the Hub section is «Конспекты и задания» with the key h
   assert.equal(overviewTexts.lead, "Конспекты и задания, почта и Google Календарь");
   assert.match(overviewTexts.hubHint, /выдаёт автор приложения/);
   assert.match(overviewTexts.hubHint, /не ключ Claude или ChatGPT/);
-  assert.match(overviewTexts.hubHint, /Распознавание речи всегда идёт на этом компьютере/);
+  assert.match(overviewTexts.hubHint, /Расшифровка всегда идёт на этом компьютере/);
   const page = src("../src/pages/ConnectionsPage.tsx");
   // The card of the section page carries the title, and the hint is its first line.
   assert.match(

@@ -177,11 +177,11 @@ test("the list shows the chip «ваш конспект» on note-only lectures 
   assert.ok(e.includes("&lt;script&gt;"));
 });
 
-test("a subject known only from notes is listed with the chip text instead of «0 занятий»", () => {
+test("a subject known only from notes is listed with the chip text instead of «0 пар»", () => {
   assert.equal(subjectMeta(subject()), "ваш конспект");
   const html = renderToStaticMarkup(h(SubjectList, { subjects: [subject()], onOpen: () => undefined }));
   assert.ok(html.includes("Физика"));
-  assert.ok(!html.includes("0 занятий"));
+  assert.ok(!html.includes("0 пар"));
 });
 
 // ---- Ordering ----
@@ -307,7 +307,7 @@ test("«Добавить конспект прошедшей пары» is off w
   const off = renderToStaticMarkup(h(AddPastNote, { subject: subject({ subjectId: "" }), lectures: [], onChoose: () => undefined }));
   assert.ok(off.includes(noteLectureTexts.addPast));
   assert.match(off, /<button[^>]*disabled/);
-  assert.ok(off.includes("Предмет занятия не найден в библиотеке"));
+  assert.ok(off.includes("Предмет пары не найден в библиотеке"));
   const noSubj = renderToStaticMarkup(h(AddPastNote, { subject: subject({ subjectId: "", noSubject: true }), lectures: [], onChoose: () => undefined }));
   assert.ok(noSubj.includes("не найден предмет в библиотеке"));
   const on = renderToStaticMarkup(h(AddPastNote, { subject: subject(), lectures: [lesson()], onChoose: () => undefined, today: "2026-10-27" }));

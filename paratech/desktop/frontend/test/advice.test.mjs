@@ -314,7 +314,7 @@ test("a silent recording says «Запись без звука» and offers the 
   assert.deepEqual([v.status.label, v.status.kind, v.status.icon], ["Запись без звука", "wait", "warn"]);
   assert.equal(
     v.status.hint,
-    "В записи нет звука — скорее всего, был выбран не тот источник. Проверьте звук перед следующим занятием.",
+    "В записи нет звука — скорее всего, был выбран не тот источник. Проверьте звук перед следующей парой.",
   );
   assert.equal(chainStatusView(silent, 0).label, silentTexts.label);
   assert.deepEqual(v.action, { kind: "open", page: "diagnostics", label: "Проверить звук" });

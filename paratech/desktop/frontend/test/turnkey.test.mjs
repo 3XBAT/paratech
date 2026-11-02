@@ -270,9 +270,9 @@ test("a failed answer keeps the card and shows the problem of the reader call", 
   assert.ok(!out.includes(turnkeyTexts.triageStart));
   // A stored triage without a problem: no attempt made, only «Разобрать задание» without the old line.
   const stored = render(work({ status: "triage" }));
-  assert.ok(stored.includes("Разобрать задание") && !stored.includes("Попробовать снова"));
+  assert.ok(stored.includes("Разобрать задание") && !stored.includes("Повторить"));
   assert.ok(!stored.includes("ещё не разобрано") && !stored.includes("Повторить"));
-  assert.equal(turnkeyTexts.retry, "Попробовать снова");
+  assert.equal(turnkeyTexts.retry, "Повторить");
   const err = render(work({ status: "questions", questionRound: 1, questions: [choice] }), fakeApi(), { error: "Не удалось выполнить. Попробуйте ещё раз.", onError: noop });
   assert.ok(err.includes('role="alert"') && err.includes("Не удалось выполнить"));
   assert.ok(render(work({ status: "failed" })).includes(turnkeyTexts.failedText));

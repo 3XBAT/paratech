@@ -30,7 +30,7 @@ export const maxErrorPollMs = 30000;
 export type SummaryOffer = "main" | "extra" | null;
 
 /**
- * Whether a row of «Записи и задачи» offers «Открыть конспект», from the chain the list already has (no call per row).
+ * Whether a row of «Записи» offers «Открыть конспект», from the chain the list already has (no call per row).
  * Main: the chain is done or at the lecture text, or only the homework search or the lecture text failed. Extra: the summary is queued,
  * running or failed, so the page shows why and keeps the place for «Повторить».
  */

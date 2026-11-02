@@ -53,10 +53,10 @@ export const workTexts = {
   approveHint: "Разделы можно переименовать, переставить, добавить или убрать.",
   approve: "Утвердить план",
   savePlan: "Сохранить план",
-  blockedText: "Не удалось написать раздел. Можно сгенерировать заново.",
+  blockedText: "Не удалось написать раздел. Можно написать заново.",
   blockedOutlineText: "Не удалось составить план. Можно составить заново.",
   noteLabel: "Дополнительные указания",
-  regenerate: "Сгенерировать заново",
+  regenerate: "Написать заново",
   doneCaption: "Работа готова",
   generated: "Сгенерировано — прочитайте перед сдачей",
   verify: "проверить источник",
@@ -70,7 +70,6 @@ export const workTexts = {
   section: "Раздел",
   slideNotes: "Заметки докладчика",
   questionsCaption: "Вероятные вопросы",
-  answerLabel: "Ответ",
   openTalk: "Открыть текст выступления",
   todoCaption: "Что доделать самому",
   todoDepends: "Выводы зависят от ваших данных",
@@ -582,7 +581,7 @@ export function noteOf(raw: string): string {
 }
 
 /**
- * The section «Сгенерировать заново» of a blocked work sends: 0 (the plan) only when there are no sections; otherwise
+ * The section «Написать заново» of a blocked work sends: 0 (the plan) only when there are no sections; otherwise
  * the first section not written yet, and 0 if every one is written.
  */
 export function blockedNumber(w: WorkWriting): number {

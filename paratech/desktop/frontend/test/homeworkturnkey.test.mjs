@@ -36,7 +36,8 @@ function hasType(el, type) {
 test("without a work the block shows the caption and the button, and no card", () => {
   const out = renderToStaticMarkup(view({ phase: "none", error: "" }));
   assert.match(out, /Сделать под ключ/);
-  assert.match(out, /Разбор задания и вопросы, затем работа или презентация файлом/);
+  assert.match(out, /paratech задаст 1–2 вопроса и напишет работу файлом \(Word или PowerPoint\)\. Разбор расходует минуты обработки\./);
+  assert.match(out, />Начать разбор</);
   assert.match(out, /<button/);
   assert.doesNotMatch(out, /disabled/);
   assert.doesNotMatch(out, /платн/i);

@@ -96,7 +96,7 @@ test("one status per stage, in the order of the chain", () => {
   assert.deepEqual([at({ stage: "transcribing", progressPercent: 64 }).label, at({ stage: "transcribing", progressPercent: 64 }).value],
     ["Расшифровка", "64 %"]);
   assert.equal(at({ stage: "transcribing" }).value, "");
-  assert.equal(at({ stage: "summarizing" }).label, "Краткое содержание");
+  assert.equal(at({ stage: "summarizing" }).label, "Конспект");
   assert.deepEqual([at({ stage: "done" }).label, at({ stage: "done" }).kind], ["Конспект готов", "ok"]);
   assert.equal(recordingRowView(row({ stage: "transcribing", progressPercent: 64 }), 0).progress, 64);
   assert.equal(recordingRowView(row({ stage: "queued", progressPercent: 64 }), 0).progress, null);
@@ -107,10 +107,10 @@ test("a queued chain says why it waits and which step is next", () => {
     const v = chainStatusView(row({ stage: "queued", step: "summary", queueReason: reason }), 0);
     const label = ownLabelReasons.includes(reason) ? queueReasonLabels[reason] : `В очереди · ${queueReasonTexts[reason]}`;
     assert.equal(v.label, label, reason);
-    assert.equal(v.hint, `Дальше краткое содержание. ${queueReasonHints[reason]}`, reason);
+    assert.equal(v.hint, `Дальше конспект. ${queueReasonHints[reason]}`, reason);
   }
   const power = chainStatusView(row({ stage: "queued", step: "transcription", queueReason: "power" }), 0);
-  assert.deepEqual([power.label, power.kind, power.icon], ["В очереди · ждёт питания от сети", "wait", "plug"]);
+  assert.deepEqual([power.label, power.kind, power.icon], ["В очереди · ждёт зарядки", "wait", "plug"]);
   assert.match(power.hint, /^Дальше расшифровка\./);
   assert.equal(chainStatusView(row({ stage: "queued", queueReason: "network" }), 0).kind, "net");
 });
@@ -121,7 +121,7 @@ test("a summary service problem is named by the core's reason, not by no network
   assert.deepEqual([v.status.label, v.status.kind, v.status.icon], ["Сервис конспектов не настроен", "wait", "warn"]);
   assert.equal(
     v.status.hint,
-    "Дальше краткое содержание. Укажите адрес и ключ в «Подключения» → «Конспекты и задания». Запись сохранена.",
+    "Дальше конспект. Укажите адрес и ключ в «Подключения» → «Конспекты и задания». Запись сохранена.",
   );
   assert.deepEqual(v.action, { kind: "open", page: "connections", label: "Открыть подключения" });
   const offHtml = render(off);
@@ -132,13 +132,13 @@ test("a summary service problem is named by the core's reason, not by no network
 
   const down = recordingRowView(row({ stage: "queued", step: "summary", queueReason: "serviceUnavailable", jobError: "hub: unavailable" }), 0);
   assert.deepEqual([down.status.label, down.status.kind, down.status.icon], ["Сервис конспектов недоступен", "wait", "clock"]);
-  assert.equal(down.status.hint, "Дальше краткое содержание. Повторим автоматически.");
+  assert.equal(down.status.hint, "Дальше конспект. Повторим автоматически.");
   assert.equal(down.action, null);
 
   // Only the reason decides: a network error text does not turn a service reason into no network, nor the reverse.
   const net = chainStatusView(row({ stage: "queued", step: "summary", queueReason: "network", jobError: "hub: not configured" }), 0);
-  assert.deepEqual([net.label, net.kind], ["В очереди · нет сети", "net"]);
-  assert.equal(net.hint, "Дальше краткое содержание. Продолжится само, как только появится сеть.");
+  assert.deepEqual([net.label, net.kind], ["В очереди · ждёт интернет", "net"]);
+  assert.equal(net.hint, "Дальше конспект. Продолжится само, как только появится сеть.");
 });
 
 test("a failed chain names what failed and offers the core's action", () => {
@@ -175,7 +175,7 @@ test("a failed post-processing offers «Повторить», also next to the c
   assert.equal(recordingRowView(row({ stage: "summarizing" }), 0).retry, null);
 
   // The retry is the round icon button next to the chip (TASK-096): its name is in aria-label and title.
-  const label = 'aria-label="Повторить краткое содержание"';
+  const label = 'aria-label="Повторить конспект"';
   const html = render(retry, { onRetry: () => undefined });
   assert.ok(html.includes(label));
   assert.ok(!html.includes(">Повторить<"), "no text button");
@@ -189,7 +189,7 @@ test("a failed post-processing offers «Повторить», also next to the c
 
 test("«Повторить» is a round icon button by the chip, named by the work, busy while it runs (TASK-096)", () => {
   assert.deepEqual(retryLabels, {
-    summary: "Повторить краткое содержание",
+    summary: "Повторить конспект",
     homework: "Повторить поиск заданий",
     lectureText: "Повторить текст лекции",
   });
@@ -213,7 +213,7 @@ test("«Повторить» is a round icon button by the chip, named by the wo
   assert.match(html, /<span class="st-head"><span class="chip s-fail"[^]*?<\/span><\/span><button[^>]*aria-label="Повторить текст лекции"/);
 
   const busy = render(failed("summary"), { onRetry: () => undefined, retrying: true })
-    .match(/<button[^>]*aria-label="Повторить краткое содержание"[^>]*>/)?.[0] ?? "";
+    .match(/<button[^>]*aria-label="Повторить конспект"[^>]*>/)?.[0] ?? "";
   assert.ok(busy.includes("disabled") && busy.includes('aria-busy="true"'), busy);
 });
 
@@ -330,7 +330,7 @@ test("the row renders the lesson title and notes as text and only the offered bu
 
   const waiting = render(row({ stage: "queued", step: "transcription", queueReason: "power", action: "runNow", actionJobId: "j1" }));
   assert.ok(waiting.includes("Запустить сейчас"));
-  assert.ok(waiting.includes("В очереди · ждёт питания от сети"));
+  assert.ok(waiting.includes("В очереди · ждёт зарядки"));
 
   const noop = () => undefined;
   assert.ok(render(row(), { onOpenSummary: noop, onOpenTranscript: noop }).includes(">Открыть конспект<"), "the texts when the page opens them");
@@ -574,17 +574,17 @@ test("recording and task rows share one grid: fixed status, button and «⋯» t
   assert.equal(page.split('className="card arows"').length - 1, 1, "every group of both sections uses the one card");
   assert.ok(!page.includes('"card rows"'), "no per-card subgrid");
   assert.match(page, /renderContainer=\{card\}/);
-  assert.match(page, /<h2 className="group-title">Записи<\/h2>/);
-  assert.match(page, /<h2 className="group-title">Задачи<\/h2>/);
+  assert.match(page, /<h1>Записи<\/h1>/);
+  assert.match(page, /<h2 className="group-title">Фоновая обработка<\/h2>/);
   assert.match(page, /sectionGroups\("recordings", "записи", groups\.recordings, recordingRow\)/);
-  assert.match(page, /sectionGroups\("tasks", "задачи", groups\.tasks, jobRow\)/);
+  assert.match(page, /sectionGroups\("tasks", "фоновая обработка", groups\.tasks, jobRow\)/);
   // The two «Завершённые» toggles have distinct accessible names: a hidden word after the title.
   assert.match(page, /Завершённые<span className="vh"> \{name\}<\/span>/);
-  // No «Записи» heading right above the empty state's own heading.
-  assert.match(page, /\{!noRecordings && <h2 className="group-title">Записи<\/h2>\}/);
+  // The page title is «Записи»: no second «Записи» heading under it (TASK-344).
+  assert.doesNotMatch(page, /<h2 className="group-title">Записи<\/h2>/);
   assert.match(page, /\) : noRecordings \? \(\s*<EmptyState/);
   assert.match(page, /<h3 className="arows-sub">Идут<\/h3>/);
-  assert.match(page, /<p className="muted arows-empty">\{tasksEmptyText\}<\/p>/, "an empty «Задачи» has a short hint");
+  assert.match(page, /<p className="muted arows-empty">\{tasksEmptyText\}<\/p>/, "an empty «Фоновая обработка» has a short hint");
   assert.ok(!page.includes("attempts"), "the page shows no attempts");
 
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
@@ -630,7 +630,7 @@ test("the retry hints name the round arrow by the status (TASK-096)", () => {
 });
 
 test("the selection checkbox has its own grid column: on the title's first line, the meta under the title (TASK-111)", () => {
-  const title = "Очень длинное название занятия, которое переносится на вторую строку в узком окне";
+  const title = "Очень длинное название пары, которое переносится на вторую строку в узком окне";
   const html = render(row({ title, durationSeconds: 3600, hasDuration: true }), { onDelete() {}, onSelect() {} });
   assert.match(
     html,

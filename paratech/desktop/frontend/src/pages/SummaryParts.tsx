@@ -147,14 +147,14 @@ export function NoSpeechCard(props: { view: SummaryView; onCheckSound?: () => vo
   );
 }
 
-/** The homework found in the lesson, each with a jump to it in «Домашние задания». */
+/** The homework found in the lesson, each with a jump to it in «Задания». */
 export function HomeworkCard(props: RetryProps & { view: SummaryView; onOpenAssignment: (id: string) => void }) {
   const v = props.view;
   const line = homeworkLine(v);
   const items = v.homework.assignments;
   return (
     <div className="sm-homework">
-      <h2 className="group-title">Домашние задания</h2>
+      <h2 className="group-title">Задания</h2>
       {line && <Line line={line} />}
       <RetrySlot {...props} step="homework" />
       {items.length > 0 && (

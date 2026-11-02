@@ -128,7 +128,7 @@ test("every generation state has a chip; waiting and failed ones show the core's
   }
   assert.deepEqual(
     generationStates.map((state) => generationView({ state, message: "" }).label),
-    ["Готовим черновик…", "Ждёт интернет", "Лимит обработки исчерпан", "Черновик не готов", "Черновик готов"],
+    ["Готовим черновик…", "Ждёт интернет", "Ждёт пополнения минут", "Черновик не готов", "Черновик готов"],
   );
   const text = "Нет связи с сервисом конспектов: проверьте интернет и адрес в разделе «Подключения». Генерация продолжится сама.";
   assert.equal(generationView({ state: "waitingNetwork", message: text }).hint, text);
@@ -183,12 +183,12 @@ test("while a draft is prepared, generate and the instructions are off with «Г
   assert.equal(generatingLabel, "Готовим черновик…");
   const base = { hasDraft: true, generating: false, olderShown: false, dirty: false };
   assert.deepEqual(generateOffer(base), {
-    label: "Сгенерировать заново",
+    label: "Написать заново",
     disabled: false,
     reason: undefined,
     instructionDisabled: false,
   });
-  assert.equal(generateOffer({ ...base, hasDraft: false }).label, "Сгенерировать ДЗ");
+  assert.equal(generateOffer({ ...base, hasDraft: false }).label, "Написать черновик");
   const running = generateOffer({ ...base, generating: true });
   assert.equal(running.disabled, true);
   assert.equal(running.instructionDisabled, true);
@@ -259,7 +259,7 @@ test("formats: versions, deadlines, sizes", () => {
   assert.equal(versionTitle({ number: 3, source: "edited" }), "Версия 3 · исправлена вручную");
   assert.equal(versionTitle({ number: 1, source: "generated" }), "Версия 1 · сгенерирована");
   assert.equal(dueText(""), "Без срока");
-  assert.match(dueText("2026-09-18T15:00:00Z"), /^до \d/);
+  assert.match(dueText("2026-09-18T15:00:00Z"), /^до [а-я]{2}, \d{1,2} [а-я.]+, \d{2}:\d{2}$/);
   assert.equal(sizeText(1), "1 байт");
   assert.equal(sizeText(3), "3 байта");
   assert.equal(sizeText(800), "800 байт");

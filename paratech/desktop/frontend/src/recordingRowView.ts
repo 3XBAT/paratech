@@ -1,4 +1,4 @@
-// One row of «Записи и задачи» per recording (TASK-076): the title, the time and the one status of the whole chain the
+// One row of «Записи» per recording (TASK-076): the title, the time and the one status of the whole chain the
 // Go core derives (stage, queue reason, error, action). Texts and looks only: the stage and the offered action are the
 // core's (ARCH-44).
 
@@ -18,6 +18,7 @@ import { remainingText } from "./durationEstimate.js";
 import type { PageId } from "./nav.js";
 import { plural } from "./plural.js";
 import type { StatusView } from "./statusPresentation.js";
+import { waitingInline } from "./statusWords.js";
 import { rowSummaryOffer, type SummaryOffer } from "./summaryView.js";
 import { rowOffersTranscript } from "./transcriptView.js";
 import type { IconName } from "./ui/Icon.js";
@@ -33,7 +34,7 @@ export const stageLabels: Readonly<Record<ChainStage, string>> = {
   saving: "Сохраняется",
   queued: "В очереди",
   transcribing: "Расшифровка",
-  summarizing: "Краткое содержание",
+  summarizing: "Конспект",
   lectureText: "Текст лекции…",
   done: "Конспект готов",
   failed: "Ошибка",
@@ -71,9 +72,9 @@ type OwnLabelReason = "serviceNotConfigured" | "serviceUnavailable";
 export const queueReasonTexts: Readonly<Record<Exclude<QueueReason, "" | OwnLabelReason>, string>> = {
   inLine: "ждёт очереди",
   retry: "повтор позже",
-  power: "ждёт питания от сети",
-  network: "нет сети",
-  quota: "лимит исчерпан",
+  power: waitingInline("power"),
+  network: waitingInline("network"),
+  quota: waitingInline("quota"),
 };
 
 /** The whole chip for the reasons that replace «В очереди · …». */
@@ -88,7 +89,7 @@ export const queueReasonHints: Readonly<Record<Exclude<QueueReason, "">, string>
   retry: "Не получилось, повторится само.",
   power: "Ноутбук на батарее. Начнётся само после подключения питания.",
   network: "Продолжится само, как только появится сеть.",
-  quota: "Лимит обработки исчерпан. Продолжится, когда он пополнится. Запись сохранена.",
+  quota: "Продолжится, когда минуты обработки пополнятся. Запись сохранена.",
   // The chip already names the service; the hint only says what to do.
   serviceNotConfigured: "Укажите адрес и ключ в «Подключения» → «Конспекты и задания». Запись сохранена.",
   serviceUnavailable: "Повторим автоматически.",
@@ -108,22 +109,22 @@ const queueReasonLooks: Readonly<Record<Exclude<QueueReason, "">, Look>> = {
 /** The step a queued chain waits with, as the start of its hint. */
 export const stepTexts: Readonly<Record<Exclude<ChainStep, "">, string>> = {
   transcription: "Дальше расшифровка.",
-  summary: "Дальше краткое содержание.",
+  summary: "Дальше конспект.",
   lectureText: "Дальше текст лекции.",
 };
 
 export const errorTexts: Readonly<Record<Exclude<ChainErrorCode, "" | "silentRecording" | "noSpeech">, string>> = {
   recordingFailed: "Запись не удалась.",
   transcriptionFailed: "Не удалось расшифровать запись.",
-  summaryFailed: "Не удалось сделать краткое содержание.",
-  homeworkFailed: "Не удалось найти домашнее задание.",
+  summaryFailed: "Не удалось сделать конспект.",
+  homeworkFailed: "Не удалось найти задание.",
   lectureTextFailed: "Не удалось составить текст лекции.",
 };
 
 /** A silent recording (TASK-082) has its own chip instead of «Ошибка»: nothing failed, the source played nothing. */
 export const silentTexts = {
   label: "Запись без звука",
-  hint: "В записи нет звука — скорее всего, был выбран не тот источник. Проверьте звук перед следующим занятием.",
+  hint: "В записи нет звука — скорее всего, был выбран не тот источник. Проверьте звук перед следующей парой.",
 } as const;
 
 /** A transcript without speech (TASK-110): the same calm chip, the sound check and no retry. */
@@ -318,7 +319,7 @@ export function rowSecondaryAction(r: Pick<RecordingItem, "action" | "retryWork"
 
 /** The names of the round «Повторить» per work (TASK-096). */
 export const retryLabels: Readonly<Record<Exclude<RetryWork, "">, string>> = {
-  summary: "Повторить краткое содержание",
+  summary: "Повторить конспект",
   homework: "Повторить поиск заданий",
   lectureText: "Повторить текст лекции",
 };
@@ -462,8 +463,8 @@ export interface PageSection<T> {
 }
 
 /**
- * What «Записи и задачи» shows (TASK-098): «Записи» (a recording with its whole chain) and «Задачи» (drafts, emails,
- * calendar sync and other jobs without a recording), each with its own groups.
+ * What «Записи» shows (TASK-098): the recordings (a recording with its whole chain) and the background processing
+ * (drafts, emails, calendar sync and other jobs without a recording), each with its own groups.
  */
 export interface PageGroups {
   recordings: PageSection<RecordingItem>;
@@ -532,8 +533,8 @@ export function pageGroups(recordings: readonly RecordingItem[], jobs: readonly 
   };
 }
 
-/** The hint of an empty «Задачи». */
-export const tasksEmptyText = "Здесь появятся решения домашних заданий, письма и синхронизация календаря.";
+/** The hint of an empty «Фоновая обработка». */
+export const tasksEmptyText = "Здесь появятся решения заданий, письма и синхронизация календаря.";
 
 /** What a task row does besides the round retry: «Запустить сейчас» and «Открыть задание». */
 export type JobItemKey = "runNow" | "assignment";

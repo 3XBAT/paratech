@@ -150,7 +150,7 @@ export function changeParts(c: ImportChange): Part[] {
 }
 
 export function conflictParts(c: ImportConflict): Part[] {
-  const other = c.withLine > 0 ? `со строкой ${c.withLine}: ` : "с занятием в расписании: ";
+  const other = c.withLine > 0 ? `со строкой ${c.withLine}: ` : "с парой в расписании: ";
   return [
     fixed(`строка ${c.line}: `),
     ...lessonParts(c.lesson),
@@ -265,7 +265,7 @@ export function weekHeaders(lessons: readonly { start: string }[]): (WeekHeader 
     while (i + n < weeks.length && weeks[i + n]?.key === w.key) {
       n++;
     }
-    out[i] = { label: w.label, count: n, countText: `${n} ${plural(n, "занятие", "занятия", "занятий")}` };
+    out[i] = { label: w.label, count: n, countText: `${n} ${plural(n, "пара", "пары", "пар")}` };
   }
   return out;
 }
@@ -438,7 +438,7 @@ export function lessonTime(start: string, end: string): string {
 }
 
 export function windowText(w: ImportWindow): string {
-  return `Импортируются занятия с ${w.from} до ${w.to}; удаляются только занятия внутри этого периода.`;
+  return `Импортируются пары с ${w.from} до ${w.to}; удаляются только пары внутри этого периода.`;
 }
 
 export function resultText(r: ImportResult): string {
@@ -451,7 +451,7 @@ export const notes = {
   allDay: "События на весь день в ICS пропускаются: они не импортируются.",
   uid:
     "CSV и XLSX: первая строка — заголовок с колонками title, date (ГГГГ-ММ-ДД), start и end (ЧЧ:ММ), timezone " +
-    "(например Europe/Moscow) и uid. Без uid изменение названия, даты или начала занятия выглядит как «удалено + добавлено».",
+    "(например Europe/Moscow) и uid. Без uid изменение названия, даты или начала пары выглядит как «удалено + добавлено».",
   details:
     "Необязательные колонки: subject (предмет), kind (тип: лекция, семинар, практика или лабораторная; можно " +
     "сокращённо и по-английски — «лек.», «сем», «пр», «лаб», lecture, lab) и teacher (преподаватель). Пустая ячейка " +
@@ -460,7 +460,7 @@ export const notes = {
     "ICS: предмет и тип берутся из названия события, преподаватель — из строки «Преподаватель: …» в описании или " +
     "из организатора.",
   filledDetails:
-    "Занятия, загруженные раньше, показываются изменёнными: импорт дополнит их предметом, типом и преподавателем.",
+    "Пары, загруженные раньше, показываются изменёнными: импорт дополнит их предметом, типом и преподавателем.",
   noNotifications: "Уведомления об импорте не показываются.",
   rowErrors: "Ничего не будет записано: исправьте ошибки в файле и выберите его снова.",
   noChanges: "Изменений нет: расписание уже совпадает с файлом.",
