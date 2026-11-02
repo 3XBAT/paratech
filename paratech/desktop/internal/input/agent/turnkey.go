@@ -38,7 +38,8 @@ type Turnkey interface {
 // work's ID, where it stands, the feasibility enum and the number of waiting questions, never a text (ADR-0022);
 // the panel gets a work card that the turnkey binding fills. A work this call created is undone by removing it while
 // the student has not touched it; an existing work is not this action's (no Undo). A reader call that did not finish
-// leaves the work with its call due: outcome «pending», not a failure of the action.
+// leaves the work with its call due: outcome «pending», journaled as this action's (Undo removes the work), but an
+// is_error result for the planner (values.TriageResult): nothing started for the student.
 func (a *Actions) triage(call values.Call) (prepared, error) {
 	if a.turnkey == nil {
 		return prepared{}, errUnavailable
