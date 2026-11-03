@@ -75,8 +75,6 @@ type Core struct {
 	// «Открыть в Word / PowerPoint» of a library file (TASK-177): the artifact store keeps the copy, Opener starts it.
 	MaterialViews MaterialViews
 	Opener        FileOpener
-	// «Подключиться» (TASK-364): opens the call link kept on a subject.
-	CallLinks CallLinkOpener
 	// The page of a subject (TASK-225): «Ближайшее», the schedule line, the lessons and the «новое» marks.
 	SubjectOverview SubjectOverviewUseCase
 	// «Мой конспект» (TASK-151): the shell shows its open dialog and routes a drop on a lecture; Files reads the files.
@@ -293,8 +291,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.Knowledge == nil {
 		return Services{}, errors.New("wails: open core: no knowledge base")
 	}
-	if core.Library == nil || core.MaterialViews == nil || core.Opener == nil || core.SubjectOverview == nil ||
-		core.CallLinks == nil {
+	if core.Library == nil || core.MaterialViews == nil || core.Opener == nil || core.SubjectOverview == nil {
 		return Services{}, errors.New("wails: open core: no library")
 	}
 	if core.Notes == nil {
@@ -324,7 +321,7 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
 	lib := NewLibraryService(core.Library, materialPickerFunc(s.pickMaterialFile), core.Files, s.opts.Log).
-		withOpener(core.MaterialViews, core.Opener).withOverview(core.SubjectOverview).withCallLinkOpener(core.CallLinks)
+		withOpener(core.MaterialViews, core.Opener).withOverview(core.SubjectOverview)
 	return Services{
 		Settings: NewSettingsService(core.Settings, s.opts.Log).withSpeed(core.Speed),
 		Activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, core.Retrier, s.opts.Log),

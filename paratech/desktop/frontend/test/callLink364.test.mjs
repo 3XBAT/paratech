@@ -6,11 +6,13 @@ import { readFileSync } from "node:fs";
 import {
   callLinkOpenProblems,
   callLinkProblems,
+  createWithCallLinkProblems,
   libraryApi,
   methods,
   parseCallLink,
   parseCallLinkOpen,
   parseCallLinkResult,
+  parseCreateWithCallLink,
   parseSubject,
 } from "../.test-build/bindings/library.js";
 import { parseLesson } from "../.test-build/bindings/today.js";
@@ -89,6 +91,56 @@ test("problem codes are read as they are; an unknown, malformed or failed reply 
   assert.deepEqual(await api.setSubjectCallLink("s1", "x"), { problem: "failed", subject: null });
   assert.deepEqual(await api.clearSubjectCallLink("s1"), { problem: "failed", subject: null });
   assert.deepEqual(await api.openSubjectCallLink("s1"), { problem: "failed" });
+});
+
+test("createSubjectWithCallLink: the name and the link cross in one call; the problems match the Go binding", async () => {
+  const go = readFileSync(new URL("../../internal/input/wails/library_calllink.go", import.meta.url), "utf8");
+  const discardGo = readFileSync(new URL("../../internal/input/wails/library_discard.go", import.meta.url), "utf8");
+  const value = (src, name) => src.match(new RegExp(`${name}\\s*=\\s*"([^"]*)"`))[1];
+  assert.deepEqual(
+    [...createWithCallLinkProblems].sort(),
+    ["", value(go, "callLinkInvalid"), value(go, "callLinkInvalidName"), value(go, "callLinkNameTaken"),
+      value(discardGo, "RemovedNameTaken"), value(go, "callLinkFailed")].sort(),
+  );
+  assert.equal(methods.createSubjectWithCallLink, "paratech/desktop/internal/input/wails.LibraryService.CreateSubjectWithCallLink");
+  for (const field of ["problem", "subject", "removedSubjectId", "removedVersion"]) {
+    assert.match(go, new RegExp(`json:"${field}"`), field);
+  }
+
+  const calls = [];
+  const api = libraryApi(async (method, ...args) => {
+    calls.push([method, ...args]);
+    return { problem: "", subject: subject({ version: 1 }), removedSubjectId: "", removedVersion: 0 };
+  });
+  const created = await api.createSubjectWithCallLink("Физика", " https://meet.example.org/j/1?pwd=FakePwd42 ");
+  assert.equal(created.problem, "");
+  assert.deepEqual(created.subject.callLink, link);
+  assert.equal(created.removed, null);
+  assert.deepEqual(calls, [[methods.createSubjectWithCallLink, "Физика", " https://meet.example.org/j/1?pwd=FakePwd42 "]]);
+});
+
+test("createSubjectWithCallLink replies: problems as they are, «Вернуть» data, anything malformed is «failed»", async () => {
+  const failed = { problem: "failed", subject: null, removed: null };
+  for (const problem of ["invalid", "invalid_name", "name_taken", "failed"]) {
+    assert.deepEqual(parseCreateWithCallLink({ problem, subject: subject() }), { problem, subject: null, removed: null }, problem);
+  }
+  assert.deepEqual(
+    parseCreateWithCallLink({ problem: "removed_name_taken", subject: null, removedSubjectId: "s9", removedVersion: 4 }),
+    { problem: "removed_name_taken", subject: null, removed: { subjectId: "s9", version: 4 } },
+  );
+  for (const raw of [
+    null, undefined, "", [], {}, { problem: "toString" }, { problem: "weird" }, { problem: 0 }, { problem: "" },
+    { problem: "", subject: { id: 1 } }, { problem: "removed_name_taken" },
+    { problem: "removed_name_taken", removedSubjectId: "", removedVersion: 4 },
+    { problem: "removed_name_taken", removedSubjectId: "s9", removedVersion: 0 },
+    { problem: "removed_name_taken", removedSubjectId: "s9", removedVersion: -1 },
+  ]) {
+    assert.deepEqual(parseCreateWithCallLink(raw), failed, JSON.stringify(raw));
+  }
+  const api = libraryApi(async () => {
+    throw new Error("boom");
+  });
+  assert.deepEqual(await api.createSubjectWithCallLink("Физика", "x"), failed);
 });
 
 test("a lesson of «Сегодня» carries its library subject and the host of its link; an older shape has none", () => {

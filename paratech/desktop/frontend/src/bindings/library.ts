@@ -28,6 +28,7 @@ export const methods = {
   setSubjectCallLink: `${service}.SetSubjectCallLink`,
   clearSubjectCallLink: `${service}.ClearSubjectCallLink`,
   openSubjectCallLink: `${service}.OpenSubjectCallLink`,
+  createSubjectWithCallLink: `${service}.CreateSubjectWithCallLink`,
   // TASK-311: subjects from the schedule.
   scheduleSubjects: `${service}.ScheduleSubjects`,
   createFromSchedule: `${service}.CreateFromSchedule`,
@@ -157,6 +158,31 @@ export const callLinkOpenProblems: readonly CallLinkOpenProblem[] = ["", "no_lin
 /** The reply of openSubjectCallLink. */
 export interface CallLinkOpen {
   problem: CallLinkOpenProblem;
+}
+
+/**
+ * The problems of createSubjectWithCallLink; with any of them nothing was created. "invalid": the link (checked first);
+ * "invalid_name": the name is empty or too long; "name_taken": another subject has the name; "removed_name_taken": a
+ * removed subject has it, «Вернуть» is restoreSubject(removed.subjectId, removed.version).
+ */
+export type CreateWithCallLinkProblem = "" | "invalid" | "invalid_name" | "name_taken" | "removed_name_taken" | "failed";
+
+export const createWithCallLinkProblems: readonly CreateWithCallLinkProblem[] = [
+  "",
+  "invalid",
+  "invalid_name",
+  "name_taken",
+  "removed_name_taken",
+  "failed",
+];
+
+/** The reply of createSubjectWithCallLink: the new subject with its link, or a problem and nothing created. */
+export interface CreateWithCallLink {
+  problem: CreateWithCallLinkProblem;
+  /** Set only when problem is "". */
+  subject: LibrarySubject | null;
+  /** Set only for "removed_name_taken". */
+  removed: RemovedName | null;
 }
 
 /** A teacher of a subject: personal data typed by the student, text nodes only. */
@@ -299,6 +325,34 @@ export function parseCallLinkOpen(raw: unknown): CallLinkOpen {
   return typeof problem === "string" && callLinkOpenProblems.includes(problem as CallLinkOpenProblem)
     ? { problem: problem as CallLinkOpenProblem }
     : { problem: "failed" };
+}
+
+/** Reads the reply of createSubjectWithCallLink; an unknown or malformed reply is "failed". */
+export function parseCreateWithCallLink(raw: unknown): CreateWithCallLink {
+  const failed: CreateWithCallLink = { problem: "failed", subject: null, removed: null };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return failed;
+  }
+  const r = raw as Record<string, unknown>;
+  const problem = r.problem;
+  if (typeof problem !== "string" || !createWithCallLinkProblems.includes(problem as CreateWithCallLinkProblem)) {
+    return failed;
+  }
+  if (problem === "") {
+    try {
+      return { problem: "", subject: parseSubject(r.subject), removed: null };
+    } catch {
+      return failed;
+    }
+  }
+  if (problem === "removed_name_taken") {
+    const version = safeCount(r.removedVersion);
+    if (typeof r.removedSubjectId !== "string" || r.removedSubjectId === "" || version === null || version === 0) {
+      return failed;
+    }
+    return { problem, subject: null, removed: { subjectId: r.removedSubjectId, version } };
+  }
+  return { problem: problem as CreateWithCallLinkProblem, subject: null, removed: null };
 }
 
 /** The teachers of a subject; a missing or malformed reply is null in every role. */
@@ -682,6 +736,11 @@ export interface LibraryApi {
   clearSubjectCallLink(subjectId: string): Promise<CallLinkResult>;
   /** «Подключиться»: only the subject ID crosses, the core reads the link and opens it; recording does not start. */
   openSubjectCallLink(subjectId: string): Promise<CallLinkOpen>;
+  /**
+   * A new subject of the current semester that keeps link as its call link (a lesson card of «Сегодня»): the core
+   * checks the link first and stores both in one save, so with a problem nothing exists. A failed call is "failed".
+   */
+  createSubjectWithCallLink(name: string, link: string): Promise<CreateWithCallLink>;
 }
 
 export function libraryApi(call: CallByName): LibraryApi {
@@ -752,6 +811,13 @@ export function libraryApi(call: CallByName): LibraryApi {
         return parseCallLinkOpen(await call(methods.openSubjectCallLink, subjectId));
       } catch {
         return parseCallLinkOpen(null);
+      }
+    },
+    createSubjectWithCallLink: async (name, link) => {
+      try {
+        return parseCreateWithCallLink(await call(methods.createSubjectWithCallLink, name, link));
+      } catch {
+        return parseCreateWithCallLink(null);
       }
     },
   };

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -119,6 +120,152 @@ func TestSetCallLinkSaveFailures(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), callLinkPwd) || strings.Contains(buf.String(), "bbb.example") {
 		t.Fatalf("the log holds the link: %s", buf)
+	}
+}
+
+// The subject is stored with the link in its one and only save; the name rules are those of CreateSubject.
+func TestCreateSubjectWithCallLink(t *testing.T) {
+	e, buf := newLoggingEnv(t)
+	ctx := context.Background()
+
+	got, err := e.svc.CreateSubjectWithCallLink(ctx, NewSubject{Name: "Физика"}, " "+callLink+" ")
+	if err != nil || got.CallLink().String() != callLink || got.Version() != 1 || got.Name().String() != "Физика" {
+		t.Fatalf("CreateSubjectWithCallLink = %v, %v", got, err)
+	}
+	stored, err := e.subjects.Get(ctx, got.ID())
+	if err != nil || stored.CallLink() != got.CallLink() || stored.Version() != 1 || len(stored.Folders()) != len(got.Folders()) {
+		t.Fatalf("stored %v, %v", stored, err)
+	}
+
+	// A taken name is refused as by CreateSubject; the link changes nothing about that.
+	if _, err := e.svc.CreateSubjectWithCallLink(ctx, NewSubject{Name: "физика"}, callLink); !errors.Is(err, ErrNameTaken) {
+		t.Fatalf("taken name = %v, want ErrNameTaken", err)
+	}
+	if _, err := e.svc.CreateSubjectWithCallLink(ctx, NewSubject{Name: "  "}, callLink); !errors.Is(err, ErrInvalidName) {
+		t.Fatalf("empty name = %v, want ErrInvalidName", err)
+	}
+	if strings.Contains(buf.String(), callLinkPwd) {
+		t.Fatalf("the log holds the link: %s", buf)
+	}
+}
+
+// A bad link is refused before anything is read, erased or stored.
+func TestCreateSubjectWithCallLinkRejectsTheLinkFirst(t *testing.T) {
+	ctx := context.Background()
+	for _, link := range []string{"", "javascript:alert(1)", "https://u:" + callLinkPwd + "@meet.example.org/"} {
+		t.Run(link, func(t *testing.T) {
+			e := newEnv(t)
+			purge := withExpired(e)
+			e.subjects.beforeSave = func() { t.Error("a subject was saved") }
+
+			_, err := e.svc.CreateSubjectWithCallLink(ctx, NewSubject{Name: "Физика"}, link)
+			if !errors.Is(err, ErrInvalidCallLink) || strings.Contains(err.Error(), callLinkPwd) {
+				t.Fatalf("CreateSubjectWithCallLink = %v, want ErrInvalidCallLink without the text", err)
+			}
+			// Also an invalid name: the link is told first.
+			if _, err := e.svc.CreateSubjectWithCallLink(ctx, NewSubject{Name: ""}, link); !errors.Is(err, ErrInvalidCallLink) {
+				t.Fatalf("bad name and link = %v, want ErrInvalidCallLink", err)
+			}
+			if list, _ := e.svc.Subjects(ctx); len(list) != 0 || purge.calls != 0 {
+				t.Fatalf("subjects %v, purges %d: something happened", list, purge.calls)
+			}
+		})
+	}
+}
+
+// A store that fails on the save leaves no subject: there is no state with the subject but without its link.
+func TestCreateSubjectWithCallLinkSaveFails(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	e.subjects.beforeSave = func() { e.subjects.err = errors.New("disk full") }
+
+	if _, err := e.svc.CreateSubjectWithCallLink(ctx, NewSubject{Name: "Физика"}, callLink); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("CreateSubjectWithCallLink on a failing store = %v", err)
+	}
+	e.subjects.err = nil
+	if list, err := e.svc.Subjects(ctx); err != nil || len(list) != 0 {
+		t.Fatalf("subjects after the failed save = %v, %v", list, err)
+	}
+}
+
+// fakeCallOpener records the links it was asked to open.
+type fakeCallOpener struct {
+	opened []string
+	err    error
+}
+
+func (f *fakeCallOpener) OpenSubjectCallLink(_ context.Context, l subject.CallLink) error {
+	f.opened = append(f.opened, l.String())
+	return f.err
+}
+
+func TestOpenCallLink(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	opener := &fakeCallOpener{}
+	e.svc.calls = opener
+	phys := createSubject(t, e, "Физика")
+
+	if err := e.svc.OpenCallLink(ctx, phys.ID()); !errors.Is(err, ErrNoCallLink) || len(opener.opened) != 0 {
+		t.Fatalf("no link: %v, opened %q", err, opener.opened)
+	}
+	if _, err := e.svc.SetCallLink(ctx, phys.ID(), callLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.OpenCallLink(ctx, phys.ID()); err != nil || len(opener.opened) != 1 || opener.opened[0] != callLink {
+		t.Fatalf("open = %v, opened %q", err, opener.opened)
+	}
+
+	// The link is read again at each click: one cleared meanwhile opens nothing.
+	if _, err := e.svc.ClearCallLink(ctx, phys.ID()); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.OpenCallLink(ctx, phys.ID()); !errors.Is(err, ErrNoCallLink) || len(opener.opened) != 1 {
+		t.Fatalf("after the clear: %v, opened %q", err, opener.opened)
+	}
+}
+
+func TestOpenCallLinkFailures(t *testing.T) {
+	ctx := context.Background()
+	refused := errors.New("weblink: the call link names an environment variable")
+	tests := []struct {
+		name   string
+		id     shared.SubjectID
+		setUp  func(e *env, o *fakeCallOpener)
+		want   error
+		opened int
+	}{
+		{"unknown subject", "nope", nil, ErrSubjectNotFound, 0},
+		{"bad id", "a b", nil, ErrInvalidRequest, 0},
+		{"storage", "", func(e *env, _ *fakeCallOpener) { e.subjects.err = errors.New("disk full") }, ErrUnavailable, 0},
+		{"opener refuses", "", func(_ *env, o *fakeCallOpener) { o.err = refused }, ErrCallLinkNotOpened, 1},
+		{"no opener", "", func(e *env, _ *fakeCallOpener) { e.svc.calls = nil }, ErrCallLinkNotOpened, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			opener := &fakeCallOpener{}
+			e.svc.calls = opener
+			phys := createSubject(t, e, "Физика")
+			if _, err := e.svc.SetCallLink(ctx, phys.ID(), callLink); err != nil {
+				t.Fatal(err)
+			}
+			id := tt.id
+			if id == "" {
+				id = phys.ID()
+			}
+			if tt.setUp != nil {
+				tt.setUp(e, opener)
+			}
+			err := e.svc.OpenCallLink(ctx, id)
+			if !errors.Is(err, tt.want) || len(opener.opened) != tt.opened {
+				t.Fatalf("OpenCallLink = %v, opened %q; want %v", err, opener.opened, tt.want)
+			}
+			if strings.Contains(err.Error(), callLinkPwd) || strings.Contains(err.Error(), "example") {
+				t.Fatalf("error %q holds the link", err)
+			}
+			if tt.name == "opener refuses" && !errors.Is(err, refused) {
+				t.Fatalf("the opener's error is not kept: %v", err)
+			}
+		})
 	}
 }
 

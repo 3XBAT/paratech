@@ -39,6 +39,13 @@ var (
 	// error never holds the typed text.
 	ErrInvalidCallLink = errors.New("library: invalid call link")
 
+	// ErrNoCallLink means OpenCallLink found no call link on the subject (any more): nothing was opened.
+	ErrNoCallLink = errors.New("library: the subject has no call link")
+
+	// ErrCallLinkNotOpened means the call link was refused by the opener or could not be handed to the system (or no
+	// opener is configured); it wraps the opener's error, which never holds the link.
+	ErrCallLinkNotOpened = errors.New("library: the call link was not opened")
+
 	// ErrSubjectChanged means the subject is no longer at the version the student saw: the page reloads it.
 	ErrSubjectChanged = errors.New("library: subject changed")
 

@@ -118,7 +118,8 @@ type LibraryUseCase interface {
 	ClearTeacher(ctx context.Context, id shared.SubjectID, role subject.TeacherRole, expectedVersion int64) (*subject.Subject, error)
 	SetCallLink(ctx context.Context, id shared.SubjectID, link string) (*subject.Subject, error)
 	ClearCallLink(ctx context.Context, id shared.SubjectID) (*subject.Subject, error)
-	CallLink(ctx context.Context, id shared.SubjectID) (subject.CallLink, error)
+	CreateSubjectWithCallLink(ctx context.Context, req library.NewSubject, link string) (*subject.Subject, error)
+	OpenCallLink(ctx context.Context, id shared.SubjectID) error
 }
 
 // MaterialFilePicker shows the native open dialog for a file of the library. It returns the chosen path, or "" when
@@ -209,8 +210,6 @@ type LibraryService struct {
 	files  MaterialFileReader
 	views  MaterialViews // «Открыть»: set by withOpener
 	opener FileOpener
-	// callLinks opens the call link of a subject (TASK-364): set by withCallLinkOpener.
-	callLinks CallLinkOpener
 	// overview is the page of a subject (TASK-225): set by withOverview.
 	overview SubjectOverviewUseCase
 	// schedule is subjects from the schedule (TASK-311): attached when uc has it, or by withSchedule.

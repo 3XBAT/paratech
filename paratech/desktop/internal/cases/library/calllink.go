@@ -2,6 +2,8 @@ package library
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
@@ -19,6 +21,42 @@ func (s *Service) SetCallLink(ctx context.Context, id shared.SubjectID, link str
 		changed, err := sub.SetCallLink(link, s.clock.Now())
 		return changed, domainError(err)
 	})
+}
+
+// CreateSubjectWithCallLink creates a subject that keeps link as its call link («Создать предмет» with the link typed
+// on a lesson card of «Сегодня»). The link is checked first: a bad one is ErrInvalidCallLink and nothing is created or
+// erased (CreateSubject may erase an expired removed subject that holds the name). Then the subject is created with
+// the link in one save, so there is never a subject without the link it was asked with. Otherwise it answers as
+// CreateSubject. Nothing is logged: the link may hold a meeting password.
+func (s *Service) CreateSubjectWithCallLink(ctx context.Context, req NewSubject, link string) (*subject.Subject, error) {
+	if _, err := subject.ParseCallLink(link); err != nil {
+		return nil, domainError(err)
+	}
+	return s.createSubject(ctx, req, func(sub *subject.Subject, now time.Time) error {
+		_, err := sub.SetCallLink(link, now)
+		return err
+	})
+}
+
+// OpenCallLink opens the call link of an active subject («Подключиться»). The caller sends only the subject: the link
+// is read again from storage at the click and handed to the CallOpener, which checks it once more (ADR-0032 «Opening
+// and copying»). A subject without one is ErrNoCallLink, a missing or removed one ErrSubjectNotFound, a refusal or a
+// failure of the opener ErrCallLinkNotOpened. Recording does not start.
+func (s *Service) OpenCallLink(ctx context.Context, id shared.SubjectID) error {
+	if s.calls == nil {
+		return fmt.Errorf("%w: no opener is configured", ErrCallLinkNotOpened)
+	}
+	l, err := s.CallLink(ctx, id)
+	switch {
+	case err != nil:
+		return err
+	case l.IsZero():
+		return ErrNoCallLink
+	}
+	if err := s.calls.OpenSubjectCallLink(ctx, l); err != nil {
+		return fmt.Errorf("%w: %w", ErrCallLinkNotOpened, err)
+	}
+	return nil
 }
 
 // ClearCallLink removes the link to the online class of a subject; a subject without one is returned unchanged.

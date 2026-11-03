@@ -208,7 +208,8 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Subjects: sqlite.NewSubjectRepository(db), Materials: sqlite.NewMaterialRepository(db), Blobs: store,
 		Lessons: lessons, Strings: sqlite.NewSubjectStrings(db), Clock: e.local, IDs: e.ids, Texts: doctext.New(),
 		Reader: llm, Inspections: sqlite.NewInspectionRepository(db), Notes: noteRepo, Images: imagepage.New(),
-		Expired: subjectPurge, Log: log,
+		// «Подключиться»: the call link of a subject, re-checked and opened through a .url file (ADR-0032).
+		Expired: subjectPurge, Calls: weblink.New(), Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: library: %w", err)
@@ -491,10 +492,8 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Knowledge:       knowledge,
 		Library:         lib,
 		// «Открыть в Word / PowerPoint»: a named copy in the artifact store, started below that root only.
-		MaterialViews: store,
-		Opener:        fileopen.New(filepath.Join(dataDir, artifactsDir)),
-		// «Подключиться»: the call link of a subject, re-checked and opened through a .url file (ADR-0032).
-		CallLinks:       weblink.New(),
+		MaterialViews:   store,
+		Opener:          fileopen.New(filepath.Join(dataDir, artifactsDir)),
 		SubjectOverview: subjectPage,
 		Notes:           ownNotes,
 		// Life is set by openCore: the requests live as long as the app.

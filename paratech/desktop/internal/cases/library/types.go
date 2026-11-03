@@ -71,11 +71,13 @@ type RemovedSubject struct {
 // of the text (MaterialText, Inspect): without them those answer ErrNotConfigured. Notes is optional: without it a
 // subject with notes is still refused by the store, as ErrNotEmpty instead of ErrHasNotes. Images is optional: without
 // it a photo is refused (ErrUnsupportedImage), never stored as it came. Expired is optional: without it the name of a
-// removed subject past its window stays taken (a *RemovedNameError) until the daily purge erased it.
+// removed subject past its window stays taken (a *RemovedNameError) until the daily purge erased it. Calls is optional:
+// without it OpenCallLink opens nothing (ErrCallLinkNotOpened).
 type Deps struct {
 	Notes       SubjectNotes
 	Images      PageImages
 	Expired     ExpiredSubjects
+	Calls       CallOpener
 	Subjects    SubjectRepository
 	Materials   MaterialRepository
 	Blobs       BlobStore

@@ -10,7 +10,6 @@ import (
 
 	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/domain/library/subject"
-	schedvalues "paratech/desktop/internal/domain/schedule/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -36,23 +35,27 @@ func (f *fakeLibrary) ClearCallLink(_ context.Context, id shared.SubjectID) (*su
 	return f.subjects[0], nil
 }
 
-func (f *fakeLibrary) CallLink(_ context.Context, id shared.SubjectID) (subject.CallLink, error) {
-	f.note("CallLink %s", id)
+func (f *fakeLibrary) CreateSubjectWithCallLink(_ context.Context, req library.NewSubject, link string) (*subject.Subject, error) {
+	f.created = req
+	f.note("CreateSubjectWithCallLink %s", link)
 	if f.err != nil {
-		return subject.CallLink{}, f.err
+		return nil, f.err
 	}
-	return f.subjects[0].CallLink(), nil
+	return f.subjects[0], nil
 }
 
-// fakeCallOpener records the links it was asked to open.
-type fakeCallOpener struct {
-	opened []string
-	err    error
-}
-
-func (f *fakeCallOpener) OpenCallLink(_ context.Context, l schedvalues.CallLink) error {
-	f.opened = append(f.opened, l.String())
-	return f.err
+// OpenCallLink answers as the use case does: f.err, else no link, else what the opener answered (f.openErr).
+func (f *fakeLibrary) OpenCallLink(_ context.Context, id shared.SubjectID) error {
+	f.note("OpenCallLink %s", id)
+	switch {
+	case f.err != nil:
+		return f.err
+	case f.subjects[0].CallLink().IsZero():
+		return library.ErrNoCallLink
+	case f.openErr != nil:
+		return fmt.Errorf("%w: %w", library.ErrCallLinkNotOpened, f.openErr)
+	}
+	return nil
 }
 
 // subjectWithCallLink is testSubject with the fake link.
@@ -131,8 +134,6 @@ func TestLibraryCallLinkProblems(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s, uc, logs := newLibraryBinding(t, "", &memFiles{})
-			opener := &fakeCallOpener{}
-			s.withCallLinkOpener(opener)
 			uc.err = fmt.Errorf("wrapped: %w", tt.err)
 
 			for call, res := range map[string]LibraryCallLinkResult{
@@ -148,9 +149,6 @@ func TestLibraryCallLinkProblems(t *testing.T) {
 					t.Errorf("open = %+v, want problem %q", res, tt.problem)
 				}
 			}
-			if len(opener.opened) != 0 {
-				t.Fatalf("opened %q", opener.opened)
-			}
 
 			out := logs.String()
 			if tt.logged != (out != "") {
@@ -163,39 +161,98 @@ func TestLibraryCallLinkProblems(t *testing.T) {
 	}
 }
 
-// «Подключиться» sends only the subject: the link is read again in Go and opened in its canonical form; a subject
-// without a link opens nothing.
+// «Подключиться» sends only the subject to the use case, which reads the link and opens it; the binding maps the
+// outcome to a code.
 func TestOpenSubjectCallLink(t *testing.T) {
 	s, uc, logs := newLibraryBinding(t, "", &memFiles{})
-	opener := &fakeCallOpener{}
-	s.withCallLinkOpener(opener)
 	ctx := context.Background()
 
-	if res := s.OpenSubjectCallLink(ctx, "s1"); res.Problem != "no_link" || len(opener.opened) != 0 {
-		t.Fatalf("no link: %+v, opened %q", res, opener.opened)
+	if res := s.OpenSubjectCallLink(ctx, "s1"); res.Problem != "no_link" {
+		t.Fatalf("no link: %+v", res)
 	}
 
 	uc.subjects = []*subject.Subject{subjectWithCallLink(t)}
-	if res := s.OpenSubjectCallLink(ctx, "s1"); res.Problem != "" || fmt.Sprint(opener.opened) != fmt.Sprint([]string{fakeCallLink}) {
-		t.Fatalf("open = %+v, opened %q", res, opener.opened)
+	if res := s.OpenSubjectCallLink(ctx, "s1"); res.Problem != "" {
+		t.Fatalf("open = %+v", res)
 	}
-	if !strings.Contains(fmt.Sprint(uc.calls), "CallLink s1") {
+	if want := []string{"OpenCallLink s1", "OpenCallLink s1"}; fmt.Sprint(uc.calls) != fmt.Sprint(want) {
 		t.Fatalf("calls = %q", uc.calls)
 	}
 
-	// The opener refuses (an environment variable in the link, another OS): failed, and its error is logged without
-	// the link.
-	opener.err = errors.New("weblink: the call link names an environment variable")
+	// The opener refuses (an environment variable in the link, another OS): failed, and its error is logged; it never
+	// holds the link.
+	uc.openErr = errors.New("weblink: the call link names an environment variable")
 	if res := s.OpenSubjectCallLink(ctx, "s1"); res.Problem != "failed" {
 		t.Fatalf("refused open = %+v", res)
 	}
 	if out := logs.String(); !strings.Contains(out, "environment variable") || strings.Contains(out, fakeCallPwd) {
 		t.Fatalf("log %s", out)
 	}
+}
 
-	// Without an opener nothing opens.
-	bare, _, _ := newLibraryBinding(t, "", &memFiles{})
-	if res := bare.OpenSubjectCallLink(ctx, "s1"); res.Problem != "failed" {
-		t.Fatalf("no opener = %+v", res)
+// «Создать предмет» of a lesson card: name and link go to the use case in one call, and the outcome is a code.
+func TestCreateSubjectWithCallLink(t *testing.T) {
+	s, uc, logs := newLibraryBinding(t, "", &memFiles{})
+	uc.subjects = []*subject.Subject{subjectWithCallLink(t)}
+	ctx := context.Background()
+
+	res := s.CreateSubjectWithCallLink(ctx, "Физика", fakeCallLink)
+	if res.Problem != "" || res.Subject == nil || res.Subject.ID != "s1" || res.Subject.CallLink == nil ||
+		res.Subject.CallLink.Link != fakeCallLink || res.RemovedSubjectID != "" {
+		t.Fatalf("CreateSubjectWithCallLink = %+v", res)
+	}
+	if uc.created.Name != "Физика" || len(uc.created.Aliases) != 0 || uc.created.Semester != "" ||
+		fmt.Sprint(uc.calls) != fmt.Sprint([]string{"CreateSubjectWithCallLink " + fakeCallLink}) {
+		t.Fatalf("created %+v, calls %q", uc.created, uc.calls)
+	}
+	raw, err := json.Marshal(res)
+	if err != nil || !strings.Contains(string(raw), `"problem":"","subject":{`) || !strings.Contains(string(raw), `"removedSubjectId":"","removedVersion":0`) {
+		t.Fatalf("json %s, %v", raw, err)
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("a success logs nothing: %s", logs.String())
+	}
+}
+
+func TestCreateSubjectWithCallLinkProblems(t *testing.T) {
+	leaky := errors.New("row: " + fakeCallLink)
+	removed := testSubject(t)
+	removed.Persisted(7)
+	tests := []struct {
+		name    string
+		err     error
+		removed bool // the removed subject can be read
+		problem string
+	}{
+		{"invalid link", fmt.Errorf("%w: %w", library.ErrInvalidCallLink, leaky), false, "invalid"},
+		{"invalid name", library.ErrInvalidName, false, "invalid_name"},
+		{"name taken", library.ErrNameTaken, false, "name_taken"},
+		{"removed name", &library.RemovedNameError{Subject: "s1"}, true, "removed_name_taken"},
+		{"removed subject gone", &library.RemovedNameError{Subject: "s1"}, false, "failed"},
+		{"busy", library.ErrBusy, false, "failed"},
+		{"storage", fmt.Errorf("%w: %w", library.ErrUnavailable, leaky), false, "failed"},
+		{"bad request", library.ErrInvalidRequest, false, "failed"},
+		{"unexpected", leaky, false, "failed"},
+	}
+	ctx := context.Background()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, uc, logs := newLibraryBinding(t, "", &memFiles{})
+			uc.err = fmt.Errorf("wrapped: %w", tt.err)
+			if tt.removed {
+				uc.removed = map[shared.SubjectID]*subject.Subject{"s1": removed}
+			}
+
+			res := s.CreateSubjectWithCallLink(ctx, "Физика", fakeCallLink)
+			if res.Problem != tt.problem || res.Subject != nil {
+				t.Fatalf("CreateSubjectWithCallLink = %+v, want problem %q", res, tt.problem)
+			}
+			if tt.removed != (res.RemovedSubjectID == "s1" && res.RemovedVersion == 7) {
+				t.Fatalf("removed subject = %q at %d", res.RemovedSubjectID, res.RemovedVersion)
+			}
+			if out := logs.String(); strings.Contains(out, fakeCallPwd) || strings.Contains(out, "meet.example.org") {
+				t.Fatalf("the log has the link: %s", out)
+			}
+		})
 	}
 }

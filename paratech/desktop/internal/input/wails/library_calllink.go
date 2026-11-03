@@ -6,15 +6,15 @@ import (
 
 	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/domain/library/subject"
-	schedvalues "paratech/desktop/internal/domain/schedule/values"
 	"paratech/desktop/internal/domain/shared"
 )
 
 // Operation names of the log.
 const (
-	opLibrarySetCallLink   = "ui: set subject call link"
-	opLibraryClearCallLink = "ui: clear subject call link"
-	opLibraryOpenCallLink  = "ui: open subject call link"
+	opLibrarySetCallLink    = "ui: set subject call link"
+	opLibraryClearCallLink  = "ui: clear subject call link"
+	opLibraryOpenCallLink   = "ui: open subject call link"
+	opLibraryCreateCallLink = "ui: create subject with a call link"
 )
 
 // Problems of the call link calls as the page reads them. The page owns the Russian texts.
@@ -23,13 +23,11 @@ const (
 	callLinkNone     = "no_link" // OpenSubjectCallLink: the subject has no link (any more)
 	callLinkNotFound = "not_found"
 	callLinkFailed   = "failed"
-)
 
-// CallLinkOpener opens a call link outside the app (ARCH-42; the app wires adapters/weblink, which re-checks it and
-// opens it through a .url file and explorer.exe, ADR-0032). The page never sends the URL to open.
-type CallLinkOpener interface {
-	OpenCallLink(ctx context.Context, l schedvalues.CallLink) error
-}
+	// CreateSubjectWithCallLink only; "invalid" there is the link, and then nothing is created.
+	callLinkInvalidName = "invalid_name" // the name is empty or too long
+	callLinkNameTaken   = "name_taken"   // another subject has the name; RemovedNameTaken when a removed one has it
+)
 
 // LibraryCallLink is the link to the online class kept on a subject (ADR-0032, TASK-364): the student's own typed
 // link in canonical form, and its host, shown in full. Plain text only.
@@ -51,10 +49,15 @@ type LibraryCallLinkOpen struct {
 	Problem string `json:"problem"`
 }
 
-// withCallLinkOpener adds «Подключиться».
-func (s *LibraryService) withCallLinkOpener(o CallLinkOpener) *LibraryService {
-	s.callLinks = o
-	return s
+// LibraryCreateWithCallLink answers CreateSubjectWithCallLink: Problem "" with Subject, the new subject with its link;
+// or a problem with Subject null and nothing created: "invalid" (the link), "invalid_name", "name_taken",
+// "removed_name_taken" (a removed subject holds the name: «Вернуть» is RestoreSubject(RemovedSubjectID,
+// RemovedVersion)) or "failed".
+type LibraryCreateWithCallLink struct {
+	Problem          string          `json:"problem"`
+	Subject          *LibrarySubject `json:"subject"`
+	RemovedSubjectID string          `json:"removedSubjectId"`
+	RemovedVersion   int64           `json:"removedVersion"`
 }
 
 // SetSubjectCallLink keeps link as the link to the online class of a subject (the subject page, and «Добавить ссылку»
@@ -79,33 +82,57 @@ func (s *LibraryService) ClearSubjectCallLink(ctx context.Context, subjectID str
 	return LibraryCallLinkResult{Subject: &out}
 }
 
-// OpenSubjectCallLink opens the link kept on a subject («Подключиться»). The page sends only the subject: the link is
-// read again here and opened only when it passes the call link rule of the schedule, the one the opener re-checks
-// (ADR-0032 «Opening and copying»). Recording does not start.
+// CreateSubjectWithCallLink creates a subject of the current semester that keeps link as its call link (a lesson card
+// of «Сегодня» whose subject string matches no subject). The link is checked before anything is created, and the
+// subject is stored with it in one save: either both exist or nothing does. The link is never logged.
+func (s *LibraryService) CreateSubjectWithCallLink(ctx context.Context, name, link string) LibraryCreateWithCallLink {
+	sub, err := s.uc.CreateSubjectWithCallLink(ctx, library.NewSubject{Name: name}, link)
+	if err == nil {
+		out := librarySubject(sub)
+		return LibraryCreateWithCallLink{Subject: &out}
+	}
+
+	var gone *library.RemovedNameError
+	switch {
+	case errors.As(err, &gone):
+		var named *LibraryRemovedNameError
+		if errors.As(s.removedName(ctx, gone.Subject), &named) {
+			return LibraryCreateWithCallLink{
+				Problem: RemovedNameTaken, RemovedSubjectID: named.SubjectID, RemovedVersion: named.Version,
+			}
+		}
+		// The removed subject was restored or purged meanwhile, or could not be read: a repeat answers anew.
+		return LibraryCreateWithCallLink{Problem: callLinkFailed}
+	case errors.Is(err, library.ErrNameTaken):
+		s.log.Info(opLibraryCreateCallLink, "result", callLinkNameTaken)
+		return LibraryCreateWithCallLink{Problem: callLinkNameTaken}
+	case errors.Is(err, library.ErrInvalidName):
+		s.log.Info(opLibraryCreateCallLink, "result", callLinkInvalidName)
+		return LibraryCreateWithCallLink{Problem: callLinkInvalidName}
+	}
+	problem := s.callLinkProblem(opLibraryCreateCallLink, err)
+	if problem == callLinkNotFound { // no subject is looked up here: anything of the kind is a fault
+		problem = callLinkFailed
+	}
+	return LibraryCreateWithCallLink{Problem: problem}
+}
+
+// OpenSubjectCallLink opens the link kept on a subject («Подключиться»). The page sends only the subject; the use case
+// reads the link again and the opener checks it once more (ADR-0032 «Opening and copying»). Recording does not start.
 func (s *LibraryService) OpenSubjectCallLink(ctx context.Context, subjectID string) LibraryCallLinkOpen {
-	if s.callLinks == nil {
-		s.log.Error(opLibraryOpenCallLink, "result", callLinkFailed, "cause", "no opener")
-		return LibraryCallLinkOpen{Problem: callLinkFailed}
-	}
-	l, err := s.uc.CallLink(ctx, shared.SubjectID(subjectID))
-	if err != nil {
-		return LibraryCallLinkOpen{Problem: s.callLinkProblem(opLibraryOpenCallLink, err)}
-	}
-	if l.IsZero() {
+	err := s.uc.OpenCallLink(ctx, shared.SubjectID(subjectID))
+	switch {
+	case err == nil:
+		return LibraryCallLinkOpen{}
+	case errors.Is(err, library.ErrNoCallLink):
 		s.log.Info(opLibraryOpenCallLink, "result", callLinkNone)
 		return LibraryCallLinkOpen{Problem: callLinkNone}
-	}
-	open, err := schedvalues.ParseCallLink(l.String())
-	if err != nil || open.String() != l.String() {
-		s.log.Error(opLibraryOpenCallLink, "result", callLinkFailed, "cause", "the call link rules differ")
-		return LibraryCallLinkOpen{Problem: callLinkFailed}
-	}
-	if err := s.callLinks.OpenCallLink(ctx, open); err != nil {
+	case errors.Is(err, library.ErrCallLinkNotOpened):
 		// The opener's errors name the rule or the step, never the link.
 		s.log.Error(opLibraryOpenCallLink, "result", callLinkFailed, "err", err)
 		return LibraryCallLinkOpen{Problem: callLinkFailed}
 	}
-	return LibraryCallLinkOpen{}
+	return LibraryCallLinkOpen{Problem: s.callLinkProblem(opLibraryOpenCallLink, err)}
 }
 
 // callLinkProblem maps a use case error to a code of the page. The cause is never logged: a storage error may carry
