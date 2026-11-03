@@ -229,15 +229,39 @@ func (t tools) controlReader(tool values.Tool) (read, bool) {
 // resultOf builds the result of a tool with its own result shape (recording) and adds cards.
 type resultOf func(t tools, c agentturn.Call, cards []values.Card) ran
 
-// replayControl rebuilds the result of a recording call from its entry; set_setting answers as every write.
+// replayControl rebuilds the result of a recording call from its entry, never running it against the state of now;
+// set_setting answers as every write. A FAILED stop found no recording running (not_recording); a DONE start without
+// a compensation found one running (already_recording). Its ID is not in the entry, so the replay names the one that
+// runs now, or answers not_recording when the student stopped it since: still nothing starts.
 func (t tools) replayControl(c agentturn.Call, e agentjournal.Entry) (ran, bool) {
 	if e.Tool != values.ToolRecording {
+		return ran{}, false
+	}
+	act, _ := c.Call.Args().Enum(values.ArgAction)
+	notRecording := recordingOut(values.RecordingNotActive, values.Ref{})
+	switch e.Status {
+	case action.StatusFailed:
+		if act == values.RecordingStop {
+			return notRecording(t, c, nil), true
+		}
+		return ran{}, false
+	case action.StatusPending, action.StatusUnknown, action.StatusProposed:
 		return ran{}, false
 	}
 	if v, ok := e.Compensation.(action.StopRecording); ok {
 		return recordingOut(values.RecordingStarted, v.Recording)(t, c, nil), true
 	}
-	return recordingOut(values.RecordingStopped, values.Ref{})(t, c, nil), true
+	if act != values.RecordingStart {
+		return recordingOut(values.RecordingStopped, values.Ref{})(t, c, nil), true
+	}
+	if s := t.actions.controls.Session; s != nil {
+		if info, ok := s.Active(); ok {
+			if r, err := recordingRefOf(info.ID); err == nil {
+				return recordingOut(values.RecordingRunning, r)(t, c, nil), true
+			}
+		}
+	}
+	return notRecording(t, c, nil), true
 }
 
 // controlRefusal maps the errors of the control tools the generic map does not know.

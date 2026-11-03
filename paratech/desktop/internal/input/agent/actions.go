@@ -178,7 +178,6 @@ type prepared struct {
 	intent    action.Intent
 	noop      *values.WriteRow
 	noopMarks []values.MarkRow // mark_assignments_done that changes nothing
-	noopOut   resultOf         // a tool with its own result shape that changes nothing (recording)
 	noopNote  *values.NoteWriteRow
 	run       func(ctx context.Context) (effect, error)
 }
@@ -190,6 +189,9 @@ type effect struct {
 	row     values.WriteRow
 	created values.Ref // the subject, folder or assignment a create made
 	failed  bool       // the use case changed nothing (a job or a work that existed already)
+	// noop: nothing changed, yet the entry is DONE without a compensation (and no action line) so that a replay
+	// answers from it (recording{start} while one runs).
+	noop bool
 	// triage is what triage_assignment shows the planner instead of row; cards are the cards it adds.
 	triage *values.TriageRow
 	cards  []values.Card
@@ -226,7 +228,7 @@ func (a *Actions) prepare(ctx context.Context, at origin, call values.Call) (pre
 	case values.ToolSetSetting:
 		p, err = a.setSetting(ctx, call)
 	case values.ToolRecording:
-		p, err = a.recording(ctx, call)
+		p, err = a.recording(call)
 	case values.ToolTriageAssignment:
 		if actionpolicy.FreeTopic(call) {
 			p, err = a.triageTopic(at, call)

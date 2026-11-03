@@ -47,33 +47,34 @@ var (
 )
 
 // recording prepares one action of recording.
-func (a *Actions) recording(ctx context.Context, call values.Call) (prepared, error) {
+func (a *Actions) recording(call values.Call) (prepared, error) {
 	if a.controls.Starts == nil || a.controls.Session == nil {
 		return prepared{}, errUnavailable
 	}
 	act, _ := call.Args().Enum(values.ArgAction)
 	switch act {
 	case values.RecordingStart:
-		return a.startRecording(ctx)
+		return a.startRecording(), nil
 	case values.RecordingStop:
-		return a.stopRecording()
+		return a.stopRecording(), nil
 	}
 	return prepared{}, errUnavailable
 }
 
-// startRecording is «Начать запись» with the source the page preselects. While a recording runs nothing starts and
-// nothing is journaled (already_recording, its ID). The Undo stops exactly the recording this start made.
-func (a *Actions) startRecording(ctx context.Context) (prepared, error) {
-	if info, ok := a.controls.Session.Active(); ok {
-		r, err := recordingRefOf(info.ID)
-		if err != nil {
-			return prepared{}, err
-		}
-		return prepared{noopOut: recordingOut(values.RecordingRunning, r)}, nil
-	}
-	source := a.preselected(ctx)
+// startRecording is «Начать запись» with the source the page preselects. The look at the running recording is made
+// after the entry is journaled, and a start that finds one changes nothing but is still journaled (DONE without a
+// compensation): a replay of its call ID then answers from the entry and never starts a capture the student did not
+// ask for since. The Undo of a real start stops exactly the recording it made.
+func (a *Actions) startRecording() prepared {
 	return prepared{run: func(ctx context.Context) (effect, error) {
-		m, err := a.controls.Starts.StartManual(ctx, source)
+		if info, ok := a.controls.Session.Active(); ok {
+			r, err := recordingRefOf(info.ID)
+			if err != nil {
+				return effect{}, err
+			}
+			return effect{noop: true, version: recordingVersion, out: recordingOut(values.RecordingRunning, r)}, nil
+		}
+		m, err := a.controls.Starts.StartManual(ctx, a.preselected(ctx))
 		if err != nil {
 			return effect{}, startError(m.Problem, err)
 		}
@@ -84,7 +85,7 @@ func (a *Actions) startRecording(ctx context.Context) (prepared, error) {
 		return effect{
 			comp: action.StopRecording{Recording: r}, version: recordingVersion, out: recordingOut(values.RecordingStarted, r),
 		}, nil
-	}}, nil
+	}}
 }
 
 // preselected is the source the picker of «Начать запись» takes on a fresh opening (frontend sourcePicker nextSelection
@@ -114,28 +115,32 @@ func startError(p prompt.Problem, err error) error {
 }
 
 // stopRecording is «Остановить» of the running recording: done without a compensation (О-7 а), the line offers
-// «Начать запись». Without a running recording nothing is journaled (not_recording).
-func (a *Actions) stopRecording() (prepared, error) {
-	info, ok := a.controls.Session.Active()
-	if !ok {
-		return prepared{noopOut: recordingOut(values.RecordingNotActive, values.Ref{})}, nil
-	}
-	r, err := recordingRefOf(info.ID)
-	if err != nil {
-		return prepared{}, err
-	}
+// «Начать запись». Without a running recording it changes nothing (not_recording) and its entry is FAILED, so a
+// replay of its call ID answers not_recording again and never stops a recording the student started since.
+func (a *Actions) stopRecording() prepared {
+	notRecording := effect{failed: true, out: recordingOut(values.RecordingNotActive, values.Ref{})}
 	return prepared{run: func(ctx context.Context) (effect, error) {
-		_, err := a.controls.Session.Stop(ctx, info.ID)
+		info, ok := a.controls.Session.Active()
+		if !ok {
+			return notRecording, nil
+		}
+		r, err := recordingRefOf(info.ID)
+		if err != nil {
+			return effect{}, err
+		}
+		// Stop of a recording that already ended returns it without an error (and it counts as stopped here);
+		// ErrNotRunning is an unfinished recording no session of this process captures: nothing was stopped.
+		_, err = a.controls.Session.Stop(ctx, info.ID)
 		switch {
 		case errors.Is(err, recordingsession.ErrNotRunning):
-			return effect{failed: true, out: recordingOut(values.RecordingNotActive, values.Ref{})}, nil
+			return notRecording, nil
 		case err != nil:
 			return effect{}, err
 		}
 		return effect{
 			version: recordingVersion, offer: values.OfferStartRecording, out: recordingOut(values.RecordingStopped, r),
 		}, nil
-	}}, nil
+	}}
 }
 
 // checkRecording reads the target of a StopRecording: compensated once the recording the start made no longer runs

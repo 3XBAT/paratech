@@ -144,14 +144,33 @@ func TestRecordingStartSource(t *testing.T) {
 	}
 }
 
-// start while a recording runs starts nothing and journals nothing; it names the running one.
+// start while a recording runs starts nothing and names the running one; it is journaled DONE without a compensation
+// (no «Отменить», no action line), so a replay of its call ID («Продолжить» after «Стоп») answers from the entry and
+// never starts a capture, even after the student stopped the recording.
 func TestRecordingStartWhileRecording(t *testing.T) {
+	const running = `{"changed":false,"done":true,"recording":"rec-7","state":"already_recording"}`
 	w, f := newControlsWorld(t)
 	f.rec.active = &recordingsession.Info{ID: "rec-7"}
 	r, e := run10(t, w, req, call10(t, "c1", values.ToolRecording, startArgs, actionpolicy.ClassU))
-	if r.out.Result.ResultJSON != `{"changed":false,"done":true,"recording":"rec-7","state":"already_recording"}` ||
-		e.ID != "" || len(f.rec.started) != 0 || len(r.cards) != 0 {
-		t.Fatalf("result = %s, entry %+v, starts %d", r.out.Result.ResultJSON, e, len(f.rec.started))
+	if r.out.Result.ResultJSON != running || len(f.rec.started) != 0 || len(r.cards) != 0 {
+		t.Fatalf("result = %s, cards %+v, starts %d", r.out.Result.ResultJSON, r.cards, len(f.rec.started))
+	}
+	if e.Status != action.StatusDone || e.Compensation != nil || e.CanUndo {
+		t.Fatalf("entry = %+v, want DONE without an Undo", e)
+	}
+	if _, err := w.journal.Undo(t.Context(), e.ID); err == nil || len(f.rec.stops) != 0 {
+		t.Fatalf("undo of a start that changed nothing = %v, stops %v", err, f.rec.stops)
+	}
+
+	again, _ := run10(t, w, req, call10(t, "c1", values.ToolRecording, startArgs, actionpolicy.ClassU))
+	if again.out.Result.ResultJSON != running || len(again.cards) != 0 {
+		t.Fatalf("replay while it runs = %s, cards %+v", again.out.Result.ResultJSON, again.cards)
+	}
+
+	f.rec.active = nil // the student stopped it
+	again, _ = run10(t, w, req, call10(t, "c1", values.ToolRecording, startArgs, actionpolicy.ClassU))
+	if again.out.Result.ResultJSON != `{"changed":false,"done":true,"state":"not_recording"}` || len(f.rec.started) != 0 {
+		t.Fatalf("replay after the stop = %s, starts %v", again.out.Result.ResultJSON, f.rec.started)
 	}
 }
 
@@ -232,18 +251,40 @@ func TestRecordingStop(t *testing.T) {
 	}
 }
 
-// stop without a running recording, or one that ended meanwhile, stops nothing: not_recording.
+// stop without a running recording, or of one no session captures (ErrNotRunning), stops nothing: not_recording. Its
+// entry is FAILED (no «Отменить», no line), and a replay of its call ID answers not_recording again without stopping a
+// recording the student started since.
 func TestRecordingStopWithoutARecording(t *testing.T) {
-	w, f := newControlsWorld(t)
-	r, e := run10(t, w, req, call10(t, "c1", values.ToolRecording, stopArgs, actionpolicy.ClassU))
-	if r.out.Result.ResultJSON != `{"changed":false,"done":true,"state":"not_recording"}` || e.ID != "" || len(f.rec.stops) != 0 {
-		t.Fatalf("result = %s, entry %+v", r.out.Result.ResultJSON, e)
+	const notRecording = `{"changed":false,"done":true,"state":"not_recording"}`
+	tests := map[string]func(f *controlFakes){
+		"none runs": func(*controlFakes) {},
+		"no session captures it": func(f *controlFakes) {
+			f.rec.active, f.rec.stopErr = &recordingsession.Info{ID: "rec-9"}, recordingsession.ErrNotRunning
+		},
 	}
+	for name, before := range tests {
+		t.Run(name, func(t *testing.T) {
+			w, f := newControlsWorld(t)
+			before(f)
+			r, e := run10(t, w, req, call10(t, "c1", values.ToolRecording, stopArgs, actionpolicy.ClassU))
+			if r.out.Result.ResultJSON != notRecording || len(r.cards) != 0 {
+				t.Fatalf("result = %s, cards %+v", r.out.Result.ResultJSON, r.cards)
+			}
+			if e.Status != action.StatusFailed || e.Compensation != nil || e.CanUndo {
+				t.Fatalf("entry = %+v, want FAILED without an Undo", e)
+			}
+			stops := len(f.rec.stops)
 
-	f.rec.active, f.rec.stopErr = &recordingsession.Info{ID: "rec-9"}, recordingsession.ErrNotRunning
-	r, e = run10(t, w, req, call10(t, "c2", values.ToolRecording, stopArgs, actionpolicy.ClassU))
-	if r.out.Result.ResultJSON != `{"changed":false,"done":true,"state":"not_recording"}` || e.Status != action.StatusFailed || len(r.cards) != 0 {
-		t.Fatalf("ended meanwhile = %s, entry %+v", r.out.Result.ResultJSON, e)
+			// The student starts a lecture recording; the replayed stop leaves it running.
+			f.rec.active, f.rec.stopErr = &recordingsession.Info{ID: "rec-lecture"}, nil
+			again, _ := run10(t, w, req, call10(t, "c1", values.ToolRecording, stopArgs, actionpolicy.ClassU))
+			if again.out.Result.ResultJSON != notRecording || len(again.cards) != 0 {
+				t.Fatalf("replay = %s, cards %+v", again.out.Result.ResultJSON, again.cards)
+			}
+			if f.rec.active == nil || len(f.rec.stops) != stops {
+				t.Fatalf("the replay stopped the new recording: stops %v", f.rec.stops)
+			}
+		})
 	}
 }
 
@@ -291,7 +332,7 @@ func TestRecordingUnwired(t *testing.T) {
 // Catalog 10 is not served yet (TASK-326): at catalog 9 the four tools do not exist.
 func TestControlToolsInvisibleAtCatalog9(t *testing.T) {
 	if values.CatalogVersion != 9 {
-		t.Skipf("catalog %d is served: this pin is for catalog 9", values.CatalogVersion)
+		t.Fatalf("CatalogVersion = %d", values.CatalogVersion)
 	}
 	for _, tool := range []values.Tool{values.ToolGetSettings, values.ToolSetSetting, values.ToolQuotaStatus, values.ToolRecording} {
 		if _, err := values.ParseTool(string(tool)); err == nil {

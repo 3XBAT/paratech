@@ -70,8 +70,6 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 		return t.result(c, *p.noop, values.Ref{}, nil)
 	case p.noopMarks != nil:
 		return t.marksResult(c, p.noopMarks, nil)
-	case p.noopOut != nil:
-		return p.noopOut(t, c, nil)
 	case p.noopNote != nil:
 		return t.noteResult(c, *p.noopNote, nil)
 	}
@@ -101,6 +99,9 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 	if _, err := t.journal.Finish(ctx, entry.ID, done); err != nil {
 		// The action is done; the entry stays PENDING and Recover settles it from its intent at the next start.
 		t.log.WarnContext(ctx, opJournal, "action", entry.ID.String(), "err", err)
+	}
+	if eff.noop {
+		return t.outcome(c, eff, eff.cards) // nothing changed: no line
 	}
 	line := values.ActionLine{Action: entry.ID, Offer: eff.offer}
 	if eff.created.Kind() == values.KindAssignment {
@@ -154,14 +155,14 @@ func (t tools) replay(ctx context.Context, c agentturn.Call, e agentjournal.Entr
 	if e.Tool != c.Call.Tool() {
 		return ran{out: agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseInvalidArgs)}, write: true}
 	}
+	if r, ok := t.replayControl(c, e); ok {
+		return r
+	}
 	switch e.Status {
 	case action.StatusFailed:
 		return ran{out: agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseFailed)}, write: true}
 	case action.StatusPending, action.StatusUnknown, action.StatusProposed:
 		return ran{out: agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseUnknown)}, write: true}
-	}
-	if r, ok := t.replayControl(c, e); ok {
-		return r
 	}
 	if r, ok := t.replayAssignment(c, e.Compensation); ok {
 		return r
