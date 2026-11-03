@@ -102,6 +102,11 @@ export const workTexts = {
   fileKind: ".docx",
 } as const;
 
+/** The name of a row button of the plan editor: the action and the number the row shows («Выше: 2»). The tooltip is the action. */
+export function rowActionLabel(action: string, n: number): string {
+  return `${action}: ${n}`;
+}
+
 export const checkTexts = {
   count: `Нужно от ${limits.minSections} до ${limits.maxSections} разделов.`,
   title: "У каждого раздела должно быть название.",

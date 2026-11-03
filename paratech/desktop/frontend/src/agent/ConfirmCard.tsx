@@ -5,6 +5,7 @@ import type { TeacherRole } from "../bindings/recipient.js";
 import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
 import { type ConfirmCardModel, ConfirmFlow, confirmCardModel, confirmTexts, type FlowState, initialFlow } from "../agentConfirmView.js";
 import { Button } from "../ui/Button.js";
+import { IconAction } from "../ui/IconAction.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
 import { type RecipientNav, useRecipientNav } from "../recipientNav.js";
@@ -153,9 +154,7 @@ export function ConfirmCardPending(props: { error: string; onReload?: () => void
       </ResultLine>
       {props.onReload !== undefined && (
         <div className="ag-actions">
-          <Button size="sm" onClick={props.onReload}>
-            {confirmTexts.reload}
-          </Button>
+          <IconAction icon="retry" label={confirmTexts.reload} onClick={props.onReload} />
         </div>
       )}
     </section>

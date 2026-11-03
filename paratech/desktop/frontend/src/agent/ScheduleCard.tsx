@@ -64,9 +64,7 @@ export function ScheduleCardPending(props: { error: string; onReload?: () => voi
       </ResultLine>
       {props.onReload !== undefined && (
         <div className="ag-actions">
-          <Button size="sm" variant="secondary" onClick={props.onReload}>
-            {scheduleTexts.reload}
-          </Button>
+          <IconAction icon="retry" label={scheduleTexts.reload} onClick={props.onReload} />
         </div>
       )}
     </section>

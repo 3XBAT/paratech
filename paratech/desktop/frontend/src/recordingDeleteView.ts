@@ -232,3 +232,8 @@ export function pruneSelection(
 export function selectedText(n: number): string {
   return `Выбрано ${n}`;
 }
+
+/** The name and tooltip of the trash icon of the selection: «Удалить выбранные (3)». */
+export function selectedDeleteLabel(n: number): string {
+  return `${deleteTexts.selectedDelete} (${n})`;
+}

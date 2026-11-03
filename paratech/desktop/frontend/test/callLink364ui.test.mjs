@@ -30,6 +30,7 @@ import {
 } from "../.test-build/callLinkView.js";
 import { CallLinkBlock, LessonLinkButtons } from "../.test-build/pages/CallLinkParts.js";
 import { LessonsSection } from "../.test-build/pages/TodayParts.js";
+import { ariaLabels, buttonTag, isOff, visibleText } from "./iconbtn.mjs";
 
 const html = (el) => renderToStaticMarkup(el);
 const noop = () => undefined;
@@ -532,7 +533,10 @@ test("a pair with a link: «Подключиться» next to «Записат�
   assert.ok(out.indexOf("Подключиться") < out.indexOf(">Записать<"), "joining comes before recording");
   assert.match(out, /<bdi>meet\.example\.org<\/bdi>/);
   assert.ok(out.includes('title="Открыть ссылку на пару (запись не начнётся)"'), "the tooltip does not repeat the host");
-  assert.match(out, /aria-label="Изменить: Физика"/);
+  // TASK-371: «Изменить» is a pencil icon that names the pair; the words are its tooltip only.
+  assert.match(buttonTag(out, "Изменить: Физика") ?? "", /class="ia"/);
+  assert.match(out, /<use href="#i-pencil"><\/use><\/svg><span class="ia-tip" aria-hidden="true">Изменить<\/span>/);
+  assert.doesNotMatch(visibleText(out), /Изменить/);
   assert.doesNotMatch(out, /Добавить ссылку/);
   assert.doesNotMatch(out, /https?:\/\//, "no link text on the card");
   assert.doesNotMatch(out, /FakePwd42/);
@@ -667,10 +671,14 @@ test("a refusal under the field: «Открыть «Предметы»» for a t
   assert.match(plain, /Создать предмет и сохранить/, "without an offer the button creates");
 });
 
-test("results: a failed open offers «Повторить»; texts of files and models stay text", () => {
+test("results: a failed open offers «Повторить» as a retry icon (the card keeps «Подключиться»); texts of files and models stay text", () => {
   const failed = section([withLink()], controls({ line: { key: "l1", kind: "fail", text: callLinkTexts.openFailed, action: "retry" } }));
   assert.match(failed, /Не удалось открыть ссылку\. Можно повторить\./);
-  assert.match(failed, />Повторить</);
+  assert.match(buttonTag(failed, "Повторить открытие ссылки") ?? "", /class="ia"/);
+  assert.match(failed, /<use href="#i-retry"><\/use><\/svg><span class="ia-tip" aria-hidden="true">Повторить<\/span>/);
+  assert.doesNotMatch(visibleText(failed), /Повторить/, "no word button");
+  assert.match(visibleText(failed), /Подключиться/, "the way on is still a word on the card");
+  assert.ok(isOff(section([withLink()], controls({ busy: "open", busyKey: "l1", line: { key: "l1", kind: "fail", text: callLinkTexts.openFailed, action: "retry" } })), "Повторить открытие ссылки"));
   const ok = section([withLink()], controls({ line: { key: "l1", kind: "ok", text: callLinkTexts.opened, action: "" } }));
   assert.match(ok, /role="status"[^>]*>Ссылка открыта\./);
   const evil = section([withLink({ callLinkHost: "<img src=x onerror=1>", title: "<b>x</b>" })], controls());
@@ -703,9 +711,14 @@ test("the block: the full link as selectable text (the host is not repeated), «
   assert.ok(out.includes(`<bdi>${LINK}</bdi>`), "the full link is a text node");
   assert.ok(out.includes('title="Открыть ссылку на пару (запись не начнётся)"'));
   assert.ok(out.includes(`title="${LINK}"`));
-  for (const word of ["Подключиться", "Изменить", "Удалить"]) {
-    assert.match(out, new RegExp(`>${word}<`), word);
-  }
+  // «Подключиться» is a word; «Изменить» and «Удалить» are icons (TASK-371) named «… ссылку» with the short word as tooltip.
+  assert.match(out, />Подключиться</);
+  assert.deepEqual(ariaLabels(out).filter((l) => l !== "Ссылка на пару"), ["Изменить ссылку", "Удалить ссылку"]);
+  assert.match(out, /<use href="#i-pencil"><\/use>/);
+  assert.match(out, /<use href="#i-trash"><\/use>/);
+  assert.match(buttonTag(out, "Удалить ссылку"), /ia-danger/, "deleting is the red one");
+  assert.doesNotMatch(buttonTag(out, "Изменить ссылку"), /ia-danger/);
+  assert.doesNotMatch(visibleText(out), /Изменить|Удалить/, "no words on the icons");
   assert.doesNotMatch(out, /<a /, "never a link element");
   const empty = block(subject());
   assert.match(empty, /Ссылки на пару нет\. С ней у пар этого предмета на «Сегодня» появится «Подключиться»\./);
@@ -723,10 +736,19 @@ test("the block: the change form is filled with the current link and labelled; �
     removed: { key: "s1", subjectId: "s1", link: LINK },
   });
   assert.match(cleared, /Ссылка на пару удалена\./);
-  assert.match(cleared, />Вернуть</);
+  // «Вернуть» is an undo icon (TASK-371): found by its name, not red, id kept for the focus code.
+  assert.match(buttonTag(cleared, "Вернуть ссылку") ?? "", /class="ia" /);
+  assert.match(buttonTag(cleared, "Вернуть ссылку"), new RegExp(`id="${linkId("s1", "undo")}"`));
+  assert.match(cleared, /<use href="#i-undo"><\/use>/);
+  assert.doesNotMatch(visibleText(cleared), /Вернуть/);
   assert.match(cleared, /Ссылки на пару нет/);
   const busy = block(subject(), { line: { key: "s1", kind: "ok", text: callLinkTexts.cleared, action: "" }, removed: { key: "s1", subjectId: "s1", link: LINK }, busy: "restore", busyKey: "s1" });
-  assert.match(busy, /Возврат…/);
+  assert.ok(isOff(busy, "Возврат…"), "busy: the spinner button is off and named by what runs");
+  assert.match(busy, /aria-busy="true"/);
+  // Clearing runs: the trash turns into a spinner named «Удаление…».
+  const clearing = block(linked(), { busy: "clear", busyKey: "s1" });
+  assert.ok(isOff(clearing, "Удаление…"));
+  assert.match(clearing, /ia-spin/);
   // The offer of another subject is not drawn.
   const other = block(subject({ id: "s2" }), { line: { key: "s1", kind: "ok", text: "Чужое", action: "" }, removed: { key: "s1", subjectId: "s1", link: LINK } });
   assert.doesNotMatch(other, /Чужое|Вернуть/);

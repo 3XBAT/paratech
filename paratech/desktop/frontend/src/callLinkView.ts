@@ -27,6 +27,11 @@ export const callLinkTexts = {
   clearing: "Удаление…",
   undo: "Вернуть",
   restoring: "Возврат…",
+  /** TASK-371: the names of the icon buttons (the old words stay in front); the tooltip of the short ones is `change` etc. */
+  changeLink: "Изменить ссылку",
+  clearLink: "Удалить ссылку",
+  undoLink: "Вернуть ссылку",
+  retryOpen: "Повторить открытие ссылки",
   /** The main button of the field while a removed subject holds the name: the refused create is not run again. */
   revive: "Вернуть предмет и сохранить",
   save: "Сохранить",

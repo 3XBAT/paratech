@@ -26,6 +26,7 @@ import { openPairLabel } from "../.test-build/todayView.js";
 import { openTaskLabel } from "../.test-build/summaryView.js";
 import { removeModelLabel, cancelDownloadLabel } from "../.test-build/modelsView.js";
 import { openVersionLabel } from "../.test-build/homeworkView.js";
+import { selectedDeleteLabel } from "../.test-build/recordingDeleteView.js";
 import { setSubjectLabel } from "../.test-build/knowledgeView.js";
 import { ariaLabels, buttonTag, isOff, isOn, visibleText } from "./iconbtn.mjs";
 
@@ -329,7 +330,7 @@ test("schedule: the outcome of «Создать предметы» has undo (def
   assert.doesNotMatch(review, /variant="ghost" onClick=\{(props|offer)\.onRetry\}/, "the offer retry buttons use the default style too");
 });
 
-test("models and the recordings selection: a model row's delete is a trash icon and its cancel a cross, both naming the model; «Удалить выбранные» keeps its word, the clear is a cross", () => {
+test("models and the recordings selection: a model row's delete is a trash icon and its cancel a cross, both naming the model; «Удалить выбранные (N)» is a red trash (TASK-371), the clear is a cross", () => {
   const models = src("pages/ModelsPage.tsx");
   assert.equal((models.match(/icon="trash"\s+variant="danger"/g) ?? []).length, 2, "an installed row and a catalog row");
   assert.equal(count(models, "removeModelLabel(fullName(r))"), 2);
@@ -339,8 +340,12 @@ test("models and the recordings selection: a model row's delete is a trash icon 
   assert.equal(removeModelLabel("small · q5"), "Удалить модель small · q5");
   assert.equal(cancelDownloadLabel("small · q5"), "Отменить скачивание: small · q5");
   const recs = src("pages/RecordingsPage.tsx");
-  assert.match(recs, /<Button variant="danger" disabled=\{deleting !== null\} onClick=\{\(\) => askDelete\(\[\.\.\.selected\]\)\}>\s*\{deleteTexts\.selectedDelete\}/);
+  assert.match(recs, /<IconAction icon="trash" variant="danger" label=\{selectedDeleteLabel\(selected\.size\)\} disabled=\{deleting !== null\} onClick=\{\(\) => askDelete\(\[\.\.\.selected\]\)\}/);
   assert.match(recs, /<IconAction icon="x" label=\{deleteTexts\.selectedClear\}/);
+  assert.equal(selectedDeleteLabel(3), "Удалить выбранные (3)");
+  // The icon only asks: the confirmation dialog that lists the recordings stays, and it is off while one is open.
+  assert.match(recs, /askDelete\(\[\.\.\.selected\]\)/);
+  assert.match(recs, /disabled=\{deleting !== null\}/);
 });
 
 // ---- the source: the word buttons that remain are the decision ----
@@ -396,11 +401,11 @@ const wordButtons = {
   "pages/AppleCalendarHelpPage.tsx": ["{helpTexts.backToConnections}", "{l.caption}"],
   "pages/AssignmentDoneParts.tsx": ["{pageDoneLabel(props.done)}", "{button.label}", "Открыть"],
   "pages/CalendarSync.tsx": ["{calendarTexts.sync}"],
-  // TASK-364 (parallel task): its call-link card keeps words; see the TASK-368 follow-ups.
+  // TASK-371: the call-link card keeps «Подключиться», «Добавить ссылку», the field's «Сохранить»/«Отмена» and the two «Открыть «Предметы»»
+  // (the only way out of a refusal that the subject's page fixes); «Изменить», «Удалить», «Вернуть», «Повторить» are icons.
   "pages/CallLinkParts.tsx": [
-    "{callLinkTexts.retry}", "{callLinkTexts.undo}", "{reviving ? callLinkTexts.revive : saveLabel(card)}", "{callLinkTexts.cancel}", "{callLinkTexts.openSubjects}",
-    "{callLinkTexts.join}", "{callLinkTexts.add}", "{callLinkTexts.openSubjects}", "{callLinkTexts.change}", "{callLinkTexts.add}", "{callLinkTexts.join}",
-    "{callLinkTexts.change}", "{callLinkTexts.clear}",
+    "{reviving ? callLinkTexts.revive : saveLabel(card)}", "{callLinkTexts.cancel}", "{callLinkTexts.openSubjects}",
+    "{callLinkTexts.join}", "{callLinkTexts.add}", "{callLinkTexts.openSubjects}", "{callLinkTexts.add}", "{callLinkTexts.join}",
   ],
   "pages/ConnectionsPage.tsx": ["Сохранить адрес", "Сохранить", "Проверить почту"],
   "pages/DiagnosticsPage.tsx": ["{check.label}", "{save.label}"],
@@ -422,7 +427,7 @@ const wordButtons = {
   "pages/RecipientParts.tsx": ["{action.label}"],
   "pages/RecordingImportPanel.tsx": ["{importTexts.choose}", "{importTexts.close}"],
   "pages/RecordingRow.tsx": ["{i.label}", "{i.label}", "{i.label}", "{i.label}", "{fixTexts.connections}", "{fixTexts.retry}", "{i.label}", "{i.label}"],
-  "pages/RecordingsPage.tsx": ["{importTexts.open}", "{manualStartTexts.open}", "{manualStartTexts.start}", "{manualStartTexts.cancel}", "{deleteTexts.selectedDelete}", "{emptyTexts.schedule}", "{failed}"],
+  "pages/RecordingsPage.tsx": ["{importTexts.open}", "{manualStartTexts.open}", "{manualStartTexts.start}", "{manualStartTexts.cancel}", "{emptyTexts.schedule}", "{failed}"],
   "pages/SchedulePage.tsx": ["Выбрать файл…", "{reviewTexts.open}", "{folded ? listTexts.expandAll : listTexts.collapseAll}", "{applyLabel(p)}", "Отмена"],
   "pages/ScheduleSubjectsReview.tsx": ["{stepLabels[s]}", "{main.label}", "{reviewTexts.close}", "{label}", '{reviewTexts.open} {props.groups !== undefined && <span className="sched-cnt num">{props.groups}</span>}', "{reviewTexts.retry}", "{props.addLabel}", "{reviewTexts.retry}", "{reviewTexts.importSchedule}"],
   "pages/SecretSlot.tsx": ["{labels.save}", "{labels.remove}"],
@@ -488,7 +493,7 @@ test("the converted places draw their small buttons through IconAction and their
     "pages/FileRows.tsx", "pages/DropZone.tsx", "pages/AssignmentDoneParts.tsx", "pages/TodayParts.tsx", "pages/JournalParts.tsx", "pages/SummaryParts.tsx",
     "pages/LectureTextParts.tsx", "pages/TranscriptPage.tsx", "pages/KnowledgeParts.tsx", "pages/KnowledgeBasePage.tsx", "pages/OwnNotesParts.tsx", "pages/PageViewer.tsx",
     "pages/TeachersBlock.tsx", "pages/TicketsPage.tsx", "pages/TicketsParts.tsx", "pages/ModelsPage.tsx", "pages/ScheduleSubjectsReview.tsx",
-    "pages/SubjectRemoval.tsx", "pages/RecordingsPage.tsx", "pages/ConnectionsPage.tsx", "pages/HomeworkPage.tsx",
+    "pages/SubjectRemoval.tsx", "pages/RecordingsPage.tsx", "pages/ConnectionsPage.tsx", "pages/HomeworkPage.tsx", "pages/CallLinkParts.tsx",
   ]) {
     const code = src(file);
     assert.ok(count(code, "<IconAction") > 0, file);

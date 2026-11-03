@@ -210,11 +210,15 @@ test("cardButtonIcon: the secondary buttons are icons, the main actions keep wor
   assert.equal(cardButtonIcon("stop", "progress"), "stop");
   assert.equal(cardButtonIcon("stop", "waiting"), "stop");
   assert.equal(cardButtonIcon("cancel", "stopped"), "x");
-  // Yes / no of the plan and the forward buttons of a stopped request are words.
+  // Yes / no of the plan are words.
   assert.equal(cardButtonIcon("cancel", "plan"), null);
-  for (const id of ["approve", "continue", "resume", "retry", "restart", "resend", "rerun"]) {
-    assert.equal(cardButtonIcon(id, "stopped"), null, id);
+  assert.equal(cardButtonIcon("approve", "plan"), null);
+  // TASK-371: the forward buttons of the small stopped / problem lines are icons: another try is the retry glyph, «Продолжить» a play.
+  for (const id of ["continue", "retry", "restart", "rerun", "resend"]) {
+    assert.equal(cardButtonIcon(id, "stopped"), "retry", id);
+    assert.equal(cardButtonIcon(id, "problem"), "retry", id);
   }
+  assert.equal(cardButtonIcon("resume", "stopped"), "play");
   // Keyed on what the button does, never on its Russian words.
   assert.equal(undoIcon("undo"), "undo");
   assert.equal(undoIcon("stop"), "stop");
@@ -270,16 +274,25 @@ test("waiting and progress rows: «Остановить» is the stop icon", () 
   assert.ok(isOff(request([{ type: "waiting", buttons: [{ id: "stop", label: "Остановить" }] }], { busy: true }), "Остановить"));
 });
 
-test("stopped line: «Продолжить» keeps its word, «Отменить запрос» is a cross", () => {
+test("stopped and problem lines (TASK-371): «Продолжить», «Повторить», «Отправить ещё раз» and «Отменить запрос» are icons; the line says what happened", () => {
   const out = request([{ type: "stopped", text: "Остановлено", buttons: [{ id: "resume", label: "Продолжить" }, { id: "cancel", label: "Отменить запрос" }] }]);
-  assert.deepEqual(ariaLabels(out), ["Отменить запрос"]);
-  assert.match(visibleText(out), /Остановлено Продолжить/);
-  assert.doesNotMatch(visibleText(out), /Отменить запрос/);
-  assert.match(out, /class="ia ia-danger"/);
-  // A request refused as busy: stopping the blocker is an icon, sending again is the word.
+  assert.deepEqual(ariaLabels(out), ["Продолжить", "Отменить запрос"]);
+  assert.equal(visibleText(out), "Остановлено", "the sentence is the only visible text");
+  assert.match(out, /<use href="#i-play"><\/use>/);
+  assert.match(buttonTag(out, "Отменить запрос"), /ia-danger/);
+  assert.doesNotMatch(buttonTag(out, "Продолжить"), /ia-danger/);
+  // Another try: the retry glyph, tooltip and name are the old word; busy turns it off.
+  const retry = request([{ type: "stopped", text: "Не получилось выполнить шаг", buttons: [{ id: "retry", label: "Повторить" }] }]);
+  assert.deepEqual(ariaLabels(retry), ["Повторить"]);
+  assert.match(retry, /<use href="#i-retry"><\/use><\/svg><span class="ia-tip" aria-hidden="true">Повторить<\/span>/);
+  assert.equal(visibleText(retry), "Не получилось выполнить шаг");
+  assert.ok(isOn(retry, "Повторить"));
+  assert.ok(isOff(request([{ type: "problem", text: "Шаг не удался.", buttons: [{ id: "retry", label: "Повторить" }] }], { busy: true }), "Повторить"));
+  // A request refused as busy: stopping the blocker and sending again are both icons (the sentence says why).
   const problem = request([{ type: "problem", text: "Занято", buttons: [{ id: "stop", label: "Остановить" }, { id: "resend", label: "Отправить ещё раз" }] }]);
-  assert.deepEqual(ariaLabels(problem), ["Остановить"]);
-  assert.match(visibleText(problem), /Отправить ещё раз/);
+  assert.deepEqual(ariaLabels(problem), ["Остановить", "Отправить ещё раз"]);
+  assert.equal(visibleText(problem), "Занято");
+  assert.match(problem, /<use href="#i-retry"><\/use>/);
 });
 
 test("action line: «Открыть» (in the app: a chevron that names the task) and «Отменить» are icons; «Отменить всё» under several lines is a word", () => {
@@ -318,13 +331,19 @@ test("an undo offer is an icon in the default colour; the other offers are the c
   assert.match(visibleText(record), /Начать запись/);
 });
 
-test("a card that could not be read: the only way out is a word button, as before the icons", () => {
+function assertRetry(out) {
+  assert.match(buttonTag(out, "Повторить"), /class="ia"/);
+  assert.match(out, /<use href="#i-retry"><\/use><\/svg><span class="ia-tip" aria-hidden="true">Повторить<\/span>/);
+}
+
+test("a card that could not be read (TASK-371): the retry is an icon next to the reason, as everywhere in the chat", () => {
   const confirm = html(h(ConfirmCardPending, { error: "Не удалось загрузить", onReload: noop }));
-  assert.deepEqual(ariaLabels(confirm), []);
-  assert.match(confirm, /class="btn sm"[^>]*>Повторить</);
+  assert.deepEqual(ariaLabels(confirm), ["Повторить"]);
+  assertRetry(confirm);
   const schedule = html(h(ScheduleCardPending, { error: "Не удалось загрузить", onReload: noop }));
-  assert.deepEqual(ariaLabels(schedule), []);
-  assert.match(schedule, /class="btn sm"[^>]*>Повторить</);
+  assert.deepEqual(ariaLabels(schedule), ["Повторить"]);
+  assertRetry(schedule);
+  assert.doesNotMatch(visibleText(schedule), /Повторить/);
   // The error text stays as the reason; without a reload there is no button at all.
   assert.match(visibleText(schedule), /Не удалось загрузить/);
   assert.equal(count(html(h(ScheduleCardPending, { error: "Не удалось загрузить" })), "<button"), 0);
@@ -387,6 +406,20 @@ test("work card: the plan editor adds with an icon and saves with a word; a runn
   assert.match(stopping, /ia-spin/);
 });
 
+test("plan editor rows (TASK-371): up, down and remove are IconAction (one icon-button component), named by the row number, tooltip = the short action", () => {
+  const sections = [1, 2].map((n) => ({ number: n, title: `Раздел ${n}`, words: 300, note: "", written: false, paragraphs: [], sources: [], kind: "", part: "", bullets: [], columns: [] }));
+  const out = body(work({ writing: writing({ step: "approve", result: "", sections }) }));
+  for (const label of ["Выше: 1", "Ниже: 1", "Убрать раздел: 1", "Выше: 2", "Ниже: 2", "Убрать раздел: 2"]) {
+    assert.match(buttonTag(out, label) ?? "", /class="ia"/, label);
+  }
+  assert.match(out, /<span class="ia-tip" aria-hidden="true">Убрать раздел<\/span>/);
+  assert.ok(isOff(out, "Выше: 1"), "the first row cannot go up");
+  assert.ok(isOff(out, "Ниже: 2"), "the last row cannot go down");
+  assert.ok(isOn(out, "Ниже: 1"));
+  assert.doesNotMatch(out, /icon-btn/, "the round IconButton is no longer drawn by the agent panel");
+  assert.equal(count(src("agent/WorkCard.tsx"), "IconButton"), 0);
+});
+
 test("work card, revise and edit modes end with the word «Отмена» (an inline form's own button)", () => {
   const code = src("agent/WorkCard.tsx");
   assert.equal(count(code, "{workTexts.cancel}"), 2);
@@ -418,12 +451,14 @@ test("turnkey cards: the edit of the understanding is a pencil, its save and can
 // ---- the source: no word buttons left in the small places of the panel ----
 
 // The word buttons that remain in src/agent, each with the reason: the main action of its card, a yes/no pair, a dialog button,
-// an inline form's own buttons («Пропустить», «Сохранить», «Отмена»), the only way out of an error («Повторить» of a card that
-// could not be read), and the bulk «Отменить всё» (it spends several results).
+// an inline form's own buttons («Пропустить», «Сохранить», «Отмена»), the way on out of a refusal («Открыть задание»,
+// «Открыть «Предметы»», the primary «Повторить» of a work card), and the bulk «Отменить всё» (it spends several results).
+// TASK-371: the small «Повторить» of the chat (stopped and problem lines, a card that could not be read) is an icon now.
 const wordButtons = new Map([
   ["agent/AgentCards.tsx", ["offer.label", "b.label", "texts.reviseSend", "card.submit", "card.skip", "b.label", "texts.undoAll"]],
-  ["agent/ConfirmCard.tsx", ["confirmTexts.openAssignment", "confirmTexts.openTasks", "m.noLabel", "m.yesLabel", "confirmTexts.reload"]],
-  ["agent/ScheduleCard.tsx", ["scheduleTexts.reload", "scheduleTexts.openSubjects", "scheduleTexts.no", "main.label", "scheduleTexts.retry"]],
+  // TASK-371: the reload of a card that could not be read is a retry icon now; the buttons left are the card's own answers and its way on.
+  ["agent/ConfirmCard.tsx", ["confirmTexts.openAssignment", "confirmTexts.openTasks", "m.noLabel", "m.yesLabel"]],
+  ["agent/ScheduleCard.tsx", ["scheduleTexts.openSubjects", "scheduleTexts.no", "main.label", "scheduleTexts.retry"]],
   [
     "agent/TurnkeyCards.tsx",
     ["props.problem === \"\" ? turnkeyTexts.triageStart : turnkeyTexts.retry", "turnkeyTexts.answer", "turnkeyTexts.skip", "turnkeyTexts.confirm", "turnkeyTexts.save", "turnkeyTexts.cancel", "turnkeyTexts.askSend"],

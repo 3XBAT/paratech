@@ -1137,8 +1137,9 @@ function buttons(ids: ButtonId[]): ButtonModel[] {
 
 // ---- Words or icons on the buttons of the cards (TASK-368) ----
 // Owner rule: a small or secondary button is an icon with a tooltip (its old words) and an aria-label. The words stay on
-// the main action of a card («Да, выполнить», «Продолжить», «Повторить» of a stopped request) and on its yes/no pair
-// («Не выполнять»).
+// the main action of a card («Да, выполнить») and on its yes/no pair («Не выполнять»). TASK-371 (owner 03.11): the stopped
+// and problem lines of the chat are small lines next to a message, not cards with a main action, so their «Повторить»,
+// «Продолжить» and «Отправить ещё раз» are icons too (the line itself says what happened).
 
 export type ButtonCard = "plan" | "progress" | "waiting" | "stopped" | "problem";
 
@@ -1152,6 +1153,15 @@ export function cardButtonIcon(id: ButtonId, card: ButtonCard): IconName | null 
     case "cancel":
       // «Не выполнять» answers the plan's question; «Отменить запрос» of a stopped request is a way out.
       return card === "plan" ? null : "x";
+    case "continue":
+    case "retry":
+    case "restart":
+    case "rerun":
+    case "resend":
+      // Another try of the same request (the words «Повторить» / «Отправить ещё раз»).
+      return "retry";
+    case "resume":
+      return "play";
     default:
       return null;
   }
