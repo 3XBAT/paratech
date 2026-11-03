@@ -8029,7 +8029,7 @@
                 "npm run test и run build"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-365",
