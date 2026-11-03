@@ -39,8 +39,6 @@ export const pairsTexts = {
   exportEmpty: "Нельзя сохранить: у предмета пока нет пар с конспектом.",
   more: "Ещё действия с парами",
   moreTitle: "Ещё действия с парами",
-  /** The reason the forms of «Пары» do not switch while a recording is being imported (the panel would be lost with its result). */
-  importBusy: "Недоступно, пока идёт импорт записи.",
 } as const;
 
 export const tasksTexts = {

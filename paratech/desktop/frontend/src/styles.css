@@ -282,6 +282,8 @@ button.row-open:not(.btn) { padding: 0; border: 0; background: none; color: inhe
 .rec-import-note { display: flex; align-items: center; gap: 8px; }
 .rec-import-panel .seg { margin-bottom: 12px; }
 .rec-import-panel .acts { margin-top: 12px; }
+/* While the import runs the form is quiet, like any disabled control. */
+.rec-import-panel .input:disabled, .rec-import-panel .sel:disabled { opacity: .5; cursor: not-allowed; }
 .row-imported { display: block; color: var(--muted); }
 .head .head-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 .statusbar span { display: inline-flex; align-items: center; gap: 8px; }
@@ -298,6 +300,8 @@ button.row-open:not(.btn) { padding: 0; border: 0; background: none; color: inhe
 .background-failed { margin: -4px 0 8px; padding: 0 16px; }
 /* The start and import panels wrap in one element only to find the first control when the empty state hands over. */
 .rec-panels { display: contents; }
+/* The wrapper of «Начать запись» is as high as its button: a block would add the line's descender below the inline-flex button, so it stood taller than «Импортировать запись» beside it. */
+.rec-start { display: flex; }
 .rec-empty-reason { margin: 8px 0 0; }
 /* A dialog whose «Отмена» is off takes the focus itself (see Dialog): no ring around the whole box. */
 dialog.dialog:focus { outline: none; }

@@ -7,6 +7,7 @@ import { todayApi } from "../bindings/today";
 import { callByName } from "../bindings/runtime";
 import { actionErrorText, loadErrorText } from "../activityView";
 import { CollapsibleList } from "../CollapsibleList";
+import { firstControlSelector } from "../disclosureFocus";
 import { type ListStates, stateOf, withState } from "../listView";
 import { manualStartTexts, startButton, startOutcome } from "../manualStartView";
 import type { PageId } from "../nav";
@@ -58,6 +59,7 @@ import { useOpenLesson } from "../openLesson";
 import { RecordingDeleteDialog } from "./RecordingDeleteDialog";
 import { RecordingImportPanel } from "./RecordingImportPanel";
 import { JobRow, RecordingRow } from "./RecordingRow";
+import { useDisclosureFocus } from "./useDisclosureFocus";
 
 const pollMs = 3000;
 
@@ -203,6 +205,10 @@ export function RecordingsPage({
 
   // «Импортировать запись» (TASK-162): the panel; the mark of an imported row comes from the recording's origin.
   const [importOpen, setImportOpen] = useState(false);
+  // Declared before the effect below: the import panel's own focus move (into it, back to its button) goes first.
+  const importFocus = useDisclosureFocus(importOpen);
+  // While an import runs the opener stays off: closing the panel would lose the result.
+  const [importBusy, setImportBusy] = useState(false);
   const loadLessons = useCallback(async () => (await today.today()).lessons, [today]);
 
   // The silent-source advice of the running recording (TASK-082): the click running per recording, and the problem of
@@ -403,10 +409,13 @@ export function RecordingsPage({
   const panelWasOpen = useRef(false);
 
   // The clicked button is gone with the empty state: the focus follows into the panel, and back to the state on closing.
+  // The import panel already moved it (useDisclosureFocus: into the panel, back to «Импортировать запись»): then it stays.
   useEffect(() => {
     if (noRecordings && panelOpen !== panelWasOpen.current) {
       const target = panelOpen ? panelsRef.current : emptyRef.current;
-      target?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled)")?.focus();
+      if (!target?.contains(document.activeElement)) {
+        target?.querySelector<HTMLElement>(firstControlSelector)?.focus();
+      }
     }
     panelWasOpen.current = panelOpen;
   }, [panelOpen, noRecordings]);
@@ -417,7 +426,7 @@ export function RecordingsPage({
   useEffect(() => {
     if (focusStart.current) {
       focusStart.current = false;
-      panelsRef.current?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled)")?.focus();
+      panelsRef.current?.querySelector<HTMLElement>(firstControlSelector)?.focus();
     }
     if (openStart) {
       onStartTaken?.();
@@ -425,7 +434,13 @@ export function RecordingsPage({
   }, []);
 
   const importButton = (
-    <Button icon="up" aria-expanded={importOpen} onClick={() => setImportOpen((open) => !open)}>
+    <Button
+      icon="up"
+      {...importFocus.openerProps}
+      disabled={importBusy}
+      disabledReason={importTexts.importBusy}
+      onClick={() => setImportOpen((open) => !open)}
+    >
       {importTexts.open}
     </Button>
   );
@@ -468,9 +483,11 @@ export function RecordingsPage({
       <div ref={panelsRef} className="rec-panels">
         {importOpen && (
           <RecordingImportPanel
+            id={importFocus.panelId}
             api={importing}
             loadLessons={loadLessons}
             onImported={() => void refresh()}
+            onBusyChange={setImportBusy}
             onClose={() => setImportOpen(false)}
           />
         )}

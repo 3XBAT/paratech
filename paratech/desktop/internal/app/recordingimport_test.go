@@ -156,6 +156,64 @@ func TestImportOldRecordingThroughTheWiredCore(t *testing.T) {
 	}
 }
 
+// TASK-303: the start deletes an import copy a crash left without its recording once it is old; a young copy, one
+// with its recording and the files of a capture stay.
+func TestStartupSweepsImportCopiesWithoutARecording(t *testing.T) {
+	ctx := context.Background()
+	e, _ := testEnv(t)
+	dir := t.TempDir()
+	u := openUICore(t, dir, e)
+
+	kept, err := recording.NewImported(recording.ImportSpec{
+		ID: "imp-kept", StartedAt: time.Now().Add(-48 * time.Hour), SHA256: fmt.Sprintf("%064x", 7),
+		Audio: recording.ImportedAudio{Format: recording.FormatWAV},
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlite.NewRecordingRepository(u.c.db).Save(ctx, kept); err != nil {
+		t.Fatal(err)
+	}
+
+	recordings := filepath.Join(dir, artifactsDir, "recordings")
+	old := time.Now().Add(-time.Hour)
+	files := []struct {
+		name string
+		at   time.Time
+		gone bool
+	}{
+		{"imp-crashed.wav", old, true},
+		{"imp-young.mp3", time.Now(), false},
+		{"imp-kept.wav", old, false},
+		{"abcdefghijklmnopqrstuvwxyz.wav", old, false}, // a capture track
+	}
+	for _, f := range files {
+		p := filepath.Join(recordings, f.name)
+		if err := os.WriteFile(p, []byte("audio"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, f.at, f.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chunks := filepath.Join(recordings, "imp-dir.wav") // a directory is never a copy
+	if err := os.Mkdir(chunks, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	u.start(t)
+
+	for _, f := range files {
+		_, err := os.Stat(filepath.Join(recordings, f.name))
+		if gone := errors.Is(err, os.ErrNotExist); gone != f.gone {
+			t.Errorf("%s: gone %v (%v), want %v", f.name, gone, err, f.gone)
+		}
+	}
+	if _, err := os.Stat(chunks); err != nil {
+		t.Errorf("the directory: %v", err)
+	}
+}
+
 // A file whose content is not audio is refused with the page's text, whatever its name; nothing is stored.
 func TestImportRefusesNonAudioThroughTheWiredCore(t *testing.T) {
 	ctx := context.Background()

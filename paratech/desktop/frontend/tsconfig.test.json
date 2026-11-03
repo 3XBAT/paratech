@@ -121,6 +121,8 @@
     "src/bindings/recordingImport.ts",
     "src/recordingImportView.ts",
     "src/pages/RecordingImportPanel.tsx",
+    "src/disclosureFocus.ts",
+    "src/pages/useDisclosureFocus.ts",
     "src/assignmentDoneView.ts",
     "src/doneRunner.ts",
     "src/ui/Toast.tsx",

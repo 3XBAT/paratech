@@ -1,7 +1,6 @@
 package recordingimport
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -59,9 +58,9 @@ func New(d Deps) (*Service, error) {
 }
 
 // Import makes the file of req a COMPLETED recording of its lecture and enqueues its transcription. The same bytes
-// again return the recording made from them (Existing), whatever the lecture named now. Refusals: ErrInvalidRequest,
-// ErrLessonNotFound, ErrUnreadable, ErrChanged, ErrDeleting, ErrStorage and the domain's errors of the file and the
-// lecture (see errors.go). On any refusal after the copy was written the copy is deleted.
+// again return the recording made from them (Existing), whatever the lecture named now, without a second copy.
+// Refusals: ErrInvalidRequest, ErrLessonNotFound, ErrUnreadable, ErrChanged, ErrDeleting, ErrStorage and the domain's
+// errors of the file and the lecture (see errors.go). On any refusal after the copy was written the copy is deleted.
 func (s *Service) Import(ctx context.Context, req Request) (Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -114,6 +113,18 @@ func (s *Service) importFile(ctx context.Context, req Request) (Result, error) {
 	if audio, err = walkWAVChunks(ctx, src, audio, len(head)); err != nil {
 		return Result{}, err
 	}
+	// The digest first, read from the original: the same bytes again are found before a second copy is written.
+	sum, frames, err := digestOf(ctx, src, audio, size)
+	if err != nil {
+		return Result{}, err
+	}
+	if audio, err = audio.Counted(frames); err != nil {
+		return Result{}, err
+	}
+	if existing, err := s.importedBefore(ctx, sum); err != nil || existing != nil {
+		return Result{Recording: existing, Existing: existing != nil}, err
+	}
+
 	free, err := s.space.FreeBytes(ctx)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrStorage, err)
@@ -122,34 +133,65 @@ func (s *Service) importFile(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	}
 
-	id := s.ids.NewRecordingID()
+	id := importedID(s.ids.NewRecordingID())
 	ref, err := recording.ImportedTrackRef(id, audio.Format)
 	if err != nil {
 		return Result{}, err
 	}
-	h := sha256.New()
-	var sink io.Writer = h
-	var frames *recording.MP3FrameCounter
-	if audio.NeedsFrameCount() {
-		frames = recording.NewMP3FrameCounter(audio)
-		sink = io.MultiWriter(h, frames)
+	if _, err := src.Seek(0, io.SeekStart); err != nil {
+		return Result{}, unreadable(ctx, err)
 	}
-	content := io.TeeReader(exactReader(ctx, io.MultiReader(bytes.NewReader(head), sourceReader{src}), size), sink)
-	if err := s.store.Write(ctx, ref, content); err != nil {
+	h := sha256.New()
+	if err := s.store.Write(ctx, ref, io.TeeReader(exactReader(ctx, sourceReader{src}, size), h)); err != nil {
 		return Result{}, copyError(ctx, err)
 	}
-	if audio, err = audio.Counted(frames); err != nil {
+	if hex.EncodeToString(h.Sum(nil)) != sum {
 		s.discard(ctx, ref)
-		return Result{}, err
+		return Result{}, fmt.Errorf("%w: its bytes differ from the ones read before the copy", ErrChanged)
 	}
 
 	res, err := s.save(ctx, recording.ImportSpec{
-		ID: id, LessonID: a.lesson, Lesson: a.snap, StartedAt: a.start, Audio: audio, SHA256: hex.EncodeToString(h.Sum(nil)),
+		ID: id, LessonID: a.lesson, Lesson: a.snap, StartedAt: a.start, Audio: audio, SHA256: sum,
 	})
 	if err != nil || res.Existing {
 		s.discard(ctx, ref)
 	}
 	return res, err
+}
+
+// digestOf reads the whole original from its start and returns its SHA-256 and, for an MP3 that needs them, its
+// frames counted (a file too long is then refused before the copy). It fails as the copy does when the file has more
+// or fewer bytes than size, or cannot be read.
+func digestOf(ctx context.Context, src io.ReadSeeker, a recording.ImportedAudio, size int64) (string, *recording.MP3FrameCounter, error) {
+	if _, err := src.Seek(0, io.SeekStart); err != nil {
+		return "", nil, unreadable(ctx, err)
+	}
+	h := sha256.New()
+	var sink io.Writer = h
+	var frames *recording.MP3FrameCounter
+	if a.NeedsFrameCount() {
+		frames = recording.NewMP3FrameCounter(a)
+		sink = io.MultiWriter(h, frames)
+	}
+	if _, err := io.Copy(sink, exactReader(ctx, sourceReader{src}, size)); err != nil {
+		return "", nil, copyError(ctx, err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), frames, nil
+}
+
+// importedBefore returns the recording already imported from the bytes of the digest, nil when there is none. One
+// being deleted is ErrDeleting.
+func (s *Service) importedBefore(ctx context.Context, sum string) (*recording.Recording, error) {
+	rec, err := s.recordings.GetBySourceSHA256(ctx, sum)
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("%w: %w", ErrStorage, err)
+	case rec.Deleting():
+		return nil, fmt.Errorf("%w: %s", ErrDeleting, rec.ID())
+	}
+	return rec, nil
 }
 
 // anchor reads the lecture of req: the past lesson, or the date and names the student gave.

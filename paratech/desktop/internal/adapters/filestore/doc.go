@@ -1,5 +1,5 @@
 // Package filestore is the file artifact adapter: it implements the ArtifactStore ports of the use cases
-// (Open, Write, List, Size, Delete) on a private data root (hard rule 5, ARCH-30..33). Path resolves a reference to
+// (Open, Write, List, ListKind, Size, ModTime, Delete) on a private data root (hard rule 5, ARCH-30..33). Path resolves a reference to
 // the OS path of an existing file for the STT sidecar, with the same link checks. ExportHomework is the
 // homeworkflow.HomeworkExporter: it writes a confirmed export command only to the export file of its assignment.
 //

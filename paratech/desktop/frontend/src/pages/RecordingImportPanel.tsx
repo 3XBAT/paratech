@@ -28,6 +28,8 @@ export function RecordingImportPanel(props: {
   loadLessons: () => Promise<LessonChoice[]>;
   /** The subject of the page the panel opens on ("" for none): prefilled, and it narrows the lessons. */
   subject?: string;
+  /** The id of the panel: the opening button points to it with aria-controls (see useDisclosureFocus). */
+  id?: string;
   now?: () => number;
   /** A recording was imported (or was already there): the page refreshes; the row is marked by the recording's origin. */
   onImported: (recordingId: string, existing: boolean) => void;
@@ -125,15 +127,17 @@ export function RecordingImportPanel(props: {
   ];
 
   return (
-    <Card className="box rec-import-panel" label={importTexts.title}>
+    <Card id={props.id} className="box rec-import-panel" label={importTexts.title}>
       <h2>{importTexts.title}</h2>
       <span className="small muted box-desc">{importTexts.explain}</span>
 
       <h3 className="rec-import-step">{importTexts.lectureStep}</h3>
-      <Segmented label={importTexts.modeLabel} options={modes} value={form.mode} onChange={(mode) => change({ mode })} />
+      <Segmented label={importTexts.modeLabel} options={modes} value={form.mode} disabled={busy} onChange={(mode) => change({ mode })} />
       {form.mode === "lesson" ? (
         options.length === 0 ? (
-          <p className="small muted">{lessons === null ? "Загрузка…" : importTexts.lessonsEmpty}</p>
+          <p className="small muted" role={lessons === null ? "status" : undefined}>
+            {lessons === null ? importTexts.loading : importTexts.lessonsEmpty}
+          </p>
         ) : (
           <Field label={importTexts.lessonLabel}>
             {(id) => (
@@ -158,13 +162,13 @@ export function RecordingImportPanel(props: {
                   type="date"
                   value={form.date}
                   max={dateInput(new Date(clock()))}
-                  readOnly={busy}
+                  disabled={busy}
                   onChange={(e) => change({ date: e.target.value })}
                 />
               )}
             </Field>
             <Field label={importTexts.timeLabel}>
-              {(id) => <Input id={id} type="time" value={form.time} readOnly={busy} onChange={(e) => change({ time: e.target.value })} />}
+              {(id) => <Input id={id} type="time" value={form.time} disabled={busy} onChange={(e) => change({ time: e.target.value })} />}
             </Field>
           </div>
           <Field label={importTexts.subjectLabel}>
@@ -173,7 +177,7 @@ export function RecordingImportPanel(props: {
                 id={id}
                 value={form.subject}
                 maxLength={maxNameLength}
-                readOnly={busy}
+                disabled={busy}
                 onChange={(e) => change({ subject: e.target.value })}
               />
             )}
@@ -191,7 +195,7 @@ export function RecordingImportPanel(props: {
           </Field>
           <Field label={importTexts.titleLabel}>
             {(id) => (
-              <Input id={id} value={form.title} maxLength={maxNameLength} readOnly={busy} onChange={(e) => change({ title: e.target.value })} />
+              <Input id={id} value={form.title} maxLength={maxNameLength} disabled={busy} onChange={(e) => change({ title: e.target.value })} />
             )}
           </Field>
         </>
@@ -214,7 +218,15 @@ export function RecordingImportPanel(props: {
         </ResultLine>
       )}
       <div className="acts start">
-        <Button variant="primary" icon="up" busy={busy} busyLabel={importTexts.importing} disabled={busy} onClick={() => void onChoose()}>
+        {/* Not natively disabled while busy: the focus is on this button, and a disabled one would drop it to <body> when the file dialog closes. */}
+        <Button
+          variant="primary"
+          icon="up"
+          busy={busy}
+          busyLabel={importTexts.importing}
+          aria-disabled={busy || undefined}
+          onClick={() => (busy ? undefined : void onChoose())}
+        >
           {importTexts.choose}
         </Button>
         <Button variant="ghost" disabled={busy} onClick={props.onClose}>

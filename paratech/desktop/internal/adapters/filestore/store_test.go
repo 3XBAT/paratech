@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"paratech/desktop/internal/domain/shared"
 )
@@ -575,6 +576,45 @@ func TestList(t *testing.T) {
 	}
 	if got, err := s.List(ctx, empty); err != nil || len(got) != 0 {
 		t.Errorf("List(empty dir) = %v, %v", got, err)
+	}
+}
+
+// ListKind lists the kind directory itself (no reference names it); ModTime reads a file's time, not a directory's.
+func TestListKindAndModTime(t *testing.T) {
+	s, root := newStore(t)
+	ctx := context.Background()
+	put(t, s, ref(t, shared.ArtifactRecordings, "r2.wav"), "x")
+	put(t, s, ref(t, shared.ArtifactRecordings, "r1/chunk-0001"), "x")
+	put(t, s, ref(t, shared.ArtifactTranscripts, "t1"), "x")
+	crashDuringWrite(t, s, ref(t, shared.ArtifactRecordings, "r3.wav"), "x") // a temporary file, hidden
+
+	got, err := s.ListKind(ctx, shared.ArtifactRecordings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, r := range got {
+		names = append(names, r.String())
+	}
+	if want := "recordings/r1 recordings/r2.wav"; strings.Join(names, " ") != want {
+		t.Errorf("ListKind = %v, want %s", names, want)
+	}
+	if _, err := s.ListKind(ctx, "elsewhere"); !errors.Is(err, shared.ErrInvalidArtifactRef) {
+		t.Errorf("ListKind(unknown kind) = %v", err)
+	}
+
+	stamp := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(root, "recordings", "r2.wav"), stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	if at, err := s.ModTime(ctx, ref(t, shared.ArtifactRecordings, "r2.wav")); err != nil || !at.Equal(stamp) {
+		t.Errorf("ModTime = %v, %v; want %v", at, err, stamp)
+	}
+	if _, err := s.ModTime(ctx, ref(t, shared.ArtifactRecordings, "r1")); !errors.Is(err, shared.ErrConflict) {
+		t.Errorf("ModTime(dir) = %v, want ErrConflict", err)
+	}
+	if _, err := s.ModTime(ctx, ref(t, shared.ArtifactRecordings, "gone.wav")); !errors.Is(err, shared.ErrNotFound) {
+		t.Errorf("ModTime(missing) = %v, want ErrNotFound", err)
 	}
 }
 

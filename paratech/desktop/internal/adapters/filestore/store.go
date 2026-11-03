@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -34,6 +35,7 @@ const (
 const (
 	opOpen       = "open"
 	opSize       = "size"
+	opModTime    = "modification time"
 	opPath       = "path"
 	opList       = "list"
 	opDelete     = "delete"
@@ -194,15 +196,57 @@ func (s *Store) List(ctx context.Context, dir shared.ArtifactRef) ([]shared.Arti
 		return nil, fmt.Errorf("%w: %s is not a directory", shared.ErrConflict, dir)
 	}
 
-	d, err := s.root.Open(rel)
+	names, err := s.names(rel)
 	if err != nil {
 		return nil, mapErr(opList, dir, err)
+	}
+
+	out := make([]shared.ArtifactRef, 0, len(names))
+	for _, n := range names {
+		if child, err := dir.Child(n); err == nil {
+			out = append(out, child)
+		}
+	}
+
+	return out, nil
+}
+
+// ListKind returns the entries directly in the directory of kind (for example recordings/<id>.wav and the chunk
+// directory recordings/<id>), sorted by name and skipped as in List.
+func (s *Store) ListKind(ctx context.Context, kind shared.ArtifactKind) ([]shared.ArtifactRef, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !slices.Contains(kinds, kind) {
+		return nil, fmt.Errorf("%w: unknown kind %q", shared.ErrInvalidArtifactRef, kind)
+	}
+
+	names, err := s.names(string(kind))
+	if err != nil {
+		return nil, storageFail(opList+" "+string(kind), err)
+	}
+
+	out := make([]shared.ArtifactRef, 0, len(names))
+	for _, n := range names {
+		if ref, err := shared.NewArtifactRef(kind, n); err == nil {
+			out = append(out, ref)
+		}
+	}
+
+	return out, nil
+}
+
+// names reads the directory rel and returns its entry names sorted, without temporary files and links.
+func (s *Store) names(rel string) ([]string, error) {
+	d, err := s.root.Open(rel)
+	if err != nil {
+		return nil, err
 	}
 
 	entries, err := d.ReadDir(-1)
 	_ = d.Close()
 	if err != nil {
-		return nil, mapErr(opList, dir, err)
+		return nil, err
 	}
 
 	names := make([]string, 0, len(entries))
@@ -214,15 +258,22 @@ func (s *Store) List(ctx context.Context, dir shared.ArtifactRef) ([]shared.Arti
 	}
 
 	sort.Strings(names)
+	return names, nil
+}
 
-	out := make([]shared.ArtifactRef, 0, len(names))
-	for _, n := range names {
-		if child, err := dir.Child(n); err == nil {
-			out = append(out, child)
-		}
+// ModTime returns the modification time of the file; a missing file yields shared.ErrNotFound and a directory
+// shared.ErrConflict.
+func (s *Store) ModTime(ctx context.Context, ref shared.ArtifactRef) (time.Time, error) {
+	_, fi, err := s.lookup(ctx, opModTime, ref, false)
+	if err != nil {
+		return time.Time{}, err
 	}
 
-	return out, nil
+	if fi.IsDir() {
+		return time.Time{}, isDirErr(ref)
+	}
+
+	return fi.ModTime(), nil
 }
 
 // Delete removes a file or a whole directory tree. A missing target is not an error. If the target itself is a
