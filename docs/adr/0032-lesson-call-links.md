@@ -88,3 +88,17 @@ has no link. Links open today only through `adapters/weblink` (`explorer.exe`, s
 - A call service missing from the list is not taken from the calendar; the student can still type its link.
 - Context map (`docs/architecture.md` §12): no new context or aggregate; the `schedule` row names the link and
   `joinlink`, the `library` row the subject link. New use case `cases/calllinks`.
+
+## Addendum 2026-11-03 (owner, TASK-364): one link per subject, for now
+- Built: only the subject's link. `subject.CallLink` (own copy of the rule, cross-checked against `ParseCallLink` in
+  `desktop/tests`), `SetCallLink`/`ClearCallLink`, migration 0050 `subjects.call_link`; a stored value that no longer
+  parses is read as no link. Set and cleared by `cases/library` without a version check (the «Сегодня» card has none;
+  the last save wins).
+- «Сегодня»: the lesson card gets the library subject of the lesson and the host of its link; «Подключиться» opens it
+  (the page sends only the subject ID, `OpenCallLink` as above), no link → «Добавить ссылку». Recording does not
+  start. A lesson whose subject string resolves to no library subject has no link until the subject exists.
+- Postponed: the lesson's student link, the calendar link on the card, `joinlink`, the `Visible` window and
+  `cases/calllinks`. Google Calendar is not read for links.
+- Changes «The agent has no tool to read … a link»: the agent sees the link in `list_subjects` (`call_link`, the
+  canonical form; owner О14 = а), so it goes to the Hub when that tool runs. It still has no tool to set it; the
+  student saves it on the card or the subject page.
