@@ -13,6 +13,8 @@ import (
 
 	"paratech/desktop/internal/domain/library/material"
 	"paratech/desktop/internal/domain/library/note"
+	"paratech/desktop/internal/domain/library/services/filing"
+	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -110,9 +112,18 @@ func (s *Service) Add(ctx context.Context, req AddRequest) (Added, error) {
 		return res, firstErr
 	}
 
-	var n *note.Note
+	return s.attach(ctx, t, title, ids, res)
+}
+
+// attach adds the stored materials ids to the note of t (a new one with title when there is none) and reads it into
+// res; with no ids (every file a part already) the note stays as it is.
+func (s *Service) attach(ctx context.Context, t target, title string, ids []shared.MaterialID, res Added) (Added, error) {
+	var (
+		n   *note.Note
+		err error
+	)
 	switch {
-	case len(ids) == 0: // every file is a part already
+	case len(ids) == 0:
 		n = t.note
 	case t.note == nil:
 		n, err = s.create(ctx, t, title, ids)
@@ -127,6 +138,52 @@ func (s *Service) Add(ctx context.Context, req AddRequest) (Added, error) {
 	}
 	res.View, err = s.view(ctx, n)
 	return res, err
+}
+
+// AddMaterial adds a material of the library (an upload of the agent panel) to the notes of a lecture as Add adds a
+// file: one in «Входящие» is filed under the note's subject by the lesson kind first, as FileNotePart files bytes; one
+// filed elsewhere must be under that subject. A material that is a part already is «уже добавлено».
+func (s *Service) AddMaterial(ctx context.Context, req MaterialRequest) (Added, error) {
+	if req.Material.Validate() != nil {
+		return Added{}, ErrInvalidRequest
+	}
+	t, err := s.target(ctx, AddRequest{Note: req.Note, Anchor: req.Anchor, Subject: req.Subject})
+	if err != nil {
+		return Added{}, err
+	}
+	m, err := s.materials.Material(ctx, req.Material)
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return Added{}, ErrMaterialNotFound
+	case err != nil:
+		return Added{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	case !m.Active():
+		return Added{}, ErrMaterialRemoved
+	}
+	if t.note != nil && slices.Contains(t.note.Parts(), m.ID()) {
+		r := PartResult{Name: m.Name(), Material: m, Existing: true, AlreadyAdded: true}
+		return s.attach(ctx, t, "", nil, Added{Parts: []PartResult{r}})
+	}
+	if t.note != nil && len(t.note.Parts())+1 > note.MaxParts {
+		return Added{}, ErrTooManyParts // refused before the upload is filed
+	}
+	if m.InInbox() {
+		folder := subject.SystemFolderID(t.subject, filing.NoteFolder(t.anchor.LessonKind()))
+		if m, err = s.materials.Place(ctx, m.ID(), t.subject, folder); err != nil {
+			return Added{}, err
+		}
+	}
+	if err := partOf(m, t.subject); err != nil {
+		return Added{}, err
+	}
+	res := Added{Parts: []PartResult{{Name: m.Name(), Material: m, Existing: true}}}
+	return s.attach(ctx, t, cmp.Or(req.Title, m.Name()), []shared.MaterialID{m.ID()}, res)
+}
+
+// RemovePart takes a part out of a note (the agent's Undo of an add into a note that existed); the material stays in
+// the library. The last part stays: ErrNoFiles.
+func (s *Service) RemovePart(ctx context.Context, id shared.NoteID, part shared.MaterialID) (View, error) {
+	return s.changeView(ctx, id, func(n *note.Note, now time.Time) (bool, error) { return n.RemovePart(part, now) })
 }
 
 // Paste stores the text as a TXT material of at most MaxPastedBytes and adds it as Add adds a file. The same text

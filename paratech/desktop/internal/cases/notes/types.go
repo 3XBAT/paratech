@@ -67,6 +67,16 @@ type PasteRequest struct {
 	Text    string
 }
 
+// MaterialRequest is what AddMaterial needs: Note, Anchor, Subject and Title as in AddRequest, and the material of the
+// library to add (an upload the student dropped). Title "" takes the material's name.
+type MaterialRequest struct {
+	Note     shared.NoteID
+	Anchor   AnchorRef
+	Subject  shared.SubjectID
+	Title    string
+	Material shared.MaterialID
+}
+
 // PartResult is the outcome of one file of Add: Material when it is in the library, Err otherwise (a use case error
 // of this package or of the library). Existing: the same bytes were in the library already. AlreadyAdded: the material
 // was a part of the note already (or an earlier file of the request), so no second part was made.

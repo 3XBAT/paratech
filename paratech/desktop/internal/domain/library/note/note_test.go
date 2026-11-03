@@ -208,6 +208,7 @@ func TestRemovedNoteRefusesChanges(t *testing.T) {
 		"Reorder":     func(n *Note) (bool, error) { return n.Reorder([]shared.MaterialID{"m2", "m1"}, t1) },
 		"Reanchor":    func(n *Note) (bool, error) { return n.Reanchor(other, t1) },
 		"Retitle":     func(n *Note) (bool, error) { return n.Retitle("Другое", t1) },
+		"RemovePart":  func(n *Note) (bool, error) { return n.RemovePart("m1", t1) },
 	}
 	for name, change := range changes {
 		t.Run(name, func(t *testing.T) {
@@ -259,6 +260,52 @@ func TestAddParts(t *testing.T) {
 				t.Fatalf("updated at %v, changed %v", n.UpdatedAt(), changed)
 			}
 		})
+	}
+}
+
+func TestRemovePart(t *testing.T) {
+	tests := []struct {
+		name    string
+		start   []shared.MaterialID
+		remove  shared.MaterialID
+		want    []shared.MaterialID
+		changed bool
+		err     error
+	}{
+		{"the middle one, order kept", []shared.MaterialID{"m1", "m2", "m3"}, "m2", []shared.MaterialID{"m1", "m3"}, true, nil},
+		{"the last added", []shared.MaterialID{"m1", "m2"}, "m2", []shared.MaterialID{"m1"}, true, nil},
+		{"not a part", []shared.MaterialID{"m1", "m2"}, "m9", []shared.MaterialID{"m1", "m2"}, false, nil},
+		{"the only part stays", []shared.MaterialID{"m1"}, "m1", []shared.MaterialID{"m1"}, false, ErrNoParts},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := validSpec(t)
+			spec.Parts = tt.start
+			n, err := New(spec, t0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed, err := n.RemovePart(tt.remove, t1)
+			if changed != tt.changed || !errors.Is(err, tt.err) || (tt.err == nil && err != nil) {
+				t.Fatalf("RemovePart = %v, %v; want %v, %v", changed, err, tt.changed, tt.err)
+			}
+			if !slices.Equal(n.Parts(), tt.want) || n.UpdatedAt().Equal(t1) != changed {
+				t.Fatalf("parts = %v, updated %v", n.Parts(), n.UpdatedAt())
+			}
+		})
+	}
+}
+
+func TestCleanTitleIsWhatRetitleStores(t *testing.T) {
+	for _, in := range []string{"  Лекция\n3  ", strings.Repeat("я", MaxTitleRunes+5), "   ", "Своё"} {
+		n := newNote(t)
+		_, err := n.Retitle(in, t1)
+		switch got := CleanTitle(in); {
+		case got == "" && !errors.Is(err, ErrEmptyTitle):
+			t.Fatalf("CleanTitle(%q) is empty, Retitle = %v", in, err)
+		case got != "" && n.Title() != got:
+			t.Fatalf("CleanTitle(%q) = %q, Retitle stored %q", in, got, n.Title())
+		}
 	}
 }
 
