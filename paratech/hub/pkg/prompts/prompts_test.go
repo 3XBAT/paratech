@@ -383,7 +383,7 @@ func TestPanelV9CallLink(t *testing.T) {
 		"say so in one plain sentence and name a real action", "No technical details (IDs, tools, versions) in the reply.",
 		// the screens
 		"Each lesson card in «Пары дня» has «Подключиться»", "it does not start the recording",
-		"or, for a subject without a link, «Добавить ссылку»; «Записать» appears while the lesson can be recorded.",
+		"or, for a subject without a link, «Добавить ссылку», when the subject of the lesson is in «Предметы»; «Записать» appears while the lesson can be recorded.",
 		"«Предметы» → the page of the subject (always); on a day with its lesson, also",
 		"The page of a subject shows the link of its online class, where it can be changed or removed.",
 	} {
