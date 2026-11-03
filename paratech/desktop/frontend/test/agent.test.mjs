@@ -143,7 +143,8 @@ test("history, undo and undoRequest replies are parsed defensively", () => {
   assert.deepEqual(parseUndoRequest({ problem: "", actions: null }), { problem: "", actions: [] });
 });
 
-test("parseUpdate checks the shape, tolerates null lists and drops unknown cards", () => {
+// TASK-324: a card kind the panel does not know is no longer dropped; it becomes an "unknown" card (a stub in the panel).
+test("parseUpdate checks the shape, tolerates null lists and keeps an unknown card as a stub kind", () => {
   const raw = {
     threadId: "t", turn: 1, subjectId: "", lessonId: "", assignmentId: "", screen: "today", status: "DONE",
     stopReason: "", problem: "",
@@ -153,7 +154,7 @@ test("parseUpdate checks the shape, tolerates null lists and drops unknown cards
     ],
   };
   const u = parseUpdate(raw);
-  assert.equal(u.cards.length, 1);
+  assert.deepEqual(u.cards.map((c) => c.kind), ["reply", "unknown"]);
   assert.equal(u.progress, false); // an older core does not send it
   assert.equal(parseUpdate({ ...raw, progress: true, cards: [] }).progress, true);
   assert.equal(parseUpdate({ ...raw, cards: null }).cards.length, 0);

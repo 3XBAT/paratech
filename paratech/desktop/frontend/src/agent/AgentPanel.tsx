@@ -4,6 +4,9 @@ import { agentConfirmApi } from "../bindings/agentConfirm.js";
 import { answersApi } from "../bindings/answers.js";
 import type { CitationOpening } from "../knowledgeView.js";
 import { libraryApi } from "../bindings/library.js";
+import { calendarApi } from "../bindings/calendar.js";
+import { type OfferNav, runOffer } from "../agentOffer.js";
+import { runRestore } from "../subjectRemovalView.js";
 import { turnkeyApi } from "../bindings/turnkey.js";
 import { recordingDeleteApi } from "../bindings/recordingDelete.js";
 import { callByName, onEventData } from "../bindings/runtime.js";
@@ -24,7 +27,9 @@ import {
   cancelRestartEdit,
   closeRestartDialog,
   hideRestart,
+  actionWording,
   isFocusPanelKey,
+  latestUndoableCard,
   liveRestartTarget,
   noRestart,
   openAfterArchive,
@@ -64,6 +69,7 @@ import type { CardActions } from "./AgentCards.js";
 const api: AgentApi = agentApi(callByName);
 const turnkey = turnkeyApi(callByName);
 const library = libraryApi(callByName);
+const calendar = calendarApi(callByName);
 const answers = answersApi(callByName);
 const confirm = { api: agentConfirmApi(callByName), deleteApi: recordingDeleteApi(callByName) };
 
@@ -107,6 +113,10 @@ export function AgentPanel(props: {
   onOpenSource?: (o: CitationOpening) => void;
   /** A mention pill of the thread was pressed (kind and id as stored). */
   onOpenMention?: (kind: string, id: string) => void;
+  /** Where the page buttons of an offer lead; without it such buttons are shown off. */
+  offerNav?: OfferNav;
+  /** A card created, took back or restored subjects: the pages read them again. */
+  onLibraryChanged?: () => void;
 }) {
   const [state, dispatch] = useReducer(reducePanel, initialPanelState);
   // Subject names for the assignment lists of replies; unreadable subjects just leave the names out.
@@ -515,23 +525,53 @@ export function AgentPanel(props: {
   undoNotesRef.current = undoNotes;
   const setNote = useCallback((id: string, note: UndoNote) => setUndoNotes((m) => ({ ...m, [id]: note })), []);
 
+  // Resolves with what the line shows afterwards; null when the action is already undone or being undone.
   const undoOne = useCallback(
-    (actionId: string) => {
+    (actionId: string): Promise<UndoNote | null> => {
       const cur = undoNotesRef.current[actionId];
       if (cur?.busy || cur?.done) {
-        return;
+        return Promise.resolve(null);
       }
       setNote(actionId, { busy: true, done: false, text: "" });
-      api.undo(actionId).then(
+      const settle = (note: UndoNote) => {
+        setNote(actionId, note);
+        return note;
+      };
+      return api.undo(actionId).then(
         (v) => {
           const o = undoOutcome(v);
-          setNote(actionId, { busy: false, done: o.ok, text: o.text });
+          return settle({ busy: false, done: o.ok, text: o.text });
         },
-        () => setNote(actionId, { busy: false, done: false, text: undoOutcome({ problem: "failed", actionId, status: "", refusal: "" }).text }),
+        () => settle({ busy: false, done: false, text: undoOutcome({ problem: "failed", actionId, status: "", refusal: "" }).text }),
       );
     },
     [setNote],
   );
+
+  // «Отменить» of the offer_button undo_action: the latest action of the open chat that can still be undone.
+  const subjectsRef = useRef(subjects);
+  subjectsRef.current = subjects;
+  const latestCard = useCallback(() => {
+    const cards = visibleEntries(entriesRef.current, openRef.current, undefined).map((e) => entryModel(e).cards);
+    return latestUndoableCard(cards, undoNotesRef.current);
+  }, []);
+  // What the offer «Отменить» would undo, in the words of that action's line.
+  const undoTarget = useCallback(() => {
+    const card = latestCard();
+    return card === null ? "" : actionWording(card, subjectsRef.current, new Date());
+  }, [latestCard]);
+  const undoLatest = useCallback(async () => {
+    const card = latestCard();
+    if (card === null) {
+      return null;
+    }
+    const what = actionWording(card, subjectsRef.current, new Date());
+    const note = await undoOne(card.actionId);
+    return note === null ? null : { ok: note.done, text: note.text, what };
+  }, [latestCard, undoOne]);
+
+  // «Вернуть» of a skipped row of the schedule card: the page's own call.
+  const restore = useCallback((subjectId: string, version: number) => runRestore(library, subjectId, version), []);
 
   const undoAll = useCallback(
     (ref: { threadId: string; turn: number }, ids: string[]) => {
@@ -556,6 +596,7 @@ export function AgentPanel(props: {
     [setNote],
   );
 
+  const offerNav = props.offerNav;
   const actionsFor = useCallback((e: Entry): CardActions => {
     const ref = { threadId: e.threadId, turn: e.turn };
     const named = e.threadId !== "";
@@ -647,6 +688,10 @@ export function AgentPanel(props: {
       subjects,
       openAssignment: props.onOpenAssignment,
       openMention: props.onOpenMention,
+      offer: offerNav === undefined ? undefined : (offer) => runOffer(offer, { library, turnkey, calendar, nav: offerNav, undoLatest }),
+      undoTarget,
+      restore,
+      libraryChanged: props.onLibraryChanged,
       answers,
       openSource: props.onOpenSource,
       press,
@@ -661,7 +706,7 @@ export function AgentPanel(props: {
       },
       undoNote: (actionId) => undoNotes[actionId],
     };
-  }, [state.entries, send, loadState, undoNotes, undoOne, undoAll, subjects, props.onOpenAssignment, props.onOpenMention, props.onOpenSource]);
+  }, [state.entries, send, loadState, undoNotes, undoOne, undoAll, undoLatest, undoTarget, restore, subjects, props.onOpenAssignment, props.onOpenMention, props.onOpenSource, offerNav, props.onLibraryChanged]);
 
   const sections = useMemo(() => chatSections(chats, state.entries), [chats, state.entries]);
   const openChat = [...sections.active, ...sections.archived].find((r) => r.threadId === openId) ?? null;

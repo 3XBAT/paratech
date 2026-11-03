@@ -206,7 +206,11 @@ export interface AddedAssignmentView {
   time: string;
 }
 
-export type CardKind =
+/**
+ * The kinds of card this panel knows (the Go AgentCardView.Kind). A kind the core sends that is not in this list reads
+ * as "unknown": the card is kept and shown as a quiet «Обновите приложение» line, never dropped.
+ */
+export type KnownCardKind =
   | "plan"
   | "questions"
   | "progress"
@@ -217,9 +221,14 @@ export type CardKind =
   | "cannot_do"
   | "reply"
   | "stopped"
-  | "work";
+  | "work"
+  | "schedule_subjects"
+  | "delete_assignment"
+  | "offer_button";
 
-export const cardKinds: readonly CardKind[] = [
+export type CardKind = KnownCardKind | "unknown";
+
+export const cardKinds: readonly KnownCardKind[] = [
   "plan",
   "questions",
   "progress",
@@ -231,7 +240,54 @@ export const cardKinds: readonly CardKind[] = [
   "reply",
   "stopped",
   "work",
+  "schedule_subjects",
+  "delete_assignment",
+  "offer_button",
 ];
+
+/** The actions of an offer_button (ADR-0033 §3); the page's own button for it is rendered from a template. */
+export const offerActions: readonly string[] = [
+  "open_material",
+  "open_call_link",
+  "copy_call_link",
+  "open_summary",
+  "open_lecture_text",
+  "open_transcript",
+  "save_as",
+  "google_sign_in",
+  "google_sync",
+  "download_model",
+  "sound_check",
+  "open_help",
+  "undo_action",
+  "start_recording",
+];
+
+/**
+ * The page's own button an offer_button card names, or the button an `action_line` offers instead of «Отменить» (the
+ * stop of a recording: start_recording, no target). `target` is the one typed ID the action needs; null when none.
+ * Nothing here is model text.
+ */
+export interface OfferView {
+  action: string;
+  target: RefView | null;
+}
+
+/**
+ * What a wave-10 action did, for the panel to word its `action_line` (kinds: marked_done, marked_undone, note_text,
+ * note_upload, note_move, note_rename, note_remove, recording_started, recording_stopped, setting; any other kind
+ * reads as the generic line). `count` is 1..50 for marked_done/marked_undone;
+ * `excerpt` is 0..3 lines of the student's own saved text (note_text; plain text only); `setting` and `value` name a
+ * setting (recording_prompts, ac_power_only, recognition_load) and its new value (on/off, or a load mode). The fields
+ * a kind does not use are 0, "" and [].
+ */
+export interface LineResultView {
+  kind: string;
+  count: number;
+  setting: string;
+  value: string;
+  excerpt: string[];
+}
 
 /** One card; `kind` says which field is set. */
 export interface CardView {
@@ -255,6 +311,10 @@ export interface CardView {
   workId: string;
   /** A `work` card: questions, review, helper, pending, failed or confirmed. */
   outcome: string;
+  /** An `offer_button` card, or an `action_line` that offers a button instead of «Отменить»; null otherwise. */
+  offer: OfferView | null;
+  /** An `action_line` of a wave-10 action: what it did; null on other cards, a generic line and an older core. */
+  result: LineResultView | null;
 }
 
 /**
@@ -542,10 +602,85 @@ function nested<T>(r: Record<string, unknown>, key: string, parse: (raw: unknown
   return v === null || v === undefined ? null : parse(v);
 }
 
-/** A card the panel does not know is an error: the caller drops that card, not the update. */
+/**
+ * Never throws; absent, null or malformed reads as null. Lenient on purpose: the offer or the result only words the line,
+ * and a line must keep its «Отменить» whatever is wrong with them.
+ */
+export function parseOffer(raw: unknown): OfferView | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return null;
+  }
+  const { action, target } = raw as Record<string, unknown>;
+  if (typeof action !== "string" || action === "") {
+    return null;
+  }
+  if (target === null || target === undefined) {
+    return { action, target: null };
+  }
+  try {
+    return { action, target: parseRef(target) };
+  } catch {
+    return null;
+  }
+}
+
+/** Never throws; absent, null or malformed reads as null, a field of the wrong type as its empty value. */
+export function parseLineResult(raw: unknown): LineResultView | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return null;
+  }
+  const r = raw as Record<string, unknown>;
+  if (typeof r.kind !== "string" || r.kind === "") {
+    return null;
+  }
+  return {
+    kind: r.kind,
+    count: typeof r.count === "number" && Number.isFinite(r.count) ? r.count : 0,
+    setting: typeof r.setting === "string" ? r.setting : "",
+    value: typeof r.value === "string" ? r.value : "",
+    excerpt: Array.isArray(r.excerpt) ? r.excerpt.filter((s): s is string => typeof s === "string") : [],
+  };
+}
+
+/** The card of a kind this panel does not know: nothing but the kind is read from it. */
+function unknownCard(): CardView {
+  return {
+    kind: "unknown",
+    plan: null,
+    questions: null,
+    jobId: "",
+    artifact: "",
+    target: null,
+    actionId: "",
+    answerId: "",
+    cannotDo: null,
+    text: "",
+    assignments: [],
+    assignment: null,
+    stopReason: "",
+    workId: "",
+    outcome: "",
+    offer: null,
+    result: null,
+  };
+}
+
+/** Kinds that left the product: a stored request may still carry one, and it is dropped (no stub: an update does not help). */
+const retiredCardKinds: readonly string[] = ["free_work"];
+
+/**
+ * A card of a known kind that is malformed is an error: the caller drops that card, not the update. A kind the panel does
+ * not know (a newer core) is not an error: it reads as a card of kind "unknown", which the panel shows as a stub.
+ */
 export function parseCard(raw: unknown): CardView {
   const w = "card";
   const r = record(raw, w);
+  if (typeof r.kind === "string" && !(cardKinds as readonly string[]).includes(r.kind)) {
+    if (retiredCardKinds.includes(r.kind)) {
+      throw new Error(`${w}: retired kind ${r.kind}`);
+    }
+    return unknownCard();
+  }
   return {
     kind: oneOf(r, "kind", cardKinds, w),
     plan: nested(r, "plan", parsePlan),
@@ -564,10 +699,13 @@ export function parseCard(raw: unknown): CardView {
     // An older core does not send them; only a `work` card needs its workId (checked where the card is built).
     workId: optStr(r, "workId", w),
     outcome: optStr(r, "outcome", w),
+    // Absent from an older core and (omitempty) from every card that has none.
+    offer: parseOffer(r.offer),
+    result: parseLineResult(r.result),
   };
 }
 
-/** Checks one update; a malformed update is an error, a malformed or unknown card is dropped. */
+/** Checks one update; a malformed update is an error, a malformed card is dropped, an unknown kind becomes an "unknown" card. */
 export function parseUpdate(raw: unknown): UpdateView {
   const w = "agent update";
   const r = record(raw, w);
@@ -576,7 +714,7 @@ export function parseUpdate(raw: unknown): UpdateView {
     try {
       cards.push(parseCard(c));
     } catch {
-      // The core already drops cards it cannot show; one the panel cannot read is dropped the same way.
+      // The core already drops cards it cannot show; a card of a known kind that the panel cannot read is dropped the same way.
     }
   }
   return {

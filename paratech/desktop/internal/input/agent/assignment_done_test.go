@@ -10,6 +10,7 @@ import (
 	"paratech/desktop/internal/domain/agent/action"
 	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/values"
+	"paratech/desktop/internal/domain/shared"
 )
 
 const markA1A2 = `{"assignments":["a1","a2","zz"],"done":true}`
@@ -36,8 +37,9 @@ func TestMarkAssignmentsDone(t *testing.T) {
 	if got := comp.Marks(); len(got) != 2 || got[0] != wantMarks[0] || got[1] != wantMarks[1] {
 		t.Fatalf("marks = %+v, want %+v", got, wantMarks)
 	}
-	if len(r.cards) != 1 {
-		t.Fatalf("cards = %+v, want the action line", r.cards)
+	// The line counts the assignments that changed, not the ones asked for (TASK-324).
+	if len(r.cards) != 1 || r.cards[0] != (values.ActionLine{Action: e.ID, Result: values.LineResult{Kind: values.LineMarkedDone, Count: 2}}) {
+		t.Fatalf("cards = %+v, want the action line of 2 marked", r.cards)
 	}
 	if ch.calendar != 0 {
 		t.Fatal("Google Calendar was touched")
@@ -83,6 +85,36 @@ func TestMarkAssignmentsDoneWithADeletedOne(t *testing.T) {
 	a1 := mustRef(t, values.KindAssignment, "a1")
 	if got := comp.Marks(); len(got) != 1 || got[0] != (action.DoneMark{Assignment: a1, WasDone: false, Version: 4}) {
 		t.Fatalf("marks = %+v, want a1 only", got)
+	}
+	if len(r.cards) != 1 || r.cards[0] != (values.ActionLine{Action: e.ID, Result: values.LineResult{Kind: values.LineMarkedDone, Count: 1}}) {
+		t.Fatalf("cards = %+v, want the action line of 1 marked", r.cards)
+	}
+}
+
+// Back to work: the line says so, with the count of the assignments that changed.
+func TestMarkAssignmentsUndoneLine(t *testing.T) {
+	w, _ := newWave10World(t)
+	for _, id := range []shared.AssignmentID{"a1", "a2"} {
+		v := w.assignments.views[id]
+		v.Done = true
+		w.assignments.views[id] = v
+	}
+	r, e := run10(t, w, req, call10(t, "c1", values.ToolMarkAssignmentsDone, `{"assignments":["a1","a2"],"done":false}`, actionpolicy.ClassU))
+	want := values.ActionLine{Action: e.ID, Result: values.LineResult{Kind: values.LineMarkedUndone, Count: 2}}
+	if e.Status != action.StatusDone || len(r.cards) != 1 || r.cards[0] != want {
+		t.Fatalf("entry %+v, cards = %+v", e, r.cards)
+	}
+}
+
+// The line of a count beyond the limit falls back to the generic line: the line and its «Отменить» stay.
+func TestLineResultFallsBack(t *testing.T) {
+	for _, n := range []int{0, values.MaxLineCount + 1} {
+		if got := (effect{line: markedLine(true, n)}).lineResult(); !got.IsZero() {
+			t.Fatalf("count %d: line %+v", n, got)
+		}
+	}
+	if got := (effect{line: markedLine(false, 3)}).lineResult(); got != (values.LineResult{Kind: values.LineMarkedUndone, Count: 3}) {
+		t.Fatalf("line %+v", got)
 	}
 }
 

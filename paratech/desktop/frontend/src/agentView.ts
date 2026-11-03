@@ -3,12 +3,15 @@
 // impersonal («Создан предмет…», not «Я создал…»). Model text (summary, notes, questions, options, labels, replies) is
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
-import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, ContextFill, EarlierRequestView, MentionView, PlanStepView, PlanView, QuestionView, UpdateView } from "./bindings/agent.js";
+import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, ContextFill, EarlierRequestView, LineResultView, MentionView, OfferView, PlanStepView, PlanView, QuestionView, UpdateView } from "./bindings/agent.js";
+import { estimateTexts, loadLabels } from "./durationEstimate.js";
+import { plural } from "./plural.js";
 import { askMentions, maxDraftLength, maxMentions, type MentionPill, mentionPills } from "./agentMentions.js";
 import { approveLabel, type PlanProgress, planProgress, stepMarks, type StepMark, planWindow } from "./planView.js";
 import { type Entry, isBusyRefused, isFinalStatus, isRunning, orderedEntries } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
 import { dayText, daysBetween, daysLeftText, dueText, parseMoment } from "./dueText.js";
+import { doneTexts } from "./assignmentDoneView.js";
 
 /** One row of the assignment list of a reply card. */
 export interface AssignmentRow {
@@ -882,6 +885,18 @@ const toolTexts: Record<string, string> = {
   propose_deadline: "Предложение срока",
   propose_send: "Подготовка письма",
   propose_delete_recording: "Предложение удалить запись",
+  // Wave 10 (ADR-0033 §10).
+  propose_subjects_from_schedule: "Предметы из расписания",
+  change_assignment: "Изменение задания",
+  mark_assignments_done: "Отметка заданий выполненными",
+  // The student's own notes are «Мой конспект» (glossary); «Конспект» alone is what paratech makes.
+  list_notes: "Просмотр «Мой конспект»",
+  note: "Работа с «Мой конспект»",
+  get_settings: "Просмотр настроек",
+  set_setting: "Изменение настройки",
+  quota_status: "Проверка остатка минут",
+  recording: "Запись",
+  offer_button: "Предложена кнопка",
 };
 
 const idKindTexts: Record<string, string> = {
@@ -1046,8 +1061,29 @@ export type CardModel =
   | { type: "answer"; caption: string; text: string; answerId: string }
   | { type: "reply"; text: string; assignments: AssignmentLineView[] }
   | { type: "cannot_do"; caption: string; yourTitle: string; yourPart: string[]; ourTitle: string; ourPart: string[] }
-  | { type: "confirm"; caption: string; text: string; target: { kind: "proposal" | "preview"; id: string } | null }
-  | { type: "action"; text: string; actionId: string; undo: { label: string; enabled: boolean }; assignment: AddedAssignmentView | null }
+  | { type: "confirm"; caption: string; text: string; target: { kind: "proposal" | "preview" | "assignment"; id: string } | null }
+  | {
+      type: "action";
+      /** The sentence of the line. */
+      text: string;
+      /** Plain muted lines under the sentence (the saved text of a note); [] for most lines. */
+      detail: string[];
+      actionId: string;
+      /** `shown` false: the line has no «Отменить» (the stop of a recording cannot be undone, or the line offers a button). */
+      undo: { label: string; busyLabel: string; enabled: boolean; shown: boolean };
+      /** What the line says once the undo is done. */
+      undoneText: string;
+      /** The button the line offers once the undo is done («Начать запись» after «Остановить»); null when none. */
+      afterUndoOffer: OfferModel | null;
+      assignment: AddedAssignmentView | null;
+      /** The button the line offers instead of «Отменить»; null when none. */
+      offer: OfferModel | null;
+    }
+  | { type: "unknown"; text: string }
+  /** The schedule_subjects card: the review of subjects from the schedule, read from the core by this token. */
+  | { type: "schedule"; token: string }
+  /** The offer_button card: the page's own button, no heading. */
+  | { type: "offer"; offer: OfferModel }
   | { type: "stopped"; text: string; buttons: ButtonModel[] }
   | { type: "work"; workId: string }
   | { type: "problem"; text: string; buttons: ButtonModel[] };
@@ -1056,10 +1092,198 @@ function buttons(ids: ButtonId[]): ButtonModel[] {
   return ids.map((id) => ({ id, label: buttonLabels[id] }));
 }
 
-/** The target a confirm card names; anything but a proposal or a deletion preview has no card to show. */
-function confirmTarget(c: CardView): { kind: "proposal" | "preview"; id: string } | null {
+/**
+ * The target a confirm card names: a `confirm` card a proposal or a deletion preview, a `delete_assignment` card the
+ * assignment; anything else has no card to show.
+ */
+function confirmTarget(c: CardView): { kind: "proposal" | "preview" | "assignment"; id: string } | null {
   const t = c.target;
-  return t !== null && (t.kind === "proposal" || t.kind === "preview") && t.id !== "" ? { kind: t.kind, id: t.id } : null;
+  if (t === null || t.id === "") {
+    return null;
+  }
+  if (c.kind === "delete_assignment") {
+    return t.kind === "assignment" ? { kind: "assignment", id: t.id } : null;
+  }
+  return t.kind === "proposal" || t.kind === "preview" ? { kind: t.kind, id: t.id } : null;
+}
+
+// ---- Lines of the actions of wave 10 (ADR-0033 §10) ----
+
+export const resultTexts = {
+  // The words of the assignment toast (assignmentDoneView.ts), for one assignment and for several.
+  markedDone: "Отмечено выполненным",
+  markedDoneMany: doneTexts.markedMany,
+  markedUndone: doneTexts.unmarked,
+  markedUndoneMany: doneTexts.unmarkedMany,
+  noteText: "Записано в «Мой конспект»",
+  noteUpload: "Файл добавлен в «Мой конспект»",
+  noteMove: "«Мой конспект» перенесён",
+  noteRename: "«Мой конспект» переименован",
+  noteRemove: "«Мой конспект» удалён",
+  recordingStarted: "Запись началась",
+  recordingStopped: "Запись остановлена",
+  /** The undo of a started recording stops it and keeps the audio. */
+  stopRecording: "Остановить",
+  stopping: "Остановка…",
+  startRecording: "Начать запись",
+  /** The stub of a card kind a newer core sends (no actions: nothing to press). */
+  unknownCard: "Эту часть ответа нельзя показать в этой версии paratech. Обновите приложение.",
+} as const;
+
+/** Setting lines by the core's setting name; the words are those of the settings page. */
+const settingOnOff: Readonly<Record<string, { on: string; off: string }>> = {
+  // The settings page calls it «Автоматически предлагать запись в начале пары».
+  recording_prompts: { on: "Предложение записи в начале пары включено", off: "Предложение записи в начале пары выключено" },
+  ac_power_only: { on: "Обработка только от розетки включена", off: "Обработка только от розетки выключена" },
+};
+
+/** The most excerpt lines a note line shows (the core sends at most 3). */
+const maxExcerptLines = 3;
+
+/** A sentence and the plain lines under it. */
+export interface Wording {
+  text: string;
+  detail: string[];
+}
+
+/** «Отмечено выполненным: 1 задание» for one, «Отмечены выполненными: 3 задания» for several. */
+function counted(one: string, many: string, count: number): Wording | null {
+  if (!Number.isInteger(count) || count < 1) {
+    return null;
+  }
+  return { text: `${count === 1 ? one : many}: ${count} ${plural(count, "задание", "задания", "заданий")}`, detail: [] };
+}
+
+function settingWording(r: LineResultView): Wording | null {
+  if (r.setting === "recognition_load") {
+    return Object.hasOwn(loadLabels, r.value)
+      ? { text: `${estimateTexts.setting}: ${loadLabels[r.value as keyof typeof loadLabels].toLowerCase()}`, detail: [] }
+      : null;
+  }
+  const words = Object.hasOwn(settingOnOff, r.setting) ? settingOnOff[r.setting] : undefined;
+  if (words === undefined || (r.value !== "on" && r.value !== "off")) {
+    return null;
+  }
+  return { text: r.value === "on" ? words.on : words.off, detail: [] };
+}
+
+/** The sentence of a result; null for a kind or value the panel does not know (the generic line says «Действие выполнено»). */
+export function resultWording(r: LineResultView): Wording | null {
+  const plain = (text: string): Wording => ({ text, detail: [] });
+  switch (r.kind) {
+    case "marked_done":
+      return counted(resultTexts.markedDone, resultTexts.markedDoneMany, r.count);
+    case "marked_undone":
+      return counted(resultTexts.markedUndone, resultTexts.markedUndoneMany, r.count);
+    case "note_text": {
+      const lines = r.excerpt.filter((l) => l.trim() !== "").slice(0, maxExcerptLines);
+      return lines.length === 0 ? plain(resultTexts.noteText) : { text: `${resultTexts.noteText}:`, detail: lines };
+    }
+    case "note_upload":
+      return plain(resultTexts.noteUpload);
+    case "note_move":
+      return plain(resultTexts.noteMove);
+    case "note_rename":
+      return plain(resultTexts.noteRename);
+    case "note_remove":
+      return plain(resultTexts.noteRemove);
+    case "recording_started":
+      return plain(resultTexts.recordingStarted);
+    case "recording_stopped":
+      return plain(resultTexts.recordingStopped);
+    case "setting":
+      return settingWording(r);
+    default:
+      return null;
+  }
+}
+
+/** A page button an offer names, with its label from the template; the model supplies no label. */
+export interface OfferModel {
+  label: string;
+  offer: OfferView;
+}
+
+/** The reason a press of the call link gives if it ever arrives: no page offers it yet (TASK-261), so no button is drawn. */
+export const offerUnavailableText = "Недоступно в этой версии";
+
+/**
+ * The offers of ADR-0033 §3: the label is the one the page's own button carries (test/agentwave10cards324b pins them to
+ * the pages' constants), `target` the kind of the one id the button needs ("" none). A button that only navigates is
+ * labelled by what happens («Открыть «Подключения»»). The call link has no page yet: no button at all.
+ */
+interface OfferSpec {
+  label: string;
+  target: "" | "material" | "recording" | "work" | "lesson";
+  /** No page offers it in this version: the model draws nothing (a dead button is worse than none). */
+  unavailable?: boolean;
+}
+
+// ADR-0033 §3 binds google_sign_in and open_help to the page's own buttons; the sign-in needs the page's fields (the
+// stored client) and the only help is the calendar guide there, so both lead to «Подключения» and are named so.
+const openConnections = `Открыть «${pageById("connections").label}»`;
+
+export const offerSpecs: Readonly<Record<string, OfferSpec>> = {
+  open_material: { label: "Открыть", target: "material" },
+  open_call_link: { label: "Открыть ссылку на пару", target: "lesson", unavailable: true },
+  copy_call_link: { label: "Скопировать ссылку на пару", target: "lesson", unavailable: true },
+  open_summary: { label: "Открыть конспект", target: "recording" },
+  open_lecture_text: { label: "Открыть текст лекции", target: "recording" },
+  open_transcript: { label: "Открыть расшифровку", target: "recording" },
+  // The work's file opens in Word / PowerPoint, where «Сохранить как» is: the pages have no save dialog for a work.
+  save_as: { label: "Открыть работу", target: "work" },
+  google_sign_in: { label: openConnections, target: "" },
+  google_sync: { label: "Синхронизировать", target: "" },
+  download_model: { label: "Открыть модели речи", target: "" },
+  sound_check: { label: "Проверить звук", target: "" },
+  open_help: { label: openConnections, target: "" },
+  undo_action: { label: "Отменить", target: "" },
+  start_recording: { label: resultTexts.startRecording, target: "" },
+};
+
+/**
+ * The button of an offer; null for an action the panel does not know, or one whose id is missing or of another kind (no
+ * button is better than a made-up or a dead one).
+ */
+export function offerModel(offer: OfferView | null | undefined): OfferModel | null {
+  if (offer === null || offer === undefined || !Object.hasOwn(offerSpecs, offer.action)) {
+    return null;
+  }
+  const spec = offerSpecs[offer.action];
+  if (spec.unavailable === true || (spec.target !== "" && (offer.target === null || offer.target.kind !== spec.target || offer.target.id === ""))) {
+    return null;
+  }
+  return { label: spec.label, offer };
+}
+
+/** The action line card. */
+export type ActionCardModel = Extract<CardModel, { type: "action" }>;
+
+function actionModel(c: CardView): ActionCardModel {
+  const result = c.result ?? null;
+  const wording = result === null ? null : resultWording(result);
+  const offer = offerModel(c.offer);
+  const started = result?.kind === "recording_started";
+  // The stop of a recording has no compensation, and a line that offers a button has no «Отменить» (ADR-0033 §2, О-7 а).
+  const shown = offer === null && result?.kind !== "recording_stopped";
+  return {
+    type: "action",
+    text: wording?.text ?? texts.actionDone,
+    detail: wording?.detail ?? [],
+    actionId: c.actionId,
+    undo: {
+      label: started ? resultTexts.stopRecording : texts.undo,
+      busyLabel: started ? resultTexts.stopping : texts.undoBusy,
+      enabled: c.actionId !== "",
+      shown,
+    },
+    // Pressing «Остановить» is not an undo in the student's eyes: the line then says what happened.
+    undoneText: started ? resultTexts.recordingStopped : texts.undoDone,
+    // After «Остановить» the way on is a new recording.
+    afterUndoOffer: started ? offerModel({ action: "start_recording", target: null }) : null,
+    assignment: c.assignment ?? null,
+    offer,
+  };
 }
 
 const activeStatuses = new Set(["PLANNING", "EXECUTING"]);
@@ -1124,15 +1348,19 @@ function cardModel(c: CardView, status: string): CardModel | null {
         ourPart: c.cannotDo.ourPart,
       };
     case "confirm":
+    case "delete_assignment":
       return { type: "confirm", caption: texts.confirmCaption, text: texts.confirmPending, target: confirmTarget(c) };
     case "action_line":
-      return {
-        type: "action",
-        text: texts.actionDone,
-        actionId: c.actionId,
-        undo: { label: texts.undo, enabled: c.actionId !== "" },
-        assignment: c.assignment ?? null,
-      };
+      return actionModel(c);
+    case "unknown":
+      return { type: "unknown", text: resultTexts.unknownCard };
+    case "schedule_subjects":
+      // The token of the package the desktop built; the card reads everything else from the core.
+      return c.target !== null && c.target.kind === "schedule_subjects" && c.target.id !== "" ? { type: "schedule", token: c.target.id } : null;
+    case "offer_button": {
+      const offer = offerModel(c.offer);
+      return offer === null ? null : { type: "offer", offer };
+    }
     case "work":
       // The card reads the work itself (TurnkeyService.Work); a work card without an id has nothing to read.
       return c.workId !== "" ? { type: "work", workId: c.workId } : null;
@@ -1150,7 +1378,34 @@ export interface UndoNote {
 
 /** The action lines of a request that offer «Отменить» (for «Отменить всё»). */
 export function undoableActions(cards: readonly CardModel[]): string[] {
-  return cards.flatMap((c) => (c.type === "action" && c.undo.enabled ? [c.actionId] : []));
+  return cards.flatMap((c) => (c.type === "action" && c.undo.shown && c.undo.enabled ? [c.actionId] : []));
+}
+
+/**
+ * The latest action of the chat that can still be undone, for the offer «Отменить» (undo_action): `requests` are the cards
+ * of the chat's requests in order, `notes` what «Отменить» already did per action. null when there is none.
+ */
+export function latestUndoableAction(requests: readonly (readonly CardModel[])[], notes: Readonly<Record<string, UndoNote | undefined>>): string | null {
+  return latestUndoableCard(requests, notes)?.actionId ?? null;
+}
+
+/** The same action line as a card, so the offer can say what it would undo. */
+export function latestUndoableCard(requests: readonly (readonly CardModel[])[], notes: Readonly<Record<string, UndoNote | undefined>>): ActionCardModel | null {
+  for (let i = requests.length - 1; i >= 0; i--) {
+    const open = (requests[i] ?? []).filter(
+      (c): c is ActionCardModel => c.type === "action" && c.undo.shown && c.undo.enabled && notes[c.actionId]?.done !== true && notes[c.actionId]?.busy !== true,
+    );
+    if (open.length > 0) {
+      return open[open.length - 1] ?? null;
+    }
+  }
+  return null;
+}
+
+/** The sentence of an action line (the added assignment reads with its subject and deadline); no trailing colon. */
+export function actionWording(c: ActionCardModel, subjects: Readonly<Record<string, string>>, now: Date): string {
+  const text = c.assignment ? addedAssignmentText(c.assignment, subjects, now) : c.text;
+  return text.replace(/:$/, "");
 }
 
 /** What a request shows: the student's text, the cards in order, and the state line while nothing else says it. */

@@ -96,6 +96,7 @@ func (a *Actions) addToNote(ctx context.Context, at origin, call values.Call, ac
 		in   = action.Intent{Name: t.key}
 		into shared.NoteID
 		add  func(ctx context.Context) (notes.Added, error)
+		line = values.LineResult{Kind: values.LineNoteUpload}
 	)
 	if t.note != nil {
 		ref, err := noteRef(t.note.ID())
@@ -112,6 +113,8 @@ func (a *Actions) addToNote(ctx context.Context, at origin, call values.Call, ac
 			return prepared{}, notes.ErrTooManyParts
 		}
 		text, _ := args.Text("text")
+		// Only the action line of the live update shows the start of the text: never the intent, the result or a log.
+		line = values.LineResult{Kind: values.LineNoteText, Excerpt: values.NoteExcerpt(string(text))}
 		add = func(ctx context.Context) (notes.Added, error) {
 			return a.notes.Paste(ctx, notes.PasteRequest{Note: into, Anchor: t.anchor, Subject: t.subject, Title: title, Text: string(text)})
 		}
@@ -165,7 +168,9 @@ func (a *Actions) addToNote(ctx context.Context, at origin, call values.Call, ac
 			if err != nil {
 				return effect{}, err
 			}
-			return addEffect(res)
+			eff, err := addEffect(res)
+			eff.line = line
+			return eff, err
 		},
 	}, nil
 }
@@ -376,7 +381,7 @@ func (a *Actions) moveNote(ctx context.Context, call values.Call) (prepared, err
 		return prepared{noopNote: &values.NoteWriteRow{Note: ref}}, nil
 	}
 	undo := action.ReanchorNote{Note: ref, Prior: prior}
-	return a.changeNote(ref, n.Version(), undo, action.ReanchorNote{Note: ref, Prior: wanted},
+	return a.changeNote(ref, n.Version(), values.LineNoteMove, undo, action.ReanchorNote{Note: ref, Prior: wanted},
 		func(ctx context.Context) (notes.View, error) { return a.notes.Reanchor(ctx, id, to) }), nil
 }
 
@@ -398,7 +403,7 @@ func (a *Actions) renameNote(ctx context.Context, call values.Call) (prepared, e
 		return prepared{noopNote: &values.NoteWriteRow{Note: ref}}, nil
 	}
 	undo := action.RetitleNote{Note: ref, OldTitle: n.Title()}
-	return a.changeNote(ref, n.Version(), undo, action.RetitleNote{Note: ref, OldTitle: title},
+	return a.changeNote(ref, n.Version(), values.LineNoteRename, undo, action.RetitleNote{Note: ref, OldTitle: title},
 		func(ctx context.Context) (notes.View, error) { return a.notes.Retitle(ctx, id, title) }), nil
 }
 
@@ -413,12 +418,13 @@ func (a *Actions) removeNote(ctx context.Context, call values.Call) (prepared, e
 	if !v.Note.Active() {
 		return prepared{noopNote: &values.NoteWriteRow{Note: ref}}, nil
 	}
-	return a.changeNote(ref, v.Note.Version(), action.RestoreNote{Note: ref}, nil,
+	return a.changeNote(ref, v.Note.Version(), values.LineNoteRemove, action.RestoreNote{Note: ref}, nil,
 		func(ctx context.Context) (notes.View, error) { return a.notes.Remove(ctx, id) }), nil
 }
 
-// changeNote runs change on the note ref while it is still at version before, in one transaction with that check.
-func (a *Actions) changeNote(ref values.Ref, before int64, undo, next action.Compensation,
+// changeNote runs change on the note ref while it is still at version before, in one transaction with that check; the
+// action line words it as kind.
+func (a *Actions) changeNote(ref values.Ref, before int64, kind values.LineKind, undo, next action.Compensation,
 	change func(ctx context.Context) (notes.View, error)) prepared {
 	id := shared.NoteID(ref.ID())
 	return prepared{
@@ -433,7 +439,10 @@ func (a *Actions) changeNote(ref values.Ref, before int64, undo, next action.Com
 				if err != nil {
 					return err
 				}
-				e = effect{comp: undo, version: v.Note.Version(), note: &values.NoteWriteRow{Note: ref, Changed: true}}
+				e = effect{
+					comp: undo, version: v.Note.Version(), note: &values.NoteWriteRow{Note: ref, Changed: true},
+					line: values.LineResult{Kind: kind},
+				}
 				return nil
 			})
 			return e, err

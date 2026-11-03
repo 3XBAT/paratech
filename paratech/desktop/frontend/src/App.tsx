@@ -344,11 +344,28 @@ export function App() {
         setRoute(routeToPage("subjects"));
         setVisit((v) => v + 1);
       },
+      openAssignments: () => openPage("homework"),
     }),
-    [openTeacher, openAssignmentFor],
+    [openTeacher, openAssignmentFor, openPage],
   );
   // Counts the files the drop zone added: «Предметы» reads the library again.
   const [library, setLibrary] = useState(0);
+  // The page buttons the agent offers (TASK-324): a press does what the page's own button does, or opens that page.
+  const offerNav = useMemo(
+    () => ({
+      // The lesson screen of the recording (TASK-352 replaced the summary and transcript viewers).
+      openLessonSummary: (recordingId: string, section?: "lecture") => openRecordingLesson(recordingId, section ?? "summary"),
+      openLessonTranscript: (recordingId: string) => openRecordingLesson(recordingId, "transcript"),
+      // As a rail click: a page with sub-pages starts at its first level.
+      openPage: (id: PageId) => {
+        openPage(id);
+        setVisit((v) => v + 1);
+      },
+      startRecording: openStartPanel,
+    }),
+    [openRecordingLesson, openPage, openStartPanel],
+  );
+  const libraryChanged = useCallback(() => setLibrary((n) => n + 1), []);
   const panel = useResizablePanel();
   const open = panel.pref.open;
   const width = panel.width;
@@ -437,7 +454,7 @@ export function App() {
           </div>
         )}
       </main>
-      <AgentPanel page={current} assignmentId={route.assignment} open={open} reveal={panel.reveal} hide={panel.hide} onOpenAssignment={openAssignment} onOpenSource={openSource} onOpenMention={openMention} />
+      <AgentPanel page={current} assignmentId={route.assignment} open={open} reveal={panel.reveal} hide={panel.hide} onOpenAssignment={openAssignment} onOpenSource={openSource} onOpenMention={openMention} offerNav={offerNav} onLibraryChanged={libraryChanged} />
       <PanelResizeHandle panel={panel} />
       <DropZone onImported={() => setLibrary((n) => n + 1)} />
     </div>

@@ -11,14 +11,15 @@ import {
 import type { TeacherRole } from "./bindings/recipient.js";
 import { choiceOf, isRefusal, type RecipientView, recipientView, sendBlocked } from "./recipientView.js";
 import { dueText, shortDate, timeText } from "./todayView.js";
+import { doneTexts } from "./assignmentDoneView.js";
 
 export const confirmTexts = {
   caption: "Нужно подтверждение",
   yes: "Да",
   no: "Нет",
   working: "Выполняется…",
-  loading: "Загрузка карточки…",
-  reload: "Обновить карточку",
+  loading: "Загрузка…",
+  reload: "Повторить",
   deadlineTitle: "Срок в календарь",
   sendTitle: "Отправка письма",
   deleteTitle: "Удаление записи",
@@ -28,12 +29,28 @@ export const confirmTexts = {
   doneDeadline: "Срок добавлен в календарь.",
   doneSend: "Письмо отправлено.",
   doneDelete: "Запись удалена.",
+  // The section is «Задания» (glossary: not «Домашние задания»; words344.test.mjs checks it).
+  doneDeleteAssignment: "Задание удалено вместе с событием в Google Календаре.",
+  openTasks: "Открыть «Задания»",
+  /** Under the refusal «письмо ещё отправляется»: the assignment page is where the letter is checked. */
+  openAssignment: doneTexts.openAssignment,
+  /** The buttons of the delete question say what happens (the others keep «Да» / «Нет»). */
+  deleteYes: "Да, удалить",
+  deleteNo: "Не удалять",
   declined: "Отклонено: ничего не выполнено.",
+  declinedDeleteAssignment: "Оставлено без изменений.",
+  deleteAssignment: "Удалить задание и событие в Google Календаре?",
   notActual: "Предложение больше не действует: ничего не выполнено.",
   confirmedAgain: "Подтверждено, но не выполнено. Повторное «Да» не создаст дубль.",
   noDeletable: "Удалить нельзя.",
   adHoc: "Запись",
 } as const;
+
+/** «Удалить «Задачи 1–7» и событие в Google Календаре?»; the title is stored text, so it stays a text node of the caller. */
+export function deleteAssignmentQuestion(title: string): string {
+  const t = title.trim();
+  return t === "" ? confirmTexts.deleteAssignment : `Удалить «${t}» и событие в Google Календаре?`;
+}
 
 export interface CardRow {
   label: string;
@@ -45,6 +62,8 @@ export interface CardRow {
 /** What the card shows. Every value is text from a file, the settings or a model: a text node only. */
 export interface ConfirmCardModel {
   title: string;
+  /** The whole heading as a question (delete_assignment); "" for the others: they read «Нужно подтверждение · title». */
+  question: string;
   /** What exactly happens: «кому, что, какая версия». */
   rows: CardRow[];
   /** The list of what a deletion removes. */
@@ -58,6 +77,12 @@ export interface ConfirmCardModel {
   /** Which buttons: both while waiting, only «Да» when a confirmed action did not finish. */
   yes: boolean;
   no: boolean;
+  /** The words of the two buttons: «Да» / «Нет», or what the question asks («Да, удалить» / «Не удалять»). */
+  yesLabel: string;
+  noLabel: string;
+  /** A deleted assignment: «Открыть «Задания»» (the list: the assignment itself is gone); and the assignment for «Открыть задание». */
+  openTasks: boolean;
+  assignmentId: string;
   /** Why «Да» is shown but off («Выберите, кому отправить.»); "" when it may be pressed. */
   yesBlocked: string;
   /** The recipient part of a send: the question, a refusal with its way out, or nothing more than the «Кому» row. */
@@ -102,14 +127,31 @@ function deletionTitle(c: ConfirmCard): string {
   return when === "" ? confirmTexts.adHoc : `${confirmTexts.adHoc} ${when}`;
 }
 
+function doneText(kind: ConfirmCard["kind"]): string {
+  switch (kind) {
+    case "deadline":
+      return confirmTexts.doneDeadline;
+    case "send":
+      return confirmTexts.doneSend;
+    case "delete_assignment":
+      return confirmTexts.doneDeleteAssignment;
+    case "delete_recording":
+      return confirmTexts.doneDelete;
+    case "schedule_subjects":
+      // Drawn by the schedule card (agentScheduleView.ts), never by this view; the text is only a fallback.
+      return confirmTexts.declinedDeleteAssignment;
+  }
+}
+
 function outcomeOf(c: ConfirmCard): string {
   switch (c.state) {
     case "done":
-      return c.kind === "deadline" ? confirmTexts.doneDeadline : c.kind === "send" ? confirmTexts.doneSend : confirmTexts.doneDelete;
+      return doneText(c.kind);
     case "declined":
-      return confirmTexts.declined;
+      return c.kind === "delete_assignment" || c.kind === "schedule_subjects" ? confirmTexts.declinedDeleteAssignment : confirmTexts.declined;
     case "stale":
     case "rejected":
+    case "undone":
       return c.message !== "" ? c.message : confirmTexts.notActual;
     case "confirmed":
       return c.message !== "" ? c.message : confirmTexts.confirmedAgain;
@@ -129,11 +171,34 @@ export function confirmCardModel(c: ConfirmCard, chosenRole: TeacherRole | "" = 
     outcome: outcomeOf(c),
     yes: open,
     no: waiting,
+    yesLabel: confirmTexts.yes,
+    noLabel: confirmTexts.no,
+    openTasks: false,
+    assignmentId: "",
     notice: c.notice,
     yesBlocked: "",
     recipient: { kind: "none" } as RecipientView,
+    question: "",
   };
   switch (c.kind) {
+    case "schedule_subjects":
+      // Not drawn by ConfirmCardView: the schedule card has its own view. A plain line keeps the switch total.
+      return { ...base, title: "", question: confirmTexts.caption, rows: [], items: [], note: "", notice: "" };
+    case "delete_assignment":
+      // The heading is the question, and it already says the event goes too: no second note, no repeated notice.
+      return {
+        ...base,
+        title: "",
+        yesLabel: confirmTexts.deleteYes,
+        noLabel: confirmTexts.deleteNo,
+        openTasks: c.state === "done",
+        assignmentId: c.targetId !== "" ? c.targetId : c.assignmentId,
+        question: deleteAssignmentQuestion(c.title),
+        rows: [...row("Предмет", c.subject), ...row("Срок", dueText(c.due).replace(/^до /, ""))],
+        items: [],
+        note: "",
+        notice: "",
+      };
     case "deadline":
       return {
         ...base,
@@ -271,7 +336,8 @@ export class ConfirmFlow {
   /** «Да». A send or a deadline goes to the core; a deletion opens the deletion window. */
   async yes(): Promise<void> {
     const card = this.current.card;
-    if (this.pending || card === null || this.current.deleteOpen) {
+    // A schedule_subjects card is confirmed with the student's choices by its own flow (agentScheduleView.ts).
+    if (this.pending || card === null || this.current.deleteOpen || card.kind === "schedule_subjects") {
       return;
     }
     const model = confirmCardModel(card, this.current.chosenRole);

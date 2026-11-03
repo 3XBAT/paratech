@@ -84,6 +84,7 @@ func (a *Actions) startRecording() prepared {
 		}
 		return effect{
 			comp: action.StopRecording{Recording: r}, version: recordingVersion, out: recordingOut(values.RecordingStarted, r),
+			line: values.LineResult{Kind: values.LineRecordingStarted},
 		}, nil
 	}}
 }
@@ -139,6 +140,7 @@ func (a *Actions) stopRecording() prepared {
 		}
 		return effect{
 			version: recordingVersion, offer: values.OfferStartRecording, out: recordingOut(values.RecordingStopped, r),
+			line: values.LineResult{Kind: values.LineRecordingStopped},
 		}, nil
 	}}
 }
