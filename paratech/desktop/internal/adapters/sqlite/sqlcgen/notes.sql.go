@@ -108,6 +108,34 @@ func (q *Queries) InsertNotePart(ctx context.Context, arg InsertNotePartParams) 
 	return err
 }
 
+const listNoteIDsOfSubject = `-- name: ListNoteIDsOfSubject :many
+SELECT id FROM notes WHERE subject_id = ?1 ORDER BY created_at, id
+`
+
+// The notes of a subject in any status, also while it is removed, for its purge (TASK-308).
+func (q *Queries) ListNoteIDsOfSubject(ctx context.Context, subjectID string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listNoteIDsOfSubject, subjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNoteParts = `-- name: ListNoteParts :many
 SELECT material_id FROM note_parts WHERE note_id = ?1 ORDER BY position
 `
@@ -310,6 +338,29 @@ func (q *Queries) ListNotesOfSubject(ctx context.Context, subjectID string) ([]N
 		return nil, err
 	}
 	return items, nil
+}
+
+const purgeNoteOfRemovedSubject = `-- name: PurgeNoteOfRemovedSubject :execrows
+DELETE FROM notes
+WHERE notes.id = ?1
+  AND notes.subject_id = ?2
+  AND EXISTS (SELECT 1 FROM subjects s
+              WHERE s.id = notes.subject_id AND s.removed_at IS NOT NULL AND s.removed_at <= ?3)
+`
+
+type PurgeNoteOfRemovedSubjectParams struct {
+	ID        string
+	SubjectID string
+	Cutoff    sql.NullInt64
+}
+
+// Deletes a note of a subject still removed at or before the cutoff (ms); its parts cascade, the materials stay.
+func (q *Queries) PurgeNoteOfRemovedSubject(ctx context.Context, arg PurgeNoteOfRemovedSubjectParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeNoteOfRemovedSubject, arg.ID, arg.SubjectID, arg.Cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateNote = `-- name: UpdateNote :execrows

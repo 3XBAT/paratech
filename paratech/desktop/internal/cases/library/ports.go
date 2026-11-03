@@ -138,6 +138,13 @@ type SubjectNotes interface {
 	ListBySubject(ctx context.Context, sub shared.SubjectID) ([]*note.Note, error)
 }
 
+// ExpiredSubjects erases the removed subjects whose restore window has ended (ADR-0027), so that their names are free
+// before the daily purge comes. The app wires the subject purge (cases/subjectpurge). It returns how many it erased;
+// an error may be about another subject than the one asked for.
+type ExpiredSubjects interface {
+	Purge(ctx context.Context) (int, error)
+}
+
 // IDs generates the identifiers of new subjects, folders and materials (ARCH-24).
 type IDs interface {
 	NewSubjectID() shared.SubjectID

@@ -524,6 +524,47 @@ func (q *Queries) ListMaterialLessons(ctx context.Context, materialID string) ([
 	return items, nil
 }
 
+const listMaterialsFiledUnder = `-- name: ListMaterialsFiledUnder :many
+SELECT id, sha256, size_bytes, type, original_name, subject_id, folder_id, status, text_status, version, created_at, updated_at FROM materials WHERE subject_id = ?1 ORDER BY created_at, id
+`
+
+// The files filed under a subject in any status and visibility, for its purge (TASK-308).
+func (q *Queries) ListMaterialsFiledUnder(ctx context.Context, subjectID sql.NullString) ([]Material, error) {
+	rows, err := q.db.QueryContext(ctx, listMaterialsFiledUnder, subjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Material{}
+	for rows.Next() {
+		var i Material
+		if err := rows.Scan(
+			&i.ID,
+			&i.Sha256,
+			&i.SizeBytes,
+			&i.Type,
+			&i.OriginalName,
+			&i.SubjectID,
+			&i.FolderID,
+			&i.Status,
+			&i.TextStatus,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMaterialsOfSubject = `-- name: ListMaterialsOfSubject :many
 SELECT id, sha256, size_bytes, type, original_name, subject_id, folder_id, status, text_status, version, created_at, updated_at FROM materials
 WHERE subject_id = ?1
@@ -879,6 +920,115 @@ func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const materialDigestInUse = `-- name: MaterialDigestInUse :one
+SELECT CAST(EXISTS (SELECT 1 FROM materials m WHERE m.sha256 = ?1 AND m.id <> ?2)
+         OR EXISTS (SELECT 1
+                    FROM proposals p
+                    WHERE p.kind = 'send_work_email' AND p.attachment_sha256 = ?1
+                      AND p.status IN ('PROPOSED', 'VALIDATED', 'CONFIRMED')) AS INTEGER) AS used
+`
+
+type MaterialDigestInUseParams struct {
+	Sha256   string
+	ExceptID string
+}
+
+// Whether the stored bytes of a sha256 are used by anything but one material: another material, or a send of a work
+// not yet carried out that pinned them (its copy is made from them). One query on purpose: later stores of those
+// bytes (note revisions, TASK-290/291) are added here.
+func (q *Queries) MaterialDigestInUse(ctx context.Context, arg MaterialDigestInUseParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, materialDigestInUse, arg.Sha256, arg.ExceptID)
+	var used int64
+	err := row.Scan(&used)
+	return used, err
+}
+
+const materialKeptElsewhere = `-- name: MaterialKeptElsewhere :one
+SELECT CAST(EXISTS (SELECT 1
+                    FROM note_parts p
+                    JOIN notes n ON n.id = p.note_id
+                    WHERE p.material_id = ?1 AND n.subject_id <> ?2)
+         OR EXISTS (SELECT 1 FROM works w WHERE w.material_id = ?1) AS INTEGER) AS kept
+`
+
+type MaterialKeptElsewhereParams struct {
+	ID        string
+	SubjectID string
+}
+
+// The one check of a file that must survive its subject's purge: a note of another subject holds it, or a work was
+// written from it (works.material_id cascades, ADR-0027 keeps works).
+func (q *Queries) MaterialKeptElsewhere(ctx context.Context, arg MaterialKeptElsewhereParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, materialKeptElsewhere, arg.ID, arg.SubjectID)
+	var kept int64
+	err := row.Scan(&kept)
+	return kept, err
+}
+
+const purgeMaterialOfRemovedSubject = `-- name: PurgeMaterialOfRemovedSubject :execrows
+DELETE FROM materials
+WHERE materials.id = ?1
+  AND materials.subject_id = ?2
+  AND EXISTS (SELECT 1 FROM subjects s
+              WHERE s.id = materials.subject_id AND s.removed_at IS NOT NULL AND s.removed_at <= ?3)
+  AND NOT EXISTS (SELECT 1 FROM note_parts p WHERE p.material_id = materials.id)
+  AND NOT EXISTS (SELECT 1 FROM works w WHERE w.material_id = materials.id)
+`
+
+type PurgeMaterialOfRemovedSubjectParams struct {
+	ID        string
+	SubjectID sql.NullString
+	Cutoff    sql.NullInt64
+}
+
+// A material held by any note or the source of any work is never deleted (works would cascade); its lesson links and
+// inspection cascade, and the summaries and assignments made from it keep their rows (SET NULL).
+func (q *Queries) PurgeMaterialOfRemovedSubject(ctx context.Context, arg PurgeMaterialOfRemovedSubjectParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeMaterialOfRemovedSubject, arg.ID, arg.SubjectID, arg.Cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const purgeRemovedSubject = `-- name: PurgeRemovedSubject :execrows
+DELETE FROM subjects
+WHERE id = ?1 AND removed_at IS NOT NULL AND removed_at <= ?2
+`
+
+type PurgeRemovedSubjectParams struct {
+	ID     string
+	Cutoff sql.NullInt64
+}
+
+// The purge of a removed subject past its restore window (TASK-308, ADR-0027). Every purge delete re-checks that the
+// subject is still removed at or before the cutoff (ms), so a restore that won the race keeps everything.
+func (q *Queries) PurgeRemovedSubject(ctx context.Context, arg PurgeRemovedSubjectParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeRemovedSubject, arg.ID, arg.Cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const subjectStillDue = `-- name: SubjectStillDue :one
+SELECT CAST(EXISTS (SELECT 1 FROM subjects
+                    WHERE id = ?1 AND removed_at IS NOT NULL AND removed_at <= ?2) AS INTEGER)
+       AS due
+`
+
+type SubjectStillDueParams struct {
+	ID     string
+	Cutoff sql.NullInt64
+}
+
+func (q *Queries) SubjectStillDue(ctx context.Context, arg SubjectStillDueParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, subjectStillDue, arg.ID, arg.Cutoff)
+	var due int64
+	err := row.Scan(&due)
+	return due, err
 }
 
 const updateMaterial = `-- name: UpdateMaterial :execrows

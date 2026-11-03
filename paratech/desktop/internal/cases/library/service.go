@@ -43,8 +43,9 @@ type Service struct {
 	texts       TextExtractor
 	reader      MaterialReader
 	inspections InspectionRepository
-	notes       SubjectNotes // optional
-	images      PageImages   // optional: without it photos are refused
+	notes       SubjectNotes    // optional
+	images      PageImages      // optional: without it photos are refused
+	expired     ExpiredSubjects // optional: without it an expired name waits for the daily purge
 	log         *slog.Logger
 }
 
@@ -61,7 +62,7 @@ func New(d Deps) (*Service, error) {
 	return &Service{
 		subjects: d.Subjects, materials: d.Materials, blobs: d.Blobs, lessons: d.Lessons, strings: d.Strings,
 		clock: d.Clock, ids: d.IDs, texts: d.Texts, reader: d.Reader, inspections: d.Inspections, notes: d.Notes,
-		images: d.Images, log: log,
+		images: d.Images, expired: d.Expired, log: log,
 	}, nil
 }
 
@@ -75,7 +76,8 @@ func (s *Service) Subjects(ctx context.Context) ([]*subject.Subject, error) {
 }
 
 // CreateSubject creates a subject with its system folders. A name or alias that another subject has (by key) is
-// ErrNameTaken, one a removed subject has a *RemovedNameError (ErrRemovedNameTaken); aliases with the key of the name
+// ErrNameTaken, one a removed subject has a *RemovedNameError (ErrRemovedNameTaken) while it can be restored; once its
+// window has ended the subject is erased first and the name is free (see namesFor). Aliases with the key of the name
 // are dropped.
 func (s *Service) CreateSubject(ctx context.Context, req NewSubject) (*subject.Subject, error) {
 	now := s.clock.Now()
@@ -91,13 +93,13 @@ func (s *Service) CreateSubject(ctx context.Context, req NewSubject) (*subject.S
 		return nil, domainError(err)
 	}
 
-	ix, err := s.names(ctx)
-	if err != nil {
-		return nil, err
-	}
 	names := []string{sub.Name().String()}
 	for _, a := range sub.Aliases() {
 		names = append(names, a.String())
+	}
+	ix, err := s.namesFor(ctx, "", names...)
+	if err != nil {
+		return nil, err
 	}
 	for _, n := range names {
 		if err := ix.taken(n, ""); err != nil {
@@ -120,7 +122,7 @@ func (s *Service) CreateSubject(ctx context.Context, req NewSubject) (*subject.S
 // subject has is ErrNameTaken (a *RemovedNameError when that subject is removed); one the subject has changes nothing.
 func (s *Service) AddAlias(ctx context.Context, id shared.SubjectID, alias string) (*subject.Subject, error) {
 	return s.changeSubject(ctx, id, func(sub *subject.Subject) (bool, error) {
-		ix, err := s.names(ctx)
+		ix, err := s.namesFor(ctx, id, alias)
 		if err != nil {
 			return false, err
 		}

@@ -47,7 +47,7 @@ func TestPurgeLoopRunsOnceADay(t *testing.T) {
 	clock := testenv.NewFakeClock(time.Date(2026, 10, 28, 3, 0, 0, 0, time.UTC))
 	purge := &countingPurge{err: errors.New("disk busy")}
 	var logs bytes.Buffer
-	run := purgeLoop(clock, purge.run, slog.New(slog.NewTextHandler(&syncWriter{w: &logs}, nil)))
+	run := purgeLoop(clock, purgeStep, purge.run, slog.New(slog.NewTextHandler(&syncWriter{w: &logs}, nil)))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -84,7 +84,8 @@ func TestPurgeLoopRunsOnceADay(t *testing.T) {
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("loop ended with %v", err)
 	}
-	if s := logs.String(); !strings.Contains(s, "daily cleanup failed") || !strings.Contains(s, "disk busy") {
+	if s := logs.String(); !strings.Contains(s, "daily cleanup failed") || !strings.Contains(s, "disk busy") ||
+		!strings.Contains(s, purgeStep) {
 		t.Fatalf("the failure is not logged: %q", s)
 	}
 }

@@ -2,6 +2,7 @@ package library
 
 import (
 	"log/slog"
+	"time"
 
 	"paratech/desktop/internal/domain/library/inspection"
 	"paratech/desktop/internal/domain/library/material"
@@ -58,13 +59,23 @@ type Inspected struct {
 	Answer *inspection.Answer
 }
 
+// RemovedSubject is a removed subject still inside its restore window, for «Недавно удалённые»: «Вернуть» works until
+// PurgeAt, then it is erased.
+type RemovedSubject struct {
+	Subject   *subject.Subject
+	RemovedAt time.Time
+	PurgeAt   time.Time
+}
+
 // Deps are the ports the Service needs; Log is optional. Texts, Reader and Inspections are needed only by the reading
 // of the text (MaterialText, Inspect): without them those answer ErrNotConfigured. Notes is optional: without it a
 // subject with notes is still refused by the store, as ErrNotEmpty instead of ErrHasNotes. Images is optional: without
-// it a photo is refused (ErrUnsupportedImage), never stored as it came.
+// it a photo is refused (ErrUnsupportedImage), never stored as it came. Expired is optional: without it the name of a
+// removed subject past its window stays taken (a *RemovedNameError) until the daily purge erased it.
 type Deps struct {
 	Notes       SubjectNotes
 	Images      PageImages
+	Expired     ExpiredSubjects
 	Subjects    SubjectRepository
 	Materials   MaterialRepository
 	Blobs       BlobStore

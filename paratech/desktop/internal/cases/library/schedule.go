@@ -208,7 +208,14 @@ func (s *Service) createScheduled(ctx context.Context, token string, c schedules
 
 	switch sub, err := s.subjects.GetAny(ctx, id); {
 	case err == nil:
-		return existing(sub)
+		// One removed past its window is erased first and made again (ADR-0027: after the purge the name is free).
+		gone, err := s.purgeExpired(ctx, sub)
+		if err != nil {
+			return err
+		}
+		if !gone {
+			return existing(sub)
+		}
 	case !errors.Is(err, shared.ErrNotFound):
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
@@ -217,7 +224,11 @@ func (s *Service) createScheduled(ctx context.Context, token string, c schedules
 	if err != nil {
 		return domainError(err)
 	}
-	ix, err := s.names(ctx) // a removed subject keeps its spellings too
+	spellings := []string{sub.Name().String()}
+	for _, a := range sub.Aliases() {
+		spellings = append(spellings, a.String())
+	}
+	ix, err := s.namesFor(ctx, id, spellings...) // a removed subject keeps its spellings too, until its window ends
 	if err != nil {
 		return err
 	}
@@ -272,7 +283,7 @@ func scheduleNameTaken(ix nameIndex, sub *subject.Subject, id shared.SubjectID) 
 // none, so a retry finds the subject as before or as done.
 func (s *Service) addScheduled(ctx context.Context, a schedulesubjects.Addition, now time.Time, res *ScheduleResult) error {
 	_, err := s.changeSubject(ctx, a.Subject, func(sub *subject.Subject) (bool, error) {
-		ix, err := s.names(ctx)
+		ix, err := s.namesFor(ctx, a.Subject, a.Aliases...)
 		if err != nil {
 			return false, err
 		}
