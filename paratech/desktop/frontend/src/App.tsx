@@ -353,8 +353,9 @@ export function App() {
   // The page buttons the agent offers (TASK-324): a press does what the page's own button does, or opens that page.
   const offerNav = useMemo(
     () => ({
-      openSummary,
-      openTranscript,
+      // The lesson screen of the recording (TASK-352 replaced the summary and transcript viewers).
+      openLessonSummary: (recordingId: string, section?: "lecture") => openRecordingLesson(recordingId, section ?? "summary"),
+      openLessonTranscript: (recordingId: string) => openRecordingLesson(recordingId, "transcript"),
       // As a rail click: a page with sub-pages starts at its first level.
       openPage: (id: PageId) => {
         openPage(id);
@@ -362,7 +363,7 @@ export function App() {
       },
       startRecording: openStartPanel,
     }),
-    [openSummary, openTranscript, openPage, openStartPanel],
+    [openRecordingLesson, openPage, openStartPanel],
   );
   const libraryChanged = useCallback(() => setLibrary((n) => n + 1), []);
   const panel = useResizablePanel();

@@ -93,8 +93,8 @@ export interface OfferDeps {
   turnkey: Pick<TurnkeyApi, "work">;
   calendar: Pick<CalendarApi, "sync">;
   nav: {
-    openSummary(recordingId: string, section?: "lecture"): void;
-    openTranscript(recordingId: string): void;
+    openLessonSummary(recordingId: string, section?: "lecture"): void;
+    openLessonTranscript(recordingId: string): void;
     openPage(page: PageId): void;
     /** «Записи» with the start panel open: the source of the sound is chosen there. */
     startRecording(): void;
@@ -126,10 +126,10 @@ export async function runOffer(offer: OfferView, deps: OfferDeps): Promise<Offer
         return r.status === "opened" ? opened : { ok: false, text: r.message };
       }
       case "openSummary":
-        deps.nav.openSummary(step.id, step.section);
+        deps.nav.openLessonSummary(step.id, step.section);
         return opened;
       case "openTranscript":
-        deps.nav.openTranscript(step.id);
+        deps.nav.openLessonTranscript(step.id);
         return opened;
       case "openWork": {
         // The work card's «Открыть в Word / PowerPoint»: a copy of the ready file opens in the default program.

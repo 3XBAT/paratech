@@ -760,8 +760,8 @@ function fakeDeps(over = {}) {
     turnkey: { work: async (id) => (log.push(["work", id]), { id, workType: "paper", writing: { step: "none", result: "done", materialId: "mat7" } }) },
     calendar: { sync: async () => (log.push(["sync"]), { ok: true, message: "Синхронизация запущена.", state: {} }) },
     nav: {
-      openSummary: (id, section) => log.push(["openSummary", id, section]),
-      openTranscript: (id) => log.push(["openTranscript", id]),
+      openLessonSummary: (id, section) => log.push(["openSummary", id, section]),
+      openLessonTranscript: (id) => log.push(["openTranscript", id]),
       openPage: (page) => log.push(["openPage", page]),
       startRecording: () => log.push(["startRecording"]),
     },
