@@ -779,7 +779,7 @@ test("«База знаний» is a global button of the tree under «Пред�
   const page = src("pages/SubjectsPage.tsx");
   assert.match(page, /onOpenKnowledge=\{\(\) => props\.onOpen\("knowledge"\)\}/);
   assert.equal((page.match(/onOpenKnowledge=/g) ?? []).length, 1);
-  assert.match(src("pages/SubjectsParts.tsx"), /onClick=\{\(\) => \(props\.onOpenFolder \?\? scrollToFolder\)\(f\.id\)\}/);
+  assert.match(src("pages/SubjectsParts.tsx"), /s\.id === props\.currentId \? \(props\.onOpenFolder \?\? scrollToFolder\)\(f\.id\) : props\.onOpen\(s\.id\)/);
 });
 
 test("a click on a folder of the tree shows the tab «Файлы» first, then scrolls; «Новая папка» opens the tab with the form", () => {
