@@ -13,19 +13,20 @@ const (
 	opAssignmentState = "homeworkflow: state of an assignment"
 )
 
-// maxEventScan bounds the confirmed and executed proposals looked through for a deadline event.
+// maxEventScan bounds the executed, confirmed and stale proposals looked through for a deadline event.
 const maxEventScan = 1000
 
 // HasDeadlineEvent tells from the local projection whether assignment id has a deadline event in Google Calendar: a
-// deadline proposal of it was executed, or confirmed and maybe executed (a crash or a failed calendar call), so the
-// agent asks «Да» before deleting it (ADR-0033 О-6 б). Nothing is read from Google. An event the calendar sync removed
-// after a delete and a restore still counts, as does every assignment when the list was cut at maxEventScan: the
-// answer errs towards «Да». Errors: no Waiting port (ErrInvalidConfig) or the store could not be read.
+// deadline proposal of it was executed, or confirmed and maybe executed (a crash or a failed calendar call), or went
+// STALE (a confirmed one may have made the event before), so the agent asks «Да» before deleting it (ADR-0033 О-6 б).
+// Nothing is read from Google. An event the calendar sync removed after a delete and a restore still counts, as does
+// every assignment when a list was cut at maxEventScan: the answer errs towards «Да». Errors: no Waiting port
+// (ErrInvalidConfig) or the store could not be read.
 func (s *Service) HasDeadlineEvent(ctx context.Context, id shared.AssignmentID) (bool, error) {
 	if s.waiting == nil {
 		return false, fmt.Errorf("%s: %w: no proposal list", opDeadlineEvent, ErrInvalidConfig)
 	}
-	for _, st := range []proposal.Status{proposal.StatusExecuted, proposal.StatusConfirmed} {
+	for _, st := range []proposal.Status{proposal.StatusExecuted, proposal.StatusConfirmed, proposal.StatusStale} {
 		list, err := s.waiting.ListByStatus(ctx, st, maxEventScan)
 		if err != nil {
 			return false, fmt.Errorf("%s %s: %w", opDeadlineEvent, id, err)

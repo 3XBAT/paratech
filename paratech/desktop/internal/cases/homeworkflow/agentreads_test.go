@@ -60,6 +60,28 @@ func TestHasDeadlineEvent(t *testing.T) {
 		}
 	})
 
+	t.Run("stale: counts", func(t *testing.T) {
+		e := newAgentProposalEnv(t, false)
+		v, err := e.svc.ProposeDeadline(t.Context(), "a1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Confirmed (the calendar call failed), then gone STALE before an execution was recorded.
+		e.calendar.Fail(ErrCalendarNotConnected)
+		if _, err := e.svc.ConfirmDeadline(t.Context(), v.ID); !errors.Is(err, ErrCalendarNotConnected) {
+			t.Fatal(err)
+		}
+		ps := e.proposals[v.ID]
+		ps.Status, ps.Reason = proposal.StatusStale, proposal.ReasonAssignmentDeleted
+		e.proposals[v.ID] = ps
+		if ok, err := e.svc.HasDeadlineEvent(t.Context(), "a1"); err != nil || !ok {
+			t.Fatalf("stale = %v, %v; want an event (a confirmed one may have made it)", ok, err)
+		}
+		if ok, err := e.svc.HasDeadlineEvent(t.Context(), "a2"); err != nil || ok {
+			t.Fatalf("another assignment = %v, %v", ok, err)
+		}
+	})
+
 	t.Run("the list cannot be read", func(t *testing.T) {
 		e := newAgentProposalEnv(t, false)
 		svc := *e.svc
