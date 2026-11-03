@@ -21,6 +21,7 @@ import { type ActiveIssue, doneTexts } from "../assignmentDoneView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 import { DoneCheck, DoneIssueLine } from "./AssignmentDoneParts.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
 import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
@@ -88,9 +89,7 @@ export function LoadError(props: { onRetry: () => void; quiet?: boolean }) {
           {texts.loadFailed}
         </ResultLine>
       )}
-      <Button size="sm" onClick={props.onRetry}>
-        {texts.retry}
-      </Button>
+      <IconAction icon="retry" label={texts.retry} onClick={props.onRetry} />
     </div>
   );
 }
@@ -183,12 +182,8 @@ export function StopProblem(props: {
       <ResultLine kind="fail" role="alert">
         {props.text}
       </ResultLine>
-      <Button size="sm" busy={props.retrying} busyLabel={recordTexts.stopping} disabled={props.retrying || !props.canRetry} onClick={props.onRetry}>
-        {recordTexts.retry}
-      </Button>
-      <Button size="sm" variant="ghost" onClick={props.onOpenRecordings}>
-        {recordTexts.openRecordings}
-      </Button>
+      <IconAction icon="retry" label={props.retrying ? recordTexts.stopping : recordTexts.retry} busy={props.retrying} disabled={!props.canRetry} onClick={props.onRetry} />
+      <IconAction icon="open" label={recordTexts.openRecordings} onClick={props.onOpenRecordings} />
     </div>
   );
 }
@@ -499,11 +494,7 @@ export function SummarySection(props: {
                       />
                     ))}
               </div>
-              {m.canOpen && (
-                <Button size="sm" onClick={() => props.onOpenLesson(m.recordingId)}>
-                  {texts.open}
-                </Button>
-              )}
+              {m.canOpen && <IconAction icon="open" place="left" label={texts.open} onClick={() => props.onOpenLesson(m.recordingId)} />}
             </div>
           );
         })}
@@ -516,11 +507,7 @@ export function SummarySection(props: {
                 <div className="today-t">{m.title}</div>
                 {m.meta !== "" && <div className="small muted today-meta num">{m.meta}</div>}
               </div>
-              {m.canOpen && (
-                <Button size="sm" onClick={() => props.onOpenLesson(m.recordingId)}>
-                  {texts.open}
-                </Button>
-              )}
+              {m.canOpen && <IconAction icon="open" place="left" label={texts.open} onClick={() => props.onOpenLesson(m.recordingId)} />}
             </div>
           );
         })}

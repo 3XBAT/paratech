@@ -6,7 +6,7 @@ import {
   type ViewerKey,
   viewerAnnounce,
 } from "../ownNotesView.js";
-import { Button } from "../ui/Button.js";
+import { IconAction } from "../ui/IconAction.js";
 
 // Full-size viewer of the photo pages of one note (TASK-166). The image comes only from the page's core address.
 // A modal dialog: focus moves in, Tab stays inside, Esc closes and focus goes back to where it was.
@@ -98,15 +98,9 @@ export function PageViewer(props: { pages: PhotoPage[]; start: number; opener?: 
           {viewerAnnounce(page.number, total)}
         </span>
         <span className="page-viewer-acts">
-          <Button variant="secondary" size="sm" disabled={at === 0} onClick={() => go("ArrowLeft")}>
-            {t.viewerPrev}
-          </Button>
-          <Button variant="secondary" size="sm" disabled={at === total - 1} onClick={() => go("ArrowRight")}>
-            {t.viewerNext}
-          </Button>
-          <Button variant="primary" size="sm" data-close="" onClick={props.onClose}>
-            {t.viewerClose}
-          </Button>
+          <IconAction icon="back" place="below" label={t.viewerPrev} disabled={at === 0} onClick={() => go("ArrowLeft")} />
+          <IconAction icon="chevr" place="below" label={t.viewerNext} disabled={at === total - 1} onClick={() => go("ArrowRight")} />
+          <IconAction icon="x" place="below" label={t.viewerClose} data={{ close: "" }} onClick={props.onClose} />
         </span>
       </div>
       <div className="page-viewer-stage">

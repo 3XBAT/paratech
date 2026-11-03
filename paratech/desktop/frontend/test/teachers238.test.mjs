@@ -23,6 +23,7 @@ import {
   triggerId,
 } from "../.test-build/teachersView.js";
 import { TeachersBlock } from "../.test-build/pages/TeachersBlock.js";
+import { ariaLabels, isOn, visibleText } from "./iconbtn.mjs";
 
 const html = (el) => renderToStaticMarkup(el);
 const noop = () => undefined;
@@ -80,7 +81,10 @@ test("three rows in a fixed order; an empty one says «Не указан» and o
   assert.ok(rows.every((r) => !r.filled && r.action === "Указать"));
   const out = view(none);
   assert.equal(out.split("Не указан").length - 1, 3);
-  assert.equal((out.match(/>Указать</g) ?? []).length, 3);
+  // TASK-368: the row button is an icon (plus for an empty row) named «Указать: <роль>»; no visible word.
+  assert.deepEqual(ariaLabels(out), ["Указать: лектор", "Указать: семинары и практика", "Указать: лабораторные"]);
+  assert.equal(visibleText(out).includes("Указать"), false);
+  assert.equal((out.match(/<use href="#i-plus">/g) ?? []).length, 3);
   assert.doesNotMatch(out, /Изменить/);
   assert.match(out, new RegExp(teacherTexts.hint), "an empty block says what the addresses are for");
   assert.match(out, /<h2[^>]*>Преподаватели<\/h2>/);
@@ -104,7 +108,8 @@ test("names and addresses stay text: bdi text nodes, no link, no markup", () => 
   const out = view({ lecture: { name: evil, email: `${evil}@example.test` }, practice: null, lab: null });
   assert.ok(!out.includes("<img"));
   assert.ok(out.includes("&lt;img"));
-  assert.doesNotMatch(out, /<a[ >]|href=|mailto:|dangerouslySetInnerHTML/);
+  // The icon buttons draw the fixed sprite reference <use href="#i-…">: the one href allowed.
+  assert.doesNotMatch(out.replace(/<use href="#i-[a-z]+"><\/use>/g, ""), /<a[ >]|href=|mailto:|dangerouslySetInnerHTML/);
   assert.match(out, /<bdi>&lt;img/);
   for (const file of ["pages/TeachersBlock.tsx", "pages/RecipientParts.tsx", "teachersView.ts", "recipientView.ts"]) {
     const src = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8").replace(/\/\/.*$/gm, "");
@@ -376,7 +381,7 @@ test("«Убрать» can be undone: «Вернуть» saves the removed name 
   assert.deepEqual(page.flow.state.removed, { role: "lecture", ...lecturer });
   assert.equal(page.flow.state.note, teacherTexts.cleared);
   const out = view(none, page.flow.state);
-  assert.match(out, />Вернуть</);
+  assert.ok(isOn(out, "Вернуть"), "TASK-368: an undo icon named «Вернуть»");
   assert.match(out, /Преподаватель убран\./);
   await Promise.all([page.flow.restore(), page.flow.restore()]);
   assert.deepEqual(page.calls[1], ["set", "s1", 4, "lecture", lecturer.name, lecturer.email], "the version of the last answer, one call");

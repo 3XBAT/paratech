@@ -6,6 +6,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { initialFilter, lineModel, statusOptions, problemText, refusalText, toFilter, undoOutcome } from "../.test-build/journalView.js";
 import { FilterBar, JournalList } from "../.test-build/pages/JournalParts.js";
+import { isOff, isOn, visibleText } from "./iconbtn.mjs";
 
 const noop = () => undefined;
 
@@ -51,9 +52,12 @@ test("an undoable action line offers «Отменить»; the busy one is label
   assert.match(out, /Создан предмет/);
   assert.match(out, /Матанализ/);
   assert.match(out, /Выполнено/);
-  assert.match(out, /<button(?![^>]*disabled)[^>]*>Отменить</);
+  // TASK-368: the row button is an undo icon named «Отменить»; its words are the tooltip and the aria-label.
+  assert.ok(isOn(out, "Отменить"));
+  assert.equal(visibleText(out).includes("Отменить"), false);
   const busy = list([line(), line({ actionId: "a2" })], "a1");
-  assert.match(busy, />Отмена…</);
+  assert.ok(isOff(busy, "Отмена…"));
+  assert.match(busy, /aria-busy="true"/);
   assert.equal((busy.match(/<button[^>]*disabled/g) ?? []).length, 2);
 });
 

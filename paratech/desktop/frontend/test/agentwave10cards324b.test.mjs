@@ -495,7 +495,7 @@ test("a refusal of the core: its own words, the buttons stay active; the undo th
   const gone = view(done(), { review: reviewOf(), flowOver: { error: scheduleUndoGoneText } });
   assert.ok(gone.includes(scheduleUndoGoneText));
   assert.match(gone, />Открыть «Предметы»</);
-  assert.match(gone, /<button(?![^>]*disabled)[^>]*><span class="btn-labels"><span>Отменить всё</);
+  assert.ok(isOn(gone, "Отменить всё"), "TASK-368: «Отменить всё» of the done line is an icon with the same name");
   assert.equal(refusalOpensSubjects(scheduleUndoGoneText), true);
   assert.equal(refusalOpensSubjects(scheduleUndoAgainText), false);
   const again = view(done(), { review: reviewOf(), flowOver: { error: scheduleUndoAgainText } });

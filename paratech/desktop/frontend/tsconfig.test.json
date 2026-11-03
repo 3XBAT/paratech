@@ -138,6 +138,8 @@
     "src/pages/SubjectPairsTab.tsx",
     "src/pages/SubjectTasksTab.tsx",
     "src/pages/SubjectTabs.tsx",
-    "src/pages/useFocusBack.ts"
+    "src/pages/useFocusBack.ts",
+    "src/bindings/runtime.ts",
+    "src/pages/DropZone.tsx"
   ]
 }

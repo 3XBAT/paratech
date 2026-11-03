@@ -16,6 +16,7 @@ import {
 } from "../teachersView.js";
 import { Button } from "../ui/Button.js";
 import { Card, Field, Input, ResultLine } from "../ui/controls.js";
+import { IconAction } from "../ui/IconAction.js";
 
 // Names and addresses of teachers are typed text: only text nodes (<bdi>) here, never markup, never a mailto link.
 
@@ -47,9 +48,14 @@ function RowView(props: { row: TeacherRow; disabled: boolean; onOpen: () => void
           )}
         </div>
       </div>
-      <Button id={triggerId(row.role)} size="sm" variant="ghost" aria-label={row.actionLabel} disabled={props.disabled} onClick={props.onOpen}>
-        {row.action}
-      </Button>
+      <IconAction
+        id={triggerId(row.role)}
+        icon={row.filled ? "pencil" : "plus"}
+        place="left"
+        label={row.actionLabel}
+        disabled={props.disabled}
+        onClick={props.onOpen}
+      />
     </div>
   );
 }
@@ -188,9 +194,13 @@ export function TeachersBlock(props: { teachers: LibraryTeachers; state: Teacher
       </p>
       {state.removed !== null && state.form === null && (
         <div className="acts start">
-          <Button size="sm" variant="ghost" disabled={busy} busy={state.busy === "save"} busyLabel={teacherTexts.saving} onClick={on.restore}>
-            {teacherTexts.undo}
-          </Button>
+          <IconAction
+            icon="undo"
+            label={state.busy === "save" ? teacherTexts.saving : teacherTexts.undo}
+            busy={state.busy === "save"}
+            disabled={busy}
+            onClick={on.restore}
+          />
         </div>
       )}
     </section>

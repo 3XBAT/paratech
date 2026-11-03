@@ -36,6 +36,7 @@ import {
   texts,
 } from "../.test-build/journalView.js";
 import { FilterBar, JournalList, LoadError } from "../.test-build/pages/JournalParts.js";
+import { isOn, visibleText } from "./iconbtn.mjs";
 
 const noop = () => undefined;
 const read = (rel) => readFileSync(new URL(`../src/${rel}`, import.meta.url), "utf8");
@@ -457,7 +458,9 @@ test("a load error shows «Повторить» next to it, as an alert; «За�
   const html = renderToStaticMarkup(h(LoadError, { text: "Не удалось загрузить журнал.", onRetry: noop }));
   assert.match(html, /role="alert"/);
   assert.ok(html.includes("Не удалось загрузить журнал."));
-  assert.match(html, />Повторить</);
+  // TASK-368: «Повторить» is a retry icon (tooltip and aria-label), not a word button.
+  assert.ok(isOn(html, "Повторить"));
+  assert.equal(visibleText(html).includes("Повторить"), false);
   const page = read("pages/JournalPage.tsx");
   assert.match(page, /<LoadError text=\{error\} onRetry=\{retry\} \/>/);
   assert.match(page, /<p className="small muted">\{texts\.loading\}<\/p>/);

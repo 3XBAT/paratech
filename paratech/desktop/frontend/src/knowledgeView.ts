@@ -419,6 +419,13 @@ export function checkQuery(raw: string): QueryCheck {
   return n > maxQueryChars ? { kind: "long" } : { kind: "ok", query: q };
 }
 
+/** The words of the small buttons of the base: icons with a tooltip and an aria-label (TASK-368). */
+export const knowledgeToolTexts = {
+  export: "Экспорт в .md",
+  exporting: "Сохранение…",
+  setSubject: "Указать предмет",
+} as const;
+
 export const searchTexts = {
   short: `Введите хотя бы ${minQueryChars} символа.`,
   running: "Поиск…",

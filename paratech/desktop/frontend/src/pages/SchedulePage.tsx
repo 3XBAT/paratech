@@ -36,6 +36,7 @@ import { Button } from "../ui/Button.js";
 import { offerGroups, reviewTexts } from "../scheduleSubjectsView.js";
 import { Banner, Card, CountTiles, EmptyState } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 
 // Schedule import (PRD section 11.2): choose a file, see its errors or the preview, then apply it. Every text from the
 // file is rendered as plain text, each piece in its own <bdi>.
@@ -356,9 +357,11 @@ export function PreviewView(props: {
 
       {groups.length > 0 && (
         <div className="actions">
-          <Button variant="ghost" onClick={() => props.onLists(setCollapsed(props.lists, groups, !folded))}>
-            {folded ? listTexts.expandAll : listTexts.collapseAll}
-          </Button>
+          <IconAction
+            icon={folded ? "chev" : "chevup"}
+            label={folded ? listTexts.expandAll : listTexts.collapseAll}
+            onClick={() => props.onLists(setCollapsed(props.lists, groups, !folded))}
+          />
         </div>
       )}
       {group("errors", p.errors, (e) => plainRow(rowErrorParts(e)), { more: () => listTexts.allErrors })}

@@ -34,8 +34,12 @@ export interface IconActionProps {
   tabIndex?: number;
   className?: string;
   id?: string;
+  /** `data-*` attributes (without the prefix) that the page's focus code finds the button by. */
+  data?: Readonly<Record<string, string>>;
   ref?: Ref<HTMLButtonElement>;
   onClick(e: MouseEvent<HTMLButtonElement>): void;
+  /** For a button that must not move a text selection before the click reads it (copy of the selection). */
+  onMouseDown?(e: MouseEvent<HTMLButtonElement>): void;
 }
 
 interface Box {
@@ -63,6 +67,10 @@ export function fitTip(tip: Box, clip: Box, place: TipPlace, margin = 4): { dx: 
   }
   const flip = place === "left" ? tip.left < clip.left + margin : tip.right > clip.right - margin;
   return { dx: 0, flip };
+}
+
+function dataAttributes(data: Readonly<Record<string, string>> | undefined): Record<string, string> {
+  return Object.fromEntries(Object.entries(data ?? {}).map(([k, v]) => [`data-${k}`, v]));
 }
 
 /** The nearest ancestor that clips (scrolls) its content, else the window. */
@@ -130,8 +138,10 @@ export function IconAction(props: IconActionProps) {
       aria-expanded={props.expanded}
       aria-busy={props.busy === true ? true : undefined}
       aria-describedby={reason !== "" ? reasonId : undefined}
+      {...dataAttributes(props.data)}
       disabled={off}
       onClick={props.onClick}
+      onMouseDown={props.onMouseDown}
       onMouseEnter={show}
       onFocus={show}
       onKeyDown={key}

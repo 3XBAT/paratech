@@ -471,6 +471,10 @@ export const texts = {
     "Устанавливайте, только если они совпадают.",
   choosing: "Выбор файла… После выбора считается SHA-256: для файла 0,5–1,5 ГБ это несколько секунд.",
   installing: "Установка: файл копируется в папку приложения и проверяется ещё раз…",
+  /** The small row buttons are icons: these are their tooltips and names (TASK-368). */
+  remove: "Удалить",
+  removing: "Удаление…",
+  cancelDownload: "Отменить",
   deleteTitle: "Удалить модель?",
   deleteConfirm: "Её файл будет удалён из папки приложения.",
 } as const;

@@ -237,6 +237,16 @@ export const redoTexts = {
 /** The action of a recording without speech (TASK-110), as on its row: opens «Диагностика». */
 export const checkSoundLabel = "Проверить звук";
 
+/** The words of the small buttons of the summary page: icons with a tooltip and an aria-label (TASK-368). */
+export const summaryToolTexts = {
+  copy: "Скопировать",
+  copying: "Копирование…",
+  starting: "Запуск…",
+  saveAs: "Сохранить как…",
+  saving: "Сохранение…",
+  openAssignment: "Открыть задание",
+} as const;
+
 const knownErrors: ReadonlySet<string> = new Set([
   ...Object.values(errorMessages),
   ...Object.values(lectureErrorMessages),

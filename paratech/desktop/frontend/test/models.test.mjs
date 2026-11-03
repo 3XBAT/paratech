@@ -537,12 +537,15 @@ test("the page: one action button, the «⋯» menu, the id only as a tooltip, t
   for (const r of ["function CatalogRow(", "function InstalledRow("]) {
     const body = page.slice(page.indexOf(r));
     const end = body.indexOf("\n}\n");
-    const buttons = body.slice(0, end).match(/<Button\b/g) ?? [];
+    // TASK-368: a row's small buttons (delete, cancel a download) are icon buttons; «Скачать» keeps its word.
+    const buttons = body.slice(0, end).match(/<(Button|IconAction)\b/g) ?? [];
     assert.ok(buttons.length >= 1, r);
     assert.ok(body.slice(0, end).includes("<RowMenu"), `${r} has the «⋯» menu`);
   }
   const installedBody = page.slice(page.indexOf("function InstalledRow("));
-  assert.equal(installedBody.slice(0, installedBody.indexOf("\n}\n")).match(/<Button\b/g).length, 1, "only «Удалить»");
+  const installedRow = installedBody.slice(0, installedBody.indexOf("\n}\n"));
+  assert.equal(installedRow.match(/<IconAction\b/g).length, 1, "only «Удалить», as a trash icon");
+  assert.equal(installedRow.match(/<Button\b/g), null, "no word button in an installed row");
 });
 
 test("the catalog filters by language and load and groups by language", () => {

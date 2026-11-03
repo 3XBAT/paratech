@@ -43,7 +43,10 @@ export type IconName =
   | "skip"
   | "open"
   | "save"
-  | "undo";
+  | "undo"
+  | "trash"
+  | "chevup"
+  | "copysel";
 
 /** Rendered once per window, before any Icon. */
 export function IconSprite() {
@@ -198,6 +201,18 @@ export function IconSprite() {
       </symbol>
       <symbol id="i-undo" viewBox="0 0 24 24">
         <path d="M9 14L4 9l5-5M4 9h9a6 6 0 0 1 0 12h-3" />
+      </symbol>
+      {/* TASK-368 (screens): trash (delete), chevup (the upward chevron next to «chev»), copysel (copy with a dashed front
+          sheet: only the selected part). */}
+      <symbol id="i-trash" viewBox="0 0 24 24">
+        <path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.8 12a1.5 1.5 0 0 0 1.5 1.4h6.4a1.5 1.5 0 0 0 1.5-1.4l.8-12M10 11v6M14 11v6" />
+      </symbol>
+      <symbol id="i-chevup" viewBox="0 0 24 24">
+        <path d="M6 15l6-6 6 6" />
+      </symbol>
+      <symbol id="i-copysel" viewBox="0 0 24 24">
+        <rect x="9" y="9" width="11" height="11" rx="2" strokeDasharray="2.6 2.4" />
+        <path d="M15 9V6.5A1.5 1.5 0 0 0 13.5 5h-8A1.5 1.5 0 0 0 4 6.5v8A1.5 1.5 0 0 0 5.5 16H9" />
       </symbol>
     </svg>
   );

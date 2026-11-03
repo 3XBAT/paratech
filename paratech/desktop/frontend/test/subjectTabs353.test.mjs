@@ -749,7 +749,8 @@ test("the tickets page has one name, and opened from a subject it hides the sele
   assert.equal(ticketTexts.noSubjectsTitle, "Сначала нужен предмет", "the empty state keeps its title");
   const page = src("pages/TicketsPage.tsx");
   assert.match(page, /const pinned = wanted\.current !== "" && subjectId === wanted\.current && !changing;/);
-  assert.match(page, /\{pinned \? \([^]*?<span>\{subjectLine\(subject\.name\)\}<\/span>[^]*?disabled=\{blocked\}\s+onClick=\{\(\) => setChanging\(true\)\}[^]*?\{texts\.changeShort\}[^]*?\) : \(\s*<Field label=\{texts\.subject\}>/);
+  // TASK-368: the short «Сменить» is a pencil icon named «Сменить предмет» (tooltip and aria-label).
+  assert.match(page, /\{pinned \? \([^]*?<span>\{subjectLine\(subject\.name\)\}<\/span>[^]*?<IconAction[^]*?disabled=\{blocked\}\s+disabledReason=\{blocked \? texts\.changeBusy : undefined\}\s+onClick=\{\(\) => setChanging\(true\)\}[^]*?\) : \(\s*<Field label=\{texts\.subject\}>/);
   assert.match(page, /pick\.current\?\.querySelector\("select"\)\?\.focus\(\)/, "the pressed button is gone: the select takes the focus");
 });
 
@@ -759,8 +760,8 @@ test("opened from a subject the tickets page says «Предмет: …» with �
   assert.equal(ticketTexts.changeBusy, "Нельзя сменить предмет, пока идёт другое действие.");
   const page = src("pages/TicketsPage.tsx");
   assert.match(page, /<p className="tk-subject">/);
-  assert.match(page, /aria-label=\{texts\.change\}/, "the short word keeps the full accessible name");
-  assert.match(page, /title=\{blocked \? texts\.changeBusy : undefined\}\s+disabled=\{blocked\}/, "a disabled button says why");
+  assert.match(page, /label=\{texts\.change\}/, "the icon keeps the full accessible name");
+  assert.match(page, /disabled=\{blocked\}\s+disabledReason=\{blocked \? texts\.changeBusy : undefined\}/, "a disabled button says why");
   // The route's subject must be the one shown: if it vanished from the list, startSubjectId picked another and the select is shown.
   assert.match(page, /const pinned = wanted\.current !== "" && subjectId === wanted\.current && !changing;/);
   assert.equal(startSubjectId([{ id: "a" }], "gone"), "a", "so subjectId !== wanted and pinned is false");

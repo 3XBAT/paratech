@@ -43,6 +43,7 @@ import {
 } from "../.test-build/libraryInboxView.js";
 import { AddFileLines, PlacePanel, UndoLines } from "../.test-build/pages/FileRows.js";
 import { InboxList, SubjectDetail, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
+import { buttonTag, isOff, isOn, visibleText } from "./iconbtn.mjs";
 
 const noop = () => undefined;
 const evil = "<img src=x onerror=alert(1)>";
@@ -365,10 +366,14 @@ test("a refused «Вернуть» keeps its line with the reason; a done one is
   const out = html(h(UndoLines, { items: failed, busy: false, onUndo: noop, onRefresh: noop }));
   assert.match(out, /role="status" aria-live="polite"/);
   assert.match(out, /Файл не найден: обновите список\./);
-  assert.match(out, />Обновить список<\/button>/);
-  assert.doesNotMatch(out, />Вернуть<\/button>/);
+  // TASK-368: both are icon buttons named by their aria-label (no visible words).
+  assert.ok(isOn(out, "Обновить список"));
+  assert.equal(buttonTag(out, "Вернуть"), null);
+  assert.equal(visibleText(out).includes("Обновить список"), false);
   const ok = html(h(UndoLines, { items: list, busy: false, onUndo: noop, onRefresh: noop }));
-  assert.match(ok, />Вернуть<\/button>/);
+  assert.ok(isOn(ok, "Вернуть"));
+  assert.match(buttonTag(ok, "Вернуть"), /class="ia"/);
+  assert.ok(isOff(html(h(UndoLines, { items: list, busy: true, onUndo: noop, onRefresh: noop })), "Вернуть"));
   // The live region is there before any line comes.
   assert.match(html(h(UndoLines, { items: [], busy: false, onUndo: noop, onRefresh: noop })), /<div class="undo-lines" role="status" aria-live="polite"><\/div>/);
 });
@@ -549,14 +554,16 @@ test("the lines after «Добавить файл»: the buttons follow the outc
   const elsewhere = html(h(AddFileLines, addLines({ note: "Этот файл уже есть: «Физика → Лекции».", elsewhere: { material: there, label: "Физика → Лекции", openSubjectId: "s2" } })));
   assert.match(elsewhere, /role="status"/);
   assert.match(elsewhere, />Переместить сюда<\/button>/);
-  assert.match(elsewhere, />Открыть предмет<\/button>/);
+  // TASK-368: «Переместить сюда» is the line's main action and keeps its words; «Открыть предмет» is an icon.
+  assert.ok(isOn(elsewhere, "Открыть предмет"));
+  assert.equal(visibleText(elsewhere).includes("Открыть предмет"), false);
   assert.doesNotMatch(elsewhere, /Перейти во/);
   // «Переместить сюда» is off while a call runs; «Открыть предмет» is absent for a file of «Входящие».
   const inbox = html(h(AddFileLines, addLines({ note: "Этот файл уже есть: «Входящие».", busy: true, elsewhere: { material: material(), label: "Входящие", openSubjectId: "" } })));
   assert.match(inbox, /<button[^>]*disabled=""[^>]*>Переместить сюда<\/button>/);
   assert.doesNotMatch(inbox, /Открыть предмет/);
   const unplaced = html(h(AddFileLines, addLines({ note: "Файл добавлен во «Входящие»: положить его в «Лекции» не получилось.", toInbox: true })));
-  assert.match(unplaced, />Перейти во «Входящие»<\/button>/);
+  assert.ok(isOn(unplaced, "Перейти во «Входящие»"));
   assert.doesNotMatch(unplaced, /Переместить|Открыть предмет/);
   // Nothing to say (a cancelled dialog): nothing rendered.
   assert.equal(html(h(AddFileLines, addLines())), "");
@@ -566,11 +573,14 @@ test("a refusal of «Добавить файл» says why with the way out: «П
   const retry = html(h(AddFileLines, addLines({ error: "Файл больше 100 МБ." })));
   assert.match(retry, /role="alert"/);
   assert.match(retry, /Файл больше 100 МБ\./);
-  assert.match(retry, />Повторить<\/button>/);
+  // TASK-368: the way out is an icon button (retry arrow) named «Повторить» / «Обновить список».
+  assert.ok(isOn(retry, "Повторить"));
+  assert.equal(visibleText(retry).includes("Повторить"), false);
   assert.doesNotMatch(retry, /Обновить список/);
   const gone = html(h(AddFileLines, addLines({ error: "Папка не найдена: обновите список." })));
-  assert.match(gone, />Обновить список<\/button>/);
-  assert.doesNotMatch(gone, />Повторить</);
+  assert.ok(isOn(gone, "Обновить список"));
+  assert.equal(buttonTag(gone, "Повторить"), null);
+  assert.doesNotMatch(gone, /Повторить/);
 });
 
 // ---- «Осень 2026» and the tree ----

@@ -55,6 +55,7 @@ import { ReviewView } from "../.test-build/pages/ScheduleSubjectsReview.js";
 import { NameForm } from "../.test-build/pages/NameForm.js";
 import { RemoveSubjectDialog, RemovedNameLine, RestoreRow } from "../.test-build/pages/SubjectRemoval.js";
 import { SubjectHead } from "../.test-build/pages/SubjectHead.js";
+import { ariaLabels, visibleText } from "./iconbtn.mjs";
 
 const html = (el) => renderToStaticMarkup(el);
 const noop = () => undefined;
@@ -623,9 +624,11 @@ test("the restore row: text and «Вернуть», the form's line, no markup f
   const row = html(h(RestoreRow, { idleText: removedLineText("<i>Физика</i>"), doneText: "", restore: async () => null, onSettled: noop, onClose: noop }));
   assert.match(row, /Предмет «&lt;i&gt;Физика&lt;\/i&gt;» удалён/);
   assert.match(row, />Вернуть</);
-  assert.match(row, />Закрыть</);
+  // TASK-368: «Закрыть» is a cross icon named by its aria-label; «Вернуть» is the way out of the refusal and keeps its word.
+  assert.deepEqual(ariaLabels(row), ["Закрыть"]);
+  assert.equal(visibleText(row).includes("Закрыть"), false);
   assert.match(row, /role="status"/);
-  assert.doesNotMatch(row, /aria-label/, "no name given: the button's own text is its name");
+  assert.doesNotMatch(row, /aria-label="Вернуть/, "no name given: the button's own text is its name");
 
   // With the name known «Вернуть» says which subject it brings back (the name stays a text/attribute value, never markup).
   const named = html(h(RestoreRow, { idleText: "x", doneText: "", name: 'Физика "1"', restore: async () => null, onSettled: noop }));

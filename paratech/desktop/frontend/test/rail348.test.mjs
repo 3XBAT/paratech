@@ -13,6 +13,7 @@ import { keepStartPanel } from "../.test-build/recordStartView.js";
 import { queueLine } from "../.test-build/recordingRowView.js";
 import { clockText, elapsedText, recordButton, recordTexts, stopProblemText, texts } from "../.test-build/todayView.js";
 import { RecordAction, StatusBar, StopProblem } from "../.test-build/pages/TodayParts.js";
+import { isOff, isOn, visibleText } from "./iconbtn.mjs";
 
 const noop = () => undefined;
 const html = (el) => renderToStaticMarkup(el);
@@ -239,20 +240,24 @@ test("a failed stop says the recording goes on; «Повторить» and a qui
   const out = html(h(StopProblem, { text, retrying: false, canRetry: true, onRetry: () => retried++, onOpenRecordings: () => opened++ }));
   assert.match(out, /role="alert"/);
   assert.match(out, /Не удалось остановить запись — она продолжается\./);
-  assert.match(out, /<button[^>]*class="btn sm"[^>]*><span class="btn-labels"><span>Повторить<\/span>/);
-  assert.match(out, /<button[^>]*class="btn ghost sm"[^>]*>Перейти к записям<\/button>/);
+  // TASK-368: both are icon buttons (retry arrow, open) named by their aria-label; no visible words.
+  assert.ok(isOn(out, "Повторить"));
+  assert.ok(isOn(out, "Перейти к записям"));
+  assert.equal(visibleText(out).includes("Повторить"), false);
+  assert.equal(visibleText(out).includes("Перейти к записям"), false);
   assert.doesNotMatch(out, /Открыть «Записи»|btn primary/);
   assert.equal(opened + retried, 0);
   // While the repeat runs the button is busy and off, the line stays.
   const busy = html(h(StopProblem, { text, retrying: true, canRetry: true, onRetry: noop, onOpenRecordings: noop }));
-  assert.match(busy, /<button[^>]*disabled=""[^>]*>[^]*Остановка…/);
+  assert.ok(isOff(busy, "Остановка…"));
+  assert.match(busy, /aria-busy="true"/);
   assert.match(busy, /role="alert"/);
   // «Повторить» is never an enabled button that does nothing: off when the main button is not «Остановить».
   assert.doesNotMatch(out, /disabled/);
   const idle = html(h(StopProblem, { text, retrying: false, canRetry: false, onRetry: noop, onOpenRecordings: noop }));
-  assert.match(idle, /<button[^>]*class="btn sm"[^>]*disabled=""[^>]*>[^]*Повторить/);
-  assert.match(idle, /<span>Повторить<\/span><span class="btn-off">Остановка…<\/span>/, "not busy: nothing is being stopped");
-  assert.doesNotMatch(idle, /class="btn ghost sm"[^>]*disabled/, "the way to «Записи» stays on");
+  assert.ok(isOff(idle, "Повторить"));
+  assert.doesNotMatch(idle, /aria-busy|ia-spin/, "not busy: nothing is being stopped");
+  assert.ok(isOn(idle, "Перейти к записям"), "the way to «Записи» stays on");
   assert.match(src("pages/TodayPage.tsx"), /canRetry=\{stopButton\.kind === "stop"\}/);
 });
 

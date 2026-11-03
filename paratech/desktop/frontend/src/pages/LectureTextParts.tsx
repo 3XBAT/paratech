@@ -11,8 +11,10 @@ import {
   lectureUpdatedText,
   showsEarlierLecture,
 } from "../lectureTextView.js";
+import { summaryToolTexts } from "../summaryView.js";
 import { Button } from "../ui/Button.js";
 import { Card, ResultLine, type ResultKind, Segmented } from "../ui/controls.js";
+import { IconAction } from "../ui/IconAction.js";
 import { Line } from "./SummaryParts.js";
 
 export interface LectureTextCardProps {
@@ -47,22 +49,26 @@ export function LectureTextCard(props: LectureTextCardProps) {
       {showsEarlierLecture(v) && <p className="small muted sm-detail">{lectureEarlierNote}</p>}
       {start !== null && (
         <div className="acts start sm-retry">
-          <Button busy={props.busy === "start"} busyLabel="Запуск…" disabled={off} onClick={props.onStart}>
-            {start}
-          </Button>
+          {v.lectureText.canStart ? (
+            // The first start is the card's only action: it keeps its words. A retry is a plain icon.
+            <Button busy={props.busy === "start"} busyLabel="Запуск…" disabled={off} onClick={props.onStart}>
+              {start}
+            </Button>
+          ) : (
+            <IconAction icon="retry" label={props.busy === "start" ? summaryToolTexts.starting : start} busy={props.busy === "start"} disabled={off} onClick={props.onStart} />
+          )}
         </div>
       )}
       {/* Only a ready text has the tools: there is nothing to copy before. */}
       {ready && (
         <div className="tr-share sm-lecture-tools">
-          <Button
+          <IconAction
+            icon="copy"
+            label={props.busy === "copy" ? summaryToolTexts.copying : summaryToolTexts.copy}
             busy={props.busy === "copy"}
-            busyLabel="Копирование…"
             disabled={off}
             onClick={props.onCopy}
-          >
-            Скопировать
-          </Button>
+          />
           <Segmented
             label="Формат файла текста лекции"
             options={[
@@ -72,15 +78,13 @@ export function LectureTextCard(props: LectureTextCardProps) {
             value={props.format}
             onChange={props.onFormat}
           />
-          <Button
+          <IconAction
             icon="down"
+            label={props.busy === "save" ? summaryToolTexts.saving : summaryToolTexts.saveAs}
             busy={props.busy === "save"}
-            busyLabel="Сохранение…"
             disabled={off}
             onClick={props.onSave}
-          >
-            Сохранить как…
-          </Button>
+          />
         </div>
       )}
       {props.message && (

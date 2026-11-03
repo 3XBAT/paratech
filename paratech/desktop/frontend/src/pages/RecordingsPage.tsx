@@ -50,6 +50,7 @@ import { Button } from "../ui/Button";
 import { SpeechComponentNotice } from "./SpeechComponentNotice";
 import { Banner, Dialog, ResultLine } from "../ui/controls";
 import { Icon } from "../ui/Icon";
+import { IconAction } from "../ui/IconAction";
 import { useNow } from "../useNow";
 import { useRecordingSound } from "../useRecordingSound";
 import { useOpenLesson } from "../openLesson";
@@ -532,12 +533,8 @@ export function RecordingsPage({
       {selected.size > 0 && (
         <div className="acts start rec-selected" role="group" aria-label="Выбранные записи">
           <span className="num">{selectedText(selected.size)}</span>
-          <Button variant="danger" disabled={deleting !== null} onClick={() => askDelete([...selected])}>
-            {deleteTexts.selectedDelete}
-          </Button>
-          <Button variant="ghost" disabled={deleting !== null} onClick={() => setSelected(new Set())}>
-            {deleteTexts.selectedClear}
-          </Button>
+          <IconAction icon="trash" variant="danger" label={deleteTexts.selectedDelete} disabled={deleting !== null} onClick={() => askDelete([...selected])} />
+          <IconAction icon="x" label={deleteTexts.selectedClear} disabled={deleting !== null} onClick={() => setSelected(new Set())} />
         </div>
       )}
       {deleted && (
