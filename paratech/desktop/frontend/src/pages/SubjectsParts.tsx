@@ -30,6 +30,7 @@ import {
 } from "../libraryView.js";
 import type { PageId } from "../nav.js";
 import { offerGroups, reviewTexts } from "../scheduleSubjectsView.js";
+import { initialOpen, isSubjectOpen, seedOpen, toggleLabel, toggleSubject } from "../subjectTreeState.js";
 import { emptyInboxText, type InboxEntry } from "../subjectsHome.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Card, EmptyState, ResultLine } from "../ui/controls.js";
@@ -137,6 +138,12 @@ export function SubjectTree(props: {
 }) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [over, setOver] = useState("");
+  // Which subjects show their folders: each one by its own toggle, independent of the subject on screen (subjectTreeState).
+  const [opened, setOpened] = useState(() => initialOpen(props.currentId));
+  const seeded = seedOpen(opened, props.currentId);
+  if (seeded !== opened) {
+    setOpened(seeded);
+  }
   const toggle = (code: string) =>
     setCollapsed((c) => {
       const next = new Set(c);
@@ -206,7 +213,9 @@ export function SubjectTree(props: {
               </button>
               {!shut && (
                 <ul className="lv1">
-                  {g.subjects.map((s) => (
+                  {g.subjects.map((s) => {
+                    const expanded = isSubjectOpen(seeded, s.id);
+                    return (
                     <li key={s.id}>
                       <button
                         type="button"
@@ -218,26 +227,39 @@ export function SubjectTree(props: {
                         onDragLeave={() => setOver((o) => (o === s.id ? "" : o))}
                         onDrop={(e) => onDrop(e, s)}
                       >
-                        <Icon name={s.id === props.currentId ? "chev" : "chevr"} />
+                        <Icon name={expanded ? "chev" : "chevr"} />
                         <span className="nm">{s.name}</span>
                       </button>
-                      {s.id === props.currentId && (
+                      {/* The chevron's own button, laid over the icon of the row: it expands or folds this subject only. */}
+                      <button
+                        type="button"
+                        className="tog"
+                        aria-expanded={expanded}
+                        aria-label={toggleLabel(s.name, expanded)}
+                        onClick={() => setOpened((o) => toggleSubject(seedOpen(o, props.currentId), s.id))}
+                        onDragOver={(e) => onDragOver(e, s.id)}
+                        onDragLeave={() => setOver((o) => (o === s.id ? "" : o))}
+                        onDrop={(e) => onDrop(e, s)}
+                      />
+                      {expanded && (
                         <ul className="lv2">
                           {orderedFolders(s.folders).map((f) => (
                             <li key={f.id}>
-                              <button type="button" className="ti fold" onClick={() => scrollToFolder(f.id)}>
+                              <button type="button" className="ti fold" onClick={() => (s.id === props.currentId ? scrollToFolder(f.id) : props.onOpen(s.id))}>
                                 <Icon name="folder" />
                                 <span className="nm">{folderTitle(f)}</span>
                                 {props.freshFolders?.has(f.id) === true && <span className="fresh">{texts.fresh}</span>}
-                                {/* Blank while the files are being read (or failed to load): «—» would claim an empty folder. */}
-                                {props.counts !== null && <span className="cnt num">{treeCount(props.counts.get(f.id))}</span>}
+                                {/* Blank while the files are being read (or failed to load): «—» would claim an empty folder.
+                                    The files are read for the subject on screen only, so another subject shows no count. */}
+                                {props.counts !== null && s.id === props.currentId && <span className="cnt num">{treeCount(props.counts.get(f.id))}</span>}
                               </button>
                             </li>
                           ))}
                         </ul>
                       )}
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               )}
             </li>
