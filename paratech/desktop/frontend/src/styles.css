@@ -52,11 +52,14 @@ html, body, #root { height: 100%; }
 /* «Дополнительно»: a divider and a quiet caption, then the support tools (ADR-0034 §4). */
 .set-nav-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; flex-basis: 100%; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--sep); }
 .set-nav-caption { flex-basis: 100%; padding: 0 12px 4px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--muted); }
-/* The folded «Дополнительно» of «Подключения»: a quiet native disclosure. */
+/* The folded «Адрес сервера» of «Подключения»: a native disclosure with a visible chevron (the focus ring is global). */
 .conn-adv { margin-top: 8px; }
-.conn-adv > summary { display: flex; align-items: center; gap: 6px; min-height: 32px; cursor: pointer; font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 500; color: var(--muted); border-radius: var(--r-md); }
-.conn-adv > summary:hover { color: var(--text); }
+.conn-adv > summary { display: flex; align-items: center; gap: 6px; min-height: 32px; cursor: pointer; list-style: none; font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 500; color: var(--text); border-radius: var(--r-md); }
+.conn-adv > summary::-webkit-details-marker { display: none; }
+.conn-adv > summary .i { width: 16px; height: 16px; flex: none; color: var(--muted); transition: transform .12s; }
+.conn-adv[open] > summary .i { transform: rotate(90deg); }
 .conn-adv[open] > summary { margin-bottom: 8px; }
+@media (prefers-reduced-motion: reduce) { .conn-adv > summary .i { transition: none; } }
 .set-nav button[aria-current="page"] { background: var(--raised); font-weight: 600; box-shadow: 0 0 0 1px var(--edge); }
 .set-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .set-body > .page { flex: 1; }

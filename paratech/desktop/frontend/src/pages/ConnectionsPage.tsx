@@ -45,6 +45,7 @@ import {
 } from "../quotaView";
 import { Button } from "../ui/Button";
 import { Card, Field, Input, Progress, ResultLine, Select } from "../ui/controls";
+import { Icon } from "../ui/Icon";
 import { StatusChip } from "../ui/StatusChip";
 import { helpTexts } from "../appleHelpView";
 import { googleTexts } from "../googleView";
@@ -82,7 +83,7 @@ export function ConnectionsPage(props: { visit?: number }) {
   const [hubBusy, setHubBusy] = useState(false);
   const [hubErrors, setHubErrors] = useState<FieldError[]>([]);
   const [hubDone, setHubDone] = useState("");
-  // The student's own open/close of «Дополнительно» during this visit; null until they touch it.
+  // The student's own open/close of «Адрес сервера» during this visit; null until they touch it.
   const [addrChosen, setAddrChosen] = useState<boolean | null>(null);
 
   const [hubKeyBusy, setHubKeyBusy] = useState(false);
@@ -286,6 +287,7 @@ export function ConnectionsPage(props: { visit?: number }) {
   useEffect(() => {
     if (props.visit !== firstVisit.current) {
       setOpen(null);
+      setAddrChosen(null); // a new visit starts from the automatic state
     }
   }, [props.visit]);
 
@@ -385,7 +387,13 @@ export function ConnectionsPage(props: { visit?: number }) {
   const quota = quotaDisplay(saved.quota, saved, quotaMessage);
   const quotaState = quotaControls({ refreshing, keyBusy: hubKeyBusy, hubBusy });
   const used = quotaUsedPercent(saved.quota);
-  const addressOpen = hubAddressOpen({ savedUrl: saved.hubUrl, typedUrl: hubUrl, errors: hubErrors, chosen: addrChosen });
+  const addressOpen = hubAddressOpen({
+    savedUrl: saved.hubUrl,
+    typedUrl: hubUrl,
+    errors: hubErrors,
+    quotaStatus: saved.quota.status,
+    chosen: addrChosen,
+  });
   const setupHint = hubSetupHint(saved);
 
   if (open === "hub") {
@@ -393,12 +401,9 @@ export function ConnectionsPage(props: { visit?: number }) {
       <SectionPage title={title} onBack={back}>
         <Card className="box" label={overviewTexts.hubTitle}>
           <span className="small muted box-desc">{overviewTexts.hubHint}</span>
-          <span className="small muted box-desc">
-            Делает конспекты и ищет задания. Звук туда не отправляется — только текст расшифровки.
-          </span>
-          {setupHint !== "" && <ResultLine kind="wait">{setupHint}</ResultLine>}
 
           <hr className="sep" />
+          {setupHint !== "" && <ResultLine kind="wait">{setupHint}</ResultLine>}
           <SecretSlot
             nested
             labels={hubKeyLabels}
@@ -413,7 +418,8 @@ export function ConnectionsPage(props: { visit?: number }) {
               student toggles it; every toggle is remembered, so it never closes under their hands. */}
           <details className="conn-adv" open={addressOpen} onToggle={(e) => setAddrChosen(e.currentTarget.open)}>
             <summary>
-              Дополнительно <span className="muted">· адрес сервера</span>
+              <Icon name="chevr" className="conn-adv-chev" />
+              Адрес сервера
             </summary>
             <Field label="Адрес сервера" error={fieldErrorText(hubErrors, "hubUrl")}>
               {(id) => (
@@ -432,7 +438,7 @@ export function ConnectionsPage(props: { visit?: number }) {
             <Errors texts={otherErrorTexts(hubErrors, hubFields)} />
             <div className="acts start">
               <Button disabled={hubBusy} onClick={() => void saveHub()}>
-                Сохранить
+                Сохранить адрес
               </Button>
             </div>
             {hubDone && (

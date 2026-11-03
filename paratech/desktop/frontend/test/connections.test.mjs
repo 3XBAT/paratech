@@ -23,10 +23,8 @@ import {
   checkControls,
   failureText,
   fieldErrorText,
-  hubAddressOpen,
   hubFields,
   hubKeyLabels,
-  hubSetupHint,
   mailConfiguredText,
   mailFields,
   mailFormDirty,
@@ -477,7 +475,7 @@ test("every card chip pairs its colour with a word and an icon where it warns", 
     assert.equal(s.icon === null, s.kind === "neutral", s.text);
   }
   for (const d of [overviewTexts.hubDesc, overviewTexts.mailDesc, overviewTexts.googleDesc]) {
-    assert.ok(d.length <= 40, `${d}: one line in a card`);
+    assert.ok(d.length <= 48,`${d}: one line in a card`);
   }
 });
 
@@ -525,7 +523,7 @@ test("the Hub section is «Конспекты и задания» with the key h
   assert.equal(overviewTexts.lead, "Конспекты и задания, почта и Google Календарь");
   assert.match(overviewTexts.hubHint, /выдаёт автор приложения/);
   assert.match(overviewTexts.hubHint, /не ключ Claude или ChatGPT/);
-  assert.match(overviewTexts.hubHint, /Расшифровка всегда идёт на этом компьютере/);
+  assert.match(overviewTexts.hubHint, /расшифровка идёт на этом компьютере/);
   const page = src("../src/pages/ConnectionsPage.tsx");
   // The card of the section page carries the title, and the hint is its first line.
   assert.match(

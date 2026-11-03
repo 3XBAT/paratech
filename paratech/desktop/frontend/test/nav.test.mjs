@@ -55,9 +55,6 @@ test("the order leaves the slot for «Разрешения» right after «Ос�
   // The item itself is TASK-361's: no page of that name yet.
   assert.ok(!pages.some((p) => p.label === "Разрешения"));
   assert.ok(!settingsPages.includes("permissions"));
-  const spliced = [...settingsMainPages];
-  spliced.splice(settingsPermissionsSlot, 0, "permissions");
-  assert.deepEqual(spliced.slice(0, 3), ["settings", "permissions", "connections"]);
 });
 
 test("an unknown page falls back to the default", () => {

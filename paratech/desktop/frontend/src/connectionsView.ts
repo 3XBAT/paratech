@@ -7,6 +7,7 @@ import type {
   FieldError,
   MailSecurity,
   MailSettingsInput,
+  QuotaStatus,
   SecretStatus,
 } from "./bindings/connections";
 import type { CalendarSyncState } from "./bindings/calendar";
@@ -60,41 +61,52 @@ export const texts = {
   unknownField: "Недопустимое значение.",
 } as const;
 
-/** The Hub address nobody has to set: the core has no built-in address, so "no address" is the default. */
-export const defaultHubUrl = "";
+/** No address is saved: the core ships no built-in one, so this is a missing required value, not a default. */
+export const emptyHubUrl = "";
+
+/** The quota statuses that are not about the address: the key is missing or refused, or the Hub has not been asked yet. */
+const addressNeutralQuota: readonly QuotaStatus[] = ["current", "unchecked", "noKey", "keyRejected"];
 
 /**
- * Whether the folded «Дополнительно» with «Адрес сервера» is open. A choice made by hand during the visit wins, so the
- * block never closes under the student's hands; with no choice it opens by itself for a non-default saved or typed
- * address and for a refused one (any error of the address form).
+ * Whether the folded «Адрес сервера» is open. A choice made by hand during the visit wins, so the block never closes
+ * under the student's hands. With no choice it is open unless the address is fine: there is no built-in address yet,
+ * so folded means «the address is saved and works». It opens for an empty saved address, for a form being edited, for
+ * any error of the address form and when the Hub did not answer (offline, not configured, failed).
  */
 export function hubAddressOpen(s: {
   savedUrl: string;
   typedUrl: string;
   errors: readonly FieldError[];
+  quotaStatus: QuotaStatus;
   chosen: boolean | null;
 }): boolean {
   if (s.chosen !== null) {
     return s.chosen;
   }
-  return s.savedUrl.trim() !== defaultHubUrl || s.typedUrl.trim() !== defaultHubUrl || s.errors.length > 0;
+  const saved = s.savedUrl.trim();
+  return (
+    saved === emptyHubUrl ||
+    s.typedUrl.trim() !== saved ||
+    s.errors.length > 0 ||
+    !addressNeutralQuota.includes(s.quotaStatus)
+  );
 }
 
 /**
- * What the key and the address still need, next to the key field: "" when both are set. The address is folded away, so
- * the line says where it is.
+ * What the key and the address still need, right above the key field: "" when both are set. The address field sits
+ * below the key, so the line points down to it.
  */
 export function hubSetupHint(c: Pick<Connections, "hubUrl" | "hubKey">): string {
   const noKey = c.hubKey === "unset";
-  const noUrl = c.hubUrl.trim() === defaultHubUrl;
+  const noUrl = c.hubUrl.trim() === emptyHubUrl;
   if (noKey && noUrl) {
-    return "Для работы нужны ключ доступа и адрес сервера. Вставьте ключ ниже и нажмите «Сохранить ключ», адрес указывается в разделе «Дополнительно».";
-  }
-  if (noKey) {
-    return "Ключ не задан. Вставьте его ниже и нажмите «Сохранить ключ»: без него конспекты и поиск заданий не работают.";
+    return "Нужны ключ доступа и адрес сервера — их выдаёт автор приложения. Вставьте ключ и нажмите «Сохранить ключ», затем укажите адрес в поле «Адрес сервера» ниже.";
   }
   if (noUrl) {
-    return "Адрес сервера не задан. Откройте раздел «Дополнительно» ниже и укажите его: без адреса конспекты и поиск заданий не работают.";
+    return "Не указан адрес сервера: без него конспекты и поиск заданий не работают. Укажите его в поле «Адрес сервера» ниже.";
+  }
+  if (noKey) {
+    return "Без ключа конспекты и поиск заданий не работают. Вставьте ключ ниже и нажмите «Сохранить ключ».";
   }
   return "";
 }
@@ -308,9 +320,10 @@ export const overviewTexts = {
   title: "Подключения",
   back: "Назад",
   hubTitle: "Конспекты и задания",
+  // One line for the section: who gives the key, what it is not, and what leaves the computer.
   hubHint:
-    "Ключ доступа выдаёт автор приложения. Это не ключ Claude или ChatGPT. Расшифровка всегда идёт на этом компьютере.",
-  hubDesc: "Адрес, ключ доступа и лимит обработки",
+    "Ключ доступа и адрес сервера выдаёт автор приложения. Это не ключ Claude или ChatGPT. Звук не отправляется: расшифровка идёт на этом компьютере, на сервер уходит только текст.",
+  hubDesc: "Ключ доступа, адрес сервера и лимит обработки",
   mailTitle: "Почта",
   mailDesc: "Отправка заданий письмом",
   googleDesc: "Вход и синхронизация расписания",
