@@ -545,7 +545,7 @@ test("pills: the stored name is shown as it is; an empty name reads as the kind"
   assert.equal(mentionKindCaption("lesson"), "Пара");
 });
 
-test("pills are honest about where they lead: a lesson and a material open a page, not the object", () => {
+test("pills are honest about where they lead: a pair opens its lesson screen, a material opens a page (TASK-352)", () => {
   const [s, l, m, a, w] = mentionPills([
     { kind: "subject", id: "s", label: "Физика" },
     { kind: "lesson", id: "l", label: "Лекция 3" },
@@ -555,7 +555,7 @@ test("pills are honest about where they lead: a lesson and a material open a pag
   ]);
   assert.deepEqual([s.title, s.aria], ["Предмет: Физика", "Открыть предмет «Физика»"]);
   assert.deepEqual([a.title, a.aria], ["Задание: Задачи", "Открыть задание «Задачи»"]);
-  assert.deepEqual([l.title, l.aria], ["Пара: Лекция 3. Откроется «База знаний»", "Открыть «Базу знаний»: Лекция 3"]);
+  assert.deepEqual([l.title, l.aria], ["Пара: Лекция 3", "Открыть пару «Лекция 3»"]);
   assert.deepEqual([m.title, m.aria], ["Материал: Конспект.pdf. Откроется «Предметы»", "Открыть «Предметы»: Конспект.pdf"]);
   assert.ok(!w.aria.startsWith("Открыть"), "an unknown kind opens nothing and does not claim to");
 });
@@ -563,7 +563,9 @@ test("pills are honest about where they lead: a lesson and a material open a pag
 test("pills open the object through the routes the window has", () => {
   assert.deepEqual(mentionOpening("subject", "s1"), { type: "subject", id: "s1" });
   assert.deepEqual(mentionOpening("assignment", "a1"), { type: "assignment", id: "a1" });
-  assert.deepEqual(mentionOpening("lesson", "l1"), { type: "page", page: "knowledge" });
+  // The id of a «Пара» is the schedule lesson's; the window finds its lecture and opens the lesson screen.
+  assert.deepEqual(mentionOpening("lesson", "l1"), { type: "pair", lessonId: "l1" });
+  assert.equal(mentionOpening("lesson", ""), null);
   assert.deepEqual(mentionOpening("material", "m1"), { type: "page", page: "subjects" });
   assert.equal(mentionOpening("weird", "x"), null);
   assert.equal(mentionOpening("subject", ""), null);

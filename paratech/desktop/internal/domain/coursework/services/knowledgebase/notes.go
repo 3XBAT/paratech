@@ -3,6 +3,7 @@ package knowledgebase
 import (
 	"cmp"
 	"slices"
+	"strings"
 	"time"
 
 	"paratech/desktop/internal/domain/coursework/values"
@@ -32,6 +33,37 @@ func DayKey(subject shared.SubjectID, day time.Time) string {
 
 // NoteKey is the key of an undated lecture: each undated note is a lecture of its own.
 func NoteKey(id shared.NoteID) string { return noteKeyPrefix + string(id) }
+
+// MaxKeyBytes bounds a lesson key given from outside; the longest key built here, a DayKey, stays far below it.
+const MaxKeyBytes = 200
+
+// ParseKey checks a lesson key given from outside (untrusted): bounded, with a known prefix and something after it.
+// For a recording key it returns the recording, "" for the key of a note-only lecture; ok is false for a key no
+// lesson can have. The key is only ever compared with the keys built here.
+func ParseKey(key string) (rec shared.RecordingID, ok bool) {
+	if len(key) > MaxKeyBytes {
+		return "", false
+	}
+	if id, found := strings.CutPrefix(key, recordingKeyPrefix); found {
+		return shared.RecordingID(id), id != ""
+	}
+	for _, p := range []string{lessonKeyPrefix, dayKeyPrefix, noteKeyPrefix} {
+		if rest, found := strings.CutPrefix(key, p); found {
+			return "", rest != ""
+		}
+	}
+	return "", false
+}
+
+// FindByKey returns the lesson whose key is key exactly.
+func FindByKey(lessons []Lesson, key string) (Lesson, bool) {
+	for _, l := range lessons {
+		if l.Key == key {
+			return l, true
+		}
+	}
+	return Lesson{}, false
+}
 
 // NoteAnchor is what a note of the student is attached to (ADR-0027).
 type NoteAnchor string

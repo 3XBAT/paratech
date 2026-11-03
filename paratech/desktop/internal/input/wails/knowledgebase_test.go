@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"reflect"
@@ -49,6 +50,18 @@ func (f *fakeKnowledge) Lesson(_ context.Context, id shared.RecordingID) (kb.Les
 		return kb.Lesson{}, errors.Join(f.err, knowledgebase.ErrRecordingNotFound)
 	}
 	return f.lessons[0], nil
+}
+
+// LessonByKey finds key among the lectures.
+func (f *fakeKnowledge) LessonByKey(_ context.Context, key string) (kb.Lesson, error) {
+	f.key = key
+	if f.err != nil {
+		return kb.Lesson{}, f.err
+	}
+	if l, ok := kb.FindByKey(f.lectures, key); ok {
+		return l, nil
+	}
+	return kb.Lesson{}, knowledgebase.ErrRecordingNotFound
 }
 
 func (f *fakeKnowledge) Search(_ context.Context, query string) (knowledgebase.SearchResult, error) {
@@ -258,6 +271,48 @@ func TestKnowledgeLectures(t *testing.T) {
 	f.lectures = nil
 	if got, err := s.Lectures(ctx, "x"); err != nil || got == nil || len(got) != 0 {
 		t.Fatalf("no lectures = %#v, %v; want an empty list", got, err)
+	}
+}
+
+// TASK-352: a lesson opens by its key alone, a note-only lecture with its notes; a failure is a fixed text that names
+// neither the key nor a cause.
+func TestKnowledgeLessonByKey(t *testing.T) {
+	ctx := context.Background()
+	dayKey := kb.DayKey("phys", time.Date(2026, 9, 12, 0, 0, 0, 0, kbZone))
+	f := &fakeKnowledge{lectures: []kb.Lesson{kbLesson(), noteLecture(dayKey, time.Date(2026, 9, 12, 0, 0, 0, 0, kbZone), "", "n1")}}
+	s, _ := newKnowledgeService(f, nil)
+
+	got, err := s.LessonByKey(ctx, dayKey)
+	if err != nil || f.key != dayKey || got.Key != dayKey || !got.NoteOnly || got.Anchor != "day" || got.Date != "2026-09-12" ||
+		got.RecordingID != "" || len(got.Notes) != 1 || got.Notes[0].ID != "n1" {
+		t.Fatalf("LessonByKey(%s) = %+v, %v (asked %q)", dayKey, got, err, f.key)
+	}
+	if got, err := s.LessonByKey(ctx, "recording:r1"); err != nil || got.RecordingID != "r1" || got.NoteOnly {
+		t.Fatalf("LessonByKey(recording:r1) = %+v, %v", got, err)
+	}
+
+	const secret = "note:Ряды Тейлора"
+	tests := []struct {
+		name string
+		key  string
+		err  error
+		want error
+	}{
+		{"not found", "note:gone", nil, ErrKnowledgeNotFound},
+		{"invalid key", secret, fmt.Errorf("%w: %s", knowledgebase.ErrInvalidRequest, secret), ErrKnowledgeInvalidID},
+		{"unavailable", secret, errors.Join(knowledgebase.ErrUnavailable, errors.New(`open C:\Users\student\db: locked`)), ErrKnowledgeUnavailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, _ := newKnowledgeService(&fakeKnowledge{err: tt.err}, nil)
+			_, err := s.LessonByKey(ctx, tt.key)
+			if !errors.Is(err, tt.want) || err.Error() != tt.want.Error() {
+				t.Fatalf("LessonByKey(%q) = %v, want %v", tt.key, err, tt.want)
+			}
+			if msg := err.Error(); strings.Contains(msg, "Тейлора") || strings.Contains(msg, "student") || strings.Contains(msg, "gone") {
+				t.Fatalf("the error shows the key or the cause: %q", msg)
+			}
+		})
 	}
 }
 

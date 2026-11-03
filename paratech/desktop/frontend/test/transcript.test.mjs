@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { errorMessages, maxPage, methods, transcriptApi } from "../.test-build/bindings/transcript.js";
-import { closeTranscript, initialRoute, routeToPage, routeToTranscript } from "../.test-build/nav.js";
+import { closeLesson, initialRoute, routeToLesson, routeToPage } from "../.test-build/nav.js";
 import {
   applyPage,
   canOpenTranscript,
@@ -323,15 +323,13 @@ test("timestamps play from their second; save results say what happened", () => 
   assert.deepEqual(saveResultText({ status: "failed", message: failed, name: "" }), { ok: false, text: failed });
 });
 
-test("the transcript opens over the current section and goes back to it", () => {
-  const r = routeToTranscript(routeToPage("homework"), "r1");
-  // TASK-087 added the summary overlay and the assignment to open to the route.
-  // TASK-351 added `lesson` and `tab` to the route; they stay empty here.
-  const none = { lesson: "", tab: "" };
-  assert.deepEqual(r, { page: "homework", transcript: "r1", summary: "", assignment: "", subject: "", ...none });
-  assert.deepEqual(closeTranscript(r), { page: "homework", transcript: "", summary: "", assignment: "", subject: "", ...none });
-  assert.deepEqual(routeToPage("settings"), { page: "settings", transcript: "", summary: "", assignment: "", subject: "", ...none });
-  assert.equal(initialRoute.transcript, "");
+test("the transcript is the tab of the lesson over the current section and goes back to it", () => {
+  // TASK-352: the transcript overlay route is replaced by the lesson route with the tab «Расшифровка».
+  const r = routeToLesson(routeToPage("homework"), "recording:r1", "transcript");
+  assert.deepEqual(r, { page: "homework", assignment: "", subject: "", lesson: "recording:r1", tab: "transcript" });
+  assert.deepEqual(closeLesson(r), { page: "homework", assignment: "", subject: "", lesson: "", tab: "" });
+  assert.deepEqual(routeToPage("settings"), { page: "settings", assignment: "", subject: "", lesson: "", tab: "" });
+  assert.equal("transcript" in initialRoute, false);
 });
 
 test("a recording row offers the transcript from its chain once recognition is queued, running or past", () => {
@@ -357,7 +355,7 @@ const src = (rel) =>
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
 
 test("the viewer renders text only, plays only on a click and polls without overlap", () => {
-  const files = ["pages/TranscriptPage.tsx", "pages/TranscriptLinks.tsx", "transcriptView.ts", "bindings/transcript.ts", "openTranscript.ts"];
+  const files = ["pages/TranscriptPage.tsx", "pages/TranscriptLinks.tsx", "transcriptView.ts", "bindings/transcript.ts", "openLesson.ts"];
   for (const rel of files) {
     const text = src(rel);
     for (const banned of ["dangerouslySetInnerHTML", "innerHTML", "outerHTML", "insertAdjacentHTML", "href=", "window.open",
@@ -381,11 +379,11 @@ test("the viewer renders text only, plays only on a click and polls without over
 test("the recordings page decides the row's transcript action from the list, without a call per row", () => {
   // The row's actions (rowActions, TASK-096) come from rowLinks over the list's chain.
   const page = src("pages/RecordingsPage.tsx");
-  assert.match(page, /onOpenTranscript=\{openTranscript\}/);
+  assert.match(page, /onOpenLesson=\{openLesson\}/);
   assert.match(src("recordingRowView.ts"), /if \(!rowOffersTranscript\(r\)\)/);
   assert.match(src("recordingRowView.ts"), /offers\.texts \? rowLinks\(r\)/);
   const row = src("pages/RecordingRow.tsx");
-  assert.match(row, /props\.onOpenTranscript\?\.\(r\.id\)/);
+  assert.match(row, /props\.onOpenLesson\?\.\(r\.id, tab\)/);
   for (const text of [page, row]) {
     assert.ok(!text.includes("transcriptApi"), "no transcript status call per row");
   }

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { initialRoute, routeToPage, routeToSummary, routeToAssignment, routeToSubject, routeToOpenedAssignment } from "../.test-build/nav.js";
+import { initialRoute, routeToPage, routeToLesson, routeToAssignment, routeToSubject, routeToOpenedAssignment } from "../.test-build/nav.js";
 import {
   canGoBack,
   canGoForward,
@@ -28,11 +28,11 @@ const noop = () => {};
 
 test("going back and forward walks the entries", () => {
   let hist = newHistory(initialRoute);
-  hist = pushRoute(hist, routeToSummary(initialRoute, "r1"));
+  hist = pushRoute(hist, routeToLesson(initialRoute, "recording:r1"));
   hist = pushRoute(hist, routeToPage("journal"));
   assert.equal(currentRoute(hist).page, "journal");
   hist = goBack(hist);
-  assert.equal(currentRoute(hist).summary, "r1");
+  assert.equal(currentRoute(hist).lesson, "recording:r1");
   hist = goBack(hist);
   assert.deepEqual(currentRoute(hist), initialRoute);
   assert.equal(canGoBack(hist), false);
@@ -103,9 +103,9 @@ test("a card opened from the list of «Задания» is an entry; the back to
   assert.equal(needsRemount(hist.entries[0], hist.entries[1]), false);
 });
 
-test("a subject does not leak into other routes: a summary over «Предметы» keeps it, a jump to an assignment drops it", () => {
+test("a subject does not leak into other routes: a lesson over «Предметы» keeps it, a jump to an assignment drops it", () => {
   const r = routeToSubject(routeToPage("subjects"), "s1");
-  assert.equal(routeToSummary(r, "r1").subject, "s1");
+  assert.equal(routeToLesson(r, "recording:r1").subject, "s1");
   assert.equal(routeToAssignment("a1").subject, "");
   const toCard = routeToOpenedAssignment(r, "a1");
   assert.equal(toCard.page, "homework");
@@ -195,8 +195,8 @@ test("a keydown in an editable target is ignored", () => {
   assert.deepEqual(a, { prevent: false, next: null });
 });
 
-test("going back from a summary opened over an assignment does not remount the page", () => {
-  const over = routeToSummary(routeToAssignment("a1"), "r1");
+test("going back from a lesson opened over an assignment does not remount the page", () => {
+  const over = routeToLesson(routeToAssignment("a1"), "recording:r1");
   assert.equal(needsRemount(routeToAssignment("a1"), over), false);
   assert.equal(needsRemount(routeToAssignment("a2"), routeToAssignment("a1")), true);
   assert.equal(needsRemount(routeToAssignment("a1"), routeToPage("journal")), true);

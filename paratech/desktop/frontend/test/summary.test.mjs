@@ -6,19 +6,17 @@ import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import server from "react-dom/server";
 import { errorMessages, methods, summaryApi } from "../.test-build/bindings/summary.js";
-import { closeTranscript, routeToAssignment, routeToPage, routeToSummary, routeToTranscript } from "../.test-build/nav.js";
+import { closeLesson, routeToAssignment, routeToLesson, routeToPage } from "../.test-build/nav.js";
 import { HomeworkCard, SummaryCard, SummarySections } from "../.test-build/pages/SummaryParts.js";
 import {
   assignmentMeta,
   earlierNote,
   errorText,
-  headerMeta,
   homeworkLine,
   idlePollMs,
   keyPointList,
   maxErrorPollMs,
   nextPollMs,
-  pageTitle,
   pollMs,
   redoTexts,
   retryAction,
@@ -199,14 +197,8 @@ test("the page asks again only while a step is not finished, slower before it st
   assert.ok(pollMs >= 2000 && pollMs <= 5000);
 });
 
-test("the head, the paragraphs, the key points and the assignments are arranged from the core's view", () => {
-  assert.equal(pageTitle(view()), "Матанализ");
-  assert.equal(pageTitle(view({ title: " " })), "Запись");
-  const meta = headerMeta(view());
-  assert.match(meta, / · Длительность 0:45:00$/);
-  assert.equal(headerMeta(view({ hasDuration: false })).includes("Длительность"), false);
-  assert.equal(headerMeta(view({ startedAt: "", hasDuration: false })), "");
-
+test("the paragraphs, the key points and the assignments are arranged from the core's view", () => {
+  // The head of the old summary page (pageTitle, headerMeta) went with it (TASK-352): the lesson screen has its own.
   assert.deepEqual(summaryParagraphs("Первый абзац.\r\nВторая строка.\r\n\r\n  \n\nВторой абзац.\n"), [
     "Первый абзац.\nВторая строка.",
     "Второй абзац.",
@@ -250,22 +242,13 @@ test("the state of each step is the core's text, with its error, and stays visib
   assert.equal(retryLabel(view(), "homework"), null);
 });
 
-test("the summary opens over the current section in place of the transcript, and jumps to an assignment", () => {
-  const s = routeToSummary(routeToPage("homework"), "r1");
-  // TASK-351 added `lesson` and `tab` to the route; they stay empty here.
-  const none = { lesson: "", tab: "" };
-  assert.deepEqual(s, { page: "homework", transcript: "", summary: "r1", assignment: "", subject: "", ...none });
-  assert.deepEqual(routeToTranscript(s, "r1"), { page: "homework", transcript: "r1", summary: "", assignment: "", subject: "", ...none });
-  assert.deepEqual(routeToSummary(routeToTranscript(routeToPage("recordings"), "r2"), "r2"), {
-    page: "recordings",
-    transcript: "",
-    summary: "r2",
-    assignment: "",
-    subject: "",
-    ...none,
-  });
-  assert.deepEqual(closeTranscript(s), { page: "homework", transcript: "", summary: "", assignment: "", subject: "", ...none });
-  assert.deepEqual(routeToAssignment("a1"), { page: "homework", transcript: "", summary: "", assignment: "a1", subject: "", ...none });
+test("the summary is the tab of the lesson over the current section, and jumps to an assignment", () => {
+  // TASK-352: the summary overlay route is replaced by the lesson route with the tab «Конспект».
+  const s = routeToLesson(routeToPage("homework"), "recording:r1", "summary");
+  assert.deepEqual(s, { page: "homework", assignment: "", subject: "", lesson: "recording:r1", tab: "summary" });
+  assert.deepEqual(routeToLesson(s, "recording:r1", "transcript"), { ...s, tab: "transcript" });
+  assert.deepEqual(closeLesson(s), { page: "homework", assignment: "", subject: "", lesson: "", tab: "" });
+  assert.deepEqual(routeToAssignment("a1"), { page: "homework", assignment: "a1", subject: "", lesson: "", tab: "" });
   assert.equal(routeToPage("homework").assignment, "", "a rail click shows the list");
 });
 
@@ -411,7 +394,8 @@ test("a failed step is retried at once, a ready summary is made again only after
 });
 
 test("the page retries through the activity binding and redoes the summary only from the dialog's confirm", () => {
-  const page = src("pages/SummaryPage.tsx");
+  // The lesson screen (TASK-352) took this from the old summary page.
+  const page = src("pages/KnowledgeLessonPage.tsx");
   assert.match(page, /activityApi\(callByName\)/);
   assert.match(page, /retryClick\(view, step,/);
   assert.match(page, /props\.activity\.retryPostProcessing\(id, work\)/);
@@ -437,7 +421,7 @@ const src = (rel) =>
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
 
 test("the viewer renders text only, talks only to the core and polls without overlap", () => {
-  const files = ["pages/SummaryPage.tsx", "pages/SummaryParts.tsx", "summaryView.ts", "bindings/summary.ts", "openSummary.ts"];
+  const files = ["pages/KnowledgeLessonPage.tsx", "pages/SummaryParts.tsx", "summaryView.ts", "bindings/summary.ts", "openLesson.ts"];
   for (const rel of files) {
     const text = src(rel);
     for (const banned of ["dangerouslySetInnerHTML", "innerHTML", "outerHTML", "insertAdjacentHTML", "href=", "window.open",
@@ -445,84 +429,68 @@ test("the viewer renders text only, talks only to the core and polls without ove
       assert.ok(!text.includes(banned), `${rel} uses ${banned}`);
     }
   }
-  const page = src("pages/SummaryPage.tsx");
+  const page = src("pages/KnowledgeLessonPage.tsx");
   assert.ok(!page.includes("setInterval"), "the next poll waits for the previous answer");
   assert.match(page, /clearTimeout\(timer\)/);
   assert.match(page, /api\.copyAll\(id\)/);
   assert.match(page, /api\.saveAs\(id, format\)/);
 });
 
-test("the row, the homework page and the transcript open the summary without a call per row", () => {
+test("the row and the homework page open the lesson without a call per row", () => {
   // The row's actions (rowActions, TASK-096) come from rowLinks and rowSummaryOffer over the list's chain.
   assert.match(src("recordingRowView.ts"), /const summary = rowSummaryOffer\(r\)/);
   assert.match(src("recordingRowView.ts"), /: rowSummaryOffer\(r\)/);
   const rows = src("pages/RecordingRow.tsx");
   assert.match(rows, /rowActions\(r, /);
-  assert.match(rows, /props\.onOpenSummary\?\.\(r\.id\)/);
-  assert.match(src("pages/RecordingsPage.tsx"), /onOpenSummary=\{openSummary\}/);
+  assert.match(rows, /props\.onOpenLesson\?\.\(r\.id, tab\)/, "a named tab of «⋯»");
+  assert.match(rows, /case "lesson":[^]*?props\.onOpenLesson\?\.\(r\.id\);/, "the main «Открыть» names no tab");
+  assert.match(src("pages/RecordingsPage.tsx"), /onOpenLesson=\{openLesson\}/);
   for (const rel of ["pages/RecordingRow.tsx", "pages/RecordingsPage.tsx"]) {
     assert.ok(!src(rel).includes("summaryApi"), "no summary call per row");
   }
   const links = src("pages/TranscriptLinks.tsx");
-  assert.match(links, /rowSummaryOffer\(r\)/);
+  assert.match(links, /pairLinks\(await activity\.listRecordings\(\), lessonId\)/);
   assert.ok(!links.includes("summaryApi"));
-  assert.match(src("pages/TranscriptPage.tsx"), /props\.onOpenSummary\(id\)/);
   const app = src("App.tsx");
-  assert.match(app, /<SummaryPage/);
+  assert.match(app, /<LessonScreen/);
   assert.match(app, /onOpenAssignment=\{openAssignment\}/);
   assert.match(src("pages/HomeworkPage.tsx"), /useState\(props\.openAssignment \?\? ""\)/);
 });
 
-// TASK-100: the summary screen shows one part at a time in a segmented control.
-test("the summary screen has the three segments, the summary first, the lecture text first from its row", async () => {
-  const { firstSegment, summarySegments } = await import("../.test-build/summaryView.js");
-  assert.deepEqual(summarySegments.map((s) => s.label), ["Конспект", "Текст лекции", "Задания"]);
-  assert.deepEqual(summarySegments.map((s) => s.value), ["summary", "lecture", "homework"]);
-  assert.equal(firstSegment(), "summary");
-  assert.equal(firstSegment("lecture"), "lecture");
-});
-
+// TASK-100, moved to the lesson screen by TASK-351/352: one part at a time in a segmented control (the lesson's tabs).
 test("the segments are a tablist with one tab stop, moved by the arrows, Home and End", async () => {
   const { SegmentTabs, nextSegment, segmentPanelId, segmentTabId } = await import("../.test-build/ui/controls.js");
-  const { summarySegments } = await import("../.test-build/summaryView.js");
+  const { lessonTabs } = await import("../.test-build/knowledgeView.js");
   const html = renderToStaticMarkup(
-    h(SegmentTabs, { label: "Раздел", base: "s", options: summarySegments, value: "summary", onChange: () => {} }),
+    h(SegmentTabs, { label: "Раздел", base: "s", options: lessonTabs, value: "summary", onChange: () => {} }),
   );
   assert.match(html, /^<div class="seg lg" role="tablist" aria-label="Раздел">/);
-  assert.equal(html.split('role="tab"').length - 1, 3);
+  assert.equal(html.split('role="tab"').length - 1, 5);
   assert.equal(html.split('aria-selected="true"').length - 1, 1, "one chosen segment");
   assert.match(html, /id="s-tab-summary" aria-selected="true" aria-controls="s-panel-summary" tabindex="0">Конспект</);
   assert.match(html, /id="s-tab-lecture" aria-selected="false" tabindex="-1">Текст лекции</);
   assert.match(html, /id="s-tab-homework" aria-selected="false" tabindex="-1">Задания</);
   assert.equal(segmentTabId("s", "lecture"), "s-tab-lecture");
   assert.equal(segmentPanelId("s", "lecture"), "s-panel-lecture");
-  assert.equal(nextSegment(summarySegments, "summary", "ArrowRight"), "lecture");
-  assert.equal(nextSegment(summarySegments, "homework", "ArrowRight"), "summary", "wraps");
-  assert.equal(nextSegment(summarySegments, "summary", "ArrowLeft"), "homework");
-  assert.equal(nextSegment(summarySegments, "lecture", "Home"), "summary");
-  assert.equal(nextSegment(summarySegments, "lecture", "End"), "homework");
-  assert.equal(nextSegment(summarySegments, "lecture", "Enter"), null);
+  assert.equal(nextSegment(lessonTabs, "summary", "ArrowRight"), "lecture");
+  assert.equal(nextSegment(lessonTabs, "homework", "ArrowRight"), "notes", "wraps");
+  assert.equal(nextSegment(lessonTabs, "notes", "ArrowLeft"), "homework");
+  assert.equal(nextSegment(lessonTabs, "lecture", "Home"), "notes");
+  assert.equal(nextSegment(lessonTabs, "lecture", "End"), "homework");
+  assert.equal(nextSegment(lessonTabs, "lecture", "Enter"), null);
   assert.equal(nextSegment([], "x", "ArrowRight"), null);
 });
 
-test("the page shows only the chosen segment, in its tabpanel", () => {
-  const page = src("pages/SummaryPage.tsx");
-  assert.match(page, /<SegmentTabs label="Раздел" base=\{tabsId\} options=\{summarySegments\} value=\{segment\}/);
-  assert.match(page, /useState<SummarySegment>\(\(\) => firstSegment\(props\.section\)\)/);
-  assert.match(page, /role="tabpanel"\s+id=\{segmentPanelId\(tabsId, segment\)\}\s+aria-labelledby=\{segmentTabId\(tabsId, segment\)\}/);
-  for (const [seg, part] of [["summary", "<SummaryCard"], ["lecture", "<LectureTextCard"], ["homework", "<HomeworkCard"]]) {
-    const at = page.indexOf(`{segment === "${seg}" && (`);
-    assert.ok(at > 0, `a branch for ${seg}`);
-    assert.equal(page.split(part).length - 1, 1, `${part} is rendered once`);
-    const next = page.indexOf("{segment === ", at + 1);
-    const branch = page.slice(at, next < 0 ? page.indexOf("<Dialog") : next);
-    assert.ok(branch.includes(part), `${part} is inside the ${seg} branch`);
+test("the lesson screen shows only the chosen tab, in its tabpanel, each part once", () => {
+  const page = src("pages/KnowledgeLessonPage.tsx");
+  assert.match(page, /<SegmentTabs label="Раздел пары" base=\{tabsId\} options=\{lessonTabs\} value=\{tab\}/);
+  assert.match(page, /role="tabpanel" id=\{segmentPanelId\(tabsId, tab\)\} aria-labelledby=\{segmentTabId\(tabsId, tab\)\}/);
+  for (const part of ["<SummaryTab", "<LectureTab", "<TranscriptPage", "<OwnNotes", "<NoSpeechCard"]) {
+    // The notes card is also the whole body of a lecture of the student's notes (NoteLecturePage).
+    const own = part === "<OwnNotes" ? 2 : 1;
+    assert.equal(page.split(part).length - 1, own, `${part} is rendered ${own === 1 ? "once" : "in the tab and in the note-only page"}`);
   }
-  // The summary tools stay with the summary; the screen is one reading column at any width.
-  const summary = page.slice(page.indexOf('{segment === "summary" && ('), page.indexOf('{segment === "lecture" && ('));
-  // TASK-351: the tools are the shared SummaryTools («Скопировать» and the «⋯» menu); the storage paragraph is gone.
-  assert.match(summary, /<SummaryTools/);
-  assert.doesNotMatch(summary, /Конспект хранится на этом компьютере|Скопировать конспект|Сохранить как…/);
+  // The screen is one reading column at any width.
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.page\.sm \{ width: 100%; max-width: 800px; margin-inline: auto; \}/);
 });
@@ -582,9 +550,9 @@ test("the no-speech card shows the core's message and «Проверить зв�
     assert.ok(!html.includes(s), s);
   }
   assert.ok(!renderToStaticMarkup(h(NoSpeechCard, { view: v })).includes("<button"), "no button without its handler");
-  // The page shows the card instead of the parts and opens «Диагностика» with it.
-  const page = readFileSync(new URL("../src/pages/SummaryPage.tsx", import.meta.url), "utf8");
-  assert.match(page, /if \(view\.noSpeech\) \{\s*return <NoSpeechCard/);
+  // The lesson screen shows the card instead of the parts and opens «Диагностика» with it.
+  const page = readFileSync(new URL("../src/pages/KnowledgeLessonPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /view\.noSpeech \? \(\s*<NoSpeechCard view=\{view\} onCheckSound=\{props\.onCheckSound\} \/>/);
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.ok(app.includes('onCheckSound={() => openPage("diagnostics")}'));
 });

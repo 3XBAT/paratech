@@ -331,7 +331,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 		{file: "summary.ts", typ: reflect.TypeFor[*SummaryService](), methods: 3},                 // TASK-087
 		{file: "summary.ts", typ: reflect.TypeFor[*LectureTextService](), methods: 2},             // TASK-090
 		{file: "recordingDelete.ts", typ: reflect.TypeFor[*RecordingDeleteService](), methods: 2}, // TASK-095
-		{file: "knowledgeBase.ts", typ: reflect.TypeFor[*KnowledgeBaseService](), methods: 7},     // TASK-091, +Lectures (TASK-155)
+		{file: "knowledgeBase.ts", typ: reflect.TypeFor[*KnowledgeBaseService](), methods: 8},     // TASK-091, +Lectures (TASK-155), +LessonByKey (TASK-352)
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {

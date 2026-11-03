@@ -492,7 +492,7 @@ export interface MentionPill {
   aria: string;
 }
 
-/** What a pill says about itself and about where it leads. The lesson and the material open a page, not the object. */
+/** What a pill says about itself and about where it leads. The material opens a page, not the object. */
 function pillWording(kind: string, caption: string, label: string): { title: string; aria: string } {
   switch (kind) {
     case "subject":
@@ -500,7 +500,7 @@ function pillWording(kind: string, caption: string, label: string): { title: str
     case "assignment":
       return { title: `${caption}: ${label}`, aria: `Открыть задание «${label}»` };
     case "lesson":
-      return { title: `${caption}: ${label}. Откроется «База знаний»`, aria: `Открыть «Базу знаний»: ${label}` };
+      return { title: `${caption}: ${label}`, aria: `Открыть пару «${label}»` };
     case "material":
       return { title: `${caption}: ${label}. Откроется «Предметы»`, aria: `Открыть «Предметы»: ${label}` };
     default:
@@ -518,11 +518,17 @@ export function mentionPills(list: readonly MentionView[] | undefined): MentionP
 }
 
 /** Where a pill leads, in terms of the routes the window already has. */
-export type MentionOpening = { type: "subject"; id: string } | { type: "assignment"; id: string } | { type: "page"; page: PageId };
+export type MentionOpening =
+  | { type: "subject"; id: string }
+  | { type: "assignment"; id: string }
+  /** The id is a schedule lesson's: the window finds its lecture and opens the lesson screen (TASK-352). */
+  | { type: "pair"; lessonId: string }
+  | { type: "page"; page: PageId };
 
 /**
- * No route opens a lesson or a material by id: «Пара» leads to «База знаний», «Материал» to «Предметы». A deleted object
- * just meets the normal state of that page. An unknown kind or an empty id leads nowhere.
+ * «Пара» opens the lesson screen of that pair (a pair with neither a recording nor notes says so), «Материал» leads to
+ * «Предметы» (no route opens a material by id). A deleted object just meets the normal state of the page. An unknown
+ * kind or an empty id leads nowhere.
  */
 export function mentionOpening(kind: string, id: string): MentionOpening | null {
   if (id === "") {
@@ -534,7 +540,7 @@ export function mentionOpening(kind: string, id: string): MentionOpening | null 
     case "assignment":
       return { type: "assignment", id };
     case "lesson":
-      return { type: "page", page: "knowledge" };
+      return { type: "pair", lessonId: id };
     case "material":
       return { type: "page", page: "subjects" };
     default:

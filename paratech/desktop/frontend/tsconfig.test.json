@@ -129,6 +129,9 @@
     "src/subjectRemovalView.ts",
     "src/pages/SubjectRemoval.tsx",
     "src/pages/useSubjectRemoval.ts",
-    "src/recordStartView.ts"
+    "src/recordStartView.ts",
+    "src/openLesson.ts",
+    "src/pages/TranscriptLinks.tsx",
+    "src/pages/LessonGone.tsx"
   ]
 }

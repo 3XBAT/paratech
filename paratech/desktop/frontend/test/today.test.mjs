@@ -306,9 +306,9 @@ const evil = "<img src=x onerror=alert(1)>";
 test("untrusted text stays text in every section", () => {
   const p = post({ headline: evil, lesson: { ...post().lesson, title: evil, subjectName: evil, subject: evil } });
   const out = [
-    html(h(LessonsSection, { lessons: [lesson({ title: evil, teacher: evil, post: p })], recordings: [], onOpenSummary: noop })),
-    html(h(SummarySection, { posts: [p], done: [], onOpenSummary: noop })),
-    html(h(SummarySection, { posts: [], done: [{ recordingId: "r1", lesson: p.lesson, summaryReady: true, homework: 0, at: at(21) }], onOpenSummary: noop })),
+    html(h(LessonsSection, { lessons: [lesson({ title: evil, teacher: evil, post: p })], recordings: [], onOpenLesson: noop })),
+    html(h(SummarySection, { posts: [p], done: [], onOpenLesson: noop })),
+    html(h(SummarySection, { posts: [], done: [{ recordingId: "r1", lesson: p.lesson, summaryReady: true, homework: 0, at: at(21) }], onOpenLesson: noop })),
     html(h(WaitingSection, { waiting: [{ proposalId: "p", kind: "send_homework_email", assignmentId: "", title: evil, subject: evil, due: "", recipient: evil, createdAt: "" }] })),
     html(h(BurningSection, { burning: [{ assignmentId: "a", title: evil, subject: evil, due: at(23), daysLeft: 1, urgent: false }], onOpenAssignment: noop })),
     html(h(AskSection, { chips: [{ kind: "x", text: evil }], onChip: noop })),
@@ -320,7 +320,7 @@ test("untrusted text stays text in every section", () => {
 });
 
 test("empty sections of an empty day: the heading and one short line; the others are hidden (TASK-345)", () => {
-  const lessons = html(h(LessonsSection, { lessons: [], recordings: [], onOpenSummary: noop }));
+  const lessons = html(h(LessonsSection, { lessons: [], recordings: [], onOpenLesson: noop }));
   const waiting = html(h(WaitingSection, { waiting: [] }));
   const burning = html(h(BurningSection, { burning: [], onOpenAssignment: noop }));
   assert.match(lessons, /Пары дня[^]*На сегодня пар нет\./);
@@ -331,7 +331,7 @@ test("empty sections of an empty day: the heading and one short line; the others
     assert.equal(s.match(/<h2/g).length, 1);
     assert.doesNotMatch(s, /пока нет|пока ничего/);
   }
-  assert.equal(html(h(SummarySection, { posts: [], done: [], onOpenSummary: noop })), "");
+  assert.equal(html(h(SummarySection, { posts: [], done: [], onOpenLesson: noop })), "");
   assert.equal(html(h(AskSection, { chips: [], onChip: noop })), "");
   assert.match(html(h(AskSection, { chips: [{ kind: "x", text: "Что горит?" }], onChip: noop })), /Спросить paratech[^]*Что горит\?/);
 });
@@ -344,13 +344,13 @@ test("«Итоги дня»: one list, the posts first, then the done ones; a do
   assert.equal(rows.count, 3);
   assert.equal(summaryRows([], []).count, 0);
 
-  const out = html(h(SummarySection, { posts: [post({ recordingId: "r1", headline: "Пост один" })], done: [dn("r1", "Повтор"), dn("r3", "Физика")], onOpenSummary: noop }));
+  const out = html(h(SummarySection, { posts: [post({ recordingId: "r1", headline: "Пост один" })], done: [dn("r1", "Повтор"), dn("r3", "Физика")], onOpenLesson: noop }));
   assert.equal((out.match(/<h2/g) ?? []).length, 1, "no inner sub-headings");
   assert.match(out, /Итоги дня[^]*<span class="num today-cnt"> · 2<\/span>/);
   assert.equal((out.match(/role="list"/g) ?? []).length, 1, "one card list");
   assert.ok(out.indexOf("Пост один") < out.indexOf("Конспект · Физика"), "posts before the done rows");
   assert.ok(!out.includes("Повтор"), "the done row of a told recording is not repeated");
-  assert.equal((out.match(/>Открыть</g) ?? []).length, 2, "every ready row opens its summary");
+  assert.equal((out.match(/>Открыть</g) ?? []).length, 2, "every ready row opens its lesson");
   assert.doesNotMatch(out, /Сообщения paratech|Готово за день/);
 });
 
@@ -407,7 +407,7 @@ test("«Итоги дня» is last in one column and under the lessons in two (
   assert.match(css, /grid-template-areas: "lessons decide" "summary decide"; grid-template-rows: auto 1fr;/);
   assert.match(css, /\.today-summary \{ grid-area: summary; \}/);
   assert.match(css, /\.today-cols > div > \.today-sec:first-child \{ margin-top: 0; \}/);
-  assert.ok(html(h(SummarySection, { posts: [post()], done: [], onOpenSummary: noop })).includes("today-summary"));
+  assert.ok(html(h(SummarySection, { posts: [post()], done: [], onOpenLesson: noop })).includes("today-summary"));
 });
 
 test("a deadline row: the chip sits under the title with the subject, the row is a plain column (TASK-345)", () => {
@@ -451,16 +451,19 @@ test("an urgent deadline chip has the clock icon and the word, a plain one has n
   assert.doesNotMatch(today, /today-day/, "the chip carries the date: no separate column");
 });
 
-test("rows: live chip, urgent chip, open only for a ready summary, no confirm buttons", () => {
-  const live = html(h(LessonsSection, { lessons: [lesson()], recordings: [rec({ stage: "recording" })], onOpenSummary: noop }));
+test("rows: live chip, urgent chip, the whole row opens the lesson (TASK-352), no confirm buttons", () => {
+  const live = html(h(LessonsSection, { lessons: [lesson()], recordings: [rec({ stage: "recording" })], onOpenLesson: noop }));
   assert.match(live, /Идёт запись/);
-  assert.match(html(h(LessonsSection, { lessons: [lesson()], recordings: [rec({ stage: "transcribing", progressPercent: 40 })], onOpenSummary: noop })), /Расшифровка · 40 %/);
+  assert.match(html(h(LessonsSection, { lessons: [lesson()], recordings: [rec({ stage: "transcribing", progressPercent: 40 })], onOpenLesson: noop })), /Расшифровка · 40 %/);
 
-  const ready = html(h(LessonsSection, { lessons: [lesson({ post: post() })], recordings: [], onOpenSummary: noop }));
+  // The row itself is the open (a title button stretched over it); no separate «Открыть» button is left.
+  const ready = html(h(LessonsSection, { lessons: [lesson({ post: post() })], recordings: [], onOpenLesson: noop }));
   assert.match(ready, /Конспект готов/);
-  assert.match(ready, /Открыть/);
-  const pending = html(h(LessonsSection, { lessons: [lesson({ post: post({ summaryReady: false }) })], recordings: [], onOpenSummary: noop }));
-  assert.ok(!pending.includes("Открыть"));
+  assert.match(ready, /<button type="button" class="row-open" title="Открыть пару" aria-label="Открыть пару: Матанализ">Матанализ<\/button>/);
+  assert.doesNotMatch(ready, />Открыть</);
+  // A pending summary opens too: the lesson screen shows where it stands and holds the transcript.
+  const pending = html(h(LessonsSection, { lessons: [lesson({ post: post({ summaryReady: false }) })], recordings: [], onOpenLesson: noop }));
+  assert.match(pending, /class="row-open"/);
 
   const burning = html(h(BurningSection, { now: new Date(2026, 9, 21, 12, 0), burning: [{ assignmentId: "a", title: "Реферат", subject: "", due: at(23), daysLeft: 2, urgent: true }, { assignmentId: "b", title: "ЛР", subject: "", due: at(26), daysLeft: 5, urgent: false }], onOpenAssignment: noop }));
   assert.match(burning, /s-run[^>]*>.*до пт, 23 окт\., 00:00/);
@@ -482,10 +485,10 @@ test("a failed recording of the day shows a problem chip that opens «Запис
   assert.equal(looseProblems(["l1"], [failed({ lessonId: "" })], at(21)).length, 1);
 
   let opened = 0;
-  const out = html(h(LessonsSection, { lessons: [lesson()], recordings: [failed()], day: at(21), onOpenSummary: noop, onOpenRecordings: () => opened++ }));
+  const out = html(h(LessonsSection, { lessons: [lesson()], recordings: [failed()], day: at(21), onOpenLesson: noop, onOpenRecordings: () => opened++ }));
   assert.match(out, /Проблема с записью/);
   assert.match(out, /<button[^>]*today-problem/);
-  const loose = html(h(LessonsSection, { lessons: [], recordings: [failed({ lessonId: "" })], day: at(21), onOpenSummary: noop, onOpenRecordings: noop }));
+  const loose = html(h(LessonsSection, { lessons: [], recordings: [failed({ lessonId: "" })], day: at(21), onOpenLesson: noop, onOpenRecordings: noop }));
   assert.match(loose, /Проблема с записью/);
 });
 

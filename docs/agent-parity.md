@@ -138,7 +138,7 @@ Legend
 |---|---|---|---|---|---|
 | Поиск | `KnowledgeBaseService.Search` | `search` | R | — | |
 | Вопрос по лекциям | `AnswerService.Answer` | `answer_question` | R (платно) | — | О-1 а |
-| Предметы и лекции базы | `KnowledgeBaseService.Subjects/Lessons/Lectures/Lesson` | частично `find_lessons` | R | — | |
+| Предметы и лекции базы | `KnowledgeBaseService.Subjects/Lessons/Lectures/Lesson/LessonByKey` | частично `find_lessons` | R | — | |
 | Билеты из вставленного списка | `TicketService.Propose` | нет | U | — | the pasted list is foreign text: only from an upload, never through the planner |
 | Билеты из файла | `TicketService.ProposeFromMaterial` | нет | U | — | |
 | Подтвердить билеты (платно) | `TicketService.Confirm` | нет | U (платно) | план | |

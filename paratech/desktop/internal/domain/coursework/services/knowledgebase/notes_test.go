@@ -2,6 +2,7 @@ package knowledgebase
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +30,48 @@ func TestKeys(t *testing.T) {
 	}
 	if l := NewLesson(Facts{Recording: "r1", ScheduleLesson: "l1", StartedAt: t0}); l.Key != "recording:r1" || l.ScheduleLesson != "l1" {
 		t.Fatalf("NewLesson = %+v", l)
+	}
+}
+
+func TestParseKey(t *testing.T) {
+	longID := strings.Repeat("x", 128)
+	tests := []struct {
+		key    string
+		rec    shared.RecordingID
+		wantOK bool
+	}{
+		{RecordingKey("r1"), "r1", true},
+		{LessonKey("l1"), "", true},
+		{DayKey("phys", sep5), "", true},
+		{NoteKey("n1"), "", true},
+		{DayKey(shared.SubjectID(longID), sep5), "", true}, // the longest key built
+		{"", "", false},
+		{"recording:", "", false},
+		{"lesson:", "", false},
+		{"day:", "", false},
+		{"note:", "", false},
+		{"subject:phys", "", false},
+		{"Recording:r1", "", false},
+		{"r1", "", false},
+		{"note:" + strings.Repeat("x", MaxKeyBytes), "", false},
+	}
+	for _, tc := range tests {
+		rec, ok := ParseKey(tc.key)
+		if rec != tc.rec || ok != tc.wantOK {
+			t.Errorf("ParseKey(%.30q) = %q, %v; want %q, %v", tc.key, rec, ok, tc.rec, tc.wantOK)
+		}
+	}
+}
+
+func TestFindByKey(t *testing.T) {
+	lessons := []Lesson{{Key: "recording:r1"}, {Key: "note:n1", Title: "Конспект"}}
+	if l, ok := FindByKey(lessons, "note:n1"); !ok || l.Title != "Конспект" {
+		t.Fatalf("FindByKey(note:n1) = %+v, %v", l, ok)
+	}
+	for _, key := range []string{"note:n", "note:n1 ", "lesson:n1", ""} {
+		if l, ok := FindByKey(lessons, key); ok {
+			t.Errorf("FindByKey(%q) = %+v", key, l)
+		}
 	}
 }
 
