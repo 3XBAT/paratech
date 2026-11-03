@@ -8199,6 +8199,266 @@
                 "TASK-370"
             ],
             "status": "done"
+        },
+        {
+            "id": "TASK-372",
+            "category": "infrastructure",
+            "priority": "high",
+            "description": "[E2E] Режим E2E настоящего приложения (тег сборки e2e): песочница, порт CDP, без схемы paratech: и чужого окна",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-372-e2e-mode.md; ADR-0035 §3",
+                "Флаги --e2e-dir, --e2e-cdp-port, --e2e-window есть только в сборке с тегом e2e; без тега флага нет (тест config)",
+                "В режиме E2E: свой UniqueID Wails (…desktop.e2e), WebView2 в <e2e-dir>/webview, AdditionalBrowserArgs --remote-debugging-port (не переменная окружения: Wails её стирает), размер окна, « · E2E» в заголовке и подсказке трея",
+                "В режиме E2E не пишется HKCU\\Software\\Classes\\paratech; запуск отказывает при каталоге данных по умолчанию или неизолированном профиле Credential Manager; адрес Hub только loopback",
+                "build-alpha.ps1 -E2E собирает -tags production,e2e в paratech/dist/e2e; -E2E -Smoke проходит",
+                "Ручная проверка на Windows: E2E-exe запускается рядом с рабочим paratech владельца, /json/version порта CDP отвечает",
+                "Файлы: desktop/config, internal/app (app.go, e2e.go, settingsbridge.go), input/wails (shell*.go), build-alpha.ps1, .github/workflows/ci.yml (vet и test с -tags e2e), тесты",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go vet и go test -race ./desktop/... с тегом e2e и без, GOOS=windows go vet -tags e2e ./desktop/..., golangci-lint v2.14.0",
+                "powershell -File paratech/desktop/build-alpha.ps1 -E2E -Smoke"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-373",
+            "category": "infrastructure",
+            "priority": "high",
+            "description": "[E2E] Хуки режима E2E: диалоги выбора и сохранения файла, открытие ссылок и файлов, буфер обмена — через файлы песочницы",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-373-e2e-hooks.md; ADR-0035 §3",
+                "Новый адаптер internal/adapters/e2ehooks (только std); input/wails получает необязательные подмены в Options и не импортирует adapters; app подключает их только в режиме E2E",
+                "Диалоги открытия берут путь из <e2e-dir>/picks.jsonl, только файлы внутри <e2e-dir>/fixtures; абсолютный путь, .., reparse point, чужой диалог — «отменено»",
+                "Диалоги сохранения возвращают <e2e-dir>/saved/<имя>; weblink, открытие файлов и буфер обмена пишут строку в <e2e-dir>/opened.jsonl и ничего не запускают",
+                "Без режима E2E поведение не меняется; ревью безопасности (ограничение путей)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go vet и go test -race затронутого с тегом e2e и без, GOOS=windows go vet -tags e2e ./desktop/..., golangci-lint v2.14.0"
+            ],
+            "dependencies": [
+                "TASK-372"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-374",
+            "category": "infrastructure",
+            "priority": "high",
+            "description": "[E2E] Стенд Hub для E2E: свой Postgres-схема, тестовый ключ, свободный порт; поддельный Messages API со сценарными ответами",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-374-e2e-hub-harness.md; ADR-0035 §1, §4",
+                "Новый пакет paratech/e2e (TypeScript, typescript и @types/node с точными версиями, npm test)",
+                "startHub: Postgres из hub/docker-compose.yml (или HUB_TEST_DATABASE_URL), схема e2e_<run>, hub keys create, hub serve на свободном loopback-порту (не 8080 и не 58080), случайный HUB_AGENT_SEAL_KEYS, HUB_QUOTA_LIMIT (по умолчанию 400000); stop удаляет схему",
+                "Scripted: поддельный ключ провайдера и HUB_ANTHROPIC_BASE_URL на подделку, HUB_PROVIDER_STREAM=false; live: ключ из PARATECH_E2E_ANTHROPIC_KEY (+ _BASE_URL, _AUTH) только в окружении процесса Hub, нигде не печатается",
+                "Подделка Messages API: правила по порядку, POST /__e2e/script, GET /__e2e/requests и /__e2e/unmatched; несовпавший запрос — HTTP 500 и провал сценария «незаписанный вызов LLM»; формат ответа по hub/internal/adapters/anthropic",
+                "Изменения Go в hub/ не нужны; если нужны — остановиться и сообщить",
+                "Исполнитель: hub-dev (opus)"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/e2e test (юнит-тесты без Docker; тест с настоящим Hub пропускается без Docker)",
+                "На Windows с Docker: тест с настоящим Hub и GetRemaining проходит, запись в progress"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-375",
+            "category": "testing",
+            "priority": "high",
+            "description": "[E2E] Раннер Playwright: песочница, подключение по CDP к обоим окнам, отчёт «готово / сломано» со снимками",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-375-e2e-runner.md; ADR-0035 §2, §3, §6, §7",
+                "@playwright/test (точная версия, без скачивания браузеров), connectOverCDP; главное окно и popup находятся по URL",
+                "Подготовка: очистка paratech/dist/e2e-run, фикстуры в <e2e-dir>/fixtures, свободные порты, стенд Hub (TASK-374), запуск exe с флагами E2E; ожидание строк instance lock acquired, secrets_profile=isolated, e2e mode on, background work started — иначе отказ «песочница не изолирована»",
+                "Завершение: остановка exe, Hub, удаление записей Credential Manager только профиля paratech-<secrets_profile_id>",
+                "Помощники pick, opened, llm.script/requests, step со снимком при ошибке; отчёт paratech/dist/e2e-run/report/report.md: «Функция | Режим | Итог | Шаг, где сломалось | Снимок», «не проверено (нужно: …)»; ключи не попадают в отчёт",
+                "workers 1, retries 0; smoke-сценарий; docs/process/e2e.md и docs/refs/playwright-webview2.md (что проверено: CDP к WebView2, скрытый popup, снимок закрытого окна, loopback порта)",
+                "CI: задание e2e-static (npm ci, npm test, tsc --noEmit), без запуска приложения",
+                "Исполнитель: tester (sonnet)"
+            ],
+            "test_steps": [
+                "bash paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --grep @smoke",
+                "npm --prefix paratech/e2e test"
+            ],
+            "dependencies": [
+                "TASK-372",
+                "TASK-373",
+                "TASK-374"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-376",
+            "category": "testing",
+            "priority": "high",
+            "description": "[E2E] Проверки раскладки на всех экранах: окно не прокручивается, нет горизонтального переполнения, у значков есть подсказки, спокойные статусы",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-376-e2e-layout-invariants.md; ADR-0035 §5",
+                "checkLayout: scrollHeight документа ≤ высоты окна; ничего не шире окна; у кнопок и ссылок без текста есть aria-label и title; у [data-status] нет заливки и цветной рамки; нет undefined/NaN/[object/английских ошибок; нет ошибок консоли",
+                "Обход: все разделы рейки, страница предмета и её вкладки, вкладки пары, страница задания, все пункты настроек, открытая панель агента, popup — при обычном размере и 1024x640",
+                "Юнит-тесты проверки на статичном HTML; найденные дефекты — отдельные задачи в progress, не правятся здесь",
+                "Файлы: paratech/e2e/src/checks, specs/layout, test; frontend src/ui/* только атрибут data-status без визуальных изменений",
+                "Исполнитель: frontend (sonnet)"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/e2e test; npm run test и run build во frontend",
+                "bash paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --grep @layout"
+            ],
+            "dependencies": [
+                "TASK-375"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-377",
+            "category": "testing",
+            "priority": "high",
+            "description": "[E2E] Пакет «Настройки и подключения»: адрес Hub и ключ через UI, остаток квоты, импорт модели с проверкой, импорт синтетического расписания",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-377-e2e-settings-pack.md; ADR-0035 §4, §6; AC-07, AC-12, AC-16, AC-23, AC-25",
+                "Адрес сервера и ключ вводятся в UI; квота показывает предел E2E; отозванный ключ показывает отказ",
+                "Модель ggml-base-q5_1 скачивается один раз в paratech/dist/cache/e2e (размер и SHA-256 из catalog.json), импортируется через диалог-подмену, становится моделью по умолчанию; испорченная копия отклоняется понятным текстом",
+                "Синтетический ICS (Матанализ, Литература, История; пара через 2 минуты; синтетическая ссылка telemost) — предпросмотр и импорт",
+                "Исполнитель: tester (sonnet)"
+            ],
+            "test_steps": [
+                "bash paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --grep @settings",
+                "npm --prefix paratech/e2e test"
+            ],
+            "dependencies": [
+                "TASK-375"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-378",
+            "category": "testing",
+            "priority": "high",
+            "description": "[E2E] Пакет «Запись → конспект → задание» с настоящим whisper-cli и моделью (закрывает TASK-025)",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-378-e2e-recording-pack.md; ADR-0035 §4, §6; AC-06, AC-08, AC-09; TASK-025",
+                "Фикстура: отрывок русской речи ≤ 60 с из общественного достояния (README: источник, лицензия, ожидаемые слова), если ответ О3 не иной",
+                "Импорт записи → настоящий whisper-cli → «Расшифровка» содержит ≥ 2 ожидаемых слов → сценарный конспект и извлечение → задание в «Задания» и «Сроки на неделе»",
+                "AC-06: ни один запрос к провайдеру не несёт аудио; отмена задачи STT; перезапуск во время STT — задача доходит (AC-09); строка скорости STT в отчёте",
+                "Статус TASK-025 меняет супервизор по отчёту; эта задача его не трогает",
+                "Исполнитель: tester (sonnet)"
+            ],
+            "test_steps": [
+                "bash paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --grep @recording",
+                "npm --prefix paratech/e2e test"
+            ],
+            "dependencies": [
+                "TASK-377"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-379",
+            "category": "testing",
+            "priority": "medium",
+            "description": "[E2E] Пакет «Окно-напоминание и запись звука»: popup в начале пары, «Подключиться», «Не записывать», запись из popup; звук из колонок — по флагу",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-379-e2e-popup-capture.md; ADR-0035 §2, §4; AC-01, AC-03, AC-24; TASK-370",
+                "Popup виден не позже 20 с после начала синтетической пары; «Подключиться» пишет ровно синтетическую ссылку в opened.jsonl и становится неактивной",
+                "«Не записывать» прячет popup; «Начать запись» → запись видна; «Остановить» в главном окне сохраняет её",
+                "Только с E2E_WITH_SOUND=1: фикстура играет в устройство по умолчанию во время записи, расшифровка не пустая; без флага — «не проверено (нужен звук)»",
+                "Исполнитель: tester (sonnet)"
+            ],
+            "test_steps": [
+                "bash paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --grep @popup"
+            ],
+            "dependencies": [
+                "TASK-377"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-380",
+            "category": "testing",
+            "priority": "high",
+            "description": "[E2E] Пакет «Агент» (scripted): названия записей видны модели, вопрос о ссылке ведёт к ссылке, «что было на паре», «добавь предмет по последней записи», честность при сбое инструмента",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-380-e2e-agent-pack.md; ADR-0035 §1, §6; ADR-0021, ADR-0023; AC-18",
+                "Результат инструмента, отправленный модели, содержит названия записей TASK-378",
+                "Вопрос о ссылке: результат содержит синтетическую ссылку; каждый переход из ответа открывает экран с «Подключиться»; экран без ссылки — провал",
+                "«что было на паре по литературе» — карточка с источником, источник открывает страницу пары; «добавь предмет по последней записи» — предмет появился, «Отменить» возвращает",
+                "Сбой инструмента: следующий запрос к модели несёт is_error с настоящей причиной; карточка — ошибка/cannot_do, не успех; действие класса C только через карточку подтверждения",
+                "Ни одного незаписанного вызова LLM",
+                "Исполнитель: tester (sonnet)"
+            ],
+            "test_steps": [
+                "bash paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --grep @agent"
+            ],
+            "dependencies": [
+                "TASK-378"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-381",
+            "category": "testing",
+            "priority": "medium",
+            "description": "[E2E] Пакет «Задания»: добавить, изменить срок, короткий ответ (сценарный), «Выполнено», удаление",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-381-e2e-assignments-pack.md; ADR-0035 §6; AC-13, AC-14",
+                "«Добавить задание» для «История» → в нужной группе «Задания» и в «Сроки на неделе»; смена срока меняет группу и видна в «Журнал»",
+                "Короткий ответ со сценарным черновиком: показ, правка, переделка по указанию (AC-13); «Сохранить в файл» пишет в <e2e-dir>/saved",
+                "«Выполнено» убирает из открытых; удаление через «⋯» с подтверждением; отправка останавливается на подтверждении (AC-14)",
+                "Исполнитель: tester (sonnet)"
+            ],
+            "test_steps": [
+                "bash paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --grep @assignments"
+            ],
+            "dependencies": [
+                "TASK-377"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-382",
+            "category": "testing",
+            "priority": "high",
+            "description": "[E2E] LIVE-набор перед каждой бетой: настоящий LLM через локальный Hub, предел токенов, оценка ответов агента",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-382-e2e-live-set.md; ADR-0035 §1, §4, §6; AC-11, AC-12",
+                "npm run e2e:live; нет PARATECH_E2E_ANTHROPIC_KEY — строка окружения «нет ключа», без запуска; предел HUB_QUOTA_LIMIT 400000 (E2E_LIVE_TOKENS)",
+                "Набор: настройки, цепочка записи с настоящим конспектом и извлечением, пять сценариев агента TASK-380 с рубриками (названия записей, ссылка или экран с «Подключиться», источник пары, предмет с отменой, нет выдуманной причины сбоя из списка запретов)",
+                "Один повтор на сценарий («готово после повтора»); в отчёте потраченные токены и время; LIVE ≤ 30 мин",
+                "Один настоящий LIVE-прогон, сводка в progress; шаг «перед бетой: scripted + live» в docs/process/supervision.md",
+                "Исполнитель: tester (sonnet)"
+            ],
+            "test_steps": [
+                "bash paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e:live",
+                "npm --prefix paratech/e2e test"
+            ],
+            "dependencies": [
+                "TASK-376",
+                "TASK-378",
+                "TASK-379",
+                "TASK-380",
+                "TASK-381"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-383",
+            "category": "documentation",
+            "priority": "low",
+            "description": "[Документация] Короткий README для агентов в крупных пакетах: input/wails, input/agent, frontend src/ и src/agent",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-383-package-readmes.md",
+                "Четыре README ≤ 80 строк: назначение, карта файлов по группам, куда добавлять привязку / инструмент / страницу / карточку, правила ARCH и ADR, как запускать тесты, какой пакет E2E покрывает",
+                "Все упомянутые пути существуют на master; код не меняется",
+                "Исполнитель: go-core (sonnet)"
+            ],
+            "test_steps": [
+                "Скрипт проверки путей (scratchpad), результат в progress"
+            ],
+            "dependencies": [],
+            "status": "pending"
         }
     ]
 }
