@@ -132,6 +132,12 @@
     "src/recordStartView.ts",
     "src/openLesson.ts",
     "src/pages/TranscriptLinks.tsx",
-    "src/pages/LessonGone.tsx"
+    "src/pages/LessonGone.tsx",
+    "src/subjectTabsView.ts",
+    "src/pages/SubjectHead.tsx",
+    "src/pages/SubjectPairsTab.tsx",
+    "src/pages/SubjectTasksTab.tsx",
+    "src/pages/SubjectTabs.tsx",
+    "src/pages/useFocusBack.ts"
   ]
 }

@@ -1,5 +1,5 @@
 import { type DragEvent, Fragment, type ReactNode, useState } from "react";
-import type { LibraryMaterial, LibrarySubject, SubjectOverview } from "../bindings/library.js";
+import type { LibraryMaterial, LibrarySubject } from "../bindings/library.js";
 import {
   addToFolderLabel,
   dropCue,
@@ -11,31 +11,24 @@ import {
   scrollToFolder as scrollToFolderIn,
 } from "../libraryInboxView.js";
 import {
-  dayMonth,
-  daysChip,
   type FreshMarks,
   filesOfFolder,
   foldEmptyFolders,
   folderCountText,
   folderTitle,
   groupBySemester,
-  lessonChip,
-  lessonMeta,
-  lessonTitle,
   noFresh,
   orderedFolders,
   texts,
   treeCount,
-  weekdayOf,
 } from "../libraryView.js";
-import type { PageId } from "../nav.js";
 import { offerGroups, reviewTexts } from "../scheduleSubjectsView.js";
+import { folderAddId } from "../subjectTabsView.js";
 import { expandSubject, initialOpen, isSubjectOpen, seedOpen, toggleLabel, toggleSubject } from "../subjectTreeState.js";
 import { emptyInboxText, type InboxEntry } from "../subjectsHome.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Card, EmptyState, ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
-import { StatusChip } from "../ui/StatusChip.js";
 import { type FileActions, FileRows } from "./FileRows.js";
 import { NameForm } from "./NameForm.js";
 import { EmptySubjectsActions, type ScheduleOffer } from "./ScheduleSubjectsReview.js";
@@ -76,30 +69,13 @@ export function EmptySubjects(props: {
 }
 
 /**
- * The buttons in the head of every screen of the section: «База знаний» and «Билеты» (the pages that belong to the
- * library), «Добавить файл» (its tooltip says where the file goes), and what the screen adds (`children`). With
- * `links={false}` (the library without subjects, where both pages are empty) only «Добавить файл» is left.
+ * The buttons in the head of «Входящие» and of the library without subjects: «Добавить файл» (its tooltip says where the
+ * file goes) and what the screen adds (`children`). «База знаний» is in the tree, «Билеты к экзамену» in the head of a
+ * subject (TASK-353): neither belongs to a screen of files.
  */
-export function LibraryActions(props: {
-  onOpen(id: PageId): void;
-  onAddFile(): void;
-  addTip: string;
-  busy: boolean;
-  links?: boolean;
-  children?: ReactNode;
-}) {
+export function LibraryActions(props: { onAddFile(): void; addTip: string; busy: boolean; children?: ReactNode }) {
   return (
     <div className="acts">
-      {props.links !== false && (
-        <>
-          <Button icon="book" onClick={() => props.onOpen("knowledge")}>
-            {texts.knowledge}
-          </Button>
-          <Button icon="doc" onClick={() => props.onOpen("tickets")}>
-            Билеты
-          </Button>
-        </>
-      )}
       <Button icon="up" disabled={props.busy} title={props.addTip} onClick={props.onAddFile}>
         {texts.addFile}
       </Button>
@@ -135,6 +111,10 @@ export function SubjectTree(props: {
   drop?: TreeDrop;
   /** The id of the «Предмет» button (the focus returns to it when the review of the schedule closes). */
   addId?: string;
+  /** A click on a folder: the page shows the tab «Файлы» and scrolls to it; without it the tree only scrolls. */
+  onOpenFolder?(folderId: string): void;
+  /** «База знаний» (the search of all lessons): a global place, under the buttons of the tree, until TASK-354. */
+  onOpenKnowledge?(): void;
 }) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [over, setOver] = useState("");
@@ -248,7 +228,11 @@ export function SubjectTree(props: {
                         <ul className="lv2">
                           {orderedFolders(s.folders).map((f) => (
                             <li key={f.id}>
-                              <button type="button" className="ti fold" onClick={() => (s.id === props.currentId ? scrollToFolder(f.id) : props.onOpen(s.id))}>
+                              <button
+                                type="button"
+                                className="ti fold"
+                                onClick={() => (s.id === props.currentId ? (props.onOpenFolder ?? scrollToFolder)(f.id) : props.onOpen(s.id))}
+                              >
                                 <Icon name="folder" />
                                 <span className="nm">{folderTitle(f)}</span>
                                 {props.freshFolders?.has(f.id) === true && <span className="fresh">{texts.fresh}</span>}
@@ -278,102 +262,13 @@ export function SubjectTree(props: {
             {texts.addFolder}
           </Button>
         )}
+        {props.onOpenKnowledge && (
+          <Button size="sm" icon="book" onClick={props.onOpenKnowledge}>
+            {texts.knowledge}
+          </Button>
+        )}
       </div>
     </nav>
-  );
-}
-
-/** «Ближайшее» and the lessons of a subject. Titles come from the model or the student: text nodes only. */
-export function OverviewSections(props: {
-  overview: SubjectOverview;
-  onOpenAssignment?: (assignmentId: string) => void;
-  /** A row of «Пары» opens the lesson of its recording (TASK-352); without it the rows only show the lessons. */
-  onOpenLesson?: (recordingId: string) => void;
-}) {
-  const { deadlines, lessons } = props.overview;
-  const open = props.onOpenAssignment;
-  const openLesson = props.onOpenLesson;
-  return (
-    <>
-      {deadlines.length > 0 && (
-        <section className="section">
-          <h2 className="sec-h">{texts.upcoming}</h2>
-          <Card className="lrows" label={texts.upcoming}>
-            <div role="list">
-              {deadlines.map((d) => {
-                const chip = daysChip(d.daysLeft);
-                const body = (
-                  <>
-                    {/* Spans only: the same body sits inside a <button> when the row opens its assignment. */}
-                    <span className="d num">
-                      {weekdayOf(d.due)}
-                      <span>{dayMonth(d.due)}</span>
-                    </span>
-                    <span className="tx">
-                      <span className="t">{d.title}</span>
-                    </span>
-                    <StatusChip kind={chip.kind}>{chip.label}</StatusChip>
-                  </>
-                );
-                // The whole row opens its assignment (navigation only, as on «Сегодня»); the focus ring is the global one.
-                return open === undefined ? (
-                  <div className="lrow drow" role="listitem" key={d.assignmentId}>
-                    {body}
-                  </div>
-                ) : (
-                  <div className="drow-item" role="listitem" key={d.assignmentId}>
-                    <button type="button" className="lrow drow drow-open" title={texts.openAssignment} onClick={() => open(d.assignmentId)}>
-                      {body}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-        </section>
-      )}
-      {lessons.length > 0 && (
-        <section className="section">
-          <h2 className="sec-h">
-            {texts.lessons} <span className="cnt num">· {lessons.length}</span>
-          </h2>
-          <Card className="lrows" label={texts.lessons}>
-            <div role="list">
-              {lessons.map((l) => {
-                const chip = lessonChip(l.status);
-                const meta = lessonMeta(l);
-                const body = (
-                  <>
-                    <Icon name="doc" />
-                    {/* Spans only: the same body sits inside a <button> when the row opens its lesson. */}
-                    <span className="tx">
-                      <span className="t">{lessonTitle(l)}</span>
-                      {meta !== "" && <span className="meta num">{meta}</span>}
-                    </span>
-                    {l.summaryNew && <span className="fresh">{texts.fresh}</span>}
-                    <StatusChip kind={chip.kind} icon={chip.icon}>
-                      {chip.label}
-                    </StatusChip>
-                  </>
-                );
-                // The whole row opens its lesson, like a row of «Ближайшее» opens its assignment.
-                return openLesson === undefined ? (
-                  <div className="lrow drow" role="listitem" key={l.recordingId}>
-                    {body}
-                  </div>
-                ) : (
-                  <div className="drow-item" role="listitem" key={l.recordingId}>
-                    <button type="button" className="lrow drow drow-open" title={texts.openLesson} onClick={() => openLesson(l.recordingId)}>
-                      {body}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-        </section>
-      )}
-    </>
   );
 }
 
@@ -421,7 +316,7 @@ export function SubjectDetail(props: {
                 {folderTitle(f)} {files !== null && files.length > 0 && <span className="cnt num">· {folderCountText(files.length)}</span>}
                 {fresh.folders.has(f.id) && <span className="fresh">{texts.fresh}</span>}
               </h2>
-              {onAddFile && <IconButton icon="plus" label={addToFolderLabel(folderTitle(f))} disabled={props.busy} onClick={() => onAddFile(f.id)} />}
+              {onAddFile && <IconButton id={folderAddId(f.id)} icon="plus" label={addToFolderLabel(folderTitle(f))} disabled={props.busy} onClick={() => onAddFile(f.id)} />}
             </div>
             {props.folderExtra?.(f.id)}
             {/* Unknown files (loading, failed): no «пусто» claim and no per-folder «Загрузка…»; a failure is one line under the head of the page. */}
@@ -444,7 +339,7 @@ export function SubjectDetail(props: {
             {empty.map((f) => (
               <span className="empty-folder-name" id={folderAnchor(f.id)} key={f.id}>
                 {folderTitle(f)}
-                {onAddFile && <IconButton icon="plus" label={addToFolderLabel(folderTitle(f))} disabled={props.busy} onClick={() => onAddFile(f.id)} />}
+                {onAddFile && <IconButton id={folderAddId(f.id)} icon="plus" label={addToFolderLabel(folderTitle(f))} disabled={props.busy} onClick={() => onAddFile(f.id)} />}
               </span>
             ))}
           </div>

@@ -17,15 +17,6 @@ import { ResultLine } from "../ui/controls.js";
 // «Удалить предмет» and «Вернуть» (TASK-289): the confirm dialog and the inline line with «Вернуть». Names of subjects are
 // typed or imported text: only text nodes here, never markup.
 
-/** «Удалить предмет» in the head of the page of a subject: a plain secondary button (red only in the dialog it opens), last in the row. */
-export function RemoveSubjectButton(props: { disabled: boolean; onClick(opener: HTMLElement): void }) {
-  return (
-    <Button variant="secondary" disabled={props.disabled} onClick={(e) => props.onClick(e.currentTarget)}>
-      {removalTexts.action}
-    </Button>
-  );
-}
-
 /**
  * The question before «Удалить предмет»: a modal dialog (native <dialog>, so the page behind it is inert and Tab stays
  * inside) with the warning, «Отмена» (it takes the focus, never the red button) and «Удалить». While the call runs both

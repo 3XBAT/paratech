@@ -1,7 +1,7 @@
 // Parts of «База знаний» (TASK-091) that only show what the core sent: subjects, lessons, search hits and the
 // subject/kind form. Titles, subjects and snippets are imported, typed or model text: React text nodes only, no HTML;
 // the match of a snippet is marked with <mark> around a text node.
-import { useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 // The .js extensions let the Node test runner load the compiled modules (test/knowledge.test.mjs renders these parts).
 import type {
   KnowledgeHit,
@@ -74,31 +74,44 @@ export function LessonList(props: {
   onOpen: (l: KnowledgeLesson) => void;
   /** Shown in «Без предмета»: opens the lesson with the subject form. */
   onEdit?: (l: KnowledgeLesson) => void;
+  /** Marks at the end of a row's first line (a status chip, «новое»): spans only, they sit inside the row button. null: none. */
+  extra?: (l: KnowledgeLesson) => ReactNode;
 }) {
   const onEdit = props.onEdit;
   return (
     <ul className="card kb-list" aria-label="Пары">
-      {props.lessons.map((l) => (
-        <li key={l.key} className="kb-lesson">
-          <button type="button" className="kb-item" onClick={() => props.onOpen(l)}>
-            <span className="kb-name">{lectureLabel(l)}</span>
-            {isNoteOnly(l) ? (
-              <span>
-                <StatusChip kind="neutral" icon="doc">
-                  {noteLectureTexts.ownChip}
-                </StatusChip>
-              </span>
-            ) : (
-              <ReadyMarks lesson={l} />
+      {props.lessons.map((l) => {
+        const extra = props.extra?.(l) ?? null;
+        const name = <span className="kb-name">{lectureLabel(l)}</span>;
+        return (
+          <li key={l.key} className="kb-lesson">
+            <button type="button" className="kb-item" onClick={() => props.onOpen(l)}>
+              {extra === null ? (
+                name
+              ) : (
+                <span className="kb-line">
+                  {name}
+                  {extra}
+                </span>
+              )}
+              {isNoteOnly(l) ? (
+                <span>
+                  <StatusChip kind="neutral" icon="doc">
+                    {noteLectureTexts.ownChip}
+                  </StatusChip>
+                </span>
+              ) : (
+                <ReadyMarks lesson={l} />
+              )}
+            </button>
+            {onEdit && !isNoteOnly(l) && (
+              <Button variant="ghost" onClick={() => onEdit(l)}>
+                Указать предмет
+              </Button>
             )}
-          </button>
-          {onEdit && !isNoteOnly(l) && (
-            <Button variant="ghost" onClick={() => onEdit(l)}>
-              Указать предмет
-            </Button>
-          )}
-        </li>
-      ))}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -114,9 +127,19 @@ export function AddPastNote(props: {
   onChoose: (c: PastChoice) => void;
   /** Today as "YYYY-MM-DD"; the page's clock in the app, a fixed day in tests. */
   today?: string;
+  /** The page may own the open state (one form open at a time); without it the block keeps its own. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Set while the page cannot switch forms (a running import): the button is off and says this. */
+  busyReason?: string;
 }) {
   const known = props.subject.subjectId !== "";
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = props.open ?? ownOpen;
+  const setOpen = (next: boolean) => {
+    setOwnOpen(next);
+    props.onOpenChange?.(next);
+  };
   const [lessonKey, setLessonKey] = useState("");
   const [date, setDate] = useState("");
   const [dateError, setDateError] = useState("");
@@ -140,9 +163,9 @@ export function AddPastNote(props: {
       <Button
         icon="plus"
         aria-expanded={open}
-        disabled={!known}
-        disabledReason={known ? undefined : hint}
-        onClick={() => setOpen((o) => !o)}
+        disabled={!known || props.busyReason !== undefined}
+        disabledReason={known ? props.busyReason : hint}
+        onClick={() => setOpen(!open)}
       >
         {t.addPast}
       </Button>

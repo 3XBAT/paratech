@@ -7778,7 +7778,7 @@
             "dependencies": [
                 "TASK-352"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-354",

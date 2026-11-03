@@ -8,6 +8,8 @@ export interface RowMenuItem<K extends string> {
   disabled?: boolean;
   /** Why a disabled item is off, shown under it. */
   hint?: string;
+  /** The tooltip of the item: what it does, when the label alone does not say. */
+  title?: string;
 }
 
 // The «⋯» menu of a row: Enter/Space or ArrowDown opens it, arrows move, Escape closes it and focuses the button again,
@@ -139,6 +141,7 @@ function MenuEntry<K extends string>(props: { item: RowMenuItem<K>; onPick: () =
         className="mmenu-item"
         tabIndex={-1}
         disabled={i.disabled}
+        title={i.title}
         aria-describedby={hint ? hintId : undefined}
         onClick={props.onPick}
       >

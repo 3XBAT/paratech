@@ -51,8 +51,9 @@ const html = (el) => renderToStaticMarkup(el);
 
 test("the route has the lesson and its tab, empty everywhere else", () => {
   // TASK-352: the summary and transcript overlays are gone, the lesson is the one screen over a page.
-  assert.deepEqual(initialRoute, { page: "today", assignment: "", subject: "", lesson: "", tab: "" });
-  assert.deepEqual(Object.keys(routeToPage("journal")).sort(), ["assignment", "lesson", "page", "subject", "tab"]);
+  // TASK-353: the tab of the subject page joined the route.
+  assert.deepEqual(initialRoute, { page: "today", assignment: "", subject: "", lesson: "", tab: "", subjectTab: "" });
+  assert.deepEqual(Object.keys(routeToPage("journal")).sort(), ["assignment", "lesson", "page", "subject", "subjectTab", "tab"]);
 });
 
 test("a lesson opens over the current page: the page under it stays as it was left", () => {

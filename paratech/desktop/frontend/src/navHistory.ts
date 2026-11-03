@@ -19,7 +19,7 @@ export function currentRoute(h: NavHistory): Route {
   return h.entries[h.index];
 }
 
-/** The same place; the tab of a lesson is not part of it (switching tabs is not a step of the history). */
+/** The same place; the tab of a lesson and the tab of a subject are not part of it (switching tabs is not a step of the history). */
 export function sameRoute(a: Route, b: Route): boolean {
   return (
     a.page === b.page &&
@@ -31,13 +31,13 @@ export function sameRoute(a: Route, b: Route): boolean {
 
 /**
  * A new place: forward entries are cut off; the same place as the current one adds nothing. Another tab of the open
- * lesson replaces the tab of the current entry, so «Назад» leaves the lesson whatever tabs were visited and «Вперёд»
- * returns to the tab last used.
+ * lesson (or of the subject page) replaces the tab of the current entry, so «Назад» leaves the lesson whatever tabs were
+ * visited and «Вперёд» returns to the tab last used; «Назад» from a lesson opened on a subject's tab lands on that tab.
  */
 export function pushRoute(h: NavHistory, r: Route): NavHistory {
   const now = currentRoute(h);
   if (sameRoute(now, r)) {
-    if (now.tab === r.tab) {
+    if (now.tab === r.tab && now.subjectTab === r.subjectTab) {
       return h;
     }
     const entries = h.entries.slice();

@@ -77,13 +77,13 @@ test("the view «Входящие» has no heading of its own (the head names it
 });
 
 test("«Добавить файл» in the head: the tooltip says where the file goes, in «Входящие» and in a subject", () => {
-  const head = (addTip) => html(h(LibraryActions, { onOpen: noop, onAddFile: noop, addTip, busy: false }));
+  const head = (addTip) => html(h(LibraryActions, { onAddFile: noop, addTip, busy: false }));
   assert.match(head(fileTexts.addToInboxTip), /<button[^>]*title="Файл попадёт во «Входящие»"[^>]*>(<svg.*?<\/svg>)?Добавить файл<\/button>/);
   assert.match(head(fileTexts.addToMaterialsTip), /title="Файл попадёт в «Материалы»"/);
+  // TASK-353: «База знаний» moved to the tree and «Билеты» to the head of a subject; the head of files holds only the add button.
   const out = head(fileTexts.addToInboxTip);
-  assert.match(out, />База знаний</);
-  assert.match(out, />Билеты</);
-  assert.match(html(h(LibraryActions, { onOpen: noop, onAddFile: noop, addTip: "", busy: true })), /<button[^>]*disabled=""[^>]*>(<svg.*?<\/svg>)?Добавить файл/, "off while a call runs");
+  assert.doesNotMatch(out, /База знаний|Билеты/);
+  assert.match(html(h(LibraryActions, { onAddFile: noop, addTip: "", busy: true })), /<button[^>]*disabled=""[^>]*>(<svg.*?<\/svg>)?Добавить файл/, "off while a call runs");
 });
 
 test("Esc in the panel steps back out of the «Новый предмет…» form and closes the panel only otherwise", () => {

@@ -656,6 +656,18 @@ dialog.dialog:focus { outline: none; }
 .kb-snippet { overflow-wrap: anywhere; }
 .kb-snippet mark { border-radius: var(--r-xs); background: var(--wait-b); color: var(--wait-t); }
 .kb-tabs { margin: 0 0 16px; }
+/* The tabs of the page of a subject (TASK-353): the actions of a tab sit above its content, «⋯» at the right edge; the
+   form of «Добавить конспект прошедшей пары» opens as a full row under them. */
+.tab-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; }
+.tab-acts .mmenu { margin-left: auto; }
+.tab-acts .kb-past { display: contents; }
+.tab-acts .kb-form { order: 9; flex: 1 0 100%; }
+/* A stable box under the bar: the undecided tab and the loaded one do not make the page jump. */
+.tab-panel { min-height: 160px; }
+/* The first line of a lesson row: the title and, at the end, «новое» and the status chip. */
+.kb-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.kb-line .kb-name { flex: 1; min-width: 0; }
+.kb-line .chip, .kb-line .fresh { flex: none; }
 /* TASK-351: the lesson as one screen. The tools of the summary sit above it, their «⋯» menu opens to the right; a lesson
    that cannot be shown says why and offers the way out. */
 .sm-tools { margin: 0 0 16px; }

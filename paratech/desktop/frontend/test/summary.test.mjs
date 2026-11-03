@@ -245,10 +245,10 @@ test("the state of each step is the core's text, with its error, and stays visib
 test("the summary is the tab of the lesson over the current section, and jumps to an assignment", () => {
   // TASK-352: the summary overlay route is replaced by the lesson route with the tab «Конспект».
   const s = routeToLesson(routeToPage("homework"), "recording:r1", "summary");
-  assert.deepEqual(s, { page: "homework", assignment: "", subject: "", lesson: "recording:r1", tab: "summary" });
+  assert.deepEqual(s, { page: "homework", assignment: "", subject: "", lesson: "recording:r1", tab: "summary", subjectTab: "" });
   assert.deepEqual(routeToLesson(s, "recording:r1", "transcript"), { ...s, tab: "transcript" });
-  assert.deepEqual(closeLesson(s), { page: "homework", assignment: "", subject: "", lesson: "", tab: "" });
-  assert.deepEqual(routeToAssignment("a1"), { page: "homework", assignment: "a1", subject: "", lesson: "", tab: "" });
+  assert.deepEqual(closeLesson(s), { page: "homework", assignment: "", subject: "", lesson: "", tab: "", subjectTab: "" });
+  assert.deepEqual(routeToAssignment("a1"), { page: "homework", assignment: "a1", subject: "", lesson: "", tab: "", subjectTab: "" });
   assert.equal(routeToPage("homework").assignment, "", "a rail click shows the list");
 });
 

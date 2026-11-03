@@ -53,7 +53,8 @@ import {
 import { initialState, reduce, splitSkipped, subjectsChanged } from "../.test-build/scheduleSubjectsView.js";
 import { ReviewView } from "../.test-build/pages/ScheduleSubjectsReview.js";
 import { NameForm } from "../.test-build/pages/NameForm.js";
-import { RemoveSubjectButton, RemoveSubjectDialog, RemovedNameLine, RestoreRow } from "../.test-build/pages/SubjectRemoval.js";
+import { RemoveSubjectDialog, RemovedNameLine, RestoreRow } from "../.test-build/pages/SubjectRemoval.js";
+import { SubjectHead } from "../.test-build/pages/SubjectHead.js";
 
 const html = (el) => renderToStaticMarkup(el);
 const noop = () => undefined;
@@ -598,10 +599,17 @@ test("the dialog is a labelled modal dialog with the warning, a status line and 
   assert.doesNotMatch(out, /<p class="small muted" role="status"/);
 });
 
-test("«Удалить предмет» in the head is a secondary button, not the accent one", () => {
-  const out = html(h(RemoveSubjectButton, { disabled: false, onClick: noop }));
-  assert.match(out, /class="btn"[^>]*>Удалить предмет</);
-  assert.doesNotMatch(out, /ghost|primary|danger/);
+// TASK-353: «Удалить предмет» left the visible buttons of the head; it is the one item of the «⋯» menu there. The menu
+// button is the opener the question returns the focus to.
+test("«Удалить предмет» is the item of the head's «⋯» menu, not a button next to the useful ones", () => {
+  const head = html(h(SubjectHead, { subject: { id: "s1", name: "Физика", aliases: [], semester: "", semesterLabel: "" }, schedule: "", busy: false, onTickets: noop, onRemove: noop }));
+  assert.doesNotMatch(head, />Удалить предмет</, "the menu is closed: no red or plain button in the row");
+  assert.match(head, /aria-label="Ещё действия с предметом"[^>]*aria-haspopup="menu"/);
+  assert.match(head, />Билеты к экзамену</);
+  assert.equal(removalTexts.action, "Удалить предмет");
+  const headSrc = src("pages/SubjectHead.tsx");
+  assert.match(headSrc, /key: "remove", label: removalTexts\.action, disabled: props\.busy/);
+  assert.match(headSrc, /onPick=\{\(\) => props\.onRemove\(box\.current\?\.querySelector<HTMLElement>\("\.mmenu-btn"\) \?\? null\)\}/);
 });
 
 test("a subject name is a text node, never markup", () => {
@@ -659,16 +667,15 @@ test("source: the dialog is a native modal (focus trap, inert page), Esc is «О
 
 test("source: the page asks before it deletes and sends the shown version; the line is state of the page", () => {
   const page = src("pages/SubjectsPage.tsx");
-  assert.match(page, /<RemoveSubjectButton disabled=\{busy\} onClick=\{\(opener\) => removal\.open\(subject, opener\)\} \/>/);
+  assert.match(page, /onRemove=\{\(opener\) => removal\.open\(subject, opener\)\}/);
   assert.match(page, /<RemoveSubjectDialog/);
   assert.match(page, /removal\.removed\.map/);
   assert.match(page, /removal\.settled\(r, call\)/);
   assert.match(page, /\{removalBlock\}/);
   // The subject leaves for the home subject through a click-like selection, not a redirect effect.
   assert.match(page, /props\.onSelect\(homeSubjectId\(rest, ""\)\)/);
-  // The button is quiet: a secondary button with the words of the glossary, red only in the dialog.
-  const parts = src("pages/SubjectRemoval.tsx");
-  assert.match(parts, /<Button variant="secondary"[\s\S]{0,120}\{removalTexts\.action\}/);
+  // The action is quiet: a menu item with the words of the glossary, red only in the dialog.
+  assert.doesNotMatch(src("pages/SubjectRemoval.tsx"), /RemoveSubjectButton/);
   assert.equal(removalTexts.action, "Удалить предмет");
   const hook = src("pages/useSubjectRemoval.ts");
   // The version sent is the one of the state that was read again when the dialog opened, never the page's copy.

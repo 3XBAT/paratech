@@ -7,17 +7,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { libraryApi, methods, parseOverview, parseLesson, parseSlot, parseDeadline } from "../.test-build/bindings/library.js";
 import {
   daysChip,
-  durationText,
   freshMarks,
-  lessonChip,
-  lessonMeta,
-  lessonTitle,
   scheduleLine,
   SubjectOverviewFlow,
   texts,
   weekdayShort,
 } from "../.test-build/libraryView.js";
-import { OverviewSections, SubjectDetail, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
+import { SubjectDetail, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
 import { parseWork } from "../.test-build/bindings/turnkey.js";
 import { triageReason, turnkeyTexts } from "../.test-build/turnkeyView.js";
 import { sendWorkTexts, sentNote, initialSendWork } from "../.test-build/sendWorkView.js";
@@ -38,6 +34,7 @@ const lesson = (over = {}) => ({
 const overview = (over = {}) => ({
   subjectId: "s1", name: "Линейная алгебра", openedAt: "2026-10-20T08:00:00Z",
   deadlines: [{ assignmentId: "a1", title: "Задачи 3, 5, 8", due: "2026-10-27T12:00:00Z", daysLeft: 6 }],
+  assignments: [{ assignmentId: "a1", title: "Задачи 3, 5, 8", due: "2026-10-27T12:00:00Z", daysLeft: 6 }],
   schedule: [{ kind: "lecture", weekday: 2, start: "10:30", end: "12:00" }, { kind: "seminar", weekday: 1, start: "12:10", end: "13:40" }],
   lessons: [lesson()],
   newMaterials: [{ materialId: "m1", folderId: "f1" }],
@@ -50,10 +47,10 @@ test("the overview binding is called by name and parsed strictly", async () => {
   const calls = [];
   const api = libraryApi(async (method, ...args) => {
     calls.push([method, ...args]);
-    return method === methods.subjectOverview ? overview({ deadlines: null, lessons: null }) : null;
+    return method === methods.subjectOverview ? overview({ deadlines: null, lessons: null, assignments: null }) : null;
   });
   const o = await api.subjectOverview("s1");
-  assert.deepEqual([o.deadlines, o.lessons], [[], []]);
+  assert.deepEqual([o.deadlines, o.lessons, o.assignments], [[], [], []]);
   await api.markSubjectOpened("s1");
   assert.deepEqual(calls, [[methods.subjectOverview, "s1"], [methods.markSubjectOpened, "s1"]]);
 });
@@ -82,20 +79,6 @@ test("the schedule line, weekdays, day chips and lesson texts", () => {
   assert.equal(daysChip(21).label, "21 день");
   assert.equal(daysChip(12).label, "12 дней");
   assert.equal(daysChip(-1).label, "просрочено");
-  assert.equal(durationText(5412), "1:30:12");
-  assert.equal(durationText(125), "2:05");
-  assert.equal(durationText(0), "");
-});
-
-test("a lesson without a title is named by its date; the status chips are short Russian words", () => {
-  assert.equal(lessonTitle(lesson({ title: "Смена базиса" })), "Смена базиса");
-  assert.match(lessonTitle(lesson({ title: "" })), /^Пара \d\d\.\d\d$/);
-  assert.match(lessonMeta(lesson()), /\d\d\.\d\d · 1:30:12$/);
-  assert.equal(lessonMeta(lesson({ durationSeconds: 0 })).includes("·"), false);
-  assert.deepEqual(
-    ["recorded", "transcribed", "summaryReady", "failed"].map((s) => lessonChip(s).label),
-    ["Записано", "Расшифровано", "Конспект готов", "Ошибка"],
-  );
 });
 
 test("fresh marks collect folders and materials of the visit", () => {
@@ -172,24 +155,7 @@ test("a closed or superseded opening neither shows nor marks", async () => {
 
 // ---- rendering ----
 
-test("«Ближайшее» and the lessons render with chips and «новое»; titles are text nodes", () => {
-  const o = overview({
-    deadlines: [{ assignmentId: "a1", title: evil, due: "2026-10-27T12:00:00Z", daysLeft: 0 }],
-    lessons: [lesson({ title: evil, summaryNew: true }), lesson({ recordingId: "r2", title: "", status: "failed" })],
-  });
-  const out = html(h(OverviewSections, { overview: o }));
-  assert.ok(out.includes(texts.upcoming));
-  assert.ok(out.includes(evilEscaped));
-  assert.ok(!out.includes("<b>x</b>"));
-  assert.ok(out.includes("сегодня"));
-  assert.ok(out.includes("Конспект готов"));
-  assert.ok(out.includes("Ошибка"));
-  assert.equal(out.split(">новое<").length - 1, 1);
-});
-
-test("empty sections are omitted", () => {
-  assert.equal(html(h(OverviewSections, { overview: overview({ deadlines: [], lessons: [] }) })), "");
-});
+// TASK-353: «Ближайшее» and the lessons of the overview are the tabs «Задания» and «Пары» now (subjectTabs353.test.mjs).
 
 test("folders and files of the visit carry «новое»; without marks the old page is unchanged", () => {
   const subject = { id: "s1", name: "Алгебра", aliases: [], semester: "2026-autumn", semesterLabel: "Осень 2026", folders: [{ id: "f1", name: "Лекции", system: "lectures" }, { id: "f2", name: "Семинары", system: "seminars" }] };

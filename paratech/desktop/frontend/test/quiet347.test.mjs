@@ -7,7 +7,8 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { foldEmptyFolders, inFolderText, texts } from "../.test-build/libraryView.js";
 import { initialListState, stateOf } from "../.test-build/listView.js";
-import { OverviewSections, SubjectDetail } from "../.test-build/pages/SubjectsParts.js";
+import { SubjectDetail } from "../.test-build/pages/SubjectsParts.js";
+import { SubjectTasksTab } from "../.test-build/pages/SubjectTasksTab.js";
 import {
   backgroundCount,
   backgroundFailedText,
@@ -263,20 +264,26 @@ test("a folder name stays a text node in the line", () => {
 });
 
 const overview = {
-  subjectId: "s1", name: "Матанализ", openedAt: "", schedule: [], lessons: [], newMaterials: [],
-  deadlines: [
+  subjectId: "s1", name: "Матанализ", openedAt: "", schedule: [], lessons: [], newMaterials: [], deadlines: [],
+  assignments: [
     { assignmentId: "a1", title: "Задачи 3, 5", due: "2026-10-27T12:00:00Z", daysLeft: 6 },
     { assignmentId: "a2", title: "Эссе", due: "2026-10-29T12:00:00Z", daysLeft: 8 },
   ],
 };
+const ready = { status: "ready", overview, error: "" };
+const tasksTab = (props) =>
+  h(SubjectTasksTab, { subjectId: "s1", state: ready, onRetry: noop, onCreated: noop, api: {}, library: {}, ...props });
 
-test("«Ближайшее» rows are whole-row buttons that open their assignment", () => {
-  const out = html(h(OverviewSections, { overview, onOpenAssignment: noop }));
-  assert.equal((out.match(/<button type="button" class="lrow drow drow-open"/g) ?? []).length, 2);
+// TASK-353: the rows of «Ближайшее» became the rows of the tab «Задания» (same row look, all open assignments).
+test("the rows of «Задания» are whole-row buttons that open their assignment", () => {
+  const out = html(tasksTab({ onOpenAssignment: noop }));
+  assert.equal((out.match(/<button type="button" id="task-open-a\d" class="lrow drow drow-open"/g) ?? []).length, 2);
   assert.equal((out.match(/role="listitem"/g) ?? []).length, 2, "the list items stay");
   assert.ok(out.includes("Задачи 3, 5") && out.includes("Эссе"));
   // A button holds phrasing content only: the body of the row is spans (blocks again by CSS), no div or p inside.
-  for (const button of out.match(/<button[^>]*>[^]*?<\/button>/g) ?? []) {
+  const rows = (out.match(/<button[^>]*drow-open[^>]*>[^]*?<\/button>/g) ?? []);
+  assert.equal(rows.length, 2);
+  for (const button of rows) {
     assert.doesNotMatch(button, /<(div|p|h[1-6]|ul|li)[\s>]/, button);
     assert.match(button, /<span class="d num">[^]*?<span class="tx"><span class="t">/);
   }
@@ -284,12 +291,13 @@ test("«Ближайшее» rows are whole-row buttons that open their assignme
   assert.match(src("../src/styles.css"), /\.drow \.tx, \.drow \.t, \.drow \.meta \{ display: block; \}/);
   assert.match(out, new RegExp(`title="${texts.openAssignment}"`));
   // Without the handler the rows only show.
-  const plain = html(h(OverviewSections, { overview }));
-  assert.doesNotMatch(plain, /<button/);
+  const plain = html(tasksTab({}));
+  assert.doesNotMatch(plain, /drow-open/);
+  assert.equal((plain.match(/<button/g) ?? []).length, 1, "only «Добавить задание» without the opener");
 
   const page = src("../src/pages/SubjectsPage.tsx");
   assert.match(page, /onOpenAssignment\?: \(assignmentId: string\) => void;/);
-  assert.match(page, /<OverviewSections overview=\{overview\} onOpenAssignment=\{props\.onOpenAssignment\} onOpenLesson=\{props\.onOpenLesson\} \/>/);
+  assert.match(page, /onOpenAssignment=\{props\.onOpenAssignment\}/);
   const app = src("../src/App.tsx");
   assert.match(app, /onSelect=\{props\.onSelectSubject\}\s+onOpenAssignment=\{props\.onOpenAssignment\}/);
 

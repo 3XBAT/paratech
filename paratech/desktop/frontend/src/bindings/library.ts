@@ -431,6 +431,19 @@ export interface SubjectDeadline {
   daysLeft: number;
 }
 
+/**
+ * An open assignment of the subject (the tab «Задания»), in the core's order: dated ones by deadline (overdue first),
+ * undated last. title is the student's or the model's text: a text node only.
+ */
+export interface SubjectAssignment {
+  assignmentId: string;
+  title: string;
+  /** RFC 3339, "" for no deadline. */
+  due: string;
+  /** Calendar days from today (negative: overdue); meaningful only with `due`. */
+  daysLeft: number;
+}
+
 /** A weekly place of the subject's lessons in the schedule; weekday 1 (Monday) to 7 (Sunday), times "HH:MM". */
 export interface SubjectSlot {
   kind: string;
@@ -465,6 +478,8 @@ export interface SubjectOverview {
   name: string;
   openedAt: string;
   deadlines: SubjectDeadline[];
+  /** Every open assignment of the subject (the tab «Задания»). */
+  assignments: SubjectAssignment[];
   schedule: SubjectSlot[];
   lessons: SubjectLesson[];
   newMaterials: SubjectNewMaterial[];
@@ -488,6 +503,16 @@ function bool(r: Record<string, unknown>, key: string, what: string): boolean {
 
 export function parseDeadline(raw: unknown): SubjectDeadline {
   const w = "deadline";
+  const r = record(raw, w);
+  const days = r.daysLeft;
+  if (typeof days !== "number" || !Number.isInteger(days)) {
+    throw new Error(`${w}: daysLeft is not an integer`);
+  }
+  return { assignmentId: str(r, "assignmentId", w), title: str(r, "title", w), due: str(r, "due", w), daysLeft: days };
+}
+
+export function parseAssignment(raw: unknown): SubjectAssignment {
+  const w = "assignment";
   const r = record(raw, w);
   const days = r.daysLeft;
   if (typeof days !== "number" || !Number.isInteger(days)) {
@@ -539,6 +564,7 @@ export function parseOverview(raw: unknown): SubjectOverview {
     name: str(r, "name", w),
     openedAt: optStr(r, "openedAt"),
     deadlines: list(r.deadlines, w, parseDeadline),
+    assignments: list(r.assignments, w, parseAssignment),
     schedule: list(r.schedule, w, parseSlot),
     lessons: list(r.lessons, w, parseLesson),
     newMaterials: list(r.newMaterials, w, parseNewMaterial),

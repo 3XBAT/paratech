@@ -48,6 +48,32 @@ func Nearest(ds []Deadline, now time.Time) []Deadline {
 	return out
 }
 
+// Open returns every given deadline (they are open assignments already) for the tab «Задания»: dated ones first by
+// Due, passed ones included, with DaysLeft set (negative: overdue); undated ones last with DaysLeft 0; ties by id. No
+// cap: the upstream list is already bounded.
+func Open(ds []Deadline, now time.Time) []Deadline {
+	out := make([]Deadline, 0, len(ds))
+	for _, d := range ds {
+		d.DaysLeft = 0
+		if !d.Due.IsZero() {
+			d.DaysLeft = daysFrom(now, d.Due)
+		}
+		out = append(out, d)
+	}
+	slices.SortFunc(out, func(a, b Deadline) int {
+		return cmp.Or(cmp.Compare(boolInt(a.Due.IsZero()), boolInt(b.Due.IsZero())), a.Due.Compare(b.Due),
+			cmp.Compare(a.Assignment, b.Assignment))
+	})
+	return out
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 // daysFrom returns the calendar days from the day of now to the day of t, both read in now's location.
 func daysFrom(now, t time.Time) int {
 	day := func(x time.Time) time.Time {

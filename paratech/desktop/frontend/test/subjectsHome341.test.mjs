@@ -306,12 +306,12 @@ test("a failed «Входящие» is not drawn as an empty one; the files of a
   assert.doesNotMatch(detail({ materials: [] }), /В этой папке пока нет файлов|· 0 файлов/);
 });
 
-test("the head of the library without subjects has no «База знаний» and «Билеты» (both are empty there)", () => {
-  const head = (props) => html(h(LibraryActions, { onOpen: noop, onAddFile: noop, addTip: "", busy: false, ...props }));
-  assert.match(head({}), /База знаний/);
-  assert.match(head({}), /Билеты/);
-  assert.doesNotMatch(head({ links: false }), /База знаний|Билеты/);
-  assert.match(head({ links: false }), /Добавить файл/);
+test("the heads of «Входящие» and of the library without subjects hold «Добавить файл» only (TASK-353: no «База знаний», no «Билеты»)", () => {
+  const head = (props) => html(h(LibraryActions, { onAddFile: noop, addTip: "", busy: false, ...props }));
+  assert.doesNotMatch(head({}), /База знаний|Билеты/);
+  assert.match(head({}), /Добавить файл/);
+  const page = src("pages/SubjectsPage.tsx");
+  assert.doesNotMatch(page, /links=\{false\}|onOpen=\{props\.onOpen\} onAddFile/);
 });
 
 // ---- the page and the window (source checks: no DOM harness) ----
@@ -328,8 +328,10 @@ test("the page shows the tree for any route with subjects and the tiles only for
 
 test("the empty screen has «Добавить предмет» of EmptySubjects only: no «Предмет» button and no library links in its head", () => {
   const page = src("pages/SubjectsPage.tsx");
-  assert.match(page, /busy=\{busy\} links=\{false\} \/>/);
-  assert.doesNotMatch(page, /addSubjectVariant|<Button/);
+  const tilesHead = page.slice(page.indexOf("const tilesHead"), page.indexOf("const tilesBody"));
+  assert.match(tilesHead, /<LibraryActions onAddFile=\{\(\) => void addFile\(\)\} addTip=\{fileTexts\.addToInboxTip\} busy=\{busy\} \/>/);
+  assert.doesNotMatch(tilesHead, /<Button|onOpen/);
+  assert.doesNotMatch(page, /addSubjectVariant/);
 });
 
 test("the schedule review keeps its state when the first subjects are made: one return, the same slot in both views", () => {
@@ -386,9 +388,9 @@ test("the page remembers the shown subject, opens «Входящие» by the ro
   assert.doesNotMatch(page, /inboxScroll|scrollToInbox/);
 });
 
-test("«Добавить файл» in the head of a subject puts the file into that subject, in «Входящие» into the inbox", () => {
+test("«Добавить файл» in the tab «Файлы» of a subject puts the file into that subject (TASK-353: it left the head), in «Входящие» into the inbox", () => {
   const page = src("pages/SubjectsPage.tsx");
-  assert.match(page, /onAddFile=\{\(\) => void addFileTo\(""\)\} addTip=\{fileTexts\.addToMaterialsTip\}/);
+  assert.match(page, /<Button id=\{addFileId\} variant="primary" icon="up" disabled=\{busy\} title=\{fileTexts\.addToMaterialsTip\} onClick=\{\(\) => void addFileTo\(""\)\}>/);
   assert.match(page, /onAddFile=\{\(\) => void addFile\(\)\} addTip=\{fileTexts\.addToInboxTip\}/);
   assert.match(page, /addFileInto\(inboxApi, shownId, folderId, subjects \?\? \[\]\)/);
 });

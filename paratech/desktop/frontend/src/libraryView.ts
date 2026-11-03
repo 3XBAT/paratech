@@ -1,24 +1,11 @@
 // View logic of «Предметы»: semesters, folders and file lines. Pure, no React. Names are typed or imported text and are
 // passed through untouched (the page renders them as text nodes).
 
-import type {
-  LessonStatus,
-  LibraryApi,
-  LibraryFolder,
-  LibraryMaterial,
-  LibrarySubject,
-  SubjectLesson,
-  SubjectOverview,
-  SubjectSlot,
-} from "./bindings/library.js";
-import type { IconName } from "./ui/Icon.js";
+import type { LibraryApi, LibraryFolder, LibraryMaterial, LibrarySubject, SubjectOverview, SubjectSlot } from "./bindings/library.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 
 export const texts = {
-  upcoming: "Ближайшее",
   openAssignment: "Открыть задание",
-  openLesson: "Открыть пару",
-  lessons: "Пары",
   fresh: "новое",
   overviewFailed: "Не удалось загрузить сведения о предмете.",
   title: "Предметы",
@@ -243,49 +230,6 @@ export function daysChip(daysLeft: number): DaysChip {
   return { kind: "neutral", label: `${daysLeft} ${plural(daysLeft, "день", "дня", "дней")}` };
 }
 
-/** The title of a lesson row: its title, or the date when the recording has none. */
-export function lessonTitle(l: SubjectLesson): string {
-  if (l.title.trim() !== "") {
-    return l.title;
-  }
-  const day = dayMonth(l.startedAt);
-  return day === "" ? "Пара" : `Пара ${day}`;
-}
-
-/** «1:30:12» or «42:05»; "" for an unknown duration. */
-export function durationText(seconds: number): string {
-  if (seconds <= 0) {
-    return "";
-  }
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
-}
-
-/** «вт, 13.10 · 1:30:12». */
-export function lessonMeta(l: SubjectLesson): string {
-  const when = [weekdayOf(l.startedAt), dayMonth(l.startedAt)].filter((x) => x !== "");
-  return [when.join(", "), durationText(l.durationSeconds)].filter((x) => x !== "").join(" · ");
-}
-
-export interface LessonChip {
-  kind: ChipKind;
-  icon: IconName | null;
-  label: string;
-}
-
-const lessonChips: Readonly<Record<LessonStatus, LessonChip>> = {
-  recorded: { kind: "neutral", icon: "rec", label: "Записано" },
-  transcribed: { kind: "neutral", icon: "doc", label: "Расшифровано" },
-  summaryReady: { kind: "ok", icon: "ok", label: "Конспект готов" },
-  failed: { kind: "fail", icon: "warn", label: "Ошибка" },
-};
-
-export function lessonChip(status: LessonStatus): LessonChip {
-  return lessonChips[status];
-}
-
 /** The «новое» marks of one visit: folders holding fresh files, and those files. */
 export interface FreshMarks {
   folders: ReadonlySet<string>;
@@ -308,6 +252,8 @@ export interface OverviewState {
   status: "idle" | "loading" | "ready" | "failed";
   overview: SubjectOverview | null;
   error: string;
+  /** The last re-read after a change on the page failed: `overview` is the previous one, still shown. */
+  rereadFailed?: boolean;
 }
 
 export const idleOverview: OverviewState = { status: "idle", overview: null, error: "" };
@@ -319,6 +265,9 @@ export const idleOverview: OverviewState = { status: "idle", overview: null, err
  */
 export class SubjectOverviewFlow {
   private token = 0;
+  private refreshes = 0;
+  /** The overview of this opening, once read: a failed re-read keeps it. */
+  private loaded: SubjectOverview | null = null;
 
   constructor(
     private readonly api: Pick<LibraryApi, "subjectOverview" | "markSubjectOpened">,
@@ -327,12 +276,14 @@ export class SubjectOverviewFlow {
 
   open(subjectId: string): void {
     const mine = ++this.token;
+    this.loaded = null;
     this.onChange({ status: "loading", overview: null, error: "" });
     this.api.subjectOverview(subjectId).then(
       (overview) => {
         if (mine !== this.token) {
           return;
         }
+        this.loaded = overview;
         this.onChange({ status: "ready", overview, error: "" });
         void this.mark(subjectId);
       },
@@ -342,6 +293,42 @@ export class SubjectOverviewFlow {
         }
       },
     );
+  }
+
+  /**
+   * Reads the overview again after a change made on the page (an assignment added): no «Загрузка…», no new
+   * opening is recorded. A failed read keeps what is shown and says so (`rereadFailed`), so the change is never lost
+   * silently. A late reply of a superseded read never shows.
+   */
+  refresh(subjectId: string): void {
+    const mine = ++this.refreshes;
+    const opened = this.token;
+    this.api.subjectOverview(subjectId).then(
+      (overview) => {
+        if (mine === this.refreshes && opened === this.token) {
+          this.loaded = overview;
+          this.onChange({ status: "ready", overview, error: "" });
+        }
+      },
+      () => {
+        if (mine === this.refreshes && opened === this.token) {
+          this.onChange(
+            this.loaded === null
+              ? { status: "failed", overview: null, error: texts.overviewFailed }
+              : { status: "ready", overview: this.loaded, error: "", rereadFailed: true },
+          );
+        }
+      },
+    );
+  }
+
+  /** «Повторить»: a first reading when there is nothing yet (it failed), else the re-read that failed. */
+  retry(subjectId: string): void {
+    if (this.loaded === null) {
+      this.open(subjectId);
+    } else {
+      this.refresh(subjectId);
+    }
   }
 
   close(): void {

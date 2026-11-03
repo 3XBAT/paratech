@@ -84,7 +84,9 @@ func (s *Service) Overview(ctx context.Context, id shared.SubjectID) (Overview, 
 	if err != nil {
 		return fail(err)
 	}
-	out.Deadlines = overview.Nearest(deadlinesOf(deadlines, resolved, id), now)
+	own := deadlinesOf(deadlines, resolved, id)
+	out.Deadlines = overview.Nearest(own, now)
+	out.Assignments = overview.Open(own, now)
 	out.Schedule = overview.Slots(scheduledOf(scheduled, resolved, id), now.Location())
 
 	if out.Lessons, err = s.lessons(ctx, id, out.OpenedAt, now.Location()); err != nil {

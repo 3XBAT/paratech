@@ -32,6 +32,8 @@ export function RecordingImportPanel(props: {
   /** A recording was imported (or was already there): the page refreshes; the row is marked by the recording's origin. */
   onImported: (recordingId: string, existing: boolean) => void;
   onClose: () => void;
+  /** Tells the page while an import runs, so it does not unmount the panel (and lose the result) meanwhile. */
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const clock = props.now ?? Date.now;
   const subject = props.subject ?? "";
@@ -62,6 +64,13 @@ export function RecordingImportPanel(props: {
     };
     // The lessons are read once when the panel opens.
   }, []);
+
+  const { onBusyChange } = props;
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
+  // A panel that goes away is not busy for the page any more.
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
 
   const options = useMemo(() => pastLessonOptions(lessons ?? [], clock(), subject), [lessons, clock, subject]);
   // The first answer picks «Пара из расписания» when there is something to choose, unless the user already chose.

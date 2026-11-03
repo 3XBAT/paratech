@@ -43,6 +43,11 @@ func TestSubjectOverviewDTO(t *testing.T) {
 		Deadlines: []overview.Deadline{
 			{Assignment: "a1", Title: "Задачи 3, 5, 8", Due: time.Date(2026, 10, 27, 10, 30, 0, 0, msk), DaysLeft: 6},
 		},
+		Assignments: []overview.Deadline{
+			{Assignment: "a0", Title: "Прошло", Due: time.Date(2026, 10, 19, 10, 30, 0, 0, msk), DaysLeft: -2},
+			{Assignment: "a1", Title: "Задачи 3, 5, 8", Due: time.Date(2026, 10, 27, 10, 30, 0, 0, msk), DaysLeft: 6},
+			{Assignment: "a2", Title: "Без срока"},
+		},
 		Schedule: []overview.Slot{
 			{Kind: "seminar", Weekday: time.Monday, StartMinute: 12*60 + 10, EndMinute: 13*60 + 40},
 			{Kind: "lab", Weekday: time.Sunday, StartMinute: 9 * 60, EndMinute: 10*60 + 5},
@@ -62,6 +67,11 @@ func TestSubjectOverviewDTO(t *testing.T) {
 	want := SubjectOverview{
 		SubjectID: "s1", Name: "Линейная алгебра", OpenedAt: "2026-10-20T06:00:00Z",
 		Deadlines: []SubjectDeadline{{AssignmentID: "a1", Title: "Задачи 3, 5, 8", Due: "2026-10-27T07:30:00Z", DaysLeft: 6}},
+		Assignments: []SubjectAssignment{
+			{AssignmentID: "a0", Title: "Прошло", Due: "2026-10-19T07:30:00Z", DaysLeft: -2},
+			{AssignmentID: "a1", Title: "Задачи 3, 5, 8", Due: "2026-10-27T07:30:00Z", DaysLeft: 6},
+			{AssignmentID: "a2", Title: "Без срока", Due: ""},
+		},
 		Schedule: []SubjectSlot{
 			{Kind: "seminar", Weekday: 1, Start: "12:10", End: "13:40"},
 			{Kind: "lab", Weekday: 7, Start: "09:00", End: "10:05"},
@@ -83,7 +93,8 @@ func TestSubjectOverviewDTO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"subjectId"`, `"openedAt"`, `"deadlines"`, `"daysLeft"`, `"schedule"`, `"weekday"`,
+	for _, key := range []string{`"subjectId"`, `"openedAt"`, `"deadlines"`, `"daysLeft"`, `"assignments"`, `"due":""`,
+		`"daysLeft":-2`, `"schedule"`, `"weekday"`,
 		`"lessons"`, `"durationSeconds"`, `"summaryNew"`, `"newMaterials"`, `"folderId"`} {
 		if !strings.Contains(string(raw), key) {
 			t.Errorf("JSON lacks %s: %s", key, raw)
@@ -105,8 +116,8 @@ func TestSubjectOverviewEmptyListsAreArrays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), "null") {
-		t.Fatalf("JSON has null: %s", raw)
+	if strings.Contains(string(raw), "null") || !strings.Contains(string(raw), `"assignments":[]`) {
+		t.Fatalf("JSON has null or no assignments array: %s", raw)
 	}
 	if got.OpenedAt != "" {
 		t.Fatalf("openedAt = %q, want \"\" for a page never opened", got.OpenedAt)

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { KnowledgeLesson } from "../bindings/knowledgeBase.js";
 import {
   type LibraryMaterial,
   type LibrarySubject,
@@ -23,7 +24,6 @@ import {
   type OverviewState,
   scheduleLine,
   SubjectOverviewFlow,
-  subjectSubLine,
   texts,
 } from "../libraryView.js";
 import type { PageId } from "../nav.js";
@@ -45,7 +45,9 @@ import {
   viewKey,
 } from "../subjectsHome.js";
 import { removedLineText, restoreNeedsReload, runRestore } from "../subjectRemovalView.js";
+import { addFileId, folderAddId, type SubjectTab } from "../subjectTabsView.js";
 import { idleTeacher, TeacherFlow, type TeacherFocus, type TeacherState, teacherFocusStep, teacherStateFor } from "../teachersView.js";
+import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { AddFileLines, ErrorLine, UndoLines } from "./FileRows.js";
 import {
@@ -57,9 +59,13 @@ import {
   scheduleReviewApi,
   useKeptUndo,
 } from "./ScheduleSubjectsReview.js";
-import { RemovedNameLine, RemoveSubjectButton, RemoveSubjectDialog, RestoreRow } from "./SubjectRemoval.js";
-import { EmptySubjects, InboxList, LibraryActions, NameForm, OverviewSections, SubjectDetail, SubjectTree } from "./SubjectsParts.js";
+import { RemovedNameLine, RemoveSubjectDialog, RestoreRow } from "./SubjectRemoval.js";
+import { type LessonOpening } from "./SubjectPairsTab.js";
+import { SubjectHead } from "./SubjectHead.js";
+import { EmptySubjects, InboxList, LibraryActions, NameForm, SubjectDetail, SubjectTree } from "./SubjectsParts.js";
+import { SubjectTabs } from "./SubjectTabs.js";
 import { type TeacherActions, TeachersBlock } from "./TeachersBlock.js";
+import { useFocusBack } from "./useFocusBack.js";
 import { useMaterialActions } from "./useMaterialActions.js";
 import { useSubjectRemoval } from "./useSubjectRemoval.js";
 
@@ -101,10 +107,17 @@ export function SubjectsPage(props: {
   /** The route's choice: "" for none, inboxRoute for «Входящие», else a subject id; and the way to choose another. */
   subjectId: string;
   onSelect: (subjectId: string) => void;
-  /** A row of «Ближайшее» opens its assignment (TASK-347); without it the rows only show the deadlines. */
+  /** A row of the tab «Задания» opens its assignment (TASK-347); without it the rows only show the deadlines. */
   onOpenAssignment?: (assignmentId: string) => void;
-  /** A row of «Пары» opens the lesson of its recording (TASK-352); without it the rows only show the lessons. */
-  onOpenLesson?: (recordingId: string) => void;
+  /** The tab of the subject page ("" = not chosen) is in the window route (TASK-353); `onSubjectTab` changes it without a history entry. */
+  subjectTab?: string;
+  onSubjectTab?: (tab: SubjectTab) => void;
+  /** «Билеты к экзамену» of the head: the tickets page with this subject chosen. */
+  onOpenTickets?: (subjectId: string) => void;
+  /** A row of the tab «Пары» opens the lesson screen; the counters re-read the list after a lesson screen was left or corrected. */
+  onOpenKnowledgeLesson?: (lesson: KnowledgeLesson, opening: LessonOpening) => void;
+  lessonsSeen?: number;
+  lessonsEdited?: number;
   /** Counts the rail clicks: a click reads the remembered subject again (see landingFor). */
   visit?: number;
   /** «Указать почту» of a refused send: the form of one teacher to open on arrival (taken once, then onTeacherFocusDone). */
@@ -145,6 +158,12 @@ export function SubjectsPage(props: {
   const [addError, setAddError] = useState<{ text: string; again: () => void; origin: string } | null>(null);
   const running = useRef(false); // a double click comes before the re-render that disables the button
   const typedName = useRef(""); // the last name sent to createSubject: «Повторить» of a restore that found the subject changed
+  // The button that started «Добавить файл» gets the focus back (the «+» of a folder is replaced once the folder has a file).
+  const focusBack = useFocusBack(busy, materials, filesFailed);
+  // A click on a folder of the tree while another tab is open: «Файлы» opens first, then the folder is scrolled to.
+  const folderJump = useRef("");
+  const tab = props.subjectTab ?? "";
+  const onSubjectTab = props.onSubjectTab;
 
   // What is on screen. "" shows the subject remembered for this arrival (read again at a rail click, not at every render,
   // so «Назад» to "" shows the subject it showed before).
@@ -301,6 +320,8 @@ export function SubjectsPage(props: {
     setDragging("");
     setMaterials(null);
     setFilesFailed(false);
+    folderJump.current = "";
+    focusBack.cancel();
     setCreatedFolders(noFolders);
     flow.reset();
   }, [key, flow]);
@@ -312,18 +333,35 @@ export function SubjectsPage(props: {
     }
   }, [createdFolders]);
 
+  useEffect(() => {
+    if (tab === "files" && folderJump.current !== "") {
+      scrollToFolder(document, folderJump.current);
+      folderJump.current = "";
+    }
+  }, [tab]);
+
   // The overview of the open subject: loaded once per opening, then the opening is recorded (see SubjectOverviewFlow).
   // It does not depend on `reload`, so a dropped file does not count as a new visit.
   const [overviewState, setOverviewState] = useState<OverviewState>(idleOverview);
+  const overviewFlow = useRef<SubjectOverviewFlow | null>(null);
   useEffect(() => {
     if (shownId === "") {
       setOverviewState(idleOverview);
       return;
     }
     const flow = new SubjectOverviewFlow(api, setOverviewState);
+    overviewFlow.current = flow;
     flow.open(shownId);
-    return () => flow.close();
+    return () => {
+      flow.close();
+      overviewFlow.current = null;
+    };
   }, [api, shownId]);
+  // The overview feeds the tab «Задания», the schedule line and the marks of the rows. Only «Задания» says when it failed
+  // (its «Повторить» is the flow's retry: a first reading, or the re-read that failed); the other tabs go on without it.
+  // An assignment added on the tab «Задания» only re-reads.
+  const retryOverview = () => overviewFlow.current?.retry(shownId);
+  const rereadOverview = () => overviewFlow.current?.refresh(shownId);
 
   const subject = subjects?.find((s) => s.id === shownId) ?? null;
   const known = subjects?.some((s) => s.id === openId) ?? false; // the route's own subject (for «Указать почту»)
@@ -465,10 +503,12 @@ export function SubjectsPage(props: {
     setError("");
     setAdded(noAdded);
     setAddError(null);
+    focusBack.arm(folderId === "" ? addFileId : folderAddId(folderId));
     try {
       const r = await addFileInto(inboxApi, shownId, folderId, subjects ?? []);
       if (r.kind === "done") {
         setAdded({ ...r.outcome, unplaced: r.outcome.unplaced ?? null, target: r.target, origin: folderId });
+        focusBack.reloading();
         refresh();
       } else if (r.kind === "refused") {
         setAddError({ text: r.text, again: () => void addFileTo(folderId), origin: folderId });
@@ -651,7 +691,7 @@ export function SubjectsPage(props: {
           {texts.title}
         </h1>
       </div>
-      <LibraryActions onOpen={props.onOpen} onAddFile={() => void addFile()} addTip={fileTexts.addToInboxTip} busy={busy} links={false} />
+      <LibraryActions onAddFile={() => void addFile()} addTip={fileTexts.addToInboxTip} busy={busy} />
     </div>
   );
   const tilesBody = (
@@ -675,6 +715,15 @@ export function SubjectsPage(props: {
     </>
   );
 
+  const openFolder = (folderId: string) => {
+    if (tab === "files" || onSubjectTab === undefined) {
+      scrollToFolder(document, folderId);
+      return;
+    }
+    folderJump.current = folderId;
+    onSubjectTab("files");
+  };
+
   const tree = (
     <SubjectTree
       subjects={subjects}
@@ -687,7 +736,10 @@ export function SubjectsPage(props: {
       onAddFolder={() => {
         setError("");
         setForm("folder");
+        onSubjectTab?.("files"); // the form of a folder lives in the tab «Файлы»
       }}
+      onOpenFolder={openFolder}
+      onOpenKnowledge={() => props.onOpen("knowledge")}
       inbox={inboxEntry(inboxFiles(inbox), view.kind === "inbox", inboxLoaded && !inboxError)}
       onOpenInbox={openInbox}
       drop={
@@ -715,7 +767,7 @@ export function SubjectsPage(props: {
               <div>
                 <h1>{texts.inbox}</h1>
               </div>
-              <LibraryActions onOpen={props.onOpen} onAddFile={() => void addFile()} addTip={fileTexts.addToInboxTip} busy={busy} />
+              <LibraryActions onAddFile={() => void addFile()} addTip={fileTexts.addToInboxTip} busy={busy} />
             </div>
             {subjectForm}
             {inboxError && <ErrorLine text={inboxFailedText} onRefresh={load} onRetry={load} />}
@@ -736,40 +788,53 @@ export function SubjectsPage(props: {
         )}
         {view.kind === "subject" && subject !== null && (
           <>
-            <div className="head">
-              <div>
-                <h1>{subject.name}</h1>
-                {subjectSubLine(subject) !== "" && <p className="small muted sub-line">{subjectSubLine(subject)}</p>}
-                {schedule !== "" && <p className="small muted sub-line">{schedule}</p>}
-              </div>
-              <LibraryActions onOpen={props.onOpen} onAddFile={() => void addFileTo("")} addTip={fileTexts.addToMaterialsTip} busy={busy}>
-                <RemoveSubjectButton disabled={busy} onClick={(opener) => removal.open(subject, opener)} />
-              </LibraryActions>
-            </div>
-            {filesFailed && <ErrorLine text={texts.filesFailed} onRefresh={refresh} onRetry={refresh} />}
-            {addLines("")}
-            {subjectForm}
-            {overviewState.status === "failed" && (
-              <ResultLine kind="fail" role="alert">
-                {overviewState.error}
-              </ResultLine>
-            )}
-            <TeachersBlock key={subject.id} teachers={subject.teachers} state={teacherStateFor(teacher, subject.id)} on={teacherActions} />
-            {overview && <OverviewSections overview={overview} onOpenAssignment={props.onOpenAssignment} onOpenLesson={props.onOpenLesson} />}
-            <SubjectDetail
+            <SubjectHead
               subject={subject}
-              materials={materials}
-              failed={filesFailed}
-              fresh={fresh}
-              created={createdFolders}
-              folderForm={form === "folder"}
+              schedule={schedule}
               busy={busy}
-              error={error}
-              onCreateFolder={(n) => void createFolder(n)}
-              onCancelFolder={() => setForm("none")}
-              actions={mat.actions}
-              onAddFile={(folderId) => void addFileTo(folderId)}
-              folderExtra={(folderId, named) => addLines(folderId, named)}
+              onTickets={() => props.onOpenTickets?.(subject.id)}
+              onRemove={(opener) => removal.open(subject, opener)}
+            />
+            {subjectForm}
+            <TeachersBlock key={subject.id} teachers={subject.teachers} state={teacherStateFor(teacher, subject.id)} on={teacherActions} />
+            <SubjectTabs
+              key={subject.id}
+              subject={subject}
+              tab={tab}
+              onTab={(t) => onSubjectTab?.(t)}
+              overview={overviewState}
+              onRetryOverview={retryOverview}
+              onOverviewChanged={rereadOverview}
+              onOpenAssignment={props.onOpenAssignment}
+              onOpenLesson={(lesson, opening) => props.onOpenKnowledgeLesson?.(lesson, opening)}
+              lessonsSeen={props.lessonsSeen ?? 0}
+              lessonsEdited={props.lessonsEdited ?? 0}
+              files={
+                <>
+                  <div className="tab-acts">
+                    <Button id={addFileId} variant="primary" icon="up" disabled={busy} title={fileTexts.addToMaterialsTip} onClick={() => void addFileTo("")}>
+                      {texts.addFile}
+                    </Button>
+                  </div>
+                  {filesFailed && <ErrorLine text={texts.filesFailed} onRefresh={refresh} onRetry={refresh} />}
+                  {addLines("")}
+                  <SubjectDetail
+                    subject={subject}
+                    materials={materials}
+                    failed={filesFailed}
+                    fresh={fresh}
+                    created={createdFolders}
+                    folderForm={form === "folder"}
+                    busy={busy}
+                    error={error}
+                    onCreateFolder={(n) => void createFolder(n)}
+                    onCancelFolder={() => setForm("none")}
+                    actions={mat.actions}
+                    onAddFile={(folderId) => void addFileTo(folderId)}
+                    folderExtra={(folderId, named) => addLines(folderId, named)}
+                  />
+                </>
+              }
             />
             {form !== "folder" && form !== "subject" && error !== "" && (
               <ResultLine kind="fail" role="alert">

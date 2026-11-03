@@ -33,13 +33,14 @@ type Deps struct {
 // the previous opening the «новое» marks are relative to; zero when the page was never opened, and then nothing is
 // marked.
 type Overview struct {
-	Subject   shared.SubjectID
-	Name      string
-	OpenedAt  time.Time
-	Deadlines []overview.Deadline // «Ближайшее», soonest first
-	Schedule  []overview.Slot     // the schedule line; empty without an imported schedule
-	Lessons   []Lesson            // the latest recorded lessons, newest first
-	Fresh     []FreshMaterial     // the files marked «новое», newest first
+	Subject     shared.SubjectID
+	Name        string
+	OpenedAt    time.Time
+	Deadlines   []overview.Deadline // «Ближайшее», soonest first
+	Assignments []overview.Deadline // the tab «Задания»: every open assignment, overdue first, undated last
+	Schedule    []overview.Slot     // the schedule line; empty without an imported schedule
+	Lessons     []Lesson            // the latest recorded lessons, newest first
+	Fresh       []FreshMaterial     // the files marked «новое», newest first
 }
 
 // Lesson is a recorded lesson of the subject. Title is "" for an ad-hoc recording (the page names it by its date);

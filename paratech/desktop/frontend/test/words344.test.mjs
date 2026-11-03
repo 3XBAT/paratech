@@ -12,6 +12,7 @@ import { statusView as ticketStatus, texts as ticketTexts } from "../.test-build
 import { headings, recordingTexts } from "../.test-build/popup/view.js";
 import { problemTexts } from "../.test-build/sourcePicker/view.js";
 import { texts as libraryTexts } from "../.test-build/libraryView.js";
+import { tabTexts } from "../.test-build/subjectTabsView.js";
 import { lessonTabs } from "../.test-build/knowledgeView.js";
 import { waitingInline, waitingWords } from "../.test-build/statusWords.js";
 import { addedAssignmentText, assignmentRow, buttonLabels, entryModel, texts as agentTexts } from "../.test-build/agentView.js";
@@ -103,7 +104,7 @@ test("one pair, one task, one record: popup, picker, tabs, buttons and the journ
   assert.equal(problemTexts.in_progress, "Уже идёт другая запись — её можно остановить в окне paratech, раздел «Записи».");
   assert.equal(libraryTexts.addSubject, "Добавить предмет");
   assert.equal(libraryTexts.addFolder, "Новая папка");
-  assert.equal(libraryTexts.lessons, "Пары");
+  assert.equal(tabTexts.pairs, "Пары"); // TASK-353: the word moved from the overview heading to the tab of the subject page
   assert.equal(lessonTabs[0].label, "Мой конспект");
   assert.equal(lessonTabs[1].label, "Конспект");
   assert.equal(ticketTexts.pasteAction, "Разобрать список");
