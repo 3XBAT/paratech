@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -29,6 +30,9 @@ var ErrTurnGone = errors.New("hub no longer keeps the model turn")
 // cleaned (see replyDraft), to a non-nil draft, in order, from the calling goroutine; a Hub without it (unimplemented)
 // is asked through AgentStep with the same request, so the same key, and so is every later step of this client. The reply is the stream's result, never the
 // deltas; a stream that ends without a result is a lost answer (unavailable, «Продолжить» replays the key).
+//
+// A stream has no total cap of RequestTimeout: it ends as ErrTimeout when the Hub stays silent too long (see
+// Config.StepIdleTimeout) or after Config.StepTimeout. The unary fallback is bounded by RequestTimeout.
 func (c *Client) Step(ctx context.Context, req agent.StepRequest, draft func(soFar string)) (agent.StepReply, error) {
 	if err := ctx.Err(); err != nil {
 		return agent.StepReply{}, fmt.Errorf("%s: %w", opAgentStep, err)
@@ -46,28 +50,66 @@ func (c *Client) Step(ctx context.Context, req agent.StepRequest, draft func(soF
 		return agent.StepReply{}, err
 	}
 
+	gateway := hubv1connect.NewGatewayServiceClient(c.http, base, connect.WithReadMaxBytes(maxResponseBytes))
+	if !c.noStepStream.Load() {
+		resp, older, err := c.streamStep(ctx, gateway, msg, key, draft)
+		if !older {
+			if err != nil {
+				return agent.StepReply{}, err
+			}
+			return agentReplyOf(resp)
+		}
+		c.noStepStream.Store(true)
+	}
+
+	// The unary step reports no progress, so it keeps the total cap of a call, on a context of its own.
 	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
-	gateway := hubv1connect.NewGatewayServiceClient(c.http, base, connect.WithReadMaxBytes(maxResponseBytes))
-	var resp *hubv1.AgentStepResponse
-	if c.noStepStream.Load() {
-		resp, err = unaryStep(callCtx, gateway, msg, key)
-	} else {
-		resp, err = streamStep(callCtx, gateway, msg, key, draft)
-		if connect.CodeOf(err) == connect.CodeUnimplemented && ctx.Err() == nil {
-			c.noStepStream.Store(true)
-			resp, err = unaryStep(callCtx, gateway, msg, key)
-		}
-	}
+	resp, err := unaryStep(callCtx, gateway, msg, key)
 	if err != nil {
 		return agent.StepReply{}, stepError(ctx, callCtx, err)
 	}
 	return agentReplyOf(resp)
 }
 
-// streamStep reads AgentStepStream. Errors are those of the generated client, or an *Error of a broken stream.
-func streamStep(ctx context.Context, gateway hubv1connect.GatewayServiceClient, msg *hubv1.AgentStepRequest, key string,
-	draft func(string),
+// Causes of a streamed step cut by the client; each is also the detail of its ErrTimeout, so desktop.log tells them
+// apart.
+var (
+	errStepSilent  = errors.New("no message from the hub in time")
+	errStepTooLong = errors.New("the step ran over its time cap")
+)
+
+// streamStep reads AgentStepStream within c.stepTO, cut when the Hub sends nothing for c.timeout before the first
+// message or for c.stepIdle after one. older reports an unimplemented stream while ctx lives (an older Hub), with the
+// error unclassified; any other error is classified by stepError.
+func (c *Client) streamStep(ctx context.Context, gateway hubv1connect.GatewayServiceClient, msg *hubv1.AgentStepRequest,
+	key string, draft func(string),
+) (res *hubv1.AgentStepResponse, older bool, err error) {
+	capCtx, cancelCap := context.WithTimeoutCause(ctx, c.stepTO, errStepTooLong)
+	defer cancelCap()
+	callCtx, stop := context.WithCancelCause(capCtx)
+	defer stop(nil)
+	watch := time.AfterFunc(min(c.timeout, c.stepTO), func() { stop(errStepSilent) })
+	defer watch.Stop()
+
+	res, err = readStepStream(callCtx, gateway, msg, key, draft, func() {
+		if watch.Stop() { // false: it fired, the call is cut already
+			watch.Reset(c.stepIdle)
+		}
+	})
+	switch {
+	case err == nil:
+		return res, false, nil
+	case connect.CodeOf(err) == connect.CodeUnimplemented && ctx.Err() == nil:
+		return nil, true, err
+	}
+	return nil, false, stepError(ctx, callCtx, err)
+}
+
+// readStepStream reads AgentStepStream, calling seen on every message. Errors are those of the generated client, or an
+// *Error of a broken stream.
+func readStepStream(ctx context.Context, gateway hubv1connect.GatewayServiceClient, msg *hubv1.AgentStepRequest,
+	key string, draft func(string), seen func(),
 ) (*hubv1.AgentStepResponse, error) {
 	sreq := connect.NewRequest(&hubv1.AgentStepStreamRequest{Request: msg})
 	sreq.Header().Set("Authorization", "Bearer "+key)
@@ -82,6 +124,7 @@ func streamStep(ctx context.Context, gateway hubv1connect.GatewayServiceClient, 
 		res  *hubv1.AgentStepResponse
 	)
 	for stream.Receive() {
+		seen()
 		if res != nil {
 			return nil, permanent(opAgentStep, ErrBadResponse) // the result is the last message
 		}
@@ -119,10 +162,16 @@ func unaryStep(ctx context.Context, gateway hubv1connect.GatewayServiceClient, m
 	return resp.Msg, nil
 }
 
-// stepError classifies a failed step like Complete; the Hub's own failed_precondition is a model turn it forgot.
+// stepError classifies a failed step like Complete; the Hub's own failed_precondition is a model turn it forgot. The
+// caller's ctx going away stays its error; a silent or overlong stream (the cause of callCtx) is a timeout.
 func stepError(ctx, callCtx context.Context, err error) error {
 	if perr := ctx.Err(); perr != nil {
 		return fmt.Errorf("%s: %w", opAgentStep, perr)
+	}
+	if cause := context.Cause(callCtx); errors.Is(cause, errStepSilent) || errors.Is(cause, errStepTooLong) {
+		e := unavailable(opAgentStep, ErrTimeout)
+		e.detail = cause
+		return e
 	}
 	if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
 		return unavailable(opAgentStep, ErrTimeout)

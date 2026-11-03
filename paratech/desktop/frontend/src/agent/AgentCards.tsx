@@ -17,6 +17,7 @@ import { type OfferResult, offerReasons } from "../agentOffer.js";
 import type { RestoreCall } from "../subjectRemovalView.js";
 import { WorkWritingCard } from "./WorkCard.js";
 import { MessagePills } from "./MentionParts.js";
+import { Elapsed } from "./Elapsed.js";
 import { Waiting } from "./Waiting.js";
 import { openTaskLabel, summaryToolTexts } from "../summaryView.js";
 import { failedStepIndex, moreStepsLabel, planCollapseLimit, planTexts, planWindow, progressLabel, type StepMark } from "../planView.js";
@@ -423,8 +424,11 @@ function QuestionsCard(props: { card: Extract<CardModel, { type: "questions" }>;
   );
 }
 
-/** `typing`: the reply is being typed above, so the waiting row keeps only «Стоп» (the text is the progress). */
-function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }) {
+/**
+ * `typing`: the reply is being typed above, so the waiting row keeps the elapsed time and «Стоп» (the text is the progress).
+ * `startedAt`: when the request started running, for the timer; `clock` is the time source of the timer (tests).
+ */
+function Card(props: { card: CardModel; actions: CardActions; typing?: boolean; startedAt?: number; clock?: () => number }) {
   const { card } = props;
   switch (card.type) {
     case "plan":
@@ -437,6 +441,7 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
           <h3 className="ag-card-h">
             <span className="ag-dot" aria-hidden="true" />
             {card.caption}
+            {props.startedAt !== undefined && <Elapsed since={props.startedAt} clock={props.clock} />}
           </h3>
           <Buttons buttons={card.buttons} card="progress" busy={props.actions.busy} onPress={props.actions.press} />
         </section>
@@ -445,6 +450,7 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
       return (
         <div className="ag-think">
           {!props.typing && <Waiting />}
+          {props.startedAt !== undefined && <Elapsed since={props.startedAt} clock={props.clock} />}
           <Buttons buttons={card.buttons} card="waiting" busy={props.actions.busy} onPress={props.actions.press} />
         </div>
       );
@@ -629,12 +635,15 @@ export function ReplyDraft(props: { text: string }) {
   );
 }
 
-/** What the student had read when they pressed «Стоп»: muted plain text, no cursor, a small caption. UI only. */
-export function StoppedReply(props: { text: string }) {
+/**
+ * What the student had read when the request ended: muted plain text, no cursor. UI only. After «Стоп» a small caption says
+ * so; after a break-off (`caption` false) the stop line under it is the only words.
+ */
+export function StoppedReply(props: { text: string; caption?: boolean }) {
   return (
     <section className="ag-card ag-reply-kept">
       <p className="ag-text muted">{props.text}</p>
-      <p className="ag-draft-cap small muted">{texts.replyStopped}</p>
+      {props.caption !== false && <p className="ag-draft-cap small muted">{texts.replyStopped}</p>}
     </section>
   );
 }
@@ -658,12 +667,25 @@ function ReplyStatus(props: { typing: boolean; replyCard: boolean; running: bool
 }
 
 /** One request of the thread: the student's text, then the cards. `cut`: its reply was typing when it stopped. */
-export function AgentRequest(props: { model: EntryModel; actions: CardActions; drafts?: readonly DraftView[]; cut?: CutReply; underUser?: ReactNode }) {
+export function AgentRequest(props: {
+  model: EntryModel;
+  actions: CardActions;
+  drafts?: readonly DraftView[];
+  cut?: CutReply;
+  underUser?: ReactNode;
+  /** When the request started running (ms): the elapsed time shows beside the dots. Absent: no timer. */
+  startedAt?: number;
+  /** The time source of the timer; the current time when absent. */
+  clock?: () => number;
+}) {
   const { model } = props;
   const { reply, answers } = splitDrafts(props.drafts ?? []);
-  // The kept text goes right above the first stopped line.
+  // The kept text goes right above the first stop line (or the problem line); with neither, after the cards: it never vanishes.
   const keptText = props.cut?.text ?? "";
-  const keptAt = keptText === "" ? -1 : model.cards.findIndex((c) => c.type === "stopped");
+  const lineAt = model.cards.findIndex((c) => c.type === "stopped");
+  const problemAt = model.cards.findIndex((c) => c.type === "problem");
+  const keptAt = keptText === "" ? -1 : lineAt >= 0 ? lineAt : problemAt >= 0 ? problemAt : model.cards.length;
+  const kept = <StoppedReply text={keptText} caption={props.cut?.reason === "user"} />;
   // «Отменить всё» only when there is more than one action left to undo.
   const open = undoableActions(model.cards).filter((id) => !props.actions.undoNote(id)?.done);
   const hasWaitingCard = model.cards.some((c) => c.type === "waiting");
@@ -674,7 +696,22 @@ export function AgentRequest(props: { model: EntryModel; actions: CardActions; d
       <UserActions text={model.userText} copy={props.actions.copy}>
         {props.underUser}
       </UserActions>
-      {model.waiting && <Waiting />}
+      {model.waiting && (model.queued || props.startedAt !== undefined ? (
+        <div className="ag-think">
+          {model.queued ? <Waiting label={texts.waitingQueued} queued /> : <Waiting />}
+          {model.queued ? (
+            <>
+              <span className="ag-queued small muted">{texts.queued}</span>
+              {/* The running request's stop, on the row of the one that waits for it. */}
+              <IconAction icon="stop" label={texts.stopPrevious} disabled={props.actions.busy === true} onClick={() => props.actions.press("stop")} />
+            </>
+          ) : (
+            props.startedAt !== undefined && <Elapsed since={props.startedAt} clock={props.clock} />
+          )}
+        </div>
+      ) : (
+        <Waiting />
+      ))}
       {model.callLine !== "" && (
         <p className="ag-callline small muted" role="status">
           {model.callLine}
@@ -685,18 +722,19 @@ export function AgentRequest(props: { model: EntryModel; actions: CardActions; d
         // The draft goes before the waiting card, so its dots (with «Стоп») stay after the last line.
         c.type === "waiting" ? null : (
           <Fragment key={`${c.type}:${"caption" in c ? c.caption : ""}:${i}`}>
-            {i === keptAt && <StoppedReply text={keptText} />}
-            <Card card={c} actions={props.actions} />
+            {i === keptAt && kept}
+            <Card card={c} actions={props.actions} startedAt={props.startedAt} clock={props.clock} />
           </Fragment>
         ),
       )}
+      {keptAt === model.cards.length && kept}
       <ReplyStatus typing={reply !== null} replyCard={model.cards.some((c) => c.type === "reply")} running={hasWaitingCard} />
       {/* The reply sits where its final card will be, before the answer drafts, so it does not jump over them. */}
       {reply !== null && <ReplyDraft text={replyDraftText(reply)} />}
       {answers.map((d, i) => (
         <AnswerDraft key={d.callId || i} draft={d} dots={!hasWaitingCard && reply === null && i === answers.length - 1} />
       ))}
-      {model.cards.map((c, i) => (c.type === "waiting" ? <Card key={`w:${i}`} card={c} actions={props.actions} typing={reply !== null} /> : null))}
+      {model.cards.map((c, i) => (c.type === "waiting" ? <Card key={`w:${i}`} card={c} actions={props.actions} typing={reply !== null} startedAt={props.startedAt} clock={props.clock} /> : null))}
       {/* No copy while the reply is still typing: the final card replaces the draft. */}
       <AgentActions
         text={reply === null ? replyCopyText(model.cards) : ""}

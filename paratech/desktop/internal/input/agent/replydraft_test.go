@@ -41,7 +41,7 @@ func TestReplyDraftPassesTheTextSoFar(t *testing.T) {
 		end      DraftEnd
 	}{
 		{"answered", true, DraftAnswered},
-		{"failed", false, DraftDropped},
+		{"failed", false, DraftFailed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -207,8 +207,9 @@ func TestStreamedReplyThroughTheDriver(t *testing.T) {
 	}
 }
 
-// A step that fails after its drafts drops them before the update of the stopped request.
-func TestFailedStreamDropsTheReplyDraft(t *testing.T) {
+// A step that fails after its drafts (a Hub timeout, a broken stream) ends them failed, not dropped, before the update
+// of the stopped request: the text the Hub delivered stays shown.
+func TestFailedStreamKeepsTheReplyDraft(t *testing.T) {
 	r, sink := replyDrafts(t)
 	model := &scriptModel{stream: func(_ context.Context, draft func(string)) error {
 		draft("половина")
@@ -220,8 +221,22 @@ func TestFailedStreamDropsTheReplyDraft(t *testing.T) {
 	}
 	drv.Wait()
 	ds := sink.drafts
-	if len(ds) != 2 || ds[1].End != DraftDropped {
+	if len(ds) != 2 || ds[0].Texts[0] != "половина" || ds[1].End != DraftFailed {
 		t.Fatalf("drafts = %+v", ds)
+	}
+	var kinds []string
+	for _, ev := range sink.events() {
+		switch ev := ev.(type) {
+		case Draft:
+			kinds = append(kinds, "draft:"+string(ev.End))
+		case Update:
+			if !ev.Progress {
+				kinds = append(kinds, "update:"+ev.Status.String())
+			}
+		}
+	}
+	if want := []string{"draft:", "draft:failed", "update:STOPPED"}; !equalStrings(kinds, want) {
+		t.Fatalf("events = %v, want %v", kinds, want)
 	}
 	ups := sink.all()
 	if last := ups[len(ups)-1]; last.Status != thread.StatusStopped {
