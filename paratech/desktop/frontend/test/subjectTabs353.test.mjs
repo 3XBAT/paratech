@@ -27,10 +27,15 @@ import {
   defaultTab,
   exportItem,
   folderAddId,
+  headTexts,
   knowledgeEntryFor,
+  lessonChip,
+  lessonMarks,
+  loadingDelayMs,
   pairsSubject,
   pairsTexts,
   refocusAllowed,
+  startDelay,
   tabSuffix,
   tabTexts,
   taskChip,
@@ -46,6 +51,9 @@ import { loadingPairs, readPairs, SubjectPairsTab } from "../.test-build/pages/S
 import { SubjectTabs } from "../.test-build/pages/SubjectTabs.js";
 import { SubjectTasksTab } from "../.test-build/pages/SubjectTasksTab.js";
 import { SubjectDetail, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
+import { SegmentTabs } from "../.test-build/ui/controls.js";
+import { RowMenu } from "../.test-build/ui/RowMenu.js";
+import { AddPastNote, LessonList } from "../.test-build/pages/KnowledgeParts.js";
 
 const noop = () => undefined;
 const html = (el) => renderToStaticMarkup(el);
@@ -114,15 +122,130 @@ test("readPairs: the group gives the key, the key gives the ordered lectures; no
   assert.ok(!bad.error.includes("boom"), "only the fixed texts of the page are shown");
 });
 
-test("export: off with a visible reason when there is nothing to save, off while it runs or the lessons load", () => {
-  const on = { loaded: true, hasEntry: true, nothingToExport: false, exporting: false };
+test("export: off with a visible reason when there is nothing to save, off while it runs", () => {
+  const on = { hasEntry: true, nothingToExport: false, exporting: false };
   assert.deepEqual(exportItem(on), { disabled: false, hint: "" });
   assert.deepEqual(exportItem({ ...on, nothingToExport: true }), { disabled: true, hint: pairsTexts.exportEmpty });
   assert.deepEqual(exportItem({ ...on, hasEntry: false }), { disabled: true, hint: pairsTexts.exportEmpty });
   assert.deepEqual(exportItem({ ...on, exporting: true }), { disabled: true, hint: "" });
-  assert.deepEqual(exportItem({ ...on, loaded: false }), { disabled: true, hint: "" });
-  assert.equal(pairsTexts.exportEmpty, "Экспортировать нечего: у предмета пока нет пар с конспектом.");
+  assert.equal(pairsTexts.exportEmpty, "Нельзя сохранить: у предмета пока нет пар с конспектом.");
   assert.equal(pairsTexts.export, "Сохранить все конспекты одним файлом");
+});
+
+test("the export item carries what it does as its tooltip, and the reason of a disabled one is visible under it", () => {
+  // The static render has the menu closed, so the item's title and hint are checked on the sources.
+  const items = [{ key: "export", label: pairsTexts.export, title: pairsTexts.exportHint }];
+  assert.doesNotMatch(html(h(RowMenu, { label: "x", title: "y", items, onPick: noop })), /Сохранить все/);
+  assert.match(src("ui/RowMenu.tsx"), /title=\{i\.title\}/);
+  assert.match(src("ui/RowMenu.tsx"), /\{hint && \(\s*<span id=\{hintId\} className="small muted mmenu-hint">/, "a disabled item's reason is visible text");
+  assert.match(src("pages/SubjectPairsTab.tsx"), /title: pairsTexts\.exportHint,/);
+  assert.match(src("pages/SubjectPairsTab.tsx"), /exportItem\(\{ hasEntry: data\.entry !== null, nothingToExport, exporting \}\)/);
+});
+
+test("the two «⋯» have their own tooltips, and «Удалить предмет» says why it is off", () => {
+  assert.equal(headTexts.moreTitle, "Ещё: предмет");
+  assert.equal(pairsTexts.moreTitle, "Ещё: пары");
+  assert.equal(headTexts.busy, "Нельзя удалить, пока идёт действие с файлами предмета.");
+  assert.match(html(h(SubjectHead, { subject: librarySubject, schedule: "", busy: false, onTickets: noop, onRemove: noop })), /title="Ещё: предмет"/);
+  assert.match(src("pages/SubjectPairsTab.tsx"), /title=\{pairsTexts\.moreTitle\}/);
+  assert.doesNotMatch(src("pages/SubjectPairsTab.tsx") + src("pages/SubjectHead.tsx"), /title="Ещё"/);
+});
+
+// ---- the status of a row of «Пары» ----
+
+const overviewLesson = (recordingId, status, summaryNew = false) => ({ recordingId, status, summaryNew });
+
+test("lessonMarks: the chip words as before, «новое» from summaryNew, joined by recordingId; a note has none", () => {
+  assert.deepEqual(
+    ["recorded", "transcribed", "summaryReady", "failed"].map((s) => lessonChip(s).label),
+    ["Записано", "Расшифровано", "Конспект готов", "Ошибка"],
+  );
+  assert.equal(lessonChip("failed").kind, "fail");
+  const marks = lessonMarks([overviewLesson("r1", "failed"), overviewLesson("r2", "summaryReady", true), overviewLesson("", "recorded")]);
+  assert.equal(marks.size, 2, "no recording, no mark");
+  assert.deepEqual([marks.get("r1").chip.label, marks.get("r1").fresh], ["Ошибка", false]);
+  assert.deepEqual([marks.get("r2").chip.label, marks.get("r2").fresh], ["Конспект готов", true]);
+  assert.equal(marks.get("r9"), undefined);
+});
+
+test("the rows of «Пары» carry the chip and «новое» of their recording, in spans inside the row button; the rest carry none", () => {
+  const lessons = [recorded({ key: "k1", recordingId: "r1" }), recorded({ key: "k2", recordingId: "r2", title: "Новая" }), recorded({ key: "k3", recordingId: "old" }), noteOnly("2026-10-01")];
+  const marks = lessonMarks([overviewLesson("r1", "failed"), overviewLesson("r2", "summaryReady", true)]);
+  const out = html(pairsProps(ready(lessons), { marks }));
+  const rows = out.match(/<button[^>]*class="kb-item"[^>]*>[^]*?<\/button>/g) ?? [];
+  assert.equal(rows.length, 4);
+  assert.match(rows[0], /<span class="chip s-fail"[^>]*><svg[^>]*>[^]*?<\/svg><span class="chip-text">Ошибка<\/span>/);
+  assert.doesNotMatch(rows[0], /class="fresh"/);
+  assert.match(rows[1], /<span class="fresh">новое<\/span>/);
+  assert.match(rows[1], /chip s-ok[^>]*>[^]*?Конспект готов/);
+  assert.doesNotMatch(rows[2], /class="chip s-(fail|ok)"|class="fresh"|kb-line/, "older than the overview's latest: no chip");
+  assert.doesNotMatch(rows[3], /Ошибка|Записано|kb-line/);
+  for (const r of rows.slice(0, 2)) {
+    assert.match(r, /<span class="kb-line"><span class="kb-name">/);
+    assert.doesNotMatch(r, /<(div|p|h[1-6]|ul|li)[\s>]/, "phrasing content only inside a button");
+  }
+  // Without marks the list is what it was.
+  assert.doesNotMatch(html(pairsProps(ready(lessons))), /kb-line|class="chip s-fail"/);
+});
+
+test("LessonList without `extra` keeps its markup (the knowledge base page is unchanged)", () => {
+  const out = html(h(LessonList, { lessons: [recorded()], onOpen: noop }));
+  assert.match(out, /<button type="button" class="kb-item"><span class="kb-name">/);
+  assert.doesNotMatch(out, /kb-line/);
+  const withNull = html(h(LessonList, { lessons: [recorded()], onOpen: noop, extra: () => null }));
+  assert.equal(withNull, out);
+});
+
+test("the overview's lessons reach the rows: SubjectTabs joins them and gives them to the tab", () => {
+  const tabs = src("pages/SubjectTabs.tsx");
+  assert.match(tabs, /lessonMarks\(props\.overview\.overview\?\.lessons \?\? \[\]\)/);
+  assert.match(tabs, /marks=\{marks\}/);
+  assert.match(src("pages/SubjectPairsTab.tsx"), /extra=\{\(l\) => lessonMarkView\(props\.marks\?\.get\(l\.recordingId\)\)\}/);
+});
+
+// ---- one form at a time on «Пары» ----
+
+test("«Импортировать запись» and «Добавить конспект прошедшей пары» are never open together; the import is the accent only on an empty tab", () => {
+  const tab = src("pages/SubjectPairsTab.tsx");
+  assert.match(tab, /const \[form, setForm\] = useState<"none" \| "import" \| "past">\("none"\);/);
+  assert.match(tab, /onClick=\{\(\) => setForm\(importOpen \? "none" : "import"\)\}/);
+  assert.match(tab, /open=\{form === "past"\}\s+onOpenChange=\{\(o\) => setForm\(o \? "past" : "none"\)\}/);
+  assert.match(tab, /variant=\{empty && !importOpen \? "primary" : undefined\}/);
+  // With lessons nothing on the tab is the accent.
+  const withLessons = html(pairsProps(ready([recorded()])));
+  assert.equal((withLessons.match(/btn primary/g) ?? []).length, 0);
+  // AddPastNote: the page can own the open state; without it the block keeps its own (the knowledge base page).
+  const past = (extra) => html(h(AddPastNote, { subject: { subjectId: "s1", noSubject: false }, lectures: [], onChoose: noop, today: "2026-11-03", ...extra }));
+  assert.doesNotMatch(past({}), /Выберите|kb-form/);
+  assert.match(past({ open: true }), /kb-form/);
+  assert.doesNotMatch(past({ open: false }), /kb-form/);
+});
+
+// ---- the delayed «Загрузка…» and the first tab stop ----
+
+test("startDelay fires after the wait and never after cancel", () => {
+  const timers = [];
+  const fake = { set: (fn, ms) => (timers.push({ fn, ms, cleared: false }), timers.length - 1), clear: (i) => (timers[i].cleared = true) };
+  let fired = 0;
+  const cancel = startDelay(loadingDelayMs, () => fired++, fake);
+  assert.equal(timers[0].ms, 800);
+  assert.equal(fired, 0, "nothing at once");
+  timers[0].fn();
+  assert.equal(fired, 1);
+  const cancel2 = startDelay(loadingDelayMs, () => fired++, fake);
+  cancel2();
+  assert.equal(timers[1].cleared, true);
+  assert.equal(typeof cancel, "function");
+  assert.match(src("pages/useAfterDelay.ts"), /return startDelay\(ms, \(\) => setLate\(true\)\);/);
+});
+
+test("the segmented tabs: with no tab selected the first one is the tab stop; with one selected only it is", () => {
+  const options = [{ value: "a", label: "A" }, { value: "b", label: "B" }, { value: "c", label: "C" }];
+  const bar = (value) => html(h(SegmentTabs, { label: "x", base: "id", options, value, onChange: noop }));
+  const stops = (out) => [...out.matchAll(/<button[^>]*id="id-tab-(\w)"[^>]*tabindex="(-?\d)"/g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(stops(bar("")), [["a", "0"], ["b", "-1"], ["c", "-1"]]);
+  assert.deepEqual(stops(bar("zzz")), [["a", "0"], ["b", "-1"], ["c", "-1"]]);
+  assert.deepEqual(stops(bar("b")), [["a", "-1"], ["b", "0"], ["c", "-1"]]);
 });
 
 // ---- «Задания» ----
@@ -181,17 +304,31 @@ test("the tab «Задания»: rows are whole-row buttons with a date block, 
 
 test("the tab «Задания»: empty says so and keeps the button under the text; loading and failed have their own line", () => {
   const empty = html(tasksTab(tasksState([])));
-  assert.match(empty, /Открытых заданий по предмету нет\./);
+  assert.match(empty, /Открытых заданий по предмету нет\. Они появляются из конспектов пар; можно добавить своё\./);
   assert.ok(empty.indexOf("Открытых заданий") < empty.indexOf("Добавить задание"), "text first, the button under it");
   assert.doesNotMatch(empty, /Загрузка/);
   const loading = html(tasksTab({ status: "loading", overview: null, error: "" }));
   assert.match(loading, /<p class="muted small" role="status">Загрузка…<\/p>/);
   assert.match(loading, /Добавить задание/, "the add button works without the list");
+  // The tab says it in its own words, whatever text the flow carries.
   const failed = html(tasksTab({ status: "failed", overview: null, error: "Не удалось загрузить сведения о предмете." }));
-  assert.match(failed, /Не удалось загрузить сведения о предмете\./);
+  assert.match(failed, /Не удалось загрузить задания предмета\./);
+  assert.doesNotMatch(failed, /сведения о предмете/);
   assert.match(failed, />Повторить</);
   assert.doesNotMatch(failed, /Загрузка/);
-  assert.equal(tasksTexts.empty, "Открытых заданий по предмету нет.");
+  assert.equal(tasksTexts.failed, "Не удалось загрузить задания предмета.");
+});
+
+test("a failed re-read after «Добавить задание» keeps the list and says so in the tab, with «Повторить»", () => {
+  const kept = html(tasksTab(tasksState([dated("a1", 1)], { rereadFailed: true }), { onOpenAssignment: noop }));
+  assert.match(kept, /task-open-a1/, "the previous list stays");
+  assert.match(kept, /Не удалось загрузить задания предмета\./);
+  assert.match(kept, />Повторить</);
+  // Nothing to show yet and the re-read failed: not «нет заданий», the new one may be missing.
+  const none = html(tasksTab(tasksState([], { rereadFailed: true })));
+  assert.doesNotMatch(none, /Открытых заданий по предмету нет/);
+  assert.match(none, /Не удалось загрузить задания предмета\./);
+  assert.doesNotMatch(html(tasksTab(tasksState([dated("a1", 1)]))), /Не удалось/);
 });
 
 test("«Добавить задание» opens the form with the subject of the page chosen; by default no subject", () => {
@@ -240,34 +377,70 @@ test("the overview carries every open assignment; the binding reads it strictly 
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
-test("a re-read of the overview shows no «Загрузка…», records no new opening and keeps what is shown when it fails", async () => {
+test("a re-read of the overview shows no «Загрузка…», records no new opening; when it fails the previous overview stays and the state says so", async () => {
   const calls = [];
   let fail = false;
+  let reads = 0;
   const api = {
     subjectOverview: async (id) => {
       calls.push(["overview", id]);
       if (fail) throw new Error("boom");
-      return { subjectId: id, name: "x", openedAt: "", deadlines: [], assignments: [], schedule: [], lessons: [], newMaterials: [] };
+      return { subjectId: id, name: "x", openedAt: "", deadlines: [], assignments: [], schedule: [], lessons: [], newMaterials: [], read: ++reads };
     },
     markSubjectOpened: async (id) => void calls.push(["mark", id]),
   };
   const states = [];
-  const flow = new SubjectOverviewFlow(api, (s) => states.push(s.status));
+  const flow = new SubjectOverviewFlow(api, (s) => states.push(s));
   flow.open("s1");
   await settle();
   flow.refresh("s1");
   await settle();
   assert.deepEqual(calls, [["overview", "s1"], ["mark", "s1"], ["overview", "s1"]], "one opening recorded, two reads");
-  assert.deepEqual(states, ["loading", "ready", "ready"]);
+  assert.deepEqual(states.map((s) => s.status), ["loading", "ready", "ready"]);
+  const shown = states[2].overview;
+  assert.equal(shown.read, 2);
   fail = true;
   flow.refresh("s1");
   await settle();
-  assert.deepEqual(states, ["loading", "ready", "ready"], "a failed re-read changes nothing");
+  assert.equal(states.length, 4, "a failed re-read is told, not swallowed");
+  assert.equal(states[3].status, "ready");
+  assert.equal(states[3].overview, shown, "the previous overview is kept");
+  assert.equal(states[3].rereadFailed, true);
+  // «Повторить» re-reads (no new opening, no «Загрузка…»); success clears the flag.
   fail = false;
+  flow.retry("s1");
+  await settle();
+  assert.equal(states.length, 5);
+  assert.equal(states[4].rereadFailed, undefined);
+  assert.equal(states[4].overview.read, 3);
+  assert.equal(calls.filter((c) => c[0] === "mark").length, 1);
   flow.refresh("s1");
   flow.close();
   await settle();
-  assert.equal(states.length, 3, "a closed flow shows no late reply");
+  assert.equal(states.length, 5, "a closed flow shows no late reply");
+});
+
+test("«Повторить» of a first reading that failed opens again; the overview line of the head is gone from the other tabs", async () => {
+  let fail = true;
+  const api = {
+    subjectOverview: async (id) => {
+      if (fail) throw new Error("boom");
+      return { subjectId: id, name: "x", openedAt: "", deadlines: [], assignments: [], schedule: [], lessons: [], newMaterials: [] };
+    },
+    markSubjectOpened: async () => undefined,
+  };
+  const states = [];
+  const flow = new SubjectOverviewFlow(api, (s) => states.push(s.status));
+  flow.open("s1");
+  await settle();
+  assert.deepEqual(states, ["loading", "failed"]);
+  fail = false;
+  flow.retry("s1");
+  await settle();
+  assert.deepEqual(states, ["loading", "failed", "loading", "ready"], "a first reading, as at the opening");
+  const page = src("pages/SubjectsPage.tsx");
+  assert.doesNotMatch(page, /overviewState\.status === "failed"/, "no vague line above the tabs");
+  assert.match(page, /const retryOverview = \(\) => overviewFlow\.current\?\.retry\(shownId\);/);
 });
 
 // ---- the route ----
@@ -338,7 +511,7 @@ const pairsProps = (data, extra = {}) =>
   h(SubjectPairsTab, { api: {}, subject: librarySubject, data, onRetry: noop, onImported: noop, onOpenLesson: noop, ...extra });
 const ready = (lessons, entry = kb()) => ({ status: "ready", entry, lessons, error: "" });
 
-test("the tabs: a bar with three tabs and a tabpanel; until the default is decided none is chosen and the panel says «Загрузка…»", () => {
+test("the tabs: a bar with three tabs and a tabpanel; until the default is decided none is chosen, the panel is empty (no flash) and the first tab is the tab stop", () => {
   const props = {
     subject: librarySubject, tab: "", onTab: noop, overview: idleOverview, onRetryOverview: noop, onOverviewChanged: noop,
     onOpenLesson: noop, lessonsSeen: 0, lessonsEdited: 0, files: h("p", null, "ФАЙЛЫ"),
@@ -348,8 +521,17 @@ test("the tabs: a bar with three tabs and a tabpanel; until the default is decid
   assert.equal((out.match(/role="tab"/g) ?? []).length, 3);
   assert.deepEqual([...out.matchAll(/role="tab"[^>]*>(?:<[^>]+>)*([А-Яа-я]+)/g)].map((m) => m[1]), ["Пары", "Файлы", "Задания"]);
   assert.equal((out.match(/aria-selected="true"/g) ?? []).length, 0);
-  assert.match(out, /<div role="tabpanel" aria-busy="true"><p class="muted small" role="status">Загрузка…<\/p><\/div>/);
+  assert.match(out, /<div role="tabpanel" aria-busy="true" class="tab-panel"><\/div>/, "an empty box of a stable height, no «Загрузка…» at once");
+  assert.doesNotMatch(out, /Загрузка/);
   assert.doesNotMatch(out, /ФАЙЛЫ/);
+  assert.equal((out.match(/tabindex="0"/g) ?? []).length, 1, "the first tab can be reached by keyboard");
+  assert.match(out, /<button[^>]*id="[^"]*-tab-pairs"[^>]*tabindex="0"/);
+  // The «Загрузка…» comes after loadingDelayMs only.
+  const tabs = src("pages/SubjectTabs.tsx");
+  assert.match(tabs, /const slow = useAfterDelay\(!decided, loadingDelayMs\);/);
+  assert.match(tabs, /slow && \(\s*<p className="muted small" role="status">/);
+  assert.equal(loadingDelayMs, 800);
+  assert.match(src("styles.css"), /\.tab-panel \{ min-height: \d+px; \}/);
 
   const files = html(h(SubjectTabs, { ...props, tab: "files" }));
   assert.match(files, /<button[^>]*role="tab"[^>]*id="[^"]*-tab-files"[^>]*aria-selected="true"/);
@@ -362,6 +544,32 @@ test("the tabs: a bar with three tabs and a tabpanel; until the default is decid
   assert.match(html(h(SubjectTabs, { ...props, tab: "tasks" })), /id="[^"]*-panel-tasks"[^>]*>[^]*Добавить задание/);
   // An unknown value of the route is «not chosen».
   assert.match(html(h(SubjectTabs, { ...props, tab: "bogus" })), /aria-busy="true"/);
+});
+
+test("«Пары» stays mounted once shown, hidden and not exposed while another tab is chosen; the other tabs have one panel", () => {
+  const tabs = src("pages/SubjectTabs.tsx");
+  assert.match(tabs, /const \[pairsShown, setPairsShown\] = useState\(false\);\s*if \(chosen === "pairs" && !pairsShown\) \{\s*setPairsShown\(true\);/);
+  assert.match(tabs, /\{pairsShown && \(\s*<div\s+role="tabpanel"\s+id=\{segmentPanelId\(base, "pairs"\)\}[^>]*hidden=\{chosen !== "pairs"\}/);
+  assert.match(tabs, /\{chosen !== "pairs" && \(\s*<div\s+role="tabpanel"/);
+  const props = {
+    subject: librarySubject, onTab: noop, overview: idleOverview, onRetryOverview: noop, onOverviewChanged: noop,
+    onOpenLesson: noop, lessonsSeen: 0, lessonsEdited: 0, files: h("p", null, "ФАЙЛЫ"),
+  };
+  const pairs = html(h(SubjectTabs, { ...props, tab: "pairs" }));
+  assert.equal((pairs.match(/role="tabpanel"/g) ?? []).length, 1);
+  assert.doesNotMatch(pairs, /hidden/);
+  // Not visited yet: no pairs panel at all, so the other tab's panel is the only one.
+  const files = html(h(SubjectTabs, { ...props, tab: "files" }));
+  assert.equal((files.match(/role="tabpanel"/g) ?? []).length, 1);
+  assert.doesNotMatch(files, /-panel-pairs/);
+});
+
+test("the counts on the bar wait for the decision: nothing to count while the tab is undecided", () => {
+  const props = {
+    subject: librarySubject, tab: "", onTab: noop, onRetryOverview: noop, onOverviewChanged: noop,
+    onOpenLesson: noop, lessonsSeen: 0, lessonsEdited: 0, files: null,
+  };
+  assert.doesNotMatch(html(h(SubjectTabs, { ...props, overview: tasksState([dated("a", 1)]) })), /class="num"/);
 });
 
 test("the count of open assignments is `num` text on the tab «Задания», none when there are none", () => {
@@ -413,7 +621,7 @@ test("the tab «Пары» with lessons: rows that open the lesson, no heading o
   const tab = src("pages/SubjectPairsTab.tsx");
   assert.match(tab, /const open = \(lesson: KnowledgeLesson, editing = false\) => props\.onOpenLesson\(lesson, \{ focus: noFocus, materialId: "", editing \}\);/);
   assert.deepEqual(noFocus, { tab: "notes", index: -1 });
-  assert.match(tab, /<LessonList lessons=\{data\.lessons\} onOpen=\{\(l\) => open\(l\)\} \/>/);
+  assert.match(tab, /<LessonList lessons=\{data\.lessons\} onOpen=\{\(l\) => open\(l\)\} extra=\{/);
   assert.match(tab, /onChoose=\{\(c: PastChoice\) => open\(pastLesson\(kbSubject, c\)\)\}/, "a past pair opens the lesson screen too");
 });
 
@@ -421,7 +629,7 @@ test("the tab «Пары»: «Импортировать запись» opens th
   const tab = src("pages/SubjectPairsTab.tsx");
   assert.match(tab, /subject=\{subject\.name\}/);
   assert.match(tab, /onImported=\{props\.onImported\}/);
-  assert.match(tab, /variant=\{importOpen \? undefined : "primary"\}/, "an open panel has its own accent");
+  assert.match(tab, /variant=\{empty && !importOpen \? "primary" : undefined\}/, "the accent only on an empty tab, and not while the panel is open");
   const tabs = src("pages/SubjectTabs.tsx");
   assert.match(tabs, /onImported=\{\(\) => setImports\(\(n\) => n \+ 1\)\}/);
   assert.match(tabs, /useSubjectPairs\(kb, props\.subject\.id, props\.lessonsSeen \+ props\.lessonsEdited \+ imports\)/);
@@ -429,10 +637,10 @@ test("the tab «Пары»: «Импортировать запись» opens th
 
 test("the export of all notes is in the «⋯» of the tab, with the result line and the same texts as the base", () => {
   const tab = src("pages/SubjectPairsTab.tsx");
-  assert.match(tab, /<RowMenu label=\{pairsTexts\.more\} title="Ещё" items=\{items\} onPick=\{\(\) => void onExport\(\)\} \/>/);
+  assert.match(tab, /<RowMenu label=\{pairsTexts\.more\} title=\{pairsTexts\.moreTitle\} items=\{items\} onPick=\{\(\) => void onExport\(\)\} \/>/);
   assert.match(tab, /props\.api\.exportSubject\(data\.entry\.key\)/);
   assert.match(tab, /setMessage\(exportResultLine\(r\)\)/);
-  assert.match(tab, /disabled: exportState\.disabled, hint: exportState\.hint/);
+  assert.match(tab, /disabled: exportState\.disabled,\s*hint: exportState\.hint,/);
   assert.equal(pairsTexts.exportHint, "Сохранить все пары предмета в один файл .md — по датам, с конспектом и текстом лекции.");
 });
 
@@ -475,14 +683,24 @@ test("the crumbs of the tickets: «Предметы / <предмет> / Бил�
   const calls = [];
   const nav = { onSubjects: () => calls.push("subjects"), onSubject: (id) => calls.push(`subject:${id}`) };
   const crumbs = ticketsCrumbs({ id: "s1", name: "Матанализ" }, nav);
-  assert.deepEqual(crumbs.map((c) => c.label), ["Предметы", "Матанализ", "Билеты"]);
+  assert.deepEqual(crumbs.map((c) => c.label), ["Предметы", "Матанализ", "Билеты к экзамену"]);
   crumbs[0].onClick();
   crumbs[1].onClick();
   assert.deepEqual(calls, ["subjects", "subject:s1"]);
   assert.equal(crumbs[2].onClick, undefined, "the last level is the page");
   // Before the subject is known no crumb names a wrong one.
-  assert.deepEqual(ticketsCrumbs(null, nav).map((c) => c.label), ["Предметы", "Билеты"]);
+  assert.deepEqual(ticketsCrumbs(null, nav).map((c) => c.label), ["Предметы", "Билеты к экзамену"]);
   assert.equal(ticketTexts.back, "Предметы");
+});
+
+test("the tickets page has one name, and opened from a subject it hides the select behind «Сменить предмет»", () => {
+  assert.equal(ticketTexts.title, "Билеты к экзамену");
+  assert.equal(ticketTexts.change, "Сменить предмет");
+  assert.equal(ticketTexts.noSubjectsTitle, "Сначала нужен предмет", "the empty state keeps its title");
+  const page = src("pages/TicketsPage.tsx");
+  assert.match(page, /const pinned = wanted\.current !== "" && !changing;/);
+  assert.match(page, /\{pinned \? \([^]*?<Button variant="ghost" size="sm" disabled=\{blocked\} onClick=\{\(\) => setChanging\(true\)\}>\s*\{texts\.change\}[^]*?\) : \(\s*<Field label=\{texts\.subject\}>/);
+  assert.match(page, /pick\.current\?\.querySelector\("select"\)\?\.focus\(\)/, "the pressed button is gone: the select takes the focus");
 });
 
 // ---- the tree ----
@@ -563,10 +781,11 @@ test("«Добавить файл» is the first thing of the tab «Файлы»
   assert.match(page, /<SubjectTabs\s+key=\{subject\.id\}/, "another subject: the tabs start afresh");
 });
 
-test("a failed overview has «Повторить» on the other tabs; on «Задания» the tab shows it itself", () => {
+test("a failed overview is told on «Задания» only (its own line and «Повторить»); «Пары» and «Файлы» go on without it", () => {
   const page = src("pages/SubjectsPage.tsx");
-  assert.match(page, /\{overviewState\.status === "failed" && tab !== "tasks" && \(\s*<ErrorLine text=\{overviewState\.error\} onRefresh=\{retryOverview\} onRetry=\{retryOverview\} \/>/);
-  assert.match(page, /const retryOverview = \(\) => overviewFlow\.current\?\.open\(shownId\);/);
+  assert.doesNotMatch(page, /overviewState\.error|overviewState\.status === "failed"/);
+  assert.match(page, /onRetryOverview=\{retryOverview\}/);
+  assert.match(src("pages/SubjectTasksTab.tsx"), /\(state\.status === "failed" \|\| state\.rereadFailed === true\) && \(\s*<ErrorLine text=\{tasksTexts\.failed\}/);
 });
 
 test("App puts the tab into the route, and only the tab", () => {

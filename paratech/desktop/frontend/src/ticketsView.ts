@@ -24,8 +24,9 @@ export const ticketsPollMs = 3000;
 export const filedFolder = "Билеты";
 
 export const texts = {
-  title: "Билеты",
+  title: "Билеты к экзамену",
   back: "Предметы",
+  change: "Сменить предмет",
   loading: "Загрузка…",
   loadFailed: "Не удалось загрузить. Попробуйте ещё раз.",
   subject: "Предмет",

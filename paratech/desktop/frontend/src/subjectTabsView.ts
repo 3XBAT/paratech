@@ -3,8 +3,10 @@
 // файл». Pure, no React. Titles and names are the student's or the model's text: the page renders them as text nodes.
 
 import type { KnowledgeSubject } from "./bindings/knowledgeBase.js";
-import type { LibrarySubject, SubjectAssignment } from "./bindings/library.js";
+import type { LessonStatus, LibrarySubject, SubjectAssignment, SubjectLesson } from "./bindings/library.js";
 import { dayMonth, type DaysChip, daysChip, weekdayOf } from "./libraryView.js";
+import type { IconName } from "./ui/Icon.js";
+import type { ChipKind } from "./ui/StatusChip.js";
 
 export type SubjectTab = "pairs" | "files" | "tasks";
 
@@ -19,11 +21,14 @@ export const tabTexts = {
   loading: "Загрузка…",
 } as const;
 
+/** The inline «Загрузка…» of a tab that is not chosen yet shows only after this long: a quick read leaves no flash. */
+export const loadingDelayMs = 800;
+
 export const headTexts = {
   tickets: "Билеты к экзамену",
   more: "Ещё действия с предметом",
-  moreTitle: "Ещё",
-  busy: "Идёт другое действие: дождитесь его окончания.",
+  moreTitle: "Ещё: предмет",
+  busy: "Нельзя удалить, пока идёт действие с файлами предмета.",
 } as const;
 
 export const pairsTexts = {
@@ -31,13 +36,14 @@ export const pairsTexts = {
   export: "Сохранить все конспекты одним файлом",
   exporting: "Сохранение…",
   exportHint: "Сохранить все пары предмета в один файл .md — по датам, с конспектом и текстом лекции.",
-  exportEmpty: "Экспортировать нечего: у предмета пока нет пар с конспектом.",
+  exportEmpty: "Нельзя сохранить: у предмета пока нет пар с конспектом.",
   more: "Ещё действия с парами",
+  moreTitle: "Ещё: пары",
 } as const;
 
 export const tasksTexts = {
   add: "Добавить задание",
-  empty: "Открытых заданий по предмету нет.",
+  empty: "Открытых заданий по предмету нет. Они появляются из конспектов пар; можно добавить своё.",
   overdue: "Просрочено",
   noDue: "Без срока",
   failed: "Не удалось загрузить задания предмета.",
@@ -89,14 +95,67 @@ export function pairsSubject(entry: KnowledgeSubject | null, subject: Pick<Libra
   return entry ?? { key: `library:${subject.id}`, name: subject.name, lessons: 0, latest: "", noSubject: false, subjectId: subject.id };
 }
 
-/** The «⋯» item of the tab «Пары»: off with a visible reason when there is nothing to save. */
+/** The «⋯» item of the tab «Пары»: off with a visible reason when there is nothing to save, off while it runs. */
 export function exportItem(
-  state: { loaded: boolean; hasEntry: boolean; nothingToExport: boolean; exporting: boolean },
+  state: { hasEntry: boolean; nothingToExport: boolean; exporting: boolean },
 ): { disabled: boolean; hint: string } {
-  if (state.exporting || !state.loaded) {
+  if (state.exporting) {
     return { disabled: true, hint: "" };
   }
   return state.hasEntry && !state.nothingToExport ? { disabled: false, hint: "" } : { disabled: true, hint: pairsTexts.exportEmpty };
+}
+
+// ---- The status of a row of «Пары» ----
+
+export interface LessonChip {
+  kind: ChipKind;
+  icon: IconName | null;
+  label: string;
+}
+
+const lessonChips: Readonly<Record<LessonStatus, LessonChip>> = {
+  recorded: { kind: "neutral", icon: "rec", label: "Записано" },
+  transcribed: { kind: "neutral", icon: "doc", label: "Расшифровано" },
+  summaryReady: { kind: "ok", icon: "ok", label: "Конспект готов" },
+  failed: { kind: "fail", icon: "warn", label: "Ошибка" },
+};
+
+export function lessonChip(status: LessonStatus): LessonChip {
+  return lessonChips[status];
+}
+
+/** What a row of «Пары» says about its recording besides the title: the status chip and the «новое» mark. */
+export interface LessonMark {
+  chip: LessonChip;
+  fresh: boolean;
+}
+
+/**
+ * The marks of the rows by `recordingId`, from the lessons of the overview (the core sends the latest ones only). A row
+ * the overview does not know (older, or a note without a recording) has no entry and shows no chip.
+ */
+export function lessonMarks(lessons: readonly Pick<SubjectLesson, "recordingId" | "status" | "summaryNew">[]): ReadonlyMap<string, LessonMark> {
+  const marks = new Map<string, LessonMark>();
+  for (const l of lessons) {
+    if (l.recordingId !== "") {
+      marks.set(l.recordingId, { chip: lessonChip(l.status), fresh: l.summaryNew });
+    }
+  }
+  return marks;
+}
+
+// ---- A delayed «Загрузка…» ----
+
+/** The timer functions of the platform; tests pass fakes. */
+export interface Timers {
+  set(fn: () => void, ms: number): unknown;
+  clear(handle: unknown): void;
+}
+
+/** Calls `fire` after `ms` unless the returned function (cancel) is called first. */
+export function startDelay(ms: number, fire: () => void, timers: Timers = { set: (fn, t) => setTimeout(fn, t), clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) }): () => void {
+  const handle = timers.set(fire, ms);
+  return () => timers.clear(handle);
 }
 
 // ---- «Задания» ----

@@ -70,9 +70,11 @@ export function SegmentTabs<T extends string>(props: {
     props.onChange(next);
     tabs.current.get(next)?.focus();
   };
+  // Nothing selected (the page has not chosen yet): the first tab is the tab stop, so the bar stays reachable by keyboard.
+  const none = !props.options.some((o) => o.value === props.value);
   return (
     <div className="seg lg" role="tablist" aria-label={props.label} onKeyDown={onKey}>
-      {props.options.map((o) => {
+      {props.options.map((o, i) => {
         const selected = o.value === props.value;
         return (
           <button
@@ -89,7 +91,7 @@ export function SegmentTabs<T extends string>(props: {
             id={segmentTabId(props.base, o.value)}
             aria-selected={selected}
             aria-controls={selected ? segmentPanelId(props.base, o.value) : undefined}
-            tabIndex={selected ? 0 : -1}
+            tabIndex={selected || (none && i === 0) ? 0 : -1}
             onClick={() => props.onChange(o.value)}
           >
             {o.label}

@@ -39,6 +39,16 @@ export function TicketsPage(props: {
   const [busy, setBusy] = useState("");
   const running = useRef(false); // a double click comes before the re-render that disables the button
   const wanted = useRef(props.subjectId ?? ""); // the route's subject, taken once when the list arrives
+  // Opened from a subject: no select until «Сменить предмет» is pressed.
+  const [changing, setChanging] = useState(false);
+  const pinned = wanted.current !== "" && !changing;
+  const pick = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (changing) {
+      pick.current?.querySelector("select")?.focus(); // the button that was pressed is gone
+    }
+  }, [changing]);
 
   useEffect(() => {
     let active = true;
@@ -167,18 +177,25 @@ export function TicketsPage(props: {
       )}
       {subject !== null && subjects !== null && (
         <>
-          <div className="tk-pick">
-            <Field label={texts.subject}>
-              {(id) => (
-                <Select id={id} value={subjectId} disabled={blocked} onChange={(e) => setSubjectId(e.target.value)}>
-                  {subjects.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </Field>
+          <div className="tk-pick" ref={pick}>
+            {pinned ? (
+              // Opened from a subject: its name is in the crumbs, the choice stays one click away.
+              <Button variant="ghost" size="sm" disabled={blocked} onClick={() => setChanging(true)}>
+                {texts.change}
+              </Button>
+            ) : (
+              <Field label={texts.subject}>
+                {(id) => (
+                  <Select id={id} value={subjectId} disabled={blocked} onChange={(e) => setSubjectId(e.target.value)}>
+                    {subjects.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
+            )}
           </div>
 
           <form

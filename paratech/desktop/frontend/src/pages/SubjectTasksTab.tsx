@@ -16,7 +16,7 @@ export function SubjectTasksTab(props: {
   subjectId: string;
   /** The overview of the page: the assignments come from it. */
   state: OverviewState;
-  /** «Повторить» after a failed overview. */
+  /** «Повторить» after a failed overview or a failed re-read. */
   onRetry: () => void;
   /** An assignment was added: the overview is read again. */
   onCreated: () => void;
@@ -58,7 +58,7 @@ export function SubjectTasksTab(props: {
 
   return (
     <>
-      {ready && rows.length === 0 && <p className="muted">{tasksTexts.empty}</p>}
+      {ready && rows.length === 0 && state.rereadFailed !== true && <p className="muted">{tasksTexts.empty}</p>}
       <div className="tab-acts">
         <Button id={addTaskId} variant="primary" icon="plus" onClick={() => setAdding(true)}>
           {tasksTexts.add}
@@ -77,7 +77,10 @@ export function SubjectTasksTab(props: {
           }}
         />
       )}
-      {state.status === "failed" && <ErrorLine text={state.error} onRefresh={props.onRetry} onRetry={props.onRetry} />}
+      {/* A failed re-read keeps the list shown; the new assignment may be missing from it, so the line says so. */}
+      {(state.status === "failed" || state.rereadFailed === true) && (
+        <ErrorLine text={tasksTexts.failed} onRefresh={props.onRetry} onRetry={props.onRetry} />
+      )}
       {!ready && state.status !== "failed" && (
         <p className="muted small" role="status">
           {tabTexts.loading}

@@ -19,9 +19,11 @@ import {
   pastLesson,
 } from "../knowledgeView.js";
 import { importTexts } from "../recordingImportView.js";
-import { exportItem, knowledgeEntryFor, pairsSubject, pairsTexts, tabTexts } from "../subjectTabsView.js";
+import { texts } from "../libraryView.js";
+import { exportItem, knowledgeEntryFor, type LessonMark, pairsSubject, pairsTexts, tabTexts } from "../subjectTabsView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine, type ResultKind } from "../ui/controls.js";
+import { StatusChip } from "../ui/StatusChip.js";
 import { RowMenu, type RowMenuItem } from "../ui/RowMenu.js";
 import { ErrorLine } from "./FileRows.js";
 import { AddPastNote, LessonList } from "./KnowledgeParts.js";
@@ -101,11 +103,15 @@ export function SubjectPairsTab(props: {
   onImported: () => void;
   /** A row (or a past pair chosen in «Добавить конспект прошедшей пары») opens the lesson screen. */
   onOpenLesson: (lesson: KnowledgeLesson, opening: LessonOpening) => void;
+  /** Status chip and «новое» by `recordingId`, from the overview; a row without an entry shows none. */
+  marks?: ReadonlyMap<string, LessonMark>;
 }) {
   const { data, subject } = props;
   const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState<{ kind: ResultKind; text: string } | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
+  // One form at a time: «Импортировать запись» or «Добавить конспект прошедшей пары».
+  const [form, setForm] = useState<"none" | "import" | "past">("none");
+  const importOpen = form === "import";
   const acting = useRef(false);
   const mounted = useRef(true);
   const importing = useMemo(() => recordingImportApi(callByName), []);
@@ -133,9 +139,15 @@ export function SubjectPairsTab(props: {
   const open = (lesson: KnowledgeLesson, editing = false) => props.onOpenLesson(lesson, { focus: noFocus, materialId: "", editing });
   const empty = data.lessons.length === 0;
   const nothingToExport = data.lessons.every(isNoteOnly);
-  const exportState = exportItem({ loaded: true, hasEntry: data.entry !== null, nothingToExport, exporting });
+  const exportState = exportItem({ hasEntry: data.entry !== null, nothingToExport, exporting });
   const items: readonly RowMenuItem<"export">[] = [
-    { key: "export", label: exporting ? pairsTexts.exporting : pairsTexts.export, disabled: exportState.disabled, hint: exportState.hint },
+    {
+      key: "export",
+      label: exporting ? pairsTexts.exporting : pairsTexts.export,
+      disabled: exportState.disabled,
+      hint: exportState.hint,
+      title: pairsTexts.exportHint,
+    },
   ];
 
   async function onExport() {
@@ -168,11 +180,18 @@ export function SubjectPairsTab(props: {
     <>
       {empty && <p className="muted">{pairsTexts.empty}</p>}
       <div className="tab-acts">
-        <Button variant={importOpen ? undefined : "primary"} icon="up" aria-expanded={importOpen} onClick={() => setImportOpen((o) => !o)}>
+        {/* The accent only while there is nothing yet: with lessons the import is one way among others. */}
+        <Button variant={empty && !importOpen ? "primary" : undefined} icon="up" aria-expanded={importOpen} onClick={() => setForm(importOpen ? "none" : "import")}>
           {importTexts.open}
         </Button>
-        <AddPastNote subject={kbSubject} lectures={data.lessons} onChoose={(c: PastChoice) => open(pastLesson(kbSubject, c))} />
-        <RowMenu label={pairsTexts.more} title="Ещё" items={items} onPick={() => void onExport()} />
+        <AddPastNote
+          subject={kbSubject}
+          lectures={data.lessons}
+          open={form === "past"}
+          onOpenChange={(o) => setForm(o ? "past" : "none")}
+          onChoose={(c: PastChoice) => open(pastLesson(kbSubject, c))}
+        />
+        <RowMenu label={pairsTexts.more} title={pairsTexts.moreTitle} items={items} onPick={() => void onExport()} />
       </div>
       {importOpen && (
         <RecordingImportPanel
@@ -180,7 +199,7 @@ export function SubjectPairsTab(props: {
           loadLessons={async () => (await today.today()).lessons}
           subject={subject.name}
           onImported={props.onImported}
-          onClose={() => setImportOpen(false)}
+          onClose={() => setForm("none")}
         />
       )}
       {message && (
@@ -188,7 +207,25 @@ export function SubjectPairsTab(props: {
           {message.text}
         </ResultLine>
       )}
-      {!empty && <LessonList lessons={data.lessons} onOpen={(l) => open(l)} />}
+      {!empty && <LessonList lessons={data.lessons} onOpen={(l) => open(l)} extra={(l) => lessonMarkView(props.marks?.get(l.recordingId))} />}
+    </>
+  );
+}
+
+/**
+ * The status chip and «новое» of a row, or null when the overview does not know the recording (an older pair, a note).
+ * Spans only: the mark sits inside the button of the row.
+ */
+function lessonMarkView(m: LessonMark | undefined) {
+  if (m === undefined) {
+    return null;
+  }
+  return (
+    <>
+      {m.fresh && <span className="fresh">{texts.fresh}</span>}
+      <StatusChip kind={m.chip.kind} icon={m.chip.icon}>
+        {m.chip.label}
+      </StatusChip>
     </>
   );
 }

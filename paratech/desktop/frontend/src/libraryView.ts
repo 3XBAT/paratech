@@ -252,6 +252,8 @@ export interface OverviewState {
   status: "idle" | "loading" | "ready" | "failed";
   overview: SubjectOverview | null;
   error: string;
+  /** The last re-read after a change on the page failed: `overview` is the previous one, still shown. */
+  rereadFailed?: boolean;
 }
 
 export const idleOverview: OverviewState = { status: "idle", overview: null, error: "" };
@@ -264,6 +266,8 @@ export const idleOverview: OverviewState = { status: "idle", overview: null, err
 export class SubjectOverviewFlow {
   private token = 0;
   private refreshes = 0;
+  /** The overview of this opening, once read: a failed re-read keeps it. */
+  private loaded: SubjectOverview | null = null;
 
   constructor(
     private readonly api: Pick<LibraryApi, "subjectOverview" | "markSubjectOpened">,
@@ -272,12 +276,14 @@ export class SubjectOverviewFlow {
 
   open(subjectId: string): void {
     const mine = ++this.token;
+    this.loaded = null;
     this.onChange({ status: "loading", overview: null, error: "" });
     this.api.subjectOverview(subjectId).then(
       (overview) => {
         if (mine !== this.token) {
           return;
         }
+        this.loaded = overview;
         this.onChange({ status: "ready", overview, error: "" });
         void this.mark(subjectId);
       },
@@ -291,7 +297,8 @@ export class SubjectOverviewFlow {
 
   /**
    * Reads the overview again after a change made on the page (an assignment added): no «Загрузка…», no new
-   * opening is recorded, and a failed read keeps what is shown. A late reply of a superseded read never shows.
+   * opening is recorded. A failed read keeps what is shown and says so (`rereadFailed`), so the change is never lost
+   * silently. A late reply of a superseded read never shows.
    */
   refresh(subjectId: string): void {
     const mine = ++this.refreshes;
@@ -299,11 +306,29 @@ export class SubjectOverviewFlow {
     this.api.subjectOverview(subjectId).then(
       (overview) => {
         if (mine === this.refreshes && opened === this.token) {
+          this.loaded = overview;
           this.onChange({ status: "ready", overview, error: "" });
         }
       },
-      () => undefined,
+      () => {
+        if (mine === this.refreshes && opened === this.token) {
+          this.onChange(
+            this.loaded === null
+              ? { status: "failed", overview: null, error: texts.overviewFailed }
+              : { status: "ready", overview: this.loaded, error: "", rereadFailed: true },
+          );
+        }
+      },
     );
+  }
+
+  /** «Повторить»: a first reading when there is nothing yet (it failed), else the re-read that failed. */
+  retry(subjectId: string): void {
+    if (this.loaded === null) {
+      this.open(subjectId);
+    } else {
+      this.refresh(subjectId);
+    }
   }
 
   close(): void {

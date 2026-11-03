@@ -357,8 +357,10 @@ export function SubjectsPage(props: {
       overviewFlow.current = null;
     };
   }, [api, shownId]);
-  // «Повторить» after a failed overview reads it as a first opening; an assignment added on the tab «Задания» only re-reads.
-  const retryOverview = () => overviewFlow.current?.open(shownId);
+  // The overview feeds the tab «Задания», the schedule line and the marks of the rows. Only «Задания» says when it failed
+  // (its «Повторить» is the flow's retry: a first reading, or the re-read that failed); the other tabs go on without it.
+  // An assignment added on the tab «Задания» only re-reads.
+  const retryOverview = () => overviewFlow.current?.retry(shownId);
   const rereadOverview = () => overviewFlow.current?.refresh(shownId);
 
   const subject = subjects?.find((s) => s.id === shownId) ?? null;
@@ -794,9 +796,6 @@ export function SubjectsPage(props: {
               onRemove={(opener) => removal.open(subject, opener)}
             />
             {subjectForm}
-            {overviewState.status === "failed" && tab !== "tasks" && (
-              <ErrorLine text={overviewState.error} onRefresh={retryOverview} onRetry={retryOverview} />
-            )}
             <TeachersBlock key={subject.id} teachers={subject.teachers} state={teacherStateFor(teacher, subject.id)} on={teacherActions} />
             <SubjectTabs
               key={subject.id}

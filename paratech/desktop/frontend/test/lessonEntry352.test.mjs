@@ -312,7 +312,8 @@ test("the tab a recording's lesson link opens: the lecture text, else the summar
 // subjectTabs353.test.mjs).
 test("the lessons of a subject open the lesson screen from the tab «Пары»; the overview's own rows and their opener are gone", () => {
   const tab = src("pages/SubjectPairsTab.tsx");
-  assert.match(tab, /<LessonList lessons=\{data\.lessons\} onOpen=\{\(l\) => open\(l\)\} \/>/);
+  // TASK-353 fix round: the rows also get the status chip of the overview (`extra`); the opener is the same.
+  assert.match(tab, /<LessonList lessons=\{data\.lessons\} onOpen=\{\(l\) => open\(l\)\} extra=\{/);
   assert.match(src("pages/SubjectsPage.tsx"), /onOpenLesson=\{\(lesson, opening\) => props\.onOpenKnowledgeLesson\?\.\(lesson, opening\)\}/);
   assert.match(src("App.tsx"), /onOpenKnowledgeLesson=\{props\.onOpenLesson\}/);
   assert.doesNotMatch(src("App.tsx"), /onOpenRecording|openRecording\b/);
