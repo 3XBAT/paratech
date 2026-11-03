@@ -33,8 +33,8 @@ func validCore() Core {
 		RecordingImport: &fakeImportUC{},
 		Knowledge:       &fakeKnowledge{},
 		Library:         &fakeLibrary{}, MaterialViews: newMemViews(), Opener: &fakeOpener{}, SubjectOverview: &fakeOverview{},
-		CallLinks:       &fakeCallOpener{},
-		Notes: &fakeNotesUC{},
+		CallLinks: &fakeCallOpener{},
+		Notes:     &fakeNotesUC{},
 		Agent: AgentCore{
 			Driver: &fakeAgentDriver{}, Link: &fakeConnections{}, Panel: NewAgentPanel(discard()), Life: context.Background(),
 			Journal: &fakeJournal{}, Clock: fixedClock{}, Chats: &fakeChats{},

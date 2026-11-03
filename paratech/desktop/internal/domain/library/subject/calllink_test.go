@@ -186,7 +186,9 @@ func TestPrintingHidesCallLink(t *testing.T) {
 	if _, err := s.SetCallLink(callLink, t0); err != nil {
 		t.Fatal(err)
 	}
-	leaks := func(out string) bool { return strings.Contains(out, callLinkPwd) || strings.Contains(out, "1234567890") }
+	leaks := func(out string) bool {
+		return strings.Contains(out, callLinkPwd) || strings.Contains(out, "1234567890")
+	}
 	for label, v := range map[string]any{"subject": s, "link": s.CallLink(), "subjects": []*Subject{s}} {
 		for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q"} {
 			if out := fmt.Sprintf(verb, v); leaks(out) {

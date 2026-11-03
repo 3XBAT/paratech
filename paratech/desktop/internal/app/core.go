@@ -491,8 +491,8 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Knowledge:       knowledge,
 		Library:         lib,
 		// «Открыть в Word / PowerPoint»: a named copy in the artifact store, started below that root only.
-		MaterialViews:   store,
-		Opener:          fileopen.New(filepath.Join(dataDir, artifactsDir)),
+		MaterialViews: store,
+		Opener:        fileopen.New(filepath.Join(dataDir, artifactsDir)),
 		// «Подключиться»: the call link of a subject, re-checked and opened through a .url file (ADR-0032).
 		CallLinks:       weblink.New(),
 		SubjectOverview: subjectPage,
