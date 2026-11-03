@@ -1,4 +1,4 @@
-import { type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type MouseEvent, type ReactNode, type Ref, useEffect, useRef, useState } from "react";
 import { copyable, copyNote, copyNoteMs, type CopyState, copyOutcome, messageActionTexts } from "../agentView.js";
 import { Icon, type IconName } from "../ui/Icon.js";
 
@@ -13,15 +13,21 @@ export function ActionButton(props: {
   className?: string;
   note?: boolean;
   busy?: boolean;
+  disabled?: boolean;
+  /** "menuitem" inside the chat list menu. */
+  role?: "menuitem";
+  ref?: Ref<HTMLButtonElement>;
   onClick(e: MouseEvent<HTMLButtonElement>): void;
 }) {
   return (
     <button
       type="button"
+      ref={props.ref}
+      role={props.role}
       className={["ag-act", props.className, props.note ? "ag-act-note" : ""].filter((c) => c !== undefined && c !== "").join(" ")}
       aria-label={props.label}
       aria-busy={props.busy || undefined}
-      disabled={props.busy}
+      disabled={props.busy || props.disabled}
       onClick={props.onClick}
     >
       <Icon name={props.icon} />

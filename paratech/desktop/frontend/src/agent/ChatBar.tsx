@@ -1,6 +1,7 @@
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { type ChatRow, type ChatSections, chatTexts, checkChatTitle } from "../agentView.js";
-import { Button } from "../ui/Button.js";
+import { Icon } from "../ui/Icon.js";
+import { ActionButton } from "./MessageActions.js";
 
 // Chat titles come from the student (or the core's default): they reach the page as text nodes only.
 
@@ -18,22 +19,34 @@ export interface ChatBarProps {
   onRestore(threadId: string): void;
 }
 
+/** A running request in a chat that is not open: a quiet clock in the muted colour, named for screen readers. */
 function RunMark() {
-  return <span className="ag-chat-run small">{chatTexts.running}</span>;
+  return (
+    <span className="ag-chat-run">
+      <Icon name="clock" />
+      <span className="ag-vh">{chatTexts.running}</span>
+    </span>
+  );
 }
 
-function ChatItem(props: { row: ChatRow; open: boolean; onOpen(): void; onToggle(): void }) {
+/** One row of the chat list. The mark of a running request is only for the chats that are not open: the open one shows it in the thread. */
+export function ChatItem(props: { row: ChatRow; open: boolean; onOpen(): void; onToggle(): void }) {
   const { row } = props;
   const action = row.archived ? chatTexts.restore : chatTexts.toArchive;
   return (
     <li role="none" className="ag-chat-row">
       <button type="button" role="menuitem" className="ag-chat-item" aria-current={props.open ? "true" : undefined} onClick={props.onOpen}>
         <span className="ag-chat-name">{row.title}</span>
-        {row.running && <RunMark />}
+        {row.running && !props.open && <RunMark />}
       </button>
-      <button type="button" role="menuitem" className="ag-chat-act small" aria-label={`${action}: ${row.title}`} onClick={props.onToggle}>
-        {action}
-      </button>
+      <ActionButton
+        role="menuitem"
+        icon={row.archived ? "unarchive" : "archive"}
+        label={`${action}: ${row.title}`}
+        tip={action}
+        className="ag-act-side"
+        onClick={props.onToggle}
+      />
     </li>
   );
 }
@@ -227,33 +240,27 @@ export function ChatBar(props: ChatBarProps) {
             >
               <span className="ag-chat-name">{title}</span>
               {openChat?.archived === true && <span className="ag-chat-tag small">{chatTexts.archivedMark}</span>}
-              {openChat?.running === true && <RunMark />}
               <svg className="ag-chat-caret" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M6 9l6 6 6-6" />
               </svg>
             </button>
           </>
         )}
+        {!editing && (
+          <div className="ag-chat-actions">
+            <ActionButton ref={renameBtn} icon="pencil" label={chatTexts.rename} className="ag-act-head" disabled={openChat === null} onClick={startEdit} />
+            {openChat !== null && (
+              <ActionButton
+                icon={openChat.archived ? "unarchive" : "archive"}
+                label={openChat.archived ? chatTexts.restore : chatTexts.toArchive}
+                className="ag-act-head"
+                onClick={() => (openChat.archived ? props.onRestore(openChat.threadId) : props.onArchive(openChat.threadId))}
+              />
+            )}
+            <ActionButton icon="plus" label={chatTexts.newChat} className="ag-act-head" onClick={props.onNew} />
+          </div>
+        )}
       </div>
-      {!editing && (
-        <div className="ag-chat-actions">
-          <button type="button" ref={renameBtn} className="btn ghost sm" disabled={openChat === null} onClick={startEdit}>
-            {chatTexts.rename}
-          </button>
-          {openChat !== null && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => (openChat.archived ? props.onRestore(openChat.threadId) : props.onArchive(openChat.threadId))}
-            >
-              {openChat.archived ? chatTexts.restore : chatTexts.toArchive}
-            </Button>
-          )}
-          <Button size="sm" variant="secondary" onClick={props.onNew}>
-            {chatTexts.newChat}
-          </Button>
-        </div>
-      )}
       {menu && (
         <ul id={menuId} ref={menuRef} className="ag-chat-menu" role="menu" aria-label={chatTexts.list} onKeyDown={onMenuKey}>
           {sections.active.length === 0 && (
