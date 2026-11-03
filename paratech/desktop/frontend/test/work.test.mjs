@@ -266,7 +266,9 @@ test("approve: the editor with the sections, both buttons, the limits", () => {
   assert.match(out, /Выше/);
   assert.match(out, /Ниже/);
   // Nothing edited: «Сохранить план» waits, «Утвердить план» does not.
+  // «Сохранить план» is the form's own commit button and keeps its word; «Добавить раздел» (TASK-368) is a plus icon.
   const save = /<button[^>]*disabled=""[^>]*>Сохранить план/.test(out);
+  assert.match(out, /<use href="#i-plus"><\/use>/, "«Добавить раздел» is a plus icon");
   const approve = /<button[^>]*disabled=""[^>]*>Утвердить план/.test(out);
   assert.equal(save, true);
   assert.equal(approve, false);

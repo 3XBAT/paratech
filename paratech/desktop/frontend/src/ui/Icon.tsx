@@ -39,7 +39,18 @@ export type IconName =
   | "chevr"
   | "pencil"
   | "archive"
-  | "unarchive";
+  | "unarchive"
+  | "open"
+  | "undo"
+  | "trash"
+  | "chevup"
+  | "copysel"
+  | "chevl"
+  | "arrowup"
+  | "arrowdown"
+  | "swap"
+  | "paste"
+  | "insert";
 
 /** Rendered once per window, before any Icon. */
 export function IconSprite() {
@@ -180,6 +191,50 @@ export function IconSprite() {
       <symbol id="i-unarchive" viewBox="0 0 24 24">
         <rect x="3.5" y="4.5" width="17" height="4" rx="1" />
         <path d="M5 8.5V18a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 18V8.5M12 16v-5M9.5 13l2.5-2.5 2.5 2.5" />
+      </symbol>
+      {/* TASK-368, drawn by hand in the same 24 grid: open (an arrow out of a box: opens outside the app), undo (a curved
+          arrow back). */}
+      <symbol id="i-open" viewBox="0 0 24 24">
+        <path d="M14 4h6v6M20 4l-9 9M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10" />
+      </symbol>
+      <symbol id="i-undo" viewBox="0 0 24 24">
+        <path d="M9 14L4 9l5-5M4 9h9a6 6 0 0 1 0 12h-3" />
+      </symbol>
+      {/* TASK-368 (screens): trash (delete), chevup (the upward chevron next to «chev»), copysel (below). */}
+      <symbol id="i-trash" viewBox="0 0 24 24">
+        <path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.8 12a1.5 1.5 0 0 0 1.5 1.4h6.4a1.5 1.5 0 0 0 1.5-1.4l.8-12M10 11v6M14 11v6" />
+      </symbol>
+      <symbol id="i-chevup" viewBox="0 0 24 24">
+        <path d="M6 15l6-6 6 6" />
+      </symbol>
+      {/* copysel: the copy sheets with a text cursor (an I-beam) on the front one: only the selected part. Solid strokes. */}
+      <symbol id="i-copysel" viewBox="0 0 24 24">
+        <rect x="9" y="9" width="11" height="11" rx="2" />
+        <path d="M15 9V6.5A1.5 1.5 0 0 0 13.5 5h-8A1.5 1.5 0 0 0 4 6.5v8A1.5 1.5 0 0 0 5.5 16H9" />
+        <path d="M12.5 12h4M14.5 12v5M12.5 17h4" />
+      </symbol>
+      {/* TASK-368 (review): chevl mirrors chevr; arrowup and arrowdown are plain arrows (move a row); swap is two opposite
+          arrows (replace); paste is a clipboard with text; insert is an arrow into a field (put the text back). */}
+      <symbol id="i-chevl" viewBox="0 0 24 24">
+        <path d="M15 6l-6 6 6 6" />
+      </symbol>
+      <symbol id="i-arrowup" viewBox="0 0 24 24">
+        <path d="M12 19V5M6.5 10.5L12 5l5.5 5.5" />
+      </symbol>
+      <symbol id="i-arrowdown" viewBox="0 0 24 24">
+        <path d="M12 5v14M6.5 13.5L12 19l5.5-5.5" />
+      </symbol>
+      <symbol id="i-swap" viewBox="0 0 24 24">
+        <path d="M4 8h14M14.5 4.5L18 8l-3.5 3.5M20 16H6M9.5 12.5L6 16l3.5 3.5" />
+      </symbol>
+      <symbol id="i-paste" viewBox="0 0 24 24">
+        <rect x="5" y="5" width="14" height="16" rx="2" />
+        <rect x="9" y="3" width="6" height="4" rx="1" />
+        <path d="M8.5 12h7M8.5 16h5" />
+      </symbol>
+      <symbol id="i-insert" viewBox="0 0 24 24">
+        <path d="M12 3.5v7M8.5 7.5l3.5 3.5 3.5-3.5" />
+        <rect x="3.5" y="13.5" width="17" height="7" rx="2" />
       </symbol>
     </svg>
   );

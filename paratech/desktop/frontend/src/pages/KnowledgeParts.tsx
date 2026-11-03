@@ -20,6 +20,8 @@ import {
   hitPlace,
   isNoteOnly,
   kindOptions,
+  knowledgeToolTexts,
+  setSubjectLabel,
   lectureLabel,
   lessonsWithoutNotes,
   localDay,
@@ -35,6 +37,7 @@ import { noSubjectText } from "../ownNotesView.js";
 import { Button } from "../ui/Button.js";
 import { Card, Field, Input, ResultLine, Select } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 import { StatusChip } from "../ui/StatusChip.js";
 
 /** «Конспект ✓ · Текст лекции · Расшифровка ✓»: a ready one has the tick and the word «готово» for screen readers. */
@@ -104,11 +107,7 @@ export function LessonList(props: {
                 <ReadyMarks lesson={l} />
               )}
             </button>
-            {onEdit && !isNoteOnly(l) && (
-              <Button variant="ghost" onClick={() => onEdit(l)}>
-                Указать предмет
-              </Button>
-            )}
+            {onEdit && !isNoteOnly(l) && <IconAction icon="folder" place="left" label={setSubjectLabel(lectureLabel(l))} tipText={knowledgeToolTexts.setSubject} onClick={() => onEdit(l)} />}
           </li>
         );
       })}

@@ -25,9 +25,10 @@ import {
   searchQuery,
   statusView,
   stepMatch,
+  toolTexts,
 } from "../transcriptView";
-import { Button } from "../ui/Button";
 import { Banner, Card, Input, Progress, ResultLine, type ResultKind, Segmented } from "../ui/controls";
+import { IconAction } from "../ui/IconAction";
 
 // The tab «Расшифровка» of a lesson (TASK-079, 091, 352): the local transcript of one recording, live while the
 // recognition runs, with search, copy, save and playback from a timestamp. It has no head of its own: the lesson screen
@@ -308,12 +309,8 @@ function Viewer(props: {
           <span className="small muted num tr-count" aria-live="polite">
             {matchCountText(cur, search.total, folded)}
           </span>
-          <Button variant="ghost" icon="up" disabled={search.total === 0} onClick={() => step(-1)} title="Shift+Enter">
-            Предыдущее
-          </Button>
-          <Button variant="ghost" icon="down" disabled={search.total === 0} onClick={() => step(1)} title="Enter">
-            Следующее
-          </Button>
+          <IconAction icon="chevup" label={toolTexts.prev} tipText={toolTexts.prevTip} disabled={search.total === 0} onClick={() => step(-1)} />
+          <IconAction icon="chev" label={toolTexts.next} tipText={toolTexts.nextTip} disabled={search.total === 0} onClick={() => step(1)} />
         </div>
         <div className="tr-share">
           <label className="tr-switch">
@@ -326,26 +323,24 @@ function Viewer(props: {
             />
             С метками времени
           </label>
-          <Button
+          <IconAction
+            icon="copy"
+            label={busy === "all" ? toolTexts.copying : toolTexts.copyAll}
             busy={busy === "all"}
-            busyLabel="Копирование…"
             disabled={!idle || !hasText}
             disabledReason={idle ? noText : undefined}
             onClick={() => void copyAll()}
-          >
-            Скопировать всё
-          </Button>
-          <Button
+          />
+          <IconAction
+            icon="copysel"
+            label={busy === "selection" ? toolTexts.copying : toolTexts.copySelection}
             busy={busy === "selection"}
-            busyLabel="Копирование…"
             disabled={!idle || !hasSelection}
             disabledReason={idle && hasText ? noSelectionHint : undefined}
             // Keeps the selection: the click must not move it before it is read.
             onMouseDown={(e) => e.preventDefault()}
             onClick={copySelection}
-          >
-            Скопировать выделенное
-          </Button>
+          />
           <Segmented
             label="Формат файла"
             options={[
@@ -355,16 +350,14 @@ function Viewer(props: {
             value={format}
             onChange={setFormat}
           />
-          <Button
+          <IconAction
             icon="down"
+            label={busy === "save" ? toolTexts.saving : toolTexts.saveAs}
             busy={busy === "save"}
-            busyLabel="Сохранение…"
             disabled={!idle || !hasText}
             disabledReason={idle ? noText : undefined}
             onClick={() => void save()}
-          >
-            Сохранить как…
-          </Button>
+          />
         </div>
         {message && (
           <ResultLine kind={message.kind} role={message.kind === "fail" ? "alert" : "status"}>

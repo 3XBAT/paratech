@@ -14,6 +14,7 @@ import {
 } from "../journalView.js";
 import { Button } from "../ui/Button.js";
 import { Card, ResultLine, Row, Segmented, Select } from "../ui/controls.js";
+import { IconAction } from "../ui/IconAction.js";
 
 // A journal line shows fixed phrases and the typed name of a subject, as text nodes only.
 
@@ -102,7 +103,7 @@ export function LoadError(props: { text: string; onRetry(): void }) {
       <ResultLine kind="fail" role="alert">
         {props.text}
       </ResultLine>
-      <Button size="sm" variant="ghost" onClick={props.onRetry}>
+      <Button size="sm" onClick={props.onRetry}>
         {texts.retry}
       </Button>
     </div>
@@ -160,9 +161,14 @@ export function JournalList(props: {
                   status={m.reason !== "" ? <span className="small muted">{m.reason}</span> : undefined}
                   actions={
                     m.undoActionId !== "" ? (
-                      <Button size="sm" disabled={props.busyAction !== ""} onClick={() => props.onUndo(m.undoActionId)}>
-                        {props.busyAction === m.undoActionId ? texts.undoBusy : texts.undo}
-                      </Button>
+                      <IconAction
+                        icon="undo"
+                        place="left"
+                        label={props.busyAction === m.undoActionId ? texts.undoBusy : texts.undo}
+                        busy={props.busyAction === m.undoActionId}
+                        disabled={props.busyAction !== ""}
+                        onClick={() => props.onUndo(m.undoActionId)}
+                      />
                     ) : undefined
                   }
                   below={

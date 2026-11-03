@@ -7,6 +7,7 @@ import { needsPolling, openResultView, startSubjectId, subjectLine, texts, ticke
 import { Breadcrumbs } from "../ui/Breadcrumbs.js";
 import { Button } from "../ui/Button.js";
 import { EmptyState, Field, ResultLine, Select } from "../ui/controls.js";
+import { IconAction } from "../ui/IconAction.js";
 import { SetCard } from "./TicketsParts.js";
 
 /**
@@ -183,16 +184,13 @@ export function TicketsPage(props: {
               // Opened from a subject: the subject and the way to change it on one line.
               <p className="tk-subject">
                 <span>{subjectLine(subject.name)}</span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label={texts.change}
-                  title={blocked ? texts.changeBusy : undefined}
+                <IconAction
+                  icon="pencil"
+                  label={texts.change}
                   disabled={blocked}
+                  disabledReason={blocked ? texts.changeBusy : undefined}
                   onClick={() => setChanging(true)}
-                >
-                  {texts.changeShort}
-                </Button>
+                />
               </p>
             ) : (
               <Field label={texts.subject}>

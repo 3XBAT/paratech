@@ -23,6 +23,7 @@ import {
 import { texts } from "../.test-build/libraryView.js";
 import { AddFileLines, PlacePanel } from "../.test-build/pages/FileRows.js";
 import { InboxList, LibraryActions, SubjectDetail } from "../.test-build/pages/SubjectsParts.js";
+import { isOn } from "./iconbtn.mjs";
 
 const noop = () => undefined;
 const html = (el) => renderToStaticMarkup(el);
@@ -297,7 +298,8 @@ test("a file that did not land: a warning line with the reason, «Разложи
   assert.match(out, /class="result s-wait"/, "a warning, not the green success line");
   assert.doesNotMatch(out, /s-ok/);
   assert.match(out, />Разложить<\/button>/);
-  assert.match(out, />Перейти во «Входящие»<\/button>/);
+  // TASK-368: «Разложить» is the main action (words); «Перейти во «Входящие»» is an icon button with the same name.
+  assert.ok(isOn(out, "Перейти во «Входящие»"));
   // The panel opens on a click (state), so the preselect it starts from is the target.
   assert.deepEqual(panelChoice([subject()], outcome.unplaced.subjectId, outcome.unplaced.folderId), { subjectId: "s1", folderId: "f1" });
   // «Материалы» when the button gave no folder: the resolved one is carried.

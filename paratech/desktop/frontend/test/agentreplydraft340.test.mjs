@@ -240,7 +240,8 @@ test("while the reply types, the waiting dots are gone and «Остановит�
   const html = render(s);
   assert.ok(!html.includes("ag-wait"));
   assert.ok(!html.includes(texts.waiting));
-  assert.match(html, /<div class="ag-think">\s*<div class="ag-actions"><button[^>]*>Остановить<\/button><\/div><\/div>/);
+  // TASK-368: «Остановить» is the stop icon with a tooltip and an aria-label.
+  assert.match(html, /<div class="ag-think">\s*<div class="ag-actions"><button[^>]*aria-label="Остановить"[^>]*><svg[^>]*><use href="#i-stop"><\/use><\/svg><span class="ia-tip"[^>]*>Остановить<\/span><\/button><\/div><\/div>/);
   assert.ok(html.indexOf("ag-reply-draft") < html.indexOf("ag-think"));
 });
 

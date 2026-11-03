@@ -50,6 +50,7 @@ import { Breadcrumbs } from "../ui/Breadcrumbs";
 import { Button } from "../ui/Button";
 import { Card, Field, Input, Progress, ResultLine, Select } from "../ui/controls";
 import { Icon } from "../ui/Icon";
+import { IconAction } from "../ui/IconAction";
 import { StatusChip } from "../ui/StatusChip";
 import { helpTexts } from "../appleHelpView";
 import { googleTexts } from "../googleView";
@@ -503,9 +504,7 @@ export function ConnectionsPage(props: { visit?: number }) {
             ),
           )}
           <div className="acts start">
-            <Button disabled={quotaState.disabled} onClick={() => void refreshQuota()}>
-              {quotaState.label}
-            </Button>
+            <IconAction icon="retry" label={quotaState.label} busy={refreshing} disabled={quotaState.disabled} onClick={() => void refreshQuota()} />
           </div>
         </Card>
       </SectionPage>

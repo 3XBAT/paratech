@@ -37,6 +37,7 @@ import {
   type LoadFilter,
   loadHint,
   loadLevels,
+  cancelDownloadLabel,
   loadOptions,
   loadText,
   type MenuItem,
@@ -44,6 +45,7 @@ import {
   type ModelRow,
   progressPercent,
   progressText,
+  removeModelLabel,
   sizeText,
   statusNotes,
   texts,
@@ -52,6 +54,7 @@ import { Button } from "../ui/Button";
 import { SpeechComponentNotice } from "./SpeechComponentNotice";
 import { Banner, Card, Dialog, Field, Input, Progress, ResultLine, Select } from "../ui/controls";
 import type { IconName } from "../ui/Icon";
+import { IconAction } from "../ui/IconAction";
 import { RowMenu as SharedRowMenu } from "../ui/RowMenu";
 import { StatusChip, type ChipKind } from "../ui/StatusChip";
 
@@ -494,9 +497,15 @@ function InstalledRow(props: {
         )}
       </div>
       <div className="acts">
-        <Button variant="danger" busy={deleteBusy} busyLabel="Удаление…" disabled={deleteBusy} onClick={props.onAskDelete}>
-          Удалить
-        </Button>
+        <IconAction
+          icon="trash"
+          variant="danger"
+          place="left"
+          label={deleteBusy ? texts.removing : removeModelLabel(fullName(r))}
+          tipText={deleteBusy ? undefined : texts.remove}
+          busy={deleteBusy}
+          onClick={props.onAskDelete}
+        />
       </div>
       <RowMenu
         name={fullName(r)}
@@ -719,14 +728,26 @@ function CatalogRow(props: {
       </div>
       <div className="acts">
         {action === "cancel" && (
-          <Button disabled={key("cancel")} onClick={props.onCancel}>
-            Отменить
-          </Button>
+          <IconAction
+            icon="x"
+            variant="danger"
+            place="left"
+            label={cancelDownloadLabel(fullName(r))}
+            tipText={texts.cancelDownload}
+            disabled={key("cancel")}
+            onClick={props.onCancel}
+          />
         )}
         {action === "delete" && (
-          <Button variant="danger" busy={deleteBusy} busyLabel="Удаление…" disabled={deleteBusy} onClick={props.onAskDelete}>
-            Удалить
-          </Button>
+          <IconAction
+            icon="trash"
+            variant="danger"
+            place="left"
+            label={deleteBusy ? texts.removing : removeModelLabel(fullName(r))}
+            tipText={deleteBusy ? undefined : texts.remove}
+            busy={deleteBusy}
+            onClick={props.onAskDelete}
+          />
         )}
         {action === "download" && (
           <Button

@@ -56,7 +56,9 @@ import {
   generationRunning,
   generationView,
   isStale,
+  openVersionLabel,
   sendFormatChange,
+  versionTexts,
   versionTitle,
 } from "../homeworkView";
 import { lessonText } from "../lessonLabel";
@@ -67,6 +69,7 @@ import { newestOnly } from "../todayView";
 import { Breadcrumbs } from "../ui/Breadcrumbs";
 import { Button } from "../ui/Button";
 import { Banner, Card, Field, Input, ResultLine, type ResultKind, Row } from "../ui/controls";
+import { IconAction } from "../ui/IconAction";
 import { StatusChip } from "../ui/StatusChip";
 import { Toast } from "../ui/Toast";
 import { AssignmentRowView, DoneButton, DoneIssueLine, DoneStamp } from "./AssignmentDoneParts";
@@ -1502,9 +1505,14 @@ function AssignmentEditor(props: {
                   shown !== null && shown.number === v.number ? (
                     <span className="small muted">Открыта</span>
                   ) : (
-                    <Button disabled={!idle || dirty || generating} onClick={() => void showVersion(v.number)}>
-                      Открыть
-                    </Button>
+                    <IconAction
+                      icon="chevr"
+                      place="left"
+                      label={openVersionLabel(v.number)}
+                      tipText={versionTexts.open}
+                      disabled={!idle || dirty || generating}
+                      onClick={() => void showVersion(v.number)}
+                    />
                   )
                 }
               />

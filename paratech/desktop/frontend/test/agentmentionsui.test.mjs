@@ -665,7 +665,8 @@ test("render: status lines sit inside the popup; «Повторить» only aft
   const off = withState({ status: "unavailable", query: "", candidates: [] });
   assert.ok(off.includes("Поиск по предметам сейчас недоступен. Название можно написать словами.") && !off.includes("Повторить"));
   const bad = withState({ status: "failed", query: "", candidates: [] });
-  assert.ok(bad.includes("Не удалось выполнить поиск.") && bad.includes("Повторить") && bad.includes('title="Повторить поиск (Enter)"'));
+  assert.ok(bad.includes("Не удалось выполнить поиск.") && bad.includes('aria-label="Повторить"') && bad.includes('<span class="ia-tip" aria-hidden="true">Повторить поиск (Enter)</span>'), "TASK-368: an icon button, the tooltip carries the longer words");
+  assert.match(bad, /<button[^>]*tabindex="-1"[^>]*aria-label="Повторить"/, "still not a tab stop: the field keeps the focus");
   const eight = Array.from({ length: 8 }, (_, i) => ({ kind: "subject", id: `s${i}`, label: `П${i}` }));
   const full = withState({ status: "ready", query: "", candidates: [cand("subject", "x")] }, eight);
   assert.ok(full.includes("Можно указать не больше 8. Чтобы добавить другое, нужно убрать одно из выбранных выше.") && !full.includes('role="option"'));

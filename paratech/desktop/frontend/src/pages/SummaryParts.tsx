@@ -14,13 +14,16 @@ import {
   showsEarlier,
   type StepLine,
   stepLine,
+  openTaskLabel,
   summaryLine,
   summarySections,
+  summaryToolTexts,
   updatedText,
 } from "../summaryView.js";
 import { lessonText } from "../lessonLabel.js";
 import { Button } from "../ui/Button.js";
 import { Card, type ResultKind, ResultLine, Row } from "../ui/controls.js";
+import { IconAction } from "../ui/IconAction.js";
 import { RowMenu } from "../ui/RowMenu.js";
 
 /** The save formats of the «⋯» menu of the summary, in the order shown. */
@@ -48,15 +51,13 @@ export function SummaryTools(props: {
   return (
     <div className="sm-tools">
       <div className="tr-share">
-        <Button
-          variant="primary"
+        <IconAction
+          icon="copy"
+          label={props.busy === "copy" ? summaryToolTexts.copying : summaryToolTexts.copy}
           busy={props.busy === "copy"}
-          busyLabel="Копирование…"
           disabled={off}
           onClick={props.onCopy}
-        >
-          Скопировать
-        </Button>
+        />
         <RowMenu
           label="Ещё действия с конспектом"
           title="Ещё"
@@ -115,7 +116,7 @@ function RetrySlot(props: RetryProps & { view: SummaryView; step: RetryStep }) {
     <div className="acts start sm-retry">
       <Button
         busy={busy}
-        busyLabel="Запуск…"
+        busyLabel={summaryToolTexts.starting}
         disabled={props.retryDisabled === true || (props.retrying ?? "") !== ""}
         onClick={() => onRetry(props.step)}
       >
@@ -242,9 +243,7 @@ export function HomeworkCard(
                 </>
               }
               actions={
-                <Button variant="ghost" onClick={() => props.onOpenAssignment(a.id)}>
-                  Открыть задание
-                </Button>
+                <IconAction icon="chevr" place="left" label={openTaskLabel(a.title)} tipText={summaryToolTexts.openAssignment} onClick={() => props.onOpenAssignment(a.id)} />
               }
             />
           ))}

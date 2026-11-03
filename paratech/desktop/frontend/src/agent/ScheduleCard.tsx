@@ -25,6 +25,7 @@ import {
 import type { RestoreCall } from "../subjectRemovalView.js";
 import { DoneRow, GroupRow, NoticeRows } from "../pages/ScheduleSubjectsReview.js";
 import { Button } from "../ui/Button.js";
+import { IconAction } from "../ui/IconAction.js";
 import { ResultLine } from "../ui/controls.js";
 
 // The schedule_subjects card (TASK-324): the check of the «Предметы» review inside the chat. Every name is schedule text:
@@ -160,12 +161,10 @@ export function ScheduleCardView(props: {
           <NoticeRows rows={model.rows} restore={on.restore} onChanged={on.reload} />
           {model.view === "confirmed" && (
             <div className="ag-actions">
-              <Button size="sm" variant="secondary" disabled={busy} busy={flow.busy === "undo"} busyLabel={reviewTexts.undoing} onClick={on.undo}>
-                {reviewTexts.undoAll}
-              </Button>
               <Button size="sm" variant="primary" disabled={busy} busy={flow.busy === "confirm"} busyLabel={reviewTexts.creating} onClick={on.yes}>
                 {scheduleTexts.retry}
               </Button>
+              <IconAction icon="undo" label={flow.busy === "undo" ? reviewTexts.undoing : reviewTexts.undoAll} busy={flow.busy === "undo"} disabled={busy} onClick={on.undo} />
             </div>
           )}
           {model.view === "done" && model.rest && subjectsButton && <div className="ag-actions">{subjectsButton}</div>}

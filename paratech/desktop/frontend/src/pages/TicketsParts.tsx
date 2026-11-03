@@ -21,6 +21,7 @@ import {
 } from "../ticketsView.js";
 import { Button } from "../ui/Button.js";
 import { Card, Progress, ResultLine } from "../ui/controls.js";
+import { IconAction } from "../ui/IconAction.js";
 import { StatusChip } from "../ui/StatusChip.js";
 
 // Ticket titles come from the student's list: only text nodes here, never markup or links.
@@ -154,20 +155,25 @@ export function SetCard(props: {
         </div>
       )}
       <div className="acts start">
-        {m.cancel && (
+        {m.cancel && s.status === "proposed" && (
+          // The «no» of «Подтвердить»: a yes/no pair keeps its words.
           <Button size="sm" variant="ghost" busy={props.busy} busyLabel={texts.cancelBusy} disabled={props.blocked || props.busy} onClick={props.onCancel}>
             {texts.cancel}
           </Button>
         )}
-        {m.undo && (
-          <Button size="sm" variant="ghost" disabled={props.blocked || props.busy} onClick={props.onUndo}>
-            {texts.undo}
-          </Button>
+        {m.cancel && s.status !== "proposed" && (
+          <IconAction
+            icon="x"
+            variant="danger"
+            label={props.busy ? texts.cancelBusy : texts.cancel}
+            busy={props.busy}
+            disabled={props.blocked}
+            onClick={props.onCancel}
+          />
         )}
+        {m.undo && <IconAction icon="undo" label={texts.undo} disabled={props.blocked || props.busy} onClick={props.onUndo} />}
         {s.tickets.length > 0 && (
-          <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-            {open ? texts.hide : texts.show}
-          </Button>
+          <IconAction icon={open ? "chevup" : "chev"} expanded={open} label={open ? texts.hide : texts.show} onClick={() => setOpen((o) => !o)} />
         )}
       </div>
       {props.error !== "" && (

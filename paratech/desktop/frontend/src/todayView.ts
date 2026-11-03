@@ -6,6 +6,7 @@ import { actionErrorText, errorMessage } from "./activityView.js";
 import { errorMessages, type RecordingItem } from "./bindings/activity.js";
 import type { TodayDeadline, TodayDone, TodayLesson, TodayPost, TodayWaiting } from "./bindings/today.js";
 import { dayAndTime, dayText, daysBetween, daysLeftText, dueText, monthsShort, pad, parseMoment, timeText } from "./dueText.js";
+import { shortName } from "./ownNotesView.js";
 import { plural } from "./plural.js";
 import { chainStatusView } from "./recordingRowView.js";
 import { rowOffersTranscript } from "./transcriptView.js";
@@ -14,6 +15,11 @@ import type { IconName } from "./ui/Icon.js";
 
 // The deadline wording lives in dueText.ts; the names stay importable from here.
 export { dayAndTime, dayText, daysBetween, daysLeftText, dueText, parseMoment, timeText };
+
+/** The name of the open button of a repeated row: it names the pair, so a screen reader can tell the rows apart. */
+export function openPairLabel(title: string): string {
+  return title.trim() === "" ? texts.open : `${texts.openLesson}: ${shortName(title.trim())}`;
+}
 
 export const texts = {
   title: "Сегодня",

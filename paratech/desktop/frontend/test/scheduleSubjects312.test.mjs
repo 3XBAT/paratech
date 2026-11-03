@@ -57,6 +57,7 @@ import {
 } from "../.test-build/pages/ScheduleSubjectsReview.js";
 import { ScheduleNextHint } from "../.test-build/pages/SchedulePage.js";
 import { EmptySubjects, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
+import { isOn, visibleText } from "./iconbtn.mjs";
 
 const html = (el) => renderToStaticMarkup(el);
 const noop = () => undefined;
@@ -1197,7 +1198,7 @@ test("the check failed with subjects on the page: one quiet line with «Повт
   let retried = 0;
   const out = html(h(ScheduleCheckFailedLine, { onRetry: () => retried++ }));
   assert.match(out, /Не удалось проверить расписание/);
-  assert.match(out, /class="btn ghost sm"[^>]*>Повторить</);
+  assert.match(out, /class="btn sm"[^>]*>Повторить</); // TASK-368: every load-error retry is the default secondary style
   assert.equal(primaries(out), 0);
   assert.equal(retried, 0);
 });
@@ -1209,10 +1210,12 @@ test("the one-shot request of the review is kept only on the list of «Пред�
   assert.equal(keepScheduleReview(false, { page: "subjects", subject: "" }), false);
 });
 
-test("the page line «Создано предметов» has a ghost «Закрыть» that drops the kept state", () => {
+test("the page line «Создано предметов» has a «Закрыть» icon that drops the kept state", () => {
   const out = html(h(KeptUndoLine, { state: closedState([keptBatch]), onUndo: noop, onDismiss: noop, onForget: noop }));
-  assert.match(out, />Отменить всё</);
-  assert.match(out, /class="btn ghost sm"[^>]*>Закрыть</);
+  // TASK-368: «Отменить всё» (undo icon) and «Закрыть» (cross) are icon buttons named by their aria-label.
+  assert.ok(isOn(out, "Отменить всё"));
+  assert.ok(isOn(out, "Закрыть"));
+  assert.equal(visibleText(out).includes("Закрыть"), false);
   const forgotten = reduce(closedState([keptBatch]), { type: "forget" });
   assert.deepEqual([forgotten.batches, forgotten.notice], [[], null]);
   assert.equal(html(h(KeptUndoLine, { state: forgotten, onUndo: noop, onDismiss: noop, onForget: noop })), "");

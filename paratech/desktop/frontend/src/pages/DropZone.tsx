@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { onEventData } from "../bindings/runtime.js";
 import { type DropLine, dropTargetAttr, dropTexts, subscribeDropped, windowDragHandlers } from "../dropFiles.js";
 import { Icon } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 
 /** The report of a drop: fixed texts, one line per file. */
 export function DropReport(props: { lines: readonly DropLine[]; onClose(): void }) {
@@ -18,9 +19,7 @@ export function DropReport(props: { lines: readonly DropLine[]; onClose(): void 
           </li>
         ))}
       </ul>
-      <button type="button" className="btn ghost sm" onClick={props.onClose}>
-        {dropTexts.close}
-      </button>
+      <IconAction icon="x" place="left" label={dropTexts.close} onClick={props.onClose} />
     </div>
   );
 }

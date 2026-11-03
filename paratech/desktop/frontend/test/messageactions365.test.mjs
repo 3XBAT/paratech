@@ -205,7 +205,10 @@ test("every use of the retry icon goes through the set; no page draws its own ar
   for (const f of ["agent/AgentCards.tsx", "agent/RestartDialog.tsx", "agent/MessageActions.tsx"]) {
     assert.doesNotMatch(src(f), /<path d="M2?0 12a8/);
   }
-  assert.match(src("pages/OwnNotesParts.tsx"), /icon="retry"/);
+  // The own-notes row once used the retry arrow for «Заменить файл»; it now has its own swap glyph (TASK-368 review), so the
+  // check looks at a page that still repeats something with an icon.
+  assert.match(src("pages/AssignmentDoneParts.tsx"), /"retry"/);
+  assert.doesNotMatch(src("pages/OwnNotesParts.tsx"), /icon="retry"/);
 });
 
 // ---- the look ----

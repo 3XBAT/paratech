@@ -26,6 +26,7 @@ import { sizeText, texts, typeLabel } from "../libraryView.js";
 import { Button } from "../ui/Button.js";
 import { Field, ResultLine, Select } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 import { RowMenu } from "../ui/RowMenu.js";
 import { NameForm } from "./NameForm.js";
 import { RemovedNameLine, type RestoreCall, restoreUnavailable } from "./SubjectRemoval.js";
@@ -132,9 +133,7 @@ export function AddFileLines(props: {
             </Button>
           )}
           {e !== null && e.openSubjectId !== "" && (
-            <Button size="sm" variant="ghost" onClick={() => props.onOpenSubject(e.openSubjectId)}>
-              {addFileTexts.openSubject}
-            </Button>
+            <IconAction icon="chevr" label={addFileTexts.openSubject} onClick={() => props.onOpenSubject(e.openSubjectId)} />
           )}
         </div>
       )}
@@ -198,9 +197,7 @@ function NotPlacedLine(props: {
             {addFileTexts.place}
           </Button>
         )}
-        <Button size="sm" variant="ghost" onClick={props.onOpenInbox}>
-          {addFileTexts.openInbox}
-        </Button>
+        <IconAction icon="chevr" label={addFileTexts.openInbox} onClick={props.onOpenInbox} />
       </div>
       {canPlace && panel && (
         <div className="place-inline">
@@ -564,13 +561,11 @@ export function UndoLines(props: { items: readonly UndoItem[]; busy: boolean; on
             {it.error !== "" && <span className="muted"> {it.error}</span>}
           </span>
           {it.error !== "" && errorWay(it.error) === "refresh" ? (
-            <Button size="sm" variant="ghost" onClick={props.onRefresh}>
+            <Button size="sm" onClick={props.onRefresh}>
               {fileTexts.refresh}
             </Button>
           ) : (
-            <Button size="sm" variant="ghost" disabled={props.busy} onClick={() => props.onUndo(it)}>
-              {fileTexts.undo}
-            </Button>
+            <IconAction icon="undo" label={fileTexts.undo} disabled={props.busy} onClick={() => props.onUndo(it)} />
           )}
         </div>
       ))}
