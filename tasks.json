@@ -8262,7 +8262,7 @@
                 "На Windows с Docker: тест с настоящим Hub и GetRemaining проходит, запись в progress"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-375",
