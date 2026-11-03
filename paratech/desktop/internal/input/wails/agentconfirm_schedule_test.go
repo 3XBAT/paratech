@@ -1,6 +1,7 @@
 package wails
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,10 +24,14 @@ type scheduleLibrary struct {
 }
 
 func newScheduleConfirm(uc *fakeScheduleSubjects, lib *fakeLibrary, log *slog.Logger) *AgentConfirmService {
-	return NewAgentConfirmService(AgentConfirmCore{
+	return newScheduleCards(NewLibraryService(scheduleLibrary{lib, uc}, nil, nil, log), log)
+}
+
+// newScheduleCards is the confirm cards bound to page, the library binding of the page.
+func newScheduleCards(page *LibraryService, log *slog.Logger) *AgentConfirmService {
+	return BindScheduleCards(NewAgentConfirmService(AgentConfirmCore{
 		Proposals: newConfirmProposals(), Materials: fakeMaterials{}, Deletions: &fakeDeletion{},
-		Schedule: scheduleLibrary{lib, uc},
-	}, log)
+	}, log), page)
 }
 
 func agentSchedule(tok string) library.ScheduleProposal {
@@ -73,8 +78,12 @@ func TestScheduleCardStale(t *testing.T) {
 	if err != nil || got.State != agentStateStale || got.Message != msgScheduleStale || got.Schedule.Result != nil {
 		t.Fatalf("confirm = %+v, %v", got, err)
 	}
-	if !strings.Contains(got.Message, "попросите агента") {
+	if !strings.Contains(got.Message, "попросите агента") || !strings.Contains(got.Message, "«Предметы»") {
 		t.Errorf("the stale card offers no way on: %q", got.Message)
+	}
+	// Stale also shows for a card applied before a restart or from the page: it never claims nothing was created.
+	if strings.Contains(got.Message, "Ничего не создано") {
+		t.Errorf("the stale card claims nothing was created: %q", got.Message)
 	}
 	if _, err := s.UndoSchedule(t.Context(), tokA); !errors.Is(err, ErrAgentConfirmScheduleUndoGone) {
 		t.Fatalf("undo of nothing: %v", err)
@@ -253,11 +262,12 @@ func TestScheduleConfirmRefusals(t *testing.T) {
 	if _, err := plain.ConfirmSchedule(t.Context(), tokA, nil); !errors.Is(err, ErrAgentConfirmInvalid) {
 		t.Errorf("confirm without the schedule: %v", err)
 	}
-	notWired := NewAgentConfirmService(AgentConfirmCore{
-		Proposals: newConfirmProposals(), Materials: fakeMaterials{}, Deletions: &fakeDeletion{}, Schedule: &fakeLibrary{},
-	}, discard())
+	notWired := newScheduleCards(NewLibraryService(&fakeLibrary{}, nil, nil, discard()), discard())
 	if _, err := notWired.UndoSchedule(t.Context(), tokA); !errors.Is(err, ErrAgentConfirmInvalid) {
 		t.Errorf("undo with a library without the schedule: %v", err)
+	}
+	if _, err := newScheduleCards(nil, discard()).Card(t.Context(), agentCardScheduleSubjects, tokA); !errors.Is(err, ErrAgentConfirmInvalid) {
+		t.Errorf("card without a library: %v", err)
 	}
 
 	// The generic Confirm never applies a package: the choices are needed.
@@ -285,6 +295,10 @@ func TestScheduleUndoProblems(t *testing.T) {
 	if _, err := fresh.UndoSchedule(t.Context(), tokA); !errors.Is(err, ErrAgentConfirmScheduleUndoGone) {
 		t.Fatalf("undo after a restart: %v", err)
 	}
+	// A restart is not the only cause (the page may have taken it back), so the message names none.
+	if msg := ErrAgentConfirmScheduleUndoGone.Error(); strings.Contains(msg, "перезапуск") || !strings.Contains(msg, "«Предметы»") {
+		t.Errorf("undo gone says %q", msg)
+	}
 }
 
 func TestScheduleDecline(t *testing.T) {
@@ -296,6 +310,10 @@ func TestScheduleDecline(t *testing.T) {
 	}
 	if uc.creates != 0 {
 		t.Error("«Нет» created something")
+	}
+	// Read again with the token still current, the card stays declined instead of waiting.
+	if read, err := s.Card(t.Context(), agentCardScheduleSubjects, tokA); err != nil || read.State != agentStateDeclined {
+		t.Fatalf("declined read again = %+v, %v", read, err)
 	}
 	if _, err := s.Decline(t.Context(), agentCardScheduleSubjects, "x"); !errors.Is(err, ErrAgentConfirmInvalid) {
 		t.Errorf("decline of a bad token: %v", err)
@@ -367,5 +385,115 @@ func TestPanelShowsTheWave10Cards(t *testing.T) {
 	}
 	if _, ok := cardView(values.OfferButtonCard{Action: "open_url"}); ok {
 		t.Error("an unknown button is shown")
+	}
+}
+
+// TestSchedulePartialKeepsTheChoices: after a «Да» that stopped midway the card read again has no groups, so a second
+// «Да» may send no choices; the earlier ones still hold (a skipped group is never created by the defaults), a group
+// chosen anew takes the new choice, and once done the next «Да» runs only what it sends.
+func TestSchedulePartialKeepsTheChoices(t *testing.T) {
+	uc := &fakeScheduleSubjects{proposal: agentSchedule(tokA), res: partialResult(), err: library.ErrUnavailable}
+	s := newScheduleConfirm(uc, &fakeLibrary{}, discard())
+
+	first := []ScheduleChoice{
+		{Group: "матанализ", Action: ScheduleActionCreate, Name: "Матанализ 1"},
+		{Group: "физика", Action: ScheduleActionSkip},
+	}
+	if got, err := s.ConfirmSchedule(t.Context(), tokA, first); err != nil || got.State != agentStateConfirmed {
+		t.Fatalf("partial = %+v, %v", got, err)
+	}
+
+	steps := []struct {
+		name    string
+		choices []ScheduleChoice
+		err     error
+		want    []schedulesubjects.Choice
+	}{
+		{
+			name: "no choices: the earlier ones", err: library.ErrUnavailable,
+			want: []schedulesubjects.Choice{
+				{Group: "матанализ", Action: schedulesubjects.GroupCreate, Name: "Матанализ 1"},
+				{Group: "физика", Action: schedulesubjects.GroupSkip},
+			},
+		},
+		{
+			name:    "one group anew: it wins, the other is kept",
+			choices: []ScheduleChoice{{Group: "матанализ", Action: ScheduleActionCreate, Name: "Матанализ 2"}},
+			want: []schedulesubjects.Choice{
+				{Group: "матанализ", Action: schedulesubjects.GroupCreate, Name: "Матанализ 2"},
+				{Group: "физика", Action: schedulesubjects.GroupSkip},
+			},
+		},
+		{name: "done: nothing kept"},
+	}
+	for _, st := range steps {
+		uc.set(partialResult(), st.err)
+		if _, err := s.ConfirmSchedule(t.Context(), tokA, st.choices); err != nil {
+			t.Fatalf("%s: %v", st.name, err)
+		}
+		uc.mu.Lock()
+		got := uc.gotChoices
+		uc.mu.Unlock()
+		if len(got) != len(st.want) || (len(st.want) > 0 && !reflect.DeepEqual(got, st.want)) {
+			t.Fatalf("%s: choices = %+v\nwant %+v", st.name, got, st.want)
+		}
+	}
+}
+
+// TestScheduleCardSharesThePageBinding: the card and the page run on one binding, so the card takes back what the
+// page created, and a «Да» on the card while the page creates answers busy.
+func TestScheduleCardSharesThePageBinding(t *testing.T) {
+	uc := &fakeScheduleSubjects{
+		proposal: agentSchedule(tokA), res: partialResult(),
+		undo: library.ScheduleUndo{Removed: []shared.SubjectID{"sched-1"}},
+	}
+	page := NewLibraryService(scheduleLibrary{&fakeLibrary{}, uc}, nil, nil, discard())
+	s := newScheduleCards(page, discard())
+
+	if out := page.CreateFromSchedule(t.Context(), tokA, nil); out.Problem != "" {
+		t.Fatalf("page create = %+v", out)
+	}
+	if read, err := s.Card(t.Context(), agentCardScheduleSubjects, tokA); err != nil || read.State != agentStateDone {
+		t.Fatalf("card after the page's create = %+v, %v", read, err)
+	}
+	if undone, err := s.UndoSchedule(t.Context(), tokA); err != nil || undone.State != agentStateUndone || len(uc.undos) != 1 {
+		t.Fatalf("card undo of the page's batch = %+v, %v (%d undos)", undone, err, len(uc.undos))
+	}
+
+	uc.mu.Lock()
+	uc.block, uc.started = make(chan struct{}), make(chan struct{}, 1)
+	uc.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		page.CreateFromSchedule(t.Context(), tokA, nil)
+	}()
+	<-uc.started
+	_, err := s.ConfirmSchedule(t.Context(), tokA, nil)
+	close(uc.block)
+	<-done
+	if !errors.Is(err, ErrAgentConfirmScheduleBusy) {
+		t.Fatalf("card «Да» while the page creates: %v", err)
+	}
+}
+
+// TestOpenServicesSharesTheLibraryWithTheCards: the shell gives the confirm cards the page's own library binding.
+func TestOpenServicesSharesTheLibraryWithTheCards(t *testing.T) {
+	opts := validOptions()
+	opts.OpenCore = func(context.Context) (Core, error) {
+		c := validCore()
+		c.Library = scheduleLibrary{&fakeLibrary{}, &fakeScheduleSubjects{proposal: agentSchedule(tokA)}}
+		return c, nil
+	}
+	sh, err := New(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := sh.OpenServices(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.AgentConfirm.schedule == nil || b.AgentConfirm.schedule != b.Library {
+		t.Fatalf("the cards have %p, the page %p", b.AgentConfirm.schedule, b.Library)
 	}
 }

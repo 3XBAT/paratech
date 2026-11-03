@@ -54,8 +54,8 @@ func (t tools) proposeSubjects(ctx context.Context, st agentturn.Step, c agenttu
 
 	p, err := t.subjects.ScheduleSubjects(ctx)
 	if err != nil {
-		// The use case puts no schedule string into its errors.
-		t.log.WarnContext(ctx, opScheduleSubjects, "err", err)
+		// A class only, as the page's binding logs it: the raw error is not needed to tell the cases apart.
+		t.log.WarnContext(ctx, opScheduleSubjects, "problem", subjectsProblem(err))
 		return refuse(values.RefuseFailed)
 	}
 	if len(p.Groups) == 0 {
@@ -98,6 +98,17 @@ func (t tools) replaySubjects(ctx context.Context, c agentturn.Call, e agentjour
 		return ran{out: agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseFailed)}, write: true}
 	}
 	return ran{out: agentturn.Outcome{Result: res}, write: true}
+}
+
+// subjectsProblem is the class of an error of ScheduleSubjects for the log.
+func subjectsProblem(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	}
+	return "unavailable"
 }
 
 // scheduleCard is the card of proposal p: its token and one ID per group (scheduleGroupID). false when the token is

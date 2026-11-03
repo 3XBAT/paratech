@@ -235,3 +235,21 @@ func TestAgentCannotCreateSubjects(t *testing.T) {
 		})
 	}
 }
+
+// TestSubjectsProblemIsAClass: the log gets a class of the error, never its text.
+func TestSubjectsProblemIsAClass(t *testing.T) {
+	tests := []struct {
+		err  error
+		want string
+	}{
+		{context.DeadlineExceeded, "timeout"},
+		{context.Canceled, "canceled"},
+		{errors.New("Матанализ: disk"), "unavailable"},
+		{library.ErrUnavailable, "unavailable"},
+	}
+	for _, tt := range tests {
+		if got := subjectsProblem(tt.err); got != tt.want {
+			t.Errorf("subjectsProblem(%v) = %q, want %q", tt.err, got, tt.want)
+		}
+	}
+}

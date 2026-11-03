@@ -8,9 +8,9 @@ import (
 	"paratech/desktop/internal/input/wails"
 )
 
-// The schedule_subjects card of the agent is wired to the library of the screens (TASK-323): the card of the current
-// token waits, an old token is stale, and a «Да» runs the page's CreateFromSchedule (nothing to create in an empty
-// store).
+// The schedule_subjects card of the agent is wired to the library of the screens (TASK-323): the shell gives the card
+// the page's binding (wails.BindScheduleCards), the card of the current token waits, an old token is stale, and a «Да»
+// runs the page's CreateFromSchedule (nothing to create in an empty store).
 func TestAgentScheduleCardWired(t *testing.T) {
 	ctx := context.Background()
 	a := newTestApp(t, t.TempDir())
@@ -18,12 +18,13 @@ func TestAgentScheduleCardWired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := ui.AgentConfirm.Schedule.(wails.LibraryScheduleUseCase); !ok {
-		t.Fatalf("the confirm cards get %T, without subjects from the schedule", ui.AgentConfirm.Schedule)
+	if _, ok := ui.Library.(wails.LibraryScheduleUseCase); !ok {
+		t.Fatalf("the library of the screens is %T, without subjects from the schedule", ui.Library)
 	}
-	token := wails.NewLibraryService(ui.Library, nil, nil, slog.New(slog.DiscardHandler)).ScheduleSubjects(ctx).Token
+	page := wails.NewLibraryService(ui.Library, nil, nil, slog.New(slog.DiscardHandler))
+	token := page.ScheduleSubjects(ctx).Token
 
-	cards := wails.NewAgentConfirmService(ui.AgentConfirm, slog.New(slog.DiscardHandler))
+	cards := wails.BindScheduleCards(wails.NewAgentConfirmService(ui.AgentConfirm, slog.New(slog.DiscardHandler)), page)
 	got, err := cards.Card(ctx, "schedule_subjects", token)
 	if err != nil || got.State != "waiting" || got.Schedule == nil {
 		t.Fatalf("card = %+v, %v", got, err)

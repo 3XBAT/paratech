@@ -27,8 +27,9 @@ const agentStateUndone = "undone"
 
 // Messages of the schedule_subjects card.
 const (
-	msgScheduleStale = "Расписание или предметы изменились, пока карточка ждала. Ничего не создано: попросите агента " +
-		"ещё раз предложить предметы из расписания."
+	// Neutral: stale also shows for a card applied before a restart or applied from the page.
+	msgScheduleStale = "Предложение устарело: расписание или предметы изменились. Проверьте список на странице " +
+		"«Предметы» или попросите агента предложить предметы ещё раз."
 	msgSchedulePartial = "Создано не всё. Нажмите «Да» ещё раз — уже созданное не повторится, или «Отменить всё»."
 )
 
@@ -38,7 +39,7 @@ const (
 		"Подождите немного и нажмите ещё раз.")
 	ErrAgentConfirmScheduleName = agentConfirmError("Это название уже занято другим предметом или строкой списка. " +
 		"Выберите другое и нажмите «Да».")
-	ErrAgentConfirmScheduleUndoGone = agentConfirmError("Отменить уже нельзя: после создания приложение перезапускалось. " +
+	ErrAgentConfirmScheduleUndoGone = agentConfirmError("Отменить отсюда уже нельзя. " +
 		"Лишние предметы можно убрать на странице «Предметы».")
 	ErrAgentConfirmScheduleUndoAgain = agentConfirmError("Отменилось не всё. Нажмите «Отменить всё» ещё раз — " +
 		"повтор безопасен.")
@@ -55,12 +56,13 @@ type AgentScheduleCard struct {
 	Undo    *ScheduleUndoResult   `json:"undo"`
 }
 
-// scheduleCards remembers, in this run, the tokens whose «Да» stopped midway and the undos, so a card read again says
-// so; the outcome itself is the binding's (LibraryService journal).
+// scheduleCards remembers, in this run, the tokens whose «Да» stopped midway (with the choices it ran with), the undos
+// and the «Нет», so a card read again says so; the outcome itself is the binding's (LibraryService journal).
 type scheduleCards struct {
-	mu      sync.Mutex
-	partial map[string]bool
-	undone  map[string]ScheduleUndoResult
+	mu       sync.Mutex
+	partial  map[string][]ScheduleChoice // the choices of the «Да» that stopped midway
+	undone   map[string]ScheduleUndoResult
+	declined map[string]bool
 }
 
 func (c *scheduleCards) markUndone(token string, u ScheduleUndoResult) {
@@ -72,16 +74,27 @@ func (c *scheduleCards) markUndone(token string, u ScheduleUndoResult) {
 	c.undone[token] = u
 }
 
-// created records a «Да» of token that did something: the undo mark goes, and partial tells whether it stopped midway.
-func (c *scheduleCards) created(token string, partial bool) {
+func (c *scheduleCards) markDeclined(token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.declined == nil {
+		c.declined = map[string]bool{}
+	}
+	c.declined[token] = true
+}
+
+// created records a «Да» of token that did something with choices: the undo and «Нет» marks go, and partial tells
+// whether it stopped midway (then the choices are kept for the next «Да»).
+func (c *scheduleCards) created(token string, choices []ScheduleChoice, partial bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.undone, token)
+	delete(c.declined, token)
 	if c.partial == nil {
-		c.partial = map[string]bool{}
+		c.partial = map[string][]ScheduleChoice{}
 	}
 	if partial {
-		c.partial[token] = true
+		c.partial[token] = append([]ScheduleChoice{}, choices...)
 	} else {
 		delete(c.partial, token)
 	}
@@ -90,7 +103,37 @@ func (c *scheduleCards) created(token string, partial bool) {
 func (c *scheduleCards) partialOf(token string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.partial[token]
+	_, ok := c.partial[token]
+	return ok
+}
+
+func (c *scheduleCards) declinedOf(token string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.declined[token]
+}
+
+// choicesFor is what a «Да» of token runs with. After a partial «Да» the card read again has no groups, so it may send
+// fewer choices (or none): a group the student chose for before keeps that choice unless chosen anew, so a group set
+// to «Не заводить» or renamed is never created by the defaults.
+func (c *scheduleCards) choicesFor(token string, choices []ScheduleChoice) []ScheduleChoice {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	prev, ok := c.partial[token]
+	if !ok {
+		return choices
+	}
+	given := make(map[string]bool, len(choices))
+	for _, ch := range choices {
+		given[ch.Group] = true
+	}
+	out := append([]ScheduleChoice{}, choices...)
+	for _, ch := range prev {
+		if !given[ch.Group] {
+			out = append(out, ch)
+		}
+	}
+	return out
 }
 
 func (c *scheduleCards) undoneOf(token string) (ScheduleUndoResult, bool) {
@@ -121,6 +164,9 @@ func (s *AgentConfirmService) scheduleSubjectsCard(ctx context.Context, token st
 		card.Schedule.Result = res
 		return card, nil
 	}
+	if s.scheduleState.declinedOf(token) {
+		return scheduleCard(token, agentStateDeclined), nil
+	}
 
 	view := lib.ScheduleSubjects(ctx)
 	switch {
@@ -145,10 +191,11 @@ func (s *AgentConfirmService) ConfirmSchedule(ctx context.Context, token string,
 	if err != nil {
 		return AgentConfirmCard{}, err
 	}
+	choices = s.scheduleState.choicesFor(token, choices)
 	out := lib.CreateFromSchedule(ctx, token, choices)
 	did := len(out.Created) > 0 || len(out.Aliased) > 0
 	if did {
-		s.scheduleState.created(token, out.Problem != "")
+		s.scheduleState.created(token, choices, out.Problem != "")
 	}
 	s.log.Info(opScheduleConfirm, "created", len(out.Created), "aliased", len(out.Aliased), "skipped", len(out.Skipped),
 		"problem", out.Problem)
@@ -202,11 +249,13 @@ func (s *AgentConfirmService) UndoSchedule(ctx context.Context, token string) (A
 	return card, nil
 }
 
-// declineScheduleSubjects is «Нет»: nothing is stored to decline; nothing was created.
+// declineScheduleSubjects is «Нет»: nothing is created; the card remembers it in this run, so read again it does not
+// wait.
 func (s *AgentConfirmService) declineScheduleSubjects(token string) (AgentConfirmCard, error) {
 	if _, err := s.cardSchedule(token); err != nil {
 		return AgentConfirmCard{}, err
 	}
+	s.scheduleState.markDeclined(token)
 	return scheduleCard(token, agentStateDeclined), nil
 }
 

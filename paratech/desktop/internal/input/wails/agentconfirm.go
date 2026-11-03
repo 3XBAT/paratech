@@ -104,8 +104,6 @@ type AgentConfirmCore struct {
 	Materials   AgentConfirmMaterials
 	Deletions   AgentConfirmDeletions
 	Assignments AgentConfirmAssignments // optional: without it the delete_assignment card is unavailable
-	// Schedule is optional: without it, or without subjects from the schedule, the schedule_subjects card is unavailable.
-	Schedule LibraryUseCase
 }
 
 func (c AgentConfirmCore) complete() bool {
@@ -155,19 +153,24 @@ type AgentConfirmService struct {
 	core AgentConfirmCore
 	log  *slog.Logger
 
-	schedule      *LibraryService // the page's schedule binding over core.Schedule; nil: not wired
+	schedule      *LibraryService // the page's own binding (BindScheduleCards); nil: the schedule card is unavailable
 	scheduleState scheduleCards
 }
 
 // NewAgentConfirmService returns the binding of the confirm cards; OpenServices checks the core before calling it.
 func NewAgentConfirmService(c AgentConfirmCore, log *slog.Logger) *AgentConfirmService {
-	s := &AgentConfirmService{core: c, log: log}
-	if c.Schedule != nil {
-		if lib := NewLibraryService(c.Schedule, nil, nil, log); lib.schedule.uc != nil {
-			s.schedule = lib
-		}
+	return &AgentConfirmService{core: c, log: log}
+}
+
+// BindScheduleCards gives the schedule_subjects card the page's library binding: one result journal and one busy
+// guard for the page and the card, so either can undo the other's batch and they never run at once. A binding
+// without subjects from the schedule leaves the card unavailable. A function, not a method: every method of a bound
+// service is callable from the page.
+func BindScheduleCards(cards *AgentConfirmService, lib *LibraryService) *AgentConfirmService {
+	if lib != nil && lib.schedule.uc != nil {
+		cards.schedule = lib
 	}
-	return s
+	return cards
 }
 
 // Card returns the data of the card bound to target (kind "proposal" or "preview", the target of a confirm card).
