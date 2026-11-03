@@ -923,3 +923,8 @@ ALTER TABLE settings DROP COLUMN free_work_notice;
 -- subjects: when the student removed the subject (ms); NULL while it is active. Its notes and files are hidden with it,
 -- no row is rewritten; it keeps its name until it is purged 3 days later.
 ALTER TABLE subjects ADD COLUMN removed_at INTEGER CHECK (removed_at IS NULL OR removed_at > 0);
+
+-- Migration 0050 (TASK-364).
+-- subjects: the call link in the canonical form of subject.CallLink; '' none. Untrusted input, re-checked on read (a
+-- value that no longer parses is read as no link); never written to Google Calendar, the logs or the Journal.
+ALTER TABLE subjects ADD COLUMN call_link TEXT NOT NULL DEFAULT '' CHECK (length(call_link) <= 2048);

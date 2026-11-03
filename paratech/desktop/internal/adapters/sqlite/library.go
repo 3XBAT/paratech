@@ -157,14 +157,15 @@ func (r *SubjectRepository) Save(ctx context.Context, s *subject.Subject) error 
 		if st.Version == 0 {
 			if err := DuplicateAsVersionConflict(MapError(ctx, q.InsertSubject(ctx, sqlcgen.InsertSubjectParams{
 				ID: string(st.ID), Name: st.Name, NameKey: values.Key(st.Name), Semester: st.Semester.Code(),
-				CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
+				CallLink: st.CallLink, CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
 			}))); err != nil {
 				return err
 			}
 		} else {
 			n, err := q.UpdateSubject(ctx, sqlcgen.UpdateSubjectParams{
-				Name: st.Name, NameKey: values.Key(st.Name), Semester: st.Semester.Code(), RemovedAt: jobNullMs(st.RemovedAt),
-				UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID), ExpectedVersion: st.Version,
+				Name: st.Name, NameKey: values.Key(st.Name), Semester: st.Semester.Code(), CallLink: st.CallLink,
+				RemovedAt: jobNullMs(st.RemovedAt), UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID),
+				ExpectedVersion: st.Version,
 			})
 			if err := VersionCAS(ctx, n, err); err != nil {
 				return err
@@ -242,7 +243,8 @@ func (r *SubjectRepository) Delete(ctx context.Context, s *subject.Subject) erro
 	return nil
 }
 
-// subjectFromRows restores a subject. subjects.teacher_* are legacy (migration 0044) and never read.
+// subjectFromRows restores a subject. subjects.teacher_* are legacy (migration 0044) and never read. A call link that
+// no longer parses is restored as none by the aggregate (ADR-0032).
 func subjectFromRows(row sqlcgen.Subject, aliases []sqlcgen.SubjectAlias, folders []sqlcgen.SubjectFolder,
 	teachers []sqlcgen.SubjectTeacher) (*subject.Subject, error) {
 	sem, err := values.ParseSemester(row.Semester)
@@ -250,7 +252,7 @@ func subjectFromRows(row sqlcgen.Subject, aliases []sqlcgen.SubjectAlias, folder
 		return nil, fmt.Errorf("%s %s: %w", opRestoreSubject, row.ID, err)
 	}
 	st := subject.State{
-		Version: row.Version, ID: shared.SubjectID(row.ID), Name: row.Name, Semester: sem,
+		Version: row.Version, ID: shared.SubjectID(row.ID), Name: row.Name, Semester: sem, CallLink: row.CallLink,
 		RemovedAt: jobFromNullMs(row.RemovedAt), CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 	}
 	for _, t := range teachers {

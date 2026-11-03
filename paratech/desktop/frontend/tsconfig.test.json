@@ -140,6 +140,8 @@
     "src/pages/SubjectTabs.tsx",
     "src/pages/useFocusBack.ts",
     "src/bindings/runtime.ts",
-    "src/pages/DropZone.tsx"
+    "src/pages/DropZone.tsx",
+    "src/callLinkView.ts",
+    "src/pages/CallLinkParts.tsx"
   ]
 }

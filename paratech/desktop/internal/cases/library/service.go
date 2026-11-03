@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"paratech/desktop/internal/domain/library/material"
 	"paratech/desktop/internal/domain/library/services/filing"
@@ -46,6 +47,7 @@ type Service struct {
 	notes       SubjectNotes    // optional
 	images      PageImages      // optional: without it photos are refused
 	expired     ExpiredSubjects // optional: without it an expired name waits for the daily purge
+	calls       CallOpener      // optional: without it no call link is opened
 	log         *slog.Logger
 }
 
@@ -62,7 +64,7 @@ func New(d Deps) (*Service, error) {
 	return &Service{
 		subjects: d.Subjects, materials: d.Materials, blobs: d.Blobs, lessons: d.Lessons, strings: d.Strings,
 		clock: d.Clock, ids: d.IDs, texts: d.Texts, reader: d.Reader, inspections: d.Inspections, notes: d.Notes,
-		images: d.Images, expired: d.Expired, log: log,
+		images: d.Images, expired: d.Expired, calls: d.Calls, log: log,
 	}, nil
 }
 
@@ -80,6 +82,11 @@ func (s *Service) Subjects(ctx context.Context) ([]*subject.Subject, error) {
 // window has ended the subject is erased first and the name is free (see namesFor). Aliases with the key of the name
 // are dropped.
 func (s *Service) CreateSubject(ctx context.Context, req NewSubject) (*subject.Subject, error) {
+	return s.createSubject(ctx, req, nil)
+}
+
+// createSubject is CreateSubject; setUp, when given, changes the new subject before its first and only save.
+func (s *Service) createSubject(ctx context.Context, req NewSubject, setUp func(*subject.Subject, time.Time) error) (*subject.Subject, error) {
 	now := s.clock.Now()
 	sem := values.SemesterOf(now)
 	if req.Semester != "" {
@@ -91,6 +98,11 @@ func (s *Service) CreateSubject(ctx context.Context, req NewSubject) (*subject.S
 	sub, err := subject.New(subject.Spec{ID: s.ids.NewSubjectID(), Name: req.Name, Aliases: req.Aliases, Semester: sem}, now)
 	if err != nil {
 		return nil, domainError(err)
+	}
+	if setUp != nil {
+		if err := setUp(sub, now); err != nil {
+			return nil, domainError(err)
+		}
 	}
 
 	names := []string{sub.Name().String()}
@@ -757,6 +769,8 @@ func domainError(err error) error {
 		to = ErrInvalidTeacherEmail
 	case errors.Is(err, subject.ErrInvalidTeacherRole):
 		to = ErrInvalidTeacherRole
+	case errors.Is(err, subject.ErrInvalidCallLink):
+		to = ErrInvalidCallLink
 	case errors.Is(err, subject.ErrFolderExists):
 		to = ErrFolderTaken
 	case errors.Is(err, subject.ErrFolderNotFound):

@@ -208,7 +208,8 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		Subjects: sqlite.NewSubjectRepository(db), Materials: sqlite.NewMaterialRepository(db), Blobs: store,
 		Lessons: lessons, Strings: sqlite.NewSubjectStrings(db), Clock: e.local, IDs: e.ids, Texts: doctext.New(),
 		Reader: llm, Inspections: sqlite.NewInspectionRepository(db), Notes: noteRepo, Images: imagepage.New(),
-		Expired: subjectPurge, Log: log,
+		// «Подключиться»: the call link of a subject, re-checked and opened through a .url file (ADR-0032).
+		Expired: subjectPurge, Calls: weblink.New(), Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: library: %w", err)

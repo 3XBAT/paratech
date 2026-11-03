@@ -80,6 +80,23 @@ func TestListSubjects(t *testing.T) {
 	}
 }
 
+// TASK-364: a subject that keeps a call link shows it in canonical form; one without has no field.
+func TestListSubjectsCallLink(t *testing.T) {
+	r := newReads()
+	withLink := newSubject(t, "s1", "Матанализ")
+	if _, err := withLink.SetCallLink(" HTTPS://Meet.Example.org/j/1?pwd=FakePwd42 ", now); err != nil {
+		t.Fatal(err)
+	}
+	r.library.subjects = []*subject.Subject{withLink, newSubject(t, "s2", "Химия")}
+	out := runRead(t, r, values.Scope{}, values.ToolListSubjects, `{}`)
+	want := `{"count":2,"subjects":[{"id":"s1","name":"Матанализ","semester":"2026-autumn",` +
+		`"call_link":"https://meet.example.org/j/1?pwd=FakePwd42"},{"id":"s2","name":"Химия","semester":"2026-autumn"}],` +
+		`"truncated":false}`
+	if out.Result.ResultJSON != want {
+		t.Fatalf("result = %s", out.Result.ResultJSON)
+	}
+}
+
 func TestFindLessons(t *testing.T) {
 	r := newReads()
 	r.knowledge.lessons = []kb.Lesson{

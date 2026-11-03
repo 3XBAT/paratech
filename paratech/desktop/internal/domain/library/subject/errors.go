@@ -43,6 +43,10 @@ var (
 	// ErrInvalidTeacherRole means a role that is not one of TeacherRoles; it wraps ErrInvalidTeacher.
 	ErrInvalidTeacherRole = fmt.Errorf("%w: role", ErrInvalidTeacher)
 
+	// ErrInvalidCallLink means text that is not a call link the app may store or open (ADR-0032); wrapping errors name
+	// the rule, never the text.
+	ErrInvalidCallLink = errors.New("invalid call link")
+
 	// ErrRemoved means a change of a removed subject other than restoring it.
 	ErrRemoved = errors.New("subject is removed")
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"paratech/desktop/internal/domain/library/subject"
 	schedvalues "paratech/desktop/internal/domain/schedule/values"
 )
 
@@ -13,6 +14,17 @@ import (
 // right before the start and, like OpenAuthPage, always goes through a temporary .url file: the link never reaches a
 // command line. A %NAME% naming an existing environment variable is refused. It returns like OpenLink.
 func (o *Opener) OpenCallLink(ctx context.Context, l schedvalues.CallLink) error {
+	link, err := checkCallLink(l.String())
+	if err != nil {
+		return err
+	}
+	return startShortcut(ctx, link)
+}
+
+// OpenSubjectCallLink opens the link the student keeps on a subject («Подключиться», ADR-0032). The library's copy of
+// the rule is not trusted here: the link is re-parsed with the schedule's rule, which must give back exactly the same
+// canonical form, then opened as OpenCallLink does. It returns like OpenLink.
+func (o *Opener) OpenSubjectCallLink(ctx context.Context, l subject.CallLink) error {
 	link, err := checkCallLink(l.String())
 	if err != nil {
 		return err

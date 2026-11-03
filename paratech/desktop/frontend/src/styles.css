@@ -105,6 +105,17 @@ html, body, #root { height: 100%; }
 .teacher-form .t { margin: 0; font-weight: 500; }
 .teacher-form .ui-field { margin-bottom: 0; }
 .teachers-note:empty { margin: 0; }
+/* «Ссылка на пару» (TASK-364): one row like a teacher; the field row wraps; the full link is one selectable line. */
+.section.calllink { margin-top: 16px; }
+.calllink-form { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 520px; }
+.calllink-form p { margin: 0; }
+.calllink-fieldrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.calllink-fieldrow .input { flex: 1 1 14rem; min-width: 0; }
+.calllink-refusal { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.calllink-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 8px; }
+.calllink-line p, .calllink-line .result { margin: 0; }
+.section.calllink .calllink-line { padding: 0 16px; }
+.calllink-full { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; }
 /* «Кому отправить?» (TASK-238): the options reuse .ag-opt of the agent's questions. */
 .rcp-choose { min-width: 0; margin: 0 0 12px; padding: 0; border: 0; }
 .rcp-choose legend { margin: 0 0 4px; padding: 0; font-weight: 600; }

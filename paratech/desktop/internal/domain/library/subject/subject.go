@@ -39,7 +39,7 @@ var transitions = map[Status][]Status{
 }
 
 // Subject is a subject of the library. Fields change only through the methods below. It prints (fmt, slog) only its
-// id and name: the teachers are personal data.
+// id and name: the teachers are personal data, the call link may hold a meeting password.
 type Subject struct {
 	version int64 // persisted version for optimistic concurrency; 0 = never stored (ADR-0004)
 	id      shared.SubjectID
@@ -49,6 +49,7 @@ type Subject struct {
 	semester values.Semester
 	folders  []Folder // the system folders first, in the order of Systems, then own folders in the order added
 	teachers Teachers
+	callLink CallLink // the student's link to the online class (ADR-0032, TASK-364); zero: none
 
 	status    Status
 	removedAt time.Time // zero while active
@@ -97,6 +98,9 @@ type State struct {
 	Folders  []FolderState
 	// Teachers holds one entry per role that has a teacher, in the order of TeacherRoles.
 	Teachers []TeacherState
+	// CallLink is the canonical call link; "" none. A stored value that no longer parses is restored as no link
+	// (ADR-0032), so a tightened rule never fails the read.
+	CallLink string
 	// RemovedAt is when the subject was removed; zero while it is active (the status follows from it).
 	RemovedAt time.Time
 	CreatedAt time.Time
@@ -148,6 +152,9 @@ func Restore(st State) (*Subject, error) {
 			return nil, fmt.Errorf("%w: stored teacher", ErrInvalidSubject)
 		}
 		s.teachers.byRole[i] = t
+	}
+	if l, err := ParseCallLink(st.CallLink); err == nil && l.link == st.CallLink {
+		s.callLink = l
 	}
 	if err := s.validate(); err != nil {
 		return nil, err
@@ -353,6 +360,39 @@ func (s *Subject) ClearTeacher(role TeacherRole, now time.Time) (changed bool, e
 	return true, nil
 }
 
+// SetCallLink sets the link to the online class of the subject (ADR-0032, TASK-364), replacing the one set before;
+// the same canonical link again changes nothing (changed is false). Errors: ErrRemoved, or an error wrapping
+// ErrInvalidCallLink.
+func (s *Subject) SetCallLink(text string, now time.Time) (changed bool, err error) {
+	if err := s.active(); err != nil {
+		return false, err
+	}
+	l, err := ParseCallLink(text)
+	if err != nil {
+		return false, err
+	}
+	if l == s.callLink {
+		return false, nil
+	}
+	s.callLink = l
+	s.updatedAt = now
+	return true, nil
+}
+
+// ClearCallLink removes the link to the online class; a subject without one changes nothing (changed is false).
+// Error: ErrRemoved.
+func (s *Subject) ClearCallLink(now time.Time) (changed bool, err error) {
+	if err := s.active(); err != nil {
+		return false, err
+	}
+	if s.callLink.IsZero() {
+		return false, nil
+	}
+	s.callLink = CallLink{}
+	s.updatedAt = now
+	return true, nil
+}
+
 // HasKey reports whether key (values.Key) is the key of the name or of an alias.
 func (s *Subject) HasKey(key string) bool {
 	if s.name.Key() == key {
@@ -461,7 +501,10 @@ func (s *Subject) Teacher(role TeacherRole) Teacher { return s.teachers.Of(role)
 // Teachers returns the teachers of every role (a copy).
 func (s *Subject) Teachers() Teachers { return s.teachers }
 
-// String names the subject by id and name only, never its teachers.
+// CallLink returns the link to the online class; the zero CallLink while none is set.
+func (s *Subject) CallLink() CallLink { return s.callLink }
+
+// String names the subject by id and name only, never its teachers or its call link.
 func (s *Subject) String() string {
 	if s == nil {
 		return "<nil subject>"
@@ -498,8 +541,8 @@ func (s *Subject) UpdatedAt() time.Time { return s.updatedAt }
 // State returns the stored form, for the repositories.
 func (s *Subject) State() State {
 	st := State{
-		Version: s.version, ID: s.id, Name: s.name.text, Semester: s.semester, RemovedAt: s.removedAt,
-		CreatedAt: s.createdAt, UpdatedAt: s.updatedAt,
+		Version: s.version, ID: s.id, Name: s.name.text, Semester: s.semester, CallLink: s.callLink.link,
+		RemovedAt: s.removedAt, CreatedAt: s.createdAt, UpdatedAt: s.updatedAt,
 	}
 	for i, t := range s.teachers.byRole {
 		if !t.IsZero() {

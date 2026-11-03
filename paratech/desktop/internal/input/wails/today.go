@@ -68,16 +68,27 @@ type TodayPost struct {
 	ShownAt      string                `json:"shownAt"`
 }
 
-// TodayLesson is a lesson of the day; Post is null until its recording has a post.
+// TodayLesson is a lesson of the day; Post is null until its recording has a post. Subject is the string of the
+// schedule. SubjectState tells what the library says about it: "none" (the lesson names no subject), "unknown" (no
+// subject has the name: LibraryService.CreateSubjectWithCallLink can create one), "ambiguous" (several subjects have
+// it), "known" (one: SubjectID) or "unavailable" (the library could not be read now: offer nothing). SubjectID and
+// SubjectName are set only for "known": the other lessons have no place to keep a call link. CallLinkHost is the host
+// of the link kept on the subject ("" none, HasCallLink false); «Подключиться» calls LibraryService.
+// OpenSubjectCallLink(SubjectID), «Добавить ссылку» LibraryService.SetSubjectCallLink(SubjectID, text).
 type TodayLesson struct {
-	ID      string     `json:"id"`
-	Title   string     `json:"title"`
-	Subject string     `json:"subject"`
-	Kind    string     `json:"kind"`
-	Teacher string     `json:"teacher"`
-	Start   string     `json:"start"`
-	End     string     `json:"end"`
-	Post    *TodayPost `json:"post"`
+	ID           string     `json:"id"`
+	Title        string     `json:"title"`
+	Subject      string     `json:"subject"`
+	SubjectState string     `json:"subjectState"`
+	SubjectID    string     `json:"subjectId"`
+	SubjectName  string     `json:"subjectName"`
+	HasCallLink  bool       `json:"hasCallLink"`
+	CallLinkHost string     `json:"callLinkHost"`
+	Kind         string     `json:"kind"`
+	Teacher      string     `json:"teacher"`
+	Start        string     `json:"start"`
+	End          string     `json:"end"`
+	Post         *TodayPost `json:"post"`
 }
 
 // TodayWaiting is a proposal of «Ждёт вашего «Да»». Kind is the proposal kind ("create_deadline_event",
@@ -154,8 +165,10 @@ func (s *TodayService) Today(ctx context.Context) (TodayScreen, error) {
 	}
 	for _, l := range v.Lessons {
 		row := TodayLesson{
-			ID: l.Lesson.String(), Title: l.Title, Subject: l.Subject, Kind: l.Kind, Teacher: l.Teacher,
-			Start: timeText(l.Start), End: timeText(l.End),
+			ID: l.Lesson.String(), Title: l.Title, Subject: l.Subject, SubjectState: todaySubjectState(l.SubjectState),
+			SubjectID:   l.SubjectID.String(),
+			SubjectName: l.SubjectName, HasCallLink: !l.CallLink.IsZero(), CallLinkHost: l.CallLink.Host(), Kind: l.Kind,
+			Teacher: l.Teacher, Start: timeText(l.Start), End: timeText(l.End),
 		}
 		if l.Post != nil {
 			p := todayPost(*l.Post)
@@ -227,6 +240,15 @@ func todayLesson(l todayfeed.LessonInfo) TodayPostLesson {
 		LessonID: l.Lesson.String(), Title: l.Title, Subject: l.Subject, SubjectID: l.SubjectID.String(),
 		SubjectName: l.SubjectName, Kind: l.Kind, Start: timeText(l.Start),
 	}
+}
+
+// todaySubjectState is the code of the page; a state it does not know is "unavailable", which offers nothing.
+func todaySubjectState(st todayfeed.SubjectState) string {
+	switch st {
+	case todayfeed.SubjectNone, todayfeed.SubjectUnknown, todayfeed.SubjectAmbiguous, todayfeed.SubjectKnown:
+		return string(st)
+	}
+	return string(todayfeed.SubjectUnavailable)
 }
 
 func todayDeadline(b today.Burning) TodayDeadline {

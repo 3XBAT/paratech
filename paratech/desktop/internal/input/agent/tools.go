@@ -178,7 +178,9 @@ func (t tools) listSubjects(ctx context.Context, call values.Call, _ values.Scop
 		if !ok {
 			continue
 		}
-		rows = append(rows, values.SubjectRow{ID: r, Name: s.Name().String(), Semester: s.Semester().Code()})
+		rows = append(rows, values.SubjectRow{
+			ID: r, Name: s.Name().String(), Semester: s.Semester().Code(), CallLink: s.CallLink().String(),
+		})
 	}
 	return values.SubjectsResult(call.ID(), rows)
 }

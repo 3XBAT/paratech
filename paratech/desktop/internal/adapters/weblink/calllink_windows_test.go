@@ -72,6 +72,31 @@ func TestOpenCallLinkWritesTheShortcut(t *testing.T) {
 	}
 }
 
+// The link of a subject goes the same .url way, in the canonical form both rules give.
+func TestOpenSubjectCallLinkWritesTheShortcut(t *testing.T) {
+	f, _ := useFakeLauncher(t)
+
+	if err := New().OpenSubjectCallLink(context.Background(), mustSubjectCallLink(t, " "+zoomCallLink+" ")); err != nil {
+		t.Fatalf("OpenSubjectCallLink = %v", err)
+	}
+	if want := "[InternetShortcut]\r\nURL=" + zoomCallLink + "\r\n"; f.calls != 1 || f.contents != want {
+		t.Fatalf("launcher calls %d, .url contents %q, want %q", f.calls, f.contents, want)
+	}
+}
+
+func TestOpenSubjectCallLinkEnvReferenceStartsNothing(t *testing.T) {
+	f, dir := useFakeLauncher(t)
+	useEnviron(t, "DB_PASSWORD=fake")
+
+	link := mustSubjectCallLink(t, "https://example.zoom.us/j/1?x=%DB_PASSWORD%20")
+	if err := New().OpenSubjectCallLink(context.Background(), link); !errors.Is(err, ErrRefused) {
+		t.Fatalf("OpenSubjectCallLink = %v, want ErrRefused", err)
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, shortcutPrefix+"*.url")); f.calls != 0 || len(files) != 0 {
+		t.Fatalf("launcher calls %d, shortcuts %v", f.calls, files)
+	}
+}
+
 func TestOpenCallLinkCancelledStartsNothing(t *testing.T) {
 	f, dir := useFakeLauncher(t)
 	ctx, cancel := context.WithCancel(context.Background())
