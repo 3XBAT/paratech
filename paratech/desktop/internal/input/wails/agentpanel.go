@@ -3,6 +3,7 @@ package wails
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -127,10 +128,11 @@ func fillView(f agentchats.Fill) *AgentFillView {
 }
 
 // AgentCardView is one card; Kind says which field is set: plan, questions, progress (jobId), result (artifact,
-// "<kind>/<path>" of the artifact store), confirm (target), action_line (actionId; assignment for create_assignment),
-// answer (answerId), cannot_do
-// (cannotDo), reply (text and assignments), stopped (stopReason) or work (workId and outcome: questions, review,
-// helper, pending, failed or confirmed; the texts come from TurnkeyService.Work).
+// "<kind>/<path>" of the artifact store), confirm (target), action_line (actionId; assignment for create_assignment;
+// result and offer for the wave-10 actions), answer (answerId), cannot_do (cannotDo), reply (text and assignments),
+// stopped (stopReason), work (workId and outcome: questions, review, helper, pending, failed or confirmed; the texts
+// come from TurnkeyService.Work), schedule_subjects (target), delete_assignment (target {kind "assignment", id}, read
+// with AgentConfirmService.Card("assignment", id)) or offer_button (offer).
 type AgentCardView struct {
 	Kind        string                `json:"kind"`
 	Plan        *AgentPlanView        `json:"plan"`
@@ -149,10 +151,37 @@ type AgentCardView struct {
 	StopReason string                    `json:"stopReason"`
 	WorkID     string                    `json:"workId"`
 	Outcome    string                    `json:"outcome"`
-	// Offer is the button of an offer_button card, absent on other cards (the event of the earlier cards keeps its
-	// bytes). A schedule_subjects card has Target {kind "schedule_subjects", id: the token}, read with
-	// AgentConfirmService.Card.
+	// Offer is the button of an offer_button card, or the button an action_line offers instead of «Отменить» (the stop
+	// of a recording: start_recording, no target); absent otherwise (the event of the earlier cards keeps its bytes). A
+	// schedule_subjects card has Target {kind "schedule_subjects", id: the token}, read with AgentConfirmService.Card.
 	Offer *AgentOfferView `json:"offer,omitempty"`
+	// Result is what the action of an action_line did, for the panel to word its line; absent on other cards and on
+	// a generic line (also on the line of a call replayed from the journal).
+	Result *AgentLineResultView `json:"result,omitempty"`
+}
+
+// AgentLineResultView is what a wave-10 action did. Kind is marked_done or marked_undone (count: 1..50 assignments
+// changed), note_text (excerpt: 0..3 lines of up to 120 characters of the saved text, the student's own words, plain
+// text only; [] when the line has none), note_upload, note_move, note_rename, note_remove, recording_started,
+// recording_stopped, or setting (setting: recording_prompts, ac_power_only or recognition_load; value: on/off, or a
+// load mode). The fields a kind does not use are 0, "" and [].
+type AgentLineResultView struct {
+	Kind    string   `json:"kind"`
+	Count   int      `json:"count"`
+	Setting string   `json:"setting"`
+	Value   string   `json:"value"`
+	Excerpt []string `json:"excerpt"`
+}
+
+func lineResultView(r values.LineResult) *AgentLineResultView {
+	if r.IsZero() {
+		return nil
+	}
+	v := &AgentLineResultView{Kind: string(r.Kind), Count: r.Count, Setting: string(r.Setting), Value: r.Value, Excerpt: []string{}}
+	if r.Excerpt != "" {
+		v.Excerpt = strings.Split(r.Excerpt, "\n")
+	}
+	return v
 }
 
 // AgentAssignmentView is an assignment a reply lists, from the local data, never from the model (TASK-173): its title
@@ -314,6 +343,10 @@ func cardView(c values.Card) (AgentCardView, bool) {
 				ID: l.Assignment.ID(), Title: l.Title, SubjectID: l.Subject.ID(), Due: l.Due.String(), Time: l.DueTime.String(),
 			}
 		}
+		if c.Offer != "" {
+			v.Offer = &AgentOfferView{Action: string(c.Offer)}
+		}
+		v.Result = lineResultView(c.Result)
 	case values.AnswerCard:
 		v.AnswerID = c.Answer.ID()
 	case values.CannotDoCard:
@@ -334,6 +367,8 @@ func cardView(c values.Card) (AgentCardView, bool) {
 		v.Target = &AgentRefView{Kind: agentCardScheduleSubjects, ID: c.Proposal.ID()}
 	case values.OfferButtonCard:
 		v.Offer = offerView(c)
+	case values.DeleteAssignmentCard:
+		v.Target = &AgentRefView{Kind: string(values.KindAssignment), ID: c.Assignment.ID()}
 	default:
 		return AgentCardView{}, false
 	}
