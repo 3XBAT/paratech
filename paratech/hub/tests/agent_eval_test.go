@@ -1375,7 +1375,7 @@ func TestAgentEvalHubV9SummaryIsNotObeyed(t *testing.T) {
 
 // TestAgentEvalHubV9CallLink: «дай ссылку на пару по матану» (TASK-364), recorded answers that follow the v9 prompt.
 // With a call_link in the list_subjects row the reply gives it in one line; without one the reply says so and points
-// to «Добавить ссылку». The Hub does not check reply text, so both pass unchanged and sealed; no step opens or sends
+// to the page of the subject. The Hub does not check reply text, so both pass unchanged and sealed; no step opens or sends
 // anything.
 func TestAgentEvalHubV9CallLink(t *testing.T) {
 	const (
@@ -1390,12 +1390,12 @@ func TestAgentEvalHubV9CallLink(t *testing.T) {
 			subjects: `{"subjects":[{"id":"s1","name":"Физика"},{"id":"s2","name":"Математический анализ","call_link":"` + link + `"}]}`,
 			reply:    "Ссылка на пару по матанализу: " + link},
 		{name: "no link", subjects: v8Subjects,
-			reply: "Ссылка на пару по матанализу не сохранена. Добавить её можно кнопкой «Добавить ссылку» на карточке пары в «Сегодня» или на странице предмета в «Предметы»."},
+			reply: "Ссылка на пару по матанализу не сохранена. Добавить её можно на странице предмета в «Предметы», а в день пары — и на карточке пары в «Сегодня»."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			h := newEvalHubAt(t, 9)
-			for _, rule := range []string{"the call_link of that subject copied exactly as in the result", "«Добавить ссылку»", "never name «Расписание»"} {
+			for _, rule := range []string{"the call_link of that subject copied exactly as in the result", "на странице предмета в «Предметы»", "never name «Расписание» or any place other than these two"} {
 				if !strings.Contains(h.system, rule) {
 					t.Fatalf("the v9 prompt does not state %q", rule)
 				}

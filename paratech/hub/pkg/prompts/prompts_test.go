@@ -363,8 +363,8 @@ func TestPanelV9Prompt(t *testing.T) {
 }
 
 // TestPanelV9CallLink: the link of a subject's online class (TASK-364, catalog 9 unchanged). The reply may give the
-// call_link of a list_subjects row and nothing else that is a URL; without a link the student is sent to «Добавить
-// ссылку», never to «Расписание», which holds no links; a screen without what was asked is never named.
+// call_link of a list_subjects row and nothing else that is a URL; without a link the student is sent to the page of
+// the subject (or the lesson card of the day), never to «Расписание», which holds no links; a screen without what was asked is never named.
 func TestPanelV9CallLink(t *testing.T) {
 	system := panelSystem(t, 9)
 	for _, rule := range []string{
@@ -376,13 +376,15 @@ func TestPanelV9CallLink(t *testing.T) {
 		// the request and the missing link
 		"«дай ссылку на пару по матану»", "then reply with one line: the call_link of that subject copied exactly as in the result",
 		"When that subject has no call_link, no link is saved",
-		"«Добавить ссылку» на карточке пары в «Сегодня» или на странице предмета в «Предметы»",
-		"No tool saves a link: never offer to save it, and never name «Расписание» or any other place for it.",
+		"Добавить её можно на странице предмета в «Предметы», а в день пары — и на карточке пары в «Сегодня».",
+		"No tool saves a link: never offer to save it, and never name «Расписание» or any place other than these two.",
 		// the general rule
 		"Never send the student to a screen, a block or a button that does not have what was asked, and never promise what the app cannot do.",
 		"say so in one plain sentence and name a real action", "No technical details (IDs, tools, versions) in the reply.",
 		// the screens
-		"Each lesson card in «Пары дня» has «Записать» and either «Подключиться»", "it does not start the recording",
+		"Each lesson card in «Пары дня» has «Подключиться»", "it does not start the recording",
+		"or, for a subject without a link, «Добавить ссылку»; «Записать» appears while the lesson can be recorded.",
+		"«Предметы» → the page of the subject (always); on a day with its lesson, also",
 		"The page of a subject shows the link of its online class, where it can be changed or removed.",
 	} {
 		if !strings.Contains(system, rule) {
