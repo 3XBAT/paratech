@@ -10,7 +10,7 @@ import { requestDraft } from "../agentDraft.js";
 import type { PageId } from "../nav.js";
 import { useOpenSummary } from "../openSummary.js";
 import { anyRecording, queueLine } from "../recordingRowView.js";
-import { dayTitle, loadView, nearestDeadlineText, newestOnly, stagesChanged, stagesKey, stopProblemText, texts } from "../todayView.js";
+import { dayTitle, loadView, nearestDeadlineText, newestOnly, recordButton, stagesChanged, stagesKey, stopProblemText, texts } from "../todayView.js";
 import { Toast } from "../ui/Toast.js";
 import { useNow } from "../useNow.js";
 import { burningAfterDone } from "../assignmentDoneView.js";
@@ -117,12 +117,14 @@ export function TodayPage(props: {
 
   // The recordings list for the live status of the lesson rows and for the main button (a running recording is stopped
   // from here); a failed read leaves the rows without it and the button at «Записать пару».
-  const readRecordings = useCallback(() => {
-    activity.listRecordings().then(
-      (r) => mounted.current && setRecordings(r),
-      () => undefined,
-    );
-  }, [activity]);
+  const readRecordings = useCallback(
+    () =>
+      activity.listRecordings().then(
+        (r) => mounted.current && setRecordings(r),
+        () => undefined,
+      ),
+    [activity],
+  );
   useEffect(() => {
     const read = () => {
       if (document.visibilityState === "visible") {
@@ -135,7 +137,8 @@ export function TodayPage(props: {
   }, [readRecordings]);
 
   // The stop of the running recording: the same binding as the rows of «Записи». One call at a time; a failure says so
-  // with the way out, and the list is read again either way.
+  // with the way out, and the list is read again either way. The busy state lasts until that read is answered, so a click
+  // on the stale list cannot stop twice. A shown failure stays while «Повторить» runs and goes with a successful stop.
   const [stopping, setStopping] = useState(false);
   const [stopProblem, setStopProblem] = useState("");
   const stoppingRef = useRef(false);
@@ -146,21 +149,23 @@ export function TodayPage(props: {
       }
       stoppingRef.current = true;
       setStopping(true);
-      setStopProblem("");
       try {
         await activity.stopRecording(recordingId);
+        if (mounted.current) {
+          setStopProblem("");
+        }
       } catch (err) {
         if (mounted.current) {
           setStopProblem(stopProblemText(err));
         }
+      }
+      try {
+        await readRecordings();
       } finally {
         stoppingRef.current = false;
         if (mounted.current) {
           setStopping(false);
         }
-      }
-      if (mounted.current) {
-        readRecordings();
       }
     },
     [activity, readRecordings],
@@ -168,6 +173,7 @@ export function TodayPage(props: {
   const running = recordings?.some((r) => r.stage === "recording") ?? false;
   // The elapsed time of the button ticks every second from startedAt, independent of the 3 s poll (as on «Записи»).
   const now = useNow(recordings !== null && anyRecording(recordings));
+  const stopButton = recordButton(recordings, now);
   useEffect(() => {
     // The recording is gone (stopped here or elsewhere): an old failure line has nothing to refer to.
     if (!running) {
@@ -205,7 +211,14 @@ export function TodayPage(props: {
           <RecordAction recordings={recordings} now={now} stopping={stopping} onStart={props.onRecord} onStop={(id) => void stop(id)} />
         </div>
       </div>
-      {stopProblem !== "" && <StopProblem text={stopProblem} onOpenRecordings={openRecordings} />}
+      {stopProblem !== "" && (
+        <StopProblem
+          text={stopProblem}
+          retrying={stopping}
+          onRetry={() => stopButton.kind === "stop" && void stop(stopButton.id)}
+          onOpenRecordings={openRecordings}
+        />
+      )}
       <SpeechComponentNotice primary={false} />
       {view === "error" && <LoadError onRetry={retry} />}
       {view === "stale" && <LoadError onRetry={retry} quiet />}

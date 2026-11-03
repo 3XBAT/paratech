@@ -48,15 +48,23 @@ test("the rail is 72 px wide everywhere the width is assumed", () => {
 
 test("the rail label is small, one line, and cannot overflow the button; the tooltip rules are gone", () => {
   const css = src("styles.css");
-  assert.match(css, /\.rail-label \{[^}]*font-size: var\(--fs-nav\)[^}]*white-space: nowrap/);
+  // 11px (not the 11.5px token of the popup) with a tighter track; what still does not fit ends in «…».
+  assert.match(css, /\.rail-label \{[^}]*font-size: 11px[^}]*letter-spacing: -0\.01em[^}]*white-space: nowrap[^}]*text-overflow: ellipsis/);
   assert.match(css, /\.rail-label \{[^}]*max-width: 100%[^}]*overflow: hidden/);
   assert.doesNotMatch(css, /\.rail \.tip|\.rail button:hover \.tip/);
   // Keyboard focus, the current item and the high-contrast outline stay as before.
   assert.match(css, /\.rail button\[aria-current="page"\] \{/);
-  assert.match(css, /@media \(forced-colors: active\) \{\s*\.rail button\[aria-current="page"\] \{ outline: 2px solid Highlight; \}/);
+  assert.match(css, /@media \(forced-colors: active\) \{\s*\.rail button\[aria-current="page"\] \{ outline: 2px solid Highlight; outline-offset: -2px; \}/);
   assert.doesNotMatch(css, /\.rail button \{[^}]*outline: none/);
-  // The nav token is the small one of the design tokens.
-  assert.match(src("ui/tokens.css"), /--fs-nav: 11\.5px/);
+});
+
+test("the focus ring of a rail button is drawn inside it: the button fills the rail and an outer ring is cut at the window edge", () => {
+  assert.match(src("styles.css"), /\.rail button:focus-visible \{ outline-offset: -2px; \}/);
+});
+
+test("the stale «Записи и задачи» wording is gone from the stylesheet and nav.ts", () => {
+  assert.doesNotMatch(src("styles.css"), /Записи и задачи/);
+  assert.doesNotMatch(src("nav.ts"), /Записи и задачи/);
 });
 
 // ---- «Записи» as a section: navigation ----
@@ -158,17 +166,30 @@ test("the button is «Записать пару» without a running recording, a
 
 test("a running recording turns the button into «● Идёт запись 00:41 · Остановить» for that recording", () => {
   const b = recordButton([running({ id: "old", stage: "done", stoppable: false }), running()], at("09:00:41"));
-  assert.deepEqual(b, { kind: "stop", label: "● Идёт запись 00:41 · Остановить", id: "r1" });
+  assert.deepEqual(b, { kind: "stop", label: "● Идёт запись 00:41 · Остановить", id: "r1", time: "00:41" });
   assert.equal(recordButton([running()], at("10:02:05")).label, "● Идёт запись 1:02:05 · Остановить");
   // A start time that cannot be read leaves out the time, not the stop.
   assert.equal(recordButton([running({ startedAt: "" })], 0).label, "● Идёт запись · Остановить");
 });
 
-test("a recording that runs but is not stoppable yet is only named; the button is off", () => {
-  const b = recordButton([running({ stoppable: false, status: "STARTING" })], 0);
-  assert.deepEqual(b, { kind: "wait", label: "● Идёт запись", id: "r1" });
-  const off = html(h(RecordAction, { recordings: [running({ stoppable: false })], now: 0, stopping: false, onStart: noop, onStop: noop }));
+test("a recording that runs but is not stoppable yet says starting or stopping by its age; the button is off", () => {
+  const fresh = recordButton([running({ stoppable: false, status: "STARTING" })], at("09:00:03"));
+  assert.deepEqual(fresh, { kind: "wait", label: "Запись начинается…", id: "r1", title: recordTexts.startingHint });
+  assert.equal(recordButton([running({ stoppable: false })], at("09:00:04.999")).label, "Запись начинается…");
+  const late = recordButton([running({ stoppable: false })], at("09:00:05"));
+  assert.deepEqual(late, { kind: "wait", label: "Запись останавливается…", id: "r1", title: recordTexts.stopWaitHint });
+  assert.equal(recordButton([running({ stoppable: false })], at("10:30:00")).label, "Запись останавливается…");
+  // An unreadable start is treated as just started; a clock behind the start too.
+  assert.equal(recordButton([running({ stoppable: false, startedAt: "" })], at("12:00:00")).label, "Запись начинается…");
+  assert.equal(recordButton([running({ stoppable: false })], at("08:00:00")).label, "Запись начинается…");
+  const off = html(h(RecordAction, { recordings: [running({ stoppable: false })], now: at("09:00:01"), stopping: false, onStart: noop, onStop: noop }));
   assert.match(off, /<button[^>]*disabled=""/);
+  assert.match(off, /aria-busy="true"/);
+  assert.match(off, /title="Остановить можно через несколько секунд\."/);
+  assert.match(off, />Запись начинается…</);
+  const later = html(h(RecordAction, { recordings: [running({ stoppable: false })], now: at("09:01:00"), stopping: false, onStart: noop, onStop: noop }));
+  assert.match(later, /Запись останавливается…/);
+  assert.match(later, /title="Остановка идёт, нужно дождаться окончания\."/);
 });
 
 test("RecordAction: primary, with the record icon to start; the stop shows the time and busy text while stopping", () => {
@@ -180,12 +201,19 @@ test("RecordAction: primary, with the record icon to start; the stop shows the t
 
   const stop = html(h(RecordAction, { recordings: [running()], now: at("09:00:41"), stopping: false, onStart: noop, onStop: noop }));
   assert.match(stop, /class="btn primary"/);
-  assert.match(stop, /● Идёт запись 00:41 · Остановить/);
-  assert.doesNotMatch(stop, /disabled/);
+  // The name is the action; the time is a tabular-figure span so the width does not jitter.
+  assert.match(stop, /aria-label="Остановить запись"/);
+  assert.match(stop, /● Идёт запись <span class="num">00:41<\/span> · Остановить/);
+  assert.doesNotMatch(stop, /disabled|aria-busy/);
+  const unknown = html(h(RecordAction, { recordings: [running({ startedAt: "" })], now: 0, stopping: false, onStart: noop, onStop: noop }));
+  assert.match(unknown, /● Идёт запись · Остановить/);
+  assert.doesNotMatch(unknown, /class="num"/);
 
   const busy = html(h(RecordAction, { recordings: [running()], now: at("09:00:41"), stopping: true, onStart: noop, onStop: noop }));
   assert.match(busy, /disabled=""/);
   assert.match(busy, /Остановка…/);
+  assert.match(busy, /aria-busy="true"/);
+  assert.doesNotMatch(busy, /aria-label/, "the busy button is named by its text");
 });
 
 test("RecordAction presses: start opens «Записи», stop stops that recording; the seconds tick only while capturing", () => {
@@ -197,16 +225,45 @@ test("RecordAction presses: start opens «Записи», stop stops that record
   assert.match(page, /<RecordAction recordings=\{recordings\} now=\{now\}/);
 });
 
-test("a failed stop says what happened, gives the way out and a button to «Записи»", () => {
+test("a failed stop says the recording goes on; «Повторить» and a quiet button to «Записи»", () => {
+  const first = "Не удалось остановить запись — она продолжается.";
+  assert.equal(recordTexts.stopFailed, first);
+  // Any other cause is not repeated: the core's generic sentences would only say «не удалось» twice.
+  assert.equal(stopProblemText(new Error("boom")), first);
+  assert.equal(stopProblemText(new Error("recording is not running in this session")), first);
+  assert.equal(stopProblemText(new Error("recordings and jobs are unavailable")), `${first} Записи сейчас недоступны.`);
+  assert.doesNotMatch(src("todayView.ts"), /stopWay|можно и в разделе/);
   const text = stopProblemText(new Error("boom"));
-  assert.match(text, /^Не удалось выполнить действие\. Остановить запись можно и в разделе «Записи»\.$/);
-  assert.match(stopProblemText(new Error("recording is not running in this session")), /Остановить запись можно и в разделе «Записи»/);
   let opened = 0;
-  const out = html(h(StopProblem, { text, onOpenRecordings: () => opened++ }));
+  let retried = 0;
+  const out = html(h(StopProblem, { text, retrying: false, onRetry: () => retried++, onOpenRecordings: () => opened++ }));
   assert.match(out, /role="alert"/);
-  assert.match(out, /Не удалось выполнить действие/);
-  assert.match(out, /<button[^>]*>Открыть «Записи»<\/button>/);
-  assert.equal(opened, 0);
+  assert.match(out, /Не удалось остановить запись — она продолжается\./);
+  assert.match(out, /<button[^>]*class="btn sm"[^>]*><span class="btn-labels"><span>Повторить<\/span>/);
+  assert.match(out, /<button[^>]*class="btn ghost sm"[^>]*>Перейти к записям<\/button>/);
+  assert.doesNotMatch(out, /Открыть «Записи»|btn primary/);
+  assert.equal(opened + retried, 0);
+  // While the repeat runs the button is busy and off, the line stays.
+  const busy = html(h(StopProblem, { text, retrying: true, onRetry: noop, onOpenRecordings: noop }));
+  assert.match(busy, /<button[^>]*disabled=""[^>]*>[^]*Остановка…/);
+  assert.match(busy, /role="alert"/);
+});
+
+test("a stop keeps the busy state until the list is read again; a shown failure stays during the repeat", () => {
+  const page = src("pages/TodayPage.tsx");
+  assert.match(page, /const readRecordings = useCallback\(\s*\(\) =>\s*activity\.listRecordings\(\)\.then\(/);
+  assert.match(page, /await readRecordings\(\);\s*\} finally \{\s*stoppingRef\.current = false;/);
+  assert.doesNotMatch(page, /setStopProblem\(""\);\s*try \{/, "the line is not cleared when a repeat starts");
+  assert.match(page, /retrying=\{stopping\}/);
+  assert.match(page, /onRetry=\{\(\) => stopButton\.kind === "stop" && void stop\(stopButton\.id\)\}/);
+});
+
+test("the head toggle of «Записи» gives the accent to the panel's own «Начать запись» while the panel is open", () => {
+  const page = src("pages/RecordingsPage.tsx");
+  assert.match(page, /variant=\{startOpen \? undefined : "primary"\}/);
+  assert.match(page, /aria-expanded=\{startOpen\}/);
+  // The panel's button keeps the accent.
+  assert.match(page, /<Button\s+variant="primary"\s+icon="rec"\s+busy=\{starting\}/);
 });
 
 test("TodayPage: the head holds the one primary; the stop uses the binding of the recordings page; no «all» mode", () => {
@@ -216,8 +273,8 @@ test("TodayPage: the head holds the one primary; the stop uses the binding of th
   assert.match(page, /setStopProblem\(stopProblemText\(err\)\);/);
   // One stop at a time; the list is read again whatever the result.
   assert.match(page, /if \(stoppingRef\.current\) \{\s*return;\s*\}/);
-  assert.match(page, /if \(mounted\.current\) \{\s*readRecordings\(\);\s*\}/);
-  assert.match(page, /\{stopProblem !== "" && <StopProblem text=\{stopProblem\} onOpenRecordings=\{openRecordings\} \/>\}/);
+  assert.match(page, /<StopProblem\s+text=\{stopProblem\}/);
+  assert.match(page, /onOpenRecordings=\{openRecordings\}/);
   // The old head button, the back button and the embedded page are gone.
   assert.doesNotMatch(page, /RecordingsPage|texts\.allRecords|texts\.back|setAll|today-back/);
   assert.ok(!("allRecords" in texts) && !("back" in texts));
@@ -243,6 +300,8 @@ test("the queue line says «В очереди: N» and never «задачи»; �
 test("the queue in the status line of «Сегодня» is a quiet text button to «Записи»", () => {
   const bar = html(h(StatusBar, { queue: "В очереди: 2", nearest: "Ближайший срок — пт", onOpenQueue: noop }));
   assert.match(bar, /<button[^>]*class="btn ghost sm"[^>]*title="Открыть раздел «Записи»"[^>]*>В очереди: 2<\/button>/);
+  // The visible text is only the count; the name says where the button leads.
+  assert.match(bar, /aria-label="В очереди: 2\. Открыть раздел «Записи»"/);
   assert.equal((bar.match(/<button/g) ?? []).length, 1, "the deadline is plain text");
   assert.doesNotMatch(bar, /class="btn primary/);
   const plain = html(h(StatusBar, { queue: "В очереди: 2", nearest: "" }));

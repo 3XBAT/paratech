@@ -3,7 +3,7 @@
 // headlines and recipients are imported or model text, passed through untouched and rendered as text nodes only.
 
 import { actionErrorText } from "./activityView.js";
-import type { RecordingItem } from "./bindings/activity.js";
+import { errorMessages, type RecordingItem } from "./bindings/activity.js";
 import type { TodayDeadline, TodayDone, TodayLesson, TodayPost, TodayWaiting } from "./bindings/today.js";
 import { dayAndTime, dayText, daysBetween, daysLeftText, dueText, monthsShort, pad, parseMoment, timeText } from "./dueText.js";
 import { plural } from "./plural.js";
@@ -146,11 +146,22 @@ export const recordTexts = {
   start: "Записать пару",
   running: "● Идёт запись",
   stop: "Остановить",
+  /** The accessible name of the running button: the visible text carries the timer. */
+  stopAction: "Остановить запись",
   stopping: "Остановка…",
-  /** Under a failed stop: the way out besides pressing the button again. */
-  stopWay: "Остановить запись можно и в разделе «Записи».",
-  openRecordings: "Открыть «Записи»",
+  /** The recording runs but cannot be stopped yet: it has just started, or the stop is on its way. */
+  starting: "Запись начинается…",
+  startingHint: "Остановить можно через несколько секунд.",
+  stopWait: "Запись останавливается…",
+  stopWaitHint: "Остановка идёт, нужно дождаться окончания.",
+  /** Under a failed stop: the recording goes on; «Повторить» stops again, the other button leads to «Записи». */
+  stopFailed: "Не удалось остановить запись — она продолжается.",
+  retry: "Повторить",
+  openRecordings: "Перейти к записям",
 } as const;
+
+/** A recording that started less than this ago is «начинается», a later one that is still not stoppable is «останавливается». */
+const startingMs = 5000;
 
 /** «00:41» under an hour, «1:02:05» from an hour; "—" for an unusable value. */
 export function clockText(seconds: number): string {
@@ -176,9 +187,10 @@ export function elapsedText(r: Pick<RecordingItem, "status" | "startedAt">, now:
 
 export type RecordButton =
   | { kind: "start"; label: string; id: "" }
-  | { kind: "stop"; label: string; id: string }
-  /** A recording runs but the core does not offer to stop it yet (it is starting): the button only says so. */
-  | { kind: "wait"; label: string; id: string };
+  /** `time` is the elapsed part of the label ("" when unknown): drawn with tabular figures so the width does not jitter. */
+  | { kind: "stop"; label: string; id: string; time: string }
+  /** A recording runs but the core does not offer to stop it yet (it is starting or stopping): the button only says so. */
+  | { kind: "wait"; label: string; id: string; title: string };
 
 /**
  * «Записать пару» or, while a recording runs, «● Идёт запись 00:41 · Остановить». The running one is the notion of the
@@ -193,17 +205,27 @@ export function recordButton(
   const stoppable = running.find((r) => r.stoppable);
   if (stoppable !== undefined) {
     const t = elapsedText(stoppable, now);
-    return { kind: "stop", label: `${recordTexts.running}${t === "" ? "" : ` ${t}`} · ${recordTexts.stop}`, id: stoppable.id };
+    return { kind: "stop", label: `${recordTexts.running}${t === "" ? "" : ` ${t}`} · ${recordTexts.stop}`, id: stoppable.id, time: t };
   }
   if (running.length > 0) {
-    return { kind: "wait", label: recordTexts.running, id: running[0].id };
+    const first = running[0];
+    const started = parseMoment(first.startedAt);
+    // An unreadable start counts as «just started»: the button should not claim a stop nobody asked for.
+    const justStarted = started === null || now - started.getTime() < startingMs;
+    return justStarted
+      ? { kind: "wait", label: recordTexts.starting, id: first.id, title: recordTexts.startingHint }
+      : { kind: "wait", label: recordTexts.stopWait, id: first.id, title: recordTexts.stopWaitHint };
   }
   return { kind: "start", label: recordTexts.start, id: "" };
 }
 
-/** The line under a failed stop: what happened and the way out. */
+/**
+ * The line under a failed stop: the recording goes on. Only a known cause is added (the recordings are unavailable);
+ * the generic texts of the core would only repeat «не удалось».
+ */
 export function stopProblemText(err: unknown): string {
-  return `${actionErrorText(err)} ${recordTexts.stopWay}`;
+  const unavailable = actionErrorText(new Error(errorMessages.unavailable));
+  return actionErrorText(err) === unavailable ? `${recordTexts.stopFailed} ${unavailable}` : recordTexts.stopFailed;
 }
 
 /** A signature of the recordings stages: it changes when a recording starts, stops or finishes. */

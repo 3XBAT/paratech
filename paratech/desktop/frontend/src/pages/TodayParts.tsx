@@ -109,7 +109,7 @@ export function StatusBar(props: { queue: string; nearest: string; onOpenQueue?:
       {parts.map((p) => (
         <span key={p} className="num">
           {p === props.queue && props.onOpenQueue !== undefined ? (
-            <Button variant="ghost" size="sm" title={texts.queueOpen} onClick={props.onOpenQueue}>
+            <Button variant="ghost" size="sm" title={texts.queueOpen} aria-label={`${p}. ${texts.queueOpen}`} onClick={props.onOpenQueue}>
               {p}
             </Button>
           ) : (
@@ -134,28 +134,52 @@ export function RecordAction(props: {
   onStop: (recordingId: string) => void;
 }) {
   const b = recordButton(props.recordings, props.now);
+  const waiting = b.kind === "wait";
   return (
     <Button
       variant="primary"
       icon={b.kind === "start" ? "rec" : undefined}
       busy={props.stopping}
       busyLabel={recordTexts.stopping}
-      disabled={props.stopping || b.kind === "wait"}
+      disabled={props.stopping || waiting}
+      // The visible text carries the timer; the name stays the action.
+      aria-label={b.kind === "stop" && !props.stopping ? recordTexts.stopAction : undefined}
+      aria-busy={props.stopping || waiting || undefined}
+      title={waiting ? b.title : undefined}
       onClick={() => (b.kind === "start" ? props.onStart() : props.onStop(b.id))}
     >
-      {b.label}
+      {b.kind === "stop" ? (
+        <>
+          {recordTexts.running}
+          {b.time !== "" && (
+            <>
+              {" "}
+              <span className="num">{b.time}</span>
+            </>
+          )}
+          {` · ${recordTexts.stop}`}
+        </>
+      ) : (
+        b.label
+      )}
     </Button>
   );
 }
 
-/** A failed stop: the text with the way out, and a button to «Записи»; the main button stays for another try. */
-export function StopProblem(props: { text: string; onOpenRecordings: () => void }) {
+/**
+ * A failed stop: the recording goes on. «Повторить» stops again (the busy state of the main button is shared), the quiet
+ * button leads to «Записи».
+ */
+export function StopProblem(props: { text: string; retrying: boolean; onRetry: () => void; onOpenRecordings: () => void }) {
   return (
     <div className="today-err">
       <ResultLine kind="fail" role="alert">
         {props.text}
       </ResultLine>
-      <Button size="sm" onClick={props.onOpenRecordings}>
+      <Button size="sm" busy={props.retrying} busyLabel={recordTexts.stopping} disabled={props.retrying} onClick={props.onRetry}>
+        {recordTexts.retry}
+      </Button>
+      <Button size="sm" variant="ghost" onClick={props.onOpenRecordings}>
         {recordTexts.openRecordings}
       </Button>
     </div>

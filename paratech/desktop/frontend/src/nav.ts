@@ -1,8 +1,7 @@
 // Sections of the main window (TASK-124, docs/design/concept-agent.html). The side rail has seven items with a label
 // under the icon (TASK-348): Сегодня, Записи, Предметы, Задания, Расписание; below Журнал, Настройки. Every screen is a
-// page; a rail item covers one or more pages (Настройки holds
-// the general settings, the speech models, the connections, diagnostics, the profile and the appearance; Предметы holds
-// the knowledge base).
+// page; a rail item covers one or more pages (Настройки holds the general settings, the speech models, the connections,
+// diagnostics, the profile and the appearance; Предметы holds the knowledge base).
 
 // The .js extension lets the Node test runner load the compiled module; TypeScript and Vite map it to the .tsx file.
 import type { IconName } from "./ui/Icon.js";
