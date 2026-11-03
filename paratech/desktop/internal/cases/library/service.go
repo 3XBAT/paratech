@@ -75,7 +75,8 @@ func (s *Service) Subjects(ctx context.Context) ([]*subject.Subject, error) {
 }
 
 // CreateSubject creates a subject with its system folders. A name or alias that another subject has (by key) is
-// ErrNameTaken; aliases with the key of the name are dropped.
+// ErrNameTaken, one a removed subject has a *RemovedNameError (ErrRemovedNameTaken); aliases with the key of the name
+// are dropped.
 func (s *Service) CreateSubject(ctx context.Context, req NewSubject) (*subject.Subject, error) {
 	now := s.clock.Now()
 	sem := values.SemesterOf(now)
@@ -90,7 +91,7 @@ func (s *Service) CreateSubject(ctx context.Context, req NewSubject) (*subject.S
 		return nil, domainError(err)
 	}
 
-	ix, err := s.index(ctx)
+	ix, err := s.names(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -99,8 +100,8 @@ func (s *Service) CreateSubject(ctx context.Context, req NewSubject) (*subject.S
 		names = append(names, a.String())
 	}
 	for _, n := range names {
-		if ix.TakenByOther(n, "") {
-			return nil, ErrNameTaken
+		if err := ix.taken(n, ""); err != nil {
+			return nil, err
 		}
 	}
 
@@ -116,15 +117,15 @@ func (s *Service) CreateSubject(ctx context.Context, req NewSubject) (*subject.S
 }
 
 // AddAlias adds another spelling to the subject, for example a string SuggestSubjects listed. A spelling another
-// subject has is ErrNameTaken; one the subject has changes nothing.
+// subject has is ErrNameTaken (a *RemovedNameError when that subject is removed); one the subject has changes nothing.
 func (s *Service) AddAlias(ctx context.Context, id shared.SubjectID, alias string) (*subject.Subject, error) {
 	return s.changeSubject(ctx, id, func(sub *subject.Subject) (bool, error) {
-		ix, err := s.index(ctx)
+		ix, err := s.names(ctx)
 		if err != nil {
 			return false, err
 		}
-		if ix.TakenByOther(alias, id) {
-			return false, ErrNameTaken
+		if err := ix.taken(alias, id); err != nil {
+			return false, err
 		}
 		changed, err := sub.AddAlias(alias, s.clock.Now())
 		return changed, domainError(err)
@@ -165,8 +166,9 @@ func (s *Service) RemoveFolder(ctx context.Context, id shared.SubjectID, folder 
 	return err
 }
 
-// RemoveSubject removes a subject that holds no file (active or removed), with its own folders. One with files is
-// ErrNotEmpty, one with notes of the student (active or removed) ErrHasNotes: the notes are never removed with it.
+// RemoveSubject deletes a subject that holds no file (active or removed), with its own folders: the agent's undo of
+// create_subject. One with files is ErrNotEmpty, one with notes of the student (active or removed) ErrHasNotes: the
+// notes are never removed with it. The student's click removes a subject with DiscardSubject.
 func (s *Service) RemoveSubject(ctx context.Context, id shared.SubjectID) error {
 	for attempt := 1; ; attempt++ {
 		sub, err := s.subject(ctx, id)
@@ -337,8 +339,8 @@ func (s *Service) importInbox(ctx context.Context, up Upload) (Imported, error) 
 			return Imported{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		default:
 			var changed bool
-			if changed, err = m.Reupload(s.clock.Now()); err != nil {
-				return Imported{}, domainError(err)
+			if changed, err = s.reupload(ctx, m); err != nil {
+				return Imported{}, err
 			}
 			if !changed {
 				return Imported{Material: m, Existing: true}, nil
@@ -357,6 +359,23 @@ func (s *Service) importInbox(ctx context.Context, up Upload) (Imported, error) 
 		}
 		return Imported{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
+}
+
+// reupload is the same bytes uploaded again as a material that exists: a removed one comes back into «Входящие», and
+// so does an active one hidden under a removed subject, or the student could not find the file just added.
+func (s *Service) reupload(ctx context.Context, m *material.Material) (bool, error) {
+	changed, err := m.Reupload(s.clock.Now())
+	if err != nil || changed || m.InInbox() {
+		return changed, domainError(err)
+	}
+	switch _, err := s.materials.Get(ctx, m.ID()); {
+	case err == nil:
+		return false, nil
+	case !errors.Is(err, shared.ErrNotFound):
+		return false, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	changed, err = m.MoveToInbox(s.clock.Now())
+	return changed, domainError(err)
 }
 
 // cleanImage returns the photo data of type typ encoded again by PageImages; without the port it is refused. A
@@ -744,6 +763,10 @@ func domainError(err error) error {
 		to = ErrSystemFolder
 	case errors.Is(err, subject.ErrNotEmpty):
 		to = ErrNotEmpty
+	case errors.Is(err, subject.ErrRemoved): // hidden from every reader, so gone for the caller
+		to = ErrSubjectNotFound
+	case errors.Is(err, subject.ErrRestoreExpired):
+		to = ErrRestoreExpired
 	case errors.Is(err, subject.ErrTooMany), errors.Is(err, material.ErrTooManyLessons):
 		to = ErrTooMany
 	case errors.Is(err, material.ErrRemoved):

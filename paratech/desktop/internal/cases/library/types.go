@@ -5,6 +5,7 @@ import (
 
 	"paratech/desktop/internal/domain/library/inspection"
 	"paratech/desktop/internal/domain/library/material"
+	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -34,6 +35,15 @@ type Imported struct {
 	Material  *material.Material
 	Existing  bool
 	NotPlaced bool
+}
+
+// Discarded is what DiscardSubject removed: the subject (RestoreSubject takes its version), its active notes and its
+// active files that are not parts of those notes, in any of its folders («Вместе с предметом удалятся N конспектов и
+// M файлов»).
+type Discarded struct {
+	Subject *subject.Subject
+	Notes   int
+	Files   int
 }
 
 // Inspected is what Inspect tells about a material: how far its text was read and, when there was text, the reader's

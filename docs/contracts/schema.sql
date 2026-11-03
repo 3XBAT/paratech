@@ -918,3 +918,8 @@ ALTER TABLE agent_threads ADD COLUMN forked_from TEXT CHECK (forked_from IS NULL
 -- Migration 0048 (TASK-342).
 -- settings: the free-work notice of 0032 is gone (a work on a free topic runs at once, no card).
 ALTER TABLE settings DROP COLUMN free_work_notice;
+
+-- Migration 0049 (TASK-288).
+-- subjects: when the student removed the subject (ms); NULL while it is active. Its notes and files are hidden with it,
+-- no row is rewritten; it keeps its name until it is purged 3 days later.
+ALTER TABLE subjects ADD COLUMN removed_at INTEGER CHECK (removed_at IS NULL OR removed_at > 0);

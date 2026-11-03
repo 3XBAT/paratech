@@ -1,10 +1,18 @@
 -- The library (TASK-121, ADR-0024): subjects with their aliases and folders, materials with their lesson links. Both
 -- aggregates follow the optimistic-concurrency protocol of ADR-0004(d); child rows carry no version of their own.
 
+-- A removed subject (removed_at set, TASK-288) and everything filed under it are hidden from every reader; only
+-- GetSubjectAnyStatus and ListRemovedSubjects see it. Its rows are never rewritten by the removal.
 -- name: ListSubjects :many
-SELECT * FROM subjects ORDER BY name_key, id;
+SELECT * FROM subjects WHERE removed_at IS NULL ORDER BY name_key, id;
+
+-- name: ListRemovedSubjects :many
+SELECT * FROM subjects WHERE removed_at IS NOT NULL ORDER BY removed_at, id;
 
 -- name: GetSubject :one
+SELECT * FROM subjects WHERE id = sqlc.arg(id) AND removed_at IS NULL;
+
+-- name: GetSubjectAnyStatus :one
 SELECT * FROM subjects WHERE id = sqlc.arg(id);
 
 -- A never-stored subject (version 0) is inserted with version 1. subjects.teacher_* are legacy since migration 0044
@@ -19,6 +27,7 @@ UPDATE subjects
 SET name       = sqlc.arg(name),
     name_key   = sqlc.arg(name_key),
     semester   = sqlc.arg(semester),
+    removed_at = sqlc.arg(removed_at),
     version    = version + 1,
     updated_at = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
@@ -71,14 +80,29 @@ DELETE FROM subject_teachers WHERE subject_id = sqlc.arg(subject_id);
 INSERT INTO subject_teachers (subject_id, role, name, email)
 VALUES (sqlc.arg(subject_id), sqlc.arg(role), sqlc.arg(name), sqlc.arg(email));
 
+-- A material is visible while it is in the inbox or its subject is not removed; one filed under a removed subject
+-- stays visible while it is a part of an active note of a subject that is not removed (ADR-0027). (Comments here stay
+-- ASCII: sqlc v1.31.1 counts the offsets of its rewrites in bytes.)
 -- name: GetMaterial :one
-SELECT * FROM materials WHERE id = sqlc.arg(id);
+SELECT * FROM materials
+WHERE materials.id = sqlc.arg(id)
+  AND (subject_id IS NULL
+    OR EXISTS (SELECT 1 FROM subjects s WHERE s.id = materials.subject_id AND s.removed_at IS NULL)
+    OR EXISTS (SELECT 1
+               FROM note_parts p
+               JOIN notes n ON n.id = p.note_id
+               JOIN subjects ns ON ns.id = n.subject_id
+               WHERE p.material_id = materials.id AND n.status = 'active' AND ns.removed_at IS NULL));
 
+-- In any visibility: the same bytes are one material (import dedupe).
 -- name: GetMaterialBySHA256 :one
 SELECT * FROM materials WHERE sha256 = sqlc.arg(sha256);
 
 -- name: ListMaterialsOfSubject :many
-SELECT * FROM materials WHERE subject_id = sqlc.arg(subject_id) ORDER BY created_at DESC, id;
+SELECT * FROM materials
+WHERE subject_id = sqlc.arg(subject_id)
+  AND EXISTS (SELECT 1 FROM subjects s WHERE s.id = materials.subject_id AND s.removed_at IS NULL)
+ORDER BY created_at DESC, id;
 
 -- name: ListInboxMaterials :many
 SELECT * FROM materials WHERE subject_id IS NULL ORDER BY created_at DESC, id;

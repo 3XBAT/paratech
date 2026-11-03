@@ -38,6 +38,22 @@ func newFakeSubjects() *fakeSubjects {
 }
 
 func (f *fakeSubjects) List(context.Context) ([]*subject.Subject, error) {
+	return f.list(false)
+}
+
+func (f *fakeSubjects) ListRemoved(context.Context) ([]*subject.Subject, error) {
+	return f.list(true)
+}
+
+// removed reports whether the subject id is stored and removed.
+func (f *fakeSubjects) removed(id shared.SubjectID) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	st, ok := f.rows[id]
+	return ok && !st.RemovedAt.IsZero()
+}
+
+func (f *fakeSubjects) list(removed bool) ([]*subject.Subject, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
@@ -45,6 +61,9 @@ func (f *fakeSubjects) List(context.Context) ([]*subject.Subject, error) {
 	}
 	var out []*subject.Subject
 	for _, st := range f.rows {
+		if st.RemovedAt.IsZero() == removed {
+			continue
+		}
 		s, err := subject.Restore(st)
 		if err != nil {
 			return nil, err
@@ -61,13 +80,21 @@ func (f *fakeSubjects) List(context.Context) ([]*subject.Subject, error) {
 }
 
 func (f *fakeSubjects) Get(_ context.Context, id shared.SubjectID) (*subject.Subject, error) {
+	return f.get(id, false)
+}
+
+func (f *fakeSubjects) GetAny(_ context.Context, id shared.SubjectID) (*subject.Subject, error) {
+	return f.get(id, true)
+}
+
+func (f *fakeSubjects) get(id shared.SubjectID, anyStatus bool) (*subject.Subject, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
 		return nil, f.err
 	}
 	st, ok := f.rows[id]
-	if !ok {
+	if !ok || (!anyStatus && !st.RemovedAt.IsZero()) {
 		return nil, shared.ErrNotFound
 	}
 	return subject.Restore(st)
@@ -141,10 +168,17 @@ type fakeMaterials struct {
 	saveErrs []error
 	// beforeSave runs once before the next Save.
 	beforeSave func()
+	// removedSubject tells a removed subject: Get and ListIn hide what is filed under it, as the sqlite adapter does
+	// (the exception for a part of a note of another subject is tested on SQLite).
+	removedSubject func(shared.SubjectID) bool
 }
 
 func newFakeMaterials() *fakeMaterials {
 	return &fakeMaterials{rows: map[shared.MaterialID]material.State{}}
+}
+
+func (f *fakeMaterials) hidden(st material.State) bool {
+	return st.Subject != "" && f.removedSubject != nil && f.removedSubject(st.Subject)
 }
 
 func (f *fakeMaterials) Get(_ context.Context, id shared.MaterialID) (*material.Material, error) {
@@ -154,7 +188,7 @@ func (f *fakeMaterials) Get(_ context.Context, id shared.MaterialID) (*material.
 		return nil, f.err
 	}
 	st, ok := f.rows[id]
-	if !ok {
+	if !ok || f.hidden(st) {
 		return nil, shared.ErrNotFound
 	}
 	return material.Restore(st)
@@ -179,7 +213,7 @@ func (f *fakeMaterials) ListIn(_ context.Context, sub shared.SubjectID) ([]*mate
 	defer f.mu.Unlock()
 	var out []*material.Material
 	for _, st := range f.rows {
-		if st.Subject == sub {
+		if st.Subject == sub && !f.hidden(st) {
 			m, err := material.Restore(st)
 			if err != nil {
 				return nil, err
@@ -497,6 +531,7 @@ func newEnv(t interface {
 		clock: &fakeClock{now: t0}, texts: &fakeTexts{}, reader: &fakeReader{},
 		inspections: &fakeInspections{rows: map[shared.MaterialID]inspection.State{}}, images: &fakeImages{},
 	}
+	e.materials.removedSubject = e.subjects.removed
 	svc, err := New(Deps{
 		Subjects: e.subjects, Materials: e.materials, Blobs: e.blobs, Lessons: e.lessons, Strings: e.strings,
 		Clock: e.clock, IDs: &seqIDs{}, Texts: e.texts, Reader: e.reader, Inspections: e.inspections, Images: e.images,

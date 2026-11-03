@@ -91,8 +91,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != dropFreeWorkNoticeVersion {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, dropFreeWorkNoticeVersion)
+	if err != nil || first != subjectRemovalVersion {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, subjectRemovalVersion)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
@@ -271,8 +271,11 @@ const assignmentDoneVersion = 46
 // agentReplyVersion adds the reply line of a request, the summary and the fork source of a chat (TASK-266).
 const agentReplyVersion = 47
 
-// dropFreeWorkNoticeVersion drops the free-work notice setting (TASK-342), the newest one.
+// dropFreeWorkNoticeVersion drops the free-work notice setting (TASK-342).
 const dropFreeWorkNoticeVersion = 48
+
+// subjectRemovalVersion adds the soft removal of a subject (TASK-288), the newest one.
+const subjectRemovalVersion = 49
 
 // recordingOriginVersion adds the origin of a recording (TASK-161).
 const recordingOriginVersion = 42
