@@ -76,6 +76,53 @@ func TestOverviewDeadlines(t *testing.T) {
 	}
 }
 
+// The tab «Задания» lists every open assignment of the subject, overdue and undated included and beyond five, while
+// «Ближайшее» keeps only the five nearest not yet passed.
+func TestOverviewAssignments(t *testing.T) {
+	e := newEnv(t)
+	due := func(days int) time.Time { return now.AddDate(0, 0, days) }
+	e.assignments.list = []today.Deadline{
+		{Assignment: "a-undated", Title: "Без срока", Subject: "Линал"},
+		{Assignment: "a-later", Title: "Контрольная", Subject: "Линейная алгебра", Due: due(7)},
+		{Assignment: "a-other", Title: "Лабораторная", Subject: "Физика", Due: due(1)},
+		{Assignment: "a-none", Title: "Без предмета", Due: due(-2)},
+		{Assignment: "a-overdue", Title: "Прошло", Subject: "Линал", Due: due(-2)},
+	}
+	for i := range 5 {
+		e.assignments.list = append(e.assignments.list, today.Deadline{
+			Assignment: shared.AssignmentID(fmt.Sprintf("a-far-%d", i)), Subject: "Линал", Due: due(30 + i),
+		})
+	}
+
+	got, err := e.svc.Overview(context.Background(), "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []shared.AssignmentID
+	var days []int
+	for _, d := range got.Assignments {
+		ids, days = append(ids, d.Assignment), append(days, d.DaysLeft)
+	}
+	want := []shared.AssignmentID{"a-overdue", "a-later", "a-far-0", "a-far-1", "a-far-2", "a-far-3", "a-far-4", "a-undated"}
+	if !slices.Equal(ids, want) || !slices.Equal(days, []int{-2, 7, 30, 31, 32, 33, 34, 0}) {
+		t.Fatalf("assignments = %v %v, want %v", ids, days, want)
+	}
+	if d := got.Assignments[0]; d.Title != "Прошло" || !d.Due.Equal(due(-2)) {
+		t.Fatalf("first assignment = %+v", d)
+	}
+
+	var nearest []shared.AssignmentID
+	for _, d := range got.Deadlines {
+		nearest = append(nearest, d.Assignment)
+	}
+	if wantNearest := []shared.AssignmentID{"a-later", "a-far-0", "a-far-1", "a-far-2", "a-far-3"}; !slices.Equal(nearest, wantNearest) {
+		t.Fatalf("deadlines = %v, want %v", nearest, wantNearest)
+	}
+	if e.resolver.calls != 1 {
+		t.Fatalf("resolver calls = %d, want one", e.resolver.calls)
+	}
+}
+
 func TestOverviewSchedule(t *testing.T) {
 	e := newEnv(t)
 	tue := time.Date(2026, 10, 20, 10, 30, 0, 0, msk) // Tuesday of this week
@@ -109,11 +156,11 @@ func TestOverviewNoScheduleNoDeadlines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Name != "Физика" || got.Subject != "s2" || len(got.Deadlines) != 0 || len(got.Schedule) != 0 ||
-		len(got.Lessons) != 0 || len(got.Fresh) != 0 || !got.OpenedAt.IsZero() {
+	if got.Name != "Физика" || got.Subject != "s2" || len(got.Deadlines) != 0 || len(got.Assignments) != 0 ||
+		len(got.Schedule) != 0 || len(got.Lessons) != 0 || len(got.Fresh) != 0 || !got.OpenedAt.IsZero() {
 		t.Fatalf("overview = %+v, want an empty page", got)
 	}
-	if got.Deadlines == nil || got.Schedule == nil || got.Lessons == nil || got.Fresh == nil {
+	if got.Deadlines == nil || got.Assignments == nil || got.Schedule == nil || got.Lessons == nil || got.Fresh == nil {
 		t.Fatalf("overview = %+v: lists must be empty, not nil", got)
 	}
 	if e.resolver.calls != 0 {

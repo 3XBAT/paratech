@@ -67,6 +67,70 @@ func TestNearest(t *testing.T) {
 	}
 }
 
+func TestOpen(t *testing.T) {
+	at := func(days int, hour int) time.Time { return time.Date(2026, 10, 21+days, hour, 0, 0, 0, msk) }
+	many := func(n int) []Deadline {
+		var out []Deadline
+		for i := range n {
+			out = append(out, Deadline{Assignment: shared.AssignmentID(fmt.Sprintf("a%d", i)), Due: at(i+1, 10)})
+		}
+		return out
+	}
+	tests := []struct {
+		name string
+		in   []Deadline
+		want []shared.AssignmentID
+		days []int
+	}{
+		{name: "none", in: nil, want: []shared.AssignmentID{}, days: []int{}},
+		{
+			name: "overdue first, undated last",
+			in: []Deadline{
+				{Assignment: "undated"}, {Assignment: "later today", Due: at(0, 23)},
+				{Assignment: "passed today", Due: at(0, 11)}, {Assignment: "overdue", Due: at(-3, 10)},
+				{Assignment: "next week", Due: at(7, 9)},
+			},
+			want: []shared.AssignmentID{"overdue", "passed today", "later today", "next week", "undated"},
+			days: []int{-3, 0, 0, 7, 0},
+		},
+		{
+			name: "ties by id, undated too",
+			in: []Deadline{
+				{Assignment: "u2"}, {Assignment: "b", Due: at(6, 10)}, {Assignment: "u1"}, {Assignment: "a", Due: at(6, 10)},
+			},
+			want: []shared.AssignmentID{"a", "b", "u1", "u2"}, days: []int{6, 6, 0, 0},
+		},
+		{
+			name: "no cap",
+			in:   many(7),
+			want: []shared.AssignmentID{"a0", "a1", "a2", "a3", "a4", "a5", "a6"}, days: []int{1, 2, 3, 4, 5, 6, 7},
+		},
+		{
+			name: "stale DaysLeft of an undated one is reset",
+			in:   []Deadline{{Assignment: "u", DaysLeft: 4}},
+			want: []shared.AssignmentID{"u"}, days: []int{0},
+		},
+		{
+			name: "days in the student's zone",
+			// 22:30 UTC on the 19th is 01:30 on the 20th in MSK: yesterday.
+			in:   []Deadline{{Assignment: "x", Due: time.Date(2026, 10, 19, 22, 30, 0, 0, time.UTC)}},
+			want: []shared.AssignmentID{"x"}, days: []int{-1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Open(tt.in, now)
+			ids, days := []shared.AssignmentID{}, []int{}
+			for _, d := range got {
+				ids, days = append(ids, d.Assignment), append(days, d.DaysLeft)
+			}
+			if !slices.Equal(ids, tt.want) || !slices.Equal(days, tt.days) {
+				t.Fatalf("Open = %v %v, want %v %v", ids, days, tt.want, tt.days)
+			}
+		})
+	}
+}
+
 func TestSlots(t *testing.T) {
 	lesson := func(kind string, day, hour, minute int) Scheduled {
 		start := time.Date(2026, 10, day, hour, minute, 0, 0, msk)

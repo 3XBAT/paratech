@@ -30,6 +30,16 @@ type SubjectDeadline struct {
 	DaysLeft     int    `json:"daysLeft"`
 }
 
+// SubjectAssignment is an open assignment of the tab «Задания». Title is model output or the student's text: plain
+// text only. Due is RFC 3339 in UTC, "" for no deadline; DaysLeft counts calendar days from today and is meaningful
+// only with Due (0 is today, negative is overdue).
+type SubjectAssignment struct {
+	AssignmentID string `json:"assignmentId"`
+	Title        string `json:"title"`
+	Due          string `json:"due"`
+	DaysLeft     int    `json:"daysLeft"`
+}
+
 // SubjectSlot is a weekly place of the subject's lessons in the imported schedule: «Лекции — вт, 10:30». Kind is a
 // lesson kind code ("lecture", "seminar", "practice", "lab", "unknown"); Weekday is 1 (Monday) to 7 (Sunday); Start
 // and End are "HH:MM" in the student's zone.
@@ -68,6 +78,7 @@ type SubjectOverview struct {
 	Name         string               `json:"name"`
 	OpenedAt     string               `json:"openedAt"`
 	Deadlines    []SubjectDeadline    `json:"deadlines"`
+	Assignments  []SubjectAssignment  `json:"assignments"` // every open assignment, overdue first, undated last
 	Schedule     []SubjectSlot        `json:"schedule"`
 	Lessons      []SubjectLesson      `json:"lessons"`
 	NewMaterials []SubjectNewMaterial `json:"newMaterials"`
@@ -123,11 +134,17 @@ func (s *LibraryService) overviewFail(op string, err error) error {
 func subjectOverview(v subjectview.Overview) SubjectOverview {
 	out := SubjectOverview{
 		SubjectID: v.Subject.String(), Name: v.Name, OpenedAt: timeText(v.OpenedAt),
-		Deadlines: make([]SubjectDeadline, 0, len(v.Deadlines)), Schedule: make([]SubjectSlot, 0, len(v.Schedule)),
-		Lessons: make([]SubjectLesson, 0, len(v.Lessons)), NewMaterials: make([]SubjectNewMaterial, 0, len(v.Fresh)),
+		Deadlines: make([]SubjectDeadline, 0, len(v.Deadlines)), Assignments: make([]SubjectAssignment, 0, len(v.Assignments)),
+		Schedule: make([]SubjectSlot, 0, len(v.Schedule)), Lessons: make([]SubjectLesson, 0, len(v.Lessons)),
+		NewMaterials: make([]SubjectNewMaterial, 0, len(v.Fresh)),
 	}
 	for _, d := range v.Deadlines {
 		out.Deadlines = append(out.Deadlines, SubjectDeadline{
+			AssignmentID: d.Assignment.String(), Title: d.Title, Due: timeText(d.Due), DaysLeft: d.DaysLeft,
+		})
+	}
+	for _, d := range v.Assignments {
+		out.Assignments = append(out.Assignments, SubjectAssignment{
 			AssignmentID: d.Assignment.String(), Title: d.Title, Due: timeText(d.Due), DaysLeft: d.DaysLeft,
 		})
 	}
