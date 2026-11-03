@@ -1,6 +1,7 @@
 // «Сегодня» (TASK-126): the binding parsing, the view logic and the plain-text rule.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { errorTexts, genericError, methods, parseScreen, todayApi, todayErrorText } from "../.test-build/bindings/today.js";
@@ -23,12 +24,16 @@ import {
   postLine,
   shortDate,
   stagesKey,
+  statusParts,
+  summaryRows,
+  texts,
   timeText,
   titleOf,
   waitingLine,
 } from "../.test-build/todayView.js";
+import * as todayView from "../.test-build/todayView.js";
 import { assignmentRow } from "../.test-build/agentView.js";
-import { AskSection, BurningSection, DoneSection, LessonsSection, PostsSection, WaitingSection } from "../.test-build/pages/TodayParts.js";
+import { AskSection, BurningSection, LessonsSection, LoadError, StatusBar, SummarySection, WaitingSection } from "../.test-build/pages/TodayParts.js";
 
 const noop = () => undefined;
 // Local-time moments, so the expected texts do not depend on the machine's zone.
@@ -196,7 +201,8 @@ test("lesson, waiting, deadline, done and post lines", () => {
   assert.equal(waitingLine({ proposalId: "p3", kind: "unknown", assignmentId: "", title: "", subject: "", due: "", recipient: "", createdAt: "" }).label, "Действие");
 
   const d = deadlineLine({ assignmentId: "a1", title: "Реферат", subject: "История", due: at(23, 20, 0), daysLeft: 2, urgent: true }, new Date(2026, 9, 21, 12, 0));
-  assert.deepEqual([d.weekday, d.date, d.chip, d.urgent], ["пт", "23.10", "через 2 дня, до 20:00", true]);
+  // TASK-345: the chip carries the weekday and the date itself, the row has no date column.
+  assert.deepEqual([d.chip, d.urgent, "weekday" in d, "date" in d], ["до пт, 23 окт., 20:00", true, false, false]);
 
   const done = doneLine({ recordingId: "r1", lesson: post().lesson, summaryReady: true, homework: 1, at: at(21, 11, 52) });
   assert.equal(done.title, "Конспект · Матанализ");
@@ -213,29 +219,35 @@ test("lesson, waiting, deadline, done and post lines", () => {
   assert.equal(p.meta, "Матанализ · 11:52");
 });
 
-test("the «Горит» chip carries the time of today and tomorrow, and is «просрочено» once the moment has passed (TASK-343)", () => {
+test("the «Сроки на неделе» chip is the dueText phrase (TASK-343, TASK-345)", () => {
   const chip = (day, hh, mm, daysLeft, now) => deadlineChip({ due: at(day, hh, mm), daysLeft }, now);
   const noon = new Date(2026, 9, 21, 12, 0);
   assert.equal(chip(21, 20, 0, 0, noon), "сегодня до 20:00");
   assert.equal(chip(22, 18, 30, 1, noon), "завтра до 18:30");
-  assert.equal(chip(23, 20, 0, 2, noon), "через 2 дня, до 20:00");
-  assert.equal(chip(26, 18, 30, 5, noon), "через 5 дней, до 18:30");
+  assert.equal(chip(23, 20, 0, 2, noon), "до пт, 23 окт., 20:00");
+  assert.equal(chip(26, 18, 30, 5, noon), "до пн, 26 окт., 18:30");
+  // The chip is exactly dueText: one wording for «Сегодня», the panel and «Задания».
+  for (const [day, hh, mm] of [[21, 20, 0], [22, 18, 30], [24, 18, 30], [21, 9, 0], [20, 20, 0]]) {
+    assert.equal(chip(day, hh, mm, 3, noon), dueText(at(day, hh, mm), noon));
+  }
   // The days come from the local clock: a stale snapshot never says «завтра» for today, or «сегодня» for tomorrow.
   assert.equal(chip(21, 20, 0, 1, noon), "сегодня до 20:00");
   assert.equal(chip(22, 18, 30, 0, noon), "завтра до 18:30");
-  assert.equal(chip(24, 18, 30, 1, noon), "через 3 дня, до 18:30");
-  // After 20:00 the core may still count the day as today: the passed moment wins.
-  assert.equal(chip(21, 20, 0, 0, new Date(2026, 9, 21, 20, 0)), "просрочено");
-  assert.equal(chip(21, 20, 0, 0, new Date(2026, 9, 21, 23, 59)), "просрочено");
+  assert.equal(chip(24, 18, 30, 1, noon), "до сб, 24 окт., 18:30");
+  // After 20:00 the core may still count the day as today: the passed moment wins, with its date.
+  assert.equal(chip(21, 20, 0, 0, new Date(2026, 9, 21, 20, 0)), "просрочено, ср, 21 окт., 20:00");
+  assert.equal(chip(21, 20, 0, 0, new Date(2026, 9, 21, 23, 59)), "просрочено, ср, 21 окт., 20:00");
   assert.equal(chip(21, 20, 0, 0, new Date(2026, 9, 21, 19, 59)), "сегодня до 20:00");
-  assert.equal(chip(21, 9, 0, -1, noon), "просрочено");
-  assert.equal(chip(20, 20, 0, -1, noon), "просрочено");
+  assert.equal(chip(21, 9, 0, -1, noon), "просрочено, ср, 21 окт., 09:00");
+  assert.equal(chip(20, 20, 0, -1, noon), "просрочено, вт, 20 окт., 20:00");
   // Midnight: 00:00 tomorrow is «завтра до 00:00», and at 00:01 on that day it has passed.
   assert.equal(chip(22, 0, 0, 1, new Date(2026, 9, 21, 23, 58)), "завтра до 00:00");
-  assert.equal(chip(22, 0, 0, 0, new Date(2026, 9, 22, 0, 1)), "просрочено");
+  assert.equal(chip(22, 0, 0, 0, new Date(2026, 9, 22, 0, 1)), "просрочено, чт, 22 окт., 00:00");
   // An unreadable due keeps the day count of the core.
   assert.equal(deadlineChip({ due: "", daysLeft: 0 }, noon), "сегодня");
   assert.equal(deadlineChip({ due: "", daysLeft: 1 }, noon), "завтра");
+  assert.equal(deadlineChip({ due: "not a date", daysLeft: 3 }, noon), "через 3 дня");
+  assert.equal(deadlineChip({ due: "", daysLeft: -1 }, noon), "просрочено");
   assert.equal(deadlineLine({ assignmentId: "a", title: "ЛР", subject: "", due: at(21, 20, 0), daysLeft: 0, urgent: true }, noon).chip, "сегодня до 20:00");
 });
 
@@ -267,8 +279,8 @@ test("untrusted text stays text in every section", () => {
   const p = post({ headline: evil, lesson: { ...post().lesson, title: evil, subjectName: evil, subject: evil } });
   const out = [
     html(h(LessonsSection, { lessons: [lesson({ title: evil, teacher: evil, post: p })], recordings: [], onOpenSummary: noop })),
-    html(h(PostsSection, { posts: [p], onOpenSummary: noop })),
-    html(h(DoneSection, { done: [{ recordingId: "r1", lesson: p.lesson, summaryReady: true, homework: 0, at: at(21) }], onOpenSummary: noop })),
+    html(h(SummarySection, { posts: [p], done: [], onOpenSummary: noop })),
+    html(h(SummarySection, { posts: [], done: [{ recordingId: "r1", lesson: p.lesson, summaryReady: true, homework: 0, at: at(21) }], onOpenSummary: noop })),
     html(h(WaitingSection, { waiting: [{ proposalId: "p", kind: "send_homework_email", assignmentId: "", title: evil, subject: evil, due: "", recipient: evil, createdAt: "" }] })),
     html(h(BurningSection, { burning: [{ assignmentId: "a", title: evil, subject: evil, due: at(23), daysLeft: 1, urgent: false }], onOpenAssignment: noop })),
     html(h(AskSection, { chips: [{ kind: "x", text: evil }], onChip: noop })),
@@ -279,13 +291,85 @@ test("untrusted text stays text in every section", () => {
   }
 });
 
-test("empty sections say so", () => {
-  assert.match(html(h(LessonsSection, { lessons: [], recordings: [], onOpenSummary: noop })), /На сегодня пар нет/);
-  assert.match(html(h(WaitingSection, { waiting: [] })), /Ничего не ждёт подтверждения/);
-  assert.match(html(h(BurningSection, { burning: [], onOpenAssignment: noop })), /сроков на неделю нет/);
-  assert.match(html(h(DoneSection, { done: [], onOpenSummary: noop })), /пока ничего не готово/);
-  assert.match(html(h(PostsSection, { posts: [], onOpenSummary: noop })), /Сообщений после пар пока нет/);
-  assert.match(html(h(AskSection, { chips: [], onChip: noop })), /Подсказок пока нет/);
+test("empty sections of an empty day: the heading and one short line; the others are hidden (TASK-345)", () => {
+  const lessons = html(h(LessonsSection, { lessons: [], recordings: [], onOpenSummary: noop }));
+  const waiting = html(h(WaitingSection, { waiting: [] }));
+  const burning = html(h(BurningSection, { burning: [], onOpenAssignment: noop }));
+  assert.match(lessons, /Пары дня[^]*На сегодня пар нет\./);
+  assert.match(waiting, /Нужно ваше решение[^]*Ничего не ждёт решения\./);
+  assert.match(burning, /Сроки на неделе[^]*Сроков на неделе нет\./);
+  for (const s of [lessons, waiting, burning]) {
+    assert.equal(s.match(/<p /g).length, 1, "one line: " + s);
+    assert.equal(s.match(/<h2/g).length, 1);
+    assert.doesNotMatch(s, /пока нет|пока ничего/);
+  }
+  assert.equal(html(h(SummarySection, { posts: [], done: [], onOpenSummary: noop })), "");
+  assert.equal(html(h(AskSection, { chips: [], onChip: noop })), "");
+  assert.match(html(h(AskSection, { chips: [{ kind: "x", text: "Что горит?" }], onChip: noop })), /Спросить paratech[^]*Что горит\?/);
+});
+
+test("«Итоги дня»: one list, the posts first, then the done ones; a done lesson a post already tells about is not repeated (TASK-345)", () => {
+  const dn = (id, title) => ({ recordingId: id, lesson: { ...post().lesson, title, subjectName: title, subject: title }, summaryReady: true, homework: 0, at: at(21, 12, 0) });
+  const rows = summaryRows([post({ recordingId: "r1" }), post({ recordingId: "r2" })], [dn("r2", "Дубль"), dn("r3", "Физика")]);
+  assert.deepEqual(rows.posts.map((p) => p.recordingId), ["r1", "r2"]);
+  assert.deepEqual(rows.done.map((d) => d.recordingId), ["r3"]);
+  assert.equal(rows.count, 3);
+  assert.equal(summaryRows([], []).count, 0);
+
+  const out = html(h(SummarySection, { posts: [post({ recordingId: "r1", headline: "Пост один" })], done: [dn("r1", "Повтор"), dn("r3", "Физика")], onOpenSummary: noop }));
+  assert.equal((out.match(/<h2/g) ?? []).length, 1, "no inner sub-headings");
+  assert.match(out, /Итоги дня[^]*<span class="num today-cnt"> · 2<\/span>/);
+  assert.equal((out.match(/role="list"/g) ?? []).length, 1, "one card list");
+  assert.ok(out.indexOf("Пост один") < out.indexOf("Конспект · Физика"), "posts before the done rows");
+  assert.ok(!out.includes("Повтор"), "the done row of a told recording is not repeated");
+  assert.equal((out.match(/>Открыть</g) ?? []).length, 2, "every ready row opens its summary");
+  assert.doesNotMatch(out, /Сообщения paratech|Готово за день/);
+});
+
+test("a load error: the fixed text in an alert and «Повторить»; no «Обновить» anywhere (TASK-345)", () => {
+  let retried = 0;
+  const el = LoadError({ onRetry: () => retried++ });
+  const out = html(el);
+  assert.match(out, /role="alert"[^]*Не удалось загрузить день\./);
+  assert.match(out, /<button[^>]*>[^]*Повторить[^]*<\/button>/);
+  assert.equal((out.match(/<button/g) ?? []).length, 1);
+  // The button calls the reload as it is.
+  const button = el.props.children[1];
+  button.props.onClick();
+  assert.equal(retried, 1);
+  assert.equal(texts.loadFailed, "Не удалось загрузить день.");
+  assert.ok(!("refresh" in texts));
+  const page = readFileSync(new URL("../src/pages/TodayPage.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(page, /texts\.refresh/);
+  assert.match(page, /<SpeechComponentNotice \/>[\s\S]*\{failed && <LoadError onRetry=\{load\} \/>\}/, "the notice sits above the error");
+  assert.ok(page.indexOf("<SpeechComponentNotice />") > page.lastIndexOf("if (all) {"), "only in the day, after the all mode returned");
+  assert.match(page, /className="muted small">\{texts\.loading\}/, "loading is a small inline line, not a banner");
+});
+
+test("the status bar shows the queue and the nearest deadline only, and is absent when both are empty (TASK-345)", () => {
+  assert.deepEqual(statusParts("", ""), []);
+  assert.deepEqual(statusParts("В очереди: 2", ""), ["В очереди: 2"]);
+  assert.deepEqual(statusParts("В очереди: 2", "Ближайший срок — пт"), ["В очереди: 2", "Ближайший срок — пт"]);
+  assert.equal(html(h(StatusBar, { queue: "", nearest: "" })), "");
+  const bar = html(h(StatusBar, { queue: "В очереди: 2", nearest: "Ближайший срок — пт, 23 окт., 20:00" }));
+  assert.match(bar, /class="statusbar"/);
+  assert.match(bar, /В очереди: 2/);
+  assert.match(bar, /Ближайший срок/);
+  assert.doesNotMatch(bar, /Звук обрабатывается|<svg/);
+  assert.ok(!("statusTexts" in todayView));
+});
+
+test("an urgent deadline chip has the clock icon and the word, a plain one has none (TASK-345)", () => {
+  const now = new Date(2026, 9, 21, 12, 0);
+  const row = (due, urgent) => html(h(BurningSection, { now, burning: [{ assignmentId: "a", title: "Реферат", subject: "", due: at(...due), daysLeft: 0, urgent }], onOpenAssignment: noop }));
+  const today = row([21, 20, 0], true);
+  assert.match(today, /s-run[^>]*><svg[^]*?<\/svg><span class="chip-text"><span class="num">сегодня до 20:00<\/span>/);
+  assert.match(row([22, 18, 30], true), /s-run[^>]*><svg[^]*?<\/svg><span class="chip-text"><span class="num">завтра до 18:30/);
+  assert.match(row([20, 9, 0], true), /s-run[^>]*><svg[^]*?<\/svg><span class="chip-text"><span class="num">просрочено, вт, 20 окт., 09:00/);
+  const calm = row([26, 18, 30], false);
+  assert.match(calm, /s-neutral[^>]*><span class="chip-text"><span class="num">до пн, 26 окт., 18:30/);
+  assert.doesNotMatch(calm, /<svg/);
+  assert.doesNotMatch(today, /today-day/, "the chip carries the date: no separate column");
 });
 
 test("rows: live chip, urgent chip, open only for a ready summary, no confirm buttons", () => {
@@ -300,8 +384,8 @@ test("rows: live chip, urgent chip, open only for a ready summary, no confirm bu
   assert.ok(!pending.includes("Открыть"));
 
   const burning = html(h(BurningSection, { now: new Date(2026, 9, 21, 12, 0), burning: [{ assignmentId: "a", title: "Реферат", subject: "", due: at(23), daysLeft: 2, urgent: true }, { assignmentId: "b", title: "ЛР", subject: "", due: at(26), daysLeft: 5, urgent: false }], onOpenAssignment: noop }));
-  assert.match(burning, /s-run[^>]*>.*через 2 дня/);
-  assert.match(burning, /s-neutral[^>]*>.*через 5 дней/);
+  assert.match(burning, /s-run[^>]*>.*до пт, 23 окт\., 00:00/);
+  assert.match(burning, /s-neutral[^>]*>.*до пн, 26 окт\., 00:00/);
 
   const waiting = html(h(WaitingSection, { waiting: [{ proposalId: "p", kind: "create_deadline_event", assignmentId: "a", title: "ДЗ", subject: "", due: at(24), recipient: "", createdAt: "" }] }));
   assert.ok(!waiting.includes("<button"));

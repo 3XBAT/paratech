@@ -1,4 +1,4 @@
-// «Сегодня» → «Горит на 7 дней» with «Выполнено» (TASK-316): the check in every row beside the open button, the row
+// «Сегодня» → «Сроки на неделе» with «Выполнено» (TASK-316): the check in every row beside the open button, the row
 // that leaves at once, the post line of a lesson whose homework is all done.
 import { test } from "node:test";
 import assert from "node:assert/strict";

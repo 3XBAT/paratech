@@ -4,7 +4,7 @@
 
 import type { RecordingItem } from "./bindings/activity.js";
 import type { TodayDeadline, TodayDone, TodayLesson, TodayPost, TodayWaiting } from "./bindings/today.js";
-import { dayAndTime, dayText, daysBetween, daysLeftText, dueText, monthsShort, pad, parseMoment, timeText, weekdaysShort } from "./dueText.js";
+import { dayAndTime, dayText, daysBetween, daysLeftText, dueText, monthsShort, pad, parseMoment, timeText } from "./dueText.js";
 import { plural } from "./plural.js";
 import { chainStatusView } from "./recordingRowView.js";
 import type { ChipKind } from "./ui/StatusChip.js";
@@ -17,20 +17,17 @@ export const texts = {
   title: "Сегодня",
   askTitle: "Спросить paratech",
   askHint: "Вопрос вводится в панели справа (Ctrl+K). Подсказка только подставляет текст, отправка остаётся за вами.",
-  askNoChips: "Подсказок пока нет.",
   lessons: "Пары дня",
   lessonsEmpty: "На сегодня пар нет.",
-  waiting: "Ждёт вашего «Да»",
-  waitingEmpty: "Ничего не ждёт подтверждения.",
+  waiting: "Нужно ваше решение",
+  waitingEmpty: "Ничего не ждёт решения.",
   waitingFoot: "Письма, календарь и выгрузка выполняются только после подтверждения.",
-  burning: "Горит на 7 дней",
-  burningEmpty: "Ближайших сроков на неделю нет.",
-  done: "Готово за день",
-  doneEmpty: "Сегодня пока ничего не готово.",
-  posts: "Сообщения paratech",
-  postsEmpty: "Сообщений после пар пока нет.",
+  burning: "Сроки на неделе",
+  burningEmpty: "Сроков на неделе нет.",
+  summary: "Итоги дня",
   loading: "Загрузка…",
-  refresh: "Обновить",
+  loadFailed: "Не удалось загрузить день.",
+  retry: "Повторить",
   allRecords: "Записи",
   back: "К сегодняшнему дню",
   open: "Открыть",
@@ -66,12 +63,6 @@ export function shortDate(s: string): string {
 export function dayTitle(day: string): string {
   const d = parseMoment(day);
   return d === null ? "" : `${weekdaysLong[d.getDay()]}, ${d.getDate()} ${monthsGen[d.getMonth()]}`;
-}
-
-/** The weekday and the date of a deadline row: «пт» over «23.10». */
-export function deadlineDay(due: string): { weekday: string; date: string } {
-  const d = parseMoment(due);
-  return d === null ? { weekday: "", date: "" } : { weekday: weekdaysShort[d.getDay()], date: shortDate(due) };
 }
 
 const kinds: Readonly<Record<string, string>> = {
@@ -187,8 +178,6 @@ export function waitingLine(w: TodayWaiting, now?: Date): WaitingLine {
 
 export interface DeadlineLine {
   key: string;
-  weekday: string;
-  date: string;
   title: string;
   subject: string;
   chip: string;
@@ -196,32 +185,18 @@ export interface DeadlineLine {
 }
 
 /**
- * The chip of a «Горит» row. The days come from the local `now` (a stale snapshot never says «завтра» for today); the
- * core's daysLeft is only the fallback for an unreadable due. A date alone reads as «до конца дня», so the time is
- * always there: «сегодня до 20:00», «завтра до 18:30», «через 3 дня, до 18:30». A moment that has passed reads «просрочено».
+ * The chip of a «Сроки на неделе» row: the same phrase as everywhere (dueText). The days come from the local `now` (a
+ * stale snapshot never says «завтра» for today) and the weekday and date are in the phrase, so the row has no date column:
+ * «сегодня до 20:00», «завтра до 18:30», «до сб, 24 окт., 18:30», «просрочено, пт, 23 окт., 20:00». The core's daysLeft
+ * is only the fallback for an unreadable due.
  */
 export function deadlineChip(b: Pick<TodayDeadline, "due" | "daysLeft">, now: Date): string {
-  const d = parseMoment(b.due);
-  if (d === null) {
-    return daysLeftText(b.daysLeft);
-  }
-  if (d.getTime() <= now.getTime()) {
-    return daysLeftText(-1);
-  }
-  const days = daysBetween(d, now);
-  const time = timeText(b.due);
-  if (days === 0) {
-    return `сегодня до ${time}`;
-  }
-  if (days === 1) {
-    return `завтра до ${time}`;
-  }
-  return `${daysLeftText(days)}, до ${time}`;
+  const text = dueText(b.due, now);
+  return text === "" ? daysLeftText(b.daysLeft) : text;
 }
 
 export function deadlineLine(b: TodayDeadline, now: Date): DeadlineLine {
-  const { weekday, date } = deadlineDay(b.due);
-  return { key: b.assignmentId, weekday, date, title: titleOf(b.title), subject: b.subject.trim(), chip: deadlineChip(b, now), urgent: b.urgent };
+  return { key: b.assignmentId, title: titleOf(b.title), subject: b.subject.trim(), chip: deadlineChip(b, now), urgent: b.urgent };
 }
 
 /**
@@ -239,7 +214,20 @@ export function nearestDeadlineText(burning: readonly Pick<TodayDeadline, "due">
   return `Ближайший срок — ${dayAndTime(first.at as Date)}`;
 }
 
-export const statusTexts = { local: "Звук обрабатывается только на этом компьютере" } as const;
+/** The parts of the status bar: the queue and the nearest deadline, the empty ones left out; none, no bar. */
+export function statusParts(queue: string, nearest: string): string[] {
+  return [queue, nearest].filter((p) => p !== "");
+}
+
+/**
+ * «Итоги дня»: the posts first, then the done lessons. A done lesson whose recording a post already tells about is not
+ * repeated (the post says it). The count in the title is the number of shown rows.
+ */
+export function summaryRows(posts: readonly TodayPost[], done: readonly TodayDone[]): { posts: readonly TodayPost[]; done: TodayDone[]; count: number } {
+  const told = new Set(posts.map((p) => p.recordingId));
+  const rest = done.filter((d) => !told.has(d.recordingId));
+  return { posts, done: rest, count: posts.length + rest.length };
+}
 
 export interface DoneLine {
   key: string;

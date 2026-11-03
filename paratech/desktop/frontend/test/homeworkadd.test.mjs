@@ -215,7 +215,7 @@ test("the time field opens with 20:00 shown; left alone it sends that default, c
   assert.deepEqual(validateAddForm({ ...emptyAddForm, title: "Задача", date: "2026-10-28" }), {});
 });
 
-test("«Горит на 7 дней» offers the button only with a handler", () => {
+test("«Сроки на неделе» offers the button only with a handler", () => {
   const without = renderToStaticMarkup(h(BurningSection, { burning: [], onOpenAssignment: () => undefined }));
   assert.ok(!without.includes(addTexts.button));
   const withAdd = renderToStaticMarkup(
