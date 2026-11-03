@@ -798,6 +798,17 @@ export function dialogKey(e: { key: string; shiftKey: boolean }, at: number, cou
   return null;
 }
 
+// ---- Elapsed time of a running request ----
+
+/**
+ * «5с», «59с», «1м 0с», «2м 5с»: no space before the unit letter, one between minutes and seconds. A negative or unreadable
+ * value reads «0с»; minutes just keep growing (no hours).
+ */
+export function formatElapsed(seconds: number): string {
+  const s = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+  return s < 60 ? `${s}с` : `${Math.floor(s / 60)}м ${s % 60}с`;
+}
+
 // ---- Texts ----
 
 export const texts = {
@@ -812,8 +823,10 @@ export const texts = {
   replyReady: "Ответ готов",
   /** Small caption under the text a student had read when they pressed «Остановить». */
   replyStopped: "Ответ остановлен",
-  /** The stopped card of a request that failed or was cut while its reply was typing. */
-  replyCut: "Ответ прервался. Можно повторить.",
+  /** The stop line of a request that broke off (a lost connection, a failure) while its reply was typing; the text read stays above it. */
+  replyCut: "Ответ оборван.",
+  /** A request sent while another one of the chat still runs. */
+  queued: "ждёт предыдущий запрос",
   // The busy-refused request: what its icons do (the line names the way out, the icons carry no visible word).
   busyBoth: "Предыдущий запрос ещё выполняется. Его можно остановить или отправить этот ещё раз.",
   busyStop: "Предыдущий запрос ещё выполняется. Его можно остановить.",
@@ -1528,6 +1541,8 @@ export interface EntryModel {
   callLine: string;
   /** The call runs and nothing has come back yet: the waiting dots show instead of a line. */
   waiting: boolean;
+  /** The request waits behind a running one of its chat: «ждёт предыдущий запрос» and a stop for that one, no timer. */
+  queued: boolean;
   cards: CardModel[];
   /** «Повторить» is offered under the request. */
   rerun: boolean;
@@ -1541,8 +1556,10 @@ export interface EntryContext {
   blocked: boolean;
   /** The mentions of a request restored after a restart (no scope of its own); the scope's own win. */
   mentions?: readonly MentionView[];
-  /** The request failed or was cut while its reply was typing: the stopped card says the reply broke off. */
+  /** The request ended while its reply was typing: the text read stays above, and a lost connection or a failure says the reply broke off. */
   replyCut?: boolean;
+  /** Another request of the chat is running and this one has not been answered yet (queuedBehind). */
+  queued?: boolean;
 }
 
 /**
@@ -1565,7 +1582,8 @@ const finishedStatuses = new Set(["DONE", "FAILED", "CANCELLED", "STOPPED"]);
 
 export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked: false }): EntryModel {
   const callLine = e.callProblem !== "" ? callProblemText(e.callProblem) : "";
-  const base = { key: e.key, userText: e.text, mentions: mentionPills(e.scope?.mentions ?? ctx.mentions), callLine, waiting: e.callProblem === "" && e.update === null, rerun: false };
+  const waiting = e.callProblem === "" && e.update === null;
+  const base = { key: e.key, userText: e.text, mentions: mentionPills(e.scope?.mentions ?? ctx.mentions), callLine, waiting, queued: waiting && ctx.queued === true, rerun: false };
   const u = e.update;
   if (u === null) {
     return { ...base, cards: [] };
@@ -1590,8 +1608,10 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
   const stopCard = running ? undefined : u.cards.find((c) => c.kind === "stopped");
   const reason = running ? "" : stopCard?.stopReason || u.stopReason;
   let stop: StopText | null = reason !== "" ? (stopTexts[reason] ?? { text: "Остановлено", hint: "", buttons: [] }) : null;
-  // A reply that broke off in the middle: the same retry button, a clearer line (it names the way on itself).
-  if (stop && reason === "failed" && ctx.replyCut === true) {
+  // A reply that broke off in the middle (a lost connection, a failure): the same retry icon, a clearer line. The text the
+  // student read stays above it, so the line is the only caption. Other reasons keep their own line.
+  const cutHere = ctx.replyCut === true && (reason === "failed" || reason === "offline");
+  if (stop && cutHere) {
     stop = { ...stop, text: texts.replyCut, hint: "" };
   }
   // The problem's own «Повторить» is the next step: the stop card must not offer a second way on, nor a second «Повторить».
@@ -1603,9 +1623,15 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
     const stopButtons = buttons(stop.buttons).map((b) => (b.id === "cancel" ? { ...b, label: restartTexts.cancelRequest } : b));
     cards.push({ type: "stopped", text: stopLine(stop), buttons: stopButtons });
   }
-  if (problem !== "") {
+  // A cut reply says it in the stop line already; the generic «Не удалось выполнить запрос.» under it would be a second line.
+  const coveredByCut = cutHere && problem === "failed";
+  if (problem !== "" && !coveredByCut) {
     let next: ButtonId[] = problem === "retry_required" ? ["retry"] : problem === "restart_required" ? ["restart"] : [];
     let text = updateProblemTexts[problem] ?? updateProblemTexts.failed;
+    // A failure with no stop reason of its own: the problem line is the one that says the reply broke off.
+    if (ctx.replyCut === true && !stop && problem === "failed") {
+      text = texts.replyCut;
+    }
     let nextButtons = buttons(next);
     // A request refused as busy has no thread: it can stop the one that blocks it, or be sent again. Only the last one.
     if (isBusyRefused(e) && ctx.last) {

@@ -30,19 +30,20 @@ export interface PanelState {
   link: AgentState | null;
   /** Unchecked answer texts being read (agent:draft), one per (thread, turn, call), the last one winning. */
   drafts: readonly DraftView[];
-  /** Requests whose reply was typing when they stopped or failed (UI only, never stored or sent), at most one per thread. */
+  /** Requests whose reply was typing when they ended (UI only, never stored or sent), at most one per thread. */
   cuts: readonly CutReply[];
 }
 
 /**
- * A reply cut short. `text` is what the student had read, kept only when they pressed «Стоп» (stopReason "user") and
- * shown muted above the stopped line; "" for a failure or an offline cut (the unchecked fragment is dropped, only the
- * wording of the stopped card changes).
+ * A reply cut short. `text` is what the student had read: kept for EVERY end of the request (a stop, a lost connection,
+ * a failure...) and shown muted above the stop line, so a broken reply never erases what was already on screen.
  */
 export interface CutReply {
   threadId: string;
   turn: number;
   text: string;
+  /** Why the request ended ("user" for «Стоп»); a user stop keeps a caption under the text, any other end only the stop line. */
+  reason: string;
 }
 
 export const initialPanelState: PanelState = { entries: [], nextSeq: 1, link: null, drafts: [], cuts: [] };
@@ -103,7 +104,13 @@ function pendingLocal(entries: readonly Entry[], scope: string, threadId = ""): 
  * button). A failed read emits no event of its own, so every other update is taken to clear.
  */
 function clearsDrafts(u: UpdateView): boolean {
-  return u.threadId !== "" && !u.progress && !(u.status === "" && u.cards.length === 0);
+  // An ended request has no draft, whatever else the update says.
+  return u.threadId !== "" && (isEnded(u) || (!u.progress && !(u.status === "" && u.cards.length === 0)));
+}
+
+/** The update says the request stopped or failed. */
+function isEnded(u: UpdateView): boolean {
+  return u.status === "STOPPED" || u.status === "FAILED";
 }
 
 /** An update of an Ask the core refused: no thread, or the asked chat with turn 0 and no status. */
@@ -131,22 +138,26 @@ function endReason(u: UpdateView): string {
 }
 
 /**
- * The cut replies after an update. A stopped or failed request whose reply was typing is recorded (the text only for «Стоп»);
- * a repeat of the same end keeps the record; any other update of the thread (Продолжить/Повторить of a stopped request, Повторить of a finished one, Отменить, a new turn)
- * ends it. A problem-only update (a refused button) leaves it.
+ * The cut replies after an update. A stopped or failed request whose reply was typing is recorded with the text the
+ * student had read, whatever the reason; a repeat of the same end keeps the record; any later update of the thread
+ * (Продолжить/Повторить of a stopped request, Повторить of a finished one, Отменить, a new turn) ends it. A problem-only
+ * update (a refused button) and an update of an older turn leave it.
  */
 function nextCuts(s: PanelState, u: UpdateView): readonly CutReply[] {
   const mine = s.cuts.find((c) => c.threadId === u.threadId);
   if (u.status === "" && u.cards.length === 0) {
     return s.cuts;
   }
-  const ended = u.status === "STOPPED" || u.status === "FAILED";
-  const typed = ended && clearsDrafts(u) ?s.drafts.filter((d) => d.threadId === u.threadId && d.turn === u.turn && d.reply === true && replyDraftText(d) !== "").at(-1) : undefined;
+  // A late update of an earlier turn (or the history) says nothing about the newer request.
+  if (mine !== undefined && u.turn < mine.turn) {
+    return s.cuts;
+  }
+  const typed = isEnded(u) && clearsDrafts(u) ? s.drafts.filter((d) => d.threadId === u.threadId && d.turn === u.turn && d.reply === true && replyDraftText(d) !== "").at(-1) : undefined;
   if (typed) {
-    const cut: CutReply = { threadId: u.threadId, turn: u.turn, text: endReason(u) === "user" ? replyDraftText(typed) : "" };
+    const cut: CutReply = { threadId: u.threadId, turn: u.turn, text: replyDraftText(typed), reason: endReason(u) };
     return [...s.cuts.filter((c) => c !== mine), cut];
   }
-  if (mine === undefined || (ended && mine.turn === u.turn)) {
+  if (mine === undefined || (isEnded(u) && mine.turn === u.turn)) {
     return s.cuts;
   }
   return s.cuts.filter((c) => c !== mine);
@@ -445,7 +456,8 @@ export function lastEntry(entries: readonly Entry[]): Entry | undefined {
 export function blockingEntry(entries: readonly Entry[], refused: Entry): Entry | undefined {
   const u = refused.update;
   if (!u) {
-    return undefined;
+    // Not answered yet: it may be waiting behind a running request of its chat.
+    return queuedBehind(entries, refused);
   }
   // Busy is per chat: the blocker is in the chat the refused request was asked in; subject only when that is unknown.
   const chat = refused.scope?.threadId || u.threadId;
@@ -457,6 +469,24 @@ export function blockingEntry(entries: readonly Entry[], refused: Entry): Entry 
         isRunning(e.update.status) &&
         (chat !== "" ? e.threadId === chat : e.update.subjectId === u.subjectId),
     )
+    .at(-1);
+}
+
+/**
+ * The running request a not yet answered request waits behind: another request of the same chat (the thread it is named
+ * by, else the chat it was asked in) whose status is PLANNING or EXECUTING. undefined: it is not queued (it runs itself,
+ * or a failed call / an update already says what became of it).
+ */
+export function queuedBehind(entries: readonly Entry[], e: Entry): Entry | undefined {
+  if (e.update !== null || e.callProblem !== "") {
+    return undefined;
+  }
+  const chat = e.threadId || (e.scope?.threadId ?? "");
+  if (chat === "") {
+    return undefined;
+  }
+  return orderedEntries(entries)
+    .filter((x) => x !== e && x.threadId === chat && x.update !== null && isRunning(x.update.status))
     .at(-1);
 }
 

@@ -71,13 +71,14 @@ test("a reply draft of an older turn is ignored", () => {
   assert.deepEqual(t.drafts.map((d) => d.turn), [2]);
 });
 
-test("a failed request whose reply was typing says the reply broke off, with the same «Повторить», and shows no fragment", () => {
+// Changed (BUG 2026-11-04 agent-stream): the shown text is no longer erased by a failure; the line is «Ответ оборван.».
+test("a failed request whose reply was typing says the reply broke off, with the same «Повторить», and keeps the text", () => {
   const s = apply(initialPanelState, upd({}), drf(typing({})), upd({ status: "STOPPED", stopReason: "failed" }));
   const html = render(s);
   assert.ok(!html.includes("ag-reply-draft"));
-  assert.ok(!html.includes("ag-reply-kept"));
-  assert.ok(!html.includes("Привет"));
-  assert.ok(html.includes("Ответ прервался. Можно повторить."));
+  assert.ok(html.includes("ag-reply-kept"));
+  assert.ok(html.includes("Привет"));
+  assert.ok(html.includes("Ответ оборван."));
   assert.ok(!html.includes("Не получилось выполнить шаг"));
   assert.ok(html.includes("Повторить"));
 });
@@ -86,7 +87,7 @@ test("a failure without a shown reply draft keeps today's text", () => {
   const s = apply(initialPanelState, upd({}), drf(answerDraft({})), upd({ status: "STOPPED", stopReason: "failed" }));
   const html = render(s);
   assert.ok(html.includes("Не получилось выполнить шаг"));
-  assert.ok(!html.includes("Ответ прервался"));
+  assert.ok(!html.includes("Ответ оборван"));
 });
 
 // ---- «Остановить» keeps what was read ----
@@ -105,7 +106,7 @@ test("«Остановить» keeps the reply text as UI-only state, shown mute
   assert.ok(html.includes("Остановлено"));
   assert.ok(html.includes(">Продолжить<"));
   assert.ok(!html.includes(">Повторить<"));
-  assert.ok(!html.includes("Ответ прервался"));
+  assert.ok(!html.includes("Ответ оборван"));
 });
 
 test("the kept text is a plain text node", () => {
@@ -141,11 +142,13 @@ test("a new request in the chat removes the kept text; another chat does not", (
   assert.equal(stopped(upd({ threadId: "t2", turn: 1, status: "EXECUTING" })).cuts.length, 1);
 });
 
-test("other stop reasons drop the fragment but remember that the reply was cut", () => {
+// Changed (BUG 2026-11-04 agent-stream): the cut text was "" for every reason but «Остановить»; now it is kept for all.
+test("other stop reasons keep the text too and remember why the reply was cut", () => {
   for (const stopReason of ["offline", "quota", "failed"]) {
     const s = apply(initialPanelState, upd({}), drf(typing({})), upd({ status: "STOPPED", stopReason }));
-    assert.equal(cutFor(s, s.entries[0]).text, "");
-    assert.ok(!render(s).includes("Привет"));
+    assert.equal(cutFor(s, s.entries[0]).text, "Привет");
+    assert.equal(cutFor(s, s.entries[0]).reason, stopReason);
+    assert.ok(render(s).includes("Привет"));
   }
   const none = apply(initialPanelState, upd({}), upd({ status: "STOPPED", stopReason: "user" }));
   assert.equal(none.cuts.length, 0);

@@ -1,8 +1,9 @@
-import { type RefObject, useEffect, useId, useLayoutEffect, useRef } from "react";
+import { type RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { type RunStarts, syncRunStarts } from "../agentElapsed.js";
 import type { MentionView } from "../bindings/agent.js";
 import { maxDraftLength, maxMentions, mentionTexts } from "../agentMentions.js";
 import { type AgentContext, chatTexts, composerKey, type EarlierItem, entryModel, inputPlacement, type RestartTarget, texts } from "../agentView.js";
-import { blockingEntry, cutFor, draftSize, draftsFor, endSignature, type Entry, orderedEntries, panelMode, type PanelState } from "../agentState.js";
+import { blockingEntry, cutFor, draftSize, draftsFor, endSignature, type Entry, orderedEntries, panelMode, type PanelState, queuedBehind } from "../agentState.js";
 import { Icon } from "../ui/Icon.js";
 import { AgentRequest, type CardActions } from "./AgentCards.js";
 import type { ContextFill } from "../bindings/agent.js";
@@ -78,6 +79,8 @@ export interface AgentPanelViewProps {
   restart?: RestartUi;
   /** «Копировать» under the messages of earlier requests; absent: no copy there. The live requests get it from actionsFor. */
   copy?: (text: string) => Promise<void>;
+  /** The time source of the elapsed timers (ms); the current time when absent. A stable function. */
+  clock?: () => number;
 }
 
 /**
@@ -94,6 +97,13 @@ export function AgentPanelView(props: AgentPanelViewProps) {
   const end = useRef<HTMLDivElement>(null);
   const noteId = useId();
   const { restart } = props;
+  // When each running request started: derived from the thread while rendering (a request that began running is marked now,
+  // one that stopped loses its mark, so a new run counts from 0). Only the small timers re-render each second, not the panel.
+  const [stored, setStored] = useState<RunStarts>({});
+  const starts = syncRunStarts(stored, state.entries, (props.clock ?? Date.now)());
+  if (starts !== stored) {
+    setStored(starts);
+  }
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: "end" });
   }, [entries.length, earlier.length]);
@@ -255,7 +265,10 @@ export function AgentPanelView(props: AgentPanelViewProps) {
                 blocked: blockingEntry(entries, e) !== undefined,
                 mentions: props.mentionsFor?.(e),
                 replyCut: cutFor(state, e) !== undefined,
+                queued: queuedBehind(entries, e) !== undefined,
               })}
+              startedAt={starts[e.seq]}
+              clock={props.clock}
               actions={props.actionsFor(e)}
               drafts={draftsFor(state, e)}
               cut={cutFor(state, e)}
