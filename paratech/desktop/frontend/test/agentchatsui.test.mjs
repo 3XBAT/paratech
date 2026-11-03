@@ -180,23 +180,27 @@ const barProps = (over) => ({
   ...over,
 });
 
-test("the chat bar renders titles as text, marks the running chat, the Archive is collapsed", () => {
+test("the chat bar renders titles as text, no running mark on the open chat, the Archive is collapsed", () => {
   const html = renderToStaticMarkup(h(ChatBar, barProps()));
   assert.ok(!html.includes("<img"), "title is escaped");
   assert.ok(html.includes("&lt;img src=x onerror=1&gt;"));
-  assert.ok(html.includes("идёт запрос"));
-  assert.ok(html.includes("Новый чат"));
-  assert.ok(html.includes("В архив"));
+  // TASK-365: the open chat's title carries no «идёт запрос» (the thread shows the request); it was a text mark before.
+  assert.ok(!html.includes("Идёт запрос"));
+  // The header actions are icon buttons now: the words are the aria-label and the tooltip.
+  assert.ok(html.includes('aria-label="Новый чат"'));
+  assert.ok(html.includes('aria-label="В архив"'));
   assert.ok(html.includes('aria-expanded="false"') && html.includes('aria-haspopup="menu"'));
   assert.ok(html.includes('aria-live="polite"'));
 });
 
-test("an archived open chat offers «Вернуть»; with no chat the title is «Новый чат» and rename is off", () => {
+test("an archived open chat offers «Вернуть»; with no chat the title is «Новый чат» and rename is not shown", () => {
   const archived = renderToStaticMarkup(h(ChatBar, barProps({ openChat: sections.archived[0] })));
   assert.ok(archived.includes("Вернуть") && archived.includes("в архиве"));
   const none = renderToStaticMarkup(h(ChatBar, barProps({ openChat: null, sections: chatSections([], []) })));
   assert.ok(none.includes("Новый чат"));
-  assert.ok(/<button[^>]*disabled=""[^>]*>Переименовать/.test(none));
+  // TASK-365 review: nothing to rename, so no dead disabled pencil (the archive icon is hidden the same way).
+  assert.ok(!none.includes("Переименовать"));
+  assert.ok(none.includes('aria-label="Новый чат"'));
   assert.ok(!none.includes("В архив"));
 });
 

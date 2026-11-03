@@ -14,6 +14,8 @@ export type IconName =
   | "off"
   | "ok"
   | "warn"
+  | "error"
+  | "help"
   | "wave"
   | "clock"
   | "chev"
@@ -25,6 +27,7 @@ export type IconName =
   | "book"
   | "mail"
   | "retry"
+  | "copy"
   | "info"
   | "x"
   | "home"
@@ -33,7 +36,10 @@ export type IconName =
   | "journal"
   | "plus"
   | "back"
-  | "chevr";
+  | "chevr"
+  | "pencil"
+  | "archive"
+  | "unarchive";
 
 /** Rendered once per window, before any Icon. */
 export function IconSprite() {
@@ -79,6 +85,16 @@ export function IconSprite() {
       <symbol id="i-warn" viewBox="0 0 24 24">
         <path d="M12 4l9 16H3zM12 10v4M12 17h.01" />
       </symbol>
+      {/* «error» is a circle with a cross, the shape of a failure; «warn» (triangle) stays for waiting and cautions. */}
+      <symbol id="i-error" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6" />
+      </symbol>
+      {/* «help»: a circle with a question mark, the heading icon of a question to the student. */}
+      <symbol id="i-help" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M9.6 9.6a2.5 2.5 0 1 1 3.6 2.2c-.8.4-1.2 1-1.2 1.8M12 16.8h.01" />
+      </symbol>
       <symbol id="i-wave" viewBox="0 0 24 24">
         <path d="M3 12h2l2-5 3 10 3-14 3 12 2-3h3" />
       </symbol>
@@ -114,8 +130,13 @@ export function IconSprite() {
         <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
         <path d="M4.5 7.5l7.5 5.5 7.5-5.5" />
       </symbol>
+      {/* The one retry/repeat icon: a circle arrow counter-clockwise (arrow head at the upper left). */}
       <symbol id="i-retry" viewBox="0 0 24 24">
-        <path d="M20 12a8 8 0 1 1-2.34-5.66M17.66 2.34v4h-4" />
+        <path d="M4 12a8 8 0 1 0 2.34-5.66M6.34 2.34v4h4" />
+      </symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24">
+        <rect x="9" y="9" width="11" height="11" rx="2" />
+        <path d="M15 9V6.5A1.5 1.5 0 0 0 13.5 5h-8A1.5 1.5 0 0 0 4 6.5v8A1.5 1.5 0 0 0 5.5 16H9" />
       </symbol>
       <symbol id="i-info" viewBox="0 0 24 24">
         <circle cx="12" cy="12" r="8.5" />
@@ -147,6 +168,18 @@ export function IconSprite() {
       </symbol>
       <symbol id="i-chevr" viewBox="0 0 24 24">
         <path d="M9 6l6 6-6 6" />
+      </symbol>
+      <symbol id="i-pencil" viewBox="0 0 24 24">
+        <path d="M5 19l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L9 18zM14.5 6.5l3 3" />
+      </symbol>
+      {/* A box with a lid; «unarchive» adds an arrow out of the box. */}
+      <symbol id="i-archive" viewBox="0 0 24 24">
+        <rect x="3.5" y="4.5" width="17" height="4" rx="1" />
+        <path d="M5 8.5V18a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 18V8.5M10 12.5h4" />
+      </symbol>
+      <symbol id="i-unarchive" viewBox="0 0 24 24">
+        <rect x="3.5" y="4.5" width="17" height="4" rx="1" />
+        <path d="M5 8.5V18a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 18V8.5M12 16v-5M9.5 13l2.5-2.5 2.5 2.5" />
       </symbol>
     </svg>
   );

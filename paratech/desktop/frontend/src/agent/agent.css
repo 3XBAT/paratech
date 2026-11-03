@@ -55,14 +55,15 @@
 .ag-card p { margin: 0 0 8px; overflow-wrap: anywhere; }
 .ag-card p:last-child { margin-bottom: 0; }
 .ag-card-h { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 600; color: var(--muted); }
-.ag-ask { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
-.ag-ask > .ag-card-h { color: var(--accent); }
-.ag-confirm { box-shadow: 0 0 0 1px color-mix(in srgb, var(--rec-t) 45%, transparent); }
+/* TASK-367: the cards that wait for the student keep the plain card frame. The question caption is plain text with a
+   question icon, not the accent colour (a link/action colour), so it does not read as pressable. */
+.ag-ask > .ag-card-h { color: var(--text); font-weight: 600; }
+.ag-ask > .ag-card-h .i { width: 14px; height: 14px; color: var(--muted); }
 .ag-confirm > .ag-card-h { color: var(--rec-t); }
 .ag-lead { font-size: var(--fs-h3); line-height: var(--lh-h3); font-weight: 600; letter-spacing: -0.01em; }
 /* The reply is the model's text: line breaks stay, markup is never interpreted. */
 .ag-text { white-space: pre-wrap; }
-/* Assignment list of a reply (TASK-176); the overdue colour is the urgent one of «Сегодня» (--run-t). */
+/* Assignment list of a reply (TASK-176); the overdue colour is the one of «Сегодня» (--rec-t, the failure kind). */
 .ag-asg { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .ag-asg-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .ag-asg-row:hover { background: var(--raised); }
@@ -70,7 +71,7 @@
 .ag-asg-main { display: flex; flex-direction: column; min-width: 0; }
 .ag-asg-t { overflow-wrap: anywhere; font-weight: 600; }
 .ag-asg-due { flex: none; color: var(--muted); }
-.ag-asg-late { color: var(--run-t); font-weight: 600; }
+.ag-asg-late { color: var(--rec-t); font-weight: 600; }
 /* Sources of an answer (TASK-296): quiet rows; a removed or unopenable source is plain muted text, not a button. */
 .ag-src { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .ag-src-row { display: block; padding: 4px 8px; font-size: var(--fs-small); line-height: var(--lh-small); overflow-wrap: anywhere; }
@@ -102,7 +103,6 @@
 .ag-note { display: flex; gap: 8px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--muted); }
 .ag-note .i { flex: none; width: 14px; height: 14px; margin-top: 2px; }
 .ag-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.ag-rerun { display: flex; justify-content: flex-start; margin-top: 4px; }
 .ag-revise { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .ag-inp { width: 100%; height: var(--h-ctl); padding: 0 8px; border: 1px solid var(--control); border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: inherit; }
 .ag-inp:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
@@ -165,24 +165,35 @@
 /* Chats (TASK-207): the title row, its actions and the list as a menu. One accent, neutral surfaces. */
 .ag-chatbar { position: relative; display: flex; flex-direction: column; gap: 4px; }
 .ag-chat-line { display: flex; align-items: center; min-width: 0; }
-.ag-chat-toggle { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: var(--raised); box-shadow: 0 0 0 1px var(--edge); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
+.ag-chat-line { gap: 4px; }
+.ag-chat-toggle { display: flex; flex: 0 1 auto; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: var(--raised); box-shadow: 0 0 0 1px var(--edge); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
 .ag-chat-toggle:hover { background: var(--fill); }
-.ag-chat-toggle:focus-visible, .ag-chat-item:focus-visible, .ag-chat-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ag-chat-toggle:focus-visible, .ag-chat-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ag-chat-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ag-chat-caret { flex: none; color: var(--muted); }
 .ag-chat-tag { flex: none; color: var(--muted); }
-.ag-chat-run { flex: none; color: var(--accent); font-weight: 600; }
+/* A running request of a chat that is not open: a muted clock, no accent; the words are for screen readers. */
+.ag-chat-run { position: relative; flex: none; display: inline-grid; color: var(--muted); }
+.ag-chat-run .i { width: 14px; height: 14px; }
 .ag-chat-edit { flex: 1; min-width: 0; }
-.ag-chat-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+/* The header icons share the row with the title (like the tab bar of an editor). */
+.ag-chat-actions { flex: none; display: flex; gap: 2px; margin-left: auto; }
+/* «Новый чат» is the most frequent target: 8px (6 + the 2px gap) of air between it and the archive icon. */
+.ag-ib-new { margin-left: 6px; }
+/* The tip opens downwards and towards the inside of the panel: the buttons sit at its right edge. */
+.ag-ib-head .ag-ib-tip { bottom: auto; top: calc(100% + 4px); right: 0; z-index: 7; }
+/* In the chat list the tip opens to the left of the row's icon, inside the menu, which scrolls and clips. */
+.ag-ib-side .ag-ib-tip { bottom: auto; top: 50%; right: calc(100% + 2px); transform: translateY(-50%); }
+/* The base hover rule below (transform: none) comes later in the file and has the same weight: this one is heavier on purpose. */
+.ag-ib.ag-ib-side:hover .ag-ib-tip, .ag-ib.ag-ib-side:focus-visible .ag-ib-tip { transform: translateY(-50%); }
 .ag-chat-note { margin: 0; min-height: 0; color: var(--muted); overflow-wrap: anywhere; }
 .ag-chat-note:empty { display: none; }
 .ag-chat-menu { position: absolute; z-index: 6; top: 32px; left: 0; right: 0; max-height: min(60vh, 420px); margin: 0; padding: 4px; overflow-y: auto; list-style: none; border-radius: var(--r-md); background: var(--panel); box-shadow: 0 0 0 1px var(--edge), 0 8px 24px rgb(0 0 0 / 0.35); }
 .ag-chat-group { margin: 0; padding: 0 0 0 8px; list-style: none; }
 .ag-chat-row { display: flex; align-items: center; gap: 4px; }
 .ag-chat-item { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; height: 28px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
-.ag-chat-item:hover, .ag-chat-act:hover { background: var(--fill); }
+.ag-chat-item:hover { background: var(--fill); }
 .ag-chat-item[aria-current="true"] { box-shadow: inset 2px 0 0 var(--accent); font-weight: 600; }
-.ag-chat-act { flex: none; height: 28px; padding: 0 6px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
 .ag-chat-empty { padding: 4px 8px; }
 .ag-chat-archbtn { width: 100%; }
 .ag-earlier { display: flex; flex-direction: column; gap: 12px; }
@@ -252,9 +263,27 @@ button.ag-pill:focus-visible { outline: 2px solid var(--accent); outline-offset:
 
 /* «Начать заново отсюда» (TASK-249): a quiet action under a message of the student, the warning dialog, and the note by the field. */
 .ag { position: relative; }
-.ag-restart { align-self: flex-end; min-height: 24px; margin: -2px 0 0; padding: 2px 6px; border: 0; border-radius: var(--r-xs); background: none; color: var(--muted); opacity: 0.6; font: inherit; font-size: var(--fs-small); line-height: var(--lh-small); cursor: pointer; }
-.ag-restart:hover, .ag-restart:focus-visible { background: var(--fill); color: var(--text); opacity: 1; }
-.ag-restart:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* TASK-365: the quiet icon row under a message (copy; restart under the student's, repeat under the agent's). Muted
+   (>= 4.5:1, so far above 3:1 for icons) and full on hover and keyboard focus; the name is a tooltip drawn like the rail's,
+   above the icon, and the aria-label. The 28px hit area is the button. */
+.ag-acts { position: relative; z-index: 2; display: flex; align-items: center; gap: 2px; margin-top: -2px; }
+.ag-acts-user { align-self: flex-end; }
+.ag-acts-agent { align-self: flex-start; }
+.ag-ib { position: relative; display: grid; place-items: center; flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; box-shadow: none; color: var(--muted); cursor: pointer; }
+/* The icon takes the button's colour, so it brightens on hover and focus and the copied check shows. */
+.ag-ib .i { width: 16px; height: 16px; color: inherit; }
+.ag-ib:hover:enabled, .ag-ib:focus-visible, .ag-ib-note { background: var(--fill); color: var(--text); }
+.ag-ib:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ag-ib:disabled { cursor: default; }
+.ag-ib[aria-busy="true"] .i { animation: icon-spin 1s linear infinite reverse; }
+.ag-ib-tip { position: absolute; bottom: calc(100% + 4px); padding: 4px 8px; border-radius: var(--r-sm); background: var(--prim); color: var(--on-prim); font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 500; white-space: nowrap; opacity: 0; transform: translateY(2px); pointer-events: none; transition: opacity var(--t-fast), transform var(--t-fast); box-shadow: var(--sh-pop); }
+/* The failure hint is a sentence: it wraps instead of running off the narrow panel. */
+.ag-ib-note .ag-ib-tip { width: max-content; max-width: min(240px, 70vw); white-space: normal; }
+.ag-acts-user .ag-ib-tip { right: 0; }
+.ag-acts-agent .ag-ib-tip { left: 0; }
+.ag-ib:hover .ag-ib-tip, .ag-ib:focus-visible .ag-ib-tip, .ag-ib-note .ag-ib-tip { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .ag-ib-tip { transition: none; } .ag-ib[aria-busy="true"] .i { animation: none; } }
+@media (forced-colors: active) { .ag-ib { color: ButtonText; } .ag-ib-tip { border: 1px solid CanvasText; } }
 .ag-restart-scrim { position: absolute; z-index: 7; inset: 0; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--bg) 72%, transparent); }
 .ag-restart-dlg { box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; width: min(100%, 320px); padding: 16px; border-radius: var(--r-lg); background: var(--panel); box-shadow: 0 0 0 1px var(--edge), 0 8px 24px rgb(0 0 0 / 0.35); }
 .ag-restart-title { margin: 0; font-size: var(--fs-h3); line-height: var(--lh-h3); font-weight: 600; }

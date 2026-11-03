@@ -8,6 +8,7 @@ import { calendarApi } from "../bindings/calendar.js";
 import { type OfferNav, runOffer } from "../agentOffer.js";
 import { runRestore } from "../subjectRemovalView.js";
 import { turnkeyApi } from "../bindings/turnkey.js";
+import { transcriptApi } from "../bindings/transcript.js";
 import { recordingDeleteApi } from "../bindings/recordingDelete.js";
 import { callByName, onEventData } from "../bindings/runtime.js";
 import {
@@ -72,6 +73,9 @@ const library = libraryApi(callByName);
 const calendar = calendarApi(callByName);
 const answers = answersApi(callByName);
 const confirm = { api: agentConfirmApi(callByName), deleteApi: recordingDeleteApi(callByName) };
+// «Копировать» under a message: the shell puts plain text on the system clipboard (the page's own clipboard needs focus
+// and a permission in WebView2); the same call the transcript page uses for its selection.
+const copyMessage = transcriptApi(callByName).copyText;
 
 /** Ctrl+K from anywhere in the window: a closed panel opens with focus in the input, an open one closes. */
 function useFocusShortcut(input: RefObject<HTMLTextAreaElement | null>, open: boolean, reveal?: () => void, hide?: () => void) {
@@ -694,6 +698,7 @@ export function AgentPanel(props: {
       libraryChanged: props.onLibraryChanged,
       answers,
       openSource: props.onOpenSource,
+      copy: copyMessage,
       press,
       revise: (wish) => named && run(() => api.revisePlan(ref, wish)),
       answer: (answers) => named && run(() => api.answer(ref, answers)),
@@ -805,6 +810,7 @@ export function AgentPanel(props: {
       mentionsFor={(e) => restoredMentions(e, earlierReq, openId)}
       fill={fillOf(fills, openId)}
       restart={restartUi}
+      copy={copyMessage}
       ctx={ctx}
       draft={draft}
       notice={notice}
