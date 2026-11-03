@@ -173,7 +173,8 @@ var errMovedOn = errors.New("agent: the target changed before the action")
 // --- the actions --------------------------------------------------------------------------------------
 
 // prepared is what an action knows before it runs: the intent the journal records first and, when the state is
-// already the wanted one, the result without any change (nothing is journaled then).
+// already the wanted one, the result without any change (nothing is journaled then; recording no-ops are, see
+// effect.noop).
 type prepared struct {
 	intent    action.Intent
 	noop      *values.WriteRow

@@ -32,7 +32,7 @@ const (
 )
 
 // noUndoTools are the U tools one of whose actions completes without a compensation: recording{stop} (ADR-0033 §2,
-// О-7 а). Policy marks the call (actionpolicy.Decision.NoUndo); the entry is DONE without «Отменить».
+// О-7 а) and a recording{start} that found one running. Policy marks the call (actionpolicy.Decision.NoUndo); the entry is DONE without «Отменить».
 var noUndoTools = map[values.Tool]bool{values.ToolRecording: true}
 
 // priorPinned are the kinds whose whole prior state is read before the use case runs: Complete and Restore accept
