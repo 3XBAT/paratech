@@ -252,17 +252,20 @@ test("the state of each step is the core's text, with its error, and stays visib
 
 test("the summary opens over the current section in place of the transcript, and jumps to an assignment", () => {
   const s = routeToSummary(routeToPage("homework"), "r1");
-  assert.deepEqual(s, { page: "homework", transcript: "", summary: "r1", assignment: "", subject: "" });
-  assert.deepEqual(routeToTranscript(s, "r1"), { page: "homework", transcript: "r1", summary: "", assignment: "", subject: "" });
+  // TASK-351 added `lesson` and `tab` to the route; they stay empty here.
+  const none = { lesson: "", tab: "" };
+  assert.deepEqual(s, { page: "homework", transcript: "", summary: "r1", assignment: "", subject: "", ...none });
+  assert.deepEqual(routeToTranscript(s, "r1"), { page: "homework", transcript: "r1", summary: "", assignment: "", subject: "", ...none });
   assert.deepEqual(routeToSummary(routeToTranscript(routeToPage("recordings"), "r2"), "r2"), {
     page: "recordings",
     transcript: "",
     summary: "r2",
     assignment: "",
     subject: "",
+    ...none,
   });
-  assert.deepEqual(closeTranscript(s), { page: "homework", transcript: "", summary: "", assignment: "", subject: "" });
-  assert.deepEqual(routeToAssignment("a1"), { page: "homework", transcript: "", summary: "", assignment: "a1", subject: "" });
+  assert.deepEqual(closeTranscript(s), { page: "homework", transcript: "", summary: "", assignment: "", subject: "", ...none });
+  assert.deepEqual(routeToAssignment("a1"), { page: "homework", transcript: "", summary: "", assignment: "a1", subject: "", ...none });
   assert.equal(routeToPage("homework").assignment, "", "a rail click shows the list");
 });
 
@@ -517,8 +520,9 @@ test("the page shows only the chosen segment, in its tabpanel", () => {
   }
   // The summary tools stay with the summary; the screen is one reading column at any width.
   const summary = page.slice(page.indexOf('{segment === "summary" && ('), page.indexOf('{segment === "lecture" && ('));
-  assert.match(summary, /Скопировать конспект/);
-  assert.match(summary, /Конспект хранится на этом компьютере/);
+  // TASK-351: the tools are the shared SummaryTools («Скопировать» and the «⋯» menu); the storage paragraph is gone.
+  assert.match(summary, /<SummaryTools/);
+  assert.doesNotMatch(summary, /Конспект хранится на этом компьютере|Скопировать конспект|Сохранить как…/);
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.page\.sm \{ width: 100%; max-width: 800px; margin-inline: auto; \}/);
 });

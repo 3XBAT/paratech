@@ -556,7 +556,9 @@ test("the knowledge base renders text only, talks only to the core and searches 
   assert.equal(page.match(/api\.search\(/g)?.length, 1);
   const lessonPage = src("pages/KnowledgeLessonPage.tsx");
   assert.match(lessonPage, /summaryFocus\(view\.summary, focus\.index\)/);
-  assert.match(lessonPage, /<SummaryCard view=\{view\} focusSection=\{focusSection\} focusPoint=\{focusPoint\} \/>/);
+  // TASK-351: the summary card sits in SummaryTab now (with its retry), which gets the marks from the page.
+  assert.match(lessonPage, /<SummaryTab[\s\S]*?focusSection=\{focusSection\}\s+focusPoint=\{focusPoint\}/);
+  assert.match(lessonPage, /<SummaryCard\s+view=\{view\}\s+focusSection=\{props\.focusSection\}\s+focusPoint=\{props\.focusPoint\}/);
   assert.match(src("App.tsx"), /case "knowledge":\s*return <KnowledgeBasePage/);
 });
 
@@ -564,11 +566,13 @@ test("«Мой конспект» is its own tab: before the summary view is rea
   const page = src("pages/KnowledgeLessonPage.tsx");
   const notes = page.indexOf(') : tab === "notes" ?');
   const loading = page.indexOf("view === null ?");
-  const summary = page.indexOf(') : tab === "summary" ?');
+  const summary = page.indexOf("<SummaryTab");
   assert.ok(notes > 0 && loading > notes && summary > loading);
-  // The block is created once, in the notes tab; the summary tab holds the AI note only.
+  // The block is created once, in the notes tab; the summary tab holds the summary only. TASK-351: the «Конспект paratech»
+  // label over it is gone: the tab is named «Конспект» and the card repeats it (the glossary rules the label out).
   assert.equal(page.slice(0, page.indexOf("export function NoteLecturePage")).match(/<OwnNotes/g)?.length, 1);
-  const summaryBranch = page.slice(summary, page.indexOf(') : tab === "homework"'));
-  assert.ok(!summaryBranch.includes("OwnNotes") && summaryBranch.includes("<AiNoteLabel />"));
-  assert.match(page, /useState<LessonTab>\(props\.focus\.tab\)/);
+  const summaryTab = page.slice(page.indexOf("function SummaryTab"), page.indexOf("function LectureTab"));
+  assert.ok(!summaryTab.includes("OwnNotes") && !summaryTab.includes("AiNoteLabel") && summaryTab.includes("<SummaryCard"));
+  // TASK-351: the shown tab is the route's once set; before that the opening tab, decided once (openingTab).
+  assert.match(page, /const tab: LessonTab \| null = isLessonTab\(props\.tab\) \? props\.tab : auto;/);
 });

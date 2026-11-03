@@ -635,6 +635,14 @@ dialog.dialog:focus { outline: none; }
 .kb-snippet { overflow-wrap: anywhere; }
 .kb-snippet mark { border-radius: var(--r-xs); background: var(--wait-b); color: var(--wait-t); }
 .kb-tabs { margin: 0 0 16px; }
+/* TASK-351: the lesson as one screen. The tools of the summary sit above it, their «⋯» menu opens to the right; a lesson
+   that cannot be shown says why and offers the way out. */
+.sm-tools { margin: 0 0 16px; }
+.sm-tools .tr-share { margin-top: 0; }
+.sm-tools .result { margin-top: 12px; }
+.sm-tools .mmenu-list { right: auto; left: 0; min-width: 180px; }
+.kb-gone { display: grid; justify-items: start; gap: 12px; margin: 0 0 16px; }
+.kb-gone .acts { margin: 0; }
 .kb-form { margin-bottom: 16px; }
 .kb-form .ui-field { max-width: 420px; }
 /* The place a search found: a bar on its left, not colour alone. */
