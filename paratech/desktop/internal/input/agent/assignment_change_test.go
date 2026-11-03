@@ -342,6 +342,30 @@ func TestChangeAssignmentRestore(t *testing.T) {
 			t.Fatalf("undo = %+v, deleted %v", u, w.assignments.deleted["a1"])
 		}
 	})
+
+	// The delete of the Undo runs in DeleteAndStop's own transaction, never inside an outer one: its after-commit work
+	// (the calendar sync, stopping jobs) must follow a real commit.
+	t.Run("undo of a restore deletes outside an outer transaction", func(t *testing.T) {
+		w, _ := newWave10World(t)
+		run10(t, w, req, call10(t, "c1", values.ToolChangeAssignment, deleteA1, actionpolicy.ClassU))
+		_, e := run10(t, w, req, call10(t, "c2", values.ToolChangeAssignment, restoreA1, actionpolicy.ClassU))
+		txs := w.tx.n
+		if u := undo(t, w, e); u.Status != action.StatusUndone || !w.assignments.deleted["a1"] || w.tx.n != txs {
+			t.Fatalf("undo = %+v, deleted %v, transactions %d -> %d", u, w.assignments.deleted["a1"], txs, w.tx.n)
+		}
+	})
+
+	t.Run("undo of a restore the student edited since is refused", func(t *testing.T) {
+		w, _ := newWave10World(t)
+		run10(t, w, req, call10(t, "c1", values.ToolChangeAssignment, deleteA1, actionpolicy.ClassU))
+		_, e := run10(t, w, req, call10(t, "c2", values.ToolChangeAssignment, restoreA1, actionpolicy.ClassU))
+		v := w.assignments.views["a1"]
+		v.Title, v.Version = "Своё", v.Version+1
+		w.assignments.views["a1"] = v
+		if u := undo(t, w, e); u.Status != action.StatusUndoRefused || u.NoUndo != action.NoUndoChanged || w.assignments.deleted["a1"] {
+			t.Fatalf("undo = %+v, deleted %v", u, w.assignments.deleted["a1"])
+		}
+	})
 }
 
 func TestChangeAssignmentRestoreRefusesWhatThisChatDidNotDelete(t *testing.T) {

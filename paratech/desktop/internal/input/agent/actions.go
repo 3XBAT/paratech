@@ -656,6 +656,10 @@ func (a *Actions) Apply(ctx context.Context, c action.Compensation, expectedVers
 		// The use case removes it under its version in its own transaction; nothing is left to rebase on.
 		return 0, a.removeAdded(ctx, v, expectedVersion)
 	}
+	if v, ok := c.(action.DeleteAssignment); ok {
+		// DeleteAndStop checks the version in its own transaction and works after its commit; nothing to rebase on.
+		return 0, a.trashAgain(ctx, v, expectedVersion)
+	}
 	var after int64
 	err := a.tx.Do(ctx, func(ctx context.Context) error {
 		t, err := a.Check(ctx, c)
