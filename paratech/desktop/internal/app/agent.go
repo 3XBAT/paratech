@@ -115,6 +115,8 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 		Knowledge: reads.knowledge, Activity: reads.activity, Schedule: reads.schedule,
 		Assignments: reads.assignments, Deliveries: reads.deliveries, Journal: c.journal, Actions: actions,
 		Proposals: reads.assignments, Deletions: c.deletions, Drafts: c.drafts, Replies: replies, Clock: e.local, Log: log,
+		// The schedule-subjects card only: its «Да» is AgentConfirmService.ConfirmSchedule, never the Driver.
+		Subjects: reads.library,
 	})
 	if err != nil {
 		return fmt.Errorf("app: agent driver: %w", err)
