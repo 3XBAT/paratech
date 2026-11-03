@@ -24,6 +24,7 @@ import {
   deliveryLooks,
   deliveryView,
   docxSaveView,
+  draftButtonTexts,
   draftStatusStep,
   dueText,
   errorText,
@@ -111,11 +112,14 @@ test("which email actions are offered is the core's decision, not the view's", (
     const v = deliveryView(delivery(s, { canMarkSent: true, canSendAgain: true }));
     assert.deepEqual(Object.keys(v).sort(), ["hint", "icon", "kind", "label", "problem"]);
   }
+  // TASK-346: the email row is DeliveryRow in pages/HomeworkMenus.tsx.
   const page = code("pages/HomeworkPage.tsx");
-  assert.match(page, /\{d\.canMarkSent && \(/);
-  assert.match(page, /\{d\.canSendAgain && \(/);
+  const row = code("pages/HomeworkMenus.tsx");
+  assert.match(row, /\{d\.canMarkSent && \(/);
+  assert.match(row, /\{d\.canSendAgain && \(/);
   for (const s of deliveryStatuses) {
     assert.ok(!page.includes(`"${s}"`), `the page does not branch on ${s}`);
+    assert.ok(!row.includes(`"${s}"`), `the email row does not branch on ${s}`);
   }
 });
 
@@ -540,7 +544,9 @@ test("the open assignment asks the core for its draft until the page goes away",
   assert.match(page, /pollDraftNow\.current = \(\) => undefined;/, "the poll stops on unmount");
   assert.match(page, /disabled=\{offer\.instructionDisabled\}/, "the instructions follow the core's generation");
   assert.match(page, /busyLabel=\{generatingLabel\}/);
-  assert.match(page, />\s*Сохранить в Word \(\.docx\)\s*</);
+  // TASK-346: «Сохранить ▾» (pages/HomeworkMenus.tsx) has «Word (.docx)»; the page wires it to saveWord.
+  assert.match(page, /onWord=\{saveWord\}/);
+  assert.equal(draftButtonTexts.word, "Word (.docx)");
   assert.equal(count(page, "api.saveDocx(id, shown.number)"), 1, "Word saves the shown version");
 });
 

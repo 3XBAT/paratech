@@ -34,7 +34,8 @@ test("the filter bar offers kind, subject, status, 7/30/90 days and only-undoabl
   const out = renderToStaticMarkup(
     h(FilterBar, { filter: { ...initialFilter, days: 7, undoable: true, subjectId: "s1" }, subjects: [{ id: "s1", name: "Матанализ" }], onChange: noop }),
   );
-  for (const t of ["Всё", "Действия", "Обработка", "Предмет", "Состояние", "Период", "Только обратимые"]) {
+  // (a set hidden filter opens «Ещё фильтры»; the folded form is tested in homeworkJournal346.test.mjs.)
+  for (const t of ["Всё", "Действия", "Обработка", "Предмет", "Состояние", "Период", "Только отменяемые"]) {
     assert.ok(out.includes(t), t);
   }
   assert.match(out, /<option value="s1" selected="">Матанализ<\/option>/);
@@ -56,25 +57,25 @@ test("an undoable action line offers «Отменить»; the busy one is label
   assert.equal((busy.match(/<button[^>]*disabled/g) ?? []).length, 2);
 });
 
-test("a sent email says «Отменить нельзя» with the reason and no «Отменить»", () => {
+test("a sent email says «Нельзя отменить: письмо уже отправлено» as text and has no «Отменить»", () => {
   const sent = line({ kind: "processing", actionId: "", tool: "", jobId: "j1", jobType: "send_email", status: "COMPLETED", undoable: false, cannotUndo: true, noUndo: "sent", subjectId: "" });
   const out = list([sent]);
   assert.match(out, /Отправка письма/);
-  assert.match(out, /Отменить нельзя/);
-  assert.match(out, /Письмо отправлено/);
+  assert.match(out, /Нельзя отменить: письмо уже отправлено/);
+  assert.doesNotMatch(out, /<button/, "text in place of the disabled button");
   assert.doesNotMatch(out, />Отменить</);
   const m = lineModel(sent, 0, names);
   assert.equal(m.undoActionId, "");
   assert.equal(m.cannotUndo, true);
 });
 
-test("an irreversible proposal says «Отменить нельзя»; reasons explain lines without «Отменить»", () => {
+test("an irreversible proposal says the decision is the student's (no refusal prefix); reasons explain lines without «Отменить»", () => {
   const proposal = line({ tool: "propose_send", status: "PROPOSED", undoable: false, cannotUndo: true, noUndo: "irreversible" });
   const out = list([proposal]);
   assert.match(out, /Предложена отправка письма/);
-  assert.match(out, /Отменить нельзя/);
+  assert.doesNotMatch(out, /Нельзя отменить/);
   assert.match(out, /Решение остаётся за вами/);
-  const reasons = { running: "Выполняется", failed: "Не выполнено", undone: "Уже отменено", changed: "Изменено после — отменить нельзя", result_ready: "Результат готов", cannot_stop: "Уже не остановить", unknown: "Итог неизвестен" };
+  const reasons = { running: "Выполняется", failed: "Не выполнено", undone: "Уже отменено", changed: "Нельзя отменить: изменено после", result_ready: "Нельзя отменить: результат уже готов", cannot_stop: "Нельзя отменить: задачу уже не остановить", unknown: "Итог неизвестен" };
   for (const [noUndo, text] of Object.entries(reasons)) {
     const o = list([line({ undoable: false, noUndo, status: "UNDONE" })]);
     assert.ok(o.includes(text), noUndo);

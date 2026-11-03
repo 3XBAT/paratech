@@ -112,7 +112,8 @@ test("both delete buttons ask first and delete only through the warning or when 
   // The buttons call the asking functions, never the delete directly.
   // (in the list the «Удалить» is an item of the row's «⋯» menu, which the row view gets as onRemove, TASK-316.)
   assert.match(page, /onRemove=\{\(\) => void askRemove\(a\)\}/);
-  assert.match(page, /onClick=\{\(\) => void askRemoveThis\(\)\}/);
+  // (on the detail page it is the last item of the head's «⋯» menu, TASK-346: pickHead calls askRemoveThis.)
+  assert.match(page, /\} else \{\s*void askRemoveThis\(\);/);
   // Asking: the check comes first; a running work shows the warning, otherwise the delete follows at once.
   assert.match(page, /deleteNeedsWarning\(\(\) => api\.deleteImpact\(a\.id\)\)/);
   assert.match(page, /deleteNeedsWarning\(\(\) => api\.deleteImpact\(id\)\)/);
@@ -136,13 +137,15 @@ test("the check shows no «Удаление…»; «Отмена» gives the foc
   assert.match(page, /removeLock=\{checkingId === a\.id \? "checking" : confirmId === a\.id \? "confirm" : ""\}/);
   assert.match(page, /busyText = doneBusy \? doneTexts\.saving : busyId === a\.id \? changeTexts\.removing : ""/);
   assert.match(page, /disabled=\{changing \|\| checking \|\| confirming( \|\| doneBusy)?\}/);
-  assert.match(page, /busy=\{changing\}\s*busyLabel=\{changeTexts\.removing\}/);
+  // (the detail page has no delete button any more, TASK-346: «Удаление…» is a small status text next to «Выполнено».)
+  assert.match(page, /\{changing && \(\s*<span className="small muted hw-inline" role="status">\s*\{changeTexts\.removing\}/);
   assert.doesNotMatch(page, /setBusyId\(a\.id\);\s*try \{\s*await impactGuard/);
   assert.doesNotMatch(page, /setChanging\(true\);\s*try \{\s*await impactGuard/);
   // After «Отмена» the «⋯» button of the row takes the focus, once the question is gone.
   assert.match(page, /focusRowMenu\(rootRef\.current, cancelledId\)/);
-  assert.match(page, /key=\{cancelled \? "remove-cancelled" : "remove"\}/);
-  assert.match(page, /autoFocus=\{restored \|\| cancelled\}/);
+  // The detail page: after «Отмена» and after «Вернуть» the «⋯» button of the head takes the focus (no autoFocus on a button).
+  assert.match(page, /if \(\(cancelled \|\| restored\) && detail !== null && gone === null\) \{\s*focusRowMenu\(rootRef\.current, id\);/);
+  assert.doesNotMatch(page, /autoFocus=\{restored/);
 });
 
 test("«Выполнено» and delete do not overlap: during the check, under the warning and while the mark is saved", () => {

@@ -2,14 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type AgentApi, agentApi, type JournalLine } from "../bindings/agent.js";
 import { libraryApi, type LibrarySubject } from "../bindings/library.js";
 import { callByName } from "../bindings/runtime.js";
-import { initialFilter, texts, toFilter, undoOutcome } from "../journalView.js";
-import { Button } from "../ui/Button.js";
+import { type FilterState, initialFilter, outcomeHasRow, texts, toFilter, undoOutcome, type UndoOutcome } from "../journalView.js";
 import { ResultLine } from "../ui/controls.js";
-import { FilterBar, JournalList } from "./JournalParts.js";
+import { FilterBar, JournalList, LoadError } from "./JournalParts.js";
 
 /**
  * «Журнал»: what paratech did and what was processed, newest first. The core builds the lines and decides which can be
- * undone; the page words them and sends «Отменить».
+ * undone; the page words them and sends «Отменить». There is no refresh button: the list is read on arrival and after
+ * each «Отменить»; a failed read shows «Повторить» next to its message. The outcome of «Отменить» shows in the row of
+ * the action.
  */
 export function JournalPage() {
   const api: AgentApi = useMemo(() => agentApi(callByName), []);
@@ -18,7 +19,7 @@ export function JournalPage() {
   const [subjects, setSubjects] = useState<LibrarySubject[]>([]);
   const [error, setError] = useState("");
   const [busyAction, setBusyAction] = useState("");
-  const [outcome, setOutcome] = useState<{ ok: boolean; text: string } | null>(null);
+  const [outcome, setOutcome] = useState<UndoOutcome | null>(null);
   const running = useRef(false); // a double click comes before the re-render that disables the button
 
   useEffect(() => {
@@ -59,15 +60,31 @@ export function JournalPage() {
     setBusyAction(actionId);
     setOutcome(null);
     try {
-      setOutcome(undoOutcome(await api.undo(actionId)));
+      setOutcome({ actionId, ...undoOutcome(await api.undo(actionId)) });
     } catch {
-      setOutcome(undoOutcome({ problem: "failed", actionId, status: "", refusal: "" }));
+      setOutcome({ actionId, ...undoOutcome({ problem: "failed", actionId, status: "", refusal: "" }) });
     } finally {
       running.current = false;
       setBusyAction("");
       load();
     }
   }
+
+  // «Повторить»: the inline «Загрузка…» shows again until the answer comes.
+  function retry() {
+    setError("");
+    setLines(null);
+    load();
+  }
+
+  // Another filter is another list: the outcome of an action of the old one goes.
+  function changeFilter(next: FilterState) {
+    setOutcome(null);
+    setFilter(next);
+  }
+
+  // The row of the action is gone from the list (a filter drops what was undone): the outcome is said here instead.
+  const strayOutcome = outcome !== null && lines !== null && !outcomeHasRow(lines, outcome.actionId) ? outcome : null;
 
   return (
     <section className="page">
@@ -76,23 +93,16 @@ export function JournalPage() {
           <span className="label">{texts.lead}</span>
           <h1>{texts.title}</h1>
         </div>
-        <div className="acts">
-          <Button icon="retry" onClick={load}>
-            {texts.refresh}
-          </Button>
-        </div>
       </div>
-      <FilterBar filter={filter} subjects={subjects} onChange={setFilter} />
+      <FilterBar filter={filter} subjects={subjects} onChange={changeFilter} />
       {lines === null && !error && <p className="muted">{texts.loading}</p>}
-      {error !== "" && (
-        <ResultLine kind="fail" role="alert">
-          {error}
-        </ResultLine>
+      {error !== "" && <LoadError text={error} onRetry={retry} />}
+      {lines !== null && !(error !== "" && lines.length === 0) && (
+        <JournalList lines={lines} subjects={names} busyAction={busyAction} outcome={outcome} onUndo={(id) => void undo(id)} />
       )}
-      {lines !== null && <JournalList lines={lines} subjects={names} busyAction={busyAction} onUndo={(id) => void undo(id)} />}
-      {outcome !== null && (
-        <ResultLine kind={outcome.ok ? "ok" : "fail"} role="status">
-          {outcome.text}
+      {strayOutcome !== null && (
+        <ResultLine kind={strayOutcome.ok ? "ok" : "fail"} role={strayOutcome.ok ? "status" : "alert"}>
+          {strayOutcome.text}
         </ResultLine>
       )}
     </section>
