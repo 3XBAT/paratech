@@ -17,6 +17,7 @@ import type { ChipKind } from "./ui/StatusChip.js";
 export const texts = {
   upcoming: "Ближайшее",
   openAssignment: "Открыть задание",
+  openLesson: "Открыть пару",
   lessons: "Пары",
   fresh: "новое",
   overviewFailed: "Не удалось загрузить сведения о предмете.",

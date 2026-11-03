@@ -112,6 +112,28 @@ func (s *Service) Lesson(ctx context.Context, id shared.RecordingID) (kb.Lesson,
 	return s.lessonOf(ctx, rec)
 }
 
+// LessonByKey returns the lesson with key (kb.Lesson.Key), so a lecture known only from the student's notes opens by
+// itself: a recording key is read as Lesson reads it (without notes); any other key is looked up among the lessons of
+// Lectures, notes joined. A key no lesson can have is ErrInvalidRequest; a lesson that is gone is ErrRecordingNotFound.
+func (s *Service) LessonByKey(ctx context.Context, key string) (kb.Lesson, error) {
+	rec, ok := kb.ParseKey(key)
+	if !ok {
+		return kb.Lesson{}, ErrInvalidRequest
+	}
+	if rec != "" {
+		return s.Lesson(ctx, rec)
+	}
+	all, err := s.withNotes(ctx)
+	if err != nil {
+		return kb.Lesson{}, err
+	}
+	l, found := kb.FindByKey(all, key)
+	if !found {
+		return kb.Lesson{}, ErrRecordingNotFound
+	}
+	return l, nil
+}
+
 // SetLessonInfo stores the subject and kind the user set for a recording (kind "" or a code of
 // values.LessonKindCodes); empty ones clear the correction, so the recorded lesson names it again. It returns the
 // lesson as the knowledge base now shows it.

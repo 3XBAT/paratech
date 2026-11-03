@@ -103,6 +103,8 @@ export function SubjectsPage(props: {
   onSelect: (subjectId: string) => void;
   /** A row of «Ближайшее» opens its assignment (TASK-347); without it the rows only show the deadlines. */
   onOpenAssignment?: (assignmentId: string) => void;
+  /** A row of «Пары» opens the lesson of its recording (TASK-352); without it the rows only show the lessons. */
+  onOpenLesson?: (recordingId: string) => void;
   /** Counts the rail clicks: a click reads the remembered subject again (see landingFor). */
   visit?: number;
   /** «Указать почту» of a refused send: the form of one teacher to open on arrival (taken once, then onTeacherFocusDone). */
@@ -753,7 +755,7 @@ export function SubjectsPage(props: {
               </ResultLine>
             )}
             <TeachersBlock key={subject.id} teachers={subject.teachers} state={teacherStateFor(teacher, subject.id)} on={teacherActions} />
-            {overview && <OverviewSections overview={overview} onOpenAssignment={props.onOpenAssignment} />}
+            {overview && <OverviewSections overview={overview} onOpenAssignment={props.onOpenAssignment} onOpenLesson={props.onOpenLesson} />}
             <SubjectDetail
               subject={subject}
               materials={materials}

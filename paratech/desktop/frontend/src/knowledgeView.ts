@@ -137,13 +137,29 @@ export const noFocus: LessonFocus = { tab: "notes", index: -1 };
 /** The prefix of the key of a recorded lesson (the core's kb.RecordingKey); the rest is the recording id. */
 export const recordingKeyPrefix = "recording:";
 
+/** The key of the lesson of a recording (the core's kb.RecordingKey). */
+export function recordingLessonKey(recordingId: string): string {
+  return recordingKeyPrefix + recordingId;
+}
+
 /**
- * The recording id inside the key of a recorded lesson, "" for any other key. The core has no call that opens a lesson
- * by its key, but a recorded one has `lesson(recordingId)`; a note-only lecture can be shown only from what the window
- * remembers (App's cache of opened lessons).
+ * Every link into a recorded lesson (TASK-352): the key, and the tab and the place as the old «Открыть конспект /
+ * текст лекции / расшифровку» named them. `tab` undefined lets the lesson screen choose (openingTab); `index` is the
+ * block of the lecture text, the segment of the transcript or the hit's index of the summary (-1: the top of the tab).
+ * The shape is that of LessonOpeningRequest plus the key; the window puts the lesson in the route by it and the screen
+ * loads it with lessonByKey.
  */
-export function recordingIdOfKey(key: string): string {
-  return key.startsWith(recordingKeyPrefix) ? key.slice(recordingKeyPrefix.length) : "";
+export function recordingLessonOpening(
+  recordingId: string,
+  tab?: LessonTab,
+  index = -1,
+): { key: string; focus: LessonFocus; materialId: string; editing: boolean } {
+  return {
+    key: recordingLessonKey(recordingId),
+    focus: tab === undefined ? noFocus : { tab, index },
+    materialId: "",
+    editing: false,
+  };
 }
 
 export function isLessonTab(v: string): v is LessonTab {
@@ -195,6 +211,14 @@ export interface LessonOpening {
   editing: boolean;
 }
 
+/**
+ * The React key of the lesson screen: a different lesson, or the same one opened again (the window counts `visit` on each
+ * opening, so another place of it) mounts the screen afresh; switching its tab (the route's tab) never does.
+ */
+export function lessonScreenKey(lessonKey: string, visit: number): string {
+  return `lesson:${lessonKey}:${visit}`;
+}
+
 /** The window keeps the request only while the route shows the lesson it names, so Alt+← never applies it late. */
 export function keepLessonOpening(o: LessonOpening | null, route: { lesson: string }): LessonOpening | null {
   return o !== null && route.lesson === o.key ? o : null;
@@ -242,13 +266,34 @@ export function lessonCrumbs(
 
 export const lessonScreenTexts = {
   loading: "Загрузка…",
-  /** A lecture of the student's notes cannot be found by its key once the window forgot it. */
-  gone: "Эту пару можно открыть только из списка пар. Нажмите «Назад» и выберите её в списке.",
   /** Under the head after the subject and kind form was saved. */
   infoSaved: "Предмет и тип пары сохранены.",
   /** Returns where the student came from. */
   back: "Назад",
+  /** The core cannot find the lesson (an unknown key, or the recording and files are deleted): nothing to retry. */
+  pairGone: "Этой пары больше нет: запись или файлы удалены.",
+  /** The core cannot read the lesson now (busy, unreadable base): a repeat may work. */
+  openFailed: "Не удалось открыть пару.",
+  retry: "Повторить",
 } as const;
+
+/** Why the lesson screen cannot show a lesson, and what the student can do about it. */
+export interface LessonProblem {
+  /** "gone" offers only «Назад»; "retry" offers «Повторить» and «Назад». */
+  kind: "gone" | "retry";
+  text: string;
+}
+
+/**
+ * The screen's own words for a failed read of a lesson: the binding texts name «запись» and «обновите список», which
+ * mean nothing on this screen. An unknown key or a missing lesson is gone for good; anything else is worth a repeat.
+ */
+export function lessonProblem(err: unknown): LessonProblem {
+  const msg = errorText(err);
+  return msg === errorMessages.notFound || msg === errorMessages.invalidId
+    ? { kind: "gone", text: lessonScreenTexts.pairGone }
+    : { kind: "retry", text: lessonScreenTexts.openFailed };
+}
 
 /**
  * The place a search hit opens in a recording's page: the lecture block, the transcript segment, a summary section or a
@@ -680,7 +725,9 @@ export function citationPlace(s: CitationSource): string {
 
 export type CitationOpening =
   | { kind: "note"; noteId: string; materialId: string; locatorKind: NoteLocatorKind; locatorN: number }
-  | { kind: "recording"; recordingId: string; focus: LessonFocus };
+  | { kind: "recording"; recordingId: string; focus: LessonFocus }
+  /** The «Пара» pill of the agent: a schedule lesson, found by its id among the lectures (TASK-352). */
+  | { kind: "pair"; lessonId: string };
 
 /** What a click on a citation opens, by ids only; a removed source, or one without ids, does not open (null). */
 export function citationOpening(s: CitationSource): CitationOpening | null {
@@ -705,25 +752,40 @@ export const maxNoteScanSubjects = 101;
 
 export const noteJumpTexts = {
   notFound: "Конспект не найден: обновите список.",
+  /** The pill names a pair that has neither a recording nor notes (or it was deleted). */
+  pairNotFound: "У этой пары нет записи и конспекта: открывать нечего.",
   busy: "Открывается…",
 } as const;
 
-/**
- * Stopgap (the core has no call from a note id to its lecture): the first lecture, over the subjects in the core's
- * order, whose notes hold noteId; null when none does. By ids only. A failed call rejects.
- */
-export async function findNoteLecture(api: Pick<KnowledgeBaseApi, "subjects" | "lectures">, noteId: string): Promise<KnowledgeLesson | null> {
-  if (noteId === "") {
-    return null;
-  }
+/** Stopgap (the core has no call from a note id or a schedule lesson to its lecture): the first match, by ids only. */
+async function findLecture(
+  api: Pick<KnowledgeBaseApi, "subjects" | "lectures">,
+  match: (l: KnowledgeLesson) => boolean,
+): Promise<KnowledgeLesson | null> {
   const subjects = (await api.subjects()).slice(0, maxNoteScanSubjects);
   for (const s of subjects) {
-    const found = (await api.lectures(s.key)).find((l) => l.notes.some((n) => n.id === noteId));
+    const found = (await api.lectures(s.key)).find(match);
     if (found !== undefined) {
       return found;
     }
   }
   return null;
+}
+
+/**
+ * The first lecture, over the subjects in the core's order, whose notes hold noteId; null when none does. A failed call
+ * rejects.
+ */
+export async function findNoteLecture(api: Pick<KnowledgeBaseApi, "subjects" | "lectures">, noteId: string): Promise<KnowledgeLesson | null> {
+  return noteId === "" ? null : findLecture(api, (l) => l.notes.some((n) => n.id === noteId));
+}
+
+/**
+ * The newest lecture of a schedule lesson, a recording or a lecture of notes alike (both carry scheduleLessonId); null
+ * when the pair has neither. A failed call rejects.
+ */
+export async function findPairLecture(api: Pick<KnowledgeBaseApi, "subjects" | "lectures">, lessonId: string): Promise<KnowledgeLesson | null> {
+  return lessonId === "" ? null : findLecture(api, (l) => l.scheduleLessonId === lessonId);
 }
 
 /** Where a citation lands on «База знаний»: the lesson, the place in it and the file of the notes to mark. */
@@ -740,6 +802,10 @@ export async function resolveOpening(
 ): Promise<ResolvedOpening | null> {
   if (o.kind === "recording") {
     return { lesson: await api.lesson(o.recordingId), focus: o.focus, materialId: "" };
+  }
+  if (o.kind === "pair") {
+    const pair = await findPairLecture(api, o.lessonId);
+    return pair === null ? null : { lesson: pair, focus: noFocus, materialId: "" };
   }
   const lecture = await findNoteLecture(api, o.noteId);
   return lecture === null ? null : { lesson: lecture, focus: noFocus, materialId: o.materialId };
@@ -799,7 +865,7 @@ export async function runJump(
     const r = await resolveOpening(api, o);
     if (ticket.isLive()) {
       if (r === null) {
-        h.failed(noteJumpTexts.notFound);
+        h.failed(o.kind === "pair" ? noteJumpTexts.pairNotFound : noteJumpTexts.notFound);
       } else {
         h.opened(r);
       }

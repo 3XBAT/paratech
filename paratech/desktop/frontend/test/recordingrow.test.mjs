@@ -237,7 +237,7 @@ test("«Открыть подключения» is a text button of a failed LLM
 
   // With the texts offered the link goes to «⋯», so the status cell carries it: connections first, then «Повторить».
   const opened = [];
-  const html = render(llm, { onRetry: () => undefined, onOpen: (p) => opened.push(p), onOpenSummary: () => undefined, onOpenTranscript: () => undefined });
+  const html = render(llm, { onRetry: () => undefined, onOpen: (p) => opened.push(p), onOpenLesson: () => undefined });
   assert.match(html, /<span class="st-fixes"><button[^>]*>.*Открыть подключения<\/button><button[^>]*aria-label="Повторить поиск заданий"/);
   assert.ok(!html.includes("Проверьте подключения") && !html.includes("круглую стрелку"), "the old hints are gone");
   // Without the texts the main button is that link already: once.
@@ -257,26 +257,26 @@ test("one main button per state; the rest goes to «⋯» (TASK-096)", () => {
     const a = rowActions(row(over), offers);
     return [a.main?.key ?? null, a.menu.map((i) => i.key)];
   };
-  // A ready summary leads; the lecture text, the transcript and the redo are in the menu.
-  assert.deepEqual(keys({ canRedoSummary: true }), ["summary", ["transcript", "redo"]]);
-  assert.deepEqual(keys({ canRedoSummary: true, lectureTextReady: true }), ["summary", ["lectureText", "transcript", "redo"]]);
+  // TASK-352: with any text the main button is the lesson (no tab named); the named texts and the redo are in the menu.
+  assert.deepEqual(keys({ canRedoSummary: true }), ["lesson", ["summary", "transcript", "redo"]]);
+  assert.deepEqual(keys({ canRedoSummary: true, lectureTextReady: true }), ["lesson", ["lectureText", "summary", "transcript", "redo"]]);
   // A ready summary and a failed homework search behind the connections: the link goes to the menu.
   assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "homeworkFailed", action: "openConnections", retryWork: "homework" }),
-    ["summary", ["transcript", "open"]]);
-  // No ready summary: the lecture text leads, else the transcript; the fix link stays in the menu.
+    ["lesson", ["summary", "transcript", "open"]]);
+  // No ready summary: the lesson still leads with what there is; the fix link stays in the menu.
   assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "summaryFailed", action: "openConnections", retryWork: "summary" }),
-    ["transcript", ["summary", "open"]]);
+    ["lesson", ["summary", "transcript", "open"]]);
   assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "summaryFailed", action: "openConnections", retryWork: "summary", lectureTextReady: true }),
-    ["lectureText", ["summary", "transcript", "open"]]);
-  // A failed transcription keeps its recognised part, so the transcript leads there too.
+    ["lesson", ["lectureText", "summary", "transcript", "open"]]);
+  // A failed transcription keeps its recognised part, so the lesson opens there too.
   assert.deepEqual(keys({ stage: "failed", step: "transcription", errorCode: "transcriptionFailed", action: "openModels" }),
-    ["transcript", ["open"]]);
+    ["lesson", ["transcript", "open"]]);
   // No text at all: the fix link is the fallback main button.
   assert.deepEqual(keys({ stage: "failed", step: "", errorCode: "recordingFailed", action: "checkSound" }), ["open", []]);
   assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "summaryFailed", action: "retry", retryWork: "summary" }),
-    ["transcript", ["summary"]]);
-  assert.deepEqual(keys({ stage: "summarizing", lectureTextReady: true }), ["lectureText", ["summary", "transcript"]]);
-  assert.deepEqual(keys({ stage: "transcribing" }), ["transcript", []]);
+    ["lesson", ["summary", "transcript"]]);
+  assert.deepEqual(keys({ stage: "summarizing", lectureTextReady: true }), ["lesson", ["lectureText", "summary", "transcript"]]);
+  assert.deepEqual(keys({ stage: "transcribing" }), ["lesson", ["transcript"]]);
   assert.deepEqual(keys({ stage: "failed", errorCode: "silentRecording", action: "checkSound" }), ["open", []]);
   // Stop and «Запустить сейчас» stay visible: they are the state's own action.
   assert.deepEqual(keys({ stage: "recording", status: "RECORDING", stoppable: true }), ["stop", []]);
@@ -289,11 +289,13 @@ test("one main button per state; the rest goes to «⋯» (TASK-096)", () => {
 
   // The row renders the one main button and the «⋯» button; the menu items show only when it opens.
   const noop = () => undefined;
-  const page = { onOpenSummary: noop, onOpenTranscript: noop, onRedoSummary: noop, onDelete: noop };
+  const page = { onOpenLesson: noop, onRedoSummary: noop, onDelete: noop };
   const html = render(row({ canRedoSummary: true, lectureTextReady: true }), page);
-  assert.ok(html.includes(">Открыть конспект<"));
-  assert.ok(!html.includes("Открыть текст лекции") && !html.includes("Открыть расшифровку") && !html.includes("Исходная расшифровка"));
-  assert.equal(html.split('class="btn"').length - 1, 1, "one main button");
+  // TASK-352: the main button is «Открыть» (the lesson screen), stretched over the row; no text names remain outside «⋯».
+  assert.ok(html.includes(">Открыть<"));
+  assert.ok(!html.includes("Открыть конспект") && !html.includes("Открыть текст лекции") && !html.includes("Открыть расшифровку") && !html.includes("Исходная расшифровка"));
+  assert.equal(html.split('class="btn row-open"').length - 1, 1, "one main button, the row's open");
+  assert.match(html, /<button[^>]*class="btn row-open"[^>]*aria-label="Открыть: [^"]*"/);
   assert.ok(html.includes('aria-label="Ещё действия: Матанализ"'));
   // Every row keeps the «⋯» cell, so the actions column stays aligned.
   assert.ok(render(row({ stage: "transcribing" })).includes('<div class="mmenu"></div>'));
@@ -367,7 +369,7 @@ test("the row renders the lesson title and notes as text and only the offered bu
   assert.ok(waiting.includes("В очереди · ждёт зарядки"));
 
   const noop = () => undefined;
-  assert.ok(render(row(), { onOpenSummary: noop, onOpenTranscript: noop }).includes(">Открыть конспект<"), "the texts when the page opens them");
+  assert.ok(render(row(), { onOpenLesson: noop }).includes(">Открыть<"), "the texts when the page opens them");
   assert.ok(!render(row()).includes("Открыть"), "no texts without the page's handlers");
   const src = readFileSync(new URL("../src/pages/RecordingRow.tsx", import.meta.url), "utf8");
   assert.ok(!src.includes("dangerouslySetInnerHTML"));
@@ -707,10 +709,10 @@ test("a recording without speech says so and offers only the sound check, no ret
     assert.deepEqual([a.main?.key ?? null, a.menu.map((i) => i.key)], ["open", []], step);
 
     const noop = () => undefined;
-    const html = render(r, { onOpenSummary: noop, onOpenTranscript: noop, onRedoSummary: noop, onRetry: noop });
+    const html = render(r, { onOpenLesson: noop, onRedoSummary: noop, onRetry: noop });
     assert.ok(html.includes("Запись без речи"), step);
     assert.ok(html.includes("Проверить звук"), step);
-    for (const s of ["Ошибка", "Повторить", "Сделать конспект заново", "Открыть расшифровку", "Открыть конспект"]) {
+    for (const s of ["Ошибка", "Повторить", "Сделать конспект заново", "Открыть расшифровку", "Открыть конспект", ">Открыть<"]) {
       assert.ok(!html.includes(s), `${step}: ${s}`);
     }
   }

@@ -2,7 +2,6 @@
 // Summary sections, key points and assignment titles are model output: React text nodes only, no HTML, no links from them.
 
 // The .js extensions let the Node test runner load the compiled modules (test/summary.test.mjs renders these parts).
-import type { ReactNode } from "react";
 import type { SummarySaveFormat, SummarySection, SummaryView } from "../bindings/summary.js";
 import {
   assignmentMeta,
@@ -32,21 +31,18 @@ export const summarySaveItems: readonly { key: SummarySaveFormat; label: string 
 
 /**
  * The tools of the summary (TASK-351): one «Скопировать» and a «⋯» menu with the file formats. Copy and save run one at
- * a time (`idle`); a summary that is not ready has nothing to save, so the menu is not offered and the copy button says
- * why it is off. `extra` holds a page's own further action.
+ * a time (`idle`); a summary that is not ready has nothing to save, so the menu is not offered (the lesson screen does
+ * not show the tools then: the card's state line says where the summary stands).
  */
 export function SummaryTools(props: {
   ready: boolean;
   /** No copy, save or start is running. */
   idle: boolean;
-  /** Why the copy is off while the summary is not ready. */
-  notReady?: string;
   /** "copy", "save" or another key of a running action. */
   busy: string;
   message: { kind: ResultKind; text: string } | null;
   onCopy: () => void;
   onSave: (format: SummarySaveFormat) => void;
-  extra?: ReactNode;
 }) {
   const off = !props.idle || !props.ready;
   return (
@@ -57,7 +53,6 @@ export function SummaryTools(props: {
           busy={props.busy === "copy"}
           busyLabel="Копирование…"
           disabled={off}
-          disabledReason={props.idle ? props.notReady : undefined}
           onClick={props.onCopy}
         >
           Скопировать
@@ -68,7 +63,6 @@ export function SummaryTools(props: {
           items={props.ready ? summarySaveItems.map((i) => ({ ...i, disabled: !props.idle })) : []}
           onPick={props.onSave}
         />
-        {props.extra}
         {props.busy === "save" && (
           <span className="small muted" role="status">
             Сохранение…

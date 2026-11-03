@@ -2,7 +2,7 @@
 // instead of their back buttons. The pages need the Wails bindings to render, so their source is checked.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Breadcrumbs, crumbsLabel } from "../.test-build/ui/Breadcrumbs.js";
@@ -137,30 +137,19 @@ test("lesson pages: the crumbs are the lesson's own, the lesson is the last leve
   // TASK-351 review: the crumbs follow the section under the lesson (origin) and can close the lesson (onBack).
   assert.match(src, /<Breadcrumbs items=\{crumbItems\(lesson, lessonHeading\(lesson\), props\.origin, props\.nav, props\.onBack\)\} \/>/);
   assert.match(src, /<Breadcrumbs items=\{crumbItems\(l, noteLectureHeading\(l\), props\.origin, props\.nav, props\.onBack\)\} \/>/);
-  // The embedded transcript still gets the step up (it draws no head of its own).
-  assert.match(src, /embedded[\s\S]*?onBack=\{props\.onBack\}/);
+  // The transcript tab draws no head and no crumbs of its own (TASK-352: the overlay pages of the summary and the
+  // transcript are gone, the lesson screen has the only crumbs).
+  const transcript = read("pages/TranscriptPage.tsx");
+  assert.doesNotMatch(transcript, /Breadcrumbs|<h1|onBack|embedded|defaultParentCrumb/);
 });
 
-test("summary and transcript: the first level is the old «Назад» (onBack), shown while loading too", () => {
-  for (const [file, last] of [
-    ["pages/SummaryPage.tsx", "Конспект"],
-    ["pages/TranscriptPage.tsx", "Расшифровка"],
-  ]) {
-    const src = read(file);
-    assert.doesNotMatch(src, backButtons, file);
-    assert.ok(!src.includes("hw-back"), file);
-    // The first crumb names the page under it (App passes `parent`), «Записи» when none is given.
-    assert.match(src, /<Breadcrumbs items=\{\[\{ label: props\.parent \|\| defaultParentCrumb, onClick: props\.onBack \}, \{ label: pageCrumb \}\]\} \/>/, file);
-    assert.ok(src.includes('const defaultParentCrumb = "Записи";'), file);
-    assert.match(src, /parent\?: string;/, file);
-    assert.ok(src.includes(`const pageCrumb = "${last}";`), file);
-    assert.match(src, /<h1>\{pageCrumb\}<\/h1>/, file);
-  }
-  // The window still closes the overlay to the section under it (the route's step), the page only calls it.
+test("the lesson screen is the only page with crumbs for a recording: the old overlays and their wiring are gone", () => {
+  assert.equal(existsSync(new URL("../src/pages/SummaryPage.tsx", import.meta.url)), false);
   const app = read("App.tsx");
-  assert.equal((app.match(/onBack=\{\(\) => setRoute\(closeTranscript\)\}/g) ?? []).length, 2);
-  // The first crumb is the label of the page under the overlay, not a fixed «Записи».
-  assert.equal((app.match(/parent=\{pageById\(current\)\.label\}/g) ?? []).length, 2);
+  assert.doesNotMatch(app, /closeTranscript|routeToSummary|routeToTranscript|<SummaryPage|<TranscriptPage|pageById/);
+  // The window closes the lesson to the section under it (the route's step); the screen only calls it.
+  assert.equal((app.match(/onBack=\{lessonBack\}/g) ?? []).length, 1);
+  assert.match(app, /setRoute\(closeLesson\);/);
 });
 
 test("subjects: the over-lines are gone, the semester and the aliases are one muted line under the name", () => {

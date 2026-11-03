@@ -3,7 +3,7 @@
 // points and assignment titles are model output: they stay plain strings for React text nodes, never HTML or links.
 
 // The .js extensions let the Node test runner load the compiled modules; TypeScript and Vite map them to the .ts files.
-import { formatDuration, formatTime } from "./activityView.js";
+import { formatTime } from "./activityView.js";
 import type { RecordingItem } from "./bindings/activity.js";
 import {
   errorMessages,
@@ -84,18 +84,6 @@ export function nextPollMs(last: SummaryView | null, errors: number): number | n
     return null;
   }
   return isActive(last.summary.state) || isActive(last.homework.state) || lecture ? pollMs : idlePollMs;
-}
-
-/** «<дата, время> · Длительность 0:45:00» under the title; "" parts are left out. */
-export function headerMeta(v: Pick<SummaryView, "startedAt" | "hasDuration" | "durationSeconds">): string {
-  const at = v.startedAt === "" ? "" : formatTime(v.startedAt);
-  const parts = [at === "—" ? "" : at, v.hasDuration ? `Длительность ${formatDuration(v.durationSeconds)}` : ""];
-  return parts.filter((s) => s !== "").join(" · ");
-}
-
-/** The title of the page: the lesson, or the core's «Запись <дата, время>». */
-export function pageTitle(v: Pick<SummaryView, "title">): string {
-  return v.title.trim() !== "" ? v.title : "Запись";
 }
 
 /** The summary text as paragraphs: blank lines split them, single line breaks stay inside (shown with pre-line). */
@@ -246,8 +234,6 @@ export const redoTexts = {
   cancel: "Отмена",
 } as const;
 
-export const noSummaryHint = "Конспекта пока нет: копировать и сохранять нечего.";
-
 /** The action of a recording without speech (TASK-110), as on its row: opens «Диагностика». */
 export const checkSoundLabel = "Проверить звук";
 
@@ -265,18 +251,4 @@ export function errorText(err: unknown): string {
     msg = (err as { message: string }).message;
   }
   return knownErrors.has(msg) ? msg : errorMessages.unavailable;
-}
-
-/** The parts of the summary screen (TASK-100): one is shown at a time. */
-export type SummarySegment = "summary" | "lecture" | "homework";
-
-export const summarySegments: readonly { value: SummarySegment; label: string }[] = [
-  { value: "summary", label: "Конспект" },
-  { value: "lecture", label: "Текст лекции" },
-  { value: "homework", label: "Задания" },
-];
-
-/** The part shown first: the lecture text when the row's «Открыть текст лекции» opened the screen, else the summary. */
-export function firstSegment(section?: "lecture"): SummarySegment {
-  return section === "lecture" ? "lecture" : "summary";
 }

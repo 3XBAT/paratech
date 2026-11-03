@@ -238,6 +238,60 @@ func TestLecturesWithNotes(t *testing.T) {
 	}
 }
 
+func TestLessonByKey(t *testing.T) {
+	e, ctx := newNotesEnv(t), context.Background()
+	e.seedLectures(t)
+	deleting := e.add(t, lessonSpec{id: "deleting", title: "Оптика", subject: "Физика"})
+	if err := deleting.MarkDeleting(t0.Add(time.Hour), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	found := []struct {
+		key   string
+		title string
+		notes []shared.NoteID
+	}{
+		{"recording:r1", "Механика", nil}, // as Lesson: without notes
+		{"lesson:l-past", "Пределы", []shared.NoteID{"past"}},
+		{"day:phys:2026-09-12", "Конспект gone", []shared.NoteID{"gone", "day"}},
+		{"note:undated", "Конспект undated", []shared.NoteID{"undated"}},
+		{"note:chem", "Конспект chem", []shared.NoteID{"chem"}},
+	}
+	for _, tc := range found {
+		l, err := e.svc.LessonByKey(ctx, tc.key)
+		if err != nil || l.Key != tc.key || l.Title != tc.title || !reflect.DeepEqual(noteIDsOf(l), tc.notes) {
+			t.Errorf("LessonByKey(%s) = %+v, %v; want %q with notes %v", tc.key, l, err, tc.title, tc.notes)
+		}
+	}
+
+	failing := map[string]error{
+		"recording:deleting":   ErrRecordingNotFound,
+		"recording:nope":       ErrRecordingNotFound,
+		"lesson:l-nope":        ErrRecordingNotFound,
+		"lesson:l-gone":        ErrRecordingNotFound, // its note fell back to its day
+		"day:phys:2026-09-13":  ErrRecordingNotFound,
+		"note:removed":         ErrRecordingNotFound,
+		"note:unknown-subject": ErrRecordingNotFound,
+		"note:on-rec":          ErrRecordingNotFound, // joined the recording
+		"":                     ErrInvalidRequest,
+		"note:":                ErrInvalidRequest,
+		"recording:a/b":        ErrInvalidRequest,
+		"subject:phys":         ErrInvalidRequest,
+		"r1":                   ErrInvalidRequest,
+		"note:" + strings.Repeat("x", kb.MaxKeyBytes): ErrInvalidRequest,
+	}
+	for key, want := range failing {
+		if l, err := e.svc.LessonByKey(ctx, key); !errors.Is(err, want) {
+			t.Errorf("LessonByKey(%.30q) = %+v, %v; want %v", key, l, err, want)
+		}
+	}
+
+	e.recs.listErr = errDisk
+	if _, err := e.svc.LessonByKey(ctx, "note:undated"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("unreadable base: %v, want ErrUnavailable", err)
+	}
+}
+
 func TestSearchNotes(t *testing.T) {
 	e, ctx := newNotesEnv(t), context.Background()
 	e.add(t, lessonSpec{id: "r1", title: "Механика", subject: "Физика"})

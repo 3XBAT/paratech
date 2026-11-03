@@ -280,7 +280,8 @@ test("«Ближайшее» rows are whole-row buttons that open their assignme
     assert.doesNotMatch(button, /<(div|p|h[1-6]|ul|li)[\s>]/, button);
     assert.match(button, /<span class="d num">[^]*?<span class="tx"><span class="t">/);
   }
-  assert.match(src("../src/styles.css"), /\.drow \.tx, \.drow \.t \{ display: block; \}/);
+  // TASK-352: the rows of «Пары» share the rule, their meta line is a span too.
+  assert.match(src("../src/styles.css"), /\.drow \.tx, \.drow \.t, \.drow \.meta \{ display: block; \}/);
   assert.match(out, new RegExp(`title="${texts.openAssignment}"`));
   // Without the handler the rows only show.
   const plain = html(h(OverviewSections, { overview }));
@@ -288,7 +289,7 @@ test("«Ближайшее» rows are whole-row buttons that open their assignme
 
   const page = src("../src/pages/SubjectsPage.tsx");
   assert.match(page, /onOpenAssignment\?: \(assignmentId: string\) => void;/);
-  assert.match(page, /<OverviewSections overview=\{overview\} onOpenAssignment=\{props\.onOpenAssignment\} \/>/);
+  assert.match(page, /<OverviewSections overview=\{overview\} onOpenAssignment=\{props\.onOpenAssignment\} onOpenLesson=\{props\.onOpenLesson\} \/>/);
   const app = src("../src/App.tsx");
   assert.match(app, /onSelect=\{props\.onSelectSubject\}\s+onOpenAssignment=\{props\.onOpenAssignment\}/);
 

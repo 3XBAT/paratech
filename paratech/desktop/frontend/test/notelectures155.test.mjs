@@ -365,7 +365,7 @@ test("the note-only page reads nothing by a recording id and renders no HTML", (
   const end = src.indexOf("interface Message");
   const body = src.slice(start, end);
   assert.ok(start > 0 && end > start);
-  for (const banned of ["summary.view", "recordingId", "api.lesson", "TranscriptPage", "useOpenSummary", "dangerouslySetInnerHTML"]) {
+  for (const banned of ["summary.view", "recordingId", "api.lesson", "TranscriptPage", "useOpenLesson", "dangerouslySetInnerHTML"]) {
     assert.ok(!body.includes(banned), banned);
   }
   // TASK-351: the lesson screen (route) picks the page by the lecture; «База знаний» only lists them.
