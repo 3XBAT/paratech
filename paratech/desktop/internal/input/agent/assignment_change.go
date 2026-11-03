@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"paratech/desktop/internal/cases/agentjournal"
 	"paratech/desktop/internal/cases/agentturn"
@@ -76,11 +77,12 @@ func (a *Actions) editAssignment(ctx context.Context, call values.Call) (prepare
 	}
 	prior := fieldsOf(v)
 	next := prior
+	// Trimmed as the domain stores them (assignment.NewDetails), so Recover finds exactly these fields.
 	if l, ok := args.Label("title"); ok {
-		next.Title = string(l)
+		next.Title = strings.TrimSpace(string(l))
 	}
 	if q, ok := args.Query("note"); ok {
-		next.Note = string(q)
+		next.Note = strings.TrimSpace(string(q))
 	}
 	var date, tod string
 	day, hasDay := args.Date("due")
