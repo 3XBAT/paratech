@@ -206,7 +206,6 @@ export function DiagnosticsPage() {
     <section className="page">
       <div className="head">
         <div>
-          <span className="label">{texts.lead}</span>
           <h2>{texts.title}</h2>
         </div>
       </div>

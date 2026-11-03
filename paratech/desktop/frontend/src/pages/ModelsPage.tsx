@@ -281,7 +281,6 @@ export function ModelsPage() {
     <section className="page">
       <div className="head">
         <div>
-          <span className="label">Расшифровка работает без интернета</span>
           <h2>Модели речи</h2>
         </div>
         <div className="acts">

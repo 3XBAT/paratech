@@ -7,10 +7,13 @@ import type {
   FieldError,
   MailSecurity,
   MailSettingsInput,
+  QuotaStatus,
   SecretStatus,
 } from "./bindings/connections";
 import type { CalendarSyncState } from "./bindings/calendar";
 import type { GoogleState } from "./bindings/google";
+// The .js extension lets the Node test runner load the compiled module.
+import { googleTexts } from "./googleView.js";
 import type { IconName } from "./ui/Icon.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 
@@ -59,6 +62,69 @@ export const texts = {
   checkFailed: "Не удалось проверить почту.",
   unknownField: "Недопустимое значение.",
 } as const;
+
+/** No address is saved: the core ships no built-in one, so this is a missing required value, not a default. */
+export const emptyHubUrl = "";
+
+/** The quota statuses that are not about the address: the key is missing or refused, or the Hub has not been asked yet. */
+const addressNeutralQuota: readonly QuotaStatus[] = ["current", "unchecked", "noKey", "keyRejected"];
+
+/**
+ * Whether the folded «Адрес сервера» is open. A choice made by hand during the visit wins, so the block never closes
+ * under the student's hands. With no choice it is open unless the address is fine: there is no built-in address yet,
+ * so folded means «the address is saved and works». It opens for an empty saved address, for a form being edited, for
+ * any error of the address form and when the Hub did not answer (offline, not configured, failed).
+ */
+export function hubAddressOpen(s: {
+  savedUrl: string;
+  typedUrl: string;
+  errors: readonly FieldError[];
+  quotaStatus: QuotaStatus;
+  chosen: boolean | null;
+}): boolean {
+  if (s.chosen !== null) {
+    return s.chosen;
+  }
+  const saved = s.savedUrl.trim();
+  return (
+    saved === emptyHubUrl ||
+    s.typedUrl.trim() !== saved ||
+    s.errors.length > 0 ||
+    !addressNeutralQuota.includes(s.quotaStatus)
+  );
+}
+
+/**
+ * The manual choice after the browser's toggle event. The event also fires when the block opens or closes by itself
+ * (the computed state changed), and that is not a choice: only a state that differs from the computed one is.
+ */
+export function nextChosen(open: boolean, computed: boolean, current: boolean | null): boolean | null {
+  return open === computed ? current : open;
+}
+
+/** The saved address shown next to the folded «Адрес сервера»; "" when none is saved (nothing to show). */
+export function savedAddressNote(savedUrl: string): string {
+  return savedUrl.trim();
+}
+
+/**
+ * What the key and the address still need, right above the key field: "" when both are set. The address field sits
+ * below the key, so the line points down to it.
+ */
+export function hubSetupHint(c: Pick<Connections, "hubUrl" | "hubKey">): string {
+  const noKey = c.hubKey === "unset";
+  const noUrl = c.hubUrl.trim() === emptyHubUrl;
+  if (noKey && noUrl) {
+    return "Нужны ключ доступа и адрес сервера — их выдаёт автор приложения. Вставьте ключ и нажмите «Сохранить ключ», затем укажите адрес в поле «Адрес сервера» ниже.";
+  }
+  if (noUrl) {
+    return "Не указан адрес сервера: без него конспекты и поиск заданий не работают. Укажите его в поле «Адрес сервера» ниже.";
+  }
+  if (noKey) {
+    return "Без ключа конспекты и поиск заданий не работают. Вставьте ключ ниже и нажмите «Сохранить ключ».";
+  }
+  return "";
+}
 
 /** The form of the stored values; port 0 shows as empty. */
 export function mailFormFrom(c: Connections): MailForm {
@@ -265,17 +331,27 @@ export interface CardStatus {
 }
 
 export const overviewTexts = {
-  lead: "Конспекты и задания, почта и Google Календарь",
   title: "Подключения",
-  back: "Назад",
   hubTitle: "Конспекты и задания",
+  // One line for the section: what the key is not and what leaves the computer. Who gives the key and the address is
+  // said by the setup hint while either is missing, so it is not repeated here.
   hubHint:
-    "Ключ доступа выдаёт автор приложения. Это не ключ Claude или ChatGPT. Расшифровка всегда идёт на этом компьютере.",
-  hubDesc: "Адрес, ключ доступа и лимит обработки",
+    "Это не ключ Claude или ChatGPT. Звук не отправляется: расшифровка идёт на этом компьютере, на сервер уходит только текст.",
+  hubDesc: "Ключ, адрес сервера и лимит обработки",
   mailTitle: "Почта",
   mailDesc: "Отправка заданий письмом",
   googleDesc: "Вход и синхронизация расписания",
 } as const;
+
+/**
+ * The last crumb of a section page, after «Подключения»: the name of its card, which is also its heading (the Apple
+ * help names itself in appleHelpView).
+ */
+export const sectionCrumbs: Readonly<Record<Exclude<ConnSection, "apple">, string>> = {
+  hub: overviewTexts.hubTitle,
+  mail: overviewTexts.mailTitle,
+  google: googleTexts.title,
+};
 
 const status = (kind: ChipKind, text: string): CardStatus => ({
   kind,

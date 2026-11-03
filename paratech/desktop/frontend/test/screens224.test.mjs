@@ -51,8 +51,10 @@ test("the journal renders a heading with a count per group and nothing for an em
 });
 
 test("«Настройки» has a shared head and a menu of all sections with the current one marked", () => {
+  // TASK-356: the over-line «Изменения сохраняются сразу» is gone; the title stays.
   const head = renderToStaticMarkup(h(SettingsHead));
-  assert.ok(head.includes("Изменения сохраняются сразу") && head.includes("<h1>Настройки</h1>"));
+  assert.ok(head.includes("<h1>Настройки</h1>"));
+  assert.ok(!head.includes("Изменения сохраняются сразу") && !head.includes("label"));
   const nav = renderToStaticMarkup(h(SettingsTabs, { current: "models", onOpen: noop }));
   assert.match(nav, /class="set-nav"/);
   for (const t of ["Основные", "Модели речи", "Подключения", "Диагностика", "Профиль", "Оформление"]) {
@@ -60,6 +62,19 @@ test("«Настройки» has a shared head and a menu of all sections with t
   }
   assert.equal(nav.match(/aria-current="page"/g).length, 1);
   assert.match(nav, /aria-current="page"[^>]*>(<svg[^>]*>.*?<\/svg>)Модели речи/);
+});
+
+test("TASK-356: the menu runs Основные, Подключения, Профиль, Оформление, then «Дополнительно» with Модели речи, Диагностика", () => {
+  const nav = renderToStaticMarkup(h(SettingsTabs, { current: "settings", onOpen: noop }));
+  const labels = [...nav.matchAll(/<button[^>]*>(?:<svg[^>]*>.*?<\/svg>)?([^<]+)<\/button>/g)].map((m) => m[1]);
+  assert.deepEqual(labels, ["Основные", "Подключения", "Профиль", "Оформление", "Модели речи", "Диагностика"]);
+  // The caption sits between the groups and names the second one; it is plain text, not a heading or a button.
+  const [main, advanced] = nav.split('<div class="set-nav-group"');
+  assert.ok(!main.includes("Дополнительно"));
+  assert.match(advanced, /^ role="group" aria-labelledby="set-nav-advanced"><span class="set-nav-caption" id="set-nav-advanced">Дополнительно<\/span>/);
+  assert.ok(advanced.includes("Модели речи") && advanced.includes("Диагностика"));
+  assert.ok(!advanced.includes("Профиль") && !/<h\d/.test(nav));
+  assert.ok(!nav.includes("Разрешения"));
 });
 
 const items = [{ id: "a" }, { id: "b" }, { id: "c" }];
