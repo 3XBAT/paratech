@@ -68,7 +68,9 @@ html, body, #root { height: 100%; }
 /* «Предметы» (TASK-202, concept-agent.html «Tree»): a form of one name, an empty folder; the subject page is a tree
    (220px) and the folders with their files; the list is cards by semester. */
 .name-form { display: flex; flex-direction: column; gap: 8px; max-width: 420px; margin-bottom: 16px; }
-.empty-folder { grid-column: 1 / -1; margin: 0; padding: 12px 16px; }
+/* Folders without files are one line «Пусто: Семинары +, Билеты +» (TASK-347); every name keeps its visible «+». */
+.empty-folders-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; padding: 0 16px; }
+.empty-folder-name { display: inline-flex; align-items: center; gap: 2px; }
 .section + .section { margin-top: 24px; }
 .sec-h { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; padding: 0 16px; color: var(--muted); font-size: 13px; line-height: 18px; font-weight: 600; letter-spacing: 0; }
 .sec-h .cnt { font-weight: 500; }
@@ -156,6 +158,10 @@ html, body, #root { height: 100%; }
 .undo-line > span { min-width: 0; overflow-wrap: anywhere; }
 .drow .d { display: flex; flex-direction: column; min-width: 40px; font-size: 12.5px; line-height: 16px; font-weight: 600; color: var(--muted); }
 .drow .d span { color: var(--text); font-size: 14px; }
+/* A «Ближайшее» row that opens its assignment (TASK-347): the whole row is the button. */
+.drow-open { width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.drow-open:hover { background: var(--fill); }
+.drow-item + .drow-item > .lrow::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 1px; background: var(--sep); }
 /* «новое»: accent text, never colour alone (the word is the mark). */
 .fresh { flex: none; font-size: 12px; font-weight: 600; color: var(--accent); }
 .tree .ti .fresh { margin-left: auto; }
@@ -226,6 +232,15 @@ html, body, #root { height: 100%; }
 .statusbar span { display: inline-flex; align-items: center; gap: 8px; }
 .statusbar .r { margin-left: auto; }
 .statusbar .i { width: 14px; height: 14px; }
+/* Empty «Записи» (TASK-347): the text, the three buttons, the muted privacy line. */
+.rec-empty { max-width: 640px; padding: 16px 0; }
+.rec-empty .empty-text { max-width: 60ch; }
+.rec-empty-privacy { display: flex; align-items: center; gap: 8px; margin: 16px 0 0; }
+.rec-empty-privacy .i { width: 14px; height: 14px; }
+/* The text buttons «Повторить» / «Открыть подключения» under the hint of a failed row (TASK-347). */
+.st-fixes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+/* The folded «Фоновая обработка» (TASK-347): the count in the title, failures named under the fold. */
+.background-failed { margin: -4px 0 0; padding: 0 16px; }
 
 /* Подключения: form cards two in a row, one column in a narrow window. */
 .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: start; }

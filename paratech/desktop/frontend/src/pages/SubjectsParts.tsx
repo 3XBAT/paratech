@@ -1,4 +1,4 @@
-import { type DragEvent, type ReactNode, useState } from "react";
+import { type DragEvent, Fragment, type ReactNode, useState } from "react";
 import type { LibraryMaterial, LibrarySubject, SubjectOverview } from "../bindings/library.js";
 import {
   addToFolderLabel,
@@ -15,6 +15,7 @@ import {
   daysChip,
   type FreshMarks,
   filesOfFolder,
+  foldEmptyFolders,
   folderCountText,
   folderTitle,
   groupBySemester,
@@ -258,8 +259,9 @@ export function SubjectTree(props: {
 }
 
 /** «Ближайшее» and the lessons of a subject. Titles come from the model or the student: text nodes only. */
-export function OverviewSections(props: { overview: SubjectOverview }) {
+export function OverviewSections(props: { overview: SubjectOverview; onOpenAssignment?: (assignmentId: string) => void }) {
   const { deadlines, lessons } = props.overview;
+  const open = props.onOpenAssignment;
   return (
     <>
       {deadlines.length > 0 && (
@@ -269,8 +271,8 @@ export function OverviewSections(props: { overview: SubjectOverview }) {
             <div role="list">
               {deadlines.map((d) => {
                 const chip = daysChip(d.daysLeft);
-                return (
-                  <div className="lrow drow" role="listitem" key={d.assignmentId}>
+                const body = (
+                  <>
                     <div className="d num">
                       {weekdayOf(d.due)}
                       <span>{dayMonth(d.due)}</span>
@@ -279,6 +281,18 @@ export function OverviewSections(props: { overview: SubjectOverview }) {
                       <p className="t">{d.title}</p>
                     </div>
                     <StatusChip kind={chip.kind}>{chip.label}</StatusChip>
+                  </>
+                );
+                // The whole row opens its assignment (navigation only, as on «Сегодня»); the focus ring is the global one.
+                return open === undefined ? (
+                  <div className="lrow drow" role="listitem" key={d.assignmentId}>
+                    {body}
+                  </div>
+                ) : (
+                  <div className="drow-item" role="listitem" key={d.assignmentId}>
+                    <button type="button" className="lrow drow drow-open" title={texts.openAssignment} onClick={() => open(d.assignmentId)}>
+                      {body}
+                    </button>
                   </div>
                 );
               })}
@@ -341,11 +355,13 @@ export function SubjectDetail(props: {
 }) {
   const { subject } = props;
   const fresh = props.fresh ?? noFresh;
+  const onAddFile = props.onAddFile;
+  // Folders without files are one line, not a section each (TASK-347); with unknown files nothing is called empty.
+  const { shown, empty } = foldEmptyFolders(subject.folders, props.materials);
   return (
     <>
-      {orderedFolders(subject.folders).map((f) => {
+      {shown.map((f) => {
         const files = props.materials === null ? null : filesOfFolder(props.materials, f.id);
-        const onAddFile = props.onAddFile;
         return (
           <section className="section" key={f.id} id={folderAnchor(f.id)}>
             <div className="sec-head">
@@ -359,16 +375,33 @@ export function SubjectDetail(props: {
             {/* Unknown files (loading, failed): no «пусто» claim and no per-folder «Загрузка…»; a failure is one line under the head of the page. */}
             {files === null ? null : (
               <Card className="lrows" label={folderTitle(f)}>
-                {files.length === 0 ? (
-                  <p className="small muted empty-folder">{texts.emptyFolder}</p>
-                ) : (
-                  <FileRows files={files} where="folder" fresh={fresh.materials} actions={props.actions} />
-                )}
+                <FileRows files={files} where="folder" fresh={fresh.materials} actions={props.actions} />
               </Card>
             )}
           </section>
         );
       })}
+      {empty.length > 0 && (
+        <section className="section empty-folders">
+          {/* The «+» after each name stays a visible button (keyboard reachable), the tree's click lands on the name. */}
+          <div className="small muted empty-folders-line">
+            <span>{texts.emptyFolders}</span>{" "}
+            {empty.map((f, i) => (
+              <Fragment key={f.id}>
+                <span className="empty-folder-name" id={folderAnchor(f.id)}>
+                  {folderTitle(f)}
+                  {onAddFile && <IconButton icon="plus" label={addToFolderLabel(folderTitle(f))} disabled={props.busy} onClick={() => onAddFile(f.id)} />}
+                  {i < empty.length - 1 ? "," : ""}
+                </span>
+                {i < empty.length - 1 ? " " : ""}
+              </Fragment>
+            ))}
+          </div>
+          {empty.map((f) => (
+            <Fragment key={f.id}>{props.folderExtra?.(f.id)}</Fragment>
+          ))}
+        </section>
+      )}
       {props.folderForm && (
         <NameForm label={texts.folderName} busy={props.busy} error={props.error} onSubmit={props.onCreateFolder} onCancel={props.onCancelFolder} />
       )}

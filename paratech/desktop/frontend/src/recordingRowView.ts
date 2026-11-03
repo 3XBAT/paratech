@@ -16,8 +16,9 @@ import type {
 import { formatDuration, formatTime, isFinishedJob, recordingDurationText, splitFinished } from "./activityView.js";
 import { remainingText } from "./durationEstimate.js";
 import type { PageId } from "./nav.js";
+import type { ListState, ListStates } from "./listView.js";
 import { plural } from "./plural.js";
-import type { StatusView } from "./statusPresentation.js";
+import { jobStatusView, type StatusView } from "./statusPresentation.js";
 import { waitingInline } from "./statusWords.js";
 import { rowSummaryOffer, type SummaryOffer } from "./summaryView.js";
 import { rowOffersTranscript } from "./transcriptView.js";
@@ -141,11 +142,19 @@ export const actionLabels: Readonly<Record<Exclude<ChainAction, "">, string>> = 
   retry: "Повторить",
 };
 
-/** What the hint of a failed step adds when the row offers «Повторить», the round arrow by the chip (TASK-086, TASK-096). */
-export const retryHints = {
-  retry: "Нажмите круглую стрелку «Повторить» у статуса.",
-  // The LLM call failed: the connection, the key or the quota may need a fix first.
-  afterConnections: "Проверьте подключения (меню «⋯») и нажмите круглую стрелку «Повторить».",
+/**
+ * The fixes of a failed step under its hint, as text buttons (TASK-347): «Открыть подключения» when the LLM call failed
+ * (the connection, the key or the quota may need a fix first), then «Повторить». The core decides what is offered.
+ */
+export interface RowFixes {
+  /** «Открыть подключения» as a button in the status cell; false when the row already has it as its main button. */
+  connections: boolean;
+  retry: RowRetry | null;
+}
+
+export const fixTexts = {
+  retry: "Повторить",
+  connections: "Открыть подключения",
 } as const;
 
 /** The page a navigation action opens; the sound check is on «Диагностика». */
@@ -181,11 +190,11 @@ export interface RecordingRowView {
   /** The tooltip of the chip: the problem of the recording and the last error of the job as they are; "" for none. */
   details: string;
   action: RowAction | null;
-  /** The round «Повторить» next to the chip (TASK-086, TASK-096); null for none. */
+  /** «Повторить» under the hint (TASK-086, TASK-347); null for none. */
   retry: RowRetry | null;
 }
 
-/** The round «Повторить» of a row: the work it starts and its name for the tooltip and screen readers. */
+/** The «Повторить» of a row: the work it starts and its name for the tooltip and screen readers. */
 export interface RowRetry {
   work: Exclude<RetryWork, "">;
   label: string;
@@ -280,20 +289,10 @@ export function chainStatusView(r: RecordingItem, now: number): StatusView {
         view.hint = noSpeechTexts.hint;
         break;
       }
-      view.hint = [own(errorTexts, r.errorCode), failedRetryHint(r)].filter((s) => s).join(" ");
+      view.hint = own(errorTexts, r.errorCode) ?? "";
       break;
   }
   return view;
-}
-
-function failedRetryHint(r: Pick<RecordingItem, "action" | "retryWork">): string {
-  if (r.retryWork === "") {
-    return "";
-  }
-  if (r.action === "retry") {
-    return retryHints.retry;
-  }
-  return r.action === "openConnections" ? retryHints.afterConnections : "";
 }
 
 function retryAction(work: RetryWork): RowAction | null {
@@ -317,7 +316,7 @@ export function rowSecondaryAction(r: Pick<RecordingItem, "action" | "retryWork"
   return r.action === "openConnections" ? retryAction(r.retryWork) : null;
 }
 
-/** The names of the round «Повторить» per work (TASK-096). */
+/** The names of «Повторить» per work (TASK-096): the tooltip and the accessible name of the text button. */
 export const retryLabels: Readonly<Record<Exclude<RetryWork, "">, string>> = {
   summary: "Повторить конспект",
   homework: "Повторить поиск заданий",
@@ -328,6 +327,18 @@ export const retryLabels: Readonly<Record<Exclude<RetryWork, "">, string>> = {
 export function rowRetry(r: Pick<RecordingItem, "action" | "actionJobId" | "retryWork">): RowRetry | null {
   const a = r.action === "retry" ? rowAction(r) : rowSecondaryAction(r);
   return a?.kind === "retry" ? { work: a.work, label: own(retryLabels, a.work) ?? actionLabels.retry } : null;
+}
+
+/**
+ * The text buttons under the hint of a failed row (TASK-347). «Открыть подключения» only for a failed chain whose
+ * core action is that page, and not again when the row already shows it as its main button.
+ */
+export function rowFixes(
+  r: Pick<RecordingItem, "stage" | "action" | "actionJobId" | "retryWork">,
+  mainKey: RowItemKey | null,
+): RowFixes {
+  const connections = r.stage === "failed" && r.action === "openConnections" && mainKey !== "open";
+  return { connections, retry: rowRetry(r) };
 }
 
 // The core's own notes (the capture switch) are Russian; its failure reasons and job errors are English for support.
@@ -533,8 +544,41 @@ export function pageGroups(recordings: readonly RecordingItem[], jobs: readonly 
   };
 }
 
-/** The hint of an empty «Фоновая обработка». */
-export const tasksEmptyText = "Здесь появятся решения заданий, письма и синхронизация календаря.";
+/** The empty «Записи» (TASK-347): where to start, and the one place that says the sound stays on this computer. */
+export const emptyTexts = {
+  text: "Здесь будут записи пар. Записать можно сейчас — кнопкой «Начать запись», или загрузить расписание, и paratech сам предложит запись в начале пары.",
+  privacy: "Звук обрабатывается только на этом компьютере",
+  schedule: "Загрузить расписание",
+} as const;
+
+/**
+ * The buttons in the head of «Записи» (start, import) show with a list that has rows; an empty list offers them in its
+ * empty state instead, one primary button on the screen. While the list loads they wait; a failed load keeps them.
+ */
+export function headActionsVisible(recordings: readonly unknown[] | null, loadFailed: boolean): boolean {
+  return recordings === null ? loadFailed : recordings.length > 0;
+}
+
+/** «Фоновая обработка» (TASK-347): one folded block with the count; the jobs of a recording show on its own row. */
+export const backgroundKey = "background";
+export const backgroundTitle = "Фоновая обработка";
+const foldedState: ListState = { collapsed: true, showAll: false };
+
+/** The block starts folded; the state the user sets is kept across the polls. */
+export function backgroundState(states: ListStates): ListState {
+  return Object.hasOwn(states, backgroundKey) ? states[backgroundKey] : foldedState;
+}
+
+/** The block is shown only for jobs (or a load error); an empty one stays out of the way. */
+export function backgroundVisible(jobs: readonly unknown[]): boolean {
+  return jobs.length > 0;
+}
+
+/** «Задач с ошибкой: 2» under the folded title, so a failed job is not hidden by the fold; "" for none. */
+export function backgroundFailedText(jobs: readonly Parameters<typeof jobStatusView>[0][]): string {
+  const n = jobs.filter((j) => jobStatusView(j).kind === "fail").length;
+  return n === 0 ? "" : `Задач с ошибкой: ${n}`;
+}
 
 /** What a task row does besides the round retry: «Запустить сейчас» and «Открыть задание». */
 export type JobItemKey = "runNow" | "assignment";

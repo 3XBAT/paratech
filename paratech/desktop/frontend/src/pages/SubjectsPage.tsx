@@ -95,6 +95,8 @@ export function SubjectsPage(props: {
   /** The route's choice: "" for none, inboxRoute for «Входящие», else a subject id; and the way to choose another. */
   subjectId: string;
   onSelect: (subjectId: string) => void;
+  /** A row of «Ближайшее» opens its assignment (TASK-347); without it the rows only show the deadlines. */
+  onOpenAssignment?: (assignmentId: string) => void;
   /** Counts the rail clicks: a click reads the remembered subject again (see landingFor). */
   visit?: number;
   /** «Указать почту» of a refused send: the form of one teacher to open on arrival (taken once, then onTeacherFocusDone). */
@@ -736,7 +738,7 @@ export function SubjectsPage(props: {
               </ResultLine>
             )}
             <TeachersBlock key={subject.id} teachers={subject.teachers} state={teacherStateFor(teacher, subject.id)} on={teacherActions} />
-            {overview && <OverviewSections overview={overview} />}
+            {overview && <OverviewSections overview={overview} onOpenAssignment={props.onOpenAssignment} />}
             <SubjectDetail
               subject={subject}
               materials={materials}

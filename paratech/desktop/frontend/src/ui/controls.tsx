@@ -278,7 +278,7 @@ export function CountTiles(props: { label: string; tiles: readonly { key: string
 }
 
 /**
- * A modal for irreversible actions: native <dialog>, buttons named by their action, focus on the safe one.
+ * A modal for irreversible actions: native <dialog>, buttons named by their action, focus on the safe one (the last).
  * Escape and the cancel button call onCancel.
  */
 export function Dialog(props: {
@@ -325,10 +325,8 @@ export function Dialog(props: {
     >
       <h2 id={titleId}>{props.title}</h2>
       <div className="dialog-body">{props.children}</div>
+      {/* Windows order: the action left, «Отмена» right; the focus still starts on the safe, right one. */}
       <div className="acts">
-        <button ref={safe} type="button" className="btn" disabled={props.cancelDisabled} onClick={props.onCancel}>
-          {props.cancelLabel}
-        </button>
         <button
           type="button"
           className={props.danger ? "btn danger" : "btn primary"}
@@ -336,6 +334,9 @@ export function Dialog(props: {
           onClick={props.onConfirm}
         >
           {props.confirmLabel}
+        </button>
+        <button ref={safe} type="button" className="btn" disabled={props.cancelDisabled} onClick={props.onCancel}>
+          {props.cancelLabel}
         </button>
       </div>
     </dialog>

@@ -30,8 +30,15 @@ import {
   recordingRowView,
   rowAction,
   rowActions,
-  retryHints,
+  backgroundFailedText,
+  backgroundKey,
+  backgroundState,
+  backgroundVisible,
+  emptyTexts,
+  fixTexts,
+  headActionsVisible,
   retryLabels,
+  rowFixes,
   rowRetry,
   rowSecondaryAction,
   rowTitle,
@@ -159,14 +166,15 @@ test("a failed post-processing offers «Повторить», also next to the c
   const retry = row({ stage: "failed", step: "summary", errorCode: "summaryFailed", action: "retry", retryWork: "summary" });
   assert.deepEqual(rowAction(retry), { kind: "retry", work: "summary", label: "Повторить" });
   assert.equal(rowSecondaryAction(retry), null);
-  assert.equal(chainStatusView(retry, 0).hint, `${errorTexts.summaryFailed} ${retryHints.retry}`);
+  // TASK-347: the hint is the error alone; «Повторить» is a text button under it, not a sentence about a round arrow.
+  assert.equal(chainStatusView(retry, 0).hint, errorTexts.summaryFailed);
   assert.ok(!chainStatusView(retry, 0).hint.includes("подключени"), "an unreadable answer is no connection problem");
   assert.equal(rowAction({ ...retry, retryWork: "" }), null, "no work to retry");
 
   const llm = row({ stage: "failed", step: "summary", errorCode: "homeworkFailed", action: "openConnections", retryWork: "homework" });
   assert.deepEqual(rowAction(llm), { kind: "open", page: "connections", label: "Открыть подключения" });
   assert.deepEqual(rowSecondaryAction(llm), { kind: "retry", work: "homework", label: "Повторить" });
-  assert.equal(chainStatusView(llm, 0).hint, `${errorTexts.homeworkFailed} ${retryHints.afterConnections}`);
+  assert.equal(chainStatusView(llm, 0).hint, errorTexts.homeworkFailed);
   assert.equal(rowSecondaryAction({ ...llm, retryWork: "" }), null);
   assert.equal(chainStatusView({ ...llm, retryWork: "" }, 0).hint, errorTexts.homeworkFailed);
 
@@ -174,25 +182,27 @@ test("a failed post-processing offers «Повторить», also next to the c
   assert.equal(rowSecondaryAction(row({ stage: "queued", queueReason: "serviceNotConfigured", action: "openConnections" })), null);
   assert.equal(recordingRowView(row({ stage: "summarizing" }), 0).retry, null);
 
-  // The retry is the round icon button next to the chip (TASK-096): its name is in aria-label and title.
+  // TASK-347: the retry is a text button «Повторить» under the hint; its work is in aria-label and title.
   const label = 'aria-label="Повторить конспект"';
   const html = render(retry, { onRetry: () => undefined });
   assert.ok(html.includes(label));
-  assert.ok(!html.includes(">Повторить<"), "no text button");
+  assert.ok(html.includes(">Повторить<"), "a text button");
+  assert.ok(!html.includes("icon-btn") && !html.includes("круглую стрелку"), "no round arrow, no hint about it");
   assert.ok(!html.includes("Открыть подключения"));
   const both = render(llm, { onRetry: () => undefined });
   assert.ok(both.includes('aria-label="Повторить поиск заданий"'));
-  assert.ok(both.indexOf("Повторить поиск заданий") < both.indexOf("Открыть подключения"), "the retry by the chip, the link in the actions");
+  assert.ok(both.indexOf("Повторить поиск заданий") < both.indexOf("Открыть подключения"), "the retry in the status cell, the link in the actions");
   assert.ok(!render(retry).includes(label), "no retry without onRetry");
   assert.ok(!render(row({ canRedoSummary: true }), { onRetry: () => undefined }).includes("заново"), "the redo is only in the closed «⋯» menu");
 });
 
-test("«Повторить» is a round icon button by the chip, named by the work, busy while it runs (TASK-096)", () => {
+test("«Повторить» is a text button under the hint, named by the work, busy while it runs (TASK-347)", () => {
   assert.deepEqual(retryLabels, {
     summary: "Повторить конспект",
     homework: "Повторить поиск заданий",
     lectureText: "Повторить текст лекции",
   });
+  assert.deepEqual(fixTexts, { retry: "Повторить", connections: "Открыть подключения" });
   const failed = (work, action = "retry") => row({ stage: "failed", step: "summary", errorCode: "summaryFailed", action, retryWork: work });
   for (const work of ["summary", "homework", "lectureText"]) {
     assert.deepEqual(rowRetry(failed(work)), { work, label: retryLabels[work] });
@@ -205,16 +215,40 @@ test("«Повторить» is a round icon button by the chip, named by the wo
   const html = render(failed("lectureText"), { onRetry: (w) => picked.push(w) });
   const button = html.match(/<button[^>]*aria-label="Повторить текст лекции"[^>]*>/)?.[0] ?? "";
   assert.ok(button.includes('type="button"'), button);
-  assert.ok(button.includes('class="btn icon-btn"'), button);
+  assert.ok(!button.includes("icon-btn"), `not the round arrow: ${button}`);
   assert.ok(button.includes('title="Повторить текст лекции"'), button);
   assert.ok(!button.includes("disabled") && !button.includes("aria-busy"), button);
-  assert.ok(html.includes('<use href="#i-retry"></use>'));
-  // Right next to the chip, inside the status cell.
-  assert.match(html, /<span class="st-head"><span class="chip s-fail"[^]*?<\/span><\/span><button[^>]*aria-label="Повторить текст лекции"/);
+  assert.ok(!html.includes('<use href="#i-retry"></use>'));
+  // Under the chip and the hint, in the status cell.
+  assert.match(html, /<span class="small muted">Не удалось сделать конспект\.<\/span><span class="st-fixes"><button[^>]*aria-label="Повторить текст лекции"/);
+  assert.match(html, /<span>Повторить<\/span>/);
 
   const busy = render(failed("summary"), { onRetry: () => undefined, retrying: true })
     .match(/<button[^>]*aria-label="Повторить конспект"[^>]*>/)?.[0] ?? "";
   assert.ok(busy.includes("disabled") && busy.includes('aria-busy="true"'), busy);
+});
+
+test("«Открыть подключения» is a text button of a failed LLM step, not twice with the main button (TASK-347)", () => {
+  const llm = row({ stage: "failed", step: "summary", errorCode: "homeworkFailed", action: "openConnections", retryWork: "homework" });
+  assert.deepEqual(rowFixes(llm, null), { connections: true, retry: { work: "homework", label: retryLabels.homework } });
+  assert.equal(rowFixes(llm, "open").connections, false, "the main button already is that link");
+  assert.equal(rowFixes({ ...llm, stage: "queued" }, null).connections, false, "only a failed chain");
+  assert.equal(rowFixes(row({ stage: "failed", action: "retry", retryWork: "summary" }), null).connections, false);
+
+  // With the texts offered the link goes to «⋯», so the status cell carries it: connections first, then «Повторить».
+  const opened = [];
+  const html = render(llm, { onRetry: () => undefined, onOpen: (p) => opened.push(p), onOpenSummary: () => undefined, onOpenTranscript: () => undefined });
+  assert.match(html, /<span class="st-fixes"><button[^>]*>.*Открыть подключения<\/button><button[^>]*aria-label="Повторить поиск заданий"/);
+  assert.ok(!html.includes("Проверьте подключения") && !html.includes("круглую стрелку"), "the old hints are gone");
+  // Without the texts the main button is that link already: once.
+  assert.equal((render(llm, { onRetry: () => undefined }).match(/Открыть подключения/g) ?? []).length, 1);
+});
+
+test("no hint about the round arrow or the «⋯» menu is left in the row code (TASK-347)", () => {
+  for (const f of ["../src/recordingRowView.ts", "../src/pages/RecordingRow.tsx", "../src/pages/RecordingsPage.tsx"]) {
+    const src = readFileSync(new URL(f, import.meta.url), "utf8");
+    assert.doesNotMatch(src, /круглую стрелку|Проверьте подключения|retryHints/, f);
+  }
 });
 
 test("one main button per state; the rest goes to «⋯» (TASK-096)", () => {
@@ -575,18 +609,22 @@ test("recording and task rows share one grid: fixed status, button and «⋯» t
   assert.ok(!page.includes('"card rows"'), "no per-card subgrid");
   assert.match(page, /renderContainer=\{card\}/);
   assert.match(page, /<h1>Записи<\/h1>/);
-  assert.match(page, /<h2 className="group-title">Фоновая обработка<\/h2>/);
+  // TASK-347: «Фоновая обработка» is one folded block (CollapsibleList, h2) with the count; it has no heading of its own.
+  assert.doesNotMatch(page, /group-title/);
+  assert.match(page, /title=\{backgroundTitle\}\s+heading="h2"/);
+  assert.match(page, /count=\{visibleJobs\.length\}\s+state=\{background\}/);
   assert.match(page, /sectionGroups\("recordings", "записи", groups\.recordings, recordingRow\)/);
   assert.match(page, /sectionGroups\("tasks", "фоновая обработка", groups\.tasks, jobRow\)/);
   // The two «Завершённые» toggles have distinct accessible names: a hidden word after the title.
   assert.match(page, /Завершённые<span className="vh"> · \{name\}<\/span>/);
   // The page title is «Записи»: no second «Записи» heading under it (TASK-344).
   assert.doesNotMatch(page, /<h2 className="group-title">Записи<\/h2>/);
-  assert.match(page, /\) : noRecordings \? \(\s*<EmptyState/);
+  assert.match(page, /\) : noRecordings \? \(\s*<div className="rec-empty">/);
   // «Идут» under the page h1 is an h2 (no skipped level); under the h2 «Фоновая обработка» it is an h3.
   assert.match(page, /const Sub = list === "recordings" \? "h2" : "h3";/);
   assert.match(page, /<Sub className="arows-sub">Идут<\/Sub>/);
-  assert.match(page, /<p className="muted arows-empty">\{tasksEmptyText\}<\/p>/, "an empty «Фоновая обработка» has a short hint");
+  assert.doesNotMatch(page, /arows-empty|tasksEmptyText/, "an empty «Фоновая обработка» is not drawn at all");
+  assert.match(page, /\{backgroundVisible\(visibleJobs\) && \(/);
   assert.ok(!page.includes("attempts"), "the page shows no attempts");
 
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
@@ -624,11 +662,6 @@ test("a job row keeps its technical error in the chip's tooltip, not as row text
   const html = renderToStaticMarkup(h(StatusLine, { view: jobStatusView(job({ type: "homework_draft", status: "FAILED" })), notes: [], details: err }));
   assert.ok(html.includes(`title="${err}"`), "the error is in the chip's title");
   assert.equal(html.split(err).length - 1, 1, "and nowhere else");
-});
-
-test("the retry hints name the round arrow by the status (TASK-096)", () => {
-  assert.equal(retryHints.retry, "Нажмите круглую стрелку «Повторить» у статуса.");
-  assert.equal(retryHints.afterConnections, "Проверьте подключения (меню «⋯») и нажмите круглую стрелку «Повторить».");
 });
 
 test("the selection checkbox has its own grid column: on the title's first line, the meta under the title (TASK-111)", () => {
