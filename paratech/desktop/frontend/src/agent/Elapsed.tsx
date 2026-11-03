@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { elapsedLabel } from "../agentElapsed.js";
+import { elapsedLabel, elapsedSeconds } from "../agentElapsed.js";
 
 /** One tick per second; the label is computed from the timestamps, so a late tick never drifts it. */
 const tickMs = 1000;
@@ -27,6 +27,10 @@ export function Elapsed(props: { since: number; clock?: () => number }) {
       document.removeEventListener("visibilitychange", tick);
     };
   }, []);
+  // Nothing for the first second: «0с» would flash and vanish; the first value read is «1с».
+  if (elapsedSeconds(props.since, now) < 1) {
+    return null;
+  }
   return (
     <span className="ag-elapsed small muted" aria-hidden="true">
       {elapsedLabel(props.since, now)}

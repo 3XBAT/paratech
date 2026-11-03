@@ -824,7 +824,9 @@ export const texts = {
   /** Small caption under the text a student had read when they pressed «Остановить». */
   replyStopped: "Ответ остановлен",
   /** The stop line of a request that broke off (a lost connection, a failure) while its reply was typing; the text read stays above it. */
-  replyCut: "Ответ оборван.",
+  replyCut: "Ответ оборван. Можно повторить.",
+  /** The accessible label of a request that waits for the previous one (the dots' region; «waiting» is for a running one). */
+  waitingQueued: "Запрос ждёт предыдущий",
   /** A request sent while another one of the chat still runs. */
   queued: "ждёт предыдущий запрос",
   // The busy-refused request: what its icons do (the line names the way out, the icons carry no visible word).

@@ -48,9 +48,8 @@ test("a reply that broke off (offline) keeps its text above «Ответ обо�
   assert.equal(cutFor(s, s.entries[0]).text, "Длинный ответ, который уже виден");
   const html = render(s);
   assert.ok(html.includes('<section class="ag-card ag-reply-kept"><p class="ag-text muted">Длинный ответ, который уже виден</p></section>'));
-  assert.ok(html.includes("Ответ оборван."));
+  assert.ok(html.includes("Ответ оборван. Можно повторить."));
   assert.ok(!html.includes(texts.replyStopped));
-  assert.ok(!html.includes("Можно повторить"));
   assert.ok(!html.includes("ag-cursor"));
   assert.ok(html.indexOf("ag-reply-kept") < html.indexOf("ag-stop"));
   assert.equal(retryButtons(html), 1);
@@ -178,8 +177,8 @@ test("the problem's own «Повторить» is the only one on a cut reply", 
 
 test("the text of an old, longer cut stays after the old wording is gone", () => {
   const model = entryModel(ended({ stopReason: "offline" }).entries[0], { last: true, blocked: false, replyCut: true });
-  assert.equal(model.cards.find((c) => c.type === "stopped").text, "Ответ оборван.");
-  assert.equal(texts.replyCut, "Ответ оборван.");
+  assert.equal(model.cards.find((c) => c.type === "stopped").text, "Ответ оборван. Можно повторить.");
+  assert.equal(texts.replyCut, "Ответ оборван. Можно повторить.");
 });
 
 // ---- Part 2: the elapsed timer ----
@@ -275,6 +274,12 @@ test("the timer stays next to «Остановить» while the reply types, an
   assert.ok(!render(s).includes("ag-elapsed"));
 });
 
+test("the timer renders nothing under one second and «1с» is the first value", () => {
+  assert.equal(renderToStaticMarkup(h(Elapsed, { since: 1000, clock: () => 1000 })), "");
+  assert.equal(renderToStaticMarkup(h(Elapsed, { since: 1000, clock: () => 1999 })), "");
+  assert.equal(renderToStaticMarkup(h(Elapsed, { since: 1000, clock: () => 2000 })), '<span class="ag-elapsed small muted" aria-hidden="true">1с</span>');
+});
+
 test("the timer shows on a request sent and not yet answered, and not on a refused one or an ended one", () => {
   const sent = { ...apply(initialPanelState, { type: "asked", id: 1, text: "q", scope: local({}).scope }) };
   const html = render(sent, { props: { startedAt: 0, clock: () => 3000 } });
@@ -292,7 +297,8 @@ test("the panel gives a running request its timer and a finished one none", () =
         onDraft: noop, onSubmit: noop, onRemoveContext: noop, actionsFor: () => actions, clock: () => 50_000,
       }),
     );
-  assert.ok(view(apply(initialPanelState, upd({}))).includes('aria-hidden="true">0с</span>'));
+  // Nothing for the first second (no «0с» flash).
+  assert.ok(!view(apply(initialPanelState, upd({}))).includes("ag-elapsed"));
   assert.ok(!view(apply(initialPanelState, upd({ status: "DONE", cards: [replyCard] }))).includes("ag-elapsed"));
   assert.ok(!view(ended({ stopReason: "user" })).includes("ag-elapsed"));
 });
@@ -330,7 +336,10 @@ test("a queued request shows «ждёт предыдущий запрос», the
     h(AgentRequest, { model: entryModel(sent, { last: true, blocked: false, queued: queuedBehind([running, sent], sent) !== undefined }), actions, startedAt: undefined }),
   );
   assert.ok(html.includes('<span class="ag-queued small muted">ждёт предыдущий запрос</span>'));
-  assert.ok(html.includes("ag-wait"));
+  assert.ok(html.includes("ag-wait queued"));
+  // The screen reader hears the waiting, not «Агент отвечает…».
+  assert.ok(html.includes('<span class="ag-vh">Запрос ждёт предыдущий</span>'));
+  assert.ok(!html.includes("Агент отвечает"));
   assert.ok(html.includes('aria-label="Остановить предыдущий запрос"'));
   assert.ok(!html.includes("ag-elapsed"));
   assert.equal(texts.queued, "ждёт предыдущий запрос");
@@ -338,6 +347,37 @@ test("a queued request shows «ждёт предыдущий запрос», the
   const plain = renderToStaticMarkup(h(AgentRequest, { model: entryModel(sent, { last: true, blocked: false }), actions }));
   assert.ok(!plain.includes("ждёт предыдущий запрос"));
   assert.ok(!plain.includes("Остановить предыдущий запрос"));
+  // Running: the same region in the same place with the usual label and animated dots.
+  assert.ok(plain.includes('<span class="ag-wait" role="status">'));
+  assert.ok(plain.includes('<span class="ag-vh">Агент отвечает…</span>'));
+  assert.ok(!plain.includes("ag-wait queued"));
+  // Both states start the thread row with the same region, so the polite region announces the change.
+  const start = (m) => m.slice(m.indexOf('<div class="ag-think">'), m.indexOf('<div class="ag-think">') + 40);
+  const ticking = renderToStaticMarkup(h(AgentRequest, { model: entryModel(sent, { last: true, blocked: false }), actions, startedAt: 0, clock: () => 5000 }));
+  assert.equal(start(html).slice(0, 36), start(ticking).slice(0, 36));
+  assert.ok(ticking.includes("ag-elapsed"));
+});
+
+test("queued dots are static and muted; the queued label wraps normally", () => {
+  const css = readFileSync(new URL("../src/agent/agent.css", import.meta.url), "utf8");
+  const dots = css.match(/\.ag-wait\.queued \.ag-wdot\s*\{[^}]*\}/)?.[0] ?? "";
+  assert.match(dots, /var\(--muted\)/);
+  assert.match(dots, /animation:\s*none/);
+  const label = css.match(/\.ag-queued\s*\{[^}]*\}/)?.[0] ?? "";
+  assert.match(label, /flex:\s*1 1 auto/);
+  assert.match(label, /overflow-wrap:\s*break-word/);
+  assert.doesNotMatch(label, /anywhere/);
+});
+
+test("the cut reply line says what is possible: «Ответ оборван. Можно повторить.», for offline and failed", () => {
+  for (const stopReason of ["offline", "failed"]) {
+    const html = render(ended({ stopReason }));
+    assert.ok(html.includes("Ответ оборван. Можно повторить."), stopReason);
+    assert.equal(retryButtons(html), 1, stopReason);
+  }
+  // The failed problem without a stop reason of its own gets the same line.
+  const s = ended({ stopReason: "", problem: "failed" });
+  assert.ok(render(s).includes("Ответ оборван. Можно повторить."));
 });
 
 test("the queued label is not an announcement and its stop is disabled while a press is running", () => {

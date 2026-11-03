@@ -698,7 +698,7 @@ export function AgentRequest(props: {
       </UserActions>
       {model.waiting && (model.queued || props.startedAt !== undefined ? (
         <div className="ag-think">
-          <Waiting />
+          {model.queued ? <Waiting label={texts.waitingQueued} queued /> : <Waiting />}
           {model.queued ? (
             <>
               <span className="ag-queued small muted">{texts.queued}</span>
