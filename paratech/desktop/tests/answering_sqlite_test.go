@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"paratech/desktop/internal/adapters/hubclient"
 	"paratech/desktop/internal/adapters/random"
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/adapters/textfile"
@@ -143,7 +144,9 @@ func TestAnswersWithCitationsOnTheRealStack(t *testing.T) {
 	// 5. The Hub refuses the reader's answer: refused, charged once, the same question repeats the refusal free.
 	hub.RefuseAnswerQuestion(1)
 	for range 2 {
-		if _, err := svc.Ask(ctx, "Where do rivers and deltas meet?", "", askScope, nil); !errors.Is(err, answering.ErrReaderRefused) {
+		_, err := svc.Ask(ctx, "Where do rivers and deltas meet?", "", askScope, nil)
+		if !errors.Is(err, answering.ErrReaderRefused) || errors.Is(err, answering.ErrNoConnection) ||
+			!strings.Contains(err.Error(), hubclient.ErrModelAnswer.Error()) {
 			t.Fatalf("refused = %v", err)
 		}
 	}
@@ -266,5 +269,54 @@ func TestDriverAnswerQuestionIsAPaidRead(t *testing.T) {
 	}
 	if reader.Charged() != 1 {
 		t.Fatalf("reader charged %d", reader.Charged())
+	}
+}
+
+// A model answer the Hub refused by the schema, through the real Hub client and answering: the planner gets the one
+// plain failure, no cause and no card (TASK-366 review).
+func TestDriverAnswerQuestionHubRefusalIsPlain(t *testing.T) {
+	e := newAgentEnv(t)
+	ctx := t.Context()
+	log := slog.New(slog.DiscardHandler)
+	reader := testenv.NewFakeHub()
+	reader.RefuseAnswerQuestion(1)
+	answers, err := answering.New(answering.Deps{
+		Knowledge: answerTexts{}, Reader: fakeHubClient(t, reader), Answers: sqlite.NewAnswerRepository(e.db),
+		Clock: e.clock, IDs: random.IDs{}, Log: log,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &driverSink{}
+	driver, err := agentloop.New(agentloop.Deps{
+		Turns: e.turns, Sink: sink, Library: driverLibrary{}, Answerer: answers, Knowledge: &driverKnowledge{},
+		Activity: noUseCase{}, Assignments: noListedAssignments{}, Deliveries: driverDeliveries{}, Clock: e.clock, Log: log,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(driver.Close)
+
+	e.hub.Then(testenv.AgentCall{ID: "c1", Tool: "answer_question", Args: `{"question":"Когда ряд сходится абсолютно?"}`}).
+		Then(testenv.AgentCall{ID: "r1", Tool: "reply", Args: `{"text":"Не получилось ответить, попробуйте ещё раз"}`})
+	if err := driver.Ask(ctx, agentturn.AskInput{Scope: physicsScope(t), Text: "когда ряд сходится абсолютно?"}); err != nil {
+		t.Fatal(err)
+	}
+	driver.Wait()
+	if up := sink.last(t); up.Status != thread.StatusDone {
+		t.Fatalf("update = %+v", up)
+	}
+	if r, ok := resultOf(e, "c1"); !ok || !r.GetIsError() || r.GetResultJson() != `{"error":"failed"}` {
+		t.Fatalf("c1 result = %v", r)
+	}
+	for _, u := range sink.snapshot() {
+		for _, c := range u.Cards {
+			if _, ok := c.(values.AnswerCard); ok {
+				t.Fatalf("an answer card for a refused answer: %v", u.Cards)
+			}
+		}
+	}
+	if reader.Charged() != 1 || answerCount(t, e.db) != 0 {
+		t.Fatalf("reader charged %d, %d answers stored", reader.Charged(), answerCount(t, e.db))
 	}
 }

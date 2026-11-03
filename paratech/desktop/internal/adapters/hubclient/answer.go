@@ -17,7 +17,8 @@ import (
 const opAnswer = "hubclient: answer question"
 
 // AnswerQuestion runs the quarantined reader of a question about the student's lessons (OPERATION_TYPE_ANSWER,
-// ADR-0022; the answering.Reader port) with the URL, key, limits and error classes of Complete. It sends no
+// ADR-0022; the answering.Reader port) with the URL, key, limits and error classes of Complete, bounded by
+// Config.AnswerTimeout instead of RequestTimeout. It sends no
 // instructions and no model alias: the Hub uses its own prompt and alias. The returned output is untrusted model
 // text; the only thing to do with it is answer.Request.Parse. A permanent ErrProvider (the Hub's charged schema
 // refusal or an uncharged model refusal) also matches answer.ErrInvalidAnswer; the same key replays it.
@@ -42,7 +43,7 @@ func (c *Client) AnswerQuestion(ctx context.Context, req answer.Request, partial
 		return "", err
 	}
 
-	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	callCtx, cancel := context.WithTimeout(ctx, c.answerTO)
 	defer cancel()
 	gateway := hubv1connect.NewGatewayServiceClient(c.http, base, connect.WithReadMaxBytes(maxResponseBytes))
 	spec := &hubv1.CompletionSpec{
@@ -135,8 +136,10 @@ func answerError(ctx, callCtx context.Context, err error) error {
 		return own
 	}
 	e := mapCallError(opAnswer, err)
-	if errors.Is(e, ErrProvider) && errors.Is(e, backoff.ErrPermanent) {
-		// A permanent provider error counts as a refused answer (charged or not).
+	if errors.Is(e, ErrModelAnswer) || errors.Is(e, ErrProvider) && errors.Is(e, backoff.ErrPermanent) {
+		// A permanent provider error counts as a refused answer (charged or not). A model answer the Hub refused by
+		// the schema is refused whatever its retryable flag: asking the same key again replays the refusal, so a
+		// ticket run must record it instead of waiting as for a lost connection.
 		e.extra = append(e.extra, answer.ErrInvalidAnswer)
 	}
 	return e

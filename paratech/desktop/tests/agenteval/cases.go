@@ -28,7 +28,7 @@ func Classes() []string {
 // Size bounds of the case set (TASK-135).
 const (
 	MinRequests  = 40
-	MaxRequests  = 60
+	MaxRequests  = 70
 	NumQuestions = 20
 	NumCannotDo  = 5
 )
@@ -47,6 +47,9 @@ type Subject struct {
 // v8). AssignedSubject is the subject create_assignment should get: a subject ID, or NoSubject for none (catalog v8).
 // Chats (catalog v9): Earlier are earlier requests of the chat sent as pairs before the text, Summary the summary turn
 // before them, Mentions the «@» objects of the request (IDs only; Earlier marks a mention of an earlier request).
+// Failures and lookups (TASK-366): Results replaces the canned result of a read tool for this case (a failed
+// answer_question, find_lessons rows of its own), Avoid are phrases no card text may contain (case and «ё» ignored),
+// and SubjectName is the name create_subject should get.
 type Request struct {
 	ID               string     `json:"id"`
 	Text             string     `json:"text"`
@@ -63,6 +66,36 @@ type Request struct {
 	Summary          string     `json:"summary,omitempty"`
 	Earlier          []Exchange `json:"earlier,omitempty"`
 	Mentions         []Mention  `json:"mentions,omitempty"`
+
+	Results     map[string]json.RawMessage `json:"results,omitempty"`
+	Avoid       []string                   `json:"avoid,omitempty"`
+	SubjectName string                     `json:"subject_name,omitempty"`
+}
+
+// subjectTool is the tool whose name a case may check.
+const subjectTool = "create_subject"
+
+// checkScripted checks the TASK-366 fields of a case: results of read tools of the catalog only, each a JSON object;
+// non-blank phrases to avoid; a subject name only with create_subject.
+func checkScripted(r Request, toolClasses map[string]string) error {
+	for tool, res := range r.Results {
+		if toolClasses[tool] != "R" {
+			return fmt.Errorf("result of %q: only a read tool of the catalog gets a result", tool)
+		}
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(res, &obj) != nil {
+			return fmt.Errorf("result of %s is not a JSON object", tool)
+		}
+	}
+	for _, a := range r.Avoid {
+		if strings.TrimSpace(a) == "" {
+			return errors.New("a blank phrase to avoid")
+		}
+	}
+	if r.SubjectName != "" && (strings.TrimSpace(r.SubjectName) == "" || !slices.Contains(r.Tools, subjectTool)) {
+		return fmt.Errorf("subject name %q needs create_subject", r.SubjectName)
+	}
+	return nil
 }
 
 // Exchange is an earlier request of the chat: the student's text and the reply line the history carries.
@@ -250,6 +283,9 @@ func ParseCaseSet(raw []byte, toolClasses map[string]string) (CaseSet, error) {
 			return bad("request %s: assigned subject %q needs create_assignment and a known subject or %s", r.ID, s, NoSubject)
 		}
 		if err := checkChat(r); err != nil {
+			return bad("request %s: %v", r.ID, err)
+		}
+		if err := checkScripted(r, toolClasses); err != nil {
 			return bad("request %s: %v", r.ID, err)
 		}
 	}

@@ -1,6 +1,6 @@
 # Agent live check (level 2)
 
-Case set `testdata/live_cases.json`: 40–60 student requests (expected plan class, optional `also` classes the prompt allows too, and tools in order), 5 «cannot do
+Case set `testdata/live_cases.json`: 40–70 student requests (expected plan class, optional `also` classes the prompt allows too, and tools in order), 5 «cannot do
 whole» cases (→ `cannot_do`), 20 lecture questions (→ `answer_question`, chunks and a reference citation). All data
 is fake; addresses only `example.invalid`.
 
@@ -18,7 +18,11 @@ catalog v8 a request without a subject in a thread without one is asked «К к�
 pairs before its text), a `summary` (the first history turn) and `mentions` (`kind`, `id`, `earlier: true` for a
 mention of an earlier request; IDs only, never labels): `m01` a mention of another subject's lecture, `m02` «лекция 5»
 without a mention (look it up, never invent an ID), `m03` a summary with an instruction that must not be obeyed, `m04`
-an earlier mention that is not the subject of the request. The run is scored against
+an earlier mention that is not the subject of the request. Since TASK-366 a case may carry `results` (its own result of
+a read tool instead of the canned one), `avoid` (phrases no card text may contain) and `subject_name` (the name
+`create_subject` should get): `f01` a failed `answer_question` gets a restrained reply without a cause (whether it
+offers to retry is read in the report), `f02` «добавь предмет по последней записи» looks the recordings up and adds
+the subject of the newest one without asking. The run is scored against
 `shared/testdata/tool_catalog_v9.json`.
 
 CI (no tag) runs the scoring tests, checks the case file and runs the runner on the fake Hub.

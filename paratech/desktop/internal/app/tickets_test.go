@@ -4,15 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"paratech/desktop/internal/adapters/hubclient"
 	"paratech/desktop/internal/cases/answering"
 	"paratech/desktop/internal/cases/tickets"
 	"paratech/desktop/internal/domain/coursework/answer"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
 	"paratech/desktop/internal/domain/jobs/services/backoff"
 	"paratech/desktop/internal/domain/shared"
+	"paratech/desktop/testenv"
 )
 
 var _ tickets.Answerer = ticketAnswers{}
@@ -95,6 +98,31 @@ func TestTicketAnswersMapsErrors(t *testing.T) {
 	if _, waits := backoff.WaitStatus(err); waits || backoff.Classify(err) != backoff.ClassPermanent ||
 		!errors.Is(err, shared.ErrNetworkUnavailable) {
 		t.Fatalf("permanent = %v (waits %v)", err, waits)
+	}
+
+	// The Hub's schema refusal through the real Hub client: a refused ticket, never a wait for the network, and the
+	// log text keeps that the model did answer (TASK-366 review).
+	hub := testenv.NewFakeHub()
+	hub.RefuseAnswerQuestion(1)
+	url, httpClient := testenv.StartFakeHub(t, hub)
+	creds := testenv.NewMemCredentials()
+	if err := creds.Set(t.Context(), hubclient.DefaultCredentialName, "la_test_key_0123456789"); err != nil {
+		t.Fatal(err)
+	}
+	client, err := hubclient.New(hubclient.Config{BaseURL: url, HTTPClient: httpClient, RequestTimeout: 10 * time.Second}, creds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusing, err := answering.New(answering.Deps{
+		Knowledge: ticketLessons{}, Reader: client, Answers: ticketAnswerStore{}, Clock: ticketClock{}, IDs: ticketIDs{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = (ticketAnswers{answers: refusing}).Ask(t.Context(), "Когда ряд сходится абсолютно?", "sub1")
+	if !errors.Is(err, answer.ErrInvalidAnswer) || !errors.Is(err, answering.ErrReaderRefused) ||
+		errors.Is(err, shared.ErrNetworkUnavailable) || !strings.Contains(err.Error(), hubclient.ErrModelAnswer.Error()) {
+		t.Fatalf("Hub schema refusal = %v", err)
 	}
 
 	svc, err := answering.New(answering.Deps{

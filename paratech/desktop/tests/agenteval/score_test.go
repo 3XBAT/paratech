@@ -1,6 +1,7 @@
 package agenteval
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -117,6 +118,21 @@ func TestParseCaseSetRejects(t *testing.T) {
 		},
 		"earlier request without a reply": func(s string) string {
 			return strings.Replace(s, `"reply": "reply: Пожалуйста."`, `"reply": " "`, 1)
+		},
+		"result of a write tool": func(s string) string {
+			return strings.Replace(s, `"results": {"answer_question"`, `"results": {"create_subject"`, 1)
+		},
+		"result of a tool outside the catalog": func(s string) string {
+			return strings.Replace(s, `"results": {"answer_question"`, `"results": {"read_mail"`, 1)
+		},
+		"result that is not an object": func(s string) string {
+			return strings.Replace(s, `{"answer_question": {"error": "failed"}}`, `{"answer_question": ["failed"]}`, 1)
+		},
+		"blank phrase to avoid": func(s string) string {
+			return strings.Replace(s, `"avoid": ["материала нет"`, `"avoid": [" "`, 1)
+		},
+		"subject name without create_subject": func(s string) string {
+			return strings.Replace(s, `"tools": ["find_lessons", "create_subject"]`, `"tools": ["find_lessons", "create_folder"]`, 1)
 		},
 	} {
 		mutated := mutate(string(raw))
@@ -290,6 +306,78 @@ func TestStudentAssignmentCasesInTheCaseSet(t *testing.T) {
 	}
 	if c := catalogClasses(t)["create_assignment"]; c != "U" {
 		t.Fatalf("create_assignment class = %q", c)
+	}
+}
+
+// TestFailureCasesInTheCaseSet: the beta cases of TASK-366 stay in the live set. A failed answer_question gets a
+// restrained reply that names no cause (no «материала нет», no provider, no check); «добавь предмет по последней
+// записи» looks the recordings up first and adds the subject of the newest row, without asking.
+func TestFailureCasesInTheCaseSet(t *testing.T) {
+	cs := loadCases(t)
+	f01 := cs.Requests[slicesIndex(cs.Requests, "f01")]
+	if f01.Class != ClassRead || len(f01.Also) != 0 || !slices.Equal(f01.Tools, []string{"answer_question"}) ||
+		string(f01.Results["answer_question"]) != `{"error": "failed"}` {
+		t.Errorf("f01 = %+v", f01)
+	}
+	for _, s := range []string{"Материала нет", "провайдер", "не прошёл проверку"} {
+		if len(AvoidedPhrases(s, f01.Avoid)) == 0 {
+			t.Errorf("f01 does not avoid %q", s)
+		}
+	}
+	if a := AvoidedPhrases("Не получилось ответить на вопрос. Можно попробовать ещё раз.", f01.Avoid); len(a) != 0 {
+		t.Errorf("f01 refuses a restrained reply: %v", a)
+	}
+
+	f02 := cs.Requests[slicesIndex(cs.Requests, "f02")]
+	if f02.Class != ClassWrite || len(f02.Also) != 0 || !slices.Equal(f02.Tools, []string{"find_lessons", "create_subject"}) ||
+		f02.Subject != "" || f02.SubjectName != "Теория вероятностей" {
+		t.Errorf("f02 = %+v", f02)
+	}
+	type row struct {
+		Date        string `json:"date"`
+		SubjectName string `json:"subject_name"`
+	}
+	var lessons struct {
+		Lessons []row `json:"lessons"`
+	}
+	if err := json.Unmarshal(f02.Results["find_lessons"], &lessons); err != nil || len(lessons.Lessons) < 2 {
+		t.Fatalf("f02 rows: %v", err)
+	}
+	newest := slices.MaxFunc(lessons.Lessons, func(a, b row) int { return strings.Compare(a.Date, b.Date) })
+	if newest.SubjectName != f02.SubjectName {
+		t.Errorf("f02 expects %q, the newest row is %q", f02.SubjectName, newest.SubjectName)
+	}
+}
+
+func TestCreatedSubject(t *testing.T) {
+	for _, tt := range []struct {
+		tool, args, want string
+	}{
+		{"create_subject", `{"name":"Теория вероятностей"}`, "Теория вероятностей"},
+		{"create_subject", `{"name":"  Философия "}`, "Философия"},
+		{"create_subject", `{}`, ""},
+		{"create_subject", `not json`, ""},
+		{"create_folder", `{"name":"Лабы"}`, ""},
+	} {
+		if got := CreatedSubject(tt.tool, tt.args); got != tt.want {
+			t.Errorf("CreatedSubject(%s, %s) = %q, want %q", tt.tool, tt.args, got, tt.want)
+		}
+	}
+}
+
+func TestAvoidedPhrases(t *testing.T) {
+	avoid := []string{"материала нет", "не прошёл проверку"}
+	for _, tt := range []struct {
+		text string
+		want []string
+	}{
+		{"МАТЕРИАЛА  НЕТ по этой паре.", []string{"материала нет"}},
+		{"Ответ не прошел проверку.", []string{"не прошёл проверку"}},
+		{"Не получилось ответить. Можно повторить.", nil},
+	} {
+		if got := AvoidedPhrases(tt.text, avoid); !slices.Equal(got, tt.want) {
+			t.Errorf("AvoidedPhrases(%q) = %v, want %v", tt.text, got, tt.want)
+		}
 	}
 }
 
@@ -480,5 +568,27 @@ func TestReport(t *testing.T) {
 	if md := v8.Markdown(); !strings.Contains(md, "| create_assignment: верный предмет | 1/2 (50%) |") ||
 		!strings.Contains(md, "s02 «Запиши»: create_assignment ждали с предметом none, получили [s-math]") {
 		t.Errorf("v8 report:\n%s", md)
+	}
+
+	// TASK-366: a reply after a failed answer that names a cause, and a subject added under another name, are reported.
+	failed := Request{ID: "f01", Text: "Объясни", Class: ClassRead, Tools: []string{"answer_question"}, Avoid: []string{"провайдер"}}
+	named := Request{ID: "f02", Text: "Добавь предмет", Class: ClassWrite, Tools: []string{"find_lessons", "create_subject"},
+		SubjectName: "Теория вероятностей"}
+	v366 := Report{Classes: classes, Requests: []Outcome{
+		{Case: failed, Tools: []string{"answer_question", "reply"}, Texts: []string{"Не получилось ответить, можно повторить."}},
+		{Case: failed, Tools: []string{"answer_question", "reply"}, Texts: []string{"Провайдер не ответил."}},
+		{Case: named, Tools: []string{"find_lessons", "create_subject"}, Created: []string{"Теория вероятностей"}},
+		{Case: named, Tools: []string{"find_lessons", "create_subject"}, Created: []string{"Линейная алгебра"}},
+	}}
+	if m := v366.Metrics(); m.Avoids != 2 || m.AvoidsOK != 1 || m.Created != 2 || m.CreatedOK != 1 || m.ClassOK != 4 {
+		t.Fatalf("TASK-366 metrics = %+v", m)
+	}
+	md = v366.Markdown()
+	for _, s := range []string{"| Тексты без запрещённых фраз | 1/2 (50%) |", "| create_subject: верное название | 1/2 (50%) |",
+		"f01 «Объясни»: в тексте запрещённые фразы [провайдер]",
+		"f02 «Добавь предмет»: create_subject ждали с названием «Теория вероятностей», получили [Линейная алгебра]"} {
+		if !strings.Contains(md, s) {
+			t.Errorf("report misses %q:\n%s", s, md)
+		}
 	}
 }

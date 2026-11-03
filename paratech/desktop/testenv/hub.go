@@ -105,10 +105,16 @@ func (h *FakeHub) RefuseAnswerQuestion(n int) {
 	h.refuse[hubv1.OperationType_OPERATION_TYPE_ANSWER] = n
 }
 
+// hubMsgInvalidAnswer is the Hub's fixed ErrorDetail.message of a schema refusal (hub input/connect msgInvalidAnswer),
+// so the client reads the refusal as the real one, with its detail.
+const hubMsgInvalidAnswer = "the model answered, but its answer does not match the schema of the operation"
+
 // providerRefusal is the Hub's answer to a reader answer outside its schema (errors.proto).
 func providerRefusal() error {
 	e := connect.NewError(connect.CodeUnavailable, errors.New("fake hub: answer refused by the schema"))
-	d, err := connect.NewErrorDetail(&hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Retryable: false})
+	d, err := connect.NewErrorDetail(&hubv1.ErrorDetail{
+		Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Message: hubMsgInvalidAnswer, Retryable: false,
+	})
 	if err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}

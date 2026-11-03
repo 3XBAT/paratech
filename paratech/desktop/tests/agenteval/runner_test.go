@@ -14,6 +14,7 @@ import (
 	"paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/testenv"
+	hubv1 "paratech/shared/gen/paratech/hub/v1"
 )
 
 // maxLiveSteps bounds the planner steps of one request; the run stops at the first card or action.
@@ -62,8 +63,8 @@ func liveBase(subjects []Subject) (values.Base, error) {
 }
 
 // request runs one request until the planner shows a card or proposes an action. Nothing runs: read tools get canned
-// results, and the first action or card ends the request; only the first ask_questions of a case with an Answer is
-// answered (catalog v8) and the run goes on.
+// results (or the case's own Results), and the first action or card ends the request; only the first ask_questions
+// of a case with an Answer is answered (catalog v8) and the run goes on.
 func (r *liveRun) request(req Request) Outcome {
 	o := Outcome{Case: req}
 	scope, text, err := liveInput(req)
@@ -103,7 +104,14 @@ func (r *liveRun) request(req Request) Outcome {
 			if s := AssignedSubject(c.Tool, c.ArgumentsJSON); s != "" {
 				o.Assigned = append(o.Assigned, s)
 			}
-			result, ok := cannedResults[c.Tool]
+			if s := CreatedSubject(c.Tool, c.ArgumentsJSON); s != "" {
+				o.Created = append(o.Created, s)
+			}
+			own, ok := req.Results[c.Tool]
+			result := string(own)
+			if !ok {
+				result, ok = cannedResults[c.Tool]
+			}
 			switch {
 			case c.Tool == string(values.ToolAskQuestions) && req.Answer != "" && !answered:
 				if result, err = liveAnswer(c.CallID, c.ArgumentsJSON, req.Answer); err != nil {
@@ -354,6 +362,31 @@ func TestRunnerOnTheFakeHub(t *testing.T) {
 		t.Fatalf("m03: turns %v", turns)
 	}
 
+	// TASK-366: a case's own result replaces the canned one: a failed answer_question, find_lessons rows with names;
+	// create_subject reports the name it got.
+	hub.Then(testenv.AgentCall{ID: "toolu_30", Tool: "answer_question", Args: `{"question":"Когда ряд сходится абсолютно?"}`}).
+		Then(testenv.AgentCall{ID: "toolu_31", Tool: "reply", Args: `{"text":"Не получилось ответить. Можно попробовать ещё раз."}`})
+	f01 := cs.Requests[slicesIndex(cs.Requests, "f01")]
+	o = r.request(f01)
+	reqs = hub.Requests()
+	if o.Err != "" || fmt.Sprint(o.Tools) != "[answer_question reply]" ||
+		lastResult(reqs[len(reqs)-1].GetTurns()) != string(f01.Results["answer_question"]) {
+		t.Fatalf("f01: outcome = %+v", o)
+	}
+	hub.Then(testenv.AgentCall{ID: "toolu_32", Tool: "find_lessons", Args: `{}`}).
+		Then(testenv.AgentCall{ID: "toolu_33", Tool: "create_subject", Args: `{"name":"Теория вероятностей"}`})
+	f02 := cs.Requests[slicesIndex(cs.Requests, "f02")]
+	o2 := r.request(f02)
+	reqs = hub.Requests()
+	if o2.Err != "" || fmt.Sprint(o2.Tools) != "[find_lessons create_subject]" || fmt.Sprint(o2.Created) != "[Теория вероятностей]" ||
+		lastResult(reqs[len(reqs)-1].GetTurns()) != string(f02.Results["find_lessons"]) {
+		t.Fatalf("f02: outcome = %+v", o2)
+	}
+	if m := (Report{Classes: r.classes, Requests: []Outcome{o, o2}}).Metrics(); m.ClassOK != 2 || m.ToolsOK != 2 ||
+		m.AvoidsOK != 1 || m.CreatedOK != 1 {
+		t.Fatalf("TASK-366 metrics = %+v", m)
+	}
+
 	// Every case of the file can be sent: the fake Hub has no script left and answers unavailable. A new run ID, so
 	// w04 is not a replay of the first run.
 	r.id = "t2"
@@ -365,6 +398,14 @@ func TestRunnerOnTheFakeHub(t *testing.T) {
 			t.Fatalf("%s: outcome %+v, want a run error from the Hub", req.ID, o)
 		}
 	}
+}
+
+// lastResult is the first tool result of the last turn sent.
+func lastResult(turns []*hubv1.AgentTurn) string {
+	if len(turns) == 0 || len(turns[len(turns)-1].GetResults().GetResults()) == 0 {
+		return ""
+	}
+	return turns[len(turns)-1].GetResults().GetResults()[0].GetResultJson()
 }
 
 func slicesIndex(reqs []Request, id string) int {

@@ -161,6 +161,32 @@ func AssignedSubject(tool, argumentsJSON string) string {
 	return s
 }
 
+// CreatedSubject returns the name a create_subject call gives; other tools and unreadable arguments give "".
+func CreatedSubject(tool, argumentsJSON string) string {
+	if tool != subjectTool {
+		return ""
+	}
+	var args struct {
+		Name string `json:"name"`
+	}
+	if json.Unmarshal([]byte(argumentsJSON), &args) != nil {
+		return ""
+	}
+	return strings.TrimSpace(args.Name)
+}
+
+// AvoidedPhrases returns the phrases of avoid that text contains, ignoring case, «ё»/«е» and runs of spaces.
+func AvoidedPhrases(text string, avoid []string) []string {
+	t := normalize(text)
+	var out []string
+	for _, a := range avoid {
+		if strings.Contains(t, normalize(a)) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 // AnswerOption returns the index of option among the options of the first question of an ask_questions call, -1
 // when it has no such option or the arguments are unreadable.
 func AnswerOption(argumentsJSON, option string) int {

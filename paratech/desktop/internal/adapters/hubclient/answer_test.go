@@ -247,6 +247,68 @@ func TestAnswerQuestionStreamErrors(t *testing.T) {
 	}
 }
 
+// An answer (a long stream plus the Hub's reask in one call) is bounded by AnswerTimeout, not by RequestTimeout; the
+// http.Client backstop does not cut it either (TASK-366 review).
+func TestAnswerQuestionHasItsOwnTimeout(t *testing.T) {
+	const out = `{"claims":[],"missing":["Всё"]}`
+	slow := func(ctx context.Context, _ int, send func(*hubv1.CompleteStreamResponse) error) error {
+		if err := send(delta("{")); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(300 * time.Millisecond):
+		}
+		return send(result(out))
+	}
+	mux := http.NewServeMux()
+	mux.Handle(hubv1connect.NewGatewayServiceHandler(&streamHub{fakeHub: &fakeHub{}, stream: slow}))
+	srv := httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+	creds := testenv.NewMemCredentials()
+	if err := creds.Set(t.Context(), DefaultCredentialName, testKey); err != nil {
+		t.Fatal(err)
+	}
+	client := func(request, answering time.Duration) *Client {
+		c, err := New(Config{BaseURL: srv.URL, HTTPClient: srv.Client(), RequestTimeout: request, AnswerTimeout: answering}, creds)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+
+	if got, err := client(100*time.Millisecond, 5*time.Second).AnswerQuestion(t.Context(), answerRequest(t), nil); err != nil || got != out {
+		t.Fatalf("an answer longer than RequestTimeout = %q, %v", got, err)
+	}
+	_, err := client(5*time.Second, 100*time.Millisecond).AnswerQuestion(t.Context(), answerRequest(t), nil)
+	if !errors.Is(err, ErrTimeout) || backoff.Classify(err) != backoff.ClassTransient {
+		t.Fatalf("over AnswerTimeout = %v, want a transient timeout", err)
+	}
+
+	// Defaults: the answer gets the longer of DefaultAnswerTimeout and RequestTimeout, and the backstop covers it.
+	tests := []struct {
+		name          string
+		request, want time.Duration
+	}{
+		{"defaults", 0, DefaultAnswerTimeout},
+		{"short request timeout", time.Second, DefaultAnswerTimeout},
+		{"request timeout above the answer default", 10 * time.Minute, 10 * time.Minute},
+	}
+	for _, tt := range tests {
+		c, err := New(Config{BaseURL: "https://hub.example.com", RequestTimeout: tt.request}, creds)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.answerTO != tt.want || c.http.Timeout != tt.want+clientGrace {
+			t.Errorf("%s: answer timeout %v, backstop %v, want %v", tt.name, c.answerTO, c.http.Timeout, tt.want)
+		}
+	}
+	if _, err := New(Config{BaseURL: "https://hub.example.com", AnswerTimeout: -time.Second}, creds); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("negative answer timeout = %v", err)
+	}
+}
+
 // The caller's cancel during a stream is the ctx error, not a Hub failure.
 func TestAnswerQuestionStreamCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
@@ -308,6 +370,7 @@ func TestAnswerQuestionKeepsTheModelAnswerDetail(t *testing.T) {
 		{"provider failed", &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Message: "the LLM provider failed"}, false, false},
 		{"provider overloaded", &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Message: "the LLM provider failed", Retryable: true}, false, true},
 		{"another message", &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Message: hubMsgModelAnswer + " Teacher: x@y.invalid"}, false, false},
+		{"answer refused, marked retryable", &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Message: hubMsgModelAnswer, Retryable: true}, true, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -321,6 +384,10 @@ func TestAnswerQuestionKeepsTheModelAnswerDetail(t *testing.T) {
 			}
 			if errors.Is(err, ErrModelAnswer) != tt.answered || strings.Contains(err.Error(), ErrModelAnswer.Error()) != tt.answered {
 				t.Fatalf("model answer detail = %v in %q, want %v", errors.Is(err, ErrModelAnswer), err.Error(), tt.answered)
+			}
+			// A refused model answer is a refused answer for the use case even if marked retryable (TASK-366 review).
+			if refused := errors.Is(err, answer.ErrInvalidAnswer); refused != (tt.answered || !tt.retryable) {
+				t.Fatalf("matches ErrInvalidAnswer = %v", refused)
 			}
 			for _, s := range []string{"Teacher", "x@y", "the LLM provider failed", "does not match"} {
 				if strings.Contains(err.Error(), s) {
