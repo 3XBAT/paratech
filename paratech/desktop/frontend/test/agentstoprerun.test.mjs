@@ -178,7 +178,7 @@ test("never two «Повторить» under one request: the stop card's button
   assert.equal(stopped.rerun, false);
   const html = renderToStaticMarkup(h(AgentRequest, { model: stopped, actions }));
   assert.equal(html.split(">Повторить<").length - 1, 1);
-  assert.doesNotMatch(html, /Запустить запрос заново/);
+  assert.doesNotMatch(html, /Повторить ответ/);
   // A retry_required problem on a stopped-offline card shows one «Повторить» (the problem's retry), not two.
   const withProblem = modelOf(update({ status: "STOPPED", stopReason: "offline", problem: "retry_required" }));
   assert.deepEqual(withProblem.cards.flatMap((c) => ("buttons" in c ? c.buttons.map((b) => b.id) : [])), ["cancel", "retry"]);
@@ -192,7 +192,7 @@ test("«Остановить» offers «Продолжить» and keeps the rer
   assert.equal(m.rerun, true);
   const html = renderToStaticMarkup(h(AgentRequest, { model: m, actions }));
   assert.equal(html.split(">Повторить<").length - 1, 0);
-  assert.match(html, /Запустить запрос заново/);
+  assert.match(html, /aria-label="Повторить ответ"/);
 });
 
 test("only the last request offers «Повторить»", () => {
@@ -204,10 +204,10 @@ test("only the last request offers «Повторить»", () => {
   assert.equal(entryModel(entries[0]).rerun, false, "without the thread context nothing is offered");
 });
 
-test("«Повторить» is a button with the round arrow, title and name", () => {
+test("«Повторить ответ» is an icon button with the counter-clockwise arrow, a tooltip and the same name (TASK-365)", () => {
   const html = renderToStaticMarkup(h(AgentRequest, { model: modelOf(update()), actions }));
-  assert.match(html, /<button[^>]*aria-label="Запустить запрос заново"[^>]*title="Запустить запрос заново"/);
-  assert.equal(texts.rerunTitle, "Запустить запрос заново");
+  assert.match(html, /<button[^>]*aria-label="Повторить ответ"[^>]*><svg[^>]*><use href="#i-retry"><\/use><\/svg><span class="ag-act-tip" aria-hidden="true">Повторить ответ<\/span><\/button>/);
+  assert.equal(texts.rerunTitle, "Повторить ответ");
 });
 
 test("a rerun refused over effects says why, impersonally; stale and busy keep their texts", () => {

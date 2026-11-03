@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode, useId, useRef, useState } from "react";
 import type { AnswerInput, AssignmentLineView, DraftView, OfferView } from "../bindings/agent.js";
-import { Button, IconButton } from "../ui/Button.js";
+import { Button } from "../ui/Button.js";
+import { AgentActions, UserActions } from "./MessageActions.js";
 import { Icon } from "../ui/Icon.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
 import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
@@ -21,6 +22,7 @@ import {
   addedAssignmentText,
   assignmentRow,
   openAssignmentLabel,
+  replyCopyText,
   replyStatus,
   type ButtonId,
   type ButtonModel,
@@ -69,6 +71,8 @@ export interface CardActions {
   answers?: AnswersApi;
   /** Opens the place of a source on «База знаний», by ids. */
   openSource?: (o: CitationOpening) => void;
+  /** Puts a message text on the clipboard («Копировать»); absent: the message actions offer no copy. */
+  copy?: (text: string) => Promise<void>;
   press(id: ButtonId): void;
   revise(wish: string): void;
   answer(answers: AnswerInput[]): void;
@@ -635,7 +639,9 @@ export function AgentRequest(props: { model: EntryModel; actions: CardActions; d
     <article className="ag-req">
       {model.userText !== "" && <p className="ag-user">{model.userText}</p>}
       <MessagePills pills={model.mentions} onOpen={props.actions.openMention} />
-      {props.underUser}
+      <UserActions text={model.userText} copy={props.actions.copy}>
+        {props.underUser}
+      </UserActions>
       {model.waiting && <Waiting />}
       {model.callLine !== "" && (
         <p className="ag-callline small muted" role="status">
@@ -659,11 +665,14 @@ export function AgentRequest(props: { model: EntryModel; actions: CardActions; d
         <AnswerDraft key={d.callId || i} draft={d} dots={!hasWaitingCard && reply === null && i === answers.length - 1} />
       ))}
       {model.cards.map((c, i) => (c.type === "waiting" ? <Card key={`w:${i}`} card={c} actions={props.actions} typing={reply !== null} /> : null))}
-      {model.rerun && (
-        <div className="ag-rerun">
-          <IconButton icon="retry" label={texts.rerunTitle} busy={props.actions.busy} onClick={() => props.actions.press("rerun")} />
-        </div>
-      )}
+      {/* No copy while the reply is still typing: the final card replaces the draft. */}
+      <AgentActions
+        text={reply === null ? replyCopyText(model.cards) : ""}
+        copy={props.actions.copy}
+        rerun={model.rerun}
+        busy={props.actions.busy === true}
+        onRerun={() => props.actions.press("rerun")}
+      />
       {open.length > 1 && (
         <div className="ag-actions">
           <Button size="sm" variant="ghost" disabled={open.some((id) => props.actions.undoNote(id)?.busy)} onClick={props.actions.undoAll}>

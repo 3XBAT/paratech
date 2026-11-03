@@ -25,6 +25,7 @@ export type IconName =
   | "book"
   | "mail"
   | "retry"
+  | "copy"
   | "info"
   | "x"
   | "home"
@@ -114,8 +115,13 @@ export function IconSprite() {
         <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
         <path d="M4.5 7.5l7.5 5.5 7.5-5.5" />
       </symbol>
+      {/* The one retry/repeat icon: a circle arrow counter-clockwise (arrow head at the upper left). */}
       <symbol id="i-retry" viewBox="0 0 24 24">
-        <path d="M20 12a8 8 0 1 1-2.34-5.66M17.66 2.34v4h-4" />
+        <path d="M4 12a8 8 0 1 0 2.34-5.66M6.34 2.34v4h4" />
+      </symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24">
+        <rect x="9" y="9" width="11" height="11" rx="2" />
+        <path d="M15 9V6.5A1.5 1.5 0 0 0 13.5 5h-8A1.5 1.5 0 0 0 4 6.5v8A1.5 1.5 0 0 0 5.5 16H9" />
       </symbol>
       <symbol id="i-info" viewBox="0 0 24 24">
         <circle cx="12" cy="12" r="8.5" />

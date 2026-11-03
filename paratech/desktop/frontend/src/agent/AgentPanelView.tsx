@@ -9,8 +9,11 @@ import type { ContextFill } from "../bindings/agent.js";
 import { ChatBar, type ChatBarProps } from "./ChatBar.js";
 import { ContextHint, ContextRing } from "./ContextRing.js";
 import { ComposerPills, MentionPopup, MessagePills } from "./MentionParts.js";
+import { AgentActions, UserActions } from "./MessageActions.js";
 import { RestartButton, RestartDialog, type RestartDialogProps, RestartNote } from "./RestartDialog.js";
 import type { MentionComposer } from "./useMentionComposer.js";
+
+const noop = () => undefined;
 
 /** «Начать заново отсюда» of the panel: where it is offered, the dialog it opens and the edit it leaves next to the field. */
 export interface RestartUi {
@@ -24,19 +27,24 @@ export interface RestartUi {
 }
 
 /** Earlier requests of the open chat: text only (the student's words, the mentions as pills, the reply line). */
-function EarlierRequests(props: { items: EarlierItem[]; onOpenMention?: (kind: string, id: string) => void; restart?: RestartUi }) {
+function EarlierRequests(props: { items: EarlierItem[]; onOpenMention?: (kind: string, id: string) => void; restart?: RestartUi; copy?: (text: string) => Promise<void> }) {
   if (props.items.length === 0) {
     return null;
   }
-  const { restart } = props;
+  const { restart, copy } = props;
   return (
     <section className="ag-earlier" aria-label={chatTexts.earlierCaption}>
       {props.items.map((it) => (
         <div className="ag-req ag-earlier-req" key={it.key}>
           <p className="ag-user">{it.text}</p>
           <MessagePills pills={it.mentions} onOpen={props.onOpenMention} />
-          {restart && it.restart && <RestartButton target={it.restart} onOpen={restart.open} />}
+          <UserActions text={it.text} copy={copy}>
+            {restart && it.restart && <RestartButton target={it.restart} onOpen={restart.open} />}
+          </UserActions>
           {it.reply !== "" && <p className="ag-earlier-reply ag-text small muted">{it.reply}</p>}
+          {it.reply !== "" && copy && (
+            <AgentActions text={it.reply} copy={copy} rerun={false} busy={false} onRerun={noop} />
+          )}
         </div>
       ))}
     </section>
@@ -68,6 +76,8 @@ export interface AgentPanelViewProps {
   fill?: ContextFill | null;
   /** «Начать заново отсюда»; absent: the action is not offered. */
   restart?: RestartUi;
+  /** «Копировать» under the messages of earlier requests; absent: no copy there. The live requests get it from actionsFor. */
+  copy?: (text: string) => Promise<void>;
 }
 
 /**
@@ -233,7 +243,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
           <p className="ag-empty muted">{mn && mode.inputEnabled ? `${texts.empty} ${mentionTexts.hint}` : texts.empty}</p>
         )}
         {mode.staleNote !== "" && <p className="ag-stale small muted">{mode.staleNote}</p>}
-        <EarlierRequests items={earlier} onOpenMention={props.onOpenMention} restart={restart} />
+        <EarlierRequests items={earlier} onOpenMention={props.onOpenMention} restart={restart} copy={props.copy} />
         {entries.map((e) => {
           const target = restart?.targetFor(e) ?? null;
           return (
