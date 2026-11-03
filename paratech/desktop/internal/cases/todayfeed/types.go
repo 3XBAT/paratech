@@ -6,6 +6,7 @@ import (
 
 	"paratech/desktop/internal/domain/agent/services/today"
 	"paratech/desktop/internal/domain/coursework/proposal"
+	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -35,6 +36,7 @@ type ScreenDeps struct {
 	Assignments Assignments
 	Proposals   ProposalList
 	Subjects    SubjectResolver
+	CallLinks   SubjectCallLinks
 	Clock       Clock
 	Log         *slog.Logger // optional
 }
@@ -74,16 +76,21 @@ type PostView struct {
 	ShownAt      time.Time        // when the post became worth showing
 }
 
-// LessonRow is a lesson of the day with its post, if the post-processing of its recording produced one.
+// LessonRow is a lesson of the day with its post, if the post-processing of its recording produced one. SubjectID is
+// the library subject its subject string resolves to ("" none: no place to keep a call link), SubjectName its name and
+// CallLink the link the student keeps on it (ADR-0032, TASK-364; zero none).
 type LessonRow struct {
-	Lesson  shared.LessonID
-	Title   string
-	Subject string
-	Kind    string // lesson kind code; "unknown" when the schedule does not say
-	Teacher string
-	Start   time.Time
-	End     time.Time
-	Post    *PostView // nil: none
+	Lesson      shared.LessonID
+	Title       string
+	Subject     string
+	SubjectID   shared.SubjectID
+	SubjectName string
+	CallLink    subject.CallLink
+	Kind        string // lesson kind code; "unknown" when the schedule does not say
+	Teacher     string
+	Start       time.Time
+	End         time.Time
+	Post        *PostView // nil: none
 }
 
 // WaitingItem is a proposal waiting for the student's «Да»: a deadline for the calendar or an email.

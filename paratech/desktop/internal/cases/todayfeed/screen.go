@@ -36,6 +36,7 @@ type Screen struct {
 	assignments Assignments
 	proposals   ProposalList
 	subjects    SubjectResolver
+	callLinks   SubjectCallLinks
 	clock       Clock
 	log         *slog.Logger
 }
@@ -43,12 +44,12 @@ type Screen struct {
 // NewScreen checks the ports.
 func NewScreen(d ScreenDeps) (*Screen, error) {
 	if d.Posts == nil || d.Recordings == nil || d.Lessons == nil || d.Homework == nil || d.Assignments == nil ||
-		d.Proposals == nil || d.Subjects == nil || d.Clock == nil {
+		d.Proposals == nil || d.Subjects == nil || d.CallLinks == nil || d.Clock == nil {
 		return nil, fmt.Errorf("%s: %w: every port is required", opNewScreen, ErrInvalidConfig)
 	}
 	s := &Screen{
 		posts: d.Posts, recordings: d.Recordings, lessons: d.Lessons, homework: d.Homework, assignments: d.Assignments,
-		proposals: d.Proposals, subjects: d.Subjects, clock: d.Clock, log: d.Log,
+		proposals: d.Proposals, subjects: d.Subjects, callLinks: d.CallLinks, clock: d.Clock, log: d.Log,
 	}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
@@ -299,7 +300,47 @@ func (s *Screen) lessonsOf(ctx context.Context, day time.Time, views []PostView)
 		}
 		out = append(out, row)
 	}
-	return out, nil
+	return out, s.lessonSubjects(ctx, out)
+}
+
+// lessonSubjects sets the library subject of each lesson of the day and the call link the student keeps on it
+// (ADR-0032, TASK-364). A lesson whose string resolves to no subject (or to several) keeps SubjectID "".
+func (s *Screen) lessonSubjects(ctx context.Context, rows []LessonRow) error {
+	var names []string
+	for _, r := range rows {
+		if r.Subject != "" && !slices.Contains(names, r.Subject) {
+			names = append(names, r.Subject)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	matches, err := s.subjects.ResolveSubjects(ctx, names)
+	if err != nil {
+		return err
+	}
+	var ids []shared.SubjectID
+	for i, r := range rows {
+		if m, ok := matches[r.Subject]; ok && m.ID != "" {
+			rows[i].SubjectID, rows[i].SubjectName = m.ID, m.Name
+			if !slices.Contains(ids, m.ID) {
+				ids = append(ids, m.ID)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	links, err := s.callLinks.CallLinks(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i, r := range rows {
+		if r.SubjectID != "" {
+			rows[i].CallLink = links[r.SubjectID]
+		}
+	}
+	return nil
 }
 
 // waiting returns the proposals that wait for the student's «Да». An assignment that is gone leaves its labels empty.

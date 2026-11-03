@@ -66,7 +66,7 @@ func (c *core) newTodayScreen(e env, lib *library.Service, log *slog.Logger) (*t
 		Posts: sqlite.NewTodayPostRepository(c.db), Recordings: sqlite.NewRecordingRepository(c.db),
 		Lessons: sqlite.NewLessonRepository(c.db), Homework: sqlite.NewAssignmentRepository(c.db),
 		Assignments: todayAssignments{c.proposals}, Proposals: sqlite.NewProposalRepository(c.db), Subjects: lib,
-		Clock: e.local, Log: log,
+		CallLinks: lib, Clock: e.local, Log: log,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("app: today screen: %w", err)
