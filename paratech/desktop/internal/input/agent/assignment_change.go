@@ -69,9 +69,9 @@ func (a *Actions) changeAssignment(ctx context.Context, at origin, call values.C
 	return prepared{}, errUnavailable
 }
 
-// editAssignment is «Сохранить» of the assignment page with the fields the call names; the others stay as stored. A
-// deadline the agent changes updates its Google event through the existing sync without asking (C-4, О-2 а). Undo
-// writes back the fields read here (RevertAssignment, the intent's Prior).
+// editAssignment is «Сохранить» of the assignment page with the fields the call names; the others stay as stored. The
+// Google event of a changed deadline is not updated yet, as for edit_due: the event-refresh queue (ADR-0029 addendum
+// 3, C-4) is not built. Undo writes back the fields read here (RevertAssignment, the intent's Prior).
 func (a *Actions) editAssignment(ctx context.Context, call values.Call) (prepared, error) {
 	args := call.Args()
 	ref, _ := args.ID("assignment")
