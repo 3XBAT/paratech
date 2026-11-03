@@ -37,7 +37,7 @@ func TestLoad(t *testing.T) {
 			name: "defaults",
 			env:  withDB(nil),
 			want: config.Config{LogLevel: "info", ListenAddr: ":8080", DatabaseURL: devURL, ShutdownTimeout: 15 * time.Second,
-				QuotaUnit: "tokens", QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
+				QuotaUnit: "tokens", QuotaLimit: 25_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
 				AnthropicBaseURL: "https://api.anthropic.com", AnthropicAuth: "x-api-key", LLMTimeout: 5 * time.Minute, LLMModels: "default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:4096",
 				ProviderStream: true, RateLimitPerMinute: 30, RateLimitBurst: 10, AgentPlannerAlias: "planner", AgentStrongAlias: "default"},
 		},
@@ -47,7 +47,7 @@ func TestLoad(t *testing.T) {
 				config.EnvLogLevel: "debug", config.EnvListenAddr: "127.0.0.1:9000", config.EnvShutdownTimeout: "3s",
 			}),
 			want: config.Config{LogLevel: "debug", ListenAddr: "127.0.0.1:9000", DatabaseURL: devURL, ShutdownTimeout: 3 * time.Second,
-				QuotaUnit: "tokens", QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
+				QuotaUnit: "tokens", QuotaLimit: 25_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
 				AnthropicBaseURL: "https://api.anthropic.com", AnthropicAuth: "x-api-key", LLMTimeout: 5 * time.Minute, LLMModels: "default=claude-sonnet-5-5:8192,planner=claude-haiku-5-5:4096",
 				ProviderStream: true, RateLimitPerMinute: 30, RateLimitBurst: 10, AgentPlannerAlias: "planner", AgentStrongAlias: "default"},
 		},
@@ -308,7 +308,7 @@ func TestLoadQuota(t *testing.T) {
 		{
 			name: "defaults",
 			want: func(c config.Config) bool {
-				return c.QuotaUnit == "tokens" && c.QuotaLimit == 1_000_000 && c.QuotaReservationTTL == 10*time.Minute && c.IdempotencyRetention == 24*time.Hour
+				return c.QuotaUnit == "tokens" && c.QuotaLimit == 25_000_000 && c.QuotaReservationTTL == 10*time.Minute && c.IdempotencyRetention == 24*time.Hour
 			},
 		},
 		{
@@ -389,7 +389,7 @@ func TestConfigPrintsQuotaSettings(t *testing.T) {
 	var logged bytes.Buffer
 	slog.New(slog.NewJSONHandler(&logged, nil)).Info("cfg", "cfg", cfg)
 	for _, out := range []string{cfg.String(), logged.String()} {
-		if !strings.Contains(out, "1000000") || !strings.Contains(out, "tokens") {
+		if !strings.Contains(out, "25000000") || !strings.Contains(out, "tokens") {
 			t.Errorf("output lacks the quota settings: %s", out)
 		}
 	}

@@ -193,7 +193,7 @@ type Model struct {
 func Default() Config {
 	return Config{
 		LogLevel: "info", ListenAddr: ":8080", ShutdownTimeout: 15 * time.Second,
-		QuotaUnit: QuotaUnitTokens, QuotaLimit: 1_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
+		QuotaUnit: QuotaUnitTokens, QuotaLimit: 25_000_000, QuotaReservationTTL: 10 * time.Minute, IdempotencyRetention: 24 * time.Hour,
 		AnthropicBaseURL: DefaultAnthropicBaseURL, AnthropicAuth: AnthropicAuthXAPIKey, LLMTimeout: 5 * time.Minute, LLMModels: DefaultLLMModels, ProviderStream: true,
 		RateLimitPerMinute: 30, RateLimitBurst: 10,
 		AgentPlannerAlias: DefaultAgentPlannerAlias, AgentStrongAlias: DefaultAgentStrongAlias,

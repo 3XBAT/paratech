@@ -85,7 +85,7 @@ and Release are Hub-internal (ADR-0005(f), ADR-0008). Settings (env or flag):
 | Env | Flag | Default | Rule |
 |---|---|---|---|
 | `HUB_QUOTA_UNIT` | `-quota-unit` | `tokens` | only `tokens` |
-| `HUB_QUOTA_LIMIT` | `-quota-limit` | `1000000` | > 0; a new value applies to every tester at once |
+| `HUB_QUOTA_LIMIT` | `-quota-limit` | `25000000` | > 0; a new value applies to every tester at once |
 | `HUB_QUOTA_RESERVATION_TTL` | `-quota-reservation-ttl` | `10m` | 1m..1h and at least 2x `HUB_LLM_TIMEOUT` (with the default 5m timeout a TTL below 10m fails at startup; lower the timeout first) |
 | `HUB_IDEMPOTENCY_RETENTION` | `-idempotency-retention` | `24h` | 1h..24h |
 
