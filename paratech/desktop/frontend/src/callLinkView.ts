@@ -1,18 +1,18 @@
 // View logic and the flow of the link to the online class kept on a subject (TASK-364, ADR-0032 addendum). Pure, no React.
 // The core checks the link (http or https, length) and opens it; the page never builds a URL, sends only the subject ID to
-// open, and shows a link as plain text (the host on «Сегодня», host and full text on the page of the subject).
+// open, and shows a link as plain text (the host on «Сегодня», the full text on the page of the subject).
 // The voice is impersonal. Subject names and links are typed or imported text: passed through untouched, text nodes only.
 
 import {
   type CallLinkResult,
-  genericError,
+  type CreateWithCallLink,
   type LibraryApi,
   type LibraryCallLink,
   type LibrarySubject,
-  libraryErrorText,
-  removedNameText,
+  type SubjectRestore,
 } from "./bindings/library.js";
 import type { TodayLesson } from "./bindings/today.js";
+import { removalTexts } from "./subjectRemovalView.js";
 
 /** How long a confirming line («Ссылка на пару сохранена.») stays. */
 export const confirmMs = 6000;
@@ -20,60 +20,54 @@ export const confirmMs = 6000;
 export const callLinkTexts = {
   join: "Подключиться",
   joining: "Открытие…",
+  /** The tooltip of «Подключиться»: where it leads is on the card already. */
+  joinTitle: "Открыть ссылку на пару (запись не начнётся)",
   add: "Добавить ссылку",
   change: "Изменить",
+  replace: "Заменить",
   clear: "Удалить",
   clearing: "Удаление…",
   undo: "Вернуть",
   restoring: "Возврат…",
+  revive: "Вернуть предмет",
   save: "Сохранить",
   saveCreate: "Создать предмет и сохранить",
   saving: "Сохранение…",
   cancel: "Отмена",
-  close: "Закрыть",
   retry: "Повторить",
   openSubjects: "Открыть «Предметы»",
   /** The label of the field and of the block on the page of a subject. */
   field: "Ссылка на пару",
   placeholder: "https://…",
-  none: "Ссылки на пару нет",
-  fieldEmpty: "Вставьте ссылку на пару.",
+  none: "Ссылки на пару нет. С ней на «Сегодня» появится «Подключиться».",
+  fieldEmpty: "Ссылка не вставлена.",
   invalid: "Нужна ссылка вида https://… (http или https).",
-  saveFailed: "Не удалось сохранить ссылку. Попробуйте ещё раз.",
-  openFailed: "Не удалось открыть ссылку. Попробуйте ещё раз.",
-  clearFailed: "Не удалось удалить ссылку. Попробуйте ещё раз.",
+  saveFailed: "Не удалось сохранить ссылку. Можно повторить.",
+  openFailed: "Не удалось открыть ссылку. Можно повторить.",
+  clearFailed: "Не удалось удалить ссылку. Можно повторить.",
   gone: "Ссылки на пару уже нет. Можно добавить новую.",
   subjectGone: "Предмет не найден, данные обновлены.",
   saved: "Ссылка на пару сохранена.",
-  opened: "Ссылка открыта в браузере.",
+  opened: "Ссылка открыта.",
   cleared: "Ссылка на пару удалена.",
   restored: "Ссылка на пару возвращена.",
   restoreFailed: "Не удалось вернуть ссылку. Её можно добавить заново.",
-  createFailed: "Не удалось создать предмет. Попробуйте ещё раз.",
-  noSubject: "У пары нет предмета: ссылку можно добавить на странице предмета в «Предметы».",
+  invalidName: "Название предмета в расписании не подходит: нужно от 1 до 200 символов.",
+  createFailed: "Не удалось создать предмет. Можно повторить.",
+  reviveFailed: "Не удалось вернуть предмет. Можно повторить.",
+  reviveChanged: "Предмет изменился, вернуть его не удалось. Можно ещё раз нажать «Создать предмет и сохранить».",
 } as const;
-
-/** The text of a refused create for a name that is taken; the core's message (library.go), pinned by a test. */
-export const nameTakenText = "Предмет с таким названием уже есть.";
 
 /** «Ссылка хранится у предмета «Физика». Создать предмет и сохранить ссылку?» */
 export function createQuestion(name: string): string {
   return `Ссылка хранится у предмета «${name}». Создать предмет и сохранить ссылку?`;
 }
 
-/**
- * Why a subject cannot be made for the pair, in plain words. «Такое название уже есть» happens when the pair's subject
- * string fits several subjects (or an alias), so the pair cannot pick one: the student picks the subject in «Предметы».
- */
-export function createRefusalText(err: unknown, name: string): string {
-  const msg = libraryErrorText(err);
-  if (msg === removedNameText) {
-    return `Предмет «${name}» удалён. Вернуть его можно в «Предметы»: создайте предмет с тем же названием.`;
-  }
-  if (msg === nameTakenText) {
-    return `Не удалось создать предмет «${name}»: такое название уже есть, а пара не знает, к какому предмету относится. Ссылку можно добавить у нужного предмета в «Предметы».`;
-  }
-  return msg === genericError ? callLinkTexts.createFailed : msg;
+/** The field of «Изменить» on «Сегодня» is empty (the card never holds the link): the texts say what the new one does. */
+export function replaceTexts(host: string): { placeholder: string; hint: string } {
+  return host === ""
+    ? { placeholder: "Новая ссылка", hint: "Новая ссылка заменит прежнюю." }
+    : { placeholder: `Новая ссылка вместо ${host}`, hint: `Новая ссылка заменит ссылку на ${host}.` };
 }
 
 // ---- The card of a pair on «Сегодня» ----
@@ -82,17 +76,37 @@ export function createRefusalText(err: unknown, name: string): string {
 export type CardLink =
   | { kind: "join"; host: string }
   | { kind: "add" }
-  /** The pair names a subject the library does not have (or cannot pick): it can be created, then the link is kept. */
+  /** The schedule names a subject the library does not have: it can be created, then the link is kept. */
   | { kind: "create"; name: string }
-  /** The pair names no subject at all. */
-  | { kind: "nosubject" };
+  /** The pair names no subject at all: nowhere to keep a link. */
+  | { kind: "nosubject" }
+  /** The name fits several subjects: the card cannot pick one, the link is not kept here. */
+  | { kind: "ambiguous"; name: string }
+  /** The library could not be read just now. */
+  | { kind: "unavailable" };
 
-export function cardLink(l: Pick<TodayLesson, "subject" | "subjectId" | "hasCallLink" | "callLinkHost">): CardLink {
-  if (l.subjectId === "") {
-    const name = l.subject.trim();
-    return name === "" ? { kind: "nosubject" } : { kind: "create", name };
+export function cardLink(l: Pick<TodayLesson, "subject" | "subjectState" | "subjectId" | "hasCallLink" | "callLinkHost">): CardLink {
+  const name = l.subject.trim();
+  switch (l.subjectState) {
+    case "known":
+      if (l.subjectId === "") {
+        return { kind: "unavailable" };
+      }
+      return l.hasCallLink ? { kind: "join", host: l.callLinkHost } : { kind: "add" };
+    case "unknown":
+      return name === "" ? { kind: "nosubject" } : { kind: "create", name };
+    case "ambiguous":
+      return { kind: "ambiguous", name };
+    case "none":
+      return { kind: "nosubject" };
+    default:
+      return { kind: "unavailable" };
   }
-  return l.hasCallLink ? { kind: "join", host: l.callLinkHost } : { kind: "add" };
+}
+
+/** The pair can open the field of a link (add, change, create the subject): the other kinds only say why not. */
+export function canEditLink(card: CardLink): boolean {
+  return card.kind === "join" || card.kind === "add" || card.kind === "create";
 }
 
 /** The key of a pair's link controls: its ID (the focus ids and the open form are kept by it). */
@@ -100,28 +114,45 @@ export function linkKey(l: Pick<TodayLesson, "id" | "start" | "title">): string 
   return l.id !== "" ? l.id : `${l.start}|${l.title}`;
 }
 
-/** The explanation above the field (or instead of it); "" when the card needs none. */
+/** The explanation above the field; "" when the card needs none. */
 export function explainText(card: CardLink): string {
-  return card.kind === "create" ? createQuestion(card.name) : card.kind === "nosubject" ? callLinkTexts.noSubject : "";
+  return card.kind === "create" ? createQuestion(card.name) : "";
 }
 
-/** The pair has nowhere to keep a link: the form has no field, only the explanation and the way to «Предметы». */
-export function hasNoField(card: CardLink): boolean {
-  return card.kind === "nosubject";
+/**
+ * The quiet one-line reason on a card whose link cannot be kept there; "" for the other cards. Every text is true to the
+ * card: a link saved on the page of a subject never shows here when the pair is not bound to that subject.
+ */
+export function cardNote(card: CardLink): string {
+  switch (card.kind) {
+    case "nosubject":
+      return "У пары в расписании не указан предмет, поэтому ссылку негде сохранить.";
+    case "ambiguous":
+      return card.name === ""
+        ? "Название пары подходит к нескольким предметам: ссылку на этой карточке сохранить нельзя."
+        : `Название «${card.name}» подходит к нескольким предметам: ссылку на этой карточке сохранить нельзя.`;
+    case "unavailable":
+      return "Ссылка недоступна: «Предметы» сейчас не прочитать.";
+    default:
+      return "";
+  }
 }
 
-export function saveLabel(card: CardLink): string {
+/** «Открыть «Предметы»» next to the note helps only when the right subject is there to pick. */
+export function noteOffersSubjects(card: CardLink): boolean {
+  return card.kind === "ambiguous";
+}
+
+export function saveLabel(card: CardLink, replacing = false): string {
+  if (replacing) {
+    return callLinkTexts.replace;
+  }
   return card.kind === "create" ? callLinkTexts.saveCreate : callLinkTexts.save;
 }
 
 /** The accessible name of a button of a pair's card: the action and the pair. */
 export function pairLabel(action: string, title: string): string {
   return `${action}: ${title}`;
-}
-
-/** The tooltip of «Подключиться»: where it leads (the host only). */
-export function joinTitle(host: string): string {
-  return host === "" ? "" : `Ссылка на пару: ${host}`;
 }
 
 /**
@@ -133,6 +164,7 @@ export function applySubjectLink(lessons: readonly TodayLesson[], key: string, s
     linkKey(l) === key || (l.subjectId !== "" && l.subjectId === subject.id)
       ? {
           ...l,
+          subjectState: "known",
           subjectId: subject.id,
           subjectName: subject.name,
           hasCallLink: subject.callLink !== null,
@@ -155,6 +187,61 @@ export function linkId(key: string, part: LinkPart): string {
   return `calllink-${part}-${key}`;
 }
 
+// ---- The refusals of creating a subject with a link ----
+
+/** The button next to the text under the field: «Открыть «Предметы»», or «Вернуть предмет» for a removed one. */
+export type FieldAction = "" | "subjects" | "revive";
+
+/** A removed subject that holds the name: «Вернуть предмет» is restoreSubject(subjectId, version). */
+export interface ReviveOffer {
+  key: string;
+  name: string;
+  subjectId: string;
+  version: number;
+}
+
+export interface CreateRefusal {
+  text: string;
+  action: FieldAction;
+  offer: ReviveOffer | null;
+}
+
+/** What a refused createSubjectWithCallLink says under the field (nothing was created). */
+export function createRefusal(res: CreateWithCallLink, name: string, key: string): CreateRefusal {
+  switch (res.problem) {
+    case "invalid":
+      return { text: callLinkTexts.invalid, action: "", offer: null };
+    case "invalid_name":
+      return { text: callLinkTexts.invalidName, action: "", offer: null };
+    case "name_taken":
+      return { text: `Название «${name}» уже занято другим предметом.`, action: "subjects", offer: null };
+    case "removed_name_taken":
+      return res.removed === null
+        ? { text: `Название «${name}» занято удалённым предметом.`, action: "subjects", offer: null }
+        : {
+            text: `Предмет «${name}» удалён. Его можно вернуть.`,
+            action: "revive",
+            offer: { key, name, subjectId: res.removed.subjectId, version: res.removed.version },
+          };
+    default:
+      return { text: callLinkTexts.createFailed, action: "", offer: null };
+  }
+}
+
+/** Why a restore of a removed subject failed, in plain words (the texts of the subject pages where they exist). */
+export function reviveRefusalText(problem: Exclude<SubjectRestore["problem"], "">): string {
+  switch (problem) {
+    case "expired":
+      return `${removalTexts.expired}.`;
+    case "changed":
+      return callLinkTexts.reviveChanged;
+    case "not_found":
+      return removalTexts.restoreGone;
+    default:
+      return callLinkTexts.reviveFailed;
+  }
+}
+
 // ---- The flow ----
 
 export type LinkMode = "add" | "change";
@@ -170,8 +257,8 @@ export interface LinkLine {
   key: string;
   kind: "ok" | "fail";
   text: string;
-  /** The button next to the text: repeat the open, or go to «Предметы». */
-  action: "" | "retry" | "subjects";
+  /** The button next to the text: repeat the open. */
+  action: "" | "retry";
 }
 
 /** A link the student just removed: «Вернуть» saves it back. Typed text, kept only in memory. */
@@ -184,18 +271,31 @@ export interface RemovedLink {
 export interface LinkState {
   /** The open form; at most one. */
   form: LinkForm | null;
-  /** A call runs: every control is off (one call at a time). */
-  busy: "" | "save" | "open" | "clear" | "restore";
+  /** A call runs: every control is off (one call at a time). "revive" brings a removed subject back. */
+  busy: "" | "save" | "open" | "clear" | "restore" | "revive";
   busyKey: string;
   /** Under the field (the rule broke); the line below is for results. */
   fieldError: string;
+  /** The button next to the error under the field, and the removed subject it brings back. */
+  fieldAction: FieldAction;
+  reviveOffer: ReviveOffer | null;
   line: LinkLine | null;
   removed: RemovedLink | null;
   /** The element to focus; `n` changes on every request so the same element can be asked again. */
   focus: { id: string; n: number };
 }
 
-export const idleLink: LinkState = { form: null, busy: "", busyKey: "", fieldError: "", line: null, removed: null, focus: { id: "", n: 0 } };
+export const idleLink: LinkState = {
+  form: null,
+  busy: "",
+  busyKey: "",
+  fieldError: "",
+  fieldAction: "",
+  reviveOffer: null,
+  line: null,
+  removed: null,
+  focus: { id: "", n: 0 },
+};
 
 /** Where a pair's call goes. `name` is the subject string of the pair, used only to make the subject when there is none. */
 export interface LinkTarget {
@@ -214,7 +314,10 @@ export interface LinkHost {
   reread(): void;
 }
 
-type FlowApi = Pick<LibraryApi, "createSubject" | "setSubjectCallLink" | "clearSubjectCallLink" | "openSubjectCallLink">;
+type FlowApi = Pick<
+  LibraryApi,
+  "createSubjectWithCallLink" | "restoreSubject" | "setSubjectCallLink" | "clearSubjectCallLink" | "openSubjectCallLink"
+>;
 
 const failedResult: CallLinkResult = { problem: "failed", subject: null };
 
@@ -266,7 +369,7 @@ export class CallLinkFlow {
     if (this.pending) {
       return;
     }
-    this.set({ form: { key, mode, text }, fieldError: "", line: null, removed: null }, linkId(key, "field"));
+    this.set({ form: { key, mode, text }, fieldError: "", fieldAction: "", reviveOffer: null, line: null, removed: null }, linkId(key, "field"));
   }
 
   /** The student typed: the error and the old result go away. */
@@ -275,7 +378,7 @@ export class CallLinkFlow {
     if (form === null) {
       return;
     }
-    this.set({ form: { ...form, text }, fieldError: "", line: null });
+    this.set({ form: { ...form, text }, fieldError: "", fieldAction: "", reviveOffer: null, line: null });
   }
 
   /** Escape or «Отмена»: the focus returns to the button that opened the field. */
@@ -284,7 +387,7 @@ export class CallLinkFlow {
     if (this.pending || form === null) {
       return;
     }
-    this.set({ form: null, fieldError: "", line: null }, linkId(form.key, form.mode));
+    this.set({ form: null, fieldError: "", fieldAction: "", reviveOffer: null, line: null }, linkId(form.key, form.mode));
   }
 
   /** A result that only confirms («сохранена», «открыта») fades after a while; a failure and the undo offer stay. */
@@ -297,7 +400,9 @@ export class CallLinkFlow {
   private async guard(kind: LinkState["busy"], key: string, work: (fresh: () => boolean) => Promise<void>): Promise<void> {
     this.pending = true;
     const epoch = this.epoch;
-    this.set({ busy: kind, busyKey: key, fieldError: "", line: null });
+    // «Вернуть предмет» works under the error it was offered with: that text stays while the call runs.
+    const keep = kind === "revive";
+    this.set({ busy: kind, busyKey: key, ...(keep ? {} : { fieldError: "", fieldAction: "", reviveOffer: null }), line: null });
     try {
       await work(() => epoch === this.epoch);
     } finally {
@@ -316,9 +421,37 @@ export class CallLinkFlow {
     }
   }
 
+  /** The end of a setSubjectCallLink: the card is told, or the field stays with the refusal and the typed text. */
+  private finishSet(res: CallLinkResult, key: string, okText: string, fresh: () => boolean): void {
+    if (res.problem === "" && res.subject !== null) {
+      this.host.applied(res.subject, key);
+      if (fresh()) {
+        const line: LinkLine = { key, kind: "ok", text: okText, action: "" };
+        this.set({ busy: "", form: null, line, removed: null, fieldError: "", fieldAction: "", reviveOffer: null }, linkId(key, "join"));
+      }
+      return;
+    }
+    if (res.problem === "not_found") {
+      this.host.reread();
+    }
+    if (!fresh()) {
+      return;
+    }
+    if (res.problem === "invalid") {
+      this.set({ busy: "", fieldError: callLinkTexts.invalid }, linkId(key, "field"));
+    } else if (res.problem === "not_found") {
+      const line: LinkLine = { key, kind: "fail", text: callLinkTexts.subjectGone, action: "" };
+      this.set({ busy: "", form: null, line }, linkId(key, "add"));
+    } else {
+      const line: LinkLine = { key, kind: "fail", text: callLinkTexts.saveFailed, action: "" };
+      this.set({ busy: "", line }, linkId(key, "field"));
+    }
+  }
+
   /**
-   * «Сохранить»: a pair without a library subject first makes the subject (a refusal says why and leads to «Предметы»),
-   * then the link is checked and kept by the core. A refused link keeps the field with the typed text.
+   * «Сохранить»: a pair with a library subject keeps the link there (the core checks it). A pair whose subject is not in
+   * the library creates the subject and keeps the link in one call: the link is checked first, so a refusal creates
+   * nothing and the field stays with the typed text and the reason under it.
    */
   async save(target: LinkTarget): Promise<void> {
     const form = this.current.form;
@@ -334,21 +467,16 @@ export class CallLinkFlow {
       return;
     }
     await this.guard("save", target.key, async (fresh) => {
-      let subjectId = target.subjectId;
-      if (subjectId === "") {
-        try {
-          const created = await this.api.createSubject(target.name, "");
-          this.host.applied(created, target.key);
-          subjectId = created.id;
-        } catch (err) {
-          if (fresh()) {
-            const line: LinkLine = { key: target.key, kind: "fail", text: createRefusalText(err, target.name), action: "subjects" };
-            this.set({ busy: "", form: null, line }, linkId(target.key, "add"));
-          }
-          return;
-        }
+      if (target.subjectId !== "") {
+        this.finishSet(await this.setLink(target.subjectId, text), target.key, callLinkTexts.saved, fresh);
+        return;
       }
-      const res = await this.setLink(subjectId, text);
+      let res: CreateWithCallLink;
+      try {
+        res = await this.api.createSubjectWithCallLink(target.name, text);
+      } catch {
+        res = { problem: "failed", subject: null, removed: null };
+      }
       if (res.problem === "" && res.subject !== null) {
         this.host.applied(res.subject, target.key);
         if (fresh()) {
@@ -357,21 +485,48 @@ export class CallLinkFlow {
         }
         return;
       }
-      if (res.problem === "not_found") {
-        this.host.reread();
+      if (fresh()) {
+        const refusal = createRefusal(res, target.name, target.key);
+        this.set({ busy: "", fieldError: refusal.text, fieldAction: refusal.action, reviveOffer: refusal.offer }, linkId(target.key, "field"));
       }
-      if (!fresh()) {
+    });
+  }
+
+  /**
+   * «Вернуть предмет»: the removed subject that holds the name comes back, then the typed link is kept on it (the core
+   * checks it as any other). A refusal stays under the field; a call that failed can be repeated.
+   */
+  async revive(target: LinkTarget): Promise<void> {
+    const offer = this.current.reviveOffer;
+    const form = this.current.form;
+    if (this.pending || offer === null || form === null || form.key !== target.key || offer.key !== target.key) {
+      return;
+    }
+    const text = form.text.trim();
+    await this.guard("revive", target.key, async (fresh) => {
+      let res: SubjectRestore;
+      try {
+        res = await this.api.restoreSubject(offer.subjectId, offer.version);
+      } catch {
+        res = { problem: "failed", subject: null };
+      }
+      if (res.problem !== "" || res.subject === null) {
+        const problem = res.problem === "" ? "failed" : res.problem;
+        if (problem !== "failed") {
+          this.host.reread();
+        }
+        if (fresh()) {
+          // Only a failed call is worth repeating with the same version; the other refusals need a fresh create.
+          const again = problem === "failed";
+          this.set(
+            { busy: "", fieldError: reviveRefusalText(problem), fieldAction: again ? "revive" : "", reviveOffer: again ? offer : null },
+            linkId(target.key, "field"),
+          );
+        }
         return;
       }
-      if (res.problem === "invalid") {
-        this.set({ busy: "", fieldError: callLinkTexts.invalid }, linkId(target.key, "field"));
-      } else if (res.problem === "not_found") {
-        const line: LinkLine = { key: target.key, kind: "fail", text: callLinkTexts.subjectGone, action: "" };
-        this.set({ busy: "", form: null, line }, linkId(target.key, "add"));
-      } else {
-        const line: LinkLine = { key: target.key, kind: "fail", text: callLinkTexts.saveFailed, action: "" };
-        this.set({ busy: "", line }, linkId(target.key, "field"));
-      }
+      this.host.applied(res.subject, target.key);
+      this.finishSet(await this.setLink(res.subject.id, text), target.key, `Предмет «${offer.name}» возвращён, ссылка на пару сохранена.`, fresh);
     });
   }
 

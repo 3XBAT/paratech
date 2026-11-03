@@ -5,18 +5,20 @@ import {
   type CallLinkFlow,
   type CardLink,
   callLinkTexts,
+  canEditLink,
   cardLink,
+  cardNote,
   confirmMs,
   explainText,
-  hasNoField,
-  joinTitle,
   type LinkForm,
   type LinkLine,
   type LinkState,
   type LinkTarget,
   linkId,
   linkKey,
+  noteOffersSubjects,
   pairLabel,
+  replaceTexts,
   saveLabel,
 } from "../callLinkView.js";
 import { Button } from "../ui/Button.js";
@@ -36,6 +38,8 @@ export interface LinkActions {
   join(target: LinkTarget): void;
   clear(target: LinkTarget, link: { link: string; host: string }): void;
   restore(): void;
+  /** «Вернуть предмет»: the removed subject that holds the name comes back, the typed link is kept on it. */
+  revive(target: LinkTarget): void;
   /** The confirming line fades. */
   dismiss(): void;
 }
@@ -56,6 +60,7 @@ export function linkActions(flow: CallLinkFlow): LinkActions {
     join: (target) => void flow.join(target),
     clear: (target, link) => void flow.clear(target, link),
     restore: () => void flow.restore(),
+    revive: (target) => void flow.revive(target),
     dismiss: () => flow.dismiss(),
   };
 }
@@ -101,11 +106,6 @@ function Line(props: { line: LinkLine; links: LinkControls; onRetry?: () => void
           {callLinkTexts.retry}
         </Button>
       )}
-      {line.action === "subjects" && (
-        <Button size="sm" onClick={links.onOpenSubjects}>
-          {callLinkTexts.openSubjects}
-        </Button>
-      )}
       {props.undo === true && (
         <Button
           id={linkId(line.key, "undo")}
@@ -125,13 +125,18 @@ function Line(props: { line: LinkLine; links: LinkControls; onRetry?: () => void
 
 /**
  * The small form: the field (Enter saves, Escape cancels), «Сохранить», «Отмена»; above it the explanation when the pair has
- * no subject to keep the link. A pair that names no subject at all has no field: the way to «Предметы» instead.
+ * no subject yet (the subject is created with the link). `replaceHost` is set for «Изменить» on «Сегодня»: the card never
+ * holds the link, so the field is empty and says what the new link replaces. A refusal stays under the field with its
+ * button («Открыть «Предметы»», «Вернуть предмет»).
  */
-function Form(props: { form: LinkForm; card: CardLink; target: LinkTarget; links: LinkControls; labelled: boolean }) {
+function Form(props: { form: LinkForm; card: CardLink; target: LinkTarget; links: LinkControls; labelled: boolean; replaceHost?: string }) {
   const { form, card, target, links } = props;
   const { state, on } = links;
   const busy = state.busy !== "";
-  const explain = explainText(card);
+  const replacing = props.replaceHost !== undefined;
+  const replace = replaceTexts(props.replaceHost ?? "");
+  const explain = replacing ? replace.hint : explainText(card);
+  const placeholder = replacing ? replace.placeholder : callLinkTexts.placeholder;
   const fieldId = linkId(form.key, "field");
   const errorId = `${fieldId}-error`;
   const onKey = (e: KeyboardEvent) => {
@@ -141,21 +146,6 @@ function Form(props: { form: LinkForm; card: CardLink; target: LinkTarget; links
       on.cancel();
     }
   };
-  if (hasNoField(card)) {
-    return (
-      <div className="calllink-form" role="group" aria-label={callLinkTexts.field} onKeyDown={onKey}>
-        <p className="small muted">{explain}</p>
-        <div className="acts start">
-          <Button id={fieldId} size="sm" onClick={links.onOpenSubjects}>
-            {callLinkTexts.openSubjects}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={on.cancel}>
-            {callLinkTexts.close}
-          </Button>
-        </div>
-      </div>
-    );
-  }
   const submit = (e: FormEvent) => {
     e.preventDefault();
     on.save(target);
@@ -169,8 +159,8 @@ function Form(props: { form: LinkForm; card: CardLink; target: LinkTarget; links
           id={fieldId}
           value={form.text}
           maxLength={2048}
-          placeholder={callLinkTexts.placeholder}
-          aria-label={props.labelled ? undefined : callLinkTexts.field}
+          placeholder={placeholder}
+          aria-label={props.labelled ? undefined : replacing ? replace.placeholder : callLinkTexts.field}
           aria-invalid={state.fieldError !== ""}
           aria-describedby={state.fieldError !== "" ? errorId : undefined}
           inputMode="url"
@@ -180,17 +170,35 @@ function Form(props: { form: LinkForm; card: CardLink; target: LinkTarget; links
           onChange={(e) => on.type(e.target.value)}
         />
         <Button type="submit" size="sm" disabled={busy} busy={state.busy === "save"} busyLabel={callLinkTexts.saving}>
-          {saveLabel(card)}
+          {saveLabel(card, replacing)}
         </Button>
         <Button size="sm" variant="ghost" disabled={busy} onClick={on.cancel}>
           {callLinkTexts.cancel}
         </Button>
       </div>
       {state.fieldError !== "" && (
-        <span className="field-error small" id={errorId} role="alert">
-          <Icon name="warn" />
-          {state.fieldError}
-        </span>
+        <div className="calllink-refusal">
+          <span className="field-error small" id={errorId} role="alert">
+            <Icon name="warn" />
+            {state.fieldError}
+          </span>
+          {state.fieldAction === "subjects" && (
+            <Button size="sm" disabled={busy} onClick={links.onOpenSubjects}>
+              {callLinkTexts.openSubjects}
+            </Button>
+          )}
+          {state.fieldAction === "revive" && (
+            <Button
+              size="sm"
+              disabled={busy}
+              busy={state.busy === "revive"}
+              busyLabel={callLinkTexts.restoring}
+              onClick={() => on.revive(target)}
+            >
+              {callLinkTexts.revive}
+            </Button>
+          )}
+        </div>
       )}
     </form>
   );
@@ -220,13 +228,17 @@ export function LessonLinkButtons(props: { lesson: TodayLesson; title: string; l
         busy={state.busy === "open" && state.busyKey === key}
         busyLabel={callLinkTexts.joining}
         disabled={busy}
-        title={joinTitle(card.host) || undefined}
+        title={callLinkTexts.joinTitle}
         aria-label={pairLabel(callLinkTexts.join, title)}
         onClick={() => on.join(targetOf(lesson, card))}
       >
         {callLinkTexts.join}
       </Button>
     );
+  }
+  // A pair whose link cannot be kept on the card says why under the title (LessonLinkHost); nothing to click into a refusal.
+  if (!canEditLink(card)) {
+    return null;
   }
   // While the field of this pair is open it has its own buttons.
   if (state.form?.key === key) {
@@ -246,11 +258,27 @@ export function LessonLinkButtons(props: { lesson: TodayLesson; title: string; l
   );
 }
 
-/** Under the title: the host of the link (never the link) and «Изменить». Nothing for a pair without a link. */
+/**
+ * Under the title: the host of the link (never the link) and «Изменить»; for a pair whose link cannot be kept on the card
+ * the quiet reason (with «Открыть «Предметы»» when the right subject is to be picked there). Nothing for «Добавить ссылку».
+ */
 export function LessonLinkHost(props: { lesson: TodayLesson; title: string; links: LinkControls }) {
   const { lesson, title, links } = props;
   const card = cardLink(lesson);
   const key = linkKey(lesson);
+  const note = cardNote(card);
+  if (note !== "") {
+    return (
+      <div className="small muted today-host">
+        <span>{note}</span>
+        {noteOffersSubjects(card) && (
+          <Button size="sm" variant="ghost" aria-label={pairLabel(callLinkTexts.openSubjects, title)} onClick={links.onOpenSubjects}>
+            {callLinkTexts.openSubjects}
+          </Button>
+        )}
+      </div>
+    );
+  }
   if (card.kind !== "join") {
     return null;
   }
@@ -278,15 +306,19 @@ export function LessonLinkPanel(props: { lesson: TodayLesson; links: LinkControl
   const { lesson, links } = props;
   const card = cardLink(lesson);
   const key = linkKey(lesson);
-  const form = links.state.form?.key === key ? links.state.form : null;
+  const form = links.state.form?.key === key && canEditLink(card) ? links.state.form : null;
   const line = links.state.line?.key === key ? links.state.line : null;
   useFading(line, links.on);
   if (form === null && line === null) {
     return null;
   }
+  // «Изменить» opens an empty field (the card never holds the link): it says which link the new one replaces.
+  const replaceHost = form?.mode === "change" && card.kind === "join" ? card.host : undefined;
   return (
     <div className="today-link">
-      {form !== null && <Form form={form} card={card} target={targetOf(lesson, card)} links={links} labelled={false} />}
+      {form !== null && (
+        <Form form={form} card={card} target={targetOf(lesson, card)} links={links} labelled={false} replaceHost={replaceHost} />
+      )}
       {line !== null && <Line line={line} links={links} onRetry={() => links.on.join(targetOf(lesson, card))} />}
     </div>
   );
@@ -295,7 +327,7 @@ export function LessonLinkPanel(props: { lesson: TodayLesson; links: LinkControl
 // ---- The page of a subject ----
 
 /**
- * «Ссылка на пару» on the page of a subject, next to the teachers: the host (the full link as selectable text), «Подключиться»,
+ * «Ссылка на пару» on the page of a subject, next to the teachers: the full link as selectable text, «Подключиться»,
  * «Изменить», «Удалить» with «Вернуть»; without a link «Ссылки на пару нет» and «Добавить ссылку».
  */
 export function CallLinkBlock(props: { subject: LibrarySubject; links: LinkControls }) {
@@ -321,8 +353,10 @@ export function CallLinkBlock(props: { subject: LibrarySubject; links: LinkContr
           <div className="lrow">
             <div className="tx">
               <p className="t">{callLinkTexts.field}</p>
-              <div className="meta">{link === null ? callLinkTexts.none : <bdi>{link.host}</bdi>}</div>
-              {link !== null && (
+              {/* The host is part of the full link: one line, the whole text selectable (ellipsis, title). */}
+              {link === null ? (
+                <div className="meta">{callLinkTexts.none}</div>
+              ) : (
                 <div className="meta calllink-full" title={link.link}>
                   <bdi>{link.link}</bdi>
                 </div>
@@ -340,6 +374,7 @@ export function CallLinkBlock(props: { subject: LibrarySubject; links: LinkContr
                   busy={state.busy === "open" && state.busyKey === key}
                   busyLabel={callLinkTexts.joining}
                   disabled={busy}
+                  title={callLinkTexts.joinTitle}
                   onClick={() => on.join(target)}
                 >
                   {callLinkTexts.join}

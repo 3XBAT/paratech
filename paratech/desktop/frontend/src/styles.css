@@ -109,6 +109,7 @@ html, body, #root { height: 100%; }
 .calllink-form p { margin: 0; }
 .calllink-fieldrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .calllink-fieldrow .input { flex: 1 1 14rem; min-width: 0; }
+.calllink-refusal { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .calllink-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 8px; }
 .calllink-line p, .calllink-line .result { margin: 0; }
 .section.calllink .calllink-line { padding: 0 16px; }
