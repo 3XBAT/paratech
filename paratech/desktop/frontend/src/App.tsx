@@ -77,6 +77,7 @@ function PageView(props: {
           visit={props.visit}
           subjectId={props.subject}
           onSelect={props.onSelectSubject}
+          onOpenAssignment={props.onOpenAssignment}
           teacherFocus={props.teacherFocus}
           onTeacherFocusDone={props.onTeacherFocusDone}
           openReview={props.scheduleReview}

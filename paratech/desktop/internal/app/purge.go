@@ -8,12 +8,18 @@ import (
 
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/homeworkflow"
+	"paratech/desktop/internal/cases/subjectpurge"
 )
 
-// purgeInterval is how often the purge of deleted assignments runs after the one at the start (ADR-0029 addendum 2).
+// purgeInterval is how often the purges run after the one at the start: the deleted assignments (ADR-0029 addendum 2)
+// and the removed subjects (ADR-0027).
 const purgeInterval = 24 * time.Hour
 
-const purgeStep = "deleted assignments past the restore window"
+// The names of the purges as startup cleanup steps and in the log.
+const (
+	purgeStep        = "deleted assignments past the restore window"
+	subjectPurgeStep = "removed subjects past the restore window"
+)
 
 // sleeper waits on the time source of the use cases (ARCH-24).
 type sleeper interface {
@@ -33,13 +39,30 @@ func (c *core) wirePurge(e env, log *slog.Logger) error {
 		return fmt.Errorf("app: assignment purge: %w", err)
 	}
 	c.cleanups = append(c.cleanups, cleanup{name: purgeStep, run: purger.PurgeDeleted})
-	c.purge = loop{name: "assignment purge", run: purgeLoop(e.clock, purger.PurgeDeleted, log)}
+	c.purge = loop{name: "assignment purge", run: purgeLoop(e.clock, purgeStep, purger.PurgeDeleted, log)}
 	return nil
 }
 
+// wireSubjectPurge builds the purge of the subjects removed longer than the restore window (TASK-308, ADR-0027): a
+// startup cleanup and a loop that runs it once a day, like the assignment purge. Its clock is the one of «Вернуть»
+// (library.Service); the files go through the Storage Manager. The library gets it too, to free the name of an
+// expired subject at once.
+func (c *core) wireSubjectPurge(e env, notes *sqlite.NoteRepository, log *slog.Logger) (*subjectpurge.Purger, error) {
+	purger, err := subjectpurge.New(subjectpurge.Deps{
+		Subjects: sqlite.NewSubjectRepository(c.db), Notes: notes, TicketSets: sqlite.NewSubjectTicketSets(c.db),
+		Materials: sqlite.NewMaterialRepository(c.db), Blobs: c.store, Clock: e.local, Log: log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("app: subject purge: %w", err)
+	}
+	c.cleanups = append(c.cleanups, cleanup{name: subjectPurgeStep, run: purger.Purge})
+	c.subjectPurge = loop{name: "subject purge", run: purgeLoop(e.clock, subjectPurgeStep, purger.Purge, log)}
+	return purger, nil
+}
+
 // purgeLoop runs purge every purgeInterval on sl's time until ctx ends; the startup cleanup made the first run. A
-// failed run is logged and the next one tries again.
-func purgeLoop(sl sleeper, purge func(ctx context.Context) (int, error), log *slog.Logger) func(ctx context.Context) error {
+// failed run is logged with step and the next one tries again.
+func purgeLoop(sl sleeper, step string, purge func(ctx context.Context) (int, error), log *slog.Logger) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		for {
 			if err := sl.Sleep(ctx, purgeInterval); err != nil {
@@ -48,9 +71,9 @@ func purgeLoop(sl sleeper, purge func(ctx context.Context) (int, error), log *sl
 			n, err := purge(ctx)
 			switch {
 			case err != nil && ctx.Err() == nil:
-				log.Error("daily cleanup failed", "step", purgeStep, "removed", n, "err", err)
+				log.Error("daily cleanup failed", "step", step, "removed", n, "err", err)
 			case n > 0:
-				log.Info("daily cleanup", "step", purgeStep, "removed", n)
+				log.Info("daily cleanup", "step", step, "removed", n)
 			}
 		}
 	}

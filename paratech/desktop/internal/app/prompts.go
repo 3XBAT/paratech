@@ -77,14 +77,16 @@ func (c *core) wirePrompts(e env, popup recordingprompt.Popup, log *slog.Logger)
 }
 
 // loops are the background loops of the core: the scheduler and the recording prompt, when they are wired, and the
-// daily purge of deleted assignments.
+// daily purges of deleted assignments and removed subjects.
 func (c *core) loops() []loop {
 	var out []loop
 	if c.prompts != nil {
 		out = append(out, loop{name: "scheduler", run: c.scheduler.Run}, loop{name: "recording prompt", run: c.prompts.Run})
 	}
-	if c.purge.run != nil {
-		out = append(out, c.purge)
+	for _, l := range []loop{c.purge, c.subjectPurge} {
+		if l.run != nil {
+			out = append(out, l)
+		}
 	}
 	return out
 }

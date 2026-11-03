@@ -25,3 +25,15 @@ SET status     = sqlc.arg(status),
     version    = version + 1,
     updated_at = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
+
+-- The sets of a subject for its purge (TASK-308): they name it without a foreign key and would be left dangling.
+-- name: ListTicketSetIDsOfSubject :many
+SELECT id FROM ticket_sets WHERE subject_id = sqlc.arg(subject_id) ORDER BY created_at, id;
+
+-- Deletes a set of a subject still removed at or before the cutoff (ms).
+-- name: PurgeTicketSetOfRemovedSubject :execrows
+DELETE FROM ticket_sets
+WHERE ticket_sets.id = sqlc.arg(id)
+  AND ticket_sets.subject_id = sqlc.arg(subject_id)
+  AND EXISTS (SELECT 1 FROM subjects s
+              WHERE s.id = ticket_sets.subject_id AND s.removed_at IS NOT NULL AND s.removed_at <= sqlc.arg(cutoff));

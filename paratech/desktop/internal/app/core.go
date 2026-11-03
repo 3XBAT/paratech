@@ -126,6 +126,8 @@ type core struct {
 	cleanups []cleanup
 	// purge removes the assignments past the restore window once a day (wirePurge; the first run is a cleanup).
 	purge loop
+	// subjectPurge erases the removed subjects past the restore window once a day (wireSubjectPurge, the same way).
+	subjectPurge loop
 
 	ui wails.Core
 }
@@ -196,11 +198,17 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	// the local time zone. Its texts are read locally (doctext); only Inspect asks the Hub's reader (TASK-122).
 	// A subject with notes of the student is not removed (ADR-0027). Photos are encoded again locally (imagepage) and
 	// kept as pages without text (TASK-165).
+	// A removed subject is erased 3 days later (ADR-0027); the library erases one at once when it holds a name again.
 	noteRepo := sqlite.NewNoteRepository(db)
+	subjectPurge, err := c.wireSubjectPurge(e, noteRepo, log)
+	if err != nil {
+		return err
+	}
 	lib, err := library.New(library.Deps{
 		Subjects: sqlite.NewSubjectRepository(db), Materials: sqlite.NewMaterialRepository(db), Blobs: store,
 		Lessons: lessons, Strings: sqlite.NewSubjectStrings(db), Clock: e.local, IDs: e.ids, Texts: doctext.New(),
-		Reader: llm, Inspections: sqlite.NewInspectionRepository(db), Notes: noteRepo, Images: imagepage.New(), Log: log,
+		Reader: llm, Inspections: sqlite.NewInspectionRepository(db), Notes: noteRepo, Images: imagepage.New(),
+		Expired: subjectPurge, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: library: %w", err)

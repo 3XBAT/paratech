@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   type KnowledgeBaseApi,
   knowledgeBaseApi,
@@ -40,6 +40,11 @@ import { Banner, Card, EmptyState, Input, ResultLine, type ResultKind } from "..
 import { AddPastNote, HitList, LessonList, SubjectList } from "./KnowledgeParts";
 import { RecordingImportPanel } from "./RecordingImportPanel";
 import { KnowledgeLessonPage, NoteLecturePage } from "./KnowledgeLessonPage";
+
+/** What the export does: the tooltip of «Экспорт в .md» instead of a paragraph under the head (TASK-347). */
+const exportHint = "Сохранить все пары предмета в один файл .md — по датам, с конспектом и текстом лекции.";
+/** The same place says why the button is off: the subject has only notes, or nothing, to export. */
+const exportEmptyHint = "Экспортировать нечего: у предмета пока нет пар с конспектом.";
 
 type SearchOutcome =
   | { kind: "short" }
@@ -403,6 +408,9 @@ function SubjectView(props: {
   const today = useMemo(() => todayApi(callByName), []);
   const [importOpen, setImportOpen] = useState(false);
   const [imports, setImports] = useState(0);
+  const exportHintId = useId();
+  const nothingToExport = lessons !== null && lessons.every(isNoteOnly);
+  const exportTip = nothingToExport ? exportEmptyHint : exportHint;
 
   useEffect(() => {
     mounted.current = true;
@@ -471,11 +479,16 @@ function SubjectView(props: {
             icon="down"
             busy={exporting}
             busyLabel="Сохранение…"
-            disabled={exporting || lessons === null || lessons.every(isNoteOnly)}
+            disabled={exporting || lessons === null || nothingToExport}
+            title={exportTip}
+            aria-describedby={exportHintId}
             onClick={() => void onExport()}
           >
             Экспорт в .md
           </Button>
+          <span id={exportHintId} className="vh">
+            {exportTip}
+          </span>
         </div>
       </div>
       {importOpen && (
@@ -492,9 +505,6 @@ function SubjectView(props: {
           {message.text}
         </ResultLine>
       )}
-      <p className="small muted kb-sub">
-        Экспорт — один файл .md: пары по датам, с конспектом и текстом лекции. Сохраняется только по кнопке.
-      </p>
       {error !== "" && (
         <Banner kind="fail" role="alert">
           {error}

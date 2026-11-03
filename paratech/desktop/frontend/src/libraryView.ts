@@ -16,6 +16,7 @@ import type { ChipKind } from "./ui/StatusChip.js";
 
 export const texts = {
   upcoming: "Ближайшее",
+  openAssignment: "Открыть задание",
   lessons: "Пары",
   fresh: "новое",
   overviewFailed: "Не удалось загрузить сведения о предмете.",
@@ -35,7 +36,8 @@ export const texts = {
   filesFailed: "Не удалось загрузить файлы предмета.",
   emptyTitle: "Предметов пока нет",
   emptyText: "Создайте первый предмет: в нём появятся папки для лекций, семинаров, материалов и заданий.",
-  emptyFolder: "В этой папке пока нет файлов.",
+  emptyFolders: "Пусто:",
+  folderEmpty: "Пока пусто",
   inbox: "Входящие",
   inboxHint:
     "Файлы, которые ещё не разложены по предметам. Разложить можно кнопкой справа или перетащив значок файла на предмет слева.",
@@ -133,6 +135,30 @@ export function treeCount(n: number | undefined): string {
 /** Files per folder of the open subject (removed files and «Входящие» do not count). */
 export function folderCounts(folders: readonly LibraryFolder[], materials: readonly LibraryMaterial[]): Map<string, number> {
   return new Map(folders.map((f) => [f.id, filesOfFolder(materials, f.id).length]));
+}
+
+/**
+ * The folders of the page of a subject split for the screen (TASK-347): the ones with files (or whose files are not
+ * known yet: no «пусто» claim then) get a section each; the empty ones fold into one line «Пусто: ...». Order is kept.
+ * `keepOpen` holds the ids of folders that stay sections while empty (a folder just created: it must not vanish into
+ * the line); they say «Пока пусто» themselves.
+ */
+export function foldEmptyFolders(
+  folders: readonly LibraryFolder[],
+  materials: readonly LibraryMaterial[] | null,
+  keepOpen: ReadonlySet<string> = new Set(),
+): { shown: LibraryFolder[]; empty: LibraryFolder[] } {
+  const ordered = orderedFolders(folders);
+  if (materials === null) {
+    return { shown: ordered, empty: [] };
+  }
+  const isEmpty = (f: LibraryFolder) => filesOfFolder(materials, f.id).length === 0 && !keepOpen.has(f.id);
+  return { shown: ordered.filter((f) => !isEmpty(f)), empty: ordered.filter(isEmpty) };
+}
+
+/** «Семинары»: Файл добавлен. — names the folder in the result of one that has no section of its own (it sits in the «Пусто» line). */
+export function inFolderText(folder: string, text: string): string {
+  return text === "" ? "" : `«${folder}»: ${text}`;
 }
 
 export function folderCountText(n: number): string {

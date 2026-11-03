@@ -68,14 +68,20 @@ func TestRestoreWindow(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newSubject(t)
-			if s.PurgeDue(tt.now) {
-				t.Fatal("PurgeDue of an active subject")
+			if s.PurgeDue(tt.now) || !s.PurgeAt().IsZero() {
+				t.Fatal("PurgeDue or PurgeAt of an active subject")
 			}
 			if _, err := s.Remove(removedAt); err != nil {
 				t.Fatal(err)
 			}
 			if got := s.PurgeDue(tt.now); got != tt.due {
 				t.Fatalf("PurgeDue = %v, want %v", got, tt.due)
+			}
+			if !s.PurgeAt().Equal(removedAt.Add(RestoreWindow)) {
+				t.Fatalf("PurgeAt = %v, want %v", s.PurgeAt(), removedAt.Add(RestoreWindow))
+			}
+			if cut := !s.RemovedAt().After(PurgeCutoff(tt.now)); cut != tt.due {
+				t.Fatalf("RemovedAt not after PurgeCutoff = %v, want PurgeDue %v", cut, tt.due)
 			}
 			changed, err := s.Restore(tt.now)
 			if !errors.Is(err, tt.wantErr) || (err == nil) != changed {

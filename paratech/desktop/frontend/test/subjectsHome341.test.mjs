@@ -301,8 +301,9 @@ test("a failed «Входящие» is not drawn as an empty one; the files of a
   assert.doesNotMatch(loading, /· 0 файлов/, "no count while unknown");
   const failed = detail({ materials: null, failed: true });
   assert.doesNotMatch(failed, /пока нет файлов|Загрузка…/);
-  assert.match(detail({ materials: [] }), /В этой папке пока нет файлов\./);
-  assert.match(detail({ materials: [] }), /· 0 файлов/);
+  // TASK-347: known empty folders are the one line «Пусто: …» (no section, no «0 файлов» per folder).
+  assert.match(detail({ materials: [] }), /Пусто:/);
+  assert.doesNotMatch(detail({ materials: [] }), /В этой папке пока нет файлов|· 0 файлов/);
 });
 
 test("the head of the library without subjects has no «База знаний» and «Билеты» (both are empty there)", () => {

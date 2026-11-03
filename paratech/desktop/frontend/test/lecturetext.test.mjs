@@ -25,7 +25,6 @@ import {
   recordingRowView,
   rowAction,
   rowActions,
-  retryHints,
   rowLinks,
   stageLabels,
 } from "../.test-build/recordingRowView.js";
@@ -246,7 +245,8 @@ test("the row shows the lecture text with its parts and the progress bar", () =>
 test("a failed lecture text says so and offers «Повторить» with the lecture text work", () => {
   const r = row({ stage: "failed", step: "lectureText", errorCode: "lectureTextFailed", action: "retry", retryWork: "lectureText" });
   assert.equal(errorTexts.lectureTextFailed, "Не удалось составить текст лекции.");
-  assert.equal(chainStatusView(r, 0).hint, `Не удалось составить текст лекции. ${retryHints.retry}`);
+  // TASK-347: the old hint about the round arrow is gone; «Повторить» is a text button under the hint.
+  assert.equal(chainStatusView(r, 0).hint, "Не удалось составить текст лекции.");
   assert.deepEqual(rowAction(r), { kind: "retry", work: "lectureText", label: "Повторить" });
 });
 

@@ -206,8 +206,10 @@ func TestHeadlessCoreHasNoPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The daily purge of deleted assignments (TASK-274) is the only loop without a popup.
-	if core.Prompt != nil || a.core.scheduler != nil || a.core.prompts != nil || !slices.Equal(loopNames(a.life.loops), []string{"assignment purge"}) {
+	// The daily purges of deleted assignments (TASK-274) and removed subjects (TASK-308) are the only loops without a
+	// popup.
+	if core.Prompt != nil || a.core.scheduler != nil || a.core.prompts != nil ||
+		!slices.Equal(loopNames(a.life.loops), []string{"assignment purge", "subject purge"}) {
 		t.Fatalf("headless core wires the prompt: %+v, loops %v", core, loopNames(a.life.loops))
 	}
 }
@@ -230,8 +232,8 @@ func TestUICoreWiresThePrompt(t *testing.T) {
 	if core.Prompt == nil || core.Prompt != a.core.prompts || a.core.scheduler == nil {
 		t.Fatal("UI mode must wire the prompt and the scheduler")
 	}
-	if got := loopNames(a.life.loops); !slices.Equal(got, []string{"scheduler", "recording prompt", "assignment purge"}) {
-		t.Fatalf("loops %v, want the scheduler, the prompt and the daily purge (TASK-274)", got)
+	if got := loopNames(a.life.loops); !slices.Equal(got, []string{"scheduler", "recording prompt", "assignment purge", "subject purge"}) {
+		t.Fatalf("loops %v, want the scheduler, the prompt and the daily purges (TASK-274, TASK-308)", got)
 	}
 }
 

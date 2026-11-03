@@ -63,6 +63,34 @@ func (q *Queries) InsertTicketSet(ctx context.Context, arg InsertTicketSetParams
 	return err
 }
 
+const listTicketSetIDsOfSubject = `-- name: ListTicketSetIDsOfSubject :many
+SELECT id FROM ticket_sets WHERE subject_id = ?1 ORDER BY created_at, id
+`
+
+// The sets of a subject for its purge (TASK-308): they name it without a foreign key and would be left dangling.
+func (q *Queries) ListTicketSetIDsOfSubject(ctx context.Context, subjectID string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listTicketSetIDsOfSubject, subjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTicketSetsBySubject = `-- name: ListTicketSetsBySubject :many
 SELECT id, subject_id, material_id, status, content, version, created_at, updated_at FROM ticket_sets
 WHERE subject_id = ?1
@@ -106,6 +134,29 @@ func (q *Queries) ListTicketSetsBySubject(ctx context.Context, arg ListTicketSet
 		return nil, err
 	}
 	return items, nil
+}
+
+const purgeTicketSetOfRemovedSubject = `-- name: PurgeTicketSetOfRemovedSubject :execrows
+DELETE FROM ticket_sets
+WHERE ticket_sets.id = ?1
+  AND ticket_sets.subject_id = ?2
+  AND EXISTS (SELECT 1 FROM subjects s
+              WHERE s.id = ticket_sets.subject_id AND s.removed_at IS NOT NULL AND s.removed_at <= ?3)
+`
+
+type PurgeTicketSetOfRemovedSubjectParams struct {
+	ID        string
+	SubjectID string
+	Cutoff    sql.NullInt64
+}
+
+// Deletes a set of a subject still removed at or before the cutoff (ms).
+func (q *Queries) PurgeTicketSetOfRemovedSubject(ctx context.Context, arg PurgeTicketSetOfRemovedSubjectParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeTicketSetOfRemovedSubject, arg.ID, arg.SubjectID, arg.Cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateTicketSet = `-- name: UpdateTicketSet :execrows

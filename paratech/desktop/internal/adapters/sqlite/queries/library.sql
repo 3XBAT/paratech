@@ -37,6 +37,17 @@ WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 -- name: DeleteSubject :execrows
 DELETE FROM subjects WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 
+-- The purge of a removed subject past its restore window (TASK-308, ADR-0027). Every purge delete re-checks that the
+-- subject is still removed at or before the cutoff (ms), so a restore that won the race keeps everything.
+-- name: PurgeRemovedSubject :execrows
+DELETE FROM subjects
+WHERE id = sqlc.arg(id) AND removed_at IS NOT NULL AND removed_at <= sqlc.arg(cutoff);
+
+-- name: SubjectStillDue :one
+SELECT CAST(EXISTS (SELECT 1 FROM subjects
+                    WHERE id = sqlc.arg(id) AND removed_at IS NOT NULL AND removed_at <= sqlc.arg(cutoff)) AS INTEGER)
+       AS due;
+
 -- name: ListAllSubjectAliases :many
 SELECT * FROM subject_aliases ORDER BY subject_id, position;
 
@@ -137,6 +148,40 @@ WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 UPDATE materials
 SET text_status = sqlc.arg(text_status)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
+
+-- The files filed under a subject in any status and visibility, for its purge (TASK-308).
+-- name: ListMaterialsFiledUnder :many
+SELECT * FROM materials WHERE subject_id = sqlc.arg(subject_id) ORDER BY created_at, id;
+
+-- The one check of a file that must survive its subject's purge: a note of another subject holds it, or a work was
+-- written from it (works.material_id cascades, ADR-0027 keeps works).
+-- name: MaterialKeptElsewhere :one
+SELECT CAST(EXISTS (SELECT 1
+                    FROM note_parts p
+                    JOIN notes n ON n.id = p.note_id
+                    WHERE p.material_id = sqlc.arg(id) AND n.subject_id <> sqlc.arg(subject_id))
+         OR EXISTS (SELECT 1 FROM works w WHERE w.material_id = sqlc.arg(id)) AS INTEGER) AS kept;
+
+-- Whether the stored bytes of a sha256 are used by anything but one material: another material, or a send of a work
+-- not yet carried out that pinned them (its copy is made from them). One query on purpose: later stores of those
+-- bytes (note revisions, TASK-290/291) are added here.
+-- name: MaterialDigestInUse :one
+SELECT CAST(EXISTS (SELECT 1 FROM materials m WHERE m.sha256 = sqlc.arg(sha256) AND m.id <> sqlc.arg(except_id))
+         OR EXISTS (SELECT 1
+                    FROM proposals p
+                    WHERE p.kind = 'send_work_email' AND p.attachment_sha256 = sqlc.arg(sha256)
+                      AND p.status IN ('PROPOSED', 'VALIDATED', 'CONFIRMED')) AS INTEGER) AS used;
+
+-- A material held by any note or the source of any work is never deleted (works would cascade); its lesson links and
+-- inspection cascade, and the summaries and assignments made from it keep their rows (SET NULL).
+-- name: PurgeMaterialOfRemovedSubject :execrows
+DELETE FROM materials
+WHERE materials.id = sqlc.arg(id)
+  AND materials.subject_id = sqlc.arg(subject_id)
+  AND EXISTS (SELECT 1 FROM subjects s
+              WHERE s.id = materials.subject_id AND s.removed_at IS NOT NULL AND s.removed_at <= sqlc.arg(cutoff))
+  AND NOT EXISTS (SELECT 1 FROM note_parts p WHERE p.material_id = materials.id)
+  AND NOT EXISTS (SELECT 1 FROM works w WHERE w.material_id = materials.id);
 
 -- name: ListMaterialLessons :many
 SELECT lesson_id FROM material_lessons WHERE material_id = sqlc.arg(material_id) ORDER BY position;

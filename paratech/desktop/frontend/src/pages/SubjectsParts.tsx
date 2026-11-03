@@ -1,4 +1,4 @@
-import { type DragEvent, type ReactNode, useState } from "react";
+import { type DragEvent, Fragment, type ReactNode, useState } from "react";
 import type { LibraryMaterial, LibrarySubject, SubjectOverview } from "../bindings/library.js";
 import {
   addToFolderLabel,
@@ -15,6 +15,7 @@ import {
   daysChip,
   type FreshMarks,
   filesOfFolder,
+  foldEmptyFolders,
   folderCountText,
   folderTitle,
   groupBySemester,
@@ -258,8 +259,9 @@ export function SubjectTree(props: {
 }
 
 /** «Ближайшее» and the lessons of a subject. Titles come from the model or the student: text nodes only. */
-export function OverviewSections(props: { overview: SubjectOverview }) {
+export function OverviewSections(props: { overview: SubjectOverview; onOpenAssignment?: (assignmentId: string) => void }) {
   const { deadlines, lessons } = props.overview;
+  const open = props.onOpenAssignment;
   return (
     <>
       {deadlines.length > 0 && (
@@ -269,16 +271,29 @@ export function OverviewSections(props: { overview: SubjectOverview }) {
             <div role="list">
               {deadlines.map((d) => {
                 const chip = daysChip(d.daysLeft);
-                return (
-                  <div className="lrow drow" role="listitem" key={d.assignmentId}>
-                    <div className="d num">
+                const body = (
+                  <>
+                    {/* Spans only: the same body sits inside a <button> when the row opens its assignment. */}
+                    <span className="d num">
                       {weekdayOf(d.due)}
                       <span>{dayMonth(d.due)}</span>
-                    </div>
-                    <div className="tx">
-                      <p className="t">{d.title}</p>
-                    </div>
+                    </span>
+                    <span className="tx">
+                      <span className="t">{d.title}</span>
+                    </span>
                     <StatusChip kind={chip.kind}>{chip.label}</StatusChip>
+                  </>
+                );
+                // The whole row opens its assignment (navigation only, as on «Сегодня»); the focus ring is the global one.
+                return open === undefined ? (
+                  <div className="lrow drow" role="listitem" key={d.assignmentId}>
+                    {body}
+                  </div>
+                ) : (
+                  <div className="drow-item" role="listitem" key={d.assignmentId}>
+                    <button type="button" className="lrow drow drow-open" title={texts.openAssignment} onClick={() => open(d.assignmentId)}>
+                      {body}
+                    </button>
                   </div>
                 );
               })}
@@ -327,6 +342,8 @@ export function SubjectDetail(props: {
   failed?: boolean;
   /** The «новое» marks of this visit (TASK-227); none without the overview. */
   fresh?: FreshMarks;
+  /** Folders made during this visit: they stay sections («Пока пусто») instead of folding into the «Пусто» line. */
+  created?: ReadonlySet<string>;
   folderForm: boolean;
   busy: boolean;
   error: string;
@@ -336,39 +353,62 @@ export function SubjectDetail(props: {
   actions?: FileActions;
   /** «+» in the header of a folder: the file dialog, the file lands in this folder. */
   onAddFile?(folderId: string): void;
-  /** What to show under the header of a folder (the result of its «+»); null for nothing. */
-  folderExtra?(folderId: string): ReactNode;
+  /**
+   * What to show under the header of a folder (the result of its «+»); null for nothing. `named` is the folder's title
+   * when it has no header of its own (it sits in the «Пусто» line), so the result can name it.
+   */
+  folderExtra?(folderId: string, named?: string): ReactNode;
 }) {
   const { subject } = props;
   const fresh = props.fresh ?? noFresh;
+  const onAddFile = props.onAddFile;
+  // Folders without files are one line, not a section each (TASK-347); with unknown files nothing is called empty.
+  // A folder just made and a folder marked «новое» keep their sections.
+  const keepOpen = new Set([...(props.created ?? []), ...fresh.folders]);
+  const { shown, empty } = foldEmptyFolders(subject.folders, props.materials, keepOpen);
   return (
     <>
-      {orderedFolders(subject.folders).map((f) => {
+      {shown.map((f) => {
         const files = props.materials === null ? null : filesOfFolder(props.materials, f.id);
-        const onAddFile = props.onAddFile;
         return (
           <section className="section" key={f.id} id={folderAnchor(f.id)}>
             <div className="sec-head">
               <h2 className="sec-h">
-                {folderTitle(f)} {files !== null && <span className="cnt num">· {folderCountText(files.length)}</span>}
+                {folderTitle(f)} {files !== null && files.length > 0 && <span className="cnt num">· {folderCountText(files.length)}</span>}
                 {fresh.folders.has(f.id) && <span className="fresh">{texts.fresh}</span>}
               </h2>
               {onAddFile && <IconButton icon="plus" label={addToFolderLabel(folderTitle(f))} disabled={props.busy} onClick={() => onAddFile(f.id)} />}
             </div>
             {props.folderExtra?.(f.id)}
             {/* Unknown files (loading, failed): no «пусто» claim and no per-folder «Загрузка…»; a failure is one line under the head of the page. */}
-            {files === null ? null : (
+            {files === null ? null : files.length === 0 ? (
+              <p className="small muted folder-empty">{texts.folderEmpty}</p>
+            ) : (
               <Card className="lrows" label={folderTitle(f)}>
-                {files.length === 0 ? (
-                  <p className="small muted empty-folder">{texts.emptyFolder}</p>
-                ) : (
-                  <FileRows files={files} where="folder" fresh={fresh.materials} actions={props.actions} />
-                )}
+                <FileRows files={files} where="folder" fresh={fresh.materials} actions={props.actions} />
               </Card>
             )}
           </section>
         );
       })}
+      {empty.length > 0 && (
+        <section className="section empty-folders">
+          {/* The «+» after each name stays a visible button (keyboard reachable), the tree's click lands on the name. The
+              names are set apart by the gap of the line, not by commas that would end up after a button. */}
+          <div className="small muted empty-folders-line">
+            <span className="empty-folders-label">{texts.emptyFolders}</span>
+            {empty.map((f) => (
+              <span className="empty-folder-name" id={folderAnchor(f.id)} key={f.id}>
+                {folderTitle(f)}
+                {onAddFile && <IconButton icon="plus" label={addToFolderLabel(folderTitle(f))} disabled={props.busy} onClick={() => onAddFile(f.id)} />}
+              </span>
+            ))}
+          </div>
+          {empty.map((f) => (
+            <Fragment key={f.id}>{props.folderExtra?.(f.id, folderTitle(f))}</Fragment>
+          ))}
+        </section>
+      )}
       {props.folderForm && (
         <NameForm label={texts.folderName} busy={props.busy} error={props.error} onSubmit={props.onCreateFolder} onCancel={props.onCancelFolder} />
       )}
