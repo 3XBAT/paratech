@@ -70,6 +70,8 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 		return t.result(c, *p.noop, values.Ref{}, nil)
 	case p.noopMarks != nil:
 		return t.marksResult(c, p.noopMarks, nil)
+	case p.noopOut != nil:
+		return p.noopOut(t, c, nil)
 	}
 
 	entry, err := t.journal.Begin(ctx, agentjournal.BeginInput{
@@ -98,7 +100,7 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 		// The action is done; the entry stays PENDING and Recover settles it from its intent at the next start.
 		t.log.WarnContext(ctx, opJournal, "action", entry.ID.String(), "err", err)
 	}
-	line := values.ActionLine{Action: entry.ID}
+	line := values.ActionLine{Action: entry.ID, Offer: eff.offer}
 	if eff.created.Kind() == values.KindAssignment {
 		// The Driver fills its title, subject and deadline from the local data when it publishes the line.
 		line.Assignment = values.AssignmentLine{Assignment: eff.created}
@@ -112,6 +114,9 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 
 // outcome is the result of an action that went through: the triage row of triage_assignment, else its write row.
 func (t tools) outcome(c agentturn.Call, eff effect, cards []values.Card) ran {
+	if eff.out != nil {
+		return eff.out(t, c, cards)
+	}
 	if eff.marks != nil {
 		return t.marksResult(c, eff.marks, cards)
 	}
@@ -150,6 +155,9 @@ func (t tools) replay(ctx context.Context, c agentturn.Call, e agentjournal.Entr
 	case action.StatusPending, action.StatusUnknown, action.StatusProposed:
 		return ran{out: agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseUnknown)}, write: true}
 	}
+	if r, ok := t.replayControl(c, e); ok {
+		return r
+	}
 	if r, ok := t.replayAssignment(c, e.Compensation); ok {
 		return r
 	}
@@ -185,6 +193,9 @@ func (t tools) refusalOf(ctx context.Context, tool values.Tool, err error) value
 		return values.RefuseUnknownID
 	}
 	if why, ok := assignmentRefusal(tool, err); ok {
+		return why
+	}
+	if why, ok := controlRefusal(tool, err); ok {
 		return why
 	}
 	// The subject or lesson of a new assignment the use case does not know: an ID that passed provenance but is gone.

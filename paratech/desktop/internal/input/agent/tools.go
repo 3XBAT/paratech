@@ -118,7 +118,7 @@ func (t tools) reader(tool values.Tool) (read, bool) {
 	case values.ToolAnswerQuestion:
 		return t.answerQuestion, t.answerer != nil
 	}
-	return nil, false
+	return t.controlReader(tool)
 }
 
 // paidReads are the paid read tools this desktop runs: they are reads of the request, not its paid job (TASK-117).
