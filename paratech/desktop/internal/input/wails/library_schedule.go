@@ -163,11 +163,14 @@ type ScheduleAliases struct {
 }
 
 // ScheduleSkippedRow is a row not done: Key for a subject to create, SubjectID for spellings to add. Reason is
-// "name_taken", "too_many_aliases" or "subject_gone".
+// "name_taken", "too_many_aliases" or "subject_gone". RemovedSubjectID is set with name_taken when only a removed
+// subject holds the spelling: the page offers «Вернуть» (RestoreSubject at RemovedSubjectVersion); "" and 0 otherwise.
 type ScheduleSkippedRow struct {
-	Key       string `json:"key"`
-	SubjectID string `json:"subjectId"`
-	Reason    string `json:"reason"`
+	Key                   string `json:"key"`
+	SubjectID             string `json:"subjectId"`
+	Reason                string `json:"reason"`
+	RemovedSubjectID      string `json:"removedSubjectId"`
+	RemovedSubjectVersion int64  `json:"removedSubjectVersion"`
 }
 
 // ScheduleCreateResult answers CreateFromSchedule. Problem is "", stale, invalid, name_taken, busy or unavailable;
@@ -349,6 +352,7 @@ func (s *LibraryService) CreateFromSchedule(ctx context.Context, token string, c
 
 	out, unknown := scheduleCreateResult(res)
 	out.Problem = createProblem(err)
+	s.removedVersions(ctx, out.Skipped)
 	counts := []any{"created", len(out.Created), "aliased", len(out.Aliased), "skipped", len(out.Skipped)}
 	if unknown > 0 {
 		counts = append(counts, "unknown_reasons", unknown)
@@ -565,7 +569,11 @@ func scheduleCreateResult(res library.ScheduleResult) (out ScheduleCreateResult,
 		if !ok {
 			unknown++
 		}
-		out.Skipped = append(out.Skipped, ScheduleSkippedRow{Key: sk.Key, SubjectID: string(sk.Subject), Reason: reason})
+		row := ScheduleSkippedRow{Key: sk.Key, SubjectID: string(sk.Subject), Reason: reason}
+		if sk.Reason == library.ReasonNameTaken {
+			row.RemovedSubjectID = string(sk.Removed)
+		}
+		out.Skipped = append(out.Skipped, row)
 	}
 	return out, unknown
 }

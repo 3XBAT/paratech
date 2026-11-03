@@ -12,6 +12,9 @@ export const methods = {
   createSubject: `${service}.CreateSubject`,
   createFolder: `${service}.CreateFolder`,
   removeSubject: `${service}.RemoveSubject`,
+  // TASK-289: «Удалить предмет» with its notes and files, «Вернуть».
+  discardSubject: `${service}.DiscardSubject`,
+  restoreSubject: `${service}.RestoreSubject`,
   materials: `${service}.Materials`,
   importFile: `${service}.ImportFile`,
   openMaterial: `${service}.OpenMaterial`,
@@ -250,6 +253,107 @@ export function parseTeacherResult(raw: unknown): TeacherResult {
   return { problem: problem as TeacherProblem, field, subject: null };
 }
 
+// «Удалить предмет» and «Вернуть» (TASK-289, ADR-0027). The page owns the Russian texts of the problems.
+
+export type DiscardProblem = "" | "changed" | "not_found" | "failed";
+
+export const discardProblems: readonly DiscardProblem[] = ["", "changed", "not_found", "failed"];
+
+export type RestoreProblem = "" | "expired" | "changed" | "not_found" | "failed";
+
+export const restoreProblems: readonly RestoreProblem[] = ["", "expired", "changed", "not_found", "failed"];
+
+/** The reply of discardSubject. */
+export interface SubjectDiscard {
+  problem: DiscardProblem;
+  /** What went with the subject: its notes and the files that are no part of them; 0 with a problem. */
+  notes: number;
+  files: number;
+  /** The removed subject's version, for restoreSubject; 0 with a problem. */
+  version: number;
+}
+
+/** The reply of restoreSubject; subject is set only when problem is "". */
+export interface SubjectRestore {
+  problem: RestoreProblem;
+  subject: LibrarySubject | null;
+}
+
+/** A removed subject that holds the name createSubject was refused for: «Вернуть» is restoreSubject(subjectId, version). */
+export interface RemovedName {
+  subjectId: string;
+  version: number;
+}
+
+function safeCount(v: unknown): number | null {
+  return typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : null;
+}
+
+/** Reads the reply of discardSubject; an unknown or malformed reply is "failed". */
+export function parseDiscard(raw: unknown): SubjectDiscard {
+  const failed: SubjectDiscard = { problem: "failed", notes: 0, files: 0, version: 0 };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return failed;
+  }
+  const r = raw as Record<string, unknown>;
+  const problem = r.problem;
+  if (typeof problem !== "string" || !discardProblems.includes(problem as DiscardProblem)) {
+    return failed;
+  }
+  if (problem !== "") {
+    return { problem: problem as DiscardProblem, notes: 0, files: 0, version: 0 };
+  }
+  const notes = safeCount(r.notes);
+  const files = safeCount(r.files);
+  const version = safeCount(r.version);
+  if (notes === null || files === null || version === null || version === 0) {
+    return failed;
+  }
+  return { problem: "", notes, files, version };
+}
+
+/** Reads the reply of restoreSubject; an unknown or malformed reply is "failed" without a subject. */
+export function parseRestore(raw: unknown): SubjectRestore {
+  const failed: SubjectRestore = { problem: "failed", subject: null };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return failed;
+  }
+  const r = raw as Record<string, unknown>;
+  const problem = r.problem;
+  if (typeof problem !== "string" || !restoreProblems.includes(problem as RestoreProblem)) {
+    return failed;
+  }
+  if (problem !== "") {
+    return { problem: problem as RestoreProblem, subject: null };
+  }
+  try {
+    return { problem: "", subject: parseSubject(r.subject) };
+  } catch {
+    return failed;
+  }
+}
+
+/**
+ * The removed subject behind a refused createSubject, read from the rejection's cause (Wails passes the Go error's
+ * fields there); null for any other refusal. The rejection's text stays «Предмет с таким названием уже есть.», so a
+ * page that does not ask still shows that.
+ */
+export function removedNameOf(err: unknown): RemovedName | null {
+  if (typeof err !== "object" || err === null) {
+    return null;
+  }
+  const cause = (err as { cause?: unknown }).cause;
+  if (typeof cause !== "object" || cause === null || Array.isArray(cause)) {
+    return null;
+  }
+  const c = cause as Record<string, unknown>;
+  const version = safeCount(c.version);
+  if (c.problem !== "removed_name_taken" || typeof c.subjectId !== "string" || c.subjectId === "" || version === null || version === 0) {
+    return null;
+  }
+  return { subjectId: c.subjectId, version };
+}
+
 export function parseMaterial(raw: unknown): LibraryMaterial {
   const w = "material";
   const r = record(raw, w);
@@ -437,11 +541,18 @@ export interface LibraryApi {
   /** Records the opening once the overview is shown, so the next visit marks only what is newer. */
   markSubjectOpened(subjectId: string): Promise<void>;
   subjects(): Promise<LibrarySubject[]>;
-  /** semester is a code or "" for the current one; aliases are other spellings of the name (none by default). */
+  /**
+   * semester is a code or "" for the current one; aliases are other spellings of the name (none by default). A name a
+   * removed subject holds rejects with the text of a taken name; removedNameOf(err) gives the subject for «Вернуть».
+   */
   createSubject(name: string, semester: string, aliases?: readonly string[]): Promise<LibrarySubject>;
   createFolder(subjectId: string, name: string): Promise<LibraryFolder>;
   /** Removes a subject that holds nothing; the core refuses otherwise (a rejected call). */
   removeSubject(subjectId: string): Promise<void>;
+  /** «Удалить предмет»: the subject at version (the one shown) goes with its notes and files; a failed call is "failed". */
+  discardSubject(subjectId: string, version: number): Promise<SubjectDiscard>;
+  /** «Вернуть»: the removed subject at version shows again; a failed call is "failed". */
+  restoreSubject(subjectId: string, version: number): Promise<SubjectRestore>;
   /** The files of a subject, or of «Входящие» for "". */
   materials(subjectId: string): Promise<LibraryMaterial[]>;
   /** «Добавить файл»: the native open dialog. */
@@ -465,6 +576,20 @@ export function libraryApi(call: CallByName): LibraryApi {
     createFolder: async (subjectId, name) => parseFolder(await call(methods.createFolder, subjectId, name)),
     removeSubject: async (subjectId) => {
       await call(methods.removeSubject, subjectId);
+    },
+    discardSubject: async (subjectId, version) => {
+      try {
+        return parseDiscard(await call(methods.discardSubject, subjectId, version));
+      } catch {
+        return parseDiscard(null);
+      }
+    },
+    restoreSubject: async (subjectId, version) => {
+      try {
+        return parseRestore(await call(methods.restoreSubject, subjectId, version));
+      } catch {
+        return parseRestore(null);
+      }
     },
     materials: async (subjectId) => list(await call(methods.materials, subjectId), "materials", parseMaterial),
     importFile: async () => parseImport(await call(methods.importFile)),
@@ -612,6 +737,26 @@ export interface ScheduleSkipped {
   key: string;
   subjectId: string;
   reason: ScheduleSkipReason;
+  /**
+   * TASK-289: set (with removedSubjectVersion) on a name_taken row when only a removed subject holds the spelling:
+   * «Вернуть» is restoreSubject(removedSubjectId, removedSubjectVersion). Absent otherwise.
+   */
+  removedSubjectId?: string;
+  removedSubjectVersion?: number;
+}
+
+/** The skipped row as the page reads it; the restore pair is kept only when both parts are valid. */
+function parseSkipped(raw: unknown): ScheduleSkipped {
+  const w = "schedule skipped";
+  const r = record(raw, w);
+  const row: ScheduleSkipped = { key: str(r, "key", w), subjectId: str(r, "subjectId", w), reason: oneOf(r, "reason", w, scheduleSkipReasons) };
+  const id = optStr(r, "removedSubjectId");
+  const version = r.removedSubjectVersion;
+  if (row.reason === "name_taken" && id !== "" && typeof version === "number" && Number.isSafeInteger(version) && version > 0) {
+    row.removedSubjectId = id;
+    row.removedSubjectVersion = version;
+  }
+  return row;
 }
 
 /** With a problem the lists still hold what was done before it; undoFromSchedule takes that back. */
@@ -735,11 +880,7 @@ export function parseCreateFromSchedule(raw: unknown): CreateFromScheduleReply {
       return { id: str(cr, "id", cw), key: str(cr, "key", cw), name: str(cr, "name", cw) };
     }),
     aliased: strictList(r, "aliased", w, parseAliased),
-    skipped: strictList(r, "skipped", w, (s) => {
-      const sw = "schedule skipped";
-      const sr = record(s, sw);
-      return { key: str(sr, "key", sw), subjectId: str(sr, "subjectId", sw), reason: oneOf(sr, "reason", sw, scheduleSkipReasons) };
-    }),
+    skipped: strictList(r, "skipped", w, parseSkipped),
     problem: oneOf(r, "problem", w, scheduleCreateProblems),
   };
 }

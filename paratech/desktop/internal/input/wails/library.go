@@ -68,6 +68,9 @@ const (
 	opLibraryFolder      = "ui: create folder"
 	opLibraryRemoveDir   = "ui: remove folder"
 	opLibraryRemoveSub   = "ui: remove subject"
+	opLibraryDiscard     = "ui: remove subject with its notes and files"
+	opLibraryRestoreSub  = "ui: restore removed subject"
+	opLibraryRemovedSub  = "ui: read removed subject"
 	opLibraryMaterials   = "ui: library files"
 	opLibraryPick        = "ui: choose a file for the library"
 	opLibraryDrop        = "ui: file dropped on the window refused"
@@ -97,6 +100,9 @@ type LibraryUseCase interface {
 	CreateFolder(ctx context.Context, id shared.SubjectID, name string) (subject.Folder, error)
 	RemoveFolder(ctx context.Context, id shared.SubjectID, folder shared.FolderID) error
 	RemoveSubject(ctx context.Context, id shared.SubjectID) error
+	DiscardSubject(ctx context.Context, id shared.SubjectID, expectedVersion int64) (library.Discarded, error)
+	RestoreSubject(ctx context.Context, id shared.SubjectID, expectedVersion int64) (*subject.Subject, error)
+	RemovedSubject(ctx context.Context, id shared.SubjectID) (*subject.Subject, error)
 	Materials(ctx context.Context, sub shared.SubjectID) ([]*material.Material, error)
 	Material(ctx context.Context, id shared.MaterialID) (*material.Material, error)
 	Import(ctx context.Context, up library.Upload) (library.Imported, error)
@@ -230,10 +236,15 @@ func (s *LibraryService) Subjects(ctx context.Context) ([]LibrarySubject, error)
 }
 
 // CreateSubject creates a subject with its system folders. semester is a code ("2026-autumn") or "" for the current
-// one; aliases may be empty (a suggested schedule string is typically passed as one).
+// one; aliases may be empty (a suggested schedule string is typically passed as one). A name a removed subject holds
+// is a *LibraryRemovedNameError (library_discard.go).
 func (s *LibraryService) CreateSubject(ctx context.Context, name string, aliases []string, semester string) (LibrarySubject, error) {
 	sub, err := s.uc.CreateSubject(ctx, library.NewSubject{Name: name, Aliases: aliases, Semester: semester})
-	if err != nil {
+	var gone *library.RemovedNameError
+	switch {
+	case errors.As(err, &gone):
+		return LibrarySubject{}, s.removedName(ctx, gone.Subject)
+	case err != nil:
 		return LibrarySubject{}, s.fail(opLibraryCreate, err)
 	}
 	return librarySubject(sub), nil
@@ -271,6 +282,27 @@ func (s *LibraryService) RemoveSubject(ctx context.Context, subjectID string) er
 		return s.fail(opLibraryRemoveSub, err)
 	}
 	return nil
+}
+
+// DiscardSubject is «Удалить предмет» (ADR-0027): the subject at version, the one the page shows, goes with its notes
+// and files; RestoreSubject brings it back for subject.RestoreWindow. The student's click only.
+func (s *LibraryService) DiscardSubject(ctx context.Context, subjectID string, version int64) LibraryDiscard {
+	d, err := s.uc.DiscardSubject(ctx, shared.SubjectID(subjectID), version)
+	if err != nil {
+		return LibraryDiscard{Problem: s.subjectProblem(opLibraryDiscard, err)}
+	}
+	return LibraryDiscard{Notes: d.Notes, Files: d.Files, Version: d.Subject.Version()}
+}
+
+// RestoreSubject is «Вернуть»: the removed subject at version (LibraryDiscard.Version, LibraryRemovedNameError.Version
+// or ScheduleSkippedRow.RemovedSubjectVersion) shows again with everything under it.
+func (s *LibraryService) RestoreSubject(ctx context.Context, subjectID string, version int64) LibraryRestore {
+	sub, err := s.uc.RestoreSubject(ctx, shared.SubjectID(subjectID), version)
+	if err != nil {
+		return LibraryRestore{Problem: s.subjectProblem(opLibraryRestoreSub, err)}
+	}
+	out := librarySubject(sub)
+	return LibraryRestore{Subject: &out}
 }
 
 // Materials lists the files of a subject, or of «Входящие» for "", removed ones included (Removed), newest first.
