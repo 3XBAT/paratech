@@ -316,7 +316,7 @@ func TestFrontendCallsBoundNames(t *testing.T) {
 	}{
 		{file: "settings.ts", typ: reflect.TypeFor[*SettingsService](), methods: 7}, // SetRecognitionLoad: TASK-084, +GetProfile, SaveProfile (TASK-094), +SetNoteRecognition (TASK-294); -SetFreeWorkNotice (TASK-342)
 		{file: "activity.ts", typ: reflect.TypeFor[*ActivityService](), methods: 9}, // +SwitchSource, DismissAdvice (TASK-082), +RetryPostProcessing, RedoSummary (TASK-086), +RecordingSound (TASK-099)
-		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 7},     // -Snooze (TASK-076), +2 (TASK-081), +Advice (TASK-082)
+		{file: "prompt.ts", typ: reflect.TypeFor[*PromptService](), methods: 8},     // -Snooze (TASK-076), +2 (TASK-081), +Advice (TASK-082), +CallSubject (TASK-370)
 		{file: "prompt.ts", typ: reflect.TypeFor[*PopupWindowService](), methods: 1},
 		{file: "schedule.ts", typ: reflect.TypeFor[*ScheduleImportService](), methods: 3},
 		{file: "models.ts", typ: reflect.TypeFor[*ModelsService](), methods: 13},

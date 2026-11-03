@@ -61,6 +61,7 @@ type PromptUseCase interface {
 	Skip(ctx context.Context, id prompt.ID) (recordingprompt.View, error)
 	SelectSource(ctx context.Context, source values.Source) error
 	StartManual(ctx context.Context, source values.Source) (recordingprompt.Manual, error)
+	CallSubject(ctx context.Context, id prompt.ID) shared.SubjectID
 }
 
 // PromptView is the JSON form of the current prompt.
@@ -112,6 +113,12 @@ type RecordingStart struct {
 	RecordingID string `json:"recordingId"` // "" unless started
 	// Linked reports that the recording belongs to the lesson in progress; otherwise it has no lesson.
 	Linked bool `json:"linked"`
+}
+
+// PromptCallSubject answers CallSubject: the library subject whose call link «Подключиться» opens through
+// LibraryService.OpenSubjectCallLink, or "" when the popup offers none. The link itself never reaches the popup.
+type PromptCallSubject struct {
+	SubjectID string `json:"subjectId"`
 }
 
 // PromptService is bound to the pages like SettingsService ("<package path>.PromptService.<Method>"): the popup and,
@@ -205,6 +212,17 @@ func (s *PromptService) SelectSource(ctx context.Context, app string) error {
 		return ErrActionFailed
 	}
 	return nil
+}
+
+// CallSubject answers which subject's call link the popup may offer for the prompt id (TASK-370): set only for the
+// current lesson prompt whose subject has a link; anything else, failures included, is an empty SubjectID, never an
+// error (the use case logs failures).
+func (s *PromptService) CallSubject(ctx context.Context, id string) PromptCallSubject {
+	pid := prompt.ID(id)
+	if pid.Validate() != nil {
+		return PromptCallSubject{}
+	}
+	return PromptCallSubject{SubjectID: s.uc.CallSubject(ctx, pid).String()}
 }
 
 // StartRecording starts recording app ("" = the whole computer) from the main window, without the popup; the

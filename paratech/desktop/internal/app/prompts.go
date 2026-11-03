@@ -53,12 +53,14 @@ func (r *adviceRelay) SourceAdviceChanged(ctx context.Context, id shared.Recordi
 }
 
 // wirePrompts builds the recording prompt on popup and the scheduler that feeds it. UI mode only: headless has no
-// popup, and a scheduler there would mark the announcements as made without showing anything.
+// popup, and a scheduler there would mark the announcements as made without showing anything. The popup's
+// «Подключиться» resolves the lesson's subject and its call link through the library, as «Сегодня» does (TASK-370).
 func (c *core) wirePrompts(e env, popup recordingprompt.Popup, log *slog.Logger) error {
 	lessons := sqlite.NewLessonRepository(c.db)
 	prompts, err := recordingprompt.New(recordingprompt.Deps{
 		Settings: sqlite.NewSettingsRepository(c.db), Apps: e.apps(log), Popup: popup,
-		Recordings: promptRecordings{session: c.recordings}, Lessons: lessons, Clock: e.clock, Sleeper: e.clock, Log: log,
+		Recordings: promptRecordings{session: c.recordings}, Lessons: lessons, Subjects: c.library, CallLinks: c.library,
+		Clock: e.clock, Sleeper: e.clock, Log: log,
 	}, recordingprompt.DefaultConfig())
 	if err != nil {
 		return fmt.Errorf("app: recording prompt: %w", err)

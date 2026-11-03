@@ -108,6 +108,9 @@ type core struct {
 	// sound is "Проверить звук"; its running check ends with the lifecycle.
 	sound *soundcheck.Service
 
+	// library is the library of subjects; the prompts read the call link of a lesson's subject from it (TASK-370).
+	library *library.Service
+
 	// UI mode only (wirePrompts): nil headless.
 	scheduler *scheduler.Service
 	prompts   *recordingprompt.Service
@@ -214,6 +217,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return fmt.Errorf("app: library: %w", err)
 	}
+	c.library = lib
 	// «Мой конспект» (TASK-151): the files through the library; the date of a lecture in the local time zone.
 	ownNotes, err := notes.New(notes.Deps{
 		Notes: noteRepo, Materials: lib, Recordings: recordings, Lessons: lessons, Clock: e.local, IDs: e.ids, Log: log,
