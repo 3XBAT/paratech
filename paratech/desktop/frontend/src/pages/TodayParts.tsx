@@ -22,6 +22,7 @@ import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
 import { DoneCheck, DoneIssueLine } from "./AssignmentDoneParts.js";
+import { LessonLinkButtons, LessonLinkHost, LessonLinkPanel, type LinkControls, useLinkFocus } from "./CallLinkParts.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
 import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
 import { isDeadlineAction } from "../agentConfirmView.js";
@@ -228,7 +229,11 @@ export function LessonsSection(props: {
   onRecord?: () => void;
   /** Opens «Записи», where a failed recording is dealt with. */
   onOpenRecordings?: () => void;
+  /** TASK-364: «Подключиться» / «Добавить ссылку» on every pair, whatever the time; without it the link is not offered. */
+  links?: LinkControls;
 }) {
+  const links = props.links;
+  useLinkFocus(links?.state.focus);
   const day = props.day ?? "";
   const loose = looseProblems(
     props.lessons.map((l) => l.id),
@@ -274,6 +279,7 @@ export function LessonsSection(props: {
                     )}
                   </p>
                   {m.meta !== "" && <div className="small muted today-meta">{m.meta}</div>}
+                  {links !== undefined && <LessonLinkHost lesson={l} title={m.title} links={links} />}
                 </div>
                 <div className="today-st">
                   {m.live !== null && (
@@ -292,12 +298,14 @@ export function LessonsSection(props: {
                   )}
                 </div>
                 <div className="today-ac">
+                  {links !== undefined && <LessonLinkButtons lesson={l} title={m.title} links={links} />}
                   {open.kind === "record" && props.onRecord !== undefined && (
                     <Button size="sm" icon="rec" aria-label={`${texts.record}: ${m.title}`} onClick={props.onRecord}>
                       {texts.record}
                     </Button>
                   )}
                 </div>
+                {links !== undefined && <LessonLinkPanel lesson={l} links={links} />}
               </div>
             );
           })}

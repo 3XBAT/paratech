@@ -7,6 +7,7 @@ import { recordingDeleteApi } from "../bindings/recordingDelete.js";
 import { callByName } from "../bindings/runtime.js";
 import { type TodayScreen, todayApi } from "../bindings/today.js";
 import { requestDraft } from "../agentDraft.js";
+import { applySubjectLink, CallLinkFlow, idleLink, type LinkState, withoutLink } from "../callLinkView.js";
 import type { PageId } from "../nav.js";
 import { useOpenLesson } from "../openLesson.js";
 import { anyRecording, queueLine } from "../recordingRowView.js";
@@ -16,6 +17,7 @@ import { useNow } from "../useNow.js";
 import { burningAfterDone } from "../assignmentDoneView.js";
 import { AddAssignmentDialog } from "./HomeworkDialogs.js";
 import { SpeechComponentNotice } from "./SpeechComponentNotice.js";
+import { linkActions, type LinkControls } from "./CallLinkParts.js";
 import {
   AskSection,
   BurningSection,
@@ -107,6 +109,39 @@ export function TodayPage(props: {
     },
     refresh: load,
   });
+
+  // The link to the online class of a pair (TASK-364): kept on the subject, so a saved link shows on every pair of that
+  // subject at once. A newer read is started after each change, which also settles what the patch only guessed.
+  const [linkState, setLinkState] = useState<LinkState>(idleLink);
+  const linkFlow = useMemo(
+    () =>
+      new CallLinkFlow(
+        library,
+        {
+          applied: (subject, key) => {
+            requests.current.next(); // an older read must not bring the old link back
+            setScreen((s) => (s === null ? s : { ...s, lessons: applySubjectLink(s.lessons, key, subject) }));
+            load();
+          },
+          linkGone: (subjectId) => {
+            setScreen((s) => (s === null ? s : { ...s, lessons: withoutLink(s.lessons, subjectId) }));
+            load();
+          },
+          reread: load,
+        },
+        setLinkState,
+      ),
+    [library, load],
+  );
+  useEffect(() => {
+    linkFlow.attach();
+    return () => linkFlow.dispose();
+  }, [linkFlow]);
+  const onOpenPage = props.onOpen;
+  const links = useMemo<LinkControls>(
+    () => ({ state: linkState, on: linkActions(linkFlow), onOpenSubjects: () => onOpenPage("subjects") }),
+    [linkState, linkFlow, onOpenPage],
+  );
 
   // Read on each visit of the section and when the window gets back the focus.
   useEffect(() => {
@@ -253,6 +288,7 @@ export function TodayPage(props: {
                 onOpenLesson={(recordingId) => openLesson(recordingId)}
                 onRecord={props.onRecord}
                 onOpenRecordings={openRecordings}
+                links={links}
               />
             </div>
             <div className="today-decide">
