@@ -1,11 +1,14 @@
-import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  closeLesson,
   closeTranscript,
   initialRoute,
   pageById,
   type PageId,
   railItemOf,
   routeToAssignment,
+  routeToLesson,
+  routeToLessonTab,
   routeToOpenedAssignment,
   routeToPage,
   routeToSubject,
@@ -15,7 +18,8 @@ import {
 import { AgentPanel } from "./agent/AgentPanel";
 import { mentionOpening } from "./agentMentions";
 import { PanelResizeHandle, useResizablePanel } from "./agent/PanelResizeHandle";
-import type { CitationOpening } from "./knowledgeView";
+import type { KnowledgeLesson } from "./bindings/knowledgeBase";
+import { type CitationOpening, keepLessonOpening, type LessonOpening, openingRouteTab } from "./knowledgeView";
 import { keepStartPanel } from "./recordStartView";
 import { keepScheduleReview } from "./scheduleSubjectsView";
 import { OpenSummaryContext, type SummarySection } from "./openSummary";
@@ -23,7 +27,8 @@ import { OpenTranscriptContext } from "./openTranscript";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage";
 import { HomeworkPage } from "./pages/HomeworkPage";
-import { KnowledgeBasePage } from "./pages/KnowledgeBasePage";
+import { KnowledgeBasePage, type LessonOpeningRequest } from "./pages/KnowledgeBasePage";
+import { LessonScreen } from "./pages/KnowledgeLessonPage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { DropZone } from "./pages/DropZone";
 import { JournalPage } from "./pages/JournalPage";
@@ -72,6 +77,11 @@ function PageView(props: {
   /** The place of an answer's source «База знаний» opens on arrival; cleared once taken. */
   sourceJump?: CitationOpening;
   onSourceJumpDone: () => void;
+  /** A lesson of «База знаний» opens as a screen of its own over the page (route.lesson, TASK-351). */
+  onOpenLesson: (lesson: KnowledgeLesson, opening: LessonOpeningRequest) => void;
+  /** Count the lesson screens left and the corrections saved there: «База знаний» reads and searches again. */
+  lessonsSeen: number;
+  lessonsEdited: number;
 }) {
   switch (props.id) {
     case "today":
@@ -112,7 +122,7 @@ function PageView(props: {
         />
       );
     case "knowledge":
-      return <KnowledgeBasePage visit={props.visit} onOpenAssignment={props.onOpenAssignment} jump={props.sourceJump} onJumpDone={props.onSourceJumpDone} />;
+      return <KnowledgeBasePage visit={props.visit} onOpenLesson={props.onOpenLesson} lessonsSeen={props.lessonsSeen} lessonsEdited={props.lessonsEdited} jump={props.sourceJump} onJumpDone={props.onSourceJumpDone} />;
     case "tickets":
       return <TicketsPage onOpen={props.onOpen} />;
     case "schedule":
@@ -229,6 +239,45 @@ export function App() {
   useEffect(() => {
     setAssignmentEdit((e) => keepAssignmentEdit(e, { page: route.page, assignment: route.assignment }));
   }, [route.page, route.assignment]);
+  // A lesson of «База знаний» (TASK-351): route.lesson is its key; the screen finds the lesson in `lessons`, which every
+  // page that opens one fills (a lecture of the student's notes has no other way to be found by its key). What the
+  // opening carries besides the route (the found place, the file to mark, the subject form) is one-shot state like the
+  // requests above: taken once by the screen and dropped as soon as the route leaves the lesson.
+  const lessons = useRef(new Map<string, KnowledgeLesson>());
+  const [lessonOpening, setLessonOpening] = useState<LessonOpening | null>(null);
+  const openLesson = useCallback((lesson: KnowledgeLesson, o: LessonOpeningRequest) => {
+    lessons.current.set(lesson.key, lesson);
+    setLessonOpening({ key: lesson.key, focus: o.focus, materialId: o.materialId, editing: o.editing });
+    setRoute((r) => routeToLesson(r, lesson.key, openingRouteTab(o.focus, o.materialId)));
+  }, []);
+  const lessonOpeningTaken = useCallback(() => setLessonOpening(null), []);
+  const openLessonTab = useCallback((tab: string) => setRoute((r) => routeToLessonTab(r, tab)), []);
+  // «База знаний» under the lesson reads its lists when the lesson screen is left, and searches again after a correction.
+  const [lessonsSeen, setLessonsSeen] = useState(0);
+  const [lessonsEdited, setLessonsEdited] = useState(0);
+  const lessonChanged = useCallback((l: KnowledgeLesson) => {
+    lessons.current.set(l.key, l);
+    setLessonsEdited((n) => n + 1);
+  }, []);
+  // The crumbs «Предметы / <предмет>» are routes: «Предметы» is the rail click, the subject opens in «Предметы».
+  const lessonNav = useMemo(
+    () => ({
+      onOpenSubjects: () => {
+        openPage("subjects");
+        setVisit((v) => v + 1);
+      },
+      onOpenSubject: selectSubject,
+    }),
+    [openPage, selectSubject],
+  );
+  const lastLesson = useRef("");
+  useEffect(() => {
+    setLessonOpening((o) => keepLessonOpening(o, { lesson: route.lesson }));
+    if (lastLesson.current !== "" && route.lesson === "") {
+      setLessonsSeen((n) => n + 1);
+    }
+    lastLesson.current = route.lesson;
+  }, [route.lesson]);
   const recipientNav = useMemo<RecipientNav>(
     () => ({
       openTeacher,
@@ -252,7 +301,7 @@ export function App() {
   const panel = useResizablePanel();
   const open = panel.pref.open;
   const width = panel.width;
-  const overlay = route.transcript !== "" || route.summary !== "";
+  const overlay = route.transcript !== "" || route.summary !== "" || route.lesson !== "";
   const inSettings = railItemOf(current).id === "settings";
 
   const pageView = (
@@ -280,6 +329,9 @@ export function App() {
           onAssignmentEditDone={assignmentEditDone}
           sourceJump={sourceJump}
           onSourceJumpDone={sourceJumpDone}
+          onOpenLesson={openLesson}
+          lessonsSeen={lessonsSeen}
+          lessonsEdited={lessonsEdited}
         />
       </OpenSummaryContext.Provider>
     </OpenTranscriptContext.Provider>
@@ -334,6 +386,24 @@ export function App() {
               onOpenAssignment={openAssignment}
               onDeleted={() => openPage("today")}
               onCheckSound={() => openPage("diagnostics")}
+            />
+          </div>
+        )}
+        {route.lesson !== "" && (
+          // The tab is not in the key: switching tabs keeps the screen; another lesson opens it afresh.
+          <div key={`lesson:${route.lesson}`} className="screen">
+            <LessonScreen
+              lessonKey={route.lesson}
+              tab={route.tab}
+              cache={lessons.current}
+              opening={lessonOpening}
+              onOpeningTaken={lessonOpeningTaken}
+              onTab={openLessonTab}
+              onBack={() => setRoute(closeLesson)}
+              onChanged={lessonChanged}
+              onOpenAssignment={openAssignment}
+              onCheckSound={() => openPage("diagnostics")}
+              nav={lessonNav}
             />
           </div>
         )}

@@ -115,7 +115,9 @@ test("tickets: «Предметы / Билеты» opens the subjects as the old
   assert.equal(readFileSync(new URL("../src/ticketsView.ts", import.meta.url), "utf8").match(/back: "Предметы"/).length, 1);
 });
 
-test("knowledge base: the subject and the lesson have crumbs; each level does what a step up did", () => {
+// TASK-351: the lesson is a screen of its own (route.lesson), not rendered inside «База знаний» any more; its crumbs are
+// «Предметы / <предмет> / <пара>» (lessonCrumbs of knowledgeView.ts), the first two are routes of the window.
+test("knowledge base: the subject has crumbs, the old «Назад» of its step up stays; the lesson is not drawn inside it", () => {
   const page = read("pages/KnowledgeBasePage.tsx");
   assert.doesNotMatch(page, backButtons);
   assert.ok(!page.includes("hw-back"));
@@ -123,23 +125,16 @@ test("knowledge base: the subject and the lesson have crumbs; each level does wh
   assert.match(page, /<Breadcrumbs items=\{\[\{ label: rootCrumb, onClick: props\.onBack \}, \{ label: subject\.name \}\]\} \/>/);
   assert.match(page, /onBack=\{leaveSubject\}/);
   assert.match(page, /const leaveSubject = \(\) => \{\s*setSubject\(null\);\s*setReload\(\(n\) => n \+ 1\);\s*\};/);
-  // The lesson: the same step up as before, and the subject level when the lesson was opened from a subject.
-  assert.match(page, /onBack=\{closeLesson\}/);
-  assert.match(page, /subject === null\s*\?\s*\[\{ label: rootCrumb, onClick: closeLesson \}\]/);
-  assert.match(page, /\{ label: subject\.name, onClick: closeLesson \}/);
-  assert.match(page, /closeLesson\(\);\s*leaveSubject\(\);/);
-  // The found lessons are asked again after a change, as before.
-  assert.match(page, /const closeLesson = \(\) => \{\s*setOpen\(null\);\s*if \(changed\.current\) \{[^}]*runSearch\(query, true\)/);
-  assert.match(page, /<NoteLecturePage[^>]*trail=\{lessonTrail\}/);
-  assert.match(page, /<KnowledgeLessonPage[\s\S]*?trail=\{lessonTrail\}/);
+  // The lesson levels moved to the lesson screen with the route.
+  assert.doesNotMatch(page, /KnowledgeLessonPage|NoteLecturePage|lessonTrail|closeLesson|setOpen\(/);
 });
 
-test("lesson pages: the lesson is the last level after the trail they get, and they have no back button", () => {
+test("lesson pages: the crumbs are the lesson's own, the lesson is the last level, and there is no back button", () => {
   const src = read("pages/KnowledgeLessonPage.tsx");
   assert.doesNotMatch(src, backButtons);
   assert.ok(!src.includes("hw-back"));
-  assert.match(src, /<Breadcrumbs items=\{\[\.\.\.props\.trail, \{ label: lessonHeading\(lesson\) \}\]\} \/>/);
-  assert.match(src, /<Breadcrumbs items=\{\[\.\.\.props\.trail, \{ label: noteLectureHeading\(l\) \}\]\} \/>/);
+  assert.match(src, /<Breadcrumbs items=\{crumbItems\(lesson, lessonHeading\(lesson\), props\.nav\)\} \/>/);
+  assert.match(src, /<Breadcrumbs items=\{crumbItems\(l, noteLectureHeading\(l\), props\.nav\)\} \/>/);
   // The embedded transcript still gets the step up (it draws no head of its own).
   assert.match(src, /embedded[\s\S]*?onBack=\{props\.onBack\}/);
 });

@@ -19,20 +19,32 @@ export function currentRoute(h: NavHistory): Route {
   return h.entries[h.index];
 }
 
+/** The same place; the tab of a lesson is not part of it (switching tabs is not a step of the history). */
 export function sameRoute(a: Route, b: Route): boolean {
   return (
     a.page === b.page &&
     a.transcript === b.transcript &&
     a.summary === b.summary &&
     a.assignment === b.assignment &&
-    a.subject === b.subject
+    a.subject === b.subject &&
+    a.lesson === b.lesson
   );
 }
 
-/** A new place: forward entries are cut off; the same place as the current one adds nothing. */
+/**
+ * A new place: forward entries are cut off; the same place as the current one adds nothing. Another tab of the open
+ * lesson replaces the tab of the current entry, so «Назад» leaves the lesson whatever tabs were visited and «Вперёд»
+ * returns to the tab last used.
+ */
 export function pushRoute(h: NavHistory, r: Route): NavHistory {
-  if (sameRoute(currentRoute(h), r)) {
-    return h;
+  const now = currentRoute(h);
+  if (sameRoute(now, r)) {
+    if (now.tab === r.tab) {
+      return h;
+    }
+    const entries = h.entries.slice();
+    entries[h.index] = r;
+    return { entries, index: h.index };
   }
   const kept = [...h.entries.slice(0, h.index + 1), r];
   const entries = kept.length > maxDepth ? kept.slice(kept.length - maxDepth) : kept;
@@ -122,7 +134,10 @@ export function handleMouse(e: { button: number; type: string }, h: NavHistory):
   return { prevent: true, next: e.type === "mouseup" ? step(h, d) : null };
 }
 
-/** True when going from one route to another swaps the page or the assignment, so the page must open afresh. */
+/**
+ * True when going from one route to another swaps the page or the assignment, so the page must open afresh. A lesson
+ * (and its tab) is not such a case: its overlay has its own key (the lesson), and the page under it stays as left.
+ */
 export function needsRemount(to: Route, from: Route): boolean {
   return to.assignment !== "" && (to.page !== from.page || to.assignment !== from.assignment);
 }
