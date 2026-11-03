@@ -1,7 +1,7 @@
-import { type PageId, settingsPages, settingsTabLabels } from "../nav.js";
+import { type PageId, settingsAdvancedCaption, settingsAdvancedPages, settingsMainPages, settingsTabLabels } from "../nav.js";
 import { Icon, type IconName } from "../ui/Icon.js";
 
-export const settingsHead = { lead: "Изменения сохраняются сразу", title: "Настройки" } as const;
+export const settingsHead = { title: "Настройки" } as const;
 
 const sectionIcons: Readonly<Record<string, IconName>> = {
   settings: "set",
@@ -12,28 +12,37 @@ const sectionIcons: Readonly<Record<string, IconName>> = {
   appearance: "wave",
 };
 
-/** The shared head of «Настройки»: one over-line and title for all its sections. */
+/** The shared head of «Настройки»: one title for all its sections. */
 export function SettingsHead() {
   return (
     <div className="head">
       <div>
-        <span className="label">{settingsHead.lead}</span>
         <h1>{settingsHead.title}</h1>
       </div>
     </div>
   );
 }
 
-/** The left menu of «Настройки»: the general settings and the screens that moved inside (models, connections, ...). */
+/**
+ * The left menu of «Настройки»: the main sections, then under a divider with the caption «Дополнительно» the support
+ * tools (models, diagnostics). The caption names the second group for a screen reader.
+ */
 export function SettingsTabs(props: { current: PageId; onOpen: (id: PageId) => void }) {
+  const tab = (id: PageId) => (
+    <button key={id} type="button" aria-current={id === props.current ? "page" : undefined} onClick={() => props.onOpen(id)}>
+      <Icon name={sectionIcons[id] ?? "set"} />
+      {settingsTabLabels[id]}
+    </button>
+  );
   return (
     <nav className="set-nav" aria-label="Разделы настроек">
-      {settingsPages.map((id) => (
-        <button key={id} type="button" aria-current={id === props.current ? "page" : undefined} onClick={() => props.onOpen(id)}>
-          <Icon name={sectionIcons[id] ?? "set"} />
-          {settingsTabLabels[id]}
-        </button>
-      ))}
+      {settingsMainPages.map(tab)}
+      <div className="set-nav-group" role="group" aria-labelledby="set-nav-advanced">
+        <span className="set-nav-caption" id="set-nav-advanced">
+          {settingsAdvancedCaption}
+        </span>
+        {settingsAdvancedPages.map(tab)}
+      </div>
     </nav>
   );
 }

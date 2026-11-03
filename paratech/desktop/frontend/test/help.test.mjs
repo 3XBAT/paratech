@@ -1,4 +1,4 @@
-// Help screen «Как увидеть события в Apple Calendar» (TASK-052). Runs on the modules compiled by `npm run test`.
+// Help screen «Как увидеть события в Календаре Apple» (TASK-052). Runs on the modules compiled by `npm run test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -63,7 +63,9 @@ test("the options come in the PRD order: A recommended, B the fallback, C not re
   assert.ok(at(helpTexts.title) < a);
   assert.ok(at(helpTexts.editTitle) < a, "the editing note comes before the options");
   assert.ok(c < at(helpTexts.troubleTitle));
-  assert.equal(markup.split(`>${helpTexts.back}<`).length - 1, 2, "a back button at the top and at the bottom");
+  // TASK-356: the way back is the first crumb; at the bottom only the quiet «Вернуться к подключениям» is left.
+  assert.ok(at(helpTexts.parentCrumb) < at(helpTexts.title));
+  assert.ok(!markup.includes(">Назад<"));
 });
 
 test("the copy keeps the product rules", () => {
@@ -167,7 +169,8 @@ test("the entry on «Подключения» opens the screen and the rail stay
   const page = src("../src/pages/ConnectionsPage.tsx");
   assert.ok(page.includes("<AppleCalendarHelpPage onBack="));
   assert.ok(page.includes("{helpTexts.entryButton}"));
-  assert.equal(helpTexts.entryButton, "Как увидеть события в Apple Calendar");
+  assert.equal(helpTexts.entryButton, "Как увидеть события в Календаре Apple");
+  assert.equal(helpTexts.title, helpTexts.entryButton, "the button names the screen it opens");
   assert.equal(helpTexts.entryTitle, "Календарь на iPhone, iPad и Mac");
   assert.ok(!src("../src/nav.ts").includes("help"));
 });

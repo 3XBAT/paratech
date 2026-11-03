@@ -49,6 +49,18 @@ html, body, #root { height: 100%; }
 .set-nav button { position: relative; display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 12px; border: 0; border-radius: var(--r-md); background: none; color: var(--text); font: inherit; font-weight: 500; text-align: left; cursor: pointer; }
 .set-nav button .i { width: 18px; height: 18px; color: var(--muted); }
 .set-nav button:hover { background: var(--fill); }
+/* «Дополнительно»: a divider and a quiet caption, then the support tools (ADR-0034 §4). */
+.set-nav-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; flex-basis: 100%; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--sep); }
+.set-nav-caption { flex-basis: 100%; padding: 0 12px 4px; font-size: var(--fs-small); line-height: var(--lh-small); color: var(--muted); }
+/* The folded «Адрес сервера» of «Подключения»: a native disclosure with a visible chevron (the focus ring is global). */
+.conn-adv { margin-top: 8px; }
+.conn-adv > summary { display: flex; align-items: center; gap: 6px; min-height: 32px; cursor: pointer; list-style: none; font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 500; color: var(--text); border-radius: var(--r-md); }
+.conn-adv > summary::-webkit-details-marker { display: none; }
+.conn-adv-saved { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; color: var(--muted); }
+.conn-adv > summary .i { width: 16px; height: 16px; flex: none; color: var(--muted); transition: transform .12s; }
+.conn-adv[open] > summary .i { transform: rotate(90deg); }
+.conn-adv[open] > summary { margin-bottom: 8px; }
+@media (prefers-reduced-motion: reduce) { .conn-adv > summary .i { transition: none; } }
 .set-nav button[aria-current="page"] { background: var(--raised); font-weight: 600; box-shadow: 0 0 0 1px var(--edge); }
 .set-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .set-body > .page { flex: 1; }
@@ -58,6 +70,7 @@ html, body, #root { height: 100%; }
   .set-layout { grid-template-columns: 220px minmax(0, 1fr); }
   .set-nav { flex-direction: column; flex-wrap: nowrap; }
   .set-nav button { width: 100%; }
+  .set-nav-group { flex-direction: column; flex-wrap: nowrap; align-items: stretch; flex-basis: auto; }
   .set-nav button[aria-current="page"]::after { content: ""; position: absolute; right: 12px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: var(--accent-fill); }
 }
 
@@ -389,7 +402,6 @@ dialog.dialog:focus { outline: none; }
 .box p.help-text { margin: 0 0 8px; }
 .help-list { margin: 0 0 8px; padding-left: 20px; }
 .help-list li + li { margin-top: 4px; }
-.help-back { margin-top: 16px; }
 
 /* Домашние задания: the assignment, the draft editor, the versions and the emails. Model text wraps anywhere. */
 .hw .row .t, .hw-title, .hw-desc, .hw-quote { overflow-wrap: anywhere; }
