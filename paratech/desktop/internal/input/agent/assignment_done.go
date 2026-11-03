@@ -69,10 +69,14 @@ func (a *Actions) markDone(ctx context.Context, call values.Call) (prepared, err
 				return effect{}, err
 			}
 			rows := make([]values.MarkRow, 0, len(res.Outcomes))
+			changed := 0
 			for _, o := range res.Outcomes {
 				r, err := values.NewRef(values.KindAssignment, string(o.ID))
 				if err != nil {
 					return effect{}, err
+				}
+				if o.Code == homeworkflow.DoneChanged {
+					changed++
 				}
 				rows = append(rows, values.MarkRow{ID: r, Changed: o.Code == homeworkflow.DoneChanged, Refusal: markRefusal(o)})
 			}
@@ -83,7 +87,7 @@ func (a *Actions) markDone(ctx context.Context, call values.Call) (prepared, err
 			if err != nil {
 				return effect{}, err
 			}
-			return effect{comp: comp, version: comp.ExpectedVersion(), marks: rows}, nil
+			return effect{comp: comp, version: comp.ExpectedVersion(), marks: rows, line: markedLine(done, changed)}, nil
 		},
 	}, nil
 }

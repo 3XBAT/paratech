@@ -124,7 +124,9 @@ func TestSetSettingAndUndo(t *testing.T) {
 			if e.Status != action.StatusDone || !e.CanUndo || e.Compensation != want {
 				t.Fatalf("entry = %+v, want DONE with %+v", e, want)
 			}
-			if len(r.cards) != 1 || r.cards[0] != (values.ActionLine{Action: e.ID}) {
+			// The line names the setting and its new value from the allowlist enums (TASK-324).
+			line := values.LineResult{Kind: values.LineSetting, Setting: values.Setting(tt.setting), Value: tt.value}
+			if len(r.cards) != 1 || r.cards[0] != (values.ActionLine{Action: e.ID, Result: line}) {
 				t.Fatalf("cards = %+v", r.cards)
 			}
 			if u := undo(t, w, e); u.Status != action.StatusUndone || tt.now(f.settings) != tt.old {

@@ -103,7 +103,7 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 	if eff.noop {
 		return t.outcome(c, eff, eff.cards) // nothing changed: no line
 	}
-	line := values.ActionLine{Action: entry.ID, Offer: eff.offer}
+	line := values.ActionLine{Action: entry.ID, Offer: eff.offer, Result: eff.lineResult()}
 	if eff.created.Kind() == values.KindAssignment {
 		// The Driver fills its title, subject and deadline from the local data when it publishes the line.
 		line.Assignment = values.AssignmentLine{Assignment: eff.created}

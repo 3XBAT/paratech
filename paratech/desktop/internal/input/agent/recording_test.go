@@ -103,7 +103,8 @@ func TestRecordingStartAndUndo(t *testing.T) {
 	if e.Status != action.StatusDone || !e.CanUndo || e.Compensation != (action.StopRecording{Recording: rec}) {
 		t.Fatalf("entry = %+v, want DONE with StopRecording rec-1", e)
 	}
-	if len(r.cards) != 1 || r.cards[0] != (values.ActionLine{Action: e.ID}) || len(r.out.Seen) != 1 || r.out.Seen[0] != rec {
+	started := values.ActionLine{Action: e.ID, Result: values.LineResult{Kind: values.LineRecordingStarted}} // TASK-324
+	if len(r.cards) != 1 || r.cards[0] != started || len(r.out.Seen) != 1 || r.out.Seen[0] != rec {
 		t.Fatalf("cards %+v, seen %+v", r.cards, r.out.Seen)
 	}
 
@@ -234,7 +235,9 @@ func TestRecordingStop(t *testing.T) {
 	if e.Status != action.StatusDone || e.Compensation != nil || e.CanUndo || e.NoUndo != action.NoUndoIrreversible {
 		t.Fatalf("entry = %+v, want DONE without an Undo", e)
 	}
-	line := values.ActionLine{Action: e.ID, Offer: values.OfferStartRecording}
+	line := values.ActionLine{
+		Action: e.ID, Offer: values.OfferStartRecording, Result: values.LineResult{Kind: values.LineRecordingStopped}, // TASK-324
+	}
 	if len(r.cards) != 1 || r.cards[0] != line || line.Validate() != nil {
 		t.Fatalf("cards = %+v, want the line offering «Начать запись»", r.cards)
 	}

@@ -200,6 +200,7 @@ type effect struct {
 	note   *values.NoteWriteRow // what note shows instead of row
 	out    resultOf             // what a tool with its own result shape shows instead of row (recording)
 	offer  values.OfferAction
+	line   values.LineResult // what the action line words (lines.go); zero: the generic line
 }
 
 // prepare looks at the target of call, made at at, and returns how to run it; ok is false for a tool this desktop
