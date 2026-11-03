@@ -644,7 +644,6 @@ export function SubjectsPage(props: {
   const tilesHead = tiles && (
     <div className="head">
       <div>
-        <span className="label">Библиотека</span>
         <h1 id={titleId} tabIndex={-1}>
           {texts.title}
         </h1>
@@ -736,8 +735,8 @@ export function SubjectsPage(props: {
           <>
             <div className="head">
               <div>
-                <span className="label">{subject.semesterLabel || subject.semester}</span>
                 <h1>{subject.name}</h1>
+                <p className="small muted sub-line">{subject.semesterLabel || subject.semester}</p>
                 {subject.aliases.length > 0 && (
                   <p className="small muted sub-line">
                     {texts.aliases}: {subject.aliases.join(", ")}

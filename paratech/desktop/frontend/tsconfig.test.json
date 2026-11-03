@@ -123,6 +123,7 @@
     "src/assignmentDoneView.ts",
     "src/doneRunner.ts",
     "src/ui/Toast.tsx",
+    "src/ui/Breadcrumbs.tsx",
     "src/pages/AssignmentDoneParts.tsx",
     "src/pages/HomeworkMenus.tsx",
     "src/subjectRemovalView.ts",

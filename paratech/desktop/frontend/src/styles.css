@@ -390,7 +390,16 @@ dialog.dialog:focus { outline: none; }
 
 /* Домашние задания: the assignment, the draft editor, the versions and the emails. Model text wraps anywhere. */
 .hw .row .t, .hw-title, .hw-desc, .hw-quote { overflow-wrap: anywhere; }
-.hw-back { margin: -8px 0 8px -12px; }
+/* Breadcrumbs (TASK-350): the way back, left above the title. Long names are cut with an ellipsis, the line never wraps. */
+.crumbs { margin: 0 0 8px -4px; font-size: var(--fs-small); line-height: var(--lh-small); }
+.crumbs ol { display: flex; flex-wrap: nowrap; align-items: center; margin: 0; padding: 0; list-style: none; }
+.crumbs li { display: flex; flex: 0 1 auto; align-items: center; min-width: 0; }
+.crumbs li:last-child { flex: 1 1 0; }
+.crumb { display: block; min-width: 0; max-width: 28ch; padding: 2px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crumb.cur { max-width: none; color: var(--muted); }
+.crumb.link { border: 0; border-radius: var(--r-xs); background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.crumb.link:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.crumb-sep { flex: none; color: var(--muted); }
 .hw-desc { margin: 0 0 16px; white-space: pre-wrap; }
 .hw .card.box { margin-bottom: 24px; }
 .hw .card.box + .card.box { margin-top: 0; }
