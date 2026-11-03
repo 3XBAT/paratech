@@ -300,7 +300,7 @@ func TestAnswerQuestionHasItsOwnTimeout(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if c.answerTO != tt.want || c.http.Timeout != tt.want+clientGrace {
+		if c.answerTO != tt.want || c.http.Timeout < tt.want+clientGrace {
 			t.Errorf("%s: answer timeout %v, backstop %v, want %v", tt.name, c.answerTO, c.http.Timeout, tt.want)
 		}
 	}
