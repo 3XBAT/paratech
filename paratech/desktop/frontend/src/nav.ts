@@ -1,13 +1,14 @@
-// Sections of the main window (TASK-124, docs/design/concept-agent.html). The side rail has six icons: Сегодня, Предметы,
-// Задания, Расписание, Журнал, Настройки. Every screen is a page; a rail item covers one or more pages (Настройки holds
-// the general settings, the speech models, the connections, diagnostics, the profile and the appearance; Предметы holds
-// the knowledge base).
+// Sections of the main window (TASK-124, docs/design/concept-agent.html). The side rail has seven items with a label
+// under the icon (TASK-348): Сегодня, Записи, Предметы, Задания, Расписание; below Журнал, Настройки. Every screen is a
+// page; a rail item covers one or more pages (Настройки holds the general settings, the speech models, the connections,
+// diagnostics, the profile and the appearance; Предметы holds the knowledge base).
 
 // The .js extension lets the Node test runner load the compiled module; TypeScript and Vite map it to the .tsx file.
 import type { IconName } from "./ui/Icon.js";
 
 export type PageId =
   | "today"
+  | "recordings"
   | "subjects"
   | "knowledge"
   | "tickets"
@@ -28,6 +29,7 @@ export interface Page {
 
 export const pages: readonly Page[] = [
   { id: "today", label: "Сегодня" },
+  { id: "recordings", label: "Записи" },
   { id: "subjects", label: "Предметы" },
   { id: "knowledge", label: "База знаний" },
   { id: "tickets", label: "Билеты" },
@@ -50,9 +52,10 @@ export interface RailItem {
   covers: readonly PageId[];
 }
 
-/** The six icons of the rail, in order. */
+/** The seven items of the rail, in order. */
 export const rail: readonly RailItem[] = [
   { id: "today", label: "Сегодня", icon: "home", covers: ["today"] },
+  { id: "recordings", label: "Записи", icon: "rec", covers: ["recordings"] },
   { id: "subjects", label: "Предметы", icon: "folder", covers: ["subjects", "knowledge", "tickets"] },
   { id: "homework", label: "Задания", icon: "tasks", covers: ["homework"] },
   { id: "schedule", label: "Расписание", icon: "cal", covers: ["schedule"] },
@@ -66,7 +69,7 @@ export const rail: readonly RailItem[] = [
 ];
 
 /** The first item of the group pinned to the bottom of the rail. */
-export const bottomGroupStart: PageId = "settings";
+export const bottomGroupStart: PageId = "journal";
 
 export const defaultPage: PageId = "today";
 

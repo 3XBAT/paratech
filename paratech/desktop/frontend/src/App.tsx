@@ -15,6 +15,7 @@ import { AgentPanel } from "./agent/AgentPanel";
 import { mentionOpening } from "./agentMentions";
 import { PanelResizeHandle, useResizablePanel } from "./agent/PanelResizeHandle";
 import type { CitationOpening } from "./knowledgeView";
+import { keepStartPanel } from "./recordStartView";
 import { keepScheduleReview } from "./scheduleSubjectsView";
 import { OpenSummaryContext, type SummarySection } from "./openSummary";
 import { OpenTranscriptContext } from "./openTranscript";
@@ -31,6 +32,7 @@ import { SettingsHead, SettingsTabs } from "./pages/SettingsTabs";
 import { SubjectsPage } from "./pages/SubjectsPage";
 import { SummaryPage } from "./pages/SummaryPage";
 import { TicketsPage } from "./pages/TicketsPage";
+import { RecordingsPage } from "./pages/RecordingsPage";
 import { TodayPage } from "./pages/TodayPage";
 import { TranscriptPage } from "./pages/TranscriptPage";
 import { needsRemount } from "./navHistory";
@@ -59,6 +61,10 @@ function PageView(props: {
   scheduleReview: boolean;
   onOpenScheduleReview: () => void;
   onScheduleReviewTaken: () => void;
+  /** «Записать пару» of «Сегодня»: «Записи» opens with the start panel open, taken once. */
+  startPanel: boolean;
+  onOpenStartPanel: () => void;
+  onStartPanelTaken: () => void;
   /** The assignment whose «Изменить» opens on arrival ("" none), taken once. */
   assignmentEdit: string;
   onAssignmentEditDone: () => void;
@@ -68,7 +74,16 @@ function PageView(props: {
 }) {
   switch (props.id) {
     case "today":
-      return <TodayPage onOpen={props.onOpen} onOpenAssignment={props.onOpenAssignment} />;
+      return <TodayPage onOpen={props.onOpen} onOpenAssignment={props.onOpenAssignment} onRecord={props.onOpenStartPanel} />;
+    case "recordings":
+      return (
+        <RecordingsPage
+          onOpen={props.onOpen}
+          onOpenAssignment={props.onOpenAssignment}
+          openStart={props.startPanel}
+          onStartTaken={props.onStartPanelTaken}
+        />
+      );
     case "subjects":
       return (
         <SubjectsPage
@@ -189,6 +204,17 @@ export function App() {
   useEffect(() => {
     setScheduleReview((r) => keepScheduleReview(r, { page: route.page, subject: route.subject }));
   }, [route.page, route.subject]);
+  // «Записать пару» (TASK-348): «Записи» opens with the start panel open. The same one-shot idea: state, not route; taken
+  // once, and dropped as soon as the route leaves «Записи», so Alt+← never opens the panel late.
+  const [startPanel, setStartPanel] = useState(false);
+  const openStartPanel = useCallback(() => {
+    setStartPanel(true);
+    setRoute(routeToPage("recordings"));
+  }, []);
+  const startPanelTaken = useCallback(() => setStartPanel(false), []);
+  useEffect(() => {
+    setStartPanel((s) => keepStartPanel(s, { page: route.page }));
+  }, [route.page]);
   // «Выбрать предмет» from the agent's card: the assignment opens with «Изменить» already open; the same one-shot idea.
   const [assignmentEdit, setAssignmentEdit] = useState("");
   const openAssignmentFor = useCallback(
@@ -246,6 +272,9 @@ export function App() {
           scheduleReview={scheduleReview}
           onOpenScheduleReview={openScheduleReview}
           onScheduleReviewTaken={scheduleReviewTaken}
+          startPanel={startPanel}
+          onOpenStartPanel={openStartPanel}
+          onStartPanelTaken={startPanelTaken}
           assignmentEdit={assignmentEdit}
           onAssignmentEditDone={assignmentEditDone}
           sourceJump={sourceJump}

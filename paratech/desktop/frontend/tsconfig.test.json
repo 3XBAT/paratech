@@ -127,6 +127,7 @@
     "src/pages/HomeworkMenus.tsx",
     "src/subjectRemovalView.ts",
     "src/pages/SubjectRemoval.tsx",
-    "src/pages/useSubjectRemoval.ts"
+    "src/pages/useSubjectRemoval.ts",
+    "src/recordStartView.ts"
   ]
 }

@@ -25,8 +25,7 @@
 .today-decide { grid-area: decide; }
 .today-summary { grid-area: summary; }
 .today-cols { grid-template-areas: "lessons" "decide" "summary"; }
-.today-back { margin-bottom: 8px; }
-/* The read of the day failed: the text and «Повторить» in one line, above the content. */
+/* The read of the day failed (or the stop of a recording): the text and the button in one line, above the content. */
 .today-err { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
 .today-err .result { margin: 0; }
 

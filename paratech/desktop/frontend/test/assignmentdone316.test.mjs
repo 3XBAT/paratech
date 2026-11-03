@@ -454,7 +454,7 @@ test("Ctrl+Z undoes while the toast is shown, but never inside a text field", ()
 test("the toast sits in the content column on the inverse surface, and the check has a 32px hit area", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const host = css.match(/\.toast-host \{([^}]*)\}/)[1];
-  assert.match(host, /left: 64px/, "right of the rail");
+  assert.match(host, /left: 72px/, "right of the rail (72 px since TASK-348)");
   assert.match(host, /right: var\(--ag-w, 0px\)/, "left of the agent panel (the shell sets --ag-w, 0 when closed)");
   const toast = css.match(/\n\.toast \{([^}]*)\}/)[1];
   assert.match(toast, /background: var\(--prim\)/);
