@@ -6,6 +6,7 @@ import {
   type CardLink,
   callLinkTexts,
   cardLink,
+  confirmMs,
   explainText,
   hasNoField,
   joinTitle,
@@ -35,6 +36,8 @@ export interface LinkActions {
   join(target: LinkTarget): void;
   clear(target: LinkTarget, link: { link: string; host: string }): void;
   restore(): void;
+  /** The confirming line fades. */
+  dismiss(): void;
 }
 
 export interface LinkControls {
@@ -53,7 +56,19 @@ export function linkActions(flow: CallLinkFlow): LinkActions {
     join: (target) => void flow.join(target),
     clear: (target, link) => void flow.clear(target, link),
     restore: () => void flow.restore(),
+    dismiss: () => flow.dismiss(),
   };
+}
+
+/** A confirming line fades after `confirmMs` (the flow keeps failures and the undo offer). */
+function useFading(line: LinkLine | null, on: LinkActions): void {
+  useEffect(() => {
+    if (line?.kind !== "ok") {
+      return;
+    }
+    const timer = setTimeout(on.dismiss, confirmMs);
+    return () => clearTimeout(timer);
+  }, [line, on]);
 }
 
 /** The element the flow asked to focus (after an open, a save, a refusal); `n` changes on every request. */
@@ -265,6 +280,7 @@ export function LessonLinkPanel(props: { lesson: TodayLesson; links: LinkControl
   const key = linkKey(lesson);
   const form = links.state.form?.key === key ? links.state.form : null;
   const line = links.state.line?.key === key ? links.state.line : null;
+  useFading(line, links.on);
   if (form === null && line === null) {
     return null;
   }
@@ -293,6 +309,7 @@ export function CallLinkBlock(props: { subject: LibrarySubject; links: LinkContr
   const line = state.line?.key === key ? state.line : null;
   const undo = line !== null && state.removed?.key === key && link === null;
   useLinkFocus(state.focus);
+  useFading(line, on);
   return (
     <section className="section calllink" aria-label={callLinkTexts.field}>
       <Card className="lrows">

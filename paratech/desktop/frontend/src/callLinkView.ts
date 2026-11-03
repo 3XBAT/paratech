@@ -14,6 +14,9 @@ import {
 } from "./bindings/library.js";
 import type { TodayLesson } from "./bindings/today.js";
 
+/** How long a confirming line («Ссылка на пару сохранена.») stays. */
+export const confirmMs = 6000;
+
 export const callLinkTexts = {
   join: "Подключиться",
   joining: "Открытие…",
@@ -282,6 +285,13 @@ export class CallLinkFlow {
       return;
     }
     this.set({ form: null, fieldError: "", line: null }, linkId(form.key, form.mode));
+  }
+
+  /** A result that only confirms («сохранена», «открыта») fades after a while; a failure and the undo offer stay. */
+  dismiss(): void {
+    if (!this.pending && this.current.line?.kind === "ok" && this.current.removed === null) {
+      this.set({ line: null });
+    }
   }
 
   private async guard(kind: LinkState["busy"], key: string, work: (fresh: () => boolean) => Promise<void>): Promise<void> {

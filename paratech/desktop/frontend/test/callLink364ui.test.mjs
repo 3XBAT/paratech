@@ -12,6 +12,7 @@ import {
   applySubjectLink,
   callLinkTexts,
   cardLink,
+  confirmMs,
   createQuestion,
   createRefusalText,
   explainText,
@@ -309,6 +310,22 @@ test("a refused delete and a restore the core refuses say so; the offer goes wit
   await p.flow.restore();
   assert.equal(p.flow.state.removed, null, "an invalid link will not become valid by repeating");
   assert.equal(p.flow.state.focus.id, linkId("s1", "add"));
+});
+
+test("a confirming line fades; a failure and the line with the undo offer stay", async () => {
+  const p = setup({ open: [{ problem: "" }, { problem: "failed" }] });
+  await p.flow.join(target());
+  assert.equal(p.flow.state.line.kind, "ok");
+  p.flow.dismiss();
+  assert.equal(p.flow.state.line, null);
+  await p.flow.join(target());
+  p.flow.dismiss();
+  assert.equal(p.flow.state.line.kind, "fail", "a failure stays until the student acts");
+  await p.flow.clear(target({ key: "s1" }), { link: LINK, host: HOST });
+  p.flow.dismiss();
+  assert.equal(p.flow.state.line.text, callLinkTexts.cleared, "«Вернуть» stays with its line");
+  assert.equal(confirmMs, 6000);
+  assert.match(src("pages/CallLinkParts.tsx"), /setTimeout\(on\.dismiss, confirmMs\)/);
 });
 
 test("opening a field drops the undo offer; reset() clears everything and a late call no longer touches the state", async () => {
