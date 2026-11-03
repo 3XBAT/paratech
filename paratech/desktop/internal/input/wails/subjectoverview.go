@@ -72,7 +72,7 @@ type SubjectNewMaterial struct {
 
 // SubjectOverview is the data of the page of a subject. Name is typed text: plain text only. OpenedAt is the previous
 // opening the «новое» marks are relative to (RFC 3339 in UTC; "" when the page was never opened, and nothing is
-// marked). No teacher: it waits for the owner's decision.
+// marked). It carries no teacher.
 type SubjectOverview struct {
 	SubjectID    string               `json:"subjectId"`
 	Name         string               `json:"name"`
@@ -117,17 +117,21 @@ func (s *LibraryService) MarkSubjectOpened(ctx context.Context, subjectID string
 	return nil
 }
 
-// overviewFail maps an error of the subject page to the page's text and logs the cause.
+// overviewFail maps an error of the subject page to the page's text and logs only its class, as fail does.
 func (s *LibraryService) overviewFail(op string, err error) error {
 	switch {
 	case errors.Is(err, subjectview.ErrInvalidRequest):
-		s.log.Info(op, "result", err.Error())
+		s.log.Info(op, "result", subjectview.ErrInvalidRequest.Error())
 		return ErrLibraryInvalidID
 	case errors.Is(err, subjectview.ErrSubjectNotFound):
-		s.log.Info(op, "result", err.Error())
+		s.log.Info(op, "result", subjectview.ErrSubjectNotFound.Error())
 		return ErrLibrarySubjectNotFound
 	}
-	s.log.Error(op, "err", err)
+	cause := "unexpected"
+	if errors.Is(err, subjectview.ErrUnavailable) {
+		cause = "local storage"
+	}
+	s.log.Error(op, "result", ErrLibraryUnavailable.Error(), "cause", cause)
 	return ErrLibraryUnavailable
 }
 

@@ -52,7 +52,7 @@ func (e *LibraryRemovedNameError) Error() string { return ErrLibraryNameTaken.Er
 func (e *LibraryRemovedNameError) Unwrap() error { return ErrLibraryNameTaken }
 
 // subjectProblem maps an error of DiscardSubject or RestoreSubject to a code of the page; an unexpected one is logged
-// with its cause, as by fail.
+// with its class only, as by fail.
 func (s *LibraryService) subjectProblem(op string, err error) string {
 	code := subjectFailed
 	switch {
@@ -64,7 +64,7 @@ func (s *LibraryService) subjectProblem(op string, err error) string {
 		code = subjectNotFound
 	}
 	if code == subjectFailed {
-		s.log.Error(op, "err", err)
+		s.log.Error(op, "problem", code, "cause", libraryCause(err))
 	} else {
 		s.log.Info(op, "problem", code)
 	}
@@ -97,7 +97,7 @@ func (s *LibraryService) removedVersions(ctx context.Context, rows []ScheduleSki
 		sub, err := s.uc.RemovedSubject(ctx, shared.SubjectID(r.RemovedSubjectID))
 		if err != nil {
 			if !errors.Is(err, library.ErrSubjectNotFound) {
-				s.log.Warn(opLibraryRemovedSub, "err", err)
+				s.log.Warn(opLibraryRemovedSub, "cause", libraryCause(err))
 			}
 			r.RemovedSubjectID = ""
 			continue
