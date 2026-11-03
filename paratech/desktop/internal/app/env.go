@@ -126,6 +126,8 @@ type env struct {
 
 	// hubHTTP replaces the transport of the Hub client (tests: the fake Hub's certificate); nil in production.
 	hubHTTP *http.Client
+	// loopbackHubOnly reads a Hub URL of another host as not configured (E2E mode only, ADR-0035 §3); openCore sets it.
+	loopbackHubOnly bool
 	// mailRoots replaces the system roots for the SMTP server certificate (tests); nil in production.
 	mailRoots *x509.CertPool
 

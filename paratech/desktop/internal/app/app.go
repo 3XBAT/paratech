@@ -207,7 +207,9 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 	}
 
 	profile := a.secretsProfile()
-	c, err := buildCore(ctx, a.cfg.DataDir, profile, a.env, a.log)
+	e := a.env
+	e.loopbackHubOnly = a.cfg.E2E.On()
+	c, err := buildCore(ctx, a.cfg.DataDir, profile, e, a.log)
 	if err != nil {
 		return wails.Core{}, errors.Join(err, closeLog(), lock.Release())
 	}

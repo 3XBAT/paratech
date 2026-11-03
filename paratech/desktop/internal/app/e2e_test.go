@@ -5,14 +5,20 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"paratech/desktop/config"
+	"paratech/desktop/internal/adapters/hubclient"
+	"paratech/desktop/internal/input/wails"
+	"paratech/desktop/testenv"
 )
 
 // e2eDirs is a fake profile layout: the owner's default data dir and WebView2 folder, and the run's folders.
@@ -231,6 +237,91 @@ func TestE2ELogsTheMode(t *testing.T) {
 	}
 	if strings.Contains(plainLogs.String(), "e2e") {
 		t.Errorf("normal start logs the e2e mode:\n%s", plainLogs.String())
+	}
+}
+
+// toFakeHub sends every request to the fake Hub whatever its host, and records the hosts asked for.
+type toFakeHub struct {
+	hub   *url.URL
+	next  http.RoundTripper
+	mu    sync.Mutex
+	hosts []string
+}
+
+func (r *toFakeHub) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.mu.Lock()
+	r.hosts = append(r.hosts, req.URL.Host)
+	r.mu.Unlock()
+	req = req.Clone(req.Context())
+	req.URL.Scheme, req.URL.Host, req.Host = r.hub.Scheme, r.hub.Host, ""
+	return r.next.RoundTrip(req)
+}
+
+func (r *toFakeHub) asked() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.hosts)
+}
+
+// AC6 of TASK-372 (ADR-0035 §3): in E2E mode a stored Hub URL of another host reads as not configured and nothing is
+// sent, a loopback one works; outside the mode the same remote URL is used.
+func TestE2EHubIsLoopbackOnly(t *testing.T) {
+	const remote = "https://hub.example.org"
+	tests := []struct {
+		name       string
+		e2e        bool
+		loopback   bool
+		wantStatus string
+	}{
+		{"e2e, remote url", true, false, "notConfigured"},
+		{"e2e, loopback url", true, true, "current"},
+		{"normal, remote url", false, false, "current"},
+		{"normal, loopback url", false, true, "current"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			hub := testenv.NewFakeHub()
+			hub.SetRemaining(600, 0, 1000)
+			hubURL, hubHTTP := testenv.StartFakeHub(t, hub)
+			target, err := url.Parse(hubURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			transport := &toFakeHub{hub: target, next: hubHTTP.Transport}
+
+			d := newE2EDirs(t)
+			a, f := newTestAppWith(t, d.data)
+			if tt.e2e {
+				a.cfg = d.config(true)
+			}
+			a.env.hubHTTP = &http.Client{Transport: transport}
+			if err := f.secrets[hubSecretsService].Set(ctx, hubclient.DefaultCredentialName, testHubKey); err != nil {
+				t.Fatal(err)
+			}
+			page := wails.NewConnectionsService(startCore(t, a).Connections, a.log)
+
+			stored := map[bool]string{true: hubURL, false: remote}[tt.loopback]
+			if saved, err := page.SaveHubURL(ctx, stored); err != nil || !saved.Saved {
+				t.Fatalf("SaveHubURL(%q) = %+v, %v", stored, saved, err)
+			}
+			got, err := page.RefreshQuota(ctx)
+			if err != nil || got.Quota.Status != tt.wantStatus {
+				t.Fatalf("RefreshQuota = %+v, %v; want status %q", got, err, tt.wantStatus)
+			}
+
+			asked := transport.asked()
+			if tt.wantStatus == "notConfigured" {
+				if len(asked) != 0 || len(hub.QuotaAuthorizations()) != 0 {
+					t.Fatalf("a not configured Hub was asked: hosts %q", asked)
+				}
+				return
+			}
+			want := map[bool]string{true: target.Host, false: "hub.example.org"}[tt.loopback]
+			if len(asked) == 0 || asked[0] != want {
+				t.Fatalf("hosts asked %q, want %q", asked, want)
+			}
+		})
 	}
 }
 
