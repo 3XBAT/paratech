@@ -61,6 +61,7 @@ import { FailedCard, HelperCard, QuestionsCard, TriageCard, UnderstandingCard } 
 import { Button, IconButton } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 
 // Topic, titles, paragraphs, notes and sources reach the page as React text nodes: React escapes them, so markup in
 // them stays visible text. No element, link or markdown is built from them, and nothing is kept in browser storage.
@@ -105,9 +106,7 @@ function OutlineEditor(props: { items: EditorItem[]; check: EditorCheck; disable
         </div>
       ))}
       <div className="ag-actions">
-        <Button size="sm" variant="ghost" icon="plus" disabled={disabled || items.length >= maxCount} onClick={() => props.onChange(addItem(items, mode))}>
-          {workTexts.addSection}
-        </Button>
+        <IconAction icon="plus" label={workTexts.addSection} disabled={disabled || items.length >= maxCount} onClick={() => props.onChange(addItem(items, mode))} />
       </div>
       {!check.ok && (
         <p className="small muted" role="status">
@@ -335,9 +334,13 @@ export function WorkBody(props: {
               </Button>
             )}
             {canStop(work) && (
-              <Button size="sm" variant="secondary" disabled={busy || props.stopping === true} onClick={() => void run(stop)}>
-                {props.stopping ? workTexts.stopping : workTexts.stop}
-              </Button>
+              <IconAction
+                icon="stop"
+                label={props.stopping ? workTexts.stopping : workTexts.stop}
+                busy={props.stopping === true}
+                disabled={busy}
+                onClick={() => void run(stop)}
+              />
             )}
           </div>
         </section>
@@ -375,9 +378,7 @@ export function WorkBody(props: {
             >
               {workTexts.approve}
             </Button>
-            <Button size="sm" variant="secondary" disabled={busy || !check.ok || !edited} onClick={() => void run(savePlan)}>
-              {workTexts.savePlan}
-            </Button>
+            <IconAction icon="save" label={workTexts.savePlan} disabled={busy || !check.ok || !edited} onClick={() => void run(savePlan)} />
           </div>
         </section>
       );
@@ -534,29 +535,16 @@ export function WorkBody(props: {
                 <Button size="sm" variant="primary" disabled={busy} onClick={() => setMode("revise")}>
                   {workTexts.revise}
                 </Button>
-                <Button size="sm" variant="secondary" disabled={busy} onClick={() => setMode("edit")}>
-                  {workTexts.editPlan}
-                </Button>
                 {canOpen && (
                   <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(open)}>
                     {openLabel(work)}
                   </Button>
                 )}
-                {canSavePdf && (
-                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(savePdf)}>
-                    {pdfBusy ? workTexts.savingPdf : workTexts.downloadPdf}
-                  </Button>
-                )}
-                {canOpenPdf && (
-                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(openPdfCopy)}>
-                    {workTexts.openPdf}
-                  </Button>
-                )}
-                {canOpenTalk && (
-                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(openTalkText)}>
-                    {workTexts.openTalk}
-                  </Button>
-                )}
+                {/* The words first, then the icons. */}
+                <IconAction icon="pencil" label={workTexts.editPlan} disabled={busy} onClick={() => setMode("edit")} />
+                {canSavePdf && <IconAction icon="down" label={pdfBusy ? workTexts.savingPdf : workTexts.downloadPdf} busy={pdfBusy} disabled={busy} onClick={() => void run(savePdf)} />}
+                {canOpenPdf && <IconAction icon="open" label={workTexts.openPdf} disabled={busy} onClick={() => void run(openPdfCopy)} />}
+                {canOpenTalk && <IconAction icon="doc" label={workTexts.openTalk} disabled={busy} onClick={() => void run(openTalkText)} />}
               </>
             )}
             {mode === "revise" && (
@@ -564,9 +552,7 @@ export function WorkBody(props: {
                 <Button size="sm" variant="primary" disabled={busy || !canSubmitNote(note)} onClick={() => void run(reviseNow)}>
                   {workTexts.reviseSubmit}
                 </Button>
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMode("view")}>
-                  {workTexts.cancel}
-                </Button>
+                <IconAction icon="x" variant="danger" label={workTexts.cancel} disabled={busy} onClick={() => setMode("view")} />
               </>
             )}
             {mode === "edit" && (
@@ -579,9 +565,7 @@ export function WorkBody(props: {
                 >
                   {workTexts.rewrite}
                 </Button>
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMode("view")}>
-                  {workTexts.cancel}
-                </Button>
+                <IconAction icon="x" variant="danger" label={workTexts.cancel} disabled={busy} onClick={() => setMode("view")} />
               </>
             )}
           </div>

@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement as h } from "react";
 import server from "react-dom/server";
+import { isOff, isOn } from "./iconbtn.mjs";
 import { offerActions, parseCard, parseUpdate } from "../.test-build/bindings/agent.js";
 import {
   agentConfirmApi,
@@ -920,7 +921,9 @@ test("undo_action: «Отменить» shows beside it what it would undo, and 
   const view = (actions, result = null) =>
     renderToStaticMarkup(h(OfferControlView, { offer: model, actions: { ...baseActions, offer: noop, ...actions }, busy: false, result }));
   const out = view({ undoTarget: () => "Отмечены выполненными: 3 задания" });
-  assert.match(out, /<button(?![^>]*disabled)[^>]*>Отменить</);
+  // TASK-368: the undo offer is a small secondary button: an icon with a tooltip, named by the aria-label.
+  assert.ok(isOn(out, "Отменить"));
+  assert.match(out, /<use href="#i-undo"><\/use>/);
   assert.ok(out.includes("Отмечены выполненными: 3 задания"));
   // Nothing to undo: the existing text stays (no target line); other offers never show one.
   assert.doesNotMatch(view({ undoTarget: () => "" }), /ag-act-note/);
@@ -932,7 +935,7 @@ test("undo_action: «Отменить» shows beside it what it would undo, and 
   // After the undo the line says «Отменено: …» instead of the target, and the button is off.
   const done = view({ undoTarget: () => "Отмечены выполненными: 3 задания" }, { ok: true, text: "Отменено: Отмечены выполненными: 3 задания", once: true });
   assert.equal((done.match(/Отмечены выполненными: 3 задания/g) ?? []).length, 1);
-  assert.match(done, /<button[^>]*disabled[^>]*>Отменить</);
+  assert.ok(isOff(done, "Отменить"));
   assert.ok(done.includes("Отменено: Отмечены выполненными: 3 задания"));
   // Not wired: nothing is drawn, not even the target line.
   assert.equal(renderToStaticMarkup(h(OfferControlView, { offer: model, actions: { ...baseActions, undoTarget: () => "x" }, busy: false, result: null })), "");

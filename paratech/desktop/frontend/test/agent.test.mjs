@@ -28,6 +28,7 @@ import {
   stepText,
   texts,
 } from "../.test-build/agentView.js";
+import { isOff, isOn } from "./iconbtn.mjs";
 import { AgentRequest } from "../.test-build/agent/AgentCards.js";
 import { AgentPanelView } from "../.test-build/agent/AgentPanelView.js";
 
@@ -569,10 +570,11 @@ test("action line: «Отменить» is enabled for a named action and calls 
   assert.equal(m.actionId, "a1");
   assert.equal(m.undo.enabled, true);
   const out = html(update({ cards: [card({ kind: "action_line", actionId: "a1" })] }));
-  assert.match(out, /<button(?![^>]*disabled)[^>]*>Отменить</);
+  // TASK-368: «Отменить» is an icon button named by its aria-label.
+  assert.ok(isOn(out, "Отменить"));
   assert.doesNotMatch(out, /Пока недоступно/);
   const none = html(update({ cards: [card({ kind: "action_line", actionId: "" })] }));
-  assert.match(none, /<button[^>]*disabled[^>]*>Отменить</);
+  assert.ok(isOff(none, "Отменить"));
 });
 
 test("action line after «Отменить»: done hides the button, a refusal stays as text, busy disables it", () => {
@@ -584,15 +586,16 @@ test("action line after «Отменить»: done hides the button, a refusal s
   assert.doesNotMatch(done, /<button/);
   const refused = withNote({ busy: false, done: false, text: "Изменено после — отменить нельзя." });
   assert.match(refused, /Изменено после — отменить нельзя\./);
-  assert.match(refused, />Отменить</);
+  assert.ok(isOn(refused, "Отменить"));
   const busy = withNote({ busy: true, done: false, text: "" });
-  assert.match(busy, /<button[^>]*disabled[^>]*>Отмена…</);
+  assert.ok(isOff(busy, "Отмена…"));
+  assert.match(busy, /<span class="ia-spin"/, "a busy icon button shows a small spinner");
 });
 
 test("«Отменить всё» appears with two or more actions to undo and calls undoAll", () => {
   const two = update({ cards: [card({ kind: "action_line", actionId: "a1" }), card({ kind: "action_line", actionId: "a2" })] });
   const out = renderToStaticMarkup(h(AgentRequest, { model: modelOf(two), actions }));
-  assert.match(out, />Отменить всё</);
+  assert.ok(isOn(out, "Отменить всё"));
   const one = html(update({ cards: [card({ kind: "action_line", actionId: "a1" })] }));
   assert.doesNotMatch(one, /Отменить всё/);
   const allDone = renderToStaticMarkup(

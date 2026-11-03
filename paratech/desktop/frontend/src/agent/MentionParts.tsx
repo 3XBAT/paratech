@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { MentionView } from "../bindings/agent.js";
 import { mentionKindCaption, mentionOpening, type MentionPill, mentionTexts, type PopupModel, removeMentionLabel } from "../agentMentions.js";
-import { Button } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 
 // Names of objects are untrusted plain text: they reach the page as React text nodes (and as attribute values), never as
 // markup, and never inside a URL or a class name.
@@ -104,9 +104,7 @@ export function MentionPopup(props: MentionPopupProps) {
           <span>{model.text}</span>
           {model.retry && (
             // Not a tab stop: Enter in the field repeats the search, so the field keeps the focus.
-            <Button size="sm" tabIndex={-1} title={mentionTexts.retryTitle} onClick={props.onRetry}>
-              {mentionTexts.retry}
-            </Button>
+            <IconAction icon="retry" size="sm" place="left" tabIndex={-1} label={mentionTexts.retry} tipText={mentionTexts.retryTitle} onClick={props.onRetry} />
           )}
         </div>
       )}

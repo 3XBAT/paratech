@@ -7,6 +7,7 @@ import { type ConfirmCardModel, ConfirmFlow, confirmCardModel, confirmTexts, typ
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 import { type RecipientNav, useRecipientNav } from "../recipientNav.js";
 import { isRefusal, refusalAction } from "../recipientView.js";
 import { RecipientName, RefusalButton, TeacherChoiceGroup } from "../pages/RecipientParts.js";
@@ -153,9 +154,7 @@ export function ConfirmCardPending(props: { error: string; onReload?: () => void
       </ResultLine>
       {props.onReload !== undefined && (
         <div className="ag-actions">
-          <Button size="sm" onClick={props.onReload}>
-            {confirmTexts.reload}
-          </Button>
+          <IconAction icon="retry" label={confirmTexts.reload} onClick={props.onReload} />
         </div>
       )}
     </section>

@@ -109,9 +109,10 @@ test("«Остановить» is offered at the waiting line only while PLANNIN
   }
 });
 
-test("«Остановить» is a real quiet button; the stop card follows a stopped request", () => {
+test("«Остановить» is a real quiet icon button; the stop card follows a stopped request", () => {
   const html = renderToStaticMarkup(h(AgentRequest, { model: modelOf(update({ status: "EXECUTING" })), actions }));
-  assert.match(html, /<button[^>]*class="btn ghost sm"[^>]*>Остановить<\/button>/);
+  // TASK-368: the stop icon, named by the aria-label and the tooltip (no visible word).
+  assert.match(html, /<button[^>]*class="ia"[^>]*aria-label="Остановить"[^>]*><svg[^>]*><use href="#i-stop"><\/use><\/svg><span class="ia-tip" aria-hidden="true">Остановить<\/span><\/button>/);
   const stopped = modelOf(update({ status: "STOPPED", stopReason: "user" }));
   assert.deepEqual(buttonIds(stopped), ["resume", "cancel"]);
   assert.equal(stopped.cards[0].text, "Остановлено");
@@ -119,7 +120,7 @@ test("«Остановить» is a real quiet button; the stop card follows a s
 
 test("the buttons are off while a call runs", () => {
   const html = renderToStaticMarkup(h(AgentRequest, { model: modelOf(update({ status: "EXECUTING" })), actions: { ...actions, busy: true } }));
-  assert.match(html, /<button[^>]*disabled=""[^>]*>Остановить<\/button>/);
+  assert.match(html, /<button[^>]*aria-label="Остановить"[^>]*disabled=""/);
 });
 
 // ---- Повторить ----

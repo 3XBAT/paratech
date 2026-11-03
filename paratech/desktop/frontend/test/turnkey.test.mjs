@@ -390,7 +390,8 @@ test("the helper page shows the steps, what to hand in, the typical mistakes and
   assert.ok(out.includes(turnkeyTexts.submit) && out.includes("Отчёт в формате docx через почту"));
   assert.ok(out.includes(turnkeyTexts.pitfalls) && out.includes("Забыть единицы измерения"));
   assert.ok(out.includes("Введение") && out.includes("Таблица измерений"));
-  assert.equal((out.match(new RegExp(turnkeyTexts.askStep, "g")) ?? []).length, 2);
+  // TASK-368: one icon button per step, named by its aria-label (the tooltip repeats the words).
+  assert.equal((out.match(new RegExp(`aria-label="${turnkeyTexts.askStep}"`, "g")) ?? []).length, 2);
   assert.ok(/<ol/.test(out));
 });
 

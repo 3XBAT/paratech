@@ -20,6 +20,7 @@ import {
 import { ConfirmFlow, confirmCardModel, confirmTexts, deleteAssignmentQuestion } from "../.test-build/agentConfirmView.js";
 import { lineModel, recordingStopNoUndo } from "../.test-build/journalView.js";
 import { doneTexts } from "../.test-build/assignmentDoneView.js";
+import { buttonTag, isOff, isOn } from "./iconbtn.mjs";
 
 const { renderToStaticMarkup } = server;
 const noop = () => undefined;
@@ -214,8 +215,10 @@ test("the other note lines and their words", () => {
 test("recording_started: «Запись началась» and the undo is «Остановить»", () => {
   const out = render([line(result("recording_started"))]);
   assert.ok(out.includes("Запись началась"));
-  assert.match(out, />Остановить</);
-  assert.doesNotMatch(out, />Отменить</);
+  // TASK-368: the stop icon, named by the aria-label (no visible word).
+  assert.ok(isOn(out, "Остановить"));
+  assert.match(out, /<use href="#i-stop"><\/use>/);
+  assert.equal(buttonTag(out, "Отменить"), null);
   // The press is the existing undo of the action.
   const undone = [];
   const el = AgentRequest({ model: modelOf([line(result("recording_started"))]), actions: { ...actions, undo: (id) => undone.push(id) } });
@@ -228,13 +231,14 @@ test("recording_started: «Запись началась» and the undo is «О�
     if (typeof n.type === "function" && n.type.name === "Card") walk(n.type(n.props));
   };
   walk(el);
-  buttons.find((b) => b.children === "Остановить").onClick();
+  buttons.find((b) => b.label === "Остановить").onClick();
   assert.deepEqual(undone, ["act1"]);
 });
 
 test("recording_started: while stopping and after, the line says so", () => {
   const busy = render([line(result("recording_started"))], { undoNote: () => ({ busy: true, done: false, text: "" }) });
-  assert.match(busy, /<button[^>]*disabled[^>]*>Остановка…</);
+  assert.ok(isOff(busy, "Остановка…"));
+  assert.match(busy, /<span class="ia-spin"/);
   const done = render([line(result("recording_started"))], { undoNote: () => ({ busy: false, done: true, text: "" }) });
   assert.ok(done.includes("Запись остановлена"));
   assert.doesNotMatch(done, /<button|Запись началась/);
