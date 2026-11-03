@@ -362,14 +362,15 @@ test("the not-covered hint of a ticket is shown as it is", () => {
 test("the note-only page reads nothing by a recording id and renders no HTML", () => {
   const src = readFileSync(new URL("../src/pages/KnowledgeLessonPage.tsx", import.meta.url), "utf8");
   const start = src.indexOf("export function NoteLecturePage");
-  const end = src.indexOf("function LectureTab");
+  const end = src.indexOf("interface Message");
   const body = src.slice(start, end);
   assert.ok(start > 0 && end > start);
   for (const banned of ["summary.view", "recordingId", "api.lesson", "TranscriptPage", "useOpenSummary", "dangerouslySetInnerHTML"]) {
     assert.ok(!body.includes(banned), banned);
   }
+  // TASK-351: the lesson screen (route) picks the page by the lecture; «База знаний» only lists them.
+  assert.match(src, /isNoteOnly\(lesson\)\) \{\s*return <NoteLecturePage/);
   const page = readFileSync(new URL("../src/pages/KnowledgeBasePage.tsx", import.meta.url), "utf8");
-  assert.match(page, /isNoteOnly\(open\.lesson\)[\s\S]*?<NoteLecturePage/);
   assert.match(page, /api\.lectures\(subject\.key\)/);
   for (const f of ["knowledgeView.ts", "pages/KnowledgeParts.tsx", "pages/KnowledgeBasePage.tsx"]) {
     const s = readFileSync(new URL(`../src/${f}`, import.meta.url), "utf8");

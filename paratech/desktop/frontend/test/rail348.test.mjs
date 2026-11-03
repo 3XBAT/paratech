@@ -97,7 +97,7 @@ test("a rail click on «Записи» while a transcript or summary is open ove
 });
 
 test("the start panel request is not part of the route", () => {
-  assert.deepEqual(Object.keys(routeToPage("recordings")).sort(), ["assignment", "page", "subject", "summary", "transcript"]);
+  assert.deepEqual(Object.keys(routeToPage("recordings")).sort(), ["assignment", "lesson", "page", "subject", "summary", "tab", "transcript"]);
   assert.doesNotMatch(src("nav.ts"), /startPanel|openStart/);
   assert.doesNotMatch(src("navHistory.ts"), /startPanel|openStart/);
 });

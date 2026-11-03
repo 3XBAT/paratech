@@ -35,19 +35,18 @@ import {
   searchTexts,
   subjectMeta,
 } from "../knowledgeView";
-import { Breadcrumbs, type Crumb } from "../ui/Breadcrumbs";
+import { Breadcrumbs } from "../ui/Breadcrumbs";
 import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Input, ResultLine, type ResultKind } from "../ui/controls";
 import { AddPastNote, HitList, LessonList, SubjectList } from "./KnowledgeParts";
 import { RecordingImportPanel } from "./RecordingImportPanel";
-import { KnowledgeLessonPage, NoteLecturePage } from "./KnowledgeLessonPage";
 
 /** What the export does: the tooltip of «Экспорт в .md» instead of a paragraph under the head (TASK-347). */
 const exportHint = "Сохранить все пары предмета в один файл .md — по датам, с конспектом и текстом лекции.";
 /** The same place says why the button is off: the subject has only notes, or nothing, to export. */
 const exportEmptyHint = "Экспортировать нечего: у предмета пока нет пар с конспектом.";
 
-/** The first level of the breadcrumbs of a subject and of a lesson: the list of subjects of this page. */
+/** The first level of the breadcrumbs of a subject: the list of subjects of this page. */
 const rootCrumb = "База знаний";
 
 type SearchOutcome =
@@ -56,20 +55,26 @@ type SearchOutcome =
   | { kind: "error"; text: string }
   | { kind: "ok"; result: KnowledgeSearchResult };
 
-interface OpenLesson {
-  lesson: KnowledgeLesson;
+/** What a lesson opens with besides the lesson itself (the window keeps it for the lesson screen, TASK-351). */
+export interface LessonOpeningRequest {
   focus: LessonFocus;
-  editing: boolean;
   /** The file of the student's notes to mark (a hit in them); "" for none. */
   materialId: string;
+  editing: boolean;
 }
 
 // «База знаний» (TASK-091): the subjects with their lessons, the search over the whole base and the export of a
-// subject. The core groups, searches and writes the file; the page only shows and asks. A lesson opens here, over the
-// list it came from, so «Назад» finds the list or the search as the user left it.
+// subject. The core groups, searches and writes the file; the page only shows and asks. A lesson opens as a screen of
+// its own over this page (the window's route, TASK-351): the page stays mounted under it, so «Назад» finds the list or
+// the search as the user left it.
 export function KnowledgeBasePage(props: {
   visit?: number;
-  onOpenAssignment: (assignmentId: string) => void;
+  /** Opens a lesson screen. */
+  onOpenLesson: (lesson: KnowledgeLesson, opening: LessonOpeningRequest) => void;
+  /** Counts the lesson screens left: the lists (subjects, lessons of the open subject) are read again. */
+  lessonsSeen?: number;
+  /** Counts the saved subject/kind corrections: the found lessons show the old subject, so the search runs again. */
+  lessonsEdited?: number;
   /** A place of an answer's source to open on arrival (TASK-296); the page takes it once and App clears it. */
   jump?: CitationOpening;
   onJumpDone?: () => void;
@@ -85,8 +90,8 @@ export function KnowledgeBasePage(props: {
   const [listError, setListError] = useState("");
   const [reload, setReload] = useState(0);
   const [subject, setSubject] = useState<KnowledgeSubject | null>(null);
-  const [open, setOpen] = useState<OpenLesson | null>(null);
-  const changed = useRef(false);
+  const onOpenLesson = useRef(props.onOpenLesson);
+  onOpenLesson.current = props.onOpenLesson;
 
   const [query, setQuery] = useState("");
   const [outcome, setOutcome] = useState<SearchOutcome | null>(null);
@@ -180,9 +185,8 @@ export function KnowledgeBasePage(props: {
       },
       opened: (r) => {
         if (mounted.current) {
-          changed.current = false;
           setJumpError("");
-          setOpen({ lesson: r.lesson, focus: r.focus, editing: false, materialId: r.materialId });
+          onOpenLesson.current(r.lesson, { focus: r.focus, materialId: r.materialId, editing: false });
         }
       },
       failed: (text) => mounted.current && setJumpError(text),
@@ -199,7 +203,6 @@ export function KnowledgeBasePage(props: {
     if (props.visit !== firstVisit.current) {
       firstVisit.current = props.visit;
       leaveJump();
-      setOpen(null);
       setSubject(null);
       setQuery("");
       void runSearch("", false);
@@ -207,10 +210,30 @@ export function KnowledgeBasePage(props: {
     }
   }, [props.visit, runSearch, leaveJump]);
 
+  // A lesson screen was left: the lists may be out of date (notes added, a subject corrected).
+  const seenAt = useRef(props.lessonsSeen);
+  useEffect(() => {
+    if (props.lessonsSeen !== seenAt.current) {
+      seenAt.current = props.lessonsSeen;
+      setReload((n) => n + 1);
+    }
+  }, [props.lessonsSeen]);
+
+  // A correction was saved: the found lessons show the old subject, so the search is asked again.
+  const editedAt = useRef(props.lessonsEdited);
+  const queryNow = useRef(query);
+  queryNow.current = query;
+  useEffect(() => {
+    if (props.lessonsEdited !== editedAt.current) {
+      editedAt.current = props.lessonsEdited;
+      setReload((n) => n + 1);
+      void runSearch(queryNow.current, true);
+    }
+  }, [props.lessonsEdited, runSearch]);
+
   const openLesson = (lesson: KnowledgeLesson, focus: LessonFocus = noFocus, editing = false, materialId = "") => {
     leaveJump();
-    changed.current = false;
-    setOpen({ lesson, focus, editing, materialId });
+    props.onOpenLesson(lesson, { focus, materialId, editing });
   };
 
   // Back from a subject to the list: the counts may have changed meanwhile.
@@ -219,59 +242,12 @@ export function KnowledgeBasePage(props: {
     setReload((n) => n + 1);
   };
 
-  // Back from a lesson to where it was opened from (the subject, or the list or the search).
-  const closeLesson = () => {
-    setOpen(null);
-    if (changed.current) {
-      // The found lessons show the old subject: ask again.
-      void runSearch(query, true);
-    }
-  };
-  // The levels above an open lesson: «База знаний / <предмет>» when it was opened from a subject, else «База знаний».
-  const lessonTrail: Crumb[] =
-    subject === null
-      ? [{ label: rootCrumb, onClick: closeLesson }]
-      : [
-          {
-            label: rootCrumb,
-            onClick: () => {
-              closeLesson();
-              leaveSubject();
-            },
-          },
-          { label: subject.name, onClick: closeLesson },
-        ];
-
-  if (open !== null && isNoteOnly(open.lesson)) {
-    // No recording: the page reads nothing by a recording id.
-    return <NoteLecturePage key={open.lesson.key} lesson={open.lesson} materialId={open.materialId} trail={lessonTrail} />;
-  }
-
-  if (open !== null) {
-    return (
-      <KnowledgeLessonPage
-        key={open.lesson.recordingId}
-        api={api}
-        lesson={open.lesson}
-        focus={open.focus}
-        materialId={open.materialId}
-        editing={open.editing}
-        trail={lessonTrail}
-        onBack={closeLesson}
-        onChanged={() => {
-          changed.current = true;
-          setReload((n) => n + 1);
-        }}
-        onOpenAssignment={props.onOpenAssignment}
-      />
-    );
-  }
-
   if (subject !== null) {
     return (
       <SubjectView
         api={api}
         subject={subject}
+        reread={props.lessonsSeen ?? 0}
         onBack={leaveSubject}
         onOpen={(l, editing) => openLesson(l, noFocus, editing)}
       />
@@ -418,6 +394,8 @@ function SearchResults(props: {
 function SubjectView(props: {
   api: KnowledgeBaseApi;
   subject: KnowledgeSubject;
+  /** Counts the lesson screens left: the lessons are read again. */
+  reread: number;
   onBack: () => void;
   onOpen: (l: KnowledgeLesson, editing: boolean) => void;
 }) {
@@ -457,7 +435,7 @@ function SubjectView(props: {
       stopped = true;
       mounted.current = false;
     };
-  }, [api, subject.key, imports]);
+  }, [api, subject.key, imports, props.reread]);
 
   async function onExport() {
     if (acting.current) {

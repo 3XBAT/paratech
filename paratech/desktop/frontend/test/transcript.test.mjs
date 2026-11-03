@@ -326,9 +326,11 @@ test("timestamps play from their second; save results say what happened", () => 
 test("the transcript opens over the current section and goes back to it", () => {
   const r = routeToTranscript(routeToPage("homework"), "r1");
   // TASK-087 added the summary overlay and the assignment to open to the route.
-  assert.deepEqual(r, { page: "homework", transcript: "r1", summary: "", assignment: "", subject: "" });
-  assert.deepEqual(closeTranscript(r), { page: "homework", transcript: "", summary: "", assignment: "", subject: "" });
-  assert.deepEqual(routeToPage("settings"), { page: "settings", transcript: "", summary: "", assignment: "", subject: "" });
+  // TASK-351 added `lesson` and `tab` to the route; they stay empty here.
+  const none = { lesson: "", tab: "" };
+  assert.deepEqual(r, { page: "homework", transcript: "r1", summary: "", assignment: "", subject: "", ...none });
+  assert.deepEqual(closeTranscript(r), { page: "homework", transcript: "", summary: "", assignment: "", subject: "", ...none });
+  assert.deepEqual(routeToPage("settings"), { page: "settings", transcript: "", summary: "", assignment: "", subject: "", ...none });
   assert.equal(initialRoute.transcript, "");
 });
 
