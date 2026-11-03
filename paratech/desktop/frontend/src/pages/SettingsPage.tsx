@@ -198,8 +198,8 @@ export function SettingsPage(props: { part?: SettingsPart }) {
       <section className="page">
         <div className="head">
           <div>
-            <span className="label">Для титульного листа задания</span>
             <h2>Профиль</h2>
+            <p className="small muted">Для титульного листа задания</p>
           </div>
         </div>
         <ProfileCard api={api} />
@@ -212,7 +212,6 @@ export function SettingsPage(props: { part?: SettingsPart }) {
     <section className="page">
       <div className="head">
         <div>
-          <span className="label">Хранится на этом компьютере</span>
           <h2>Оформление</h2>
         </div>
       </div>

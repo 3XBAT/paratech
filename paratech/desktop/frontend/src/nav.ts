@@ -78,8 +78,29 @@ export function railItemOf(page: PageId): RailItem {
   return rail.find((r) => r.covers.includes(page)) ?? rail[0];
 }
 
-/** The pages of «Настройки» in the order of its tabs. */
-export const settingsPages: readonly PageId[] = ["settings", "models", "connections", "diagnostics", "profile", "appearance"];
+/**
+ * The index in settingsMainPages where «Разрешения» goes: right after «Основные» (ADR-0034 §4). TASK-361 adds the page id
+ * at this index; nothing else in the order changes.
+ */
+export const settingsPermissionsSlot = 1;
+
+/** The first group of the left menu of «Настройки», top to bottom. */
+export const settingsMainPages: readonly PageId[] = [
+  "settings",
+  // slot settingsPermissionsSlot: «Разрешения» (TASK-361)
+  "connections",
+  "profile",
+  "appearance",
+];
+
+/** The group under the divider «Дополнительно»: support tools, one click away. */
+export const settingsAdvancedPages: readonly PageId[] = ["models", "diagnostics"];
+
+/** The small caption over the second group. */
+export const settingsAdvancedCaption = "Дополнительно";
+
+/** The pages of «Настройки» in the order of its menu (the groups one after another). */
+export const settingsPages: readonly PageId[] = [...settingsMainPages, ...settingsAdvancedPages];
 
 /** The tab labels of «Настройки»; the first page is the general settings. */
 export const settingsTabLabels: Readonly<Record<string, string>> = {

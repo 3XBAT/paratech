@@ -13,6 +13,7 @@ import {
   type Verdict,
 } from "../appleHelpView.js";
 import { Button } from "../ui/Button.js";
+import { Breadcrumbs } from "../ui/Breadcrumbs.js";
 import { Banner, Card, ResultLine } from "../ui/controls.js";
 import { StatusChip, type ChipKind } from "../ui/StatusChip.js";
 import type { IconName } from "../ui/Icon.js";
@@ -23,7 +24,7 @@ export interface HelpFailure {
   text: string;
 }
 
-// «Как увидеть события в Apple Calendar», opened from «Подключения». The page sends only keys; the core opens the
+// «Как увидеть события в Календаре Apple», opened from «Подключения». The page sends only keys; the core opens the
 // official pages in the browser (ARCH-44).
 export function AppleCalendarHelpPage(props: { onBack: () => void }) {
   const api = useMemo(() => helpApi(callByName), []);
@@ -78,15 +79,14 @@ export function HelpView(props: {
 
   return (
     <section className="page help">
+      <Breadcrumbs items={[{ label: helpTexts.parentCrumb, onClick: props.onBack }, { label: helpTexts.crumb }]} />
       <div className="head">
         <div>
-          <span className="label">{helpTexts.lead}</span>
           <h2 ref={title} tabIndex={-1}>
             {helpTexts.title}
           </h2>
           <p className="small muted">{helpTexts.entryText}</p>
         </div>
-        <Button onClick={props.onBack}>{helpTexts.back}</Button>
       </div>
 
       <p>{helpTexts.intro}</p>
@@ -128,8 +128,10 @@ export function HelpView(props: {
         </ul>
       </Card>
 
-      <div className="acts start help-back">
-        <Button onClick={props.onBack}>{helpTexts.back}</Button>
+      <div className="acts start">
+        <Button variant="ghost" onClick={props.onBack}>
+          {helpTexts.backToConnections}
+        </Button>
       </div>
     </section>
   );

@@ -14,8 +14,10 @@ import {
   fieldErrorText,
   googleCardStatus,
   hubCardStatus,
+  hubAddressOpen,
   hubFields,
   hubKeyLabels,
+  hubSetupHint,
   mailConfiguredText,
   mailFields,
   mailFormDirty,
@@ -23,9 +25,12 @@ import {
   mailCardStatus,
   mailInputFrom,
   mailPasswordLabels,
+  nextChosen,
   otherErrorTexts,
   overviewTexts,
+  savedAddressNote,
   secretOutcomeOk,
+  sectionCrumbs,
   securityOptions,
   texts,
   type CardStatus,
@@ -41,8 +46,10 @@ import {
   quotaUsedPercent,
   type QuotaMessage,
 } from "../quotaView";
+import { Breadcrumbs } from "../ui/Breadcrumbs";
 import { Button } from "../ui/Button";
 import { Card, Field, Input, Progress, ResultLine, Select } from "../ui/controls";
+import { Icon } from "../ui/Icon";
 import { StatusChip } from "../ui/StatusChip";
 import { helpTexts } from "../appleHelpView";
 import { googleTexts } from "../googleView";
@@ -80,6 +87,8 @@ export function ConnectionsPage(props: { visit?: number }) {
   const [hubBusy, setHubBusy] = useState(false);
   const [hubErrors, setHubErrors] = useState<FieldError[]>([]);
   const [hubDone, setHubDone] = useState("");
+  // The student's own open/close of «Адрес сервера» during this visit; null until they touch it.
+  const [addrChosen, setAddrChosen] = useState<boolean | null>(null);
 
   const [hubKeyBusy, setHubKeyBusy] = useState(false);
   const [hubKeyMessage, setHubKeyMessage] = useState<SecretMessage | null>(null);
@@ -131,16 +140,19 @@ export function ConnectionsPage(props: { visit?: number }) {
           setSaved(c);
           setHubUrl(c.hubUrl);
           setHubDone(texts.saved);
+          setAddrChosen(true); // «Сохранено.» sits in the block: keep it open even when the address now works
           setQuotaMessage(null); // an answer of the old address would mislead
           if (quotaRefreshable(c)) {
             void refreshQuota();
           }
         } else {
           setHubErrors(r.errors); // the typed value stays for correction
+          setAddrChosen(true); // the error is in the block: keep it open
         }
       } catch {
         if (mounted.current) {
           setHubErrors([{ field: "", message: failureText("save") }]);
+          setAddrChosen(true);
         }
       }
     });
@@ -280,6 +292,7 @@ export function ConnectionsPage(props: { visit?: number }) {
   useEffect(() => {
     if (props.visit !== firstVisit.current) {
       setOpen(null);
+      setAddrChosen(null); // a new visit starts from the automatic state
     }
   }, [props.visit]);
 
@@ -309,7 +322,7 @@ export function ConnectionsPage(props: { visit?: number }) {
 
   if (open === "google") {
     return (
-      <SectionPage title={googleTexts.title} onBack={back}>
+      <SectionPage title={googleTexts.title} crumb={sectionCrumbs.google} onBack={back}>
         <GoogleBlock />
       </SectionPage>
     );
@@ -325,7 +338,6 @@ export function ConnectionsPage(props: { visit?: number }) {
       <section className="page">
         <div className="head">
           <div>
-            <span className="label">{overviewTexts.lead}</span>
             <h2>{overviewTexts.title}</h2>
           </div>
         </div>
@@ -360,9 +372,10 @@ export function ConnectionsPage(props: { visit?: number }) {
   }
 
   const title = open === "hub" ? overviewTexts.hubTitle : overviewTexts.mailTitle;
+  const crumb = sectionCrumbs[open];
   if (saved === null || mail === null) {
     return (
-      <SectionPage title={title} onBack={back}>
+      <SectionPage title={title} crumb={crumb} onBack={back}>
         {loadError ? (
           <ResultLine kind="fail" role="alert">
             {loadError}
@@ -379,42 +392,25 @@ export function ConnectionsPage(props: { visit?: number }) {
   const quota = quotaDisplay(saved.quota, saved, quotaMessage);
   const quotaState = quotaControls({ refreshing, keyBusy: hubKeyBusy, hubBusy });
   const used = quotaUsedPercent(saved.quota);
+  const addressOpen = hubAddressOpen({
+    savedUrl: saved.hubUrl,
+    typedUrl: hubUrl,
+    errors: hubErrors,
+    quotaStatus: saved.quota.status,
+    chosen: addrChosen,
+  });
+  const setupHint = hubSetupHint(saved);
+  const savedNote = savedAddressNote(saved.hubUrl);
+  const addressLabel = "Адрес сервера";
 
   if (open === "hub") {
     return (
-      <SectionPage title={title} onBack={back}>
+      <SectionPage title={title} crumb={crumb} onBack={back}>
         <Card className="box" label={overviewTexts.hubTitle}>
           <span className="small muted box-desc">{overviewTexts.hubHint}</span>
-          <span className="small muted box-desc">
-            Делает конспекты и ищет задания. Звук туда не отправляется — только текст расшифровки.
-          </span>
-          <Field label="Адрес сервера" error={fieldErrorText(hubErrors, "hubUrl")}>
-            {(id) => (
-              <Input
-                id={id}
-                type="text"
-                inputMode="url"
-                spellCheck={false}
-                placeholder={texts.hubPlaceholder}
-                value={hubUrl}
-                disabled={hubBusy}
-                onChange={(e) => setHubUrl(e.target.value)}
-              />
-            )}
-          </Field>
-          <Errors texts={otherErrorTexts(hubErrors, hubFields)} />
-          <div className="acts start">
-            <Button disabled={hubBusy} onClick={() => void saveHub()}>
-              Сохранить
-            </Button>
-          </div>
-          {hubDone && (
-            <ResultLine kind="ok" role="status">
-              {hubDone}
-            </ResultLine>
-          )}
 
           <hr className="sep" />
+          {setupHint !== "" && <ResultLine kind="wait">{setupHint}</ResultLine>}
           <SecretSlot
             nested
             labels={hubKeyLabels}
@@ -424,6 +420,50 @@ export function ConnectionsPage(props: { visit?: number }) {
             onStore={(value) => changeHubKey("store", () => api.setHubKey(value))}
             onRemove={() => changeHubKey("remove", () => api.removeHubKey())}
           />
+
+          {/* Native disclosure: Tab and Enter/Space work without code. The open state follows hubAddressOpen until the
+              student toggles it; only a toggle that differs from the computed state is a choice (nextChosen), so the
+              event of an automatic open is not, and a choice then keeps the block from closing under their hands. */}
+          <details
+            className="conn-adv"
+            open={addressOpen}
+            onToggle={(e) => {
+              const now = e.currentTarget.open;
+              setAddrChosen((cur) => nextChosen(now, addressOpen, cur));
+            }}
+          >
+            <summary>
+              <Icon name="chevr" className="conn-adv-chev" />
+              {addressLabel}
+              {!addressOpen && savedNote !== "" && <span className="conn-adv-saved">{`· ${savedNote}`}</span>}
+            </summary>
+            {/* The summary already names the field, so the label is read but not shown twice in a row. */}
+            <Field label={<span className="vh">{addressLabel}</span>} error={fieldErrorText(hubErrors, "hubUrl")}>
+              {(id) => (
+                <Input
+                  id={id}
+                  type="text"
+                  inputMode="url"
+                  spellCheck={false}
+                  placeholder={texts.hubPlaceholder}
+                  value={hubUrl}
+                  disabled={hubBusy}
+                  onChange={(e) => setHubUrl(e.target.value)}
+                />
+              )}
+            </Field>
+            <Errors texts={otherErrorTexts(hubErrors, hubFields)} />
+            <div className="acts start">
+              <Button disabled={hubBusy} onClick={() => void saveHub()}>
+                Сохранить адрес
+              </Button>
+            </div>
+            {hubDone && (
+              <ResultLine kind="ok" role="status">
+                {hubDone}
+              </ResultLine>
+            )}
+          </details>
 
           <hr className="sep" />
           <h2 className="sub">{quotaTexts.title}</h2>
@@ -473,7 +513,7 @@ export function ConnectionsPage(props: { visit?: number }) {
   }
 
   return (
-    <SectionPage title={title} onBack={back}>
+    <SectionPage title={title} crumb={crumb} onBack={back}>
       <Card className="box" label="Почта">
         {saved.mailConfigured ? (
           <span className="small muted box-desc">{mailConfiguredText(true)}</span>
@@ -587,23 +627,23 @@ function SectionCard(props: {
   );
 }
 
-// A section opened from a card: the title, «Назад» and the section's card. Focus moves to the title so a screen reader
-// announces the new page and Tab starts from its top.
-function SectionPage(props: { title: string; onBack: () => void; children: ReactNode }) {
+// A section opened from a card: «Подключения / <section>» above the title (the first crumb is the old «Назад», so the
+// focus still returns to the card) and the section's card. Focus moves to the title so a screen reader announces the
+// new page and Tab starts from its top.
+function SectionPage(props: { title: string; crumb: string; onBack: () => void; children: ReactNode }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     heading.current?.focus();
   }, []);
   return (
     <section className="page conn-page">
+      <Breadcrumbs items={[{ label: overviewTexts.title, onClick: props.onBack }, { label: props.crumb }]} />
       <div className="head">
         <div>
-          <span className="label">{overviewTexts.title}</span>
           <h2 ref={heading} tabIndex={-1}>
             {props.title}
           </h2>
         </div>
-        <Button onClick={props.onBack}>{overviewTexts.back}</Button>
       </div>
       {props.children}
     </section>
