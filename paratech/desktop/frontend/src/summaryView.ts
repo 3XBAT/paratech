@@ -184,9 +184,12 @@ export function updatedText(v: SummaryView): string {
   return at === "—" ? "" : `Составлен ${at}`;
 }
 
-/** The deadline of an assignment and whether the student changed it. */
+/**
+ * The deadline of an assignment and whether the student changed it. The summary does not know whether the assignment
+ * is done, so it keeps the plain «до …» wording (never «просрочено» for what may already be handed in).
+ */
 export function assignmentMeta(a: Pick<SummaryAssignment, "due" | "userEdited">, now?: Date): string {
-  return a.userEdited ? `${dueText(a.due, now)} · изменено вами` : dueText(a.due, now);
+  return a.userEdited ? `${dueText(a.due, now, true)} · изменено вами` : dueText(a.due, now, true);
 }
 
 /** Which step a retry is for (TASK-086). */

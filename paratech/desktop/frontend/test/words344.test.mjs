@@ -171,8 +171,21 @@ test("«Задания»: a deadline to do reads with now, a done one stays plai
   assert.equal(homeworkDueText(at(2025, 9, 23, 20, 0), now), "просрочено, чт, 23 окт. 2025, 20:00");
   assert.equal(homeworkDueText(at(2025, 9, 23, 20, 0), now, true), "до чт, 23 окт. 2025, 20:00");
   assert.equal(homeworkDueText(at(2026, 9, 30, 18, 30), now).includes("2026"), false);
-  // The summary list reads the same way.
-  assert.equal(assignmentMeta({ due: at(2026, 9, 27, 18, 30), userEdited: true }, now), "завтра до 18:30 · изменено вами");
+});
+
+test("the lesson summary keeps the plain «до …» (it does not know which assignments are done)", () => {
+  const at = (y, mo, d, h, m) => new Date(y, mo, d, h, m).toISOString();
+  assert.equal(assignmentMeta({ due: at(2026, 9, 27, 18, 30), userEdited: true }, now), "до вт, 27 окт., 18:30 · изменено вами");
+  assert.equal(assignmentMeta({ due: at(2026, 9, 24, 18, 30), userEdited: false }, now), "до сб, 24 окт., 18:30");
+  assert.doesNotMatch(assignmentMeta({ due: at(2026, 9, 24, 18, 30), userEdited: true }, now), /просрочено/);
+  assert.equal(assignmentMeta({ due: at(2027, 0, 15, 10, 0), userEdited: false }, now), "до пт, 15 янв. 2027, 10:00");
+});
+
+test("a deadline without a time shows the year when it is not the current one", () => {
+  const line = (due) => ({ id: "a1", title: "Эссе", subjectId: "", due, time: "" });
+  assert.equal(assignmentRow(line("2027-01-15"), {}, now).due, "до пт, 15 янв. 2027");
+  assert.equal(assignmentRow(line("2025-10-23"), {}, now).due, "просрочено, чт, 23 окт. 2025");
+  assert.equal(assignmentRow(line("2026-10-30"), {}, now).due, "до пт, 30 окт.");
 });
 
 test("source: the assignment page and the list rows pass now and the done mark to dueText", () => {
@@ -346,6 +359,10 @@ const oldWords = [
   /Написать заново/,
   /Разобрать задание/,
   /Попробуем/,
+  /Обновляем/,
+  /Запускаем/,
+  /Выходим/,
+  /Завершаем/,
 ];
 
 // The Windows setting is named «Распознавание текста» in the OS itself: the one place the word may stay.

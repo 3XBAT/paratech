@@ -51,9 +51,9 @@ function dueWhen(d: Date, time: string, now: Date): { text: string; overdue: boo
   }
   const days = daysBetween(d, now);
   if (days < 0) {
-    return { text: `${daysLeftText(days)}, ${dayText(d)}`, overdue: true };
+    return { text: `${daysLeftText(days)}, ${dayText(d, now)}`, overdue: true };
   }
-  return { text: days < 2 ? daysLeftText(days) : `до ${dayText(d)}`, overdue: false };
+  return { text: days < 2 ? daysLeftText(days) : `до ${dayText(d, now)}`, overdue: false };
 }
 
 /** The row of an assignment; the subject name comes from the student's subjects. */
