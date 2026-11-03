@@ -43,8 +43,9 @@ h1, p, ul { margin: 0; }
 /* Error banner, warnings and the general advice. */
 .texts { display: flex; flex: 0 1 auto; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
 .texts > * { flex: none; }
-/* TASK-367: a neutral note, no tint and no coloured border; only the icon carries the colour. */
-.note { display: flex; align-items: flex-start; gap: 8px; padding: 5px 10px; border-radius: var(--r-ctl); background: var(--panel-2); font-size: var(--fs-small); line-height: 17px; }
+/* TASK-367: a neutral note, no tint and no coloured border; only the icon carries the colour. On --raised with the
+   group contour like the main window's (the popup sheet is --panel; --panel-2 was nearly the same shade). */
+.note { display: flex; align-items: flex-start; gap: 8px; padding: 5px 10px; border-radius: var(--r-ctl); background: var(--raised); border: 1px solid var(--edge); font-size: var(--fs-small); line-height: 17px; }
 .note > .i { width: 16px; height: 16px; margin-top: 1px; color: var(--rec-t); }
 /* The silent-source advice (TASK-082): a warning, not an error. */
 .note.s-wait { font-weight: 500; }

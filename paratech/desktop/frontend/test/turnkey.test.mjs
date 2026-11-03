@@ -439,7 +439,8 @@ test("reader text never becomes markup, a link or an address", () => {
   for (const html of out) {
     assert.ok(!html.includes("<img") && !html.includes("<a "), html);
     // An attribute value (a placeholder) holds the escaped text; only an element with a real href attribute is wrong.
-    assert.ok(!/<[a-z]+[^>]* href=/.test(html.replace(/="[^"]*"/g, '=""')), html);
+    // The icon sprite reference (<use href="#i-…">) is the one fixed href the cards draw.
+    assert.ok(!/<[a-z]+[^>]* href=/.test(html.replace(/<use href="#i-[a-z]+"><\/use>/g, "").replace(/="[^"]*"/g, '=""')), html);
     assert.ok(html.includes(evilEscaped) || html.includes(evilEscaped.replace(/"/g, "&quot;")), html.slice(0, 400));
   }
 });

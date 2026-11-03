@@ -124,14 +124,25 @@ test("status text colours are AA on every surface in both themes; the recording 
     for (const surface of ["bg", "panel", "raised", "fill"]) {
       check(theme, "rec", surface, 3);
     }
-    // A banner is plain text on --fill (or --panel-2 in the popup) with a coloured icon (3:1).
-    for (const surface of ["fill", "panel-2"]) {
-      check(theme, "text", surface, 4.5);
-      for (const icon of ["rec-t", "wait-t", "muted"]) {
-        check(theme, icon, surface, 3);
-      }
+    // A banner (.note, the popup's too) is plain text on --raised with a coloured icon (3:1) and may hold a ghost button
+    // (accent text, «Оставить») and a progress bar; both must stay readable on it.
+    check(theme, "text", "raised", 4.5);
+    check(theme, "accent", "raised", 4.5);
+    for (const icon of ["rec-t", "wait-t", "muted"]) {
+      check(theme, icon, "raised", 3);
     }
+    check(theme, "accent-fill", "raised", 3);
+    // The track (--fill) is a different shade from the banner, so an empty bar still shows.
+    assert.ok(ratio(hex(theme, "fill"), hex(theme, "raised")) >= 1.1, `${theme}: the progress track is visible on a banner`);
   }
+});
+
+// TASK-367 review: --run-t is no longer a text colour of statuses (in-progress ones are muted: icon and verb carry the
+// meaning); the app accent and an orange-brown status text would read as the same link colour.
+test("the in-progress status text is the quiet muted colour, not an accent-like orange", () => {
+  const components = readFileSync(new URL("../src/ui/components.css", import.meta.url), "utf8");
+  assert.match(components, /\.s-run, \.s-net, \.s-neutral \{ --c: var\(--muted\); \}/);
+  assert.doesNotMatch(components, /\.s-run \{/);
 });
 
 // TASK-363: the scrollbar thumb is a non-text control, visible at rest and clearer on hover/drag.

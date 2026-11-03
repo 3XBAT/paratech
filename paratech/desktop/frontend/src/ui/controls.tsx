@@ -184,7 +184,7 @@ export function Toggle(props: {
 
 export type BannerKind = "wait" | "net" | "fail";
 
-const bannerIcons: Readonly<Record<BannerKind, IconName>> = { wait: "warn", net: "wave", fail: "warn" };
+const bannerIcons: Readonly<Record<BannerKind, IconName>> = { wait: "warn", net: "wave", fail: "error" };
 
 /** A note above the content. It has no close button: it goes away when its reason does. */
 export function Banner(props: { kind: BannerKind; role?: "status" | "alert"; children: ReactNode }) {
@@ -198,7 +198,7 @@ export function Banner(props: { kind: BannerKind; role?: "status" | "alert"; chi
 
 export type ResultKind = "ok" | "wait" | "fail";
 
-const resultIcons: Readonly<Record<ResultKind, IconName>> = { ok: "ok", wait: "warn", fail: "warn" };
+const resultIcons: Readonly<Record<ResultKind, IconName>> = { ok: "ok", wait: "warn", fail: "error" };
 
 /** The outcome of an action: a line with an icon under its button, instead of a toast. */
 export function ResultLine(props: { kind: ResultKind; role?: "status" | "alert"; title?: string; children: ReactNode }) {

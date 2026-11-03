@@ -437,12 +437,14 @@ test("an urgent deadline chip has the clock icon and the word, a plain one has n
   const now = new Date(2026, 9, 21, 12, 0);
   const row = (due, urgent) => html(h(BurningSection, { now, burning: [{ assignmentId: "a", title: "Реферат", subject: "", due: at(...due), daysLeft: 0, urgent }], onOpenAssignment: noop }));
   const today = row([21, 20, 0], true);
-  assert.match(today, /s-run[^>]*><svg[^]*?<\/svg><span class="chip-text"><span class="num">сегодня до 20:00<\/span>/);
-  assert.match(row([22, 18, 30], true), /s-run[^>]*><svg[^]*?<\/svg><span class="chip-text"><span class="num">завтра до 18:30/);
+  // TASK-367 review: urgent is amber (wait) with the clock, not the quiet in-progress grey (s-run).
+  assert.match(today, /s-wait[^>]*><svg[^]*?<\/svg><span class="chip-text"><span class="num">сегодня до 20:00<\/span>/);
+  assert.match(row([22, 18, 30], true), /s-wait[^>]*><svg[^]*?<\/svg><span class="chip-text"><span class="num">завтра до 18:30/);
+  assert.doesNotMatch(today, /s-run/);
   // TASK-345 review: a passed moment is a failure chip with the warning icon, not the «сегодня» one.
   const gone = row([20, 9, 0], true);
   assert.match(gone, /s-fail[^>]*><svg[^]*?<\/svg><span class="chip-text"><span class="num">просрочено, вт, 20 окт., 09:00/);
-  assert.doesNotMatch(gone, /s-run/);
+  assert.doesNotMatch(gone, /s-run|s-wait/);
   assert.match(row([21, 9, 0], false), /s-fail/, "overdue wins over a calm row");
   assert.doesNotMatch(today, /s-fail/);
   const calm = row([26, 18, 30], false);
@@ -466,7 +468,7 @@ test("rows: live chip, urgent chip, the whole row opens the lesson (TASK-352), n
   assert.match(pending, /class="row-open"/);
 
   const burning = html(h(BurningSection, { now: new Date(2026, 9, 21, 12, 0), burning: [{ assignmentId: "a", title: "Реферат", subject: "", due: at(23), daysLeft: 2, urgent: true }, { assignmentId: "b", title: "ЛР", subject: "", due: at(26), daysLeft: 5, urgent: false }], onOpenAssignment: noop }));
-  assert.match(burning, /s-run[^>]*>.*до пт, 23 окт\., 00:00/);
+  assert.match(burning, /s-wait[^>]*>.*до пт, 23 окт\., 00:00/);
   assert.match(burning, /s-neutral[^>]*>.*до пн, 26 окт\., 00:00/);
 
   const waiting = html(h(WaitingSection, { waiting: [{ proposalId: "p", kind: "create_deadline_event", assignmentId: "a", title: "ДЗ", subject: "", due: at(24), recipient: "", createdAt: "" }] }));

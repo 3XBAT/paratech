@@ -352,7 +352,7 @@ test("each earlier message with a number has the quiet action; one without a num
   const earlier = earlierItems([req(1), req(2, { text: "" })], [], "a");
   const html = panel({ earlier, restart: restartUi() });
   // TASK-365: an icon of the action row; the tooltip holds the name, the aria-label adds the start of the message.
-  assert.equal(html.split('class="ag-act ag-act-restart"').length - 1, 1);
+  assert.equal(html.split('class="ag-ib ag-ib-restart"').length - 1, 1);
   assert.ok(html.includes("Начать заново отсюда"));
   assert.ok(html.includes('aria-label="Начать заново отсюда: вопрос 1"'));
   assert.ok(!html.includes('aria-modal'), "the dialog is closed");
@@ -362,7 +362,7 @@ test("each earlier message with a number has the quiet action; one without a num
 test("a live request of the open chat shows the action under its text", () => {
   const state = withText(twoDone());
   const html = panel({ state, restart: restartUi({ targetFor: (e) => liveRestartTarget(e, [], "a") }) });
-  assert.equal(html.split('class="ag-act ag-act-restart"').length - 1, 2);
+  assert.equal(html.split('class="ag-ib ag-ib-restart"').length - 1, 2);
 });
 
 test("the pending edit shows a note by the field with «Отменить»; the refusal is written there", () => {
@@ -512,15 +512,15 @@ test("a hint text from outside ends the pending edit and its pills; with no edit
 
 test("the action under a message is always visible (quiet, not hidden) and its tooltip says what it does", () => {
   const css = readFileSync(new URL("../src/agent/agent.css", import.meta.url), "utf8");
-  // TASK-365: the text link became an icon of the row (.ag-act): muted, never hidden, 28px; the name is the tooltip.
-  const rule = css.split("\n").filter((l) => l.startsWith(".ag-act { "));
+  // TASK-365: the text link became an icon of the row (.ag-ib): muted, never hidden, 28px; the name is the tooltip.
+  const rule = css.split("\n").filter((l) => l.startsWith(".ag-ib { "));
   assert.equal(rule.length, 1);
   assert.match(rule[0], /color: var\(--muted\)/);
   assert.match(rule[0], /width: 28px; height: 28px/);
   assert.doesNotMatch(rule[0], /opacity/);
   const html = panel({ earlier: earlierItems([req(1)], [], "a"), restart: restartUi() });
-  assert.ok(html.includes(`<span class="ag-act-tip" aria-hidden="true">${restartTexts.action}</span>`));
-  assert.ok(!/<button[^>]*ag-act-restart[^>]*title=/.test(html), "the tooltip replaces the native hint");
+  assert.ok(html.includes(`<span class="ag-ib-tip" aria-hidden="true">${restartTexts.action}</span>`));
+  assert.ok(!/<button[^>]*ag-ib-restart[^>]*title=/.test(html), "the tooltip replaces the native hint");
 });
 
 test("the dialog points only at its body; the reason is a live region; «Скрыть» has no pointer of its own", () => {

@@ -24,14 +24,14 @@ export function ActionButton(props: {
       type="button"
       ref={props.ref}
       role={props.role}
-      className={["ag-act", props.className, props.note ? "ag-act-note" : ""].filter((c) => c !== undefined && c !== "").join(" ")}
+      className={["ag-ib", props.className, props.note ? "ag-ib-note" : ""].filter((c) => c !== undefined && c !== "").join(" ")}
       aria-label={props.label}
       aria-busy={props.busy || undefined}
       disabled={props.busy || props.disabled}
       onClick={props.onClick}
     >
       <Icon name={props.icon} />
-      <span className="ag-act-tip" aria-hidden="true">
+      <span className="ag-ib-tip" aria-hidden="true">
         {props.tip ?? props.label}
       </span>
     </button>
@@ -69,7 +69,7 @@ export function CopyAction(props: { text: string; copy(text: string): Promise<vo
     });
   };
 
-  const icon: IconName = state === "copied" ? "ok" : state === "failed" ? "warn" : "copy";
+  const icon: IconName = state === "copied" ? "ok" : state === "failed" ? "error" : "copy";
   return (
     <>
       <ActionButton icon={icon} label={messageActionTexts.copy} tip={copyNote(state)} note={state !== "idle"} onClick={press} />
@@ -109,7 +109,7 @@ export function AgentActions(props: { text: string; copy?: (text: string) => Pro
   return (
     <Row side="agent">
       {canCopy && props.copy && <CopyAction text={props.text} copy={props.copy} />}
-      {props.rerun && <ActionButton icon="retry" label={messageActionTexts.rerun} className="ag-act-rerun" busy={props.busy} onClick={props.onRerun} />}
+      {props.rerun && <ActionButton icon="retry" label={messageActionTexts.rerun} className="ag-ib-rerun" busy={props.busy} onClick={props.onRerun} />}
     </Row>
   );
 }

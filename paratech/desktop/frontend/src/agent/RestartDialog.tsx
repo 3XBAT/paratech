@@ -15,7 +15,7 @@ export function RestartButton(props: { target: RestartTarget; onOpen(target: Res
       icon="retry"
       label={restartLabel(props.target)}
       tip={restartTexts.action}
-      className="ag-act-restart"
+      className="ag-ib-restart"
       onClick={(e) => props.onOpen(props.target, e.currentTarget)}
     />
   );

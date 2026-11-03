@@ -14,6 +14,8 @@ export type IconName =
   | "off"
   | "ok"
   | "warn"
+  | "error"
+  | "help"
   | "wave"
   | "clock"
   | "chev"
@@ -82,6 +84,16 @@ export function IconSprite() {
       </symbol>
       <symbol id="i-warn" viewBox="0 0 24 24">
         <path d="M12 4l9 16H3zM12 10v4M12 17h.01" />
+      </symbol>
+      {/* «error» is a circle with a cross, the shape of a failure; «warn» (triangle) stays for waiting and cautions. */}
+      <symbol id="i-error" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6" />
+      </symbol>
+      {/* «help»: a circle with a question mark, the heading icon of a question to the student. */}
+      <symbol id="i-help" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M9.6 9.6a2.5 2.5 0 1 1 3.6 2.2c-.8.4-1.2 1-1.2 1.8M12 16.8h.01" />
       </symbol>
       <symbol id="i-wave" viewBox="0 0 24 24">
         <path d="M3 12h2l2-5 3 10 3-14 3 12 2-3h3" />

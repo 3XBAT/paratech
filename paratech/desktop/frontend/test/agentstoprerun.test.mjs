@@ -206,7 +206,7 @@ test("only the last request offers «Повторить»", () => {
 
 test("«Повторить ответ» is an icon button with the counter-clockwise arrow, a tooltip and the same name (TASK-365)", () => {
   const html = renderToStaticMarkup(h(AgentRequest, { model: modelOf(update()), actions }));
-  assert.match(html, /<button[^>]*aria-label="Повторить ответ"[^>]*><svg[^>]*><use href="#i-retry"><\/use><\/svg><span class="ag-act-tip" aria-hidden="true">Повторить ответ<\/span><\/button>/);
+  assert.match(html, /<button[^>]*aria-label="Повторить ответ"[^>]*><svg[^>]*><use href="#i-retry"><\/use><\/svg><span class="ag-ib-tip" aria-hidden="true">Повторить ответ<\/span><\/button>/);
   assert.equal(texts.rerunTitle, "Повторить ответ");
 });
 

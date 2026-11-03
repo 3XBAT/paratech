@@ -38,17 +38,18 @@ const count = (html, part) => html.split(part).length - 1;
 test("the texts of the actions are fixed, impersonal Russian", () => {
   assert.equal(messageActionTexts.copy, "Копировать");
   assert.equal(messageActionTexts.copied, "Скопировано");
-  assert.equal(messageActionTexts.copyFailed, "Не удалось скопировать");
+  // TASK-365 review: a failure tells what to do instead; the note stays 2 s so the sentence can be read.
+  assert.equal(messageActionTexts.copyFailed, "Не удалось скопировать. Выделите текст и нажмите Ctrl+C");
   assert.equal(messageActionTexts.rerun, "Повторить ответ");
   assert.equal(texts.rerunTitle, "Повторить ответ");
   assert.equal(restartTexts.action, "Начать заново отсюда");
-  assert.equal(copyNoteMs, 1500);
+  assert.equal(copyNoteMs, 2000);
 });
 
 test("copyNote: the tooltip follows the state, idle is the action's name", () => {
   assert.equal(copyNote("idle"), "Копировать");
   assert.equal(copyNote("copied"), "Скопировано");
-  assert.equal(copyNote("failed"), "Не удалось скопировать");
+  assert.equal(copyNote("failed"), "Не удалось скопировать. Выделите текст и нажмите Ctrl+C");
 });
 
 test("copyable: a message with only blanks has nothing to copy", () => {
@@ -94,8 +95,8 @@ test("under the student's message: «Копировать» and «Начать �
   const labels = [...row[1].matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(labels, ["Копировать", "Начать заново отсюда: Что задали?"]);
   assert.match(row[1], /<use href="#i-copy"><\/use>/);
-  assert.match(row[1], /<span class="ag-act-tip" aria-hidden="true">Копировать<\/span>/);
-  assert.match(row[1], /<span class="ag-act-tip" aria-hidden="true">Начать заново отсюда<\/span>/);
+  assert.match(row[1], /<span class="ag-ib-tip" aria-hidden="true">Копировать<\/span>/);
+  assert.match(row[1], /<span class="ag-ib-tip" aria-hidden="true">Начать заново отсюда<\/span>/);
   assert.equal(count(row[1], '<use href="#i-retry"></use>'), 1, "the restart icon is the retry arrow");
   // The text link is gone: no visible text of the action, only the tooltip.
   assert.doesNotMatch(html, /class="ag-restart"/);
@@ -113,7 +114,7 @@ test("under the student's message the row is above the cards; without text there
 test("without a copy call the student's row keeps only the restart; without both there is no row", () => {
   const onlyRestart = render(model({ cards: [] }), baseActions);
   assert.equal(count(onlyRestart, "<button"), 1);
-  assert.match(onlyRestart, /ag-act-restart/);
+  assert.match(onlyRestart, /ag-ib-restart/);
   assert.doesNotMatch(onlyRestart, /Копировать/);
   assert.doesNotMatch(render(model({ cards: [] }), baseActions, null), /ag-acts/);
 });
@@ -126,7 +127,7 @@ test("under the agent's reply: «Копировать» and «Повторить
   assert.ok(row, html);
   const labels = [...row[1].matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(labels, ["Копировать", "Повторить ответ"]);
-  assert.match(row[1], /<span class="ag-act-tip" aria-hidden="true">Повторить ответ<\/span>/);
+  assert.match(row[1], /<span class="ag-ib-tip" aria-hidden="true">Повторить ответ<\/span>/);
   assert.match(row[1], /<use href="#i-retry"><\/use>/);
   assert.ok(html.indexOf("ag-acts-agent") > html.indexOf("Выучить §4"), "the row is under the reply");
 });
@@ -134,9 +135,9 @@ test("under the agent's reply: «Копировать» and «Повторить
 test("the rerun press is the existing «rerun» button call; busy turns the button off", () => {
   const presses = [];
   const html = renderToStaticMarkup(h(AgentRequest, { model: model({ rerun: true }), actions: { ...baseActions, copy, press: (id) => presses.push(id) } }));
-  assert.match(html, /class="ag-act ag-act-rerun"/);
+  assert.match(html, /class="ag-ib ag-ib-rerun"/);
   const busy = renderToStaticMarkup(h(AgentRequest, { model: model({ rerun: true }), actions: { ...baseActions, copy, busy: true } }));
-  assert.match(busy, /<button[^>]*class="ag-act ag-act-rerun"[^>]*aria-busy="true"[^>]*disabled=""/);
+  assert.match(busy, /<button[^>]*class="ag-ib ag-ib-rerun"[^>]*aria-busy="true"[^>]*disabled=""/);
   assert.match(src("agent/AgentCards.tsx"), /onRerun=\{\(\) => props\.actions\.press\("rerun"\)\}/);
 });
 
@@ -167,7 +168,7 @@ test("the rerun row is the same as before for a panel without a copy call", () =
 
 test("CopyAction starts quiet: «Копировать», the copy icon, an empty polite status", () => {
   const html = renderToStaticMarkup(h(CopyAction, { text: "т", copy }));
-  assert.match(html, /<button[^>]*class="ag-act"[^>]*aria-label="Копировать"/);
+  assert.match(html, /<button[^>]*class="ag-ib"[^>]*aria-label="Копировать"/);
   assert.match(html, /<use href="#i-copy"><\/use>/);
   assert.match(html, /<span class="ag-vh" role="status" aria-live="polite" aria-atomic="true"><\/span>/);
   assert.doesNotMatch(html, /Скопировано|Не удалось/);
@@ -176,7 +177,9 @@ test("CopyAction starts quiet: «Копировать», the copy icon, an empty
 test("the copy confirmation is inline: the state in the component, no toast", () => {
   const code = src("agent/MessageActions.tsx");
   assert.match(code, /setTimeout\(\(\) => setState\("idle"\), copyNoteMs\)/);
-  assert.match(code, /state === "copied" \? "ok" : state === "failed" \? "warn" : "copy"/);
+  assert.match(code, /state === "copied" \? "ok" : state === "failed" \? "error" : "copy"/);
+  // The polite status says the same sentence as the tooltip.
+  assert.match(code, /\{state === "idle" \? "" : copyNote\(state\)\}/);
   assert.doesNotMatch(code, /Toast|navigator\.clipboard/);
 });
 
@@ -209,11 +212,87 @@ test("every use of the retry icon goes through the set; no page draws its own ar
 
 test("the row is quiet and visible: muted without opacity, text colour on hover and focus, 28px target, focus ring", () => {
   const css = src("agent/agent.css");
-  assert.match(css, /\.ag-act \{[^}]*width: 28px; height: 28px[^}]*color: var\(--muted\)/);
-  assert.doesNotMatch(css.match(/\.ag-act \{[^}]*\}/)[0], /opacity/);
-  assert.match(css, /\.ag-act:hover:enabled, \.ag-act:focus-visible, \.ag-act-note \{ background: var\(--fill\); color: var\(--text\); \}/);
-  assert.match(css, /\.ag-act:focus-visible \{ outline: 2px solid var\(--accent\);/);
-  assert.match(css, /\.ag-act:hover \.ag-act-tip, \.ag-act:focus-visible \.ag-act-tip, \.ag-act-note \.ag-act-tip \{ opacity: 1;/);
-  assert.match(css, /\.ag-act-tip \{[^}]*position: absolute[^}]*opacity: 0[^}]*pointer-events: none/);
+  assert.match(css, /\.ag-ib \{[^}]*width: 28px; height: 28px[^}]*color: var\(--muted\)/);
+  assert.doesNotMatch(css.match(/\.ag-ib \{[^}]*\}/)[0], /opacity/);
+  assert.match(css, /\.ag-ib:hover:enabled, \.ag-ib:focus-visible, \.ag-ib-note \{ background: var\(--fill\); color: var\(--text\); \}/);
+  assert.match(css, /\.ag-ib:focus-visible \{ outline: 2px solid var\(--accent\);/);
+  assert.match(css, /\.ag-ib:hover \.ag-ib-tip, \.ag-ib:focus-visible \.ag-ib-tip, \.ag-ib-note \.ag-ib-tip \{ opacity: 1;/);
+  assert.match(css, /\.ag-ib-tip \{[^}]*position: absolute[^}]*opacity: 0[^}]*pointer-events: none/);
   assert.doesNotMatch(css, /\.ag-restart \{|\.ag-rerun/);
+});
+
+// ---- the icon buttons (.ag-ib) and the action line card (.ag-act) are two different things ----
+
+const rulesOf = (css) => [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ selector: m[1].trim(), decls: m[2].trim() }));
+
+test("the action line card keeps its own class and takes nothing from the icon buttons", () => {
+  const cards = src("agent/AgentCards.tsx");
+  assert.match(cards, /<div className="ag-act">/);
+  assert.doesNotMatch(cards, /ag-ib/, "AgentCards builds no icon button class by hand");
+  const html = renderToStaticMarkup(
+    h(AgentRequest, {
+      model: model({
+        userText: "",
+        cards: [{ type: "action", text: "Добавлено задание", detail: [], actionId: "x", undo: { label: "Отменить", busyLabel: "…", enabled: true, shown: true }, undoneText: "", afterUndoOffer: null, assignment: null, offer: null }],
+      }),
+      actions: { ...baseActions, copy, undoNote: () => undefined },
+    }),
+  );
+  const line = html.match(/<div class="ag-act">[^]*$/)?.[0] ?? "";
+  assert.notEqual(line, "", html);
+  assert.doesNotMatch(line.split("</article>")[0], /ag-ib/, "no icon-button class inside the action line card");
+});
+
+test("the CSS of the action line card is the one of master; the icon buttons use their own family", () => {
+  const css = src("agent/agent.css");
+  assert.match(css, /\n\.ag-act, \.ag-stop \{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 32px; padding: 4px 4px 4px 12px; border-radius: var\(--r-md\); background: var\(--panel\); box-shadow: 0 0 0 1px var\(--edge\); font-size: var\(--fs-small\); line-height: var\(--lh-small\); \}\n/);
+  assert.match(css, /\n\.ag-act \.i, \.ag-stop \.i \{ flex: none; width: 14px; height: 14px; color: var\(--muted\); \}\n/);
+  // No rule of the icon-button family may name the old classes, and the old ones are defined once.
+  const rules = rulesOf(css);
+  for (const { selector } of rules) {
+    for (const one of selector.split(",").map((s) => s.trim())) {
+      if (/\.ag-ib/.test(one)) {
+        assert.doesNotMatch(one, /\.ag-act(?![\w-])|\.ag-act-(tx|ex|note)/, one);
+      }
+    }
+  }
+  for (const name of [".ag-act", ".ag-act-tx", ".ag-act-ex", ".ag-act-note", ".ag-act-tip"]) {
+    const re = new RegExp(`${name.replace(".", "\\.")}(?![\\w-])`);
+    const n = rules.filter((r) => r.selector.split(",").some((s) => re.test(s))).length;
+    assert.ok(n <= 2, `${name} is defined in ${n} rules`); // .ag-act has two (box, icon); the others none or one
+  }
+  assert.equal(rules.filter((r) => r.selector.split(",").some((s) => s.trim() === ".ag-act-note")).length, 0, "the old note span has no rule of its own");
+  assert.doesNotMatch(css, /\.ag-act-tip|\.ag-act-head|\.ag-act-side|\.ag-act-rerun|\.ag-act-restart/);
+});
+
+test("no selector is defined twice for the icon buttons", () => {
+  const seen = new Map();
+  // The base rules only: the @media blocks (reduced motion, forced colours) restate a selector on purpose.
+  const base = src("agent/agent.css").replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, "");
+  for (const { selector } of rulesOf(base)) {
+    if (!/\.ag-ib/.test(selector)) continue;
+    seen.set(selector, (seen.get(selector) ?? 0) + 1);
+  }
+  const twice = [...seen].filter(([, n]) => n > 1).map(([s]) => s);
+  assert.deepEqual(twice, []);
+});
+
+test("an icon button has no ring, is 28px, and its icon takes the button's colour (brightens, shows the check)", () => {
+  const css = src("agent/agent.css");
+  const box = css.match(/\n\.ag-ib \{([^}]*)\}/)[1];
+  assert.match(box, /width: 28px; height: 28px/);
+  assert.match(box, /box-shadow: none/);
+  assert.match(box, /background: none/);
+  assert.match(css, /\n\.ag-ib \.i \{[^}]*color: inherit;/);
+});
+
+test("the tip of a row icon in the chat list keeps its vertical centring on hover and focus (heavier than the base rule)", () => {
+  const css = src("agent/agent.css");
+  assert.match(css, /\.ag-ib\.ag-ib-side:hover \.ag-ib-tip, \.ag-ib\.ag-ib-side:focus-visible \.ag-ib-tip \{ transform: translateY\(-50%\); \}/);
+  // The base rule that resets the transform has weight (0,3,0); the side one must weigh more.
+  assert.match(css, /\.ag-ib:hover \.ag-ib-tip, \.ag-ib:focus-visible \.ag-ib-tip, \.ag-ib-note \.ag-ib-tip \{ opacity: 1; transform: none; \}/);
+});
+
+test("a long copy hint wraps inside the narrow panel instead of running off it", () => {
+  assert.match(src("agent/agent.css"), /\.ag-ib-note \.ag-ib-tip \{[^}]*max-width: min\(240px, 70vw\)[^}]*white-space: normal/);
 });

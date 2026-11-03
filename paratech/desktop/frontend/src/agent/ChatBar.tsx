@@ -22,7 +22,7 @@ export interface ChatBarProps {
 /** A running request in a chat that is not open: a quiet clock in the muted colour, named for screen readers. */
 function RunMark() {
   return (
-    <span className="ag-chat-run">
+    <span className="ag-chat-run" title={chatTexts.running}>
       <Icon name="clock" />
       <span className="ag-vh">{chatTexts.running}</span>
     </span>
@@ -44,7 +44,7 @@ export function ChatItem(props: { row: ChatRow; open: boolean; onOpen(): void; o
         icon={row.archived ? "unarchive" : "archive"}
         label={`${action}: ${row.title}`}
         tip={action}
-        className="ag-act-side"
+        className="ag-ib-side"
         onClick={props.onToggle}
       />
     </li>
@@ -248,16 +248,20 @@ export function ChatBar(props: ChatBarProps) {
         )}
         {!editing && (
           <div className="ag-chat-actions">
-            <ActionButton ref={renameBtn} icon="pencil" label={chatTexts.rename} className="ag-act-head" disabled={openChat === null} onClick={startEdit} />
+            {/* Rename and archive act on the open chat: without one they are not shown (nothing disabled to explain). */}
             {openChat !== null && (
-              <ActionButton
-                icon={openChat.archived ? "unarchive" : "archive"}
-                label={openChat.archived ? chatTexts.restore : chatTexts.toArchive}
-                className="ag-act-head"
-                onClick={() => (openChat.archived ? props.onRestore(openChat.threadId) : props.onArchive(openChat.threadId))}
-              />
+              <>
+                <ActionButton ref={renameBtn} icon="pencil" label={chatTexts.rename} className="ag-ib-head" onClick={startEdit} />
+                <ActionButton
+                  icon={openChat.archived ? "unarchive" : "archive"}
+                  label={openChat.archived ? chatTexts.restore : chatTexts.toArchive}
+                  className="ag-ib-head"
+                  onClick={() => (openChat.archived ? props.onRestore(openChat.threadId) : props.onArchive(openChat.threadId))}
+                />
+              </>
             )}
-            <ActionButton icon="plus" label={chatTexts.newChat} className="ag-act-head" onClick={props.onNew} />
+            {/* The most frequent target stands apart so a slip does not archive the chat. */}
+            <ActionButton icon="plus" label={chatTexts.newChat} className="ag-ib-head ag-ib-new" onClick={props.onNew} />
           </div>
         )}
       </div>

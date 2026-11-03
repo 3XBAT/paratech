@@ -358,7 +358,10 @@ function QuestionsCard(props: { card: Extract<CardModel, { type: "questions" }>;
   const answers = collectAnswers(card.questions, picked, typed);
   return (
     <section className="ag-card ag-ask">
-      <h3 className="ag-card-h">{card.caption}</h3>
+      <h3 className="ag-card-h">
+        <Icon name="help" />
+        {card.caption}
+      </h3>
       {card.questions.map((q, i) => (
         <fieldset key={i} className="ag-q" disabled={!card.active}>
           <legend>{q.text}</legend>

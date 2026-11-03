@@ -33,7 +33,10 @@
 .today-row + .today-row::before, [role="listitem"] + [role="listitem"] > .today-row::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 1px; background: var(--sep); }
 .today-lesson { grid-template-columns: 4.5rem minmax(0, 1fr) auto; }
 .today-lesson .today-st { grid-column: 2 / -1; }
-.today-problem { display: inline-flex; padding: 0; border: 0; background: none; cursor: pointer; font: inherit; }
+/* A chip inside a button: the underline on hover and focus and the focus ring tell that the word is pressable. */
+.today-problem { display: inline-flex; padding: 0; border: 0; border-radius: var(--r-xs); background: none; cursor: pointer; font: inherit; }
+.today-problem:hover .chip-text, .today-problem:focus-visible .chip-text { text-decoration: underline; }
+.today-problem:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .today-loose { margin-bottom: 8px; }
 .today-wait { grid-template-columns: auto minmax(0, 1fr) auto; }
 .today-wait > .i { color: var(--muted); }

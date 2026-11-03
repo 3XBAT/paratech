@@ -185,7 +185,7 @@ export const chatTexts = {
   restore: "Вернуть",
   rename: "Переименовать",
   renameLabel: "Название чата",
-  running: "идёт запрос",
+  running: "Идёт запрос",
   archivedMark: "в архиве",
   noChats: "Чатов пока нет.",
   emptyArchive: "Архив пуст.",
@@ -498,12 +498,12 @@ export const restartTexts = {
 export const messageActionTexts = {
   copy: "Копировать",
   copied: "Скопировано",
-  copyFailed: "Не удалось скопировать",
+  copyFailed: "Не удалось скопировать. Выделите текст и нажмите Ctrl+C",
   rerun: "Повторить ответ",
 } as const;
 
-/** How long «Скопировано» / «Не удалось скопировать» stays on the button. */
-export const copyNoteMs = 1500;
+/** How long «Скопировано» / the failure hint stays on the button (long enough to read the hint). */
+export const copyNoteMs = 2000;
 
 export type CopyState = "idle" | "copied" | "failed";
 

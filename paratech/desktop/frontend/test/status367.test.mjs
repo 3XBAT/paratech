@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { StatusChip } from "../.test-build/ui/StatusChip.js";
+import { Banner, ResultLine } from "../.test-build/ui/controls.js";
+import { IconSprite } from "../.test-build/ui/Icon.js";
 import { jobStatusView, recordingStatusView } from "../.test-build/statusPresentation.js";
 
 const html = (el) => renderToStaticMarkup(el);
@@ -142,8 +144,77 @@ test("the source-picker marks and the banners are plain: coloured words and icon
   assert.match(picker, /\.picker \.mark\.sounding \{[^}]*color: var\(--ok-t\);/);
   assert.match(picker, /\.picker \.mark\.muted, \.picker \.mark\.gone \{ color: var\(--rec-t\); \}/);
   const note = read(new URL("ui/components.css", srcUrl)).match(/\n\.note \{([^}]*)\}/)?.[1] ?? "";
-  assert.match(note, /background: var\(--fill\)/);
-  assert.doesNotMatch(note, /border:|color-mix/);
+  // Review: on --raised (not --fill) accent text and the progress track both stay readable inside a banner.
+  assert.match(note, /background: var\(--raised\)/);
+  assert.match(note, /box-shadow: 0 0 0 1px var\(--edge\)/);
+  assert.doesNotMatch(note, /border:|color-mix|background: var\(--fill\)/);
+  const popupNote = read(new URL("popup/popup.css", srcUrl)).match(/\n\.note \{([^}]*)\}/)?.[1] ?? "";
+  assert.match(popupNote, /background: var\(--raised\)/);
+  assert.doesNotMatch(popupNote, /--panel-2|color-mix/);
   const live = read(new URL("pages/today.css", srcUrl));
   assert.doesNotMatch(live, /today-lesson\.live/, "no red tint behind the live lesson");
+});
+
+// ---- review fixes ----
+
+test("a failure banner and result line have their own glyph (a circle with a cross), a wait keeps the triangle", () => {
+  const iconOf = (el) => html(el).match(/<use href="#i-([a-z]+)">/)[1];
+  assert.equal(iconOf(h(Banner, { kind: "fail", role: "alert" }, "Не вышло")), "error");
+  assert.equal(iconOf(h(Banner, { kind: "wait" }, "Ждём")), "warn");
+  assert.equal(iconOf(h(Banner, { kind: "net" }, "Нет сети")), "wave");
+  assert.equal(iconOf(h(ResultLine, { kind: "fail" }, "Не вышло")), "error");
+  assert.equal(iconOf(h(ResultLine, { kind: "wait" }, "Ждём")), "warn");
+  assert.equal(iconOf(h(ResultLine, { kind: "ok" }, "Готово")), "ok");
+  // The fail text stays plain --text in a banner; only the icon is red.
+  assert.match(html(h(Banner, { kind: "fail" }, "Не вышло")), /^<div class="note s-fail"><svg/);
+  const sprite = html(h(IconSprite));
+  for (const id of ["i-error", "i-help", "i-warn"]) {
+    assert.equal(sprite.split(`id="${id}"`).length - 1, 1, id);
+  }
+  assert.notEqual(sprite.match(/<symbol id="i-error"[^]*?<\/symbol>/)[0], sprite.match(/<symbol id="i-warn"[^]*?<\/symbol>/)[0]);
+});
+
+test("in-progress statuses are muted (icon and verb carry them), never the orange of the accent", () => {
+  const css = read(new URL("ui/components.css", srcUrl));
+  assert.match(css, /\.s-run, \.s-net, \.s-neutral \{ --c: var\(--muted\); \}/);
+  assert.doesNotMatch(css, /\.s-run \{/);
+  // --run-t is left to highlights (<mark>, a diff insertion); no status text uses it.
+  for (const [file, text] of files) {
+    for (const { selector, decls } of rules(text)) {
+      if (/(^|[\s,])\.(chip|s-run|result|note)(?![\w-])/.test(selector) && decls.some(([, v]) => /--run-t/.test(v))) {
+        assert.fail(`${file}: ${selector} uses --run-t`);
+      }
+    }
+  }
+});
+
+test("an urgent deadline is amber (wait) with the clock; the overdue assignment in a reply is the failure red", () => {
+  const code = read(new URL("pages/TodayParts.tsx", srcUrl));
+  assert.match(code, /m\.overdue \? "fail" : m\.urgent \? "wait" : "neutral"/);
+  assert.doesNotMatch(code, /m\.urgent \? "run"/);
+  assert.match(read(new URL("agent/agent.css", srcUrl)), /\.ag-asg-late \{ color: var\(--rec-t\);/);
+});
+
+test("the question cards: a plain-text caption with a question icon, not the accent colour, still no frame", () => {
+  const css = read(new URL("agent/agent.css", srcUrl));
+  const cap = css.match(/\n\.ag-ask > \.ag-card-h \{([^}]*)\}/)[1];
+  assert.match(cap, /color: var\(--text\)/);
+  assert.match(cap, /font-weight: 600/);
+  assert.doesNotMatch(cap, /accent/);
+  assert.doesNotMatch(css, /\n\.ag-ask \{/, "no frame for the question card");
+  for (const f of ["agent/AgentCards.tsx", "agent/TurnkeyCards.tsx"]) {
+    assert.match(read(new URL(f, srcUrl)), /<section className="ag-card ag-ask">\s*<h3 className="ag-card-h">\s*<Icon name="help" \/>/, f);
+  }
+});
+
+test("«Сегодня»: the problem chip button shows it is pressable (underline on hover and focus, a focus ring)", () => {
+  const css = read(new URL("pages/today.css", srcUrl));
+  assert.match(css, /\.today-problem:hover \.chip-text, \.today-problem:focus-visible \.chip-text \{ text-decoration: underline; \}/);
+  assert.match(css, /\.today-problem:focus-visible \{ outline: 2px solid var\(--accent\);/);
+});
+
+test("a busy round icon button spins the way the retry arrow points (counter-clockwise)", () => {
+  const css = read(new URL("ui/components.css", srcUrl));
+  assert.match(css, /\.btn\.icon-btn\[aria-busy="true"\] \.i \{ animation: icon-spin 1s linear infinite; \}/);
+  assert.match(css, /\.btn\.icon-btn\[aria-busy="true"\] \.i:has\(use\[href="#i-retry"\]\) \{ animation-direction: reverse; \}/);
 });

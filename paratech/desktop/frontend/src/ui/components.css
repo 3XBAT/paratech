@@ -45,6 +45,8 @@
 .btn.icon-btn:hover:enabled { background: var(--fill); color: var(--text); }
 .btn.icon-btn .i { width: 16px; height: 16px; color: currentColor; }
 .btn.icon-btn[aria-busy="true"] .i { animation: icon-spin 1s linear infinite; }
+/* The retry arrow runs counter-clockwise, so it spins the way it points. */
+.btn.icon-btn[aria-busy="true"] .i:has(use[href="#i-retry"]) { animation-direction: reverse; }
 @keyframes icon-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .btn.icon-btn[aria-busy="true"] .i { animation: none; } }
 .btn-with-reason { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
@@ -78,9 +80,9 @@
 .chip-text { min-width: 0; white-space: normal; overflow-wrap: normal; }
 /* Status colours are text colours (AA on every surface, test/contrast.test.mjs); the quiet kinds are --muted. */
 .s-rec, .s-fail { --c: var(--rec-t); }
-.s-run { --c: var(--run-t); }
 .s-wait { --c: var(--wait-t); }
-.s-net, .s-neutral { --c: var(--muted); }
+/* In progress is quiet: the icon and the verb carry it; --run-t shares the accent's orange hue and would read as a link. */
+.s-run, .s-net, .s-neutral { --c: var(--muted); }
 .s-ok { --c: var(--ok-t); }
 .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--rec); animation: breath var(--t-breath) ease-in-out infinite; }
 @keyframes breath { 50% { opacity: .35; } }
@@ -121,8 +123,10 @@
 .switch:checked::after { transform: translateX(16px); background: var(--on-prim); }
 .switch:disabled { opacity: .6; cursor: not-allowed; }
 
-/* Banner: a neutral note (no tint, no coloured border) with the icon in the status colour and plain text. */
-.note { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 16px; padding: 8px 12px; border-radius: var(--r-md); background: var(--fill); color: var(--text); }
+/* Banner: a neutral note (no tint, no coloured border) with the icon in the status colour and plain text. It sits on
+   --raised with the group contour, not on --fill: accent text (the ghost button «Оставить») is 5.45:1 there against
+   4.37:1 on --fill, and the progress track (--fill) stays visible inside it. */
+.note { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 16px; padding: 8px 12px; border-radius: var(--r-md); background: var(--raised); box-shadow: 0 0 0 1px var(--edge); color: var(--text); }
 .note > .i { margin-top: 1px; color: var(--c); }
 .note p { margin: 0; }
 
