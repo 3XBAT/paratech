@@ -57,7 +57,8 @@ test("the api calls the bound Go methods with the prompt id", async () => {
   ]);
   // Snooze is no longer bound (TASK-076); selectSource and startRecording are the main window's (TASK-081); advice
   // is the popup's silent-source advice (TASK-082).
-  assert.equal(Object.keys(methods).length, 7);
+  // TASK-370 added callSubject («Подключиться» in the popup).
+  assert.equal(Object.keys(methods).length, 8);
   assert.equal("snooze" in api, false);
   assert.equal(shownEvent, "recordingprompt:shown");
 });

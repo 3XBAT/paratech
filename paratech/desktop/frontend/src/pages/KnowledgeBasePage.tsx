@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type KnowledgeBaseApi,
   knowledgeBaseApi,
@@ -22,6 +22,7 @@ import {
   type LessonFocus,
   idleFlight,
   jumpTicket,
+  knowledgeToolTexts,
   lecturesMeta,
   noFocus,
   noteJumpTexts,
@@ -38,6 +39,7 @@ import {
 import { Breadcrumbs } from "../ui/Breadcrumbs";
 import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Input, ResultLine, type ResultKind } from "../ui/controls";
+import { IconAction } from "../ui/IconAction";
 import { AddPastNote, HitList, LessonList, SubjectList } from "./KnowledgeParts";
 import { RecordingImportPanel } from "./RecordingImportPanel";
 
@@ -411,7 +413,6 @@ function SubjectView(props: {
   const today = useMemo(() => todayApi(callByName), []);
   const [importOpen, setImportOpen] = useState(false);
   const [imports, setImports] = useState(0);
-  const exportHintId = useId();
   const nothingToExport = lessons !== null && lessons.every(isNoteOnly);
   const exportTip = nothingToExport ? exportEmptyHint : exportHint;
 
@@ -474,20 +475,16 @@ function SubjectView(props: {
           <Button icon="up" aria-expanded={importOpen} onClick={() => setImportOpen((open) => !open)}>
             {importTexts.open}
           </Button>
-          <Button
+          <IconAction
             icon="down"
+            place="below"
+            label={exporting ? knowledgeToolTexts.exporting : knowledgeToolTexts.export}
+            tipText={exportTip}
             busy={exporting}
-            busyLabel="Сохранение…"
-            disabled={exporting || lessons === null || nothingToExport}
-            title={exportTip}
-            aria-describedby={exportHintId}
+            disabled={lessons === null || nothingToExport}
+            disabledReason={nothingToExport ? exportEmptyHint : undefined}
             onClick={() => void onExport()}
-          >
-            Экспорт в .md
-          </Button>
-          <span id={exportHintId} className="vh">
-            {exportTip}
-          </span>
+          />
         </div>
       </div>
       {importOpen && (

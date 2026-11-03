@@ -369,7 +369,8 @@ test("the pending edit shows a note by the field with «Отменить»; the 
   const html = panel({ draft: "старый", restart: restartUi({ pending: { problem: "", onCancel: noop } }) });
   assert.ok(html.includes("Правка сообщения. После отправки всё, что ниже него, пропадёт из чата."));
   assert.ok(!html.includes("Вернуть текст сообщения"), "nothing to bring back without a refusal");
-  assert.ok(/<button[^>]*aria-label="Отменить правку"[^>]*>Отменить<\/button>/.test(html));
+  // TASK-368: an icon button (undo, the default colour) named «Отменить правку» by aria-label and tooltip, no visible word.
+  assert.ok(/<button[^>]*aria-label="Отменить правку"[^>]*><svg[^>]*><use href="#i-undo"><\/use><\/svg><span class="ia-tip" aria-hidden="true">Отменить правку<\/span><\/button>/.test(html));
   assert.ok(/aria-describedby="[^"]+"/.test(html), "the field points at the note");
   const failed = panel({ draft: "старый", restart: restartUi({ pending: { problem: restartRefusalText("busy"), onCancel: noop } }) });
   assert.ok(failed.includes("Дождитесь конца или остановите его и отправьте снова"));
@@ -465,7 +466,8 @@ test("a refusal with a busy field leaves the field alone, keeps the reason and t
   assert.deepEqual(pills.step.flow.pending.unsent, sentText);
   // The note offers the action only while there is something to bring back.
   const html = panel({ draft: "уже набрано заново", restart: restartUi({ pending: { problem: p.problem, onCancel: noop, onRestoreText: noop } }) });
-  assert.ok(html.includes(">Вернуть текст сообщения</button>"));
+  // «insert» (an arrow into a field), not the undo of the other button.
+  assert.ok(/<button[^>]*aria-label="Вернуть текст сообщения"[^>]*><svg[^>]*><use href="#i-insert"><\/use><\/svg><span class="ia-tip" aria-hidden="true">Вернуть текст сообщения<\/span><\/button>/.test(html));
   assert.ok(html.includes("Не удалось отправить: агент ещё занят"));
 });
 

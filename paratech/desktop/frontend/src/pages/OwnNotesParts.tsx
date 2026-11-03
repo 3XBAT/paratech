@@ -21,6 +21,7 @@ import { PageViewer } from "./PageViewer.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 import { StatusChip } from "../ui/StatusChip.js";
 
 // The «Мой конспект» block (TASK-154). Everything from the student or from files (titles, names, text) is rendered as
@@ -87,9 +88,7 @@ function NoteCard(props: {
             {note.noTextPages > 0 && ` · ${noTextPagesText(note.noTextPages)}`}
           </p>
         </div>
-        <Button variant="ghost" size="sm" disabled={off} onClick={() => actions.onRemove(note.id)}>
-          {t.remove}
-        </Button>
+        <IconAction icon="trash" variant="danger" place="left" label={t.remove} disabled={off} onClick={() => actions.onRemove(note.id)} />
       </div>
       {rows.length > 0 && <PartsList note={note} rows={rows} model={model} actions={actions} onMoved={props.onMoved} />}
     </Card>
@@ -233,60 +232,50 @@ function PartsList(props: {
                 {r.page !== null && r.page.noText && <span className="small muted">{t.noText}</span>}
               </span>
               <span className="own-part-acts">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon="up"
+                {/* Four distinct glyphs: plain arrows move, two opposite arrows swap the file, a clipboard pastes the text of a photo page. */}
+                <IconAction
+                  icon="arrowup"
+                  place="left"
+                  label={`${t.moveUp}: ${shortName(r.name)}`}
+                  tipText={t.moveUp}
                   disabled={off || !r.canUp}
-                  data-move="up"
-                  data-mid={r.materialId}
-                  aria-label={`${t.moveUp}: ${shortName(r.name)}`}
+                  data={{ move: "up", mid: r.materialId }}
                   onClick={() => {
                     props.onMoved(r.materialId, "up");
                     actions.onMove(note, i, -1);
                   }}
-                >
-                  {t.moveUp}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon="down"
+                />
+                <IconAction
+                  icon="arrowdown"
+                  place="left"
+                  label={`${t.moveDown}: ${shortName(r.name)}`}
+                  tipText={t.moveDown}
                   disabled={off || !r.canDown}
-                  data-move="down"
-                  data-mid={r.materialId}
-                  aria-label={`${t.moveDown}: ${shortName(r.name)}`}
+                  data={{ move: "down", mid: r.materialId }}
                   onClick={() => {
                     props.onMoved(r.materialId, "down");
                     actions.onMove(note, i, 1);
                   }}
-                >
-                  {t.moveDown}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon="retry"
+                />
+                <IconAction
+                  icon="swap"
+                  place="left"
+                  label={`${t.replace}: ${shortName(r.name)}`}
+                  tipText={t.replace}
                   disabled={off}
-                  aria-label={`${t.replace}: ${shortName(r.name)}`}
                   onClick={() => actions.onReplace(note.id, r.materialId)}
-                >
-                  {t.replace}
-                </Button>
+                />
                 {r.page !== null && r.page.noText && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon="doc"
+                  <IconAction
+                    icon="paste"
+                    place="left"
+                    label={`${t.paste}: ${t.pageWord} ${r.page.number}`}
+                    tipText={t.paste}
                     disabled={off}
-                    data-page-paste=""
-                    data-mid={r.materialId}
-                    aria-expanded={pasting === r.materialId}
-                    aria-label={`${t.paste}: ${t.pageWord} ${r.page.number}`}
+                    data={{ "page-paste": "", mid: r.materialId }}
+                    expanded={pasting === r.materialId}
                     onClick={() => (pasting === r.materialId ? closePaste(r.materialId) : setPasting(r.materialId))}
-                  >
-                    {t.paste}
-                  </Button>
+                  />
                 )}
               </span>
               {pasting === r.materialId && (
@@ -422,9 +411,7 @@ export function OwnNotesView(props: { model: OwnNotesModel; actions: OwnNotesAct
           </ul>
         )}
         {model.undo !== null && (
-          <Button variant="secondary" size="sm" data-undo="" disabled={model.busy} onClick={actions.onUndo}>
-            {t.undo}
-          </Button>
+          <IconAction icon="undo" label={t.undo} data={{ undo: "" }} disabled={model.busy} onClick={actions.onUndo} />
         )}
       </div>
       {model.loading ? (

@@ -28,5 +28,9 @@
 .page-viewer { position: fixed; inset: 0; z-index: 1000; display: grid; grid-template-rows: auto 1fr; background: rgba(0, 0, 0, 0.92); color: #fff; }
 .page-viewer-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px; flex-wrap: wrap; }
 .page-viewer-acts { display: flex; gap: 8px; }
+/* The viewer is dark in both themes: its icon buttons are light on it, the tooltip keeps a light edge. */
+.page-viewer .ia { color: #fff; }
+.page-viewer .ia:hover:enabled, .page-viewer .ia:focus-visible { background: rgba(255, 255, 255, 0.16); color: #fff; }
+.page-viewer .ia-tip { outline: 1px solid rgba(255, 255, 255, 0.5); }
 .page-viewer-stage { min-height: 0; display: grid; place-items: center; padding: 0 16px 16px; }
 .page-viewer-img { max-width: 100%; max-height: 100%; object-fit: contain; }

@@ -350,7 +350,9 @@ test("«Итоги дня»: one list, the posts first, then the done ones; a do
   assert.equal((out.match(/role="list"/g) ?? []).length, 1, "one card list");
   assert.ok(out.indexOf("Пост один") < out.indexOf("Конспект · Физика"), "posts before the done rows");
   assert.ok(!out.includes("Повтор"), "the done row of a told recording is not repeated");
-  assert.equal((out.match(/>Открыть</g) ?? []).length, 2, "every ready row opens its lesson");
+  assert.equal((out.match(/aria-label="Открыть пару: /g) ?? []).length, 2, "every ready row opens its lesson");
+  assert.match(out, /aria-label="Открыть пару: Пост один"/);
+  assert.match(out, /aria-label="Открыть пару: Конспект · Физика"/);
   assert.doesNotMatch(out, /Сообщения paratech|Готово за день/);
 });
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"paratech/desktop/internal/domain/library/services/subjectmatch"
+	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/settings/settings"
@@ -55,11 +57,29 @@ type Recordings interface {
 }
 
 // Lessons reads the local schedule to link a recording started from the main window to the lesson in progress
-// (TASK-081). Implemented by the sqlite adapter (LessonRepository).
+// (TASK-081) and to find the subject of a prompt's lesson (TASK-370). Implemented by the sqlite adapter
+// (LessonRepository).
 type Lessons interface {
+	// Get loads a live lesson; a missing or soft-deleted one wraps shared.ErrNotFound.
+	Get(ctx context.Context, id shared.LessonID) (*lesson.Lesson, error)
+
 	// ListStartingBetween returns the live lessons whose start lies in [from, to), ordered by start. Soft-deleted
 	// lessons are not returned.
 	ListStartingBetween(ctx context.Context, from, to time.Time) ([]*lesson.Lesson, error)
+}
+
+// SubjectResolver maps the subject string of a lesson to the subjects of the library the way «Сегодня» does
+// (ADR-0024, ADR-0032). Implemented by cases/library, wired by the app.
+type SubjectResolver interface {
+	// LookupSubjects tells how each name resolves: to one subject, to none, to several or not at all (no key).
+	LookupSubjects(ctx context.Context, names []string) (map[string]subjectmatch.Resolution, error)
+}
+
+// SubjectCallLinks reads the links to the online classes kept on the subjects (ADR-0032). Implemented by
+// cases/library, wired by the app.
+type SubjectCallLinks interface {
+	// CallLinks returns the link of each active subject of ids that has one.
+	CallLinks(ctx context.Context, ids []shared.SubjectID) (map[shared.SubjectID]subject.CallLink, error)
 }
 
 // Clock supplies the current time (ARCH-24, PRD section 6.1). Implemented by the clock adapter and by a fake.

@@ -31,6 +31,7 @@ import {
   updatedText,
 } from "../.test-build/summaryView.js";
 import { rowOffersTranscript } from "../.test-build/transcriptView.js";
+import { visibleText } from "./iconbtn.mjs";
 
 const { renderToStaticMarkup } = server;
 
@@ -275,8 +276,11 @@ test("model text renders as text only: no HTML, no links, line breaks kept as te
   const homework = renderToStaticMarkup(h(HomeworkCard, { view: v, onOpenAssignment: (id) => opened.push(id) }));
   assert.ok(!homework.includes("<img") && !homework.includes("<b>"), homework);
   assert.ok(homework.includes("&lt;b&gt;описание&lt;/b&gt;"));
-  assert.ok(homework.includes("Открыть задание"));
-  assert.ok(!homework.includes("href"));
+  // TASK-368: «Открыть задание» is a chevron icon button named «Открыть задание: <title>» by its aria-label (the title is escaped
+  // in the attribute); the only href is the fixed sprite reference.
+  assert.match(homework, /<button[^>]*aria-label="Открыть задание: &lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.equal(visibleText(homework).includes("Открыть задание"), false);
+  assert.ok(!homework.replace(/<use href="#i-[a-z]+"><\/use>/g, "").includes("href"));
 });
 
 // TASK-101: the summary in logical sections.

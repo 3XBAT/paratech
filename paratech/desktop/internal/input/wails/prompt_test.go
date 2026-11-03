@@ -18,6 +18,7 @@ import (
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/domain/recording/prompt"
 	"paratech/desktop/internal/domain/recording/values"
+	"paratech/desktop/internal/domain/shared"
 )
 
 // fakePrompt is the recording prompt use case behind the binding.
@@ -37,6 +38,14 @@ type fakePrompt struct {
 	selectErr error
 
 	advice recordingprompt.Advice
+
+	callSubject shared.SubjectID
+}
+
+func (f *fakePrompt) CallSubject(_ context.Context, id prompt.ID) shared.SubjectID {
+	f.calls = append(f.calls, "call subject")
+	f.gotIDs = append(f.gotIDs, id)
+	return f.callSubject
 }
 
 func (f *fakePrompt) Current() (recordingprompt.View, bool) { return f.view, f.has }
@@ -268,14 +277,16 @@ func TestFrontendKnowsPromptErrors(t *testing.T) {
 }
 
 // Every exported method is callable from the pages: the four the popup uses (no Snooze since TASK-076), the source
-// picker and start of the main window (TASK-081) and the silent-source advice of the popup (TASK-082).
+// picker and start of the main window (TASK-081), the silent-source advice of the popup (TASK-082) and the subject of
+// its «Подключиться» (TASK-370).
 func TestPromptServiceMethodSet(t *testing.T) {
 	typ := reflect.TypeFor[*PromptService]()
 	var got []string
 	for i := range typ.NumMethod() {
 		got = append(got, typ.Method(i).Name)
 	}
-	if want := []string{"Advice", "Current", "SelectSource", "Skip", "Sources", "Start", "StartRecording"}; !slices.Equal(got, want) {
+	want := []string{"Advice", "CallSubject", "Current", "SelectSource", "Skip", "Sources", "Start", "StartRecording"}
+	if !slices.Equal(got, want) {
 		t.Fatalf("exported methods %v, want %v", got, want)
 	}
 }

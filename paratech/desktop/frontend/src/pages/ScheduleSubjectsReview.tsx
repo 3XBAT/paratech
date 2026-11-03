@@ -50,7 +50,8 @@ import {
 import { type RemovedRow, removedRowText, type RestoreCall, restoredRowText, runRestore } from "../subjectRemovalView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
-import { Icon } from "../ui/Icon.js";
+import { Icon, type IconName } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 import { RestoreRow } from "./SubjectRemoval.js";
 
 // The review of subjects proposed from the schedule (TASK-312; the agent card of TASK-324 reuses it). The names,
@@ -196,24 +197,46 @@ const stepLabels: Readonly<Record<Step, string>> = {
   close: reviewTexts.close,
 };
 
+/** The icon of each step; null: the step keeps its words. */
+const stepIcons: Readonly<Record<Step, IconName | null>> = {
+  retryCreate: "retry",
+  retryUndo: "retry",
+  refresh: "retry",
+  rest: null,
+  close: "x",
+};
+
 /** The buttons of an outcome; they are off while a call runs. */
 function StepButtons(props: { steps: readonly Step[]; phase: ReviewState["phase"]; onStep(step: Step): void }) {
   const busy = props.phase !== "idle";
   return (
     <>
-      {props.steps.map((s) => (
-        <Button
-          key={s}
-          size="sm"
-          variant="ghost"
-          disabled={busy}
-          busy={(s === "refresh" || s === "rest") && props.phase === "refreshing"}
-          busyLabel={s === "refresh" || s === "rest" ? reviewTexts.refreshing : undefined}
-          onClick={() => props.onStep(s)}
-        >
-          {stepLabels[s]}
-        </Button>
-      ))}
+      {props.steps.map((s) => {
+        const icon = stepIcons[s];
+        return icon === null ? (
+          // «Показать остальные» opens more of the list: a word, an icon would not say what is shown.
+          <Button
+            key={s}
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            busy={props.phase === "refreshing"}
+            busyLabel={reviewTexts.refreshing}
+            onClick={() => props.onStep(s)}
+          >
+            {stepLabels[s]}
+          </Button>
+        ) : (
+          <IconAction
+            key={s}
+            icon={icon}
+            label={s === "refresh" && props.phase === "refreshing" ? reviewTexts.refreshing : stepLabels[s]}
+            busy={s === "refresh" && props.phase === "refreshing"}
+            disabled={busy}
+            onClick={() => props.onStep(s)}
+          />
+        );
+      })}
     </>
   );
 }
@@ -226,14 +249,14 @@ export function DoneRow(props: { text: string; phase: ReviewState["phase"]; onUn
   return (
     <div className="sched-done">
       <ResultLine kind="ok">{props.text}</ResultLine>
-      <Button size="sm" variant="ghost" disabled={props.phase !== "idle"} busy={props.phase === "undoing"} busyLabel={reviewTexts.undoing} onClick={props.onUndo}>
-        {reviewTexts.undoAll}
-      </Button>
-      {props.onClose !== undefined && (
-        <Button size="sm" variant="ghost" disabled={props.phase !== "idle"} onClick={props.onClose}>
-          {reviewTexts.close}
-        </Button>
-      )}
+      <IconAction
+        icon="undo"
+        label={props.phase === "undoing" ? reviewTexts.undoing : reviewTexts.undoAll}
+        busy={props.phase === "undoing"}
+        disabled={props.phase !== "idle"}
+        onClick={props.onUndo}
+      />
+      {props.onClose !== undefined && <IconAction icon="x" label={reviewTexts.close} disabled={props.phase !== "idle"} onClick={props.onClose} />}
     </div>
   );
 }
@@ -677,7 +700,7 @@ export function ScheduleCheckFailedLine(props: { onRetry(): void }) {
   return (
     <p className="sched-offer small muted" role="status">
       <span>{reviewTexts.checkFailed}</span>
-      <Button size="sm" variant="ghost" onClick={props.onRetry}>
+      <Button size="sm" onClick={props.onRetry}>
         {reviewTexts.retry}
       </Button>
     </p>
@@ -716,7 +739,7 @@ export function EmptySubjectsActions(props: { offer?: ScheduleOffer; addLabel: s
           <span className="small muted" role="status">
             {reviewTexts.checkFailed}
           </span>
-          <Button size="sm" variant="ghost" onClick={offer.onRetry}>
+          <Button size="sm" onClick={offer.onRetry}>
             {reviewTexts.retry}
           </Button>
         </>

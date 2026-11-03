@@ -750,6 +750,13 @@ test("the pages are wired: «Сегодня» passes the controls to the lessons
   assert.doesNotMatch(parts, /dangerouslySetInnerHTML|<a\b/);
   for (const file of ["popup/Popup.tsx", "popup/main.tsx"]) {
     assert.equal(existsSync(new URL(`../src/${file}`, import.meta.url)), true);
+    if (file === "popup/Popup.tsx") {
+      // TASK-370: the popup got «Подключиться» (popupJoin370.test.mjs); it may name only the texts and the open call.
+      const names = new Set(src(file).match(/\w*callLink\w*/gi));
+      assert.deepEqual([...names].sort(), ["callLinkTexts", "callLinkView", "openSubjectCallLink"], file);
+      assert.doesNotMatch(src(file), /CallLinkFlow|setSubjectCallLink|clearSubjectCallLink|createSubjectWithCallLink|CallLinkParts/, file);
+      continue;
+    }
     assert.doesNotMatch(src(file), /callLink|CallLink/i, file);
   }
 });

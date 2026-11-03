@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { activityApi, type AdviceView } from "../bindings/activity";
 import { popupWindowApi, promptApi, shownEvent, type PromptView, type SourcesView } from "../bindings/prompt";
+import { libraryApi } from "../bindings/library";
 import { callByName, hideWindow, onEvent } from "../bindings/runtime";
+import { callLinkTexts } from "../callLinkView";
 import { Button } from "../ui/Button";
 import { Banner } from "../ui/controls";
 import { Icon, IconSprite } from "../ui/Icon";
@@ -29,6 +31,7 @@ import {
   SourcesPoller,
   type Selection,
 } from "../sourcePicker/view";
+import { idleJoin, JoinController, joinPromptId, joinView, type JoinState } from "./joinView";
 import {
   adviceHeading,
   buttonHints,
@@ -67,6 +70,13 @@ export function Popup() {
   const [loaded, setLoaded] = useState(false);
   const [pending, setPending] = useState<Action | null>(null);
   const [error, setError] = useState("");
+  // «Подключиться» (TASK-370): the state machine is in joinView.ts; the page only draws it. The meeting opens through the
+  // library binding by subject ID, never by a URL from here.
+  const [join, setJoin] = useState<JoinState>(idleJoin);
+  const joinCtl = useMemo(() => {
+    const library = libraryApi(callByName);
+    return new JoinController({ callSubject: api.callSubject, open: library.openSubjectCallLink }, setJoin);
+  }, [api]);
   // Only the newest reply is applied: an older Current() must not overwrite a newer prompt or action result.
   const latest = useRef(0);
 
@@ -172,6 +182,7 @@ export function Popup() {
       poller.refreshNow();
       refreshSound();
       setStopProblem("");
+      joinCtl.refresh();
     }).then(
       (stop) => {
         if (alive) {
@@ -183,7 +194,16 @@ export function Popup() {
       () => setError(loadErrorText),
     );
     void reload(true);
-    const onVisibility = () => setVisible(document.visibilityState === "visible");
+    const onVisibility = () => {
+      setVisible(document.visibilityState === "visible");
+      // The popup closed: the meeting may be opened again when it is shown next. The same prompt shown again has no
+      // new offer to read the subject, so the page reads it itself.
+      if (document.visibilityState === "hidden") {
+        joinCtl.closed();
+      } else {
+        joinCtl.refresh();
+      }
+    };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       alive = false;
@@ -191,7 +211,7 @@ export function Popup() {
       document.removeEventListener("visibilitychange", onVisibility);
       poller.setActive(false);
     };
-  }, [reload, poller, fitter, refreshSound]);
+  }, [reload, poller, fitter, refreshSound, joinCtl]);
 
   // A new prompt starts with a fresh picker: no choice carries over from the previous offer.
   useEffect(() => {
@@ -210,11 +230,24 @@ export function Popup() {
   const m = popupModel(view, pending);
   const picker = pickerModel(sources, selection);
   const showPicker = m.buttons.includes("start");
-  const errorLine = error || m.problem;
-  const notes = showPicker ? [picker.autoNote, ...picker.warnings].filter((n) => n !== "") : [];
-  const layout = textsLayout(notes, errorLine);
   const live = sound !== null && advice === null && showsRecording(view, sound.recording, pending);
   const liveId = live && sound !== null ? sound.recordingId : "";
+  const jv = joinView(join, m.disabled);
+  const joinShown = showPicker && jv.visible;
+  // Only start problems are red. The join texts are quiet notes (opened, gone) or the amber failure line, all in the
+  // texts area, so they count in its layout but never grow the window.
+  const errorLine = error || m.problem;
+  const joinQuiet = showPicker ? [jv.confirm, jv.note].filter((n) => n !== "") : [];
+  const joinFailure = showPicker ? jv.failure : "";
+  const notes = showPicker
+    ? [picker.autoNote, ...picker.warnings, ...joinQuiet, joinFailure].filter((n) => n !== "")
+    : [];
+  const layout = textsLayout(notes, errorLine);
+
+  const offeredId = joinPromptId(view, advice !== null || live);
+  useEffect(() => {
+    joinCtl.offer(offeredId);
+  }, [joinCtl, offeredId]);
 
   useEffect(() => {
     if (liveId === "") {
@@ -269,6 +302,7 @@ export function Popup() {
     setPending(action);
     setListOpen(false);
     setError("");
+    joinCtl.clearProblem();
     const seq = ++latest.current;
     try {
       const v = action === "start" ? await api.start(view.id, picker.chosen.app) : await api[action](view.id);
@@ -453,6 +487,17 @@ export function Popup() {
                 {w}
               </p>
             ))}
+          {joinQuiet.map((n) => (
+            // The confirmation is a status for screen readers; the gone note is plain text.
+            <p
+              key={n}
+              className={layout.clamp ? "p-note join-note clamp" : "p-note join-note"}
+              role={n === jv.confirm ? "status" : undefined}
+              title={layout.clamp ? n : undefined}
+            >
+              {n}
+            </p>
+          ))}
           {showPicker && (
             <p
               className={layout.collapsed ? "advice collapsed" : "advice"}
@@ -461,22 +506,43 @@ export function Popup() {
               {picker.advice}
             </p>
           )}
+          {joinFailure !== "" && (
+            // Last, right above the buttons.
+            <p className={layout.clamp ? "warning clamp" : "warning"} title={layout.clamp ? joinFailure : undefined}>
+              {joinFailure}
+            </p>
+          )}
         </div>
       )}
       <div className="pbtns">
         {m.buttons.map((id) => (
-          <Button
-            key={id}
-            variant={id === "start" ? "primary" : id === "skip" ? "ghost" : "secondary"}
-            icon={id === "start" ? "rec" : undefined}
-            className={id === "start" || id === "close" ? "wide" : undefined}
-            disabled={m.disabled}
-            // The title is also the accessible description of the button (the label stays its name).
-            title={buttonHints[id]}
-            onClick={() => click(id)}
-          >
-            {id === "start" ? m.startLabel : buttonLabels[id]}
-          </Button>
+          <Fragment key={id}>
+            <Button
+              variant={id === "start" ? "primary" : id === "skip" ? "ghost" : "secondary"}
+              icon={id === "start" ? "rec" : undefined}
+              className={id === "start" || id === "close" ? "wide" : undefined}
+              disabled={m.disabled}
+              // The title is also the accessible description of the button (the label stays its name).
+              title={buttonHints[id]}
+              onClick={() => click(id)}
+            >
+              {id === "start" ? m.startLabel : buttonLabels[id]}
+            </Button>
+            {id === "start" && joinShown && (
+              // Between «Начать запись» and «Не записывать»: they share one row, so the three do not stack. It never
+              // disables the start and takes no focus itself.
+              <Button
+                className={jv.opened ? "joined" : undefined}
+                busy={jv.busy}
+                busyLabel={callLinkTexts.joining}
+                disabled={jv.disabled}
+                title={jv.title}
+                onClick={() => void joinCtl.click()}
+              >
+                {callLinkTexts.join}
+              </Button>
+            )}
+          </Fragment>
         ))}
       </div>
     </div>

@@ -54,10 +54,12 @@ h1, p, ul { margin: 0; }
 .note > div { min-width: 0; }
 .clamp { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .warning { color: var(--wait-t); font-size: var(--fs-label); line-height: var(--lh-label); }
+/* TASK-370: the quiet lines of «Подключиться» (the link is open, the link is gone) are muted, in the size of the warnings. */
+.p-note.join-note { font-size: var(--fs-label); line-height: var(--lh-label); }
 .advice { color: var(--muted); font-size: var(--fs-nav); line-height: 15px; }
 .advice.collapsed { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
-/* Buttons: «Начать запись» across the width, the others below it. */
+/* Buttons: «Начать запись» across the width, the others below it; with «Подключиться» it and «Не записывать» share one row. */
 .pbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: auto; }
 /* The running recording (TASK-099): .two keeps «Остановить» and «Скрыть» side by side. */
 .pbtns .wide, .pbtns:not(.two) > .btn:nth-child(2):last-child { grid-column: 1 / -1; }
@@ -76,6 +78,8 @@ h1, p, ul { margin: 0; }
 /* «Остановить»: a normal button, only its square is red (TASK-367). */
 .btn.stop .i { color: var(--rec-t); fill: currentColor; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+/* «Подключиться» once the meeting is open (TASK-370): grey until the popup closes, faded like every disabled button. */
+.btn.joined:disabled { border-color: var(--line); background: var(--neu-b); color: var(--muted); }
 /* Button busy labels share one cell, so the width stays (as in ../ui/components.css). */
 .btn-labels { display: inline-grid; }
 .btn-labels > * { grid-area: 1 / 1; }

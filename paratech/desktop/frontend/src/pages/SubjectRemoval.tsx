@@ -13,6 +13,7 @@ import {
 } from "../subjectRemovalView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
+import { IconAction } from "../ui/IconAction.js";
 
 // «Удалить предмет» and «Вернуть» (TASK-289): the confirm dialog and the inline line with «Вернуть». Names of subjects are
 // typed or imported text: only text nodes here, never markup.
@@ -264,11 +265,7 @@ export function RestoreRow(props: {
           {v.button === "restore" ? removalTexts.restore : removalTexts.retry}
         </Button>
       )}
-      {v.close && (
-        <Button size="sm" variant="ghost" disabled={v.busy} onClick={close}>
-          {removalTexts.close}
-        </Button>
-      )}
+      {v.close && <IconAction icon="x" label={removalTexts.close} disabled={v.busy} onClick={close} />}
     </div>
   );
 }

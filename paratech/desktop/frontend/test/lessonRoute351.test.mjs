@@ -42,6 +42,7 @@ import {
   recordingLessonKey,
 } from "../.test-build/knowledgeView.js";
 import { HomeworkCard, SummaryCard, SummaryTools, summarySaveItems } from "../.test-build/pages/SummaryParts.js";
+import { ariaLabels, buttonTag, isOff, visibleText } from "./iconbtn.mjs";
 
 const read = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
 const noop = () => undefined;
@@ -276,11 +277,14 @@ test("the lesson-info form: focus returns to the head «⋯» when it closes, a 
 const tools = (over = {}) =>
   html(h(SummaryTools, { ready: true, idle: true, busy: "", message: null, onCopy: noop, onSave: noop, ...over }));
 
-test("the tools: one «Скопировать» as the primary action and one «⋯» menu; no format switch, no «Сохранить как…»", () => {
+test("the tools: one «Скопировать» icon and one «⋯» menu; no format switch, no «Сохранить как…»", () => {
   const out = tools();
-  assert.equal((out.match(/<span>Скопировать<\/span>/g) ?? []).length, 1);
-  assert.equal((out.match(/class="btn primary"/g) ?? []).length, 1, "the one accent");
-  assert.match(out, /<button type="button" class="btn primary"><span class="btn-labels"><span>Скопировать<\/span>/);
+  // TASK-368: «Скопировать» is a copy icon named by its tooltip and aria-label; no word button, no accent button.
+  assert.deepEqual(ariaLabels(out).filter((l) => l === "Скопировать"), ["Скопировать"]);
+  assert.match(buttonTag(out, "Скопировать"), /class="ia"/);
+  assert.match(out, /<use href="#i-copy"><\/use>/);
+  assert.equal(visibleText(out).includes("Скопировать"), false);
+  assert.equal((out.match(/class="btn primary"/g) ?? []).length, 0);
   assert.equal((out.match(/aria-haspopup="menu"/g) ?? []).length, 1);
   assert.match(out, /aria-label="Ещё действия с конспектом"/);
   assert.doesNotMatch(out, /Сохранить как…|aria-pressed|Формат файла|хранится на этом компьютере/);
@@ -296,16 +300,19 @@ test("the tools: not ready, copy is off and there is nothing to save; busy and t
   // The lesson screen does not draw the tools before the summary is ready (the card's state line says where it stands),
   // so the component has no text of its own for it (TASK-352 removed notReady).
   const off = tools({ ready: false });
-  assert.match(off, /<button[^>]*disabled=""[^>]*><span class="btn-labels"><span>Скопировать<\/span>/);
+  assert.ok(isOff(off, "Скопировать"));
   assert.doesNotMatch(off, /aria-haspopup/, "no menu without a summary");
   assert.doesNotMatch(off, /Конспекта пока нет/);
   const busy = tools({ idle: false, busy: "save" });
-  assert.match(busy, /<button[^>]*disabled=""[^>]*><span class="btn-labels"><span>Скопировать<\/span>/);
+  assert.ok(isOff(busy, "Скопировать"));
   assert.match(busy, /role="status">Сохранение…</);
   // The menu items are off while an action runs.
   assert.match(busy, /aria-haspopup="menu"/);
+  // While copying the icon is a spinner named «Копирование…».
   const copying = tools({ idle: false, busy: "copy" });
-  assert.match(copying, /<span class="btn-off">Скопировать<\/span><span>Копирование…<\/span>/);
+  assert.ok(isOff(copying, "Копирование…"));
+  assert.match(copying, /aria-busy="true"/);
+  assert.match(copying, /ia-spin/);
   const ok = tools({ message: { kind: "ok", text: "Конспект скопирован в буфер обмена." } });
   assert.match(ok, /role="status"[^>]*>.*<span>Конспект скопирован в буфер обмена\.<\/span>/);
   const fail = tools({ message: { kind: "fail", text: "Не удалось" } });

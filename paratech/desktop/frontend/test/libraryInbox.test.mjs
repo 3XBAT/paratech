@@ -43,6 +43,7 @@ import {
 } from "../.test-build/libraryInboxView.js";
 import { AddFileLines, PlacePanel, UndoLines } from "../.test-build/pages/FileRows.js";
 import { InboxList, SubjectDetail, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
+import { buttonTag, isOff, isOn, visibleText } from "./iconbtn.mjs";
 
 const noop = () => undefined;
 const evil = "<img src=x onerror=alert(1)>";
@@ -365,10 +366,15 @@ test("a refused «Вернуть» keeps its line with the reason; a done one is
   const out = html(h(UndoLines, { items: failed, busy: false, onUndo: noop, onRefresh: noop }));
   assert.match(out, /role="status" aria-live="polite"/);
   assert.match(out, /Файл не найден: обновите список\./);
-  assert.match(out, />Обновить список<\/button>/);
-  assert.doesNotMatch(out, />Вернуть<\/button>/);
+  // TASK-368: «Вернуть» is an icon button; the way out of a refusal, «Обновить список», is a word button (as in ErrorLine).
+  assert.equal(buttonTag(out, "Обновить список"), null);
+  assert.match(out, /class="btn sm"[^>]*>Обновить список</);
+  assert.equal(buttonTag(out, "Вернуть"), null);
+  assert.equal(visibleText(out).includes("Обновить список"), true);
   const ok = html(h(UndoLines, { items: list, busy: false, onUndo: noop, onRefresh: noop }));
-  assert.match(ok, />Вернуть<\/button>/);
+  assert.ok(isOn(ok, "Вернуть"));
+  assert.match(buttonTag(ok, "Вернуть"), /class="ia"/);
+  assert.ok(isOff(html(h(UndoLines, { items: list, busy: true, onUndo: noop, onRefresh: noop })), "Вернуть"));
   // The live region is there before any line comes.
   assert.match(html(h(UndoLines, { items: [], busy: false, onUndo: noop, onRefresh: noop })), /<div class="undo-lines" role="status" aria-live="polite"><\/div>/);
 });
@@ -549,14 +555,16 @@ test("the lines after «Добавить файл»: the buttons follow the outc
   const elsewhere = html(h(AddFileLines, addLines({ note: "Этот файл уже есть: «Физика → Лекции».", elsewhere: { material: there, label: "Физика → Лекции", openSubjectId: "s2" } })));
   assert.match(elsewhere, /role="status"/);
   assert.match(elsewhere, />Переместить сюда<\/button>/);
-  assert.match(elsewhere, />Открыть предмет<\/button>/);
+  // TASK-368: «Переместить сюда» is the line's main action and keeps its words; «Открыть предмет» is an icon.
+  assert.ok(isOn(elsewhere, "Открыть предмет"));
+  assert.equal(visibleText(elsewhere).includes("Открыть предмет"), false);
   assert.doesNotMatch(elsewhere, /Перейти во/);
   // «Переместить сюда» is off while a call runs; «Открыть предмет» is absent for a file of «Входящие».
   const inbox = html(h(AddFileLines, addLines({ note: "Этот файл уже есть: «Входящие».", busy: true, elsewhere: { material: material(), label: "Входящие", openSubjectId: "" } })));
   assert.match(inbox, /<button[^>]*disabled=""[^>]*>Переместить сюда<\/button>/);
   assert.doesNotMatch(inbox, /Открыть предмет/);
   const unplaced = html(h(AddFileLines, addLines({ note: "Файл добавлен во «Входящие»: положить его в «Лекции» не получилось.", toInbox: true })));
-  assert.match(unplaced, />Перейти во «Входящие»<\/button>/);
+  assert.ok(isOn(unplaced, "Перейти во «Входящие»"));
   assert.doesNotMatch(unplaced, /Переместить|Открыть предмет/);
   // Nothing to say (a cancelled dialog): nothing rendered.
   assert.equal(html(h(AddFileLines, addLines())), "");
@@ -566,6 +574,7 @@ test("a refusal of «Добавить файл» says why with the way out: «П
   const retry = html(h(AddFileLines, addLines({ error: "Файл больше 100 МБ." })));
   assert.match(retry, /role="alert"/);
   assert.match(retry, /Файл больше 100 МБ\./);
+  // The only way out of the refusal keeps its words (as before TASK-368).
   assert.match(retry, />Повторить<\/button>/);
   assert.doesNotMatch(retry, /Обновить список/);
   const gone = html(h(AddFileLines, addLines({ error: "Папка не найдена: обновите список." })));

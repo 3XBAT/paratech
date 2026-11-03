@@ -312,12 +312,14 @@ test("the rows of «Задания» are whole-row buttons that open their assig
 test("the export paragraph of a subject is the tooltip of the export button", () => {
   const page = src("../src/pages/KnowledgeBasePage.tsx");
   assert.match(page, /const exportHint = "Сохранить все пары предмета в один файл \.md — по датам, с конспектом и текстом лекции\.";/);
-  // Off, the same place says why (title for the pointer, aria-describedby for the screen reader).
+  // Off, the same place says why.
   assert.match(page, /const exportEmptyHint = "Экспортировать нечего: у предмета пока нет пар с конспектом\.";/);
   assert.match(page, /const nothingToExport = lessons !== null && lessons\.every\(isNoteOnly\);/);
   assert.match(page, /const exportTip = nothingToExport \? exportEmptyHint : exportHint;/);
-  assert.match(page, /disabled=\{exporting \|\| lessons === null \|\| nothingToExport\}\s+title=\{exportTip\}\s+aria-describedby=\{exportHintId\}/);
-  assert.match(page, /<span id=\{exportHintId\} className="vh">\s*\{exportTip\}/);
+  // TASK-368: the export button is an icon; the hint is its tooltip, and the reason it is off is said by the icon button
+  // itself (tooltip and screen reader), so there is no separate hidden span any more.
+  assert.match(page, /<IconAction[^>]*\s+tipText=\{exportTip\}[^>]*\s+disabled=\{lessons === null \|\| nothingToExport\}\s+disabledReason=\{nothingToExport \? exportEmptyHint : undefined\}/);
+  assert.doesNotMatch(page, /exportHintId/);
   assert.doesNotMatch(page, /<p className="small muted kb-sub">\s*Экспорт — один файл/, "the paragraph is gone");
   assert.equal(page.split("Сохраняется только по кнопке").length - 1, 0, "the old text is gone");
 });

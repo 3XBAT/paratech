@@ -338,6 +338,19 @@ export function playSeconds(startMs: number): number {
   return Math.max(0, startMs) / 1000;
 }
 
+/** The words of the small buttons of the transcript tools: icons with a tooltip and an aria-label (TASK-368). */
+export const toolTexts = {
+  prev: "Предыдущее",
+  next: "Следующее",
+  prevTip: "Предыдущее (Shift+Enter)",
+  nextTip: "Следующее (Enter)",
+  copyAll: "Скопировать всё",
+  copySelection: "Скопировать выделенное",
+  copying: "Копирование…",
+  saveAs: "Сохранить как…",
+  saving: "Сохранение…",
+} as const;
+
 export const noAudioHint = "Запись недоступна для прослушивания: по меткам времени её не проиграть.";
 export const noSelectionHint = "Выделите текст в расшифровке.";
 export const playFailedText = "Не удалось проиграть запись.";

@@ -12,6 +12,7 @@ import { type Entry, isBusyRefused, isFinalStatus, isRunning, orderedEntries } f
 import { type PageId, pageById } from "./nav.js";
 import { dayText, daysBetween, daysLeftText, dueText, parseMoment } from "./dueText.js";
 import { doneTexts } from "./assignmentDoneView.js";
+import type { IconName } from "./ui/Icon.js";
 
 /** One row of the assignment list of a reply card. */
 export interface AssignmentRow {
@@ -1112,7 +1113,7 @@ export type CardModel =
       detail: string[];
       actionId: string;
       /** `shown` false: the line has no «Отменить» (the stop of a recording cannot be undone, or the line offers a button). */
-      undo: { label: string; busyLabel: string; enabled: boolean; shown: boolean };
+      undo: { kind: UndoKind; label: string; busyLabel: string; enabled: boolean; shown: boolean };
       /** What the line says once the undo is done. */
       undoneText: string;
       /** The button the line offers once the undo is done («Начать запись» after «Остановить»); null when none. */
@@ -1132,6 +1133,41 @@ export type CardModel =
 
 function buttons(ids: ButtonId[]): ButtonModel[] {
   return ids.map((id) => ({ id, label: buttonLabels[id] }));
+}
+
+// ---- Words or icons on the buttons of the cards (TASK-368) ----
+// Owner rule: a small or secondary button is an icon with a tooltip (its old words) and an aria-label. The words stay on
+// the main action of a card («Да, выполнить», «Продолжить», «Повторить» of a stopped request) and on its yes/no pair
+// («Не выполнять»).
+
+export type ButtonCard = "plan" | "progress" | "waiting" | "stopped" | "problem";
+
+/** The icon of a secondary card button; null: the button is a main action (or half of a yes/no pair) and keeps its word. */
+export function cardButtonIcon(id: ButtonId, card: ButtonCard): IconName | null {
+  switch (id) {
+    case "revise":
+      return "pencil";
+    case "stop":
+      return "stop";
+    case "cancel":
+      // «Не выполнять» answers the plan's question; «Отменить запрос» of a stopped request is a way out.
+      return card === "plan" ? null : "x";
+    default:
+      return null;
+  }
+}
+
+/** What the secondary button of an action line does: stops a started recording, or undoes the action. */
+export type UndoKind = "undo" | "stop";
+
+/** The icon of the secondary button of an action line, by what it does (never by its words). */
+export function undoIcon(kind: UndoKind): IconName {
+  return kind === "stop" ? "stop" : "undo";
+}
+
+/** Page buttons an offer names: «Отменить» (undo_action) is an icon, the others are the card's main action and keep words. */
+export function offerIcon(offer: OfferView): IconName | null {
+  return offer.action === "undo_action" ? "undo" : null;
 }
 
 /**
@@ -1314,6 +1350,7 @@ function actionModel(c: CardView): ActionCardModel {
     detail: wording?.detail ?? [],
     actionId: c.actionId,
     undo: {
+      kind: started ? "stop" : "undo",
       label: started ? resultTexts.stopRecording : texts.undo,
       busyLabel: started ? resultTexts.stopping : texts.undoBusy,
       enabled: c.actionId !== "",

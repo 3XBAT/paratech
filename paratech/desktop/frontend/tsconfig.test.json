@@ -46,6 +46,7 @@
     "src/pages/LectureTextParts.tsx",
     "src/pages/HomeworkDialogs.tsx",
     "src/popup/view.ts",
+    "src/popup/joinView.ts",
     "src/sourcePicker/view.ts",
     "src/sourcePicker/SourcePicker.tsx",
     "src/sourcePicker/advice.ts",
@@ -139,6 +140,8 @@
     "src/pages/SubjectTasksTab.tsx",
     "src/pages/SubjectTabs.tsx",
     "src/pages/useFocusBack.ts",
+    "src/bindings/runtime.ts",
+    "src/pages/DropZone.tsx",
     "src/callLinkView.ts",
     "src/pages/CallLinkParts.tsx"
   ]

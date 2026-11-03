@@ -1,6 +1,7 @@
 import { type KeyboardEvent, useEffect, useId, useRef } from "react";
 import { Button } from "../ui/Button.js";
 import { dialogKey, type RestartBlock, restartLabel, type RestartTarget, restartTexts } from "../agentView.js";
+import { IconAction } from "../ui/IconAction.js";
 import { ActionButton } from "./MessageActions.js";
 
 // «Начать заново отсюда» (TASK-249): a quiet action under a message of the student and the warning dialog it opens.
@@ -128,14 +129,9 @@ export function RestartNote(props: { id: string; problem: string; onCancel(): vo
         {props.problem !== "" && <span className="ag-restart-problem">{props.problem}</span>}
       </span>
       <span className="ag-restart-acts">
-        {props.onRestoreText && (
-          <button type="button" className="ag-restart-undo" onClick={props.onRestoreText}>
-            {restartTexts.restoreText}
-          </button>
-        )}
-        <button type="button" className="ag-restart-undo" aria-label={restartTexts.undoLabel} onClick={props.onCancel}>
-          {restartTexts.undoNote}
-        </button>
+        {/* «insert» (an arrow into a field) puts the text back into the box; «undo» takes the whole restart back. */}
+        {props.onRestoreText && <IconAction icon="insert" place="below" label={restartTexts.restoreText} onClick={props.onRestoreText} />}
+        <IconAction icon="undo" place="below" label={restartTexts.undoLabel} onClick={props.onCancel} />
       </span>
     </div>
   );

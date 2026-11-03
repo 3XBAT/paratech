@@ -3,6 +3,7 @@ import type { AnswerInput, AssignmentLineView, DraftView, OfferView } from "../b
 import { Button } from "../ui/Button.js";
 import { AgentActions, UserActions } from "./MessageActions.js";
 import { Icon } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
 import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
 import type { TurnkeyApi } from "../bindings/turnkey.js";
@@ -17,11 +18,14 @@ import type { RestoreCall } from "../subjectRemovalView.js";
 import { WorkWritingCard } from "./WorkCard.js";
 import { MessagePills } from "./MentionParts.js";
 import { Waiting } from "./Waiting.js";
+import { openTaskLabel, summaryToolTexts } from "../summaryView.js";
 import { failedStepIndex, moreStepsLabel, planCollapseLimit, planTexts, planWindow, progressLabel, type StepMark } from "../planView.js";
 import {
   addedAssignmentText,
   assignmentRow,
-  openAssignmentLabel,
+  type ButtonCard,
+  cardButtonIcon,
+  offerIcon,
   replyCopyText,
   replyStatus,
   type ButtonId,
@@ -33,6 +37,7 @@ import {
   skipAnswers,
   texts,
   undoableActions,
+  undoIcon,
   type UndoNote,
 } from "../agentView.js";
 
@@ -88,10 +93,15 @@ export interface CardActions {
  * The page's own button an offer names, labelled from the template (never by the model). It calls `actions.offer`; until
  * the panel wires it nothing is drawn: a dead button helps nobody. A button the version does not have has no model at all.
  */
-export function OfferButton(props: { offer: OfferModel; actions: CardActions }) {
+export function OfferButton(props: { offer: OfferModel; actions: CardActions; running?: boolean }) {
   const { offer, actions } = props;
   if (actions.offer === undefined) {
     return null;
+  }
+  // «Отменить» is a small secondary button: an icon. The other offers are the card's one main action and keep their words.
+  const icon = offerIcon(offer.offer);
+  if (icon !== null) {
+    return <IconAction icon={icon} label={offer.label} busy={props.running === true} disabled={actions.busy === true} onClick={() => actions.offer?.(offer.offer)} />;
   }
   return (
     <Button size="sm" variant="secondary" disabled={actions.busy === true} onClick={() => actions.offer?.(offer.offer)}>
@@ -143,7 +153,7 @@ export function OfferControlView(props: { offer: OfferModel; actions: CardAction
   const target = props.offer.offer.action === "undo_action" && result?.once !== true ? (props.actions.undoTarget?.() ?? "") : "";
   return (
     <>
-      <OfferButton offer={props.offer} actions={off} />
+      <OfferButton offer={props.offer} actions={off} running={props.busy} />
       {target !== "" && props.actions.offer !== undefined && <span className="ag-act-note small muted">{target}</span>}
       {result !== null && result.text !== "" && (
         <span className="ag-act-note small muted" role="status">
@@ -154,17 +164,27 @@ export function OfferControlView(props: { offer: OfferModel; actions: CardAction
   );
 }
 
-function Buttons(props: { buttons: ButtonModel[]; busy?: boolean; onPress: (id: ButtonId) => void }) {
+/** The buttons of a card: the main action keeps its word, the secondary ones are icons (cardButtonIcon). */
+function Buttons(props: { buttons: ButtonModel[]; card: ButtonCard; busy?: boolean; onPress: (id: ButtonId) => void }) {
   if (props.buttons.length === 0) {
     return null;
   }
+  // The words first (the first one is the primary), then the icons: a pencil between two words reads as a stray.
+  const withIcon = props.buttons.map((b) => ({ b, icon: cardButtonIcon(b.id, props.card) }));
   return (
     <div className="ag-actions">
-      {props.buttons.map((b, i) => (
-        <Button key={b.id} size="sm" variant={b.id === "stop" ? "ghost" : i === 0 ? "primary" : "secondary"} disabled={props.busy} onClick={() => props.onPress(b.id)}>
-          {b.label}
-        </Button>
-      ))}
+      {withIcon
+        .filter((x) => x.icon === null)
+        .map(({ b }, i) => (
+          <Button key={b.id} size="sm" variant={i === 0 ? "primary" : "secondary"} disabled={props.busy} onClick={() => props.onPress(b.id)}>
+            {b.label}
+          </Button>
+        ))}
+      {withIcon.map(({ b, icon }) =>
+        icon === null ? null : (
+          <IconAction key={b.id} icon={icon} label={b.label} variant={b.id === "cancel" ? "danger" : "default"} disabled={props.busy} onClick={() => props.onPress(b.id)} />
+        ),
+      )}
     </div>
   );
 }
@@ -337,6 +357,7 @@ function PlanCard(props: { card: Extract<CardModel, { type: "plan" }>; actions: 
       ) : (
         <Buttons
           buttons={card.buttons}
+          card="plan"
           busy={props.actions.busy}
           onPress={(id) => {
             if (id === "revise") {
@@ -417,14 +438,14 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
             <span className="ag-dot" aria-hidden="true" />
             {card.caption}
           </h3>
-          <Buttons buttons={card.buttons} busy={props.actions.busy} onPress={props.actions.press} />
+          <Buttons buttons={card.buttons} card="progress" busy={props.actions.busy} onPress={props.actions.press} />
         </section>
       );
     case "waiting":
       return (
         <div className="ag-think">
           {!props.typing && <Waiting />}
-          <Buttons buttons={card.buttons} busy={props.actions.busy} onPress={props.actions.press} />
+          <Buttons buttons={card.buttons} card="waiting" busy={props.actions.busy} onPress={props.actions.press} />
         </div>
       );
     case "result":
@@ -502,17 +523,20 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
             ))}
           </span>
           {!note?.done && card.assignment && props.actions.openAssignment && (
-            <Button size="sm" variant="ghost" onClick={() => card.assignment && props.actions.openAssignment?.(card.assignment.id)}>
-              {openAssignmentLabel}
-            </Button>
+            <IconAction icon="chevr" label={openTaskLabel(card.assignment.title)} tipText={summaryToolTexts.openAssignment} onClick={() => card.assignment && props.actions.openAssignment?.(card.assignment.id)} />
           )}
           {card.offer !== null && <OfferControl offer={card.offer} actions={props.actions} />}
           {/* «Остановить» was pressed: the line says «Запись остановлена» and offers a new recording. */}
           {note?.done === true && card.afterUndoOffer !== null && <OfferControl offer={card.afterUndoOffer} actions={props.actions} />}
           {!note?.done && card.undo.shown && (
-            <Button size="sm" variant="ghost" disabled={!card.undo.enabled || note?.busy === true} onClick={() => props.actions.undo(card.actionId)}>
-              {note?.busy ? card.undo.busyLabel : card.undo.label}
-            </Button>
+            <IconAction
+              icon={undoIcon(card.undo.kind)}
+              variant={card.undo.kind === "stop" ? "danger" : "default"}
+              label={note?.busy ? card.undo.busyLabel : card.undo.label}
+              busy={note?.busy === true}
+              disabled={!card.undo.enabled}
+              onClick={() => props.actions.undo(card.actionId)}
+            />
           )}
           {note && !note.done && !note.busy && note.text !== "" && (
             <span className="ag-act-note small muted" role="status">
@@ -559,11 +583,16 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
         <div className="ag-stop" role="status">
           <Icon name={card.type === "stopped" ? "warn" : "info"} />
           <span className="ag-act-tx">{card.text}</span>
-          {card.buttons.map((b) => (
-            <Button key={b.id} size="sm" variant="ghost" disabled={props.actions.busy} onClick={() => props.actions.press(b.id)}>
-              {b.label}
-            </Button>
-          ))}
+          {card.buttons.map((b) => {
+            const icon = cardButtonIcon(b.id, card.type);
+            return icon !== null ? (
+              <IconAction key={b.id} icon={icon} label={b.label} variant={b.id === "cancel" ? "danger" : "default"} disabled={props.actions.busy} onClick={() => props.actions.press(b.id)} />
+            ) : (
+              <Button key={b.id} size="sm" variant="ghost" disabled={props.actions.busy} onClick={() => props.actions.press(b.id)}>
+                {b.label}
+              </Button>
+            );
+          })}
         </div>
       );
   }

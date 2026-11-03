@@ -262,7 +262,9 @@ test("the screen of the day shows one lesson once: its row opens it, «Итог�
   );
   assert.doesNotMatch(out, /Пост пары/);
   assert.match(out, /Пост другой/);
-  assert.equal((out.match(/>Открыть</g) ?? []).length, 1);
+  // The row's button is a chevron named after the pair (TASK-368 review): «Открыть пару: <заголовок>».
+  assert.equal((out.match(/aria-label="Открыть пару: /g) ?? []).length, 1);
+  assert.match(out, /aria-label="Открыть пару: Пост другой"/);
   // Only that pair: nothing is left to say, the section is hidden.
   assert.equal(html(h(SummarySection, { posts: [post({ recordingId: "r1" })], done: [], lessons, onOpenLesson: noop })), "");
   // The page passes the lessons of the day.

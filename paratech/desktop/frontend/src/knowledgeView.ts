@@ -419,6 +419,18 @@ export function checkQuery(raw: string): QueryCheck {
   return n > maxQueryChars ? { kind: "long" } : { kind: "ok", query: q };
 }
 
+/** The words of the small buttons of the base: icons with a tooltip and an aria-label (TASK-368). */
+export const knowledgeToolTexts = {
+  export: "Экспорт в .md",
+  exporting: "Сохранение…",
+  setSubject: "Указать предмет",
+} as const;
+
+/** The name of the button of a lesson row: it names the lesson, so the rows differ for a screen reader. */
+export function setSubjectLabel(title: string): string {
+  return title.trim() === "" ? knowledgeToolTexts.setSubject : `${knowledgeToolTexts.setSubject}: ${title.trim()}`;
+}
+
 export const searchTexts = {
   short: `Введите хотя бы ${minQueryChars} символа.`,
   running: "Поиск…",

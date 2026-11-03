@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement as h } from "react";
 import server from "react-dom/server";
+import { isOff, isOn } from "./iconbtn.mjs";
 import { offerActions, parseCard, parseUpdate } from "../.test-build/bindings/agent.js";
 import {
   agentConfirmApi,
@@ -428,7 +429,8 @@ test("stopped midway: the card's own words (not the core's «Нажмите «Д
   // The core's sentence names a «Да» that is not a button here: it is never shown.
   assert.doesNotMatch(out, /Нажмите «Да»/);
   assert.ok(out.includes("Создано предметов: 2"));
-  assert.ok(out.indexOf(">Отменить всё<") > 0 && out.indexOf(">Отменить всё<") < out.lastIndexOf("<span>Повторить</span>"));
+  // TASK-368: words first, then icons: the undo icon comes after the word button «Повторить».
+  assert.ok(out.indexOf("<span>Повторить</span>") > 0 && out.indexOf("<span>Повторить</span>") < out.indexOf(">Отменить всё<"));
   assert.match(out, /<button(?![^>]*disabled)[^>]*><span class="btn-labels"><span>Повторить</);
   assert.match(out, /class="btn primary sm"[^>]*><span class="btn-labels"><span>Повторить</);
   assert.doesNotMatch(out, />Нет<|>Да<|<span>Да</);
@@ -494,7 +496,7 @@ test("a refusal of the core: its own words, the buttons stay active; the undo th
   const gone = view(done(), { review: reviewOf(), flowOver: { error: scheduleUndoGoneText } });
   assert.ok(gone.includes(scheduleUndoGoneText));
   assert.match(gone, />Открыть «Предметы»</);
-  assert.match(gone, /<button(?![^>]*disabled)[^>]*><span class="btn-labels"><span>Отменить всё</);
+  assert.ok(isOn(gone, "Отменить всё"), "TASK-368: «Отменить всё» of the done line is an icon with the same name");
   assert.equal(refusalOpensSubjects(scheduleUndoGoneText), true);
   assert.equal(refusalOpensSubjects(scheduleUndoAgainText), false);
   const again = view(done(), { review: reviewOf(), flowOver: { error: scheduleUndoAgainText } });
@@ -920,7 +922,9 @@ test("undo_action: «Отменить» shows beside it what it would undo, and 
   const view = (actions, result = null) =>
     renderToStaticMarkup(h(OfferControlView, { offer: model, actions: { ...baseActions, offer: noop, ...actions }, busy: false, result }));
   const out = view({ undoTarget: () => "Отмечены выполненными: 3 задания" });
-  assert.match(out, /<button(?![^>]*disabled)[^>]*>Отменить</);
+  // TASK-368: the undo offer is a small secondary button: an icon with a tooltip, named by the aria-label.
+  assert.ok(isOn(out, "Отменить"));
+  assert.match(out, /<use href="#i-undo"><\/use>/);
   assert.ok(out.includes("Отмечены выполненными: 3 задания"));
   // Nothing to undo: the existing text stays (no target line); other offers never show one.
   assert.doesNotMatch(view({ undoTarget: () => "" }), /ag-act-note/);
@@ -932,7 +936,7 @@ test("undo_action: «Отменить» shows beside it what it would undo, and 
   // After the undo the line says «Отменено: …» instead of the target, and the button is off.
   const done = view({ undoTarget: () => "Отмечены выполненными: 3 задания" }, { ok: true, text: "Отменено: Отмечены выполненными: 3 задания", once: true });
   assert.equal((done.match(/Отмечены выполненными: 3 задания/g) ?? []).length, 1);
-  assert.match(done, /<button[^>]*disabled[^>]*>Отменить</);
+  assert.ok(isOff(done, "Отменить"));
   assert.ok(done.includes("Отменено: Отмечены выполненными: 3 задания"));
   // Not wired: nothing is drawn, not even the target line.
   assert.equal(renderToStaticMarkup(h(OfferControlView, { offer: model, actions: { ...baseActions, undoTarget: () => "x" }, busy: false, result: null })), "");

@@ -9,6 +9,7 @@ import {
   doneLine,
   lessonLine,
   looseProblems,
+  openPairLabel,
   postLine,
   recordButton,
   recordTexts,
@@ -22,6 +23,7 @@ import { callLinkTexts, linksUnavailableNote } from "../callLinkView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 import { DoneCheck, DoneIssueLine } from "./AssignmentDoneParts.js";
 import { LessonLinkButtons, LessonLinkHost, LessonLinkPanel, type LinkControls, useLinkFocus } from "./CallLinkParts.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
@@ -522,11 +524,7 @@ export function SummarySection(props: {
                       />
                     ))}
               </div>
-              {m.canOpen && (
-                <Button size="sm" onClick={() => props.onOpenLesson(m.recordingId)}>
-                  {texts.open}
-                </Button>
-              )}
+              {m.canOpen && <IconAction icon="chevr" place="left" label={openPairLabel(m.headline)} tipText={texts.openLesson} onClick={() => props.onOpenLesson(m.recordingId)} />}
             </div>
           );
         })}
@@ -539,11 +537,7 @@ export function SummarySection(props: {
                 <div className="today-t">{m.title}</div>
                 {m.meta !== "" && <div className="small muted today-meta num">{m.meta}</div>}
               </div>
-              {m.canOpen && (
-                <Button size="sm" onClick={() => props.onOpenLesson(m.recordingId)}>
-                  {texts.open}
-                </Button>
-              )}
+              {m.canOpen && <IconAction icon="chevr" place="left" label={openPairLabel(m.title)} tipText={texts.openLesson} onClick={() => props.onOpenLesson(m.recordingId)} />}
             </div>
           );
         })}

@@ -8,6 +8,7 @@ import "./ui/tokens.css";
 import "./ui/base.css";
 import "./ui/scrollbar.css";
 import "./ui/components.css";
+import "./ui/iconAction.css";
 import "./ui/accent.css";
 import "./sourcePicker/sourcePicker.css";
 import "./ui/soundLevel.css";

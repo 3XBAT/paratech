@@ -19,6 +19,7 @@ import { lessonText } from "../lessonLabel.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine, Row } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 import { RowMenu } from "../ui/RowMenu.js";
 
 /**
@@ -99,16 +100,14 @@ export function DoneIssueLine(props: {
       <ResultLine kind="fail" role="alert">
         {props.where === "page" ? props.issue.pageText : props.issue.text}
       </ResultLine>
-      {button !== null && (button.kind !== "back" || props.onBack !== undefined) && (
+      {/* A retry and an open are plain secondary actions: icons. «К заданиям» is the only way out of a gone assignment: a word. */}
+      {button !== null && button.kind !== "back" && <IconAction icon={button.kind === "retry" ? "retry" : "chevr"} label={button.label} onClick={click} />}
+      {button !== null && button.kind === "back" && props.onBack !== undefined && (
         <Button size="sm" onClick={click}>
           {button.label}
         </Button>
       )}
-      {props.onClose !== undefined && (
-        <Button size="sm" variant="ghost" onClick={props.onClose}>
-          {doneTexts.close}
-        </Button>
-      )}
+      {props.onClose !== undefined && <IconAction icon="x" label={doneTexts.close} onClick={props.onClose} />}
     </div>
   );
 }

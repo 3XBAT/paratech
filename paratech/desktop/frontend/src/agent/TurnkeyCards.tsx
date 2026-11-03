@@ -27,6 +27,7 @@ import type { StepResult } from "../workView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 
 // Questions, assumptions, requirements, steps, pitfalls and answers about a step were written by the reader or the
 // student (untrusted). They reach the page as React text nodes only: no element, link or markdown is built from them,
@@ -278,11 +279,7 @@ export function UnderstandingCard(props: { ctx: CardContext; startEditing?: bool
         <Button size="sm" variant="primary" disabled={ctx.busy || (editing && !check.ok)} onClick={() => void ctx.run(() => ctx.step(confirmCard(ctx.api, work.id, draft, editing && edited)))}>
           {turnkeyTexts.confirm}
         </Button>
-        {!editing && (
-          <Button size="sm" variant="secondary" disabled={ctx.busy} onClick={() => setEditing(true)}>
-            {turnkeyTexts.edit}
-          </Button>
-        )}
+        {!editing && <IconAction icon="pencil" label={turnkeyTexts.edit} disabled={ctx.busy} onClick={() => setEditing(true)} />}
         {editing && (
           <>
             <Button
@@ -350,9 +347,7 @@ function HelperStep(props: { ctx: CardContext; index: number; text: string }) {
     <li>
       <span className="ag-text">{props.text}</span>
       <div className="ag-actions">
-        <Button size="sm" variant="ghost" aria-expanded={open} disabled={asking} onClick={() => setOpen(!open)}>
-          {open ? turnkeyTexts.askClose : turnkeyTexts.askStep}
-        </Button>
+        <IconAction icon={open ? "x" : "help"} expanded={open} label={open ? turnkeyTexts.askClose : turnkeyTexts.askStep} disabled={asking} onClick={() => setOpen(!open)} />
       </div>
       {open && (
         <div className="ag-revise">
