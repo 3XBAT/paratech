@@ -19,6 +19,12 @@ type assignmentFieldsWire struct {
 	SubjectName string `json:"subject_name,omitempty"`
 }
 
+// settingWire is the setting and its prior value of action.RestoreSetting (TASK-322).
+type settingWire struct {
+	Setting  string `json:"name"`
+	OldValue string `json:"old_value"`
+}
+
 // doneMarkWire is one action.DoneMark.
 type doneMarkWire struct {
 	Assignment string `json:"assignment"`
@@ -83,6 +89,10 @@ func wireOf10(c action.Compensation, w compensationWire) (compensationWire, erro
 		for _, m := range v.Marks() {
 			w.Marks = append(w.Marks, doneMarkWire{Assignment: m.Assignment.ID(), WasDone: m.WasDone, Version: m.Version})
 		}
+	case action.RestoreSetting:
+		w.Prior = &settingWire{Setting: string(v.Setting), OldValue: v.OldValue}
+	case action.StopRecording:
+		w.Recording = v.Recording.ID()
 	case action.RemoveNotePart:
 		w.Note, w.Material = v.Note.ID(), v.Part.ID()
 	case action.RemoveNote:
@@ -128,6 +138,14 @@ func compensationOfWire10(w compensationWire) (action.Compensation, error) {
 			marks = append(marks, action.DoneMark{Assignment: ref(m.Assignment), WasDone: m.WasDone, Version: m.Version})
 		}
 		return action.NewRestoreDone(marks)
+	case action.CompRestoreSetting:
+		if w.Prior == nil {
+			return nil, fmt.Errorf("compensation %s without its setting", w.Kind)
+		}
+		return action.RestoreSetting{Setting: values.Setting(w.Prior.Setting), OldValue: w.Prior.OldValue}, nil
+	case action.CompStopRecording:
+		r, _ := optionalRef(values.KindRecording, w.Recording) // a malformed id stays zero and fails the check in Restore
+		return action.StopRecording{Recording: r}, nil
 	}
 	note := func() values.Ref {
 		r, _ := optionalRef(values.KindNote, w.Note)

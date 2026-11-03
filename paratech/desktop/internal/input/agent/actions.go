@@ -111,6 +111,9 @@ type ActionDeps struct {
 	Marks   AssignmentMarks
 	Chat    ChatActions
 	Events  CalendarEvents
+	// Catalog v10 controls (optional; without them their tools answer "unavailable"): settings.go, quota.go,
+	// recording.go.
+	Controls Controls
 	// Notes is «Мой конспект» (optional; without it list_notes and note answer "unavailable").
 	Notes Notes
 }
@@ -135,6 +138,7 @@ type Actions struct {
 	marks       AssignmentMarks
 	chat        ChatActions
 	events      CalendarEvents
+	controls    Controls
 	notes       Notes
 }
 
@@ -152,7 +156,7 @@ func NewActions(d ActionDeps) (*Actions, error) {
 		library: d.Library, lessons: d.Lessons, assignments: d.Assignments, added: d.NewAssignments, rerunner: d.Rerunner,
 		materials: d.Materials,
 		turnkey:   d.Turnkey, jobs: d.Jobs, canceller: d.Canceller, tx: d.Tx, clock: d.Clock, log: log,
-		changes: d.Changes, marks: d.Marks, chat: d.Chat, events: d.Events, notes: d.Notes,
+		changes: d.Changes, marks: d.Marks, chat: d.Chat, events: d.Events, controls: d.Controls, notes: d.Notes,
 	}, nil
 }
 
@@ -169,7 +173,8 @@ var errMovedOn = errors.New("agent: the target changed before the action")
 // --- the actions --------------------------------------------------------------------------------------
 
 // prepared is what an action knows before it runs: the intent the journal records first and, when the state is
-// already the wanted one, the result without any change (nothing is journaled then).
+// already the wanted one, the result without any change (nothing is journaled then; recording no-ops are, see
+// effect.noop).
 type prepared struct {
 	intent    action.Intent
 	noop      *values.WriteRow
@@ -185,11 +190,16 @@ type effect struct {
 	row     values.WriteRow
 	created values.Ref // the subject, folder or assignment a create made
 	failed  bool       // the use case changed nothing (a job or a work that existed already)
+	// noop: nothing changed, yet the entry is DONE without a compensation (and no action line) so that a replay
+	// answers from it (recording{start} while one runs).
+	noop bool
 	// triage is what triage_assignment shows the planner instead of row; cards are the cards it adds.
 	triage *values.TriageRow
 	cards  []values.Card
 	marks  []values.MarkRow     // what mark_assignments_done shows instead of row
 	note   *values.NoteWriteRow // what note shows instead of row
+	out    resultOf             // what a tool with its own result shape shows instead of row (recording)
+	offer  values.OfferAction
 }
 
 // prepare looks at the target of call, made at at, and returns how to run it; ok is false for a tool this desktop
@@ -216,6 +226,10 @@ func (a *Actions) prepare(ctx context.Context, at origin, call values.Call) (pre
 		p, err = a.createAssignment(at, call)
 	case values.ToolMakeSummary, values.ToolMakeLectureText, values.ToolFindHomework:
 		p, err = a.postProcess(ctx, call)
+	case values.ToolSetSetting:
+		p, err = a.setSetting(ctx, call)
+	case values.ToolRecording:
+		p, err = a.recording(call)
 	case values.ToolTriageAssignment:
 		if actionpolicy.FreeTopic(call) {
 			p, err = a.triageTopic(at, call)
@@ -578,6 +592,10 @@ func jobEffect(id shared.JobID, created bool) (effect, error) {
 // Check reads the state of the target of a compensation (agentjournal.Compensator).
 func (a *Actions) Check(ctx context.Context, c action.Compensation) (action.Target, error) {
 	switch v := c.(type) {
+	case action.RestoreSetting:
+		return a.checkSetting(ctx, v)
+	case action.StopRecording:
+		return a.checkRecording(v)
 	case action.RemoveSubject:
 		sub, err := a.subject(ctx, shared.SubjectID(v.Subject.ID()))
 		if err != nil {
@@ -648,6 +666,10 @@ func (a *Actions) Check(ctx context.Context, c action.Compensation) (action.Targ
 // compensated, so nothing rebases on it). A job is cancelled
 // through the job runner: a finished one is action.ErrResultReady.
 func (a *Actions) Apply(ctx context.Context, c action.Compensation, expectedVersion int64) (int64, error) {
+	if v, ok := c.(action.StopRecording); ok {
+		// The session stops and finalizes outside the database; nothing is left to rebase on.
+		return 0, a.stopStarted(ctx, v, expectedVersion)
+	}
 	if v, ok := c.(action.CancelJob); ok {
 		if err := a.cancelJob(ctx, shared.JobID(v.Job.ID())); err != nil {
 			return 0, err
@@ -699,6 +721,9 @@ func (a *Actions) Apply(ctx context.Context, c action.Compensation, expectedVers
 
 func (a *Actions) compensate(ctx context.Context, c action.Compensation) error {
 	switch v := c.(type) {
+	case action.RestoreSetting:
+		_, err := a.writeSetting(ctx, v.Setting, v.OldValue)
+		return err
 	case action.RemoveSubject:
 		return a.library.RemoveSubject(ctx, shared.SubjectID(v.Subject.ID()))
 	case action.RemoveFolder:
@@ -784,6 +809,8 @@ func (a *Actions) jobState(ctx context.Context, id shared.JobID) (job.Status, er
 // now and whether the effect of the action is there. A paid job cannot be told (its key is the use case's own).
 func (a *Actions) Observe(ctx context.Context, tool values.Tool, in action.Intent, since time.Time) (action.Observation, error) {
 	switch tool {
+	case values.ToolSetSetting:
+		return a.observeSetting(ctx, in)
 	case values.ToolCreateSubject:
 		return a.observeSubject(ctx, in, since)
 	case values.ToolCreateFolder:

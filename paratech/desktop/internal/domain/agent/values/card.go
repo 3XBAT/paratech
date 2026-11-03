@@ -143,19 +143,27 @@ func (c ConfirmCard) Validate() error {
 
 // ActionLine is one journal line with «Отменить». Assignment is the assignment create_assignment added (ADR-0029),
 // zero for other tools: the action names its ID, and the Driver fills its title, subject and deadline from the local
-// data before the line is shown (the planner never sees them).
+// data before the line is shown (the planner never sees them). Offer is a button the line offers instead of
+// «Отменить», set by the desktop (recording{stop}: «Начать запись», ADR-0033 §2), never by the planner; empty for none.
 type ActionLine struct {
 	Action     shared.ActionID
 	Assignment AssignmentLine
+	Offer      OfferAction
 }
 
 // Kind returns CardActionLine.
 func (ActionLine) Kind() CardKind { return CardActionLine }
 
-// Validate checks the card: an assignment, when there is one, is a valid line with a title.
+// Validate checks the card: an assignment, when there is one, is a valid line with a title; an offer is a button
+// that needs no ID.
 func (c ActionLine) Validate() error {
 	if err := c.Action.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidCard, err)
+	}
+	if c.Offer != "" {
+		if arg, _, ok := OfferTarget(c.Offer); !ok || arg != "" {
+			return fmt.Errorf("%w: an action line offers a button without an id", ErrInvalidCard)
+		}
 	}
 	if c.Assignment == (AssignmentLine{}) {
 		return nil
