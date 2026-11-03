@@ -320,7 +320,11 @@ type Querier interface {
 	ListLessonsStartingBetween(ctx context.Context, arg ListLessonsStartingBetweenParams) ([]ScheduleEntry, error)
 	ListLiveLessons(ctx context.Context) ([]ScheduleEntry, error)
 	ListMaterialLessons(ctx context.Context, materialID string) ([]string, error)
+	// The files filed under a subject in any status and visibility, for its purge (TASK-308).
+	ListMaterialsFiledUnder(ctx context.Context, subjectID sql.NullString) ([]Material, error)
 	ListMaterialsOfSubject(ctx context.Context, subjectID sql.NullString) ([]Material, error)
+	// The notes of a subject in any status, also while it is removed, for its purge (TASK-308).
+	ListNoteIDsOfSubject(ctx context.Context, subjectID string) ([]string, error)
 	ListNoteParts(ctx context.Context, noteID string) ([]string, error)
 	// Every note, for the knowledge base (TASK-152); ordered as ListNotesOfSubject.
 	ListNotes(ctx context.Context) ([]Note, error)
@@ -368,6 +372,8 @@ type Querier interface {
 	// A removed subject (removed_at set, TASK-288) and everything filed under it are hidden from every reader; only
 	// GetSubjectAnyStatus and ListRemovedSubjects see it. Its rows are never rewritten by the removal.
 	ListSubjects(ctx context.Context) ([]Subject, error)
+	// The sets of a subject for its purge (TASK-308): they name it without a foreign key and would be left dangling.
+	ListTicketSetIDsOfSubject(ctx context.Context, subjectID string) ([]string, error)
 	// The sets of one subject for the tickets screen, newest first (idx_ticket_sets_subject).
 	ListTicketSetsBySubject(ctx context.Context, arg ListTicketSetsBySubjectParams) ([]TicketSet, error)
 	ListTodayPostsSince(ctx context.Context, arg ListTodayPostsSinceParams) ([]TodayPost, error)
@@ -381,6 +387,11 @@ type Querier interface {
 	// marked for deletion (TASK-095). Ids only: the caller loads each one and its aggregate decides.
 	ListUntranscribedRecordingIDs(ctx context.Context, arg ListUntranscribedRecordingIDsParams) ([]string, error)
 	ListWorkRounds(ctx context.Context, workID string) ([]WorkRound, error)
+	// Whether the stored bytes of a sha256 are used by anything but one material: another material, or a send of a work
+	// not yet carried out that pinned them (its copy is made from them). One query on purpose: later stores of those
+	// bytes (note revisions, TASK-290/291) are added here.
+	MaterialDigestInUse(ctx context.Context, arg MaterialDigestInUseParams) (int64, error)
+	MaterialInNoteOfOtherSubject(ctx context.Context, arg MaterialInNoteOfOtherSubjectParams) (int64, error)
 	// Next due QUEUED job admitted by job.ClaimFilter. The lists are JSON arrays of type names (an empty list is safe,
 	// unlike an empty IN list): a heavy type needs heavy_allowed or the run_now override of the job (AC-22).
 	// skip_ids lists rows the caller found unusable (corrupt) so that they do not block the jobs behind them.
@@ -392,6 +403,16 @@ type Querier interface {
 	// The purge of a deleted assignment (ADR-0029 addendum 2): its draft, the versions go with it (CASCADE). Only while
 	// the assignment is still deleted before the cutoff, so a restore that won keeps its draft.
 	PurgeDraftOfAssignment(ctx context.Context, arg PurgeDraftOfAssignmentParams) (int64, error)
+	// A material held by any note is never deleted; its lesson links and inspection cascade, its works too, and the
+	// summaries and assignments made from it keep their rows (SET NULL).
+	PurgeMaterialOfRemovedSubject(ctx context.Context, arg PurgeMaterialOfRemovedSubjectParams) (int64, error)
+	// Deletes a note of a subject still removed at or before the cutoff (ms); its parts cascade, the materials stay.
+	PurgeNoteOfRemovedSubject(ctx context.Context, arg PurgeNoteOfRemovedSubjectParams) (int64, error)
+	// The purge of a removed subject past its restore window (TASK-308, ADR-0027). Every purge delete re-checks that the
+	// subject is still removed at or before the cutoff (ms), so a restore that won the race keeps everything.
+	PurgeRemovedSubject(ctx context.Context, arg PurgeRemovedSubjectParams) (int64, error)
+	// Deletes a set of a subject still removed at or before the cutoff (ms).
+	PurgeTicketSetOfRemovedSubject(ctx context.Context, arg PurgeTicketSetOfRemovedSubjectParams) (int64, error)
 	// The deletion of a recording with what was made from it (TASK-095, ADR-0018). The rows go in one transaction after
 	// the files; summaries and lecture texts are keyed by the transcript id.
 	// What the recording holds, for the confirmation.
