@@ -193,6 +193,20 @@ func (f *fakeLessons) ListStartingBetween(_ context.Context, from, to time.Time)
 	return out, nil
 }
 
+func (f *fakeLessons) Get(_ context.Context, id shared.LessonID) (*lesson.Lesson, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	for _, l := range f.lessons {
+		if l.ID() == id && !l.Deleted() {
+			return l, nil
+		}
+	}
+	return nil, shared.ErrNotFound
+}
+
 // add stores a live lesson running [start, start+d).
 func (f *fakeLessons) add(t *testing.T, id shared.LessonID, start time.Time, d time.Duration) {
 	t.Helper()

@@ -46,6 +46,7 @@
     "src/pages/LectureTextParts.tsx",
     "src/pages/HomeworkDialogs.tsx",
     "src/popup/view.ts",
+    "src/popup/joinView.ts",
     "src/sourcePicker/view.ts",
     "src/sourcePicker/SourcePicker.tsx",
     "src/sourcePicker/advice.ts",

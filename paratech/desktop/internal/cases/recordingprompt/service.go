@@ -45,6 +45,8 @@ type Service struct {
 	popup      Popup
 	recordings Recordings
 	lessons    Lessons
+	subjects   SubjectResolver  // nil: no call subject
+	callLinks  SubjectCallLinks // nil: no call subject
 	clock      Clock
 	sleeper    Sleeper
 	log        *slog.Logger
@@ -78,7 +80,7 @@ func New(deps Deps, cfg Config) (*Service, error) {
 	}
 	return &Service{
 		settings: deps.Settings, apps: deps.Apps, popup: deps.Popup, recordings: deps.Recordings, lessons: deps.Lessons,
-		clock: deps.Clock, sleeper: deps.Sleeper, log: log, cfg: cfg,
+		subjects: deps.Subjects, callLinks: deps.CallLinks, clock: deps.Clock, sleeper: deps.Sleeper, log: log, cfg: cfg,
 	}, nil
 }
 
