@@ -190,8 +190,6 @@ export interface RecordingRowView {
   /** The tooltip of the chip: the problem of the recording and the last error of the job as they are; "" for none. */
   details: string;
   action: RowAction | null;
-  /** «Повторить» under the hint (TASK-086, TASK-347); null for none. */
-  retry: RowRetry | null;
 }
 
 /** The «Повторить» of a row: the work it starts and its name for the tooltip and screen readers. */
@@ -377,7 +375,6 @@ export function recordingRowView(r: RecordingItem, now: number): RecordingRowVie
     notes: userNotes(r.problem),
     details: detailsText(r),
     action: rowAction(r),
-    retry: rowRetry(r),
   };
 }
 
@@ -569,18 +566,48 @@ export function backgroundState(states: ListStates): ListState {
   return Object.hasOwn(states, backgroundKey) ? states[backgroundKey] : foldedState;
 }
 
-/** The block is shown only for jobs (or a load error); an empty one stays out of the way. */
+/** The block is shown only while there are jobs at all; an empty one stays out of the way. */
 export function backgroundVisible(jobs: readonly unknown[]): boolean {
   return jobs.length > 0;
 }
 
-/** «Задач с ошибкой: 2» under the folded title, so a failed job is not hidden by the fold; "" for none. */
-export function backgroundFailedText(jobs: readonly Parameters<typeof jobStatusView>[0][]): string {
-  const n = jobs.filter((j) => jobStatusView(j).kind === "fail").length;
-  return n === 0 ? "" : `Задач с ошибкой: ${n}`;
+type JobLike = Parameters<typeof jobStatusView>[0];
+
+const jobFailed = (j: JobLike) => jobStatusView(j).kind === "fail";
+
+/**
+ * The number in the title: the jobs that are not finished (queued, running, waiting) and the failed ones. The finished
+ * ones are counted by their own «Завершённые (N)». 0 means the title has no number.
+ */
+export function backgroundCount(tasks: PageSection<JobLike>): number {
+  return tasks.active.length + tasks.finished.filter(jobFailed).length;
 }
 
-/** What a task row does besides the round retry: «Запустить сейчас» and «Открыть задание». */
+/** The key of the inner «Завершённые» list of the block (see RecordingsPage.sectionGroups). */
+export const tasksKey = "tasks";
+
+/**
+ * «С ошибкой: 2 — показать»: the text button that brings the failed jobs into view. Shown while at least one failed job
+ * is hidden by the fold of the block or of its «Завершённые» (a failed job is a finished one); "" when none is hidden.
+ */
+export function backgroundFailedText(tasks: PageSection<JobLike>, background: ListState, finished: ListState): string {
+  const failedActive = tasks.active.filter(jobFailed).length;
+  const failedDone = tasks.finished.filter(jobFailed).length;
+  const open = !background.collapsed;
+  const hidden = (failedDone > 0 && !(open && !finished.collapsed)) || (failedActive > 0 && !open);
+  return hidden ? `С ошибкой: ${failedActive + failedDone} — показать` : "";
+}
+
+/** The click on that button: the block and its «Завершённые» unfold, with every row (the failed one may be past the limit). */
+export function backgroundShowFailed(states: ListStates): ListStates {
+  return {
+    ...states,
+    [backgroundKey]: { collapsed: false, showAll: false },
+    [tasksKey]: { collapsed: false, showAll: true },
+  };
+}
+
+/** What a task row does: «Запустить сейчас» and «Открыть задание». */
 export type JobItemKey = "runNow" | "assignment";
 
 export interface JobRowItem {

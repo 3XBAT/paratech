@@ -42,7 +42,9 @@ import { RecordingImportPanel } from "./RecordingImportPanel";
 import { KnowledgeLessonPage, NoteLecturePage } from "./KnowledgeLessonPage";
 
 /** What the export does: the tooltip of «Экспорт в .md» instead of a paragraph under the head (TASK-347). */
-const exportHint = "Один файл .md: пары по датам, с конспектом и текстом лекции. Сохраняется только по кнопке.";
+const exportHint = "Сохранить все пары предмета в один файл .md — по датам, с конспектом и текстом лекции.";
+/** The same place says why the button is off: the subject has only notes, or nothing, to export. */
+const exportEmptyHint = "Экспортировать нечего: у предмета пока нет пар с конспектом.";
 
 type SearchOutcome =
   | { kind: "short" }
@@ -407,6 +409,8 @@ function SubjectView(props: {
   const [importOpen, setImportOpen] = useState(false);
   const [imports, setImports] = useState(0);
   const exportHintId = useId();
+  const nothingToExport = lessons !== null && lessons.every(isNoteOnly);
+  const exportTip = nothingToExport ? exportEmptyHint : exportHint;
 
   useEffect(() => {
     mounted.current = true;
@@ -475,15 +479,15 @@ function SubjectView(props: {
             icon="down"
             busy={exporting}
             busyLabel="Сохранение…"
-            disabled={exporting || lessons === null || lessons.every(isNoteOnly)}
-            title={exportHint}
+            disabled={exporting || lessons === null || nothingToExport}
+            title={exportTip}
             aria-describedby={exportHintId}
             onClick={() => void onExport()}
           >
             Экспорт в .md
           </Button>
           <span id={exportHintId} className="vh">
-            {exportHint}
+            {exportTip}
           </span>
         </div>
       </div>

@@ -305,7 +305,9 @@ export function Dialog(props: {
     }
     if (props.open && !d.open) {
       d.showModal();
-      safe.current?.focus();
+      // A disabled «Отмена» cannot take the focus, and showModal() has put it on the action: it goes to the dialog then.
+      const button = safe.current;
+      (button !== null && !button.disabled ? button : d).focus();
     } else if (!props.open && d.open) {
       d.close();
     }
@@ -315,6 +317,7 @@ export function Dialog(props: {
     <dialog
       ref={ref}
       className="dialog"
+      tabIndex={-1}
       aria-labelledby={titleId}
       onCancel={(e) => {
         e.preventDefault();

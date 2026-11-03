@@ -180,7 +180,7 @@ test("a failed post-processing offers «Повторить», also next to the c
 
   // A queued service problem keeps its link only; running or queued work is never retried.
   assert.equal(rowSecondaryAction(row({ stage: "queued", queueReason: "serviceNotConfigured", action: "openConnections" })), null);
-  assert.equal(recordingRowView(row({ stage: "summarizing" }), 0).retry, null);
+  assert.equal(rowRetry(row({ stage: "summarizing" })), null);
 
   // TASK-347: the retry is a text button «Повторить» under the hint; its work is in aria-label and title.
   const label = 'aria-label="Повторить конспект"';
@@ -609,17 +609,18 @@ test("recording and task rows share one grid: fixed status, button and «⋯» t
   assert.ok(!page.includes('"card rows"'), "no per-card subgrid");
   assert.match(page, /renderContainer=\{card\}/);
   assert.match(page, /<h1>Записи<\/h1>/);
-  // TASK-347: «Фоновая обработка» is one folded block (CollapsibleList, h2) with the count; it has no heading of its own.
+  // TASK-347: «Фоновая обработка» is one folded block (an h2 with CollapsibleList's header markup, so the title can go
+  // without a number) with the count of unfinished and failed jobs; it has no heading of its own.
   assert.doesNotMatch(page, /group-title/);
-  assert.match(page, /title=\{backgroundTitle\}\s+heading="h2"/);
-  assert.match(page, /count=\{visibleJobs\.length\}\s+state=\{background\}/);
+  assert.match(page, /<h2 className="clist-header">\s*<button[^>]*aria-expanded=\{!background\.collapsed\}/);
+  assert.match(page, /\{backgroundTitle\}\s*\{backgroundN > 0 && <span className="clist-count"> \(\{backgroundN\}\)<\/span>\}/);
   assert.match(page, /sectionGroups\("recordings", "записи", groups\.recordings, recordingRow\)/);
   assert.match(page, /sectionGroups\("tasks", "фоновая обработка", groups\.tasks, jobRow\)/);
   // The two «Завершённые» toggles have distinct accessible names: a hidden word after the title.
   assert.match(page, /Завершённые<span className="vh"> · \{name\}<\/span>/);
   // The page title is «Записи»: no second «Записи» heading under it (TASK-344).
   assert.doesNotMatch(page, /<h2 className="group-title">Записи<\/h2>/);
-  assert.match(page, /\) : noRecordings \? \(\s*<div className="rec-empty">/);
+  assert.match(page, /\) : noRecordings \? \(\s*\/\/[^\n]*\n\s*!panelOpen && \(\s*<div ref=\{emptyRef\} className="rec-empty">/);
   // «Идут» under the page h1 is an h2 (no skipped level); under the h2 «Фоновая обработка» it is an h3.
   assert.match(page, /const Sub = list === "recordings" \? "h2" : "h3";/);
   assert.match(page, /<Sub className="arows-sub">Идут<\/Sub>/);
@@ -698,7 +699,7 @@ test("a recording without speech says so and offers only the sound check, no ret
     assert.equal(v.status.hint, "В записи нет речи — скорее всего, выбран не тот источник звука.", step);
     assert.equal(v.status.label, noSpeechTexts.label);
     assert.deepEqual(v.action, { kind: "open", page: "diagnostics", label: "Проверить звук" }, step);
-    assert.equal(v.retry, null, step);
+    assert.equal(rowRetry(r), null, step);
     assert.equal(v.details, "", step);
     assert.equal(rowOffersTranscript(r), false, step);
     assert.equal(rowSummaryOffer(r), null, step);

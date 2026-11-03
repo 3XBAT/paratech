@@ -65,8 +65,8 @@ export interface RecordingRowProps {
 type MenuKey = RowItemKey | "delete";
 
 // One recording with the status of its whole chain, and the silent-source advice of a running one. One main button by
-// the state, the other actions in «⋯», a round «Повторить» next to the chip (TASK-096). The lesson title and the
-// core's notes are untrusted text: React renders them as text only.
+// the state, the other actions in «⋯», the text buttons «Повторить» and «Открыть подключения» under the hint of a failed
+// step (TASK-347). The lesson title and the core's notes are untrusted text: React renders them as text only.
 export function RecordingRow(props: RecordingRowProps) {
   const r = props.item;
   const v = recordingRowView(r, props.now);
@@ -249,7 +249,7 @@ export interface JobRowProps {
   onOpenAssignment?: (assignmentId: string) => void;
 }
 
-// One task of «Задачи» (a job without a recording), on the same grid as a recording row: one main button and the «⋯»
+// One task of «Фоновая обработка» (a job without a recording), on the same grid as a recording row: one main button and the «⋯»
 // cell, which stays empty without more actions (TASK-098). The job error and the attempts are technical: only in the
 // chip's tooltip (TASK-096). The draft's title is model text: React renders it as text only.
 export function JobRow(props: JobRowProps) {
