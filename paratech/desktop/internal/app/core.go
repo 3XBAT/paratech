@@ -466,6 +466,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err := c.wireAgent(e, llm, agentReads{
 		library: lib, knowledge: knowledge, activity: history, schedule: schedule, assignments: c.proposals,
 		deliveries: c.deliveries, rerunner: rerunner, materials: materialJobs, turnkey: works, answers: answers,
+		settings: prefs,
 	}, log); err != nil {
 		return err
 	}

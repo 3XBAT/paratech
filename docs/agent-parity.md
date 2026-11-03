@@ -116,10 +116,10 @@ Legend
 
 | Действие в UI | Binding | Инструмент агента сейчас | Класс | «Да» / план | Notes |
 |---|---|---|---|---|---|
-| Начать запись (окно перед парой / вручную) | `PromptService.Start`, `StartRecording` | нет → `recording{start}` (10) | U | — | О-7 а; Undo = stop and keep the audio |
+| Начать запись (окно перед парой / вручную) | `PromptService.Start`, `StartRecording` | нет → `recording{start}` (10) | U | — | О-7 а; Undo = stop and keep the audio; dispatch done in TASK-322 (the source the page's picker preselects; the model names none), served with catalog 10 (TASK-326) |
 | Пропустить пару в окне записи | `PromptService.Skip` | — | только UI | — | popup control |
 | Сменить источник звука | `PromptService.SelectSource`, `ActivityService.SwitchSource` | нет | U | — | |
-| Остановить запись | `ActivityService.StopRecording` | нет → `recording{stop}` (10) | U без «Отменить» | — | О-7 а; the result line offers «Начать запись» |
+| Остановить запись | `ActivityService.StopRecording` | нет → `recording{stop}` (10) | U без «Отменить» | — | О-7 а; the result line offers «Начать запись»; dispatch done in TASK-322 (the offer is `ActionLine.Offer`, rendered by TASK-324), served with catalog 10 (TASK-326) |
 | Удалить записи | `RecordingDeleteService.Preview`, `Delete` | `propose_delete_recording` | C | «Да» | |
 | Импорт старой записи | `RecordingImportService.Import` (диалог) | нет | только UI, *кнопка*; аудио из панели — U позже | — | audio stays local (hard rule 2) |
 | Записи и задачи | `ActivityService.ListRecordings`, `ListJobs` | `find_lessons`, `job_status` | R | — | |
@@ -171,19 +171,19 @@ Legend
 | Журнал действий агента | `AgentService.History` | нет | R | — | |
 | «Отменить» действие / всё | `AgentService.Undo`, `UndoRequest` | нет | UI, *кнопка* | клик | |
 | «Да», «Стоп», «Продолжить», «Повторить», «Начать заново», «Отмена», ответы | `ApprovePlan`, `RevisePlan`, `Answer`, `Stop`, `Continue`, `Retry`, `Restart`, `Rerun`, `Cancel` | — | только UI | клик | control of the agent itself |
-| Окно записи перед парой: вкл / выкл | `SettingsService.SetRecordingPromptsEnabled` | нет → `set_setting` (10) | U | — | gap P6 |
-| Обрабатывать только от сети | `SettingsService.SetProcessOnlyOnACPower` | нет → `set_setting` (10) | U | — | |
-| Нагрузка распознавания | `SettingsService.SetRecognitionLoad` | нет → `set_setting` (10) | U | — | |
+| Окно записи перед парой: вкл / выкл | `SettingsService.SetRecordingPromptsEnabled` | нет → `set_setting` (10) | U | — | gap P6; dispatch done in TASK-322, served with catalog 10 (TASK-326) |
+| Обрабатывать только от сети | `SettingsService.SetProcessOnlyOnACPower` | нет → `set_setting` (10) | U | — | dispatch done in TASK-322, served with catalog 10 (TASK-326) |
+| Нагрузка распознавания | `SettingsService.SetRecognitionLoad` | нет → `set_setting` (10) | U | — | dispatch done in TASK-322, served with catalog 10 (TASK-326) |
 | События в календаре при смене срока | TASK-276/279, в работе | нет → `set_setting` (11) | U | — | |
 | «ИИ распознаёт фото конспектов» | TASK-294, в работе | нет | U (`off`/`local`); будущий `cloud` — C | «Да» для `cloud` | images would leave the PC |
-| Настройки (чтение) | `SettingsService.GetSettings` | нет → `get_settings` (10) | R | — | enums only |
+| Настройки (чтение) | `SettingsService.GetSettings` | нет → `get_settings` (10) | R | — | enums only; dispatch done in TASK-322, served with catalog 10 (TASK-326) |
 | Профиль (ФИО, группа, вуз, факультет, город) | `SettingsService.GetProfile`, `SaveProfile` | нет → `set_profile_field` (11) | C | «Да» с точным значением | О-4 в; reading the values back: О-14 |
 | Почта: адрес получателя, SMTP | `ConnectionsService.SaveMailSettings` | — | только UI | — | addresses and servers (ADR-0022) |
 | Пароль почты | `SetMailPassword`, `RemoveMailPassword` | — | только UI | — | secret (hard rule 4) |
 | Проверить почту | `ConnectionsService.CheckMail` | нет | C, *кнопка* | клик | network |
 | Адрес Hub | `ConnectionsService.SaveHubURL` | — | только UI | — | trust boundary |
 | Ключ Hub | `SetHubKey`, `RemoveHubKey` | — | только UI | — | secret |
-| Квота | `GetConnections`, `RefreshQuota` | нет → `quota_status` (10) | R | — | «сколько осталось» |
+| Квота | `GetConnections`, `RefreshQuota` | нет → `quota_status` (10) | R | — | «сколько осталось»: share and reset date only; dispatch done in TASK-322, served with catalog 10 (TASK-326) |
 | Google: Client ID / secret | `GoogleService.SetGoogleClient`, `ClearGoogleClient` | — | только UI | — | secret |
 | Войти в Google | `GoogleService.GoogleSignIn`, `GoogleCancelSignIn` | — | только UI, *кнопка* | клик | OAuth consent in the browser |
 | Выйти из Google | `GoogleService.GoogleSignOut` | нет | C, *кнопка* | клик | |
