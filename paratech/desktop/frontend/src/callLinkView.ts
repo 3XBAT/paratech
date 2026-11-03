@@ -42,10 +42,10 @@ export const callLinkTexts = {
   openSubjects: "Открыть «Предметы»",
   /** The label of the field and of the block on the page of a subject. */
   field: "Ссылка на пару",
-  placeholder: "https://…",
+  placeholder: "zoom.us/j/123 или https://…",
   none: "Ссылки на пару нет. С ней у пар этого предмета на «Сегодня» появится «Подключиться».",
   fieldEmpty: "Ссылка не вставлена.",
-  invalid: "Нужна ссылка вида https://… (http или https).",
+  invalid: "Не похоже на ссылку на онлайн-пару. Пример: zoom.us/j/123 или https://… (только http или https, без порта).",
   saveFailed: "Не удалось сохранить ссылку. Можно повторить.",
   openFailed: "Не удалось открыть ссылку. Можно повторить.",
   clearFailed: "Не удалось удалить ссылку. Можно повторить.",

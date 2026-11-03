@@ -8,7 +8,8 @@ import (
 
 // Outcome is what the planner did with one request: every tool it called in order, the texts of its cards, the
 // assignment IDs its reply listed, the sources its triage_assignment calls gave, the subjects its create_assignment
-// calls gave (NoSubject for none) and the error that ended the run early, if any.
+// calls gave (NoSubject for none), the names its create_subject calls gave and the error that ended the run early, if
+// any.
 type Outcome struct {
 	Case     Request
 	Tools    []string
@@ -16,7 +17,21 @@ type Outcome struct {
 	Listed   []string
 	Sources  []string
 	Assigned []string
+	Created  []string
 	Err      string
+}
+
+// avoided returns the phrases of the case to avoid that a card text of the run has.
+func (o Outcome) avoided() []string {
+	var out []string
+	for _, t := range o.Texts {
+		for _, a := range AvoidedPhrases(t, o.Case.Avoid) {
+			if !slices.Contains(out, a) {
+				out = append(out, a)
+			}
+		}
+	}
+	return out
 }
 
 // QuestionOutcome is a lecture question: the tools the planner called and, when the answer was measured, its
@@ -45,6 +60,8 @@ type Metrics struct {
 	Lists, ListsOK             int // requests whose reply should list assignments, and those that did
 	Sources, SourcesOK         int // requests with an expected triage source, and those that gave it
 	Assigned, AssignedOK       int // requests with an expected assignment subject, and those that gave it
+	Created, CreatedOK         int // requests with an expected create_subject name, and those that gave it
+	Avoids, AvoidsOK           int // requests with phrases to avoid, and those whose texts had none
 	Questions, AnswerRouted    int
 	Measured, Valid, Citations int
 	Errors                     int
@@ -88,6 +105,18 @@ func (r Report) Metrics() Metrics {
 			m.Assigned++
 			if slices.Contains(o.Assigned, o.Case.AssignedSubject) {
 				m.AssignedOK++
+			}
+		}
+		if o.Case.SubjectName != "" {
+			m.Created++
+			if slices.Contains(o.Created, o.Case.SubjectName) {
+				m.CreatedOK++
+			}
+		}
+		if len(o.Case.Avoid) > 0 {
+			m.Avoids++
+			if len(o.avoided()) == 0 {
+				m.AvoidsOK++
 			}
 		}
 		for _, t := range o.Texts {
@@ -145,6 +174,8 @@ func (r Report) Markdown() string {
 	fmt.Fprintf(&b, "| reply со списком заданий | %s |\n", share(m.ListsOK, m.Lists))
 	fmt.Fprintf(&b, "| triage_assignment: верный источник | %s |\n", share(m.SourcesOK, m.Sources))
 	fmt.Fprintf(&b, "| create_assignment: верный предмет | %s |\n", share(m.AssignedOK, m.Assigned))
+	fmt.Fprintf(&b, "| create_subject: верное название | %s |\n", share(m.CreatedOK, m.Created))
+	fmt.Fprintf(&b, "| Тексты без запрещённых фраз | %s |\n", share(m.AvoidsOK, m.Avoids))
 	fmt.Fprintf(&b, "| Ошибки прогона | %d |\n", m.Errors)
 
 	var misses []string
@@ -164,6 +195,13 @@ func (r Report) Markdown() string {
 		if o.Case.AssignedSubject != "" && !slices.Contains(o.Assigned, o.Case.AssignedSubject) {
 			misses = append(misses, fmt.Sprintf("- %s «%s»: create_assignment ждали с предметом %s, получили %v",
 				o.Case.ID, o.Case.Text, o.Case.AssignedSubject, o.Assigned))
+		}
+		if o.Case.SubjectName != "" && !slices.Contains(o.Created, o.Case.SubjectName) {
+			misses = append(misses, fmt.Sprintf("- %s «%s»: create_subject ждали с названием «%s», получили %v",
+				o.Case.ID, o.Case.Text, o.Case.SubjectName, o.Created))
+		}
+		if a := o.avoided(); len(a) > 0 {
+			misses = append(misses, fmt.Sprintf("- %s «%s»: в тексте запрещённые фразы %v", o.Case.ID, o.Case.Text, a))
 		}
 		for _, t := range o.Texts {
 			if w := FirstPersonWords(t); len(w) > 0 {

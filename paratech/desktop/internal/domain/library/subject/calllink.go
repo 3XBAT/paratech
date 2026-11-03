@@ -26,7 +26,8 @@ type CallLink struct {
 // cross-checked in desktop/tests): trimmed, at most MaxCallLinkBytes, printable ASCII without spaces, quotes,
 // <>\^{|} or backtick, http or https, a host of lowercase a-z 0-9 . - with a dot and valid labels, no user info, port,
 // IP literal, IDN or fragment, a path and query of RFC 3986 characters and %XX. Errors wrap ErrInvalidCallLink, name
-// the rule and never quote the text.
+// the rule and never quote the text. One addition over the schedule rule: text typed without a scheme gets "https://"
+// in front first (see hasCallScheme), so the stored canonical form always passes the schedule rule.
 func ParseCallLink(s string) (CallLink, error) {
 	s = strings.TrimSpace(s)
 	switch {
@@ -34,6 +35,12 @@ func ParseCallLink(s string) (CallLink, error) {
 		return CallLink{}, callLinkError("empty")
 	case len(s) > MaxCallLinkBytes:
 		return CallLink{}, callLinkError(fmt.Sprintf("longer than %d bytes", MaxCallLinkBytes))
+	}
+	if !hasCallScheme(s) {
+		s = "https://" + s
+		if len(s) > MaxCallLinkBytes {
+			return CallLink{}, callLinkError(fmt.Sprintf("longer than %d bytes", MaxCallLinkBytes))
+		}
 	}
 	for i := 0; i < len(s); i++ {
 		if c := s[i]; c < 0x21 || c > 0x7e {
@@ -94,6 +101,28 @@ func (l CallLink) LogValue() slog.Value {
 	}
 	return slog.StringValue("call link to " + l.host)
 }
+
+// hasCallScheme reports whether s starts with "name:" before any '/' or '?', name a URI scheme (RFC 3986: a letter,
+// then letters, digits, + - .), and the text after the colon up to '/' or '?' is not a port: "host:8080/x" has no
+// scheme, "mailto:a@b", "javascript:alert(1)" and "ftp://x" have one. Text without a scheme gets "https://", so a
+// misread is safe: the result is still checked as an https link and a port or user info in it is refused.
+func hasCallScheme(s string) bool {
+	if end := strings.IndexAny(s, "/?"); end >= 0 {
+		s = s[:end]
+	}
+	name, after, ok := strings.Cut(s, ":")
+	if !ok || name == "" || !isLetter(name[0]) {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		if c := name[i]; !isLetter(c) && (c < '0' || c > '9') && c != '+' && c != '-' && c != '.' {
+			return false
+		}
+	}
+	return !isDecimal(after)
+}
+
+func isLetter(c byte) bool { return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') }
 
 func checkCallHost(host string) error {
 	switch {

@@ -86,19 +86,21 @@ func TestBuildTickets(t *testing.T) {
 	}
 }
 
-// The largest set fits the limits of a document: 100 tickets of the longest title, every claim and missing part at
-// its bound with three sources of a long lesson title.
+// A large set fits the limits of a document: 100 tickets of the longest title, each answer as large as the reader's
+// answers were bounded before TASK-366 (8 claims of 400 characters with three sources of a long lesson title, 5
+// missing parts of 300). The answer has no such bounds any more, so this is a typical large set, not the largest.
 func TestBuildTicketsAtTheBounds(t *testing.T) {
+	const claimsPerTicket, claimRunes, missingPerTicket, missingRunes = 8, 400, 5, 300
 	src := TicketSource{Lesson: strings.Repeat("л", 1000), Date: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC), Section: answer.SectionTranscript}
 	var claims []TicketClaim
-	for range answer.MaxClaims {
+	for range claimsPerTicket {
 		own := TicketSource{Lesson: src.Lesson, Date: src.Date, Section: answer.SectionOwnNote,
 			Locator: answer.Locator{Kind: answer.LocatorSection, N: 1}, Heading: strings.Repeat("р", answer.MaxHeadingRunes)}
-		claims = append(claims, TicketClaim{Text: strings.Repeat("у", answer.MaxClaimRunes), Sources: []TicketSource{src, src, own}})
+		claims = append(claims, TicketClaim{Text: strings.Repeat("у", claimRunes), Sources: []TicketSource{src, src, own}})
 	}
 	var missing []string
-	for range answer.MaxMissing {
-		missing = append(missing, strings.Repeat("м", answer.MaxMissingRunes))
+	for range missingPerTicket {
+		missing = append(missing, strings.Repeat("м", missingRunes))
 	}
 	var tickets []TicketEntry
 	for i := range ticketset.MaxTickets {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"paratech/desktop/internal/cases/activity"
 	"paratech/desktop/internal/cases/agentturn"
@@ -34,12 +35,37 @@ func runRead(t *testing.T, r *reads, scope values.Scope, tool values.Tool, args 
 	if err := out.Result.Validate(); err != nil {
 		t.Fatalf("%s result: %v", tool, err)
 	}
+	// The names of a find_lessons row are data the planner gets (TASK-369); no other field carries such a text.
+	clean := out.Result.ResultJSON
+	if tool == values.ToolFindLessons && !out.Result.IsError {
+		clean = withoutLessonNames(t, clean)
+	}
 	for _, bad := range []string{"ignore", "send_email", "example.invalid", "Физика", "<"} {
-		if strings.Contains(out.Result.ResultJSON, bad) && !strings.Contains(args, bad) {
+		if strings.Contains(clean, bad) && !strings.Contains(args, bad) {
 			t.Fatalf("%s result carries %q: %s", tool, bad, out.Result.ResultJSON)
 		}
 	}
 	return out
+}
+
+// withoutLessonNames is a find_lessons result without the title, subject_name and teacher of its rows.
+func withoutLessonNames(t *testing.T, s string) string {
+	t.Helper()
+	var body map[string]any
+	decode(t, s, &body)
+	rows, _ := body["lessons"].([]any)
+	for _, row := range rows {
+		if m, ok := row.(map[string]any); ok {
+			delete(m, "title")
+			delete(m, "subject_name")
+			delete(m, "teacher")
+		}
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 func decode(t *testing.T, s string, v any) {
@@ -137,6 +163,66 @@ func TestFindLessons(t *testing.T) {
 	}
 }
 
+// Beta 2026-11-03 (TASK-369): «добавь предмет по последней записи» was asked back, as find_lessons rows had no names.
+// Every row carries the title, the subject name and the teacher, also a recording whose subject is not in the library.
+func TestFindLessonsCarriesNames(t *testing.T) {
+	r := newReads()
+	newest := kb.Lesson{Recording: "r2", StartedAt: time.Date(2026, 11, 3, 10, 0, 0, 0, moscow), Title: "Социология культуры (лекция)",
+		Subject: "Социология культуры", Kind: "lecture"}
+	older := kbLesson("r1", "s1", time.Date(2026, 11, 2, 10, 0, 0, 0, moscow), "lecture", kb.Readiness{})
+	older.Title = ""
+	r.knowledge.lessons = []kb.Lesson{older, newest}
+	r.activity.recordings = []activity.Recording{
+		{ID: "r1", LessonTitle: "Физика (лекция)", LessonTeacher: "Петров П. П."},
+		{ID: "r2", LessonID: "l2", LessonTeacher: "Иванова" + string(rune(0x202e)) + " И.\x07И."},
+	}
+	r.library.resolve = map[string]subjectmatch.Match{}
+	long := strings.Repeat("Очень длинное название пары ", 9)
+	r.schedule.lessons = []*lesson.Lesson{func() *lesson.Lesson {
+		l, err := lesson.New(lesson.Spec{ID: "l-next", Content: lesson.Content{
+			Title: long, Start: time.Date(2026, 11, 4, 12, 0, 0, 0, moscow), End: time.Date(2026, 11, 4, 13, 30, 0, 0, moscow),
+			TimeZone: "Europe/Moscow", Subject: "Теория" + string(rune(0x200b)) + " культуры", Kind: lesson.KindSeminar, Teacher: "Сидоров С. С.",
+		}}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}()}
+
+	type row struct {
+		Recording, Lesson, Subject, Title, SubjectName, Teacher string
+	}
+	var body struct {
+		Lessons []struct {
+			Recording   string `json:"recording"`
+			Lesson      string `json:"lesson"`
+			Subject     string `json:"subject"`
+			Title       string `json:"title"`
+			SubjectName string `json:"subject_name"`
+			Teacher     string `json:"teacher"`
+		}
+	}
+	decode(t, runRead(t, r, values.Scope{}, values.ToolFindLessons, `{"from":"2026-11-01","to":"2026-11-05"}`).Result.ResultJSON, &body)
+	var got []row
+	for _, l := range body.Lessons {
+		got = append(got, row{l.Recording, l.Lesson, l.Subject, l.Title, l.SubjectName, l.Teacher})
+	}
+	want := []row{
+		{Lesson: "l-next", Title: strings.Repeat("Очень длинное название пары ", 4) + "Очень д…",
+			SubjectName: "Теория культуры", Teacher: "Сидоров С. С."},
+		// The newest recording: no subject of the library, its names all the same.
+		{Recording: "r2", Lesson: "l2", Title: "Социология культуры (лекция)", SubjectName: "Социология культуры", Teacher: "Иванова И. И."},
+		// No title in the knowledge base: the one the recording kept of its lesson.
+		{Recording: "r1", Subject: "s1", Title: "Физика (лекция)", SubjectName: "Физика s1", Teacher: "Петров П. П."},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("lessons =\n%+v\nwant\n%+v", got, want)
+	}
+	if n := utf8.RuneCountInString(got[0].Title); n != values.MaxLessonTitleRunes {
+		t.Fatalf("title of %d characters", n)
+	}
+}
+
 // planned is a lesson of the schedule whose title was written by others.
 func planned(t *testing.T, id, sub string, start time.Time, kind lesson.Kind) *lesson.Lesson {
 	t.Helper()
@@ -172,11 +258,8 @@ func TestFindLessonsListsPlannedLessons(t *testing.T) {
 	}
 	read := func(scope values.Scope, args string) []row {
 		t.Helper()
+		// The title and the subject string of the schedule reach the planner only as names (runRead, TASK-369).
 		raw := runRead(t, r, scope, values.ToolFindLessons, args).Result.ResultJSON
-		// Neither the title nor the subject string of the schedule reaches the planner.
-		if strings.Contains(raw, injection) || strings.Contains(raw, "Физика") {
-			t.Fatalf("%s: result carries a text of others: %s", args, raw)
-		}
 		var body struct{ Lessons []row }
 		decode(t, raw, &body)
 		return body.Lessons

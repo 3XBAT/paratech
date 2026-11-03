@@ -36,7 +36,13 @@ func TestMatches(t *testing.T) {
 			if got := Matches(tt.quote, lesson); got != tt.want {
 				t.Fatalf("Matches(%q) = %v, want %v", tt.quote, got, tt.want)
 			}
+			if got := MatchesNormalized(tt.quote, Normalize(lesson)); got != tt.want {
+				t.Fatalf("MatchesNormalized(%q) = %v, want %v", tt.quote, got, tt.want)
+			}
 		})
+	}
+	if MatchesNormalized(lesson+" и ещё текст", Normalize(lesson)) {
+		t.Fatal("a quote longer than the text matched")
 	}
 }
 

@@ -10,19 +10,8 @@ import (
 	"unicode/utf8"
 )
 
-// Limits of the reader's answer, those the Hub checks.
-const (
-	// MaxClaims bounds the claims of one answer.
-	MaxClaims = 8
-	// MaxClaimRunes bounds the text of one claim.
-	MaxClaimRunes = 400
-	// MaxCites bounds the citations of one claim; the reader gives at least one.
-	MaxCites = 3
-	// MaxQuoteRunes bounds one quote.
-	MaxQuoteRunes = 200
-	// MaxMissing bounds the unanswered parts; MaxMissingRunes bounds each.
-	MaxMissing, MaxMissingRunes = 5, 300
-)
+// The reader's answer has no count or length limits of its own (owner, TASK-366): only the output cap of the model
+// (MaxOutputTokens, clamped by the Hub) and the size of a Hub response bound it.
 
 // Keys of the answer.
 const (
@@ -46,17 +35,22 @@ type ReplyClaim struct {
 	Cites []ReplyCite
 }
 
-// Reply is the reader's answer after the schema check, before the citation check (New).
+// Reply is the reader's answer after the schema check, before the citation check (New). Dropped counts the claims,
+// citations and missing parts the check left out.
 type Reply struct {
 	Claims  []ReplyClaim
 	Missing []string
+	Dropped int
 }
 
-// Parse checks the reader's output against the schema the Hub returns (canonical JSON): one object with exactly the
-// keys claims and missing once each; at most MaxClaims claims of exactly text (1..MaxClaimRunes) and cites
-// (1..MaxCites of exactly chunk_id, a fragment of r, and quote, 1..MaxQuoteRunes); at most MaxMissing parts of
-// 1..MaxMissingRunes; every text not blank, without control characters but line breaks and tabs; at least one claim or
-// one part. Anything else refuses the whole answer with ErrInvalidAnswer; the error never quotes the output.
+// Parse checks the reader's output against the schema the Hub returns (canonical JSON). The whole answer is refused
+// with ErrInvalidAnswer unless it is exactly one JSON object with the keys claims and missing once each, both arrays
+// of syntactically valid JSON. Inside them each part is checked on its own and dropped when it fails, as the Hub does:
+// a citation that is not exactly chunk_id (a fragment of r) and quote (plain text), a claim that is not exactly text
+// (plain text) and cites or keeps no citation, a missing part that is not plain text. Plain text is valid UTF-8, not
+// blank, without control characters but line breaks and tabs. An answer that keeps no claim and no missing part is
+// refused. Whether a quote is in its fragment is New's check. Every part is read once, so the cost is linear in the
+// output. The error never quotes the output.
 func (r Request) Parse(output string) (Reply, error) {
 	var (
 		rep  Reply
@@ -69,19 +63,28 @@ func (r Request) Parse(output string) (Reply, error) {
 		case keyClaims:
 			rep.Claims = []ReplyClaim{}
 			ok = readArray(d, func(d *json.Decoder) error {
-				c, err := r.readClaim(d)
-				if err != nil || len(rep.Claims) == MaxClaims {
+				raw, read := readRaw(d)
+				if !read {
 					return errShape
 				}
-				rep.Claims = append(rep.Claims, c)
+				c, dropped, valid := r.checkClaim(raw)
+				rep.Dropped += dropped
+				if valid {
+					rep.Claims = append(rep.Claims, c)
+				}
 				return nil
 			}) == nil
 		case keyMissing:
 			rep.Missing = []string{}
 			ok = readArray(d, func(d *json.Decoder) error {
-				s, read := readString(d)
-				if !read || len(rep.Missing) == MaxMissing || !boundedText(s, MaxMissingRunes) {
+				raw, read := readRaw(d)
+				if !read {
 					return errShape
+				}
+				var s string
+				if json.Unmarshal(raw, &s) != nil || !plainText(s) {
+					rep.Dropped++
+					return nil
 				}
 				rep.Missing = append(rep.Missing, s)
 				return nil
@@ -107,24 +110,33 @@ func (r Request) Parse(output string) (Reply, error) {
 	return rep, nil
 }
 
-func (r Request) readClaim(d *json.Decoder) (ReplyClaim, error) {
-	var c ReplyClaim
-	seen := map[string]bool{}
-	err := readObject(d, func(key string, d *json.Decoder) error {
+// checkClaim reads one element of claims: the claim with its valid citations, how many parts were dropped (the
+// citations that failed, and the claim itself when it fails or keeps no citation), and whether the claim is kept.
+func (r Request) checkClaim(raw json.RawMessage) (ReplyClaim, int, bool) {
+	var (
+		c       ReplyClaim
+		dropped int
+		seen    = map[string]bool{}
+	)
+	err := decodeObject(string(raw), func(key string, d *json.Decoder) error {
 		seen[key] = true
 		var ok bool
 		switch key {
 		case keyText:
 			c.Text, ok = readString(d)
-			ok = ok && boundedText(c.Text, MaxClaimRunes)
+			ok = ok && plainText(c.Text)
 		case keyCites:
 			c.Cites = []ReplyCite{}
 			ok = readArray(d, func(d *json.Decoder) error {
-				cite, err := r.readCite(d)
-				if err != nil || len(c.Cites) == MaxCites {
+				raw, read := readRaw(d)
+				if !read {
 					return errShape
 				}
-				c.Cites = append(c.Cites, cite)
+				if cite, valid := r.checkCite(raw); valid {
+					c.Cites = append(c.Cites, cite)
+				} else {
+					dropped++
+				}
 				return nil
 			}) == nil
 		}
@@ -133,16 +145,19 @@ func (r Request) readClaim(d *json.Decoder) (ReplyClaim, error) {
 		}
 		return nil
 	})
-	if err != nil || len(seen) != 2 || !seen[keyText] || !seen[keyCites] || len(c.Cites) == 0 {
-		return ReplyClaim{}, errShape
+	if err != nil || !seen[keyText] || !seen[keyCites] || len(c.Cites) == 0 {
+		return ReplyClaim{}, dropped + 1, false
 	}
-	return c, nil
+	return c, dropped, true
 }
 
-func (r Request) readCite(d *json.Decoder) (ReplyCite, error) {
-	var c ReplyCite
-	seen := map[string]bool{}
-	err := readObject(d, func(key string, d *json.Decoder) error {
+// checkCite reads one element of cites: exactly chunk_id, a fragment of r, and quote, plain text.
+func (r Request) checkCite(raw json.RawMessage) (ReplyCite, bool) {
+	var (
+		c    ReplyCite
+		seen = map[string]bool{}
+	)
+	err := decodeObject(string(raw), func(key string, d *json.Decoder) error {
 		seen[key] = true
 		var ok bool
 		switch key {
@@ -153,17 +168,17 @@ func (r Request) readCite(d *json.Decoder) (ReplyCite, error) {
 			ok = ok && sent
 		case keyQuote:
 			c.Quote, ok = readString(d)
-			ok = ok && boundedText(c.Quote, MaxQuoteRunes)
+			ok = ok && plainText(c.Quote)
 		}
 		if !ok {
 			return errShape
 		}
 		return nil
 	})
-	if err != nil || len(seen) != 2 || !seen[keyChunkID] || !seen[keyQuote] {
-		return ReplyCite{}, errShape
+	if err != nil || !seen[keyChunkID] || !seen[keyQuote] {
+		return ReplyCite{}, false
 	}
-	return c, nil
+	return c, true
 }
 
 // safeKey names a schema key in an error; any other key (model text) is not quoted.
@@ -242,10 +257,18 @@ func readString(d *json.Decoder) (string, bool) {
 	return s, ok
 }
 
-// boundedText is valid UTF-8 of 1..maxRunes characters, not blank, without control characters but line breaks and
-// tabs. The Hub's rule.
-func boundedText(s string, maxRunes int) bool {
-	if s == "" || !utf8.ValidString(s) || utf8.RuneCountInString(s) > maxRunes {
+// readRaw reads the next value whole, checked as JSON syntax only; false for broken JSON.
+func readRaw(d *json.Decoder) (json.RawMessage, bool) {
+	var raw json.RawMessage
+	if err := d.Decode(&raw); err != nil {
+		return nil, false
+	}
+	return raw, true
+}
+
+// plainText is valid UTF-8, not blank, without control characters but line breaks and tabs. The Hub's rule.
+func plainText(s string) bool {
+	if s == "" || !utf8.ValidString(s) {
 		return false
 	}
 	blank := true

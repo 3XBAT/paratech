@@ -6,12 +6,15 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Results of the read tools (ADR-0022): built here from agent-owned rows of IDs, dates, enums and counters, which the
 // Driver fills from the views of other contexts. No row has a free-text field except a subject name checked as a
-// Name and the student's own call link of a subject checked as one link (TASK-364), so titles, transcripts and model
-// output never reach the planner.
+// Name, the student's own call link of a subject checked as one link (TASK-364), and the title, schedule subject name
+// and teacher of a lesson (TASK-369): names the student typed or imported with the schedule, passed as data, one
+// cleaned line each, cut to a bound (dataLine). Transcripts and model output never reach the planner.
 
 // MaxReadItems bounds the rows of one read result; more are cut and the result says truncated.
 const MaxReadItems = 50
@@ -113,7 +116,20 @@ type LessonRow struct {
 	Transcribed bool
 	Summary     bool
 	LectureText bool
+	// Title is the title of the recording or the lesson, SubjectName the subject of the lesson as the schedule (or the
+	// student's correction) names it, also when no subject of the library matches it, Teacher the teacher of the
+	// lesson; "" unknown. Untrusted names, shown cut to MaxLessonTitleRunes, MaxLessonSubjectRunes, MaxTeacherRunes.
+	Title       string
+	SubjectName string
+	Teacher     string
 }
+
+// Bounds of the names of a find_lessons row, in characters, an ellipsis included.
+const (
+	MaxLessonTitleRunes   = 120
+	MaxLessonSubjectRunes = 120
+	MaxTeacherRunes       = 80
+)
 
 // AssignmentRow is one assignment of list_assignments, without its title (a model wrote it).
 type AssignmentRow struct {
@@ -289,7 +305,9 @@ func callLinkToken(s string) bool {
 	return true
 }
 
-// LessonsResult is the result of find_lessons and the IDs it shows.
+// LessonsResult is the result of find_lessons and the IDs it shows. When the rows that fit would not fit with their
+// names, the teachers are dropped first, then the titles; the subject names stay longest, as the name a subject is
+// added by.
 func LessonsResult(callID string, rows []LessonRow) (ToolResult, []Ref, error) {
 	type item struct {
 		Recording   string `json:"recording,omitempty"`
@@ -301,6 +319,9 @@ func LessonsResult(callID string, rows []LessonRow) (ToolResult, []Ref, error) {
 		Transcribed bool   `json:"transcribed"`
 		Summary     bool   `json:"summary"`
 		LectureText bool   `json:"lecture_text"`
+		Title       string `json:"title,omitempty"`
+		SubjectName string `json:"subject_name,omitempty"`
+		Teacher     string `json:"teacher,omitempty"`
 	}
 	items := make([]item, 0, len(rows))
 	refs := make([][]Ref, 0, len(rows)) // per row
@@ -313,6 +334,8 @@ func LessonsResult(callID string, rows []LessonRow) (ToolResult, []Ref, error) {
 		it := item{
 			Recording: r.Recording.ID(), Lesson: r.Lesson.ID(), Subject: r.Subject.ID(), Date: r.Date.String(), Time: r.Time.String(),
 			Transcribed: r.Transcribed, Summary: r.Summary, LectureText: r.LectureText,
+			Title: dataLine(r.Title, MaxLessonTitleRunes), SubjectName: dataLine(r.SubjectName, MaxLessonSubjectRunes),
+			Teacher: dataLine(r.Teacher, MaxTeacherRunes),
 		}
 		if slices.Contains(lessonKinds, r.Kind) {
 			it.Kind = r.Kind
@@ -320,7 +343,43 @@ func LessonsResult(callID string, rows []LessonRow) (ToolResult, []Ref, error) {
 		items = append(items, it)
 		refs = append(refs, []Ref{r.Recording, r.Lesson, r.Subject})
 	}
+	for _, drop := range []func(*item){func(it *item) { it.Teacher = "" }, func(it *item) { it.Title = "" }} {
+		if fitsList("lessons", items) {
+			break
+		}
+		for i := range items {
+			drop(&items[i])
+		}
+	}
 	return listResult(callID, "lessons", items, refs)
+}
+
+// fitsList reports whether the items listResult shows of items fit in MaxResultBytes as they are.
+func fitsList[T any](name string, items []T) bool {
+	n := min(len(items), MaxReadItems)
+	b, err := json.Marshal(map[string]any{name: items[:n], "count": len(items), "truncated": n < len(items)})
+	return err == nil && len(b) <= MaxResultBytes
+}
+
+// dataLine is an untrusted name as a result shows it: one line, format characters (zero-width, bidi) dropped, control
+// and other non-printable characters as spaces, spaces collapsed, cut at a character to maxRunes with an ellipsis.
+// "" when nothing printable is left.
+func dataLine(s string, maxRunes int) string {
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case unicode.Is(unicode.Cf, r):
+			return -1
+		case r == utf8.RuneError || !unicode.IsPrint(r):
+			return ' '
+		}
+		return r
+	}, strings.ToValidUTF8(s, " "))
+	s = strings.Join(strings.Fields(s), " ")
+	if utf8.RuneCountInString(s) <= maxRunes {
+		return s
+	}
+	cut := []rune(s)[:maxRunes-utf8.RuneCountInString(excerptEllipsis)]
+	return strings.TrimRight(string(cut), " ") + excerptEllipsis
 }
 
 // AssignmentsResult is the result of list_assignments and the IDs it shows.

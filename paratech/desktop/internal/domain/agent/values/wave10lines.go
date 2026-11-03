@@ -3,8 +3,6 @@ package values
 import (
 	"fmt"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 )
 
 // LineKind says what the action of an action line did, so the panel words its line from a template (catalog v10,
@@ -127,20 +125,4 @@ func NoteExcerpt(text string) string {
 	return strings.Join(lines, "\n")
 }
 
-func excerptLine(s string) string {
-	s = strings.Map(func(r rune) rune {
-		switch {
-		case unicode.Is(unicode.Cf, r):
-			return -1 // zero-width and bidi marks
-		case r == utf8.RuneError || !unicode.IsPrint(r):
-			return ' '
-		}
-		return r
-	}, strings.ToValidUTF8(s, " "))
-	s = strings.Join(strings.Fields(s), " ")
-	if utf8.RuneCountInString(s) <= MaxExcerptLineRunes {
-		return s
-	}
-	cut := []rune(s)[:MaxExcerptLineRunes-utf8.RuneCountInString(excerptEllipsis)]
-	return strings.TrimRight(string(cut), " ") + excerptEllipsis
-}
+func excerptLine(s string) string { return dataLine(s, MaxExcerptLineRunes) }

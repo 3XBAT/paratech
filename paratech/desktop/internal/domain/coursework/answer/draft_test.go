@@ -17,8 +17,9 @@ const fullAnswer = `{"claims":[` +
 var wantTexts = []string{"Производная — предел \"отношения\".", "Ряд\nТейлора — многочлен 😀."}
 
 func TestDraft(t *testing.T) {
-	long := strings.Repeat("я", MaxClaimRunes+50)
-	many := `{"claims":[` + strings.Repeat(`{"text":"x","cites":[]},`, MaxClaims+3) + `]}`
+	// The draft has no count or length limits, as the answer (TASK-366).
+	long := strings.Repeat("я", 450)
+	many := `{"claims":[` + strings.Repeat(`{"text":"x","cites":[]},`, 11) + `]}`
 	tests := []struct {
 		name    string
 		partial string
@@ -43,8 +44,8 @@ func TestDraft(t *testing.T) {
 		{"second text of a claim ignored", `{"claims":[{"text":"a","text":"b"}]}`, []string{"a"}},
 		{"after the answer", `{"claims":[]}{"claims":[{"text":"no"}]}`, nil},
 		{"bad escape dropped", `{"claims":[{"text":"a\qb\uZZZZc\udc00d"}]}`, []string{"abZZZZcd"}},
-		{"long text cut", `{"claims":[{"text":"` + long + `"}]}`, []string{long[:MaxClaimRunes*len("я")]}},
-		{"many claims", many, slices.Repeat([]string{"x"}, MaxClaims)},
+		{"long text whole", `{"claims":[{"text":"` + long + `"}]}`, []string{long}},
+		{"many claims", many, slices.Repeat([]string{"x"}, 11)},
 		{"deep nesting", `{"claims":` + strings.Repeat("[", 10_000) + `{"text":"no"}`, nil},
 		{"full answer", fullAnswer, wantTexts},
 	}
@@ -98,11 +99,15 @@ func FuzzDraft(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, partial string) {
 		got := Draft(partial)
-		if len(got) > MaxClaims {
-			t.Fatalf("%d texts", len(got))
+		total := 0
+		for _, s := range got {
+			total += len(s)
+		}
+		if total > len(partial) {
+			t.Fatalf("%d bytes of texts from %d bytes", total, len(partial))
 		}
 		for _, s := range got {
-			if !utf8.ValidString(s) || utf8.RuneCountInString(s) > MaxClaimRunes || strings.TrimSpace(s) == "" {
+			if !utf8.ValidString(s) || strings.TrimSpace(s) == "" {
 				t.Fatalf("text %q", s)
 			}
 			for _, r := range s {

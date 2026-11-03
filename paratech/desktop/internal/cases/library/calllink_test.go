@@ -149,6 +149,36 @@ func TestCreateSubjectWithCallLink(t *testing.T) {
 	}
 }
 
+// A link typed without a scheme is kept with "https://" on both paths: the subject page and the «Сегодня» card.
+func TestCallLinkWithoutSchemeGetsHTTPS(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	const typed = "Meet.Example.org/j/1234567890?pwd=FakePwd42"
+
+	created, err := e.svc.CreateSubjectWithCallLink(ctx, NewSubject{Name: "Физика"}, typed)
+	if err != nil || created.CallLink().String() != callLink {
+		t.Fatalf("CreateSubjectWithCallLink = %v, %v", created, err)
+	}
+
+	math := createSubject(t, e, "Математика")
+	tests := []struct {
+		label, link, want string
+		wantErr           error
+	}{
+		{"scheme-less", typed, callLink, nil},
+		{"http stays", "http://meet.example.org/j/1", "http://meet.example.org/j/1", nil},
+		{"scheme-less port", "meet.example.org:8443/j/1", "", ErrInvalidCallLink},
+		{"other scheme", "mailto:a@example.org", "", ErrInvalidCallLink},
+	}
+	for _, tt := range tests {
+		t.Run(tt.label, func(t *testing.T) {
+			got, err := e.svc.SetCallLink(ctx, math.ID(), tt.link)
+			if !errors.Is(err, tt.wantErr) || (err == nil && got.CallLink().String() != tt.want) {
+				t.Fatalf("SetCallLink = %v, %v; want %q, %v", got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}
+
 // A bad link is refused before anything is read, erased or stored.
 func TestCreateSubjectWithCallLinkRejectsTheLinkFirst(t *testing.T) {
 	ctx := context.Background()

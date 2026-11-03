@@ -26,6 +26,10 @@ const (
 	DefaultCredentialName = "api-key"
 	DefaultRequestTimeout = 2 * time.Minute
 
+	// DefaultAnswerTimeout bounds one AnswerQuestion call: a streamed answer of up to the Hub's output cap plus the
+	// Hub's reask inside the same call outlast DefaultRequestTimeout.
+	DefaultAnswerTimeout = 5 * time.Minute
+
 	// maxResponseBytes bounds one answer: 1 MiB of output is far above any operation, plus envelope headroom.
 	maxResponseBytes = 2 << 20
 
@@ -71,6 +75,9 @@ type Config struct {
 	// RequestTimeout bounds one call; default DefaultRequestTimeout.
 	RequestTimeout time.Duration
 
+	// AnswerTimeout bounds one AnswerQuestion call; default the longer of DefaultAnswerTimeout and RequestTimeout.
+	AnswerTimeout time.Duration
+
 	// HTTPClient replaces the default transport (tests). The client copies it and always refuses redirects.
 	HTTPClient *http.Client
 }
@@ -82,6 +89,7 @@ type Client struct {
 	creds    Credentials
 	credName string
 	timeout  time.Duration
+	answerTO time.Duration // the timeout of AnswerQuestion
 
 	// noStepStream is set once the Hub answered AgentStepStream with unimplemented: later steps go straight to
 	// AgentStep for the life of the process instead of paying a refused round trip each time.
@@ -109,18 +117,22 @@ func New(cfg Config, creds Credentials) (*Client, error) {
 		}
 		urls = fixedURL(base)
 	}
-	if cfg.RequestTimeout < 0 {
+	if cfg.RequestTimeout < 0 || cfg.AnswerTimeout < 0 {
 		return nil, fmt.Errorf("%s: %w: negative request timeout", opNew, ErrInvalidConfig)
 	}
 
-	c := &Client{urls: urls, creds: creds, credName: cfg.CredentialName, timeout: cfg.RequestTimeout}
+	c := &Client{urls: urls, creds: creds, credName: cfg.CredentialName, timeout: cfg.RequestTimeout, answerTO: cfg.AnswerTimeout}
 	if c.credName == "" {
 		c.credName = DefaultCredentialName
 	}
 	if c.timeout == 0 {
 		c.timeout = DefaultRequestTimeout
 	}
-	c.http = httpClientFor(cfg.HTTPClient, c.timeout)
+	if c.answerTO == 0 {
+		c.answerTO = max(DefaultAnswerTimeout, c.timeout)
+	}
+	// The backstop of the shared http.Client must not cut the longest call; each call still has its own deadline.
+	c.http = httpClientFor(cfg.HTTPClient, max(c.timeout, c.answerTO))
 	return c, nil
 }
 

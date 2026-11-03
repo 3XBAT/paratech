@@ -132,7 +132,8 @@ func (s *Service) Ask(ctx context.Context, question string, subject shared.Subje
 	}
 	c := a.Counts()
 	s.log.InfoContext(ctx, opAsked, slog.String("answer", string(a.ID())), slog.Int("fragments", c.Fragments),
-		slog.Int("claims", c.Claims), slog.Int("supported", c.Supported), slog.Int("missing", c.Missing))
+		slog.Int("claims", c.Claims), slog.Int("supported", c.Supported), slog.Int("missing", c.Missing),
+		slog.Int("dropped", rep.Dropped))
 	return Asked{Answer: a}, nil
 }
 

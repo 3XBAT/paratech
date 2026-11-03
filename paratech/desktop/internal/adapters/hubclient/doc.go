@@ -27,7 +27,7 @@
 //
 // Retries live in the job runner, not here: an error is classified (backoff.Transient or backoff.Permanent, see
 // errors.go) and the runner retries with its bounded exponential backoff, like every other handler (TASK-009). One
-// call is one attempt bounded by Config.RequestTimeout. shared.ErrNetworkUnavailable and shared.ErrQuotaExceeded tell
+// call is one attempt bounded by Config.RequestTimeout (AnswerQuestion: Config.AnswerTimeout). shared.ErrNetworkUnavailable and shared.ErrQuotaExceeded tell
 // the caller to park the job in WAITING_FOR_NETWORK or WAITING_FOR_QUOTA (PRD section 7.2). A Hub retry_after is
 // exposed by the RetryAfter method of *Error.
 //

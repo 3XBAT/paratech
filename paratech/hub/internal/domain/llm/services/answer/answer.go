@@ -1,9 +1,10 @@
 // Package answer is the quarantined reader that answers a student's question from lesson and material fragments
 // (OPERATION_TYPE_ANSWER, ADR-0022): the shape of its input and the strict check of its answer. The question and the
 // fragments are untrusted data; the answer is claims, each citing fragments by chunk ID with a quote, and the parts of
-// the question the fragments do not answer. Whether a quote really is in its fragment is the desktop's check
-// (coursework/services/citation), which matches quotes loosely; the Hub checks the shape, the bounds and that every
-// cited chunk ID is one of the fragments sent.
+// the question the fragments do not answer. The answer has no count or length limits of its own (owner, TASK-366): only
+// the output cap of the model bounds it. The Hub checks the shape, that every cited chunk ID is one of the fragments
+// sent and that its quote occurs in that fragment, read as loosely as the desktop's final check
+// (coursework/services/citation); a claim, citation or missing part that fails is dropped, not the whole answer.
 //
 // Wire shape (CompletionSpec.untrusted_data, no client instructions; CompletionResult.output):
 //
@@ -37,20 +38,6 @@ const (
 	MaxFragmentsBytes = 128 << 10
 )
 
-// Limits of the answer.
-const (
-	// MaxClaims bounds the claims of one answer.
-	MaxClaims = 8
-	// MaxClaimRunes bounds the text of one claim.
-	MaxClaimRunes = 400
-	// MaxCites bounds the citations of one claim; a claim has at least one.
-	MaxCites = 3
-	// MaxQuoteRunes bounds one quote.
-	MaxQuoteRunes = 200
-	// MaxMissing bounds the unanswered parts; MaxMissingRunes bounds each.
-	MaxMissing, MaxMissingRunes = 5, 300
-)
-
 // FailedOutput is the stored result of a reader answer that was charged but refused, so a retry with the same key
 // repeats the refusal instead of paying again. It never passes ParseAnswer.
 const FailedOutput = "{}"
@@ -72,7 +59,8 @@ const (
 var (
 	// ErrInvalidInput means the untrusted data of a request is not a valid reader input.
 	ErrInvalidInput = errors.New("invalid answer operation input")
-	// ErrInvalidAnswer means the model's answer breaks the reader schema; the whole answer is refused.
+	// ErrInvalidAnswer means the model's answer is not one object of the reader schema or keeps nothing valid; the
+	// whole answer is refused.
 	ErrInvalidAnswer = errors.New("invalid answer operation output")
 )
 
@@ -105,7 +93,7 @@ func ParseInput(data string) (Input, error) {
 		case keyQuestion:
 			var ok bool
 			in.question, ok = strictjson.ReadString(d)
-			if !ok || !boundedText(in.question, MaxQuestionRunes, true) {
+			if !ok || utf8.RuneCountInString(in.question) > MaxQuestionRunes || !plainText(in.question) {
 				return fmt.Errorf("%w: question must be 1-%d characters, not blank, without control characters", ErrInvalidInput, MaxQuestionRunes)
 			}
 		case keyFragments:
@@ -198,25 +186,32 @@ type Claim struct {
 	Cites []Cite `json:"cites"`
 }
 
-// Answer is a checked reader answer.
+// Answer is a checked reader answer. Dropped counts the claims, citations and missing parts left out by the check.
 type Answer struct {
 	Claims  []Claim
 	Missing []string
+	Dropped int
 }
 
-// ParseAnswer checks the model's output against the schema: exactly the keys claims and missing once each, at most
-// MaxClaims claims (each exactly text and cites, 1-MaxCites citations of exactly chunk_id, one of the fragments sent,
-// and quote), at most MaxMissing unanswered parts, every text bounded and without control characters but line breaks
-// and tabs, and at least one claim or one unanswered part. Whitespace and one Markdown code fence around the object are
-// tolerated; anything else (another key, free text, a second object) refuses the whole answer.
+// ParseAnswer checks the model's output against the schema. The whole answer is refused unless it is exactly one JSON
+// object with the keys claims and missing once each, both arrays of syntactically valid JSON (whitespace and one
+// Markdown code fence around it are tolerated). Inside them each part is checked on its own and dropped when it fails:
+// a citation that is not exactly chunk_id (one of the fragments sent) and quote (plain text that occurs in that
+// fragment), a claim that is not exactly text (plain text) and cites or keeps no citation, a missing part that is not
+// plain text. Plain text is valid UTF-8, not blank, without control characters but line breaks and tabs. An answer
+// that keeps no claim and no missing part is refused.
+//
+// The cost stays linear in the output: every part is read once, and a quote is searched only in its own fragment
+// (at most MaxFragmentBytes), normalized once per call.
 func (in Input) ParseAnswer(output string) (Answer, error) {
 	body, ok := strictjson.Unfence(output)
 	if !ok {
 		return Answer{}, fmt.Errorf("%w: not valid UTF-8", ErrInvalidAnswer)
 	}
 	var (
-		a    Answer
-		seen = map[string]bool{}
+		a     Answer
+		seen  = map[string]bool{}
+		texts = in.searchTexts()
 	)
 	err := strictjson.DecodeObject(body, func(key string, d *json.Decoder) error {
 		seen[key] = true
@@ -225,21 +220,29 @@ func (in Input) ParseAnswer(output string) (Answer, error) {
 		case keyClaims:
 			a.Claims = []Claim{}
 			ok = strictjson.ReadArray(d, func(d *json.Decoder) error {
-				c, err := in.readClaim(d)
-				if err != nil || len(a.Claims) == MaxClaims {
+				raw, _, read := strictjson.ReadRaw(d)
+				if !read {
 					return strictjson.ErrShape
 				}
-				a.Claims = append(a.Claims, c)
+				c, dropped, valid := in.checkClaim(raw, texts)
+				a.Dropped += dropped
+				if valid {
+					a.Claims = append(a.Claims, c)
+				}
 				return nil
 			}) == nil
 		case keyMissing:
 			a.Missing = []string{}
 			ok = strictjson.ReadArray(d, func(d *json.Decoder) error {
-				s, read := strictjson.ReadString(d)
-				if !read || len(a.Missing) == MaxMissing || !boundedText(s, MaxMissingRunes, true) {
+				raw, _, read := strictjson.ReadRaw(d)
+				if !read {
 					return strictjson.ErrShape
 				}
-				a.Missing = append(a.Missing, s)
+				if s, valid := plainString(raw); valid {
+					a.Missing = append(a.Missing, s)
+				} else {
+					a.Dropped++
+				}
 				return nil
 			}) == nil
 		}
@@ -263,24 +266,33 @@ func (in Input) ParseAnswer(output string) (Answer, error) {
 	return a, nil
 }
 
-func (in Input) readClaim(d *json.Decoder) (Claim, error) {
-	var c Claim
-	seen := map[string]bool{}
-	err := strictjson.ReadObject(d, func(key string, d *json.Decoder) error {
+// checkClaim reads one element of claims: the claim with its valid citations, how many parts were dropped (the
+// citations that failed, and the claim itself when it fails or keeps no citation), and whether the claim is kept.
+func (in Input) checkClaim(raw string, texts map[string]string) (Claim, int, bool) {
+	var (
+		c       Claim
+		dropped int
+		seen    = map[string]bool{}
+	)
+	err := strictjson.DecodeObject(raw, func(key string, d *json.Decoder) error {
 		seen[key] = true
 		var ok bool
 		switch key {
 		case keyText:
 			c.Text, ok = strictjson.ReadString(d)
-			ok = ok && boundedText(c.Text, MaxClaimRunes, true)
+			ok = ok && plainText(c.Text)
 		case keyCites:
 			c.Cites = []Cite{}
 			ok = strictjson.ReadArray(d, func(d *json.Decoder) error {
-				cite, err := in.readCite(d)
-				if err != nil || len(c.Cites) == MaxCites {
+				raw, _, read := strictjson.ReadRaw(d)
+				if !read {
 					return strictjson.ErrShape
 				}
-				c.Cites = append(c.Cites, cite)
+				if cite, valid := in.checkCite(raw, texts); valid {
+					c.Cites = append(c.Cites, cite)
+				} else {
+					dropped++
+				}
 				return nil
 			}) == nil
 		}
@@ -289,16 +301,20 @@ func (in Input) readClaim(d *json.Decoder) (Claim, error) {
 		}
 		return nil
 	})
-	if err != nil || len(seen) != 2 || !seen[keyText] || !seen[keyCites] || len(c.Cites) == 0 {
-		return Claim{}, strictjson.ErrShape
+	if err != nil || !seen[keyText] || !seen[keyCites] || len(c.Cites) == 0 {
+		return Claim{}, dropped + 1, false
 	}
-	return c, nil
+	return c, dropped, true
 }
 
-func (in Input) readCite(d *json.Decoder) (Cite, error) {
-	var c Cite
-	seen := map[string]bool{}
-	err := strictjson.ReadObject(d, func(key string, d *json.Decoder) error {
+// checkCite reads one element of cites: exactly chunk_id, one of the fragments sent, and quote, plain text that occurs
+// in that fragment.
+func (in Input) checkCite(raw string, texts map[string]string) (Cite, bool) {
+	var (
+		c    Cite
+		seen = map[string]bool{}
+	)
+	err := strictjson.DecodeObject(raw, func(key string, d *json.Decoder) error {
 		seen[key] = true
 		var ok bool
 		switch key {
@@ -308,17 +324,35 @@ func (in Input) readCite(d *json.Decoder) (Cite, error) {
 			ok = ok && in.ids[c.ChunkID]
 		case keyQuote:
 			c.Quote, ok = strictjson.ReadString(d)
-			ok = ok && boundedText(c.Quote, MaxQuoteRunes, true)
+			ok = ok && plainText(c.Quote)
 		}
 		if !ok {
 			return strictjson.ErrShape
 		}
 		return nil
 	})
-	if err != nil || len(seen) != 2 || !seen[keyChunkID] || !seen[keyQuote] {
-		return Cite{}, strictjson.ErrShape
+	if err != nil || !seen[keyChunkID] || !seen[keyQuote] {
+		return Cite{}, false
 	}
-	return c, nil
+	return c, quoteIn(c.Quote, texts[c.ChunkID])
+}
+
+// searchTexts is the text of every fragment by chunk ID, normalized for the quote search.
+func (in Input) searchTexts() map[string]string {
+	texts := make(map[string]string, len(in.fragments))
+	for _, f := range in.fragments {
+		texts[f.ChunkID] = normalize(f.Text)
+	}
+	return texts
+}
+
+// plainString reads raw as one JSON string of plain text.
+func plainString(raw string) (string, bool) {
+	var s string
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		return "", false
+	}
+	return s, plainText(s)
 }
 
 // Encode is the canonical answer the Hub returns and stores: the keys in the order of the wire shape, empty lists as
@@ -346,16 +380,14 @@ func (a Answer) Encode() string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-// boundedText is valid UTF-8 of 1..maxRunes characters, not blank, without control characters (a multiline text may
-// hold line breaks and tabs).
-func boundedText(s string, maxRunes int, multiline bool) bool {
-	if s == "" || !utf8.ValidString(s) || utf8.RuneCountInString(s) > maxRunes {
+// plainText is valid UTF-8, not blank, without control characters but line breaks and tabs.
+func plainText(s string) bool {
+	if s == "" || !utf8.ValidString(s) {
 		return false
 	}
 	blank := true
 	for _, r := range s {
-		lineBreak := multiline && (r == '\n' || r == '\t')
-		if unicode.IsControl(r) && !lineBreak {
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
 			return false
 		}
 		if !unicode.IsSpace(r) {

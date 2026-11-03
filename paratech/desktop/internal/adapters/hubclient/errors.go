@@ -53,6 +53,11 @@ var (
 	// ErrProvider means the upstream LLM provider failed (PROVIDER_ERROR); ErrorDetail.retryable decides the class.
 	ErrProvider = errors.New("llm provider failed")
 
+	// ErrModelAnswer is the detail of an ErrProvider whose model did answer, but the Hub refused the answer by the
+	// schema of the operation (the Hub logs reason=invalid_answer; charged). It is in the error text, so desktop.log
+	// tells it from a provider that did not answer; the user sees one general text for both.
+	ErrModelAnswer = errors.New("the model answer breaks the operation schema")
+
 	// ErrIdempotencyConflict means the key was used with another request: a bug of the caller.
 	ErrIdempotencyConflict = errors.New("idempotency key reused with another request")
 
@@ -75,21 +80,36 @@ var (
 // maxRetryAfter bounds a retry_after from the Hub, so a broken value cannot park a job for days.
 const maxRetryAfter = time.Hour
 
+// hubMsgModelAnswer is the fixed ErrorDetail.message of a PROVIDER_ERROR whose answer the Hub refused by the schema
+// (hub input/connect msgInvalidAnswer; keep them equal). errors.proto has no code of its own for it, and the message is
+// only compared, never shown or logged.
+const hubMsgModelAnswer = "the model answered, but its answer does not match the schema of the operation"
+
 // Error is a classified failure of a Hub call. Its text is fixed; errors.Is matches the reason, the domain sentinel
 // (network or quota) when there is one, and the backoff class marker.
 type Error struct {
 	op         string
 	reason     error
+	detail     error   // a fixed sentinel that tells more of the reason, part of the text; nil none
 	extra      []error // further sentinels for errors.Is, not part of the text
 	class      error   // backoff.ErrTransient, backoff.ErrPermanent or nil
 	retryAfter time.Duration
 }
 
-func (e *Error) Error() string { return e.op + ": " + e.reason.Error() }
+func (e *Error) Error() string {
+	if e.detail != nil {
+		return e.op + ": " + e.reason.Error() + ": " + e.detail.Error()
+	}
+	return e.op + ": " + e.reason.Error()
+}
 
-// Unwrap exposes the reason, the extra sentinels and the class to errors.Is.
+// Unwrap exposes the reason, the detail, the extra sentinels and the class to errors.Is.
 func (e *Error) Unwrap() []error {
-	out := append([]error{e.reason}, e.extra...)
+	out := []error{e.reason}
+	if e.detail != nil {
+		out = append(out, e.detail)
+	}
+	out = append(out, e.extra...)
 	if e.class != nil {
 		out = append(out, e.class)
 	}
@@ -192,11 +212,16 @@ func mapDetail(op string, d *hubv1.ErrorDetail) *Error {
 	case hubv1.ErrorCode_ERROR_CODE_INVALID_API_KEY:
 		return permanent(op, ErrInvalidAPIKey)
 	case hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR:
+		var e *Error
 		if !d.GetRetryable() {
-			return permanent(op, ErrProvider)
+			e = permanent(op, ErrProvider)
+		} else {
+			e = unavailable(op, ErrProvider)
+			e.retryAfter = retryAfter(d)
 		}
-		e := unavailable(op, ErrProvider)
-		e.retryAfter = retryAfter(d)
+		if d.GetMessage() == hubMsgModelAnswer {
+			e.detail = ErrModelAnswer
+		}
 		return e
 	case hubv1.ErrorCode_ERROR_CODE_IDEMPOTENCY_CONFLICT:
 		return permanent(op, ErrIdempotencyConflict)

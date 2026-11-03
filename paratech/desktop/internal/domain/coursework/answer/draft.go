@@ -1,13 +1,14 @@
 package answer
 
 import (
+	"math"
 	"strings"
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 )
 
-// Bounds of the draft scanner beyond the answer limits.
+// Bounds of the draft scanner.
 const (
 	// maxDraftDepth stops at nesting no answer has, so garbage cannot grow the stack.
 	maxDraftDepth = 32
@@ -25,9 +26,9 @@ type draftFrame struct {
 
 // Draft returns the claim texts written so far in a partial reader output (ADR-0026): the text of each object of the
 // claims array of the first JSON object, in order, the last one possibly cut off. JSON escapes are decoded, invalid
-// UTF-8 and control characters but line breaks and tabs are dropped, blank texts skipped; at most MaxClaims texts of at
-// most MaxClaimRunes runes. It never fails: anything it cannot read ends the draft. The draft is untrusted model text
-// for display only; the answer is Parse of the whole output.
+// UTF-8 and control characters but line breaks and tabs are dropped, blank texts skipped; as many texts as the output
+// holds, like the answer. It never fails: anything it cannot read ends the draft. The draft is untrusted model text for
+// display only; the answer is Parse of the whole output. One call reads partial once.
 func Draft(partial string) []string {
 	start := strings.IndexByte(partial, '{')
 	if start < 0 {
@@ -39,7 +40,7 @@ func Draft(partial string) []string {
 		texts []string
 		stack []draftFrame
 	)
-	for i := 0; i < len(in) && len(texts) < MaxClaims; {
+	for i := 0; i < len(in); {
 		c := in[i]
 		switch c {
 		case '{', '[':
@@ -78,7 +79,7 @@ func Draft(partial string) []string {
 			case isKey:
 				limit = maxKeyRunes
 			case isText:
-				limit = MaxClaimRunes
+				limit = math.MaxInt
 			}
 			s, n, closed := draftString(in[i+1:], limit)
 			i += 1 + n
