@@ -160,7 +160,8 @@ export function openingRouteTab(focus: LessonFocus, materialId: string): LessonT
 
 /**
  * The tab a lesson screen shows: the route's, else «Мой конспект» when the student has notes in it, else «Конспект»
- * when ready, else the first tab with something in it, else «Мой конспект» with its hint how to add.
+ * when ready, else the first tab with something in it, else «Конспект», where a running or failed step, «Повторить»
+ * and the no-speech card are visible.
  */
 export function openingTab(a: {
   routeTab: string;
@@ -179,7 +180,7 @@ export function openingTab(a: {
   if (a.lesson.lectureTextReady) {
     return "lecture";
   }
-  return a.lesson.transcriptReady ? "transcript" : "notes";
+  return a.lesson.transcriptReady ? "transcript" : "summary";
 }
 
 /**
@@ -199,19 +200,41 @@ export function keepLessonOpening(o: LessonOpening | null, route: { lesson: stri
   return o !== null && route.lesson === o.key ? o : null;
 }
 
-/** Where a crumb of the lesson screen leads: the section «Предметы», one of its subjects, or nowhere (the lesson). */
-export type LessonCrumbGo = { kind: "subjects" } | { kind: "subject"; id: string } | null;
+/**
+ * Where a crumb of the lesson screen leads: the section «Предметы», one of its subjects, back to where the lesson was
+ * opened from ("close": the section under the lesson), or nowhere (the lesson itself).
+ */
+export type LessonCrumbGo = { kind: "subjects" } | { kind: "subject"; id: string } | { kind: "close" } | null;
 
 export const lessonCrumbRoot = "Предметы";
+export const knowledgeCrumbRoot = "База знаний";
 
-/** «Предметы / <предмет> / <пара>»; the subject level only when the core matched the lesson to a library subject. */
+/** The lesson was opened from «База знаний» (the route's page under it). */
+export function openedFromKnowledge(page: string): boolean {
+  return page === "knowledge";
+}
+
+/** The first crumb of the lesson screen: the section it was opened from. */
+export function lessonRootLabel(page: string): string {
+  return openedFromKnowledge(page) ? knowledgeCrumbRoot : lessonCrumbRoot;
+}
+
+/**
+ * «База знаний / <предмет> / <пара>» for a lesson opened from «База знаний» (it has no list of pairs yet, so the
+ * ancestors just close the lesson), «Предметы / <предмет> / <пара>» from any other section. The subject level only when
+ * the core matched the lesson to a library subject.
+ */
 export function lessonCrumbs(
   l: Pick<KnowledgeLesson, "subject" | "librarySubjectId" | "librarySubjectState">,
   heading: string,
+  page: string,
 ): { label: string; go: LessonCrumbGo }[] {
-  const out: { label: string; go: LessonCrumbGo }[] = [{ label: lessonCrumbRoot, go: { kind: "subjects" } }];
+  const fromKnowledge = openedFromKnowledge(page);
+  const out: { label: string; go: LessonCrumbGo }[] = [
+    { label: lessonRootLabel(page), go: fromKnowledge ? { kind: "close" } : { kind: "subjects" } },
+  ];
   if (l.librarySubjectState === "matched" && l.librarySubjectId !== "") {
-    out.push({ label: subjectName(l), go: { kind: "subject", id: l.librarySubjectId } });
+    out.push({ label: subjectName(l), go: fromKnowledge ? { kind: "close" } : { kind: "subject", id: l.librarySubjectId } });
   }
   out.push({ label: heading, go: null });
   return out;
@@ -220,8 +243,9 @@ export function lessonCrumbs(
 export const lessonScreenTexts = {
   loading: "Загрузка…",
   /** A lecture of the student's notes cannot be found by its key once the window forgot it. */
-  gone: "Пару не удалось открыть: она не найдена. Откройте её заново из списка пар предмета.",
-  toSubjects: "К предметам",
+  gone: "Пару не удалось открыть: окно её больше не помнит. Вернитесь назад и откройте её заново из списка пар.",
+  /** Returns where the student came from. */
+  back: "Назад",
 } as const;
 
 /**

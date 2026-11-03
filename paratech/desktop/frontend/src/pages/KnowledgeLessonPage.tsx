@@ -17,8 +17,8 @@ import {
   isNoteOnly,
   keepLessonOpening,
   type LessonFocus,
-  lessonCrumbRoot,
   lessonCrumbs,
+  lessonRootLabel,
   lessonHeading,
   lessonMeta,
   type LessonOpening,
@@ -28,6 +28,7 @@ import {
   noFocus,
   noteLectureHeading,
   noteLectureMeta,
+  openedFromKnowledge,
   openingTab,
   recordingIdOfKey,
   shownBlock,
@@ -38,7 +39,6 @@ import { lectureOf, readLectureNotes, visibleNotes } from "../ownNotesView";
 import {
   errorText,
   nextPollMs,
-  noSummaryHint,
   redoTexts,
   retryAction,
   retryClick,
@@ -57,7 +57,7 @@ import {
   segmentTabId,
 } from "../ui/controls";
 import { RowMenu } from "../ui/RowMenu";
-import { LessonInfoForm, ReadyMarks } from "./KnowledgeParts";
+import { LessonInfoForm } from "./KnowledgeParts";
 import { LectureTextCard } from "./LectureTextParts";
 import { OwnNotes } from "./OwnNotes";
 import { HomeworkCard, NoSpeechCard, SummaryCard, SummaryTools } from "./SummaryParts";
@@ -69,28 +69,56 @@ export interface LessonNav {
   onOpenSubject: (subjectId: string) => void;
 }
 
-/** The crumbs of a lesson: the levels above it are buttons, the last one is the lesson itself. */
+/**
+ * The crumbs of a lesson: the levels above it are buttons, the last one is the lesson itself. `origin` is the section
+ * under the lesson: from «База знаний» the levels above just close the lesson, from other sections they go to «Предметы».
+ */
 function crumbItems(
   l: Pick<KnowledgeLesson, "subject" | "librarySubjectId" | "librarySubjectState">,
   heading: string,
+  origin: string,
   nav: LessonNav,
+  onBack: () => void,
 ): Crumb[] {
-  return lessonCrumbs(l, heading).map((c) => {
+  return lessonCrumbs(l, heading, origin).map((c) => {
     const go = c.go;
     if (go === null) {
       return { label: c.label };
     }
-    return { label: c.label, onClick: go.kind === "subjects" ? nav.onOpenSubjects : () => nav.onOpenSubject(go.id) };
+    switch (go.kind) {
+      case "close":
+        return { label: c.label, onClick: onBack };
+      case "subjects":
+        return { label: c.label, onClick: nav.onOpenSubjects };
+      case "subject":
+        return { label: c.label, onClick: () => nav.onOpenSubject(go.id) };
+    }
   });
+}
+
+/** The lesson cannot be shown: the reason and «Назад» to where the student came from. */
+function LessonGone(props: { text: string; onBack: () => void }) {
+  return (
+    <div className="kb-gone">
+      <Banner kind="fail" role="alert">
+        {props.text}
+      </Banner>
+      <div className="acts start">
+        <Button onClick={props.onBack}>{lessonScreenTexts.back}</Button>
+      </div>
+    </div>
+  );
 }
 
 // The screen a route `lesson` shows (TASK-351). The core has no call that opens a lesson by its key, so the lesson is
 // found in the window's memory of the lessons it opened (`cache`, filled by every page that opens one), or, for a
 // recorded lesson whose key is `recording:<recordingId>`, read through `lesson(recordingId)`. A lecture of the student's
 // notes has no recording, so once the window has forgotten it (a cold link) it cannot be found: the screen says so and
-// offers the way to the subjects. A by-key binding would remove that limit (follow-up for the core).
+// offers «Назад». A by-key binding would remove that limit (follow-up for the core).
 export function LessonScreen(props: {
   lessonKey: string;
+  /** The section under the lesson (route.page): the crumbs and the ways out follow it. */
+  origin: string;
   /** Route.tab: a LessonTab, "" while the student has not chosen one. */
   tab: string;
   cache: ReadonlyMap<string, KnowledgeLesson>;
@@ -143,35 +171,30 @@ export function LessonScreen(props: {
 
   const lesson = cached ?? fetched;
   if (lesson === null) {
+    const rootGo = openedFromKnowledge(props.origin) ? props.onBack : props.nav.onOpenSubjects;
     const text = recordingId === "" ? lessonScreenTexts.gone : error;
     return (
       <section className="page tr sm kb-lesson-page">
-        <Breadcrumbs items={[{ label: lessonCrumbRoot, onClick: props.nav.onOpenSubjects }, { label: "Пара" }]} />
+        <Breadcrumbs items={[{ label: lessonRootLabel(props.origin), onClick: rootGo }, { label: "Пара" }]} />
         {text === "" ? (
           <p className="muted" role="status">
             {lessonScreenTexts.loading}
           </p>
         ) : (
-          <div className="kb-gone">
-            <Banner kind="fail" role="alert">
-              {text}
-            </Banner>
-            <div className="acts start">
-              <Button onClick={props.nav.onOpenSubjects}>{lessonScreenTexts.toSubjects}</Button>
-            </div>
-          </div>
+          <LessonGone text={text} onBack={props.onBack} />
         )}
       </section>
     );
   }
 
   if (isNoteOnly(lesson)) {
-    return <NoteLecturePage lesson={lesson} materialId={opening?.materialId} nav={props.nav} />;
+    return <NoteLecturePage lesson={lesson} materialId={opening?.materialId} origin={props.origin} nav={props.nav} onBack={props.onBack} />;
   }
 
   return (
     <KnowledgeLessonPage
       api={api}
+      origin={props.origin}
       lesson={lesson}
       stale={cached !== undefined}
       tab={props.tab}
@@ -193,6 +216,8 @@ export function LessonScreen(props: {
 // offline: everything comes from the core on this computer. Model text is rendered by those viewers as React text only.
 export function KnowledgeLessonPage(props: {
   api: KnowledgeBaseApi;
+  /** The section under the lesson (route.page). */
+  origin: string;
   lesson: KnowledgeLesson;
   /** The lesson comes from the window's memory and may be older than the core's: it is read again. */
   stale: boolean;
@@ -229,6 +254,7 @@ export function KnowledgeLessonPage(props: {
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const content = useRef<HTMLDivElement>(null);
+  const formBox = useRef<HTMLDivElement>(null);
   const scrolled = useRef(false);
   const needsAuto = useRef(!isLessonTab(props.tab));
 
@@ -290,8 +316,19 @@ export function KnowledgeLessonPage(props: {
 
   const tab: LessonTab | null = isLessonTab(props.tab) ? props.tab : auto;
 
-  // The summary view as on the summary page: one call at a time, polled while a step runs.
+  // The form takes the focus when it opens, so the keyboard continues where the «⋯» item was.
   useEffect(() => {
+    if (editing) {
+      formBox.current?.querySelector<HTMLElement>("input, select")?.focus();
+    }
+  }, [editing]);
+
+  // The summary view as on the summary page: one call at a time, polled while a step runs. A lesson that could not be
+  // read again (deleted) shows only its error, so nothing is polled for it.
+  useEffect(() => {
+    if (lessonError !== "") {
+      return;
+    }
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let last: SummaryView | null = null;
@@ -323,7 +360,7 @@ export function KnowledgeLessonPage(props: {
       stopped = true;
       clearTimeout(timer);
     };
-  }, [summary, id, refresh]);
+  }, [summary, id, refresh, lessonError]);
 
   const focus = props.focus;
   const focusBlock = view && focus.tab === "lecture" ? shownBlock(view, focus.index) : -1;
@@ -343,47 +380,52 @@ export function KnowledgeLessonPage(props: {
     }
   }, [tab, focus.tab, focusBlock, focusSection, focusPoint]);
 
+  const crumbs = <Breadcrumbs items={crumbItems(lesson, lessonHeading(lesson), props.origin, props.nav, props.onBack)} />;
+
+  // The lesson cannot be read any more: the error and the way back, no tabs (they would add a second error of their own).
+  if (lessonError !== "") {
+    return (
+      <section className="page tr sm kb-lesson-page">
+        {crumbs}
+        <LessonGone text={lessonError} onBack={props.onBack} />
+      </section>
+    );
+  }
+
   return (
     <section className="page tr sm kb-lesson-page">
-      <Breadcrumbs items={crumbItems(lesson, lessonHeading(lesson), props.nav)} />
+      {crumbs}
       <div className="head">
         <div>
           <h1 className="kb-heading">{lessonHeading(lesson)}</h1>
           <p className="tr-sub">
             <span className="tr-title">{lessonMeta(lesson)}</span>
           </p>
-          <ReadyMarks lesson={lesson} />
         </div>
-        <div className="acts">
-          <RowMenu
-            label="Ещё действия с парой"
-            title="Ещё"
-            items={[{ key: "edit", label: "Исправить предмет или тип пары" }]}
-            onPick={() => setEditing((e) => !e)}
+        {!editing && (
+          <div className="acts">
+            <RowMenu
+              label="Ещё действия с парой"
+              title="Ещё"
+              items={[{ key: "edit", label: "Исправить предмет или тип пары" }]}
+              onPick={() => setEditing(true)}
+            />
+          </div>
+        )}
+      </div>
+      {editing && (
+        <div ref={formBox}>
+          <LessonInfoForm
+            lesson={lesson}
+            save={props.api.setLessonInfo}
+            onSaved={(l) => {
+              setLesson(l);
+              setEditing(false);
+              props.onChanged(l);
+            }}
+            onClose={() => setEditing(false)}
           />
         </div>
-      </div>
-      {lessonError !== "" && (
-        <div className="kb-gone">
-          <Banner kind="fail" role="alert">
-            {lessonError}
-          </Banner>
-          <div className="acts start">
-            <Button onClick={props.nav.onOpenSubjects}>{lessonScreenTexts.toSubjects}</Button>
-          </div>
-        </div>
-      )}
-      {editing && (
-        <LessonInfoForm
-          lesson={lesson}
-          save={props.api.setLessonInfo}
-          onSaved={(l) => {
-            setLesson(l);
-            setEditing(false);
-            props.onChanged(l);
-          }}
-          onClose={() => setEditing(false)}
-        />
       )}
       {tab === null ? (
         <p className="muted" role="status">
@@ -456,11 +498,17 @@ export function KnowledgeLessonPage(props: {
 
 // A lecture known only from the student's notes (TASK-155): no recording, so no summary, transcript or tabs and no
 // call that needs a recording id; only the «Мой конспект» block, opened by the lecture's ids.
-export function NoteLecturePage(props: { lesson: KnowledgeLesson; materialId?: string; nav: LessonNav }) {
+export function NoteLecturePage(props: {
+  lesson: KnowledgeLesson;
+  materialId?: string;
+  origin: string;
+  nav: LessonNav;
+  onBack: () => void;
+}) {
   const l = props.lesson;
   return (
     <section className="page tr sm kb-lesson-page">
-      <Breadcrumbs items={crumbItems(l, noteLectureHeading(l), props.nav)} />
+      <Breadcrumbs items={crumbItems(l, noteLectureHeading(l), props.origin, props.nav, props.onBack)} />
       <div className="head">
         <div>
           <h1 className="kb-heading">{noteLectureHeading(l)}</h1>
@@ -587,19 +635,29 @@ function SummaryTab(props: {
     <>
       {props.tab === "summary" ? (
         <>
-          <SummaryTools
-            ready={view.summary.ready}
-            idle={idle}
-            notReady={noSummaryHint}
-            busy={busy}
-            message={message}
-            onCopy={() => void copy()}
-            onSave={(f) => void save(f)}
-          />
+          {/* Nothing to copy or save before the summary is ready: the card's state line says where it stands. */}
+          {view.summary.ready ? (
+            <SummaryTools
+              ready
+              idle={idle}
+              busy={busy}
+              message={message}
+              onCopy={() => void copy()}
+              onSave={(f) => void save(f)}
+            />
+          ) : (
+            // A refused retry still tells why.
+            message && (
+              <ResultLine kind={message.kind} role={message.kind === "fail" ? "alert" : "status"}>
+                {message.text}
+              </ResultLine>
+            )
+          )}
           <SummaryCard
             view={view}
             focusSection={props.focusSection}
             focusPoint={props.focusPoint}
+            heading={false}
             onRetry={retry}
             retrying={retrying}
             retryDisabled={!idle}
@@ -614,6 +672,7 @@ function SummaryTab(props: {
           )}
           <HomeworkCard
             view={view}
+            heading={false}
             onOpenAssignment={props.onOpenAssignment}
             onRetry={retry}
             retrying={retrying}

@@ -26,8 +26,8 @@ import { RowMenu } from "../ui/RowMenu.js";
 
 /** The save formats of the «⋯» menu of the summary, in the order shown. */
 export const summarySaveItems: readonly { key: SummarySaveFormat; label: string }[] = [
-  { key: "txt", label: "Сохранить как .txt" },
-  { key: "md", label: "Сохранить как .md" },
+  { key: "txt", label: "Сохранить как текст (.txt)" },
+  { key: "md", label: "Сохранить в Markdown (.md)" },
 ];
 
 /**
@@ -162,14 +162,22 @@ export function SummarySections(props: { sections: readonly SummarySection[]; fo
  * The summary card: its state, the sections and the key points. focusSection (an index of summary.sections) and
  * focusPoint (of the listed key points) mark the place a search found (TASK-091).
  */
-export function SummaryCard(props: RetryProps & { view: SummaryView; focusSection?: number; focusPoint?: number }) {
+export function SummaryCard(
+  props: RetryProps & {
+    view: SummaryView;
+    focusSection?: number;
+    focusPoint?: number;
+    /** The «Конспект» heading; false where a tab already names the card. */
+    heading?: boolean;
+  },
+) {
   const v = props.view;
   const line = summaryLine(v);
   const points = v.summary.ready ? keyPointList(v.summary.keyPoints) : [];
   const updated = updatedText(v);
   return (
     <Card className="box sm-summary">
-      <h2>Конспект</h2>
+      {props.heading !== false && <h2>Конспект</h2>}
       {line && <Line line={line} />}
       {showsEarlier(v) && <p className="small muted sm-detail">{earlierNote}</p>}
       <RetrySlot {...props} step="summary" />
@@ -210,13 +218,20 @@ export function NoSpeechCard(props: { view: SummaryView; onCheckSound?: () => vo
 }
 
 /** The homework found in the lesson, each with a jump to it in «Задания». */
-export function HomeworkCard(props: RetryProps & { view: SummaryView; onOpenAssignment: (id: string) => void }) {
+export function HomeworkCard(
+  props: RetryProps & {
+    view: SummaryView;
+    onOpenAssignment: (id: string) => void;
+    /** The «Задания» heading; false where a tab already names the card. */
+    heading?: boolean;
+  },
+) {
   const v = props.view;
   const line = homeworkLine(v);
   const items = v.homework.assignments;
   return (
     <div className="sm-homework">
-      <h2 className="group-title">Задания</h2>
+      {props.heading !== false && <h2 className="group-title">Задания</h2>}
       {line && <Line line={line} />}
       <RetrySlot {...props} step="homework" />
       {items.length > 0 && (

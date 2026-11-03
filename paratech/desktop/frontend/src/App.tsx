@@ -394,6 +394,7 @@ export function App() {
           <div key={`lesson:${route.lesson}`} className="screen">
             <LessonScreen
               lessonKey={route.lesson}
+              origin={route.page}
               tab={route.tab}
               cache={lessons.current}
               opening={lessonOpening}

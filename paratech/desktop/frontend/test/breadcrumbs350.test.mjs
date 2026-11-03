@@ -133,8 +133,9 @@ test("lesson pages: the crumbs are the lesson's own, the lesson is the last leve
   const src = read("pages/KnowledgeLessonPage.tsx");
   assert.doesNotMatch(src, backButtons);
   assert.ok(!src.includes("hw-back"));
-  assert.match(src, /<Breadcrumbs items=\{crumbItems\(lesson, lessonHeading\(lesson\), props\.nav\)\} \/>/);
-  assert.match(src, /<Breadcrumbs items=\{crumbItems\(l, noteLectureHeading\(l\), props\.nav\)\} \/>/);
+  // TASK-351 review: the crumbs follow the section under the lesson (origin) and can close the lesson (onBack).
+  assert.match(src, /<Breadcrumbs items=\{crumbItems\(lesson, lessonHeading\(lesson\), props\.origin, props\.nav, props\.onBack\)\} \/>/);
+  assert.match(src, /<Breadcrumbs items=\{crumbItems\(l, noteLectureHeading\(l\), props\.origin, props\.nav, props\.onBack\)\} \/>/);
   // The embedded transcript still gets the step up (it draws no head of its own).
   assert.match(src, /embedded[\s\S]*?onBack=\{props\.onBack\}/);
 });

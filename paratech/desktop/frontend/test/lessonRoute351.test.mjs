@@ -35,14 +35,16 @@ import {
   isLessonTab,
   keepLessonOpening,
   lessonCrumbs,
+  lessonRootLabel,
   lessonScreenTexts,
   lessonTabs,
   noFocus,
+  openedFromKnowledge,
   openingRouteTab,
   openingTab,
   recordingIdOfKey,
 } from "../.test-build/knowledgeView.js";
-import { SummaryTools, summarySaveItems } from "../.test-build/pages/SummaryParts.js";
+import { HomeworkCard, SummaryCard, SummaryTools, summarySaveItems } from "../.test-build/pages/SummaryParts.js";
 
 const read = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
 const noop = () => undefined;
@@ -192,7 +194,7 @@ test("a search asks for a tab only when it names a place or a note; a plain open
   assert.equal(openingRouteTab(noFocus, "m1"), "notes", "a hit in the student's notes opens them");
 });
 
-test("the opening tab: the route's, else own notes, else the summary, else lecture text, else transcript, else notes", () => {
+test("the opening tab: the route's, else own notes, else the summary, else lecture text, else transcript, else the summary card", () => {
   const ready = (over) => ({ summaryReady: false, lectureTextReady: false, transcriptReady: false, ...over });
   const pick = (routeTab, hasNotes, lesson) => openingTab({ routeTab, hasNotes, lesson: ready(lesson) });
   // The tab of the route is never replaced.
@@ -203,27 +205,46 @@ test("the opening tab: the route's, else own notes, else the summary, else lectu
   assert.equal(pick("", false, { summaryReady: true, lectureTextReady: true }), "summary");
   assert.equal(pick("", false, { lectureTextReady: true, transcriptReady: true }), "lecture");
   assert.equal(pick("", false, { transcriptReady: true }), "transcript");
-  // Nothing yet: «Мой конспект» with its hint how to add.
-  assert.equal(pick("", false, {}), "notes");
+  // Nothing ready yet: «Конспект», where a running or failed step, «Повторить» and the no-speech card are seen.
+  assert.equal(pick("", false, {}), "summary");
   // An unknown tab in the route is no choice.
   assert.equal(pick("nope", false, { summaryReady: true }), "summary");
 });
 
-test("crumbs «Предметы / <предмет> / <пара>»: the subject level only for a matched library subject", () => {
+test("crumbs «Предметы / <предмет> / <пара>» from other sections: the subject level only for a matched library subject", () => {
   const matched = { subject: "Матанализ", librarySubjectId: "s1", librarySubjectState: "matched" };
-  assert.deepEqual(lessonCrumbs(matched, "Пара 21.10"), [
+  assert.deepEqual(lessonCrumbs(matched, "Пара 21.10", "subjects"), [
     { label: "Предметы", go: { kind: "subjects" } },
     { label: "Матанализ", go: { kind: "subject", id: "s1" } },
     { label: "Пара 21.10", go: null },
   ]);
   for (const librarySubjectState of ["none", "ambiguous", "no-subject"]) {
-    const c = lessonCrumbs({ subject: "Матанализ", librarySubjectId: "", librarySubjectState }, "Пара 21.10");
+    const c = lessonCrumbs({ subject: "Матанализ", librarySubjectId: "", librarySubjectState }, "Пара 21.10", "subjects");
     assert.deepEqual(c.map((x) => x.label), ["Предметы", "Пара 21.10"], librarySubjectState);
   }
-  assert.equal(lessonCrumbs(matched, "x").at(-1).go, null, "the lesson itself is not a link");
+  assert.equal(lessonCrumbs(matched, "x", "subjects").at(-1).go, null, "the lesson itself is not a link");
   // A subject name stays text.
-  const evil = lessonCrumbs({ ...matched, subject: "<img src=x onerror=1>" }, "x");
+  const evil = lessonCrumbs({ ...matched, subject: "<img src=x onerror=1>" }, "x", "subjects");
   assert.equal(evil[1].label, "<img src=x onerror=1>");
+});
+
+test("crumbs from «База знаний»: «База знаний / <предмет> / <пара>», every level above the lesson closes it", () => {
+  const matched = { subject: "Матанализ", librarySubjectId: "s1", librarySubjectState: "matched" };
+  assert.equal(openedFromKnowledge("knowledge"), true);
+  assert.equal(openedFromKnowledge("subjects"), false);
+  assert.deepEqual(lessonCrumbs(matched, "Пара 21.10", "knowledge"), [
+    { label: "База знаний", go: { kind: "close" } },
+    { label: "Матанализ", go: { kind: "close" } },
+    { label: "Пара 21.10", go: null },
+  ]);
+  const plain = lessonCrumbs({ subject: "Матанализ", librarySubjectId: "", librarySubjectState: "none" }, "Пара 21.10", "knowledge");
+  assert.deepEqual(plain, [
+    { label: "База знаний", go: { kind: "close" } },
+    { label: "Пара 21.10", go: null },
+  ]);
+  assert.equal(lessonRootLabel("knowledge"), "База знаний");
+  assert.equal(lessonRootLabel("subjects"), "Предметы");
+  assert.equal(lessonRootLabel("today"), "Предметы");
 });
 
 test("the one-shot opening is kept only while the route shows its lesson", () => {
@@ -234,10 +255,14 @@ test("the one-shot opening is kept only while the route shows its lesson", () =>
   assert.equal(keepLessonOpening(null, { lesson: "recording:r1" }), null);
 });
 
-test("a lesson that cannot be opened says why in plain words and offers the way to the subjects", () => {
-  assert.equal(lessonScreenTexts.toSubjects, "К предметам");
+test("a lesson that cannot be opened says why in plain words and offers «Назад»", () => {
+  assert.equal(lessonScreenTexts.back, "Назад");
+  assert.equal("toSubjects" in lessonScreenTexts, false);
   assert.equal(lessonScreenTexts.loading, "Загрузка…");
-  assert.match(lessonScreenTexts.gone, /не найдена/);
+  assert.equal(
+    lessonScreenTexts.gone,
+    "Пару не удалось открыть: окно её больше не помнит. Вернитесь назад и откройте её заново из списка пар.",
+  );
   assert.doesNotMatch(lessonScreenTexts.gone, /ключ|key|ошибк/i);
 });
 
@@ -256,8 +281,8 @@ test("the tools: one «Скопировать» as the primary action and one «
   assert.doesNotMatch(out, /Сохранить как…|aria-pressed|Формат файла|хранится на этом компьютере/);
   // The menu items are the two formats, as menu items of the shared «⋯» menu.
   assert.deepEqual(summarySaveItems, [
-    { key: "txt", label: "Сохранить как .txt" },
-    { key: "md", label: "Сохранить как .md" },
+    { key: "txt", label: "Сохранить как текст (.txt)" },
+    { key: "md", label: "Сохранить в Markdown (.md)" },
   ]);
   assert.match(read("ui/RowMenu.tsx"), /role="menuitem"/);
 });
@@ -292,8 +317,20 @@ test("the lesson page: the summary tools in «Конспект», the storage pa
   assert.doesNotMatch(src, /Открыть конспект|хранится на этом компьютере|Сохранить как…|useOpenSummary/);
   assert.doesNotMatch(src, /<Segmented/);
   // «Исправить предмет или тип пары» is an item of the «⋯» menu of the head, not a button.
-  assert.match(src, /<RowMenu\s+label="Ещё действия с парой"[^>]*items=\{\[\{ key: "edit", label: "Исправить предмет или тип пары" \}\]\}\s+onPick=\{\(\) => setEditing\(\(e\) => !e\)\}/);
+  // It only opens the form; the whole «⋯» is gone while the form is open (the form has its own «Закрыть»).
+  assert.match(src, /\{!editing && \(\s*<div className="acts">\s*<RowMenu\s+label="Ещё действия с парой"[^>]*items=\{\[\{ key: "edit", label: "Исправить предмет или тип пары" \}\]\}\s+onPick=\{\(\) => setEditing\(true\)\}/);
+  assert.doesNotMatch(src, /setEditing\(\(e\) => !e\)/);
   assert.doesNotMatch(src, /<Button[^>]*>\s*Исправить предмет или тип пары/);
+  // The form takes the focus (its first input or select) when it opens.
+  assert.match(src, /<div ref=\{formBox\}>\s*<LessonInfoForm/);
+  assert.match(src, /if \(editing\) \{\s*formBox\.current\?\.querySelector<HTMLElement>\("input, select"\)\?\.focus\(\);\s*\}\s*\}, \[editing\]\);/);
+  // The head holds no readiness marks: the tabs and the cards' state lines say it.
+  assert.doesNotMatch(src, /ReadyMarks/);
+  // The tools only when the summary is ready; the cards of the tabs drop the heading the tab already shows.
+  assert.match(src, /\{view\.summary\.ready \? \(\s*<SummaryTools\s+ready\s+idle=\{idle\}/);
+  assert.doesNotMatch(src, /noSummaryHint/);
+  assert.match(src, /<SummaryCard[^>]*\sheading=\{false\}/);
+  assert.match(src, /<HomeworkCard\s+view=\{view\}\s+heading=\{false\}/);
   // The tabs are a tablist with a tabpanel.
   assert.match(src, /<SegmentTabs label="Раздел пары" base=\{tabsId\} options=\{lessonTabs\} value=\{tab\} onChange=\{props\.onTab\} \/>/);
   assert.match(src, /role="tabpanel" id=\{segmentPanelId\(tabsId, tab\)\} aria-labelledby=\{segmentTabId\(tabsId, tab\)\}/);
@@ -308,7 +345,11 @@ test("the lesson page: the summary tools in «Конспект», the storage pa
 test("the summary page shares the tools with the lesson: one copy of them, in SummaryParts", () => {
   const page = read("pages/SummaryPage.tsx");
   assert.match(page, /<SummaryTools/);
+  // Only a ready summary has tools; before that the transcript link and a refusal's text stay without the copy button.
+  assert.match(page, /\{ready \? \(\s*<SummaryTools/);
   assert.doesNotMatch(page, /Сохранить как…|хранится на этом компьютере|<Segmented/);
+  // The overlay keeps its headings: it passes no `heading`.
+  assert.doesNotMatch(page, /heading=\{false\}/);
   const parts = read("pages/SummaryParts.tsx");
   assert.equal((parts.match(/export function SummaryTools/g) ?? []).length, 1);
 });
@@ -323,22 +364,67 @@ test("the opening tab is decided once, after the notes and the fresh lesson are 
   assert.match(src, /\{tab === null \? \(\s*<p className="muted" role="status">\s*\{lessonScreenTexts\.loading\}/);
 });
 
-test("the lesson is found in the window's memory, else by the id of its key; a lost note-only lecture has a way out", () => {
+test("the lesson is found in the window's memory, else by the id of its key; a lost note-only lecture has «Назад»", () => {
   const src = read("pages/KnowledgeLessonPage.tsx");
   assert.match(src, /const cached = props\.cache\.get\(key\);/);
   assert.match(src, /api\.lesson\(recordingId\)/);
   assert.match(src, /const text = recordingId === "" \? lessonScreenTexts\.gone : error;/);
-  assert.match(src, /<Button onClick=\{props\.nav\.onOpenSubjects\}>\{lessonScreenTexts\.toSubjects\}<\/Button>/);
-  // The re-read of a cached lesson says so with the same way out.
-  assert.match(src, /\{lessonError !== "" && \(\s*<div className="kb-gone">/);
+  // One component for both failures: the banner and «Назад», which is the window's closeLesson (where the student came from).
+  assert.match(src, /<Button onClick=\{props\.onBack\}>\{lessonScreenTexts\.back\}<\/Button>/);
+  assert.match(src, /<LessonGone text=\{text\} onBack=\{props\.onBack\} \/>/);
+  assert.doesNotMatch(src, /toSubjects/);
   assert.doesNotMatch(src, /dangerouslySetInnerHTML|innerHTML/);
+});
+
+test("a lesson that cannot be read again shows only the error and «Назад»: no tabs, no summary polling", () => {
+  const src = read("pages/KnowledgeLessonPage.tsx");
+  assert.match(src, /if \(lessonError !== ""\) \{\s*return \(\s*<section className="page tr sm kb-lesson-page">\s*\{crumbs\}\s*<LessonGone text=\{lessonError\} onBack=\{props\.onBack\} \/>/);
+  // The early return comes before the head and the tabs.
+  assert.ok(src.indexOf('if (lessonError !== "") {\n    return') < src.indexOf("<SegmentTabs"));
+  // The polling effect does not start for it.
+  assert.match(src, /useEffect\(\(\) => \{\s*if \(lessonError !== ""\) \{\s*return;\s*\}\s*let stopped = false;\s*let timer/);
+});
+
+test("the crumbs follow the section under the lesson: the window passes the route's page", () => {
+  const app = read("App.tsx");
+  assert.match(app, /lessonKey=\{route\.lesson\}\s+origin=\{route\.page\}/);
+  const src = read("pages/KnowledgeLessonPage.tsx");
+  assert.match(src, /case "close":\s*return \{ label: c\.label, onClick: onBack \};/);
+  assert.match(src, /const rootGo = openedFromKnowledge\(props\.origin\) \? props\.onBack : props\.nav\.onOpenSubjects;/);
+});
+
+// ---- the cards without their headings (the tab names them) ----
+
+const bareView = {
+  recordingId: "r1",
+  lessonId: "l1",
+  title: "Матанализ",
+  startedAt: "2026-10-19T06:05:00Z",
+  durationSeconds: 2700,
+  hasDuration: true,
+  transcribed: true,
+  noSpeech: false,
+  summary: { state: "running", waitReason: "", message: "Конспект составляется.", jobError: "", ready: false, text: "", sections: [], keyPoints: [], updatedAt: "" },
+  homework: { state: "done", waitReason: "", message: "", jobError: "", assignments: [] },
+  lectureText: { state: "none", waitReason: "", message: "", jobError: "", ready: false, blocks: [], updatedAt: "", partsDone: 0, partsTotal: 0 },
+};
+
+test("the cards keep their headings by default (the old overlay) and drop them with heading={false}", () => {
+  const withHeading = html(h(SummaryCard, { view: bareView }));
+  assert.match(withHeading, /<h2>Конспект<\/h2>/);
+  const bare = html(h(SummaryCard, { view: bareView, heading: false }));
+  assert.doesNotMatch(bare, /<h2/);
+  assert.match(bare, /Конспект составляется\./, "the state line stays");
+  const hw = html(h(HomeworkCard, { view: bareView, onOpenAssignment: noop }));
+  assert.match(hw, /<h2 class="group-title">Задания<\/h2>/);
+  assert.doesNotMatch(html(h(HomeworkCard, { view: bareView, onOpenAssignment: noop, heading: false })), /<h2/);
 });
 
 test("the window: the lesson is an overlay over the page, the cache is filled on every open, the opening is one-shot", () => {
   const app = read("App.tsx");
   assert.match(app, /const overlay = route\.transcript !== "" \|\| route\.summary !== "" \|\| route\.lesson !== "";/);
   assert.match(app, /\{route\.lesson !== "" && \(/);
-  assert.match(app, /<LessonScreen\s+lessonKey=\{route\.lesson\}\s+tab=\{route\.tab\}\s+cache=\{lessons\.current\}/);
+  assert.match(app, /<LessonScreen\s+lessonKey=\{route\.lesson\}\s+origin=\{route\.page\}\s+tab=\{route\.tab\}\s+cache=\{lessons\.current\}/);
   assert.match(app, /lessons\.current\.set\(lesson\.key, lesson\);/);
   assert.match(app, /setRoute\(\(r\) => routeToLesson\(r, lesson\.key, openingRouteTab\(o\.focus, o\.materialId\)\)\);/);
   assert.match(app, /setRoute\(\(r\) => routeToLessonTab\(r, tab\)\)/);
