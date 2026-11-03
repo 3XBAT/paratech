@@ -10,20 +10,28 @@ export const texts = {
   title: "Журнал",
   lead: "Что paratech сделал за последние дни и что обрабатывалось. Часть действий можно отменить.",
   empty: "За выбранный период ничего нет.",
+  /** Nothing to show because a filter beyond the period is set. */
+  emptyFiltered: "По выбранным фильтрам ничего нет.",
+  resetFilters: "Сбросить фильтры",
   loading: "Загрузка…",
   loadFailed: "Не удалось загрузить журнал.",
   undo: "Отменить",
   undoBusy: "Отмена…",
-  cannotUndo: "Отменить нельзя",
+  /** «Нельзя отменить: письмо уже отправлено»: the reason follows, in lower case. */
+  cannotUndo: "Нельзя отменить",
+  /** The reason when the core named none: the line still says why in plain words. */
+  cannotUndoGeneric: "такие действия не возвращаются",
   undone: "Действие отменено.",
   undoFailed: "Не удалось отменить действие.",
   kindLabel: "Что показывать",
   subjectLabel: "Предмет",
   statusLabel: "Состояние",
   periodLabel: "Период",
-  onlyUndoable: "Только обратимые",
+  onlyUndoable: "Только отменяемые",
+  moreFilters: "Ещё фильтры",
   noSubject: "Без предмета",
-  refresh: "Обновить",
+  /** Next to the load error: the way out. */
+  retry: "Повторить",
 } as const;
 
 export type KindChoice = "" | "action" | "processing";
@@ -99,18 +107,46 @@ const jobLabels: Readonly<Record<string, string>> = {
   send_email: "Отправка письма",
 };
 
-/** Why a line offers no «Отменить»; "" says nothing. */
-const noUndoReasons: Readonly<Record<string, string>> = {
+/** Why Undo is refused, in lower case: the line reads «Нельзя отменить: <reason>». */
+const noUndoRefusals: Readonly<Record<string, string>> = {
+  changed: "после этого вносились другие изменения",
+  result_ready: "результат уже готов, прежний не сохранён",
+  cannot_stop: "обработку уже не остановить",
+  sent: "письмо уже отправлено",
+  irreversible: "это предложение, решение за вами",
+};
+
+/** Lines without «Отменить» that are no refusal (nothing to undo): the state, in plain words. */
+const noUndoStates: Readonly<Record<string, string>> = {
   running: "Выполняется",
   failed: "Не выполнено — отменять нечего",
   unknown: "Итог неизвестен",
   undone: "Уже отменено",
-  irreversible: "Решение остаётся за вами",
-  changed: "Изменено после — отменить нельзя",
-  result_ready: "Результат готов — отменить нельзя",
-  cannot_stop: "Уже не остановить",
-  sent: "Письмо отправлено",
 };
+
+/**
+ * Of those, the ones that only say what the status label of the line already says (by the label): the line shows the
+ * status once. «Не выполнено — отменять нечего» adds a fact (nothing to undo), so it stays.
+ */
+const sameAsStatus: Readonly<Record<string, string>> = {
+  running: statusLabels.RUNNING,
+  unknown: statusLabels.UNKNOWN,
+  undone: statusLabels.UNDONE,
+};
+
+/**
+ * What a line without «Отменить» says in its place; "" says nothing. A refusal reads «Нельзя отменить: <reason>»; a
+ * line the core marks cannotUndo without a reason it knows still says why, in general words.
+ */
+export function noUndoText(noUndo: string, cannotUndo: boolean): string {
+  if (Object.hasOwn(noUndoRefusals, noUndo)) {
+    return `${texts.cannotUndo}: ${noUndoRefusals[noUndo]}`;
+  }
+  if (Object.hasOwn(noUndoStates, noUndo)) {
+    return noUndoStates[noUndo];
+  }
+  return cannotUndo ? `${texts.cannotUndo}: ${texts.cannotUndoGeneric}` : "";
+}
 
 const busyText = "Действие уже меняется, попробуйте ещё раз.";
 
@@ -191,9 +227,11 @@ export interface LineModel {
   /** The student's chat title of an action line (plain text); "" for none. */
   chat: string;
   undoActionId: string;
-  /** «Отменить нельзя» is shown. */
+  /** The id of an action line whether or not it can be undone now (where its outcome shows); "" for a processing line. */
+  actionId: string;
+  /** The core marks the line as one that cannot be undone. */
   cannotUndo: boolean;
-  /** Why there is no «Отменить» ("" when it is offered or nothing is to be said). */
+  /** What stands in place of «Отменить»: «Нельзя отменить: <reason>» or a plain state ("" when it is offered or nothing is to be said). */
   reason: string;
 }
 
@@ -278,16 +316,55 @@ export function lineModel(l: JournalLine, index: number, subjects: ReadonlyMap<s
   const title = processing ? (jobLabels[l.jobType] ?? "Обработка") : (toolLabels[l.tool] ?? "Действие");
   const key = processing ? `job:${l.jobId}:${index}` : `act:${l.actionId}:${index}`;
   const undoable = !processing && l.undoable && l.actionId !== "";
+  const status = statusLabels[l.status] ?? "";
   return {
     key,
     kind: processing ? "processing" : "action",
     title,
-    status: statusLabels[l.status] ?? "",
+    status,
     when: timeOnly ? clockTime(l.at) : formatTime(l.at),
     subject: subjects.get(l.subjectId) ?? "",
     chat: processing ? "" : (l.chatTitle ?? "").trim(),
     undoActionId: undoable ? l.actionId : "",
+    actionId: processing ? "" : l.actionId,
     cannotUndo: l.cannotUndo,
-    reason: undoable ? "" : (noUndoReasons[l.noUndo] ?? ""),
+    reason: undoable ? "" : reasonText(l, status),
   };
+}
+
+/** The reason of a line without «Отменить»; "" when the status of the line already says it. */
+function reasonText(l: JournalLine, status: string): string {
+  if (Object.hasOwn(sameAsStatus, l.noUndo) && status === sameAsStatus[l.noUndo]) {
+    return "";
+  }
+  return noUndoText(l.noUndo, l.cannotUndo);
+}
+
+/** The outcome of the last «Отменить», kept for the row of that action. */
+export interface UndoOutcome {
+  actionId: string;
+  ok: boolean;
+  text: string;
+}
+
+/** Whether the row of the action is in the list: if not (a filter dropped it), the page says the outcome itself. */
+export function outcomeHasRow(lines: readonly JournalLine[], actionId: string): boolean {
+  return lines.some((l) => l.kind !== "processing" && l.actionId === actionId);
+}
+
+/** The filters back to their defaults except the period, which stays what the student chose. */
+export function resetFilters(f: FilterState): FilterState {
+  return { ...initialFilter, days: f.days };
+}
+
+/** Whether a filter beyond the period narrows the list (the hidden three or «Только отменяемые»). */
+export function filtersNarrow(f: FilterState): boolean {
+  return extraFilterCount(f) > 0 || f.undoable;
+}
+
+/** How many of the hidden filters («Что показывать», «Предмет», «Состояние») are not at their default. */
+export function extraFilterCount(f: FilterState): number {
+  return [f.kind !== initialFilter.kind, f.subjectId !== initialFilter.subjectId, f.status !== initialFilter.status].filter(
+    Boolean,
+  ).length;
 }
