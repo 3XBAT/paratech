@@ -43,9 +43,12 @@ type compensationWire struct {
 	Job        string `json:"job,omitempty"`
 	Work       string `json:"work,omitempty"`
 	// Wave 10 (agentactions10.go).
-	Fields *assignmentFieldsWire `json:"fields,omitempty"`
-	Marks  []doneMarkWire        `json:"marks,omitempty"`
-	Prior  *settingWire          `json:"setting,omitempty"` // the prior value of a setting
+	Fields   *assignmentFieldsWire `json:"fields,omitempty"`
+	Marks    []doneMarkWire        `json:"marks,omitempty"`
+	Note     string                `json:"note,omitempty"`
+	OldTitle string                `json:"old_title,omitempty"`
+	Anchor   *noteAnchorWire       `json:"anchor,omitempty"`
+	Prior    *settingWire          `json:"setting,omitempty"` // the prior value of a setting
 }
 
 // Get loads an entry; a missing one wraps shared.ErrNotFound.

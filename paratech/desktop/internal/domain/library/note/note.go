@@ -106,6 +106,9 @@ func Restore(st State) (*Note, error) {
 	return n, nil
 }
 
+// CleanTitle is the title as New and Retitle store s: one line of at most MaxTitleRunes characters ("" for none).
+func CleanTitle(s string) string { return cleanTitle(s) }
+
 // cleanTitle makes a title one line of at most MaxTitleRunes characters.
 func cleanTitle(s string) string {
 	s = values.CleanText(s)
@@ -209,6 +212,23 @@ func (n *Note) ReplacePart(old, next shared.MaterialID, now time.Time) (changed 
 		return false, fmt.Errorf("%w: %s", ErrDuplicatePart, next)
 	}
 	n.parts[i], n.updatedAt = next, now
+	return true, nil
+}
+
+// RemovePart takes the material id out of the parts; the others keep their order. A material that is not a part
+// changes nothing. The last part stays (a note has parts; remove the note instead). Errors: ErrRemoved, ErrNoParts.
+func (n *Note) RemovePart(id shared.MaterialID, now time.Time) (changed bool, err error) {
+	if n.status != StatusActive {
+		return false, ErrRemoved
+	}
+	i := slices.Index(n.parts, id)
+	if i < 0 {
+		return false, nil
+	}
+	if len(n.parts) == 1 {
+		return false, fmt.Errorf("%w: the last part of a note", ErrNoParts)
+	}
+	n.parts, n.updatedAt = slices.Delete(slices.Clone(n.parts), i, i+1), now
 	return true, nil
 }
 

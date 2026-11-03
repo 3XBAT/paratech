@@ -13,6 +13,7 @@ import (
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/knowledgebase"
 	"paratech/desktop/internal/cases/library"
+	"paratech/desktop/internal/cases/notes"
 	"paratech/desktop/internal/cases/preferences"
 	"paratech/desktop/internal/cases/schedulesync"
 	"paratech/desktop/internal/cases/senddelivery"
@@ -36,6 +37,7 @@ type agentReads struct {
 	turnkey     *turnkey.Service           // triage_assignment and its Undo (TASK-129)
 	answers     *answering.Service         // answer_question (TASK-118)
 	settings    *preferences.Service       // get_settings, set_setting: the toggles of the settings page (TASK-322)
+	notes       *notes.Service             // list_notes and note (TASK-321), as the notes page
 }
 
 // wireAgent builds the agent core (TASK-116, TASK-117, TASK-123, TASK-127, ADR-0021): the steps of a request on the
@@ -73,7 +75,7 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 		Rerunner: reads.rerunner, Materials: reads.materials, Turnkey: reads.turnkey, Drafts: c.drafts, Jobs: reads.activity, Canceller: c.runner,
 		Tx: c.db, Clock: e.local, Log: log,
 		Changes: agentAssignments{reads.assignments}, Marks: reads.assignments, Chat: chatJournal{c}, Events: reads.assignments,
-		Controls: agentControls(c, reads),
+		Controls: agentControls(c, reads), Notes: reads.notes,
 	})
 	if err != nil {
 		return fmt.Errorf("app: agent actions: %w", err)

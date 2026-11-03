@@ -61,6 +61,34 @@ func (s *Service) ForSubject(ctx context.Context, sub shared.SubjectID) ([]View,
 	return s.activeViews(ctx, list, nil)
 }
 
+// Note reads one note in any status (removed too), as it reads now. Errors: ErrInvalidRequest, ErrNoteNotFound (also
+// for a note of a removed subject), ErrUnavailable.
+func (s *Service) Note(ctx context.Context, id shared.NoteID) (View, error) {
+	n, err := s.get(ctx, id)
+	if err != nil {
+		return View{}, err
+	}
+	return s.view(ctx, n)
+}
+
+// Anchor is the anchor Add and Reanchor would set for ref now, with its snapshot. Errors as Reanchor.
+func (s *Service) Anchor(ctx context.Context, ref AnchorRef) (note.Anchor, error) {
+	return s.anchorFor(ctx, ref)
+}
+
+// LessonSubject is the subject name a schedule lesson carries ("" for none), for a note of that lesson. Errors:
+// ErrInvalidRequest, ErrLessonNotFound, ErrUnavailable.
+func (s *Service) LessonSubject(ctx context.Context, id shared.LessonID) (string, error) {
+	l, err := s.lesson(ctx, id)
+	switch {
+	case err != nil:
+		return "", err
+	case l == nil:
+		return "", ErrLessonNotFound
+	}
+	return l.Content().Subject, nil
+}
+
 // activeViews reads the active notes of list whose current anchor keep accepts (nil: all), in order.
 func (s *Service) activeViews(ctx context.Context, list []*note.Note, keep func(note.Anchor) bool) ([]View, error) {
 	r, b := s.newResolver(), newCountBudget()

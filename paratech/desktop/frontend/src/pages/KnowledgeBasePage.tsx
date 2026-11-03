@@ -35,6 +35,7 @@ import {
   searchTexts,
   subjectMeta,
 } from "../knowledgeView";
+import { Breadcrumbs, type Crumb } from "../ui/Breadcrumbs";
 import { Button } from "../ui/Button";
 import { Banner, Card, EmptyState, Input, ResultLine, type ResultKind } from "../ui/controls";
 import { AddPastNote, HitList, LessonList, SubjectList } from "./KnowledgeParts";
@@ -45,6 +46,9 @@ import { KnowledgeLessonPage, NoteLecturePage } from "./KnowledgeLessonPage";
 const exportHint = "Сохранить все пары предмета в один файл .md — по датам, с конспектом и текстом лекции.";
 /** The same place says why the button is off: the subject has only notes, or nothing, to export. */
 const exportEmptyHint = "Экспортировать нечего: у предмета пока нет пар с конспектом.";
+
+/** The first level of the breadcrumbs of a subject and of a lesson: the list of subjects of this page. */
+const rootCrumb = "База знаний";
 
 type SearchOutcome =
   | { kind: "short" }
@@ -209,9 +213,38 @@ export function KnowledgeBasePage(props: {
     setOpen({ lesson, focus, editing, materialId });
   };
 
+  // Back from a subject to the list: the counts may have changed meanwhile.
+  const leaveSubject = () => {
+    setSubject(null);
+    setReload((n) => n + 1);
+  };
+
+  // Back from a lesson to where it was opened from (the subject, or the list or the search).
+  const closeLesson = () => {
+    setOpen(null);
+    if (changed.current) {
+      // The found lessons show the old subject: ask again.
+      void runSearch(query, true);
+    }
+  };
+  // The levels above an open lesson: «База знаний / <предмет>» when it was opened from a subject, else «База знаний».
+  const lessonTrail: Crumb[] =
+    subject === null
+      ? [{ label: rootCrumb, onClick: closeLesson }]
+      : [
+          {
+            label: rootCrumb,
+            onClick: () => {
+              closeLesson();
+              leaveSubject();
+            },
+          },
+          { label: subject.name, onClick: closeLesson },
+        ];
+
   if (open !== null && isNoteOnly(open.lesson)) {
     // No recording: the page reads nothing by a recording id.
-    return <NoteLecturePage key={open.lesson.key} lesson={open.lesson} materialId={open.materialId} onBack={() => setOpen(null)} />;
+    return <NoteLecturePage key={open.lesson.key} lesson={open.lesson} materialId={open.materialId} trail={lessonTrail} />;
   }
 
   if (open !== null) {
@@ -223,13 +256,8 @@ export function KnowledgeBasePage(props: {
         focus={open.focus}
         materialId={open.materialId}
         editing={open.editing}
-        onBack={() => {
-          setOpen(null);
-          if (changed.current) {
-            // The found lessons show the old subject: ask again.
-            void runSearch(query, true);
-          }
-        }}
+        trail={lessonTrail}
+        onBack={closeLesson}
         onChanged={() => {
           changed.current = true;
           setReload((n) => n + 1);
@@ -244,10 +272,7 @@ export function KnowledgeBasePage(props: {
       <SubjectView
         api={api}
         subject={subject}
-        onBack={() => {
-          setSubject(null);
-          setReload((n) => n + 1);
-        }}
+        onBack={leaveSubject}
         onOpen={(l, editing) => openLesson(l, noFocus, editing)}
       />
     );
@@ -461,11 +486,7 @@ function SubjectView(props: {
   const count = lessons === null ? subject : lecturesMeta(lessons);
   return (
     <section className="page kb">
-      <div className="hw-back">
-        <Button variant="ghost" onClick={props.onBack}>
-          Назад
-        </Button>
-      </div>
+      <Breadcrumbs items={[{ label: rootCrumb, onClick: props.onBack }, { label: subject.name }]} />
       <div className="head">
         <div>
           <h1 className="kb-heading">{subject.name}</h1>

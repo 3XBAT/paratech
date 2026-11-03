@@ -36,6 +36,12 @@ type Materials interface {
 	// Material loads a material in any status; a missing one wraps shared.ErrNotFound.
 	Material(ctx context.Context, id shared.MaterialID) (*material.Material, error)
 
+	// Place files a material of «Входящие» in folder of sub (AddMaterial files an upload as FileNotePart files bytes).
+	Place(ctx context.Context, id shared.MaterialID, sub shared.SubjectID, folder shared.FolderID) (*material.Material, error)
+
+	// MoveToInbox returns a material to «Входящие», the undo of Place (an AddMaterial that failed after filing).
+	MoveToInbox(ctx context.Context, id shared.MaterialID) (*material.Material, error)
+
 	// PageImage loads an active photo with its stored bytes, checked against its sha256. One that is missing, removed
 	// or not a photo wraps shared.ErrNotFound; bytes that are gone or changed material.ErrDamaged.
 	PageImage(ctx context.Context, id shared.MaterialID) (*material.Material, []byte, error)

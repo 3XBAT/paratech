@@ -72,6 +72,8 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 		return t.marksResult(c, p.noopMarks, nil)
 	case p.noopOut != nil:
 		return p.noopOut(t, c, nil)
+	case p.noopNote != nil:
+		return t.noteResult(c, *p.noopNote, nil)
 	}
 
 	entry, err := t.journal.Begin(ctx, agentjournal.BeginInput{
@@ -120,6 +122,9 @@ func (t tools) outcome(c agentturn.Call, eff effect, cards []values.Card) ran {
 	if eff.marks != nil {
 		return t.marksResult(c, eff.marks, cards)
 	}
+	if eff.note != nil {
+		return t.noteResult(c, *eff.note, cards)
+	}
 	if eff.triage == nil {
 		return t.result(c, eff.row, eff.created, cards)
 	}
@@ -161,6 +166,9 @@ func (t tools) replay(ctx context.Context, c agentturn.Call, e agentjournal.Entr
 	if r, ok := t.replayAssignment(c, e.Compensation); ok {
 		return r
 	}
+	if r, ok := t.replayNote(ctx, c, e.Compensation); ok {
+		return r
+	}
 	row := values.WriteRow{Changed: true}
 	var created values.Ref
 	switch v := e.Compensation.(type) {
@@ -196,6 +204,9 @@ func (t tools) refusalOf(ctx context.Context, tool values.Tool, err error) value
 		return why
 	}
 	if why, ok := controlRefusal(tool, err); ok {
+		return why
+	}
+	if why, ok := noteRefusal(tool, err); ok {
 		return why
 	}
 	// The subject or lesson of a new assignment the use case does not know: an ID that passed provenance but is gone.

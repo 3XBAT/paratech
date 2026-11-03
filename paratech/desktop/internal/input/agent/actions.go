@@ -114,6 +114,8 @@ type ActionDeps struct {
 	// Catalog v10 controls (optional; without them their tools answer "unavailable"): settings.go, quota.go,
 	// recording.go.
 	Controls Controls
+	// Notes is «Мой конспект» (optional; without it list_notes and note answer "unavailable").
+	Notes Notes
 }
 
 // Actions runs the reversible actions of the agent (class U, ADR-0021) on the use cases and is their Undo: it
@@ -137,6 +139,7 @@ type Actions struct {
 	chat        ChatActions
 	events      CalendarEvents
 	controls    Controls
+	notes       Notes
 }
 
 // NewActions checks the dependencies.
@@ -153,7 +156,7 @@ func NewActions(d ActionDeps) (*Actions, error) {
 		library: d.Library, lessons: d.Lessons, assignments: d.Assignments, added: d.NewAssignments, rerunner: d.Rerunner,
 		materials: d.Materials,
 		turnkey:   d.Turnkey, jobs: d.Jobs, canceller: d.Canceller, tx: d.Tx, clock: d.Clock, log: log,
-		changes: d.Changes, marks: d.Marks, chat: d.Chat, events: d.Events, controls: d.Controls,
+		changes: d.Changes, marks: d.Marks, chat: d.Chat, events: d.Events, controls: d.Controls, notes: d.Notes,
 	}, nil
 }
 
@@ -176,6 +179,7 @@ type prepared struct {
 	noop      *values.WriteRow
 	noopMarks []values.MarkRow // mark_assignments_done that changes nothing
 	noopOut   resultOf         // a tool with its own result shape that changes nothing (recording)
+	noopNote  *values.NoteWriteRow
 	run       func(ctx context.Context) (effect, error)
 }
 
@@ -189,8 +193,9 @@ type effect struct {
 	// triage is what triage_assignment shows the planner instead of row; cards are the cards it adds.
 	triage *values.TriageRow
 	cards  []values.Card
-	marks  []values.MarkRow // what mark_assignments_done shows instead of row
-	out    resultOf         // what a tool with its own result shape shows instead of row (recording)
+	marks  []values.MarkRow     // what mark_assignments_done shows instead of row
+	note   *values.NoteWriteRow // what note shows instead of row
+	out    resultOf             // what a tool with its own result shape shows instead of row (recording)
 	offer  values.OfferAction
 }
 
@@ -234,6 +239,8 @@ func (a *Actions) prepare(ctx context.Context, at origin, call values.Call) (pre
 		p, err = a.changeAssignment(ctx, at, call)
 	case values.ToolMarkAssignmentsDone:
 		p, err = a.markDone(ctx, call)
+	case values.ToolNote:
+		p, err = a.note(ctx, at, call)
 	default:
 		return prepared{}, false, nil
 	}
@@ -645,6 +652,8 @@ func (a *Actions) Check(ctx context.Context, c action.Compensation) (action.Targ
 		return a.checkAdded(ctx, v)
 	case action.RestoreDone:
 		return a.checkMarks(ctx, v)
+	case action.RemoveNotePart, action.RemoveNote, action.ReanchorNote, action.RetitleNote, action.RestoreNote:
+		return a.checkNote(ctx, c)
 	}
 	return a.checkAssignment(ctx, c)
 }
@@ -742,6 +751,8 @@ func (a *Actions) compensate(ctx context.Context, c action.Compensation) error {
 		return err
 	case action.RestoreDone:
 		return a.restoreMarks(ctx, v)
+	case action.RemoveNotePart, action.RemoveNote, action.ReanchorNote, action.RetitleNote, action.RestoreNote:
+		return a.compensateNote(ctx, c)
 	}
 	return a.compensateAssignment(ctx, c)
 }
@@ -851,6 +862,8 @@ func (a *Actions) Observe(ctx context.Context, tool values.Tool, in action.Inten
 		return a.observeAssignment(ctx, in)
 	case values.ToolMarkAssignmentsDone:
 		return a.observeMarks(ctx, in)
+	case values.ToolNote:
+		return a.observeNote(ctx, in, since)
 	}
 	return action.Observation{}, nil
 }
