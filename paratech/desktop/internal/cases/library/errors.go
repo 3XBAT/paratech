@@ -35,6 +35,10 @@ var (
 	// ErrInvalidTeacherRole means a role that is not lecture, practice or lab; it wraps ErrInvalidTeacher.
 	ErrInvalidTeacherRole = fmt.Errorf("%w: role", ErrInvalidTeacher)
 
+	// ErrInvalidCallLink means text that is not a call link the app may store or open (subject.ParseCallLink); the
+	// error never holds the typed text.
+	ErrInvalidCallLink = errors.New("library: invalid call link")
+
 	// ErrSubjectChanged means the subject is no longer at the version the student saw: the page reloads it.
 	ErrSubjectChanged = errors.New("library: subject changed")
 
