@@ -1,6 +1,7 @@
 package library
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 const (
 	opSubjectDiscarded = "library: subject removed with its notes and files"
 	opSubjectRestored  = "library: removed subject restored"
+	opExpiredPurge     = "library: purge of expired subjects failed for another subject"
 )
 
 // DiscardSubject removes a subject softly with its notes and every file filed under it, in any of its folders, while
@@ -129,11 +131,99 @@ func (s *Service) contents(ctx context.Context, id shared.SubjectID) (notes, fil
 	return notes, files, nil
 }
 
+// RemovedSubjects lists the removed subjects that can still be restored, the most recently removed first, each with
+// when it is erased (subject.PurgeAt), for «Недавно удалённые». One past its window is left out: it waits for the
+// purge and «Вернуть» refuses it. Error: ErrUnavailable.
+func (s *Service) RemovedSubjects(ctx context.Context) ([]RemovedSubject, error) {
+	list, err := s.subjects.ListRemoved(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	now := s.clock.Now()
+	out := make([]RemovedSubject, 0, len(list))
+	for _, sub := range list {
+		if sub.PurgeDue(now) {
+			continue
+		}
+		out = append(out, RemovedSubject{Subject: sub, RemovedAt: sub.RemovedAt(), PurgeAt: sub.PurgeAt()})
+	}
+	slices.SortFunc(out, func(a, b RemovedSubject) int {
+		if c := b.RemovedAt.Compare(a.RemovedAt); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Subject.ID(), b.Subject.ID())
+	})
+	return out, nil
+}
+
 // nameIndex is the index of the names and aliases of every subject, removed ones too, with the removed ones by ID: a
 // removed subject keeps its name and aliases until it is purged, so that restoring it never makes a string ambiguous.
+// expired holds the removed ones whose restore window had ended when the index was built.
 type nameIndex struct {
 	subjectmatch.Index
 	removed map[shared.SubjectID]bool
+	expired map[shared.SubjectID]bool
+}
+
+// holdsExpired reports whether a removed subject past its window, other than except, has the key of one of spellings.
+func (ix nameIndex) holdsExpired(except shared.SubjectID, spellings []string) bool {
+	for _, sp := range spellings {
+		if !ix.TakenByOther(sp, except) {
+			continue
+		}
+		if m, ok := ix.Resolve(sp); ok && ix.expired[m.ID] {
+			return true
+		}
+	}
+	return false
+}
+
+// namesFor builds the nameIndex for checking spellings as names or aliases of a subject other than except. When a
+// removed subject past its restore window holds one of them, it is erased first (ExpiredSubjects) and the index is
+// built again, so the name is free even before the daily purge (ADR-0027: after the purge the name is free). A purge
+// that leaves that subject is ErrUnavailable with its error, never «удалён»: «Вернуть» would refuse it. Without the
+// port the expired subject keeps holding the name until the daily purge.
+func (s *Service) namesFor(ctx context.Context, except shared.SubjectID, spellings ...string) (nameIndex, error) {
+	ix, err := s.names(ctx)
+	if err != nil || s.expired == nil || !ix.holdsExpired(except, spellings) {
+		return ix, err
+	}
+	_, perr := s.expired.Purge(ctx)
+	if ix, err = s.names(ctx); err != nil {
+		return nameIndex{}, err
+	}
+	if ix.holdsExpired(except, spellings) {
+		if perr == nil {
+			perr = errors.New("the purge left it")
+		}
+		return nameIndex{}, fmt.Errorf("%w: erase the expired subject holding the name: %w", ErrUnavailable, perr)
+	}
+	if perr != nil { // about other subjects: the one holding the name is gone
+		s.log.Warn(opExpiredPurge, slog.Any("cause", perr))
+	}
+	return ix, nil
+}
+
+// purgeExpired erases sub when it is removed and past its restore window, through ExpiredSubjects; gone is true when
+// it is no longer stored. Without the port nothing is erased.
+func (s *Service) purgeExpired(ctx context.Context, sub *subject.Subject) (gone bool, err error) {
+	if s.expired == nil || !sub.PurgeDue(s.clock.Now()) {
+		return false, nil
+	}
+	_, perr := s.expired.Purge(ctx)
+	switch _, err := s.subjects.GetAny(ctx, sub.ID()); {
+	case errors.Is(err, shared.ErrNotFound):
+		if perr != nil {
+			s.log.Warn(opExpiredPurge, slog.Any("cause", perr))
+		}
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	if perr == nil {
+		perr = errors.New("the purge left it")
+	}
+	return false, fmt.Errorf("%w: erase the expired subject: %w", ErrUnavailable, perr)
 }
 
 // taken refuses name when a subject other than except has its key: a *RemovedNameError when that subject is removed,
@@ -158,9 +248,14 @@ func (s *Service) names(ctx context.Context) (ix nameIndex, err error) {
 	if err != nil {
 		return nameIndex{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
+	now := s.clock.Now()
 	ix.removed = make(map[shared.SubjectID]bool, len(gone))
+	ix.expired = map[shared.SubjectID]bool{}
 	for _, g := range gone {
 		ix.removed[g.ID()] = true
+		if g.PurgeDue(now) {
+			ix.expired[g.ID()] = true
+		}
 	}
 	ix.Index = indexOf(slices.Concat(active, gone))
 	return ix, nil
