@@ -341,7 +341,10 @@ test("the pages wire the buttons to the bindings (a delete asks only while its w
   assert.match(page, /api\.deleteAssignment\(a\.id, a\.version\)/);
   assert.match(page, /api\.deleteAssignment\(id, version\)/);
   assert.match(page, /api\.restoreAssignment\(/);
-  assert.match(page, /changeTexts\.edit/);
+  // TASK-346: «Изменить» is an item of the head's «⋯» menu (pages/HomeworkMenus.tsx); the page opens the dialog from it.
+  const menus = readFileSync(new URL("../src/pages/HomeworkMenus.tsx", import.meta.url), "utf8");
+  assert.match(menus, /changeTexts\.edit/);
+  assert.match(page, /setEditing\(true\)/);
   assert.match(page, /<EditAssignmentDialog/);
   assert.doesNotMatch(page, /confirm\(/);
 });

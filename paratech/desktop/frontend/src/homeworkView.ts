@@ -7,6 +7,7 @@ import { formatTimeMinutes } from "./activityView.js";
 import {
   type ActiveGeneration,
   type AssignmentItem,
+  type AssignmentState,
   type ChangeAssignmentResult,
   type CreateAssignmentRequest,
   type CreateAssignmentResult,
@@ -23,7 +24,7 @@ import {
   type VersionSource,
 } from "./bindings/homework.js";
 import type { LibrarySubject } from "./bindings/library.js";
-import { dueText as dueMoment } from "./dueText.js";
+import { daysBetween, dueText as dueMoment, parseMoment } from "./dueText.js";
 import { plural } from "./plural.js";
 import { waitingWords } from "./statusWords.js";
 import type { ResultKind } from "./ui/controls.js";
@@ -121,7 +122,7 @@ export function generationRunning(err: unknown): boolean {
   return errorMessage(err) === errorMessages.generationRunning;
 }
 
-/** The line under the draft after «Сохранить в Word (.docx)»: the core's text and the saved file's name. */
+/** The line under the draft after «Сохранить ▾» → «Word (.docx)»: the core's text and the saved file's name. */
 export function docxSaveView(r: DocxSaveResult): { kind: ResultKind; text: string } {
   switch (r.status) {
     case "saved":
@@ -260,6 +261,86 @@ export function filterAssignments(
   }
   return items.filter((a) => isSentAssignment(deliveries[a.id]) === (filter === "sent"));
 }
+
+// ---- The grouped list (TASK-346) ----
+
+export type GroupKey = "overdue" | "week" | "later" | "nodue" | "done" | "flat";
+
+export const groupTitles: Readonly<Record<GroupKey, string>> = {
+  overdue: "Просрочено",
+  week: "На этой неделе",
+  later: "Позже",
+  nodue: "Без срока",
+  done: "Выполнено",
+  flat: "",
+};
+
+/** «На этой неделе» is the next 7 calendar days: today (day 0) up to today + 6 days. */
+export const weekDays = 7;
+
+/** One heading of the list with its rows; the "flat" group has no heading (title ""). */
+export interface AssignmentGroup {
+  key: GroupKey;
+  title: string;
+  items: AssignmentItem[];
+}
+
+/**
+ * The group of an open assignment by its deadline, in the local time zone like dueText: a moment that has passed is
+ * «Просрочено» (the same `<= now` test), within the next `weekDays` calendar days (today + 6) is «На этой неделе»,
+ * further is «Позже»; no deadline or an unreadable one is «Без срока».
+ */
+export function dueGroupKey(due: string, now: Date): "overdue" | "week" | "later" | "nodue" {
+  const d = parseMoment(due);
+  if (d === null) {
+    return "nodue";
+  }
+  if (d.getTime() <= now.getTime()) {
+    return "overdue";
+  }
+  return daysBetween(d, now) < weekDays ? "week" : "later";
+}
+
+/**
+ * Splits the list into «Просрочено · На этой неделе · Позже · Без срока»; groups without rows are left out. A group is
+ * sorted by deadline, earliest first (ties and «Без срока» keep the core's order). A done assignment goes to the last
+ * group «Выполнено»; in the «Выполненные» list (state "done") the rows stay flat, in the core's order.
+ */
+export function groupAssignments(items: readonly AssignmentItem[], now: Date, state: AssignmentState): AssignmentGroup[] {
+  if (state === "done") {
+    return items.length === 0 ? [] : [{ key: "flat", title: groupTitles.flat, items: [...items] }];
+  }
+  const by: Record<Exclude<GroupKey, "flat">, AssignmentItem[]> = { overdue: [], week: [], later: [], nodue: [], done: [] };
+  for (const a of items) {
+    by[a.done ? "done" : dueGroupKey(a.due, now)].push(a);
+  }
+  const at = (a: AssignmentItem) => parseMoment(a.due)?.getTime() ?? 0;
+  for (const key of ["overdue", "week", "later"] as const) {
+    by[key].sort((x, y) => at(x) - at(y));
+  }
+  return (["overdue", "week", "later", "nodue", "done"] as const)
+    .filter((key) => by[key].length > 0)
+    .map((key) => ({ key, title: groupTitles[key], items: by[key] }));
+}
+
+export const firstRunTexts = {
+  text: "Задания находятся сами в записи пары после конспекта.",
+  manual: "Добавить задание вручную",
+} as const;
+
+/** The drafting buttons: one «Сохранить ▾» menu instead of two buttons, and the send button (TASK-346). */
+export const draftButtonTexts = {
+  save: "Сохранить",
+  file: "Файл .txt",
+  word: "Word (.docx)",
+  send: "Отправить преподавателю…",
+  sendAgain: "Отправить ещё раз…",
+  markSent: "Письмо дошло",
+  /** Under «Письмо дошло»: why the button is there and when to press it. */
+  markSentNote:
+    "Почта не подтвердила доставку. Если преподаватель письмо получил — отметьте «Письмо дошло». Повторная отправка может прийти вторым письмом.",
+  correct: "Поправить предмет и преподавателя",
+} as const;
 
 const sourceLabels: Readonly<Record<VersionSource, string>> = {
   generated: "сгенерирована",

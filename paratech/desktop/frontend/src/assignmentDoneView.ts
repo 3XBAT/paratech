@@ -334,6 +334,17 @@ export function focusTargetAfter(order: readonly string[], leaving: readonly str
   return before.length > 0 ? before[before.length - 1] : "";
 }
 
+/**
+ * The rows that stay in the list but change their group because their mark changed («Все»: a row marked done moves to
+ * «Выполнено»). The row is drawn again in its new group, so the check that had the focus is a new element.
+ */
+export function rowsChangingGroup(
+  before: readonly Pick<AssignmentItem, "id" | "done">[],
+  after: readonly Pick<AssignmentItem, "id" | "done">[],
+): string[] {
+  return before.filter((a) => after.some((n) => n.id === a.id && n.done !== a.done)).map((a) => a.id);
+}
+
 /** Where the keyboard focus is: on the check of a row, nowhere (body or none: the focused element is gone) or elsewhere. */
 export type FocusSpot = { kind: "check"; id: string } | { kind: "none" } | { kind: "other" };
 
@@ -352,6 +363,11 @@ export function shouldMoveFocus(spot: FocusSpot, leaving: readonly string[]): bo
     return false;
   }
   return spot.kind === "none" || (spot.kind === "check" && leaving.includes(spot.id));
+}
+
+/** Rows change their group: the check that has the focus is put back once its row is drawn in the new place; null: nothing to keep. */
+export function focusKeepTarget(spot: FocusSpot, moving: readonly string[]): string | null {
+  return spot.kind === "check" && moving.includes(spot.id) ? spot.id : null;
 }
 
 /**

@@ -363,18 +363,20 @@ test("the assignment page pieces in both states; edit and delete stay in the hea
   assert.match(busy, /aria-busy="true"/);
   assert.ok(busy.includes("Сохранение…"));
 
-  // The header of the page keeps «Изменить» and «Удалить» and puts «Выполнено» before them.
+  // The header of the page keeps «Выполнено» and puts «Изменить», «Поправить…» and «Удалить» into the «⋯» menu after it
+  // (TASK-346; the items and their order are tested in homeworkJournal346.test.mjs).
   const page = readFileSync(new URL("../src/pages/HomeworkPage.tsx", import.meta.url), "utf8");
   const head = page.slice(page.indexOf("<DoneButton"), page.indexOf("<DoneStamp"));
-  assert.ok(head.indexOf("changeTexts.edit") > 0, "«Изменить» follows");
-  assert.ok(head.indexOf("changeTexts.remove") > head.indexOf("changeTexts.edit"), "«Удалить» follows");
+  assert.ok(head.indexOf("<AssignmentHeadMenu") > 0, "the «⋯» menu follows");
+  assert.ok(!head.includes("changeTexts."), "no separate «Изменить» and «Удалить» buttons in the header");
   // «Удалить» asks the core first (TASK-338): it goes through askRemoveThis, which deletes with the version at that time.
-  assert.match(head, /onClick=\{\(\) => void askRemoveThis\(\)\}/);
+  assert.match(page, /\} else \{\s*void askRemoveThis\(\);/);
   assert.match(page, /api\.deleteAssignment\(id, version\)/);
   assert.match(page, /<DoneStamp assignment=\{a\} \/>/);
   // While the mark is saved the page does not edit or delete (a delete would go out with a stale version); the
-  // delete check and its warning (TASK-338, TASK-316) hold «Изменить» and «Отметить выполненным» too.
-  assert.equal(head.split("|| doneBusy").length - 1, 2, "«Изменить» and «Удалить» wait for the mark");
+  // delete check and its warning (TASK-338, TASK-316) hold «Отметить выполненным» too.
+  // (TASK-346 review: the menu gets the two reasons apart, «Идёт удаление» and «Идёт сохранение».)
+  assert.match(head, /changing=\{changing\}\s+marking=\{doneBusy\}/, "the items of the menu wait for the delete and for the mark");
   assert.match(head, /disabled=\{changing \|\| checking \|\| confirming\}\s*onToggle/);
 });
 
