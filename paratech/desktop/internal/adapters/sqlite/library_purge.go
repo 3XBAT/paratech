@@ -17,8 +17,9 @@ import (
 // Operation names of the purge.
 const (
 	opPurgeSubject       = "sqlite: purge removed subject"
+	opSubjectStillDue    = "sqlite: check removed subject still due"
 	opListFiledMaterials = "sqlite: list materials of a removed subject"
-	opMaterialHeld       = "sqlite: check material held by a note"
+	opMaterialKept       = "sqlite: check material kept by a note or a work"
 	opDigestInUse        = "sqlite: check stored file in use"
 	opPurgeMaterial      = "sqlite: purge material of a removed subject"
 	opListSubjectSets    = "sqlite: list ticket sets of a subject"
@@ -35,6 +36,17 @@ func (r *SubjectRepository) PurgeRemoved(ctx context.Context, id shared.SubjectI
 		return false, fmt.Errorf("%s %s: %w", opPurgeSubject, id, MapError(ctx, err))
 	}
 	return n > 0, nil
+}
+
+// StillDue reports whether subject id is still removed at or before cutoff.
+func (r *SubjectRepository) StillDue(ctx context.Context, id shared.SubjectID, cutoff time.Time) (bool, error) {
+	due, err := r.db.Queries(ctx).SubjectStillDue(ctx, sqlcgen.SubjectStillDueParams{
+		ID: string(id), Cutoff: jobNullMs(cutoff),
+	})
+	if err != nil {
+		return false, fmt.Errorf("%s %s: %w", opSubjectStillDue, id, MapError(ctx, err))
+	}
+	return due != 0, nil
 }
 
 // ListFiledUnder returns the materials filed in any folder of sub, in any status, also while sub is removed (the
@@ -56,15 +68,16 @@ func (r *MaterialRepository) ListFiledUnder(ctx context.Context, sub shared.Subj
 	return out, nil
 }
 
-// PartOfOtherNote reports whether material id is a part of a note, in any status, of a subject other than sub.
-func (r *MaterialRepository) PartOfOtherNote(ctx context.Context, id shared.MaterialID, sub shared.SubjectID) (bool, error) {
-	held, err := r.db.Queries(ctx).MaterialInNoteOfOtherSubject(ctx, sqlcgen.MaterialInNoteOfOtherSubjectParams{
+// KeptElsewhere reports whether material id must survive the purge of sub: a note, in any status, of another subject
+// holds it as a part, or a work was written from it.
+func (r *MaterialRepository) KeptElsewhere(ctx context.Context, id shared.MaterialID, sub shared.SubjectID) (bool, error) {
+	kept, err := r.db.Queries(ctx).MaterialKeptElsewhere(ctx, sqlcgen.MaterialKeptElsewhereParams{
 		ID: string(id), SubjectID: string(sub),
 	})
 	if err != nil {
-		return false, fmt.Errorf("%s %s: %w", opMaterialHeld, id, MapError(ctx, err))
+		return false, fmt.Errorf("%s %s: %w", opMaterialKept, id, MapError(ctx, err))
 	}
-	return held != 0, nil
+	return kept != 0, nil
 }
 
 // DigestInUse reports whether the stored bytes with sha256 d are used by anything other than material except: another
@@ -81,8 +94,9 @@ func (r *MaterialRepository) DigestInUse(ctx context.Context, d material.Digest,
 }
 
 // PurgeFiledUnderRemoved deletes material id while it is still filed under sub, sub is still removed at or before
-// cutoff, and no note holds it as a part; false when not. Its lesson links and inspection go with it (CASCADE), its
-// works too; the summaries and assignments made from it stay with no material (SET NULL).
+// cutoff, no note holds it as a part and no work was written from it (works would cascade); false when not. Its lesson
+// links and inspection go with it (CASCADE); the summaries and assignments made from it stay with no material (SET
+// NULL).
 func (r *MaterialRepository) PurgeFiledUnderRemoved(ctx context.Context, id shared.MaterialID, sub shared.SubjectID,
 	cutoff time.Time) (bool, error) {
 	n, err := r.db.Queries(ctx).PurgeMaterialOfRemovedSubject(ctx, sqlcgen.PurgeMaterialOfRemovedSubjectParams{

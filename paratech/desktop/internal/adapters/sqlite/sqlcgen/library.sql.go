@@ -945,23 +945,26 @@ func (q *Queries) MaterialDigestInUse(ctx context.Context, arg MaterialDigestInU
 	return used, err
 }
 
-const materialInNoteOfOtherSubject = `-- name: MaterialInNoteOfOtherSubject :one
+const materialKeptElsewhere = `-- name: MaterialKeptElsewhere :one
 SELECT CAST(EXISTS (SELECT 1
                     FROM note_parts p
                     JOIN notes n ON n.id = p.note_id
-                    WHERE p.material_id = ?1 AND n.subject_id <> ?2) AS INTEGER) AS held
+                    WHERE p.material_id = ?1 AND n.subject_id <> ?2)
+         OR EXISTS (SELECT 1 FROM works w WHERE w.material_id = ?1) AS INTEGER) AS kept
 `
 
-type MaterialInNoteOfOtherSubjectParams struct {
+type MaterialKeptElsewhereParams struct {
 	ID        string
 	SubjectID string
 }
 
-func (q *Queries) MaterialInNoteOfOtherSubject(ctx context.Context, arg MaterialInNoteOfOtherSubjectParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, materialInNoteOfOtherSubject, arg.ID, arg.SubjectID)
-	var held int64
-	err := row.Scan(&held)
-	return held, err
+// The one check of a file that must survive its subject's purge: a note of another subject holds it, or a work was
+// written from it (works.material_id cascades, ADR-0027 keeps works).
+func (q *Queries) MaterialKeptElsewhere(ctx context.Context, arg MaterialKeptElsewhereParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, materialKeptElsewhere, arg.ID, arg.SubjectID)
+	var kept int64
+	err := row.Scan(&kept)
+	return kept, err
 }
 
 const purgeMaterialOfRemovedSubject = `-- name: PurgeMaterialOfRemovedSubject :execrows
@@ -971,6 +974,7 @@ WHERE materials.id = ?1
   AND EXISTS (SELECT 1 FROM subjects s
               WHERE s.id = materials.subject_id AND s.removed_at IS NOT NULL AND s.removed_at <= ?3)
   AND NOT EXISTS (SELECT 1 FROM note_parts p WHERE p.material_id = materials.id)
+  AND NOT EXISTS (SELECT 1 FROM works w WHERE w.material_id = materials.id)
 `
 
 type PurgeMaterialOfRemovedSubjectParams struct {
@@ -979,8 +983,8 @@ type PurgeMaterialOfRemovedSubjectParams struct {
 	Cutoff    sql.NullInt64
 }
 
-// A material held by any note is never deleted; its lesson links and inspection cascade, its works too, and the
-// summaries and assignments made from it keep their rows (SET NULL).
+// A material held by any note or the source of any work is never deleted (works would cascade); its lesson links and
+// inspection cascade, and the summaries and assignments made from it keep their rows (SET NULL).
 func (q *Queries) PurgeMaterialOfRemovedSubject(ctx context.Context, arg PurgeMaterialOfRemovedSubjectParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, purgeMaterialOfRemovedSubject, arg.ID, arg.SubjectID, arg.Cutoff)
 	if err != nil {
@@ -1007,6 +1011,24 @@ func (q *Queries) PurgeRemovedSubject(ctx context.Context, arg PurgeRemovedSubje
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const subjectStillDue = `-- name: SubjectStillDue :one
+SELECT CAST(EXISTS (SELECT 1 FROM subjects
+                    WHERE id = ?1 AND removed_at IS NOT NULL AND removed_at <= ?2) AS INTEGER)
+       AS due
+`
+
+type SubjectStillDueParams struct {
+	ID     string
+	Cutoff sql.NullInt64
+}
+
+func (q *Queries) SubjectStillDue(ctx context.Context, arg SubjectStillDueParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, subjectStillDue, arg.ID, arg.Cutoff)
+	var due int64
+	err := row.Scan(&due)
+	return due, err
 }
 
 const updateMaterial = `-- name: UpdateMaterial :execrows

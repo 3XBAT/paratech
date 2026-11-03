@@ -391,7 +391,9 @@ type Querier interface {
 	// not yet carried out that pinned them (its copy is made from them). One query on purpose: later stores of those
 	// bytes (note revisions, TASK-290/291) are added here.
 	MaterialDigestInUse(ctx context.Context, arg MaterialDigestInUseParams) (int64, error)
-	MaterialInNoteOfOtherSubject(ctx context.Context, arg MaterialInNoteOfOtherSubjectParams) (int64, error)
+	// The one check of a file that must survive its subject's purge: a note of another subject holds it, or a work was
+	// written from it (works.material_id cascades, ADR-0027 keeps works).
+	MaterialKeptElsewhere(ctx context.Context, arg MaterialKeptElsewhereParams) (int64, error)
 	// Next due QUEUED job admitted by job.ClaimFilter. The lists are JSON arrays of type names (an empty list is safe,
 	// unlike an empty IN list): a heavy type needs heavy_allowed or the run_now override of the job (AC-22).
 	// skip_ids lists rows the caller found unusable (corrupt) so that they do not block the jobs behind them.
@@ -403,8 +405,8 @@ type Querier interface {
 	// The purge of a deleted assignment (ADR-0029 addendum 2): its draft, the versions go with it (CASCADE). Only while
 	// the assignment is still deleted before the cutoff, so a restore that won keeps its draft.
 	PurgeDraftOfAssignment(ctx context.Context, arg PurgeDraftOfAssignmentParams) (int64, error)
-	// A material held by any note is never deleted; its lesson links and inspection cascade, its works too, and the
-	// summaries and assignments made from it keep their rows (SET NULL).
+	// A material held by any note or the source of any work is never deleted (works would cascade); its lesson links and
+	// inspection cascade, and the summaries and assignments made from it keep their rows (SET NULL).
 	PurgeMaterialOfRemovedSubject(ctx context.Context, arg PurgeMaterialOfRemovedSubjectParams) (int64, error)
 	// Deletes a note of a subject still removed at or before the cutoff (ms); its parts cascade, the materials stay.
 	PurgeNoteOfRemovedSubject(ctx context.Context, arg PurgeNoteOfRemovedSubjectParams) (int64, error)
@@ -417,6 +419,7 @@ type Querier interface {
 	// the files; summaries and lecture texts are keyed by the transcript id.
 	// What the recording holds, for the confirmation.
 	RecordingDeletionCounts(ctx context.Context, recordingID string) (RecordingDeletionCountsRow, error)
+	SubjectStillDue(ctx context.Context, arg SubjectStillDueParams) (int64, error)
 	// Compare-and-swap on the loaded version; the call and its intent never change.
 	UpdateAgentAction(ctx context.Context, arg UpdateAgentActionParams) (int64, error)
 	// Compare-and-swap on the loaded version.

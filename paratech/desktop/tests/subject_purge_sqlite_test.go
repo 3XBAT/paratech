@@ -2,8 +2,8 @@ package tests
 
 // Scenario test of the purge of a removed subject (TASK-308, ADR-0027 «Purge after 3 days») on the real stack: SQLite,
 // the artifact store, the library and the subject purge. Three days after the removal the subject is erased with its
-// notes, files, folders, aliases and ticket sets; its assignments, recordings and lessons stay, a file of it in a note
-// of another subject stays in «Входящие», and the name can be created again.
+// notes, files, folders, aliases and ticket sets; its assignments, recordings, lessons and works stay, a file of it in
+// a note of another subject or that a work was written from stays in «Входящие», and the name can be created again.
 
 import (
 	"context"
@@ -171,8 +171,14 @@ func TestRemovedSubjectIsPurgedAfterThreeDays(t *testing.T) {
 	s.file(t, phys.ID(), own.ID(), "tasks.txt", "Задачи по механике")
 	plan := s.file(t, phys.ID(), "", "plan.txt", "План семестра")
 	both := s.file(t, phys.ID(), "", "both.txt", "Общая часть")
+	source := s.file(t, phys.ID(), "", "essay-task.txt", "Тема реферата")
 	s.dayNote(t, "n-phys", phys.ID(), part)
 	s.dayNote(t, "n-chem", chem.ID(), both) // a file of «Физика» in a note of «Химия»
+
+	// A work the student is writing from a file of «Физика», with its first round.
+	s.exec(t, `INSERT INTO works (id, material_id, status, round, attempt, version, created_at, updated_at)
+		VALUES ('w1', ?, 'questions', 1, 1, 1, 1, 1)`, string(source))
+	s.exec(t, `INSERT INTO work_rounds (work_id, round, answer) VALUES ('w1', 1, '{}')`)
 
 	// Other contexts that name the subject: a lesson and a recording by its name, an assignment made from its file, a
 	// ticket set by its id.
@@ -224,20 +230,26 @@ func TestRemovedSubjectIsPurgedAfterThreeDays(t *testing.T) {
 		"SELECT count(*) FROM assignments WHERE id = 'a1' AND material_id IS NULL": 1,
 		"SELECT count(*) FROM recordings WHERE id = 'r1'":                          1,
 		"SELECT count(*) FROM schedule_entries WHERE id = 'l1'":                    1,
-		"SELECT count(*) FROM materials":                                           1,
+		"SELECT count(*) FROM materials":                                           2,
+		"SELECT count(*) FROM works WHERE id = 'w1'":                               1,
+		"SELECT count(*) FROM work_rounds WHERE work_id = 'w1'":                    1,
 	} {
 		if n := s.count(t, q); n != want {
 			t.Errorf("%s = %d, want %d", q, n, want)
 		}
 	}
 
-	// The file in the note of «Химия» is in «Входящие» with its bytes; the others' bytes are gone.
-	m, err := s.lib.Material(ctx, both)
-	if err != nil || !m.InInbox() || !m.Active() {
-		t.Fatalf("the file of the other note = %v, %v; want it active in the inbox", m, err)
+	// The file in the note of «Химия» and the source of the work are in «Входящие» with their bytes; the others' bytes
+	// are gone.
+	for name, id := range map[string]shared.MaterialID{"the file of the other note": both, "the source of the work": source} {
+		m, err := s.lib.Material(ctx, id)
+		if err != nil || !m.InInbox() || !m.Active() {
+			t.Fatalf("%s = %v, %v; want it active in the inbox", name, m, err)
+		}
 	}
 	for text, kept := range map[string]bool{
-		"Общая часть": true, "Ряд Тейлора сходится": false, "Задачи по механике": false, "План семестра": false,
+		"Общая часть": true, "Тема реферата": true, "Ряд Тейлора сходится": false, "Задачи по механике": false,
+		"План семестра": false,
 	} {
 		if got := s.stored(t, text); got != kept {
 			t.Errorf("bytes of %q stored = %v, want %v", text, got, kept)

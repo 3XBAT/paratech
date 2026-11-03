@@ -5,7 +5,8 @@
 //
 // Every step is its own transaction and repeatable, and every delete re-checks in the store that the subject is still
 // removed and past its window, so a crash anywhere is finished by the next run and a restore that won the race keeps
-// everything. Assignments, recordings, schedule lessons, answers and the agent journal are other contexts and stay.
+// everything. Assignments, works (their source files move to «Входящие»), recordings, schedule lessons, answers and
+// the agent journal are other contexts and stay.
 //
 // Rules that apply: ARCH-20..27.
 package subjectpurge

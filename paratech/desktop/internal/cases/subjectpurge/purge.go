@@ -17,7 +17,7 @@ import (
 const (
 	opPurge       = "subjectpurge: purge removed subject"
 	opPurged      = "subjectpurge: removed subject purged"
-	opKeptInInbox = "subjectpurge: file of a purged subject moved to the inbox: a note of another subject holds it"
+	opKeptInInbox = "subjectpurge: file of a purged subject moved to the inbox: a note of another subject or a work keeps it"
 )
 
 // ErrInvalidConfig is returned by New when a required port is missing.
@@ -168,18 +168,19 @@ func (p *Purger) purgeMaterials(ctx context.Context, sub shared.SubjectID, cutof
 // store deletes only if it is still filed under sub and no note holds it. A crash or a failed delete in between leaves
 // the row, so the next run finds it and deletes the bytes again (a missing file is no error).
 //
-// A file that a note of another subject holds is kept and moved to «Входящие» (ADR-0027): the note stays whole, and
-// its subject's folder could not hold it.
+// A file that a note of another subject holds, or that a work was written from, is kept and moved to «Входящие»
+// (ADR-0027 keeps notes of other subjects whole and works out of the purge; works.material_id would cascade).
 //
+// The subject is re-checked right before the bytes go: a restore after the listing (a clock set back) keeps them.
 // One race is left: the same bytes uploaded again while the bytes are deleted can make the import keep the material
 // (it moves a hidden one to «Входящие») with its file gone; the store's re-check then keeps the row, and the next
 // upload of those bytes writes the file again (library.Service.Import repairs a missing file).
 func (p *Purger) purgeMaterial(ctx context.Context, m *material.Material, sub shared.SubjectID, cutoff time.Time) error {
-	held, err := p.materials.PartOfOtherNote(ctx, m.ID(), sub)
+	kept, err := p.materials.KeptElsewhere(ctx, m.ID(), sub)
 	if err != nil {
 		return err
 	}
-	if held {
+	if kept {
 		return p.moveToInbox(ctx, m)
 	}
 
@@ -188,6 +189,13 @@ func (p *Purger) purgeMaterial(ctx context.Context, m *material.Material, sub sh
 		return err
 	}
 	if !used {
+		due, err := p.subjects.StillDue(ctx, sub, cutoff)
+		if err != nil {
+			return err
+		}
+		if !due {
+			return nil
+		}
 		if err := p.deleteBlobs(ctx, m.Digest()); err != nil {
 			return err
 		}

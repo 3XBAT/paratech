@@ -17,8 +17,9 @@ import (
 var due = t0.Add(subject.RestoreWindow)
 
 // library is s1 «Физика» removed at t0, s2 «Химия» active, s3 «История» removed an hour later; the notes n1 (s1: m1),
-// n3 (s2: m4), n4 (s2: m5) and n5 (s3: m8); m1..m5 and m8 filed under s1 (m3 and m5 removed), m6 in «Входящие», m7
-// under s3; a send of a work pinned the bytes of m2; the ticket sets ts1 of s1 and ts2 of s2.
+// n3 (s2: m4), n4 (s2: m5) and n5 (s3: m8); m1..m5, m8 and m9 filed under s1 (m3 and m5 removed), m6 in «Входящие»,
+// m7 under s3; a send of a work pinned the bytes of m2; a work was written from m9; the ticket sets ts1 of s1 and ts2
+// of s2.
 func library(t *testing.T) *store {
 	t.Helper()
 	st := newStore()
@@ -31,7 +32,7 @@ func library(t *testing.T) *store {
 		removed bool
 	}{
 		{"m1", "s1", false}, {"m2", "s1", false}, {"m3", "s1", true}, {"m4", "s1", false}, {"m5", "s1", true},
-		{"m6", "", false}, {"m7", "s3", false}, {"m8", "s1", false},
+		{"m6", "", false}, {"m7", "s3", false}, {"m8", "s1", false}, {"m9", "s1", false},
 	} {
 		d := st.addMaterial(t, m.id, m.sub, m.removed)
 		if m.id == "m2" {
@@ -42,6 +43,7 @@ func library(t *testing.T) *store {
 	st.notes["n3"] = fakeNote{sub: "s2", parts: []shared.MaterialID{"m4"}}
 	st.notes["n4"] = fakeNote{sub: "s2", parts: []shared.MaterialID{"m5"}}
 	st.notes["n5"] = fakeNote{sub: "s3", parts: []shared.MaterialID{"m8", "m7"}}
+	st.works["m9"] = true
 	st.ticketSets["ts1"] = "s1"
 	st.ticketSets["ts2"] = "s2"
 	return st
@@ -61,11 +63,11 @@ func checkPurged(t *testing.T, st *store) {
 	if got := sortedKeys(st.ticketSets); !slices.Equal(got, []shared.TicketSetID{"ts2"}) {
 		t.Errorf("ticket sets = %v, want ts2", got)
 	}
-	if got := sortedKeys(st.materials); !slices.Equal(got, []shared.MaterialID{"m4", "m5", "m6", "m7", "m8"}) {
-		t.Errorf("materials = %v, want m4 m5 m6 m7 m8", got)
+	if got := sortedKeys(st.materials); !slices.Equal(got, []shared.MaterialID{"m4", "m5", "m6", "m7", "m8", "m9"}) {
+		t.Errorf("materials = %v, want m4 m5 m6 m7 m8 m9", got)
 	}
-	// The files a note of another subject holds are in «Входящие» with their status.
-	for id, active := range map[shared.MaterialID]bool{"m4": true, "m5": false, "m8": true} {
+	// The files a note of another subject holds or a work was written from are in «Входящие» with their status.
+	for id, active := range map[shared.MaterialID]bool{"m4": true, "m5": false, "m8": true, "m9": true} {
 		m := st.materials[id]
 		if m.Subject != "" || m.Folder != "" || (m.Status == material.StatusActive) != active {
 			t.Errorf("%s: subject %q folder %q status %s, want in the inbox, active %v", id, m.Subject, m.Folder, m.Status, active)
@@ -75,7 +77,7 @@ func checkPurged(t *testing.T, st *store) {
 		t.Errorf("m7 of s3 (not due) moved to %q", m.Subject)
 	}
 	// The bytes: gone for m1 and m3, kept for m2 (pinned by a send) and every material that stays.
-	for id, kept := range map[string]bool{"m1": false, "m2": true, "m3": false, "m4": true, "m5": true, "m6": true, "m7": true, "m8": true} {
+	for id, kept := range map[string]bool{"m1": false, "m2": true, "m3": false, "m4": true, "m5": true, "m6": true, "m7": true, "m8": true, "m9": true} {
 		for _, ref := range refsOf(t, material.DigestOf([]byte("content of "+id))) {
 			if st.files[ref] != kept {
 				t.Errorf("%s: file %s kept = %v, want %v", id, ref, st.files[ref], kept)
@@ -136,7 +138,17 @@ func TestPurgeFailureMidwayIsFinishedByTheNextRun(t *testing.T) {
 		{"ticket set ts1", nil},
 		{"list materials", nil},
 		{"held m4", nil},
+		{"held m9", func(t *testing.T, st *store) {
+			if st.materials["m9"].Subject != "s1" || !st.files[refsOf(t, st.materials["m9"].Digest)[0]] {
+				t.Error("m9 moved or lost its bytes although its check failed")
+			}
+		}},
 		{"in use m1", nil},
+		{"still due s1", func(t *testing.T, st *store) {
+			if _, ok := st.materials["m1"]; !ok || !st.files[refsOf(t, st.materials["m1"].Digest)[0]] {
+				t.Error("m1 lost its row or bytes although the re-check of its subject failed")
+			}
+		}},
 		{"blob " + m1Blob.String(), func(t *testing.T, st *store) {
 			if _, ok := st.materials["m1"]; !ok {
 				t.Error("the row of m1 was deleted although its file was not")
@@ -196,12 +208,13 @@ func TestPurgeOneFailingSubjectDoesNotStopAnother(t *testing.T) {
 }
 
 // A subject the store no longer has due (restored when the clock was set back, before its notes were reached) keeps
-// its rows: every delete re-checks it.
+// its rows and the bytes of its files: every delete re-checks it, the bytes right before they go.
 func TestPurgeStoreGuardKeepsARestoredSubject(t *testing.T) {
 	st := newStore()
 	st.addSubject(t, "s1", "Физика", t0)
 	st.notes["n1"] = fakeNote{sub: "s1"}
 	st.ticketSets["ts1"] = "s1"
+	d := st.addMaterial(t, "m1", "s1", false)
 	p := newPurger(t, st, due)
 
 	list, err := fakeSubjects{st}.ListRemoved(context.Background())
@@ -216,8 +229,41 @@ func TestPurgeStoreGuardKeepsARestoredSubject(t *testing.T) {
 	if err != nil || done {
 		t.Fatalf("purge of a restored subject = %v, %v; want false, nil", done, err)
 	}
-	if len(st.subjects) != 1 || len(st.notes) != 1 || len(st.ticketSets) != 1 {
+	if len(st.subjects) != 1 || len(st.notes) != 1 || len(st.ticketSets) != 1 || len(st.materials) != 1 {
 		t.Fatal("a restored subject lost rows")
+	}
+	for _, ref := range refsOf(t, d) {
+		if !st.files[ref] {
+			t.Errorf("a restored subject lost the file %s", ref)
+		}
+	}
+	if st.calls["blob"] != 0 {
+		t.Errorf("blob deletes = %d, want none", st.calls["blob"])
+	}
+}
+
+// A file a work was written from is kept in «Входящие» with its bytes (works.material_id would cascade), and the
+// subject row still goes.
+func TestPurgeKeepsTheSourceOfAWork(t *testing.T) {
+	st := newStore()
+	st.addSubject(t, "s1", "Физика", t0)
+	d := st.addMaterial(t, "m1", "s1", true)
+	st.works["m1"] = true
+
+	if n, err := newPurger(t, st, due).Purge(context.Background()); err != nil || n != 1 {
+		t.Fatalf("Purge = %d, %v; want 1, nil", n, err)
+	}
+	if _, ok := st.subjects["s1"]; ok {
+		t.Fatal("the subject row stayed")
+	}
+	m, ok := st.materials["m1"]
+	if !ok || m.Subject != "" || m.Folder != "" || m.Status == material.StatusActive {
+		t.Fatalf("m1 = %+v, %v; want removed in the inbox", m, ok)
+	}
+	for _, ref := range refsOf(t, d) {
+		if !st.files[ref] {
+			t.Errorf("the source of a work lost the file %s", ref)
+		}
 	}
 }
 

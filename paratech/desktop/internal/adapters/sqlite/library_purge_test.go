@@ -9,14 +9,23 @@ import (
 	"time"
 
 	"paratech/desktop/internal/domain/library/material"
+	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
 )
 
 // purgeExtras adds to removalLibrary what the purge of s1 must and must not touch: lesson l1 «Физика» with recording
-// r1, an assignment a1 and a summary made from m2, m2 linked to l1 with an inspection and a work, a send of a work that
-// pinned the bytes of m1, a teacher of s1, and the ticket sets ts1 of s1 and ts2 of s2.
+// r1, an assignment a1 and a summary made from m2, m2 linked to l1 with an inspection, m5 under s1 that the work w1
+// (with a round) was written from, a send of a work that pinned the bytes of m1, a teacher of s1, and the ticket sets
+// ts1 of s1 and ts2 of s2.
 func purgeExtras(t *testing.T, db *DB) {
 	t.Helper()
+	m5 := newLibMaterial(t, "m5", "content of m5")
+	if _, err := m5.Place("s1", subject.SystemFolderID("s1", subject.SystemMaterials), libT0); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewMaterialRepository(db).Save(context.Background(), m5); err != nil {
+		t.Fatal(err)
+	}
 	for _, q := range []string{
 		`INSERT INTO schedule_entries (id, title, starts_at, ends_at, timezone, subject, created_at, updated_at)
 			VALUES ('l1', 'Лекция', 1000, 2000, 'Europe/Moscow', 'Физика', 1, 1)`,
@@ -30,7 +39,8 @@ func purgeExtras(t *testing.T, db *DB) {
 		`INSERT INTO material_inspections (material_id, text_sha256, status, attempt, created_at, updated_at)
 			VALUES ('m2', '` + strings.Repeat("a", 64) + `', 'refused', 1, 1, 1)`,
 		`INSERT INTO works (id, material_id, status, round, attempt, version, created_at, updated_at)
-			VALUES ('w1', 'm2', 'done', 1, 1, 1, 1, 1)`,
+			VALUES ('w1', 'm5', 'questions', 1, 1, 1, 1, 1)`,
+		`INSERT INTO work_rounds (work_id, round, answer) VALUES ('w1', 1, '{}')`,
 		`INSERT INTO proposals (id, kind, status, assignment_id, work_id, attachment_sha256, attachment_size, created_at, updated_at)
 			VALUES ('p1', 'send_work_email', 'VALIDATED', 'a1', 'w0', '` + string(material.DigestOf([]byte("content of m1"))) + `', 13, 1, 1)`,
 		`INSERT INTO subject_teachers (subject_id, role, name, email) VALUES ('s1', 'lecture', 'Иванов И. И.', 'teacher@example.test')`,
@@ -42,8 +52,8 @@ func purgeExtras(t *testing.T, db *DB) {
 }
 
 // Step by step as subjectpurge runs it: nothing goes before the cutoff passes the removal; then the notes, the ticket
-// sets, the files (one held by a note of s2 refuses, one moved to the inbox), the subject row last. The lesson, the
-// recording, the assignment and the summary stay.
+// sets, the files (one held by a note of s2 and one a work was written from refuse, both moved to the inbox), the
+// subject row last. The lesson, the recording, the assignment, the summary and the work with its round stay.
 func TestPurgeOfARemovedSubjectOnSQLite(t *testing.T) {
 	db, ctx := openTest(t, nil), context.Background()
 	removalLibrary(t, db)
@@ -61,8 +71,8 @@ func TestPurgeOfARemovedSubjectOnSQLite(t *testing.T) {
 		t.Fatalf("ListOfSubject = %v, %v", setIDs, err)
 	}
 	filed, err := materials.ListFiledUnder(ctx, "s1")
-	if err != nil || len(filed) != 3 {
-		t.Fatalf("ListFiledUnder = %d, %v; want m1 m2 m3, also hidden", len(filed), err)
+	if err != nil || len(filed) != 4 {
+		t.Fatalf("ListFiledUnder = %d, %v; want m1 m2 m3 m5, also hidden", len(filed), err)
 	}
 
 	// A cutoff a moment before the removal: every delete refuses.
@@ -79,6 +89,17 @@ func TestPurgeOfARemovedSubjectOnSQLite(t *testing.T) {
 	}
 
 	cutoff := removedAt
+	for c, want := range map[time.Time]bool{early: false, cutoff: true} {
+		if due, err := subjects.StillDue(ctx, "s1", c); err != nil || due != want {
+			t.Fatalf("StillDue(s1, %v) = %v, %v; want %v", c, due, err, want)
+		}
+	}
+	for _, id := range []shared.SubjectID{"s2", "s9"} {
+		if due, err := subjects.StillDue(ctx, id, cutoff); err != nil || due {
+			t.Fatalf("StillDue(%s, active or missing) = %v, %v", id, due, err)
+		}
+	}
+
 	for _, id := range noteIDs {
 		if done, err := notes.PurgeOfRemovedSubject(ctx, id, "s1", cutoff); err != nil || !done {
 			t.Fatalf("purge note %s = %v, %v", id, done, err)
@@ -91,10 +112,10 @@ func TestPurgeOfARemovedSubjectOnSQLite(t *testing.T) {
 		t.Fatalf("purge ticket set = %v, %v", done, err)
 	}
 
-	// m3 is a part of the note n2 of s2; m1 and m2 are held by no note now.
-	for id, want := range map[shared.MaterialID]bool{"m1": false, "m2": false, "m3": true} {
-		if held, err := materials.PartOfOtherNote(ctx, id, "s1"); err != nil || held != want {
-			t.Fatalf("PartOfOtherNote(%s) = %v, %v; want %v", id, held, err, want)
+	// m3 is a part of the note n2 of s2, w1 was written from m5; m1 and m2 are kept by nothing now.
+	for id, want := range map[shared.MaterialID]bool{"m1": false, "m2": false, "m3": true, "m5": true} {
+		if kept, err := materials.KeptElsewhere(ctx, id, "s1"); err != nil || kept != want {
+			t.Fatalf("KeptElsewhere(%s) = %v, %v; want %v", id, kept, err, want)
 		}
 	}
 	// The bytes of m1 are pinned by a send not yet carried out; those of m2 by nothing.
@@ -113,9 +134,13 @@ func TestPurgeOfARemovedSubjectOnSQLite(t *testing.T) {
 		t.Fatalf("DigestInUse(m1, send carried out) = %v, %v", used, err)
 	}
 
-	// m3 refuses (held by n2), m2 goes with its links, inspection and work; its assignment and summary stay.
+	// m3 refuses (held by n2), m5 refuses (w1 would cascade), m2 goes with its links and inspection; its assignment and
+	// summary stay.
 	if done, err := materials.PurgeFiledUnderRemoved(ctx, "m3", "s1", cutoff); err != nil || done {
 		t.Fatalf("purge of a material held by a note = %v, %v", done, err)
+	}
+	if done, err := materials.PurgeFiledUnderRemoved(ctx, "m5", "s1", cutoff); err != nil || done {
+		t.Fatalf("purge of the source of a work = %v, %v", done, err)
 	}
 	if done, err := materials.PurgeFiledUnderRemoved(ctx, "m2", "s1", cutoff); err != nil || !done {
 		t.Fatalf("purge m2 = %v, %v", done, err)
@@ -128,15 +153,17 @@ func TestPurgeOfARemovedSubjectOnSQLite(t *testing.T) {
 	if _, err := subjects.PurgeRemoved(ctx, "s1", cutoff); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("PurgeRemoved with files under it = %v, want ErrConflict", err)
 	}
-	m3, err := materials.GetByDigest(ctx, material.DigestOf([]byte("content of m3")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m3.MoveToInbox(libT0.Add(4 * 24 * time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if err := materials.Save(ctx, m3); err != nil {
-		t.Fatal(err)
+	for _, id := range []string{"m3", "m5"} {
+		m, err := materials.GetByDigest(ctx, material.DigestOf([]byte("content of "+id)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := m.MoveToInbox(libT0.Add(4 * 24 * time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if err := materials.Save(ctx, m); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if done, err := materials.PurgeFiledUnderRemoved(ctx, "m1", "s1", cutoff); err != nil || !done {
 		t.Fatalf("purge m1 = %v, %v", done, err)
@@ -158,7 +185,9 @@ func TestPurgeOfARemovedSubjectOnSQLite(t *testing.T) {
 		"SELECT count(*) FROM materials WHERE subject_id = 's1' OR id IN ('m1', 'm2')":    0,
 		"SELECT count(*) FROM material_lessons WHERE material_id = 'm2'":                  0,
 		"SELECT count(*) FROM material_inspections WHERE material_id = 'm2'":              0,
-		"SELECT count(*) FROM works WHERE id = 'w1'":                                      0,
+		"SELECT count(*) FROM works WHERE id = 'w1' AND material_id = 'm5'":               1,
+		"SELECT count(*) FROM work_rounds WHERE work_id = 'w1'":                           1,
+		"SELECT count(*) FROM materials WHERE id = 'm5' AND subject_id IS NULL":           1,
 		"SELECT count(*) FROM ticket_sets WHERE subject_id = 's1'":                        0,
 		"SELECT count(*) FROM ticket_sets WHERE id = 'ts2'":                               1,
 		"SELECT count(*) FROM materials WHERE id = 'm3' AND subject_id IS NULL":           1,
@@ -190,6 +219,9 @@ func TestPurgeKeepsARestoredSubjectOnSQLite(t *testing.T) {
 	setRemoved(t, subjects, time.Time{})
 
 	late := libT0.Add(30 * 24 * time.Hour)
+	if due, err := subjects.StillDue(ctx, "s1", late); err != nil || due {
+		t.Fatalf("StillDue of a restored subject = %v, %v", due, err)
+	}
 	if done, err := notes.PurgeOfRemovedSubject(ctx, "n1", "s1", late); err != nil || done {
 		t.Fatalf("purge a note of a restored subject = %v, %v", done, err)
 	}

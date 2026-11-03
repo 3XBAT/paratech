@@ -24,14 +24,15 @@ type fakeNote struct {
 }
 
 // store is the library on fakes: it keeps the guards of the sqlite adapter (still removed at or before the cutoff,
-// the foreign keys of the subject row, a material held by a note is never deleted).
+// the foreign keys of the subject row, a material held by a note or the source of a work is never deleted).
 type store struct {
 	mu         sync.Mutex
 	subjects   map[shared.SubjectID]subject.State
 	notes      map[shared.NoteID]fakeNote
 	ticketSets map[shared.TicketSetID]shared.SubjectID
 	materials  map[shared.MaterialID]material.State
-	pinned     map[material.Digest]bool // the digests a send of a work not yet carried out pinned
+	pinned     map[material.Digest]bool   // the digests a send of a work not yet carried out pinned
+	works      map[shared.MaterialID]bool // the materials a work was written from
 	files      map[string]bool
 
 	// fail holds an error for the next call of an operation ("note n1", "blob materials/…", "subject s1", …).
@@ -44,7 +45,8 @@ func newStore() *store {
 	return &store{
 		subjects: map[shared.SubjectID]subject.State{}, notes: map[shared.NoteID]fakeNote{},
 		ticketSets: map[shared.TicketSetID]shared.SubjectID{}, materials: map[shared.MaterialID]material.State{},
-		pinned: map[material.Digest]bool{}, files: map[string]bool{}, fail: map[string]error{}, calls: map[string]int{},
+		pinned: map[material.Digest]bool{}, works: map[shared.MaterialID]bool{}, files: map[string]bool{},
+		fail: map[string]error{}, calls: map[string]int{},
 	}
 }
 
@@ -123,6 +125,15 @@ func (f fakeSubjects) PurgeRemoved(_ context.Context, id shared.SubjectID, cutof
 	}
 	delete(f.subjects, id)
 	return true, nil
+}
+
+func (f fakeSubjects) StillDue(_ context.Context, id shared.SubjectID, cutoff time.Time) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.hit("still due", "still due "+string(id)); err != nil {
+		return false, err
+	}
+	return f.due(id, cutoff), nil
 }
 
 type fakeNotes struct{ *store }
@@ -207,11 +218,14 @@ func (f fakeMaterials) ListFiledUnder(_ context.Context, sub shared.SubjectID) (
 	return out, nil
 }
 
-func (f fakeMaterials) PartOfOtherNote(_ context.Context, id shared.MaterialID, sub shared.SubjectID) (bool, error) {
+func (f fakeMaterials) KeptElsewhere(_ context.Context, id shared.MaterialID, sub shared.SubjectID) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.hit("held", "held "+string(id)); err != nil {
 		return false, err
+	}
+	if f.works[id] {
+		return true, nil
 	}
 	for _, n := range f.notes {
 		if n.sub != sub && slices.Contains(n.parts, id) {
@@ -262,7 +276,7 @@ func (f fakeMaterials) PurgeFiledUnderRemoved(_ context.Context, id shared.Mater
 		return false, err
 	}
 	st, ok := f.materials[id]
-	if !ok || st.Subject != sub || !f.due(sub, cutoff) {
+	if !ok || st.Subject != sub || !f.due(sub, cutoff) || f.works[id] {
 		return false, nil
 	}
 	for _, n := range f.notes {
