@@ -633,17 +633,17 @@ test("recording and task rows share one grid: fixed status, button and «⋯» t
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const tracks = [...css.matchAll(/\.arows > \.row \{ grid-template-columns: ([^;]+); \}/g)].map((m) => m[1]);
   assert.deepEqual(tracks, [
-    "minmax(0, 1fr) var(--arow-st) calc(var(--arow-btn) + 4px + var(--arow-menu))",
+    "minmax(min(16rem, 100%), 1fr) var(--arow-st) calc(var(--arow-btn) + 4px + var(--arow-menu))",
     "minmax(0, 1fr) calc(var(--arow-btn) + 4px + var(--arow-menu))",
     "minmax(0, 1fr)",
   ], "only the title flexes, wide and narrow; one column when very narrow");
-  assert.match(css, /\.arows \{ --arow-st: 17rem; --arow-btn: 14rem; --arow-menu: 32px;/);
+  assert.match(css, /\.arows \{ --arow-st: 13rem; --arow-btn: 10rem; --arow-menu: 32px;/);
   assert.match(css, /\.arows > \.row > \.acts \{ display: grid; grid-template-columns: var\(--arow-btn\) var\(--arow-menu\);/);
   assert.match(css, /\.arows > \.row > \.acts > \.btn, \.arows > \.row > \.acts > \.btn-with-reason \{ grid-column: 1; width: 100%; \}/, "one button width");
   assert.match(css, /\.arows > \.row > \.acts > \.mmenu \{ grid-column: 2; \}/, "«⋯» in its own slot, also without a button");
   // Only the row's own actions cell: a descendant rule would also stack the advice's «Переключиться»/«Оставить».
   assert.ok(!/\.arows\s+\.acts/.test(css), "no descendant .arows .acts rule");
-  assert.match(css, /@container app \(max-width: 1000px\) \{\s*\.arows > \.row \{[^}]*\}\s*\.arows > \.row > \.row-main \{ grid-column: 1 \/ -1; \}/);
+  assert.match(css, /@container app \(max-width: 900px\) \{\s*\.arows > \.row \{[^}]*\}\s*\.arows > \.row > \.row-main \{ grid-column: 1 \/ -1; \}/);
   assert.match(css, /@container app \(max-width: 720px\) \{\s*\.arows > \.row \{ grid-template-columns: minmax\(0, 1fr\); \}\s*\.arows > \.row > \.acts \{ justify-self: end; \}/, "very narrow: one column");
 });
 

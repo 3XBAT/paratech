@@ -32,7 +32,7 @@ const running = (over = {}) => ({
 
 test("the rail is icons only, 64 px wide everywhere the width is assumed", () => {
   assert.match(src("styles.css"), /\.shell \{[^}]*grid-template-columns: 64px minmax\(0, 1fr\)/);
-  assert.match(src("agent/agent.css"), /\.shell\.with-agent \{[^}]*grid-template-columns: 64px minmax\(0, 1fr\) var\(--ag-w, 340px\)/);
+  assert.match(src("agent/agent.css"), /\.shell\.with-agent \{[^}]*grid-template-columns: 64px minmax\(0, 1fr\) 0/);
   assert.match(src("styles.css"), /\.toast-host \{[^}]*left: 64px/);
   assert.equal(reservedWidth, 64 + 420);
   assert.doesNotMatch(src("styles.css"), /grid-template-columns: 72px/);

@@ -705,8 +705,8 @@ dialog.dialog:focus { outline: none; }
 /* «Записи» (TASK-098): one row grid for every card of both sections. Only the title track flexes; the status,
    button and «⋯» tracks are fixed, so the columns start at the same line in separate cards too (a subgrid per card
    sizes its tracks by that card's content). The «⋯» slot exists in every row, empty without a menu. */
-.arows { --arow-st: 17rem; --arow-btn: 14rem; --arow-menu: 32px; overflow: visible; }
-.arows > .row { grid-template-columns: minmax(0, 1fr) var(--arow-st) calc(var(--arow-btn) + 4px + var(--arow-menu)); }
+.arows { --arow-st: 13rem; --arow-btn: 10rem; --arow-menu: 32px; overflow: visible; }
+.arows > .row { grid-template-columns: minmax(min(16rem, 100%), 1fr) var(--arow-st) calc(var(--arow-btn) + 4px + var(--arow-menu)); }
 /* Child combinators: only the row's own actions cell, not the «Переключиться»/«Оставить» of the advice in .row-below. */
 .arows > .row > .acts { display: grid; grid-template-columns: var(--arow-btn) var(--arow-menu); gap: 4px; }
 .arows > .row > .acts > .btn, .arows > .row > .acts > .btn-with-reason { grid-column: 1; width: 100%; }
@@ -716,7 +716,7 @@ dialog.dialog:focus { outline: none; }
 .group-title + .arows-sub { margin-top: 0; }
 /* Narrower window (also 150 % scaling on a small screen): the title across the row, then the status and the actions,
    still on shared tracks. It switches earlier than other lists: the fixed tracks would squeeze the title. */
-@container app (max-width: 1000px) {
+@container app (max-width: 900px) {
   .arows > .row { grid-template-columns: minmax(0, 1fr) calc(var(--arow-btn) + 4px + var(--arow-menu)); }
   .arows > .row > .row-main { grid-column: 1 / -1; }
 }
