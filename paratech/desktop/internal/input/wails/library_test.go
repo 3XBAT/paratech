@@ -31,6 +31,10 @@ type fakeLibrary struct {
 	calls    []string
 	upload   library.Upload
 	created  library.NewSubject
+	// discarded is the answer of DiscardSubject; removed the subjects RemovedSubject finds, removedErr its failure.
+	discarded  library.Discarded
+	removed    map[shared.SubjectID]*subject.Subject
+	removedErr error
 }
 
 func (f *fakeLibrary) note(format string, args ...any) {

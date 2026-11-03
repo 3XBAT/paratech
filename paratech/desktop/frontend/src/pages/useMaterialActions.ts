@@ -1,8 +1,9 @@
 import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { type LibraryApi, type LibraryMaterial, type LibrarySubject, libraryErrorText } from "../bindings/library.js";
+import { type LibraryApi, type LibraryMaterial, type LibrarySubject, libraryErrorText, removedNameOf } from "../bindings/library.js";
 import type { LibraryInboxApi } from "../bindings/libraryInbox.js";
 import { subjectsKey, type UndoItem } from "../libraryInboxView.js";
 import { type HintSnapshot, HintScheduler, MaterialFlow } from "../materialFlow.js";
+import { restoreNeedsReload, runRestore } from "../subjectRemovalView.js";
 import type { FileActions } from "./FileRows.js";
 
 const emptyHints: HintSnapshot = { hints: new Map(), pending: new Set() };
@@ -73,8 +74,20 @@ export function useMaterialActions(p: {
         setSubjects((l) => [...(l ?? []), s]);
         return { error: "", subject: s };
       } catch (err) {
-        return { error: libraryErrorText(err), subject: null };
+        const removed = removedNameOf(err);
+        return removed === null ? { error: libraryErrorText(err), subject: null } : { error: libraryErrorText(err), subject: null, removed };
       }
+    },
+    restoreSubject: async (removed) => {
+      const out = await runRestore(api, removed.subjectId, removed.version);
+      if (out.subject !== null) {
+        const s = out.subject;
+        setSubjects((l) => (l === null || l.some((x) => x.id === s.id) ? l : [...l, s]));
+      }
+      if (out.state.phase === "done" || restoreNeedsReload(out.state)) {
+        refresh();
+      }
+      return out;
     },
     refresh,
   };

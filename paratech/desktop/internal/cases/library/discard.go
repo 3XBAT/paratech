@@ -76,6 +76,25 @@ func (s *Service) RestoreSubject(ctx context.Context, id shared.SubjectID, expec
 	return sub, nil
 }
 
+// RemovedSubject reads a removed subject for «Вернуть» where only its ID is known (a *RemovedNameError, a skipped
+// schedule row): RestoreSubject takes its version. A missing or active one is ErrSubjectNotFound. Errors:
+// ErrInvalidRequest, ErrSubjectNotFound, ErrUnavailable.
+func (s *Service) RemovedSubject(ctx context.Context, id shared.SubjectID) (*subject.Subject, error) {
+	if id.Validate() != nil {
+		return nil, ErrInvalidRequest
+	}
+	sub, err := s.subjects.GetAny(ctx, id)
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return nil, ErrSubjectNotFound
+	case err != nil:
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	case sub.Status() != subject.StatusRemoved:
+		return nil, ErrSubjectNotFound
+	}
+	return sub, nil
+}
+
 // saveSeen saves a subject changed at the version the student saw: a save that lost is ErrSubjectChanged.
 func (s *Service) saveSeen(ctx context.Context, sub *subject.Subject) error {
 	switch err := s.subjects.Save(ctx, sub); {

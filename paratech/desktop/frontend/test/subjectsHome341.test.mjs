@@ -335,9 +335,10 @@ test("the schedule review keeps its state when the first subjects are made: one 
   const page = src("pages/SubjectsPage.tsx");
   // The empty view and the tree view are the last child of one <section>; the review is its 3rd child (after the
   // optional head and the load error) in both, so React does not remount it when view.kind goes empty -> subject.
+  // TASK-289: the removal block (the lines with «Вернуть» and the question) is one more slot of the same kind before the views.
   assert.equal((page.match(/\{reviewPanel\}/g) ?? []).length, 1, "drawn in one place only");
   assert.equal((page.match(/<section className="page">/g) ?? []).length, 2, "the loading return and the one return of the views");
-  assert.match(page, /<section className="page">\s*\{tilesHead\}\s*\{loadFailed\}\s*\{reviewPanel\}\s*\{scheduleLines\}\s*\{tiles \? tilesBody : treeView\}\s*<\/section>/);
+  assert.match(page, /<section className="page">\s*\{tilesHead\}\s*\{loadFailed\}\s*\{reviewPanel\}\s*\{scheduleLines\}\s*\{removalBlock\}\s*\{tiles \? tilesBody : treeView\}\s*<\/section>/);
   assert.match(page, /<ScheduleSubjectsReview\s+key="schedule-review"/, "and an explicit key besides");
 });
 
