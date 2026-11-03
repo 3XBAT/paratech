@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -92,9 +93,9 @@ func TestTodayLessonCallLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	uc := &fakeToday{today: todayfeed.Today{Lessons: []todayfeed.LessonRow{
-		{Lesson: "l1", Subject: "Матанализ", SubjectID: "s1", SubjectName: "Математический анализ", CallLink: link},
-		{Lesson: "l2", Subject: "Химия", SubjectID: "s2", SubjectName: "Химия"},
-		{Lesson: "l3", Subject: "Физкультура"},
+		{Lesson: "l1", Subject: "Матанализ", SubjectState: todayfeed.SubjectKnown, SubjectID: "s1", SubjectName: "Математический анализ", CallLink: link},
+		{Lesson: "l2", Subject: "Химия", SubjectState: todayfeed.SubjectKnown, SubjectID: "s2", SubjectName: "Химия"},
+		{Lesson: "l3", Subject: "Физкультура", SubjectState: todayfeed.SubjectUnknown},
 	}}}
 	got, err := NewTodayService(uc, discard()).Today(context.Background())
 	if err != nil {
@@ -115,6 +116,32 @@ func TestTodayLessonCallLink(t *testing.T) {
 	if err != nil || strings.Contains(string(raw), "FakePwd42") ||
 		!strings.Contains(string(raw), `"subjectId":"s1","subjectName":"Математический анализ","hasCallLink":true,"callLinkHost":"meet.example.org"`) {
 		t.Fatalf("lessons JSON = %s, %v", raw, err)
+	}
+}
+
+// TASK-364: the subject state reaches the card as a code; one the binding does not know offers nothing.
+func TestTodayLessonSubjectState(t *testing.T) {
+	states := []todayfeed.SubjectState{
+		todayfeed.SubjectNone, todayfeed.SubjectUnknown, todayfeed.SubjectAmbiguous, todayfeed.SubjectKnown,
+		todayfeed.SubjectUnavailable, "", "weird",
+	}
+	want := []string{"none", "unknown", "ambiguous", "known", "unavailable", "unavailable", "unavailable"}
+	uc := &fakeToday{}
+	for i, st := range states {
+		uc.today.Lessons = append(uc.today.Lessons, todayfeed.LessonRow{Lesson: shared.LessonID(fmt.Sprint("l", i)), SubjectState: st})
+	}
+	got, err := NewTodayService(uc, discard()).Today(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, l := range got.Lessons {
+		if l.SubjectState != want[i] {
+			t.Errorf("%q = %q, want %q", states[i], l.SubjectState, want[i])
+		}
+	}
+	raw, err := json.Marshal(got.Lessons[0])
+	if err != nil || !strings.Contains(string(raw), `"subject":"","subjectState":"none","subjectId":""`) {
+		t.Fatalf("JSON = %s, %v", raw, err)
 	}
 }
 

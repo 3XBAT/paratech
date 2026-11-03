@@ -15,7 +15,7 @@ import {
   parseCreateWithCallLink,
   parseSubject,
 } from "../.test-build/bindings/library.js";
-import { parseLesson } from "../.test-build/bindings/today.js";
+import { parseLesson, subjectStates } from "../.test-build/bindings/today.js";
 
 const link = { link: "https://meet.example.org/j/1?pwd=FakePwd42", host: "meet.example.org" };
 
@@ -156,7 +156,27 @@ test("a lesson of «Сегодня» carries its library subject and the host of
   assert.throws(() => parseLesson({ ...base, subjectId: 1 }));
 
   const go = readFileSync(new URL("../../internal/input/wails/today.go", import.meta.url), "utf8");
-  for (const field of ["subjectId", "subjectName", "hasCallLink", "callLinkHost"]) {
+  for (const field of ["subjectState", "subjectId", "subjectName", "hasCallLink", "callLinkHost"]) {
     assert.match(go, new RegExp(`json:"${field}"`), field);
   }
+});
+
+test("a lesson of «Сегодня» tells the state of its subject; an unknown or inconsistent one offers nothing", () => {
+  const types = readFileSync(new URL("../../internal/cases/todayfeed/types.go", import.meta.url), "utf8");
+  const goStates = [...types.matchAll(/^\s+Subject\w+\s+SubjectState = "([^"]*)"/gm)].map((m) => m[1]);
+  assert.deepEqual([...subjectStates].sort(), [...goStates].sort());
+
+  const base = { id: "l1", title: "Физика", subject: "Физика", kind: "lecture", teacher: "", start: "", end: "", post: null };
+  for (const st of ["none", "unknown", "ambiguous", "unavailable"]) {
+    assert.equal(parseLesson({ ...base, subjectState: st, subjectId: "" }).subjectState, st, st);
+  }
+  assert.equal(parseLesson({ ...base, subjectState: "known", subjectId: "s1" }).subjectState, "known");
+  // "known" with no subject would offer a control with nowhere to keep the link.
+  assert.equal(parseLesson({ ...base, subjectState: "known", subjectId: "" }).subjectState, "unavailable");
+  for (const st of ["weird", "toString", 1, null]) {
+    assert.equal(parseLesson({ ...base, subjectState: st, subjectId: "" }).subjectState, "unavailable", String(st));
+  }
+  // An older core without the field: told from the subject alone.
+  assert.equal(parseLesson({ ...base, subjectId: "s1" }).subjectState, "known");
+  assert.equal(parseLesson(base).subjectState, "unavailable");
 });

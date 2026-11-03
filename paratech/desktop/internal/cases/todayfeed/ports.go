@@ -90,8 +90,9 @@ type ProposalList interface {
 // SubjectResolver maps the subject strings of lessons to the subjects of the library, which key the agent threads
 // (ADR-0024, PRD section 9). Implemented by cases/library, wired by the app.
 type SubjectResolver interface {
-	// ResolveSubjects returns the library subject of each name that matches one (PRD section 9).
-	ResolveSubjects(ctx context.Context, names []string) (map[string]subjectmatch.Match, error)
+	// LookupSubjects tells how each name resolves: to one subject, to none, to several or not at all (no key); every
+	// name is in the result (PRD section 9).
+	LookupSubjects(ctx context.Context, names []string) (map[string]subjectmatch.Resolution, error)
 }
 
 // SubjectCallLinks reads the links to the online classes the student keeps on the subjects of the library (ADR-0032,

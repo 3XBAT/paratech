@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -102,22 +103,25 @@ func (f *fakePosts) ListUpdatedSince(_ context.Context, since time.Time, limit i
 
 // world holds the rest of the local state the ports read.
 type world struct {
-	t           *testing.T
-	clock       *testClock
-	posts       *fakePosts
-	transcripts map[shared.TranscriptID]*transcript.Transcript
-	summaries   map[shared.TranscriptID]bool
-	recordings  map[shared.RecordingID]*recording.Recording
-	lessons     map[shared.LessonID]*lesson.Lesson
-	homework    map[shared.TranscriptID][]*assignment.Assignment
-	deadlines   []today.Deadline
-	labels      map[shared.AssignmentID][2]string
-	proposals   []*proposal.Proposal
-	subjects    map[string]subjectmatch.Match
-	callLinks   map[shared.SubjectID]subject.CallLink
-	linkReads   int   // calls of CallLinks
-	failLinks   error // returned by CallLinks when set
-	failReads   error // returned by the reads of the screen when set
+	t            *testing.T
+	clock        *testClock
+	posts        *fakePosts
+	transcripts  map[shared.TranscriptID]*transcript.Transcript
+	summaries    map[shared.TranscriptID]bool
+	recordings   map[shared.RecordingID]*recording.Recording
+	lessons      map[shared.LessonID]*lesson.Lesson
+	homework     map[shared.TranscriptID][]*assignment.Assignment
+	deadlines    []today.Deadline
+	labels       map[shared.AssignmentID][2]string
+	proposals    []*proposal.Proposal
+	subjects     map[string]subjectmatch.Match
+	ambiguous    map[string]bool // names several subjects have
+	subjectReads int             // calls of LookupSubjects
+	failSubjects error           // returned by LookupSubjects when set
+	callLinks    map[shared.SubjectID]subject.CallLink
+	linkReads    int   // calls of CallLinks
+	failLinks    error // returned by CallLinks when set
+	failReads    error // returned by the reads of the screen when set
 }
 
 func newWorld(t *testing.T) *world {
@@ -126,7 +130,8 @@ func newWorld(t *testing.T) *world {
 		transcripts: map[shared.TranscriptID]*transcript.Transcript{}, summaries: map[shared.TranscriptID]bool{},
 		recordings: map[shared.RecordingID]*recording.Recording{}, lessons: map[shared.LessonID]*lesson.Lesson{},
 		homework: map[shared.TranscriptID][]*assignment.Assignment{}, labels: map[shared.AssignmentID][2]string{},
-		subjects: map[string]subjectmatch.Match{}, callLinks: map[shared.SubjectID]subject.CallLink{},
+		subjects: map[string]subjectmatch.Match{}, ambiguous: map[string]bool{},
+		callLinks: map[shared.SubjectID]subject.CallLink{},
 	}
 }
 
@@ -347,11 +352,24 @@ func (f worldProposals) ListByStatus(_ context.Context, st proposal.Status, limi
 
 type worldSubjects struct{ w *world }
 
-func (f worldSubjects) ResolveSubjects(_ context.Context, names []string) (map[string]subjectmatch.Match, error) {
-	out := map[string]subjectmatch.Match{}
+// LookupSubjects answers as the library does: every name is in the result; one with no letters or digits has no key.
+func (f worldSubjects) LookupSubjects(_ context.Context, names []string) (map[string]subjectmatch.Resolution, error) {
+	f.w.subjectReads++
+	if f.w.failSubjects != nil {
+		return nil, f.w.failSubjects
+	}
+	out := map[string]subjectmatch.Resolution{}
 	for _, n := range names {
-		if m, ok := f.w.subjects[n]; ok {
-			out[n] = m
+		m, ok := f.w.subjects[n]
+		switch {
+		case ok:
+			out[n] = subjectmatch.Resolution{Match: m, Outcome: subjectmatch.Matched}
+		case f.w.ambiguous[n]:
+			out[n] = subjectmatch.Resolution{Outcome: subjectmatch.Ambiguous}
+		case strings.Trim(n, " .-–") == "":
+			out[n] = subjectmatch.Resolution{Outcome: subjectmatch.NoKey}
+		default:
+			out[n] = subjectmatch.Resolution{Outcome: subjectmatch.NoMatch}
 		}
 	}
 	return out, nil

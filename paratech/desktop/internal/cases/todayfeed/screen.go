@@ -14,7 +14,9 @@ import (
 	"paratech/desktop/internal/domain/coursework/assignment"
 	"paratech/desktop/internal/domain/coursework/proposal"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
+	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/recording/recording"
+	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -25,6 +27,8 @@ const (
 	opThread    = "todayfeed: subject thread"
 	opLesson    = "todayfeed: live lesson of a post unread"
 	opLabel     = "todayfeed: assignment of a proposal unread"
+	opSubjects  = "todayfeed: library subjects of the day unread"
+	opCallLinks = "todayfeed: call links of the day unread"
 )
 
 // Screen reads the data of «Сегодня» and the posts of a subject thread. Everything is local: it works offline.
@@ -68,6 +72,23 @@ func (s *Screen) Today(ctx context.Context) (Today, error) {
 	if err != nil {
 		return fail(err)
 	}
+	list, err := s.lessons.ListStartingBetween(ctx, day, day.AddDate(0, 0, 1))
+	if err != nil {
+		return fail(err)
+	}
+	// The library only adds the subjects and the call links: when it cannot be read the screen still shows the day
+	// («Пары дня», «Записать»), with no subject and no link control.
+	names := subjectNames(views)
+	for _, l := range list {
+		names = appendName(names, l.Content().Subject)
+	}
+	found, err := s.lookup(ctx, names)
+	if err != nil {
+		s.log.Warn(opSubjects, slog.String("result", "subjects unread"))
+		found = nil
+	}
+	withSubjects(views, found)
+
 	out := Today{Day: day, Posts: []PostView{}, Done: []DoneItem{}}
 	summaryYesterday := false
 	for _, v := range views {
@@ -82,9 +103,8 @@ func (s *Screen) Today(ctx context.Context) (Today, error) {
 		}
 	}
 
-	if out.Lessons, err = s.lessonsOf(ctx, day, views); err != nil {
-		return fail(err)
-	}
+	out.Lessons = lessonsOf(list, day, views)
+	s.lessonSubjects(ctx, out.Lessons, found)
 	if out.Waiting, err = s.waiting(ctx, now); err != nil {
 		return fail(err)
 	}
@@ -123,6 +143,12 @@ func (s *Screen) Thread(ctx context.Context, subject shared.SubjectID) ([]PostVi
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", opThread, err)
 	}
+	// The thread is keyed by the subject: without the library it cannot be told, so here a failed read fails.
+	found, err := s.lookup(ctx, subjectNames(views))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", opThread, err)
+	}
+	withSubjects(views, found)
 	out := []PostView{}
 	for _, v := range views {
 		if v.Lesson.SubjectID == subject {
@@ -132,7 +158,8 @@ func (s *Screen) Thread(ctx context.Context, subject shared.SubjectID) ([]PostVi
 	return out, nil
 }
 
-// recent returns the views of the posts changed since since that are worth showing, newest shown first.
+// recent returns the views of the posts changed since since that are worth showing, newest shown first, without their
+// library subjects (withSubjects sets them).
 func (s *Screen) recent(ctx context.Context, since, now time.Time) ([]PostView, error) {
 	posts, err := s.posts.ListUpdatedSince(ctx, since, MaxPosts)
 	if err != nil {
@@ -147,9 +174,6 @@ func (s *Screen) recent(ctx context.Context, since, now time.Time) ([]PostView, 
 		if ok && !v.ShownAt.Before(since) {
 			views = append(views, v)
 		}
-	}
-	if err := s.resolve(ctx, views); err != nil {
-		return nil, err
 	}
 	slices.SortFunc(views, func(a, b PostView) int {
 		return cmp.Or(b.ShownAt.Compare(a.ShownAt), cmp.Compare(a.Recording, b.Recording))
@@ -247,43 +271,56 @@ func (s *Screen) lessonInfo(ctx context.Context, rec *recording.Recording, loc *
 	}
 }
 
-// resolve sets the library subject of each view (ADR-0024): its id keys the thread, its name is shown.
-func (s *Screen) resolve(ctx context.Context, views []PostView) error {
+// subjectNames returns the distinct subject strings of the views.
+func subjectNames(views []PostView) []string {
 	var names []string
 	for _, v := range views {
-		if v.Lesson.Subject != "" && !slices.Contains(names, v.Lesson.Subject) {
-			names = append(names, v.Lesson.Subject)
-		}
+		names = appendName(names, v.Lesson.Subject)
 	}
+	return names
+}
+
+// appendName adds a non-empty name that is not in names yet.
+func appendName(names []string, name string) []string {
+	if name == "" || slices.Contains(names, name) {
+		return names
+	}
+	return append(names, name)
+}
+
+// lookup tells how each name resolves to the subjects of the library, in one read.
+func (s *Screen) lookup(ctx context.Context, names []string) (map[string]subjectmatch.Resolution, error) {
 	if len(names) == 0 {
-		return nil
+		return map[string]subjectmatch.Resolution{}, nil
+	}
+	return s.subjects.LookupSubjects(ctx, names)
+}
+
+// withSubjects sets the library subject of each view (ADR-0024): its id keys the thread, its name is shown. With no
+// lookup (found nil) the views keep the string of their lesson.
+func withSubjects(views []PostView, found map[string]subjectmatch.Resolution) {
+	if len(views) == 0 || len(found) == 0 {
+		return
+	}
+	resolved := make(map[string]kb.LibrarySubject, len(found))
+	for name, r := range found {
+		if r.Outcome == subjectmatch.Matched {
+			resolved[name] = kb.LibrarySubject{ID: r.Match.ID, Name: r.Match.Name}
+		}
 	}
 	lessons := make([]kb.Lesson, len(views))
 	for i, v := range views {
 		lessons[i] = kb.Lesson{Subject: v.Lesson.Subject}
-	}
-	matches, err := s.subjects.ResolveSubjects(ctx, names)
-	if err != nil {
-		return err
-	}
-	resolved := make(map[string]kb.LibrarySubject, len(matches))
-	for name, m := range matches {
-		resolved[name] = kb.LibrarySubject{ID: m.ID, Name: m.Name}
 	}
 	for i, l := range kb.WithLibrary(lessons, resolved) {
 		if l.Library.ID != "" {
 			views[i].Lesson.SubjectID, views[i].Lesson.SubjectName = l.Library.ID, l.Library.Name
 		}
 	}
-	return nil
 }
 
-// lessonsOf returns the lessons of the day starting at day, each with the post of its recording if one is shown.
-func (s *Screen) lessonsOf(ctx context.Context, day time.Time, views []PostView) ([]LessonRow, error) {
-	list, err := s.lessons.ListStartingBetween(ctx, day, day.AddDate(0, 0, 1))
-	if err != nil {
-		return nil, err
-	}
+// lessonsOf returns the lessons of list in the zone of day, each with the post of its recording if one is shown.
+func lessonsOf(list []*lesson.Lesson, day time.Time, views []PostView) []LessonRow {
 	out := make([]LessonRow, 0, len(list))
 	for _, l := range list {
 		c := l.Content()
@@ -300,47 +337,68 @@ func (s *Screen) lessonsOf(ctx context.Context, day time.Time, views []PostView)
 		}
 		out = append(out, row)
 	}
-	return out, s.lessonSubjects(ctx, out)
+	return out
 }
 
-// lessonSubjects sets the library subject of each lesson of the day and the call link the student keeps on it
-// (ADR-0032, TASK-364). A lesson whose string resolves to no subject (or to several) keeps SubjectID "".
-func (s *Screen) lessonSubjects(ctx context.Context, rows []LessonRow) error {
-	var names []string
-	for _, r := range rows {
-		if r.Subject != "" && !slices.Contains(names, r.Subject) {
-			names = append(names, r.Subject)
-		}
-	}
-	if len(names) == 0 {
-		return nil
-	}
-	matches, err := s.subjects.ResolveSubjects(ctx, names)
-	if err != nil {
-		return err
-	}
+// lessonSubjects sets the subject state of each lesson of the day, its library subject and the call link the student
+// keeps on it (ADR-0032, TASK-364). With no lookup (found nil) or a failed read of the links, a lesson that names a
+// subject is SubjectUnavailable without SubjectID: a «Добавить ссылку» then could overwrite a link it did not see.
+func (s *Screen) lessonSubjects(ctx context.Context, rows []LessonRow, found map[string]subjectmatch.Resolution) {
 	var ids []shared.SubjectID
 	for i, r := range rows {
-		if m, ok := matches[r.Subject]; ok && m.ID != "" {
-			rows[i].SubjectID, rows[i].SubjectName = m.ID, m.Name
-			if !slices.Contains(ids, m.ID) {
-				ids = append(ids, m.ID)
-			}
+		rows[i].SubjectState = subjectState(r.Subject, found)
+		if rows[i].SubjectState != SubjectKnown {
+			continue
+		}
+		m := found[r.Subject].Match
+		rows[i].SubjectID, rows[i].SubjectName = m.ID, m.Name
+		if !slices.Contains(ids, m.ID) {
+			ids = append(ids, m.ID)
 		}
 	}
 	if len(ids) == 0 {
-		return nil
+		return
 	}
 	links, err := s.callLinks.CallLinks(ctx, ids)
 	if err != nil {
-		return err
+		// The cause is not logged: a storage error may carry row data, and a link a meeting password.
+		s.log.Warn(opCallLinks, slog.String("result", "call links unread"))
+		for i := range rows {
+			if rows[i].SubjectState == SubjectKnown {
+				rows[i].SubjectState, rows[i].SubjectID, rows[i].SubjectName = SubjectUnavailable, "", ""
+			}
+		}
+		return
 	}
 	for i, r := range rows {
 		if r.SubjectID != "" {
 			rows[i].CallLink = links[r.SubjectID]
 		}
 	}
-	return nil
+}
+
+// subjectState is the state of the subject string name in the lookup found; nil found is a library not read.
+func subjectState(name string, found map[string]subjectmatch.Resolution) SubjectState {
+	if name == "" {
+		return SubjectNone
+	}
+	if found == nil {
+		return SubjectUnavailable
+	}
+	r, ok := found[name]
+	switch {
+	case !ok:
+		return SubjectUnavailable // the resolver left it out: not told, so nothing is offered
+	case r.Outcome == subjectmatch.Matched && r.Match.ID != "":
+		return SubjectKnown
+	case r.Outcome == subjectmatch.Ambiguous:
+		return SubjectAmbiguous
+	case r.Outcome == subjectmatch.NoKey:
+		return SubjectNone
+	case r.Outcome == subjectmatch.NoMatch:
+		return SubjectUnknown
+	}
+	return SubjectUnavailable
 }
 
 // waiting returns the proposals that wait for the student's «Да». An assignment that is gone leaves its labels empty.

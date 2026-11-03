@@ -76,21 +76,36 @@ type PostView struct {
 	ShownAt      time.Time        // when the post became worth showing
 }
 
-// LessonRow is a lesson of the day with its post, if the post-processing of its recording produced one. SubjectID is
-// the library subject its subject string resolves to ("" none: no place to keep a call link), SubjectName its name and
-// CallLink the link the student keeps on it (ADR-0032, TASK-364; zero none).
+// SubjectState tells what the library says about the subject string of a lesson of the day (TASK-364), so the card
+// can say it honestly.
+type SubjectState string
+
+// States of the subject of a lesson.
+const (
+	SubjectNone        SubjectState = "none"        // the lesson names no subject (an empty string, or one without letters or digits)
+	SubjectUnknown     SubjectState = "unknown"     // no subject of the library has the name: the student may create one
+	SubjectAmbiguous   SubjectState = "ambiguous"   // several subjects have it: none is guessed
+	SubjectKnown       SubjectState = "known"       // one subject: SubjectID
+	SubjectUnavailable SubjectState = "unavailable" // the library could not be read now: nothing is offered
+)
+
+// LessonRow is a lesson of the day with its post, if the post-processing of its recording produced one. SubjectState
+// says how its subject string resolves; SubjectID is the library subject when it is SubjectKnown ("" otherwise: no
+// place to keep a call link), SubjectName its name and CallLink the link the student keeps on it (ADR-0032, TASK-364;
+// zero none).
 type LessonRow struct {
-	Lesson      shared.LessonID
-	Title       string
-	Subject     string
-	SubjectID   shared.SubjectID
-	SubjectName string
-	CallLink    subject.CallLink
-	Kind        string // lesson kind code; "unknown" when the schedule does not say
-	Teacher     string
-	Start       time.Time
-	End         time.Time
-	Post        *PostView // nil: none
+	Lesson       shared.LessonID
+	Title        string
+	Subject      string
+	SubjectState SubjectState
+	SubjectID    shared.SubjectID
+	SubjectName  string
+	CallLink     subject.CallLink
+	Kind         string // lesson kind code; "unknown" when the schedule does not say
+	Teacher      string
+	Start        time.Time
+	End          time.Time
+	Post         *PostView // nil: none
 }
 
 // WaitingItem is a proposal waiting for the student's «Да»: a deadline for the calendar or an email.

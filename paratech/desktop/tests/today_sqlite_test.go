@@ -45,8 +45,12 @@ func (noAssignments) Label(context.Context, shared.AssignmentID) (string, string
 // noSubjects is the SubjectResolver with an empty library.
 type noSubjects struct{}
 
-func (noSubjects) ResolveSubjects(context.Context, []string) (map[string]subjectmatch.Match, error) {
-	return map[string]subjectmatch.Match{}, nil
+func (noSubjects) LookupSubjects(_ context.Context, names []string) (map[string]subjectmatch.Resolution, error) {
+	out := make(map[string]subjectmatch.Resolution, len(names))
+	for _, n := range names {
+		out[n] = subjectmatch.Resolution{Outcome: subjectmatch.NoMatch}
+	}
+	return out, nil
 }
 
 // CallLinks is the SubjectCallLinks port of the same empty library.
