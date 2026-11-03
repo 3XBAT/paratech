@@ -10,7 +10,7 @@ import type { LibraryApi } from "./bindings/library.js";
 import type { TurnkeyApi } from "./bindings/turnkey.js";
 import { calendarTexts } from "./calendarView.js";
 import type { PageId } from "./nav.js";
-import { offerModel, offerSpecs, offerUnavailableText } from "./agentView.js";
+import { offerModel, offerSpecs, offerUnavailableText, texts } from "./agentView.js";
 import { openWork } from "./workView.js";
 
 export const offerReasons = {
@@ -57,12 +57,12 @@ const pageOf: Readonly<Record<string, PageId>> = {
 
 /** The step of an offer; an offer the panel draws no button for (unknown action, missing id) is `noTarget`. */
 export function offerStep(offer: OfferView): OfferStep {
-  const model = offerModel(offer);
-  if (model === null) {
-    return { type: "noTarget" };
-  }
-  if (model.unavailable !== undefined) {
+  // No button is drawn for these; a press that arrives anyway says why nothing happens.
+  if (Object.hasOwn(offerSpecs, offer.action) && offerSpecs[offer.action].unavailable === true) {
     return { type: "unavailable" };
+  }
+  if (offerModel(offer) === null) {
+    return { type: "noTarget" };
   }
   const id = offer.target?.id ?? "";
   switch (offer.action) {
@@ -99,8 +99,11 @@ export interface OfferDeps {
     /** «Записи» with the start panel open: the source of the sound is chosen there. */
     startRecording(): void;
   };
-  /** «Отменить» of the latest action of the chat that can still be undone; null when there is none. */
-  undoLatest(): Promise<{ ok: boolean; text: string } | null>;
+  /**
+   * «Отменить» of the latest action of the chat that can still be undone; null when there is none. `what` is the wording
+   * of the action that was undone («Отмечено выполненным: 3 задания»).
+   */
+  undoLatest(): Promise<{ ok: boolean; text: string; what?: string } | null>;
 }
 
 /** Where the page buttons of an offer lead (the window's navigation). */
@@ -149,7 +152,8 @@ export async function runOffer(offer: OfferView, deps: OfferDeps): Promise<Offer
         if (r === null) {
           return { ok: false, text: offerReasons.nothingToUndo };
         }
-        return r.ok ? { ok: true, text: "", once: true } : { ok: false, text: r.text };
+        // «Отменено: Отмечено выполненным: 3 задания»: the student sees what went back.
+        return r.ok ? { ok: true, text: r.what ? `${texts.undoDone}: ${r.what}` : "", once: true } : { ok: false, text: r.text };
       }
     }
   } catch {

@@ -56,9 +56,11 @@ export interface CardActions {
   /**
    * The press of a page button an offer names («Начать запись» under a stopped recording, an offer_button card): the
    * panel runs the page's own binding for `offer.action` with `offer.target` (agentOffer.ts) and answers how it went;
-   * a refusal is shown beside the button, which stays usable. Absent: the button is shown off.
+   * a refusal is shown beside the button, which stays usable. Absent: no button is drawn.
    */
   offer?: (offer: OfferView) => void | Promise<OfferResult | void>;
+  /** The wording of the action line «Отменить» (undo_action) would undo; "" when there is none. */
+  undoTarget?: () => string;
   /** «Вернуть» of a skipped row of the schedule card, as the «Предметы» page does it. */
   restore?: (subjectId: string, version: number) => Promise<RestoreCall>;
   /** Subjects were created, taken back or restored by a card: the pages read them again. */
@@ -80,18 +82,15 @@ export interface CardActions {
 
 /**
  * The page's own button an offer names, labelled from the template (never by the model). It calls `actions.offer`; until
- * the panel wires it the button is off, without a tooltip. A button the version does not have is off with its reason.
+ * the panel wires it nothing is drawn: a dead button helps nobody. A button the version does not have has no model at all.
  */
 export function OfferButton(props: { offer: OfferModel; actions: CardActions }) {
   const { offer, actions } = props;
+  if (actions.offer === undefined) {
+    return null;
+  }
   return (
-    <Button
-      size="sm"
-      variant="secondary"
-      disabled={actions.offer === undefined || actions.busy === true || offer.unavailable !== undefined}
-      disabledReason={offer.unavailable}
-      onClick={() => actions.offer?.(offer.offer)}
-    >
+    <Button size="sm" variant="secondary" disabled={actions.busy === true} onClick={() => actions.offer?.(offer.offer)}>
       {offer.label}
     </Button>
   );
@@ -136,9 +135,12 @@ export function OfferControl(props: { offer: OfferModel; actions: CardActions })
 export function OfferControlView(props: { offer: OfferModel; actions: CardActions; busy: boolean; result: OfferResult | null }) {
   const { result } = props;
   const off: CardActions = { ...props.actions, busy: props.actions.busy === true || props.busy || result?.once === true };
+  // The «Отменить» of an offer says what it would undo: the wording of the action line, until it is done.
+  const target = props.offer.offer.action === "undo_action" && result?.once !== true ? (props.actions.undoTarget?.() ?? "") : "";
   return (
     <>
       <OfferButton offer={props.offer} actions={off} />
+      {target !== "" && props.actions.offer !== undefined && <span className="ag-act-note small muted">{target}</span>}
       {result !== null && result.text !== "" && (
         <span className="ag-act-note small muted" role="status">
           {result.text}
@@ -498,6 +500,8 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
             </Button>
           )}
           {card.offer !== null && <OfferControl offer={card.offer} actions={props.actions} />}
+          {/* «Остановить» was pressed: the line says «Запись остановлена» and offers a new recording. */}
+          {note?.done === true && card.afterUndoOffer !== null && <OfferControl offer={card.afterUndoOffer} actions={props.actions} />}
           {!note?.done && card.undo.shown && (
             <Button size="sm" variant="ghost" disabled={!card.undo.enabled || note?.busy === true} onClick={() => props.actions.undo(card.actionId)}>
               {note?.busy ? card.undo.busyLabel : card.undo.label}
@@ -528,8 +532,8 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
         </section>
       );
     case "offer":
-      // One button with the page's own label and no heading.
-      return (
+      // One button with the page's own label and no heading; until the panel wires the press there is nothing to show.
+      return props.actions.offer === undefined ? null : (
         <div className="ag-actions ag-offer">
           <OfferControl offer={card.offer} actions={props.actions} />
         </div>

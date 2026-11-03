@@ -12,17 +12,17 @@ import {
   scheduleUndoGoneText,
 } from "./bindings/agentConfirm.js";
 import type { ScheduleChoice } from "./bindings/library.js";
-import { plural } from "./plural.js";
 import {
   aliasCount,
   buildChoices,
+  createdText,
   omittedAfter,
   reviewTexts,
   type ReviewState,
   skippedLines,
   splitSkipped,
-  subjectsWord,
   undoLines,
+  undoneText,
 } from "./scheduleSubjectsView.js";
 import type { RemovedRow } from "./subjectRemovalView.js";
 
@@ -31,39 +31,28 @@ export const scheduleTexts = {
   loading: "Загрузка предметов…",
   /** The button after a failed read (the glossary: «Повторить»). */
   reload: "Повторить",
-  no: "Нет",
-  yes: "Да",
+  /** Not «Нет»: the button says what does not happen. The primary button is the page's «Создать N предметов». */
+  no: "Не создавать",
+  /** The stopped-midway card: the same press again creates the rest. */
+  retry: "Повторить",
   declined: "Оставлено без изменений",
   openSubjects: "Открыть «Предметы»",
   /** The core's message is empty (an older core): the card still says why it cannot go on. */
   staleFallback: "Предложение устарело: расписание или предметы изменились.",
-  partialFallback: "Создано не всё. Нажмите «Да» ещё раз — уже созданное не повторится, или «Отменить всё».",
+  /** Always the card's own words: the core's message for this state names «Да», which is not a button here. */
+  partialFallback: "Создано не всё. «Повторить» досоздаст остальное без дублей, «Отменить всё» уберёт созданное.",
   /** Nothing is left to choose from: every name of the schedule is already a subject. */
   noGroups: reviewTexts.allDone,
 } as const;
 
-/** «Заведено 3 предмета · Добавлено названий: 2»; "" when nothing was done. «Отменить всё» is offered exactly then. */
+/** «Создано предметов: 3 · Добавлено названий: 2» (the page's own line); "" when nothing was done. «Отменить всё» is offered exactly then. */
 export function doneSummary(created: number, aliases: number): string {
-  const parts: string[] = [];
-  if (created > 0) {
-    parts.push(`Заведено ${subjectsWord(created)}`);
-  }
-  if (aliases > 0) {
-    parts.push(`Добавлено названий: ${aliases}`);
-  }
-  return parts.join(" · ");
+  return createdText(created, aliases);
 }
 
-/** «Отменено: убрано 2 предмета и 1 название»; «Ничего не убрано» when everything stayed. */
+/** «Отменено: предметов 2 · названий 1» (the page's own line); «Ничего не убрано» when everything stayed. */
 export function undoSummary(removed: number, unaliased: number): string {
-  const parts: string[] = [];
-  if (removed > 0) {
-    parts.push(subjectsWord(removed));
-  }
-  if (unaliased > 0) {
-    parts.push(`${unaliased} ${plural(unaliased, "название", "названия", "названий")}`);
-  }
-  return parts.length > 0 ? `Отменено: убрано ${parts.join(" и ")}` : reviewTexts.nothingRemoved;
+  return undoneText(removed, unaliased) || reviewTexts.nothingRemoved;
 }
 
 /** What the card draws for each state. */
@@ -111,7 +100,8 @@ export function scheduleModel(card: ConfirmCard, review: ReviewState, names: Rea
         summary,
         lines: [...skippedLines(review, plain, names), ...(rest ? [omittedAfter(review.omitted)] : [])],
         rows,
-        message: confirmed ? card.message || scheduleTexts.partialFallback : "",
+        // The core's message for a stop midway says «Нажмите «Да» ещё раз»: there is no «Да» here, so the card words it itself.
+        message: confirmed ? scheduleTexts.partialFallback : "",
         yes: confirmed,
         undo: !nothing,
         rest,
@@ -210,32 +200,35 @@ export class ScheduleCardFlow {
     }
   }
 
-  private async call(busy: "confirm" | "decline" | "undo", make: () => Promise<ConfirmCard>): Promise<void> {
+  /** True when the core answered with a card that may have changed the subjects (a refusal and a stale answer did not). */
+  private async call(busy: "confirm" | "decline" | "undo", make: () => Promise<ConfirmCard>): Promise<boolean> {
     if (this.pending) {
-      return;
+      return false;
     }
     this.pending = true;
     this.set({ busy, error: "" });
     try {
       const card = await make();
       this.set({ card, busy: "" });
+      return card.state === "done" || card.state === "confirmed" || card.state === "undone";
     } catch (err) {
       this.set({ busy: "", error: confirmErrorText(err) });
+      return false;
     } finally {
       this.pending = false;
     }
   }
 
-  /** «Да» (waiting) or «Да» again (stopped midway): only these two states may go to the core. */
-  async yes(choices: ScheduleChoice[]): Promise<void> {
+  /** «Создать» (waiting) or «Повторить» (stopped midway): only these two states may go to the core. Resolves true when subjects may have changed. */
+  async yes(choices: ScheduleChoice[]): Promise<boolean> {
     const state = this.current.card?.state;
     if (state !== "waiting" && state !== "confirmed") {
-      return;
+      return false;
     }
-    await this.call("confirm", () => this.api.confirmSchedule(this.token, choices));
+    return this.call("confirm", () => this.api.confirmSchedule(this.token, choices));
   }
 
-  /** «Нет»: nothing is created. */
+  /** «Не создавать»: nothing is created. */
   async no(): Promise<void> {
     if (this.current.card?.state !== "waiting") {
       return;
@@ -243,12 +236,12 @@ export class ScheduleCardFlow {
     await this.call("decline", () => this.api.decline({ kind: "schedule_subjects", id: this.token }));
   }
 
-  /** «Отменить всё» after a create (also one that stopped midway). */
-  async undo(): Promise<void> {
+  /** «Отменить всё» after a create (also one that stopped midway). Resolves true when subjects may have changed. */
+  async undo(): Promise<boolean> {
     const state = this.current.card?.state;
     if (state !== "done" && state !== "confirmed") {
-      return;
+      return false;
     }
-    await this.call("undo", () => this.api.undoSchedule(this.token));
+    return this.call("undo", () => this.api.undoSchedule(this.token));
   }
 }

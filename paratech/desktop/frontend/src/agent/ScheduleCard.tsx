@@ -119,7 +119,7 @@ export function ScheduleCardView(props: {
           </ul>
           {review.omitted > 0 && <p className="small muted">{omittedNote(review.omitted)}</p>}
           <div className="ag-actions">
-            {/* «Нет» first and nothing is focused: Enter never lands on «Да» by itself. */}
+            {/* «Не создавать» first and nothing is focused: Enter never lands on the creating button by itself. */}
             <Button size="sm" variant="secondary" disabled={busy} onClick={on.no}>
               {scheduleTexts.no}
             </Button>
@@ -164,7 +164,7 @@ export function ScheduleCardView(props: {
                 {reviewTexts.undoAll}
               </Button>
               <Button size="sm" variant="primary" disabled={busy} busy={flow.busy === "confirm"} busyLabel={reviewTexts.creating} onClick={on.yes}>
-                {scheduleTexts.yes}
+                {scheduleTexts.retry}
               </Button>
             </div>
           )}
@@ -184,23 +184,29 @@ export function ScheduleCardView(props: {
       break;
     case "undone":
       body = (
-        <div role="status">
-          <ResultLine kind="ok">{model.summary}</ResultLine>
-          {model.lines.length > 0 && (
-            <ul className="sched-lines small muted">
-              {model.lines.map((l, i) => (
-                <li key={i}>{l}</li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <>
+          <div role="status">
+            <ResultLine kind="ok">{model.summary}</ResultLine>
+            {model.lines.length > 0 && (
+              <ul className="sched-lines small muted">
+                {model.lines.map((l, i) => (
+                  <li key={i}>{l}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+          {subjectsButton && <div className="ag-actions">{subjectsButton}</div>}
+        </>
       );
       break;
     case "declined":
       body = (
-        <p className="muted" role="status">
-          {model.text}
-        </p>
+        <>
+          <p className="muted" role="status">
+            {model.text}
+          </p>
+          {subjectsButton && <div className="ag-actions">{subjectsButton}</div>}
+        </>
       );
       break;
   }
@@ -297,9 +303,10 @@ export function ScheduleSubjectsCard(props: {
         rename: (group, name) => dispatch({ type: "rename", group, name }),
         member: (group, member, mode) => dispatch({ type: "member", group, member, mode }),
         renameMember: (group, member, name) => dispatch({ type: "renameMember", group, member, name }),
-        yes: () => void flow.yes(choicesOf(review)).then(() => onChanged?.()),
+        // The pages read the subjects again only after a call that returned a changed card, not after a refusal.
+        yes: () => void flow.yes(choicesOf(review)).then((changed) => changed && onChanged?.()),
         no: () => void flow.no(),
-        undo: () => void flow.undo().then(() => onChanged?.()),
+        undo: () => void flow.undo().then((changed) => changed && onChanged?.()),
         reload: () => void flow.load(),
         openSubjects: nav.openSubjects,
         restore,

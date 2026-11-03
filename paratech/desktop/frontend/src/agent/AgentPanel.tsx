@@ -27,8 +27,9 @@ import {
   cancelRestartEdit,
   closeRestartDialog,
   hideRestart,
+  actionWording,
   isFocusPanelKey,
-  latestUndoableAction,
+  latestUndoableCard,
   liveRestartTarget,
   noRestart,
   openAfterArchive,
@@ -548,15 +549,29 @@ export function AgentPanel(props: {
   );
 
   // «Отменить» of the offer_button undo_action: the latest action of the open chat that can still be undone.
-  const undoLatest = useCallback(async () => {
+  const subjectsRef = useRef(subjects);
+  subjectsRef.current = subjects;
+  const latestCard = useCallback(() => {
     const cards = visibleEntries(entriesRef.current, openRef.current, undefined).map((e) => entryModel(e).cards);
-    const id = latestUndoableAction(cards, undoNotesRef.current);
-    if (id === null) {
+    return latestUndoableCard(cards, undoNotesRef.current);
+  }, []);
+  // What the offer «Отменить» would undo, in the words of that action's line.
+  const undoTarget = useCallback(() => {
+    const card = latestCard();
+    return card === null ? "" : actionWording(card, subjectsRef.current, new Date());
+  }, [latestCard]);
+  const undoLatest = useCallback(async () => {
+    const card = latestCard();
+    if (card === null) {
       return null;
     }
-    const note = await undoOne(id);
-    return note === null ? null : { ok: note.done, text: note.text };
-  }, [undoOne]);
+    const what = actionWording(card, subjectsRef.current, new Date());
+    const note = await undoOne(card.actionId);
+    return note === null ? null : { ok: note.done, text: note.text, what };
+  }, [latestCard, undoOne]);
+
+  // «Вернуть» of a skipped row of the schedule card: the page's own call.
+  const restore = useCallback((subjectId: string, version: number) => runRestore(library, subjectId, version), []);
 
   const undoAll = useCallback(
     (ref: { threadId: string; turn: number }, ids: string[]) => {
@@ -674,7 +689,8 @@ export function AgentPanel(props: {
       openAssignment: props.onOpenAssignment,
       openMention: props.onOpenMention,
       offer: offerNav === undefined ? undefined : (offer) => runOffer(offer, { library, turnkey, calendar, nav: offerNav, undoLatest }),
-      restore: (subjectId, version) => runRestore(library, subjectId, version),
+      undoTarget,
+      restore,
       libraryChanged: props.onLibraryChanged,
       answers,
       openSource: props.onOpenSource,
@@ -690,7 +706,7 @@ export function AgentPanel(props: {
       },
       undoNote: (actionId) => undoNotes[actionId],
     };
-  }, [state.entries, send, loadState, undoNotes, undoOne, undoAll, undoLatest, subjects, props.onOpenAssignment, props.onOpenMention, props.onOpenSource, offerNav, props.onLibraryChanged]);
+  }, [state.entries, send, loadState, undoNotes, undoOne, undoAll, undoLatest, undoTarget, restore, subjects, props.onOpenAssignment, props.onOpenMention, props.onOpenSource, offerNav, props.onLibraryChanged]);
 
   const sections = useMemo(() => chatSections(chats, state.entries), [chats, state.entries]);
   const openChat = [...sections.active, ...sections.archived].find((r) => r.threadId === openId) ?? null;

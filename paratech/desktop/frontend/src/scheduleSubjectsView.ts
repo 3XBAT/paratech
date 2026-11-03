@@ -507,8 +507,14 @@ export function escCloses(target: { tagName: string; type?: string }, busy: bool
 
 /** «Создано предметов: 3 · Добавлено названий: 2»; "" when nothing was done. «Отменить всё» is offered exactly then. */
 export function doneText(batches: readonly Batch[]): string {
-  const created = batches.reduce((n, b) => n + b.created.length, 0);
-  const aliases = batches.reduce((n, b) => n + aliasCount(b.aliased), 0);
+  return createdText(
+    batches.reduce((n, b) => n + b.created.length, 0),
+    batches.reduce((n, b) => n + aliasCount(b.aliased), 0),
+  );
+}
+
+/** The same line for counts (the agent's card has no batches). */
+export function createdText(created: number, aliases: number): string {
   const parts: string[] = [];
   if (created > 0) {
     parts.push(`Создано предметов: ${created}`);
@@ -730,10 +736,14 @@ function keptLine(k: ScheduleKept): string {
 
 /** «Отменено: предметов 2 · названий 1»; "" when nothing was taken back. */
 function undoSummary(reply: UndoFromScheduleReply): string {
-  const unaliased = aliasCount(reply.unaliased);
+  return undoneText(reply.removed.length, aliasCount(reply.unaliased));
+}
+
+/** The same line for counts (the agent's card has no reply of its own). */
+export function undoneText(removed: number, unaliased: number): string {
   const parts: string[] = [];
-  if (reply.removed.length > 0) {
-    parts.push(`предметов ${reply.removed.length}`);
+  if (removed > 0) {
+    parts.push(`предметов ${removed}`);
   }
   if (unaliased > 0) {
     parts.push(`названий ${unaliased}`);

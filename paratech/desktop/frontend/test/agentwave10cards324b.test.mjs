@@ -32,8 +32,10 @@ import {
   undoSummary,
 } from "../.test-build/agentScheduleView.js";
 import {
+  actionWording,
   entryModel,
   latestUndoableAction,
+  latestUndoableCard,
   offerModel,
   offerSpecs,
   offerUnavailableText,
@@ -42,7 +44,7 @@ import {
 import { offerReasons, offerStep, runOffer } from "../.test-build/agentOffer.js";
 import { AgentRequest, OfferButton, OfferControlView } from "../.test-build/agent/AgentCards.js";
 import { ScheduleCardPending, ScheduleCardView, ScheduleSubjectsCard } from "../.test-build/agent/ScheduleCard.js";
-import { initialState, mainButton, planOf, reduce, reviewTexts, subjectsWord, takenOf } from "../.test-build/scheduleSubjectsView.js";
+import { doneText, initialState, mainButton, planOf, reduce, reviewTexts, subjectsWord, takenOf } from "../.test-build/scheduleSubjectsView.js";
 import { removalTexts, runRestore } from "../.test-build/subjectRemovalView.js";
 import { calendarTexts } from "../.test-build/calendarView.js";
 import { actionLabels as rowActionLabels, rowItemLabels } from "../.test-build/recordingRowView.js";
@@ -260,7 +262,10 @@ test("cardModel: an offer_button card is one button; an unknown action or a miss
 
 // ---- The card: waiting ----
 
-test("waiting: the review rows inside the card, no heading, «Нет» then «Создать N предметов», nothing focused", () => {
+/** The buttons under the rows (the rows' own «Не создавать» radio is not one of them). */
+const actionBtn = (label, extra = "") => new RegExp(`class="ag-actions"><button${extra}[^>]*>${label}<`);
+
+test("waiting: the review rows inside the card, no heading, «Не создавать» then «Создать N предметов», nothing focused", () => {
   const out = view(waiting());
   assert.doesNotMatch(out, /<h[1-6]/);
   assert.ok(out.includes(reviewTexts.intro));
@@ -272,9 +277,11 @@ test("waiting: the review rows inside the card, no heading, «Нет» then «С
   const main = mainButton(planOf(groups(), reviewOf().selection, takenOf(subjectRefs, { token: TOKEN, batches: [], attempt: [] })));
   assert.equal(main.label, "Создать 2 предмета");
   assert.ok(out.includes("Создать 2 предмета"));
-  assert.ok(out.indexOf(">Нет<") > 0 && out.indexOf(">Нет<") < out.indexOf("Создать 2 предмета"));
+  assert.ok(out.lastIndexOf(">Не создавать<") > 0 && out.lastIndexOf(">Не создавать<") < out.indexOf("Создать 2 предмета"));
+  assert.equal(scheduleTexts.no, "Не создавать");
+  assert.doesNotMatch(out, />Нет<|>Да</);
   assert.doesNotMatch(out, /autofocus|autoFocus/i);
-  assert.match(out, /<button(?![^>]*disabled)[^>]*>Нет</);
+  assert.match(out, actionBtn("Не создавать", "(?![^>]*disabled)"));
   assert.match(out, /<button(?![^>]*disabled)[^>]*><span class="btn-labels"><span>Создать 2 предмета</);
   // The doubtful members start merged: «Вместе» is the checked radio of each.
   assert.match(out, /aria-checked="true"[^>]*>Вместе</);
@@ -299,7 +306,7 @@ test("waiting: nothing to create — «Да» is off and the reason stands besid
   const out = view(waiting(), { review });
   assert.match(out, /<button[^>]*disabled[^>]*><span class="btn-labels"><span>Создать предметы</);
   assert.ok(out.includes(reviewTexts.nothingSelected));
-  assert.match(out, /<button(?![^>]*disabled)[^>]*>Нет</);
+  assert.match(out, actionBtn("Не создавать", "(?![^>]*disabled)"));
 });
 
 test("waiting: a name problem blocks «Да» with the page's reason; the problem stands beside the field", () => {
@@ -346,7 +353,7 @@ test("waiting: stored text is text, never markup", () => {
 test("waiting: a call runs — every control is off and «Да» says it works", () => {
   const out = view(waiting(), { flowOver: { busy: "confirm" } });
   assert.match(out, /aria-busy="true"/);
-  assert.match(out, /<button[^>]*disabled[^>]*>Нет</);
+  assert.match(out, actionBtn("Не создавать", "[^>]*disabled"));
   assert.ok(out.includes('<span class="btn-off">Создать 2 предмета</span><span>Создание…</span>'));
   assert.doesNotMatch(out, /<button(?![^>]*disabled)/);
   assert.doesNotMatch(out, /<input(?![^>]*disabled)/);
@@ -365,7 +372,7 @@ test("waiting: the names the proposal left out are counted under the rows", () =
 
 // ---- The card: the other states ----
 
-test("done: «Заведено N · Отменить всё», the added spellings and the lines of the skipped rows", () => {
+test("done: «Создано предметов: N · Отменить всё», the added spellings and the lines of the skipped rows", () => {
   const result = createResult({
     skipped: [
       { key: "kurs", subjectId: "s1", reason: "too_many_aliases" },
@@ -373,7 +380,8 @@ test("done: «Заведено N · Отменить всё», the added spellin
     ],
   });
   const out = view(done(result), { review: reviewOf(), on: { restore: async () => ({ state: { phase: "done" }, subject: null }) } });
-  assert.ok(out.includes("Заведено 2 предмета · Добавлено названий: 1"));
+  assert.ok(out.includes("Создано предметов: 2 · Добавлено названий: 1"));
+  assert.doesNotMatch(out, /Заведено/);
   assert.match(out, />Отменить всё</);
   assert.ok(out.includes(reviewTexts.tooManyAliases));
   // The skipped row a removed subject holds is called by the name the student saw, with «Вернуть».
@@ -413,17 +421,22 @@ test("done: «Отменить всё» works as a button; while the undo runs i
   assert.equal(doneRow.props.onUndo(), "undo");
 });
 
-test("stopped midway: the core's message, «Отменить всё» and «Да» again; what was created is said", () => {
+test("stopped midway: the card's own words (not the core's «Нажмите «Да»»), «Отменить всё» and primary «Повторить»; what was created is said", () => {
   const out = view(stopped(), { review: reviewOf() });
-  assert.ok(out.includes("Создано не всё. Нажмите «Да» ещё раз — уже созданное не повторится, или «Отменить всё»."));
-  assert.ok(out.includes("Заведено 2 предмета"));
-  assert.ok(out.indexOf(">Отменить всё<") > 0 && out.indexOf(">Отменить всё<") < out.lastIndexOf("<span>Да</span>"));
-  assert.match(out, /<button(?![^>]*disabled)[^>]*><span class="btn-labels"><span>Да</);
-  assert.doesNotMatch(out, />Нет</);
+  assert.ok(out.includes("Создано не всё. «Повторить» досоздаст остальное без дублей, «Отменить всё» уберёт созданное."));
+  assert.equal(scheduleTexts.partialFallback, "Создано не всё. «Повторить» досоздаст остальное без дублей, «Отменить всё» уберёт созданное.");
+  // The core's sentence names a «Да» that is not a button here: it is never shown.
+  assert.doesNotMatch(out, /Нажмите «Да»/);
+  assert.ok(out.includes("Создано предметов: 2"));
+  assert.ok(out.indexOf(">Отменить всё<") > 0 && out.indexOf(">Отменить всё<") < out.lastIndexOf("<span>Повторить</span>"));
+  assert.match(out, /<button(?![^>]*disabled)[^>]*><span class="btn-labels"><span>Повторить</);
+  assert.match(out, /class="btn primary sm"[^>]*><span class="btn-labels"><span>Повторить</);
+  assert.doesNotMatch(out, />Нет<|>Да<|<span>Да</);
   assert.doesNotMatch(out, /autofocus/i);
-  // An older core with no message still says what to do.
+  // An older core with no message says the same.
   const bare = view(sched("confirmed", { result: createResult() }), { review: reviewOf() });
   assert.ok(bare.includes(scheduleTexts.partialFallback));
+  assert.deepEqual(scheduleModel(parseConfirmCard(stopped()), emptyReview(), new Map()).message, scheduleTexts.partialFallback);
 });
 
 test("stale: the core's message and «Открыть «Предметы»» as the way out; no «Да»", () => {
@@ -436,7 +449,7 @@ test("stale: the core's message and «Открыть «Предметы»» as t
   assert.doesNotMatch(view(stale(), { on: { openSubjects: undefined } }), /<button/);
 });
 
-test("undone: «Отменено: убрано N» and what stayed, in plain words", () => {
+test("undone: «Отменено: предметов N · названий K» (the page's line) and what stayed, in plain words", () => {
   const u = undoResult({
     removed: ["sched-1"],
     kept: [{ id: "sched-2", name: "Физика", reason: "has_files" }, { id: "sched-3", name: "Химия", reason: "has_notes" }],
@@ -444,29 +457,37 @@ test("undone: «Отменено: убрано N» and what stayed, in plain wor
     keptAliases: [{ subjectId: "s9", aliases: ["Сети"], reason: "stale" }],
   });
   const out = view(undone(u), { review: reviewOf() });
-  assert.ok(out.includes("Отменено: убрано 1 предмет"));
+  assert.ok(out.includes("Отменено: предметов 1"));
   assert.ok(out.includes("В «Физика» уже есть файл — оставлен"));
   assert.ok(out.includes("В «Химия» уже есть конспект — оставлен"));
   assert.ok(out.includes("Другие названия у «Компьютерные сети» оставлены: расписание изменилось"));
-  assert.doesNotMatch(out, /<button/);
-  assert.ok(view(undone()).includes("Отменено: убрано 2 предмета и 1 название"));
+  // The way on is «Предметы»: the student may check the list.
+  assert.equal((out.match(/<button/g) ?? []).length, 1);
+  assert.match(out, />Открыть «Предметы»</);
+  assert.ok(view(undone()).includes("Отменено: предметов 2 · названий 1"));
+  assert.doesNotMatch(view(undone()), /убрано/);
   assert.equal(undoSummary(0, 0), "Ничего не убрано");
-  assert.equal(undoSummary(5, 2), "Отменено: убрано 5 предметов и 2 названия");
-  assert.equal(doneSummary(1, 0), "Заведено 1 предмет");
+  assert.equal(undoSummary(5, 2), "Отменено: предметов 5 · названий 2");
+  assert.equal(doneSummary(1, 0), "Создано предметов: 1");
   assert.equal(doneSummary(0, 3), "Добавлено названий: 3");
+  // The lines are the page's own functions.
+  assert.equal(doneSummary(3, 2), doneText([{ token: "t", created: [created("a", "a", "A"), created("b", "b", "B"), created("c", "c", "C")], aliased: [{ subjectId: "s9", aliases: ["x", "y"] }] }]));
 });
 
-test("declined: «Оставлено без изменений», nothing to press", () => {
+test("declined: «Оставлено без изменений» and «Открыть «Предметы»» as the way on", () => {
   const out = view(declinedCard());
   assert.ok(out.includes("Оставлено без изменений"));
-  assert.doesNotMatch(out, /<button|<h[1-6]/);
+  assert.match(out, /<button(?![^>]*disabled)[^>]*>Открыть «Предметы»</);
+  assert.equal((out.match(/<button/g) ?? []).length, 1);
+  assert.doesNotMatch(out, /<h[1-6]/);
+  assert.doesNotMatch(view(declinedCard(), { on: { openSubjects: undefined } }), /<button/);
 });
 
 test("a refusal of the core: its own words, the buttons stay active; the undo that cannot go on names «Предметы»", () => {
   const w = view(waiting(), { flowOver: { error: scheduleNameText } });
   assert.ok(w.includes(scheduleNameText));
   assert.match(w, /role="alert"/);
-  assert.match(w, /<button(?![^>]*disabled)[^>]*>Нет</);
+  assert.match(w, actionBtn("Не создавать", "(?![^>]*disabled)"));
   assert.match(w, /<button(?![^>]*disabled)[^>]*><span class="btn-labels"><span>Создать 2 предмета</);
   const busy = view(waiting(), { flowOver: { error: scheduleBusyText } });
   assert.ok(busy.includes(scheduleBusyText));
@@ -654,6 +675,30 @@ test("flow: a stale answer is a card, not an error", async () => {
   assert.equal(flow.state.error, "");
 });
 
+test("flow: the pages read the subjects again only after a call that returned a changed card, not after a refusal", async () => {
+  // «Создать» and «Отменить всё» resolve true for done / confirmed / undone and false for a refusal, a stale answer or a no-op.
+  const refused = fakeApi({ confirmSchedule: async () => { throw new Error(scheduleNameText); }, undoSchedule: async () => { throw new Error(scheduleUndoGoneText); } });
+  const f1 = new ScheduleCardFlow(refused.api, TOKEN, noop);
+  await f1.load();
+  assert.equal(await f1.yes(choicesOf(reviewOf())), false);
+  assert.equal(f1.state.error, scheduleNameText);
+  refused.api.confirmSchedule = async () => parseConfirmCard(done());
+  assert.equal(await f1.yes(choicesOf(reviewOf())), true);
+  assert.equal(await f1.undo(), false);
+  assert.equal(f1.state.error, scheduleUndoGoneText);
+  const f2 = new ScheduleCardFlow(fakeApi({ confirmSchedule: async () => parseConfirmCard(stale()) }).api, TOKEN, noop);
+  await f2.load();
+  assert.equal(await f2.yes([]), false);
+  const f3 = new ScheduleCardFlow(fakeApi({ confirmSchedule: async () => parseConfirmCard(stopped()) }).api, TOKEN, noop);
+  await f3.load();
+  assert.equal(await f3.yes([]), true);
+  assert.equal(await f3.undo(), true);
+  // A call that never starts (a waiting card has nothing to undo) changed nothing.
+  const f4 = new ScheduleCardFlow(fakeApi().api, TOKEN, noop);
+  await f4.load();
+  assert.equal(await f4.undo(), false);
+});
+
 test("flow: a card that cannot be read keeps the error; «Повторить» reads it again; a card of another kind is not shown", async () => {
   let fail = true;
   const { api } = fakeApi({
@@ -698,7 +743,6 @@ const pageLabels = {
   open_summary: rowItemLabels.summary,
   open_lecture_text: rowItemLabels.lectureText,
   open_transcript: rowItemLabels.transcript,
-  google_sign_in: googleTexts.signIn,
   google_sync: calendarTexts.sync,
   download_model: rowActionLabels.openModels,
   sound_check: diagnosticsTexts.checkSound,
@@ -738,10 +782,22 @@ test("the labels are the pages' own buttons", () => {
     assert.equal(offerModel(offerOf(action)).label, label, action);
   }
   assert.equal(offerSpecs.undo_action.label, "Отменить");
-  assert.equal(offerSpecs.open_help.label, "Справка");
   assert.equal(offerSpecs.save_as.label, "Открыть работу");
   assert.equal(offerSpecs.open_call_link.label, "Открыть ссылку на пару");
   assert.equal(offerSpecs.copy_call_link.label, "Скопировать ссылку на пару");
+});
+
+test("a button that only navigates is labelled by what happens: «Открыть «Подключения»» (ADR-0033 §3: the page's sign-in needs the page's fields)", () => {
+  for (const action of ["google_sign_in", "open_help"]) {
+    assert.equal(offerSpecs[action].label, "Открыть «Подключения»", action);
+    assert.equal(offerModel({ action, target: null }).label, "Открыть «Подключения»", action);
+    assert.deepEqual(offerStep({ action, target: null }), { type: "page", page: "connections" }, action);
+  }
+  assert.notEqual(offerSpecs.google_sign_in.label, googleTexts.signIn);
+  // The ones that do the page's own thing keep its words.
+  assert.equal(offerSpecs.sound_check.label, diagnosticsTexts.checkSound);
+  assert.equal(offerSpecs.download_model.label, rowActionLabels.openModels);
+  assert.equal(offerSpecs.start_recording.label, manualStartTexts.open);
 });
 
 test("the mapping table: every action opens the page's button, calls its binding or goes to its page", async () => {
@@ -773,17 +829,14 @@ test("the mapping table: every action opens the page's button, calls its binding
   }
 });
 
-test("the call link is honestly unavailable: a disabled button with the reason, never a call", async () => {
+test("the call link has no page yet: no card is drawn (not a disabled button), and a press that arrives anyway calls nothing", async () => {
   for (const action of ["open_call_link", "copy_call_link"]) {
-    const m = offerModel(offerOf(action));
-    assert.equal(m.unavailable, "Недоступно в этой версии");
-    assert.equal(offerUnavailableText, "Недоступно в этой версии");
-    const button = OfferButton({ offer: m, actions: { ...baseActions, offer: noop } });
-    assert.equal(button.props.disabled, true);
-    assert.equal(button.props.disabledReason, "Недоступно в этой версии");
+    assert.equal(offerModel(offerOf(action)), null);
+    assert.deepEqual(modelOf([offerCard(offerOf(action))]).cards, []);
     const out = render([offerCard(offerOf(action))], { offer: noop });
-    assert.match(out, /<button[^>]*disabled[^>]*>/);
-    assert.ok(out.includes("Недоступно в этой версии"));
+    assert.doesNotMatch(out, /<button|disabled|Недоступно/);
+    assert.ok(!out.includes("ag-offer"));
+    assert.equal(offerUnavailableText, "Недоступно в этой версии");
     const { deps, log } = fakeDeps();
     assert.deepEqual(await runOffer(offerOf(action), deps), { ok: false, text: "Недоступно в этой версии" });
     assert.deepEqual(log, []);
@@ -831,6 +884,9 @@ test("google_sync: Go's own message says how it went; a failed call has a plain 
 test("undo_action: undoes the latest action once; with nothing to undo it says so", async () => {
   const { deps } = fakeDeps();
   assert.deepEqual(await runOffer(offerOf("undo_action"), deps), { ok: true, text: "", once: true });
+  // The success says what went back.
+  const what = fakeDeps({ undoLatest: async () => ({ ok: true, text: "", what: "Отмечены выполненными: 3 задания" }) });
+  assert.deepEqual(await runOffer(offerOf("undo_action"), what.deps), { ok: true, text: "Отменено: Отмечены выполненными: 3 задания", once: true });
   const none = fakeDeps({ undoLatest: async () => null });
   assert.deepEqual(await runOffer(offerOf("undo_action"), none.deps), { ok: false, text: offerReasons.nothingToUndo });
   const refused = fakeDeps({ undoLatest: async () => ({ ok: false, text: "Нельзя отменить: действие уже отменено." }) });
@@ -847,13 +903,57 @@ test("the latest action that can still be undone: newest first, undone and runni
   assert.equal(latestUndoableAction([], {}), null);
 });
 
-test("the offer_button card: one button with the page's label, no heading; off until the panel wires it", () => {
+test("the offer_button card: one button with the page's label, no heading; nothing at all until the panel wires it", () => {
   const offer = { action: "open_transcript", target: target("recording", "r1") };
   const out = render([offerCard(offer)], { offer: noop });
   assert.match(out, /<button(?![^>]*disabled)[^>]*>Открыть расшифровку</);
   assert.doesNotMatch(out, /<h[1-6]|title=|aria-describedby/);
   assert.equal((out.match(/<button/g) ?? []).length, 1);
-  assert.match(render([offerCard(offer)]), /<button[^>]*disabled[^>]*>Открыть расшифровку</);
+  // No disabled dead button: the card renders nothing.
+  const bare = render([offerCard(offer)]);
+  assert.doesNotMatch(bare, /<button|Открыть расшифровку|ag-offer/);
+});
+
+test("undo_action: «Отменить» shows beside it what it would undo, and says what went back", () => {
+  const model = offerModel({ action: "undo_action", target: null });
+  assert.equal(model.label, "Отменить");
+  const view = (actions, result = null) =>
+    renderToStaticMarkup(h(OfferControlView, { offer: model, actions: { ...baseActions, offer: noop, ...actions }, busy: false, result }));
+  const out = view({ undoTarget: () => "Отмечены выполненными: 3 задания" });
+  assert.match(out, /<button(?![^>]*disabled)[^>]*>Отменить</);
+  assert.ok(out.includes("Отмечены выполненными: 3 задания"));
+  // Nothing to undo: the existing text stays (no target line); other offers never show one.
+  assert.doesNotMatch(view({ undoTarget: () => "" }), /ag-act-note/);
+  assert.doesNotMatch(view({}), /ag-act-note/);
+  const other = renderToStaticMarkup(
+    h(OfferControlView, { offer: offerModel({ action: "open_material", target: target("material", "m1") }), actions: { ...baseActions, offer: noop, undoTarget: () => "Что-то" }, busy: false, result: null }),
+  );
+  assert.ok(!other.includes("Что-то"));
+  // After the undo the line says «Отменено: …» instead of the target, and the button is off.
+  const done = view({ undoTarget: () => "Отмечены выполненными: 3 задания" }, { ok: true, text: "Отменено: Отмечены выполненными: 3 задания", once: true });
+  assert.equal((done.match(/Отмечены выполненными: 3 задания/g) ?? []).length, 1);
+  assert.match(done, /<button[^>]*disabled[^>]*>Отменить</);
+  assert.ok(done.includes("Отменено: Отмечены выполненными: 3 задания"));
+  // Not wired: nothing is drawn, not even the target line.
+  assert.equal(renderToStaticMarkup(h(OfferControlView, { offer: model, actions: { ...baseActions, undoTarget: () => "x" }, busy: false, result: null })), "");
+});
+
+test("the action line an undo_action offer would undo: the latest one, in its own words", () => {
+  const cards = modelOf([
+    raw({ actionId: "a1", result: { kind: "marked_done", count: 3, setting: "", value: "", excerpt: [] } }),
+    raw({ actionId: "a2", result: { kind: "note_text", count: 0, setting: "", value: "", excerpt: ["строка"] } }),
+  ]).cards;
+  const last = latestUndoableCard([cards], {});
+  assert.equal(last.actionId, "a2");
+  assert.equal(actionWording(last, {}, new Date()), "Записано в «Мой конспект»");
+  assert.equal(latestUndoableCard([cards], { a2: { done: true, busy: false, text: "" } }).actionId, "a1");
+  assert.equal(actionWording(latestUndoableCard([cards], { a2: { done: true } }), {}, new Date()), "Отмечены выполненными: 3 задания");
+  assert.equal(latestUndoableCard([cards], { a1: { done: true }, a2: { done: true } }), null);
+  assert.equal(latestUndoableCard([], {}), null);
+  // An added assignment reads with its subject, as the line does.
+  const added = modelOf([raw({ actionId: "a3", assignment: { id: "x1", title: "Задачи", subjectId: "s1", due: "2026-10-24", time: "18:30" } })]).cards;
+  const now = new Date(2026, 9, 22, 10, 0);
+  assert.ok(actionWording(latestUndoableCard([added], {}), { s1: "Алгебра" }, now).startsWith("Задание добавлено: Задачи · Алгебра"));
 });
 
 test("the press: the button is off while it runs, shows the reason after a refusal and stays usable; an undo done goes off", () => {
@@ -867,7 +967,8 @@ test("the press: the button is off while it runs, shows the reason after a refus
   assert.match(refused, /class="ag-act-note small muted"/);
   assert.doesNotMatch(view(false, { ok: true, text: "" }), /ag-act-note/);
   assert.match(view(false, { ok: true, text: "", once: true }), /<button[^>]*disabled[^>]*>Открыть</);
-  assert.match(view(false, null, baseActions), /<button[^>]*disabled[^>]*>Открыть</);
+  // The panel has not wired the press: no dead button.
+  assert.equal(view(false, null, baseActions), "");
 });
 
 test("the offer on an action line is the same control (start_recording under a stopped recording)", () => {

@@ -386,7 +386,7 @@ test("an unknown error text becomes the generic one; a failed load can be retrie
 
 test("an unloaded card shows loading and no buttons", () => {
   const out = html(h(ConfirmCard, { api: fakeApi(), deleteApi: {}, target: { kind: "proposal", id: "p1" } }));
-  assert.match(out, /Загрузка карточки/);
+  assert.match(out, /Загрузка…/);
   assert.doesNotMatch(out, /<button/);
 });
 
@@ -402,8 +402,9 @@ const modelOf = (u) => entryModel({ key: "k", seq: 1, threadId: "t1", turn: 1, t
 test("the panel's confirm card reads its target from the core and ignores the agent's text", () => {
   const withCalls = { ...actions, confirm: { api: fakeApi(), deleteApi: {} } };
   const out = html(h(AgentRequest, { model: modelOf(confirmUpdate({ kind: "proposal", id: "p1" })), actions: withCalls }));
-  assert.match(out, /Нужно подтверждение/);
-  assert.match(out, /Загрузка карточки/);
+  // While the card loads there is nothing to confirm yet: a small line, no heading.
+  assert.doesNotMatch(out, /Нужно подтверждение/);
+  assert.match(out, /Загрузка…/);
   assert.ok(!out.includes("<img"));
   // A target of another kind has no card to load.
   const odd = html(h(AgentRequest, { model: modelOf(confirmUpdate({ kind: "work", id: "w1" })), actions: withCalls }));

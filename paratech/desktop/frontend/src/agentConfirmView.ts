@@ -11,14 +11,15 @@ import {
 import type { TeacherRole } from "./bindings/recipient.js";
 import { choiceOf, isRefusal, type RecipientView, recipientView, sendBlocked } from "./recipientView.js";
 import { dueText, shortDate, timeText } from "./todayView.js";
+import { doneTexts } from "./assignmentDoneView.js";
 
 export const confirmTexts = {
   caption: "Нужно подтверждение",
   yes: "Да",
   no: "Нет",
   working: "Выполняется…",
-  loading: "Загрузка карточки…",
-  reload: "Обновить карточку",
+  loading: "Загрузка…",
+  reload: "Повторить",
   deadlineTitle: "Срок в календарь",
   sendTitle: "Отправка письма",
   deleteTitle: "Удаление записи",
@@ -28,8 +29,14 @@ export const confirmTexts = {
   doneDeadline: "Срок добавлен в календарь.",
   doneSend: "Письмо отправлено.",
   doneDelete: "Запись удалена.",
-  // The section is «Задания» (glossary: not «Домашние задания»; words344.test.mjs checks it).
-  doneDeleteAssignment: "Задание удалено. Вернуть его можно на странице «Задания».",
+  // The section is «Задания» (glossary: not «Домашние задания»; words344.test.mjs checks it). The student can restore it there.
+  doneDeleteAssignment: "Задание удалено вместе с событием в Google Календаре.",
+  openTasks: "Открыть «Задания»",
+  /** Under the refusal «письмо ещё отправляется»: the assignment page is where the letter is checked. */
+  openAssignment: doneTexts.openAssignment,
+  /** The buttons of the delete question say what happens (the others keep «Да» / «Нет»). */
+  deleteYes: "Да, удалить",
+  deleteNo: "Не удалять",
   declined: "Отклонено: ничего не выполнено.",
   declinedDeleteAssignment: "Оставлено без изменений.",
   deleteAssignment: "Удалить задание и событие в Google Календаре?",
@@ -39,10 +46,10 @@ export const confirmTexts = {
   adHoc: "Запись",
 } as const;
 
-/** «Удалить „Задачи 1–7“ и событие в Google Календаре?»; the title is stored text, so it stays a text node of the caller. */
+/** «Удалить «Задачи 1–7» и событие в Google Календаре?»; the title is stored text, so it stays a text node of the caller. */
 export function deleteAssignmentQuestion(title: string): string {
   const t = title.trim();
-  return t === "" ? confirmTexts.deleteAssignment : `Удалить „${t}“ и событие в Google Календаре?`;
+  return t === "" ? confirmTexts.deleteAssignment : `Удалить «${t}» и событие в Google Календаре?`;
 }
 
 export interface CardRow {
@@ -70,6 +77,12 @@ export interface ConfirmCardModel {
   /** Which buttons: both while waiting, only «Да» when a confirmed action did not finish. */
   yes: boolean;
   no: boolean;
+  /** The words of the two buttons: «Да» / «Нет», or what the question asks («Да, удалить» / «Не удалять»). */
+  yesLabel: string;
+  noLabel: string;
+  /** A deleted assignment: «Открыть «Задания»» (the student can restore it there); and the assignment for «Открыть задание». */
+  openTasks: boolean;
+  assignmentId: string;
   /** Why «Да» is shown but off («Выберите, кому отправить.»); "" when it may be pressed. */
   yesBlocked: string;
   /** The recipient part of a send: the question, a refusal with its way out, or nothing more than the «Кому» row. */
@@ -158,6 +171,10 @@ export function confirmCardModel(c: ConfirmCard, chosenRole: TeacherRole | "" = 
     outcome: outcomeOf(c),
     yes: open,
     no: waiting,
+    yesLabel: confirmTexts.yes,
+    noLabel: confirmTexts.no,
+    openTasks: false,
+    assignmentId: "",
     notice: c.notice,
     yesBlocked: "",
     recipient: { kind: "none" } as RecipientView,
@@ -172,6 +189,10 @@ export function confirmCardModel(c: ConfirmCard, chosenRole: TeacherRole | "" = 
       return {
         ...base,
         title: "",
+        yesLabel: confirmTexts.deleteYes,
+        noLabel: confirmTexts.deleteNo,
+        openTasks: c.state === "done",
+        assignmentId: c.targetId !== "" ? c.targetId : c.assignmentId,
         question: deleteAssignmentQuestion(c.title),
         rows: [...row("Предмет", c.subject), ...row("Срок", dueText(c.due).replace(/^до /, ""))],
         items: [],

@@ -19,6 +19,7 @@ import {
 } from "../.test-build/bindings/agentConfirm.js";
 import { ConfirmFlow, confirmCardModel, confirmTexts, deleteAssignmentQuestion } from "../.test-build/agentConfirmView.js";
 import { lineModel, recordingStopNoUndo } from "../.test-build/journalView.js";
+import { doneTexts } from "../.test-build/assignmentDoneView.js";
 
 const { renderToStaticMarkup } = server;
 const noop = () => undefined;
@@ -133,28 +134,33 @@ test("strictness stays: a known kind that is malformed, or a kind that is no str
 
 test("the stub says to update the app, quietly, with nothing to press", () => {
   const out = render([{ kind: "hologram" }]);
-  assert.ok(out.includes("Обновите приложение: этот вид карточки пока не поддерживается."));
-  assert.equal(resultTexts.unknownCard, "Обновите приложение: этот вид карточки пока не поддерживается.");
+  assert.ok(out.includes("Эту часть ответа нельзя показать в этой версии paratech. Обновите приложение."));
+  assert.equal(resultTexts.unknownCard, "Эту часть ответа нельзя показать в этой версии paratech. Обновите приложение.");
   assert.doesNotMatch(out, /<button|<h3|<input/);
   assert.match(out, /role="status"/);
 });
 
 // ---- Result lines ----
 
-test("marked_done: «Отмечено выполненным: N» with the right plural of «задание» and «Отменить»", () => {
-  const cases = [[1, "задание"], [2, "задания"], [3, "задания"], [4, "задания"], [5, "заданий"], [11, "заданий"], [14, "заданий"], [21, "задание"], [22, "задания"], [50, "заданий"]];
+test("marked_done: «Отмечено выполненным: 1 задание» for one, «Отмечены выполненными: N» for several, with the plural of «задание»", () => {
+  assert.equal(textOf(result("marked_done", { count: 1 })), "Отмечено выполненным: 1 задание");
+  const cases = [[2, "задания"], [3, "задания"], [4, "задания"], [5, "заданий"], [11, "заданий"], [14, "заданий"], [21, "задание"], [22, "задания"], [50, "заданий"]];
   for (const [n, word] of cases) {
-    assert.equal(textOf(result("marked_done", { count: n })), `Отмечено выполненным: ${n} ${word}`, String(n));
+    assert.equal(textOf(result("marked_done", { count: n })), `Отмечены выполненными: ${n} ${word}`, String(n));
   }
   const out = render([line(result("marked_done", { count: 3 }))]);
-  assert.ok(out.includes("Отмечено выполненным: 3 задания"));
+  assert.ok(out.includes("Отмечены выполненными: 3 задания"));
   assert.match(out, />Отменить</);
   assert.doesNotMatch(out, /Действие выполнено/);
+  // The words are the assignment toast's (assignmentDoneView).
+  assert.equal(resultTexts.markedDoneMany, doneTexts.markedMany);
+  assert.equal(resultTexts.markedUndone, doneTexts.unmarked);
+  assert.equal(resultTexts.markedUndoneMany, doneTexts.unmarkedMany);
 });
 
-test("marked_undone: «Возвращено в работу: N»", () => {
+test("marked_undone: «Возвращено в работу: 1 задание», «Возвращены в работу: N заданий»", () => {
   assert.equal(textOf(result("marked_undone", { count: 1 })), "Возвращено в работу: 1 задание");
-  assert.equal(textOf(result("marked_undone", { count: 7 })), "Возвращено в работу: 7 заданий");
+  assert.equal(textOf(result("marked_undone", { count: 7 })), "Возвращены в работу: 7 заданий");
   assert.match(render([line(result("marked_undone", { count: 2 }))]), />Отменить</);
 });
 
@@ -166,21 +172,21 @@ test("a count outside 1.. reads as the generic line", () => {
 
 test("note_text: the sentence, then the excerpt as plain muted lines (no heading), then «Отменить»", () => {
   const out = render([line(result("note_text", { excerpt: ["Первая строка", "Вторая строка", "Третья"] }))]);
-  assert.ok(out.includes("Записано в конспект:"));
+  assert.ok(out.includes("Записано в «Мой конспект»:"));
   for (const t of ["Первая строка", "Вторая строка", "Третья"]) {
     assert.match(out, new RegExp(`<span class="ag-act-ex small muted">${t}</span>`));
   }
-  assert.ok(out.indexOf("Записано в конспект:") < out.indexOf("Первая строка"));
+  assert.ok(out.indexOf("Записано в «Мой конспект»:") < out.indexOf("Первая строка"));
   assert.ok(out.indexOf("Третья") < out.indexOf(">Отменить<"));
   assert.doesNotMatch(out, /<h[1-6]/);
 });
 
 test("note_text: no excerpt is the sentence alone; blank lines are left out; at most three lines", () => {
   const none = render([line(result("note_text"))]);
-  assert.ok(none.includes("Записано в конспект"));
-  assert.ok(!none.includes("Записано в конспект:"));
+  assert.ok(none.includes("Записано в «Мой конспект»"));
+  assert.ok(!none.includes("Записано в «Мой конспект»:"));
   assert.doesNotMatch(none, /ag-act-ex/);
-  assert.deepEqual(resultWording(result("note_text", { excerpt: ["", "  ", "a"] })), { text: "Записано в конспект:", detail: ["a"] });
+  assert.deepEqual(resultWording(result("note_text", { excerpt: ["", "  ", "a"] })), { text: "Записано в «Мой конспект»:", detail: ["a"] });
   assert.equal(resultWording(result("note_text", { excerpt: ["1", "2", "3", "4", "5"] })).detail.length, 3);
 });
 
@@ -192,10 +198,10 @@ test("note_text: the saved text is text, never markup", () => {
 
 test("the other note lines and their words", () => {
   const words = {
-    note_upload: "Файл добавлен в конспект",
-    note_move: "Конспект перенесён",
-    note_rename: "Конспект переименован",
-    note_remove: "Конспект удалён",
+    note_upload: "Файл добавлен в «Мой конспект»",
+    note_move: "«Мой конспект» перенесён",
+    note_rename: "«Мой конспект» переименован",
+    note_remove: "«Мой конспект» удалён",
   };
   for (const [kind, text] of Object.entries(words)) {
     assert.equal(textOf(result(kind)), text, kind);
@@ -234,6 +240,18 @@ test("recording_started: while stopping and after, the line says so", () => {
   assert.doesNotMatch(done, /<button|Запись началась/);
 });
 
+test("recording_started: after «Остановить» the line offers «Начать запись» when the panel wires offers", () => {
+  const stopped = { undoNote: () => ({ busy: false, done: true, text: "" }), offer: noop };
+  const out = render([line(result("recording_started"))], stopped);
+  assert.ok(out.includes("Запись остановлена"));
+  assert.match(out, /<button(?![^>]*disabled)[^>]*>Начать запись</);
+  assert.doesNotMatch(out, />Остановить<|>Отменить<|Запись началась/);
+  // Before the stop there is no such button, and a line without that offer wiring shows none.
+  assert.doesNotMatch(render([line(result("recording_started"))], { offer: noop }), /Начать запись/);
+  assert.deepEqual(modelOf([line(result("recording_started"))]).cards[0].afterUndoOffer, { label: "Начать запись", offer: { action: "start_recording", target: null } });
+  assert.equal(modelOf([line(result("marked_done", { count: 1 }))]).cards[0].afterUndoOffer, null);
+});
+
 test("a refusal to stop is shown as text under the line", () => {
   const out = render([line(result("recording_started"))], { undoNote: () => ({ busy: false, done: false, text: "Запись уже остановлена." }) });
   assert.ok(out.includes("Запись уже остановлена."));
@@ -249,7 +267,7 @@ test("recording_stopped: «Запись остановлена» and the offer �
   assert.deepEqual(undoableActions(modelOf(cards).cards), []);
 });
 
-test("the offer button calls actions.offer with the offer; without the prop it is off, with no tooltip", () => {
+test("the offer button calls actions.offer with the offer; without the prop nothing is drawn at all", () => {
   const model = offerModel({ action: "start_recording", target: null });
   assert.deepEqual(model, { label: "Начать запись", offer: { action: "start_recording", target: null } });
   const seen = [];
@@ -257,13 +275,12 @@ test("the offer button calls actions.offer with the offer; without the prop it i
   assert.equal(on.props.disabled, false);
   on.props.onClick();
   assert.deepEqual(seen, [{ action: "start_recording", target: null }]);
-  const off = OfferButton({ offer: model, actions });
-  assert.equal(off.props.disabled, true);
+  assert.equal(OfferButton({ offer: model, actions }), null);
   const busy = OfferButton({ offer: model, actions: { ...actions, offer: noop, busy: true } });
   assert.equal(busy.props.disabled, true);
   const out = render([line(result("recording_stopped"), { offer: { action: "start_recording", target: null } })]);
-  assert.match(out, /<button[^>]*disabled[^>]*>Начать запись</);
-  assert.doesNotMatch(out, /title=|aria-describedby/);
+  assert.doesNotMatch(out, /<button/);
+  assert.ok(out.includes("Запись остановлена"));
 });
 
 test("recording_stopped without an offer is the sentence alone, still no «Отменить»", () => {
@@ -281,12 +298,12 @@ test("an offer the panel has no label for draws no button and the line keeps «�
 
 test("setting lines: recording_prompts and ac_power_only, on and off", () => {
   const t = (setting, value) => textOf(result("setting", { setting, value }));
-  assert.equal(t("recording_prompts", "on"), "Окно записи перед парой включено");
-  assert.equal(t("recording_prompts", "off"), "Окно записи перед парой выключено");
+  assert.equal(t("recording_prompts", "on"), "Предложение записи в начале пары включено");
+  assert.equal(t("recording_prompts", "off"), "Предложение записи в начале пары выключено");
   assert.equal(t("ac_power_only", "on"), "Обработка только от розетки включена");
   assert.equal(t("ac_power_only", "off"), "Обработка только от розетки выключена");
   const out = render([line(result("setting", { setting: "recording_prompts", value: "off" }))]);
-  assert.ok(out.includes("Окно записи перед парой выключено"));
+  assert.ok(out.includes("Предложение записи в начале пары выключено"));
   assert.match(out, />Отменить</);
 });
 
@@ -372,18 +389,24 @@ test("the known refusal of the delete is shown, any other text is generic", () =
 
 // ---- delete_assignment: the card ----
 
-test("waiting: the heading is the question with the title; subject and deadline rows; «Нет» then «Да»", () => {
+test("waiting: the heading is the question in «» with the title; subject and deadline rows; «Не удалять» then «Да, удалить»", () => {
   const out = view(asg());
-  assert.ok(out.includes("Удалить „Задачи 1–7“ и событие в Google Календаре?"));
+  assert.ok(out.includes("Удалить «Задачи 1–7» и событие в Google Календаре?"));
+  assert.doesNotMatch(out, /[„“]/);
   assert.match(out, /Предмет/);
   assert.ok(out.includes("Матанализ"));
   assert.match(out, /Срок/);
   assert.ok(out.includes("сб, 24 окт., 18:30"));
-  assert.ok(out.indexOf(">Нет<") > 0 && out.indexOf(">Нет<") < out.indexOf(">Да<"));
+  assert.ok(out.indexOf(">Не удалять<") > 0 && out.indexOf(">Не удалять<") < out.indexOf("Да, удалить"));
+  assert.doesNotMatch(out, />Нет<|>Да<|<span>Да</);
+  // The confirming button is the danger one; the refusing one is quiet.
+  assert.match(out, /<button[^>]*class="btn danger sm"[^>]*><span class="btn-labels"><span>Да, удалить</);
   // One heading, no repeated caption, no second note with the same words, nothing focused.
   assert.equal((out.match(/<h3/g) ?? []).length, 1);
   assert.doesNotMatch(out, /Нужно подтверждение|Вместе с заданием|autofocus|autoFocus/i);
-  assert.equal(deleteAssignmentQuestion("Задачи 1–7"), "Удалить „Задачи 1–7“ и событие в Google Календаре?");
+  assert.equal(deleteAssignmentQuestion("Задачи 1–7"), "Удалить «Задачи 1–7» и событие в Google Календаре?");
+  assert.equal(confirmTexts.deleteYes, "Да, удалить");
+  assert.equal(confirmTexts.deleteNo, "Не удалять");
 });
 
 test("waiting: a missing subject, a missing deadline and an empty title are left out, not shown empty", () => {
@@ -406,11 +429,28 @@ test("waiting: the title and subject are text, never markup", () => {
   assert.ok(out.includes("&lt;img src=x onerror=alert(1)&gt;"));
 });
 
-test("done: «Задание удалено…» with the way back (the section is «Задания»), no buttons", () => {
-  const out = view(done());
-  assert.ok(out.includes("Задание удалено. Вернуть его можно на странице «Задания»"));
+test("done: «Задание удалено вместе с событием…» and «Открыть «Задания»» (the student can restore it there)", () => {
+  const seen = [];
+  const nav = { openAssignment: (id, opts) => seen.push([id, opts]), openTeacher: noop, openSubjects: noop };
+  const out = view(done(), { nav });
+  assert.ok(out.includes("Задание удалено вместе с событием в Google Календаре."));
   assert.doesNotMatch(out, /Домашние задания/);
-  assert.doesNotMatch(out, /<button/);
+  assert.match(out, /<button(?![^>]*disabled)[^>]*>Открыть «Задания»</);
+  assert.doesNotMatch(out, />Не удалять<|Да, удалить/);
+  // The press opens the assignment page by the card's target id.
+  const tree = ConfirmCardView({ model: confirmCardModel(done()), busy: "", error: "", onYes: noop, onNo: noop, nav });
+  const find = (n, out = []) => {
+    if (n === null || typeof n !== "object") return out;
+    if (Array.isArray(n)) return n.forEach((x) => find(x, out)), out;
+    if (typeof n.props?.onClick === "function") out.push(n.props);
+    return find(n.props?.children, out);
+  };
+  find(tree).find((p) => p.children === "Открыть «Задания»").onClick();
+  assert.deepEqual(seen, [["a1", undefined]]);
+  // Without the window's navigation, and while waiting or after «Не удалять», there is no such button.
+  assert.doesNotMatch(view(done()), /<button/);
+  assert.doesNotMatch(view(asg(), { nav }), /Открыть «Задания»/);
+  assert.doesNotMatch(view(declined(), { nav }), /<button/);
 });
 
 test("declined: «Оставлено без изменений», no buttons", () => {
@@ -419,26 +459,29 @@ test("declined: «Оставлено без изменений», no buttons", (
   assert.doesNotMatch(out, /<button/);
 });
 
-test("busy: the buttons are off and «Да» says it works", () => {
+test("busy: the buttons are off and «Да, удалить» says it works", () => {
   const out = view(asg(), { busy: "confirm" });
-  assert.match(out, /<button[^>]*disabled[^>]*>Нет</);
+  assert.match(out, /<button[^>]*disabled[^>]*>Не удалять</);
   assert.match(out, /<button[^>]*disabled/);
   assert.ok(out.includes("Выполняется…"));
 });
 
-test("loading: a small line, no banner; the error has the reason and «Обновить карточку»", () => {
+test("loading: a small «Загрузка…» line with no heading; the error has the reason and «Повторить»", () => {
   const loading = renderToStaticMarkup(h(ConfirmCardPending, { error: "" }));
-  assert.ok(loading.includes("Загрузка карточки…"));
-  assert.doesNotMatch(loading, /<button|role="alert"/);
+  assert.ok(loading.includes("Загрузка…"));
+  assert.doesNotMatch(loading, /<button|role="alert"|<h[1-6]|<section|Нужно подтверждение/);
   const failed = renderToStaticMarkup(h(ConfirmCardPending, { error: genericError, onReload: noop }));
   assert.ok(failed.includes(genericError));
   assert.match(failed, /role="alert"/);
-  assert.match(failed, />Обновить карточку</);
+  assert.match(failed, />Повторить</);
+  assert.doesNotMatch(failed, /Обновить карточку/);
   const stateless = renderToStaticMarkup(h(ConfirmCardPending, { error: genericError }));
   assert.doesNotMatch(stateless, /<button/);
   // The card of the panel starts in the loading state.
   const api = { card: async () => asg(), confirm: async () => done(), decline: async () => declined() };
-  assert.ok(renderToStaticMarkup(h(ConfirmCard, { api, deleteApi: {}, target: { kind: "assignment", id: "a1" } })).includes("Загрузка карточки…"));
+  const real = renderToStaticMarkup(h(ConfirmCard, { api, deleteApi: {}, target: { kind: "assignment", id: "a1" } }));
+  assert.ok(real.includes("Загрузка…"));
+  assert.doesNotMatch(real, /Нужно подтверждение/);
 });
 
 test("«Да» confirms with the assignment target; «Нет» declines it; both end the card", async () => {
@@ -464,7 +507,7 @@ test("«Да» confirms with the assignment target; «Нет» declines it; both
   ]);
 });
 
-test("a refused «Да» (a letter may still go out): the reason in words, the card re-read, «Нет» and «Да» stay as the way on", async () => {
+test("a refused «Да, удалить» (a letter may still go out): the reason in words, the card re-read, both buttons stay, «Открыть задание» is the way out", async () => {
   const api = {
     card: async () => asg(),
     confirm: async () => {
@@ -478,11 +521,28 @@ test("a refused «Да» (a letter may still go out): the reason in words, the c
   assert.equal(flow.state.error, assignmentInUseText);
   assert.equal(flow.state.card.state, "waiting");
   assert.equal(flow.state.busy, "");
-  const out = view(flow.state.card, { error: flow.state.error });
+  const seen = [];
+  const nav = { openAssignment: (id) => seen.push(id), openTeacher: noop, openSubjects: noop };
+  const out = view(flow.state.card, { error: flow.state.error, nav });
   assert.ok(out.includes(assignmentInUseText));
   assert.match(out, /role="alert"/);
-  assert.match(out, /<button(?![^>]*disabled)[^>]*>Нет</);
-  assert.match(out, /<button(?![^>]*disabled)[^>]*><span class="btn-labels"><span>Да</);
+  assert.match(out, /<button(?![^>]*disabled)[^>]*>Не удалять</);
+  assert.match(out, /<button(?![^>]*disabled)[^>]*><span class="btn-labels"><span>Да, удалить</);
+  assert.match(out, /<button(?![^>]*disabled)[^>]*>Открыть задание</);
+  // The way out opens the assignment by the card's id; other errors and a card without the window's navigation have none.
+  const tree = ConfirmCardView({ model: confirmCardModel(flow.state.card), busy: "", error: flow.state.error, onYes: noop, onNo: noop, nav });
+  const buttons = [];
+  const walk = (n) => {
+    if (n === null || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach(walk);
+    if (typeof n.props?.onClick === "function") buttons.push(n.props);
+    walk(n.props?.children);
+  };
+  walk(tree);
+  buttons.find((p) => p.children === "Открыть задание").onClick();
+  assert.deepEqual(seen, ["a1"]);
+  assert.doesNotMatch(view(flow.state.card, { error: genericError, nav }), /Открыть задание/);
+  assert.doesNotMatch(view(flow.state.card, { error: flow.state.error }), /Открыть задание/);
 });
 
 test("an unknown error of the delete is the generic text", async () => {
@@ -528,7 +588,8 @@ test("in the panel: a delete_assignment card reads the card of target kind assig
   assert.deepEqual(m.target, { kind: "assignment", id: "a1" });
   const api = { card: async () => asg(), confirm: async () => done(), decline: async () => declined() };
   const out = render(cards, { confirm: { api, deleteApi: {} } });
-  assert.ok(out.includes("Загрузка карточки…"));
+  assert.ok(out.includes("Загрузка…"));
+  assert.doesNotMatch(out, /Нужно подтверждение/);
 });
 
 test("in the panel: without the confirm calls, or with another target kind, the card says it is unavailable", () => {
@@ -554,20 +615,29 @@ test("journal: the wave-10 tools have plain labels", () => {
   const title = (tool) => lineModel(jline({ tool }), 0, new Map()).title;
   assert.equal(title("recording"), "Запись");
   assert.equal(title("change_assignment"), "Изменено задание");
-  assert.equal(title("mark_assignments_done"), "Задания отмечены выполненными");
-  assert.equal(title("note"), "Изменён конспект");
+  assert.equal(title("mark_assignments_done"), "Изменена отметка «Выполнено»");
+  assert.equal(title("note"), "Изменён «Мой конспект»");
   assert.equal(title("set_setting"), "Изменена настройка");
   assert.equal(title("propose_subjects_from_schedule"), "Предложены предметы из расписания");
   assert.equal(title("some_future_tool"), "Действие");
 });
 
-test("journal: a done recording line without «Отменить» says the stop is not undone, not «это предложение»", () => {
+test("journal: a done recording line the core calls irreversible says the stop is not undone, not «это предложение»", () => {
   const m = lineModel(jline({}), 0, new Map());
-  assert.equal(m.reason, "Остановка записи не отменяется — начните запись заново");
+  assert.equal(m.reason, "Нельзя отменить: запись уже остановлена. Можно начать новую.");
   assert.equal(m.reason, recordingStopNoUndo);
   assert.doesNotMatch(m.reason, /предложение/);
-  assert.equal(lineModel(jline({ noUndo: "" }), 0, new Map()).reason, recordingStopNoUndo);
+  // Only «irreversible» means the stop: a recording line with no reason of the core's is not guessed to be one.
+  assert.equal(lineModel(jline({ noUndo: "" }), 0, new Map()).reason, "Нельзя отменить: такие действия не возвращаются");
+  assert.notEqual(lineModel(jline({ noUndo: "" }), 0, new Map()).reason, recordingStopNoUndo);
   assert.equal(lineModel(jline({ noUndo: "", cannotUndo: false }), 0, new Map()).reason, "");
+});
+
+test("plan steps: the offer_button tool reads «Предложена кнопка» and the notes tools say «Мой конспект»", () => {
+  const step = (tool) => stepText({ tool, args: [], deferred: [] });
+  assert.equal(step("offer_button"), "Предложена кнопка");
+  assert.equal(step("note"), "Работа с «Мой конспект»");
+  assert.equal(step("list_notes"), "Просмотр «Мой конспект»");
 });
 
 test("journal: other recording lines keep their own reason; other tools keep «это предложение»", () => {

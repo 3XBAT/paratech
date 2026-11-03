@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 // The .js extensions let the Node test runner load the compiled card.
-import type { AgentConfirmApi, ConfirmCard as CardData, ConfirmTarget } from "../bindings/agentConfirm.js";
+import { type AgentConfirmApi, assignmentInUseText, type ConfirmCard as CardData, type ConfirmTarget } from "../bindings/agentConfirm.js";
 import type { TeacherRole } from "../bindings/recipient.js";
 import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
 import { type ConfirmCardModel, ConfirmFlow, confirmCardModel, confirmTexts, type FlowState, initialFlow } from "../agentConfirmView.js";
@@ -89,12 +89,27 @@ export function ConfirmCardView(props: {
           <RefusalButton action={refusalAction(rv, "card")} nav={props.nav} disabled={off} />
         </div>
       )}
+      {/* The letter may still go out: the way out is the assignment, where it can be checked. «Не удалять» / «Да, удалить» stay. */}
+      {props.error === assignmentInUseText && m.assignmentId !== "" && props.nav !== undefined && (
+        <div className="ag-actions">
+          <Button size="sm" variant="secondary" disabled={off} onClick={() => props.nav?.openAssignment(m.assignmentId)}>
+            {confirmTexts.openAssignment}
+          </Button>
+        </div>
+      )}
+      {m.openTasks && props.nav !== undefined && (
+        <div className="ag-actions">
+          <Button size="sm" variant="secondary" onClick={() => props.nav?.openAssignment(m.assignmentId)}>
+            {confirmTexts.openTasks}
+          </Button>
+        </div>
+      )}
       {(m.yes || m.no) && (
         <div className="ag-actions">
-          {/* «Нет» first and nothing is focused: Enter never lands on «Да» by itself. */}
+          {/* The refusing button first and nothing is focused: Enter never lands on the confirming one by itself. */}
           {m.no && (
             <Button size="sm" variant="secondary" disabled={off} onClick={props.onNo}>
-              {confirmTexts.no}
+              {m.noLabel}
             </Button>
           )}
           {m.yes && (
@@ -107,7 +122,7 @@ export function ConfirmCardView(props: {
               busyLabel={confirmTexts.working}
               onClick={props.onYes}
             >
-              {confirmTexts.yes}
+              {m.yesLabel}
             </Button>
           )}
         </div>
@@ -121,24 +136,26 @@ export function ConfirmCardView(props: {
  * (no hooks: the tests render it directly). Without onReload the error has no button.
  */
 export function ConfirmCardPending(props: { error: string; onReload?: () => void }) {
+  // While it loads there is nothing to confirm yet: a small line, no «Нужно подтверждение» heading.
+  if (props.error === "") {
+    return (
+      <p className="ag-sched-load small muted" role="status">
+        {confirmTexts.loading}
+      </p>
+    );
+  }
   return (
     <section className="ag-card ag-confirm">
       <h3 className="ag-card-h">{confirmTexts.caption}</h3>
-      {props.error === "" ? (
-        <p className="muted">{confirmTexts.loading}</p>
-      ) : (
-        <>
-          <ResultLine kind="fail" role="alert">
-            {props.error}
-          </ResultLine>
-          {props.onReload !== undefined && (
-            <div className="ag-actions">
-              <Button size="sm" onClick={props.onReload}>
-                {confirmTexts.reload}
-              </Button>
-            </div>
-          )}
-        </>
+      <ResultLine kind="fail" role="alert">
+        {props.error}
+      </ResultLine>
+      {props.onReload !== undefined && (
+        <div className="ag-actions">
+          <Button size="sm" onClick={props.onReload}>
+            {confirmTexts.reload}
+          </Button>
+        </div>
       )}
     </section>
   );
