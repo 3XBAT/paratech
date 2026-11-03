@@ -157,7 +157,7 @@ const genericActionError = "Не удалось выполнить действ�
 
 const loadErrors: Readonly<Record<"recordings" | "jobs", string>> = {
   recordings: "Не удалось загрузить записи.",
-  jobs: "Не удалось загрузить фоновую обработку.",
+  jobs: "Не удалось загрузить список фоновой обработки.",
 };
 
 /** Russian text for a failed load of one list; the raw error text is not shown. */

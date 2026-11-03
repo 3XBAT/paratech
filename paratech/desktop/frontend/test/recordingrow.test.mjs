@@ -132,7 +132,7 @@ test("a summary service problem is named by the core's reason, not by no network
 
   const down = recordingRowView(row({ stage: "queued", step: "summary", queueReason: "serviceUnavailable", jobError: "hub: unavailable" }), 0);
   assert.deepEqual([down.status.label, down.status.kind, down.status.icon], ["Сервис конспектов недоступен", "wait", "clock"]);
-  assert.equal(down.status.hint, "Дальше конспект. Повторим автоматически.");
+  assert.equal(down.status.hint, "Дальше конспект. Повторится автоматически. Запись сохранена.");
   assert.equal(down.action, null);
 
   // Only the reason decides: a network error text does not turn a service reason into no network, nor the reverse.
@@ -579,11 +579,13 @@ test("recording and task rows share one grid: fixed status, button and «⋯» t
   assert.match(page, /sectionGroups\("recordings", "записи", groups\.recordings, recordingRow\)/);
   assert.match(page, /sectionGroups\("tasks", "фоновая обработка", groups\.tasks, jobRow\)/);
   // The two «Завершённые» toggles have distinct accessible names: a hidden word after the title.
-  assert.match(page, /Завершённые<span className="vh"> \{name\}<\/span>/);
+  assert.match(page, /Завершённые<span className="vh"> · \{name\}<\/span>/);
   // The page title is «Записи»: no second «Записи» heading under it (TASK-344).
   assert.doesNotMatch(page, /<h2 className="group-title">Записи<\/h2>/);
   assert.match(page, /\) : noRecordings \? \(\s*<EmptyState/);
-  assert.match(page, /<h3 className="arows-sub">Идут<\/h3>/);
+  // «Идут» under the page h1 is an h2 (no skipped level); under the h2 «Фоновая обработка» it is an h3.
+  assert.match(page, /const Sub = list === "recordings" \? "h2" : "h3";/);
+  assert.match(page, /<Sub className="arows-sub">Идут<\/Sub>/);
   assert.match(page, /<p className="muted arows-empty">\{tasksEmptyText\}<\/p>/, "an empty «Фоновая обработка» has a short hint");
   assert.ok(!page.includes("attempts"), "the page shows no attempts");
 

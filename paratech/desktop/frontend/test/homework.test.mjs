@@ -128,7 +128,7 @@ test("every generation state has a chip; waiting and failed ones show the core's
   }
   assert.deepEqual(
     generationStates.map((state) => generationView({ state, message: "" }).label),
-    ["Готовим черновик…", "Ждёт интернет", "Ждёт пополнения минут", "Черновик не готов", "Черновик готов"],
+    ["Черновик пишется…", "Ждёт интернет", "Ждёт пополнения минут", "Черновик не готов", "Черновик готов"],
   );
   const text = "Нет связи с сервисом конспектов: проверьте интернет и адрес в разделе «Подключения». Генерация продолжится сама.";
   assert.equal(generationView({ state: "waitingNetwork", message: text }).hint, text);
@@ -179,11 +179,11 @@ test("the page follows the core's generation; a new version reloads the assignme
   assert.equal(draftStatusStep({ latestVersion: 3, generation: active({ jobId: "j2" }) }, 3, "j1").follow.jobId, "j2");
 });
 
-test("while a draft is prepared, generate and the instructions are off with «Готовим черновик…»", () => {
-  assert.equal(generatingLabel, "Готовим черновик…");
+test("while a draft is prepared, generate and the instructions are off with «Черновик пишется…»", () => {
+  assert.equal(generatingLabel, "Черновик пишется…");
   const base = { hasDraft: true, generating: false, olderShown: false, dirty: false };
   assert.deepEqual(generateOffer(base), {
-    label: "Написать заново",
+    label: "Написать новую версию",
     disabled: false,
     reason: undefined,
     instructionDisabled: false,

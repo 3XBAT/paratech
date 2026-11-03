@@ -383,7 +383,7 @@ test("plan card: caption, steps in impersonal words, buttons only while the plan
     "Изменение срока · срок 03.11.2026",
   ]);
   // TASK-318: the one «Да» of the plan names the number of steps (this plan has 3); the button id stays "approve".
-  assert.deepEqual(m.buttons.map((b) => b.label), ["Да, выполнить 3 шага", "Изменить", "Отмена"]);
+  assert.deepEqual(m.buttons.map((b) => b.label), ["Да, выполнить 3 шага", "Изменить", "Не выполнять"]);
   assert.equal(m.buttons[0].id, "approve");
   const later = modelOf(update({ status: "EXECUTING", cards: [card({ kind: "plan", plan })] })).cards[0];
   assert.deepEqual(later.buttons, []);
@@ -613,15 +613,15 @@ test("stop reasons: offline repeats (continue), failed retries, expired restarts
   const off = stop("offline");
   assert.equal(off.type, "stopped");
   assert.equal(off.text, "Не завершено: нет связи");
-  assert.deepEqual(off.buttons.map((b) => b.label), ["Повторить", "Отмена"]);
+  assert.deepEqual(off.buttons.map((b) => b.label), ["Повторить", "Отменить запрос"]);
   assert.deepEqual(off.buttons.map((b) => b.id), ["continue", "cancel"]);
   assert.deepEqual(stop("failed").buttons.map((b) => b.label), ["Повторить"]);
   assert.deepEqual(stop("expired").buttons.map((b) => b.label), ["Повторить"]);
   assert.deepEqual(stop("budget").buttons, []);
   // «Остановить» resumes («Продолжить», id resume); offline and quota repeat («Повторить», id continue).
-  assert.deepEqual(stop("user").buttons.map((b) => b.label), ["Продолжить", "Отмена"]);
+  assert.deepEqual(stop("user").buttons.map((b) => b.label), ["Продолжить", "Отменить запрос"]);
   assert.deepEqual(stop("user").buttons.map((b) => b.id), ["resume", "cancel"]);
-  assert.deepEqual(stop("quota").buttons.map((b) => b.label), ["Повторить", "Отмена"]);
+  assert.deepEqual(stop("quota").buttons.map((b) => b.label), ["Повторить", "Отменить запрос"]);
   assert.deepEqual(stop("quota").buttons.map((b) => b.id), ["continue", "cancel"]);
   // A problem that offers its own next step leaves no second way on in the stop card.
   const stopCardOf = (reason, problem) => modelOf(update({ status: "STOPPED", stopReason: reason, problem })).cards.find((c) => c.type === "stopped");

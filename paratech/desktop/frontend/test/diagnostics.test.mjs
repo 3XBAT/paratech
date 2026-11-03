@@ -189,10 +189,10 @@ test("the seconds left are whole and rounded up; at 0 a running check is finishi
   assert.equal(remainingText(15000), "Осталось 15 с");
   assert.equal(remainingText(10800), "Осталось 11 с");
   assert.equal(remainingText(1), "Осталось 1 с");
-  assert.equal(remainingText(0), "Завершаем…");
-  assert.equal(remainingText(-5), "Завершаем…");
+  assert.equal(remainingText(0), "Завершение…");
+  assert.equal(remainingText(-5), "Завершение…");
   // The capture starts after the countdown, so the core may still run at 0 left.
-  assert.equal(soundDisplay({ ...running, elapsedMs: 15000, remainingMs: 0 }).remaining, "Завершаем…");
+  assert.equal(soundDisplay({ ...running, elapsedMs: 15000, remainingMs: 0 }).remaining, "Завершение…");
 });
 
 // Fake timers: run() fires the one pending timer. Reads are answered by the test, so an overlap would be visible.
@@ -302,7 +302,7 @@ test("the sound button starts or stops; buttons are disabled while their call ru
   assert.deepEqual(checkButton(true, false), { label: "Остановить", disabled: false });
   assert.deepEqual(checkButton(false, true), { label: "Проверить звук", disabled: true });
   assert.deepEqual(bundleButton(false), { label: "Сохранить пакет для поддержки…", disabled: false });
-  assert.deepEqual(bundleButton(true), { label: "Сохраняем…", disabled: true });
+  assert.deepEqual(bundleButton(true), { label: "Сохранение…", disabled: true });
   // 10 reads a second, as fast as the core reports levels at most (20 a second).
   assert.equal(pollMs, 100);
 });

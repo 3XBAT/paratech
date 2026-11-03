@@ -8,7 +8,6 @@ import { askMentions, maxDraftLength, maxMentions, type MentionPill, mentionPill
 import { approveLabel, type PlanProgress, planProgress, stepMarks, type StepMark, planWindow } from "./planView.js";
 import { type Entry, isBusyRefused, isFinalStatus, isRunning, orderedEntries } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
-import { waitingInline } from "./statusWords.js";
 import { dayText, daysBetween, daysLeftText, dueText, parseMoment } from "./dueText.js";
 
 /** One row of the assignment list of a reply card. */
@@ -771,6 +770,8 @@ export const texts = {
   offlineBanner: "Нет связи с paratech",
   empty: "Можно задать вопрос или попросить что-нибудь сделать.",
   planCaption: "План",
+  /** The plan card's refusal: «Да, выполнить» / «Не выполнять» (plain «Отмена» is for dialogs). */
+  planDecline: "Не выполнять",
   progressCaption: "Работа идёт",
   resultCaption: "Готово",
   answerCaption: "Ответ по материалам",
@@ -844,7 +845,8 @@ const stopTexts: Record<string, { text: string; buttons: ButtonId[] }> = {
   offline: { text: "Не завершено: нет связи", buttons: ["continue", "cancel"] },
   // «Остановить» keeps «Продолжить» (the same free replay): «Повторить» would promise another attempt, which is the rerun button.
   user: { text: "Остановлено", buttons: ["resume", "cancel"] },
-  quota: { text: `Не завершено: ${waitingInline("quota")}`, buttons: ["continue", "cancel"] },
+  // The request does not continue by itself after a top-up: «Повторить» is the next step.
+  quota: { text: "Не завершено: закончились минуты обработки. После пополнения нажмите «Повторить».", buttons: ["continue", "cancel"] },
   failed: { text: "Не получилось выполнить шаг", buttons: ["retry"] },
   expired: { text: "Запрос устарел", buttons: ["restart"] },
   budget: { text: "Остановлено: лимит запроса", buttons: [] },
@@ -1064,7 +1066,8 @@ const activeStatuses = new Set(["PLANNING", "EXECUTING"]);
 function planModel(plan: PlanView, status: string): Extract<CardModel, { type: "plan" }> {
   const total = plan.steps.length;
   const states = plan.steps.map((s) => s.state);
-  const awaiting = buttons(["approve", "revise", "cancel"]).map((b) => (b.id === "approve" ? { ...b, label: approveLabel(total) } : b));
+  const planLabels: Partial<Record<ButtonId, string>> = { approve: approveLabel(total), cancel: texts.planDecline };
+  const awaiting = buttons(["approve", "revise", "cancel"]).map((b) => ({ ...b, label: planLabels[b.id] ?? b.label }));
   return {
     type: "plan",
     caption: texts.planCaption,
@@ -1225,12 +1228,14 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
   if (stop && reason === "failed" && ctx.replyCut === true) {
     stop = { ...stop, text: texts.replyCut };
   }
-  // The problem's own «Повторить» is the next step: the stop card must not offer a second way on.
+  // The problem's own «Повторить» is the next step: the stop card must not offer a second way on, nor a second «Повторить».
   if (stop && (problem === "retry_required" || problem === "restart_required")) {
-    stop = { ...stop, buttons: stop.buttons.filter((b) => b !== "continue" && b !== "resume") };
+    stop = { ...stop, buttons: stop.buttons.filter((b) => b !== "continue" && b !== "resume" && b !== "retry" && b !== "restart") };
   }
   if (stop) {
-    cards.push({ type: "stopped", text: stop.text, buttons: buttons(stop.buttons) });
+    // The same action is «Отменить запрос» here as in the restart dialog.
+    const stopButtons = buttons(stop.buttons).map((b) => (b.id === "cancel" ? { ...b, label: restartTexts.cancelRequest } : b));
+    cards.push({ type: "stopped", text: stop.text, buttons: stopButtons });
   }
   if (problem !== "") {
     let next: ButtonId[] = problem === "retry_required" ? ["retry"] : problem === "restart_required" ? ["restart"] : [];

@@ -47,7 +47,8 @@ export const texts = {
   show: "Показать билеты",
   hide: "Скрыть билеты",
   stalledTitle: "Подбор остановлен",
-  stalledHint: "Сам не продолжится. «Повторить» продолжит с того места, где подбор остановился.",
+  // True to cases/tickets: the run continues from the first ticket without a result; a stored answer is never asked again.
+  stalledHint: "Подбор прервался и сам не продолжится. «Повторить» продолжит с того же билета, готовые ответы не оплачиваются снова.",
   notCoveredHint: "Не найдено в лекциях и конспектах.",
   generatedNote: "Ответы сгенерированы по лекциям: перед сдачей их нужно прочитать и проверить.",
   openNote: "Открывается копия файла: правки в Word в библиотеку не попадают.",

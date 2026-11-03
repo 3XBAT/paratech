@@ -15,7 +15,7 @@ export const turnkeyTexts = {
   triageCaption: "Разбор задания",
   triageFailed: "Разбор задания не завершён. Можно повторить.",
   /** No attempt yet: the first start. After a failed attempt the button is retry. */
-  triageStart: "Разобрать задание",
+  triageStart: "Начать разбор",
   retry: "Повторить",
   failedCaption: "Разбор задания",
   failedText: "Задание не удалось разобрать.",
@@ -90,7 +90,7 @@ export function triageReason(w: TurnkeyWork): string {
 /**
  * The card of a work that has no writing yet, or null (the writing cards decide). A reader call that did not go
  * through keeps the work in triage with its problem; «Повторить» asks again. Without a problem
- * no attempt was made: the card only offers «Разобрать задание».
+ * no attempt was made: the card only offers «Начать разбор».
  */
 export function turnkeyCardModel(w: TurnkeyWork): TurnkeyCardModel | null {
   if (w.writing !== null) {

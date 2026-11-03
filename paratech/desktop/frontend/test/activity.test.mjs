@@ -99,7 +99,7 @@ test("errors of the core map to Russian text, unknown ones to a generic text", (
   assert.equal(actionErrorText(new Error("constructor")), generic);
   assert.equal(loadErrorText(new Error(errorMessages.unavailable), "jobs"), "Записи сейчас недоступны.");
   assert.equal(loadErrorText(new Error("x"), "recordings"), "Не удалось загрузить записи.");
-  assert.equal(loadErrorText(new Error("x"), "jobs"), "Не удалось загрузить фоновую обработку.");
+  assert.equal(loadErrorText(new Error("x"), "jobs"), "Не удалось загрузить список фоновой обработки.");
 });
 
 test("a running recording shows the time elapsed by the client clock", () => {

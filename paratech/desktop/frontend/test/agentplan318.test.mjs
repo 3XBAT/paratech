@@ -99,7 +99,7 @@ test("approve label names the number of steps; a plan with no steps keeps «Да
   assert.equal(approveLabel(0), "Да, выполнить");
 
   const m = modelOf(plan(5)).cards[0];
-  assert.deepEqual(m.buttons.map((b) => [b.id, b.label]), [["approve", "Да, выполнить 5 шагов"], ["revise", "Изменить"], ["cancel", "Отмена"]]);
+  assert.deepEqual(m.buttons.map((b) => [b.id, b.label]), [["approve", "Да, выполнить 5 шагов"], ["revise", "Изменить"], ["cancel", "Не выполнять"]]);
   assert.equal(modelOf(plan(0)).cards[0].buttons[0].label, "Да, выполнить");
   // Only while the plan awaits an answer.
   assert.deepEqual(modelOf(plan(5), "EXECUTING").cards[0].buttons, []);
@@ -155,7 +155,7 @@ test("a plan of 3 and of 8 steps shows every step and no «Ещё», no scroll a
     assert.ok(!out.includes("Ещё"), `n=${n}`);
     assert.ok(!out.includes("ag-plan-scroll") && !out.includes("ag-plan-more") && !out.includes("aria-controls"), `n=${n}`);
     assert.ok(!out.includes("Шаги плана"), `n=${n}`);
-    assert.ok(out.includes(`Да, выполнить ${stepsWord(n)}`) && out.includes("Изменить") && out.includes("Отмена"));
+    assert.ok(out.includes(`Да, выполнить ${stepsWord(n)}`) && out.includes("Изменить") && out.includes("Не выполнять"));
   }
 });
 

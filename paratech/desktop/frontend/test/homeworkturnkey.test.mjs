@@ -140,7 +140,7 @@ test("the page names the blocks «Быстрый черновик» and «Сде
 });
 
 test("the generation chips and the busy label say «черновик»", () => {
-  assert.equal(generatingLabel, "Готовим черновик…");
+  assert.equal(generatingLabel, "Черновик пишется…");
   assert.equal(generationView({ state: "failed", message: "", percent: 0 }).label, "Черновик не готов");
   assert.equal(generationView({ state: "done", message: "", percent: 0 }).label, "Черновик готов");
 });

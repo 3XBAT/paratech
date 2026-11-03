@@ -51,7 +51,7 @@ interface Look {
 }
 
 const generationLooks: Readonly<Record<GenerationState, Look>> = {
-  generating: { kind: "run", icon: "wave", label: "Готовим черновик…" },
+  generating: { kind: "run", icon: "wave", label: "Черновик пишется…" },
   waitingNetwork: { kind: "net", icon: "off", label: waitingWords.network },
   waitingQuota: { kind: "wait", icon: "clock", label: waitingWords.quota },
   failed: { kind: "fail", icon: "warn", label: "Черновик не готов" },
@@ -96,7 +96,7 @@ export function draftStatusStep(
 }
 
 /** The busy label of the generate button while the core prepares a draft. */
-export const generatingLabel = "Готовим черновик…";
+export const generatingLabel = "Черновик пишется…";
 
 /** The generate button and the instructions field: off while a generation goes on or the shown text forbids one. */
 export interface GenerateOffer {
@@ -107,7 +107,7 @@ export interface GenerateOffer {
 }
 
 export function generateOffer(o: { hasDraft: boolean; generating: boolean; olderShown: boolean; dirty: boolean }): GenerateOffer {
-  const label = o.hasDraft ? "Написать заново" : "Написать черновик";
+  const label = o.hasDraft ? "Написать новую версию" : "Написать черновик";
   if (o.generating) {
     // The button's busy label says why.
     return { label, disabled: true, reason: undefined, instructionDisabled: true };
@@ -271,9 +271,16 @@ export function versionTitle(v: { number: number; source: VersionSource }): stri
   return `Версия ${v.number} · ${sourceLabels[v.source]}`;
 }
 
-/** "до сб, 24 окт., 18:00" (never seconds, the one wording of the deadline everywhere) or "Без срока". */
-export function dueText(due: string): string {
-  return due === "" ? "Без срока" : dueMoment(due) || "до —";
+/**
+ * The deadline of an assignment in the one wording of dueText (never seconds): «завтра до 18:30», «просрочено, пт,
+ * 23 окт., 20:00» for one still to do; a done (sent) one keeps the plain «до сб, 24 окт., 18:30». «Без срока» without a
+ * deadline, «Срок не распознан» for an unreadable one. Without `now` there is no today/tomorrow/overdue and no year.
+ */
+export function dueText(due: string, now?: Date, done = false): string {
+  if (due === "") {
+    return "Без срока";
+  }
+  return dueMoment(due, now, done) || "Срок не распознан";
 }
 
 /** An attachment size for people: "800 байт", "12,5 КБ", "1,2 МБ". */
@@ -321,7 +328,7 @@ export function blockedByEmail(err: unknown): boolean {
 }
 
 /**
- * Why «Написать заново» is off, undefined when it is on. A new version always continues the latest one, so it is
+ * Why «Написать новую версию» is off, undefined when it is on. A new version always continues the latest one, so it is
  * off while an older version is shown: the student picks «К последней версии» or «Взять этот текст» first.
  */
 export function regenerateBlockedReason(olderShown: boolean, dirty: boolean): string | undefined {

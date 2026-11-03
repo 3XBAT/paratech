@@ -68,7 +68,7 @@ test("a plan waiting for «Да» after a restart becomes a card with the confir
     }),
   );
   assert.ok(html.includes("Поставь срок на пятницу"));
-  assert.ok(html.includes("Да") && html.includes("Изменить") && html.includes("Отмена"));
+  assert.ok(html.includes("Да") && html.includes("Изменить") && html.includes("Не выполнять"));
   assert.ok(!/<button[^>]*disabled=""[^>]*>\s*(<[^>]*>)*Да/.test(html), "«Да» is enabled");
   // Model text is escaped, never HTML.
   assert.ok(html.includes("&lt;b&gt;сдачи&lt;/b&gt;") && !html.includes("<b>сдачи"));

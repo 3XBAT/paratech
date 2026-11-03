@@ -71,7 +71,7 @@ type OwnLabelReason = "serviceNotConfigured" | "serviceUnavailable";
 /** Shown in the chip after «В очереди». */
 export const queueReasonTexts: Readonly<Record<Exclude<QueueReason, "" | OwnLabelReason>, string>> = {
   inLine: "ждёт очереди",
-  retry: "повтор позже",
+  retry: waitingInline("retry"),
   power: waitingInline("power"),
   network: waitingInline("network"),
   quota: waitingInline("quota"),
@@ -92,7 +92,7 @@ export const queueReasonHints: Readonly<Record<Exclude<QueueReason, "">, string>
   quota: "Продолжится, когда минуты обработки пополнятся. Запись сохранена.",
   // The chip already names the service; the hint only says what to do.
   serviceNotConfigured: "Укажите адрес и ключ в «Подключения» → «Конспекты и задания». Запись сохранена.",
-  serviceUnavailable: "Повторим автоматически.",
+  serviceUnavailable: "Повторится автоматически. Запись сохранена.",
 };
 
 const queueReasonLooks: Readonly<Record<Exclude<QueueReason, "">, Look>> = {

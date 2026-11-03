@@ -3,8 +3,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { jobStatusLabels, jobTypeLabels } from "../.test-build/activityView.js";
-import { generationView, dueText as homeworkDueText } from "../.test-build/homeworkView.js";
+import { jobStatusLabels, jobTypeLabels, loadErrorText } from "../.test-build/activityView.js";
+import { generateOffer, generatingLabel, generationView, dueText as homeworkDueText } from "../.test-build/homeworkView.js";
+import { assignmentMeta } from "../.test-build/summaryView.js";
 import { lineModel } from "../.test-build/journalView.js";
 import { queueReasonTexts, chainStatusView } from "../.test-build/recordingRowView.js";
 import { statusView as ticketStatus, texts as ticketTexts } from "../.test-build/ticketsView.js";
@@ -13,7 +14,8 @@ import { problemTexts } from "../.test-build/sourcePicker/view.js";
 import { texts as libraryTexts } from "../.test-build/libraryView.js";
 import { lessonTabs } from "../.test-build/knowledgeView.js";
 import { waitingInline, waitingWords } from "../.test-build/statusWords.js";
-import { addedAssignmentText, assignmentRow, buttonLabels, texts as agentTexts } from "../.test-build/agentView.js";
+import { addedAssignmentText, assignmentRow, buttonLabels, entryModel, texts as agentTexts } from "../.test-build/agentView.js";
+import { texts as connectionTexts } from "../.test-build/connectionsView.js";
 import { dueText } from "../.test-build/dueText.js";
 import { dueText as todayDueText } from "../.test-build/todayView.js";
 import { approveLabel } from "../.test-build/planView.js";
@@ -148,6 +150,140 @@ test("«Задания» shows the deadline in the same style as «Сегодн�
   assert.doesNotMatch(homeworkDueText(due), /\d{2}\.\d{2}\.\d{4}/);
 });
 
+test("«Задания»: a deadline to do reads with now, a done one stays plain «до …»", () => {
+  const at = (y, mo, d, h, m) => new Date(y, mo, d, h, m).toISOString();
+  // now = Mon 26 Oct 2026, 12:00
+  assert.equal(homeworkDueText(at(2026, 9, 24, 18, 30), now), "просрочено, сб, 24 окт., 18:30", "past");
+  assert.equal(homeworkDueText(at(2026, 9, 26, 11, 0), now), "просрочено, пн, 26 окт., 11:00", "earlier today is past too");
+  assert.equal(homeworkDueText(at(2026, 9, 27, 18, 30), now), "завтра до 18:30", "tomorrow");
+  assert.equal(homeworkDueText(at(2026, 9, 26, 20, 0), now), "сегодня до 20:00", "today");
+  assert.equal(homeworkDueText(at(2026, 9, 30, 18, 30), now), "до пт, 30 окт., 18:30", "later");
+  assert.equal(homeworkDueText(at(2026, 9, 24, 18, 30), now, true), "до сб, 24 окт., 18:30", "done: no «просрочено» next to the tick");
+  assert.equal(homeworkDueText(at(2026, 9, 27, 18, 30), now, true), "до вт, 27 окт., 18:30", "done: no «завтра»");
+  assert.equal(homeworkDueText("", now), "Без срока");
+  assert.equal(homeworkDueText("", now, true), "Без срока");
+  assert.equal(homeworkDueText("not a date", now), "Срок не распознан");
+  assert.doesNotMatch(homeworkDueText("not a date", now), /до —/);
+  // Without now there is no relative wording and no year.
+  assert.equal(homeworkDueText(at(2026, 9, 24, 18, 30)), "до сб, 24 окт., 18:30");
+  // The year shows only when it is not the current one.
+  assert.equal(homeworkDueText(at(2027, 0, 15, 10, 0), now), "до пт, 15 янв. 2027, 10:00");
+  assert.equal(homeworkDueText(at(2025, 9, 23, 20, 0), now), "просрочено, чт, 23 окт. 2025, 20:00");
+  assert.equal(homeworkDueText(at(2025, 9, 23, 20, 0), now, true), "до чт, 23 окт. 2025, 20:00");
+  assert.equal(homeworkDueText(at(2026, 9, 30, 18, 30), now).includes("2026"), false);
+  // The summary list reads the same way.
+  assert.equal(assignmentMeta({ due: at(2026, 9, 27, 18, 30), userEdited: true }, now), "завтра до 18:30 · изменено вами");
+});
+
+test("source: the assignment page and the list rows pass now and the done mark to dueText", () => {
+  const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
+  assert.match(read("../src/pages/HomeworkPage.tsx"), /dueText\(a\.due, new Date\(\), a\.done\)/);
+  assert.match(read("../src/pages/AssignmentDoneParts.tsx"), /dueText\(a\.due, new Date\(\), a\.done\)/);
+});
+
+// ---- The agent cards ----
+
+const rawCard = (over) => ({
+  kind: "reply", plan: null, questions: null, jobId: "", artifact: "", target: null, actionId: "", answerId: "",
+  cannotDo: null, text: "", assignments: [], assignment: null, stopReason: "", workId: "", outcome: "", ...over,
+});
+const agentModel = (over, ctx = { last: true, blocked: false }) =>
+  entryModel(
+    {
+      key: "k", seq: 1, threadId: "t1", turn: 1, text: "", scope: null, callProblem: "",
+      update: {
+        threadId: "t1", turn: 1, subjectId: "", lessonId: "", assignmentId: "", screen: "today", status: "STOPPED",
+        stopReason: "", problem: "", progress: false, cards: [], ...over,
+      },
+    },
+    ctx,
+  );
+const buttonsOf = (m) => m.cards.flatMap((c) => ("buttons" in c ? c.buttons : []));
+
+test("the plan card refuses with «Не выполнять»; plain «Отмена» is for dialogs", () => {
+  const plan = { summary: "С", steps: [{ tool: "create_subject", args: [], deferred: [] }], notes: [] };
+  const m = agentModel({ status: "AWAITING_PLAN", cards: [rawCard({ kind: "plan", plan })] });
+  assert.deepEqual(m.cards[0].buttons.map((b) => [b.id, b.label]), [["approve", "Да, выполнить 1 шаг"], ["revise", "Изменить"], ["cancel", "Не выполнять"]]);
+});
+
+test("a stop card cancels with «Отменить запрос», the word of the restart dialog", () => {
+  for (const stopReason of ["offline", "quota", "user"]) {
+    const cancel = buttonsOf(agentModel({ stopReason })).find((b) => b.id === "cancel");
+    assert.equal(cancel?.label, "Отменить запрос", stopReason);
+  }
+  assert.equal(buttonLabels.cancel, "Отмена", "the plain word stays for dialogs");
+});
+
+test("a stopped request for quota says what to do: no promise to go on by itself", () => {
+  const stop = agentModel({ stopReason: "quota" }).cards.find((c) => c.type === "stopped");
+  assert.equal(stop.text, "Не завершено: закончились минуты обработки. После пополнения нажмите «Повторить».");
+  assert.deepEqual(stop.buttons.map((b) => b.label), ["Повторить", "Отменить запрос"]);
+});
+
+test("one request never shows two «Повторить»: the problem's retry replaces the stop card's", () => {
+  const retries = (m) => buttonsOf(m).filter((b) => b.label === "Повторить").length;
+  const failed = agentModel({ stopReason: "failed", problem: "retry_required" });
+  assert.equal(retries(failed), 1);
+  assert.equal(failed.rerun, false);
+  assert.deepEqual(failed.cards.find((c) => c.type === "stopped").buttons, []);
+  assert.deepEqual(failed.cards.find((c) => c.type === "problem").buttons.map((b) => b.id), ["retry"]);
+
+  const expired = agentModel({ stopReason: "expired", problem: "restart_required" });
+  assert.equal(retries(expired), 1);
+  assert.deepEqual(expired.cards.find((c) => c.type === "problem").buttons.map((b) => b.id), ["restart"]);
+
+  // A problem of the other kind does not take the stop card's retry away.
+  assert.equal(retries(agentModel({ stopReason: "failed" })), 1);
+  assert.deepEqual(buttonsOf(agentModel({ stopReason: "failed" })).map((b) => b.id), ["retry"]);
+});
+
+test("the turnkey start has one name on the agent card and on «Задания»", () => {
+  assert.equal(helperTexts.triageStart, "Начать разбор");
+  assert.equal(helperTexts.triageStart, blockTexts.button);
+});
+
+test("a new version of a draft or a work: one name, a busy label in the impersonal voice", () => {
+  assert.equal(generatingLabel, "Черновик пишется…");
+  assert.equal(generationView({ state: "generating", message: "", percent: 0 }).label, "Черновик пишется…");
+  assert.equal(generateOffer({ hasDraft: true, generating: false, olderShown: false, dirty: false }).label, "Написать новую версию");
+  assert.equal(generateOffer({ hasDraft: false, generating: false, olderShown: false, dirty: false }).label, "Написать черновик");
+  assert.equal(workTexts.regenerate, "Написать новую версию");
+  assert.equal(workTexts.rewrite, "Написать новую версию");
+  assert.equal(workTexts.blockedText, "Не удалось написать раздел. Можно написать новую версию.");
+});
+
+test("the outline card is «План работы готов», not the agent's «План»", () => {
+  assert.equal(workTexts.approveCaption, "План работы готов");
+  assert.equal(workTexts.approve, "Утвердить план");
+  assert.notEqual(workTexts.approveCaption, agentTexts.planCaption);
+});
+
+const queuedRow = (queueReason) => ({
+  stage: "queued", step: "summary", queueReason, status: "COMPLETED", progressPercent: 0, parts: 0, partsDone: 0,
+  action: "", retryWork: "", errorCode: "", startedAt: "", durationSeconds: 0, hasDuration: false,
+});
+
+test("status texts speak impersonally: «Проверка…», «Повторится автоматически», no «Повторим»", () => {
+  assert.equal(connectionTexts.checking, "Проверка…");
+  assert.equal(chainStatusView(queuedRow("serviceUnavailable"), 0).hint, "Дальше конспект. Повторится автоматически. Запись сохранена.");
+});
+
+test("a recording waiting for a retry says it with the dictionary: «В очереди · ждёт повтора»", () => {
+  assert.equal(queueReasonTexts.retry, waitingInline("retry"));
+  assert.equal(chainStatusView(queuedRow("retry"), 0).label, "В очереди · ждёт повтора");
+});
+
+test("the list of background jobs: a grammatical load error", () => {
+  assert.equal(loadErrorText(new Error("x"), "jobs"), "Не удалось загрузить список фоновой обработки.");
+});
+
+test("a stalled ticket set says why «Повторить» is safe, as the core does (the first ticket without a result, no second payment)", () => {
+  assert.equal(
+    ticketTexts.stalledHint,
+    "Подбор прервался и сам не продолжится. «Повторить» продолжит с того же билета, готовые ответы не оплачиваются снова.",
+  );
+});
+
 // ---- The old words are gone from the UI texts ----
 
 function sourceFiles(dir = new URL("../src/", import.meta.url)) {
@@ -197,15 +333,33 @@ const oldWords = [
   /просьб/,
   /Оценено задание/,
   /Запущен поиск ДЗ/,
+  // Round 2: more old words and the first-person-plural status texts the glossary bans by name.
+  /Распознавани/,
+  /заняти[еяйю]/i,
+  /нет сети/i,
+  /лимит исчерпан/i,
+  /Предмет и тип(?! пары)/,
+  /Проверяем/,
+  /Повторим/,
+  /Готовим/,
+  /Сохраняем/,
+  /Написать заново/,
+  /Разобрать задание/,
+  /Попробуем/,
 ];
+
+// The Windows setting is named «Распознавание текста» in the OS itself: the one place the word may stay.
+const allowed = new Map([["noteRecognitionView.ts", /Распознавание текста/g]]);
 
 test("no UI text uses a word the glossary replaced", () => {
   const files = sourceFiles();
   assert.ok(files.length > 100, "the scan really reads the sources");
   assert.equal(code("a // «Стоп»\nb /* «Стоп» */ c"), "a \nb  c", "comments are skipped");
   assert.match(code('x = "«Стоп»"'), /Стоп/, "string literals are kept");
+  assert.ok(/Распознавани/.test("Распознавание речи") && !/Предмет и тип(?! пары)/.test("Предмет и тип пары"));
   for (const url of files) {
-    const text = code(readFileSync(url, "utf8"));
+    const allow = allowed.get(url.pathname.split("/").at(-1));
+    const text = code(readFileSync(url, "utf8")).replace(allow ?? /$^/g, "");
     for (const re of oldWords) {
       assert.doesNotMatch(text, re, `${url.pathname.split("/src/")[1]}: ${re}`);
     }

@@ -24,9 +24,9 @@ test("a deadline reads «до вт, 27 окт., 15:50» without seconds", () => 
   assert.equal(formatTimeMinutes(withSeconds), "27.10.2026, 15:50");
 });
 
-test("missing or unreadable deadline keeps its old text", () => {
+test("a missing deadline is «Без срока», an unreadable one «Срок не распознан»", () => {
   assert.equal(dueText(""), "Без срока");
-  assert.equal(dueText("not a date"), "до —");
+  assert.equal(dueText("not a date"), "Срок не распознан");
   assert.equal(formatTimeMinutes(""), "—");
   assert.equal(formatTimeMinutes("not a date"), "—");
 });
@@ -54,7 +54,7 @@ test("no deadline path emits seconds: assignment list/page, summary, «Сего�
 
 test("source: homeworkView.dueText goes through the shared deadline wording, not formatTime", () => {
   const src = readFileSync(new URL("../src/homeworkView.ts", import.meta.url), "utf8");
-  assert.match(src, /dueMoment\(due\)/);
+  assert.match(src, /dueMoment\(due, now, done\)/);
   assert.doesNotMatch(src, /formatTime\(/);
 });
 

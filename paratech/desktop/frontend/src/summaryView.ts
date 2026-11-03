@@ -185,8 +185,8 @@ export function updatedText(v: SummaryView): string {
 }
 
 /** The deadline of an assignment and whether the student changed it. */
-export function assignmentMeta(a: Pick<SummaryAssignment, "due" | "userEdited">): string {
-  return a.userEdited ? `${dueText(a.due)} · изменено вами` : dueText(a.due);
+export function assignmentMeta(a: Pick<SummaryAssignment, "due" | "userEdited">, now?: Date): string {
+  return a.userEdited ? `${dueText(a.due, now)} · изменено вами` : dueText(a.due, now);
 }
 
 /** Which step a retry is for (TASK-086). */

@@ -174,7 +174,7 @@ test("the page asks on its own only with an address and a stored key", () => {
 test("«Обновить» waits for a refresh and for a change of the key or the address", () => {
   const idle = { refreshing: false, keyBusy: false, hubBusy: false };
   assert.deepEqual(quotaControls(idle), { disabled: false, label: "Обновить" });
-  assert.deepEqual(quotaControls({ ...idle, refreshing: true }), { disabled: true, label: "Обновляем…" });
+  assert.deepEqual(quotaControls({ ...idle, refreshing: true }), { disabled: true, label: "Обновление…" });
   assert.equal(quotaControls({ ...idle, keyBusy: true }).disabled, true);
   assert.equal(quotaControls({ ...idle, hubBusy: true }).disabled, true);
 });

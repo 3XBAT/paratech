@@ -336,11 +336,13 @@ export function RecordingsPage({
     section: { active: T[]; finished: T[] },
     row: (item: T) => ReactNode,
   ) {
+    // «Записи» is the page h1, so its «Идут» is an h2 (no skipped level); the tasks sit under the h2 «Фоновая обработка».
+    const Sub = list === "recordings" ? "h2" : "h3";
     return (
       <>
         {section.active.length > 0 && (
           <>
-            <h3 className="arows-sub">Идут</h3>
+            <Sub className="arows-sub">Идут</Sub>
             {card(section.active.map(row))}
           </>
         )}
@@ -348,7 +350,7 @@ export function RecordingsPage({
           <CollapsibleList
             title={
               <>
-                Завершённые<span className="vh"> {name}</span>
+                Завершённые<span className="vh"> · {name}</span>
               </>
             }
             items={section.finished}

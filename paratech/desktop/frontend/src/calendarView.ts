@@ -9,7 +9,7 @@ import { plural } from "./plural.js";
 export const calendarTexts = {
   title: "Синхронизация",
   sync: "Синхронизировать",
-  syncing: "Запускаем…",
+  syncing: "Запуск…",
   busyReason: "Дождитесь окончания синхронизации.",
   lastSynced: "Последняя синхронизация:",
   loading: "Загрузка…",

@@ -174,7 +174,7 @@ test("never two «Повторить» under one request: the stop card's button
   }
   // The stop card's button is the one shown, and it is still the continue call.
   const stopped = modelOf(update({ status: "STOPPED", stopReason: "offline" }));
-  assert.deepEqual(stopped.cards.at(-1).buttons.map((b) => [b.id, b.label]), [["continue", "Повторить"], ["cancel", "Отмена"]]);
+  assert.deepEqual(stopped.cards.at(-1).buttons.map((b) => [b.id, b.label]), [["continue", "Повторить"], ["cancel", "Отменить запрос"]]);
   assert.equal(stopped.rerun, false);
   const html = renderToStaticMarkup(h(AgentRequest, { model: stopped, actions }));
   assert.equal(html.split(">Повторить<").length - 1, 1);
@@ -188,7 +188,7 @@ test("never two «Повторить» under one request: the stop card's button
 
 test("«Остановить» offers «Продолжить» and keeps the rerun under the last request", () => {
   const m = modelOf(update({ status: "STOPPED", stopReason: "user" }));
-  assert.deepEqual(m.cards.at(-1).buttons.map((b) => [b.id, b.label]), [["resume", "Продолжить"], ["cancel", "Отмена"]]);
+  assert.deepEqual(m.cards.at(-1).buttons.map((b) => [b.id, b.label]), [["resume", "Продолжить"], ["cancel", "Отменить запрос"]]);
   assert.equal(m.rerun, true);
   const html = renderToStaticMarkup(h(AgentRequest, { model: m, actions }));
   assert.equal(html.split(">Повторить<").length - 1, 0);

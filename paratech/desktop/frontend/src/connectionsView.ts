@@ -52,7 +52,7 @@ export const texts = {
   saved: "Сохранено.",
   checkSaveFirst: "Сначала сохраните изменения: проверяются сохранённые настройки.",
   checkNoSend: "Письмо не отправляется: только соединение и вход.",
-  checking: "Проверяем…",
+  checking: "Проверка…",
   loading: "Загрузка…",
   loadFailed: "Не удалось загрузить настройки подключений.",
   saveFailed: "Не удалось сохранить настройки подключений.",
@@ -305,7 +305,7 @@ export function hubCardStatus(s: { saved: Connections | null; loadFailed: boolea
     return status("fail", "Ключ недоступен");
   }
   if (s.refreshing) {
-    return status("run", "Проверяем…");
+    return status("run", "Проверка…");
   }
   switch (c.quota.status) {
     case "current":

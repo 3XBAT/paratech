@@ -268,9 +268,9 @@ test("a failed answer keeps the card and shows the problem of the reader call", 
   const out = render(failed);
   assert.ok(out.includes("Нет связи с paratech") && out.includes(turnkeyTexts.retry));
   assert.ok(!out.includes(turnkeyTexts.triageStart));
-  // A stored triage without a problem: no attempt made, only «Разобрать задание» without the old line.
+  // A stored triage without a problem: no attempt made, only «Начать разбор» without the old line.
   const stored = render(work({ status: "triage" }));
-  assert.ok(stored.includes("Разобрать задание") && !stored.includes("Повторить"));
+  assert.ok(stored.includes("Начать разбор") && !stored.includes("Повторить"));
   assert.ok(!stored.includes("ещё не разобрано") && !stored.includes("Повторить"));
   assert.equal(turnkeyTexts.retry, "Повторить");
   const err = render(work({ status: "questions", questionRound: 1, questions: [choice] }), fakeApi(), { error: "Не удалось выполнить. Попробуйте ещё раз.", onError: noop });

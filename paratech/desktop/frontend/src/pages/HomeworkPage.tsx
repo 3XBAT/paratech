@@ -88,7 +88,7 @@ import { doneToastProps, useDoneFocus } from "./useDoneFocus";
 import { useDoneRunner } from "./useDoneRunner";
 
 // «Задания» (PRD section 10): the assignments, and for the opened one the draft editor, the extra
-// instructions with «Написать заново», the version history, the export to a file and the send by email through
+// instructions with «Написать новую версию», the version history, the export to a file and the send by email through
 // the confirmation dialog (AC-13, AC-14, AC-15). The core decides what can be sent and what to offer for an email; the
 // page shows it. Whether a draft is being generated comes from the core too (TASK-094): the page asks it while open,
 // so a generation started earlier or elsewhere and a version made meanwhile show up without opening the page again. Assignment, draft and instruction texts may be model output: they are plain React text and textarea
@@ -1254,7 +1254,7 @@ function AssignmentEditor(props: {
         <h1 className="hw-title" id="hw-detail-title">
           {a.title}
         </h1>
-        <span className="muted num">{dueText(a.due)}</span>
+        <span className="muted num">{dueText(a.due, new Date(), a.done)}</span>
         <div className="acts">
           <DoneButton
             done={a.done}

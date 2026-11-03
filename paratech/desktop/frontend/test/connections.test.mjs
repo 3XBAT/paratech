@@ -387,7 +387,7 @@ test("the Hub card says what is missing before it says connected", () => {
   assert.deepEqual(hub({ ...stored, hubKey: "unset" }), ["wait", "Нет ключа"]);
   assert.deepEqual(hub({ ...stored, hubKey: "unsupported" }), ["fail", "Ключ недоступен"]);
   assert.deepEqual(hub({ ...stored, hubKey: "unavailable" }), ["fail", "Ключ недоступен"]);
-  assert.deepEqual(hub(stored, { refreshing: true }), ["run", "Проверяем…"]);
+  assert.deepEqual(hub(stored, { refreshing: true }), ["run", "Проверка…"]);
   assert.deepEqual(hub(stored), ["ok", "Подключено"]);
   const q = (status) => hub({ ...stored, quota: { ...current, status } });
   assert.deepEqual(q("unchecked"), ["neutral", "Не проверено"]);

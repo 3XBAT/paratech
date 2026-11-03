@@ -252,9 +252,9 @@ test("a running step does not show the material of the work as a result", () => 
 
 test("approve: the editor with the sections, both buttons, the limits", () => {
   const w = work({ writing: writing({ step: "approve", sections: [section({ number: 1, title: "Введение", words: 300 }), section({ number: 2, title: "Основная часть", words: 1500 })] }) });
-  assert.equal(workCardModel(w).caption, "План готов, утвердите");
+  assert.equal(workCardModel(w).caption, "План работы готов");
   const out = render(w);
-  assert.match(out, /План готов, утвердите/);
+  assert.match(out, /План работы готов/);
   assert.match(out, /value="Введение"/);
   assert.match(out, /value="Основная часть"/);
   assert.match(out, /value="1500"/);
@@ -278,12 +278,12 @@ test("approve with no sections does not crash and cannot be approved", () => {
   assert.match(out, /<button[^>]*disabled=""[^>]*>Утвердить план/);
 });
 
-test("blocked: the text, the note field with its limit and «Написать заново»", () => {
+test("blocked: the text, the note field with its limit and «Написать новую версию»", () => {
   const out = render(work({ writing: writing({ step: "blocked", sections: [section({ written: true }), section({ number: 2 })] }) }));
-  assert.match(out, /Не удалось написать раздел\. Можно написать заново\./);
+  assert.match(out, /Не удалось написать раздел\. Можно написать новую версию./);
   assert.match(out, /Дополнительные указания/);
   assert.match(out, /maxLength="1000"/);
-  assert.match(out, /Написать заново/);
+  assert.match(out, /Написать новую версию/);
 });
 
 test("blocked outline (no sections) says so and offers to make the plan again", () => {

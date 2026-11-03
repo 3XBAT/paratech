@@ -49,14 +49,14 @@ export const workTexts = {
   startHint: "Требования подтверждены. Работу можно написать целиком: сначала составляется план.",
   start: "Написать работу",
   planning: "Составляется план",
-  approveCaption: "План готов, утвердите",
+  approveCaption: "План работы готов",
   approveHint: "Разделы можно переименовать, переставить, добавить или убрать.",
   approve: "Утвердить план",
   savePlan: "Сохранить план",
-  blockedText: "Не удалось написать раздел. Можно написать заново.",
+  blockedText: "Не удалось написать раздел. Можно написать новую версию.",
   blockedOutlineText: "Не удалось составить план. Можно составить заново.",
   noteLabel: "Дополнительные указания",
-  regenerate: "Написать заново",
+  regenerate: "Написать новую версию",
   doneCaption: "Работа готова",
   generated: "Сгенерировано — прочитайте перед сдачей",
   verify: "проверить источник",
@@ -77,7 +77,7 @@ export const workTexts = {
   manualNoText: "В методичке нет текста, который можно прочитать: отчёт написан по тексту задания.",
   columnFallback: "Колонка",
   editPlan: "Изменить план",
-  rewrite: "Написать заново",
+  rewrite: "Написать новую версию",
   cancel: "Отмена",
   retry: "Повторить",
   stop: "Остановить",
@@ -581,7 +581,7 @@ export function noteOf(raw: string): string {
 }
 
 /**
- * The section «Написать заново» of a blocked work sends: 0 (the plan) only when there are no sections; otherwise
+ * The section «Написать новую версию» of a blocked work sends: 0 (the plan) only when there are no sections; otherwise
  * the first section not written yet, and 0 if every one is written.
  */
 export function blockedNumber(w: WorkWriting): number {
@@ -648,7 +648,7 @@ export function approvePlan(api: TurnkeyApi, workId: string, version: number, it
   return afterEdit(api, workId, version, items, edited, () => api.approveOutline(workId), mode);
 }
 
-/** «Написать заново» of a done work: EditOutlineAt, then StartWriting. */
+/** «Написать новую версию» of a done work: EditOutlineAt, then StartWriting. */
 export function rewriteWork(api: TurnkeyApi, workId: string, version: number, items: readonly EditorItem[], edited: boolean, mode: EditorMode = "paper"): Promise<StepResult> {
   return afterEdit(api, workId, version, items, edited, () => api.startWriting(workId), mode);
 }

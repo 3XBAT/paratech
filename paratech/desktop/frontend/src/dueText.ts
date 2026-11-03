@@ -31,14 +31,15 @@ export function daysBetween(d: Date, now: Date): number {
   return Math.round((dayStart(d) - dayStart(now)) / 86_400_000);
 }
 
-/** «сб, 24 окт.»: the day of a moment in the local zone. */
-export function dayText(d: Date): string {
-  return `${weekdaysShort[d.getDay()]}, ${d.getDate()} ${monthsShort[d.getMonth()]}`;
+/** «сб, 24 окт.»: the day of a moment in the local zone; with `now` the year follows («24 окт. 2027») when it differs. */
+export function dayText(d: Date, now?: Date): string {
+  const year = now !== undefined && d.getFullYear() !== now.getFullYear() ? ` ${d.getFullYear()}` : "";
+  return `${weekdaysShort[d.getDay()]}, ${d.getDate()} ${monthsShort[d.getMonth()]}${year}`;
 }
 
-/** «сб, 24 окт., 18:30»: the day and the time of a moment in the local zone. */
-export function dayAndTime(d: Date): string {
-  return `${dayText(d)}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/** «сб, 24 окт., 18:30»: the day and the time of a moment in the local zone (the year only as in dayText). */
+export function dayAndTime(d: Date, now?: Date): string {
+  return `${dayText(d, now)}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** «сегодня», «завтра», «через 2 дня», «через 5 дней»; a past date reads «просрочено». */
@@ -58,16 +59,18 @@ export function daysLeftText(n: number): string {
 /**
  * The deadline as one tidy phrase, always with the time (a date alone reads as «до конца дня»): «до сб, 24 окт., 18:30».
  * With `now`: a coming today reads «сегодня до 20:00», tomorrow «завтра до 18:30», a moment that has passed
- * «просрочено, пт, 23 окт., 20:00» (never «до …» for the past). "" when unknown.
+ * «просрочено, пт, 23 окт., 20:00» (never «до …» for the past). With `done` the plain «до …» stays whatever the
+ * moment (a finished assignment is not «просрочено»). The year shows only when it is not the year of `now`.
+ * "" when unknown.
  */
-export function dueText(due: string, now?: Date): string {
+export function dueText(due: string, now?: Date, done = false): string {
   const d = parseMoment(due);
   if (d === null) {
     return "";
   }
-  if (now !== undefined) {
+  if (now !== undefined && !done) {
     if (d.getTime() <= now.getTime()) {
-      return `${daysLeftText(-1)}, ${dayAndTime(d)}`;
+      return `${daysLeftText(-1)}, ${dayAndTime(d, now)}`;
     }
     const days = daysBetween(d, now);
     if (days === 0) {
@@ -77,5 +80,5 @@ export function dueText(due: string, now?: Date): string {
       return `завтра до ${timeText(due)}`;
     }
   }
-  return `до ${dayAndTime(d)}`;
+  return `до ${dayAndTime(d, now)}`;
 }

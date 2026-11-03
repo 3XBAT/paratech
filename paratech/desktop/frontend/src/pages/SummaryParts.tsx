@@ -166,7 +166,7 @@ export function HomeworkCard(props: RetryProps & { view: SummaryView; onOpenAssi
               meta={
                 <>
                   {lessonText(a) !== "" && <span className="sm-lesson">{lessonText(a)}</span>}
-                  <span className="num">{assignmentMeta(a)}</span>
+                  <span className="num">{assignmentMeta(a, new Date())}</span>
                   {a.description !== "" && <span className="sm-desc">{a.description}</span>}
                 </>
               }
