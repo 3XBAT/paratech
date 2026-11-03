@@ -203,7 +203,7 @@ test("going back from a summary opened over an assignment does not remount the p
   assert.equal(needsRemount(routeToPage("journal"), over), false);
 });
 
-test("the subject is shown in the rows of «Горит» and «Ждёт»; no subject, no line", () => {
+test("the subject is shown in the rows of «Сроки на неделе» and «Нужно ваше решение»; no subject, no line", () => {
   const withSubject = html(h(BurningSection, { burning: [{ assignmentId: "a", title: "Реферат", subject: "История", due: "", daysLeft: 2, urgent: false }], onOpenAssignment: noop }));
   assert.match(withSubject, /today-subject[^>]*>История</);
   const without = html(h(BurningSection, { burning: [{ assignmentId: "a", title: "Реферат", subject: "", due: "", daysLeft: 2, urgent: false }], onOpenAssignment: noop }));
