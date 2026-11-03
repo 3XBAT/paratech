@@ -10,6 +10,8 @@ import {
   lessonLine,
   looseProblems,
   postLine,
+  recordButton,
+  recordTexts,
   statusParts,
   summaryRows,
   texts,
@@ -93,8 +95,11 @@ export function LoadError(props: { onRetry: () => void; quiet?: boolean }) {
   );
 }
 
-/** The queue and the nearest deadline; nothing at all when both are empty. */
-export function StatusBar(props: { queue: string; nearest: string }) {
+/**
+ * The queue and the nearest deadline; nothing at all when both are empty. With `onOpenQueue` the queue is a quiet text
+ * button to «Записи», where the queue is dealt with.
+ */
+export function StatusBar(props: { queue: string; nearest: string; onOpenQueue?: () => void }) {
   const parts = statusParts(props.queue, props.nearest);
   if (parts.length === 0) {
     return null;
@@ -103,9 +108,56 @@ export function StatusBar(props: { queue: string; nearest: string }) {
     <div className="statusbar">
       {parts.map((p) => (
         <span key={p} className="num">
-          {p}
+          {p === props.queue && props.onOpenQueue !== undefined ? (
+            <Button variant="ghost" size="sm" title={texts.queueOpen} onClick={props.onOpenQueue}>
+              {p}
+            </Button>
+          ) : (
+            p
+          )}
         </span>
       ))}
+    </div>
+  );
+}
+
+/**
+ * The main button of the head (TASK-348): «Записать пару» opens «Записи» with the start panel; while a recording runs it
+ * reads «● Идёт запись 00:41 · Остановить» and stops it. `now` is the clock in ms; the page ticks it every second while a
+ * recording captures (useNow in TodayPage, like the recordings page).
+ */
+export function RecordAction(props: {
+  recordings: readonly RecordingItem[] | null;
+  now: number;
+  stopping: boolean;
+  onStart: () => void;
+  onStop: (recordingId: string) => void;
+}) {
+  const b = recordButton(props.recordings, props.now);
+  return (
+    <Button
+      variant="primary"
+      icon={b.kind === "start" ? "rec" : undefined}
+      busy={props.stopping}
+      busyLabel={recordTexts.stopping}
+      disabled={props.stopping || b.kind === "wait"}
+      onClick={() => (b.kind === "start" ? props.onStart() : props.onStop(b.id))}
+    >
+      {b.label}
+    </Button>
+  );
+}
+
+/** A failed stop: the text with the way out, and a button to «Записи»; the main button stays for another try. */
+export function StopProblem(props: { text: string; onOpenRecordings: () => void }) {
+  return (
+    <div className="today-err">
+      <ResultLine kind="fail" role="alert">
+        {props.text}
+      </ResultLine>
+      <Button size="sm" onClick={props.onOpenRecordings}>
+        {recordTexts.openRecordings}
+      </Button>
     </div>
   );
 }
@@ -131,8 +183,8 @@ export function LessonsSection(props: {
   /** The start of the day: only failures of this day are shown. */
   day?: string;
   onOpenSummary: (recordingId: string) => void;
-  /** Opens «Записи и задания», where a failed recording is dealt with. */
-  onOpenAll?: () => void;
+  /** Opens «Записи», where a failed recording is dealt with. */
+  onOpenRecordings?: () => void;
 }) {
   const day = props.day ?? "";
   const loose = looseProblems(
@@ -144,7 +196,7 @@ export function LessonsSection(props: {
     <Section title={texts.lessons} count={props.lessons.length}>
       {loose.length > 0 && (
         <div className="today-loose">
-          <ProblemChip problem={loose[0]} onClick={props.onOpenAll} />
+          <ProblemChip problem={loose[0]} onClick={props.onOpenRecordings} />
           {loose.length > 1 && <span className="small muted num"> · {loose.length}</span>}
         </div>
       )}
@@ -170,7 +222,7 @@ export function LessonsSection(props: {
                       <span className="num">{m.live.text}</span>
                     </StatusChip>
                   )}
-                  {m.problem !== null && <ProblemChip problem={m.problem} onClick={props.onOpenAll} />}
+                  {m.problem !== null && <ProblemChip problem={m.problem} onClick={props.onOpenRecordings} />}
                   {m.post !== null && (
                     <>
                       <StatusChip kind="neutral" icon={m.post.canOpen ? "ok" : "clock"}>

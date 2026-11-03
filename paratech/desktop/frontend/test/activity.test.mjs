@@ -209,9 +209,10 @@ test("a draft job row is named by the core and opens its assignment (TASK-094)",
   const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
   assert.match(page, /onOpenAssignment=\{onOpenAssignment\}/);
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  // «Сегодня» holds the recordings page until TASK-125 replaces it (pages/TodayPage.tsx).
+  // Since TASK-348 the recordings page is the section «Записи» of the window, no longer embedded in «Сегодня».
   const today = readFileSync(new URL("../src/pages/TodayPage.tsx", import.meta.url), "utf8");
-  assert.match(today, /<RecordingsPage onOpen=\{props\.onOpen\} onOpenAssignment=\{props\.onOpenAssignment\} \/>/);
-  assert.match(app, /<TodayPage onOpen=\{props\.onOpen\} onOpenAssignment=\{props\.onOpenAssignment\} \/>/);
+  assert.doesNotMatch(today, /<RecordingsPage/);
+  assert.match(app, /case "recordings":\s*return \(\s*<RecordingsPage\s+onOpen=\{props\.onOpen\}\s+onOpenAssignment=\{props\.onOpenAssignment\}/);
+  assert.match(app, /<TodayPage onOpen=\{props\.onOpen\} onOpenAssignment=\{props\.onOpenAssignment\} onRecord=\{props\.onOpenStartPanel\} \/>/);
   assert.match(app, /onOpenAssignment=\{openAssignment\}/);
 });

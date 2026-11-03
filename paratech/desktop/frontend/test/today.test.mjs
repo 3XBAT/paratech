@@ -369,8 +369,8 @@ test("a load error: the fixed text in an alert and «Повторить»; no «
   assert.ok(!("refresh" in texts));
   const page = readFileSync(new URL("../src/pages/TodayPage.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(page, /texts\.refresh/);
-  assert.match(page, /<SpeechComponentNotice \/>[\s\S]*view === "error" && <LoadError onRetry=\{retry\} \/>/, "the notice sits above the error");
-  assert.ok(page.indexOf("<SpeechComponentNotice />") > page.lastIndexOf("if (all) {"), "only in the day, after the all mode returned");
+  assert.match(page, /<SpeechComponentNotice primary=\{false\} \/>[\s\S]*view === "error" && <LoadError onRetry=\{retry\} \/>/, "the notice sits above the error, its button is secondary");
+  assert.doesNotMatch(page, /\ball\b|setAll/, "the «all» mode is gone since TASK-348: «Записи» is a section");
   assert.match(page, /className="muted small"[^>]*>\s*\{texts\.loading\}/, "loading is a small inline line, not a banner");
 });
 
@@ -470,7 +470,7 @@ test("rows: live chip, urgent chip, open only for a ready summary, no confirm bu
   assert.ok(!waiting.includes("<button"));
 });
 
-test("a failed recording of the day shows a problem chip that opens all records", () => {
+test("a failed recording of the day shows a problem chip that opens «Записи»", () => {
   const failed = (over = {}) => rec({ stage: "failed", errorCode: "transcriptionFailed", status: "COMPLETED", startedAt: at(21, 10, 30), ...over });
   assert.equal(problemFor("l1", [rec()], at(21)), null);
   assert.deepEqual(problemFor("l1", [failed()], at(21)), { label: "Проблема с записью", kind: "fail", icon: "warn" });
@@ -482,10 +482,10 @@ test("a failed recording of the day shows a problem chip that opens all records"
   assert.equal(looseProblems(["l1"], [failed({ lessonId: "" })], at(21)).length, 1);
 
   let opened = 0;
-  const out = html(h(LessonsSection, { lessons: [lesson()], recordings: [failed()], day: at(21), onOpenSummary: noop, onOpenAll: () => opened++ }));
+  const out = html(h(LessonsSection, { lessons: [lesson()], recordings: [failed()], day: at(21), onOpenSummary: noop, onOpenRecordings: () => opened++ }));
   assert.match(out, /Проблема с записью/);
   assert.match(out, /<button[^>]*today-problem/);
-  const loose = html(h(LessonsSection, { lessons: [], recordings: [failed({ lessonId: "" })], day: at(21), onOpenSummary: noop, onOpenAll: noop }));
+  const loose = html(h(LessonsSection, { lessons: [], recordings: [failed({ lessonId: "" })], day: at(21), onOpenSummary: noop, onOpenRecordings: noop }));
   assert.match(loose, /Проблема с записью/);
 });
 

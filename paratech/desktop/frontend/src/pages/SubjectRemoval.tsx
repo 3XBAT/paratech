@@ -103,12 +103,9 @@ export function RemoveSubjectDialog(props: {
           </ResultLine>
         )}
       </div>
+      {/* The Windows order (TASK-347, as Dialog in controls.tsx): the action, then «Отмена» at the right edge; the focus
+          still starts on «Отмена», never on the red action. */}
       <div className="acts">
-        {view.cancel !== null && (
-          <button ref={cancel} type="button" className="btn" disabled={view.cancel.disabled} onClick={props.onDismiss}>
-            {view.cancel.label}
-          </button>
-        )}
         <button
           ref={way}
           type="button"
@@ -118,6 +115,11 @@ export function RemoveSubjectDialog(props: {
         >
           {view.confirm.label}
         </button>
+        {view.cancel !== null && (
+          <button ref={cancel} type="button" className="btn" disabled={view.cancel.disabled} onClick={props.onDismiss}>
+            {view.cancel.label}
+          </button>
+        )}
       </div>
     </dialog>
   );

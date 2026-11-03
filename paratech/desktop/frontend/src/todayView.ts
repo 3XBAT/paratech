@@ -2,6 +2,7 @@
 // burns and what waits (ARCH-44); here it is only put into words. The voice is impersonal. Titles, subjects, teachers,
 // headlines and recipients are imported or model text, passed through untouched and rendered as text nodes only.
 
+import { actionErrorText } from "./activityView.js";
 import type { RecordingItem } from "./bindings/activity.js";
 import type { TodayDeadline, TodayDone, TodayLesson, TodayPost, TodayWaiting } from "./bindings/today.js";
 import { dayAndTime, dayText, daysBetween, daysLeftText, dueText, monthsShort, pad, parseMoment, timeText } from "./dueText.js";
@@ -29,8 +30,7 @@ export const texts = {
   loadFailed: "Не удалось загрузить день.",
   refreshFailed: "Не удалось обновить день.",
   retry: "Повторить",
-  allRecords: "Записи",
-  back: "К сегодняшнему дню",
+  queueOpen: "Открыть раздел «Записи»",
   open: "Открыть",
   summaryReady: "Конспект готов",
   summaryPending: "Конспект готовится",
@@ -139,6 +139,71 @@ export function liveStatus(lessonId: string, recordings: readonly RecordingItem[
     return { kind: "run", text: `Расшифровка · ${pct} %` };
   }
   return null;
+}
+
+/** The main button of the head (TASK-348): «Записать пару», and while a recording runs its stop. */
+export const recordTexts = {
+  start: "Записать пару",
+  running: "● Идёт запись",
+  stop: "Остановить",
+  stopping: "Остановка…",
+  /** Under a failed stop: the way out besides pressing the button again. */
+  stopWay: "Остановить запись можно и в разделе «Записи».",
+  openRecordings: "Открыть «Записи»",
+} as const;
+
+/** «00:41» under an hour, «1:02:05» from an hour; "—" for an unusable value. */
+export function clockText(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return "—";
+  }
+  const total = Math.floor(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const ms = `${pad(m)}:${pad(s)}`;
+  return h > 0 ? `${h}:${ms}` : ms;
+}
+
+/** The elapsed time of a running recording by the clock `now` (ms); "" when the start is unknown or not capturing yet. */
+export function elapsedText(r: Pick<RecordingItem, "status" | "startedAt">, now: number): string {
+  if (r.status !== "RECORDING") {
+    return "";
+  }
+  const started = parseMoment(r.startedAt);
+  return started === null ? "" : clockText(Math.max(0, (now - started.getTime()) / 1000));
+}
+
+export type RecordButton =
+  | { kind: "start"; label: string; id: "" }
+  | { kind: "stop"; label: string; id: string }
+  /** A recording runs but the core does not offer to stop it yet (it is starting): the button only says so. */
+  | { kind: "wait"; label: string; id: string };
+
+/**
+ * «Записать пару» or, while a recording runs, «● Идёт запись 00:41 · Остановить». The running one is the notion of the
+ * recordings page (stage «recording»); Stop is offered when the core says it is stoppable, as in the row. A start refused
+ * for a known reason is explained on «Записи» (manualStartView), not here.
+ */
+export function recordButton(
+  recordings: readonly Pick<RecordingItem, "id" | "stage" | "status" | "startedAt" | "stoppable">[] | null,
+  now: number,
+): RecordButton {
+  const running = (recordings ?? []).filter((r) => r.stage === "recording");
+  const stoppable = running.find((r) => r.stoppable);
+  if (stoppable !== undefined) {
+    const t = elapsedText(stoppable, now);
+    return { kind: "stop", label: `${recordTexts.running}${t === "" ? "" : ` ${t}`} · ${recordTexts.stop}`, id: stoppable.id };
+  }
+  if (running.length > 0) {
+    return { kind: "wait", label: recordTexts.running, id: running[0].id };
+  }
+  return { kind: "start", label: recordTexts.start, id: "" };
+}
+
+/** The line under a failed stop: what happened and the way out. */
+export function stopProblemText(err: unknown): string {
+  return `${actionErrorText(err)} ${recordTexts.stopWay}`;
 }
 
 /** A signature of the recordings stages: it changes when a recording starts, stops or finishes. */

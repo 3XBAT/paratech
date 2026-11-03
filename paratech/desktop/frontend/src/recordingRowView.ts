@@ -17,7 +17,6 @@ import { formatDuration, formatTime, isFinishedJob, recordingDurationText, split
 import { remainingText } from "./durationEstimate.js";
 import type { PageId } from "./nav.js";
 import type { ListState, ListStates } from "./listView.js";
-import { plural } from "./plural.js";
 import { jobStatusView, type StatusView } from "./statusPresentation.js";
 import { waitingInline } from "./statusWords.js";
 import { rowSummaryOffer, type SummaryOffer } from "./summaryView.js";
@@ -656,10 +655,13 @@ export function anyRecording(rows: readonly Pick<RecordingItem, "stage" | "statu
   return rows.some((r) => r.stage === "recording" && r.status === "RECORDING");
 }
 
-/** "В очереди 2 задачи" for the status line: rows and other jobs waiting for their turn; "" when none. */
+/**
+ * «В очереди: 2» for the status line: recordings and other jobs waiting for their turn; "" when none. No «задачи»
+ * (glossary): the number is a count of things in the queue, whatever they are (TASK-348).
+ */
 export function queueLine(rows: readonly Pick<RecordingItem, "stage" | "queueReason">[], jobs: readonly { status: string }[]): string {
   const n =
     rows.filter((r) => r.stage === "queued" && r.queueReason === "inLine").length +
     jobs.filter((j) => j.status === "QUEUED").length;
-  return n === 0 ? "" : `В очереди ${n} ${plural(n, "задача", "задачи", "задач")}`;
+  return n === 0 ? "" : `В очереди: ${n}`;
 }

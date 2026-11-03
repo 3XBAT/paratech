@@ -69,9 +69,14 @@ const pollMs = 3000;
 export function RecordingsPage({
   onOpen,
   onOpenAssignment,
+  openStart = false,
+  onStartTaken,
 }: {
   onOpen?: (page: PageId) => void;
   onOpenAssignment?: (assignmentId: string) => void;
+  /** «Записать пару» of «Сегодня»: the page opens with the start panel open; taken once on arrival (onStartTaken). */
+  openStart?: boolean;
+  onStartTaken?: () => void;
 }) {
   const api = useMemo(() => activityApi(callByName), []);
   const prompts = useMemo(() => promptApi(callByName), []);
@@ -221,7 +226,8 @@ export function RecordingsPage({
   }
 
   // «Начать запись»: the panel with the picker, the choice for this start and the problem of a refused one.
-  const [startOpen, setStartOpen] = useState(false);
+  // Arrival from «Записать пару» (TASK-348): the panel is open from the first paint.
+  const [startOpen, setStartOpen] = useState(openStart);
   const [starting, setStarting] = useState(false);
   const startingRef = useRef(false);
   const [startProblem, setStartProblem] = useState("");
@@ -239,7 +245,6 @@ export function RecordingsPage({
 
   const startState = startButton(recordings, starting);
   const picker = pickerModel(sources, selection);
-
   // Each opening starts with a fresh choice, like a new popup.
   function toggleStart() {
     setStartProblem("");
@@ -406,6 +411,19 @@ export function RecordingsPage({
     panelWasOpen.current = panelOpen;
   }, [panelOpen, noRecordings]);
 
+  // The clicked «Записать пару» is on another page: the focus goes into the panel. The request is taken once on arrival, so
+  // the window drops it and a later visit or «Назад» does not open the panel again.
+  const focusStart = useRef(openStart);
+  useEffect(() => {
+    if (focusStart.current) {
+      focusStart.current = false;
+      panelsRef.current?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled)")?.focus();
+    }
+    if (openStart) {
+      onStartTaken?.();
+    }
+  }, []);
+
   const importButton = (
     <Button icon="up" aria-expanded={importOpen} onClick={() => setImportOpen((open) => !open)}>
       {importTexts.open}
@@ -500,7 +518,7 @@ export function RecordingsPage({
           </div>
         )}
       </div>
-      <SpeechComponentNotice onReady={() => void refresh()} />
+      <SpeechComponentNotice onReady={() => void refresh()} primary={false} />
       {actionError && (
         <Banner kind="fail" role="alert">
           {actionError}

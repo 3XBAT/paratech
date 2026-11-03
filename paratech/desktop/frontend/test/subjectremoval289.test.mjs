@@ -710,3 +710,13 @@ test("source: the tree rows carry the id the focus finds after «Вернуть�
   assert.match(src("pages/SubjectsParts.tsx"), /data-subject-id=\{s\.id\}/);
   assert.match(src("subjectRemovalView.ts"), /subjectRowAttr = "data-subject-id"/);
 });
+
+// TASK-348: the Windows order of the buttons, as TASK-347 did for Dialog (controls.tsx): the action, then «Отмена».
+test("the removal dialog puts the action left and «Отмена» right; «Отмена» still takes the focus, never the red button", () => {
+  const out = html(h(RemoveSubjectDialog, { view: ask(), returnTo: null, onAction: noop, onDismiss: noop }));
+  assert.match(out, /<div class="acts"><button type="button" class="btn danger">Удалить<\/button><button type="button" class="btn">Отмена<\/button><\/div>/);
+  const refused = html(h(RemoveSubjectDialog, { view: ask({ problem: "failed" }), returnTo: null, onAction: noop, onDismiss: noop }));
+  const cancel = ask({ problem: "failed" }).cancel.label;
+  assert.ok(refused.indexOf(">Повторить<") > 0 && refused.indexOf(">Повторить<") < refused.indexOf(`>${cancel}<`), "a refusal keeps the order: the way on, then the cancel");
+  assert.match(src("pages/SubjectRemoval.tsx"), /d\.showModal\(\);\s*\(cancel\.current \?\? way\.current\)\?\.focus\(\);/);
+});

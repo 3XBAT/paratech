@@ -9,24 +9,38 @@ import { type TodayScreen, todayApi } from "../bindings/today.js";
 import { requestDraft } from "../agentDraft.js";
 import type { PageId } from "../nav.js";
 import { useOpenSummary } from "../openSummary.js";
-import { queueLine } from "../recordingRowView.js";
-import { dayTitle, loadView, nearestDeadlineText, newestOnly, stagesChanged, stagesKey, texts } from "../todayView.js";
-import { Button } from "../ui/Button.js";
+import { anyRecording, queueLine } from "../recordingRowView.js";
+import { dayTitle, loadView, nearestDeadlineText, newestOnly, stagesChanged, stagesKey, stopProblemText, texts } from "../todayView.js";
 import { Toast } from "../ui/Toast.js";
+import { useNow } from "../useNow.js";
 import { burningAfterDone } from "../assignmentDoneView.js";
 import { AddAssignmentDialog } from "./HomeworkDialogs.js";
-import { RecordingsPage } from "./RecordingsPage.js";
 import { SpeechComponentNotice } from "./SpeechComponentNotice.js";
-import { AskSection, BurningSection, LessonsSection, LoadError, StatusBar, SummarySection, WaitingSection } from "./TodayParts.js";
+import {
+  AskSection,
+  BurningSection,
+  LessonsSection,
+  LoadError,
+  RecordAction,
+  StatusBar,
+  StopProblem,
+  SummarySection,
+  WaitingSection,
+} from "./TodayParts.js";
 import { doneToastProps, useDoneFocus } from "./useDoneFocus.js";
 import { useDoneRunner } from "./useDoneRunner.js";
 
 const pollMs = 3000;
 
 // «Сегодня»: the day of the student (TASK-126). The core builds the screen (TASK-125); the live recording and
-// recognition status of a lesson comes from the activity binding, the same one «Записи и задачи» reads. The former home
-// screen, the recordings and tasks, is one click away and keeps working as it was.
-export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignment: (id: string) => void }) {
+// recognition status of a lesson comes from the activity binding, the same one «Записи» reads. The recordings have their
+// own section since TASK-348; «Записать пару» in the head leads there (or stops the running recording).
+export function TodayPage(props: {
+  onOpen: (id: PageId) => void;
+  onOpenAssignment: (id: string) => void;
+  /** «Записать пару»: opens «Записи» with the start panel open. */
+  onRecord: () => void;
+}) {
   const api = useMemo(() => todayApi(callByName), []);
   const activity = useMemo(() => activityApi(callByName), []);
   const calendar = useMemo(() => ({ api: agentConfirmApi(callByName), deleteApi: recordingDeleteApi(callByName) }), []);
@@ -34,7 +48,6 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
   const homework = useMemo(() => homeworkApi(callByName), []);
   const library = useMemo(() => libraryApi(callByName), []);
   const [adding, setAdding] = useState(false);
-  const [all, setAll] = useState(false);
   const [screen, setScreen] = useState<TodayScreen | null>(null);
   const screenRef = useRef(screen);
   screenRef.current = screen;
@@ -97,31 +110,70 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
 
   // Read on each visit of the section and when the window gets back the focus.
   useEffect(() => {
-    if (all) {
-      return;
-    }
     load();
     window.addEventListener("focus", load);
     return () => window.removeEventListener("focus", load);
-  }, [all, load]);
+  }, [load]);
 
-  // The recordings list only for the live status of the lesson rows; a failed read leaves the rows without it.
+  // The recordings list for the live status of the lesson rows and for the main button (a running recording is stopped
+  // from here); a failed read leaves the rows without it and the button at «Записать пару».
+  const readRecordings = useCallback(() => {
+    activity.listRecordings().then(
+      (r) => mounted.current && setRecordings(r),
+      () => undefined,
+    );
+  }, [activity]);
   useEffect(() => {
-    if (all) {
-      return;
-    }
     const read = () => {
       if (document.visibilityState === "visible") {
-        activity.listRecordings().then(
-          (r) => mounted.current && setRecordings(r),
-          () => undefined,
-        );
+        readRecordings();
       }
     };
     read();
     const timer = setInterval(read, pollMs);
     return () => clearInterval(timer);
-  }, [all, activity]);
+  }, [readRecordings]);
+
+  // The stop of the running recording: the same binding as the rows of «Записи». One call at a time; a failure says so
+  // with the way out, and the list is read again either way.
+  const [stopping, setStopping] = useState(false);
+  const [stopProblem, setStopProblem] = useState("");
+  const stoppingRef = useRef(false);
+  const stop = useCallback(
+    async (recordingId: string) => {
+      if (stoppingRef.current) {
+        return;
+      }
+      stoppingRef.current = true;
+      setStopping(true);
+      setStopProblem("");
+      try {
+        await activity.stopRecording(recordingId);
+      } catch (err) {
+        if (mounted.current) {
+          setStopProblem(stopProblemText(err));
+        }
+      } finally {
+        stoppingRef.current = false;
+        if (mounted.current) {
+          setStopping(false);
+        }
+      }
+      if (mounted.current) {
+        readRecordings();
+      }
+    },
+    [activity, readRecordings],
+  );
+  const running = recordings?.some((r) => r.stage === "recording") ?? false;
+  // The elapsed time of the button ticks every second from startedAt, independent of the 3 s poll (as on «Записи»).
+  const now = useNow(recordings !== null && anyRecording(recordings));
+  useEffect(() => {
+    // The recording is gone (stopped here or elsewhere): an old failure line has nothing to refer to.
+    if (!running) {
+      setStopProblem("");
+    }
+  }, [running]);
 
   // A recording that starts, stops or finishes changes the day: the screen is read again. The first reply of the
   // list is not a change (the screen is read on entry).
@@ -135,19 +187,7 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
     }
   }, [stages, load]);
 
-  if (all) {
-    return (
-      <>
-        <div className="today-back">
-          <Button variant="ghost" icon="back" onClick={() => setAll(false)}>
-            {texts.back}
-          </Button>
-        </div>
-        <RecordingsPage onOpen={props.onOpen} onOpenAssignment={props.onOpenAssignment} />
-      </>
-    );
-  }
-
+  const openRecordings = () => props.onOpen("recordings");
   const queue = queueLine(recordings ?? [], []);
   const nearest = screen === null ? "" : nearestDeadlineText(screen.burning, new Date());
   const view = loadView(screen !== null, failed, retrying);
@@ -162,12 +202,11 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
           <h1 id="today-title">{texts.title}</h1>
         </div>
         <div className="acts">
-          <Button icon="rec" onClick={() => setAll(true)}>
-            {texts.allRecords}
-          </Button>
+          <RecordAction recordings={recordings} now={now} stopping={stopping} onStart={props.onRecord} onStop={(id) => void stop(id)} />
         </div>
       </div>
-      <SpeechComponentNotice />
+      {stopProblem !== "" && <StopProblem text={stopProblem} onOpenRecordings={openRecordings} />}
+      <SpeechComponentNotice primary={false} />
       {view === "error" && <LoadError onRetry={retry} />}
       {view === "stale" && <LoadError onRetry={retry} quiet />}
       {view === "loading" && (
@@ -197,7 +236,7 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
                 recordings={recordings ?? []}
                 day={screen.day}
                 onOpenSummary={openSummary}
-                onOpenAll={() => setAll(true)}
+                onOpenRecordings={openRecordings}
               />
             </div>
             <div className="today-decide">
@@ -216,7 +255,7 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
             </div>
             <SummarySection posts={screen.posts} done={screen.done} onOpenSummary={openSummary} calendar={calendar} />
           </div>
-          <StatusBar queue={queue} nearest={nearest} />
+          <StatusBar queue={queue} nearest={nearest} onOpenQueue={openRecordings} />
         </>
       )}
     </section>

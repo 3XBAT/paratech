@@ -332,7 +332,7 @@ test("the core's details are shown once each", () => {
 
 test("the queue line counts rows and jobs waiting for their turn; the clock ticks only while a recording runs", () => {
   const rows = [row({ stage: "queued", queueReason: "inLine" }), row({ stage: "queued", queueReason: "power" }), row()];
-  assert.equal(queueLine(rows, [{ status: "QUEUED" }, { status: "RUNNING" }]), "В очереди 2 задачи");
+  assert.equal(queueLine(rows, [{ status: "QUEUED" }, { status: "RUNNING" }]), "В очереди: 2");
   assert.equal(queueLine([], []), "");
   assert.equal(anyRecording(rows), false);
   assert.equal(anyRecording([row({ stage: "recording", status: "STARTING" })]), false);
@@ -545,7 +545,7 @@ test("only the latest draft job of an assignment is shown (TASK-098)", () => {
   assert.deepEqual(kept.tasks.finished.map((j) => j.id), ["d-new"]);
   const queuedOld = draft({ id: "d-queued", status: "QUEUED", createdAt: at(0) });
   const inLine = pageGroups([], [queuedOld, doneNew]);
-  assert.equal(queueLine([], [...inLine.tasks.active, ...inLine.tasks.finished]), "В очереди 1 задача", "the queue line counts the kept draft");
+  assert.equal(queueLine([], [...inLine.tasks.active, ...inLine.tasks.finished]), "В очереди: 1", "the queue line counts the kept draft");
   // An older failed draft behind a newer done one, and an older done one behind a newer failed one, are hidden.
   assert.deepEqual(latestDrafts([failedOld, doneNew]).map((j) => j.id), ["d-new"]);
   const doneOld = draft({ id: "d-done-old", createdAt: at(0) });
