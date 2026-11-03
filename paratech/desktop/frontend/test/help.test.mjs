@@ -63,7 +63,9 @@ test("the options come in the PRD order: A recommended, B the fallback, C not re
   assert.ok(at(helpTexts.title) < a);
   assert.ok(at(helpTexts.editTitle) < a, "the editing note comes before the options");
   assert.ok(c < at(helpTexts.troubleTitle));
-  assert.equal(markup.split(`>${helpTexts.back}<`).length - 1, 2, "a back button at the top and at the bottom");
+  // TASK-356: the way back is the first crumb, the two «Назад» buttons are gone.
+  assert.ok(at(helpTexts.parentCrumb) < at(helpTexts.title));
+  assert.ok(!markup.includes(">Назад<"));
 });
 
 test("the copy keeps the product rules", () => {

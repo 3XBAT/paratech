@@ -488,8 +488,9 @@ test("the overview opens each section in place and returns the focus to its card
     assert.ok(page.includes(`{...cardProps("${id}")}`), id);
   }
   assert.match(page, /cards\.current\[returnTo\.current\]\?\.focus\(\)/);
-  assert.match(page, /<Button onClick=\{props\.onBack\}>\{overviewTexts\.back\}<\/Button>/);
-  assert.equal(overviewTexts.back, "Назад");
+  // «Подключения» in the crumbs is the old «Назад» (TASK-356): the same callback, so the focus returns to the card.
+  assert.match(page, /\{ label: overviewTexts\.title, onClick: props\.onBack \}/);
+  assert.ok(!("back" in overviewTexts));
   // The overview reads the Google status only; nothing on it signs in, syncs or refreshes.
   const hook = src("../src/pages/useGoogleStatus.ts");
   assert.deepEqual([...hook.matchAll(/api\.(\w+)\(/g)].map((m) => m[1]), ["status", "status"]);
@@ -520,7 +521,7 @@ test("section heading rule is scoped to h2.sub so dialog titles keep their size"
 
 test("the Hub section is «Конспекты и задания» with the key hint under its title (TASK-069)", () => {
   assert.equal(overviewTexts.hubTitle, "Конспекты и задания");
-  assert.equal(overviewTexts.lead, "Конспекты и задания, почта и Google Календарь");
+  assert.ok(!("lead" in overviewTexts), "the over-line only listed the cards below it (TASK-356)");
   assert.match(overviewTexts.hubHint, /выдаёт автор приложения/);
   assert.match(overviewTexts.hubHint, /не ключ Claude или ChatGPT/);
   assert.match(overviewTexts.hubHint, /расшифровка идёт на этом компьютере/);

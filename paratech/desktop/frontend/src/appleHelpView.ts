@@ -40,9 +40,10 @@ export const verdictTexts: Readonly<Record<Verdict, string>> = {
 };
 
 export const helpTexts = {
-  lead: "Подключения",
+  /** The path above the title: the screen is opened from «Подключения». */
+  parentCrumb: "Подключения",
+  crumb: "Apple Календарь",
   title: "Как увидеть события в Apple Calendar",
-  back: "Назад",
   intro:
     "Приложение ведёт свой отдельный календарь в аккаунте Google — календарь приложения. Он появляется, когда " +
     "подключён Google Календарь. Ниже — как увидеть его на iPhone, iPad и Mac.",

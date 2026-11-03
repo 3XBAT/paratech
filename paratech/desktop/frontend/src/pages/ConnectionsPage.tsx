@@ -28,6 +28,7 @@ import {
   otherErrorTexts,
   overviewTexts,
   secretOutcomeOk,
+  sectionCrumbs,
   securityOptions,
   texts,
   type CardStatus,
@@ -43,6 +44,7 @@ import {
   quotaUsedPercent,
   type QuotaMessage,
 } from "../quotaView";
+import { Breadcrumbs } from "../ui/Breadcrumbs";
 import { Button } from "../ui/Button";
 import { Card, Field, Input, Progress, ResultLine, Select } from "../ui/controls";
 import { Icon } from "../ui/Icon";
@@ -317,7 +319,7 @@ export function ConnectionsPage(props: { visit?: number }) {
 
   if (open === "google") {
     return (
-      <SectionPage title={googleTexts.title} onBack={back}>
+      <SectionPage title={googleTexts.title} crumb={sectionCrumbs.google} onBack={back}>
         <GoogleBlock />
       </SectionPage>
     );
@@ -333,7 +335,6 @@ export function ConnectionsPage(props: { visit?: number }) {
       <section className="page">
         <div className="head">
           <div>
-            <span className="label">{overviewTexts.lead}</span>
             <h2>{overviewTexts.title}</h2>
           </div>
         </div>
@@ -368,9 +369,10 @@ export function ConnectionsPage(props: { visit?: number }) {
   }
 
   const title = open === "hub" ? overviewTexts.hubTitle : overviewTexts.mailTitle;
+  const crumb = sectionCrumbs[open];
   if (saved === null || mail === null) {
     return (
-      <SectionPage title={title} onBack={back}>
+      <SectionPage title={title} crumb={crumb} onBack={back}>
         {loadError ? (
           <ResultLine kind="fail" role="alert">
             {loadError}
@@ -398,7 +400,7 @@ export function ConnectionsPage(props: { visit?: number }) {
 
   if (open === "hub") {
     return (
-      <SectionPage title={title} onBack={back}>
+      <SectionPage title={title} crumb={crumb} onBack={back}>
         <Card className="box" label={overviewTexts.hubTitle}>
           <span className="small muted box-desc">{overviewTexts.hubHint}</span>
 
@@ -496,7 +498,7 @@ export function ConnectionsPage(props: { visit?: number }) {
   }
 
   return (
-    <SectionPage title={title} onBack={back}>
+    <SectionPage title={title} crumb={crumb} onBack={back}>
       <Card className="box" label="Почта">
         {saved.mailConfigured ? (
           <span className="small muted box-desc">{mailConfiguredText(true)}</span>
@@ -610,23 +612,23 @@ function SectionCard(props: {
   );
 }
 
-// A section opened from a card: the title, «Назад» and the section's card. Focus moves to the title so a screen reader
-// announces the new page and Tab starts from its top.
-function SectionPage(props: { title: string; onBack: () => void; children: ReactNode }) {
+// A section opened from a card: «Подключения / <section>» above the title (the first crumb is the old «Назад», so the
+// focus still returns to the card) and the section's card. Focus moves to the title so a screen reader announces the
+// new page and Tab starts from its top.
+function SectionPage(props: { title: string; crumb: string; onBack: () => void; children: ReactNode }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     heading.current?.focus();
   }, []);
   return (
     <section className="page conn-page">
+      <Breadcrumbs items={[{ label: overviewTexts.title, onClick: props.onBack }, { label: props.crumb }]} />
       <div className="head">
         <div>
-          <span className="label">{overviewTexts.title}</span>
           <h2 ref={heading} tabIndex={-1}>
             {props.title}
           </h2>
         </div>
-        <Button onClick={props.onBack}>{overviewTexts.back}</Button>
       </div>
       {props.children}
     </section>

@@ -316,9 +316,7 @@ export interface CardStatus {
 }
 
 export const overviewTexts = {
-  lead: "Конспекты и задания, почта и Google Календарь",
   title: "Подключения",
-  back: "Назад",
   hubTitle: "Конспекты и задания",
   // One line for the section: who gives the key, what it is not, and what leaves the computer.
   hubHint:
@@ -328,6 +326,13 @@ export const overviewTexts = {
   mailDesc: "Отправка заданий письмом",
   googleDesc: "Вход и синхронизация расписания",
 } as const;
+
+/** The last crumb of a section page, after «Подключения» (the Apple help names itself in appleHelpView). */
+export const sectionCrumbs: Readonly<Record<Exclude<ConnSection, "apple">, string>> = {
+  hub: overviewTexts.hubTitle,
+  mail: overviewTexts.mailTitle,
+  google: "Google",
+};
 
 const status = (kind: ChipKind, text: string): CardStatus => ({
   kind,
