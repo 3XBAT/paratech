@@ -109,15 +109,15 @@ test("the labels and the explanations are plain impersonal Russian", () => {
   assert.equal(saveLabel({ kind: "join", host: HOST }), "Сохранить", "one label for the same action; the hint explains the replacement");
   assert.equal(callLinkTexts.revive, "Вернуть предмет и сохранить");
   assert.deepEqual(replaceTexts(HOST), {
-    placeholder: "https://…",
+    placeholder: "zoom.us/j/123 или https://…",
     label: "Новая ссылка вместо meet.example.org",
     hint: "Новая ссылка заменит ссылку на meet.example.org.",
   });
-  assert.equal(replaceTexts("").placeholder, "https://…");
+  assert.equal(replaceTexts("").placeholder, "zoom.us/j/123 или https://…");
   assert.equal(replaceTexts("").label, "Новая ссылка");
   assert.equal(reviveLinkFailedText("Физика"), "Предмет «Физика» возвращён, но ссылку сохранить не удалось. Можно повторить.");
   assert.equal(callLinkTexts.joinTitle, "Открыть ссылку на пару (запись не начнётся)");
-  assert.equal(callLinkTexts.invalid, "Нужна ссылка вида https://… (http или https).");
+  assert.equal(callLinkTexts.invalid, "Не похоже на ссылку на онлайн-пару. Пример: zoom.us/j/123 или https://… (только http или https, без порта).");
   assert.equal(callLinkTexts.fieldEmpty, "Ссылка не вставлена.");
   assert.equal(callLinkTexts.openFailed, "Не удалось открыть ссылку. Можно повторить.");
   assert.equal(callLinkTexts.opened, "Ссылка открыта.");
@@ -239,7 +239,7 @@ test("save: an empty field and a refused link keep the field with the entered te
   assert.equal(p.flow.state.fieldError, "", "typing clears the error");
   await p.flow.save(target());
   const s = p.flow.state;
-  assert.equal(s.fieldError, "Нужна ссылка вида https://… (http или https).");
+  assert.equal(s.fieldError, "Не похоже на ссылку на онлайн-пару. Пример: zoom.us/j/123 или https://… (только http или https, без порта).");
   assert.equal(s.form.text, "ftp://x");
   assert.equal(s.focus.id, linkId("l1", "field"));
   assert.equal(s.busy, "");
@@ -555,7 +555,7 @@ test("a pair without a link offers «Добавить ссылку» as a quiet 
   const open = section([lesson()], controls({ form: { key: "l1", mode: "add", text: "https://x" } }));
   assert.match(open, /<form[^>]*aria-label="Ссылка на пару"/);
   assert.match(open, /<input[^>]*aria-label="Ссылка на пару"/);
-  assert.match(open, /placeholder="https:\/\/…"/);
+  assert.match(open, /placeholder="zoom\.us\/j\/123 или https:\/\/…"/);
   assert.match(open, /value="https:\/\/x"/);
   assert.match(open, />Сохранить</);
   assert.match(open, />Отмена</);
@@ -565,7 +565,7 @@ test("a pair without a link offers «Добавить ссылку» as a quiet 
 
 test("a refused link shows the plain rule under the field, marks it invalid and keeps the typed text", () => {
   const out = section([lesson()], controls({ form: { key: "l1", mode: "add", text: "ftp://x" }, fieldError: callLinkTexts.invalid }));
-  assert.match(out, /Нужна ссылка вида https:\/\/… \(http или https\)\./);
+  assert.match(out, /Не похоже на ссылку на онлайн-пару\. Пример: zoom\.us\/j\/123 или https:\/\/… \(только http или https, без порта\)\./);
   assert.match(out, /aria-invalid="true"/);
   assert.match(out, /value="ftp:\/\/x"/);
   assert.match(out, /role="alert"/);
@@ -630,7 +630,7 @@ test("a pair that cannot keep a link on the card says why up front; no «Доб�
 
 test("«Изменить» on «Сегодня» opens an empty field with the usual example, a hint of which link it replaces and the one label «Сохранить»", () => {
   const open = section([withLink()], controls({ form: { key: "l1", mode: "change", text: "" } }));
-  assert.match(open, /placeholder="https:\/\/…"/);
+  assert.match(open, /placeholder="zoom\.us\/j\/123 или https:\/\/…"/);
   assert.match(open, /aria-label="Новая ссылка вместо meet\.example\.org"/);
   assert.match(open, /Новая ссылка заменит ссылку на meet\.example\.org\./);
   assert.match(open, />Сохранить</);
