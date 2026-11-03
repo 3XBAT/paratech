@@ -1076,6 +1076,10 @@ export type CardModel =
       offer: OfferModel | null;
     }
   | { type: "unknown"; text: string }
+  /** The schedule_subjects card: the review of subjects from the schedule, read from the core by this token. */
+  | { type: "schedule"; token: string }
+  /** The offer_button card: the page's own button, no heading. */
+  | { type: "offer"; offer: OfferModel }
   | { type: "stopped"; text: string; buttons: ButtonModel[] }
   | { type: "work"; workId: string }
   | { type: "problem"; text: string; buttons: ButtonModel[] };
@@ -1189,19 +1193,54 @@ export function resultWording(r: LineResultView): Wording | null {
 export interface OfferModel {
   label: string;
   offer: OfferView;
+  /** The button is drawn off with this reason beside it (the feature is not in this version); absent: it can be pressed. */
+  unavailable?: string;
 }
 
-/** The labels of the offers this panel can draw. Part of them join with the offer_button card. */
-const offerLabels: Readonly<Record<string, string>> = {
-  start_recording: resultTexts.startRecording,
+/** Beside the disabled buttons of the call link, which no page offers yet (TASK-261). */
+export const offerUnavailableText = "Недоступно в этой версии";
+
+/**
+ * The offers of ADR-0033 §3: the label is the one the page's own button carries (test/agentwave10cards324b pins them to
+ * the pages' constants), `target` the kind of the one id the button needs ("" none). The call link has no page yet.
+ */
+interface OfferSpec {
+  label: string;
+  target: "" | "material" | "recording" | "work" | "lesson";
+  unavailable?: boolean;
+}
+
+export const offerSpecs: Readonly<Record<string, OfferSpec>> = {
+  open_material: { label: "Открыть", target: "material" },
+  open_call_link: { label: "Открыть ссылку на пару", target: "lesson", unavailable: true },
+  copy_call_link: { label: "Скопировать ссылку на пару", target: "lesson", unavailable: true },
+  open_summary: { label: "Открыть конспект", target: "recording" },
+  open_lecture_text: { label: "Открыть текст лекции", target: "recording" },
+  open_transcript: { label: "Открыть расшифровку", target: "recording" },
+  // The work's file opens in Word / PowerPoint, where «Сохранить как» is: the pages have no save dialog for a work.
+  save_as: { label: "Открыть работу", target: "work" },
+  google_sign_in: { label: "Войти через Google", target: "" },
+  google_sync: { label: "Синхронизировать", target: "" },
+  download_model: { label: "Открыть модели речи", target: "" },
+  sound_check: { label: "Проверить звук", target: "" },
+  open_help: { label: "Справка", target: "" },
+  undo_action: { label: "Отменить", target: "" },
+  start_recording: { label: resultTexts.startRecording, target: "" },
 };
 
-/** The button of an offer; null for an action the panel has no label for (no button is better than a made-up one). */
+/**
+ * The button of an offer; null for an action the panel does not know, or one whose id is missing or of another kind (no
+ * button is better than a made-up or a dead one).
+ */
 export function offerModel(offer: OfferView | null | undefined): OfferModel | null {
-  if (offer === null || offer === undefined || !Object.hasOwn(offerLabels, offer.action)) {
+  if (offer === null || offer === undefined || !Object.hasOwn(offerSpecs, offer.action)) {
     return null;
   }
-  return { label: offerLabels[offer.action], offer };
+  const spec = offerSpecs[offer.action];
+  if (spec.target !== "" && (offer.target === null || offer.target.kind !== spec.target || offer.target.id === "")) {
+    return null;
+  }
+  return spec.unavailable === true ? { label: spec.label, offer, unavailable: offerUnavailableText } : { label: spec.label, offer };
 }
 
 function actionModel(c: CardView): Extract<CardModel, { type: "action" }> {
@@ -1298,8 +1337,12 @@ function cardModel(c: CardView, status: string): CardModel | null {
     case "unknown":
       return { type: "unknown", text: resultTexts.unknownCard };
     case "schedule_subjects":
-    case "offer_button":
-      return null; // Part B of TASK-324.
+      // The token of the package the desktop built; the card reads everything else from the core.
+      return c.target !== null && c.target.kind === "schedule_subjects" && c.target.id !== "" ? { type: "schedule", token: c.target.id } : null;
+    case "offer_button": {
+      const offer = offerModel(c.offer);
+      return offer === null ? null : { type: "offer", offer };
+    }
     case "work":
       // The card reads the work itself (TurnkeyService.Work); a work card without an id has nothing to read.
       return c.workId !== "" ? { type: "work", workId: c.workId } : null;
@@ -1318,6 +1361,20 @@ export interface UndoNote {
 /** The action lines of a request that offer «Отменить» (for «Отменить всё»). */
 export function undoableActions(cards: readonly CardModel[]): string[] {
   return cards.flatMap((c) => (c.type === "action" && c.undo.shown && c.undo.enabled ? [c.actionId] : []));
+}
+
+/**
+ * The latest action of the chat that can still be undone, for the offer «Отменить» (undo_action): `requests` are the cards
+ * of the chat's requests in order, `notes` what «Отменить» already did per action. null when there is none.
+ */
+export function latestUndoableAction(requests: readonly (readonly CardModel[])[], notes: Readonly<Record<string, UndoNote | undefined>>): string | null {
+  for (let i = requests.length - 1; i >= 0; i--) {
+    const ids = undoableActions(requests[i] ?? []).filter((id) => notes[id]?.done !== true && notes[id]?.busy !== true);
+    if (ids.length > 0) {
+      return ids[ids.length - 1] ?? null;
+    }
+  }
+  return null;
 }
 
 /** What a request shows: the student's text, the cards in order, and the state line while nothing else says it. */

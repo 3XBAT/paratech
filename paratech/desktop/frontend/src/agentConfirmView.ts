@@ -124,6 +124,9 @@ function doneText(kind: ConfirmCard["kind"]): string {
       return confirmTexts.doneDeleteAssignment;
     case "delete_recording":
       return confirmTexts.doneDelete;
+    case "schedule_subjects":
+      // Drawn by the schedule card (agentScheduleView.ts), never by this view; the text is only a fallback.
+      return confirmTexts.declinedDeleteAssignment;
   }
 }
 
@@ -132,9 +135,10 @@ function outcomeOf(c: ConfirmCard): string {
     case "done":
       return doneText(c.kind);
     case "declined":
-      return c.kind === "delete_assignment" ? confirmTexts.declinedDeleteAssignment : confirmTexts.declined;
+      return c.kind === "delete_assignment" || c.kind === "schedule_subjects" ? confirmTexts.declinedDeleteAssignment : confirmTexts.declined;
     case "stale":
     case "rejected":
+    case "undone":
       return c.message !== "" ? c.message : confirmTexts.notActual;
     case "confirmed":
       return c.message !== "" ? c.message : confirmTexts.confirmedAgain;
@@ -160,6 +164,9 @@ export function confirmCardModel(c: ConfirmCard, chosenRole: TeacherRole | "" = 
     question: "",
   };
   switch (c.kind) {
+    case "schedule_subjects":
+      // Not drawn by ConfirmCardView: the schedule card has its own view. A plain line keeps the switch total.
+      return { ...base, title: "", question: confirmTexts.caption, rows: [], items: [], note: "", notice: "" };
     case "delete_assignment":
       // The heading is the question, and it already says the event goes too: no second note, no repeated notice.
       return {
@@ -308,7 +315,8 @@ export class ConfirmFlow {
   /** «Да». A send or a deadline goes to the core; a deletion opens the deletion window. */
   async yes(): Promise<void> {
     const card = this.current.card;
-    if (this.pending || card === null || this.current.deleteOpen) {
+    // A schedule_subjects card is confirmed with the student's choices by its own flow (agentScheduleView.ts).
+    if (this.pending || card === null || this.current.deleteOpen || card.kind === "schedule_subjects") {
       return;
     }
     const model = confirmCardModel(card, this.current.chosenRole);

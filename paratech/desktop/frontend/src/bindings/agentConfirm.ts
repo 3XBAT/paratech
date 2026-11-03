@@ -11,6 +11,15 @@ import {
   recipientReason,
   type TeacherChoice,
 } from "./recipient.js";
+import {
+  type CreateFromScheduleReply,
+  parseCreateFromSchedule,
+  parseScheduleGroup,
+  parseUndoFromSchedule,
+  type ScheduleChoice,
+  type ScheduleGroup,
+  type UndoFromScheduleReply,
+} from "./library.js";
 import type { CallByName } from "./settings";
 
 const service = "paratech/desktop/internal/input/wails.AgentConfirmService";
@@ -22,24 +31,43 @@ export const methods = {
   decline: `${service}.Decline`,
   proposeDeadline: `${service}.ProposeDeadline`,
   proposeSendWork: `${service}.ProposeSendWork`,
+  // TASK-323: the schedule_subjects card (agentconfirm_schedule.go).
+  confirmSchedule: `${service}.ConfirmSchedule`,
+  undoSchedule: `${service}.UndoSchedule`,
 } as const;
 
-export type CardKind = "deadline" | "send" | "delete_recording" | "delete_assignment";
+export type CardKind = "deadline" | "send" | "delete_recording" | "delete_assignment" | "schedule_subjects";
 
-export const cardKinds: readonly CardKind[] = ["deadline", "send", "delete_recording", "delete_assignment"];
+export const cardKinds: readonly CardKind[] = ["deadline", "send", "delete_recording", "delete_assignment", "schedule_subjects"];
 
-/** waiting: «Да» / «Нет»; confirmed: not finished, «Да» repeats it safely; stale and rejected carry a message. */
-export type CardState = "waiting" | "confirmed" | "done" | "declined" | "stale" | "rejected";
+/**
+ * waiting: «Да» / «Нет»; confirmed: not finished, «Да» repeats it safely; stale and rejected carry a message; undone: a
+ * schedule_subjects card after «Отменить всё».
+ */
+export type CardState = "waiting" | "confirmed" | "done" | "declined" | "stale" | "rejected" | "undone";
 
-export const cardStates: readonly CardState[] = ["waiting", "confirmed", "done", "declined", "stale", "rejected"];
+export const cardStates: readonly CardState[] = ["waiting", "confirmed", "done", "declined", "stale", "rejected", "undone"];
 
 /**
  * The target of a confirm card as the update names it: a stored proposal, a deletion preview, or (a delete_assignment
- * card) the assignment itself, which has nothing stored to decline.
+ * card) the assignment itself, which has nothing stored to decline. A schedule_subjects card names the token of the
+ * package the desktop built.
  */
 export interface ConfirmTarget {
-  kind: "proposal" | "preview" | "assignment";
+  kind: "proposal" | "preview" | "assignment" | "schedule_subjects";
   id: string;
+}
+
+/**
+ * The content of a schedule_subjects card, in the shapes the «Предметы» review reads from LibraryService: the groups to
+ * choose from while waiting (the lists are empty after that), the outcome of «Да» and the outcome of «Отменить всё».
+ * Every name in it is schedule text: a text node only.
+ */
+export interface ConfirmSchedule {
+  groups: ScheduleGroup[];
+  omitted: number;
+  result: CreateFromScheduleReply | null;
+  undo: UndoFromScheduleReply | null;
 }
 
 export interface ConfirmDeletion {
@@ -78,6 +106,8 @@ export interface ConfirmCard extends RecipientFields {
   /** «В файле указан другой адрес — не используется» or "". */
   notice: string;
   deletion: ConfirmDeletion | null;
+  /** A schedule_subjects card; null on every other kind. */
+  schedule: ConfirmSchedule | null;
 }
 
 /** The refusal no_assignment of proposeSendWork: a work not made for an assignment is never sent (TASK-180). */
@@ -87,6 +117,15 @@ export const noAssignmentText =
 /** The refusal of «Да» on a delete_assignment card while an email of the assignment may still go out (ErrAgentConfirmInUse). */
 export const assignmentInUseText =
   "Сейчас удалить нельзя: письмо по этому заданию ещё отправляется или его судьба неизвестна. Проверьте «Письма» и нажмите «Да» ещё раз.";
+
+/** The refusals of the schedule_subjects card (ErrAgentConfirmSchedule* in agentconfirm_schedule.go). */
+export const scheduleBusyText =
+  "Предметы из расписания сейчас создаются или отменяются. Подождите немного и нажмите ещё раз.";
+export const scheduleNameText =
+  "Это название уже занято другим предметом или строкой списка. Выберите другое и нажмите «Да».";
+export const scheduleUndoGoneText =
+  "Отменить отсюда уже нельзя. Лишние предметы можно убрать на странице «Предметы».";
+export const scheduleUndoAgainText = "Отменилось не всё. Нажмите «Отменить всё» ещё раз — повтор безопасен.";
 
 /** The fixed Russian texts of the Go binding (agentconfirm.go, agentconfirm_assignment.go, homework.go); anything else gets the generic one. */
 export const errorTexts: readonly string[] = [
@@ -103,6 +142,10 @@ export const errorTexts: readonly string[] = [
   "Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Сначала разберитесь с ним в списке писем.",
   noAssignmentText,
   assignmentInUseText,
+  scheduleBusyText,
+  scheduleNameText,
+  scheduleUndoGoneText,
+  scheduleUndoAgainText,
 ];
 
 export const genericError = "Не удалось выполнить действие. Попробуйте ещё раз.";
@@ -186,12 +229,33 @@ function parseDeletion(raw: unknown): ConfirmDeletion {
   };
 }
 
+function parseSchedule(raw: unknown): ConfirmSchedule {
+  const w = "confirm schedule";
+  const r = record(raw, w);
+  const groups = r.groups;
+  if (!Array.isArray(groups)) {
+    throw new Error(`${w}: groups is not a list`);
+  }
+  return {
+    groups: groups.map(parseScheduleGroup),
+    omitted: count(r, "omitted", w),
+    result: r.result === null || r.result === undefined ? null : parseCreateFromSchedule(r.result),
+    undo: r.undo === null || r.undo === undefined ? null : parseUndoFromSchedule(r.undo),
+  };
+}
+
 /** Checks the shape of a card; a malformed reply is an error, not a default. */
 export function parseConfirmCard(raw: unknown): ConfirmCard {
   const w = "confirm card";
   const r = record(raw, w);
+  const kind = oneOf(r, "kind", cardKinds, w);
+  const schedule = r.schedule === null || r.schedule === undefined ? null : parseSchedule(r.schedule);
+  if (kind === "schedule_subjects" && schedule === null) {
+    throw new Error(`${w}: schedule is missing`);
+  }
   return {
-    kind: oneOf(r, "kind", cardKinds, w),
+    kind,
+    schedule,
     targetKind: str(r, "targetKind", w),
     targetId: str(r, "targetId", w),
     state: oneOf(r, "state", cardStates, w),
@@ -230,6 +294,14 @@ export interface AgentConfirmApi {
    * is sent before «Да». A work without an assignment is refused with noAssignmentText.
    */
   proposeSendWork(workId: string): Promise<ConfirmCard>;
+  /**
+   * «Да» of a schedule_subjects card: the choices go as the page sends them to LibraryService.CreateFromSchedule (a
+   * doubtful member left alone is merged; after a «Да» that stopped midway [] is fine). The card comes back done,
+   * confirmed (stopped midway), or stale; a refusal rejects with the core's text.
+   */
+  confirmSchedule(token: string, choices: ScheduleChoice[]): Promise<ConfirmCard>;
+  /** «Отменить всё» of a schedule_subjects card; a repeated call is safe. */
+  undoSchedule(token: string): Promise<ConfirmCard>;
 }
 
 /** Builds the confirm API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -243,5 +315,7 @@ export function agentConfirmApi(call: CallByName): AgentConfirmApi {
     decline: async (t) => parseConfirmCard(await call(methods.decline, t.kind, t.id)),
     proposeDeadline: async (id) => parseConfirmCard(await call(methods.proposeDeadline, id)),
     proposeSendWork: async (id) => parseConfirmCard(await call(methods.proposeSendWork, id)),
+    confirmSchedule: async (token, choices) => parseConfirmCard(await call(methods.confirmSchedule, token, choices)),
+    undoSchedule: async (token) => parseConfirmCard(await call(methods.undoSchedule, token)),
   };
 }

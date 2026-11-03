@@ -222,7 +222,7 @@ function StepButtons(props: { steps: readonly Step[]; phase: ReviewState["phase"
  * «Создано предметов: 3 · [Отменить всё]»; the same line in the panel and on the page after the panel is closed (there
  * with `onClose`: «Закрыть» drops the line; the panel has its own).
  */
-function DoneRow(props: { text: string; phase: ReviewState["phase"]; onUndo(): void; onClose?: () => void }) {
+export function DoneRow(props: { text: string; phase: ReviewState["phase"]; onUndo(): void; onClose?: () => void }) {
   return (
     <div className="sched-done">
       <ResultLine kind="ok">{props.text}</ResultLine>
@@ -365,7 +365,7 @@ function NoticeBody(props: { notice: Notice; steps: ReactNode }) {
  * the notice (their buttons and their own status lines would be announced twice there). After `changed` «Повторить» reads
  * the proposal again; creating it again gives the fresh version.
  */
-function NoticeRows(props: { rows: readonly RemovedRow[]; restore?: ReviewHandlers["restore"]; onChanged(): void }) {
+export function NoticeRows(props: { rows: readonly RemovedRow[]; restore?: ReviewHandlers["restore"]; onChanged(): void }) {
   const restore = props.restore;
   if (props.rows.length === 0) {
     return null;
@@ -429,12 +429,15 @@ function NameInput(props: {
   );
 }
 
-function GroupRow(props: {
+/** What a row needs of the handlers: the agent's card has no others. */
+type RowHandlers = Pick<ReviewHandlers, "check" | "rename" | "member" | "renameMember">;
+
+export function GroupRow(props: {
   group: ScheduleGroup;
   row: RowSel;
   problems: ReadonlyMap<string, NameProblem>;
   disabled: boolean;
-  on: ReviewHandlers;
+  on: RowHandlers;
 }) {
   const { group: g, row, on } = props;
   const chkId = useId();
@@ -506,7 +509,7 @@ function MemberRow(props: {
   row: RowSel;
   problems: ReadonlyMap<string, NameProblem>;
   disabled: boolean;
-  on: ReviewHandlers;
+  on: RowHandlers;
 }) {
   const { group: g, member: m, row, on } = props;
   const sel = row.members.get(m.key) ?? { mode: "keep" as const, name: m.name };

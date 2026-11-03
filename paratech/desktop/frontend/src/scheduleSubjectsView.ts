@@ -742,7 +742,7 @@ function undoSummary(reply: UndoFromScheduleReply): string {
 }
 
 /** What stayed: one plain line per subject or name kept, and a word about batches the core no longer knew. */
-function undoLines(r: UndoResult): string[] {
+export function undoLines(r: UndoResult): string[] {
   const reply = r.reply;
   return [
     ...reply.kept.map(keptLine),

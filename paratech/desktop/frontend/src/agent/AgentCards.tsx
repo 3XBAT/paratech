@@ -10,6 +10,9 @@ import type { CitationOpening } from "../knowledgeView.js";
 import { type CutReply, replyDraftText, splitDrafts } from "../agentState.js";
 import { AnswerSources } from "./AnswerSources.js";
 import { ConfirmCard } from "./ConfirmCard.js";
+import { ScheduleSubjectsCard } from "./ScheduleCard.js";
+import { type OfferResult, offerReasons } from "../agentOffer.js";
+import type { RestoreCall } from "../subjectRemovalView.js";
 import { WorkWritingCard } from "./WorkCard.js";
 import { MessagePills } from "./MentionParts.js";
 import { Waiting } from "./Waiting.js";
@@ -52,9 +55,14 @@ export interface CardActions {
   openMention?: (kind: string, id: string) => void;
   /**
    * The press of a page button an offer names («Начать запись» under a stopped recording, an offer_button card): the
-   * panel runs the page's own binding for `offer.action` with `offer.target`. Absent: the button is shown off.
+   * panel runs the page's own binding for `offer.action` with `offer.target` (agentOffer.ts) and answers how it went;
+   * a refusal is shown beside the button, which stays usable. Absent: the button is shown off.
    */
-  offer?: (offer: OfferView) => void;
+  offer?: (offer: OfferView) => void | Promise<OfferResult | void>;
+  /** «Вернуть» of a skipped row of the schedule card, as the «Предметы» page does it. */
+  restore?: (subjectId: string, version: number) => Promise<RestoreCall>;
+  /** Subjects were created, taken back or restored by a card: the pages read them again. */
+  libraryChanged?: () => void;
   /** The core call of the `answer` cards; without it a card lists no sources. */
   answers?: AnswersApi;
   /** Opens the place of a source on «База знаний», by ids. */
@@ -72,14 +80,71 @@ export interface CardActions {
 
 /**
  * The page's own button an offer names, labelled from the template (never by the model). It calls `actions.offer`; until
- * the panel wires it the button is off, without a tooltip.
+ * the panel wires it the button is off, without a tooltip. A button the version does not have is off with its reason.
  */
 export function OfferButton(props: { offer: OfferModel; actions: CardActions }) {
   const { offer, actions } = props;
   return (
-    <Button size="sm" variant="secondary" disabled={actions.offer === undefined || actions.busy === true} onClick={() => actions.offer?.(offer.offer)}>
+    <Button
+      size="sm"
+      variant="secondary"
+      disabled={actions.offer === undefined || actions.busy === true || offer.unavailable !== undefined}
+      disabledReason={offer.unavailable}
+      onClick={() => actions.offer?.(offer.offer)}
+    >
       {offer.label}
     </Button>
+  );
+}
+
+/**
+ * The offer button with the state of its press: off while the call runs (one click is one call), and the page's reason in
+ * a small muted line beside it when the press did not work. The button stays usable after a refusal; after a job that is
+ * done once (the undo of the latest action) it goes off.
+ */
+export function OfferControl(props: { offer: OfferModel; actions: CardActions }) {
+  const [state, setState] = useState<{ busy: boolean; result: OfferResult | null }>({ busy: false, result: null });
+  const running = useRef(false);
+  const { actions } = props;
+  const press = (offer: OfferView) => {
+    if (running.current) {
+      return;
+    }
+    running.current = true;
+    setState({ busy: true, result: null });
+    Promise.resolve()
+      .then(() => actions.offer?.(offer))
+      .then(
+        (r) => setState({ busy: false, result: r ?? null }),
+        () => setState({ busy: false, result: { ok: false, text: offerReasons.failed } }),
+      )
+      .finally(() => {
+        running.current = false;
+      });
+  };
+  return (
+    <OfferControlView
+      offer={props.offer}
+      actions={{ ...actions, offer: actions.offer === undefined ? undefined : press }}
+      busy={state.busy}
+      result={state.result}
+    />
+  );
+}
+
+/** The offer button for a state of its press (no hooks: the tests render it directly). */
+export function OfferControlView(props: { offer: OfferModel; actions: CardActions; busy: boolean; result: OfferResult | null }) {
+  const { result } = props;
+  const off: CardActions = { ...props.actions, busy: props.actions.busy === true || props.busy || result?.once === true };
+  return (
+    <>
+      <OfferButton offer={props.offer} actions={off} />
+      {result !== null && result.text !== "" && (
+        <span className="ag-act-note small muted" role="status">
+          {result.text}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -432,7 +497,7 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
               {openAssignmentLabel}
             </Button>
           )}
-          {card.offer !== null && <OfferButton offer={card.offer} actions={props.actions} />}
+          {card.offer !== null && <OfferControl offer={card.offer} actions={props.actions} />}
           {!note?.done && card.undo.shown && (
             <Button size="sm" variant="ghost" disabled={!card.undo.enabled || note?.busy === true} onClick={() => props.actions.undo(card.actionId)}>
               {note?.busy ? card.undo.busyLabel : card.undo.label}
@@ -446,6 +511,29 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
         </div>
       );
     }
+    case "schedule":
+      // The check of the «Предметы» review inside the chat; the card reads its rows from the core by the token.
+      return props.actions.confirm !== undefined ? (
+        <ScheduleSubjectsCard
+          key={card.token}
+          api={props.actions.confirm.api}
+          token={card.token}
+          subjects={props.actions.subjects}
+          restore={props.actions.restore}
+          onChanged={props.actions.libraryChanged}
+        />
+      ) : (
+        <section className="ag-card">
+          <p className="muted">{texts.confirmPending}</p>
+        </section>
+      );
+    case "offer":
+      // One button with the page's own label and no heading.
+      return (
+        <div className="ag-actions ag-offer">
+          <OfferControl offer={card.offer} actions={props.actions} />
+        </div>
+      );
     case "unknown":
       // A card kind of a newer core: said honestly and quietly, with nothing to press.
       return (

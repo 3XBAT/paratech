@@ -6,5 +6,15 @@
 .ag-conf-out { font-weight: 600; }
 /* The heading of delete_assignment is the question with the stored title in it: it wraps, however long the title. */
 .ag-conf-q { min-width: 0; overflow-wrap: anywhere; }
+/* The schedule_subjects card (TASK-324): the rows of the «Предметы» review inside the card; the frame is the plain card's, no red. */
+.ag-sched:focus { outline: none; }
+.ag-sched .sched-intro { margin: 0 0 4px; }
+.ag-sched .sched-row:first-child { padding-top: 4px; }
+.ag-sched .sched-name { max-width: none; }
+.ag-sched .sched-done { margin-bottom: 4px; }
+.ag-sched .sched-lines { padding-left: 20px; }
+.ag-sched-load { margin: 0; padding: 4px 12px; }
+/* The offer_button card: the one button, with its reason beside it; no frame, no heading. */
+.ag-offer { margin-top: 0; align-items: center; }
 .today-cal { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
 .today-main > .ag-confirm { margin-top: 8px; }
