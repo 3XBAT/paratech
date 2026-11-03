@@ -14,8 +14,10 @@ import {
   fieldErrorText,
   googleCardStatus,
   hubCardStatus,
+  hubAddressOpen,
   hubFields,
   hubKeyLabels,
+  hubSetupHint,
   mailConfiguredText,
   mailFields,
   mailFormDirty,
@@ -80,6 +82,8 @@ export function ConnectionsPage(props: { visit?: number }) {
   const [hubBusy, setHubBusy] = useState(false);
   const [hubErrors, setHubErrors] = useState<FieldError[]>([]);
   const [hubDone, setHubDone] = useState("");
+  // The student's own open/close of «Дополнительно» during this visit; null until they touch it.
+  const [addrChosen, setAddrChosen] = useState<boolean | null>(null);
 
   const [hubKeyBusy, setHubKeyBusy] = useState(false);
   const [hubKeyMessage, setHubKeyMessage] = useState<SecretMessage | null>(null);
@@ -137,10 +141,12 @@ export function ConnectionsPage(props: { visit?: number }) {
           }
         } else {
           setHubErrors(r.errors); // the typed value stays for correction
+          setAddrChosen(true); // the error is in the block: keep it open
         }
       } catch {
         if (mounted.current) {
           setHubErrors([{ field: "", message: failureText("save") }]);
+          setAddrChosen(true);
         }
       }
     });
@@ -379,6 +385,8 @@ export function ConnectionsPage(props: { visit?: number }) {
   const quota = quotaDisplay(saved.quota, saved, quotaMessage);
   const quotaState = quotaControls({ refreshing, keyBusy: hubKeyBusy, hubBusy });
   const used = quotaUsedPercent(saved.quota);
+  const addressOpen = hubAddressOpen({ savedUrl: saved.hubUrl, typedUrl: hubUrl, errors: hubErrors, chosen: addrChosen });
+  const setupHint = hubSetupHint(saved);
 
   if (open === "hub") {
     return (
@@ -388,31 +396,7 @@ export function ConnectionsPage(props: { visit?: number }) {
           <span className="small muted box-desc">
             Делает конспекты и ищет задания. Звук туда не отправляется — только текст расшифровки.
           </span>
-          <Field label="Адрес сервера" error={fieldErrorText(hubErrors, "hubUrl")}>
-            {(id) => (
-              <Input
-                id={id}
-                type="text"
-                inputMode="url"
-                spellCheck={false}
-                placeholder={texts.hubPlaceholder}
-                value={hubUrl}
-                disabled={hubBusy}
-                onChange={(e) => setHubUrl(e.target.value)}
-              />
-            )}
-          </Field>
-          <Errors texts={otherErrorTexts(hubErrors, hubFields)} />
-          <div className="acts start">
-            <Button disabled={hubBusy} onClick={() => void saveHub()}>
-              Сохранить
-            </Button>
-          </div>
-          {hubDone && (
-            <ResultLine kind="ok" role="status">
-              {hubDone}
-            </ResultLine>
-          )}
+          {setupHint !== "" && <ResultLine kind="wait">{setupHint}</ResultLine>}
 
           <hr className="sep" />
           <SecretSlot
@@ -424,6 +408,39 @@ export function ConnectionsPage(props: { visit?: number }) {
             onStore={(value) => changeHubKey("store", () => api.setHubKey(value))}
             onRemove={() => changeHubKey("remove", () => api.removeHubKey())}
           />
+
+          {/* Native disclosure: Tab and Enter/Space work without code. The open state follows hubAddressOpen until the
+              student toggles it; every toggle is remembered, so it never closes under their hands. */}
+          <details className="conn-adv" open={addressOpen} onToggle={(e) => setAddrChosen(e.currentTarget.open)}>
+            <summary>
+              Дополнительно <span className="muted">· адрес сервера</span>
+            </summary>
+            <Field label="Адрес сервера" error={fieldErrorText(hubErrors, "hubUrl")}>
+              {(id) => (
+                <Input
+                  id={id}
+                  type="text"
+                  inputMode="url"
+                  spellCheck={false}
+                  placeholder={texts.hubPlaceholder}
+                  value={hubUrl}
+                  disabled={hubBusy}
+                  onChange={(e) => setHubUrl(e.target.value)}
+                />
+              )}
+            </Field>
+            <Errors texts={otherErrorTexts(hubErrors, hubFields)} />
+            <div className="acts start">
+              <Button disabled={hubBusy} onClick={() => void saveHub()}>
+                Сохранить
+              </Button>
+            </div>
+            {hubDone && (
+              <ResultLine kind="ok" role="status">
+                {hubDone}
+              </ResultLine>
+            )}
+          </details>
 
           <hr className="sep" />
           <h2 className="sub">{quotaTexts.title}</h2>

@@ -60,6 +60,45 @@ export const texts = {
   unknownField: "Недопустимое значение.",
 } as const;
 
+/** The Hub address nobody has to set: the core has no built-in address, so "no address" is the default. */
+export const defaultHubUrl = "";
+
+/**
+ * Whether the folded «Дополнительно» with «Адрес сервера» is open. A choice made by hand during the visit wins, so the
+ * block never closes under the student's hands; with no choice it opens by itself for a non-default saved or typed
+ * address and for a refused one (any error of the address form).
+ */
+export function hubAddressOpen(s: {
+  savedUrl: string;
+  typedUrl: string;
+  errors: readonly FieldError[];
+  chosen: boolean | null;
+}): boolean {
+  if (s.chosen !== null) {
+    return s.chosen;
+  }
+  return s.savedUrl.trim() !== defaultHubUrl || s.typedUrl.trim() !== defaultHubUrl || s.errors.length > 0;
+}
+
+/**
+ * What the key and the address still need, next to the key field: "" when both are set. The address is folded away, so
+ * the line says where it is.
+ */
+export function hubSetupHint(c: Pick<Connections, "hubUrl" | "hubKey">): string {
+  const noKey = c.hubKey === "unset";
+  const noUrl = c.hubUrl.trim() === defaultHubUrl;
+  if (noKey && noUrl) {
+    return "Для работы нужны ключ доступа и адрес сервера. Вставьте ключ ниже и нажмите «Сохранить ключ», адрес указывается в разделе «Дополнительно».";
+  }
+  if (noKey) {
+    return "Ключ не задан. Вставьте его ниже и нажмите «Сохранить ключ»: без него конспекты и поиск заданий не работают.";
+  }
+  if (noUrl) {
+    return "Адрес сервера не задан. Откройте раздел «Дополнительно» ниже и укажите его: без адреса конспекты и поиск заданий не работают.";
+  }
+  return "";
+}
+
 /** The form of the stored values; port 0 shows as empty. */
 export function mailFormFrom(c: Connections): MailForm {
   return {

@@ -2,7 +2,19 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { defaultPage, pageById, pages, rail, railItemOf, settingsPages, routeToPage } from "../.test-build/nav.js";
+import {
+  defaultPage,
+  pageById,
+  pages,
+  rail,
+  railItemOf,
+  routeToPage,
+  settingsAdvancedCaption,
+  settingsAdvancedPages,
+  settingsMainPages,
+  settingsPages,
+  settingsPermissionsSlot,
+} from "../.test-build/nav.js";
 import { Rail } from "../.test-build/ui/Rail.js";
 
 test("the rail has six icons in order", () => {
@@ -22,7 +34,26 @@ test("every page belongs to exactly one rail item; the moved screens are inside 
     assert.equal(railItemOf(id).id, "settings", id);
   }
   assert.equal(railItemOf("knowledge").id, "subjects");
-  assert.deepEqual(settingsPages, ["settings", "models", "connections", "diagnostics", "profile", "appearance"]);
+  // TASK-356: the main group first, then the «Дополнительно» group; every page is still in the menu once.
+  assert.deepEqual(settingsPages, ["settings", "connections", "profile", "appearance", "models", "diagnostics"]);
+  assert.deepEqual(settingsAdvancedPages, ["models", "diagnostics"]);
+  assert.equal(settingsAdvancedCaption, "Дополнительно");
+  assert.equal(new Set(settingsPages).size, settingsPages.length);
+  for (const id of settingsPages) {
+    assert.equal(railItemOf(id).id, "settings", id);
+  }
+});
+
+test("the order leaves the slot for «Разрешения» right after «Основные»", () => {
+  assert.equal(settingsPermissionsSlot, 1);
+  assert.equal(settingsMainPages[settingsPermissionsSlot - 1], "settings");
+  assert.equal(settingsMainPages[settingsPermissionsSlot], "connections");
+  // The item itself is TASK-361's: no page of that name yet.
+  assert.ok(!pages.some((p) => p.label === "Разрешения"));
+  assert.ok(!settingsPages.includes("permissions"));
+  const spliced = [...settingsMainPages];
+  spliced.splice(settingsPermissionsSlot, 0, "permissions");
+  assert.deepEqual(spliced.slice(0, 3), ["settings", "permissions", "connections"]);
 });
 
 test("an unknown page falls back to the default", () => {
