@@ -44,6 +44,7 @@ import {
   showsTiles,
   viewKey,
 } from "../subjectsHome.js";
+import { CallLinkFlow, idleLink, type LinkState } from "../callLinkView.js";
 import { removedLineText, restoreNeedsReload, runRestore } from "../subjectRemovalView.js";
 import { addFileId, folderAddId, type SubjectTab } from "../subjectTabsView.js";
 import { idleTeacher, TeacherFlow, type TeacherFocus, type TeacherState, teacherFocusStep, teacherStateFor } from "../teachersView.js";
@@ -65,6 +66,7 @@ import { SubjectHead } from "./SubjectHead.js";
 import { EmptySubjects, InboxList, LibraryActions, NameForm, SubjectDetail, SubjectTree } from "./SubjectsParts.js";
 import { SubjectTabs } from "./SubjectTabs.js";
 import { type TeacherActions, TeachersBlock } from "./TeachersBlock.js";
+import { CallLinkBlock, linkActions, type LinkControls } from "./CallLinkParts.js";
 import { useFocusBack } from "./useFocusBack.js";
 import { useMaterialActions } from "./useMaterialActions.js";
 import { useSubjectRemoval } from "./useSubjectRemoval.js";
@@ -232,6 +234,26 @@ export function SubjectsPage(props: {
     [flow],
   );
 
+  // The link to the online class of the open subject (TASK-364): the core returns the subject after each change.
+  const [linkState, setLinkState] = useState<LinkState>(idleLink);
+  const linkFlow = useMemo(() => {
+    const reread = () => void api.subjects().then(setSubjects, () => undefined);
+    return new CallLinkFlow(
+      api,
+      { applied: (s) => setSubjects((list) => (list === null ? list : list.map((x) => (x.id === s.id ? s : x)))), linkGone: reread, reread },
+      setLinkState,
+    );
+  }, [api]);
+  useEffect(() => {
+    linkFlow.attach();
+    return () => linkFlow.dispose();
+  }, [linkFlow]);
+  const onOpenPage = props.onOpen;
+  const links = useMemo<LinkControls>(
+    () => ({ state: linkState, on: linkActions(linkFlow), onOpenSubjects: () => onOpenPage("subjects") }),
+    [linkState, linkFlow, onOpenPage],
+  );
+
   const load = useCallback(() => {
     api.subjects().then(
       (s) => {
@@ -324,7 +346,8 @@ export function SubjectsPage(props: {
     focusBack.cancel();
     setCreatedFolders(noFolders);
     flow.reset();
-  }, [key, flow]);
+    linkFlow.reset();
+  }, [key, flow, linkFlow]);
 
   useEffect(() => {
     if (scrollTo.current !== "") {
@@ -797,6 +820,7 @@ export function SubjectsPage(props: {
             />
             {subjectForm}
             <TeachersBlock key={subject.id} teachers={subject.teachers} state={teacherStateFor(teacher, subject.id)} on={teacherActions} />
+            <CallLinkBlock key={`link:${subject.id}`} subject={subject} links={links} />
             <SubjectTabs
               key={subject.id}
               subject={subject}

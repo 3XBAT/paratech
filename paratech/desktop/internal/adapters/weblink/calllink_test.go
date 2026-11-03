@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"paratech/desktop/internal/domain/library/subject"
 	schedvalues "paratech/desktop/internal/domain/schedule/values"
 )
 
@@ -167,6 +168,22 @@ func TestOpenCallLinkRefusesTheZeroValue(t *testing.T) {
 	if err := New().OpenCallLink(context.Background(), schedvalues.CallLink{}); !errors.Is(err, ErrRefused) {
 		t.Fatalf("OpenCallLink(zero) = %v, want ErrRefused", err)
 	}
+}
+
+func TestOpenSubjectCallLinkRefusesTheZeroValue(t *testing.T) {
+	if err := New().OpenSubjectCallLink(context.Background(), subject.CallLink{}); !errors.Is(err, ErrRefused) {
+		t.Fatalf("OpenSubjectCallLink(zero) = %v, want ErrRefused", err)
+	}
+}
+
+// mustSubjectCallLink is s as the library keeps it on a subject.
+func mustSubjectCallLink(t *testing.T, s string) subject.CallLink {
+	t.Helper()
+	l, err := subject.ParseCallLink(s)
+	if err != nil {
+		t.Fatalf("subject.ParseCallLink(%q): %v", s, err)
+	}
+	return l
 }
 
 func mustCallLink(t *testing.T, s string) schedvalues.CallLink {

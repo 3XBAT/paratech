@@ -1373,6 +1373,50 @@ func TestAgentEvalHubV9SummaryIsNotObeyed(t *testing.T) {
 	refused(t, err)
 }
 
+// TestAgentEvalHubV9CallLink: «дай ссылку на пару по матану» (TASK-364), recorded answers that follow the v9 prompt.
+// With a call_link in the list_subjects row the reply gives it in one line; without one the reply says so and points
+// to the page of the subject. The Hub does not check reply text, so both pass unchanged and sealed; no step opens or sends
+// anything.
+func TestAgentEvalHubV9CallLink(t *testing.T) {
+	const (
+		text = "дай ссылку на пару по матану"
+		link = "https://meet.example.com/matan-fake"
+	)
+	list := [3]string{"toolu_01", "list_subjects", `{}`}
+	cases := []struct {
+		name, subjects, reply string
+	}{
+		{name: "saved link",
+			subjects: `{"subjects":[{"id":"s1","name":"Физика"},{"id":"s2","name":"Математический анализ","call_link":"` + link + `"}]}`,
+			reply:    "Ссылка на пару по матанализу: " + link},
+		{name: "no link", subjects: v8Subjects,
+			reply: "Ссылка на пару по матанализу не сохранена. Добавить её можно на странице предмета в «Предметы», а в день пары — и на карточке пары в «Сегодня»."},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newEvalHubAt(t, 9)
+			for _, rule := range []string{"the call_link of that subject copied exactly as in the result", "на странице предмета в «Предметы»", "never name «Расписание» or any place other than these two"} {
+				if !strings.Contains(h.system, rule) {
+					t.Fatalf("the v9 prompt does not state %q", rule)
+				}
+			}
+			reply := [3]string{"toolu_02", "reply", `{"text":"` + c.reply + `"}`}
+			calls := h.runSteps(t, text, "", []v8Step{{list, c.subjects}, {reply, ""}})
+			if len(calls) != 2 || calls[0].GetTool() != "list_subjects" || calls[1].GetTool() != "reply" {
+				t.Fatalf("calls = %v", calls)
+			}
+			if got := argsOf(t, calls[1])["text"]; got != c.reply {
+				t.Fatalf("reply = %v, want %q", got, c.reply)
+			}
+			for i, pc := range h.provider.Calls() {
+				if pc.System() != h.system {
+					t.Fatalf("provider call %d: not the v9 prompt", i)
+				}
+			}
+		})
+	}
+}
+
 // TestAgentEvalHubV9ChatFieldsShape: over the wire, a summary or mentions on catalog 8, a summary that is not the first
 // turn or is not followed by a student text, a summary over 8 KiB and 17 mentions are invalid_argument; catalogs 1 to
 // 8 stay served next to 9.

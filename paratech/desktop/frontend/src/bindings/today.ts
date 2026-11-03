@@ -69,10 +69,31 @@ export interface TodayPost {
   shownAt: string;
 }
 
+/**
+ * TASK-364: what the library says about the subject string of a lesson. "none": the lesson names no subject; "unknown":
+ * no subject has the name (library createSubjectWithCallLink can create one); "ambiguous": several subjects have it;
+ * "known": one, subjectId; "unavailable": the library could not be read now, offer nothing.
+ */
+export type SubjectState = "none" | "unknown" | "ambiguous" | "known" | "unavailable";
+
+export const subjectStates: readonly SubjectState[] = ["none", "unknown", "ambiguous", "known", "unavailable"];
+
 export interface TodayLesson {
   id: string;
   title: string;
+  /** The subject string of the schedule. */
   subject: string;
+  subjectState: SubjectState;
+  /**
+   * TASK-364: the library subject the lesson resolves to, set only for subjectState "known": the other lessons have no
+   * place to keep a call link. «Подключиться» is library openSubjectCallLink(subjectId), «Добавить ссылку» library
+   * setSubjectCallLink(subjectId, text).
+   */
+  subjectId: string;
+  subjectName: string;
+  /** The subject keeps a call link; its host is callLinkHost (the link itself never reaches this screen). */
+  hasCallLink: boolean;
+  callLinkHost: string;
   kind: string;
   teacher: string;
   start: string;
@@ -203,13 +224,34 @@ export function parsePost(raw: unknown): TodayPost {
   };
 }
 
+/**
+ * The state of a lesson's subject; an older shape without it is "known" with a subject and "unavailable" without one,
+ * and a value this page does not know is "unavailable": nothing is offered on a guess.
+ */
+function parseSubjectState(r: Record<string, unknown>, subjectId: string): SubjectState {
+  const v = r.subjectState;
+  if (v === undefined) {
+    return subjectId !== "" ? "known" : "unavailable";
+  }
+  const st = typeof v === "string" && subjectStates.includes(v as SubjectState) ? (v as SubjectState) : "unavailable";
+  // "known" without a subject would offer controls with nowhere to keep the link.
+  return st === "known" && subjectId === "" ? "unavailable" : st;
+}
+
 export function parseLesson(raw: unknown): TodayLesson {
   const w = "lesson";
   const r = record(raw, w);
+  // A lesson without these fields (older shape) has no library subject and no link; another type is an error.
+  const subjectId = r.subjectId === undefined ? "" : str(r, "subjectId", w);
   return {
     id: str(r, "id", w),
     title: str(r, "title", w),
     subject: str(r, "subject", w),
+    subjectState: parseSubjectState(r, subjectId),
+    subjectId,
+    subjectName: r.subjectName === undefined ? "" : str(r, "subjectName", w),
+    hasCallLink: r.hasCallLink === undefined ? false : bool(r, "hasCallLink", w),
+    callLinkHost: r.callLinkHost === undefined ? "" : str(r, "callLinkHost", w),
     kind: str(r, "kind", w),
     teacher: str(r, "teacher", w),
     start: str(r, "start", w),

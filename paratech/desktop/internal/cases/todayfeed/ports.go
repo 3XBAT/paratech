@@ -10,6 +10,7 @@ import (
 	"paratech/desktop/internal/domain/coursework/proposal"
 	"paratech/desktop/internal/domain/coursework/summary"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
+	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
@@ -89,8 +90,16 @@ type ProposalList interface {
 // SubjectResolver maps the subject strings of lessons to the subjects of the library, which key the agent threads
 // (ADR-0024, PRD section 9). Implemented by cases/library, wired by the app.
 type SubjectResolver interface {
-	// ResolveSubjects returns the library subject of each name that matches one (PRD section 9).
-	ResolveSubjects(ctx context.Context, names []string) (map[string]subjectmatch.Match, error)
+	// LookupSubjects tells how each name resolves: to one subject, to none, to several or not at all (no key); every
+	// name is in the result (PRD section 9).
+	LookupSubjects(ctx context.Context, names []string) (map[string]subjectmatch.Resolution, error)
+}
+
+// SubjectCallLinks reads the links to the online classes the student keeps on the subjects of the library (ADR-0032,
+// TASK-364). Implemented by cases/library, wired by the app.
+type SubjectCallLinks interface {
+	// CallLinks returns the link of each active subject of ids that has one (ADR-0032).
+	CallLinks(ctx context.Context, ids []shared.SubjectID) (map[shared.SubjectID]subject.CallLink, error)
 }
 
 // Clock supplies the current time in the student's zone, whose calendar days the screen uses (ARCH-24, PRD

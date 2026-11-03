@@ -17,6 +17,7 @@ import (
 	"paratech/desktop/internal/domain/coursework/values"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
+	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/transcript"
 	"paratech/desktop/testenv"
@@ -44,8 +45,17 @@ func (noAssignments) Label(context.Context, shared.AssignmentID) (string, string
 // noSubjects is the SubjectResolver with an empty library.
 type noSubjects struct{}
 
-func (noSubjects) ResolveSubjects(context.Context, []string) (map[string]subjectmatch.Match, error) {
-	return map[string]subjectmatch.Match{}, nil
+func (noSubjects) LookupSubjects(_ context.Context, names []string) (map[string]subjectmatch.Resolution, error) {
+	out := make(map[string]subjectmatch.Resolution, len(names))
+	for _, n := range names {
+		out[n] = subjectmatch.Resolution{Outcome: subjectmatch.NoMatch}
+	}
+	return out, nil
+}
+
+// CallLinks is the SubjectCallLinks port of the same empty library.
+func (noSubjects) CallLinks(context.Context, []shared.SubjectID) (map[shared.SubjectID]subject.CallLink, error) {
+	return map[shared.SubjectID]subject.CallLink{}, nil
 }
 
 func (e *ppEnv) today() (*todayfeed.Poster, *todayfeed.Screen) {
@@ -60,7 +70,7 @@ func (e *ppEnv) today() (*todayfeed.Poster, *todayfeed.Screen) {
 	screen, err := todayfeed.NewScreen(todayfeed.ScreenDeps{
 		Posts: posts, Recordings: sqlite.NewRecordingRepository(e.db), Lessons: sqlite.NewLessonRepository(e.db),
 		Homework: e.assignments, Assignments: noAssignments{}, Proposals: sqlite.NewProposalRepository(e.db),
-		Subjects: noSubjects{}, Clock: e.clock,
+		Subjects: noSubjects{}, CallLinks: noSubjects{}, Clock: e.clock,
 	})
 	if err != nil {
 		e.t.Fatal(err)

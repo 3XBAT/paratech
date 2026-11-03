@@ -380,6 +380,7 @@ type Subject struct {
 	TeacherName  string
 	TeacherEmail string
 	RemovedAt    sql.NullInt64
+	CallLink     string
 }
 
 type SubjectAlias struct {

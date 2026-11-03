@@ -145,6 +145,14 @@ type ExpiredSubjects interface {
 	Purge(ctx context.Context) (int, error)
 }
 
+// CallOpener opens the link to the online class kept on a subject outside the app («Подключиться», ADR-0032 «Opening
+// and copying»). Implemented by the weblink adapter: it re-parses the link with the call link rule of the schedule,
+// requires the same canonical form and opens it through a .url file. Its errors name the rule or the step, never the
+// link.
+type CallOpener interface {
+	OpenSubjectCallLink(ctx context.Context, l subject.CallLink) error
+}
+
 // IDs generates the identifiers of new subjects, folders and materials (ARCH-24).
 type IDs interface {
 	NewSubjectID() shared.SubjectID
