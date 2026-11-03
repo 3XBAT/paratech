@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { activityApi, type AdviceView } from "../bindings/activity";
 import { popupWindowApi, promptApi, shownEvent, type PromptView, type SourcesView } from "../bindings/prompt";
 import { libraryApi } from "../bindings/library";
@@ -196,9 +196,12 @@ export function Popup() {
     void reload(true);
     const onVisibility = () => {
       setVisible(document.visibilityState === "visible");
-      // The popup closed: the meeting may be opened again when it is shown next.
+      // The popup closed: the meeting may be opened again when it is shown next. The same prompt shown again has no
+      // new offer to read the subject, so the page reads it itself.
       if (document.visibilityState === "hidden") {
         joinCtl.closed();
+      } else {
+        joinCtl.refresh();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
@@ -231,10 +234,14 @@ export function Popup() {
   const liveId = live && sound !== null ? sound.recordingId : "";
   const jv = joinView(join, m.disabled);
   const joinShown = showPicker && jv.visible;
-  // A failed open is the last of the error lines (a start problem comes first); a vanished link is a quiet note.
-  const errorLine = error || m.problem || (showPicker ? jv.error : "");
-  const joinNote = showPicker ? jv.note : "";
-  const notes = showPicker ? [picker.autoNote, ...picker.warnings, joinNote].filter((n) => n !== "") : [];
+  // Only start problems are red. The join texts are quiet notes (opened, gone) or the amber failure line, all in the
+  // texts area, so they count in its layout but never grow the window.
+  const errorLine = error || m.problem;
+  const joinQuiet = showPicker ? [jv.confirm, jv.note].filter((n) => n !== "") : [];
+  const joinFailure = showPicker ? jv.failure : "";
+  const notes = showPicker
+    ? [picker.autoNote, ...picker.warnings, ...joinQuiet, joinFailure].filter((n) => n !== "")
+    : [];
   const layout = textsLayout(notes, errorLine);
 
   const offeredId = joinPromptId(view, advice !== null || live);
@@ -475,13 +482,22 @@ export function Popup() {
           )}
           {showPicker && picker.autoNote !== "" && <p className="auto-note">{picker.autoNote}</p>}
           {showPicker &&
-            [...picker.warnings, joinNote]
-              .filter((w) => w !== "")
-              .map((w) => (
-                <p key={w} className={layout.clamp ? "warning clamp" : "warning"} title={layout.clamp ? w : undefined}>
-                  {w}
-                </p>
-              ))}
+            picker.warnings.map((w) => (
+              <p key={w} className={layout.clamp ? "warning clamp" : "warning"} title={layout.clamp ? w : undefined}>
+                {w}
+              </p>
+            ))}
+          {joinQuiet.map((n) => (
+            // The confirmation is a status for screen readers; the gone note is plain text.
+            <p
+              key={n}
+              className={layout.clamp ? "p-note join-note clamp" : "p-note join-note"}
+              role={n === jv.confirm ? "status" : undefined}
+              title={layout.clamp ? n : undefined}
+            >
+              {n}
+            </p>
+          ))}
           {showPicker && (
             <p
               className={layout.collapsed ? "advice collapsed" : "advice"}
@@ -490,35 +506,43 @@ export function Popup() {
               {picker.advice}
             </p>
           )}
+          {joinFailure !== "" && (
+            // Last, right above the buttons.
+            <p className={layout.clamp ? "warning clamp" : "warning"} title={layout.clamp ? joinFailure : undefined}>
+              {joinFailure}
+            </p>
+          )}
         </div>
       )}
       <div className="pbtns">
-        {joinShown && (
-          // Before «Начать запись»: join first, then record. It never disables the start and takes no focus itself.
-          <Button
-            className={jv.opened ? "wide joined" : "wide"}
-            busy={jv.busy}
-            busyLabel={callLinkTexts.joining}
-            disabled={jv.disabled}
-            title={jv.title}
-            onClick={() => void joinCtl.click()}
-          >
-            {callLinkTexts.join}
-          </Button>
-        )}
         {m.buttons.map((id) => (
-          <Button
-            key={id}
-            variant={id === "start" ? "primary" : id === "skip" ? "ghost" : "secondary"}
-            icon={id === "start" ? "rec" : undefined}
-            className={id === "start" || id === "skip" || id === "close" ? "wide" : undefined}
-            disabled={m.disabled}
-            // The title is also the accessible description of the button (the label stays its name).
-            title={buttonHints[id]}
-            onClick={() => click(id)}
-          >
-            {id === "start" ? m.startLabel : buttonLabels[id]}
-          </Button>
+          <Fragment key={id}>
+            <Button
+              variant={id === "start" ? "primary" : id === "skip" ? "ghost" : "secondary"}
+              icon={id === "start" ? "rec" : undefined}
+              className={id === "start" || id === "close" ? "wide" : undefined}
+              disabled={m.disabled}
+              // The title is also the accessible description of the button (the label stays its name).
+              title={buttonHints[id]}
+              onClick={() => click(id)}
+            >
+              {id === "start" ? m.startLabel : buttonLabels[id]}
+            </Button>
+            {id === "start" && joinShown && (
+              // Between «Начать запись» and «Не записывать»: they share one row, so the three do not stack. It never
+              // disables the start and takes no focus itself.
+              <Button
+                className={jv.opened ? "joined" : undefined}
+                busy={jv.busy}
+                busyLabel={callLinkTexts.joining}
+                disabled={jv.disabled}
+                title={jv.title}
+                onClick={() => void joinCtl.click()}
+              >
+                {callLinkTexts.join}
+              </Button>
+            )}
+          </Fragment>
         ))}
       </div>
     </div>

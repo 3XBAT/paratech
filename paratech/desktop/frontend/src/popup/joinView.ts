@@ -7,9 +7,11 @@ import { callLinkTexts } from "../callLinkView.js";
 
 export const joinTexts = {
   /** The link was removed meanwhile (or the subject is gone): the button goes, «Начать запись» stays. */
-  gone: "Ссылки на пару больше нет.",
-  /** Why the grey button does nothing. */
+  gone: "Ссылки на пару уже нет.",
+  /** Why the grey button does nothing (the hover text). */
   openedTitle: "Ссылка уже открыта",
+  /** The visible confirmation while the button is grey: the open does not start the recording. */
+  opened: "Ссылка открыта. Запись пока не идёт.",
 } as const;
 
 /** hidden: no button; ready: «Подключиться»; opening: the call runs; opened: grey until the popup closes. */
@@ -160,9 +162,11 @@ export interface JoinView {
   /** The meeting is open: the button stays grey until the popup closes. */
   opened: boolean;
   title: string;
-  /** Joins the popup's error line (lowest priority); "" when none. */
-  error: string;
-  /** A quiet line like the picker's warnings; "" when none. */
+  /** A quiet line while the meeting is open; "" otherwise. */
+  confirm: string;
+  /** The amber line of a failed open (never the red banner, it must not grow the window); "" when none. */
+  failure: string;
+  /** A quiet line: the link is gone; "" when none. */
   note: string;
 }
 
@@ -174,7 +178,8 @@ export function joinView(s: JoinState, blocked: boolean): JoinView {
     disabled: s.phase !== "ready" || blocked,
     opened: s.phase === "opened",
     title: s.phase === "opened" ? joinTexts.openedTitle : callLinkTexts.joinTitle,
-    error: s.shown && s.problem === "failed" ? callLinkTexts.openFailed : "",
+    confirm: s.shown && s.phase === "opened" ? joinTexts.opened : "",
+    failure: s.shown && s.problem === "failed" ? callLinkTexts.openFailed : "",
     note: s.shown && s.problem === "gone" ? joinTexts.gone : "",
   };
 }

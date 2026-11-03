@@ -89,13 +89,13 @@ test("an offered lesson with a link shows the button ready; no link or no subjec
   assert.deepEqual(withLink.reads, ["p1"]);
   assert.deepEqual(withLink.ctl.state, { shown: true, phase: "ready", subjectId: "sub-1", problem: "" });
   const v = joinView(withLink.ctl.state, false);
-  assert.deepEqual(v, { visible: true, busy: false, disabled: false, opened: false, title: callLinkTexts.joinTitle, error: "", note: "" });
+  assert.deepEqual(v, { visible: true, busy: false, disabled: false, opened: false, title: callLinkTexts.joinTitle, confirm: "", failure: "", note: "" });
 
   const none = setup({ subject: () => Promise.resolve("") });
   none.ctl.offer("p1");
   await settle();
   assert.deepEqual(none.ctl.state, { shown: true, phase: "hidden", subjectId: "", problem: "" });
-  assert.deepEqual(joinView(none.ctl.state, false), { visible: false, busy: false, disabled: true, opened: false, title: callLinkTexts.joinTitle, error: "", note: "" });
+  assert.deepEqual(joinView(none.ctl.state, false), { visible: false, busy: false, disabled: true, opened: false, title: callLinkTexts.joinTitle, confirm: "", failure: "", note: "" });
 });
 
 test("the prompt is read only for an offered lesson: not for ad-hoc, STARTING, other states, the recording or the advice", () => {
@@ -129,7 +129,10 @@ test("a click opens the meeting through the open call with the subject ID, shows
   assert.deepEqual(opens, ["sub-1"]);
   assert.equal(ctl.state.phase, "opened");
   v = joinView(ctl.state, false);
-  assert.deepEqual([v.visible, v.busy, v.disabled, v.opened, v.title, v.error, v.note], [true, false, true, true, joinTexts.openedTitle, "", ""]);
+  assert.deepEqual(
+    [v.visible, v.busy, v.disabled, v.opened, v.title, v.confirm, v.failure, v.note],
+    [true, false, true, true, joinTexts.openedTitle, "Ссылка открыта. Запись пока не идёт.", "", ""],
+  );
   await ctl.click();
   assert.deepEqual(opens, ["sub-1"], "no second open once opened");
 });
@@ -157,12 +160,13 @@ test("a failed or thrown open shows the failure text and the button is active ag
     const v = joinView(ctl.state, false);
     assert.equal(v.visible, true);
     assert.equal(v.disabled, false);
-    assert.equal(v.error, "Не удалось открыть ссылку. Можно повторить.");
+    assert.equal(v.failure, "Не удалось открыть ссылку. Можно повторить.");
+    assert.equal(v.confirm, "", "no confirmation after a failure");
     next = () => Promise.resolve({ problem: "" });
     await ctl.click();
     assert.equal(opens.length, 2);
     assert.equal(ctl.state.phase, "opened");
-    assert.equal(joinView(ctl.state, false).error, "", "the text goes with the new attempt");
+    assert.equal(joinView(ctl.state, false).failure, "", "the text goes with the new attempt");
   }
 });
 
@@ -174,8 +178,9 @@ test("no_link and not_found remove the button and say the link is gone, without 
     await ctl.click();
     const v = joinView(ctl.state, false);
     assert.equal(v.visible, false);
-    assert.equal(v.note, "Ссылки на пару больше нет.");
-    assert.equal(v.error, "");
+    assert.equal(v.note, "Ссылки на пару уже нет.");
+    assert.equal(v.failure, "");
+    assert.equal(v.confirm, "");
     assert.doesNotMatch(v.note, /Добавить/);
     await ctl.click();
     assert.equal(ctl.state.phase, "hidden", "nothing to click");
@@ -206,6 +211,22 @@ test("the popup closing resets the opened state and the texts; the next showing 
   assert.equal(ctl.state.phase, "ready");
   await ctl.click();
   assert.equal(opens.length, 2);
+});
+
+test("the same prompt shown again: closed() then the refresh on visible brings the button back, ready and not opened", async () => {
+  const { ctl, reads, opens } = setup();
+  ctl.offer("p1");
+  await settle();
+  await ctl.click();
+  assert.equal(ctl.state.phase, "opened");
+  ctl.closed(); // visibilitychange: hidden
+  ctl.refresh(); // visibilitychange: visible (no new offer, the prompt id is the same)
+  await settle();
+  assert.deepEqual(reads, ["p1", "p1"]);
+  assert.deepEqual(ctl.state, { shown: true, phase: "ready", subjectId: "sub-1", problem: "" });
+  assert.equal(joinView(ctl.state, false).confirm, "");
+  await ctl.click();
+  assert.equal(opens.length, 2, "it can be opened again in the new showing");
 });
 
 test("a read while the popup stays open does not undo the opened state, and a changed subject starts clean", async () => {
@@ -334,33 +355,76 @@ test("a running start or skip disables the button but nothing here disables «Н
   assert.equal(joinView(idleJoin, false).visible, false);
   // Texts are never shown without an offer.
   assert.equal(joinView({ shown: false, phase: "hidden", subjectId: "", problem: "gone" }, false).note, "");
-  assert.equal(joinView({ shown: false, phase: "ready", subjectId: "s", problem: "failed" }, false).error, "");
+  assert.equal(joinView({ shown: false, phase: "ready", subjectId: "s", problem: "failed" }, false).failure, "");
+  assert.equal(joinView({ shown: false, phase: "opened", subjectId: "s", problem: "" }, false).confirm, "");
 });
 
-test("the popup puts «Подключиться» before «Начать запись» in the buttons row and keeps start, skip and close as they were", () => {
+test("the confirmation is shown only while the meeting is open", () => {
+  assert.equal(joinTexts.opened, "Ссылка открыта. Запись пока не идёт.");
+  for (const phase of ["hidden", "ready", "opening"]) {
+    assert.equal(joinView({ shown: true, phase, subjectId: "s", problem: "" }, false).confirm, "", phase);
+  }
+  const opened = joinView({ shown: true, phase: "opened", subjectId: "s", problem: "" }, false);
+  assert.equal(opened.confirm, joinTexts.opened);
+  assert.equal(opened.title, joinTexts.openedTitle, "the hover text stays");
+  assert.equal(opened.disabled, true, "still grey and not clickable");
+});
+
+test("the buttons: «Начать запись» full width on top, then «Подключиться» and «Не записывать» side by side; no join keeps the old look", () => {
   const code = src("popup/Popup.tsx");
   const row = code.slice(code.lastIndexOf('<div className="pbtns">'));
-  assert.ok(row.indexOf("{joinShown && (") >= 0);
-  assert.ok(row.indexOf("{joinShown && (") < row.indexOf("m.buttons.map"), "join first, then record");
+  const start = row.indexOf("m.buttons.map");
+  const join = row.indexOf("{id === \"start\" && joinShown && (");
+  assert.ok(start >= 0 && join > start, "the join button is drawn right after the start button, before the skip one");
   assert.match(row, /callLinkTexts\.join\}\s*<\/Button>/);
   assert.match(row, /title=\{jv\.title\}/, "the hint is callLinkTexts.joinTitle (via joinView)");
   assert.match(row, /busyLabel=\{callLinkTexts\.joining\}/);
   assert.match(row, /disabled=\{jv\.disabled\}/);
   assert.match(row, /disabled=\{m\.disabled\}/, "start and skip still follow the old rule");
-  assert.match(row, /id === "start" \|\| id === "skip" \|\| id === "close" \? "wide"/, "the three full-width buttons stay full width");
+  assert.match(row, /className=\{id === "start" \|\| id === "close" \? "wide" : undefined\}/, "only start and close are full width, as before");
+  assert.doesNotMatch(row.slice(join), /wide/, "the join button is not full width");
   assert.doesNotMatch(row, /autoFocus|\.focus\(/, "no focus is taken");
   const view = src("popup/view.ts");
   assert.match(view, /buttons: ButtonId\[\] = onOffer \? \["start", "skip"\] : \["close"\]/, "view.ts buttons are unchanged");
-  assert.match(src("popup/popup.css"), /\.btn\.joined:disabled \{[^}]*opacity: 1/, "the opened button is plainly grey");
+  // Without the join button «Не записывать» is the second and last child and spans the row, as before; with it, the
+  // third child does not match and takes the second column.
+  const css = src("popup/popup.css");
+  assert.match(css, /\.pbtns:not\(\.two\) > \.btn:nth-child\(2\):last-child \{ grid-column: 1 \/ -1; \}/);
+  assert.match(css, /\.pbtns \{ display: grid; grid-template-columns: 1fr 1fr;/);
+  assert.match(css, /\.btn\.joined:disabled \{[^}]*\}/);
+  assert.doesNotMatch(css.match(/\.btn\.joined:disabled \{[^}]*\}/)[0], /opacity/, "the grey button fades like every disabled one");
   assert.equal(callLinkTexts.join, "Подключиться");
   assert.equal(callLinkTexts.joining, "Открытие…");
 });
 
-test("the error joins the error line last (after the page error and the start problem); the gone note is a warning", () => {
+test("the red banner carries only the page error and the start problem; the join texts are quiet lines in the texts area", () => {
   const code = src("popup/Popup.tsx");
-  assert.match(code, /const errorLine = error \|\| m\.problem \|\| \(showPicker \? jv\.error : ""\);/);
-  assert.match(code, /\[\.\.\.picker\.warnings, joinNote\]/);
+  assert.match(code, /const errorLine = error \|\| m\.problem;/);
+  assert.doesNotMatch(code, /jv\.error/);
+  // The notes count in the layout, the failure and the opened note too, so the buttons stay uncut.
+  assert.match(code, /\[picker\.autoNote, \.\.\.picker\.warnings, \.\.\.joinQuiet, joinFailure\]/);
   assert.match(code, /textsLayout\(notes, errorLine\)/);
+  assert.match(code, /const joinQuiet = showPicker \? \[jv\.confirm, jv\.note\]/);
+  // Quiet: p-note (muted), the confirmation is a status; the failure is the amber warning, last in the area.
+  const area = code.slice(code.indexOf('<div className="texts">\n          {errorLine'), code.indexOf('<div className="pbtns">\n        {m.buttons'));
+  assert.match(area, /joinQuiet\.map/);
+  assert.match(area, /"p-note join-note clamp" : "p-note join-note"/);
+  assert.match(area, /role=\{n === jv\.confirm \? "status" : undefined\}/);
+  assert.doesNotMatch(area.slice(area.indexOf("joinQuiet.map"), area.indexOf("{showPicker && (\n            <p\n              className={layout.collapsed")), /warning/, "the quiet lines are not amber");
+  const failure = area.indexOf("{joinFailure !== \"\" && (");
+  assert.ok(failure > area.indexOf("picker.advice"), "the failure is the last item, below the advice");
+  assert.match(area.slice(failure), /className=\{layout\.clamp \? "warning clamp" : "warning"\}/);
+  assert.doesNotMatch(area.slice(failure), /Banner|alert/);
+  assert.equal(area.indexOf("Banner kind=\"fail\"") < area.indexOf("joinQuiet.map"), true);
+  assert.doesNotMatch(area.slice(area.indexOf("Banner kind"), area.indexOf("</Banner>")), /join/i, "nothing of the join reaches the banner");
+});
+
+test("the visibility handler: hidden closes the join state, visible reads the subject again", () => {
+  const code = src("popup/Popup.tsx");
+  assert.match(
+    code,
+    /if \(document\.visibilityState === "hidden"\) \{\s*joinCtl\.closed\(\);\s*\} else \{\s*joinCtl\.refresh\(\);\s*\}/,
+  );
 });
 
 // ---- the core is never given a URL, the page opens none ----
