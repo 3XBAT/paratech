@@ -142,6 +142,8 @@ type AgentConfirmCard struct {
 	DraftVersion     int              `json:"draftVersion"`
 	Notice           string           `json:"notice"`
 	Deletion         *DeleteRecording `json:"deletion"`
+	// Schedule is the content of a schedule_subjects card (agentconfirm_schedule.go); null on other cards.
+	Schedule *AgentScheduleCard `json:"schedule"`
 }
 
 // AgentConfirmService is bound to the confirm cards of the agent panel: every exported method is callable from the
@@ -150,6 +152,9 @@ type AgentConfirmCard struct {
 type AgentConfirmService struct {
 	core AgentConfirmCore
 	log  *slog.Logger
+
+	schedule      *LibraryService // the page's own binding (BindScheduleCards); nil: the schedule card is unavailable
+	scheduleState scheduleCards
 }
 
 // NewAgentConfirmService returns the binding of the confirm cards; OpenServices checks the core before calling it.
@@ -157,8 +162,22 @@ func NewAgentConfirmService(c AgentConfirmCore, log *slog.Logger) *AgentConfirmS
 	return &AgentConfirmService{core: c, log: log}
 }
 
+// BindScheduleCards gives the schedule_subjects card the page's library binding: one result journal and one busy
+// guard for the page and the card, so either can undo the other's batch and they never run at once. A binding
+// without subjects from the schedule leaves the card unavailable. A function, not a method: every method of a bound
+// service is callable from the page.
+func BindScheduleCards(cards *AgentConfirmService, lib *LibraryService) *AgentConfirmService {
+	if lib != nil && lib.schedule.uc != nil {
+		cards.schedule = lib
+	}
+	return cards
+}
+
 // Card returns the data of the card bound to target (kind "proposal" or "preview", the target of a confirm card).
 func (s *AgentConfirmService) Card(ctx context.Context, kind, id string) (AgentConfirmCard, error) {
+	if kind == agentCardScheduleSubjects {
+		return s.scheduleSubjectsCard(ctx, id)
+	}
 	switch values.IDKind(kind) {
 	case values.KindProposal:
 		pid, err := proposalID(id)
@@ -285,6 +304,9 @@ func (s *AgentConfirmService) Confirm(ctx context.Context, kind, id, emailSubjec
 
 // Decline is «Нет» on a proposal card: it can never run afterwards. A preview has nothing stored to decline.
 func (s *AgentConfirmService) Decline(ctx context.Context, kind, id string) (AgentConfirmCard, error) {
+	if kind == agentCardScheduleSubjects {
+		return s.declineScheduleSubjects(id)
+	}
 	switch values.IDKind(kind) {
 	case values.KindPreview:
 		if shared.RecordingID(id).Validate() != nil {

@@ -107,7 +107,7 @@ type Clock interface {
 }
 
 // Deps are the dependencies of the Driver; every one except Journal, Actions, Inspector, Answerer, Proposals,
-// Deletions, Drafts, Replies and Log is required. Replies is the reply draft wired into the step use case: a stored
+// Deletions, Drafts, Subjects, Replies and Log is required. Replies is the reply draft wired into the step use case: a stored
 // «Стоп» cuts its stream. Without Journal and Actions the actions (class U) answer "unavailable",
 // without Inspector inspect_upload does, without Answerer answer_question does, without Journal and Proposals or
 // Deletions the proposals (class C) do.
@@ -127,6 +127,7 @@ type Deps struct {
 	Proposals   Proposals
 	Deletions   DeletionPreviews
 	Drafts      DraftVersions
+	Subjects    ScheduleSubjects // nil: propose_subjects_from_schedule answers "unavailable"
 	Replies     *Replies
 	Clock       Clock
 	Log         *slog.Logger
@@ -184,7 +185,7 @@ func New(d Deps) (*Driver, error) {
 		tools: tools{
 			library: d.Library, inspector: d.Inspector, answerer: d.Answerer, knowledge: d.Knowledge, activity: d.Activity, schedule: d.Schedule, assignments: d.Assignments,
 			deliveries: d.Deliveries, journal: d.Journal, actions: d.Actions, proposals: d.Proposals,
-			deletions: d.Deletions, drafts: d.Drafts, clock: d.Clock, log: log, sink: d.Sink,
+			deletions: d.Deletions, drafts: d.Drafts, subjects: d.Subjects, clock: d.Clock, log: log, sink: d.Sink,
 		},
 	}, nil
 }

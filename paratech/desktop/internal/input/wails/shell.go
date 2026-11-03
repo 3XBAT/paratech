@@ -320,6 +320,8 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	}
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
+	lib := NewLibraryService(core.Library, materialPickerFunc(s.pickMaterialFile), core.Files, s.opts.Log).
+		withOpener(core.MaterialViews, core.Opener).withOverview(core.SubjectOverview)
 	return Services{
 		Settings: NewSettingsService(core.Settings, s.opts.Log).withSpeed(core.Speed),
 		Activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, core.Retrier, s.opts.Log),
@@ -346,17 +348,16 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 			s.opts.Log),
 		LectureText: NewLectureTextService(core.Summary, summaryPickerFunc(s.pickSummaryFile),
 			clipboardFunc(s.setClipboardText), s.opts.Log),
-		Deletion:  NewRecordingDeleteService(core.Deletion, s.opts.Log),
-		Import:    NewRecordingImportService(core.RecordingImport, recordingPickerFunc(s.pickRecordingFile), s.opts.Log),
-		Knowledge: NewKnowledgeBaseService(core.Knowledge, knowledgePickerFunc(s.pickKnowledgeFile), s.opts.Log),
-		Library: NewLibraryService(core.Library, materialPickerFunc(s.pickMaterialFile), core.Files, s.opts.Log).
-			withOpener(core.MaterialViews, core.Opener).withOverview(core.SubjectOverview),
+		Deletion:   NewRecordingDeleteService(core.Deletion, s.opts.Log),
+		Import:     NewRecordingImportService(core.RecordingImport, recordingPickerFunc(s.pickRecordingFile), s.opts.Log),
+		Knowledge:  NewKnowledgeBaseService(core.Knowledge, knowledgePickerFunc(s.pickKnowledgeFile), s.opts.Log),
+		Library:    lib,
 		Notes:      NewNotesService(core.Notes, notesPickerFunc(s.pickNoteFiles), core.Files, s.opts.Log),
 		Agent:      NewAgentService(core.Agent, s.opts.Log),
 		Today:      NewTodayService(core.Today, s.opts.Log),
 		AgentPanel: core.Agent.Panel,
 
-		AgentConfirm: NewAgentConfirmService(core.AgentConfirm, s.opts.Log),
+		AgentConfirm: BindScheduleCards(NewAgentConfirmService(core.AgentConfirm, s.opts.Log), lib),
 		Turnkey:      NewTurnkeyService(core.Turnkey, s.opts.Log),
 		Answers:      NewAnswerService(core.Answers, s.opts.Log),
 		Tickets:      NewTicketService(core.Tickets, s.opts.Log),

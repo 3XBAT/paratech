@@ -46,6 +46,9 @@ type DraftVersions interface {
 // answers from its journal entry and proposes nothing new.
 func (t tools) propose(ctx context.Context, st agentturn.Step, c agentturn.Call) ran {
 	id, tool := c.Call.ID(), c.Call.Tool()
+	if tool == values.ToolProposeSubjectsFromSchedule {
+		return t.proposeSubjects(ctx, st, c) // a batch card, not a proposal of homeworkflow (subjects.go)
+	}
 	refuse := func(why values.Refusal) ran {
 		return ran{out: agentturn.Outcome{Result: values.RefusalResult(id, why)}, write: true}
 	}

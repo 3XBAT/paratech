@@ -149,6 +149,10 @@ type AgentCardView struct {
 	StopReason string                    `json:"stopReason"`
 	WorkID     string                    `json:"workId"`
 	Outcome    string                    `json:"outcome"`
+	// Offer is the button of an offer_button card, absent on other cards (the event of the earlier cards keeps its
+	// bytes). A schedule_subjects card has Target {kind "schedule_subjects", id: the token}, read with
+	// AgentConfirmService.Card.
+	Offer *AgentOfferView `json:"offer,omitempty"`
 }
 
 // AgentAssignmentView is an assignment a reply lists, from the local data, never from the model (TASK-173): its title
@@ -326,6 +330,10 @@ func cardView(c values.Card) (AgentCardView, bool) {
 		v.StopReason = string(c.Reason)
 	case values.WorkCard:
 		v.WorkID, v.Outcome = c.Work.ID(), string(c.Outcome)
+	case values.ScheduleSubjectsCard:
+		v.Target = &AgentRefView{Kind: agentCardScheduleSubjects, ID: c.Proposal.ID()}
+	case values.OfferButtonCard:
+		v.Offer = offerView(c)
 	default:
 		return AgentCardView{}, false
 	}
