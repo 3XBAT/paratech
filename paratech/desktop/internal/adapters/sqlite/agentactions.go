@@ -42,6 +42,9 @@ type compensationWire struct {
 	OldDue     string `json:"old_due,omitempty"`
 	Job        string `json:"job,omitempty"`
 	Work       string `json:"work,omitempty"`
+	// Wave 10 (agentactions10.go).
+	Fields *assignmentFieldsWire `json:"fields,omitempty"`
+	Marks  []doneMarkWire        `json:"marks,omitempty"`
 }
 
 // Get loads an entry; a missing one wraps shared.ErrNotFound.
@@ -297,7 +300,7 @@ func wireOf(c action.Compensation) (compensationWire, error) {
 	case action.RemoveAssignment:
 		w.Assignment = v.Assignment.ID()
 	default:
-		return compensationWire{}, fmt.Errorf("unknown compensation %s", c.Kind())
+		return wireOf10(c, w)
 	}
 	return w, nil
 }
@@ -352,5 +355,5 @@ func compensationOfWire(w compensationWire) (action.Compensation, error) {
 	case action.CompRemoveAssignment:
 		return action.RemoveAssignment{Assignment: ref(values.KindAssignment, w.Assignment)}, nil
 	}
-	return nil, fmt.Errorf("unknown compensation kind %q", w.Kind)
+	return compensationOfWire10(w)
 }

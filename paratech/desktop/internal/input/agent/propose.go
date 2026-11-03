@@ -78,7 +78,7 @@ func (t tools) propose(ctx context.Context, st agentturn.Step, c agentturn.Call)
 		t.log.WarnContext(ctx, opPropose, "tool", tool.String(), "err", err)
 		return refuse(values.RefuseFailed)
 	}
-	return ran{out: agentturn.Outcome{Result: res, Seen: seen}, write: true, cards: []values.Card{values.ConfirmCard{Target: target}}}
+	return ran{out: agentturn.Outcome{Result: res, Seen: seen}, write: true, cards: []values.Card{cardOf(c, target)}}
 }
 
 // canPropose reports whether the use case of a C tool is wired.
@@ -88,6 +88,8 @@ func (t tools) canPropose(tool values.Tool) bool {
 		return t.proposals != nil
 	case values.ToolProposeDeleteRecording:
 		return t.deletions != nil
+	case values.ToolChangeAssignment:
+		return t.actions != nil
 	}
 	return false
 }
@@ -114,6 +116,8 @@ func (t tools) makeProposal(ctx context.Context, call values.Call) (values.Ref, 
 		view, err = t.proposals.ProposeEmailOfVersion(ctx, shared.AssignmentID(a.ID()), n)
 	case values.ToolProposeDeleteRecording:
 		return t.previewDeletion(ctx, call)
+	case values.ToolChangeAssignment:
+		return t.previewAssignmentDeletion(ctx, call)
 	default:
 		return values.Ref{}, values.RefuseUnavailable
 	}

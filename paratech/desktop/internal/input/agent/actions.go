@@ -105,6 +105,12 @@ type ActionDeps struct {
 	Tx             Tx
 	Clock          Clock
 	Log            *slog.Logger
+	// Catalog v10 (optional; without them change_assignment and mark_assignments_done answer "unavailable"):
+	// Changes, Marks, Chat (restore) and Events (a delete without «Да» only when the assignment has no Google event).
+	Changes AssignmentChanges
+	Marks   AssignmentMarks
+	Chat    ChatActions
+	Events  CalendarEvents
 }
 
 // Actions runs the reversible actions of the agent (class U, ADR-0021) on the use cases and is their Undo: it
@@ -123,6 +129,10 @@ type Actions struct {
 	tx          Tx
 	clock       Clock
 	log         *slog.Logger
+	changes     AssignmentChanges
+	marks       AssignmentMarks
+	chat        ChatActions
+	events      CalendarEvents
 }
 
 // NewActions checks the dependencies.
@@ -139,6 +149,7 @@ func NewActions(d ActionDeps) (*Actions, error) {
 		library: d.Library, lessons: d.Lessons, assignments: d.Assignments, added: d.NewAssignments, rerunner: d.Rerunner,
 		materials: d.Materials,
 		turnkey:   d.Turnkey, jobs: d.Jobs, canceller: d.Canceller, tx: d.Tx, clock: d.Clock, log: log,
+		changes: d.Changes, marks: d.Marks, chat: d.Chat, events: d.Events,
 	}, nil
 }
 
@@ -157,9 +168,10 @@ var errMovedOn = errors.New("agent: the target changed before the action")
 // prepared is what an action knows before it runs: the intent the journal records first and, when the state is
 // already the wanted one, the result without any change (nothing is journaled then).
 type prepared struct {
-	intent action.Intent
-	noop   *values.WriteRow
-	run    func(ctx context.Context) (effect, error)
+	intent    action.Intent
+	noop      *values.WriteRow
+	noopMarks []values.MarkRow // mark_assignments_done that changes nothing
+	run       func(ctx context.Context) (effect, error)
 }
 
 // effect is what an action did: its compensation, the target's version right after it and what the planner sees.
@@ -172,6 +184,7 @@ type effect struct {
 	// triage is what triage_assignment shows the planner instead of row; cards are the cards it adds.
 	triage *values.TriageRow
 	cards  []values.Card
+	marks  []values.MarkRow // what mark_assignments_done shows instead of row
 }
 
 // prepare looks at the target of call, made at at, and returns how to run it; ok is false for a tool this desktop
@@ -206,6 +219,10 @@ func (a *Actions) prepare(ctx context.Context, at origin, call values.Call) (pre
 		p, err = a.triage(call)
 	case values.ToolWriteWork:
 		p, err = a.writeWork(ctx, call)
+	case values.ToolChangeAssignment:
+		p, err = a.changeAssignment(ctx, at, call)
+	case values.ToolMarkAssignmentsDone:
+		p, err = a.markDone(ctx, call)
 	default:
 		return prepared{}, false, nil
 	}
@@ -611,8 +628,10 @@ func (a *Actions) Check(ctx context.Context, c action.Compensation) (action.Targ
 		return a.checkWriting(ctx, v)
 	case action.RemoveAssignment:
 		return a.checkAdded(ctx, v)
+	case action.RestoreDone:
+		return a.checkMarks(ctx, v)
 	}
-	return action.Target{}, fmt.Errorf("%w: %T", action.ErrInvalidCompensation, c)
+	return a.checkAssignment(ctx, c)
 }
 
 // Apply applies a compensation if its target is still at expectedVersion, in one transaction with that check
@@ -636,6 +655,10 @@ func (a *Actions) Apply(ctx context.Context, c action.Compensation, expectedVers
 	if v, ok := c.(action.RemoveAssignment); ok {
 		// The use case removes it under its version in its own transaction; nothing is left to rebase on.
 		return 0, a.removeAdded(ctx, v, expectedVersion)
+	}
+	if v, ok := c.(action.DeleteAssignment); ok {
+		// DeleteAndStop checks the version in its own transaction and works after its commit; nothing to rebase on.
+		return 0, a.trashAgain(ctx, v, expectedVersion)
 	}
 	var after int64
 	err := a.tx.Do(ctx, func(ctx context.Context) error {
@@ -695,8 +718,10 @@ func (a *Actions) compensate(ctx context.Context, c action.Compensation) error {
 		}
 		_, err = a.setDue(ctx, id, av.Version, v.OldDue)
 		return err
+	case action.RestoreDone:
+		return a.restoreMarks(ctx, v)
 	}
-	return fmt.Errorf("%w: %T", action.ErrInvalidCompensation, c)
+	return a.compensateAssignment(ctx, c)
 }
 
 // changedIfConflict reads a refusal of the use case that means the target is not as the action left it (a file was
@@ -798,6 +823,10 @@ func (a *Actions) Observe(ctx context.Context, tool values.Tool, in action.Inten
 		return observed(v.Version, in, ok && !next.OldDue.IsZero() && v.Due.Equal(next.OldDue)), nil
 	case values.ToolCreateAssignment:
 		return a.observeAdded(ctx, in)
+	case values.ToolChangeAssignment:
+		return a.observeAssignment(ctx, in)
+	case values.ToolMarkAssignmentsDone:
+		return a.observeMarks(ctx, in)
 	}
 	return action.Observation{}, nil
 }

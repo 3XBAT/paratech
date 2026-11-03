@@ -120,9 +120,14 @@ func (a *Actions) observeAdded(ctx context.Context, in action.Intent) (action.Ob
 
 // namesDeleted reports whether an ID argument of call (plan steps aside) names an assignment the student deleted:
 // every tool then answers unknown_id before its use case runs, as if the assignment never was (ADR-0029). Any other
-// read error is left to the tool.
+// read error is left to the tool. Two exceptions: change_assignment{restore} names a deleted assignment by design and
+// checks itself that this chat deleted it (ADR-0029 C-2); mark_assignments_done refuses a deleted one in its own row
+// (unknown_id) and still marks the others of the list.
 func (t tools) namesDeleted(ctx context.Context, call values.Call) bool {
-	if t.actions == nil {
+	if t.actions == nil || call.Tool() == values.ToolMarkAssignmentsDone {
+		return false
+	}
+	if act, _ := call.Args().Enum(values.ArgAction); call.Tool() == values.ToolChangeAssignment && act == values.AssignmentRestore {
 		return false
 	}
 	args := call.Args()

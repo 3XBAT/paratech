@@ -25,9 +25,44 @@ type LessonReadiness interface {
 //   - Cost: no estimate exists yet, so it stays unknown (zero) and every paid write needs a plan (D8, conservative).
 //   - Triage: not reported (TASK-129 follow-up). triage_assignment is a paid write of unknown cost, so it runs only as
 //     a step of an approved plan, and every later write of the request must match that plan anyway.
+//   - HasCalendarEvent: change_assignment{delete} of an assignment with a Google deadline event, read from the local
+//     projection (WithCalendarEvents); without the reader, or when it fails, the call is refused (fail closed).
 type Facts struct {
 	lessons   LessonReadiness
 	materials MaterialReadiness // nil: a material's summary is never ready
+	events    CalendarEvents    // nil: a delete of an assignment is refused
+}
+
+// CalendarEvents tells from the local Google projection whether an assignment has a deadline event (cases/homeworkflow);
+// nothing is read from Google.
+type CalendarEvents interface {
+	HasDeadlineEvent(ctx context.Context, id shared.AssignmentID) (bool, error)
+}
+
+// errNoEvents: the Google event of an assignment cannot be told without the reader.
+var errNoEvents = errors.New("agent: facts: no calendar event reader")
+
+// WithCalendarEvents returns Facts that also know whether an assignment has a Google deadline event.
+func (f *Facts) WithCalendarEvents(e CalendarEvents) *Facts {
+	out := *f
+	out.events = e
+	return &out
+}
+
+// calendarEvent is the fact of change_assignment{delete}.
+func (f *Facts) calendarEvent(ctx context.Context, call values.Call) (thread.Facts, error) {
+	if act, _ := call.Args().Enum(values.ArgAction); act != values.AssignmentDelete {
+		return thread.Facts{}, nil
+	}
+	if f.events == nil {
+		return thread.Facts{}, errNoEvents
+	}
+	a, _ := call.Args().ID("assignment")
+	has, err := f.events.HasDeadlineEvent(ctx, shared.AssignmentID(a.ID()))
+	if err != nil {
+		return thread.Facts{}, err
+	}
+	return thread.Facts{HasCalendarEvent: has}, nil
 }
 
 // MaterialReadiness tells whether the summary of a library material is stored (cases/homeworkflow).
@@ -53,6 +88,9 @@ func NewFacts(lessons LessonReadiness) (*Facts, error) {
 // Facts returns the facts of one call.
 func (f *Facts) Facts(ctx context.Context, call values.Call) (thread.Facts, error) {
 	tool := call.Tool()
+	if tool == values.ToolChangeAssignment {
+		return f.calendarEvent(ctx, call)
+	}
 	if tool != values.ToolMakeSummary && tool != values.ToolMakeLectureText {
 		return thread.Facts{}, nil
 	}

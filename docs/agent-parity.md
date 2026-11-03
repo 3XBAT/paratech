@@ -71,10 +71,10 @@ Legend
 | Список заданий | `HomeworkService.ListAssignments` | `list_assignments` | R | — | |
 | Открыть задание | `HomeworkService.OpenAssignment` | частично: `reply.assignments` (карточка) | R | — | |
 | Добавить задание | `HomeworkService.CreateAssignment` | `create_assignment` | U | 2-я → план | |
-| Изменить название, заметку, срок, предмет | `HomeworkService.EditAssignment` | `edit_due` (только срок) → `change_assignment{edit}` (10) | U | — | gap P2 |
-| Удалить / «Вернуть» (3 дня) | `HomeworkService.DeleteAssignment`, `RestoreAssignment` | нет → `change_assignment{delete, restore}` (10) | U; с событием в Google — C | с событием — «Да» (О-6 б) | gap P2; the agent can restore only what it deleted in this chat (no list of deleted ones, ADR-0029 C-2) |
-| **Отметить «Выполнено» / «Вернуть в работу»** | нет (ADR-0033 §9, новое) | нет → `mark_assignments_done` (10, списком) | U | — | a done assignment leaves «Сегодня» and «Горит», stays in the list («Выполненные») and history; Google event unchanged (О-13) |
-| Выполненные задания (фильтр) | нет (ADR-0033 §9) | `list_assignments{state}` (10) | R | — | |
+| Изменить название, заметку, срок, предмет | `HomeworkService.EditAssignment` | `edit_due` (только срок) → `change_assignment{edit}` (10) | U | — | dispatch done in TASK-320, served with catalog 10 (TASK-326) |
+| Удалить / «Вернуть» (3 дня) | `HomeworkService.DeleteAssignment`, `RestoreAssignment` | нет → `change_assignment{delete, restore}` (10) | U; с событием в Google — C | с событием — «Да» (О-6 б) | dispatch and the `delete_assignment` card done in TASK-320, served with catalog 10 (TASK-326); the agent can restore only what it deleted in this chat (no list of deleted ones, ADR-0029 C-2) |
+| **Отметить «Выполнено» / «Вернуть в работу»** | нет (ADR-0033 §9, новое) | нет → `mark_assignments_done` (10, списком) | U | — | dispatch done in TASK-320, served with catalog 10 (TASK-326); a done assignment leaves «Сегодня» and «Горит», stays in the list («Выполненные») and history; Google event unchanged (О-13) |
+| Выполненные задания (фильтр) | нет (ADR-0033 §9) | `list_assignments{state}` (10) | R | — | dispatch done in TASK-320, served with catalog 10 (TASK-326) |
 | Исправить предмет / преподавателя у извлечённого | `HomeworkService.CorrectLesson` | нет | U | — | subject: through `edit_assignment`; the teacher text stays manual (ADR-0030) |
 | Предложить срок в Google Календарь | `AgentConfirmService.ProposeDeadline` | `propose_deadline` | C | «Да» | |
 | «Обновить событие в Google Календаре?» после правки срока | TASK-277/279, в работе | нет (агентский `edit_due` обновляет сам, C-4) | C | «Да» (только в UI) | О-2 а: the agent's change updates the event without asking |
@@ -204,7 +204,7 @@ Owner answers 2026-10-28 are in ADR-0033 («Answered»). Tasks (tasks.json):
 - Предметы из расписания: TASK-309 (domain), TASK-310 (use case), TASK-311 (binding), TASK-312 (UI).
 - «Выполнено»: TASK-313 (domain, migration), TASK-314 (use cases, «Сегодня»), TASK-315 (binding), TASK-316 (UI).
 - Plan budget (О-9 в): TASK-317 (domain), TASK-318 (long plan card).
-- Wave 10: TASK-319 (desktop specs and policy), TASK-320 (assignments), TASK-321 (notes), TASK-322 (settings, quota,
+- Wave 10: TASK-319 (desktop specs and policy), TASK-320 (assignments: dispatch done, not served), TASK-321 (notes), TASK-322 (settings, quota,
   recording), TASK-323 (schedule-subjects card, `offer_button`), TASK-324 (cards UI), TASK-325 (Hub panel v10),
   TASK-326 (desktop switch to catalog 10).
 - Wave 11: TASK-327 (specs), TASK-328 (teacher, call link, profile cards), TASK-329 (library), TASK-330 (new chat
