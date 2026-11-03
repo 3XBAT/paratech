@@ -1,6 +1,6 @@
 // Which subjects of the «Предметы» tree show their folders. Pure, no React.
 //
-// Each subject has its own toggle: opening a subject on the right (selecting it) neither expands nor collapses anything,
+// Each subject has its own toggle; a click on the name opens the subject and expands it, but never collapses another one,
 // and the selected subject can be collapsed like any other, so all of them can be closed at once. Before this (TASK-341)
 // only the selected subject was ever expanded, which made "collapse all" impossible.
 
@@ -31,6 +31,14 @@ export function toggleSubject(state: SubjectsOpen, id: string): SubjectsOpen {
     open.add(id);
   }
   return { open, seeded: true };
+}
+
+/** A click on the name of a subject opens it and expands it; an expanded one stays so, the others are not touched. */
+export function expandSubject(state: SubjectsOpen, id: string): SubjectsOpen {
+  if (state.open.has(id)) {
+    return state;
+  }
+  return { open: new Set(state.open).add(id), seeded: true };
 }
 
 /** The name of a subject's toggle (the chevron has no text). */

@@ -30,7 +30,7 @@ import {
 } from "../libraryView.js";
 import type { PageId } from "../nav.js";
 import { offerGroups, reviewTexts } from "../scheduleSubjectsView.js";
-import { initialOpen, isSubjectOpen, seedOpen, toggleLabel, toggleSubject } from "../subjectTreeState.js";
+import { expandSubject, initialOpen, isSubjectOpen, seedOpen, toggleLabel, toggleSubject } from "../subjectTreeState.js";
 import { emptyInboxText, type InboxEntry } from "../subjectsHome.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Card, EmptyState, ResultLine } from "../ui/controls.js";
@@ -222,7 +222,10 @@ export function SubjectTree(props: {
                         className={["ti", s.id === props.currentId ? "cur" : "", overNow === s.id ? "drop" : ""].filter((c) => c !== "").join(" ")}
                         aria-current={s.id === props.currentId ? "page" : undefined}
                         data-subject-id={s.id}
-                        onClick={() => props.onOpen(s.id)}
+                        onClick={() => {
+                          setOpened((o) => expandSubject(seedOpen(o, props.currentId), s.id));
+                          props.onOpen(s.id);
+                        }}
                         onDragOver={(e) => onDragOver(e, s.id)}
                         onDragLeave={() => setOver((o) => (o === s.id ? "" : o))}
                         onDrop={(e) => onDrop(e, s)}
