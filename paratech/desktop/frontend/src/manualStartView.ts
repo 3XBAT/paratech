@@ -1,4 +1,4 @@
-// «Начать запись» of «Записи и задачи» (TASK-081): a recording without the popup, from the shared source picker. The
+// «Начать запись» of «Записи» (TASK-081): a recording without the popup, from the shared source picker. The
 // core starts it and links it to the lesson in progress, if any; the page only maps the answer to what it shows.
 
 // The .js extensions let the Node test runner load the compiled modules; TypeScript and Vite map them to the .ts files.
@@ -9,7 +9,7 @@ import { problemText } from "./sourcePicker/view.js";
 export const manualStartTexts = {
   open: "Начать запись",
   title: "Новая запись",
-  explain: "Если сейчас идёт занятие из расписания, запись попадёт к нему.",
+  explain: "Если сейчас идёт пара из расписания, запись попадёт к ней.",
   sourceLabel: "Источник звука",
   start: "Начать запись",
   starting: "Запуск…",

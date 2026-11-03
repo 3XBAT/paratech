@@ -150,7 +150,7 @@ test("the subject is prefilled by name among the library subjects", () => {
 test("a subject of the lesson is not turned into a choice; its empty option says so", () => {
   const fromLesson = item({ lessonId: "l1", subjectFromLesson: true, subject: "Физика" });
   assert.equal(editForm(fromLesson, subjects).subjectId, "");
-  assert.equal(noSubjectLabel(fromLesson), "Предмет занятия");
+  assert.equal(noSubjectLabel(fromLesson), "Предмет пары");
   assert.equal(noSubjectLabel(item()), "Без предмета");
 });
 
@@ -317,7 +317,7 @@ test("the edit form shows the stored values and the lesson label", () => {
       onClose: () => undefined,
     }),
   );
-  assert.match(lesson, />Предмет занятия</);
+  assert.match(lesson, />Предмет пары</);
   assert.ok(!lesson.includes(">Без предмета<"));
 });
 

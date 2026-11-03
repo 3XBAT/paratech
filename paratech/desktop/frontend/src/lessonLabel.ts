@@ -1,4 +1,4 @@
-// The lesson of an assignment as one line (TASK-092): «Предмет · тип · преподаватель» and «занятие ДД.ММ». The core
+// The lesson of an assignment as one line (TASK-092): «Предмет · тип · преподаватель» and «пара ДД.ММ». The core
 // picks the values and their source; here they are only arranged. A hint from the recording is model output: it stays
 // a plain string, marked «по записи».
 
@@ -44,7 +44,7 @@ export function lessonLine(l: LessonFields): string {
     .join(" · ");
 }
 
-/** "занятие 19.10" in local time; "" when the date is unknown or malformed. */
+/** "пара 19.10" in local time; "" when the date is unknown or malformed. */
 export function lessonDateText(lessonDate: string): string {
   if (lessonDate === "") {
     return "";
@@ -54,10 +54,10 @@ export function lessonDateText(lessonDate: string): string {
     return "";
   }
   const two = (n: number) => String(n).padStart(2, "0");
-  return `занятие ${two(d.getDate())}.${two(d.getMonth() + 1)}`;
+  return `пара ${two(d.getDate())}.${two(d.getMonth() + 1)}`;
 }
 
-/** Both parts joined: "Физика · лекция · Иванов И. И. · занятие 19.10"; "" when there is nothing to show. */
+/** Both parts joined: "Физика · лекция · Иванов И. И. · пара 19.10"; "" when there is nothing to show. */
 export function lessonText(l: LessonFields): string {
   return [lessonLine(l), lessonDateText(l.lessonDate)].filter((p) => p !== "").join(" · ");
 }

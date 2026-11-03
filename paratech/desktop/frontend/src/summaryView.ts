@@ -30,7 +30,7 @@ export const maxErrorPollMs = 30000;
 export type SummaryOffer = "main" | "extra" | null;
 
 /**
- * Whether a row of «Записи и задачи» offers «Открыть конспект», from the chain the list already has (no call per row).
+ * Whether a row of «Записи» offers «Открыть конспект», from the chain the list already has (no call per row).
  * Main: the chain is done or at the lecture text, or only the homework search or the lecture text failed. Extra: the summary is queued,
  * running or failed, so the page shows why and keeps the place for «Повторить».
  */
@@ -184,9 +184,12 @@ export function updatedText(v: SummaryView): string {
   return at === "—" ? "" : `Составлен ${at}`;
 }
 
-/** The deadline of an assignment and whether the student changed it. */
-export function assignmentMeta(a: Pick<SummaryAssignment, "due" | "userEdited">): string {
-  return a.userEdited ? `${dueText(a.due)} · изменено вами` : dueText(a.due);
+/**
+ * The deadline of an assignment and whether the student changed it. The summary does not know whether the assignment
+ * is done, so it keeps the plain «до …» wording (never «просрочено» for what may already be handed in).
+ */
+export function assignmentMeta(a: Pick<SummaryAssignment, "due" | "userEdited">, now?: Date): string {
+  return a.userEdited ? `${dueText(a.due, now, true)} · изменено вами` : dueText(a.due, now, true);
 }
 
 /** Which step a retry is for (TASK-086). */

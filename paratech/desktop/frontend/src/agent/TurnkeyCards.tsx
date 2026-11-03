@@ -372,12 +372,9 @@ function HelperStep(props: { ctx: CardContext; index: number; text: string }) {
             </ResultLine>
           )}
           {answer !== "" && (
-            <>
-              <p className="ag-sub">{turnkeyTexts.answerLabel}</p>
-              <p className="ag-text" role="status">
-                {answer}
-              </p>
-            </>
+            <p className="ag-text" role="status">
+              {answer}
+            </p>
           )}
         </div>
       )}

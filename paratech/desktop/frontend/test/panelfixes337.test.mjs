@@ -18,15 +18,15 @@ const seconds = /\d:\d\d:\d\d/;
 // A local 15:50:37 so that the test does not depend on the time zone of the machine.
 const withSeconds = new Date(2026, 9, 27, 15, 50, 37).toISOString();
 
-test("a deadline reads «до 27.10.2026, 15:50» without seconds", () => {
-  assert.equal(dueText(withSeconds), "до 27.10.2026, 15:50");
-  assert.equal(dueText(new Date(2026, 9, 27, 15, 50, 0).toISOString()), "до 27.10.2026, 15:50");
+test("a deadline reads «до вт, 27 окт., 15:50» without seconds", () => {
+  assert.equal(dueText(withSeconds), "до вт, 27 окт., 15:50");
+  assert.equal(dueText(new Date(2026, 9, 27, 15, 50, 0).toISOString()), "до вт, 27 окт., 15:50");
   assert.equal(formatTimeMinutes(withSeconds), "27.10.2026, 15:50");
 });
 
-test("missing or unreadable deadline keeps its old text", () => {
+test("a missing deadline is «Без срока», an unreadable one «Срок не распознан»", () => {
   assert.equal(dueText(""), "Без срока");
-  assert.equal(dueText("not a date"), "до —");
+  assert.equal(dueText("not a date"), "Срок не распознан");
   assert.equal(formatTimeMinutes(""), "—");
   assert.equal(formatTimeMinutes("not a date"), "—");
 });
@@ -52,9 +52,9 @@ test("no deadline path emits seconds: assignment list/page, summary, «Сего�
   }
 });
 
-test("source: homeworkView.dueText goes through the minutes helper, not formatTime", () => {
+test("source: homeworkView.dueText goes through the shared deadline wording, not formatTime", () => {
   const src = readFileSync(new URL("../src/homeworkView.ts", import.meta.url), "utf8");
-  assert.match(src, /`до \$\{formatTimeMinutes\(due\)\}`/);
+  assert.match(src, /dueMoment\(due, now, done\)/);
   assert.doesNotMatch(src, /formatTime\(/);
 });
 
@@ -84,7 +84,7 @@ test("the reply card is the text alone: no «Ответ» caption, other cards k
 
 // ---- The thinking indicator ----
 
-test("thinking: a small row with a polite live text, no banner, «Стоп» next to the dots", () => {
+test("thinking: a small row with a polite live text, no banner, «Остановить» next to the dots", () => {
   const model = entryModel(entryWith([], "EXECUTING"));
   assert.deepEqual(model.cards.map((c) => c.type), ["waiting"]);
   const out = renderToStaticMarkup(h(AgentRequest, { model, actions }));
@@ -93,7 +93,7 @@ test("thinking: a small row with a polite live text, no banner, «Стоп» nex
   assert.match(out, /<span class="ag-vh">Агент отвечает…<\/span>/);
   assert.match(out, /<div class="ag-think">/);
   assert.doesNotMatch(out, /ag-card|Запрос выполняется/);
-  assert.match(out, />Стоп</);
+  assert.match(out, />Остановить</);
 });
 
 test("thinking css: reduced motion keeps the dots still and visible; the card style of the waiting banner is gone", () => {

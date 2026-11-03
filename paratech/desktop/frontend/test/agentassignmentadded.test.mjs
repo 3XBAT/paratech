@@ -28,21 +28,22 @@ function model(assignment) {
 const render = (assignment, actions = {}) => renderToStaticMarkup(h(AgentRequest, { model: model(assignment), actions: { ...base, ...actions } }));
 
 test("the text has title, subject and due with date and time", () => {
-  assert.equal(addedAssignmentText(added(), base.subjects, now), "Задание добавлено: Задачи 1-7 · Матанализ · срок пт, 30 окт., 20:00");
-  assert.equal(addedAssignmentText(added({ due: "2026-10-27", time: "18:00" }), base.subjects, now), "Задание добавлено: Задачи 1-7 · Матанализ · срок завтра, 18:00");
+  assert.equal(addedAssignmentText(added(), base.subjects, now), "Задание добавлено: Задачи 1-7 · Матанализ · до пт, 30 окт., 20:00");
+  assert.equal(addedAssignmentText(added({ due: "2026-10-27", time: "18:00" }), base.subjects, now), "Задание добавлено: Задачи 1-7 · Матанализ · завтра до 18:00");
+  assert.equal(addedAssignmentText(added({ due: "2026-10-26", time: "20:00" }), base.subjects, now), "Задание добавлено: Задачи 1-7 · Матанализ · сегодня до 20:00");
   // 23:59 is an ordinary time now: the default for a date alone is 20:00.
-  assert.equal(addedAssignmentText(added({ time: "23:59" }), base.subjects, now), "Задание добавлено: Задачи 1-7 · Матанализ · срок пт, 30 окт., 23:59");
+  assert.equal(addedAssignmentText(added({ time: "23:59" }), base.subjects, now), "Задание добавлено: Задачи 1-7 · Матанализ · до пт, 30 окт., 23:59");
 });
 
 test("absent subject, unknown subject and absent due are left out", () => {
-  assert.equal(addedAssignmentText(added({ subjectId: "" }), base.subjects, now), "Задание добавлено: Задачи 1-7 · срок пт, 30 окт., 20:00");
-  assert.equal(addedAssignmentText(added({ subjectId: "zzz" }), base.subjects, now), "Задание добавлено: Задачи 1-7 · срок пт, 30 окт., 20:00");
+  assert.equal(addedAssignmentText(added({ subjectId: "" }), base.subjects, now), "Задание добавлено: Задачи 1-7 · до пт, 30 окт., 20:00");
+  assert.equal(addedAssignmentText(added({ subjectId: "zzz" }), base.subjects, now), "Задание добавлено: Задачи 1-7 · до пт, 30 окт., 20:00");
   assert.equal(addedAssignmentText(added({ due: "", time: "" }), base.subjects, now), "Задание добавлено: Задачи 1-7 · Матанализ");
 });
 
 test("the panel line shows the text, «Открыть» and «Отменить»", () => {
   const out = render(added(), { openAssignment: noop });
-  assert.ok(out.includes("Задание добавлено: Задачи 1-7 · Матанализ · срок пт, 30 окт., 20:00"));
+  assert.ok(out.includes("Задание добавлено: Задачи 1-7 · Матанализ · до пт, 30 окт., 20:00"));
   assert.match(out, />Открыть</);
   assert.match(out, />Отменить</);
 });

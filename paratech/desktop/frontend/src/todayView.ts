@@ -4,10 +4,14 @@
 
 import type { RecordingItem } from "./bindings/activity.js";
 import type { TodayDeadline, TodayDone, TodayLesson, TodayPost, TodayWaiting } from "./bindings/today.js";
+import { dayAndTime, dayText, daysBetween, daysLeftText, dueText, monthsShort, pad, parseMoment, timeText, weekdaysShort } from "./dueText.js";
 import { plural } from "./plural.js";
 import { chainStatusView } from "./recordingRowView.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 import type { IconName } from "./ui/Icon.js";
+
+// The deadline wording lives in dueText.ts; the names stay importable from here.
+export { dayAndTime, dayText, daysBetween, daysLeftText, dueText, parseMoment, timeText };
 
 export const texts = {
   title: "Сегодня",
@@ -27,7 +31,7 @@ export const texts = {
   postsEmpty: "Сообщений после пар пока нет.",
   loading: "Загрузка…",
   refresh: "Обновить",
-  allRecords: "Записи и задания",
+  allRecords: "Записи",
   back: "К сегодняшнему дню",
   open: "Открыть",
   summaryReady: "Конспект готов",
@@ -36,7 +40,6 @@ export const texts = {
   noTitle: "Без названия",
 } as const;
 
-const weekdaysShort = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"] as const;
 const weekdaysLong = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"] as const;
 const monthsGen = [
   "января",
@@ -52,24 +55,6 @@ const monthsGen = [
   "ноября",
   "декабря",
 ] as const;
-const monthsShort = ["янв.", "февр.", "мар.", "апр.", "мая", "июн.", "июл.", "авг.", "сент.", "окт.", "нояб.", "дек."] as const;
-
-const pad = (n: number) => String(n).padStart(2, "0");
-
-/** The moment of an RFC 3339 text, null for an empty or unreadable one. */
-export function parseMoment(s: string): Date | null {
-  if (s === "") {
-    return null;
-  }
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-/** «10:30» in the local time zone, "" when unknown. */
-export function timeText(s: string): string {
-  const d = parseMoment(s);
-  return d === null ? "" : `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 /** «21.10» in the local time zone, "" when unknown. */
 export function shortDate(s: string): string {
@@ -83,66 +68,10 @@ export function dayTitle(day: string): string {
   return d === null ? "" : `${weekdaysLong[d.getDay()]}, ${d.getDate()} ${monthsGen[d.getMonth()]}`;
 }
 
-const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-
-/** Whole local calendar days from `now` to `d` (negative for the past). */
-export function daysBetween(d: Date, now: Date): number {
-  return Math.round((dayStart(d) - dayStart(now)) / 86_400_000);
-}
-
-/** «сб, 24 окт.»: the day of a moment in the local zone. */
-export function dayText(d: Date): string {
-  return `${weekdaysShort[d.getDay()]}, ${d.getDate()} ${monthsShort[d.getMonth()]}`;
-}
-
-/** «сб, 24 окт., 18:30»: the day and the time of a moment in the local zone. */
-export function dayAndTime(d: Date): string {
-  return `${dayText(d)}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-/**
- * The deadline as one tidy phrase, always with the time (a date alone reads as «до конца дня»): «до сб, 24 окт., 18:30».
- * With `now`: a coming today reads «сегодня до 20:00», tomorrow «завтра до 18:30», a moment that has passed
- * «просрочено, пт, 23 окт., 20:00» (never «до …» for the past). "" when unknown.
- */
-export function dueText(due: string, now?: Date): string {
-  const d = parseMoment(due);
-  if (d === null) {
-    return "";
-  }
-  if (now !== undefined) {
-    if (d.getTime() <= now.getTime()) {
-      return `${daysLeftText(-1)}, ${dayAndTime(d)}`;
-    }
-    const days = daysBetween(d, now);
-    if (days === 0) {
-      return `сегодня до ${timeText(due)}`;
-    }
-    if (days === 1) {
-      return `завтра до ${timeText(due)}`;
-    }
-  }
-  return `до ${dayAndTime(d)}`;
-}
-
 /** The weekday and the date of a deadline row: «пт» over «23.10». */
 export function deadlineDay(due: string): { weekday: string; date: string } {
   const d = parseMoment(due);
   return d === null ? { weekday: "", date: "" } : { weekday: weekdaysShort[d.getDay()], date: shortDate(due) };
-}
-
-/** «сегодня», «завтра», «через 2 дня», «через 5 дней»; a past date reads «просрочено». */
-export function daysLeftText(n: number): string {
-  if (n < 0) {
-    return "просрочено";
-  }
-  if (n === 0) {
-    return "сегодня";
-  }
-  if (n === 1) {
-    return "завтра";
-  }
-  return `через ${n} ${plural(n, "день", "дня", "дней")}`;
 }
 
 const kinds: Readonly<Record<string, string>> = {
@@ -150,7 +79,7 @@ const kinds: Readonly<Record<string, string>> = {
   seminar: "Семинар",
   practice: "Практика",
   lab: "Лабораторная",
-  other: "Занятие",
+  other: "Пара",
 };
 
 /** The Russian word of a lesson kind code, "" when unknown. */
@@ -215,7 +144,7 @@ export function liveStatus(lessonId: string, recordings: readonly RecordingItem[
   const recognition = mine.find((r) => r.stage === "transcribing");
   if (recognition !== undefined) {
     const pct = Math.max(0, Math.min(100, Math.round(recognition.progressPercent)));
-    return { kind: "run", text: `Распознавание · ${pct} %` };
+    return { kind: "run", text: `Расшифровка · ${pct} %` };
   }
   return null;
 }
@@ -400,7 +329,7 @@ export interface Problem {
   icon: IconName | null;
 }
 
-/** Failed recordings that started in the day; an old failure stays on «Записи и задания» only. */
+/** Failed recordings that started in the day; an old failure stays on «Записи» only. */
 export function dayProblems(recordings: readonly RecordingItem[], day: string): RecordingItem[] {
   const from = parseMoment(day);
   return recordings.filter((r) => {

@@ -310,17 +310,17 @@ test("readiness marks and subject counts", () => {
   assert.deepEqual(
     readyMarks(lesson()).map((m) => [m.label, m.ready]),
     [
-      ["Кратко", true],
+      ["Конспект", true],
       ["Текст лекции", false],
       ["Расшифровка", true],
     ],
   );
-  assert.equal(subjectMeta(subject()), "5 занятий · последнее 19.10");
-  assert.equal(subjectMeta(subject({ lessons: 1 })), "1 занятие · последнее 19.10");
-  assert.equal(subjectMeta(subject({ lessons: 3, latest: "" })), "3 занятия");
+  assert.equal(subjectMeta(subject()), "5 пар · последняя 19.10");
+  assert.equal(subjectMeta(subject({ lessons: 1 })), "1 пара · последняя 19.10");
+  assert.equal(subjectMeta(subject({ lessons: 3, latest: "" })), "3 пары");
   assert.deepEqual(
     lessonTabs.map((t) => t.label),
-    ["Мой конспект", "Кратко", "Текст лекции", "Расшифровка", "Задания"],
+    ["Мой конспект", "Конспект", "Текст лекции", "Расшифровка", "Задания"],
   );
 });
 
@@ -356,7 +356,7 @@ test("a hit opens the lesson at its place", () => {
   assert.deepEqual(hitFocus(hit({ section: "summary", index: 3 })), { tab: "summary", index: 3 });
   assert.deepEqual(hitFocus(hit({ section: "title", index: 0 })), noFocus);
   assert.equal(hitPlace(hit()), "Расшифровка · 12:05");
-  assert.equal(hitPlace(hit({ section: "summary", time: "" })), "Кратко");
+  assert.equal(hitPlace(hit({ section: "summary", time: "" })), "Конспект");
 });
 
 test("hits are grouped by lesson in the core's order", () => {
@@ -372,8 +372,8 @@ test("hits are grouped by lesson in the core's order", () => {
       ["r2", 1],
     ],
   );
-  assert.equal(hitCountText(3, 2, false), "Найдено 3 места в 2 занятиях.");
-  assert.equal(hitCountText(1, 1, false), "Найдено 1 место в 1 занятии.");
+  assert.equal(hitCountText(3, 2, false), "Найдено 3 места в 2 парах.");
+  assert.equal(hitCountText(1, 1, false), "Найдено 1 место в 1 паре.");
   assert.equal(hitCountText(50, 20, true), "Показаны первые 50 мест: уточните запрос.");
 });
 
@@ -501,7 +501,7 @@ test("lists, hits and the form render text only; the match is a <mark> around te
     h(SubjectList, { subjects: [subject(), subject({ key: "", name: "Без предмета", lessons: 2, noSubject: true })], onOpen: () => undefined }),
   );
   assert.ok(subjects.indexOf("Матанализ") < subjects.indexOf("Без предмета"));
-  assert.ok(subjects.includes("2 занятия"));
+  assert.ok(subjects.includes("2 пары"));
 
   const plain = renderToStaticMarkup(h(LessonList, { lessons: [lesson()], onOpen: () => undefined }));
   assert.ok(plain.includes("19.10 · лекция · Пределы"));
@@ -511,7 +511,7 @@ test("lists, hits and the form render text only; the match is a <mark> around te
 
   const marks = renderToStaticMarkup(h(ReadyMarks, { lesson: lesson() }));
   assert.ok(marks.includes("Текст лекции<span class=\"vh\">: нет</span>"));
-  assert.ok(marks.includes("Кратко<span class=\"vh\">: готово</span>"));
+  assert.ok(marks.includes("Конспект<span class=\"vh\">: готово</span>"));
 
   const form = renderToStaticMarkup(
     h(LessonInfoForm, {
@@ -560,7 +560,7 @@ test("the knowledge base renders text only, talks only to the core and searches 
   assert.match(src("App.tsx"), /case "knowledge":\s*return <KnowledgeBasePage/);
 });
 
-test("«Мой конспект» is its own tab: before the summary view is read, and not inside «Кратко»", () => {
+test("«Мой конспект» is its own tab: before the summary view is read, and not inside «Конспект»", () => {
   const page = src("pages/KnowledgeLessonPage.tsx");
   const notes = page.indexOf(') : tab === "notes" ?');
   const loading = page.indexOf("view === null ?");

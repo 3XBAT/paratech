@@ -18,11 +18,11 @@ export const loadDescriptions: Readonly<Record<RecognitionLoad, string>> = {
 };
 
 export const estimateTexts = {
-  setting: "Нагрузка при распознавании",
-  nextRun: "Применится к следующему распознаванию.",
+  setting: "Нагрузка при расшифровке",
+  nextRun: "Применится к следующей расшифровке.",
   onThisComputer: " на этом компьютере",
   heavy: " — дольше самой записи",
-  unknown: "скорость неизвестна до первого распознавания",
+  unknown: "скорость неизвестна до первой расшифровки",
 } as const;
 
 /**

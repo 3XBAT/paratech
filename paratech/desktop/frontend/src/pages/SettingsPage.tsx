@@ -30,13 +30,13 @@ type Toggle = SettingsToggle;
 export type SettingsPart = "settings" | "profile" | "appearance";
 
 const labels: Record<Toggle, string> = {
-  recordingPromptsEnabled: "Автоматически предлагать запись в начале занятия",
+  recordingPromptsEnabled: "Автоматически предлагать запись в начале пары",
   processOnlyOnAcPower: "Обрабатывать только от розетки",
 };
 
 const hints: Record<Toggle, string> = {
   recordingPromptsEnabled: "Перед началом пары появится окно с кнопкой «Начать запись».",
-  processOnlyOnAcPower: "На батарее расшифровка ждёт подключения питания и начнётся сама.",
+  processOnlyOnAcPower: "На батарее расшифровка ждёт зарядки и начнётся сама.",
 };
 
 const setters: Record<Toggle, "setRecordingPromptsEnabled" | "setProcessOnlyOnAcPower"> = {
@@ -198,7 +198,7 @@ export function SettingsPage(props: { part?: SettingsPart }) {
       <section className="page">
         <div className="head">
           <div>
-            <span className="label">Для титульного листа домашнего задания</span>
+            <span className="label">Для титульного листа задания</span>
             <h2>Профиль</h2>
           </div>
         </div>
@@ -335,7 +335,7 @@ function ProfileCard(props: { api: SettingsApi }) {
           ))}
       </Card>
       <p className="small muted group-foot">
-        Для титульного листа файла Word с домашним заданием. Все поля необязательные: пустые на титульный лист не
+        Для титульного листа файла Word с заданием. Все поля необязательные: пустые на титульный лист не
         попадут.
       </p>
       {stored !== null && (

@@ -70,13 +70,13 @@ test("only a hint from the recording is marked «по записи»", () => {
   assert.equal(lessonLine(lesson({ subject: "", subjectSource: "transcript" })), "лекция · Иванов И. И.");
 });
 
-test("the lesson date is «занятие ДД.ММ» in local time, nothing when unknown", () => {
-  assert.equal(lessonDateText(noon), "занятие 19.10");
-  assert.equal(lessonDateText("2026-03-05T12:00:00Z"), "занятие 05.03");
+test("the lesson date is «пара ДД.ММ» in local time, nothing when unknown", () => {
+  assert.equal(lessonDateText(noon), "пара 19.10");
+  assert.equal(lessonDateText("2026-03-05T12:00:00Z"), "пара 05.03");
   assert.equal(lessonDateText(""), "");
   assert.equal(lessonDateText("later"), "");
-  assert.equal(lessonText(lesson()), "Физика · лекция · Иванов И. И. · занятие 19.10");
-  assert.equal(lessonText(lesson({ subject: "", kind: "", teacher: "" })), "занятие 19.10");
+  assert.equal(lessonText(lesson()), "Физика · лекция · Иванов И. И. · пара 19.10");
+  assert.equal(lessonText(lesson({ subject: "", kind: "", teacher: "" })), "пара 19.10");
   assert.equal(lessonText(lesson({ lessonDate: "" })), "Физика · лекция · Иванов И. И.");
 });
 
@@ -107,7 +107,7 @@ test("correctLesson calls the bound method and returns the assignment as shown",
     await assert.rejects(homeworkApi(async () => bad).correctLesson("a1", "", ""), undefined, key);
   }
   const listed = await homeworkApi(async () => [item({ subjectSource: "transcript" })]).listAssignments();
-  assert.equal(lessonText(listed[0]), "Физика (по записи) · лекция · Иванов И. И. · занятие 19.10");
+  assert.equal(lessonText(listed[0]), "Физика (по записи) · лекция · Иванов И. И. · пара 19.10");
 });
 
 const summaryView = (assignment) => ({
@@ -144,7 +144,7 @@ test("the summary's assignments carry the lesson and show it, a hint marked «п
   const a = v.homework.assignments[0];
   assert.equal(a.teacherSource, "transcript");
   const html = renderToStaticMarkup(h(HomeworkCard, { view: v, onOpenAssignment: () => undefined }));
-  assert.ok(html.includes("Физика · лекция · &lt;b&gt;Петров&lt;/b&gt; (по записи) · занятие 19.10"), html);
+  assert.ok(html.includes("Физика · лекция · &lt;b&gt;Петров&lt;/b&gt; (по записи) · пара 19.10"), html);
   assert.ok(!html.includes("<b>"));
 
   const bare = summaryAssignment({ subject: "", subjectSource: "", kind: "", teacher: "", teacherSource: "", lessonDate: "" });

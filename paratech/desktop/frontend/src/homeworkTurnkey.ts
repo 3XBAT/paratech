@@ -5,8 +5,8 @@ import { notFoundText, type TurnkeyApi, type TurnkeyWork, turnkeyErrorText } fro
 
 export const turnkeyTexts = {
   title: "Сделать под ключ",
-  caption: "Разбор задания и вопросы, затем работа или презентация файлом",
-  button: "Сделать под ключ",
+  caption: "paratech задаст 1–2 вопроса и напишет работу файлом (Word или PowerPoint). Разбор расходует минуты обработки.",
+  button: "Начать разбор",
   busy: "Разбор задания…",
   loading: "Загрузка…",
 } as const;
@@ -29,7 +29,7 @@ export async function loadTurnkeyBlock(api: TurnkeyApi, assignmentId: string): P
 }
 
 /**
- * The click on «Сделать под ключ». `flight` is the single-flight guard (workView.singleFlight): a second click while the
+ * The click on «Начать разбор». `flight` is the single-flight guard (workView.singleFlight): a second click while the
  * call runs makes no call and answers null. A failure comes back as the state with the text of the core's error.
  */
 export async function startTurnkeyOnce(

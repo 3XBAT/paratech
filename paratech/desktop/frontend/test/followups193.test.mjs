@@ -172,7 +172,7 @@ test("the assignment page seeds the work card with the reply of a failed start, 
   assert.equal(state.work, failed);
   const out = html(h(WorkWritingCard, { api: { work: async () => work({ id: "w9", status: "triage" }) }, workId: "w9", initial: state.work, library: {}, send: sendApis }));
   assert.ok(out.includes("Лимит запросов исчерпан"));
-  assert.ok(out.includes("Попробовать снова") && !out.includes("Разобрать задание"));
+  assert.ok(out.includes("Повторить") && !out.includes("Начать разбор"));
 });
 
 test("a failed work shows its reason too", () => {

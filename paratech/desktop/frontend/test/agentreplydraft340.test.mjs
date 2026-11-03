@@ -89,11 +89,11 @@ test("a failure without a shown reply draft keeps today's text", () => {
   assert.ok(!html.includes("Ответ прервался"));
 });
 
-// ---- «Стоп» keeps what was read ----
+// ---- «Остановить» keeps what was read ----
 
 const stopped = (...extra) => apply(initialPanelState, upd({}), drf(typing({ texts: ["Привет, мир"] })), upd({ status: "STOPPED", stopReason: "user" }), ...extra);
 
-test("«Стоп» keeps the reply text as UI-only state, shown muted above the stopped line with a caption and no cursor", () => {
+test("«Остановить» keeps the reply text as UI-only state, shown muted above the stopped line with a caption and no cursor", () => {
   const s = stopped();
   assert.equal(s.drafts.length, 0);
   assert.equal(cutFor(s, s.entries[0]).text, "Привет, мир");
@@ -152,14 +152,14 @@ test("other stop reasons drop the fragment but remember that the reply was cut",
   assert.ok(!render(none).includes("ag-reply-kept"));
 });
 
-test("«Стоп» without a reply text yet shows no kept block", () => {
+test("«Остановить» without a reply text yet shows no kept block", () => {
   const s = apply(initialPanelState, upd({}), drf(typing({ texts: [""] })), upd({ status: "STOPPED", stopReason: "user" }));
   assert.equal(s.cuts.length, 0);
 });
 
-// ---- «Стоп» stays reachable ----
+// ---- «Остановить» stays reachable ----
 
-test("the waiting row with «Стоп» is sticky to the bottom of the thread on the panel background", () => {
+test("the waiting row with «Остановить» is sticky to the bottom of the thread on the panel background", () => {
   const css = readFileSync(new URL("../src/agent/agent.css", import.meta.url), "utf8");
   const rule = css.match(/\.ag-think\s*\{[^}]*\}/)?.[0] ?? "";
   assert.match(rule, /position:\s*sticky/);
@@ -235,12 +235,12 @@ test("the reply draft looks like the reply card: same classes, no caption, curso
   assert.ok(!html.includes("ag-draft"));
 });
 
-test("while the reply types, the waiting dots are gone and «Стоп» stays in the same row", () => {
+test("while the reply types, the waiting dots are gone and «Остановить» stays in the same row", () => {
   const s = apply(initialPanelState, upd({}), drf(typing({})));
   const html = render(s);
   assert.ok(!html.includes("ag-wait"));
   assert.ok(!html.includes(texts.waiting));
-  assert.match(html, /<div class="ag-think">\s*<div class="ag-actions"><button[^>]*>Стоп<\/button><\/div><\/div>/);
+  assert.match(html, /<div class="ag-think">\s*<div class="ag-actions"><button[^>]*>Остановить<\/button><\/div><\/div>/);
   assert.ok(html.indexOf("ag-reply-draft") < html.indexOf("ag-think"));
 });
 

@@ -103,7 +103,7 @@ test("problem texts: busy on rename/archive has its own, not_found refreshes, th
   assert.equal(chatProblemText("", "rename"), "");
   assert.equal(chatProblemText("busy", "rename"), chatBusyText);
   assert.equal(chatProblemText("busy", "archive"), chatBusyText);
-  assert.equal(chatBusyText, "Чат занят: дождитесь конца просьбы или остановите её.");
+  assert.equal(chatBusyText, "Чат занят: дождитесь конца запроса или остановите его.");
   assert.notEqual(chatProblemText("busy", "restore"), chatBusyText);
   assert.equal(chatProblemText("not_found", "open"), chatGoneText);
   assert.equal(refreshesChats("not_found"), true);
@@ -184,7 +184,7 @@ test("the chat bar renders titles as text, marks the running chat, the Archive i
   const html = renderToStaticMarkup(h(ChatBar, barProps()));
   assert.ok(!html.includes("<img"), "title is escaped");
   assert.ok(html.includes("&lt;img src=x onerror=1&gt;"));
-  assert.ok(html.includes("идёт просьба"));
+  assert.ok(html.includes("идёт запрос"));
   assert.ok(html.includes("Новый чат"));
   assert.ok(html.includes("В архив"));
   assert.ok(html.includes('aria-expanded="false"') && html.includes('aria-haspopup="menu"'));
