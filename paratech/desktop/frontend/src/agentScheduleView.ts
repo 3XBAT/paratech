@@ -29,7 +29,7 @@ import type { RemovedRow } from "./subjectRemovalView.js";
 export const scheduleTexts = {
   /** A small line inside the card while the core is asked. */
   loading: "Загрузка предметов…",
-  /** The button after a failed read (the glossary: «Повторить»). */
+  /** The icon after a failed read (its name and tooltip: the glossary «Повторить»). */
   reload: "Повторить",
   /** Not «Нет»: the button says what does not happen. The primary button is the page's «Создать N предметов». */
   no: "Не создавать",
@@ -39,8 +39,8 @@ export const scheduleTexts = {
   openSubjects: "Открыть «Предметы»",
   /** The core's message is empty (an older core): the card still says why it cannot go on. */
   staleFallback: "Предложение устарело: расписание или предметы изменились.",
-  /** Always the card's own words: the core's message for this state names «Да», which is not a button here. */
-  partialFallback: "Создано не всё. «Повторить» досоздаст остальное без дублей, «Отменить всё» уберёт созданное.",
+  /** Always the card's own words: the core's message for this state names «Да», which is not a button here. The icons carry no visible word, so none is quoted. */
+  partialFallback: "Создано не всё. Можно повторить: остальное создастся без дублей. Можно отменить всё: созданное будет убрано.",
   /** Nothing is left to choose from: every name of the schedule is already a subject. */
   noGroups: reviewTexts.allDone,
 } as const;

@@ -115,7 +115,7 @@ test("«Остановить» is a real quiet icon button; the stop card follow
   assert.match(html, /<button[^>]*class="ia"[^>]*aria-label="Остановить"[^>]*><svg[^>]*><use href="#i-stop"><\/use><\/svg><span class="ia-tip" aria-hidden="true">Остановить<\/span><\/button>/);
   const stopped = modelOf(update({ status: "STOPPED", stopReason: "user" }));
   assert.deepEqual(buttonIds(stopped), ["resume", "cancel"]);
-  assert.equal(stopped.cards[0].text, "Остановлено");
+  assert.equal(stopped.cards[0].text, "Остановлено. Можно продолжить.");
 });
 
 test("the buttons are off while a call runs", () => {
@@ -271,7 +271,11 @@ test("a request refused as busy offers «Остановить» for the running 
   assert.deepEqual(buttonIds(entryModel(refused, { last: true, blocked: false })), ["resend"]);
   assert.deepEqual(buttonIds(entryModel(refused, { last: false, blocked: true })), [], "only while it is the last one");
   assert.equal(entryModel(refused, last).rerun, false);
-  assert.equal(entryModel(refused, last).cards[0].text, "Предыдущий запрос ещё выполняется.");
+  // The icons carry no word: the line says what they do, and the stop icon names the request it stops (TASK-371).
+  const both = entryModel(refused, { last: true, blocked: true }).cards[0];
+  assert.equal(both.text, "Предыдущий запрос ещё выполняется. Его можно остановить или отправить этот ещё раз.");
+  assert.deepEqual(both.buttons.map((b) => [b.id, b.label]), [["stop", "Остановить предыдущий запрос"], ["resend", "Отправить ещё раз"]]);
+  assert.equal(entryModel(refused, last).cards[0].text, "Предыдущий запрос ещё выполняется. Этот можно отправить ещё раз.");
 });
 
 test("once the running request is stopped it no longer blocks", () => {
@@ -282,7 +286,9 @@ test("once the running request is stopped it no longer blocks", () => {
 
 test("a refused request without text can only stop the blocker", () => {
   const u = update({ threadId: "", turn: 0, status: "", problem: "busy" });
-  assert.deepEqual(buttonIds(entryModel(entryOf(u, { key: "orphan:x", threadId: "" }), { last: true, blocked: true })), ["stop"]);
+  const only = entryModel(entryOf(u, { key: "orphan:x", threadId: "" }), { last: true, blocked: true });
+  assert.deepEqual(buttonIds(only), ["stop"]);
+  assert.equal(only.cards[0].text, "Предыдущий запрос ещё выполняется. Его можно остановить.");
 });
 
 // ---- Double click ----

@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
+import { loadFailedLine } from "../agentConfirmView.js";
 import {
   choicesOf,
   initialScheduleFlow,
@@ -60,15 +61,9 @@ export function ScheduleCardPending(props: { error: string; onReload?: () => voi
   return (
     <section className="ag-card ag-sched" aria-label={reviewTexts.label}>
       <ResultLine kind="fail" role="alert">
-        {props.error}
+        {loadFailedLine(props.error, props.onReload !== undefined)}
+        {props.onReload !== undefined && <IconAction icon="retry" size="sm" className="ag-inline-ia" label={scheduleTexts.reload} onClick={props.onReload} />}
       </ResultLine>
-      {props.onReload !== undefined && (
-        <div className="ag-actions">
-          <Button size="sm" variant="secondary" onClick={props.onReload}>
-            {scheduleTexts.reload}
-          </Button>
-        </div>
-      )}
     </section>
   );
 }

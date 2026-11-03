@@ -93,6 +93,12 @@ export const workTexts = {
   moveUp: "Выше",
   moveDown: "Ниже",
   remove: "Убрать раздел",
+  /** The names of the row buttons (with the row number, rowActionLabel); the tooltip is the short word above. */
+  moveUpName: "Поднять раздел",
+  moveDownName: "Опустить раздел",
+  /** Why the remove button of a row is off (removeBlockedReason). */
+  removeFixedSlide: "Титульный и заключительный слайды убрать нельзя.",
+  removeLastPart: "Это единственный раздел такой части отчёта: убрать его нельзя.",
   sources: "Источники",
   downloadPdf: "Скачать PDF",
   savingPdf: "Сохранение PDF…",
@@ -101,6 +107,11 @@ export const workTexts = {
   fallbackName: "Работа",
   fileKind: ".docx",
 } as const;
+
+/** The name of a row button of the plan editor: the action and the number the row shows («Поднять раздел 2»). */
+export function rowActionLabel(action: string, n: number): string {
+  return `${action} ${n}`;
+}
 
 export const checkTexts = {
   count: `Нужно от ${limits.minSections} до ${limits.maxSections} разделов.`,
@@ -461,6 +472,15 @@ export function canRemove(items: readonly EditorItem[], index: number): boolean 
     return items.some((o, i) => i !== index && o.part === it.part);
   }
   return true;
+}
+
+/** Why a row cannot be removed ("" when it can): said by the off remove button. */
+export function removeBlockedReason(items: readonly EditorItem[], index: number): string {
+  const it = items[index];
+  if (it === undefined || canRemove(items, index)) {
+    return "";
+  }
+  return isFixedSlide(it) ? workTexts.removeFixedSlide : workTexts.removeLastPart;
 }
 
 export function removeItem(items: readonly EditorItem[], index: number): EditorItem[] {

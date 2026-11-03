@@ -24,6 +24,7 @@ import {
 import { Button } from "../ui/Button.js";
 import { Card, Input, ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { IconAction } from "../ui/IconAction.js";
 
 // The link to the online class (TASK-364): the card of a pair on «Сегодня» and the block on the page of a subject. The
 // pages own the flow; here only what it reports is drawn. The link and the host are typed text: text nodes only, never a
@@ -98,23 +99,20 @@ function Line(props: { line: LinkLine; links: LinkControls; onRetry?: () => void
           {line.text}
         </ResultLine>
       )}
+      {/* «Подключиться» stays on the card, so the retry is not the only way on: an icon, the line itself says «Можно повторить». */}
       {line.action === "retry" && props.onRetry !== undefined && (
-        <Button size="sm" disabled={busy} onClick={props.onRetry}>
-          {callLinkTexts.retry}
-        </Button>
+        <IconAction icon="retry" label={callLinkTexts.retryOpen} tipText={callLinkTexts.retry} disabled={busy} onClick={props.onRetry} />
       )}
       {props.undo === true && (
-        <Button
+        <IconAction
           id={linkId(line.key, "undo")}
-          size="sm"
-          variant="ghost"
-          disabled={busy}
+          icon="undo"
+          label={links.state.busy === "restore" ? callLinkTexts.restoring : callLinkTexts.undoLink}
+          tipText={links.state.busy === "restore" ? callLinkTexts.restoring : callLinkTexts.undo}
           busy={links.state.busy === "restore"}
-          busyLabel={callLinkTexts.restoring}
+          disabled={busy}
           onClick={links.on.restore}
-        >
-          {callLinkTexts.undo}
-        </Button>
+        />
       )}
     </div>
   );
@@ -280,16 +278,14 @@ export function LessonLinkHost(props: { lesson: TodayLesson; title: string; link
     <div className="small muted today-host">
       {card.host !== "" && <bdi>{card.host}</bdi>}
       {links.state.form?.key !== key && (
-        <Button
+        <IconAction
           id={linkId(key, "change")}
-          size="sm"
-          variant="ghost"
+          icon="pencil"
+          label={pairLabel(callLinkTexts.change, title)}
+          tipText={callLinkTexts.change}
           disabled={links.state.busy !== ""}
-          aria-label={pairLabel(callLinkTexts.change, title)}
           onClick={() => links.on.openForm(key, "change")}
-        >
-          {callLinkTexts.change}
-        </Button>
+        />
       )}
     </div>
   );
@@ -330,6 +326,7 @@ export function CallLinkBlock(props: { subject: LibrarySubject; links: LinkContr
   const key = subject.id;
   const link = subject.callLink;
   const busy = state.busy !== "";
+  const clearing = state.busy === "clear" && state.busyKey === key;
   const target: LinkTarget = { key, subjectId: subject.id, name: "" };
   const form = state.form?.key === key ? state.form : null;
   const line = state.line?.key === key ? state.line : null;
@@ -373,20 +370,16 @@ export function CallLinkBlock(props: { subject: LibrarySubject; links: LinkContr
                 >
                   {callLinkTexts.join}
                 </Button>
-                <Button id={linkId(key, "change")} size="sm" variant="ghost" disabled={busy} onClick={() => on.openForm(key, "change", link.link)}>
-                  {callLinkTexts.change}
-                </Button>
-                <Button
+                <IconAction id={linkId(key, "change")} icon="pencil" label={callLinkTexts.changeLink} disabled={busy} onClick={() => on.openForm(key, "change", link.link)} />
+                <IconAction
                   id={linkId(key, "clear")}
-                  size="sm"
-                  variant="ghost"
+                  icon="trash"
+                  variant="danger"
+                  label={clearing ? callLinkTexts.clearing : callLinkTexts.clearLink}
+                  busy={clearing}
                   disabled={busy}
-                  busy={state.busy === "clear" && state.busyKey === key}
-                  busyLabel={callLinkTexts.clearing}
                   onClick={() => on.clear(target, link)}
-                >
-                  {callLinkTexts.clear}
-                </Button>
+                />
               </>
             )}
           </div>

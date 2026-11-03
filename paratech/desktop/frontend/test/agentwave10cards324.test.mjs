@@ -480,12 +480,18 @@ test("loading: a small «Загрузка…» line with no heading; the error h
   assert.ok(loading.includes("Загрузка…"));
   assert.doesNotMatch(loading, /<button|role="alert"|<h[1-6]|<section|Нужно подтверждение/);
   const failed = renderToStaticMarkup(h(ConfirmCardPending, { error: genericError, onReload: noop }));
-  assert.ok(failed.includes(genericError));
+  // TASK-371: the reload is an icon at the end of the line; the line says nothing ran and what to do (genericError itself is unchanged).
+  assert.ok(failed.includes("Карточку не удалось загрузить. Ничего не выполнено. Можно повторить."));
+  assert.ok(!failed.includes(genericError));
   assert.match(failed, /role="alert"/);
-  assert.match(failed, />Повторить</);
+  assert.match(failed, /aria-label="Повторить"/);
   assert.doesNotMatch(failed, /Обновить карточку/);
   const stateless = renderToStaticMarkup(h(ConfirmCardPending, { error: genericError }));
   assert.doesNotMatch(stateless, /<button/);
+  assert.ok(stateless.includes("Карточку не удалось загрузить. Ничего не выполнено."));
+  assert.ok(!stateless.includes("Можно повторить"), "no icon, no promise of a repeat");
+  // A specific refusal of the core keeps its own text.
+  assert.ok(renderToStaticMarkup(h(ConfirmCardPending, { error: errorTexts[1], onReload: noop })).includes(errorTexts[1]));
   // The card of the panel starts in the loading state.
   const api = { card: async () => asg(), confirm: async () => done(), decline: async () => declined() };
   const real = renderToStaticMarkup(h(ConfirmCard, { api, deleteApi: {}, target: { kind: "assignment", id: "a1" } }));

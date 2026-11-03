@@ -6,6 +6,7 @@
 .ia .i { width: 16px; height: 16px; color: inherit; }
 .ia:hover:enabled:not([aria-disabled="true"]), .ia:focus-visible, .ia-note { background: var(--fill); color: var(--text); }
 .ia-danger:hover:enabled:not([aria-disabled="true"]), .ia-danger:focus-visible { color: var(--rec-t); }
+.ia-danger-solid { color: var(--rec-t); }
 .ia:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ia:disabled, .ia[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
 .ia[aria-busy="true"]:disabled { opacity: 1; cursor: progress; }

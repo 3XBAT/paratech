@@ -617,7 +617,7 @@ test("stop reasons: offline repeats (continue), failed retries, expired restarts
   const stop = (reason, over = {}) => modelOf(update({ status: "STOPPED", stopReason: reason, ...over })).cards.at(-1);
   const off = stop("offline");
   assert.equal(off.type, "stopped");
-  assert.equal(off.text, "Не завершено: нет связи");
+  assert.equal(off.text, "Не завершено: нет связи. Можно повторить, когда связь вернётся.");
   assert.deepEqual(off.buttons.map((b) => b.label), ["Повторить", "Отменить запрос"]);
   assert.deepEqual(off.buttons.map((b) => b.id), ["continue", "cancel"]);
   assert.deepEqual(stop("failed").buttons.map((b) => b.label), ["Повторить"]);
@@ -636,7 +636,7 @@ test("stop reasons: offline repeats (continue), failed retries, expired restarts
   const both = modelOf(update({ status: "STOPPED", stopReason: "offline", cards: [card({ kind: "stopped", stopReason: "offline" })] }));
   assert.equal(both.cards.filter((c) => c.type === "stopped").length, 1);
   const out = html(update({ status: "STOPPED", stopReason: "offline" }));
-  assert.match(out, /Не завершено: нет связи/);
+  assert.match(out, /Не завершено: нет связи\. Можно повторить, когда связь вернётся\./);
   assert.match(out, />Повторить</);
 });
 

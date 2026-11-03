@@ -47,6 +47,8 @@ import {
   metaLine,
   workMeta,
   type OpenView,
+  removeBlockedReason,
+  rowActionLabel,
   workCardModel,
   workTexts,
 } from "../workView.js";
@@ -58,7 +60,7 @@ import { canOfferSend } from "../sendWorkView.js";
 import { WorkSend } from "./WorkSend.js";
 import { triageReason, turnkeyCardModel } from "../turnkeyView.js";
 import { FailedCard, HelperCard, QuestionsCard, TriageCard, UnderstandingCard } from "./TurnkeyCards.js";
-import { Button, IconButton } from "../ui/Button.js";
+import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
 import { IconAction } from "../ui/IconAction.js";
@@ -100,9 +102,29 @@ function OutlineEditor(props: { items: EditorItem[]; check: EditorCheck; disable
             disabled={disabled}
             onChange={(e) => set(i, { words: e.target.value })}
           />
-          <IconButton icon="up" label={workTexts.moveUp} disabled={disabled || !canMove(items, i, -1)} onClick={() => props.onChange(moveItem(items, i, -1))} />
-          <IconButton icon="down" label={workTexts.moveDown} disabled={disabled || !canMove(items, i, 1)} onClick={() => props.onChange(moveItem(items, i, 1))} />
-          <IconButton icon="x" label={workTexts.remove} disabled={disabled || !canRemove(items, i)} onClick={() => props.onChange(removeItem(items, i))} />
+          {/* The name carries the row number the row shows; the tooltip is the short action. */}
+          <IconAction
+            icon="up"
+            label={rowActionLabel(workTexts.moveUpName, i + 1)}
+            tipText={workTexts.moveUp}
+            disabled={disabled || !canMove(items, i, -1)}
+            onClick={() => props.onChange(moveItem(items, i, -1))}
+          />
+          <IconAction
+            icon="down"
+            label={rowActionLabel(workTexts.moveDownName, i + 1)}
+            tipText={workTexts.moveDown}
+            disabled={disabled || !canMove(items, i, 1)}
+            onClick={() => props.onChange(moveItem(items, i, 1))}
+          />
+          <IconAction
+            icon="x"
+            label={rowActionLabel(workTexts.remove, i + 1)}
+            tipText={workTexts.remove}
+            disabled={disabled || !canRemove(items, i)}
+            disabledReason={disabled ? undefined : removeBlockedReason(items, i) || undefined}
+            onClick={() => props.onChange(removeItem(items, i))}
+          />
         </div>
       ))}
       <div className="ag-actions">
