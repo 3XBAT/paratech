@@ -89,6 +89,7 @@ type tools struct {
 	proposals   Proposals        // nil: propose_deadline and propose_send answer "unavailable"
 	deletions   DeletionPreviews // nil: propose_delete_recording answers "unavailable"
 	drafts      DraftVersions    // nil: list_assignments shows no draft version
+	subjects    ScheduleSubjects // nil: propose_subjects_from_schedule answers "unavailable"
 	clock       Clock
 	log         *slog.Logger
 	reuse       string            // the answer reuse scope of the step run sets on its copy (answerScope)
@@ -136,6 +137,8 @@ func (t tools) run(ctx context.Context, st agentturn.Step, c agentturn.Call) ran
 		return t.write(ctx, st, c)
 	case actionpolicy.ClassC:
 		return t.propose(ctx, st, c)
+	case actionpolicy.ClassUI:
+		return cardTool(c)
 	}
 	t.reuse, t.turn = answerScope(st), refOf(st)
 	out := t.read(ctx, st.Scope, c)

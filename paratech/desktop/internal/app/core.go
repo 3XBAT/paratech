@@ -506,10 +506,12 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		},
 		Today: todayScreen,
 		// The confirm cards of the agent: only the student's click here confirms what the agent proposed.
-		AgentConfirm: wails.AgentConfirmCore{Proposals: c.proposals, Materials: lib, Deletions: c.deletions, Assignments: c.proposals},
-		Turnkey:      works,
-		Answers:      answers,
-		Tickets:      ticketSets,
+		AgentConfirm: wails.AgentConfirmCore{
+			Proposals: c.proposals, Materials: lib, Deletions: c.deletions, Assignments: c.proposals,
+		},
+		Turnkey: works,
+		Answers: answers,
+		Tickets: ticketSets,
 	}
 	if err := c.wireConnections(e, settings, mailSecrets, mailer, hubSecrets, llm, log); err != nil {
 		return err
