@@ -55,6 +55,18 @@ SET title        = sqlc.arg(title),
     updated_at   = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version);
 
+-- The notes of a subject in any status, also while it is removed, for its purge (TASK-308).
+-- name: ListNoteIDsOfSubject :many
+SELECT id FROM notes WHERE subject_id = sqlc.arg(subject_id) ORDER BY created_at, id;
+
+-- Deletes a note of a subject still removed at or before the cutoff (ms); its parts cascade, the materials stay.
+-- name: PurgeNoteOfRemovedSubject :execrows
+DELETE FROM notes
+WHERE notes.id = sqlc.arg(id)
+  AND notes.subject_id = sqlc.arg(subject_id)
+  AND EXISTS (SELECT 1 FROM subjects s
+              WHERE s.id = notes.subject_id AND s.removed_at IS NOT NULL AND s.removed_at <= sqlc.arg(cutoff));
+
 -- name: ListNoteParts :many
 SELECT material_id FROM note_parts WHERE note_id = sqlc.arg(note_id) ORDER BY position;
 

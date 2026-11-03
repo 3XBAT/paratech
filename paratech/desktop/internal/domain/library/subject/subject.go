@@ -242,8 +242,21 @@ func (s *Subject) Restore(now time.Time) (changed bool, err error) {
 // PurgeDue reports whether the subject was removed at least RestoreWindow before now, so it can no longer be restored
 // and is to be purged.
 func (s *Subject) PurgeDue(now time.Time) bool {
-	return s.status == StatusRemoved && !now.Before(s.removedAt.Add(RestoreWindow))
+	return s.status == StatusRemoved && !now.Before(s.PurgeAt())
 }
+
+// PurgeAt returns when the restore window of a removed subject ends and it is due to be purged; zero while it is
+// active.
+func (s *Subject) PurgeAt() time.Time {
+	if s.status != StatusRemoved {
+		return time.Time{}
+	}
+	return s.removedAt.Add(RestoreWindow)
+}
+
+// PurgeCutoff is the latest removal time whose subject is due to be purged at now: PurgeDue(now) holds exactly for a
+// removed subject whose RemovedAt is not after it. The store re-checks a purge against it.
+func PurgeCutoff(now time.Time) time.Time { return now.Add(-RestoreWindow) }
 
 func (s *Subject) transition(to Status, now time.Time) error {
 	if !slices.Contains(transitions[s.status], to) {
