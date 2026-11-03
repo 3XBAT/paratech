@@ -228,13 +228,12 @@ test("crumbs «Предметы / <предмет> / <пара>» from other sec
   assert.equal(evil[1].label, "<img src=x onerror=1>");
 });
 
-test("crumbs from «База знаний»: «База знаний / <предмет> / <пара>», every level above the lesson closes it", () => {
+test("crumbs from «База знаний»: «База знаний / <пара>», only the root closes the lesson, no subject crumb", () => {
   const matched = { subject: "Матанализ", librarySubjectId: "s1", librarySubjectState: "matched" };
   assert.equal(openedFromKnowledge("knowledge"), true);
   assert.equal(openedFromKnowledge("subjects"), false);
   assert.deepEqual(lessonCrumbs(matched, "Пара 21.10", "knowledge"), [
     { label: "База знаний", go: { kind: "close" } },
-    { label: "Матанализ", go: { kind: "close" } },
     { label: "Пара 21.10", go: null },
   ]);
   const plain = lessonCrumbs({ subject: "Матанализ", librarySubjectId: "", librarySubjectState: "none" }, "Пара 21.10", "knowledge");
@@ -261,9 +260,26 @@ test("a lesson that cannot be opened says why in plain words and offers «Наз
   assert.equal(lessonScreenTexts.loading, "Загрузка…");
   assert.equal(
     lessonScreenTexts.gone,
-    "Пару не удалось открыть: окно её больше не помнит. Вернитесь назад и откройте её заново из списка пар.",
+    "Эту пару можно открыть только из списка пар. Нажмите «Назад» и выберите её в списке.",
   );
   assert.doesNotMatch(lessonScreenTexts.gone, /ключ|key|ошибк/i);
+});
+
+test("the lesson-info form: focus returns to the head «⋯» when it closes, a saved line is a status", () => {
+  const src = read("pages/KnowledgeLessonPage.tsx");
+  assert.equal(lessonScreenTexts.infoSaved, "Предмет и тип пары сохранены.");
+  // The effect starts from the opening value, so the first render (even with the form open) never moves the focus.
+  assert.match(src, /const wasEditing = useRef\(props\.editing\);/);
+  assert.match(
+    src,
+    /if \(wasEditing\.current && !editing\) \{\s*menuBox\.current\?\.querySelector<HTMLElement>\("button"\)\?\.focus\(\);\s*\}\s*wasEditing\.current = editing;/,
+  );
+  assert.match(src, /<div className="acts" ref=\{menuBox\}>\s*<RowMenu/);
+  // Saved: the line shows only while the form is closed, and goes when the form opens again or the lesson changes.
+  assert.match(src, /setSaved\(true\);/);
+  assert.match(src, /\{saved && !editing && \(\s*<ResultLine kind="ok" role="status">\s*\{lessonScreenTexts\.infoSaved\}/);
+  assert.match(src, /if \(editing\) \{\s*setSaved\(false\);\s*\}/);
+  assert.match(src, /useEffect\(\(\) => setSaved\(false\), \[id\]\);/);
 });
 
 // ---- the summary tools ----
@@ -318,7 +334,7 @@ test("the lesson page: the summary tools in «Конспект», the storage pa
   assert.doesNotMatch(src, /<Segmented/);
   // «Исправить предмет или тип пары» is an item of the «⋯» menu of the head, not a button.
   // It only opens the form; the whole «⋯» is gone while the form is open (the form has its own «Закрыть»).
-  assert.match(src, /\{!editing && \(\s*<div className="acts">\s*<RowMenu\s+label="Ещё действия с парой"[^>]*items=\{\[\{ key: "edit", label: "Исправить предмет или тип пары" \}\]\}\s+onPick=\{\(\) => setEditing\(true\)\}/);
+  assert.match(src, /\{!editing && \(\s*<div className="acts" ref=\{menuBox\}>\s*<RowMenu\s+label="Ещё действия с парой"[^>]*items=\{\[\{ key: "edit", label: "Исправить предмет или тип пары" \}\]\}\s+onPick=\{\(\) => setEditing\(true\)\}/);
   assert.doesNotMatch(src, /setEditing\(\(e\) => !e\)/);
   assert.doesNotMatch(src, /<Button[^>]*>\s*Исправить предмет или тип пары/);
   // The form takes the focus (its first input or select) when it opens.

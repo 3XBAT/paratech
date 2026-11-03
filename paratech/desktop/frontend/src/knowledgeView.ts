@@ -220,9 +220,9 @@ export function lessonRootLabel(page: string): string {
 }
 
 /**
- * «База знаний / <предмет> / <пара>» for a lesson opened from «База знаний» (it has no list of pairs yet, so the
- * ancestors just close the lesson), «Предметы / <предмет> / <пара>» from any other section. The subject level only when
- * the core matched the lesson to a library subject.
+ * «База знаний / <пара>» for a lesson opened from «База знаний» (the root closes the lesson; a subject crumb is left out
+ * because it could not reach the subject's page, the subject stays in the head's meta line), «Предметы / <предмет> /
+ * <пара>» from any other section. The subject level only when the core matched the lesson to a library subject.
  */
 export function lessonCrumbs(
   l: Pick<KnowledgeLesson, "subject" | "librarySubjectId" | "librarySubjectState">,
@@ -233,8 +233,8 @@ export function lessonCrumbs(
   const out: { label: string; go: LessonCrumbGo }[] = [
     { label: lessonRootLabel(page), go: fromKnowledge ? { kind: "close" } : { kind: "subjects" } },
   ];
-  if (l.librarySubjectState === "matched" && l.librarySubjectId !== "") {
-    out.push({ label: subjectName(l), go: fromKnowledge ? { kind: "close" } : { kind: "subject", id: l.librarySubjectId } });
+  if (!fromKnowledge && l.librarySubjectState === "matched" && l.librarySubjectId !== "") {
+    out.push({ label: subjectName(l), go: { kind: "subject", id: l.librarySubjectId } });
   }
   out.push({ label: heading, go: null });
   return out;
@@ -243,7 +243,9 @@ export function lessonCrumbs(
 export const lessonScreenTexts = {
   loading: "Загрузка…",
   /** A lecture of the student's notes cannot be found by its key once the window forgot it. */
-  gone: "Пару не удалось открыть: окно её больше не помнит. Вернитесь назад и откройте её заново из списка пар.",
+  gone: "Эту пару можно открыть только из списка пар. Нажмите «Назад» и выберите её в списке.",
+  /** Under the head after the subject and kind form was saved. */
+  infoSaved: "Предмет и тип пары сохранены.",
   /** Returns where the student came from. */
   back: "Назад",
 } as const;

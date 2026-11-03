@@ -255,6 +255,9 @@ export function KnowledgeLessonPage(props: {
   const [refresh, setRefresh] = useState(0);
   const content = useRef<HTMLDivElement>(null);
   const formBox = useRef<HTMLDivElement>(null);
+  const menuBox = useRef<HTMLDivElement>(null);
+  const wasEditing = useRef(props.editing);
+  const [saved, setSaved] = useState(false);
   const scrolled = useRef(false);
   const needsAuto = useRef(!isLessonTab(props.tab));
 
@@ -322,6 +325,23 @@ export function KnowledgeLessonPage(props: {
       formBox.current?.querySelector<HTMLElement>("input, select")?.focus();
     }
   }, [editing]);
+
+  // The form is gone (closed or saved): the focus returns to the head «⋯», which was unmounted meanwhile. Not on the
+  // first render, and never when the page opened with the form and nothing was closed yet.
+  useEffect(() => {
+    if (wasEditing.current && !editing) {
+      menuBox.current?.querySelector<HTMLElement>("button")?.focus();
+    }
+    wasEditing.current = editing;
+  }, [editing]);
+
+  // The «saved» line belongs to one lesson and goes when the form opens again.
+  useEffect(() => {
+    if (editing) {
+      setSaved(false);
+    }
+  }, [editing]);
+  useEffect(() => setSaved(false), [id]);
 
   // The summary view as on the summary page: one call at a time, polled while a step runs. A lesson that could not be
   // read again (deleted) shows only its error, so nothing is polled for it.
@@ -403,7 +423,7 @@ export function KnowledgeLessonPage(props: {
           </p>
         </div>
         {!editing && (
-          <div className="acts">
+          <div className="acts" ref={menuBox}>
             <RowMenu
               label="Ещё действия с парой"
               title="Ещё"
@@ -421,11 +441,17 @@ export function KnowledgeLessonPage(props: {
             onSaved={(l) => {
               setLesson(l);
               setEditing(false);
+              setSaved(true);
               props.onChanged(l);
             }}
             onClose={() => setEditing(false)}
           />
         </div>
+      )}
+      {saved && !editing && (
+        <ResultLine kind="ok" role="status">
+          {lessonScreenTexts.infoSaved}
+        </ResultLine>
       )}
       {tab === null ? (
         <p className="muted" role="status">

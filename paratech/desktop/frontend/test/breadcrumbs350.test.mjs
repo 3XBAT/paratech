@@ -116,7 +116,8 @@ test("tickets: «Предметы / Билеты» opens the subjects as the old
 });
 
 // TASK-351: the lesson is a screen of its own (route.lesson), not rendered inside «База знаний» any more; its crumbs are
-// «Предметы / <предмет> / <пара>» (lessonCrumbs of knowledgeView.ts), the first two are routes of the window.
+// «Предметы / <предмет> / <пара>» (lessonCrumbs of knowledgeView.ts; from «База знаний»: «База знаний / <пара>»), the
+// levels above the lesson are routes of the window.
 test("knowledge base: the subject has crumbs, the old «Назад» of its step up stays; the lesson is not drawn inside it", () => {
   const page = read("pages/KnowledgeBasePage.tsx");
   assert.doesNotMatch(page, backButtons);
