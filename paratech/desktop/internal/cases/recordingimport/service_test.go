@@ -120,27 +120,26 @@ func TestImportOfADateAndSubject(t *testing.T) {
 	}
 }
 
-// Every format has a duration cap: a file too long, or whose headers do not tell its duration, is refused. The headers
-// of WAV, FLAC and Ogg (and the Xing/VBRI header of an MP3) refuse it before the copy; the frames of any other MP3 are
-// counted during the copy, which is then deleted.
+// Every format has a duration cap: a file too long, or whose headers do not tell its duration, is refused before any
+// copy. The headers of WAV, FLAC and Ogg (and the Xing/VBRI header of an MP3) tell it; the frames of any other MP3 are
+// counted while the original is read for its digest.
 func TestImportDurationCap(t *testing.T) {
 	const big = int64(1) << 30
 	pairs := bytes.Repeat(append(mp3File(low8, 72, 1, ""), mp3File(low16, 144, 1, "")...), 300) // VBR, 43.2 s
 	tests := []struct {
-		name   string
-		file   original
-		copied bool // the refusal comes after the copy
-		want   error
-		dur    time.Duration // of an accepted file
+		name string
+		file original
+		want error
+		dur  time.Duration // of an accepted file
 	}{
 		{name: "flac over 4 hours", file: original{data: flacFile(8000, 8000*(4*3600+1), "x"), length: big}, want: recording.ErrAudioTooLong},
 		{name: "flac without total samples", file: original{data: flacFile(48000, 0, "x"), length: big}, want: recording.ErrAudioDurationUnknown},
 		{name: "ogg over 4 hours", file: original{data: oggHead(8000), end: oggPage(8000*(4*3600+1), []byte("x")), length: big},
 			want: recording.ErrAudioTooLong},
 		{name: "ogg without a last page", file: original{data: oggHead(8000), length: big}, want: recording.ErrAudioDurationUnknown},
-		{name: "vbr mp3 over 4 hours", file: original{data: append(pairs, mp3File(low8, 72, 199_401, "")...)}, copied: true,
+		{name: "vbr mp3 over 4 hours", file: original{data: append(pairs, mp3File(low8, 72, 199_401, "")...)},
 			want: recording.ErrAudioTooLong},
-		{name: "mp3 without countable frames", file: original{data: append([]byte{0xFF, 0xFB, 0x04, 0x64}, make([]byte, 1000)...)}, copied: true,
+		{name: "mp3 without countable frames", file: original{data: append([]byte{0xFF, 0xFB, 0x04, 0x64}, make([]byte, 1000)...)},
 			want: recording.ErrAudioDurationUnknown},
 		{name: "wav without data past the head", file: original{data: wavWithJunk(0, 100<<10, "")[:36+8+100<<10], length: big},
 			want: recording.ErrAudioDurationUnknown},
@@ -156,8 +155,6 @@ func TestImportDurationCap(t *testing.T) {
 			o := w.originals.add(path, nil)
 			*o = tc.file
 			o.size = -1
-			writes := 0
-			w.store.onWrite = func() { writes++ }
 
 			res, err := w.svc.Import(context.Background(), Request{Path: path, StartedAt: now.Add(-time.Hour)})
 			if tc.want == nil {
@@ -176,15 +173,16 @@ func TestImportDurationCap(t *testing.T) {
 				t.Fatalf("after a refusal: %d files, %d recordings, completions %v", len(w.store.files), w.recordings.count(),
 					w.completions.ids)
 			}
-			if copied := writes > 0; copied != tc.copied || len(w.store.deleted) != writes {
-				t.Fatalf("%d copies written, %d deleted; want a copy %v", writes, len(w.store.deleted), tc.copied)
+			if w.store.writes != 0 {
+				t.Fatalf("%d copies written, want none", w.store.writes)
 			}
 		})
 	}
 }
 
-// The data chunk of a WAV past the head is found by reading chunk headers only: the copy is the whole file, and a file
-// without data is refused after a bounded number of header reads, not read through.
+// The data chunk of a WAV past the head is found by reading chunk headers only: the copy is the whole file (read once
+// for the digest and once for the copy), and a file without data is refused after a bounded number of header reads,
+// not read through.
 func TestImportWAVDataPastTheHead(t *testing.T) {
 	w := newWorld(t)
 	audio := wavWithJunk(2, 100<<10, "junk")
@@ -199,8 +197,9 @@ func TestImportWAVDataPastTheHead(t *testing.T) {
 	if copied := w.store.files[res.Recording.Audio()]; !bytes.Equal(copied, audio) {
 		t.Fatalf("the copy has %d bytes, want the %d of the file", len(copied), len(audio))
 	}
-	if want := int64(len(audio)) + recording.ImportTailBytes + recording.WAVChunkHeaderBytes; o.read != want {
-		t.Fatalf("%d bytes read, want the file, its tail and one chunk header: %d", o.read, want)
+	want := recording.ImportHeadBytes + recording.ImportTailBytes + recording.WAVChunkHeaderBytes + 2*int64(len(audio))
+	if o.read != want {
+		t.Fatalf("%d bytes read, want its head, tail and one chunk header, then the file twice: %d", o.read, want)
 	}
 
 	w = newWorld(t)
@@ -214,8 +213,8 @@ func TestImportWAVDataPastTheHead(t *testing.T) {
 	}
 }
 
-// The same bytes twice are the same recording: the second copy is deleted, nothing new is stored, and the
-// transcription is handed the same id again (the enqueuer is idempotent).
+// The same bytes twice are the same recording: the digest is read from the original first, so no second copy is
+// written, nothing new is stored, and the transcription is handed the same id again (the enqueuer is idempotent).
 func TestImportOfTheSameBytesTwice(t *testing.T) {
 	w := newWorld(t)
 	l := pastLesson(t, w)
@@ -238,11 +237,60 @@ func TestImportOfTheSameBytesTwice(t *testing.T) {
 	if w.recordings.count() != 1 || len(w.store.files) != 1 {
 		t.Fatalf("%d recordings, %d files; want one of each", w.recordings.count(), len(w.store.files))
 	}
-	if len(w.store.deleted) != 1 || w.store.deleted[0] != mustRef(t, "recordings/imp-2.wav") {
-		t.Fatalf("deleted %v, want the second copy", w.store.deleted)
+	if w.store.writes != 1 || len(w.store.deleted) != 0 {
+		t.Fatalf("%d copies written, deleted %v; want the first copy only", w.store.writes, w.store.deleted)
 	}
-	if len(w.completions.ids) != 2 || w.completions.ids[1] != first.Recording.ID() {
+
+	// Even with no room for a second copy: none is needed.
+	w.space.free = 0
+	third, err := w.svc.Import(ctx, Request{Path: path, StartedAt: now.Add(-time.Hour)})
+	if err != nil || !third.Existing || third.Recording.ID() != first.Recording.ID() || w.store.writes != 1 {
+		t.Fatalf("third import %+v, %v, %d copies; want the first recording, no copy", third, err, w.store.writes)
+	}
+	if len(w.completions.ids) != 3 || w.completions.ids[1] != first.Recording.ID() {
 		t.Fatalf("completions %v", w.completions.ids)
+	}
+}
+
+// The original changes after its digest was read and before the copy (same size): the copy is deleted and refused.
+func TestImportRefusesACopyThatDiffersFromTheDigest(t *testing.T) {
+	w := newWorld(t)
+	o := w.originals.add(path, wavFile(1, "changing"))
+	w.store.onWrite = func() { o.data[len(o.data)-1] ^= 0xFF }
+
+	if _, err := w.svc.Import(context.Background(), Request{Path: path, StartedAt: now}); !errors.Is(err, ErrChanged) {
+		t.Fatalf("Import = %v, want ErrChanged", err)
+	}
+	if len(w.store.files) != 0 || len(w.store.deleted) != 1 || w.recordings.count() != 0 || len(w.completions.ids) != 0 {
+		t.Fatalf("after the refusal: %d files, deleted %v, %d recordings", len(w.store.files), w.store.deleted,
+			w.recordings.count())
+	}
+}
+
+// The recording of the same bytes is being deleted: the import is refused before any copy.
+func TestImportOfBytesBeingDeletedWritesNothing(t *testing.T) {
+	w := newWorld(t)
+	audio := wavFile(1, "deleting")
+	w.originals.add(path, audio)
+	old, err := recording.NewImported(recording.ImportSpec{
+		ID: "imp-old", StartedAt: now.Add(-time.Hour), Audio: recording.ImportedAudio{Format: recording.FormatWAV},
+		SHA256: digest(audio),
+	}, now)
+	if err == nil {
+		err = old.MarkDeleting(now, nil)
+	}
+	if err == nil {
+		err = w.recordings.Save(context.Background(), old)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := w.svc.Import(context.Background(), Request{Path: path, StartedAt: now}); !errors.Is(err, ErrDeleting) {
+		t.Fatalf("Import = %v, want ErrDeleting", err)
+	}
+	if w.store.writes != 0 {
+		t.Fatalf("%d copies written, want none", w.store.writes)
 	}
 }
 

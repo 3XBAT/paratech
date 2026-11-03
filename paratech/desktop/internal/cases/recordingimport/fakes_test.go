@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -187,18 +189,31 @@ func (c *closer) Close() error {
 	return nil
 }
 
-// memStore is the Storage Manager in memory: a write is stored only when its reader ended without an error.
+// memStore is the Storage Manager in memory: a write is stored only when its reader ended without an error. A file
+// is written at now unless modTimes says otherwise; dirs are directories, listed but not files.
 type memStore struct {
-	mu       sync.Mutex
-	files    map[shared.ArtifactRef][]byte
-	deleted  []shared.ArtifactRef
-	writeErr error
-	onWrite  func() // runs before the content is read
+	mu         sync.Mutex
+	files      map[shared.ArtifactRef][]byte
+	modTimes   map[shared.ArtifactRef]time.Time
+	dirs       []shared.ArtifactRef
+	deleted    []shared.ArtifactRef
+	writes     int // Write calls
+	writeErr   error
+	deleteErr  error
+	failDelete shared.ArtifactRef // only its Delete fails
+	listErr    error
+	modErr     error
+	onWrite    func() // runs before the content is read
 }
 
-func newStore() *memStore { return &memStore{files: map[shared.ArtifactRef][]byte{}} }
+func newStore() *memStore {
+	return &memStore{files: map[shared.ArtifactRef][]byte{}, modTimes: map[shared.ArtifactRef]time.Time{}}
+}
 
 func (s *memStore) Write(ctx context.Context, ref shared.ArtifactRef, content io.Reader) error {
+	s.mu.Lock()
+	s.writes++
+	s.mu.Unlock()
 	if s.onWrite != nil {
 		s.onWrite()
 	}
@@ -221,9 +236,54 @@ func (s *memStore) Write(ctx context.Context, ref shared.ArtifactRef, content io
 func (s *memStore) Delete(_ context.Context, ref shared.ArtifactRef) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	switch {
+	case s.deleteErr != nil:
+		return s.deleteErr
+	case ref == s.failDelete:
+		return errors.New("file in use")
+	}
 	delete(s.files, ref)
 	s.deleted = append(s.deleted, ref)
 	return nil
+}
+
+func (s *memStore) ListKind(_ context.Context, kind shared.ArtifactKind) ([]shared.ArtifactRef, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	var out []shared.ArtifactRef
+	for ref := range s.files {
+		if ref.Kind() == kind && !strings.Contains(ref.Path(), "/") {
+			out = append(out, ref)
+		}
+	}
+	for _, d := range s.dirs {
+		if d.Kind() == kind {
+			out = append(out, d)
+		}
+	}
+	slices.SortFunc(out, func(a, b shared.ArtifactRef) int { return strings.Compare(a.String(), b.String()) })
+	return out, nil
+}
+
+func (s *memStore) ModTime(_ context.Context, ref shared.ArtifactRef) (time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case s.modErr != nil:
+		return time.Time{}, s.modErr
+	case slices.Contains(s.dirs, ref):
+		return time.Time{}, fmt.Errorf("%s is a directory: %w", ref, shared.ErrConflict)
+	}
+	if _, ok := s.files[ref]; !ok {
+		return time.Time{}, fmt.Errorf("%s: %w", ref, shared.ErrNotFound)
+	}
+	if at, ok := s.modTimes[ref]; ok {
+		return at, nil
+	}
+	return now, nil
 }
 
 type fakeSpace struct {
@@ -238,12 +298,25 @@ type memRecordings struct {
 	mu      sync.Mutex
 	byID    map[shared.RecordingID]*recording.Recording
 	saveErr error
+	getErr  error
 	// beforeSave runs inside Save before the insert, to store a rival import.
 	beforeSave func()
 }
 
 func newRecordings() *memRecordings {
 	return &memRecordings{byID: map[shared.RecordingID]*recording.Recording{}}
+}
+
+func (m *memRecordings) Get(_ context.Context, id shared.RecordingID) (*recording.Recording, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	if r, ok := m.byID[id]; ok {
+		return r, nil
+	}
+	return nil, fmt.Errorf("recording %s: %w", id, shared.ErrNotFound)
 }
 
 func (m *memRecordings) GetBySourceSHA256(_ context.Context, sha string) (*recording.Recording, error) {
@@ -317,7 +390,7 @@ func (s *seqIDs) NewRecordingID() shared.RecordingID {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.n++
-	return shared.RecordingID(fmt.Sprintf("imp-%d", s.n))
+	return shared.RecordingID(fmt.Sprintf("%d", s.n)) // the import makes it imp-<n>
 }
 
 type passTx struct{}

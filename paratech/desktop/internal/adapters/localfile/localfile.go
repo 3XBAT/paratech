@@ -1,13 +1,3 @@
-// Package localfile is the adapter that reads a file the user picked outside the data directory, for an import: a
-// model file (PRD sections 8 and 8.1) or an old recording (ADR-0027). It implements modelcatalog.ImportSource (Reader)
-// and recordingimport.Originals (SeekReader) (ARCH-30..33).
-//
-// The path is untrusted input: it is cleaned and must be absolute and free of NUL bytes; on Windows it must be on a
-// drive letter, so UNC, device and namespace paths, reserved device names and streams are refused. A mapped network
-// drive and a symbolic link or junction the user picked are followed, even to a remote target. Only regular files
-// are opened (no directories, devices or pipes). The file is opened read-only and checked again after the open, so a
-// path swapped for another file in between is refused. Errors are values.ErrInvalidImportFile, shared.ErrNotFound or shared.ErrStorage
-// (narrowed to shared.ErrStoragePermission when access is denied); the OS path never appears in messages.
 package localfile
 
 import (
@@ -45,8 +35,8 @@ func (*Reader) Open(ctx context.Context, path string) (io.ReadCloser, int64, err
 	return f, size, nil
 }
 
-// SeekReader opens picked files that are read out of order: the head and the tail of an audio file before its copy
-// (recordingimport.Originals). The zero value is ready to use.
+// SeekReader opens picked files that are read out of order: the head and the tail of an audio file, then the whole
+// file for its digest and again for its copy (recordingimport.Originals). The zero value is ready to use.
 type SeekReader struct{}
 
 // NewSeekReader returns a SeekReader.

@@ -29,6 +29,14 @@ type ArtifactStore interface {
 
 	// Delete removes the file; one already gone is not an error.
 	Delete(ctx context.Context, ref shared.ArtifactRef) error
+
+	// ListKind returns the entries directly in the directory of kind (files and directories), without temporary
+	// files and links.
+	ListKind(ctx context.Context, kind shared.ArtifactKind) ([]shared.ArtifactRef, error)
+
+	// ModTime returns when the file was last written; a missing file wraps shared.ErrNotFound, a directory
+	// shared.ErrConflict.
+	ModTime(ctx context.Context, ref shared.ArtifactRef) (time.Time, error)
 }
 
 // DiskSpace reports the free disk space of the data directory. Implemented by the filestore adapter.
@@ -39,6 +47,10 @@ type DiskSpace interface {
 
 // RecordingRepository stores the recording aggregate (PRD section 6.2). Implemented by the sqlite adapter.
 type RecordingRepository interface {
+	// Get loads a recording by id, marked for deletion or not; an error wrapping shared.ErrNotFound when there is
+	// none.
+	Get(ctx context.Context, id shared.RecordingID) (*recording.Recording, error)
+
 	// GetBySourceSHA256 loads the imported recording of the file with the digest, marked for deletion or not; an
 	// error wrapping shared.ErrNotFound when there is none.
 	GetBySourceSHA256(ctx context.Context, sha256 string) (*recording.Recording, error)
