@@ -24,10 +24,12 @@ import (
 // use cases as the assignment page (HomeworkService) and the read of a deleted assignment for the versions.
 // TrashAssignment is homeworkflow.Service.DeleteAndStop, the soft delete of the page with «Вернуть» (app wires it
 // under this name: the package has no method named after an irreversible action, TestAgentHasNoPathToIrreversibleActions).
+// DeletionImpact tells whether that delete would stop a work or a job.
 type AssignmentChanges interface {
 	AssignmentState(ctx context.Context, id shared.AssignmentID) (homeworkflow.AssignmentView, error)
 	EditAssignment(ctx context.Context, e homeworkflow.AssignmentEdit) (homeworkflow.AssignmentView, error)
 	CorrectLesson(ctx context.Context, c homeworkflow.LessonCorrection) (homeworkflow.AssignmentView, error)
+	DeletionImpact(ctx context.Context, id shared.AssignmentID) (homeworkflow.DeleteImpact, error)
 	TrashAssignment(ctx context.Context, id shared.AssignmentID, expectedVersion int64) (homeworkflow.Deletion, error)
 	RestoreAssignment(ctx context.Context, id shared.AssignmentID, expectedVersion int64) (homeworkflow.AssignmentView, error)
 }
@@ -43,6 +45,9 @@ var (
 	errNotThisChat = errors.New("agent: the assignment was not deleted by this chat")
 	// errHasEvent: the assignment got a Google event after the call was admitted as U; only the «Да» card deletes it.
 	errHasEvent = errors.New("agent: the assignment has a Google Calendar event")
+	// errWorking: a delete would stop a work or a job of the assignment, and «Вернуть» restarts nothing; the student
+	// deletes it on the page, where the card warns first.
+	errWorking = errors.New("agent: a delete would stop the work on the assignment")
 	// errTimeWithoutDue: edit names a time of day without a date (as create_assignment).
 	errTimeWithoutDue = errors.New("agent: a time without a date")
 )
@@ -174,7 +179,8 @@ func fieldsOf(v homeworkflow.AssignmentView) action.AssignmentFields {
 
 // deleteAssignment is «Удалить» of the assignment page (DeleteAndStop) for one without a Google event: class U, Undo
 // is «Вернуть» (RestoreAssignment at the version the delete left). One with an event is class C (the card); the fact
-// is read again here, so a delete never runs as U for an assignment that has one (a read error refuses).
+// is read again here, so a delete never runs as U for an assignment that has one (a read error refuses). Nor for one
+// with a work or a job under way: DeleteAndStop would stop it and Undo would not restart it.
 func (a *Actions) deleteAssignment(ctx context.Context, call values.Call) (prepared, error) {
 	ref, _ := call.Args().ID("assignment")
 	id := shared.AssignmentID(ref.ID())
@@ -182,7 +188,7 @@ func (a *Actions) deleteAssignment(ctx context.Context, call values.Call) (prepa
 	if err != nil {
 		return prepared{}, err
 	}
-	if err := a.noEvent(ctx, id); err != nil {
+	if err := a.mayTrash(ctx, id); err != nil {
 		return prepared{}, err
 	}
 	undo := action.RestoreAssignment{Assignment: ref}
@@ -190,7 +196,7 @@ func (a *Actions) deleteAssignment(ctx context.Context, call values.Call) (prepa
 	return prepared{
 		intent: action.Intent{Target: ref, Before: before, Prior: undo},
 		run: func(ctx context.Context) (effect, error) {
-			if err := a.noEvent(ctx, id); err != nil {
+			if err := a.mayTrash(ctx, id); err != nil {
 				return effect{}, err
 			}
 			d, err := a.changes.TrashAssignment(ctx, id, before)
@@ -200,6 +206,22 @@ func (a *Actions) deleteAssignment(ctx context.Context, call values.Call) (prepa
 			return effect{comp: undo, version: d.Assignment.Version, row: values.WriteRow{Changed: true}}, nil
 		},
 	}, nil
+}
+
+// mayTrash refuses a delete without «Да» of an assignment with a Google event or with a work or a job under way, and
+// of one where either cannot be told (fail closed).
+func (a *Actions) mayTrash(ctx context.Context, id shared.AssignmentID) error {
+	if err := a.noEvent(ctx, id); err != nil {
+		return err
+	}
+	impact, err := a.changes.DeletionImpact(ctx, id)
+	switch {
+	case err != nil:
+		return err
+	case impact.Working:
+		return errWorking
+	}
+	return nil
 }
 
 // noEvent refuses an assignment with a Google event, and one whose event cannot be told (fail closed).
@@ -287,7 +309,7 @@ func assignmentRefusal(tool values.Tool, err error) (values.Refusal, bool) {
 	case errors.Is(err, errNotThisChat), errors.Is(err, assignment.ErrRestoreExpired),
 		errors.Is(err, homeworkflow.ErrSubjectNotFound):
 		return values.RefuseUnknownID, true
-	case errors.Is(err, errHasEvent), errors.Is(err, assignment.ErrInUse):
+	case errors.Is(err, errHasEvent), errors.Is(err, errWorking), errors.Is(err, assignment.ErrInUse):
 		return values.RefuseNotNow, true
 	case errors.Is(err, errTimeWithoutDue), errors.Is(err, homeworkflow.ErrInvalidRequest):
 		return values.RefuseInvalidArgs, true

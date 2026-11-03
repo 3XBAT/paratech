@@ -221,6 +221,54 @@ func TestChangeAssignmentDelete(t *testing.T) {
 	})
 }
 
+// A delete that would stop a work or a job is refused (not_now): Undo would not restart it, so only the page deletes
+// it, after its card warns. The fact is read before the journal and again just before the delete; a read error
+// refuses (failed). Nothing is deleted in any of these cases.
+func TestChangeAssignmentDeleteOfAWorkingOne(t *testing.T) {
+	tests := []struct {
+		name string
+		set  func(ch *memChanges)
+		want values.Refusal
+	}{
+		{"working", func(ch *memChanges) { ch.working["a1"] = true }, values.RefuseNotNow},
+		{"the impact cannot be read", func(ch *memChanges) { ch.impactErr = errors.New("disk I/O error") }, values.RefuseFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w, ch := newWave10World(t)
+			tt.set(ch)
+			r, e := run10(t, w, req, call10(t, "c1", values.ToolChangeAssignment, deleteA1, actionpolicy.ClassU))
+			if !strings.Contains(r.out.Result.ResultJSON, string(tt.want)) || e.ID != "" || len(w.store.order) != 0 {
+				t.Fatalf("result = %+v, entry %+v; want %s, no entry", r.out.Result, e, tt.want)
+			}
+			if w.assignments.deleted["a1"] {
+				t.Fatal("a refused delete deleted the assignment")
+			}
+		})
+	}
+
+	t.Run("a work started between the look and the delete", func(t *testing.T) {
+		w, ch := newWave10World(t)
+		p, ok, err := w.actions.prepare(t.Context(), originOf(req), call10(t, "c1", values.ToolChangeAssignment, deleteA1, actionpolicy.ClassU).Call)
+		if !ok || err != nil {
+			t.Fatal(ok, err)
+		}
+		ch.working["a1"] = true
+		if _, err := p.run(t.Context()); !errors.Is(err, errWorking) || w.assignments.deleted["a1"] {
+			t.Fatalf("run = %v, deleted %v", err, w.assignments.deleted["a1"])
+		}
+	})
+
+	t.Run("not working: deletes as before", func(t *testing.T) {
+		w, ch := newWave10World(t)
+		ch.working["a2"] = true
+		r, e := run10(t, w, req, call10(t, "c1", values.ToolChangeAssignment, deleteA1, actionpolicy.ClassU))
+		if r.out.Result.IsError || e.Status != action.StatusDone || !w.assignments.deleted["a1"] {
+			t.Fatalf("result = %+v, entry %+v", r.out.Result, e)
+		}
+	})
+}
+
 // delete of an assignment with a Google event is C: the agent only makes the delete_assignment card; nothing is
 // deleted, the journal holds the proposal.
 func TestChangeAssignmentDeleteWithAnEventMakesTheCard(t *testing.T) {

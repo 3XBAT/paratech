@@ -128,7 +128,8 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 }
 
 // agentAssignments is the homework service under the names of the agent's interfaces: TrashAssignment is the page's
-// soft delete DeleteAndStop (input/agent names no method after an irreversible action).
+// soft delete DeleteAndStop (input/agent names no method after an irreversible action); DeletionImpact and the other
+// reads come from the embedded service as they are.
 type agentAssignments struct {
 	*homeworkflow.Service
 }

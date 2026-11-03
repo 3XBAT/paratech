@@ -21,6 +21,8 @@ type memChanges struct {
 	events   map[shared.AssignmentID]bool
 	eventErr error
 	inUse    map[shared.AssignmentID]bool
+	working  map[shared.AssignmentID]bool // a work or a job under way (DeletionImpact)
+	impactErr error
 	marks    int // MarkDone calls
 	restores int // RestoreDone calls
 	calendar int // calls that would touch Google Calendar (none may)
@@ -30,7 +32,16 @@ func newMemChanges(a *memAssignments) *memChanges {
 	if a.deleted == nil {
 		a.deleted = map[shared.AssignmentID]bool{}
 	}
-	return &memChanges{a: a, events: map[shared.AssignmentID]bool{}, inUse: map[shared.AssignmentID]bool{}}
+	return &memChanges{
+		a: a, events: map[shared.AssignmentID]bool{}, inUse: map[shared.AssignmentID]bool{}, working: map[shared.AssignmentID]bool{},
+	}
+}
+
+func (m *memChanges) DeletionImpact(_ context.Context, id shared.AssignmentID) (homeworkflow.DeleteImpact, error) {
+	if m.impactErr != nil {
+		return homeworkflow.DeleteImpact{}, m.impactErr
+	}
+	return homeworkflow.DeleteImpact{Working: m.working[id]}, nil
 }
 
 func (m *memChanges) live(id shared.AssignmentID) (homeworkflow.AssignmentView, error) {
