@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { activityApi, type AdviceView } from "../bindings/activity";
 import { popupWindowApi, promptApi, shownEvent, type PromptView, type SourcesView } from "../bindings/prompt";
+import { libraryApi } from "../bindings/library";
 import { callByName, hideWindow, onEvent } from "../bindings/runtime";
+import { callLinkTexts } from "../callLinkView";
 import { Button } from "../ui/Button";
 import { Banner } from "../ui/controls";
 import { Icon, IconSprite } from "../ui/Icon";
@@ -29,6 +31,7 @@ import {
   SourcesPoller,
   type Selection,
 } from "../sourcePicker/view";
+import { idleJoin, JoinController, joinPromptId, joinView, type JoinState } from "./joinView";
 import {
   adviceHeading,
   buttonHints,
@@ -67,6 +70,13 @@ export function Popup() {
   const [loaded, setLoaded] = useState(false);
   const [pending, setPending] = useState<Action | null>(null);
   const [error, setError] = useState("");
+  // «Подключиться» (TASK-370): the state machine is in joinView.ts; the page only draws it. The meeting opens through the
+  // library binding by subject ID, never by a URL from here.
+  const [join, setJoin] = useState<JoinState>(idleJoin);
+  const joinCtl = useMemo(() => {
+    const library = libraryApi(callByName);
+    return new JoinController({ callSubject: api.callSubject, open: library.openSubjectCallLink }, setJoin);
+  }, [api]);
   // Only the newest reply is applied: an older Current() must not overwrite a newer prompt or action result.
   const latest = useRef(0);
 
@@ -172,6 +182,7 @@ export function Popup() {
       poller.refreshNow();
       refreshSound();
       setStopProblem("");
+      joinCtl.refresh();
     }).then(
       (stop) => {
         if (alive) {
@@ -183,7 +194,13 @@ export function Popup() {
       () => setError(loadErrorText),
     );
     void reload(true);
-    const onVisibility = () => setVisible(document.visibilityState === "visible");
+    const onVisibility = () => {
+      setVisible(document.visibilityState === "visible");
+      // The popup closed: the meeting may be opened again when it is shown next.
+      if (document.visibilityState === "hidden") {
+        joinCtl.closed();
+      }
+    };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       alive = false;
@@ -191,7 +208,7 @@ export function Popup() {
       document.removeEventListener("visibilitychange", onVisibility);
       poller.setActive(false);
     };
-  }, [reload, poller, fitter, refreshSound]);
+  }, [reload, poller, fitter, refreshSound, joinCtl]);
 
   // A new prompt starts with a fresh picker: no choice carries over from the previous offer.
   useEffect(() => {
@@ -210,11 +227,20 @@ export function Popup() {
   const m = popupModel(view, pending);
   const picker = pickerModel(sources, selection);
   const showPicker = m.buttons.includes("start");
-  const errorLine = error || m.problem;
-  const notes = showPicker ? [picker.autoNote, ...picker.warnings].filter((n) => n !== "") : [];
-  const layout = textsLayout(notes, errorLine);
   const live = sound !== null && advice === null && showsRecording(view, sound.recording, pending);
   const liveId = live && sound !== null ? sound.recordingId : "";
+  const jv = joinView(join, m.disabled);
+  const joinShown = showPicker && jv.visible;
+  // A failed open is the last of the error lines (a start problem comes first); a vanished link is a quiet note.
+  const errorLine = error || m.problem || (showPicker ? jv.error : "");
+  const joinNote = showPicker ? jv.note : "";
+  const notes = showPicker ? [picker.autoNote, ...picker.warnings, joinNote].filter((n) => n !== "") : [];
+  const layout = textsLayout(notes, errorLine);
+
+  const offeredId = joinPromptId(view, advice !== null || live);
+  useEffect(() => {
+    joinCtl.offer(offeredId);
+  }, [joinCtl, offeredId]);
 
   useEffect(() => {
     if (liveId === "") {
@@ -269,6 +295,7 @@ export function Popup() {
     setPending(action);
     setListOpen(false);
     setError("");
+    joinCtl.clearProblem();
     const seq = ++latest.current;
     try {
       const v = action === "start" ? await api.start(view.id, picker.chosen.app) : await api[action](view.id);
@@ -448,11 +475,13 @@ export function Popup() {
           )}
           {showPicker && picker.autoNote !== "" && <p className="auto-note">{picker.autoNote}</p>}
           {showPicker &&
-            picker.warnings.map((w) => (
-              <p key={w} className={layout.clamp ? "warning clamp" : "warning"} title={layout.clamp ? w : undefined}>
-                {w}
-              </p>
-            ))}
+            [...picker.warnings, joinNote]
+              .filter((w) => w !== "")
+              .map((w) => (
+                <p key={w} className={layout.clamp ? "warning clamp" : "warning"} title={layout.clamp ? w : undefined}>
+                  {w}
+                </p>
+              ))}
           {showPicker && (
             <p
               className={layout.collapsed ? "advice collapsed" : "advice"}
@@ -464,12 +493,25 @@ export function Popup() {
         </div>
       )}
       <div className="pbtns">
+        {joinShown && (
+          // Before «Начать запись»: join first, then record. It never disables the start and takes no focus itself.
+          <Button
+            className={jv.opened ? "wide joined" : "wide"}
+            busy={jv.busy}
+            busyLabel={callLinkTexts.joining}
+            disabled={jv.disabled}
+            title={jv.title}
+            onClick={() => void joinCtl.click()}
+          >
+            {callLinkTexts.join}
+          </Button>
+        )}
         {m.buttons.map((id) => (
           <Button
             key={id}
             variant={id === "start" ? "primary" : id === "skip" ? "ghost" : "secondary"}
             icon={id === "start" ? "rec" : undefined}
-            className={id === "start" || id === "close" ? "wide" : undefined}
+            className={id === "start" || id === "skip" || id === "close" ? "wide" : undefined}
             disabled={m.disabled}
             // The title is also the accessible description of the button (the label stays its name).
             title={buttonHints[id]}

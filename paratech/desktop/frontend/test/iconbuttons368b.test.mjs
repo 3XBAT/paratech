@@ -451,8 +451,9 @@ const wordButtons = {
     "{addTexts.button}",
   ],
   "pages/TranscriptLinks.tsx": ["{links.length === 1 ? openPairTexts.one : openPairTexts.many(formatTime(l.startedAt))}"],
-  // The popup is one prompt window: every button answers the prompt («Записать», «Пропустить», «Остановить», «Скрыть»).
-  "popup/Popup.tsx": ['{advicePending === "switch" ? adviceLabels.switching : adviceLabels.switch}', "{adviceLabels.keep}", "{recordingTexts.stop}", "{recordingTexts.hide}", '{id === "start" ? m.startLabel : buttonLabels[id]}'],
+  // The popup is one prompt window: every button answers the prompt («Записать», «Пропустить», «Остановить», «Скрыть»);
+  // TASK-370: «Подключиться» (the meeting of the lesson on offer) is its second main action and stays a word.
+  "popup/Popup.tsx": ['{advicePending === "switch" ? adviceLabels.switching : adviceLabels.switch}', "{adviceLabels.keep}", "{recordingTexts.stop}", "{recordingTexts.hide}", "{callLinkTexts.join}", '{id === "start" ? m.startLabel : buttonLabels[id]}'],
   "sourcePicker/SourceAdvice.tsx": ["{adviceLabels.switch}", "{adviceLabels.keep}"],
 };
 

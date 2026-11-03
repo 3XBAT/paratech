@@ -76,6 +76,8 @@ h1, p, ul { margin: 0; }
 /* «Остановить»: a normal button, only its square is red (TASK-367). */
 .btn.stop .i { color: var(--rec-t); fill: currentColor; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+/* «Подключиться» once the meeting is open (TASK-370): plainly grey until the popup closes, not half-faded. */
+.btn.joined:disabled { border-color: var(--line); background: var(--neu-b); color: var(--muted); opacity: 1; }
 /* Button busy labels share one cell, so the width stays (as in ../ui/components.css). */
 .btn-labels { display: inline-grid; }
 .btn-labels > * { grid-area: 1 / 1; }
