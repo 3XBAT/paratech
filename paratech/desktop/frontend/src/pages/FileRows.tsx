@@ -74,9 +74,15 @@ export function ErrorLine(props: { text: string; onRefresh(): void; onRetry?: ()
         {props.text}
       </ResultLine>
       {refresh ? (
-        <IconAction icon="retry" label={fileTexts.refresh} onClick={props.onRefresh} />
+        <Button size="sm" onClick={props.onRefresh}>
+          {fileTexts.refresh}
+        </Button>
       ) : (
-        props.onRetry && <IconAction icon="retry" label={fileTexts.retry} onClick={props.onRetry} />
+        props.onRetry && (
+          <Button size="sm" onClick={props.onRetry}>
+            {fileTexts.retry}
+          </Button>
+        )
       )}
     </div>
   );
@@ -127,7 +133,7 @@ export function AddFileLines(props: {
             </Button>
           )}
           {e !== null && e.openSubjectId !== "" && (
-            <IconAction icon="open" label={addFileTexts.openSubject} onClick={() => props.onOpenSubject(e.openSubjectId)} />
+            <IconAction icon="chevr" label={addFileTexts.openSubject} onClick={() => props.onOpenSubject(e.openSubjectId)} />
           )}
         </div>
       )}
@@ -191,7 +197,7 @@ function NotPlacedLine(props: {
             {addFileTexts.place}
           </Button>
         )}
-        <IconAction icon="open" label={addFileTexts.openInbox} onClick={props.onOpenInbox} />
+        <IconAction icon="chevr" label={addFileTexts.openInbox} onClick={props.onOpenInbox} />
       </div>
       {canPlace && panel && (
         <div className="place-inline">

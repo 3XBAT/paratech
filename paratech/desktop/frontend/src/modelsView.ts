@@ -479,6 +479,15 @@ export const texts = {
   deleteConfirm: "Её файл будет удалён из папки приложения.",
 } as const;
 
+/** The names of the row buttons name the model, so the rows differ for a screen reader. */
+export function removeModelLabel(name: string): string {
+  return `${texts.remove} модель ${name}`;
+}
+
+export function cancelDownloadLabel(name: string): string {
+  return `${texts.cancelDownload} скачивание: ${name}`;
+}
+
 /** The notes above the lists, warnings first. A missing speech component has its own notice (SpeechComponentNotice). */
 export function statusNotes(v: ModelsView): Note[] {
   const notes: Note[] = [];

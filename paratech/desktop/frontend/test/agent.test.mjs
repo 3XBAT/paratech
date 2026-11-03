@@ -595,7 +595,8 @@ test("action line after «Отменить»: done hides the button, a refusal s
 test("«Отменить всё» appears with two or more actions to undo and calls undoAll", () => {
   const two = update({ cards: [card({ kind: "action_line", actionId: "a1" }), card({ kind: "action_line", actionId: "a2" })] });
   const out = renderToStaticMarkup(h(AgentRequest, { model: modelOf(two), actions }));
-  assert.ok(isOn(out, "Отменить всё"));
+  // The bulk undo spends several results: it keeps its word (back to the TASK-368 part-1 expectation).
+  assert.match(out, />Отменить всё</);
   const one = html(update({ cards: [card({ kind: "action_line", actionId: "a1" })] }));
   assert.doesNotMatch(one, /Отменить всё/);
   const allDone = renderToStaticMarkup(

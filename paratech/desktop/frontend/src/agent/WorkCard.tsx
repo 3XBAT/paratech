@@ -378,7 +378,9 @@ export function WorkBody(props: {
             >
               {workTexts.approve}
             </Button>
-            <IconAction icon="save" label={workTexts.savePlan} disabled={busy || !check.ok || !edited} onClick={() => void run(savePlan)} />
+            <Button size="sm" variant="secondary" disabled={busy || !check.ok || !edited} onClick={() => void run(savePlan)}>
+              {workTexts.savePlan}
+            </Button>
           </div>
         </section>
       );
@@ -552,7 +554,9 @@ export function WorkBody(props: {
                 <Button size="sm" variant="primary" disabled={busy || !canSubmitNote(note)} onClick={() => void run(reviseNow)}>
                   {workTexts.reviseSubmit}
                 </Button>
-                <IconAction icon="x" variant="danger" label={workTexts.cancel} disabled={busy} onClick={() => setMode("view")} />
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMode("view")}>
+                  {workTexts.cancel}
+                </Button>
               </>
             )}
             {mode === "edit" && (
@@ -565,7 +569,9 @@ export function WorkBody(props: {
                 >
                   {workTexts.rewrite}
                 </Button>
-                <IconAction icon="x" variant="danger" label={workTexts.cancel} disabled={busy} onClick={() => setMode("view")} />
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMode("view")}>
+                  {workTexts.cancel}
+                </Button>
               </>
             )}
           </div>

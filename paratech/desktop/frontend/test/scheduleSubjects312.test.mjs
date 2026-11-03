@@ -1198,9 +1198,7 @@ test("the check failed with subjects on the page: one quiet line with «Повт
   let retried = 0;
   const out = html(h(ScheduleCheckFailedLine, { onRetry: () => retried++ }));
   assert.match(out, /Не удалось проверить расписание/);
-  // TASK-368: «Повторить» is a retry icon (tooltip and aria-label), not a word button.
-  assert.ok(isOn(out, "Повторить"));
-  assert.equal(visibleText(out).includes("Повторить"), false);
+  assert.match(out, /class="btn ghost sm"[^>]*>Повторить</);
   assert.equal(primaries(out), 0);
   assert.equal(retried, 0);
 });

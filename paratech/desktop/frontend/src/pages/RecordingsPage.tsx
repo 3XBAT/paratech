@@ -533,7 +533,9 @@ export function RecordingsPage({
       {selected.size > 0 && (
         <div className="acts start rec-selected" role="group" aria-label="Выбранные записи">
           <span className="num">{selectedText(selected.size)}</span>
-          <IconAction icon="trash" variant="danger" label={deleteTexts.selectedDelete} disabled={deleting !== null} onClick={() => askDelete([...selected])} />
+          <Button variant="danger" disabled={deleting !== null} onClick={() => askDelete([...selected])}>
+            {deleteTexts.selectedDelete}
+          </Button>
           <IconAction icon="x" label={deleteTexts.selectedClear} disabled={deleting !== null} onClick={() => setSelected(new Set())} />
         </div>
       )}

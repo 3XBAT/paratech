@@ -98,7 +98,7 @@ export function PageViewer(props: { pages: PhotoPage[]; start: number; opener?: 
           {viewerAnnounce(page.number, total)}
         </span>
         <span className="page-viewer-acts">
-          <IconAction icon="back" place="below" label={t.viewerPrev} disabled={at === 0} onClick={() => go("ArrowLeft")} />
+          <IconAction icon="chevl" place="below" label={t.viewerPrev} disabled={at === 0} onClick={() => go("ArrowLeft")} />
           <IconAction icon="chevr" place="below" label={t.viewerNext} disabled={at === total - 1} onClick={() => go("ArrowRight")} />
           <IconAction icon="x" place="below" label={t.viewerClose} data={{ close: "" }} onClick={props.onClose} />
         </span>

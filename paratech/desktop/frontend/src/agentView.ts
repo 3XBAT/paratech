@@ -1113,7 +1113,7 @@ export type CardModel =
       detail: string[];
       actionId: string;
       /** `shown` false: the line has no «Отменить» (the stop of a recording cannot be undone, or the line offers a button). */
-      undo: { label: string; busyLabel: string; enabled: boolean; shown: boolean };
+      undo: { kind: UndoKind; label: string; busyLabel: string; enabled: boolean; shown: boolean };
       /** What the line says once the undo is done. */
       undoneText: string;
       /** The button the line offers once the undo is done («Начать запись» after «Остановить»); null when none. */
@@ -1157,9 +1157,12 @@ export function cardButtonIcon(id: ButtonId, card: ButtonCard): IconName | null 
   }
 }
 
-/** The icon of the «Отменить» of an action line: «Остановить» of a started recording is a stop, anything else an undo. */
-export function undoIcon(label: string): IconName {
-  return label === resultTexts.stopRecording ? "stop" : "undo";
+/** What the secondary button of an action line does: stops a started recording, or undoes the action. */
+export type UndoKind = "undo" | "stop";
+
+/** The icon of the secondary button of an action line, by what it does (never by its words). */
+export function undoIcon(kind: UndoKind): IconName {
+  return kind === "stop" ? "stop" : "undo";
 }
 
 /** Page buttons an offer names: «Отменить» (undo_action) is an icon, the others are the card's main action and keep words. */
@@ -1347,6 +1350,7 @@ function actionModel(c: CardView): ActionCardModel {
     detail: wording?.detail ?? [],
     actionId: c.actionId,
     undo: {
+      kind: started ? "stop" : "undo",
       label: started ? resultTexts.stopRecording : texts.undo,
       busyLabel: started ? resultTexts.stopping : texts.undoBusy,
       enabled: c.actionId !== "",

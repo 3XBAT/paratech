@@ -6,13 +6,14 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import server from "react-dom/server";
-import { IconAction, fitTip } from "../.test-build/ui/IconAction.js";
+import { IconAction, TIP_DELAY_MS, fitTip } from "../.test-build/ui/IconAction.js";
 import { IconSprite } from "../.test-build/ui/Icon.js";
 import { cardButtonIcon, offerIcon, undoIcon } from "../.test-build/agentView.js";
 import { AgentRequest } from "../.test-build/agent/AgentCards.js";
 import { ConfirmCardPending } from "../.test-build/agent/ConfirmCard.js";
 import { ScheduleCardPending } from "../.test-build/agent/ScheduleCard.js";
 import { WorkBody } from "../.test-build/agent/WorkCard.js";
+import { RestartNote } from "../.test-build/agent/RestartDialog.js";
 import { UnderstandingCard } from "../.test-build/agent/TurnkeyCards.js";
 import { ariaLabels, buttonTag, isOff, isOn, visibleText } from "./iconbtn.mjs";
 
@@ -45,6 +46,12 @@ test("tipText replaces the tooltip only; place, size, variant, role, tabIndex an
   assert.match(out, /aria-label="Повторить"/);
   assert.match(out, /<span class="ia-tip" aria-hidden="true">Повторить поиск \(Enter\)<\/span>/);
   assert.match(ia({ note: true }), /class="ia ia-note"/);
+  // The tooltip words that differ from the name are also given to screen readers (the tooltip itself is aria-hidden).
+  assert.match(out, /aria-describedby="([^"]+)"/);
+  const id = out.match(/aria-describedby="([^"]+)"/)[1];
+  assert.match(out, new RegExp(`<span id="${id}" class="ia-vh">Повторить поиск \\(Enter\\)</span>`));
+  assert.doesNotMatch(ia({ tipText: "Закрыть" }), /aria-describedby|ia-vh/, "the same words need no description");
+  assert.doesNotMatch(ia(), /aria-describedby|ia-vh/);
 });
 
 test("busy: a small spinner instead of the icon, the button is off and aria-busy", () => {
@@ -57,15 +64,29 @@ test("busy: a small spinner instead of the icon, the button is off and aria-busy
   assert.doesNotMatch(ia(), /aria-busy|ia-spin/);
 });
 
-test("disabled: off; a reason is said in the tooltip and to screen readers", () => {
+test("disabled: off; with a reason the button stays focusable (aria-disabled), the reason is in the tooltip and read to screen readers", () => {
   assert.equal(isOff(ia({ disabled: true }), "Закрыть"), true);
+  assert.match(ia({ disabled: true }), / disabled=""/, "no reason: natively disabled");
   assert.equal(isOn(ia(), "Закрыть"), true);
   const out = ia({ disabled: true, disabledReason: "Нечего сохранять" });
+  assert.match(out, /aria-disabled="true"/);
+  assert.doesNotMatch(out, / disabled=""/, "a native disabled button cannot take the focus, so its reason could not be read");
+  assert.equal(isOff(out, "Закрыть"), true);
   assert.match(out, /aria-describedby="[^"]+"/);
   assert.match(out, /<span class="ia-tip" aria-hidden="true">Закрыть\. Нечего сохранять<\/span>/);
   assert.match(out, /<span id="[^"]+" class="ia-vh">Нечего сохранять<\/span>/);
   // A reason only matters while the button is off.
   assert.doesNotMatch(ia({ disabledReason: "Нечего сохранять" }), /Нечего сохранять/);
+  // A running call is a native disabled + aria-busy, whatever the reason.
+  assert.match(ia({ busy: true, disabled: true, disabledReason: "Нечего сохранять" }), / disabled=""/);
+});
+
+test("an aria-disabled button does nothing on click or mouse down", () => {
+  const code = src("ui/IconAction.tsx");
+  assert.match(code, /const click = \(e: MouseEvent<HTMLButtonElement>\) => \{\s*if \(soft\) \{\s*e\.preventDefault\(\);\s*return;\s*\}\s*props\.onClick\(e\);/);
+  assert.match(code, /const down = [^]*if \(!soft\) \{\s*props\.onMouseDown\?\.\(e\);/);
+  assert.match(code, /onClick=\{click\}/);
+  assert.match(code, /onMouseDown=\{down\}/);
 });
 
 test("fitTip keeps a tooltip inside the clipping box: nudges sideways, flips when there is no room", () => {
@@ -81,14 +102,29 @@ test("fitTip keeps a tooltip inside the clipping box: nudges sideways, flips whe
   assert.deepEqual(fitTip(tip(100, 100), clip, "right"), { dx: 0, flip: false });
 });
 
-test("the component measures on hover and focus and Esc hides the tooltip (WCAG 1.4.13)", () => {
+test("the tooltip opens after a hover pause and at once on keyboard focus; it is measured after it shows; Esc hides it (WCAG 1.4.13)", () => {
   const code = src("ui/IconAction.tsx");
-  assert.match(code, /onMouseEnter=\{show\}/);
-  assert.match(code, /onFocus=\{show\}/);
+  assert.equal(TIP_DELAY_MS, 350, "the hover pause");
+  assert.match(code, /window\.setTimeout\(\(\) => \{\s*setDismissed\(false\);\s*setHovered\(true\);\s*\}, TIP_DELAY_MS\)/);
+  assert.match(code, /onMouseEnter=\{enter\}/);
+  assert.match(code, /onMouseLeave=\{leave\}/);
+  assert.match(code, /onFocus=\{focus\}/);
+  assert.match(code, /onBlur=\{\(\) => setFocused\(false\)\}/);
+  // Keyboard focus: no timer around the state change.
+  assert.match(code, /matches\(":focus-visible"\)\) \{\s*setDismissed\(false\);\s*setFocused\(true\);/);
+  // Measured in a layout effect once it is open (it is display: none before), so there is no flicker.
+  assert.match(code, /useLayoutEffect\(\(\) => \{\s*const t = tip\.current;\s*if \(!open/);
+  assert.match(code, /data-open=\{open \? "" : undefined\}/);
   assert.match(code, /e\.key === "Escape"[^}]*setDismissed\(true\)/);
-  assert.match(code, /data-dismissed=\{dismissed \? "" : undefined\}/);
-  // Esc is not swallowed: a menu or a dialog around the button still closes.
-  assert.doesNotMatch(code, /stopPropagation|preventDefault/);
+  assert.match(code, /const open = !dismissed && \(hovered \|\| focused \|\| props\.note === true\)/);
+  // Esc is not swallowed: a menu or a dialog around the button still closes. (preventDefault is only in the aria-disabled click.)
+  assert.doesNotMatch(code, /stopPropagation/);
+  assert.equal(count(code, "preventDefault"), 1);
+});
+
+test("a closed tooltip is not rendered open: no data-open on a plain button, a note stays open", () => {
+  assert.doesNotMatch(ia(), /data-open/);
+  assert.match(ia({ note: true }), /data-open=""/);
 });
 
 // ---- the look ----
@@ -104,14 +140,20 @@ test("the target is at least 32px, 28px only for the dense size", () => {
   assert.doesNotMatch(rule(".ia"), /opacity/);
 });
 
-test("keyboard focus is visible and the tooltip shows on hover and on keyboard focus", () => {
+test("keyboard focus is visible; the tooltip is not laid out while hidden and shows when the script opens it", () => {
   assert.match(rule(".ia:focus-visible"), /outline: 2px solid var\(--accent\)/);
-  assert.match(rule(".ia:hover:enabled, .ia:focus-visible, .ia-note"), /background: var\(--fill\); color: var\(--text\)/);
-  assert.match(rule(".ia:hover .ia-tip, .ia:focus-visible .ia-tip, .ia-note .ia-tip"), /opacity: 1/);
-  assert.match(rule(".ia-tip"), /position: absolute[^}]*opacity: 0[^}]*pointer-events: none/);
-  assert.match(rule(".ia[data-dismissed] .ia-tip, .ia-note[data-dismissed] .ia-tip"), /opacity: 0/);
-  // The dismissal comes after the show rule and is not weaker than it.
-  assert.ok(css.indexOf(".ia[data-dismissed] .ia-tip") > css.indexOf(".ia:hover .ia-tip"));
+  assert.match(rule('.ia:hover:enabled:not([aria-disabled="true"]), .ia:focus-visible, .ia-note'), /background: var\(--fill\); color: var\(--text\)/);
+  // display: none while hidden: a tooltip near the edge of the chat or a list never adds scroll space.
+  assert.match(rule(".ia-tip"), /display: none; position: absolute[^}]*pointer-events: none/);
+  assert.doesNotMatch(rule(".ia-tip"), /opacity: 0|transition/, "hiding is display, not an invisible box that still takes room");
+  assert.match(rule(".ia[data-open] .ia-tip"), /display: block/);
+  // Hover and focus do not show it by CSS: the hover pause is the script's.
+  assert.doesNotMatch(css, /\.ia:hover \.ia-tip|\.ia:focus-visible \.ia-tip/);
+});
+
+test("a disabled button with a reason looks disabled and does not light up on hover", () => {
+  assert.match(rule('.ia:disabled, .ia[aria-disabled="true"]'), /opacity: \.5; cursor: not-allowed/);
+  assert.match(rule('.ia-danger:hover:enabled:not([aria-disabled="true"]), .ia-danger:focus-visible'), /color: var\(--rec-t\)/);
 });
 
 test("the tooltip opens above, below, left or right and flips; a long text wraps instead of running off", () => {
@@ -125,15 +167,15 @@ test("the tooltip opens above, below, left or right and flips; a long text wraps
 });
 
 test("danger turns red on hover and focus only; a busy button shows the spinner at full strength", () => {
-  assert.match(rule(".ia-danger:hover:enabled, .ia-danger:focus-visible"), /color: var\(--rec-t\)/);
-  assert.match(rule(".ia:disabled"), /opacity: \.5/);
+  assert.match(rule('.ia-danger:hover:enabled:not([aria-disabled="true"]), .ia-danger:focus-visible'), /color: var\(--rec-t\)/);
+  assert.match(rule('.ia:disabled, .ia[aria-disabled="true"]'), /opacity: \.5/);
   assert.match(rule('.ia[aria-busy="true"]:disabled'), /opacity: 1/);
   assert.match(rule(".ia-spin"), /animation: ia-spin 1s linear infinite/);
 });
 
 test("reduced motion and forced colours have their rules", () => {
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.ia-tip \{ transition: none; \} \.ia-spin \{ animation: none; \} \}/);
-  assert.match(css, /@media \(forced-colors: active\) \{ \.ia \{ color: ButtonText; \} \.ia:disabled \{ color: GrayText; \} \.ia-tip \{ border: 1px solid CanvasText; \} \}/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.ia\[data-open\] \.ia-tip \{ animation: none; \} \.ia-spin \{ animation: none; \} \}/);
+  assert.match(css, /@media \(forced-colors: active\) \{ \.ia \{ color: ButtonText; \} \.ia:disabled, \.ia\[aria-disabled="true"\] \{ color: GrayText; \} \.ia-tip \{ border: 1px solid CanvasText; \} \}/);
 });
 
 test("the stylesheet is loaded by the main window and by the popup, which has no components.css", () => {
@@ -146,8 +188,12 @@ test("the stylesheet is loaded by the main window and by the popup, which has no
 
 test("the new icons are in the sprite once each; every name of the type has a symbol", () => {
   const svg = html(h(IconSprite));
-  for (const name of ["skip", "open", "save", "undo"]) {
+  // «open» (an arrow out of a box) is only for what opens outside the app; «skip» and «save» went with the word buttons.
+  for (const name of ["open", "undo", "chevl", "arrowup", "arrowdown", "swap", "paste", "insert"]) {
     assert.equal(count(svg, `id="i-${name}"`), 1, name);
+  }
+  for (const name of ["skip", "save"]) {
+    assert.equal(count(svg, `id="i-${name}"`), 0, `${name} is no longer drawn`);
   }
   const type = src("ui/Icon.tsx").match(/export type IconName =([^;]+);/)[1];
   const names = [...type.matchAll(/"([a-z]+)"/g)].map((m) => m[1]);
@@ -169,8 +215,12 @@ test("cardButtonIcon: the secondary buttons are icons, the main actions keep wor
   for (const id of ["approve", "continue", "resume", "retry", "restart", "resend", "rerun"]) {
     assert.equal(cardButtonIcon(id, "stopped"), null, id);
   }
-  assert.equal(undoIcon("Отменить"), "undo");
-  assert.equal(undoIcon("Остановить"), "stop");
+  // Keyed on what the button does, never on its Russian words.
+  assert.equal(undoIcon("undo"), "undo");
+  assert.equal(undoIcon("stop"), "stop");
+  const source = src("agentView.ts");
+  assert.doesNotMatch(source.slice(source.indexOf("export function undoIcon")), /^[^}]*(?:=== |!== )resultTexts/, "no comparison of labels");
+  assert.match(source, /kind: started \? "stop" : "undo",/, "the action line says what its button does");
   assert.equal(offerIcon({ action: "undo_action", target: null }), "undo");
   for (const action of ["start_recording", "open_summary", "google_sync", "sound_check", "open_material"]) {
     assert.equal(offerIcon({ action, target: null }), null, action);
@@ -203,12 +253,11 @@ test("plan card: «Да, выполнить» and «Не выполнять» ke
   assert.ok(out.indexOf(">Не выполнять<") < out.indexOf('aria-label="Изменить"'));
 });
 
-test("question card: «Ответить» keeps its word, «Пропустить вопросы» is a skip icon", () => {
+test("question card: «Ответить» and «Пропустить вопросы» are both words (a form's own two buttons)", () => {
   const out = request([{ type: "questions", caption: "Вопросы", questions: [], active: true, skip: "Пропустить вопросы", submit: "Ответить" }]);
-  assert.ok(isOn(out, "Пропустить вопросы"));
-  assert.match(out, /<use href="#i-skip"><\/use>/);
-  assert.match(visibleText(out), /Ответить/);
-  assert.doesNotMatch(visibleText(out), /Пропустить/);
+  assert.deepEqual(ariaLabels(out), []);
+  assert.match(out, /class="btn primary sm"[^>]*>Ответить</);
+  assert.match(out, /class="btn ghost sm"[^>]*>Пропустить вопросы</);
 });
 
 test("waiting and progress rows: «Остановить» is the stop icon", () => {
@@ -233,45 +282,61 @@ test("stopped line: «Продолжить» keeps its word, «Отменить 
   assert.match(visibleText(problem), /Отправить ещё раз/);
 });
 
-test("action line: «Открыть» and «Отменить» are icons; «Отменить всё» under several lines is an icon", () => {
+test("action line: «Открыть» (in the app: a chevron that names the task) and «Отменить» are icons; «Отменить всё» under several lines is a word", () => {
   const line = (id) => ({
-    type: "action", text: "Готово", detail: [], actionId: id, undo: { label: "Отменить", busyLabel: "Отмена…", enabled: true, shown: true },
+    type: "action", text: "Готово", detail: [], actionId: id, undo: { kind: "undo", label: "Отменить", busyLabel: "Отмена…", enabled: true, shown: true },
     undoneText: "Отменено", afterUndoOffer: null, assignment: { id: "a1", title: "Задача", subjectId: "", due: "", time: "" }, offer: null,
   });
   const one = request([line("x1")], { openAssignment: noop });
-  assert.deepEqual(ariaLabels(one), ["Открыть", "Отменить"]);
+  assert.deepEqual(ariaLabels(one), ["Открыть задание: Задача", "Отменить"]);
+  assert.match(one, /<use href="#i-chevr"><\/use>/, "opening something inside the app is a chevron, not the arrow out of a box");
+  assert.doesNotMatch(one, /#i-open/);
   assert.equal(visibleText(one).includes("Отменить"), false);
   assert.equal(visibleText(one).includes("Открыть"), false);
+  // An undo is the default colour: red is for deleting, stopping a recording and cancelling a download.
+  assert.doesNotMatch(buttonTag(one, "Отменить"), /ia-danger/);
+  assert.doesNotMatch(one, /ia-danger/);
   const two = request([line("x1"), line("x2")], { openAssignment: noop });
-  assert.ok(isOn(two, "Отменить всё"));
-  assert.equal(visibleText(two).includes("Отменить всё"), false);
-  // A started recording: the same place is a «Остановить» square.
+  assert.match(two, /class="btn ghost sm"[^>]*>Отменить всё</, "the bulk undo spends several results: a word");
+  assert.equal(buttonTag(two, "Отменить всё"), null);
+  // A started recording: the same place is a «Остановить» square, red.
   const started = line("x1");
-  started.undo = { label: "Остановить", busyLabel: "Остановка…", enabled: true, shown: true };
-  assert.match(request([started]), /<use href="#i-stop"><\/use>/);
+  started.undo = { kind: "stop", label: "Остановить", busyLabel: "Остановка…", enabled: true, shown: true };
+  const stop = request([started]);
+  assert.match(stop, /<use href="#i-stop"><\/use>/);
+  assert.match(buttonTag(stop, "Остановить"), /ia-danger/);
 });
 
-test("an undo offer is an icon; the other offers are the card's one main action and keep their words", () => {
+test("an undo offer is an icon in the default colour; the other offers are the card's one main action and keep their words", () => {
   const offer = (label, action) => ({ type: "offer", offer: { label, offer: { action, target: null } } });
   const undo = request([offer("Отменить", "undo_action")], { offer: noop });
   assert.ok(isOn(undo, "Отменить"));
+  assert.doesNotMatch(buttonTag(undo, "Отменить"), /ia-danger/);
   assert.equal(visibleText(undo).includes("Отменить"), false);
   const record = request([offer("Начать запись", "start_recording")], { offer: noop });
   assert.deepEqual(ariaLabels(record), []);
   assert.match(visibleText(record), /Начать запись/);
 });
 
-test("a card that could not be read: the way on is a retry icon with the old words", () => {
+test("a card that could not be read: the only way out is a word button, as before the icons", () => {
   const confirm = html(h(ConfirmCardPending, { error: "Не удалось загрузить", onReload: noop }));
-  assert.deepEqual(ariaLabels(confirm), ["Повторить"]);
-  assert.equal(visibleText(confirm).includes("Повторить"), false);
-  assert.match(confirm, /<use href="#i-retry"><\/use>/);
+  assert.deepEqual(ariaLabels(confirm), []);
+  assert.match(confirm, /class="btn sm"[^>]*>Повторить</);
   const schedule = html(h(ScheduleCardPending, { error: "Не удалось загрузить", onReload: noop }));
-  assert.deepEqual(ariaLabels(schedule), ["Повторить"]);
-  assert.equal(visibleText(schedule).includes("Повторить"), false);
+  assert.deepEqual(ariaLabels(schedule), []);
+  assert.match(schedule, /class="btn sm"[^>]*>Повторить</);
   // The error text stays as the reason; without a reload there is no button at all.
   assert.match(visibleText(schedule), /Не удалось загрузить/);
   assert.equal(count(html(h(ScheduleCardPending, { error: "Не удалось загрузить" })), "<button"), 0);
+});
+
+test("the note of a pending edit: «Вернуть текст сообщения» puts text into the field (insert), «Отменить правку» is a plain undo", () => {
+  const out = html(h(RestartNote, { id: "n1", problem: "", onCancel: noop, onRestoreText: noop }));
+  assert.deepEqual(ariaLabels(out), ["Вернуть текст сообщения", "Отменить правку"]);
+  assert.match(out, /<use href="#i-insert"><\/use>/);
+  assert.match(out, /<use href="#i-undo"><\/use>/);
+  assert.doesNotMatch(out, /ia-danger|#i-x"/, "an undo is neither red nor a cross");
+  assert.equal(html(h(RestartNote, { id: "n1", problem: "", onCancel: noop })).includes("insert"), false, "no restore, no insert glyph");
 });
 
 // ---- the work card and the turnkey cards ----
@@ -303,15 +368,17 @@ test("work card, done: «Доработать» and «Открыть в Word» k
   // A saved PDF is opened with its own icon.
   const saved = body(work({ writing: writing({ pdfMaterialId: "p1" }) }));
   assert.ok(isOn(saved, "Открыть PDF"));
+  assert.match(saved, /<use href="#i-open"><\/use>/, "the PDF opens outside the app: the one place of the arrow out of a box");
   assert.equal(buttonTag(saved, "Скачать PDF"), null);
 });
 
-test("work card: the plan editor adds and saves with icons; a running step stops with an icon that spins while stopping", () => {
+test("work card: the plan editor adds with an icon and saves with a word; a running step stops with an icon that spins while stopping", () => {
   const approve = body(work({ writing: writing({ step: "approve", result: "", sections: [{ number: 1, title: "Введение", words: 300, note: "", written: false, paragraphs: [], sources: [], kind: "", part: "", bullets: [], columns: [] }] }) }));
   assert.ok(ariaLabels(approve).includes("Добавить раздел"));
-  assert.ok(ariaLabels(approve).includes("Сохранить план"));
+  assert.ok(!ariaLabels(approve).includes("Сохранить план"));
   assert.match(visibleText(approve), /Утвердить план/);
-  assert.doesNotMatch(visibleText(approve), /Добавить раздел|Сохранить план/);
+  assert.match(visibleText(approve), /Сохранить план/, "the form's own commit button keeps its words");
+  assert.doesNotMatch(visibleText(approve), /Добавить раздел/);
   const running = work({ writing: writing({ step: "section", result: "", total: 2, active: true }) });
   assert.ok(isOn(body(running), "Остановить"));
   assert.equal(visibleText(body(running)).includes("Остановить"), false);
@@ -320,13 +387,13 @@ test("work card: the plan editor adds and saves with icons; a running step stops
   assert.match(stopping, /ia-spin/);
 });
 
-test("work card, revise and edit modes end with a cross, not the word «Отмена»", () => {
+test("work card, revise and edit modes end with the word «Отмена» (an inline form's own button)", () => {
   const code = src("agent/WorkCard.tsx");
-  assert.equal(count(code, '<IconAction icon="x" variant="danger" label={workTexts.cancel}'), 2);
-  assert.doesNotMatch(code, />\s*\{workTexts\.cancel\}\s*</);
+  assert.equal(count(code, "{workTexts.cancel}"), 2);
+  assert.doesNotMatch(code, /<IconAction[^>]*workTexts\.cancel/);
 });
 
-test("turnkey cards: the edit of the understanding is a pencil, saving a disk, cancelling a cross; the questions skip is an icon", () => {
+test("turnkey cards: the edit of the understanding is a pencil, its save and cancel and the questions skip are words", () => {
   const card = { workType: "referat", volume: "10 страниц", fileFormat: "docx", formatting: "ГОСТ", variant: "", deadline: "", sources: "" };
   const w = { id: "w1", status: "review", version: 1, writing: null, workType: "referat", problem: "", message: "", questionRound: 0, questions: [], hasCard: true, card, edited: [], feasibility: "", feasibilityReason: "", partial: false, assumptions: [], helper: null, answered: [] };
   const ctx = { work: w, api: {}, busy: false, run: async () => undefined, step: async () => undefined, onWork: noop, errorLine: null };
@@ -335,11 +402,12 @@ test("turnkey cards: the edit of the understanding is a pencil, saving a disk, c
   assert.match(visibleText(view), /Подтвердить/);
   assert.doesNotMatch(visibleText(view), /Изменить/);
   const editing = html(h(UnderstandingCard, { ctx, startEditing: true }));
-  assert.deepEqual(ariaLabels(editing), ["Сохранить", "Отмена"]);
-  assert.match(editing, /<use href="#i-save"><\/use>/);
-  assert.equal(visibleText(editing).includes("Отмена"), false);
+  assert.deepEqual(ariaLabels(editing), []);
+  assert.match(editing, /class="btn sm"[^>]*>Сохранить</);
+  assert.match(editing, /class="btn ghost sm"[^>]*>Отмена</);
   const questions = html(h(WorkBody, { work: { ...w, status: "questions", questionRound: 1, questions: [{ kind: "text", text: "Тема?", options: [], default: 0, defaultText: "", why: "" }] }, api: {}, onWork: noop }));
-  assert.ok(isOn(questions, "Пропустить вопросы"));
+  assert.equal(buttonTag(questions, "Пропустить вопросы"), null);
+  assert.match(questions, /class="btn ghost sm"[^>]*>Пропустить вопросы</);
   assert.match(visibleText(questions), /Ответить/);
   const helper = html(h(WorkBody, { work: { ...w, status: "helper", helper: { steps: ["Шаг"], submit: "", pitfalls: [], readyParts: [], placeholders: [] } }, api: {}, onWork: noop }));
   assert.ok(isOn(helper, "Спросить по шагу"));
@@ -349,13 +417,21 @@ test("turnkey cards: the edit of the understanding is a pencil, saving a disk, c
 
 // ---- the source: no word buttons left in the small places of the panel ----
 
-// The word buttons that remain in src/agent, each with the reason: the main action of its card, a yes/no pair, a dialog button.
+// The word buttons that remain in src/agent, each with the reason: the main action of its card, a yes/no pair, a dialog button,
+// an inline form's own buttons («Пропустить», «Сохранить», «Отмена»), the only way out of an error («Повторить» of a card that
+// could not be read), and the bulk «Отменить всё» (it spends several results).
 const wordButtons = new Map([
-  ["agent/AgentCards.tsx", ["offer.label", "b.label", "texts.reviseSend", "card.submit", "b.label"]],
-  ["agent/ConfirmCard.tsx", ["confirmTexts.openAssignment", "confirmTexts.openTasks", "m.noLabel", "m.yesLabel"]],
-  ["agent/ScheduleCard.tsx", ["scheduleTexts.openSubjects", "scheduleTexts.no", "main.label", "scheduleTexts.retry"]],
-  ["agent/TurnkeyCards.tsx", ["props.problem === \"\" ? turnkeyTexts.triageStart : turnkeyTexts.retry", "turnkeyTexts.answer", "turnkeyTexts.confirm", "turnkeyTexts.askSend"]],
-  ["agent/WorkCard.tsx", ["model.button", "workTexts.retry", "model.button", "workTexts.approve", "model.button", "workTexts.revise", "openLabel(work)", "workTexts.reviseSubmit", "workTexts.rewrite"]],
+  ["agent/AgentCards.tsx", ["offer.label", "b.label", "texts.reviseSend", "card.submit", "card.skip", "b.label", "texts.undoAll"]],
+  ["agent/ConfirmCard.tsx", ["confirmTexts.openAssignment", "confirmTexts.openTasks", "m.noLabel", "m.yesLabel", "confirmTexts.reload"]],
+  ["agent/ScheduleCard.tsx", ["scheduleTexts.reload", "scheduleTexts.openSubjects", "scheduleTexts.no", "main.label", "scheduleTexts.retry"]],
+  [
+    "agent/TurnkeyCards.tsx",
+    ["props.problem === \"\" ? turnkeyTexts.triageStart : turnkeyTexts.retry", "turnkeyTexts.answer", "turnkeyTexts.skip", "turnkeyTexts.confirm", "turnkeyTexts.save", "turnkeyTexts.cancel", "turnkeyTexts.askSend"],
+  ],
+  [
+    "agent/WorkCard.tsx",
+    ["model.button", "workTexts.retry", "model.button", "workTexts.approve", "workTexts.savePlan", "model.button", "workTexts.revise", "openLabel(work)", "workTexts.reviseSubmit", "workTexts.cancel", "workTexts.rewrite", "workTexts.cancel"],
+  ],
   ["agent/WorkSend.tsx", ["note.sent ? sendWorkTexts.again : sendWorkTexts.button"]],
   ["agent/RestartDialog.tsx", ["restartTexts.hide", "props.fixBusy ? (block.fix.kind === \"stop\" ? restartTexts.stopping : restartTexts.cancelling) : block.fix.label"]],
   ["agent/ContextRing.tsx", ["ringTexts.hintButton"]],
@@ -372,7 +448,7 @@ test("every <Button> that still shows words in src/agent is a main action, a yes
 });
 
 test("the converted places draw no raw <button> with words: the secondary buttons go through IconAction", () => {
-  for (const file of ["AgentCards.tsx", "WorkCard.tsx", "TurnkeyCards.tsx", "ConfirmCard.tsx", "ScheduleCard.tsx", "MentionParts.tsx", "RestartDialog.tsx"]) {
+  for (const file of ["AgentCards.tsx", "WorkCard.tsx", "TurnkeyCards.tsx", "ScheduleCard.tsx", "MentionParts.tsx", "RestartDialog.tsx"]) {
     const code = src(`agent/${file}`);
     assert.ok(count(code, "<IconAction") > 0, file);
   }

@@ -37,6 +37,7 @@ import {
   type LoadFilter,
   loadHint,
   loadLevels,
+  cancelDownloadLabel,
   loadOptions,
   loadText,
   type MenuItem,
@@ -44,6 +45,7 @@ import {
   type ModelRow,
   progressPercent,
   progressText,
+  removeModelLabel,
   sizeText,
   statusNotes,
   texts,
@@ -495,7 +497,15 @@ function InstalledRow(props: {
         )}
       </div>
       <div className="acts">
-        <IconAction icon="trash" variant="danger" place="left" label={deleteBusy ? texts.removing : texts.remove} busy={deleteBusy} onClick={props.onAskDelete} />
+        <IconAction
+          icon="trash"
+          variant="danger"
+          place="left"
+          label={deleteBusy ? texts.removing : removeModelLabel(fullName(r))}
+          tipText={deleteBusy ? undefined : texts.remove}
+          busy={deleteBusy}
+          onClick={props.onAskDelete}
+        />
       </div>
       <RowMenu
         name={fullName(r)}
@@ -717,9 +727,27 @@ function CatalogRow(props: {
         )}
       </div>
       <div className="acts">
-        {action === "cancel" && <IconAction icon="x" variant="danger" place="left" label={texts.cancelDownload} disabled={key("cancel")} onClick={props.onCancel} />}
+        {action === "cancel" && (
+          <IconAction
+            icon="x"
+            variant="danger"
+            place="left"
+            label={cancelDownloadLabel(fullName(r))}
+            tipText={texts.cancelDownload}
+            disabled={key("cancel")}
+            onClick={props.onCancel}
+          />
+        )}
         {action === "delete" && (
-          <IconAction icon="trash" variant="danger" place="left" label={deleteBusy ? texts.removing : texts.remove} busy={deleteBusy} onClick={props.onAskDelete} />
+          <IconAction
+            icon="trash"
+            variant="danger"
+            place="left"
+            label={deleteBusy ? texts.removing : removeModelLabel(fullName(r))}
+            tipText={deleteBusy ? undefined : texts.remove}
+            busy={deleteBusy}
+            onClick={props.onAskDelete}
+          />
         )}
         {action === "download" && (
           <Button

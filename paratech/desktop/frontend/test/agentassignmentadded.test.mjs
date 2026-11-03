@@ -7,7 +7,7 @@ import { parseCard } from "../.test-build/bindings/agent.js";
 import { addedAssignmentText, entryModel, stepText } from "../.test-build/agentView.js";
 import { lineModel } from "../.test-build/journalView.js";
 import { AgentRequest } from "../.test-build/agent/AgentCards.js";
-import { buttonTag, isOn } from "./iconbtn.mjs";
+import { isOn } from "./iconbtn.mjs";
 
 const { renderToStaticMarkup } = server;
 const noop = () => undefined;
@@ -46,7 +46,8 @@ test("the panel line shows the text, «Открыть» and «Отменить»
   const out = render(added(), { openAssignment: noop });
   assert.ok(out.includes("Задание добавлено: Задачи 1-7 · Матанализ · до пт, 30 окт., 20:00"));
   // TASK-368: both are icon buttons named by aria-label (and a tooltip).
-  assert.ok(isOn(out, "Открыть"));
+  // «Открыть» goes into the app: a chevron whose name says which task.
+  assert.ok(isOn(out, "Открыть задание: Задачи 1-7"));
   assert.ok(isOn(out, "Отменить"));
 });
 
@@ -63,7 +64,7 @@ test("«Открыть» opens the assignment, «Отменить» undoes the a
     if (typeof n.type === "function" && n.type.name === "Card") walk(n.type(n.props));
   };
   walk(el);
-  const open = buttons.find((b) => b.label === "Открыть");
+  const open = buttons.find((b) => b.label === "Открыть задание: Задачи 1-7");
   const undo = buttons.find((b) => b.label === "Отменить");
   assert.ok(open && undo);
   open.onClick();
@@ -76,13 +77,13 @@ test("after undo the line says «Отменено» with no title and no link", 
   const out = render(added(), { undoNote: () => ({ busy: false, done: true, text: "" }) });
   assert.ok(out.includes("Отменено"));
   assert.ok(!out.includes("Задачи 1-7"));
-  assert.equal(buttonTag(out, "Открыть"), null);
+  assert.doesNotMatch(out, /aria-label="Открыть/);
 });
 
 test("a deleted assignment (null) has no link", () => {
   const out = render(null);
   assert.ok(out.includes("Действие выполнено"));
-  assert.equal(buttonTag(out, "Открыть"), null);
+  assert.doesNotMatch(out, /aria-label="Открыть/);
   assert.ok(isOn(out, "Отменить"));
 });
 

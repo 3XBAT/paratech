@@ -49,14 +49,10 @@ export function LectureTextCard(props: LectureTextCardProps) {
       {showsEarlierLecture(v) && <p className="small muted sm-detail">{lectureEarlierNote}</p>}
       {start !== null && (
         <div className="acts start sm-retry">
-          {v.lectureText.canStart ? (
-            // The first start is the card's only action: it keeps its words. A retry is a plain icon.
-            <Button busy={props.busy === "start"} busyLabel="Запуск…" disabled={off} onClick={props.onStart}>
-              {start}
-            </Button>
-          ) : (
-            <IconAction icon="retry" label={props.busy === "start" ? summaryToolTexts.starting : start} busy={props.busy === "start"} disabled={off} onClick={props.onStart} />
-          )}
+          {/* The first start and the retry are the only way on: both keep their words. */}
+          <Button busy={props.busy === "start"} busyLabel="Запуск…" disabled={off} onClick={props.onStart}>
+            {start}
+          </Button>
         </div>
       )}
       {/* Only a ready text has the tools: there is nothing to copy before. */}

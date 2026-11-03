@@ -61,7 +61,6 @@ import {
 } from "../.test-build/workView.js";
 import { WorkBody } from "../.test-build/agent/WorkCard.js";
 import { AgentRequest } from "../.test-build/agent/AgentCards.js";
-import { isOff } from "./iconbtn.mjs";
 
 const { renderToStaticMarkup } = server;
 const noop = () => undefined;
@@ -267,9 +266,8 @@ test("approve: the editor with the sections, both buttons, the limits", () => {
   assert.match(out, /Выше/);
   assert.match(out, /Ниже/);
   // Nothing edited: «Сохранить план» waits, «Утвердить план» does not.
-  // TASK-368: «Сохранить план» is a save icon with a tooltip, named by its aria-label.
-  const save = isOff(out, "Сохранить план");
-  assert.match(out, /<use href="#i-save"><\/use>/);
+  // «Сохранить план» is the form's own commit button and keeps its word; «Добавить раздел» (TASK-368) is a plus icon.
+  const save = /<button[^>]*disabled=""[^>]*>Сохранить план/.test(out);
   assert.match(out, /<use href="#i-plus"><\/use>/, "«Добавить раздел» is a plus icon");
   const approve = /<button[^>]*disabled=""[^>]*>Утвердить план/.test(out);
   assert.equal(save, true);

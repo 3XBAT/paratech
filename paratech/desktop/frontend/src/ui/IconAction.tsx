@@ -1,4 +1,4 @@
-import { type FocusEvent, type KeyboardEvent, type MouseEvent, type Ref, useId, useRef, useState } from "react";
+import { type FocusEvent, type KeyboardEvent, type MouseEvent, type Ref, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "./Icon.js";
 
 // The one icon button for the small, secondary places of every window (TASK-368): headers, rows under messages, toolbars,
@@ -86,38 +86,78 @@ function clipBox(el: HTMLElement): Box {
   return view;
 }
 
+/** Hover opens the tooltip after this pause (a pointer passing over a row does not flash tips); keyboard focus opens it at once. */
+export const TIP_DELAY_MS = 350;
+
 export function IconAction(props: IconActionProps) {
   const place = props.place ?? "above";
   const tip = useRef<HTMLSpanElement>(null);
+  const timer = useRef<number | undefined>(undefined);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   const [dismissed, setDismissed] = useState(false);
-  const reasonId = useId();
-  const off = props.busy === true || props.disabled === true;
-  const reason = props.disabled === true && props.disabledReason !== undefined ? props.disabledReason : "";
-  const text = reason !== "" ? `${props.label}. ${reason}` : (props.tipText ?? props.label);
+  const descId = useId();
+  const busy = props.busy === true;
+  const reason = props.disabled === true && !busy && props.disabledReason !== undefined ? props.disabledReason : "";
+  // A disabled control with a reason stays focusable (aria-disabled) so the keyboard and screen reader users can read the reason.
+  const soft = reason !== "";
+  const off = busy || (props.disabled === true && !soft);
+  // The tooltip words that differ from the name are also given to screen readers, which do not read the hidden tooltip.
+  const desc = soft ? reason : props.tipText !== undefined && props.tipText !== props.label ? props.tipText : "";
+  const text = soft ? `${props.label}. ${reason}` : (props.tipText ?? props.label);
+  const open = !dismissed && (hovered || focused || props.note === true);
 
-  // The tooltip is laid out even when hidden, so it can be measured before it shows.
-  const fit = (el: HTMLElement) => {
+  // The tooltip is not laid out while hidden (it adds no scroll space to the lists around it); it is measured after it shows,
+  // before the browser paints.
+  useLayoutEffect(() => {
     const t = tip.current;
-    if (t === null) {
+    if (!open || t === null || t.parentElement === null) {
       return;
     }
     t.removeAttribute("data-flip");
     t.style.setProperty("--ia-dx", "0px");
-    const r = t.getBoundingClientRect();
-    const { dx, flip } = fitTip(r, clipBox(el), place);
+    const { dx, flip } = fitTip(t.getBoundingClientRect(), clipBox(t.parentElement), place);
     t.style.setProperty("--ia-dx", `${dx}px`);
     if (flip) {
       t.setAttribute("data-flip", "");
     }
+  }, [open, place, text]);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  const enter = () => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      setDismissed(false);
+      setHovered(true);
+    }, TIP_DELAY_MS);
   };
-  const show = (e: MouseEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
-    setDismissed(false);
-    fit(e.currentTarget);
+  const leave = () => {
+    window.clearTimeout(timer.current);
+    setHovered(false);
+  };
+  const focus = (e: FocusEvent<HTMLButtonElement>) => {
+    // A click focuses the button too; the tooltip follows the keyboard only (the hover covers the pointer).
+    if (e.currentTarget.matches(":focus-visible")) {
+      setDismissed(false);
+      setFocused(true);
+    }
   };
   // Esc hides the tooltip without moving the focus or the pointer (WCAG 1.4.13); the key still reaches the parent.
   const key = (e: KeyboardEvent<HTMLButtonElement>) => {
     if (e.key === "Escape") {
       setDismissed(true);
+    }
+  };
+  const click = (e: MouseEvent<HTMLButtonElement>) => {
+    if (soft) {
+      e.preventDefault();
+      return;
+    }
+    props.onClick(e);
+  };
+  const down = (e: MouseEvent<HTMLButtonElement>) => {
+    if (!soft) {
+      props.onMouseDown?.(e);
     }
   };
 
@@ -133,26 +173,29 @@ export function IconAction(props: IconActionProps) {
       tabIndex={props.tabIndex}
       className={cls}
       data-place={place}
-      data-dismissed={dismissed ? "" : undefined}
+      data-open={open ? "" : undefined}
       aria-label={props.label}
       aria-expanded={props.expanded}
-      aria-busy={props.busy === true ? true : undefined}
-      aria-describedby={reason !== "" ? reasonId : undefined}
+      aria-busy={busy ? true : undefined}
+      aria-disabled={soft ? true : undefined}
+      aria-describedby={desc !== "" ? descId : undefined}
       {...dataAttributes(props.data)}
       disabled={off}
-      onClick={props.onClick}
-      onMouseDown={props.onMouseDown}
-      onMouseEnter={show}
-      onFocus={show}
+      onClick={click}
+      onMouseDown={down}
+      onMouseEnter={enter}
+      onMouseLeave={leave}
+      onFocus={focus}
+      onBlur={() => setFocused(false)}
       onKeyDown={key}
     >
-      {props.busy === true ? <span className="ia-spin" aria-hidden="true" /> : <Icon name={props.icon} />}
+      {busy ? <span className="ia-spin" aria-hidden="true" /> : <Icon name={props.icon} />}
       <span ref={tip} className="ia-tip" aria-hidden="true">
         {text}
       </span>
-      {reason !== "" && (
-        <span id={reasonId} className="ia-vh">
-          {reason}
+      {desc !== "" && (
+        <span id={descId} className="ia-vh">
+          {desc}
         </span>
       )}
     </button>

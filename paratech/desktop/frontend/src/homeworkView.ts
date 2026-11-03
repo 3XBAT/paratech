@@ -350,6 +350,11 @@ const sourceLabels: Readonly<Record<VersionSource, string>> = {
 /** The word of the open button of a version row: an icon with a tooltip and an aria-label (TASK-368). */
 export const versionTexts = { open: "Открыть" } as const;
 
+/** The name of the open button of a version row: it names the version, so the rows differ for a screen reader. */
+export function openVersionLabel(number: number): string {
+  return `${versionTexts.open} версию ${number}`;
+}
+
 /** "Версия 3 · исправлена вручную". */
 export function versionTitle(v: { number: number; source: VersionSource }): string {
   return `Версия ${v.number} · ${sourceLabels[v.source]}`;

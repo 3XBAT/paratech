@@ -56,6 +56,7 @@ import {
   generationRunning,
   generationView,
   isStale,
+  openVersionLabel,
   sendFormatChange,
   versionTexts,
   versionTitle,
@@ -1505,9 +1506,10 @@ function AssignmentEditor(props: {
                     <span className="small muted">Открыта</span>
                   ) : (
                     <IconAction
-                      icon="open"
+                      icon="chevr"
                       place="left"
-                      label={versionTexts.open}
+                      label={openVersionLabel(v.number)}
+                      tipText={versionTexts.open}
                       disabled={!idle || dirty || generating}
                       onClick={() => void showVersion(v.number)}
                     />

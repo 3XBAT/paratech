@@ -21,6 +21,7 @@ import {
   isNoteOnly,
   kindOptions,
   knowledgeToolTexts,
+  setSubjectLabel,
   lectureLabel,
   lessonsWithoutNotes,
   localDay,
@@ -106,7 +107,7 @@ export function LessonList(props: {
                 <ReadyMarks lesson={l} />
               )}
             </button>
-            {onEdit && !isNoteOnly(l) && <IconAction icon="pencil" place="left" label={knowledgeToolTexts.setSubject} onClick={() => onEdit(l)} />}
+            {onEdit && !isNoteOnly(l) && <IconAction icon="folder" place="left" label={setSubjectLabel(lectureLabel(l))} tipText={knowledgeToolTexts.setSubject} onClick={() => onEdit(l)} />}
           </li>
         );
       })}

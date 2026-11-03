@@ -64,7 +64,9 @@ export function ScheduleCardPending(props: { error: string; onReload?: () => voi
       </ResultLine>
       {props.onReload !== undefined && (
         <div className="ag-actions">
-          <IconAction icon="retry" label={scheduleTexts.reload} onClick={props.onReload} />
+          <Button size="sm" variant="secondary" onClick={props.onReload}>
+            {scheduleTexts.reload}
+          </Button>
         </div>
       )}
     </section>
@@ -159,7 +161,7 @@ export function ScheduleCardView(props: {
           <NoticeRows rows={model.rows} restore={on.restore} onChanged={on.reload} />
           {model.view === "confirmed" && (
             <div className="ag-actions">
-              <IconAction icon="undo" variant="danger" label={flow.busy === "undo" ? reviewTexts.undoing : reviewTexts.undoAll} busy={flow.busy === "undo"} disabled={busy} onClick={on.undo} />
+              <IconAction icon="undo" label={flow.busy === "undo" ? reviewTexts.undoing : reviewTexts.undoAll} busy={flow.busy === "undo"} disabled={busy} onClick={on.undo} />
               <Button size="sm" variant="primary" disabled={busy} busy={flow.busy === "confirm"} busyLabel={reviewTexts.creating} onClick={on.yes}>
                 {scheduleTexts.retry}
               </Button>

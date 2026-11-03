@@ -14,6 +14,7 @@ import {
   showsEarlier,
   type StepLine,
   stepLine,
+  openTaskLabel,
   summaryLine,
   summarySections,
   summaryToolTexts,
@@ -113,13 +114,14 @@ function RetrySlot(props: RetryProps & { view: SummaryView; step: RetryStep }) {
   const busy = props.retrying === props.step;
   return (
     <div className="acts start sm-retry">
-      <IconAction
-        icon="retry"
-        label={busy ? summaryToolTexts.starting : label}
+      <Button
         busy={busy}
+        busyLabel="Запуск…"
         disabled={props.retryDisabled === true || (props.retrying ?? "") !== ""}
         onClick={() => onRetry(props.step)}
-      />
+      >
+        {label}
+      </Button>
     </div>
   );
 }
@@ -241,7 +243,7 @@ export function HomeworkCard(
                 </>
               }
               actions={
-                <IconAction icon="open" place="left" label={summaryToolTexts.openAssignment} onClick={() => props.onOpenAssignment(a.id)} />
+                <IconAction icon="chevr" place="left" label={openTaskLabel(a.title)} onClick={() => props.onOpenAssignment(a.id)} />
               }
             />
           ))}

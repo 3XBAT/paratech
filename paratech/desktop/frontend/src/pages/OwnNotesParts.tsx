@@ -232,9 +232,9 @@ function PartsList(props: {
                 {r.page !== null && r.page.noText && <span className="small muted">{t.noText}</span>}
               </span>
               <span className="own-part-acts">
-                {/* Four distinct glyphs: the chevrons move, the arrow replaces, the sheet types the text of a photo page. */}
+                {/* Four distinct glyphs: plain arrows move, two opposite arrows swap the file, a clipboard pastes the text of a photo page. */}
                 <IconAction
-                  icon="chevup"
+                  icon="arrowup"
                   place="left"
                   label={`${t.moveUp}: ${shortName(r.name)}`}
                   tipText={t.moveUp}
@@ -246,7 +246,7 @@ function PartsList(props: {
                   }}
                 />
                 <IconAction
-                  icon="chev"
+                  icon="arrowdown"
                   place="left"
                   label={`${t.moveDown}: ${shortName(r.name)}`}
                   tipText={t.moveDown}
@@ -258,7 +258,7 @@ function PartsList(props: {
                   }}
                 />
                 <IconAction
-                  icon="retry"
+                  icon="swap"
                   place="left"
                   label={`${t.replace}: ${shortName(r.name)}`}
                   tipText={t.replace}
@@ -267,7 +267,7 @@ function PartsList(props: {
                 />
                 {r.page !== null && r.page.noText && (
                   <IconAction
-                    icon="doc"
+                    icon="paste"
                     place="left"
                     label={`${t.paste}: ${t.pageWord} ${r.page.number}`}
                     tipText={t.paste}

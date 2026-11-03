@@ -101,7 +101,7 @@ export function DoneIssueLine(props: {
         {props.where === "page" ? props.issue.pageText : props.issue.text}
       </ResultLine>
       {/* A retry and an open are plain secondary actions: icons. «К заданиям» is the only way out of a gone assignment: a word. */}
-      {button !== null && button.kind !== "back" && <IconAction icon={button.kind === "retry" ? "retry" : "open"} label={button.label} onClick={click} />}
+      {button !== null && button.kind !== "back" && <IconAction icon={button.kind === "retry" ? "retry" : "chevr"} label={button.label} onClick={click} />}
       {button !== null && button.kind === "back" && props.onBack !== undefined && (
         <Button size="sm" onClick={click}>
           {button.label}

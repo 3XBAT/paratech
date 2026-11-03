@@ -18,6 +18,7 @@ import type { RestoreCall } from "../subjectRemovalView.js";
 import { WorkWritingCard } from "./WorkCard.js";
 import { MessagePills } from "./MentionParts.js";
 import { Waiting } from "./Waiting.js";
+import { openTaskLabel } from "../summaryView.js";
 import { failedStepIndex, moreStepsLabel, planCollapseLimit, planTexts, planWindow, progressLabel, type StepMark } from "../planView.js";
 import {
   addedAssignmentText,
@@ -25,7 +26,6 @@ import {
   type ButtonCard,
   cardButtonIcon,
   offerIcon,
-  openAssignmentLabel,
   replyCopyText,
   replyStatus,
   type ButtonId,
@@ -101,7 +101,7 @@ export function OfferButton(props: { offer: OfferModel; actions: CardActions; ru
   // «Отменить» is a small secondary button: an icon. The other offers are the card's one main action and keep their words.
   const icon = offerIcon(offer.offer);
   if (icon !== null) {
-    return <IconAction icon={icon} variant="danger" label={offer.label} busy={props.running === true} disabled={actions.busy === true} onClick={() => actions.offer?.(offer.offer)} />;
+    return <IconAction icon={icon} label={offer.label} busy={props.running === true} disabled={actions.busy === true} onClick={() => actions.offer?.(offer.offer)} />;
   }
   return (
     <Button size="sm" variant="secondary" disabled={actions.busy === true} onClick={() => actions.offer?.(offer.offer)}>
@@ -414,7 +414,9 @@ function QuestionsCard(props: { card: Extract<CardModel, { type: "questions" }>;
           <Button size="sm" variant="primary" disabled={answers === null || props.actions.busy} onClick={() => answers && props.actions.answer(answers)}>
             {card.submit}
           </Button>
-          <IconAction icon="skip" label={card.skip} disabled={props.actions.busy} onClick={() => props.actions.answer(skipAnswers(card.questions))} />
+          <Button size="sm" variant="ghost" disabled={props.actions.busy} onClick={() => props.actions.answer(skipAnswers(card.questions))}>
+            {card.skip}
+          </Button>
         </div>
       )}
     </section>
@@ -521,15 +523,15 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
             ))}
           </span>
           {!note?.done && card.assignment && props.actions.openAssignment && (
-            <IconAction icon="open" label={openAssignmentLabel} onClick={() => card.assignment && props.actions.openAssignment?.(card.assignment.id)} />
+            <IconAction icon="chevr" label={openTaskLabel(card.assignment.title)} onClick={() => card.assignment && props.actions.openAssignment?.(card.assignment.id)} />
           )}
           {card.offer !== null && <OfferControl offer={card.offer} actions={props.actions} />}
           {/* «Остановить» was pressed: the line says «Запись остановлена» and offers a new recording. */}
           {note?.done === true && card.afterUndoOffer !== null && <OfferControl offer={card.afterUndoOffer} actions={props.actions} />}
           {!note?.done && card.undo.shown && (
             <IconAction
-              icon={undoIcon(card.undo.label)}
-              variant="danger"
+              icon={undoIcon(card.undo.kind)}
+              variant={card.undo.kind === "stop" ? "danger" : "default"}
               label={note?.busy ? card.undo.busyLabel : card.undo.label}
               busy={note?.busy === true}
               disabled={!card.undo.enabled}
@@ -705,7 +707,9 @@ export function AgentRequest(props: { model: EntryModel; actions: CardActions; d
       />
       {open.length > 1 && (
         <div className="ag-actions">
-          <IconAction icon="undo" variant="danger" label={texts.undoAll} disabled={open.some((id) => props.actions.undoNote(id)?.busy)} onClick={props.actions.undoAll} />
+          <Button size="sm" variant="ghost" disabled={open.some((id) => props.actions.undoNote(id)?.busy)} onClick={props.actions.undoAll}>
+            {texts.undoAll}
+          </Button>
         </div>
       )}
     </article>

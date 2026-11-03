@@ -175,7 +175,9 @@ export function QuestionsCard(props: { ctx: CardContext }) {
         <Button size="sm" variant="primary" disabled={ctx.busy} onClick={() => void ctx.run(async () => ctx.onWork(await ctx.api.answerQuestions(work.id, toAnswers(work.questions, drafts))))}>
           {turnkeyTexts.answer}
         </Button>
-        <IconAction icon="skip" label={turnkeyTexts.skip} disabled={ctx.busy} onClick={() => void ctx.run(async () => ctx.onWork(await ctx.api.skipQuestions(work.id)))} />
+        <Button size="sm" variant="ghost" disabled={ctx.busy} onClick={() => void ctx.run(async () => ctx.onWork(await ctx.api.skipQuestions(work.id)))}>
+          {turnkeyTexts.skip}
+        </Button>
       </div>
     </section>
   );
@@ -280,9 +282,9 @@ export function UnderstandingCard(props: { ctx: CardContext; startEditing?: bool
         {!editing && <IconAction icon="pencil" label={turnkeyTexts.edit} disabled={ctx.busy} onClick={() => setEditing(true)} />}
         {editing && (
           <>
-            <IconAction
-              icon="save"
-              label={turnkeyTexts.save}
+            <Button
+              size="sm"
+              variant="secondary"
               disabled={ctx.busy || !check.ok || !edited}
               onClick={() =>
                 void ctx.run(async () => {
@@ -291,17 +293,20 @@ export function UnderstandingCard(props: { ctx: CardContext; startEditing?: bool
                   setDraft(cardDraft(w.card));
                 })
               }
-            />
-            <IconAction
-              icon="x"
-              variant="danger"
-              label={turnkeyTexts.cancel}
+            >
+              {turnkeyTexts.save}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
               disabled={ctx.busy}
               onClick={() => {
                 setDraft(cardDraft(work.card));
                 setEditing(false);
               }}
-            />
+            >
+              {turnkeyTexts.cancel}
+            </Button>
           </>
         )}
       </div>

@@ -129,8 +129,9 @@ export function RestartNote(props: { id: string; problem: string; onCancel(): vo
         {props.problem !== "" && <span className="ag-restart-problem">{props.problem}</span>}
       </span>
       <span className="ag-restart-acts">
-        {props.onRestoreText && <IconAction icon="undo" place="below" label={restartTexts.restoreText} onClick={props.onRestoreText} />}
-        <IconAction icon="x" variant="danger" place="below" label={restartTexts.undoLabel} onClick={props.onCancel} />
+        {/* «insert» (an arrow into a field) puts the text back into the box; «undo» takes the whole restart back. */}
+        {props.onRestoreText && <IconAction icon="insert" place="below" label={restartTexts.restoreText} onClick={props.onRestoreText} />}
+        <IconAction icon="undo" place="below" label={restartTexts.undoLabel} onClick={props.onCancel} />
       </span>
     </div>
   );

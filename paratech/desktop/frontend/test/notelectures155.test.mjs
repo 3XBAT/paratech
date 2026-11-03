@@ -171,8 +171,8 @@ test("the list shows the chip «ваш конспект» on note-only lectures 
   assert.equal(html.split("ваш конспект").length - 1, 2);
   assert.ok(html.includes("Расшифровка"));
   // A note-only lecture has no recording whose subject could be corrected.
-  // TASK-368: «Указать предмет» is a pencil icon: its words are the tooltip and the aria-label (two places), not visible text.
-  assert.equal(html.split('aria-label="Указать предмет"').length - 1, 1);
+  // TASK-368: «Указать предмет» is a folder icon named after its lesson («Указать предмет: …») by aria-label, not visible text.
+  assert.equal(html.split('aria-label="Указать предмет: ').length - 1, 1);
   assert.equal(visibleText(html).includes("Указать предмет"), false);
   const evil = "<script>x</script>.docx";
   const e = renderToStaticMarkup(h(LessonList, { lessons: [dayLecture({ notes: [note({ title: evil })] })], onOpen: () => undefined }));

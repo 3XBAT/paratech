@@ -7,16 +7,21 @@ export function buttonTag(html, label) {
   return tags.find((t) => t.includes(`aria-label="${label}"`)) ?? null;
 }
 
+/** Off: natively disabled, or aria-disabled (a disabled button with a reason stays focusable so the reason can be read). */
+function off(tag) {
+  return /\sdisabled=""/.test(tag) || /\saria-disabled="true"/.test(tag);
+}
+
 /** True when the button named `label` exists and is not disabled. */
 export function isOn(html, label) {
   const tag = buttonTag(html, label);
-  return tag !== null && !/\sdisabled=""/.test(tag);
+  return tag !== null && !off(tag);
 }
 
-/** True when the button named `label` exists and is disabled. */
+/** True when the button named `label` exists and is disabled (natively or aria-disabled). */
 export function isOff(html, label) {
   const tag = buttonTag(html, label);
-  return tag !== null && /\sdisabled=""/.test(tag);
+  return tag !== null && off(tag);
 }
 
 /** The aria-labels of all buttons of a markup, in order. */
@@ -24,11 +29,11 @@ export function ariaLabels(html) {
   return [...html.matchAll(/<button\b[^>]*\saria-label="([^"]*)"/g)].map((m) => m[1]);
 }
 
-/** The visible text of the markup: tags and the aria-hidden tooltips removed. */
+/** The visible text of the markup: tags, the aria-hidden tooltips and the visually hidden descriptions removed. */
 export function visibleText(html) {
   return html
     .replace(/<span class="ia-tip"[^>]*>[^<]*<\/span>/g, "")
-    .replace(/<span class="ia-vh">[^<]*<\/span>/g, "")
+    .replace(/<span (?:id="[^"]*" )?class="ia-vh">[^<]*<\/span>/g, "")
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();

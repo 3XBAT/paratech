@@ -15,6 +15,11 @@ import type { IconName } from "./ui/Icon.js";
 // The deadline wording lives in dueText.ts; the names stay importable from here.
 export { dayAndTime, dayText, daysBetween, daysLeftText, dueText, parseMoment, timeText };
 
+/** The name of the open button of a repeated row: it names the pair, so a screen reader can tell the rows apart. */
+export function openPairLabel(title: string): string {
+  return title.trim() === "" ? texts.open : `${texts.openLesson}: ${title.trim()}`;
+}
+
 export const texts = {
   title: "Сегодня",
   askTitle: "Спросить paratech",

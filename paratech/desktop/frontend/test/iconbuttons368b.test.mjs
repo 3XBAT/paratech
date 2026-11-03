@@ -19,9 +19,14 @@ import { LessonList } from "../.test-build/pages/KnowledgeParts.js";
 import { PageViewer } from "../.test-build/pages/PageViewer.js";
 import { TeachersBlock } from "../.test-build/pages/TeachersBlock.js";
 import { SetCard } from "../.test-build/pages/TicketsParts.js";
-import { DoneRow } from "../.test-build/pages/ScheduleSubjectsReview.js";
+import { DoneRow, ScheduleCheckFailedLine } from "../.test-build/pages/ScheduleSubjectsReview.js";
 import { parseSet } from "../.test-build/bindings/tickets.js";
 import { idleTeacher } from "../.test-build/teachersView.js";
+import { openPairLabel } from "../.test-build/todayView.js";
+import { openTaskLabel } from "../.test-build/summaryView.js";
+import { removeModelLabel, cancelDownloadLabel } from "../.test-build/modelsView.js";
+import { openVersionLabel } from "../.test-build/homeworkView.js";
+import { setSubjectLabel } from "../.test-build/knowledgeView.js";
 import { ariaLabels, buttonTag, isOff, isOn, visibleText } from "./iconbtn.mjs";
 
 const { renderToStaticMarkup } = server;
@@ -41,12 +46,14 @@ function assertIcon(out, label, icon) {
 
 // ---- the icon set and the component ----
 
-test("the new icons (trash, chevup, copysel) are in the sprite once each", () => {
+test("the new icons (trash, chevup, copysel) are in the sprite once each; copysel has solid strokes and a text cursor", () => {
   const svg = html(h(IconSprite));
   for (const name of ["trash", "chevup", "copysel"]) {
     assert.equal(count(svg, `id="i-${name}"`), 1, name);
   }
-});
+  const copysel = svg.slice(svg.indexOf('id="i-copysel"'), svg.indexOf("</symbol>", svg.indexOf('id="i-copysel"')));
+  assert.doesNotMatch(copysel, /dasharray/i, "dashes vanish at 16px");
+  assert.match(copysel, /M12\.5 12h4M14\.5 12v5M12\.5 17h4/, "an I-beam on the front sheet");});
 
 test("IconAction passes data-* attributes (the pages find buttons by them) and onMouseDown (the selection stays)", () => {
   const out = html(h(IconAction, { icon: "chevup", label: "Выше", data: { move: "up", mid: "m1", "page-paste": "" }, onClick: noop, onMouseDown: noop }));
@@ -55,16 +62,19 @@ test("IconAction passes data-* attributes (the pages find buttons by them) and o
   assert.match(out, /data-page-paste=""/);
   assert.doesNotMatch(html(h(IconAction, { icon: "x", label: "Закрыть", onClick: noop })), /data-(?!place)/);
   const code = src("ui/IconAction.tsx");
-  assert.match(code, /onMouseDown=\{props\.onMouseDown\}/);
+  assert.match(code, /props\.onMouseDown\?\.\(e\)/, "the handler runs unless the button is aria-disabled");
+  assert.match(code, /onMouseDown=\{down\}/);
 });
 
 // ---- the library: files ----
 
-test("files: the way out of a refusal is a retry icon («Повторить» / «Обновить список»), the undo of a placement an undo icon", () => {
+test("files: the only way out of a refusal keeps its words («Повторить» / «Обновить список»), the undo of a placement is an undo icon", () => {
   const retry = html(h(ErrorLine, { text: "Файл больше 100 МБ.", onRefresh: noop, onRetry: noop }));
-  assertIcon(retry, "Повторить", "retry");
+  assert.deepEqual(ariaLabels(retry), []);
+  assert.match(retry, /class="btn sm"[^>]*>Повторить</);
   const refresh = html(h(ErrorLine, { text: "Папка не найдена: обновите список.", onRefresh: noop, onRetry: noop }));
-  assertIcon(refresh, "Обновить список", "retry");
+  assert.deepEqual(ariaLabels(refresh), []);
+  assert.match(refresh, /class="btn sm"[^>]*>Обновить список</);
   const item = { id: 1, materialId: "m1", text: "Положено в «Лекции».", back: { kind: "inbox" }, error: "", expires: 0 };
   const undo = html(h(UndoLines, { items: [item], busy: false, onUndo: noop, onRefresh: noop }));
   assertIcon(undo, "Вернуть", "undo");
@@ -93,21 +103,27 @@ test("a refusal of «Выполнено»: retry and open are icons, «Закр�
   assert.match(gone, /<button type="button" class="btn sm">/);
 });
 
-test("Today: a failed read and a failed stop use retry and open icons; the recording button keeps its words", () => {
+test("Today: a failed read and a failed stop keep the words (the only way out); the rows of the day open with a chevron that names the pair", () => {
   const load = html(h(TodayLoadError, { onRetry: noop }));
-  assertIcon(load, "Повторить", "retry");
+  assert.deepEqual(ariaLabels(load), []);
+  assert.match(load, /class="btn sm"[^>]*>Повторить</);
   const stop = html(h(StopProblem, { text: "Не удалось остановить.", retrying: false, canRetry: true, onRetry: noop, onOpenRecordings: noop }));
-  assert.deepEqual(ariaLabels(stop), ["Повторить", "Перейти к записям"]);
+  assert.deepEqual(ariaLabels(stop), []);
+  assert.match(visibleText(stop), /Повторить .*Перейти к записям/);
   const busy = html(h(StopProblem, { text: "Не удалось остановить.", retrying: true, canRetry: true, onRetry: noop, onOpenRecordings: noop }));
-  assert.ok(isOff(busy, "Остановка…"));
-  assert.match(busy, /aria-busy="true"/);
+  assert.match(busy, /disabled=""[^>]*>[^]*Остановка…/);
   const parts = src("pages/TodayParts.tsx");
-  assert.equal(count(parts, "<IconAction"), 5, "load error, stop retry, open recordings, two «Открыть» of the summary rows");
-  assert.equal(count(parts, "{texts.open}"), 2, "the old words are the labels of those two");
+  assert.equal(count(parts, "<IconAction"), 2, "the two «Открыть» of the summary rows");
+  assert.equal(count(parts, 'icon="chevr"'), 2, "opening a row of the app is a chevron");
+  assert.equal(count(parts, "openPairLabel("), 2, "and its name says which pair");
+  assert.equal(openPairLabel("Матанализ"), "Открыть пару: Матанализ");
+  assert.equal(openPairLabel("  "), "Открыть");
 });
 
-test("Journal: «Повторить» and the row «Отменить» are icons; the filter reset of an empty list keeps its words", () => {
-  assertIcon(html(h(JournalLoadError, { text: "Не удалось.", onRetry: noop })), "Повторить", "retry");
+test("Journal: «Повторить» keeps its word; the row «Отменить» is an icon; the filter reset of an empty list keeps its words", () => {
+  const retry = html(h(JournalLoadError, { text: "Не удалось.", onRetry: noop }));
+  assert.deepEqual(ariaLabels(retry), []);
+  assert.match(retry, /class="btn ghost sm"[^>]*>Повторить</);
   const line = { kind: "action", at: "2026-10-22T10:00:00Z", updatedAt: "2026-10-22T10:00:00Z", subjectId: "", actionId: "a1", threadId: "t1", turn: 1, tool: "create_subject", jobId: "", jobType: "", status: "DONE", undoable: true, cannotUndo: false, noUndo: "" };
   const out = html(h(JournalList, { lines: [line], subjects: new Map(), busyAction: "", onUndo: noop }));
   assertIcon(out, "Отменить", "undo");
@@ -129,24 +145,31 @@ const summaryView = (over = {}, lt = {}, summary = {}) => ({
   ...over,
 });
 
-test("the summary: «Скопировать» is a copy icon, «Сделать конспект заново» / «Повторить» a retry icon, «Открыть задание» an open icon", () => {
+test("the summary: «Скопировать» is a copy icon; «Сделать конспект заново» (it spends quota) and «Повторить» keep words; «Открыть задание» is a chevron naming the task", () => {
   const tools = html(h(SummaryTools, { ready: true, idle: true, busy: "", message: null, onCopy: noop, onSave: noop }));
   assertIcon(tools, "Скопировать", "copy");
   const redo = html(h(SummaryCard, { view: summaryView(), onRetry: noop, retrying: "" }));
-  assertIcon(redo, "Сделать конспект заново", "retry");
+  assert.deepEqual(ariaLabels(redo), []);
+  assert.match(visibleText(redo), /Сделать конспект заново/);
   const failed = html(h(SummaryCard, { view: summaryView({}, {}, { ...step("failed"), ready: false }), onRetry: noop, retrying: "" }));
-  assertIcon(failed, "Повторить", "retry");
-  assert.ok(isOff(html(h(SummaryCard, { view: summaryView(), onRetry: noop, retrying: "summary" })), "Запуск…"));
+  assert.deepEqual(ariaLabels(failed), []);
+  assert.match(visibleText(failed), /Повторить/);
+  const running = html(h(SummaryCard, { view: summaryView(), onRetry: noop, retrying: "summary" }));
+  assert.match(running, /disabled=""[^>]*>[^]*Запуск…/);
   assert.equal(html(h(SummaryCard, { view: summaryView() })).includes("<button"), false, "no handler, no button");
   const task = { id: "a1", title: "Задача", description: "", due: "2026-10-25T20:59:00Z", userEdited: false, subject: "Матанализ", subjectSource: "schedule", kind: "lecture", teacher: "", teacherSource: "", lessonDate: "2026-10-19T06:00:00Z" };
   const withTask = summaryView({ homework: { ...step("done"), assignments: [task] } });
-  assertIcon(html(h(HomeworkCard, { view: withTask, onOpenAssignment: noop })), "Открыть задание", "open");
+  const opened = html(h(HomeworkCard, { view: withTask, onOpenAssignment: noop }));
+  assertIcon(opened, "Открыть задание: Задача", "chevr");
+  assert.equal(openTaskLabel("Задача"), "Открыть задание: Задача");
+  assert.equal(openTaskLabel(""), "Открыть задание");
+  assert.doesNotMatch(opened, /#i-open/, "the arrow out of a box is only for what opens outside the app");
 });
 
 const lectureCard = (v, over = {}) =>
   html(h(LectureTextCard, { view: v, busy: "", disabled: false, format: "txt", onFormat: noop, onCopy: noop, onSave: noop, onStart: noop, onOpenTranscript: noop, message: null, ...over }));
 
-test("the lecture text: copy and save are icons, a retry is an icon, the first «Сделать текст лекции» and «Исходная расшифровка» keep words", () => {
+test("the lecture text: copy and save are icons, the start and the retry keep words with «Исходная расшифровка»", () => {
   const ready = lectureCard(summaryView());
   assert.deepEqual(ariaLabels(ready), ["Скопировать", "Сохранить как…"]);
   assertIcon(ready, "Скопировать", "copy");
@@ -156,7 +179,8 @@ test("the lecture text: copy and save are icons, a retry is an icon, the first �
   assert.deepEqual(ariaLabels(first), []);
   assert.match(visibleText(first), /Сделать текст лекции/);
   const failed = lectureCard(summaryView({}, { ...step("failed"), ready: false, blocks: [], canStart: false, retryWork: "lectureText" }));
-  assertIcon(failed, "Повторить", "retry");
+  assert.deepEqual(ariaLabels(failed), []);
+  assert.match(visibleText(failed), /Повторить/);
   assert.ok(isOff(lectureCard(summaryView(), { busy: "copy" }), "Копирование…"));
   assert.ok(isOff(lectureCard(summaryView(), { busy: "save" }), "Сохранение…"));
 });
@@ -179,26 +203,34 @@ test("the transcript tools: search steps, two different copy glyphs and save are
 
 // ---- the knowledge base, notes, pages ----
 
-test("«База знаний»: «Указать предмет» of a lesson row is a pencil, «Экспорт в .md» a download icon with the hint as its tooltip", () => {
+test("«База знаний»: «Указать предмет» of a lesson row is a folder naming the lesson, «Экспорт в .md» a download icon with the hint as its tooltip", () => {
   const lesson = {
     key: "recording:r1", noteOnly: false, undated: false, anchor: "recording", scheduleLessonId: "", date: "", notes: [], recordingId: "r1", startedAt: "2026-10-19T12:00:00Z",
     durationSeconds: 5400, title: "Пределы", subject: "", subjectKey: "", kind: "lecture", subjectEdited: false, kindEdited: false, transcriptReady: true, summaryReady: true,
     lectureTextReady: false, librarySubjectId: "", librarySubjectState: "none",
   };
   const out = html(h(LessonList, { lessons: [lesson], onOpen: noop, onEdit: noop }));
-  assertIcon(out, "Указать предмет", "pencil");
+  assert.equal(ariaLabels(out).length, 1);
+  assert.match(ariaLabels(out)[0], /^Указать предмет: /, "the name says which lesson");
+  assertIcon(out, ariaLabels(out)[0], "folder");
+  assert.equal(setSubjectLabel("Пределы"), "Указать предмет: Пределы");
+  assert.equal(setSubjectLabel(" "), "Указать предмет");
   const page = src("pages/KnowledgeBasePage.tsx");
   assert.match(page, /<IconAction\s+icon="down"\s+place="below"/);
   assert.match(page, /tipText=\{exportTip\}/);
   assert.doesNotMatch(page, />\s*Экспорт в \.md\s*</, "the words come from knowledgeView.ts");
 });
 
-test("own notes: the four row actions have four different glyphs and keep the attributes the focus code reads; the dark viewer has its colours", () => {
+test("own notes: the four row actions have four glyphs of their own (none used elsewhere for another meaning) and keep the attributes the focus code reads; the dark viewer has its colours", () => {
   const code = src("pages/OwnNotesParts.tsx");
   const row = code.slice(code.indexOf('<span className="own-part-acts">'), code.indexOf("{pasting === r.materialId && ("));
   const icons = [...row.matchAll(/icon="([a-z]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(icons, ["chevup", "chev", "retry", "doc"]);
+  assert.deepEqual(icons, ["arrowup", "arrowdown", "swap", "paste"]);
   assert.equal(new Set(icons).size, 4, "a row of four icons is never ambiguous");
+  // chev/chevup mean show/hide, retry means repeat, doc means a document: the row uses none of them.
+  for (const taken of ["chev", "chevup", "retry", "doc", "up", "down"]) {
+    assert.equal(icons.includes(taken), false, taken);
+  }
   assert.match(row, /data=\{\{ move: "up", mid: r\.materialId \}\}/);
   assert.match(row, /data=\{\{ move: "down", mid: r\.materialId \}\}/);
   assert.match(row, /data=\{\{ "page-paste": "", mid: r\.materialId \}\}/);
@@ -218,12 +250,20 @@ test("the page viewer: previous, next and close are icons; close stays the eleme
   assert.equal(count(first, "<button"), 3);
   assert.equal(count(first, 'class="btn'), 0, "no word button");
   assert.equal(count(first, 'class="ia"'), 3);
+  // A mirrored pair: left and right chevrons, then the cross.
+  assert.deepEqual([...first.matchAll(/<use href="#i-([a-z]+)">/g)].map((m) => m[1]).slice(-3), ["chevl", "chevr", "x"]);
   assert.match(buttonTag(first, ariaLabels(first)[2]), /data-close=""/);
   const prev = ariaLabels(first)[0];
   assert.ok(isOff(first, prev), "the first page has no previous");
   const last = html(h(PageViewer, { pages, start: 2, onClose: noop }));
   assert.ok(isOff(last, ariaLabels(last)[1]), "the last page has no next");
   assert.match(src("pages/PageViewer.tsx"), /button\[data-close\]/);
+});
+
+test("homework: opening a version switches it in place: a chevron that names the version, not the arrow out of a box", () => {
+  const page = src("pages/HomeworkPage.tsx");
+  assert.match(page, /icon="chevr"\s+place="left"\s+label=\{openVersionLabel\(v\.number\)\}\s+tipText=\{versionTexts\.open\}/);
+  assert.equal(openVersionLabel(3), "Открыть версию 3");
 });
 
 // ---- settings, tickets, schedule ----
@@ -263,24 +303,34 @@ test("tickets: undo, stop and show/hide are icons; «Открыть .docx» and 
   assert.ok(isOff(card(ticketSet({ status: "answering", materialId: "" }), { busy: true }), "Отменяется…"));
 });
 
-test("schedule: the outcome of «Создать предметы» has undo and close icons; the list folds with a chevron", () => {
+test("schedule: the outcome of «Создать предметы» has undo (default colour) and close icons; «Развернуть все»/«Свернуть все» and the check retry keep words", () => {
   const out = html(h(DoneRow, { text: "Создано предметов: 2", phase: "idle", onUndo: noop, onClose: noop }));
   assertIcon(out, "Отменить всё", "undo");
   assertIcon(out, "Закрыть", "x");
-  assert.match(buttonTag(out, "Отменить всё"), /ia-danger/);
+  assert.doesNotMatch(buttonTag(out, "Отменить всё"), /ia-danger/, "an undo is not red");
   assert.ok(isOff(html(h(DoneRow, { text: "x", phase: "undoing", onUndo: noop })), "Отмена…") || isOff(html(h(DoneRow, { text: "x", phase: "undoing", onUndo: noop })), "Отменяется…"));
   const review = src("pages/ScheduleSubjectsReview.tsx");
   assert.match(review, /rest: null,/, "«Показать остальные» keeps its words");
-  assert.match(src("pages/SchedulePage.tsx"), /icon=\{folded \? "chev" : "chevup"\}/);
+  const page = src("pages/SchedulePage.tsx");
+  assert.match(page, /\{folded \? listTexts\.expandAll : listTexts\.collapseAll\}/);
+  assert.doesNotMatch(page, /IconAction/);
+  // The check of the schedule failed: «Повторить» is a word (the empty list of subjects is covered by scheduleSubjects312).
+  const failed = html(h(ScheduleCheckFailedLine, { onRetry: noop }));
+  assert.deepEqual(ariaLabels(failed), []);
+  assert.match(failed, /class="btn ghost sm"[^>]*>Повторить</);
 });
 
-test("models and the recordings selection: delete is a trash icon (the confirmation is unchanged), cancel and clear a cross", () => {
+test("models and the recordings selection: a model row's delete is a trash icon and its cancel a cross, both naming the model; «Удалить выбранные» keeps its word, the clear is a cross", () => {
   const models = src("pages/ModelsPage.tsx");
-  assert.equal(count(models, '<IconAction icon="trash" variant="danger"'), 2);
-  assert.match(models, /<IconAction icon="x" variant="danger" place="left" label=\{texts\.cancelDownload\}/);
+  assert.equal((models.match(/icon="trash"\s+variant="danger"/g) ?? []).length, 2, "an installed row and a catalog row");
+  assert.equal(count(models, "removeModelLabel(fullName(r))"), 2);
+  assert.equal(count(models, "cancelDownloadLabel(fullName(r))"), 1);
+  assert.match(models, /icon="x"\s+variant="danger"\s+place="left"\s+label=\{cancelDownloadLabel/);
   assert.match(models, /onClick=\{props\.onAskDelete\}/, "the row still asks first");
+  assert.equal(removeModelLabel("small · q5"), "Удалить модель small · q5");
+  assert.equal(cancelDownloadLabel("small · q5"), "Отменить скачивание: small · q5");
   const recs = src("pages/RecordingsPage.tsx");
-  assert.match(recs, /<IconAction icon="trash" variant="danger" label=\{deleteTexts\.selectedDelete\}[^>]*onClick=\{\(\) => askDelete\(\[\.\.\.selected\]\)\}/);
+  assert.match(recs, /<Button variant="danger" disabled=\{deleting !== null\} onClick=\{\(\) => askDelete\(\[\.\.\.selected\]\)\}>\s*\{deleteTexts\.selectedDelete\}/);
   assert.match(recs, /<IconAction icon="x" label=\{deleteTexts\.selectedClear\}/);
 });
 
@@ -329,20 +379,23 @@ function buttonBodies(code) {
 //  - the way out of a refusal that must name its target («Вернуть», «Разложить», «Открыть подключения», «К заданиям»);
 //  - an empty-state call to action; a navigation or a disclosure whose words are the content («Исходная расшифровка»,
 //    the shown count of failed jobs, a suggestion chip, a link with a date).
-// Anything else (retry, refresh, open, close, copy, save-as, undo, delete, cancel in a row, edit, show/hide) is an icon.
+// Anything else (open, close, copy, save-as, undo, delete, cancel in a row, edit, show/hide, and a retry that sits inside a
+// populated block) is an icon. A retry, refresh or reload that is the ONLY way out of an error state keeps its words
+// (the LoadError lines, the cards that could not be read, «Сделать конспект заново»), and so do the bulk «Развернуть все»,
+// «Удалить выбранные» and the commit buttons of inline forms.
 const wordButtons = {
   "pages/AppleCalendarHelpPage.tsx": ["{helpTexts.backToConnections}", "{l.caption}"],
   "pages/AssignmentDoneParts.tsx": ["{pageDoneLabel(props.done)}", "{button.label}", "Открыть"],
   "pages/CalendarSync.tsx": ["{calendarTexts.sync}"],
   "pages/ConnectionsPage.tsx": ["Сохранить адрес", "Сохранить", "Проверить почту"],
   "pages/DiagnosticsPage.tsx": ["{check.label}", "{save.label}"],
-  "pages/FileRows.tsx": ["{addFileTexts.moveHere}", "{addFileTexts.place}", "{fileTexts.createSubject}", "{fileTexts.cancel}", "{fileTexts.putHere}", "{fileTexts.cancel}", "{line.action}", "{primary.label}"],
+  "pages/FileRows.tsx": ["{fileTexts.refresh}", "{fileTexts.retry}", "{addFileTexts.moveHere}", "{addFileTexts.place}", "{fileTexts.createSubject}", "{fileTexts.cancel}", "{fileTexts.putHere}", "{fileTexts.cancel}", "{line.action}", "{primary.label}"],
   "pages/GoogleBlock.tsx": ["{googleTexts.save}", "{googleTexts.remove}", "{googleTexts.cancel}", "{googleTexts.signIn}", "{googleTexts.signOut}"],
   "pages/HomeworkDialogs.tsx": ["{changeTexts.restore}", "{changeTexts.remove}", "{changeTexts.cancel}", "{changeTexts.openSend}"],
   "pages/HomeworkMenus.tsx": ["{firstRunTexts.manual}", "{draftButtonTexts.markSent}", "{draftButtonTexts.sendAgain}", '{draftButtonTexts.save} <span aria-hidden="true"> ▾</span>'],
   "pages/HomeworkPage.tsx": ["{addTexts.button}", "{empty.action.label}", "{filterReset}", "Сохранить правку", "Отменить правку", "Взять этот текст", "К последней версии", "{draftButtonTexts.send}", "{offer.label}"],
   "pages/HomeworkTurnkey.tsx": ["{turnkeyTexts.button}"],
-  "pages/JournalParts.tsx": ["{texts.resetFilters}"],
+  "pages/JournalParts.tsx": ["{texts.retry}", "{texts.resetFilters}"],
   "pages/KnowledgeBasePage.tsx": ["Найти", "{importTexts.open}"],
   "pages/KnowledgeParts.tsx": ["{t.addPast}", "{t.choose}", "{t.choose}", "{t.pickUndated}", "{t.close}", "Сохранить", "Закрыть"],
   "pages/LectureTextParts.tsx": ["{start}", "Исходная расшифровка"],
@@ -354,9 +407,9 @@ const wordButtons = {
   "pages/RecipientParts.tsx": ["{action.label}"],
   "pages/RecordingImportPanel.tsx": ["{importTexts.choose}", "{importTexts.close}"],
   "pages/RecordingRow.tsx": ["{i.label}", "{i.label}", "{i.label}", "{i.label}", "{fixTexts.connections}", "{fixTexts.retry}", "{i.label}", "{i.label}"],
-  "pages/RecordingsPage.tsx": ["{importTexts.open}", "{manualStartTexts.open}", "{manualStartTexts.start}", "{manualStartTexts.cancel}", "{emptyTexts.schedule}", "{failed}"],
-  "pages/SchedulePage.tsx": ["Выбрать файл…", "{reviewTexts.open}", "{applyLabel(p)}", "Отмена"],
-  "pages/ScheduleSubjectsReview.tsx": ["{stepLabels[s]}", "{main.label}", "{reviewTexts.close}", "{label}", '{reviewTexts.open} {props.groups !== undefined && <span className="sched-cnt num">{props.groups}</span>}', "{props.addLabel}", "{reviewTexts.importSchedule}"],
+  "pages/RecordingsPage.tsx": ["{importTexts.open}", "{manualStartTexts.open}", "{manualStartTexts.start}", "{manualStartTexts.cancel}", "{deleteTexts.selectedDelete}", "{emptyTexts.schedule}", "{failed}"],
+  "pages/SchedulePage.tsx": ["Выбрать файл…", "{reviewTexts.open}", "{folded ? listTexts.expandAll : listTexts.collapseAll}", "{applyLabel(p)}", "Отмена"],
+  "pages/ScheduleSubjectsReview.tsx": ["{stepLabels[s]}", "{main.label}", "{reviewTexts.close}", "{label}", '{reviewTexts.open} {props.groups !== undefined && <span className="sched-cnt num">{props.groups}</span>}', "{reviewTexts.retry}", "{props.addLabel}", "{reviewTexts.retry}", "{reviewTexts.importSchedule}"],
   "pages/SecretSlot.tsx": ["{labels.save}", "{labels.remove}"],
   "pages/SettingsPage.tsx": ["Сохранить профиль"],
   "pages/SpeechComponentNotice.tsx": ["{speechTexts.install}", "{speechTexts.cancel}"],
@@ -366,15 +419,18 @@ const wordButtons = {
   "pages/SubjectsPage.tsx": ["{texts.addFile}"],
   "pages/SubjectsParts.tsx": ["{texts.addFile}", "{texts.addSubject}", "{texts.addFolder}", "{texts.knowledge}"],
   "pages/SubjectTasksTab.tsx": ["{tasksTexts.add}"],
-  "pages/SummaryParts.tsx": ["{checkSoundLabel}"],
+  "pages/SummaryParts.tsx": ["{label}", "{checkSoundLabel}"],
   "pages/TeachersBlock.tsx": ["{copyLabels[source].button}", "{teacherTexts.save}", "{teacherTexts.cancel}", "{teacherTexts.clear}"],
   "pages/TicketsPage.tsx": ["{texts.goSubjects}", "{texts.pasteAction}", "{texts.fileAction}"],
   "pages/TicketsParts.tsx": ["{props.restart ? texts.confirmAgain : texts.confirm}", "{texts.open}", "{texts.cancel}"],
   "pages/TodayCalendar.tsx": ["{calendarTexts.button}"],
   "pages/TodayParts.tsx": [
     "{c.text}",
+    "{texts.retry}",
     "{p}",
     '{b.kind === "stop" ? ( <> {recordTexts.running} {b.time !== "" && ( <> {" "} <span className="num">{b.time}</span> </> )} {` · ${recordTexts.stop}`} </> ) : ( b.label )}',
+    "{recordTexts.retry}",
+    "{recordTexts.openRecordings}",
     "{texts.record}",
     "{addTexts.button}",
   ],
@@ -414,7 +470,7 @@ test("the converted places draw their small buttons through IconAction and their
   for (const file of [
     "pages/FileRows.tsx", "pages/DropZone.tsx", "pages/AssignmentDoneParts.tsx", "pages/TodayParts.tsx", "pages/JournalParts.tsx", "pages/SummaryParts.tsx",
     "pages/LectureTextParts.tsx", "pages/TranscriptPage.tsx", "pages/KnowledgeParts.tsx", "pages/KnowledgeBasePage.tsx", "pages/OwnNotesParts.tsx", "pages/PageViewer.tsx",
-    "pages/TeachersBlock.tsx", "pages/TicketsPage.tsx", "pages/TicketsParts.tsx", "pages/ModelsPage.tsx", "pages/ScheduleSubjectsReview.tsx", "pages/SchedulePage.tsx",
+    "pages/TeachersBlock.tsx", "pages/TicketsPage.tsx", "pages/TicketsParts.tsx", "pages/ModelsPage.tsx", "pages/ScheduleSubjectsReview.tsx",
     "pages/SubjectRemoval.tsx", "pages/RecordingsPage.tsx", "pages/ConnectionsPage.tsx", "pages/HomeworkPage.tsx",
   ]) {
     const code = src(file);

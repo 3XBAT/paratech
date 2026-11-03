@@ -251,7 +251,6 @@ export function DoneRow(props: { text: string; phase: ReviewState["phase"]; onUn
       <ResultLine kind="ok">{props.text}</ResultLine>
       <IconAction
         icon="undo"
-        variant="danger"
         label={props.phase === "undoing" ? reviewTexts.undoing : reviewTexts.undoAll}
         busy={props.phase === "undoing"}
         disabled={props.phase !== "idle"}
@@ -701,7 +700,9 @@ export function ScheduleCheckFailedLine(props: { onRetry(): void }) {
   return (
     <p className="sched-offer small muted" role="status">
       <span>{reviewTexts.checkFailed}</span>
-      <IconAction icon="retry" label={reviewTexts.retry} onClick={props.onRetry} />
+      <Button size="sm" variant="ghost" onClick={props.onRetry}>
+        {reviewTexts.retry}
+      </Button>
     </p>
   );
 }
@@ -738,7 +739,9 @@ export function EmptySubjectsActions(props: { offer?: ScheduleOffer; addLabel: s
           <span className="small muted" role="status">
             {reviewTexts.checkFailed}
           </span>
-          <IconAction icon="retry" label={reviewTexts.retry} onClick={offer.onRetry} />
+          <Button size="sm" variant="ghost" onClick={offer.onRetry}>
+            {reviewTexts.retry}
+          </Button>
         </>
       );
     case "groups":

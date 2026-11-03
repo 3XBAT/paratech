@@ -573,14 +573,12 @@ test("a refusal of «Добавить файл» says why with the way out: «П
   const retry = html(h(AddFileLines, addLines({ error: "Файл больше 100 МБ." })));
   assert.match(retry, /role="alert"/);
   assert.match(retry, /Файл больше 100 МБ\./);
-  // TASK-368: the way out is an icon button (retry arrow) named «Повторить» / «Обновить список».
-  assert.ok(isOn(retry, "Повторить"));
-  assert.equal(visibleText(retry).includes("Повторить"), false);
+  // The only way out of the refusal keeps its words (as before TASK-368).
+  assert.match(retry, />Повторить<\/button>/);
   assert.doesNotMatch(retry, /Обновить список/);
   const gone = html(h(AddFileLines, addLines({ error: "Папка не найдена: обновите список." })));
-  assert.ok(isOn(gone, "Обновить список"));
-  assert.equal(buttonTag(gone, "Повторить"), null);
-  assert.doesNotMatch(gone, /Повторить/);
+  assert.match(gone, />Обновить список<\/button>/);
+  assert.doesNotMatch(gone, />Повторить</);
 });
 
 // ---- «Осень 2026» and the tree ----

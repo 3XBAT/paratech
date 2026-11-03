@@ -104,7 +104,7 @@ export function MentionPopup(props: MentionPopupProps) {
           <span>{model.text}</span>
           {model.retry && (
             // Not a tab stop: Enter in the field repeats the search, so the field keeps the focus.
-            <IconAction icon="retry" size="sm" place="left" tabIndex={-1} label={mentionTexts.retry} tipText={mentionTexts.retryTitle} onClick={props.onRetry} />
+            <IconAction icon="retry" place="left" tabIndex={-1} label={mentionTexts.retry} tipText={mentionTexts.retryTitle} onClick={props.onRetry} />
           )}
         </div>
       )}

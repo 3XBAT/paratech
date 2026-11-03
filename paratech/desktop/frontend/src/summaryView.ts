@@ -247,6 +247,11 @@ export const summaryToolTexts = {
   openAssignment: "Открыть задание",
 } as const;
 
+/** The name of the open button in a list of tasks: it names the task, so the rows differ for a screen reader. */
+export function openTaskLabel(title: string): string {
+  return title.trim() === "" ? summaryToolTexts.openAssignment : `${summaryToolTexts.openAssignment}: ${title.trim()}`;
+}
+
 const knownErrors: ReadonlySet<string> = new Set([
   ...Object.values(errorMessages),
   ...Object.values(lectureErrorMessages),

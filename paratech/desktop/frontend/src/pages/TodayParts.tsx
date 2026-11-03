@@ -9,6 +9,7 @@ import {
   doneLine,
   lessonLine,
   looseProblems,
+  openPairLabel,
   postLine,
   recordButton,
   recordTexts,
@@ -89,7 +90,9 @@ export function LoadError(props: { onRetry: () => void; quiet?: boolean }) {
           {texts.loadFailed}
         </ResultLine>
       )}
-      <IconAction icon="retry" label={texts.retry} onClick={props.onRetry} />
+      <Button size="sm" onClick={props.onRetry}>
+        {texts.retry}
+      </Button>
     </div>
   );
 }
@@ -182,8 +185,12 @@ export function StopProblem(props: {
       <ResultLine kind="fail" role="alert">
         {props.text}
       </ResultLine>
-      <IconAction icon="retry" label={props.retrying ? recordTexts.stopping : recordTexts.retry} busy={props.retrying} disabled={!props.canRetry} onClick={props.onRetry} />
-      <IconAction icon="open" label={recordTexts.openRecordings} onClick={props.onOpenRecordings} />
+      <Button size="sm" busy={props.retrying} busyLabel={recordTexts.stopping} disabled={props.retrying || !props.canRetry} onClick={props.onRetry}>
+        {recordTexts.retry}
+      </Button>
+      <Button size="sm" variant="ghost" onClick={props.onOpenRecordings}>
+        {recordTexts.openRecordings}
+      </Button>
     </div>
   );
 }
@@ -494,7 +501,7 @@ export function SummarySection(props: {
                       />
                     ))}
               </div>
-              {m.canOpen && <IconAction icon="open" place="left" label={texts.open} onClick={() => props.onOpenLesson(m.recordingId)} />}
+              {m.canOpen && <IconAction icon="chevr" place="left" label={openPairLabel(m.headline)} onClick={() => props.onOpenLesson(m.recordingId)} />}
             </div>
           );
         })}
@@ -507,7 +514,7 @@ export function SummarySection(props: {
                 <div className="today-t">{m.title}</div>
                 {m.meta !== "" && <div className="small muted today-meta num">{m.meta}</div>}
               </div>
-              {m.canOpen && <IconAction icon="open" place="left" label={texts.open} onClick={() => props.onOpenLesson(m.recordingId)} />}
+              {m.canOpen && <IconAction icon="chevr" place="left" label={openPairLabel(m.title)} onClick={() => props.onOpenLesson(m.recordingId)} />}
             </div>
           );
         })}

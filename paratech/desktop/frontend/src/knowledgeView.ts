@@ -426,6 +426,11 @@ export const knowledgeToolTexts = {
   setSubject: "Указать предмет",
 } as const;
 
+/** The name of the button of a lesson row: it names the lesson, so the rows differ for a screen reader. */
+export function setSubjectLabel(title: string): string {
+  return title.trim() === "" ? knowledgeToolTexts.setSubject : `${knowledgeToolTexts.setSubject}: ${title.trim()}`;
+}
+
 export const searchTexts = {
   short: `Введите хотя бы ${minQueryChars} символа.`,
   running: "Поиск…",
