@@ -389,8 +389,8 @@ func (a *Actions) compensateAssignment(ctx context.Context, c action.Compensatio
 // trashAgain applies a DeleteAssignment compensation (Undo of a restore) at expectedVersion, outside Apply's
 // transaction as removeAdded: DeleteAndStop checks the version in its own transaction and asks for the calendar sync and
 // stops jobs after its commit, which must not happen before an outer commit. Deleting again is a delete: one that got a
-// Google event since the restore needs «Да» (О-6 б). Another version, an event (or one that cannot be told), an email
-// that may go out or a delete meanwhile is action.ErrTargetChanged («Изменено после»).
+// Google event since the restore needs «Да» (О-6 б). Another version, an event or a work or a job under way (or either
+// that cannot be told), an email that may go out or a delete meanwhile is action.ErrTargetChanged («Изменено после»).
 func (a *Actions) trashAgain(ctx context.Context, c action.DeleteAssignment, expectedVersion int64) error {
 	if a.changes == nil {
 		return errUnavailable
@@ -403,7 +403,7 @@ func (a *Actions) trashAgain(ctx context.Context, c action.DeleteAssignment, exp
 		return action.ErrTargetChanged
 	}
 	id := shared.AssignmentID(c.Assignment.ID())
-	if err := a.noEvent(ctx, id); err != nil {
+	if err := a.mayTrash(ctx, id); err != nil {
 		return fmt.Errorf("%w: %w", action.ErrTargetChanged, err)
 	}
 	_, err = a.changes.TrashAssignment(ctx, id, expectedVersion)

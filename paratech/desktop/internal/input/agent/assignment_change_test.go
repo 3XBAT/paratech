@@ -343,6 +343,17 @@ func TestChangeAssignmentRestore(t *testing.T) {
 		}
 	})
 
+	// Deleting again would stop the work the student started after the restore: «Изменено после», not a silent stop.
+	t.Run("undo of a restore whose assignment got a work under way is refused", func(t *testing.T) {
+		w, ch := newWave10World(t)
+		run10(t, w, req, call10(t, "c1", values.ToolChangeAssignment, deleteA1, actionpolicy.ClassU))
+		_, e := run10(t, w, req, call10(t, "c2", values.ToolChangeAssignment, restoreA1, actionpolicy.ClassU))
+		ch.working["a1"] = true
+		if u := undo(t, w, e); u.Status != action.StatusUndoRefused || u.NoUndo != action.NoUndoChanged || w.assignments.deleted["a1"] {
+			t.Fatalf("undo = %+v, deleted %v", u, w.assignments.deleted["a1"])
+		}
+	})
+
 	// The delete of the Undo runs in DeleteAndStop's own transaction, never inside an outer one: its after-commit work
 	// (the calendar sync, stopping jobs) must follow a real commit.
 	t.Run("undo of a restore deletes outside an outer transaction", func(t *testing.T) {
