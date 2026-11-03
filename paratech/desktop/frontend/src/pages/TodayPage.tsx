@@ -8,7 +8,7 @@ import { callByName } from "../bindings/runtime.js";
 import { type TodayScreen, todayApi } from "../bindings/today.js";
 import { requestDraft } from "../agentDraft.js";
 import type { PageId } from "../nav.js";
-import { useOpenSummary } from "../openSummary.js";
+import { useOpenLesson } from "../openLesson.js";
 import { anyRecording, queueLine } from "../recordingRowView.js";
 import { dayTitle, loadView, nearestDeadlineText, newestOnly, recordButton, stagesChanged, stagesKey, stopProblemText, texts } from "../todayView.js";
 import { Toast } from "../ui/Toast.js";
@@ -44,7 +44,7 @@ export function TodayPage(props: {
   const api = useMemo(() => todayApi(callByName), []);
   const activity = useMemo(() => activityApi(callByName), []);
   const calendar = useMemo(() => ({ api: agentConfirmApi(callByName), deleteApi: recordingDeleteApi(callByName) }), []);
-  const openSummary = useOpenSummary();
+  const openLesson = useOpenLesson();
   const homework = useMemo(() => homeworkApi(callByName), []);
   const library = useMemo(() => libraryApi(callByName), []);
   const [adding, setAdding] = useState(false);
@@ -248,8 +248,10 @@ export function TodayPage(props: {
               <LessonsSection
                 lessons={screen.lessons}
                 recordings={recordings ?? []}
+                recordingsKnown={recordings !== null}
                 day={screen.day}
-                onOpenSummary={openSummary}
+                onOpenLesson={(recordingId) => openLesson(recordingId)}
+                onRecord={props.onRecord}
                 onOpenRecordings={openRecordings}
               />
             </div>
@@ -267,7 +269,13 @@ export function TodayPage(props: {
                 }}
               />
             </div>
-            <SummarySection posts={screen.posts} done={screen.done} onOpenSummary={openSummary} calendar={calendar} />
+            <SummarySection
+              posts={screen.posts}
+              done={screen.done}
+              lessons={screen.lessons}
+              onOpenLesson={(recordingId) => openLesson(recordingId)}
+              calendar={calendar}
+            />
           </div>
           <StatusBar queue={queue} nearest={nearest} onOpenQueue={openRecordings} />
         </>

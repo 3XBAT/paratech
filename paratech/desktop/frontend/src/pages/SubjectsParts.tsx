@@ -259,9 +259,15 @@ export function SubjectTree(props: {
 }
 
 /** «Ближайшее» and the lessons of a subject. Titles come from the model or the student: text nodes only. */
-export function OverviewSections(props: { overview: SubjectOverview; onOpenAssignment?: (assignmentId: string) => void }) {
+export function OverviewSections(props: {
+  overview: SubjectOverview;
+  onOpenAssignment?: (assignmentId: string) => void;
+  /** A row of «Пары» opens the lesson of its recording (TASK-352); without it the rows only show the lessons. */
+  onOpenLesson?: (recordingId: string) => void;
+}) {
   const { deadlines, lessons } = props.overview;
   const open = props.onOpenAssignment;
+  const openLesson = props.onOpenLesson;
   return (
     <>
       {deadlines.length > 0 && (
@@ -311,17 +317,30 @@ export function OverviewSections(props: { overview: SubjectOverview; onOpenAssig
               {lessons.map((l) => {
                 const chip = lessonChip(l.status);
                 const meta = lessonMeta(l);
-                return (
-                  <div className="lrow" role="listitem" key={l.recordingId}>
+                const body = (
+                  <>
                     <Icon name="doc" />
-                    <div className="tx">
-                      <p className="t">{lessonTitle(l)}</p>
-                      {meta !== "" && <div className="meta num">{meta}</div>}
-                    </div>
+                    {/* Spans only: the same body sits inside a <button> when the row opens its lesson. */}
+                    <span className="tx">
+                      <span className="t">{lessonTitle(l)}</span>
+                      {meta !== "" && <span className="meta num">{meta}</span>}
+                    </span>
                     {l.summaryNew && <span className="fresh">{texts.fresh}</span>}
                     <StatusChip kind={chip.kind} icon={chip.icon}>
                       {chip.label}
                     </StatusChip>
+                  </>
+                );
+                // The whole row opens its lesson, like a row of «Ближайшее» opens its assignment.
+                return openLesson === undefined ? (
+                  <div className="lrow drow" role="listitem" key={l.recordingId}>
+                    {body}
+                  </div>
+                ) : (
+                  <div className="drow-item" role="listitem" key={l.recordingId}>
+                    <button type="button" className="lrow drow drow-open" title={texts.openLesson} onClick={() => openLesson(l.recordingId)}>
+                      {body}
+                    </button>
                   </div>
                 );
               })}

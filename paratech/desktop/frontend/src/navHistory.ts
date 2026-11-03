@@ -1,5 +1,5 @@
 // In-window history (TASK-201): «Назад/Вперёд» like in a browser. An entry is a route: the page and what is open over
-// it (transcript, summary, assignment). Pure functions; the hook that wires them to the window is in useNavHistory.ts.
+// it (lesson, assignment). Pure functions; the hook that wires them to the window is in useNavHistory.ts.
 
 import type { Route } from "./nav.js";
 
@@ -23,8 +23,6 @@ export function currentRoute(h: NavHistory): Route {
 export function sameRoute(a: Route, b: Route): boolean {
   return (
     a.page === b.page &&
-    a.transcript === b.transcript &&
-    a.summary === b.summary &&
     a.assignment === b.assignment &&
     a.subject === b.subject &&
     a.lesson === b.lesson

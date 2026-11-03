@@ -3,6 +3,7 @@ import { actionErrorText } from "../activityView";
 import { type ActivityApi, activityApi } from "../bindings/activity";
 import { type KnowledgeBaseApi, knowledgeBaseApi, type KnowledgeLesson } from "../bindings/knowledgeBase";
 import { notesApi } from "../bindings/notes";
+import { recordingDeleteApi } from "../bindings/recordingDelete";
 import { callByName } from "../bindings/runtime";
 import {
   lectureTextApi,
@@ -30,12 +31,12 @@ import {
   noteLectureMeta,
   openedFromKnowledge,
   openingTab,
-  recordingIdOfKey,
   shownBlock,
   summaryFocus,
 } from "../knowledgeView";
 import { lectureCopiedText } from "../lectureTextView";
 import { lectureOf, readLectureNotes, visibleNotes } from "../ownNotesView";
+import { type DeleteOutcome, deleteOutcome, deleteTexts } from "../recordingDeleteView";
 import {
   errorText,
   nextPollMs,
@@ -56,10 +57,11 @@ import {
   segmentPanelId,
   segmentTabId,
 } from "../ui/controls";
-import { RowMenu } from "../ui/RowMenu";
+import { RowMenu, type RowMenuItem } from "../ui/RowMenu";
 import { LessonInfoForm } from "./KnowledgeParts";
 import { LectureTextCard } from "./LectureTextParts";
 import { OwnNotes } from "./OwnNotes";
+import { RecordingDeleteDialog } from "./RecordingDeleteDialog";
 import { HomeworkCard, NoSpeechCard, SummaryCard, SummaryTools } from "./SummaryParts";
 import { TranscriptPage } from "./TranscriptPage";
 
@@ -96,6 +98,12 @@ function crumbItems(
   });
 }
 
+/** The head «⋯» of a recorded lesson: the correction of the subject and kind, and the deletion of the recording (only here). */
+const lessonMenu: readonly RowMenuItem<"edit" | "delete">[] = [
+  { key: "edit", label: "Исправить предмет или тип пары" },
+  { key: "delete", label: deleteTexts.summaryButton },
+];
+
 /** The lesson cannot be shown: the reason and «Назад» to where the student came from. */
 function LessonGone(props: { text: string; onBack: () => void }) {
   return (
@@ -110,11 +118,11 @@ function LessonGone(props: { text: string; onBack: () => void }) {
   );
 }
 
-// The screen a route `lesson` shows (TASK-351). The core has no call that opens a lesson by its key, so the lesson is
-// found in the window's memory of the lessons it opened (`cache`, filled by every page that opens one), or, for a
-// recorded lesson whose key is `recording:<recordingId>`, read through `lesson(recordingId)`. A lecture of the student's
-// notes has no recording, so once the window has forgotten it (a cold link) it cannot be found: the screen says so and
-// offers «Назад». A by-key binding would remove that limit (follow-up for the core).
+// The screen a route `lesson` shows (TASK-351, 352): the one screen every link to a summary, a lecture text or a transcript leads to. The
+// lesson is found in the window's memory of the lessons it opened (`cache`, filled by every page that opens one), else
+// the core reads it by its key (lessonByKey: a recording, or a lecture known only from the student's notes), so a cold
+// start or a step of the history reaches any lesson. When the core cannot find it (deleted meanwhile) or cannot read
+// it, the screen says why with its fixed text and offers «Назад».
 export function LessonScreen(props: {
   lessonKey: string;
   /** The section under the lesson (route.page): the crumbs and the ways out follow it. */
@@ -128,6 +136,8 @@ export function LessonScreen(props: {
   onTab: (tab: LessonTab) => void;
   onBack: () => void;
   onChanged: (l: KnowledgeLesson) => void;
+  /** The recording of this lesson was deleted here: the window goes back to where the lesson was opened from. */
+  onDeleted: (lessonKey: string) => void;
   onOpenAssignment: (assignmentId: string) => void;
   onCheckSound: () => void;
   nav: LessonNav;
@@ -135,7 +145,6 @@ export function LessonScreen(props: {
   const key = props.lessonKey;
   const api = useMemo(() => knowledgeBaseApi(callByName), []);
   const cached = props.cache.get(key);
-  const recordingId = recordingIdOfKey(key);
   const [opening] = useState<LessonOpening | null>(() => keepLessonOpening(props.opening, { lesson: key }));
   const taken = props.onOpeningTaken;
   const [fetched, setFetched] = useState<KnowledgeLesson | null>(null);
@@ -148,11 +157,11 @@ export function LessonScreen(props: {
   }, [opening, taken]);
 
   useEffect(() => {
-    if (cached !== undefined || recordingId === "") {
+    if (cached !== undefined) {
       return;
     }
     let stopped = false;
-    api.lesson(recordingId).then(
+    api.lessonByKey(key).then(
       (l) => {
         if (!stopped) {
           setFetched(l);
@@ -167,21 +176,20 @@ export function LessonScreen(props: {
     return () => {
       stopped = true;
     };
-  }, [api, cached, recordingId]);
+  }, [api, cached, key]);
 
   const lesson = cached ?? fetched;
   if (lesson === null) {
     const rootGo = openedFromKnowledge(props.origin) ? props.onBack : props.nav.onOpenSubjects;
-    const text = recordingId === "" ? lessonScreenTexts.gone : error;
     return (
       <section className="page tr sm kb-lesson-page">
         <Breadcrumbs items={[{ label: lessonRootLabel(props.origin), onClick: rootGo }, { label: "Пара" }]} />
-        {text === "" ? (
+        {error === "" ? (
           <p className="muted" role="status">
             {lessonScreenTexts.loading}
           </p>
         ) : (
-          <LessonGone text={text} onBack={props.onBack} />
+          <LessonGone text={error} onBack={props.onBack} />
         )}
       </section>
     );
@@ -205,14 +213,15 @@ export function LessonScreen(props: {
       onTab={props.onTab}
       onBack={props.onBack}
       onChanged={props.onChanged}
+      onDeleted={() => props.onDeleted(key)}
       onOpenAssignment={props.onOpenAssignment}
       onCheckSound={props.onCheckSound}
     />
   );
 }
 
-// One lesson of «База знаний» (TASK-091): «Мой конспект» (first), «Конспект», «Текст лекции», «Расшифровка» and «Задания»
-// as tabs over the summary and transcript viewers (TASK-087/090/079), opened at the place a search found. Works
+// One lesson (TASK-091, 351, 352): «Мой конспект» (first), «Конспект», «Текст лекции», «Расшифровка» and «Задания» as
+// tabs, opened at the place a search, a link or a source named. «Удалить запись» is in the head «⋯». Works
 // offline: everything comes from the core on this computer. Model text is rendered by those viewers as React text only.
 export function KnowledgeLessonPage(props: {
   api: KnowledgeBaseApi;
@@ -231,10 +240,12 @@ export function KnowledgeLessonPage(props: {
   nav: LessonNav;
   /** The student chose a tab: the route changes without a new entry of the history. */
   onTab: (tab: LessonTab) => void;
-  /** Where the embedded transcript steps up to (the section under the lesson). */
+  /** «Назад» and the first crumb when it leads back: the section under the lesson. */
   onBack: () => void;
   /** The subject or kind was saved: the lists are out of date. */
   onChanged: (l: KnowledgeLesson) => void;
+  /** «Удалить запись» deleted the recording: the lesson is gone, the window leaves the screen. */
+  onDeleted: () => void;
   onOpenAssignment: (assignmentId: string) => void;
   onCheckSound: () => void;
 }) {
@@ -243,6 +254,10 @@ export function KnowledgeLessonPage(props: {
   const lecture = useMemo(() => lectureTextApi(callByName), []);
   const activity = useMemo(() => activityApi(callByName), []);
   const notes = useMemo(() => notesApi(callByName), []);
+  const deletion = useMemo(() => recordingDeleteApi(callByName), []);
+  // «Удалить запись» (TASK-095, moved here from the old summary page): the dialog, and the refusal when nothing was deleted.
+  const [deleting, setDeleting] = useState(false);
+  const [deleteFailed, setDeleteFailed] = useState<DeleteOutcome | null>(null);
   const tabsId = useId();
   const [lesson, setLesson] = useState(props.lesson);
   const [lessonError, setLessonError] = useState("");
@@ -427,12 +442,39 @@ export function KnowledgeLessonPage(props: {
             <RowMenu
               label="Ещё действия с парой"
               title="Ещё"
-              items={[{ key: "edit", label: "Исправить предмет или тип пары" }]}
-              onPick={() => setEditing(true)}
+              items={lessonMenu}
+              onPick={(key) => {
+                if (key === "edit") {
+                  setEditing(true);
+                } else {
+                  setDeleteFailed(null);
+                  setDeleting(true);
+                }
+              }}
             />
           </div>
         )}
       </div>
+      {deleteFailed && (
+        <Banner kind="fail" role="alert">
+          {deleteFailed.lines.join(" ")}
+        </Banner>
+      )}
+      {deleting && (
+        <RecordingDeleteDialog
+          api={deletion}
+          ids={[id]}
+          onCancel={() => setDeleting(false)}
+          onDone={(res, preview) => {
+            setDeleting(false);
+            if (res.removed > 0) {
+              props.onDeleted();
+            } else {
+              setDeleteFailed(deleteOutcome(res, preview));
+            }
+          }}
+        />
+      )}
       {editing && (
         <div ref={formBox}>
           <LessonInfoForm
@@ -464,13 +506,7 @@ export function KnowledgeLessonPage(props: {
           </div>
           <div ref={content} role="tabpanel" id={segmentPanelId(tabsId, tab)} aria-labelledby={segmentTabId(tabsId, tab)}>
             {tab === "transcript" ? (
-              <TranscriptPage
-                recordingId={id}
-                embedded
-                focusSegment={focus.tab === "transcript" ? focus.index : -1}
-                onBack={props.onBack}
-                onOpenSummary={() => props.onTab("summary")}
-              />
+              <TranscriptPage recordingId={id} focusSegment={focus.tab === "transcript" ? focus.index : -1} />
             ) : tab === "notes" ? (
               // The student's own notes do not depend on the summary: no «Загрузка…» and no summary error here.
               <OwnNotes

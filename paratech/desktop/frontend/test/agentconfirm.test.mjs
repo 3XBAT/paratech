@@ -422,18 +422,18 @@ const post = (calendar) => ({
 test("posts offer «Да, в календарь» for a deadline action only, and only when the calls are given", () => {
   const cal = [{ kind: "create_deadline_event", assignmentId: "a1", due: "2026-10-24T12:00:00Z" }, { kind: "other", assignmentId: "a2", due: "" }];
   const calls = { api: fakeApi(), deleteApi: {} };
-  const withCalls = html(h(SummarySection, { posts: [post(cal)], done: [], onOpenSummary: noop, calendar: calls }));
+  const withCalls = html(h(SummarySection, { posts: [post(cal)], done: [], onOpenLesson: noop, calendar: calls }));
   assert.equal((withCalls.match(/Да, в календарь/g) ?? []).length, 1);
   assert.match(withCalls, /24 окт\./);
-  assert.doesNotMatch(html(h(SummarySection, { posts: [post(cal)], done: [], onOpenSummary: noop })), /Да, в календарь/);
-  assert.doesNotMatch(html(h(SummarySection, { posts: [post([])], done: [], onOpenSummary: noop, calendar: calls })), /Да, в календарь/);
+  assert.doesNotMatch(html(h(SummarySection, { posts: [post(cal)], done: [], onOpenLesson: noop })), /Да, в календарь/);
+  assert.doesNotMatch(html(h(SummarySection, { posts: [post([])], done: [], onOpenLesson: noop, calendar: calls })), /Да, в календарь/);
   assert.equal(isDeadlineAction("create_deadline_event", ""), false);
   assert.equal(isDeadlineAction("create_deadline_event", "a1"), true);
 });
 
 test("an earlier non-deadline action for the same assignment does not hide the button", () => {
   const cal = [{ kind: "other", assignmentId: "a1", due: "" }, { kind: "create_deadline_event", assignmentId: "a1", due: "2026-10-24T12:00:00Z" }];
-  const out = html(h(SummarySection, { posts: [post(cal)], done: [], onOpenSummary: noop, calendar: { api: fakeApi(), deleteApi: {} } }));
+  const out = html(h(SummarySection, { posts: [post(cal)], done: [], onOpenLesson: noop, calendar: { api: fakeApi(), deleteApi: {} } }));
   assert.equal((out.match(/Да, в календарь/g) ?? []).length, 1);
 });
 

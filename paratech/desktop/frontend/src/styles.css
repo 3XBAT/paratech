@@ -177,11 +177,26 @@ html, body, #root { height: 100%; }
 .undo-line > span { min-width: 0; overflow-wrap: anywhere; }
 .drow .d { display: flex; flex-direction: column; min-width: 40px; font-size: 12.5px; line-height: 16px; font-weight: 600; color: var(--muted); }
 .drow .d span { color: var(--text); font-size: 14px; }
-/* The body of a «Ближайшее» row is spans (it may sit in a <button>); they are blocks like the div and p before. */
-.drow .tx, .drow .t { display: block; }
-/* A «Ближайшее» row that opens its assignment (TASK-347): the whole row is the button. */
+/* The body of a «Ближайшее» or «Пары» row is spans (it may sit in a <button>); they are blocks like the div and p before. */
+.drow .tx, .drow .t, .drow .meta { display: block; }
+/* A «Ближайшее» row that opens its assignment (TASK-347), a «Пары» row that opens its lesson (TASK-352): the whole row is the button. */
 .drow-open { width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .drow-open:hover { background: var(--fill); }
+/* A row of a list opens its lesson by one control stretched over the whole row (ADR-0034 §2, TASK-352): the title
+   button of a pair on «Сегодня», «Открыть» of a recording on «Записи». Its ::after covers the row (the row is
+   positioned); the checkbox, the chips, the fix buttons and «⋯» stay separate controls above it, so they never open the
+   lesson too. The ring is drawn around the row, not around the title. */
+.row-open::after { content: ""; position: absolute; inset: 0; }
+button.row-open:not(.btn) { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.row-open:focus-visible { outline: none; }
+.row-open:focus-visible::after { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--r-sm); }
+/* The button moves one pixel when pressed: that would shrink the stretched area under the cursor and lose the click. */
+.btn.row-open:active:enabled { transform: none; }
+.row:has(.row-open):hover, .row-openable:hover { background: var(--fill); }
+.row:has(.row-open) :is(.row-lead-box, .st .chip, .st .btn, .row-below), .row-openable :is(.today-problem, .today-st .chip) { position: relative; z-index: 1; }
+@media (forced-colors: active) {
+  .row-open:focus-visible::after { outline-color: Highlight; }
+}
 .drow-item + .drow-item > .lrow::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 1px; background: var(--sep); }
 /* «новое»: accent text, never colour alone (the word is the mark). */
 .fresh { flex: none; font-size: 12px; font-weight: 600; color: var(--accent); }

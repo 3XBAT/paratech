@@ -8,6 +8,7 @@ import type { TodayDeadline, TodayDone, TodayLesson, TodayPost, TodayWaiting } f
 import { dayAndTime, dayText, daysBetween, daysLeftText, dueText, monthsShort, pad, parseMoment, timeText } from "./dueText.js";
 import { plural } from "./plural.js";
 import { chainStatusView } from "./recordingRowView.js";
+import { rowOffersTranscript } from "./transcriptView.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 import type { IconName } from "./ui/Icon.js";
 
@@ -32,6 +33,10 @@ export const texts = {
   retry: "Повторить",
   queueOpen: "Открыть раздел «Записи»",
   open: "Открыть",
+  /** The tooltip of a pair row that opens its lesson (the row is the target). */
+  openLesson: "Открыть пару",
+  /** The button of a pair row that is before or during its time and has no recording. */
+  record: "Записать",
   summaryReady: "Конспект готов",
   summaryPending: "Конспект готовится",
   recordingProblem: "Проблема с записью",
@@ -332,14 +337,29 @@ export function statusParts(queue: string, nearest: string): string[] {
   return [queue, nearest].filter((p) => p !== "");
 }
 
+/** The recordings of the pair rows of the day: those lessons are opened by their row, so «Итоги дня» does not repeat them. */
+export function pairRecordings(lessons: readonly Pick<TodayLesson, "post">[]): ReadonlySet<string> {
+  return new Set(lessons.flatMap((l) => (l.post === null ? [] : [l.post.recordingId])));
+}
+
 /**
  * «Итоги дня»: the posts first, then the done lessons. A done lesson whose recording a post already tells about is not
- * repeated (the post says it). The count in the title is the number of shown rows.
+ * repeated (the post says it). A lesson that is already a pair row of the day appears once (TASK-352): its row opens
+ * it, so a done line of it is dropped, and so is its post, unless the post carries a question of the agent (`asks`: the
+ * calendar), which has no other place; such a post stays without «Открыть» (`onDay`). The count in the title is the
+ * number of shown rows.
  */
-export function summaryRows(posts: readonly TodayPost[], done: readonly TodayDone[]): { posts: readonly TodayPost[]; done: TodayDone[]; count: number } {
+export function summaryRows(
+  posts: readonly TodayPost[],
+  done: readonly TodayDone[],
+  lessons: readonly Pick<TodayLesson, "post">[] = [],
+  asks: (p: TodayPost) => boolean = () => false,
+): { posts: readonly TodayPost[]; done: TodayDone[]; count: number; onDay: ReadonlySet<string> } {
+  const onDay = pairRecordings(lessons);
+  const shown = posts.filter((p) => !onDay.has(p.recordingId) || asks(p));
   const told = new Set(posts.map((p) => p.recordingId));
-  const rest = done.filter((d) => !told.has(d.recordingId));
-  return { posts, done: rest, count: posts.length + rest.length };
+  const rest = done.filter((d) => !told.has(d.recordingId) && !onDay.has(d.recordingId));
+  return { posts: shown, done: rest, count: shown.length + rest.length, onDay };
 }
 
 export interface DoneLine {
@@ -376,17 +396,71 @@ export interface PostLine {
   recordingId: string;
 }
 
-/** A post of the agent after a lesson: the headline is the core's text; «Открыть» only for a ready summary. */
-export function postLine(p: TodayPost, now?: Date): PostLine {
+/**
+ * A post of the agent after a lesson: the headline is the core's text; «Открыть» only for a ready summary, and not for a
+ * lesson that is a pair row of the day (`onDay`: that row opens it).
+ */
+export function postLine(p: TodayPost, now?: Date, onDay: ReadonlySet<string> = new Set()): PostLine {
   const meta = [titleOf(p.lesson.title), timeText(p.shownAt)].filter((x) => x !== "").join(" · ");
   return {
     key: p.recordingId,
     headline: p.headline,
     meta,
     homework: homeworkText(p.homework, p.earliestDue, p.homeworkDone, now),
-    canOpen: p.summaryReady,
+    canOpen: p.summaryReady && !onDay.has(p.recordingId),
     recordingId: p.recordingId,
   };
+}
+
+/**
+ * What a pair row of the day does (TASK-352): the whole row opens the lesson of its recording, or, before and during a
+ * pair that has no recording, offers «Записать»; a finished pair without a recording and a recording that is still
+ * being made have nothing to open (the chip of the row says where it stands).
+ */
+export type LessonOpen = { kind: "open"; recordingId: string } | { kind: "record" } | { kind: "none" };
+
+/** A pair whose end is unknown lasts this long (a school pair, 90 minutes) for «during». */
+const pairMinutes = 90;
+
+/** The pair is over: its end (or its start plus a pair) has passed. An unreadable start counts as not over. */
+export function pairIsOver(l: Pick<TodayLesson, "start" | "end">, now: Date): boolean {
+  const end = parseMoment(l.end);
+  if (end !== null) {
+    return end.getTime() <= now.getTime();
+  }
+  const start = parseMoment(l.start);
+  return start !== null && start.getTime() + pairMinutes * 60_000 <= now.getTime();
+}
+
+/**
+ * The recording the row opens: the one its post is about, else the newest saved recording of the lesson whose texts can
+ * be opened (rowOffersTranscript: saved and recognised, being recognised or past it). `recordingsKnown` is false while the
+ * list has not been read: no «Записать» is offered on a guess then.
+ */
+export function lessonOpen(
+  l: Pick<TodayLesson, "id" | "start" | "end" | "post">,
+  recordings: readonly RecordingItem[],
+  now: Date,
+  recordingsKnown = true,
+): LessonOpen {
+  if (l.id === "") {
+    return { kind: "none" };
+  }
+  const mine = recordings.filter((r) => r.lessonId === l.id);
+  if (mine.some((r) => r.stage === "recording" || r.stage === "saving")) {
+    return { kind: "none" };
+  }
+  const post = l.post?.recordingId ?? "";
+  if (post !== "") {
+    return { kind: "open", recordingId: post };
+  }
+  const newest = mine.filter(rowOffersTranscript)[0];
+  if (newest !== undefined) {
+    return { kind: "open", recordingId: newest.id };
+  }
+  // A recording that failed is no recording: the pair can be recorded again while it lasts.
+  const none = mine.every((r) => r.stage === "failed");
+  return recordingsKnown && none && !pairIsOver(l, now) ? { kind: "record" } : { kind: "none" };
 }
 
 export interface LessonLine {
@@ -400,9 +474,17 @@ export interface LessonLine {
   problem: Problem | null;
   /** The chip of the lesson's post; null while it has none. */
   post: { text: string; homework: string; canOpen: boolean; recordingId: string } | null;
+  /** What the whole row does. */
+  open: LessonOpen;
 }
 
-export function lessonLine(l: TodayLesson, recordings: readonly RecordingItem[], day = "", now?: Date): LessonLine {
+export function lessonLine(
+  l: TodayLesson,
+  recordings: readonly RecordingItem[],
+  day = "",
+  now?: Date,
+  recordingsKnown = true,
+): LessonLine {
   const { start, end } = lessonTimes(l);
   return {
     key: l.id,
@@ -412,6 +494,7 @@ export function lessonLine(l: TodayLesson, recordings: readonly RecordingItem[],
     meta: lessonMeta(l),
     live: liveStatus(l.id, recordings),
     problem: problemFor(l.id, recordings, day),
+    open: lessonOpen(l, recordings, now ?? new Date(), recordingsKnown),
     post:
       l.post === null
         ? null

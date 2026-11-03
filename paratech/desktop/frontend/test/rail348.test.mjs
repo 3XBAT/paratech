@@ -7,15 +7,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { contextFor } from "../.test-build/agentView.js";
 import { reservedWidth } from "../.test-build/agent/panelWidth.js";
-import {
-  closeTranscript,
-  initialRoute,
-  pageById,
-  railItemOf,
-  routeToPage,
-  routeToSummary,
-  routeToTranscript,
-} from "../.test-build/nav.js";
+import { closeLesson, initialRoute, pageById, railItemOf, routeToLesson, routeToPage } from "../.test-build/nav.js";
 import { canGoBack, currentRoute, goBack, goForward, newHistory, pushRoute } from "../.test-build/navHistory.js";
 import { keepStartPanel } from "../.test-build/recordStartView.js";
 import { queueLine } from "../.test-build/recordingRowView.js";
@@ -83,21 +75,21 @@ test("«Записи» is a page with its own route: back and forward walk to it
   assert.equal(currentRoute(goForward(hist)).page, "recordings");
 });
 
-test("a rail click on «Записи» while a transcript or summary is open over it returns to the list of recordings", () => {
-  const over = routeToSummary(routeToPage("recordings"), "r1");
+test("a rail click on «Записи» while a lesson is open over it returns to the list of recordings", () => {
+  const over = routeToLesson(routeToPage("recordings"), "recording:r1", "transcript");
   assert.equal(over.page, "recordings");
-  assert.equal(over.summary, "r1");
+  assert.equal(over.lesson, "recording:r1");
   const again = routeToPage("recordings");
-  assert.equal(again.summary, "");
-  assert.equal(again.transcript, "");
-  // Back from the transcript is the same page, so the list stays as the user left it.
-  assert.deepEqual(closeTranscript(routeToTranscript(routeToPage("recordings"), "r2")), routeToPage("recordings"));
+  assert.equal(again.lesson, "");
+  assert.equal(again.tab, "");
+  // Back from the lesson is the same page, so the list stays as the user left it.
+  assert.deepEqual(closeLesson(routeToLesson(routeToPage("recordings"), "recording:r2")), routeToPage("recordings"));
   // The rail click goes through openPage + a new visit in App.
   assert.match(src("App.tsx"), /<Rail\s+current=\{current\}\s+onOpen=\{\(id\) => \{\s*openPage\(id\);\s*setVisit\(\(v\) => v \+ 1\);/);
 });
 
 test("the start panel request is not part of the route", () => {
-  assert.deepEqual(Object.keys(routeToPage("recordings")).sort(), ["assignment", "lesson", "page", "subject", "summary", "tab", "transcript"]);
+  assert.deepEqual(Object.keys(routeToPage("recordings")).sort(), ["assignment", "lesson", "page", "subject", "tab"]);
   assert.doesNotMatch(src("nav.ts"), /startPanel|openStart/);
   assert.doesNotMatch(src("navHistory.ts"), /startPanel|openStart/);
 });

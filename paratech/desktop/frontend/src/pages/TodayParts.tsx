@@ -208,12 +208,23 @@ function ProblemChip(props: { problem: Problem; onClick?: () => void }) {
   );
 }
 
+/**
+ * The pairs of the day (TASK-352): the whole row opens the lesson of its recording (the title is the button, stretched
+ * over the row by .row-open; the chips and «Записать» stay separate controls above it). A pair before or during its time
+ * without a recording offers «Записать» instead; a finished pair without one is a plain row.
+ */
 export function LessonsSection(props: {
   lessons: readonly TodayLesson[];
   recordings: readonly RecordingItem[];
+  /** The list of recordings has been read: no «Записать» on a guess before that. */
+  recordingsKnown?: boolean;
   /** The start of the day: only failures of this day are shown. */
   day?: string;
-  onOpenSummary: (recordingId: string) => void;
+  /** The moment the rows are read against; the clock when omitted (tests pass a fixed one). */
+  now?: Date;
+  onOpenLesson: (recordingId: string) => void;
+  /** «Записать»: opens «Записи» with the start panel; without it the button is not offered. */
+  onRecord?: () => void;
   /** Opens «Записи», where a failed recording is dealt with. */
   onOpenRecordings?: () => void;
 }) {
@@ -236,15 +247,25 @@ export function LessonsSection(props: {
       ) : (
         <div className="card" role="list">
           {props.lessons.map((l) => {
-            const m = lessonLine(l, props.recordings, day, new Date());
+            const m = lessonLine(l, props.recordings, day, props.now ?? new Date(), props.recordingsKnown ?? true);
+            const open = m.open;
+            const cls = ["today-row", "today-lesson", m.live?.kind === "rec" ? "live" : "", open.kind === "open" ? "row-openable" : ""];
             return (
-              <div key={m.key} className={m.live?.kind === "rec" ? "today-row today-lesson live" : "today-row today-lesson"} role="listitem">
+              <div key={m.key} className={cls.filter((c) => c !== "").join(" ")} role="listitem">
                 <div className="today-tm num">
                   {m.start}
                   {m.end !== "" && <span>{m.end}</span>}
                 </div>
                 <div className="today-main">
-                  <p className="today-t">{m.title}</p>
+                  <p className="today-t">
+                    {open.kind === "open" ? (
+                      <button type="button" className="row-open" title={texts.openLesson} onClick={() => props.onOpenLesson(open.recordingId)}>
+                        {m.title}
+                      </button>
+                    ) : (
+                      m.title
+                    )}
+                  </p>
                   {m.meta !== "" && <div className="small muted today-meta">{m.meta}</div>}
                 </div>
                 <div className="today-st">
@@ -264,9 +285,9 @@ export function LessonsSection(props: {
                   )}
                 </div>
                 <div className="today-ac">
-                  {m.post?.canOpen === true && (
-                    <Button size="sm" onClick={() => props.onOpenSummary(m.post?.recordingId ?? "")}>
-                      {texts.open}
+                  {open.kind === "record" && props.onRecord !== undefined && (
+                    <Button size="sm" icon="rec" aria-label={`${texts.record}: ${m.title}`} onClick={props.onRecord}>
+                      {texts.record}
                     </Button>
                   )}
                 </div>
@@ -430,11 +451,15 @@ export function BurningSection(props: {
 export function SummarySection(props: {
   posts: readonly TodayPost[];
   done: readonly TodayDone[];
-  onOpenSummary: (recordingId: string) => void;
+  /** The pairs of the day: a lesson that is a row there is not repeated here (its row opens it). */
+  lessons?: readonly TodayLesson[];
+  onOpenLesson: (recordingId: string) => void;
   /** The core calls of «Да, в календарь»; without them the button is not offered. */
   calendar?: { api: AgentConfirmApi; deleteApi: RecordingDeleteApi };
 }) {
-  const rows = summaryRows(props.posts, props.done);
+  // A post with a question about the calendar has no other place on the screen, so it stays (without «Открыть»).
+  const asks = (p: TodayPost) => props.calendar !== undefined && p.calendar.some((c) => isDeadlineAction(c.kind, c.assignmentId));
+  const rows = summaryRows(props.posts, props.done, props.lessons, asks);
   if (rows.count === 0) {
     return null;
   }
@@ -442,7 +467,7 @@ export function SummarySection(props: {
     <Section title={texts.summary} count={rows.count} className="today-summary">
       <div className="card" role="list">
         {rows.posts.map((p) => {
-          const m = postLine(p, new Date());
+          const m = postLine(p, new Date(), rows.onDay);
           return (
             <div key={`post:${m.key}`} className="today-row today-wait" role="listitem">
               <Icon name="wave" />
@@ -464,7 +489,7 @@ export function SummarySection(props: {
                     ))}
               </div>
               {m.canOpen && (
-                <Button size="sm" onClick={() => props.onOpenSummary(m.recordingId)}>
+                <Button size="sm" onClick={() => props.onOpenLesson(m.recordingId)}>
                   {texts.open}
                 </Button>
               )}
@@ -481,7 +506,7 @@ export function SummarySection(props: {
                 {m.meta !== "" && <div className="small muted today-meta num">{m.meta}</div>}
               </div>
               {m.canOpen && (
-                <Button size="sm" onClick={() => props.onOpenSummary(m.recordingId)}>
+                <Button size="sm" onClick={() => props.onOpenLesson(m.recordingId)}>
                   {texts.open}
                 </Button>
               )}

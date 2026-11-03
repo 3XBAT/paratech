@@ -15,6 +15,7 @@ import type {
 } from "./bindings/activity.js";
 import { formatDuration, formatTime, isFinishedJob, recordingDurationText, splitFinished } from "./activityView.js";
 import { remainingText } from "./durationEstimate.js";
+import type { LessonTab } from "./knowledgeView.js";
 import type { PageId } from "./nav.js";
 import type { ListState, ListStates } from "./listView.js";
 import { jobStatusView, type StatusView } from "./statusPresentation.js";
@@ -387,6 +388,8 @@ export interface RowItem {
 
 export const rowItemLabels = {
   stop: "Остановить",
+  /** The main button of a row with texts (TASK-352): the lesson screen, on the tab the first of the texts below names. */
+  open: "Открыть",
   summary: "Открыть конспект",
   lectureText: "Открыть текст лекции",
   transcript: "Открыть расшифровку",
@@ -407,10 +410,25 @@ export interface RowActions {
   menu: RowItem[];
 }
 
+/** The tab of the lesson screen a text item opens (TASK-352); null for the items that open no text. */
+export function rowItemTab(key: RowItemKey): LessonTab | null {
+  switch (key) {
+    case "summary":
+      return "summary";
+    case "lectureText":
+      return "lecture";
+    case "transcript":
+      return "transcript";
+    default:
+      return null;
+  }
+}
+
 /**
- * The actions of a row (TASK-096). The main button is the first of: Stop, «Запустить сейчас», a ready summary, a ready
- * lecture text, the transcript; the core's fix link (models, connections, sound check) only when no text is offered.
- * The rest goes to «⋯».
+ * The actions of a row (TASK-096). The main button is the first of: Stop, «Запустить сейчас», the texts, the core's fix
+ * link (models, connections, sound check) only when no text is offered. The texts are one lesson screen (TASK-352): the
+ * main one is «Открыть» on the tab of the first of a ready summary, a ready lecture text, the transcript; the other
+ * texts stay in «⋯» as the choice of another tab. The rest goes to «⋯».
  */
 export function rowActions(
   r: Pick<RecordingItem, "stage" | "step" | "errorCode" | "lectureTextReady" | "stoppable" | "action" | "actionJobId" | "retryWork" | "canRedoSummary">,
@@ -427,9 +445,10 @@ export function rowActions(
   const transcript = links.transcript !== null ? item("transcript", rowItemLabels.transcript) : null;
   const open = core?.kind === "open" ? item("open", core.label) : null;
   const redo = offers.redo && r.canRedoSummary ? item("redo", rowItemLabels.redo) : null;
-  const main = stop ?? runNow ?? (summary === "main" ? sum : null) ?? lecture ?? transcript ?? open;
+  const text = (summary === "main" ? sum : null) ?? lecture ?? transcript;
+  const main = stop ?? runNow ?? text ?? open;
   const menu = [stop, runNow, lecture, sum, transcript, open, redo].filter((i): i is RowItem => i !== null && i !== main);
-  return { main, menu };
+  return { main: main !== null && main === text ? { key: main.key, label: rowItemLabels.open } : main, menu };
 }
 
 /** The links of a row to the texts of the recording; the row uses only whether each exists (TASK-096). */
@@ -453,6 +472,21 @@ export function rowLinks(
     return { lectureText: false, summary, transcript: "full" };
   }
   return { lectureText: true, summary: summary === null ? null : "extra", transcript: "source" };
+}
+
+/**
+ * The tab a link to the lesson of a recording opens (TASK-352): the lecture text once it is ready, else the summary, else
+ * the transcript; null when the recording offers none of them yet (the lesson is not in the base).
+ */
+export function rowLessonTab(r: Pick<RecordingItem, "stage" | "step" | "errorCode" | "lectureTextReady">): LessonTab | null {
+  const links = rowLinks(r);
+  if (links.lectureText) {
+    return "lecture";
+  }
+  if (links.summary === "main") {
+    return "summary";
+  }
+  return links.transcript === null ? null : "transcript";
 }
 
 /**
