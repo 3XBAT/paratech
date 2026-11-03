@@ -1,20 +1,29 @@
 import assert from "node:assert/strict";
 import net from "node:net";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { inspect } from "node:util";
 
-import { DummyProviderKey, hubEnv, LogCapture, providerVars, Redactor, toolEnv } from "../src/hub/env.js";
+import { buildHub } from "../src/hub/build.js";
+import { captureStream, DummyProviderKey, hubEnv, LogCapture, providerVars, Redactor, toolEnv } from "../src/hub/env.js";
 import {
   BadConfigError,
   E2EEnvironmentError,
   ForbiddenPortError,
+  GoToolchainMissingError,
+  guardedHubCount,
+  HubBuildFailedError,
+  HubFailedError,
+  HubKeyFailedError,
   HubNotReadyError,
   isEnvironmentError,
+  isHubFailedError,
   MissingLiveKeyError,
   startHub,
   type HubDeps,
+  type StartedHub,
 } from "../src/hub/index.js";
 import { parsePgUrl, scramClientFinal, withSearchPath } from "../src/hub/pg.js";
 import { assertAllowedHubPort, freeLoopbackPort, loopbackPortBusy } from "../src/hub/ports.js";
@@ -101,6 +110,23 @@ describe("redaction", () => {
     assert.equal(logs.text(), "a (redacted) b\npending (redacted)");
   });
 
+  test("a stream split inside a Cyrillic char and inside a secret is decoded and scrubbed", async () => {
+    const r = new Redactor();
+    r.add(Sentinel);
+    const logs = new LogCapture(r);
+    const stream = new PassThrough();
+    captureStream(stream, logs);
+    const bytes = Buffer.from(`Конспект ${Sentinel} пары\nещё`, "utf8");
+    const cuts = [1, 3, Buffer.byteLength(`Конспект ${Sentinel.slice(0, 9)}`), bytes.length - 1]; // 1, 3: inside "К", "о"
+    let from = 0;
+    for (const to of [...cuts, bytes.length]) {
+      stream.write(bytes.subarray(from, to));
+      from = to;
+      await new Promise((resolve) => setImmediate(resolve)); // each piece is its own 'data' chunk
+    }
+    assert.equal(logs.text(), "Конспект (redacted) пары\nещё");
+  });
+
   test("the size limit drops whole lines and a runaway line keeps no part of a secret", () => {
     const r = new Redactor();
     r.add(Sentinel);
@@ -158,6 +184,33 @@ describe("typed errors", () => {
     assert.match(err.message, /[а-я]/);
     assert.equal(isEnvironmentError(new Error("x")), false);
   });
+
+  test("Hub failures are a separate hierarchy: never environment errors", () => {
+    const failures = [
+      new HubBuildFailedError("Сборка hub.exe не удалась"),
+      new HubKeyFailedError("hub keys create не выдал ключ"),
+      new HubNotReadyError("Hub не ответил на /readyz"),
+    ];
+    assert.deepEqual(failures.map((e) => e.kind), ["HubBuildFailed", "HubKeyFailed", "HubNotReady"]);
+    for (const err of failures) {
+      assert.ok(err instanceof HubFailedError && isHubFailedError(err));
+      assert.ok(!(err instanceof E2EEnvironmentError) && !isEnvironmentError(err), err.name);
+      assert.match(err.message, /[а-я]/);
+    }
+    const goMissing = new GoToolchainMissingError("Go не найден в PATH");
+    assert.ok(isEnvironmentError(goMissing) && !isHubFailedError(goMissing));
+    assert.equal(goMissing.kind, "GoToolchainMissing");
+  });
+
+  test("go missing from PATH is an environment error, not a failed build", async () => {
+    // Under build/ (compiled tests live there): nothing outside the package is created.
+    const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "nogo");
+    const paths = { e2eDir: dir, paratechDir: dir, composeFile: path.join(dir, "none.yml"), distDir: dir };
+    await assert.rejects(
+      buildHub(paths, { PATH: dir }),
+      (err: unknown) => err instanceof GoToolchainMissingError && isEnvironmentError(err) && /Go не найден/.test(err.message),
+    );
+  });
 });
 
 describe("postgres client", () => {
@@ -208,6 +261,21 @@ function stubDeps(behaviour: "ok" | "crash", port?: number) {
   return { deps, calls };
 }
 
+/** The stub's startup output once it is all captured: /readyz can answer before the pipe delivers the last lines. */
+async function logsWhenComplete(hub: StartedHub, timeoutMs = 10_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const logs = hub.logs();
+    if (/^end-of-startup$/m.test(logs)) {
+      return logs;
+    }
+    if (Date.now() > deadline) {
+      assert.fail(`the stub's startup output was not captured in ${timeoutMs} ms:\n${logs}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 const ownerEnv = {
   ...process.env,
   PARATECH_E2E_ANTHROPIC_KEY: Sentinel,
@@ -224,9 +292,11 @@ describe("startHub with a stub hub", () => {
       assert.match(hub.url, /^http:\/\/127\.0\.0\.1:\d+$/);
       assert.match(hub.schema, /^e2e_[0-9a-f]{16}$/);
 
-      const logs = hub.logs();
+      const logs = await logsWhenComplete(hub);
       assert.match(logs, /provider key=\(redacted\)/, "the stub did print the key and it was scrubbed");
       assert.match(logs, /split=\(redacted\)/);
+      assert.match(logs, /^русский \(redacted\) текст$/m, "bytes of a Cyrillic char split across chunks stay one char");
+      assert.ok(!logs.includes("�"));
       assert.match(logs, /quota=1234 /);
       const names = /env-names=(.*)/.exec(logs)?.[1]?.split(",") ?? [];
       assert.ok(names.includes("HUB_ANTHROPIC_API_KEY") && names.includes("HUB_DATABASE_URL"));
@@ -250,21 +320,23 @@ describe("startHub with a stub hub", () => {
     const { deps } = stubDeps("ok");
     const hub = await startHub({ mode: "scripted", fakeUrl: "http://127.0.0.1:4999", env: ownerEnv }, deps);
     try {
-      assert.match(hub.logs(), /quota=400000 stream=false base=http:\/\/127\.0\.0\.1:4999/);
-      assert.match(hub.logs(), new RegExp(`provider key=${DummyProviderKey}`));
-      assert.ok(!hub.logs().includes(Sentinel));
+      const logs = await logsWhenComplete(hub);
+      assert.match(logs, /quota=400000 stream=false base=http:\/\/127\.0\.0\.1:4999/);
+      assert.match(logs, new RegExp(`provider key=${DummyProviderKey}`));
+      assert.ok(!logs.includes(Sentinel));
     } finally {
       await hub.stop();
     }
   });
 
-  test("a Hub that exits at start is HubNotReady, scrubbed, and everything is cleaned up", async () => {
+  test("a Hub that exits at start is a Hub failure (not an environment one), scrubbed, and cleaned up", async () => {
     const { deps, calls } = stubDeps("crash");
     const err = await startHub({ mode: "live", env: ownerEnv }, deps).then(
       () => assert.fail("startHub should fail"),
       (e: unknown) => e,
     );
     assert.ok(err instanceof HubNotReadyError && err.kind === "HubNotReady");
+    assert.ok(isHubFailedError(err) && !isEnvironmentError(err), "a crashing Hub is «сломано», never «не проверено»");
     assert.match(err.message, /код 3/);
     const visible = [err.message, err.stack ?? "", JSON.stringify(err), inspect(err)].join("\n");
     for (const secret of [Sentinel, StubApiKey, "db-secret-pw"]) {
@@ -272,6 +344,24 @@ describe("startHub with a stub hub", () => {
     }
     assert.equal(calls.at(-1), "release");
     assert.ok(calls.some((c) => c.startsWith("DROP SCHEMA")));
+  });
+
+  test("all running Hubs share one process exit guard", async () => {
+    const before = process.listenerCount("exit");
+    const hubs = await Promise.all(
+      [1, 2, 3].map(() => startHub({ mode: "scripted", fakeUrl: "http://127.0.0.1:4999", env: ownerEnv }, stubDeps("ok").deps)),
+    );
+    try {
+      assert.equal(guardedHubCount(), 3);
+      assert.ok(process.listenerCount("exit") - before <= 1, "at most the one shared listener is added");
+    } finally {
+      await Promise.all(hubs.map((h) => h.stop()));
+    }
+    assert.equal(guardedHubCount(), 0);
+    const after = process.listenerCount("exit");
+    const more = await startHub({ mode: "scripted", fakeUrl: "http://127.0.0.1:4999", env: ownerEnv }, stubDeps("ok").deps);
+    await more.stop();
+    assert.equal(process.listenerCount("exit"), after, "a later Hub reuses the installed guard");
   });
 
   test("a forbidden port fails the start and cleans up", async () => {

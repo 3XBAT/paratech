@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { inspect } from "node:util";
 
 import { buildHub } from "./build.js";
-import { type Env, type HubMode, hubEnv, LogCapture, providerVars, randomSealKeys, Redactor } from "./env.js";
+import { captureStream, type Env, type HubMode, hubEnv, LogCapture, providerVars, randomSealKeys, Redactor } from "./env.js";
 import { BadConfigError, DatabaseUnavailableError, HubKeyFailedError, HubNotReadyError } from "./errors.js";
 import { repoPaths } from "./paths.js";
 import { pgExec, PgError, type PgTarget, withSearchPath } from "./pg.js";
@@ -128,15 +128,14 @@ export async function startHub(options: StartHubOptions, deps: HubDeps = default
       stdio: ["ignore", "pipe", "pipe"],
     });
     child.on("error", () => {}); // reported by waitReady; later errors must not crash the runner
-    const orphanGuard = (): void => killTree(child); // a test runner that exits without stop() leaves no Hub behind
-    process.once("exit", orphanGuard);
+    guardOrphan(child);
     cleanups.push(async () => {
-      process.removeListener("exit", orphanGuard);
       killTree(child);
       await waitExit(child, exitWaitMs);
+      runningHubs.delete(child);
     });
-    child.stdout?.on("data", (c: Buffer) => logs.write(c));
-    child.stderr?.on("data", (c: Buffer) => logs.write(c));
+    captureStream(child.stdout, logs);
+    captureStream(child.stderr, logs);
 
     await waitReady(url, child, options.readyTimeoutMs ?? defaultReadyTimeoutMs, logs);
 
@@ -155,6 +154,25 @@ export async function startHub(options: StartHubOptions, deps: HubDeps = default
     await teardown().catch(() => {}); // the original failure matters more than a cleanup one
     throw scrubError(err, redactor);
   }
+}
+
+// Hub processes not stopped yet. One process 'exit' listener for all of them: a test runner that exits without stop()
+// leaves no Hub behind, and many Hubs do not pile up listeners (no MaxListeners warning).
+const runningHubs = new Set<ChildProcess>();
+let exitGuardInstalled = false;
+
+function guardOrphan(child: ChildProcess): void {
+  runningHubs.add(child);
+  child.once("exit", () => runningHubs.delete(child));
+  if (!exitGuardInstalled) {
+    exitGuardInstalled = true;
+    process.on("exit", () => runningHubs.forEach((c) => killTree(c)));
+  }
+}
+
+/** How many Hub processes the shared exit guard still watches (for tests). */
+export function guardedHubCount(): number {
+  return runningHubs.size;
 }
 
 async function sql(deps: HubDeps, target: PgTarget, statement: string): Promise<void> {

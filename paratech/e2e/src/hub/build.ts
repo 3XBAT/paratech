@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 
 import { type Env, toolEnv } from "./env.js";
-import { HubBuildFailedError } from "./errors.js";
+import { GoToolchainMissingError, HubBuildFailedError } from "./errors.js";
 import type { Paths } from "./paths.js";
 import { run, SpawnError } from "./proc.js";
 
@@ -32,10 +32,14 @@ async function doBuild(paths: Paths, env: Env): Promise<string> {
       timeoutMs: buildTimeoutMs,
     });
   } catch (err) {
+    // go itself could not be started: an environment problem, the Hub source was never compiled.
     if (err instanceof SpawnError && err.code === "ENOENT") {
-      throw new HubBuildFailedError("Go не найден в PATH: hub.exe не собрать");
+      throw new GoToolchainMissingError("Go не найден в PATH: hub.exe не собрать");
     }
-    throw new HubBuildFailedError("Не удалось запустить go build");
+    if (err instanceof SpawnError) {
+      throw new GoToolchainMissingError(`Не удалось запустить go (${err.code ?? "ошибка"}): hub.exe не собрать`);
+    }
+    throw err;
   }
   if (res.code !== 0) {
     const tail = res.stderr.trim().split("\n").slice(-15).join("\n");

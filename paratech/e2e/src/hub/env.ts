@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { Readable } from "node:stream";
 
 import { BadConfigError, MissingLiveKeyError } from "./errors.js";
 
@@ -127,6 +128,14 @@ export class Redactor {
 }
 
 /**
+ * Feeds a child's output stream into logs as UTF-8. Each stream gets its own decoder (setEncoding), so Russian text
+ * whose bytes are split across chunks is not garbled, and stdout and stderr bytes never mix in one decoder.
+ */
+export function captureStream(stream: Readable | null | undefined, logs: LogCapture): void {
+  stream?.setEncoding("utf8").on("data", (text: string) => logs.write(text));
+}
+
+/**
  * Captures process output line by line, scrubbing each complete line, and keeps the last maxBytes. Scrubbing whole
  * lines means a secret split across chunks or cut by the size limit is never stored in part.
  */
@@ -141,8 +150,9 @@ export class LogCapture {
     private readonly maxLine = 8 * 1024,
   ) {}
 
-  write(chunk: string | Buffer): void {
-    this.pending += chunk.toString();
+  /** Takes decoded text only: bytes are decoded per stream (captureStream), so a split multibyte char stays whole. */
+  write(chunk: string): void {
+    this.pending += chunk;
     let nl = this.pending.indexOf("\n");
     while (nl >= 0) {
       this.push(this.pending.slice(0, nl).replace(/\r$/, ""));

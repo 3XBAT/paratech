@@ -219,7 +219,21 @@ describe("fake server", () => {
     assert.equal(fake.remaining(), 1);
   });
 
-  test("unknown paths are 404", async () => {
-    assert.equal((await fetch(fake.url + "/v1/other", { method: "POST", body: "{}" })).status, 404);
+  test("unknown paths are 404 and recorded as unmatched with a reason, headers never kept", async () => {
+    fake.setScript([{ kind: "plain", match: "", reply: "never" }]);
+    assert.equal((await call(userTurn("x"), "/v1/messages/count_tokens")).status, 404);
+    assert.equal((await fetch(fake.url + "/v1/models")).status, 404);
+    const unmatched = (await (await fetch(fake.url + "/__e2e/unmatched")).json()) as RecordedRequest[];
+    assert.deepEqual(
+      unmatched.map((r) => [r.path, r.reason]),
+      [
+        ["/v1/messages/count_tokens", "unknown endpoint POST /v1/messages/count_tokens"],
+        ["/v1/models", "unknown endpoint GET /v1/models"],
+      ],
+    );
+    assert.deepEqual(unmatched[0]?.body, userTurn("x"));
+    assert.equal(unmatched[1]?.body, "");
+    assert.ok(!JSON.stringify(unmatched).includes(FakeProviderKey));
+    assert.equal(fake.remaining(), 1, "an unknown endpoint consumes no rule");
   });
 });

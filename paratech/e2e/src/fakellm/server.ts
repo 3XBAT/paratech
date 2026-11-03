@@ -137,8 +137,13 @@ export async function startFakeLLM(opts: FakeLLMOptions = {}): Promise<FakeLLM> 
       });
       return;
     }
-    req.resume();
-    send(res, 404, errorResponse("not_found_error", "e2e fake: unknown path", seq));
+    // Not a control endpoint and not POST …/v1/messages: recorded as unmatched too, so a provider endpoint the Hub
+    // starts calling (count_tokens, batches...) shows up in /__e2e/unmatched instead of hiding behind a 404.
+    readBody(req, maxRecordedRaw, (raw) => {
+      seq++;
+      records.push({ seq, path, matched: false, reason: `unknown endpoint ${method} ${path}`, lastUser: "", body: parseOrRaw(raw ?? "") });
+      send(res, 404, errorResponse("not_found_error", "e2e fake: unknown path", seq));
+    });
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -181,6 +186,14 @@ function readBody(req: http.IncomingMessage, max: number, done: (raw: string | u
   });
   req.on("end", () => finish(size > max ? undefined : Buffer.concat(chunks).toString("utf8")));
   req.on("error", () => finish(undefined));
+}
+
+function parseOrRaw(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
 }
 
 function send(res: http.ServerResponse, status: number, body: unknown): void {

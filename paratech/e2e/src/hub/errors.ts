@@ -1,6 +1,9 @@
-// Environment errors of the harness: the machine is not ready for an E2E run (no Docker, a busy port, no live key).
-// They are typed so that a runner reports «не проверено», never «сломано». Messages are Russian, for the human, and
-// never carry a secret, a database URL or captured output that was not scrubbed.
+// Typed errors of the harness, in two separate hierarchies:
+//   - E2EEnvironmentError: the machine is not ready for an E2E run (no Docker, a busy port, no live key, no Go). A
+//     runner reports it as «не проверено».
+//   - HubFailedError: the Hub itself failed (it does not build, `keys create` fails, it does not become ready or exits
+//     at startup). This can be a real Hub regression, so a runner reports it as «сломано», never as «не проверено».
+// Messages are Russian, for the human, and never carry a secret, a database URL or captured output that was not scrubbed.
 
 export type EnvironmentErrorKind =
   | "DockerMissing"
@@ -10,9 +13,7 @@ export type EnvironmentErrorKind =
   | "MissingLiveKey"
   | "BadConfig"
   | "DatabaseUnavailable"
-  | "HubBuildFailed"
-  | "HubKeyFailed"
-  | "HubNotReady";
+  | "GoToolchainMissing";
 
 export class E2EEnvironmentError extends Error {
   readonly kind: EnvironmentErrorKind;
@@ -75,24 +76,51 @@ export class DatabaseUnavailableError extends E2EEnvironmentError {
   }
 }
 
-export class HubBuildFailedError extends E2EEnvironmentError {
+/** The go command cannot be started at all (not in PATH): nothing about the Hub is known yet. */
+export class GoToolchainMissingError extends E2EEnvironmentError {
+  constructor(message: string) {
+    super("GoToolchainMissing", message);
+  }
+}
+
+export type HubFailedKind = "HubBuildFailed" | "HubKeyFailed" | "HubNotReady";
+
+export class HubFailedError extends Error {
+  readonly kind: HubFailedKind;
+
+  constructor(kind: HubFailedKind, message: string) {
+    super(message);
+    this.name = new.target.name;
+    this.kind = kind;
+  }
+}
+
+/** go build ran and finished with a nonzero exit (or was killed by the build timeout). */
+export class HubBuildFailedError extends HubFailedError {
   constructor(message: string) {
     super("HubBuildFailed", message);
   }
 }
 
-export class HubKeyFailedError extends E2EEnvironmentError {
+export class HubKeyFailedError extends HubFailedError {
   constructor(message: string) {
     super("HubKeyFailed", message);
   }
 }
 
-export class HubNotReadyError extends E2EEnvironmentError {
+/** The Hub did not answer /readyz in time, exited at startup or its binary could not be started. */
+export class HubNotReadyError extends HubFailedError {
   constructor(message: string) {
     super("HubNotReady", message);
   }
 }
 
+/** True for «не проверено» errors (the environment), false for Hub failures and anything else. */
 export function isEnvironmentError(err: unknown): err is E2EEnvironmentError {
   return err instanceof E2EEnvironmentError;
+}
+
+/** True for errors the Hub itself caused: a runner reports them as «сломано». */
+export function isHubFailedError(err: unknown): err is HubFailedError {
+  return err instanceof HubFailedError;
 }

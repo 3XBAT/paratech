@@ -67,7 +67,12 @@ test(
       const body = calls[0]?.body as { stream?: boolean; model?: string };
       assert.equal(body.stream, undefined, "SCRIPTED mode calls the provider unary");
       assert.deepEqual(fake.unmatched(), []);
-      assert.ok(!hub.logs().includes(hub.apiKey));
+      // The client's Hub key must not travel to the provider (recordings hold the bodies the Hub sent).
+      assert.ok(!JSON.stringify(calls).includes(hub.apiKey), "the run's API key reached the provider");
+      // The capture is scrubbed, so the key itself can never show up there; the marker shows the Hub printed a secret
+      // of the run (API key, seal keys, database password) at all, which it must not.
+      assert.ok(hub.logs().length > 0, "the Hub output is captured");
+      assert.ok(!hub.logs().includes("(redacted)"), `the Hub logged a secret of the run:\n${hub.logs()}`);
     } finally {
       await hub.stop();
       await fake.stop();

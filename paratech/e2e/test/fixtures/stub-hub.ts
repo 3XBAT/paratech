@@ -20,8 +20,18 @@ process.stderr.write(`seal=${env.HUB_AGENT_SEAL_KEYS} api=${StubApiKey}\n`);
 const key = env.HUB_ANTHROPIC_API_KEY ?? "";
 process.stderr.write(`split=${key.slice(0, 5)}`);
 process.stderr.write(`${key.slice(5)}\n`);
-process.stderr.write(`env-names=${Object.keys(env).sort().join(",")}\n`);
+
+// Russian text whose bytes are cut inside a two-byte char (and the key inside), the second half written later so the
+// parent reads it as a separate chunk.
+const russian = Buffer.from(`русский ${key} текст\n`, "utf8");
+const cut = 3; // "р" is bytes 0-1, so byte 3 is inside "у"
+process.stderr.write(russian.subarray(0, cut));
+await new Promise((r) => setTimeout(r, 50));
+process.stderr.write(russian.subarray(cut));
+
 process.stderr.write(`quota=${env.HUB_QUOTA_LIMIT} stream=${env.HUB_PROVIDER_STREAM ?? "(unset)"} base=${env.HUB_ANTHROPIC_BASE_URL}\n`);
+process.stderr.write(`env-names=${Object.keys(env).sort().join(",")}\n`);
+process.stderr.write("end-of-startup\n"); // the tests wait for it: every line above is complete by then
 
 if (behaviour === "crash") {
   process.exit(3);

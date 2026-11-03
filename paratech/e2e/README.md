@@ -34,8 +34,16 @@ await hub.stop(); await fake.stop();
 | `PARATECH_E2E_UNIT_ONLY=1` | skip the real Hub test |
 
 `startHub` options: `mode`, `fakeUrl` (SCRIPTED), `quotaLimit` (default 400000 tokens), `logLevel`, `env`, `readyTimeoutMs`.
-Environment problems throw typed `E2EEnvironmentError`s with a `kind` (`DockerNotRunning`, `PortBusy`, `ForbiddenPort`,
-`MissingLiveKey`, `HubBuildFailed`, `HubNotReady`, ...) and a Russian message: a run reports them as «не проверено».
+Errors are typed, with a `kind` and a Russian message (scrubbed of every secret of the run), in two hierarchies:
+
+- `E2EEnvironmentError` — the machine is not ready: `DockerMissing`, `DockerNotRunning`, `PortBusy`, `ForbiddenPort`,
+  `MissingLiveKey`, `BadConfig`, `DatabaseUnavailable`, `GoToolchainMissing` (go cannot be started). A run reports
+  them as «не проверено».
+- `HubFailedError` — the Hub itself failed: `HubBuildFailed` (`go build` exited nonzero or timed out), `HubKeyFailed`
+  (`keys create` gave no key), `HubNotReady` (no `/readyz` in time, exited at startup). These can be real Hub
+  regressions: a run reports them as «сломано», never «не проверено».
+
+`isEnvironmentError(e)` / `isHubFailedError(e)` tell them apart.
 
 ## Fake Messages API
 
@@ -43,8 +51,20 @@ Environment problems throw typed `E2EEnvironmentError`s with a `kind` (`DockerNo
 `{kind: "tools"|"plain", match, reply, text?, usage?}`: a request takes the first remaining rule whose `match` is a
 substring of the last user message (text and `tool_result` text); the rule is consumed. No rule: HTTP 500 `api_error`,
 listed as unmatched («unscripted LLM call»). Control: `POST /__e2e/script` `{"rules": [...]}` (strictly validated, 1 MiB
-cap; replaces the script and clears the recordings), `GET /__e2e/requests`, `GET /__e2e/unmatched`. Recordings hold
-request bodies only, never headers.
+cap; replaces the script and clears the recordings), `GET /__e2e/requests`, `GET /__e2e/unmatched`. Any other path
+is HTTP 404 and is recorded as unmatched too («unknown endpoint METHOD path»), so a new provider endpoint the Hub
+starts calling is not missed. Recordings hold request bodies only, never headers.
+
+## Решения / ограничения
+
+- The fake returns no thinking blocks: SCRIPTED checks the app side (tools, quota, flows), not the model's reasoning.
+- Rules match as «first remaining match»: the first not yet consumed rule whose `match` is a substring wins; order
+  the rules from specific to general.
+- An unmatched call is HTTP 500 `api_error`, which is transient for the Hub and the desktop: they may retry it, so
+  one unscripted call can show up several times in `/__e2e/unmatched`.
+- Linux CI must set `PARATECH_E2E_UNIT_ONLY=1`: there it only type-checks and unit tests this package (ADR-0035 section 7).
+- `HUB_TEST_DATABASE_URL` and `HUB_PG_PORT` are read from the environment: never point them at the owner's dev
+  database or its port; set `PARATECH_E2E_PG_PORT` to a port of its own for the E2E compose project.
 
 ## Isolation
 
