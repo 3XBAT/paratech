@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -167,6 +168,24 @@ func TestAppOptionsWebviewDataDir(t *testing.T) {
 	o.WebviewDataDir = `C:\Users\Student\AppData\Roaming\learning-assistant.exe`
 	if got := appOptions(o, func() {}).Windows.WebviewUserDataPath; got != o.WebviewDataDir {
 		t.Fatalf("WebviewUserDataPath = %q, want %q", got, o.WebviewDataDir)
+	}
+}
+
+// Browser arguments go to the WebView2 environment as given; none keeps the Wails defaults alone.
+func TestAppOptionsBrowserArgs(t *testing.T) {
+	if got := appOptions(validOptions(), func() {}).Windows.AdditionalBrowserArgs; got != nil {
+		t.Fatalf("no BrowserArgs: AdditionalBrowserArgs = %q, want none", got)
+	}
+
+	o := validOptions()
+	o.BrowserArgs = []string{"--remote-debugging-port=9333"}
+	got := appOptions(o, func() {}).Windows.AdditionalBrowserArgs
+	if !slices.Equal(got, o.BrowserArgs) {
+		t.Fatalf("AdditionalBrowserArgs = %q, want %q", got, o.BrowserArgs)
+	}
+	got[0] = "--changed"
+	if o.BrowserArgs[0] != "--remote-debugging-port=9333" {
+		t.Fatal("the Wails options share the slice of the shell options")
 	}
 }
 

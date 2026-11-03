@@ -25,7 +25,14 @@ type Options struct {
 	InstanceID string
 	// WebviewDataDir is the WebView2 user data folder; empty uses the Wails default, %APPDATA%\<exe name>.
 	WebviewDataDir string
-	Log            *slog.Logger
+	// Title replaces Name in the window titles and the tray tooltip; empty: Name.
+	Title string
+	// BrowserArgs are extra WebView2 browser arguments, of the one environment all windows share.
+	BrowserArgs []string
+	// MainWidth and MainHeight set the main window size when both are positive; else the normal size.
+	MainWidth, MainHeight int
+
+	Log *slog.Logger
 	// OpenCore opens the core (database, use cases) and returns what the pages bind to. Run calls it once, after the
 	// single-instance check: a second instance exits before it and never touches the database (ADR-0007).
 	OpenCore func(ctx context.Context) (Core, error)
@@ -140,6 +147,23 @@ func New(opts Options) (*Shell, error) {
 		return nil, err
 	}
 	return &Shell{opts: opts}, nil
+}
+
+// title is the text of the window titles and the tray tooltip.
+func (o Options) title() string {
+	if o.Title != "" {
+		return o.Title
+	}
+	return o.Name
+}
+
+// mainSpec is the main window with the title and the size of the options.
+func (o Options) mainSpec() windowSpec {
+	spec := mainWindowSpec(o.title())
+	if o.MainWidth > 0 && o.MainHeight > 0 {
+		spec.Width, spec.Height = o.MainWidth, o.MainHeight
+	}
+	return spec
 }
 
 // Run shows the tray icon and the main window and blocks until ctx is cancelled or the user quits from the tray.
