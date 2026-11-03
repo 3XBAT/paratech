@@ -122,7 +122,7 @@ export function generationRunning(err: unknown): boolean {
   return errorMessage(err) === errorMessages.generationRunning;
 }
 
-/** The line under the draft after «Сохранить ▾» → «Word (.docx)»:the core's text and the saved file's name. */
+/** The line under the draft after «Сохранить ▾» → «Word (.docx)»: the core's text and the saved file's name. */
 export function docxSaveView(r: DocxSaveResult): { kind: ResultKind; text: string } {
   switch (r.status) {
     case "saved":
@@ -275,7 +275,7 @@ export const groupTitles: Readonly<Record<GroupKey, string>> = {
   flat: "",
 };
 
-/** «На этой неделе» reaches this many calendar days ahead of today (today is day 0). */
+/** «На этой неделе» is the next 7 calendar days: today (day 0) up to today + 6 days. */
 export const weekDays = 7;
 
 /** One heading of the list with its rows; the "flat" group has no heading (title ""). */
@@ -287,8 +287,8 @@ export interface AssignmentGroup {
 
 /**
  * The group of an open assignment by its deadline, in the local time zone like dueText: a moment that has passed is
- * «Просрочено» (the same `<= now` test), up to `weekDays` calendar days ahead is «На этой неделе», further is «Позже»;
- * no deadline or an unreadable one is «Без срока».
+ * «Просрочено» (the same `<= now` test), within the next `weekDays` calendar days (today + 6) is «На этой неделе»,
+ * further is «Позже»; no deadline or an unreadable one is «Без срока».
  */
 export function dueGroupKey(due: string, now: Date): "overdue" | "week" | "later" | "nodue" {
   const d = parseMoment(due);
@@ -298,7 +298,7 @@ export function dueGroupKey(due: string, now: Date): "overdue" | "week" | "later
   if (d.getTime() <= now.getTime()) {
     return "overdue";
   }
-  return daysBetween(d, now) <= weekDays ? "week" : "later";
+  return daysBetween(d, now) < weekDays ? "week" : "later";
 }
 
 /**
@@ -323,19 +323,6 @@ export function groupAssignments(items: readonly AssignmentItem[], now: Date, st
     .map((key) => ({ key, title: groupTitles[key], items: by[key] }));
 }
 
-/**
- * Cuts the rows CollapsibleList rendered (the first `rows.length` of the groups' rows in order) back into the groups:
- * one slice per size, the last ones shorter or empty when the list is cut off at «Показать ещё».
- */
-export function splitRows<T>(sizes: readonly number[], rows: readonly T[]): T[][] {
-  let at = 0;
-  return sizes.map((n) => {
-    const part = rows.slice(at, at + n);
-    at += n;
-    return part;
-  });
-}
-
 export const firstRunTexts = {
   text: "Задания находятся сами в записи пары после конспекта.",
   manual: "Добавить задание вручную",
@@ -350,7 +337,8 @@ export const draftButtonTexts = {
   sendAgain: "Отправить ещё раз…",
   markSent: "Письмо дошло",
   /** Under «Письмо дошло»: why the button is there and when to press it. */
-  markSentNote: "Почта не подтвердила доставку. Если преподаватель письмо получил — отметьте.",
+  markSentNote:
+    "Почта не подтвердила доставку. Если преподаватель письмо получил — отметьте «Письмо дошло». Повторная отправка может прийти вторым письмом.",
   correct: "Поправить предмет и преподавателя",
 } as const;
 

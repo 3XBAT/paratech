@@ -1,5 +1,5 @@
 import { type RefObject, useEffect, useRef, useState } from "react";
-import { focusSpot, focusTargetAfter, shouldMoveFocus, shouldRestoreFocus } from "../assignmentDoneView.js";
+import { focusKeepTarget, focusSpot, focusTargetAfter, shouldMoveFocus, shouldRestoreFocus } from "../assignmentDoneView.js";
 import type { DoneToast } from "../doneRunner.js";
 
 /** Focuses the check of the row with this id inside root; false when there is none. */
@@ -75,6 +75,13 @@ export function useDoneFocus(root: RefObject<HTMLElement | null>) {
       }
       const order = Array.from(el.querySelectorAll<HTMLElement>("[data-done-id]"), (x) => x.dataset.doneId ?? "");
       const target = focusTargetAfter(order, leaving);
+      if (target !== null) {
+        pending.current = target;
+      }
+    },
+    /** Rows stay but move to another group (call before the state changes): the check that has the focus gets it back. */
+    rowsMoving(moving: readonly string[]) {
+      const target = focusKeepTarget(focusSpot(document.activeElement as HTMLElement | null, document.body), moving);
       if (target !== null) {
         pending.current = target;
       }

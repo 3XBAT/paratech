@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatTime } from "../activityView";
-import { CollapsibleList } from "../CollapsibleList";
 import {
   assignmentAfterDone,
   defaultState,
@@ -8,6 +7,7 @@ import {
   focusRowMenu,
   listAfterDone,
   listEmpty,
+  rowsChangingGroup,
 } from "../assignmentDoneView";
 import {
   type AssignmentDetail,
@@ -60,7 +60,7 @@ import {
   versionTitle,
 } from "../homeworkView";
 import { lessonText } from "../lessonLabel";
-import { initialListState, type ListState } from "../listView";
+import { type ListStates, withState } from "../listView";
 import { useRecipientNav } from "../recipientNav";
 import { isRefusal, type RecipientView, recipientView, refusalAction } from "../recipientView";
 import { newestOnly } from "../todayView";
@@ -183,7 +183,8 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
   const [deliveriesLoaded, setDeliveriesLoaded] = useState(false);
   const [filter, setFilter] = useState<AssignmentFilter>("all");
   const [error, setError] = useState("");
-  const [list, setList] = useState<ListState>(initialListState);
+  // The «Показать ещё» window of every group, by group key.
+  const [lists, setLists] = useState<ListStates>({});
   const [adding, setAdding] = useState(false);
   const library = useMemo(() => libraryApi(callByName), []);
   // «Открытые / Выполненные / Все» (TASK-316). A slow answer of an earlier request never replaces a newer one.
@@ -250,7 +251,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
     setItems(null);
     setDeliveries({});
     setDeliveriesLoaded(false);
-    setList(initialListState);
+    setLists({});
     setRowProblem(null);
     // A delete question of the old list must not come back for a row after a switch.
     setConfirmId("");
@@ -308,6 +309,8 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
       // A row that leaves takes the focus with it: it goes to the next row's check.
       const leaving = cur.filter((a) => !next.some((n) => n.id === a.id)).map((a) => a.id);
       focus.rowsLeaving(leaving);
+      // A row that only changes its group («Все»: to «Выполнено») is drawn anew: its check gets the focus back there.
+      focus.rowsMoving(rowsChangingGroup(cur, next));
       // A delete question of a row that left the list goes with it.
       setConfirmId((c) => (leaving.includes(c) ? "" : c));
       itemsRef.current = next;
@@ -481,7 +484,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
   // The way out of an empty email group.
   const resetFilter = () => {
     setFilter("all");
-    setList(initialListState);
+    setLists({});
   };
 
   const live = items === null ? [] : items.filter((a) => !Object.hasOwn(removed, a.id));
@@ -543,7 +546,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
                 value={filter}
                 onChange={(f) => {
                   setFilter(f);
-                  setList(initialListState);
+                  setLists({});
                 }}
               />
             )}
@@ -572,16 +575,12 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
               <Button onClick={resetFilter}>{filterReset}</Button>
             </div>
           ) : (
-            // One list for the «Показать ещё» window; the headings of the groups are drawn between its rows.
-            <CollapsibleList
-              items={groups.flatMap((g) => g.items)}
-              itemKey={(a) => a.id}
+            // Every group has its own «Показать ещё» window, so no group is pushed out of sight by a longer one above it.
+            <GroupedRows
+              groups={groups}
+              states={lists}
+              onStateChange={(key, next) => setLists((cur) => withState(cur, key, next))}
               renderItem={row}
-              renderContainer={(rows) => <GroupedRows groups={groups} rows={Array.isArray(rows) ? rows : [rows]} />}
-              state={list}
-              onStateChange={setList}
-              className="clist-card"
-              classNames={{ button: "btn ghost" }}
             />
           )}
         </>
@@ -1286,9 +1285,11 @@ function AssignmentEditor(props: {
           <AssignmentHeadMenu
             id={id}
             title={a.title}
-            saving={changing || doneBusy}
+            changing={changing}
+            marking={doneBusy}
             checking={checking}
             confirming={confirming}
+            correcting={correcting}
             onPick={pickHead}
           />
         </div>
@@ -1413,6 +1414,7 @@ function AssignmentEditor(props: {
                 busy={busy === "send"}
                 busyLabel="Подготовка…"
                 disabled={!idle || dirty}
+                disabledReason={savedReason}
                 onClick={startSend}
               >
                 {draftButtonTexts.send}

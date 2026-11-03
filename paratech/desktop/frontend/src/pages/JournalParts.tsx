@@ -119,8 +119,23 @@ export function JournalList(props: {
   outcome?: UndoOutcome | null;
   /** The moment «Сегодня» is counted from; the clock when omitted. */
   now?: Date;
+  /** A filter beyond the period is set: an empty list says the filters hide everything, with the way to drop them. */
+  filtered?: boolean;
+  onResetFilters?(): void;
 }) {
   if (props.lines.length === 0) {
+    if (props.filtered === true) {
+      return (
+        <div className="jr-none">
+          <p className="muted">{texts.emptyFiltered}</p>
+          {props.onResetFilters !== undefined && (
+            <Button variant="ghost" onClick={props.onResetFilters}>
+              {texts.resetFilters}
+            </Button>
+          )}
+        </div>
+      );
+    }
     return <p className="muted">{texts.empty}</p>;
   }
   const outcome = props.outcome ?? null;

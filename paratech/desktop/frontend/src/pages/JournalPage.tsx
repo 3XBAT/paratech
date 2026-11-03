@@ -2,7 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type AgentApi, agentApi, type JournalLine } from "../bindings/agent.js";
 import { libraryApi, type LibrarySubject } from "../bindings/library.js";
 import { callByName } from "../bindings/runtime.js";
-import { type FilterState, initialFilter, outcomeHasRow, texts, toFilter, undoOutcome, type UndoOutcome } from "../journalView.js";
+import {
+  type FilterState,
+  filtersNarrow,
+  initialFilter,
+  outcomeHasRow,
+  resetFilters,
+  texts,
+  toFilter,
+  undoOutcome,
+  type UndoOutcome,
+} from "../journalView.js";
 import { ResultLine } from "../ui/controls.js";
 import { FilterBar, JournalList, LoadError } from "./JournalParts.js";
 
@@ -20,6 +30,7 @@ export function JournalPage() {
   const [error, setError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const [outcome, setOutcome] = useState<UndoOutcome | null>(null);
+  const [retrying, setRetrying] = useState(false); // «Повторить» was pressed and the answer has not come
   const running = useRef(false); // a double click comes before the re-render that disables the button
 
   useEffect(() => {
@@ -33,6 +44,7 @@ export function JournalPage() {
         if (!active) {
           return;
         }
+        setRetrying(false);
         if (h.problem !== "") {
           setError(texts.loadFailed);
           setLines([]);
@@ -41,7 +53,12 @@ export function JournalPage() {
           setLines(h.lines);
         }
       },
-      () => active && setError(texts.loadFailed),
+      () => {
+        if (active) {
+          setRetrying(false);
+          setError(texts.loadFailed);
+        }
+      },
     );
     return () => {
       active = false;
@@ -70,10 +87,14 @@ export function JournalPage() {
     }
   }
 
-  // «Повторить»: the inline «Загрузка…» shows again until the answer comes.
+  // «Повторить»: the lines already shown stay; a small «Загрузка…» shows until the answer comes. Without lines the
+  // list area itself says «Загрузка…».
   function retry() {
     setError("");
-    setLines(null);
+    setRetrying(true);
+    if (lines === null || lines.length === 0) {
+      setLines(null);
+    }
     load();
   }
 
@@ -95,15 +116,25 @@ export function JournalPage() {
         </div>
       </div>
       <FilterBar filter={filter} subjects={subjects} onChange={changeFilter} />
-      {lines === null && !error && <p className="muted">{texts.loading}</p>}
+      {strayOutcome !== null && (
+        <div className="jr-stray">
+          <ResultLine kind={strayOutcome.ok ? "ok" : "fail"} role={strayOutcome.ok ? "status" : "alert"}>
+            {strayOutcome.text}
+          </ResultLine>
+        </div>
+      )}
+      {(lines === null ? error === "" : retrying) && <p className="small muted">{texts.loading}</p>}
       {error !== "" && <LoadError text={error} onRetry={retry} />}
       {lines !== null && !(error !== "" && lines.length === 0) && (
-        <JournalList lines={lines} subjects={names} busyAction={busyAction} outcome={outcome} onUndo={(id) => void undo(id)} />
-      )}
-      {strayOutcome !== null && (
-        <ResultLine kind={strayOutcome.ok ? "ok" : "fail"} role={strayOutcome.ok ? "status" : "alert"}>
-          {strayOutcome.text}
-        </ResultLine>
+        <JournalList
+          lines={lines}
+          subjects={names}
+          busyAction={busyAction}
+          outcome={outcome}
+          filtered={filtersNarrow(filter)}
+          onResetFilters={() => changeFilter(resetFilters(filter))}
+          onUndo={(id) => void undo(id)}
+        />
       )}
     </section>
   );

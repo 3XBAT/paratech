@@ -2,15 +2,10 @@ import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState 
 // The .js extensions let the Node test runner load the compiled menus (test/homeworkJournal346.test.mjs renders them).
 import { doneTexts, type RemoveLock, removeItem } from "../assignmentDoneView.js";
 import { formatTime } from "../activityView.js";
-import type { DeliveryItem } from "../bindings/homework.js";
-import {
-  type AssignmentGroup,
-  changeTexts,
-  deliveryView,
-  draftButtonTexts,
-  firstRunTexts,
-  splitRows,
-} from "../homeworkView.js";
+import type { AssignmentItem, DeliveryItem } from "../bindings/homework.js";
+import { CollapsibleList } from "../CollapsibleList.js";
+import { type AssignmentGroup, changeTexts, deliveryView, draftButtonTexts, firstRunTexts } from "../homeworkView.js";
+import { type ListState, type ListStates, stateOf } from "../listView.js";
 import { Button } from "../ui/Button.js";
 import { EmptyState, Row } from "../ui/controls.js";
 import { menuKey, menuShown } from "../ui/menu.js";
@@ -22,32 +17,42 @@ import { StatusChip } from "../ui/StatusChip.js";
 // each pick does.
 
 /**
- * The rows CollapsibleList rendered, put under the headings of their groups «Просрочено · На этой неделе · Позже · Без
- * срока · Выполнено». The count in a heading is the whole group; a group whose rows are all cut off by «Показать ещё»
- * is not drawn. The «Выполненные» list is flat: one card, no heading.
+ * The groups «Просрочено · На этой неделе · Позже · Без срока · Выполнено», each with its heading, its card and its own
+ * «Показать ещё N» window (the state of every group is kept by the page under the group's key), so a long group never
+ * pushes a later one out of sight. The count in a heading is the whole group. The «Выполненные» list is flat: one card,
+ * no heading.
  */
-export function GroupedRows(props: { groups: readonly AssignmentGroup[]; rows: readonly ReactNode[] }) {
-  const parts = splitRows(
-    props.groups.map((g) => g.items.length),
-    props.rows,
-  );
+export function GroupedRows(props: {
+  groups: readonly AssignmentGroup[];
+  states: ListStates;
+  onStateChange: (key: string, next: ListState) => void;
+  renderItem: (a: AssignmentItem) => ReactNode;
+}) {
   return (
     <>
-      {props.groups.map((g, i) =>
-        parts[i].length === 0 ? null : (
-          <section key={g.key} className="hw-sec" aria-labelledby={g.title === "" ? undefined : `hw-h-${g.key}`}>
-            {g.title !== "" && (
-              <h2 className="hw-group" id={`hw-h-${g.key}`}>
-                {g.title}
-                <span className="cnt num">{g.items.length}</span>
-              </h2>
+      {props.groups.map((g) => (
+        <section key={g.key} className="hw-sec" aria-labelledby={g.title === "" ? undefined : `hw-h-${g.key}`}>
+          {g.title !== "" && (
+            <h2 className="hw-group" id={`hw-h-${g.key}`}>
+              {g.title}
+              <span className="cnt num">{g.items.length}</span>
+            </h2>
+          )}
+          <CollapsibleList
+            items={g.items}
+            itemKey={(a) => a.id}
+            renderItem={props.renderItem}
+            renderContainer={(rows) => (
+              <div className="card rows" role="list">
+                {rows}
+              </div>
             )}
-            <div className="card rows" role="list">
-              {parts[i]}
-            </div>
-          </section>
-        ),
-      )}
+            state={stateOf(props.states, g.key)}
+            onStateChange={(next) => props.onStateChange(g.key, next)}
+            classNames={{ button: "btn ghost" }}
+          />
+        </section>
+      ))}
     </>
   );
 }
@@ -94,7 +99,8 @@ export function DeliveryRow(props: {
           <StatusChip kind={v.kind} icon={v.icon}>
             {v.label}
           </StatusChip>
-          {v.hint !== "" && <span className="small muted">{v.hint}</span>}
+          {/* With «Письмо дошло» the line under it says everything; the core's hint would repeat it. */}
+          {v.hint !== "" && !d.canMarkSent && <span className="small muted">{v.hint}</span>}
           {v.problem !== "" && <span className="small row-problem">{v.problem}</span>}
           {d.canMarkSent && (
             <span id={noteId} className="small muted">
@@ -129,30 +135,55 @@ export function DeliveryRow(props: {
 
 export type HeadKey = "edit" | "correct" | "remove";
 
+export const headMenuTexts = {
+  /** Under the disabled items while the delete call runs. */
+  deleting: "Идёт удаление",
+  /** Under «Поправить предмет и преподавателя» while its form is open. */
+  formOpen: "Уже открыто",
+} as const;
+
+/** What the page is doing, for the items of the head's «⋯» menu. */
+export interface HeadMenuState {
+  /** The delete call runs. */
+  changing: boolean;
+  /** The done mark is being saved. */
+  marking: boolean;
+  /** The running-work check of «Удалить» is on its way. */
+  checking: boolean;
+  /** Its question is open. */
+  confirming: boolean;
+  /** The form of «Поправить предмет и преподавателя» is open. */
+  correcting: boolean;
+}
+
 /**
  * The items of the head's «⋯» menu, in this order: «Изменить», «Поправить предмет и преподавателя», «Удалить» (last, the
- * only one that removes). saving: a call of the page runs (a mark or the delete); checking: the running-work check of
- * «Удалить» is on its way; confirming: its question is open. A disabled item says why.
+ * only one that removes). A disabled item says why: the delete runs, the mark is saved, the check of «Удалить» runs, its
+ * question waits (only «Удалить»), the correction form is already open (only that item).
  */
-export function headMenuItems(s: { saving: boolean; checking: boolean; confirming: boolean }): RowMenuItem<HeadKey>[] {
+export function headMenuItems(s: HeadMenuState): RowMenuItem<HeadKey>[] {
   const lock: RemoveLock = s.checking ? "checking" : s.confirming ? "confirm" : "";
-  const why = s.saving ? doneTexts.busyHint : s.checking ? doneTexts.removeChecking : "";
+  const why = s.changing ? headMenuTexts.deleting : s.marking ? doneTexts.busyHint : s.checking ? doneTexts.removeChecking : "";
+  const correctWhy = why !== "" ? why : s.correcting ? headMenuTexts.formOpen : "";
   return [
     { key: "edit", label: changeTexts.edit, disabled: why !== "", hint: why },
-    { key: "correct", label: draftButtonTexts.correct, disabled: why !== "", hint: why },
-    { key: "remove", label: changeTexts.remove, ...removeItem(s.saving, lock) },
+    { key: "correct", label: draftButtonTexts.correct, disabled: correctWhy !== "", hint: correctWhy },
+    {
+      key: "remove",
+      label: changeTexts.remove,
+      ...(s.changing ? { disabled: true, hint: headMenuTexts.deleting } : removeItem(s.marking, lock)),
+    },
   ];
 }
 
 /** «⋯» of the assignment page; its button carries the id, so the page can give it the focus back (focusRowMenu). */
-export function AssignmentHeadMenu(props: {
-  id: string;
-  title: string;
-  saving: boolean;
-  checking: boolean;
-  confirming: boolean;
-  onPick: (key: HeadKey) => void;
-}) {
+export function AssignmentHeadMenu(
+  props: HeadMenuState & {
+    id: string;
+    title: string;
+    onPick: (key: HeadKey) => void;
+  },
+) {
   return (
     <RowMenu
       rowId={props.id}

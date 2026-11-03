@@ -375,7 +375,8 @@ test("the assignment page pieces in both states; edit and delete stay in the hea
   assert.match(page, /<DoneStamp assignment=\{a\} \/>/);
   // While the mark is saved the page does not edit or delete (a delete would go out with a stale version); the
   // delete check and its warning (TASK-338, TASK-316) hold «Отметить выполненным» too.
-  assert.match(head, /saving=\{changing \|\| doneBusy\}/, "the items of the menu wait for the mark");
+  // (TASK-346 review: the menu gets the two reasons apart, «Идёт удаление» and «Идёт сохранение».)
+  assert.match(head, /changing=\{changing\}\s+marking=\{doneBusy\}/, "the items of the menu wait for the delete and for the mark");
   assert.match(head, /disabled=\{changing \|\| checking \|\| confirming\}\s*onToggle/);
 });
 

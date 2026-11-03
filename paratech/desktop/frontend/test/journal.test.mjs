@@ -69,13 +69,14 @@ test("a sent email says «Нельзя отменить: письмо уже о�
   assert.equal(m.cannotUndo, true);
 });
 
-test("an irreversible proposal says the decision is the student's (no refusal prefix); reasons explain lines without «Отменить»", () => {
+test("an irreversible proposal is a refusal with the prefix; reasons explain lines without «Отменить»", () => {
   const proposal = line({ tool: "propose_send", status: "PROPOSED", undoable: false, cannotUndo: true, noUndo: "irreversible" });
   const out = list([proposal]);
   assert.match(out, /Предложена отправка письма/);
-  assert.doesNotMatch(out, /Нельзя отменить/);
-  assert.match(out, /Решение остаётся за вами/);
-  const reasons = { running: "Выполняется", failed: "Не выполнено", undone: "Уже отменено", changed: "Нельзя отменить: изменено после", result_ready: "Нельзя отменить: результат уже готов", cannot_stop: "Нельзя отменить: задачу уже не остановить", unknown: "Итог неизвестен" };
+  assert.match(out, /Нельзя отменить/);
+  assert.match(out, /Нельзя отменить: это предложение, решение за вами/);
+  // (running, unknown and undone repeat the status label of the line, so they are left out here: see homeworkJournal346.test.mjs.)
+  const reasons = { failed: "Не выполнено", changed: "Нельзя отменить: после этого вносились другие изменения", result_ready: "Нельзя отменить: результат уже готов, прежний не сохранён", cannot_stop: "Нельзя отменить: обработку уже не остановить" };
   for (const [noUndo, text] of Object.entries(reasons)) {
     const o = list([line({ undoable: false, noUndo, status: "UNDONE" })]);
     assert.ok(o.includes(text), noUndo);
