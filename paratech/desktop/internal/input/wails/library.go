@@ -116,6 +116,9 @@ type LibraryUseCase interface {
 	PlacementHint(ctx context.Context, id shared.MaterialID) (library.Placement, error)
 	SetTeacher(ctx context.Context, id shared.SubjectID, role subject.TeacherRole, name, email string, expectedVersion int64) (*subject.Subject, error)
 	ClearTeacher(ctx context.Context, id shared.SubjectID, role subject.TeacherRole, expectedVersion int64) (*subject.Subject, error)
+	SetCallLink(ctx context.Context, id shared.SubjectID, link string) (*subject.Subject, error)
+	ClearCallLink(ctx context.Context, id shared.SubjectID) (*subject.Subject, error)
+	CallLink(ctx context.Context, id shared.SubjectID) (subject.CallLink, error)
 }
 
 // MaterialFilePicker shows the native open dialog for a file of the library. It returns the chosen path, or "" when
@@ -146,16 +149,17 @@ type LibraryFolder struct {
 
 // LibrarySubject is a subject of the library. Semester is the code ("2026-autumn"), SemesterLabel the text shown
 // («Осень 2026»). Names are typed text: plain text only. Version is passed back to the teacher calls; Teachers holds
-// the three roles.
+// the three roles. CallLink is the link to the online class (TASK-364), null for none.
 type LibrarySubject struct {
-	ID            string          `json:"id"`
-	Name          string          `json:"name"`
-	Aliases       []string        `json:"aliases"`
-	Semester      string          `json:"semester"`
-	SemesterLabel string          `json:"semesterLabel"`
-	Folders       []LibraryFolder `json:"folders"`
-	Version       int64           `json:"version"`
-	Teachers      LibraryTeachers `json:"teachers"`
+	ID            string           `json:"id"`
+	Name          string           `json:"name"`
+	Aliases       []string         `json:"aliases"`
+	Semester      string           `json:"semester"`
+	SemesterLabel string           `json:"semesterLabel"`
+	Folders       []LibraryFolder  `json:"folders"`
+	Version       int64            `json:"version"`
+	Teachers      LibraryTeachers  `json:"teachers"`
+	CallLink      *LibraryCallLink `json:"callLink"`
 }
 
 // LibraryMaterial is a file of the library. Name is the original file name, shown only (plain text). Type is "docx",
@@ -205,6 +209,8 @@ type LibraryService struct {
 	files  MaterialFileReader
 	views  MaterialViews // «Открыть»: set by withOpener
 	opener FileOpener
+	// callLinks opens the call link of a subject (TASK-364): set by withCallLinkOpener.
+	callLinks CallLinkOpener
 	// overview is the page of a subject (TASK-225): set by withOverview.
 	overview SubjectOverviewUseCase
 	// schedule is subjects from the schedule (TASK-311): attached when uc has it, or by withSchedule.
@@ -493,6 +499,7 @@ func librarySubject(sub *subject.Subject) LibrarySubject {
 	out := LibrarySubject{
 		ID: string(sub.ID()), Name: sub.Name().String(), Aliases: []string{}, Semester: sub.Semester().Code(),
 		SemesterLabel: sub.Semester().Label(), Folders: []LibraryFolder{}, Version: sub.Version(),
+		CallLink: libraryCallLink(sub.CallLink()),
 	}
 	ts := sub.Teachers()
 	out.Teachers = LibraryTeachers{

@@ -11,6 +11,7 @@ import (
 	"paratech/desktop/internal/cases/todayfeed"
 	"paratech/desktop/internal/domain/agent/services/today"
 	"paratech/desktop/internal/domain/coursework/proposal"
+	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -80,6 +81,40 @@ func TestTodayScreenMapping(t *testing.T) {
 	}
 	if c := got.Chips[0]; c.Kind != "file_summary" || c.Text != "Конспект по файлу" {
 		t.Errorf("chip = %+v", c)
+	}
+}
+
+// TASK-364: a lesson card knows the library subject of the lesson and the host of the link kept on it, never the link
+// itself; a lesson of no library subject says so with an empty subjectId.
+func TestTodayLessonCallLink(t *testing.T) {
+	link, err := subject.ParseCallLink("https://meet.example.org/j/1?pwd=FakePwd42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc := &fakeToday{today: todayfeed.Today{Lessons: []todayfeed.LessonRow{
+		{Lesson: "l1", Subject: "Матанализ", SubjectID: "s1", SubjectName: "Математический анализ", CallLink: link},
+		{Lesson: "l2", Subject: "Химия", SubjectID: "s2", SubjectName: "Химия"},
+		{Lesson: "l3", Subject: "Физкультура"},
+	}}}
+	got, err := NewTodayService(uc, discard()).Today(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	withLink, noLink, noSubject := got.Lessons[0], got.Lessons[1], got.Lessons[2]
+	if withLink.SubjectID != "s1" || withLink.SubjectName != "Математический анализ" || !withLink.HasCallLink ||
+		withLink.CallLinkHost != "meet.example.org" {
+		t.Errorf("with link = %+v", withLink)
+	}
+	if noLink.SubjectID != "s2" || noLink.HasCallLink || noLink.CallLinkHost != "" {
+		t.Errorf("no link = %+v", noLink)
+	}
+	if noSubject.SubjectID != "" || noSubject.Subject != "Физкультура" || noSubject.HasCallLink {
+		t.Errorf("no library subject = %+v", noSubject)
+	}
+	raw, err := json.Marshal(got.Lessons)
+	if err != nil || strings.Contains(string(raw), "FakePwd42") ||
+		!strings.Contains(string(raw), `"subjectId":"s1","subjectName":"Математический анализ","hasCallLink":true,"callLinkHost":"meet.example.org"`) {
+		t.Fatalf("lessons JSON = %s, %v", raw, err)
 	}
 }
 

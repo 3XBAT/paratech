@@ -68,16 +68,24 @@ type TodayPost struct {
 	ShownAt      string                `json:"shownAt"`
 }
 
-// TodayLesson is a lesson of the day; Post is null until its recording has a post.
+// TodayLesson is a lesson of the day; Post is null until its recording has a post. Subject is the string of the
+// schedule; SubjectID the library subject it resolves to and SubjectName its name, both "" when it resolves to none
+// (or to several): such a lesson has no place to keep a call link until the subject exists. CallLinkHost is the host
+// of the link kept on the subject ("" none, HasCallLink false); «Подключиться» calls LibraryService.
+// OpenSubjectCallLink(SubjectID), «Добавить ссылку» LibraryService.SetSubjectCallLink(SubjectID, text).
 type TodayLesson struct {
-	ID      string     `json:"id"`
-	Title   string     `json:"title"`
-	Subject string     `json:"subject"`
-	Kind    string     `json:"kind"`
-	Teacher string     `json:"teacher"`
-	Start   string     `json:"start"`
-	End     string     `json:"end"`
-	Post    *TodayPost `json:"post"`
+	ID           string     `json:"id"`
+	Title        string     `json:"title"`
+	Subject      string     `json:"subject"`
+	SubjectID    string     `json:"subjectId"`
+	SubjectName  string     `json:"subjectName"`
+	HasCallLink  bool       `json:"hasCallLink"`
+	CallLinkHost string     `json:"callLinkHost"`
+	Kind         string     `json:"kind"`
+	Teacher      string     `json:"teacher"`
+	Start        string     `json:"start"`
+	End          string     `json:"end"`
+	Post         *TodayPost `json:"post"`
 }
 
 // TodayWaiting is a proposal of «Ждёт вашего «Да»». Kind is the proposal kind ("create_deadline_event",
@@ -154,8 +162,9 @@ func (s *TodayService) Today(ctx context.Context) (TodayScreen, error) {
 	}
 	for _, l := range v.Lessons {
 		row := TodayLesson{
-			ID: l.Lesson.String(), Title: l.Title, Subject: l.Subject, Kind: l.Kind, Teacher: l.Teacher,
-			Start: timeText(l.Start), End: timeText(l.End),
+			ID: l.Lesson.String(), Title: l.Title, Subject: l.Subject, SubjectID: l.SubjectID.String(),
+			SubjectName: l.SubjectName, HasCallLink: !l.CallLink.IsZero(), CallLinkHost: l.CallLink.Host(), Kind: l.Kind,
+			Teacher: l.Teacher, Start: timeText(l.Start), End: timeText(l.End),
 		}
 		if l.Post != nil {
 			p := todayPost(*l.Post)

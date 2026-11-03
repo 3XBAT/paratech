@@ -72,7 +72,18 @@ export interface TodayPost {
 export interface TodayLesson {
   id: string;
   title: string;
+  /** The subject string of the schedule. */
   subject: string;
+  /**
+   * TASK-364: the library subject the lesson resolves to; "" when it resolves to none (or to several): there is no place
+   * to keep a call link until the subject exists. «Подключиться» is library openSubjectCallLink(subjectId), «Добавить
+   * ссылку» library setSubjectCallLink(subjectId, text).
+   */
+  subjectId: string;
+  subjectName: string;
+  /** The subject keeps a call link; its host is callLinkHost (the link itself never reaches this screen). */
+  hasCallLink: boolean;
+  callLinkHost: string;
   kind: string;
   teacher: string;
   start: string;
@@ -210,6 +221,11 @@ export function parseLesson(raw: unknown): TodayLesson {
     id: str(r, "id", w),
     title: str(r, "title", w),
     subject: str(r, "subject", w),
+    // A lesson without these fields (older shape) has no library subject and no link; another type is an error.
+    subjectId: r.subjectId === undefined ? "" : str(r, "subjectId", w),
+    subjectName: r.subjectName === undefined ? "" : str(r, "subjectName", w),
+    hasCallLink: r.hasCallLink === undefined ? false : bool(r, "hasCallLink", w),
+    callLinkHost: r.callLinkHost === undefined ? "" : str(r, "callLinkHost", w),
     kind: str(r, "kind", w),
     teacher: str(r, "teacher", w),
     start: str(r, "start", w),

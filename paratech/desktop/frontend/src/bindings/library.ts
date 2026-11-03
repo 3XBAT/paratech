@@ -24,6 +24,10 @@ export const methods = {
   // TASK-236, TASK-285: the teachers of a subject.
   setSubjectTeacher: `${service}.SetSubjectTeacher`,
   clearSubjectTeacher: `${service}.ClearSubjectTeacher`,
+  // TASK-364: the link to the online class kept on a subject.
+  setSubjectCallLink: `${service}.SetSubjectCallLink`,
+  clearSubjectCallLink: `${service}.ClearSubjectCallLink`,
+  openSubjectCallLink: `${service}.OpenSubjectCallLink`,
   // TASK-311: subjects from the schedule.
   scheduleSubjects: `${service}.ScheduleSubjects`,
   createFromSchedule: `${service}.CreateFromSchedule`,
@@ -123,6 +127,36 @@ export interface LibrarySubject {
   version: number;
   /** The teacher of each role; null for a role without one. */
   teachers: LibraryTeachers;
+  /** TASK-364: the link to the online class; null for none. */
+  callLink: LibraryCallLink | null;
+}
+
+/** The student's own link to the online class in canonical form, and its host (shown in full). Text nodes only. */
+export interface LibraryCallLink {
+  link: string;
+  host: string;
+}
+
+/** "invalid": not an http or https link the app may open; the page owns the texts. */
+export type CallLinkProblem = "" | "invalid" | "not_found" | "failed";
+
+export const callLinkProblems: readonly CallLinkProblem[] = ["", "invalid", "not_found", "failed"];
+
+/** The reply of setSubjectCallLink / clearSubjectCallLink. */
+export interface CallLinkResult {
+  problem: CallLinkProblem;
+  /** Set only when problem is "". */
+  subject: LibrarySubject | null;
+}
+
+/** "no_link": the subject has no link (any more), offer «Добавить ссылку». */
+export type CallLinkOpenProblem = "" | "no_link" | "not_found" | "failed";
+
+export const callLinkOpenProblems: readonly CallLinkOpenProblem[] = ["", "no_link", "not_found", "failed"];
+
+/** The reply of openSubjectCallLink. */
+export interface CallLinkOpen {
+  problem: CallLinkOpenProblem;
 }
 
 /** A teacher of a subject: personal data typed by the student, text nodes only. */
@@ -221,7 +255,50 @@ export function parseSubject(raw: unknown): LibrarySubject {
     folders: list(r.folders, w, parseFolder),
     version: typeof r.version === "number" && Number.isSafeInteger(r.version) && r.version >= 0 ? r.version : 0,
     teachers: parseTeachers(r.teachers),
+    callLink: parseCallLink(r.callLink),
   };
+}
+
+/** The call link of a subject; null for none or for a reply without both texts. */
+export function parseCallLink(raw: unknown): LibraryCallLink | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return null;
+  }
+  const r = raw as Record<string, unknown>;
+  const link = optStr(r, "link");
+  const host = optStr(r, "host");
+  return link !== "" && host !== "" ? { link, host } : null;
+}
+
+/** Reads the reply of setSubjectCallLink / clearSubjectCallLink; an unknown or malformed reply is "failed". */
+export function parseCallLinkResult(raw: unknown): CallLinkResult {
+  const failed: CallLinkResult = { problem: "failed", subject: null };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return failed;
+  }
+  const problem = (raw as Record<string, unknown>).problem;
+  if (typeof problem !== "string" || !callLinkProblems.includes(problem as CallLinkProblem)) {
+    return failed;
+  }
+  if (problem === "") {
+    try {
+      return { problem: "", subject: parseSubject((raw as Record<string, unknown>).subject) };
+    } catch {
+      return failed;
+    }
+  }
+  return { problem: problem as CallLinkProblem, subject: null };
+}
+
+/** Reads the reply of openSubjectCallLink; an unknown or malformed reply is "failed". */
+export function parseCallLinkOpen(raw: unknown): CallLinkOpen {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { problem: "failed" };
+  }
+  const problem = (raw as Record<string, unknown>).problem;
+  return typeof problem === "string" && callLinkOpenProblems.includes(problem as CallLinkOpenProblem)
+    ? { problem: problem as CallLinkOpenProblem }
+    : { problem: "failed" };
 }
 
 /** The teachers of a subject; a missing or malformed reply is null in every role. */
@@ -599,6 +676,12 @@ export interface LibraryApi {
   setSubjectTeacher(subjectId: string, version: number, role: TeacherRole, name: string, email: string): Promise<TeacherResult>;
   /** Removes the teacher of role while the subject is at version; a failed call is "failed". */
   clearSubjectTeacher(subjectId: string, version: number, role: TeacherRole): Promise<TeacherResult>;
+  /** TASK-364: keeps text as the subject's call link (checked in the core); a failed call is "failed". */
+  setSubjectCallLink(subjectId: string, link: string): Promise<CallLinkResult>;
+  /** Removes the subject's call link; a failed call is "failed". */
+  clearSubjectCallLink(subjectId: string): Promise<CallLinkResult>;
+  /** «Подключиться»: only the subject ID crosses, the core reads the link and opens it; recording does not start. */
+  openSubjectCallLink(subjectId: string): Promise<CallLinkOpen>;
 }
 
 export function libraryApi(call: CallByName): LibraryApi {
@@ -648,6 +731,27 @@ export function libraryApi(call: CallByName): LibraryApi {
         return parseTeacherResult(await call(methods.clearSubjectTeacher, subjectId, version, role));
       } catch {
         return parseTeacherResult(null);
+      }
+    },
+    setSubjectCallLink: async (subjectId, link) => {
+      try {
+        return parseCallLinkResult(await call(methods.setSubjectCallLink, subjectId, link));
+      } catch {
+        return parseCallLinkResult(null);
+      }
+    },
+    clearSubjectCallLink: async (subjectId) => {
+      try {
+        return parseCallLinkResult(await call(methods.clearSubjectCallLink, subjectId));
+      } catch {
+        return parseCallLinkResult(null);
+      }
+    },
+    openSubjectCallLink: async (subjectId) => {
+      try {
+        return parseCallLinkOpen(await call(methods.openSubjectCallLink, subjectId));
+      } catch {
+        return parseCallLinkOpen(null);
       }
     },
   };
