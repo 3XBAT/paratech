@@ -31,20 +31,10 @@ import {
 import { saveResultText } from "../transcriptView";
 import { Breadcrumbs } from "../ui/Breadcrumbs";
 import { Button } from "../ui/Button";
-import {
-  Banner,
-  Card,
-  Dialog,
-  ResultLine,
-  type ResultKind,
-  Segmented,
-  SegmentTabs,
-  segmentPanelId,
-  segmentTabId,
-} from "../ui/controls";
+import { Banner, Dialog, type ResultKind, ResultLine, SegmentTabs, segmentPanelId, segmentTabId } from "../ui/controls";
 import { LectureTextCard } from "./LectureTextParts";
 import { RecordingDeleteDialog } from "./RecordingDeleteDialog";
-import { HomeworkCard, NoSpeechCard, SummaryCard } from "./SummaryParts";
+import { HomeworkCard, NoSpeechCard, SummaryCard, SummaryTools } from "./SummaryParts";
 
 export interface SummaryPageProps {
   recordingId: string;
@@ -215,7 +205,6 @@ function Viewer(props: {
   const acting = useRef(false);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState<(Message & { lecture: boolean }) | null>(null);
-  const [format, setFormat] = useState<SummarySaveFormat>("txt");
   const [lectureFormat, setLectureFormat] = useState<SummarySaveFormat>("txt");
   const [askingRedo, setAskingRedo] = useState(false);
   const [segment, setSegment] = useState<SummarySegment>(() => firstSegment(props.section));
@@ -266,7 +255,7 @@ function Viewer(props: {
       return { kind: "ok", text: "Конспект скопирован в буфер обмена." };
     });
 
-  const save = () =>
+  const save = (format: SummarySaveFormat) =>
     act("save", async () => {
       const r = saveResultText(await api.saveAs(id, format));
       return r && { kind: r.ok ? "ok" : "fail", text: r.text };
@@ -328,6 +317,13 @@ function Viewer(props: {
   const ready = view.summary.ready;
   const idle = busy === "";
   const noText = ready ? undefined : noSummaryHint;
+  // With a lecture text the transcript is only its source: the small link in the lecture card.
+  const transcriptLink =
+    view.transcribed && !view.lectureText.ready ? (
+      <Button variant="ghost" icon="doc" onClick={() => props.onOpenTranscript(id)}>
+        Открыть расшифровку
+      </Button>
+    ) : undefined;
 
   return (
     <>
@@ -342,52 +338,30 @@ function Viewer(props: {
       >
         {segment === "summary" && (
           <>
-            <Card className="box tr-tools">
-              <div className="tr-share">
-                <Button
-                  busy={busy === "copy"}
-                  busyLabel="Копирование…"
-                  disabled={!idle || !ready}
-                  disabledReason={idle ? noText : undefined}
-                  onClick={() => void copy()}
-                >
-                  Скопировать конспект
-                </Button>
-                <Segmented
-                  label="Формат файла"
-                  options={[
-                    { value: "txt", label: ".txt" },
-                    { value: "md", label: ".md" },
-                  ]}
-                  value={format}
-                  onChange={setFormat}
-                />
-                <Button
-                  icon="down"
-                  busy={busy === "save"}
-                  busyLabel="Сохранение…"
-                  disabled={!idle || !ready}
-                  disabledReason={idle ? noText : undefined}
-                  onClick={() => void save()}
-                >
-                  Сохранить как…
-                </Button>
-                {/* With a lecture text the transcript is only its source: the small link in the lecture card. */}
-                {view.transcribed && !view.lectureText.ready && (
-                  <Button variant="ghost" icon="doc" onClick={() => props.onOpenTranscript(id)}>
-                    Открыть расшифровку
-                  </Button>
-                )}
-              </div>
-              {message && !message.lecture && (
-                <ResultLine kind={message.kind} role={message.kind === "fail" ? "alert" : "status"}>
-                  {message.text}
-                </ResultLine>
-              )}
-              <p className="small muted tr-note">
-                Конспект хранится на этом компьютере. Копирование и сохранение — только по кнопке, в сеть ничего не уходит.
-              </p>
-            </Card>
+            {ready ? (
+              <SummaryTools
+                ready={ready}
+                idle={idle}
+                notReady={noText}
+                busy={busy}
+                message={message && !message.lecture ? message : null}
+                onCopy={() => void copy()}
+                onSave={(f) => void save(f)}
+                extra={transcriptLink}
+              />
+            ) : (
+              // Nothing to copy or save yet (the card's state line says why); the way to the transcript stays.
+              (transcriptLink || (message && !message.lecture)) && (
+                <div className="sm-tools">
+                  {transcriptLink && <div className="tr-share">{transcriptLink}</div>}
+                  {message && !message.lecture && (
+                    <ResultLine kind={message.kind} role={message.kind === "fail" ? "alert" : "status"}>
+                      {message.text}
+                    </ResultLine>
+                  )}
+                </div>
+              )
+            )}
             <SummaryCard view={view} onRetry={retry} retrying={retrying} retryDisabled={!idle} />
           </>
         )}

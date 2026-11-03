@@ -132,6 +132,124 @@ export interface LessonFocus {
 /** No explicit place: a lesson opens at «Мой конспект», its first tab. */
 export const noFocus: LessonFocus = { tab: "notes", index: -1 };
 
+// ---- The lesson as a route (TASK-351, ADR-0034 §2) ----
+
+/** The prefix of the key of a recorded lesson (the core's kb.RecordingKey); the rest is the recording id. */
+export const recordingKeyPrefix = "recording:";
+
+/**
+ * The recording id inside the key of a recorded lesson, "" for any other key. The core has no call that opens a lesson
+ * by its key, but a recorded one has `lesson(recordingId)`; a note-only lecture can be shown only from what the window
+ * remembers (App's cache of opened lessons).
+ */
+export function recordingIdOfKey(key: string): string {
+  return key.startsWith(recordingKeyPrefix) ? key.slice(recordingKeyPrefix.length) : "";
+}
+
+export function isLessonTab(v: string): v is LessonTab {
+  return lessonTabs.some((t) => t.value === v);
+}
+
+/**
+ * The tab a lesson is put in the route with: the tab of the found place, or of the student's note a hit named; "" when
+ * nothing was asked for, so the screen chooses (openingTab).
+ */
+export function openingRouteTab(focus: LessonFocus, materialId: string): LessonTab | "" {
+  return focus.index >= 0 || focus.tab !== noFocus.tab || materialId !== "" ? focus.tab : "";
+}
+
+/**
+ * The tab a lesson screen shows: the route's, else «Мой конспект» when the student has notes in it, else «Конспект»
+ * when ready, else the first tab with something in it, else «Конспект», where a running or failed step, «Повторить»
+ * and the no-speech card are visible.
+ */
+export function openingTab(a: {
+  routeTab: string;
+  hasNotes: boolean;
+  lesson: Pick<KnowledgeLesson, "summaryReady" | "lectureTextReady" | "transcriptReady">;
+}): LessonTab {
+  if (isLessonTab(a.routeTab)) {
+    return a.routeTab;
+  }
+  if (a.hasNotes) {
+    return "notes";
+  }
+  if (a.lesson.summaryReady) {
+    return "summary";
+  }
+  if (a.lesson.lectureTextReady) {
+    return "lecture";
+  }
+  return a.lesson.transcriptReady ? "transcript" : "summary";
+}
+
+/**
+ * What a lesson opens with besides the route (TASK-351): the found place, the file of the student's notes to mark and the
+ * subject form (from «Без предмета»). One-shot state of the window, not part of the route: the screen takes it once.
+ */
+export interface LessonOpening {
+  /** The key of the lesson it is for. */
+  key: string;
+  focus: LessonFocus;
+  materialId: string;
+  editing: boolean;
+}
+
+/** The window keeps the request only while the route shows the lesson it names, so Alt+← never applies it late. */
+export function keepLessonOpening(o: LessonOpening | null, route: { lesson: string }): LessonOpening | null {
+  return o !== null && route.lesson === o.key ? o : null;
+}
+
+/**
+ * Where a crumb of the lesson screen leads: the section «Предметы», one of its subjects, back to where the lesson was
+ * opened from ("close": the section under the lesson), or nowhere (the lesson itself).
+ */
+export type LessonCrumbGo = { kind: "subjects" } | { kind: "subject"; id: string } | { kind: "close" } | null;
+
+export const lessonCrumbRoot = "Предметы";
+export const knowledgeCrumbRoot = "База знаний";
+
+/** The lesson was opened from «База знаний» (the route's page under it). */
+export function openedFromKnowledge(page: string): boolean {
+  return page === "knowledge";
+}
+
+/** The first crumb of the lesson screen: the section it was opened from. */
+export function lessonRootLabel(page: string): string {
+  return openedFromKnowledge(page) ? knowledgeCrumbRoot : lessonCrumbRoot;
+}
+
+/**
+ * «База знаний / <пара>» for a lesson opened from «База знаний» (the root closes the lesson; a subject crumb is left out
+ * because it could not reach the subject's page, the subject stays in the head's meta line), «Предметы / <предмет> /
+ * <пара>» from any other section. The subject level only when the core matched the lesson to a library subject.
+ */
+export function lessonCrumbs(
+  l: Pick<KnowledgeLesson, "subject" | "librarySubjectId" | "librarySubjectState">,
+  heading: string,
+  page: string,
+): { label: string; go: LessonCrumbGo }[] {
+  const fromKnowledge = openedFromKnowledge(page);
+  const out: { label: string; go: LessonCrumbGo }[] = [
+    { label: lessonRootLabel(page), go: fromKnowledge ? { kind: "close" } : { kind: "subjects" } },
+  ];
+  if (!fromKnowledge && l.librarySubjectState === "matched" && l.librarySubjectId !== "") {
+    out.push({ label: subjectName(l), go: { kind: "subject", id: l.librarySubjectId } });
+  }
+  out.push({ label: heading, go: null });
+  return out;
+}
+
+export const lessonScreenTexts = {
+  loading: "Загрузка…",
+  /** A lecture of the student's notes cannot be found by its key once the window forgot it. */
+  gone: "Эту пару можно открыть только из списка пар. Нажмите «Назад» и выберите её в списке.",
+  /** Under the head after the subject and kind form was saved. */
+  infoSaved: "Предмет и тип пары сохранены.",
+  /** Returns where the student came from. */
+  back: "Назад",
+} as const;
+
 /**
  * The place a search hit opens in a recording's page: the lecture block, the transcript segment, a summary section or a
  * key point. A hit in the student's notes (or in the title) opens «Мой конспект»: no place inside it.

@@ -2,7 +2,8 @@
 // Summary sections, key points and assignment titles are model output: React text nodes only, no HTML, no links from them.
 
 // The .js extensions let the Node test runner load the compiled modules (test/summary.test.mjs renders these parts).
-import type { SummarySection, SummaryView } from "../bindings/summary.js";
+import type { ReactNode } from "react";
+import type { SummarySaveFormat, SummarySection, SummaryView } from "../bindings/summary.js";
 import {
   assignmentMeta,
   checkSoundLabel,
@@ -20,7 +21,68 @@ import {
 } from "../summaryView.js";
 import { lessonText } from "../lessonLabel.js";
 import { Button } from "../ui/Button.js";
-import { Card, ResultLine, Row } from "../ui/controls.js";
+import { Card, type ResultKind, ResultLine, Row } from "../ui/controls.js";
+import { RowMenu } from "../ui/RowMenu.js";
+
+/** The save formats of the «⋯» menu of the summary, in the order shown. */
+export const summarySaveItems: readonly { key: SummarySaveFormat; label: string }[] = [
+  { key: "txt", label: "Сохранить как текст (.txt)" },
+  { key: "md", label: "Сохранить в Markdown (.md)" },
+];
+
+/**
+ * The tools of the summary (TASK-351): one «Скопировать» and a «⋯» menu with the file formats. Copy and save run one at
+ * a time (`idle`); a summary that is not ready has nothing to save, so the menu is not offered and the copy button says
+ * why it is off. `extra` holds a page's own further action.
+ */
+export function SummaryTools(props: {
+  ready: boolean;
+  /** No copy, save or start is running. */
+  idle: boolean;
+  /** Why the copy is off while the summary is not ready. */
+  notReady?: string;
+  /** "copy", "save" or another key of a running action. */
+  busy: string;
+  message: { kind: ResultKind; text: string } | null;
+  onCopy: () => void;
+  onSave: (format: SummarySaveFormat) => void;
+  extra?: ReactNode;
+}) {
+  const off = !props.idle || !props.ready;
+  return (
+    <div className="sm-tools">
+      <div className="tr-share">
+        <Button
+          variant="primary"
+          busy={props.busy === "copy"}
+          busyLabel="Копирование…"
+          disabled={off}
+          disabledReason={props.idle ? props.notReady : undefined}
+          onClick={props.onCopy}
+        >
+          Скопировать
+        </Button>
+        <RowMenu
+          label="Ещё действия с конспектом"
+          title="Ещё"
+          items={props.ready ? summarySaveItems.map((i) => ({ ...i, disabled: !props.idle })) : []}
+          onPick={props.onSave}
+        />
+        {props.extra}
+        {props.busy === "save" && (
+          <span className="small muted" role="status">
+            Сохранение…
+          </span>
+        )}
+      </div>
+      {props.message && (
+        <ResultLine kind={props.message.kind} role={props.message.kind === "fail" ? "alert" : "status"}>
+          {props.message.text}
+        </ResultLine>
+      )}
+    </div>
+  );
+}
 
 export interface RetryProps {
   /** «Повторить» / «Сделать конспект заново» (TASK-086); without it the buttons stay hidden. */
@@ -100,14 +162,22 @@ export function SummarySections(props: { sections: readonly SummarySection[]; fo
  * The summary card: its state, the sections and the key points. focusSection (an index of summary.sections) and
  * focusPoint (of the listed key points) mark the place a search found (TASK-091).
  */
-export function SummaryCard(props: RetryProps & { view: SummaryView; focusSection?: number; focusPoint?: number }) {
+export function SummaryCard(
+  props: RetryProps & {
+    view: SummaryView;
+    focusSection?: number;
+    focusPoint?: number;
+    /** The «Конспект» heading; false where a tab already names the card. */
+    heading?: boolean;
+  },
+) {
   const v = props.view;
   const line = summaryLine(v);
   const points = v.summary.ready ? keyPointList(v.summary.keyPoints) : [];
   const updated = updatedText(v);
   return (
     <Card className="box sm-summary">
-      <h2>Конспект</h2>
+      {props.heading !== false && <h2>Конспект</h2>}
       {line && <Line line={line} />}
       {showsEarlier(v) && <p className="small muted sm-detail">{earlierNote}</p>}
       <RetrySlot {...props} step="summary" />
@@ -148,13 +218,20 @@ export function NoSpeechCard(props: { view: SummaryView; onCheckSound?: () => vo
 }
 
 /** The homework found in the lesson, each with a jump to it in «Задания». */
-export function HomeworkCard(props: RetryProps & { view: SummaryView; onOpenAssignment: (id: string) => void }) {
+export function HomeworkCard(
+  props: RetryProps & {
+    view: SummaryView;
+    onOpenAssignment: (id: string) => void;
+    /** The «Задания» heading; false where a tab already names the card. */
+    heading?: boolean;
+  },
+) {
   const v = props.view;
   const line = homeworkLine(v);
   const items = v.homework.assignments;
   return (
     <div className="sm-homework">
-      <h2 className="group-title">Задания</h2>
+      {props.heading !== false && <h2 className="group-title">Задания</h2>}
       {line && <Line line={line} />}
       <RetrySlot {...props} step="homework" />
       {items.length > 0 && (

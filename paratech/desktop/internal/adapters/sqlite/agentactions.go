@@ -48,6 +48,7 @@ type compensationWire struct {
 	Note     string                `json:"note,omitempty"`
 	OldTitle string                `json:"old_title,omitempty"`
 	Anchor   *noteAnchorWire       `json:"anchor,omitempty"`
+	Prior    *settingWire          `json:"setting,omitempty"` // the prior value of a setting
 }
 
 // Get loads an entry; a missing one wraps shared.ErrNotFound.
