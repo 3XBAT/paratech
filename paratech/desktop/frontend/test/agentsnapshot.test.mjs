@@ -68,7 +68,7 @@ test("a plan waiting for «Да» after a restart becomes a card with the confir
     }),
   );
   assert.ok(html.includes("Поставь срок на пятницу"));
-  assert.ok(html.includes("Да") && html.includes("Изменить") && html.includes("Отмена"));
+  assert.ok(html.includes("Да") && html.includes("Изменить") && html.includes("Не выполнять"));
   assert.ok(!/<button[^>]*disabled=""[^>]*>\s*(<[^>]*>)*Да/.test(html), "«Да» is enabled");
   // Model text is escaped, never HTML.
   assert.ok(html.includes("&lt;b&gt;сдачи&lt;/b&gt;") && !html.includes("<b>сдачи"));
@@ -89,7 +89,7 @@ test("«Да» of the snapshot card calls approvePlan with the request's thread 
   assert.deepEqual(calls, [[methods.approvePlan, { threadId: "a", turn: 2 }]]);
 });
 
-test("a request stopped by «Стоп» restored from the snapshot offers «Продолжить» (resume); a running one only the status", () => {
+test("a request stopped by «Остановить» restored from the snapshot offers «Продолжить» (resume); a running one only the status", () => {
   const stopped = snap(initialPanelState, update({ status: "STOPPED", stopReason: "user", cards: [] })).entries[0];
   assert.deepEqual(ids(stopped), ["resume", "cancel"]);
   const offline = snap(initialPanelState, update({ status: "STOPPED", stopReason: "offline", cards: [] })).entries[0];
@@ -262,7 +262,7 @@ test("the problem texts: a missing chat re-reads the list, the rest is a Russian
   assert.equal(chatProblemText("not_found", "current"), "Чат не найден: список обновлён.");
   for (const p of ["invalid", "failed"]) {
     assert.equal(refreshesChats(p), false);
-    assert.equal(chatProblemText(p, "current"), "Не удалось загрузить текущую просьбу чата.");
+    assert.equal(chatProblemText(p, "current"), "Не удалось загрузить текущий запрос чата.");
   }
 });
 

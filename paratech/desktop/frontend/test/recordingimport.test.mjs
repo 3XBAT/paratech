@@ -28,7 +28,7 @@ const result = (over = {}) => ({
 });
 
 test("the note and the hints are in Russian, the local note is shown", () => {
-  assert.equal(importTexts.local, "Звук не покидает компьютер, распознаётся локально.");
+  assert.equal(importTexts.local, "Звук не покидает компьютер, расшифровывается локально.");
   assert.equal(importTexts.imported, "импортирована");
   assert.match(importTexts.formats, /WAV, FLAC, MP3 и OGG/);
 });
@@ -138,7 +138,7 @@ test("the panel shows the steps, the local note and the formats, with names as t
       onClose: () => undefined,
     }),
   );
-  assert.match(html, /Звук не покидает компьютер, распознаётся локально/);
+  assert.match(html, /Звук не покидает компьютер, расшифровывается локально/);
   assert.match(html, /Выбрать файл и импортировать/);
   assert.match(html, /Пара из расписания/);
   assert.match(html, /type="date"/);

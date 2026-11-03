@@ -112,7 +112,7 @@ test("a running request blocks «Скрыть», says why in Russian and offers 
   for (const status of ["PLANNING", "EXECUTING"]) {
     const s = apply(initialPanelState, update({ turn: 1 }), update({ turn: 2, status }));
     const b = restartBlock(s.entries, "a", live);
-    assert.match(b.reason, /^Агент ещё работает над просьбой\. Дождитесь конца или остановите её\.$/);
+    assert.match(b.reason, /^Агент ещё работает над запросом\. Дождитесь конца или остановите его\.$/);
     assert.equal(b.fix.kind, "stop");
     assert.equal(b.fix.label, "Остановить");
     assert.equal(b.fix.entry.turn, 2, "the stop goes to the running request");
@@ -122,7 +122,7 @@ test("a running request blocks «Скрыть», says why in Russian and offers 
 test("a request waiting for the student blocks «Скрыть» and offers to cancel it", () => {
   const plan = restartBlock(apply(initialPanelState, update({ status: "AWAITING_PLAN" })).entries, "a", live);
   assert.match(plan.reason, /план/);
-  assert.deepEqual([plan.fix.kind, plan.fix.label], ["cancel", "Отменить просьбу"]);
+  assert.deepEqual([plan.fix.kind, plan.fix.label], ["cancel", "Отменить запрос"]);
   const answers = restartBlock(apply(initialPanelState, update({ status: "AWAITING_ANSWERS" })).entries, "a", live);
   assert.match(answers.reason, /вопрос/);
   assert.equal(answers.fix.kind, "cancel");
@@ -371,7 +371,7 @@ test("the pending edit shows a note by the field with «Отменить»; the 
   assert.ok(/<button[^>]*aria-label="Отменить правку"[^>]*>Отменить<\/button>/.test(html));
   assert.ok(/aria-describedby="[^"]+"/.test(html), "the field points at the note");
   const failed = panel({ draft: "старый", restart: restartUi({ pending: { problem: restartRefusalText("busy"), onCancel: noop } }) });
-  assert.ok(failed.includes("Дождитесь конца или остановите её и отправьте снова"));
+  assert.ok(failed.includes("Дождитесь конца или остановите его и отправьте снова"));
   assert.ok(!panel({ draft: "x", restart: restartUi() }).includes("Правка сообщения"));
 });
 
@@ -395,7 +395,7 @@ test("while the request runs «Скрыть» is off with the reason in view and
   const running = restartBlock(apply(initialPanelState, update({ status: "EXECUTING" })).entries, "a", live);
   const html = dialog({ block: running });
   assert.ok(/<button[^>]*disabled=""[^>]*>Скрыть<\/button>/.test(html));
-  assert.ok(html.includes("Агент ещё работает над просьбой. Дождитесь конца или остановите её."));
+  assert.ok(html.includes("Агент ещё работает над запросом. Дождитесь конца или остановите его."));
   assert.ok(/<button[^>]*>Остановить<\/button>/.test(html));
   assert.ok(html.includes(">Отмена</button>"), "the dialog can always be left");
   // The stop call is on its way: the button says so and is off.
@@ -403,17 +403,17 @@ test("while the request runs «Скрыть» is off with the reason in view and
   assert.ok(/<button[^>]*disabled=""[^>]*>Останавливается…<\/button>/.test(stopping));
 });
 
-test("while the student's answer is awaited the way out is «Отменить просьбу»", () => {
+test("while the student's answer is awaited the way out is «Отменить запрос»", () => {
   const waiting = restartBlock(apply(initialPanelState, update({ status: "AWAITING_PLAN" })).entries, "a", live);
   const html = dialog({ block: waiting });
   assert.ok(/<button[^>]*disabled=""[^>]*>Скрыть<\/button>/.test(html));
-  assert.ok(html.includes(">Отменить просьбу</button>"));
+  assert.ok(html.includes(">Отменить запрос</button>"));
 });
 
 test("with no connection the reason is written and there is nothing to press but «Отмена»", () => {
   const html = dialog({ block: restartBlock([], "a", { inputEnabled: false, offline: true }) });
   assert.ok(html.includes("Нет связи с paratech. Начать заново можно, когда связь появится."));
-  assert.ok(!html.includes(">Остановить<") && !html.includes("Отменить просьбу"));
+  assert.ok(!html.includes(">Остановить<") && !html.includes("Отменить запрос"));
 });
 
 test("the panel draws the dialog over its thread only while it is open", () => {
@@ -531,7 +531,7 @@ test("the dialog points only at its body; the reason is a live region; «Скр�
   assert.ok(!/<button[^>]*aria-describedby/.test(html));
 });
 
-test("while «Отменить просьбу» runs it says «Отменяется…» and is off", () => {
+test("while «Отменить запрос» runs it says «Отменяется…» and is off", () => {
   const waiting = restartBlock(apply(initialPanelState, update({ status: "AWAITING_PLAN" })).entries, "a", live);
   const html = dialog({ block: waiting, fixBusy: true });
   assert.ok(/<button[^>]*disabled=""[^>]*>Отменяется…<\/button>/.test(html));

@@ -126,7 +126,7 @@ export function SendDialog(props: {
   return (
     <Dialog
       open
-      title="Отправить домашнее задание?"
+      title="Отправить задание?"
       confirmLabel={busy ? "Отправка…" : retry ? "Повторить" : "Отправить"}
       cancelLabel={tried ? "Закрыть" : "Отмена"}
       confirmDisabled={busy || switching || (tried && !retry) || blocked !== ""}

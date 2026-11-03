@@ -62,7 +62,7 @@ test("the api calls the bound Go methods with the prompt id", async () => {
   assert.equal(shownEvent, "recordingprompt:shown");
 });
 
-// TASK-081: the picker of the diagnostics page and «Начать запись» of «Записи и задачи».
+// TASK-081: the picker of the diagnostics page and «Начать запись» of «Записи».
 test("the main window remembers a source and starts a recording without the popup", async () => {
   const started = { started: true, problem: "", recordingId: "rec-1", linked: true };
   const { call, calls } = fakeCall(started);
@@ -114,7 +114,7 @@ test("every problem code has its own text, an unknown one the generic failure", 
   const texts = problems.map(problemText);
   assert.equal(new Set(texts).size, texts.length);
   assert.equal(problemText("unavailable"), "Запись пока недоступна в этой сборке.");
-  assert.equal(problemText("in_progress"), "Уже идёт другая запись — её можно остановить в «Записях и задачах».");
+  assert.equal(problemText("in_progress"), "Уже идёт другая запись — её можно остановить в окне paratech, раздел «Записи».");
   assert.equal(problemText("recovering"), "Восстанавливаются прерванные записи. Повторите через минуту.");
   assert.equal(problemText("failed"), "Не удалось начать запись.");
   assert.equal(problemText(""), "");
@@ -124,7 +124,7 @@ test("every problem code has its own text, an unknown one the generic failure", 
 // Since TASK-076 the popup has only «Начать запись» and «Не записывать»: the snooze button and canSnooze are gone.
 test("an offered lesson shows title, time and its two buttons", () => {
   const m = popupModel(lesson, null);
-  assert.equal(m.heading, "Начинается занятие");
+  assert.equal(m.heading, "Начинается пара");
   assert.equal(m.title, "Матанализ <b>");
   assert.equal(m.time, "10:00–11:30");
   assert.deepEqual(m.buttons, ["start", "skip"]);
@@ -140,8 +140,8 @@ test("an offered lesson shows title, time and its two buttons", () => {
 
 test("every button has a hint that says what it does", () => {
   assert.deepEqual(Object.keys(buttonHints).sort(), Object.keys(buttonLabels).sort());
-  assert.equal(buttonHints.start, "Записать звук этого занятия");
-  assert.equal(buttonHints.skip, "Закрыть, это занятие не записывается");
+  assert.equal(buttonHints.start, "Записать звук этой пары");
+  assert.equal(buttonHints.skip, "Закрыть, эта пара не записывается");
   for (const id of Object.keys(buttonHints)) {
     assert.notEqual(buttonHints[id], buttonLabels[id], id);
   }
@@ -149,7 +149,7 @@ test("every button has a hint that says what it does", () => {
 
 test("an ad-hoc prompt has its own heading and no lesson details", () => {
   const m = popupModel({ ...adhoc, title: "ignored", start: "10:00", end: "11:00" }, null);
-  assert.equal(m.heading, "Запись без занятия");
+  assert.equal(m.heading, "Запись без пары");
   assert.equal(m.title, "");
   assert.equal(m.time, "");
   assert.deepEqual(m.buttons, ["start", "skip"]);

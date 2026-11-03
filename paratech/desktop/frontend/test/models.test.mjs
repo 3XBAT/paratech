@@ -335,7 +335,7 @@ test("the load is a 5-step scale with «Нагрузка N из 5»; the warning
   assert.equal(loadText(6), "");
   assert.equal(loadHint(0), "");
 
-  assert.equal(texts.heavy, "Тяжёлая модель: распознавание будет долгим");
+  assert.equal(texts.heavy, "Тяжёлая модель: расшифровка будет долгой");
   for (const load of [0, 1, 2, 3, 4, 5]) {
     assert.equal(catalogRow({ ...available, load }).load, load);
   }

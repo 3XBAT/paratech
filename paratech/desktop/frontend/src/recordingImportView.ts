@@ -8,7 +8,7 @@ export const importTexts = {
   open: "Импортировать запись",
   title: "Импорт записи лекции",
   explain: "Сначала нужно указать, какая это лекция, затем выбрать файл с записью.",
-  local: "Звук не покидает компьютер, распознаётся локально.",
+  local: "Звук не покидает компьютер, расшифровывается локально.",
   formats: "Подходят аудиофайлы WAV, FLAC, MP3 и OGG (Vorbis) размером до 2 ГБ и длиной до 4 часов.",
   lectureStep: "1. Какая это лекция",
   fileStep: "2. Файл записи",
@@ -21,7 +21,7 @@ export const importTexts = {
   dateLabel: "Дата",
   timeLabel: "Время начала",
   subjectLabel: "Предмет",
-  kindLabel: "Тип занятия",
+  kindLabel: "Тип пары",
   titleLabel: "Название (необязательно)",
   choose: "Выбрать файл и импортировать",
   importing: "Импорт…",
@@ -158,7 +158,7 @@ export function pastLessonOptions(lessons: readonly LessonChoice[], now: number,
     .filter((x) => !Number.isNaN(x.at) && x.at <= now && (want === "" || x.l.subject.trim().toLowerCase() === want))
     .sort((a, b) => b.at - a.at)
     .map(({ l, at }) => {
-      const name = [l.title.trim(), l.subject.trim()].find((s) => s !== "") ?? "Занятие";
+      const name = [l.title.trim(), l.subject.trim()].find((s) => s !== "") ?? "Пара";
       return { id: l.id, label: `${timeOnly.format(new Date(at))} · ${name}` };
     });
 }

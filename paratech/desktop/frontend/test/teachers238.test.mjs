@@ -556,7 +556,7 @@ test("the subject page owns the block near the top, the teachers come from the l
   const read = (rel) => readFileSync(new URL(`../src/${rel}`, import.meta.url), "utf8");
   const page = read("pages/SubjectsPage.tsx");
   assert.ok(page.indexOf("<TeachersBlock") > page.indexOf("<h1>{subject.name}</h1>"), "under the title");
-  assert.ok(page.indexOf("<TeachersBlock") < page.indexOf("<OverviewSections"), "before «Ближайшее» and «Занятия»");
+  assert.ok(page.indexOf("<TeachersBlock") < page.indexOf("<OverviewSections"), "before «Ближайшее» and «Пары»");
   assert.match(page, /teachers=\{subject\.teachers\}/, "from Subjects(), not from the overview");
   assert.match(page, /api\.subjects\(\)\.then/, "re-read of the list");
   assert.ok(page.indexOf("flow.reset()") < page.indexOf("teacherFocusStep("), "the reset of the previous subject comes first");

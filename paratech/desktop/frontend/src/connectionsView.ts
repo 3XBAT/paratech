@@ -31,7 +31,7 @@ export const hubFields: readonly FieldCode[] = ["hubUrl"];
 
 /** The mail fields in the order of the form. */
 export const mailFields: readonly { code: Exclude<FieldCode, "hubUrl">; label: string }[] = [
-  { code: "recipient", label: "Адрес получателя домашки" },
+  { code: "recipient", label: "Адрес получателя заданий" },
   { code: "smtpHost", label: "SMTP-сервер" },
   { code: "smtpPort", label: "Порт" },
   { code: "smtpSecurity", label: "Режим TLS" },
@@ -52,7 +52,7 @@ export const texts = {
   saved: "Сохранено.",
   checkSaveFirst: "Сначала сохраните изменения: проверяются сохранённые настройки.",
   checkNoSend: "Письмо не отправляется: только соединение и вход.",
-  checking: "Проверяем…",
+  checking: "Проверка…",
   loading: "Загрузка…",
   loadFailed: "Не удалось загрузить настройки подключений.",
   saveFailed: "Не удалось сохранить настройки подключений.",
@@ -174,7 +174,7 @@ export const hubKeyLabels: SecretLabels = {
   replaceHint: "Новый ключ заменит сохранённый.",
   remove: "Удалить ключ",
   confirmTitle: "Удалить сохранённый ключ доступа?",
-  confirmRemove: "Конспекты и поиск домашних заданий будут ждать, пока не зададите новый.",
+  confirmRemove: "Конспекты и поиск заданий будут ждать, пока не зададите новый.",
   confirmYes: "Удалить ключ",
   confirmNo: "Отмена",
 };
@@ -270,10 +270,10 @@ export const overviewTexts = {
   back: "Назад",
   hubTitle: "Конспекты и задания",
   hubHint:
-    "Ключ доступа выдаёт автор приложения. Это не ключ Claude или ChatGPT. Распознавание речи всегда идёт на этом компьютере.",
+    "Ключ доступа выдаёт автор приложения. Это не ключ Claude или ChatGPT. Расшифровка всегда идёт на этом компьютере.",
   hubDesc: "Адрес, ключ доступа и лимит обработки",
   mailTitle: "Почта",
-  mailDesc: "Отправка домашних заданий письмом",
+  mailDesc: "Отправка заданий письмом",
   googleDesc: "Вход и синхронизация расписания",
 } as const;
 
@@ -305,7 +305,7 @@ export function hubCardStatus(s: { saved: Connections | null; loadFailed: boolea
     return status("fail", "Ключ недоступен");
   }
   if (s.refreshing) {
-    return status("run", "Проверяем…");
+    return status("run", "Проверка…");
   }
   switch (c.quota.status) {
     case "current":

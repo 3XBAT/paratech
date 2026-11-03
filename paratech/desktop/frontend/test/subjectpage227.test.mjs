@@ -89,7 +89,7 @@ test("the schedule line, weekdays, day chips and lesson texts", () => {
 
 test("a lesson without a title is named by its date; the status chips are short Russian words", () => {
   assert.equal(lessonTitle(lesson({ title: "Смена базиса" })), "Смена базиса");
-  assert.match(lessonTitle(lesson({ title: "" })), /^Занятие \d\d\.\d\d$/);
+  assert.match(lessonTitle(lesson({ title: "" })), /^Пара \d\d\.\d\d$/);
   assert.match(lessonMeta(lesson()), /\d\d\.\d\d · 1:30:12$/);
   assert.equal(lessonMeta(lesson({ durationSeconds: 0 })).includes("·"), false);
   assert.deepEqual(

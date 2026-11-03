@@ -18,7 +18,7 @@ export const soundTexts = {
   labelPrefix: "Уровень звука: ",
   heardLabel: "звук идёт",
   quietLabel: "тихо",
-  hint: "Если занятие идёт, а звука нет, возможно, выбран не тот источник.",
+  hint: "Если пара идёт, а звука нет, возможно, выбран не тот источник.",
 } as const;
 
 export type SoundState = "heard" | "quiet" | "hint";

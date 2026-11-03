@@ -257,13 +257,13 @@ test("with no files «Входящие» stays in the tree, quiet and without a 
   assert.match(out, /<span class="nm">Входящие<\/span><\/button>/, "no number after the name");
 });
 
-test("when «Входящие» is on screen it is the current item, no subject is, and «Папка» (of a subject) is not offered", () => {
+test("when «Входящие» is on screen it is the current item, no subject is, and «Новая папка» (of a subject) is not offered", () => {
   const out = tree({ currentId: "", inbox: inboxEntry(2, true) });
   assert.match(out, /class="ti inbox cur has"[^>]*aria-current="page"/);
   assert.equal((out.match(/aria-current="page"/g) ?? []).length, 1);
   assert.equal((out.match(/class="ti fold"/g) ?? []).length, 0, "no folders: no subject is open");
-  assert.doesNotMatch(out, />Папка</);
-  assert.match(out, />Предмет</);
+  assert.doesNotMatch(out, />Новая папка</);
+  assert.match(out, />Добавить предмет</);
 });
 
 test("without the inbox entry the tree is as before (the old callers keep working)", () => {

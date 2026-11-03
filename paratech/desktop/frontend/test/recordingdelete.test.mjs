@@ -120,7 +120,7 @@ test("found homework: plain ones checked by default, drafts apart and unchecked,
 
   const html = renderToStaticMarkup(h(DeleteBody, { model: m, choice: initialDeleteChoice, disabled: false, onChoice() {} }));
   assert.ok(html.includes("Удалить и найденные задания (2)"));
-  assert.ok(html.includes("останутся в «Домашних заданиях»"));
+  assert.ok(html.includes("останутся в «Заданиях»"));
   // The plain box is on, the draft box is off.
   const boxes = html.match(/<input[^>]*>/g);
   assert.equal(boxes.length, 2);
@@ -158,7 +158,7 @@ test("the result: «Удалено N», what stays and the recordings that faile
   const part = { ...ok, removed: 1, deleted: 1, message: "Удалено 1", failures: [{ recordingId: "r2", message: errorMessages.unavailable }], keptAssignments: ["a9"] };
   assert.deepEqual(deleteOutcome(part, p), {
     kind: "wait",
-    lines: ["Удалено 1", "Найденные задания остались в «Домашних заданиях»: 1.", "Физика: Не удалось удалить запись. Попробуйте ещё раз."],
+    lines: ["Удалено 1", "Найденные задания остались в «Заданиях»: 1.", "Физика: Не удалось удалить запись. Попробуйте ещё раз."],
   });
   const none = { ...ok, removed: 0, deleted: 0, message: "Удалено 0", failures: [{ recordingId: "r1", message: errorMessages.inProgress }] };
   assert.deepEqual(deleteOutcome(none, p), { kind: "fail", lines: ["Матанализ: Запись ещё идёт: сначала остановите её."] });

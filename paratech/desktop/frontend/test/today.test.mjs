@@ -170,8 +170,8 @@ test("live status comes from the recordings of the lesson", () => {
   assert.equal(liveStatus("l1", []), null);
   assert.equal(liveStatus("", [rec({ lessonId: "" , stage: "recording" })]), null);
   assert.equal(liveStatus("l1", [rec()]), null);
-  assert.deepEqual(liveStatus("l1", [rec({ stage: "transcribing", progressPercent: 63.6 })]), { kind: "run", text: "Распознавание · 64 %" });
-  assert.deepEqual(liveStatus("l1", [rec({ stage: "transcribing", progressPercent: 140 })]), { kind: "run", text: "Распознавание · 100 %" });
+  assert.deepEqual(liveStatus("l1", [rec({ stage: "transcribing", progressPercent: 63.6 })]), { kind: "run", text: "Расшифровка · 64 %" });
+  assert.deepEqual(liveStatus("l1", [rec({ stage: "transcribing", progressPercent: 140 })]), { kind: "run", text: "Расшифровка · 100 %" });
   assert.deepEqual(liveStatus("l1", [rec({ stage: "transcribing" }), rec({ id: "rec2", stage: "recording" })]), { kind: "rec", text: "Идёт запись" });
   assert.equal(liveStatus("l2", [rec({ stage: "recording" })]), null);
   assert.notEqual(stagesKey([rec()]), stagesKey([rec({ stage: "recording" })]));
@@ -291,7 +291,7 @@ test("empty sections say so", () => {
 test("rows: live chip, urgent chip, open only for a ready summary, no confirm buttons", () => {
   const live = html(h(LessonsSection, { lessons: [lesson()], recordings: [rec({ stage: "recording" })], onOpenSummary: noop }));
   assert.match(live, /Идёт запись/);
-  assert.match(html(h(LessonsSection, { lessons: [lesson()], recordings: [rec({ stage: "transcribing", progressPercent: 40 })], onOpenSummary: noop })), /Распознавание · 40 %/);
+  assert.match(html(h(LessonsSection, { lessons: [lesson()], recordings: [rec({ stage: "transcribing", progressPercent: 40 })], onOpenSummary: noop })), /Расшифровка · 40 %/);
 
   const ready = html(h(LessonsSection, { lessons: [lesson({ post: post() })], recordings: [], onOpenSummary: noop }));
   assert.match(ready, /Конспект готов/);

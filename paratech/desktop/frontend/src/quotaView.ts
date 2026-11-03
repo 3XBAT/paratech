@@ -36,7 +36,7 @@ export interface QuotaDisplay {
 export const quotaTexts = {
   title: "Лимит обработки",
   refresh: "Обновить",
-  refreshing: "Обновляем…",
+  refreshing: "Обновление…",
   remaining: "Осталось",
   limit: "Лимит",
   reserved: "Зарезервировано идущими запросами",

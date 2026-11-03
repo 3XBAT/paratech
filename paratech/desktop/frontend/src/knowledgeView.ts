@@ -93,20 +93,20 @@ export interface ReadyMark {
 /** The readiness marks of a lesson, in the order of the lesson tabs. */
 export function readyMarks(l: Pick<KnowledgeLesson, "summaryReady" | "lectureTextReady" | "transcriptReady">): ReadyMark[] {
   return [
-    { key: "summary", label: "Кратко", ready: l.summaryReady },
+    { key: "summary", label: "Конспект", ready: l.summaryReady },
     { key: "lectureText", label: "Текст лекции", ready: l.lectureTextReady },
     { key: "transcript", label: "Расшифровка", ready: l.transcriptReady },
   ];
 }
 
-/** «5 занятий · последнее 19.10»; a subject known only from the student's notes has no recorded lessons. */
+/** «5 пар · последняя 19.10»; a subject known only from the student's notes has no recorded lessons. */
 export function subjectMeta(s: Pick<KnowledgeSubject, "lessons" | "latest">): string {
   if (s.lessons === 0) {
     return ownNotesTexts.ownChip;
   }
-  const n =`${s.lessons} ${plural(s.lessons, "занятие", "занятия", "занятий")}`;
+  const n =`${s.lessons} ${plural(s.lessons, "пара", "пары", "пар")}`;
   const day = dayText(s.latest);
-  return day === "" ? n : `${n} · последнее ${day}`;
+  return day === "" ? n : `${n} · последняя ${day}`;
 }
 
 /** The tabs of an opened lesson. */
@@ -114,7 +114,7 @@ export type LessonTab = "notes" | "summary" | "lecture" | "transcript" | "homewo
 
 export const lessonTabs: readonly { value: LessonTab; label: string }[] = [
   { value: "notes", label: "Мой конспект" },
-  { value: "summary", label: "Кратко" },
+  { value: "summary", label: "Конспект" },
   { value: "lecture", label: "Текст лекции" },
   { value: "transcript", label: "Расшифровка" },
   { value: "homework", label: "Задания" },
@@ -153,7 +153,7 @@ export function hitFocus(h: Pick<KnowledgeHit, "section" | "index">): LessonFocu
 /** The section names of a recording; a hit in the student's notes is named by the core's label instead. */
 export const sectionLabels: Readonly<Record<Exclude<KnowledgeSection, "ownNote">, string>> = {
   title: "Название",
-  summary: "Кратко",
+  summary: "Конспект",
   lectureText: "Текст лекции",
   transcript: "Расшифровка",
 };
@@ -264,12 +264,12 @@ export const searchTexts = {
   local: "Поиск идёт по этому компьютеру, в сеть ничего не уходит.",
 };
 
-/** «Найдено 12 мест в 3 занятиях»; with truncated «Показаны первые 50 мест: уточните запрос». */
+/** «Найдено 12 мест в 3 парах»; with truncated «Показаны первые 50 мест: уточните запрос». */
 export function hitCountText(hits: number, lessons: number, truncated: boolean): string {
   if (truncated) {
     return `Показаны первые ${hits} ${plural(hits, "место", "места", "мест")}: уточните запрос.`;
   }
-  return `Найдено ${hits} ${plural(hits, "место", "места", "мест")} в ${lessons} ${plural(lessons, "занятии", "занятиях", "занятиях")}.`;
+  return `Найдено ${hits} ${plural(hits, "место", "места", "мест")} в ${lessons} ${plural(lessons, "паре", "парах", "парах")}.`;
 }
 
 /** The outcome of «Экспорт в .md»: what to show and how. */
@@ -367,8 +367,8 @@ export const noteLectureTexts = {
   pair: "Пара",
   addPast: "Добавить конспект прошедшей пары",
   addPastTitle: "Конспект прошедшей пары",
-  pickRecording: "Занятие с записью",
-  pickRecordingNone: "Нет занятий с записью без конспекта.",
+  pickRecording: "Пара с записью",
+  pickRecordingNone: "Нет пар с записью без конспекта.",
   pickDate: "Дата пары",
   pickUndated: "Без даты",
   choose: "Выбрать",

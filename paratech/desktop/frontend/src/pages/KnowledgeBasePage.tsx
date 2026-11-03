@@ -253,7 +253,7 @@ export function KnowledgeBasePage(props: {
       <div className="head">
         <div>
           <h1>База знаний</h1>
-          <p className="small muted kb-sub">Занятия по предметам: кратко, текст лекции, расшифровка и задания.</p>
+          <p className="small muted kb-sub">Пары по предметам: конспект, текст лекции, расшифровка и задания.</p>
         </div>
       </div>
       {jumpError !== "" && (
@@ -327,7 +327,7 @@ export function KnowledgeBasePage(props: {
             listError === "" && <p className="muted">Загрузка…</p>
           ) : subjects.length === 0 ? (
             <EmptyState label="База знаний" title="Пока пусто">
-              Здесь появятся занятия после первой записи: по предметам, с кратким содержанием, текстом лекции и
+              Здесь появятся пары после первой записи: по предметам, с конспектом, текстом лекции и
               расшифровкой.
             </EmptyState>
           ) : (
@@ -493,7 +493,7 @@ function SubjectView(props: {
         </ResultLine>
       )}
       <p className="small muted kb-sub">
-        Экспорт — один файл .md: занятия по датам, с кратким содержанием и текстом лекции. Сохраняется только по кнопке.
+        Экспорт — один файл .md: пары по датам, с конспектом и текстом лекции. Сохраняется только по кнопке.
       </p>
       {error !== "" && (
         <Banner kind="fail" role="alert">
@@ -510,7 +510,7 @@ function SubjectView(props: {
       {lessons === null ? (
         error === "" && <p className="muted">Загрузка…</p>
       ) : lessons.length === 0 ? (
-        <p className="muted">В этом предмете больше нет занятий.</p>
+        <p className="muted">В этом предмете больше нет пар.</p>
       ) : (
         <LessonList
           lessons={lessons}

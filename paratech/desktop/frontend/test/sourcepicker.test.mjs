@@ -1,4 +1,4 @@
-// The source picker shared by the popup, «Диагностика» and «Записи и задачи», and «Начать запись» without the popup
+// The source picker shared by the popup, «Диагностика» and «Записи», and «Начать запись» without the popup
 // (TASK-081). Runs on the modules compiled by `npm run test` (tsconfig.test.json) with the Node test runner.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -102,7 +102,7 @@ test("the notes are the warnings of the chosen source and, if asked, the advice"
   assert.ok(server.renderToStaticMarkup(h(SourceNotes, { picker, advice: true })).includes(adviceTexts.always));
 });
 
-test("one picker: the popup, «Диагностика» and «Записи и задачи» use the shared component", () => {
+test("one picker: the popup, «Диагностика» and «Записи» use the shared component", () => {
   const popup = src("../src/popup/Popup.tsx");
   assert.match(popup, /<SourcePicker\s/);
   assert.ok(!popup.includes('className="source'), "the popup draws its own picker");

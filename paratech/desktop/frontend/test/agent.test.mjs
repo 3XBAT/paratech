@@ -376,20 +376,20 @@ test("plan card: caption, steps in impersonal words, buttons only while the plan
   };
   const m = modelOf(update({ status: "AWAITING_PLAN", cards: [card({ kind: "plan", plan })] })).cards[0];
   assert.equal(m.type, "plan");
-  assert.equal(m.caption, "Понял так");
+  assert.equal(m.caption, "План");
   assert.deepEqual(m.steps, [
     "Создание предмета · Матан",
     "Размещение файла · файл · после предыдущих шагов",
     "Изменение срока · срок 03.11.2026",
   ]);
   // TASK-318: the one «Да» of the plan names the number of steps (this plan has 3); the button id stays "approve".
-  assert.deepEqual(m.buttons.map((b) => b.label), ["Да, выполнить 3 шага", "Изменить", "Отмена"]);
+  assert.deepEqual(m.buttons.map((b) => b.label), ["Да, выполнить 3 шага", "Изменить", "Не выполнять"]);
   assert.equal(m.buttons[0].id, "approve");
   const later = modelOf(update({ status: "EXECUTING", cards: [card({ kind: "plan", plan })] })).cards[0];
   assert.deepEqual(later.buttons, []);
   assert.equal(stepText({ tool: "new_tool", args: [], deferred: [] }), "Шаг");
   const out = html(update({ status: "AWAITING_PLAN", cards: [card({ kind: "plan", plan })] }));
-  assert.match(out, /Понял так/);
+  assert.match(out, /План/);
   assert.match(out, />Да, выполнить 3 шага</);
 });
 
@@ -407,7 +407,7 @@ test("question card: round N of 2, skip text, defaults and typed answers", () =>
   const m = modelOf(u).cards[0];
   assert.equal(m.caption, roundCaption(2));
   assert.equal(m.caption, "Уточнение · раунд 2 из 2");
-  assert.equal(m.skip, "Пропустить — сделай как считаешь");
+  assert.equal(m.skip, "Пропустить вопросы");
   assert.equal(m.active, true);
   assert.deepEqual(skipAnswers(questions.questions), [
     { question: 0, option: 1, text: "" },
@@ -419,7 +419,7 @@ test("question card: round N of 2, skip text, defaults and typed answers", () =>
     { question: 1, option: 0, text: "5" },
   ]);
   const out = html(u);
-  assert.match(out, /Пропустить — сделай как считаешь/);
+  assert.match(out, /Пропустить вопросы/);
   assert.match(out, /Какой формат\?/);
   assert.doesNotMatch(html({ ...u, status: "EXECUTING" }), /Пропустить/);
 });
@@ -451,16 +451,16 @@ test("question card: default -1 preselects nothing, blocks submit, skip takes th
 
 // ---- Progress card ----
 
-test("progress card: shown while working, with «Стоп» (TASK-143: also while planning)", () => {
+test("progress card: shown while working, with «Остановить» (TASK-143: also while planning)", () => {
   const u = update({ status: "EXECUTING", cards: [card({ kind: "progress", jobId: "j1" })] });
   const m = modelOf(u).cards;
   assert.equal(m.length, 1);
-  assert.deepEqual(m[0].buttons.map((b) => b.label), ["Стоп"]);
+  assert.deepEqual(m[0].buttons.map((b) => b.label), ["Остановить"]);
   const planning = modelOf(update({ status: "PLANNING" })).cards;
   assert.equal(m[0].type, "progress");
   assert.equal(planning.length, 1);
   assert.equal(planning[0].type, "waiting");
-  assert.deepEqual(planning[0].buttons.map((b) => b.label), ["Стоп"]);
+  assert.deepEqual(planning[0].buttons.map((b) => b.label), ["Остановить"]);
   assert.match(html(u), /Работа идёт/);
 });
 
@@ -489,14 +489,14 @@ test("waiting: shown while the call runs, hidden on refusal and on any card that
   }
 });
 
-test("waiting: job-less PLANNING and EXECUTING give a waiting card, both keep «Стоп» (TASK-143)", () => {
+test("waiting: job-less PLANNING and EXECUTING give a waiting card, both keep «Остановить» (TASK-143)", () => {
   const planning = modelOf(update({ status: "PLANNING" })).cards;
-  assert.deepEqual(planning, [{ type: "waiting", buttons: [{ id: "stop", label: "Стоп" }] }]);
+  assert.deepEqual(planning, [{ type: "waiting", buttons: [{ id: "stop", label: "Остановить" }] }]);
   const executing = modelOf(update({ status: "EXECUTING" })).cards;
   assert.deepEqual(executing.map((c) => c.type), ["waiting"]);
-  assert.deepEqual(executing[0].buttons.map((b) => b.label), ["Стоп"]);
+  assert.deepEqual(executing[0].buttons.map((b) => b.label), ["Остановить"]);
   const out = html(update({ status: "EXECUTING" }));
-  assert.match(out, />Стоп</);
+  assert.match(out, />Остановить</);
   assert.doesNotMatch(out, /Работа идёт/);
 });
 
@@ -511,11 +511,11 @@ test("waiting: three dots, polite live region «Агент отвечает…»
   assert.doesNotMatch(card, /Работа идёт/);
 });
 
-test("waiting (TASK-337): a small inline row with «Стоп» next to the dots, not a full-width card or banner", () => {
+test("waiting (TASK-337): a small inline row with «Остановить» next to the dots, not a full-width card or banner", () => {
   const out = html(update({ status: "EXECUTING" }));
   assert.match(out, /<div class="ag-think">/);
   assert.doesNotMatch(out, /ag-card|ag-card-wait/);
-  assert.ok(out.indexOf("ag-wait") < out.indexOf(">Стоп<"), "the dots come first, «Стоп» beside them");
+  assert.ok(out.indexOf("ag-wait") < out.indexOf(">Остановить<"), "the dots come first, «Остановить» beside them");
   const css = readFileSync(new URL("../src/agent/agent.css", import.meta.url), "utf8");
   assert.doesNotMatch(css, /ag-card-wait/);
   assert.match(css, /\.ag-think\s*\{[^}]*display: flex/);
@@ -613,15 +613,15 @@ test("stop reasons: offline repeats (continue), failed retries, expired restarts
   const off = stop("offline");
   assert.equal(off.type, "stopped");
   assert.equal(off.text, "Не завершено: нет связи");
-  assert.deepEqual(off.buttons.map((b) => b.label), ["Повторить", "Отмена"]);
+  assert.deepEqual(off.buttons.map((b) => b.label), ["Повторить", "Отменить запрос"]);
   assert.deepEqual(off.buttons.map((b) => b.id), ["continue", "cancel"]);
   assert.deepEqual(stop("failed").buttons.map((b) => b.label), ["Повторить"]);
-  assert.deepEqual(stop("expired").buttons.map((b) => b.label), ["Запустить снова"]);
+  assert.deepEqual(stop("expired").buttons.map((b) => b.label), ["Повторить"]);
   assert.deepEqual(stop("budget").buttons, []);
-  // «Стоп» resumes («Продолжить», id resume); offline and quota repeat («Повторить», id continue).
-  assert.deepEqual(stop("user").buttons.map((b) => b.label), ["Продолжить", "Отмена"]);
+  // «Остановить» resumes («Продолжить», id resume); offline and quota repeat («Повторить», id continue).
+  assert.deepEqual(stop("user").buttons.map((b) => b.label), ["Продолжить", "Отменить запрос"]);
   assert.deepEqual(stop("user").buttons.map((b) => b.id), ["resume", "cancel"]);
-  assert.deepEqual(stop("quota").buttons.map((b) => b.label), ["Повторить", "Отмена"]);
+  assert.deepEqual(stop("quota").buttons.map((b) => b.label), ["Повторить", "Отменить запрос"]);
   assert.deepEqual(stop("quota").buttons.map((b) => b.id), ["continue", "cancel"]);
   // A problem that offers its own next step leaves no second way on in the stop card.
   const stopCardOf = (reason, problem) => modelOf(update({ status: "STOPPED", stopReason: reason, problem })).cards.find((c) => c.type === "stopped");
@@ -638,9 +638,9 @@ test("stop reasons: offline repeats (continue), failed retries, expired restarts
 test("update problems explain themselves and offer the next step", () => {
   const p = (problem) => modelOf(update({ status: "", problem })).cards.at(-1);
   assert.deepEqual(p("retry_required").buttons.map((b) => b.label), ["Повторить"]);
-  assert.deepEqual(p("restart_required").buttons.map((b) => b.label), ["Запустить снова"]);
+  assert.deepEqual(p("restart_required").buttons.map((b) => b.label), ["Повторить"]);
   assert.equal(p("busy").type, "problem");
-  assert.equal(p("something unknown").text, "Не удалось выполнить просьбу.");
+  assert.equal(p("something unknown").text, "Не удалось выполнить запрос.");
 });
 
 // ---- Offline ----
