@@ -10,6 +10,7 @@ export const methods = {
   lessons: "paratech/desktop/internal/input/wails.KnowledgeBaseService.Lessons",
   lectures: "paratech/desktop/internal/input/wails.KnowledgeBaseService.Lectures",
   lesson: "paratech/desktop/internal/input/wails.KnowledgeBaseService.Lesson",
+  lessonByKey: "paratech/desktop/internal/input/wails.KnowledgeBaseService.LessonByKey",
   search: "paratech/desktop/internal/input/wails.KnowledgeBaseService.Search",
   exportSubject: "paratech/desktop/internal/input/wails.KnowledgeBaseService.ExportSubject",
   setLessonInfo: "paratech/desktop/internal/input/wails.KnowledgeBaseService.SetLessonInfo",
@@ -345,6 +346,11 @@ export interface KnowledgeBaseApi {
    */
   lectures(subjectKey: string): Promise<KnowledgeLesson[]>;
   lesson(recordingId: string): Promise<KnowledgeLesson>;
+  /**
+   * Any lesson by its key (KnowledgeLesson.key: recording:/lesson:/day:/note:), for a lesson opened from a link or the
+   * history; a lecture known only from notes comes with its notes (TASK-352).
+   */
+  lessonByKey(key: string): Promise<KnowledgeLesson>;
   /** Searches the whole base on this computer; the core checks the query (2–100 characters). */
   search(query: string): Promise<KnowledgeSearchResult>;
   /** Shows the Windows save dialog and writes the subject as one .md; the path never comes from the page. */
@@ -360,6 +366,7 @@ export function knowledgeBaseApi(call: CallByName): KnowledgeBaseApi {
     lessons: async (key) => list(await call(methods.lessons, key), "knowledge lessons").map(parseLesson),
     lectures: async (key) => list(await call(methods.lectures, key), "knowledge lectures").map(parseLesson),
     lesson: async (id) => parseLesson(await call(methods.lesson, id)),
+    lessonByKey: async (key) => parseLesson(await call(methods.lessonByKey, key)),
     search: async (query) => parseSearchResult(await call(methods.search, query)),
     exportSubject: async (key) => parseExportResult(await call(methods.exportSubject, key)),
     setLessonInfo: async (id, subject, kind) => parseLesson(await call(methods.setLessonInfo, id, subject, kind)),

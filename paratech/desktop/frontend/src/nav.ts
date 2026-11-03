@@ -118,29 +118,27 @@ export function pageById(id: string): Page {
 }
 
 /**
- * Where the window is: a page and, over it, the transcript (TASK-079) or the summary (TASK-087) of a recording.
- * Neither is a page: they open from a recording ("" when closed), one at a time, and the page under them
- * stays as the user left it. assignment: the assignment «Задания» shows ("" for the list). subject: what «Предметы»
- * shows: a subject id, `inboxRoute` of subjectsHome.ts for «Входящие», or "" for no choice yet (the last opened subject,
- * no entry of its own in the history; TASK-341). lesson: the lesson screen over the page (TASK-351), the key of a
- * KnowledgeLesson ("" none); tab: its tab (a LessonTab, "" = chosen by the screen). Opening a lesson is an entry of the
- * history, switching its tab is not (navHistory.pushRoute).
+ * Where the window is: a page and, over it, a lesson. assignment: the assignment «Задания» shows ("" for the list).
+ * subject: what «Предметы» shows: a subject id, `inboxRoute` of subjectsHome.ts for «Входящие», or "" for no choice yet
+ * (the last opened subject, no entry of its own in the history; TASK-341). lesson: the lesson screen over the page,
+ * the key of a KnowledgeLesson ("" none). It is the one screen for the summary, the lecture text and the transcript
+ * (TASK-351/352): every «Открыть конспект / расшифровку» is a lesson with a tab. The page under it stays as the user
+ * left it. tab: its tab (a LessonTab, "" = chosen by the screen). Opening a lesson is an entry of the history,
+ * switching its tab is not (navHistory.pushRoute).
  */
 export interface Route {
   page: PageId;
-  transcript: string;
-  summary: string;
   assignment: string;
   subject: string;
   lesson: string;
   tab: string;
 }
 
-export const initialRoute: Route = { page: defaultPage, transcript: "", summary: "", assignment: "", subject: "", lesson: "", tab: "" };
+export const initialRoute: Route = { page: defaultPage, assignment: "", subject: "", lesson: "", tab: "" };
 
-/** A rail click: the page, with the transcript, the summary and the lesson closed. */
+/** A rail click: the page, with the lesson closed. */
 export function routeToPage(id: PageId): Route {
-  return { page: id, transcript: "", summary: "", assignment: "", subject: "", lesson: "", tab: "" };
+  return { page: id, assignment: "", subject: "", lesson: "", tab: "" };
 }
 
 /** Opens a subject (or «Входящие») in «Предметы»; "" is no choice. An entry of its own in the history. */
@@ -153,32 +151,17 @@ export function routeToOpenedAssignment(_r: Route, assignmentId: string): Route 
   return { ...routeToPage("homework"), assignment: assignmentId };
 }
 
-/** Opens the transcript of a recording over the current section (in place of an open summary or lesson). */
-export function routeToTranscript(r: Route, recordingId: string): Route {
-  return { ...r, transcript: recordingId, summary: "", lesson: "", tab: "" };
-}
-
-/** Opens the summary of a recording over the current section (in place of an open transcript or lesson). */
-export function routeToSummary(r: Route, recordingId: string): Route {
-  return { ...r, transcript: "", summary: recordingId, lesson: "", tab: "" };
-}
-
-/** Back from the transcript or the summary to the section it was opened from. */
-export function closeTranscript(r: Route): Route {
-  return { ...r, transcript: "", summary: "", lesson: "", tab: "" };
-}
-
-/** Opens an assignment in «Задания» (from the summary or the «Задания» tab of a lesson). */
+/** Opens an assignment in «Задания» (from the «Задания» tab of a lesson, an agent card or a deadline row). */
 export function routeToAssignment(assignmentId: string): Route {
-  return { page: "homework", transcript: "", summary: "", assignment: assignmentId, subject: "", lesson: "", tab: "" };
+  return { page: "homework", assignment: assignmentId, subject: "", lesson: "", tab: "" };
 }
 
 /**
- * Opens a lesson over the current section, like the summary: the page under it stays as it was left. `tab` is a
- * LessonTab, or "" to let the screen choose (its opening tab).
+ * Opens a lesson over the current section: the page under it stays as it was left. `tab` is a LessonTab, or "" to
+ * let the screen choose (its opening tab).
  */
 export function routeToLesson(r: Route, lessonKey: string, tab = ""): Route {
-  return { ...r, transcript: "", summary: "", lesson: lessonKey, tab };
+  return { ...r, lesson: lessonKey, tab };
 }
 
 /** Another tab of the open lesson. Not a new place: the history replaces the tab of the current entry. */

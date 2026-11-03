@@ -264,23 +264,25 @@ test("the row's links: the lecture text first once ready, the transcript then as
   assert.equal(rowSummaryOffer({ stage: "failed", step: "lectureText", errorCode: "lectureTextFailed" }), "main");
   assert.ok(rowOffersTranscript({ stage: "lectureText", errorCode: "" }));
 
-  // TASK-096: one main button; a ready summary leads, the lecture text leads only without it.
+  // TASK-096: one main button. TASK-352: it is «Открыть» (the lesson screen on its own opening tab, no tab named); the
+  // menu keeps every named tab: the lecture text, the summary, the transcript.
   const offers = { texts: true, redo: false };
   const ready = rowActions(row({ lectureTextReady: true }), offers);
-  assert.deepEqual([ready.main.label, ready.menu.map((i) => i.label)], ["Открыть конспект", ["Открыть текст лекции", "Открыть расшифровку"]]);
+  assert.deepEqual([ready.main.key, ready.main.label, ready.menu.map((i) => i.label)], ["lesson", "Открыть", ["Открыть текст лекции", "Открыть конспект", "Открыть расшифровку"]]);
   const running = rowActions(row({ stage: "summarizing", lectureTextReady: true }), offers);
-  assert.equal(running.main.label, "Открыть текст лекции");
+  assert.deepEqual([running.main.key, running.main.label], ["lesson", "Открыть"]);
   const before = rowActions(row(), offers);
-  assert.deepEqual([before.main.label, before.menu.map((i) => i.label)], ["Открыть конспект", ["Открыть расшифровку"]]);
+  assert.deepEqual([before.main.key, before.main.label, before.menu.map((i) => i.label)], ["lesson", "Открыть", ["Открыть конспект", "Открыть расшифровку"]]);
 
   const noop = () => undefined;
   const html = renderToStaticMarkup(
     h(RecordingRow, {
       item: row({ stage: "summarizing", lectureTextReady: true }), now: 0, stopping: false, starting: false,
-      onStop: noop, onRunNow: noop, onOpen: noop, onOpenSummary: noop, onOpenTranscript: noop,
+      onStop: noop, onRunNow: noop, onOpen: noop, onOpenLesson: noop,
     }),
   );
-  assert.ok(html.includes(">Открыть текст лекции<") && !html.includes("Открыть расшифровку"));
+  // TASK-352: one «Открыть» (the lesson screen, on the lecture text); the other tabs are items of «⋯», shut here.
+  assert.ok(html.includes(">Открыть<") && !html.includes("Открыть расшифровку") && !html.includes("Открыть конспект"));
 });
 
 // Source guards: read the TypeScript sources, not the build.
@@ -297,10 +299,11 @@ test("the lecture text renders text only, talks only to the core and starts thro
       assert.ok(!text.includes(banned), `${rel} uses ${banned}`);
     }
   }
-  const page = src("pages/SummaryPage.tsx");
-  assert.match(page, /props\.lecture\.copy\(id\)/);
-  assert.match(page, /props\.lecture\.saveAs\(id, lectureFormat\)/);
-  assert.match(page, /props\.activity\.retryPostProcessing\(id, "lectureText"\)/);
-  assert.match(src("pages/RecordingRow.tsx"), /props\.onOpenSummary\?\.\(r\.id, "lecture"\)/);
-  assert.match(src("App.tsx"), /section=\{summarySection\}/);
+  // The lecture text lives on the lesson screen (TASK-352); the row opens it on the tab «Текст лекции».
+  const page = src("pages/KnowledgeLessonPage.tsx");
+  assert.match(page, /copy=\{\(\) => lecture\.copy\(id\)\}/);
+  assert.match(page, /saveAs=\{\(f\) => lecture\.saveAs\(id, f\)\}/);
+  assert.match(page, /activity\.retryPostProcessing\(id, "lectureText"\)/);
+  assert.match(src("recordingRowView.ts"), /case "lectureText":\s*return "lecture";/);
+  assert.match(src("pages/RecordingRow.tsx"), /props\.onOpenLesson\?\.\(r\.id, tab\)/);
 });

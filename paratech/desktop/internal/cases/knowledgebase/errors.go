@@ -7,7 +7,7 @@ var (
 	// ErrInvalidConfig is returned by New when a required port is missing.
 	ErrInvalidConfig = errors.New("knowledgebase: invalid configuration")
 
-	// ErrInvalidRequest means an invalid recording id or path.
+	// ErrInvalidRequest means an invalid recording id, lesson key or path.
 	ErrInvalidRequest = errors.New("knowledgebase: invalid request")
 
 	// ErrInvalidQuery means a search query that is too short or too long.
@@ -16,7 +16,7 @@ var (
 	// ErrInvalidLessonInfo means a subject that is too long or an unknown lesson kind.
 	ErrInvalidLessonInfo = errors.New("knowledgebase: invalid subject or kind")
 
-	// ErrRecordingNotFound means the recording is not (any more) a lesson of the knowledge base.
+	// ErrRecordingNotFound means the recording, or the lesson of a key, is not (any more) a lesson of the knowledge base.
 	ErrRecordingNotFound = errors.New("knowledgebase: recording not found")
 
 	// ErrSubjectNotFound means the subject has no lesson (any more).

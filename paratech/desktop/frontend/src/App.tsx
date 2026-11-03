@@ -1,9 +1,7 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   closeLesson,
-  closeTranscript,
   initialRoute,
-  pageById,
   type PageId,
   railItemOf,
   routeToAssignment,
@@ -12,18 +10,24 @@ import {
   routeToOpenedAssignment,
   routeToPage,
   routeToSubject,
-  routeToSummary,
-  routeToTranscript,
 } from "./nav";
 import { AgentPanel } from "./agent/AgentPanel";
 import { mentionOpening } from "./agentMentions";
 import { PanelResizeHandle, useResizablePanel } from "./agent/PanelResizeHandle";
 import type { KnowledgeLesson } from "./bindings/knowledgeBase";
-import { type CitationOpening, keepLessonOpening, type LessonOpening, openingRouteTab } from "./knowledgeView";
+import {
+  type CitationOpening,
+  keepLessonOpening,
+  type LessonOpening,
+  lessonScreenKey,
+  type LessonTab,
+  openingRouteTab,
+  recordingLessonKey,
+  recordingLessonOpening,
+} from "./knowledgeView";
 import { keepStartPanel } from "./recordStartView";
 import { keepScheduleReview } from "./scheduleSubjectsView";
-import { OpenSummaryContext, type SummarySection } from "./openSummary";
-import { OpenTranscriptContext } from "./openTranscript";
+import { OpenLessonContext } from "./openLesson";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage";
 import { HomeworkPage } from "./pages/HomeworkPage";
@@ -36,11 +40,9 @@ import { SchedulePage } from "./pages/SchedulePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SettingsHead, SettingsTabs } from "./pages/SettingsTabs";
 import { SubjectsPage } from "./pages/SubjectsPage";
-import { SummaryPage } from "./pages/SummaryPage";
 import { TicketsPage } from "./pages/TicketsPage";
 import { RecordingsPage } from "./pages/RecordingsPage";
 import { TodayPage } from "./pages/TodayPage";
-import { TranscriptPage } from "./pages/TranscriptPage";
 import { needsRemount } from "./navHistory";
 import { keepAssignmentEdit, type RecipientNav, RecipientNavContext } from "./recipientNav";
 import { keepTeacherFocus, type TeacherFocus } from "./teachersView";
@@ -79,6 +81,8 @@ function PageView(props: {
   onSourceJumpDone: () => void;
   /** A lesson of «База знаний» opens as a screen of its own over the page (route.lesson, TASK-351). */
   onOpenLesson: (lesson: KnowledgeLesson, opening: LessonOpeningRequest) => void;
+  /** A recorded lesson of a subject's «Пары» opens by its recording (TASK-352). */
+  onOpenRecording: (recordingId: string) => void;
   /** Count the lesson screens left and the corrections saved there: «База знаний» reads and searches again. */
   lessonsSeen: number;
   lessonsEdited: number;
@@ -104,6 +108,7 @@ function PageView(props: {
           subjectId={props.subject}
           onSelect={props.onSelectSubject}
           onOpenAssignment={props.onOpenAssignment}
+          onOpenLesson={props.onOpenRecording}
           teacherFocus={props.teacherFocus}
           onTeacherFocusDone={props.onTeacherFocusDone}
           openReview={props.scheduleReview}
@@ -148,13 +153,6 @@ export function App() {
   // Counts the rail clicks: a click on the current section takes a page with sub-pages back to its first level.
   const [visit, setVisit] = useState(0);
   const current = route.page;
-  const openTranscript = useCallback((id: string) => setRoute((r) => routeToTranscript(r, id)), []);
-  // Where the summary page opens (TASK-090); not part of the route: «Назад» and a new open reset it.
-  const [summarySection, setSummarySection] = useState<SummarySection | undefined>(undefined);
-  const openSummary = useCallback((id: string, section?: SummarySection) => {
-    setSummarySection(section);
-    setRoute((r) => routeToSummary(r, id));
-  }, []);
   const openPage = useCallback((id: PageId) => setRoute(routeToPage(id)), []);
   // Counts the jumps to an assignment: each one opens «Домашние задания» afresh on that assignment.
   const [jump, setJump] = useState(0);
@@ -162,34 +160,9 @@ export function App() {
     setRoute(routeToAssignment(id));
     setJump((j) => j + 1);
   }, []);
-  // A place of an answer's source (TASK-296): «База знаний» opens afresh and takes it once.
-  const [sourceJump, setSourceJump] = useState<CitationOpening | undefined>(undefined);
-  const openSource = useCallback((o: CitationOpening) => {
-    setSourceJump(o);
-    setRoute(routeToPage("knowledge"));
-    setJump((j) => j + 1);
-  }, []);
-  const sourceJumpDone = useCallback(() => setSourceJump(undefined), []);
   // A subject or a card opened inside its page is a route too, so «Назад» finds the list again (TASK-202).
   const selectSubject = useCallback((id: string) => setRoute((r) => routeToSubject(r, id)), []);
   const selectAssignment = useCallback((id: string) => setRoute((r) => routeToOpenedAssignment(r, id)), []);
-  // A mention pill of the agent's thread (TASK-247): the closest existing page; a deleted object meets its normal state.
-  const openMention = useCallback(
-    (kind: string, id: string) => {
-      const o = mentionOpening(kind, id);
-      if (o === null) {
-        return;
-      }
-      if (o.type === "subject") {
-        selectSubject(o.id);
-      } else if (o.type === "assignment") {
-        openAssignment(o.id);
-      } else {
-        openPage(o.page);
-      }
-    },
-    [selectSubject, openAssignment, openPage],
-  );
   // «Указать почту» (TASK-238): opens the subject and asks its page for the form of one teacher. The request is state, not
   // part of the route: it is taken once, so «Назад» and a later visit never reopen the form, and the window drops it
   // as soon as the route points elsewhere.
@@ -245,12 +218,93 @@ export function App() {
   // requests above: taken once by the screen and dropped as soon as the route leaves the lesson.
   const lessons = useRef(new Map<string, KnowledgeLesson>());
   const [lessonOpening, setLessonOpening] = useState<LessonOpening | null>(null);
-  const openLesson = useCallback((lesson: KnowledgeLesson, o: LessonOpeningRequest) => {
-    lessons.current.set(lesson.key, lesson);
-    setLessonOpening({ key: lesson.key, focus: o.focus, materialId: o.materialId, editing: o.editing });
-    setRoute((r) => routeToLesson(r, lesson.key, openingRouteTab(o.focus, o.materialId)));
+  // Counts the openings: a lesson opened again (another place of it) opens its screen afresh, switching a tab does not.
+  const [lessonVisit, setLessonVisit] = useState(0);
+  const openLessonKey = useCallback((key: string, o: LessonOpeningRequest) => {
+    setLessonOpening({ key, focus: o.focus, materialId: o.materialId, editing: o.editing });
+    setLessonVisit((n) => n + 1);
+    setRoute((r) => routeToLesson(r, key, openingRouteTab(o.focus, o.materialId)));
   }, []);
+  const openLesson = useCallback(
+    (lesson: KnowledgeLesson, o: LessonOpeningRequest) => {
+      lessons.current.set(lesson.key, lesson);
+      openLessonKey(lesson.key, o);
+    },
+    [openLessonKey],
+  );
+  // Every «Открыть конспект / текст лекции / расшифровку» (TASK-352): the lesson of a recording by its id; the screen
+  // loads it by its key (lessonByKey), so no page has to hold the lesson.
+  const openRecordingLesson = useCallback(
+    (recordingId: string, tab?: LessonTab, index?: number) => {
+      const { key, ...o } = recordingLessonOpening(recordingId, tab, index);
+      openLessonKey(key, o);
+    },
+    [openLessonKey],
+  );
+  const openRecording = useCallback((recordingId: string) => openRecordingLesson(recordingId), [openRecordingLesson]);
+  // A place of an answer's source (TASK-296): a recording's place opens its lesson at once; a note or a pair is found by
+  // its ids first, which «База знаний» does (it opens afresh and takes the jump once), then the lesson opens over it.
+  const [sourceJump, setSourceJump] = useState<CitationOpening | undefined>(undefined);
+  const openSource = useCallback(
+    (o: CitationOpening) => {
+      if (o.kind === "recording") {
+        openLessonKey(recordingLessonKey(o.recordingId), { focus: o.focus, materialId: "", editing: false });
+        return;
+      }
+      setSourceJump(o);
+      setRoute(routeToPage("knowledge"));
+      setJump((j) => j + 1);
+    },
+    [openLessonKey],
+  );
+  const sourceJumpDone = useCallback(() => setSourceJump(undefined), []);
   const lessonOpeningTaken = useCallback(() => setLessonOpening(null), []);
+  // The button that closed the lesson screen is gone with it: the focus goes to the sheet, so the keyboard does not fall
+  // to the body. Set by «Назад» and by a deletion only; a rail click keeps the focus on the rail.
+  const sheet = useRef<HTMLElement>(null);
+  const refocusSheet = useRef(false);
+  // Alt+←/→ and the mouse side buttons walk the history of routes (TASK-201).
+  const navHistory = useNavHistory(route, setRoute, (r, from) => {
+    if (needsRemount(r, from)) {
+      setJump((j) => j + 1);
+    }
+  });
+  // The recording was deleted on the lesson screen: back to the section it was opened from, and the lesson leaves the
+  // history (Alt+← must not return to it). That section is read afresh, its lists still hold the recording.
+  const lessonDeleted = useCallback(
+    (key: string) => {
+      lessons.current.delete(key);
+      refocusSheet.current = true;
+      navHistory.lessonDeleted(key);
+      setJump((j) => j + 1);
+    },
+    [navHistory],
+  );
+  // «Назад» of the lesson screen.
+  const lessonBack = useCallback(() => {
+    refocusSheet.current = true;
+    setRoute(closeLesson);
+  }, []);
+  // A mention pill of the agent's thread (TASK-247): the object itself where a route opens it (a subject, an assignment,
+  // a pair's lesson, TASK-352), else the closest existing page; a deleted object meets its normal state.
+  const openMention = useCallback(
+    (kind: string, id: string) => {
+      const o = mentionOpening(kind, id);
+      if (o === null) {
+        return;
+      }
+      if (o.type === "subject") {
+        selectSubject(o.id);
+      } else if (o.type === "assignment") {
+        openAssignment(o.id);
+      } else if (o.type === "pair") {
+        openSource({ kind: "pair", lessonId: o.lessonId });
+      } else {
+        openPage(o.page);
+      }
+    },
+    [selectSubject, openAssignment, openSource, openPage],
+  );
   const openLessonTab = useCallback((tab: string) => setRoute((r) => routeToLessonTab(r, tab)), []);
   // «База знаний» under the lesson reads its lists when the lesson screen is left, and searches again after a correction.
   const [lessonsSeen, setLessonsSeen] = useState(0);
@@ -275,7 +329,11 @@ export function App() {
     setLessonOpening((o) => keepLessonOpening(o, { lesson: route.lesson }));
     if (lastLesson.current !== "" && route.lesson === "") {
       setLessonsSeen((n) => n + 1);
+      if (refocusSheet.current) {
+        sheet.current?.focus();
+      }
     }
+    refocusSheet.current = false;
     lastLesson.current = route.lesson;
   }, [route.lesson]);
   const recipientNav = useMemo<RecipientNav>(
@@ -290,13 +348,6 @@ export function App() {
     }),
     [openTeacher, openAssignmentFor, openPage],
   );
-  // Alt+←/→ and the mouse side buttons walk the history of routes (TASK-201).
-  useNavHistory(route, setRoute, (r, from) => {
-    setSummarySection(undefined);
-    if (needsRemount(r, from)) {
-      setJump((j) => j + 1);
-    }
-  });
   // Counts the files the drop zone added: «Предметы» reads the library again.
   const [library, setLibrary] = useState(0);
   // The page buttons the agent offers (TASK-324): a press does what the page's own button does, or opens that page.
@@ -317,40 +368,39 @@ export function App() {
   const panel = useResizablePanel();
   const open = panel.pref.open;
   const width = panel.width;
-  const overlay = route.transcript !== "" || route.summary !== "" || route.lesson !== "";
+  const overlay = route.lesson !== "";
   const inSettings = railItemOf(current).id === "settings";
 
   const pageView = (
-    <OpenTranscriptContext.Provider value={openTranscript}>
-      <OpenSummaryContext.Provider value={openSummary}>
-        <PageView
-          id={current}
-          visit={visit}
-          assignment={route.assignment}
-          subject={route.subject}
-          library={library}
-          onOpen={openPage}
-          onOpenAssignment={openAssignment}
-          onSelectAssignment={selectAssignment}
-          onSelectSubject={selectSubject}
-          teacherFocus={teacherFocus}
-          onTeacherFocusDone={teacherFocusDone}
-          scheduleReview={scheduleReview}
-          onOpenScheduleReview={openScheduleReview}
-          onScheduleReviewTaken={scheduleReviewTaken}
-          startPanel={startPanel}
-          onOpenStartPanel={openStartPanel}
-          onStartPanelTaken={startPanelTaken}
-          assignmentEdit={assignmentEdit}
-          onAssignmentEditDone={assignmentEditDone}
-          sourceJump={sourceJump}
-          onSourceJumpDone={sourceJumpDone}
-          onOpenLesson={openLesson}
-          lessonsSeen={lessonsSeen}
-          lessonsEdited={lessonsEdited}
-        />
-      </OpenSummaryContext.Provider>
-    </OpenTranscriptContext.Provider>
+    <OpenLessonContext.Provider value={openRecordingLesson}>
+      <PageView
+        id={current}
+        visit={visit}
+        assignment={route.assignment}
+        subject={route.subject}
+        library={library}
+        onOpen={openPage}
+        onOpenAssignment={openAssignment}
+        onSelectAssignment={selectAssignment}
+        onSelectSubject={selectSubject}
+        teacherFocus={teacherFocus}
+        onTeacherFocusDone={teacherFocusDone}
+        scheduleReview={scheduleReview}
+        onOpenScheduleReview={openScheduleReview}
+        onScheduleReviewTaken={scheduleReviewTaken}
+        startPanel={startPanel}
+        onOpenStartPanel={openStartPanel}
+        onStartPanelTaken={startPanelTaken}
+        assignmentEdit={assignmentEdit}
+        onAssignmentEditDone={assignmentEditDone}
+        sourceJump={sourceJump}
+        onSourceJumpDone={sourceJumpDone}
+        onOpenLesson={openLesson}
+        onOpenRecording={openRecording}
+        lessonsSeen={lessonsSeen}
+        lessonsEdited={lessonsEdited}
+      />
+    </OpenLessonContext.Provider>
   );
 
   return (
@@ -367,9 +417,9 @@ export function App() {
           setVisit((v) => v + 1);
         }}
       />
-      <main className="sheet">
-        {/* A new key per section replays the entry animation. The section stays mounted under an open transcript or
-            summary, so «Назад» finds it as the user left it. */}
+      <main className="sheet" ref={sheet} tabIndex={-1}>
+        {/* A new key per section replays the entry animation. The section stays mounted under an open lesson, so
+            «Назад» finds it as the user left it. */}
         <div key={`${current}:${jump}`} className="screen" hidden={overlay}>
           {inSettings && <SettingsHead />}
           {inSettings ? (
@@ -381,33 +431,10 @@ export function App() {
             pageView
           )}
         </div>
-        {route.transcript !== "" && (
-          <div key={`transcript:${route.transcript}`} className="screen">
-            <TranscriptPage
-              recordingId={route.transcript}
-              parent={pageById(current).label}
-              onBack={() => setRoute(closeTranscript)}
-              onOpenSummary={openSummary}
-            />
-          </div>
-        )}
-        {route.summary !== "" && (
-          <div key={`summary:${route.summary}`} className="screen">
-            <SummaryPage
-              recordingId={route.summary}
-              parent={pageById(current).label}
-              section={summarySection}
-              onBack={() => setRoute(closeTranscript)}
-              onOpenTranscript={openTranscript}
-              onOpenAssignment={openAssignment}
-              onDeleted={() => openPage("today")}
-              onCheckSound={() => openPage("diagnostics")}
-            />
-          </div>
-        )}
         {route.lesson !== "" && (
-          // The tab is not in the key: switching tabs keeps the screen; another lesson opens it afresh.
-          <div key={`lesson:${route.lesson}`} className="screen">
+          // The tab is not in the key: switching tabs keeps the screen; another lesson, or the same one opened again
+          // at another place, opens it afresh.
+          <div key={lessonScreenKey(route.lesson, lessonVisit)} className="screen">
             <LessonScreen
               lessonKey={route.lesson}
               origin={route.page}
@@ -416,8 +443,9 @@ export function App() {
               opening={lessonOpening}
               onOpeningTaken={lessonOpeningTaken}
               onTab={openLessonTab}
-              onBack={() => setRoute(closeLesson)}
+              onBack={lessonBack}
               onChanged={lessonChanged}
+              onDeleted={lessonDeleted}
               onOpenAssignment={openAssignment}
               onCheckSound={() => openPage("diagnostics")}
               nav={lessonNav}
