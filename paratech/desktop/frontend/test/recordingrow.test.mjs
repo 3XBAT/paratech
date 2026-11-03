@@ -603,7 +603,7 @@ test("a task row renders no technical text and keeps the «⋯» cell, empty wit
 
 test("recording and task rows share one grid: fixed status, button and «⋯» tracks in every card (TASK-098)", () => {
   // A recording row has the same cells: the main button, then the «⋯» cell.
-  assert.match(actsOf(render(row({ stage: "recording", status: "RECORDING", stoppable: true }))), /^<div class="acts"><button[^>]*class="btn danger"[^>]*>.*<\/button><div class="mmenu">/);
+  assert.match(actsOf(render(row({ stage: "recording", status: "RECORDING", stoppable: true }))), /^<div class="acts"><button[^>]*class="btn stop"[^>]*>.*<\/button><div class="mmenu">/);
   assert.match(actsOf(render(row({ stage: "queued", queueReason: "inLine" }))), /^<div class="acts"><div class="mmenu"><\/div><\/div>/);
 
   const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");

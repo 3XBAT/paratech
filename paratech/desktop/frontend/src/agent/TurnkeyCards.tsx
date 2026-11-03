@@ -26,6 +26,7 @@ import {
 import type { StepResult } from "../workView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
+import { Icon } from "../ui/Icon.js";
 
 // Questions, assumptions, requirements, steps, pitfalls and answers about a step were written by the reader or the
 // student (untrusted). They reach the page as React text nodes only: no element, link or markdown is built from them,
@@ -105,7 +106,10 @@ export function QuestionsCard(props: { ctx: CardContext }) {
 
   return (
     <section className="ag-card ag-ask">
-      <h3 className="ag-card-h">{turnkeyTexts.questionsCaption}</h3>
+      <h3 className="ag-card-h">
+        <Icon name="help" />
+        {turnkeyTexts.questionsCaption}
+      </h3>
       <p className="small muted">{turnkeyTexts.roundLine(work.questionRound)}</p>
       {isLastRound(work) && <p className="small muted">{turnkeyTexts.lastRoundNote}</p>}
 

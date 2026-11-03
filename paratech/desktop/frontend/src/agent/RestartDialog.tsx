@@ -1,16 +1,23 @@
 import { type KeyboardEvent, useEffect, useId, useRef } from "react";
 import { Button } from "../ui/Button.js";
 import { dialogKey, type RestartBlock, restartLabel, type RestartTarget, restartTexts } from "../agentView.js";
+import { ActionButton } from "./MessageActions.js";
 
 // «Начать заново отсюда» (TASK-249): a quiet action under a message of the student and the warning dialog it opens.
 
-/** The action under the student's message: always visible but quiet, full on hover and keyboard focus. */
+/**
+ * The action under the student's message, an icon of the row (agent/MessageActions): always visible but quiet, full on
+ * hover and keyboard focus. The tooltip says «Начать заново отсюда»; the accessible name adds the start of the message.
+ */
 export function RestartButton(props: { target: RestartTarget; onOpen(target: RestartTarget, opener: HTMLElement): void }) {
-  const label = restartLabel(props.target);
   return (
-    <button type="button" className="ag-restart" aria-label={label} title={restartTexts.actionHint} onClick={(e) => props.onOpen(props.target, e.currentTarget)}>
-      {restartTexts.action}
-    </button>
+    <ActionButton
+      icon="retry"
+      label={restartLabel(props.target)}
+      tip={restartTexts.action}
+      className="ag-ib-restart"
+      onClick={(e) => props.onOpen(props.target, e.currentTarget)}
+    />
   );
 }
 

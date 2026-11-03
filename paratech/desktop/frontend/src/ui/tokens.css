@@ -23,15 +23,11 @@
   --on-prim: #FAFAF8;
   --rec: #B23A30;
   --rec-t: #9C3027;
-  --rec-b: #F7E5E2;
   --run-t: #8A4716;
   --run-b: #F5E9DE;
   --wait-t: #735000;
   --wait-b: #F4ECD4;
-  --net-t: #2B5788;
-  --net-b: #E3EBF4;
   --ok-t: #2C6644;
-  --ok-b: #E1EEE5;
   --neu-t: #4E5158;
   --neu-b: #EEEEEB;
   --sh-btn: 0 .5px 1px rgba(20, 20, 24, .10);
@@ -39,6 +35,8 @@
   --sh-win: 0 1px 2px rgba(20, 20, 24, .05), 0 18px 44px -22px rgba(20, 20, 24, .28);
   --sh-pop: 0 0 0 1px rgba(20, 20, 24, .08), 0 12px 32px -12px rgba(20, 20, 24, .30);
   --scrim: rgba(20, 20, 24, .35); /* behind a modal dialog */
+  --scroll: #A4A49E; /* scrollbar thumb (ui/scrollbar.css) */
+  --scroll-hover: #7A7D83;
   color-scheme: light;
 
   /* Type scale, base 14px: size / line height. */
@@ -116,15 +114,11 @@
     --on-prim: #16171A;
     --rec: #E8766B;
     --rec-t: #F0958B;
-    --rec-b: #3A2422;
     --run-t: #E8AC7C;
     --run-b: #33281F;
     --wait-t: #DFC07A;
     --wait-b: #312B1C;
-    --net-t: #98BBE4;
-    --net-b: #1E2937;
     --ok-t: #8FCDA7;
-    --ok-b: #1C2F25;
     --neu-t: #B4B7BD;
     --neu-b: #2A2B2F;
     --sh-btn: 0 .5px 1px rgba(0, 0, 0, .4);
@@ -132,6 +126,8 @@
     --sh-win: 0 1px 2px rgba(0, 0, 0, .4), 0 22px 48px -24px rgba(0, 0, 0, .85);
     --sh-pop: 0 0 0 1px rgba(255, 255, 255, .06), 0 14px 36px -12px rgba(0, 0, 0, .8);
     --scrim: rgba(0, 0, 0, .55);
+    --scroll: #595C63;
+    --scroll-hover: #70747C;
     color-scheme: dark;
   }
 }
@@ -157,15 +153,11 @@
   --on-prim: #16171A;
   --rec: #E8766B;
   --rec-t: #F0958B;
-  --rec-b: #3A2422;
   --run-t: #E8AC7C;
   --run-b: #33281F;
   --wait-t: #DFC07A;
   --wait-b: #312B1C;
-  --net-t: #98BBE4;
-  --net-b: #1E2937;
   --ok-t: #8FCDA7;
-  --ok-b: #1C2F25;
   --neu-t: #B4B7BD;
   --neu-b: #2A2B2F;
   --sh-btn: 0 .5px 1px rgba(0, 0, 0, .4);
@@ -173,5 +165,7 @@
   --sh-win: 0 1px 2px rgba(0, 0, 0, .4), 0 22px 48px -24px rgba(0, 0, 0, .85);
   --sh-pop: 0 0 0 1px rgba(255, 255, 255, .06), 0 14px 36px -12px rgba(0, 0, 0, .8);
   --scrim: rgba(0, 0, 0, .55);
+  --scroll: #595C63;
+  --scroll-hover: #70747C;
   color-scheme: dark;
 }

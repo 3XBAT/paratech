@@ -185,7 +185,7 @@ export const chatTexts = {
   restore: "Вернуть",
   rename: "Переименовать",
   renameLabel: "Название чата",
-  running: "идёт запрос",
+  running: "Идёт запрос",
   archivedMark: "в архиве",
   noChats: "Чатов пока нет.",
   emptyArchive: "Архив пуст.",
@@ -477,7 +477,6 @@ export function restoredMentions(e: Entry, requests: readonly EarlierRequestView
 
 export const restartTexts = {
   action: "Начать заново отсюда",
-  actionHint: "Изменить это сообщение и скрыть всё, что после него",
   title: "Начать заново отсюда?",
   body: "Сообщения после этого агент забудет. Сделанные действия не отменяются.",
   hide: "Скрыть",
@@ -491,6 +490,49 @@ export const restartTexts = {
   undoLabel: "Отменить правку",
   restoreText: "Вернуть текст сообщения",
 } as const;
+
+// ---- The quiet actions under a message (TASK-365) ----
+// A row of icons under the student's message («Копировать», «Начать заново отсюда») and under the agent's reply
+// («Копировать», «Повторить ответ»). The name is the tooltip (hover and focus) and the aria-label.
+
+export const messageActionTexts = {
+  copy: "Копировать",
+  copied: "Скопировано",
+  copyFailed: "Не удалось скопировать. Выделите текст и нажмите Ctrl+C",
+  rerun: "Повторить ответ",
+} as const;
+
+/** How long «Скопировано» / the failure hint stays on the button (long enough to read the hint). */
+export const copyNoteMs = 2000;
+
+export type CopyState = "idle" | "copied" | "failed";
+
+/** The tooltip (and the live announcement) of the copy button in a state; the aria-label stays «Копировать». */
+export function copyNote(s: CopyState): string {
+  return s === "copied" ? messageActionTexts.copied : s === "failed" ? messageActionTexts.copyFailed : messageActionTexts.copy;
+}
+
+/** Only a message with something in it can be copied. */
+export function copyable(text: string): boolean {
+  return text.trim() !== "";
+}
+
+/** What «Копировать» takes from the agent's reply: the text of its reply cards only, never a service card. */
+export function replyCopyText(cards: readonly CardModel[]): string {
+  return cards
+    .flatMap((c) => (c.type === "reply" && copyable(c.text) ? [c.text.trim()] : []))
+    .join("\n\n");
+}
+
+/** Copies the text and says how it went; a refusal or an error of the clipboard call is «failed», never thrown. */
+export async function copyOutcome(copy: (text: string) => Promise<void>, text: string): Promise<Exclude<CopyState, "idle">> {
+  try {
+    await copy(text);
+    return "copied";
+  } catch {
+    return "failed";
+  }
+}
 
 /** The earlier request «Начать заново отсюда» starts from. */
 export interface RestartTarget {
@@ -801,7 +843,7 @@ export const texts = {
   answerReady: "Ответ с источниками подготовлен.",
   stale: "нет связи — может быть неактуально",
   threadNote: "Последняя беседа",
-  rerunTitle: "Запустить запрос заново",
+  rerunTitle: messageActionTexts.rerun,
 } as const;
 
 /** Button ids of a request; the panel maps them to the calls. */

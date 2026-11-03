@@ -449,7 +449,7 @@ export function BurningSection(props: {
                     <div className="today-t">{m.title}</div>
                     <div className="today-dlmeta">
                       {m.subject !== "" && <div className="small muted today-subject">{m.subject}</div>}
-                      <StatusChip kind={m.overdue ? "fail" : m.urgent ? "run" : "neutral"} icon={m.overdue ? "warn" : m.urgent ? "clock" : null}>
+                      <StatusChip kind={m.overdue ? "fail" : m.urgent ? "wait" : "neutral"} icon={m.overdue ? "warn" : m.urgent ? "clock" : null}>
                         <span className="num">{m.chip}</span>
                       </StatusChip>
                     </div>

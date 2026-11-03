@@ -1,4 +1,4 @@
-/* Confirm card (TASK-128). Red is used on this card only: the frame and the heading come from .ag-confirm, «Да» is the danger button. */
+/* Confirm card (TASK-128). Red is used on this card only: the heading word comes from .ag-confirm, «Да» is the danger button (red text, no red frame, TASK-367). */
 .ag-conf-rows { display: grid; gap: 6px; margin: 0 0 8px; }
 .ag-conf-row { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: 8px; align-items: baseline; }
 .ag-conf-row dt, .ag-conf-row dd { margin: 0; }

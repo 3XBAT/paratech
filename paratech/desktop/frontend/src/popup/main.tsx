@@ -6,6 +6,7 @@ import { Popup } from "./Popup";
 // the popup stays light (docs/design/brief.md section 8).
 import "../ui/fonts.css";
 import "../ui/tokens.css";
+import "../ui/scrollbar.css";
 import "../sourcePicker/sourcePicker.css";
 import "../ui/soundLevel.css";
 import "./popup.css";
