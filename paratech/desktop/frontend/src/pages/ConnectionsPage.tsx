@@ -25,8 +25,10 @@ import {
   mailCardStatus,
   mailInputFrom,
   mailPasswordLabels,
+  nextChosen,
   otherErrorTexts,
   overviewTexts,
+  savedAddressNote,
   secretOutcomeOk,
   sectionCrumbs,
   securityOptions,
@@ -138,6 +140,7 @@ export function ConnectionsPage(props: { visit?: number }) {
           setSaved(c);
           setHubUrl(c.hubUrl);
           setHubDone(texts.saved);
+          setAddrChosen(true); // «Сохранено.» sits in the block: keep it open even when the address now works
           setQuotaMessage(null); // an answer of the old address would mislead
           if (quotaRefreshable(c)) {
             void refreshQuota();
@@ -397,6 +400,8 @@ export function ConnectionsPage(props: { visit?: number }) {
     chosen: addrChosen,
   });
   const setupHint = hubSetupHint(saved);
+  const savedNote = savedAddressNote(saved.hubUrl);
+  const addressLabel = "Адрес сервера";
 
   if (open === "hub") {
     return (
@@ -417,13 +422,23 @@ export function ConnectionsPage(props: { visit?: number }) {
           />
 
           {/* Native disclosure: Tab and Enter/Space work without code. The open state follows hubAddressOpen until the
-              student toggles it; every toggle is remembered, so it never closes under their hands. */}
-          <details className="conn-adv" open={addressOpen} onToggle={(e) => setAddrChosen(e.currentTarget.open)}>
+              student toggles it; only a toggle that differs from the computed state is a choice (nextChosen), so the
+              event of an automatic open is not, and a choice then keeps the block from closing under their hands. */}
+          <details
+            className="conn-adv"
+            open={addressOpen}
+            onToggle={(e) => {
+              const now = e.currentTarget.open;
+              setAddrChosen((cur) => nextChosen(now, addressOpen, cur));
+            }}
+          >
             <summary>
               <Icon name="chevr" className="conn-adv-chev" />
-              Адрес сервера
+              {addressLabel}
+              {!addressOpen && savedNote !== "" && <span className="conn-adv-saved">{`· ${savedNote}`}</span>}
             </summary>
-            <Field label="Адрес сервера" error={fieldErrorText(hubErrors, "hubUrl")}>
+            {/* The summary already names the field, so the label is read but not shown twice in a row. */}
+            <Field label={<span className="vh">{addressLabel}</span>} error={fieldErrorText(hubErrors, "hubUrl")}>
               {(id) => (
                 <Input
                   id={id}

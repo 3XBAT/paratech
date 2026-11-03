@@ -522,7 +522,8 @@ test("section heading rule is scoped to h2.sub so dialog titles keep their size"
 test("the Hub section is «Конспекты и задания» with the key hint under its title (TASK-069)", () => {
   assert.equal(overviewTexts.hubTitle, "Конспекты и задания");
   assert.ok(!("lead" in overviewTexts), "the over-line only listed the cards below it (TASK-356)");
-  assert.match(overviewTexts.hubHint, /выдаёт автор приложения/);
+  // Who gives the key is said by the setup hint while it is missing; the card does not repeat it.
+  assert.doesNotMatch(overviewTexts.hubHint, /автор/);
   assert.match(overviewTexts.hubHint, /не ключ Claude или ChatGPT/);
   assert.match(overviewTexts.hubHint, /расшифровка идёт на этом компьютере/);
   const page = src("../src/pages/ConnectionsPage.tsx");

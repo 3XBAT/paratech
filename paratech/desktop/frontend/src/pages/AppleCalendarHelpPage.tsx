@@ -24,7 +24,7 @@ export interface HelpFailure {
   text: string;
 }
 
-// «Как увидеть события в Apple Calendar», opened from «Подключения». The page sends only keys; the core opens the
+// «Как увидеть события в Календаре Apple», opened from «Подключения». The page sends only keys; the core opens the
 // official pages in the browser (ARCH-44).
 export function AppleCalendarHelpPage(props: { onBack: () => void }) {
   const api = useMemo(() => helpApi(callByName), []);
@@ -127,6 +127,12 @@ export function HelpView(props: {
           ))}
         </ul>
       </Card>
+
+      <div className="acts start">
+        <Button variant="ghost" onClick={props.onBack}>
+          {helpTexts.backToConnections}
+        </Button>
+      </div>
     </section>
   );
 }

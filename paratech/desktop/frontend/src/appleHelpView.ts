@@ -1,4 +1,4 @@
-// Content of the help screen «Как увидеть события в Apple Calendar» (PRD section 11.3). Steps and labels come only
+// Content of the help screen «Как увидеть события в Календаре Apple» (PRD section 11.3). Steps and labels come only
 // from docs/refs/apple-calendar.md; paths the refs mark "not verified" point to the official page instead. Links are
 // keys of the closed set in help.go: the core owns the URLs and opens them in the browser.
 
@@ -39,11 +39,17 @@ export const verdictTexts: Readonly<Record<Verdict, string>> = {
   notRecommended: "Не рекомендуется",
 };
 
+// One name for the screen: the card, the last crumb and the entry all say it, so the crumb is the card title.
+const entryTitle = "Календарь на iPhone, iPad и Mac";
+const appleCalendarGuide = "Как увидеть события в Календаре Apple";
+
 export const helpTexts = {
   /** The path above the title: the screen is opened from «Подключения». */
   parentCrumb: "Подключения",
-  crumb: "Apple Календарь",
-  title: "Как увидеть события в Apple Calendar",
+  crumb: entryTitle,
+  /** The quiet button at the bottom: the same way back as the first crumb. */
+  backToConnections: "Вернуться к подключениям",
+  title: appleCalendarGuide,
   intro:
     "Приложение ведёт свой отдельный календарь в аккаунте Google — календарь приложения. Он появляется, когда " +
     "подключён Google Календарь. Ниже — как увидеть его на iPhone, iPad и Mac.",
@@ -52,9 +58,9 @@ export const helpTexts = {
     "Изменения в Календаре Apple или в Google Календаре в приложение не попадают. Главная копия — в приложении, " +
     "и следующая синхронизация может перезаписать такие изменения.",
   troubleTitle: "Если событий не видно",
-  entryTitle: "Календарь на iPhone, iPad и Mac",
+  entryTitle,
   entryText: "Календарь приложения можно смотреть в Календаре Apple. Пароль от Apple ID не нужен.",
-  entryButton: "Как увидеть события в Apple Calendar",
+  entryButton: appleCalendarGuide,
 } as const;
 
 /** The note next to a row of link buttons. */

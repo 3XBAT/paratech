@@ -9,6 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { Breadcrumbs } from "../.test-build/ui/Breadcrumbs.js";
 import { overviewTexts, sectionCrumbs } from "../.test-build/connectionsView.js";
 import { helpTexts } from "../.test-build/appleHelpView.js";
+import { googleTexts } from "../.test-build/googleView.js";
 import { texts as diagnosticsTexts } from "../.test-build/diagnosticsView.js";
 import { HelpView } from "../.test-build/pages/AppleCalendarHelpPage.js";
 
@@ -27,8 +28,11 @@ test("SectionPage: «Подключения / <section>», the first crumb is th
   // The title still takes the focus on open.
   assert.match(page, /heading\.current\?\.focus\(\)/);
   assert.equal(overviewTexts.title, "Подключения");
-  assert.deepEqual(sectionCrumbs, { hub: "Конспекты и задания", mail: "Почта", google: "Google" });
-  assert.equal(helpTexts.crumb, "Apple Календарь");
+  // The last crumb is the name of the card and the heading.
+  assert.deepEqual(sectionCrumbs, { hub: "Конспекты и задания", mail: "Почта", google: "Google Календарь" });
+  assert.equal(sectionCrumbs.google, googleTexts.title);
+  assert.equal(helpTexts.crumb, "Календарь на iPhone, iPad и Mac");
+  assert.equal(helpTexts.crumb, helpTexts.entryTitle, "the crumb is the card title");
 });
 
 test("no «Назад» button and no over-line is left in «Подключения» and the Apple help", () => {
@@ -43,19 +47,25 @@ test("no «Назад» button and no over-line is left in «Подключен�
   assert.ok(!read("styles.css").includes(".help-back"), "the style of the bottom button is gone with it");
 });
 
-test("Apple help: «Подключения / Apple Календарь» above the title; the first crumb calls onBack", () => {
+test("Apple help: «Подключения / <card title>» above the title; the first crumb and the bottom button call onBack", () => {
   const calls = [];
   const html = renderToStaticMarkup(h(HelpView, { failure: null, onOpen: () => {}, onBack: () => calls.push("back") }));
   assert.match(html, /<nav class="crumbs" aria-label="Путь">/);
   assert.match(html, /<button type="button" class="crumb link">Подключения<\/button>/);
-  assert.match(html, /<span class="crumb cur" aria-current="page">Apple Календарь<\/span>/);
+  assert.match(html, /<span class="crumb cur" aria-current="page"[^>]*>Календарь на iPhone, iPad и Mac<\/span>/);
   assert.ok(html.indexOf("crumbs") < html.indexOf(helpTexts.title), "the path is above the title");
   assert.ok(!html.includes(">Назад<"));
-  // The view passes onBack to the crumbs as it is.
+  assert.ok(!html.includes("Apple Calendar") && !html.includes("Apple Календарь"), "one name: Календарь Apple");
+  // The quiet button at the bottom (after the last card) says where it goes, not «Назад».
+  assert.equal(helpTexts.backToConnections, "Вернуться к подключениям");
+  assert.match(html, /<button[^>]*class="btn ghost"[^>]*>Вернуться к подключениям<\/button>/);
+  assert.ok(html.indexOf(helpTexts.backToConnections) > html.indexOf(helpTexts.troubleTitle), "at the bottom");
+  // The view passes onBack to the crumbs and to the bottom button as it is.
   const src = read("pages/AppleCalendarHelpPage.tsx");
   assert.match(src, /<Breadcrumbs items=\{\[\{ label: helpTexts\.parentCrumb, onClick: props\.onBack \}, \{ label: helpTexts\.crumb \}\]\} \/>/);
+  assert.match(src, /<Button variant="ghost" onClick=\{props\.onBack\}>\s*\{helpTexts\.backToConnections\}/);
   assert.match(src, /import \{ Breadcrumbs \} from "\.\.\/ui\/Breadcrumbs\.js"/);
-  assert.equal((src.match(/props\.onBack/g) ?? []).length, 2, "passed down once, used once");
+  assert.equal((src.match(/props\.onBack/g) ?? []).length, 3, "passed down once, used twice");
   // The crumbs render the same two levels in the section pages' shape.
   const crumbs = renderToStaticMarkup(
     h(Breadcrumbs, { items: [{ label: overviewTexts.title, onClick: () => {} }, { label: sectionCrumbs.mail }] }),

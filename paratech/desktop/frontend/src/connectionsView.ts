@@ -12,6 +12,8 @@ import type {
 } from "./bindings/connections";
 import type { CalendarSyncState } from "./bindings/calendar";
 import type { GoogleState } from "./bindings/google";
+// The .js extension lets the Node test runner load the compiled module.
+import { googleTexts } from "./googleView.js";
 import type { IconName } from "./ui/Icon.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 
@@ -90,6 +92,19 @@ export function hubAddressOpen(s: {
     s.errors.length > 0 ||
     !addressNeutralQuota.includes(s.quotaStatus)
   );
+}
+
+/**
+ * The manual choice after the browser's toggle event. The event also fires when the block opens or closes by itself
+ * (the computed state changed), and that is not a choice: only a state that differs from the computed one is.
+ */
+export function nextChosen(open: boolean, computed: boolean, current: boolean | null): boolean | null {
+  return open === computed ? current : open;
+}
+
+/** The saved address shown next to the folded «Адрес сервера»; "" when none is saved (nothing to show). */
+export function savedAddressNote(savedUrl: string): string {
+  return savedUrl.trim();
 }
 
 /**
@@ -318,20 +333,24 @@ export interface CardStatus {
 export const overviewTexts = {
   title: "Подключения",
   hubTitle: "Конспекты и задания",
-  // One line for the section: who gives the key, what it is not, and what leaves the computer.
+  // One line for the section: what the key is not and what leaves the computer. Who gives the key and the address is
+  // said by the setup hint while either is missing, so it is not repeated here.
   hubHint:
-    "Ключ доступа и адрес сервера выдаёт автор приложения. Это не ключ Claude или ChatGPT. Звук не отправляется: расшифровка идёт на этом компьютере, на сервер уходит только текст.",
+    "Это не ключ Claude или ChatGPT. Звук не отправляется: расшифровка идёт на этом компьютере, на сервер уходит только текст.",
   hubDesc: "Ключ, адрес сервера и лимит обработки",
   mailTitle: "Почта",
   mailDesc: "Отправка заданий письмом",
   googleDesc: "Вход и синхронизация расписания",
 } as const;
 
-/** The last crumb of a section page, after «Подключения» (the Apple help names itself in appleHelpView). */
+/**
+ * The last crumb of a section page, after «Подключения»: the name of its card, which is also its heading (the Apple
+ * help names itself in appleHelpView).
+ */
 export const sectionCrumbs: Readonly<Record<Exclude<ConnSection, "apple">, string>> = {
   hub: overviewTexts.hubTitle,
   mail: overviewTexts.mailTitle,
-  google: "Google",
+  google: googleTexts.title,
 };
 
 const status = (kind: ChipKind, text: string): CardStatus => ({

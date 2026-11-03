@@ -56,6 +56,7 @@ html, body, #root { height: 100%; }
 .conn-adv { margin-top: 8px; }
 .conn-adv > summary { display: flex; align-items: center; gap: 6px; min-height: 32px; cursor: pointer; list-style: none; font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 500; color: var(--text); border-radius: var(--r-md); }
 .conn-adv > summary::-webkit-details-marker { display: none; }
+.conn-adv-saved { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; color: var(--muted); }
 .conn-adv > summary .i { width: 16px; height: 16px; flex: none; color: var(--muted); transition: transform .12s; }
 .conn-adv[open] > summary .i { transform: rotate(90deg); }
 .conn-adv[open] > summary { margin-bottom: 8px; }
