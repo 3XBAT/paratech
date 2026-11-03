@@ -175,6 +175,47 @@ func TestAgentReplyDraft(t *testing.T) {
 	}
 }
 
+// A reply whose Hub call failed uncut (a timeout) ends failed: the text still waiting is shown before the update of the
+// stopped request, so the panel holds all the Hub delivered. A request cut before (a «Стоп» update) and a dropped end
+// still show nothing that waited.
+func TestAgentReplyDraftFailedEnd(t *testing.T) {
+	replying := func(text string) AgentDraft {
+		return AgentDraft{Thread: "th1", Turn: 1, CallID: "step:reply", Texts: []string{text}, Reply: true}
+	}
+	replyEnd := func(end AgentDraftEnd) AgentDraft {
+		return AgentDraft{Thread: "th1", Turn: 1, CallID: "step:reply", End: end, Reply: true}
+	}
+	offline := AgentUpdate{Thread: "th1", Turn: 1, Status: "STOPPED", StopReason: values.StopOffline,
+		Cards: []values.Card{values.StoppedCard{Reason: values.StopOffline}}}
+	stopped := AgentUpdate{Thread: "th1", Turn: 1, Status: "STOPPED", StopReason: values.StopUser,
+		Cards: []values.Card{values.StoppedCard{Reason: values.StopUser}}}
+
+	tests := []struct {
+		name  string
+		after func(p *AgentPanel)
+		want  []string
+	}{
+		{"failed", func(p *AgentPanel) { p.Draft(replyEnd(AgentDraftFailed)); p.Publish(offline) },
+			[]string{"нача|", "начало ответа|", "update"}},
+		{"stop before the end", func(p *AgentPanel) { p.Publish(stopped); p.Draft(replyEnd(AgentDraftFailed)) },
+			[]string{"нача|", "update"}},
+		{"dropped", func(p *AgentPanel) { p.Draft(replyEnd(AgentDraftDropped)); p.Publish(stopped) },
+			[]string{"нача|", "update"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, em, clock := draftPanel(t)
+			p.Draft(replying("нача"))
+			p.Draft(replying("начало ответа")) // waits for the timer
+			tt.after(p)
+			clock.advance(time.Second)
+			if got := shown(t, em); !slices.Equal(got, tt.want) {
+				t.Fatalf("shown %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // The progress update of a stopped request lifts the cut for the reply draft only: a late answer draft of the stopped
 // step stays dropped, before and after the progress update, while the reply of the continued request shows. An update
 // of the running request then lets answer drafts through again.

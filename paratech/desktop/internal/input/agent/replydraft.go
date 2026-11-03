@@ -105,20 +105,28 @@ func (d *stepDraft) Text(soFar string) {
 }
 
 // End closes the draft once the Hub call returned: answered when the step goes on with its reply (the update follows),
-// else dropped. A cut draft stays dropped.
+// failed when the call failed while its ctx lived, so what the Hub delivered stays. A cut draft (a stored «Стоп»)
+// stays dropped, and so does one whose ctx ended.
 func (d *stepDraft) End(answered bool) {
-	d.end(answered && d.ctx.Err() == nil)
+	end := DraftFailed
+	switch {
+	case d.ctx.Err() != nil:
+		end = DraftDropped
+	case answered:
+		end = DraftAnswered
+	}
+	d.end(end)
 	d.cancel()
 	d.forget()
 }
 
 func (d *stepDraft) cut() {
-	d.end(false)
+	d.end(DraftDropped)
 	d.cancel()
 }
 
 // end tells the sink how the draft ended, once, and only when a draft was passed.
-func (d *stepDraft) end(answered bool) {
+func (d *stepDraft) end(how DraftEnd) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.done {
@@ -129,9 +137,6 @@ func (d *stepDraft) end(answered bool) {
 		return
 	}
 	out := d.base
-	out.End = DraftDropped
-	if answered {
-		out.End = DraftAnswered
-	}
+	out.End = how
 	d.sink.Draft(out)
 }

@@ -30,6 +30,12 @@ const (
 	// Hub's reask inside the same call outlast DefaultRequestTimeout.
 	DefaultAnswerTimeout = 5 * time.Minute
 
+	// A streamed agent step: the Hub sends only reply text (no keepalive) and ends its provider call within
+	// HUB_LLM_TIMEOUT (5 min by default, half the 10 min reservation TTL), so 10 min never cuts a step the Hub still
+	// runs; 60 s without a message after the first one is a stalled stream (a planner step writes far faster).
+	DefaultStepTimeout     = 10 * time.Minute
+	DefaultStepIdleTimeout = time.Minute
+
 	// maxResponseBytes bounds one answer: 1 MiB of output is far above any operation, plus envelope headroom.
 	maxResponseBytes = 2 << 20
 
@@ -78,7 +84,17 @@ type Config struct {
 	// AnswerTimeout bounds one AnswerQuestion call; default the longer of DefaultAnswerTimeout and RequestTimeout.
 	AnswerTimeout time.Duration
 
-	// HTTPClient replaces the default transport (tests). The client copies it and always refuses redirects.
+	// StepTimeout bounds one streamed agent step (AgentStepStream); default the longer of DefaultStepTimeout and
+	// RequestTimeout. The unary AgentStep of an older Hub keeps RequestTimeout.
+	StepTimeout time.Duration
+
+	// StepIdleTimeout bounds the wait between two messages of a streamed agent step once the first came, at most
+	// StepTimeout; default DefaultStepIdleTimeout. The first message may take RequestTimeout: a step that only calls
+	// tools streams nothing before its result.
+	StepIdleTimeout time.Duration
+
+	// HTTPClient replaces the default transport (tests). The client copies it and always refuses redirects. A Timeout
+	// set on it is kept and caps every call, a stream too.
 	HTTPClient *http.Client
 }
 
@@ -90,6 +106,8 @@ type Client struct {
 	credName string
 	timeout  time.Duration
 	answerTO time.Duration // the timeout of AnswerQuestion
+	stepTO   time.Duration // the cap of a streamed agent step
+	stepIdle time.Duration // the longest silence of a streamed agent step after its first message
 
 	// noStepStream is set once the Hub answered AgentStepStream with unimplemented: later steps go straight to
 	// AgentStep for the life of the process instead of paying a refused round trip each time.
@@ -117,11 +135,14 @@ func New(cfg Config, creds Credentials) (*Client, error) {
 		}
 		urls = fixedURL(base)
 	}
-	if cfg.RequestTimeout < 0 || cfg.AnswerTimeout < 0 {
+	if cfg.RequestTimeout < 0 || cfg.AnswerTimeout < 0 || cfg.StepTimeout < 0 || cfg.StepIdleTimeout < 0 {
 		return nil, fmt.Errorf("%s: %w: negative request timeout", opNew, ErrInvalidConfig)
 	}
 
-	c := &Client{urls: urls, creds: creds, credName: cfg.CredentialName, timeout: cfg.RequestTimeout, answerTO: cfg.AnswerTimeout}
+	c := &Client{
+		urls: urls, creds: creds, credName: cfg.CredentialName, timeout: cfg.RequestTimeout, answerTO: cfg.AnswerTimeout,
+		stepTO: cfg.StepTimeout, stepIdle: cfg.StepIdleTimeout,
+	}
 	if c.credName == "" {
 		c.credName = DefaultCredentialName
 	}
@@ -131,8 +152,17 @@ func New(cfg Config, creds Credentials) (*Client, error) {
 	if c.answerTO == 0 {
 		c.answerTO = max(DefaultAnswerTimeout, c.timeout)
 	}
+	if c.stepTO == 0 {
+		c.stepTO = max(DefaultStepTimeout, c.timeout)
+	}
+	if c.stepIdle == 0 {
+		c.stepIdle = min(DefaultStepIdleTimeout, c.stepTO)
+	}
+	if c.stepIdle > c.stepTO {
+		return nil, fmt.Errorf("%s: %w: step idle timeout above the step timeout", opNew, ErrInvalidConfig)
+	}
 	// The backstop of the shared http.Client must not cut the longest call; each call still has its own deadline.
-	c.http = httpClientFor(cfg.HTTPClient, max(c.timeout, c.answerTO))
+	c.http = httpClientFor(cfg.HTTPClient, max(c.timeout, c.answerTO, c.stepTO))
 	return c, nil
 }
 
@@ -308,7 +338,8 @@ func isLoopback(host string) bool {
 }
 
 // httpClientFor copies base (or builds a default client) and refuses redirects, so the Authorization header never
-// follows one. Timeout is a backstop; each call has its own context deadline.
+// follows one. Timeout is a backstop; each call has its own context deadline. A Timeout of base is kept: it bounds the
+// whole call, the read of a stream included.
 func httpClientFor(base *http.Client, timeout time.Duration) *http.Client {
 	var c http.Client
 	if base != nil {

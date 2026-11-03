@@ -603,9 +603,9 @@ export function AgentPanel(props: {
   const offerNav = props.offerNav;
   const actionsFor = useCallback((e: Entry): CardActions => {
     const ref = { threadId: e.threadId, turn: e.turn };
-    const named = e.threadId !== "";
-    // A request the core has not named yet has no buttons of its own: one refused as busy stops the running request
-    // that blocks it, or is sent again.
+    // A request that is not answered yet has no buttons of its own: one refused as busy stops the running request
+    // that blocks it, or is sent again; one waiting behind a running request of its chat can stop that one.
+    const named = e.threadId !== "" && e.update !== null;
     const blocking = named ? undefined : blockingEntry(state.entries, e);
     // Buttons are off while a call runs; the refused request's «Стоп» is guarded on the blocker, so it shows that mark.
     const busy = named ? pressed.current.busy(e.key, e.update) : blocking ? pressed.current.busy(blocking.key, blocking.update) : false;
