@@ -1,19 +1,16 @@
 /* App shell: a side rail on the window background, the section on a sheet (docs/design/brief.md section 5). */
 html, body, #root { height: 100%; }
-.shell { container: app / inline-size; display: grid; grid-template-columns: 72px minmax(0, 1fr); height: 100%; padding-top: 8px; }
-/* The rail (TASK-348, docs/design/concept-agent.html): 72px wide, the icon with its name under it. The label is nowrap and
-   small, so «Расписание» fits the 68px button; what would not fit ends in «…», never wraps. */
-.rail { position: relative; z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 0; padding: 4px 2px 12px; }
+.shell { container: app / inline-size; display: grid; grid-template-columns: 64px minmax(0, 1fr); height: 100%; padding-top: 8px; }
+/* Icon-only rail (owner 2026-11-03, docs/design/concept-agent.html): 40px targets, the name is a tooltip to the right
+   (on hover and on keyboard focus) and the button's aria-label. */
+.rail { position: relative; z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 0; padding: 4px 8px 12px; }
 .rail button {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  width: 100%;
-  min-height: 48px;
-  padding: 6px 0 5px;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
   border: 0;
   border-radius: var(--r-md);
   background: none;
@@ -21,14 +18,14 @@ html, body, #root { height: 100%; }
   cursor: pointer;
 }
 .rail button:hover { background: var(--fill); color: var(--text); }
-/* The button fills the rail, so an outer ring would be cut at the window edge: it is drawn inside. */
+/* The ring is drawn inside the button, as in TASK-348, so it is never cut at the window edge. */
 .rail button:focus-visible { outline-offset: -2px; }
 .rail button[aria-current="page"] { background: var(--panel); color: var(--accent); box-shadow: 0 0 0 1px var(--edge); }
-.rail button[aria-current="page"]::before { content: ""; position: absolute; top: 10px; bottom: 10px; left: -2px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent-fill); }
-.rail .i { width: 20px; height: 20px; flex: none; }
+.rail button[aria-current="page"]::before { content: ""; position: absolute; top: 10px; bottom: 10px; left: -8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent-fill); }
+.rail .i { width: 20px; height: 20px; }
 .rail .low { margin-top: auto; }
-/* 11px, not the 11.5px nav token (shared with the popup): «Расписание» must fit 68px; if it still does not, it ends in «…». */
-.rail-label { max-width: 100%; overflow: hidden; font-size: 11px; letter-spacing: -0.01em; line-height: var(--lh-nav); font-weight: 500; white-space: nowrap; text-overflow: ellipsis; text-align: center; }
+.rail .tip { position: absolute; left: calc(100% + 8px); top: 50%; transform: translate(-4px, -50%); padding: 4px 8px; border-radius: var(--r-sm); background: var(--prim); color: var(--on-prim); font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 500; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity var(--t-fast), transform var(--t-fast); box-shadow: var(--sh-pop); }
+.rail button:hover .tip, .rail button:focus-visible .tip { opacity: 1; transform: translate(0, -50%); }
 .sheet { min-width: 0; min-height: 0; overflow: auto; padding: 24px 32px; border-top: 1px solid var(--edge); border-left: 1px solid var(--edge); border-top-left-radius: var(--r-xl); background: var(--panel); }
 .screen { display: flex; flex-direction: column; min-height: 100%; animation: screen-in var(--t-mid) var(--ease); }
 @keyframes screen-in { from { opacity: 0; transform: translateY(4px); } }
@@ -40,6 +37,9 @@ html, body, #root { height: 100%; }
 }
 @media (forced-colors: active) {
   .rail button[aria-current="page"] { outline: 2px solid Highlight; outline-offset: -2px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail .tip { transition: none; }
 }
 
 /* «Настройки» (TASK-224, concept-agent.html «snav»): one head, the menu on the left, the section on the right. The
@@ -127,6 +127,11 @@ html, body, #root { height: 100%; }
 .tree .ti.sem { height: 24px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .tree .lv1 .ti { padding-left: 20px; }
 .tree .lv2 .ti { padding-left: 34px; }
+/* The toggle of one subject is laid over the chevron of its row (28px tall like the row), so expanding and opening are two
+   separate clicks. */
+.tree .lv1 > li { position: relative; }
+.tree .tog { position: absolute; top: 0; left: 14px; width: 26px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; cursor: pointer; }
+.tree .tog:hover { background: var(--fill); }
 .tree button.ti.fold { cursor: pointer; }
 .tree .lv0 > li + li { margin-top: 8px; }
 /* «Входящие» (TASK-341) is the first item and stays when empty, only quiet. A subject takes a dragged file of «Входящие»:
@@ -778,10 +783,10 @@ p.hw-donedate { margin: 0 0 12px; }
 
 /* The toast: one at a time at the bottom of the content column (ui/Toast.tsx). The host is the live region; it takes no
    clicks itself, only the toast does. It is fixed inside .shell (a size container, so it is the containing block): the
-   rail (72px) is on the left and the agent panel (--ag-w of the shell, 0 when closed) on the right, so the toast never
+   rail (64px) is on the left and the agent panel (--ag-w of the shell, 0 when closed) on the right, so the toast never
    covers the request field of the panel. It is the inverse surface (--prim on --on-prim, 4.5:1 in both themes), so it
    stands out from the cards; no new accent colour. */
-.toast-host { position: fixed; left: 72px; right: var(--ag-w, 0px); bottom: 24px; z-index: 30; display: flex; justify-content: center; padding: 0 16px; pointer-events: none; }
+.toast-host { position: fixed; left: 64px; right: var(--ag-w, 0px); bottom: 24px; z-index: 30; display: flex; justify-content: center; padding: 0 16px; pointer-events: none; }
 .toast { display: flex; align-items: center; gap: 8px; max-width: min(520px, 100%); padding: 6px 6px 6px 16px; border-radius: var(--r-lg); background: var(--prim); color: var(--on-prim); box-shadow: var(--sh-pop); pointer-events: auto; animation: toast-in var(--t-mid) var(--ease); }
 .toast-text { min-width: 0; overflow-wrap: anywhere; }
 .toast-act, .toast-x { flex: none; display: inline-flex; align-items: center; justify-content: center; min-height: var(--h-sm); border: 0; border-radius: var(--r-md, 8px); background: none; color: inherit; font: inherit; cursor: pointer; }

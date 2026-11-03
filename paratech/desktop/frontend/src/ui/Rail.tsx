@@ -2,8 +2,8 @@ import { bottomGroupStart, type PageId, rail, railItemOf } from "../nav.js";
 import { Icon } from "./Icon.js";
 
 /**
- * The side rail: the icon with the name under it (TASK-348). The name is visible text, so there is no tooltip; the button
- * keeps the name as its aria-label.
+ * The side rail: icons only (owner requirement). The name is a tooltip to the right (on hover and on keyboard focus) and
+ * the button's aria-label; no visible text sits under the icon.
  */
 export function Rail(props: { current: PageId; onOpen: (id: PageId) => void }) {
   const here = railItemOf(props.current).id;
@@ -19,7 +19,7 @@ export function Rail(props: { current: PageId; onOpen: (id: PageId) => void }) {
           onClick={() => props.onOpen(item.id)}
         >
           <Icon name={item.icon} />
-          <span className="rail-label" aria-hidden="true">
+          <span className="tip" aria-hidden="true">
             {item.label}
           </span>
         </button>

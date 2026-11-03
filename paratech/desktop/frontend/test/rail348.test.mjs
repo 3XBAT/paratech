@@ -1,4 +1,4 @@
-// TASK-348: the rail with labels, «Записи» as a section, «Записать пару» on «Сегодня».
+// TASK-348: the rail (icons only again since 2026-11-03), «Записи» as a section, «Записать пару» on «Сегодня».
 // Pure view logic on the compiled modules; the pages have no DOM harness, so their wiring is checked in the source text.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -30,20 +30,21 @@ const running = (over = {}) => ({
 
 // ---- the rail ----
 
-test("the rail is 72 px wide everywhere the width is assumed", () => {
-  assert.match(src("styles.css"), /\.shell \{[^}]*grid-template-columns: 72px minmax\(0, 1fr\)/);
-  assert.match(src("agent/agent.css"), /\.shell\.with-agent \{[^}]*grid-template-columns: 72px minmax\(0, 1fr\) var\(--ag-w, 340px\)/);
-  assert.match(src("styles.css"), /\.toast-host \{[^}]*left: 72px/);
-  assert.equal(reservedWidth, 72 + 420);
-  assert.doesNotMatch(src("styles.css"), /grid-template-columns: 64px/);
+test("the rail is icons only, 64 px wide everywhere the width is assumed", () => {
+  assert.match(src("styles.css"), /\.shell \{[^}]*grid-template-columns: 64px minmax\(0, 1fr\)/);
+  assert.match(src("agent/agent.css"), /\.shell\.with-agent \{[^}]*grid-template-columns: 64px minmax\(0, 1fr\) var\(--ag-w, 340px\)/);
+  assert.match(src("styles.css"), /\.toast-host \{[^}]*left: 64px/);
+  assert.equal(reservedWidth, 64 + 420);
+  assert.doesNotMatch(src("styles.css"), /grid-template-columns: 72px/);
 });
 
-test("the rail label is small, one line, and cannot overflow the button; the tooltip rules are gone", () => {
+test("the rail has no visible label; the name is a tooltip on hover and on keyboard focus", () => {
   const css = src("styles.css");
-  // 11px (not the 11.5px token of the popup) with a tighter track; what still does not fit ends in «…».
-  assert.match(css, /\.rail-label \{[^}]*font-size: 11px[^}]*letter-spacing: -0\.01em[^}]*white-space: nowrap[^}]*text-overflow: ellipsis/);
-  assert.match(css, /\.rail-label \{[^}]*max-width: 100%[^}]*overflow: hidden/);
-  assert.doesNotMatch(css, /\.rail \.tip|\.rail button:hover \.tip/);
+  assert.doesNotMatch(css, /\.rail-label/);
+  assert.doesNotMatch(src("ui/Rail.tsx"), /rail-label/);
+  assert.match(css, /\.rail button \{[^}]*width: 40px[^}]*height: 40px/);
+  assert.match(css, /\.rail \.tip \{[^}]*position: absolute[^}]*left: calc\(100% \+ 8px\)[^}]*opacity: 0[^}]*pointer-events: none/);
+  assert.match(css, /\.rail button:hover \.tip, \.rail button:focus-visible \.tip \{ opacity: 1;/);
   // Keyboard focus, the current item and the high-contrast outline stay as before.
   assert.match(css, /\.rail button\[aria-current="page"\] \{/);
   assert.match(css, /@media \(forced-colors: active\) \{\s*\.rail button\[aria-current="page"\] \{ outline: 2px solid Highlight; outline-offset: -2px; \}/);
