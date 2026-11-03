@@ -29,10 +29,10 @@ test("width is clamped to the minimum and to what leaves the main screen room", 
   assert.equal(dragPref(closed, 0, vp).width, maxWidth(vp));
   assert.equal(maxWidth(5000), maxWidthLimit);
   assert.equal(maxWidth(700), minWidth);
-  // The rail is 72 px wide since TASK-348 (was 64), so the reserved width and the clamps move by 8.
-  assert.equal(maxWidth(1000), 1000 - 72 - 420);
+  // The rail is icons-only and 64 px wide, so the reserved width is 64 + 420.
+  assert.equal(maxWidth(1000), 1000 - 64 - 420);
   assert.equal(clampWidth(NaN, vp), defaultWidth);
-  assert.equal(effectiveWidth({ open: true, width: 600 }, 900), 408);
+  assert.equal(effectiveWidth({ open: true, width: 600 }, 900), 416);
   assert.equal(effectiveWidth(open, vp), 340);
 });
 
@@ -40,7 +40,7 @@ test("a temporarily narrow window narrows only the drawn width, the stored one s
   const s = memory();
   const pref = { open: true, width: 600 };
   writePref(s, pref);
-  assert.equal(effectiveWidth(pref, 900), 408);
+  assert.equal(effectiveWidth(pref, 900), 416);
   assert.equal(effectiveWidth(pref, 700), minWidth);
   assert.deepEqual(readPref(s, 700), pref);
   assert.equal(effectiveWidth(readPref(s, 700), 1400), 600);

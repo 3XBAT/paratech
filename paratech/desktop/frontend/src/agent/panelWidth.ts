@@ -6,8 +6,8 @@ export const minWidth = 260;
 export const maxWidthLimit = 640;
 /** A drag that leaves the panel narrower than this closes it (and a closed panel opens only past it). */
 export const closeBelow = 180;
-/** The rail (72 px) plus the narrowest main screen that still reads well. */
-export const reservedWidth = 72 + 420;
+/** The rail (64 px) plus the narrowest main screen that still reads well. */
+export const reservedWidth = 64 + 420;
 export const keyStep = 16;
 
 export const widthKey = "ui.agentWidth";

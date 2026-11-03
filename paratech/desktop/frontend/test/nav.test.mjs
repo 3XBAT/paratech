@@ -18,7 +18,7 @@ import {
 } from "../.test-build/nav.js";
 import { Rail } from "../.test-build/ui/Rail.js";
 
-// TASK-348: «Записи» is a section of its own; the rail has seven items with the label under the icon.
+// TASK-348: «Записи» is a section of its own; the rail has seven icon-only items.
 test("the rail has seven items in order: five on top, «Журнал» and «Настройки» below", () => {
   assert.deepEqual(
     rail.map((r) => r.label),
@@ -65,15 +65,17 @@ test("an unknown page falls back to the default", () => {
   assert.equal(routeToPage("journal").page, "journal");
 });
 
-test("the rail shows the icon with the name under it as visible text, and marks the current item", () => {
+test("the rail shows icons only: the name is a tooltip and the aria-label, never visible text; marks the current item", () => {
   const out = renderToStaticMarkup(h(Rail, { current: "models", onOpen: () => undefined }));
   assert.equal((out.match(/<button/g) ?? []).length, 7);
   for (const label of ["Сегодня", "Записи", "Предметы", "Задания", "Расписание", "Журнал", "Настройки"]) {
     assert.match(out, new RegExp(`aria-label="${label}"`));
-    assert.match(out, new RegExp(`<span class="rail-label" aria-hidden="true">${label}</span>`));
+    // The tooltip holds the name; it is hidden from the accessibility tree (the button is named by aria-label).
+    assert.match(out, new RegExp(`<span class="tip" aria-hidden="true">${label}</span>`));
   }
-  // The label is text now, the hover tooltip is gone.
-  assert.doesNotMatch(out, /class="tip"/);
+  assert.equal((out.match(/class="tip"/g) ?? []).length, 7, "one tooltip per item");
+  // No visible label under the icon.
+  assert.doesNotMatch(out, /rail-label/);
   // A screen inside Настройки keeps the Настройки item current, and only that one.
   assert.equal((out.match(/aria-current="page"/g) ?? []).length, 1);
   assert.match(out, /aria-label="Настройки" aria-current="page"/);
