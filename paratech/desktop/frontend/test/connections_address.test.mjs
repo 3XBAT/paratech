@@ -71,7 +71,7 @@ test("the setup hint: consequence first, then the action, and where the address 
 });
 
 test("the Hub texts: one description line, the key and the address come from the app author", () => {
-  assert.equal(overviewTexts.hubDesc, "Ключ доступа, адрес сервера и лимит обработки");
+  assert.equal(overviewTexts.hubDesc, "Ключ, адрес сервера и лимит обработки");
   assert.match(overviewTexts.hubHint, /^Ключ доступа и адрес сервера выдаёт автор приложения\. Это не ключ Claude или ChatGPT\./);
   assert.match(overviewTexts.hubHint, /Звук не отправляется/);
   assert.equal([...overviewTexts.hubHint.matchAll(/расшифровк/gi)].length, 1);

@@ -323,7 +323,7 @@ export const overviewTexts = {
   // One line for the section: who gives the key, what it is not, and what leaves the computer.
   hubHint:
     "Ключ доступа и адрес сервера выдаёт автор приложения. Это не ключ Claude или ChatGPT. Звук не отправляется: расшифровка идёт на этом компьютере, на сервер уходит только текст.",
-  hubDesc: "Ключ доступа, адрес сервера и лимит обработки",
+  hubDesc: "Ключ, адрес сервера и лимит обработки",
   mailTitle: "Почта",
   mailDesc: "Отправка заданий письмом",
   googleDesc: "Вход и синхронизация расписания",

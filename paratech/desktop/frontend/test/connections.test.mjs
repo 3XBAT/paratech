@@ -475,7 +475,7 @@ test("every card chip pairs its colour with a word and an icon where it warns", 
     assert.equal(s.icon === null, s.kind === "neutral", s.text);
   }
   for (const d of [overviewTexts.hubDesc, overviewTexts.mailDesc, overviewTexts.googleDesc]) {
-    assert.ok(d.length <= 48,`${d}: one line in a card`);
+    assert.ok(d.length <= 40, `${d}: one line in a card`);
   }
 });
 
