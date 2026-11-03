@@ -158,7 +158,7 @@ const overviewLesson = (recordingId, status, summaryNew = false) => ({ recording
 test("lessonMarks: a chip only for «в обработке» and «не обработано» (what the ready marks cannot say), «новое» from summaryNew, joined by recordingId", () => {
   const chips = Object.fromEntries(["recorded", "transcribed", "summaryReady", "failed"].map((s) => [s, lessonChip(s)]));
   assert.deepEqual([chips.recorded.label, chips.recorded.kind], ["В обработке", "neutral"]);
-  assert.deepEqual([chips.failed.label, chips.failed.kind], ["Не обработано", "fail"]);
+  assert.deepEqual([chips.failed.label, chips.failed.kind], ["Сбой обработки", "fail"]);
   assert.equal(chips.transcribed, null, "«✓ Конспект» and the like say it: no second word for the same fact");
   assert.equal(chips.summaryReady, null);
   const marks = lessonMarks([
@@ -169,7 +169,7 @@ test("lessonMarks: a chip only for «в обработке» and «не обра
     overviewLesson("", "recorded"),
   ]);
   assert.deepEqual([...marks.keys()], ["r1", "r2", "r4"], "no recording, or nothing to say: no mark");
-  assert.deepEqual([marks.get("r1").chip.label, marks.get("r1").fresh], ["Не обработано", false]);
+  assert.deepEqual([marks.get("r1").chip.label, marks.get("r1").fresh], ["Сбой обработки", false]);
   assert.deepEqual([marks.get("r2").chip, marks.get("r2").fresh], [null, true], "«новое» stays without a chip");
   assert.equal(marks.get("r4").chip.label, "В обработке");
   assert.equal(marks.get("r9"), undefined);
@@ -193,12 +193,12 @@ test("the rows of «Пары» carry the chip and «новое» of their record
   const out = html(pairsProps(ready(lessons), { marks }));
   const rows = out.match(/<button[^>]*class="kb-item"[^>]*>[^]*?<\/button>/g) ?? [];
   assert.equal(rows.length, 6);
-  assert.match(rows[0], /<span class="chip s-fail"[^>]*><svg[^>]*>[^]*?<\/svg><span class="chip-text">Не обработано<\/span>/);
+  assert.match(rows[0], /<span class="chip s-fail"[^>]*><svg[^>]*>[^]*?<\/svg><span class="chip-text">Сбой обработки<\/span>/);
   assert.doesNotMatch(rows[0], /class="fresh"/);
   assert.match(rows[1], /<span class="fresh">новое<\/span>/);
   assert.doesNotMatch(rows[1], /chip|Конспект готов/, "a ready summary has no chip: «новое» only");
   assert.doesNotMatch(rows[2], /class="chip|class="fresh"|kb-line/, "older than the overview's latest: no chip");
-  assert.doesNotMatch(rows[3], /Не обработано|В обработке|kb-line/);
+  assert.doesNotMatch(rows[3], /Сбой обработки|В обработке|kb-line/);
   assert.match(rows[4], /chip s-neutral[^>]*>[^]*?В обработке/, "in the work: a quiet chip");
   assert.doesNotMatch(rows[5], /class="chip|kb-line/, "transcribed: nothing to add");
   for (const r of [rows[0], rows[1], rows[4]]) {
@@ -206,7 +206,7 @@ test("the rows of «Пары» carry the chip and «новое» of their record
     assert.doesNotMatch(r, /<(div|p|h[1-6]|ul|li)[\s>]/, "phrasing content only inside a button");
   }
   // Without marks the list is what it was.
-  assert.doesNotMatch(html(pairsProps(ready(lessons))), /kb-line|В обработке|Не обработано/);
+  assert.doesNotMatch(html(pairsProps(ready(lessons))), /kb-line|В обработке|Сбой обработки/);
 });
 
 test("LessonList without `extra` keeps its markup (the knowledge base page is unchanged)", () => {

@@ -121,7 +121,7 @@ export interface LessonChip {
 // transcribed or summarised lesson has no chip (the «✓ Конспект»-style marks of the row say it).
 const lessonChips: Readonly<Partial<Record<LessonStatus, LessonChip>>> = {
   recorded: { kind: "neutral", icon: "clock", label: "В обработке" },
-  failed: { kind: "fail", icon: "warn", label: "Не обработано" },
+  failed: { kind: "fail", icon: "warn", label: "Сбой обработки" },
 };
 
 /** The chip of a lesson status; null when the row has nothing to add to its ready marks. */
