@@ -39,6 +39,8 @@
   --sh-win: 0 1px 2px rgba(20, 20, 24, .05), 0 18px 44px -22px rgba(20, 20, 24, .28);
   --sh-pop: 0 0 0 1px rgba(20, 20, 24, .08), 0 12px 32px -12px rgba(20, 20, 24, .30);
   --scrim: rgba(20, 20, 24, .35); /* behind a modal dialog */
+  --scroll: #A4A49E; /* scrollbar thumb (ui/scrollbar.css) */
+  --scroll-hover: #7A7D83;
   color-scheme: light;
 
   /* Type scale, base 14px: size / line height. */
@@ -132,6 +134,8 @@
     --sh-win: 0 1px 2px rgba(0, 0, 0, .4), 0 22px 48px -24px rgba(0, 0, 0, .85);
     --sh-pop: 0 0 0 1px rgba(255, 255, 255, .06), 0 14px 36px -12px rgba(0, 0, 0, .8);
     --scrim: rgba(0, 0, 0, .55);
+    --scroll: #595C63;
+    --scroll-hover: #70747C;
     color-scheme: dark;
   }
 }
@@ -173,5 +177,7 @@
   --sh-win: 0 1px 2px rgba(0, 0, 0, .4), 0 22px 48px -24px rgba(0, 0, 0, .85);
   --sh-pop: 0 0 0 1px rgba(255, 255, 255, .06), 0 14px 36px -12px rgba(0, 0, 0, .8);
   --scrim: rgba(0, 0, 0, .55);
+  --scroll: #595C63;
+  --scroll-hover: #70747C;
   color-scheme: dark;
 }

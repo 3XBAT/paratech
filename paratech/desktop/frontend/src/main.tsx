@@ -6,6 +6,7 @@ import { initTheme } from "./ui/theme";
 import "./ui/fonts.css";
 import "./ui/tokens.css";
 import "./ui/base.css";
+import "./ui/scrollbar.css";
 import "./ui/components.css";
 import "./ui/accent.css";
 import "./sourcePicker/sourcePicker.css";

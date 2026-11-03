@@ -109,6 +109,16 @@ test("text and controls have enough contrast in both themes", () => {
   }
 });
 
+// TASK-363: the scrollbar thumb is a non-text control, visible at rest and clearer on hover/drag.
+test("the scrollbar thumb is visible on every surface in both themes", () => {
+  for (const theme of Object.keys(themes)) {
+    for (const surface of ["bg", "panel", "raised"]) {
+      check(theme, "scroll", surface, 2);
+      check(theme, "scroll-hover", surface, 3);
+    }
+  }
+});
+
 // TASK-100: the surfaces of both themes are the strict mockup's (docs/design/concept-strict.html, the token table).
 test("the surfaces, hairlines and shadows are the strict mockup's in light and dark", () => {
   const mockup = {
