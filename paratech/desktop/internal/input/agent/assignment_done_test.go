@@ -63,6 +63,29 @@ func TestMarkAssignmentsDone(t *testing.T) {
 	}
 }
 
+// A deleted assignment in the list is refused in its own row (unknown_id); the others are marked under one entry
+// whose RestoreDone covers only them.
+func TestMarkAssignmentsDoneWithADeletedOne(t *testing.T) {
+	w, ch := newWave10World(t)
+	w.assignments.deleted["a2"] = true
+	r, e := run10(t, w, req, call10(t, "c1", values.ToolMarkAssignmentsDone, `{"assignments":["a1","a2"],"done":true}`, actionpolicy.ClassU))
+	want := `{"changed":true,"done":true,"marks":[{"id":"a1","changed":true},{"id":"a2","changed":false,"refused":"unknown_id"}]}`
+	if r.out.Result.ResultJSON != want {
+		t.Fatalf("result = %s", r.out.Result.ResultJSON)
+	}
+	if ch.marks != 1 || !w.assignments.views["a1"].Done || w.assignments.views["a2"].Done {
+		t.Fatalf("MarkDone calls %d, views %+v", ch.marks, w.assignments.views)
+	}
+	comp, ok := e.Compensation.(action.RestoreDone)
+	if e.Status != action.StatusDone || !ok || len(w.store.order) != 1 {
+		t.Fatalf("entry = %+v, entries %d", e, len(w.store.order))
+	}
+	a1 := mustRef(t, values.KindAssignment, "a1")
+	if got := comp.Marks(); len(got) != 1 || got[0] != (action.DoneMark{Assignment: a1, WasDone: false, Version: 4}) {
+		t.Fatalf("marks = %+v, want a1 only", got)
+	}
+}
+
 // Undo is all or nothing: a change of any mark since, also of the one with the LOWER version, refuses it as
 // «Изменено после» and nothing is put back.
 func TestMarkAssignmentsDoneUndoOfAChangedMark(t *testing.T) {
