@@ -1,5 +1,6 @@
 /* Tickets screen (TASK-134). One accent; states are told by icon and word as well as colour. */
 .tk-pick { max-width: 360px; margin-bottom: 16px; }
+.tk-subject { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: 0; overflow-wrap: anywhere; }
 .tk-form { margin: 16px 0; max-width: 720px; }
 .tk-text { width: 100%; min-height: 120px; resize: vertical; font: inherit; }
 .tk-sets { display: grid; gap: 12px; margin-top: 16px; }

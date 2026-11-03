@@ -20,7 +20,7 @@ import {
 } from "../knowledgeView.js";
 import { importTexts } from "../recordingImportView.js";
 import { texts } from "../libraryView.js";
-import { exportItem, knowledgeEntryFor, type LessonMark, pairsSubject, pairsTexts, tabTexts } from "../subjectTabsView.js";
+import { exportItem, knowledgeEntryFor, type LessonMark, loadingDelayMs, pairsSubject, pairsTexts, tabTexts } from "../subjectTabsView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine, type ResultKind } from "../ui/controls.js";
 import { StatusChip } from "../ui/StatusChip.js";
@@ -28,6 +28,7 @@ import { RowMenu, type RowMenuItem } from "../ui/RowMenu.js";
 import { ErrorLine } from "./FileRows.js";
 import { AddPastNote, LessonList } from "./KnowledgeParts.js";
 import { RecordingImportPanel } from "./RecordingImportPanel.js";
+import { useAfterDelay } from "./useAfterDelay.js";
 
 // The tab «Пары» of the subject page (TASK-353): the lessons of the subject from the knowledge base. Titles and notes are
 // recorded, imported or typed text: text nodes only.
@@ -112,6 +113,9 @@ export function SubjectPairsTab(props: {
   // One form at a time: «Импортировать запись» or «Добавить конспект прошедшей пары».
   const [form, setForm] = useState<"none" | "import" | "past">("none");
   const importOpen = form === "import";
+  // The panel keeps the import and its result: while it works the forms do not switch (it would be unmounted).
+  const [importBusy, setImportBusy] = useState(false);
+  const slow = useAfterDelay(data.status === "loading", loadingDelayMs);
   const acting = useRef(false);
   const mounted = useRef(true);
   const importing = useMemo(() => recordingImportApi(callByName), []);
@@ -125,11 +129,12 @@ export function SubjectPairsTab(props: {
   }, []);
 
   if (data.status === "loading") {
-    return (
+    // A quick read (Back from a lesson) leaves no flash: the panel keeps its height, the text comes only if the wait is long.
+    return slow ? (
       <p className="muted small" role="status">
         {tabTexts.loading}
       </p>
-    );
+    ) : null;
   }
   if (data.status === "failed") {
     return <ErrorLine text={data.error} onRefresh={props.onRetry} onRetry={props.onRetry} />;
@@ -181,13 +186,21 @@ export function SubjectPairsTab(props: {
       {empty && <p className="muted">{pairsTexts.empty}</p>}
       <div className="tab-acts">
         {/* The accent only while there is nothing yet: with lessons the import is one way among others. */}
-        <Button variant={empty && !importOpen ? "primary" : undefined} icon="up" aria-expanded={importOpen} onClick={() => setForm(importOpen ? "none" : "import")}>
+        <Button
+          variant={empty && !importOpen ? "primary" : undefined}
+          icon="up"
+          aria-expanded={importOpen}
+          disabled={importBusy}
+          title={importBusy ? pairsTexts.importBusy : undefined}
+          onClick={() => setForm(importOpen ? "none" : "import")}
+        >
           {importTexts.open}
         </Button>
         <AddPastNote
           subject={kbSubject}
           lectures={data.lessons}
           open={form === "past"}
+          busyReason={importBusy ? pairsTexts.importBusy : undefined}
           onOpenChange={(o) => setForm(o ? "past" : "none")}
           onChoose={(c: PastChoice) => open(pastLesson(kbSubject, c))}
         />
@@ -199,6 +212,7 @@ export function SubjectPairsTab(props: {
           loadLessons={async () => (await today.today()).lessons}
           subject={subject.name}
           onImported={props.onImported}
+          onBusyChange={setImportBusy}
           onClose={() => setForm("none")}
         />
       )}
@@ -223,9 +237,11 @@ function lessonMarkView(m: LessonMark | undefined) {
   return (
     <>
       {m.fresh && <span className="fresh">{texts.fresh}</span>}
-      <StatusChip kind={m.chip.kind} icon={m.chip.icon}>
-        {m.chip.label}
-      </StatusChip>
+      {m.chip !== null && (
+        <StatusChip kind={m.chip.kind} icon={m.chip.icon}>
+          {m.chip.label}
+        </StatusChip>
+      )}
     </>
   );
 }

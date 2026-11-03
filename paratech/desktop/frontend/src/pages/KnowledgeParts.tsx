@@ -130,6 +130,8 @@ export function AddPastNote(props: {
   /** The page may own the open state (one form open at a time); without it the block keeps its own. */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Set while the page cannot switch forms (a running import): the button is off and says this. */
+  busyReason?: string;
 }) {
   const known = props.subject.subjectId !== "";
   const [ownOpen, setOwnOpen] = useState(false);
@@ -161,8 +163,8 @@ export function AddPastNote(props: {
       <Button
         icon="plus"
         aria-expanded={open}
-        disabled={!known}
-        disabledReason={known ? undefined : hint}
+        disabled={!known || props.busyReason !== undefined}
+        disabledReason={known ? props.busyReason : hint}
         onClick={() => setOpen(!open)}
       >
         {t.addPast}

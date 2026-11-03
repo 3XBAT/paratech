@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import type { AssignmentItem, HomeworkApi } from "../bindings/homework.js";
 import type { LibraryApi } from "../bindings/library.js";
 import { type OverviewState, texts } from "../libraryView.js";
-import { addTaskId, refocusAllowed, tabTexts, taskRowId, taskRows, tasksTexts } from "../subjectTabsView.js";
+import { addTaskId, loadingDelayMs, refocusAllowed, tabTexts, taskRowId, taskRows, tasksTexts } from "../subjectTabsView.js";
 import { Button } from "../ui/Button.js";
 import { Card } from "../ui/controls.js";
 import { StatusChip } from "../ui/StatusChip.js";
 import { ErrorLine } from "./FileRows.js";
 import { AddAssignmentDialog } from "./HomeworkDialogs.js";
+import { useAfterDelay } from "./useAfterDelay.js";
 
 // The tab «Задания» of the subject page (TASK-353): the open assignments of the subject in the order the core sent them.
 // Titles are the student's or the model's text: text nodes only (spans inside the row button, which holds phrasing only).
@@ -55,6 +56,9 @@ export function SubjectTasksTab(props: {
   const open = props.onOpenAssignment;
   const ready = state.status === "ready" && overview !== null;
   const rows = ready ? taskRows(overview.assignments) : [];
+  // A quick read (Back from a lesson) leaves no flash: the panel keeps its height, the text comes only if the wait is long.
+  const loading = !ready && state.status !== "failed";
+  const slow = useAfterDelay(loading, loadingDelayMs);
 
   return (
     <>
@@ -77,11 +81,12 @@ export function SubjectTasksTab(props: {
           }}
         />
       )}
-      {/* A failed re-read keeps the list shown; the new assignment may be missing from it, so the line says so. */}
-      {(state.status === "failed" || state.rereadFailed === true) && (
-        <ErrorLine text={tasksTexts.failed} onRefresh={props.onRetry} onRetry={props.onRetry} />
+      {state.status === "failed" && <ErrorLine text={tasksTexts.failed} onRefresh={props.onRetry} onRetry={props.onRetry} />}
+      {/* A failed re-read keeps the list shown; the new assignment may be missing from it, so the line says that, not "failed to load". */}
+      {state.status !== "failed" && state.rereadFailed === true && (
+        <ErrorLine text={tasksTexts.rereadFailed} onRefresh={props.onRetry} onRetry={props.onRetry} />
       )}
-      {!ready && state.status !== "failed" && (
+      {loading && slow && (
         <p className="muted small" role="status">
           {tabTexts.loading}
         </p>

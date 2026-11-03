@@ -44,7 +44,7 @@ import {
   tasksTexts,
   validTab,
 } from "../.test-build/subjectTabsView.js";
-import { startSubjectId, texts as ticketTexts, ticketsCrumbs } from "../.test-build/ticketsView.js";
+import { startSubjectId, subjectLine, texts as ticketTexts, ticketsCrumbs } from "../.test-build/ticketsView.js";
 import { AddAssignmentDialog } from "../.test-build/pages/HomeworkDialogs.js";
 import { SubjectHead } from "../.test-build/pages/SubjectHead.js";
 import { loadingPairs, readPairs, SubjectPairsTab } from "../.test-build/pages/SubjectPairsTab.js";
@@ -143,10 +143,10 @@ test("the export item carries what it does as its tooltip, and the reason of a d
 });
 
 test("the two «⋯» have their own tooltips, and «Удалить предмет» says why it is off", () => {
-  assert.equal(headTexts.moreTitle, "Ещё: предмет");
-  assert.equal(pairsTexts.moreTitle, "Ещё: пары");
-  assert.equal(headTexts.busy, "Нельзя удалить, пока идёт действие с файлами предмета.");
-  assert.match(html(h(SubjectHead, { subject: librarySubject, schedule: "", busy: false, onTickets: noop, onRemove: noop })), /title="Ещё: предмет"/);
+  assert.equal(headTexts.moreTitle, "Ещё действия с предметом");
+  assert.equal(pairsTexts.moreTitle, "Ещё действия с парами");
+  assert.equal(headTexts.busy, "Нельзя удалить, пока идёт другое действие с предметом. Удалить можно, когда оно закончится.");
+  assert.match(html(h(SubjectHead, { subject: librarySubject, schedule: "", busy: false, onTickets: noop, onRemove: noop })), /title="Ещё действия с предметом"/);
   assert.match(src("pages/SubjectPairsTab.tsx"), /title=\{pairsTexts\.moreTitle\}/);
   assert.doesNotMatch(src("pages/SubjectPairsTab.tsx") + src("pages/SubjectHead.tsx"), /title="Ещё"/);
 });
@@ -155,37 +155,58 @@ test("the two «⋯» have their own tooltips, and «Удалить предме
 
 const overviewLesson = (recordingId, status, summaryNew = false) => ({ recordingId, status, summaryNew });
 
-test("lessonMarks: the chip words as before, «новое» from summaryNew, joined by recordingId; a note has none", () => {
-  assert.deepEqual(
-    ["recorded", "transcribed", "summaryReady", "failed"].map((s) => lessonChip(s).label),
-    ["Записано", "Расшифровано", "Конспект готов", "Ошибка"],
-  );
-  assert.equal(lessonChip("failed").kind, "fail");
-  const marks = lessonMarks([overviewLesson("r1", "failed"), overviewLesson("r2", "summaryReady", true), overviewLesson("", "recorded")]);
-  assert.equal(marks.size, 2, "no recording, no mark");
-  assert.deepEqual([marks.get("r1").chip.label, marks.get("r1").fresh], ["Ошибка", false]);
-  assert.deepEqual([marks.get("r2").chip.label, marks.get("r2").fresh], ["Конспект готов", true]);
+test("lessonMarks: a chip only for «в обработке» and «не обработано» (what the ready marks cannot say), «новое» from summaryNew, joined by recordingId", () => {
+  const chips = Object.fromEntries(["recorded", "transcribed", "summaryReady", "failed"].map((s) => [s, lessonChip(s)]));
+  assert.deepEqual([chips.recorded.label, chips.recorded.kind], ["В обработке", "neutral"]);
+  assert.deepEqual([chips.failed.label, chips.failed.kind], ["Не обработано", "fail"]);
+  assert.equal(chips.transcribed, null, "«✓ Конспект» and the like say it: no second word for the same fact");
+  assert.equal(chips.summaryReady, null);
+  const marks = lessonMarks([
+    overviewLesson("r1", "failed"),
+    overviewLesson("r2", "summaryReady", true),
+    overviewLesson("r3", "transcribed"),
+    overviewLesson("r4", "recorded"),
+    overviewLesson("", "recorded"),
+  ]);
+  assert.deepEqual([...marks.keys()], ["r1", "r2", "r4"], "no recording, or nothing to say: no mark");
+  assert.deepEqual([marks.get("r1").chip.label, marks.get("r1").fresh], ["Не обработано", false]);
+  assert.deepEqual([marks.get("r2").chip, marks.get("r2").fresh], [null, true], "«новое» stays without a chip");
+  assert.equal(marks.get("r4").chip.label, "В обработке");
   assert.equal(marks.get("r9"), undefined);
 });
 
 test("the rows of «Пары» carry the chip and «новое» of their recording, in spans inside the row button; the rest carry none", () => {
-  const lessons = [recorded({ key: "k1", recordingId: "r1" }), recorded({ key: "k2", recordingId: "r2", title: "Новая" }), recorded({ key: "k3", recordingId: "old" }), noteOnly("2026-10-01")];
-  const marks = lessonMarks([overviewLesson("r1", "failed"), overviewLesson("r2", "summaryReady", true)]);
+  const lessons = [
+    recorded({ key: "k1", recordingId: "r1" }),
+    recorded({ key: "k2", recordingId: "r2", title: "Новая" }),
+    recorded({ key: "k3", recordingId: "old" }),
+    noteOnly("2026-10-01"),
+    recorded({ key: "k5", recordingId: "r5" }),
+    recorded({ key: "k6", recordingId: "r6" }),
+  ];
+  const marks = lessonMarks([
+    overviewLesson("r1", "failed"),
+    overviewLesson("r2", "summaryReady", true),
+    overviewLesson("r5", "recorded"),
+    overviewLesson("r6", "transcribed"),
+  ]);
   const out = html(pairsProps(ready(lessons), { marks }));
   const rows = out.match(/<button[^>]*class="kb-item"[^>]*>[^]*?<\/button>/g) ?? [];
-  assert.equal(rows.length, 4);
-  assert.match(rows[0], /<span class="chip s-fail"[^>]*><svg[^>]*>[^]*?<\/svg><span class="chip-text">Ошибка<\/span>/);
+  assert.equal(rows.length, 6);
+  assert.match(rows[0], /<span class="chip s-fail"[^>]*><svg[^>]*>[^]*?<\/svg><span class="chip-text">Не обработано<\/span>/);
   assert.doesNotMatch(rows[0], /class="fresh"/);
   assert.match(rows[1], /<span class="fresh">новое<\/span>/);
-  assert.match(rows[1], /chip s-ok[^>]*>[^]*?Конспект готов/);
-  assert.doesNotMatch(rows[2], /class="chip s-(fail|ok)"|class="fresh"|kb-line/, "older than the overview's latest: no chip");
-  assert.doesNotMatch(rows[3], /Ошибка|Записано|kb-line/);
-  for (const r of rows.slice(0, 2)) {
+  assert.doesNotMatch(rows[1], /chip|Конспект готов/, "a ready summary has no chip: «новое» only");
+  assert.doesNotMatch(rows[2], /class="chip|class="fresh"|kb-line/, "older than the overview's latest: no chip");
+  assert.doesNotMatch(rows[3], /Не обработано|В обработке|kb-line/);
+  assert.match(rows[4], /chip s-neutral[^>]*>[^]*?В обработке/, "in the work: a quiet chip");
+  assert.doesNotMatch(rows[5], /class="chip|kb-line/, "transcribed: nothing to add");
+  for (const r of [rows[0], rows[1], rows[4]]) {
     assert.match(r, /<span class="kb-line"><span class="kb-name">/);
     assert.doesNotMatch(r, /<(div|p|h[1-6]|ul|li)[\s>]/, "phrasing content only inside a button");
   }
   // Without marks the list is what it was.
-  assert.doesNotMatch(html(pairsProps(ready(lessons))), /kb-line|class="chip s-fail"/);
+  assert.doesNotMatch(html(pairsProps(ready(lessons))), /kb-line|В обработке|Не обработано/);
 });
 
 test("LessonList without `extra` keeps its markup (the knowledge base page is unchanged)", () => {
@@ -209,7 +230,7 @@ test("«Импортировать запись» and «Добавить кон�
   const tab = src("pages/SubjectPairsTab.tsx");
   assert.match(tab, /const \[form, setForm\] = useState<"none" \| "import" \| "past">\("none"\);/);
   assert.match(tab, /onClick=\{\(\) => setForm\(importOpen \? "none" : "import"\)\}/);
-  assert.match(tab, /open=\{form === "past"\}\s+onOpenChange=\{\(o\) => setForm\(o \? "past" : "none"\)\}/);
+  assert.match(tab, /open=\{form === "past"\}\s+busyReason=\{[^}]*\}\s+onOpenChange=\{\(o\) => setForm\(o \? "past" : "none"\)\}/);
   assert.match(tab, /variant=\{empty && !importOpen \? "primary" : undefined\}/);
   // With lessons nothing on the tab is the accent.
   const withLessons = html(pairsProps(ready([recorded()])));
@@ -219,6 +240,25 @@ test("«Импортировать запись» and «Добавить кон�
   assert.doesNotMatch(past({}), /Выберите|kb-form/);
   assert.match(past({ open: true }), /kb-form/);
   assert.doesNotMatch(past({ open: false }), /kb-form/);
+});
+
+test("while a recording is imported the forms of «Пары» do not switch (the panel would be lost with its result), and they say why", () => {
+  assert.equal(pairsTexts.importBusy, "Недоступно, пока идёт импорт записи.");
+  const past = (extra) => html(h(AddPastNote, { subject: { subjectId: "s1", noSubject: false }, lectures: [], onChoose: noop, today: "2026-11-03", ...extra }));
+  const idle = past({});
+  assert.doesNotMatch(idle, /disabled|Недоступно/);
+  const busy = past({ busyReason: pairsTexts.importBusy });
+  assert.match(busy, /<button[^>]*aria-describedby="[^"]*"[^>]*disabled=""[^>]*>[^]*?Добавить конспект прошедшей пары/);
+  assert.match(busy, /<span id="[^"]*" class="small muted">Недоступно, пока идёт импорт записи\.<\/span>/, "the reason is visible text");
+  // The panel tells the page; the page turns both buttons off.
+  const tab = src("pages/SubjectPairsTab.tsx");
+  assert.match(tab, /onBusyChange=\{setImportBusy\}/);
+  assert.match(tab, /busyReason=\{importBusy \? pairsTexts\.importBusy : undefined\}/);
+  assert.match(tab, /disabled=\{importBusy\}\s+title=\{importBusy \? pairsTexts\.importBusy : undefined\}/);
+  const panel = src("pages/RecordingImportPanel.tsx");
+  assert.match(panel, /onBusyChange\?: \(busy: boolean\) => void;/);
+  assert.match(panel, /onBusyChange\?\.\(busy\);/);
+  assert.match(panel, /useEffect\(\(\) => \(\) => onBusyChange\?\.\(false\), \[onBusyChange\]\);/, "a panel that goes away is not busy any more");
 });
 
 // ---- the delayed «Загрузка…» and the first tab stop ----
@@ -308,7 +348,9 @@ test("the tab «Задания»: empty says so and keeps the button under the t
   assert.ok(empty.indexOf("Открытых заданий") < empty.indexOf("Добавить задание"), "text first, the button under it");
   assert.doesNotMatch(empty, /Загрузка/);
   const loading = html(tasksTab({ status: "loading", overview: null, error: "" }));
-  assert.match(loading, /<p class="muted small" role="status">Загрузка…<\/p>/);
+  assert.doesNotMatch(loading, /Загрузка/, "a quick read leaves no flash: the text comes after loadingDelayMs only");
+  assert.match(src("pages/SubjectTasksTab.tsx"), /const slow = useAfterDelay\(loading, loadingDelayMs\);/);
+  assert.match(src("pages/SubjectTasksTab.tsx"), /\{loading && slow && \(\s*<p className="muted small" role="status">\s*\{tabTexts\.loading\}/);
   assert.match(loading, /Добавить задание/, "the add button works without the list");
   // The tab says it in its own words, whatever text the flow carries.
   const failed = html(tasksTab({ status: "failed", overview: null, error: "Не удалось загрузить сведения о предмете." }));
@@ -319,16 +361,18 @@ test("the tab «Задания»: empty says so and keeps the button under the t
   assert.equal(tasksTexts.failed, "Не удалось загрузить задания предмета.");
 });
 
-test("a failed re-read after «Добавить задание» keeps the list and says so in the tab, with «Повторить»", () => {
+test("a failed re-read after «Добавить задание» keeps the list and says so in its own words, with «Повторить»", () => {
+  assert.equal(tasksTexts.rereadFailed, "Список не обновился: новое задание может пока не отображаться.");
   const kept = html(tasksTab(tasksState([dated("a1", 1)], { rereadFailed: true }), { onOpenAssignment: noop }));
   assert.match(kept, /task-open-a1/, "the previous list stays");
-  assert.match(kept, /Не удалось загрузить задания предмета\./);
+  assert.match(kept, /Список не обновился: новое задание может пока не отображаться\./);
+  assert.doesNotMatch(kept, /Не удалось загрузить/, "the list is on screen: the line must not say it failed to load");
   assert.match(kept, />Повторить</);
   // Nothing to show yet and the re-read failed: not «нет заданий», the new one may be missing.
   const none = html(tasksTab(tasksState([], { rereadFailed: true })));
   assert.doesNotMatch(none, /Открытых заданий по предмету нет/);
-  assert.match(none, /Не удалось загрузить задания предмета\./);
-  assert.doesNotMatch(html(tasksTab(tasksState([dated("a1", 1)]))), /Не удалось/);
+  assert.match(none, /Список не обновился/);
+  assert.doesNotMatch(html(tasksTab(tasksState([dated("a1", 1)]))), /Не удалось|не обновился/);
 });
 
 test("«Добавить задание» opens the form with the subject of the page chosen; by default no subject", () => {
@@ -539,8 +583,10 @@ test("the tabs: a bar with three tabs and a tabpanel; until the default is decid
   assert.match(files, /ФАЙЛЫ/);
   assert.doesNotMatch(files, /aria-busy/);
   assert.equal((files.match(/tabindex="0"/g) ?? []).length, 1, "one tab stop; arrows move");
-  // The other tabs show their own loading state (the lessons are read when the page opens).
-  assert.match(html(h(SubjectTabs, { ...props, tab: "pairs" })), /id="[^"]*-panel-pairs"[^>]*><p class="muted small" role="status">Загрузка…/);
+  // The other tabs wait the same way (the lessons are read when the page opens): an empty box first, no flash.
+  const pairs = html(h(SubjectTabs, { ...props, tab: "pairs" }));
+  assert.match(pairs, /id="[^"]*-panel-pairs"[^>]*><\/div>/);
+  assert.doesNotMatch(pairs, /Загрузка/);
   assert.match(html(h(SubjectTabs, { ...props, tab: "tasks" })), /id="[^"]*-panel-tasks"[^>]*>[^]*Добавить задание/);
   // An unknown value of the route is «not chosen».
   assert.match(html(h(SubjectTabs, { ...props, tab: "bogus" })), /aria-busy="true"/);
@@ -583,8 +629,12 @@ test("the count of open assignments is `num` text on the tab «Задания»,
   assert.match(html(h(SubjectTabs, { ...props, overview: idleOverview })), />Задания<\/button>/);
 });
 
-test("the tab «Пары»: loading is an inline line, a failure has the text and «Повторить»", () => {
-  assert.match(html(pairsProps(loadingPairs)), /<p class="muted small" role="status">Загрузка…<\/p>/);
+test("the tab «Пары»: loading shows its line only after the delay, a failure has the text and «Повторить»", () => {
+  assert.doesNotMatch(html(pairsProps(loadingPairs)), /Загрузка/, "Back from a lesson re-reads quickly: no flash");
+  const tab = src("pages/SubjectPairsTab.tsx");
+  assert.match(tab, /const slow = useAfterDelay\(data\.status === "loading", loadingDelayMs\);/);
+  assert.match(tab, /return slow \? \(\s*<p className="muted small" role="status">\s*\{tabTexts\.loading\}/);
+  assert.ok(tab.indexOf("useAfterDelay(data.status") < tab.indexOf('if (data.status === "loading")'), "the hook comes before the early returns");
   const failed = html(pairsProps({ status: "failed", entry: null, lessons: [], error: "Не удалось открыть базу знаний." }));
   assert.match(failed, /Не удалось открыть базу знаний\./);
   assert.match(failed, />Повторить</);
@@ -698,9 +748,23 @@ test("the tickets page has one name, and opened from a subject it hides the sele
   assert.equal(ticketTexts.change, "Сменить предмет");
   assert.equal(ticketTexts.noSubjectsTitle, "Сначала нужен предмет", "the empty state keeps its title");
   const page = src("pages/TicketsPage.tsx");
-  assert.match(page, /const pinned = wanted\.current !== "" && !changing;/);
-  assert.match(page, /\{pinned \? \([^]*?<Button variant="ghost" size="sm" disabled=\{blocked\} onClick=\{\(\) => setChanging\(true\)\}>\s*\{texts\.change\}[^]*?\) : \(\s*<Field label=\{texts\.subject\}>/);
+  assert.match(page, /const pinned = wanted\.current !== "" && subjectId === wanted\.current && !changing;/);
+  assert.match(page, /\{pinned \? \([^]*?<span>\{subjectLine\(subject\.name\)\}<\/span>[^]*?disabled=\{blocked\}\s+onClick=\{\(\) => setChanging\(true\)\}[^]*?\{texts\.changeShort\}[^]*?\) : \(\s*<Field label=\{texts\.subject\}>/);
   assert.match(page, /pick\.current\?\.querySelector\("select"\)\?\.focus\(\)/, "the pressed button is gone: the select takes the focus");
+});
+
+test("opened from a subject the tickets page says «Предмет: …» with «Сменить» on one line; busy and a vanished subject are handled", () => {
+  assert.equal(subjectLine("Матанализ"), "Предмет: Матанализ");
+  assert.equal(ticketTexts.changeShort, "Сменить");
+  assert.equal(ticketTexts.changeBusy, "Нельзя сменить предмет, пока идёт другое действие.");
+  const page = src("pages/TicketsPage.tsx");
+  assert.match(page, /<p className="tk-subject">/);
+  assert.match(page, /aria-label=\{texts\.change\}/, "the short word keeps the full accessible name");
+  assert.match(page, /title=\{blocked \? texts\.changeBusy : undefined\}\s+disabled=\{blocked\}/, "a disabled button says why");
+  // The route's subject must be the one shown: if it vanished from the list, startSubjectId picked another and the select is shown.
+  assert.match(page, /const pinned = wanted\.current !== "" && subjectId === wanted\.current && !changing;/);
+  assert.equal(startSubjectId([{ id: "a" }], "gone"), "a", "so subjectId !== wanted and pinned is false");
+  assert.match(src("pages/tickets.css"), /\.tk-subject \{ display: flex;/);
 });
 
 // ---- the tree ----
@@ -785,7 +849,9 @@ test("a failed overview is told on «Задания» only (its own line and «�
   const page = src("pages/SubjectsPage.tsx");
   assert.doesNotMatch(page, /overviewState\.error|overviewState\.status === "failed"/);
   assert.match(page, /onRetryOverview=\{retryOverview\}/);
-  assert.match(src("pages/SubjectTasksTab.tsx"), /\(state\.status === "failed" \|\| state\.rereadFailed === true\) && \(\s*<ErrorLine text=\{tasksTexts\.failed\}/);
+  const tab = src("pages/SubjectTasksTab.tsx");
+  assert.match(tab, /state\.status === "failed" && <ErrorLine text=\{tasksTexts\.failed\}/);
+  assert.match(tab, /state\.status !== "failed" && state\.rereadFailed === true && \(\s*<ErrorLine text=\{tasksTexts\.rereadFailed\}/);
 });
 
 test("App puts the tab into the route, and only the tab", () => {

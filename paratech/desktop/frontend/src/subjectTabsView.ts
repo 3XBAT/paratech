@@ -27,8 +27,8 @@ export const loadingDelayMs = 800;
 export const headTexts = {
   tickets: "Билеты к экзамену",
   more: "Ещё действия с предметом",
-  moreTitle: "Ещё: предмет",
-  busy: "Нельзя удалить, пока идёт действие с файлами предмета.",
+  moreTitle: "Ещё действия с предметом",
+  busy: "Нельзя удалить, пока идёт другое действие с предметом. Удалить можно, когда оно закончится.",
 } as const;
 
 export const pairsTexts = {
@@ -38,7 +38,9 @@ export const pairsTexts = {
   exportHint: "Сохранить все пары предмета в один файл .md — по датам, с конспектом и текстом лекции.",
   exportEmpty: "Нельзя сохранить: у предмета пока нет пар с конспектом.",
   more: "Ещё действия с парами",
-  moreTitle: "Ещё: пары",
+  moreTitle: "Ещё действия с парами",
+  /** The reason the forms of «Пары» do not switch while a recording is being imported (the panel would be lost with its result). */
+  importBusy: "Недоступно, пока идёт импорт записи.",
 } as const;
 
 export const tasksTexts = {
@@ -47,6 +49,8 @@ export const tasksTexts = {
   overdue: "Просрочено",
   noDue: "Без срока",
   failed: "Не удалось загрузить задания предмета.",
+  /** The old list is still shown, so the line does not say the load failed. */
+  rereadFailed: "Список не обновился: новое задание может пока не отображаться.",
   list: "Открытые задания",
 } as const;
 
@@ -113,32 +117,34 @@ export interface LessonChip {
   label: string;
 }
 
-const lessonChips: Readonly<Record<LessonStatus, LessonChip>> = {
-  recorded: { kind: "neutral", icon: "rec", label: "Записано" },
-  transcribed: { kind: "neutral", icon: "doc", label: "Расшифровано" },
-  summaryReady: { kind: "ok", icon: "ok", label: "Конспект готов" },
-  failed: { kind: "fail", icon: "warn", label: "Ошибка" },
+// A chip only for what the ready marks of the row cannot say: a lesson still in the work and one that failed. A
+// transcribed or summarised lesson has no chip (the «✓ Конспект»-style marks of the row say it).
+const lessonChips: Readonly<Partial<Record<LessonStatus, LessonChip>>> = {
+  recorded: { kind: "neutral", icon: "clock", label: "В обработке" },
+  failed: { kind: "fail", icon: "warn", label: "Не обработано" },
 };
 
-export function lessonChip(status: LessonStatus): LessonChip {
-  return lessonChips[status];
+/** The chip of a lesson status; null when the row has nothing to add to its ready marks. */
+export function lessonChip(status: LessonStatus): LessonChip | null {
+  return lessonChips[status] ?? null;
 }
 
-/** What a row of «Пары» says about its recording besides the title: the status chip and the «новое» mark. */
+/** What a row of «Пары» says about its recording besides the title: a status chip (only «в обработке» / «не обработано») and the «новое» mark. */
 export interface LessonMark {
-  chip: LessonChip;
+  chip: LessonChip | null;
   fresh: boolean;
 }
 
 /**
  * The marks of the rows by `recordingId`, from the lessons of the overview (the core sends the latest ones only). A row
- * the overview does not know (older, or a note without a recording) has no entry and shows no chip.
+ * the overview does not know (older, or a note without a recording), or one with neither chip nor «новое», has no entry.
  */
 export function lessonMarks(lessons: readonly Pick<SubjectLesson, "recordingId" | "status" | "summaryNew">[]): ReadonlyMap<string, LessonMark> {
   const marks = new Map<string, LessonMark>();
   for (const l of lessons) {
-    if (l.recordingId !== "") {
-      marks.set(l.recordingId, { chip: lessonChip(l.status), fresh: l.summaryNew });
+    const chip = lessonChip(l.status);
+    if (l.recordingId !== "" && (chip !== null || l.summaryNew)) {
+      marks.set(l.recordingId, { chip, fresh: l.summaryNew });
     }
   }
   return marks;

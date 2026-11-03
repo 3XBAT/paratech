@@ -3,7 +3,7 @@ import { type LibraryMaterial, type LibrarySubject, libraryApi } from "../bindin
 import { callByName } from "../bindings/runtime.js";
 import { type TicketSet, ticketsApi, ticketsErrorText } from "../bindings/tickets.js";
 import type { PageId } from "../nav.js";
-import { needsPolling, openResultView, startSubjectId, texts, ticketsCrumbs, ticketsPollMs } from "../ticketsView.js";
+import { needsPolling, openResultView, startSubjectId, subjectLine, texts, ticketsCrumbs, ticketsPollMs } from "../ticketsView.js";
 import { Breadcrumbs } from "../ui/Breadcrumbs.js";
 import { Button } from "../ui/Button.js";
 import { EmptyState, Field, ResultLine, Select } from "../ui/controls.js";
@@ -41,7 +41,8 @@ export function TicketsPage(props: {
   const wanted = useRef(props.subjectId ?? ""); // the route's subject, taken once when the list arrives
   // Opened from a subject: no select until «Сменить предмет» is pressed.
   const [changing, setChanging] = useState(false);
-  const pinned = wanted.current !== "" && !changing;
+  // Only while the route's subject is the one shown: if it vanished from the list the select is the way to choose another.
+  const pinned = wanted.current !== "" && subjectId === wanted.current && !changing;
   const pick = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -179,10 +180,20 @@ export function TicketsPage(props: {
         <>
           <div className="tk-pick" ref={pick}>
             {pinned ? (
-              // Opened from a subject: its name is in the crumbs, the choice stays one click away.
-              <Button variant="ghost" size="sm" disabled={blocked} onClick={() => setChanging(true)}>
-                {texts.change}
-              </Button>
+              // Opened from a subject: the subject and the way to change it on one line.
+              <p className="tk-subject">
+                <span>{subjectLine(subject.name)}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={texts.change}
+                  title={blocked ? texts.changeBusy : undefined}
+                  disabled={blocked}
+                  onClick={() => setChanging(true)}
+                >
+                  {texts.changeShort}
+                </Button>
+              </p>
             ) : (
               <Field label={texts.subject}>
                 {(id) => (

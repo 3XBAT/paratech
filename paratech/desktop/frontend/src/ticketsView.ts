@@ -27,6 +27,9 @@ export const texts = {
   title: "Билеты к экзамену",
   back: "Предметы",
   change: "Сменить предмет",
+  /** The visible word of the inline button; `change` is its accessible name. */
+  changeShort: "Сменить",
+  changeBusy: "Нельзя сменить предмет, пока идёт другое действие.",
   loading: "Загрузка…",
   loadFailed: "Не удалось загрузить. Попробуйте ещё раз.",
   subject: "Предмет",
@@ -70,8 +73,13 @@ export function startSubjectId(list: readonly { id: string }[], wanted: string):
   return list.some((s) => s.id === wanted) ? wanted : (list[0]?.id ?? "");
 }
 
+/** «Предмет: Матанализ», the line of a page opened from a subject; the name is the student's text. */
+export function subjectLine(name: string): string {
+  return `${texts.subject}: ${name}`;
+}
+
 /**
- * «Предметы / <предмет> / Билеты»: «Предметы» opens the section, the subject opens its page. While the subject is not
+ * «Предметы / <предмет> / Билеты к экзамену»: «Предметы» opens the section, the subject opens its page. While the subject is not
  * known (loading, failed) the middle level is left out, so a crumb never names the wrong subject.
  */
 export function ticketsCrumbs(
