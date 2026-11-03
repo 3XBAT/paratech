@@ -18,7 +18,7 @@ import type { RestoreCall } from "../subjectRemovalView.js";
 import { WorkWritingCard } from "./WorkCard.js";
 import { MessagePills } from "./MentionParts.js";
 import { Waiting } from "./Waiting.js";
-import { openTaskLabel } from "../summaryView.js";
+import { openTaskLabel, summaryToolTexts } from "../summaryView.js";
 import { failedStepIndex, moreStepsLabel, planCollapseLimit, planTexts, planWindow, progressLabel, type StepMark } from "../planView.js";
 import {
   addedAssignmentText,
@@ -523,7 +523,7 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
             ))}
           </span>
           {!note?.done && card.assignment && props.actions.openAssignment && (
-            <IconAction icon="chevr" label={openTaskLabel(card.assignment.title)} onClick={() => card.assignment && props.actions.openAssignment?.(card.assignment.id)} />
+            <IconAction icon="chevr" label={openTaskLabel(card.assignment.title)} tipText={summaryToolTexts.openAssignment} onClick={() => card.assignment && props.actions.openAssignment?.(card.assignment.id)} />
           )}
           {card.offer !== null && <OfferControl offer={card.offer} actions={props.actions} />}
           {/* «Остановить» was pressed: the line says «Запись остановлена» and offers a new recording. */}

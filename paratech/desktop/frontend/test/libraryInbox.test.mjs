@@ -366,10 +366,11 @@ test("a refused «Вернуть» keeps its line with the reason; a done one is
   const out = html(h(UndoLines, { items: failed, busy: false, onUndo: noop, onRefresh: noop }));
   assert.match(out, /role="status" aria-live="polite"/);
   assert.match(out, /Файл не найден: обновите список\./);
-  // TASK-368: both are icon buttons named by their aria-label (no visible words).
-  assert.ok(isOn(out, "Обновить список"));
+  // TASK-368: «Вернуть» is an icon button; the way out of a refusal, «Обновить список», is a word button (as in ErrorLine).
+  assert.equal(buttonTag(out, "Обновить список"), null);
+  assert.match(out, /class="btn sm"[^>]*>Обновить список</);
   assert.equal(buttonTag(out, "Вернуть"), null);
-  assert.equal(visibleText(out).includes("Обновить список"), false);
+  assert.equal(visibleText(out).includes("Обновить список"), true);
   const ok = html(h(UndoLines, { items: list, busy: false, onUndo: noop, onRefresh: noop }));
   assert.ok(isOn(ok, "Вернуть"));
   assert.match(buttonTag(ok, "Вернуть"), /class="ia"/);

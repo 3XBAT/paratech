@@ -1198,7 +1198,7 @@ test("the check failed with subjects on the page: one quiet line with «Повт
   let retried = 0;
   const out = html(h(ScheduleCheckFailedLine, { onRetry: () => retried++ }));
   assert.match(out, /Не удалось проверить расписание/);
-  assert.match(out, /class="btn ghost sm"[^>]*>Повторить</);
+  assert.match(out, /class="btn sm"[^>]*>Повторить</); // TASK-368: every load-error retry is the default secondary style
   assert.equal(primaries(out), 0);
   assert.equal(retried, 0);
 });

@@ -15,6 +15,7 @@ import {
   type SummaryView,
 } from "./bindings/summary.js";
 import { dueText } from "./homeworkView.js";
+import { shortName } from "./ownNotesView.js";
 import type { ResultKind } from "./ui/controls.js";
 
 /** How often a waiting or running step is asked for again. */
@@ -249,7 +250,7 @@ export const summaryToolTexts = {
 
 /** The name of the open button in a list of tasks: it names the task, so the rows differ for a screen reader. */
 export function openTaskLabel(title: string): string {
-  return title.trim() === "" ? summaryToolTexts.openAssignment : `${summaryToolTexts.openAssignment}: ${title.trim()}`;
+  return title.trim() === "" ? summaryToolTexts.openAssignment : `${summaryToolTexts.openAssignment}: ${shortName(title.trim())}`;
 }
 
 const knownErrors: ReadonlySet<string> = new Set([

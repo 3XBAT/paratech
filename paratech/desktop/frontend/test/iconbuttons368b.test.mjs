@@ -53,7 +53,8 @@ test("the new icons (trash, chevup, copysel) are in the sprite once each; copyse
   }
   const copysel = svg.slice(svg.indexOf('id="i-copysel"'), svg.indexOf("</symbol>", svg.indexOf('id="i-copysel"')));
   assert.doesNotMatch(copysel, /dasharray/i, "dashes vanish at 16px");
-  assert.match(copysel, /M12\.5 12h4M14\.5 12v5M12\.5 17h4/, "an I-beam on the front sheet");});
+  assert.match(copysel, /M12\.5 12h4M14\.5 12v5M12\.5 17h4/, "an I-beam on the front sheet");
+});
 
 test("IconAction passes data-* attributes (the pages find buttons by them) and onMouseDown (the selection stays)", () => {
   const out = html(h(IconAction, { icon: "chevup", label: "Выше", data: { move: "up", mid: "m1", "page-paste": "" }, onClick: noop, onMouseDown: noop }));
@@ -79,6 +80,9 @@ test("files: the only way out of a refusal keeps its words («Повторить
   const undo = html(h(UndoLines, { items: [item], busy: false, onUndo: noop, onRefresh: noop }));
   assertIcon(undo, "Вернуть", "undo");
   assert.ok(isOff(html(h(UndoLines, { items: [item], busy: true, onUndo: noop, onRefresh: noop })), "Вернуть"));
+  const stale = html(h(UndoLines, { items: [{ ...item, error: "Папка не найдена: обновите список." }], busy: false, onUndo: noop, onRefresh: noop }));
+  assert.deepEqual(ariaLabels(stale), [], "a refused «Вернуть» offers the word «Обновить список», as ErrorLine does");
+  assert.match(stale, /class="btn sm"[^>]*>Обновить список</);
 });
 
 test("the report of a drop: «Закрыть» is a cross", () => {
@@ -118,12 +122,14 @@ test("Today: a failed read and a failed stop keep the words (the only way out); 
   assert.equal(count(parts, "openPairLabel("), 2, "and its name says which pair");
   assert.equal(openPairLabel("Матанализ"), "Открыть пару: Матанализ");
   assert.equal(openPairLabel("  "), "Открыть");
+  assert.equal(count(parts, "tipText={texts.openLesson}"), 2, "the hover tooltip is the short «Открыть пару»");
+  assert.equal(openPairLabel("я".repeat(300)), `Открыть пару: ${"я".repeat(120)}…`, "a long title is cut in the name");
 });
 
 test("Journal: «Повторить» keeps its word; the row «Отменить» is an icon; the filter reset of an empty list keeps its words", () => {
   const retry = html(h(JournalLoadError, { text: "Не удалось.", onRetry: noop }));
   assert.deepEqual(ariaLabels(retry), []);
-  assert.match(retry, /class="btn ghost sm"[^>]*>Повторить</);
+  assert.match(retry, /class="btn sm"[^>]*>Повторить</, "every load-error «Повторить» is the default secondary button");
   const line = { kind: "action", at: "2026-10-22T10:00:00Z", updatedAt: "2026-10-22T10:00:00Z", subjectId: "", actionId: "a1", threadId: "t1", turn: 1, tool: "create_subject", jobId: "", jobType: "", status: "DONE", undoable: true, cannotUndo: false, noUndo: "" };
   const out = html(h(JournalList, { lines: [line], subjects: new Map(), busyAction: "", onUndo: noop }));
   assertIcon(out, "Отменить", "undo");
@@ -163,6 +169,8 @@ test("the summary: «Скопировать» is a copy icon; «Сделать �
   assertIcon(opened, "Открыть задание: Задача", "chevr");
   assert.equal(openTaskLabel("Задача"), "Открыть задание: Задача");
   assert.equal(openTaskLabel(""), "Открыть задание");
+  assert.match(opened, /<span class="ia-tip" aria-hidden="true">Открыть задание<\/span>/, "the hover tooltip is short; the title stays in the name");
+  assert.equal(openTaskLabel("я".repeat(300)), `Открыть задание: ${"я".repeat(120)}…`);
   assert.doesNotMatch(opened, /#i-open/, "the arrow out of a box is only for what opens outside the app");
 });
 
@@ -317,7 +325,8 @@ test("schedule: the outcome of «Создать предметы» has undo (def
   // The check of the schedule failed: «Повторить» is a word (the empty list of subjects is covered by scheduleSubjects312).
   const failed = html(h(ScheduleCheckFailedLine, { onRetry: noop }));
   assert.deepEqual(ariaLabels(failed), []);
-  assert.match(failed, /class="btn ghost sm"[^>]*>Повторить</);
+  assert.match(failed, /class="btn sm"[^>]*>Повторить</);
+  assert.doesNotMatch(review, /variant="ghost" onClick=\{(props|offer)\.onRetry\}/, "the offer retry buttons use the default style too");
 });
 
 test("models and the recordings selection: a model row's delete is a trash icon and its cancel a cross, both naming the model; «Удалить выбранные» keeps its word, the clear is a cross", () => {
@@ -389,7 +398,7 @@ const wordButtons = {
   "pages/CalendarSync.tsx": ["{calendarTexts.sync}"],
   "pages/ConnectionsPage.tsx": ["Сохранить адрес", "Сохранить", "Проверить почту"],
   "pages/DiagnosticsPage.tsx": ["{check.label}", "{save.label}"],
-  "pages/FileRows.tsx": ["{fileTexts.refresh}", "{fileTexts.retry}", "{addFileTexts.moveHere}", "{addFileTexts.place}", "{fileTexts.createSubject}", "{fileTexts.cancel}", "{fileTexts.putHere}", "{fileTexts.cancel}", "{line.action}", "{primary.label}"],
+  "pages/FileRows.tsx": ["{fileTexts.refresh}", "{fileTexts.retry}", "{addFileTexts.moveHere}", "{addFileTexts.place}", "{fileTexts.createSubject}", "{fileTexts.cancel}", "{fileTexts.putHere}", "{fileTexts.cancel}", "{line.action}", "{primary.label}", "{fileTexts.refresh}"],
   "pages/GoogleBlock.tsx": ["{googleTexts.save}", "{googleTexts.remove}", "{googleTexts.cancel}", "{googleTexts.signIn}", "{googleTexts.signOut}"],
   "pages/HomeworkDialogs.tsx": ["{changeTexts.restore}", "{changeTexts.remove}", "{changeTexts.cancel}", "{changeTexts.openSend}"],
   "pages/HomeworkMenus.tsx": ["{firstRunTexts.manual}", "{draftButtonTexts.markSent}", "{draftButtonTexts.sendAgain}", '{draftButtonTexts.save} <span aria-hidden="true"> ▾</span>'],

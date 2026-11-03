@@ -561,7 +561,9 @@ export function UndoLines(props: { items: readonly UndoItem[]; busy: boolean; on
             {it.error !== "" && <span className="muted"> {it.error}</span>}
           </span>
           {it.error !== "" && errorWay(it.error) === "refresh" ? (
-            <IconAction icon="retry" label={fileTexts.refresh} onClick={props.onRefresh} />
+            <Button size="sm" onClick={props.onRefresh}>
+              {fileTexts.refresh}
+            </Button>
           ) : (
             <IconAction icon="undo" label={fileTexts.undo} disabled={props.busy} onClick={() => props.onUndo(it)} />
           )}

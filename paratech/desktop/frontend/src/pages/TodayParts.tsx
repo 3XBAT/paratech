@@ -501,7 +501,7 @@ export function SummarySection(props: {
                       />
                     ))}
               </div>
-              {m.canOpen && <IconAction icon="chevr" place="left" label={openPairLabel(m.headline)} onClick={() => props.onOpenLesson(m.recordingId)} />}
+              {m.canOpen && <IconAction icon="chevr" place="left" label={openPairLabel(m.headline)} tipText={texts.openLesson} onClick={() => props.onOpenLesson(m.recordingId)} />}
             </div>
           );
         })}
@@ -514,7 +514,7 @@ export function SummarySection(props: {
                 <div className="today-t">{m.title}</div>
                 {m.meta !== "" && <div className="small muted today-meta num">{m.meta}</div>}
               </div>
-              {m.canOpen && <IconAction icon="chevr" place="left" label={openPairLabel(m.title)} onClick={() => props.onOpenLesson(m.recordingId)} />}
+              {m.canOpen && <IconAction icon="chevr" place="left" label={openPairLabel(m.title)} tipText={texts.openLesson} onClick={() => props.onOpenLesson(m.recordingId)} />}
             </div>
           );
         })}

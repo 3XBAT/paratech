@@ -50,7 +50,7 @@ export function LectureTextCard(props: LectureTextCardProps) {
       {start !== null && (
         <div className="acts start sm-retry">
           {/* The first start and the retry are the only way on: both keep their words. */}
-          <Button busy={props.busy === "start"} busyLabel="Запуск…" disabled={off} onClick={props.onStart}>
+          <Button busy={props.busy === "start"} busyLabel={summaryToolTexts.starting} disabled={off} onClick={props.onStart}>
             {start}
           </Button>
         </div>

@@ -103,7 +103,7 @@ export function LoadError(props: { text: string; onRetry(): void }) {
       <ResultLine kind="fail" role="alert">
         {props.text}
       </ResultLine>
-      <Button size="sm" variant="ghost" onClick={props.onRetry}>
+      <Button size="sm" onClick={props.onRetry}>
         {texts.retry}
       </Button>
     </div>

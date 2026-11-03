@@ -429,7 +429,8 @@ test("stopped midway: the card's own words (not the core's «Нажмите «Д
   // The core's sentence names a «Да» that is not a button here: it is never shown.
   assert.doesNotMatch(out, /Нажмите «Да»/);
   assert.ok(out.includes("Создано предметов: 2"));
-  assert.ok(out.indexOf(">Отменить всё<") > 0 && out.indexOf(">Отменить всё<") < out.lastIndexOf("<span>Повторить</span>"));
+  // TASK-368: words first, then icons: the undo icon comes after the word button «Повторить».
+  assert.ok(out.indexOf("<span>Повторить</span>") > 0 && out.indexOf("<span>Повторить</span>") < out.indexOf(">Отменить всё<"));
   assert.match(out, /<button(?![^>]*disabled)[^>]*><span class="btn-labels"><span>Повторить</);
   assert.match(out, /class="btn primary sm"[^>]*><span class="btn-labels"><span>Повторить</);
   assert.doesNotMatch(out, />Нет<|>Да<|<span>Да</);
