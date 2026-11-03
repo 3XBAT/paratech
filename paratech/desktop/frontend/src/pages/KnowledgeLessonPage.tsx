@@ -21,6 +21,7 @@ import { useOpenSummary } from "../openSummary";
 import { lectureOf } from "../ownNotesView";
 import { errorText, nextPollMs } from "../summaryView";
 import { saveResultText } from "../transcriptView";
+import { Breadcrumbs, type Crumb } from "../ui/Breadcrumbs";
 import { Button } from "../ui/Button";
 import { Banner, type ResultKind, Segmented } from "../ui/controls";
 import { LessonInfoForm, ReadyMarks } from "./KnowledgeParts";
@@ -41,6 +42,8 @@ export function KnowledgeLessonPage(props: {
   materialId?: string;
   /** Opens with the subject and kind form (from «Без предмета»). */
   editing: boolean;
+  /** The levels above the lesson («База знаний / Матанализ»); each does what a step up does. The lesson is the last level. */
+  trail: readonly Crumb[];
   onBack: () => void;
   /** The subject or kind was saved: the lists are out of date. */
   onChanged: (l: KnowledgeLesson) => void;
@@ -136,11 +139,7 @@ export function KnowledgeLessonPage(props: {
 
   return (
     <section className="page tr sm kb-lesson-page">
-      <div className="hw-back">
-        <Button variant="ghost" onClick={props.onBack}>
-          Назад
-        </Button>
-      </div>
+      <Breadcrumbs items={[...props.trail, { label: lessonHeading(lesson) }]} />
       <div className="head">
         <div>
           <h1 className="kb-heading">{lessonHeading(lesson)}</h1>
@@ -231,15 +230,11 @@ export function KnowledgeLessonPage(props: {
 
 // A lecture known only from the student's notes (TASK-155): no recording, so no summary, transcript or tabs and no
 // call that needs a recording id; only the «Мой конспект» block, opened by the lecture's ids.
-export function NoteLecturePage(props: { lesson: KnowledgeLesson; materialId?: string; onBack: () => void }) {
+export function NoteLecturePage(props: { lesson: KnowledgeLesson; materialId?: string; trail: readonly Crumb[] }) {
   const l = props.lesson;
   return (
     <section className="page tr sm kb-lesson-page">
-      <div className="hw-back">
-        <Button variant="ghost" onClick={props.onBack}>
-          Назад
-        </Button>
-      </div>
+      <Breadcrumbs items={[...props.trail, { label: noteLectureHeading(l) }]} />
       <div className="head">
         <div>
           <h1 className="kb-heading">{noteLectureHeading(l)}</h1>

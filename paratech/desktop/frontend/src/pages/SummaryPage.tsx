@@ -29,6 +29,7 @@ import {
   summarySegments,
 } from "../summaryView";
 import { saveResultText } from "../transcriptView";
+import { Breadcrumbs } from "../ui/Breadcrumbs";
 import { Button } from "../ui/Button";
 import {
   Banner,
@@ -49,6 +50,8 @@ export interface SummaryPageProps {
   recordingId: string;
   /** "lecture": show the lecture text first (the row's «Открыть текст лекции»). */
   section?: SummarySection;
+  /** The label of the page under this one, the first crumb; «Записи» when not given. */
+  parent?: string;
   onBack: () => void;
   onOpenTranscript: (recordingId: string) => void;
   onOpenAssignment: (assignmentId: string) => void;
@@ -57,6 +60,10 @@ export interface SummaryPageProps {
   /** «Проверить звук» of a recording without speech (TASK-110): opens «Диагностика». */
   onCheckSound: () => void;
 }
+
+// The breadcrumbs of the page: it opens over the section the student came from; the app names it (`parent`).
+const defaultParentCrumb = "Записи";
+const pageCrumb = "Конспект";
 
 // «Конспект» of one recording (TASK-087): the lesson, the summary with its key points, the homework found, the lecture
 // text (TASK-090) and where they stand, with copy and save; one part at a time in segments (TASK-100). Works offline: everything comes from the core on this
@@ -117,14 +124,10 @@ export function SummaryPage(props: SummaryPageProps) {
 
   return (
     <section className="page tr sm">
-      <div className="hw-back">
-        <Button variant="ghost" onClick={props.onBack}>
-          Назад
-        </Button>
-      </div>
+      <Breadcrumbs items={[{ label: props.parent || defaultParentCrumb, onClick: props.onBack }, { label: pageCrumb }]} />
       <div className="head">
         <div>
-          <h1>Конспект</h1>
+          <h1>{pageCrumb}</h1>
           {view && (
             <p className="tr-sub">
               <span className="tr-title">{pageTitle(view)}</span>

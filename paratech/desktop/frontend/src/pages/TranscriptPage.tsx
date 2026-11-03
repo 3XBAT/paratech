@@ -27,8 +27,13 @@ import {
   statusView,
   stepMatch,
 } from "../transcriptView";
+import { Breadcrumbs } from "../ui/Breadcrumbs";
 import { Button } from "../ui/Button";
 import { Banner, Card, Input, Progress, ResultLine, type ResultKind, Segmented } from "../ui/controls";
+
+// The breadcrumbs of the page, as on the summary page: the label of the section under it comes from the app (`parent`).
+const defaultParentCrumb = "Записи";
+const pageCrumb = "Расшифровка";
 
 // «Расшифровка» of one recording (TASK-079): the local transcript, live while the recognition runs, with search,
 // copy, save and playback from a timestamp. Works offline: everything comes from the core on this computer. The text
@@ -40,6 +45,8 @@ export function TranscriptPage(props: {
   onBack: () => void;
   onOpenSummary: (recordingId: string) => void;
   embedded?: boolean;
+  /** The label of the page under this one, the first crumb; «Записи» when not given. */
+  parent?: string;
   /** The segment to scroll to and mark once it is loaded; -1 or undefined for none. */
   focusSegment?: number;
 }) {
@@ -118,14 +125,10 @@ export function TranscriptPage(props: {
     <section className="page tr">
       {!props.embedded && (
         <>
-          <div className="hw-back">
-            <Button variant="ghost" onClick={props.onBack}>
-              Назад
-            </Button>
-          </div>
+          <Breadcrumbs items={[{ label: props.parent || defaultParentCrumb, onClick: props.onBack }, { label: pageCrumb }]} />
           <div className="head">
             <div>
-              <h1>Расшифровка</h1>
+              <h1>{pageCrumb}</h1>
               <p className="tr-sub">
                 <span className="tr-title">{title}</span>
                 {status && status.startedAt !== "" && <span className="muted num"> · {formatTime(status.startedAt)}</span>}

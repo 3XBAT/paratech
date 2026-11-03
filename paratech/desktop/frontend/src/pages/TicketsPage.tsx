@@ -4,6 +4,7 @@ import { callByName } from "../bindings/runtime.js";
 import { type TicketSet, ticketsApi, ticketsErrorText } from "../bindings/tickets.js";
 import type { PageId } from "../nav.js";
 import { needsPolling, openResultView, texts, ticketsPollMs } from "../ticketsView.js";
+import { Breadcrumbs } from "../ui/Breadcrumbs.js";
 import { Button } from "../ui/Button.js";
 import { EmptyState, Field, ResultLine, Select } from "../ui/controls.js";
 import { SetCard } from "./TicketsParts.js";
@@ -134,16 +135,9 @@ export function TicketsPage(props: { onOpen: (id: PageId) => void }) {
 
   return (
     <section className="page">
+      <Breadcrumbs items={[{ label: texts.back, onClick: () => props.onOpen("subjects") }, { label: texts.title }]} />
       <div className="head">
-        <div>
-          <span className="label">{texts.label}</span>
-          <h1>{texts.title}</h1>
-        </div>
-        <div className="acts">
-          <Button icon="back" onClick={() => props.onOpen("subjects")}>
-            {texts.back}
-          </Button>
-        </div>
+        <h1>{texts.title}</h1>
       </div>
       {subjects === null && loadError === "" && <p className="muted">{texts.loading}</p>}
       {loadError !== "" && (
@@ -152,7 +146,7 @@ export function TicketsPage(props: { onOpen: (id: PageId) => void }) {
         </ResultLine>
       )}
       {subjects !== null && subjects.length === 0 && (
-        <EmptyState label={texts.label} title={texts.title} actions={<Button onClick={() => props.onOpen("subjects")}>{texts.back}</Button>}>
+        <EmptyState title={texts.noSubjectsTitle} actions={<Button onClick={() => props.onOpen("subjects")}>{texts.goSubjects}</Button>}>
           {texts.noSubjects}
         </EmptyState>
       )}
