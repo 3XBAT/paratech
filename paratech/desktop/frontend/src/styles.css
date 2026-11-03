@@ -26,8 +26,8 @@ html, body, #root { height: 100%; }
 .rail .low { margin-top: auto; }
 .rail .tip { position: absolute; left: calc(100% + 8px); top: 50%; transform: translate(-4px, -50%); padding: 4px 8px; border-radius: var(--r-sm); background: var(--prim); color: var(--on-prim); font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 500; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity var(--t-fast), transform var(--t-fast); box-shadow: var(--sh-pop); }
 .rail button:hover .tip, .rail button:focus-visible .tip { opacity: 1; transform: translate(0, -50%); }
-/* position: relative is load-bearing: the absolutely placed .vh / .icon-sprite inside the page must be clipped and scrolled by
-   the sheet. Without it their containing block is the initial one and a .vh low in a long page stretches the whole document. */
+/* position: relative is load-bearing: the absolute .vh inside the page must be clipped and scrolled by the sheet. Without it
+   the containing block is .shell (always with-agent, relative), which does not clip, so a .vh low in a long page stretches it. */
 .sheet { position: relative; min-width: 0; min-height: 0; overflow: auto; padding: 24px 32px; border-top: 1px solid var(--edge); border-left: 1px solid var(--edge); border-top-left-radius: var(--r-xl); background: var(--panel); }
 .screen { display: flex; flex-direction: column; min-height: 100%; animation: screen-in var(--t-mid) var(--ease); }
 @keyframes screen-in { from { opacity: 0; transform: translateY(4px); } }
