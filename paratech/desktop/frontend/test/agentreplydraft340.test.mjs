@@ -159,12 +159,13 @@ test("«Остановить» without a reply text yet shows no kept block", ()
 
 // ---- «Остановить» stays reachable ----
 
-test("the waiting row with «Остановить» is sticky to the bottom of the thread on the panel background", () => {
+// Changed (BUG 2026-11-04): the row used to be sticky and floated over the reply text; it now scrolls with the thread.
+test("the waiting row with «Остановить» is in the flow at the end of the thread, never floating over the text", () => {
   const css = readFileSync(new URL("../src/agent/agent.css", import.meta.url), "utf8");
   const rule = css.match(/\.ag-think\s*\{[^}]*\}/)?.[0] ?? "";
-  assert.match(rule, /position:\s*sticky/);
-  assert.match(rule, /bottom:\s*0/);
-  assert.match(rule, /background:\s*var\(--bg\)/);
+  assert.ok(rule !== "");
+  assert.doesNotMatch(rule, /position:\s*(?:sticky|absolute|fixed)/);
+  assert.doesNotMatch(rule, /z-index/);
   // The thread is the scroll container and the field is outside it, so the row cannot overlap the input.
   assert.match(css, /\.ag-thread\s*\{[^}]*overflow-y:\s*auto/);
 });
