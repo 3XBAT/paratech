@@ -89,6 +89,61 @@ func TestAddMaterialToAFullNoteFilesNothing(t *testing.T) {
 	}
 }
 
+// An add that fails after AddMaterial filed the upload returns it to «Входящие» (best effort: a failure of that keeps the
+// error of the add); an upload that was filed before stays where it was.
+func TestAddMaterialThatFailsReturnsTheUpload(t *testing.T) {
+	disk := errors.New("disk I/O error")
+	conflicts := []error{shared.ErrVersionConflict, shared.ErrVersionConflict, shared.ErrVersionConflict}
+	tests := []struct {
+		name      string
+		into      bool    // into the note n-own, else a new note
+		filed     bool    // the upload is filed under the subject already
+		saveErrs  []error // of the add's saves
+		inboxErr  error
+		want      error
+		wantInbox bool
+	}{
+		{name: "a new note not saved", saveErrs: []error{disk}, want: ErrUnavailable, wantInbox: true},
+		{name: "a note that kept changing", into: true, saveErrs: conflicts, want: ErrBusy, wantInbox: true},
+		{name: "a filed upload stays filed", into: true, filed: true, saveErrs: []error{disk}, want: ErrUnavailable},
+		{name: "the return fails too: the add's error", saveErrs: []error{disk}, inboxErr: errors.New("library busy"), want: ErrUnavailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e, ctx := newEnv(t), context.Background()
+			req := MaterialRequest{Anchor: AnchorRef{Kind: note.AnchorUndated}, Subject: phys}
+			if tt.into {
+				n, err := note.New(note.Spec{ID: "n-own", Subject: phys, Anchor: undated(t), Title: "Своё",
+					Parts: []shared.MaterialID{e.materials.filed(t, phys, "своё").ID()}}, t0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := e.notes.Save(ctx, n); err != nil {
+					t.Fatal(err)
+				}
+				req = MaterialRequest{Note: "n-own"}
+			}
+			up := e.materials.inbox(t, "фото доски")
+			if tt.filed {
+				up = e.materials.filed(t, phys, "фото доски 2")
+			}
+			req.Material = up.ID()
+			e.materials.inboxErr = tt.inboxErr
+			e.notes.saveErrs = tt.saveErrs
+
+			if _, err := e.svc.AddMaterial(ctx, req); !errors.Is(err, tt.want) {
+				t.Fatalf("AddMaterial = %v, want %v", err, tt.want)
+			}
+			if got := e.materials.rows[up.ID()].InInbox(); got != tt.wantInbox {
+				t.Fatalf("upload in «Входящие» = %v, want %v", got, tt.wantInbox)
+			}
+			if tt.filed && len(e.materials.unplaced) != 0 {
+				t.Fatalf("a filed upload was moved: %v", e.materials.unplaced)
+			}
+		})
+	}
+}
+
 // RemovePart is the undo of an add into a note that existed: the part goes, the material stays; the last part stays.
 func TestRemovePart(t *testing.T) {
 	e, ctx := newEnv(t), context.Background()

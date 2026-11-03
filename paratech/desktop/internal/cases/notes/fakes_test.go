@@ -116,6 +116,9 @@ type fakeMaterials struct {
 	kinds  []string          // lesson kinds FileNotePart was called with
 	placed []shared.FolderID // folders Place was called with
 	err    error             // returned by FileNotePart when set
+	// unplaced are the materials MoveToInbox was called with; inboxErr is returned by it when set.
+	unplaced []shared.MaterialID
+	inboxErr error
 	// pageErr is returned by PageImage when set.
 	pageErr error
 	// MaterialText: the bytes of each file (a TXT reads them as Markdown), preset texts and errors by material, and
@@ -233,6 +236,24 @@ func (f *fakeMaterials) Place(_ context.Context, id shared.MaterialID, sub share
 		return nil, fmt.Errorf("fake: %w", shared.ErrNotFound)
 	}
 	if _, err := m.Place(sub, folder, t0); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// MoveToInbox returns a material to «Входящие»; inboxErr, when set, is returned instead.
+func (f *fakeMaterials) MoveToInbox(_ context.Context, id shared.MaterialID) (*material.Material, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unplaced = append(f.unplaced, id)
+	if f.inboxErr != nil {
+		return nil, f.inboxErr
+	}
+	m, ok := f.rows[id]
+	if !ok {
+		return nil, fmt.Errorf("fake: %w", shared.ErrNotFound)
+	}
+	if _, err := m.MoveToInbox(t0); err != nil {
 		return nil, err
 	}
 	return m, nil

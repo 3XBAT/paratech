@@ -13,13 +13,16 @@ import (
 	"paratech/desktop/internal/cases/notes"
 	"paratech/desktop/internal/domain/agent/action"
 	"paratech/desktop/internal/domain/agent/values"
+	"paratech/desktop/internal/domain/library/material"
 	"paratech/desktop/internal/domain/library/note"
 	"paratech/desktop/internal/domain/shared"
 )
 
 // note (catalog v10, ADR-0033 §8, §10): «Запиши в конспект» and the changes of «Мой конспект» through the use case of
 // the notes page. The text, the title and the file names are the student's: stored as the page stores them, never
-// logged, never journaled and never sent back to the planner, which gets the note ID and counters only (ADR-0022).
+// logged and never sent back to the planner, which gets the note ID and counters only (ADR-0022). The text and the
+// file names are never journaled; a rename keeps the old and the new title in the local journal (RetitleNote) for Undo
+// and Recover.
 //
 // The subject of a note: an add to a note takes the note's; to a lesson, the library subject the lesson names, else the
 // subject of the request; to a date, the subject of the request (the context chip), none is refused
@@ -102,7 +105,12 @@ func (a *Actions) addToNote(ctx context.Context, at origin, call values.Call, ac
 		into = t.note.ID()
 		in = action.Intent{Target: ref, Before: t.note.Version()}
 	}
+	// Refused before anything is journaled, as the use case refuses it; an upload that is a part already is a no-op first.
+	full := t.note != nil && len(t.note.Parts())+1 > note.MaxParts
 	if act == values.NoteAddText {
+		if full {
+			return prepared{}, notes.ErrTooManyParts
+		}
 		text, _ := args.Text("text")
 		add = func(ctx context.Context) (notes.Added, error) {
 			return a.notes.Paste(ctx, notes.PasteRequest{Note: into, Anchor: t.anchor, Subject: t.subject, Title: title, Text: string(text)})
@@ -124,12 +132,17 @@ func (a *Actions) addToNote(ctx context.Context, at origin, call values.Call, ac
 			if slices.Contains(t.note.Parts(), id) {
 				return prepared{noopNote: &values.NoteWriteRow{Note: in.Target}}, nil
 			}
+			if full {
+				return prepared{}, notes.ErrTooManyParts
+			}
 			// The upload is the one part this add can make: Recover looks for it.
 			part, err := values.NewRef(values.KindMaterial, string(id))
 			if err != nil {
 				return prepared{}, err
 			}
 			in.Next = action.RemoveNotePart{Note: in.Target, Part: part}
+		} else {
+			in.Name = withUpload(t.key, id) // Recover takes a new note as this add's only by this part
 		}
 		add = func(ctx context.Context) (notes.Added, error) {
 			return a.notes.AddMaterial(ctx, notes.MaterialRequest{Note: into, Anchor: t.anchor, Subject: t.subject, Title: title, Material: id})
@@ -145,6 +158,10 @@ func (a *Actions) addToNote(ctx context.Context, at origin, call values.Call, ac
 				}
 			}
 			res, err := add(ctx)
+			if errors.Is(err, notes.ErrAlreadyAdded) && into != "" {
+				// Another add made it a part meanwhile: «уже добавлено», as for a part that was there before.
+				return a.alreadyAdded(ctx, in.Target), nil
+			}
 			if err != nil {
 				return effect{}, err
 			}
@@ -172,7 +189,10 @@ func (a *Actions) noteTarget(ctx context.Context, at origin, args values.Args) (
 		if err != nil {
 			return noteTarget{}, err
 		}
-		t = noteTarget{subject: sub, anchor: notes.AnchorRef{Kind: note.AnchorLesson, Lesson: id}, key: lessonKey + string(id)}
+		t = noteTarget{
+			subject: sub, anchor: notes.AnchorRef{Kind: note.AnchorLesson, Lesson: id},
+			key: lessonKey + string(id) + ":" + string(sub),
+		}
 		lecture = notes.Lecture{Lesson: id}
 	} else {
 		d, _ := args.Date("date")
@@ -189,7 +209,8 @@ func (a *Actions) noteTarget(ctx context.Context, at origin, args values.Args) (
 		}
 		lecture = notes.Lecture{Subject: at.subject, Date: day}
 	}
-	// A subject that is not in the library (removed meanwhile, TASK-288/308) takes no notes.
+	// A subject that is not in the library (removed meanwhile, TASK-288/308) takes no notes. Its ErrSubjectNotFound
+	// answers unknown_id (noteRefusal), also for the subject of the request: the planner holds an ID that is gone.
 	if _, err := a.subject(ctx, t.subject); err != nil {
 		return noteTarget{}, err
 	}
@@ -201,27 +222,52 @@ func (a *Actions) noteTarget(ctx context.Context, at origin, args values.Args) (
 	return t, nil
 }
 
-// Keys of the lecture of an add that makes a note, in Intent.Name.
+// Keys of the lecture of an add that makes a note, in Intent.Name: the lesson or the date, ':' and the subject, then
+// for an upload '|' and its ID. IDs hold neither ':' nor '|' (shared.validateID).
 const (
 	lessonKey = "note:lesson:"
-	dayKey    = "note:day:" // then the date, ':' and the subject
+	dayKey    = "note:day:"
+	uploadSep = "|"
 )
 
-// lectureOfKey reads a key back; ok is false for anything else.
-func lectureOfKey(key string) (l notes.Lecture, sub shared.SubjectID, ok bool) {
-	if id, found := strings.CutPrefix(key, lessonKey); found && id != "" {
-		return notes.Lecture{Lesson: shared.LessonID(id)}, "", true
+// newNoteKey is a key read back.
+type newNoteKey struct {
+	lecture notes.Lecture
+	subject shared.SubjectID
+	upload  shared.MaterialID // "": an add of a text
+}
+
+// withUpload is the key of an add of the upload id.
+func withUpload(key string, id shared.MaterialID) string { return key + uploadSep + string(id) }
+
+// parseNoteKey reads a key back; ok is false for anything else.
+func parseNoteKey(key string) (k newNoteKey, ok bool) {
+	key, up, hasUpload := strings.Cut(key, uploadSep)
+	if hasUpload {
+		if up == "" {
+			return newNoteKey{}, false
+		}
+		k.upload = shared.MaterialID(up)
+	}
+	if rest, found := strings.CutPrefix(key, lessonKey); found {
+		id, s, found := strings.Cut(rest, ":")
+		if !found || id == "" || s == "" {
+			return newNoteKey{}, false
+		}
+		k.lecture, k.subject = notes.Lecture{Lesson: shared.LessonID(id)}, shared.SubjectID(s)
+		return k, true
 	}
 	rest, found := strings.CutPrefix(key, dayKey)
 	if !found {
-		return notes.Lecture{}, "", false
+		return newNoteKey{}, false
 	}
 	date, s, found := strings.Cut(rest, ":")
 	d, err := note.ParseDate(date)
 	if !found || err != nil || s == "" {
-		return notes.Lecture{}, "", false
+		return newNoteKey{}, false
 	}
-	return notes.Lecture{Subject: shared.SubjectID(s), Date: d}, shared.SubjectID(s), true
+	k.lecture, k.subject = notes.Lecture{Subject: shared.SubjectID(s), Date: d}, shared.SubjectID(s)
+	return k, true
 }
 
 // lessonSubject is the library subject a lesson names, else the subject of the request.
@@ -282,6 +328,16 @@ func addEffect(res notes.Added) (effect, error) {
 	}
 	row.Changed = true
 	return effect{comp: action.RemoveNotePart{Note: ref, Part: materialRef(p.Material)}, version: n.Version(), note: &row}, nil
+}
+
+// alreadyAdded is the effect of an add whose part the note got meanwhile: nothing changed, no «Отменить»; the counter
+// is the note's now, when it can be read.
+func (a *Actions) alreadyAdded(ctx context.Context, ref values.Ref) effect {
+	row := values.NoteWriteRow{Note: ref}
+	if v, err := a.notes.Note(ctx, shared.NoteID(ref.ID())); err == nil {
+		row.Parts = len(v.Note.Parts())
+	}
+	return effect{note: &row, failed: true}
 }
 
 // moveNote attaches the note to a lesson or to a day of its own subject; Undo puts back the anchor read here.
@@ -424,8 +480,10 @@ func noteRefusal(tool values.Tool, err error) (values.Refusal, bool) {
 		return values.RefuseNotFound, true
 	case errors.Is(err, errNoteNeedsSubject), errors.Is(err, notes.ErrEmptyTitle), errors.Is(err, notes.ErrEmptyText),
 		errors.Is(err, notes.ErrInvalidText), errors.Is(err, notes.ErrTextTooLarge), errors.Is(err, notes.ErrOtherSubject),
-		errors.Is(err, notes.ErrInvalidRequest):
+		errors.Is(err, notes.ErrInvalidRequest), errors.Is(err, notes.ErrTooManyParts):
 		return values.RefuseInvalidArgs, true
+	case errors.Is(err, notes.ErrBusy):
+		return values.RefuseNotNow, true // the note kept changing under the save: later
 	}
 	return "", false
 }
@@ -551,14 +609,15 @@ func (a *Actions) observeNote(ctx context.Context, in action.Intent, since time.
 	}
 }
 
-// observeNewNote finds the note an add made: the one active note of its lecture made at or after the entry. Another
-// note of the lecture changed since means the add may have gone into it: unknown.
+// observeNewNote finds the note an add made: the one active note of its lecture and subject made at or after the entry,
+// and only when this add made it (madeBy). Another note of the lecture changed since, or a new note the student may
+// have made, is unknown: Undo would remove the student's note.
 func (a *Actions) observeNewNote(ctx context.Context, in action.Intent, since time.Time) (action.Observation, error) {
-	l, sub, ok := lectureOfKey(in.Name)
+	k, ok := parseNoteKey(in.Name)
 	if !ok {
 		return action.Observation{}, nil
 	}
-	views, err := a.notes.ForLesson(ctx, l)
+	views, err := a.notes.ForLesson(ctx, k.lecture)
 	if err != nil {
 		return action.Observation{}, err
 	}
@@ -566,7 +625,7 @@ func (a *Actions) observeNewNote(ctx context.Context, in action.Intent, since ti
 	for _, v := range views {
 		n := v.Note
 		switch {
-		case sub != "" && n.Subject() != sub:
+		case n.Subject() != k.subject:
 		case !n.CreatedAt().Before(since):
 			made = append(made, n)
 		case !n.UpdatedAt().Before(since):
@@ -577,6 +636,10 @@ func (a *Actions) observeNewNote(ctx context.Context, in action.Intent, since ti
 	case 0:
 		return action.Observation{Known: true}, nil
 	case 1:
+		mine, err := a.madeBy(ctx, made[0], k, since)
+		if err != nil || !mine {
+			return action.Observation{}, err
+		}
 		ref, err := noteRef(made[0].ID())
 		if err != nil {
 			return action.Observation{}, err
@@ -584,6 +647,26 @@ func (a *Actions) observeNewNote(ctx context.Context, in action.Intent, since ti
 		return action.Observation{Known: true, Version: made[0].Version(), Effect: true, Compensation: action.RemoveNote{Note: ref}}, nil
 	}
 	return action.Observation{}, nil
+}
+
+// madeBy reports whether the add of key k made the note n: its only part is the upload of the add, or, for a text, a
+// TXT material stored at or after the entry (a text the library had before cannot be told from the student's).
+func (a *Actions) madeBy(ctx context.Context, n *note.Note, k newNoteKey, since time.Time) (bool, error) {
+	parts := n.Parts()
+	if len(parts) != 1 {
+		return false, nil
+	}
+	if k.upload != "" {
+		return parts[0] == k.upload, nil
+	}
+	m, err := a.library.Material(ctx, parts[0])
+	switch {
+	case errors.Is(err, library.ErrMaterialNotFound), errors.Is(err, shared.ErrNotFound):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	return m.Type() == material.TypeTXT && !m.CreatedAt().Before(since), nil
 }
 
 // replayNote rebuilds the result of a note call from its compensation; an add shows the parts the note has now.
@@ -601,6 +684,10 @@ func (t tools) replayNote(ctx context.Context, c agentturn.Call, comp action.Com
 	_, part := comp.(action.RemoveNotePart)
 	if created || part {
 		row.Created = created
+		// Without the use case wired the replay answers without the counter.
+		if t.actions.notes == nil {
+			return t.noteResult(c, row, nil), true
+		}
 		if v, err := t.actions.notes.Note(ctx, id); err == nil {
 			row.Parts = len(v.Note.Parts())
 		}

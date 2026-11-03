@@ -110,7 +110,8 @@ func (s *memNoteStore) state(t *testing.T, id shared.NoteID) note.State {
 // noteMaterials is the library of the notes over memLibrary: one material per content, a new one filed under the
 // subject in the system folder of the lesson kind, as library.FileNotePart does.
 type noteMaterials struct {
-	lib *memLibrary
+	lib   *memLibrary
+	clock *noteClock // the time a new material is stored at, as the journal reads it
 }
 
 func (m noteMaterials) FileNotePart(_ context.Context, sub shared.SubjectID, kind, name string, data []byte) (*material.Material, bool, error) {
@@ -126,7 +127,7 @@ func (m noteMaterials) FileNotePart(_ context.Context, sub shared.SubjectID, kin
 	m.lib.next++
 	x, err := material.New(material.Spec{
 		ID: shared.MaterialID(fmt.Sprintf("m-new%d", m.lib.next)), Digest: d, Size: int64(len(data)), Type: material.TypeTXT, Name: name,
-	}, now)
+	}, m.clock.Now())
 	if err != nil {
 		return nil, false, err
 	}
@@ -147,6 +148,10 @@ func (m noteMaterials) Material(_ context.Context, id shared.MaterialID) (*mater
 
 func (m noteMaterials) Place(ctx context.Context, id shared.MaterialID, sub shared.SubjectID, folder shared.FolderID) (*material.Material, error) {
 	return m.lib.Place(ctx, id, sub, folder)
+}
+
+func (m noteMaterials) MoveToInbox(ctx context.Context, id shared.MaterialID) (*material.Material, error) {
+	return m.lib.MoveToInbox(ctx, id)
 }
 
 func (noteMaterials) PageImage(_ context.Context, id shared.MaterialID) (*material.Material, []byte, error) {
@@ -235,7 +240,7 @@ func newNotesWorld(t *testing.T) *notesWorld {
 	clock := &noteClock{at: now}
 	var err error
 	nw.notes, err = notes.New(notes.Deps{
-		Notes: nw.noteStore, Materials: noteMaterials{lib: w.lib}, Recordings: noRecordings{}, Lessons: lessons, Clock: clock,
+		Notes: nw.noteStore, Materials: noteMaterials{lib: w.lib, clock: clock}, Recordings: noRecordings{}, Lessons: lessons, Clock: clock,
 		IDs: &seqNoteIDs{n: 1}, Log: log,
 	})
 	if err != nil {

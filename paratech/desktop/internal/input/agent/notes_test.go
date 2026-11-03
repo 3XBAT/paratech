@@ -297,6 +297,8 @@ func TestNoteRefusals(t *testing.T) {
 		{"rename a note of a removed subject", "", removeS1, `{"action":"rename","note":"n1","title":"x"}`, values.RefuseUnknownID},
 		{"a day of a removed subject", "s1", removeS1, addText(`"date":"2026-10-16"`), values.RefuseUnknownID},
 		{"a lesson whose subject is removed", "", removeS1, addText(`"lesson":"l1"`), values.RefuseInvalidArgs},
+		{"a text into a full note", "", fillN1, addText(`"note":"n1"`), values.RefuseInvalidArgs},
+		{"an upload into a full note", "", fillN1, `{"action":"add_upload","note":"n1","upload":"up1"}`, values.RefuseInvalidArgs},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -319,6 +321,65 @@ func TestNoteRefusals(t *testing.T) {
 			}
 			noSecret(t, nw, r)
 		})
+	}
+}
+
+// fillN1 gives n1 as many parts as a note holds.
+func fillN1(_ *testing.T, nw *notesWorld) {
+	nw.noteStore.mu.Lock()
+	defer nw.noteStore.mu.Unlock()
+	st := nw.noteStore.rows["n1"]
+	for i := len(st.Parts); i < note.MaxParts; i++ {
+		st.Parts = append(st.Parts, shared.MaterialID(fmt.Sprintf("m-full%d", i)))
+	}
+	nw.noteStore.rows["n1"] = st
+}
+
+// The errors of the use case the generic map does not know get their own enum.
+func TestNoteRefusalOfUseCaseErrors(t *testing.T) {
+	tests := []struct {
+		err  error
+		want values.Refusal
+	}{
+		{notes.ErrTooManyParts, values.RefuseInvalidArgs},
+		{fmt.Errorf("wrapped: %w", notes.ErrTooManyParts), values.RefuseInvalidArgs},
+		{notes.ErrBusy, values.RefuseNotNow},
+		{notes.ErrNoteNotFound, values.RefuseUnknownID},
+	}
+	for _, tt := range tests {
+		if got, ok := noteRefusal(values.ToolNote, tt.err); !ok || got != tt.want {
+			t.Errorf("noteRefusal(%v) = %q, %v; want %q", tt.err, got, ok, tt.want)
+		}
+	}
+	if _, ok := noteRefusal(values.ToolCreateAssignment, notes.ErrBusy); ok {
+		t.Error("noteRefusal mapped an error of another tool")
+	}
+}
+
+// The key of an add that makes a note names the lecture, the subject and the upload; anything else is not a key.
+func TestParseNoteKey(t *testing.T) {
+	day := mustNoteDate(t, "2026-10-16")
+	tests := []struct {
+		key  string
+		want newNoteKey
+		ok   bool
+	}{
+		{"note:lesson:l1:s1", newNoteKey{lecture: notes.Lecture{Lesson: "l1"}, subject: "s1"}, true},
+		{"note:lesson:l1:s1|up1", newNoteKey{lecture: notes.Lecture{Lesson: "l1"}, subject: "s1", upload: "up1"}, true},
+		{"note:day:2026-10-16:s1", newNoteKey{lecture: notes.Lecture{Subject: "s1", Date: day}, subject: "s1"}, true},
+		{"note:day:2026-10-16:s1|up1", newNoteKey{lecture: notes.Lecture{Subject: "s1", Date: day}, subject: "s1", upload: "up1"}, true},
+		{"note:lesson:l1", newNoteKey{}, false},
+		{"note:lesson::s1", newNoteKey{}, false},
+		{"note:lesson:l1:s1|", newNoteKey{}, false},
+		{"note:day:2026-13-01:s1", newNoteKey{}, false},
+		{"note:day:2026-10-16", newNoteKey{}, false},
+		{"Физика", newNoteKey{}, false},
+	}
+	for _, tt := range tests {
+		got, ok := parseNoteKey(tt.key)
+		if ok != tt.ok || got != tt.want {
+			t.Errorf("parseNoteKey(%q) = %+v, %v; want %+v, %v", tt.key, got, ok, tt.want, tt.ok)
+		}
 	}
 }
 
@@ -346,6 +407,21 @@ func TestNoteTextIsNeverLogged(t *testing.T) {
 		t.Fatal("the failure was not logged at all")
 	}
 	noSecret(t, nw, r)
+}
+
+// An add_upload whose note is not saved leaves the upload in «Входящие», where the panel showed it.
+func TestNoteFailedUploadStaysInTheInbox(t *testing.T) {
+	for _, args := range []string{`{"action":"add_upload","note":"n1","upload":"up1"}`, `{"action":"add_upload","date":"2026-10-16","upload":"up1"}`} {
+		nw := newNotesWorld(t)
+		nw.noteStore.saveErr = errors.New("disk I/O error")
+		r, e := nw.run(t, inScope(t, "s1"), "c1", args)
+		if r.out.Result.ResultJSON != `{"error":"failed"}` || e.Status != action.StatusFailed {
+			t.Fatalf("%s: result %+v, entry %+v", args, r.out.Result, e)
+		}
+		if !nw.lib.materials["up1"].InInbox() {
+			t.Fatalf("%s: the upload of a failed add stayed filed", args)
+		}
+	}
 }
 
 // Undo of each action whose note changed since is «Изменено после»; nothing is written back.
@@ -502,6 +578,72 @@ func TestNoteRecover(t *testing.T) {
 			}
 		}
 	})
+
+	// The add that would make a note never ran, and the student made a note of the lecture meanwhile: Recover never
+	// takes the student's note for the add's (its Undo would remove it).
+	inS1 := func(t *testing.T) agentturn.Step { return inScope(t, "s1") }
+	l1 := notes.AnchorRef{Kind: note.AnchorLesson, Lesson: "l1"}
+	day16 := notes.AnchorRef{Kind: note.AnchorDay, Date: mustNoteDate(t, "2026-10-16")}
+	students := []struct {
+		name    string
+		args    string
+		student func(t *testing.T, nw *notesWorld)
+		want    action.Status
+	}{
+		{"a note of two parts made for a text: UNKNOWN", addText(`"date":"2026-10-16"`), func(t *testing.T, nw *notesWorld) {
+			if _, err := nw.notes.Add(t.Context(), notes.AddRequest{Anchor: day16, Subject: "s1", Uploads: []notes.Upload{
+				{Name: "a.txt", Data: []byte("первое")}, {Name: "b.txt", Data: []byte("второе")},
+			}}); err != nil {
+				t.Fatal(err)
+			}
+		}, action.StatusUnknown},
+		{"a note of two parts made for an upload: UNKNOWN", `{"action":"add_upload","lesson":"l1","upload":"up1"}`, func(t *testing.T, nw *notesWorld) {
+			if _, err := nw.notes.Add(t.Context(), notes.AddRequest{Anchor: l1, Subject: "s1", Uploads: []notes.Upload{
+				{Name: "a.txt", Data: []byte("первое")}, {Name: "b.txt", Data: []byte("второе")},
+			}}); err != nil {
+				t.Fatal(err)
+			}
+		}, action.StatusUnknown},
+		{"a note of another upload: UNKNOWN", `{"action":"add_upload","lesson":"l1","upload":"up1"}`, func(t *testing.T, nw *notesWorld) {
+			if _, err := nw.notes.AddMaterial(t.Context(), notes.MaterialRequest{Anchor: l1, Subject: "s1", Material: "up2"}); err != nil {
+				t.Fatal(err)
+			}
+		}, action.StatusUnknown},
+		{"a note of a file the library had before, made for a text: UNKNOWN", addText(`"date":"2026-10-16"`), func(t *testing.T, nw *notesWorld) {
+			if _, err := nw.notes.AddMaterial(t.Context(), notes.MaterialRequest{Anchor: day16, Subject: "s1", Material: "m1"}); err != nil {
+				t.Fatal(err)
+			}
+		}, action.StatusUnknown},
+		{"a note of another subject at the lesson does not count: FAILED", addText(`"lesson":"l1"`), func(t *testing.T, nw *notesWorld) {
+			nw.lib.subjects["s2"] = newSubject(t, "s2", "Химия")
+			if _, err := nw.notes.Paste(t.Context(), notes.PasteRequest{Anchor: l1, Subject: "s2", Text: "своё"}); err != nil {
+				t.Fatal(err)
+			}
+		}, action.StatusFailed},
+	}
+	for _, tt := range students {
+		t.Run(tt.name, func(t *testing.T) {
+			nw := newNotesWorld(t)
+			st := inS1(t)
+			p, ok, err := nw.actions.prepare(t.Context(), originOf(st), call10(t, "c1", values.ToolNote, tt.args, actionpolicy.ClassU).Call)
+			if !ok || err != nil {
+				t.Fatal(ok, err)
+			}
+			if _, err := nw.journal.Begin(t.Context(), agentjournal.BeginInput{Thread: st.Thread, Turn: st.Turn, CallID: "c1",
+				Tool: values.ToolNote, Intent: p.intent}); err != nil {
+				t.Fatal(err)
+			}
+			tt.student(t, nw)
+			before := maps(nw)
+			e := recovered(t, nw.world, "c1")
+			if e.Status != tt.want || e.CanUndo {
+				t.Fatalf("recovered = %+v, want %s without Undo", e, tt.want)
+			}
+			if fmt.Sprint(maps(nw)) != fmt.Sprint(before) {
+				t.Fatal("Recover changed the notes")
+			}
+		})
+	}
 }
 
 func activityRecording(id shared.RecordingID, l shared.LessonID) activity.Recording {
