@@ -193,7 +193,7 @@ export function SubjectPairsTab(props: {
           icon="up"
           {...importFocus.openerProps}
           disabled={importBusy}
-          title={importBusy ? pairsTexts.importBusy : undefined}
+          disabledReason={importTexts.importBusy}
           onClick={() => setForm(importOpen ? "none" : "import")}
         >
           {importTexts.open}
@@ -202,7 +202,7 @@ export function SubjectPairsTab(props: {
           subject={kbSubject}
           lectures={data.lessons}
           open={form === "past"}
-          busyReason={importBusy ? pairsTexts.importBusy : undefined}
+          busyReason={importBusy ? importTexts.importBusy : undefined}
           onOpenChange={(o) => setForm(o ? "past" : "none")}
           onChoose={(c: PastChoice) => open(pastLesson(kbSubject, c))}
         />

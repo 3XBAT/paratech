@@ -414,6 +414,8 @@ function SubjectView(props: {
   const today = useMemo(() => todayApi(callByName), []);
   const [importOpen, setImportOpen] = useState(false);
   const importFocus = useDisclosureFocus(importOpen);
+  // While an import runs the opener stays off: closing the panel would lose the result.
+  const [importBusy, setImportBusy] = useState(false);
   const [imports, setImports] = useState(0);
   const nothingToExport = lessons !== null && lessons.every(isNoteOnly);
   const exportTip = nothingToExport ? exportEmptyHint : exportHint;
@@ -474,7 +476,13 @@ function SubjectView(props: {
           <p className="small muted num kb-sub">{subjectMeta(count)}</p>
         </div>
         <div className="head-acts">
-          <Button icon="up" {...importFocus.openerProps} onClick={() => setImportOpen((open) => !open)}>
+          <Button
+            icon="up"
+            {...importFocus.openerProps}
+            disabled={importBusy}
+            disabledReason={importTexts.importBusy}
+            onClick={() => setImportOpen((open) => !open)}
+          >
             {importTexts.open}
           </Button>
           <IconAction
@@ -496,6 +504,7 @@ function SubjectView(props: {
           loadLessons={async () => (await today.today()).lessons}
           subject={subject.noSubject ? "" : subject.name}
           onImported={() => setImports((n) => n + 1)}
+          onBusyChange={setImportBusy}
           onClose={() => setImportOpen(false)}
         />
       )}

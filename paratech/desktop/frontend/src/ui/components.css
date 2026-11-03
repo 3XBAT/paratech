@@ -22,21 +22,22 @@
   transition: background var(--t-fast), transform var(--t-fast) var(--ease);
 }
 .btn .i { width: 16px; height: 16px; color: var(--muted); }
-.btn:hover:enabled { background: var(--fill); }
-.btn:active:enabled { background: var(--fill-2); transform: translateY(1px); }
+.btn:hover:enabled:not([aria-disabled="true"]) { background: var(--fill); }
+.btn:active:enabled:not([aria-disabled="true"]) { background: var(--fill-2); transform: translateY(1px); }
 .btn.primary { background: var(--prim); box-shadow: var(--sh-btn); color: var(--on-prim); }
 .btn.primary .i, .btn.danger .i, .btn.ghost .i { color: currentColor; }
-.btn.primary:hover:enabled, .btn.primary:active:enabled { background: var(--prim); opacity: .9; }
+.btn.primary:hover:enabled:not([aria-disabled="true"]), .btn.primary:active:enabled:not([aria-disabled="true"]) { background: var(--prim); opacity: .9; }
 /* A link-like button: accent text; on the hover fill the text turns plain (no accent text on --fill). */
 .btn.ghost { background: none; box-shadow: none; color: var(--accent); }
-.btn.ghost:hover:enabled, .btn.ghost:active:enabled { background: var(--fill); color: var(--text); }
+.btn.ghost:hover:enabled:not([aria-disabled="true"]), .btn.ghost:active:enabled:not([aria-disabled="true"]) { background: var(--fill); color: var(--text); }
 /* Danger: a normal button with red text, no red ring (TASK-367). */
 .btn.danger { color: var(--rec-t); }
 /* «Остановить»: a normal button, only its square is red (and filled). */
 .btn.stop .i { color: var(--rec-t); fill: currentColor; }
 .btn.sm { min-height: var(--h-sm); padding: 0 8px; font-size: var(--fs-small); line-height: var(--lh-small); }
 .btn.lg { min-height: var(--h-lg); font-size: var(--fs-body); }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
+/* aria-disabled keeps the focus on the button (a native disabled one drops it): the same look, the caller makes onClick a no-op. */
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
 .btn-labels { display: inline-grid; }
 .btn-labels > * { grid-area: 1 / 1; }
 .btn-labels > .btn-off { visibility: hidden; }

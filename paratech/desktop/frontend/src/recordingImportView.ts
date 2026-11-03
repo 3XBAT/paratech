@@ -25,6 +25,9 @@ export const importTexts = {
   titleLabel: "Название (необязательно)",
   choose: "Выбрать файл и импортировать",
   importing: "Импорт…",
+  loading: "Загрузка…",
+  /** The reason the opener and the forms next to it do not switch while an import runs (the panel would be lost with its result). */
+  importBusy: "Недоступно, пока идёт импорт записи.",
   close: "Закрыть",
   cancelled: "Файл не выбран, импорт отменён.",
   queued: "Расшифровка поставлена в очередь, ход виден в списке записей.",

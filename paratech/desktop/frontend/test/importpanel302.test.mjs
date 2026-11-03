@@ -113,6 +113,56 @@ test("RecordingsPage: one focus mechanism, the empty-state effect leaves a focus
   assert.match(text, /if \(!target\?\.contains\(document\.activeElement\)\)/);
 });
 
+test("busy primary button: aria-disabled, not native disabled (the focus stays), and a no-op on click", () => {
+  const panel = src("pages/RecordingImportPanel.tsx");
+  const primary = /<Button\s+variant="primary"[\s\S]*?<\/Button>/.exec(panel)?.[0] ?? "";
+  assert.notEqual(primary, "");
+  assert.match(primary, /aria-disabled=\{busy \|\| undefined\}/);
+  assert.match(primary, /onClick=\{\(\) => \(busy \? undefined : void onChoose\(\)\)\}/);
+  assert.doesNotMatch(primary, /\sdisabled=/, "a natively disabled button drops the focus to <body>");
+  // «Закрыть» may be disabled: the focus is not on it.
+  assert.match(panel, /<Button variant="ghost" disabled=\{busy\}/);
+  // The Button passes aria-disabled through and does not add the native attribute.
+  const html = renderToStaticMarkup(h(Button, { variant: "primary", busy: true, busyLabel: "Импорт…", "aria-disabled": true }, "Выбрать"));
+  assert.match(html, /aria-disabled="true"/);
+  assert.doesNotMatch(html, /\sdisabled/);
+  // The look is the disabled look.
+  const css = src("ui/components.css");
+  assert.match(css, /\.btn:disabled, \.btn\[aria-disabled="true"\] \{ opacity: \.5; cursor: not-allowed; \}/);
+  for (const sel of [".btn", ".btn.primary", ".btn.ghost"]) {
+    assert.ok(css.includes(`${sel}:hover:enabled:not([aria-disabled="true"])`), `${sel}: no hover effect on an aria-disabled button`);
+  }
+});
+
+test("busy form: the fields are disabled and look quiet; the loading line is a status", () => {
+  const panel = src("pages/RecordingImportPanel.tsx");
+  assert.doesNotMatch(panel, /readOnly/);
+  assert.equal((panel.match(/disabled=\{busy\}/g) ?? []).length, 8, "mode, lesson, date, time, subject, kind, title, close");
+  assert.match(src("styles.css"), /\.rec-import-panel \.input:disabled[^{]*\{ opacity: \.5;/);
+  assert.match(panel, /role=\{lessons === null \? "status" : undefined\}/);
+  assert.equal(importTexts.loading, "Загрузка…");
+});
+
+test("all three openers are off while an import runs, with the visible reason; the panel tells the page", () => {
+  assert.equal(importTexts.importBusy, "Недоступно, пока идёт импорт записи.");
+  for (const page of ["pages/RecordingsPage.tsx", "pages/SubjectPairsTab.tsx", "pages/KnowledgeBasePage.tsx"]) {
+    const text = src(page);
+    assert.match(text, /onBusyChange=\{setImportBusy\}/, page);
+    assert.match(text, /disabled=\{importBusy\}\s+disabledReason=\{importTexts\.importBusy\}/, page);
+    assert.doesNotMatch(text, /title=\{importBusy/, `${page}: the reason is visible text, not a title`);
+  }
+  // The opener of RecordingsPage is one element used in the head and in the empty state, found by id, not by place.
+  const rec = src("pages/RecordingsPage.tsx");
+  assert.match(rec, /const importButton = \(\s+<Button\s+icon="up"\s+\{\.\.\.importFocus\.openerProps\}/);
+});
+
+test("RecordingsPage reuses firstControlSelector instead of its own copies", () => {
+  const rec = src("pages/RecordingsPage.tsx");
+  assert.doesNotMatch(rec, /"button:not\(:disabled\), input:not\(:disabled\)"/);
+  assert.equal((rec.match(/querySelector<HTMLElement>\(firstControlSelector\)/g) ?? []).length, 2);
+  assert.match(rec, /import \{ firstControlSelector \} from "\.\.\/disclosureFocus";/);
+});
+
 test("the open button keeps its text; no new visible text on the panel", () => {
   assert.equal(importTexts.open, "Импортировать запись");
 });

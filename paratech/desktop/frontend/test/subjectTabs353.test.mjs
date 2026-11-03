@@ -20,6 +20,7 @@ import {
   routeToSubjectTab,
   routeToTickets,
 } from "../.test-build/nav.js";
+import { importTexts } from "../.test-build/recordingImportView.js";
 import { currentRoute, goBack, goForward, newHistory, pushRoute, sameRoute } from "../.test-build/navHistory.js";
 import {
   addFileId,
@@ -243,18 +244,19 @@ test("«Импортировать запись» and «Добавить кон�
 });
 
 test("while a recording is imported the forms of «Пары» do not switch (the panel would be lost with its result), and they say why", () => {
-  assert.equal(pairsTexts.importBusy, "Недоступно, пока идёт импорт записи.");
+  // The text moved to importTexts (TASK-302): the opener of all three pages shares it.
+  assert.equal(importTexts.importBusy, "Недоступно, пока идёт импорт записи.");
   const past = (extra) => html(h(AddPastNote, { subject: { subjectId: "s1", noSubject: false }, lectures: [], onChoose: noop, today: "2026-11-03", ...extra }));
   const idle = past({});
   assert.doesNotMatch(idle, /disabled|Недоступно/);
-  const busy = past({ busyReason: pairsTexts.importBusy });
+  const busy = past({ busyReason: importTexts.importBusy });
   assert.match(busy, /<button[^>]*aria-describedby="[^"]*"[^>]*disabled=""[^>]*>[^]*?Добавить конспект прошедшей пары/);
   assert.match(busy, /<span id="[^"]*" class="small muted">Недоступно, пока идёт импорт записи\.<\/span>/, "the reason is visible text");
   // The panel tells the page; the page turns both buttons off.
   const tab = src("pages/SubjectPairsTab.tsx");
   assert.match(tab, /onBusyChange=\{setImportBusy\}/);
-  assert.match(tab, /busyReason=\{importBusy \? pairsTexts\.importBusy : undefined\}/);
-  assert.match(tab, /disabled=\{importBusy\}\s+title=\{importBusy \? pairsTexts\.importBusy : undefined\}/);
+  assert.match(tab, /busyReason=\{importBusy \? importTexts\.importBusy : undefined\}/);
+  assert.match(tab, /disabled=\{importBusy\}\s+disabledReason=\{importTexts\.importBusy\}/);
   const panel = src("pages/RecordingImportPanel.tsx");
   assert.match(panel, /onBusyChange\?: \(busy: boolean\) => void;/);
   assert.match(panel, /onBusyChange\?\.\(busy\);/);
