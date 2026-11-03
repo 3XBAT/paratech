@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"paratech/desktop/internal/cases/activity"
 	"paratech/desktop/internal/cases/agentjournal"
@@ -19,21 +20,43 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// secret is the student's text of the tests: it must never reach the planner, a card or the log.
+// secret is the student's text of the tests: it must never reach the planner, the journal or the log, and a card only
+// as the excerpt of its own action line (TASK-324).
 const secret = "Секретная мысль про импульс"
+
+// secretExcerpt is the excerpt the action line of an add of addText shows.
+const secretExcerpt = secret + "\nвторая строка"
 
 func addText(target string) string {
 	return `{"action":"add_text",` + target + `,"text":"` + secret + `\nвторая строка"}`
 }
 
-// noSecret fails when the student's text or title reached the planner, a card or the log.
+// noSecret fails when the student's text or title reached the planner, a card other than the excerpt of the action
+// line, or the log, and when the text reached the journal (its rows, intents included; a rename journals its titles).
 func noSecret(t *testing.T, nw *notesWorld, r ran, words ...string) {
 	t.Helper()
-	for _, s := range []string{r.out.Result.ResultJSON, fmt.Sprint(r.cards), nw.log.String()} {
-		for _, w := range append(words, secret, "вторая строка") {
+	cards := make([]values.Card, 0, len(r.cards))
+	for _, c := range r.cards {
+		if l, ok := c.(values.ActionLine); ok {
+			l.Result.Excerpt = ""
+			c = l
+		}
+		cards = append(cards, c)
+	}
+	text := []string{secret, "вторая строка"}
+	for _, s := range []string{r.out.Result.ResultJSON, fmt.Sprint(cards), nw.log.String()} {
+		for _, w := range append(words, text...) {
 			if strings.Contains(s, w) {
 				t.Fatalf("%q reached the planner, a card or the log: %s", w, s)
 			}
+		}
+	}
+	nw.store.mu.Lock()
+	journal := fmt.Sprintf("%+v", nw.store.states)
+	nw.store.mu.Unlock()
+	for _, w := range text {
+		if strings.Contains(journal, w) {
+			t.Fatalf("%q reached the journal: %s", w, journal)
 		}
 	}
 }
@@ -48,12 +71,13 @@ func TestNoteActionsAndUndo(t *testing.T) {
 		args   string
 		result string
 		kind   action.CompensationKind
+		line   values.LineKind                                          // the excerpt is secretExcerpt for note_text
 		check  func(t *testing.T, nw *notesWorld, e agentjournal.Entry) // after the action
 		undone func(t *testing.T, nw *notesWorld)                       // after Undo
 	}{
 		{
 			name: "add_text into the note", args: addText(`"note":"n1"`),
-			result: `{"changed":true,"done":true,"id":"n1","parts":2}`, kind: action.CompRemoveNotePart,
+			result: `{"changed":true,"done":true,"id":"n1","parts":2}`, kind: action.CompRemoveNotePart, line: values.LineNoteText,
 			check: func(t *testing.T, nw *notesWorld, e agentjournal.Entry) {
 				c := e.Compensation.(action.RemoveNotePart)
 				if c.Note != n1 || !slices.Contains(nw.noteStore.state(t, "n1").Parts, shared.MaterialID(c.Part.ID())) {
@@ -72,12 +96,12 @@ func TestNoteActionsAndUndo(t *testing.T) {
 		},
 		{
 			name: "add_text to a day of the request's subject that has a note", st: func(t *testing.T) agentturn.Step { return inScope(t, "s1") },
-			args: addText(`"date":"2026-10-15"`), result: `{"changed":true,"done":true,"id":"n1","parts":2}`, kind: action.CompRemoveNotePart,
+			args: addText(`"date":"2026-10-15"`), result: `{"changed":true,"done":true,"id":"n1","parts":2}`, kind: action.CompRemoveNotePart, line: values.LineNoteText,
 		},
 		{
 			name: "add_text makes the note of a day", st: func(t *testing.T) agentturn.Step { return inScope(t, "s1") },
 			args: addText(`"date":"2026-10-16","title":"Мысли"`), result: `{"changed":true,"created":true,"done":true,"id":"n2","parts":1}`,
-			kind: action.CompRemoveNote,
+			kind: action.CompRemoveNote, line: values.LineNoteText,
 			check: func(t *testing.T, nw *notesWorld, _ agentjournal.Entry) {
 				st := nw.noteStore.state(t, "n2")
 				if st.Subject != "s1" || st.Anchor.Kind() != note.AnchorDay || st.Anchor.Date().String() != "2026-10-16" || st.Title != "Мысли" {
@@ -92,7 +116,7 @@ func TestNoteActionsAndUndo(t *testing.T) {
 		},
 		{
 			name: "add_text makes the note of a lesson, of the lesson's subject", args: addText(`"lesson":"l1"`),
-			result: `{"changed":true,"created":true,"done":true,"id":"n2","parts":1}`, kind: action.CompRemoveNote,
+			result: `{"changed":true,"created":true,"done":true,"id":"n2","parts":1}`, kind: action.CompRemoveNote, line: values.LineNoteText,
 			check: func(t *testing.T, nw *notesWorld, _ agentjournal.Entry) {
 				if st := nw.noteStore.state(t, "n2"); st.Subject != "s1" || st.Anchor.Lesson() != "l1" {
 					t.Fatalf("new note %+v", st)
@@ -101,7 +125,7 @@ func TestNoteActionsAndUndo(t *testing.T) {
 		},
 		{
 			name: "add_upload into the note", args: `{"action":"add_upload","note":"n1","upload":"up1"}`,
-			result: `{"changed":true,"done":true,"id":"n1","parts":2}`, kind: action.CompRemoveNotePart,
+			result: `{"changed":true,"done":true,"id":"n1","parts":2}`, kind: action.CompRemoveNotePart, line: values.LineNoteUpload,
 			check: func(t *testing.T, nw *notesWorld, e agentjournal.Entry) {
 				if e.Compensation != (action.RemoveNotePart{Note: n1, Part: mustRef(t, values.KindMaterial, "up1")}) {
 					t.Fatalf("compensation = %+v", e.Compensation)
@@ -114,11 +138,11 @@ func TestNoteActionsAndUndo(t *testing.T) {
 		{
 			name: "add_upload makes the note of a day", st: func(t *testing.T) agentturn.Step { return inScope(t, "s1") },
 			args: `{"action":"add_upload","date":"2026-10-16","upload":"up1"}`, result: `{"changed":true,"created":true,"done":true,"id":"n2","parts":1}`,
-			kind: action.CompRemoveNote,
+			kind: action.CompRemoveNote, line: values.LineNoteUpload,
 		},
 		{
 			name: "move to a lesson", args: `{"action":"move","note":"n1","lesson":"l1"}`,
-			result: `{"changed":true,"done":true,"id":"n1"}`, kind: action.CompReanchorNote,
+			result: `{"changed":true,"done":true,"id":"n1"}`, kind: action.CompReanchorNote, line: values.LineNoteMove,
 			check: func(t *testing.T, nw *notesWorld, e agentjournal.Entry) {
 				want := action.ReanchorNote{Note: n1, Prior: action.NoteAnchor{Kind: action.AnchorDay, Date: mustDate(t, "2026-10-15")}}
 				if e.Compensation != want || nw.noteStore.state(t, "n1").Anchor.Lesson() != "l1" {
@@ -133,7 +157,7 @@ func TestNoteActionsAndUndo(t *testing.T) {
 		},
 		{
 			name: "move to a day of its own subject, outside any scope", args: `{"action":"move","note":"n1","date":"2026-10-17"}`,
-			result: `{"changed":true,"done":true,"id":"n1"}`, kind: action.CompReanchorNote,
+			result: `{"changed":true,"done":true,"id":"n1"}`, kind: action.CompReanchorNote, line: values.LineNoteMove,
 			check: func(t *testing.T, nw *notesWorld, _ agentjournal.Entry) {
 				if st := nw.noteStore.state(t, "n1"); st.Anchor.Date().String() != "2026-10-17" || st.Subject != "s1" {
 					t.Fatalf("moved %+v", st)
@@ -142,7 +166,7 @@ func TestNoteActionsAndUndo(t *testing.T) {
 		},
 		{
 			name: "rename", args: `{"action":"rename","note":"n1","title":"Импульс, конспект"}`,
-			result: `{"changed":true,"done":true,"id":"n1"}`, kind: action.CompRetitleNote,
+			result: `{"changed":true,"done":true,"id":"n1"}`, kind: action.CompRetitleNote, line: values.LineNoteRename,
 			check: func(t *testing.T, nw *notesWorld, e agentjournal.Entry) {
 				if e.Compensation != (action.RetitleNote{Note: n1, OldTitle: "Моя лекция"}) || nw.noteStore.state(t, "n1").Title != "Импульс, конспект" {
 					t.Fatalf("compensation %+v, title %q", e.Compensation, nw.noteStore.state(t, "n1").Title)
@@ -155,7 +179,7 @@ func TestNoteActionsAndUndo(t *testing.T) {
 			},
 		},
 		{
-			name: "remove", args: `{"action":"remove","note":"n1"}`, result: `{"changed":true,"done":true,"id":"n1"}`, kind: action.CompRestoreNote,
+			name: "remove", args: `{"action":"remove","note":"n1"}`, result: `{"changed":true,"done":true,"id":"n1"}`, kind: action.CompRestoreNote, line: values.LineNoteRemove,
 			check: func(t *testing.T, nw *notesWorld, _ agentjournal.Entry) {
 				if nw.noteStore.state(t, "n1").Status != note.StatusRemoved {
 					t.Fatal("not removed")
@@ -182,8 +206,12 @@ func TestNoteActionsAndUndo(t *testing.T) {
 			if e.Status != action.StatusDone || e.Compensation == nil || e.Compensation.Kind() != tt.kind || !e.CanUndo {
 				t.Fatalf("entry = %+v, want DONE with %s", e, tt.kind)
 			}
-			if len(r.cards) != 1 || r.cards[0] != (values.ActionLine{Action: e.ID}) {
-				t.Fatalf("cards = %v, want the action line with «Отменить»", r.cards)
+			line := values.LineResult{Kind: tt.line}
+			if tt.line == values.LineNoteText {
+				line.Excerpt = secretExcerpt // the start of the student's text, on the line of the live update only
+			}
+			if len(r.cards) != 1 || r.cards[0] != (values.ActionLine{Action: e.ID, Result: line}) {
+				t.Fatalf("cards = %v, want the action line with «Отменить» and %+v", r.cards, line)
 			}
 			noSecret(t, nw, r, "Мысли", "Импульс, конспект", "Моя лекция")
 			if tt.check != nil {
@@ -224,6 +252,43 @@ func TestNoteTextBoundary(t *testing.T) {
 	_, err := values.ParseCallAt("c2", string(values.ToolNote), `{"action":"add_text","note":"n1","text":"`+longest+`ж"}`, values.CatalogWave10)
 	if !errors.Is(err, values.ErrInvalidArguments) {
 		t.Fatalf("4001 characters = %v", err)
+	}
+}
+
+// The line of add_text shows at most three non-blank lines of the saved text, each trimmed and cut to 120 characters,
+// as plain text; none of it reaches the planner, the journal or the log.
+func TestNoteTextLineExcerpt(t *testing.T) {
+	long := strings.Repeat("ж", values.MaxExcerptLineRunes+30)
+	tests := []struct{ name, text, want string }{
+		{"two lines", `раз\nдва`, "раз\nдва"},
+		{"trims and skips blank lines", `  раз  \n\n   \n  два   три`, "раз\nдва три"},
+		{"three lines of five", `1\n2\n3\n4\n5`, "1\n2\n3"},
+		{"a long line cut in characters", long, strings.Repeat("ж", values.MaxExcerptLineRunes-1) + "…"},
+		{"markup stays text", `<b>жирно</b> & \"кавычки\"`, `<b>жирно</b> & "кавычки"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nw := newNotesWorld(t)
+			r, e := nw.run(t, req, "c1", `{"action":"add_text","note":"n1","text":"`+tt.text+`"}`)
+			if r.out.Result.IsError || e.Status != action.StatusDone {
+				t.Fatalf("result %+v, entry %+v", r.out.Result, e)
+			}
+			want := values.ActionLine{Action: e.ID, Result: values.LineResult{Kind: values.LineNoteText, Excerpt: tt.want}}
+			if len(r.cards) != 1 || r.cards[0] != want {
+				t.Fatalf("cards = %+v, want %+v", r.cards, want)
+			}
+			nw.store.mu.Lock()
+			journal := fmt.Sprintf("%+v", nw.store.states)
+			nw.store.mu.Unlock()
+			for _, l := range strings.Split(tt.want, "\n") {
+				if utf8.RuneCountInString(l) < 3 {
+					continue // "1" is in any ID
+				}
+				if strings.Contains(r.out.Result.ResultJSON, l) || strings.Contains(nw.log.String(), l) || strings.Contains(journal, l) {
+					t.Fatalf("%q reached the planner, the log or the journal", l)
+				}
+			}
+		})
 	}
 }
 
@@ -512,6 +577,16 @@ func TestNoteReplay(t *testing.T) {
 		if second.out.Result != first.out.Result || nw.noteStore.state(t, "n1").Version != version || len(nw.store.order) != 1 {
 			t.Fatalf("%s: replay = %+v, first %+v", args, second.out.Result, first.out.Result)
 		}
+		// The text is not in the journal: a replay shows no excerpt and invents none.
+		if s := fmt.Sprint(second.cards); strings.Contains(s, secret) || strings.Contains(s, "вторая строка") {
+			t.Fatalf("%s: the replay shows the text: %s", args, s)
+		}
+		for _, c := range second.cards {
+			if l, ok := c.(values.ActionLine); ok && l.Result.Excerpt != "" {
+				t.Fatalf("%s: the replay line has an excerpt %q", args, l.Result.Excerpt)
+			}
+		}
+		noSecret(t, nw, second)
 	}
 }
 

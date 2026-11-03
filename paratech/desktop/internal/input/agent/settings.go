@@ -157,7 +157,10 @@ func (a *Actions) setSetting(ctx context.Context, call values.Call) (prepared, e
 				if err != nil {
 					return err
 				}
-				e = effect{comp: undo, version: settingVersion(s, after), row: values.WriteRow{Changed: true}}
+				e = effect{
+					comp: undo, version: settingVersion(s, after), row: values.WriteRow{Changed: true},
+					line: values.LineResult{Kind: values.LineSetting, Setting: s, Value: after},
+				}
 				return nil
 			})
 			return e, err

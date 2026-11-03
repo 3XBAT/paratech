@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode, useId, useRef, useState } from "react";
-import type { AnswerInput, AssignmentLineView, DraftView } from "../bindings/agent.js";
+import type { AnswerInput, AssignmentLineView, DraftView, OfferView } from "../bindings/agent.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
@@ -10,6 +10,9 @@ import type { CitationOpening } from "../knowledgeView.js";
 import { type CutReply, replyDraftText, splitDrafts } from "../agentState.js";
 import { AnswerSources } from "./AnswerSources.js";
 import { ConfirmCard } from "./ConfirmCard.js";
+import { ScheduleSubjectsCard } from "./ScheduleCard.js";
+import { type OfferResult, offerReasons } from "../agentOffer.js";
+import type { RestoreCall } from "../subjectRemovalView.js";
 import { WorkWritingCard } from "./WorkCard.js";
 import { MessagePills } from "./MentionParts.js";
 import { Waiting } from "./Waiting.js";
@@ -24,6 +27,7 @@ import {
   type CardModel,
   collectAnswers,
   type EntryModel,
+  type OfferModel,
   skipAnswers,
   texts,
   undoableActions,
@@ -49,6 +53,18 @@ export interface CardActions {
   openAssignment?: (id: string) => void;
   /** Opens the object of a mention pill under the student's text (kind and id as stored). */
   openMention?: (kind: string, id: string) => void;
+  /**
+   * The press of a page button an offer names («Начать запись» under a stopped recording, an offer_button card): the
+   * panel runs the page's own binding for `offer.action` with `offer.target` (agentOffer.ts) and answers how it went;
+   * a refusal is shown beside the button, which stays usable. Absent: no button is drawn.
+   */
+  offer?: (offer: OfferView) => void | Promise<OfferResult | void>;
+  /** The wording of the action line «Отменить» (undo_action) would undo; "" when there is none. */
+  undoTarget?: () => string;
+  /** «Вернуть» of a skipped row of the schedule card, as the «Предметы» page does it. */
+  restore?: (subjectId: string, version: number) => Promise<RestoreCall>;
+  /** Subjects were created, taken back or restored by a card: the pages read them again. */
+  libraryChanged?: () => void;
   /** The core call of the `answer` cards; without it a card lists no sources. */
   answers?: AnswersApi;
   /** Opens the place of a source on «База знаний», by ids. */
@@ -62,6 +78,76 @@ export interface CardActions {
   undoAll(): void;
   /** What «Отменить» of the action did, if it was pressed. */
   undoNote(actionId: string): UndoNote | undefined;
+}
+
+/**
+ * The page's own button an offer names, labelled from the template (never by the model). It calls `actions.offer`; until
+ * the panel wires it nothing is drawn: a dead button helps nobody. A button the version does not have has no model at all.
+ */
+export function OfferButton(props: { offer: OfferModel; actions: CardActions }) {
+  const { offer, actions } = props;
+  if (actions.offer === undefined) {
+    return null;
+  }
+  return (
+    <Button size="sm" variant="secondary" disabled={actions.busy === true} onClick={() => actions.offer?.(offer.offer)}>
+      {offer.label}
+    </Button>
+  );
+}
+
+/**
+ * The offer button with the state of its press: off while the call runs (one click is one call), and the page's reason in
+ * a small muted line beside it when the press did not work. The button stays usable after a refusal; after a job that is
+ * done once (the undo of the latest action) it goes off.
+ */
+export function OfferControl(props: { offer: OfferModel; actions: CardActions }) {
+  const [state, setState] = useState<{ busy: boolean; result: OfferResult | null }>({ busy: false, result: null });
+  const running = useRef(false);
+  const { actions } = props;
+  const press = (offer: OfferView) => {
+    if (running.current) {
+      return;
+    }
+    running.current = true;
+    setState({ busy: true, result: null });
+    Promise.resolve()
+      .then(() => actions.offer?.(offer))
+      .then(
+        (r) => setState({ busy: false, result: r ?? null }),
+        () => setState({ busy: false, result: { ok: false, text: offerReasons.failed } }),
+      )
+      .finally(() => {
+        running.current = false;
+      });
+  };
+  return (
+    <OfferControlView
+      offer={props.offer}
+      actions={{ ...actions, offer: actions.offer === undefined ? undefined : press }}
+      busy={state.busy}
+      result={state.result}
+    />
+  );
+}
+
+/** The offer button for a state of its press (no hooks: the tests render it directly). */
+export function OfferControlView(props: { offer: OfferModel; actions: CardActions; busy: boolean; result: OfferResult | null }) {
+  const { result } = props;
+  const off: CardActions = { ...props.actions, busy: props.actions.busy === true || props.busy || result?.once === true };
+  // The «Отменить» of an offer says what it would undo: the wording of the action line, until it is done.
+  const target = props.offer.offer.action === "undo_action" && result?.once !== true ? (props.actions.undoTarget?.() ?? "") : "";
+  return (
+    <>
+      <OfferButton offer={props.offer} actions={off} />
+      {target !== "" && props.actions.offer !== undefined && <span className="ag-act-note small muted">{target}</span>}
+      {result !== null && result.text !== "" && (
+        <span className="ag-act-note small muted" role="status">
+          {result.text}
+        </span>
+      )}
+    </>
+  );
 }
 
 function Buttons(props: { buttons: ButtonModel[]; busy?: boolean; onPress: (id: ButtonId) => void }) {
@@ -400,16 +486,25 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
         <div className="ag-act">
           <Icon name={note?.done ? "back" : "ok"} />
           <span className="ag-act-tx">
-            {note?.done ? texts.undoDone : card.assignment ? addedAssignmentText(card.assignment, props.actions.subjects ?? {}, props.actions.now ?? new Date()) : card.text}
+            {note?.done ? card.undoneText : card.assignment ? addedAssignmentText(card.assignment, props.actions.subjects ?? {}, props.actions.now ?? new Date()) : card.text}
+            {/* The saved text is the student's own: plain lines, muted, under the sentence; gone once undone. */}
+            {!note?.done && card.detail.map((t, i) => (
+              <span key={i} className="ag-act-ex small muted">
+                {t}
+              </span>
+            ))}
           </span>
           {!note?.done && card.assignment && props.actions.openAssignment && (
             <Button size="sm" variant="ghost" onClick={() => card.assignment && props.actions.openAssignment?.(card.assignment.id)}>
               {openAssignmentLabel}
             </Button>
           )}
-          {!note?.done && (
+          {card.offer !== null && <OfferControl offer={card.offer} actions={props.actions} />}
+          {/* «Остановить» was pressed: the line says «Запись остановлена» and offers a new recording. */}
+          {note?.done === true && card.afterUndoOffer !== null && <OfferControl offer={card.afterUndoOffer} actions={props.actions} />}
+          {!note?.done && card.undo.shown && (
             <Button size="sm" variant="ghost" disabled={!card.undo.enabled || note?.busy === true} onClick={() => props.actions.undo(card.actionId)}>
-              {note?.busy ? texts.undoBusy : card.undo.label}
+              {note?.busy ? card.undo.busyLabel : card.undo.label}
             </Button>
           )}
           {note && !note.done && !note.busy && note.text !== "" && (
@@ -420,6 +515,37 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
         </div>
       );
     }
+    case "schedule":
+      // The check of the «Предметы» review inside the chat; the card reads its rows from the core by the token.
+      return props.actions.confirm !== undefined ? (
+        <ScheduleSubjectsCard
+          key={card.token}
+          api={props.actions.confirm.api}
+          token={card.token}
+          subjects={props.actions.subjects}
+          restore={props.actions.restore}
+          onChanged={props.actions.libraryChanged}
+        />
+      ) : (
+        <section className="ag-card">
+          <p className="muted">{texts.confirmPending}</p>
+        </section>
+      );
+    case "offer":
+      // One button with the page's own label and no heading; until the panel wires the press there is nothing to show.
+      return props.actions.offer === undefined ? null : (
+        <div className="ag-actions ag-offer">
+          <OfferControl offer={card.offer} actions={props.actions} />
+        </div>
+      );
+    case "unknown":
+      // A card kind of a newer core: said honestly and quietly, with nothing to press.
+      return (
+        <div className="ag-stop" role="status">
+          <Icon name="info" />
+          <span className="ag-act-tx">{card.text}</span>
+        </div>
+      );
     case "stopped":
     case "problem":
       return (

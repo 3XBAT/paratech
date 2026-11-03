@@ -155,6 +155,8 @@
 .ag-act, .ag-stop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 32px; padding: 4px 4px 4px 12px; border-radius: var(--r-md); background: var(--panel); box-shadow: 0 0 0 1px var(--edge); font-size: var(--fs-small); line-height: var(--lh-small); }
 .ag-act .i, .ag-stop .i { flex: none; width: 14px; height: 14px; color: var(--muted); }
 .ag-act-tx { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* The saved text of a note under the sentence of its line: the student's own lines, kept as typed. */
+.ag-act-ex { display: block; white-space: pre-wrap; }
 @media (forced-colors: active) {
   .ag-input:focus { outline: 2px solid Highlight; }
 }

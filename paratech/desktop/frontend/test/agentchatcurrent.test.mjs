@@ -40,7 +40,8 @@ test("the update parses identically to the event parser", () => {
   const v = parseCurrent({ problem: "", update });
   assert.equal(v.problem, "");
   assert.deepEqual(v.update, parseUpdate(update));
-  assert.equal(v.update.cards.length, 1);
+  // TASK-324: the card of an unknown kind is kept as an "unknown" card, not dropped.
+  assert.deepEqual(v.update.cards.map((c) => c.kind), ["reply", "unknown"]);
   assert.equal(v.update.cards[0].text, "<b>Привет</b>");
 });
 

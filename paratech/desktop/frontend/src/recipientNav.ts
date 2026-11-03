@@ -11,6 +11,8 @@ export interface RecipientNav {
   openAssignment(assignmentId: string, opts?: { edit?: boolean }): void;
   /** The list of subjects, when a refusal names no subject. */
   openSubjects(): void;
+  /** The list of «Задания» (after a deletion the assignment itself no longer exists). */
+  openAssignments(): void;
 }
 
 /** The window keeps a request to open «Изменить» only while the route still shows that assignment ("" none). */
@@ -18,7 +20,12 @@ export function keepAssignmentEdit(editId: string, route: { page: string; assign
   return editId !== "" && route.page === "homework" && route.assignment === editId ? editId : "";
 }
 
-const none: RecipientNav = { openTeacher: () => undefined, openAssignment: () => undefined, openSubjects: () => undefined };
+const none: RecipientNav = {
+  openTeacher: () => undefined,
+  openAssignment: () => undefined,
+  openSubjects: () => undefined,
+  openAssignments: () => undefined,
+};
 
 export const RecipientNavContext = createContext<RecipientNav>(none);
 
