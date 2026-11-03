@@ -61,16 +61,19 @@ func New(cfg config.Config, log *slog.Logger) (*App, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	// Before any window or tray: an E2E run on the owner's folders never starts.
+	if err := checkE2EDirs(cfg); err != nil {
+		return nil, err
+	}
 
 	// Everything logs through the tee, the Wails logger behind its Info floor too, so the file gets what stderr gets.
 	tee := logfile.NewTee(log.Handler())
 	a := &App{cfg: cfg, log: slog.New(tee), tee: tee, env: productionEnv()}
 	a.startCtx, a.cancelStart = context.WithCancel(context.Background())
 	if !cfg.Headless && !cfg.Recorder {
-		shell, err := wails.New(wails.Options{
-			Name: appName, InstanceID: instanceID, WebviewDataDir: a.cfg.WebviewDataDir, Log: a.log,
-			OpenCore: a.openCore, Started: a.launchStart,
-		})
+		opts := shellOptions(cfg)
+		opts.Log, opts.OpenCore, opts.Started = a.log, a.openCore, a.launchStart
+		shell, err := wails.New(opts)
 		if err != nil {
 			return nil, fmt.Errorf("app: ui shell: %w", err)
 		}
@@ -171,9 +174,17 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 	case a.cfg.DataDir == "":
 		return wails.Core{}, fmt.Errorf("app: no data directory: pass --data-dir or set %s", config.EnvDataDir)
 	}
+	// Again here, as New may be long ago; before the data dir is created.
+	if err := checkE2EDirs(a.cfg); err != nil {
+		return wails.Core{}, err
+	}
 	// Windows ignores the 0o700 mode bits; privacy comes from the per-user %LOCALAPPDATA% ACL (PRD section 13.1).
 	if err := os.MkdirAll(a.cfg.DataDir, 0o700); err != nil {
 		return wails.Core{}, fmt.Errorf("app: create data directory: %w", err)
+	}
+	// By file identity, so only once the data dir exists; before the lock and anything of the owner's profile.
+	if err := checkE2EProfile(a.cfg); err != nil {
+		return wails.Core{}, err
 	}
 
 	// First, before the database: a second instance must not recover the jobs and recordings of a live one.
@@ -185,8 +196,13 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 	closeLog := a.openLogFile()
 	// No path: it lies below the user's profile, and logs go into the support bundle.
 	a.log.Info("instance lock acquired")
-	if a.shell != nil {
+	if e := a.cfg.E2E; e.On() {
+		// The paths are of a synthetic run, not below the owner's data; the runner reads them from the log.
+		a.log.Info("e2e mode on", "data_dir", a.cfg.DataDir, "e2e_dir", e.Dir, "cdp_port", e.CDPPort, "window", e.Window)
+	}
+	if a.shell != nil && !a.cfg.E2E.On() {
 		// Only the instance with the UI: the links bring its window forward, and a second instance never gets here.
+		// Never in E2E mode: the links belong to the owner's app (ADR-0013, ADR-0035).
 		ensureURLScheme(a.env.scheme, os.Executable, a.log)
 	}
 

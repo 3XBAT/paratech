@@ -7,6 +7,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/netip"
+	"net/url"
 	"strings"
 
 	"paratech/desktop/internal/adapters/smtp"
@@ -31,6 +33,38 @@ func (h hubSettings) HubURL(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return s.HubURL(), nil
+}
+
+// hubURLSource is what the Hub client reads its URL from (hubclient.URLSource).
+type hubURLSource interface {
+	HubURL(ctx context.Context) (string, error)
+}
+
+// loopbackHub is the Hub URL source of the E2E mode (ADR-0035 §3): a URL whose host is not this machine reads as not
+// configured, so the jobs park and nothing of a run reaches a real Hub, whichever way the URL was set.
+type loopbackHub struct{ urls hubURLSource }
+
+func (h loopbackHub) HubURL(ctx context.Context) (string, error) {
+	raw, err := h.urls.HubURL(ctx)
+	if err != nil || !loopbackURL(raw) {
+		return "", err
+	}
+	return raw, nil
+}
+
+// loopbackURL reports whether the host of raw is exactly localhost, 127.0.0.1 or ::1 (by net/url, so neither a
+// lookalike name nor user info passes).
+func loopbackURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.User != nil || u.Opaque != "" {
+		return false
+	}
+	host := u.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.Zone() == "" && (ip == netip.MustParseAddr("127.0.0.1") || ip == netip.IPv6Loopback())
 }
 
 // mailSettings is the smtp.AccountSource of the settings: the zero account while no SMTP account is configured. The
