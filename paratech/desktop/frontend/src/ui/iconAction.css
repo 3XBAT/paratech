@@ -1,0 +1,34 @@
+/* The shared icon button (ui/IconAction.tsx, TASK-368) for the small places of the main window, the agent panel and the popup.
+   Muted at rest, the text colour on hover and keyboard focus; the name is a tooltip (hover and focus, Esc hides it) and the
+   aria-label. Needs tokens.css only. */
+.ia { position: relative; display: inline-grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; box-shadow: none; color: var(--muted); font: inherit; cursor: pointer; }
+.ia-sm { width: 28px; height: 28px; }
+.ia .i { width: 16px; height: 16px; color: inherit; }
+.ia:hover:enabled, .ia:focus-visible, .ia-note { background: var(--fill); color: var(--text); }
+.ia-danger:hover:enabled, .ia-danger:focus-visible { color: var(--rec-t); }
+.ia:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ia:disabled { opacity: .5; cursor: not-allowed; }
+.ia[aria-busy="true"]:disabled { opacity: 1; cursor: progress; }
+.ia-vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* A small spinner in place of the icon while the call runs. */
+.ia-spin { width: 14px; height: 14px; box-sizing: border-box; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: ia-spin 1s linear infinite; }
+@keyframes ia-spin { to { transform: rotate(360deg); } }
+
+/* The tooltip is laid out even when hidden (the script measures it); --ia-dx nudges it back into the clipping box. */
+.ia-tip { position: absolute; z-index: 20; width: max-content; max-width: min(240px, 70vw); box-sizing: border-box; padding: 4px 8px; border-radius: var(--r-sm); background: var(--prim); color: var(--on-prim); font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 500; text-align: left; white-space: normal; opacity: 0; pointer-events: none; transition: opacity var(--t-fast); box-shadow: var(--sh-pop); }
+.ia[data-place="above"] .ia-tip { bottom: calc(100% + 4px); left: 50%; transform: translateX(calc(-50% + var(--ia-dx, 0px))); }
+.ia[data-place="below"] .ia-tip { top: calc(100% + 4px); left: 50%; transform: translateX(calc(-50% + var(--ia-dx, 0px))); }
+.ia[data-place="left"] .ia-tip { right: calc(100% + 4px); top: 50%; transform: translateY(-50%); }
+.ia[data-place="right"] .ia-tip { left: calc(100% + 4px); top: 50%; transform: translateY(-50%); }
+/* No room on that side: the other one. */
+.ia[data-place="above"] .ia-tip[data-flip] { bottom: auto; top: calc(100% + 4px); }
+.ia[data-place="below"] .ia-tip[data-flip] { top: auto; bottom: calc(100% + 4px); }
+.ia[data-place="left"] .ia-tip[data-flip] { right: auto; left: calc(100% + 4px); }
+.ia[data-place="right"] .ia-tip[data-flip] { left: auto; right: calc(100% + 4px); }
+.ia:hover .ia-tip, .ia:focus-visible .ia-tip, .ia-note .ia-tip { opacity: 1; }
+/* Esc (WCAG 1.4.13): hidden until the pointer or the focus comes back. */
+.ia[data-dismissed] .ia-tip, .ia-note[data-dismissed] .ia-tip { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) { .ia-tip { transition: none; } .ia-spin { animation: none; } }
+@media (forced-colors: active) { .ia { color: ButtonText; } .ia:disabled { color: GrayText; } .ia-tip { border: 1px solid CanvasText; } }

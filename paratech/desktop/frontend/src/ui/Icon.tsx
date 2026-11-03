@@ -39,7 +39,11 @@ export type IconName =
   | "chevr"
   | "pencil"
   | "archive"
-  | "unarchive";
+  | "unarchive"
+  | "skip"
+  | "open"
+  | "save"
+  | "undo";
 
 /** Rendered once per window, before any Icon. */
 export function IconSprite() {
@@ -180,6 +184,20 @@ export function IconSprite() {
       <symbol id="i-unarchive" viewBox="0 0 24 24">
         <rect x="3.5" y="4.5" width="17" height="4" rx="1" />
         <path d="M5 8.5V18a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 18V8.5M12 16v-5M9.5 13l2.5-2.5 2.5 2.5" />
+      </symbol>
+      {/* TASK-368, drawn by hand in the same 24 grid: skip (a triangle with a bar), open (an arrow out of a box),
+          save (a floppy disk), undo (a curved arrow back). */}
+      <symbol id="i-skip" viewBox="0 0 24 24">
+        <path d="M6 6.5v11l8-5.5zM18 6v12" />
+      </symbol>
+      <symbol id="i-open" viewBox="0 0 24 24">
+        <path d="M14 4h6v6M20 4l-9 9M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10" />
+      </symbol>
+      <symbol id="i-save" viewBox="0 0 24 24">
+        <path d="M5.5 4h10.5l3.5 3.5v11A1.5 1.5 0 0 1 18 20H6a1.5 1.5 0 0 1-1.5-1.5v-13A1.5 1.5 0 0 1 5.5 4zM8 4v5h7V4M8 20v-6h8v6" />
+      </symbol>
+      <symbol id="i-undo" viewBox="0 0 24 24">
+        <path d="M9 14L4 9l5-5M4 9h9a6 6 0 0 1 0 12h-3" />
       </symbol>
     </svg>
   );
