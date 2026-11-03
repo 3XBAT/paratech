@@ -3,7 +3,8 @@
 The agent panel on the right of every main-window screen: the chat header, the request field with `@` mentions, the thread
 of requests and the cards the agent answers with (plan, questions, reply, action line with "Отменить", confirm, work, offer
 button...). It only shows what the Go core publishes and sends the student's clicks back; the planner, the safety classes
-and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `paratech/desktop/frontend/src` unless they start with `paratech/` or `docs/`.
+and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `paratech/desktop/frontend/src` unless they start with `paratech/` or `docs/`;
+`test/...` and `tsconfig.test.json` live in `paratech/desktop/frontend` (not in `src/`).
 
 ## Map
 - `agent/AgentPanel.tsx` - the stateful container: calls `bindings/agent.ts`, listens to `updateEvent` ("agent:update"),
@@ -19,7 +20,7 @@ and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `par
 - Pure logic is outside this folder, in `src/`: `agentView.ts` (texts, `CardModel`, `cardModel`, `entryModel`, `offerSpecs`,
   button labels and icons), `agentState.ts` (panel reducer, no React), `agentOffer.ts` (`offerStep`, `runOffer`),
   `agentMentions.ts`, `agentDraft.ts`, `agentConfirmView.ts`, `agentScheduleView.ts`, `planView.ts`, `workView.ts`, `turnkeyView.ts`.
-- Bindings used: `bindings/agent.ts` (`AgentService`), `agentConfirm.ts`, `turnkey.ts`, `answers.ts`, `library.ts`, `calendar.ts`.
+- Bindings used: `bindings/agent.ts` (`AgentService`), `agentConfirm.ts`, `turnkey.ts`, `answers.ts`, `library.ts`, `calendar.ts`, among others (`transcript.ts`, `recordingDelete.ts`, `recipient.ts`).
   Their Go side is in `paratech/desktop/internal/input/wails` (`agent*.go`, `turnkey.go`, `answers.go`).
 
 ## Where to add
@@ -27,7 +28,8 @@ and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `par
   (`KnownCardKind`, `cardKinds`, the card parser) -> `agentView.ts` (`CardModel` variant and a `case` in `cardModel`) ->
   `agent/XCard.tsx` (a hook-free `XCardView` for tests plus a stateful wrapper) -> a `case` in `Card()` of `agent/AgentCards.tsx`
   -> CSS -> a `test/agent*.test.mjs` and the new files in `../tsconfig.test.json`. A kind the UI does not know is shown as
-  a quiet "unknown" stub, never dropped (`bindings/agent.ts`), so the Go side may ship first.
+  a quiet "unknown" stub, never dropped (`bindings/agent.ts`), so the Go side may ship first. A confirm card also needs
+  its target in `cardKinds` of `bindings/agentConfirm.ts` (and the Go `AgentConfirmService.Card`/`Decline` branches).
 - A page button the agent offers (`offer_button`, ADR-0033 §3): the action name in `offerActions` (`bindings/agent.ts`),
   its label and target in `offerSpecs` (`agentView.ts`), what a press does in `offerStep` / `runOffer` (`agentOffer.ts`).
   The label comes from the page's own button, never from model text.

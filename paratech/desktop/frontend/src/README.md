@@ -4,7 +4,8 @@ React 19 + TypeScript UI of the desktop app, built by Vite into the Go package t
 (`paratech/desktop/internal/input/wails/assets/app/`, git-ignored; `vite.config.ts`). It has two entry points: the main
 window (`index.html` -> `main.tsx` -> `App.tsx`) and the recording popup (`popup.html` -> `popup/main.tsx`). The UI holds no
 business rules and no secrets: every read and action is a call to a Go service bound in
-`paratech/desktop/internal/input/wails` (ARCH-44). Paths below are relative to this folder unless they start with `paratech/` or `docs/`.
+`paratech/desktop/internal/input/wails` (ARCH-44). Paths below are relative to this folder unless they start with `paratech/` or `docs/`;
+`test/...` and `tsconfig.test.json` live one level up, in `paratech/desktop/frontend` (not in `src/`).
 
 ## Map
 - `App.tsx` - the window: rail, current page, agent panel, lesson screen over a page, one-shot "open this with that" state.

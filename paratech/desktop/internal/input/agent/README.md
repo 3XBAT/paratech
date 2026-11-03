@@ -25,10 +25,11 @@ Order per ADR-0033 §5 and §7 (tools ship in catalog waves, never one catalog p
    `paratech/desktop/internal/domain/agent/values/wave10.go`).
 2. `paratech/desktop/internal/domain/agent/services/actionpolicy/policy.go`: its class and rules.
 3. Here, a file for the group: the narrow interface on the use case, the handler, then the dispatch by class:
-   R in `tools.reader` (`tools.go`), U in `Actions.prepare` plus its compensation (`actions.go`), C in `canPropose`
+   R in `tools.reader` (`tools.go`, falls back to `controlReader`), U in `Actions.prepare` plus its compensation (`actions.go`), C in `canPropose`
    and `makeProposal` (`propose.go`), UI in `cardTool` (`offer.go`). A new dependency is a field of `Deps`
    (`driver.go`) or `ActionDeps` (`actions.go`).
-4. `paratech/desktop/internal/app/agent.go`: pass the use case in `wireAgent`.
+4. `paratech/desktop/internal/app/agent.go`: add the use case to `agentReads` (filled in `paratech/desktop/internal/app/core.go`) and to the
+   `Deps`/`ActionDeps` literal in `wireAgent`.
 5. Catalog: `paratech/hub/pkg/prompts/agent/panel/v<N>/tools.json` equals the golden
    `paratech/shared/testdata/tool_catalog_v<N>.json`; the Hub ships first, then `values.CatalogVersion`.
 A C tool's «Да» never runs here: the card is rendered by `AgentPanel` and confirmed by `AgentConfirmService`
