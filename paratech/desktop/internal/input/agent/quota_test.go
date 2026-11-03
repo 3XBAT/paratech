@@ -65,9 +65,6 @@ func TestQuotaStatus(t *testing.T) {
 		{"used up", func(t *testing.T) cwvalues.QuotaSnapshot {
 			return quotaSnapshot(t, 0, 1000, time.Time{})
 		}, `{"remaining_percent":0}`},
-		{"no limit", func(t *testing.T) cwvalues.QuotaSnapshot {
-			return quotaSnapshot(t, 0, 0, time.Time{})
-		}, `{"remaining_percent":0}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -86,9 +83,11 @@ func TestQuotaStatus(t *testing.T) {
 	}
 }
 
-// A Hub that is not set up is "unavailable"; any other failure "failed", also when a stale value is still kept.
+// A Hub that is not set up is "unavailable"; any other failure "failed", also when a stale value is still kept, and a
+// limit of zero, which has no honest share.
 func TestQuotaStatusErrors(t *testing.T) {
 	stale := currentReading(t, quotaSnapshot(t, 500, 1000, time.Time{}))
+	noLimit := currentReading(t, quotaSnapshot(t, 0, 0, time.Time{}))
 	tests := []struct {
 		name    string
 		reading cwvalues.QuotaReading
@@ -102,6 +101,7 @@ func TestQuotaStatusErrors(t *testing.T) {
 		{"busy", stale, errors.New("busy"), values.RefuseFailed},
 		{"stale without an error", stale.Failed(cwvalues.QuotaFailed, now), nil, values.RefuseFailed},
 		{"no snapshot without an error", cwvalues.QuotaReading{}, nil, values.RefuseFailed},
+		{"no limit", noLimit, nil, values.RefuseFailed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

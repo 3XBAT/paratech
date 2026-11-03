@@ -26,7 +26,11 @@ func (t tools) quotaStatus(ctx context.Context, call values.Call, _ values.Scope
 	if !ok || r.Stale() {
 		return values.RefusalResult(call.ID(), values.RefuseFailed), nil, nil
 	}
-	row := values.QuotaRow{RemainingPercent: remainingPercent(snap)}
+	pct, ok := remainingPercent(snap)
+	if !ok {
+		return values.RefusalResult(call.ID(), values.RefuseFailed), nil, nil
+	}
+	row := values.QuotaRow{RemainingPercent: pct}
 	if end, ok := snap.PeriodEnd(); ok {
 		row.Resets = dateOf(end, t.clock.Now().Location())
 	}
@@ -43,11 +47,15 @@ func quotaRefusal(o cwvalues.QuotaOutcome) values.Refusal {
 	return values.RefuseFailed
 }
 
-// remainingPercent is the remaining share of the limit in whole percent, rounded down; 0 without a limit.
-func remainingPercent(s cwvalues.QuotaSnapshot) int {
+// remainingPercent is the remaining share of the limit in whole percent, rounded down; ok is false without a limit,
+// which has no honest share.
+func remainingPercent(s cwvalues.QuotaSnapshot) (int, bool) {
 	limit, left := s.Limit().Value(), s.Remaining().Value()
-	if limit <= 0 || left <= 0 {
-		return 0
+	if limit <= 0 {
+		return 0, false
 	}
-	return int(min(left*100/limit, 100))
+	if left <= 0 {
+		return 0, true
+	}
+	return int(min(left*100/limit, 100)), true
 }
