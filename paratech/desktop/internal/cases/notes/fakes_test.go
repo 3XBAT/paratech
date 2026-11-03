@@ -110,11 +110,15 @@ func (f *fakeNotes) count() int {
 // fakeMaterials is the library: one material per content, a new one filed under the subject in a folder named by the
 // lesson kind.
 type fakeMaterials struct {
-	mu    sync.Mutex
-	rows  map[shared.MaterialID]*material.Material
-	n     int
-	kinds []string // lesson kinds FileNotePart was called with
-	err   error    // returned by FileNotePart when set
+	mu     sync.Mutex
+	rows   map[shared.MaterialID]*material.Material
+	n      int
+	kinds  []string          // lesson kinds FileNotePart was called with
+	placed []shared.FolderID // folders Place was called with
+	err    error             // returned by FileNotePart when set
+	// unplaced are the materials MoveToInbox was called with; inboxErr is returned by it when set.
+	unplaced []shared.MaterialID
+	inboxErr error
 	// pageErr is returned by PageImage when set.
 	pageErr error
 	// MaterialText: the bytes of each file (a TXT reads them as Markdown), preset texts and errors by material, and
@@ -203,6 +207,56 @@ func (f *fakeMaterials) filedAs(t *testing.T, sub shared.SubjectID, typ material
 		t.Fatal(err)
 	}
 	return m
+}
+
+// inbox stores content as an upload of «Входящие».
+func (f *fakeMaterials) inbox(t *testing.T, content string) *material.Material {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	d := material.DigestOf([]byte(content))
+	m, err := f.add(d, int64(len(content)), material.TypeTXT, "загрузка.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.data[d] = []byte(content)
+	return m
+}
+
+// Place files a material in folder of sub, as the library does; "nosuch" is a subject that is gone.
+func (f *fakeMaterials) Place(_ context.Context, id shared.MaterialID, sub shared.SubjectID, folder shared.FolderID) (*material.Material, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.placed = append(f.placed, folder)
+	if sub == "nosuch" {
+		return nil, errSubjectGone
+	}
+	m, ok := f.rows[id]
+	if !ok {
+		return nil, fmt.Errorf("fake: %w", shared.ErrNotFound)
+	}
+	if _, err := m.Place(sub, folder, t0); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// MoveToInbox returns a material to «Входящие»; inboxErr, when set, is returned instead.
+func (f *fakeMaterials) MoveToInbox(_ context.Context, id shared.MaterialID) (*material.Material, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unplaced = append(f.unplaced, id)
+	if f.inboxErr != nil {
+		return nil, f.inboxErr
+	}
+	m, ok := f.rows[id]
+	if !ok {
+		return nil, fmt.Errorf("fake: %w", shared.ErrNotFound)
+	}
+	if _, err := m.MoveToInbox(t0); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func (f *fakeMaterials) Material(_ context.Context, id shared.MaterialID) (*material.Material, error) {

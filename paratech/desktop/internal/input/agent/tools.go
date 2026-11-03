@@ -117,6 +117,8 @@ func (t tools) reader(tool values.Tool) (read, bool) {
 		return t.inspectUpload, t.inspector != nil
 	case values.ToolAnswerQuestion:
 		return t.answerQuestion, t.answerer != nil
+	case values.ToolListNotes:
+		return t.listNotes, t.actions != nil && t.actions.notes != nil
 	}
 	return nil, false
 }
