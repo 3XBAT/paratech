@@ -363,6 +363,11 @@ const oldWords = [
   /Запускаем/,
   /Выходим/,
   /Завершаем/,
+  // TASK-345: the headings of «Сегодня» (the decision wait is «Нужно ваше решение», the week is «Сроки на неделе»).
+  /Ждёт вашего/,
+  /Горит на/,
+  /Сообщения paratech/,
+  /Готово за день/,
 ];
 
 // The Windows setting is named «Распознавание текста» in the OS itself: the one place the word may stay.

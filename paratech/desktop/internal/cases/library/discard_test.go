@@ -284,6 +284,46 @@ func TestRemovedSubjectKeepsItsNames(t *testing.T) {
 	}
 }
 
+func TestRemovedSubjectGivesTheVersionToRestore(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	phys, chem := createSubject(t, e, "Физика"), createSubject(t, e, "Химия")
+	got, err := e.svc.DiscardSubject(ctx, phys.ID(), phys.Version())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sub, err := e.svc.RemovedSubject(ctx, phys.ID())
+	if err != nil || sub.ID() != phys.ID() || sub.Version() != got.Subject.Version() {
+		t.Fatalf("RemovedSubject = %v, %v; want version %d", sub, err, got.Subject.Version())
+	}
+	if _, err := e.svc.RestoreSubject(ctx, phys.ID(), sub.Version()); err != nil {
+		t.Fatalf("RestoreSubject with the read version = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		id   shared.SubjectID
+		want error
+	}{
+		{"restored meanwhile", phys.ID(), ErrSubjectNotFound},
+		{"active", chem.ID(), ErrSubjectNotFound},
+		{"unknown", "nope", ErrSubjectNotFound},
+		{"bad id", "", ErrInvalidRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := e.svc.RemovedSubject(ctx, tt.id); !errors.Is(err, tt.want) {
+				t.Fatalf("RemovedSubject = %v, want %v", err, tt.want)
+			}
+		})
+	}
+
+	e.subjects.err = errors.New("disk")
+	if _, err := e.svc.RemovedSubject(ctx, phys.ID()); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("RemovedSubject(store down) = %v, want ErrUnavailable", err)
+	}
+}
+
 // The same bytes as a file hidden under a removed subject come back in «Входящие»: the student finds what was added.
 func TestImportOfAFileHiddenUnderARemovedSubject(t *testing.T) {
 	e, ctx := newEnv(t), context.Background()

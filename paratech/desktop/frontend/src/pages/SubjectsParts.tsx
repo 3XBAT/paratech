@@ -211,6 +211,7 @@ export function SubjectTree(props: {
                         type="button"
                         className={["ti", s.id === props.currentId ? "cur" : "", overNow === s.id ? "drop" : ""].filter((c) => c !== "").join(" ")}
                         aria-current={s.id === props.currentId ? "page" : undefined}
+                        data-subject-id={s.id}
                         onClick={() => props.onOpen(s.id)}
                         onDragOver={(e) => onDragOver(e, s.id)}
                         onDragLeave={() => setOver((o) => (o === s.id ? "" : o))}

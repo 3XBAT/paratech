@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { errorTexts, genericError, openTexts, refreshTexts } from "../.test-build/bindings/library.js";
+import { errorTexts, genericError, openTexts, refreshTexts, removedNameText } from "../.test-build/bindings/library.js";
 import { inboxMethods, libraryInboxApi, noHint, parsePlacementHint } from "../.test-build/bindings/libraryInbox.js";
 import { hasFiles, windowDragHandlers } from "../.test-build/dropFiles.js";
 import {
@@ -290,6 +290,7 @@ test("every known refusal of the library has its way out, pinned by the exact te
     "Название предмета: от 1 до 200 символов.": "retry",
     "Недопустимое имя папки: до 64 символов, без \\ / : * ? \" < > |, не CON, NUL и т. п., без точки в конце.": "retry",
     "Предмет с таким названием уже есть.": "refresh",
+    [removedNameText]: "refresh",
     "Папка с таким именем уже есть.": "refresh",
     "Предмет не найден: обновите список.": "refresh",
     "Папка не найдена: обновите список.": "refresh",
@@ -320,7 +321,7 @@ test("every known refusal of the library has its way out, pinned by the exact te
     assert.equal(errorWay(t), expected, t);
   }
   // Every text that sends the student to «Обновить список» is still a text the core says (or one of openTexts).
-  const known = new Set([...errorTexts, ...Object.values(openTexts)]);
+  const known = new Set([...errorTexts, ...Object.values(openTexts), removedNameText]);
   for (const t of refreshTexts) {
     assert.ok(known.has(t), `refreshTexts holds a text nobody says: ${t}`);
   }
