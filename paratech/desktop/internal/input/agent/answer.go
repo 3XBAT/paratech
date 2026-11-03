@@ -45,6 +45,10 @@ const (
 	DraftReading  DraftEnd = ""
 	DraftAnswered DraftEnd = "answered" // an answer was made: its card follows, the last draft may be shown till then
 	DraftDropped  DraftEnd = "dropped"  // no answer (failed, cut by «Стоп» or the ctx): the draft goes, nothing replaces it
+
+	// DraftFailed ends a reply draft whose Hub call failed without a cut (a timeout, a broken stream): the text the
+	// Hub delivered stays shown, so the last draft still waiting is shown too.
+	DraftFailed DraftEnd = "failed"
 )
 
 // callDraft is the DraftSink of one answer_question call: it passes the changed drafts of the read while its ctx lives

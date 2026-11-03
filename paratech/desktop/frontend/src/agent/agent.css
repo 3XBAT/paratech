@@ -139,6 +139,11 @@
    It is in the flow at the end of the thread and scrolls with it: a sticky strip floated over the reply text. */
 .ag-think { display: flex; align-items: center; gap: 8px; min-height: 28px; }
 .ag-think .ag-actions { margin-top: 0; }
+/* The time a request has been running, beside the dots: muted, digits of equal width so the row does not jitter. */
+.ag-elapsed { flex: none; font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* A queued request: nothing answers yet, so the dots are still and muted (one breathing indicator at a time). */
+.ag-wait.queued .ag-wdot { background: var(--muted); animation: none; }
+.ag-queued { flex: 1 1 auto; min-width: 0; font-weight: 400; overflow-wrap: break-word; }
 .ag-file { display: flex; align-items: center; gap: 8px; }
 .ag-file .i { flex: none; color: var(--muted); }
 .ag-file-kind { color: var(--muted); }

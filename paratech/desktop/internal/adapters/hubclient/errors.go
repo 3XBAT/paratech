@@ -67,7 +67,8 @@ var (
 	// ErrUnavailable means the Hub or a proxy answered unavailable without a classified reason.
 	ErrUnavailable = errors.New("hub unavailable")
 
-	// ErrTimeout means the call did not finish within Config.RequestTimeout.
+	// ErrTimeout means the call did not finish within Config.RequestTimeout (AnswerQuestion: AnswerTimeout; a streamed
+	// agent step: StepTimeout, or the Hub silent for longer than StepIdleTimeout).
 	ErrTimeout = errors.New("hub request timed out")
 
 	// ErrRejected means the Hub refused the request for a reason retrying cannot fix (invalid_argument and others).

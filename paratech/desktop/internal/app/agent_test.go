@@ -279,6 +279,7 @@ func TestPanelSinkMapsUpdates(t *testing.T) {
 	}
 	if wails.AgentDraftAnswered != wails.AgentDraftEnd(agentloop.DraftAnswered) ||
 		wails.AgentDraftDropped != wails.AgentDraftEnd(agentloop.DraftDropped) ||
+		wails.AgentDraftFailed != wails.AgentDraftEnd(agentloop.DraftFailed) ||
 		wails.AgentDraftReading != wails.AgentDraftEnd(agentloop.DraftReading) {
 		t.Error("the ends of a draft differ between the Driver and the panel")
 	}

@@ -23,6 +23,7 @@ const (
 	AgentDraftReading  AgentDraftEnd = ""
 	AgentDraftAnswered AgentDraftEnd = "answered" // the answer card follows: the last texts are shown before it
 	AgentDraftDropped  AgentDraftEnd = "dropped"  // no answer: the texts not shown yet are dropped
+	AgentDraftFailed   AgentDraftEnd = "failed"   // a reply's Hub call failed uncut: the last texts are shown, as delivered
 )
 
 // AgentDraft is a draft as the Driver hands it; app maps the Driver's own type to it. Texts are the claim texts
@@ -93,7 +94,8 @@ type callDraft struct {
 }
 
 // Draft emits the draft d at most every agentDraftEvery per call, the last texts winning. An answered end emits the
-// texts still waiting at once (the card follows), a dropped end drops them; no draft of a cut request is emitted.
+// texts still waiting at once (the card follows), and so does a failed one (the text the Hub delivered stays shown); a
+// dropped end drops them; no draft of a cut request is emitted.
 func (p *AgentPanel) Draft(d AgentDraft) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -104,7 +106,7 @@ func (p *AgentPanel) Draft(d AgentDraft) {
 	c := t.calls[d.CallID]
 	if d.End != AgentDraftReading {
 		if c != nil {
-			if d.End == AgentDraftAnswered && !t.blocked(c.reply) {
+			if (d.End == AgentDraftAnswered || d.End == AgentDraftFailed) && !t.blocked(c.reply) {
 				p.flushDraft(d.Thread, t.turn, d.CallID, c)
 			}
 			c.halt()
