@@ -19,6 +19,7 @@ import {
   type UndoFromScheduleReply,
 } from "./bindings/library.js";
 import { plural } from "./plural.js";
+import type { RemovedRow, RestoreCall } from "./subjectRemovalView.js";
 
 /** Russian texts of the review; each refusal says why in plain words and the state offers the way out as a button. */
 export const reviewTexts = {
@@ -529,6 +530,8 @@ export interface Notice {
   /** One plain line per item (skipped rows, kept subjects). */
   lines: string[];
   steps: Step[];
+  /** TASK-289: skipped rows whose name a removed subject holds, each with «Вернуть»; absent when there are none. */
+  rows?: RemovedRow[];
 }
 
 export type Phase = "idle" | "saving" | "undoing" | "refreshing";
@@ -658,6 +661,29 @@ export function skippedLines(state: ReviewState, skipped: readonly ScheduleSkipp
   });
 }
 
+/** A skipped row that only a removed subject blocks: it has «Вернуть» instead of a line (TASK-289). */
+function removedRowOf(state: ReviewState, s: ScheduleSkipped): RemovedRow | null {
+  if (s.reason !== "name_taken" || s.removedSubjectId === undefined || s.removedSubjectVersion === undefined) {
+    return null;
+  }
+  return { key: s.key, name: skippedName(state, s.key), subjectId: s.removedSubjectId, version: s.removedSubjectVersion };
+}
+
+/** The skipped rows split: the ones with «Вернуть», and the plain ones, which stay lines. */
+export function splitSkipped(state: ReviewState, skipped: readonly ScheduleSkipped[]): { rows: RemovedRow[]; plain: ScheduleSkipped[] } {
+  const rows: RemovedRow[] = [];
+  const plain: ScheduleSkipped[] = [];
+  for (const s of skipped) {
+    const row = removedRowOf(state, s);
+    if (row === null) {
+      plain.push(s);
+    } else {
+      rows.push(row);
+    }
+  }
+  return { rows, plain };
+}
+
 function createNotice(state: ReviewState, reply: CreateFromScheduleReply): { view: View; notice: Notice | null } {
   const fail = (text: string, steps: Step[], view: View): { view: View; notice: Notice } => ({
     view,
@@ -667,11 +693,21 @@ function createNotice(state: ReviewState, reply: CreateFromScheduleReply): { vie
     case "": {
       // A clean success still tells about the names the proposal left out, with the button that shows them.
       const rest = state.omitted > 0;
-      const lines = [...skippedLines(state, reply.skipped), ...(rest ? [omittedAfter(state.omitted)] : [])];
+      const { rows, plain } = splitSkipped(state, reply.skipped);
+      const lines = [...skippedLines(state, plain), ...(rest ? [omittedAfter(state.omitted)] : [])];
       const nothing = reply.created.length === 0 && reply.aliased.length === 0;
       return {
         view: "result",
-        notice: lines.length === 0 ? null : { tone: "ok", text: reply.skipped.length > 0 && nothing ? reviewTexts.nothingCreated : "", lines, steps: [rest ? "rest" : "refresh"] },
+        notice:
+          lines.length === 0 && rows.length === 0
+            ? null
+            : {
+                tone: "ok",
+                text: reply.skipped.length > 0 && nothing ? reviewTexts.nothingCreated : "",
+                lines,
+                steps: [rest ? "rest" : "refresh"],
+                ...(rows.length > 0 ? { rows } : {}),
+              },
       };
     }
     case "stale":
@@ -817,6 +853,8 @@ export interface ReviewApi {
   create(token: string, choices: ScheduleChoice[]): Promise<CreateFromScheduleReply>;
   undo(token: string): Promise<UndoFromScheduleReply>;
   refresh(): Promise<ScheduleSubjectsReply>;
+  /** TASK-289: «Вернуть» for a skipped row a removed subject blocks; without it such a row is only a line. Never throws. */
+  restore?(subjectId: string, version: number): Promise<RestoreCall>;
 }
 
 /** Applies the selection to the proposal of the state's token. A rejected call (unreadable reply) is an action too. */

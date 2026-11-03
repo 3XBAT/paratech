@@ -1,6 +1,7 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useMemo, useReducer, useRef } from "react";
 import {
   createFromSchedule,
+  libraryApi,
   type ScheduleGroup,
   type ScheduleMember,
   scheduleSubjects,
@@ -46,9 +47,11 @@ import {
   takenOf,
   undoFlow,
 } from "../scheduleSubjectsView.js";
+import { removedRowText, type RestoreCall, restoredRowText, runRestore } from "../subjectRemovalView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { RestoreRow } from "./SubjectRemoval.js";
 
 // The review of subjects proposed from the schedule (TASK-312; the agent card of TASK-324 reuses it). The names,
 // spellings and subject names are schedule text: text nodes and input values only, never markup, never logged. Fixed
@@ -56,14 +59,18 @@ import { Icon } from "../ui/Icon.js";
 
 /** The calls of the review over the Wails bindings; the strict parsers reject an unreadable reply. */
 export function scheduleReviewApi(call: CallByName): ReviewApi {
+  const library = libraryApi(call);
   return {
     create: (token, choices) => createFromSchedule(call, token, choices),
     undo: (token) => undoFromSchedule(call, token),
     refresh: () => scheduleSubjects(call),
+    restore: (subjectId, version) => runRestore(library, subjectId, version),
   };
 }
 
 export interface ReviewHandlers {
+  /** «Вернуть» of a skipped row a removed subject blocks (TASK-289); absent: such a row is only a line. */
+  restore?(subjectId: string, version: number): Promise<RestoreCall>;
   check(group: string, checked: boolean): void;
   rename(group: string, name: string): void;
   member(group: string, member: string, mode: MemberMode): void;
@@ -131,7 +138,21 @@ export function ScheduleSubjectsReview(props: {
     }
   };
 
+  // A restored subject changes the subjects: the page reads them again, as after a create.
+  const restoreRow = props.api.restore;
+  const restore: ReviewHandlers["restore"] =
+    restoreRow === undefined
+      ? undefined
+      : async (subjectId, version) => {
+          const call = await restoreRow(subjectId, version);
+          if (call.state.phase === "done") {
+            latest.current.onChanged();
+          }
+          return call;
+        };
+
   const on: ReviewHandlers = {
+    restore,
     check: (group, checked) => dispatch({ type: "check", group, checked }),
     rename: (group, name) => dispatch({ type: "rename", group, name }),
     member: (group, member, mode) => dispatch({ type: "member", group, member, mode }),
@@ -265,7 +286,7 @@ export function ReviewView(props: {
     >
       <div className="sched-status" role="status" aria-live="polite">
         {done !== "" && <DoneRow text={done} phase={state.phase} onUndo={on.undo} />}
-        {notice !== null && notice.tone === "ok" && <NoticeBody notice={notice} steps={steps(notice)} />}
+        {notice !== null && notice.tone === "ok" && <NoticeBody notice={notice} steps={steps(notice)} restore={on.restore} />}
       </div>
 
       {state.view === "list" && (
@@ -318,16 +339,33 @@ export function ReviewView(props: {
   );
 }
 
-function NoticeBody(props: { notice: Notice; steps: ReactNode }) {
+function NoticeBody(props: { notice: Notice; steps: ReactNode; restore?: ReviewHandlers["restore"] }) {
   const n = props.notice;
   const hasSteps = n.steps.length > 0;
+  const rows = n.rows ?? [];
+  const restore = props.restore;
   return (
     <div className="sched-notice">
       {n.text !== "" && <ResultLine kind={n.tone === "ok" ? "ok" : "fail"}>{n.text}</ResultLine>}
-      {n.lines.length > 0 && (
+      {(n.lines.length > 0 || rows.length > 0) && (
         <ul className="sched-lines small muted">
           {n.lines.map((l, i) => (
             <li key={i}>{l}</li>
+          ))}
+          {/* A name only a removed subject holds: «Вернуть» brings the subject back (TASK-289). */}
+          {rows.map((r) => (
+            <li key={`${r.key}:${r.subjectId}`}>
+              {restore === undefined ? (
+                removedRowText(r)
+              ) : (
+                <RestoreRow
+                  idleText={removedRowText(r)}
+                  doneText={restoredRowText(r)}
+                  restore={() => restore(r.subjectId, r.version)}
+                  onSettled={() => undefined}
+                />
+              )}
+            </li>
           ))}
         </ul>
       )}

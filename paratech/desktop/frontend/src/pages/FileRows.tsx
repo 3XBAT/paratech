@@ -1,5 +1,5 @@
 import { type DragEvent, type KeyboardEvent, useState, useRef } from "react";
-import type { LibraryMaterial, LibrarySubject } from "../bindings/library.js";
+import type { LibraryMaterial, LibrarySubject, RemovedName } from "../bindings/library.js";
 import type { PlacementHint } from "../bindings/libraryInbox.js";
 import {
   addFileTexts,
@@ -28,6 +28,7 @@ import { Field, ResultLine, Select } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
 import { RowMenu } from "../ui/RowMenu.js";
 import { NameForm } from "./NameForm.js";
+import { RemovedNameLine, type RestoreCall, restoreUnavailable } from "./SubjectRemoval.js";
 
 // Names of files, subjects and folders are typed or imported text: only text nodes here, never markup or attributes
 // built from them (the aria-labels are plain strings with the name inside, set as attribute values by React).
@@ -48,16 +49,19 @@ export interface FileActions {
   remove(m: LibraryMaterial): Promise<string>;
   /** Creates a subject for the panel «Разложить» («Новый предмет…»); it neither opens it nor places anything into it. */
   createSubject(name: string): Promise<CreatedSubject>;
+  /** «Вернуть» of the removed subject that holds the name of a new one (TASK-289); the restored subject joins the list. */
+  restoreSubject?(removed: RemovedName): Promise<RestoreCall>;
   /** Re-reads the lists: the way out of a refusal that says the list is out of date. */
   refresh(): void;
   dragStart?(materialId: string): void;
   dragEnd?(): void;
 }
 
-/** The answer of a subject creation: the subject, or the Russian text of the refusal. */
+/** The answer of a subject creation: the subject, or the Russian text of the refusal (`removed`: a removed subject holds the name). */
 export interface CreatedSubject {
   error: string;
   subject: LibrarySubject | null;
+  removed?: RemovedName;
 }
 
 /** A refusal in plain words and the way out as a button: «Обновить список» or «Повторить». */
@@ -145,6 +149,7 @@ export interface Placing {
   /** Places the file; resolves to "" or the Russian text of the refusal. */
   place(subjectId: string, folderId: string): Promise<string>;
   createSubject(name: string): Promise<CreatedSubject>;
+  restoreSubject?(removed: RemovedName): Promise<RestoreCall>;
 }
 
 /**
@@ -207,6 +212,7 @@ function NotPlacedLine(props: {
             onSubmit={(s, f) => void submit(s, f)}
             onCancel={closePanel}
             onCreateSubject={placing.createSubject}
+            onRestoreRemoved={placing.restoreSubject}
           />
           {problem !== "" && <ErrorLine text={problem} onRefresh={props.onRefresh} />}
         </div>
@@ -229,16 +235,20 @@ export function PlacePanel(props: {
   onSubmit(subjectId: string, folderId: string): void;
   onCancel(): void;
   onCreateSubject(name: string): Promise<CreatedSubject>;
+  /** «Вернуть» for a name a removed subject holds (TASK-289); without it the refusal is the plain text. */
+  onRestoreRemoved?(removed: RemovedName): Promise<RestoreCall>;
 }) {
   const [pick, setPick] = useState<PanelPick>(() => panelStart(props.subjectId, props.folderId));
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [createRemoved, setCreateRemoved] = useState<RemovedName | null>(null);
   const choice = panelChoice(props.subjects, pick.subjectId, pick.folderId);
   const subject = props.subjects.find((s) => s.id === choice.subjectId);
   const creating = pick.creating;
 
   const backToSelect = () => {
     setCreateError("");
+    setCreateRemoved(null);
     setPick(panelBack);
   };
 
@@ -256,14 +266,31 @@ export function PlacePanel(props: {
   const create = async (name: string) => {
     setCreateBusy(true);
     setCreateError("");
+    setCreateRemoved(null);
     const r = await props.onCreateSubject(name);
     setCreateBusy(false);
     if (r.subject !== null) {
       setPick(panelCreated(r.subject.id));
+    } else if (r.removed !== undefined && props.onRestoreRemoved !== undefined) {
+      setCreateRemoved(r.removed);
     } else {
       setCreateError(r.error);
     }
   };
+
+  // «Вернуть» of the removed subject that holds the name: the restored subject is chosen, as a made one would be.
+  const removedLine = (removed: RemovedName) => (
+    <RemovedNameLine
+      removed={removed}
+      restore={(r) => props.onRestoreRemoved?.(r) ?? Promise.resolve(restoreUnavailable)}
+      onSettled={(call) => {
+        if (call.state.phase === "done" && call.subject !== null) {
+          setCreateRemoved(null);
+          setPick(panelCreated(call.subject.id));
+        }
+      }}
+    />
+  );
 
   if (creating || props.subjects.length === 0) {
     return (
@@ -273,6 +300,8 @@ export function PlacePanel(props: {
             label={texts.subjectName}
             busy={createBusy}
             error={createError}
+            removed={createRemoved === null ? undefined : removedLine(createRemoved)}
+            onEdit={() => setCreateRemoved(null)}
             primary={false}
             onSubmit={(n) => void create(n)}
             onCancel={backToSelect}
@@ -491,6 +520,7 @@ export function FileRow(props: { m: LibraryMaterial; where: "inbox" | "folder"; 
               onSubmit={(s, f) => void act(() => a.place(m, s, f))}
               onCancel={closePanel}
               onCreateSubject={a.createSubject}
+              onRestoreRemoved={a.restoreSubject}
             />
           )}
           {problem !== null && <ErrorLine text={problem.text} onRefresh={a.refresh} onRetry={panel ? undefined : problem.again} />}

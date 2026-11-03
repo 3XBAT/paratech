@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type LibraryMaterial, type LibrarySubject, libraryApi, libraryErrorText, type ScheduleSubjectsReply, scheduleSubjects } from "../bindings/library.js";
+import {
+  type LibraryMaterial,
+  type LibrarySubject,
+  libraryApi,
+  libraryErrorText,
+  type RemovedName,
+  removedNameOf,
+  type ScheduleSubjectsReply,
+  scheduleSubjects,
+} from "../bindings/library.js";
 import { libraryInboxApi } from "../bindings/libraryInbox.js";
+import { notesApi as makeNotesApi } from "../bindings/notes.js";
 import { callByName } from "../bindings/runtime.js";
 import { fileTexts, type ImportElsewhere, type ImportOutcome } from "../libraryInboxView.js";
 import { addFileInto, CardDrop } from "../materialFlow.js";
@@ -18,6 +28,7 @@ import type { PageId } from "../nav.js";
 import { type Batch, type OfferState, offerChecking, offerStatus, showCheckFailed, type SubjectRef } from "../scheduleSubjectsView.js";
 import {
   browserStore,
+  homeSubjectId,
   inboxEntry,
   inboxFiles,
   inboxRoute,
@@ -31,6 +42,7 @@ import {
   showsTiles,
   viewKey,
 } from "../subjectsHome.js";
+import { removedLineText, restoreNeedsReload, runRestore } from "../subjectRemovalView.js";
 import { idleTeacher, TeacherFlow, type TeacherFocus, type TeacherState, teacherFocusStep, teacherStateFor } from "../teachersView.js";
 import { ResultLine } from "../ui/controls.js";
 import { AddFileLines, ErrorLine, UndoLines } from "./FileRows.js";
@@ -43,9 +55,11 @@ import {
   scheduleReviewApi,
   useKeptUndo,
 } from "./ScheduleSubjectsReview.js";
+import { RemovedNameLine, RemoveSubjectButton, RemoveSubjectDialog, RestoreRow } from "./SubjectRemoval.js";
 import { EmptySubjects, InboxList, LibraryActions, NameForm, OverviewSections, SubjectDetail, SubjectTree } from "./SubjectsParts.js";
 import { type TeacherActions, TeachersBlock } from "./TeachersBlock.js";
 import { useMaterialActions } from "./useMaterialActions.js";
+import { useSubjectRemoval } from "./useSubjectRemoval.js";
 
 type Form = "none" | "subject" | "folder";
 
@@ -92,6 +106,7 @@ export function SubjectsPage(props: {
 }) {
   const api = useMemo(() => libraryApi(callByName), []);
   const inboxApi = useMemo(() => libraryInboxApi(callByName), []);
+  const notesClient = useMemo(() => makeNotesApi(callByName), []);
   const openId = props.subjectId;
   const [subjects, setSubjects] = useState<LibrarySubject[] | null>(null);
   const [inbox, setInbox] = useState<LibraryMaterial[]>([]);
@@ -102,6 +117,8 @@ export function SubjectsPage(props: {
   const [form, setForm] = useState<Form>("none");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The name just typed belongs to a removed subject: «Предмет с таким названием удалён» and «Вернуть» (TASK-289).
+  const [removedName, setRemovedName] = useState<RemovedName | null>(null);
   const [loadError, setLoadError] = useState("");
   const [note, setNote] = useState("");
   // The file being dragged from «Входящие» (the tree shows the cue) and the refusal of a drop on a subject.
@@ -261,6 +278,7 @@ export function SubjectsPage(props: {
   useEffect(() => {
     setForm("none");
     setError("");
+    setRemovedName(null);
     setNote("");
     setAdded(noAdded);
     setAddError(null);
@@ -326,6 +344,26 @@ export function SubjectsPage(props: {
 
   const counts = useMemo(() => (subject && materials ? folderCounts(subject.folders, materials) : null), [subject, materials]);
 
+  // A restored subject joins the list at once; the reload that follows brings the rest.
+  const putSubject = (s: LibrarySubject) => setSubjects((list) => (list === null || list.some((x) => x.id === s.id) ? list : [...list, s]));
+
+  // «Удалить предмет» (TASK-289): the question, the line with «Вернуть» that replaces the subject, the restore.
+  const removal = useSubjectRemoval({
+    api,
+    notes: notesClient,
+    materials: filesFailed ? null : materials,
+    subjects,
+    // The subject is gone: out of the list, and its page gives way to the list with the home subject open (a click in the
+    // tree would do the same). Without subjects the route is the empty one and the tiles show.
+    onGone: (id) => {
+      const rest = (subjects ?? []).filter((s) => s.id !== id);
+      setSubjects((list) => (list === null ? list : list.filter((s) => s.id !== id)));
+      props.onSelect(homeSubjectId(rest, ""));
+    },
+    onReload: refresh,
+    onRestored: putSubject,
+  });
+
   async function run(work: () => Promise<void>) {
     if (running.current) {
       return;
@@ -354,10 +392,20 @@ export function SubjectsPage(props: {
 
   const createSubject = (name: string) =>
     run(async () => {
-      const s = await api.createSubject(name, "");
-      setSubjects((list) => [...(list ?? []), s]);
-      setForm("none");
-      props.onSelect(s.id);
+      setRemovedName(null);
+      try {
+        const s = await api.createSubject(name, "");
+        setSubjects((list) => [...(list ?? []), s]);
+        setForm("none");
+        props.onSelect(s.id);
+      } catch (err) {
+        // The name belongs to a removed subject: «Вернуть» instead of «уже есть»; any other refusal is shown as it is.
+        const removed = removedNameOf(err);
+        if (removed === null) {
+          throw err;
+        }
+        setRemovedName(removed);
+      }
     });
 
   const createFolder = (name: string) =>
@@ -463,7 +511,7 @@ export function SubjectsPage(props: {
       elsewhere={added.origin === origin ? added.elsewhere : null}
       toInbox={added.origin === origin && added.toInbox}
       unplaced={added.origin === origin ? added.unplaced : null}
-      placing={{ subjects: subjects ?? [], place: placeUnplaced, createSubject: mat.actions.createSubject }}
+      placing={{ subjects: subjects ?? [], place: placeUnplaced, createSubject: mat.actions.createSubject, restoreSubject: mat.actions.restoreSubject }}
       busy={busy}
       error={addError !== null && addError.origin === origin ? addError.text : ""}
       onMoveHere={() => void moveHere()}
@@ -484,7 +532,36 @@ export function SubjectsPage(props: {
   }, [dragging, inboxIds]);
 
   const subjectForm = form === "subject" && (
-    <NameForm label={texts.subjectName} busy={busy} error={error} onSubmit={(n) => void createSubject(n)} onCancel={() => setForm("none")} />
+    <NameForm
+      label={texts.subjectName}
+      busy={busy}
+      error={error}
+      removed={
+        removedName === null ? undefined : (
+          <RemovedNameLine
+            removed={removedName}
+            restore={(r) => runRestore(api, r.subjectId, r.version)}
+            onSettled={(call) => {
+              if (call.state.phase === "done" && call.subject !== null) {
+                putSubject(call.subject);
+                setRemovedName(null);
+                setForm("none");
+                props.onSelect(call.subject.id);
+                refresh();
+              } else if (restoreNeedsReload(call.state)) {
+                refresh();
+              }
+            }}
+          />
+        )
+      }
+      onEdit={() => setRemovedName(null)}
+      onSubmit={(n) => void createSubject(n)}
+      onCancel={() => {
+        setForm("none");
+        setRemovedName(null);
+      }}
+    />
   );
   const inboxActions = { ...mat.actions, dragStart: setDragging, dragEnd: () => setDragging("") };
   // The subjects list did not load: the reason and the way on, in the same words wherever it shows.
@@ -635,7 +712,9 @@ export function SubjectsPage(props: {
                 )}
                 {schedule !== "" && <p className="small muted sub-line">{schedule}</p>}
               </div>
-              <LibraryActions onOpen={props.onOpen} onAddFile={() => void addFileTo("")} addTip={fileTexts.addToMaterialsTip} busy={busy} />
+              <LibraryActions onOpen={props.onOpen} onAddFile={() => void addFileTo("")} addTip={fileTexts.addToMaterialsTip} busy={busy}>
+                <RemoveSubjectButton disabled={busy} onClick={(opener) => removal.open(subject, opener)} />
+              </LibraryActions>
             </div>
             {filesFailed && <ErrorLine text={texts.filesFailed} onRefresh={refresh} onRetry={refresh} />}
             {addLines("")}
@@ -673,6 +752,28 @@ export function SubjectsPage(props: {
     </div>
   );
 
+  // A removed subject takes the place of its page: the line stays (above the list) until closed or the page is left. The
+  // question is part of the block, so it keeps its place when the view changes.
+  const removalBlock = (
+    <>
+      {removal.removed.map((r) => (
+        <div className="sched-kept" key={r.id}>
+          <RestoreRow
+            idleText={removedLineText(r.name)}
+            doneText=""
+            restore={() => removal.restore(r)}
+            onSettled={(call) => removal.settled(r, call)}
+            onClose={() => removal.closeLine(r.id)}
+            autoFocus
+          />
+        </div>
+      ))}
+      {removal.dialog !== null && (
+        <RemoveSubjectDialog view={removal.dialog} returnTo={removal.returnTo} onAction={removal.act} onDismiss={removal.dismiss} />
+      )}
+    </>
+  );
+
   // One return for both views: the schedule review sits at the same place of the same element, so it keeps its state
   // when the first subjects are made from it (the empty view turns into the tree view without remounting it).
   return (
@@ -681,6 +782,7 @@ export function SubjectsPage(props: {
       {loadFailed}
       {reviewPanel}
       {scheduleLines}
+      {removalBlock}
       {tiles ? tilesBody : treeView}
     </section>
   );
