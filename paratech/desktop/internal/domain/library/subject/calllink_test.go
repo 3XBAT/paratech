@@ -43,6 +43,33 @@ func TestParseCallLinkAccepts(t *testing.T) {
 	}
 }
 
+// A link typed without a scheme gets "https://" in front (owner 2026-11-03); a typed scheme stays as it is.
+func TestParseCallLinkAddsHTTPS(t *testing.T) {
+	longTail := strings.Repeat("x", MaxCallLinkBytes-len("https://a.example.org/"))
+	tests := []struct {
+		label, in, want, host string
+	}{
+		{"host and path", "meet.example.org/j/1", "https://meet.example.org/j/1", "meet.example.org"},
+		{"host only", "example.com", "https://example.com", "example.com"},
+		{"trimmed and lowercased", "  Meet.Example.ORG/j/1?pwd=AbC ", "https://meet.example.org/j/1?pwd=AbC", "meet.example.org"},
+		{"query right after the host", "a.example.org?x=1", "https://a.example.org?x=1", "a.example.org"},
+		{"colon in the path", "a.example.org/x:y", "https://a.example.org/x:y", "a.example.org"},
+		{"link in the query", "a.example.org/r?u=https://b.example.org/", "https://a.example.org/r?u=https://b.example.org/", "a.example.org"},
+		{"longest after the prefix", "a.example.org/" + longTail, "https://a.example.org/" + longTail, "a.example.org"},
+		{"http stays", "http://a.example.org/x", "http://a.example.org/x", "a.example.org"},
+		{"https stays", "https://a.example.org/x", "https://a.example.org/x", "a.example.org"},
+		{"upper case scheme", "HTTP://a.example.org/x", "http://a.example.org/x", "a.example.org"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.label, func(t *testing.T) {
+			got, err := ParseCallLink(tt.in)
+			if err != nil || got.String() != tt.want || got.Host() != tt.host {
+				t.Fatalf("ParseCallLink = %q %q, %v", got.String(), got.Host(), err)
+			}
+		})
+	}
+}
+
 func TestParseCallLinkRejects(t *testing.T) {
 	tests := []struct{ label, in string }{
 		{"empty", "   "},
@@ -59,8 +86,21 @@ func TestParseCallLinkRejects(t *testing.T) {
 		{"pipe", "https://a.example.org/|"},
 		{"backtick", "https://a.example.org/`x`"},
 		{"fragment", "https://a.example.org/x#y"},
-		{"no scheme", "meet.example.org/j/1"},
 		{"javascript", "javascript://a.example.org/%0aalert(1)"},
+		{"javascript no slashes", "javascript:alert(1)"},
+		{"mailto", "mailto:a@example.org"},
+		{"file no host", "file:///c:/x"},
+		{"data", "data:text/html,x"},
+		{"https one slash", "https:/a.example.org/"},
+		{"http no colon", "http//a.example.org/"},
+		{"scheme relative", "//a.example.org/x"},
+		{"scheme-less port", "a.example.org:8443/x"},
+		{"scheme-less port only", "localhost:3000"},
+		{"scheme-less user info", "user:" + callLinkPwd + "@a.example.org/"},
+		{"scheme-less user", "user@a.example.org/"},
+		{"scheme-less no dot", "localhost/x"},
+		{"scheme-less ipv4", "127.0.0.1/x"},
+		{"scheme-less too long", "a.example.org/" + strings.Repeat("x", MaxCallLinkBytes-len("a.example.org/"))},
 		{"file", "file://a.example.org/c$/x"},
 		{"ftp", "ftp://a.example.org/x"},
 		{"no host", "https:///x"},
@@ -112,6 +152,11 @@ func TestSetAndClearCallLink(t *testing.T) {
 	// The same canonical link again changes nothing.
 	if changed, err := s.SetCallLink("HTTPS://MEET.example.org/j/1234567890?pwd=FakePwd42", t1.Add(time.Hour)); err != nil || changed || !s.UpdatedAt().Equal(t1) {
 		t.Fatalf("same link again = %v, %v", changed, err)
+	}
+
+	// The same link typed without its scheme is the same canonical link.
+	if changed, err := s.SetCallLink("meet.example.org/j/1234567890?pwd=FakePwd42", t1.Add(time.Hour)); err != nil || changed {
+		t.Fatalf("same link without a scheme = %v, %v", changed, err)
 	}
 
 	// A bad link keeps the one that is set.
@@ -170,7 +215,7 @@ func TestRestoreCallLink(t *testing.T) {
 	}
 
 	// A stored value that no longer parses, or is not canonical, is read as no link and never fails the read.
-	for _, stored := range []string{"", "javascript:alert(1)", "https://localhost/", " " + callLink, "HTTPS://meet.example.org/"} {
+	for _, stored := range []string{"", "javascript:alert(1)", "https://localhost/", " " + callLink, "HTTPS://meet.example.org/", "meet.example.org/j/1"} {
 		bad := st
 		bad.CallLink = stored
 		back, err := Restore(bad)
