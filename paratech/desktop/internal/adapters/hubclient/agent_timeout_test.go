@@ -83,15 +83,15 @@ func assertStepTimeout(t *testing.T, err, cause error) {
 // A stream that keeps writing has no total cap of RequestTimeout or of the idle window: each message resets the wait.
 func TestStepStreamOutlastsTheIdleWindow(t *testing.T) {
 	const n = 10
-	f := &fakeStreamHub{serve: serveSlowly(n, 40*time.Millisecond, true)}
-	c := startStepGateway(t, f, Config{RequestTimeout: 200 * time.Millisecond, StepIdleTimeout: 200 * time.Millisecond, StepTimeout: 5 * time.Second})
+	f := &fakeStreamHub{serve: serveSlowly(n, 100*time.Millisecond, true)}
+	c := startStepGateway(t, f, Config{RequestTimeout: 600 * time.Millisecond, StepIdleTimeout: 600 * time.Millisecond, StepTimeout: 5 * time.Second})
 	d := &drafts{}
 
 	start := time.Now()
 	if _, err := c.Step(t.Context(), stepRequest(t), d.add); err != nil {
 		t.Fatalf("Step: %v", err)
 	}
-	if took := time.Since(start); took < 300*time.Millisecond {
+	if took := time.Since(start); took < 800*time.Millisecond {
 		t.Fatalf("the stream took %v, not longer than the idle window and RequestTimeout", took)
 	}
 	if len(d.got) != n || d.got[n-1] != strings.Repeat("ч", n) {
@@ -103,7 +103,7 @@ func TestStepStreamOutlastsTheIdleWindow(t *testing.T) {
 // had the earlier deltas and gets nothing after the call returned.
 func TestStepStreamGoesSilent(t *testing.T) {
 	f := &fakeStreamHub{serve: serveSlowly(2, time.Millisecond, false)}
-	c := startStepGateway(t, f, Config{RequestTimeout: 5 * time.Second, StepIdleTimeout: 100 * time.Millisecond, StepTimeout: 5 * time.Second})
+	c := startStepGateway(t, f, Config{RequestTimeout: 5 * time.Second, StepIdleTimeout: 300 * time.Millisecond, StepTimeout: 5 * time.Second})
 	d := &drafts{}
 
 	start := time.Now()
@@ -117,7 +117,7 @@ func TestStepStreamGoesSilent(t *testing.T) {
 	if got != 2 || d.got[1] != "чч" {
 		t.Fatalf("drafts = %q", d.got)
 	}
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
 	if len(d.got) != got || len(f.seen()) != 0 {
 		t.Fatalf("drafts after the call %q, unary calls %d", d.got, len(f.seen()))
 	}
@@ -134,7 +134,7 @@ func TestStepStreamFirstMessageWindow(t *testing.T) {
 		{
 			name: "result after the idle window",
 			serve: func(ctx context.Context, send func(*hubv1.AgentStepStreamResponse) error) error {
-				if err := sleepCtx(ctx, 150*time.Millisecond); err != nil {
+				if err := sleepCtx(ctx, 300*time.Millisecond); err != nil {
 					return err
 				}
 				return send(stepResult(okResponse()))
@@ -146,7 +146,7 @@ func TestStepStreamFirstMessageWindow(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := startStepGateway(t, &fakeStreamHub{serve: tt.serve},
-				Config{RequestTimeout: 500 * time.Millisecond, StepIdleTimeout: 30 * time.Millisecond, StepTimeout: 5 * time.Second})
+				Config{RequestTimeout: 1500 * time.Millisecond, StepIdleTimeout: 90 * time.Millisecond, StepTimeout: 5 * time.Second})
 			start := time.Now()
 			_, err := c.Step(t.Context(), stepRequest(t), nil)
 			if tt.ok {
@@ -156,7 +156,7 @@ func TestStepStreamFirstMessageWindow(t *testing.T) {
 				return
 			}
 			assertStepTimeout(t, err, errStepSilent)
-			if took := time.Since(start); took < 450*time.Millisecond {
+			if took := time.Since(start); took < 1350*time.Millisecond {
 				t.Fatalf("a silent first wait ended after %v, before RequestTimeout", took)
 			}
 		})
@@ -175,7 +175,7 @@ func TestStepStreamOverTheCap(t *testing.T) {
 		}
 		return ctx.Err()
 	}}
-	c := startStepGateway(t, f, Config{RequestTimeout: 200 * time.Millisecond, StepIdleTimeout: 200 * time.Millisecond, StepTimeout: 300 * time.Millisecond})
+	c := startStepGateway(t, f, Config{RequestTimeout: 600 * time.Millisecond, StepIdleTimeout: 600 * time.Millisecond, StepTimeout: 900 * time.Millisecond})
 	_, err := c.Step(t.Context(), stepRequest(t), nil)
 	assertStepTimeout(t, err, errStepTooLong)
 	if errors.Is(err, errStepSilent) {
@@ -192,17 +192,17 @@ func TestStepStreamCallerEndIsNoTimeout(t *testing.T) {
 	}{
 		{"cancel", func(ctx context.Context) (context.Context, context.CancelFunc) {
 			ctx, cancel := context.WithCancel(ctx)
-			time.AfterFunc(50*time.Millisecond, cancel)
+			time.AfterFunc(100*time.Millisecond, cancel)
 			return ctx, cancel
 		}, context.Canceled},
 		{"caller deadline", func(ctx context.Context) (context.Context, context.CancelFunc) {
-			return context.WithTimeout(ctx, 50*time.Millisecond)
+			return context.WithTimeout(ctx, 100*time.Millisecond)
 		}, context.DeadlineExceeded},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := startStepGateway(t, &fakeStreamHub{serve: serveSlowly(1, 0, false)},
-				Config{RequestTimeout: 5 * time.Second, StepIdleTimeout: time.Second, StepTimeout: 5 * time.Second})
+				Config{RequestTimeout: 5 * time.Second, StepIdleTimeout: 3 * time.Second, StepTimeout: 5 * time.Second})
 			ctx, cancel := tt.ctx(t.Context())
 			defer cancel()
 			_, err := c.Step(ctx, stepRequest(t), nil)
@@ -214,10 +214,11 @@ func TestStepStreamCallerEndIsNoTimeout(t *testing.T) {
 }
 
 // The unary fallback keeps RequestTimeout as its total cap, on a context of its own: the stream's wait for
-// unimplemented does not count, and StepTimeout does not apply.
+// unimplemented does not count, and StepTimeout does not apply. The stream wait and the unary delay are each well
+// under RequestTimeout (the stream's first-message window is RequestTimeout too) while together they exceed it.
 func TestStepUnaryFallbackKeepsRequestTimeout(t *testing.T) {
 	older := func(ctx context.Context, _ func(*hubv1.AgentStepStreamResponse) error) error {
-		if err := sleepCtx(ctx, 200*time.Millisecond); err != nil {
+		if err := sleepCtx(ctx, 600*time.Millisecond); err != nil {
 			return err
 		}
 		return connect.NewError(connect.CodeUnimplemented, errors.New("older hub"))
@@ -227,8 +228,8 @@ func TestStepUnaryFallbackKeepsRequestTimeout(t *testing.T) {
 		delay time.Duration
 		ok    bool
 	}{
-		{"within the cap", 200 * time.Millisecond, true},
-		{"over the cap", time.Second, false},
+		{"within the cap", 600 * time.Millisecond, true},
+		{"over the cap", 2 * time.Second, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -237,7 +238,7 @@ func TestStepUnaryFallbackKeepsRequestTimeout(t *testing.T) {
 				time.Sleep(tt.delay)
 				return agentOK()
 			}
-			c := startStepGateway(t, f, Config{RequestTimeout: 350 * time.Millisecond, StepTimeout: 10 * time.Second})
+			c := startStepGateway(t, f, Config{RequestTimeout: time.Second, StepTimeout: 10 * time.Second})
 			_, err := c.Step(t.Context(), stepRequest(t), nil)
 			if tt.ok {
 				if err != nil {
