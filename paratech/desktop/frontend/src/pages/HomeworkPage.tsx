@@ -64,6 +64,7 @@ import { type ListStates, withState } from "../listView";
 import { useRecipientNav } from "../recipientNav";
 import { isRefusal, type RecipientView, recipientView, refusalAction } from "../recipientView";
 import { newestOnly } from "../todayView";
+import { Breadcrumbs } from "../ui/Breadcrumbs";
 import { Button } from "../ui/Button";
 import { Banner, Card, Field, Input, ResultLine, type ResultKind, Row } from "../ui/controls";
 import { StatusChip } from "../ui/StatusChip";
@@ -128,6 +129,10 @@ export function HomeworkPage(props: { openAssignment?: string; onSelect?: (id: s
 
 /** Where an opened assignment page lands: «mail» is the emails block. */
 type OpenTarget = "mail";
+
+/** The breadcrumbs of an assignment page: the list above it, and the last level while the assignment is not loaded. */
+const listCrumb = "Задания";
+const loadingCrumb = "Задание";
 
 function Chip(props: { view: ChipView }) {
   return (
@@ -1202,14 +1207,13 @@ function AssignmentEditor(props: {
     }
   }, [showMail, loaded]); // once per arrival: showDeliveries is a new function on every render
 
+  // «Задания / <задание>»: the first level does what the old «Все задания» did (the route history keeps working).
+  const crumbs = (title: string) => <Breadcrumbs items={[{ label: listCrumb, onClick: props.onBack }, { label: title }]} />;
+
   if (detail === null) {
     return (
       <section className="page hw">
-        <div className="hw-back">
-          <Button variant="ghost" onClick={props.onBack}>
-            Все задания
-          </Button>
-        </div>
+        {crumbs(loadingCrumb)}
         {loadError ? (
           <Banner kind="fail" role="alert">
             {loadError}
@@ -1229,11 +1233,7 @@ function AssignmentEditor(props: {
   if (gone !== null) {
     return (
       <section className="page hw">
-        <div className="hw-back">
-          <Button variant="ghost" onClick={props.onBack}>
-            Все задания
-          </Button>
-        </div>
+        {crumbs(a.title)}
         <RemovedLine
           busy={changing}
           stopped={goneStopped}
@@ -1260,11 +1260,7 @@ function AssignmentEditor(props: {
 
   return (
     <section className="page hw" tabIndex={-1} ref={rootRef} aria-labelledby="hw-detail-title">
-      <div className="hw-back">
-        <Button variant="ghost" onClick={props.onBack}>
-          Все задания
-        </Button>
-      </div>
+      {crumbs(a.title)}
       <div className="head">
         <h1 className="hw-title" id="hw-detail-title">
           {a.title}
