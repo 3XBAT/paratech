@@ -130,6 +130,7 @@ export function SubjectsPage(props: {
   const [added, setAdded] = useState<AddedState>(noAdded);
   const [addError, setAddError] = useState<{ text: string; again: () => void; origin: string } | null>(null);
   const running = useRef(false); // a double click comes before the re-render that disables the button
+  const typedName = useRef(""); // the last name sent to createSubject: «Повторить» of a restore that found the subject changed
 
   // What is on screen. "" shows the subject remembered for this arrival (read again at a rail click, not at every render,
   // so «Назад» to "" shows the subject it showed before).
@@ -351,7 +352,8 @@ export function SubjectsPage(props: {
   const removal = useSubjectRemoval({
     api,
     notes: notesClient,
-    materials: filesFailed ? null : materials,
+    // null while the files are read is "loading" for the dialog (its counts wait); null after a failure is "unknown".
+    materials: filesFailed ? null : materials === null ? "loading" : materials,
     subjects,
     // The subject is gone: out of the list, and its page gives way to the list with the home subject open (a click in the
     // tree would do the same). Without subjects the route is the empty one and the tiles show.
@@ -361,7 +363,11 @@ export function SubjectsPage(props: {
       props.onSelect(homeSubjectId(rest, ""));
     },
     onReload: refresh,
-    onRestored: putSubject,
+    // «Вернуть» on the line leads back to the subject, as «Вернуть» in the create form does.
+    onRestored: (s) => {
+      putSubject(s);
+      props.onSelect(s.id);
+    },
   });
 
   async function run(work: () => Promise<void>) {
@@ -392,6 +398,7 @@ export function SubjectsPage(props: {
 
   const createSubject = (name: string) =>
     run(async () => {
+      typedName.current = name;
       setRemovedName(null);
       try {
         const s = await api.createSubject(name, "");
@@ -540,6 +547,10 @@ export function SubjectsPage(props: {
         removedName === null ? undefined : (
           <RemovedNameLine
             removed={removedName}
+            name={typedName.current}
+            // After `changed`: the create runs again and brings the removed subject with its fresh version.
+            onChanged={() => void createSubject(typedName.current)}
+            onDismiss={() => setRemovedName(null)}
             restore={(r) => runRestore(api, r.subjectId, r.version)}
             onSettled={(call) => {
               if (call.state.phase === "done" && call.subject !== null) {

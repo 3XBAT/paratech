@@ -59,6 +59,12 @@ export const errorTexts: readonly string[] = [
 export const genericError = "Не удалось выполнить действие.";
 
 /**
+ * The text for a refused create whose name a removed subject holds. The core's message still says «уже есть», which is
+ * not true for the student (the subject is not in the list), so this text replaces it wherever the refusal is shown as text.
+ */
+export const removedNameText = "Предмет с таким названием удалён.";
+
+/**
  * The refusals after which the lists are out of date: the way out is «Обновить список», not a repeat. Exact texts (the
  * ones above and in openTexts), so a reworded message cannot silently change the button; test/libraryInbox.test.mjs
  * checks that every known text has its way and that each of these is still a known text.
@@ -66,6 +72,7 @@ export const genericError = "Не удалось выполнить действ
 export const refreshTexts: readonly string[] = [
   "Неверный идентификатор: обновите список.",
   "Предмет с таким названием уже есть.",
+  removedNameText,
   "Папка с таким именем уже есть.",
   "Предмет не найден: обновите список.",
   "Папка не найдена: обновите список.",
@@ -86,6 +93,9 @@ function errorMessage(err: unknown): string {
 
 /** The core's text of a refused call as it is when it is one of the known texts; a generic text otherwise. */
 export function libraryErrorText(err: unknown): string {
+  if (removedNameOf(err) !== null) {
+    return removedNameText;
+  }
   const msg = errorMessage(err);
   return errorTexts.includes(msg) ? msg : genericError;
 }
@@ -335,8 +345,8 @@ export function parseRestore(raw: unknown): SubjectRestore {
 
 /**
  * The removed subject behind a refused createSubject, read from the rejection's cause (Wails passes the Go error's
- * fields there); null for any other refusal. The rejection's text stays «Предмет с таким названием уже есть.», so a
- * page that does not ask still shows that.
+ * fields there); null for any other refusal. The rejection's own text stays «Предмет с таким названием уже есть.»;
+ * libraryErrorText turns it into removedNameText for a page that does not offer «Вернуть».
  */
 export function removedNameOf(err: unknown): RemovedName | null {
   if (typeof err !== "object" || err === null) {

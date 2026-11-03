@@ -1,5 +1,6 @@
 import { type FormEvent, type ReactNode, useState } from "react";
 import { texts } from "../libraryView.js";
+import { removalTexts } from "../subjectRemovalView.js";
 import { Button } from "../ui/Button.js";
 import { Field, Input } from "../ui/controls.js";
 
@@ -42,7 +43,14 @@ export function NameForm(props: {
           />
         )}
       </Field>
-      {props.removed}
+      {/* One live region that is there before its text comes, so «Предмет с таким названием удалён» is announced; the line's
+          buttons stay out of it. */}
+      <div className="lrow-error">
+        <div className="small muted" role="status" aria-live="polite">
+          {props.removed ? removalTexts.nameRemoved : ""}
+        </div>
+        {props.removed}
+      </div>
       <div className="acts start">
         <Button type="submit" variant={props.primary === false ? "secondary" : "primary"} size="sm" disabled={props.busy || name.trim() === ""}>
           {texts.create}

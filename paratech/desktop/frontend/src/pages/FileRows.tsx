@@ -242,6 +242,7 @@ export function PlacePanel(props: {
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState("");
   const [createRemoved, setCreateRemoved] = useState<RemovedName | null>(null);
+  const typedName = useRef(""); // the last name sent: «Повторить» of a restore that found the subject changed runs the create again
   const choice = panelChoice(props.subjects, pick.subjectId, pick.folderId);
   const subject = props.subjects.find((s) => s.id === choice.subjectId);
   const creating = pick.creating;
@@ -264,6 +265,7 @@ export function PlacePanel(props: {
   };
 
   const create = async (name: string) => {
+    typedName.current = name;
     setCreateBusy(true);
     setCreateError("");
     setCreateRemoved(null);
@@ -282,6 +284,9 @@ export function PlacePanel(props: {
   const removedLine = (removed: RemovedName) => (
     <RemovedNameLine
       removed={removed}
+      name={typedName.current}
+      onChanged={() => void create(typedName.current)}
+      onDismiss={() => setCreateRemoved(null)}
       restore={(r) => props.onRestoreRemoved?.(r) ?? Promise.resolve(restoreUnavailable)}
       onSettled={(call) => {
         if (call.state.phase === "done" && call.subject !== null) {

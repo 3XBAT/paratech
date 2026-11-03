@@ -47,7 +47,7 @@ import {
   takenOf,
   undoFlow,
 } from "../scheduleSubjectsView.js";
-import { removedRowText, type RestoreCall, restoredRowText, runRestore } from "../subjectRemovalView.js";
+import { type RemovedRow, removedRowText, type RestoreCall, restoredRowText, runRestore } from "../subjectRemovalView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
@@ -286,8 +286,11 @@ export function ReviewView(props: {
     >
       <div className="sched-status" role="status" aria-live="polite">
         {done !== "" && <DoneRow text={done} phase={state.phase} onUndo={on.undo} />}
-        {notice !== null && notice.tone === "ok" && <NoticeBody notice={notice} steps={steps(notice)} restore={on.restore} />}
+        {notice !== null && notice.tone === "ok" && <NoticeBody notice={notice} steps={steps(notice)} />}
       </div>
+      {notice !== null && notice.tone === "ok" && (
+        <NoticeRows rows={notice.rows ?? []} restore={on.restore} onChanged={() => on.step("refresh")} />
+      )}
 
       {state.view === "list" && (
         <>
@@ -339,38 +342,53 @@ export function ReviewView(props: {
   );
 }
 
-function NoticeBody(props: { notice: Notice; steps: ReactNode; restore?: ReviewHandlers["restore"] }) {
+function NoticeBody(props: { notice: Notice; steps: ReactNode }) {
   const n = props.notice;
   const hasSteps = n.steps.length > 0;
-  const rows = n.rows ?? [];
-  const restore = props.restore;
   return (
     <div className="sched-notice">
       {n.text !== "" && <ResultLine kind={n.tone === "ok" ? "ok" : "fail"}>{n.text}</ResultLine>}
-      {(n.lines.length > 0 || rows.length > 0) && (
+      {n.lines.length > 0 && (
         <ul className="sched-lines small muted">
           {n.lines.map((l, i) => (
             <li key={i}>{l}</li>
-          ))}
-          {/* A name only a removed subject holds: «Вернуть» brings the subject back (TASK-289). */}
-          {rows.map((r) => (
-            <li key={`${r.key}:${r.subjectId}`}>
-              {restore === undefined ? (
-                removedRowText(r)
-              ) : (
-                <RestoreRow
-                  idleText={removedRowText(r)}
-                  doneText={restoredRowText(r)}
-                  restore={() => restore(r.subjectId, r.version)}
-                  onSettled={() => undefined}
-                />
-              )}
-            </li>
           ))}
         </ul>
       )}
       {hasSteps && <div className="acts start">{props.steps}</div>}
     </div>
+  );
+}
+
+/**
+ * The names only a removed subject holds: «Вернуть» brings the subject back (TASK-289). They sit outside the live region of
+ * the notice (their buttons and their own status lines would be announced twice there). After `changed` «Повторить» reads
+ * the proposal again; creating it again gives the fresh version.
+ */
+function NoticeRows(props: { rows: readonly RemovedRow[]; restore?: ReviewHandlers["restore"]; onChanged(): void }) {
+  const restore = props.restore;
+  if (props.rows.length === 0) {
+    return null;
+  }
+  return (
+    <ul className="sched-lines small muted">
+      {props.rows.map((r) => (
+        <li key={`${r.key}:${r.subjectId}:${r.version}`}>
+          {restore === undefined ? (
+            removedRowText(r)
+          ) : (
+            <RestoreRow
+              idleText={removedRowText(r)}
+              doneText={restoredRowText(r)}
+              name={r.name}
+              restore={() => restore(r.subjectId, r.version)}
+              onSettled={() => undefined}
+              onChanged={props.onChanged}
+            />
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 

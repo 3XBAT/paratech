@@ -167,7 +167,7 @@ function flowWith(over = {}) {
       createSubject: async (name, semester, aliases) => {
         log.created.push([name, semester, aliases]);
         if (over.createFails) {
-          throw new Error(over.createFails);
+          throw Object.assign(new Error(over.createFails), over.createCause === undefined ? {} : { cause: over.createCause });
         }
         return subject({ id: "s-new", name, aliases: [...aliases], folders: over.newFolders ?? subject().folders });
       },
@@ -252,6 +252,14 @@ test("a refused creation or an unknown hint places nothing and says why", async 
   const refused = flowWith({ subjects: [], createFails: "Предмет с таким названием уже есть." });
   assert.equal(await refused.flow.placeHint(material(), createHint), "Предмет с таким названием уже есть.");
   assert.deepEqual(refused.log.placed, []);
+  // The name a removed subject holds: the hint's refusal says «удалён», not the untrue «уже есть» (TASK-289).
+  const removed = flowWith({
+    subjects: [],
+    createFails: "Предмет с таким названием уже есть.",
+    createCause: { problem: "removed_name_taken", subjectId: "s7", version: 4 },
+  });
+  assert.equal(await removed.flow.placeHint(material(), createHint), "Предмет с таким названием удалён.");
+  assert.deepEqual(removed.log.placed, []);
   const odd = flowWith({ subjects: [], createFails: "C:\\secret\\path" });
   assert.equal(await odd.flow.placeHint(material(), createHint), genericError, "a text that is not a known one never reaches the page");
   assert.equal(await odd.flow.placeHint(material(), { ...createHint, kind: "none" }), genericError);
