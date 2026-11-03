@@ -289,6 +289,7 @@ export function TodayPage(props: {
                 onRecord={props.onRecord}
                 onOpenRecordings={openRecordings}
                 links={links}
+                onReload={load}
               />
             </div>
             <div className="today-decide">

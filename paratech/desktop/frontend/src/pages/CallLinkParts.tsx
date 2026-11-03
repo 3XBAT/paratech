@@ -38,8 +38,6 @@ export interface LinkActions {
   join(target: LinkTarget): void;
   clear(target: LinkTarget, link: { link: string; host: string }): void;
   restore(): void;
-  /** «Вернуть предмет»: the removed subject that holds the name comes back, the typed link is kept on it. */
-  revive(target: LinkTarget): void;
   /** The confirming line fades. */
   dismiss(): void;
 }
@@ -60,7 +58,6 @@ export function linkActions(flow: CallLinkFlow): LinkActions {
     join: (target) => void flow.join(target),
     clear: (target, link) => void flow.clear(target, link),
     restore: () => void flow.restore(),
-    revive: (target) => void flow.revive(target),
     dismiss: () => flow.dismiss(),
   };
 }
@@ -126,8 +123,9 @@ function Line(props: { line: LinkLine; links: LinkControls; onRetry?: () => void
 /**
  * The small form: the field (Enter saves, Escape cancels), «Сохранить», «Отмена»; above it the explanation when the pair has
  * no subject yet (the subject is created with the link). `replaceHost` is set for «Изменить» on «Сегодня»: the card never
- * holds the link, so the field is empty and says what the new link replaces. A refusal stays under the field with its
- * button («Открыть «Предметы»», «Вернуть предмет»).
+ * holds the link, so the field is empty and says what the new link replaces. A refusal stays under the field, with
+ * «Открыть «Предметы»» when only that page can fix it; a removed subject that holds the name turns the main button into
+ * «Вернуть предмет и сохранить».
  */
 function Form(props: { form: LinkForm; card: CardLink; target: LinkTarget; links: LinkControls; labelled: boolean; replaceHost?: string }) {
   const { form, card, target, links } = props;
@@ -136,7 +134,8 @@ function Form(props: { form: LinkForm; card: CardLink; target: LinkTarget; links
   const replacing = props.replaceHost !== undefined;
   const replace = replaceTexts(props.replaceHost ?? "");
   const explain = replacing ? replace.hint : explainText(card);
-  const placeholder = replacing ? replace.placeholder : callLinkTexts.placeholder;
+  // While a removed subject holds the name the one button (and Enter) brings it back; the flow routes the submit the same way.
+  const reviving = state.reviveOffer !== null && state.reviveOffer.key === target.key;
   const fieldId = linkId(form.key, "field");
   const errorId = `${fieldId}-error`;
   const onKey = (e: KeyboardEvent) => {
@@ -159,8 +158,8 @@ function Form(props: { form: LinkForm; card: CardLink; target: LinkTarget; links
           id={fieldId}
           value={form.text}
           maxLength={2048}
-          placeholder={placeholder}
-          aria-label={props.labelled ? undefined : replacing ? replace.placeholder : callLinkTexts.field}
+          placeholder={callLinkTexts.placeholder}
+          aria-label={props.labelled ? undefined : replacing ? replace.label : callLinkTexts.field}
           aria-invalid={state.fieldError !== ""}
           aria-describedby={state.fieldError !== "" ? errorId : undefined}
           inputMode="url"
@@ -169,8 +168,14 @@ function Form(props: { form: LinkForm; card: CardLink; target: LinkTarget; links
           disabled={busy}
           onChange={(e) => on.type(e.target.value)}
         />
-        <Button type="submit" size="sm" disabled={busy} busy={state.busy === "save"} busyLabel={callLinkTexts.saving}>
-          {saveLabel(card, replacing)}
+        <Button
+          type="submit"
+          size="sm"
+          disabled={busy}
+          busy={state.busy === "save" || state.busy === "revive"}
+          busyLabel={reviving ? callLinkTexts.restoring : callLinkTexts.saving}
+        >
+          {reviving ? callLinkTexts.revive : saveLabel(card)}
         </Button>
         <Button size="sm" variant="ghost" disabled={busy} onClick={on.cancel}>
           {callLinkTexts.cancel}
@@ -185,17 +190,6 @@ function Form(props: { form: LinkForm; card: CardLink; target: LinkTarget; links
           {state.fieldAction === "subjects" && (
             <Button size="sm" disabled={busy} onClick={links.onOpenSubjects}>
               {callLinkTexts.openSubjects}
-            </Button>
-          )}
-          {state.fieldAction === "revive" && (
-            <Button
-              size="sm"
-              disabled={busy}
-              busy={state.busy === "revive"}
-              busyLabel={callLinkTexts.restoring}
-              onClick={() => on.revive(target)}
-            >
-              {callLinkTexts.revive}
             </Button>
           )}
         </div>

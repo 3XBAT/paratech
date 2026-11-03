@@ -12,7 +12,6 @@ import {
   type SubjectRestore,
 } from "./bindings/library.js";
 import type { TodayLesson } from "./bindings/today.js";
-import { removalTexts } from "./subjectRemovalView.js";
 
 /** How long a confirming line («Ссылка на пару сохранена.») stays. */
 export const confirmMs = 6000;
@@ -24,12 +23,12 @@ export const callLinkTexts = {
   joinTitle: "Открыть ссылку на пару (запись не начнётся)",
   add: "Добавить ссылку",
   change: "Изменить",
-  replace: "Заменить",
   clear: "Удалить",
   clearing: "Удаление…",
   undo: "Вернуть",
   restoring: "Возврат…",
-  revive: "Вернуть предмет",
+  /** The main button of the field while a removed subject holds the name: the refused create is not run again. */
+  revive: "Вернуть предмет и сохранить",
   save: "Сохранить",
   saveCreate: "Создать предмет и сохранить",
   saving: "Сохранение…",
@@ -39,7 +38,7 @@ export const callLinkTexts = {
   /** The label of the field and of the block on the page of a subject. */
   field: "Ссылка на пару",
   placeholder: "https://…",
-  none: "Ссылки на пару нет. С ней на «Сегодня» появится «Подключиться».",
+  none: "Ссылки на пару нет. С ней у пар этого предмета на «Сегодня» появится «Подключиться».",
   fieldEmpty: "Ссылка не вставлена.",
   invalid: "Нужна ссылка вида https://… (http или https).",
   saveFailed: "Не удалось сохранить ссылку. Можно повторить.",
@@ -56,7 +55,14 @@ export const callLinkTexts = {
   createFailed: "Не удалось создать предмет. Можно повторить.",
   reviveFailed: "Не удалось вернуть предмет. Можно повторить.",
   reviveChanged: "Предмет изменился, вернуть его не удалось. Можно ещё раз нажать «Создать предмет и сохранить».",
+  /** Once at the heading «Пары дня» when some pairs could not read their subjects (the cards say nothing). */
+  linksUnavailable: "Ссылки на пары сейчас не загрузились.",
 } as const;
+
+/** After a restore: the subject is back, only the link is not kept. */
+export function reviveLinkFailedText(name: string): string {
+  return `Предмет «${name}» возвращён, но ссылку сохранить не удалось. Можно повторить.`;
+}
 
 /** «Ссылка хранится у предмета «Физика». Создать предмет и сохранить ссылку?» */
 export function createQuestion(name: string): string {
@@ -64,10 +70,10 @@ export function createQuestion(name: string): string {
 }
 
 /** The field of «Изменить» on «Сегодня» is empty (the card never holds the link): the texts say what the new one does. */
-export function replaceTexts(host: string): { placeholder: string; hint: string } {
+export function replaceTexts(host: string): { placeholder: string; label: string; hint: string } {
   return host === ""
-    ? { placeholder: "Новая ссылка", hint: "Новая ссылка заменит прежнюю." }
-    : { placeholder: `Новая ссылка вместо ${host}`, hint: `Новая ссылка заменит ссылку на ${host}.` };
+    ? { placeholder: callLinkTexts.placeholder, label: "Новая ссылка", hint: "Новая ссылка заменит прежнюю." }
+    : { placeholder: callLinkTexts.placeholder, label: `Новая ссылка вместо ${host}`, hint: `Новая ссылка заменит ссылку на ${host}.` };
 }
 
 // ---- The card of a pair on «Сегодня» ----
@@ -121,32 +127,37 @@ export function explainText(card: CardLink): string {
 
 /**
  * The quiet one-line reason on a card whose link cannot be kept there; "" for the other cards. Every text is true to the
- * card: a link saved on the page of a subject never shows here when the pair is not bound to that subject.
+ * card. An unavailable card says nothing: the one line at the heading speaks for all of them (linksUnavailableNote).
+ *
+ * Ambiguous: the core matches the pair's string to the name or an alias of a subject (case, «ё», spaces ignored) and a
+ * string with two owners matches none. The library does not let a subject take another's spelling, so the student fixes
+ * it in «Предметы» by renaming a subject or removing the alias; then the pair resolves to one subject.
  */
 export function cardNote(card: CardLink): string {
   switch (card.kind) {
     case "nosubject":
       return "У пары в расписании не указан предмет, поэтому ссылку негде сохранить.";
     case "ambiguous":
-      return card.name === ""
-        ? "Название пары подходит к нескольким предметам: ссылку на этой карточке сохранить нельзя."
-        : `Название «${card.name}» подходит к нескольким предметам: ссылку на этой карточке сохранить нельзя.`;
-    case "unavailable":
-      return "Ссылка недоступна: «Предметы» сейчас не прочитать.";
+      return (
+        `${card.name === "" ? "Название пары" : `Название «${card.name}»`} подходит к нескольким предметам, поэтому ссылку здесь не сохранить. ` +
+        "Когда в «Предметы» это название (в том числе из «Также») останется только у одного предмета, здесь появится «Добавить ссылку»."
+      );
     default:
       return "";
   }
 }
 
-/** «Открыть «Предметы»» next to the note helps only when the right subject is there to pick. */
+/** One quiet line near «Пары дня» when at least one pair could not read its subject; "" otherwise. */
+export function linksUnavailableNote(lessons: readonly Pick<TodayLesson, "subject" | "subjectState" | "subjectId" | "hasCallLink" | "callLinkHost">[]): string {
+  return lessons.some((l) => cardLink(l).kind === "unavailable") ? callLinkTexts.linksUnavailable : "";
+}
+
+/** «Открыть «Предметы»» next to the note: the way to make the name belong to one subject. */
 export function noteOffersSubjects(card: CardLink): boolean {
   return card.kind === "ambiguous";
 }
 
-export function saveLabel(card: CardLink, replacing = false): string {
-  if (replacing) {
-    return callLinkTexts.replace;
-  }
+export function saveLabel(card: CardLink): string {
   return card.kind === "create" ? callLinkTexts.saveCreate : callLinkTexts.save;
 }
 
@@ -189,10 +200,10 @@ export function linkId(key: string, part: LinkPart): string {
 
 // ---- The refusals of creating a subject with a link ----
 
-/** The button next to the text under the field: «Открыть «Предметы»», or «Вернуть предмет» for a removed one. */
-export type FieldAction = "" | "subjects" | "revive";
+/** The button next to the text under the field: «Открыть «Предметы»». A removed subject has no button of its own: the main one returns it. */
+export type FieldAction = "" | "subjects";
 
-/** A removed subject that holds the name: «Вернуть предмет» is restoreSubject(subjectId, version). */
+/** A removed subject that holds the name: while it is set, «Вернуть предмет и сохранить» is restoreSubject(subjectId, version). */
 export interface ReviveOffer {
   key: string;
   name: string;
@@ -220,7 +231,7 @@ export function createRefusal(res: CreateWithCallLink, name: string, key: string
         ? { text: `Название «${name}» занято удалённым предметом.`, action: "subjects", offer: null }
         : {
             text: `Предмет «${name}» удалён. Его можно вернуть.`,
-            action: "revive",
+            action: "",
             offer: { key, name, subjectId: res.removed.subjectId, version: res.removed.version },
           };
     default:
@@ -228,15 +239,19 @@ export function createRefusal(res: CreateWithCallLink, name: string, key: string
   }
 }
 
-/** Why a restore of a removed subject failed, in plain words (the texts of the subject pages where they exist). */
-export function reviveRefusalText(problem: Exclude<SubjectRestore["problem"], "">): string {
+/**
+ * Why a restore of a removed subject failed, in plain words, and the next step. Once the subject is gone for good (its
+ * window ended, or it is not stored) the core frees the name (it erases an expired subject before checking a name), so a
+ * new create goes through; the offer is dropped and the main button reads «Создать предмет и сохранить» again.
+ */
+export function reviveRefusalText(problem: Exclude<SubjectRestore["problem"], "">, name: string): string {
   switch (problem) {
     case "expired":
-      return `${removalTexts.expired}.`;
+      return `Предмет «${name}» удалён окончательно. Можно создать новый: «${callLinkTexts.saveCreate}».`;
     case "changed":
       return callLinkTexts.reviveChanged;
     case "not_found":
-      return removalTexts.restoreGone;
+      return `Предмет «${name}» не найден: возможно, он удалён окончательно. Можно создать новый: «${callLinkTexts.saveCreate}».`;
     default:
       return callLinkTexts.reviveFailed;
   }
@@ -422,7 +437,7 @@ export class CallLinkFlow {
   }
 
   /** The end of a setSubjectCallLink: the card is told, or the field stays with the refusal and the typed text. */
-  private finishSet(res: CallLinkResult, key: string, okText: string, fresh: () => boolean): void {
+  private finishSet(res: CallLinkResult, key: string, okText: string, fresh: () => boolean, failText: string = callLinkTexts.saveFailed): void {
     if (res.problem === "" && res.subject !== null) {
       this.host.applied(res.subject, key);
       if (fresh()) {
@@ -443,7 +458,7 @@ export class CallLinkFlow {
       const line: LinkLine = { key, kind: "fail", text: callLinkTexts.subjectGone, action: "" };
       this.set({ busy: "", form: null, line }, linkId(key, "add"));
     } else {
-      const line: LinkLine = { key, kind: "fail", text: callLinkTexts.saveFailed, action: "" };
+      const line: LinkLine = { key, kind: "fail", text: failText, action: "" };
       this.set({ busy: "", line }, linkId(key, "field"));
     }
   }
@@ -457,6 +472,10 @@ export class CallLinkFlow {
     const form = this.current.form;
     if (this.pending || form === null || form.key !== target.key) {
       return;
+    }
+    // A removed subject holds the name: the create was refused, so the button and Enter bring the subject back instead.
+    if (this.current.reviveOffer?.key === target.key) {
+      return this.revive(target);
     }
     const text = form.text.trim();
     if (text === "") {
@@ -516,17 +535,25 @@ export class CallLinkFlow {
           this.host.reread();
         }
         if (fresh()) {
-          // Only a failed call is worth repeating with the same version; the other refusals need a fresh create.
+          // Only a failed call is worth repeating with the same version; the other refusals leave the subject gone, so the
+          // offer goes and the main button creates again.
           const again = problem === "failed";
-          this.set(
-            { busy: "", fieldError: reviveRefusalText(problem), fieldAction: again ? "revive" : "", reviveOffer: again ? offer : null },
-            linkId(target.key, "field"),
-          );
+          this.set({ busy: "", fieldError: reviveRefusalText(problem, offer.name), reviveOffer: again ? offer : null }, linkId(target.key, "field"));
         }
         return;
       }
       this.host.applied(res.subject, target.key);
-      this.finishSet(await this.setLink(res.subject.id, text), target.key, `Предмет «${offer.name}» возвращён, ссылка на пару сохранена.`, fresh);
+      // The subject is back: the main button is a plain save now, also when only the link fails below.
+      if (fresh()) {
+        this.set({ reviveOffer: null, fieldError: "" });
+      }
+      this.finishSet(
+        await this.setLink(res.subject.id, text),
+        target.key,
+        `Предмет «${offer.name}» возвращён, ссылка на пару сохранена.`,
+        fresh,
+        reviveLinkFailedText(offer.name),
+      );
     });
   }
 

@@ -20,8 +20,10 @@ import {
   idleLink,
   linkId,
   linkKey,
+  linksUnavailableNote,
   noteOffersSubjects,
   replaceTexts,
+  reviveLinkFailedText,
   reviveRefusalText,
   saveLabel,
   withoutLink,
@@ -69,21 +71,33 @@ test("the card of a pair offers what the state of its subject allows, from the l
 
 test("every note on a card that keeps no link is true: it never promises the link will show there", () => {
   assert.equal(cardNote({ kind: "nosubject" }), "У пары в расписании не указан предмет, поэтому ссылку негде сохранить.");
-  assert.equal(
-    cardNote({ kind: "ambiguous", name: "Физика" }),
-    "Название «Физика» подходит к нескольким предметам: ссылку на этой карточке сохранить нельзя.",
-  );
-  assert.match(cardNote({ kind: "ambiguous", name: "" }), /Название пары подходит к нескольким предметам/);
-  assert.equal(cardNote({ kind: "unavailable" }), "Ссылка недоступна: «Предметы» сейчас не прочитать.");
+  assert.match(cardNote({ kind: "ambiguous", name: "Физика" }), /^Название «Физика» подходит к нескольким предметам, поэтому/);
+  assert.match(cardNote({ kind: "ambiguous", name: "" }), /^Название пары подходит к нескольким предметам, поэтому/);
+  // An unavailable card says nothing: one line at the heading speaks for all of them.
+  assert.equal(cardNote({ kind: "unavailable" }), "");
   for (const kind of [{ kind: "join", host: HOST }, { kind: "add" }, { kind: "create", name: "x" }]) {
     assert.equal(cardNote(kind), "", kind.kind);
   }
-  for (const text of [cardNote({ kind: "nosubject" }), cardNote({ kind: "ambiguous", name: "x" }), cardNote({ kind: "unavailable" })]) {
-    assert.doesNotMatch(text, /можно добавить на странице|появится/, "no promise that the page of a subject fills this card");
-  }
+  assert.doesNotMatch(cardNote({ kind: "nosubject" }), /можно добавить на странице|появится/, "no promise that the page of a subject fills this card");
   assert.equal(noteOffersSubjects({ kind: "ambiguous", name: "x" }), true);
   assert.equal(noteOffersSubjects({ kind: "nosubject" }), false);
   assert.equal(noteOffersSubjects({ kind: "unavailable" }), false);
+});
+
+test("the ambiguous note says what the student can change: the name must stay with one subject in «Предметы»", () => {
+  // The core matches the string to a name or an alias (case, «ё» and spaces ignored); a key of two subjects matches none.
+  assert.equal(
+    cardNote({ kind: "ambiguous", name: "Физика" }),
+    "Название «Физика» подходит к нескольким предметам, поэтому ссылку здесь не сохранить. " +
+      "Когда в «Предметы» это название (в том числе из «Также») останется только у одного предмета, здесь появится «Добавить ссылку».",
+  );
+});
+
+test("one quiet line for all pairs whose subjects could not be read, none when every pair read", () => {
+  const down = lesson({ subjectState: "unavailable", subjectId: "" });
+  assert.equal(linksUnavailableNote([lesson(), down, down]), "Ссылки на пары сейчас не загрузились.");
+  assert.equal(linksUnavailableNote([lesson(), withLink()]), "");
+  assert.equal(linksUnavailableNote([]), "");
 });
 
 test("the labels and the explanations are plain impersonal Russian", () => {
@@ -92,15 +106,22 @@ test("the labels and the explanations are plain impersonal Russian", () => {
   assert.equal(explainText({ kind: "add" }), "");
   assert.equal(saveLabel({ kind: "create", name: "x" }), "Создать предмет и сохранить");
   assert.equal(saveLabel({ kind: "add" }), "Сохранить");
-  assert.equal(saveLabel({ kind: "join", host: HOST }, true), "Заменить");
-  assert.deepEqual(replaceTexts(HOST), { placeholder: "Новая ссылка вместо meet.example.org", hint: "Новая ссылка заменит ссылку на meet.example.org." });
-  assert.equal(replaceTexts("").placeholder, "Новая ссылка");
+  assert.equal(saveLabel({ kind: "join", host: HOST }), "Сохранить", "one label for the same action; the hint explains the replacement");
+  assert.equal(callLinkTexts.revive, "Вернуть предмет и сохранить");
+  assert.deepEqual(replaceTexts(HOST), {
+    placeholder: "https://…",
+    label: "Новая ссылка вместо meet.example.org",
+    hint: "Новая ссылка заменит ссылку на meet.example.org.",
+  });
+  assert.equal(replaceTexts("").placeholder, "https://…");
+  assert.equal(replaceTexts("").label, "Новая ссылка");
+  assert.equal(reviveLinkFailedText("Физика"), "Предмет «Физика» возвращён, но ссылку сохранить не удалось. Можно повторить.");
   assert.equal(callLinkTexts.joinTitle, "Открыть ссылку на пару (запись не начнётся)");
   assert.equal(callLinkTexts.invalid, "Нужна ссылка вида https://… (http или https).");
   assert.equal(callLinkTexts.fieldEmpty, "Ссылка не вставлена.");
   assert.equal(callLinkTexts.openFailed, "Не удалось открыть ссылку. Можно повторить.");
   assert.equal(callLinkTexts.opened, "Ссылка открыта.");
-  assert.equal(callLinkTexts.none, "Ссылки на пару нет. С ней на «Сегодня» появится «Подключиться».");
+  assert.equal(callLinkTexts.none, "Ссылки на пару нет. С ней у пар этого предмета на «Сегодня» появится «Подключиться».");
   for (const [name, text] of Object.entries(callLinkTexts)) {
     assert.doesNotMatch(text, /Попробуйте|Вставьте|создайте|нажмите/i, `${name}: no imperative, no second person`);
   }
@@ -115,15 +136,16 @@ test("a refused create says why under the field: the link, the name, a taken nam
   assert.equal(taken.action, "subjects");
   const removed = createRefusal(res("removed_name_taken", { subjectId: "s9", version: 2 }), "Физика", "l1");
   assert.equal(removed.text, "Предмет «Физика» удалён. Его можно вернуть.");
-  assert.equal(removed.action, "revive");
+  assert.equal(removed.action, "", "no button of its own: the main button returns the subject");
   assert.deepEqual(removed.offer, { key: "l1", name: "Физика", subjectId: "s9", version: 2 });
   assert.equal(createRefusal(res("failed"), "Физика", "l1").text, callLinkTexts.createFailed);
   for (const r of [taken, removed]) {
     assert.doesNotMatch(r.text, /ввести|заново|создайте/i, "no hint to retype a name to recreate a deleted subject");
   }
-  assert.match(reviveRefusalText("expired"), /удалён окончательно/);
-  assert.equal(reviveRefusalText("changed"), callLinkTexts.reviveChanged);
-  assert.equal(reviveRefusalText("failed"), callLinkTexts.reviveFailed);
+  assert.equal(reviveRefusalText("expired", "Физика"), "Предмет «Физика» удалён окончательно. Можно создать новый: «Создать предмет и сохранить».");
+  assert.match(reviveRefusalText("not_found", "Физика"), /«Физика» не найден.*Можно создать новый: «Создать предмет и сохранить»\./);
+  assert.equal(reviveRefusalText("changed", "Физика"), callLinkTexts.reviveChanged);
+  assert.equal(reviveRefusalText("failed", "Физика"), callLinkTexts.reviveFailed);
 });
 
 test("a saved link shows on every pair of its subject at once; a link that is gone leaves them offering «Добавить ссылку»", () => {
@@ -273,7 +295,7 @@ test("a refused create keeps the field open with the typed text and says why und
   assert.equal(taken.flow.state.fieldAction, "subjects");
   assert.match(taken.flow.state.fieldError, /уже занято/);
   const gone = await refuse("removed_name_taken", { subjectId: "s9", version: 2 });
-  assert.equal(gone.flow.state.fieldAction, "revive");
+  assert.equal(gone.flow.state.fieldAction, "");
   assert.deepEqual(gone.flow.state.reviveOffer, { key: "l1", name: "Физика", subjectId: "s9", version: 2 });
   const failed = await refuse("failed");
   assert.equal(failed.flow.state.fieldError, callLinkTexts.createFailed);
@@ -290,12 +312,13 @@ test("a refused create keeps the field open with the typed text and says why und
   assert.equal(boom.flow.state.fieldError, callLinkTexts.createFailed);
 });
 
-test("«Вернуть предмет»: the removed subject comes back by its ID and version, then the typed link is kept on it", async () => {
+test("«Вернуть предмет и сохранить»: the second submit does not run the refused create but returns the subject by its ID and version, then keeps the link", async () => {
   const p = setup({ create: [{ problem: "removed_name_taken", subject: null, removed: { subjectId: "s9", version: 2 } }] });
   p.flow.openForm("l1", "add");
   p.flow.type(LINK);
   await p.flow.save(target({ subjectId: "", name: "Физика" }));
-  await p.flow.revive(target({ subjectId: "", name: "Физика" }));
+  await p.flow.save(target({ subjectId: "", name: "Физика" }));
+  assert.deepEqual(p.calls.map((c) => c[0]), ["create", "restore", "set"], "create ran once");
   assert.deepEqual(p.calls.slice(1), [["restore", "s9", 2], ["set", "s9", LINK]]);
   assert.deepEqual(p.applied.map((a) => a[0]), ["s9", "s9"], "the card learns of the restored subject, then of its link");
   const s = p.flow.state;
@@ -306,32 +329,35 @@ test("«Вернуть предмет»: the removed subject comes back by its I
   assert.equal(s.focus.id, linkId("l1", "join"));
 });
 
-test("«Вернуть предмет» refused: a failed call can be repeated, the others ask for a fresh create; the typed link stays", async () => {
+test("a refused return: a failed call can be repeated by the same button, the others drop the offer and the next submit creates again; the typed link stays", async () => {
   const offer = { problem: "removed_name_taken", subject: null, removed: { subjectId: "s9", version: 2 } };
   const run = async (restoreResult) => {
     const p = setup({ create: [offer], restore: [restoreResult] });
     p.flow.openForm("l1", "add");
     p.flow.type(LINK);
     await p.flow.save(target({ subjectId: "", name: "Физика" }));
-    await p.flow.revive(target({ subjectId: "", name: "Физика" }));
+    await p.flow.save(target({ subjectId: "", name: "Физика" }));
     assert.equal(p.flow.state.form.text, LINK);
     assert.equal(p.calls.filter((c) => c[0] === "set").length, 0, "no link is saved without the subject");
     return p;
   };
   const failed = await run({ problem: "failed", subject: null });
   assert.equal(failed.flow.state.fieldError, callLinkTexts.reviveFailed);
-  assert.equal(failed.flow.state.fieldAction, "revive");
-  assert.notEqual(failed.flow.state.reviveOffer, null);
+  assert.equal(failed.flow.state.fieldAction, "");
+  assert.notEqual(failed.flow.state.reviveOffer, null, "the main button still returns the subject");
   assert.equal(failed.rereads, 0);
   for (const problem of ["expired", "changed", "not_found"]) {
     const p = await run({ problem, subject: null });
     assert.equal(p.flow.state.fieldAction, "", problem);
     assert.equal(p.flow.state.reviveOffer, null, problem);
     assert.equal(p.rereads, 1, problem);
-    assert.equal(p.flow.state.fieldError, reviveRefusalText(problem));
+    assert.equal(p.flow.state.fieldError, reviveRefusalText(problem, "Физика"));
+    // The offer is gone, so the next submit is the plain create (the core frees the name of a subject that is gone for good).
+    await p.flow.save(target({ subjectId: "", name: "Физика" }));
+    assert.deepEqual(p.calls.map((c) => c[0]), ["create", "restore", "create"], problem);
   }
   const thrown = await run(new Error("boom"));
-  assert.equal(thrown.flow.state.fieldAction, "revive");
+  assert.notEqual(thrown.flow.state.reviveOffer, null);
 });
 
 test("the subject is back but its link is refused or failed: the card now has the subject, so the field stays for a plain save", async () => {
@@ -340,9 +366,10 @@ test("the subject is back but its link is refused or failed: the card now has th
   p.flow.openForm("l1", "add");
   p.flow.type(LINK);
   await p.flow.save(target({ subjectId: "", name: "Физика" }));
-  await p.flow.revive(target({ subjectId: "", name: "Физика" }));
+  await p.flow.save(target({ subjectId: "", name: "Физика" }));
   assert.equal(p.flow.state.form.text, LINK);
-  assert.equal(p.flow.state.line.text, callLinkTexts.saveFailed);
+  assert.equal(p.flow.state.line.text, "Предмет «Физика» возвращён, но ссылку сохранить не удалось. Можно повторить.");
+  assert.equal(p.flow.state.reviveOffer, null, "the next submit is a plain save, not a second return");
   assert.equal(p.applied.length, 1);
   await p.flow.save(target({ subjectId: "s9" }));
   assert.deepEqual(p.calls.map((c) => c[0]), ["create", "restore", "set", "set"], "the subject is restored once");
@@ -574,13 +601,24 @@ test("a pair that cannot keep a link on the card says why up front; no «Доб�
   assert.doesNotMatch(none, /Добавить ссылку|Открыть «Предметы»|<input|Подключиться/);
 
   const ambiguous = section([states.ambiguous], controls());
-  assert.match(ambiguous, /Название «Физика» подходит к нескольким предметам: ссылку на этой карточке сохранить нельзя\./);
-  assert.match(ambiguous, /Открыть «Предметы»/, "the way to pick the right subject");
-  assert.doesNotMatch(ambiguous, /Добавить ссылку|<input|Подключиться/);
+  assert.match(ambiguous, /Название «Физика» подходит к нескольким предметам, поэтому ссылку здесь не сохранить\./);
+  assert.match(ambiguous, /останется только у одного предмета, здесь появится «Добавить ссылку»\./);
+  assert.match(ambiguous, /Открыть «Предметы»/, "the way to make the name unique");
+  assert.doesNotMatch(ambiguous, />Добавить ссылку<|<input|Подключиться/, "the text names the button, no such button yet");
 
+  // Unavailable: nothing on the card; one quiet line at the heading with «Повторить» (the day is re-read only on a visit or focus).
   const unavailable = section([states.unavailable], controls());
-  assert.match(unavailable, /Ссылка недоступна: «Предметы» сейчас не прочитать\./);
-  assert.doesNotMatch(unavailable, /Добавить ссылку|Открыть «Предметы»|<input|Подключиться/);
+  assert.doesNotMatch(unavailable.replace(/<h2.*?<\/h2>/, ""), /недоступна|не прочитать/);
+  assert.equal(unavailable.split("Ссылки на пары сейчас не загрузились.").length - 1, 1);
+  assert.doesNotMatch(unavailable, />Добавить ссылку<|Открыть «Предметы»|<input|Подключиться/);
+  assert.doesNotMatch(unavailable, /Повторить/, "no button without a way to re-read");
+  const retried = section([states.unavailable], controls(), { onReload: noop });
+  assert.match(retried, /Ссылки на пары сейчас не загрузились\.<\/p>.*>Повторить</);
+  // The line stays one for any number of such pairs, and is absent when every pair read.
+  const many = section([states.unavailable, { ...states.unavailable, id: "l2" }], controls());
+  assert.equal(many.split("Ссылки на пары сейчас не загрузились.").length - 1, 1);
+  assert.doesNotMatch(section([lesson()], controls()), /не загрузились/);
+  assert.doesNotMatch(section([states.unavailable], undefined), /не загрузились/, "without the link controls nothing is said");
   for (const out of [none, ambiguous, unavailable]) {
     assert.match(out, /Записать|Физика/, "the rest of the card is there");
     assert.doesNotMatch(out, /можно добавить на странице предмета/, "no advice that the card would not follow");
@@ -590,13 +628,14 @@ test("a pair that cannot keep a link on the card says why up front; no «Доб�
   assert.doesNotMatch(stale, /<input|<form/);
 });
 
-test("«Изменить» on «Сегодня» opens an empty field that says which link it replaces; «Заменить» instead of «Сохранить»", () => {
+test("«Изменить» on «Сегодня» opens an empty field with the usual example, a hint of which link it replaces and the one label «Сохранить»", () => {
   const open = section([withLink()], controls({ form: { key: "l1", mode: "change", text: "" } }));
-  assert.match(open, /placeholder="Новая ссылка вместо meet\.example\.org"/);
+  assert.match(open, /placeholder="https:\/\/…"/);
   assert.match(open, /aria-label="Новая ссылка вместо meet\.example\.org"/);
   assert.match(open, /Новая ссылка заменит ссылку на meet\.example\.org\./);
-  assert.match(open, />Заменить</);
-  assert.doesNotMatch(open, />Сохранить</);
+  assert.match(open, />Сохранить</);
+  assert.doesNotMatch(open, />Заменить</);
+  assert.doesNotMatch(open, /placeholder="Новая ссылка/);
   assert.match(open, /value=""/);
   // The page of a subject keeps its prefilled field and «Сохранить».
   const page = html(h(CallLinkBlock, { subject: linked(), links: controls({ form: { key: "s1", mode: "change", text: LINK } }) }));
@@ -604,7 +643,7 @@ test("«Изменить» on «Сегодня» opens an empty field that says 
   assert.doesNotMatch(page, /Заменить|Новая ссылка/);
 });
 
-test("a refusal under the field comes with its button: «Открыть «Предметы»» for a taken name, «Вернуть предмет» for a removed one", () => {
+test("a refusal under the field: «Открыть «Предметы»» for a taken name; for a removed one the single main button returns the subject", () => {
   const nameless = lesson({ subjectState: "unknown", subjectId: "", subjectName: "", subject: "Физика" });
   const form = { key: "l1", mode: "add", text: "example.com" };
   const taken = section([nameless], controls({ form, fieldError: "Название «Физика» уже занято другим предметом.", fieldAction: "subjects" }));
@@ -612,13 +651,20 @@ test("a refusal under the field comes with its button: «Открыть «Пре
   assert.match(taken, /уже занято другим предметом/);
   assert.match(taken, /Открыть «Предметы»/);
   assert.match(taken, /aria-invalid="true"/);
-  const removed = section([nameless], controls({ form, fieldError: "Предмет «Физика» удалён. Его можно вернуть.", fieldAction: "revive" }));
-  assert.match(removed, />Вернуть предмет</);
+  const offer = { key: "l1", name: "Физика", subjectId: "s9", version: 2 };
+  const removed = section([nameless], controls({ form, fieldError: "Предмет «Физика» удалён. Его можно вернуть.", reviveOffer: offer }));
+  assert.match(removed, /<button type="submit"[^>]*>.*Вернуть предмет и сохранить/);
+  assert.doesNotMatch(removed, /Создать предмет и сохранить<|>Сохранить</, "the refused create is not offered again");
+  assert.equal(removed.split("Вернуть предмет").length - 1, 1, "one button, no separate «Вернуть предмет»");
   assert.doesNotMatch(removed, /Открыть «Предметы»/);
-  const busy = section([nameless], controls({ form, fieldError: "x", fieldAction: "revive", busy: "revive", busyKey: "l1" }));
+  const busy = section([nameless], controls({ form, fieldError: "x", reviveOffer: offer, busy: "revive", busyKey: "l1" }));
   assert.match(busy, /Возврат…/);
+  // An offer made for another pair does not change this pair's button.
+  const other = section([nameless], controls({ form, reviveOffer: { ...offer, key: "zzz" } }));
+  assert.match(other, /Создать предмет и сохранить/);
   const plain = section([nameless], controls({ form, fieldError: callLinkTexts.invalid }));
-  assert.doesNotMatch(plain, />Вернуть предмет<|Открыть «Предметы»/);
+  assert.doesNotMatch(plain, /Вернуть предмет|Открыть «Предметы»/);
+  assert.match(plain, /Создать предмет и сохранить/, "without an offer the button creates");
 });
 
 test("results: a failed open offers «Повторить»; texts of files and models stay text", () => {
@@ -662,7 +708,7 @@ test("the block: the full link as selectable text (the host is not repeated), «
   }
   assert.doesNotMatch(out, /<a /, "never a link element");
   const empty = block(subject());
-  assert.match(empty, /Ссылки на пару нет\. С ней на «Сегодня» появится «Подключиться»\./);
+  assert.match(empty, /Ссылки на пару нет\. С ней у пар этого предмета на «Сегодня» появится «Подключиться»\./);
   assert.match(empty, />Добавить ссылку</);
   assert.doesNotMatch(empty, />Подключиться<|>Удалить</, "no buttons of a link that is not there (the hint names «Подключиться» in text)");
 });
@@ -699,7 +745,8 @@ test("the pages are wired: «Сегодня» passes the controls to the lessons
   assert.match(subjects, /linkFlow\.reset\(\)/, "another subject drops the form and the offer");
   const parts = src("pages/CallLinkParts.tsx");
   assert.match(parts, /e\.key === "Escape"/);
-  assert.match(parts, /aria-label=\{props\.labelled \? undefined : replacing \? replace\.placeholder : callLinkTexts\.field\}/);
+  assert.match(parts, /aria-label=\{props\.labelled \? undefined : replacing \? replace\.label : callLinkTexts\.field\}/);
+  assert.match(today, /onReload=\{load\}/, "the quiet line of unreadable subjects re-reads the day");
   assert.doesNotMatch(parts, /dangerouslySetInnerHTML|<a\b/);
   for (const file of ["popup/Popup.tsx", "popup/main.tsx"]) {
     assert.equal(existsSync(new URL(`../src/${file}`, import.meta.url)), true);

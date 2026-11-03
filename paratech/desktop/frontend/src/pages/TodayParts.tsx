@@ -18,6 +18,7 @@ import {
   waitingLine,
 } from "../todayView.js";
 import { type ActiveIssue, doneTexts } from "../assignmentDoneView.js";
+import { callLinkTexts, linksUnavailableNote } from "../callLinkView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
@@ -231,9 +232,13 @@ export function LessonsSection(props: {
   onOpenRecordings?: () => void;
   /** TASK-364: «Подключиться» / «Добавить ссылку» on every pair, whatever the time; without it the link is not offered. */
   links?: LinkControls;
+  /** Reads the day again: the day is re-read only on a visit and when the window gets the focus, so the quiet line offers «Повторить». */
+  onReload?: () => void;
 }) {
   const links = props.links;
   useLinkFocus(links?.state.focus);
+  // One line for all the pairs whose subjects could not be read; their cards say nothing.
+  const unavailable = links === undefined ? "" : linksUnavailableNote(props.lessons);
   const day = props.day ?? "";
   const loose = looseProblems(
     props.lessons.map((l) => l.id),
@@ -246,6 +251,16 @@ export function LessonsSection(props: {
         <div className="today-loose">
           <ProblemChip problem={loose[0]} onClick={props.onOpenRecordings} />
           {loose.length > 1 && <span className="small muted num"> · {loose.length}</span>}
+        </div>
+      )}
+      {unavailable !== "" && (
+        <div className="today-err">
+          <p className="small muted today-quiet">{unavailable}</p>
+          {props.onReload !== undefined && (
+            <Button size="sm" variant="ghost" onClick={props.onReload}>
+              {callLinkTexts.retry}
+            </Button>
+          )}
         </div>
       )}
       {props.lessons.length === 0 ? (
