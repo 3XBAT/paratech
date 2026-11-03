@@ -9,9 +9,6 @@ import { Button } from "../ui/Button.js";
 import { EmptyState, Field, ResultLine, Select } from "../ui/controls.js";
 import { SetCard } from "./TicketsParts.js";
 
-/** The way on from «Сначала нужен предмет»: the subjects page opens with its own «Добавить предмет». */
-const addSubjectAction = "Добавить предмет";
-
 /**
  * «Билеты»: the sets of exam tickets of a subject. A list is pasted or read from a file of the subject; the set is
  * only proposed until the student confirms it (the paid run); the core owns every rule and number, the page shows
@@ -149,7 +146,7 @@ export function TicketsPage(props: { onOpen: (id: PageId) => void }) {
         </ResultLine>
       )}
       {subjects !== null && subjects.length === 0 && (
-        <EmptyState label={texts.label} title={texts.title} actions={<Button onClick={() => props.onOpen("subjects")}>{addSubjectAction}</Button>}>
+        <EmptyState title={texts.noSubjectsTitle} actions={<Button onClick={() => props.onOpen("subjects")}>{texts.goSubjects}</Button>}>
           {texts.noSubjects}
         </EmptyState>
       )}

@@ -6,6 +6,8 @@ import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Breadcrumbs, crumbsLabel } from "../.test-build/ui/Breadcrumbs.js";
+import { subjectSubLine } from "../.test-build/libraryView.js";
+import { texts } from "../.test-build/ticketsView.js";
 
 const read = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
 const noop = () => undefined;
@@ -104,7 +106,12 @@ test("tickets: «Предметы / Билеты» opens the subjects as the old
   // The crumb is shown in every state (loading, failed, no subjects), the head only holds the title.
   assert.match(page, /<Breadcrumbs[^\n]*\n\s*<div className="head">\s*<h1>\{texts\.title\}<\/h1>\s*<\/div>/);
   // No subjects: not a back button but the next step.
-  assert.match(page, /<EmptyState[^>]*actions=\{<Button onClick=\{\(\) => props\.onOpen\("subjects"\)\}>\{addSubjectAction\}<\/Button>\}/);
+  // The button only opens «Предметы», so it says so; no over-line, and the title does not repeat «Билеты».
+  assert.match(page, /<EmptyState title=\{texts\.noSubjectsTitle\} actions=\{<Button onClick=\{\(\) => props\.onOpen\("subjects"\)\}>\{texts\.goSubjects\}<\/Button>\}/);
+  assert.equal(texts.noSubjectsTitle, "Сначала нужен предмет");
+  assert.equal(texts.noSubjects, "Билеты собираются по предмету. Предмет можно добавить в разделе «Предметы».");
+  assert.equal(texts.goSubjects, "Перейти к предметам");
+  assert.ok(!("label" in texts), "no «Экзамен» over-line");
   assert.equal(readFileSync(new URL("../src/ticketsView.ts", import.meta.url), "utf8").match(/back: "Предметы"/).length, 1);
 });
 
@@ -145,18 +152,35 @@ test("summary and transcript: the first level is the old «Назад» (onBack)
     const src = read(file);
     assert.doesNotMatch(src, backButtons, file);
     assert.ok(!src.includes("hw-back"), file);
-    assert.match(src, /<Breadcrumbs items=\{\[\{ label: parentCrumb, onClick: props\.onBack \}, \{ label: pageCrumb \}\]\} \/>/, file);
+    // The first crumb names the page under it (App passes `parent`), «Записи» when none is given.
+    assert.match(src, /<Breadcrumbs items=\{\[\{ label: props\.parent \|\| defaultParentCrumb, onClick: props\.onBack \}, \{ label: pageCrumb \}\]\} \/>/, file);
+    assert.ok(src.includes('const defaultParentCrumb = "Записи";'), file);
+    assert.match(src, /parent\?: string;/, file);
     assert.ok(src.includes(`const pageCrumb = "${last}";`), file);
     assert.match(src, /<h1>\{pageCrumb\}<\/h1>/, file);
   }
   // The window still closes the overlay to the section under it (the route's step), the page only calls it.
   const app = read("App.tsx");
   assert.equal((app.match(/onBack=\{\(\) => setRoute\(closeTranscript\)\}/g) ?? []).length, 2);
+  // The first crumb is the label of the page under the overlay, not a fixed «Записи».
+  assert.equal((app.match(/parent=\{pageById\(current\)\.label\}/g) ?? []).length, 2);
 });
 
-test("subjects: the over-lines are gone, the semester is one muted line under the name", () => {
+test("subjects: the over-lines are gone, the semester and the aliases are one muted line under the name", () => {
   const src = read("pages/SubjectsPage.tsx");
   assert.doesNotMatch(src, /<span className="label"/);
-  assert.match(src, /<h1>\{subject\.name\}<\/h1>\s*<p className="small muted sub-line">\{subject\.semesterLabel \|\| subject\.semester\}<\/p>/);
+  assert.match(src, /<h1>\{subject\.name\}<\/h1>\s*\{subjectSubLine\(subject\) !== "" && <p className="small muted sub-line">\{subjectSubLine\(subject\)\}<\/p>\}/);
   assert.doesNotMatch(src, backButtons);
+  const s = { semester: "2026-autumn", semesterLabel: "Осень 2026", aliases: ["матан", "МА"] };
+  assert.equal(subjectSubLine(s), "Осень 2026 · Также: матан, МА");
+  assert.equal(subjectSubLine({ ...s, aliases: [] }), "Осень 2026");
+  assert.equal(subjectSubLine({ ...s, semesterLabel: "" }), "2026-autumn · Также: матан, МА");
+  assert.equal(subjectSubLine({ semester: "", semesterLabel: "", aliases: ["МА"] }), "Также: МА");
+  assert.equal(subjectSubLine({ semester: "", semesterLabel: "", aliases: [] }), "");
+});
+
+test("the crumb is a ~32px target aligned with the title: padding 4px 6px, margin -6px", () => {
+  const css = read("styles.css");
+  assert.match(css, /\.crumbs \{[^}]*margin: 0 0 8px -6px/);
+  assert.match(css, /\.crumb \{[^}]*padding: 4px 6px/);
 });

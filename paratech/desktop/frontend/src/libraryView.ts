@@ -43,8 +43,17 @@ export const texts = {
     "Файлы, которые ещё не разложены по предметам. Разложить можно кнопкой справа или перетащив значок файла на предмет слева.",
   folders: "Папки",
   files: "Файлы",
-  aliases: "Другие названия",
+  aliases: "Также",
 } as const;
+
+/** The one muted line under the name of a subject: «Осень 2026 · Также: матан, МА»; "" when both are empty. */
+export function subjectSubLine(s: Pick<LibrarySubject, "semester" | "semesterLabel" | "aliases">): string {
+  const parts = [s.semesterLabel || s.semester];
+  if (s.aliases.length > 0) {
+    parts.push(`${texts.aliases}: ${s.aliases.join(", ")}`);
+  }
+  return parts.filter((p) => p !== "").join(" · ");
+}
 
 /** Russian names of the system folders by their code. */
 const systemNames: Readonly<Record<string, string>> = {

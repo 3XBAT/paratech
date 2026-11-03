@@ -23,6 +23,7 @@ import {
   type OverviewState,
   scheduleLine,
   SubjectOverviewFlow,
+  subjectSubLine,
   texts,
 } from "../libraryView.js";
 import type { PageId } from "../nav.js";
@@ -736,12 +737,7 @@ export function SubjectsPage(props: {
             <div className="head">
               <div>
                 <h1>{subject.name}</h1>
-                <p className="small muted sub-line">{subject.semesterLabel || subject.semester}</p>
-                {subject.aliases.length > 0 && (
-                  <p className="small muted sub-line">
-                    {texts.aliases}: {subject.aliases.join(", ")}
-                  </p>
-                )}
+                {subjectSubLine(subject) !== "" && <p className="small muted sub-line">{subjectSubLine(subject)}</p>}
                 {schedule !== "" && <p className="small muted sub-line">{schedule}</p>}
               </div>
               <LibraryActions onOpen={props.onOpen} onAddFile={() => void addFileTo("")} addTip={fileTexts.addToMaterialsTip} busy={busy}>

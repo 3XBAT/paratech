@@ -244,7 +244,7 @@ export function Row(props: {
 }
 
 /** First run and empty lists: a drawing on the left, the text and one or two actions on the right. */
-export function EmptyState(props: { label: string; title: string; children: ReactNode; actions?: ReactNode }) {
+export function EmptyState(props: { label?: string; title: string; children: ReactNode; actions?: ReactNode }) {
   return (
     <div className="empty">
       <svg viewBox="0 0 260 120" width="260" height="120" aria-hidden="true" className="empty-art">
@@ -254,7 +254,7 @@ export function EmptyState(props: { label: string; title: string; children: Reac
         <circle cx="226" cy="24" r="4" className="empty-dot" />
       </svg>
       <div>
-        <span className="label">{props.label}</span>
+        {props.label && <span className="label">{props.label}</span>}
         <h2>{props.title}</h2>
         <p className="empty-text">{props.children}</p>
         {props.actions && <div className="acts start">{props.actions}</div>}

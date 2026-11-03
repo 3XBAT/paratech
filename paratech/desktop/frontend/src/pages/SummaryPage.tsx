@@ -50,6 +50,8 @@ export interface SummaryPageProps {
   recordingId: string;
   /** "lecture": show the lecture text first (the row's «Открыть текст лекции»). */
   section?: SummarySection;
+  /** The label of the page under this one, the first crumb; «Записи» when not given. */
+  parent?: string;
   onBack: () => void;
   onOpenTranscript: (recordingId: string) => void;
   onOpenAssignment: (assignmentId: string) => void;
@@ -59,9 +61,8 @@ export interface SummaryPageProps {
   onCheckSound: () => void;
 }
 
-// The breadcrumbs of the page: it opens over the section the student came from, which it does not know (the lesson
-// screen of TASK-351 will name the real parent); «Записи» is where a recording and its summary belong.
-const parentCrumb = "Записи";
+// The breadcrumbs of the page: it opens over the section the student came from; the app names it (`parent`).
+const defaultParentCrumb = "Записи";
 const pageCrumb = "Конспект";
 
 // «Конспект» of one recording (TASK-087): the lesson, the summary with its key points, the homework found, the lecture
@@ -123,7 +124,7 @@ export function SummaryPage(props: SummaryPageProps) {
 
   return (
     <section className="page tr sm">
-      <Breadcrumbs items={[{ label: parentCrumb, onClick: props.onBack }, { label: pageCrumb }]} />
+      <Breadcrumbs items={[{ label: props.parent || defaultParentCrumb, onClick: props.onBack }, { label: pageCrumb }]} />
       <div className="head">
         <div>
           <h1>{pageCrumb}</h1>

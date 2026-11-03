@@ -2,6 +2,7 @@ import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "r
 import {
   closeTranscript,
   initialRoute,
+  pageById,
   type PageId,
   railItemOf,
   routeToAssignment,
@@ -287,6 +288,7 @@ export function App() {
           <div key={`transcript:${route.transcript}`} className="screen">
             <TranscriptPage
               recordingId={route.transcript}
+              parent={pageById(current).label}
               onBack={() => setRoute(closeTranscript)}
               onOpenSummary={openSummary}
             />
@@ -296,6 +298,7 @@ export function App() {
           <div key={`summary:${route.summary}`} className="screen">
             <SummaryPage
               recordingId={route.summary}
+              parent={pageById(current).label}
               section={summarySection}
               onBack={() => setRoute(closeTranscript)}
               onOpenTranscript={openTranscript}
