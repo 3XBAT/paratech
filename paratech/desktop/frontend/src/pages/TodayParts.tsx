@@ -170,13 +170,20 @@ export function RecordAction(props: {
  * A failed stop: the recording goes on. «Повторить» stops again (the busy state of the main button is shared), the quiet
  * button leads to «Записи».
  */
-export function StopProblem(props: { text: string; retrying: boolean; onRetry: () => void; onOpenRecordings: () => void }) {
+export function StopProblem(props: {
+  text: string;
+  retrying: boolean;
+  /** The recording can be stopped right now (the main button is «Остановить»); otherwise «Повторить» would do nothing. */
+  canRetry: boolean;
+  onRetry: () => void;
+  onOpenRecordings: () => void;
+}) {
   return (
     <div className="today-err">
       <ResultLine kind="fail" role="alert">
         {props.text}
       </ResultLine>
-      <Button size="sm" busy={props.retrying} busyLabel={recordTexts.stopping} disabled={props.retrying} onClick={props.onRetry}>
+      <Button size="sm" busy={props.retrying} busyLabel={recordTexts.stopping} disabled={props.retrying || !props.canRetry} onClick={props.onRetry}>
         {recordTexts.retry}
       </Button>
       <Button size="sm" variant="ghost" onClick={props.onOpenRecordings}>

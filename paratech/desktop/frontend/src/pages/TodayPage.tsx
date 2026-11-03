@@ -215,6 +215,7 @@ export function TodayPage(props: {
         <StopProblem
           text={stopProblem}
           retrying={stopping}
+          canRetry={stopButton.kind === "stop"}
           onRetry={() => stopButton.kind === "stop" && void stop(stopButton.id)}
           onOpenRecordings={openRecordings}
         />

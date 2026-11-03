@@ -433,8 +433,8 @@ export function RecordingsPage({
   const startControl = (
     <div className="rec-start">
       <Button
-        // The open panel has its own «Начать запись»: it is the only accent then, this one is the quiet default variant.
-        variant={startOpen ? undefined : "primary"}
+        // An open panel (start or import) has its own primary button: it is the only accent then, this one is quiet.
+        variant={panelOpen ? undefined : "primary"}
         icon="rec"
         // An open panel can always be closed, except while its start is on the way.
         disabled={starting || (startState.disabled && !startOpen)}

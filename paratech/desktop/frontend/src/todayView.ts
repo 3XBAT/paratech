@@ -2,7 +2,7 @@
 // burns and what waits (ARCH-44); here it is only put into words. The voice is impersonal. Titles, subjects, teachers,
 // headlines and recipients are imported or model text, passed through untouched and rendered as text nodes only.
 
-import { actionErrorText } from "./activityView.js";
+import { actionErrorText, errorMessage } from "./activityView.js";
 import { errorMessages, type RecordingItem } from "./bindings/activity.js";
 import type { TodayDeadline, TodayDone, TodayLesson, TodayPost, TodayWaiting } from "./bindings/today.js";
 import { dayAndTime, dayText, daysBetween, daysLeftText, dueText, monthsShort, pad, parseMoment, timeText } from "./dueText.js";
@@ -149,19 +149,16 @@ export const recordTexts = {
   /** The accessible name of the running button: the visible text carries the timer. */
   stopAction: "Остановить запись",
   stopping: "Остановка…",
-  /** The recording runs but cannot be stopped yet: it has just started, or the stop is on its way. */
+  /** The recording runs but cannot be stopped yet: it is starting. */
   starting: "Запись начинается…",
   startingHint: "Остановить можно через несколько секунд.",
-  stopWait: "Запись останавливается…",
-  stopWaitHint: "Остановка идёт, нужно дождаться окончания.",
   /** Under a failed stop: the recording goes on; «Повторить» stops again, the other button leads to «Записи». */
   stopFailed: "Не удалось остановить запись — она продолжается.",
+  /** The stop found no running recording: nothing goes on and nothing is left to repeat. */
+  alreadyStopped: "Запись уже остановлена.",
   retry: "Повторить",
   openRecordings: "Перейти к записям",
 } as const;
-
-/** A recording that started less than this ago is «начинается», a later one that is still not stoppable is «останавливается». */
-const startingMs = 5000;
 
 /** «00:41» under an hour, «1:02:05» from an hour; "—" for an unusable value. */
 export function clockText(seconds: number): string {
@@ -208,24 +205,27 @@ export function recordButton(
     return { kind: "stop", label: `${recordTexts.running}${t === "" ? "" : ` ${t}`} · ${recordTexts.stop}`, id: stoppable.id, time: t };
   }
   if (running.length > 0) {
-    const first = running[0];
-    const started = parseMoment(first.startedAt);
-    // An unreadable start counts as «just started»: the button should not claim a stop nobody asked for.
-    const justStarted = started === null || now - started.getTime() < startingMs;
-    return justStarted
-      ? { kind: "wait", label: recordTexts.starting, id: first.id, title: recordTexts.startingHint }
-      : { kind: "wait", label: recordTexts.stopWait, id: first.id, title: recordTexts.stopWaitHint };
+    // The core puts only STARTING and RECORDING into stage «recording», and a RECORDING row is always stoppable:
+    // a running but not stoppable one can only be starting (a stopping one is already in stage «saving»).
+    return { kind: "wait", label: recordTexts.starting, id: running[0].id, title: recordTexts.startingHint };
   }
   return { kind: "start", label: recordTexts.start, id: "" };
 }
 
 /**
  * The line under a failed stop: the recording goes on. Only a known cause is added (the recordings are unavailable);
- * the generic texts of the core would only repeat «не удалось».
+ * the generic texts of the core would only repeat «не удалось». When the core says the recording is not running (or not
+ * found), nothing goes on: the line says it is stopped and the not-running effect of the page clears it.
  */
 export function stopProblemText(err: unknown): string {
-  const unavailable = actionErrorText(new Error(errorMessages.unavailable));
-  return actionErrorText(err) === unavailable ? `${recordTexts.stopFailed} ${unavailable}` : recordTexts.stopFailed;
+  const msg = errorMessage(err);
+  if (msg === errorMessages.recordingNotRunning || msg === errorMessages.notFound) {
+    return recordTexts.alreadyStopped;
+  }
+  if (msg === errorMessages.unavailable) {
+    return `${recordTexts.stopFailed} ${actionErrorText(err)}`;
+  }
+  return recordTexts.stopFailed;
 }
 
 /** A signature of the recordings stages: it changes when a recording starts, stops or finishes. */

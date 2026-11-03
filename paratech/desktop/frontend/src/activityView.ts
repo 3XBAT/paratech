@@ -172,7 +172,8 @@ export function actionErrorText(err: unknown): string {
 }
 
 // Wails rejects a call with an Error-like object carrying the Go error text.
-function errorMessage(err: unknown): string {
+/** The raw message of an error from a binding call, "" when it has none. */
+export function errorMessage(err: unknown): string {
   let msg = "";
   if (typeof err === "string") {
     msg = err;
