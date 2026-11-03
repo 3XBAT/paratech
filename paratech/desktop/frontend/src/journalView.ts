@@ -96,6 +96,13 @@ const toolLabels: Readonly<Record<string, string>> = {
   propose_deadline: "Предложен срок в календарь",
   propose_send: "Предложена отправка письма",
   propose_delete_recording: "Предложено удаление записи",
+  // Wave 10 (ADR-0033 §10). The read tools leave no line.
+  propose_subjects_from_schedule: "Предложены предметы из расписания",
+  change_assignment: "Изменено задание",
+  mark_assignments_done: "Задания отмечены выполненными",
+  note: "Изменён конспект",
+  set_setting: "Изменена настройка",
+  recording: "Запись",
 };
 
 const jobLabels: Readonly<Record<string, string>> = {
@@ -332,10 +339,17 @@ export function lineModel(l: JournalLine, index: number, subjects: ReadonlyMap<s
   };
 }
 
+/** The stop of a recording has no compensation (ADR-0033 О-7 а): the line says so and the way on, not «это предложение». */
+export const recordingStopNoUndo = "Остановка записи не отменяется — начните запись заново";
+
 /** The reason of a line without «Отменить»; "" when the status of the line already says it. */
 function reasonText(l: JournalLine, status: string): string {
   if (Object.hasOwn(sameAsStatus, l.noUndo) && status === sameAsStatus[l.noUndo]) {
     return "";
+  }
+  // A done recording line that cannot be undone is the stop; the generic «irreversible» reason talks of a proposal.
+  if (l.tool === "recording" && l.status === "DONE" && (l.noUndo === "irreversible" || (l.noUndo === "" && l.cannotUndo))) {
+    return recordingStopNoUndo;
   }
   return noUndoText(l.noUndo, l.cannotUndo);
 }

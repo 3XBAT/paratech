@@ -35,7 +35,7 @@ export function ConfirmCardView(props: {
     <section className="ag-card ag-confirm">
       <h3 className="ag-card-h">
         <Icon name="warn" />
-        {confirmTexts.caption} · {m.title}
+        {m.question !== "" ? <span className="ag-conf-q">{m.question}</span> : `${confirmTexts.caption} · ${m.title}`}
       </h3>
       {m.rows.length > 0 && (
         <dl className="ag-conf-rows">
@@ -78,7 +78,7 @@ export function ConfirmCardView(props: {
           {rv.text}
         </ResultLine>
       )}
-      {m.outcome === "" && !isRefusal(rv) && <p className="small muted">{m.note}</p>}
+      {m.outcome === "" && !isRefusal(rv) && m.note !== "" && <p className="small muted">{m.note}</p>}
       {props.error !== "" && (
         <ResultLine kind="fail" role="alert">
           {props.error}
@@ -111,6 +111,34 @@ export function ConfirmCardView(props: {
             </Button>
           )}
         </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The card before it is read: a small «Загрузка карточки…», or the reason it could not be read with «Обновить карточку»
+ * (no hooks: the tests render it directly). Without onReload the error has no button.
+ */
+export function ConfirmCardPending(props: { error: string; onReload?: () => void }) {
+  return (
+    <section className="ag-card ag-confirm">
+      <h3 className="ag-card-h">{confirmTexts.caption}</h3>
+      {props.error === "" ? (
+        <p className="muted">{confirmTexts.loading}</p>
+      ) : (
+        <>
+          <ResultLine kind="fail" role="alert">
+            {props.error}
+          </ResultLine>
+          {props.onReload !== undefined && (
+            <div className="ag-actions">
+              <Button size="sm" onClick={props.onReload}>
+                {confirmTexts.reload}
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </section>
   );
@@ -153,25 +181,10 @@ export function ConfirmCard(props: {
 
   if (state.card === null) {
     return (
-      <section className="ag-card ag-confirm">
-        <h3 className="ag-card-h">{confirmTexts.caption}</h3>
-        {state.error === "" ? (
-          <p className="muted">{confirmTexts.loading}</p>
-        ) : (
-          <>
-            <ResultLine kind="fail" role="alert">
-              {state.error}
-            </ResultLine>
-            {targetKind !== undefined && targetId !== undefined && (
-              <div className="ag-actions">
-                <Button size="sm" onClick={() => void flow.load({ kind: targetKind, id: targetId })}>
-                  {confirmTexts.reload}
-                </Button>
-              </div>
-            )}
-          </>
-        )}
-      </section>
+      <ConfirmCardPending
+        error={state.error}
+        onReload={targetKind !== undefined && targetId !== undefined ? () => void flow.load({ kind: targetKind, id: targetId }) : undefined}
+      />
     );
   }
   const card = state.card;

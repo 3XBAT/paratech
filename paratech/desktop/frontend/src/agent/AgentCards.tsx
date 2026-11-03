@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode, useId, useRef, useState } from "react";
-import type { AnswerInput, AssignmentLineView, DraftView } from "../bindings/agent.js";
+import type { AnswerInput, AssignmentLineView, DraftView, OfferView } from "../bindings/agent.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Icon } from "../ui/Icon.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
@@ -24,6 +24,7 @@ import {
   type CardModel,
   collectAnswers,
   type EntryModel,
+  type OfferModel,
   skipAnswers,
   texts,
   undoableActions,
@@ -49,6 +50,11 @@ export interface CardActions {
   openAssignment?: (id: string) => void;
   /** Opens the object of a mention pill under the student's text (kind and id as stored). */
   openMention?: (kind: string, id: string) => void;
+  /**
+   * The press of a page button an offer names («Начать запись» under a stopped recording, an offer_button card): the
+   * panel runs the page's own binding for `offer.action` with `offer.target`. Absent: the button is shown off.
+   */
+  offer?: (offer: OfferView) => void;
   /** The core call of the `answer` cards; without it a card lists no sources. */
   answers?: AnswersApi;
   /** Opens the place of a source on «База знаний», by ids. */
@@ -62,6 +68,19 @@ export interface CardActions {
   undoAll(): void;
   /** What «Отменить» of the action did, if it was pressed. */
   undoNote(actionId: string): UndoNote | undefined;
+}
+
+/**
+ * The page's own button an offer names, labelled from the template (never by the model). It calls `actions.offer`; until
+ * the panel wires it the button is off, without a tooltip.
+ */
+export function OfferButton(props: { offer: OfferModel; actions: CardActions }) {
+  const { offer, actions } = props;
+  return (
+    <Button size="sm" variant="secondary" disabled={actions.offer === undefined || actions.busy === true} onClick={() => actions.offer?.(offer.offer)}>
+      {offer.label}
+    </Button>
+  );
 }
 
 function Buttons(props: { buttons: ButtonModel[]; busy?: boolean; onPress: (id: ButtonId) => void }) {
@@ -400,16 +419,23 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
         <div className="ag-act">
           <Icon name={note?.done ? "back" : "ok"} />
           <span className="ag-act-tx">
-            {note?.done ? texts.undoDone : card.assignment ? addedAssignmentText(card.assignment, props.actions.subjects ?? {}, props.actions.now ?? new Date()) : card.text}
+            {note?.done ? card.undoneText : card.assignment ? addedAssignmentText(card.assignment, props.actions.subjects ?? {}, props.actions.now ?? new Date()) : card.text}
+            {/* The saved text is the student's own: plain lines, muted, under the sentence; gone once undone. */}
+            {!note?.done && card.detail.map((t, i) => (
+              <span key={i} className="ag-act-ex small muted">
+                {t}
+              </span>
+            ))}
           </span>
           {!note?.done && card.assignment && props.actions.openAssignment && (
             <Button size="sm" variant="ghost" onClick={() => card.assignment && props.actions.openAssignment?.(card.assignment.id)}>
               {openAssignmentLabel}
             </Button>
           )}
-          {!note?.done && (
+          {card.offer !== null && <OfferButton offer={card.offer} actions={props.actions} />}
+          {!note?.done && card.undo.shown && (
             <Button size="sm" variant="ghost" disabled={!card.undo.enabled || note?.busy === true} onClick={() => props.actions.undo(card.actionId)}>
-              {note?.busy ? texts.undoBusy : card.undo.label}
+              {note?.busy ? card.undo.busyLabel : card.undo.label}
             </Button>
           )}
           {note && !note.done && !note.busy && note.text !== "" && (
@@ -420,6 +446,14 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean }
         </div>
       );
     }
+    case "unknown":
+      // A card kind of a newer core: said honestly and quietly, with nothing to press.
+      return (
+        <div className="ag-stop" role="status">
+          <Icon name="info" />
+          <span className="ag-act-tx">{card.text}</span>
+        </div>
+      );
     case "stopped":
     case "problem":
       return (

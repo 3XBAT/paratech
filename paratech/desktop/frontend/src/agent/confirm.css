@@ -4,5 +4,7 @@
 .ag-conf-row dt, .ag-conf-row dd { margin: 0; }
 .ag-conf-row dd { font-weight: 600; overflow-wrap: anywhere; white-space: pre-wrap; }
 .ag-conf-out { font-weight: 600; }
+/* The heading of delete_assignment is the question with the stored title in it: it wraps, however long the title. */
+.ag-conf-q { min-width: 0; overflow-wrap: anywhere; }
 .today-cal { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
 .today-main > .ag-confirm { margin-top: 8px; }

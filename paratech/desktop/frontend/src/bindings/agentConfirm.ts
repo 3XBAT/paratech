@@ -24,18 +24,21 @@ export const methods = {
   proposeSendWork: `${service}.ProposeSendWork`,
 } as const;
 
-export type CardKind = "deadline" | "send" | "delete_recording";
+export type CardKind = "deadline" | "send" | "delete_recording" | "delete_assignment";
 
-export const cardKinds: readonly CardKind[] = ["deadline", "send", "delete_recording"];
+export const cardKinds: readonly CardKind[] = ["deadline", "send", "delete_recording", "delete_assignment"];
 
 /** waiting: «Да» / «Нет»; confirmed: not finished, «Да» repeats it safely; stale and rejected carry a message. */
 export type CardState = "waiting" | "confirmed" | "done" | "declined" | "stale" | "rejected";
 
 export const cardStates: readonly CardState[] = ["waiting", "confirmed", "done", "declined", "stale", "rejected"];
 
-/** The target of a confirm card as the update names it: a stored proposal or a deletion preview. */
+/**
+ * The target of a confirm card as the update names it: a stored proposal, a deletion preview, or (a delete_assignment
+ * card) the assignment itself, which has nothing stored to decline.
+ */
 export interface ConfirmTarget {
-  kind: "proposal" | "preview";
+  kind: "proposal" | "preview" | "assignment";
   id: string;
 }
 
@@ -81,7 +84,11 @@ export interface ConfirmCard extends RecipientFields {
 export const noAssignmentText =
   "Работа сделана не по заданию из списка ДЗ: её можно сохранить, но не отправить преподавателю.";
 
-/** The fixed Russian texts of the Go binding (agentconfirm.go, homework.go); anything else gets the generic one. */
+/** The refusal of «Да» on a delete_assignment card while an email of the assignment may still go out (ErrAgentConfirmInUse). */
+export const assignmentInUseText =
+  "Сейчас удалить нельзя: письмо по этому заданию ещё отправляется или его судьба неизвестна. Проверьте «Письма» и нажмите «Да» ещё раз.";
+
+/** The fixed Russian texts of the Go binding (agentconfirm.go, agentconfirm_assignment.go, homework.go); anything else gets the generic one. */
 export const errorTexts: readonly string[] = [
   "Неверная карточка подтверждения: обновите панель.",
   "Предложение не найдено: возможно, оно уже обработано.",
@@ -95,6 +102,7 @@ export const errorTexts: readonly string[] = [
   "Выберите, кому отправить: лектору, семинаристу или преподавателю лабораторных.",
   "Предыдущее письмо с этим заданием ещё не отправлено до конца или его результат неизвестен. Сначала разберитесь с ним в списке писем.",
   noAssignmentText,
+  assignmentInUseText,
 ];
 
 export const genericError = "Не удалось выполнить действие. Попробуйте ещё раз.";

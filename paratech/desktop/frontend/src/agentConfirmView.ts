@@ -28,12 +28,22 @@ export const confirmTexts = {
   doneDeadline: "Срок добавлен в календарь.",
   doneSend: "Письмо отправлено.",
   doneDelete: "Запись удалена.",
+  // The section is «Задания» (glossary: not «Домашние задания»; words344.test.mjs checks it).
+  doneDeleteAssignment: "Задание удалено. Вернуть его можно на странице «Задания».",
   declined: "Отклонено: ничего не выполнено.",
+  declinedDeleteAssignment: "Оставлено без изменений.",
+  deleteAssignment: "Удалить задание и событие в Google Календаре?",
   notActual: "Предложение больше не действует: ничего не выполнено.",
   confirmedAgain: "Подтверждено, но не выполнено. Повторное «Да» не создаст дубль.",
   noDeletable: "Удалить нельзя.",
   adHoc: "Запись",
 } as const;
+
+/** «Удалить „Задачи 1–7“ и событие в Google Календаре?»; the title is stored text, so it stays a text node of the caller. */
+export function deleteAssignmentQuestion(title: string): string {
+  const t = title.trim();
+  return t === "" ? confirmTexts.deleteAssignment : `Удалить „${t}“ и событие в Google Календаре?`;
+}
 
 export interface CardRow {
   label: string;
@@ -45,6 +55,8 @@ export interface CardRow {
 /** What the card shows. Every value is text from a file, the settings or a model: a text node only. */
 export interface ConfirmCardModel {
   title: string;
+  /** The whole heading as a question (delete_assignment); "" for the others: they read «Нужно подтверждение · title». */
+  question: string;
   /** What exactly happens: «кому, что, какая версия». */
   rows: CardRow[];
   /** The list of what a deletion removes. */
@@ -102,12 +114,25 @@ function deletionTitle(c: ConfirmCard): string {
   return when === "" ? confirmTexts.adHoc : `${confirmTexts.adHoc} ${when}`;
 }
 
+function doneText(kind: ConfirmCard["kind"]): string {
+  switch (kind) {
+    case "deadline":
+      return confirmTexts.doneDeadline;
+    case "send":
+      return confirmTexts.doneSend;
+    case "delete_assignment":
+      return confirmTexts.doneDeleteAssignment;
+    case "delete_recording":
+      return confirmTexts.doneDelete;
+  }
+}
+
 function outcomeOf(c: ConfirmCard): string {
   switch (c.state) {
     case "done":
-      return c.kind === "deadline" ? confirmTexts.doneDeadline : c.kind === "send" ? confirmTexts.doneSend : confirmTexts.doneDelete;
+      return doneText(c.kind);
     case "declined":
-      return confirmTexts.declined;
+      return c.kind === "delete_assignment" ? confirmTexts.declinedDeleteAssignment : confirmTexts.declined;
     case "stale":
     case "rejected":
       return c.message !== "" ? c.message : confirmTexts.notActual;
@@ -132,8 +157,20 @@ export function confirmCardModel(c: ConfirmCard, chosenRole: TeacherRole | "" = 
     notice: c.notice,
     yesBlocked: "",
     recipient: { kind: "none" } as RecipientView,
+    question: "",
   };
   switch (c.kind) {
+    case "delete_assignment":
+      // The heading is the question, and it already says the event goes too: no second note, no repeated notice.
+      return {
+        ...base,
+        title: "",
+        question: deleteAssignmentQuestion(c.title),
+        rows: [...row("Предмет", c.subject), ...row("Срок", dueText(c.due).replace(/^до /, ""))],
+        items: [],
+        note: "",
+        notice: "",
+      };
     case "deadline":
       return {
         ...base,
