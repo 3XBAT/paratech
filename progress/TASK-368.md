@@ -25,6 +25,7 @@ Owner rule 2026-11-03: small/secondary places get icon buttons with a tooltip (h
 - Popup stays words.
 
 ## Follow-ups
+- `pages/CallLinkParts.tsx` (TASK-364, merged in parallel, deliberately not edited): its small buttons («Изменить», «Убрать ссылку», «Вернуть», «Отмена», «Повторить», «Открыть предметы») are words and are pinned in the word-button list; convert the secondary ones to `IconAction` in a follow-up, keeping «Подключиться»/«Добавить ссылку» as words.
 - Three icon-button components coexist (`IconButton`, `ActionButton` `.ag-ib`, `IconAction`); fold into `IconAction`.
 - «⋯» (`RowMenu`) still uses a native `title`, no focus tooltip.
 - IconAction behaviour tests are source regex checks, not DOM runs.

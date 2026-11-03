@@ -396,6 +396,12 @@ const wordButtons = {
   "pages/AppleCalendarHelpPage.tsx": ["{helpTexts.backToConnections}", "{l.caption}"],
   "pages/AssignmentDoneParts.tsx": ["{pageDoneLabel(props.done)}", "{button.label}", "Открыть"],
   "pages/CalendarSync.tsx": ["{calendarTexts.sync}"],
+  // TASK-364 (parallel task): its call-link card keeps words; see the TASK-368 follow-ups.
+  "pages/CallLinkParts.tsx": [
+    "{callLinkTexts.retry}", "{callLinkTexts.undo}", "{reviving ? callLinkTexts.revive : saveLabel(card)}", "{callLinkTexts.cancel}", "{callLinkTexts.openSubjects}",
+    "{callLinkTexts.join}", "{callLinkTexts.add}", "{callLinkTexts.openSubjects}", "{callLinkTexts.change}", "{callLinkTexts.add}", "{callLinkTexts.join}",
+    "{callLinkTexts.change}", "{callLinkTexts.clear}",
+  ],
   "pages/ConnectionsPage.tsx": ["Сохранить адрес", "Сохранить", "Проверить почту"],
   "pages/DiagnosticsPage.tsx": ["{check.label}", "{save.label}"],
   "pages/FileRows.tsx": ["{fileTexts.refresh}", "{fileTexts.retry}", "{addFileTexts.moveHere}", "{addFileTexts.place}", "{fileTexts.createSubject}", "{fileTexts.cancel}", "{fileTexts.putHere}", "{fileTexts.cancel}", "{line.action}", "{primary.label}", "{fileTexts.refresh}"],
@@ -440,6 +446,7 @@ const wordButtons = {
     '{b.kind === "stop" ? ( <> {recordTexts.running} {b.time !== "" && ( <> {" "} <span className="num">{b.time}</span> </> )} {` · ${recordTexts.stop}`} </> ) : ( b.label )}',
     "{recordTexts.retry}",
     "{recordTexts.openRecordings}",
+    "{callLinkTexts.retry}", // TASK-364's lesson-card button, not converted here
     "{texts.record}",
     "{addTexts.button}",
   ],
