@@ -44,9 +44,10 @@ type Answer struct {
 }
 
 // New makes the answer of req from the reader's reply rep: each citation is kept only if its quote occurs in the
-// fragment it names (citation.Matches), the places of the kept ones become the sources, in the order first cited.
-// subject is the subject the question was about, "" for the whole base. Errors: ErrInvalidState, ErrInvalidAnswer
-// for a reply that does not belong to req.
+// fragment it names (citation.Matches), the places of the kept ones become the sources, in the order first cited; a
+// claim without a kept citation stays, unsupported. subject is the subject the question was about, "" for the whole
+// base. Each fragment is normalized once and each citation searched only in its own fragment, so a long answer costs
+// linear time. Errors: ErrInvalidState, ErrInvalidAnswer for a reply that does not belong to req.
 func New(id shared.AnswerID, subject shared.SubjectID, req Request, rep Reply, now time.Time) (*Answer, error) {
 	if req.IsZero() {
 		return nil, fmt.Errorf("%w: no request", ErrInvalidState)
@@ -58,15 +59,22 @@ func New(id shared.AnswerID, subject shared.SubjectID, req Request, rep Reply, n
 	if st.Missing == nil {
 		st.Missing = []string{}
 	}
-	sourceOf := map[string]int{} // chunk ID -> index in st.Sources
+	sourceOf := map[string]int{}      // chunk ID -> index in st.Sources
+	normalized := map[string]string{} // chunk ID -> citation.Normalize of its text
 	for _, rc := range rep.Claims {
 		c := Claim{Text: rc.Text, Cites: []Cite{}}
+		kept := map[Cite]bool{}
 		for _, cite := range rc.Cites {
 			f, ok := req.fragment(cite.ChunkID)
 			if !ok {
 				return nil, fmt.Errorf("%w: a citation of a fragment that was not sent", ErrInvalidAnswer)
 			}
-			if !citation.Matches(cite.Quote, f.Text) {
+			text, ok := normalized[f.ChunkID]
+			if !ok {
+				text = citation.Normalize(f.Text)
+				normalized[f.ChunkID] = text
+			}
+			if !citation.MatchesNormalized(cite.Quote, text) {
 				continue
 			}
 			i, ok := sourceOf[f.ChunkID]
@@ -75,9 +83,10 @@ func New(id shared.AnswerID, subject shared.SubjectID, req Request, rep Reply, n
 				sourceOf[f.ChunkID] = i
 				st.Sources = append(st.Sources, f.Source)
 			}
-			kept := Cite{Quote: cite.Quote, Source: i}
-			if !slices.Contains(c.Cites, kept) {
-				c.Cites = append(c.Cites, kept)
+			k := Cite{Quote: cite.Quote, Source: i}
+			if !kept[k] {
+				kept[k] = true
+				c.Cites = append(c.Cites, k)
 			}
 		}
 		st.Claims = append(st.Claims, c)
@@ -111,7 +120,7 @@ func check(st State) error {
 		return bad("created at")
 	case st.Fragments < 1 || st.Fragments > MaxFragments || len(st.Sources) > st.Fragments:
 		return bad("fragments")
-	case len(st.Claims) > MaxClaims || len(st.Missing) > MaxMissing || len(st.Claims)+len(st.Missing) == 0:
+	case len(st.Claims)+len(st.Missing) == 0:
 		return bad("claims and missing parts")
 	}
 	if q, err := ParseQuestion(st.Question); err != nil || q != st.Question {
@@ -123,17 +132,17 @@ func check(st State) error {
 		}
 	}
 	for _, c := range st.Claims {
-		if !boundedText(c.Text, MaxClaimRunes) || len(c.Cites) > MaxCites {
+		if !plainText(c.Text) {
 			return bad("claim")
 		}
 		for _, cite := range c.Cites {
-			if cite.Source < 0 || cite.Source >= len(st.Sources) || !boundedText(cite.Quote, MaxQuoteRunes) {
+			if cite.Source < 0 || cite.Source >= len(st.Sources) || !plainText(cite.Quote) {
 				return bad("citation")
 			}
 		}
 	}
 	for _, m := range st.Missing {
-		if !boundedText(m, MaxMissingRunes) {
+		if !plainText(m) {
 			return bad("missing part")
 		}
 	}

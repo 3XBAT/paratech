@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -146,5 +147,45 @@ func TestAnswerQuestion(t *testing.T) {
 	// Without an answerer the paid reader stays unavailable and nothing is asked.
 	if out := newWorld(t).tools(t).read(t.Context(), values.Scope{}, answerCall(t, `{"question":"Что такое ряд?"}`)); out.Result.ResultJSON != `{"error":"unavailable"}` {
 		t.Fatalf("no answerer: %s", out.Result.ResultJSON)
+	}
+}
+
+// Beta 2026-11-03 (TASK-366): a refused answer became «материала по этой паре ещё нет». Whatever made answer_question
+// fail, the planner sees one fixed error with no cause, so it can only say that an error happened; the cause is in
+// desktop.log only, where a model answer refused by the schema reads apart from a provider that did not answer.
+func TestAnswerQuestionFailureIsPlain(t *testing.T) {
+	const (
+		modelAnswer  = "hubclient: answer question: llm provider failed: the model answer breaks the operation schema"
+		providerDown = "hubclient: answer question: llm provider failed"
+	)
+	tests := []struct {
+		name string
+		err  error
+		log  string
+	}{
+		{"model answer refused by the Hub", fmt.Errorf("%w: %s", answering.ErrReaderRefused, modelAnswer), modelAnswer},
+		{"model answer refused by the desktop", fmt.Errorf("%w: %w", answering.ErrReaderRefused, answer.ErrInvalidAnswer),
+			answer.ErrInvalidAnswer.Error()},
+		{"provider did not answer", fmt.Errorf("%w: %s", answering.ErrNoConnection, providerDown), providerDown},
+		{"quota", answering.ErrQuota, answering.ErrQuota.Error()},
+		{"local store", answering.ErrUnavailable, answering.ErrUnavailable.Error()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs strings.Builder
+			tl := newWorld(t).tools(t)
+			tl.log = slog.New(slog.NewTextHandler(&logs, nil))
+			tl.answerer = &fakeAnswerer{err: tt.err}
+			out := tl.read(t.Context(), values.Scope{}, answerCall(t, `{"question":"Что было на этой паре?"}`))
+			if out.Result.ResultJSON != `{"error":"failed"}` || !out.Result.IsError || len(out.Seen) != 0 {
+				t.Fatalf("result = %+v", out)
+			}
+			if !strings.Contains(logs.String(), tt.log) {
+				t.Fatalf("desktop.log lacks %q: %s", tt.log, logs.String())
+			}
+			if strings.Contains(logs.String(), "Что было") {
+				t.Fatalf("desktop.log has the question: %s", logs.String())
+			}
+		})
 	}
 }

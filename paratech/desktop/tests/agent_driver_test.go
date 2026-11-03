@@ -234,8 +234,8 @@ func (e *driverEnv) resultsOf(t *testing.T, i int) []string {
 	return out
 }
 
-// A lesson title that commands the planner never reaches it: the read results carry IDs, dates and flags only, and
-// a call the model makes up (send_email) is refused as an unknown tool and never runs.
+// A lesson title that commands the planner reaches it only as the title of a find_lessons row, data (TASK-369); no
+// other field carries it, and a call the model makes up (send_email) is refused as an unknown tool and never runs.
 func TestDriverInjectedLessonTitleIsNoCommand(t *testing.T) {
 	e := newDriverEnv(t)
 	e.hub.Then(testenv.AgentCall{ID: "c1", Tool: "find_lessons", Args: `{}`}).
@@ -252,7 +252,8 @@ func TestDriverInjectedLessonTitleIsNoCommand(t *testing.T) {
 		t.Fatalf("hub saw %d requests", len(reqs))
 	}
 	lessons := e.resultsOf(t, 1)
-	if len(lessons) != 1 || !strings.Contains(lessons[0], `"recording":"r1","lesson":"l1","subject":"s1","date":"2026-10-20"`) {
+	if len(lessons) != 1 || !strings.Contains(lessons[0], `"recording":"r1","lesson":"l1","subject":"s1","date":"2026-10-20"`) ||
+		!strings.Contains(lessons[0], `"title":"`+lessonInjection+`","subject_name":"Физика"`) {
 		t.Fatalf("find_lessons result = %v", lessons)
 	}
 	second := e.resultsOf(t, 2)
@@ -264,8 +265,9 @@ func TestDriverInjectedLessonTitleIsNoCommand(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(raw), "ignore previous") {
-			t.Fatalf("request %d carries the injected title: %s", i, raw)
+		titles := strings.Count(string(raw), `\"title\":\"`+lessonInjection)
+		if strings.Count(string(raw), "ignore previous") != titles {
+			t.Fatalf("request %d carries the injected title outside a title: %s", i, raw)
 		}
 	}
 }

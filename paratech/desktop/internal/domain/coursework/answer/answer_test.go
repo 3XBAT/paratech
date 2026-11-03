@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 var t0 = time.Date(2026, 10, 23, 9, 0, 0, 0, time.UTC)
@@ -143,20 +144,7 @@ func TestParse(t *testing.T) {
 		t.Fatalf("only missing = %+v, %v", rep, err)
 	}
 
-	claims := func(n int) string {
-		parts := make([]string, n)
-		for i := range parts {
-			parts[i] = `{"text":"x","cites":[{"chunk_id":"f1","quote":"q"}]}`
-		}
-		return `{"claims":[` + strings.Join(parts, ",") + `],"missing":[]}`
-	}
-	cites := func(n int) string {
-		parts := make([]string, n)
-		for i := range parts {
-			parts[i] = `{"chunk_id":"f1","quote":"q"}`
-		}
-		return `{"claims":[{"text":"x","cites":[` + strings.Join(parts, ",") + `]}],"missing":[]}`
-	}
+	// Each of these keeps nothing valid or breaks the object itself, so the whole answer is refused.
 	bad := map[string]string{
 		"empty":                `{"claims":[],"missing":[]}`,
 		"no missing":           `{"claims":[{"text":"x","cites":[{"chunk_id":"f1","quote":"q"}]}]}`,
@@ -166,10 +154,10 @@ func TestParse(t *testing.T) {
 		"claim without cites":  `{"claims":[{"text":"x","cites":[]}],"missing":[]}`,
 		"claim extra key":      `{"claims":[{"text":"x","cites":[{"chunk_id":"f1","quote":"q"}],"to":"x@y"}],"missing":[]}`,
 		"cite extra key":       `{"claims":[{"text":"x","cites":[{"chunk_id":"f1","quote":"q","send":true}]}],"missing":[]}`,
-		"too many claims":      claims(MaxClaims + 1),
-		"too many cites":       cites(MaxCites + 1),
-		"long quote":           `{"claims":[{"text":"x","cites":[{"chunk_id":"f1","quote":"` + strings.Repeat("q", MaxQuoteRunes+1) + `"}]}],"missing":[]}`,
 		"control character":    `{"claims":[{"text":"x\u0007","cites":[{"chunk_id":"f1","quote":"q"}]}],"missing":[]}`,
+		"claims not an array":  `{"claims":{"text":"x"},"missing":["a"]}`,
+		"broken element":       `{"claims":[{"text":"x",}],"missing":["a"]}`,
+		"missing not an array": `{"claims":[{"text":"x","cites":[{"chunk_id":"f1","quote":"q"}]}],"missing":"a"}`,
 		"blank missing":        `{"claims":[],"missing":["  "]}`,
 		"prose":                `Ответ: производная — это предел.`,
 		"code fence":           "```json\n" + valid + "\n```",
@@ -189,8 +177,107 @@ func TestParse(t *testing.T) {
 			}
 		})
 	}
-	if _, err := r.Parse(claims(MaxClaims)); err != nil {
-		t.Fatalf("%d claims refused: %v", MaxClaims, err)
+}
+
+// The answer has no count or length limits (TASK-366): a long answer comes back whole.
+func TestParseHasNoLimits(t *testing.T) {
+	ex := excerpts()
+	ex[0].Text = strings.Repeat("Производная функции — это предел отношения приращения функции к приращению аргумента. ", 8)
+	r, err := NewRequest("Что такое производная?", ex, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runes := []rune(ex[0].Text)
+	quote := strings.TrimSpace(string(runes[:len(runes)/2]))          // > 200 characters
+	long := strings.Repeat("Длинное утверждение о производной. ", 40) // > 400 characters
+	var parts []string
+	for range 12 {
+		parts = append(parts, `{"text":"`+long+`","cites":[`+strings.Repeat(`{"chunk_id":"f1","quote":"`+quote+`"},`, 4)+
+			`{"chunk_id":"f3","quote":"Ключевые понятия: производная, дифференциал, касательная"}]}`)
+	}
+	var missing []string
+	for i := range 7 {
+		missing = append(missing, `"`+strings.Repeat("часть ", 60)+string(rune('a'+i))+`"`)
+	}
+	out := `{"claims":[` + strings.Join(parts, ",") + `],"missing":[` + strings.Join(missing, ",") + `]}`
+	rep, err := r.Parse(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Claims) != 12 || len(rep.Claims[0].Cites) != 5 || rep.Claims[0].Text != long || len(rep.Missing) != 7 ||
+		rep.Dropped != 0 {
+		t.Fatalf("Parse kept %d claims, %d cites, %d missing, dropped %d", len(rep.Claims), len(rep.Claims[0].Cites),
+			len(rep.Missing), rep.Dropped)
+	}
+	if utf8.RuneCountInString(long) <= 400 || utf8.RuneCountInString(quote) <= 200 {
+		t.Fatal("the fixture is not long")
+	}
+
+	a, err := New("an1", "", r, rep, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := a.Counts()
+	if c.Claims != 12 || c.Supported != 12 || c.Missing != 7 || c.Sources != 2 {
+		t.Fatalf("Counts = %+v", c)
+	}
+	// The same citation four times is kept once; the long quote whole.
+	if got := a.Claims()[0].Cites; len(got) != 2 || got[0].Quote != quote {
+		t.Fatalf("cites = %+v", got)
+	}
+	if back, err := Restore(a.State()); err != nil || back.Counts() != c {
+		t.Fatalf("Restore = %v", err)
+	}
+}
+
+// A part that fails is dropped, not the whole answer (TASK-366).
+func TestParseDropsOnlyTheFailingPart(t *testing.T) {
+	r := request(t)
+	good := `{"chunk_id":"f1","quote":"предел отношения приращения функции"}`
+	tests := []struct {
+		name               string
+		out                string
+		claims, cites, mis int
+		dropped            int
+	}{
+		{"foreign chunk_id", `{"claims":[{"text":"a","cites":[` + good + `,{"chunk_id":"f9","quote":"предел отношения"}]}],"missing":[]}`, 1, 1, 0, 1},
+		{"chunk_id of another type", `{"claims":[{"text":"a","cites":[{"chunk_id":1,"quote":"q"},` + good + `]}],"missing":[]}`, 1, 1, 0, 1},
+		{"cite with an extra key", `{"claims":[{"text":"a","cites":[{"chunk_id":"f1","quote":"q","send":"x@y.invalid"},` + good + `]}],"missing":[]}`, 1, 1, 0, 1},
+		{"claim with only foreign cites", `{"claims":[{"text":"a","cites":[{"chunk_id":"f9","quote":"q"}]},{"text":"b","cites":[` + good + `]}],"missing":[]}`, 1, 1, 0, 2},
+		{"claim with a control character", `{"claims":[{"text":"a\u0007","cites":[` + good + `]},{"text":"b","cites":[` + good + `]}],"missing":[]}`, 1, 1, 0, 1},
+		{"claim with an extra key", `{"claims":[{"text":"a","cites":[` + good + `],"to":"x@y.invalid"}],"missing":["m"]}`, 0, 0, 1, 1},
+		{"claim not an object", `{"claims":["a",{"text":"b","cites":[` + good + `]}],"missing":[]}`, 1, 1, 0, 1},
+		{"blank missing", `{"claims":[{"text":"b","cites":[` + good + `]}],"missing":["  ","m",3]}`, 1, 1, 1, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rep, err := r.Parse(tt.out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cites := 0
+			for _, c := range rep.Claims {
+				cites += len(c.Cites)
+			}
+			if len(rep.Claims) != tt.claims || cites != tt.cites || len(rep.Missing) != tt.mis || rep.Dropped != tt.dropped {
+				t.Fatalf("kept %d claims, %d cites, %d missing, dropped %d", len(rep.Claims), cites, len(rep.Missing), rep.Dropped)
+			}
+		})
+	}
+
+	// A quote that is not in its fragment drops only that citation: the claim stays, supported by the other one.
+	rep, err := r.Parse(`{"claims":[{"text":"a","cites":[{"chunk_id":"f1","quote":"Ряд Тейлора приближает функцию"},` + good +
+		`]},{"text":"b","cites":[{"chunk_id":"f2","quote":"совсем другой текст лекции"}]}],"missing":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := New("an1", "", r, rep, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := a.Claims(); len(c) != 2 || len(c[0].Cites) != 1 || c[0].Cites[0].Quote != "предел отношения приращения функции" ||
+		c[1].Supported() {
+		t.Fatalf("claims = %+v", c)
 	}
 }
 

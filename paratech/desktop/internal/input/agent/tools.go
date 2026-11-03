@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
@@ -198,9 +199,9 @@ func (t tools) findLessons(ctx context.Context, call values.Call, scope values.S
 	if err != nil {
 		return values.ToolResult{}, nil, err
 	}
-	entry := make(map[shared.RecordingID]shared.LessonID, len(recs))
+	entry := make(map[shared.RecordingID]activity.Recording, len(recs))
 	for _, r := range recs {
-		entry[r.ID] = r.LessonID
+		entry[r.ID] = r
 	}
 
 	loc := t.clock.Now().Location()
@@ -212,18 +213,22 @@ func (t tools) findLessons(ctx context.Context, call values.Call, scope values.S
 		if !ok {
 			continue
 		}
-		if id := entry[l.Recording]; id != "" {
-			recorded[id] = true
+		r := entry[l.Recording]
+		if r.LessonID != "" {
+			recorded[r.LessonID] = true
 		}
 		start := l.StartedAt.In(loc)
+		// The names are data for the planner (TASK-369): the knowledge base's title and subject (the student's
+		// correction first), else those the recording kept of its lesson.
 		row := values.LessonRow{
 			Recording: rec, Date: dateOf(start, loc), Kind: l.Kind, Transcribed: l.Ready.Transcribed(),
 			Summary: l.Ready.Summary, LectureText: l.Ready.LectureText,
+			Title: cmp.Or(l.Title, r.LessonTitle), SubjectName: cmp.Or(l.Subject, r.LessonSubject), Teacher: r.LessonTeacher,
 		}
 		if !l.StartedAt.IsZero() {
 			row.Time, _ = values.NewTimeOfDay(start.Hour(), start.Minute())
 		}
-		row.Lesson, _ = refOfID(values.KindLesson, string(entry[l.Recording]))
+		row.Lesson, _ = refOfID(values.KindLesson, string(r.LessonID))
 		row.Subject, _ = refOfID(values.KindSubject, string(l.Library.ID))
 		if q.Match(row) {
 			found = append(found, foundLesson{start: l.StartedAt, row: row})
@@ -276,7 +281,8 @@ func (t tools) plannedLessons(ctx context.Context, q values.LessonQuery, recorde
 	if err != nil {
 		return nil, err
 	}
-	// The subject of a schedule lesson is a free string; only the library subject it names is shown, never the string.
+	// The subject of a schedule lesson is a free string: shown as data (subject_name), and as the library subject it
+	// names, if any.
 	var names []string
 	for _, l := range lessons {
 		if s := l.Content().Subject; s != "" && !slices.Contains(names, s) {
@@ -295,7 +301,9 @@ func (t tools) plannedLessons(ctx context.Context, q values.LessonQuery, recorde
 		}
 		c := l.Content()
 		start := c.Start.In(loc)
-		row := values.LessonRow{Lesson: id, Date: dateOf(start, loc), Kind: c.Kind.String()}
+		row := values.LessonRow{
+			Lesson: id, Date: dateOf(start, loc), Kind: c.Kind.String(), Title: c.Title, SubjectName: c.Subject, Teacher: c.Teacher,
+		}
 		row.Time, _ = values.NewTimeOfDay(start.Hour(), start.Minute())
 		if m, ok := subjects[c.Subject]; ok && c.Subject != "" {
 			row.Subject, _ = refOfID(values.KindSubject, string(m.ID))

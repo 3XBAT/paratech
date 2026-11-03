@@ -59,9 +59,14 @@ func Quote(quote string) string {
 // Matches reports whether quote occurs in text, both read as above, and is long enough to be evidence (at least
 // MinQuoteRunes characters after Quote).
 func Matches(quote, text string) bool {
+	return MatchesNormalized(quote, Normalize(text))
+}
+
+// MatchesNormalized is Matches for a text already read with Normalize, so many quotes of one text cost one Normalize.
+func MatchesNormalized(quote, normalized string) bool {
 	q := Quote(quote)
-	if utf8.RuneCountInString(q) < MinQuoteRunes {
+	if utf8.RuneCountInString(q) < MinQuoteRunes || len(q) > len(normalized) {
 		return false
 	}
-	return strings.Contains(Normalize(text), q)
+	return strings.Contains(normalized, q)
 }

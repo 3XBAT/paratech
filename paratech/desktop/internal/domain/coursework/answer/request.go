@@ -26,8 +26,9 @@ const (
 	// MaxFragmentsBytes bounds the texts of all fragments together.
 	MaxFragmentsBytes = 128 << 10
 
-	// MaxOutputTokens is the output cap asked for: at most MaxClaims claims with their quotes.
-	MaxOutputTokens = 4096
+	// MaxOutputTokens is the output cap asked for and the only bound of the answer (TASK-366): generous on purpose, the
+	// Hub clamps it to the cap of its model alias (8192 by default) and reserves quota by that.
+	MaxOutputTokens = 16384
 
 	// MaxScopeBytes bounds the reuse scope of a request.
 	MaxScopeBytes = 64

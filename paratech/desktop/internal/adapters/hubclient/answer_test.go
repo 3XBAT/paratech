@@ -294,6 +294,43 @@ func TestAnswerQuestionSendsExactlyTheContractFields(t *testing.T) {
 	}
 }
 
+// The Hub tells a model answer it refused by the schema from a provider that did not answer only by the message of
+// PROVIDER_ERROR; the error keeps that difference (TASK-366), in its text for desktop.log, and nothing else of the
+// message.
+func TestAnswerQuestionKeepsTheModelAnswerDetail(t *testing.T) {
+	tests := []struct {
+		name      string
+		detail    *hubv1.ErrorDetail
+		answered  bool
+		retryable bool
+	}{
+		{"answer refused by the schema", &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Message: hubMsgModelAnswer}, true, false},
+		{"provider failed", &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Message: "the LLM provider failed"}, false, false},
+		{"provider overloaded", &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Message: "the LLM provider failed", Retryable: true}, false, true},
+		{"another message", &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Message: hubMsgModelAnswer + " Teacher: x@y.invalid"}, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeHub{answer: func(context.Context, int) (*hubv1.CompleteResponse, error) {
+				return nil, detailErr(connect.CodeUnavailable, tt.detail)
+			}}
+			c, _, _ := startHub(t, f)
+			_, err := c.AnswerQuestion(t.Context(), answerRequest(t), nil)
+			if !errors.Is(err, ErrProvider) || errors.Is(err, backoff.ErrTransient) != tt.retryable {
+				t.Fatalf("err = %v", err)
+			}
+			if errors.Is(err, ErrModelAnswer) != tt.answered || strings.Contains(err.Error(), ErrModelAnswer.Error()) != tt.answered {
+				t.Fatalf("model answer detail = %v in %q, want %v", errors.Is(err, ErrModelAnswer), err.Error(), tt.answered)
+			}
+			for _, s := range []string{"Teacher", "x@y", "the LLM provider failed", "does not match"} {
+				if strings.Contains(err.Error(), s) {
+					t.Fatalf("error text %q quotes the Hub message", err.Error())
+				}
+			}
+		})
+	}
+}
+
 func TestAnswerQuestionErrors(t *testing.T) {
 	tests := []struct {
 		name  string

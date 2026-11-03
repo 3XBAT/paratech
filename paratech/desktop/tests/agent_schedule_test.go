@@ -39,7 +39,7 @@ func (e *driverEnv) importSchedule(t *testing.T, file string) {
 }
 
 // find_lessons for a future day lists the lessons of the schedule on that day, not recorded yet: their schedule
-// entry, subject, date, start and kind, never their title.
+// entry, subject, date, start and kind, and their title and subject name as data (TASK-369).
 func TestDriverFindLessonsReadsPlannedSchedule(t *testing.T) {
 	e := newDriverEnv(t)
 	e.importSchedule(t, icsFridaySaturday)
@@ -59,7 +59,8 @@ func TestDriverFindLessonsReadsPlannedSchedule(t *testing.T) {
 		`"subject":"s1","date":"2026-10-30","time":"07:00","kind":"lecture"`,
 	} {
 		if !strings.Contains(res[i], `"count":1`) || !strings.Contains(res[i], `"lesson":"lesson-`) || !strings.Contains(res[i], want) ||
-			strings.Contains(res[i], `"recording"`) || strings.Contains(res[i], "Физика") {
+			strings.Contains(res[i], `"recording"`) || !strings.Contains(res[i], `"subject_name":"Физика"`) ||
+			!strings.Contains(res[i], `"title":"Физика (`) {
 			t.Errorf("find_lessons %d = %s, want %s", i, res[i], want)
 		}
 	}
