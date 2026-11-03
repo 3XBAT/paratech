@@ -30,7 +30,10 @@
 /* A link-like button: accent text; on the hover fill the text turns plain (no accent text on --fill). */
 .btn.ghost { background: none; box-shadow: none; color: var(--accent); }
 .btn.ghost:hover:enabled, .btn.ghost:active:enabled { background: var(--fill); color: var(--text); }
-.btn.danger { color: var(--rec-t); box-shadow: 0 0 0 1px color-mix(in srgb, var(--rec-t) 40%, transparent), var(--sh-btn); }
+/* Danger: a normal button with red text, no red ring (TASK-367). */
+.btn.danger { color: var(--rec-t); }
+/* «Остановить»: a normal button, only its square is red (and filled). */
+.btn.stop .i { color: var(--rec-t); fill: currentColor; }
 .btn.sm { min-height: var(--h-sm); padding: 0 8px; font-size: var(--fs-small); line-height: var(--lh-small); }
 .btn.lg { min-height: var(--h-lg); font-size: var(--fs-body); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -54,7 +57,8 @@
 .seg button:disabled { opacity: .5; cursor: not-allowed; }
 .seg.lg button { min-height: 28px; padding: 0 16px; font-size: 13.5px; }
 
-/* Status chip («Тетрадь» style): tint, a border of the text colour at 35 %, icon and word; 22px tall, 12/600. */
+/* Status (TASK-367): an icon and a word in the status colour. No fill, no border, no ring: one accent colour stays for
+   the main action and the selection; the colour of a status only tints its text and icon. 22px tall, 12/600. */
 .chip {
   display: inline-flex;
   align-items: center;
@@ -62,10 +66,7 @@
   gap: 6px;
   max-width: 100%;
   min-height: 22px;
-  padding: 0 8px 0 6px;
-  border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
-  border-radius: var(--r-sm);
-  background: var(--b);
+  padding: 0;
   color: var(--c);
   font-size: var(--fs-label);
   line-height: var(--lh-label);
@@ -75,16 +76,12 @@
 .chip .i { width: 13px; height: 13px; stroke-width: 2; }
 /* Chips carry one to three words; a longer one wraps rather than being cut. */
 .chip-text { min-width: 0; white-space: normal; overflow-wrap: normal; }
-.s-rec { --c: var(--rec-t); --b: var(--rec-b); }
-.s-run { --c: var(--run-t); --b: var(--run-b); }
-.s-wait { --c: var(--wait-t); --b: var(--wait-b); }
-.s-net { --c: var(--net-t); --b: var(--net-b); }
-.s-ok { --c: var(--ok-t); --b: var(--ok-b); }
-.s-fail { --c: var(--rec-t); --b: var(--rec-b); }
-.s-neutral { --c: var(--neu-t); --b: var(--neu-b); }
-.chip.s-net, .chip.s-fail { border-style: dashed; }
-/* A double ring, like the «Тетрадь» stamp. */
-.chip.s-ok { box-shadow: inset 0 0 0 2px var(--b), inset 0 0 0 3px color-mix(in srgb, var(--c) 30%, transparent); }
+/* Status colours are text colours (AA on every surface, test/contrast.test.mjs); the quiet kinds are --muted. */
+.s-rec, .s-fail { --c: var(--rec-t); }
+.s-run { --c: var(--run-t); }
+.s-wait { --c: var(--wait-t); }
+.s-net, .s-neutral { --c: var(--muted); }
+.s-ok { --c: var(--ok-t); }
 .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--rec); animation: breath var(--t-breath) ease-in-out infinite; }
 @keyframes breath { 50% { opacity: .35; } }
 
@@ -124,8 +121,8 @@
 .switch:checked::after { transform: translateX(16px); background: var(--on-prim); }
 .switch:disabled { opacity: .6; cursor: not-allowed; }
 
-/* Banner: tinted note with the icon in the status colour and plain text. */
-.note { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 16px; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--c) 30%, transparent); border-radius: var(--r-md); background: var(--b); color: var(--text); }
+/* Banner: a neutral note (no tint, no coloured border) with the icon in the status colour and plain text. */
+.note { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 16px; padding: 8px 12px; border-radius: var(--r-md); background: var(--fill); color: var(--text); }
 .note > .i { margin-top: 1px; color: var(--c); }
 .note p { margin: 0; }
 
@@ -193,7 +190,8 @@
 .dialog-body { margin: 8px 0 20px; color: var(--muted); }
 
 @media (forced-colors: active) {
-  .chip, .btn, .tile, .switch, .seg button[aria-pressed="true"], .seg button[aria-selected="true"], .note, .card, .dialog { border: 1px solid CanvasText; }
+  /* A status has no box: its icon and word carry the meaning in system colours. */
+  .btn, .tile, .switch, .seg button[aria-pressed="true"], .seg button[aria-selected="true"], .note, .card, .dialog { border: 1px solid CanvasText; }
   /* Hairlines are backgrounds too. */
   .row + .row::before, .set + .set::before, .mrow + .mrow::before { forced-color-adjust: none; background: CanvasText; }
   /* The switch knob, the progress fill and the recording dot are backgrounds, which forced colours drop: keep them

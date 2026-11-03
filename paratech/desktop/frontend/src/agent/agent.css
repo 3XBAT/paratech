@@ -55,9 +55,8 @@
 .ag-card p { margin: 0 0 8px; overflow-wrap: anywhere; }
 .ag-card p:last-child { margin-bottom: 0; }
 .ag-card-h { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 600; color: var(--muted); }
-.ag-ask { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
+/* TASK-367: the cards that wait for the student keep the plain card frame; only the heading word is coloured. */
 .ag-ask > .ag-card-h { color: var(--accent); }
-.ag-confirm { box-shadow: 0 0 0 1px color-mix(in srgb, var(--rec-t) 45%, transparent); }
 .ag-confirm > .ag-card-h { color: var(--rec-t); }
 .ag-lead { font-size: var(--fs-h3); line-height: var(--lh-h3); font-weight: 600; letter-spacing: -0.01em; }
 /* The reply is the model's text: line breaks stay, markup is never interpreted. */

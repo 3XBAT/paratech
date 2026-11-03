@@ -43,10 +43,11 @@ h1, p, ul { margin: 0; }
 /* Error banner, warnings and the general advice. */
 .texts { display: flex; flex: 0 1 auto; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
 .texts > * { flex: none; }
-.note { display: flex; align-items: flex-start; gap: 8px; padding: 5px 10px; border: 1px solid color-mix(in srgb, var(--rec-t) 30%, transparent); border-radius: var(--r-ctl); background: var(--rec-b); font-size: var(--fs-small); line-height: 17px; }
+/* TASK-367: a neutral note, no tint and no coloured border; only the icon carries the colour. */
+.note { display: flex; align-items: flex-start; gap: 8px; padding: 5px 10px; border-radius: var(--r-ctl); background: var(--panel-2); font-size: var(--fs-small); line-height: 17px; }
 .note > .i { width: 16px; height: 16px; margin-top: 1px; color: var(--rec-t); }
 /* The silent-source advice (TASK-082): a warning, not an error. */
-.note.s-wait { border-color: color-mix(in srgb, var(--wait-t) 40%, transparent); background: var(--wait-b); font-weight: 500; }
+.note.s-wait { font-weight: 500; }
 .note.s-wait > .i { color: var(--wait-t); }
 .auto-note { color: var(--ok-t); font-size: var(--fs-label); line-height: var(--lh-label); font-weight: 500; }
 .note > div { min-width: 0; }
@@ -70,7 +71,9 @@ h1, p, ul { margin: 0; }
 .btn.primary:hover:enabled { background: var(--prim); opacity: .9; }
 .btn.ghost { border-color: transparent; background: none; color: var(--accent); }
 .btn.ghost:hover:enabled { background: var(--panel-2); }
-.btn.danger { color: var(--rec-t); border-color: color-mix(in srgb, var(--rec) 55%, var(--control)); }
+.btn.danger { color: var(--rec-t); }
+/* «Остановить»: a normal button, only its square is red (TASK-367). */
+.btn.stop .i { color: var(--rec-t); fill: currentColor; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 /* Button busy labels share one cell, so the width stays (as in ../ui/components.css). */
 .btn-labels { display: inline-grid; }

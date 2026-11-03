@@ -35,7 +35,6 @@
 .today-lesson .today-st { grid-column: 2 / -1; }
 .today-problem { display: inline-flex; padding: 0; border: 0; background: none; cursor: pointer; font: inherit; }
 .today-loose { margin-bottom: 8px; }
-.today-lesson.live { background: linear-gradient(90deg, var(--rec-b), transparent 45%); }
 .today-wait { grid-template-columns: auto minmax(0, 1fr) auto; }
 .today-wait > .i { color: var(--muted); }
 .today-dl { grid-template-columns: minmax(0, 1fr); width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }

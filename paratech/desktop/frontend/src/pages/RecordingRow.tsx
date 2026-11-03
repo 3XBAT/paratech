@@ -126,7 +126,7 @@ export function RecordingRow(props: RecordingRowProps) {
       case "stop":
         return (
           <Button
-            variant="danger"
+            className="stop"
             icon="stop"
             busy={props.stopping}
             busyLabel="Остановка…"

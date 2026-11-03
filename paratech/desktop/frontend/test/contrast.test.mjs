@@ -22,7 +22,7 @@ const themes = { light, dark };
 
 const colours = [
   "bg", "panel", "raised", "fill", "fill-2", "panel-2", "line", "control", "text", "muted", "accent", "accent-fill", "prim", "on-prim", "rec",
-  "rec-t", "rec-b", "run-t", "run-b", "wait-t", "wait-b", "net-t", "net-b", "ok-t", "ok-b", "neu-t", "neu-b",
+  "rec-t", "run-t", "run-b", "wait-t", "wait-b", "ok-t", "neu-t", "neu-b",
 ];
 
 function hex(theme, name) {
@@ -82,9 +82,10 @@ test("text and controls have enough contrast in both themes", () => {
       check(theme, "control", surface, 3); // non-text UI (WCAG 1.4.11)
     }
     check(theme, "on-prim", "prim", 4.5);
-    for (const chip of ["rec", "run", "wait", "net", "ok", "neu"]) {
-      check(theme, `${chip}-t`, `${chip}-b`, 4.5);
-      check(theme, "text", `${chip}-b`, 4.5); // banners: plain text on the tint
+    // TASK-367: only the highlights (<mark>) and the source letter keep a tint; statuses have none (see below).
+    for (const tint of ["run", "wait", "neu"]) {
+      check(theme, `${tint}-t`, `${tint}-b`, 4.5);
+      check(theme, "text", `${tint}-b`, 4.5);
     }
     // Hovered ghost buttons of the popup are on --panel-2.
     for (const fg of ["muted", "accent"]) {
@@ -104,6 +105,30 @@ test("text and controls have enough contrast in both themes", () => {
     for (const fg of ["rec-t", "wait-t"]) {
       for (const surface of ["raised", "panel"]) {
         check(theme, fg, surface, 4.5);
+      }
+    }
+  }
+});
+
+// TASK-367: statuses are coloured text on the plain surface (no tint behind them), so the text colour itself is AA on
+// every surface a status can sit on: the window, the sheet, a group, a hovered row or button, a popup hover.
+test("status text colours are AA on every surface in both themes; the recording dot is a visible shape", () => {
+  const surfaces = ["bg", "panel", "raised", "fill", "fill-2", "panel-2"];
+  for (const theme of Object.keys(themes)) {
+    for (const fg of ["rec-t", "ok-t", "wait-t", "run-t", "muted"]) {
+      for (const surface of surfaces) {
+        check(theme, fg, surface, 4.5);
+      }
+    }
+    // The dot (WCAG 1.4.11) next to the red word.
+    for (const surface of ["bg", "panel", "raised", "fill"]) {
+      check(theme, "rec", surface, 3);
+    }
+    // A banner is plain text on --fill (or --panel-2 in the popup) with a coloured icon (3:1).
+    for (const surface of ["fill", "panel-2"]) {
+      check(theme, "text", surface, 4.5);
+      for (const icon of ["rec-t", "wait-t", "muted"]) {
+        check(theme, icon, surface, 3);
       }
     }
   }

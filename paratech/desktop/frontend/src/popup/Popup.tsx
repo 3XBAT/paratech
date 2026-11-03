@@ -393,7 +393,7 @@ export function Popup() {
         </div>
         <div className="pbtns two">
           <Button
-            variant="danger"
+            className="stop"
             icon="stop"
             busy={stopping}
             busyLabel={recordingTexts.stopping}
