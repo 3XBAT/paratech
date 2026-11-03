@@ -427,7 +427,7 @@ export function RecordingsPage({
         {manualStartTexts.open}
       </Button>
       {/* The empty state shows the reason as a visible line instead. */}
-      {startState.reason && !noRecordings && (
+      {startState.reason && (!noRecordings || panelOpen) && (
         <span id={reasonId} className="vh">
           {startState.reason}
         </span>

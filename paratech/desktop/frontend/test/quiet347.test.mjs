@@ -72,7 +72,8 @@ test("the empty state: a disabled start says why in a visible line; the focus fo
   const page = src("../src/pages/RecordingsPage.tsx");
   // The reason is a visible muted line under the buttons (the head keeps the hidden one for screen readers).
   assert.match(page, /\{startState\.reason && \(\s*<p id=\{reasonId\} className="small muted rec-empty-reason">\s*\{startState\.reason\}/);
-  assert.match(page, /\{startState\.reason && !noRecordings && \(\s*<span id=\{reasonId\} className="vh">/);
+  // With an empty list and an open panel the visible line is gone, so the hidden span must exist for aria-describedby.
+  assert.match(page, /\{startState\.reason && \(!noRecordings \|\| panelOpen\) && \(\s*<span id=\{reasonId\} className="vh">/);
   // The clicked button leaves with the empty state: the focus goes into the panels, and back to the first button.
   assert.match(page, /noRecordings && panelOpen !== panelWasOpen\.current/);
   assert.match(page, /const target = panelOpen \? panelsRef\.current : emptyRef\.current;/);
