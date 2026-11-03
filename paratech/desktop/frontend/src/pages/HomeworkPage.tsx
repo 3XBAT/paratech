@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatTime } from "../activityView";
-import { CollapsibleList } from "../CollapsibleList";
 import {
   assignmentAfterDone,
   defaultState,
@@ -8,6 +7,7 @@ import {
   focusRowMenu,
   listAfterDone,
   listEmpty,
+  rowsChangingGroup,
 } from "../assignmentDoneView";
 import {
   type AssignmentDetail,
@@ -34,14 +34,14 @@ import {
   changeTexts,
   deleteNeedsWarning,
   flightGuard,
-  removeLabel,
   filterAssignments,
+  groupAssignments,
+  draftButtonTexts,
   blockedByEmail,
   type ChipView,
   defaultSendFormat,
   deliveriesInFlight,
   deliveryPollMs,
-  deliveryView,
   docxSaveView,
   draftPollMs,
   draftStatusStep,
@@ -60,12 +60,12 @@ import {
   versionTitle,
 } from "../homeworkView";
 import { lessonText } from "../lessonLabel";
-import { initialListState, type ListState } from "../listView";
+import { type ListStates, withState } from "../listView";
 import { useRecipientNav } from "../recipientNav";
 import { isRefusal, type RecipientView, recipientView, refusalAction } from "../recipientView";
 import { newestOnly } from "../todayView";
 import { Button } from "../ui/Button";
-import { Banner, Card, EmptyState, Field, Input, ResultLine, type ResultKind, Row } from "../ui/controls";
+import { Banner, Card, Field, Input, ResultLine, type ResultKind, Row } from "../ui/controls";
 import { StatusChip } from "../ui/StatusChip";
 import { Toast } from "../ui/Toast";
 import { AssignmentRowView, DoneButton, DoneIssueLine, DoneStamp } from "./AssignmentDoneParts";
@@ -80,6 +80,7 @@ import {
   SendDialog,
   type SendResult,
 } from "./HomeworkDialogs";
+import { AssignmentHeadMenu, DeliveryRow, GroupedRows, type HeadKey, HomeworkFirstRun, SaveMenu } from "./HomeworkMenus";
 import { HomeworkTurnkey } from "./HomeworkTurnkey";
 import { LessonCorrection } from "./LessonCorrection";
 import { RefusalButton } from "./RecipientParts";
@@ -182,7 +183,8 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
   const [deliveriesLoaded, setDeliveriesLoaded] = useState(false);
   const [filter, setFilter] = useState<AssignmentFilter>("all");
   const [error, setError] = useState("");
-  const [list, setList] = useState<ListState>(initialListState);
+  // The «Показать ещё» window of every group, by group key.
+  const [lists, setLists] = useState<ListStates>({});
   const [adding, setAdding] = useState(false);
   const library = useMemo(() => libraryApi(callByName), []);
   // «Открытые / Выполненные / Все» (TASK-316). A slow answer of an earlier request never replaces a newer one.
@@ -249,7 +251,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
     setItems(null);
     setDeliveries({});
     setDeliveriesLoaded(false);
-    setList(initialListState);
+    setLists({});
     setRowProblem(null);
     // A delete question of the old list must not come back for a row after a switch.
     setConfirmId("");
@@ -307,6 +309,8 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
       // A row that leaves takes the focus with it: it goes to the next row's check.
       const leaving = cur.filter((a) => !next.some((n) => n.id === a.id)).map((a) => a.id);
       focus.rowsLeaving(leaving);
+      // A row that only changes its group («Все»: to «Выполнено») is drawn anew: its check gets the focus back there.
+      focus.rowsMoving(rowsChangingGroup(cur, next));
       // A delete question of a row that left the list goes with it.
       setConfirmId((c) => (leaving.includes(c) ? "" : c));
       itemsRef.current = next;
@@ -480,11 +484,12 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
   // The way out of an empty email group.
   const resetFilter = () => {
     setFilter("all");
-    setList(initialListState);
+    setLists({});
   };
 
   const live = items === null ? [] : items.filter((a) => !Object.hasOwn(removed, a.id));
   const shown = items === null ? [] : filterAssignments(items, filter, deliveries, deliveriesLoaded);
+  const groups = groupAssignments(shown, new Date(), state);
   // A refusal about a row that is no longer in the list (it was deleted elsewhere) stays above the list.
   const strayIssue =
     doneRun.issue !== null && !(items ?? []).some((x) => doneRun.issue?.ids.includes(x.id)) ? doneRun.issue : null;
@@ -495,7 +500,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
       <div className="head">
         <h1 id="hw-list-title">Задания</h1>
         <div className="acts">
-          <Button icon="plus" onClick={() => setAdding(true)}>
+          <Button variant="primary" icon="plus" onClick={() => setAdding(true)}>
             {addTexts.button}
           </Button>
         </div>
@@ -529,10 +534,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
       {!shownOnce ? (
         items === null && !error && <p className="muted">Загрузка…</p>
       ) : empty !== null && empty.kind === "first-run" ? (
-        <EmptyState label="Заданий пока нет" title="Здесь появятся задания">
-          Задание находится само в записи пары, после конспекта. Здесь можно написать по нему черновик, поправить его
-          и отправить преподавателю по почте.
-        </EmptyState>
+        <HomeworkFirstRun onAdd={() => setAdding(true)} />
       ) : (
         <>
           <div className="hw-filters">
@@ -544,7 +546,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
                 value={filter}
                 onChange={(f) => {
                   setFilter(f);
-                  setList(initialListState);
+                  setLists({});
                 }}
               />
             )}
@@ -573,19 +575,12 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
               <Button onClick={resetFilter}>{filterReset}</Button>
             </div>
           ) : (
-            <CollapsibleList
-              items={shown}
-              itemKey={(a) => a.id}
+            // Every group has its own «Показать ещё» window, so no group is pushed out of sight by a longer one above it.
+            <GroupedRows
+              groups={groups}
+              states={lists}
+              onStateChange={(key, next) => setLists((cur) => withState(cur, key, next))}
               renderItem={row}
-              renderContainer={(rows) => (
-                <div className="card rows" role="list">
-                  {rows}
-                </div>
-              )}
-              state={list}
-              onStateChange={setList}
-              className="clist-card"
-              classNames={{ button: "btn ghost" }}
             />
           )}
         </>
@@ -655,13 +650,13 @@ function AssignmentEditor(props: {
   const [gone, setGone] = useState<AssignmentItem | null>(null);
   const [changing, setChanging] = useState(false);
   const [checking, setChecking] = useState(false); // the running-work check of «Удалить» is on its way: no delete yet
-  const [restored, setRestored] = useState(false); // «Вернуть» was pressed: «Удалить» takes the focus
+  const [restored, setRestored] = useState(false); // «Вернуть» was pressed: the «⋯» button takes the focus
   const [changeProblem, setChangeProblem] = useState("");
   const [changeOpenSend, setChangeOpenSend] = useState(false); // the refusal comes with «Открыть отправку»
   const [confirming, setConfirming] = useState(false); // «Работа остановится» is asked before the delete
   const [goneStopped, setGoneStopped] = useState(false); // the delete stopped a running work
   const [goneExpired, setGoneExpired] = useState(false); // «Вернуть» came after the restore window
-  const [cancelled, setCancelled] = useState(false); // «Отмена» of the warning: «Удалить» takes the focus back
+  const [cancelled, setCancelled] = useState(false); // «Отмена» of the warning: the «⋯» button takes the focus back
   const mailRef = useRef<HTMLHeadingElement>(null);
   const library = useMemo(() => libraryApi(callByName), []);
   const mounted = useRef(true);
@@ -946,7 +941,7 @@ function AssignmentEditor(props: {
       setMessage({ kind: "ok", text: `Версия ${r.version} сохранена в файл «${r.fileName}».`, at: "draft" });
     });
 
-  // «Сохранить в Word (.docx)»: the core asks where in the native save dialog and answers with a fixed text. The email
+  // «Сохранить ▾» → «Word (.docx)»: the core asks where in the native save dialog and answers with a fixed text. The email
   // attachment is not touched here: prepareSendAs exports the shown version right before the send dialog.
   const saveWord = () =>
     act("docx", async () => {
@@ -1171,6 +1166,26 @@ function AssignmentEditor(props: {
     }
   }
 
+  // An item of the «⋯» menu of the head.
+  function pickHead(key: HeadKey) {
+    if (key === "edit") {
+      setEditing(true);
+    } else if (key === "correct") {
+      setCorrecting(true);
+    } else {
+      void askRemoveThis();
+    }
+  }
+
+  // «Отмена» of the delete question and «Вернуть»: what had the focus is gone, so the «⋯» button of the head takes it.
+  useEffect(() => {
+    if ((cancelled || restored) && detail !== null && gone === null) {
+      focusRowMenu(rootRef.current, id);
+      setCancelled(false);
+      setRestored(false);
+    }
+  }, [cancelled, restored, detail, gone, id]);
+
   // «Открыть отправку»: the emails list is where the state of the unsettled email is shown.
   function showDeliveries() {
     void loadDeliveries();
@@ -1256,28 +1271,27 @@ function AssignmentEditor(props: {
         </h1>
         <span className="muted num">{dueText(a.due, new Date(), a.done)}</span>
         <div className="acts">
+          {changing && (
+            <span className="small muted hw-inline" role="status">
+              {changeTexts.removing}
+            </span>
+          )}
           <DoneButton
             done={a.done}
             busy={doneBusy}
             disabled={changing || checking || confirming}
             onToggle={() => void doneRun.mark(id, !a.done, a.title)}
           />
-          <Button disabled={changing || checking || doneBusy} onClick={() => setEditing(true)}>
-            {changeTexts.edit}
-          </Button>
-          <Button
-            // A new key after «Отмена» mounts the button again, so autoFocus gives it the focus.
-            key={cancelled ? "remove-cancelled" : "remove"}
-            variant="danger"
-            aria-label={removeLabel(a.title)}
-            autoFocus={restored || cancelled}
-            busy={changing}
-            busyLabel={changeTexts.removing}
-            disabled={changing || checking || confirming || doneBusy}
-            onClick={() => void askRemoveThis()}
-          >
-            {changeTexts.remove}
-          </Button>
+          <AssignmentHeadMenu
+            id={id}
+            title={a.title}
+            changing={changing}
+            marking={doneBusy}
+            checking={checking}
+            confirming={confirming}
+            correcting={correcting}
+            onPick={pickHead}
+          />
         </div>
       </div>
       <DoneStamp assignment={a} />
@@ -1317,14 +1331,11 @@ function AssignmentEditor(props: {
           onStale={() => reload(true).catch(() => undefined)}
         />
       )}
-      <div className="hw-lesson-head">
-        {lesson !== "" && <span className="hw-lesson">{lesson}</span>}
-        {!correcting && (
-          <Button variant="ghost" onClick={() => setCorrecting(true)}>
-            Поправить предмет и преподавателя
-          </Button>
-        )}
-      </div>
+      {lesson !== "" && (
+        <div className="hw-lesson-head">
+          <span className="hw-lesson">{lesson}</span>
+        </div>
+      )}
       {correcting && (
         <LessonCorrection
           assignment={a}
@@ -1391,27 +1402,22 @@ function AssignmentEditor(props: {
                   </Button>
                 </>
               )}
-              <Button
-                icon="down"
-                busy={busy === "export"}
-                busyLabel="Сохранение…"
+              <SaveMenu
+                busy={busy === "export" || busy === "docx"}
                 disabled={!idle || dirty}
-                disabledReason={savedReason}
-                onClick={exportFile}
-              >
-                Сохранить в файл
-              </Button>
-              <Button icon="down" busy={busy === "docx"} busyLabel="Сохранение…" disabled={!idle || dirty} onClick={saveWord}>
-                Сохранить в Word (.docx)
-              </Button>
+                reason={savedReason}
+                onFile={exportFile}
+                onWord={saveWord}
+              />
               <Button
                 icon="mail"
                 busy={busy === "send"}
                 busyLabel="Подготовка…"
                 disabled={!idle || dirty}
+                disabledReason={savedReason}
                 onClick={startSend}
               >
-                Отправить по почте…
+                {draftButtonTexts.send}
               </Button>
             </div>
             {isLatest && !dirty && <p className="small muted hw-note">Правка сохраняется новой версией, старые остаются.</p>}
@@ -1526,42 +1532,16 @@ function AssignmentEditor(props: {
         <p className="muted">Писем по этому заданию ещё не было.</p>
       ) : (
         <div className="card rows" role="list">
-          {deliveries.map((d) => {
-            const v = deliveryView(d);
-            return (
-              <Row
-                key={d.id}
-                title={<bdi>{d.recipient}</bdi>}
-                meta={<span className="num">Создано {formatTime(d.createdAt)}</span>}
-                status={
-                  <>
-                    <Chip view={v} />
-                    {v.hint !== "" && <span className="small muted">{v.hint}</span>}
-                    {v.problem !== "" && <span className="small row-problem">{v.problem}</span>}
-                  </>
-                }
-                actions={
-                  <>
-                    {d.canMarkSent && (
-                      <Button
-                        busy={busy === `mark:${d.id}`}
-                        busyLabel="Сохранение…"
-                        disabled={!idle}
-                        onClick={() => void markSent(d)}
-                      >
-                        Письмо дошло
-                      </Button>
-                    )}
-                    {d.canSendAgain && (
-                      <Button variant="danger" disabled={!idle} onClick={() => setSendAgain(d)}>
-                        Отправить ещё раз…
-                      </Button>
-                    )}
-                  </>
-                }
-              />
-            );
-          })}
+          {deliveries.map((d) => (
+            <DeliveryRow
+              key={d.id}
+              delivery={d}
+              marking={busy === `mark:${d.id}`}
+              idle={idle}
+              onMarkSent={() => void markSent(d)}
+              onSendAgain={() => setSendAgain(d)}
+            />
+          ))}
         </div>
       )}
 
