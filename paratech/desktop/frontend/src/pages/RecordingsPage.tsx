@@ -64,7 +64,7 @@ const pollMs = 3000;
 // without the popup, from the popup's source picker (TASK-081). A draft job row opens its assignment (TASK-094).
 // «Удалить» in a row's «⋯» menu and «Удалить выбранные» delete recordings after one confirmation (TASK-095).
 // «Сделать конспект заново» in the menu asks with the lesson screen's confirmation: it spends quota (TASK-096).
-// A row with texts opens the lesson screen on the tab of its main text; «⋯» holds the other tabs (TASK-352).
+// A row with texts opens the lesson screen on its own opening tab; «⋯» holds the named tabs (TASK-352).
 // Recordings and the other jobs are separate sections on one row grid (TASK-098).
 export function RecordingsPage({
   onOpen,

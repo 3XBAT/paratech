@@ -148,7 +148,8 @@ test("the lesson screen is the only page with crumbs for a recording: the old ov
   const app = read("App.tsx");
   assert.doesNotMatch(app, /closeTranscript|routeToSummary|routeToTranscript|<SummaryPage|<TranscriptPage|pageById/);
   // The window closes the lesson to the section under it (the route's step); the screen only calls it.
-  assert.equal((app.match(/onBack=\{\(\) => setRoute\(closeLesson\)\}/g) ?? []).length, 1);
+  assert.equal((app.match(/onBack=\{lessonBack\}/g) ?? []).length, 1);
+  assert.match(app, /setRoute\(closeLesson\);/);
 });
 
 test("subjects: the over-lines are gone, the semester and the aliases are one muted line under the name", () => {

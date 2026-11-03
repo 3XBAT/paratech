@@ -1,7 +1,7 @@
 // In-window history (TASK-201): «Назад/Вперёд» like in a browser. An entry is a route: the page and what is open over
 // it (lesson, assignment). Pure functions; the hook that wires them to the window is in useNavHistory.ts.
 
-import type { Route } from "./nav.js";
+import { closeLesson, type Route } from "./nav.js";
 
 /** The most entries kept; the oldest one is dropped first. */
 export const maxDepth = 50;
@@ -49,7 +49,40 @@ export function pushRoute(h: NavHistory, r: Route): NavHistory {
   return { entries, index: entries.length - 1 };
 }
 
-export const canGoBack = (h: NavHistory): boolean => h.index > 0;
+/**
+ * The entries of a lesson that no longer exists are taken out of the history, so Alt+← and Alt+→ never land on it. What
+ * is left stays in order; neighbours that became the same place are one entry; the position is the last kept entry at or
+ * before the current one. Nothing left: the current place without the lesson.
+ */
+export function dropLesson(h: NavHistory, lessonKey: string): NavHistory {
+  if (!h.entries.some((r) => r.lesson === lessonKey)) {
+    return h;
+  }
+  const entries: Route[] = [];
+  let index = 0;
+  h.entries.forEach((r, i) => {
+    if (r.lesson !== lessonKey && !(entries.length > 0 && sameRoute(entries[entries.length - 1], r))) {
+      entries.push(r);
+    }
+    if (i === h.index) {
+      index = Math.max(entries.length - 1, 0);
+    }
+  });
+  return entries.length === 0 ? newHistory(closeLesson(currentRoute(h))) : { entries, index };
+}
+
+/**
+ * The recording of the open lesson was deleted: the window goes back to the section the lesson was opened from, and the
+ * lesson leaves the history instead of becoming a step in it (otherwise Alt+← would return to a lesson that is gone).
+ * When the window has already left the lesson, only its entries are dropped.
+ */
+export function afterLessonDeleted(h: NavHistory, lessonKey: string): { history: NavHistory; route: Route } {
+  const cur = currentRoute(h);
+  const route = cur.lesson === lessonKey ? closeLesson(cur) : cur;
+  return { history: pushRoute(dropLesson(h, lessonKey), route), route };
+}
+
+export const canGoBack =(h: NavHistory): boolean => h.index > 0;
 export const canGoForward = (h: NavHistory): boolean => h.index < h.entries.length - 1;
 
 export function goBack(h: NavHistory): NavHistory {

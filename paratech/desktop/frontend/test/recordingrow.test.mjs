@@ -257,26 +257,26 @@ test("one main button per state; the rest goes to «⋯» (TASK-096)", () => {
     const a = rowActions(row(over), offers);
     return [a.main?.key ?? null, a.menu.map((i) => i.key)];
   };
-  // A ready summary leads; the lecture text, the transcript and the redo are in the menu.
-  assert.deepEqual(keys({ canRedoSummary: true }), ["summary", ["transcript", "redo"]]);
-  assert.deepEqual(keys({ canRedoSummary: true, lectureTextReady: true }), ["summary", ["lectureText", "transcript", "redo"]]);
+  // TASK-352: with any text the main button is the lesson (no tab named); the named texts and the redo are in the menu.
+  assert.deepEqual(keys({ canRedoSummary: true }), ["lesson", ["summary", "transcript", "redo"]]);
+  assert.deepEqual(keys({ canRedoSummary: true, lectureTextReady: true }), ["lesson", ["lectureText", "summary", "transcript", "redo"]]);
   // A ready summary and a failed homework search behind the connections: the link goes to the menu.
   assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "homeworkFailed", action: "openConnections", retryWork: "homework" }),
-    ["summary", ["transcript", "open"]]);
-  // No ready summary: the lecture text leads, else the transcript; the fix link stays in the menu.
+    ["lesson", ["summary", "transcript", "open"]]);
+  // No ready summary: the lesson still leads with what there is; the fix link stays in the menu.
   assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "summaryFailed", action: "openConnections", retryWork: "summary" }),
-    ["transcript", ["summary", "open"]]);
+    ["lesson", ["summary", "transcript", "open"]]);
   assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "summaryFailed", action: "openConnections", retryWork: "summary", lectureTextReady: true }),
-    ["lectureText", ["summary", "transcript", "open"]]);
-  // A failed transcription keeps its recognised part, so the transcript leads there too.
+    ["lesson", ["lectureText", "summary", "transcript", "open"]]);
+  // A failed transcription keeps its recognised part, so the lesson opens there too.
   assert.deepEqual(keys({ stage: "failed", step: "transcription", errorCode: "transcriptionFailed", action: "openModels" }),
-    ["transcript", ["open"]]);
+    ["lesson", ["transcript", "open"]]);
   // No text at all: the fix link is the fallback main button.
   assert.deepEqual(keys({ stage: "failed", step: "", errorCode: "recordingFailed", action: "checkSound" }), ["open", []]);
   assert.deepEqual(keys({ stage: "failed", step: "summary", errorCode: "summaryFailed", action: "retry", retryWork: "summary" }),
-    ["transcript", ["summary"]]);
-  assert.deepEqual(keys({ stage: "summarizing", lectureTextReady: true }), ["lectureText", ["summary", "transcript"]]);
-  assert.deepEqual(keys({ stage: "transcribing" }), ["transcript", []]);
+    ["lesson", ["summary", "transcript"]]);
+  assert.deepEqual(keys({ stage: "summarizing", lectureTextReady: true }), ["lesson", ["lectureText", "summary", "transcript"]]);
+  assert.deepEqual(keys({ stage: "transcribing" }), ["lesson", ["transcript"]]);
   assert.deepEqual(keys({ stage: "failed", errorCode: "silentRecording", action: "checkSound" }), ["open", []]);
   // Stop and «Запустить сейчас» stay visible: they are the state's own action.
   assert.deepEqual(keys({ stage: "recording", status: "RECORDING", stoppable: true }), ["stop", []]);

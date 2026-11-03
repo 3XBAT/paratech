@@ -155,8 +155,9 @@ test("a lesson never remounts the page under it: its screen has its own key (the
   assert.equal(needsRemount(under, a), false);
   const app = read("App.tsx");
   // The count of openings is in the key (TASK-352): the same lesson opened again at another place opens afresh.
-  assert.match(app, /<div key=\{`lesson:\$\{route\.lesson\}:\$\{lessonVisit\}`\} className="screen">/);
-  assert.doesNotMatch(app, /key=\{`lesson:[^`]*route\.tab/);
+  // The key is the pure lessonScreenKey (lesson, visit): tested in lessonEntry352.test.mjs; the tab is not an input.
+  assert.match(app, /<div key=\{lessonScreenKey\(route\.lesson, lessonVisit\)\} className="screen">/);
+  assert.doesNotMatch(app, /lessonScreenKey\([^)]*route\.tab/);
 });
 
 // ---- knowledgeView ----
@@ -366,22 +367,24 @@ test("the lesson is found in the window's memory, else by its key (lessonByKey);
   assert.match(src, /const cached = props\.cache\.get\(key\);/);
   // TASK-352: any key goes to the core, a recording and a note-only lecture alike; no recording-id-only path is left.
   assert.match(src, /api\.lessonByKey\(key\)\.then\(/);
-  assert.doesNotMatch(src, /api\.lesson\(recordingId\)|recordingIdOfKey|lessonScreenTexts\.gone/);
-  // One component for both failures: the banner with the binding's text and «Назад», which is the window's closeLesson
-  // (where the student came from).
-  assert.match(src, /<Button onClick=\{props\.onBack\}>\{lessonScreenTexts\.back\}<\/Button>/);
-  assert.match(src, /<LessonGone text=\{error\} onBack=\{props\.onBack\} \/>/);
+  assert.doesNotMatch(src, /api\.lesson\(recordingId\)|recordingIdOfKey/);
+  // One component (pages/LessonGone.tsx) for both failures: the banner with the screen's own words (TASK-352), «Повторить»
+  // when a repeat may help and «Назад», which is the window's closeLesson (where the student came from).
+  const gone = read("pages/LessonGone.tsx");
+  assert.match(gone, /<Button variant=\{retry \? "ghost" : undefined\} onClick=\{props\.onBack\}>\s*\{lessonScreenTexts\.back\}/);
+  assert.match(src, /<LessonGone\s+problem=\{problem\}/);
+  assert.match(src, /onBack=\{props\.onBack\}/);
   assert.doesNotMatch(src, /toSubjects/);
   assert.doesNotMatch(src, /dangerouslySetInnerHTML|innerHTML/);
 });
 
 test("a lesson that cannot be read again shows only the error and «Назад»: no tabs, no summary polling", () => {
   const src = read("pages/KnowledgeLessonPage.tsx");
-  assert.match(src, /if \(lessonError !== ""\) \{\s*return \(\s*<section className="page tr sm kb-lesson-page">\s*\{crumbs\}\s*<LessonGone text=\{lessonError\} onBack=\{props\.onBack\} \/>/);
+  assert.match(src, /if \(lessonError !== null\) \{\s*return \(\s*<section ref=\{pageRef\} tabIndex=\{-1\} className="page tr sm kb-lesson-page">\s*\{crumbs\}\s*<LessonGone\s+problem=\{lessonError\}/);
   // The early return comes before the head and the tabs.
-  assert.ok(src.indexOf('if (lessonError !== "") {\n    return') < src.indexOf("<SegmentTabs"));
+  assert.ok(src.indexOf("if (lessonError !== null) {\n    return") < src.indexOf("<SegmentTabs"));
   // The polling effect does not start for it.
-  assert.match(src, /useEffect\(\(\) => \{\s*if \(lessonError !== ""\) \{\s*return;\s*\}\s*let stopped = false;\s*let timer/);
+  assert.match(src, /useEffect\(\(\) => \{\s*if \(lessonError !== null\) \{\s*return;\s*\}\s*let stopped = false;\s*let timer/);
 });
 
 test("the crumbs follow the section under the lesson: the window passes the route's page", () => {
@@ -427,7 +430,8 @@ test("the window: the lesson is an overlay over the page, the cache is filled on
   assert.match(app, /lessons\.current\.set\(lesson\.key, lesson\);/);
   assert.match(app, /setRoute\(\(r\) => routeToLesson\(r, key, openingRouteTab\(o\.focus, o\.materialId\)\)\);/);
   assert.match(app, /setRoute\(\(r\) => routeToLessonTab\(r, tab\)\)/);
-  assert.match(app, /onBack=\{\(\) => setRoute\(closeLesson\)\}/);
+  assert.match(app, /const lessonBack = useCallback\(\(\) => \{\s*refocusSheet\.current = true;\s*setRoute\(closeLesson\);\s*\}, \[\]\);/);
+  assert.match(app, /onBack=\{lessonBack\}/);
   // The one-shot opening is dropped as soon as the route leaves the lesson.
   assert.match(app, /setLessonOpening\(\(o\) => keepLessonOpening\(o, \{ lesson: route\.lesson \}\)\);/);
   // The crumbs are routes: «Предметы» is the rail click, the subject opens in «Предметы».

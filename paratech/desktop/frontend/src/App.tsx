@@ -19,6 +19,7 @@ import {
   type CitationOpening,
   keepLessonOpening,
   type LessonOpening,
+  lessonScreenKey,
   type LessonTab,
   openingRouteTab,
   recordingLessonKey,
@@ -258,12 +259,31 @@ export function App() {
   );
   const sourceJumpDone = useCallback(() => setSourceJump(undefined), []);
   const lessonOpeningTaken = useCallback(() => setLessonOpening(null), []);
-  // The recording was deleted on the lesson screen: back to the section it was opened from. That section is read afresh,
-  // its lists still hold the recording.
-  const lessonDeleted = useCallback((key: string) => {
-    lessons.current.delete(key);
+  // The button that closed the lesson screen is gone with it: the focus goes to the sheet, so the keyboard does not fall
+  // to the body. Set by «Назад» and by a deletion only; a rail click keeps the focus on the rail.
+  const sheet = useRef<HTMLElement>(null);
+  const refocusSheet = useRef(false);
+  // Alt+←/→ and the mouse side buttons walk the history of routes (TASK-201).
+  const navHistory = useNavHistory(route, setRoute, (r, from) => {
+    if (needsRemount(r, from)) {
+      setJump((j) => j + 1);
+    }
+  });
+  // The recording was deleted on the lesson screen: back to the section it was opened from, and the lesson leaves the
+  // history (Alt+← must not return to it). That section is read afresh, its lists still hold the recording.
+  const lessonDeleted = useCallback(
+    (key: string) => {
+      lessons.current.delete(key);
+      refocusSheet.current = true;
+      navHistory.lessonDeleted(key);
+      setJump((j) => j + 1);
+    },
+    [navHistory],
+  );
+  // «Назад» of the lesson screen.
+  const lessonBack = useCallback(() => {
+    refocusSheet.current = true;
     setRoute(closeLesson);
-    setJump((j) => j + 1);
   }, []);
   // A mention pill of the agent's thread (TASK-247): the object itself where a route opens it (a subject, an assignment,
   // a pair's lesson, TASK-352), else the closest existing page; a deleted object meets its normal state.
@@ -309,7 +329,11 @@ export function App() {
     setLessonOpening((o) => keepLessonOpening(o, { lesson: route.lesson }));
     if (lastLesson.current !== "" && route.lesson === "") {
       setLessonsSeen((n) => n + 1);
+      if (refocusSheet.current) {
+        sheet.current?.focus();
+      }
     }
+    refocusSheet.current = false;
     lastLesson.current = route.lesson;
   }, [route.lesson]);
   const recipientNav = useMemo<RecipientNav>(
@@ -323,12 +347,6 @@ export function App() {
     }),
     [openTeacher, openAssignmentFor],
   );
-  // Alt+←/→ and the mouse side buttons walk the history of routes (TASK-201).
-  useNavHistory(route, setRoute, (r, from) => {
-    if (needsRemount(r, from)) {
-      setJump((j) => j + 1);
-    }
-  });
   // Counts the files the drop zone added: «Предметы» reads the library again.
   const [library, setLibrary] = useState(0);
   const panel = useResizablePanel();
@@ -383,7 +401,7 @@ export function App() {
           setVisit((v) => v + 1);
         }}
       />
-      <main className="sheet">
+      <main className="sheet" ref={sheet} tabIndex={-1}>
         {/* A new key per section replays the entry animation. The section stays mounted under an open lesson, so
             «Назад» finds it as the user left it. */}
         <div key={`${current}:${jump}`} className="screen" hidden={overlay}>
@@ -400,7 +418,7 @@ export function App() {
         {route.lesson !== "" && (
           // The tab is not in the key: switching tabs keeps the screen; another lesson, or the same one opened again
           // at another place, opens it afresh.
-          <div key={`lesson:${route.lesson}:${lessonVisit}`} className="screen">
+          <div key={lessonScreenKey(route.lesson, lessonVisit)} className="screen">
             <LessonScreen
               lessonKey={route.lesson}
               origin={route.page}
@@ -409,7 +427,7 @@ export function App() {
               opening={lessonOpening}
               onOpeningTaken={lessonOpeningTaken}
               onTab={openLessonTab}
-              onBack={() => setRoute(closeLesson)}
+              onBack={lessonBack}
               onChanged={lessonChanged}
               onDeleted={lessonDeleted}
               onOpenAssignment={openAssignment}

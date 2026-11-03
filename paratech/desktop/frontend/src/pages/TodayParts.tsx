@@ -210,8 +210,9 @@ function ProblemChip(props: { problem: Problem; onClick?: () => void }) {
 
 /**
  * The pairs of the day (TASK-352): the whole row opens the lesson of its recording (the title is the button, stretched
- * over the row by .row-open; the chips and «Записать» stay separate controls above it). A pair before or during its time
- * without a recording offers «Записать» instead; a finished pair without one is a plain row.
+ * over the row by .row-open; the problem chip and «Записать» stay separate controls above it). A pair without a recording
+ * offers «Записать» from ten minutes before its start until its end (it opens the start panel of «Записи»: the core links a
+ * recording to the pair in progress, the panel takes no pair); an earlier or a finished one is a plain row.
  */
 export function LessonsSection(props: {
   lessons: readonly TodayLesson[];
@@ -259,7 +260,13 @@ export function LessonsSection(props: {
                 <div className="today-main">
                   <p className="today-t">
                     {open.kind === "open" ? (
-                      <button type="button" className="row-open" title={texts.openLesson} onClick={() => props.onOpenLesson(open.recordingId)}>
+                      <button
+                        type="button"
+                        className="row-open"
+                        title={texts.openLesson}
+                        aria-label={`${texts.openLesson}: ${m.title}`}
+                        onClick={() => props.onOpenLesson(open.recordingId)}
+                      >
                         {m.title}
                       </button>
                     ) : (
@@ -453,13 +460,17 @@ export function SummarySection(props: {
   done: readonly TodayDone[];
   /** The pairs of the day: a lesson that is a row there is not repeated here (its row opens it). */
   lessons?: readonly TodayLesson[];
+  /** The recordings list the pair rows read: a row without a post opens the newest recording, which is not repeated either. */
+  recordings?: readonly RecordingItem[];
+  /** The moment the pair rows are read against; the clock when omitted (tests pass a fixed one). */
+  now?: Date;
   onOpenLesson: (recordingId: string) => void;
   /** The core calls of «Да, в календарь»; without them the button is not offered. */
   calendar?: { api: AgentConfirmApi; deleteApi: RecordingDeleteApi };
 }) {
   // A post with a question about the calendar has no other place on the screen, so it stays (without «Открыть»).
   const asks = (p: TodayPost) => props.calendar !== undefined && p.calendar.some((c) => isDeadlineAction(c.kind, c.assignmentId));
-  const rows = summaryRows(props.posts, props.done, props.lessons, asks);
+  const rows = summaryRows(props.posts, props.done, props.lessons, asks, props.recordings, props.now);
   if (rows.count === 0) {
     return null;
   }

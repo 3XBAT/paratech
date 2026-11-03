@@ -13,7 +13,6 @@ import {
   type SummaryView,
 } from "../bindings/summary";
 import {
-  errorText as knowledgeErrorText,
   isLessonTab,
   isNoteOnly,
   keepLessonOpening,
@@ -23,6 +22,8 @@ import {
   lessonHeading,
   lessonMeta,
   type LessonOpening,
+  type LessonProblem,
+  lessonProblem,
   lessonScreenTexts,
   type LessonTab,
   lessonTabs,
@@ -47,7 +48,6 @@ import {
 } from "../summaryView";
 import { saveResultText } from "../transcriptView";
 import { Breadcrumbs, type Crumb } from "../ui/Breadcrumbs";
-import { Button } from "../ui/Button";
 import {
   Banner,
   Dialog,
@@ -59,6 +59,7 @@ import {
 } from "../ui/controls";
 import { RowMenu, type RowMenuItem } from "../ui/RowMenu";
 import { LessonInfoForm } from "./KnowledgeParts";
+import { LessonGone } from "./LessonGone";
 import { LectureTextCard } from "./LectureTextParts";
 import { OwnNotes } from "./OwnNotes";
 import { RecordingDeleteDialog } from "./RecordingDeleteDialog";
@@ -104,20 +105,6 @@ const lessonMenu: readonly RowMenuItem<"edit" | "delete">[] = [
   { key: "delete", label: deleteTexts.summaryButton },
 ];
 
-/** The lesson cannot be shown: the reason and «Назад» to where the student came from. */
-function LessonGone(props: { text: string; onBack: () => void }) {
-  return (
-    <div className="kb-gone">
-      <Banner kind="fail" role="alert">
-        {props.text}
-      </Banner>
-      <div className="acts start">
-        <Button onClick={props.onBack}>{lessonScreenTexts.back}</Button>
-      </div>
-    </div>
-  );
-}
-
 // The screen a route `lesson` shows (TASK-351, 352): the one screen every link to a summary, a lecture text or a transcript leads to. The
 // lesson is found in the window's memory of the lessons it opened (`cache`, filled by every page that opens one), else
 // the core reads it by its key (lessonByKey: a recording, or a lecture known only from the student's notes), so a cold
@@ -148,7 +135,10 @@ export function LessonScreen(props: {
   const [opening] = useState<LessonOpening | null>(() => keepLessonOpening(props.opening, { lesson: key }));
   const taken = props.onOpeningTaken;
   const [fetched, setFetched] = useState<KnowledgeLesson | null>(null);
-  const [error, setError] = useState("");
+  const [problem, setProblem] = useState<LessonProblem | null>(null);
+  // «Повторить» reads the lesson again; the pressed button leaves with the refusal, so the focus goes to the screen first.
+  const [attempt, setAttempt] = useState(0);
+  const page = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (opening !== null) {
@@ -169,27 +159,35 @@ export function LessonScreen(props: {
       },
       (err) => {
         if (!stopped) {
-          setError(knowledgeErrorText(err));
+          setProblem(lessonProblem(err));
         }
       },
     );
     return () => {
       stopped = true;
     };
-  }, [api, cached, key]);
+  }, [api, cached, key, attempt]);
 
   const lesson = cached ?? fetched;
   if (lesson === null) {
     const rootGo = openedFromKnowledge(props.origin) ? props.onBack : props.nav.onOpenSubjects;
     return (
-      <section className="page tr sm kb-lesson-page">
+      <section ref={page} tabIndex={-1} className="page tr sm kb-lesson-page">
         <Breadcrumbs items={[{ label: lessonRootLabel(props.origin), onClick: rootGo }, { label: "Пара" }]} />
-        {error === "" ? (
+        {problem === null ? (
           <p className="muted" role="status">
             {lessonScreenTexts.loading}
           </p>
         ) : (
-          <LessonGone text={error} onBack={props.onBack} />
+          <LessonGone
+            problem={problem}
+            onRetry={() => {
+              page.current?.focus();
+              setProblem(null);
+              setAttempt((n) => n + 1);
+            }}
+            onBack={props.onBack}
+          />
         )}
       </section>
     );
@@ -260,7 +258,10 @@ export function KnowledgeLessonPage(props: {
   const [deleteFailed, setDeleteFailed] = useState<DeleteOutcome | null>(null);
   const tabsId = useId();
   const [lesson, setLesson] = useState(props.lesson);
-  const [lessonError, setLessonError] = useState("");
+  const [lessonError, setLessonError] = useState<LessonProblem | null>(null);
+  // «Повторить» of that refusal: the lesson is read again (see the page ref for the focus).
+  const [reread, setReread] = useState(0);
+  const pageRef = useRef<HTMLElement>(null);
   const [fresh, setFresh] = useState(!props.stale);
   const [editing, setEditing] = useState(props.editing);
   const [hasNotes, setHasNotes] = useState<boolean | null>(null);
@@ -291,7 +292,7 @@ export function KnowledgeLessonPage(props: {
       },
       (err) => {
         if (!stopped) {
-          setLessonError(knowledgeErrorText(err));
+          setLessonError(lessonProblem(err));
           setFresh(true);
         }
       },
@@ -299,7 +300,7 @@ export function KnowledgeLessonPage(props: {
     return () => {
       stopped = true;
     };
-  }, [props.api, props.stale, id]);
+  }, [props.api, props.stale, id, reread]);
 
   // The opening tab depends on whether the student has notes here: read once, only when no tab was asked for. A failed
   // read counts as no notes (the notes tab shows its own refusal if it is the one left).
@@ -361,7 +362,7 @@ export function KnowledgeLessonPage(props: {
   // The summary view as on the summary page: one call at a time, polled while a step runs. A lesson that could not be
   // read again (deleted) shows only its error, so nothing is polled for it.
   useEffect(() => {
-    if (lessonError !== "") {
+    if (lessonError !== null) {
       return;
     }
     let stopped = false;
@@ -418,17 +419,25 @@ export function KnowledgeLessonPage(props: {
   const crumbs = <Breadcrumbs items={crumbItems(lesson, lessonHeading(lesson), props.origin, props.nav, props.onBack)} />;
 
   // The lesson cannot be read any more: the error and the way back, no tabs (they would add a second error of their own).
-  if (lessonError !== "") {
+  if (lessonError !== null) {
     return (
-      <section className="page tr sm kb-lesson-page">
+      <section ref={pageRef} tabIndex={-1} className="page tr sm kb-lesson-page">
         {crumbs}
-        <LessonGone text={lessonError} onBack={props.onBack} />
+        <LessonGone
+          problem={lessonError}
+          onRetry={() => {
+            pageRef.current?.focus();
+            setLessonError(null);
+            setReread((n) => n + 1);
+          }}
+          onBack={props.onBack}
+        />
       </section>
     );
   }
 
   return (
-    <section className="page tr sm kb-lesson-page">
+    <section ref={pageRef} tabIndex={-1} className="page tr sm kb-lesson-page">
       {crumbs}
       <div className="head">
         <div>

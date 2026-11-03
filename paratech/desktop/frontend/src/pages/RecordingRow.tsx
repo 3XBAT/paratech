@@ -45,7 +45,7 @@ export interface RecordingRowProps {
    * The lesson screen of the recording on a tab (TASK-352): the summary, the lecture text and the transcript are its tabs.
    * Without it the row offers no texts.
    */
-  onOpenLesson?: (recordingId: string, tab: LessonTab) => void;
+  onOpenLesson?: (recordingId: string, tab?: LessonTab) => void;
   /** «Сделать конспект заново» in the «⋯» menu: the page asks first; redoing while the call runs. */
   redoing?: boolean;
   onRedoSummary?: () => void;
@@ -99,6 +99,10 @@ export function RecordingRow(props: RecordingRowProps) {
           props.onOpen(a.page);
         }
         break;
+      case "lesson":
+        // The main «Открыть»: no tab named, the lesson screen opens its own.
+        props.onOpenLesson?.(r.id);
+        break;
       case "summary":
       case "lectureText":
       case "transcript": {
@@ -147,7 +151,7 @@ export function RecordingRow(props: RecordingRowProps) {
       case "open":
         return <Button onClick={() => run(i.key)}>{i.label}</Button>;
       default:
-        // The texts: this button is the row's open (the whole row is its target, see .row-open); «⋯» holds the other tabs.
+        // The lesson: this button is the row's open (the whole row is its target, see .row-open); «⋯» holds the named tabs.
         return (
           <Button className="row-open" icon="doc" aria-label={`${i.label}: ${v.title}`} onClick={() => run(i.key)}>
             {i.label}

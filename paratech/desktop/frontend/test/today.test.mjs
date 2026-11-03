@@ -459,7 +459,7 @@ test("rows: live chip, urgent chip, the whole row opens the lesson (TASK-352), n
   // The row itself is the open (a title button stretched over it); no separate «Открыть» button is left.
   const ready = html(h(LessonsSection, { lessons: [lesson({ post: post() })], recordings: [], onOpenLesson: noop }));
   assert.match(ready, /Конспект готов/);
-  assert.match(ready, /<button type="button" class="row-open" title="Открыть пару">Матанализ<\/button>/);
+  assert.match(ready, /<button type="button" class="row-open" title="Открыть пару" aria-label="Открыть пару: Матанализ">Матанализ<\/button>/);
   assert.doesNotMatch(ready, />Открыть</);
   // A pending summary opens too: the lesson screen shows where it stands and holds the transcript.
   const pending = html(h(LessonsSection, { lessons: [lesson({ post: post({ summaryReady: false }) })], recordings: [], onOpenLesson: noop }));

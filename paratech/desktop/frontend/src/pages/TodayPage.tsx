@@ -273,6 +273,7 @@ export function TodayPage(props: {
               posts={screen.posts}
               done={screen.done}
               lessons={screen.lessons}
+              recordings={recordings ?? []}
               onOpenLesson={(recordingId) => openLesson(recordingId)}
               calendar={calendar}
             />

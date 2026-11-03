@@ -211,6 +211,14 @@ export interface LessonOpening {
   editing: boolean;
 }
 
+/**
+ * The React key of the lesson screen: a different lesson, or the same one opened again (the window counts `visit` on each
+ * opening, so another place of it) mounts the screen afresh; switching its tab (the route's tab) never does.
+ */
+export function lessonScreenKey(lessonKey: string, visit: number): string {
+  return `lesson:${lessonKey}:${visit}`;
+}
+
 /** The window keeps the request only while the route shows the lesson it names, so Alt+← never applies it late. */
 export function keepLessonOpening(o: LessonOpening | null, route: { lesson: string }): LessonOpening | null {
   return o !== null && route.lesson === o.key ? o : null;
@@ -262,7 +270,30 @@ export const lessonScreenTexts = {
   infoSaved: "Предмет и тип пары сохранены.",
   /** Returns where the student came from. */
   back: "Назад",
+  /** The core cannot find the lesson (an unknown key, or the recording and files are deleted): nothing to retry. */
+  pairGone: "Этой пары больше нет: запись или файлы удалены.",
+  /** The core cannot read the lesson now (busy, unreadable base): a repeat may work. */
+  openFailed: "Не удалось открыть пару.",
+  retry: "Повторить",
 } as const;
+
+/** Why the lesson screen cannot show a lesson, and what the student can do about it. */
+export interface LessonProblem {
+  /** "gone" offers only «Назад»; "retry" offers «Повторить» and «Назад». */
+  kind: "gone" | "retry";
+  text: string;
+}
+
+/**
+ * The screen's own words for a failed read of a lesson: the binding texts name «запись» and «обновите список», which
+ * mean nothing on this screen. An unknown key or a missing lesson is gone for good; anything else is worth a repeat.
+ */
+export function lessonProblem(err: unknown): LessonProblem {
+  const msg = errorText(err);
+  return msg === errorMessages.notFound || msg === errorMessages.invalidId
+    ? { kind: "gone", text: lessonScreenTexts.pairGone }
+    : { kind: "retry", text: lessonScreenTexts.openFailed };
+}
 
 /**
  * The place a search hit opens in a recording's page: the lecture block, the transcript segment, a summary section or a

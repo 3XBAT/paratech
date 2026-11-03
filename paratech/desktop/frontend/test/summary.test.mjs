@@ -442,13 +442,14 @@ test("the row and the homework page open the lesson without a call per row", () 
   assert.match(src("recordingRowView.ts"), /: rowSummaryOffer\(r\)/);
   const rows = src("pages/RecordingRow.tsx");
   assert.match(rows, /rowActions\(r, /);
-  assert.match(rows, /props\.onOpenLesson\?\.\(r\.id, tab\)/);
+  assert.match(rows, /props\.onOpenLesson\?\.\(r\.id, tab\)/, "a named tab of «⋯»");
+  assert.match(rows, /case "lesson":[^]*?props\.onOpenLesson\?\.\(r\.id\);/, "the main «Открыть» names no tab");
   assert.match(src("pages/RecordingsPage.tsx"), /onOpenLesson=\{openLesson\}/);
   for (const rel of ["pages/RecordingRow.tsx", "pages/RecordingsPage.tsx"]) {
     assert.ok(!src(rel).includes("summaryApi"), "no summary call per row");
   }
   const links = src("pages/TranscriptLinks.tsx");
-  assert.match(links, /rowLessonTab\(r\)/);
+  assert.match(links, /pairLinks\(await activity\.listRecordings\(\), lessonId\)/);
   assert.ok(!links.includes("summaryApi"));
   const app = src("App.tsx");
   assert.match(app, /<LessonScreen/);

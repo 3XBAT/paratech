@@ -184,8 +184,9 @@ html, body, #root { height: 100%; }
 .drow-open:hover { background: var(--fill); }
 /* A row of a list opens its lesson by one control stretched over the whole row (ADR-0034 §2, TASK-352): the title
    button of a pair on «Сегодня», «Открыть» of a recording on «Записи». Its ::after covers the row (the row is
-   positioned); the checkbox, the chips, the fix buttons and «⋯» stay separate controls above it, so they never open the
-   lesson too. The ring is drawn around the row, not around the title. */
+   positioned); only the real controls (the checkbox, the buttons, «⋯», the problem chip of «Сегодня») are raised above
+   it, so they never open the lesson too. A plain status chip stays under it: a click on it opens the lesson, it is no
+   dead zone. The ring is drawn around the row, not around the title. */
 .row-open::after { content: ""; position: absolute; inset: 0; }
 button.row-open:not(.btn) { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .row-open:focus-visible { outline: none; }
@@ -193,7 +194,7 @@ button.row-open:not(.btn) { padding: 0; border: 0; background: none; color: inhe
 /* The button moves one pixel when pressed: that would shrink the stretched area under the cursor and lose the click. */
 .btn.row-open:active:enabled { transform: none; }
 .row:has(.row-open):hover, .row-openable:hover { background: var(--fill); }
-.row:has(.row-open) :is(.row-lead-box, .st .chip, .st .btn, .row-below), .row-openable :is(.today-problem, .today-st .chip) { position: relative; z-index: 1; }
+.row:has(.row-open) :is(.row-lead-box input, .st .btn, .row-below .btn), .row-openable :is(.today-problem, button:not(.row-open)) { position: relative; z-index: 1; }
 @media (forced-colors: active) {
   .row-open:focus-visible::after { outline-color: Highlight; }
 }
@@ -227,7 +228,7 @@ button.row-open:not(.btn) { padding: 0; border: 0; background: none; color: inhe
 /* Page parts shared by the sections on the new components. */
 .page { display: flex; flex: 1; flex-direction: column; }
 .page h1 { margin: 0; }
-.page[tabindex="-1"]:focus { outline: none; }
+.page[tabindex="-1"]:focus, .sheet[tabindex="-1"]:focus { outline: none; }
 .head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 /* A section heading over its groups; 32px between sections. */
 .page .group-title { margin: 32px 0 12px; font-size: 17px; line-height: 22px; letter-spacing: -0.015em; }

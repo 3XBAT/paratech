@@ -337,9 +337,23 @@ export function statusParts(queue: string, nearest: string): string[] {
   return [queue, nearest].filter((p) => p !== "");
 }
 
-/** The recordings of the pair rows of the day: those lessons are opened by their row, so «Итоги дня» does not repeat them. */
-export function pairRecordings(lessons: readonly Pick<TodayLesson, "post">[]): ReadonlySet<string> {
-  return new Set(lessons.flatMap((l) => (l.post === null ? [] : [l.post.recordingId])));
+/**
+ * The recordings the pair rows of the day open (lessonOpen): those lessons are opened by their row, so «Итоги дня» does not
+ * repeat them. A row opens the recording of its post or, without a post, the newest saved one, so both are counted.
+ */
+export function pairRecordings(
+  lessons: readonly Pick<TodayLesson, "id" | "start" | "end" | "post">[],
+  recordings: readonly RecordingItem[] = [],
+  now: Date = new Date(),
+): ReadonlySet<string> {
+  const ids: string[] = [];
+  for (const l of lessons) {
+    const open = lessonOpen(l, recordings, now);
+    if (open.kind === "open") {
+      ids.push(open.recordingId);
+    }
+  }
+  return new Set(ids);
 }
 
 /**
@@ -352,10 +366,12 @@ export function pairRecordings(lessons: readonly Pick<TodayLesson, "post">[]): R
 export function summaryRows(
   posts: readonly TodayPost[],
   done: readonly TodayDone[],
-  lessons: readonly Pick<TodayLesson, "post">[] = [],
+  lessons: readonly Pick<TodayLesson, "id" | "start" | "end" | "post">[] = [],
   asks: (p: TodayPost) => boolean = () => false,
+  recordings: readonly RecordingItem[] = [],
+  now: Date = new Date(),
 ): { posts: readonly TodayPost[]; done: TodayDone[]; count: number; onDay: ReadonlySet<string> } {
-  const onDay = pairRecordings(lessons);
+  const onDay = pairRecordings(lessons, recordings, now);
   const shown = posts.filter((p) => !onDay.has(p.recordingId) || asks(p));
   const told = new Set(posts.map((p) => p.recordingId));
   const rest = done.filter((d) => !told.has(d.recordingId) && !onDay.has(d.recordingId));
@@ -413,9 +429,9 @@ export function postLine(p: TodayPost, now?: Date, onDay: ReadonlySet<string> = 
 }
 
 /**
- * What a pair row of the day does (TASK-352): the whole row opens the lesson of its recording, or, before and during a
- * pair that has no recording, offers «Записать»; a finished pair without a recording and a recording that is still
- * being made have nothing to open (the chip of the row says where it stands).
+ * What a pair row of the day does (TASK-352): the whole row opens the lesson of its recording, or, from ten minutes before
+ * a pair until its end, when it has no recording, offers «Записать»; an earlier or a finished pair without a recording
+ * and a recording that is still being made have nothing to open (the chip of the row says where it stands).
  */
 export type LessonOpen = { kind: "open"; recordingId: string } | { kind: "record" } | { kind: "none" };
 
@@ -430,6 +446,18 @@ export function pairIsOver(l: Pick<TodayLesson, "start" | "end">, now: Date): bo
   }
   const start = parseMoment(l.start);
   return start !== null && start.getTime() + pairMinutes * 60_000 <= now.getTime();
+}
+
+/** «Записать» is offered from this long before the start (the student is already waiting for the pair). */
+export const recordLeadMinutes = 10;
+
+/**
+ * «Записать» is due: from `recordLeadMinutes` before the start until the end. Earlier pairs are plain rows (their time
+ * is already in the row). An unreadable start is no window.
+ */
+export function pairRecordable(l: Pick<TodayLesson, "start" | "end">, now: Date): boolean {
+  const start = parseMoment(l.start);
+  return start !== null && now.getTime() >= start.getTime() - recordLeadMinutes * 60_000 && !pairIsOver(l, now);
 }
 
 /**
@@ -460,7 +488,7 @@ export function lessonOpen(
   }
   // A recording that failed is no recording: the pair can be recorded again while it lasts.
   const none = mine.every((r) => r.stage === "failed");
-  return recordingsKnown && none && !pairIsOver(l, now) ? { kind: "record" } : { kind: "none" };
+  return recordingsKnown && none && pairRecordable(l, now) ? { kind: "record" } : { kind: "none" };
 }
 
 export interface LessonLine {

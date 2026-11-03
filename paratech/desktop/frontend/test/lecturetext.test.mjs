@@ -264,15 +264,15 @@ test("the row's links: the lecture text first once ready, the transcript then as
   assert.equal(rowSummaryOffer({ stage: "failed", step: "lectureText", errorCode: "lectureTextFailed" }), "main");
   assert.ok(rowOffersTranscript({ stage: "lectureText", errorCode: "" }));
 
-  // TASK-096: one main button; a ready summary leads, the lecture text leads only without it. TASK-352: the main
-  // button is «Открыть» (the lesson screen, on the tab the key names); the menu keeps the other tabs by name.
+  // TASK-096: one main button. TASK-352: it is «Открыть» (the lesson screen on its own opening tab, no tab named); the
+  // menu keeps every named tab: the lecture text, the summary, the transcript.
   const offers = { texts: true, redo: false };
   const ready = rowActions(row({ lectureTextReady: true }), offers);
-  assert.deepEqual([ready.main.key, ready.main.label, ready.menu.map((i) => i.label)], ["summary", "Открыть", ["Открыть текст лекции", "Открыть расшифровку"]]);
+  assert.deepEqual([ready.main.key, ready.main.label, ready.menu.map((i) => i.label)], ["lesson", "Открыть", ["Открыть текст лекции", "Открыть конспект", "Открыть расшифровку"]]);
   const running = rowActions(row({ stage: "summarizing", lectureTextReady: true }), offers);
-  assert.deepEqual([running.main.key, running.main.label], ["lectureText", "Открыть"]);
+  assert.deepEqual([running.main.key, running.main.label], ["lesson", "Открыть"]);
   const before = rowActions(row(), offers);
-  assert.deepEqual([before.main.key, before.main.label, before.menu.map((i) => i.label)], ["summary", "Открыть", ["Открыть расшифровку"]]);
+  assert.deepEqual([before.main.key, before.main.label, before.menu.map((i) => i.label)], ["lesson", "Открыть", ["Открыть конспект", "Открыть расшифровку"]]);
 
   const noop = () => undefined;
   const html = renderToStaticMarkup(

@@ -379,7 +379,7 @@ export function recordingRowView(r: RecordingItem, now: number): RecordingRowVie
 }
 
 /** What a row button or «⋯» item does; runNow and open take the job or the page from the core's action. */
-export type RowItemKey = "stop" | "runNow" | "open" | "summary" | "lectureText" | "transcript" | "redo";
+export type RowItemKey = "stop" | "runNow" | "open" | "lesson" | "summary" | "lectureText" | "transcript" | "redo";
 
 export interface RowItem {
   key: RowItemKey;
@@ -388,7 +388,7 @@ export interface RowItem {
 
 export const rowItemLabels = {
   stop: "Остановить",
-  /** The main button of a row with texts (TASK-352): the lesson screen, on the tab the first of the texts below names. */
+  /** The main button of a row with texts (TASK-352): the lesson screen on its own opening tab (no tab is named). */
   open: "Открыть",
   summary: "Открыть конспект",
   lectureText: "Открыть текст лекции",
@@ -410,7 +410,10 @@ export interface RowActions {
   menu: RowItem[];
 }
 
-/** The tab of the lesson screen a text item opens (TASK-352); null for the items that open no text. */
+/**
+ * The tab of the lesson screen a named text item forces (TASK-352); null for the items that name none: «lesson» (the main
+ * «Открыть») lets the screen choose its opening tab, as every other entry point of the pair does.
+ */
 export function rowItemTab(key: RowItemKey): LessonTab | null {
   switch (key) {
     case "summary":
@@ -427,8 +430,8 @@ export function rowItemTab(key: RowItemKey): LessonTab | null {
 /**
  * The actions of a row (TASK-096). The main button is the first of: Stop, «Запустить сейчас», the texts, the core's fix
  * link (models, connections, sound check) only when no text is offered. The texts are one lesson screen (TASK-352): the
- * main one is «Открыть» on the tab of the first of a ready summary, a ready lecture text, the transcript; the other
- * texts stay in «⋯» as the choice of another tab. The rest goes to «⋯».
+ * main one is «Открыть», with no tab named (the screen opens its own: «Мой конспект» with parts, else the summary, ...);
+ * «⋯» keeps every named text as the choice of that tab. The rest goes to «⋯».
  */
 export function rowActions(
   r: Pick<RecordingItem, "stage" | "step" | "errorCode" | "lectureTextReady" | "stoppable" | "action" | "actionJobId" | "retryWork" | "canRedoSummary">,
@@ -445,10 +448,11 @@ export function rowActions(
   const transcript = links.transcript !== null ? item("transcript", rowItemLabels.transcript) : null;
   const open = core?.kind === "open" ? item("open", core.label) : null;
   const redo = offers.redo && r.canRedoSummary ? item("redo", rowItemLabels.redo) : null;
-  const text = (summary === "main" ? sum : null) ?? lecture ?? transcript;
-  const main = stop ?? runNow ?? text ?? open;
+  const hasText = lecture !== null || sum !== null || transcript !== null;
+  const lesson = hasText ? item("lesson", rowItemLabels.open) : null;
+  const main = stop ?? runNow ?? lesson ?? open;
   const menu = [stop, runNow, lecture, sum, transcript, open, redo].filter((i): i is RowItem => i !== null && i !== main);
-  return { main: main !== null && main === text ? { key: main.key, label: rowItemLabels.open } : main, menu };
+  return { main, menu };
 }
 
 /** The links of a row to the texts of the recording; the row uses only whether each exists (TASK-096). */
@@ -487,6 +491,23 @@ export function rowLessonTab(r: Pick<RecordingItem, "stage" | "step" | "errorCod
     return "summary";
   }
   return links.transcript === null ? null : "transcript";
+}
+
+/**
+ * The «Открыть пару» links of an assignment (TASK-352): one per recording of its lesson that offers a text, in the order
+ * of the list. The link names no tab (the lesson screen opens its own); rowLessonTab only decides that there is
+ * something to open.
+ */
+export function pairLinks(
+  recordings: readonly Pick<RecordingItem, "id" | "lessonId" | "startedAt" | "stage" | "step" | "errorCode" | "lectureTextReady">[],
+  lessonId: string,
+): { id: string; startedAt: string }[] {
+  if (lessonId === "") {
+    return [];
+  }
+  return recordings
+    .filter((r) => r.lessonId === lessonId && rowLessonTab(r) !== null)
+    .map((r) => ({ id: r.id, startedAt: r.startedAt }));
 }
 
 /**
