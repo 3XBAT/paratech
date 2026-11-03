@@ -98,13 +98,13 @@ test("assignment page: «Задания» is the old «Все задания» (
   assert.doesNotMatch(page, /<span className="label"/);
 });
 
-test("tickets: «Предметы / Билеты» opens the subjects as the old button did; the empty state keeps a way on", () => {
+test("tickets: «Предметы / <предмет> / Билеты» (TASK-353; «Предметы» opens the subjects as the old button did); the empty state keeps a way on", () => {
   const page = read("pages/TicketsPage.tsx");
   assert.doesNotMatch(page, /icon="back"/);
   assert.doesNotMatch(page, /<span className="label"/);
-  assert.match(page, /<Breadcrumbs items=\{\[\{ label: texts\.back, onClick: \(\) => props\.onOpen\("subjects"\) \}, \{ label: texts\.title \}\]\} \/>/);
+  assert.match(page, /<Breadcrumbs\s+items=\{ticketsCrumbs\(subject, \{\s*onSubjects: \(\) => \(props\.onOpenSubjects \?\? \(\(\) => props\.onOpen\("subjects"\)\)\)\(\),\s*onSubject: \(id\) => props\.onOpenSubject\?\.\(id\),\s*\}\)\}\s*\/>/);
   // The crumb is shown in every state (loading, failed, no subjects), the head only holds the title.
-  assert.match(page, /<Breadcrumbs[^\n]*\n\s*<div className="head">\s*<h1>\{texts\.title\}<\/h1>\s*<\/div>/);
+  assert.match(page, /\}\)\}\s*\/>\s*<div className="head">\s*<h1>\{texts\.title\}<\/h1>\s*<\/div>/);
   // No subjects: not a back button but the next step.
   // The button only opens «Предметы», so it says so; no over-line, and the title does not repeat «Билеты».
   assert.match(page, /<EmptyState title=\{texts\.noSubjectsTitle\} actions=\{<Button onClick=\{\(\) => props\.onOpen\("subjects"\)\}>\{texts\.goSubjects\}<\/Button>\}/);
@@ -153,9 +153,11 @@ test("the lesson screen is the only page with crumbs for a recording: the old ov
 });
 
 test("subjects: the over-lines are gone, the semester and the aliases are one muted line under the name", () => {
-  const src = read("pages/SubjectsPage.tsx");
-  assert.doesNotMatch(src, /<span className="label"/);
-  assert.match(src, /<h1>\{subject\.name\}<\/h1>\s*\{subjectSubLine\(subject\) !== "" && <p className="small muted sub-line">\{subjectSubLine\(subject\)\}<\/p>\}/);
+  // TASK-353: the head of a subject is SubjectHead (name, the muted lines, «Билеты к экзамену», «⋯»).
+  const src = read("pages/SubjectHead.tsx");
+  assert.doesNotMatch(read("pages/SubjectsPage.tsx"), /<span className="label"/);
+  assert.match(src, /<h1>\{subject\.name\}<\/h1>\s*\{sub !== "" && <p className="small muted sub-line">\{sub\}<\/p>\}/);
+  assert.match(src, /const sub = subjectSubLine\(subject\);/);
   assert.doesNotMatch(src, backButtons);
   const s = { semester: "2026-autumn", semesterLabel: "Осень 2026", aliases: ["матан", "МА"] };
   assert.equal(subjectSubLine(s), "Осень 2026 · Также: матан, МА");

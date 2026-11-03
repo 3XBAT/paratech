@@ -3,7 +3,7 @@ import { type LibraryMaterial, type LibrarySubject, libraryApi } from "../bindin
 import { callByName } from "../bindings/runtime.js";
 import { type TicketSet, ticketsApi, ticketsErrorText } from "../bindings/tickets.js";
 import type { PageId } from "../nav.js";
-import { needsPolling, openResultView, texts, ticketsPollMs } from "../ticketsView.js";
+import { needsPolling, openResultView, startSubjectId, texts, ticketsCrumbs, ticketsPollMs } from "../ticketsView.js";
 import { Breadcrumbs } from "../ui/Breadcrumbs.js";
 import { Button } from "../ui/Button.js";
 import { EmptyState, Field, ResultLine, Select } from "../ui/controls.js";
@@ -12,9 +12,18 @@ import { SetCard } from "./TicketsParts.js";
 /**
  * «Билеты»: the sets of exam tickets of a subject. A list is pasted or read from a file of the subject; the set is
  * only proposed until the student confirms it (the paid run); the core owns every rule and number, the page shows
- * them. Model-made and student text is rendered as text only.
+ * them. Model-made and student text is rendered as text only. It opens from the head of a subject («Билеты к экзамену»,
+ * TASK-353) with that subject chosen (`subjectId`); the crumbs lead back to «Предметы» and to that subject.
  */
-export function TicketsPage(props: { onOpen: (id: PageId) => void }) {
+export function TicketsPage(props: {
+  onOpen: (id: PageId) => void;
+  /** The subject the route names; the first subject when it is "" or gone. */
+  subjectId?: string;
+  /** «Предметы» of the crumbs: the section, as a rail click. */
+  onOpenSubjects?: () => void;
+  /** The subject of the crumbs: its page. */
+  onOpenSubject?: (subjectId: string) => void;
+}) {
   const lib = useMemo(() => libraryApi(callByName), []);
   const api = useMemo(() => ticketsApi(callByName), []);
   const [subjects, setSubjects] = useState<LibrarySubject[] | null>(null);
@@ -29,6 +38,7 @@ export function TicketsPage(props: { onOpen: (id: PageId) => void }) {
   const [openResults, setOpenResults] = useState<Record<string, { kind: "ok" | "fail"; text: string }>>({});
   const [busy, setBusy] = useState("");
   const running = useRef(false); // a double click comes before the re-render that disables the button
+  const wanted = useRef(props.subjectId ?? ""); // the route's subject, taken once when the list arrives
 
   useEffect(() => {
     let active = true;
@@ -38,7 +48,7 @@ export function TicketsPage(props: { onOpen: (id: PageId) => void }) {
           return;
         }
         setSubjects(list);
-        setSubjectId((id) => (id !== "" ? id : (list[0]?.id ?? "")));
+        setSubjectId((id) => (id !== "" ? id : startSubjectId(list, wanted.current)));
       },
       () => active && setLoadError(texts.loadFailed),
     );
@@ -135,7 +145,12 @@ export function TicketsPage(props: { onOpen: (id: PageId) => void }) {
 
   return (
     <section className="page">
-      <Breadcrumbs items={[{ label: texts.back, onClick: () => props.onOpen("subjects") }, { label: texts.title }]} />
+      <Breadcrumbs
+        items={ticketsCrumbs(subject, {
+          onSubjects: () => (props.onOpenSubjects ?? (() => props.onOpen("subjects")))(),
+          onSubject: (id) => props.onOpenSubject?.(id),
+        })}
+      />
       <div className="head">
         <h1>{texts.title}</h1>
       </div>

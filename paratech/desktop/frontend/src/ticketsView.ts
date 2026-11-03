@@ -6,6 +6,7 @@
 import type { Coverage, TicketItem, TicketReport, TicketSet } from "./bindings/tickets.js";
 import { plural } from "./plural.js";
 import { waitingWords } from "./statusWords.js";
+import type { Crumb } from "./ui/Breadcrumbs.js";
 import type { IconName } from "./ui/Icon.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 
@@ -59,6 +60,27 @@ export const texts = {
   costConsent: "Стоимость больше обычной, согласие на неё обязательно.",
   restartNote: "Подбор продолжится с того места, где встал: уже готовые ответы повторно не оплачиваются.",
 } as const;
+
+/**
+ * The subject the page opens on (TASK-353): the one the route names («Билеты к экзамену» of a subject) while it is in the
+ * list, else the first; "" without subjects.
+ */
+export function startSubjectId(list: readonly { id: string }[], wanted: string): string {
+  return list.some((s) => s.id === wanted) ? wanted : (list[0]?.id ?? "");
+}
+
+/**
+ * «Предметы / <предмет> / Билеты»: «Предметы» opens the section, the subject opens its page. While the subject is not
+ * known (loading, failed) the middle level is left out, so a crumb never names the wrong subject.
+ */
+export function ticketsCrumbs(
+  subject: { id: string; name: string } | null,
+  nav: { onSubjects(): void; onSubject(id: string): void },
+): Crumb[] {
+  const root: Crumb = { label: texts.back, onClick: nav.onSubjects };
+  const here: Crumb = { label: texts.title };
+  return subject === null ? [root, here] : [root, { label: subject.name, onClick: () => nav.onSubject(subject.id) }, here];
+}
 
 /** Money for people: micro-USD to dollars with cents, "$2,70"; a positive amount is never shown as zero. */
 export function usd(microUsd: number): string {

@@ -326,9 +326,9 @@ test("timestamps play from their second; save results say what happened", () => 
 test("the transcript is the tab of the lesson over the current section and goes back to it", () => {
   // TASK-352: the transcript overlay route is replaced by the lesson route with the tab «Расшифровка».
   const r = routeToLesson(routeToPage("homework"), "recording:r1", "transcript");
-  assert.deepEqual(r, { page: "homework", assignment: "", subject: "", lesson: "recording:r1", tab: "transcript" });
-  assert.deepEqual(closeLesson(r), { page: "homework", assignment: "", subject: "", lesson: "", tab: "" });
-  assert.deepEqual(routeToPage("settings"), { page: "settings", assignment: "", subject: "", lesson: "", tab: "" });
+  assert.deepEqual(r, { page: "homework", assignment: "", subject: "", lesson: "recording:r1", tab: "transcript", subjectTab: "" });
+  assert.deepEqual(closeLesson(r), { page: "homework", assignment: "", subject: "", lesson: "", tab: "", subjectTab: "" });
+  assert.deepEqual(routeToPage("settings"), { page: "settings", assignment: "", subject: "", lesson: "", tab: "", subjectTab: "" });
   assert.equal("transcript" in initialRoute, false);
 });
 

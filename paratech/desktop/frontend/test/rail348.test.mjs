@@ -89,7 +89,7 @@ test("a rail click on «Записи» while a lesson is open over it returns to
 });
 
 test("the start panel request is not part of the route", () => {
-  assert.deepEqual(Object.keys(routeToPage("recordings")).sort(), ["assignment", "lesson", "page", "subject", "tab"]);
+  assert.deepEqual(Object.keys(routeToPage("recordings")).sort(), ["assignment", "lesson", "page", "subject", "subjectTab", "tab"]);
   assert.doesNotMatch(src("nav.ts"), /startPanel|openStart/);
   assert.doesNotMatch(src("navHistory.ts"), /startPanel|openStart/);
 });

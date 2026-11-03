@@ -132,13 +132,19 @@ export interface Route {
   subject: string;
   lesson: string;
   tab: string;
+  /**
+   * The tab of the subject page of «Предметы» ("pairs" | "files" | "tasks", TASK-353; "" = not chosen yet, the page
+   * decides once). Like `tab`, switching it is not a step of the history. On the page "tickets" `subject` is the subject
+   * whose «Билеты к экзамену» are open.
+   */
+  subjectTab: string;
 }
 
-export const initialRoute: Route = { page: defaultPage, assignment: "", subject: "", lesson: "", tab: "" };
+export const initialRoute: Route = { page: defaultPage, assignment: "", subject: "", lesson: "", tab: "", subjectTab: "" };
 
 /** A rail click: the page, with the lesson closed. */
 export function routeToPage(id: PageId): Route {
-  return { page: id, assignment: "", subject: "", lesson: "", tab: "" };
+  return { page: id, assignment: "", subject: "", lesson: "", tab: "", subjectTab: "" };
 }
 
 /** Opens a subject (or «Входящие») in «Предметы»; "" is no choice. An entry of its own in the history. */
@@ -153,7 +159,17 @@ export function routeToOpenedAssignment(_r: Route, assignmentId: string): Route 
 
 /** Opens an assignment in «Задания» (from the «Задания» tab of a lesson, an agent card or a deadline row). */
 export function routeToAssignment(assignmentId: string): Route {
-  return { page: "homework", assignment: assignmentId, subject: "", lesson: "", tab: "" };
+  return { ...routeToPage("homework"), assignment: assignmentId };
+}
+
+/** «Билеты к экзамену» of a subject: the page «Билеты» with the subject chosen. An entry of its own in the history. */
+export function routeToTickets(_r: Route, subjectId: string): Route {
+  return { ...routeToPage("tickets"), subject: subjectId };
+}
+
+/** Another tab of the subject page. Not a new place: the history replaces the tab of the current entry. */
+export function routeToSubjectTab(r: Route, tab: string): Route {
+  return r.page === "subjects" && r.subjectTab !== tab ? { ...r, subjectTab: tab } : r;
 }
 
 /**

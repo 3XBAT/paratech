@@ -33,7 +33,6 @@ import { pairLinks, rowActions, rowItemTab, rowLessonTab } from "../.test-build/
 import { lessonOpen, lessonLine, pairIsOver, pairRecordable, pairRecordings, postLine, recordLeadMinutes, summaryRows, texts } from "../.test-build/todayView.js";
 import { LessonsSection, SummarySection } from "../.test-build/pages/TodayParts.js";
 import { LessonGone } from "../.test-build/pages/LessonGone.js";
-import { OverviewSections } from "../.test-build/pages/SubjectsParts.js";
 import { openPairTexts } from "../.test-build/pages/TranscriptLinks.js";
 
 const src = (rel) => readFileSync(new URL(`../src/${rel}`, import.meta.url), "utf8");
@@ -65,7 +64,7 @@ test("the route of a lesson from any page: it opens over that page with the tab,
   for (const page of ["today", "recordings", "subjects", "homework", "knowledge"]) {
     const o = recordingLessonOpening("r1", "transcript", 7);
     const r = routeToLesson(routeToPage(page), o.key, openingRouteTab(o.focus, o.materialId));
-    assert.deepEqual(r, { page, assignment: "", subject: "", lesson: "recording:r1", tab: "transcript" });
+    assert.deepEqual(r, { page, assignment: "", subject: "", lesson: "recording:r1", tab: "transcript", subjectTab: "" });
     assert.deepEqual(closeLesson(r), routeToPage(page), `back to ${page}`);
   }
   const under = routeToSubject(routeToPage("subjects"), "s1");
@@ -308,31 +307,16 @@ test("the tab a recording's lesson link opens: the lecture text, else the summar
 
 // ---- a subject: the rows of «Пары» ----
 
-const overview = {
-  subjectId: "s1", name: "Матанализ", openedAt: "", deadlines: [], schedule: [], newMaterials: [],
-  lessons: [
-    { recordingId: "r1", title: "Пределы", kind: "lecture", startedAt: at(21, 10, 30), durationSeconds: 2700, status: "summaryReady", summaryNew: true },
-    { recordingId: "r2", title: "<b>Ряды</b>", kind: "lecture", startedAt: at(14, 10, 30), durationSeconds: 0, status: "recorded", summaryNew: false },
-  ],
-};
-
-test("the lessons of a subject are rows that open the lesson, with the old chips inside; they stay plain without a handler", () => {
-  const out = html(h(OverviewSections, { overview, onOpenLesson: noop }));
-  const buttons = out.match(/<button[^>]*drow-open[^>]*>/g) ?? [];
-  assert.equal(buttons.length, 2, "one whole-row button per lesson");
-  assert.match(out, /<div class="drow-item" role="listitem"><button type="button" class="lrow drow drow-open" title="Открыть пару">/);
-  assert.match(out, /Пределы/);
-  assert.match(out, /Конспект готов/);
-  assert.match(out, /новое/);
-  // Spans only inside a button; the title is text.
-  assert.doesNotMatch(out, /<button(?:(?!<\/button>)[^])*<(p|div)[ >]/);
-  assert.match(out, /&lt;b&gt;Ряды&lt;\/b&gt;/);
-  const plain = html(h(OverviewSections, { overview }));
-  assert.doesNotMatch(plain, /<button/);
-  assert.match(plain, /Пределы/);
-  // The window passes the opener down to the page.
-  assert.match(src("pages/SubjectsPage.tsx"), /<OverviewSections overview=\{overview\} onOpenAssignment=\{props\.onOpenAssignment\} onOpenLesson=\{props\.onOpenLesson\} \/>/);
-  assert.match(src("App.tsx"), /onOpenLesson=\{props\.onOpenRecording\}/);
+// TASK-353: the rows of the overview's «Пары» (10 latest recordings, with chips) went; the lessons of a subject are the
+// tab «Пары», read from the knowledge base, and a row opens the lesson screen through the window (rendered and wired in
+// subjectTabs353.test.mjs).
+test("the lessons of a subject open the lesson screen from the tab «Пары»; the overview's own rows and their opener are gone", () => {
+  const tab = src("pages/SubjectPairsTab.tsx");
+  assert.match(tab, /<LessonList lessons=\{data\.lessons\} onOpen=\{\(l\) => open\(l\)\} \/>/);
+  assert.match(src("pages/SubjectsPage.tsx"), /onOpenLesson=\{\(lesson, opening\) => props\.onOpenKnowledgeLesson\?\.\(lesson, opening\)\}/);
+  assert.match(src("App.tsx"), /onOpenKnowledgeLesson=\{props\.onOpenLesson\}/);
+  assert.doesNotMatch(src("App.tsx"), /onOpenRecording|openRecording\b/);
+  assert.doesNotMatch(src("pages/SubjectsParts.tsx"), /OverviewSections/);
 });
 
 // ---- an assignment: the links of its lesson ----

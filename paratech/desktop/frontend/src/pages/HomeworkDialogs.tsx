@@ -208,11 +208,13 @@ export function AddAssignmentDialog(props: {
   library: Pick<LibraryApi, "subjects">;
   /** Subjects known up front (tests); the dialog loads them itself otherwise. */
   initialSubjects?: readonly LibrarySubject[];
+  /** The subject the form starts with (the page of a subject, TASK-353); none by default. */
+  initialSubjectId?: string;
   onCreated: (a: AssignmentItem) => void;
   onClose: () => void;
 }) {
   const [session] = useState(() => addSession(() => crypto.randomUUID()));
-  const [form, setForm] = useState<AddForm>(emptyAddForm);
+  const [form, setForm] = useState<AddForm>(() => ({ ...emptyAddForm, subjectId: props.initialSubjectId ?? emptyAddForm.subjectId }));
   const [subjects, setSubjects] = useState<readonly LibrarySubject[]>(props.initialSubjects ?? []);
   const [subjectsFailed, setSubjectsFailed] = useState(false);
   const [busy, setBusy] = useState(false);

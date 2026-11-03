@@ -10,6 +10,8 @@ import {
   routeToOpenedAssignment,
   routeToPage,
   routeToSubject,
+  routeToSubjectTab,
+  routeToTickets,
 } from "./nav";
 import { AgentPanel } from "./agent/AgentPanel";
 import { mentionOpening } from "./agentMentions";
@@ -45,6 +47,7 @@ import { RecordingsPage } from "./pages/RecordingsPage";
 import { TodayPage } from "./pages/TodayPage";
 import { needsRemount } from "./navHistory";
 import { keepAssignmentEdit, type RecipientNav, RecipientNavContext } from "./recipientNav";
+import type { SubjectTab } from "./subjectTabsView";
 import { keepTeacherFocus, type TeacherFocus } from "./teachersView";
 import { useNavHistory } from "./useNavHistory";
 import { IconSprite } from "./ui/Icon";
@@ -62,6 +65,11 @@ function PageView(props: {
   /** Shows a card of «Задания» or a subject of «Предметы» ("" the list): an entry of the history. */
   onSelectAssignment: (id: string) => void;
   onSelectSubject: (id: string) => void;
+  /** The tab of the open subject (route.subjectTab, TASK-353) and its change; «Билеты к экзамену» and the crumbs of «Билеты». */
+  subjectTab: string;
+  onSubjectTab: (tab: SubjectTab) => void;
+  onOpenTickets: (subjectId: string) => void;
+  onOpenSubjects: () => void;
   /** «Указать почту» of a refused send: the form of a teacher to open on the subject page, taken once. */
   teacherFocus: TeacherFocus | null;
   onTeacherFocusDone: () => void;
@@ -81,9 +89,7 @@ function PageView(props: {
   onSourceJumpDone: () => void;
   /** A lesson of «База знаний» opens as a screen of its own over the page (route.lesson, TASK-351). */
   onOpenLesson: (lesson: KnowledgeLesson, opening: LessonOpeningRequest) => void;
-  /** A recorded lesson of a subject's «Пары» opens by its recording (TASK-352). */
-  onOpenRecording: (recordingId: string) => void;
-  /** Count the lesson screens left and the corrections saved there: «База знаний» reads and searches again. */
+  /** Count the lesson screens left and the corrections saved there: «База знаний» and the tab «Пары» read and search again. */
   lessonsSeen: number;
   lessonsEdited: number;
 }) {
@@ -108,7 +114,12 @@ function PageView(props: {
           subjectId={props.subject}
           onSelect={props.onSelectSubject}
           onOpenAssignment={props.onOpenAssignment}
-          onOpenLesson={props.onOpenRecording}
+          subjectTab={props.subjectTab}
+          onSubjectTab={props.onSubjectTab}
+          onOpenTickets={props.onOpenTickets}
+          onOpenKnowledgeLesson={props.onOpenLesson}
+          lessonsSeen={props.lessonsSeen}
+          lessonsEdited={props.lessonsEdited}
           teacherFocus={props.teacherFocus}
           onTeacherFocusDone={props.onTeacherFocusDone}
           openReview={props.scheduleReview}
@@ -129,7 +140,7 @@ function PageView(props: {
     case "knowledge":
       return <KnowledgeBasePage visit={props.visit} onOpenLesson={props.onOpenLesson} lessonsSeen={props.lessonsSeen} lessonsEdited={props.lessonsEdited} jump={props.sourceJump} onJumpDone={props.onSourceJumpDone} />;
     case "tickets":
-      return <TicketsPage onOpen={props.onOpen} />;
+      return <TicketsPage onOpen={props.onOpen} subjectId={props.subject} onOpenSubjects={props.onOpenSubjects} onOpenSubject={props.onSelectSubject} />;
     case "schedule":
       return <SchedulePage onOpen={props.onOpen} onReview={props.onOpenScheduleReview} />;
     case "connections":
@@ -163,6 +174,9 @@ export function App() {
   // A subject or a card opened inside its page is a route too, so «Назад» finds the list again (TASK-202).
   const selectSubject = useCallback((id: string) => setRoute((r) => routeToSubject(r, id)), []);
   const selectAssignment = useCallback((id: string) => setRoute((r) => routeToOpenedAssignment(r, id)), []);
+  // The tab of a subject (TASK-353) replaces the tab of the current history entry; «Билеты к экзамену» is a place of its own.
+  const selectSubjectTab = useCallback((tab: SubjectTab) => setRoute((r) => routeToSubjectTab(r, tab)), []);
+  const openTickets = useCallback((subjectId: string) => setRoute((r) => routeToTickets(r, subjectId)), []);
   // «Указать почту» (TASK-238): opens the subject and asks its page for the form of one teacher. The request is state, not
   // part of the route: it is taken once, so «Назад» and a later visit never reopen the form, and the window drops it
   // as soon as the route points elsewhere.
@@ -241,7 +255,6 @@ export function App() {
     },
     [openLessonKey],
   );
-  const openRecording = useCallback((recordingId: string) => openRecordingLesson(recordingId), [openRecordingLesson]);
   // A place of an answer's source (TASK-296): a recording's place opens its lesson at once; a note or a pair is found by
   // its ids first, which «База знаний» does (it opens afresh and takes the jump once), then the lesson opens over it.
   const [sourceJump, setSourceJump] = useState<CitationOpening | undefined>(undefined);
@@ -367,6 +380,10 @@ export function App() {
         onOpenAssignment={openAssignment}
         onSelectAssignment={selectAssignment}
         onSelectSubject={selectSubject}
+        subjectTab={route.subjectTab}
+        onSubjectTab={selectSubjectTab}
+        onOpenTickets={openTickets}
+        onOpenSubjects={lessonNav.onOpenSubjects}
         teacherFocus={teacherFocus}
         onTeacherFocusDone={teacherFocusDone}
         scheduleReview={scheduleReview}
@@ -380,7 +397,6 @@ export function App() {
         sourceJump={sourceJump}
         onSourceJumpDone={sourceJumpDone}
         onOpenLesson={openLesson}
-        onOpenRecording={openRecording}
         lessonsSeen={lessonsSeen}
         lessonsEdited={lessonsEdited}
       />
