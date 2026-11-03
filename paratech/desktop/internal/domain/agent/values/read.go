@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 // Results of the read tools (ADR-0022): built here from agent-owned rows of IDs, dates, enums and counters, which the
 // Driver fills from the views of other contexts. No row has a free-text field except a subject name checked as a
-// Name, so titles, transcripts and model output never reach the planner.
+// Name and the student's own call link of a subject checked as one link (TASK-364), so titles, transcripts and model
+// output never reach the planner.
 
 // MaxReadItems bounds the rows of one read result; more are cut and the result says truncated.
 const MaxReadItems = 50
@@ -95,6 +97,9 @@ type SubjectRow struct {
 	ID       Ref
 	Name     string
 	Semester string // code "<year>-autumn|spring"; anything else is left out
+	// CallLink is the link to the online class the student typed and the library checked (subject.ParseCallLink,
+	// TASK-364); "" none. It is shown only as one http(s) token (see callLinkToken), else left out.
+	CallLink string
 }
 
 // LessonRow is one lesson of find_lessons: a recorded lesson, or a lesson of the schedule not recorded (no Recording).
@@ -225,15 +230,18 @@ func SearchSubjectOf(args Args, scope Scope) Ref {
 
 // --- results -----------------------------------------------------------------------------------------
 
-// SubjectsResult is the result of list_subjects and the IDs it shows.
+// SubjectsResult is the result of list_subjects and the IDs it shows. The call links are dropped from every row when
+// the rows that fit would not fit with them: the subjects matter more than their links.
 func SubjectsResult(callID string, rows []SubjectRow) (ToolResult, []Ref, error) {
 	type item struct {
 		ID       string `json:"id"`
 		Name     string `json:"name,omitempty"`
 		Semester string `json:"semester,omitempty"`
+		CallLink string `json:"call_link,omitempty"`
 	}
 	items := make([]item, 0, len(rows))
 	refs := make([][]Ref, 0, len(rows)) // per row
+	links := false
 	for _, r := range rows {
 		if err := wantRef(r.ID, KindSubject, true); err != nil {
 			return ToolResult{}, nil, err
@@ -245,10 +253,40 @@ func SubjectsResult(callID string, rows []SubjectRow) (ToolResult, []Ref, error)
 		if validSemester(r.Semester) {
 			it.Semester = r.Semester
 		}
+		if callLinkToken(r.CallLink) {
+			it.CallLink, links = r.CallLink, true
+		}
 		items = append(items, it)
 		refs = append(refs, []Ref{r.ID})
 	}
+	if links {
+		n := min(len(items), MaxReadItems)
+		body := map[string]any{"subjects": items[:n], "count": len(items), "truncated": n < len(items)}
+		if b, err := json.Marshal(body); err != nil || len(b) > MaxResultBytes {
+			for i := range items {
+				items[i].CallLink = ""
+			}
+		}
+	}
 	return listResult(callID, "subjects", items, refs)
+}
+
+// maxCallLinkBytes bounds a call link shown to the planner, as the library bounds it.
+const maxCallLinkBytes = 2048
+
+// callLinkToken is a defence behind the library's full rule (ADR-0032), which this context cannot import (ARCH-11): a
+// single http(s) token of printable ASCII without spaces, quotes or markup characters, so the field can carry nothing
+// but a link.
+func callLinkToken(s string) bool {
+	if len(s) > maxCallLinkBytes || (!strings.HasPrefix(s, "https://") && !strings.HasPrefix(s, "http://")) {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x21 || c > 0x7e || strings.IndexByte("\"'<>\\^{|}`#", c) >= 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // LessonsResult is the result of find_lessons and the IDs it shows.
