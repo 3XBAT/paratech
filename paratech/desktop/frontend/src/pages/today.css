@@ -19,6 +19,12 @@
 .today .today-chips > .btn { max-width: 100%; height: auto; min-height: 24px; padding-block: 4px; white-space: normal; text-align: left; overflow-wrap: anywhere; }
 .today-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; margin-top: 24px; }
 .today-cols > div > .today-sec:first-child { margin-top: 0; }
+/* DOM order is the one-column order: lessons, decisions, «Итоги дня» last. In two columns the summary goes under the lessons. */
+.today-cols > .today-sec { margin-top: 0; }
+.today-lessons { grid-area: lessons; }
+.today-decide { grid-area: decide; }
+.today-summary { grid-area: summary; }
+.today-cols { grid-template-areas: "lessons" "decide" "summary"; }
 .today-back { margin-bottom: 8px; }
 /* The read of the day failed: the text and «Повторить» in one line, above the content. */
 .today-err { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
@@ -33,7 +39,7 @@
 .today-lesson.live { background: linear-gradient(90deg, var(--rec-b), transparent 45%); }
 .today-wait { grid-template-columns: auto minmax(0, 1fr) auto; }
 .today-wait > .i { color: var(--muted); }
-.today-dl { grid-template-columns: minmax(0, 1fr) auto; width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.today-dl { grid-template-columns: minmax(0, 1fr); width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .today-dl:hover { background: var(--fill); }
 /* A burning row with its check (TASK-316): the check beside the open button, the separator on the item itself. */
 .today-dlitem { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; }
@@ -54,6 +60,10 @@
 .today-post { font-weight: 500; }
 .today-meta { overflow-wrap: anywhere; }
 .today-subject { overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* The subject and the deadline chip on one line under the title; the chip never squeezes the title. */
+.today-dlmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 2px; min-width: 0; }
+.today-dlmeta .today-subject { min-width: 0; }
+.today-quiet { margin: 0; }
 .today-st { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
 .today-ac { justify-self: end; }
 
@@ -66,4 +76,7 @@
    The right one is 40% of the page, 24-32rem: ordinary titles take 1-2 lines (TASK-193). */
 @container (min-width: 62rem) {
   .today-cols { grid-template-columns: minmax(28rem, 1fr) minmax(0, clamp(24rem, 40%, 32rem)); }
+  /* The decisions span both left rows; the free height goes to the summary row, so the lessons and the summary stay together. */
+  .today-cols { grid-template-areas: "lessons decide" "summary decide"; grid-template-rows: auto 1fr; row-gap: 0; }
+  .today-cols > .today-sec { margin-top: 24px; }
 }

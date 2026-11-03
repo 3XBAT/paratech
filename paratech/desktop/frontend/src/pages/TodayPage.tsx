@@ -10,7 +10,7 @@ import { requestDraft } from "../agentDraft.js";
 import type { PageId } from "../nav.js";
 import { useOpenSummary } from "../openSummary.js";
 import { queueLine } from "../recordingRowView.js";
-import { dayTitle, nearestDeadlineText, newestOnly, stagesChanged, stagesKey, texts } from "../todayView.js";
+import { dayTitle, loadView, nearestDeadlineText, newestOnly, stagesChanged, stagesKey, texts } from "../todayView.js";
 import { Button } from "../ui/Button.js";
 import { Toast } from "../ui/Toast.js";
 import { burningAfterDone } from "../assignmentDoneView.js";
@@ -40,10 +40,13 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
   screenRef.current = screen;
   // A failed read says one fixed thing (LoadError), so only the fact is kept, not the text of the core.
   const [failed, setFailed] = useState(false);
+  // «Повторить» was pressed and the answer has not come: the error line gives way to a small «Загрузка…».
+  const [retrying, setRetrying] = useState(false);
   const [recordings, setRecordings] = useState<RecordingItem[] | null>(null);
   const mounted = useRef(true);
 
   const requests = useRef(newestOnly());
+  const rootRef = useRef<HTMLElement>(null);
 
   const load = useCallback(() => {
     const token = requests.current.next();
@@ -52,11 +55,25 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
         if (mounted.current && requests.current.isNewest(token)) {
           setScreen(s);
           setFailed(false);
+          setRetrying(false);
         }
       },
-      () => mounted.current && requests.current.isNewest(token) && setFailed(true),
+      () => {
+        if (mounted.current && requests.current.isNewest(token)) {
+          setFailed(true);
+          setRetrying(false);
+        }
+      },
     );
   }, [api]);
+
+  // The pressed button leaves with the error line, so the focus goes to the section first and does not fall to the body.
+  const retry = useCallback(() => {
+    rootRef.current?.focus();
+    setFailed(false);
+    setRetrying(true);
+    load();
+  }, [load]);
 
   useEffect(() => {
     mounted.current = true;
@@ -66,7 +83,6 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
   }, []);
 
   // «Выполнено» in «Сроки на неделе» (TASK-316): the row leaves at once, the screen is read again; «Отменить» brings it back.
-  const rootRef = useRef<HTMLElement>(null);
   const focus = useDoneFocus(rootRef);
   const doneRun = useDoneRunner(homework, {
     apply: (res) => {
@@ -134,6 +150,7 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
 
   const queue = queueLine(recordings ?? [], []);
   const nearest = screen === null ? "" : nearestDeadlineText(screen.burning, new Date());
+  const view = loadView(screen !== null, failed, retrying);
 
   // The toast is outside .today: that is a size container, which would make it the containing block of the toast.
   return (
@@ -151,7 +168,13 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
         </div>
       </div>
       <SpeechComponentNotice />
-      {failed && <LoadError onRetry={load} />}
+      {view === "error" && <LoadError onRetry={retry} />}
+      {view === "stale" && <LoadError onRetry={retry} quiet />}
+      {view === "loading" && (
+        <p className="muted small" role="status">
+          {texts.loading}
+        </p>
+      )}
       {adding && (
         <AddAssignmentDialog
           api={homework}
@@ -163,12 +186,12 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
           }}
         />
       )}
-      {screen === null && !failed && <p className="muted small">{texts.loading}</p>}
       {screen !== null && (
         <>
           <AskSection chips={screen.chips} onChip={(text) => requestDraft(text)} />
+          {/* «Итоги дня» is its own grid child: last in one column, under the lessons in two (today.css). */}
           <div className="today-cols">
-            <div>
+            <div className="today-lessons">
               <LessonsSection
                 lessons={screen.lessons}
                 recordings={recordings ?? []}
@@ -176,9 +199,8 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
                 onOpenSummary={openSummary}
                 onOpenAll={() => setAll(true)}
               />
-              <SummarySection posts={screen.posts} done={screen.done} onOpenSummary={openSummary} calendar={calendar} />
             </div>
-            <div>
+            <div className="today-decide">
               <WaitingSection waiting={screen.waiting} onOpenAssignment={props.onOpenAssignment} />
               <BurningSection
                 burning={screen.burning}
@@ -192,6 +214,7 @@ export function TodayPage(props: { onOpen: (id: PageId) => void; onOpenAssignmen
                 }}
               />
             </div>
+            <SummarySection posts={screen.posts} done={screen.done} onOpenSummary={openSummary} calendar={calendar} />
           </div>
           <StatusBar queue={queue} nearest={nearest} />
         </>

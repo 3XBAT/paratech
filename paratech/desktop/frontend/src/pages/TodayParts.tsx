@@ -72,13 +72,20 @@ export function AskSection(props: { chips: readonly TodayChip[]; onChip: (text: 
   );
 }
 
-/** A failed read of the day: the fixed text and the way out in place (the reason is always the same for the student). */
-export function LoadError(props: { onRetry: () => void }) {
+/**
+ * A failed read of the day: the fixed text and the way out in place (the reason is always the same for the student).
+ * `quiet`: a day is already shown (a failed re-read), so it is a muted line, no alert and no red.
+ */
+export function LoadError(props: { onRetry: () => void; quiet?: boolean }) {
   return (
     <div className="today-err">
-      <ResultLine kind="fail" role="alert">
-        {texts.loadFailed}
-      </ResultLine>
+      {props.quiet === true ? (
+        <p className="small muted today-quiet">{texts.refreshFailed}</p>
+      ) : (
+        <ResultLine kind="fail" role="alert">
+          {texts.loadFailed}
+        </ResultLine>
+      )}
       <Button size="sm" onClick={props.onRetry}>
         {texts.retry}
       </Button>
@@ -306,11 +313,13 @@ export function BurningSection(props: {
                 <button type="button" className="today-row today-dl" onClick={() => props.onOpenAssignment(b.assignmentId)}>
                   <div className="today-main">
                     <div className="today-t">{m.title}</div>
-                    {m.subject !== "" && <div className="small muted today-subject">{m.subject}</div>}
+                    <div className="today-dlmeta">
+                      {m.subject !== "" && <div className="small muted today-subject">{m.subject}</div>}
+                      <StatusChip kind={m.overdue ? "fail" : m.urgent ? "run" : "neutral"} icon={m.overdue ? "warn" : m.urgent ? "clock" : null}>
+                        <span className="num">{m.chip}</span>
+                      </StatusChip>
+                    </div>
                   </div>
-                  <StatusChip kind={m.urgent ? "run" : "neutral"} icon={m.urgent ? "clock" : null}>
-                    <span className="num">{m.chip}</span>
-                  </StatusChip>
                 </button>
                 {done?.busyId === b.assignmentId && (
                   <span className="small muted today-dlnote" role="status">
@@ -347,7 +356,7 @@ export function SummarySection(props: {
     return null;
   }
   return (
-    <Section title={texts.summary} count={rows.count}>
+    <Section title={texts.summary} count={rows.count} className="today-summary">
       <div className="card" role="list">
         {rows.posts.map((p) => {
           const m = postLine(p, new Date());

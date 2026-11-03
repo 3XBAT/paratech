@@ -14,8 +14,10 @@ import {
   doneLine,
   dueText,
   homeworkText,
+  isOverdue,
   lessonLine,
   liveStatus,
+  loadView,
   looseProblems,
   nearestDeadlineText,
   newestOnly,
@@ -202,7 +204,7 @@ test("lesson, waiting, deadline, done and post lines", () => {
 
   const d = deadlineLine({ assignmentId: "a1", title: "Реферат", subject: "История", due: at(23, 20, 0), daysLeft: 2, urgent: true }, new Date(2026, 9, 21, 12, 0));
   // TASK-345: the chip carries the weekday and the date itself, the row has no date column.
-  assert.deepEqual([d.chip, d.urgent, "weekday" in d, "date" in d], ["до пт, 23 окт., 20:00", true, false, false]);
+  assert.deepEqual([d.chip, d.urgent, d.overdue, "weekday" in d, "date" in d], ["до пт, 23 окт., 20:00", true, false, false, false]);
 
   const done = doneLine({ recordingId: "r1", lesson: post().lesson, summaryReady: true, homework: 1, at: at(21, 11, 52) });
   assert.equal(done.title, "Конспект · Матанализ");
@@ -251,15 +253,41 @@ test("the «Сроки на неделе» chip is the dueText phrase (TASK-343,
   assert.equal(deadlineLine({ assignmentId: "a", title: "ЛР", subject: "", due: at(21, 20, 0), daysLeft: 0, urgent: true }, noon).chip, "сегодня до 20:00");
 });
 
-test("the nearest deadline of the week is named with its time (TASK-343)", () => {
+test("the nearest deadline of the week is worded as the list (dueText) (TASK-343, TASK-345)", () => {
   const d = (day, hh, mm) => ({ due: at(day, hh, mm) });
   assert.equal(nearestDeadlineText([]), "");
-  assert.equal(nearestDeadlineText([d(23, 20, 0), d(25, 9, 5)]), "Ближайший срок — пт, 23 окт., 20:00");
-  assert.equal(nearestDeadlineText([d(23, 20, 0), d(23, 18, 30)]), "Ближайший срок — пт, 23 окт., 18:30");
+  // Without `now` there is no «сегодня»/«завтра»: the plain «до …» phrase.
+  assert.equal(nearestDeadlineText([d(23, 20, 0), d(25, 9, 5)]), "Ближайший срок — до пт, 23 окт., 20:00");
+  assert.equal(nearestDeadlineText([d(23, 20, 0), d(23, 18, 30)]), "Ближайший срок — до пт, 23 окт., 18:30");
   // With `now` a deadline that has passed is skipped; when all have passed there is no text.
-  const noon = new Date(2026, 9, 23, 19, 0);
-  assert.equal(nearestDeadlineText([d(23, 18, 30), d(23, 20, 0), d(25, 9, 5)], noon), "Ближайший срок — пт, 23 окт., 20:00");
-  assert.equal(nearestDeadlineText([d(23, 18, 30)], noon), "");
+  const evening = new Date(2026, 9, 23, 19, 0);
+  assert.equal(nearestDeadlineText([d(23, 18, 30), d(23, 20, 0), d(25, 9, 5)], evening), "Ближайший срок — сегодня до 20:00");
+  assert.equal(nearestDeadlineText([d(23, 18, 30)], evening), "");
+  const noon = new Date(2026, 9, 21, 12, 0);
+  assert.equal(nearestDeadlineText([d(22, 18, 30)], noon), "Ближайший срок — завтра до 18:30");
+  assert.equal(nearestDeadlineText([d(24, 18, 30)], noon), "Ближайший срок — до сб, 24 окт., 18:30");
+  // The same words as the row chip of the list.
+  assert.equal(nearestDeadlineText([d(21, 20, 0)], noon), `Ближайший срок — ${deadlineChip({ due: at(21, 20, 0), daysLeft: 0 }, noon)}`);
+});
+
+test("an overdue deadline is told apart from «сегодня» (TASK-345)", () => {
+  const noon = new Date(2026, 9, 21, 12, 0);
+  const dl = (day, hh, mm, daysLeft = 0, urgent = true) => ({ assignmentId: "a", title: "ЛР", subject: "", due: at(day, hh, mm), daysLeft, urgent });
+  assert.equal(deadlineLine(dl(21, 20, 0), noon).overdue, false);
+  assert.equal(deadlineLine(dl(21, 9, 0), noon).overdue, true);
+  assert.equal(deadlineLine(dl(20, 9, 0, -1), noon).overdue, true);
+  assert.equal(deadlineLine(dl(21, 12, 0), noon).overdue, true, "the very moment has passed");
+  assert.equal(isOverdue({ due: "", daysLeft: -1 }, noon), true);
+  assert.equal(isOverdue({ due: "", daysLeft: 0 }, noon), false);
+});
+
+test("what the page shows about the read of the day (TASK-345)", () => {
+  assert.equal(loadView(false, false, false), "loading", "the first read");
+  assert.equal(loadView(false, true, false), "error", "failed, no day yet: the red alert");
+  assert.equal(loadView(true, true, false), "stale", "failed re-read of a shown day: the quiet line");
+  assert.equal(loadView(true, false, false), "none");
+  assert.equal(loadView(true, false, true), "loading", "retry in flight over a shown day");
+  assert.equal(loadView(false, false, true), "loading", "retry in flight, no day");
 });
 
 test("the hint chip text goes to the panel through an event", () => {
@@ -341,9 +369,55 @@ test("a load error: the fixed text in an alert and «Повторить»; no «
   assert.ok(!("refresh" in texts));
   const page = readFileSync(new URL("../src/pages/TodayPage.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(page, /texts\.refresh/);
-  assert.match(page, /<SpeechComponentNotice \/>[\s\S]*\{failed && <LoadError onRetry=\{load\} \/>\}/, "the notice sits above the error");
+  assert.match(page, /<SpeechComponentNotice \/>[\s\S]*view === "error" && <LoadError onRetry=\{retry\} \/>/, "the notice sits above the error");
   assert.ok(page.indexOf("<SpeechComponentNotice />") > page.lastIndexOf("if (all) {"), "only in the day, after the all mode returned");
-  assert.match(page, /className="muted small">\{texts\.loading\}/, "loading is a small inline line, not a banner");
+  assert.match(page, /className="muted small"[^>]*>\s*\{texts\.loading\}/, "loading is a small inline line, not a banner");
+});
+
+test("«Повторить» reacts at once: the error line gives way to «Загрузка…», the focus goes to the section (TASK-345)", () => {
+  const page = readFileSync(new URL("../src/pages/TodayPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /const retry = useCallback\(\(\) => \{\s*rootRef\.current\?\.focus\(\);\s*setFailed\(false\);\s*setRetrying\(true\);\s*load\(\);/);
+  assert.ok(page.includes('view === "loading" && ('), "the small inline line also over a shown day");
+  // A repeated failure shows the line again; every answer ends the retry.
+  assert.match(page, /setFailed\(true\);\s*setRetrying\(false\);/);
+  assert.match(page, /setFailed\(false\);\s*setRetrying\(false\);/);
+  // Only the button moves the focus; the reads on entry, on window focus and on a stage change do not.
+  assert.equal((page.match(/rootRef\.current\?\.focus\(\)/g) ?? []).length, 1);
+  assert.match(page, /<LoadError onRetry=\{retry\} quiet \/>/);
+});
+
+test("a failed re-read of a shown day is a quiet line, not a red alert (TASK-345)", () => {
+  const quiet = html(h(LoadError, { onRetry: noop, quiet: true }));
+  assert.match(quiet, /Не удалось обновить день\./);
+  assert.match(quiet, /Повторить/);
+  assert.doesNotMatch(quiet, /role="alert"|s-fail|Не удалось загрузить день/);
+  const loud = html(h(LoadError, { onRetry: noop }));
+  assert.match(loud, /role="alert"[^]*Не удалось загрузить день\./);
+  assert.equal(texts.refreshFailed, "Не удалось обновить день.");
+});
+
+test("«Итоги дня» is last in one column and under the lessons in two (TASK-345)", () => {
+  const page = readFileSync(new URL("../src/pages/TodayPage.tsx", import.meta.url), "utf8");
+  const lessons = page.indexOf("<LessonsSection");
+  const decide = page.indexOf('className="today-decide"');
+  const summary = page.indexOf("<SummarySection");
+  assert.ok(lessons < decide && decide < summary, "DOM order: lessons, decisions, summary");
+  const css = readFileSync(new URL("../src/pages/today.css", import.meta.url), "utf8");
+  assert.match(css, /\.today-cols \{ grid-template-areas: "lessons" "decide" "summary"; \}/);
+  assert.match(css, /grid-template-areas: "lessons decide" "summary decide"; grid-template-rows: auto 1fr;/);
+  assert.match(css, /\.today-summary \{ grid-area: summary; \}/);
+  assert.match(css, /\.today-cols > div > \.today-sec:first-child \{ margin-top: 0; \}/);
+  assert.ok(html(h(SummarySection, { posts: [post()], done: [], onOpenSummary: noop })).includes("today-summary"));
+});
+
+test("a deadline row: the chip sits under the title with the subject, the row is a plain column (TASK-345)", () => {
+  const out = html(h(BurningSection, { now: new Date(2026, 9, 21, 12, 0), burning: [{ assignmentId: "a", title: "Реферат", subject: "История", due: at(23, 20, 0), daysLeft: 2, urgent: false }], onOpenAssignment: noop }));
+  assert.match(out, /today-t">Реферат<\/div><div class="today-dlmeta"><div class="small muted today-subject">История<\/div><span class="chip s-neutral"/);
+  const button = out.match(/<button[^>]*today-dl[^>]*>([^]*?)<\/button>/)[1];
+  assert.ok(button.includes("chip") && button.indexOf("today-main") < button.indexOf("chip"), "the chip is inside the main column");
+  const css = readFileSync(new URL("../src/pages/today.css", import.meta.url), "utf8");
+  assert.match(css, /\.today-dl \{ grid-template-columns: minmax\(0, 1fr\); /);
+  assert.match(css, /\.today-dlmeta \{ display: flex; flex-wrap: wrap;/);
 });
 
 test("the status bar shows the queue and the nearest deadline only, and is absent when both are empty (TASK-345)", () => {
@@ -365,7 +439,12 @@ test("an urgent deadline chip has the clock icon and the word, a plain one has n
   const today = row([21, 20, 0], true);
   assert.match(today, /s-run[^>]*><svg[^]*?<\/svg><span class="chip-text"><span class="num">сегодня до 20:00<\/span>/);
   assert.match(row([22, 18, 30], true), /s-run[^>]*><svg[^]*?<\/svg><span class="chip-text"><span class="num">завтра до 18:30/);
-  assert.match(row([20, 9, 0], true), /s-run[^>]*><svg[^]*?<\/svg><span class="chip-text"><span class="num">просрочено, вт, 20 окт., 09:00/);
+  // TASK-345 review: a passed moment is a failure chip with the warning icon, not the «сегодня» one.
+  const gone = row([20, 9, 0], true);
+  assert.match(gone, /s-fail[^>]*><svg[^]*?<\/svg><span class="chip-text"><span class="num">просрочено, вт, 20 окт., 09:00/);
+  assert.doesNotMatch(gone, /s-run/);
+  assert.match(row([21, 9, 0], false), /s-fail/, "overdue wins over a calm row");
+  assert.doesNotMatch(today, /s-fail/);
   const calm = row([26, 18, 30], false);
   assert.match(calm, /s-neutral[^>]*><span class="chip-text"><span class="num">до пн, 26 окт., 18:30/);
   assert.doesNotMatch(calm, /<svg/);

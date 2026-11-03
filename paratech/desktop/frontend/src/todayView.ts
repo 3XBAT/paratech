@@ -27,6 +27,7 @@ export const texts = {
   summary: "Итоги дня",
   loading: "Загрузка…",
   loadFailed: "Не удалось загрузить день.",
+  refreshFailed: "Не удалось обновить день.",
   retry: "Повторить",
   allRecords: "Записи",
   back: "К сегодняшнему дню",
@@ -182,6 +183,8 @@ export interface DeadlineLine {
   subject: string;
   chip: string;
   urgent: boolean;
+  /** The moment has passed: the chip reads as a failure, not as «сегодня». */
+  overdue: boolean;
 }
 
 /**
@@ -195,13 +198,26 @@ export function deadlineChip(b: Pick<TodayDeadline, "due" | "daysLeft">, now: Da
   return text === "" ? daysLeftText(b.daysLeft) : text;
 }
 
+/** The deadline has passed: by the clock when the moment is readable, else by the day count of the core. */
+export function isOverdue(b: Pick<TodayDeadline, "due" | "daysLeft">, now: Date): boolean {
+  const at = parseMoment(b.due);
+  return at === null ? b.daysLeft < 0 : at.getTime() <= now.getTime();
+}
+
 export function deadlineLine(b: TodayDeadline, now: Date): DeadlineLine {
-  return { key: b.assignmentId, title: titleOf(b.title), subject: b.subject.trim(), chip: deadlineChip(b, now), urgent: b.urgent };
+  return {
+    key: b.assignmentId,
+    title: titleOf(b.title),
+    subject: b.subject.trim(),
+    chip: deadlineChip(b, now),
+    urgent: b.urgent,
+    overdue: isOverdue(b, now),
+  };
 }
 
 /**
- * «Ближайший срок — пт, 23 окт., 20:00» from the deadlines of the week (the earliest one); "" when there is none. With
- * `now` the deadlines that have passed are skipped.
+ * «Ближайший срок — сегодня до 20:00» from the deadlines of the week (the earliest one), worded as the list (dueText); ""
+ * when there is none. With `now` the deadlines that have passed are skipped.
  */
 export function nearestDeadlineText(burning: readonly Pick<TodayDeadline, "due">[], now?: Date): string {
   const dues = burning
@@ -211,7 +227,17 @@ export function nearestDeadlineText(burning: readonly Pick<TodayDeadline, "due">
     return "";
   }
   const first = dues.reduce((a, b) => ((b.at as Date) < (a.at as Date) ? b : a));
-  return `Ближайший срок — ${dayAndTime(first.at as Date)}`;
+  return `Ближайший срок — ${dueText(first.due, now)}`;
+}
+
+/** What the page shows about the read of the day: the first read, a retry in flight, or a failure (with or without a day). */
+export type LoadView = "loading" | "error" | "stale" | "none";
+
+export function loadView(hasDay: boolean, failed: boolean, retrying: boolean): LoadView {
+  if (failed) {
+    return hasDay ? "stale" : "error";
+  }
+  return !hasDay || retrying ? "loading" : "none";
 }
 
 /** The parts of the status bar: the queue and the nearest deadline, the empty ones left out; none, no bar. */
