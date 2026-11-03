@@ -128,6 +128,15 @@ func TestParseCaseSetRejects(t *testing.T) {
 		"result that is not an object": func(s string) string {
 			return strings.Replace(s, `{"answer_question": {"error": "failed"}}`, `{"answer_question": ["failed"]}`, 1)
 		},
+		"error result with an unknown refusal": func(s string) string {
+			return strings.Replace(s, `{"answer_question": {"error": "failed"}}`, `{"answer_question": {"error": "provider_down"}}`, 1)
+		},
+		"error result with another key": func(s string) string {
+			return strings.Replace(s, `{"answer_question": {"error": "failed"}}`, `{"answer_question": {"error": "failed", "why": "x"}}`, 1)
+		},
+		"error result that is no string": func(s string) string {
+			return strings.Replace(s, `{"answer_question": {"error": "failed"}}`, `{"answer_question": {"error": true}}`, 1)
+		},
 		"blank phrase to avoid": func(s string) string {
 			return strings.Replace(s, `"avoid": ["материала нет"`, `"avoid": [" "`, 1)
 		},

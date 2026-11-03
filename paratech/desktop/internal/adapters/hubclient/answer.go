@@ -142,5 +142,11 @@ func answerError(ctx, callCtx context.Context, err error) error {
 		// ticket run must record it instead of waiting as for a lost connection.
 		e.extra = append(e.extra, answer.ErrInvalidAnswer)
 	}
+	if errors.Is(e, ErrIdempotencyConflict) {
+		// The key is derived from the content, so a conflict here only comes from a Hub or desktop upgrade that changed
+		// the request fingerprint (output cap, prompt version). The same key keeps conflicting: a ticket run records one
+		// refused ticket instead of failing the whole job. The text still names the conflict for desktop.log.
+		e.extra = append(e.extra, answer.ErrInvalidAnswer)
+	}
 	return e
 }

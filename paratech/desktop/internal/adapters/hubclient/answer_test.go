@@ -400,19 +400,23 @@ func TestAnswerQuestionKeepsTheModelAnswerDetail(t *testing.T) {
 
 func TestAnswerQuestionErrors(t *testing.T) {
 	tests := []struct {
-		name  string
-		err   error
-		match []error
+		name    string
+		err     error
+		match   []error
+		refused bool
 	}{
 		{"schema refusal", detailErr(connect.CodeUnavailable, &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR}),
-			[]error{ErrProvider, backoff.ErrPermanent, answer.ErrInvalidAnswer}},
+			[]error{ErrProvider, backoff.ErrPermanent, answer.ErrInvalidAnswer}, true},
+		// A conflict after an upgrade changed the fingerprint of the same content key (TASK-366).
+		{"idempotency conflict", detailErr(connect.CodeAlreadyExists, &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_IDEMPOTENCY_CONFLICT}),
+			[]error{ErrIdempotencyConflict, backoff.ErrPermanent, answer.ErrInvalidAnswer}, true},
 		{"quota", detailErr(connect.CodeResourceExhausted, &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_QUOTA_EXCEEDED}),
-			[]error{shared.ErrQuotaExceeded}},
+			[]error{shared.ErrQuotaExceeded}, false},
 		{"provider overloaded", detailErr(connect.CodeUnavailable, &hubv1.ErrorDetail{Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Retryable: true}),
-			[]error{ErrProvider}},
-		{"no Hub", connect.NewError(connect.CodeUnavailable, errors.New("connection refused")), nil},
+			[]error{ErrProvider}, false},
+		{"no Hub", connect.NewError(connect.CodeUnavailable, errors.New("connection refused")), nil, false},
 		{"not served yet", connect.NewError(connect.CodeInvalidArgument, errors.New("operation unavailable")),
-			[]error{ErrRejected, backoff.ErrPermanent}},
+			[]error{ErrRejected, backoff.ErrPermanent}, false},
 	}
 	for _, tt := range tests {
 		f := &fakeHub{answer: func(context.Context, int) (*hubv1.CompleteResponse, error) { return nil, tt.err }}
@@ -426,9 +430,13 @@ func TestAnswerQuestionErrors(t *testing.T) {
 				t.Errorf("%s: %v does not match %v", tt.name, err, m)
 			}
 		}
-		// Only a permanent provider refusal is a refused answer; the rest is «no connection» or a quota.
-		if refused := errors.Is(err, answer.ErrInvalidAnswer); refused != (tt.name == "schema refusal") {
+		// Only a permanent provider refusal or a key conflict is a refused answer; the rest is «no connection» or a quota.
+		if refused := errors.Is(err, answer.ErrInvalidAnswer); refused != tt.refused {
 			t.Errorf("%s: matches ErrInvalidAnswer = %v", tt.name, refused)
+		}
+		// The log tells a conflict from a provider refusal by the text.
+		if conflict := strings.Contains(err.Error(), ErrIdempotencyConflict.Error()); conflict != (tt.name == "idempotency conflict") {
+			t.Errorf("%s: text %q names the conflict = %v", tt.name, err.Error(), conflict)
 		}
 	}
 

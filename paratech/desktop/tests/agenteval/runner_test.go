@@ -5,6 +5,7 @@ package agenteval
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -107,24 +108,24 @@ func (r *liveRun) request(req Request) Outcome {
 			if s := CreatedSubject(c.Tool, c.ArgumentsJSON); s != "" {
 				o.Created = append(o.Created, s)
 			}
-			own, ok := req.Results[c.Tool]
-			result := string(own)
-			if !ok {
-				result, ok = cannedResults[c.Tool]
-			}
+			own, scripted := req.Results[c.Tool]
+			canned, ok := cannedResults[c.Tool]
+			result := values.ToolResult{CallID: c.CallID, ResultJSON: canned}
 			switch {
 			case c.Tool == string(values.ToolAskQuestions) && req.Answer != "" && !answered:
-				if result, err = liveAnswer(c.CallID, c.ArgumentsJSON, req.Answer); err != nil {
+				if result.ResultJSON, err = liveAnswer(c.CallID, c.ArgumentsJSON, req.Answer); err != nil {
 					o.Err = err.Error()
 					return o
 				}
 				answered = true
 			case r.classes[c.Tool] != "R":
-				stop, result = true, `{"ok":true}`
+				stop, result.ResultJSON = true, `{"ok":true}`
+			case scripted:
+				result = ScriptedResult(c.CallID, own)
 			case !ok:
-				result = `{"items":[]}`
+				result.ResultJSON = `{"items":[]}`
 			}
-			results = append(results, values.ToolResult{CallID: c.CallID, ResultJSON: result})
+			results = append(results, result)
 		}
 		if stop {
 			return o
@@ -362,24 +363,25 @@ func TestRunnerOnTheFakeHub(t *testing.T) {
 		t.Fatalf("m03: turns %v", turns)
 	}
 
-	// TASK-366: a case's own result replaces the canned one: a failed answer_question, find_lessons rows with names;
-	// create_subject reports the name it got.
+	// TASK-366: a case's own result replaces the canned one: a failed answer_question goes as the Driver's is_error
+	// refusal, find_lessons rows with names as written; create_subject reports the name it got.
 	hub.Then(testenv.AgentCall{ID: "toolu_30", Tool: "answer_question", Args: `{"question":"Когда ряд сходится абсолютно?"}`}).
 		Then(testenv.AgentCall{ID: "toolu_31", Tool: "reply", Args: `{"text":"Не получилось ответить. Можно попробовать ещё раз."}`})
 	f01 := cs.Requests[slicesIndex(cs.Requests, "f01")]
 	o = r.request(f01)
 	reqs = hub.Requests()
-	if o.Err != "" || fmt.Sprint(o.Tools) != "[answer_question reply]" ||
-		lastResult(reqs[len(reqs)-1].GetTurns()) != string(f01.Results["answer_question"]) {
-		t.Fatalf("f01: outcome = %+v", o)
+	failed := values.RefusalResult("toolu_30", values.RefuseFailed)
+	if res := lastResultOf(reqs[len(reqs)-1].GetTurns()); o.Err != "" || fmt.Sprint(o.Tools) != "[answer_question reply]" ||
+		res.GetCallId() != failed.CallID || res.GetResultJson() != failed.ResultJSON || !res.GetIsError() {
+		t.Fatalf("f01: outcome = %+v, result %v", o, res)
 	}
 	hub.Then(testenv.AgentCall{ID: "toolu_32", Tool: "find_lessons", Args: `{}`}).
 		Then(testenv.AgentCall{ID: "toolu_33", Tool: "create_subject", Args: `{"name":"Теория вероятностей"}`})
 	f02 := cs.Requests[slicesIndex(cs.Requests, "f02")]
 	o2 := r.request(f02)
 	reqs = hub.Requests()
-	if o2.Err != "" || fmt.Sprint(o2.Tools) != "[find_lessons create_subject]" || fmt.Sprint(o2.Created) != "[Теория вероятностей]" ||
-		lastResult(reqs[len(reqs)-1].GetTurns()) != string(f02.Results["find_lessons"]) {
+	if res := lastResultOf(reqs[len(reqs)-1].GetTurns()); o2.Err != "" || fmt.Sprint(o2.Tools) != "[find_lessons create_subject]" ||
+		fmt.Sprint(o2.Created) != "[Теория вероятностей]" || res.GetResultJson() != string(f02.Results["find_lessons"]) || res.GetIsError() {
 		t.Fatalf("f02: outcome = %+v", o2)
 	}
 	if m := (Report{Classes: r.classes, Requests: []Outcome{o, o2}}).Metrics(); m.ClassOK != 2 || m.ToolsOK != 2 ||
@@ -400,12 +402,29 @@ func TestRunnerOnTheFakeHub(t *testing.T) {
 	}
 }
 
-// lastResult is the first tool result of the last turn sent.
-func lastResult(turns []*hubv1.AgentTurn) string {
-	if len(turns) == 0 || len(turns[len(turns)-1].GetResults().GetResults()) == 0 {
-		return ""
+// A scripted refusal goes as the Driver sends it; any other scripted object as written, never an error.
+func TestScriptedResult(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want values.ToolResult
+	}{
+		{`{"error": "failed"}`, values.RefusalResult("c1", values.RefuseFailed)},
+		{`{"error":"not_found"}`, values.RefusalResult("c1", values.RefuseNotFound)},
+		{`{"lessons": []}`, values.ToolResult{CallID: "c1", ResultJSON: `{"lessons": []}`}},
 	}
-	return turns[len(turns)-1].GetResults().GetResults()[0].GetResultJson()
+	for _, tt := range tests {
+		if got := ScriptedResult("c1", json.RawMessage(tt.raw)); got != tt.want || got.Validate() != nil {
+			t.Errorf("ScriptedResult(%s) = %+v, want %+v", tt.raw, got, tt.want)
+		}
+	}
+}
+
+// lastResultOf is the first tool result of the last turn sent, or nil.
+func lastResultOf(turns []*hubv1.AgentTurn) *hubv1.ToolResult {
+	if len(turns) == 0 || len(turns[len(turns)-1].GetResults().GetResults()) == 0 {
+		return nil
+	}
+	return turns[len(turns)-1].GetResults().GetResults()[0]
 }
 
 func slicesIndex(reqs []Request, id string) int {

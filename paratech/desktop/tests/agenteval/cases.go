@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"paratech/desktop/internal/domain/agent/values"
 )
 
 // Plan classes: what the planner decided for a request, from the tools it called until it stopped.
@@ -48,7 +50,7 @@ type Subject struct {
 // Chats (catalog v9): Earlier are earlier requests of the chat sent as pairs before the text, Summary the summary turn
 // before them, Mentions the «@» objects of the request (IDs only; Earlier marks a mention of an earlier request).
 // Failures and lookups (TASK-366): Results replaces the canned result of a read tool for this case (a failed
-// answer_question, find_lessons rows of its own), Avoid are phrases no card text may contain (case and «ё» ignored),
+// answer_question as {"error": "failed"}, sent like the Driver's refusal; find_lessons rows of its own), Avoid are phrases no card text may contain (case and «ё» ignored),
 // and SubjectName is the name create_subject should get.
 type Request struct {
 	ID               string     `json:"id"`
@@ -82,9 +84,8 @@ func checkScripted(r Request, toolClasses map[string]string) error {
 		if toolClasses[tool] != "R" {
 			return fmt.Errorf("result of %q: only a read tool of the catalog gets a result", tool)
 		}
-		var obj map[string]json.RawMessage
-		if json.Unmarshal(res, &obj) != nil {
-			return fmt.Errorf("result of %s is not a JSON object", tool)
+		if _, _, err := scriptedRefusal(res); err != nil {
+			return fmt.Errorf("result of %s: %w", tool, err)
 		}
 	}
 	for _, a := range r.Avoid {
@@ -96,6 +97,38 @@ func checkScripted(r Request, toolClasses map[string]string) error {
 		return fmt.Errorf("subject name %q needs create_subject", r.SubjectName)
 	}
 	return nil
+}
+
+// readRefusals are the refusals a case may script for a read tool.
+var readRefusals = []values.Refusal{
+	values.RefuseFailed, values.RefuseUnknownID, values.RefuseNotFound, values.RefuseNoText, values.RefuseUnavailable,
+}
+
+// ScriptedResult is what the run sends for a case's own result of a read tool, as the Driver would: an
+// {"error": <refusal>} object is the is_error values.RefusalResult, any other object goes as written.
+func ScriptedResult(callID string, raw json.RawMessage) values.ToolResult {
+	if why, refused, err := scriptedRefusal(raw); err == nil && refused {
+		return values.RefusalResult(callID, why)
+	}
+	return values.ToolResult{CallID: callID, ResultJSON: string(raw)}
+}
+
+// scriptedRefusal reads a scripted result: a JSON object, and one with an "error" key has no other key and a refusal
+// of readRefusals.
+func scriptedRefusal(raw json.RawMessage) (values.Refusal, bool, error) {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil || obj == nil {
+		return "", false, errors.New("not a JSON object")
+	}
+	e, ok := obj["error"]
+	if !ok {
+		return "", false, nil
+	}
+	var why values.Refusal
+	if len(obj) != 1 || json.Unmarshal(e, &why) != nil || !slices.Contains(readRefusals, why) {
+		return "", false, fmt.Errorf("an error result is {\"error\": <refusal>} with one of %v", readRefusals)
+	}
+	return why, true, nil
 }
 
 // Exchange is an earlier request of the chat: the student's text and the reply line the history carries.
