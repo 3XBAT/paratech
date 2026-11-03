@@ -8458,7 +8458,7 @@
                 "Скрипт проверки путей (scratchpad), результат в progress"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         }
     ]
 }
