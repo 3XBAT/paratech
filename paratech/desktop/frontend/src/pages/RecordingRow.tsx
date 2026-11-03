@@ -11,16 +11,18 @@ import {
   jobActions,
   jobDetails,
   jobMeta,
+  fixTexts,
   type RowItem,
   type RowItemKey,
   recordingRowView,
   rowActions,
+  rowFixes,
 } from "../recordingRowView.js";
 import { importTexts } from "../recordingImportView.js";
 import type { AdvicePending } from "../sourcePicker/advice.js";
 import { SourceAdvice } from "../sourcePicker/SourceAdvice.js";
 import { jobStatusView, showsProgress, type StatusView } from "../statusPresentation.js";
-import { Button, IconButton } from "../ui/Button.js";
+import { Button } from "../ui/Button.js";
 import { Progress, Row } from "../ui/controls.js";
 import { RowMenu, type RowMenuItem } from "../ui/RowMenu.js";
 import { SoundLevel } from "../ui/SoundLevel.js";
@@ -63,17 +65,18 @@ export interface RecordingRowProps {
 type MenuKey = RowItemKey | "delete";
 
 // One recording with the status of its whole chain, and the silent-source advice of a running one. One main button by
-// the state, the other actions in «⋯», a round «Повторить» next to the chip (TASK-096). The lesson title and the
-// core's notes are untrusted text: React renders them as text only.
+// the state, the other actions in «⋯», the text buttons «Повторить» and «Открыть подключения» under the hint of a failed
+// step (TASK-347). The lesson title and the core's notes are untrusted text: React renders them as text only.
 export function RecordingRow(props: RecordingRowProps) {
   const r = props.item;
   const v = recordingRowView(r, props.now);
   const del = rowDeleteOffer(r);
   const onSelect = props.onSelect;
   const onRetry = props.onRetry;
-  const retry = v.retry;
   const texts = props.onOpenSummary !== undefined && props.onOpenTranscript !== undefined;
   const acts = rowActions(r, { texts, redo: props.onRedoSummary !== undefined });
+  const fixes = rowFixes(r, acts.main?.key ?? null);
+  const retry = fixes.retry;
   const title = v.titleIsTime ? <span className="num">{v.title}</span> : v.title;
   const sound = r.stage === "recording" && props.sound?.recordingId === r.id ? props.sound : null;
 
@@ -183,10 +186,29 @@ export function RecordingRow(props: RecordingRowProps) {
           view={v.status}
           notes={v.notes}
           details={v.details}
-          aside={
-            retry !== null &&
-            onRetry && (
-              <IconButton icon="retry" label={retry.label} busy={props.retrying} onClick={() => onRetry(retry.work)} />
+          fixes={
+            (fixes.connections || (fixes.retry !== null && onRetry)) && (
+              <span className="st-fixes">
+                {fixes.connections && (
+                  <Button size="sm" onClick={() => props.onOpen("connections")}>
+                    {fixTexts.connections}
+                  </Button>
+                )}
+                {retry !== null && onRetry && (
+                  <Button
+                    size="sm"
+                    title={retry.label}
+                    aria-label={retry.label}
+                    busy={props.retrying}
+                    busyLabel="Повтор…"
+                    disabled={props.retrying}
+                    aria-busy={props.retrying || undefined}
+                    onClick={() => onRetry(retry.work)}
+                  >
+                    {fixTexts.retry}
+                  </Button>
+                )}
+              </span>
             )
           }
         >
@@ -227,7 +249,7 @@ export interface JobRowProps {
   onOpenAssignment?: (assignmentId: string) => void;
 }
 
-// One task of «Задачи» (a job without a recording), on the same grid as a recording row: one main button and the «⋯»
+// One task of «Фоновая обработка» (a job without a recording), on the same grid as a recording row: one main button and the «⋯»
 // cell, which stays empty without more actions (TASK-098). The job error and the attempts are technical: only in the
 // chip's tooltip (TASK-096). The draft's title is model text: React renders it as text only.
 export function JobRow(props: JobRowProps) {
@@ -284,31 +306,21 @@ export function JobRow(props: JobRowProps) {
 }
 
 // The chip, its hint and the core's notes about the row (a problem or the last error). details is the chip's tooltip;
-// aside (the round «Повторить») sits right next to the chip.
+// fixes (the text buttons «Повторить», «Открыть подключения») come last, under the hint.
 export function StatusLine(props: {
   view: StatusView;
   notes: readonly string[];
   details?: string;
-  aside?: ReactNode;
+  fixes?: ReactNode;
   children?: ReactNode;
 }) {
   const v = props.view;
-  const chip = (
-    <StatusChip kind={v.kind} icon={v.icon} title={props.details || undefined}>
-      {v.label}
-      {v.value !== "" && <span className="num"> · {v.value}</span>}
-    </StatusChip>
-  );
   return (
     <>
-      {props.aside ? (
-        <span className="st-head">
-          {chip}
-          {props.aside}
-        </span>
-      ) : (
-        chip
-      )}
+      <StatusChip kind={v.kind} icon={v.icon} title={props.details || undefined}>
+        {v.label}
+        {v.value !== "" && <span className="num"> · {v.value}</span>}
+      </StatusChip>
       {props.children}
       {v.hint !== "" && <span className="small muted">{v.hint}</span>}
       {props.notes.map((n) => (
@@ -316,6 +328,7 @@ export function StatusLine(props: {
           {n}
         </span>
       ))}
+      {props.fixes}
     </>
   );
 }

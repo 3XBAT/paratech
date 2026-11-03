@@ -12,13 +12,14 @@ import {
 import { libraryInboxApi } from "../bindings/libraryInbox.js";
 import { notesApi as makeNotesApi } from "../bindings/notes.js";
 import { callByName } from "../bindings/runtime.js";
-import { fileTexts, type ImportElsewhere, type ImportOutcome } from "../libraryInboxView.js";
+import { fileTexts, type ImportElsewhere, type ImportOutcome, scrollToFolder } from "../libraryInboxView.js";
 import { addFileInto, CardDrop } from "../materialFlow.js";
 import {
   folderCounts,
   freshMarks,
   idleOverview,
   importNote,
+  inFolderText,
   type OverviewState,
   scheduleLine,
   SubjectOverviewFlow,
@@ -81,6 +82,10 @@ interface AddedState {
 
 const noAdded: AddedState = { note: "", elsewhere: null, toInbox: false, unplaced: null, target: null, origin: "" };
 
+const noFolders: ReadonlySet<string> = new Set();
+
+const namedIn = (folder: string, text: string) => (folder === "" ? text : inFolderText(folder, text));
+
 /**
  * «Предметы» (TASK-341): the tree on the left («Входящие» first, then the subjects by semester) and the content on the
  * right, from the first moment: the last opened subject, else the first one. The tiles are only for a library with no
@@ -95,6 +100,8 @@ export function SubjectsPage(props: {
   /** The route's choice: "" for none, inboxRoute for «Входящие», else a subject id; and the way to choose another. */
   subjectId: string;
   onSelect: (subjectId: string) => void;
+  /** A row of «Ближайшее» opens its assignment (TASK-347); without it the rows only show the deadlines. */
+  onOpenAssignment?: (assignmentId: string) => void;
   /** Counts the rail clicks: a click reads the remembered subject again (see landingFor). */
   visit?: number;
   /** «Указать почту» of a refused send: the form of one teacher to open on arrival (taken once, then onTeacherFocusDone). */
@@ -126,6 +133,10 @@ export function SubjectsPage(props: {
   const [dropError, setDropError] = useState("");
   // Changes made here (a file placed, deleted, added into a subject): the files of the open subject are read again.
   const [changes, setChanges] = useState(0);
+  // The folders made during this visit stay sections («Пока пусто») until another subject opens or the page is left;
+  // the last one is scrolled into view once it is on screen.
+  const [createdFolders, setCreatedFolders] = useState<ReadonlySet<string>>(noFolders);
+  const scrollTo = useRef("");
   // The result of «Добавить файл» on the page of a subject, and the refusal (with how to repeat it).
   const [added, setAdded] = useState<AddedState>(noAdded);
   const [addError, setAddError] = useState<{ text: string; again: () => void; origin: string } | null>(null);
@@ -287,8 +298,16 @@ export function SubjectsPage(props: {
     setDragging("");
     setMaterials(null);
     setFilesFailed(false);
+    setCreatedFolders(noFolders);
     flow.reset();
   }, [key, flow]);
+
+  useEffect(() => {
+    if (scrollTo.current !== "") {
+      scrollToFolder(document, scrollTo.current);
+      scrollTo.current = "";
+    }
+  }, [createdFolders]);
 
   // The overview of the open subject: loaded once per opening, then the opening is recorded (see SubjectOverviewFlow).
   // It does not depend on `reload`, so a dropped file does not count as a new visit.
@@ -419,6 +438,8 @@ export function SubjectsPage(props: {
     run(async () => {
       const f = await api.createFolder(shownId, name);
       setSubjects((list) => (list ?? []).map((s) => (s.id === shownId ? { ...s, folders: [...s.folders, f] } : s)));
+      scrollTo.current = f.id;
+      setCreatedFolders((created) => new Set(created).add(f.id));
       setForm("none");
     });
 
@@ -512,15 +533,16 @@ export function SubjectsPage(props: {
   };
 
   // The result of «Добавить файл»: under the head for the header button, inside the section of the folder for its «+».
-  const addLines = (origin: string) => (
+  // A folder in the «Пусто» line has no header, so its results name it (`folder`).
+  const addLines = (origin: string, folder = "") => (
     <AddFileLines
-      note={added.origin === origin ? added.note : ""}
+      note={added.origin === origin ? namedIn(folder, added.note) : ""}
       elsewhere={added.origin === origin ? added.elsewhere : null}
       toInbox={added.origin === origin && added.toInbox}
       unplaced={added.origin === origin ? added.unplaced : null}
       placing={{ subjects: subjects ?? [], place: placeUnplaced, createSubject: mat.actions.createSubject, restoreSubject: mat.actions.restoreSubject }}
       busy={busy}
-      error={addError !== null && addError.origin === origin ? addError.text : ""}
+      error={addError !== null && addError.origin === origin ? namedIn(folder, addError.text) : ""}
       onMoveHere={() => void moveHere()}
       onOpenSubject={openSubject}
       onOpenInbox={openInbox}
@@ -736,12 +758,13 @@ export function SubjectsPage(props: {
               </ResultLine>
             )}
             <TeachersBlock key={subject.id} teachers={subject.teachers} state={teacherStateFor(teacher, subject.id)} on={teacherActions} />
-            {overview && <OverviewSections overview={overview} />}
+            {overview && <OverviewSections overview={overview} onOpenAssignment={props.onOpenAssignment} />}
             <SubjectDetail
               subject={subject}
               materials={materials}
               failed={filesFailed}
               fresh={fresh}
+              created={createdFolders}
               folderForm={form === "folder"}
               busy={busy}
               error={error}
@@ -749,7 +772,7 @@ export function SubjectsPage(props: {
               onCancelFolder={() => setForm("none")}
               actions={mat.actions}
               onAddFile={(folderId) => void addFileTo(folderId)}
-              folderExtra={(folderId) => addLines(folderId)}
+              folderExtra={(folderId, named) => addLines(folderId, named)}
             />
             {form !== "folder" && form !== "subject" && error !== "" && (
               <ResultLine kind="fail" role="alert">

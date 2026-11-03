@@ -19,7 +19,21 @@ import {
   withSelected,
 } from "../recordingDeleteView";
 import { importTexts } from "../recordingImportView";
-import { anyRecording, pageGroups, queueLine, tasksEmptyText } from "../recordingRowView";
+import {
+  anyRecording,
+  backgroundCount,
+  backgroundFailedText,
+  backgroundKey,
+  backgroundShowFailed,
+  backgroundState,
+  backgroundTitle,
+  backgroundVisible,
+  emptyTexts,
+  headActionsVisible,
+  pageGroups,
+  queueLine,
+  tasksKey,
+} from "../recordingRowView";
 import { adviceKey, keepSource, switchToSuggestion, type AdvicePending } from "../sourcePicker/advice";
 import { SourceNotes, SourcePicker } from "../sourcePicker/SourcePicker";
 import { useSources } from "../sourcePicker/useSources";
@@ -34,7 +48,7 @@ import {
 import { redoTexts } from "../summaryView";
 import { Button } from "../ui/Button";
 import { SpeechComponentNotice } from "./SpeechComponentNotice";
-import { Banner, Dialog, EmptyState, ResultLine } from "../ui/controls";
+import { Banner, Dialog, ResultLine } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { useNow } from "../useNow";
 import { useRecordingSound } from "../useRecordingSound";
@@ -370,92 +384,122 @@ export function RecordingsPage({
   const visibleJobs = [...groups.tasks.active, ...groups.tasks.finished];
   const noRecordings = recordings !== null && recordings.length === 0;
   const queue = queueLine(recordings ?? [], visibleJobs);
+  const background = backgroundState(lists);
+  const backgroundN = backgroundCount(groups.tasks);
+  const failed = backgroundFailedText(groups.tasks, background, stateOf(lists, tasksKey));
+
+  // With an empty list the same buttons sit in the empty state, not in the head (one primary button on the screen).
+  const headActions = headActionsVisible(recordings, recordingsError !== "");
+
+  // An opened panel replaces the empty state (it opens where the student clicked); closing it brings the state back.
+  const panelOpen = startOpen || importOpen;
+  const panelsRef = useRef<HTMLDivElement>(null);
+  const emptyRef = useRef<HTMLDivElement>(null);
+  const panelWasOpen = useRef(false);
+
+  // The clicked button is gone with the empty state: the focus follows into the panel, and back to the state on closing.
+  useEffect(() => {
+    if (noRecordings && panelOpen !== panelWasOpen.current) {
+      const target = panelOpen ? panelsRef.current : emptyRef.current;
+      target?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled)")?.focus();
+    }
+    panelWasOpen.current = panelOpen;
+  }, [panelOpen, noRecordings]);
+
+  const importButton = (
+    <Button icon="up" aria-expanded={importOpen} onClick={() => setImportOpen((open) => !open)}>
+      {importTexts.open}
+    </Button>
+  );
+
+  const startControl = (
+    <div className="rec-start">
+      <Button
+        variant="primary"
+        icon="rec"
+        // An open panel can always be closed, except while its start is on the way.
+        disabled={starting || (startState.disabled && !startOpen)}
+        aria-expanded={startOpen}
+        title={startState.reason || undefined}
+        aria-describedby={startState.reason ? reasonId : undefined}
+        onClick={toggleStart}
+      >
+        {manualStartTexts.open}
+      </Button>
+      {/* The empty state shows the reason as a visible line instead. */}
+      {startState.reason && (!noRecordings || panelOpen) && (
+        <span id={reasonId} className="vh">
+          {startState.reason}
+        </span>
+      )}
+    </div>
+  );
 
   return (
     <section className="page recordings">
       <div className="head">
         <h1>Записи</h1>
-        <div className="head-acts">
-          <Button
-            icon="up"
-            aria-expanded={importOpen}
-            onClick={() => setImportOpen((open) => !open)}
-          >
-            {importTexts.open}
-          </Button>
-        <div className="rec-start">
-          <Button
-            variant="primary"
-            icon="rec"
-            // An open panel can always be closed, except while its start is on the way.
-            disabled={starting || (startState.disabled && !startOpen)}
-            aria-expanded={startOpen}
-            title={startState.reason || undefined}
-            aria-describedby={startState.reason ? reasonId : undefined}
-            onClick={toggleStart}
-          >
-            {manualStartTexts.open}
-          </Button>
-          {startState.reason && (
-            <span id={reasonId} className="vh">
-              {startState.reason}
-            </span>
-          )}
-        </div>
-        </div>
-      </div>
-      {importOpen && (
-        <RecordingImportPanel
-          api={importing}
-          loadLessons={loadLessons}
-          onImported={() => void refresh()}
-          onClose={() => setImportOpen(false)}
-        />
-      )}
-      {startOpen && (
-        <div className="card box rec-start-panel" role="group" aria-label={manualStartTexts.title}>
-          <h2>{manualStartTexts.title}</h2>
-          <span className="small muted box-desc">{manualStartTexts.explain}</span>
-          <span className="label" id={labelId}>
-            {manualStartTexts.sourceLabel}
-          </span>
-          <SourcePicker
-            picker={picker}
-            disabled={starting}
-            open={listOpen}
-            onToggle={() => setListOpen((open) => !open)}
-            onClose={() => setListOpen(false)}
-            onChoose={(app) => {
-              setSelection(chooseSource(app));
-              setListOpen(false);
-            }}
-            labelId={labelId}
-          />
-          <SourceNotes picker={picker} advice />
-          {startProblem !== "" && (
-            <Banner kind="fail" role="alert">
-              {startProblem}
-            </Banner>
-          )}
-          <div className="acts start">
-            <Button
-              variant="primary"
-              icon="rec"
-              busy={starting}
-              busyLabel={manualStartTexts.starting}
-              disabled={startState.disabled}
-              title={startState.reason || undefined}
-              aria-describedby={startState.reason ? reasonId : undefined}
-              onClick={() => void confirmStart()}
-            >
-              {manualStartTexts.start}
-            </Button>
-            <Button variant="ghost" disabled={starting} onClick={toggleStart}>
-              {manualStartTexts.cancel}
-            </Button>
+        {headActions && (
+          <div className="head-acts">
+            {importButton}
+            {startControl}
           </div>
-        </div>
-      )}
+        )}
+      </div>
+      <div ref={panelsRef} className="rec-panels">
+        {importOpen && (
+          <RecordingImportPanel
+            api={importing}
+            loadLessons={loadLessons}
+            onImported={() => void refresh()}
+            onClose={() => setImportOpen(false)}
+          />
+        )}
+        {startOpen && (
+          <div className="card box rec-start-panel" role="group" aria-label={manualStartTexts.title}>
+            <h2>{manualStartTexts.title}</h2>
+            <span className="small muted box-desc">{manualStartTexts.explain}</span>
+            <span className="label" id={labelId}>
+              {manualStartTexts.sourceLabel}
+            </span>
+            <SourcePicker
+              picker={picker}
+              disabled={starting}
+              open={listOpen}
+              onToggle={() => setListOpen((open) => !open)}
+              onClose={() => setListOpen(false)}
+              onChoose={(app) => {
+                setSelection(chooseSource(app));
+                setListOpen(false);
+              }}
+              labelId={labelId}
+            />
+            <SourceNotes picker={picker} advice />
+            {startProblem !== "" && (
+              <Banner kind="fail" role="alert">
+                {startProblem}
+              </Banner>
+            )}
+            <div className="acts start">
+              <Button
+                variant="primary"
+                icon="rec"
+                busy={starting}
+                busyLabel={manualStartTexts.starting}
+                disabled={startState.disabled}
+                title={startState.reason || undefined}
+                aria-describedby={startState.reason ? reasonId : undefined}
+                onClick={() => void confirmStart()}
+              >
+                {manualStartTexts.start}
+              </Button>
+              <Button variant="ghost" disabled={starting} onClick={toggleStart}>
+                {manualStartTexts.cancel}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
       <SpeechComponentNotice onReady={() => void refresh()} />
       {actionError && (
         <Banner kind="fail" role="alert">
@@ -491,35 +535,64 @@ export function RecordingsPage({
       {recordings === null ? (
         !recordingsError && <p className="muted">Загрузка…</p>
       ) : noRecordings ? (
-        <EmptyState
-          label="Записей пока нет"
-          title="Здесь появятся записи пар"
-          actions={
-            onOpen && (
-              <Button variant="primary" icon="up" onClick={() => onOpen("schedule")}>
-                Импортировать расписание
-              </Button>
-            )
-          }
-        >
-          Импортируйте расписание — в начале каждой пары появится окно с кнопкой «Начать запись».
-        </EmptyState>
+        // An open panel is the answer to the click: the empty state, with its second «Начать запись», waits until it closes.
+        !panelOpen && (
+          <div ref={emptyRef} className="rec-empty">
+            <p className="empty-text">{emptyTexts.text}</p>
+            <div className="acts start">
+              {startControl}
+              {onOpen && (
+                <Button icon="cal" onClick={() => onOpen("schedule")}>
+                  {emptyTexts.schedule}
+                </Button>
+              )}
+              {importButton}
+            </div>
+            {startState.reason && (
+              <p id={reasonId} className="small muted rec-empty-reason">
+                {startState.reason}
+              </p>
+            )}
+            <p className="small muted rec-empty-privacy">
+              <Icon name="lock" />
+              {emptyTexts.privacy}
+            </p>
+          </div>
+        )
       ) : (
         sectionGroups("recordings", "записи", groups.recordings, recordingRow)
       )}
 
-      <h2 className="group-title">Фоновая обработка</h2>
       {jobsError && (
         <Banner kind="fail" role="alert">
           {jobsError}
         </Banner>
       )}
-      {jobs === null ? (
-        !jobsError && <p className="muted">Загрузка…</p>
-      ) : visibleJobs.length === 0 ? (
-        <p className="muted arows-empty">{tasksEmptyText}</p>
-      ) : (
-        sectionGroups("tasks", "фоновая обработка", groups.tasks, jobRow)
+      {backgroundVisible(visibleJobs) && (
+        // Folded by default: what a recording needs shows on its own row, the rest is a count away. The header is
+        // CollapsibleList's markup, drawn here because the title has no number when nothing is in progress or failed.
+        <div className="clist clist-card background-block">
+          <h2 className="clist-header">
+            <button
+              type="button"
+              className="clist-toggle"
+              aria-expanded={!background.collapsed}
+              onClick={() => setLists((l) => withState(l, backgroundKey, { ...background, collapsed: !background.collapsed }))}
+            >
+              <span aria-hidden="true">{background.collapsed ? "▸ " : "▾ "}</span>
+              {backgroundTitle}
+              {backgroundN > 0 && <span className="clist-count"> ({backgroundN})</span>}
+            </button>
+          </h2>
+          {failed !== "" && (
+            <div className="background-failed">
+              <Button size="sm" onClick={() => setLists(backgroundShowFailed)}>
+                {failed}
+              </Button>
+            </div>
+          )}
+          {!background.collapsed && sectionGroups("tasks", "фоновая обработка", groups.tasks, jobRow)}
+        </div>
       )}
 
       {deleting !== null && (
@@ -550,14 +623,14 @@ export function RecordingsPage({
         <p>{redoTexts.body}</p>
       </Dialog>
 
-      <div className="gap" />
-      <div className="statusbar">
-        {queue && <span className="num">{queue}</span>}
-        <span className="r">
-          <Icon name="lock" />
-          Звук обрабатывается только на этом компьютере
-        </span>
-      </div>
+      {queue && (
+        <>
+          <div className="gap" />
+          <div className="statusbar">
+            <span className="num">{queue}</span>
+          </div>
+        </>
+      )}
     </section>
   );
 }

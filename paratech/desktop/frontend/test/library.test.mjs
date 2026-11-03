@@ -120,7 +120,10 @@ test("the subject page lists the folders with their files; «Новая папк
   assert.match(out, /PDF · 2 КБ · текст PDF не извлечён/);
   assert.doesNotMatch(out, /удалён\.pdf/);
   assert.doesNotMatch(out, /входящий\.txt/);
-  assert.match(out, /В этой папке пока нет файлов/);
+  // TASK-347: the folders without files are one line, not a «В этой папке пока нет файлов» card each.
+  assert.doesNotMatch(out, /В этой папке пока нет файлов/);
+  // The names are set apart by the gap of the line, not by commas (a comma would end up after the «+» button).
+  assert.match(out, /Пусто:<\/span><span[^>]*>Семинары<\/span><span[^>]*>Лабораторные<\/span>/);
   const tree = renderToStaticMarkup(
     h(SubjectTree, { subjects: [subject()], currentId: "s1", counts: new Map(), busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop }),
   );
