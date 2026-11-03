@@ -46,7 +46,7 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)
 	}
-	facts = facts.WithMaterials(reads.materials)
+	facts = facts.WithMaterials(reads.materials).WithCalendarEvents(reads.assignments)
 	subjects, err := agentloop.NewBaseSubjects(reads.library)
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)
@@ -70,6 +70,7 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 		Library: reads.library, Lessons: reads.knowledge, Assignments: reads.assignments, NewAssignments: reads.assignments,
 		Rerunner: reads.rerunner, Materials: reads.materials, Turnkey: reads.turnkey, Drafts: c.drafts, Jobs: reads.activity, Canceller: c.runner,
 		Tx: c.db, Clock: e.local, Log: log,
+		Changes: agentAssignments{reads.assignments}, Marks: reads.assignments, Chat: chatJournal{c}, Events: reads.assignments,
 	})
 	if err != nil {
 		return fmt.Errorf("app: agent actions: %w", err)
@@ -124,6 +125,31 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 			return rep.Done + rep.Failed + rep.Unknown + rep.Undone + rep.Refused, err
 		}})
 	return nil
+}
+
+// agentAssignments is the homework service under the names of the agent's interfaces: TrashAssignment is the page's
+// soft delete DeleteAndStop (input/agent names no method after an irreversible action).
+type agentAssignments struct {
+	*homeworkflow.Service
+}
+
+// TrashAssignment forwards to DeleteAndStop.
+func (a agentAssignments) TrashAssignment(ctx context.Context, id shared.AssignmentID, expectedVersion int64) (homeworkflow.Deletion, error) {
+	return a.DeleteAndStop(ctx, id, expectedVersion)
+}
+
+// chatJournal hands the action journal to change_assignment{restore} once it is built: the journal's compensator is
+// the actions themselves, so the actions get it late.
+type chatJournal struct {
+	c *core
+}
+
+// ListThread forwards to the journal.
+func (j chatJournal) ListThread(ctx context.Context, th shared.ThreadID, limit int) ([]agentjournal.Entry, error) {
+	if j.c.journal == nil {
+		return nil, fmt.Errorf("app: agent: %w", agentjournal.ErrUndoUnavailable)
+	}
+	return j.c.journal.ListThread(ctx, th, limit)
 }
 
 // panelSink hands the Driver's updates to the agent panel of the UI (TASK-119); mapping only, as input/wails does not
