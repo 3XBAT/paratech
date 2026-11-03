@@ -1,5 +1,6 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { texts } from "../libraryView.js";
+import { removalTexts } from "../subjectRemovalView.js";
 import { Button } from "../ui/Button.js";
 import { Field, Input } from "../ui/controls.js";
 
@@ -14,6 +15,10 @@ export function NameForm(props: {
   onCancel(): void;
   /** False inside another panel, where the page already has its one accent button. */
   primary?: boolean;
+  /** Set: the name belongs to a removed subject; this line («Предмет с таким названием удалён» and «Вернуть») replaces the error. */
+  removed?: ReactNode;
+  /** The name was typed in: the line of a removed subject belongs to the old name and goes. */
+  onEdit?: () => void;
 }) {
   const [name, setName] = useState("");
   const submit = (e: FormEvent) => {
@@ -24,9 +29,28 @@ export function NameForm(props: {
   };
   return (
     <form className="name-form" onSubmit={submit}>
-      <Field label={props.label} error={props.error || undefined}>
-        {(id) => <Input id={id} value={name} maxLength={200} autoFocus onChange={(e) => setName(e.target.value)} />}
+      <Field label={props.label} error={props.removed ? undefined : props.error || undefined}>
+        {(id) => (
+          <Input
+            id={id}
+            value={name}
+            maxLength={200}
+            autoFocus
+            onChange={(e) => {
+              setName(e.target.value);
+              props.onEdit?.();
+            }}
+          />
+        )}
       </Field>
+      {/* One live region that is there before its text comes, so «Предмет с таким названием удалён» is announced; the line's
+          buttons stay out of it. */}
+      <div className="lrow-error">
+        <div className="small muted" role="status" aria-live="polite">
+          {props.removed ? removalTexts.nameRemoved : ""}
+        </div>
+        {props.removed}
+      </div>
       <div className="acts start">
         <Button type="submit" variant={props.primary === false ? "secondary" : "primary"} size="sm" disabled={props.busy || name.trim() === ""}>
           {texts.create}

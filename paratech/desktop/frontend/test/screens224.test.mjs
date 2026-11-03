@@ -127,5 +127,5 @@ test("the status line names the nearest deadline of the week", () => {
   const d = (y, m, day) => ({ due: new Date(y, m, day, 12).toISOString() });
   assert.equal(nearestDeadlineText([]), "");
   assert.equal(nearestDeadlineText([{ due: "" }]), "");
-  assert.equal(nearestDeadlineText([d(2026, 9, 30), d(2026, 9, 28)]), "Ближайший срок — ср, 28 окт., 12:00");
+  assert.equal(nearestDeadlineText([d(2026, 9, 30), d(2026, 9, 28)]), "Ближайший срок — до ср, 28 окт., 12:00");
 });

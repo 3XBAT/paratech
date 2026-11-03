@@ -10,11 +10,14 @@ import {
   lessonLine,
   looseProblems,
   postLine,
+  statusParts,
+  summaryRows,
   texts,
   waitingLine,
 } from "../todayView.js";
 import { type ActiveIssue, doneTexts } from "../assignmentDoneView.js";
 import { Button } from "../ui/Button.js";
+import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
 import { DoneCheck, DoneIssueLine } from "./AssignmentDoneParts.js";
 import type { AgentConfirmApi } from "../bindings/agentConfirm.js";
@@ -50,22 +53,60 @@ function Empty(props: { children: string }) {
   return <p className="muted today-empty">{props.children}</p>;
 }
 
+/** Not shown while there are no chips: an empty block would only be noise. */
 export function AskSection(props: { chips: readonly TodayChip[]; onChip: (text: string) => void }) {
+  if (props.chips.length === 0) {
+    return null;
+  }
   return (
     <Section title={texts.askTitle}>
       <p className="small muted today-ask-hint">{texts.askHint}</p>
-      {props.chips.length === 0 ? (
-        <Empty>{texts.askNoChips}</Empty>
-      ) : (
-        <div className="today-chips">
-          {props.chips.map((c, i) => (
-            <Button key={`${c.kind}:${i}`} size="sm" onClick={() => props.onChip(c.text)}>
-              {c.text}
-            </Button>
-          ))}
-        </div>
-      )}
+      <div className="today-chips">
+        {props.chips.map((c, i) => (
+          <Button key={`${c.kind}:${i}`} size="sm" onClick={() => props.onChip(c.text)}>
+            {c.text}
+          </Button>
+        ))}
+      </div>
     </Section>
+  );
+}
+
+/**
+ * A failed read of the day: the fixed text and the way out in place (the reason is always the same for the student).
+ * `quiet`: a day is already shown (a failed re-read), so it is a muted line, no alert and no red.
+ */
+export function LoadError(props: { onRetry: () => void; quiet?: boolean }) {
+  return (
+    <div className="today-err">
+      {props.quiet === true ? (
+        <p className="small muted today-quiet">{texts.refreshFailed}</p>
+      ) : (
+        <ResultLine kind="fail" role="alert">
+          {texts.loadFailed}
+        </ResultLine>
+      )}
+      <Button size="sm" onClick={props.onRetry}>
+        {texts.retry}
+      </Button>
+    </div>
+  );
+}
+
+/** The queue and the nearest deadline; nothing at all when both are empty. */
+export function StatusBar(props: { queue: string; nearest: string }) {
+  const parts = statusParts(props.queue, props.nearest);
+  if (parts.length === 0) {
+    return null;
+  }
+  return (
+    <div className="statusbar">
+      {parts.map((p) => (
+        <span key={p} className="num">
+          {p}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -197,7 +238,7 @@ export function WaitingSection(props: { waiting: readonly TodayWaiting[]; onOpen
   );
 }
 
-/** «Выполнено» in the rows of «Горит на 7 дней» (TASK-316): the page owns the calls, the toast and the refusal. */
+/** «Выполнено» in the rows of «Сроки на неделе» (TASK-316): the page owns the calls, the toast and the refusal. */
 export interface BurningDone {
   /** The assignment whose call runs, "" none. */
   busyId: string;
@@ -270,17 +311,15 @@ export function BurningSection(props: {
                   />
                 )}
                 <button type="button" className="today-row today-dl" onClick={() => props.onOpenAssignment(b.assignmentId)}>
-                  <div className="today-day num">
-                    {m.weekday}
-                    <span>{m.date}</span>
-                  </div>
                   <div className="today-main">
                     <div className="today-t">{m.title}</div>
-                    {m.subject !== "" && <div className="small muted today-subject">{m.subject}</div>}
+                    <div className="today-dlmeta">
+                      {m.subject !== "" && <div className="small muted today-subject">{m.subject}</div>}
+                      <StatusChip kind={m.overdue ? "fail" : m.urgent ? "run" : "neutral"} icon={m.overdue ? "warn" : m.urgent ? "clock" : null}>
+                        <span className="num">{m.chip}</span>
+                      </StatusChip>
+                    </div>
                   </div>
-                  <StatusChip kind={m.urgent ? "run" : "neutral"}>
-                    <span className="num">{m.chip}</span>
-                  </StatusChip>
                 </button>
                 {done?.busyId === b.assignmentId && (
                   <span className="small muted today-dlnote" role="status">
@@ -301,80 +340,72 @@ export function BurningSection(props: {
   );
 }
 
-export function DoneSection(props: { done: readonly TodayDone[]; onOpenSummary: (recordingId: string) => void }) {
-  return (
-    <Section title={texts.done} count={props.done.length}>
-      {props.done.length === 0 ? (
-        <Empty>{texts.doneEmpty}</Empty>
-      ) : (
-        <div className="card" role="list">
-          {props.done.map((d) => {
-            const m = doneLine(d);
-            return (
-              <div key={m.key} className="today-row today-wait" role="listitem">
-                <Icon name={m.icon} />
-                <div className="today-main">
-                  <div className="today-t">{m.title}</div>
-                  {m.meta !== "" && <div className="small muted today-meta num">{m.meta}</div>}
-                </div>
-                {m.canOpen && (
-                  <Button size="sm" onClick={() => props.onOpenSummary(m.recordingId)}>
-                    {texts.open}
-                  </Button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </Section>
-  );
-}
-
-export function PostsSection(props: {
+/**
+ * «Итоги дня»: the messages of paratech after the lessons, then what is done; one list, no sub-headings. Hidden when
+ * there is nothing to show.
+ */
+export function SummarySection(props: {
   posts: readonly TodayPost[];
+  done: readonly TodayDone[];
   onOpenSummary: (recordingId: string) => void;
   /** The core calls of «Да, в календарь»; without them the button is not offered. */
   calendar?: { api: AgentConfirmApi; deleteApi: RecordingDeleteApi };
 }) {
+  const rows = summaryRows(props.posts, props.done);
+  if (rows.count === 0) {
+    return null;
+  }
   return (
-    <Section title={texts.posts} count={props.posts.length}>
-      {props.posts.length === 0 ? (
-        <Empty>{texts.postsEmpty}</Empty>
-      ) : (
-        <div className="card" role="list">
-          {props.posts.map((p) => {
-            const m = postLine(p, new Date());
-            return (
-              <div key={m.key} className="today-row today-wait" role="listitem">
-                <Icon name="wave" />
-                <div className="today-main">
-                  <div className="today-t today-post">{m.headline}</div>
-                  <div className="small muted today-meta num">{m.homework === "" ? m.meta : `${m.meta} · ${m.homework}`}</div>
-                  {props.calendar !== undefined &&
-                    p.calendar
-                      .filter((c) => isDeadlineAction(c.kind, c.assignmentId))
-                      .filter((c, i, all) => all.findIndex((x) => x.assignmentId === c.assignmentId) === i)
-                      .map((c) => (
-                        <PostCalendar
-                          key={c.assignmentId}
-                          api={props.calendar!.api}
-                          deleteApi={props.calendar!.deleteApi}
-                          assignmentId={c.assignmentId}
-                          due={c.due}
-                        />
-                      ))}
-                </div>
-                {m.canOpen && (
-                  <Button size="sm" onClick={() => props.onOpenSummary(m.recordingId)}>
-                    {texts.open}
-                  </Button>
-                )}
+    <Section title={texts.summary} count={rows.count} className="today-summary">
+      <div className="card" role="list">
+        {rows.posts.map((p) => {
+          const m = postLine(p, new Date());
+          return (
+            <div key={`post:${m.key}`} className="today-row today-wait" role="listitem">
+              <Icon name="wave" />
+              <div className="today-main">
+                <div className="today-t today-post">{m.headline}</div>
+                <div className="small muted today-meta num">{m.homework === "" ? m.meta : `${m.meta} · ${m.homework}`}</div>
+                {props.calendar !== undefined &&
+                  p.calendar
+                    .filter((c) => isDeadlineAction(c.kind, c.assignmentId))
+                    .filter((c, i, all) => all.findIndex((x) => x.assignmentId === c.assignmentId) === i)
+                    .map((c) => (
+                      <PostCalendar
+                        key={c.assignmentId}
+                        api={props.calendar!.api}
+                        deleteApi={props.calendar!.deleteApi}
+                        assignmentId={c.assignmentId}
+                        due={c.due}
+                      />
+                    ))}
               </div>
-            );
-          })}
-        </div>
-      )}
+              {m.canOpen && (
+                <Button size="sm" onClick={() => props.onOpenSummary(m.recordingId)}>
+                  {texts.open}
+                </Button>
+              )}
+            </div>
+          );
+        })}
+        {rows.done.map((d) => {
+          const m = doneLine(d);
+          return (
+            <div key={`done:${m.key}`} className="today-row today-wait" role="listitem">
+              <Icon name={m.icon} />
+              <div className="today-main">
+                <div className="today-t">{m.title}</div>
+                {m.meta !== "" && <div className="small muted today-meta num">{m.meta}</div>}
+              </div>
+              {m.canOpen && (
+                <Button size="sm" onClick={() => props.onOpenSummary(m.recordingId)}>
+                  {texts.open}
+                </Button>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </Section>
   );
 }

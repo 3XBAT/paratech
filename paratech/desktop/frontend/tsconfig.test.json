@@ -124,6 +124,9 @@
     "src/doneRunner.ts",
     "src/ui/Toast.tsx",
     "src/pages/AssignmentDoneParts.tsx",
-    "src/pages/HomeworkMenus.tsx"
+    "src/pages/HomeworkMenus.tsx",
+    "src/subjectRemovalView.ts",
+    "src/pages/SubjectRemoval.tsx",
+    "src/pages/useSubjectRemoval.ts"
   ]
 }

@@ -1,6 +1,7 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useMemo, useReducer, useRef } from "react";
 import {
   createFromSchedule,
+  libraryApi,
   type ScheduleGroup,
   type ScheduleMember,
   scheduleSubjects,
@@ -46,9 +47,11 @@ import {
   takenOf,
   undoFlow,
 } from "../scheduleSubjectsView.js";
+import { type RemovedRow, removedRowText, type RestoreCall, restoredRowText, runRestore } from "../subjectRemovalView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
+import { RestoreRow } from "./SubjectRemoval.js";
 
 // The review of subjects proposed from the schedule (TASK-312; the agent card of TASK-324 reuses it). The names,
 // spellings and subject names are schedule text: text nodes and input values only, never markup, never logged. Fixed
@@ -56,14 +59,18 @@ import { Icon } from "../ui/Icon.js";
 
 /** The calls of the review over the Wails bindings; the strict parsers reject an unreadable reply. */
 export function scheduleReviewApi(call: CallByName): ReviewApi {
+  const library = libraryApi(call);
   return {
     create: (token, choices) => createFromSchedule(call, token, choices),
     undo: (token) => undoFromSchedule(call, token),
     refresh: () => scheduleSubjects(call),
+    restore: (subjectId, version) => runRestore(library, subjectId, version),
   };
 }
 
 export interface ReviewHandlers {
+  /** «Вернуть» of a skipped row a removed subject blocks (TASK-289); absent: such a row is only a line. */
+  restore?(subjectId: string, version: number): Promise<RestoreCall>;
   check(group: string, checked: boolean): void;
   rename(group: string, name: string): void;
   member(group: string, member: string, mode: MemberMode): void;
@@ -131,7 +138,21 @@ export function ScheduleSubjectsReview(props: {
     }
   };
 
+  // A restored subject changes the subjects: the page reads them again, as after a create.
+  const restoreRow = props.api.restore;
+  const restore: ReviewHandlers["restore"] =
+    restoreRow === undefined
+      ? undefined
+      : async (subjectId, version) => {
+          const call = await restoreRow(subjectId, version);
+          if (call.state.phase === "done") {
+            latest.current.onChanged();
+          }
+          return call;
+        };
+
   const on: ReviewHandlers = {
+    restore,
     check: (group, checked) => dispatch({ type: "check", group, checked }),
     rename: (group, name) => dispatch({ type: "rename", group, name }),
     member: (group, member, mode) => dispatch({ type: "member", group, member, mode }),
@@ -267,6 +288,9 @@ export function ReviewView(props: {
         {done !== "" && <DoneRow text={done} phase={state.phase} onUndo={on.undo} />}
         {notice !== null && notice.tone === "ok" && <NoticeBody notice={notice} steps={steps(notice)} />}
       </div>
+      {notice !== null && notice.tone === "ok" && (
+        <NoticeRows rows={notice.rows ?? []} restore={on.restore} onChanged={() => on.step("refresh")} />
+      )}
 
       {state.view === "list" && (
         <>
@@ -333,6 +357,38 @@ function NoticeBody(props: { notice: Notice; steps: ReactNode }) {
       )}
       {hasSteps && <div className="acts start">{props.steps}</div>}
     </div>
+  );
+}
+
+/**
+ * The names only a removed subject holds: «Вернуть» brings the subject back (TASK-289). They sit outside the live region of
+ * the notice (their buttons and their own status lines would be announced twice there). After `changed` «Повторить» reads
+ * the proposal again; creating it again gives the fresh version.
+ */
+function NoticeRows(props: { rows: readonly RemovedRow[]; restore?: ReviewHandlers["restore"]; onChanged(): void }) {
+  const restore = props.restore;
+  if (props.rows.length === 0) {
+    return null;
+  }
+  return (
+    <ul className="sched-lines small muted">
+      {props.rows.map((r) => (
+        <li key={`${r.key}:${r.subjectId}:${r.version}`}>
+          {restore === undefined ? (
+            removedRowText(r)
+          ) : (
+            <RestoreRow
+              idleText={removedRowText(r)}
+              doneText={restoredRowText(r)}
+              name={r.name}
+              restore={() => restore(r.subjectId, r.version)}
+              onSettled={() => undefined}
+              onChanged={props.onChanged}
+            />
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 

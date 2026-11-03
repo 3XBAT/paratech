@@ -178,7 +178,8 @@ test("while the subjects load the section shows only the small loading line, wha
 
 test("the subjects of the tree are a list of buttons: ul/li, the button is not a listitem", () => {
   const out = renderToStaticMarkup(h(SubjectTree, { subjects: [subject()], currentId: "", counts: null, busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop }));
-  assert.match(out, /<ul class="lv1"><li><button type="button" class="ti"><svg/);
+  // TASK-289: the row carries data-subject-id, which the focus finds after «Вернуть».
+  assert.match(out, /<ul class="lv1"><li><button type="button" class="ti" data-subject-id="s1"><svg/);
   assert.doesNotMatch(out, /role="listitem"/);
 });
 
