@@ -205,9 +205,10 @@ func TestStreamedReplyFinalWins(t *testing.T) {
 	}
 }
 
-// The Hub step fails after deltas: the draft is dropped before the update of the stopped request, which says why
-// honestly (failed for good) and offers «Повторить»; Retry runs the step under a new key and the reply comes.
-func TestStreamedReplyFailureDropsTheDraft(t *testing.T) {
+// The Hub step fails after deltas: the draft ends as failed (the panel keeps the shown text, BUG-20261104-agent-stream)
+// before the update of the stopped request, which says why honestly and offers «Повторить»; the draft never reaches the
+// history; Retry runs the step under a new key and the reply comes.
+func TestStreamedReplyFailureKeepsTheDraft(t *testing.T) {
 	e := newStreamEnv(t)
 	e.hub.ThenStreamFails("Половина ответа")
 
@@ -216,7 +217,7 @@ func TestStreamedReplyFailureDropsTheDraft(t *testing.T) {
 		!slices.Contains(up.Cards, values.Card(values.StoppedCard{Reason: values.StopFailed})) {
 		t.Fatalf("failed update = %+v", up)
 	}
-	want := []string{"draft:Половина ответа", "end:dropped", "update:STOPPED"}
+	want := []string{"draft:Половина ответа", "end:failed", "update:STOPPED"}
 	if got := e.sink.shown(); !slices.Equal(got, want) {
 		t.Fatalf("panel got %q\nwant %q", got, want)
 	}
