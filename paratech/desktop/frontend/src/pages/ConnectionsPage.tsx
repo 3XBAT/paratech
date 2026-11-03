@@ -386,7 +386,7 @@ export function ConnectionsPage(props: { visit?: number }) {
         <Card className="box" label={overviewTexts.hubTitle}>
           <span className="small muted box-desc">{overviewTexts.hubHint}</span>
           <span className="small muted box-desc">
-            Делает конспекты и ищет домашние задания. Звук туда не отправляется — только текст расшифровки.
+            Делает конспекты и ищет задания. Звук туда не отправляется — только текст расшифровки.
           </span>
           <Field label="Адрес сервера" error={fieldErrorText(hubErrors, "hubUrl")}>
             {(id) => (

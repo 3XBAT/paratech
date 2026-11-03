@@ -134,7 +134,7 @@ test("a failed call rejects and errorText keeps only the core's fixed texts", as
 test("labels: a note, a recording, a removed source", () => {
   assert.equal(citationPlace(noteSource()), "ваш конспект · стр. 3");
   assert.equal(citationPlace(recSource()), "Расшифровка · 12:05");
-  assert.equal(citationPlace(recSource({ section: "summary", time: "" })), "Кратко");
+  assert.equal(citationPlace(recSource({ section: "summary", time: "" })), "Конспект");
   assert.equal(citationPlace(noteSource({ removed: true, label: "источник удалён" })), "источник удалён");
   assert.equal(citationPlace(noteSource({ removed: true, label: "" })), "источник удалён");
   assert.equal(noteLectureTexts.sourceRemoved, "источник удалён");

@@ -3,6 +3,8 @@ package library
 import (
 	"errors"
 	"fmt"
+
+	"paratech/desktop/internal/domain/shared"
 )
 
 // Errors of the library (ARCH-18). Fixed texts without names or paths; causes go to the log.
@@ -38,6 +40,13 @@ var (
 
 	// ErrNameTaken means another subject already has the name or alias (case-insensitive, «ё» = «е»).
 	ErrNameTaken = errors.New("library: subject name is taken")
+
+	// ErrRemovedNameTaken means a removed subject has the name or alias: it keeps them until it is purged, so the
+	// student may restore it instead. It wraps ErrNameTaken; a *RemovedNameError carries the removed subject.
+	ErrRemovedNameTaken = fmt.Errorf("%w: by a removed subject", ErrNameTaken)
+
+	// ErrRestoreExpired means a removed subject was to be restored after subject.RestoreWindow.
+	ErrRestoreExpired = errors.New("library: the removed subject can no longer be restored")
 
 	// ErrFolderTaken means the subject already has a folder with that name.
 	ErrFolderTaken = errors.New("library: folder name is taken")
@@ -119,3 +128,15 @@ var (
 	// refusals the text is not inspected again.
 	ErrReaderRefused = errors.New("library: the reader's answer was refused")
 )
+
+// RemovedNameError is ErrRemovedNameTaken with the removed subject that has the name, so the page can offer
+// «Вернуть» for it.
+type RemovedNameError struct {
+	Subject shared.SubjectID
+}
+
+// Error is the text of ErrRemovedNameTaken; the name is not in it.
+func (e *RemovedNameError) Error() string { return ErrRemovedNameTaken.Error() }
+
+// Unwrap makes errors.Is find ErrRemovedNameTaken and ErrNameTaken.
+func (e *RemovedNameError) Unwrap() error { return ErrRemovedNameTaken }

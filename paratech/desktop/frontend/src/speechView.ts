@@ -1,4 +1,4 @@
-// Display logic of the speech recognition component notice. The Go core decides the state and which buttons are
+// Display logic of the speech-to-text module notice. The Go core decides the state and which buttons are
 // offered (ARCH-44); the page turns them into texts. Messages of the core are fixed Russian texts shown as is.
 
 // The .js extension lets the Node test runner load the compiled module; TypeScript and Vite map it to the .ts file.
@@ -6,14 +6,14 @@ import type { SpeechStage, SpeechStatus } from "./bindings/speech.js";
 import { sizeText } from "./modelsView.js";
 
 export const speechTexts = {
-  installing: "Устанавливается компонент распознавания речи",
-  unavailable: "Распознавание речи недоступно",
-  noRestart: "Записи начнут распознаваться сразу после установки, перезапуск не нужен.",
-  install: "Установить компонент распознавания",
+  installing: "Устанавливается модуль расшифровки",
+  unavailable: "Расшифровка недоступна",
+  noRestart: "Записи начнут расшифровываться сразу после установки, перезапуск не нужен.",
+  install: "Установить модуль расшифровки",
   starting: "Запуск…",
   cancel: "Отменить",
   cancelling: "Отмена…",
-  genericError: "Не удалось установить компонент распознавания речи",
+  genericError: "Не удалось установить модуль расшифровки",
 } as const;
 
 const stageLabels: Readonly<Record<SpeechStage, string>> = {
@@ -52,7 +52,7 @@ export function progressText(s: SpeechStatus): string {
     : `${label}: ${sizeText(s.doneBytes)}`;
 }
 
-/** What the notice shows; null when speech recognition works and there is nothing to say. */
+/** What the notice shows; null when the transcription module works and there is nothing to say. */
 export interface SpeechNotice {
   kind: "wait" | "fail";
   text: string;

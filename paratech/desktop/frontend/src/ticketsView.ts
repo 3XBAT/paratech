@@ -5,6 +5,7 @@
 
 import type { Coverage, TicketItem, TicketReport, TicketSet } from "./bindings/tickets.js";
 import { plural } from "./plural.js";
+import { waitingWords } from "./statusWords.js";
 import type { IconName } from "./ui/Icon.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 
@@ -33,20 +34,21 @@ export const texts = {
   pasteTitle: "Вставить список билетов",
   pasteLabel: "Список билетов (нумерованный: «1.», «1)» или «Билет 1»)",
   pasteHint: "Поиск ответов начнётся только после подтверждения.",
-  pasteAction: "Найти билеты",
+  pasteAction: "Разобрать список",
   fileTitle: "Список из файла предмета",
   fileLabel: "Файл со списком",
   fileAction: "Прочитать файл",
   noFiles: "В предмете нет файлов: файл со списком билетов можно добавить в «Предметах».",
   confirm: "Подтвердить и запустить",
-  confirmAgain: "Запустить снова",
+  confirmAgain: "Повторить",
   cancel: "Отменить",
   cancelBusy: "Отменяется…",
   undo: "Вернуть файл во «Входящие»",
   show: "Показать билеты",
   hide: "Скрыть билеты",
-  stalledTitle: "Застряло",
-  stalledHint: "Подбор ответов остановился и сам не продолжится. «Запустить снова» продолжит с того места, где он встал.",
+  stalledTitle: "Подбор остановлен",
+  // True to cases/tickets: the run continues from the first ticket without a result; a stored answer is never asked again.
+  stalledHint: "Подбор прервался и сам не продолжится. «Повторить» продолжит с того же билета, готовые ответы не оплачиваются снова.",
   notCoveredHint: "Не найдено в лекциях и конспектах.",
   generatedNote: "Ответы сгенерированы по лекциям: перед сдачей их нужно прочитать и проверить.",
   openNote: "Открывается копия файла: правки в Word в библиотеку не попадают.",
@@ -132,16 +134,16 @@ function runningView(s: TicketSet): ChipView {
   }
   const js = s.jobStatus;
   if (js === "WAITING_FOR_NETWORK") {
-    return { kind: "net", icon: "off", label: "Ждёт интернет", hint: "Подбор продолжится, когда появится связь." };
+    return { kind: "net", icon: "off", label: waitingWords.network, hint: "Подбор продолжится, когда появится связь." };
   }
   if (js === "WAITING_FOR_QUOTA") {
-    return { kind: "wait", icon: "clock", label: "Минуты обработки закончились", hint: "Подбор продолжится, когда минуты пополнятся." };
+    return { kind: "wait", icon: "clock", label: waitingWords.quota, hint: "Подбор продолжится, когда минуты пополнятся." };
   }
   if (js === "WAITING_FOR_POWER") {
-    return { kind: "wait", icon: "plug", label: "Ждёт зарядку", hint: "Подбор начнётся сам после подключения питания." };
+    return { kind: "wait", icon: "plug", label: waitingWords.power, hint: "Подбор начнётся сам после подключения питания." };
   }
   if (js === "RETRY_WAIT" || js.startsWith("WAITING_")) {
-    return { kind: "wait", icon: "clock", label: "Ждёт повтора", hint: "Подбор продолжится сам." };
+    return { kind: "wait", icon: "clock", label: waitingWords.retry, hint: "Подбор продолжится сам." };
   }
   if (js === "QUEUED" || js === "") {
     return { kind: "wait", icon: "clock", label: "В очереди", hint: "" };
@@ -151,7 +153,7 @@ function runningView(s: TicketSet): ChipView {
 
 /** What the set offers as moves. Whether a move is allowed is the core's call; these only hide what cannot apply. */
 export interface Moves {
-  /** «Подтвердить и запустить» (proposed) or «Запустить снова» (stalled). */
+  /** «Подтвердить и запустить» (proposed) or «Повторить» (stalled). */
   confirm: "none" | "start" | "restart";
   cancel: boolean;
   undo: boolean;

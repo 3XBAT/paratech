@@ -175,7 +175,7 @@ test("adding is off with a reason for an ambiguous or unknown subject", () => {
   const off = (subjectState) => render(model({ subjectId: "", subjectState }));
   assert.ok(off("ambiguous").includes("У нескольких предметов в библиотеке одно название"));
   assert.ok(!off("ambiguous").includes(t.subjectNone));
-  assert.ok(off("none").includes("Предмет занятия не найден в библиотеке"));
+  assert.ok(off("none").includes("Предмет пары не найден в библиотеке"));
   assert.ok(off("no-subject").includes(t.noSubject));
   assert.ok(off("matched").includes(t.noSubject));
   assert.ok(!off("ambiguous").includes("data-file-drop-target"));

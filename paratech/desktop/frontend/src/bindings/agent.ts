@@ -182,13 +182,15 @@ export interface CannotDoView {
 
 /**
  * An assignment a reply lists. The core reads it from the local data, never from the model; the title is still shown
- * as plain text. subjectId and due ("YYYY-MM-DD") are "" when there is none.
+ * as plain text. subjectId and due ("YYYY-MM-DD") are "" when there is none. time is the local time of the deadline
+ * ("HH:MM"; "20:00" when none was named), "" without a deadline or from an older core that sends none.
  */
 export interface AssignmentLineView {
   id: string;
   title: string;
   subjectId: string;
   due: string;
+  time: string;
 }
 
 /**
@@ -514,7 +516,13 @@ function parseCannotDo(raw: unknown): CannotDoView {
 function parseAssignmentLine(raw: unknown): AssignmentLineView {
   const w = "assignment line";
   const r = record(raw, w);
-  return { id: str(r, "id", w), title: str(r, "title", w), subjectId: str(r, "subjectId", w), due: str(r, "due", w) };
+  return {
+    id: str(r, "id", w),
+    title: str(r, "title", w),
+    subjectId: str(r, "subjectId", w),
+    due: str(r, "due", w),
+    time: r.time === undefined || r.time === null ? "" : str(r, "time", w),
+  };
 }
 
 function parseAddedAssignment(raw: unknown): AddedAssignmentView {

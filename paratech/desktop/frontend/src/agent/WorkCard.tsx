@@ -472,7 +472,6 @@ export function WorkBody(props: {
                     <strong>{q.question}</strong>
                   </p>
                   <p className="ag-text">
-                    <span className="ag-sub">{workTexts.answerLabel}. </span>
                     {q.answer}
                   </p>
                 </div>

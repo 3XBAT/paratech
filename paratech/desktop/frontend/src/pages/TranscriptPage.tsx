@@ -299,7 +299,7 @@ function Viewer(props: {
             {view.message}
           </p>
         )}
-        {view.progress !== null && <Progress value={view.progress} label="Распознавание" text={false} />}
+        {view.progress !== null && <Progress value={view.progress} label="Расшифровка" text={false} />}
         {view.partial !== "" && <p className="small muted tr-note">{view.partial}</p>}
         {playable ? (
           <audio ref={audio} className="tr-audio" controls preload="none" src={status.audioUrl}>

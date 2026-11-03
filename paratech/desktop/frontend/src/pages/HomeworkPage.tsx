@@ -87,8 +87,8 @@ import { TranscriptLinks } from "./TranscriptLinks";
 import { doneToastProps, useDoneFocus } from "./useDoneFocus";
 import { useDoneRunner } from "./useDoneRunner";
 
-// «Домашние задания» (PRD section 10): the assignments, and for the opened one the draft editor, the extra
-// instructions with «Сгенерировать заново», the version history, the export to a file and the send by email through
+// «Задания» (PRD section 10): the assignments, and for the opened one the draft editor, the extra
+// instructions with «Написать новую версию», the version history, the export to a file and the send by email through
 // the confirmation dialog (AC-13, AC-14, AC-15). The core decides what can be sent and what to offer for an email; the
 // page shows it. Whether a draft is being generated comes from the core too (TASK-094): the page asks it while open,
 // so a generation started earlier or elsewhere and a version made meanwhile show up without opening the page again. Assignment, draft and instruction texts may be model output: they are plain React text and textarea
@@ -493,7 +493,7 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
   return (
     <section className="page hw" tabIndex={-1} ref={rootRef} aria-labelledby="hw-list-title">
       <div className="head">
-        <h1 id="hw-list-title">Домашние задания</h1>
+        <h1 id="hw-list-title">Задания</h1>
         <div className="acts">
           <Button icon="plus" onClick={() => setAdding(true)}>
             {addTexts.button}
@@ -529,8 +529,8 @@ function AssignmentList(props: { api: HomeworkApi; onOpen: (id: string, target?:
       {!shownOnce ? (
         items === null && !error && <p className="muted">Загрузка…</p>
       ) : empty !== null && empty.kind === "first-run" ? (
-        <EmptyState label="Заданий пока нет" title="Здесь появятся домашние задания">
-          Задание находится само в записи пары, после конспекта. Здесь можно сгенерировать по нему черновик, поправить его
+        <EmptyState label="Заданий пока нет" title="Здесь появятся задания">
+          Задание находится само в записи пары, после конспекта. Здесь можно написать по нему черновик, поправить его
           и отправить преподавателю по почте.
         </EmptyState>
       ) : (
@@ -1254,7 +1254,7 @@ function AssignmentEditor(props: {
         <h1 className="hw-title" id="hw-detail-title">
           {a.title}
         </h1>
-        <span className="muted num">{dueText(a.due)}</span>
+        <span className="muted num">{dueText(a.due, new Date(), a.done)}</span>
         <div className="acts">
           <DoneButton
             done={a.done}
@@ -1342,7 +1342,7 @@ function AssignmentEditor(props: {
       <Card className="box">
         <h2>Быстрый черновик</h2>
         {shown === null ? (
-          <p className="small muted box-desc">Черновика ещё нет: его подготовит сервис конспектов по тексту задания.</p>
+          <p className="small muted box-desc">Черновика пока нет. paratech может написать его по тексту задания.</p>
         ) : (
           <>
             <span className="small muted box-desc num">

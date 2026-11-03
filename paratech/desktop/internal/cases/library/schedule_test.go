@@ -377,6 +377,72 @@ func TestCreateFromScheduleSkips(t *testing.T) {
 		}
 	})
 
+	// A subject of the package the student removed comes back in the same proposal, so under the same derived ID: it is
+	// skipped with itself to restore, and the rest of the package is done.
+	t.Run("own subject removed", func(t *testing.T) {
+		e, hist := scheduleEnv(t)
+		p := propose(t, e)
+		matan, phys := groupNamed(t, p, "Матанализ"), groupNamed(t, p, "Физика")
+		first, err := e.svc.CreateFromSchedule(ctx, p.Token, []schedulesubjects.Choice{
+			{Group: matan.Key, Action: schedulesubjects.GroupSkip},
+			{Group: groupNamed(t, p, "История").Key, Action: schedulesubjects.GroupSkip},
+		})
+		if err != nil || len(first.Created) != 1 {
+			t.Fatalf("CreateFromSchedule(Физика) = %+v, %v", first, err)
+		}
+		physID := first.Created[0].ID
+		got, _ := e.subjects.Get(ctx, physID)
+		if _, err := e.svc.DiscardSubject(ctx, physID, got.Version()); err != nil {
+			t.Fatal(err)
+		}
+
+		again := propose(t, e)
+		if again.Token != p.Token {
+			t.Fatal("the proposal changed after the removal")
+		}
+		res, err := e.svc.CreateFromSchedule(ctx, again.Token, nil)
+		want := ScheduleResult{
+			Created: []ScheduleCreated{{ID: schedulesubjects.DeriveSubjectID(p.Token, matan.Key), Key: matan.Key, Name: "Матанализ"}},
+			Aliased: []ScheduleAliased{{Subject: hist.ID(), Aliases: []string{"История (лек.)"}}},
+			Skipped: []ScheduleSkipped{{Key: phys.Key, Removed: physID, Reason: ReasonNameTaken}},
+		}
+		if err != nil || !reflect.DeepEqual(res, want) {
+			t.Fatalf("CreateFromSchedule = %+v, %v\nwant %+v", res, err, want)
+		}
+		if !e.subjects.removed(physID) {
+			t.Fatal("the removed subject was brought back")
+		}
+	})
+
+	t.Run("name of a removed subject", func(t *testing.T) {
+		e, hist := scheduleEnv(t)
+		old := createSubject(t, e, "Физика")
+		if _, err := e.svc.DiscardSubject(ctx, old.ID(), old.Version()); err != nil {
+			t.Fatal(err)
+		}
+		p := propose(t, e)
+		phys := groupNamed(t, p, "Физика")
+		res, err := e.svc.CreateFromSchedule(ctx, p.Token, nil)
+		if err != nil || !reflect.DeepEqual(res.Skipped, []ScheduleSkipped{{Key: phys.Key, Removed: old.ID(), Reason: ReasonNameTaken}}) ||
+			len(res.Created) != 1 || len(res.Aliased) != 1 || res.Aliased[0].Subject != hist.ID() {
+			t.Fatalf("CreateFromSchedule = %+v, %v", res, err)
+		}
+	})
+
+	t.Run("alias of a removed subject", func(t *testing.T) {
+		e, hist := scheduleEnv(t)
+		old := createSubject(t, e, "Древняя история", "История (лек.)")
+		if _, err := e.svc.DiscardSubject(ctx, old.ID(), old.Version()); err != nil {
+			t.Fatal(err)
+		}
+		p := propose(t, e)
+		res, err := e.svc.CreateFromSchedule(ctx, p.Token, nil)
+		if err != nil || !reflect.DeepEqual(res.Skipped, []ScheduleSkipped{{Subject: hist.ID(), Removed: old.ID(), Reason: ReasonNameTaken}}) ||
+			len(res.Created) != 2 || len(res.Aliased) != 0 {
+			t.Fatalf("CreateFromSchedule = %+v, %v", res, err)
+		}
+	})
+
 	t.Run("subject removed meanwhile", func(t *testing.T) {
 		e, hist := scheduleEnv(t)
 		p := propose(t, e)
@@ -395,6 +461,50 @@ func TestCreateFromScheduleSkips(t *testing.T) {
 			t.Fatalf("CreateFromSchedule = %+v, %v", res, err)
 		}
 	})
+}
+
+// An active subject holding one spelling wins: restoring the removed one would not let the row through.
+func TestScheduleNameTaken(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	gone := createSubject(t, e, "Физика", "Физ")
+	if _, err := e.svc.DiscardSubject(ctx, gone.ID(), gone.Version()); err != nil {
+		t.Fatal(err)
+	}
+	createSubject(t, e, "Механика")
+	ix, err := e.svc.names(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name        string
+		subj        string
+		aliases     []string
+		taken       bool
+		wantRemoved shared.SubjectID
+	}{
+		{"free", "Химия", []string{"Хим"}, false, ""},
+		{"removed name", "Физика", nil, true, gone.ID()},
+		{"removed alias", "Общая физика", []string{"физ"}, true, gone.ID()},
+		{"active alias", "Химия", []string{"механика"}, true, ""},
+		{"removed and active", "Физика", []string{"Механика"}, true, ""},
+		{"own ID", "Физика", nil, false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id := shared.SubjectID("new")
+			if tc.name == "own ID" {
+				id = gone.ID()
+			}
+			sub, err := subject.New(subject.Spec{ID: id, Name: tc.subj, Aliases: tc.aliases, Semester: values.SemesterOf(t0)}, t0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if taken, removed := scheduleNameTaken(ix, sub, id); taken != tc.taken || removed != tc.wantRemoved {
+				t.Fatalf("scheduleNameTaken = %v, %q; want %v, %q", taken, removed, tc.taken, tc.wantRemoved)
+			}
+		})
+	}
 }
 
 func TestUndoFromSchedule(t *testing.T) {

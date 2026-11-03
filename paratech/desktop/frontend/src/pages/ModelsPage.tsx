@@ -281,7 +281,7 @@ export function ModelsPage() {
     <section className="page">
       <div className="head">
         <div>
-          <span className="label">Распознавание речи работает без интернета</span>
+          <span className="label">Расшифровка работает без интернета</span>
           <h2>Модели речи</h2>
         </div>
         <div className="acts">
@@ -290,7 +290,7 @@ export function ModelsPage() {
           </Button>
         </div>
       </div>
-      <p className="muted">Распознавание речи идёт только на этом компьютере. Модель — файл .bin.</p>
+      <p className="muted">Расшифровка идёт только на этом компьютере. Модель — файл .bin.</p>
 
       <SpeechComponentNotice onReady={() => void refresh()} />
       {view !== null &&

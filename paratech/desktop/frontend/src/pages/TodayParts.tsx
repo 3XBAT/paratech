@@ -112,7 +112,7 @@ export function LessonsSection(props: {
       ) : (
         <div className="card" role="list">
           {props.lessons.map((l) => {
-            const m = lessonLine(l, props.recordings, day);
+            const m = lessonLine(l, props.recordings, day, new Date());
             return (
               <div key={m.key} className={m.live?.kind === "rec" ? "today-row today-lesson live" : "today-row today-lesson"} role="listitem">
                 <div className="today-tm num">
@@ -164,7 +164,7 @@ export function WaitingSection(props: { waiting: readonly TodayWaiting[]; onOpen
         <>
           <div className="card" role="list">
             {props.waiting.map((w) => {
-              const m = waitingLine(w);
+              const m = waitingLine(w, new Date());
               const body = (
                 <>
                   <Icon name={m.icon} />
@@ -216,7 +216,10 @@ export function BurningSection(props: {
   onAdd?: () => void;
   /** The check in every row; without it the rows only open the assignment. */
   done?: BurningDone;
+  /** The moment the chips are read against; the clock when omitted (tests pass a fixed one). */
+  now?: Date;
 }) {
+  const now = props.now ?? new Date();
   const onAdd = props.onAdd;
   const done = props.done;
   const issue = done?.issue ?? null;
@@ -248,7 +251,7 @@ export function BurningSection(props: {
       ) : (
         <div className="card" role="list">
           {props.burning.map((b) => {
-            const m = deadlineLine(b);
+            const m = deadlineLine(b, now);
             const rowIssue = issue !== null && issue.ids.includes(b.assignmentId) ? issue : null;
             // The check is a sibling of the open button: no interactive element inside another.
             return (
@@ -341,7 +344,7 @@ export function PostsSection(props: {
       ) : (
         <div className="card" role="list">
           {props.posts.map((p) => {
-            const m = postLine(p);
+            const m = postLine(p, new Date());
             return (
               <div key={m.key} className="today-row today-wait" role="listitem">
                 <Icon name="wave" />

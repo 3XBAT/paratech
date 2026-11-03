@@ -98,11 +98,11 @@ test("status mapping: proposed, running, waits, stalled, done, failed, cancelled
   assert.equal(statusView(set({ status: "answering", jobStatus: "RUNNING" })).kind, "run");
   assert.equal(statusView(set({ status: "confirmed", jobStatus: "QUEUED" })).label, "В очереди");
   assert.equal(statusView(set({ status: "answering", jobStatus: "WAITING_FOR_NETWORK" })).kind, "net");
-  assert.equal(statusView(set({ status: "answering", jobStatus: "WAITING_FOR_QUOTA" })).label, "Минуты обработки закончились");
-  assert.equal(statusView(set({ status: "answering", jobStatus: "WAITING_FOR_POWER" })).label, "Ждёт зарядку");
+  assert.equal(statusView(set({ status: "answering", jobStatus: "WAITING_FOR_QUOTA" })).label, "Ждёт пополнения минут");
+  assert.equal(statusView(set({ status: "answering", jobStatus: "WAITING_FOR_POWER" })).label, "Ждёт зарядки");
   assert.equal(statusView(set({ status: "answering", jobStatus: "RETRY_WAIT" })).label, "Ждёт повтора");
   const stalled = statusView(set({ status: "answering", jobStatus: "FAILED", stalled: true }));
-  assert.equal(stalled.label, "Застряло");
+  assert.equal(stalled.label, "Подбор остановлен");
   assert.equal(stalled.kind, "fail");
   assert.equal(statusView(set({ status: "done" })).kind, "ok");
   assert.equal(statusView(set({ status: "failed" })).kind, "fail");
@@ -250,13 +250,13 @@ test("the confirm card of a run over the cap shows the estimate and a disabled b
   assert.match(html, /<button[^>]*disabled=""[^>]*>[^]*?Подтвердить и запустить/);
 });
 
-test("the stalled card shows «Застряло» and the restart button", () => {
+test("the stalled card shows «Подбор остановлен» and the restart button", () => {
   const s = set({ status: "answering", stalled: true, jobStatus: "FAILED" });
   const html = server.renderToStaticMarkup(
     h(SetCard, { set: s, subjectName: "", busy: false, error: "", onConfirm() {}, onCancel() {}, onUndo() {} }),
   );
-  assert.ok(html.includes("Застряло"));
-  assert.ok(html.includes("Запустить снова"));
+  assert.ok(html.includes("Подбор остановлен"));
+  assert.ok(html.includes("Повторить"));
   assert.ok(!html.includes('type="checkbox"'), "no cost checkbox on a restart");
 });
 

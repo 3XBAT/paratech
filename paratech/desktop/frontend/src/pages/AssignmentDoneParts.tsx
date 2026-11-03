@@ -144,7 +144,7 @@ export function AssignmentRowView(props: {
       meta={
         <>
           {lesson !== "" && <span className="hw-lesson">{lesson}</span>}
-          <span className="num">{dueText(a.due)}</span>
+          <span className="num">{dueText(a.due, new Date(), a.done)}</span>
           {stamp !== "" && <span className="num hw-donedate">{` · ${stamp}`}</span>}
         </>
       }

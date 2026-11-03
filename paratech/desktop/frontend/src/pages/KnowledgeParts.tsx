@@ -37,7 +37,7 @@ import { Card, Field, Input, ResultLine, Select } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
 import { StatusChip } from "../ui/StatusChip.js";
 
-/** «Кратко ✓ · Текст лекции · Расшифровка ✓»: a ready one has the tick and the word «готово» for screen readers. */
+/** «Конспект ✓ · Текст лекции · Расшифровка ✓»: a ready one has the tick and the word «готово» for screen readers. */
 export function ReadyMarks(props: { lesson: KnowledgeLesson }) {
   return (
     <span className="kb-marks">
@@ -77,7 +77,7 @@ export function LessonList(props: {
 }) {
   const onEdit = props.onEdit;
   return (
-    <ul className="card kb-list" aria-label="Занятия">
+    <ul className="card kb-list" aria-label="Пары">
       {props.lessons.map((l) => (
         <li key={l.key} className="kb-lesson">
           <button type="button" className="kb-item" onClick={() => props.onOpen(l)}>
@@ -254,7 +254,7 @@ export function HitList(props: {
 }
 
 /**
- * «Предмет и тип занятия» of a recording. The fields hold the user's own correction; the placeholder and the first
+ * «Предмет и тип пары» of a recording. The fields hold the user's own correction; the placeholder and the first
  * option show what is shown without it. An empty field removes that correction. The core checks and stores the values.
  */
 export function LessonInfoForm(props: {
@@ -294,7 +294,7 @@ export function LessonInfoForm(props: {
 
   return (
     <Card className="box kb-form">
-      <h2>Предмет и тип занятия</h2>
+      <h2>Предмет и тип пары</h2>
       <p className="small muted box-desc">Пустое поле — снова как в записи или в расписании.</p>
       <Field label="Предмет">
         {(fid) => (
@@ -308,7 +308,7 @@ export function LessonInfoForm(props: {
           />
         )}
       </Field>
-      <Field label="Тип занятия">
+      <Field label="Тип пары">
         {(fid) => (
           <Select id={fid} value={kind} disabled={busy} onChange={(e) => setKind(e.target.value as LessonKind)}>
             {kindOptions(l).map((o) => (

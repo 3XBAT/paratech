@@ -18,13 +18,14 @@ const (
 )
 
 // NoteRepository stores the student's own notes with their ordered parts (TASK-149, ADR-0027). Validation stays in
-// note.Note: the repository only converts rows.
+// note.Note: the repository only converts rows. Every read hides the notes of a removed subject (TASK-288): Get does
+// not find them and the lists leave them out, until the subject is restored.
 type NoteRepository struct{ db *DB }
 
 // NewNoteRepository returns the note repository of db.
 func NewNoteRepository(db *DB) *NoteRepository { return &NoteRepository{db: db} }
 
-// Get loads a note; a missing one wraps shared.ErrNotFound.
+// Get loads a note; one missing or under a removed subject wraps shared.ErrNotFound.
 func (r *NoteRepository) Get(ctx context.Context, id shared.NoteID) (*note.Note, error) {
 	q := r.db.Queries(ctx)
 	row, err := q.GetNote(ctx, string(id))

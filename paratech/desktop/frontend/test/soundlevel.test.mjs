@@ -88,7 +88,7 @@ test("quietHint: the minutes and a calm line, decided by the core only", () => {
   // No own threshold: a long quiet without the core's hint stays «Тихо».
   assert.equal(soundLevelModel(quiet(10 * 60000, false)).state, "quiet");
   const html = renderToStaticMarkup(h(SoundLevel, { sound: quiet(125000, true), hint: true }));
-  assert.match(html, /class="lvl-hint">Если занятие идёт/);
+  assert.match(html, /class="lvl-hint">Если пара идёт/);
   assert.doesNotMatch(renderToStaticMarkup(h(SoundLevel, { sound: quiet(125000, true) })), /lvl-hint/);
 });
 
@@ -311,7 +311,7 @@ test("without untilIdle a failure retries too", async () => {
 
 test("the popup's recording state: title and timer from one list read, hh:mm:ss ticking locally", () => {
   assert.deepEqual(recordingInfo([row({ id: "r0" }), row()], "r1"), { title: "Матанализ", startedAt: started });
-  assert.deepEqual(recordingInfo([row({ title: "  " })], "r1"), { title: "Запись без занятия", startedAt: started });
+  assert.deepEqual(recordingInfo([row({ title: "  " })], "r1"), { title: "Запись без пары", startedAt: started });
   assert.equal(recordingInfo([row()], "r2"), null);
   const t0 = Date.parse(started);
   assert.equal(elapsedText(started, t0 + (12 * 60 + 4) * 1000 + 999), "00:12:04");

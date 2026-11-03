@@ -55,8 +55,8 @@ test("the three modes have their Russian names and one-line descriptions", () =>
     normal: "низкий приоритет, без потолка",
     max: "без ограничений, быстрее всего",
   });
-  assert.equal(estimateTexts.nextRun, "Применится к следующему распознаванию.");
-  assert.equal(estimateTexts.setting, "Нагрузка при распознавании");
+  assert.equal(estimateTexts.nextRun, "Применится к следующей расшифровке.");
+  assert.equal(estimateTexts.setting, "Нагрузка при расшифровке");
 });
 
 test("estimates are parsed strictly; null is no estimate", () => {
@@ -79,13 +79,13 @@ test("a model line: only a number measured on this computer, a warning above 1 h
     text: "Запись 1 ч ≈ 2 ч 18 мин в режиме «Обычная» на этом компьютере — дольше самой записи",
     heavy: true,
     tip:
-      "Бережная: скорость неизвестна до первого распознавания\nОбычная: ≈ 2 ч 18 мин\n" +
-      "Максимальная: скорость неизвестна до первого распознавания",
+      "Бережная: скорость неизвестна до первой расшифровки\nОбычная: ≈ 2 ч 18 мин\n" +
+      "Максимальная: скорость неизвестна до первой расшифровки",
   });
   const s = modelEstimateLine(small);
   assert.equal(s.text, "Запись 1 ч ≈ 25 мин в режиме «Обычная» на этом компьютере");
   assert.equal(s.heavy, false);
-  assert.equal(s.tip, "Бережная: скорость неизвестна до первого распознавания\nОбычная: ≈ 25 мин\nМаксимальная: скорость неизвестна до первого распознавания");
+  assert.equal(s.tip, "Бережная: скорость неизвестна до первой расшифровки\nОбычная: ≈ 25 мин\nМаксимальная: скорость неизвестна до первой расшифровки");
   for (const line of [modelEstimateLine(measuredLarge), s]) {
     assert.doesNotMatch(line.text + line.tip, /примерно/);
   }
@@ -175,7 +175,7 @@ test("models: a row shows the measured estimate; the number replaces the vague h
   const r = catalogRow({ ...catalogEntry, estimates: { ...large, current: est("normal", 8280, "measured") } });
   assert.equal(r.estimate, "Запись 1 ч ≈ 2 ч 18 мин в режиме «Обычная» на этом компьютере — дольше самой записи");
   assert.equal(r.estimateHeavy, true);
-  assert.match(r.estimateTip, /^Бережная: скорость неизвестна до первого распознавания\nОбычная: ≈ 2 ч 18 мин\n/);
+  assert.match(r.estimateTip, /^Бережная: скорость неизвестна до первой расшифровки\nОбычная: ≈ 2 ч 18 мин\n/);
   assert.equal(r.warning, "", "the number is the warning");
   assert.equal(catalogRow({ ...catalogEntry, estimates: null }).warning, texts.heavy, "without a number the old warning stays");
   assert.equal(catalogRow({ ...catalogEntry, estimates: null }).estimate, "");

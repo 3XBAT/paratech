@@ -2,7 +2,7 @@
 // the pages pass what the core reports and get the user's input back. The .js extensions let the Node test runner load
 // the compiled modules (test/list.test.mjs renders the schedule preview); TypeScript and Vite map them to the .tsx files.
 import {
-  type InputHTMLAttributes,
+  type ComponentProps,
   type KeyboardEvent,
   type ReactNode,
   type SelectHTMLAttributes,
@@ -138,7 +138,8 @@ export function Field(props: { label: ReactNode; hint?: ReactNode; error?: React
   );
 }
 
-export function Input(props: Omit<InputHTMLAttributes<HTMLInputElement>, "className">) {
+// React 19: ref is an ordinary prop, so a caller can read the native input (e.g. validity) through it.
+export function Input(props: Omit<ComponentProps<"input">, "className">) {
   return <input className="input" {...props} />;
 }
 

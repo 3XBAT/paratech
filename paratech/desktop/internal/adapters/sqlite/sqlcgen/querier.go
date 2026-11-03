@@ -135,10 +135,15 @@ type Querier interface {
 	// Lessons, the local schedule (PRD section 11) with the optimistic-concurrency protocol of ADR-0004(d) and the soft
 	// delete of ADR-0004(e): removing a lesson sets deleted_at, only PurgeDeletedLesson deletes a row.
 	GetLesson(ctx context.Context, id string) (ScheduleEntry, error)
+	// A material is visible while it is in the inbox or its subject is not removed; one filed under a removed subject
+	// stays visible while it is a part of an active note of a subject that is not removed (ADR-0027). (Comments here stay
+	// ASCII: sqlc v1.31.1 counts the offsets of its rewrites in bytes.)
 	GetMaterial(ctx context.Context, id string) (Material, error)
+	// In any visibility: the same bytes are one material (import dedupe).
 	GetMaterialBySHA256(ctx context.Context, sha256 string) (Material, error)
 	// The student's own notes (TASK-149, ADR-0027): a note with its anchor and its ordered parts. The note follows the
-	// optimistic-concurrency protocol of ADR-0004(d); its parts carry no version of their own.
+	// optimistic-concurrency protocol of ADR-0004(d); its parts carry no version of their own. The notes of a removed
+	// subject (TASK-288) are hidden from every read below; their rows are not rewritten.
 	GetNote(ctx context.Context, id string) (Note, error)
 	// Action proposals of the LLM (PRD section 13.3) with the optimistic-concurrency protocol of ADR-0004(d).
 	GetProposal(ctx context.Context, id string) (Proposal, error)
@@ -159,6 +164,7 @@ type Querier interface {
 	// (stt_model_id, recognition_load); the rows go with the model (CASCADE).
 	GetSttSpeed(ctx context.Context, arg GetSttSpeedParams) (GetSttSpeedRow, error)
 	GetSubject(ctx context.Context, id string) (Subject, error)
+	GetSubjectAnyStatus(ctx context.Context, id string) (Subject, error)
 	// Summaries of transcripts (PRD sections 9 and 10) with the optimistic-concurrency protocol of ADR-0004(d). The id is
 	// the transcript id, one summary per transcript (TASK-042); a material's summary has the id "material-<material id>"
 	// and the material_id (TASK-122). sections is NULL for a summary made before TASK-101.
@@ -343,6 +349,7 @@ type Querier interface {
 	// recordings name each; a recording marked for deletion is left out.
 	ListRecordingSubjectCounts(ctx context.Context) ([]ListRecordingSubjectCountsRow, error)
 	ListRecordingsByStatus(ctx context.Context, statuses []string) ([]Recording, error)
+	ListRemovedSubjects(ctx context.Context) ([]Subject, error)
 	// Threads whose current request was running (startup recovery).
 	ListRunningAgentThreadIDs(ctx context.Context) ([]string, error)
 	// The free subject strings of the live schedule, with how many lessons name each.
@@ -358,6 +365,8 @@ type Querier interface {
 	ListSubjectTeachers(ctx context.Context, subjectID string) ([]SubjectTeacher, error)
 	// The library (TASK-121, ADR-0024): subjects with their aliases and folders, materials with their lesson links. Both
 	// aggregates follow the optimistic-concurrency protocol of ADR-0004(d); child rows carry no version of their own.
+	// A removed subject (removed_at set, TASK-288) and everything filed under it are hidden from every reader; only
+	// GetSubjectAnyStatus and ListRemovedSubjects see it. Its rows are never rewritten by the removal.
 	ListSubjects(ctx context.Context) ([]Subject, error)
 	// The sets of one subject for the tickets screen, newest first (idx_ticket_sets_subject).
 	ListTicketSetsBySubject(ctx context.Context, arg ListTicketSetsBySubjectParams) ([]TicketSet, error)

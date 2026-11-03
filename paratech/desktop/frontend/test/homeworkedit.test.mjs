@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import server from "react-dom/server";
 import {
+  applyEditChange,
   changeOutcome,
   changeProblemText,
   changeTexts,
@@ -18,7 +19,9 @@ import {
   subjectMissingText,
   noSubjectLabel,
   removeLabel,
+  validateAddForm,
   validateEditForm,
+  withDateBad,
 } from "../.test-build/homeworkView.js";
 import { EditAssignmentDialog, RemovedLine } from "../.test-build/pages/HomeworkDialogs.js";
 
@@ -124,10 +127,10 @@ test("the delete button names the assignment as text", () => {
   assert.equal(changeTexts.remove, "Удалить");
 });
 
-test("due date and time are prefilled in local time; the default 20:00 is no time, 23:59 is a time", () => {
+test("due date and time are prefilled in local time; the default 20:00 is shown like any other time (TASK-343)", () => {
   assert.deepEqual(dueFields(local(2026, 10, 28, 9, 5)), { date: "2026-10-28", time: "09:05" });
   assert.deepEqual(dueFields(local(2026, 10, 28, 9, 0)), { date: "2026-10-28", time: "09:00" });
-  assert.deepEqual(dueFields(local(2026, 10, 28, 20, 0)), { date: "2026-10-28", time: "" });
+  assert.deepEqual(dueFields(local(2026, 10, 28, 20, 0)), { date: "2026-10-28", time: "20:00" });
   assert.deepEqual(dueFields(local(2026, 10, 28, 23, 59)), { date: "2026-10-28", time: "23:59" });
   assert.deepEqual(dueFields(""), { date: "", time: "" });
   assert.deepEqual(dueFields("not a date"), { date: "", time: "" });
@@ -147,7 +150,7 @@ test("the subject is prefilled by name among the library subjects", () => {
 test("a subject of the lesson is not turned into a choice; its empty option says so", () => {
   const fromLesson = item({ lessonId: "l1", subjectFromLesson: true, subject: "Физика" });
   assert.equal(editForm(fromLesson, subjects).subjectId, "");
-  assert.equal(noSubjectLabel(fromLesson), "Предмет занятия");
+  assert.equal(noSubjectLabel(fromLesson), "Предмет пары");
   assert.equal(noSubjectLabel(item()), "Без предмета");
 });
 
@@ -158,11 +161,65 @@ test("an assignment without a deadline can be edited; other fields are still che
   assert.ok(validateEditForm({ ...f, date: "2026-02-30" }).due);
 });
 
-test("a time without a date asks for the date at the date field", () => {
+test("a time without a date says how to remove the deadline, at the date field", () => {
   const f = { title: "Задача", subjectId: "", date: "", time: "09:00", note: "" };
-  assert.equal(validateEditForm(f).due, "Укажите дату.");
+  assert.equal(validateEditForm(f).due, "Укажите дату или очистите время, чтобы убрать срок.");
   assert.equal(validateEditForm({ ...f, time: "99:00" }).due, undefined);
   assert.ok(validateEditForm({ ...f, time: "99:00" }).time);
+});
+
+test("a half-typed date is an error, never «no deadline» (TASK-343)", () => {
+  const f = { title: "Задача", subjectId: "", date: "", time: "20:00", note: "", dateBad: true };
+  assert.equal(validateEditForm(f).due, "Дата указана неверно.");
+  assert.equal(validateEditForm({ ...f, time: "" }).due, "Дата указана неверно.");
+  assert.equal(validateEditForm({ ...f, time: "09:00" }).due, "Дата указана неверно.");
+  // The flag is cleared by the next valid change: back to «no deadline».
+  assert.deepEqual(validateEditForm({ ...f, dateBad: false }), {});
+  assert.equal(validateAddForm(f).due, "Дата указана неверно.");
+  assert.equal(validateAddForm({ ...f, dateBad: false }).due, "Укажите срок.");
+});
+
+test("the date input is read at submit time, never a stale flag (TASK-343)", () => {
+  const form = { title: "Задача", subjectId: "", date: "", time: "20:00", note: "", dateBad: true };
+  const input = (badInput) => ({ validity: { badInput } });
+  // Half-typed segments, no change event: the typed input is an error, not «no deadline».
+  assert.equal(validateEditForm(withDateBad(form, input(true))).due, "Дата указана неверно.");
+  // Cleared segment by segment: a stale true in the form must not survive; the deadline can be removed.
+  assert.deepEqual(validateEditForm(withDateBad(form, input(false))), {});
+  assert.equal(withDateBad(form, input(false)).dateBad, false);
+  // No input element (not mounted): not bad.
+  assert.equal(withDateBad(form, null).dateBad, false);
+  assert.equal(withDateBad(form, undefined).dateBad, false);
+  // The other fields stay as they were.
+  assert.deepEqual(withDateBad({ ...form, date: "2026-10-29" }, input(true)), { ...form, date: "2026-10-29", dateBad: true });
+});
+
+test("both dialogs validate through withDateBad and do not store the flag (TASK-343)", () => {
+  const src = readFileSync(new URL("../src/pages/HomeworkDialogs.tsx", import.meta.url), "utf8");
+  assert.equal(src.match(/withDateBad\(form, dateRef\.current\)/g)?.length, 2);
+  assert.ok(!/onChange\(\{[^}]*dateBad/.test(src));
+});
+
+test("an emptied date with the prefilled 20:00 means «no deadline», not an error (TASK-343)", () => {
+  const f = { title: "Задача", subjectId: "", date: "", time: "20:00", note: "" };
+  assert.deepEqual(validateEditForm(f), {});
+  // Another time without a date still asks for the date.
+  assert.equal(validateEditForm({ ...f, time: "20:01" }).due, "Укажите дату или очистите время, чтобы убрать срок.");
+  // The default time is not sent when there is no date; with a date it is sent as shown.
+  assert.deepEqual(editRequest(item(), f), { id: "ui-1", version: 3, title: "Задача", note: "", subjectId: "", date: "", time: "" });
+  assert.equal(editRequest(item(), { ...f, date: "2026-10-29" }).time, "20:00");
+  assert.equal(editRequest(item(), { ...f, time: "09:00" }).time, "09:00");
+});
+
+test("setting a date in an empty-date edit form fills the empty time with 20:00 (TASK-343)", () => {
+  const f = { title: "Задача", subjectId: "", date: "", time: "", note: "" };
+  assert.deepEqual(applyEditChange(f, { date: "2026-10-29" }), { ...f, date: "2026-10-29", time: "20:00" });
+  // A time the student typed is kept; a changed date or an emptied time later does not refill.
+  assert.equal(applyEditChange({ ...f, time: "09:00" }, { date: "2026-10-29" }).time, "09:00");
+  assert.equal(applyEditChange({ ...f, date: "2026-10-29", time: "" }, { date: "2026-10-30" }).time, "");
+  assert.equal(applyEditChange({ ...f, date: "2026-10-29" }, { time: "" }).time, "");
+  assert.equal(applyEditChange(f, { title: "Другое" }).time, "");
+  assert.equal(applyEditChange({ ...f, date: "2026-10-29" }, { date: "" }).date, "");
 });
 
 test("a stored subject with no library match is reported; the first of equal names is taken", () => {
@@ -260,7 +317,7 @@ test("the edit form shows the stored values and the lesson label", () => {
       onClose: () => undefined,
     }),
   );
-  assert.match(lesson, />Предмет занятия</);
+  assert.match(lesson, />Предмет пары</);
   assert.ok(!lesson.includes(">Без предмета<"));
 });
 

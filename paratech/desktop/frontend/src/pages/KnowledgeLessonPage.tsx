@@ -30,7 +30,7 @@ import { AiNoteLabel } from "./OwnNotesParts";
 import { HomeworkCard, SummaryCard } from "./SummaryParts";
 import { TranscriptPage } from "./TranscriptPage";
 
-// One lesson of «База знаний» (TASK-091): «Мой конспект» (first, the default), «Кратко», «Текст лекции», «Расшифровка»
+// One lesson of «База знаний» (TASK-091): «Мой конспект» (first, the default), «Конспект», «Текст лекции», «Расшифровка»
 // and «Задания» as tabs over the summary and transcript viewers (TASK-087/090/079), opened at the place a search found. Works offline: everything
 // comes from the core on this computer. Model text is rendered by those viewers as React text only.
 export function KnowledgeLessonPage(props: {
@@ -151,7 +151,7 @@ export function KnowledgeLessonPage(props: {
         </div>
         <div className="acts">
           <Button variant="ghost" onClick={() => setEditing((e) => !e)} aria-expanded={editing}>
-            Предмет и тип
+            Исправить предмет или тип пары
           </Button>
           <Button variant="ghost" icon="doc" onClick={() => openSummary(id)}>
             Открыть конспект
@@ -176,7 +176,7 @@ export function KnowledgeLessonPage(props: {
         />
       )}
       <div className="kb-tabs">
-        <Segmented label="Раздел занятия" options={lessonTabs} value={tab} onChange={setTab} />
+        <Segmented label="Раздел пары" options={lessonTabs} value={tab} onChange={setTab} />
       </div>
       <div ref={content}>
         {tab === "transcript" ? (

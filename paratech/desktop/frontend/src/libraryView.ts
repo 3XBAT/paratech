@@ -16,12 +16,12 @@ import type { ChipKind } from "./ui/StatusChip.js";
 
 export const texts = {
   upcoming: "Ближайшее",
-  lessons: "Занятия",
+  lessons: "Пары",
   fresh: "новое",
   overviewFailed: "Не удалось загрузить сведения о предмете.",
   title: "Предметы",
-  addSubject: "Предмет",
-  addFolder: "Папка",
+  addSubject: "Добавить предмет",
+  addFolder: "Новая папка",
   addFile: "Добавить файл",
   fileAdded: "Файл добавлен.",
   fileExisting: "Файл уже есть в списке.",
@@ -162,7 +162,7 @@ const kindNames: Readonly<Record<string, string>> = {
 export function scheduleLine(slots: readonly SubjectSlot[]): string {
   const parts = slots
     .filter((s) => weekdayShort(s.weekday) !== "")
-    .map((s) => `${kindNames[s.kind] ?? "Занятия"} — ${weekdayShort(s.weekday)}, ${s.start}`);
+    .map((s) => `${kindNames[s.kind] ?? "Пары"} — ${weekdayShort(s.weekday)}, ${s.start}`);
   return [...new Set(parts)].join(" · ");
 }
 
@@ -213,7 +213,7 @@ export function lessonTitle(l: SubjectLesson): string {
     return l.title;
   }
   const day = dayMonth(l.startedAt);
-  return day === "" ? "Занятие" : `Занятие ${day}`;
+  return day === "" ? "Пара" : `Пара ${day}`;
 }
 
 /** «1:30:12» or «42:05»; "" for an unknown duration. */

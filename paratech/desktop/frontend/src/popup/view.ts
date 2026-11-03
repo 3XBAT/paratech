@@ -14,8 +14,8 @@ export type Action = "start" | "skip";
 export type ButtonId = Action | "close";
 
 export const headings = {
-  lesson: "Начинается занятие",
-  adhoc: "Запись без занятия",
+  lesson: "Начинается пара",
+  adhoc: "Запись без пары",
   none: "Запись",
 } as const;
 
@@ -30,8 +30,8 @@ export const buttonLabels: Readonly<Record<ButtonId, string>> = {
 
 /** Hover texts and accessible descriptions: what each button does. */
 export const buttonHints: Readonly<Record<ButtonId, string>> = {
-  start: "Записать звук этого занятия",
-  skip: "Закрыть, это занятие не записывается",
+  start: "Записать звук этой пары",
+  skip: "Закрыть, эта пара не записывается",
   close: "Закрыть окно",
 };
 
@@ -40,8 +40,8 @@ export const startingLabel = "Запуск…";
 /** Notes for a prompt that is no longer on offer. */
 export const stateNotes: Readonly<Record<string, string>> = {
   STARTED: "Запись началась.",
-  SKIPPED: "Это занятие не записывается.",
-  EXPIRED: "Занятие закончилось.",
+  SKIPPED: "Эта пара не записывается.",
+  EXPIRED: "Пара закончилась.",
 };
 
 export const noPromptNote = "Сейчас нет предложения записи.";
@@ -207,14 +207,14 @@ export function shouldRefresh(view: PromptView | null, visible: boolean, pending
 
 export const recordingTexts = {
   heading: "Идёт запись",
-  tip: "Окно можно закрыть — запись продолжится. Остановить можно и в «Записях и задачах».",
+  tip: "Окно можно закрыть — запись продолжится. Остановить можно и в окне paratech, раздел «Записи».",
   stop: "Остановить",
   stopping: "Остановка…",
   hide: "Скрыть",
   stopHint: "Остановить запись",
   hideHint: "Скрыть окно, запись продолжится",
-  stopFailed: "Не удалось остановить запись. Остановите её в «Записях и задачах».",
-  noLesson: "Запись без занятия",
+  stopFailed: "Не удалось остановить запись. Остановите её в окне paratech, раздел «Записи».",
+  noLesson: "Запись без пары",
 } as const;
 
 /** What the popup shows of the running recording besides its sound. */

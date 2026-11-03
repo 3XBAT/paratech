@@ -42,4 +42,10 @@ var (
 
 	// ErrInvalidTeacherRole means a role that is not one of TeacherRoles; it wraps ErrInvalidTeacher.
 	ErrInvalidTeacherRole = fmt.Errorf("%w: role", ErrInvalidTeacher)
+
+	// ErrRemoved means a change of a removed subject other than restoring it.
+	ErrRemoved = errors.New("subject is removed")
+
+	// ErrRestoreExpired means a removed subject was to be restored after RestoreWindow.
+	ErrRestoreExpired = errors.New("restore window of the removed subject is over")
 )

@@ -4,10 +4,14 @@
 
 import type { RecordingItem } from "./bindings/activity.js";
 import type { TodayDeadline, TodayDone, TodayLesson, TodayPost, TodayWaiting } from "./bindings/today.js";
+import { dayAndTime, dayText, daysBetween, daysLeftText, dueText, monthsShort, pad, parseMoment, timeText, weekdaysShort } from "./dueText.js";
 import { plural } from "./plural.js";
 import { chainStatusView } from "./recordingRowView.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 import type { IconName } from "./ui/Icon.js";
+
+// The deadline wording lives in dueText.ts; the names stay importable from here.
+export { dayAndTime, dayText, daysBetween, daysLeftText, dueText, parseMoment, timeText };
 
 export const texts = {
   title: "Сегодня",
@@ -27,7 +31,7 @@ export const texts = {
   postsEmpty: "Сообщений после пар пока нет.",
   loading: "Загрузка…",
   refresh: "Обновить",
-  allRecords: "Записи и задания",
+  allRecords: "Записи",
   back: "К сегодняшнему дню",
   open: "Открыть",
   summaryReady: "Конспект готов",
@@ -36,7 +40,6 @@ export const texts = {
   noTitle: "Без названия",
 } as const;
 
-const weekdaysShort = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"] as const;
 const weekdaysLong = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"] as const;
 const monthsGen = [
   "января",
@@ -52,24 +55,6 @@ const monthsGen = [
   "ноября",
   "декабря",
 ] as const;
-const monthsShort = ["янв.", "февр.", "мар.", "апр.", "мая", "июн.", "июл.", "авг.", "сент.", "окт.", "нояб.", "дек."] as const;
-
-const pad = (n: number) => String(n).padStart(2, "0");
-
-/** The moment of an RFC 3339 text, null for an empty or unreadable one. */
-export function parseMoment(s: string): Date | null {
-  if (s === "") {
-    return null;
-  }
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-/** «10:30» in the local time zone, "" when unknown. */
-export function timeText(s: string): string {
-  const d = parseMoment(s);
-  return d === null ? "" : `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 /** «21.10» in the local time zone, "" when unknown. */
 export function shortDate(s: string): string {
@@ -83,30 +68,10 @@ export function dayTitle(day: string): string {
   return d === null ? "" : `${weekdaysLong[d.getDay()]}, ${d.getDate()} ${monthsGen[d.getMonth()]}`;
 }
 
-/** «до сб, 24 окт.» for a due date, "" when unknown. */
-export function dueText(due: string): string {
-  const d = parseMoment(due);
-  return d === null ? "" : `до ${weekdaysShort[d.getDay()]}, ${d.getDate()} ${monthsShort[d.getMonth()]}`;
-}
-
 /** The weekday and the date of a deadline row: «пт» over «23.10». */
 export function deadlineDay(due: string): { weekday: string; date: string } {
   const d = parseMoment(due);
   return d === null ? { weekday: "", date: "" } : { weekday: weekdaysShort[d.getDay()], date: shortDate(due) };
-}
-
-/** «сегодня», «завтра», «через 2 дня», «через 5 дней»; a past date reads «просрочено». */
-export function daysLeftText(n: number): string {
-  if (n < 0) {
-    return "просрочено";
-  }
-  if (n === 0) {
-    return "сегодня";
-  }
-  if (n === 1) {
-    return "завтра";
-  }
-  return `через ${n} ${plural(n, "день", "дня", "дней")}`;
 }
 
 const kinds: Readonly<Record<string, string>> = {
@@ -114,7 +79,7 @@ const kinds: Readonly<Record<string, string>> = {
   seminar: "Семинар",
   practice: "Практика",
   lab: "Лабораторная",
-  other: "Занятие",
+  other: "Пара",
 };
 
 /** The Russian word of a lesson kind code, "" when unknown. */
@@ -144,10 +109,10 @@ export function dayMonthText(s: string): string {
 }
 
 /**
- * «1 задание · до сб, 24 окт.»; "" when no homework was found. When all of it is marked done (done is the count of
- * the done ones) the deadline is of no use: «1 задание · выполнено».
+ * «1 задание · до сб, 24 окт., 20:00»; "" when no homework was found. When all of it is marked done (done is the count of
+ * the done ones) the deadline is of no use: «1 задание · выполнено». `now` makes today and tomorrow read shorter.
  */
-export function homeworkText(count: number, earliestDue: string, done = 0): string {
+export function homeworkText(count: number, earliestDue: string, done = 0, now?: Date): string {
   if (count <= 0) {
     return "";
   }
@@ -155,7 +120,7 @@ export function homeworkText(count: number, earliestDue: string, done = 0): stri
   if (done >= count) {
     return `${n} · ${plural(count, "выполнено", "выполнены", "выполнено")}`;
   }
-  const due = dueText(earliestDue);
+  const due = dueText(earliestDue, now);
   return due === "" ? n : `${n} · ${due}`;
 }
 
@@ -179,7 +144,7 @@ export function liveStatus(lessonId: string, recordings: readonly RecordingItem[
   const recognition = mine.find((r) => r.stage === "transcribing");
   if (recognition !== undefined) {
     const pct = Math.max(0, Math.min(100, Math.round(recognition.progressPercent)));
-    return { kind: "run", text: `Распознавание · ${pct} %` };
+    return { kind: "run", text: `Расшифровка · ${pct} %` };
   }
   return null;
 }
@@ -207,7 +172,7 @@ const waitingKinds: Readonly<Record<string, { label: string; icon: WaitingLine["
   export_homework: { label: "Выгрузка задания", icon: "tasks" },
 };
 
-export function waitingLine(w: TodayWaiting): WaitingLine {
+export function waitingLine(w: TodayWaiting, now?: Date): WaitingLine {
   const k = waitingKinds[w.kind] ?? { label: "Действие", icon: "tasks" as const };
   const recipient = w.recipient === "" ? "" : `→ ${w.recipient}`;
   return {
@@ -215,7 +180,7 @@ export function waitingLine(w: TodayWaiting): WaitingLine {
     label: k.label,
     title: titleOf(w.title),
     subject: w.subject.trim(),
-    meta: [dueText(w.due), recipient].filter((p) => p !== "").join(" · "),
+    meta: [dueText(w.due, now), recipient].filter((p) => p !== "").join(" · "),
     icon: k.icon,
   };
 }
@@ -230,20 +195,48 @@ export interface DeadlineLine {
   urgent: boolean;
 }
 
-export function deadlineLine(b: TodayDeadline): DeadlineLine {
-  const { weekday, date } = deadlineDay(b.due);
-  return { key: b.assignmentId, weekday, date, title: titleOf(b.title), subject: b.subject.trim(), chip: daysLeftText(b.daysLeft), urgent: b.urgent };
+/**
+ * The chip of a «Горит» row. The days come from the local `now` (a stale snapshot never says «завтра» for today); the
+ * core's daysLeft is only the fallback for an unreadable due. A date alone reads as «до конца дня», so the time is
+ * always there: «сегодня до 20:00», «завтра до 18:30», «через 3 дня, до 18:30». A moment that has passed reads «просрочено».
+ */
+export function deadlineChip(b: Pick<TodayDeadline, "due" | "daysLeft">, now: Date): string {
+  const d = parseMoment(b.due);
+  if (d === null) {
+    return daysLeftText(b.daysLeft);
+  }
+  if (d.getTime() <= now.getTime()) {
+    return daysLeftText(-1);
+  }
+  const days = daysBetween(d, now);
+  const time = timeText(b.due);
+  if (days === 0) {
+    return `сегодня до ${time}`;
+  }
+  if (days === 1) {
+    return `завтра до ${time}`;
+  }
+  return `${daysLeftText(days)}, до ${time}`;
 }
 
-/** «Ближайший срок — пт, 23.10» from the deadlines of the week (the earliest one); "" when there is none. */
-export function nearestDeadlineText(burning: readonly Pick<TodayDeadline, "due">[]): string {
-  const dues = burning.map((b) => ({ due: b.due, at: parseMoment(b.due) })).filter((b) => b.at !== null);
+export function deadlineLine(b: TodayDeadline, now: Date): DeadlineLine {
+  const { weekday, date } = deadlineDay(b.due);
+  return { key: b.assignmentId, weekday, date, title: titleOf(b.title), subject: b.subject.trim(), chip: deadlineChip(b, now), urgent: b.urgent };
+}
+
+/**
+ * «Ближайший срок — пт, 23 окт., 20:00» from the deadlines of the week (the earliest one); "" when there is none. With
+ * `now` the deadlines that have passed are skipped.
+ */
+export function nearestDeadlineText(burning: readonly Pick<TodayDeadline, "due">[], now?: Date): string {
+  const dues = burning
+    .map((b) => ({ due: b.due, at: parseMoment(b.due) }))
+    .filter((b) => b.at !== null && (now === undefined || b.at.getTime() > now.getTime()));
   if (dues.length === 0) {
     return "";
   }
   const first = dues.reduce((a, b) => ((b.at as Date) < (a.at as Date) ? b : a));
-  const { weekday, date } = deadlineDay(first.due);
-  return `Ближайший срок — ${weekday}, ${date}`;
+  return `Ближайший срок — ${dayAndTime(first.at as Date)}`;
 }
 
 export const statusTexts = { local: "Звук обрабатывается только на этом компьютере" } as const;
@@ -283,13 +276,13 @@ export interface PostLine {
 }
 
 /** A post of the agent after a lesson: the headline is the core's text; «Открыть» only for a ready summary. */
-export function postLine(p: TodayPost): PostLine {
+export function postLine(p: TodayPost, now?: Date): PostLine {
   const meta = [titleOf(p.lesson.title), timeText(p.shownAt)].filter((x) => x !== "").join(" · ");
   return {
     key: p.recordingId,
     headline: p.headline,
     meta,
-    homework: homeworkText(p.homework, p.earliestDue, p.homeworkDone),
+    homework: homeworkText(p.homework, p.earliestDue, p.homeworkDone, now),
     canOpen: p.summaryReady,
     recordingId: p.recordingId,
   };
@@ -308,7 +301,7 @@ export interface LessonLine {
   post: { text: string; homework: string; canOpen: boolean; recordingId: string } | null;
 }
 
-export function lessonLine(l: TodayLesson, recordings: readonly RecordingItem[], day = ""): LessonLine {
+export function lessonLine(l: TodayLesson, recordings: readonly RecordingItem[], day = "", now?: Date): LessonLine {
   const { start, end } = lessonTimes(l);
   return {
     key: l.id,
@@ -323,7 +316,7 @@ export function lessonLine(l: TodayLesson, recordings: readonly RecordingItem[],
         ? null
         : {
             text: l.post.summaryReady ? texts.summaryReady : texts.summaryPending,
-            homework: homeworkText(l.post.homework, l.post.earliestDue, l.post.homeworkDone),
+            homework: homeworkText(l.post.homework, l.post.earliestDue, l.post.homeworkDone, now),
             canOpen: l.post.summaryReady,
             recordingId: l.post.recordingId,
           },
@@ -336,7 +329,7 @@ export interface Problem {
   icon: IconName | null;
 }
 
-/** Failed recordings that started in the day; an old failure stays on «Записи и задания» only. */
+/** Failed recordings that started in the day; an old failure stays on «Записи» only. */
 export function dayProblems(recordings: readonly RecordingItem[], day: string): RecordingItem[] {
   const from = parseMoment(day);
   return recordings.filter((r) => {

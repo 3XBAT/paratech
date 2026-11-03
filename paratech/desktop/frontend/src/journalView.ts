@@ -4,6 +4,7 @@
 
 import type { CallProblem, HistoryFilter, JournalLine, UndoView } from "./bindings/agent.js";
 import { formatTime } from "./activityView.js";
+import { waitingWords } from "./statusWords.js";
 
 export const texts = {
   title: "Журнал",
@@ -53,11 +54,11 @@ const statusLabels: Readonly<Record<string, string>> = {
   QUEUED: "В очереди",
   RUNNING: "Выполняется",
   COMPLETED: "Завершено",
-  RETRY_WAIT: "Ждёт повтора",
+  RETRY_WAIT: waitingWords.retry,
   CANCELLED: "Остановлено",
-  WAITING_FOR_NETWORK: "Ждёт сети",
-  WAITING_FOR_QUOTA: "Ждёт лимита",
-  WAITING_FOR_POWER: "Ждёт питания",
+  WAITING_FOR_NETWORK: waitingWords.network,
+  WAITING_FOR_QUOTA: waitingWords.quota,
+  WAITING_FOR_POWER: waitingWords.power,
 };
 
 /** The states the status filter offers: "" is any. */
@@ -79,10 +80,10 @@ const toolLabels: Readonly<Record<string, string>> = {
   set_lesson_info: "Изменены данные пары",
   make_summary: "Запущен конспект",
   make_lecture_text: "Запущен текст лекции",
-  find_homework: "Запущен поиск ДЗ",
-  generate_draft: "Запущено решение ДЗ",
+  find_homework: "Поиск заданий в записи пары",
+  generate_draft: "Запущено решение задания",
   edit_due: "Изменён срок задания",
-  triage_assignment: "Оценено задание",
+  triage_assignment: "Задание разобрано",
   write_work: "Запущена работа по заданию",
   propose_deadline: "Предложен срок в календарь",
   propose_send: "Предложена отправка письма",
@@ -90,11 +91,11 @@ const toolLabels: Readonly<Record<string, string>> = {
 };
 
 const jobLabels: Readonly<Record<string, string>> = {
-  stt: "Распознавание речи",
+  stt: "Расшифровка",
   summarize: "Конспект",
-  extract_homework: "Поиск домашних заданий",
+  extract_homework: "Поиск заданий",
   lecture_text: "Текст лекции",
-  homework_draft: "Решение домашнего задания",
+  homework_draft: "Решение задания",
   send_email: "Отправка письма",
 };
 

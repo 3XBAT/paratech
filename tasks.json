@@ -6209,7 +6209,7 @@
             "dependencies": [
                 "TASK-151"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-289",
@@ -7532,7 +7532,7 @@
             "dependencies": [
                 "TASK-304"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-344",
@@ -7559,7 +7559,7 @@
                 "npm run test и run build"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-345",

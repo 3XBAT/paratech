@@ -166,12 +166,7 @@ func (t tools) actionLine(ctx context.Context, line values.ActionLine) values.Ac
 	}
 	out := values.AssignmentLine{Assignment: ref, Title: v.Title}
 	if !v.Due.IsZero() {
-		loc := t.clock.Now().Location()
-		out.Due = dateOf(v.Due, loc)
-		local := v.Due.In(loc)
-		if !out.Due.IsZero() {
-			out.DueTime, _ = values.NewTimeOfDay(local.Hour(), local.Minute())
-		}
+		out.Due, out.DueTime = dueOf(v.Due, t.clock.Now().Location())
 	}
 	if v.Subject != "" {
 		subjects, err := t.library.ResolveSubjects(ctx, []string{v.Subject})

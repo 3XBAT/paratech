@@ -24,7 +24,7 @@ export const deleteTexts = {
   nothingStored: "Звука и результатов нет — удалится только строка в списке.",
   notDeleted: "Не будет удалена:",
   drafts: "С решениями — удалятся, только если отметить:",
-  kept: "По ним отправлялись письма — останутся в «Домашних заданиях»:",
+  kept: "По ним отправлялись письма — останутся в «Заданиях»:",
   allMissing: "Записи уже удалены. Обновите список.",
   selectedDelete: "Удалить выбранные",
   selectedClear: "Снять выбор",
@@ -168,7 +168,7 @@ export function deleteOutcome(res: DeleteResult, p: DeletePreview | null): Delet
     lines.push(res.message);
   }
   if (res.keptAssignments.length > 0) {
-    lines.push(`Найденные задания остались в «Домашних заданиях»: ${res.keptAssignments.length}.`);
+    lines.push(`Найденные задания остались в «Заданиях»: ${res.keptAssignments.length}.`);
   }
   for (const f of res.failures) {
     lines.push(`${titles.get(f.recordingId) ?? "Запись"}: ${f.message}`);

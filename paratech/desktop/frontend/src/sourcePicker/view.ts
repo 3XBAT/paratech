@@ -1,4 +1,4 @@
-// The source picker shared by the popup, «Диагностика» and «Записи и задачи» (TASK-059, TASK-081): the entries, the
+// The source picker shared by the popup, «Диагностика» and «Записи» (TASK-059, TASK-081): the entries, the
 // selection rules, the warnings, the polling of the open apps and the texts of a refused start. Names and titles of
 // apps are untrusted: the pages render them as text only.
 
@@ -8,7 +8,7 @@ import { errorMessages, type SourcesView } from "../bindings/prompt.js";
 /** Texts of the start problems (domain/recording/prompt Problem). */
 export const problemTexts: Readonly<Record<string, string>> = {
   unavailable: "Запись пока недоступна в этой сборке.",
-  in_progress: "Уже идёт другая запись — её можно остановить в «Записях и задачах».",
+  in_progress: "Уже идёт другая запись — её можно остановить в окне paratech, раздел «Записи».",
   recovering: "Восстанавливаются прерванные записи. Повторите через минуту.",
   source_gone: "Выбранное приложение не запущено. Откройте его или выберите другое.",
   failed: "Не удалось начать запись.",

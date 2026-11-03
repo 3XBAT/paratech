@@ -99,16 +99,16 @@ test("sizes and counts are worded in Russian", () => {
 
 // TASK-341: the tiles of the old list page are gone; the tree shows the semesters and subjects, and the empty state is
 // only for a library without subjects (it was SubjectList with the cards).
-test("the tree shows semesters and subjects; an empty library offers «Предмет»", () => {
+test("the tree shows semesters and subjects; an empty library offers «Добавить предмет»", () => {
   const out = renderToStaticMarkup(h(SubjectTree, { subjects: [subject()], currentId: "s1", counts: null, busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop }));
   assert.match(out, /Осень 2026/);
   assert.match(out, /Матанализ/);
   const empty = renderToStaticMarkup(h(EmptySubjects, { onAdd: noop }));
   assert.match(empty, /Предметов пока нет/);
-  assert.match(empty, />Предмет</);
+  assert.match(empty, />Добавить предмет</);
 });
 
-test("the subject page lists the folders with their files; «Папка» is in the tree", () => {
+test("the subject page lists the folders with their files; «Новая папка» is in the tree", () => {
   const out = renderToStaticMarkup(
     h(SubjectDetail, {
       subject: subject(), materials: [material(), material({ id: "m2", name: "удалён.pdf", removed: true }), material({ id: "m3", name: "входящий.txt", folderId: "", inbox: true })],
@@ -124,8 +124,8 @@ test("the subject page lists the folders with their files; «Папка» is in 
   const tree = renderToStaticMarkup(
     h(SubjectTree, { subjects: [subject()], currentId: "s1", counts: new Map(), busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop }),
   );
-  assert.match(tree, />Папка</);
-  assert.match(tree, />Предмет</);
+  assert.match(tree, />Новая папка</);
+  assert.match(tree, />Добавить предмет</);
   const form = renderToStaticMarkup(
     h(SubjectDetail, {
       subject: subject(), materials: [], folderForm: true, busy: false, error: "Папка с таким именем уже есть.",

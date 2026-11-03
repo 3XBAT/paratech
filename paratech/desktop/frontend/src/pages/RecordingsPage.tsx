@@ -278,7 +278,7 @@ export function RecordingsPage({
   }, []);
   const { sound } = useRecordingSound(api.recordingSound, visible && anyRecording(recordings ?? []));
 
-  // Two sections, «Записи» and «Задачи», each with «Идут» and the folded «Завершённые» (TASK-098); rows in progress
+  // Two sections, «Записи» and «Фоновая обработка», each with «Идут» and the folded «Завершённые» (TASK-098); rows in progress
   // (and those with Stop or Run now) always stay in view. Only the latest draft job per assignment is listed.
   const groups = pageGroups(recordings ?? [], jobs ?? []);
 
@@ -336,11 +336,13 @@ export function RecordingsPage({
     section: { active: T[]; finished: T[] },
     row: (item: T) => ReactNode,
   ) {
+    // «Записи» is the page h1, so its «Идут» is an h2 (no skipped level); the tasks sit under the h2 «Фоновая обработка».
+    const Sub = list === "recordings" ? "h2" : "h3";
     return (
       <>
         {section.active.length > 0 && (
           <>
-            <h3 className="arows-sub">Идут</h3>
+            <Sub className="arows-sub">Идут</Sub>
             {card(section.active.map(row))}
           </>
         )}
@@ -348,7 +350,7 @@ export function RecordingsPage({
           <CollapsibleList
             title={
               <>
-                Завершённые<span className="vh"> {name}</span>
+                Завершённые<span className="vh"> · {name}</span>
               </>
             }
             items={section.finished}
@@ -372,7 +374,7 @@ export function RecordingsPage({
   return (
     <section className="page recordings">
       <div className="head">
-        <h1>Записи и задачи</h1>
+        <h1>Записи</h1>
         <div className="head-acts">
           <Button
             icon="up"
@@ -461,8 +463,6 @@ export function RecordingsPage({
         </Banner>
       )}
 
-      {/* The empty state has its own heading. */}
-      {!noRecordings && <h2 className="group-title">Записи</h2>}
       {recordingsError && (
         <Banner kind="fail" role="alert">
           {recordingsError}
@@ -508,7 +508,7 @@ export function RecordingsPage({
         sectionGroups("recordings", "записи", groups.recordings, recordingRow)
       )}
 
-      <h2 className="group-title">Задачи</h2>
+      <h2 className="group-title">Фоновая обработка</h2>
       {jobsError && (
         <Banner kind="fail" role="alert">
           {jobsError}
@@ -519,7 +519,7 @@ export function RecordingsPage({
       ) : visibleJobs.length === 0 ? (
         <p className="muted arows-empty">{tasksEmptyText}</p>
       ) : (
-        sectionGroups("tasks", "задачи", groups.tasks, jobRow)
+        sectionGroups("tasks", "фоновая обработка", groups.tasks, jobRow)
       )}
 
       {deleting !== null && (

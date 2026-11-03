@@ -46,9 +46,9 @@ test("every waiting status has its own non-empty reason", () => {
     assert.ok(reason.trim() !== "" && reason !== waitingStatuses[i], waitingStatuses[i]);
   }
   assert.equal(new Set(reasons).size, reasons.length);
-  assert.equal(jobStatusLabel("WAITING_FOR_POWER"), "Ждёт зарядку");
+  assert.equal(jobStatusLabel("WAITING_FOR_POWER"), "Ждёт зарядки");
   assert.equal(jobStatusLabel("WAITING_FOR_NETWORK"), "Ждёт интернет");
-  assert.equal(jobStatusLabel("WAITING_FOR_QUOTA"), "Минуты обработки закончились");
+  assert.equal(jobStatusLabel("WAITING_FOR_QUOTA"), "Ждёт пополнения минут");
 });
 
 test("every status has a distinct Russian label and unknown ones are shown raw", () => {
@@ -60,11 +60,11 @@ test("every status has a distinct Russian label and unknown ones are shown raw",
   }
   assert.equal(recordingStatusLabel("PAUSED"), "PAUSED");
   assert.equal(jobStatusLabel("toString"), "toString");
-  assert.equal(jobTypeLabel("stt"), "Распознавание речи");
+  assert.equal(jobTypeLabel("stt"), "Расшифровка");
   assert.equal(jobTypeLabel("calendar_sync"), "Синхронизация календаря");
   // TASK-076: send_email and homework_draft are the jobs the page still lists, so they have labels now.
   assert.equal(jobTypeLabel("send_email"), "Отправка письма");
-  assert.equal(jobTypeLabel("homework_draft"), "Решение домашнего задания");
+  assert.equal(jobTypeLabel("homework_draft"), "Решение задания");
   assert.equal(jobTypeLabel("new_kind"), "new_kind");
 });
 
@@ -97,9 +97,9 @@ test("errors of the core map to Russian text, unknown ones to a generic text", (
   assert.equal(generic, "Не удалось выполнить действие.");
   assert.equal(actionErrorText(undefined), generic);
   assert.equal(actionErrorText(new Error("constructor")), generic);
-  assert.equal(loadErrorText(new Error(errorMessages.unavailable), "jobs"), "Записи и задачи сейчас недоступны.");
+  assert.equal(loadErrorText(new Error(errorMessages.unavailable), "jobs"), "Записи сейчас недоступны.");
   assert.equal(loadErrorText(new Error("x"), "recordings"), "Не удалось загрузить записи.");
-  assert.equal(loadErrorText(new Error("x"), "jobs"), "Не удалось загрузить задачи.");
+  assert.equal(loadErrorText(new Error("x"), "jobs"), "Не удалось загрузить список фоновой обработки.");
 });
 
 test("a running recording shows the time elapsed by the client clock", () => {
@@ -193,7 +193,7 @@ test("a draft job row is named by the core and opens its assignment (TASK-094)",
   assert.equal(jobTitle(draft), "ДЗ: Задача 1 · Матанализ");
   assert.equal(jobAssignment(draft), "a1");
   // Without a label (another job, or the assignment is gone) the row keeps its type and opens nothing.
-  assert.equal(jobTitle({ ...draft, label: "" }), "Решение домашнего задания");
+  assert.equal(jobTitle({ ...draft, label: "" }), "Решение задания");
   assert.equal(jobTitle(job), jobTypeLabel("stt"));
   assert.equal(jobAssignment(job), "");
   for (const key of ["assignmentId", "assignmentTitle", "assignmentSubject", "label"]) {
