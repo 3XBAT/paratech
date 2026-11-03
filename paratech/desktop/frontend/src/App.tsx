@@ -286,8 +286,9 @@ export function App() {
         setRoute(routeToPage("subjects"));
         setVisit((v) => v + 1);
       },
+      openAssignments: () => openPage("homework"),
     }),
-    [openTeacher, openAssignmentFor],
+    [openTeacher, openAssignmentFor, openPage],
   );
   // Alt+←/→ and the mouse side buttons walk the history of routes (TASK-201).
   useNavHistory(route, setRoute, (r, from) => {

@@ -99,7 +99,8 @@ export function ConfirmCardView(props: {
       )}
       {m.openTasks && props.nav !== undefined && (
         <div className="ag-actions">
-          <Button size="sm" variant="secondary" onClick={() => props.nav?.openAssignment(m.assignmentId)}>
+          {/* The assignment is deleted: its own screen would say «не найдено», so the list opens. */}
+          <Button size="sm" variant="secondary" onClick={() => props.nav?.openAssignments()}>
             {confirmTexts.openTasks}
           </Button>
         </div>

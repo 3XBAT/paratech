@@ -429,15 +429,20 @@ test("waiting: the title and subject are text, never markup", () => {
   assert.ok(out.includes("&lt;img src=x onerror=alert(1)&gt;"));
 });
 
-test("done: «Задание удалено вместе с событием…» and «Открыть «Задания»» (the student can restore it there)", () => {
+test("done: «Задание удалено вместе с событием…» and «Открыть «Задания»» (the button opens the list, not the deleted assignment)", () => {
   const seen = [];
-  const nav = { openAssignment: (id, opts) => seen.push([id, opts]), openTeacher: noop, openSubjects: noop };
+  const nav = {
+    openAssignment: (id) => seen.push(["assignment", id]),
+    openAssignments: () => seen.push("list"),
+    openTeacher: noop,
+    openSubjects: noop,
+  };
   const out = view(done(), { nav });
   assert.ok(out.includes("Задание удалено вместе с событием в Google Календаре."));
   assert.doesNotMatch(out, /Домашние задания/);
   assert.match(out, /<button(?![^>]*disabled)[^>]*>Открыть «Задания»</);
   assert.doesNotMatch(out, />Не удалять<|Да, удалить/);
-  // The press opens the assignment page by the card's target id.
+  // The press opens the «Задания» list: the assignment of the card is deleted, its own screen would say «не найдено».
   const tree = ConfirmCardView({ model: confirmCardModel(done()), busy: "", error: "", onYes: noop, onNo: noop, nav });
   const find = (n, out = []) => {
     if (n === null || typeof n !== "object") return out;
@@ -446,7 +451,7 @@ test("done: «Задание удалено вместе с событием…�
     return find(n.props?.children, out);
   };
   find(tree).find((p) => p.children === "Открыть «Задания»").onClick();
-  assert.deepEqual(seen, [["a1", undefined]]);
+  assert.deepEqual(seen, ["list"]);
   // Without the window's navigation, and while waiting or after «Не удалять», there is no such button.
   assert.doesNotMatch(view(done()), /<button/);
   assert.doesNotMatch(view(asg(), { nav }), /Открыть «Задания»/);

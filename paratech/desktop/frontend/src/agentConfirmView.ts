@@ -29,7 +29,7 @@ export const confirmTexts = {
   doneDeadline: "Срок добавлен в календарь.",
   doneSend: "Письмо отправлено.",
   doneDelete: "Запись удалена.",
-  // The section is «Задания» (glossary: not «Домашние задания»; words344.test.mjs checks it). The student can restore it there.
+  // The section is «Задания» (glossary: not «Домашние задания»; words344.test.mjs checks it).
   doneDeleteAssignment: "Задание удалено вместе с событием в Google Календаре.",
   openTasks: "Открыть «Задания»",
   /** Under the refusal «письмо ещё отправляется»: the assignment page is where the letter is checked. */
@@ -80,7 +80,7 @@ export interface ConfirmCardModel {
   /** The words of the two buttons: «Да» / «Нет», or what the question asks («Да, удалить» / «Не удалять»). */
   yesLabel: string;
   noLabel: string;
-  /** A deleted assignment: «Открыть «Задания»» (the student can restore it there); and the assignment for «Открыть задание». */
+  /** A deleted assignment: «Открыть «Задания»» (the list: the assignment itself is gone); and the assignment for «Открыть задание». */
   openTasks: boolean;
   assignmentId: string;
   /** Why «Да» is shown but off («Выберите, кому отправить.»); "" when it may be pressed. */
