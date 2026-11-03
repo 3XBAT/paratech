@@ -68,6 +68,8 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 		return refuse(t.refusalOf(ctx, tool, err))
 	case p.noop != nil:
 		return t.result(c, *p.noop, values.Ref{}, nil)
+	case p.noopMarks != nil:
+		return t.marksResult(c, p.noopMarks, nil)
 	}
 
 	entry, err := t.journal.Begin(ctx, agentjournal.BeginInput{
@@ -110,6 +112,9 @@ func (t tools) write(ctx context.Context, st agentturn.Step, c agentturn.Call) r
 
 // outcome is the result of an action that went through: the triage row of triage_assignment, else its write row.
 func (t tools) outcome(c agentturn.Call, eff effect, cards []values.Card) ran {
+	if eff.marks != nil {
+		return t.marksResult(c, eff.marks, cards)
+	}
 	if eff.triage == nil {
 		return t.result(c, eff.row, eff.created, cards)
 	}
@@ -145,6 +150,9 @@ func (t tools) replay(ctx context.Context, c agentturn.Call, e agentjournal.Entr
 	case action.StatusPending, action.StatusUnknown, action.StatusProposed:
 		return ran{out: agentturn.Outcome{Result: values.RefusalResult(id, values.RefuseUnknown)}, write: true}
 	}
+	if r, ok := t.replayAssignment(c, e.Compensation); ok {
+		return r
+	}
 	row := values.WriteRow{Changed: true}
 	var created values.Ref
 	switch v := e.Compensation.(type) {
@@ -175,6 +183,9 @@ func (t tools) refusalOf(ctx context.Context, tool values.Tool, err error) value
 	// An assignment the student deleted is hidden from the agent as if it never was (ADR-0029).
 	if errors.Is(err, assignment.ErrDeleted) {
 		return values.RefuseUnknownID
+	}
+	if why, ok := assignmentRefusal(tool, err); ok {
+		return why
 	}
 	// The subject or lesson of a new assignment the use case does not know: an ID that passed provenance but is gone.
 	if tool == values.ToolCreateAssignment &&
