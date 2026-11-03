@@ -14,8 +14,10 @@ import (
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
 	"paratech/desktop/internal/domain/recording/prompt"
+	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/schedule/lesson"
 	"paratech/desktop/internal/domain/shared"
+	"paratech/desktop/testenv"
 )
 
 const (
@@ -148,6 +150,20 @@ func TestCallSubject(t *testing.T) {
 			name: "call links unread", subject: callSubjectName, edit: func(c *callEnv) { c.links.err = storage },
 			failed: "call links unread",
 		},
+		// The link is offered for the OFFERED prompt only, even while a prompt in another state is still current.
+		{name: "starting prompt", subject: callSubjectName, edit: moveCurrent(func(p *prompt.Prompt) error {
+			return p.BeginStart()
+		})},
+		{name: "started prompt", subject: callSubjectName, edit: moveCurrent(func(p *prompt.Prompt) error {
+			if err := p.BeginStart(); err != nil {
+				return err
+			}
+			return p.Started()
+		})},
+		{name: "skipped prompt", subject: callSubjectName, edit: moveCurrent(func(p *prompt.Prompt) error { return p.Skip() })},
+		{name: "expired prompt", subject: callSubjectName, edit: moveCurrent(func(p *prompt.Prompt) error {
+			return p.Expire(lessonEnd)
+		})},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -185,6 +201,44 @@ func TestCallSubject(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// moveCurrent moves the current prompt to another state but leaves it current, so only its state stops the link.
+func moveCurrent(move func(p *prompt.Prompt) error) func(c *callEnv) {
+	return func(c *callEnv) {
+		c.svc.mu.Lock()
+		defer c.svc.mu.Unlock()
+		if err := move(c.svc.current); err != nil {
+			panic(err)
+		}
+	}
+}
+
+// A prompt whose start runs keeps being current, yet offers no link; the subjects are not even read.
+func TestCallSubjectWhileStarting(t *testing.T) {
+	testenv.NoGoroutineLeaks(t)
+	ctx := context.Background()
+	c := newCallEnv(t, callSubjectName)
+	v := c.offer("lesson-1")
+	entered, release := c.recordings.hold()
+	defer release()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.svc.Start(ctx, v.ID, values.WholeComputer())
+		done <- err
+	}()
+	<-entered
+	if cur, ok := c.svc.Current(); !ok || cur.ID != v.ID || cur.State != prompt.StateStarting {
+		t.Fatalf("current %+v, %v, want STARTING", cur, ok)
+	}
+	if got := c.svc.CallSubject(ctx, v.ID); got != "" || len(c.subjects.names) != 0 {
+		t.Fatalf("while starting: %q, names %v", got, c.subjects.names)
+	}
+	release()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 

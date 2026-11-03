@@ -14,7 +14,7 @@ import (
 const opCallSubject = "recording prompt: call subject unread"
 
 // CallSubject returns the library subject whose call link the popup of prompt id may offer («Подключиться», ADR-0032,
-// TASK-370): only for the current lesson prompt whose lesson's subject string resolves to exactly one subject, as on
+// TASK-370): only for the current lesson prompt, while it is offered, whose lesson's subject string resolves to exactly one subject, as on
 // «Сегодня», and only while that subject keeps a link. Anything else, failures included, is "": the popup then simply
 // offers no link. The link stays here; the popup opens it by the subject. Failures are logged without their cause: a
 // storage error may carry row data, and a link a meeting password.
@@ -63,12 +63,12 @@ func (s *Service) CallSubject(ctx context.Context, id prompt.ID) shared.SubjectI
 	return r.Match.ID
 }
 
-// promptLesson is the lesson of the current prompt when it is id and offers a lesson, else "".
+// promptLesson is the lesson of the current prompt when it is id and is an offered lesson prompt, else "".
 func (s *Service) promptLesson(id prompt.ID) shared.LessonID {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, err := s.lookup(id)
-	if err != nil || p.Kind() != prompt.KindLesson {
+	if err != nil || p.Kind() != prompt.KindLesson || p.State() != prompt.StateOffered {
 		return ""
 	}
 	return p.Lesson().ID
