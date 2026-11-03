@@ -113,10 +113,17 @@ type call struct {
 // reader is the strict answer check of a quarantined reader: canonical turns a valid answer into the form the Hub
 // stores and returns; failed is the stored marker of a charged refusal, which canonical never accepts.
 type reader struct {
-	canonical func(output string) (string, error)
+	canonical func(output string) (checked, error)
 	failed    string
 	// reask, when set, names the refusals the model may fix: the server note for one more call, "" for any other.
 	reask func(err error) string
+}
+
+// checked is a reader answer that passed: the canonical output and how many of its parts the check dropped (only
+// ANSWER drops parts; the others pass whole or not at all).
+type checked struct {
+	output  string
+	dropped int
 }
 
 // Outcomes of the second call of a reader (the "reask" attribute of the log line).
@@ -136,18 +143,18 @@ func newReader(op values.Operation, data, note string) (*reader, string, error) 
 		if err != nil {
 			return nil, "", err
 		}
-		return &reader{failed: inspect.FailedOutput, canonical: func(out string) (string, error) {
+		return &reader{failed: inspect.FailedOutput, canonical: func(out string) (checked, error) {
 			a, err := in.ParseAnswer(out)
-			return a.Encode(), err
+			return checked{output: a.Encode()}, err
 		}}, in.ModelData(), nil
 	case values.OperationTriageAssignment:
 		in, err := triage.ParseInput(data)
 		if err != nil {
 			return nil, "", err
 		}
-		return &reader{failed: triage.FailedOutput, canonical: func(out string) (string, error) {
+		return &reader{failed: triage.FailedOutput, canonical: func(out string) (checked, error) {
 			a, err := in.ParseAnswer(out)
-			return a.Encode(), err
+			return checked{output: a.Encode()}, err
 		}, reask: func(err error) string {
 			// Only a missing helper: the rest of the answer was within the schema (ADR-0025, TASK-200).
 			if errors.Is(err, triage.ErrMissingHelper) {
@@ -160,9 +167,12 @@ func newReader(op values.Operation, data, note string) (*reader, string, error) 
 		if err != nil {
 			return nil, "", err
 		}
-		return &reader{failed: answer.FailedOutput, canonical: func(out string) (string, error) {
+		return &reader{failed: answer.FailedOutput, canonical: func(out string) (checked, error) {
 			a, err := in.ParseAnswer(out)
-			return a.Encode(), err
+			return checked{output: a.Encode(), dropped: a.Dropped}, err
+		}, reask: func(error) string {
+			// Any refusal: what is left is broken JSON, another shape or nothing valid, which one more call may fix.
+			return note
 		}}, in.ModelData(), nil
 	}
 	return nil, data, nil
@@ -181,7 +191,8 @@ func (s *Service) Complete(ctx context.Context, cmd Command) (Result, error) {
 // returns; it must not block, as the provider call waits for it. With provider streaming on, the chunks are the
 // model's raw text as it is written: a draft, as the result's output is the checked canonical answer and a failure may
 // follow them. Otherwise, and on a replay, onDelta gets the result's output once, after the settlement. A client that
-// goes away mid-stream does not stop the call: it is read to the end, settled in full and stored. Nothing is retried.
+// goes away mid-stream does not stop the call: it is read to the end, settled in full and stored. A failed call is
+// never retried; a billed answer the check refuses is asked once more as Complete does (unary, no chunks, TASK-366).
 func (s *Service) CompleteStream(ctx context.Context, cmd Command, onDelta func(chunk string)) (Result, error) {
 	if onDelta == nil {
 		onDelta = func(string) {}
@@ -299,13 +310,18 @@ func (s *Service) run(ctx context.Context, cmd Command, op string, onDelta func(
 	output := completion.Output()
 	stop := completion.Stop()
 	if c.reader != nil {
-		canonical, aerr := c.reader.canonical(output)
-		if aerr != nil && !streamed && c.reader.reask != nil {
+		valid, aerr := c.reader.canonical(output)
+		// Also after a streamed answer: the reask is one unary call and sends no chunk, so the client keeps the first
+		// draft until the result, which is the checked answer either way (ADR-0026: chunks are only a draft).
+		if aerr != nil && c.reader.reask != nil {
 			if note := c.reader.reask(aerr); note != "" {
 				var outcome string
-				canonical, usage, stop, outcome, aerr = s.reask(ctx, c, rec, note, completion, aerr)
+				valid, usage, stop, outcome, aerr = s.reask(ctx, c, rec, note, completion, aerr)
 				attrs = append(attrs, "reask", outcome)
 			}
+		}
+		if valid.dropped > 0 {
+			attrs = append(attrs, "dropped", valid.dropped)
 		}
 		if aerr != nil {
 			// The provider billed this answer: charged and stored as a refusal, so a retry with the key repeats the
@@ -319,7 +335,7 @@ func (s *Service) run(ctx context.Context, cmd Command, op string, onDelta func(
 				"stop", stop.String(), "reason", reasonInvalidAnswer, "err", aerr)...)
 			return Result{}, invalidAnswer()
 		}
-		output = canonical
+		output = valid.output
 	}
 	res, quota, err := s.settle(ctx, c, rec.ID, output, usage)
 	if err != nil {
@@ -355,14 +371,14 @@ const reasonInvalidAnswer = "invalid_answer"
 // the account bears). Without time left before the hold expires, or when the second call fails without a billed
 // answer, the first refusal stands with the first usage and stop reason; otherwise the stop reason is the second's.
 func (s *Service) reask(ctx context.Context, c call, rec account.ReservationRecord, note string, first values.Completion,
-	firstErr error) (canonical string, usage values.Usage, stop values.StopReason, outcome string, err error) {
+	firstErr error) (valid checked, usage values.Usage, stop values.StopReason, outcome string, err error) {
 	timeout := min(s.callTimeout, rec.ExpiresAt.Sub(s.clock.Now())-ledgerTimeout)
 	if timeout <= 0 {
-		return "", first.Usage(), first.Stop(), reaskNoTime, firstErr
+		return checked{}, first.Usage(), first.Stop(), reaskNoTime, firstErr
 	}
 	req, err := values.NewRequest(c.request.Model(), c.request.Instructions()+"\n\n"+note, c.request.Data(), c.request.MaxOutput())
 	if err != nil {
-		return "", first.Usage(), first.Stop(), reaskFailed, firstErr
+		return checked{}, first.Usage(), first.Stop(), reaskFailed, firstErr
 	}
 	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	completion, err := s.provider.Complete(callCtx, req)
@@ -373,18 +389,18 @@ func (s *Service) reask(ctx context.Context, c call, rec account.ReservationReco
 	if err != nil {
 		// Not billed to the tester, as a failed first call is released (accepted gap, ADR-0010).
 		s.log.WarnContext(ctx, "completion reask failed", "reservation", rec.ID.String(), "err", err)
-		return "", first.Usage(), first.Stop(), reaskFailed, firstErr
+		return checked{}, first.Usage(), first.Stop(), reaskFailed, firstErr
 	}
 	u1, u2 := first.Usage(), completion.Usage()
 	usage, err = values.NewUsage(u1.Input()+u2.Input(), u1.Output()+u2.Output())
 	if err != nil {
-		return "", u1, first.Stop(), reaskFailed, firstErr
+		return checked{}, u1, first.Stop(), reaskFailed, firstErr
 	}
-	canonical, err = c.reader.canonical(completion.Output())
+	valid, err = c.reader.canonical(completion.Output())
 	if err != nil {
-		return "", usage, completion.Stop(), reaskRefused, err
+		return checked{}, usage, completion.Stop(), reaskRefused, err
 	}
-	return canonical, usage, completion.Stop(), reaskAccepted, nil
+	return valid, usage, completion.Stop(), reaskAccepted, nil
 }
 
 // invalidAnswer is the permanent PROVIDER_ERROR of an answer that breaks the schema of its operation.
