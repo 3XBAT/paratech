@@ -535,7 +535,7 @@ export function RecordingsPage({
         <div className="acts start rec-selected" role="group" aria-label="Выбранные записи">
           <span className="num">{selectedText(selected.size)}</span>
           {/* The trash names the count: the confirmation that follows lists the recordings. */}
-          <IconAction icon="trash" variant="danger" label={selectedDeleteLabel(selected.size)} disabled={deleting !== null} onClick={() => askDelete([...selected])} />
+          <IconAction icon="trash" variant="danger-solid" label={selectedDeleteLabel(selected.size)} disabled={deleting !== null} onClick={() => askDelete([...selected])} />
           <IconAction icon="x" label={deleteTexts.selectedClear} disabled={deleting !== null} onClick={() => setSelected(new Set())} />
         </div>
       )}

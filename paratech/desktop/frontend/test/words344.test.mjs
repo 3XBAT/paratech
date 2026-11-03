@@ -230,8 +230,41 @@ test("a stop card cancels with «Отменить запрос», the word of th
 
 test("a stopped request for quota says what to do: no promise to go on by itself", () => {
   const stop = agentModel({ stopReason: "quota" }).cards.find((c) => c.type === "stopped");
-  assert.equal(stop.text, "Не завершено: закончились минуты обработки. После пополнения нажмите «Повторить».");
+  // TASK-371: the retry is an icon, so the sentence names the way without quoting a word that is not on screen.
+  assert.equal(stop.text, "Не завершено: закончились минуты обработки. Повторить можно после пополнения.");
   assert.deepEqual(stop.buttons.map((b) => b.label), ["Повторить", "Отменить запрос"]);
+});
+
+test("stop and problem lines never quote a button word that is not visible (the buttons are icons)", () => {
+  const lines = [];
+  for (const stopReason of ["offline", "quota", "user", "failed", "expired", "budget", "unknown"]) {
+    lines.push(agentModel({ stopReason }).cards.find((c) => c.type === "stopped")?.text);
+  }
+  for (const problem of ["busy", "stale", "invalid", "budget", "retry_required", "restart_required", "rerun_blocked", "failed"]) {
+    lines.push(agentModel({ problem }).cards.find((c) => c.type === "problem")?.text);
+  }
+  // The request refused as busy: with and without the running one to stop, with and without its own text to send again.
+  const scope = { text: "сделай", subjectId: "", lessonId: "", assignmentId: "", screen: "today" };
+  for (const blocked of [true, false]) {
+    for (const text of ["сделай", ""]) {
+      const refused = {
+        key: "orphan:x", seq: 1, threadId: "", turn: 0, text, scope: text === "" ? null : scope, callProblem: "",
+        update: { threadId: "", turn: 0, subjectId: "", lessonId: "", assignmentId: "", screen: "today", status: "", stopReason: "", problem: "busy", progress: false, cards: [] },
+      };
+      lines.push(entryModel(refused, { last: true, blocked }).cards.find((c) => c.type === "problem")?.text);
+    }
+  }
+  assert.ok(lines.filter((t) => typeof t === "string").length >= 14);
+  const text = (over) => agentModel(over).cards.find((c) => c.type === "stopped" || c.type === "problem")?.text;
+  assert.equal(text({ stopReason: "failed" }), "Не получилось выполнить шаг. Можно повторить.");
+  assert.equal(text({ stopReason: "expired" }), "Запрос устарел. Можно повторить.");
+  assert.equal(agentModel({ problem: "retry_required" }).cards.find((c) => c.type === "problem").text, "Шаг не удался. Можно повторить.");
+  assert.equal(agentModel({ problem: "restart_required" }).cards.find((c) => c.type === "problem").text, "Запрос устарел. Можно повторить.");
+  // The stop card drops the hint when the problem below offers the way on instead.
+  assert.equal(text({ stopReason: "failed", problem: "retry_required" }), "Не получилось выполнить шаг.");
+  for (const t of lines.filter((t) => typeof t === "string")) {
+    assert.doesNotMatch(t, /«(Повторить|Продолжить|Остановить|Отправить ещё раз|Отменить запрос)»/, t);
+  }
 });
 
 test("one request never shows two «Повторить»: the problem's retry replaces the stop card's", () => {

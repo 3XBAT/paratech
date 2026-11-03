@@ -15,6 +15,8 @@ import { ScheduleCardPending } from "../.test-build/agent/ScheduleCard.js";
 import { WorkBody } from "../.test-build/agent/WorkCard.js";
 import { RestartNote } from "../.test-build/agent/RestartDialog.js";
 import { UnderstandingCard } from "../.test-build/agent/TurnkeyCards.js";
+import { genericError } from "../.test-build/bindings/agentConfirm.js";
+import { removeBlockedReason } from "../.test-build/workView.js";
 import { ariaLabels, buttonTag, isOff, isOn, visibleText } from "./iconbtn.mjs";
 
 const { renderToStaticMarkup } = server;
@@ -166,6 +168,13 @@ test("the tooltip opens above, below, left or right and flips; a long text wraps
   assert.match(rule('.ia[data-place="above"] .ia-tip'), /translateX\(calc\(-50% \+ var\(--ia-dx, 0px\)\)\)/);
 });
 
+test("danger-solid (the delete of a selection) is red at rest too; plain danger stays quiet until hover", () => {
+  assert.match(rule(".ia-danger-solid"), /color: var\(--rec-t\)/);
+  assert.match(ia({ variant: "danger-solid" }), /class="ia ia-danger ia-danger-solid"/);
+  assert.doesNotMatch(ia({ variant: "danger" }), /ia-danger-solid/);
+  assert.doesNotMatch(ia(), /ia-danger/);
+});
+
 test("danger turns red on hover and focus only; a busy button shows the spinner at full strength", () => {
   assert.match(rule('.ia-danger:hover:enabled:not([aria-disabled="true"]), .ia-danger:focus-visible'), /color: var\(--rec-t\)/);
   assert.match(rule('.ia:disabled, .ia[aria-disabled="true"]'), /opacity: \.5/);
@@ -275,23 +284,24 @@ test("waiting and progress rows: «Остановить» is the stop icon", () 
 });
 
 test("stopped and problem lines (TASK-371): «Продолжить», «Повторить», «Отправить ещё раз» and «Отменить запрос» are icons; the line says what happened", () => {
-  const out = request([{ type: "stopped", text: "Остановлено", buttons: [{ id: "resume", label: "Продолжить" }, { id: "cancel", label: "Отменить запрос" }] }]);
+  const out = request([{ type: "stopped", text: "Остановлено. Можно продолжить.", buttons: [{ id: "resume", label: "Продолжить" }, { id: "cancel", label: "Отменить запрос" }] }]);
   assert.deepEqual(ariaLabels(out), ["Продолжить", "Отменить запрос"]);
-  assert.equal(visibleText(out), "Остановлено", "the sentence is the only visible text");
+  assert.equal(visibleText(out), "Остановлено. Можно продолжить.", "the sentence is the only visible text");
   assert.match(out, /<use href="#i-play"><\/use>/);
   assert.match(buttonTag(out, "Отменить запрос"), /ia-danger/);
   assert.doesNotMatch(buttonTag(out, "Продолжить"), /ia-danger/);
   // Another try: the retry glyph, tooltip and name are the old word; busy turns it off.
-  const retry = request([{ type: "stopped", text: "Не получилось выполнить шаг", buttons: [{ id: "retry", label: "Повторить" }] }]);
+  const retry = request([{ type: "stopped", text: "Не получилось выполнить шаг. Можно повторить.", buttons: [{ id: "retry", label: "Повторить" }] }]);
   assert.deepEqual(ariaLabels(retry), ["Повторить"]);
   assert.match(retry, /<use href="#i-retry"><\/use><\/svg><span class="ia-tip" aria-hidden="true">Повторить<\/span>/);
-  assert.equal(visibleText(retry), "Не получилось выполнить шаг");
+  assert.equal(visibleText(retry), "Не получилось выполнить шаг. Можно повторить.");
   assert.ok(isOn(retry, "Повторить"));
-  assert.ok(isOff(request([{ type: "problem", text: "Шаг не удался.", buttons: [{ id: "retry", label: "Повторить" }] }], { busy: true }), "Повторить"));
+  assert.ok(isOff(request([{ type: "problem", text: "Шаг не удался. Можно повторить.", buttons: [{ id: "retry", label: "Повторить" }] }], { busy: true }), "Повторить"));
   // A request refused as busy: stopping the blocker and sending again are both icons (the sentence says why).
-  const problem = request([{ type: "problem", text: "Занято", buttons: [{ id: "stop", label: "Остановить" }, { id: "resend", label: "Отправить ещё раз" }] }]);
-  assert.deepEqual(ariaLabels(problem), ["Остановить", "Отправить ещё раз"]);
-  assert.equal(visibleText(problem), "Занято");
+  const busyLine = "Предыдущий запрос ещё выполняется. Его можно остановить или отправить этот ещё раз.";
+  const problem = request([{ type: "problem", text: busyLine, buttons: [{ id: "stop", label: "Остановить предыдущий запрос" }, { id: "resend", label: "Отправить ещё раз" }] }]);
+  assert.deepEqual(ariaLabels(problem), ["Остановить предыдущий запрос", "Отправить ещё раз"]);
+  assert.equal(visibleText(problem), busyLine);
   assert.match(problem, /<use href="#i-retry"><\/use>/);
 });
 
@@ -332,7 +342,7 @@ test("an undo offer is an icon in the default colour; the other offers are the c
 });
 
 function assertRetry(out) {
-  assert.match(buttonTag(out, "Повторить"), /class="ia"/);
+  assert.match(buttonTag(out, "Повторить"), /class="ia(?: ia-sm ag-inline-ia)?"/);
   assert.match(out, /<use href="#i-retry"><\/use><\/svg><span class="ia-tip" aria-hidden="true">Повторить<\/span>/);
 }
 
@@ -347,6 +357,13 @@ test("a card that could not be read (TASK-371): the retry is an icon next to the
   // The error text stays as the reason; without a reload there is no button at all.
   assert.match(visibleText(schedule), /Не удалось загрузить/);
   assert.equal(count(html(h(ScheduleCardPending, { error: "Не удалось загрузить" })), "<button"), 0);
+  // The generic refusal reads as a sentence that names the way on, and the icon sits inline at the end of that line.
+  for (const card of [ConfirmCardPending, ScheduleCardPending]) {
+    const out = html(h(card, { error: genericError, onReload: noop }));
+    assert.match(visibleText(out), /Карточку не удалось загрузить\. Ничего не выполнено\. Можно повторить\./);
+    assert.match(out, /role="alert"[^>]*>.*<span>Карточку[^<]*<button[^>]*aria-label="Повторить"/);
+    assert.doesNotMatch(out, /ag-actions/);
+  }
 });
 
 test("the note of a pending edit: «Вернуть текст сообщения» puts text into the field (insert), «Отменить правку» is a plain undo", () => {
@@ -409,13 +426,28 @@ test("work card: the plan editor adds with an icon and saves with a word; a runn
 test("plan editor rows (TASK-371): up, down and remove are IconAction (one icon-button component), named by the row number, tooltip = the short action", () => {
   const sections = [1, 2].map((n) => ({ number: n, title: `Раздел ${n}`, words: 300, note: "", written: false, paragraphs: [], sources: [], kind: "", part: "", bullets: [], columns: [] }));
   const out = body(work({ writing: writing({ step: "approve", result: "", sections }) }));
-  for (const label of ["Выше: 1", "Ниже: 1", "Убрать раздел: 1", "Выше: 2", "Ниже: 2", "Убрать раздел: 2"]) {
+  for (const label of ["Поднять раздел 1", "Опустить раздел 1", "Убрать раздел 1", "Поднять раздел 2", "Опустить раздел 2", "Убрать раздел 2"]) {
     assert.match(buttonTag(out, label) ?? "", /class="ia"/, label);
   }
   assert.match(out, /<span class="ia-tip" aria-hidden="true">Убрать раздел<\/span>/);
-  assert.ok(isOff(out, "Выше: 1"), "the first row cannot go up");
-  assert.ok(isOff(out, "Ниже: 2"), "the last row cannot go down");
-  assert.ok(isOn(out, "Ниже: 1"));
+  assert.match(out, /<span class="ia-tip" aria-hidden="true">Выше<\/span>/);
+  assert.match(out, /<span class="ia-tip" aria-hidden="true">Ниже<\/span>/);
+  assert.ok(isOff(out, "Поднять раздел 1"), "the first row cannot go up");
+  assert.ok(isOff(out, "Опустить раздел 2"), "the last row cannot go down");
+  assert.ok(isOn(out, "Опустить раздел 1"));
+  // A tooltip that is part of the name is not read a second time.
+  assert.doesNotMatch(buttonTag(out, "Убрать раздел 1"), /aria-describedby/);
+  assert.match(buttonTag(out, "Опустить раздел 1"), /aria-describedby/);
+  // A row that cannot be removed says why (not when the whole editor is off for another reason).
+  assert.equal(removeBlockedReason([{ number: 1, title: "А", words: "300", kind: "", part: "" }], 0), "");
+  assert.equal(removeBlockedReason([{ number: 1, title: "А", words: "300", kind: "title", part: "" }], 0), "Титульный и заключительный слайды убрать нельзя.");
+  assert.equal(removeBlockedReason([{ number: 1, title: "А", words: "300", kind: "", part: "conclusions" }], 0), "Это единственный раздел такой части отчёта: убрать его нельзя.");
+  const lab = sections.map((s, i) => (i === 1 ? { ...s, part: "conclusions" } : s));
+  const labOut = body(work({ writing: writing({ step: "approve", result: "", sections: lab }) }));
+  assert.ok(isOff(labOut, "Убрать раздел 2"));
+  assert.match(buttonTag(labOut, "Убрать раздел 2"), /aria-disabled="true"/);
+  assert.match(labOut, /Убрать раздел 2\. Это единственный раздел такой части отчёта: убрать его нельзя\./);
+  assert.ok(isOn(labOut, "Убрать раздел 1"));
   assert.doesNotMatch(out, /icon-btn/, "the round IconButton is no longer drawn by the agent panel");
   assert.equal(count(src("agent/WorkCard.tsx"), "IconButton"), 0);
 });

@@ -47,6 +47,7 @@ import {
   metaLine,
   workMeta,
   type OpenView,
+  removeBlockedReason,
   rowActionLabel,
   workCardModel,
   workTexts,
@@ -104,14 +105,14 @@ function OutlineEditor(props: { items: EditorItem[]; check: EditorCheck; disable
           {/* The name carries the row number the row shows; the tooltip is the short action. */}
           <IconAction
             icon="up"
-            label={rowActionLabel(workTexts.moveUp, i + 1)}
+            label={rowActionLabel(workTexts.moveUpName, i + 1)}
             tipText={workTexts.moveUp}
             disabled={disabled || !canMove(items, i, -1)}
             onClick={() => props.onChange(moveItem(items, i, -1))}
           />
           <IconAction
             icon="down"
-            label={rowActionLabel(workTexts.moveDown, i + 1)}
+            label={rowActionLabel(workTexts.moveDownName, i + 1)}
             tipText={workTexts.moveDown}
             disabled={disabled || !canMove(items, i, 1)}
             onClick={() => props.onChange(moveItem(items, i, 1))}
@@ -121,6 +122,7 @@ function OutlineEditor(props: { items: EditorItem[]; check: EditorCheck; disable
             label={rowActionLabel(workTexts.remove, i + 1)}
             tipText={workTexts.remove}
             disabled={disabled || !canRemove(items, i)}
+            disabledReason={disabled ? undefined : removeBlockedReason(items, i) || undefined}
             onClick={() => props.onChange(removeItem(items, i))}
           />
         </div>

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { type AgentConfirmApi, assignmentInUseText, type ConfirmCard as CardData, type ConfirmTarget } from "../bindings/agentConfirm.js";
 import type { TeacherRole } from "../bindings/recipient.js";
 import type { RecordingDeleteApi } from "../bindings/recordingDelete.js";
-import { type ConfirmCardModel, ConfirmFlow, confirmCardModel, confirmTexts, type FlowState, initialFlow } from "../agentConfirmView.js";
+import { type ConfirmCardModel, ConfirmFlow, confirmCardModel, confirmTexts, type FlowState, initialFlow, loadFailedLine } from "../agentConfirmView.js";
 import { Button } from "../ui/Button.js";
 import { IconAction } from "../ui/IconAction.js";
 import { ResultLine } from "../ui/controls.js";
@@ -150,13 +150,9 @@ export function ConfirmCardPending(props: { error: string; onReload?: () => void
     <section className="ag-card ag-confirm">
       <h3 className="ag-card-h">{confirmTexts.caption}</h3>
       <ResultLine kind="fail" role="alert">
-        {props.error}
+        {loadFailedLine(props.error, props.onReload !== undefined)}
+        {props.onReload !== undefined && <IconAction icon="retry" size="sm" className="ag-inline-ia" label={confirmTexts.reload} onClick={props.onReload} />}
       </ResultLine>
-      {props.onReload !== undefined && (
-        <div className="ag-actions">
-          <IconAction icon="retry" label={confirmTexts.reload} onClick={props.onReload} />
-        </div>
-      )}
     </section>
   );
 }

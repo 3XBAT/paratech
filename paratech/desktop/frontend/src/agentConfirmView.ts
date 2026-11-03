@@ -7,6 +7,7 @@ import {
   type ConfirmCard,
   confirmErrorText,
   type ConfirmTarget,
+  genericError,
 } from "./bindings/agentConfirm.js";
 import type { TeacherRole } from "./bindings/recipient.js";
 import { choiceOf, isRefusal, type RecipientView, recipientView, sendBlocked } from "./recipientView.js";
@@ -20,6 +21,9 @@ export const confirmTexts = {
   working: "Выполняется…",
   loading: "Загрузка…",
   reload: "Повторить",
+  /** The card could not be read (the generic refusal of the load): nothing ran, and the reload icon is the way on. */
+  loadFailed: "Карточку не удалось загрузить. Ничего не выполнено.",
+  loadFailedRetry: "Можно повторить.",
   deadlineTitle: "Срок в календарь",
   sendTitle: "Отправка письма",
   deleteTitle: "Удаление записи",
@@ -45,6 +49,17 @@ export const confirmTexts = {
   noDeletable: "Удалить нельзя.",
   adHoc: "Запись",
 } as const;
+
+/**
+ * The line of a card that could not be read. The generic refusal says that nothing ran and, while the reload icon is
+ * drawn, that it can be repeated (the icon has no visible word); a specific refusal of the core keeps its own text.
+ */
+export function loadFailedLine(error: string, canReload: boolean): string {
+  if (error !== genericError) {
+    return error;
+  }
+  return canReload ? `${confirmTexts.loadFailed} ${confirmTexts.loadFailedRetry}` : confirmTexts.loadFailed;
+}
 
 /** «Удалить «Задачи 1–7» и событие в Google Календаре?»; the title is stored text, so it stays a text node of the caller. */
 export function deleteAssignmentQuestion(title: string): string {

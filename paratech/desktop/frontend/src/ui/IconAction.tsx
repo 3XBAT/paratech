@@ -15,8 +15,8 @@ export interface IconActionProps {
   tipText?: string;
   /** Where the tooltip opens; it flips to the other side and shifts inwards when it would leave its clipping box. */
   place?: TipPlace;
-  /** "danger": red on hover and focus (cancel, delete). */
-  variant?: "default" | "danger";
+  /** "danger": red on hover and focus (cancel, delete). "danger-solid": red at rest too (the delete of a selection, away from its row). */
+  variant?: "default" | "danger" | "danger-solid";
   /** "sm": 28px for dense lists; the default is 32px. */
   size?: "sm" | "md";
   /** Keeps the tooltip open (a confirmation the user must see). */
@@ -103,7 +103,8 @@ export function IconAction(props: IconActionProps) {
   const soft = reason !== "";
   const off = busy || (props.disabled === true && !soft);
   // The tooltip words that differ from the name are also given to screen readers, which do not read the hidden tooltip.
-  const desc = soft ? reason : props.tipText !== undefined && props.tipText !== props.label ? props.tipText : "";
+  // A tooltip that is already part of the name (the name «Убрать раздел 2», the tooltip «Убрать раздел») adds nothing to read.
+  const desc = soft ? reason : props.tipText !== undefined && !props.label.includes(props.tipText) ? props.tipText : "";
   const text = soft ? `${props.label}. ${reason}` : (props.tipText ?? props.label);
   const open = !dismissed && (hovered || focused || props.note === true);
 
@@ -161,7 +162,8 @@ export function IconAction(props: IconActionProps) {
     }
   };
 
-  const cls = ["ia", props.variant === "danger" ? "ia-danger" : "", props.size === "sm" ? "ia-sm" : "", props.note ? "ia-note" : "", props.className ?? ""]
+  const danger = props.variant === "danger" || props.variant === "danger-solid";
+  const cls = ["ia", danger ? "ia-danger" : "", props.variant === "danger-solid" ? "ia-danger-solid" : "",props.size === "sm" ? "ia-sm" : "", props.note ? "ia-note" : "", props.className ?? ""]
     .filter((c) => c !== "")
     .join(" ");
   return (

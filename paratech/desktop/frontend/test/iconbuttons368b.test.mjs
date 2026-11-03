@@ -340,7 +340,7 @@ test("models and the recordings selection: a model row's delete is a trash icon 
   assert.equal(removeModelLabel("small · q5"), "Удалить модель small · q5");
   assert.equal(cancelDownloadLabel("small · q5"), "Отменить скачивание: small · q5");
   const recs = src("pages/RecordingsPage.tsx");
-  assert.match(recs, /<IconAction icon="trash" variant="danger" label=\{selectedDeleteLabel\(selected\.size\)\} disabled=\{deleting !== null\} onClick=\{\(\) => askDelete\(\[\.\.\.selected\]\)\}/);
+  assert.match(recs, /<IconAction icon="trash" variant="danger-solid" label=\{selectedDeleteLabel\(selected\.size\)\} disabled=\{deleting !== null\} onClick=\{\(\) => askDelete\(\[\.\.\.selected\]\)\}/);
   assert.match(recs, /<IconAction icon="x" label=\{deleteTexts\.selectedClear\}/);
   assert.equal(selectedDeleteLabel(3), "Удалить выбранные (3)");
   // The icon only asks: the confirmation dialog that lists the recordings stays, and it is off while one is open.

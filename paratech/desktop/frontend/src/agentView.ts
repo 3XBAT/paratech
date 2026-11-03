@@ -814,6 +814,11 @@ export const texts = {
   replyStopped: "Ответ остановлен",
   /** The stopped card of a request that failed or was cut while its reply was typing. */
   replyCut: "Ответ прервался. Можно повторить.",
+  // The busy-refused request: what its icons do (the line names the way out, the icons carry no visible word).
+  busyBoth: "Предыдущий запрос ещё выполняется. Его можно остановить или отправить этот ещё раз.",
+  busyStop: "Предыдущий запрос ещё выполняется. Его можно остановить.",
+  busyResend: "Предыдущий запрос ещё выполняется. Этот можно отправить ещё раз.",
+  stopPrevious: "Остановить предыдущий запрос",
   removeContext: "Убрать контекст",
   offlineBanner: "Нет связи с paratech",
   empty: "Можно задать вопрос или попросить что-нибудь сделать.",
@@ -877,28 +882,43 @@ export function callProblemText(p: CallProblem): string {
   return p === "" ? "" : callProblemTexts[p];
 }
 
+// The icons carry no visible word, so a line whose way on is an icon says it in the sentence, without quoting a button.
 const updateProblemTexts: Record<string, string> = {
   busy: "Предыдущий запрос ещё выполняется.",
   stale: "Запрос устарел: нужно задать его заново.",
   invalid: "Запрос не принят: проверьте текст.",
   budget: "Остановлено: лимит запроса.",
-  retry_required: "Шаг не удался.",
-  restart_required: "Запрос устарел.",
+  retry_required: "Шаг не удался. Можно повторить.",
+  restart_required: "Запрос устарел. Можно повторить.",
   rerun_blocked: "Повтор недоступен: запрос уже изменил данные. Можно отменить действия или задать вопрос заново.",
   failed: "Не удалось выполнить запрос.",
 };
 
+interface StopText {
+  text: string;
+  /** What the way on is, said when its icon is shown (dropped when the stop card does not offer it). */
+  hint: string;
+  buttons: ButtonId[];
+}
+
 /** Why a request stopped: the text of the stop card and the buttons it offers. */
-const stopTexts: Record<string, { text: string; buttons: ButtonId[] }> = {
-  offline: { text: "Не завершено: нет связи", buttons: ["continue", "cancel"] },
+const stopTexts: Record<string, StopText> = {
+  offline: { text: "Не завершено: нет связи.", hint: "Можно повторить, когда связь вернётся.", buttons: ["continue", "cancel"] },
   // «Остановить» keeps «Продолжить» (the same free replay): «Повторить» would promise another attempt, which is the rerun button.
-  user: { text: "Остановлено", buttons: ["resume", "cancel"] },
-  // The request does not continue by itself after a top-up: «Повторить» is the next step.
-  quota: { text: "Не завершено: закончились минуты обработки. После пополнения нажмите «Повторить».", buttons: ["continue", "cancel"] },
-  failed: { text: "Не получилось выполнить шаг", buttons: ["retry"] },
-  expired: { text: "Запрос устарел", buttons: ["restart"] },
-  budget: { text: "Остановлено: лимит запроса", buttons: [] },
+  user: { text: "Остановлено.", hint: "Можно продолжить.", buttons: ["resume", "cancel"] },
+  // The request does not continue by itself after a top-up: the retry is the next step.
+  quota: { text: "Не завершено: закончились минуты обработки.", hint: "Повторить можно после пополнения.", buttons: ["continue", "cancel"] },
+  failed: { text: "Не получилось выполнить шаг.", hint: "Можно повторить.", buttons: ["retry"] },
+  expired: { text: "Запрос устарел.", hint: "Можно повторить.", buttons: ["restart"] },
+  budget: { text: "Остановлено: лимит запроса", hint: "", buttons: [] },
 };
+
+const wayOn: ReadonlySet<ButtonId> = new Set(["continue", "resume", "retry", "restart"]);
+
+/** The line of a stop card: the reason, then the way on while the card still offers it. */
+function stopLine(s: StopText): string {
+  return s.hint !== "" && s.buttons.some((b) => wayOn.has(b)) ? `${s.text} ${s.hint}` : s.text;
+}
 
 // ---- Plan ----
 
@@ -1569,10 +1589,10 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
   const problem = u.problem;
   const stopCard = running ? undefined : u.cards.find((c) => c.kind === "stopped");
   const reason = running ? "" : stopCard?.stopReason || u.stopReason;
-  let stop = reason !== "" ? (stopTexts[reason] ?? { text: "Остановлено", buttons: [] }) : null;
-  // A reply that broke off in the middle: the same retry button, a clearer line.
+  let stop: StopText | null = reason !== "" ? (stopTexts[reason] ?? { text: "Остановлено", hint: "", buttons: [] }) : null;
+  // A reply that broke off in the middle: the same retry button, a clearer line (it names the way on itself).
   if (stop && reason === "failed" && ctx.replyCut === true) {
-    stop = { ...stop, text: texts.replyCut };
+    stop = { ...stop, text: texts.replyCut, hint: "" };
   }
   // The problem's own «Повторить» is the next step: the stop card must not offer a second way on, nor a second «Повторить».
   if (stop && (problem === "retry_required" || problem === "restart_required")) {
@@ -1581,15 +1601,28 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
   if (stop) {
     // The same action is «Отменить запрос» here as in the restart dialog.
     const stopButtons = buttons(stop.buttons).map((b) => (b.id === "cancel" ? { ...b, label: restartTexts.cancelRequest } : b));
-    cards.push({ type: "stopped", text: stop.text, buttons: stopButtons });
+    cards.push({ type: "stopped", text: stopLine(stop), buttons: stopButtons });
   }
   if (problem !== "") {
     let next: ButtonId[] = problem === "retry_required" ? ["retry"] : problem === "restart_required" ? ["restart"] : [];
+    let text = updateProblemTexts[problem] ?? updateProblemTexts.failed;
+    let nextButtons = buttons(next);
     // A request refused as busy has no thread: it can stop the one that blocks it, or be sent again. Only the last one.
     if (isBusyRefused(e) && ctx.last) {
-      next = [...(ctx.blocked ? (["stop"] as const) : []), ...(e.text !== "" && e.scope !== null ? (["resend"] as const) : [])];
+      const canStop = ctx.blocked;
+      const canResend = e.text !== "" && e.scope !== null;
+      next = [...(canStop ? (["stop"] as const) : []), ...(canResend ? (["resend"] as const) : [])];
+      // Two icons: the line says what each one does, and the stop one names the request it stops.
+      nextButtons = buttons(next).map((b) => (b.id === "stop" ? { ...b, label: texts.stopPrevious } : b));
+      if (canStop && canResend) {
+        text = texts.busyBoth;
+      } else if (canStop) {
+        text = texts.busyStop;
+      } else if (canResend) {
+        text = texts.busyResend;
+      }
     }
-    cards.push({ type: "problem", text: updateProblemTexts[problem] ?? updateProblemTexts.failed, buttons: buttons(next) });
+    cards.push({ type: "problem", text, buttons: nextButtons });
   } else if (!stop && u.status === "CANCELLED") {
     cards.push({ type: "stopped", text: "Отменено", buttons: [] });
   }

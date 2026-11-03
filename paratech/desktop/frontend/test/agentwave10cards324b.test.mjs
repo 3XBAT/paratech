@@ -424,8 +424,8 @@ test("done: «Отменить всё» works as a button; while the undo runs i
 
 test("stopped midway: the card's own words (not the core's «Нажмите «Да»»), «Отменить всё» and primary «Повторить»; what was created is said", () => {
   const out = view(stopped(), { review: reviewOf() });
-  assert.ok(out.includes("Создано не всё. «Повторить» досоздаст остальное без дублей, «Отменить всё» уберёт созданное."));
-  assert.equal(scheduleTexts.partialFallback, "Создано не всё. «Повторить» досоздаст остальное без дублей, «Отменить всё» уберёт созданное.");
+  assert.ok(out.includes("Создано не всё. Можно повторить: остальное создастся без дублей. Можно отменить всё: созданное будет убрано."));
+  assert.equal(scheduleTexts.partialFallback, "Создано не всё. Можно повторить: остальное создастся без дублей. Можно отменить всё: созданное будет убрано.");
   // The core's sentence names a «Да» that is not a button here: it is never shown.
   assert.doesNotMatch(out, /Нажмите «Да»/);
   assert.ok(out.includes("Создано предметов: 2"));
@@ -509,9 +509,9 @@ test("loading is a small line; an error has the reason and «Повторить�
   assert.ok(loading.includes("Загрузка предметов…"));
   assert.doesNotMatch(loading, /<button|role="alert"|<section/);
   const failed = renderToStaticMarkup(h(ScheduleCardPending, { error: genericError, onReload: noop }));
-  assert.ok(failed.includes(genericError));
+  assert.ok(failed.includes("Карточку не удалось загрузить. Ничего не выполнено. Можно повторить."));
   assert.match(failed, /role="alert"/);
-  assert.match(failed, />Повторить</);
+  assert.match(failed, /aria-label="Повторить"/);
   assert.doesNotMatch(renderToStaticMarkup(h(ScheduleCardPending, { error: genericError })), /<button/);
   const viaView = view(null, { flow: { card: null, busy: "", error: "" } });
   assert.ok(viaView.includes("Загрузка предметов…"));
