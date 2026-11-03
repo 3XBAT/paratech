@@ -69,7 +69,7 @@ type Call struct {
 	Call     values.Call
 	Class    actionpolicy.Class
 	Paid     bool
-	PlanStep int // the approved step it executes; -1 none
+	PlanStep int             // the approved step it executes; -1 none
 	Card     values.CardKind // the card a C call makes (thread.Admission)
 	NoUndo   bool            // a U call without a compensation
 }
