@@ -28,6 +28,8 @@ export function RecordingImportPanel(props: {
   loadLessons: () => Promise<LessonChoice[]>;
   /** The subject of the page the panel opens on ("" for none): prefilled, and it narrows the lessons. */
   subject?: string;
+  /** The id of the panel: the opening button points to it with aria-controls (see useDisclosureFocus). */
+  id?: string;
   now?: () => number;
   /** A recording was imported (or was already there): the page refreshes; the row is marked by the recording's origin. */
   onImported: (recordingId: string, existing: boolean) => void;
@@ -125,12 +127,12 @@ export function RecordingImportPanel(props: {
   ];
 
   return (
-    <Card className="box rec-import-panel" label={importTexts.title}>
+    <Card id={props.id} className="box rec-import-panel" label={importTexts.title}>
       <h2>{importTexts.title}</h2>
       <span className="small muted box-desc">{importTexts.explain}</span>
 
       <h3 className="rec-import-step">{importTexts.lectureStep}</h3>
-      <Segmented label={importTexts.modeLabel} options={modes} value={form.mode} onChange={(mode) => change({ mode })} />
+      <Segmented label={importTexts.modeLabel} options={modes} value={form.mode} disabled={busy} onChange={(mode) => change({ mode })} />
       {form.mode === "lesson" ? (
         options.length === 0 ? (
           <p className="small muted">{lessons === null ? "Загрузка…" : importTexts.lessonsEmpty}</p>

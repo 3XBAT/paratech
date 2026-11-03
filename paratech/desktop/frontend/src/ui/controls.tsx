@@ -24,11 +24,19 @@ export function Segmented<T extends string>(props: {
   value: T;
   onChange: (value: T) => void;
   large?: boolean;
+  /** Every button is off (a running action must not be changed under its feet). */
+  disabled?: boolean;
 }) {
   return (
     <div className={props.large ? "seg lg" : "seg"} role="group" aria-label={props.label}>
       {props.options.map((o) => (
-        <button key={o.value} type="button" aria-pressed={o.value === props.value} onClick={() => props.onChange(o.value)}>
+        <button
+          key={o.value}
+          type="button"
+          aria-pressed={o.value === props.value}
+          disabled={props.disabled}
+          onClick={() => props.onChange(o.value)}
+        >
           {o.label}
         </button>
       ))}
@@ -210,9 +218,9 @@ export function ResultLine(props: { kind: ResultKind; role?: "status" | "alert";
   );
 }
 
-export function Card(props:{ children: ReactNode; className?: string; label?: string }) {
+export function Card(props:{ children: ReactNode; className?: string; label?: string; id?: string }) {
   return (
-    <div className={props.className ? `card ${props.className}` : "card"} role={props.label ? "group" : undefined} aria-label={props.label}>
+    <div id={props.id} className={props.className ? `card ${props.className}` : "card"} role={props.label ? "group" : undefined} aria-label={props.label}>
       {props.children}
     </div>
   );

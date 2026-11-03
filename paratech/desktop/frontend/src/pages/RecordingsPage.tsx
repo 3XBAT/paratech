@@ -58,6 +58,7 @@ import { useOpenLesson } from "../openLesson";
 import { RecordingDeleteDialog } from "./RecordingDeleteDialog";
 import { RecordingImportPanel } from "./RecordingImportPanel";
 import { JobRow, RecordingRow } from "./RecordingRow";
+import { useDisclosureFocus } from "./useDisclosureFocus";
 
 const pollMs = 3000;
 
@@ -203,6 +204,8 @@ export function RecordingsPage({
 
   // «Импортировать запись» (TASK-162): the panel; the mark of an imported row comes from the recording's origin.
   const [importOpen, setImportOpen] = useState(false);
+  // Declared before the effect below: the import panel's own focus move (into it, back to its button) goes first.
+  const importFocus = useDisclosureFocus(importOpen);
   const loadLessons = useCallback(async () => (await today.today()).lessons, [today]);
 
   // The silent-source advice of the running recording (TASK-082): the click running per recording, and the problem of
@@ -403,10 +406,13 @@ export function RecordingsPage({
   const panelWasOpen = useRef(false);
 
   // The clicked button is gone with the empty state: the focus follows into the panel, and back to the state on closing.
+  // The import panel already moved it (useDisclosureFocus: into the panel, back to «Импортировать запись»): then it stays.
   useEffect(() => {
     if (noRecordings && panelOpen !== panelWasOpen.current) {
       const target = panelOpen ? panelsRef.current : emptyRef.current;
-      target?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled)")?.focus();
+      if (!target?.contains(document.activeElement)) {
+        target?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled)")?.focus();
+      }
     }
     panelWasOpen.current = panelOpen;
   }, [panelOpen, noRecordings]);
@@ -425,7 +431,7 @@ export function RecordingsPage({
   }, []);
 
   const importButton = (
-    <Button icon="up" aria-expanded={importOpen} onClick={() => setImportOpen((open) => !open)}>
+    <Button icon="up" {...importFocus.openerProps} onClick={() => setImportOpen((open) => !open)}>
       {importTexts.open}
     </Button>
   );
@@ -468,6 +474,7 @@ export function RecordingsPage({
       <div ref={panelsRef} className="rec-panels">
         {importOpen && (
           <RecordingImportPanel
+            id={importFocus.panelId}
             api={importing}
             loadLessons={loadLessons}
             onImported={() => void refresh()}

@@ -29,6 +29,7 @@ import { ErrorLine } from "./FileRows.js";
 import { AddPastNote, LessonList } from "./KnowledgeParts.js";
 import { RecordingImportPanel } from "./RecordingImportPanel.js";
 import { useAfterDelay } from "./useAfterDelay.js";
+import { useDisclosureFocus } from "./useDisclosureFocus.js";
 
 // The tab «Пары» of the subject page (TASK-353): the lessons of the subject from the knowledge base. Titles and notes are
 // recorded, imported or typed text: text nodes only.
@@ -113,6 +114,7 @@ export function SubjectPairsTab(props: {
   // One form at a time: «Импортировать запись» or «Добавить конспект прошедшей пары».
   const [form, setForm] = useState<"none" | "import" | "past">("none");
   const importOpen = form === "import";
+  const importFocus = useDisclosureFocus(importOpen);
   // The panel keeps the import and its result: while it works the forms do not switch (it would be unmounted).
   const [importBusy, setImportBusy] = useState(false);
   const slow = useAfterDelay(data.status === "loading", loadingDelayMs);
@@ -189,7 +191,7 @@ export function SubjectPairsTab(props: {
         <Button
           variant={empty && !importOpen ? "primary" : undefined}
           icon="up"
-          aria-expanded={importOpen}
+          {...importFocus.openerProps}
           disabled={importBusy}
           title={importBusy ? pairsTexts.importBusy : undefined}
           onClick={() => setForm(importOpen ? "none" : "import")}
@@ -208,6 +210,7 @@ export function SubjectPairsTab(props: {
       </div>
       {importOpen && (
         <RecordingImportPanel
+          id={importFocus.panelId}
           api={importing}
           loadLessons={async () => (await today.today()).lessons}
           subject={subject.name}

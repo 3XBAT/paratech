@@ -54,7 +54,7 @@
 /* Segmented: the track is --fill, the thumb --raised; concentric radii (track 8 = thumb 6 + padding 2). */
 .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: var(--r-md); background: var(--fill); }
 .seg button { min-height: 26px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); font-size: 13px; line-height: 18px; font-weight: 500; white-space: nowrap; cursor: pointer; }
-.seg button:hover { color: var(--text); }
+.seg button:hover:not(:disabled) { color: var(--text); }
 .seg button[aria-pressed="true"], .seg button[aria-selected="true"] { background: var(--raised); color: var(--text); box-shadow: var(--sh-thumb); }
 .seg button:disabled { opacity: .5; cursor: not-allowed; }
 .seg.lg button { min-height: 28px; padding: 0 16px; font-size: 13.5px; }

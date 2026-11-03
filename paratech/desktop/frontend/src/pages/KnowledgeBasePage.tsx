@@ -42,6 +42,7 @@ import { Banner, Card, EmptyState, Input, ResultLine, type ResultKind } from "..
 import { IconAction } from "../ui/IconAction";
 import { AddPastNote, HitList, LessonList, SubjectList } from "./KnowledgeParts";
 import { RecordingImportPanel } from "./RecordingImportPanel";
+import { useDisclosureFocus } from "./useDisclosureFocus";
 
 /** What the export does: the tooltip of «Экспорт в .md» instead of a paragraph under the head (TASK-347). */
 const exportHint = "Сохранить все пары предмета в один файл .md — по датам, с конспектом и текстом лекции.";
@@ -412,6 +413,7 @@ function SubjectView(props: {
   const importing = useMemo(() => recordingImportApi(callByName), []);
   const today = useMemo(() => todayApi(callByName), []);
   const [importOpen, setImportOpen] = useState(false);
+  const importFocus = useDisclosureFocus(importOpen);
   const [imports, setImports] = useState(0);
   const nothingToExport = lessons !== null && lessons.every(isNoteOnly);
   const exportTip = nothingToExport ? exportEmptyHint : exportHint;
@@ -472,7 +474,7 @@ function SubjectView(props: {
           <p className="small muted num kb-sub">{subjectMeta(count)}</p>
         </div>
         <div className="head-acts">
-          <Button icon="up" aria-expanded={importOpen} onClick={() => setImportOpen((open) => !open)}>
+          <Button icon="up" {...importFocus.openerProps} onClick={() => setImportOpen((open) => !open)}>
             {importTexts.open}
           </Button>
           <IconAction
@@ -489,6 +491,7 @@ function SubjectView(props: {
       </div>
       {importOpen && (
         <RecordingImportPanel
+          id={importFocus.panelId}
           api={importing}
           loadLessons={async () => (await today.today()).lessons}
           subject={subject.noSubject ? "" : subject.name}
