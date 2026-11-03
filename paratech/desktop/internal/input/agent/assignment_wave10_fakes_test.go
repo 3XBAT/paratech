@@ -17,15 +17,15 @@ import (
 // memChanges is the homework workflow of the wave-10 assignment tools over the assignments fake: the page's edit,
 // soft delete and restore, «Выполнено» and the Google event projection. Every save bumps the version.
 type memChanges struct {
-	a        *memAssignments
-	events   map[shared.AssignmentID]bool
-	eventErr error
-	inUse    map[shared.AssignmentID]bool
-	working  map[shared.AssignmentID]bool // a work or a job under way (DeletionImpact)
+	a         *memAssignments
+	events    map[shared.AssignmentID]bool
+	eventErr  error
+	inUse     map[shared.AssignmentID]bool
+	working   map[shared.AssignmentID]bool // a work or a job under way (DeletionImpact)
 	impactErr error
-	marks    int // MarkDone calls
-	restores int // RestoreDone calls
-	calendar int // calls that would touch Google Calendar (none may)
+	marks     int // MarkDone calls
+	restores  int // RestoreDone calls
+	calendar  int // calls that would touch Google Calendar (none may)
 }
 
 func newMemChanges(a *memAssignments) *memChanges {
