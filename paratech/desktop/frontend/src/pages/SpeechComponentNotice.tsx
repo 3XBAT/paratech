@@ -9,8 +9,10 @@ import { Banner, Progress } from "../ui/controls";
 const pollMs = 2000;
 
 // The notice of a missing, damaged or installing speech recognition component, shared by the models and recordings
-// pages. It shows nothing while recognition works. onReady lets the page reload what depends on recognition.
-export function SpeechComponentNotice({ onReady }: { onReady?: () => void }) {
+// pages. It shows nothing while recognition works. onReady lets the page reload what depends on recognition. The install
+// button is the primary of a page where the notice is the main action (the models page); `primary={false}` is for «Сегодня»
+// and «Записи», where «Записать пару» / «Начать запись» is the one accent (TASK-348).
+export function SpeechComponentNotice({ onReady, primary = true }: { onReady?: () => void; primary?: boolean }) {
   const api = useMemo(() => speechApi(callByName), []);
   const [status, setStatus] = useState<SpeechStatus | null>(null);
   const [error, setError] = useState("");
@@ -95,7 +97,7 @@ export function SpeechComponentNotice({ onReady }: { onReady?: () => void }) {
         <div className="acts start">
           {n.install && (
             <Button
-              variant="primary"
+              variant={primary ? "primary" : "secondary"}
               icon="down"
               busy={busy === "start"}
               busyLabel={speechTexts.starting}

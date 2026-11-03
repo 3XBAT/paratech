@@ -89,6 +89,8 @@ export function addedAssignmentText(a: AddedAssignmentView, subjects: Readonly<R
 /** The agent screen of the core (values.Screen) for a section of the window; the core refuses unknown screens. */
 const screens: Record<PageId, string> = {
   today: "today",
+  // The Go core has no «recordings» screen and refuses unknown ones (not changed here): the panel asks as on «Сегодня».
+  recordings: "today",
   subjects: "subjects",
   knowledge: "subjects",
   tickets: "subjects",

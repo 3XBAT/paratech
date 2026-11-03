@@ -58,7 +58,8 @@ test("the empty state offers start (primary), the schedule and the import; the h
   );
   assert.match(page, /<p className="small muted rec-empty-privacy">\s*<Icon name="lock" \/>\s*\{emptyTexts\.privacy\}/);
   // One accent: the start button is always primary; an open panel replaces the empty state instead of sitting above it.
-  assert.match(page, /const startControl = \(\s*<div className="rec-start">\s*<Button\s+variant="primary"/);
+  // TASK-348: while the start panel is open the head button is the default variant; the panel's own button is the accent.
+  assert.match(page, /const startControl = \(\s*<div className="rec-start">\s*<Button\s+(\/\/[^\n]*\n\s*)?variant=\{panelOpen \? undefined : "primary"\}/);
   assert.doesNotMatch(page, /secondary/);
   assert.match(page, /\) : noRecordings \? \(\s*\/\/[^\n]*\n\s*!panelOpen && \(/);
   assert.match(page, /const panelOpen = startOpen \|\| importOpen;/);
