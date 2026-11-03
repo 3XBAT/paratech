@@ -8220,7 +8220,7 @@
                 "powershell -File paratech/desktop/build-alpha.ps1 -E2E -Smoke"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-373",
