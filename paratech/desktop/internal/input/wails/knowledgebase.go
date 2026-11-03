@@ -32,14 +32,15 @@ const (
 
 // Operation names of the log.
 const (
-	opKnowledgeSubjects = "ui: knowledge base subjects"
-	opKnowledgeLessons  = "ui: knowledge base lessons"
-	opKnowledgeLectures = "ui: knowledge base lectures"
-	opKnowledgeLesson   = "ui: knowledge base lesson"
-	opKnowledgeSearch   = "ui: knowledge base search"
-	opKnowledgePick     = "ui: choose where to save the subject"
-	opKnowledgeExport   = "ui: export subject"
-	opKnowledgeCorrect  = "ui: set the subject and kind of a recording"
+	opKnowledgeSubjects    = "ui: knowledge base subjects"
+	opKnowledgeLessons     = "ui: knowledge base lessons"
+	opKnowledgeLectures    = "ui: knowledge base lectures"
+	opKnowledgeLesson      = "ui: knowledge base lesson"
+	opKnowledgeLessonByKey = "ui: knowledge base lesson by key"
+	opKnowledgeSearch      = "ui: knowledge base search"
+	opKnowledgePick        = "ui: choose where to save the subject"
+	opKnowledgeExport      = "ui: export subject"
+	opKnowledgeCorrect     = "ui: set the subject and kind of a recording"
 )
 
 // Fixed texts of «Экспорт предмета» (Russian UI); the statuses are those of the transcript.
@@ -55,6 +56,7 @@ type KnowledgeUseCase interface {
 	Lessons(ctx context.Context, key string) ([]kb.Lesson, error)
 	Lectures(ctx context.Context, key string) ([]kb.Lesson, error)
 	Lesson(ctx context.Context, id shared.RecordingID) (kb.Lesson, error)
+	LessonByKey(ctx context.Context, key string) (kb.Lesson, error)
 	Search(ctx context.Context, query string) (knowledgebase.SearchResult, error)
 	SubjectFileName(ctx context.Context, key string) (string, error)
 	ExportSubject(ctx context.Context, key, path string) error
@@ -121,7 +123,7 @@ type KnowledgeNote struct {
 // without a recording, ScheduleLessonID), "day" (a date of the subject, Date) or "undated". ScheduleLessonID is the
 // schedule lesson of a recording or of a "lesson" lecture, "" otherwise. Date is the day of a "lesson" or "day"
 // lecture ("YYYY-MM-DD", as NoteLecture reads it), "" otherwise. Notes are the student's notes of the lesson, as made;
-// empty from Lessons, Lesson and SetLessonInfo, which list recordings only.
+// empty from Lessons, Lesson, SetLessonInfo and LessonByKey of a recording key, which read recordings only.
 //
 // LibrarySubjectState is how the core resolved Subject to the library (ADR-0024), never a guess: "matched" (one
 // subject, LibrarySubjectID), "none" (no subject has that name or alias), "ambiguous" (several have it: the student
@@ -246,7 +248,7 @@ func (s *KnowledgeBaseService) lessons(op string) func([]kb.Lesson, error) ([]Kn
 	}
 }
 
-// Lesson returns one lesson, for the lesson page opened from a search or a link.
+// Lesson returns the recorded lesson of a recording, without the student's notes; LessonByKey opens any lesson.
 func (s *KnowledgeBaseService) Lesson(ctx context.Context, recordingID string) (KnowledgeLesson, error) {
 	id, err := knowledgeRecordingID(recordingID)
 	if err != nil {
@@ -255,6 +257,17 @@ func (s *KnowledgeBaseService) Lesson(ctx context.Context, recordingID string) (
 	l, err := s.uc.Lesson(ctx, id)
 	if err != nil {
 		return KnowledgeLesson{}, s.fail(opKnowledgeLesson, err)
+	}
+	return knowledgeLesson(l), nil
+}
+
+// LessonByKey returns the lesson with key (KnowledgeLesson.Key), for the lesson page opened from a link or the
+// history: a lecture known only from the student's notes with its notes, a recording as Lesson returns it. The key is
+// only compared with the core's own keys.
+func (s *KnowledgeBaseService) LessonByKey(ctx context.Context, key string) (KnowledgeLesson, error) {
+	l, err := s.uc.LessonByKey(ctx, key)
+	if err != nil {
+		return KnowledgeLesson{}, s.fail(opKnowledgeLessonByKey, err)
 	}
 	return knowledgeLesson(l), nil
 }
