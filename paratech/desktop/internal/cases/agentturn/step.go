@@ -371,7 +371,9 @@ func (s *Service) decide(ctx context.Context, c *change, raw values.RawCall) err
 		if err != nil {
 			return c.refuse(call.ID(), err, now)
 		}
-		c.calls = append(c.calls, Call{Call: call, Class: adm.Class, Paid: adm.Paid, PlanStep: adm.PlanStep})
+		c.calls = append(c.calls, Call{
+			Call: call, Class: adm.Class, Paid: adm.Paid, PlanStep: adm.PlanStep, Card: adm.Card, NoUndo: adm.NoUndo,
+		})
 	}
 	return nil
 }

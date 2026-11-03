@@ -323,49 +323,22 @@ func (t tools) lessonsOf(ctx context.Context, sub values.Ref) ([]kb.Lesson, erro
 // --- list_assignments ----------------------------------------------------------------------------------
 
 func (t tools) listAssignments(ctx context.Context, call values.Call, scope values.Scope) (values.ToolResult, []values.Ref, error) {
-	q := values.AssignmentQueryOf(call.Args(), scope)
+	if listsByState(call) {
+		return t.listAssignments10(ctx, call, scope)
+	}
 	views, err := t.assignments.ListAssignments(ctx)
 	if err != nil {
 		return values.ToolResult{}, nil, err
 	}
-	// The subject of an assignment is a free string; only the library subject it names is shown, never the string.
-	var names []string
-	for _, v := range views {
-		if v.Subject != "" && !slices.Contains(names, v.Subject) {
-			names = append(names, v.Subject)
-		}
-	}
-	subjects, err := t.library.ResolveSubjects(ctx, names)
+	rows, err := t.assignmentRows(ctx, views, values.AssignmentQueryOf(call.Args(), scope))
 	if err != nil {
 		return values.ToolResult{}, nil, err
 	}
-
-	now := t.clock.Now()
-	today := dateOf(now, now.Location())
-	var rows []values.AssignmentRow
-	for _, v := range views {
-		id, ok := refOfID(values.KindAssignment, string(v.ID))
-		if !ok {
-			continue
-		}
-		row := values.AssignmentRow{ID: id}
-		if !v.Due.IsZero() {
-			row.Due = dateOf(v.Due, now.Location())
-		}
-		row.Status = values.AssignmentStatusOf(row.Due, today)
-		row.Lesson, _ = refOfID(values.KindLesson, string(v.LessonID))
-		if m, ok := subjects[v.Subject]; ok && v.Subject != "" {
-			row.Subject, _ = refOfID(values.KindSubject, string(m.ID))
-		}
-		if !q.Match(row) {
-			continue
-		}
-		if row.Version, err = t.latestVersion(ctx, v.ID); err != nil {
-			return values.ToolResult{}, nil, err
-		}
-		rows = append(rows, row)
+	v9 := make([]values.AssignmentRow, 0, len(rows))
+	for _, r := range rows {
+		v9 = append(v9, r.AssignmentRow)
 	}
-	return values.AssignmentsResult(call.ID(), rows)
+	return values.AssignmentsResult(call.ID(), v9)
 }
 
 // latestVersion is the latest draft version of an assignment, zero without a draft or without the drafts wired.

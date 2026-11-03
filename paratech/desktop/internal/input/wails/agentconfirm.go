@@ -100,9 +100,10 @@ type AgentConfirmDeletions interface {
 
 // AgentConfirmCore is what the confirm card binds to; every field is required.
 type AgentConfirmCore struct {
-	Proposals AgentConfirmProposals
-	Materials AgentConfirmMaterials
-	Deletions AgentConfirmDeletions
+	Proposals   AgentConfirmProposals
+	Materials   AgentConfirmMaterials
+	Deletions   AgentConfirmDeletions
+	Assignments AgentConfirmAssignments // optional: without it the delete_assignment card is unavailable
 }
 
 func (c AgentConfirmCore) complete() bool {
@@ -186,6 +187,8 @@ func (s *AgentConfirmService) Card(ctx context.Context, kind, id string) (AgentC
 			card.State, card.Message = agentStateRejected, view.RefusalMessage
 		}
 		return card, nil
+	case values.KindAssignment:
+		return s.assignmentCard(ctx, id)
 	}
 	return AgentConfirmCard{}, ErrAgentConfirmInvalid
 }
@@ -241,6 +244,8 @@ func (s *AgentConfirmService) Confirm(ctx context.Context, kind, id, emailSubjec
 	switch values.IDKind(kind) {
 	case values.KindPreview:
 		return AgentConfirmCard{}, ErrAgentConfirmDeleteHere
+	case values.KindAssignment:
+		return s.confirmAssignmentDeletion(ctx, id)
 	case values.KindProposal:
 	default:
 		return AgentConfirmCard{}, ErrAgentConfirmInvalid
@@ -286,6 +291,8 @@ func (s *AgentConfirmService) Decline(ctx context.Context, kind, id string) (Age
 			return AgentConfirmCard{}, ErrAgentConfirmInvalid
 		}
 		return AgentConfirmCard{Kind: agentCardDelete, TargetKind: kind, TargetID: id, State: agentStateDeclined}, nil
+	case values.KindAssignment:
+		return s.declineAssignmentDeletion(id)
 	case values.KindProposal:
 	default:
 		return AgentConfirmCard{}, ErrAgentConfirmInvalid
