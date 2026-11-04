@@ -166,7 +166,7 @@ Legend
 | Переименовать чат | `AgentService.RenameChat` | — | только UI | — | О-8: the agent never renames an existing chat |
 | Название нового чата | — | `reply.chat_title` (11) | U | — | О-8: only on the first request of a new chat |
 | Архивировать / вернуть чат | `AgentService.ArchiveChat`, `RestoreChat` | нет | U | — | only other chats: the current one has a running request |
-| Форк, «Начать заново отсюда» | TASK-248/271, в работе | — | только UI | — | picks a message |
+| Форк, «Начать заново отсюда» | `AgentService.ForkChat` (TASK-271), `Ask` with `restartFrom` (TASK-248) | — | только UI | — | picks a message |
 | Список чатов, ранние сообщения | `Chats`, `ChatEarlier`, `ChatCurrent`, `MentionCandidates` | — | только UI | — | |
 | Журнал действий агента | `AgentService.History` | нет | R | — | |
 | «Отменить» действие / всё | `AgentService.Undo`, `UndoRequest` | нет | UI, *кнопка* | клик | |

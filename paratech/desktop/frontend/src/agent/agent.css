@@ -181,6 +181,9 @@
 .ag-chat-toggle:hover { background: var(--fill); }
 .ag-chat-toggle:focus-visible, .ag-chat-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ag-chat-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A fork's title: the name shrinks with an ellipsis, the « (fork)» suffix next to it never does. */
+.ag-chat-title { display: flex; min-width: 0; }
+.ag-chat-sfx { flex: none; white-space: pre; }
 .ag-chat-caret { flex: none; color: var(--muted); }
 .ag-chat-tag { flex: none; color: var(--muted); }
 /* A running request of a chat that is not open: a muted clock, no accent; the words are for screen readers. */
@@ -197,7 +200,11 @@
 .ag-ib-side .ag-ib-tip { bottom: auto; top: 50%; right: calc(100% + 2px); transform: translateY(-50%); }
 /* The base hover rule below (transform: none) comes later in the file and has the same weight: this one is heavier on purpose. */
 .ag-ib.ag-ib-side:hover .ag-ib-tip, .ag-ib.ag-ib-side:focus-visible .ag-ib-tip { transform: translateY(-50%); }
-.ag-chat-note { margin: 0; min-height: 0; color: var(--muted); overflow-wrap: anywhere; }
+/* The note and, after a fork, the small icon that goes back to the source chat. */
+.ag-chat-notewrap { display: flex; align-items: flex-start; gap: 4px; }
+.ag-chat-notewrap > .ag-ib { flex: none; margin-left: auto; }
+.ag-chat-notewrap:has(> .ag-chat-note:empty) { display: none; }
+.ag-chat-note { flex: 1; min-width: 0; margin: 0; min-height: 0; color: var(--muted); overflow-wrap: anywhere; }
 .ag-chat-note:empty { display: none; }
 .ag-chat-menu { position: absolute; z-index: 6; top: 32px; left: 0; right: 0; max-height: min(60vh, 420px); margin: 0; padding: 4px; overflow-y: auto; list-style: none; border-radius: var(--r-md); background: var(--panel); box-shadow: 0 0 0 1px var(--edge), 0 8px 24px rgb(0 0 0 / 0.35); }
 .ag-chat-group { margin: 0; padding: 0 0 0 8px; list-style: none; }
@@ -308,6 +315,10 @@ button.ag-pill:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .ag-restart-title { margin: 0; font-size: var(--fs-h3); line-height: var(--lh-h3); font-weight: 600; }
 .ag-restart-body, .ag-restart-reason { margin: 0; overflow-wrap: anywhere; }
 .ag-restart-dlg .ag-actions { margin-top: 4px; }
+/* One choice of the dialog: its button(s), a line of what it does, and the reason or failure under it. */
+.ag-restart-opt { display: flex; flex-direction: column; gap: 4px; }
+.ag-restart-opt .ag-actions { margin-top: 0; }
+@media (forced-colors: active) { .ag-restart-dlg { border: 1px solid CanvasText; } }
 .ag-restart-note { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 8px; color: var(--muted); }
 .ag-restart-note-t { min-width: 0; overflow-wrap: anywhere; }
 .ag-restart-problem { display: block; color: var(--text); }

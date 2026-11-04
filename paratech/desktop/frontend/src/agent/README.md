@@ -21,6 +21,17 @@ and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `par
   text line under the field (no box, no dots: the thread's Waiting already animates). While it shows, `ContextHint` is not drawn (one line
   in that slot) and the thread re-pins to the bottom. The ring itself follows `fillsFromUpdate`; the hint sentence is `RingModel.hintText`
   (`ringTexts.overflowHint` after an overflow).
+- «Начать заново отсюда» (TASK-249, TASK-271): the icon under the student's message opens `RestartDialog` with two choices.
+  «Скрыть» (`hideRestart`: the text goes into the field, the next send carries `restartFrom`) is off while a request runs.
+  «Форк» (`forkFrom` in `AgentPanel`, `AgentApi.forkChat` -> Go `ForkChat`) is always on: the core makes a new chat
+  «<название> (fork)» (the suffix is the core's), the panel opens it like «Новый чат», puts the message's text into its field
+  (`forkOpened` / `forkField`: typed text is kept, the message follows it; a pending «Скрыть» edit of the old chat ends, but text
+  the student edited after «Скрыть» goes into the new field, after what it held before) and does not send it. The chat note then
+  says «Открыт новый чат. Исходный «…» не изменился.» with a small icon «Открыть исходный чат» (`forkNote` in `AgentPanel`,
+  `ChatBar` `noteAction`); it ends with a chat switch, any other note or the next send. The « (fork)» suffix of a title is its own
+  span (`splitForkTitle`) so the ellipsis never takes it. One call at a time (`beginFork`); a refusal is written under «Форк» in
+  the dialog (`forkFailure`): the «Форк» button itself is the retry, «Новый чат» (gone or changed chat; `invalid` also reloads
+  the earlier requests) stands in the same option. A refusal after the dialog was closed goes to the chat note.
 - CSS: `agent.css` (panel and common cards), `confirm.css`, `turnkey.css`; all three are imported in `main.tsx`.
 - Pure logic is outside this folder, in `src/`: `agentView.ts` (texts, `CardModel`, `cardModel`, `entryModel`, `offerSpecs`,
   button labels and icons), `agentState.ts` (panel reducer, no React), `agentOffer.ts` (`offerStep`, `runOffer`),
@@ -55,7 +66,8 @@ and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `par
 Same runner as `README.md` of `src/`: `npm --prefix paratech/desktop/frontend run test` and `run build`. Agent tests are
 `test/agent*.test.mjs` (also `answersources296`, `messageactions365`, `panelwidth`, `chatheader365`...) and render
 `AgentRequest` / `AgentPanelView` with `react-dom/server`. `test/agent.test.mjs` compares the `methods` of `bindings/agent.ts`
-with the exported `AgentService` methods in `agent.go`, `agentjournal.go`, `agentchats.go`, `agentmentions.go`: add a Go method, add it to `methods`.
+with the exported `AgentService` methods in `agent.go`, `agentjournal.go`, `agentchats.go`, `agentmentions.go`: add a Go method, add it to `methods`
+(`ForkChat` is in `methods` as `forkChat`; its parser is `parseForkResult`, tests in `agentfork271.test.mjs`).
 
 ## Gotchas
 - The core publishes updates from several operations without a global order; `reducePanel` applies each to the request it

@@ -19,6 +19,7 @@ const (
 	opAgentRestore = "ui: agent restore chat"
 	opAgentEarlier = "ui: agent earlier requests"
 	opAgentCurrent = "ui: agent current request"
+	opAgentFork    = "ui: agent fork chat"
 )
 
 // AgentProblemNotFound is the problem of a chat call naming a chat that does not exist.
@@ -32,6 +33,7 @@ type AgentChats interface {
 	Archive(ctx context.Context, id shared.ThreadID) (agentchats.Chat, error)
 	Restore(ctx context.Context, id shared.ThreadID) (agentchats.Chat, error)
 	Earlier(ctx context.Context, id shared.ThreadID) ([]agentchats.Request, error)
+	Fork(ctx context.Context, id shared.ThreadID, n int) (agentchats.ForkResult, error)
 }
 
 // AgentCurrent reads the current request of a chat (input/agent.Driver.Current) as the update the Driver would publish;
@@ -155,6 +157,29 @@ func (s *AgentService) ChatEarlier(ctx context.Context, threadID string) AgentEa
 	return AgentEarlierView{Requests: out}
 }
 
+// AgentForkResult is the outcome of «Форк»: Problem is "", invalid (a malformed id, a turn that is not an earlier
+// request shown in the chat), not_found, busy (try again) or failed; Chat is the new chat and Text the text of the
+// request forked from, for the input of the new chat (plain text), both only when Problem is "".
+type AgentForkResult struct {
+	Problem string        `json:"problem"`
+	Chat    AgentChatView `json:"chat"`
+	Text    string        `json:"text"`
+}
+
+// ForkChat is «Начать заново отсюда» → «Форк» (ADR-0028): a new chat with the requests of threadId before turn, which
+// becomes current; the source chat stays as it is, so it may run meanwhile.
+func (s *AgentService) ForkChat(ctx context.Context, threadID string, turn int) AgentForkResult {
+	id := shared.ThreadID(threadID)
+	if id.Validate() != nil || turn < 1 {
+		return AgentForkResult{Problem: AgentProblemInvalid}
+	}
+	r, err := s.chats.Fork(ctx, id, turn)
+	if err != nil {
+		return AgentForkResult{Problem: s.chatProblem(opAgentFork, err)}
+	}
+	return AgentForkResult{Chat: chatView(r.Chat), Text: r.Text}
+}
+
 // AgentCurrentView is the current request of a chat. Update has the form of an AgentUpdateEvent (problem "", progress
 // false; the same checked cards, model texts as plain text) and is null when the chat has no request or its request
 // ended. Problem is "", invalid, not_found, unavailable or failed.
@@ -207,7 +232,8 @@ func (s *AgentService) chatProblem(op string, err error) string {
 	switch {
 	case errors.Is(err, shared.ErrNotFound):
 		return AgentProblemNotFound
-	case errors.Is(err, agentchats.ErrInvalidInput), errors.Is(err, thread.ErrInvalidTitle):
+	case errors.Is(err, agentchats.ErrInvalidInput), errors.Is(err, thread.ErrInvalidTitle),
+		errors.Is(err, thread.ErrInvalidFork):
 		return AgentProblemInvalid
 	case errors.Is(err, agentchats.ErrBusy), errors.Is(err, thread.ErrInvalidTransition),
 		errors.Is(err, shared.ErrVersionConflict):

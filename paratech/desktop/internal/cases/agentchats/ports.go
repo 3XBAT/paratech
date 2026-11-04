@@ -28,6 +28,15 @@ type ChatRepository interface {
 	// Save inserts a new chat (version 0) or updates a stored one with a compare-and-swap on its version; a stale
 	// version or an id stored first is shared.ErrVersionConflict.
 	Save(ctx context.Context, t *thread.Thread) error
+
+	// ForkSource reads the requests 1…upTo of a chat that are not hidden, oldest first, in one read: their texts,
+	// mentions, scope, frozen line, times, and their entries only when the line is not frozen. It is not limited by
+	// the history read limit.
+	ForkSource(ctx context.Context, id shared.ThreadID, upTo int) ([]thread.PastRequest, error)
+
+	// SaveFork inserts a forked chat with its current request, the other copies and every copy's student texts, in
+	// one transaction; an id stored first is shared.ErrVersionConflict.
+	SaveFork(ctx context.Context, f thread.Fork) error
 }
 
 // History reads the history entries of a chat.

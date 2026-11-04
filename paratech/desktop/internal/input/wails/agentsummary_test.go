@@ -110,6 +110,46 @@ func (m *memChatStore) Since(_ context.Context, id shared.ThreadID, from, limit 
 	return out, nil
 }
 
+// ForkSource groups the stored entries of the chat by request, as the sqlite adapter reads them.
+func (m *memChatStore) ForkSource(_ context.Context, id shared.ThreadID, upTo int) ([]thread.PastRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	at := m.states[id].CreatedAt
+	var out []thread.PastRequest
+	for _, e := range m.history[id] {
+		if e.Turn > upTo || e.DroppedBy != 0 {
+			continue
+		}
+		if n := len(out); n == 0 || out[n-1].Number != e.Turn {
+			out = append(out, thread.PastRequest{Number: e.Turn, ReplyLine: e.ReplyLine, StartedAt: at, EndedAt: at})
+		}
+		p := &out[len(out)-1]
+		if e.Entry.StudentText != "" {
+			p.Texts = append(p.Texts, e.Entry.StudentText)
+		}
+		if p.ReplyLine == "" {
+			p.Entries = append(p.Entries, e.Entry)
+		}
+	}
+	return out, nil
+}
+
+// SaveFork stores the fork's thread and its copies' texts with their lines.
+func (m *memChatStore) SaveFork(ctx context.Context, f thread.Fork) error {
+	if err := m.Save(ctx, f.Thread); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, r := range f.Requests {
+		for _, text := range r.Texts {
+			m.history[f.Thread.ID()] = append(m.history[f.Thread.ID()],
+				values.HistoryEntry{Turn: r.Number, Entry: values.HistoryTurn{StudentText: text}, ReplyLine: r.ReplyLine})
+		}
+	}
+	return nil
+}
+
 type summaryClock struct {
 	mu  sync.Mutex
 	now time.Time
@@ -122,9 +162,18 @@ func (c *summaryClock) Now() time.Time {
 	return c.now
 }
 
-type oneID struct{}
+// nextIDs gives th2, th3, …: NewChat and ForkChat each make a chat.
+type nextIDs struct {
+	mu sync.Mutex
+	n  int
+}
 
-func (oneID) NewThreadID() shared.ThreadID { return "th2" }
+func (g *nextIDs) NewThreadID() shared.ThreadID {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.n++
+	return shared.ThreadID(fmt.Sprintf("th%d", g.n+1))
+}
 
 // compactedChat stores chat th1 with three done requests and a summary of the first holding summaryMarker.
 func compactedChat(t *testing.T, store *memChatStore, clock *summaryClock) {
@@ -163,7 +212,7 @@ func TestNoChatBindingReturnsTheSummary(t *testing.T) {
 	store := &memChatStore{states: map[shared.ThreadID]thread.State{}, history: map[shared.ThreadID][]values.HistoryEntry{}}
 	clock := &summaryClock{now: time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)}
 	compactedChat(t, store, clock)
-	chats, err := agentchats.New(agentchats.Deps{Chats: store, History: store, Clock: clock, IDs: oneID{}})
+	chats, err := agentchats.New(agentchats.Deps{Chats: store, History: store, Clock: clock, IDs: &nextIDs{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,12 +230,18 @@ func TestNoChatBindingReturnsTheSummary(t *testing.T) {
 		"Chats":        s.Chats(ctx),
 		"ChatEarlier":  s.ChatEarlier(ctx, "th1"),
 		"ChatCurrent":  s.ChatCurrent(ctx, "th1"),
+		"ForkChat":     s.ForkChat(ctx, "th1", 3), // th2, with the summary of request 1 copied
+		"Fork earlier": s.ChatEarlier(ctx, "th2"),
 		"RenameChat":   s.RenameChat(ctx, "th1", "Физика"),
 		"NewChat":      s.NewChat(ctx),
 		"ArchiveChat":  s.ArchiveChat(ctx, "th1"),
 		"RestoreChat":  s.RestoreChat(ctx, "th1"),
 		"Chats after":  s.Chats(ctx),
 		"Earlier more": s.ChatEarlier(ctx, "th1"),
+	}
+	if r := results["ForkChat"].(AgentForkResult); r.Problem != "" || r.Chat.ThreadID != "th2" || r.Text != "просьба 3" ||
+		!strings.Contains(store.states["th2"].Summary.Text(), summaryMarker) {
+		t.Fatalf("the fork does not hold the summary, so it proves nothing: %+v", r)
 	}
 	s.panel.Publish(AgentUpdate{Thread: "th1", Compaction: true, Compacting: true})
 	s.panel.Publish(AgentUpdate{Thread: "th1", Compaction: true, Fill: fill})

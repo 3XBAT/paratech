@@ -22,6 +22,7 @@ const (
 	opRestore = "agentchats: restore"
 	opEarlier = "agentchats: earlier requests"
 	opFill    = "agentchats: context fill"
+	opFork    = "agentchats: fork"
 )
 
 // maxSaves bounds the saves of one change when a request of the chat keeps saving in between.

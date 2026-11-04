@@ -1,5 +1,6 @@
 // Package agentchats is the use case of the agent chat list (ADR-0028): list the chats, start a new one, rename,
-// archive and restore one, read its earlier requests as text and its context ring (Fill, from thread.Fill). A chat is an agent/thread aggregate; requests in it
+// archive and restore one, read its earlier requests as text and its context ring (Fill, from thread.Fill), fork one
+// from an earlier request (Fork, from thread.ForkOf). A chat is an agent/thread aggregate; requests in it
 // are run by cases/agentturn, which this package does not import (ARCH-20).
 //
 // Chats are never deleted: journal lines reference them. Earlier requests show only the student's text, its mentions

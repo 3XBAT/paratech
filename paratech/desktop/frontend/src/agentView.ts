@@ -191,7 +191,22 @@ export const chatTexts = {
   noChats: "Чатов пока нет.",
   emptyArchive: "Архив пуст.",
   earlierCaption: "Ранее в этом чате",
+  openSource: "Открыть исходный чат",
 } as const;
+
+/** The core adds this to the title of a fork (domain/agent/thread/fork.go). */
+const forkTitleSuffix = " (fork)";
+
+/**
+ * A chat title split so the suffix of a fork never falls under the ellipsis: the name is cut, the suffix is kept whole.
+ * A title that is only the suffix, or has none, stays one piece.
+ */
+export function splitForkTitle(title: string): { name: string; suffix: string } {
+  if (title.endsWith(forkTitleSuffix) && title.length > forkTitleSuffix.length) {
+    return { name: title.slice(0, -forkTitleSuffix.length), suffix: forkTitleSuffix };
+  }
+  return { name: title, suffix: "" };
+}
 
 /** The longest chat title, in characters (runes), as the core checks it. */
 export const maxChatTitle = 80;
@@ -533,8 +548,13 @@ export function restoredMentions(e: Entry, requests: readonly EarlierRequestView
 export const restartTexts = {
   action: "Начать заново отсюда",
   title: "Начать заново отсюда?",
-  body: "Сообщения после этого агент забудет. Сделанные действия не отменяются.",
+  // Under each choice, in the owner's words (2026-10-27).
+  hideHint: "Сообщения после этого агент забудет. Сделанные действия не отменяются.",
   hide: "Скрыть",
+  fork: "Форк",
+  forkHint: "Будет создан новый чат с историей до этого сообщения. Этот чат не изменится.",
+  forking: "Создаётся…",
+  forkNewChat: "Новый чат",
   cancel: "Отмена",
   stop: "Остановить",
   stopping: "Останавливается…",
@@ -838,6 +858,129 @@ export function restartRefusalText(problem: string): string {
     default:
       return "Не удалось отправить. Можно попробовать ещё раз или отменить правку.";
   }
+}
+
+// ---- «Форк» (TASK-271) ----
+// The core copies the history before the chosen request into a NEW chat (already the current one) and gives back that
+// request's text for its field. The old chat is not touched; "Скрыть" is not involved.
+
+/**
+ * Why «Форк» did not work, in plain words, and the way on: "retry" is the «Форк» button itself (enabled again), "new" is the
+ * «Новый чат» button of the same option (retrying cannot help).
+ */
+export interface ForkFailure {
+  text: string;
+  way: "retry" | "new";
+}
+
+/** An unknown code, a failed call and "busy" read as one retryable failure; no raw code reaches the page. */
+export function forkFailure(problem: string): ForkFailure {
+  switch (problem) {
+    case "not_found":
+      return { text: "Этот чат уже недоступен.", way: "new" };
+    case "invalid":
+      return { text: "Этого сообщения уже нет в чате: оно скрыто или изменилось. Чат обновлён.", way: "new" };
+    default:
+      return { text: "Не удалось создать новый чат. Можно повторить.", way: "retry" };
+  }
+}
+
+/** A refusal that arrives after the dialog was closed goes to the note of the chat bar, with the way to try again. */
+export const forkNotCreatedNote = "Новый чат не создан. Можно снова выбрать «Начать заново отсюда» → «Форк».";
+
+/** The refusal that means the chat's earlier requests changed: the panel reads them again. */
+export function forkChangedChat(problem: string): boolean {
+  return problem === "invalid";
+}
+
+const maxNoteTitle = 40;
+
+/** The quiet line after a successful «Форк»: a new chat is open and the source one is as it was. The title is text, cut sensibly. */
+export function forkOpenedNote(sourceTitle: string): string {
+  const flat = sourceTitle.replace(/\s+/g, " ").trim();
+  const chars = Array.from(flat === "" ? chatTexts.untitled : flat);
+  const title = chars.length > maxNoteTitle ? `${chars.slice(0, maxNoteTitle).join("").trimEnd()}…` : chars.join("");
+  return `Открыт новый чат. Исходный «${title}» не изменился.`;
+}
+
+/** The call in flight (one at a time) and the last refusal, which the dialog shows. */
+export interface ForkState {
+  busy: boolean;
+  failure: ForkFailure | null;
+}
+
+export const noFork: ForkState = { busy: false, failure: null };
+
+/** «Форк» was pressed: a second press while the call runs starts nothing. */
+export function beginFork(s: ForkState): { state: ForkState; start: boolean } {
+  return s.busy ? { state: s, start: false } : { state: { busy: true, failure: null }, start: true };
+}
+
+/** The call came back with a problem. */
+export function endFork(problem: string): ForkState {
+  return { busy: false, failure: forkFailure(problem) };
+}
+
+/** The dialog opened or closed: an old refusal is forgotten, a call still running is not. */
+export function forgetFork(s: ForkState): ForkState {
+  return s.failure === null ? s : { ...s, failure: null };
+}
+
+function samePills(a: MentionView, b: MentionView): boolean {
+  return a.kind === b.kind && a.id === b.id;
+}
+
+/**
+ * The field of the new chat: the text of the request forked from, with its mentions as pills. A field that already holds
+ * typed text is not overwritten (the student's words are not lost): the request follows it after an empty line. Over the
+ * field's limit the end of the request is cut, never the typed text.
+ */
+export function forkField(field: FieldContent, text: string, mentions: readonly MentionView[]): FieldContent {
+  const pills = [...field.pills];
+  for (const m of mentions) {
+    if (pills.length < maxMentions && !pills.some((p) => samePills(p, m))) {
+      pills.push({ kind: m.kind, id: m.id, label: m.label });
+    }
+  }
+  const kept = field.draft.trim() === "" ? "" : field.draft.replace(/\s+$/, "");
+  const typed = kept === "" || text.trim() === "" ? kept : `${kept}\n\n`;
+  const chars = Array.from(`${typed}${text}`);
+  return { draft: chars.length > maxDraftLength ? chars.slice(0, maxDraftLength).join("") : chars.join(""), pills };
+}
+
+function sameField(a: FieldContent, b: FieldContent): boolean {
+  return a.draft === b.draft && a.pills.length === b.pills.length && a.pills.every((p, i) => samePills(p, b.pills[i]));
+}
+
+/**
+ * «Форк» succeeded; `from` is the request forked from. The dialog closes and the pending «Скрыть» edit (it belongs to the
+ * old chat) ends, but the student's words are not lost:
+ * - the field still holds the edit's own text: it returns to what it held before the edit, then the request's text follows;
+ * - the edited text (and pills) of the same request replaces the request's text, after what the field held before;
+ * - the edited text of another request is kept too, between what the field held before and the forked request's text;
+ * - after a refused send the field is already what the student typed: it stays, the request's text follows.
+ * With no pending edit the typed text stays and the request follows it, as on any chat switch.
+ */
+export function forkOpened(
+  s: RestartFlow,
+  field: FieldContent,
+  text: string,
+  mentions: readonly MentionView[],
+  from: { threadId: string; turn: number },
+): RestartStep {
+  const flow = { asking: null, pending: null };
+  const p = s.pending;
+  if (p === null || p.unsent !== null) {
+    return { flow, field: forkField(field, text, mentions) };
+  }
+  const base = { draft: p.before.draft, pills: p.before.pills };
+  if (sameField(field, { draft: restartDraft(p), pills: p.mentions })) {
+    return { flow, field: forkField(base, text, mentions) };
+  }
+  if (p.threadId === from.threadId && p.turn === from.turn) {
+    return { flow, field: forkField(base, field.draft, field.pills) };
+  }
+  return { flow, field: forkField(forkField(base, field.draft, field.pills), text, mentions) };
 }
 
 /** Keys of the warning dialog: Esc takes it back, Tab stays among its `count` buttons, Shift+Tab goes backwards. */

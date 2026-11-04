@@ -269,6 +269,13 @@ type Querier interface {
 	// Entries of the same instant follow the insert order (rowid; ids are random), so "undo the request" goes exactly
 	// in reverse.
 	ListAgentActionsByThread(ctx context.Context, arg ListAgentActionsByThreadParams) ([]AgentAction, error)
+	// The student texts of those requests, in order.
+	ListAgentForkTexts(ctx context.Context, arg ListAgentForkTextsParams) ([]ListAgentForkTextsRow, error)
+	// Fork of a chat (thread.ForkOf): its requests up to a number that are not dropped, oldest first. Not limited by the
+	// history read limit, so the first requests of a long chat are never lost.
+	ListAgentForkTurns(ctx context.Context, arg ListAgentForkTurnsParams) ([]AgentTurn, error)
+	// Every entry of one request, in order: the reply line of a request that has none frozen is built from them.
+	ListAgentRequestEntries(ctx context.Context, arg ListAgentRequestEntriesParams) ([]ListAgentRequestEntriesRow, error)
 	// The newest entries of the requests from a number on, newest first (the adapter returns them oldest first), each
 	// with the frozen reply line and the mentions of its request. Entries of dropped requests are left out here, so they
 	// never take a place under the limit (ADR-0028).
