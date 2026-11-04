@@ -6,14 +6,43 @@ provider (LIVE). Talks to the Hub only through processes and HTTP; no Go code, n
 ## Run
 
 ```
-npm ci                       # inside paratech/e2e (npm 10 ignores --prefix for a bare install)
+npm ci                                  # inside paratech/e2e (npm 10 ignores --prefix for a bare install)
 npm --prefix <abs>/paratech/e2e test    # tsc + node --test: unit tests, and the real Hub test when Docker is up
+
+# the whole run holds the machine lock, so always through heavy.sh (never nested inside the runner):
+bash <ops>/heavy.sh npm --prefix <abs>/paratech/e2e run e2e                       # SCRIPTED: builds the E2E exe, runs every spec
+bash <ops>/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --grep @smoke      # a tag or title filter (any `playwright test` argument)
+bash <ops>/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --no-build         # reuse paratech/dist/e2e/paratech.exe
+bash <ops>/heavy.sh npm --prefix <abs>/paratech/e2e run e2e:live                  # mode LIVE (= e2e -- --live; the real provider key is needed)
 ```
+
+`npm run e2e` compiles with `tsc` and starts `build/src/cli.js`, which takes `--no-build` and `--live` and hands the
+rest to `playwright test` (it runs the TypeScript sources itself; the `.js`-suffixed imports resolve for tsc and for
+Playwright alike). No browser is ever downloaded or launched: specs attach to the app over CDP.
+
+One run, in order (`src/sandbox/run.ts`): wipe the run root `paratech/dist/e2e-run/` (only that exact folder; a locked
+file is an environment error), create `ctl/` (= `--e2e-dir`), `ctl/data` (= `--data-dir`), copy `fixtures/` into
+`ctl/fixtures` → fake LLM → Hub → build (unless `--no-build`) → start the app with a minimal environment and wait for the
+four log lines → check the debug port is loopback-only → specs → teardown: hard stop of the app tree
+(`taskkill /T /F`), Hub, fake, and the Credential Manager entries `paratech-<secrets_profile_id>/…` of this profile only.
+The sandbox files stay after the run (the next run wipes them); the report is `paratech/dist/e2e-run/report/report.md`.
+
+| Folder | Content |
+|---|---|
+| `src/sandbox` | run root, wipe guard, build, Credential Manager cleanup, global setup and teardown, `state.json` |
+| `src/app` | launching the exe (`launch.ts`), `netstat` loopback check, `connectOverCDP` (`cdp.ts`) |
+| `src/steps`, `src/report` | spec helpers (`pick`, `opened`, `llm`, `step`, page stubs) and the reporter (`docs/process/e2e.md`) |
+| `src/hub`, `src/fakellm` | the Hub harness and the fake Messages API (below) |
+| `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check |
+
+If the run is killed (Ctrl+C, a crash), an exit guard kills the app tree and the Hub, but not the compose project; check for leftovers:
+`paratech.exe` / `hub.exe` of the run (`tasklist`), and `docker compose -p paratech-e2e -f paratech/hub/docker-compose.yml down -v`.
+The next run also deletes the Credential Manager entries of the previous run's profile before it wipes the folder.
 
 The Hub test builds `paratech/dist/e2e/hub.exe` (`go -C paratech build ./hub/cmd/hub`, once per process), starts the
 `postgres` service of `hub/docker-compose.yml` under its own compose project, creates schema `e2e_<run>`, issues a key
 with `hub keys create -label e2e-<run>`, serves on a free `127.0.0.1` port and calls `GetRemaining` and one `Complete`
-answered by the fake. It is skipped without Docker (and without `HUB_TEST_DATABASE_URL`) or with `PARATECH_E2E_UNIT_ONLY=1`.
+answered by the fake. It is skipped without Docker or with `PARATECH_E2E_UNIT_ONLY=1`.
 
 ```ts
 const fake = await startFakeLLM();
@@ -27,11 +56,17 @@ await hub.stop(); await fake.stop();
 
 | Variable | Use |
 |---|---|
-| `PARATECH_E2E_PG_PORT` | Postgres port of the E2E compose project; else `HUB_PG_PORT`; else 55432 |
-| `HUB_TEST_DATABASE_URL` | use this database instead of compose (`sslmode=disable`) |
-| `PARATECH_E2E_ANTHROPIC_KEY` | LIVE only: provider key (required) |
+| `PARATECH_E2E_PG_PORT` | Postgres port of the E2E compose project; else 55432 (Windows may reserve it: `netsh int ipv4 show excludedportrange protocol=tcp`; then set e.g. 56432) |
+| `PARATECH_E2E_ANTHROPIC_KEY` | LIVE only: provider key (required); only the Hub process gets it |
 | `PARATECH_E2E_ANTHROPIC_BASE_URL`, `PARATECH_E2E_ANTHROPIC_AUTH` | LIVE only: gateway URL and `x-api-key`/`bearer` |
 | `PARATECH_E2E_UNIT_ONLY=1` | skip the real Hub test |
+| `PARATECH_E2E_WINDOW=WxH` | `--e2e-window` of the app (default: the app's own size) |
+| `PARATECH_E2E_MODE`, `PARATECH_E2E_NO_BUILD` | set by `cli.js` from `--live` / `--no-build`; do not set by hand |
+| `PARATECH_E2E_RUN_ROOT`, `…_CTL_DIR`, `…_DATA_DIR`, `…_CDP_URL`, `…_FAKE_URL`, `…_HUB_URL`, `…_HUB_KEY` | outputs of the global setup for the workers (`src/contract.ts`); the Hub key lives in `process.env` only |
+
+The harness reads only `PARATECH_E2E_*` variables as inputs. `HUB_PG_PORT` is an output: `hub/docker-compose.yml`
+interpolates it, so the harness sets it in the environment of the `docker compose` child. The app is started with
+`PATH`, `SystemRoot`, `windir`, `TEMP`, `TMP` and `LOCALAPPDATA` (the app refuses an E2E start without it) and nothing else.
 
 `startHub` options: `mode`, `fakeUrl` (SCRIPTED), `quotaLimit` (default 400000 tokens), `logLevel`, `env`, `readyTimeoutMs`.
 Errors are typed, with a `kind` and a Russian message (scrubbed of every secret of the run), in two hierarchies:
@@ -63,8 +98,8 @@ starts calling is not missed. Recordings hold request bodies only, never headers
 - An unmatched call is HTTP 500 `api_error`, which is transient for the Hub and the desktop: they may retry it, so
   one unscripted call can show up several times in `/__e2e/unmatched`.
 - Linux CI must set `PARATECH_E2E_UNIT_ONLY=1`: there it only type-checks and unit tests this package (ADR-0035 section 7).
-- `HUB_TEST_DATABASE_URL` and `HUB_PG_PORT` are read from the environment: never point them at the owner's dev
-  database or its port; set `PARATECH_E2E_PG_PORT` to a port of its own for the E2E compose project.
+- The database is always the postgres service of the compose project `paratech-e2e`; no variable can point the harness at
+  another database. Set `PARATECH_E2E_PG_PORT` to a port of its own (never the owner's 15432).
 
 ## Isolation
 

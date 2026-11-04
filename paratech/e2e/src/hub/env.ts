@@ -12,8 +12,6 @@ export const EnvLiveKey = "PARATECH_E2E_ANTHROPIC_KEY";
 export const EnvLiveBaseURL = "PARATECH_E2E_ANTHROPIC_BASE_URL";
 export const EnvLiveAuth = "PARATECH_E2E_ANTHROPIC_AUTH";
 export const EnvE2EPgPort = "PARATECH_E2E_PG_PORT";
-export const EnvHubPgPort = "HUB_PG_PORT";
-export const EnvTestDatabaseURL = "HUB_TEST_DATABASE_URL";
 
 // A value the Hub needs to start in SCRIPTED mode; the fake never checks it.
 export const DummyProviderKey = "e2e-dummy-provider-key";

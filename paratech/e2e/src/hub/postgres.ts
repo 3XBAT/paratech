@@ -1,12 +1,16 @@
 import { DockerMissingError, DockerNotRunningError, DatabaseUnavailableError, PortBusyError } from "./errors.js";
-import { type Env, EnvE2EPgPort, EnvHubPgPort, EnvTestDatabaseURL, toolEnv } from "./env.js";
-import { parsePgUrl, type PgTarget } from "./pg.js";
+import { type Env, EnvE2EPgPort, toolEnv } from "./env.js";
+import { type PgTarget } from "./pg.js";
 import { Loopback, loopbackPortBusy, parsePort } from "./ports.js";
 import { run, SpawnError } from "./proc.js";
 
 // Own compose project: own container, network and volume, so the owner's stack (project "hub") is never touched.
 export const ComposeProject = "paratech-e2e";
 export const DefaultPgPort = 55432;
+
+// An OUTPUT, never read: hub/docker-compose.yml interpolates ${HUB_PG_PORT} for the host port of the postgres service,
+// so the compose child gets it in its environment. The harness reads only PARATECH_E2E_* variables.
+const composePgPortVar = "HUB_PG_PORT";
 
 // Credentials of the dev-only database of hub/docker-compose.yml (reachable from localhost only).
 const composeUser = "hub";
@@ -24,14 +28,10 @@ export interface DatabaseLease {
   release(): Promise<void>;
 }
 
-/** The Postgres port of the E2E compose project: PARATECH_E2E_PG_PORT, else HUB_PG_PORT, else 55432. */
+/** The Postgres port of the E2E compose project: PARATECH_E2E_PG_PORT, else 55432. */
 export function composePort(env: Env): number {
   const own = env[EnvE2EPgPort];
-  if (own) {
-    return parsePort(own, EnvE2EPgPort);
-  }
-  const hub = env[EnvHubPgPort];
-  return hub ? parsePort(hub, EnvHubPgPort) : DefaultPgPort;
+  return own ? parsePort(own, EnvE2EPgPort) : DefaultPgPort;
 }
 
 /** Whether the Docker engine answers; false when docker is missing or not running. */
@@ -62,12 +62,8 @@ async function checkDocker(env: Env): Promise<void> {
   }
 }
 
-/** HUB_TEST_DATABASE_URL when set (compose is skipped), else the postgres service of the E2E compose project. */
+/** The postgres service of the E2E compose project (always: no other database can be named from the environment). */
 export async function acquireDatabase(env: Env, composeFile: string): Promise<DatabaseLease> {
-  const url = env[EnvTestDatabaseURL];
-  if (url) {
-    return { adminUrl: url, target: parsePgUrl(url, EnvTestDatabaseURL), release: async () => {} };
-  }
   return acquireCompose(env, composeFile);
 }
 
@@ -140,7 +136,7 @@ async function startCompose(env: Env, composeFile: string): Promise<{ port: numb
     throw new PortBusyError(wanted);
   }
   const up = await compose(env, composeFile, ["up", "-d", "--wait", "postgres"], composeUpTimeoutMs, {
-    [EnvHubPgPort]: String(wanted),
+    [composePgPortVar]: String(wanted),
   });
   if (up.code !== 0) {
     await composeDown(env, composeFile).catch(() => {});

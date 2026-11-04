@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023"],
+    "lib": ["ES2023", "DOM"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "types": ["node"],
@@ -15,5 +15,5 @@
     "outDir": "build",
     "sourceMap": false
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["playwright.config.ts", "src/**/*.ts", "specs/**/*.ts", "test/**/*.ts"]
 }
