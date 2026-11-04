@@ -340,7 +340,17 @@ export interface UpdateView {
   /** A step went to the Hub: no cards; apply the status only and keep the cards shown. False from an older core. */
   progress: boolean;
   cards: CardView[];
-  /** How full the context of the chat is; non-null only once the request has ended. Null: unknown, leave the ring as is. */
+  /**
+   * The update only reports the compaction state of the chat (turn 0, no status, no cards, no problem): it is not a
+   * request and never reaches the request list. False from an older core.
+   */
+  compaction: boolean;
+  /** Only with `compaction`: true, a compaction runs in threadId; false, it ended. False from an older core. */
+  compacting: boolean;
+  /**
+   * How full the context of the chat is; non-null once the request has ended and on the update that ends a successful
+   * compaction. Null: unknown, leave the ring as is.
+   */
   fill: ContextFill | null;
 }
 
@@ -729,6 +739,8 @@ export function parseUpdate(raw: unknown): UpdateView {
     problem: str(r, "problem", w),
     progress: flag(r, "progress"),
     cards,
+    compaction: flag(r, "compaction"),
+    compacting: flag(r, "compacting"),
     fill: parseFill(r.fill),
   };
 }

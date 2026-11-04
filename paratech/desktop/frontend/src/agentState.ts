@@ -322,7 +322,8 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
       // Only a request the core never answered for is taken back.
       return { ...s, entries: s.entries.filter((x) => !(x.key === a.key && x.update === null)) };
     case "update":
-      return applyUpdate(s, a.update);
+      // A compaction report is not a request: with turn 0 and no status it would pass for a failed Ask.
+      return a.update.compaction ? s : applyUpdate(s, a.update);
     case "snapshot": {
       const u = a.update;
       // A live update wins: the session already knows the chat, so a late snapshot is dropped, never merged.
