@@ -37,6 +37,7 @@ export const methods = {
   chatEarlier: `${service}.ChatEarlier`,
   mentionCandidates: `${service}.MentionCandidates`,
   chatCurrent: `${service}.ChatCurrent`,
+  forkChat: `${service}.ForkChat`,
 } as const;
 
 export type MentionKind = "subject" | "lesson" | "material" | "assignment";
@@ -912,6 +913,39 @@ export function parseChatResult(raw: unknown): ChatResult {
   }
 }
 
+/**
+ * The outcome of «Форк». On success chat is the new chat as a list line (already the current one in the core) and text is
+ * the request forked from, for the new chat's field; on any problem chat is null and text is "".
+ */
+export interface ForkResult {
+  problem: ChatProblem;
+  chat: ChatView | null;
+  text: string;
+}
+
+const failedFork: ForkResult = { problem: "failed", chat: null, text: "" };
+
+/**
+ * Strict: malformed data, an unknown problem, or a success without a chat (or with an empty chat id) or without a text
+ * reads as failed; a problem always comes with no chat and no text. Never throws.
+ */
+export function parseForkResult(raw: unknown): ForkResult {
+  try {
+    const r = record(raw, "fork result");
+    const problem = chatProblemOf(r);
+    if (problem !== "") {
+      return { problem, chat: null, text: "" };
+    }
+    const chat = parseChat(r.chat);
+    if (chat.threadId === "") {
+      return failedFork;
+    }
+    return { problem, chat, text: str(r, "text", "fork result") };
+  } catch {
+    return failedFork;
+  }
+}
+
 function parseMention(raw: unknown): MentionView {
   const w = "mention";
   const r = record(raw, w);
@@ -1012,6 +1046,11 @@ export interface AgentApi {
   renameChat(threadId: string, title: string): Promise<ChatResult>;
   archiveChat(threadId: string): Promise<ChatResult>;
   restoreChat(threadId: string): Promise<ChatResult>;
+  /**
+   * «Форк» from request `turn` of a chat: a new chat «<название> (fork)» with the history before it, opened as the
+   * current one; the source chat is not changed. Allowed while a request runs.
+   */
+  forkChat(threadId: string, turn: number): Promise<ForkResult>;
   /** The requests of a chat as text, oldest first, the current one last. */
   chatEarlier(threadId: string): Promise<EarlierView>;
   /** The Hub link of the panel; calls no Hub. */
@@ -1046,6 +1085,7 @@ export function agentApi(call: CallByName): AgentApi {
     renameChat: async (threadId, title) => parseChatResult(await call(methods.renameChat, threadId, title)),
     archiveChat: async (threadId) => parseChatResult(await call(methods.archiveChat, threadId)),
     restoreChat: async (threadId) => parseChatResult(await call(methods.restoreChat, threadId)),
+    forkChat: async (threadId, turn) => parseForkResult(await call(methods.forkChat, threadId, turn)),
     chatEarlier: async (threadId) => parseEarlier(await call(methods.chatEarlier, threadId)),
     chatCurrent: async (threadId) => parseCurrent(await call(methods.chatCurrent, threadId)),
     state: async () => parseState(await call(methods.state)),
