@@ -215,7 +215,7 @@ func agentRequestAt(req agent.StepRequest, catalog uint32) (*hubv1.AgentStepRequ
 		ThreadId:        string(req.Thread),
 		Profile:         hubv1.AgentProfile_AGENT_PROFILE_PANEL,
 		CatalogVersion:  catalog,
-		Base:           &hubv1.AgentBase{Today: req.Base.Today().String(), TimeZone: req.Base.TimeZone()},
+		Base:            &hubv1.AgentBase{Today: req.Base.Today().String(), TimeZone: req.Base.TimeZone()},
 		MaxOutputTokens: uint32(req.MaxOutputTokens),
 	}
 	for _, s := range req.Base.Subjects() {

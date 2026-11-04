@@ -232,7 +232,9 @@ func TestCompactionRequestFromHistoryStart(t *testing.T) {
 }
 
 func TestCompactionRequestState(t *testing.T) {
-	long := func(turn int) string { return numbered(turn) + " " + strings.Repeat("я", (values.MaxStudentTextBytes-20)/2) }
+	long := func(turn int) string {
+		return numbered(turn) + " " + strings.Repeat("я", (values.MaxStudentTextBytes-20)/2)
+	}
 	// Three requests of five long texts each fill the window by bytes.
 	var three []values.HistoryEntry
 	for turn := 1; turn <= 3; turn++ {
