@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"testing"
@@ -532,6 +533,52 @@ func TestTurnkeyCallsPassTheStudentsInput(t *testing.T) {
 	f.advice = "Масштаб 1:100"
 	if a, err := s.AskStep(ctx, "w1", 0, "Какой масштаб?"); err != nil || a.Text != "Масштаб 1:100" {
 		t.Fatalf("AskStep = %+v, %v", a, err)
+	}
+}
+
+// An assignment without a work is a normal state of its page: null, not an error (Wails answers errors with a 422).
+func TestTurnkeyWorkOfAssignment(t *testing.T) {
+	notFound := fmt.Errorf("%w: %w", turnkey.ErrNotFound, shared.ErrNotFound)
+	tests := []struct {
+		name    string
+		view    turnkey.View
+		err     error
+		wantID  string // "" nil
+		wantErr error
+		problem string
+		level   string
+	}{
+		{name: "no work", err: notFound, level: "level=INFO"},
+		{name: "work", view: helperView(), wantID: "w1"},
+		{name: "work with a problem", view: helperView(), err: turnkey.ErrQuota, wantID: "w1", problem: turnkeyProblemQuota, level: "level=INFO"},
+		{name: "invalid id", err: fmt.Errorf("%w: bad", turnkey.ErrInvalidRequest), wantErr: ErrTurnkeyInvalid, level: "level=WARN"},
+		{name: "unavailable", err: turnkey.ErrUnavailable, wantErr: ErrTurnkeyUnavailable, level: "level=WARN"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs strings.Builder
+			s := NewTurnkeyService(&fakeTurnkey{view: tt.view, err: tt.err}, slog.New(slog.NewTextHandler(&logs, nil)))
+			got, err := s.WorkOfAssignment(t.Context(), "a7")
+			if !errors.Is(err, tt.wantErr) || (tt.wantErr == nil && err != nil) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			switch {
+			case tt.wantID == "" && got != nil:
+				t.Fatalf("got %+v, want nil", got)
+			case tt.wantID != "" && (got == nil || got.ID != tt.wantID || got.Problem != tt.problem):
+				t.Fatalf("got %+v, want %s with problem %q", got, tt.wantID, tt.problem)
+			}
+			if tt.level == "" && logs.Len() > 0 || tt.level != "" && !strings.Contains(logs.String(), tt.level) {
+				t.Errorf("log = %q, want %q", logs.String(), tt.level)
+			}
+			if tt.wantErr == nil && strings.Contains(logs.String(), "level=WARN") {
+				t.Errorf("log = %q, want no warning", logs.String())
+			}
+		})
+	}
+
+	if got, err := NewTurnkeyService(&fakeTurnkey{err: notFound}, discard()).Work(t.Context(), "w1"); !errors.Is(err, ErrTurnkeyNotFound) {
+		t.Errorf("Work of a missing id = %+v, %v; want ErrTurnkeyNotFound", got, err)
 	}
 }
 
