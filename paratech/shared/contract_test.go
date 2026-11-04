@@ -711,15 +711,18 @@ func TestAgentMessagesHaveOnlyAllowlistedStrings(t *testing.T) {
 	}
 }
 
-// Golden tool catalog (design §2.3, ADR-0021), the current version 9 (TASK-244: the tools of v8, chats with mentions and
+// Golden tool catalog (design §2.3, ADR-0021), the current version 10 (TASK-325, ADR-0033 §10: agent parity wave 10,
+// the bool type, max_items, note.text as a reply_text, the button card, plans of 200 steps; v9, TASK-244: the tools of
+// v8, chats with mentions and
 // the summary turn, a new server prompt; v8, TASK-233: the tools of v7, a new server prompt; v7, TASK-223: reply.text is a reply_text of up to 4000 characters; v6, TASK-216: create_assignment and the time type;
 // v5, TASK-200: the tools of v4, a new server prompt; v4, TASK-182: no generate_draft, triage_assignment by topic; v3,
 // TASK-172: reply lists up to 10 assignment IDs; v2, TASK-118: question and search query of up to 500 characters). Both
-// the Hub catalog (TASK-114) and the desktop Tool enum (TASK-115) must match it. Versions 1 to 8 are frozen: the Hub
+// the Hub catalog (TASK-114) and the desktop Tool enum (TASK-115) must match it. Versions 1 to 9 are frozen: the Hub
 // still serves them to clients of those versions.
 const (
-	toolCatalogVersion = 9
-	toolCatalogFile    = "testdata/tool_catalog_v9.json"
+	toolCatalogVersion = 10
+	toolCatalogFile    = "testdata/tool_catalog_v10.json"
+	toolCatalogV9File  = "testdata/tool_catalog_v9.json"
 	toolCatalogV8File  = "testdata/tool_catalog_v8.json"
 	toolCatalogV7File  = "testdata/tool_catalog_v7.json"
 	toolCatalogV6File  = "testdata/tool_catalog_v6.json"
@@ -735,6 +738,7 @@ type catalogArgument struct {
 	Type     string   `json:"type"`
 	Required bool     `json:"required"`
 	Values   []string `json:"values"`
+	MaxItems int      `json:"max_items"` // ids only, catalog 10 on
 }
 
 type catalogTool struct {
@@ -755,16 +759,22 @@ type toolCatalog struct {
 var (
 	toolNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 	toolClasses     = []string{"R", "U", "C", "UI"}
-	// Argument types of tools that act or read: only IDs, enums, dates, times of day, short labels and the student's
-	// question or search text (ADR-0022, TASK-118, TASK-216).
-	actionArgTypes = []string{"id", "ids", "date", "time", "enum", "label", "query"}
+	// Argument types of tools that act or read: only IDs, enums, true or false, dates, times of day, short labels and
+	// the student's question or search text (ADR-0022, TASK-118, TASK-216, TASK-325).
+	actionArgTypes = []string{"id", "ids", "date", "time", "enum", "bool", "label", "query"}
 	// Types only UI tools may use: card text written by the model, at most 300 characters each (ADR-0023) except the
 	// reply text of at most 4000 (TASK-223), and IDs a card lists, whose titles the desktop draws from local data
 	// (TASK-172).
 	uiArgTypes = []string{"text", "reply_text", "text_list", "card_ids", "plan_steps", "questions"}
 	// Class C tools only name trusted local objects: the confirm card shows trusted data, never model text.
 	confirmArgTypes = []string{"id"}
-	uiTools         = []string{"ask_questions", "cannot_do", "reply", "show_plan"}
+	uiTools         = []string{"ask_questions", "cannot_do", "offer_button", "reply", "show_plan"}
+	// The button card (ADR-0033 §3) names an action of a closed enum and the one ID it needs: never a URL, a path or
+	// a label.
+	buttonTool     = "offer_button"
+	buttonArgTypes = []string{"enum", "id"}
+	// The most IDs an ids argument may state as max_items (mark_assignments_done, ADR-0033 §9).
+	maxIDsItems = 50
 	// Argument names that would let a model choose a recipient, a destination or a file outside the app.
 	forbiddenArgWords = []string{"cc", "bcc", "subject_line", "attachment", "attachments", "command", "cmd", "shell"}
 )
@@ -819,6 +829,17 @@ var pinnedTools = map[string]string{
 	"ask_questions":            "UI",
 	"reply":                    "UI",
 	"cannot_do":                "UI",
+	// wave 10 (ADR-0033 §10)
+	"propose_subjects_from_schedule": "C",
+	"change_assignment":              "U",
+	"mark_assignments_done":          "U",
+	"list_notes":                     "R",
+	"note":                           "U",
+	"get_settings":                   "R",
+	"set_setting":                    "U",
+	"quota_status":                   "R",
+	"recording":                      "U",
+	"offer_button":                   "UI",
 }
 
 // Notes the catalog must carry for its implementers (TASK-114, TASK-115).
@@ -890,10 +911,12 @@ func validateCatalog(c toolCatalog) []string {
 		}
 
 		allowed := actionArgTypes
-		switch tool.Class {
-		case "UI":
+		switch {
+		case tool.Class == "UI" && tool.Name == buttonTool:
+			allowed = buttonArgTypes
+		case tool.Class == "UI":
 			allowed = uiArgTypes
-		case "C":
+		case tool.Class == "C":
 			allowed = confirmArgTypes
 		}
 		argNames := map[string]bool{}
@@ -909,8 +932,13 @@ func validateCatalog(c toolCatalog) []string {
 			if namesForbidden(a.Name) {
 				add("argument %s names a destination, a recipient, a path or a file (ADR-0022)", where)
 			}
-			if !slices.Contains(allowed, a.Type) {
+			// The text of a note (catalog 10) is the one reply_text outside the cards: the student's own words.
+			noteText := tool.Class == "U" && a.Type == "reply_text" && slices.Contains(replyTextArguments, where)
+			if !slices.Contains(allowed, a.Type) && !noteText {
 				add("argument %s has type %q, a %s tool allows only %v", where, a.Type, tool.Class, allowed)
+			}
+			if a.MaxItems != 0 && (a.Type != "ids" || a.MaxItems < 1 || a.MaxItems > maxIDsItems) {
+				add("argument %s: max_items is 1-%d on an ids argument only", where, maxIDsItems)
 			}
 			if (a.Type == "enum") != (len(a.Values) > 0) {
 				add("argument %s: an enum needs values and only an enum has them", where)
@@ -932,11 +960,19 @@ func validateCatalog(c toolCatalog) []string {
 // queryArguments are the only arguments of type query: the student's question and search text, at most 500
 // characters (TASK-118), the topic of a work without an assignment (TASK-182) and the note of an assignment the student
 // adds (TASK-216). A query is longer free text than a label, so a new one must be a conscious edit here.
-var queryArguments = []string{"answer_question.question", "create_assignment.note", "search.query", "triage_assignment.topic"}
+var queryArguments = []string{
+	"answer_question.question", "change_assignment.note", "create_assignment.note", "search.query", "triage_assignment.topic",
+}
 
 // timeArguments are the only arguments of type time (HH:MM, 24 h): the time of the deadline of an assignment the
-// student adds, only together with its due (TASK-216).
-var timeArguments = []string{"create_assignment.time"}
+// student adds or changes, only together with its due (TASK-216, TASK-325).
+var timeArguments = []string{"change_assignment.time", "create_assignment.time"}
+
+// boolArguments are the only arguments of type bool: done of a mark (ADR-0033 §9).
+var boolArguments = []string{"mark_assignments_done.done"}
+
+// idsMaxItems are the ids arguments with their bound: 20 unless the catalog states max_items (catalog 10).
+var idsMaxItems = map[string]int{"job_status.ids": 0, "mark_assignments_done.assignments": maxIDsItems}
 
 // oneOfGroups are the one-of groups of the current catalog's note (tool -> arguments), which the desktop parser and,
 // from catalog 4, the Hub enforce: exactly one of the group per call.
@@ -945,6 +981,7 @@ var oneOfGroups = map[string][]string{
 	"find_homework":     {"recording", "material"},
 	"triage_assignment": {"assignment", "upload", "topic"},
 	"place_upload":      {"folder", "lesson"},
+	"list_notes":        {"lesson", "subject"},
 }
 
 var oneOfGroupPattern = regexp.MustCompile(`([a-z][a-z0-9_]*) \(([a-z][a-z0-9_]*(?:\|[a-z][a-z0-9_]*)+)\)`)
@@ -954,8 +991,9 @@ var oneOfGroupPattern = regexp.MustCompile(`([a-z][a-z0-9_]*) \(([a-z][a-z0-9_]*
 var cardIDArguments = []string{"reply.assignments"}
 
 // replyTextArguments are the only arguments of type reply_text: the text of the reply card, plain text of at most 4000
-// characters (TASK-223). Every other card text stays a text of at most 300.
-var replyTextArguments = []string{"reply.text"}
+// characters (TASK-223), and the text of a note the student dictates (catalog 10, ADR-0033 §8). Every other card text
+// stays a text of at most 300.
+var replyTextArguments = []string{"note.text", "reply.text"}
 
 func argumentsOfType(c toolCatalog, typ string) []string {
 	var out []string
@@ -999,6 +1037,36 @@ func TestToolCatalog(t *testing.T) {
 	if i := slices.IndexFunc(reply.Arguments, func(a catalogArgument) bool { return a.Name == "assignments" }); i < 0 || reply.Arguments[i].Required {
 		t.Errorf("reply.assignments must be optional: %+v", reply.Arguments)
 	}
+	if bools := argumentsOfType(c, "bool"); !slices.Equal(bools, boolArguments) {
+		t.Errorf("bool arguments %v, want %v", bools, boolArguments)
+	}
+	gotIDs := map[string]int{}
+	for _, tool := range c.Tools {
+		for _, a := range tool.Arguments {
+			if a.Type == "ids" {
+				gotIDs[tool.Name+"."+a.Name] = a.MaxItems
+			}
+		}
+	}
+	if !maps.Equal(gotIDs, idsMaxItems) || !strings.Contains(c.Notes["max_items"], "1-20") || !strings.Contains(c.Notes["max_items"], "1-50") {
+		t.Errorf("ids arguments %v (%q), want %v", gotIDs, c.Notes["max_items"], idsMaxItems)
+	}
+	// The button card: a closed action enum and optional IDs only; no other UI tool names an object but by card_ids.
+	button := c.Tools[toolIndex(t, c, buttonTool)]
+	if len(button.Arguments) == 0 || button.Arguments[0].Name != "action" || button.Arguments[0].Type != "enum" || !button.Arguments[0].Required ||
+		slices.ContainsFunc(button.Arguments[1:], func(a catalogArgument) bool { return a.Type != "id" || a.Required }) {
+		t.Errorf("offer_button = %+v, want a required action enum and optional IDs", button)
+	}
+	// Every wave-10 action enum is closed and free of anything that reads as a destination.
+	for _, tool := range c.Tools {
+		for _, a := range tool.Arguments {
+			for _, v := range a.Values {
+				if strings.Contains(v, "url") || strings.Contains(v, "path") || strings.Contains(v, "email") || strings.Contains(v, "address") {
+					t.Errorf("%s.%s has the enum value %q", tool.Name, a.Name, v)
+				}
+			}
+		}
+	}
 
 	groups := map[string][]string{}
 	for _, m := range oneOfGroupPattern.FindAllStringSubmatch(c.Notes["one_of"], -1) {
@@ -1034,10 +1102,45 @@ func TestToolCatalog(t *testing.T) {
 	}
 }
 
+// wave10ToolCount is the number of tools catalog 10 adds after the tools of catalog 9 (ADR-0033 §10).
+const wave10ToolCount = 10
+
+// TestToolCatalogV9IsFrozen: catalog v9 stays as released: catalog v10 with version 9, without the wave-10 tools,
+// list_assignments.state, the bool type, the notes max_items and actions and list_notes in one_of. v10 shortened the
+// texts of the types (ADR-0033 §6), so the types are compared by name; their v9 texts are pinned byte for byte with the
+// file (hub/pkg/prompts TestPanelReleasedVersionsAreFrozen).
+func TestToolCatalogV9IsFrozen(t *testing.T) {
+	v9, v10 := loadToolCatalogFile(t, toolCatalogV9File), loadToolCatalog(t)
+	if v9.CatalogVersion != 9 || v9.Types["bool"] != "" {
+		t.Fatalf("v9: version %d, bool type %q", v9.CatalogVersion, v9.Types["bool"])
+	}
+	want := cloneCatalog(v10)
+	want.CatalogVersion = 9
+	delete(want.Types, "bool")
+	if !slices.Equal(slices.Sorted(maps.Keys(want.Types)), slices.Sorted(maps.Keys(v9.Types))) {
+		t.Fatalf("v9 types %v, v10 types without bool %v", v9.Types, want.Types)
+	}
+	want.Types = maps.Clone(v9.Types)
+	delete(want.Notes, "max_items")
+	delete(want.Notes, "actions")
+	want.Notes["one_of"] = strings.Replace(want.Notes["one_of"],
+		"triage_assignment (assignment|upload|topic), place_upload (folder|lesson) and list_notes (lesson|subject)",
+		"triage_assignment (assignment|upload|topic) and place_upload (folder|lesson)", 1)
+	if len(want.Tools) <= wave10ToolCount {
+		t.Fatalf("v10 has %d tools", len(want.Tools))
+	}
+	want.Tools = want.Tools[:len(want.Tools)-wave10ToolCount]
+	i := toolIndex(t, want, "list_assignments")
+	want.Tools[i].Arguments = slices.DeleteFunc(want.Tools[i].Arguments, func(a catalogArgument) bool { return a.Name == "state" })
+	if fmt.Sprint(want) != fmt.Sprint(v9) {
+		t.Errorf("v9 differs from v10 beyond the wave:\nv9  %+v\nv10 %+v", v9, want)
+	}
+}
+
 // TestToolCatalogV8IsFrozen: catalog v8 stays as released: catalog v9 with version 8 (v9 changed the contract and the
 // server prompt, not the tools, TASK-244).
 func TestToolCatalogV8IsFrozen(t *testing.T) {
-	v8, v9 := loadToolCatalogFile(t, toolCatalogV8File), loadToolCatalog(t)
+	v8, v9 := loadToolCatalogFile(t, toolCatalogV8File), loadToolCatalogFile(t, toolCatalogV9File)
 	if v8.CatalogVersion != 8 {
 		t.Fatalf("v8: version %d", v8.CatalogVersion)
 	}
@@ -1281,6 +1384,38 @@ func TestCatalogValidatorCatchesBadCatalogs(t *testing.T) {
 		{"missing note", func(t *testing.T, c *toolCatalog) {
 			delete(c.Notes, "one_of")
 		}, `note "one_of" is missing`},
+		{"reply text on a note title", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "note")
+			c.Tools[i].Arguments[len(c.Tools[i].Arguments)-1].Type = "reply_text"
+		}, `argument note.title has type "reply_text"`},
+		{"button with a label", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, buttonTool)
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "caption", Type: "label"})
+		}, `argument offer_button.caption has type "label"`},
+		{"button with a card text", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, buttonTool)
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "caption", Type: "text"})
+		}, `argument offer_button.caption has type "text"`},
+		{"button with a target argument", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, buttonTool)
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "target_url", Type: "id"})
+		}, "argument offer_button.target_url names"},
+		{"enum on another card", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "reply")
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "tone", Type: "enum", Values: []string{"short"}})
+		}, `argument reply.tone has type "enum"`},
+		{"bool on a C tool", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "propose_send")
+			c.Tools[i].Arguments = append(c.Tools[i].Arguments, catalogArgument{Name: "now", Type: "bool"})
+		}, `argument propose_send.now has type "bool"`},
+		{"max_items over 50", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "mark_assignments_done")
+			c.Tools[i].Arguments[0].MaxItems = 51
+		}, "argument mark_assignments_done.assignments: max_items is 1-50"},
+		{"max_items on an id", func(t *testing.T, c *toolCatalog) {
+			i := toolIndex(t, *c, "delivery_status")
+			c.Tools[i].Arguments[0].MaxItems = 5
+		}, "argument delivery_status.assignment: max_items is 1-50"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
