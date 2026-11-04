@@ -3,6 +3,7 @@ package agentchats
 import (
 	"strings"
 
+	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
 )
 
@@ -15,11 +16,24 @@ const (
 	lineAsked       = "Были уточняющие вопросы."
 )
 
-// request is the stored history of one request: its number, the student's text and its entries in order.
+// request is the stored history of one request: its number, the student's text, its entries in order and its frozen
+// reply line ("" when none).
 type request struct {
 	turn    int
 	text    string
 	entries []values.HistoryTurn
+	line    string
+}
+
+// reply is what the student was shown of the request: from its calls while they are kept, else from its frozen reply
+// line (the calls of a request that ended 90 days ago are purged, ADR-0028 «Retention»).
+func (r request) reply() string {
+	for _, e := range r.entries {
+		if e.Calls != nil {
+			return replyLine(r.entries)
+		}
+	}
+	return frozenLine(r.line)
 }
 
 // requestsOf groups history entries by request; a request whose text was not read (the oldest one of a cut read) is
@@ -36,6 +50,9 @@ func requestsOf(entries []values.HistoryEntry) []request {
 		r := &out[len(out)-1]
 		if e.Entry.StudentText != "" && r.text == "" {
 			r.text = e.Entry.StudentText
+		}
+		if r.line == "" {
+			r.line = e.ReplyLine
 		}
 		r.entries = append(r.entries, e.Entry)
 	}
@@ -127,4 +144,32 @@ func joinTexts(texts []values.Text) string {
 		out[i] = string(t)
 	}
 	return strings.Join(out, "; ")
+}
+
+// frozenLine is replyLine read from a frozen reply line (thread.CardLines) with the same captions: one line per card,
+// the actions line and NoReply give nothing. Line breaks inside a card text were flattened when the line was frozen.
+func frozenLine(line string) string {
+	var lines []string
+	for _, c := range thread.CardLines(line) {
+		switch c.Kind {
+		case thread.CardReply:
+			if c.Text != "" {
+				lines = append(lines, c.Text)
+			}
+		case thread.CardPlan:
+			lines = append(lines, captionPlan+c.Text)
+		case thread.CardCannotDo:
+			parts := []string{captionCannotDo}
+			if len(c.Yours) > 0 {
+				parts = append(parts, captionYours+strings.Join(c.Yours, "; "))
+			}
+			if len(c.Ours) > 0 {
+				parts = append(parts, captionOurs+strings.Join(c.Ours, "; "))
+			}
+			lines = append(lines, strings.Join(parts, " "))
+		case thread.CardAsked:
+			lines = append(lines, lineAsked)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
