@@ -4,6 +4,7 @@ import {
   type AgentThreadSnapshot,
   type Box,
   type ConsoleRecord,
+  type LayoutCounts,
   type LayoutOptions,
   type LayoutRule,
   type LayoutSnapshot,
@@ -93,7 +94,8 @@ export function evaluateLayout(snap: LayoutSnapshot, options: LayoutOptions = {}
         lacks.push("нет подсказки (непустой title или элемент .tip/role=tooltip с текстом)");
       }
       if (lacks.length > 0) {
-        add("icon-button", b.el, `кнопка без видимого текста: ${lacks.join("; ")}`);
+        const what = b.glyph === undefined ? "кнопка без видимого текста" : `кнопка только с символом «${b.glyph}»`;
+        add("icon-button", b.el, `${what}: ${lacks.join("; ")}`);
       }
     }
   }
@@ -128,7 +130,47 @@ export function evaluateLayout(snap: LayoutSnapshot, options: LayoutOptions = {}
 
   if (o.rules["raw-text"]) {
     for (const t of snap.rawText) {
-      add("raw-text", t.el, `на экране служебный текст «${t.match}»: «${t.context}»`);
+      const where = t.source === undefined || t.source === "text" ? "на экране" : t.source === "tooltip" ? "в подсказке" : `в атрибуте ${t.source}`;
+      add("raw-text", t.el, `${where} служебный текст «${t.match}»: «${t.context}»`);
+    }
+  }
+
+  if (o.rules["pane-scroll"]) {
+    for (const p of snap.panes) {
+      if (o.sidewaysPanes.includes(p.selector)) {
+        continue;
+      }
+      add(
+        "pane-scroll",
+        p.el,
+        `панель ${p.selector} прокручивается вбок: scrollWidth ${p.scrollWidth} > clientWidth ${p.clientWidth} (допуск ${tol}); слишком широкая строка или таблица внутри`,
+      );
+    }
+  }
+
+  if (o.rules["clipped"]) {
+    for (const c of snap.clipped) {
+      if (c.kind === "control") {
+        add(
+          "clipped",
+          c.el,
+          `элемент управления обрезан на ${c.cutPx} px по ${c.axis === "x" ? "горизонтали" : "вертикали"} предком ${c.by} (overflow hidden|clip, прокрутки между ними нет; допуск ${o.clipSlackPx})`,
+        );
+      } else {
+        add("clipped", c.el, `текст «${c.text}» обрезан навсегда: scrollHeight ${c.scrollHeight} > clientHeight ${c.clientHeight} при overflow hidden|clip и без line-clamp`);
+      }
+    }
+  }
+
+  if (o.rules["truncated"]) {
+    for (const t of snap.truncated) {
+      if (!t.hasTip) {
+        add(
+          "truncated",
+          t.el,
+          `текст «${t.text}» обрезан по ${t.axis === "x" ? "ширине" : "высоте"}, а подсказки с полным текстом нет (title у него или у двух предков, aria-describedby, элемент подсказки)`,
+        );
+      }
     }
   }
 
@@ -165,6 +207,15 @@ export function evaluateLayout(snap: LayoutSnapshot, options: LayoutOptions = {}
   }
 
   return capPerRule(out, o.maxPerRule);
+}
+
+/**
+ * What a check really looked at, as one readable line: a pass that examined nothing would otherwise look like a pass.
+ * «кнопок-значков» = icon-only buttons, «статусов» = [data-status] elements, «заголовков» = title candidates,
+ * «текстов» = text nodes.
+ */
+export function formatCounts(c: LayoutCounts): string {
+  return `кнопок-значков ${c.iconButtons}, статусов ${c.statuses}, заголовков ${c.titles}, текстов ${c.textNodes}`;
 }
 
 /** At most `max` per rule are kept, with one line that counts the rest, so a broken page does not print a thousand lines. */

@@ -1,6 +1,9 @@
 // Synthetic data of the layout pack, entered through the UI (TASK-376): a schedule from a generated ICS, the subjects it
 // proposes, two subjects with long names and two assignments with long titles. Every stage is best effort: a screen
 // without data is still checked in its empty state. Nothing here asserts a feature; it only needs the data to exist.
+//
+// Every click, fill and wait has an explicit timeout (act): a missing or renamed locator ends the stage in 10 s, goes
+// to the `catch` of stage() and becomes a note, instead of hanging until the test timeout.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -9,7 +12,7 @@ import type { Page } from "@playwright/test";
 import { buildLayoutIcs } from "../../src/checks/ics.js";
 import { layoutViolations, type LayoutViolation } from "../../src/checks/layout.js";
 import { consumedPicks, expect, type PickFn, snapshot, step } from "../../src/steps/index.js";
-import { firstLine, note, openSection } from "./support.js";
+import { act, actionMs, firstLine, note, openSection } from "./support.js";
 
 export const ownSubjects = [
   "Сопротивление материалов и основы строительной механики для заочного отделения",
@@ -28,17 +31,25 @@ export function carry(ctl: string, name: string, violations: LayoutViolation[]):
   writeFileSync(carryFile(ctl, name), JSON.stringify(violations), "utf8");
 }
 
-/** The violations carried from the seeding, or undefined when that state was not reached (nothing was checked). */
+/**
+ * The violations carried from the seeding, or undefined when that state was not reached (nothing was checked). A carry
+ * file that exists but cannot be read is a harness fault and throws: «not reached» would hide real findings.
+ */
 export function takeCarried(ctl: string, name: string): LayoutViolation[] | undefined {
   const file = carryFile(ctl, name);
   if (!existsSync(file)) {
     return undefined;
   }
+  let parsed: unknown;
   try {
-    return JSON.parse(readFileSync(file, "utf8")) as LayoutViolation[];
-  } catch {
-    return undefined;
+    parsed = JSON.parse(readFileSync(file, "utf8"));
+  } catch (err) {
+    throw new Error(`файл переноса находок ${file} не читается: ${firstLine(err)}`);
   }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`файл переноса находок ${file} не содержит список`);
+  }
+  return parsed as LayoutViolation[];
 }
 
 /** A seeding stage: it never throws; a failure is a note and a screenshot, and the pack goes on with what exists. */
@@ -66,7 +77,7 @@ export async function seedSchedule(main: Page, pick: PickFn, ctl: string): Promi
   const before = consumedPicks(ctl).length;
   await pick("schedule", ["fixtures/layout-schedule.ics"]);
   await openSection(main, "Расписание");
-  await main.getByRole("button", { name: "Выбрать файл…" }).click();
+  await main.getByRole("button", { name: "Выбрать файл…" }).click(act);
   await expect.poll(() => consumedPicks(ctl).length, { timeout: 15_000, message: "the app should take the schedule pick" }).toBeGreaterThan(before);
   const refused = forPick(ctl)(before).filter((p) => p.result !== "picked");
   if (refused.length > 0) {
@@ -77,7 +88,7 @@ export async function seedSchedule(main: Page, pick: PickFn, ctl: string): Promi
   await expect(apply).toBeVisible({ timeout: 15_000 });
   // The preview is a screen of its own (long titles, week and day headers); its findings go to the test of «Расписание».
   carry(ctl, "schedule-preview", await layoutViolations(main));
-  await apply.click();
+  await apply.click(act);
   await expect(apply).toBeHidden({ timeout: 15_000 });
 }
 
@@ -91,23 +102,23 @@ export async function seedScheduleSubjects(main: Page, ctl: string): Promise<voi
     await openSection(main, "Предметы");
     await expect(open.first()).toBeVisible({ timeout: 15_000 });
   }
-  await open.first().click();
+  await open.first().click(act);
   const review = main.getByRole("region", { name: "Предметы из расписания" });
   await expect(review).toBeVisible({ timeout: 15_000 });
   carry(ctl, "schedule-review", await layoutViolations(main));
-  await review.getByRole("button", { name: /^Создать/ }).click();
+  await review.getByRole("button", { name: /^Создать/ }).click(act);
   await expect(main.locator(".sched-done")).toBeVisible({ timeout: 20_000 });
-  await review.getByRole("button", { name: "Закрыть", exact: true }).click();
-  await expect(review).toBeHidden({ timeout: 10_000 });
+  await review.getByRole("button", { name: "Закрыть", exact: true }).click(act);
+  await expect(review).toBeHidden(act);
 }
 
 /** «Добавить предмет» in the tree of «Предметы», once per name; the new subject opens. */
 export async function seedOwnSubjects(main: Page): Promise<void> {
   await openSection(main, "Предметы");
   for (const name of ownSubjects) {
-    await main.getByRole("button", { name: "Добавить предмет" }).first().click();
-    await main.getByRole("textbox", { name: "Название предмета", exact: true }).fill(name);
-    await main.getByRole("button", { name: "Создать", exact: true }).click();
+    await main.getByRole("button", { name: "Добавить предмет" }).first().click(act);
+    await main.getByRole("textbox", { name: "Название предмета", exact: true }).fill(name, act);
+    await main.getByRole("button", { name: "Создать", exact: true }).click(act);
     await expect(main.locator("nav.tree .nm", { hasText: name }).first()).toBeVisible({ timeout: 15_000 });
   }
 }
@@ -116,17 +127,22 @@ const isoDay = (days: number): string => new Date(Date.now() + days * 86_400_000
 
 /** Two assignments with long titles on the page of the subject that is open (the last one created). */
 export async function seedAssignments(main: Page): Promise<void> {
-  await main.getByRole("tab", { name: /^Задания/ }).click();
+  await main.getByRole("tab", { name: /^Задания/ }).click(act);
   let n = 0;
   for (const text of assignmentTitles) {
-    await main.getByRole("button", { name: "Добавить задание" }).click();
+    // exact: «Добавить задание вручную» is another button
+    await main.getByRole("button", { name: "Добавить задание", exact: true }).click(act);
     const dialog = main.getByRole("dialog");
-    await expect(dialog).toBeVisible();
-    await dialog.getByLabel("Что сделать").first().fill(text);
+    await expect(dialog).toBeVisible(act);
+    await dialog.getByLabel("Что сделать").first().fill(text, act);
     // the due date is optional for the layout; a form that refuses the date still gets the assignment without it
-    await dialog.getByLabel("Срок").first().fill(isoDay(3 + n)).catch(() => undefined);
-    await dialog.getByRole("button", { name: "Добавить", exact: true }).click();
-    await expect(dialog).toBeHidden({ timeout: 15_000 });
+    await dialog
+      .getByLabel("Срок")
+      .first()
+      .fill(isoDay(3 + n), { timeout: 3_000 })
+      .catch(() => undefined);
+    await dialog.getByRole("button", { name: "Добавить", exact: true }).click(act);
+    await expect(dialog).toBeHidden({ timeout: actionMs + 5_000 });
     n++;
   }
   await expect(main.getByText(/^Проверка раскладки/).first()).toBeVisible({ timeout: 15_000 });

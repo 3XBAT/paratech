@@ -5,6 +5,7 @@
 import type { Page } from "@playwright/test";
 
 import { evaluateAgentThread } from "./evaluate.js";
+import { evalInPage } from "./inpage.js";
 import type { AgentThreadSnapshot, LayoutOptions, LayoutViolation } from "./types.js";
 import { resolveOptions } from "./types.js";
 
@@ -147,7 +148,7 @@ export interface AgentThreadResult {
 /** Samples the thread of the agent panel of the page and reports overlaps of the «Стоп»/progress row with text. */
 export async function checkAgentThread(page: Page, options: LayoutOptions = {}): Promise<AgentThreadResult> {
   const o = resolveOptions(options);
-  const snap = (await page.evaluate(`(${probeAgentThreadSource})()`)) as AgentThreadSnapshot;
+  const snap = await evalInPage<AgentThreadSnapshot>(page, probeAgentThreadSource);
   const result: AgentThreadResult = { rowSeen: snap.rowSeen, violations: evaluateAgentThread(snap, o) };
   if (snap.note !== undefined) {
     result.note = snap.note;

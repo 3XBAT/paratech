@@ -8,6 +8,9 @@ export type LayoutRule =
   | "status-quiet"
   | "raw-text"
   | "title-width"
+  | "pane-scroll"
+  | "clipped"
+  | "truncated"
   | "console"
   | "agent-overlap";
 
@@ -18,6 +21,9 @@ export const allLayoutRules: readonly LayoutRule[] = [
   "status-quiet",
   "raw-text",
   "title-width",
+  "pane-scroll",
+  "clipped",
+  "truncated",
   "console",
   "agent-overlap",
 ];
@@ -77,6 +83,12 @@ export interface LayoutOptions {
   maxPerRule?: number;
   /** Agent thread: an overlap bigger than this many px in both directions is a violation. Default 2. */
   overlapPx?: number;
+  /** Top-level scroll panes that must not scroll sideways (CSS selectors). Default: defaultPaneSelectors. */
+  paneSelectors?: string[];
+  /** Panes of paneSelectors (by selector text) that are MEANT to scroll sideways. Default: none. */
+  sidewaysPanes?: string[];
+  /** A control or text cut by an `overflow: hidden|clip` ancestor by at most this many px is not «clipped». Default 2. */
+  clipSlackPx?: number;
 }
 
 /**
@@ -105,8 +117,20 @@ export const defaultTitleSelectors: readonly string[] = [
   ".del-title",
 ];
 
+/** The scroll panes of the shell: main.sheet is the page body, aside.ag the agent panel, .ag-thread its message list. */
+export const defaultPaneSelectors: readonly string[] = ["main.sheet", "aside.ag", ".ag-thread"];
+
+/**
+ * Text that must never reach the screen: JS leftovers (undefined, NaN, [object, null, Invalid Date, Error:, TypeError) and
+ * the forms of backend / transport errors (a Connect code in brackets, «permanent failure», «hub: », context and network
+ * errors, SQL). It is matched against visible text, the title / aria-label / placeholder of visible elements and the text
+ * of tooltips. A container with `data-raw-ok` (the diagnostics log) is skipped.
+ */
 export const defaultRawText = {
-  source: "\\bundefined\\b|\\bNaN\\b|\\[object |Error:|TypeError",
+  source:
+    "\\bundefined\\b|\\bNaN\\b|\\[object |Error:|TypeError|\\bnull\\b|Invalid Date" +
+    "|\\[(canceled|unknown|invalid_argument|deadline_exceeded|not_found|already_exists|permission_denied|resource_exhausted|failed_precondition|aborted|unimplemented|internal|unavailable|unauthenticated)\\]" +
+    "|permanent failure|\\bhub: |context (canceled|deadline exceeded)|dial tcp|connection refused|sql: ",
   flags: "",
 };
 
@@ -124,6 +148,9 @@ export interface ResolvedOptions {
   ignoreConsole: ConsoleIgnore[];
   maxPerRule: number;
   overlapPx: number;
+  paneSelectors: string[];
+  sidewaysPanes: string[];
+  clipSlackPx: number;
 }
 
 export function resolveOptions(o: LayoutOptions = {}): ResolvedOptions {
@@ -151,6 +178,9 @@ export function resolveOptions(o: LayoutOptions = {}): ResolvedOptions {
     ignoreConsole: o.ignoreConsole ?? [],
     maxPerRule: o.maxPerRule ?? 15,
     overlapPx: o.overlapPx ?? 2,
+    paneSelectors: o.paneSelectors ?? [...defaultPaneSelectors],
+    sidewaysPanes: o.sidewaysPanes ?? [],
+    clipSlackPx: o.clipSlackPx ?? 2,
   };
 }
 
@@ -165,6 +195,8 @@ export interface ProbeOptions {
   titleSelectors: string[];
   tooltipClasses: string[];
   rawText: { source: string; flags: string };
+  paneSelectors: string[];
+  clipSlackPx: number;
   maxItems: number;
 }
 
@@ -179,6 +211,8 @@ export function probeOptions(o: ResolvedOptions): ProbeOptions {
     titleSelectors: o.titleSelectors,
     tooltipClasses: o.tooltipClasses,
     rawText: o.rawText,
+    paneSelectors: o.paneSelectors,
+    clipSlackPx: o.clipSlackPx,
     maxItems: 200,
   };
 }
@@ -198,8 +232,8 @@ export interface LayoutSnapshot {
   lowest: { el: string; bottom: number } | null;
   /** Outermost visible elements whose right edge is past the viewport and that no ancestor clips inside it. */
   overflowX: Array<{ el: string; left: number; right: number; width: number }>;
-  /** Visible buttons/links/[role=button] without visible text. */
-  iconButtons: Array<{ el: string; label: string; title: string; tip: string }>;
+  /** Visible buttons/links/[role=button|tab|menuitem] without visible text, or with a lone glyph (×, …, +) as the text. */
+  iconButtons: Array<{ el: string; label: string; title: string; tip: string; glyph?: string }>;
   iconButtonsChecked: number;
   statuses: Array<{
     el: string;
@@ -212,7 +246,17 @@ export interface LayoutSnapshot {
     focused: boolean;
     borders: BorderSide[];
   }>;
-  rawText: Array<{ el: string; match: string; context: string }>;
+  /** `source` is where the text was found: visible text (default), an attribute, or a tooltip element. */
+  rawText: Array<{ el: string; match: string; context: string; source?: RawSource }>;
+  /** Top-level scroll panes (paneSelectors) whose content is wider than the pane. */
+  panes: Array<{ selector: string; el: string; scrollWidth: number; clientWidth: number }>;
+  /** Content cut for good by an `overflow: hidden|clip` ancestor or box (no scrollbar, no line-clamp). */
+  clipped: Array<
+    | { kind: "control"; el: string; by: string; axis: "x" | "y"; cutPx: number }
+    | { kind: "text"; el: string; text: string; scrollHeight: number; clientHeight: number }
+  >;
+  /** Texts cut by overflow (ellipsis, line-clamp, row titles) and whether a tooltip carries the full text. */
+  truncated: Array<{ el: string; text: string; axis: "x" | "y"; hasTip: boolean }>;
   /** Narrow or tall text runs (a prefilter of the probe; evaluate decides). */
   textBoxes: Array<{
     el: string;
@@ -224,6 +268,35 @@ export interface LayoutSnapshot {
     target: boolean;
   }>;
   console: ConsoleRecord[];
+  /** What the probe really examined, so a pass cannot be vacuous (see formatCounts). */
+  counts: LayoutCounts;
+}
+
+export type RawSource = "text" | "title" | "aria-label" | "placeholder" | "tooltip";
+
+export interface LayoutCounts {
+  /** Visible elements of the window. */
+  visibleElements: number;
+  /** Visible buttons, links and role=button|tab|menuitem elements. */
+  buttons: number;
+  /** Of those, the icon-only ones (no visible text, or a lone glyph). */
+  iconButtons: number;
+  /** Visible [data-status] elements. */
+  statuses: number;
+  /** Title candidates: visible text runs of at least minTitleChars, or of minTargetChars when a row-title selector matches. */
+  titles: number;
+  /** Visible non-empty text nodes. */
+  textNodes: number;
+  /** Visible top-level scroll panes (paneSelectors). */
+  panes: number;
+  /** Visible controls examined for clipping. */
+  controls: number;
+  /** Texts that are cut by overflow (ellipsis, line-clamp). */
+  cutTexts: number;
+}
+
+export function emptyCounts(): LayoutCounts {
+  return { visibleElements: 0, buttons: 0, iconButtons: 0, statuses: 0, titles: 0, textNodes: 0, panes: 0, controls: 0, cutTexts: 0 };
 }
 
 export function emptySnapshot(): LayoutSnapshot {
@@ -237,8 +310,12 @@ export function emptySnapshot(): LayoutSnapshot {
     iconButtonsChecked: 0,
     statuses: [],
     rawText: [],
+    panes: [],
+    clipped: [],
+    truncated: [],
     textBoxes: [],
     console: [],
+    counts: emptyCounts(),
   };
 }
 

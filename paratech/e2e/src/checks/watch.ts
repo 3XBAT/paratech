@@ -23,8 +23,9 @@ export function watchPage(page: Page): void {
     }
     const loc = msg.location();
     const rec: ConsoleRecord = { kind: "console", text: msg.text() };
-    if (loc.url) {
-      rec.location = `${loc.url}:${loc.lineNumber}`;
+    // url:line of the message, so a false or real error is traceable; a message with no source (a CSP note) has none
+    if (loc.url || loc.lineNumber > 0) {
+      rec.location = `${loc.url || "?"}:${loc.lineNumber}`;
     }
     w.records.push(rec);
   });

@@ -404,7 +404,7 @@ const goodPage = `
   <a href="#x" aria-label="Справка" title="Справка">${svg}</a>
   <span class="vh">служебный текст для чтения с экрана undefined</span>
   <div style="display:none">Скрыто: undefined NaN</div>
-  <p title="undefined" data-note="NaN">Атрибуты не считаются</p>
+  <p data-note="NaN undefined">Служебные data-атрибуты не считаются</p>
   <span class="chip" data-status="ok">Не распознано</span>
   <span class="chip" data-status="run">Идёт обработка…</span>
   <div class="tabs"><button>Конспект</button><button>Расшифровка занятия</button></div>
@@ -445,7 +445,7 @@ describe("probe in headless Edge", () => {
       assert.ok(v.some((x) => x.element.includes("div#wide") && x.element.includes("слишком широкий")), JSON.stringify(v));
     });
     const quietPage = `
-      <div style="width:300px;overflow:hidden"><div style="width:1500px;height:10px">обрезан предком</div></div>
+      <div style="width:300px;overflow:hidden"><div style="width:1500px">обрезан предком</div></div>
       <div style="position:fixed;left:2000px;top:0;white-space:nowrap" aria-hidden="true">за краем по замыслу</div>
       <div style="display:none;width:3000px">нет</div>
       <div style="width:100px;height:5px;overflow:hidden"><div style="visibility:hidden;width:3000px;height:5px"></div></div>
@@ -516,12 +516,12 @@ describe("probe in headless Edge", () => {
     );
   });
 
-  test("raw-text: visible undefined / NaN / [object / Error: / TypeError fail; attributes, hidden and screen-reader-only text do not", async (t) => {
+  test("raw-text: visible undefined / NaN / [object / Error: / TypeError fail; data-attributes, hidden and screen-reader-only text do not", async (t) => {
     await inPage(
       t,
       `<p id="a">Всего записей: undefined</p><p id="b">Итог NaN минут</p><p id="c">Значение [object Object]</p>
        <p id="d">Error: connection refused</p><p id="e">TypeError при открытии</p>
-       <p title="undefined">attr</p><div hidden>undefined</div>
+       <p data-x="undefined">data-атрибут</p><div hidden>undefined</div>
        <p>слово undefinedX и NaNa — не совпадают по границе слова</p>`,
       async (page) => {
         const v = await layoutViolations(page);
