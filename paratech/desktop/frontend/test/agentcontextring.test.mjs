@@ -39,6 +39,9 @@ test("overflow is shown exactly as full, with the hint", () => {
   assert.equal(m.hint, true);
   assert.match(ring(fill(100, "normal", true)), /ag-ring-full/);
   assert.match(hint(fill(100, "normal", true)), /Начать новый чат/);
+  // TASK-270: an overflow has its own, non-blaming sentence instead of «почти заполнена».
+  assert.equal(m.text, `${ringTexts.label(100)}. ${ringTexts.overflow}`);
+  assert.equal(ringTexts.overflow, "Начало разговора агент уже не помнит: новый чат ответит точнее.");
 });
 
 test("an unknown fill draws nothing: no ring, no hint", () => {
@@ -96,12 +99,14 @@ test("the hidden text sits inside the role=img element, once (children of an img
 });
 
 test("the sentences are short, impersonal and name no colour", () => {
-  for (const s of [ringTexts.normal, ringTexts.high, ringTexts.full, ringTexts.hint, ringTexts.hintButton]) {
-    assert.ok(s.length <= 70, s);
+  for (const s of [ringTexts.normal, ringTexts.high, ringTexts.full, ringTexts.overflow, ringTexts.compacting, ringTexts.hint, ringTexts.overflowHint, ringTexts.hintButton]) {
+    // The overflow line is two short clauses (a question and the reason); every other sentence stays within 70.
+    assert.ok(s.length <= (s === ringTexts.overflowHint ? 90 : 70), s);
     assert.doesNotMatch(s, /(^|[^а-яё])(я|мы|вам|вы)([^а-яё]|$)/i);
     assert.doesNotMatch(s, /красн|оранж|жёлт|цвет/i);
   }
   assert.equal(ringTexts.hint, "Начать новый чат? Этот чат почти заполнен и останется в списке.");
+  assert.equal(ringTexts.overflowHint, "Начать новый чат? Начало этого разговора агент уже не помнит; чат останется в списке.");
   assert.equal(ringTexts.hintButton, "Новый чат");
 });
 

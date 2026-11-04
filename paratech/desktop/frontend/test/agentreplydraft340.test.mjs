@@ -220,7 +220,7 @@ test("the panel follows to the end when the final card replaces the draft", () =
   assert.equal(endSignature(undefined), "||0");
   // The effect keys on it and still follows only a reader who is at the bottom.
   const view = readFileSync(new URL("../src/agent/AgentPanelView.tsx", import.meta.url), "utf8");
-  assert.match(view, /if \(atBottom\.current\) \{\s*end\.current\?\.scrollIntoView\?\.\(\{ block: "end", behavior: "auto" \}\);\s*\}\s*\}, \[size, lastSig\]\)/);
+  assert.match(view, /if \(atBottom\.current\) \{\s*end\.current\?\.scrollIntoView\?\.\(\{ block: "end", behavior: "auto" \}\);\s*\}\s*\}, \[size, lastSig, props\.compacting\]\)/);
 });
 
 // ---- Order ----
