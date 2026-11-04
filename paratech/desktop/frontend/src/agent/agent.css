@@ -272,6 +272,14 @@ button.ag-pill:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .ag-fullhint-tx { min-width: 0; overflow-wrap: anywhere; }
 .ag-in-bottom .ag-fullhint { order: 4; margin-top: -6px; padding-bottom: 12px; }
 
+/* TASK-270: «Уплотнение контекста…» right under the field. Muted text, no box; in normal flow (never absolute, fixed
+   or sticky), so it cannot cover the thread. It takes the slot of the full-chat hint (which is not drawn meanwhile), so
+   the heights swap. The live region is always there and has no height while empty. */
+.ag-compact { flex: none; color: var(--muted); }
+.ag-compact:not(:empty) { padding: 4px 12px 0 16px; overflow-wrap: anywhere; }
+.ag-in-bottom .ag-compact { order: 4; }
+.ag-in-bottom .ag-compact:not(:empty) { margin-top: -6px; padding-bottom: 12px; }
+
 /* «Начать заново отсюда» (TASK-249): a quiet action under a message of the student, the warning dialog, and the note by the field. */
 .ag { position: relative; }
 /* TASK-365: the quiet icon row under a message (copy; restart under the student's, repeat under the agent's). Muted

@@ -17,6 +17,10 @@ import {
   type ChatOp,
   chatProblemText,
   chatSections,
+  type CompactingMap,
+  compactingFromList,
+  compactingFromUpdate,
+  compactingOf,
   contextFor,
   earlierItems,
   entryModel,
@@ -151,6 +155,8 @@ export function AgentPanel(props: {
   const [chatNote, setChatNote] = useState("");
   // The context fill per chat: from the list, and from the update that ends a request.
   const [fills, setFills] = useState<FillMap>({});
+  // Chats being compacted right now (per chat, never one flag): the quiet note shows for the open one only.
+  const [compacting, setCompacting] = useState<CompactingMap>({});
   const openRef = useRef(openId);
   openRef.current = openId;
   const entriesRef = useRef(state.entries);
@@ -188,6 +194,7 @@ export function AgentPanel(props: {
         }
         setChats(v.chats);
         setFills((f) => fillsFromList(f, v.chats, entriesRef.current));
+        setCompacting((c) => compactingFromList(c, v.chats));
         setListed(true);
         setChatNote((n) => (n === listFailed ? "" : n));
         setOpenId((cur) => reconcileOpenChat(v.chats, cur !== startedOn || prefer === undefined ? cur : prefer, entriesRef.current));
@@ -285,6 +292,7 @@ export function AgentPanel(props: {
       try {
         const update = parseUpdate(data);
         // The compaction state of a chat is no request: only a new fill (the end of a successful one) redraws the ring.
+        setCompacting((c) => compactingFromUpdate(c, update));
         if (update.compaction) {
           setFills((f) => fillsFromUpdate(f, update));
           return;
@@ -814,6 +822,7 @@ export function AgentPanel(props: {
       onOpenMention={props.onOpenMention}
       mentionsFor={(e) => restoredMentions(e, earlierReq, openId)}
       fill={fillOf(fills, openId)}
+      compacting={compactingOf(compacting, openId)}
       restart={restartUi}
       copy={copyMessage}
       ctx={ctx}
