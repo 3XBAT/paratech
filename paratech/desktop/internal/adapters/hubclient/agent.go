@@ -195,8 +195,17 @@ func turnGone(err error) bool {
 		errorDetail(ce) == nil
 }
 
-// agentRequestOf copies exactly the contract fields of the step.
+// summaryCatalog is the first catalog whose Hub takes the history_summary turn (ADR-0028 «Into the window»).
+const summaryCatalog = 9
+
+// agentRequestOf copies exactly the contract fields of the step, for the catalog this desktop implements.
 func agentRequestOf(req agent.StepRequest) (*hubv1.AgentStepRequest, error) {
+	return agentRequestAt(req, agent.CatalogVersion)
+}
+
+// agentRequestAt is agentRequestOf on catalog version catalog: below summaryCatalog the summary turn is not sent (the
+// window then opens with the student text that follows it).
+func agentRequestAt(req agent.StepRequest, catalog uint32) (*hubv1.AgentStepRequest, error) {
 	if req.Key == "" || req.Thread == "" || req.MaxOutputTokens < 0 || req.MaxOutputTokens > maxOutputTokens ||
 		len(req.History) == 0 {
 		return nil, permanent(opAgentStep, ErrInvalidRequest)
@@ -205,8 +214,8 @@ func agentRequestOf(req agent.StepRequest) (*hubv1.AgentStepRequest, error) {
 		IdempotencyKey:  req.Key,
 		ThreadId:        string(req.Thread),
 		Profile:         hubv1.AgentProfile_AGENT_PROFILE_PANEL,
-		CatalogVersion:  agent.CatalogVersion,
-		Base:            &hubv1.AgentBase{Today: req.Base.Today().String(), TimeZone: req.Base.TimeZone()},
+		CatalogVersion:  catalog,
+		Base:           &hubv1.AgentBase{Today: req.Base.Today().String(), TimeZone: req.Base.TimeZone()},
 		MaxOutputTokens: uint32(req.MaxOutputTokens),
 	}
 	for _, s := range req.Base.Subjects() {
@@ -225,6 +234,9 @@ func agentRequestOf(req agent.StepRequest) (*hubv1.AgentStepRequest, error) {
 		return nil, err
 	}
 	for _, h := range req.History {
+		if h.Summary != "" && catalog < summaryCatalog {
+			continue
+		}
 		t, err := turnOf(h)
 		if err != nil {
 			return nil, err
