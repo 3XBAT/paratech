@@ -13,7 +13,9 @@ import (
 
 // Structured UI argument types (the catalog names them; their shape is fixed here and mirrored by the desktop):
 //
-//	plan_steps: [{"tool": <non-UI tool of the catalog>, "arguments": {<snake_case>: <string of 1-80 characters>}}], 1-8 steps
+//	plan_steps: [{"tool": <non-UI tool of the catalog>, "arguments": {<snake_case>: <string of 1-80 characters>}}], 1-8 steps;
+//	            from catalog waveTenFrom 1-200 steps, an argument the tool declares as ids, bool, enum or query takes its
+//	            own type, and a reply_text is refused
 //	questions:  [{"kind": "choice"|"text", "question": <text>, "options": [<text>], "default": <option index>}], 1-5
 //	            questions; a choice has 2-6 options; default only with options
 const (
@@ -74,13 +76,15 @@ func (c *Catalog) typeSchema(a argument) object {
 	case typeID:
 		return idSchema()
 	case typeIDs:
-		return object{"type": "array", "items": idSchema(), "minItems": 1, "maxItems": maxIDsItems}
+		return idsSchema(a.maxIDs())
 	case typeDate:
 		return object{"type": "string", "pattern": datePattern}
 	case typeTime:
 		return object{"type": "string", "pattern": timePattern}
 	case typeEnum:
 		return object{"type": "string", "enum": a.Values}
+	case typeBool:
+		return object{"type": "boolean"}
 	case typeLabel:
 		return stringSchema(MaxLabelRunes)
 	case typeQuery:
@@ -94,16 +98,21 @@ func (c *Catalog) typeSchema(a argument) object {
 	case typeCardIDs:
 		return object{"type": "array", "items": idSchema(), "maxItems": MaxCardIDs}
 	case typePlanSteps:
+		stepArgument := stringSchema(MaxLabelRunes)
+		if c.version >= waveTenFrom {
+			// The string bound is the longest one a step takes (a query); the check holds each argument to its own type.
+			stepArgument = object{"anyOf": []any{stringSchema(MaxQueryRunes), object{"type": "boolean"}, idsSchema(maxIDsItems10)}}
+		}
 		step := object{
 			"type": "object",
 			"properties": object{
 				fieldTool:      object{"type": "string", "enum": c.actionTools()},
-				fieldArguments: object{"type": "object", "additionalProperties": stringSchema(MaxLabelRunes), "maxProperties": maxStepArguments},
+				fieldArguments: object{"type": "object", "additionalProperties": stepArgument, "maxProperties": maxStepArguments},
 			},
 			"required":             []string{fieldTool},
 			"additionalProperties": false,
 		}
-		return object{"type": "array", "items": step, "minItems": 1, "maxItems": maxPlanSteps}
+		return object{"type": "array", "items": step, "minItems": 1, "maxItems": c.maxPlanSteps()}
 	default: // typeQuestions; Parse admits no other type
 		question := object{
 			"type": "object",
@@ -122,6 +131,18 @@ func (c *Catalog) typeSchema(a argument) object {
 
 func idSchema() object {
 	return object{"type": "string", "minLength": 1, "maxLength": maxIDBytes}
+}
+
+func idsSchema(maxItems int) object {
+	return object{"type": "array", "items": idSchema(), "minItems": 1, "maxItems": maxItems}
+}
+
+// maxPlanSteps is the most steps a plan of this catalog has.
+func (c *Catalog) maxPlanSteps() int {
+	if c.version >= waveTenFrom {
+		return maxPlanSteps10
+	}
+	return maxPlanSteps
 }
 
 func stringSchema(maxRunes int) object {
@@ -145,7 +166,10 @@ func (c *Catalog) valid(a argument, v any) bool {
 	case typeID:
 		return id(v)
 	case typeIDs:
-		return eachOf(v, 1, maxIDsItems, id)
+		return eachOf(v, 1, a.maxIDs(), id)
+	case typeBool:
+		_, ok := v.(bool)
+		return ok
 	case typeDate:
 		s, ok := v.(string)
 		return ok && values.ValidDate(s)
@@ -170,7 +194,7 @@ func (c *Catalog) valid(a argument, v any) bool {
 	case typeCardIDs:
 		return eachOf(v, 0, MaxCardIDs, id)
 	case typePlanSteps:
-		return eachOf(v, 1, maxPlanSteps, c.planStep)
+		return eachOf(v, 1, c.maxPlanSteps(), c.planStep)
 	case typeQuestions:
 		return eachOf(v, 1, maxQuestions, question)
 	}
@@ -207,16 +231,31 @@ func (c *Catalog) planStep(v any) bool {
 }
 
 // stepArgument checks one plan-step argument: a label, except the note of create_assignment, which keeps the catalog's
-// own query limit (a planned note was otherwise refused above 80 characters). The provider schema keeps the 80-character
-// bound for every step argument, because changing it would change the frozen catalog text; only this check is looser.
+// own query limit (a planned note was otherwise refused above 80 characters). Before catalog waveTenFrom the provider
+// schema keeps the 80-character bound for every step argument, because changing it would change the frozen catalog
+// text; only this check is looser.
+// From catalog waveTenFrom an argument the tool declares as ids, bool or enum takes that type (mark_assignments_done,
+// the action of change_assignment), every query keeps the query limit (the note of change_assignment), and a reply_text
+// is refused, as the desktop refuses it in a step (the text of note); any other argument stays a string as before.
 func (c *Catalog) stepArgument(toolName, argName string, v any) bool {
-	if toolName == toolCreateAssignment && argName == argNote {
-		if t, ok := c.tools[toolName]; ok && slices.ContainsFunc(t.Arguments, func(a argument) bool {
-			return a.Name == argName && a.Type == typeQuery
-		}) {
-			s, ok := v.(string)
-			return ok && boundedText(s, MaxQueryRunes, false)
+	var declared argument
+	if t, ok := c.tools[toolName]; ok {
+		if i := slices.IndexFunc(t.Arguments, func(a argument) bool { return a.Name == argName }); i >= 0 {
+			declared = t.Arguments[i]
 		}
+	}
+	wave10 := c.version >= waveTenFrom
+	if wave10 {
+		switch declared.Type {
+		case typeIDs, typeBool, typeEnum:
+			return c.valid(declared, v)
+		case typeReplyText:
+			return false
+		}
+	}
+	if declared.Type == typeQuery && (wave10 || (toolName == toolCreateAssignment && argName == argNote)) {
+		s, ok := v.(string)
+		return ok && boundedText(s, MaxQueryRunes, false)
 	}
 
 	return label(v)

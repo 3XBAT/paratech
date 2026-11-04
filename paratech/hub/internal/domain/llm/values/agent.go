@@ -23,6 +23,12 @@ const (
 	ChatCatalogVersion = 9
 	MaxResultJSONBytes = 16 << 10
 	MaxArgumentsBytes  = 8 << 10
+	// PlanCatalogVersion is the first catalog of agent parity wave 10 (ADR-0033 §4, §10): show_plan holds up to 200
+	// steps in arguments of up to MaxPlanArgumentsBytes; every other tool keeps MaxArgumentsBytes.
+	PlanCatalogVersion    = 10
+	MaxPlanArgumentsBytes = 32 << 10
+	// ShowPlanTool is the plan card, the one tool whose arguments may exceed MaxArgumentsBytes.
+	ShowPlanTool = "show_plan"
 	// MaxReturnedArgumentsBytes bounds the arguments of a call the provider returned, before the catalog fits them
 	// to MaxArgumentsBytes (NewReturnedToolCall).
 	MaxReturnedArgumentsBytes = 32 << 10
@@ -73,10 +79,24 @@ type ToolCall struct {
 }
 
 // NewToolCall checks the format of a call: call id 1-128 characters of [A-Za-z0-9_-], tool name snake_case of at most
-// 64 characters, arguments a JSON object of at most MaxArgumentsBytes. Whether the tool is in a catalog is the
-// catalog's decision.
+// 64 characters, arguments a JSON object of at most MaxArgumentsBytes (MaxPlanArgumentsBytes for show_plan). Whether
+// the tool is in a catalog, and the limit of its catalog (MaxArgumentsBytesOf), is the catalog's decision: an echo or a
+// stored call of show_plan over 8 KiB on an older catalog was never returned, so its seal does not verify.
 func NewToolCall(callID, tool, arguments string) (ToolCall, error) {
-	return newToolCall(callID, tool, arguments, MaxArgumentsBytes)
+	limit := MaxArgumentsBytes
+	if tool == ShowPlanTool {
+		limit = MaxPlanArgumentsBytes
+	}
+	return newToolCall(callID, tool, arguments, limit)
+}
+
+// MaxArgumentsBytesOf is the limit of the arguments of tool in catalog version catalog: MaxPlanArgumentsBytes for
+// show_plan from PlanCatalogVersion on, MaxArgumentsBytes otherwise.
+func MaxArgumentsBytesOf(catalog uint32, tool string) int {
+	if tool == ShowPlanTool && catalog >= PlanCatalogVersion {
+		return MaxPlanArgumentsBytes
+	}
+	return MaxArgumentsBytes
 }
 
 // NewReturnedToolCall is NewToolCall for a call as the provider returned it, with arguments of at most

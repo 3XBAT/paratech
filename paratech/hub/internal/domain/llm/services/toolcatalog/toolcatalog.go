@@ -44,6 +44,13 @@ const (
 	maxIDBytes        = 128
 )
 
+// From catalog waveTenFrom (ADR-0033 §4, §9): a plan has up to maxPlanSteps10 steps, and an ids argument may state
+// max_items up to maxIDsItems10 (mark_assignments_done.assignments).
+const (
+	maxPlanSteps10 = 200
+	maxIDsItems10  = 50
+)
+
 // Argument types of the catalog.
 const (
 	typeID        = "id"
@@ -51,6 +58,7 @@ const (
 	typeDate      = "date"
 	typeTime      = "time"
 	typeEnum      = "enum"
+	typeBool      = "bool"
 	typeLabel     = "label"
 	typeQuery     = "query"
 	typeText      = "text"
@@ -70,16 +78,27 @@ const (
 )
 
 var (
-	actionTypes = []string{typeID, typeIDs, typeDate, typeTime, typeEnum, typeLabel, typeQuery}
+	actionTypes = []string{typeID, typeIDs, typeDate, typeTime, typeEnum, typeBool, typeLabel, typeQuery}
 	uiTypes     = []string{typeText, typeReplyText, typeTextList, typeCardIDs, typePlanSteps, typeQuestions}
+	// buttonTypes are the arguments of the button card (offer_button, catalog waveTenFrom): an action and one ID.
+	buttonTypes = []string{typeEnum, typeID}
 )
 
 // timeFrom is the first catalog with the time type (create_assignment.time, TASK-216), replyTextFrom the first with the
-// reply_text type (reply.text, TASK-223). An older catalog naming one was never released that way, so it is refused
-// rather than served with a schema its desktop does not know.
+// reply_text type (reply.text, TASK-223), waveTenFrom the first of agent parity wave 10 (ADR-0033 §10: the bool type,
+// max_items, note.text as a reply_text, the button card, plans of maxPlanSteps10 steps). An older catalog naming one
+// of them was never released that way, so it is refused rather than served with a schema its desktop does not know.
 const (
 	timeFrom      = 6
 	replyTextFrom = 7
+	waveTenFrom   = values.PlanCatalogVersion
+)
+
+// Wave-10 tools with arguments of their own rules: the note whose text is a reply_text and the button card.
+const (
+	toolNote   = "note"
+	argText    = "text"
+	toolButton = "offer_button"
 )
 
 // Question kinds of ask_questions.
@@ -100,6 +119,15 @@ type argument struct {
 	Type     string   `json:"type"`
 	Required bool     `json:"required"`
 	Values   []string `json:"values"`
+	MaxItems int      `json:"max_items"` // ids only, catalog waveTenFrom on; 0 means maxIDsItems
+}
+
+// maxIDs is the most IDs an ids argument takes.
+func (a argument) maxIDs() int {
+	if a.MaxItems > 0 {
+		return a.MaxItems
+	}
+	return maxIDsItems
 }
 
 type tool struct {
@@ -128,8 +156,9 @@ type Catalog struct {
 
 // Parse reads a catalog text and checks it: known fields only, a version above 0, unique snake_case tool and argument
 // names, known classes, argument types allowed for the class (UI tools only card types, among them the IDs a card
-// lists; other tools only IDs, enums, dates, times from catalog timeFrom, labels and queries), enum values only on
-// enums; from catalog oneOfFrom on,
+// lists; other tools only IDs, enums, dates, times from catalog timeFrom, bools from waveTenFrom, labels and queries),
+// enum values only on enums; from catalog waveTenFrom the button card (an action enum and IDs), note.text as a
+// reply_text and max_items on ids; from catalog oneOfFrom on,
 // a one_of note whose groups name optional arguments of declared tools. The deeper policy checks of the golden file
 // live in the contract test.
 func Parse(raw []byte) (*Catalog, error) {
@@ -188,20 +217,34 @@ func checkTool(t tool, version uint32) error {
 	default:
 		return fmt.Errorf("%w: tool %s has an unknown class", ErrInvalidCatalog, t.Name)
 	}
+	if t.Class == classUI && t.Name == toolButton && version >= waveTenFrom {
+		allowed = buttonTypes
+	}
 	seen := map[string]bool{}
 	for _, a := range t.Arguments {
 		if !values.ValidToolName(a.Name) || seen[a.Name] {
 			return fmt.Errorf("%w: tool %s: argument names must be snake_case and unique", ErrInvalidCatalog, t.Name)
 		}
 		seen[a.Name] = true
-		if !slices.Contains(allowed, a.Type) {
+		// note.text (catalog waveTenFrom) is the one reply_text outside the UI cards: the student's words for a note.
+		noteText := version >= waveTenFrom && t.Class == classUndo && t.Name == toolNote && a.Name == argText
+		if !slices.Contains(allowed, a.Type) && (!noteText || a.Type != typeReplyText) {
 			return fmt.Errorf("%w: tool %s: argument %s has a type its class does not allow", ErrInvalidCatalog, t.Name, a.Name)
 		}
 		if a.Type == typeTime && version < timeFrom {
 			return fmt.Errorf("%w: tool %s: argument %s: the time type exists from catalog %d", ErrInvalidCatalog, t.Name, a.Name, timeFrom)
 		}
-		if a.Type == typeReplyText && (version < replyTextFrom || t.Name != toolReply || a.Name != argReplyText) {
-			return fmt.Errorf("%w: tool %s: argument %s: reply_text is only reply.text, from catalog %d", ErrInvalidCatalog, t.Name, a.Name, replyTextFrom)
+		if a.Type == typeBool && version < waveTenFrom {
+			return fmt.Errorf("%w: tool %s: argument %s: the bool type exists from catalog %d", ErrInvalidCatalog, t.Name, a.Name, waveTenFrom)
+		}
+		reply := version >= replyTextFrom && t.Name == toolReply && a.Name == argReplyText
+		if a.Type == typeReplyText && !reply && !noteText {
+			return fmt.Errorf("%w: tool %s: argument %s: reply_text is only reply.text (catalog %d) and note.text (catalog %d)",
+				ErrInvalidCatalog, t.Name, a.Name, replyTextFrom, waveTenFrom)
+		}
+		if a.MaxItems != 0 && (a.Type != typeIDs || version < waveTenFrom || a.MaxItems < 1 || a.MaxItems > maxIDsItems10) {
+			return fmt.Errorf("%w: tool %s: argument %s: max_items is 1-%d on an ids argument, from catalog %d",
+				ErrInvalidCatalog, t.Name, a.Name, maxIDsItems10, waveTenFrom)
 		}
 		if (a.Type == typeEnum) != (len(a.Values) > 0) {
 			return fmt.Errorf("%w: tool %s: argument %s: an enum needs values and only an enum has them", ErrInvalidCatalog, t.Name, a.Name)
@@ -264,8 +307,8 @@ func (c *Catalog) CheckEcho(calls []values.ToolCall) error {
 }
 
 // CheckReturned checks the calls the provider returned: 1..MaxAgentCalls calls with distinct ids, each with arguments
-// of at most values.MaxArgumentsBytes (the adapter takes up to MaxReturnedArgumentsBytes, for FitReturned) and
-// matching the schema of its tool (Check).
+// of at most values.MaxArgumentsBytesOf its tool in this catalog (the adapter takes up to MaxReturnedArgumentsBytes,
+// for FitReturned) and matching the schema of its tool (Check).
 func (c *Catalog) CheckReturned(calls []values.ToolCall) error {
 	if len(calls) == 0 || len(calls) > values.MaxAgentCalls {
 		return fmt.Errorf("%w: a step returns 1-%d calls", ErrInvalidCall, values.MaxAgentCalls)
@@ -276,8 +319,8 @@ func (c *Catalog) CheckReturned(calls []values.ToolCall) error {
 			return fmt.Errorf("%w: call ids repeat", ErrInvalidCall)
 		}
 		ids[call.CallID()] = true
-		if len(call.Arguments()) > values.MaxArgumentsBytes {
-			return fmt.Errorf("%w: arguments exceed %d bytes", ErrInvalidCall, values.MaxArgumentsBytes)
+		if limit := values.MaxArgumentsBytesOf(c.version, call.Tool()); len(call.Arguments()) > limit {
+			return fmt.Errorf("%w: arguments exceed %d bytes", ErrInvalidCall, limit)
 		}
 		if err := c.Check(call); err != nil {
 			return err

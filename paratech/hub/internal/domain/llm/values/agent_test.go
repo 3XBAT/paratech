@@ -105,6 +105,46 @@ func TestNewToolCall(t *testing.T) {
 	}
 }
 
+// TestPlanArgumentsLimit (TASK-325, ADR-0033 §4): show_plan takes arguments up to 32 KiB as a call, and from catalog
+// PlanCatalogVersion on as a returned one too; every other tool and every older catalog keeps 8 KiB.
+func TestPlanArgumentsLimit(t *testing.T) {
+	at := func(n int) string { return "{" + strings.Repeat(" ", n-2) + "}" }
+	if c, err := NewToolCall("toolu_1", ShowPlanTool, at(MaxPlanArgumentsBytes)); err != nil || len(c.Arguments()) != MaxPlanArgumentsBytes {
+		t.Fatalf("show_plan at 32 KiB: %v", err)
+	}
+	for name, c := range map[string][2]string{
+		"show_plan over 32 KiB":  {ShowPlanTool, at(MaxPlanArgumentsBytes + 1)},
+		"another tool over 8KiB": {"note", at(MaxArgumentsBytes + 1)},
+	} {
+		if _, err := NewToolCall("toolu_1", c[0], c[1]); !errors.Is(err, ErrInvalidAgentRequest) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	for _, c := range []struct {
+		catalog uint32
+		tool    string
+		want    int
+	}{
+		{PlanCatalogVersion, ShowPlanTool, MaxPlanArgumentsBytes}, {PlanCatalogVersion + 1, ShowPlanTool, MaxPlanArgumentsBytes},
+		{PlanCatalogVersion - 1, ShowPlanTool, MaxArgumentsBytes}, {1, ShowPlanTool, MaxArgumentsBytes},
+		{PlanCatalogVersion, "note", MaxArgumentsBytes}, {PlanCatalogVersion, "reply", MaxArgumentsBytes},
+	} {
+		if got := MaxArgumentsBytesOf(c.catalog, c.tool); got != c.want {
+			t.Errorf("MaxArgumentsBytesOf(%d, %s) = %d, want %d", c.catalog, c.tool, got, c.want)
+		}
+	}
+	if MaxPlanArgumentsBytes != 32<<10 || MaxArgumentsBytes != 8<<10 || MaxPlanArgumentsBytes > MaxReturnedArgumentsBytes {
+		t.Fatal("limits changed")
+	}
+
+	// A stored large plan replays: the ledger keeps it and DecodeCalls reads it back.
+	plan := mustCall(t, "toolu_1", ShowPlanTool, at(20<<10))
+	got, err := DecodeCalls(EncodeCalls([]ToolCall{plan}))
+	if err != nil || len(got) != 1 || got[0].Arguments() != plan.Arguments() {
+		t.Fatalf("DecodeCalls = %v, %v", got, err)
+	}
+}
+
 // TestNewReturnedToolCall: a returned call takes arguments up to MaxReturnedArgumentsBytes, never more.
 func TestNewReturnedToolCall(t *testing.T) {
 	args := "{" + strings.Repeat(" ", MaxReturnedArgumentsBytes-2) + "}"
