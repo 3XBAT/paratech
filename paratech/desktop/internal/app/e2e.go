@@ -13,6 +13,7 @@ import (
 
 	"paratech/desktop/config"
 	"paratech/desktop/internal/adapters/wincred"
+	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/input/wails"
 )
 
@@ -43,6 +44,38 @@ func shellOptions(cfg config.Config) wails.Options {
 }
 
 func e2eWebviewPath(e config.E2E) string { return filepath.Join(e.Dir, e2eWebviewDir) }
+
+// e2eRecorder is the one adapter of an E2E run on the control dir: it answers the dialogs from its pick queue and
+// records the links, files, call links and clipboard texts instead of acting. Only a build with tag e2e has one
+// (newE2ERecorder in e2e_hooks_on.go), so the shipped exe does not link the hooks (ADR-0035 §3).
+type e2eRecorder interface {
+	wails.OpenDialogs
+	wails.SaveDialogs
+	wails.Clipboard
+	wails.LinkOpener
+	wails.FileOpener
+	library.CallOpener
+}
+
+// e2eHooks are the shell's dialogs, clipboard and link and file openers of the recorder; without one they are zero,
+// so the shell keeps the native ones.
+func e2eHooks(h e2eRecorder) wails.Hooks {
+	if h == nil {
+		return wails.Hooks{}
+	}
+	return wails.Hooks{Open: h, Save: h, Clipboard: h, Links: h, Opener: h}
+}
+
+// coreEnv is the env openCore builds the core with: in the E2E mode the Hub must be on loopback and the library's
+// «Подключиться» goes to the recorder. Google's consent page stays native: ADR-0035 keeps Google out of E2E runs.
+func (a *App) coreEnv() env {
+	e := a.env
+	e.loopbackHubOnly = a.cfg.E2E.On()
+	if a.e2e != nil {
+		e.calls = a.e2e
+	}
+	return e
+}
 
 // checkE2EDirs refuses an E2E run on the owner's folders: the data dir and the control dir must neither be, hold nor
 // lie in the default data dir, and the run's WebView2 folder must stay apart from the owner's one. An unknown default

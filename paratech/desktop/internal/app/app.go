@@ -37,6 +37,8 @@ type App struct {
 	env env
 	// shell is nil in headless mode.
 	shell *wails.Shell
+	// e2e records the shell's hooks and the library's call links in the E2E mode of an e2e build; nil otherwise.
+	e2e e2eRecorder
 
 	// startCtx ends when Close begins: it stops a startup that is still running and the agent's requests.
 	startCtx    context.Context
@@ -70,9 +72,11 @@ func New(cfg config.Config, log *slog.Logger) (*App, error) {
 	tee := logfile.NewTee(log.Handler())
 	a := &App{cfg: cfg, log: slog.New(tee), tee: tee, env: productionEnv()}
 	a.startCtx, a.cancelStart = context.WithCancel(context.Background())
+	a.e2e = newE2ERecorder(cfg, a.log)
 	if !cfg.Headless && !cfg.Recorder {
 		opts := shellOptions(cfg)
 		opts.Log, opts.OpenCore, opts.Started = a.log, a.openCore, a.launchStart
+		opts.Hooks = e2eHooks(a.e2e)
 		shell, err := wails.New(opts)
 		if err != nil {
 			return nil, fmt.Errorf("app: ui shell: %w", err)
@@ -207,9 +211,7 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 	}
 
 	profile := a.secretsProfile()
-	e := a.env
-	e.loopbackHubOnly = a.cfg.E2E.On()
-	c, err := buildCore(ctx, a.cfg.DataDir, profile, e, a.log)
+	c, err := buildCore(ctx, a.cfg.DataDir, profile, a.coreEnv(), a.log)
 	if err != nil {
 		return wails.Core{}, errors.Join(err, closeLog(), lock.Release())
 	}
