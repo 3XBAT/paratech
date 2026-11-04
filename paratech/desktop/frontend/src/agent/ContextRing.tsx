@@ -28,6 +28,28 @@ export function ContextRing(props: { fill: ContextFill | null }) {
   );
 }
 
+/**
+ * While the agent compacts the open chat: one muted line under the field, no box (TASK-270). The live region is always
+ * rendered and empty when idle (zero height), so a reader picks up the text when it appears. In normal flow, never over
+ * the thread. The field stays usable.
+ */
+export function CompactionNote(props: { active: boolean }) {
+  return (
+    <div className="ag-compact small" role="status" aria-live="polite">
+      {props.active && (
+        <>
+          <span className="ag-cdots" aria-hidden="true">
+            <span className="ag-cdot" />
+            <span className="ag-cdot" />
+            <span className="ag-cdot" />
+          </span>
+          <span>{ringTexts.compacting}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** From «full»: one quiet line under the field with the way out. Nothing at the other levels. */
 export function ContextHint(props: { fill: ContextFill | null; onNew?: () => void }) {
   const ring = ringModel(props.fill);

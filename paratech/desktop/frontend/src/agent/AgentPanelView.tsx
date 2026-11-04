@@ -8,7 +8,7 @@ import { Icon } from "../ui/Icon.js";
 import { AgentRequest, type CardActions } from "./AgentCards.js";
 import type { ContextFill } from "../bindings/agent.js";
 import { ChatBar, type ChatBarProps } from "./ChatBar.js";
-import { ContextHint, ContextRing } from "./ContextRing.js";
+import { CompactionNote, ContextHint, ContextRing } from "./ContextRing.js";
 import { ComposerPills, MentionPopup, MessagePills } from "./MentionParts.js";
 import { AgentActions, UserActions } from "./MessageActions.js";
 import { RestartButton, RestartDialog, type RestartDialogProps, RestartNote } from "./RestartDialog.js";
@@ -75,6 +75,8 @@ export interface AgentPanelViewProps {
   mentionsFor?: (entry: Entry) => readonly MentionView[] | undefined;
   /** The context fill of the open chat; null or absent: no ring. */
   fill?: ContextFill | null;
+  /** The agent compacts the open chat's context right now: the quiet «Уплотнение контекста…» line. */
+  compacting?: boolean;
   /** «Начать заново отсюда»; absent: the action is not offered. */
   restart?: RestartUi;
   /** «Копировать» under the messages of earlier requests; absent: no copy there. The live requests get it from actionsFor. */
@@ -223,6 +225,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
           </svg>
         </button>
       </form>
+      <CompactionNote active={props.compacting === true} />
       <ContextHint fill={props.fill ?? null} onNew={props.chat?.onNew} />
       <div className="ag-ctx-wrap">
         <div className="ag-ctx">

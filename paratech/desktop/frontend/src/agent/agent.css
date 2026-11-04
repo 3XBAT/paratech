@@ -272,6 +272,18 @@ button.ag-pill:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .ag-fullhint-tx { min-width: 0; overflow-wrap: anywhere; }
 .ag-in-bottom .ag-fullhint { order: 4; margin-top: -6px; padding-bottom: 12px; }
 
+/* TASK-270: «Уплотнение контекста…» right under the field. Muted text and small dots, no box; in normal flow (never
+   absolute, fixed or sticky), so it cannot cover the thread. The live region is always there and has no height while empty. */
+.ag-compact { flex: none; color: var(--muted); }
+.ag-compact:not(:empty) { display: flex; align-items: center; gap: 6px; padding: 4px 12px 0 16px; overflow-wrap: anywhere; }
+.ag-in-bottom .ag-compact { order: 4; }
+.ag-in-bottom .ag-compact:not(:empty) { margin-top: -6px; padding-bottom: 12px; }
+.ag-cdots { flex: none; display: inline-flex; align-items: center; gap: 3px; }
+.ag-cdot { width: 4px; height: 4px; border-radius: 50%; background: currentColor; animation: ag-breath var(--t-breath) ease-in-out infinite; }
+.ag-cdot:nth-child(2) { animation-delay: .2s; }
+.ag-cdot:nth-child(3) { animation-delay: .4s; }
+@media (prefers-reduced-motion: reduce) { .ag-cdot { animation: none; } }
+
 /* «Начать заново отсюда» (TASK-249): a quiet action under a message of the student, the warning dialog, and the note by the field. */
 .ag { position: relative; }
 /* TASK-365: the quiet icon row under a message (copy; restart under the student's, repeat under the agent's). Muted
