@@ -29,23 +29,14 @@ export function ContextRing(props: { fill: ContextFill | null }) {
 }
 
 /**
- * While the agent compacts the open chat: one muted line under the field, no box (TASK-270). The live region is always
- * rendered and empty when idle (zero height), so a reader picks up the text when it appears. In normal flow, never over
- * the thread. The field stays usable.
+ * While the agent compacts the open chat: one muted text line under the field, no box and no animation (the thread's
+ * Waiting dots already show the request; TASK-270). The live region is always rendered and empty when idle (zero
+ * height), so a reader picks up the text when it appears. In normal flow, never over the thread. The field stays usable.
  */
 export function CompactionNote(props: { active: boolean }) {
   return (
     <div className="ag-compact small" role="status" aria-live="polite">
-      {props.active && (
-        <>
-          <span className="ag-cdots" aria-hidden="true">
-            <span className="ag-cdot" />
-            <span className="ag-cdot" />
-            <span className="ag-cdot" />
-          </span>
-          <span>{ringTexts.compacting}</span>
-        </>
-      )}
+      {props.active && ringTexts.compacting}
     </div>
   );
 }
@@ -58,7 +49,7 @@ export function ContextHint(props: { fill: ContextFill | null; onNew?: () => voi
   }
   return (
     <div className="ag-fullhint small" role="status">
-      <span className="ag-fullhint-tx">{ringTexts.hint}</span>
+      <span className="ag-fullhint-tx">{ring.hintText}</span>
       <Button size="sm" variant="secondary" onClick={props.onNew}>
         {ringTexts.hintButton}
       </Button>

@@ -120,7 +120,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
     if (atBottom.current) {
       end.current?.scrollIntoView?.({ block: "end", behavior: "auto" });
     }
-  }, [size, lastSig]);
+  }, [size, lastSig, props.compacting]);
 
   // The field grows with its text; the CSS max-height (six lines) stops it and the rest scrolls.
   const { inputRef, draft } = props;
@@ -226,7 +226,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
         </button>
       </form>
       <CompactionNote active={props.compacting === true} />
-      <ContextHint fill={props.fill ?? null} onNew={props.chat?.onNew} />
+      {!props.compacting && <ContextHint fill={props.fill ?? null} onNew={props.chat?.onNew} />}
       <div className="ag-ctx-wrap">
         <div className="ag-ctx">
           <span className="ag-chip">

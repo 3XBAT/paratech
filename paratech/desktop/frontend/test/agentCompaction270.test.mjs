@@ -101,9 +101,9 @@ test("the always-rendered role=status container is empty when idle and carries t
 
   const busy = renderToStaticMarkup(h(CompactionNote, { active: true }));
   assert.match(busy, /^<div class="ag-compact small" role="status" aria-live="polite">/);
-  assert.match(busy, /Уплотнение контекста…<\/span>/);
-  // The dots are decoration; no button or field is disabled by the note.
-  assert.match(busy, /class="ag-cdots" aria-hidden="true"/);
+  assert.equal(busy, '<div class="ag-compact small" role="status" aria-live="polite">Уплотнение контекста…</div>');
+  // Text only: no second animated indicator next to the thread's Waiting dots.
+  assert.doesNotMatch(busy, /ag-cdot|<span|aria-hidden/);
   assert.equal(ringTexts.compacting, "Уплотнение контекста…");
 });
 
@@ -122,11 +122,17 @@ test("in the panel the note sits under the form, before the context chip, and th
   assert.doesNotMatch(html, /<textarea[^>]*disabled/);
 });
 
-test("the note comes before the full-chat hint, which stays", () => {
+test("while compacting the full-chat hint is hidden; it is back when the compaction ended and the fill is still full", () => {
   const bar = { openChat: null, sections: { active: [], archived: [] }, note: "", onOpen: noop, onNew: noop, onRename: async () => "", onArchive: noop, onRestore: noop };
-  const html = panel({ compacting: true, fill: fill(95, "full"), chat: bar });
-  assert.ok(html.indexOf("Уплотнение контекста…") < html.indexOf("ag-fullhint"));
-  assert.match(html, /Новый чат<\/button>/);
+  const busy = panel({ compacting: true, fill: fill(95, "full"), chat: bar });
+  assert.match(busy, /Уплотнение контекста…/);
+  assert.doesNotMatch(busy, /ag-fullhint|Начать новый чат/);
+  const done = panel({ compacting: false, fill: fill(95, "full"), chat: bar });
+  assert.doesNotMatch(done, /Уплотнение/);
+  assert.match(done, /ag-fullhint/);
+  assert.match(done, /Новый чат<\/button>/);
+  // The ring stays while compacting.
+  assert.match(busy, /ag-ring-full/);
 });
 
 test("ring after a compaction: the new, lower fill replaces a full one and the hint goes away", () => {
@@ -161,18 +167,43 @@ test("overflow without a compaction has its own non-blaming sentence; the hint s
   assert.equal(m.hint, true);
   assert.equal(m.text, `${ringTexts.label(100)}. Начало разговора агент уже не помнит: новый чат ответит точнее.`);
   assert.doesNotMatch(m.text, /почти заполнена/);
-  // A plain full chat keeps the old sentence.
-  assert.match(ringModel(fill(93, "full")).text, /почти заполнена/);
+  // The line under the field says the same for an overflow, and keeps its old sentence for a plain full chat.
+  assert.equal(m.hintText, "Начать новый чат? Начало этого разговора агент уже не помнит; чат останется в списке.");
+  assert.equal(m.hintText, ringTexts.overflowHint);
+  const plain = ringModel(fill(93, "full"));
+  assert.match(plain.text, /почти заполнена/);
+  assert.equal(plain.hintText, ringTexts.hint);
+  assert.equal(ringModel(fill(40, "normal")).hintText, "");
 });
 
-test("CSS: the note is in normal flow (no absolute, fixed or sticky), has no box, and stops animating for reduced motion", () => {
+test("the hint line under the field shows the overflow sentence only for an overflow", () => {
+  const bar = { openChat: null, sections: { active: [], archived: [] }, note: "", onOpen: noop, onNew: noop, onRename: async () => "", onArchive: noop, onRestore: noop };
+  const over = panel({ fill: fill(100, "high", true), chat: bar });
+  assert.match(over, /Начало этого разговора агент уже не помнит; чат останется в списке\./);
+  assert.doesNotMatch(over, /почти заполнен и останется/);
+  const full = panel({ fill: fill(93, "full"), chat: bar });
+  assert.match(full, /Этот чат почти заполнен и останется в списке\./);
+  assert.doesNotMatch(full, /Начало этого разговора/);
+});
+
+test("CSS: the note is in normal flow (no absolute, fixed or sticky), has no box and no animation, and shares the hint's slot", () => {
   const css = readFileSync(new URL("../src/agent/agent.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  const rules = css.split("\n").filter((l) => /^\s*\.(ag-in-bottom )?\.ag-(compact|cdots?)\b/.test(l) || /^\s*\.ag-cdot\b/.test(l));
-  assert.ok(rules.length >= 4, "the note rules exist");
+  const rules = css.split("\n").filter((l) => /^\s*(\.ag-in-bottom )?\.ag-compact\b/.test(l));
+  assert.equal(rules.length, 4, rules.join("\n"));
   for (const r of rules) {
     assert.doesNotMatch(r, /position\s*:\s*(fixed|absolute|sticky)/, r);
-    assert.doesNotMatch(r, /\b(border|outline|box-shadow)\s*:|background(-color)?\s*:\s*var\(--(accent|fill|raised|panel|err|warn)/, r);
+    assert.doesNotMatch(r, /\b(border|outline|box-shadow|animation)\s*:|background(-color)?\s*:/, r);
   }
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.ag-cdot \{ animation: none; \} \}/);
-  assert.match(css, /\.ag-compact \{[^}]*color: var\(--muted\)/);
+  assert.doesNotMatch(css, /ag-cdot/);
+  assert.match(css, /^\.ag-compact \{[^}]*color: var\(--muted\)/m);
+  // Same order and offsets as the hint in the bottom layout, so the two swap heights instead of adding up.
+  assert.match(css, /^\.ag-in-bottom \.ag-compact \{ order: 4; \}/m);
+  assert.match(css, /^\.ag-in-bottom \.ag-compact:not\(:empty\) \{ margin-top: -6px; padding-bottom: 12px; \}/m);
+  assert.match(css, /^\.ag-in-bottom \.ag-fullhint \{ order: 4; margin-top: -6px; padding-bottom: 12px; \}/m);
+});
+
+test("the thread re-pins to the bottom when the note appears or goes (compacting is a dependency of the scroll effect)", () => {
+  const src = readFileSync(new URL("../src/agent/AgentPanelView.tsx", import.meta.url), "utf8");
+  assert.match(src, /\}, \[size, lastSig, props\.compacting\]\);/);
+  assert.match(src, /\{!props\.compacting && <ContextHint /);
 });

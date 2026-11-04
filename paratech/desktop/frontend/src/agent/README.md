@@ -18,7 +18,9 @@ and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `par
   `MentionParts.tsx` with `useMentionComposer.ts`, `Waiting.tsx`, `PanelResizeHandle.tsx` with `panelWidth.ts` (pure rules).
 - Compaction (TASK-270): `AgentPanel` keeps a per-chat `CompactingMap` (`compactingFromUpdate` / `compactingFromList` / `compactingOf` in `agentView.ts`)
   and passes `compacting` to `AgentPanelView`, which draws `CompactionNote` (`ContextRing.tsx`), an always-rendered empty `role="status"`
-  line under the field. The ring itself follows `fillsFromUpdate`.
+  text line under the field (no box, no dots: the thread's Waiting already animates). While it shows, `ContextHint` is not drawn (one line
+  in that slot) and the thread re-pins to the bottom. The ring itself follows `fillsFromUpdate`; the hint sentence is `RingModel.hintText`
+  (`ringTexts.overflowHint` after an overflow).
 - CSS: `agent.css` (panel and common cards), `confirm.css`, `turnkey.css`; all three are imported in `main.tsx`.
 - Pure logic is outside this folder, in `src/`: `agentView.ts` (texts, `CardModel`, `cardModel`, `entryModel`, `offerSpecs`,
   button labels and icons), `agentState.ts` (panel reducer, no React), `agentOffer.ts` (`offerStep`, `runOffer`),
