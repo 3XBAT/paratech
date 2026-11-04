@@ -449,6 +449,36 @@ describe("the database URL of the Hub is a secret of the run", () => {
   });
 });
 
+// ---------------------------------------------------------------- order of the pack
+
+describe("the order of the settings pack is fixed", () => {
+  const e2e = path.resolve(import.meta.dirname, "..", "..");
+
+  test("one worker, no parallel files, no retries: the rows run in file order", () => {
+    const config = readFileSync(path.join(e2e, "playwright.config.ts"), "utf8");
+    assert.match(config, /workers:\s*1\b/);
+    assert.match(config, /fullyParallel:\s*false/);
+    assert.match(config, /retries:\s*0/);
+  });
+
+  test("the files of the pack sort as Hub, model, schedule; a row that needs another comes after it", () => {
+    const dir = path.join(e2e, "specs", "settings");
+    const files = findFiles(dir, /\.spec\.ts$/).map((f) => path.basename(f));
+    assert.deepEqual(files, ["hub.spec.ts", "model.spec.ts", "schedule.spec.ts"]);
+    for (const file of files) {
+      const source = readFileSync(path.join(dir, file), "utf8");
+      const rows = [...source.matchAll(/^test\((\w+),\s*details\(\1(?:,\s*\{\s*requires:\s*(\w+)\s*\})?\)/gm)].map((m) => ({ name: m[1] as string, requires: m[2] }));
+      assert.ok(rows.length >= 3, `${file}: rows found by the pattern: ${rows.length}`);
+      rows.forEach((row, i) => {
+        if (row.requires !== undefined) {
+          const at = rows.findIndex((r) => r.name === row.requires);
+          assert.ok(at >= 0 && at < i, `${file}: «${row.name}» requires ${row.requires}, which must be an earlier row of the same file`);
+        }
+      });
+    }
+  });
+});
+
 // ---------------------------------------------------------------- pick queue, files, texts
 
 describe("the pick queue guard", () => {

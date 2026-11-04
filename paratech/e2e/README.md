@@ -14,6 +14,8 @@ bash <ops>/heavy.sh npm --prefix <abs>/paratech/e2e run e2e                     
 bash <ops>/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --grep @smoke      # a tag or title filter (any `playwright test` argument)
 bash <ops>/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --no-build         # reuse paratech/dist/e2e/paratech.exe
 bash <ops>/heavy.sh npm --prefix <abs>/paratech/e2e run e2e:live                  # mode LIVE (= e2e -- --live; the real provider key is needed)
+bash <ops>/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --grep @settings   # one pack (here: «Настройки и подключения»)
+npm --prefix <abs>/paratech/e2e run fetch-model                                   # ggml-base-q5_1.bin into paratech/dist/cache/e2e (a run does this by itself)
 ```
 
 `npm run e2e` compiles with `tsc` and starts `build/src/cli.js`, which takes `--no-build` and `--live` and hands the
@@ -34,7 +36,9 @@ The sandbox files stay after the run (the next run wipes them); the report is `p
 | `src/steps`, `src/report` | spec helpers (`pick`, `opened`, `llm`, `step`, page stubs) and the reporter (`docs/process/e2e.md`) |
 | `src/hub`, `src/fakellm` | the Hub harness and the fake Messages API (below) |
 | `src/checks` | layout checker (`checkLayout`, `layoutSession`, page probe, pure `evaluateLayout`, console watch, agent-thread overlap, synthetic ICS) |
-| `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check, `specs/layout` the `@layout` pack (two window sizes: `PARATECH_E2E_WINDOW=1024x640`, `docs/process/e2e.md`) |
+| `src/fixtures` | pure builders and readers of the packs: the synthetic week (`schedule.ts`), the model cache and the corrupted copy (`model.ts`), the pick-queue guard (`picks.ts`), text readers (`text.ts`, `files.ts`) |
+| `scripts` | `fetch-model.ts` (compiled by tsc like the rest, `npm run fetch-model`) |
+| `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check, `specs/layout` the `@layout` pack (two window sizes: `PARATECH_E2E_WINDOW=1024x640`, `docs/process/e2e.md`), `specs/settings` the `@settings` pack (below) |
 
 Ctrl+C during the setup: Playwright still runs the global teardown, and the setup's handle is in a global slot from the
 start, so the teardown stops what is already up (the app as soon as it is spawned, not only once it is proven isolated)
@@ -76,7 +80,7 @@ await hub.stop(); await fake.stop();
 | `PARATECH_E2E_UNIT_ONLY=1` | skip the real Hub test |
 | `PARATECH_E2E_WINDOW=WxH` | `--e2e-window` of the app (default: the app's own size) |
 | `PARATECH_E2E_MODE`, `PARATECH_E2E_NO_BUILD` | set by `cli.js` from `--live` / `--no-build`; do not set by hand |
-| `PARATECH_E2E_RUN_ROOT`, `…_CTL_DIR`, `…_DATA_DIR`, `…_CDP_URL`, `…_FAKE_URL`, `…_HUB_URL`, `…_HUB_KEY` | outputs of the global setup for the workers (`src/contract.ts`); the Hub key lives in `process.env` only |
+| `PARATECH_E2E_RUN_ROOT`, `…_CTL_DIR`, `…_DATA_DIR`, `…_CDP_URL`, `…_FAKE_URL`, `…_HUB_URL`, `…_HUB_KEY`, `…_HUB_DATABASE_URL` | outputs of the global setup for the workers (`src/contract.ts`); the Hub key and the Hub database URL live in `process.env` only (never `state.json`) and are scrubbed from reports |
 
 The three provider variables are removed from `process.env` as soon as the Hub has started (the workers inherit it), but
 their values stay registered with the report scrubber of the main process, so they never reach a report or an error text.
@@ -96,6 +100,35 @@ Errors are typed, with a `kind` and a Russian message (scrubbed of every secret 
   regressions: a run reports them as «сломано», never «не проверено».
 
 `isEnvironmentError(e)` / `isHubFailedError(e)` tell them apart.
+
+## Settings pack (`specs/settings`, `@settings`, TASK-377)
+
+Sets the sandbox up through the real UI and proves the Hub connection, the model import and the schedule import. Ten report
+rows, in file order (one worker; `hub.spec.ts` < `model.spec.ts` < `schedule.spec.ts`; later rows say `requires`):
+
+- **Hub** (AC-12, AC-25): address (the folded «Адрес сервера») and key typed into the UI, the quota line shows the E2E limit
+  400 000; a **revoked key** shows the rejection. The key of the run must stay valid for the later packs, so the spec issues a
+  SECOND key with `hub keys create` and revokes that one (`src/hub/keys.ts`: `keyTools().issueKey / revokeKey / listKeys`; it
+  runs the `paratech/dist/e2e/hub.exe` of the run against `PARATECH_E2E_HUB_DATABASE_URL`); then the key of the run is typed
+  back and a third row confirms the quota line works again.
+- **Model** (AC-07, AC-23): `ggml-base-q5_1.bin` is fetched once into `paratech/dist/cache/e2e` by the spec's `beforeAll`
+  (`scripts/fetch-model.ts` runs the same code: size, SHA-256 and URL are read from `desktop/internal/app/catalog.json` at run
+  time, `.part` file renamed only after the hash matched, a mismatch is a loud error, a network failure is «не проверено»). It
+  is placed under `<ctl>/fixtures/models/`. A copy with ONE byte changed (`<ctl>/fixtures/models-corrupt/`) is refused by
+  «Импортировать скачанный файл…» of the catalog row with «Контрольная сумма SHA-256 не совпадает…»; «Импортировать файл
+  модели…» shows the file's real SHA-256 (equal to the catalog's for the good file); then the good file is imported from the
+  catalog row, made the default, and «Модуль расшифровки» is ready (no install notice).
+- **Schedule** (AC-16): `src/fixtures/schedule.ts` builds `<ctl>/fixtures/schedule/week.ics` at run time (Матанализ,
+  Литература, История; one lesson at the first whole minute at least 2 min after the file is written; UTC `Z` times plus
+  `X-WR-TIMEZONE:Europe/Moscow`). The preview shows subjects, kind, teacher and times in the zone of the file; «Применить»
+  commits; the lesson is on «Сегодня»; the same file again changes nothing. Then the three subjects are created from the
+  schedule and the synthetic call link `https://telemost.yandex.ru/j/00000000000001` is saved for «Матанализ» on «Сегодня».
+  The ICS importer ignores `LOCATION` and the rest of `DESCRIPTION` (`icsschedule/doc.go`), so the link is added on «Сегодня»;
+  it is never opened (only a later pack's click on «Подключиться» writes it to `opened.jsonl`).
+- The pack leaves the app configured for the next packs: Hub address + key of the run, the model installed and default, the
+  schedule and the three subjects with the link of «Матанализ».
+- Every wait is on UI state with an explicit timeout; page code goes through `evalInPage`. The key is never put into a title,
+  an annotation, a note or a log.
 
 ## Fake Messages API
 

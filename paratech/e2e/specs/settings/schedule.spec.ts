@@ -85,6 +85,8 @@ test(Import, details(Import), async ({ main, pick }) => {
         expect(await textOf(row.locator(".ln-day")), `день пары «${l.title}»`).toBe(day);
       }
     }
+    await preview(main).locator(".g-added").scrollIntoViewIfNeeded(act);
+    await snapshot("Расписание: добавляемые пары");
     const text = await textOf(preview(main));
     note(
       text.includes("telemost")

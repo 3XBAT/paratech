@@ -10,7 +10,7 @@
 // Order: the corrupted copy first (nothing is installed yet, so a wrongly accepted copy would show up), then the good file.
 import path from "node:path";
 
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 import { EnvCtlDir, EnvDataDir } from "../../src/contract.js";
 import { findFiles } from "../../src/fixtures/files.js";
@@ -82,6 +82,18 @@ async function openModels(main: Page): Promise<void> {
   await expect(catalogRow(main), "в каталоге моделей должна быть строка «Base Q5»").toHaveCount(1, { timeout: 20_000 });
 }
 
+/**
+ * The answer of a row action («Импортировать скачанный файл…» of a row far down the catalog) is shown at the top of the page.
+ * Whether the student can see it right after the click is recorded as a note of the row (a UX observation, not an AC).
+ */
+async function noteIfOutOfView(el: Locator, what: string): Promise<void> {
+  try {
+    await expect(el).toBeInViewport({ timeout: 1_000 });
+  } catch {
+    note(`${what} показано вне видимой части окна: строка модели внизу страницы, ответ вверху (UX)`);
+  }
+}
+
 async function openImportFromRow(main: Page): Promise<void> {
   await catalogRow(main).getByRole("button", { name: moreButton }).click(act);
   await main.getByRole("menuitem", { name: "Импортировать скачанный файл…", exact: true }).click(act);
@@ -109,6 +121,9 @@ test(Corrupted, details(Corrupted), async ({ main, pick }) => {
     assertReadable("текст отказа", text);
     expect(text, "отказ должен назвать причину: контрольная сумма не совпадает").toMatch(/SHA-256.*не совпадает|не совпадает.*SHA-256/);
     expect(text, "отказ должен сказать, что модель не установлена").toMatch(/не установлена/i);
+    await noteIfOutOfView(banner, "отказ");
+    await snapshot("Модели: окно после отказа, как его видит студент");
+    await banner.scrollIntoViewIfNeeded(act);
     await snapshot("Модели: испорченная копия отклонена");
   });
 
@@ -157,6 +172,9 @@ test(Imported, details(Imported, { requires: Corrupted }), async ({ main, pick }
     const text = await textOf(done);
     note(`ответ приложения: ${text}`);
     expect(text).toMatch(/Модель установлена: Base Q5\./);
+    await noteIfOutOfView(done.first(), "сообщение об установке");
+    await snapshot("Модели: окно после установки, как его видит студент");
+    await done.first().scrollIntoViewIfNeeded(act);
     await snapshot("Модели: Base Q5 установлена");
   });
 
