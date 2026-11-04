@@ -65,7 +65,8 @@ interface Started {
 
 /** The setup was stopped (teardown after Ctrl+C or the global timeout) before it came up. Neither «сломано» nor an environment problem. */
 class RunInterruptedError extends Error {
-  constructor() {
+  /** @param lateStop what the setup itself had to stop after the teardown ran (its problems must not be lost). */
+  constructor(readonly lateStop: StopReport) {
     super("Запуск прогона прерван остановкой раньше, чем приложение поднялось");
     this.name = "RunInterruptedError";
   }
@@ -110,19 +111,16 @@ export async function startRun(
   (globalThis as Slot)[handleKey] = handle;
   // Last resort when the process dies without a teardown (a crash, a kill of the wrapper): the hard kill and the profile
   // cleanup are synchronous. The Hub child has its own exit guard; the compose project is left (README: leftovers).
-  const onExit = () => {
-    if (!stopping) {
-      lastResort(p, state, started);
-    }
-  };
+  // Unconditional: stopAll removes what it stopped from `started`, app.stop() is alive-only and the profile cleanup is
+  // idempotent, so it also covers an exit between a checkpoint and a spawn or partway through stopAll.
+  const onExit = () => lastResort(p, state, started);
   process.once("exit", onExit);
 
   // After every wait: a teardown that ran meanwhile did not know what came up since.
   const checkpoint = async (): Promise<void> => {
     if (stopping) {
       await stopping;
-      await stopAll(p, state, started);
-      throw new RunInterruptedError();
+      throw new RunInterruptedError(await stopAll(p, state, started));
     }
   };
 
@@ -210,7 +208,8 @@ export async function startRun(
     if ((globalThis as Slot)[handleKey] === handle) {
       delete (globalThis as Slot)[handleKey]; // stopped and reported here: a teardown has nothing left to do
     }
-    const cleanup = report.problems.length > 0 ? `\nОстановка тоже прошла с ошибками: ${report.problems.join("; ")}` : "";
+    const problems = [...report.problems, ...(err instanceof RunInterruptedError ? err.lateStop.problems : [])];
+    const cleanup = problems.length > 0 ? `\nОстановка тоже прошла с ошибками: ${problems.join("; ")}` : "";
     const wrapped = new Error(`${state.environmentError && !interrupted ? `${EnvironmentMarker} ` : ""}${message}${cleanup}`);
     wrapped.cause = err;
     throw wrapped;

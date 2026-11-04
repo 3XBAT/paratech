@@ -266,6 +266,88 @@ test("a teardown while the Hub starts: what comes up afterwards is stopped by th
   }
 });
 
+test("problems of the setup's own late stop (the second pass after a teardown) reach the failure message", async () => {
+  const { paths, cleanup } = fakeRepo();
+  const env = guardEnv();
+  try {
+    const hold = gate<StartedHub>();
+    const asked = gate();
+    const { deps, hub } = stubs(paths, {
+      startHub: () => {
+        asked.open();
+        return hold.promise;
+      },
+    });
+    const late = { ...hub, stop: () => Promise.reject(new Error("compose down failed")) } as unknown as StartedHub;
+
+    const outcome = startRun({}, paths, deps).then(
+      () => undefined,
+      (err: unknown) => err as Error,
+    );
+    await asked.promise;
+    await stopRun(); // the first pass: the Hub is not known yet, so it has no problems
+    hold.open(late);
+
+    const err = await outcome;
+    assert.ok(err instanceof Error, String(err));
+    assert.match(err.message, /Остановка тоже прошла с ошибками: .*остановка Hub: compose down failed/);
+    assert.ok(!err.message.startsWith(EnvironmentMarker));
+  } finally {
+    env.restore();
+    cleanup();
+  }
+});
+
+test("the exit guard also runs after a teardown: an app spawned once the teardown has passed is still killed", async () => {
+  const { paths, cleanup } = fakeRepo();
+  const env = guardEnv();
+  const before = new Set(process.listeners("exit"));
+  try {
+    const portAsked = gate();
+    const portHold = gate<number>();
+    const spawned = gate();
+    const hold = gate<RunningApp>();
+    const { deps, events } = stubs(paths, {
+      freeLoopbackPort: () => {
+        portAsked.open();
+        return portHold.promise;
+      },
+      launchApp: (o) => {
+        o.onSpawn?.({ pid: 4242, cdpUrl: "", child: {} as ChildProcess, stop: () => void events.push("app.stop") });
+        spawned.open();
+        return hold.promise;
+      },
+    });
+
+    const outcome = startRun({}, paths, deps).then(
+      () => undefined,
+      (err: unknown) => err as Error,
+    );
+    const onExit = process.listeners("exit").find((l) => !before.has(l));
+    assert.ok(onExit, "the exit guard is registered");
+
+    await portAsked.promise;
+    await stopRun(); // nothing is running yet: only the fake and the Hub stop
+    assert.deepEqual(events, ["hub.stop", "fake.stop"]);
+
+    portHold.open(41003);
+    await spawned.promise; // spawned after the teardown, before the next checkpoint
+    (onExit as () => void)();
+    assert.deepEqual(events, ["hub.stop", "fake.stop", "app.stop"], "the guard does not skip a run that is stopping");
+
+    hold.fail(new Error("killed"));
+    await outcome;
+  } finally {
+    for (const l of process.listeners("exit")) {
+      if (!before.has(l)) {
+        process.removeListener("exit", l);
+      }
+    }
+    env.restore();
+    cleanup();
+  }
+});
+
 test("a fake LLM that cannot bind its port is an environment problem, not a start failure", async () => {
   const { paths, cleanup } = fakeRepo();
   const env = guardEnv();

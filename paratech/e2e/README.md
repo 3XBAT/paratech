@@ -35,10 +35,12 @@ The sandbox files stay after the run (the next run wipes them); the report is `p
 | `src/hub`, `src/fakellm` | the Hub harness and the fake Messages API (below) |
 | `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check |
 
-Ctrl+C or the global timeout during the setup: Playwright still runs the global teardown, and the setup's handle is in a
-global slot from the start, so the teardown stops what is already up (the app as soon as it is spawned, not only once it is
-proven isolated) and the setup stops whatever comes up after that. If the process dies without a teardown (a crash, a kill),
-an exit guard kills the app tree and the Hub, but not the compose project; check for leftovers:
+Ctrl+C during the setup: Playwright still runs the global teardown, and the setup's handle is in a global slot from the
+start, so the teardown stops what is already up (the app as soon as it is spawned, not only once it is proven isolated)
+and the setup stops whatever comes up after that. On the global timeout the teardown starts on an already expired
+deadline and Playwright does not wait for it, so there it is best effort and the exit guard is the backstop. The exit
+guard runs at every process exit, also after a teardown (it is idempotent). If the process dies without a teardown (a
+crash, a kill), the guard kills the app tree and the Hub, but not the compose project; check for leftovers:
 `paratech.exe` / `hub.exe` of the run (`tasklist`), and `docker compose -p paratech-e2e -f paratech/hub/docker-compose.yml down -v`.
 `taskkill /T /F` runs only against an app that is still alive (the pid of an exited one may belong to another process,
 for instance your own paratech.exe).
@@ -70,12 +72,13 @@ await hub.stop(); await fake.stop();
 | `PARATECH_E2E_ANTHROPIC_KEY` | LIVE only: provider key (required); only the Hub process gets it |
 | `PARATECH_E2E_ANTHROPIC_BASE_URL`, `PARATECH_E2E_ANTHROPIC_AUTH` | LIVE only: gateway URL and `x-api-key`/`bearer` |
 
-The three provider variables are removed from `process.env` as soon as the Hub has started (the workers inherit it), but
-their values stay registered with the report scrubber of the main process, so they never reach a report or an error text.
 | `PARATECH_E2E_UNIT_ONLY=1` | skip the real Hub test |
 | `PARATECH_E2E_WINDOW=WxH` | `--e2e-window` of the app (default: the app's own size) |
 | `PARATECH_E2E_MODE`, `PARATECH_E2E_NO_BUILD` | set by `cli.js` from `--live` / `--no-build`; do not set by hand |
 | `PARATECH_E2E_RUN_ROOT`, `…_CTL_DIR`, `…_DATA_DIR`, `…_CDP_URL`, `…_FAKE_URL`, `…_HUB_URL`, `…_HUB_KEY` | outputs of the global setup for the workers (`src/contract.ts`); the Hub key lives in `process.env` only |
+
+The three provider variables are removed from `process.env` as soon as the Hub has started (the workers inherit it), but
+their values stay registered with the report scrubber of the main process, so they never reach a report or an error text.
 
 The harness reads only `PARATECH_E2E_*` variables as inputs. `HUB_PG_PORT` is an output: `hub/docker-compose.yml`
 interpolates it, so the harness sets it in the environment of the `docker compose` child. The app is started with
