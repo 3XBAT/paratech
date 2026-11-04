@@ -78,6 +78,20 @@ const total = await step("Открыть «Записи»", async () => {
 Other helpers: `popup` (Page or undefined), `snapshot(name)` (screenshot of a passing scenario into the report),
 `clipboardWrites(page)` (texts the page tried to copy; the system clipboard is never touched).
 
+## Layout pack (`@layout`, TASK-376)
+`paratech/e2e/specs/layout/` visits every screen (rail sections, subject and lesson tabs, assignment page, every settings item,
+the agent panel open and at its widest, the popup) and runs `checkLayout` (`paratech/e2e/src/checks/`): no whole-window scroll,
+no horizontal overflow, icon-only buttons with `aria-label` + tooltip (`title`, or the `.tip`/`.ia-tip`/`.ag-ib-tip` span of the
+rail and `IconAction`), quiet `[data-status]`, no raw `undefined`/`NaN`/`Error:` text, no console error, no squeezed titles, no
+overlap of the agent's «Стоп» row with the text. One report row per screen and size: «Раскладка · <экран> · <размер>».
+The window size is a property of the run (one app start per run): the second size is a second run.
+```
+bash C:/Users/xvati/GolandProjects/paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --grep @layout
+bash C:/Users/xvati/GolandProjects/paratech-ops/heavy.sh env PARATECH_E2E_WINDOW=1024x640 npm --prefix <abs>/paratech/e2e run e2e -- --grep @layout
+```
+A screen missing in the build is «не проверено» (skipped with a reason); a finding is a failed test with the screen and the
+element named — never relax a rule to turn a row green. Do not run `playwright test --list` with the repo config from another cwd.
+
 ## Rules
 - No fixed sleeps: wait on UI state (`expect(locator)...`, `expect.poll`).
 - SCRIPTED has no retries. A flake is a bug: fix it, or quarantine with `test.fixme(true, "reason + task")`.
