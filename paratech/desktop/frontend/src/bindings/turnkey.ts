@@ -519,8 +519,8 @@ export interface TurnkeyApi {
   stopWriting(workId: string): Promise<TurnkeyWork>;
   /** Section `number` again with the student's note; 0 is every section (or the plan of a blocked outline). */
   regenerate(workId: string, number: number, note: string): Promise<TurnkeyWork>;
-  /** The work of an assignment; a missing one is the not-found error. */
-  workOfAssignment(assignmentId: string): Promise<TurnkeyWork>;
+  /** The work of an assignment; null when it has none yet (the core replies null, not an error: a failed call is logged by the webview). */
+  workOfAssignment(assignmentId: string): Promise<TurnkeyWork | null>;
   /**
    * «Сделать под ключ»: starts the triage of an assignment (a paid reader call; the click is the consent). An existing
    * work comes back without a new call; a call that did not go through comes back as the work with its problem.
@@ -554,7 +554,10 @@ export function turnkeyApi(call: CallByName): TurnkeyApi {
       parseWork(await call(methods.editOutlineAt, id, version, items.map((i) => ({ number: i.number, title: i.title, words: i.words })))),
     stopWriting: async (id) => parseWork(await call(methods.stopWriting, id)),
     regenerate: async (id, number, note) => parseWork(await call(methods.regenerate, id, number, note)),
-    workOfAssignment: async (id) => parseWork(await call(methods.workOfAssignment, id)),
+    workOfAssignment: async (id) => {
+      const raw = await call(methods.workOfAssignment, id);
+      return raw === null || raw === undefined ? null : parseWork(raw);
+    },
     startForAssignment: async (id) => parseWork(await call(methods.startForAssignment, id)),
     answerQuestions: async (id, answers) =>
       parseWork(await call(methods.answerQuestions, id, answers.map((a) => ({ question: a.question, option: a.option, text: a.text })))),

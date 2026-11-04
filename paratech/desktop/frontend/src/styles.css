@@ -446,8 +446,10 @@ dialog.dialog:focus { outline: none; }
 /* Breadcrumbs (TASK-350): the way back, left above the title. Long names are cut with an ellipsis, the line never wraps. */
 .crumbs { margin: 0 0 8px -6px; font-size: var(--fs-small); line-height: var(--lh-small); }
 .crumbs ol { display: flex; flex-wrap: nowrap; align-items: center; margin: 0; padding: 0; list-style: none; }
-.crumbs li { display: flex; flex: 0 1 auto; align-items: center; min-width: 0; }
-.crumbs li:last-child { flex: 1 1 0; }
+/* The levels above give way first, each down to a floor of a few letters; the shrink factor of the screen's own name is
+   almost zero, so it is cut only when the ancestors are at their floors and it alone is longer than the line. */
+.crumbs li { display: flex; flex: 0 1 auto; align-items: center; min-width: min(100%, 12ch); }
+.crumbs li:last-child { flex: 0 0.001 auto; min-width: 0; max-width: 100%; }
 .crumb { display: block; min-width: 0; max-width: 28ch; padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crumb.cur { max-width: none; color: var(--muted); }
 .crumb.link { border: 0; border-radius: var(--r-xs); background: none; color: var(--accent); font: inherit; cursor: pointer; }

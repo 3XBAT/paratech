@@ -414,7 +414,7 @@ test("«Итоги дня» is last in one column and under the lessons in two (
 
 test("a deadline row: the chip sits under the title with the subject, the row is a plain column (TASK-345)", () => {
   const out = html(h(BurningSection, { now: new Date(2026, 9, 21, 12, 0), burning: [{ assignmentId: "a", title: "Реферат", subject: "История", due: at(23, 20, 0), daysLeft: 2, urgent: false }], onOpenAssignment: noop }));
-  assert.match(out, /today-t">Реферат<\/div><div class="today-dlmeta"><div class="small muted today-subject">История<\/div><span class="chip s-neutral"/);
+  assert.match(out, /today-t">Реферат<\/div><div class="today-dlmeta"><div class="small muted today-subject" title="История">История<\/div><span class="chip s-neutral"/);
   const button = out.match(/<button[^>]*today-dl[^>]*>([^]*?)<\/button>/)[1];
   assert.ok(button.includes("chip") && button.indexOf("today-main") < button.indexOf("chip"), "the chip is inside the main column");
   const css = readFileSync(new URL("../src/pages/today.css", import.meta.url), "utf8");

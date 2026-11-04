@@ -9,9 +9,6 @@ export interface Crumb {
   onClick?: () => void;
 }
 
-/** Longer labels get a tooltip with the whole text: the line shows them cut with an ellipsis. */
-const tipFrom = 24;
-
 export const crumbsLabel = "Путь";
 export const crumbsSeparator = "/";
 
@@ -22,7 +19,9 @@ export function Breadcrumbs(props: { items: readonly Crumb[] }) {
       <ol>
         {items.map((c, i) => {
           const last = i === items.length - 1;
-          const title = c.label.length > tipFrom ? c.label : undefined;
+          // Every crumb has the whole text as a tooltip: whether the line cuts it depends on the width of the sheet,
+          // unknown at render time.
+          const title = c.label;
           return (
             <li key={`${i}:${c.label}`}>
               {last || c.onClick === undefined ? (

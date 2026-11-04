@@ -186,7 +186,7 @@ export function SubjectTree(props: {
           return (
             <li key={g.code}>
               {/* A heading of the group, not a row: it has no folder icon and the subjects below are indented under it. */}
-              <button type="button" className="ti sem" aria-expanded={!shut} onClick={() => toggle(g.code)}>
+              <button type="button" className="ti sem" aria-expanded={!shut} title={g.label} onClick={() => toggle(g.code)}>
                 <Icon name={shut ? "chevr" : "chev"} />
                 <span className="nm">{g.label}</span>
                 {shut && <span className="cnt num">{g.subjects.length}</span>}
@@ -202,6 +202,7 @@ export function SubjectTree(props: {
                         className={["ti", s.id === props.currentId ? "cur" : "", overNow === s.id ? "drop" : ""].filter((c) => c !== "").join(" ")}
                         aria-current={s.id === props.currentId ? "page" : undefined}
                         data-subject-id={s.id}
+                        title={s.name}
                         onClick={() => {
                           setOpened((o) => expandSubject(seedOpen(o, props.currentId), s.id));
                           props.onOpen(s.id);
@@ -219,6 +220,7 @@ export function SubjectTree(props: {
                         className="tog"
                         aria-expanded={expanded}
                         aria-label={toggleLabel(s.name, expanded)}
+                        title={toggleLabel(s.name, expanded)}
                         onClick={() => setOpened((o) => toggleSubject(seedOpen(o, props.currentId), s.id))}
                         onDragOver={(e) => onDragOver(e, s.id)}
                         onDragLeave={() => setOver((o) => (o === s.id ? "" : o))}
@@ -231,6 +233,7 @@ export function SubjectTree(props: {
                               <button
                                 type="button"
                                 className="ti fold"
+                                title={folderTitle(f)}
                                 onClick={() => (s.id === props.currentId ? (props.onOpenFolder ?? scrollToFolder)(f.id) : props.onOpen(s.id))}
                               >
                                 <Icon name="folder" />

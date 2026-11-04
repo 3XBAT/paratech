@@ -21,7 +21,8 @@ export type TurnkeyBlockState =
 export async function loadTurnkeyBlock(api: TurnkeyApi, assignmentId: string): Promise<TurnkeyBlockState> {
   try {
     const w = await api.workOfAssignment(assignmentId);
-    return { phase: "work", workId: w.id };
+    // null: no work yet, the quiet answer of the core; the old not-found error below is kept for an older core.
+    return w === null ? { phase: "none", error: "" } : { phase: "work", workId: w.id };
   } catch (err) {
     const text = turnkeyErrorText(err);
     return { phase: "none", error: text === notFoundText ? "" : text };
