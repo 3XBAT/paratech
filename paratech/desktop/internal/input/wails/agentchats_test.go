@@ -20,8 +20,14 @@ type fakeChats struct {
 	list    []agentchats.Chat
 	chat    agentchats.Chat
 	earlier []agentchats.Request
+	fork    agentchats.ForkResult
 	err     error
 	calls   []string
+}
+
+func (f *fakeChats) Fork(_ context.Context, id shared.ThreadID, n int) (agentchats.ForkResult, error) {
+	f.calls = append(f.calls, fmt.Sprintf("Fork %s %d", id, n))
+	return f.fork, f.err
 }
 
 func (f *fakeChats) List(context.Context) ([]agentchats.Chat, error) {
