@@ -30,6 +30,7 @@ import (
 	"paratech/desktop/internal/adapters/zipfile"
 	"paratech/desktop/internal/cases/activity"
 	"paratech/desktop/internal/cases/agentchats"
+	"paratech/desktop/internal/cases/agentcompact"
 	"paratech/desktop/internal/cases/agentjournal"
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/answering"
@@ -119,7 +120,8 @@ type core struct {
 
 	// The agent core (wireAgent): the steps of a request, the action journal and the Driver of the requests.
 	agent    *agentturn.Service
-	chats    *agentchats.Service // the chat list of the agent panel (ADR-0028)
+	chats    *agentchats.Service   // the chat list of the agent panel (ADR-0028)
+	compact  *agentcompact.Service // context compaction of a chat before its next request (ADR-0028)
 	journal  *agentjournal.Service
 	driver   *agentloop.Driver
 	panel    *wails.AgentPanel // the Driver's updates as UI events
@@ -472,7 +474,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	if err != nil {
 		return err
 	}
-	if err := c.wireAgent(e, llm, agentReads{
+	if err := c.wireAgent(e, llm, llm, agentReads{
 		library: lib, knowledge: knowledge, activity: history, schedule: schedule, assignments: c.proposals,
 		deliveries: c.deliveries, rerunner: rerunner, materials: materialJobs, turnkey: works, answers: answers,
 		settings: prefs, notes: ownNotes,
