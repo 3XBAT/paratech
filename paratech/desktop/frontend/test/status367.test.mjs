@@ -106,16 +106,24 @@ test("«Остановить» is a normal button; only its square is red", () =
 
 test("StatusChip: the recording dot with the word, the others an icon and the word", () => {
   const rec = html(h(StatusChip, { kind: "rec", icon: null }, "Идёт запись", h("span", { className: "num" }, " · 0:03:48")));
-  assert.equal(rec, '<span class="chip s-rec"><span class="dot" aria-hidden="true"></span><span class="chip-text">Идёт запись<span class="num"> · 0:03:48</span></span></span>');
+  assert.equal(rec, '<span class="chip s-rec" data-status="rec"><span class="dot" aria-hidden="true"></span><span class="chip-text">Идёт запись<span class="num"> · 0:03:48</span></span></span>');
 
   const ok = html(h(StatusChip, { kind: "ok", icon: "ok" }, "Конспект готов"));
-  assert.equal(ok, '<span class="chip s-ok"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-ok"></use></svg><span class="chip-text">Конспект готов</span></span>');
+  assert.equal(ok, '<span class="chip s-ok" data-status="ok"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-ok"></use></svg><span class="chip-text">Конспект готов</span></span>');
 
   const run = html(h(StatusChip, { kind: "run", icon: "wave" }, "Пишется конспект"));
-  assert.match(run, /^<span class="chip s-run"><svg[^>]*><use href="#i-wave"><\/use><\/svg><span class="chip-text">Пишется конспект<\/span><\/span>$/);
+  assert.match(run, /^<span class="chip s-run" data-status="run"><svg[^>]*><use href="#i-wave"><\/use><\/svg><span class="chip-text">Пишется конспект<\/span><\/span>$/);
   for (const out of [rec, ok, run]) {
     assert.doesNotMatch(out, /style=|background|border/);
   }
+});
+
+test("StatusChip marks its root with data-status=<kind> for the E2E layout check; no stylesheet uses it", () => {
+  for (const kind of ["rec", "run", "wait", "net", "ok", "fail", "neutral"]) {
+    const out = html(h(StatusChip, { kind, icon: null, title: "t" }, "x"));
+    assert.match(out, new RegExp(`^<span class="chip s-${kind}" title="t" data-status="${kind}">`), kind);
+  }
+  for (const [file, css] of files) assert.doesNotMatch(css, /data-status/, file);
 });
 
 test("every known status of a recording and a job has a word and an icon (or the dot): never colour alone", () => {

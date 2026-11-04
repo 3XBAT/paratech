@@ -312,7 +312,7 @@ test("the row shows no technical error text; the details are in the chip's toolt
   const html = render(failed, { onRetry: () => undefined });
   assert.ok(html.includes(errorTexts.summaryFailed));
   assert.ok(!html.includes("row-problem"));
-  assert.match(html, /<span class="chip s-fail" title="permanent failure: hub: answer does not match the schema">/);
+  assert.match(html, /<span class="chip s-fail" title="permanent failure: hub: answer does not match the schema" data-status="fail">/);
 
   // The core's Russian note (the capture switch) stays in the row; its English reasons do not.
   const note = "Захват выбранного приложения не запустился (activation failed) — записывается весь звук компьютера.";

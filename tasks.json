@@ -8310,7 +8310,7 @@
             "dependencies": [
                 "TASK-375"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-377",
