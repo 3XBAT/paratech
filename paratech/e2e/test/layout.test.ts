@@ -27,6 +27,7 @@ import {
   watchPage,
 } from "../src/checks/layout.js";
 import { buildLayoutIcs, icsUtc, layoutLessons, layoutSubjects } from "../src/checks/ics.js";
+import { requestRecord, safeUrl } from "../src/checks/watch.js";
 
 const rules = (v: LayoutViolation[]): LayoutRule[] => [...new Set(v.map((x) => x.rule))];
 
@@ -289,6 +290,68 @@ describe("watchPage with a fake page", () => {
 
   test("a page nobody watched has nothing to drain", () => {
     assert.deepEqual(drainConsole(fakePage()), []);
+  });
+
+  // TASK-377 (follow-up of TASK-376): «Failed to load resource: 404» names its URL.
+  const req = (method: string, url: string, failure?: string) => ({ method: () => method, url: () => url, failure: () => (failure === undefined ? null : { errorText: failure }) });
+  const res = (status: number, url: string, method = "GET") => ({ status: () => status, url: () => url, request: () => req(method, url) });
+
+  test("a failed request and an answer with status >= 400 are recorded with their URL, a good answer is not", () => {
+    const page = fakePage();
+    watchPage(page);
+    assert.equal(page.listenerCount("requestfailed"), 1);
+    assert.equal(page.listenerCount("response"), 1);
+    watchPage(page);
+    assert.equal(page.listenerCount("response"), 1, "idempotent");
+    page.emit("response", res(200, "http://127.0.0.1:34115/index.html"));
+    page.emit("response", res(399, "http://127.0.0.1:34115/moved"));
+    page.emit("response", res(404, "http://127.0.0.1:34115/favicon.ico"));
+    page.emit("response", res(500, "http://127.0.0.1:34115/wails/runtime", "POST"));
+    page.emit("requestfailed", req("GET", "http://127.0.0.1:34115/wails/custom.js", "net::ERR_CONNECTION_REFUSED"));
+    page.emit("requestfailed", req("GET", "http://127.0.0.1:34115/x.js"));
+    assert.deepEqual(
+      drainConsole(page).map((r) => [r.kind, r.text]),
+      [
+        ["request", "GET http://127.0.0.1:34115/favicon.ico → 404"],
+        ["request", "POST http://127.0.0.1:34115/wails/runtime → 500"],
+        ["request", "GET http://127.0.0.1:34115/wails/custom.js — net::ERR_CONNECTION_REFUSED"],
+        ["request", "GET http://127.0.0.1:34115/x.js — сбой запроса"],
+      ],
+    );
+  });
+
+  test("a URL is recorded without its query, fragment and user info (a token may travel there)", () => {
+    assert.equal(safeUrl("http://u:pw@127.0.0.1:1/a/b?key=pthub_secret&x=1#frag"), "http://127.0.0.1:1/a/b");
+    assert.equal(safeUrl("https://hub.example.invalid/rpc?token=abc"), "https://hub.example.invalid/rpc");
+    assert.equal(safeUrl("data:text/plain;base64,AAAA"), "data:…");
+    assert.equal(safeUrl("blob:http://x/uuid"), "blob:…");
+    assert.equal(safeUrl("not a url?secret=1"), "not a url");
+    assert.equal(requestRecord("GET", "http://h/p?pthub_aaaa=1", { status: 404 }).text, "GET http://h/p → 404");
+  });
+});
+
+describe("request records in the layout verdict", () => {
+  const failedLoad = { kind: "console" as const, text: "Failed to load resource: the server responded with a status of 404 ()", location: "http://127.0.0.1:34115/favicon.ico:0" };
+  const request = { kind: "request" as const, text: "GET http://127.0.0.1:34115/favicon.ico → 404" };
+
+  test("the console violation «Failed to load resource» names the URL of the failed request", () => {
+    const v = evaluateLayout(snap({ console: [request, failedLoad] }));
+    assert.equal(v.length, 1, "the request record is context, not a second finding");
+    assert.equal(v[0]?.rule, "console");
+    assert.match(v[0]?.detail ?? "", /Failed to load resource/);
+    assert.match(v[0]?.detail ?? "", /запросы с ошибкой: GET http:\/\/127\.0\.0\.1:34115\/favicon\.ico → 404/);
+  });
+
+  test("a request record alone is no violation, and other console errors do not get the list", () => {
+    assert.deepEqual(evaluateLayout(snap({ console: [request] })), []);
+    const v = evaluateLayout(snap({ console: [request, { kind: "pageerror", text: "TypeError: x" }] }));
+    assert.equal(v.length, 1);
+    assert.ok(!/запросы с ошибкой/.test(v[0]?.detail ?? ""));
+  });
+
+  test("an ignore with a reason still applies to the console record, and then nothing is reported", () => {
+    const v = evaluateLayout(snap({ console: [request, failedLoad] }), { ignoreConsole: [{ pattern: "^Failed to load resource", reason: "the favicon of the dev server" }] });
+    assert.deepEqual(v, []);
   });
 });
 

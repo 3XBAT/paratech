@@ -5,6 +5,7 @@ import { inspect } from "node:util";
 import { buildHub } from "./build.js";
 import { captureStream, type Env, type HubMode, hubEnv, LogCapture, providerVars, randomSealKeys, Redactor } from "./env.js";
 import { BadConfigError, DatabaseUnavailableError, HubKeyFailedError, HubNotReadyError } from "./errors.js";
+import { issuedKeyLine } from "./keys.js";
 import { repoPaths } from "./paths.js";
 import { pgExec, PgError, type PgTarget, withSearchPath } from "./pg.js";
 import { assertAllowedHubPort, freeLoopbackPort, Loopback } from "./ports.js";
@@ -21,7 +22,6 @@ const keyTimeoutMs = 60_000;
 const defaultReadyTimeoutMs = 60_000;
 const readyPollMs = 100;
 const exitWaitMs = 10_000;
-const issuedKeyLine = /^pthub_[A-Za-z0-9_-]+$/;
 const logLevels = new Set(["debug", "info", "warn", "error"]);
 
 export interface StartHubOptions {
@@ -40,6 +40,11 @@ export interface StartedHub {
   readonly url: string;
   /** The API key of the run; the only secret the caller gets. Not enumerable and masked in JSON. */
   readonly apiKey: string;
+  /**
+   * HUB_DATABASE_URL of this Hub (the run's schema in search_path), for `hub keys ...` from src/hub/keys.ts. A secret like
+   * apiKey: not enumerable, masked in JSON, scrubbed from the Hub log.
+   */
+  readonly databaseUrl: string;
   readonly schema: string;
   readonly mode: HubMode;
   /** Captured Hub output, scrubbed of every secret of the run. */
@@ -98,7 +103,9 @@ export async function startHub(options: StartHubOptions, deps: HubDeps = default
     cleanups.push(() => sql(deps, db.target, `DROP SCHEMA IF EXISTS ${schema} CASCADE`));
 
     const cmd = await deps.hubCommand(env);
-    const base = { HUB_DATABASE_URL: withSearchPath(db.adminUrl, schema), HUB_LOG_LEVEL: logLevel };
+    const databaseUrl = withSearchPath(db.adminUrl, schema);
+    redactor.add(databaseUrl);
+    const base = { HUB_DATABASE_URL: databaseUrl, HUB_LOG_LEVEL: logLevel };
 
     const issued = await run(cmd.file, [...cmd.args, "keys", "create", "-label", `e2e-${runId}`], {
       env: hubEnv(env, base),
@@ -149,7 +156,8 @@ export async function startHub(options: StartHubOptions, deps: HubDeps = default
       [inspect.custom]: () => `StartedHub { url: '${url}', schema: '${schema}', mode: '${options.mode}' }`,
     };
     Object.defineProperty(hub, "apiKey", { value: apiKey, enumerable: false });
-    return hub as typeof hub & { apiKey: string };
+    Object.defineProperty(hub, "databaseUrl", { value: databaseUrl, enumerable: false });
+    return hub as typeof hub & { apiKey: string; databaseUrl: string };
   } catch (err) {
     await teardown().catch(() => {}); // the original failure matters more than a cleanup one
     throw scrubError(err, redactor);

@@ -10,7 +10,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.json && node --test \"build/test/*.test.js\"",
     "e2e": "tsc -p tsconfig.json && node build/src/cli.js",
-    "e2e:live": "tsc -p tsconfig.json && node build/src/cli.js --live"
+    "e2e:live": "tsc -p tsconfig.json && node build/src/cli.js --live",
+    "fetch-model": "tsc -p tsconfig.json && node build/scripts/fetch-model.js"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

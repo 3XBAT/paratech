@@ -6,6 +6,7 @@ import {
   EnvCtlDir,
   EnvDataDir,
   EnvFakeUrl,
+  EnvHubDatabaseUrl,
   EnvHubKey,
   EnvHubUrl,
   EnvironmentMarker,
@@ -69,6 +70,16 @@ class RunInterruptedError extends Error {
   constructor(readonly lateStop: StopReport) {
     super("Запуск прогона прерван остановкой раньше, чем приложение поднялось");
     this.name = "RunInterruptedError";
+  }
+}
+
+/** The password of a postgres:// URL, decoded; undefined when the text is not a URL or has none. */
+export function databasePassword(raw: string): string | undefined {
+  try {
+    const p = decodeURIComponent(new URL(raw).password);
+    return p === "" ? undefined : p;
+  } catch {
+    return undefined;
   }
 }
 
@@ -182,6 +193,11 @@ export async function startRun(
     process.env[EnvFakeUrl] = state.fakeUrl;
     process.env[EnvHubUrl] = state.hubUrl;
     process.env[EnvHubKey] = started.hub.apiKey; // memory only: never written to state.json, a file or a log
+    if (started.hub.databaseUrl) {
+      // Same rules: for the workers' `hub keys ...` (src/hub/keys.ts). The reporter scrubs the URL and its password.
+      process.env[EnvHubDatabaseUrl] = started.hub.databaseUrl;
+      registerSecrets([started.hub.databaseUrl, databasePassword(started.hub.databaseUrl)]);
+    }
     process.env[EnvMode] = options.mode;
     log("the app is up");
     return handle;

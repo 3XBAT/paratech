@@ -15,5 +15,5 @@
     "outDir": "build",
     "sourceMap": false
   },
-  "include": ["playwright.config.ts", "src/**/*.ts", "specs/**/*.ts", "test/**/*.ts"]
+  "include": ["playwright.config.ts", "src/**/*.ts", "specs/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
 }
