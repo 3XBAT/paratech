@@ -102,17 +102,42 @@ test("every crumb carries its whole label as a tooltip", () => {
   assert.doesNotMatch(read("ui/Breadcrumbs.tsx"), /tipFrom/);
 });
 
-test("the ancestors give way first: a floor each, the current crumb almost never shrinks", () => {
+test("the crumb line is never wider than the pane: the ancestors give way first down to a floor, the last crumb takes the rest", () => {
   const css = read("styles.css");
+  // The containers cannot be pushed wider than the pane by their content.
+  for (const sel of [".crumbs", ".crumbs ol"]) {
+    const box = rule(css, sel);
+    assert.match(box, /min-width: 0/, `${sel} may be narrower than its content`);
+    assert.match(box, /max-width: 100%/, `${sel} is not wider than the pane`);
+  }
+  const ol = rule(css, ".crumbs ol");
+  assert.match(ol, /display: flex/);
+  assert.match(ol, /flex-wrap: nowrap/);
+
+  // Ancestors: a huge shrink weight, so the deficit goes to them first; frozen at a floor of a few letters.
   const li = rule(css, ".crumbs li");
-  assert.match(li, /flex: 0 1 auto/);
-  assert.match(li, /min-width: min\(100%, \d+ch\)/, "the floor of an ancestor");
+  const anc = /flex: 0 (\d+) auto/.exec(li);
+  assert.ok(anc && Number(anc[1]) >= 100, "ancestors shrink with a big weight");
+  const floor = /min-width: min\(100%, (\d+)ch\)/.exec(li);
+  assert.ok(floor, "the floor of an ancestor, never above the pane");
+
+  // The last crumb: a normal shrink factor (so it does shrink, the line cannot overflow) and no floor (an ellipsis).
   const last = rule(css, ".crumbs li:last-child");
-  // A shrink factor far below the ancestors' 1: the deficit goes to them until they are at the floor.
-  const shrink = /flex: 0 ([0-9.]+) auto/.exec(last);
-  assert.ok(shrink && Number(shrink[1]) > 0 && Number(shrink[1]) <= 0.01, "almost-zero shrink, not flex: 1 1 0");
+  assert.match(last, /flex: 0 1 auto/);
+  assert.match(last, /min-width: 0/);
   assert.match(last, /max-width: 100%/);
-  assert.doesNotMatch(last, /flex: 1 1 0/);
+  assert.ok(Number(anc[1]) > 1, "ancestors are weighted above the last crumb, so they give way first");
+  assert.doesNotMatch(css, /flex: 0 0\.001 auto/, "the last crumb must not be frozen: the line would overflow the sheet");
+
+  // Scenarios: (1) short last: nothing shrinks, content fits. (2) long last, short ancestors: ancestors are below their
+  // floor already (frozen), the whole deficit goes to the last, which is cut by .crumb's ellipsis. (3) long both:
+  // ancestors go down to the floor first (weight 1000), then the last takes what is left.
+  const crumb = rule(css, ".crumb");
+  assert.match(crumb, /min-width: 0/);
+  assert.match(crumb, /overflow: hidden/);
+  assert.match(crumb, /text-overflow: ellipsis/);
+  assert.match(crumb, /white-space: nowrap/);
+  assert.match(rule(css, ".crumb.cur"), /max-width: none/, "the current crumb is limited by the line, not by 28ch");
 });
 
 // ---- Turnkey: "no work yet" is a quiet null ----
