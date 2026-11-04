@@ -46,15 +46,33 @@ func shellOptions(cfg config.Config) wails.Options {
 
 func e2eWebviewPath(e config.E2E) string { return filepath.Join(e.Dir, e2eWebviewDir) }
 
-// e2eHooks are the shell's dialogs, clipboard and link and file openers in the E2E mode: one e2ehooks adapter on the
-// control dir answers the dialogs from its pick queue and records the rest instead of acting. Outside the mode they
-// are zero, so the shell keeps the native ones.
-func e2eHooks(cfg config.Config, log *slog.Logger) wails.Hooks {
+// e2eRecorder is the one e2ehooks adapter of an E2E run on the control dir: it answers the dialogs from its pick queue
+// and records the links, files, call links and clipboard texts instead of acting. nil outside the mode.
+func e2eRecorder(cfg config.Config, log *slog.Logger) *e2ehooks.Hooks {
 	if !cfg.E2E.On() {
+		return nil
+	}
+	return e2ehooks.New(cfg.E2E.Dir, log)
+}
+
+// e2eHooks are the shell's dialogs, clipboard and link and file openers of the recorder; without one they are zero,
+// so the shell keeps the native ones.
+func e2eHooks(h *e2ehooks.Hooks) wails.Hooks {
+	if h == nil {
 		return wails.Hooks{}
 	}
-	h := e2ehooks.New(cfg.E2E.Dir, log)
 	return wails.Hooks{Open: h, Save: h, Clipboard: h, Links: h, Opener: h}
+}
+
+// coreEnv is the env openCore builds the core with: in the E2E mode the Hub must be on loopback and the library's
+// «Подключиться» goes to the recorder. Google's consent page stays native: ADR-0035 keeps Google out of E2E runs.
+func (a *App) coreEnv() env {
+	e := a.env
+	e.loopbackHubOnly = a.cfg.E2E.On()
+	if a.e2e != nil {
+		e.calls = a.e2e
+	}
+	return e
 }
 
 // checkE2EDirs refuses an E2E run on the owner's folders: the data dir and the control dir must neither be, hold nor

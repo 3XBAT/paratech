@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"paratech/desktop/config"
+	"paratech/desktop/internal/adapters/e2ehooks"
 	"paratech/desktop/internal/adapters/logfile"
 	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/input/wails"
@@ -37,6 +38,8 @@ type App struct {
 	env env
 	// shell is nil in headless mode.
 	shell *wails.Shell
+	// e2e records the shell's hooks and the library's call links in the E2E mode; nil outside it.
+	e2e *e2ehooks.Hooks
 
 	// startCtx ends when Close begins: it stops a startup that is still running and the agent's requests.
 	startCtx    context.Context
@@ -70,10 +73,11 @@ func New(cfg config.Config, log *slog.Logger) (*App, error) {
 	tee := logfile.NewTee(log.Handler())
 	a := &App{cfg: cfg, log: slog.New(tee), tee: tee, env: productionEnv()}
 	a.startCtx, a.cancelStart = context.WithCancel(context.Background())
+	a.e2e = e2eRecorder(cfg, a.log)
 	if !cfg.Headless && !cfg.Recorder {
 		opts := shellOptions(cfg)
 		opts.Log, opts.OpenCore, opts.Started = a.log, a.openCore, a.launchStart
-		opts.Hooks = e2eHooks(cfg, a.log)
+		opts.Hooks = e2eHooks(a.e2e)
 		shell, err := wails.New(opts)
 		if err != nil {
 			return nil, fmt.Errorf("app: ui shell: %w", err)
@@ -208,9 +212,7 @@ func (a *App) openCore(ctx context.Context) (wails.Core, error) {
 	}
 
 	profile := a.secretsProfile()
-	e := a.env
-	e.loopbackHubOnly = a.cfg.E2E.On()
-	c, err := buildCore(ctx, a.cfg.DataDir, profile, e, a.log)
+	c, err := buildCore(ctx, a.cfg.DataDir, profile, a.coreEnv(), a.log)
 	if err != nil {
 		return wails.Core{}, errors.Join(err, closeLog(), lock.Release())
 	}
