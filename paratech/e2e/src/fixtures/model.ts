@@ -154,7 +154,11 @@ export const httpDownload: Downloader = async (url, dest, onProgress, maxBytes) 
     await pipeline(counted, createWriteStream(dest));
   } catch (err) {
     if (tooBig) {
-      rmSync(dest, { force: true });
+      try {
+        rmSync(dest, { force: true });
+      } catch {
+        // the handle may still be open on Windows; ensureModel removes the .part file again
+      }
     }
     throw err;
   }

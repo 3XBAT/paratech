@@ -242,9 +242,12 @@ test(Speech, details(Speech), async ({ main }) => {
           last = await evalInPage<{ state: string; message: string }>(main, speechStatusSource);
           return last.state;
         },
-        { timeout: 60_000, intervals: [500, 1_000, 2_000], message: "SpeechService.Status должен ответить state=ready" },
+        { timeout: 40_000, intervals: [500, 1_000, 2_000], message: "SpeechService.Status должен ответить state=ready" },
       )
-      .toBe("ready");
+      .toBe("ready")
+      .catch((err: unknown) => {
+        throw new Error(`${(err instanceof Error ? err.message : String(err)).split("\n")[0]} (последний ответ: state=${last.state}, message=${last.message})`);
+      });
     note(`SpeechService.Status: state=${last.state}`);
     // With the real status ready, the page must agree: no notice, no install button (rendered after its own status call).
     await expect(main.getByRole("heading", { name: "Установленные", exact: true })).toBeVisible(act);
