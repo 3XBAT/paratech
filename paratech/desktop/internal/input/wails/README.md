@@ -33,7 +33,8 @@ File names below are in this package unless a path is given.
    as `"paratech/desktop/internal/input/wails.<Type>.<Method>"` (see `paratech/desktop/frontend/src/bindings/runtime.ts`).
 6. Tests: `<page>_test.go`; `validCore()` in `shell_test.go` gets the new field.
 A new dialog: implement it on `windowsUI` in `<x>picker_windows.go` and reach it through a one-method interface
-asserted on the running UI, as `pickRecordingFile` in `recordingimport.go` does, so `ui` and `fakeUI` do not grow.
+asserted on the running UI, as `pickRecordingFile` in `recordingimport.go` does, so `ui` and `fakeUI` do not grow;
+hand it to its service through `Shell.dialogs` (see E2E below).
 
 ## Rules
 ARCH-33, ARCH-40..44, ARCH-50 in `docs/architecture.md` (§6 explains why this package never imports
@@ -59,5 +60,10 @@ Fakes live in the test file of each page (`fakeSettings` in `settings_test.go`, 
   `AgentConfirmService.Card` and `Decline` and a confirm path (`Confirm`, or its own method as `ConfirmSchedule`).
 
 ## E2E
+`Options.Hooks` (`shell.go`) replaces the open and save dialogs, the clipboard and `Core.Links` / `Core.Opener`; a nil
+field keeps the native one. `Shell.dialogs` routes every dialog through its hook with a fixed `Dialog*` name, so the
+override works on every OS and the `*picker_windows.go` stay as they are. Only `paratech/desktop/internal/app` sets the
+hooks (`e2eHooks` in `app/e2e.go`, the `e2ehooks` adapter, E2E mode only); no bound method takes or returns them
+(`TestBoundServicesDoNotExposeHooks`). A new dialog gets a `Dialog*` name and a branch in `Shell.dialogs`.
 ADR-0035 §6 plans packs under `paratech/e2e/specs/<pack>` (settings and connections, recording, popup and capture,
 assignments, agent, layout); the directory does not exist yet. Every pack drives this package's bindings.

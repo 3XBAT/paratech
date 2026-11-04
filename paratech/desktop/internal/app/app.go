@@ -73,6 +73,7 @@ func New(cfg config.Config, log *slog.Logger) (*App, error) {
 	if !cfg.Headless && !cfg.Recorder {
 		opts := shellOptions(cfg)
 		opts.Log, opts.OpenCore, opts.Started = a.log, a.openCore, a.launchStart
+		opts.Hooks = e2eHooks(cfg, a.log)
 		shell, err := wails.New(opts)
 		if err != nil {
 			return nil, fmt.Errorf("app: ui shell: %w", err)

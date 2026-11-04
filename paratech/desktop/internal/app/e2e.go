@@ -5,6 +5,7 @@ package app
 
 import (
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"paratech/desktop/config"
+	"paratech/desktop/internal/adapters/e2ehooks"
 	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/input/wails"
 )
@@ -43,6 +45,17 @@ func shellOptions(cfg config.Config) wails.Options {
 }
 
 func e2eWebviewPath(e config.E2E) string { return filepath.Join(e.Dir, e2eWebviewDir) }
+
+// e2eHooks are the shell's dialogs, clipboard and link and file openers in the E2E mode: one e2ehooks adapter on the
+// control dir answers the dialogs from its pick queue and records the rest instead of acting. Outside the mode they
+// are zero, so the shell keeps the native ones.
+func e2eHooks(cfg config.Config, log *slog.Logger) wails.Hooks {
+	if !cfg.E2E.On() {
+		return wails.Hooks{}
+	}
+	h := e2ehooks.New(cfg.E2E.Dir, log)
+	return wails.Hooks{Open: h, Save: h, Clipboard: h, Links: h, Opener: h}
+}
 
 // checkE2EDirs refuses an E2E run on the owner's folders: the data dir and the control dir must neither be, hold nor
 // lie in the default data dir, and the run's WebView2 folder must stay apart from the owner's one. An unknown default
