@@ -12,6 +12,7 @@ import {
   closeRestartDialog,
   dialogKey,
   earlierItems,
+  forkFailure,
   hideRestart,
   liveRestartTarget,
   noRestart,
@@ -378,19 +379,72 @@ test("the pending edit shows a note by the field with «Отменить»; the 
 });
 
 const dialog = (over) =>
-  renderToStaticMarkup(h(RestartDialog, { block: null, fixBusy: false, onHide: noop, onCancel: noop, onFix: noop, ...over }));
+  renderToStaticMarkup(
+    h(RestartDialog, { block: null, fixBusy: false, forkBusy: false, forkFailure: null, onHide: noop, onFork: noop, onNewChat: noop, onCancel: noop, onFix: noop, ...over }),
+  );
 
-test("the dialog is a modal with the warning, «Скрыть» and «Отмена»; there is no «Форк»", () => {
+// TASK-271 changed this test: the dialog used to have no «Форк» ("there is no «Форк»"); now it has the choice, each button
+// with its own line of what it does (the body paragraph became one line per choice).
+test("the dialog is a modal with «Скрыть», «Форк» and «Отмена», each choice with its line", () => {
   const html = dialog();
   assert.ok(html.includes('role="dialog"') && html.includes('aria-modal="true"'));
-  assert.ok(/aria-labelledby="[^"]+"/.test(html) && /aria-describedby="[^"]+"/.test(html));
+  assert.ok(/aria-labelledby="[^"]+"/.test(html));
   assert.ok(html.includes("Начать заново отсюда?"));
   assert.ok(html.includes("Сообщения после этого агент забудет. Сделанные действия не отменяются."));
+  assert.ok(html.includes("Будет создан новый чат с историей до этого сообщения. Этот чат не изменится."));
   assert.ok(/<button[^>]*class="btn primary sm"[^>]*>Скрыть<\/button>/.test(html));
+  assert.ok(/<button[^>]*class="btn sm"[^>]*>(?:<span[^>]*>)*Форк/.test(html), "«Форк» is a plain (secondary) button");
   assert.ok(html.includes(">Отмена</button>"));
-  assert.ok(!html.includes("Форк") && !html.includes("fork"));
+  assert.ok(!html.includes("fork"), "the English suffix is the core's, never the page's");
   assert.ok(!html.includes("disabled"), "nothing is off when the request is over");
   assert.equal(html.split("btn primary").length - 1, 1, "one accent button");
+  // The order is the owner's: Скрыть, Форк, Отмена; each line is the description of its own button.
+  assert.ok(html.indexOf(">Скрыть<") < html.indexOf("Форк") && html.indexOf("Форк") < html.indexOf(">Отмена<"));
+  const hide = /<button[^>]*aria-describedby="([^"]+)"[^>]*>Скрыть<\/button>/.exec(html);
+  assert.ok(hide && html.includes(`id="${hide[1]}"`) && html.split(`id="${hide[1]}"`)[1].startsWith(' class="ag-restart-body">Сообщения после этого'));
+  const fork = /<button[^>]*aria-describedby="([^"]+)"[^>]*>(?:<span[^>]*>)*Форк/.exec(html);
+  assert.ok(fork && html.split(`id="${fork[1]}"`)[1].startsWith(' class="ag-restart-body">Будет создан новый чат'));
+  assert.notEqual(hide[1], fork[1]);
+});
+
+test("«Форк» is available while the request runs, «Скрыть» is not; it never needs the reason", () => {
+  for (const status of ["EXECUTING", "AWAITING_PLAN"]) {
+    const block = restartBlock(apply(initialPanelState, update({ status })).entries, "a", live);
+    const html = dialog({ block });
+    assert.ok(/<button[^>]*disabled=""[^>]*>Скрыть<\/button>/.test(html), status);
+    const fork = /<button([^>]*)>(?:<span[^>]*>)*Форк/.exec(html);
+    assert.ok(fork && !fork[1].includes("disabled"), `«Форк» is on while ${status}`);
+  }
+  const offline = dialog({ block: restartBlock([], "a", { inputEnabled: false, offline: true }) });
+  assert.ok(!/<button[^>]*disabled=""[^>]*>(?:<span[^>]*>)*Форк/.test(offline), "even without a link");
+});
+
+test("while «Форк» runs its button says so inline and is off; «Отмена» stays", () => {
+  const html = dialog({ forkBusy: true });
+  assert.ok(/<button[^>]*disabled=""[^>]*aria-busy="true"[^>]*>|<button[^>]*aria-busy="true"[^>]*disabled=""[^>]*>/.test(html));
+  assert.ok(html.includes("Создаётся…"));
+  assert.ok(html.includes(">Отмена</button>"));
+  assert.ok(!dialog().includes("aria-busy"), "idle: not busy");
+  // No full-width banner: the busy state adds no status/alert block.
+  assert.ok(!html.includes('role="alert"') && !html.includes('role="status"'));
+});
+
+test("a failed «Форк» says why in the dialog and offers the way on as a button", () => {
+  const retry = dialog({ forkFailure: forkFailure("failed") });
+  assert.ok(/<p[^>]*role="alert"[^>]*>Не удалось создать новый чат\. Попробуйте ещё раз\.<\/p>/.test(retry));
+  assert.ok(/<button[^>]*>Повторить<\/button>/.test(retry));
+  assert.ok(!retry.includes(">Новый чат<"));
+  const gone = dialog({ forkFailure: forkFailure("not_found") });
+  assert.ok(gone.includes("Этот чат уже недоступен."));
+  assert.ok(/<button[^>]*>Новый чат<\/button>/.test(gone));
+  assert.ok(!gone.includes(">Повторить<"));
+  const invalid = dialog({ forkFailure: forkFailure("invalid") });
+  assert.ok(invalid.includes("Это сообщение нельзя взять за начало нового чата."));
+  assert.ok(!invalid.includes(">Повторить<") && !invalid.includes(">Новый чат<"), "retrying cannot help");
+  for (const html of [retry, gone, invalid]) {
+    assert.ok(html.includes(">Отмена</button>"), "the dialog can always be left");
+  }
+  assert.ok(!dialog().includes('role="alert"'), "no failure, no alert");
 });
 
 test("while the request runs «Скрыть» is off with the reason in view and «Остановить» next to it", () => {
@@ -419,7 +473,9 @@ test("with no connection the reason is written and there is nothing to press but
 });
 
 test("the panel draws the dialog over its thread only while it is open", () => {
-  const open = panel({ restart: restartUi({ dialog: { block: null, fixBusy: false, onHide: noop, onCancel: noop, onFix: noop } }) });
+  const open = panel({
+    restart: restartUi({ dialog: { block: null, fixBusy: false, forkBusy: false, forkFailure: null, onHide: noop, onFork: noop, onNewChat: noop, onCancel: noop, onFix: noop } }),
+  });
   assert.ok(open.includes('role="dialog"'));
   assert.ok(!panel({ restart: restartUi() }).includes('role="dialog"'));
 });
@@ -525,14 +581,16 @@ test("the action under a message is always visible (quiet, not hidden) and its t
   assert.ok(!/<button[^>]*ag-ib-restart[^>]*title=/.test(html), "the tooltip replaces the native hint");
 });
 
-test("the dialog points only at its body; the reason is a live region; «Скрыть» has no pointer of its own", () => {
+// TASK-271 changed this test: with two choices the one body line became one line per button, so each of «Скрыть» and
+// «Форк» points at its own line (one id each) and the dialog itself is named by its title only.
+test("each choice points at its own line only; the reason is a live region and is not a pointer target", () => {
   const running = restartBlock(apply(initialPanelState, update({ status: "EXECUTING" })).entries, "a", live);
   const html = dialog({ block: running });
-  const described = /role="dialog"[^>]*aria-describedby="([^"]+)"/.exec(html);
-  assert.ok(described, "the dialog is described");
-  assert.ok(!described[1].includes(" "), "one id: the body");
+  assert.ok(!/role="dialog"[^>]*aria-describedby/.test(html), "the dialog is named by its title");
+  const pointers = [...html.matchAll(/<button[^>]*aria-describedby="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(pointers.length, 2, "«Скрыть» and «Форк»");
+  assert.ok(pointers.every((p) => !p.includes(" ")), "one id each");
   assert.ok(html.includes('role="status"'));
-  assert.ok(!/<button[^>]*aria-describedby/.test(html));
 });
 
 test("while «Отменить запрос» runs it says «Отменяется…» and is off", () => {

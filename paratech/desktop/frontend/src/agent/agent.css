@@ -308,7 +308,9 @@ button.ag-pill:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .ag-restart-title { margin: 0; font-size: var(--fs-h3); line-height: var(--lh-h3); font-weight: 600; }
 .ag-restart-body, .ag-restart-reason { margin: 0; overflow-wrap: anywhere; }
 .ag-restart-dlg .ag-actions { margin-top: 4px; }
-.ag-restart-note { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 8px; color: var(--muted); }
+/* One choice of the dialog: its button(s), a line of what it does, and the reason or failure under it. */
+.ag-restart-opt { display: flex; flex-direction: column; gap: 4px; }
+.ag-restart-opt .ag-actions { margin-top: 0; }.ag-restart-note { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 8px; color: var(--muted); }
 .ag-restart-note-t { min-width: 0; overflow-wrap: anywhere; }
 .ag-restart-problem { display: block; color: var(--text); }
 .ag-restart-acts { display: flex; flex: none; gap: 2px; }

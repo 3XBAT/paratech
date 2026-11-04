@@ -533,8 +533,14 @@ export function restoredMentions(e: Entry, requests: readonly EarlierRequestView
 export const restartTexts = {
   action: "Начать заново отсюда",
   title: "Начать заново отсюда?",
-  body: "Сообщения после этого агент забудет. Сделанные действия не отменяются.",
+  // Under each choice, in the owner's words (2026-10-27).
+  hideHint: "Сообщения после этого агент забудет. Сделанные действия не отменяются.",
   hide: "Скрыть",
+  fork: "Форк",
+  forkHint: "Будет создан новый чат с историей до этого сообщения. Этот чат не изменится.",
+  forking: "Создаётся…",
+  forkRetry: "Повторить",
+  forkNewChat: "Новый чат",
   cancel: "Отмена",
   stop: "Остановить",
   stopping: "Останавливается…",
@@ -838,6 +844,81 @@ export function restartRefusalText(problem: string): string {
     default:
       return "Не удалось отправить. Можно попробовать ещё раз или отменить правку.";
   }
+}
+
+// ---- «Форк» (TASK-271) ----
+// The core copies the history before the chosen request into a NEW chat (already the current one) and gives back that
+// request's text for its field. The old chat is not touched; "Скрыть" is not involved.
+
+/** Why «Форк» did not work, in plain words, and the button that goes on from there (null: only «Отмена» is left). */
+export interface ForkFailure {
+  text: string;
+  way: "retry" | "new" | null;
+}
+
+/** An unknown code, a failed call and "busy" read as one retryable failure; no raw code reaches the page. */
+export function forkFailure(problem: string): ForkFailure {
+  switch (problem) {
+    case "not_found":
+      return { text: "Этот чат уже недоступен.", way: "new" };
+    case "invalid":
+      return { text: "Это сообщение нельзя взять за начало нового чата.", way: null };
+    default:
+      return { text: "Не удалось создать новый чат. Попробуйте ещё раз.", way: "retry" };
+  }
+}
+
+/** The call in flight (one at a time) and the last refusal, which the dialog shows. */
+export interface ForkState {
+  busy: boolean;
+  failure: ForkFailure | null;
+}
+
+export const noFork: ForkState = { busy: false, failure: null };
+
+/** «Форк» was pressed: a second press while the call runs starts nothing. */
+export function beginFork(s: ForkState): { state: ForkState; start: boolean } {
+  return s.busy ? { state: s, start: false } : { state: { busy: true, failure: null }, start: true };
+}
+
+/** The call came back with a problem. */
+export function endFork(problem: string): ForkState {
+  return { busy: false, failure: forkFailure(problem) };
+}
+
+/** The dialog opened or closed: an old refusal is forgotten, a call still running is not. */
+export function forgetFork(s: ForkState): ForkState {
+  return s.failure === null ? s : { ...s, failure: null };
+}
+
+function samePills(a: MentionView, b: MentionView): boolean {
+  return a.kind === b.kind && a.id === b.id;
+}
+
+/**
+ * The field of the new chat: the text of the request forked from, with its mentions as pills. A field that already holds
+ * typed text is not overwritten (the student's words are not lost): the request follows it after an empty line. Over the
+ * field's limit the end of the request is cut, never the typed text.
+ */
+export function forkField(field: FieldContent, text: string, mentions: readonly MentionView[]): FieldContent {
+  const pills = [...field.pills];
+  for (const m of mentions) {
+    if (pills.length < maxMentions && !pills.some((p) => samePills(p, m))) {
+      pills.push({ kind: m.kind, id: m.id, label: m.label });
+    }
+  }
+  const typed = field.draft.trim() === "" ? "" : `${field.draft.replace(/\s+$/, "")}\n\n`;
+  return { draft: `${typed}${text}`.slice(0, maxDraftLength), pills };
+}
+
+/**
+ * «Форк» succeeded and `newId` is open. The dialog closes and the pending «Скрыть» edit (it belongs to the old chat) is
+ * dropped, its field returning to what it held before; then the request's text goes into the field (`forkField`).
+ * The old chat's own typed draft stays in the field, as it does on any chat switch.
+ */
+export function forkOpened(s: RestartFlow, field: FieldContent, newId: string, text: string, mentions: readonly MentionView[]): RestartStep {
+  const left = restartOnChat(s, newId);
+  return { flow: left.flow, field: forkField(left.field ?? field, text, mentions) };
 }
 
 /** Keys of the warning dialog: Esc takes it back, Tab stays among its `count` buttons, Shift+Tab goes backwards. */

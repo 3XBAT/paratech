@@ -21,6 +21,12 @@ and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `par
   text line under the field (no box, no dots: the thread's Waiting already animates). While it shows, `ContextHint` is not drawn (one line
   in that slot) and the thread re-pins to the bottom. The ring itself follows `fillsFromUpdate`; the hint sentence is `RingModel.hintText`
   (`ringTexts.overflowHint` after an overflow).
+- «Начать заново отсюда» (TASK-249, TASK-271): the icon under the student's message opens `RestartDialog` with two choices.
+  «Скрыть» (`hideRestart`: the text goes into the field, the next send carries `restartFrom`) is off while a request runs.
+  «Форк» (`forkFrom` in `AgentPanel`, `AgentApi.forkChat` -> Go `ForkChat`) is always on: the core makes a new chat
+  «<название> (fork)» (the suffix is the core's), the panel opens it like «Новый чат», puts the message's text into its field
+  (`forkOpened` / `forkField`: typed text is kept, the message follows it; the pending «Скрыть» edit of the old chat is dropped)
+  and does not send it. One call at a time (`beginFork`), a refusal is written in the dialog with a button (`forkFailure`).
 - CSS: `agent.css` (panel and common cards), `confirm.css`, `turnkey.css`; all three are imported in `main.tsx`.
 - Pure logic is outside this folder, in `src/`: `agentView.ts` (texts, `CardModel`, `cardModel`, `entryModel`, `offerSpecs`,
   button labels and icons), `agentState.ts` (panel reducer, no React), `agentOffer.ts` (`offerStep`, `runOffer`),
@@ -55,7 +61,8 @@ and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `par
 Same runner as `README.md` of `src/`: `npm --prefix paratech/desktop/frontend run test` and `run build`. Agent tests are
 `test/agent*.test.mjs` (also `answersources296`, `messageactions365`, `panelwidth`, `chatheader365`...) and render
 `AgentRequest` / `AgentPanelView` with `react-dom/server`. `test/agent.test.mjs` compares the `methods` of `bindings/agent.ts`
-with the exported `AgentService` methods in `agent.go`, `agentjournal.go`, `agentchats.go`, `agentmentions.go`: add a Go method, add it to `methods`.
+with the exported `AgentService` methods in `agent.go`, `agentjournal.go`, `agentchats.go`, `agentmentions.go`: add a Go method, add it to `methods`
+(`ForkChat` is in `methods` as `forkChat`; its parser is `parseForkResult`, tests in `agentfork271.test.mjs`).
 
 ## Gotchas
 - The core publishes updates from several operations without a global order; `reducePanel` applies each to the request it

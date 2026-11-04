@@ -1,5 +1,5 @@
 import { type RefObject, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { type AgentApi, agentApi, type AskInput, type CallProblem, type ChatResult, type ChatView, draftEvent as draftEventName, type EarlierRequestView, parseDraft, parseUpdate, updateEvent, type UpdateView } from "../bindings/agent.js";
+import { type AgentApi, agentApi, type AskInput, type CallProblem, type ChatResult, type ChatView, draftEvent as draftEventName, type EarlierRequestView, type ForkResult, parseDraft, parseUpdate, updateEvent, type UpdateView } from "../bindings/agent.js";
 import { agentConfirmApi } from "../bindings/agentConfirm.js";
 import { answersApi } from "../bindings/answers.js";
 import type { CitationOpening } from "../knowledgeView.js";
@@ -13,6 +13,7 @@ import { recordingDeleteApi } from "../bindings/recordingDelete.js";
 import { callByName, onEventData } from "../bindings/runtime.js";
 import {
   askInput,
+  beginFork,
   callProblemText,
   type ChatOp,
   chatProblemText,
@@ -23,12 +24,17 @@ import {
   compactingOf,
   contextFor,
   earlierItems,
+  endFork,
   entryModel,
   fillOf,
   type FillMap,
   fillsFromChat,
   fillsFromList,
   fillsFromUpdate,
+  forgetFork,
+  forkOpened,
+  type ForkState,
+  noFork,
   cancelRestartEdit,
   closeRestartDialog,
   hideRestart,
@@ -167,6 +173,15 @@ export function AgentPanel(props: {
   const [restart, setFlow] = useState<RestartFlow>(noRestart);
   const flowRef = useRef(restart);
   flowRef.current = restart;
+  // «Форк» (TASK-271): the call in flight and the last refusal. The ref is read at once, so a double click starts one call.
+  const [fork, setForkState] = useState<ForkState>(noFork);
+  const forkRef = useRef(fork);
+  const setFork = useCallback((s: ForkState) => {
+    forkRef.current = s;
+    setForkState(s);
+  }, []);
+  // The field of a new chat takes the focus with the caret at the end once it shows the forked text.
+  const [caretAtEnd, setCaretAtEnd] = useState(0);
   const opener = useRef<HTMLElement | null>(null);
   const flight = useRef<{ scope: AskInput; pending: RestartPending; upTo: number } | null>(null);
   const draftRef = useRef(draft);
@@ -515,15 +530,60 @@ export function AgentPanel(props: {
     applyStep(r.step, r.step.field !== null);
   }, [state.entries, reloadEarlier, applyStep]);
 
+  useEffect(() => {
+    if (caretAtEnd > 0) {
+      const el = input.current;
+      el?.focus();
+      el?.setSelectionRange(el.value.length, el.value.length);
+    }
+  }, [caretAtEnd]);
+
   const closeDialog = useCallback(
     (back: boolean) => {
+      setFork(forgetFork(forkRef.current));
       applyStep(closeRestartDialog(flowRef.current));
       if (back) {
         setTimeout(() => (opener.current?.isConnected ? opener.current : input.current)?.focus(), 0);
       }
     },
-    [applyStep],
+    [applyStep, setFork],
   );
+
+  // «Форк» (TASK-271): a new chat with the history before the chosen message. The core already made it the current one;
+  // the panel opens it the way «Новый чат» does and puts the message's text into its field (not sent). A pending «Скрыть»
+  // edit belongs to the old chat and is dropped (forkOpened). The answer is applied even if the dialog was closed meanwhile.
+  const forkFrom = () => {
+    const target = flowRef.current.asking;
+    const begun = beginFork(forkRef.current);
+    if (target === null || !begun.start) {
+      return;
+    }
+    setFork(begun.state);
+    const failedCall: ForkResult = { problem: "failed", chat: null, text: "" };
+    api.forkChat(target.threadId, target.turn).catch(() => failedCall).then((r) => {
+      const chat = r.chat;
+      if (r.problem !== "" || chat === null) {
+        const failed = endFork(r.problem);
+        setFork(failed);
+        if (refreshesChats(r.problem)) {
+          void refreshChats();
+        }
+        // The dialog is gone: the refusal goes to the note of the chat bar, not nowhere.
+        if (flowRef.current.asking === null && failed.failure !== null) {
+          setChatNote(failed.failure.text);
+        }
+        return;
+      }
+      setFork(noFork);
+      applyStep(forkOpened(flowRef.current, { draft: draftRef.current, pills: pillsRef.current }, chat.threadId, r.text, target.mentions));
+      setFills((f) => fillsFromChat(f, chat, entriesRef.current));
+      setChatNote("");
+      setNotice("");
+      setOpenId(chat.threadId);
+      void refreshChats(chat.threadId);
+      setCaretAtEnd((n) => n + 1);
+    });
+  };
 
   // «Скрыть»: the text (and mentions) of the message go into the field; the next send carries restartFrom.
   const hideFrom = () => {
@@ -736,6 +796,7 @@ export function AgentPanel(props: {
     targetFor: (e) => liveRestartTarget(e, earlierReq, openId),
     open: (target, el) => {
       opener.current = el;
+      setFork(forgetFork(forkRef.current));
       applyStep(openRestart(flowRef.current, target));
     },
     dialog:
@@ -744,7 +805,14 @@ export function AgentPanel(props: {
         : {
             block,
             fixBusy: fixActions?.busy === true,
+            forkBusy: fork.busy,
+            forkFailure: fork.failure,
             onHide: hideFrom,
+            onFork: forkFrom,
+            onNewChat: () => {
+              closeDialog(false);
+              chatBar.onNew();
+            },
             onCancel: () => closeDialog(true),
             onFix: () => block?.fix && fixActions?.press(block.fix.kind),
           },

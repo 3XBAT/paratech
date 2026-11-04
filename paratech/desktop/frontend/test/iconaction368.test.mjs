@@ -500,7 +500,17 @@ const wordButtons = new Map([
     ["model.button", "workTexts.retry", "model.button", "workTexts.approve", "workTexts.savePlan", "model.button", "workTexts.revise", "openLabel(work)", "workTexts.reviseSubmit", "workTexts.cancel", "workTexts.rewrite", "workTexts.cancel"],
   ],
   ["agent/WorkSend.tsx", ["note.sent ? sendWorkTexts.again : sendWorkTexts.button"]],
-  ["agent/RestartDialog.tsx", ["restartTexts.hide", "props.fixBusy ? (block.fix.kind === \"stop\" ? restartTexts.stopping : restartTexts.cancelling) : block.fix.label"]],
+  // TASK-271: «Форк», its «Повторить» and «Новый чат» are the dialog's own choices (main actions), so they keep words.
+  [
+    "agent/RestartDialog.tsx",
+    [
+      "restartTexts.hide",
+      "props.fixBusy ? (block.fix.kind === \"stop\" ? restartTexts.stopping : restartTexts.cancelling) : block.fix.label",
+      "restartTexts.fork",
+      "restartTexts.forkRetry",
+      "restartTexts.forkNewChat",
+    ],
+  ],
   ["agent/ContextRing.tsx", ["ringTexts.hintButton"]],
 ]);
 
