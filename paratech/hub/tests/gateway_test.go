@@ -564,6 +564,7 @@ func TestGatewayInvalidRequestsAgainstPostgres(t *testing.T) {
 		"inspect material op":  func(s *hubv1.CompletionSpec) { s.OperationType = hubv1.OperationType_OPERATION_TYPE_INSPECT_MATERIAL },
 		"answer op":            func(s *hubv1.CompletionSpec) { s.OperationType = hubv1.OperationType_OPERATION_TYPE_ANSWER },
 		"triage assignment op": func(s *hubv1.CompletionSpec) { s.OperationType = hubv1.OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT },
+		"chat summary op":      func(s *hubv1.CompletionSpec) { s.OperationType = hubv1.OperationType_OPERATION_TYPE_CHAT_SUMMARY },
 		"empty instructions":   func(s *hubv1.CompletionSpec) { s.Instructions = "" },
 		"key with space":       func(s *hubv1.CompletionSpec) { s.IdempotencyKey = "a b" },
 		"over 1 MiB":           func(s *hubv1.CompletionSpec) { s.UntrustedData = strings.Repeat("d", values.MaxPayloadBytes) },

@@ -50,6 +50,7 @@ const (
 	OperationInspectMaterial  Operation = "inspect_material"
 	OperationAnswer           Operation = "answer"
 	OperationTriageAssignment Operation = "triage_assignment"
+	OperationChatSummary      Operation = "chat_summary"
 )
 
 // Spec is a validated completion request of a client (gateway.proto CompletionSpec). Build it with NewSpec.
@@ -67,7 +68,8 @@ type Spec struct {
 // ServerPrompt reports whether the Hub writes the prompt of op itself and picks its alias (ADR-0023): the client sends
 // no instructions, and an alias only if it is the server's.
 func (op Operation) ServerPrompt() bool {
-	return op == OperationInspectMaterial || op == OperationAnswer || op == OperationTriageAssignment
+	return op == OperationInspectMaterial || op == OperationAnswer || op == OperationTriageAssignment ||
+		op == OperationChatSummary
 }
 
 // NewSpec checks every rule of a CompletionSpec: key 1-128 printable ASCII without spaces, a known operation, alias

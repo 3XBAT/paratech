@@ -1463,16 +1463,18 @@ func TestAgentEvalHubV9ChatFieldsShape(t *testing.T) {
 // --- INSPECT_MATERIAL reader (TASK-122) -----------------------------------------------------------------------------
 
 // readerHub is the public listener with Complete wired to the real gateway use case and the embedded
-// ops/inspect_material, ops/triage_assignment and ops/answer prompts; the provider and the quota store are fakes.
+// ops/inspect_material, ops/triage_assignment, ops/answer and ops/chat_summary prompts; the provider and the quota store
+// are fakes.
 type readerHub struct {
-	provider     *testenv.FakeProvider
-	store        *testenv.QuotaStore
-	prompt       string
-	triagePrompt string
-	answerPrompt string
-	client       hubv1connect.GatewayServiceClient
-	key          string
-	owner        shared.APIKeyID
+	provider      *testenv.FakeProvider
+	store         *testenv.QuotaStore
+	prompt        string
+	triagePrompt  string
+	answerPrompt  string
+	summaryPrompt string
+	client        hubv1connect.GatewayServiceClient
+	key           string
+	owner         shared.APIKeyID
 }
 
 func newReaderHub(t *testing.T) *readerHub {
@@ -1499,8 +1501,17 @@ func newReaderHub(t *testing.T) *readerHub {
 	if err != nil {
 		t.Fatal(err)
 	}
+	summaryVersion, summaryPrompt, err := prompts.Op(string(values.OperationChatSummary))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, summaryReask, err := prompts.OpReask(string(values.OperationChatSummary))
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := &readerHub{provider: testenv.NewFakeProvider(), store: testenv.NewQuotaStore(), prompt: string(prompt),
-		triagePrompt: string(triagePrompt), answerPrompt: string(answerPrompt), key: issued.Key, owner: shared.APIKeyID(issued.ID)}
+		triagePrompt: string(triagePrompt), answerPrompt: string(answerPrompt), summaryPrompt: string(summaryPrompt),
+		key: issued.Key, owner: shared.APIKeyID(issued.ID)}
 	models, err := modelallowlist.New([]modelallowlist.Entry{
 		{Alias: "default", Model: "claude-strong", MaxOutput: 4096},
 		{Alias: "planner", Model: "claude-planner", MaxOutput: 512},
@@ -1518,6 +1529,10 @@ func newReaderHub(t *testing.T) *readerHub {
 			values.OperationInspectMaterial:  {Alias: "planner", Version: fmt.Sprintf("v%d", version), Text: h.prompt},
 			values.OperationTriageAssignment: {Alias: "default", Version: fmt.Sprintf("v%d", triageVersion), Text: h.triagePrompt},
 			values.OperationAnswer:           {Alias: "default", Version: fmt.Sprintf("v%d", answerVersion), Text: h.answerPrompt},
+			values.OperationChatSummary: {
+				Alias: "planner", Version: fmt.Sprintf("v%d", summaryVersion), Text: h.summaryPrompt, Reask: string(summaryReask),
+				MaxOutput: summaryCap,
+			},
 		},
 	})
 	if err != nil {

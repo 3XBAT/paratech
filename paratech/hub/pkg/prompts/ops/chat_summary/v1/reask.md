@@ -1,0 +1,2 @@
+# Second call
+The previous answer could not be used: it was not one complete JSON object of the answer format, it was cut off at the output limit, it was empty, or it was longer than 4000 characters. Answer again with the whole JSON object of the format above and nothing else: exactly the key "summary" with a non-empty plain text of at most 4000 characters. Keep it short enough to end within the output limit, and write only what the data says.

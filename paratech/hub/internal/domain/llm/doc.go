@@ -6,8 +6,9 @@
 // server-side model allowlist; llm/services/requestlimits bounds one call (reserved amount, per-tester rate). For the
 // agent (ADR-0023) llm/values also holds the agent step request, tool calls and results; llm/services/toolcatalog is
 // the tool catalog of one version with the check of returned calls; llm/services/seal signs and checks echoed calls;
-// llm/services/inspect, llm/services/triage and llm/services/answer are the input and the strict answer schema of the
-// INSPECT_MATERIAL, TRIAGE_ASSIGNMENT and ANSWER readers (ADR-0022), all read through llm/services/strictjson.
+// llm/services/inspect, llm/services/triage, llm/services/answer and llm/services/chatsummary are the input and the
+// strict answer schema of the INSPECT_MATERIAL, TRIAGE_ASSIGNMENT, ANSWER (ADR-0022) and CHAT_SUMMARY (ADR-0028)
+// readers, all read through llm/services/strictjson.
 // The context has no aggregate yet.
 //
 // Rules that apply: ARCH-10..19. The context imports only std, itself and domain/shared.
@@ -27,8 +28,8 @@
 //   - Completion: the provider's answer. Its output text is UNTRUSTED (CLAUDE.md hard rule 3, PRD section 13.3).
 //   - Usage: provider-reported tokens of a call, used to settle the reservation.
 //   - Transient / permanent: whether repeating the same call can help (ADR-0005(c)).
-//   - Server prompt: the Hub's own prompt of an operation (INSPECT_MATERIAL, ANSWER, TRIAGE_ASSIGNMENT) or agent
-//     profile; the client sends no instructions and its version stands in the fingerprint.
+//   - Server prompt: the Hub's own prompt of an operation (INSPECT_MATERIAL, ANSWER, TRIAGE_ASSIGNMENT, CHAT_SUMMARY) or
+//     agent profile; the client sends no instructions and its version stands in the fingerprint.
 //   - Agent step: one planner call; the answer is 1-4 tool calls of the catalog, sealed by the Hub.
 //   - Seal: HMAC by the Hub over the caller, thread, profile, catalog version and calls; an echo must carry it.
 package llm

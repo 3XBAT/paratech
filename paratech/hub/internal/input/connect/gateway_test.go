@@ -115,6 +115,7 @@ func TestCompleteMapsOperations(t *testing.T) {
 		hubv1.OperationType_OPERATION_TYPE_INSPECT_MATERIAL:  "inspect_material",
 		hubv1.OperationType_OPERATION_TYPE_ANSWER:            "answer",
 		hubv1.OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT: "triage_assignment",
+		hubv1.OperationType_OPERATION_TYPE_CHAT_SUMMARY:      "chat_summary",
 		hubv1.OperationType_OPERATION_TYPE_AGENT_STEP:        "",
 		hubv1.OperationType_OPERATION_TYPE_UNSPECIFIED:       "",
 		hubv1.OperationType(99):                              "",

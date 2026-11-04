@@ -79,8 +79,9 @@ func TestServeWarnsOfAServerPromptWithoutItsAlias(t *testing.T) {
 				t.Fatal(err)
 			}
 			out := buf.String()
+			// Both run on the planner alias by default (HUB_CHAT_SUMMARY_ALIAS, TASK-267).
 			warned := strings.Contains(out, "level=WARN") && strings.Contains(out, "operation=inspect_material") &&
-				strings.Contains(out, "alias=planner")
+				strings.Contains(out, "operation=chat_summary") && strings.Contains(out, "alias=planner")
 			if warned != tt.warn {
 				t.Fatalf("log = %q, want a warning %v", out, tt.warn)
 			}

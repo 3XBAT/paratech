@@ -8,7 +8,7 @@ import (
 
 func TestServerPromptOperations(t *testing.T) {
 	for op, want := range map[Operation]bool{
-		OperationInspectMaterial: true, OperationAnswer: true, OperationTriageAssignment: true,
+		OperationInspectMaterial: true, OperationAnswer: true, OperationTriageAssignment: true, OperationChatSummary: true,
 		OperationSummary: false, OperationLectureText: false, OperationAgentStep: false,
 	} {
 		if op.ServerPrompt() != want {

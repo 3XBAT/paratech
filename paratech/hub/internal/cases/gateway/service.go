@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"paratech/hub/internal/domain/llm/services/answer"
+	"paratech/hub/internal/domain/llm/services/chatsummary"
 	"paratech/hub/internal/domain/llm/services/inspect"
 	"paratech/hub/internal/domain/llm/services/modelallowlist"
 	"paratech/hub/internal/domain/llm/services/requestlimits"
@@ -85,8 +86,9 @@ func New(d Deps, cfg Config) (*Service, error) {
 	}
 	prompts := make(map[values.Operation]ServerPrompt, len(cfg.ServerPrompts))
 	for op, sp := range cfg.ServerPrompts {
-		if !op.ServerPrompt() || sp.Version == "" || sp.Text == "" {
-			return nil, fmt.Errorf("%w: server prompt of %s: the operation must take one, with a version and a text", ErrInvalidConfig, op)
+		if !op.ServerPrompt() || sp.Version == "" || sp.Text == "" || sp.MaxOutput < 0 {
+			return nil, fmt.Errorf("%w: server prompt of %s: the operation must take one, with a version, a text and an output cap not below 0",
+				ErrInvalidConfig, op)
 		}
 		if _, _, err := d.Models.Resolve(sp.Alias, 0); err != nil {
 			return nil, fmt.Errorf("%w: server prompt of %s: alias %q: %w", ErrInvalidConfig, op, sp.Alias, err)
@@ -105,7 +107,7 @@ type call struct {
 	spec    values.Spec
 	reserve account.ReserveRequest
 	request values.Request
-	// reader is set for a quarantined reader (INSPECT_MATERIAL, ANSWER, TRIAGE_ASSIGNMENT): the answer must pass its schema
+	// reader is set for a quarantined reader (INSPECT_MATERIAL, ANSWER, TRIAGE_ASSIGNMENT, CHAT_SUMMARY): the answer must pass its schema
 	// before it is stored or returned.
 	reader *reader
 }
@@ -172,6 +174,18 @@ func newReader(op values.Operation, data, note string) (*reader, string, error) 
 			return checked{output: a.Encode(), dropped: a.Dropped}, err
 		}, reask: func(error) string {
 			// Any refusal: what is left is broken JSON, another shape or nothing valid, which one more call may fix.
+			return note
+		}}, in.ModelData(), nil
+	case values.OperationChatSummary:
+		in, err := chatsummary.ParseInput(data)
+		if err != nil {
+			return nil, "", err
+		}
+		return &reader{failed: chatsummary.FailedOutput, canonical: func(out string) (checked, error) {
+			a, err := in.ParseAnswer(out)
+			return checked{output: a.Encode(), dropped: a.Dropped}, err
+		}, reask: func(error) string {
+			// Any refusal: broken JSON, a cut, empty or too long text, which one more call may fix.
 			return note
 		}}, in.ModelData(), nil
 	}
@@ -424,7 +438,10 @@ func (s *Service) validate(cmd Command) (call, error) {
 	if err != nil {
 		return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
-	var reask string
+	var (
+		reask   string
+		opLimit int64
+	)
 	if spec.Operation().ServerPrompt() {
 		// The Hub's own prompt and alias (ADR-0023); its version, not the text, goes into the fingerprint.
 		p, ok := s.prompts[spec.Operation()]
@@ -434,7 +451,7 @@ func (s *Service) validate(cmd Command) (call, error) {
 		if spec, err = spec.WithServerPrompt(p.Alias, p.Version, p.Text); err != nil {
 			return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 		}
-		reask = p.Reask
+		reask, opLimit = p.Reask, p.MaxOutput
 	}
 	// A reader's model reads the checked, re-encoded input; the fingerprint stays over what the client sent.
 	rd, data, err := newReader(spec.Operation(), spec.Data(), reask)
@@ -444,6 +461,9 @@ func (s *Service) validate(cmd Command) (call, error) {
 	model, maxOutput, err := s.models.Resolve(spec.Alias(), spec.MaxOutput())
 	if err != nil {
 		return call{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+	}
+	if opLimit > 0 {
+		maxOutput = min(maxOutput, opLimit)
 	}
 	amount, err := requestlimits.Reservation(spec, maxOutput)
 	if err != nil {

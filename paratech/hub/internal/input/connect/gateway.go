@@ -351,6 +351,8 @@ func operationOf(op hubv1.OperationType) string {
 		return string(values.OperationAnswer)
 	case hubv1.OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT:
 		return string(values.OperationTriageAssignment)
+	case hubv1.OperationType_OPERATION_TYPE_CHAT_SUMMARY:
+		return string(values.OperationChatSummary)
 	default:
 		return ""
 	}

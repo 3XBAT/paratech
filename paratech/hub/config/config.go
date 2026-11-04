@@ -42,6 +42,9 @@ const (
 	EnvAgentPlannerAlias = "HUB_AGENT_PLANNER_ALIAS"
 	EnvAgentStrongAlias  = "HUB_AGENT_STRONG_ALIAS"
 	EnvAgentSealKeys     = "HUB_AGENT_SEAL_KEYS" //nolint:gosec // G101: the name of the variable, not a credential
+
+	EnvChatSummaryAlias     = "HUB_CHAT_SUMMARY_ALIAS"
+	EnvChatSummaryMaxOutput = "HUB_CHAT_SUMMARY_MAX_OUTPUT"
 )
 
 // LLM provider defaults and bounds. The timeout stays at most 10 minutes (the provider discourages longer
@@ -73,6 +76,15 @@ const (
 	DefaultAgentStrongAlias  = "default"
 	minSealSecretBytes       = 32
 	maxSealKeyVersion        = 255
+)
+
+// Chat summary defaults and bounds (ADR-0028): the cheap planner model, and an output cap that fits a summary of 4000
+// characters as JSON. The effective cap is the lower of this one and the alias cap; the upper bound mirrors the
+// allowlist's MaxOutputLimit, which config may not import.
+const (
+	DefaultChatSummaryAlias     = DefaultAgentPlannerAlias
+	DefaultChatSummaryMaxOutput = 4096
+	maxChatSummaryMaxOutput     = 1 << 20
 )
 
 // Rate limit bounds of the gateway, per tester (they mirror requestlimits.NewRate, which config may not import).
@@ -173,6 +185,10 @@ type Config struct {
 	// signs, the others are still accepted (rotation). It is a secret: read only from the environment and never
 	// printed. Empty disables AgentStep (unimplemented). See SealKeys.
 	AgentSealKeys string
+	// ChatSummaryAlias is the allowlist alias of CHAT_SUMMARY; without it in the allowlist the operation is off.
+	ChatSummaryAlias string
+	// ChatSummaryMaxOutput is the output cap of CHAT_SUMMARY, 1..1048576 tokens, applied below the alias cap.
+	ChatSummaryMaxOutput int64
 }
 
 // SealKey is one parsed entry of AgentSealKeys.
@@ -197,6 +213,7 @@ func Default() Config {
 		AnthropicBaseURL: DefaultAnthropicBaseURL, AnthropicAuth: AnthropicAuthXAPIKey, LLMTimeout: 5 * time.Minute, LLMModels: DefaultLLMModels, ProviderStream: true,
 		RateLimitPerMinute: 30, RateLimitBurst: 10,
 		AgentPlannerAlias: DefaultAgentPlannerAlias, AgentStrongAlias: DefaultAgentStrongAlias,
+		ChatSummaryAlias: DefaultChatSummaryAlias, ChatSummaryMaxOutput: DefaultChatSummaryMaxOutput,
 	}
 }
 
@@ -224,11 +241,16 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 	if v := getenv(EnvQuotaUnit); v != "" {
 		cfg.QuotaUnit = v
 	}
-	if v := getenv(EnvQuotaLimit); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err != nil {
-			envErrs = append(envErrs, fmt.Errorf("%s %q: not an integer", EnvQuotaLimit, v))
-		} else {
-			cfg.QuotaLimit = n
+	for _, n := range []struct {
+		env string
+		dst *int64
+	}{{EnvQuotaLimit, &cfg.QuotaLimit}, {EnvChatSummaryMaxOutput, &cfg.ChatSummaryMaxOutput}} {
+		if v := getenv(n.env); v != "" {
+			if parsed, err := strconv.ParseInt(v, 10, 64); err != nil {
+				envErrs = append(envErrs, fmt.Errorf("%s %q: not an integer", n.env, v))
+			} else {
+				*n.dst = parsed
+			}
 		}
 	}
 	for _, n := range []struct {
@@ -250,6 +272,9 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 	}
 	if v := getenv(EnvAgentStrongAlias); v != "" {
 		cfg.AgentStrongAlias = v
+	}
+	if v := getenv(EnvChatSummaryAlias); v != "" {
+		cfg.ChatSummaryAlias = v
 	}
 	if v := getenv(EnvAnthropicBaseURL); v != "" {
 		cfg.AnthropicBaseURL = v
@@ -314,6 +339,10 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 		"allowlist alias of the agent planner (env "+EnvAgentPlannerAlias+"); the seal keys are read only from env "+EnvAgentSealKeys)
 	fs.StringVar(&cfg.AgentStrongAlias, "agent-strong-alias", cfg.AgentStrongAlias,
 		"allowlist alias of the answer and triage operations (env "+EnvAgentStrongAlias+")")
+	fs.StringVar(&cfg.ChatSummaryAlias, "chat-summary-alias", cfg.ChatSummaryAlias,
+		"allowlist alias of the chat summary operation (env "+EnvChatSummaryAlias+")")
+	fs.Int64Var(&cfg.ChatSummaryMaxOutput, "chat-summary-max-output", cfg.ChatSummaryMaxOutput,
+		"output cap of the chat summary operation, 1..1048576 tokens, applied below the alias cap (env "+EnvChatSummaryMaxOutput+")")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -486,10 +515,15 @@ func (c Config) validateLLM() []error {
 // validateAgent checks the agent settings, which only the server uses. Messages never contain a seal secret.
 func (c Config) validateAgent() []error {
 	var errs []error
-	for _, a := range []struct{ name, value string }{{EnvAgentPlannerAlias, c.AgentPlannerAlias}, {EnvAgentStrongAlias, c.AgentStrongAlias}} {
+	for _, a := range []struct{ name, value string }{
+		{EnvAgentPlannerAlias, c.AgentPlannerAlias}, {EnvAgentStrongAlias, c.AgentStrongAlias}, {EnvChatSummaryAlias, c.ChatSummaryAlias},
+	} {
 		if !printableASCII(a.value) {
 			errs = append(errs, fmt.Errorf("%s: must be non-empty printable ASCII without spaces", a.name))
 		}
+	}
+	if c.ChatSummaryMaxOutput < 1 || c.ChatSummaryMaxOutput > maxChatSummaryMaxOutput {
+		errs = append(errs, fmt.Errorf("%s %d: must be within 1..%d", EnvChatSummaryMaxOutput, c.ChatSummaryMaxOutput, maxChatSummaryMaxOutput))
 	}
 	if _, err := c.SealKeys(); err != nil {
 		errs = append(errs, err)
@@ -667,11 +701,13 @@ func validateDatabaseURL(raw string) error {
 func (c Config) String() string {
 	return fmt.Sprintf("{Command:%s LogLevel:%s ListenAddr:%s DatabaseURL:%s ShutdownTimeout:%s QuotaUnit:%s QuotaLimit:%d "+
 		"QuotaReservationTTL:%s IdempotencyRetention:%s AnthropicAPIKey:%s AnthropicBaseURL:%s AnthropicAuth:%s LLMTimeout:%s LLMModels:%s "+
-		"ProviderStream:%t RateLimitPerMinute:%d RateLimitBurst:%d AgentPlannerAlias:%s AgentStrongAlias:%s AgentSealKeys:%s}",
+		"ProviderStream:%t RateLimitPerMinute:%d RateLimitBurst:%d AgentPlannerAlias:%s AgentStrongAlias:%s AgentSealKeys:%s "+
+		"ChatSummaryAlias:%s ChatSummaryMaxOutput:%d}",
 		c.Command, c.LogLevel, c.ListenAddr, redacted(c.DatabaseURL), c.ShutdownTimeout, c.QuotaUnit, c.QuotaLimit,
 		c.QuotaReservationTTL, c.IdempotencyRetention, redacted(c.AnthropicAPIKey), printableURL(c.AnthropicBaseURL),
 		printableAuth(c.AnthropicAuth), c.LLMTimeout, c.LLMModels,
-		c.ProviderStream, c.RateLimitPerMinute, c.RateLimitBurst, c.AgentPlannerAlias, c.AgentStrongAlias, redacted(c.AgentSealKeys))
+		c.ProviderStream, c.RateLimitPerMinute, c.RateLimitBurst, c.AgentPlannerAlias, c.AgentStrongAlias, redacted(c.AgentSealKeys),
+		c.ChatSummaryAlias, c.ChatSummaryMaxOutput)
 }
 
 // GoString is String for %#v, which otherwise prints every field, secrets included.
@@ -702,6 +738,8 @@ func (c Config) LogValue() slog.Value {
 		slog.String("agent_planner_alias", c.AgentPlannerAlias),
 		slog.String("agent_strong_alias", c.AgentStrongAlias),
 		slog.String("agent_seal_keys", redacted(c.AgentSealKeys)),
+		slog.String("chat_summary_alias", c.ChatSummaryAlias),
+		slog.Int64("chat_summary_max_output", c.ChatSummaryMaxOutput),
 	)
 }
 

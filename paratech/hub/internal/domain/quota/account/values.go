@@ -30,6 +30,8 @@ const (
 	OperationInspectMaterial  Operation = "inspect_material"
 	OperationAnswer           Operation = "answer"
 	OperationTriageAssignment Operation = "triage_assignment"
+	// The chat summary reader of context compaction (ADR-0028).
+	OperationChatSummary Operation = "chat_summary"
 )
 
 // Format limits of ADR-0005(b).
@@ -43,7 +45,7 @@ const (
 func ParseOperation(s string) (Operation, error) {
 	switch op := Operation(s); op {
 	case OperationSummary, OperationExtractHomework, OperationHomeworkDraft, OperationLectureText,
-		OperationAgentStep, OperationInspectMaterial, OperationAnswer, OperationTriageAssignment:
+		OperationAgentStep, OperationInspectMaterial, OperationAnswer, OperationTriageAssignment, OperationChatSummary:
 		return op, nil
 	default:
 		return "", fmt.Errorf("%w: unknown operation type", ErrInvalidArgument)
