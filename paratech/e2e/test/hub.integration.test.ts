@@ -1,6 +1,6 @@
 // The real Hub (built from paratech/hub) on the Postgres of the E2E compose project, in front of the fake Messages
-// API. Skipped when neither Docker nor HUB_TEST_DATABASE_URL is available, or with PARATECH_E2E_UNIT_ONLY=1 (Linux CI
-// only type-checks and unit tests this package, ADR-0035 section 7).
+// API. Skipped when Docker is not available, or with PARATECH_E2E_UNIT_ONLY=1 (Linux CI only type-checks and unit
+// tests this package, ADR-0035 section 7).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -8,8 +8,8 @@ import { startFakeLLM } from "../src/fakellm/index.js";
 import { dockerAvailable, startHub } from "../src/hub/index.js";
 
 const unitOnly = process.env.PARATECH_E2E_UNIT_ONLY === "1";
-const canRun = !unitOnly && (Boolean(process.env.HUB_TEST_DATABASE_URL) || (await dockerAvailable()));
-const skipReason = unitOnly ? "PARATECH_E2E_UNIT_ONLY=1" : "Docker не запущен и HUB_TEST_DATABASE_URL не задан";
+const canRun = !unitOnly && (await dockerAvailable());
+const skipReason = unitOnly ? "PARATECH_E2E_UNIT_ONLY=1" : "Docker не запущен";
 
 const connectJSON = (url: string, procedure: string, body: unknown, apiKey?: string) =>
   fetch(`${url}/${procedure}`, {

@@ -13,7 +13,10 @@ export type EnvironmentErrorKind =
   | "MissingLiveKey"
   | "BadConfig"
   | "DatabaseUnavailable"
-  | "GoToolchainMissing";
+  | "GoToolchainMissing"
+  | "SandboxUnavailable" // the run folder cannot be wiped or created (a locked file...)
+  | "ExeMissing" // --no-build and no paratech.exe to reuse
+  | "ToolMissing"; // powershell, taskkill or another system tool cannot be started
 
 export class E2EEnvironmentError extends Error {
   readonly kind: EnvironmentErrorKind;
@@ -33,7 +36,7 @@ export class DockerMissingError extends E2EEnvironmentError {
 
 export class DockerNotRunningError extends E2EEnvironmentError {
   constructor() {
-    super("DockerNotRunning", "Docker не запущен: запустите Docker Desktop или задайте HUB_TEST_DATABASE_URL");
+    super("DockerNotRunning", "Docker не запущен: запустите Docker Desktop");
   }
 }
 

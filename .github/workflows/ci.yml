@@ -90,6 +90,24 @@ jobs:
         run: npm run build
       - if: steps.present.outputs.yes == 'true'
         run: npm run test
+  e2e-static:
+    # ADR-0035: the E2E runner is only type-checked and unit-tested here; it needs Windows, WebView2 and Docker to run.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: paratech/e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: paratech/e2e/package-lock.json
+      - run: npm ci
+      - run: npm test
+        env:
+          PARATECH_E2E_UNIT_ONLY: "1"
+      - run: npx tsc --noEmit -p tsconfig.json
   vulncheck:
     # Known vulnerabilities in the Go standard library and dependencies that the code actually calls.
     # Not-applicable findings are listed with a reason in .github/vulncheck-allow.txt (docs/process/security-review.md).

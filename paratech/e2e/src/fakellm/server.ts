@@ -91,7 +91,16 @@ export async function startFakeLLM(opts: FakeLLMOptions = {}): Promise<FakeLLM> 
     send(res, 200, messageResponse(hit.rule, seq, typeof model === "string" ? model : undefined));
   };
 
+  let port = 0; // known after listen; requests only arrive after it
   const server = http.createServer((req, res) => {
+    // DNS-rebinding guard: a web page that resolves its own name to 127.0.0.1 sends another Host. The Hub and the specs
+    // use the literal 127.0.0.1 URL.
+    const host = req.headers.host;
+    if (host !== `${loopback}:${port}` && host !== `localhost:${port}`) {
+      req.resume();
+      send(res, 403, { error: "e2e fake: Host must be 127.0.0.1 or localhost with the fake's port" });
+      return;
+    }
     const path = (req.url ?? "/").split("?")[0] ?? "/";
     const method = req.method ?? "GET";
 
@@ -151,7 +160,7 @@ export async function startFakeLLM(opts: FakeLLMOptions = {}): Promise<FakeLLM> 
     server.listen({ host: loopback, port: 0 }, () => resolve());
   });
   const addr = server.address();
-  const port = typeof addr === "object" && addr ? addr.port : 0;
+  port = typeof addr === "object" && addr ? addr.port : 0;
 
   return {
     url: `http://${loopback}:${port}`,

@@ -31,7 +31,7 @@ export interface StartHubOptions {
   /** HUB_QUOTA_LIMIT of the run in tokens (default 400000). */
   quotaLimit?: number;
   logLevel?: "debug" | "info" | "warn" | "error";
-  /** Where PARATECH_E2E_*, HUB_PG_PORT and HUB_TEST_DATABASE_URL are read (default process.env). */
+  /** Where the PARATECH_E2E_* variables are read (default process.env). */
   env?: Env;
   readyTimeoutMs?: number;
 }

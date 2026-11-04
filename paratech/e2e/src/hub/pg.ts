@@ -1,6 +1,6 @@
 // A minimal Postgres client for the two statements the harness needs (CREATE SCHEMA, DROP SCHEMA): the simple query
-// protocol over plain TCP with SCRAM-SHA-256, MD5 or cleartext login. It adds no dependency and works the same for the
-// compose database and HUB_TEST_DATABASE_URL. No TLS: the database is local (sslmode=disable).
+// protocol over plain TCP with SCRAM-SHA-256, MD5 or cleartext login. It adds no dependency and talks to the
+// compose database. No TLS: the database is local (sslmode=disable).
 import { createHash, createHmac, pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import net from "node:net";
 
