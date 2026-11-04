@@ -630,7 +630,9 @@ CREATE TABLE agent_turns (
 
 -- ---------------------------------------------------------------------------------------------------------------
 -- agent_steps: the history of a thread as sent to the planner, in order (seq): the student's text, the sealed calls
--- of a step and their results, as JSON. Append only; purged after 90 days by created_at.
+-- of a step and their results, as JSON. Append only. The 'calls' and 'results' rows of a request that is final, not
+-- the current one of its thread and ended (agent_turns.updated_at) more than 90 days ago are deleted, after its
+-- reply_line is frozen (TASK-250); the 'student' rows are kept forever.
 -- ---------------------------------------------------------------------------------------------------------------
 CREATE TABLE agent_steps (
     thread_id  TEXT    NOT NULL REFERENCES agent_threads (id) ON DELETE CASCADE,

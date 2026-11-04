@@ -7,18 +7,20 @@ import (
 	"time"
 
 	"paratech/desktop/internal/adapters/sqlite"
+	"paratech/desktop/internal/cases/agentretention"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/subjectpurge"
 )
 
-// purgeInterval is how often the purges run after the one at the start: the deleted assignments (ADR-0029 addendum 2)
-// and the removed subjects (ADR-0027).
+// purgeInterval is how often the purges run after the one at the start: the deleted assignments (ADR-0029 addendum 2),
+// the removed subjects (ADR-0027) and the details of old agent requests (ADR-0028).
 const purgeInterval = 24 * time.Hour
 
 // The names of the purges as startup cleanup steps and in the log.
 const (
-	purgeStep        = "deleted assignments past the restore window"
-	subjectPurgeStep = "removed subjects past the restore window"
+	purgeStep          = "deleted assignments past the restore window"
+	subjectPurgeStep   = "removed subjects past the restore window"
+	agentRetentionStep = "agent history details past 90 days"
 )
 
 // sleeper waits on the time source of the use cases (ARCH-24).
@@ -58,6 +60,20 @@ func (c *core) wireSubjectPurge(e env, notes *sqlite.NoteRepository, log *slog.L
 	c.cleanups = append(c.cleanups, cleanup{name: subjectPurgeStep, run: purger.Purge})
 	c.subjectPurge = loop{name: "subject purge", run: purgeLoop(e.clock, subjectPurgeStep, purger.Purge, log)}
 	return purger, nil
+}
+
+// wireAgentRetention builds the purge of the technical details of agent requests that ended 90 days ago (TASK-250,
+// ADR-0028 «Retention»): a startup cleanup after the recovery of the agent requests and a loop once a day.
+func (c *core) wireAgentRetention(e env, log *slog.Logger) error {
+	purger, err := agentretention.New(agentretention.Deps{
+		Requests: sqlite.NewAgentRetention(c.db), Tx: c.db, Clock: e.clock, Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: agent history retention: %w", err)
+	}
+	c.cleanups = append(c.cleanups, cleanup{name: agentRetentionStep, run: purger.Purge})
+	c.agentRetention = loop{name: "agent history retention", run: purgeLoop(e.clock, agentRetentionStep, purger.Purge, log)}
+	return nil
 }
 
 // purgeLoop runs purge every purgeInterval on sl's time until ctx ends; the startup cleanup made the first run. A

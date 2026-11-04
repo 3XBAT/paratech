@@ -119,6 +119,8 @@ On an earlier message N of the chat the student picks «Начать занов�
 - Purged after 90 days: the technical details of final requests — `agent_steps` (calls, results, seals). `Window`,
   `Fill`, `Earlier`, compaction and fork read only turns, never steps of earlier requests. A cold archive table or file
   is not needed now (texts are small) and can come later without a format change.
+- The student's texts are the `entry='student'` rows of `agent_steps`; the purge (TASK-250) deletes the `calls` and
+  `results` rows of requests that ended 90+ days ago, never of the current request, after freezing the reply line.
 
 ## Consequences
 - `cases/agentturn`: current chat, `ThreadID`, `Mentions`, `RestartFrom`; writes `reply_line` at the end of a request.

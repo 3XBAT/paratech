@@ -529,7 +529,7 @@ func scopeFrom(w scopeWire) (values.Scope, error) {
 }
 
 // AgentHistory stores the history entries of agent threads (the agentturn.History port). Entries are appended in
-// order and never changed; created_at serves the 90-day retention.
+// order and never changed; the calls and results of requests that ended 90 days ago are purged (AgentRetention).
 type AgentHistory struct {
 	db    *DB
 	clock interface{ Now() time.Time }
@@ -637,12 +637,21 @@ func entryFrom(row sqlcgen.ListAgentStepsRow) (values.HistoryEntry, error) {
 			return values.HistoryEntry{}, fmt.Errorf("reply line of request %d: %w", row.Turn, err)
 		}
 	}
-	var body stepBodyWire
-	if err := strictJSON(row.Body, &body); err != nil {
+	entry, err := historyTurnFrom(row.Entry, row.Body)
+	if err != nil {
 		return values.HistoryEntry{}, err
 	}
+	return values.HistoryEntry{Turn: int(row.Turn), Entry: entry, ReplyLine: row.ReplyLine.String}, nil
+}
+
+// historyTurnFrom decodes a stored agent_steps row strictly and checks it.
+func historyTurnFrom(kind, raw string) (values.HistoryTurn, error) {
+	var body stepBodyWire
+	if err := strictJSON(raw, &body); err != nil {
+		return values.HistoryTurn{}, err
+	}
 	var entry values.HistoryTurn
-	switch row.Entry {
+	switch kind {
 	case entryStudent:
 		entry.StudentText = body.Text
 	case entryCalls:
@@ -656,10 +665,10 @@ func entryFrom(row sqlcgen.ListAgentStepsRow) (values.HistoryEntry, error) {
 			entry.Results = append(entry.Results, values.ToolResult{CallID: r.CallID, ResultJSON: r.ResultJSON, IsError: r.IsError})
 		}
 	default:
-		return values.HistoryEntry{}, fmt.Errorf("unknown entry %q", row.Entry)
+		return values.HistoryTurn{}, fmt.Errorf("unknown entry %q", kind)
 	}
 	if err := entry.Validate(); err != nil {
-		return values.HistoryEntry{}, err
+		return values.HistoryTurn{}, err
 	}
-	return values.HistoryEntry{Turn: int(row.Turn), Entry: entry, ReplyLine: row.ReplyLine.String}, nil
+	return entry, nil
 }
