@@ -100,24 +100,25 @@ func summaryData(req agent.SummaryRequest) string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-// summaryOf reads the Hub's canonical answer: exactly one JSON object with the one key summary (exact case), a string,
-// and nothing after it.
+// summaryOf reads the Hub's canonical answer: exactly one JSON object with the one key summary (exact case, not
+// repeated), a string, and nothing after it. It reads tokens, as a map would keep the last of repeated keys.
 func summaryOf(output string) (string, bool) {
-	var raw map[string]json.RawMessage
 	dec := json.NewDecoder(strings.NewReader(output))
-	if err := dec.Decode(&raw); err != nil || len(raw) != 1 {
+	for _, want := range []any{json.Delim('{'), "summary"} {
+		if tok, err := dec.Token(); err != nil || tok != want {
+			return "", false
+		}
+	}
+	tok, err := dec.Token()
+	text, ok := tok.(string)
+	if err != nil || !ok {
 		return "", false
+	}
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('}') {
+		return "", false // another key, repeated or not
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return "", false // trailing data
-	}
-	field, ok := raw["summary"]
-	if !ok || !bytes.HasPrefix(field, []byte(`"`)) {
-		return "", false
-	}
-	var text string
-	if err := json.Unmarshal(field, &text); err != nil {
-		return "", false
 	}
 	return text, true
 }
