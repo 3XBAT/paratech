@@ -2,3 +2,5 @@
 
 Short, verified notes and documentation excerpts for libraries whose APIs agents tend to get wrong (Wails v3, whisper.cpp CLI, Connect-RPC, WASAPI bindings, Google Calendar API).
 Agents must consult these instead of guessing APIs. Add the library version and source URL at the top of every file.
+
+- `playwright-webview2.md`: how Playwright attaches over CDP to the real Wails WebView2 window (E2E exe, ADR-0035): what works hidden, covered, minimized.
