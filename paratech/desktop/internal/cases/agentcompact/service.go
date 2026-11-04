@@ -77,8 +77,8 @@ func New(d Deps) (*Service, error) {
 
 // Compact makes and stores a new summary of chat id when its next request needs one (thread.CompactionRequest); an
 // empty id is the current chat, and none is an empty Result. A chat with no request, or one that needs no compaction,
-// returns its fill without calling the Hub. A failure returns one of the errors of this package and stores nothing; a
-// missing chat or a failed read of the store passes through wrapped.
+// returns its fill without calling the Hub. A failure returns exactly one of the errors of this package, its cause
+// wrapped (a missing chat is ErrStore and shared.ErrNotFound), and stores nothing.
 func (s *Service) Compact(ctx context.Context, id shared.ThreadID) (Result, error) {
 	if id != "" {
 		if err := id.Validate(); err != nil {
@@ -93,14 +93,14 @@ func (s *Service) Compact(ctx context.Context, id shared.ThreadID) (Result, erro
 		return Result{}, nil
 	}
 	if err != nil {
-		return Result{}, fmt.Errorf("%s: %w", opCompact, err)
+		return Result{}, s.storeFail(ctx, id, err)
 	}
 	if _, ok := th.Turn(); !ok {
 		return Result{Fill: Fill{Level: thread.FillNormal}}, nil
 	}
 	entries, err := s.history.Since(ctx, th.ID(), 1, thread.HistoryReadLimit)
 	if err != nil {
-		return Result{}, fmt.Errorf("%s: %w", opCompact, err)
+		return Result{}, s.storeFail(ctx, th.ID(), err)
 	}
 
 	req, ok, err := th.CompactionRequest(entries)
@@ -134,7 +134,7 @@ func (s *Service) Compact(ctx context.Context, id shared.ThreadID) (Result, erro
 		return Result{}, s.fail(ctx, th.ID(), ErrRefused, err)
 	}
 
-	if th, err = s.store(ctx, th, summary); err != nil {
+	if th, entries, err = s.store(ctx, th, entries, req, summary); err != nil {
 		return Result{}, err
 	}
 	return Result{Compacted: true, Fill: fillOf(th, entries)}, nil
@@ -148,32 +148,59 @@ func (s *Service) load(ctx context.Context, id shared.ThreadID) (*thread.Thread,
 	return s.chats.Get(ctx, id)
 }
 
-// store applies summary and saves the chat. On a version conflict the chat is reloaded and the same summary applied
-// again: the thread checks once more that it covers more than the stored one and only requests that are over. The Hub
-// is never asked again (its answer for the key would be the same).
-func (s *Service) store(ctx context.Context, th *thread.Thread, summary values.HistorySummary) (*thread.Thread, error) {
+// errRequestChanged is the cause of ErrChanged when the reloaded chat would ask for another summary than the one made.
+var errRequestChanged = errors.New("the chat would ask for another summary now")
+
+// store applies summary, made for req, and saves the chat; it returns the chat saved and the history entries it was
+// checked against. On a version conflict the chat and its history are reloaded and the summary request rebuilt: the
+// summary is applied again only when the rebuilt request is the same as req. Otherwise (a «Скрыть» or a restart forgot
+// some of the requests summarized, another summary was stored, a request started) the summary no longer fits the
+// chat: ErrChanged, nothing stored. The Hub is never asked again (its answer for the key would be the same).
+func (s *Service) store(ctx context.Context, th *thread.Thread, entries []values.HistoryEntry, req values.SummaryRequest,
+	summary values.HistorySummary,
+) (*thread.Thread, []values.HistoryEntry, error) {
 	for attempt := 1; ; attempt++ {
 		if err := th.Compact(summary, s.clock.Now()); err != nil {
 			code := ErrChanged
 			if attempt == 1 && errors.Is(err, thread.ErrInvalidTransition) {
 				code = ErrBusy
 			}
-			return nil, s.fail(ctx, th.ID(), code, err)
+			return nil, nil, s.fail(ctx, th.ID(), code, err)
 		}
 		err := s.chats.Save(ctx, th)
 		if err == nil {
-			return th, nil
+			return th, entries, nil
 		}
 		if !errors.Is(err, shared.ErrVersionConflict) {
-			return nil, fmt.Errorf("%s: %w", opCompact, err)
+			return nil, nil, s.storeFail(ctx, th.ID(), err)
 		}
 		if attempt == maxSaves {
-			return nil, s.fail(ctx, th.ID(), ErrChanged, err)
+			return nil, nil, s.fail(ctx, th.ID(), ErrChanged, err)
 		}
-		if th, err = s.chats.Get(ctx, th.ID()); err != nil {
-			return nil, fmt.Errorf("%s: %w", opCompact, err)
+		id := th.ID()
+		if th, err = s.chats.Get(ctx, id); err != nil {
+			return nil, nil, s.storeFail(ctx, id, err)
+		}
+		if entries, err = s.history.Since(ctx, id, 1, thread.HistoryReadLimit); err != nil {
+			return nil, nil, s.storeFail(ctx, id, err)
+		}
+		again, ok, err := th.CompactionRequest(entries)
+		switch {
+		case err != nil:
+			return nil, nil, s.fail(ctx, id, ErrChanged, fmt.Errorf("%w: %w", errRequestChanged, err))
+		case !ok || !again.Equal(req):
+			return nil, nil, s.fail(ctx, id, ErrChanged, errRequestChanged)
 		}
 	}
+}
+
+// storeFail codes a failed read or save of the store: ErrUnavailable when the caller went away, else ErrStore.
+func (s *Service) storeFail(ctx context.Context, id shared.ThreadID, err error) error {
+	code := ErrStore
+	if ctx.Err() != nil {
+		code = ErrUnavailable
+	}
+	return s.fail(ctx, id, code, err)
 }
 
 // fail logs a failed compaction by chat and code (never a text) and returns the code with its cause.

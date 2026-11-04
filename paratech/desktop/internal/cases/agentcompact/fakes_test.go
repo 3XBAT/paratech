@@ -34,6 +34,8 @@ type memChats struct {
 	saves  int
 	// beforeSave, when set, runs before every Save (outside the lock), so a test can save a competing change.
 	beforeSave func()
+	// saveErr, when set, fails every Save after beforeSave.
+	saveErr error
 }
 
 func (r *memChats) Get(_ context.Context, id shared.ThreadID) (*thread.Thread, error) {
@@ -63,12 +65,18 @@ func (r *memChats) Current(ctx context.Context) (*thread.Thread, error) {
 	return r.Get(ctx, newest.ID)
 }
 
-func (r *memChats) Save(_ context.Context, th *thread.Thread) error {
+func (r *memChats) Save(ctx context.Context, th *thread.Thread) error {
 	if r.beforeSave != nil {
 		r.beforeSave()
 	}
+	if err := ctx.Err(); err != nil {
+		return err // as the database does
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.saveErr != nil {
+		return r.saveErr
+	}
 	if r.states == nil {
 		r.states = map[shared.ThreadID]thread.State{}
 	}
@@ -118,6 +126,13 @@ func (r *memChats) bump(id shared.ThreadID) {
 	r.states[id] = st
 }
 
+// remove forgets the stored chat.
+func (r *memChats) remove(id shared.ThreadID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.states, id)
+}
+
 type memHistory struct {
 	mu      sync.Mutex
 	entries map[shared.ThreadID][]values.HistoryEntry
@@ -142,6 +157,23 @@ func (h *memHistory) Since(_ context.Context, id shared.ThreadID, from, limit in
 		out = out[len(out)-limit:]
 	}
 	return out, nil
+}
+
+func (h *memHistory) fail(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.err = err
+}
+
+// drop marks the entries of requests from on as dropped by request by, as a restart does.
+func (h *memHistory) drop(id shared.ThreadID, from, by int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i, e := range h.entries[id] {
+		if e.Turn >= from {
+			h.entries[id][i].DroppedBy = by
+		}
+	}
 }
 
 // fakeHub is the Summarizer: it records the requests and answers with answer(n), n counting from 1. When hold is

@@ -16,7 +16,7 @@ import (
 )
 
 // codes are the errors of the package; a failure matches exactly one.
-var codes = []error{ErrInvalidConfig, ErrInvalidInput, ErrBusy, ErrChanged, ErrQuota, ErrUnavailable, ErrRefused}
+var codes = []error{ErrInvalidConfig, ErrInvalidInput, ErrBusy, ErrChanged, ErrQuota, ErrUnavailable, ErrRefused, ErrStore}
 
 func onlyCode(t *testing.T, err, want error) {
 	t.Helper()
@@ -238,24 +238,133 @@ func TestRefusedKeysAreBounded(t *testing.T) {
 	}
 }
 
-// A chat saved while the summary was made (a rename, a step) is reloaded and the same summary applied: no second Hub
-// call.
-func TestVersionConflictReappliesTheSummary(t *testing.T) {
-	e := newEnv(t)
-	e.chat(t, "c1", 21, false)
-	conflicts := 1
-	e.chats.beforeSave = func() {
-		if conflicts > 0 {
-			conflicts--
-			e.chats.bump("c1")
+// once runs f on the first call only, so a competing save inside beforeSave does not run it again.
+func once(f func()) func() {
+	done := false
+	return func() {
+		if !done {
+			done = true
+			f()
 		}
 	}
-	got, err := e.svc.Compact(t.Context(), "c1")
-	if err != nil || !got.Compacted {
-		t.Fatalf("Compact = %+v, %v", got, err)
+}
+
+// A chat saved while the summary was made by a change that leaves the request to summarize as it was (a rename, a
+// save of a step) is reloaded and the same summary applied: no second Hub call.
+func TestVersionConflictReappliesTheSummary(t *testing.T) {
+	tests := map[string]func(t *testing.T, e *env){
+		"bump": func(_ *testing.T, e *env) { e.chats.bump("c1") },
+		"rename": func(t *testing.T, e *env) {
+			th := e.chats.stored(t, "c1")
+			if err := th.Rename("Физика", e.clock.Now()); err != nil {
+				t.Error(err)
+			}
+			if err := e.chats.Save(t.Context(), th); err != nil {
+				t.Error(err)
+			}
+		},
 	}
-	if len(e.hub.calls()) != 1 || e.chats.stored(t, "c1").Summary().Through() != 10 {
-		t.Fatalf("%d Hub calls, stored %+v", len(e.hub.calls()), e.chats.stored(t, "c1").Summary())
+	for name, change := range tests {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			e.chat(t, "c1", 21, false)
+			e.chats.beforeSave = once(func() { change(t, e) })
+			got, err := e.svc.Compact(t.Context(), "c1")
+			if err != nil || got != (Result{Compacted: true, Fill: Fill{Percent: 55, Level: thread.FillNormal}}) {
+				t.Fatalf("Compact = %+v, %v", got, err)
+			}
+			if len(e.hub.calls()) != 1 || e.chats.stored(t, "c1").Summary().Through() != 10 {
+				t.Fatalf("%d Hub calls, stored %+v", len(e.hub.calls()), e.chats.stored(t, "c1").Summary())
+			}
+			if name == "rename" && e.chats.stored(t, "c1").Title() != "Физика" {
+				t.Fatal("the rename was lost")
+			}
+		})
+	}
+}
+
+// «Скрыть» (a restart from request n of those summarized) during the Hub call forgets requests the summary covers:
+// the rebuilt request differs, so the summary is not stored and the Hub is not asked again.
+func TestRestartDuringCallDropsTheSummary(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		from int
+		done bool
+	}{
+		{"running restart", 5, false},
+		{"finished restart", 5, true},
+		{"restart from the first", 1, true},
+		{"restart from the last summarized", 10, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.chat(t, "c1", 21, false)
+			e.chats.beforeSave = once(func() {
+				th := e.chats.stored(t, "c1")
+				if err := th.RestartFrom(tt.from, thread.Request{Text: "заново"}, e.clock.Now()); err != nil {
+					t.Error(err)
+				}
+				if tt.done {
+					if err := th.Complete(e.clock.Now()); err != nil {
+						t.Error(err)
+					}
+				}
+				if err := e.chats.Save(t.Context(), th); err != nil {
+					t.Error(err)
+				}
+				e.history.drop("c1", tt.from, 22)
+			})
+			got, err := e.svc.Compact(t.Context(), "c1")
+			onlyCode(t, err, ErrChanged)
+			if !errors.Is(err, errRequestChanged) || got.Compacted || len(e.hub.calls()) != 1 {
+				t.Fatalf("Compact = %+v, %v, %d Hub calls", got, err, len(e.hub.calls()))
+			}
+			if !e.chats.stored(t, "c1").Summary().IsZero() {
+				t.Fatalf("a summary of forgotten requests was stored: %+v", e.chats.stored(t, "c1").Summary())
+			}
+		})
+	}
+}
+
+// A failed read or save of the store after the Hub answered is ErrStore with its cause (ErrUnavailable when the
+// caller went away); nothing is stored and the Hub is asked once.
+func TestStoreFailuresAfterTheAnswer(t *testing.T) {
+	disk := errors.New("disk")
+	tests := []struct {
+		name  string
+		setup func(e *env, cancel context.CancelFunc)
+		want  error
+		cause error
+	}{
+		{"save fails", func(e *env, _ context.CancelFunc) { e.chats.saveErr = disk }, ErrStore, disk},
+		{"history read on reload fails", func(e *env, _ context.CancelFunc) {
+			e.chats.beforeSave = once(func() { e.chats.bump("c1"); e.history.fail(disk) })
+		}, ErrStore, disk},
+		{"chat gone on reload", func(e *env, _ context.CancelFunc) {
+			e.chats.beforeSave = once(func() { e.chats.remove("c1") })
+		}, ErrStore, shared.ErrNotFound},
+		{"caller gone after the answer", func(e *env, cancel context.CancelFunc) {
+			e.hub.answer = func(int) (string, error) { cancel(); return "Сводка.", nil }
+		}, ErrUnavailable, context.Canceled},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.chat(t, "c1", 21, false)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			tt.setup(e, cancel)
+
+			got, err := e.svc.Compact(ctx, "c1")
+			onlyCode(t, err, tt.want)
+			if !errors.Is(err, tt.cause) || got != (Result{}) || len(e.hub.calls()) != 1 {
+				t.Fatalf("Compact = %+v, %v, %d Hub calls", got, err, len(e.hub.calls()))
+			}
+			e.chats.saveErr = nil
+			if th, err := e.chats.Get(t.Context(), "c1"); err == nil && !th.Summary().IsZero() {
+				t.Fatal("a failed compaction stored a summary")
+			}
+		})
 	}
 }
 
@@ -295,7 +404,7 @@ func TestVersionConflictGivesUp(t *testing.T) {
 		}
 		got, err := e.svc.Compact(t.Context(), "c1")
 		onlyCode(t, err, ErrChanged)
-		if !errors.Is(err, thread.ErrInvalidCompaction) || got.Compacted || len(e.hub.calls()) != 1 {
+		if !errors.Is(err, errRequestChanged) || got.Compacted || len(e.hub.calls()) != 1 {
 			t.Fatalf("Compact = %+v, %v, %d Hub calls", got, err, len(e.hub.calls()))
 		}
 		if s := e.chats.stored(t, "c1").Summary(); s != other {
@@ -367,7 +476,9 @@ func TestInputAndStore(t *testing.T) {
 	if _, err := e.svc.Compact(t.Context(), "a/b"); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("malformed id = %v", err)
 	}
-	if _, err := e.svc.Compact(t.Context(), "nope"); !errors.Is(err, shared.ErrNotFound) {
+	_, err := e.svc.Compact(t.Context(), "nope")
+	onlyCode(t, err, ErrStore)
+	if !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("missing chat = %v", err)
 	}
 
@@ -387,7 +498,9 @@ func TestInputAndStore(t *testing.T) {
 	e.chat(t, "c1", 21, false)
 	disk := errors.New("disk")
 	e.history.err = disk
-	if _, err := e.svc.Compact(t.Context(), "c1"); !errors.Is(err, disk) || len(e.hub.calls()) != 0 {
+	_, err = e.svc.Compact(t.Context(), "c1")
+	onlyCode(t, err, ErrStore)
+	if !errors.Is(err, disk) || len(e.hub.calls()) != 0 {
 		t.Fatalf("failed read = %v", err)
 	}
 }

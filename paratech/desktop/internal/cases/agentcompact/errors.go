@@ -3,7 +3,8 @@ package agentcompact
 import "errors"
 
 // Errors of the use case: every failed Compact matches exactly one of them and stores nothing. The cause is wrapped
-// too, so desktop.log tells them apart; no error text holds a summary or a student's text.
+// too (shared.ErrNotFound of a missing chat still matches), so desktop.log tells them apart; no error text holds a
+// summary or a student's text.
 var (
 	// ErrInvalidConfig means a required port is missing.
 	ErrInvalidConfig = errors.New("agentcompact: invalid configuration")
@@ -27,4 +28,8 @@ var (
 	// ErrRefused means the Hub refused the request or the model's answer for good, or the answer is not a summary the
 	// chat may keep. A refused answer is charged and replayed for the same key, so the key is not asked again.
 	ErrRefused = errors.New("agentcompact: summary refused")
+
+	// ErrStore means the local store failed: the chat or its history could not be read (or is missing), or the chat
+	// could not be saved for another reason than a concurrent change.
+	ErrStore = errors.New("agentcompact: the local store failed")
 )
