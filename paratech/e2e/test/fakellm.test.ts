@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import http from "node:http";
 import { after, before, describe, test } from "node:test";
 
 import {
@@ -235,5 +236,37 @@ describe("fake server", () => {
     assert.equal(unmatched[1]?.body, "");
     assert.ok(!JSON.stringify(unmatched).includes(FakeProviderKey));
     assert.equal(fake.remaining(), 1, "an unknown endpoint consumes no rule");
+  });
+
+  // fetch may not set Host, so the raw http client is used.
+  const withHost = (host: string, path: string, method = "GET"): Promise<{ status: number; body: string }> =>
+    new Promise((resolve, reject) => {
+      const u = new URL(fake.url);
+      const req = http.request({ host: u.hostname, port: u.port, path, method, headers: { host }, setHost: false }, (res) => {
+        let body = "";
+        res.setEncoding("utf8").on("data", (c: string) => (body += c)).on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+      });
+      req.on("error", reject);
+      req.end(method === "POST" ? "{}" : undefined);
+    });
+
+  test("a request with a foreign Host (DNS rebinding) is 403 and neither answers nor records anything", async () => {
+    fake.setScript([{ kind: "plain", match: "", reply: "ok" }]);
+    const port = new URL(fake.url).port;
+    for (const host of ["evil.example", `evil.example:${port}`, "127.0.0.1", `127.0.0.1:${Number(port) + 1}`, `localhost.evil.example:${port}`]) {
+      for (const [path, method] of [["/__e2e/requests", "GET"], ["/__e2e/script", "POST"], ["/v1/messages", "POST"]] as const) {
+        const res = await withHost(host, path, method);
+        assert.equal(res.status, 403, `${host} ${method} ${path}`);
+        assert.match(res.body, /Host/);
+      }
+    }
+    assert.deepEqual(fake.requests(), []);
+    assert.equal(fake.remaining(), 1, "the script was not replaced or consumed");
+  });
+
+  test("Host 127.0.0.1:<port> and localhost:<port> are served", async () => {
+    const port = new URL(fake.url).port;
+    assert.equal((await withHost(`127.0.0.1:${port}`, "/__e2e/requests")).status, 200);
+    assert.equal((await withHost(`localhost:${port}`, "/__e2e/requests")).status, 200);
   });
 });

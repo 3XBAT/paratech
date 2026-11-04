@@ -8,7 +8,10 @@ import { envError } from "./env.js";
 export type { RecordedRequest, Rule };
 
 export interface Llm {
-  /** Replaces the script and clears the recordings: call it at the start of a scenario. */
+  /**
+   * Replaces the script and clears the recordings: call it at the start of a scenario. With the run's guard it first
+   * throws UnscriptedLlmError for an unscripted call not yet reported, which the clearing would otherwise lose.
+   */
   script(rules: Rule[]): Promise<void>;
   /** Every Hub→provider request since the script was set, matched or not. */
   requests(): Promise<RecordedRequest[]>;
@@ -53,8 +56,11 @@ export class UnscriptedLlmError extends Error {
   }
 }
 
-/** The client of the fake at baseUrl (PARATECH_E2E_FAKE_URL). */
-export function createLlm(baseUrl: string, timeoutMs = 10_000): Llm {
+/**
+ * The client of the fake at baseUrl (PARATECH_E2E_FAKE_URL). `guard` is the one step() and the test fixture use
+ * (unscriptedGuard()), so a call it reports from script() is not reported again.
+ */
+export function createLlm(baseUrl: string, timeoutMs = 10_000, guard?: UnscriptedGuard): Llm {
   const base = baseUrl.replace(/\/+$/, "");
 
   const call = async (path: string, init?: RequestInit): Promise<Response> => {
@@ -75,6 +81,10 @@ export function createLlm(baseUrl: string, timeoutMs = 10_000): Llm {
 
   const llm: Llm = {
     async script(rules) {
+      const lost = await guard?.check();
+      if (lost) {
+        throw lost;
+      }
       const res = await call(PathScript, {
         method: "POST",
         headers: { "content-type": "application/json" },

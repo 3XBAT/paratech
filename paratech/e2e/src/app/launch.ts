@@ -3,7 +3,7 @@ import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { parseSecretsProfileId } from "../sandbox/cmdkey.js";
-import { StartFailureError } from "../sandbox/errors.js";
+import { SandboxEnvironmentError, StartFailureError, type StartFailureKind } from "../sandbox/errors.js";
 import { Loopback } from "../hub/ports.js";
 import { checkLoopbackOnly, runNetstat } from "./netstat.js";
 
@@ -57,14 +57,44 @@ export interface LaunchOptions {
   startTimeoutMs?: number;
   /** Arguments before the app's own: only a test stub (node <script>) needs them. */
   exeArgs?: string[];
+  /**
+   * Called as soon as the child is spawned, before it is proven isolated: the caller can stop it from then on (an
+   * interrupt or a timeout while the app starts). launchApp still kills it itself when the start fails.
+   */
+  onSpawn?: (app: RunningApp) => void;
+  /** Tests only: replaces `taskkill /T /F`. */
+  kill?: (pid: number) => void;
+  /** Tests only: replaces the netstat listing (undefined = netstat cannot run). */
+  netstat?: () => string | undefined;
 }
 
 export interface RunningApp {
   pid: number;
   cdpUrl: string;
   child: ChildProcess;
-  /** Hard stop of the exe and its children; idempotent. */
+  /** Hard stop of the exe and its children; idempotent; does nothing once the process has exited. */
   stop(): void;
+}
+
+type Exited = Pick<ChildProcess, "exitCode" | "signalCode">;
+
+export const hasExited = (child: Exited): boolean => child.exitCode !== null || child.signalCode !== null;
+
+/**
+ * The stop of a child. The tree is killed only while the child is alive: after its exit the pid may belong to an
+ * unrelated process (the owner's paratech.exe), and `taskkill /PID` would hit that one.
+ */
+export function createStop(child: Exited, pid: number | undefined, kill: (pid: number) => void = killProcessTree): () => void {
+  let stopped = false;
+  return () => {
+    if (stopped || pid === undefined) {
+      return;
+    }
+    stopped = true;
+    if (!hasExited(child)) {
+      kill(pid);
+    }
+  };
 }
 
 export function appArgs(o: Pick<LaunchOptions, "dataDir" | "ctlDir" | "cdpPort" | "window">): string[] {
@@ -120,62 +150,56 @@ export async function launchApp(o: LaunchOptions): Promise<RunningApp> {
 
   const pid = child.pid;
   const cdpUrl = `http://${Loopback}:${o.cdpPort}`;
-  let stopped = false;
-  const stop = () => {
-    if (!stopped && pid !== undefined) {
-      stopped = true;
-      killProcessTree(pid);
-    }
-  };
-  const fail = (kind: ConstructorParameters<typeof StartFailureError>[0], message: string): never => {
+  const stop = createStop(child, pid, o.kill);
+  const fail = (error: Error): never => {
     stop();
-    throw new StartFailureError(kind, message);
+    throw error;
   };
+  const startFailure = (kind: StartFailureKind, message: string): StartFailureError => new StartFailureError(kind, message);
   if (pid === undefined) {
-    return fail("SandboxNotIsolated", `${NotIsolated}: приложение не запустилось (${spawnError ?? "нет pid"})`);
+    return fail(startFailure("SandboxNotIsolated", `${NotIsolated}: приложение не запустилось (${spawnError ?? "нет pid"})`));
   }
+  const app: RunningApp = { pid, cdpUrl, child, stop };
+  o.onSpawn?.(app);
 
   const log = desktopLogPath(o.dataDir);
   const deadline = Date.now() + (o.startTimeoutMs ?? startTimeoutMs);
   for (;;) {
     const verdict = evaluateStartLog(readSharedText(log));
     if (verdict.defaultProfile) {
-      fail("SandboxNotIsolated", `${NotIsolated}: приложение пишет ${DefaultProfileLine}`);
+      fail(startFailure("SandboxNotIsolated", `${NotIsolated}: приложение пишет ${DefaultProfileLine}`));
     }
     if (verdict.missing.length === 0) {
       break;
     }
-    const exited = child.exitCode !== null || child.signalCode !== null;
+    const exited = hasExited(child);
     if (exited || Date.now() > deadline) {
       const why = exited ? `приложение завершилось (код ${child.exitCode ?? child.signalCode})` : "строки не появились за отведённое время";
-      fail("SandboxNotIsolated", `${NotIsolated}: ${why}; нет строк в desktop.log: ${verdict.missing.map((l) => `«${l}»`).join(", ")}`);
+      fail(startFailure("SandboxNotIsolated", `${NotIsolated}: ${why}; нет строк в desktop.log: ${verdict.missing.map((l) => `«${l}»`).join(", ")}`));
     }
     await sleep(pollMs);
   }
 
   await waitCdp(cdpUrl, child, fail);
-  const listing = runNetstat();
+  const listing = (o.netstat ?? runNetstat)();
   if (listing === undefined) {
-    fail("CdpNotLoopback", `Не удалось проверить, что порт отладки ${o.cdpPort} слушает только loopback (netstat недоступен)`);
+    // The machine cannot run its own tool: not a product result.
+    fail(new SandboxEnvironmentError("ToolMissing", `Не удалось проверить, что порт отладки ${o.cdpPort} слушает только loopback (netstat недоступен)`));
   } else {
     const check = checkLoopbackOnly(listing, o.cdpPort);
     if (!check.ok) {
       const where = check.listeners.map((l) => `${l.address}:${l.port}`).join(", ") || "слушателей нет";
-      fail("CdpNotLoopback", `Порт отладки ${o.cdpPort} привязан не только к loopback (${where}); приложение остановлено`);
+      fail(startFailure("CdpNotLoopback", `Порт отладки ${o.cdpPort} привязан не только к loopback (${where}); приложение остановлено`));
     }
   }
-  return { pid, cdpUrl, child, stop };
+  return app;
 }
 
-async function waitCdp(
-  cdpUrl: string,
-  child: ChildProcess,
-  fail: (kind: ConstructorParameters<typeof StartFailureError>[0], message: string) => never,
-): Promise<void> {
+async function waitCdp(cdpUrl: string, child: ChildProcess, fail: (error: Error) => never): Promise<void> {
   const deadline = Date.now() + cdpTimeoutMs;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null || child.signalCode !== null) {
-      fail("CdpNotReady", `Приложение завершилось до ответа порта отладки (код ${child.exitCode ?? child.signalCode})`);
+    if (hasExited(child)) {
+      fail(new StartFailureError("CdpNotReady", `Приложение завершилось до ответа порта отладки (код ${child.exitCode ?? child.signalCode})`));
     }
     try {
       const res = await fetch(`${cdpUrl}/json/version`, { signal: AbortSignal.timeout(2_000) });
@@ -188,7 +212,7 @@ async function waitCdp(
     }
     await sleep(pollMs);
   }
-  fail("CdpNotReady", `Порт отладки ${cdpUrl} не ответил на /json/version за ${cdpTimeoutMs / 1000} с`);
+  fail(new StartFailureError("CdpNotReady", `Порт отладки ${cdpUrl} не ответил на /json/version за ${cdpTimeoutMs / 1000} с`));
 }
 
 /** The id of the app's isolated Credential Manager profile, from its debug log (undefined until the line is written). */

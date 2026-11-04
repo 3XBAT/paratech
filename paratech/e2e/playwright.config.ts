@@ -8,7 +8,9 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0, // SCRIPTED has no retries: a flake is a bug (ADR-0035 §6)
   timeout: 60_000, // per test
-  globalTimeout: 20 * 60_000, // the SCRIPTED budget is 15 min (the reporter warns), this is the hard stop
+  // Hard stop of the whole run, setup and exe build included (a full build takes up to 15 min). The SCRIPTED budget of
+  // 15 min counts from the start of the tests (the reporter warns), not from here.
+  globalTimeout: 45 * 60_000,
   forbidOnly: true,
   reporter: [["list"], ["./src/report/reporter.ts"]],
   globalSetup: "./src/sandbox/setup.ts",

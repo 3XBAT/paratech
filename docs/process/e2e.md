@@ -15,7 +15,9 @@ bash C:/Users/xvati/GolandProjects/paratech-ops/heavy.sh npm --prefix <abs>/para
 bash C:/Users/xvati/GolandProjects/paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --no-build   # reuse paratech/dist/e2e/paratech.exe
 ```
 `run e2e:live` is LIVE (needs `PARATECH_E2E_ANTHROPIC_KEY`, optionally `_BASE_URL`, `_AUTH`). Docker must be running (the
-Hub's Postgres). Budget: SCRIPTED up to 15 min, a pack up to 5 min, LIVE up to 30 min; over the budget the report warns.
+Hub's Postgres). Budget: SCRIPTED up to 15 min, a pack up to 5 min, LIVE up to 30 min, counted from the start of the tests
+(the exe build and the app start are not counted); over the budget the report warns. The whole run, build included, is cut
+off after 45 min.
 `npm --prefix <abs>/paratech/e2e test` is the static part (unit tests, no app): `PARATECH_E2E_UNIT_ONLY=1` skips the Docker Hub test.
 
 ## Reading the report
@@ -29,7 +31,10 @@ Hub's Postgres). Budget: SCRIPTED up to 15 min, a pack up to 5 min, LIVE up to 3
 - **не проверено (нужно: …)**: not a failure. The feature did not run: a prerequisite feature is not «готово»
   (`requires`), the test is `fixme` with a reason, or the machine is not ready (Docker, port, sandbox).
   «Проблемы среды» lists machine problems; fix those first, then rerun. A start failure of the product is «сломано», step «Запуск».
-- The Hub key and every `PARATECH_E2E_*` value are scrubbed from the report.
+- Scrubbed from the report: the secret values (the Hub key, the provider key, URL and auth of LIVE), any `pthub_…` and `sk-…`
+  token, `Authorization`/`x-api-key` headers and `PARATECH_E2E_X=value` assignments. Paths and other `PARATECH_E2E_*` outputs
+  are not secret and stay. Playwright traces and screenshots in `report/` and `traces/` are not scrubbed: they may show text typed
+  into the UI (the throwaway Hub key). Never share them; they stay under `paratech/dist` (gitignored).
 
 ## Adding a scenario
 A UI task that changes a feature adds or updates its scenario. Put it in the pack folder `paratech/e2e/specs/<pack>/<name>.spec.ts`
@@ -52,7 +57,8 @@ test("импорт записи", { tag: "@recording", annotation: [
 ```
 
 ```ts
-// llm: one rule per EXPECTED provider call, consumed in order; script() also clears the recordings
+// llm: one rule per EXPECTED provider call, consumed in order; script() also clears the recordings, so it first throws
+// if an unscripted call happened since the last check (a second script() inside a step cannot hide it)
 await llm.script([
   { kind: "tools", match: "какие у меня записи", reply: [{ name: "list_recordings", input: {} }] },
   { kind: "plain", match: "", reply: "У вас три записи." },

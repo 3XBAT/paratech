@@ -27,7 +27,7 @@ import {
 } from "../src/hub/index.js";
 import { parsePgUrl, scramClientFinal, withSearchPath } from "../src/hub/pg.js";
 import { assertAllowedHubPort, freeLoopbackPort, loopbackPortBusy } from "../src/hub/ports.js";
-import { composePort, DefaultPgPort } from "../src/hub/postgres.js";
+import { composePort } from "../src/hub/postgres.js";
 
 // An obviously fake provider key: the tests grep every output of the harness for it.
 const Sentinel = "sk-ant-e2e-SENTINEL-0123456789abcdef";
@@ -167,12 +167,21 @@ describe("ports", () => {
     }
   });
 
-  test("the compose port: PARATECH_E2E_PG_PORT, else the default; HUB_PG_PORT is never read", () => {
-    assert.equal(composePort({ PARATECH_E2E_PG_PORT: "25432", HUB_PG_PORT: "15432" }), 25432);
-    assert.equal(composePort({ HUB_PG_PORT: "35432" }), DefaultPgPort);
-    assert.equal(composePort({}), DefaultPgPort);
-    assert.throws(() => composePort({ PARATECH_E2E_PG_PORT: "abc" }), BadConfigError);
-    assert.throws(() => composePort({ PARATECH_E2E_PG_PORT: "70000" }), BadConfigError);
+  test("the compose port: PARATECH_E2E_PG_PORT, else a free loopback port; HUB_PG_PORT is never read", async () => {
+    const never = () => Promise.reject(new Error("must not pick a port when the variable is set"));
+    assert.equal(await composePort({ PARATECH_E2E_PG_PORT: "25432", HUB_PG_PORT: "15432" }, never), 25432);
+
+    const picked = () => Promise.resolve(40123);
+    assert.equal(await composePort({ HUB_PG_PORT: "35432" }, picked), 40123);
+    assert.equal(await composePort({}, picked), 40123);
+
+    // no fixed default: the real picker gives a port nobody listens on
+    const free = await composePort({});
+    assert.ok(Number.isInteger(free) && free > 0 && free < 65536);
+    assert.equal(await loopbackPortBusy(free), false);
+
+    await assert.rejects(composePort({ PARATECH_E2E_PG_PORT: "abc" }, never), BadConfigError);
+    await assert.rejects(composePort({ PARATECH_E2E_PG_PORT: "70000" }, never), BadConfigError);
   });
 });
 

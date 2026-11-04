@@ -6,7 +6,7 @@ provider (LIVE). Talks to the Hub only through processes and HTTP; no Go code, n
 ## Run
 
 ```
-npm ci                                  # inside paratech/e2e (npm 10 ignores --prefix for a bare install)
+npm --prefix <abs>/paratech/e2e ci      # first time (npm 10.9 honours --prefix for ci: checked with --dry-run)
 npm --prefix <abs>/paratech/e2e test    # tsc + node --test: unit tests, and the real Hub test when Docker is up
 
 # the whole run holds the machine lock, so always through heavy.sh (never nested inside the runner):
@@ -35,9 +35,19 @@ The sandbox files stay after the run (the next run wipes them); the report is `p
 | `src/hub`, `src/fakellm` | the Hub harness and the fake Messages API (below) |
 | `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check |
 
-If the run is killed (Ctrl+C, a crash), an exit guard kills the app tree and the Hub, but not the compose project; check for leftovers:
+Ctrl+C or the global timeout during the setup: Playwright still runs the global teardown, and the setup's handle is in a
+global slot from the start, so the teardown stops what is already up (the app as soon as it is spawned, not only once it is
+proven isolated) and the setup stops whatever comes up after that. If the process dies without a teardown (a crash, a kill),
+an exit guard kills the app tree and the Hub, but not the compose project; check for leftovers:
 `paratech.exe` / `hub.exe` of the run (`tasklist`), and `docker compose -p paratech-e2e -f paratech/hub/docker-compose.yml down -v`.
+`taskkill /T /F` runs only against an app that is still alive (the pid of an exited one may belong to another process,
+for instance your own paratech.exe).
 The next run also deletes the Credential Manager entries of the previous run's profile before it wipes the folder.
+A failure before the first state (a malformed option, a locked file in `paratech/dist/e2e-run`) is an environment
+problem too: the previous run's `state.json` is deleted first, and the reporter ignores a `state.json` older than itself.
+
+Reports, `trace.zip` and screenshots under `paratech/dist/e2e-run/report` may contain text typed into the UI, among it
+the throwaway Hub key of the run. Never share or attach them anywhere; they stay under `paratech/dist` (gitignored).
 
 The Hub test builds `paratech/dist/e2e/hub.exe` (`go -C paratech build ./hub/cmd/hub`, once per process), starts the
 `postgres` service of `hub/docker-compose.yml` under its own compose project, creates schema `e2e_<run>`, issues a key
@@ -56,9 +66,12 @@ await hub.stop(); await fake.stop();
 
 | Variable | Use |
 |---|---|
-| `PARATECH_E2E_PG_PORT` | Postgres port of the E2E compose project; else 55432 (Windows may reserve it: `netsh int ipv4 show excludedportrange protocol=tcp`; then set e.g. 56432) |
+| `PARATECH_E2E_PG_PORT` | Postgres port of the E2E compose project; unset: a free loopback port is picked for each run (no fixed default: Windows reserves ranges, `netsh int ipv4 show excludedportrange protocol=tcp`). A running postgres of the project is reused whatever its port |
 | `PARATECH_E2E_ANTHROPIC_KEY` | LIVE only: provider key (required); only the Hub process gets it |
 | `PARATECH_E2E_ANTHROPIC_BASE_URL`, `PARATECH_E2E_ANTHROPIC_AUTH` | LIVE only: gateway URL and `x-api-key`/`bearer` |
+
+The three provider variables are removed from `process.env` as soon as the Hub has started (the workers inherit it), but
+their values stay registered with the report scrubber of the main process, so they never reach a report or an error text.
 | `PARATECH_E2E_UNIT_ONLY=1` | skip the real Hub test |
 | `PARATECH_E2E_WINDOW=WxH` | `--e2e-window` of the app (default: the app's own size) |
 | `PARATECH_E2E_MODE`, `PARATECH_E2E_NO_BUILD` | set by `cli.js` from `--live` / `--no-build`; do not set by hand |
@@ -88,7 +101,8 @@ substring of the last user message (text and `tool_result` text); the rule is co
 listed as unmatched («unscripted LLM call»). Control: `POST /__e2e/script` `{"rules": [...]}` (strictly validated, 1 MiB
 cap; replaces the script and clears the recordings), `GET /__e2e/requests`, `GET /__e2e/unmatched`. Any other path
 is HTTP 404 and is recorded as unmatched too («unknown endpoint METHOD path»), so a new provider endpoint the Hub
-starts calling is not missed. Recordings hold request bodies only, never headers.
+starts calling is not missed. Recordings hold request bodies only, never headers. A request whose `Host` is not
+`127.0.0.1:<port>` or `localhost:<port>` gets HTTP 403 (DNS-rebinding guard); the Hub and the specs use the literal URL.
 
 ## Решения / ограничения
 
@@ -99,7 +113,7 @@ starts calling is not missed. Recordings hold request bodies only, never headers
   one unscripted call can show up several times in `/__e2e/unmatched`.
 - Linux CI must set `PARATECH_E2E_UNIT_ONLY=1`: there it only type-checks and unit tests this package (ADR-0035 section 7).
 - The database is always the postgres service of the compose project `paratech-e2e`; no variable can point the harness at
-  another database. Set `PARATECH_E2E_PG_PORT` to a port of its own (never the owner's 15432).
+  another database. `PARATECH_E2E_PG_PORT`, if set, must be a port of its own (never the owner's 15432).
 
 ## Isolation
 

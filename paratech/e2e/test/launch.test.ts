@@ -5,7 +5,19 @@ import path from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { appArgs, appEnv, evaluateStartLog, launchApp, type LaunchOptions, NotIsolated, StartLines } from "../src/app/launch.js";
+import {
+  appArgs,
+  appEnv,
+  createStop,
+  evaluateStartLog,
+  killProcessTree,
+  launchApp,
+  type LaunchOptions,
+  NotIsolated,
+  type RunningApp,
+  StartLines,
+} from "../src/app/launch.js";
+import { isEnvironmentError } from "../src/hub/index.js";
 import { freeLoopbackPort } from "../src/hub/ports.js";
 import { isStartFailure } from "../src/sandbox/errors.js";
 
@@ -54,6 +66,38 @@ describe("app arguments and environment", () => {
       GOFLAGS: "-p=4",
     });
     assert.deepEqual(Object.keys(env).sort(), ["LOCALAPPDATA", "Path", "SystemRoot", "TEMP", "TMP", "windir"]);
+  });
+});
+
+describe("stop of a child (platform neutral)", () => {
+  const live = { exitCode: null, signalCode: null };
+
+  test("kills the tree once while the child is alive", () => {
+    const killed: number[] = [];
+    const stop = createStop(live, 4242, (pid) => killed.push(pid));
+    stop();
+    stop();
+    assert.deepEqual(killed, [4242]);
+  });
+
+  test("an exited child (exit code or signal): its pid may be reused, so nothing is killed", () => {
+    for (const child of [{ exitCode: 0, signalCode: null }, { exitCode: 3, signalCode: null }, { exitCode: null, signalCode: "SIGKILL" as const }]) {
+      const killed: number[] = [];
+      createStop(child, 4242, (pid) => killed.push(pid))();
+      assert.deepEqual(killed, [], JSON.stringify(child));
+    }
+  });
+
+  test("the child that exits after the first stop is not killed again; no pid, nothing to kill", () => {
+    const killed: number[] = [];
+    const child: { exitCode: number | null; signalCode: null } = { exitCode: null, signalCode: null };
+    const stop = createStop(child, 7, (pid) => killed.push(pid));
+    stop();
+    child.exitCode = 1;
+    stop();
+    assert.deepEqual(killed, [7]);
+    createStop(live, undefined, (pid) => killed.push(pid))();
+    assert.deepEqual(killed, [7]);
   });
 });
 
@@ -116,6 +160,102 @@ describe("launchApp with a stub app", { skip: onWindows ? false : "Windows only 
       app.stop();
       assert.ok(await gone(app.pid), "stop() ends the process");
       app.stop(); // idempotent
+      cleanup();
+    }
+  });
+
+  test("stop() kills the tree of a live app with the real taskkill, once", async () => {
+    const { o, cleanup } = await options("ok");
+    const killed: number[] = [];
+    o.kill = (pid) => {
+      killed.push(pid);
+      killProcessTree(pid);
+    };
+    const app = await launchApp(o);
+    try {
+      app.stop();
+      app.stop();
+      assert.deepEqual(killed, [app.pid]);
+      assert.ok(await gone(app.pid));
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("stop() of an app that already exited kills nothing (its pid may belong to another process)", async () => {
+    const { o, cleanup } = await options("ok");
+    const killed: number[] = [];
+    o.kill = (pid) => {
+      killed.push(pid);
+      killProcessTree(pid);
+    };
+    const app = await launchApp(o);
+    try {
+      const exited = new Promise((resolve) => app.child.once("exit", resolve));
+      app.child.kill();
+      await exited;
+      app.stop();
+      assert.deepEqual(killed, []);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("onSpawn hands out the live app before it is proven isolated; a failed start still kills it", async () => {
+    const { o, cleanup } = await options("hang");
+    o.startTimeoutMs = 1_500;
+    const seen: { app?: RunningApp; alive?: boolean } = {};
+    o.onSpawn = (app) => {
+      seen.app = app;
+      seen.alive = alive(app.pid);
+    };
+    try {
+      await assert.rejects(launchApp(o), (err: unknown) => isStartFailure(err));
+      assert.ok(seen.app, "onSpawn was called");
+      assert.ok(seen.alive);
+      assert.ok(await gone(seen.app.pid), "launchApp killed it");
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("onSpawn lets the caller stop the app while it is still starting", async () => {
+    const { o, cleanup } = await options("hang");
+    o.startTimeoutMs = 30_000;
+    const seen: { app?: RunningApp } = {};
+    o.onSpawn = (app) => {
+      seen.app = app;
+    };
+    try {
+      const outcome = launchApp(o).then(
+        () => "started",
+        (err: unknown) => (isStartFailure(err) ? "start failure" : "other"),
+      );
+      assert.ok(seen.app, "onSpawn runs right after the spawn, before any wait");
+      seen.app.stop(); // what a teardown after an interrupt does
+      assert.ok(await gone(seen.app.pid));
+      assert.equal(await outcome, "start failure", "the exit is seen at the next poll, not after 30 s");
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("netstat that cannot run is an environment error (ToolMissing), not CdpNotLoopback, and the app is killed", async () => {
+    const { o, cleanup } = await options("ok");
+    o.netstat = () => undefined;
+    const seen: { pid?: number } = {};
+    o.onSpawn = (app) => {
+      seen.pid = app.pid;
+    };
+    try {
+      await assert.rejects(launchApp(o), (err: unknown) => {
+        assert.ok(isEnvironmentError(err) && err.kind === "ToolMissing", String(err));
+        assert.ok(!isStartFailure(err));
+        assert.match((err as Error).message, /netstat/);
+        return true;
+      });
+      assert.ok(seen.pid !== undefined && (await gone(seen.pid)));
+    } finally {
       cleanup();
     }
   });

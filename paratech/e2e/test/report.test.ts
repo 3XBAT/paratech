@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { after, describe, test } from "node:test";
+import { after, describe, mock, test } from "node:test";
 
 import type { FullConfig, FullResult, Suite, TestCase, TestError, TestResult } from "@playwright/test/reporter";
 
@@ -22,7 +22,7 @@ import { budgetWarning, cell, formatDuration, renderReport, TableHeader } from "
 import E2EReporter from "../src/report/reporter.js";
 import { evaluate, firstLine } from "../src/report/rows.js";
 import { ScreenshotStore } from "../src/report/screenshots.js";
-import { scrubSecrets } from "../src/report/scrub.js";
+import { clearRegisteredSecrets, registerSecrets, scrubSecrets } from "../src/report/scrub.js";
 
 const tmp = mkdtempSync(path.join(tmpdir(), "e2e-report-"));
 after(() => rmSync(tmp, { recursive: true, force: true }));
@@ -326,6 +326,24 @@ describe("secrets", () => {
     assert.equal(scrubSecrets("Открыть настройки", { PARATECH_E2E_ANTHROPIC_KEY: "ab" }), "Открыть настройки");
   });
 
+  test("registered values are scrubbed although they left the environment; short ones are ignored; clearing forgets them", () => {
+    clearRegisteredSecrets();
+    try {
+      registerSecrets([anthropic, baseUrl, auth, "ab", undefined]);
+      assert.equal(scrubSecrets(`k=${anthropic} u=${baseUrl} a=${auth}`, {}), "k=[скрыто] u=[скрыто] a=[скрыто]");
+      assert.equal(scrubSecrets("ab and abc", {}), "ab and abc");
+      const text = renderReport(leaky(true), {});
+      for (const s of [anthropic, baseUrl, auth]) {
+        assert.ok(!text.includes(s), `leaked ${s}`);
+      }
+      // a registered value and an env value together
+      assert.equal(scrubSecrets(`${anthropic} ${hubKey}`, { [EnvHubKey]: hubKey }), "[скрыто] [скрыто]");
+    } finally {
+      clearRegisteredSecrets();
+    }
+    assert.equal(scrubSecrets(anthropic, {}), anthropic, "forgotten");
+  });
+
   test("the written file of the reporter is scrubbed too (real process.env)", () => {
     const root = path.join(tmp, "secrets-run");
     mkdirSync(root, { recursive: true });
@@ -486,11 +504,20 @@ describe("screenshots", () => {
   });
 });
 
+// The clock of the tests that measure time: Date only (timers still run), reset after each use.
+function withClock<T>(fn: (tick: (ms: number) => void) => T): T {
+  mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-11-04T10:00:00.000Z") });
+  try {
+    return fn((ms) => mock.timers.tick(ms));
+  } finally {
+    mock.timers.reset();
+  }
+}
+
 describe("reporter end to end", () => {
   test("writes report.md with links, copies screenshots, reads state.json and prints the path", () => {
     const root = path.join(tmp, "run");
     mkdirSync(root, { recursive: true });
-    writeFileSync(path.join(root, "state.json"), JSON.stringify(state({ startedAt: new Date(Date.now() - 90_000).toISOString() })));
     const attach = path.join(tmp, "run-attach.png");
     writeFileSync(attach, png);
 
@@ -501,11 +528,18 @@ describe("reporter end to end", () => {
     const log = console.log;
     console.log = (...args: unknown[]) => void logs.push(args.join(" "));
     try {
-      const reporter = new E2EReporter({ runRoot: root });
-      reporter.onBegin({} as FullConfig, suiteOf([a, b, c]));
-      finish(reporter, a, fakeResult({ status: "passed", attachments: [{ name: SnapshotAttachment, contentType: "image/png", path: attach }] }));
-      finish(reporter, b, fakeResult({ status: "failed", error: { message: "Error: нет кнопки" }, steps: [{ title: "Открыть настройки", category: "test.step", error: { message: "x" }, steps: [] }] }));
-      reporter.onEnd({ status: "failed", startTime: new Date(), duration: 1 } as FullResult);
+      withClock((tick) => {
+        // as in Playwright: the reporter exists first, then the setup writes the state, then the tests begin
+        const reporter = new E2EReporter({ runRoot: root });
+        tick(1000);
+        writeFileSync(path.join(root, "state.json"), JSON.stringify(state({ startedAt: new Date().toISOString() })));
+        tick(5 * 60_000); // the exe build and the app start: not part of the test time
+        reporter.onBegin({} as FullConfig, suiteOf([a, b, c]));
+        tick(90_000);
+        finish(reporter, a, fakeResult({ status: "passed", attachments: [{ name: SnapshotAttachment, contentType: "image/png", path: attach }] }));
+        finish(reporter, b, fakeResult({ status: "failed", error: { message: "Error: нет кнопки" }, steps: [{ title: "Открыть настройки", category: "test.step", error: { message: "x" }, steps: [] }] }));
+        reporter.onEnd({ status: "failed", startTime: new Date(), duration: 1 } as FullResult);
+      });
     } finally {
       console.log = log;
     }
@@ -515,18 +549,21 @@ describe("reporter end to end", () => {
     assert.ok(rowOf(text, "Настройки").includes("| сломано | Открыть настройки — Error: нет кнопки | — |"));
     assert.ok(rowOf(text, "Запись").includes("не проверено (нужно: Настройки)"));
     assert.ok(existsSync(path.join(root, "report", "screenshots", "smoke.png")));
-    assert.match(text, /- Время прогона: 1 мин \d+ с/);
+    assert.ok(text.includes("- Время прогона: 1 мин 30 с"), "counted from onBegin, not from the setup");
+    assert.ok(text.includes("Начало прогона: 2026-11-04T10:00:01.000Z"), "the start comes from state.json");
+    assert.ok(!text.includes("Внимание"), "the 5 min build is not counted against the budget");
     assert.ok(logs.some((l) => l.includes("report.md")), `printed: ${logs.join("|")}`);
   });
 
   test("onEnd without onBegin (the setup failed first) still writes the report with the state's problem", () => {
     const root = path.join(tmp, "run-early");
     mkdirSync(root, { recursive: true });
-    writeFileSync(path.join(root, "state.json"), JSON.stringify(state({ environmentError: { kind: "PortBusy", message: "порт 55432 занят" } })));
     const prev = process.env[EnvRunRoot];
     process.env[EnvRunRoot] = root;
     try {
       const reporter = new E2EReporter();
+      // the setup writes the state after the reporter was created
+      writeFileSync(path.join(root, "state.json"), JSON.stringify(state({ startedAt: new Date().toISOString(), environmentError: { kind: "PortBusy", message: "порт 55432 занят" } })));
       reporter.onError({ message: "global setup failed" } as TestError);
       quiet(() => reporter.onEnd({ status: "failed", startTime: new Date(), duration: 1 } as FullResult));
     } finally {
@@ -556,17 +593,21 @@ describe("reporter end to end", () => {
   test("a run over 15 minutes prints the budget warning to stdout and into the report", () => {
     const root = path.join(tmp, "run-slow");
     mkdirSync(root, { recursive: true });
-    writeFileSync(path.join(root, "state.json"), JSON.stringify(state({ startedAt: new Date(Date.now() - 16 * 60_000).toISOString() })));
     const a = fakeTest({ id: "a", title: "slow" });
-    const reporter = new E2EReporter({ runRoot: root });
-    reporter.onBegin({} as FullConfig, suiteOf([a]));
-    finish(reporter, a, fakeResult({ status: "passed" }));
     const warnings: string[] = [];
     const { log, warn } = console;
     console.log = () => undefined;
     console.warn = (...args: unknown[]) => void warnings.push(args.join(" "));
     try {
-      reporter.onEnd({ status: "passed", startTime: new Date(), duration: 1 } as FullResult);
+      withClock((tick) => {
+        const reporter = new E2EReporter({ runRoot: root });
+        writeFileSync(path.join(root, "state.json"), JSON.stringify(state({ startedAt: new Date().toISOString() })));
+        tick(10 * 60_000); // setup and build: not counted
+        reporter.onBegin({} as FullConfig, suiteOf([a]));
+        tick(16 * 60_000);
+        finish(reporter, a, fakeResult({ status: "passed" }));
+        reporter.onEnd({ status: "passed", startTime: new Date(), duration: 1 } as FullResult);
+      });
     } finally {
       console.log = log;
       console.warn = warn;
@@ -574,6 +615,60 @@ describe("reporter end to end", () => {
     assert.equal(warnings.length, 1);
     assert.match(warnings[0] ?? "", /^Внимание: прогон занял 16 мин/);
     assert.match(readFileSync(path.join(root, "report", "report.md"), "utf8"), /- Внимание: прогон занял 16 мин/);
+  });
+
+  test("a slow setup does not count: 14 min of tests after a 20 min build is within the budget", () => {
+    const root = path.join(tmp, "run-slow-setup");
+    mkdirSync(root, { recursive: true });
+    const a = fakeTest({ id: "a", title: "ok" });
+    const warnings: string[] = [];
+    const { log, warn } = console;
+    console.log = () => undefined;
+    console.warn = (...args: unknown[]) => void warnings.push(args.join(" "));
+    try {
+      withClock((tick) => {
+        const reporter = new E2EReporter({ runRoot: root });
+        writeFileSync(path.join(root, "state.json"), JSON.stringify(state({ startedAt: new Date().toISOString() })));
+        tick(20 * 60_000);
+        reporter.onBegin({} as FullConfig, suiteOf([a]));
+        tick(14 * 60_000);
+        finish(reporter, a, fakeResult({ status: "passed" }));
+        reporter.onEnd({ status: "passed", startTime: new Date(), duration: 1 } as FullResult);
+      });
+    } finally {
+      console.log = log;
+      console.warn = warn;
+    }
+    assert.deepEqual(warnings, []);
+    assert.match(readFileSync(path.join(root, "report", "report.md"), "utf8"), /- Время прогона: 14 мин 0 с/);
+  });
+
+  test("a state.json of the previous run (older than the reporter) is ignored: no old startFailure shows up as «сломано»", () => {
+    const root = path.join(tmp, "run-stale");
+    mkdirSync(root, { recursive: true });
+    const old = state({
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+      startFailure: { kind: "BuildFailed", message: "старая сборка не удалась" },
+      environmentError: { kind: "DockerNotRunning", message: "старый Docker" },
+    });
+    writeFileSync(path.join(root, "state.json"), JSON.stringify(old));
+    const a = fakeTest({ id: "a", title: "t", annotations: [{ type: AnnotationFeature, description: "Запуск приложения" }] });
+    const reporter = new E2EReporter({ runRoot: root });
+    reporter.onBegin({} as FullConfig, suiteOf([a]));
+    finish(reporter, a, fakeResult({ status: "passed" }));
+    quiet(() => reporter.onEnd({ status: "passed", startTime: new Date(), duration: 1 } as FullResult));
+    const text = readFileSync(path.join(root, "report", "report.md"), "utf8");
+    assert.ok(rowOf(text, "Запуск приложения").includes("| готово |"), text);
+    assert.ok(!text.includes("старая сборка") && !text.includes("старый Docker"), text);
+    assert.ok(!text.includes("Начало прогона"), "the old start time is not shown either");
+
+    // the same file written after the reporter is this run's
+    const fresh = new E2EReporter({ runRoot: root });
+    writeFileSync(path.join(root, "state.json"), JSON.stringify({ ...old, startedAt: new Date().toISOString() }));
+    fresh.onBegin({} as FullConfig, suiteOf([a]));
+    finish(fresh, a, fakeResult({ status: "passed" }));
+    quiet(() => fresh.onEnd({ status: "passed", startTime: new Date(), duration: 1 } as FullResult));
+    assert.ok(readFileSync(path.join(root, "report", "report.md"), "utf8").includes("старый Docker"));
   });
 });
 

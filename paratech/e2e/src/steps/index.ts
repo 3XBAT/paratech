@@ -84,7 +84,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   },
 
   llm: async ({}, use) => {
-    await use(createLlm(requireEnv(EnvFakeUrl)));
+    await use(createLlm(requireEnv(EnvFakeUrl), undefined, unscriptedGuard()));
   },
 
   e2eGuard: [

@@ -20,16 +20,38 @@ const authHeader = /\b(authorization|x-api-key)(\s*[:=]\s*)(bearer\s+)?[^\s,;"']
 
 const assignment = /\b(PARATECH_E2E_[A-Z0-9_]+)(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/g;
 
-/** The secret values currently in env, longest first so a value that contains another is replaced whole. */
+// Values that left process.env on purpose (the global setup removes the provider settings once the Hub has them) but must
+// still be scrubbed. Shared through globalThis like the run handle: the setup and the reporter may be separate module
+// instances of the same Playwright main process.
+const registryKey = Symbol.for("paratech.e2e.scrubbed-secrets");
+type Slot = { [registryKey]?: Set<string> };
+
+/** Remembers secret values to scrub even though they are no longer in the environment. Short values are ignored. */
+export function registerSecrets(values: ReadonlyArray<string | undefined>): void {
+  const slot = globalThis as Slot;
+  const set = (slot[registryKey] ??= new Set<string>());
+  for (const v of values) {
+    if (v && v.length >= minSecretLength) {
+      set.add(v);
+    }
+  }
+}
+
+/** Forgets the registered values (tests). */
+export function clearRegisteredSecrets(): void {
+  delete (globalThis as Slot)[registryKey];
+}
+
+/** The secret values currently in env plus the registered ones, longest first so a value that contains another is replaced whole. */
 export function secretValues(env: NodeJS.ProcessEnv = process.env): string[] {
-  const values: string[] = [];
+  const values = new Set<string>((globalThis as Slot)[registryKey] ?? []);
   for (const name of SecretEnvNames) {
     const v = env[name];
     if (v && v.length >= minSecretLength) {
-      values.push(v);
+      values.add(v);
     }
   }
-  return values.sort((a, b) => b.length - a.length);
+  return [...values].sort((a, b) => b.length - a.length);
 }
 
 /** Replaces secrets in text: the env values, pthub_ keys, sk- provider keys, auth headers, PARATECH_E2E_*=value. */

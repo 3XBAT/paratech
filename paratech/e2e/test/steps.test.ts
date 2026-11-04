@@ -297,6 +297,32 @@ describe("llm helper against the real fake server", () => {
     await llm.assertNoUnmatched();
   });
 
+  test("script() with the guard throws for an unscripted call it would erase, once; leftovers before the baseline are ignored", async () => {
+    const plain = createLlm(fake.url);
+    await plain.script([]);
+    await ask("остаток прошлого теста");
+    const guard = new UnscriptedGuard(createLlm(fake.url));
+    await guard.baseline();
+    const llm = createLlm(fake.url, 10_000, guard);
+
+    // the first script() of a test: the leftover is the previous test's, not this one's
+    await llm.script([{ kind: "plain", match: "", reply: "ok" }]);
+
+    assert.equal((await ask("первый")).status, 200);
+    assert.equal((await ask("не по сценарию")).status, 500);
+    await assert.rejects(llm.script([{ kind: "plain", match: "", reply: "второй" }]), (e: unknown) => {
+      assert.ok(e instanceof UnscriptedLlmError);
+      assert.match(e.message, /«не по сценарию»/);
+      return true;
+    });
+    assert.equal((await llm.unmatched()).length, 1, "the refused script() did not clear anything");
+
+    // reported once: the next script() goes through and the guard has nothing left for step()
+    await llm.script([{ kind: "plain", match: "", reply: "второй" }]);
+    assert.equal(await guard.check(), undefined);
+    assert.equal((await ask("второй")).status, 200);
+  });
+
   test("an unknown endpoint and a stream request are unscripted calls too", async () => {
     const llm = createLlm(fake.url);
     await llm.script([{ kind: "plain", match: "", reply: "ok" }]);

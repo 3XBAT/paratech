@@ -5,7 +5,7 @@ import path from "node:path";
 
 import type { FullConfig, FullResult, Reporter, Suite, TestCase, TestError, TestResult } from "@playwright/test/reporter";
 
-import { EnvMode, EnvRunRoot, ReportDirName, ReportFileName } from "../contract.js";
+import { EnvMode, EnvRunRoot, ReportDirName, ReportFileName, type RunState } from "../contract.js";
 import { toRecord } from "./collect.js";
 import type { ReportInput, RunMode, TestRecord } from "./model.js";
 import { budgetWarning, renderReport } from "./render.js";
@@ -26,7 +26,11 @@ export default class E2EReporter implements Reporter {
   private readonly options: ReporterOptions | undefined;
   private readonly records = new Map<string, TestRecord>();
   private readonly runnerErrors: string[] = [];
-  private begun = Date.now();
+  // Playwright builds the reporter at config load, before the global setup writes this run's state.json: a state older
+  // than that is the previous run's (a wipe that failed half-way leaves it) and must not be read.
+  private readonly created = Date.now();
+  // When the tests start (after the setup and the exe build); the 15 min budget counts from here.
+  private begun: number | undefined;
   private store?: ScreenshotStore;
 
   constructor(options?: ReporterOptions) {
@@ -61,9 +65,8 @@ export default class E2EReporter implements Reporter {
 
   onEnd(result: FullResult): void {
     const runRoot = resolveRunRoot(this.options, process.env, process.cwd());
-    const state = readRunState(runRoot);
-    const startMs = state?.startedAt ? Date.parse(state.startedAt) : Number.NaN;
-    const elapsedMs = Date.now() - (Number.isNaN(startMs) ? this.begun : startMs);
+    const state = this.currentState(runRoot);
+    const elapsedMs = this.begun === undefined ? 0 : Date.now() - this.begun; // no onBegin: no test ever started
     const mode = modeOf(state?.mode ?? process.env[EnvMode]);
 
     if (result.status === "timedout" || result.status === "interrupted") {
@@ -95,6 +98,13 @@ export default class E2EReporter implements Reporter {
       console.warn(scrubSecrets(warn));
     }
     console.log(`Отчёт: ${file}`);
+  }
+
+  /** state.json of THIS run: written after the reporter was created. Missing, unreadable or older: undefined. */
+  private currentState(runRoot: string): RunState | undefined {
+    const state = readRunState(runRoot);
+    const startedMs = state?.startedAt ? Date.parse(state.startedAt) : Number.NaN;
+    return Number.isNaN(startedMs) || startedMs < this.created ? undefined : state;
   }
 
   private screenshots(): ScreenshotStore {
