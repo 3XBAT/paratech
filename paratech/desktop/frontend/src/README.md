@@ -19,6 +19,7 @@ business rules and no secrets: every read and action is a call to a Go service b
   `methods` table with full Go names, `parse*` validators of untrusted replies, `xxxApi(call)` factory.
   `bindings/runtime.ts` is the only place that touches the Wails runtime (`callByName`, `onEvent`, `onEventData`).
 - `ui/` - shared components (`Button`, `IconAction`, `Rail`, `Icon`, `controls.tsx`, `Toast`, `Breadcrumbs`), theme/accent, tokens CSS.
+  `StatusChip` sets `data-status=<kind>` on its root: a marker for the E2E layout check, not for styling.
 - `agent/` - the agent panel and its cards: see `agent/README.md`.
 - `popup/` - the popup window (`Popup.tsx`, `view.ts`, `joinView.ts`, `popup.css`); it must not take focus on its own (AC-01).
 - `sourcePicker/` - audio-source picker shared by the popup, `pages/RecordingsPage.tsx` and `pages/DiagnosticsPage.tsx`.
