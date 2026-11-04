@@ -321,7 +321,13 @@ export const ringTexts = {
   normal: "Агент помнит весь разговор.",
   high: "Скоро агент начнёт сжимать начало разговора.",
   full: "Память чата почти заполнена: новый чат ответит точнее.",
+  /** The history no longer fits and the start was dropped (not necessarily by a compaction); not blaming. */
+  overflow: "Начало разговора агент уже не помнит: новый чат ответит точнее.",
+  /** The quiet line by the field while the agent compacts the chat (TASK-270). */
+  compacting: "Уплотнение контекста…",
   hint: "Начать новый чат? Этот чат почти заполнен и останется в списке.",
+  /** Under the field when the start was already dropped (overflow). */
+  overflowHint: "Начать новый чат? Начало этого разговора агент уже не помнит; чат останется в списке.",
   hintButton: chatTexts.newChat,
 } as const;
 
@@ -334,6 +340,8 @@ export interface RingModel {
   text: string;
   /** The line under the field with «Новый чат». */
   hint: boolean;
+  /** The sentence of that line: the overflow one when the start is already dropped; empty without a hint. */
+  hintText: string;
 }
 
 /** The ring for a fill; null (unknown fill, or an empty chat at 0 %) draws nothing. */
@@ -346,7 +354,14 @@ export function ringModel(fill: ContextFill | null): RingModel | null {
     return null;
   }
   const level = fill.overflow ? "full" : fill.level;
-  return { percent, level, text: `${ringTexts.label(percent)}. ${ringTexts[level]}`, hint: level === "full" };
+  const hint = level === "full";
+  return {
+    percent,
+    level,
+    text: `${ringTexts.label(percent)}. ${fill.overflow ? ringTexts.overflow : ringTexts[level]}`,
+    hint,
+    hintText: !hint ? "" : fill.overflow ? ringTexts.overflowHint : ringTexts.hint,
+  };
 }
 
 /** The last known fill of every chat, by thread id. A chat with an unreadable fill has no entry. */
@@ -405,6 +420,45 @@ export function fillsFromUpdate(prev: FillMap, update: Pick<UpdateView, "threadI
     return prev;
   }
   return { ...prev, [update.threadId]: update.fill };
+}
+
+/** The chats whose context the agent is compacting right now (TASK-270), by thread id. */
+export type CompactingMap = Readonly<Record<string, true>>;
+
+/**
+ * The compacting chats after an update. A compaction update (non-empty thread only: an Ask without a chat shows nothing)
+ * adds or removes its chat. A real update of a chat also removes it: the request starts only after the compaction, so a
+ * lost end update can never leave the note on. Anything else returns the same object.
+ */
+export function compactingFromUpdate(prev: CompactingMap, update: Pick<UpdateView, "threadId" | "compaction" | "compacting">): CompactingMap {
+  const id = update.threadId;
+  if (id === "") {
+    return prev;
+  }
+  const has = Object.prototype.hasOwnProperty.call(prev, id);
+  if (update.compaction && update.compacting) {
+    return has ? prev : { ...prev, [id]: true };
+  }
+  if (!has) {
+    return prev;
+  }
+  const { [id]: _gone, ...rest } = prev;
+  return rest;
+}
+
+/** The compacting chats after the chat list was read: chats that are no longer listed are dropped. */
+export function compactingFromList(prev: CompactingMap, chats: readonly ChatView[]): CompactingMap {
+  const ids = Object.keys(prev);
+  const listed = new Set(chats.map((c) => c.threadId));
+  if (ids.every((id) => listed.has(id))) {
+    return prev;
+  }
+  return Object.fromEntries(ids.filter((id) => listed.has(id)).map((id) => [id, true as const]));
+}
+
+/** Is the open chat being compacted. No chat open: no. */
+export function compactingOf(map: CompactingMap, openId: string): boolean {
+  return openId !== "" && Object.prototype.hasOwnProperty.call(map, openId);
 }
 
 /** The fill to draw for the open chat; null: nothing. */
