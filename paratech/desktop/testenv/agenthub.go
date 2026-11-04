@@ -319,6 +319,10 @@ func agentSeal(thread string, catalog uint32, calls []*hubv1.ToolCall) []byte {
 
 func checkAgentHistory(req *hubv1.AgentStepRequest, catalog uint32) error {
 	turns := req.GetTurns()
+	// From catalog 9 the history may open with the chat's summary, always followed by a student text (ADR-0028).
+	if len(turns) > 0 && turns[0].GetHistorySummary() != "" && req.GetCatalogVersion() >= 9 {
+		turns = turns[1:]
+	}
 	if len(turns) == 0 || turns[0].GetStudentText() == "" {
 		return errors.New("fake hub: the first turn must be the student's text")
 	}
