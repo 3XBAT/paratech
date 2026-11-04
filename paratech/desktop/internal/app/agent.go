@@ -116,7 +116,7 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, summarizer agentcomp
 		return fmt.Errorf("app: agent chats: %w", err)
 	}
 	c.panel.SetFills(c.chats) // the ring of a chat in the update that ends its request (ADR-0028)
-	// Context compaction (ADR-0028) on the same rows; nothing runs it yet (the Driver does, TASK-269).
+	// Context compaction (ADR-0028) on the same rows; the Driver runs it before an Ask (TASK-269).
 	c.compact, err = agentcompact.New(agentcompact.Deps{
 		Chats: sqlite.NewAgentThreadRepository(c.db), History: sqlite.NewAgentHistory(c.db, e.clock),
 		Summarizer: summarizer, Clock: e.clock, Log: log,
@@ -128,7 +128,8 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, summarizer agentcomp
 		Turns: c.agent, Sink: panelSink{c.panel}, Library: reads.library, Inspector: reads.library, Answerer: reads.answers,
 		Knowledge: reads.knowledge, Activity: reads.activity, Schedule: reads.schedule,
 		Assignments: reads.assignments, Deliveries: reads.deliveries, Journal: c.journal, Actions: actions,
-		Proposals: reads.assignments, Deletions: c.deletions, Drafts: c.drafts, Replies: replies, Clock: e.local, Log: log,
+		Proposals: reads.assignments, Deletions: c.deletions, Drafts: c.drafts, Replies: replies, Compactor: c.compact,
+		Clock: e.local, Log: log,
 		// The schedule-subjects card only: its «Да» is AgentConfirmService.ConfirmSchedule, never the Driver.
 		Subjects: reads.library,
 	})
@@ -184,10 +185,14 @@ func (s panelSink) Publish(u agentloop.Update) {
 }
 
 func panelUpdate(u agentloop.Update) wails.AgentUpdate {
-	return wails.AgentUpdate{
+	w := wails.AgentUpdate{
 		Thread: u.Thread, Turn: u.Turn, Scope: u.Scope, Status: u.Status, StopReason: u.StopReason, Cards: u.Cards,
-		Problem: string(u.Problem), Progress: u.Progress,
+		Problem: string(u.Problem), Progress: u.Progress, Compaction: u.Compaction, Compacting: u.Compacting,
 	}
+	if u.Fill != nil {
+		w.Fill = &wails.AgentFillView{Percent: u.Fill.Percent, Level: string(u.Fill.Level), Overflow: u.Fill.Overflow}
+	}
+	return w
 }
 
 // driverCurrent reads the current request of a chat through the Driver for the panel (TASK-272); mapping only, as

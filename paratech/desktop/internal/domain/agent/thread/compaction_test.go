@@ -78,7 +78,7 @@ func TestCompactionRequestFollowsThePlan(t *testing.T) {
 				}
 				return
 			}
-			if req.Through() != through || req.Key() != fmt.Sprintf("cs:th1:%d", through) || req.Thread() != "th1" ||
+			if req.Through() != through || !strings.HasPrefix(req.Key(), fmt.Sprintf("cs:th1:%d:", through)) || req.Thread() != "th1" ||
 				req.Previous() != th.Summary().Text() {
 				t.Fatalf("request %s through %d, previous %q", req.Key(), req.Through(), req.Previous())
 			}

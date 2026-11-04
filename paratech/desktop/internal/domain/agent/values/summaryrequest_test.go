@@ -1,7 +1,10 @@
 package values
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -87,8 +90,9 @@ func TestSummaryRequestKeyAndCopies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Key() != "cs:th1:12" || r.Previous() != "" {
-		t.Fatalf("key %q, previous %q", r.Key(), r.Previous())
+	sum := sha256.Sum256([]byte(`{"summary":"","pairs":[{"student":"a","reply":"b"}]}`))
+	if want := "cs:th1:12:" + hex.EncodeToString(sum[:4]); r.Key() != want || r.Previous() != "" {
+		t.Fatalf("key %q, want %q; previous %q", r.Key(), want, r.Previous())
 	}
 	pairs[0].Student = "changed"
 	got := r.Pairs()
@@ -138,6 +142,58 @@ func TestSummaryRequestEqual(t *testing.T) {
 		if got := base.Equal(tt.r); got != tt.want || tt.r.Equal(base) != tt.want {
 			t.Errorf("%s: Equal = %v, want %v", tt.name, got, tt.want)
 		}
+	}
+}
+
+// The key names the chat, Through and the data: the same data is the same key, any other data another key. It stays
+// within the Hub's key rules (1-128 printable ASCII without spaces).
+func TestSummaryRequestKey(t *testing.T) {
+	prev, err := ParseHistorySummary(4, "сводка")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := ParseHistorySummary(4, "другая сводка")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairs := []SummaryPair{{Student: "a", Reply: "b"}, {Student: "c"}}
+	build := func(thread shared.ThreadID, previous HistorySummary, through int, pairs []SummaryPair) SummaryRequest {
+		t.Helper()
+		r, err := NewSummaryRequest(thread, previous, through, pairs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	base := build("th1", prev, 10, pairs)
+	shape := regexp.MustCompile(`^cs:th1:10:[0-9a-f]{8}$`)
+	if !shape.MatchString(base.Key()) {
+		t.Fatalf("key %q", base.Key())
+	}
+	tests := []struct {
+		name string
+		r    SummaryRequest
+		same bool
+	}{
+		{"same data", build("th1", prev, 10, []SummaryPair{{Student: "a", Reply: "b"}, {Student: "c"}}), true},
+		{"other thread", build("th2", prev, 10, pairs), false},
+		{"other through", build("th1", prev, 11, pairs), false},
+		{"other previous", build("th1", other, 10, pairs), false},
+		{"no previous", build("th1", HistorySummary{}, 10, pairs), false},
+		{"other student", build("th1", prev, 10, []SummaryPair{{Student: "x", Reply: "b"}, {Student: "c"}}), false},
+		{"other reply", build("th1", prev, 10, []SummaryPair{{Student: "a", Reply: "x"}, {Student: "c"}}), false},
+		{"fewer pairs", build("th1", prev, 10, pairs[:1]), false},
+	}
+	for _, tt := range tests {
+		if got := tt.r.Key() == base.Key(); got != tt.same {
+			t.Errorf("%s: key %q vs %q, same = %v", tt.name, tt.r.Key(), base.Key(), got)
+		}
+	}
+
+	// The longest thread id the desktop generates (26 characters) and a large Through stay far below 128.
+	long := build(shared.ThreadID(strings.Repeat("z", 26)), HistorySummary{}, 1_000_000, pairs)
+	if k := long.Key(); len(k) > 128 || strings.ContainsFunc(k, func(r rune) bool { return r <= ' ' || r > '~' }) {
+		t.Fatalf("key %q breaks the Hub's key rules", k)
 	}
 }
 

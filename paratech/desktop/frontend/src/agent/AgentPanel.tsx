@@ -284,6 +284,11 @@ export function AgentPanel(props: {
     onEventData(updateEvent, (data) => {
       try {
         const update = parseUpdate(data);
+        // The compaction state of a chat is no request: only a new fill (the end of a successful one) redraws the ring.
+        if (update.compaction) {
+          setFills((f) => fillsFromUpdate(f, update));
+          return;
+        }
         dispatch({ type: "update", update });
         setFills((f) => fillsFromUpdate(f, update));
         // With no chat open (and the first list read done), the first real update names the chat the request created.

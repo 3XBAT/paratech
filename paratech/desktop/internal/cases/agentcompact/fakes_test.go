@@ -177,13 +177,14 @@ func (h *memHistory) drop(id shared.ThreadID, from, by int) {
 }
 
 // fakeHub is the Summarizer: it records the requests and answers with answer(n), n counting from 1. When hold is
-// set, each call first signals arrived and waits for hold to close.
+// set, each call (of chat holdOnly only, when that is set) first signals arrived and waits for hold to close.
 type fakeHub struct {
-	mu      sync.Mutex
-	reqs    []values.SummaryRequest
-	answer  func(n int) (string, error)
-	arrived chan struct{}
-	hold    chan struct{}
+	mu       sync.Mutex
+	reqs     []values.SummaryRequest
+	answer   func(n int) (string, error)
+	arrived  chan struct{}
+	hold     chan struct{}
+	holdOnly shared.ThreadID
 }
 
 func (f *fakeHub) Summarize(ctx context.Context, req values.SummaryRequest) (string, error) {
@@ -191,7 +192,7 @@ func (f *fakeHub) Summarize(ctx context.Context, req values.SummaryRequest) (str
 	f.reqs = append(f.reqs, req)
 	n := len(f.reqs)
 	f.mu.Unlock()
-	if f.hold != nil {
+	if f.hold != nil && (f.holdOnly == "" || f.holdOnly == req.Thread()) {
 		f.arrived <- struct{}{}
 		select {
 		case <-f.hold:

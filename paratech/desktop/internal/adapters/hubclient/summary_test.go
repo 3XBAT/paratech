@@ -2,6 +2,8 @@ package hubclient
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -55,11 +57,13 @@ func TestSummarizeSendsExactlyTheContractFields(t *testing.T) {
 		t.Fatalf("Summarize = %q, %v", got, err)
 	}
 	reqs, headers := f.calls()
+	data := `{"summary":"сводка просьб 1–2","pairs":[{"student":"задача 5\nи 6","reply":"reply: решение"},` +
+		`{"student":"а <b>&</b>?","reply":""}]}`
+	sum := sha256.Sum256([]byte(data))
 	want := &hubv1.CompleteRequest{Spec: &hubv1.CompletionSpec{
-		IdempotencyKey: "cs:th1:12",
+		IdempotencyKey: "cs:th1:12:" + hex.EncodeToString(sum[:4]), // the hash of exactly the data sent
 		OperationType:  hubv1.OperationType_OPERATION_TYPE_CHAT_SUMMARY,
-		UntrustedData: `{"summary":"сводка просьб 1–2","pairs":[{"student":"задача 5\nи 6","reply":"reply: решение"},` +
-			`{"student":"а <b>&</b>?","reply":""}]}`,
+		UntrustedData:  data,
 	}}
 	if len(reqs) != 1 || !proto.Equal(reqs[0], want) {
 		t.Fatalf("request on the wire:\n got %v\nwant %v", reqs, want)
@@ -77,6 +81,11 @@ func TestSummaryDataSizeMatchesTheDomain(t *testing.T) {
 		agent.SummaryPair{Student: "без экранов", Reply: "<html>"})
 	if got := summaryData(req); len(got) != req.EncodedSize() {
 		t.Fatalf("data of %d bytes, the domain counted %d", len(got), req.EncodedSize())
+	}
+	// The key hashes the same bytes, so the same data is the same key on the Hub.
+	sum := sha256.Sum256([]byte(summaryData(req)))
+	if want := "cs:th1:12:" + hex.EncodeToString(sum[:4]); req.Key() != want {
+		t.Fatalf("key %q, want %q", req.Key(), want)
 	}
 	if got := summaryData(summaryRequest(t, "")); !strings.HasPrefix(got, `{"summary":"","pairs":[`) {
 		t.Fatalf("without a previous summary: %s", got)

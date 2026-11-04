@@ -135,7 +135,7 @@ fragments with distinct chunk IDs, up to 8 KiB each and 128 KiB together) and re
 `{"claims":[{"text","cites":[{"chunk_id","quote"}]}],"missing":[]}`: up to 8 claims, each with 1-3 citations of chunk IDs that
 were sent, up to 5 unanswered parts, at least one of the two; whether a quote is really in its fragment is the desktop's check
 (`hub/internal/domain/llm/services/answer`, same refusal rule). `CHAT_SUMMARY` (context compaction, ADR-0028; key
-`cs:<thread>:<through>`) takes `{"summary","pairs":[{"student","reply"}]}` (at most 64 KiB, previous summary up to 8 KiB and
+`cs:<thread>:<through>:<hash8>`) takes `{"summary","pairs":[{"student","reply"}]}` (at most 64 KiB, previous summary up to 8 KiB and
 may be empty, 1-10 pairs, student text up to 4 KiB and not blank, reply up to 2 KiB and may be empty) and returns
 `{"summary"}`: plain text in Russian; stray control, format and bidi characters are removed and other whitespace becomes a
 space, then it must keep 1-4000 characters and at most 8 KiB, otherwise it is refused, never cut

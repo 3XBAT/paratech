@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
@@ -50,8 +51,8 @@ func TestNoCompactionNeeded(t *testing.T) {
 	e.chat(t, "c1", 12, false)
 	saves := e.chats.saved()
 
-	got, err := e.svc.Compact(t.Context(), "c1")
-	if err != nil || got != (Result{Fill: Fill{Percent: 60, Level: thread.FillNormal}}) {
+	got, err := e.svc.Compact(t.Context(), "c1", nil)
+	if err != nil || got != (Result{Thread: "c1", Fill: Fill{Percent: 60, Level: thread.FillNormal}}) {
 		t.Fatalf("Compact = %+v, %v", got, err)
 	}
 	if len(e.hub.calls()) != 0 || e.chats.saved() != saves {
@@ -65,8 +66,8 @@ func TestCompactsAFullChat(t *testing.T) {
 	e := newEnv(t)
 	e.chat(t, "c1", 21, false)
 
-	got, err := e.svc.Compact(t.Context(), "c1")
-	if err != nil || got != (Result{Compacted: true, Fill: Fill{Percent: 55, Level: thread.FillNormal}}) {
+	got, err := e.svc.Compact(t.Context(), "c1", nil)
+	if err != nil || got != (Result{Thread: "c1", Compacted: true, Fill: Fill{Percent: 55, Level: thread.FillNormal}}) {
 		t.Fatalf("Compact = %+v, %v", got, err)
 	}
 	calls := e.hub.calls()
@@ -77,7 +78,7 @@ func TestCompactsAFullChat(t *testing.T) {
 	for n := 1; n <= 10; n++ {
 		want = append(want, values.SummaryPair{Student: numbered(n), Reply: fmt.Sprintf("reply: ответ %d", n)})
 	}
-	if r := calls[0]; r.Key() != "cs:c1:10" || r.Through() != 10 || r.Previous() != "" || !reflect.DeepEqual(r.Pairs(), want) {
+	if r := calls[0]; !strings.HasPrefix(r.Key(), "cs:c1:10:") || r.Through() != 10 || r.Previous() != "" || !reflect.DeepEqual(r.Pairs(), want) {
 		t.Fatalf("request %s through %d previous %q pairs %+v", r.Key(), r.Through(), r.Previous(), r.Pairs())
 	}
 	if s := e.chats.stored(t, "c1").Summary(); s.Through() != 10 || s.Text() != "Сводка: обсуждали физику." {
@@ -87,14 +88,14 @@ func TestCompactsAFullChat(t *testing.T) {
 	// The next compaction carries the stored summary as the previous one.
 	e.chat(t, "c2", 31, false)
 	e.hub.answer = answering("Вторая сводка.")
-	if _, err := e.svc.Compact(t.Context(), "c2"); err != nil {
+	if _, err := e.svc.Compact(t.Context(), "c2", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.svc.Compact(t.Context(), "c2"); err != nil {
+	if _, err := e.svc.Compact(t.Context(), "c2", nil); err != nil {
 		t.Fatal(err)
 	}
 	calls = e.hub.calls()
-	if len(calls) != 3 || calls[2].Key() != "cs:c2:20" || calls[2].Previous() != "Вторая сводка." {
+	if len(calls) != 3 || !strings.HasPrefix(calls[2].Key(), "cs:c2:20:") || calls[2].Previous() != "Вторая сводка." {
 		t.Fatalf("second compaction of c2: %d calls, last %s previous %q", len(calls), calls[len(calls)-1].Key(), calls[len(calls)-1].Previous())
 	}
 }
@@ -122,7 +123,7 @@ func TestHubFailures(t *testing.T) {
 			saves := e.chats.saved()
 			e.hub.answer = func(int) (string, error) { return "", tt.err }
 
-			got, err := e.svc.Compact(t.Context(), "c1")
+			got, err := e.svc.Compact(t.Context(), "c1", nil)
 			onlyCode(t, err, tt.want)
 			if !errors.Is(err, tt.err) || got != (Result{}) {
 				t.Fatalf("Compact = %+v, %v; the cause is lost", got, err)
@@ -143,7 +144,7 @@ func TestCallerGone(t *testing.T) {
 		cancel()
 		return "", errors.Join(errors.New("rejected"), backoff.ErrPermanent)
 	}
-	_, err := e.svc.Compact(ctx, "c1")
+	_, err := e.svc.Compact(ctx, "c1", nil)
 	onlyCode(t, err, ErrUnavailable)
 }
 
@@ -163,12 +164,12 @@ func TestInvalidSummaryText(t *testing.T) {
 			saves := e.chats.saved()
 			e.hub.answer = answering(text)
 
-			_, err := e.svc.Compact(t.Context(), "c1")
+			_, err := e.svc.Compact(t.Context(), "c1", nil)
 			onlyCode(t, err, ErrRefused)
 			if !errors.Is(err, values.ErrInvalidSummary) || e.chats.saved() != saves {
 				t.Fatalf("Compact = %v, saves %d → %d", err, saves, e.chats.saved())
 			}
-			_, err = e.svc.Compact(t.Context(), "c1")
+			_, err = e.svc.Compact(t.Context(), "c1", nil)
 			onlyCode(t, err, ErrRefused)
 			if len(e.hub.calls()) != 1 {
 				t.Fatalf("the refused key was asked %d times", len(e.hub.calls()))
@@ -185,7 +186,7 @@ func TestRefusedKeyIsRemembered(t *testing.T) {
 		return "", errors.Join(errors.New("provider"), backoff.ErrPermanent, values.ErrSummaryRefused)
 	}
 	for range 3 {
-		_, err := e.svc.Compact(t.Context(), "c1")
+		_, err := e.svc.Compact(t.Context(), "c1", nil)
 		onlyCode(t, err, ErrRefused)
 	}
 	if n := len(e.hub.calls()); n != 1 {
@@ -194,7 +195,7 @@ func TestRefusedKeyIsRemembered(t *testing.T) {
 
 	// Another chat is another key.
 	e.chat(t, "c2", 21, false)
-	if _, err := e.svc.Compact(t.Context(), "c2"); !errors.Is(err, ErrRefused) || len(e.hub.calls()) != 2 {
+	if _, err := e.svc.Compact(t.Context(), "c2", nil); !errors.Is(err, ErrRefused) || len(e.hub.calls()) != 2 {
 		t.Fatalf("another key: %v, %d calls", err, len(e.hub.calls()))
 	}
 
@@ -202,7 +203,7 @@ func TestRefusedKeyIsRemembered(t *testing.T) {
 	e.chat(t, "c3", 21, false)
 	e.hub.answer = func(int) (string, error) { return "", errors.Join(errors.New("bad key"), backoff.ErrPermanent) }
 	for range 2 {
-		_, err := e.svc.Compact(t.Context(), "c3")
+		_, err := e.svc.Compact(t.Context(), "c3", nil)
 		onlyCode(t, err, ErrRefused)
 	}
 	if n := len(e.hub.calls()); n != 4 {
@@ -216,11 +217,114 @@ func TestRefusedKeyIsRemembered(t *testing.T) {
 		}
 		return "Сводка.", nil
 	}
-	if _, err := e.svc.Compact(t.Context(), "c4"); !errors.Is(err, ErrUnavailable) {
+	if _, err := e.svc.Compact(t.Context(), "c4", nil); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("network = %v", err)
 	}
-	if got, err := e.svc.Compact(t.Context(), "c4"); err != nil || !got.Compacted || len(e.hub.calls()) != 6 {
+	if got, err := e.svc.Compact(t.Context(), "c4", nil); err != nil || !got.Compacted || len(e.hub.calls()) != 6 {
 		t.Fatalf("after the network came back: %+v, %v, %d calls", got, err, len(e.hub.calls()))
+	}
+}
+
+// The refused key names the data: once the requests to summarize read otherwise (a restart changed their texts), the
+// same range is asked again; the same data stays refused.
+func TestRefusedRangeIsRetriedWhenItsDataChanges(t *testing.T) {
+	e := newEnv(t)
+	e.chat(t, "c1", 21, false)
+	e.hub.answer = func(int) (string, error) {
+		return "", errors.Join(errors.New("provider"), backoff.ErrPermanent, values.ErrSummaryRefused)
+	}
+	if _, err := e.svc.Compact(t.Context(), "c1", nil); !errors.Is(err, ErrRefused) {
+		t.Fatalf("Compact = %v", err)
+	}
+
+	e.history.entries["c1"] = historyOf(21, func(n int) string { return fmt.Sprintf("другая просьба %d", n) })
+	e.hub.answer = answering("Сводка.")
+	got, err := e.svc.Compact(t.Context(), "c1", nil)
+	calls := e.hub.calls()
+	if err != nil || !got.Compacted || len(calls) != 2 {
+		t.Fatalf("Compact = %+v, %v, %d Hub calls", got, err, len(calls))
+	}
+	if calls[0].Through() != calls[1].Through() || calls[0].Key() == calls[1].Key() {
+		t.Fatalf("keys %q and %q", calls[0].Key(), calls[1].Key())
+	}
+}
+
+// started is called once, right before the Hub call; never when no Hub call is made.
+func TestStartedOnlyBeforeTheHubCall(t *testing.T) {
+	t.Run("compaction", func(t *testing.T) {
+		e := newEnv(t)
+		e.chat(t, "c1", 21, false)
+		n := 0
+		e.hub.answer = func(int) (string, error) {
+			if n != 1 {
+				t.Errorf("the Hub was called after %d started calls", n)
+			}
+			return "Сводка.", nil
+		}
+		if _, err := e.svc.Compact(t.Context(), "c1", func() { n++ }); err != nil || n != 1 {
+			t.Fatalf("Compact = %v, started %d times", err, n)
+		}
+	})
+	t.Run("failed Hub call", func(t *testing.T) {
+		e := newEnv(t)
+		e.chat(t, "c1", 21, false)
+		e.hub.answer = func(int) (string, error) { return "", fmt.Errorf("hub: %w", shared.ErrNetworkUnavailable) }
+		n := 0
+		if _, err := e.svc.Compact(t.Context(), "c1", func() { n++ }); !errors.Is(err, ErrUnavailable) || n != 1 {
+			t.Fatalf("Compact = %v, started %d times", err, n)
+		}
+	})
+
+	for name, setup := range map[string]func(t *testing.T, e *env) shared.ThreadID{
+		"no compaction needed": func(t *testing.T, e *env) shared.ThreadID { e.chat(t, "c1", 12, false); return "c1" },
+		"running request":      func(t *testing.T, e *env) shared.ThreadID { e.chat(t, "c1", 22, true); return "c1" },
+		"missing chat":         func(*testing.T, *env) shared.ThreadID { return "nope" },
+		"no current chat":      func(*testing.T, *env) shared.ThreadID { return "" },
+		"invalid id":           func(*testing.T, *env) shared.ThreadID { return "a/b" },
+		"refused before": func(t *testing.T, e *env) shared.ThreadID {
+			e.chat(t, "c1", 21, false)
+			e.hub.answer = func(int) (string, error) {
+				return "", errors.Join(errors.New("provider"), backoff.ErrPermanent, values.ErrSummaryRefused)
+			}
+			_, _ = e.svc.Compact(t.Context(), "c1", nil)
+			return "c1"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			id := setup(t, e)
+			calls := len(e.hub.calls())
+			n := 0
+			_, _ = e.svc.Compact(t.Context(), id, func() { n++ })
+			if n != 0 || len(e.hub.calls()) != calls {
+				t.Fatalf("started %d times, %d Hub calls", n, len(e.hub.calls())-calls)
+			}
+		})
+	}
+}
+
+// A failure is logged by chat and code only: its cause may carry a text of the chat or the Hub.
+func TestFailureLogHasNoCause(t *testing.T) {
+	const secret = "ПРИЧИНА-с-текстом"
+	tests := map[string]func(e *env){
+		"hub":   func(e *env) { e.hub.answer = func(int) (string, error) { return "", errors.New(secret) } },
+		"store": func(e *env) { e.chats.saveErr = errors.New(secret) },
+		"read":  func(e *env) { e.history.err = errors.New(secret) },
+	}
+	for name, setup := range tests {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			e.chat(t, "c1", 21, false)
+			setup(e)
+			_, err := e.svc.Compact(t.Context(), "c1", nil)
+			if err == nil || !strings.Contains(err.Error(), secret) {
+				t.Fatalf("Compact = %v; the cause must stay in the error", err)
+			}
+			logged := e.log.String()
+			if strings.Contains(logged, secret) || !strings.Contains(logged, "thread=c1") || !strings.Contains(logged, "code=") {
+				t.Fatalf("log = %s", logged)
+			}
+		})
 	}
 }
 
@@ -269,8 +373,8 @@ func TestVersionConflictReappliesTheSummary(t *testing.T) {
 			e := newEnv(t)
 			e.chat(t, "c1", 21, false)
 			e.chats.beforeSave = once(func() { change(t, e) })
-			got, err := e.svc.Compact(t.Context(), "c1")
-			if err != nil || got != (Result{Compacted: true, Fill: Fill{Percent: 55, Level: thread.FillNormal}}) {
+			got, err := e.svc.Compact(t.Context(), "c1", nil)
+			if err != nil || got != (Result{Thread: "c1", Compacted: true, Fill: Fill{Percent: 55, Level: thread.FillNormal}}) {
 				t.Fatalf("Compact = %+v, %v", got, err)
 			}
 			if len(e.hub.calls()) != 1 || e.chats.stored(t, "c1").Summary().Through() != 10 {
@@ -314,7 +418,7 @@ func TestRestartDuringCallDropsTheSummary(t *testing.T) {
 				}
 				e.history.drop("c1", tt.from, 22)
 			})
-			got, err := e.svc.Compact(t.Context(), "c1")
+			got, err := e.svc.Compact(t.Context(), "c1", nil)
 			onlyCode(t, err, ErrChanged)
 			if !errors.Is(err, errRequestChanged) || got.Compacted || len(e.hub.calls()) != 1 {
 				t.Fatalf("Compact = %+v, %v, %d Hub calls", got, err, len(e.hub.calls()))
@@ -355,7 +459,7 @@ func TestStoreFailuresAfterTheAnswer(t *testing.T) {
 			defer cancel()
 			tt.setup(e, cancel)
 
-			got, err := e.svc.Compact(ctx, "c1")
+			got, err := e.svc.Compact(ctx, "c1", nil)
 			onlyCode(t, err, tt.want)
 			if !errors.Is(err, tt.cause) || got != (Result{}) || len(e.hub.calls()) != 1 {
 				t.Fatalf("Compact = %+v, %v, %d Hub calls", got, err, len(e.hub.calls()))
@@ -375,7 +479,7 @@ func TestVersionConflictGivesUp(t *testing.T) {
 		e := newEnv(t)
 		e.chat(t, "c1", 21, false)
 		e.chats.beforeSave = func() { e.chats.bump("c1") }
-		_, err := e.svc.Compact(t.Context(), "c1")
+		_, err := e.svc.Compact(t.Context(), "c1", nil)
 		onlyCode(t, err, ErrChanged)
 		if !errors.Is(err, shared.ErrVersionConflict) || len(e.hub.calls()) != 1 || !e.chats.stored(t, "c1").Summary().IsZero() {
 			t.Fatalf("Compact = %v, %d Hub calls", err, len(e.hub.calls()))
@@ -402,7 +506,7 @@ func TestVersionConflictGivesUp(t *testing.T) {
 				t.Error(err)
 			}
 		}
-		got, err := e.svc.Compact(t.Context(), "c1")
+		got, err := e.svc.Compact(t.Context(), "c1", nil)
 		onlyCode(t, err, ErrChanged)
 		if !errors.Is(err, errRequestChanged) || got.Compacted || len(e.hub.calls()) != 1 {
 			t.Fatalf("Compact = %+v, %v, %d Hub calls", got, err, len(e.hub.calls()))
@@ -417,7 +521,7 @@ func TestVersionConflictGivesUp(t *testing.T) {
 func TestRunningRequestIsBusy(t *testing.T) {
 	e := newEnv(t)
 	e.chat(t, "c1", 22, true)
-	_, err := e.svc.Compact(t.Context(), "c1")
+	_, err := e.svc.Compact(t.Context(), "c1", nil)
 	onlyCode(t, err, ErrBusy)
 	if !errors.Is(err, thread.ErrTurnInProgress) || len(e.hub.calls()) != 0 {
 		t.Fatalf("Compact = %v, %d Hub calls", err, len(e.hub.calls()))
@@ -434,7 +538,7 @@ func TestConcurrentCompactionsCallTheHubOnce(t *testing.T) {
 	results := make([]Result, 2)
 	errs := make([]error, 2)
 	for i := range 2 {
-		wg.Go(func() { results[i], errs[i] = e.svc.Compact(t.Context(), "c1") })
+		wg.Go(func() { results[i], errs[i] = e.svc.Compact(t.Context(), "c1", nil) })
 	}
 	<-e.hub.arrived
 	close(e.hub.hold)
@@ -449,18 +553,76 @@ func TestConcurrentCompactionsCallTheHubOnce(t *testing.T) {
 	if results[0].Fill != results[1].Fill {
 		t.Fatalf("fills differ: %+v", results)
 	}
+	if n := e.svc.lockCount(); n != 0 {
+		t.Fatalf("%d chat locks left", n)
+	}
+}
+
+// While the Hub call of one chat is held, Compacts of other chats run to their end (one needs a summary, one has
+// room), and a second Compact of the held chat waits until its caller goes away. No chat lock is left afterwards.
+func TestCompactionsOfOtherChatsDoNotWait(t *testing.T) {
+	e := newEnv(t)
+	e.chat(t, "a", 21, false)
+	e.chat(t, "b", 21, false)
+	e.chat(t, "c", 12, false)
+	e.hub.arrived, e.hub.hold, e.hub.holdOnly = make(chan struct{}, 1), make(chan struct{}), "a"
+
+	var (
+		wg   sync.WaitGroup
+		resA Result
+		errA error
+	)
+	wg.Go(func() { resA, errA = e.svc.Compact(t.Context(), "a", nil) })
+	<-e.hub.arrived
+
+	// A deadline, so a Compact waiting for chat a's lock fails instead of hanging the test.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if got, err := e.svc.Compact(ctx, "b", nil); err != nil || !got.Compacted || got.Thread != "b" {
+		t.Fatalf("Compact b during a's Hub call = %+v, %v", got, err)
+	}
+	if got, err := e.svc.Compact(ctx, "c", nil); err != nil || got.Compacted || got.Thread != "c" {
+		t.Fatalf("Compact c during a's Hub call = %+v, %v", got, err)
+	}
+
+	gone, stop := context.WithCancel(t.Context())
+	stop()
+	_, err := e.svc.Compact(gone, "a", nil)
+	onlyCode(t, err, ErrUnavailable)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("waiting Compact of a = %v", err)
+	}
+
+	close(e.hub.hold)
+	wg.Wait()
+	if errA != nil || !resA.Compacted {
+		t.Fatalf("Compact a = %+v, %v", resA, errA)
+	}
+	if n := len(e.hub.calls()); n != 2 {
+		t.Fatalf("%d Hub calls", n)
+	}
+	if n := e.svc.lockCount(); n != 0 {
+		t.Fatalf("%d chat locks left", n)
+	}
+}
+
+// lockCount is the number of chat locks held or waited for.
+func (s *Service) lockCount() int {
+	s.locksMu.Lock()
+	defer s.locksMu.Unlock()
+	return len(s.locks)
 }
 
 // An empty ID is the current chat; no current chat is an empty result.
 func TestCurrentChat(t *testing.T) {
 	e := newEnv(t)
-	if got, err := e.svc.Compact(t.Context(), ""); err != nil || got != (Result{}) {
+	if got, err := e.svc.Compact(t.Context(), "", nil); err != nil || got != (Result{}) {
 		t.Fatalf("no chat: %+v, %v", got, err)
 	}
 	e.chat(t, "old", 21, false)
 	e.chat(t, "new", 21, false)
-	got, err := e.svc.Compact(t.Context(), "")
-	if err != nil || !got.Compacted {
+	got, err := e.svc.Compact(t.Context(), "", nil)
+	if err != nil || !got.Compacted || got.Thread != "new" {
 		t.Fatalf("Compact = %+v, %v", got, err)
 	}
 	if calls := e.hub.calls(); len(calls) != 1 || calls[0].Thread() != "new" {
@@ -473,10 +635,10 @@ func TestCurrentChat(t *testing.T) {
 
 func TestInputAndStore(t *testing.T) {
 	e := newEnv(t)
-	if _, err := e.svc.Compact(t.Context(), "a/b"); !errors.Is(err, ErrInvalidInput) {
+	if _, err := e.svc.Compact(t.Context(), "a/b", nil); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("malformed id = %v", err)
 	}
-	_, err := e.svc.Compact(t.Context(), "nope")
+	_, err := e.svc.Compact(t.Context(), "nope", nil)
 	onlyCode(t, err, ErrStore)
 	if !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("missing chat = %v", err)
@@ -488,7 +650,7 @@ func TestInputAndStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.chats.put(t, th)
-	if got, err := e.svc.Compact(t.Context(), "empty"); err != nil || got != (Result{Fill: Fill{Level: thread.FillNormal}}) {
+	if got, err := e.svc.Compact(t.Context(), "empty", nil); err != nil || got != (Result{Thread: "empty", Fill: Fill{Level: thread.FillNormal}}) {
 		t.Fatalf("empty chat = %+v, %v", got, err)
 	}
 	if e.history.reads != 0 {
@@ -498,7 +660,7 @@ func TestInputAndStore(t *testing.T) {
 	e.chat(t, "c1", 21, false)
 	disk := errors.New("disk")
 	e.history.err = disk
-	_, err = e.svc.Compact(t.Context(), "c1")
+	_, err = e.svc.Compact(t.Context(), "c1", nil)
 	onlyCode(t, err, ErrStore)
 	if !errors.Is(err, disk) || len(e.hub.calls()) != 0 {
 		t.Fatalf("failed read = %v", err)
@@ -512,13 +674,13 @@ func TestTextsStayOutOfErrorsAndLog(t *testing.T) {
 	e.history.entries["c1"] = historyOf(21, func(n int) string { return fmt.Sprintf("СЕКРЕТ-студента %d", n) })
 	e.hub.answer = answering("СЕКРЕТ-сводки\x07")
 
-	_, err := e.svc.Compact(t.Context(), "c1")
+	_, err := e.svc.Compact(t.Context(), "c1", nil)
 	if err == nil {
 		t.Fatal("an invalid summary was accepted")
 	}
 	e.hub.answer = func(int) (string, error) { return "", fmt.Errorf("hub: %w", shared.ErrNetworkUnavailable) }
 	e.chat(t, "c2", 21, false)
-	_, err2 := e.svc.Compact(t.Context(), "c2")
+	_, err2 := e.svc.Compact(t.Context(), "c2", nil)
 
 	logged := e.log.String()
 	for _, s := range []string{err.Error(), err2.Error(), logged} {

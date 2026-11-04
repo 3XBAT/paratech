@@ -48,6 +48,8 @@ reason), ADR-0034 (navigation).
 build Wails options but never call `application.New`); from another OS
 `GOOS=windows go -C paratech vet ./desktop/internal/input/wails/...`.
 Fakes live in the test file of each page (`fakeSettings` in `settings_test.go`, `fakeUI` in `shell_test.go`).
+`agentsummary_test.go` runs the real `agentchats` on `memChatStore` to pin that no chat binding or update returns a
+chat's summary (ADR-0028); a new chat binding goes into its list.
 
 ## Gotchas
 - `TestFrontendCallsBoundNames` (`settings_test.go`) pins the exported method count of the services it lists and

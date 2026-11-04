@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"paratech/desktop/internal/cases/agentcompact"
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/domain/agent/services/actionpolicy"
 	"paratech/desktop/internal/domain/agent/thread"
@@ -82,6 +83,8 @@ const (
 // only IDs, enums and the short checked texts of show_plan, ask_questions, reply and cannot_do (no HTML). An update of
 // a failed operation names the request it acted on: Thread and Turn for a button, only Scope for an Ask whose thread
 // may not exist yet. A Progress update (a step went to the Hub) has no cards: the panel applies its status only.
+// A Compaction update reports only the context compaction of chat Thread before an Ask (compact.go): Compacting
+// while it runs, then not, with Fill, the chat's new fill, when it stored a summary; it has no request state.
 type Update struct {
 	Thread     shared.ThreadID
 	Turn       int
@@ -91,6 +94,9 @@ type Update struct {
 	Cards      []values.Card
 	Problem    Problem
 	Progress   bool
+	Compaction bool
+	Compacting bool
+	Fill       *agentcompact.Fill
 }
 
 // Sink receives the updates of every request, from the Driver's goroutines; it must not block for long. Draft gets
@@ -107,7 +113,7 @@ type Clock interface {
 }
 
 // Deps are the dependencies of the Driver; every one except Journal, Actions, Inspector, Answerer, Proposals,
-// Deletions, Drafts, Subjects, Replies and Log is required. Replies is the reply draft wired into the step use case: a stored
+// Deletions, Drafts, Subjects, Replies, Compactor and Log is required. Replies is the reply draft wired into the step use case: a stored
 // «Стоп» cuts its stream. Without Journal and Actions the actions (class U) answer "unavailable",
 // without Inspector inspect_upload does, without Answerer answer_question does, without Journal and Proposals or
 // Deletions the proposals (class C) do.
@@ -129,6 +135,7 @@ type Deps struct {
 	Drafts      DraftVersions
 	Subjects    ScheduleSubjects // nil: propose_subjects_from_schedule answers "unavailable"
 	Replies     *Replies
+	Compactor   Compactor // nil: no compaction before an Ask
 	Clock       Clock
 	Log         *slog.Logger
 }
@@ -141,7 +148,8 @@ type Driver struct {
 	turns   Turns
 	sink    Sink
 	tools   tools
-	replies *Replies // nil: no reply drafts
+	replies *Replies  // nil: no reply drafts
+	compact Compactor // nil: no compaction
 	log     *slog.Logger
 
 	mu      sync.Mutex
@@ -179,7 +187,7 @@ func New(d Deps) (*Driver, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Driver{
-		turns: d.Turns, sink: d.Sink, replies: d.Replies, log: log, cancels: map[uint64]context.CancelFunc{},
+		turns: d.Turns, sink: d.Sink, replies: d.Replies, compact: d.Compactor, log: log, cancels: map[uint64]context.CancelFunc{},
 		stops: map[agentturn.TurnRef]*stopping{}, inflight: map[agentturn.TurnRef]map[uint64]context.CancelFunc{},
 		loops: map[uint64]shared.ThreadID{},
 		tools: tools{
@@ -201,12 +209,13 @@ type opMarks struct {
 // resumes clears the «Стоп» marks of the thread.
 var resumes = opMarks{clear: true}
 
-// Ask starts a request typed in the panel, in the chat it names or the current one. A thread found busy while no loop
-// of this process drives it is recovered once and asked again (unstick). An update of a failed Ask names its chat when
-// the Ask named one.
+// Ask starts a request typed in the panel, in the chat it names or the current one. A chat it names is compacted first
+// when its window is full (compact.go). A thread found busy while no loop of this process drives it is recovered once
+// and asked again (unstick). An update of a failed Ask names its chat when the Ask named one.
 func (d *Driver) Ask(ctx context.Context, in agentturn.AskInput) error {
 	at := agentturn.Step{Thread: in.ThreadID, Scope: in.Scope}
 	return d.start(ctx, at, opMarks{}, func(ctx context.Context) (agentturn.Step, error) {
+		d.compactBefore(ctx, in.ThreadID)
 		st, err := d.turns.Ask(ctx, in)
 		if d.unstick(ctx, err, agentturn.IdleInput{Thread: in.ThreadID}) { // "": the current chat
 			st, err = d.turns.Ask(ctx, in)

@@ -43,8 +43,10 @@ type Fill struct {
 	Overflow bool
 }
 
-// Result is the outcome of Compact: whether a new summary was stored, and the fill of the chat's next request after it.
+// Result is the outcome of Compact: the chat read, whether a new summary was stored, and the fill of the chat's next
+// request after it.
 type Result struct {
+	Thread    shared.ThreadID
 	Compacted bool
 	Fill      Fill
 }
@@ -57,10 +59,21 @@ type Service struct {
 	clock      Clock
 	log        *slog.Logger
 
-	// mu keeps one compaction, so one Hub call, at a time: a second Compact waits and sees the stored summary.
-	mu sync.Mutex
-	// refused are the keys whose summary the Hub refused for good, oldest first: the Hub replays the refusal.
-	refused []string
+	// locksMu guards locks: one lock per chat being compacted, removed when no Compact holds or waits for it. A second
+	// Compact of the same chat waits and sees the stored summary; Compacts of different chats never wait for each other.
+	locksMu sync.Mutex
+	locks   map[shared.ThreadID]*chatLock
+
+	// refusedMu guards refused: the keys whose summary the Hub refused for good, oldest first (the Hub replays the
+	// refusal).
+	refusedMu sync.Mutex
+	refused   []string
+}
+
+// chatLock is the lock of one chat; refs counts the Compacts holding or waiting for it.
+type chatLock struct {
+	sem  chan struct{}
+	refs int
 }
 
 // New checks the ports.
@@ -68,7 +81,10 @@ func New(d Deps) (*Service, error) {
 	if d.Chats == nil || d.History == nil || d.Summarizer == nil || d.Clock == nil {
 		return nil, fmt.Errorf("%s: %w: every port except Log is required", opNew, ErrInvalidConfig)
 	}
-	s := &Service{chats: d.Chats, history: d.History, summarizer: d.Summarizer, clock: d.Clock, log: d.Log}
+	s := &Service{
+		chats: d.Chats, history: d.History, summarizer: d.Summarizer, clock: d.Clock, log: d.Log,
+		locks: map[shared.ThreadID]*chatLock{},
+	}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
 	}
@@ -78,25 +94,44 @@ func New(d Deps) (*Service, error) {
 // Compact makes and stores a new summary of chat id when its next request needs one (thread.CompactionRequest); an
 // empty id is the current chat, and none is an empty Result. A chat with no request, or one that needs no compaction,
 // returns its fill without calling the Hub. A failure returns exactly one of the errors of this package, its cause
-// wrapped (a missing chat is ErrStore and shared.ErrNotFound), and stores nothing.
-func (s *Service) Compact(ctx context.Context, id shared.ThreadID) (Result, error) {
+// wrapped (a missing chat is ErrStore and shared.ErrNotFound), and stores nothing. started, when set, is called once
+// right before the Hub call, so the caller can show that a compaction runs; never when no Hub call is made. One
+// Compact per chat runs at a time (a second one waits, ErrUnavailable when its caller goes away meanwhile); Compacts
+// of different chats do not wait for each other.
+func (s *Service) Compact(ctx context.Context, id shared.ThreadID, started func()) (Result, error) {
 	if id != "" {
 		if err := id.Validate(); err != nil {
 			return Result{}, fmt.Errorf("%s: %w: %w", opCompact, ErrInvalidInput, err)
 		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	current := id == ""
+	if current {
+		th, err := s.chats.Current(ctx)
+		if errors.Is(err, shared.ErrNotFound) {
+			return Result{}, nil
+		}
+		if err != nil {
+			return Result{}, s.storeFail(ctx, id, err)
+		}
+		id = th.ID()
+	}
 
-	th, err := s.load(ctx, id)
-	if errors.Is(err, shared.ErrNotFound) && id == "" {
+	unlock, err := s.lock(ctx, id)
+	if err != nil {
+		return Result{}, s.fail(ctx, id, ErrUnavailable, err)
+	}
+	defer unlock()
+
+	// The chat is read under its lock: a Compact that waited sees the summary stored by the one before.
+	th, err := s.chats.Get(ctx, id)
+	if errors.Is(err, shared.ErrNotFound) && current {
 		return Result{}, nil
 	}
 	if err != nil {
 		return Result{}, s.storeFail(ctx, id, err)
 	}
 	if _, ok := th.Turn(); !ok {
-		return Result{Fill: Fill{Level: thread.FillNormal}}, nil
+		return Result{Thread: th.ID(), Fill: Fill{Level: thread.FillNormal}}, nil
 	}
 	entries, err := s.history.Since(ctx, th.ID(), 1, thread.HistoryReadLimit)
 	if err != nil {
@@ -113,12 +148,15 @@ func (s *Service) Compact(ctx context.Context, id shared.ThreadID) (Result, erro
 		return Result{}, s.fail(ctx, th.ID(), code, err)
 	}
 	if !ok {
-		return Result{Fill: fillOf(th, entries)}, nil
+		return Result{Thread: th.ID(), Fill: fillOf(th, entries)}, nil
 	}
 	if s.wasRefused(req.Key()) {
-		return Result{}, s.fail(ctx, th.ID(), ErrRefused, errors.New("refused before for the same key"))
+		return Result{}, s.fail(ctx, th.ID(), ErrRefused, errRefusedBefore)
 	}
 
+	if started != nil {
+		started()
+	}
 	text, err := s.summarizer.Summarize(ctx, req)
 	if err != nil {
 		code := codeOf(ctx, err)
@@ -137,15 +175,38 @@ func (s *Service) Compact(ctx context.Context, id shared.ThreadID) (Result, erro
 	if th, entries, err = s.store(ctx, th, entries, req, summary); err != nil {
 		return Result{}, err
 	}
-	return Result{Compacted: true, Fill: fillOf(th, entries)}, nil
+	return Result{Thread: th.ID(), Compacted: true, Fill: fillOf(th, entries)}, nil
 }
 
-// load reads chat id, or the current chat when id is empty.
-func (s *Service) load(ctx context.Context, id shared.ThreadID) (*thread.Thread, error) {
-	if id == "" {
-		return s.chats.Current(ctx)
+// errRefusedBefore is the cause of ErrRefused for a key the Hub refused before: it is not asked again.
+var errRefusedBefore = errors.New("refused before for the same key")
+
+// lock takes the lock of chat id, waiting while another Compact of it holds it; it returns the release, or the
+// context's error when the caller goes away first.
+func (s *Service) lock(ctx context.Context, id shared.ThreadID) (func(), error) {
+	s.locksMu.Lock()
+	l := s.locks[id]
+	if l == nil {
+		l = &chatLock{sem: make(chan struct{}, 1)}
+		s.locks[id] = l
 	}
-	return s.chats.Get(ctx, id)
+	l.refs++
+	s.locksMu.Unlock()
+
+	release := func() {
+		s.locksMu.Lock()
+		defer s.locksMu.Unlock()
+		if l.refs--; l.refs == 0 {
+			delete(s.locks, id)
+		}
+	}
+	select {
+	case l.sem <- struct{}{}:
+		return func() { <-l.sem; release() }, nil
+	case <-ctx.Done():
+		release()
+		return nil, ctx.Err()
+	}
 }
 
 // errRequestChanged is the cause of ErrChanged when the reloaded chat would ask for another summary than the one made.
@@ -203,9 +264,10 @@ func (s *Service) storeFail(ctx context.Context, id shared.ThreadID, err error) 
 	return s.fail(ctx, id, code, err)
 }
 
-// fail logs a failed compaction by chat and code (never a text) and returns the code with its cause.
+// fail logs a failed compaction by chat and code only (the cause may hold a text of the chat or the Hub) and returns
+// the code with its cause.
 func (s *Service) fail(ctx context.Context, id shared.ThreadID, code, cause error) error {
-	s.log.WarnContext(ctx, "agent compaction failed", "thread", id.String(), "code", code.Error(), "err", cause)
+	s.log.WarnContext(ctx, "agent compaction failed", "thread", id.String(), "code", code.Error())
 	return fmt.Errorf("%s: %w: %w", opCompact, code, cause)
 }
 
@@ -224,11 +286,17 @@ func codeOf(ctx context.Context, err error) error {
 	return ErrUnavailable
 }
 
-func (s *Service) wasRefused(key string) bool { return slices.Contains(s.refused, key) }
+func (s *Service) wasRefused(key string) bool {
+	s.refusedMu.Lock()
+	defer s.refusedMu.Unlock()
+	return slices.Contains(s.refused, key)
+}
 
 // remember keeps a refused key, forgetting the oldest beyond maxRefused.
 func (s *Service) remember(key string) {
-	if s.wasRefused(key) {
+	s.refusedMu.Lock()
+	defer s.refusedMu.Unlock()
+	if slices.Contains(s.refused, key) {
 		return
 	}
 	if len(s.refused) == maxRefused {

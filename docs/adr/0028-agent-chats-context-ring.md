@@ -69,7 +69,7 @@ chat can be continued; a restart from an earlier message after a warning; the ri
   (`pkg/prompts/ops/chat_summary/v1`), its own model alias and output cap in Hub config, a strict reader in
   `hub/internal/domain/llm/services/chatsummary`. `untrusted_data` = JSON `{"summary": "<previous or empty>",
   "pairs": [{"student": "…", "reply": "…"}]}` ≤ 64 KiB; output JSON `{"summary": "…"}`, ≤ 4000 runes, plain text.
-  Charged to the tester's quota like any operation; idempotency key `cs:<thread>:<through>` (a retry replays).
+  Charged to the tester's quota like any operation; idempotency key `cs:<thread>:<through>:<hash8>` (hash8: first 8 hex of SHA-256 of `untrusted_data`; a retry of the same data replays).
 - **Storage (desktop)**: the thread keeps one summary (`values.HistorySummary{Through, Text}`, aggregate method
   `Compact(through, text, now)`: `Through` only grows and stays below the current request). Columns on
   `agent_threads`. The text is **model output → untrusted data**: checked like a reply (printable plus line breaks, no

@@ -23,7 +23,7 @@
 // is parsed only by inspection.Request.Parse.
 //
 // Summarize asks for the summary of a chat's earlier requests (OPERATION_TYPE_CHAT_SUMMARY, ADR-0028; the
-// agentcompact.Summarizer port), unary, with the same URL, key, limits and error classes and the key cs:<thread>:<through>;
+// agentcompact.Summarizer port), unary, with the same URL, key, limits and error classes and the key cs:<thread>:<through>:<hash8>;
 // it sends no instructions, alias or output cap, and only an answer exactly {"summary":"<text>"} is returned.
 //
 // GetRemaining reads the tester's quota (QuotaService.GetRemaining, AC-12) with the same URL, key, limits and error
