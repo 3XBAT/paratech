@@ -326,11 +326,21 @@ func (s *TurnkeyService) Work(ctx context.Context, id string) (TurnkeyWork, erro
 	return s.reply(opTurnkeyWork, v, err)
 }
 
-// WorkOfAssignment returns the work of an assignment, for the card on the assignment's page; none is
-// ErrTurnkeyNotFound.
-func (s *TurnkeyService) WorkOfAssignment(ctx context.Context, assignmentID string) (TurnkeyWork, error) {
+// WorkOfAssignment returns the work of an assignment, for the card on the assignment's page; none is nil (JSON null)
+// with no error, since Wails answers every error with a 422 the webview logs. Other failures are errors as in Work.
+func (s *TurnkeyService) WorkOfAssignment(ctx context.Context, assignmentID string) (*TurnkeyWork, error) {
 	v, err := s.core.WorkOf(ctx, work.Source{Assignment: shared.AssignmentID(assignmentID)})
-	return s.reply(opTurnkeyWork, v, err)
+	if err != nil && v.ID == "" {
+		if code, _ := turnkeyFailure(err); code == turnkeyCodeNotFound {
+			s.log.Debug(opTurnkeyWork, "work", "none")
+			return nil, nil
+		}
+	}
+	out, err := s.reply(opTurnkeyWork, v, err)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // StartForAssignment is «Сделать под ключ» on the assignment's page: the same triage as the agent's

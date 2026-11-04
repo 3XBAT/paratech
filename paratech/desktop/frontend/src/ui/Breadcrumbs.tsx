@@ -9,11 +9,10 @@ export interface Crumb {
   onClick?: () => void;
 }
 
-/** Longer labels get a tooltip with the whole text: the line shows them cut with an ellipsis. */
-const tipFrom = 24;
-
 export const crumbsLabel = "Путь";
 export const crumbsSeparator = "/";
+/** Labels longer than this (in characters) are the ones an ancestor crumb may be cut at; keep in step with the floor in styles.css. */
+export const crumbLongFrom = 12;
 
 export function Breadcrumbs(props: { items: readonly Crumb[] }) {
   const { items } = props;
@@ -22,9 +21,13 @@ export function Breadcrumbs(props: { items: readonly Crumb[] }) {
       <ol>
         {items.map((c, i) => {
           const last = i === items.length - 1;
-          const title = c.label.length > tipFrom ? c.label : undefined;
+          // Every crumb has the whole text as a tooltip: whether the line cuts it depends on the width of the sheet,
+          // unknown at render time.
+          const title = c.label;
+          // Only an ancestor that the line can really cut gets the floor (CSS .long); a short one keeps its own width.
+          const cls = !last && c.label.length > crumbLongFrom ? "long" : undefined;
           return (
-            <li key={`${i}:${c.label}`}>
+            <li key={`${i}:${c.label}`} className={cls}>
               {last || c.onClick === undefined ? (
                 <span className="crumb cur" aria-current={last ? "page" : undefined} title={title}>
                   {c.label}

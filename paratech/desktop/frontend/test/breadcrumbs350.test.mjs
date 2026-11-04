@@ -33,8 +33,8 @@ test("every level but the last is a button in the tab order, the last is plain t
   assert.equal(crumbsLabel, "Путь");
   assert.equal(html.match(/<button /g).length, 2, "two links, not the last level");
   assert.equal(html.match(/<li>/g).length, 3);
-  assert.match(html, /<button type="button" class="crumb link">Предметы<\/button>/);
-  assert.match(html, /<span class="crumb cur" aria-current="page">Билеты<\/span>/);
+  assert.match(html, /<button type="button" class="crumb link" title="Предметы">Предметы<\/button>/);
+  assert.match(html, /<span class="crumb cur" aria-current="page" title="Билеты">Билеты<\/span>/);
   assert.equal(html.match(/aria-current/g).length, 1, "only the last level is the current page");
   assert.ok(!html.includes("tabindex"), "buttons are in the tab order as they are");
   // The separator is decoration for the eye; the list already says how deep the screen is.
@@ -65,7 +65,8 @@ test("one level is only the current page; a long name keeps the whole text in a 
   const long = "Реферат по истории Древнего Востока и античности";
   const html = renderToStaticMarkup(h(Breadcrumbs, { items: [{ label: "Задания", onClick: noop }, { label: long }] }));
   assert.ok(html.includes(`title="${long}"`), "cut by the line, whole in the tooltip");
-  assert.ok(!html.includes('title="Задания"'), "a short name needs no tooltip");
+  // BUG-20261104-e2e-layout: the width of the sheet is unknown at render time, so every crumb carries its text.
+  assert.ok(html.includes('title="Задания"'), "a short name has the tooltip too: the line may cut it as well");
   const evil = renderToStaticMarkup(h(Breadcrumbs, { items: [{ label: "Предметы", onClick: noop }, { label: "<img src=x onerror=1>" }] }));
   assert.ok(!evil.includes("<img"));
   assert.ok(evil.includes("&lt;img"));

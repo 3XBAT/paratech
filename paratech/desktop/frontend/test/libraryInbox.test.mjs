@@ -586,7 +586,7 @@ test("a refusal of «Добавить файл» says why with the way out: «П
 
 test("the semester is a heading without the folder icon; the folders of the open subject are buttons that scroll to their section", () => {
   const out = html(h(SubjectTree, { subjects: [subject()], currentId: "s1", counts: new Map(), busy: false, onOpen: noop, onAddSubject: noop, onAddFolder: noop }));
-  assert.match(out, /<button type="button" class="ti sem" aria-expanded="true"><svg[^>]*><use href="#i-chev"><\/use><\/svg><span class="nm">Осень 2026<\/span><\/button>/);
+  assert.match(out, /<button type="button" class="ti sem" aria-expanded="true" title="Осень 2026"><svg[^>]*><use href="#i-chev"><\/use><\/svg><span class="nm">Осень 2026<\/span><\/button>/);
   assert.equal((out.match(/class="ti fold"/g) ?? []).length, 4);
   // The semester row has no folder icon; the folder rows have.
   const sem = out.slice(out.indexOf('class="ti sem"'), out.indexOf("</button>", out.indexOf('class="ti sem"')));

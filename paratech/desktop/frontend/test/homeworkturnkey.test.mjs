@@ -70,6 +70,10 @@ test("an error is shown as the core's text, including the no-source text", () =>
 test("page open: a work gives its card, a missing work the button, another failure its text", async () => {
   const found = { workOfAssignment: async () => ({ id: "w9" }) };
   assert.deepEqual(await loadTurnkeyBlock(found, "a1"), { phase: "work", workId: "w9" });
+  // BUG-20261104-e2e-layout: the core now answers null for "no work yet" (no failed request in the webview log).
+  const none = { workOfAssignment: async () => null };
+  assert.deepEqual(await loadTurnkeyBlock(none, "a1"), { phase: "none", error: "" });
+  // The old not-found error still maps to the same state (an older core).
   const missing = { workOfAssignment: async () => Promise.reject(new Error(notFoundText)) };
   assert.deepEqual(await loadTurnkeyBlock(missing, "a1"), { phase: "none", error: "" });
   const broken = { workOfAssignment: async () => Promise.reject(new Error("raw internal text")) };

@@ -348,7 +348,7 @@ export function WaitingSection(props: { waiting: readonly TodayWaiting[]; onOpen
                   <div className="today-main">
                     <div className="today-t">{m.label}</div>
                     <div className="small muted today-meta">{m.meta === "" ? m.title : `${m.title} · ${m.meta}`}</div>
-                    {m.subject !== "" && <div className="small muted today-subject">{m.subject}</div>}
+                    {m.subject !== "" && <div className="small muted today-subject" title={m.subject}>{m.subject}</div>}
                   </div>
                 </>
               );
@@ -450,7 +450,7 @@ export function BurningSection(props: {
                   <div className="today-main">
                     <div className="today-t">{m.title}</div>
                     <div className="today-dlmeta">
-                      {m.subject !== "" && <div className="small muted today-subject">{m.subject}</div>}
+                      {m.subject !== "" && <div className="small muted today-subject" title={m.subject}>{m.subject}</div>}
                       <StatusChip kind={m.overdue ? "fail" : m.urgent ? "wait" : "neutral"} icon={m.overdue ? "warn" : m.urgent ? "clock" : null}>
                         <span className="num">{m.chip}</span>
                       </StatusChip>

@@ -11,7 +11,8 @@ File names below are in this package unless a path is given.
   `app.RegisterService` list, windows, tray, file drops. `shell_other.go`: the non-Windows stub (`ErrUnsupported`).
 - `*_windows.go`: the only Wails code (ARCH-33); `*picker_windows.go` are the native open/save dialogs.
 - `spec.go`, `popupwindow.go`, `icon.go`, `assets.go`, `media.go`, `wailslog.go`: window specs, popup sizing, tray
-  icon, embedded assets, the media handler, the logger Wails gets.
+  icon, embedded assets, the media handler, the logger Wails gets. `assetquiet.go`: the asset middleware that answers
+  the webview's own `/favicon.ico` and `/wails/custom.js` probes with 204, so the console shows no 404.
 - `agent*.go`: the agent panel. `agent.go` (`AgentService`, the `AgentDriver` interface that the app fills with the
   `Driver` of `paratech/desktop/internal/input/agent`), `agentpanel.go` (`AgentPanel`: Driver updates as Wails
   events, card views),
@@ -54,6 +55,8 @@ chat's summary (ADR-0028); a new chat binding goes into its list.
 ## Gotchas
 - `TestFrontendCallsBoundNames` (`settings_test.go`) pins the exported method count of the services it lists and
   checks that the bindings file names each method; a new exported method on those services must update both (TASK-237).
+- Wails answers every error of a bound method with HTTP 422, which the webview console logs as a failed request: a
+  normal empty state is `nil, nil` (JSON null), not an error (`TurnkeyService.WorkOfAssignment`).
 - Nothing tests the `RegisterService` list: a service missing there builds and passes tests but is not callable.
 - Wails logs binding arguments at Debug, so `Shell.WailsLogger` floors it at Info; never lower it (secrets arrive
   as arguments: `SetMailPassword`, `SetHubKey`, `SetGoogleClient`).

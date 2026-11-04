@@ -144,7 +144,10 @@ func appOptions(opts Options, onSecondInstance func()) application.Options {
 		// Wails logs binding call arguments (the mail password among them) at Debug, so it never gets Debug.
 		Logger: wailsLogger(opts.Log),
 		// The asset server logs every request at info level; the pages are embedded, so the noise has no value.
-		Assets: application.AssetOptions{Handler: application.AssetFileServerFS(assets()), DisableLogging: true},
+		// quietAssets: no 404s in the console for the favicon and the runtime's custom.js probe.
+		Assets: application.AssetOptions{
+			Handler: application.AssetFileServerFS(assets()), Middleware: quietAssets, DisableLogging: true,
+		},
 		// main.go owns signals through its context; the Wails handler would quit behind its back.
 		DisableDefaultSignalHandler: true,
 		// The app lives in the tray: closing (hiding) the windows must not end it.
