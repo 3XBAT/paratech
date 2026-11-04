@@ -188,7 +188,11 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return fmt.Errorf("app: mail credentials: %w", err)
 	}
 	// The Hub URL and the mail account are read from the settings at every call; empty means not configured.
-	llm, err := hubclient.New(hubclient.Config{URLs: hubSettings{settings}, HTTPClient: e.hubHTTP}, hubSecrets)
+	var hubURLs hubURLSource = hubSettings{settings}
+	if e.loopbackHubOnly {
+		hubURLs = loopbackHub{hubURLs}
+	}
+	llm, err := hubclient.New(hubclient.Config{URLs: hubURLs, HTTPClient: e.hubHTTP}, hubSecrets)
 	if err != nil {
 		return fmt.Errorf("app: hub client: %w", err)
 	}
