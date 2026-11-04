@@ -33,7 +33,7 @@ export interface RestartDialogProps {
   forkFailure: ForkFailure | null;
   onHide(): void;
   onFork(): void;
-  /** «Новый чат» of a failure that says the chat is gone: the dialog closes and a new chat starts. */
+  /** «Новый чат» of a failure that says the chat is gone or changed: the dialog closes and a new chat starts. */
   onNewChat(): void;
   onCancel(): void;
   onFix(): void;
@@ -44,7 +44,8 @@ export interface RestartDialogProps {
  * modal inside the panel: focus goes to «Отмена» (never to a button that changes something), Tab stays among the buttons,
  * Esc and a click outside take it back. The opener gets the focus back from the panel. While the current request is not
  * over «Скрыть» is off, the reason is written next to it and a button removes the cause (stop, cancel the request);
- * «Форк» is always available. A failed «Форк» is written in the dialog with the button to go on.
+ * «Форк» is always available. A failed «Форк» is written under it: the button itself tries again, and when trying again
+ * cannot help «Новый чат» stands in the same option.
  */
 export function RestartDialog(props: RestartDialogProps) {
   const { block, forkFailure } = props;
@@ -95,7 +96,7 @@ export function RestartDialog(props: RestartDialogProps) {
         </h2>
         <div className="ag-restart-opt">
           <div className="ag-actions">
-            <Button size="sm" variant="primary" disabled={block !== null} aria-describedby={hideHintId} onClick={props.onHide}>
+            <Button size="sm" variant="primary" disabled={block !== null} aria-describedby={block === null ? hideHintId : `${hideHintId} ${reasonId}`} onClick={props.onHide}>
               {restartTexts.hide}
             </Button>
             {block?.fix && (
@@ -144,18 +145,15 @@ export function RestartDialog(props: RestartDialogProps) {
               {forkFailure.text}
             </p>
           )}
+          {forkFailure?.way === "new" && (
+            <div className="ag-actions">
+              <Button size="sm" variant="secondary" onClick={props.onNewChat}>
+                {restartTexts.forkNewChat}
+              </Button>
+            </div>
+          )}
         </div>
         <div className="ag-actions">
-          {forkFailure?.way === "retry" && (
-            <Button size="sm" variant="secondary" disabled={props.forkBusy} onClick={fork}>
-              {restartTexts.forkRetry}
-            </Button>
-          )}
-          {forkFailure?.way === "new" && (
-            <Button size="sm" variant="secondary" onClick={props.onNewChat}>
-              {restartTexts.forkNewChat}
-            </Button>
-          )}
           <button ref={cancel} type="button" className="btn ghost sm" onClick={props.onCancel}>
             {restartTexts.cancel}
           </button>

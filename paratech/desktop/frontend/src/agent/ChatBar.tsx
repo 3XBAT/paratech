@@ -1,5 +1,5 @@
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
-import { type ChatRow, type ChatSections, chatTexts, checkChatTitle } from "../agentView.js";
+import { type ChatRow, type ChatSections, chatTexts, checkChatTitle, splitForkTitle } from "../agentView.js";
 import { Icon } from "../ui/Icon.js";
 import { ActionButton } from "./MessageActions.js";
 
@@ -11,12 +11,28 @@ export interface ChatBarProps {
   sections: ChatSections;
   /** The result of the last chat call, read out politely; "" when none. */
   note: string;
+  /** A small icon button next to the note («Открыть исходный чат» after a fork); shown only with a note. */
+  noteAction?: { label: string; onClick(): void };
   onOpen(threadId: string): void;
   onNew(): void;
   /** Resolves to "" when renamed, else the text to show. */
   onRename(threadId: string, title: string): Promise<string>;
   onArchive(threadId: string): void;
   onRestore(threadId: string): void;
+}
+
+/** The title: the name may end in an ellipsis, the « (fork)» suffix of a fork stays whole (the full title is the tooltip). */
+function ChatName(props: { title: string }) {
+  const { name, suffix } = splitForkTitle(props.title);
+  if (suffix === "") {
+    return <span className="ag-chat-name">{name}</span>;
+  }
+  return (
+    <span className="ag-chat-title">
+      <span className="ag-chat-name">{name}</span>
+      <span className="ag-chat-sfx">{suffix}</span>
+    </span>
+  );
 }
 
 /** A running request in a chat that is not open: a quiet clock in the muted colour, named for screen readers. */
@@ -36,7 +52,7 @@ export function ChatItem(props: { row: ChatRow; open: boolean; onOpen(): void; o
   return (
     <li role="none" className="ag-chat-row">
       <button type="button" role="menuitem" className="ag-chat-item" aria-current={props.open ? "true" : undefined} onClick={props.onOpen}>
-        <span className="ag-chat-name">{row.title}</span>
+        <ChatName title={row.title} />
         {row.running && !props.open && <RunMark />}
       </button>
       <ActionButton
@@ -238,7 +254,7 @@ export function ChatBar(props: ChatBarProps) {
                 }
               }}
             >
-              <span className="ag-chat-name">{title}</span>
+              <ChatName title={title} />
               {openChat?.archived === true && <span className="ag-chat-tag small">{chatTexts.archivedMark}</span>}
               <svg className="ag-chat-caret" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M6 9l6 6 6-6" />
@@ -320,9 +336,14 @@ export function ChatBar(props: ChatBarProps) {
           </li>
         </ul>
       )}
-      <p className="ag-chat-note small" role="status" aria-live="polite">
-        {error !== "" ? error : props.note}
-      </p>
+      <div className="ag-chat-notewrap">
+        <p className="ag-chat-note small" role="status" aria-live="polite">
+          {error !== "" ? error : props.note}
+        </p>
+        {error === "" && props.note !== "" && props.noteAction && (
+          <ActionButton icon="back" label={props.noteAction.label} className="ag-ib-head" onClick={props.noteAction.onClick} />
+        )}
+      </div>
     </div>
   );
 }

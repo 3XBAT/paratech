@@ -429,22 +429,49 @@ test("while «Форк» runs its button says so inline and is off; «Отмен
   assert.ok(!html.includes('role="alert"') && !html.includes('role="status"'));
 });
 
-test("a failed «Форк» says why in the dialog and offers the way on as a button", () => {
+// TASK-271 changed this test (UX review): the separate bottom-row «Повторить» is gone, the «Форк» button is the one retry;
+// «Новый чат» sits in the «Форк» option, and an invalid refusal now says why and offers «Новый чат».
+test("a failed «Форк» says why under it; the «Форк» button is the retry, «Новый чат» is in the same option", () => {
   const retry = dialog({ forkFailure: forkFailure("failed") });
-  assert.ok(/<p[^>]*role="alert"[^>]*>Не удалось создать новый чат\. Попробуйте ещё раз\.<\/p>/.test(retry));
-  assert.ok(/<button[^>]*>Повторить<\/button>/.test(retry));
+  assert.ok(/<p[^>]*role="alert"[^>]*>Не удалось создать новый чат\. Можно повторить\.<\/p>/.test(retry));
+  assert.ok(!retry.includes(">Повторить<"), "one retry only: the «Форк» button");
   assert.ok(!retry.includes(">Новый чат<"));
+  const fork = /<button([^>]*)>(?:<span[^>]*>)*Форк/.exec(retry);
+  assert.ok(fork && !fork[1].includes("disabled"), "«Форк» is enabled again");
   const gone = dialog({ forkFailure: forkFailure("not_found") });
   assert.ok(gone.includes("Этот чат уже недоступен."));
   assert.ok(/<button[^>]*>Новый чат<\/button>/.test(gone));
-  assert.ok(!gone.includes(">Повторить<"));
   const invalid = dialog({ forkFailure: forkFailure("invalid") });
-  assert.ok(invalid.includes("Это сообщение нельзя взять за начало нового чата."));
-  assert.ok(!invalid.includes(">Повторить<") && !invalid.includes(">Новый чат<"), "retrying cannot help");
+  assert.ok(invalid.includes("Этого сообщения уже нет в чате: оно скрыто или изменилось. Чат обновлён."));
+  assert.ok(/<button[^>]*>Новый чат<\/button>/.test(invalid));
   for (const html of [retry, gone, invalid]) {
     assert.ok(html.includes(">Отмена</button>"), "the dialog can always be left");
+    assert.ok(!html.includes(">Повторить<"));
+  }
+  // «Новый чат» is inside the «Форк» option block, not in the row with «Отмена».
+  for (const html of [gone, invalid]) {
+    const forkBlock = html.slice(html.indexOf("Форк"), html.indexOf(">Отмена<"));
+    assert.ok(forkBlock.includes(">Новый чат<"), "in the «Форк» option");
+    const lastRow = html.slice(html.lastIndexOf('class="ag-actions"'));
+    assert.ok(!lastRow.includes("Новый чат"), "not next to «Отмена»");
   }
   assert.ok(!dialog().includes('role="alert"'), "no failure, no alert");
+});
+
+test("a blocked «Скрыть» points at its line and at the reason; an available one at its line only", () => {
+  const running = restartBlock(apply(initialPanelState, update({ status: "EXECUTING" })).entries, "a", live);
+  const blocked = dialog({ block: running });
+  const m = /<button[^>]*aria-describedby="([^" ]+) ([^" ]+)"[^>]*>Скрыть<\/button>/.exec(blocked);
+  assert.ok(m, "two ids");
+  assert.ok(blocked.includes(`id="${m[1]}"`) && blocked.includes(`id="${m[2]}"`));
+  assert.ok(new RegExp(`id="${m[2]}"[^>]*role="status"`).test(blocked), "the second id is the reason");
+  assert.ok(/<button[^>]*aria-describedby="[^" ]+"[^>]*>Скрыть<\/button>/.test(dialog()), "free: its line only");
+});
+
+test("the dialog keeps a visible border in forced colors; the css has no glued rules", () => {
+  const css = readFileSync(new URL("../src/agent/agent.css", import.meta.url), "utf8");
+  assert.ok(/@media \(forced-colors: active\) \{ \.ag-restart-dlg \{ border: 1px solid CanvasText; \} \}/.test(css));
+  assert.ok(!/\}\.[a-z]/.test(css.replace(/@media[^\n]*/g, "")), "every rule starts on its own line");
 });
 
 test("while the request runs «Скрыть» is off with the reason in view and «Остановить» next to it", () => {
@@ -582,14 +609,16 @@ test("the action under a message is always visible (quiet, not hidden) and its t
 });
 
 // TASK-271 changed this test: with two choices the one body line became one line per button, so each of «Скрыть» and
-// «Форк» points at its own line (one id each) and the dialog itself is named by its title only.
-test("each choice points at its own line only; the reason is a live region and is not a pointer target", () => {
+// «Форк» points at its own line and the dialog itself is named by its title only. UX review: a blocked «Скрыть» also
+// points at the reason (second id), so the reason is read with the disabled button; «Форк» keeps its one line.
+test("each choice points at its own line; a blocked «Скрыть» also at the reason, which is a live region", () => {
   const running = restartBlock(apply(initialPanelState, update({ status: "EXECUTING" })).entries, "a", live);
   const html = dialog({ block: running });
   assert.ok(!/role="dialog"[^>]*aria-describedby/.test(html), "the dialog is named by its title");
   const pointers = [...html.matchAll(/<button[^>]*aria-describedby="([^"]+)"/g)].map((m) => m[1]);
   assert.equal(pointers.length, 2, "«Скрыть» and «Форк»");
-  assert.ok(pointers.every((p) => !p.includes(" ")), "one id each");
+  assert.equal(pointers[0].split(" ").length, 2, "«Скрыть» while blocked: its line and the reason");
+  assert.equal(pointers[1].split(" ").length, 1, "«Форк»: its line only");
   assert.ok(html.includes('role="status"'));
 });
 
