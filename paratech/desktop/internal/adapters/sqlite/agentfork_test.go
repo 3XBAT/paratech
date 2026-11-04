@@ -171,6 +171,47 @@ func TestAgentForkSource(t *testing.T) {
 	}
 }
 
+// Request n itself is never copied, so a running one (no frozen line) with an unreadable call row still forks: its text
+// comes from the student row only.
+func TestAgentForkSourceRunningCurrentRequest(t *testing.T) {
+	db := openTest(t, nil)
+	repo, _, src := forkSource(t, db)
+	mustExec(t, db, `UPDATE agent_turns SET reply_line = NULL WHERE thread_id = 'th1' AND number = 6`)
+	mustExec(t, db, `UPDATE agent_steps SET body = '{"unknown":1}' WHERE thread_id = 'th1' AND turn = 6 AND entry <> 'student'`)
+
+	past, err := repo.ForkSource(context.Background(), src.ID(), 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := past[len(past)-1]; last.Number != 6 || last.Entries != nil || !reflect.DeepEqual(last.Texts, []string{"просьба 6\n[upload:u1]"}) {
+		t.Fatalf("request 6 = %+v", last)
+	}
+	if f := forkTo(t, repo, src, 6, "th-fork"); len(f.Requests) != 3 {
+		t.Fatalf("copies = %d", len(f.Requests))
+	}
+
+	// An earlier request with the same corruption still fails the read.
+	if _, err := repo.ForkSource(context.Background(), src.ID(), 7); err == nil {
+		t.Fatal("a bad entry of an earlier unfrozen request was read")
+	}
+}
+
+// An earlier request with a row but no student step is read without error and is simply not copied.
+func TestAgentForkSourceRequestWithoutText(t *testing.T) {
+	db := openTest(t, nil)
+	repo, _, src := forkSource(t, db)
+	mustExec(t, db, `DELETE FROM agent_steps WHERE thread_id = 'th1' AND turn = 2 AND entry = 'student'`)
+
+	f := forkTo(t, repo, src, 6, "th-fork")
+	var nums []int
+	for _, c := range f.Requests {
+		nums = append(nums, c.Number)
+	}
+	if fmt.Sprint(nums) != "[1 5]" {
+		t.Fatalf("copies = %v", nums)
+	}
+}
+
 // A fork stores the visible requests before n as DONE copies with their texts only; hidden requests, calls, results,
 // seals and seen ids stay behind, and the source does not change by a byte. The fork reads back as it was built, its
 // window carries no echo, and its next step has a key of its own.

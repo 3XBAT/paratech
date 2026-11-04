@@ -56,7 +56,8 @@ func (r *AgentThreadRepository) ForkSource(ctx context.Context, id shared.Thread
 				Number: ts.Number, Scope: ts.Scope, Mentions: ts.Mentions, Texts: texts[row.Number], ReplyLine: ts.ReplyLine,
 				StartedAt: ts.StartedAt, EndedAt: ts.UpdatedAt,
 			}
-			if !row.ReplyLine.Valid {
+			// Request upTo itself is never copied: the entries of a running one are not read.
+			if !row.ReplyLine.Valid && row.Number < int64(upTo) {
 				if p.Entries, err = requestEntries(ctx, q, id, row.Number); err != nil {
 					return err
 				}

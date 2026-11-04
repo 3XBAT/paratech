@@ -216,6 +216,52 @@ func TestForkOfTitle(t *testing.T) {
 	}
 }
 
+// An earlier request without a text is not copied (numbers may have gaps); the last copy that remains is current, and
+// none gives an empty chat. n itself must have a text.
+func TestForkOfSkipsRequestWithoutText(t *testing.T) {
+	tests := []struct {
+		name      string
+		noText    []int
+		wantCopy  []int
+		wantTurns int
+	}{
+		{"middle", []int{2}, []int{1, 3}, 3},
+		{"would-be last", []int{3}, []int{1, 2}, 2},
+		{"all earlier", []int{1, 2, 3}, []int{}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			past := pastOf(1, 2, 3, 4)
+			for _, n := range tt.noText {
+				past[n-1].Texts = nil
+			}
+			f := forkOf(t, chatOf(t, 4), 4, past)
+			if got := numbersOf(f.Requests); !reflect.DeepEqual(got, tt.wantCopy) {
+				t.Fatalf("copies = %v, want %v", got, tt.wantCopy)
+			}
+			s := f.Thread.State()
+			if s.Turns != tt.wantTurns || (tt.wantTurns == 0) != (s.Current == nil) ||
+				(s.Current != nil && s.Current.Number != tt.wantTurns) {
+				t.Fatalf("turns = %d, current = %+v", s.Turns, s.Current)
+			}
+		})
+	}
+}
+
+// The summary rule uses the last copy that remains: a summary over a skipped would-be-last request is dropped.
+func TestForkOfSummaryWithSkippedLast(t *testing.T) {
+	src := chatOf(t, 4)
+	if err := src.Compact(summaryOf(t, 3), at(20)); err != nil {
+		t.Fatal(err)
+	}
+	past := pastOf(1, 2, 3, 4)
+	past[2].Texts = nil
+	f := forkOf(t, src, 4, past)
+	if s := f.Thread.State(); s.Turns != 2 || !s.Summary.IsZero() {
+		t.Fatalf("turns = %d, summary through %d", s.Turns, s.Summary.Through())
+	}
+}
+
 // A request that is not one to fork from, or inputs that do not fit, are ErrInvalidFork and give nothing.
 func TestForkOfInvalid(t *testing.T) {
 	src := chatOf(t, 3)
@@ -235,7 +281,7 @@ func TestForkOfInvalid(t *testing.T) {
 		{"unordered", src, 3, pastOf(2, 1, 3)},
 		{"repeated", src, 3, pastOf(1, 1, 3)},
 		{"number 0", src, 3, pastOf(0, 1, 3)},
-		{"no text", src, 3, edit(func(p []PastRequest) []PastRequest { p[1].Texts = nil; return p })},
+		{"only empty texts of n", src, 3, edit(func(p []PastRequest) []PastRequest { p[2].Texts = []string{""}; return p })},
 		{"empty text", src, 3, edit(func(p []PastRequest) []PastRequest { p[0].Texts = []string{"a", ""}; return p })},
 		{"no text of n", src, 3, edit(func(p []PastRequest) []PastRequest { p[2].Texts = nil; return p })},
 		{"too long text", src, 3, edit(func(p []PastRequest) []PastRequest {

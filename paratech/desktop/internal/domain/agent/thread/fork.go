@@ -96,8 +96,11 @@ func ForkOf(src *Thread, n int, past []PastRequest, id shared.ThreadID, now time
 		if p.Number < 1 || (i > 0 && p.Number <= past[i-1].Number) {
 			return bad("requests out of order")
 		}
-		if len(p.Texts) == 0 {
-			return bad("request %d has no text", p.Number)
+		if !hasText(p) {
+			if i == len(past)-1 {
+				return bad("request %d has no text", p.Number)
+			}
+			continue // an earlier request without a text is not copied
 		}
 		for _, text := range p.Texts {
 			if text == "" || (values.HistoryTurn{StudentText: text}).Validate() != nil {
@@ -112,6 +115,9 @@ func ForkOf(src *Thread, n int, past []PastRequest, id shared.ThreadID, now time
 	}
 	copies := make([]ForkedRequest, 0, len(past)-1)
 	for _, p := range past[:len(past)-1] {
+		if !hasText(p) {
+			continue
+		}
 		line := p.ReplyLine
 		if line == "" {
 			line = Reply(p.Entries)
@@ -143,6 +149,11 @@ func ForkOf(src *Thread, n int, past []PastRequest, id shared.ThreadID, now time
 	}
 	fork.version = 0
 	return Fork{Thread: fork, Requests: copies}, nil
+}
+
+// hasText reports whether the request has a non-empty student text.
+func hasText(p PastRequest) bool {
+	return slices.ContainsFunc(p.Texts, func(t string) bool { return t != "" })
 }
 
 // forkTitle is title with forkSuffix, the title cut on a rune boundary and trimmed so the whole fits MaxTitleRunes.
