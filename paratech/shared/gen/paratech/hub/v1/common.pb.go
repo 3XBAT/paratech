@@ -71,6 +71,10 @@ const (
 	// by Complete with the Hub's prompt; untrusted_data and output are the JSON objects of the triage reader
 	// (paratech/README.md, hub/internal/domain/llm/services/triage).
 	OperationType_OPERATION_TYPE_TRIAGE_ASSIGNMENT OperationType = 8
+	// Summary of the earlier requests of an agent chat for context compaction (ADR-0028): what was discussed, decided
+	// and done, what is still open. Served by Complete with the Hub's prompt; untrusted_data and output are the JSON
+	// objects of the chat summary reader (paratech/README.md, hub/internal/domain/llm/services/chatsummary).
+	OperationType_OPERATION_TYPE_CHAT_SUMMARY OperationType = 9
 )
 
 // Enum value maps for OperationType.
@@ -85,6 +89,7 @@ var (
 		6: "OPERATION_TYPE_INSPECT_MATERIAL",
 		7: "OPERATION_TYPE_ANSWER",
 		8: "OPERATION_TYPE_TRIAGE_ASSIGNMENT",
+		9: "OPERATION_TYPE_CHAT_SUMMARY",
 	}
 	OperationType_value = map[string]int32{
 		"OPERATION_TYPE_UNSPECIFIED":                0,
@@ -96,6 +101,7 @@ var (
 		"OPERATION_TYPE_INSPECT_MATERIAL":           6,
 		"OPERATION_TYPE_ANSWER":                     7,
 		"OPERATION_TYPE_TRIAGE_ASSIGNMENT":          8,
+		"OPERATION_TYPE_CHAT_SUMMARY":               9,
 	}
 )
 
@@ -371,7 +377,7 @@ const file_paratech_hub_v1_common_proto_rawDesc = "" +
 	"\x0eperiod_ends_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\fperiodEndsAt\"O\n" +
 	"\x05Usage\x12!\n" +
 	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
-	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens*\xc3\x02\n" +
+	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens*\xe4\x02\n" +
 	"\rOperationType\x12\x1e\n" +
 	"\x1aOPERATION_TYPE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16OPERATION_TYPE_SUMMARY\x10\x01\x12-\n" +
@@ -381,7 +387,8 @@ const file_paratech_hub_v1_common_proto_rawDesc = "" +
 	"\x19OPERATION_TYPE_AGENT_STEP\x10\x05\x12#\n" +
 	"\x1fOPERATION_TYPE_INSPECT_MATERIAL\x10\x06\x12\x19\n" +
 	"\x15OPERATION_TYPE_ANSWER\x10\a\x12$\n" +
-	" OPERATION_TYPE_TRIAGE_ASSIGNMENT\x10\b*>\n" +
+	" OPERATION_TYPE_TRIAGE_ASSIGNMENT\x10\b\x12\x1f\n" +
+	"\x1bOPERATION_TYPE_CHAT_SUMMARY\x10\t*>\n" +
 	"\tQuotaUnit\x12\x1a\n" +
 	"\x16QUOTA_UNIT_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11QUOTA_UNIT_TOKENS\x10\x01B\xab\x01\n" +

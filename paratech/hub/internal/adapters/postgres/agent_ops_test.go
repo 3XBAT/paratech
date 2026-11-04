@@ -6,11 +6,12 @@ import (
 	"paratech/hub/internal/domain/quota/account"
 )
 
-// The agent operations (migration 0006) are stored and read back: the same request replays under each key.
+// The agent operations (migration 0006) and chat_summary (0008) are stored and read back: the same request replays
+// under each key.
 func TestQuotaAccountsAgentOperations(t *testing.T) {
 	db := migratedDB(t)
 	repo, owner, p := db.QuotaAccounts(), storedOwner(t, db), quotaPolicy(t, 10_000)
-	for i, op := range []string{"agent_step", "inspect_material", "answer", "triage_assignment"} {
+	for i, op := range []string{"agent_step", "inspect_material", "answer", "triage_assignment", "chat_summary"} {
 		scope := scopeOf(owner, p, keyT0)
 		scope.Key = account.IdempotencyKey("job-1:" + op)
 		req, err := account.NewReserveRequest(string(scope.Key), op, "planner", "tokens", 100)

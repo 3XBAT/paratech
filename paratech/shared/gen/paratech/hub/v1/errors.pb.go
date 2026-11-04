@@ -40,8 +40,9 @@ const (
 //	                                                         a permanent one (context too long, refusal). A retry with
 //	                                                         the same idempotency key opens a new attempt. Exception: an
 //	                                                         answer of a reader operation (INSPECT_MATERIAL, ANSWER,
-//	                                                         TRIAGE_ASSIGNMENT) or of AgentStep that breaks its schema was
-//	                                                         billed, so it is charged, not retryable, and a retry with
+//	                                                         TRIAGE_ASSIGNMENT, CHAT_SUMMARY) or of AgentStep that breaks
+//	                                                         its schema was billed, so it is charged, not retryable, and
+//	                                                         a retry with
 //	                                                         the key replays the same error without a provider call
 //	ERROR_CODE_IDEMPOTENCY_CONFLICT  -> failed_precondition  the idempotency key was already used with a different
 //	                                                         request; the client has a bug, do not retry

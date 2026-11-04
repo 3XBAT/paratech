@@ -26,13 +26,19 @@ type agentParts struct {
 	serverPrompts map[values.Operation]gateway.ServerPrompt
 }
 
-// readerAliases says which configured alias each server-prompt operation runs on (ADR-0023).
+// readerAliases says which configured alias each server-prompt operation runs on (ADR-0023, ADR-0028).
 func readerAliases(cfg config.Config) map[values.Operation]string {
 	return map[values.Operation]string{
 		values.OperationInspectMaterial:  cfg.AgentPlannerAlias,
 		values.OperationAnswer:           cfg.AgentStrongAlias,
 		values.OperationTriageAssignment: cfg.AgentStrongAlias,
+		values.OperationChatSummary:      cfg.ChatSummaryAlias,
 	}
+}
+
+// readerCaps is the own output cap of the server-prompt operations that have one; the others keep their alias cap.
+func readerCaps(cfg config.Config) map[values.Operation]int64 {
+	return map[values.Operation]int64{values.OperationChatSummary: cfg.ChatSummaryMaxOutput}
 }
 
 // opServerPromptOff is logged at start for a server-prompt operation whose alias is not in the allowlist.
@@ -47,6 +53,7 @@ func newAgentParts(cfg config.Config, models *modelallowlist.List, log *slog.Log
 	}
 	parts.profiles = []agentstep.Profile{{Name: values.ProfilePanel, Alias: cfg.AgentPlannerAlias, Versions: versions}}
 
+	caps := readerCaps(cfg)
 	for op, alias := range readerAliases(cfg) {
 		version, text, err := prompts.Op(string(op))
 		if errors.Is(err, prompts.ErrNotFound) {
@@ -69,7 +76,7 @@ func newAgentParts(cfg config.Config, models *modelallowlist.List, log *slog.Log
 			return nil, err
 		}
 		parts.serverPrompts[op] = gateway.ServerPrompt{
-			Alias: alias, Version: "v" + strconv.FormatUint(uint64(version), 10), Text: string(text), Reask: reask,
+			Alias: alias, Version: "v" + strconv.FormatUint(uint64(version), 10), Text: string(text), Reask: reask, MaxOutput: caps[op],
 		}
 	}
 

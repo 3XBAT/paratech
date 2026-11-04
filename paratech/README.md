@@ -121,7 +121,7 @@ cost (request bytes + 1024 + the clamped output cap), provider call, then settle
 replay, or release. A retry with the same idempotency key replays the stored answer (`replayed=true`); another request with the
 key is `IDEMPOTENCY_CONFLICT`. A gateway key lives 5 minutes less than `HUB_IDEMPOTENCY_RETENTION`; the purge (at start and
 every 5 minutes) then clears its answer, so no output outlives the retention while the Hub runs. `CompleteStream` serves only
-`ANSWER` with the same ledger and key (deltas, then the result; ADR-0026). `INSPECT_MATERIAL`, `ANSWER` and `TRIAGE_ASSIGNMENT` take no client instructions: the Hub uses its own prompt
+`ANSWER` with the same ledger and key (deltas, then the result; ADR-0026). `INSPECT_MATERIAL`, `ANSWER`, `TRIAGE_ASSIGNMENT` and `CHAT_SUMMARY` take no client instructions: the Hub uses its own prompt
 (`hub/pkg/prompts/ops`) and alias; until a prompt ships, or while its alias is not in `HUB_LLM_MODELS`, the operation is
 `invalid_argument`. `INSPECT_MATERIAL` takes `{"today","subjects":[{"id","name"}],"material_text"}` as data and returns only
 `{"doc_kind","subject","lesson_date","has_homework","has_ticket_list","mentions_email"}`; an answer outside that schema is a
@@ -134,12 +134,21 @@ same refusal rule). `ANSWER` takes `{"question","fragments":[{"chunk_id","text"}
 fragments with distinct chunk IDs, up to 8 KiB each and 128 KiB together) and returns
 `{"claims":[{"text","cites":[{"chunk_id","quote"}]}],"missing":[]}`: up to 8 claims, each with 1-3 citations of chunk IDs that
 were sent, up to 5 unanswered parts, at least one of the two; whether a quote is really in its fragment is the desktop's check
-(`hub/internal/domain/llm/services/answer`, same refusal rule). Settings (env or flag):
+(`hub/internal/domain/llm/services/answer`, same refusal rule). `CHAT_SUMMARY` (context compaction, ADR-0028; key
+`cs:<thread>:<through>`) takes `{"summary","pairs":[{"student","reply"}]}` (at most 64 KiB, previous summary up to 8 KiB and
+may be empty, 1-10 pairs, student text up to 4 KiB and not blank, reply up to 2 KiB and may be empty) and returns
+`{"summary"}`: plain text in Russian; stray control, format and bidi characters are removed and other whitespace becomes a
+space, then it must keep 1-4000 characters and at most 8 KiB, otherwise it is refused, never cut
+(`hub/internal/domain/llm/services/chatsummary`). A refused answer is asked once more with the prompt's reask note before the
+refusal stands (same refusal rule). `CHAT_SUMMARY` is unary only (`CompleteStream` refuses it), so `HUB_LLM_TIMEOUT`
+bounds one non-streamed call. Settings (env or flag):
 
 | Env | Flag | Default | Rule |
 |---|---|---|---|
 | `HUB_RATE_LIMIT_PER_MINUTE` | `-rate-limit-per-minute` | `30` | 1..6000 calls a minute per API key, on average |
 | `HUB_RATE_LIMIT_BURST` | `-rate-limit-burst` | `10` | 1..1000 calls per API key at once |
+| `HUB_CHAT_SUMMARY_ALIAS` | `-chat-summary-alias` | `planner` | allowlist alias of `CHAT_SUMMARY` (a cheap model); not in `HUB_LLM_MODELS`, the operation is off (warning at start) |
+| `HUB_CHAT_SUMMARY_MAX_OUTPUT` | `-chat-summary-max-output` | `4096` | 1..1048576 output tokens of `CHAT_SUMMARY`; the lower of it, the client's `max_output_tokens` and the alias cap applies |
 
 ## Hub agent step
 `GatewayService.AgentStep` (ADR-0023): one planner step with tool use. The Hub picks the prompt and tool catalog

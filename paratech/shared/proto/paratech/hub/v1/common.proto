@@ -50,6 +50,10 @@ enum OperationType {
   // by Complete with the Hub's prompt; untrusted_data and output are the JSON objects of the triage reader
   // (paratech/README.md, hub/internal/domain/llm/services/triage).
   OPERATION_TYPE_TRIAGE_ASSIGNMENT = 8;
+  // Summary of the earlier requests of an agent chat for context compaction (ADR-0028): what was discussed, decided
+  // and done, what is still open. Served by Complete with the Hub's prompt; untrusted_data and output are the JSON
+  // objects of the chat summary reader (paratech/README.md, hub/internal/domain/llm/services/chatsummary).
+  OPERATION_TYPE_CHAT_SUMMARY = 9;
 }
 
 // QuotaUnit is the unit of a QuotaAmount. The PRD leaves the final quota unit open (section 19, decision 4); the field
