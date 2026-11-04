@@ -108,6 +108,8 @@ func TestCatalogV10(t *testing.T) {
 		"note":                  {`"text":{"description":"plain text without HTML or Markdown, at most 4000 characters`, `"maxLength":4000`},
 		"offer_button":          {`"enum":["open_material",`, `"work":{"description":"opaque desktop ID`},
 		"job_status":            {`"maxItems":20`},
+		// A step string is bounded by the longest type a step takes (query); the check holds each to its own type.
+		"show_plan": {`"additionalProperties":{"anyOf":[{"maxLength":500,"minLength":1,"type":"string"},{"type":"boolean"},`},
 	} {
 		for _, p := range parts {
 			if !strings.Contains(schema(tool), p) {
@@ -167,6 +169,9 @@ func TestCatalogV10Calls(t *testing.T) {
 		"plan of 200":         {"show_plan", planOf(t, maxPlanSteps10, map[string]any{"tool": "list_subjects"})},
 		"planned mark":        {"show_plan", planOf(t, 1, map[string]any{"tool": "mark_assignments_done", "arguments": map[string]any{"assignments": []string{"asg-1"}, "done": true}})},
 		"planned change note": {"show_plan", planOf(t, 1, map[string]any{"tool": "change_assignment", "arguments": map[string]any{"assignment": "asg-1", "action": "edit", "note": strings.Repeat("я", 200)}})},
+		"planned query 500":   {"show_plan", planOf(t, 1, map[string]any{"tool": "search", "arguments": map[string]any{"query": strings.Repeat("я", MaxQueryRunes)}})},
+		"planned setting":     {"show_plan", planOf(t, 1, map[string]any{"tool": "set_setting", "arguments": map[string]any{"setting": "ac_power_only", "value": "on"}})},
+		"planned note move":   {"show_plan", planOf(t, 1, map[string]any{"tool": "note", "arguments": map[string]any{"action": "move", "note": "note-1", "date": "2026-11-05"}})},
 	} {
 		if err := v10.Check(call(t, c[0], c[1])); err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -197,6 +202,13 @@ func TestCatalogV10Calls(t *testing.T) {
 		"planned done string":   {"show_plan", planOf(t, 1, map[string]any{"tool": "mark_assignments_done", "arguments": map[string]any{"assignments": []string{"asg-1"}, "done": "yes"}})},
 		"planned ids as string": {"show_plan", planOf(t, 1, map[string]any{"tool": "mark_assignments_done", "arguments": map[string]any{"assignments": "asg-1", "done": true}})},
 		"planned label array":   {"show_plan", planOf(t, 1, map[string]any{"tool": "create_subject", "arguments": map[string]any{"name": []string{"a"}}})},
+		// The desktop refuses the text of note in a step, so the Hub does too; enums keep their values.
+		"planned note text":      {"show_plan", planOf(t, 1, map[string]any{"tool": "note", "arguments": map[string]any{"action": "add_text", "date": "2026-11-04", "text": "Пределы"}})},
+		"planned unknown action": {"show_plan", planOf(t, 1, map[string]any{"tool": "change_assignment", "arguments": map[string]any{"assignment": "asg-1", "action": "archive"}})},
+		"planned free value":     {"show_plan", planOf(t, 1, map[string]any{"tool": "set_setting", "arguments": map[string]any{"setting": "ac_power_only", "value": "yes"}})},
+		"planned enum as bool":   {"show_plan", planOf(t, 1, map[string]any{"tool": "recording", "arguments": map[string]any{"action": true}})},
+		"planned query 501":      {"show_plan", planOf(t, 1, map[string]any{"tool": "search", "arguments": map[string]any{"query": strings.Repeat("я", MaxQueryRunes+1)}})},
+		"planned label 81":       {"show_plan", planOf(t, 1, map[string]any{"tool": "create_subject", "arguments": map[string]any{"name": strings.Repeat("я", MaxLabelRunes+1)}})},
 	} {
 		if err := v10.Check(call(t, c[0], c[1])); !errors.Is(err, ErrInvalidCall) {
 			t.Errorf("%s: err = %v, want ErrInvalidCall", name, err)

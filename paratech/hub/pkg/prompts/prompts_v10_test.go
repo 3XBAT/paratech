@@ -119,7 +119,8 @@ func TestPanelV10Tools(t *testing.T) {
 	}
 
 	// Types: v9 plus bool; the texts of the argument types are shorter (ADR-0033 §6: they repeat in every argument of
-	// the prefix) and keep the limits.
+	// the prefix) and keep the limits; a reply_text is no longer said to be cut (the text of note is never cut), and a
+	// plan step keeps the declared types of its arguments.
 	wantTypes := maps.Clone(v9.Types)
 	maps.Copy(wantTypes, map[string]string{
 		"id":         "opaque desktop ID",
@@ -128,7 +129,8 @@ func TestPanelV10Tools(t *testing.T) {
 		"bool":       "true or false",
 		"label":      "short text, at most 80 characters",
 		"query":      "the student's own words, one line, at most 500 characters",
-		"reply_text": "plain text without HTML or Markdown, at most 4000 characters; paragraphs separated by an empty line; a longer reply is cut at a sentence",
+		"reply_text": "plain text without HTML or Markdown, at most 4000 characters; paragraphs separated by an empty line",
+		"plan_steps": "planned calls: tool name plus arguments, each of the type the tool declares, never a reply_text; rendered by desktop templates",
 	})
 	if !maps.Equal(v10.Types, wantTypes) {
 		t.Errorf("v10 types = %v, want %v", v10.Types, wantTypes)
@@ -233,6 +235,9 @@ func TestPanelV10Prompt(t *testing.T) {
 		"- Irreversible tools (propose_deadline",  // the schedule card is a confirmation tool too
 		"- Several assignments in one request",    // at once up to six
 		"- «Предметы»: the subjects by semester.", // «Мой конспект» in «База знаний»
+		"- There is no tool for email addresses",  // except note.text, the dictated words
+		"- Reversible actions run at once",        // said once, in the «Да» rule
+		"- People:",                               // an address only as dictated text of a note
 	}
 	for _, line := range strings.Split(v9, "\n") {
 		if slices.ContainsFunc(reworded, func(p string) bool { return strings.HasPrefix(line, p) }) {
@@ -253,10 +258,16 @@ func TestPanelV10Prompt(t *testing.T) {
 		"«Заведи предметы из расписания»: ONE call propose_subjects_from_schedule, no arguments, no lookup before it.",
 		"Never create_subject for them and never name them in the reply",
 		// marking done
-		"«Отметь выполненными …»: ONE mark_assignments_done with the IDs from list_assignments (up to 50), done true; never one call per assignment.",
+		"«Отметь выполненными …»: ONE mark_assignments_done with the IDs from list_assignments (up to 50; more: one call per 50), done true; never one call per assignment.",
 		"state: open (default), done or all",
+		"a deadline is never cleared",
 		// notes
 		"«Запиши в конспект: …»: note, action add_text", "copied verbatim, character for character: no paraphrase, no correction, no summary, nothing added or left out",
+		"The text is the student's, not a value you typed: no «Да».", "Over 4000 characters: ask the student to split it.",
+		"none may be put into any argument, except note.text: the student's dictated words as they are, where an address is only text.",
+		"goes into no argument (only into note.text, as dictated text)",
+		"- Paid tools use the student's quota; call them only when the request needs them.",
+		"starting a recording; up to six writes in one request", "Stopping a recording runs at once too, without «Отменить».",
 		"never titles or texts", "«Записано в «Мой конспект».» without the text",
 		// buttons and recording
 		"«Открой …», «сохрани …», «войди в Google»: offer_button", "Never a URL, a path or a label.",
@@ -271,7 +282,10 @@ func TestPanelV10Prompt(t *testing.T) {
 			t.Errorf("agent/panel/v10/system.md does not state %q", rule)
 		}
 	}
-	for _, gone := range []string{"Before more than one writing action", "Several assignments in one request: show_plan first.", "list_schedule"} {
+	for _, gone := range []string{
+		"Before more than one writing action", "Several assignments in one request: show_plan first.", "list_schedule",
+		"in a row", "Reversible actions run at once and the student can undo them.",
+	} {
 		if strings.Contains(system, gone) {
 			t.Errorf("agent/panel/v10/system.md still says %q", gone)
 		}

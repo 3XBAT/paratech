@@ -101,9 +101,9 @@ func TestLargePlanOfCatalog10(t *testing.T) {
 	}
 }
 
-// TestLargePlanEchoOfAnOlderCatalog: a show_plan over 8 KiB echoed on catalog 9 was never returned there, so its seal
-// cannot verify: the request is refused before the ledger or the provider is touched.
-func TestLargePlanEchoOfAnOlderCatalog(t *testing.T) {
+// TestCatalog10SealDoesNotVerifyOnCatalog9: a seal made on catalog 10 (here over a 200-step plan) does not verify when
+// its calls are echoed on catalog 9: ErrBadSeal, and the provider is not called again.
+func TestCatalog10SealDoesNotVerifyOnCatalog9(t *testing.T) {
 	f := newCatalogsFixture(t, []uint32{9, 10}, answer(t, 1200, 80, toolCall(t, "toolu_01", "show_plan", bigPlan(t, 200))))
 	res := f.step(t, commandV("ag:1", 10))
 

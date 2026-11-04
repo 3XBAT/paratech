@@ -10,10 +10,10 @@
     "label": "short text, at most 80 characters",
     "query": "the student's own words, one line, at most 500 characters",
     "text": "UI card text, at most 300 characters, no HTML",
-    "reply_text": "plain text without HTML or Markdown, at most 4000 characters; paragraphs separated by an empty line; a longer reply is cut at a sentence",
+    "reply_text": "plain text without HTML or Markdown, at most 4000 characters; paragraphs separated by an empty line",
     "text_list": "list of text",
     "card_ids": "list of 0-10 IDs, each as id, that a card shows as a list; the desktop draws their titles and dates from local data, the model never writes them",
-    "plan_steps": "planned calls: tool name plus argument IDs, rendered by desktop templates",
+    "plan_steps": "planned calls: tool name plus arguments, each of the type the tool declares, never a reply_text; rendered by desktop templates",
     "questions": "questions of a card: kind choice|text, options as text, default option index"
   },
   "notes": {

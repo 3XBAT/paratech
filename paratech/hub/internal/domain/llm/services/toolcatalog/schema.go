@@ -14,7 +14,8 @@ import (
 // Structured UI argument types (the catalog names them; their shape is fixed here and mirrored by the desktop):
 //
 //	plan_steps: [{"tool": <non-UI tool of the catalog>, "arguments": {<snake_case>: <string of 1-80 characters>}}], 1-8 steps;
-//	            from catalog waveTenFrom 1-200 steps, and an argument the tool declares as ids or bool takes its own type
+//	            from catalog waveTenFrom 1-200 steps, an argument the tool declares as ids, bool, enum or query takes its
+//	            own type, and a reply_text is refused
 //	questions:  [{"kind": "choice"|"text", "question": <text>, "options": [<text>], "default": <option index>}], 1-5
 //	            questions; a choice has 2-6 options; default only with options
 const (
@@ -99,7 +100,8 @@ func (c *Catalog) typeSchema(a argument) object {
 	case typePlanSteps:
 		stepArgument := stringSchema(MaxLabelRunes)
 		if c.version >= waveTenFrom {
-			stepArgument = object{"anyOf": []any{stringSchema(MaxLabelRunes), object{"type": "boolean"}, idsSchema(maxIDsItems10)}}
+			// The string bound is the longest one a step takes (a query); the check holds each argument to its own type.
+			stepArgument = object{"anyOf": []any{stringSchema(MaxQueryRunes), object{"type": "boolean"}, idsSchema(maxIDsItems10)}}
 		}
 		step := object{
 			"type": "object",
@@ -229,10 +231,12 @@ func (c *Catalog) planStep(v any) bool {
 }
 
 // stepArgument checks one plan-step argument: a label, except the note of create_assignment, which keeps the catalog's
-// own query limit (a planned note was otherwise refused above 80 characters). The provider schema keeps the 80-character
-// bound for every step argument, because changing it would change the frozen catalog text; only this check is looser.
-// From catalog waveTenFrom an argument the tool declares as ids or bool takes that type (mark_assignments_done) and
-// every query keeps the query limit (the note of change_assignment); any other argument stays a string as before.
+// own query limit (a planned note was otherwise refused above 80 characters). Before catalog waveTenFrom the provider
+// schema keeps the 80-character bound for every step argument, because changing it would change the frozen catalog
+// text; only this check is looser.
+// From catalog waveTenFrom an argument the tool declares as ids, bool or enum takes that type (mark_assignments_done,
+// the action of change_assignment), every query keeps the query limit (the note of change_assignment), and a reply_text
+// is refused, as the desktop refuses it in a step (the text of note); any other argument stays a string as before.
 func (c *Catalog) stepArgument(toolName, argName string, v any) bool {
 	var declared argument
 	if t, ok := c.tools[toolName]; ok {
@@ -241,10 +245,15 @@ func (c *Catalog) stepArgument(toolName, argName string, v any) bool {
 		}
 	}
 	wave10 := c.version >= waveTenFrom
-	if wave10 && (declared.Type == typeIDs || declared.Type == typeBool) {
-		return c.valid(declared, v)
+	if wave10 {
+		switch declared.Type {
+		case typeIDs, typeBool, typeEnum:
+			return c.valid(declared, v)
+		case typeReplyText:
+			return false
+		}
 	}
-	if declared.Type == typeQuery && (wave10 || toolName == toolCreateAssignment && argName == argNote) {
+	if declared.Type == typeQuery && (wave10 || (toolName == toolCreateAssignment && argName == argNote)) {
 		s, ok := v.(string)
 		return ok && boundedText(s, MaxQueryRunes, false)
 	}
