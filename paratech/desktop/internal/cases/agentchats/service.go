@@ -60,7 +60,7 @@ type Fill struct {
 }
 
 // Request is an earlier request of a chat, read-only: the student's text without the upload IDs, the mentions with
-// the names shown at mention time, and the reply line (see replyLine). Current marks the chat's current request.
+// the names shown at mention time, and the reply line (see request.reply). Current marks the chat's current request.
 type Request struct {
 	Turn     int
 	Text     string
@@ -224,7 +224,7 @@ func (s *Service) Earlier(ctx context.Context, id shared.ThreadID) ([]Request, e
 
 	var out []Request
 	for _, g := range requestsOf(entries) {
-		r := Request{Turn: g.turn, Text: studentText(g.text), Reply: replyLine(g.entries), Current: g.turn == current.Number()}
+		r := Request{Turn: g.turn, Text: studentText(g.text), Reply: g.reply(), Current: g.turn == current.Number()}
 		if r.Current {
 			r.Mentions = current.Mentions()
 		} else if r.Mentions, err = s.chats.RequestMentions(ctx, id, g.turn); err != nil {

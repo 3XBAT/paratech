@@ -45,6 +45,32 @@ func (q *Queries) DeleteAgentTurn(ctx context.Context, arg DeleteAgentTurnParams
 	return err
 }
 
+const deleteEndedAgentTurnDetails = `-- name: DeleteEndedAgentTurnDetails :execrows
+DELETE FROM agent_steps
+WHERE agent_steps.thread_id = ?1 AND agent_steps.turn = ?2
+  AND agent_steps.entry IN ('calls', 'results')
+  AND EXISTS (SELECT 1 FROM agent_turns u JOIN agent_threads t ON t.id = u.thread_id
+              WHERE u.thread_id = agent_steps.thread_id AND u.number = agent_steps.turn AND u.reply_line IS NOT NULL
+                AND u.status IN ('DONE', 'FAILED', 'CANCELLED', 'STOPPED') AND u.updated_at < ?3
+                AND u.number < t.turns)
+`
+
+type DeleteEndedAgentTurnDetailsParams struct {
+	ThreadID string
+	Number   int64
+	Cutoff   int64
+}
+
+// The calls and results of an earlier final request that ended before the cutoff and has its reply line; its texts
+// (entry 'student') always stay.
+func (q *Queries) DeleteEndedAgentTurnDetails(ctx context.Context, arg DeleteEndedAgentTurnDetailsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteEndedAgentTurnDetails, arg.ThreadID, arg.Number, arg.Cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const dropAgentTurns = `-- name: DropAgentTurns :exec
 UPDATE agent_turns SET dropped_by = ?1
 WHERE thread_id = ?2 AND number >= ?3 AND number < ?1
@@ -80,6 +106,32 @@ func (q *Queries) FirstDroppedAgentTurn(ctx context.Context, arg FirstDroppedAge
 	var number int64
 	err := row.Scan(&number)
 	return number, err
+}
+
+const freezeEndedAgentTurnReply = `-- name: FreezeEndedAgentTurnReply :exec
+UPDATE agent_turns SET reply_line = ?1
+WHERE agent_turns.thread_id = ?2 AND agent_turns.number = ?3
+  AND agent_turns.reply_line IS NULL AND agent_turns.status IN ('DONE', 'FAILED', 'CANCELLED', 'STOPPED')
+  AND agent_turns.updated_at < ?4
+  AND EXISTS (SELECT 1 FROM agent_threads t WHERE t.id = agent_turns.thread_id AND agent_turns.number < t.turns)
+`
+
+type FreezeEndedAgentTurnReplyParams struct {
+	ReplyLine sql.NullString
+	ThreadID  string
+	Number    int64
+	Cutoff    int64
+}
+
+// The reply line of an earlier final request that ended before the cutoff, only while it has none.
+func (q *Queries) FreezeEndedAgentTurnReply(ctx context.Context, arg FreezeEndedAgentTurnReplyParams) error {
+	_, err := q.db.ExecContext(ctx, freezeEndedAgentTurnReply,
+		arg.ReplyLine,
+		arg.ThreadID,
+		arg.Number,
+		arg.Cutoff,
+	)
+	return err
 }
 
 const getAgentAction = `-- name: GetAgentAction :one
@@ -717,6 +769,114 @@ func (q *Queries) ListAgentThreadIDs(ctx context.Context) ([]string, error) {
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentTurnSteps = `-- name: ListAgentTurnSteps :many
+SELECT entry, body FROM agent_steps
+WHERE thread_id = ?1 AND turn = ?2
+ORDER BY seq
+LIMIT ?3
+`
+
+type ListAgentTurnStepsParams struct {
+	ThreadID string
+	Turn     int64
+	MaxRows  int64
+}
+
+type ListAgentTurnStepsRow struct {
+	Entry string
+	Body  string
+}
+
+// The entries of one request, oldest first, dropped or not.
+func (q *Queries) ListAgentTurnSteps(ctx context.Context, arg ListAgentTurnStepsParams) ([]ListAgentTurnStepsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAgentTurnSteps, arg.ThreadID, arg.Turn, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentTurnStepsRow{}
+	for rows.Next() {
+		var i ListAgentTurnStepsRow
+		if err := rows.Scan(&i.Entry, &i.Body); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEndedAgentTurns = `-- name: ListEndedAgentTurns :many
+SELECT u.thread_id, u.number, u.updated_at, CAST(u.reply_line IS NOT NULL AS INTEGER) AS frozen
+FROM agent_turns u
+JOIN agent_threads t ON t.id = u.thread_id
+WHERE u.status IN ('DONE', 'FAILED', 'CANCELLED', 'STOPPED') AND u.number < t.turns
+  AND u.updated_at < ?1
+  AND (u.updated_at > ?2
+       OR (u.updated_at = ?2 AND (u.thread_id > ?3
+           OR (u.thread_id = ?3 AND u.number > ?4))))
+  AND EXISTS (SELECT 1 FROM agent_steps s
+              WHERE s.thread_id = u.thread_id AND s.turn = u.number AND s.entry IN ('calls', 'results'))
+ORDER BY u.updated_at, u.thread_id, u.number
+LIMIT ?5
+`
+
+type ListEndedAgentTurnsParams struct {
+	Cutoff      int64
+	AfterAt     int64
+	AfterThread string
+	AfterNumber int64
+	MaxRows     int64
+}
+
+type ListEndedAgentTurnsRow struct {
+	ThreadID  string
+	Number    int64
+	UpdatedAt int64
+	Frozen    int64
+}
+
+// Retention (ADR-0028): earlier final requests that ended before the cutoff and still have calls or results, in
+// (updated_at, thread_id, number) order after the given key. frozen: the reply line is set.
+func (q *Queries) ListEndedAgentTurns(ctx context.Context, arg ListEndedAgentTurnsParams) ([]ListEndedAgentTurnsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listEndedAgentTurns,
+		arg.Cutoff,
+		arg.AfterAt,
+		arg.AfterThread,
+		arg.AfterNumber,
+		arg.MaxRows,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEndedAgentTurnsRow{}
+	for rows.Next() {
+		var i ListEndedAgentTurnsRow
+		if err := rows.Scan(
+			&i.ThreadID,
+			&i.Number,
+			&i.UpdatedAt,
+			&i.Frozen,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

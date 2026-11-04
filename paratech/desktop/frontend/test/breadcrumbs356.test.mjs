@@ -51,7 +51,7 @@ test("Apple help: «Подключения / <card title>» above the title; the
   const calls = [];
   const html = renderToStaticMarkup(h(HelpView, { failure: null, onOpen: () => {}, onBack: () => calls.push("back") }));
   assert.match(html, /<nav class="crumbs" aria-label="Путь">/);
-  assert.match(html, /<button type="button" class="crumb link">Подключения<\/button>/);
+  assert.match(html, /<button type="button" class="crumb link" title="Подключения">Подключения<\/button>/);
   assert.match(html, /<span class="crumb cur" aria-current="page"[^>]*>Календарь на iPhone, iPad и Mac<\/span>/);
   assert.ok(html.indexOf("crumbs") < html.indexOf(helpTexts.title), "the path is above the title");
   assert.ok(!html.includes(">Назад<"));
@@ -70,7 +70,7 @@ test("Apple help: «Подключения / <card title>» above the title; the
   const crumbs = renderToStaticMarkup(
     h(Breadcrumbs, { items: [{ label: overviewTexts.title, onClick: () => {} }, { label: sectionCrumbs.mail }] }),
   );
-  assert.match(crumbs, /Подключения<\/button>.*<span class="crumb cur" aria-current="page">Почта<\/span>/);
+  assert.match(crumbs, /Подключения<\/button>.*<span class="crumb cur" aria-current="page" title="Почта">Почта<\/span>/);
 });
 
 test("over-lines that only repeat the place are gone; the info-carrying line stays as a muted line", () => {

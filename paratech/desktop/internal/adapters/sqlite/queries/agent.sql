@@ -104,6 +104,48 @@ WHERE s.thread_id = sqlc.arg(thread_id) AND s.turn >= sqlc.arg(from_turn)
 ORDER BY s.seq DESC
 LIMIT sqlc.arg(max_rows);
 
+-- Retention (ADR-0028): earlier final requests that ended before the cutoff and still have calls or results, in
+-- (updated_at, thread_id, number) order after the given key. frozen: the reply line is set.
+-- name: ListEndedAgentTurns :many
+SELECT u.thread_id, u.number, u.updated_at, CAST(u.reply_line IS NOT NULL AS INTEGER) AS frozen
+FROM agent_turns u
+JOIN agent_threads t ON t.id = u.thread_id
+WHERE u.status IN ('DONE', 'FAILED', 'CANCELLED', 'STOPPED') AND u.number < t.turns
+  AND u.updated_at < sqlc.arg(cutoff)
+  AND (u.updated_at > sqlc.arg(after_at)
+       OR (u.updated_at = sqlc.arg(after_at) AND (u.thread_id > sqlc.arg(after_thread)
+           OR (u.thread_id = sqlc.arg(after_thread) AND u.number > sqlc.arg(after_number)))))
+  AND EXISTS (SELECT 1 FROM agent_steps s
+              WHERE s.thread_id = u.thread_id AND s.turn = u.number AND s.entry IN ('calls', 'results'))
+ORDER BY u.updated_at, u.thread_id, u.number
+LIMIT sqlc.arg(max_rows);
+
+-- The entries of one request, oldest first, dropped or not.
+-- name: ListAgentTurnSteps :many
+SELECT entry, body FROM agent_steps
+WHERE thread_id = sqlc.arg(thread_id) AND turn = sqlc.arg(turn)
+ORDER BY seq
+LIMIT sqlc.arg(max_rows);
+
+-- The reply line of an earlier final request that ended before the cutoff, only while it has none.
+-- name: FreezeEndedAgentTurnReply :exec
+UPDATE agent_turns SET reply_line = sqlc.arg(reply_line)
+WHERE agent_turns.thread_id = sqlc.arg(thread_id) AND agent_turns.number = sqlc.arg(number)
+  AND agent_turns.reply_line IS NULL AND agent_turns.status IN ('DONE', 'FAILED', 'CANCELLED', 'STOPPED')
+  AND agent_turns.updated_at < sqlc.arg(cutoff)
+  AND EXISTS (SELECT 1 FROM agent_threads t WHERE t.id = agent_turns.thread_id AND agent_turns.number < t.turns);
+
+-- The calls and results of an earlier final request that ended before the cutoff and has its reply line; its texts
+-- (entry 'student') always stay.
+-- name: DeleteEndedAgentTurnDetails :execrows
+DELETE FROM agent_steps
+WHERE agent_steps.thread_id = sqlc.arg(thread_id) AND agent_steps.turn = sqlc.arg(number)
+  AND agent_steps.entry IN ('calls', 'results')
+  AND EXISTS (SELECT 1 FROM agent_turns u JOIN agent_threads t ON t.id = u.thread_id
+              WHERE u.thread_id = agent_steps.thread_id AND u.number = agent_steps.turn AND u.reply_line IS NOT NULL
+                AND u.status IN ('DONE', 'FAILED', 'CANCELLED', 'STOPPED') AND u.updated_at < sqlc.arg(cutoff)
+                AND u.number < t.turns);
+
 -- name: GetAgentAction :one
 SELECT * FROM agent_actions WHERE id = sqlc.arg(id);
 
