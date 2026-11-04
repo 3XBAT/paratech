@@ -63,7 +63,8 @@ Fakes live in the test file of each page (`fakeSettings` in `settings_test.go`, 
 `Options.Hooks` (`shell.go`) replaces the open and save dialogs, the clipboard and `Core.Links` / `Core.Opener`; a nil
 field keeps the native one. `Shell.dialogs` routes every dialog through its hook with a fixed `Dialog*` name, so the
 override works on every OS and the `*picker_windows.go` stay as they are. Only `paratech/desktop/internal/app` sets the
-hooks (`e2eHooks` in `app/e2e.go`, the `e2ehooks` adapter, E2E mode only); no bound method takes or returns them
+hooks (`e2eHooks` in `app/e2e.go`; the `e2ehooks` adapter only in a build with tag `e2e`, `app/e2e_hooks_on.go`,
+E2E mode only); no bound method takes or returns them
 (`TestBoundServicesDoNotExposeHooks`). A new dialog gets a `Dialog*` name and a branch in `Shell.dialogs`.
 ADR-0035 §6 plans packs under `paratech/e2e/specs/<pack>` (settings and connections, recording, popup and capture,
 assignments, agent, layout); the directory does not exist yet. Every pack drives this package's bindings.

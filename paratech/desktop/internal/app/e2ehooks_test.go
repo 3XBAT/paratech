@@ -1,3 +1,5 @@
+//go:build e2e
+
 package app
 
 import (
@@ -8,29 +10,18 @@ import (
 	"strings"
 	"testing"
 
-	"paratech/desktop/config"
 	"paratech/desktop/internal/adapters/e2ehooks"
-	"paratech/desktop/internal/adapters/weblink"
 	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/input/wails"
 )
 
-// Outside the E2E mode the shell keeps its native dialogs and openers; in it one e2ehooks adapter has them all.
+// In the E2E mode of an e2e build one e2ehooks adapter has all the shell's dialogs and openers.
 func TestE2EHooks(t *testing.T) {
 	d := newE2EDirs(t)
-	normal := d.config(false)
-	normal.E2E = config.E2E{}
-	if r := e2eRecorder(normal, slog.New(slog.DiscardHandler)); r != nil {
-		t.Fatalf("normal mode recorder %+v, want none", r)
-	}
-	if got := e2eHooks(nil); got != (wails.Hooks{}) {
-		t.Fatalf("normal mode hooks %+v, want none", got)
-	}
-
-	r := e2eRecorder(d.config(false), slog.New(slog.DiscardHandler))
+	r := newE2ERecorder(d.config(false), slog.New(slog.DiscardHandler))
 	got := e2eHooks(r)
 	h, ok := got.Open.(*e2ehooks.Hooks)
-	if !ok || h != r {
+	if !ok || e2eRecorder(h) != r {
 		t.Fatalf("open dialogs %T, want the e2ehooks adapter", got.Open)
 	}
 	if got.Save != wails.SaveDialogs(h) || got.Clipboard != wails.Clipboard(h) || got.Links != wails.LinkOpener(h) ||
@@ -87,28 +78,18 @@ func TestE2ELinksAreRecorded(t *testing.T) {
 	}
 }
 
-// «Подключиться» of the library: the native weblink outside the E2E mode; in it the recorder of the shell's hooks,
-// so a call link of the wired core is recorded, not opened. The opener is checked to be the recorder before the open,
-// so a wrong wiring fails the test instead of starting a browser.
+// «Подключиться» of the library in the E2E mode: the recorder of the shell's hooks, so a call link of the wired core
+// is recorded, not opened. The opener is checked to be the recorder before the open, so a wrong wiring fails the test
+// instead of starting a browser. The native weblink outside the mode: TestE2ECallOpenerOutsideMode.
 func TestE2ECallLinksAreRecorded(t *testing.T) {
 	d := newE2EDirs(t)
-	normal := d.config(true)
-	normal.E2E = config.E2E{}
-	n, err := New(normal, slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := n.coreEnv().calls.(*weblink.Opener); !ok || n.e2e != nil {
-		t.Fatalf("normal mode call opener %T, recorder %v; want weblink and none", n.coreEnv().calls, n.e2e)
-	}
-
 	a, err := New(d.config(false), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
 	a.env, _ = testEnv(t)
 	t.Cleanup(func() { _ = a.Close() })
-	if got, ok := a.coreEnv().calls.(*e2ehooks.Hooks); !ok || got != a.e2e || a.e2e == nil {
+	if got, ok := a.coreEnv().calls.(*e2ehooks.Hooks); !ok || a.e2e == nil || e2eRecorder(got) != a.e2e {
 		t.Fatalf("e2e call opener %T, want the recorder", a.coreEnv().calls)
 	}
 

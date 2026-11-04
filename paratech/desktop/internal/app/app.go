@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"paratech/desktop/config"
-	"paratech/desktop/internal/adapters/e2ehooks"
 	"paratech/desktop/internal/adapters/logfile"
 	"paratech/desktop/internal/adapters/wincred"
 	"paratech/desktop/internal/input/wails"
@@ -38,8 +37,8 @@ type App struct {
 	env env
 	// shell is nil in headless mode.
 	shell *wails.Shell
-	// e2e records the shell's hooks and the library's call links in the E2E mode; nil outside it.
-	e2e *e2ehooks.Hooks
+	// e2e records the shell's hooks and the library's call links in the E2E mode of an e2e build; nil otherwise.
+	e2e e2eRecorder
 
 	// startCtx ends when Close begins: it stops a startup that is still running and the agent's requests.
 	startCtx    context.Context
@@ -73,7 +72,7 @@ func New(cfg config.Config, log *slog.Logger) (*App, error) {
 	tee := logfile.NewTee(log.Handler())
 	a := &App{cfg: cfg, log: slog.New(tee), tee: tee, env: productionEnv()}
 	a.startCtx, a.cancelStart = context.WithCancel(context.Background())
-	a.e2e = e2eRecorder(cfg, a.log)
+	a.e2e = newE2ERecorder(cfg, a.log)
 	if !cfg.Headless && !cfg.Recorder {
 		opts := shellOptions(cfg)
 		opts.Log, opts.OpenCore, opts.Started = a.log, a.openCore, a.launchStart

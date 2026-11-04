@@ -162,7 +162,7 @@ func TestDialogsHooked(t *testing.T) {
 	if len(f.calls) != 0 {
 		t.Fatalf("native dialogs shown with hooks: %q", f.calls)
 	}
-	if calls := h.recorded(); calls[len(calls)-1] != "clipboard:text" {
+	if calls := h.recorded(); len(calls) == 0 || calls[len(calls)-1] != "clipboard:text" {
 		t.Fatalf("clipboard not hooked: %q", calls)
 	}
 	if got, _ := d.notes(context.Background(), false); !slices.Equal(got, []string{"open:notes:false"}) {

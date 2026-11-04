@@ -5,7 +5,6 @@ package app
 
 import (
 	"errors"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,8 +12,8 @@ import (
 	"strings"
 
 	"paratech/desktop/config"
-	"paratech/desktop/internal/adapters/e2ehooks"
 	"paratech/desktop/internal/adapters/wincred"
+	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/input/wails"
 )
 
@@ -46,18 +45,21 @@ func shellOptions(cfg config.Config) wails.Options {
 
 func e2eWebviewPath(e config.E2E) string { return filepath.Join(e.Dir, e2eWebviewDir) }
 
-// e2eRecorder is the one e2ehooks adapter of an E2E run on the control dir: it answers the dialogs from its pick queue
-// and records the links, files, call links and clipboard texts instead of acting. nil outside the mode.
-func e2eRecorder(cfg config.Config, log *slog.Logger) *e2ehooks.Hooks {
-	if !cfg.E2E.On() {
-		return nil
-	}
-	return e2ehooks.New(cfg.E2E.Dir, log)
+// e2eRecorder is the one adapter of an E2E run on the control dir: it answers the dialogs from its pick queue and
+// records the links, files, call links and clipboard texts instead of acting. Only a build with tag e2e has one
+// (newE2ERecorder in e2e_hooks_on.go), so the shipped exe does not link the hooks (ADR-0035 §3).
+type e2eRecorder interface {
+	wails.OpenDialogs
+	wails.SaveDialogs
+	wails.Clipboard
+	wails.LinkOpener
+	wails.FileOpener
+	library.CallOpener
 }
 
 // e2eHooks are the shell's dialogs, clipboard and link and file openers of the recorder; without one they are zero,
 // so the shell keeps the native ones.
-func e2eHooks(h *e2ehooks.Hooks) wails.Hooks {
+func e2eHooks(h e2eRecorder) wails.Hooks {
 	if h == nil {
 		return wails.Hooks{}
 	}

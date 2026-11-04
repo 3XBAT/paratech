@@ -94,15 +94,14 @@ func (h *Hooks) pick(dialog string, multiple bool) []string {
 	return paths
 }
 
-// splitLines splits the queue at '\n' (a "\r\n" ending is accepted); a final line without '\n' counts too.
+// splitLines splits the queue into its complete lines, those ending in '\n' ("\r\n" is accepted). A final fragment
+// without '\n' may be a line the runner is still writing: it is not a line yet, so it is neither picked nor consumed.
 func splitLines(b []byte) []string {
-	if len(b) == 0 {
+	end := bytes.LastIndexByte(b, '\n')
+	if end < 0 {
 		return nil
 	}
-	lines := strings.Split(string(b), "\n")
-	if lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
+	lines := strings.Split(string(b[:end]), "\n")
 	for i, l := range lines {
 		lines[i] = strings.TrimSuffix(l, "\r")
 	}

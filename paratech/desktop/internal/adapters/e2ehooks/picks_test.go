@@ -224,6 +224,61 @@ func TestPickQueue(t *testing.T) {
 	}
 }
 
+// A last line without '\n' may still be being written: it is not used until its newline is there.
+func TestPickQueuePartialLine(t *testing.T) {
+	ctx := context.Background()
+	r := newRun(t)
+	first := pickJSON(t, DialogSchedule, "fixtures/clip.wav")
+	second := pickJSON(t, DialogModel, "fixtures/sub/notes.pdf")
+	path := filepath.Join(r.dir, picksFile)
+
+	writeFile(t, path, first+"\n"+second[:len(second)/2])
+	if got, _ := r.h.PickFile(ctx, DialogSchedule); got != r.fixture(t, "clip.wav") {
+		t.Fatalf("complete first line: %q", got)
+	}
+	if got, _ := r.h.PickFile(ctx, DialogModel); got != "" {
+		t.Fatalf("half-written line picked: %q", got)
+	}
+	writeFile(t, path, first+"\n"+second)
+	if got, _ := r.h.PickFile(ctx, DialogModel); got != "" {
+		t.Fatalf("line without a newline picked: %q", got)
+	}
+	if c := r.consumed(t); len(c) != 1 {
+		t.Fatalf("consumed %+v, want only line 1 used", c)
+	}
+
+	writeFile(t, path, first+"\n"+second+"\n")
+	if got, _ := r.h.PickFile(ctx, DialogModel); got != r.fixture(t, "sub/notes.pdf") {
+		t.Fatalf("line with its newline: %q", got)
+	}
+	c := r.consumed(t)
+	if len(c) != 2 || c[1].Line != 2 || c[1].Result != resultPicked {
+		t.Fatalf("consumed %+v, want line 2 picked", c)
+	}
+}
+
+func TestSplitLines(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{"partial", nil},
+		{"\n", []string{""}},
+		{"a\n", []string{"a"}},
+		{"a\r\n", []string{"a"}},
+		{"a\nb", []string{"a"}},
+		{"a\nb\n", []string{"a", "b"}},
+		{"a\r\nb\r\npart\r", []string{"a", "b"}},
+		{"a\n\nb\n", []string{"a", "", "b"}},
+	}
+	for _, tt := range tests {
+		if got := splitLines([]byte(tt.in)); !slices.Equal(got, tt.want) {
+			t.Errorf("splitLines(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 // A queue or record that is not a plain file, or too large, cancels without using a line.
 func TestPickQueueFiles(t *testing.T) {
 	ctx := context.Background()

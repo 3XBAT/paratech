@@ -40,9 +40,28 @@ func TestSafeName(t *testing.T) {
 			t.Errorf("safeName(%q) = %q, want %q", tt.name, got, tt.want)
 		}
 	}
-	long := safeName(strings.Repeat("я", 500) + ".txt")
-	if utf8.RuneCountInString(long) != maxNameRunes {
-		t.Errorf("a long name has %d runes, want %d", utf8.RuneCountInString(long), maxNameRunes)
+}
+
+// A name over maxNameRunes loses the end of its stem and keeps its extension.
+func TestSafeNameLong(t *testing.T) {
+	ya := strings.Repeat("я", 500)
+	tests := []struct{ name, want string }{
+		{ya + ".txt", strings.Repeat("я", maxNameRunes-4) + ".txt"},
+		{"a.b" + ya + ".docx", "a.b" + strings.Repeat("я", maxNameRunes-8) + ".docx"},
+		{ya, strings.Repeat("я", maxNameRunes)},
+		{strings.Repeat("я", maxNameRunes-6) + " . . . .....zip", strings.Repeat("я", maxNameRunes-6) + ".zip"},
+		{ya + "." + strings.Repeat("e", maxExtRunes), strings.Repeat("я", maxNameRunes)},
+		{"." + ya, "." + strings.Repeat("я", maxNameRunes-1)},
+		{"CON" + strings.Repeat(" ", 200) + ".txt", "_CON.txt"},
+	}
+	for _, tt := range tests {
+		got := safeName(tt.name)
+		if got != tt.want {
+			t.Errorf("safeName(%q) = %q, want %q", tt.name, got, tt.want)
+		}
+		if n := utf8.RuneCountInString(got); n > maxNameRunes+1 {
+			t.Errorf("safeName(%q) has %d runes", tt.name, n)
+		}
 	}
 }
 
