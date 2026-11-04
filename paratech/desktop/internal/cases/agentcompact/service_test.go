@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
@@ -552,6 +553,64 @@ func TestConcurrentCompactionsCallTheHubOnce(t *testing.T) {
 	if results[0].Fill != results[1].Fill {
 		t.Fatalf("fills differ: %+v", results)
 	}
+	if n := e.svc.lockCount(); n != 0 {
+		t.Fatalf("%d chat locks left", n)
+	}
+}
+
+// While the Hub call of one chat is held, Compacts of other chats run to their end (one needs a summary, one has
+// room), and a second Compact of the held chat waits until its caller goes away. No chat lock is left afterwards.
+func TestCompactionsOfOtherChatsDoNotWait(t *testing.T) {
+	e := newEnv(t)
+	e.chat(t, "a", 21, false)
+	e.chat(t, "b", 21, false)
+	e.chat(t, "c", 12, false)
+	e.hub.arrived, e.hub.hold, e.hub.holdOnly = make(chan struct{}, 1), make(chan struct{}), "a"
+
+	var (
+		wg   sync.WaitGroup
+		resA Result
+		errA error
+	)
+	wg.Go(func() { resA, errA = e.svc.Compact(t.Context(), "a", nil) })
+	<-e.hub.arrived
+
+	// A deadline, so a Compact waiting for chat a's lock fails instead of hanging the test.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if got, err := e.svc.Compact(ctx, "b", nil); err != nil || !got.Compacted || got.Thread != "b" {
+		t.Fatalf("Compact b during a's Hub call = %+v, %v", got, err)
+	}
+	if got, err := e.svc.Compact(ctx, "c", nil); err != nil || got.Compacted || got.Thread != "c" {
+		t.Fatalf("Compact c during a's Hub call = %+v, %v", got, err)
+	}
+
+	gone, stop := context.WithCancel(t.Context())
+	stop()
+	_, err := e.svc.Compact(gone, "a", nil)
+	onlyCode(t, err, ErrUnavailable)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("waiting Compact of a = %v", err)
+	}
+
+	close(e.hub.hold)
+	wg.Wait()
+	if errA != nil || !resA.Compacted {
+		t.Fatalf("Compact a = %+v, %v", resA, errA)
+	}
+	if n := len(e.hub.calls()); n != 2 {
+		t.Fatalf("%d Hub calls", n)
+	}
+	if n := e.svc.lockCount(); n != 0 {
+		t.Fatalf("%d chat locks left", n)
+	}
+}
+
+// lockCount is the number of chat locks held or waited for.
+func (s *Service) lockCount() int {
+	s.locksMu.Lock()
+	defer s.locksMu.Unlock()
+	return len(s.locks)
 }
 
 // An empty ID is the current chat; no current chat is an empty result.

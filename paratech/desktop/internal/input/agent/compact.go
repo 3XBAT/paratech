@@ -50,7 +50,7 @@ func compactCode(err error) string {
 // compactBefore compacts chat id before an Ask asks it (ADR-0028 «Context compaction»). Once the Hub is called the
 // panel gets an update that a compaction runs, and one that it ended, with the chat's new fill when it stored a
 // summary; the end is published whatever happens, a panic too. A failure never stops the request: it is logged by its
-// code only and the Ask goes on with the history as it is. An Ask without a chat id targets the current chat, which
+// code only (a busy chat is not) and the Ask goes on with the history as it is. An Ask without a chat id targets the current chat, which
 // the Driver cannot name before the step use case loads it: no compaction then. A chat whose request runs is refused
 // by the use case before any Hub call (busy), so it gets no update.
 func (d *Driver) compactBefore(ctx context.Context, id shared.ThreadID) {
@@ -67,7 +67,8 @@ func (d *Driver) compactBefore(ctx context.Context, id shared.ThreadID) {
 		if r := recover(); r != nil {
 			err = errCompactPanic
 			d.log.ErrorContext(ctx, opCompact, "thread", id.String(), "code", compactCode(err), "stack", string(debug.Stack()))
-		} else if err != nil {
+		} else if err != nil && !errors.Is(err, agentcompact.ErrBusy) {
+			// The use case logs every failure; busy comes back on every Ask while a request of the chat runs.
 			d.log.WarnContext(ctx, opCompact, "thread", id.String(), "code", compactCode(err))
 		}
 		if !started {

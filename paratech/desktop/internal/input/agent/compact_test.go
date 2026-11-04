@@ -179,6 +179,10 @@ func TestCompactionWithoutHubCall(t *testing.T) {
 			if len(ups) != 1 || ups[0].Compaction || ups[0].Status != thread.StatusDone || len(e.compact.calls()) != 1 {
 				t.Fatalf("updates %+v, compacted %v", ups, e.compact.calls())
 			}
+			// Busy is logged by the use case only; a chat with room is no failure.
+			if logged := e.log.String(); strings.Contains(logged, opCompact) {
+				t.Fatalf("log = %s", logged)
+			}
 		})
 	}
 	t.Run("started twice", func(t *testing.T) {

@@ -46,7 +46,7 @@ func summaryData(t *testing.T, previous string, pairs ...chatsummary.Pair) strin
 
 // TestAgentEvalChatSummaryInjectionStaysData: each fixture as the previous summary, a student text and a reply reaches
 // the model only inside the data, on the server prompt and the planner alias; the answer comes back canonical and a
-// retry with the key (cs:<thread>:<through>) replays it without a provider call or a new charge.
+// retry with the key (cs:<thread>:<through>:<hash8>) replays it without a provider call or a new charge.
 func TestAgentEvalChatSummaryInjectionStaysData(t *testing.T) {
 	for _, fx := range loadEvalFixtures[evalInjectionFixture](t, "injection") {
 		t.Run(fx.Name, func(t *testing.T) {
