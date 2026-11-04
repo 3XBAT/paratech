@@ -16,18 +16,18 @@ import (
 // byte-identical.
 const goldenCatalog = "../../../shared/testdata/tool_catalog_v%d.json"
 
-// TestEmbeddedPanel: v1 to v8 stay served to clients of those catalogs; v9 is the current version.
+// TestEmbeddedPanel: v1 to v9 stay served to clients of those catalogs; v10 is the current version.
 func TestEmbeddedPanel(t *testing.T) {
 	versions, err := Agent("panel")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 9 {
-		t.Fatalf("versions: %d, want v1 to v9", len(versions))
+	if len(versions) != 10 {
+		t.Fatalf("versions: %d, want v1 to v10", len(versions))
 	}
 	for i, v := range versions {
 		if v.Version != uint32(i+1) {
-			t.Fatalf("version %d at %d, want v1 to v9 in order", v.Version, i)
+			t.Fatalf("version %d at %d, want v1 to v10 in order", v.Version, i)
 		}
 	}
 	for _, v := range versions {
