@@ -1,11 +1,12 @@
 // Removes secrets from any text the runner writes or throws (report, step errors). Pure: the environment is a parameter.
-import { EnvHubKey } from "../contract.js";
+import { EnvHubDatabaseUrl, EnvHubKey } from "../contract.js";
 
 export const Hidden = "[скрыто]";
 
 /** Variables of the owner whose values must never appear anywhere (ADR-0035 §4). */
 export const SecretEnvNames = [
   EnvHubKey,
+  EnvHubDatabaseUrl,
   "PARATECH_E2E_ANTHROPIC_KEY",
   "PARATECH_E2E_ANTHROPIC_BASE_URL",
   "PARATECH_E2E_ANTHROPIC_AUTH",

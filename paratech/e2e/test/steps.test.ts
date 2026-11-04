@@ -20,7 +20,7 @@ import {
 } from "../src/steps/picks.js";
 import { envError, requireEnv } from "../src/steps/env.js";
 import { slugify, stepSlug } from "../src/steps/slug.js";
-import { clipboardStubSource } from "../src/steps/stubs.js";
+import { clipboardStubFunction, clipboardStubSource, clipboardWrites, installPageStubs } from "../src/steps/stubs.js";
 import { uniqueFile } from "../src/steps/shots.js";
 
 const tmp = mkdtempSync(path.join(tmpdir(), "e2e-steps-"));
@@ -210,6 +210,64 @@ describe("clipboard stub", () => {
     const clip = nav["clipboard"] as { writeText(t: string): Promise<void> };
     await clip.writeText("z");
     assert.deepEqual(stored(window), ["z"]);
+  });
+});
+
+// TASK-377: the stubs run through evalInPage (CDP Runtime.evaluate), never through page.evaluate of a string, which the
+// app CSP blocks and the page then logs as a console error.
+describe("page stubs go through the inspector, not page.evaluate", () => {
+  interface Sent {
+    method: string;
+    expression: string;
+  }
+
+  function fakePage(sent: Sent[], value: unknown = []) {
+    const session = {
+      send: (method: string, params: { expression: string }) => {
+        sent.push({ method, expression: params.expression });
+        return Promise.resolve({ result: { value } });
+      },
+    };
+    const page = {
+      context: () => ({ newCDPSession: () => Promise.resolve(session) }),
+      once: () => undefined,
+      isClosed: () => false,
+      evaluate: () => Promise.reject(new Error("page.evaluate must not be used: the app CSP blocks string eval")),
+    };
+    return page as unknown as import("@playwright/test").Page;
+  }
+
+  test("the init script is the stub called once; the function form is what evalInPage sends", () => {
+    assert.equal(clipboardStubSource, `(${clipboardStubFunction})();`);
+    assert.match(clipboardStubFunction, /^\(\) => \{/);
+    assert.ok(clipboardStubFunction.includes("__e2eClipboardInstalled"));
+  });
+
+  test("installPageStubs adds the init script and installs the stub in the open pages through Runtime.evaluate", async () => {
+    const sent: Sent[] = [];
+    const initScripts: string[] = [];
+    const page = fakePage(sent);
+    const context = { addInitScript: (s: string) => (initScripts.push(s), Promise.resolve()), pages: () => [page] };
+    await installPageStubs(context as unknown as import("@playwright/test").BrowserContext);
+    assert.deepEqual(initScripts, [clipboardStubSource]);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.method, "Runtime.evaluate");
+    assert.equal(sent[0]?.expression, `(${clipboardStubFunction})()`);
+  });
+
+  test("a page that cannot be scripted yet does not fail the install", async () => {
+    const page = { ...(fakePage([]) as object), context: () => ({ newCDPSession: () => Promise.reject(new Error("Target closed")) }), isClosed: () => true };
+    const context = { addInitScript: () => Promise.resolve(), pages: () => [page] };
+    await installPageStubs(context as unknown as import("@playwright/test").BrowserContext);
+  });
+
+  test("clipboardWrites reads the texts through Runtime.evaluate and turns them into strings", async () => {
+    const sent: Sent[] = [];
+    const got = await clipboardWrites(fakePage(sent, ["Привет", 5, "из write"]));
+    assert.deepEqual(got, ["Привет", "5", "из write"]);
+    assert.equal(sent[0]?.method, "Runtime.evaluate");
+    assert.match(sent[0]?.expression ?? "", /__e2eClipboard/);
+    assert.deepEqual(await clipboardWrites(fakePage([], "not a list")), []);
   });
 });
 

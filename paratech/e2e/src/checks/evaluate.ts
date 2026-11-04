@@ -197,12 +197,15 @@ export function evaluateLayout(snap: LayoutSnapshot, options: LayoutOptions = {}
   }
 
   if (o.rules["console"]) {
+    // «Failed to load resource: 404» does not say which resource: the failed requests of the same interval do.
+    const requests = snap.console.filter((r) => r.kind === "request").map((r) => r.text);
     for (const r of snap.console) {
-      if (matchesIgnore(r, o) !== undefined) {
-        continue;
+      if (r.kind === "request" || matchesIgnore(r, o) !== undefined) {
+        continue; // a request record is context for the message above, not a finding of its own
       }
       const where = r.location ? ` (${r.location})` : "";
-      add("console", r.kind === "pageerror" ? "страница (pageerror)" : "консоль (error)", `${r.text}${where}`);
+      const urls = requests.length > 0 && /Failed to load resource/.test(r.text) ? `; запросы с ошибкой: ${requests.join("; ")}` : "";
+      add("console", r.kind === "pageerror" ? "страница (pageerror)" : "консоль (error)", `${r.text}${where}${urls}`);
     }
   }
 

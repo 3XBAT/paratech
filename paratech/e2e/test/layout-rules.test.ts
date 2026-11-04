@@ -25,6 +25,7 @@ import {
   type LayoutViolation,
   watchPage,
 } from "../src/checks/layout.js";
+import { clipboardWrites, installPageStubs } from "../src/steps/stubs.js";
 
 const rules = (v: LayoutViolation[]): LayoutRule[] => [...new Set(v.map((x) => x.rule))];
 
@@ -245,8 +246,24 @@ describe("evalInPage under the CSP of the app", () => {
       assert.equal(await evalInPage<undefined>(page, "() => undefined"), undefined);
       assert.deepEqual(await evalInPage<{ a: number[] }>(page, "(o) => ({ a: [o.n, o.n + 1] })", { n: 1 }), { a: [1, 2] });
       assert.equal(await evalInPage<string>(page, "() => document.querySelector('p').textContent"), "страница под CSP");
-      await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, 150)); // a short grace only: this checks that a record is ABSENT, which cannot be awaited
       assert.deepEqual(drainConsole(page), [], "inspector evaluation is exempt from the CSP and prints nothing to the page console");
+    });
+  });
+
+  test("the clipboard stubs install and read back under the CSP without a console record (TASK-377)", async (t) => {
+    await cspPage(t, async (page) => {
+      drainConsole(page);
+      await installPageStubs(page.context());
+      await evalInPage(page, "() => navigator.clipboard.writeText('привет')");
+      await evalInPage(page, "async () => { await navigator.clipboard.writeText('мир'); }");
+      assert.deepEqual(await clipboardWrites(page), ["привет", "мир"]);
+      await new Promise((r) => setTimeout(r, 150)); // same: absence of a console record
+      assert.deepEqual(
+        drainConsole(page).filter((r) => r.kind !== "request"),
+        [],
+        "page.evaluate of a string would have logged the CSP note here",
+      );
     });
   });
 

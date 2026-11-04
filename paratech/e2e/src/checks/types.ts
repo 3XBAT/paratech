@@ -37,7 +37,11 @@ export interface LayoutViolation {
 
 /** A console error or an uncaught page error seen since the previous check (watch.ts). */
 export interface ConsoleRecord {
-  kind: "console" | "pageerror";
+  /**
+   * `request` is context, not a finding: a request that failed or was answered with a status >= 400, as «GET <url without
+   * query> → 404» (watch.ts). It is listed under the console violation «Failed to load resource» so that message names its URL.
+   */
+  kind: "console" | "pageerror" | "request";
   text: string;
   /** url:line of the console message, when the browser gave one. */
   location?: string;

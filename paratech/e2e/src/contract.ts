@@ -1,7 +1,7 @@
 // Shared contract of the runner parts: sandbox setup (src/sandbox, src/app), helpers (src/steps) and the report
 // (src/report). Names only, no secrets, no logic. ADR-0035 §2, §3, §6.
 
-/** Set by the global setup (main process) for the workers; none of them is a secret except EnvHubKey. */
+/** Set by the global setup (main process) for the workers; none of them is a secret except EnvHubKey and EnvHubDatabaseUrl. */
 export const EnvRunRoot = "PARATECH_E2E_RUN_ROOT"; // <repo>/paratech/dist/e2e-run
 export const EnvCtlDir = "PARATECH_E2E_CTL_DIR"; // <run root>/ctl = the --e2e-dir of the app
 export const EnvDataDir = "PARATECH_E2E_DATA_DIR"; // <ctl>/data = the --data-dir of the app
@@ -9,6 +9,12 @@ export const EnvCdpUrl = "PARATECH_E2E_CDP_URL"; // http://127.0.0.1:<port>
 export const EnvFakeUrl = "PARATECH_E2E_FAKE_URL"; // fake Messages API (control paths /__e2e/*)
 export const EnvHubUrl = "PARATECH_E2E_HUB_URL";
 export const EnvHubKey = "PARATECH_E2E_HUB_KEY"; // the throwaway key of the run: in memory only, scrubbed from reports
+/**
+ * The database URL of the throwaway Hub (user and password of the compose database, the run's schema in search_path):
+ * in memory only like EnvHubKey, never in state.json, scrubbed from reports. The workers use it to run `hub keys
+ * create/revoke` (src/hub/keys.ts), e.g. to revoke a second key without touching the key of the run.
+ */
+export const EnvHubDatabaseUrl = "PARATECH_E2E_HUB_DATABASE_URL";
 export const EnvMode = "PARATECH_E2E_MODE"; // "scripted" | "live"
 
 /** Files below the run root. */

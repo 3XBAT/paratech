@@ -3,9 +3,12 @@
 // tests this package, ADR-0035 section 7).
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { inspect } from "node:util";
 
+import { EnvHubDatabaseUrl } from "../src/contract.js";
 import { startFakeLLM } from "../src/fakellm/index.js";
 import { dockerAvailable, startHub } from "../src/hub/index.js";
+import { keyTools } from "../src/hub/keys.js";
 
 const unitOnly = process.env.PARATECH_E2E_UNIT_ONLY === "1";
 const canRun = !unitOnly && (await dockerAvailable());
@@ -73,6 +76,26 @@ test(
       // of the run (API key, seal keys, database password) at all, which it must not.
       assert.ok(hub.logs().length > 0, "the Hub output is captured");
       assert.ok(!hub.logs().includes("(redacted)"), `the Hub logged a secret of the run:\n${hub.logs()}`);
+
+      // TASK-377: a second key is issued and revoked through src/hub/keys.ts; the key of the run stays valid
+      const tools = keyTools({ env: { [EnvHubDatabaseUrl]: hub.databaseUrl } });
+      const second = await tools.issueKey("e2e-second");
+      assert.match(second.key, /^pthub_/);
+      assert.notEqual(second.key, hub.apiKey);
+      assert.equal((await connectJSON(hub.url, "paratech.hub.v1.QuotaService/GetRemaining", {}, second.key)).status, 200, "the second key works");
+      const before = await tools.listKeys();
+      assert.deepEqual(before.map((k) => k.status).sort(), ["active", "active"]);
+      assert.ok(before.some((k) => k.id === second.id && k.label === "e2e-second"));
+
+      await tools.revokeKey(second.id);
+      await tools.revokeKey(second.id); // repeating is not an error
+      const rejected = await connectJSON(hub.url, "paratech.hub.v1.QuotaService/GetRemaining", {}, second.key);
+      assert.equal(rejected.status, 401, "a revoked key is refused at once");
+      assert.equal((await connectJSON(hub.url, "paratech.hub.v1.QuotaService/GetRemaining", {}, hub.apiKey)).status, 200, "the key of the run still works");
+      const after = await tools.listKeys();
+      assert.equal(after.find((k) => k.id === second.id)?.status, "revoked");
+      assert.equal(after.filter((k) => k.status === "active").length, 1);
+      assert.ok(!JSON.stringify(hub).includes("postgres://") && !inspect(hub).includes("postgres://"), "the database URL is a secret of the run");
     } finally {
       await hub.stop();
       await fake.stop();

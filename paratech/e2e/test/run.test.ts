@@ -12,6 +12,7 @@ import {
   EnvCtlDir,
   EnvDataDir,
   EnvFakeUrl,
+  EnvHubDatabaseUrl,
   EnvHubKey,
   EnvHubUrl,
   EnvironmentMarker,
@@ -96,7 +97,7 @@ test("a malformed mode is refused before anything is wiped, and is classified as
 // ---- the setup with its outside world replaced ----
 
 const providerVars = [EnvLiveKey, EnvLiveBaseURL, EnvLiveAuth] as const;
-const exported = [EnvRunRoot, EnvCtlDir, EnvDataDir, EnvCdpUrl, EnvFakeUrl, EnvHubUrl, EnvHubKey, EnvMode, ...providerVars];
+const exported = [EnvRunRoot, EnvCtlDir, EnvDataDir, EnvCdpUrl, EnvFakeUrl, EnvHubUrl, EnvHubKey, EnvHubDatabaseUrl, EnvMode, ...providerVars];
 
 /** Saves the process.env names the setup touches; restore() puts them back and forgets registered secrets. */
 function guardEnv(): { restore(): void } {
@@ -124,6 +125,7 @@ function stubs(paths: SandboxPaths, over: Partial<RunDeps> = {}) {
   const hub = {
     url: "http://127.0.0.1:41002",
     apiKey: "pthub_stubkey_0123456789",
+    databaseUrl: "postgres://hub:stub-db-pass@127.0.0.1:41099/hub?sslmode=disable&search_path=e2e_stub",
     stop: () => Promise.resolve(void events.push("hub.stop")),
   } as unknown as StartedHub;
   const app: RunningApp = {
@@ -179,6 +181,13 @@ test("a good start exports the run, drops the provider settings from process.env
     // gone from the environment, still hidden from every report and error text of this process
     assert.equal(scrubSecrets("a live-key-AAAAAAAA b http://gateway.fake.invalid:9999/v1 c bearer-auth-ZZZZZZ", {}), "a [скрыто] b [скрыто] c [скрыто]");
     assert.ok(!readFileSync(path.join(paths.runRoot, "state.json"), "utf8").includes(hub.apiKey));
+
+    // TASK-377: the database URL of the Hub goes to the workers through process.env only and is scrubbed like the key
+    assert.equal(process.env[EnvHubDatabaseUrl], hub.databaseUrl);
+    const stateText = readFileSync(path.join(paths.runRoot, "state.json"), "utf8");
+    assert.ok(!stateText.includes("stub-db-pass") && !stateText.includes(EnvHubDatabaseUrl), "never in state.json");
+    assert.equal(scrubSecrets("x stub-db-pass y", {}), "x [скрыто] y", "the password alone is registered with the scrubber");
+    assert.equal(scrubSecrets(`x ${hub.databaseUrl} y`, {}), "x [скрыто] y");
 
     assert.deepEqual(await stopRun(), { problems: [], deletedCredentials: [] });
     assert.deepEqual(events, ["app.stop", "hub.stop", "fake.stop"]);
