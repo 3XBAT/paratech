@@ -24,6 +24,7 @@ import (
 	"paratech/desktop/internal/adapters/winpower"
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
+	"paratech/desktop/internal/cases/library"
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/cases/senddelivery"
@@ -133,6 +134,9 @@ type env struct {
 
 	// authPages opens Google's consent page (weblink in production, a fake browser in tests).
 	authPages googleauth.Browser
+	// calls opens a subject's call link, «Подключиться» (weblink in production; the recorder in E2E mode, set by
+	// openCore; nil in tests, so nothing opens).
+	calls library.CallOpener
 	// googleOAuth replaces the Google endpoints and timeouts (tests: a fake OAuth server); nil in production.
 	googleOAuth []googleauth.Option
 	// googleCalendar replaces the Calendar API base URL (tests: a fake Calendar API); nil in production, so the base
@@ -167,6 +171,7 @@ func productionEnv() env {
 		speech:          speechEnv{manifest: embeddedSpeechManifest(), bundledDir: executableDir(), source: httpdownload.New()},
 		secrets:         credentialManager,
 		authPages:       weblink.New(),
+		calls:           weblink.New(),
 		scheme:          urlscheme.New(),
 		generateRetries: homeworkflow.DefaultGenerateRetries,
 		runner:          jobrunner.DefaultConfig(),

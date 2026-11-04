@@ -39,6 +39,45 @@ type Options struct {
 	// Started, if set, is called once when the application runs (Wails' ApplicationStarted), on a Wails goroutine:
 	// it must return at once, so the app starts its background work there without blocking the UI.
 	Started func()
+
+	// Hooks replace the native dialogs, the clipboard and the openers; zero: the native ones.
+	Hooks Hooks
+}
+
+// Names of the dialogs the Hooks get; the open ones are the "dialog" of the E2E pick queue (ADR-0035 §3).
+const (
+	DialogSchedule   = "schedule"
+	DialogModel      = "model"
+	DialogMaterial   = "material"
+	DialogNotes      = "notes"
+	DialogRecording  = "recording"
+	DialogBundle     = "bundle"
+	DialogTranscript = "transcript"
+	DialogSummary    = "summary"
+	DialogKnowledge  = "knowledge"
+	DialogDocx       = "docx"
+)
+
+// Hooks replace parts of the shell in the E2E mode (ADR-0035 §3); a nil field keeps the native one. Only app sets
+// them, through Options: no bound service has a method that takes, returns or changes them, and the page never names
+// a dialog or a path (the dialog names are fixed here), so a page script cannot reach what they read or write.
+type Hooks struct {
+	Open      OpenDialogs
+	Save      SaveDialogs
+	Clipboard Clipboard
+	Links     LinkOpener // replaces Core.Links
+	Opener    FileOpener // replaces Core.Opener
+}
+
+// OpenDialogs answer the open dialogs as the native ones do: "" or no paths when cancelled.
+type OpenDialogs interface {
+	PickFile(ctx context.Context, dialog string) (string, error)
+	PickFiles(ctx context.Context, dialog string, multiple bool) ([]string, error)
+}
+
+// SaveDialogs answer a save dialog that proposes name with the path to write; "" when cancelled.
+type SaveDialogs interface {
+	SaveFile(ctx context.Context, dialog, name string) (string, error)
 }
 
 // Core is what the pages and the tray call through the bindings. Every interface field is required.
@@ -342,19 +381,26 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 	if core.RecordingImport == nil {
 		return Services{}, errors.New("wails: open core: no recording import")
 	}
+	if h := s.opts.Hooks.Links; h != nil {
+		core.Links = h
+	}
+	if h := s.opts.Hooks.Opener; h != nil {
+		core.Opener = h
+	}
+	d := s.dialogs()
 	google := NewGoogleService(core.Google, s.opts.Log)
 	google.window = s
-	lib := NewLibraryService(core.Library, materialPickerFunc(s.pickMaterialFile), core.Files, s.opts.Log).
+	lib := NewLibraryService(core.Library, d.material, core.Files, s.opts.Log).
 		withOpener(core.MaterialViews, core.Opener).withOverview(core.SubjectOverview)
 	return Services{
 		Settings: NewSettingsService(core.Settings, s.opts.Log).withSpeed(core.Speed),
 		Activity: NewActivityService(core.Activity, core.Stopper, core.Forcer, core.Retrier, s.opts.Log),
 		Prompt:   NewPromptService(core.Prompt, s.opts.Log),
 		Popup:    NewPopupWindowService(popupFitterFunc(s.fitPopup), s.opts.Log),
-		Schedule: NewScheduleImportService(core.Schedule, core.Files, pickerFunc(s.pickScheduleFile), s.opts.Log),
+		Schedule: NewScheduleImportService(core.Schedule, core.Files, d.schedule, s.opts.Log),
 		Models: NewModelsService(ModelsDeps{
 			Catalog: core.Models, Downloads: core.Downloads, Imports: core.Imports, Links: core.Links,
-			Picker: modelPickerFunc(s.pickModelFile), Speech: core.Speech, Speed: core.Speed,
+			Picker: d.model, Speech: core.Speech, Speed: core.Speed,
 		}, s.opts.Log),
 		Speech: NewSpeechService(core.Speech, s.opts.Log),
 
@@ -362,24 +408,21 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 		Google:      google,
 		Calendar:    NewGoogleCalendarService(core.Calendar, s.opts.Log),
 		Diagnostics: NewDiagnosticsService(DiagnosticsDeps{
-			Sound: core.Sound, Bundle: core.Bundle, Picker: bundlePickerFunc(s.pickBundleFile),
+			Sound: core.Sound, Bundle: core.Bundle, Picker: d.bundle,
 		}, s.opts.Log),
-		Help:     NewHelpService(core.Links, s.opts.Log),
-		Homework: NewHomeworkService(core.Homework, s.opts.Log).withDocxPicker(docxPickerFunc(s.pickDocxFile)),
-		Transcript: NewTranscriptService(core.Transcript, transcriptPickerFunc(s.pickTranscriptFile),
-			clipboardFunc(s.setClipboardText), s.opts.Log),
-		Summary: NewSummaryService(core.Summary, summaryPickerFunc(s.pickSummaryFile), clipboardFunc(s.setClipboardText),
-			s.opts.Log),
-		LectureText: NewLectureTextService(core.Summary, summaryPickerFunc(s.pickSummaryFile),
-			clipboardFunc(s.setClipboardText), s.opts.Log),
-		Deletion:   NewRecordingDeleteService(core.Deletion, s.opts.Log),
-		Import:     NewRecordingImportService(core.RecordingImport, recordingPickerFunc(s.pickRecordingFile), s.opts.Log),
-		Knowledge:  NewKnowledgeBaseService(core.Knowledge, knowledgePickerFunc(s.pickKnowledgeFile), s.opts.Log),
-		Library:    lib,
-		Notes:      NewNotesService(core.Notes, notesPickerFunc(s.pickNoteFiles), core.Files, s.opts.Log),
-		Agent:      NewAgentService(core.Agent, s.opts.Log),
-		Today:      NewTodayService(core.Today, s.opts.Log),
-		AgentPanel: core.Agent.Panel,
+		Help:        NewHelpService(core.Links, s.opts.Log),
+		Homework:    NewHomeworkService(core.Homework, s.opts.Log).withDocxPicker(d.docx),
+		Transcript:  NewTranscriptService(core.Transcript, d.transcript, d.clipboard, s.opts.Log),
+		Summary:     NewSummaryService(core.Summary, d.summary, d.clipboard, s.opts.Log),
+		LectureText: NewLectureTextService(core.Summary, d.summary, d.clipboard, s.opts.Log),
+		Deletion:    NewRecordingDeleteService(core.Deletion, s.opts.Log),
+		Import:      NewRecordingImportService(core.RecordingImport, d.recording, s.opts.Log),
+		Knowledge:   NewKnowledgeBaseService(core.Knowledge, d.knowledge, s.opts.Log),
+		Library:     lib,
+		Notes:       NewNotesService(core.Notes, d.notes, core.Files, s.opts.Log),
+		Agent:       NewAgentService(core.Agent, s.opts.Log),
+		Today:       NewTodayService(core.Today, s.opts.Log),
+		AgentPanel:  core.Agent.Panel,
 
 		AgentConfirm: BindScheduleCards(NewAgentConfirmService(core.AgentConfirm, s.opts.Log), lib),
 		Turnkey:      NewTurnkeyService(core.Turnkey, s.opts.Log),
@@ -390,6 +433,57 @@ func (s *Shell) OpenServices(ctx context.Context) (Services, error) {
 
 // WailsLogger is the logger Wails gets: Options.Log behind the Info floor, as Wails logs binding arguments at Debug.
 func (s *Shell) WailsLogger() *slog.Logger { return wailsLogger(s.opts.Log) }
+
+// dialogs are the dialogs and the clipboard the services get.
+type dialogs struct {
+	schedule   pickerFunc
+	model      modelPickerFunc
+	material   materialPickerFunc
+	recording  recordingPickerFunc
+	notes      notesPickerFunc
+	bundle     bundlePickerFunc
+	docx       docxPickerFunc
+	knowledge  knowledgePickerFunc
+	transcript transcriptPickerFunc
+	summary    summaryPickerFunc
+	clipboard  clipboardFunc
+}
+
+// dialogs are the native dialogs and clipboard of the running shell, each replaced by its hook where Options has one.
+func (s *Shell) dialogs() dialogs {
+	d := dialogs{
+		schedule: s.pickScheduleFile, model: s.pickModelFile, material: s.pickMaterialFile,
+		recording: s.pickRecordingFile, notes: s.pickNoteFiles,
+		bundle: s.pickBundleFile, docx: s.pickDocxFile, knowledge: s.pickKnowledgeFile,
+		transcript: s.pickTranscriptFile, summary: s.pickSummaryFile,
+		clipboard: s.setClipboardText,
+	}
+	if o := s.opts.Hooks.Open; o != nil {
+		pick := func(dialog string) func(context.Context) (string, error) {
+			return func(ctx context.Context) (string, error) { return o.PickFile(ctx, dialog) }
+		}
+		d.schedule, d.model, d.material, d.recording =
+			pick(DialogSchedule), pick(DialogModel), pick(DialogMaterial), pick(DialogRecording)
+		d.notes = func(ctx context.Context, multiple bool) ([]string, error) {
+			return o.PickFiles(ctx, DialogNotes, multiple)
+		}
+	}
+	if sv := s.opts.Hooks.Save; sv != nil {
+		save := func(dialog string) func(context.Context, string) (string, error) {
+			return func(ctx context.Context, name string) (string, error) { return sv.SaveFile(ctx, dialog, name) }
+		}
+		// The proposed name already has the extension of the format; the native dialog only filters by it.
+		saveText := func(dialog string) func(context.Context, string, string) (string, error) {
+			return func(ctx context.Context, name, _ string) (string, error) { return sv.SaveFile(ctx, dialog, name) }
+		}
+		d.bundle, d.docx, d.knowledge = save(DialogBundle), save(DialogDocx), save(DialogKnowledge)
+		d.transcript, d.summary = saveText(DialogTranscript), saveText(DialogSummary)
+	}
+	if c := s.opts.Hooks.Clipboard; c != nil {
+		d.clipboard = c.SetText
+	}
+	return d
+}
 
 // pickScheduleFile shows the open dialog of the schedule import over the main window; "" when the user cancels.
 func (s *Shell) pickScheduleFile(context.Context) (string, error) {
