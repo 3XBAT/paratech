@@ -8,7 +8,9 @@ or sends. See `doc.go`. File names below are in this package unless a path is gi
 
 ## Map
 - `driver.go`: `Driver`, `Deps`, `New`, the request operations (`Ask`, `ApprovePlan`, `Stop`, `Rerun`, ...), `Update`,
-  `Sink`. `progress.go`, `replydraft.go`: progress and the streamed reply draft to the panel.
+  `Sink`. `progress.go`, `replydraft.go`: progress and the streamed reply draft to the panel. `compact.go`:
+  `Compactor` (cases/agentcompact), run by `Ask` of a named chat before its first step; publishes the
+  `Compaction`/`Compacting` updates (ADR-0028).
 - `tools.go`: the read-only tool dispatch (`tools.reader`, `tools.run`) and the R tools; `facts.go`: `Facts` for
   `agentturn.CallFacts`.
 - `write.go` + `actions.go`: class U. `write.go` journals PENDING -> DONE/FAILED and replays a call seen before;
@@ -43,7 +45,7 @@ classes, waves).
 
 ## Tests
 `go -C paratech test -race ./desktop/internal/input/agent/...` (no Windows-only code here). Fakes: `fakes_test.go`
-(`reads`, `scriptedTurns`, `chanSink`, `fakeLibrary`), `actions_fakes_test.go` (`world`, `memLibrary`, `memActions`,
+(`reads`, `scriptedTurns`, `chanSink`, `fakeLibrary`), `compact_test.go` (`fakeCompactor`), `actions_fakes_test.go` (`world`, `memLibrary`, `memActions`,
 `directTx`), `notes_fakes_test.go` (`notesWorld`), `assignment_wave10_fakes_test.go` (`memChanges`,
 `newWave10World`). Scenario tests on real use cases and SQLite: `paratech/desktop/tests/agent_*_test.go`; evals:
 `paratech/desktop/tests/agenteval`.

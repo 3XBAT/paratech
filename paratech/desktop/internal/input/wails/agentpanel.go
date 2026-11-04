@@ -29,7 +29,9 @@ type AgentFills interface {
 }
 
 // AgentUpdate is one update of a request as the Driver publishes it; app maps the Driver's own type to it. Problem is
-// one of the Driver's problem enums; Progress marks the update of a step that went to the Hub (no cards).
+// one of the Driver's problem enums; Progress marks the update of a step that went to the Hub (no cards). Compaction
+// marks an update that only reports the context compaction of chat Thread (Compacting while it runs; Fill, the chat's
+// new fill, on the end of one that stored a summary).
 type AgentUpdate struct {
 	Thread     shared.ThreadID
 	Turn       int
@@ -39,6 +41,9 @@ type AgentUpdate struct {
 	Cards      []values.Card
 	Problem    string
 	Progress   bool
+	Compaction bool
+	Compacting bool
+	Fill       *AgentFillView
 }
 
 // EventEmitter sends a Wails event to the pages; satisfied by Wails' event manager.
@@ -82,12 +87,14 @@ func (p *AgentPanel) Attach(e EventEmitter) {
 // published from one Driver goroutine keep their order. Updates of different operations may interleave: consumers
 // must not rely on arrival order across operations. The drafts of the request are settled first (draftsBefore).
 // An update that ends a request reads the chat's fill from the local database on the Driver's goroutine, bounded by
-// fillTimeout, before the lock is taken.
+// fillTimeout, before the lock is taken. A compaction update has no request: it leaves the drafts.
 func (p *AgentPanel) Publish(u AgentUpdate) {
 	view := p.view(context.Background(), u)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.draftsBefore(u)
+	if !u.Compaction {
+		p.draftsBefore(u)
+	}
 	if p.emit != nil {
 		p.emit.Emit(AgentUpdateEvent, view)
 	}
@@ -98,7 +105,12 @@ func (p *AgentPanel) Publish(u AgentUpdate) {
 // retry_required, restart_required or failed; the panel words the status and the stop reason itself (offline:
 // «Не завершено: нет связи · Повторить»). Progress is true for the update of a step that went to the Hub: it has no
 // cards, and the panel applies its status only and keeps the cards it shows. Fill is the context ring of the chat,
-// set only when the request ended (see endsRequest); null otherwise and when it could not be read.
+// set only when the request ended (see endsRequest) or a compaction stored a summary; null otherwise and when it could
+// not be read.
+// Compaction is true on an update that only reports the context compaction of chat threadId before a request (ADR-0028):
+// turn 0, status "", problem "", progress false, cards []. Compacting is true while it runs («Уплотнение контекста…»)
+// and false once it ended, with the chat's new fill or null when it failed. Every other update has both false. No
+// update carries the summary or an error text.
 type AgentUpdateView struct {
 	ThreadID     string          `json:"threadId"` // "" when an Ask failed before its thread existed
 	Turn         int             `json:"turn"`
@@ -112,6 +124,8 @@ type AgentUpdateView struct {
 	Progress     bool            `json:"progress"`
 	Cards        []AgentCardView `json:"cards"`
 	Fill         *AgentFillView  `json:"fill"`
+	Compaction   bool            `json:"compaction"`
+	Compacting   bool            `json:"compacting"`
 }
 
 // AgentFillView is the context ring of a chat: the share of the window its next request would use in whole percent
@@ -259,7 +273,7 @@ type AgentCannotDoView struct {
 }
 
 // view maps u; a card that breaks its rules or that the panel does not know is dropped and logged. It reads the fill
-// of an ending request from the local database, so it runs outside p.mu.
+// of an ending request from the local database, so it runs outside p.mu; a compaction update brings its own.
 func (p *AgentPanel) view(ctx context.Context, u AgentUpdate) AgentUpdateView {
 	problem := u.Problem
 	if problem != "" && !agentUpdateProblems[problem] {
@@ -278,7 +292,14 @@ func (p *AgentPanel) view(ctx context.Context, u AgentUpdate) AgentUpdateView {
 		}
 		v.Cards = append(v.Cards, cv)
 	}
-	v.Fill = p.fill(ctx, u)
+	switch {
+	case u.Fill != nil:
+		f := *u.Fill
+		v.Fill = &f
+	case !u.Compaction:
+		v.Fill = p.fill(ctx, u)
+	}
+	v.Compaction, v.Compacting = u.Compaction, u.Compaction && u.Compacting
 	return v
 }
 

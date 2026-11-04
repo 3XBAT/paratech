@@ -43,8 +43,10 @@ type Fill struct {
 	Overflow bool
 }
 
-// Result is the outcome of Compact: whether a new summary was stored, and the fill of the chat's next request after it.
+// Result is the outcome of Compact: the chat read, whether a new summary was stored, and the fill of the chat's next
+// request after it.
 type Result struct {
+	Thread    shared.ThreadID
 	Compacted bool
 	Fill      Fill
 }
@@ -78,8 +80,9 @@ func New(d Deps) (*Service, error) {
 // Compact makes and stores a new summary of chat id when its next request needs one (thread.CompactionRequest); an
 // empty id is the current chat, and none is an empty Result. A chat with no request, or one that needs no compaction,
 // returns its fill without calling the Hub. A failure returns exactly one of the errors of this package, its cause
-// wrapped (a missing chat is ErrStore and shared.ErrNotFound), and stores nothing.
-func (s *Service) Compact(ctx context.Context, id shared.ThreadID) (Result, error) {
+// wrapped (a missing chat is ErrStore and shared.ErrNotFound), and stores nothing. started, when set, is called once
+// right before the Hub call, so the caller can show that a compaction runs; never when no Hub call is made.
+func (s *Service) Compact(ctx context.Context, id shared.ThreadID, started func()) (Result, error) {
 	if id != "" {
 		if err := id.Validate(); err != nil {
 			return Result{}, fmt.Errorf("%s: %w: %w", opCompact, ErrInvalidInput, err)
@@ -96,7 +99,7 @@ func (s *Service) Compact(ctx context.Context, id shared.ThreadID) (Result, erro
 		return Result{}, s.storeFail(ctx, id, err)
 	}
 	if _, ok := th.Turn(); !ok {
-		return Result{Fill: Fill{Level: thread.FillNormal}}, nil
+		return Result{Thread: th.ID(), Fill: Fill{Level: thread.FillNormal}}, nil
 	}
 	entries, err := s.history.Since(ctx, th.ID(), 1, thread.HistoryReadLimit)
 	if err != nil {
@@ -113,12 +116,15 @@ func (s *Service) Compact(ctx context.Context, id shared.ThreadID) (Result, erro
 		return Result{}, s.fail(ctx, th.ID(), code, err)
 	}
 	if !ok {
-		return Result{Fill: fillOf(th, entries)}, nil
+		return Result{Thread: th.ID(), Fill: fillOf(th, entries)}, nil
 	}
 	if s.wasRefused(req.Key()) {
-		return Result{}, s.fail(ctx, th.ID(), ErrRefused, errors.New("refused before for the same key"))
+		return Result{}, s.fail(ctx, th.ID(), ErrRefused, errRefusedBefore)
 	}
 
+	if started != nil {
+		started()
+	}
 	text, err := s.summarizer.Summarize(ctx, req)
 	if err != nil {
 		code := codeOf(ctx, err)
@@ -137,8 +143,11 @@ func (s *Service) Compact(ctx context.Context, id shared.ThreadID) (Result, erro
 	if th, entries, err = s.store(ctx, th, entries, req, summary); err != nil {
 		return Result{}, err
 	}
-	return Result{Compacted: true, Fill: fillOf(th, entries)}, nil
+	return Result{Thread: th.ID(), Compacted: true, Fill: fillOf(th, entries)}, nil
 }
+
+// errRefusedBefore is the cause of ErrRefused for a key the Hub refused before: it is not asked again.
+var errRefusedBefore = errors.New("refused before for the same key")
 
 // load reads chat id, or the current chat when id is empty.
 func (s *Service) load(ctx context.Context, id shared.ThreadID) (*thread.Thread, error) {
@@ -203,9 +212,10 @@ func (s *Service) storeFail(ctx context.Context, id shared.ThreadID, err error) 
 	return s.fail(ctx, id, code, err)
 }
 
-// fail logs a failed compaction by chat and code (never a text) and returns the code with its cause.
+// fail logs a failed compaction by chat and code only (the cause may hold a text of the chat or the Hub) and returns
+// the code with its cause.
 func (s *Service) fail(ctx context.Context, id shared.ThreadID, code, cause error) error {
-	s.log.WarnContext(ctx, "agent compaction failed", "thread", id.String(), "code", code.Error(), "err", cause)
+	s.log.WarnContext(ctx, "agent compaction failed", "thread", id.String(), "code", code.Error())
 	return fmt.Errorf("%s: %w: %w", opCompact, code, cause)
 }
 

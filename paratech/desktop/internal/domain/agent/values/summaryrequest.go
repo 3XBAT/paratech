@@ -2,6 +2,8 @@ package values
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -49,7 +51,11 @@ type SummaryRequest struct {
 	previous string
 	through  int
 	pairs    []SummaryPair
+	hash     string // of the data sent, for Key
 }
+
+// keyHashLen is the hex digits of the data hash in Key: enough to tell the data of one chat and Through apart.
+const keyHashLen = 8
 
 // NewSummaryRequest checks the request against the Hub limits: a valid thread, Through above the previous summary's,
 // 1..MaxSummaryPairs pairs of valid UTF-8 without NUL, a student text that is not blank and at most
@@ -71,10 +77,15 @@ func NewSummaryRequest(thread shared.ThreadID, previous HistorySummary, through 
 				ErrInvalidSummaryRequest, MaxSummaryStudentBytes, MaxSummaryReplyBytes)
 		}
 	}
-	if n := SummaryEncodedSize(previous, pairs); n > MaxSummaryDataBytes {
+	data := summaryData(previous.Text(), pairs)
+	if len(data) > MaxSummaryDataBytes {
 		return SummaryRequest{}, fmt.Errorf("%w: the data is over %d bytes", ErrInvalidSummaryRequest, MaxSummaryDataBytes)
 	}
-	return SummaryRequest{thread: thread, previous: previous.Text(), through: through, pairs: append([]SummaryPair(nil), pairs...)}, nil
+	sum := sha256.Sum256(data)
+	return SummaryRequest{
+		thread: thread, previous: previous.Text(), through: through, pairs: append([]SummaryPair(nil), pairs...),
+		hash: hex.EncodeToString(sum[:])[:keyHashLen],
+	}, nil
 }
 
 func summaryPart(s string, limit int) bool {
@@ -85,6 +96,11 @@ func summaryPart(s string, limit int) bool {
 // object {"summary":…,"pairs":[{"student":…,"reply":…}]} written by encoding/json without HTML escaping and without
 // a trailing line break. The adapter test pins that its encoding has exactly this size.
 func SummaryEncodedSize(previous HistorySummary, pairs []SummaryPair) int {
+	return len(summaryData(previous.Text(), pairs))
+}
+
+// summaryData is the data the adapter sends, as SummaryEncodedSize describes it.
+func summaryData(previous string, pairs []SummaryPair) []byte {
 	type pair struct {
 		Student string `json:"student"`
 		Reply   string `json:"reply"`
@@ -92,7 +108,7 @@ func SummaryEncodedSize(previous HistorySummary, pairs []SummaryPair) int {
 	data := struct {
 		Summary string `json:"summary"`
 		Pairs   []pair `json:"pairs"`
-	}{Summary: previous.Text(), Pairs: make([]pair, len(pairs))}
+	}{Summary: previous, Pairs: make([]pair, len(pairs))}
 	for i, p := range pairs {
 		data.Pairs[i] = pair(p)
 	}
@@ -101,12 +117,15 @@ func SummaryEncodedSize(previous HistorySummary, pairs []SummaryPair) int {
 	enc.SetEscapeHTML(false)
 	// Only strings: encoding cannot fail.
 	_ = enc.Encode(data)
-	return b.Len() - 1 // Encode ends with a line break
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n")) // Encode ends with a line break
 }
 
-// Key returns the idempotency key cs:<thread>:<through>.
+// Key returns the idempotency key cs:<thread>:<through>:<hash8>, hash8 the first 8 lowercase hex digits of the SHA-256
+// of the data sent. The Hub keeps a key's answer (and a refusal) for its retention: the same requests summarized again
+// after a «Скрыть» or a restart changed their texts are other data, so they get another key, not the old answer or an
+// idempotency conflict.
 func (r SummaryRequest) Key() string {
-	return "cs:" + string(r.thread) + ":" + strconv.Itoa(r.through)
+	return "cs:" + string(r.thread) + ":" + strconv.Itoa(r.through) + ":" + r.hash
 }
 
 // Thread returns the chat.
