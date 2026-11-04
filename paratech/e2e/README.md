@@ -33,7 +33,8 @@ The sandbox files stay after the run (the next run wipes them); the report is `p
 | `src/app` | launching the exe (`launch.ts`), `netstat` loopback check, `connectOverCDP` (`cdp.ts`) |
 | `src/steps`, `src/report` | spec helpers (`pick`, `opened`, `llm`, `step`, page stubs) and the reporter (`docs/process/e2e.md`) |
 | `src/hub`, `src/fakellm` | the Hub harness and the fake Messages API (below) |
-| `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check |
+| `src/checks` | layout checker (`checkLayout`, `layoutSession`, page probe, pure `evaluateLayout`, console watch, agent-thread overlap, synthetic ICS) |
+| `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check, `specs/layout` the `@layout` pack (two window sizes: `PARATECH_E2E_WINDOW=1024x640`, `docs/process/e2e.md`) |
 
 Ctrl+C during the setup: Playwright still runs the global teardown, and the setup's handle is in a global slot from the
 start, so the teardown stops what is already up (the app as soon as it is spawned, not only once it is proven isolated)
