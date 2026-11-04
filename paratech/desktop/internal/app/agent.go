@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 
+	"paratech/desktop/internal/adapters/hubclient"
 	"paratech/desktop/internal/adapters/sqlite"
 	"paratech/desktop/internal/cases/agentchats"
+	"paratech/desktop/internal/cases/agentcompact"
 	"paratech/desktop/internal/cases/agentjournal"
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/cases/answering"
@@ -22,6 +24,8 @@ import (
 	agentloop "paratech/desktop/internal/input/agent"
 	"paratech/desktop/internal/input/wails"
 )
+
+var _ agentcompact.Summarizer = (*hubclient.Client)(nil)
 
 // agentReads are the use cases the agent works through: the library and the knowledge base, the recordings and jobs,
 // the schedule, the assignments and their deliveries, and for the actions the reruns of post-processing and the drafts.
@@ -44,8 +48,8 @@ type agentReads struct {
 // Hub's AgentStepStream (its reply shown as a draft while written, TASK-340), the action journal with Undo and the Driver that runs the read tools, the reversible actions and
 // the proposals (a confirm card only: the proposals service and the deletion preview, never their confirmation); its
 // updates go to the agent panel of the UI (TASK-119). Today and the zone of the base come from the student's clock.
-// It needs c.drafts and c.deletions.
-func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, log *slog.Logger) error {
+// It needs c.drafts and c.deletions. The Hub client also makes the chat summaries of the compaction (ADR-0028).
+func (c *core) wireAgent(e env, model agentturn.AgentModel, summarizer agentcompact.Summarizer, reads agentReads, log *slog.Logger) error {
 	facts, err := agentloop.NewFacts(reads.knowledge)
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)
@@ -112,6 +116,14 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, reads agentReads, lo
 		return fmt.Errorf("app: agent chats: %w", err)
 	}
 	c.panel.SetFills(c.chats) // the ring of a chat in the update that ends its request (ADR-0028)
+	// Context compaction (ADR-0028) on the same rows; nothing runs it yet (the Driver does, TASK-269).
+	c.compact, err = agentcompact.New(agentcompact.Deps{
+		Chats: sqlite.NewAgentThreadRepository(c.db), History: sqlite.NewAgentHistory(c.db, e.clock),
+		Summarizer: summarizer, Clock: e.clock, Log: log,
+	})
+	if err != nil {
+		return fmt.Errorf("app: agent compaction: %w", err)
+	}
 	c.driver, err = agentloop.New(agentloop.Deps{
 		Turns: c.agent, Sink: panelSink{c.panel}, Library: reads.library, Inspector: reads.library, Answerer: reads.answers,
 		Knowledge: reads.knowledge, Activity: reads.activity, Schedule: reads.schedule,

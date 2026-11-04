@@ -22,6 +22,10 @@
 // the same URL, key, limits and error classes; it sends no instructions or alias (the Hub's own prompt), and its output
 // is parsed only by inspection.Request.Parse.
 //
+// Summarize asks for the summary of a chat's earlier requests (OPERATION_TYPE_CHAT_SUMMARY, ADR-0028; the
+// agentcompact.Summarizer port), unary, with the same URL, key, limits and error classes and the key cs:<thread>:<through>;
+// it sends no instructions, alias or output cap, and only an answer exactly {"summary":"<text>"} is returned.
+//
 // GetRemaining reads the tester's quota (QuotaService.GetRemaining, AC-12) with the same URL, key, limits and error
 // classes, for the «Подключения» page; the answer is shown, never used to decide (the Hub decides at Reserve).
 //
