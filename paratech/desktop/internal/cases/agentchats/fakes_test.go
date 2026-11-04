@@ -45,6 +45,42 @@ type memChats struct {
 	saves    int
 	// beforeSave, when set, runs before every Save (outside the lock), so a test can save a competing change.
 	beforeSave func()
+
+	// past is what ForkSource returns per chat (all of it, cut at upTo); forkErr fails ForkSource and SaveFork.
+	past    map[shared.ThreadID][]thread.PastRequest
+	forkErr error
+	reads   []turnKey // ForkSource calls
+	forks   []thread.Fork
+}
+
+func (r *memChats) ForkSource(_ context.Context, id shared.ThreadID, upTo int) ([]thread.PastRequest, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reads = append(r.reads, turnKey{id, upTo})
+	if r.forkErr != nil {
+		return nil, r.forkErr
+	}
+	var out []thread.PastRequest
+	for _, p := range r.past[id] {
+		if p.Number <= upTo {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// SaveFork stores the fork's thread as Save stores a new chat; it never touches another chat.
+func (r *memChats) SaveFork(ctx context.Context, f thread.Fork) error {
+	if r.forkErr != nil {
+		return r.forkErr
+	}
+	if err := r.Save(ctx, f.Thread); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.forks = append(r.forks, f)
+	r.mu.Unlock()
+	return nil
 }
 
 func (r *memChats) Get(_ context.Context, id shared.ThreadID) (*thread.Thread, error) {

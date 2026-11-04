@@ -481,6 +481,161 @@ func (q *Queries) ListAgentActionsByThread(ctx context.Context, arg ListAgentAct
 	return items, nil
 }
 
+const listAgentForkTexts = `-- name: ListAgentForkTexts :many
+SELECT s.seq, s.turn, s.entry, s.body FROM agent_steps s
+JOIN agent_turns u ON u.thread_id = s.thread_id AND u.number = s.turn
+WHERE s.thread_id = ?1 AND s.turn <= ?2 AND s.entry = 'student' AND u.dropped_by = 0
+ORDER BY s.seq
+`
+
+type ListAgentForkTextsParams struct {
+	ThreadID string
+	UpTo     int64
+}
+
+type ListAgentForkTextsRow struct {
+	Seq   int64
+	Turn  int64
+	Entry string
+	Body  string
+}
+
+// The student texts of those requests, in order.
+func (q *Queries) ListAgentForkTexts(ctx context.Context, arg ListAgentForkTextsParams) ([]ListAgentForkTextsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAgentForkTexts, arg.ThreadID, arg.UpTo)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentForkTextsRow{}
+	for rows.Next() {
+		var i ListAgentForkTextsRow
+		if err := rows.Scan(
+			&i.Seq,
+			&i.Turn,
+			&i.Entry,
+			&i.Body,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentForkTurns = `-- name: ListAgentForkTurns :many
+SELECT thread_id, number, status, resume_status, stop_reason, scope, mentions, steps, writes, paid_unplanned, planner_input, question_rounds, step_open, retry, proposed_plan, approved_plan, used, open_calls, created_ids, dropped_by, started_at, updated_at, reply_line FROM agent_turns
+WHERE thread_id = ?1 AND number <= ?2 AND dropped_by = 0
+ORDER BY number
+`
+
+type ListAgentForkTurnsParams struct {
+	ThreadID string
+	UpTo     int64
+}
+
+// Fork of a chat (thread.ForkOf): its requests up to a number that are not dropped, oldest first. Not limited by the
+// history read limit, so the first requests of a long chat are never lost.
+func (q *Queries) ListAgentForkTurns(ctx context.Context, arg ListAgentForkTurnsParams) ([]AgentTurn, error) {
+	rows, err := q.db.QueryContext(ctx, listAgentForkTurns, arg.ThreadID, arg.UpTo)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTurn{}
+	for rows.Next() {
+		var i AgentTurn
+		if err := rows.Scan(
+			&i.ThreadID,
+			&i.Number,
+			&i.Status,
+			&i.ResumeStatus,
+			&i.StopReason,
+			&i.Scope,
+			&i.Mentions,
+			&i.Steps,
+			&i.Writes,
+			&i.PaidUnplanned,
+			&i.PlannerInput,
+			&i.QuestionRounds,
+			&i.StepOpen,
+			&i.Retry,
+			&i.ProposedPlan,
+			&i.ApprovedPlan,
+			&i.Used,
+			&i.OpenCalls,
+			&i.CreatedIds,
+			&i.DroppedBy,
+			&i.StartedAt,
+			&i.UpdatedAt,
+			&i.ReplyLine,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentRequestEntries = `-- name: ListAgentRequestEntries :many
+SELECT seq, turn, entry, body FROM agent_steps
+WHERE thread_id = ?1 AND turn = ?2
+ORDER BY seq
+`
+
+type ListAgentRequestEntriesParams struct {
+	ThreadID string
+	Turn     int64
+}
+
+type ListAgentRequestEntriesRow struct {
+	Seq   int64
+	Turn  int64
+	Entry string
+	Body  string
+}
+
+// Every entry of one request, in order: the reply line of a request that has none frozen is built from them.
+func (q *Queries) ListAgentRequestEntries(ctx context.Context, arg ListAgentRequestEntriesParams) ([]ListAgentRequestEntriesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAgentRequestEntries, arg.ThreadID, arg.Turn)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentRequestEntriesRow{}
+	for rows.Next() {
+		var i ListAgentRequestEntriesRow
+		if err := rows.Scan(
+			&i.Seq,
+			&i.Turn,
+			&i.Entry,
+			&i.Body,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentSteps = `-- name: ListAgentSteps :many
 SELECT s.thread_id, s.seq, s.turn, s.entry, s.body, s.created_at, u.reply_line, u.mentions FROM agent_steps s
 LEFT JOIN agent_turns u ON u.thread_id = s.thread_id AND u.number = s.turn

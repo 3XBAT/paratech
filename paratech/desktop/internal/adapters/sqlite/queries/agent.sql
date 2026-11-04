@@ -146,3 +146,23 @@ LIMIT sqlc.arg(max_rows);
 
 -- name: ListUnfinishedAgentActions :many
 SELECT * FROM agent_actions WHERE status IN ('PENDING', 'UNDOING') ORDER BY created_at, rowid;
+
+-- Fork of a chat (thread.ForkOf): its requests up to a number that are not dropped, oldest first. Not limited by the
+-- history read limit, so the first requests of a long chat are never lost.
+-- name: ListAgentForkTurns :many
+SELECT * FROM agent_turns
+WHERE thread_id = sqlc.arg(thread_id) AND number <= sqlc.arg(up_to) AND dropped_by = 0
+ORDER BY number;
+
+-- The student texts of those requests, in order.
+-- name: ListAgentForkTexts :many
+SELECT s.seq, s.turn, s.entry, s.body FROM agent_steps s
+JOIN agent_turns u ON u.thread_id = s.thread_id AND u.number = s.turn
+WHERE s.thread_id = sqlc.arg(thread_id) AND s.turn <= sqlc.arg(up_to) AND s.entry = 'student' AND u.dropped_by = 0
+ORDER BY s.seq;
+
+-- Every entry of one request, in order: the reply line of a request that has none frozen is built from them.
+-- name: ListAgentRequestEntries :many
+SELECT seq, turn, entry, body FROM agent_steps
+WHERE thread_id = sqlc.arg(thread_id) AND turn = sqlc.arg(turn)
+ORDER BY seq;
