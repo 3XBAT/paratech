@@ -101,6 +101,46 @@ func TestSummaryRequestKeyAndCopies(t *testing.T) {
 	}
 }
 
+func TestSummaryRequestEqual(t *testing.T) {
+	prev, err := ParseHistorySummary(4, "сводка")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := ParseHistorySummary(4, "другая сводка")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairs := []SummaryPair{{Student: "a", Reply: "b"}, {Student: "c"}}
+	build := func(thread shared.ThreadID, previous HistorySummary, through int, pairs []SummaryPair) SummaryRequest {
+		t.Helper()
+		r, err := NewSummaryRequest(thread, previous, through, pairs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	base := build("th1", prev, 10, pairs)
+	tests := []struct {
+		name string
+		r    SummaryRequest
+		want bool
+	}{
+		{"same", build("th1", prev, 10, []SummaryPair{{Student: "a", Reply: "b"}, {Student: "c"}}), true},
+		{"other thread", build("th2", prev, 10, pairs), false},
+		{"other through", build("th1", prev, 11, pairs), false},
+		{"other previous", build("th1", other, 10, pairs), false},
+		{"no previous", build("th1", HistorySummary{}, 10, pairs), false},
+		{"other reply", build("th1", prev, 10, []SummaryPair{{Student: "a", Reply: "x"}, {Student: "c"}}), false},
+		{"fewer pairs", build("th1", prev, 10, pairs[:1]), false},
+		{"zero", SummaryRequest{}, false},
+	}
+	for _, tt := range tests {
+		if got := base.Equal(tt.r); got != tt.want || tt.r.Equal(base) != tt.want {
+			t.Errorf("%s: Equal = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
 // The size is that of the JSON as encoded without HTML escaping: escapes count, <>& do not grow.
 func TestSummaryEncodedSize(t *testing.T) {
 	prev, err := ParseHistorySummary(1, `a"b`)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -123,6 +124,11 @@ func (r SummaryRequest) Pairs() []SummaryPair { return append([]SummaryPair(nil)
 // EncodedSize is SummaryEncodedSize of the request.
 func (r SummaryRequest) EncodedSize() int {
 	return SummaryEncodedSize(HistorySummary{text: r.previous}, r.pairs)
+}
+
+// Equal reports whether o asks for the same summary: the same chat, Through, previous summary and pairs.
+func (r SummaryRequest) Equal(o SummaryRequest) bool {
+	return r.thread == o.thread && r.through == o.through && r.previous == o.previous && slices.Equal(r.pairs, o.pairs)
 }
 
 // IsZero reports whether the request is the zero value.
