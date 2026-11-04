@@ -51,6 +51,9 @@ type Querier interface {
 	DeleteDeadlineEventRemoval(ctx context.Context, assignmentID string) error
 	// The draft of an assignment chosen for deletion; its versions go with it (CASCADE).
 	DeleteDraftOfAssignment(ctx context.Context, assignmentID string) error
+	// The calls and results of an earlier final request that ended before the cutoff and has its reply line; its texts
+	// (entry 'student') always stay.
+	DeleteEndedAgentTurnDetails(ctx context.Context, arg DeleteEndedAgentTurnDetailsParams) (int64, error)
 	// The purge of a deleted assignment (ADR-0029 addendum 2): its deliveries in the passed final statuses only, so an
 	// unresolved email is never forgotten (hard rule 7); only while the assignment is still deleted before the cutoff.
 	// The statuses are a JSON array: a sqlc.slice would renumber the parameters after it.
@@ -87,6 +90,8 @@ type Querier interface {
 	DropAgentTurns(ctx context.Context, arg DropAgentTurnsParams) error
 	// The first request a request dropped; 0 when it dropped none.
 	FirstDroppedAgentTurn(ctx context.Context, arg FirstDroppedAgentTurnParams) (int64, error)
+	// The reply line of an earlier final request that ended before the cutoff, only while it has none.
+	FreezeEndedAgentTurnReply(ctx context.Context, arg FreezeEndedAgentTurnReplyParams) error
 	// The work of an assignment that has not failed; at most one (idx_works_assignment).
 	GetActiveWorkOfAssignment(ctx context.Context, assignmentID sql.NullString) (Work, error)
 	// The work of a library material that has not failed; at most one (idx_works_material).
@@ -271,6 +276,8 @@ type Querier interface {
 	// Every chat: the unarchived ones by their last activity, newest first, then the archived ones in the same order.
 	// (Comments of this file stay ASCII: sqlc rewrites queries by byte offset.)
 	ListAgentThreadIDs(ctx context.Context) ([]string, error)
+	// The entries of one request, oldest first, dropped or not.
+	ListAgentTurnSteps(ctx context.Context, arg ListAgentTurnStepsParams) ([]ListAgentTurnStepsRow, error)
 	ListAllSubjectAliases(ctx context.Context) ([]SubjectAlias, error)
 	ListAllSubjectFolders(ctx context.Context) ([]SubjectFolder, error)
 	// The teachers of a subject (TASK-285): rewritten with the subject on every save, under its version check.
@@ -287,6 +294,9 @@ type Querier interface {
 	// The deliveries of one assignment for the homework screen, newest first (idx_deliveries_assignment).
 	ListDeliveriesByAssignment(ctx context.Context, arg ListDeliveriesByAssignmentParams) ([]Delivery, error)
 	ListDeliveriesByStatus(ctx context.Context, statuses []string) ([]Delivery, error)
+	// Retention (ADR-0028): earlier final requests that ended before the cutoff and still have calls or results, in
+	// (updated_at, thread_id, number) order after the given key. frozen: the reply line is set.
+	ListEndedAgentTurns(ctx context.Context, arg ListEndedAgentTurnsParams) ([]ListEndedAgentTurnsRow, error)
 	ListInboxMaterials(ctx context.Context) ([]Material, error)
 	// Ids for the jobs screen (TASK-023): every row in an active status plus the newest max_terminal other rows,
 	// newest first. Ids only, so that one row that cannot be read does not hide the others (the caller loads each).

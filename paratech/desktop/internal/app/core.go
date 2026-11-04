@@ -133,6 +133,8 @@ type core struct {
 	purge loop
 	// subjectPurge erases the removed subjects past the restore window once a day (wireSubjectPurge, the same way).
 	subjectPurge loop
+	// agentRetention removes the details of agent requests that ended 90 days ago once a day (wireAgentRetention).
+	agentRetention loop
 
 	ui wails.Core
 }

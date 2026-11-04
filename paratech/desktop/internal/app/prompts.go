@@ -85,7 +85,7 @@ func (c *core) loops() []loop {
 	if c.prompts != nil {
 		out = append(out, loop{name: "scheduler", run: c.scheduler.Run}, loop{name: "recording prompt", run: c.prompts.Run})
 	}
-	for _, l := range []loop{c.purge, c.subjectPurge} {
+	for _, l := range []loop{c.purge, c.subjectPurge, c.agentRetention} {
 		if l.run != nil {
 			out = append(out, l)
 		}

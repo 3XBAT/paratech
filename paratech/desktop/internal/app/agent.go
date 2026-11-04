@@ -144,7 +144,8 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, summarizer agentcomp
 			rep, err := c.journal.Recover(ctx)
 			return rep.Done + rep.Failed + rep.Unknown + rep.Undone + rep.Refused, err
 		}})
-	return nil
+	// The details of requests that ended 90 days ago go at the start, after the recovery, and once a day (ADR-0028).
+	return c.wireAgentRetention(e, log)
 }
 
 // agentAssignments is the homework service under the names of the agent's interfaces: TrashAssignment is the page's
