@@ -3,6 +3,7 @@ package wails
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -30,8 +31,9 @@ func TestQuietAssets(t *testing.T) {
 			t.Errorf("%s %s = %d %q, want %d", tt.method, tt.path, rec.Code, rec.Body.String(), tt.want)
 		}
 		// loadOptionalScript appends a script only for a JavaScript content type.
-		if tt.want == http.StatusNoContent && rec.Header().Get("Content-Type") != "" {
-			t.Errorf("%s %s Content-Type = %q, want none", tt.method, tt.path, rec.Header().Get("Content-Type"))
+		ct := rec.Header().Get("Content-Type")
+		if tt.want == http.StatusNoContent && (ct != quietContentType || strings.Contains(ct, "javascript")) {
+			t.Errorf("%s %s Content-Type = %q, want non-JavaScript %q", tt.method, tt.path, ct, quietContentType)
 		}
 	}
 }

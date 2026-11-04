@@ -332,7 +332,7 @@ func (s *TurnkeyService) WorkOfAssignment(ctx context.Context, assignmentID stri
 	v, err := s.core.WorkOf(ctx, work.Source{Assignment: shared.AssignmentID(assignmentID)})
 	if err != nil && v.ID == "" {
 		if code, _ := turnkeyFailure(err); code == turnkeyCodeNotFound {
-			s.log.Info(opTurnkeyWork, "work", "none")
+			s.log.Debug(opTurnkeyWork, "work", "none")
 			return nil, nil
 		}
 	}

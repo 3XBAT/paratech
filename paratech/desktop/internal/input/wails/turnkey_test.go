@@ -548,7 +548,7 @@ func TestTurnkeyWorkOfAssignment(t *testing.T) {
 		problem string
 		level   string
 	}{
-		{name: "no work", err: notFound, level: "level=INFO"},
+		{name: "no work", err: notFound, level: "level=DEBUG"}, // a normal empty state, opened on every page visit
 		{name: "work", view: helperView(), wantID: "w1"},
 		{name: "work with a problem", view: helperView(), err: turnkey.ErrQuota, wantID: "w1", problem: turnkeyProblemQuota, level: "level=INFO"},
 		{name: "invalid id", err: fmt.Errorf("%w: bad", turnkey.ErrInvalidRequest), wantErr: ErrTurnkeyInvalid, level: "level=WARN"},
@@ -557,7 +557,8 @@ func TestTurnkeyWorkOfAssignment(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var logs strings.Builder
-			s := NewTurnkeyService(&fakeTurnkey{view: tt.view, err: tt.err}, slog.New(slog.NewTextHandler(&logs, nil)))
+			handler := slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})
+			s := NewTurnkeyService(&fakeTurnkey{view: tt.view, err: tt.err}, slog.New(handler))
 			got, err := s.WorkOfAssignment(t.Context(), "a7")
 			if !errors.Is(err, tt.wantErr) || (tt.wantErr == nil && err != nil) {
 				t.Fatalf("err = %v, want %v", err, tt.wantErr)
