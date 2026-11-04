@@ -25,8 +25,13 @@ and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `par
   «Скрыть» (`hideRestart`: the text goes into the field, the next send carries `restartFrom`) is off while a request runs.
   «Форк» (`forkFrom` in `AgentPanel`, `AgentApi.forkChat` -> Go `ForkChat`) is always on: the core makes a new chat
   «<название> (fork)» (the suffix is the core's), the panel opens it like «Новый чат», puts the message's text into its field
-  (`forkOpened` / `forkField`: typed text is kept, the message follows it; the pending «Скрыть» edit of the old chat is dropped)
-  and does not send it. One call at a time (`beginFork`), a refusal is written in the dialog with a button (`forkFailure`).
+  (`forkOpened` / `forkField`: typed text is kept, the message follows it; a pending «Скрыть» edit of the old chat ends, but text
+  the student edited after «Скрыть» goes into the new field, after what it held before) and does not send it. The chat note then
+  says «Открыт новый чат. Исходный «…» не изменился.» with a small icon «Открыть исходный чат» (`forkNote` in `AgentPanel`,
+  `ChatBar` `noteAction`); it ends with a chat switch, any other note or the next send. The « (fork)» suffix of a title is its own
+  span (`splitForkTitle`) so the ellipsis never takes it. One call at a time (`beginFork`); a refusal is written under «Форк» in
+  the dialog (`forkFailure`): the «Форк» button itself is the retry, «Новый чат» (gone or changed chat; `invalid` also reloads
+  the earlier requests) stands in the same option. A refusal after the dialog was closed goes to the chat note.
 - CSS: `agent.css` (panel and common cards), `confirm.css`, `turnkey.css`; all three are imported in `main.tsx`.
 - Pure logic is outside this folder, in `src/`: `agentView.ts` (texts, `CardModel`, `cardModel`, `entryModel`, `offerSpecs`,
   button labels and icons), `agentState.ts` (panel reducer, no React), `agentOffer.ts` (`offerStep`, `runOffer`),
