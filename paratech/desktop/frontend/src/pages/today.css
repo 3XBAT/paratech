@@ -35,6 +35,8 @@
 .today-lesson .today-st { grid-column: 2 / -1; }
 /* Narrow: the actions get their own row under the status, in the wide columns 2-3; left to auto placement they fall into the 4.5rem time column and stick out to the left. */
 .today-lesson .today-ac { grid-column: 2 / -1; justify-self: start; justify-content: flex-start; }
+/* The quiet «Добавить ссылку» has no shape, so its text must stand under the title: pull it left by its own padding (.btn.sm, 8px). */
+.today-lesson .today-ac > .btn.ghost:first-child { margin-left: -8px; }
 /* A chip inside a button: the underline on hover and focus and the focus ring tell that the word is pressable. */
 .today-problem { display: inline-flex; padding: 0; border: 0; border-radius: var(--r-xs); background: none; cursor: pointer; font: inherit; }
 .today-problem:hover .chip-text, .today-problem:focus-visible .chip-text { text-decoration: underline; }
@@ -80,6 +82,7 @@
   .today-lesson { grid-template-columns: 4.5rem minmax(0, 1fr) minmax(0, 14rem) auto; }
   .today-lesson .today-st { grid-column: auto; }
   .today-lesson .today-ac { grid-column: auto; justify-self: end; justify-content: flex-end; }
+  .today-lesson .today-ac > .btn.ghost:first-child { margin-left: 0; }
 }
 /* Two columns only when the left one keeps at least 28rem; otherwise the right column goes below.
    The right one is 40% of the page, 24-32rem: ordinary titles take 1-2 lines (TASK-193). */

@@ -11,6 +11,8 @@ export interface Crumb {
 
 export const crumbsLabel = "Путь";
 export const crumbsSeparator = "/";
+/** Labels longer than this (in characters) are the ones an ancestor crumb may be cut at; keep in step with the floor in styles.css. */
+export const crumbLongFrom = 12;
 
 export function Breadcrumbs(props: { items: readonly Crumb[] }) {
   const { items } = props;
@@ -22,8 +24,10 @@ export function Breadcrumbs(props: { items: readonly Crumb[] }) {
           // Every crumb has the whole text as a tooltip: whether the line cuts it depends on the width of the sheet,
           // unknown at render time.
           const title = c.label;
+          // Only an ancestor that the line can really cut gets the floor (CSS .long); a short one keeps its own width.
+          const cls = !last && c.label.length > crumbLongFrom ? "long" : undefined;
           return (
-            <li key={`${i}:${c.label}`}>
+            <li key={`${i}:${c.label}`} className={cls}>
               {last || c.onClick === undefined ? (
                 <span className="crumb cur" aria-current={last ? "page" : undefined} title={title}>
                   {c.label}

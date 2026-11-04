@@ -446,11 +446,15 @@ dialog.dialog:focus { outline: none; }
 /* Breadcrumbs (TASK-350): the way back, left above the title. Long names are cut with an ellipsis, the line never wraps. */
 .crumbs { min-width: 0; max-width: 100%; margin: 0 0 8px -6px; font-size: var(--fs-small); line-height: var(--lh-small); }
 .crumbs ol { display: flex; flex-wrap: nowrap; align-items: center; min-width: 0; max-width: 100%; margin: 0; padding: 0; list-style: none; }
-/* The line is never wider than the pane. The levels above shrink first (weight 1000) and freeze at a floor of 12 letters;
-   the screen's own name (weight 1, floor 0) takes the rest of the deficit and is cut with an ellipsis (its title has the
-   whole text). Short last name: nothing is cut. Long last name, short ancestors: only the last is cut, since the
-   ancestors are already at their floors (their content is shorter). Long both: the ancestors go to the floor first. */
-.crumbs li { display: flex; flex: 0 1000 auto; align-items: center; min-width: min(100%, 12ch); }
+/* The line is never wider than the pane. The levels above shrink first (weight 1000); the screen's own name (weight 1,
+   floor 0) takes the rest of the deficit and is cut with an ellipsis (its title has the whole text). A short ancestor
+   (12 letters or fewer, no class) keeps its own width: it neither shrinks nor stretches. A long one (.long, set in
+   Breadcrumbs.tsx) shrinks down to a floor of 12ch, which counts the padding and the separator, so about 9 letters
+   stay visible. Short last name: nothing is cut. Long last name: only the last is cut while the ancestors are short.
+   Long both: the long ancestors go to the floor first. Very deep trails (N floors wider than the pane) can still
+   overflow; paths are at most 3 levels today. */
+.crumbs li { display: flex; flex: 0 1000 auto; align-items: center; min-width: auto; }
+.crumbs li.long { min-width: min(100%, 12ch); }
 .crumbs li:last-child { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .crumb { display: block; min-width: 0; max-width: 28ch; padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crumb.cur { max-width: none; color: var(--muted); }

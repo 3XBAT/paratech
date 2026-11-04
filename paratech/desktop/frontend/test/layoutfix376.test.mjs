@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Breadcrumbs } from "../.test-build/ui/Breadcrumbs.js";
+import { Breadcrumbs, crumbLongFrom } from "../.test-build/ui/Breadcrumbs.js";
 import { BurningSection, WaitingSection } from "../.test-build/pages/TodayParts.js";
 import { SubjectTree } from "../.test-build/pages/SubjectsParts.js";
 import { loadTurnkeyBlock } from "../.test-build/homeworkTurnkey.js";
@@ -35,6 +35,17 @@ test("narrow lesson row: the actions take columns 2-3 of their own row and are n
   // The status keeps its place, the link panel still spans the same columns.
   assert.match(rule(narrow, ".today-lesson .today-st"), /grid-column: 2 \/ -1/);
   assert.match(rule(narrow, ".today-link"), /grid-column: 2 \/ -1/);
+});
+
+test("narrow: the quiet ghost button is pulled left by its own padding; the wide row resets it (it is end-aligned there)", () => {
+  const css = read("pages/today.css");
+  const comp = read("ui/components.css");
+  const pad = /\.btn\.sm \{[^}]*padding: 0 (\d+)px/.exec(comp);
+  assert.ok(pad, "the sm button padding");
+  const cut = css.indexOf("@container (min-width: 38rem)");
+  const sel = ".today-lesson .today-ac > .btn.ghost:first-child";
+  assert.match(rule(css.slice(0, cut), sel), new RegExp(`margin-left: -${pad[1]}px`));
+  assert.match(rule(css.slice(cut, css.indexOf("@container (min-width: 62rem)")), sel), /margin-left: 0/);
 });
 
 test("wide lesson row: four columns as before, the actions are auto-placed in the last one and end-aligned", () => {
@@ -102,6 +113,25 @@ test("every crumb carries its whole label as a tooltip", () => {
   assert.doesNotMatch(read("ui/Breadcrumbs.tsx"), /tipFrom/);
 });
 
+test("only an ancestor crumb with a label longer than the threshold gets the floor class; the last crumb never does", () => {
+  const longLabel = "Теория вероятностей"; // 19 letters
+  const edge = "а".repeat(crumbLongFrom); // exactly at the threshold: still short
+  const html = renderToStaticMarkup(
+    h(Breadcrumbs, {
+      items: [
+        { label: "Задания", onClick: noop },
+        { label: edge, onClick: noop },
+        { label: longLabel, onClick: noop },
+        { label: "Очень длинное название текущего экрана" },
+      ],
+    }),
+  );
+  const lis = html.match(/<li[^>]*>/g) ?? [];
+  assert.deepEqual(lis, ["<li>", "<li>", '<li class="long">', "<li>"]);
+  // The tooltips stay on every crumb, with or without the class.
+  assert.equal((html.match(/title="/g) ?? []).length, 4);
+});
+
 test("the crumb line is never wider than the pane: the ancestors give way first down to a floor, the last crumb takes the rest", () => {
   const css = read("styles.css");
   // The containers cannot be pushed wider than the pane by their content.
@@ -114,12 +144,16 @@ test("the crumb line is never wider than the pane: the ancestors give way first 
   assert.match(ol, /display: flex/);
   assert.match(ol, /flex-wrap: nowrap/);
 
-  // Ancestors: a huge shrink weight, so the deficit goes to them first; frozen at a floor of a few letters.
+  // Ancestors: a huge shrink weight, so the deficit goes to them first. A short one has no floor (it keeps its own width,
+  // so no empty gap appears after its «/»); only a .long one is frozen at a floor of a few letters.
   const li = rule(css, ".crumbs li");
   const anc = /flex: 0 (\d+) auto/.exec(li);
   assert.ok(anc && Number(anc[1]) >= 100, "ancestors shrink with a big weight");
-  const floor = /min-width: min\(100%, (\d+)ch\)/.exec(li);
-  assert.ok(floor, "the floor of an ancestor, never above the pane");
+  assert.match(li, /min-width: auto/, "a short ancestor has no floor to be stretched to");
+  assert.doesNotMatch(li, /min-width: min\(/);
+  const floor = /min-width: min\(100%, (\d+)ch\)/.exec(rule(css, ".crumbs li.long"));
+  assert.ok(floor, "the floor of a long ancestor, never above the pane");
+  assert.equal(Number(floor[1]), crumbLongFrom, "the floor and the class threshold are the same number");
 
   // The last crumb: a normal shrink factor (so it does shrink, the line cannot overflow) and no floor (an ellipsis).
   const last = rule(css, ".crumbs li:last-child");
@@ -127,11 +161,10 @@ test("the crumb line is never wider than the pane: the ancestors give way first 
   assert.match(last, /min-width: 0/);
   assert.match(last, /max-width: 100%/);
   assert.ok(Number(anc[1]) > 1, "ancestors are weighted above the last crumb, so they give way first");
-  assert.doesNotMatch(css, /flex: 0 0\.001 auto/, "the last crumb must not be frozen: the line would overflow the sheet");
 
-  // Scenarios: (1) short last: nothing shrinks, content fits. (2) long last, short ancestors: ancestors are below their
-  // floor already (frozen), the whole deficit goes to the last, which is cut by .crumb's ellipsis. (3) long both:
-  // ancestors go down to the floor first (weight 1000), then the last takes what is left.
+  // Scenarios: (1) short last: nothing shrinks, content fits. (2) long last, short ancestors: the ancestors keep their
+  // own width (auto floor), the whole deficit goes to the last, which is cut by .crumb's ellipsis. (3) long both: the
+  // long ancestors go down to the floor first (weight 1000), then the last takes what is left.
   const crumb = rule(css, ".crumb");
   assert.match(crumb, /min-width: 0/);
   assert.match(crumb, /overflow: hidden/);
