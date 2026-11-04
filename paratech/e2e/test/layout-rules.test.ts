@@ -246,7 +246,7 @@ describe("evalInPage under the CSP of the app", () => {
       assert.equal(await evalInPage<undefined>(page, "() => undefined"), undefined);
       assert.deepEqual(await evalInPage<{ a: number[] }>(page, "(o) => ({ a: [o.n, o.n + 1] })", { n: 1 }), { a: [1, 2] });
       assert.equal(await evalInPage<string>(page, "() => document.querySelector('p').textContent"), "страница под CSP");
-      await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, 150)); // a short grace only: this checks that a record is ABSENT, which cannot be awaited
       assert.deepEqual(drainConsole(page), [], "inspector evaluation is exempt from the CSP and prints nothing to the page console");
     });
   });
@@ -258,7 +258,7 @@ describe("evalInPage under the CSP of the app", () => {
       await evalInPage(page, "() => navigator.clipboard.writeText('привет')");
       await evalInPage(page, "async () => { await navigator.clipboard.writeText('мир'); }");
       assert.deepEqual(await clipboardWrites(page), ["привет", "мир"]);
-      await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, 150)); // same: absence of a console record
       assert.deepEqual(
         drainConsole(page).filter((r) => r.kind !== "request"),
         [],

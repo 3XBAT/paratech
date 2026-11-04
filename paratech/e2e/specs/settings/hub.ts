@@ -56,12 +56,16 @@ export async function addressField(main: Page): Promise<Locator> {
   return main.getByRole("textbox", { name: "Адрес сервера", exact: true });
 }
 
-/** Types the address and presses «Сохранить адрес»; returns when «Сохранено.» is shown. */
+/**
+ * Types the address and presses «Сохранить адрес»; returns when «Сохранено.» is shown and the field holds the address that
+ * was typed (a choice of the student to open the block wins during the visit, so the block stays open after the save).
+ */
 export async function enterAddress(main: Page, url: string): Promise<void> {
   const field = await addressField(main);
   await field.fill(url, act);
   await main.getByRole("button", { name: "Сохранить адрес", exact: true }).click(act);
   await expect(main.locator("details.conn-adv").getByRole("status").filter({ hasText: "Сохранено." })).toBeVisible(act);
+  await expect(await addressField(main), "после сохранения в поле «Адрес сервера» должен стоять сохранённый адрес").toHaveValue(url, act);
 }
 
 /** The result line under «Лимит обработки» (the answer of the last «Обновить»). Its class is s-ok / s-fail / s-wait. */

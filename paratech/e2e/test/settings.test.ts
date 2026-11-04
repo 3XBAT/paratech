@@ -3,6 +3,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { describe, test } from "node:test";
@@ -10,8 +12,10 @@ import { describe, test } from "node:test";
 import { EnvHubDatabaseUrl, EnvHubKey } from "../src/contract.js";
 import { findFiles } from "../src/fixtures/files.js";
 import {
+  downloadTimeoutMs,
   ensureModel,
   flipOneByte,
+  httpDownload,
   makeCorruptedCopy,
   type ModelPaths,
   ModelCatalogId,
@@ -257,6 +261,125 @@ describe("the model of the catalog", () => {
       s.cleanup();
     }
   });
+
+  test("the kind of a failure: only the network is «не проверено»; a mismatch and a bad catalog are defects", async () => {
+    const s = setup();
+    try {
+      const kindOf = async (p: Promise<unknown>): Promise<string> => {
+        try {
+          await p;
+        } catch (e) {
+          return e instanceof ModelFetchError ? e.kind : `not a ModelFetchError: ${String(e)}`;
+        }
+        return "no error";
+      };
+      const opts = { paths: s.paths, log: () => undefined };
+      assert.equal(await kindOf(ensureModel({ ...opts, download: writes(flipOneByte(bytes, 5)) })), "mismatch", "wrong SHA-256");
+      assert.equal(await kindOf(ensureModel({ ...opts, download: writes(bytes.subarray(2)) })), "mismatch", "wrong size");
+      assert.equal(await kindOf(ensureModel({ ...opts, download: () => Promise.reject(new Error("getaddrinfo ENOTFOUND")) })), "network");
+      assert.equal(
+        await kindOf(ensureModel({ ...opts, download: () => Promise.reject(new ModelFetchError("ответ 503", "network")) })),
+        "network",
+        "a classified error keeps its kind",
+      );
+      writeFileSync(s.paths.catalog, "{");
+      assert.equal(await kindOf(ensureModel({ ...opts, download: writes(bytes) })), "catalog");
+      writeFileSync(s.paths.catalog, JSON.stringify({ models: [{ ...entry, sha256: "xyz" }] }));
+      assert.equal(await kindOf(ensureModel({ ...opts, download: writes(bytes) })), "catalog");
+      assert.equal(await kindOf(Promise.resolve().then(() => readCatalogModel({ ...s.paths, catalog: path.join(s.dir, "missing.json") }))), "catalog");
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  test("the model spec reads the kind: only `network` becomes an environment error", () => {
+    const source = readFileSync(path.resolve(import.meta.dirname, "..", "..", "specs", "settings", "model.spec.ts"), "utf8");
+    assert.match(source, /err instanceof ModelFetchError && err\.kind !== "network"[\s\S]{0,300}throw err;/);
+  });
+
+  test("the download deadline ends before the 10 minutes of the beforeAll", () => {
+    assert.ok(downloadTimeoutMs < 10 * 60_000, String(downloadTimeoutMs));
+    const source = readFileSync(path.resolve(import.meta.dirname, "..", "..", "specs", "settings", "model.spec.ts"), "utf8");
+    assert.match(source, /test\.setTimeout\(10 \* 60_000\)/);
+  });
+
+  describe("httpDownload: the size cap", () => {
+    function serve(handler: http.RequestListener): Promise<{ url: string; close: () => Promise<void> }> {
+      return new Promise((resolve) => {
+        const server = http.createServer(handler);
+        server.listen(0, "127.0.0.1", () => {
+          const { port } = server.address() as AddressInfo;
+          resolve({
+            url: `http://127.0.0.1:${port}/ggml-base-q5_1.bin`,
+            close: () =>
+              new Promise<void>((done) => {
+                server.closeAllConnections();
+                server.close(() => done());
+              }),
+          });
+        });
+      });
+    }
+
+    test("a body that is longer than the catalog size (no Content-Length) is cut off and nothing is left", async () => {
+      const t = tmp();
+      const srv = await serve((_req, res) => {
+        // chunked, more than the cap
+        res.write(Buffer.alloc(600));
+        res.write(Buffer.alloc(600));
+        setTimeout(() => res.end(Buffer.alloc(600)), 10);
+      });
+      try {
+        const dest = path.join(t.dir, "m.bin.part");
+        await assert.rejects(httpDownload(srv.url, dest, () => undefined, 1000), (e: unknown) => e instanceof ModelFetchError && e.kind === "mismatch" && /больше 1000/.test(e.message));
+        assert.ok(!existsSync(dest), "the .part file is removed");
+      } finally {
+        await srv.close();
+        t.cleanup();
+      }
+    });
+
+    test("a Content-Length above the catalog size is refused before the body is read", async () => {
+      const t = tmp();
+      let sent = 0;
+      const srv = await serve((_req, res) => {
+        res.setHeader("content-length", "5000");
+        res.write(Buffer.alloc(100), () => {
+          sent += 100;
+        });
+      });
+      try {
+        const dest = path.join(t.dir, "m.bin.part");
+        await assert.rejects(httpDownload(srv.url, dest, () => undefined, 1000), (e: unknown) => e instanceof ModelFetchError && e.kind === "mismatch" && /обещает 5000/.test(e.message));
+        assert.ok(!existsSync(dest) || statSync(dest).size === 0, "no body was written");
+        assert.ok(sent <= 100);
+      } finally {
+        await srv.close();
+        t.cleanup();
+      }
+    });
+
+    test("a body of exactly the catalog size is accepted; an HTTP error is a network failure", async () => {
+      const t = tmp();
+      const good = await serve((_req, res) => {
+        res.end(Buffer.alloc(1000, 7));
+      });
+      const bad = await serve((_req, res) => {
+        res.statusCode = 503;
+        res.end("busy");
+      });
+      try {
+        const dest = path.join(t.dir, "m.bin.part");
+        await httpDownload(good.url, dest, () => undefined, 1000);
+        assert.equal(statSync(dest).size, 1000);
+        await assert.rejects(httpDownload(bad.url, path.join(t.dir, "x.part"), () => undefined, 1000), (e: unknown) => e instanceof ModelFetchError && e.kind === "network" && /503/.test(e.message));
+      } finally {
+        await good.close();
+        await bad.close();
+        t.cleanup();
+      }
+    });
+  });
 });
 
 describe("the corrupted copy", () => {
@@ -459,6 +582,13 @@ describe("the order of the settings pack is fixed", () => {
     assert.match(config, /workers:\s*1\b/);
     assert.match(config, /fullyParallel:\s*false/);
     assert.match(config, /retries:\s*0/);
+  });
+
+  test("the last Hub row types the key of the run itself and needs the first row", () => {
+    const source = readFileSync(path.join(e2e, "specs", "settings", "hub.spec.ts"), "utf8");
+    const restored = source.slice(source.indexOf("test(Restored,"));
+    assert.match(restored, /^test\(Restored, details\(Restored, \{ requires: Connect \}\)/);
+    assert.match(restored, /enterKey\(main, requireEnv\(EnvHubKey\)\)/);
   });
 
   test("the files of the pack sort as Hub, model, schedule; a row that needs another comes after it", () => {

@@ -3,7 +3,8 @@
 //   1. address, key and the remaining quota (the E2E limit of 400 000 tokens);
 //   2. a revoked key shows the rejection. The key of the RUN must stay valid for the later packs, so a SECOND key is issued
 //      with `hub keys create` (src/hub/keys.ts) and that one is revoked; the key of the run is typed back at the end;
-//   3. the key of the run works again (a fresh visit), so later packs are not affected whatever happened in row 2.
+//   3. the key of the run is typed once more (a fresh visit) and works, so later packs are not affected whatever happened in
+//      row 2 (the `finally` of row 2 is only a first attempt).
 // The key is read from process.env only; it is never written to a title, a note, an annotation or a log.
 import type { Page } from "@playwright/test";
 
@@ -136,9 +137,11 @@ test(Revoked, details(Revoked, { requires: Connect }), async ({ main }) => {
   }
 });
 
-test(Restored, details(Restored), async ({ main }) => {
-  await step("новый заход в «Подключения → Конспекты и задания»: остаток лимита приходит с ключом прогона", async () => {
+test(Restored, details(Restored, { requires: Connect }), async ({ main }) => {
+  await step("новый заход в «Подключения → Конспекты и задания»: ключ прогона вводится сам, остаток лимита приходит", async () => {
+    // Whatever happened in the revoke row, this row types the key of the run itself: the later packs need it valid.
     await openHubSection(main);
+    await enterKey(main, requireEnv(EnvHubKey));
     await refreshQuota(main);
     await expectQuotaOk(main, "с ключом прогона");
     await expect(keyChip(main, "Ключ задан")).toBeVisible(act);

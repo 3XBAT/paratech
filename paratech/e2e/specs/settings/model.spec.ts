@@ -12,6 +12,7 @@ import path from "node:path";
 
 import type { Locator, Page } from "@playwright/test";
 
+import { evalInPage } from "../../src/checks/inpage.js";
 import { EnvCtlDir, EnvDataDir } from "../../src/contract.js";
 import { findFiles } from "../../src/fixtures/files.js";
 import { type CatalogModel, ensureModel, makeCorruptedCopy, ModelFetchError, placeInFixtures, sha256OfFile } from "../../src/fixtures/model.js";
@@ -44,13 +45,17 @@ const need = (): Prepared => {
 };
 
 test.beforeAll(async () => {
-  test.setTimeout(10 * 60_000); // the first run downloads 57 MB
+  test.setTimeout(10 * 60_000); // the first run downloads 57 MB; the download itself stops after 9 minutes (downloadTimeoutMs)
   const ctl = requireEnv(EnvCtlDir);
   let fetched;
   try {
     fetched = await ensureModel();
   } catch (err) {
-    // no network / a download that does not match the catalog: the machine is not ready, the app was not even asked
+    if (err instanceof ModelFetchError && err.kind !== "network") {
+      // a size or SHA-256 that differs from catalog.json, or a bad catalog.json, is a defect of the product's data: the row fails
+      throw err;
+    }
+    // no network (or a disk problem of the machine): not checked, the app was not even asked
     throw envError(err instanceof ModelFetchError ? err.message : `загрузка модели: ${err instanceof Error ? err.message : String(err)}`);
   }
   const fixtures = path.join(ctl, "fixtures");
@@ -218,11 +223,30 @@ test(Default, details(Default, { requires: Imported }), async ({ main }) => {
   });
 });
 
+// The status of the speech component asked the way the page asks it (frontend bindings/speech.ts, bindings/runtime.ts): the
+// Wails runtime is served by the app at /wails/runtime.js and Call.ByName reaches SpeechService.Status. The notice of the
+// page renders nothing both while this call is pending and when the component is ready, so the DOM alone proves nothing.
+const speechStatusSource = `async () => {
+  const runtime = await import("/wails/runtime.js");
+  const s = await runtime.Call.ByName("paratech/desktop/internal/input/wails.SpeechService.Status");
+  return { state: String(s && s.state), message: String((s && s.message) || "") };
+}`;
+
 test(Speech, details(Speech), async ({ main }) => {
   await step("Модели речи: модуль расшифровки готов (нет уведомления об установке или сбое)", async () => {
     await openModels(main);
-    // The notice of the speech component loads on its own and shows nothing while recognition works, so the state is read
-    // after the list has loaded and the model is there (in a full run, seconds after the page was first opened).
+    let last = { state: "?", message: "" };
+    await expect
+      .poll(
+        async () => {
+          last = await evalInPage<{ state: string; message: string }>(main, speechStatusSource);
+          return last.state;
+        },
+        { timeout: 60_000, intervals: [500, 1_000, 2_000], message: "SpeechService.Status должен ответить state=ready" },
+      )
+      .toBe("ready");
+    note(`SpeechService.Status: state=${last.state}`);
+    // With the real status ready, the page must agree: no notice, no install button (rendered after its own status call).
     await expect(main.getByRole("heading", { name: "Установленные", exact: true })).toBeVisible(act);
     await expect(main.locator('.note[role="status"]'), "уведомление о модуле расшифровки показывается только когда он не готов").toHaveCount(0);
     await expect(main.getByRole("button", { name: "Установить модуль расшифровки" })).toHaveCount(0);

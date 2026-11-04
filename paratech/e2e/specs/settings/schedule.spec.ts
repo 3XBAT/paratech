@@ -105,14 +105,26 @@ test(Import, details(Import), async ({ main, pick }) => {
     note(`ответ приложения: ${text}`);
     expect(text).toMatch(/добавлено 3,/);
     await expect(preview(main)).toBeHidden(act);
+    // The screen of «Расписание» keeps no list of lessons after the commit (SchedulePage.tsx: the preview goes away); what it
+    // shows about the imported schedule is the result line and the offer to make the subjects out of it.
+    const next = main.locator(".sched-next");
+    await expect(next, "после «Применить» на «Расписание» должно быть предложение завести предметы из расписания").toBeVisible({ timeout: 20_000 });
+    const offer = await textOf(next);
+    note(`предложение на «Расписание»: ${offer}`);
+    expect(offer).toMatch(/Из расписания можно создать предметы: [1-9]\d*/);
+    await expect(next.getByRole("button", { name: "Завести предметы из расписания", exact: true })).toBeVisible(act);
+    await expect(main.getByText("Загрузите расписание из файла"), "после «Применить» пустого экрана быть не должно").toHaveCount(0);
     await snapshot("Расписание: применено");
   });
 
+  const today: { gap?: string } = {}; // an object: TS would narrow a plain let, assigned in a callback, to undefined
   await step("«Сегодня»: ближайшая пара на экране", async () => {
     const soon = lessons.find((l) => l.soon) as WeekLesson;
     await openSection(main, "Сегодня");
     if (!isLocalToday(soon.start, new Date())) {
-      note(`пара «${soon.title}» начинается после полуночи по времени компьютера: «Сегодня» её не покажет, проверено только «Завтра» в предпросмотре`);
+      // not asserted here; the row ends as «не проверено» after all other checks of the row (below)
+      today.gap = `пара «${soon.title}» начинается после полуночи по времени компьютера: «Сегодня» её не покажет`;
+      note(today.gap);
       return;
     }
     const row = main.locator(".today-lesson").filter({ hasText: soon.title });
@@ -131,6 +143,9 @@ test(Import, details(Import), async ({ main, pick }) => {
     await preview(main).getByRole("button", { name: "Отмена", exact: true }).click(act);
     await expect(preview(main)).toBeHidden(act);
   });
+
+  // Last, after every other assertion of the row: a gap in «Сегодня» makes the row «не проверено», never «готово».
+  test.skip(today.gap !== undefined, `«Сегодня» не проверено: ${today.gap ?? ""}`);
 });
 
 test(Subjects, details(Subjects, { requires: Import }), async ({ main }) => {

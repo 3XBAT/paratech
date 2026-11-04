@@ -110,18 +110,28 @@ rows, in file order (one worker; `hub.spec.ts` < `model.spec.ts` < `schedule.spe
   400 000; a **revoked key** shows the rejection. The key of the run must stay valid for the later packs, so the spec issues a
   SECOND key with `hub keys create` and revokes that one (`src/hub/keys.ts`: `keyTools().issueKey / revokeKey / listKeys`; it
   runs the `paratech/dist/e2e/hub.exe` of the run against `PARATECH_E2E_HUB_DATABASE_URL`); then the key of the run is typed
-  back and a third row confirms the quota line works again.
+  back (the `finally` of that row is a first attempt) and a third row (`requires` the first) types the key of the run
+  itself once more and confirms the quota line works again, so the later packs always get a valid key.
 - **Model** (AC-07, AC-23): `ggml-base-q5_1.bin` is fetched once into `paratech/dist/cache/e2e` by the spec's `beforeAll`
   (`scripts/fetch-model.ts` runs the same code: size, SHA-256 and URL are read from `desktop/internal/app/catalog.json` at run
-  time, `.part` file renamed only after the hash matched, a mismatch is a loud error, a network failure is «не проверено»). It
+  time, `.part` file renamed only after the hash matched). `ModelFetchError.kind` decides the report: only `network` (no
+  connection, HTTP error, the 9-minute download deadline) is «не проверено»; `mismatch` (size or SHA-256 differs from the
+  catalog, or more bytes than the catalog size arrive: the download is cut off and the `.part` removed) and `catalog` (a
+  broken `catalog.json`) are defects and fail the row. The FIRST run downloads the 57 MB model and that time counts against
+  the pack budget (the spec's `beforeAll` allows 10 minutes); later runs reuse the verified cache. Redirects
+  (HuggingFace -> CDN) are followed; integrity is enforced only by size + SHA-256 from the catalog. The file
   is placed under `<ctl>/fixtures/models/`. A copy with ONE byte changed (`<ctl>/fixtures/models-corrupt/`) is refused by
   «Импортировать скачанный файл…» of the catalog row with «Контрольная сумма SHA-256 не совпадает…»; «Импортировать файл
   модели…» shows the file's real SHA-256 (equal to the catalog's for the good file); then the good file is imported from the
-  catalog row, made the default, and «Модуль расшифровки» is ready (no install notice).
+  catalog row, made the default, and «Модуль расшифровки» is ready: the row asks the real `SpeechService.Status` through the
+  Wails runtime of the page (`evalInPage`) until `state === "ready"`, then checks that the page shows no install notice
+  (the notice renders nothing while its own status call is pending, so the DOM alone would prove nothing).
 - **Schedule** (AC-16): `src/fixtures/schedule.ts` builds `<ctl>/fixtures/schedule/week.ics` at run time (Матанализ,
   Литература, История; one lesson at the first whole minute at least 2 min after the file is written; UTC `Z` times plus
   `X-WR-TIMEZONE:Europe/Moscow`). The preview shows subjects, kind, teacher and times in the zone of the file; «Применить»
-  commits; the lesson is on «Сегодня»; the same file again changes nothing. Then the three subjects are created from the
+  commits (the «Расписание» screen then shows the result line and the offer to create subjects; it keeps no lesson list);
+  the lesson is on «Сегодня» (if the machine's local midnight falls before the lesson, that part is skipped and the row is
+  «не проверено», after every other assertion of the row); the same file again changes nothing. Then the three subjects are created from the
   schedule and the synthetic call link `https://telemost.yandex.ru/j/00000000000001` is saved for «Матанализ» on «Сегодня».
   The ICS importer ignores `LOCATION` and the rest of `DESCRIPTION` (`icsschedule/doc.go`), so the link is added on «Сегодня»;
   it is never opened (only a later pack's click on «Подключиться» writes it to `opened.jsonl`).
