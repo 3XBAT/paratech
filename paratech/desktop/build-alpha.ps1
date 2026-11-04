@@ -21,6 +21,10 @@ folder holds it, else from the same cache or downloaded from that URL, and check
 output folder, waits for the start log lines (the speech engine among them) and stops the process again (a hard stop:
 see docs/qa/run-alpha.md).
 
+-E2E builds the end-to-end test exe instead (ADR-0035): tags production,e2e, by default into paratech\dist\e2e. Only
+this build has the --e2e-* flags; the build without -E2E is checked to carry no e2e tag. -E2E -Smoke also passes
+--e2e-dir (a folder inside the smoke data folder) and waits for the 'e2e mode on' line.
+
 .EXAMPLE
 powershell -NoProfile -ExecutionPolicy Bypass -File .\paratech\desktop\build-alpha.ps1 -Smoke
 #>
@@ -37,7 +41,9 @@ param(
     # Dev build without the speech component (the app then offers to install it).
     [switch]$SkipWhisper,
     # Only put the speech component into the output folder; no frontend or Go build (build-release.ps1 uses it).
-    [switch]$ComponentOnly
+    [switch]$ComponentOnly,
+    # Build the end-to-end test exe (tags production,e2e; ADR-0035) instead of the alpha.
+    [switch]$E2E
 )
 
 Set-StrictMode -Version Latest
@@ -61,6 +67,12 @@ $smokeLines = @('instance lock acquired', 'secrets_profile=isolated', 'backgroun
 $speechReadyLine = 'speech recognition engine ready'
 $speechMissingLine = 'speech recognition is not available'
 $smokeTimeoutSeconds = 60
+# The E2E build has the --e2e-* flags (ADR-0035); every other build must not.
+$buildTags = 'production'
+if ($E2E) {
+    $buildTags = 'production,e2e'
+    $smokeLines += 'e2e mode on'
+}
 
 function Write-Step([string]$Message) {
     Write-Host "==> $Message"
@@ -438,6 +450,9 @@ function Invoke-Smoke([string]$Exe, [string]$Dir) {
 
     # Flags win over LA_* variables of this session; the log level is fixed so that the info lines appear.
     $arguments = @('--headless', '--log-level', 'info', '--data-dir', ('"{0}"' -f $dataDir))
+    if ($E2E) {
+        $arguments += @('--e2e-dir', ('"{0}"' -f (Join-Path $dataDir 'e2e')))
+    }
     $proc = $null
     $text = ''
     try {
@@ -488,9 +503,15 @@ if ($WhisperZip -ne '' -and $WhisperDir -ne '') {
 if ($ComponentOnly -and $Smoke) {
     throw '-Smoke needs a build; it cannot be combined with -ComponentOnly.'
 }
+if ($ComponentOnly -and $E2E) {
+    throw '-E2E needs a build; it cannot be combined with -ComponentOnly.'
+}
 
 if ($OutDir -eq '') {
     $OutDir = Join-Path $moduleRoot 'dist\alpha'
+    if ($E2E) {
+        $OutDir = Join-Path $moduleRoot 'dist\e2e'
+    }
 }
 $OutDir = Resolve-FullPath $OutDir
 $exePath = Join-Path $OutDir $exeName
@@ -543,7 +564,7 @@ try {
     Pop-Location
 }
 
-Write-Step "Go: building $exePath (tags production, CGO_ENABLED=0, windows/amd64)"
+Write-Step "Go: building $exePath (tags $buildTags, CGO_ENABLED=0, windows/amd64)"
 $null = New-Item -ItemType Directory -Force -Path $OutDir
 $legacyExe = Join-Path $OutDir $legacyExeName
 if (Test-Path -LiteralPath $legacyExe -PathType Leaf) {
@@ -552,15 +573,16 @@ if (Test-Path -LiteralPath $legacyExe -PathType Leaf) {
 }
 $saved = Set-Env @{ CGO_ENABLED = '0'; GOOS = 'windows'; GOARCH = 'amd64' }
 try {
-    Invoke-Native $goExe @('-C', $moduleRoot, 'build', '-tags', 'production', '-trimpath', '-o', $exePath, './desktop/cmd/desktop')
+    Invoke-Native $goExe @('-C', $moduleRoot, 'build', '-tags', $buildTags, '-trimpath', '-o', $exePath, './desktop/cmd/desktop')
 } finally {
     Restore-Env $saved
 }
 
-# The embedded build settings must show the release flags.
+# The embedded build settings must show the release flags: exactly these tags, so an alpha never has e2e.
 $info = (& $goExe version -m $exePath | Out-String)
-if ($LASTEXITCODE -ne 0 -or -not $info.Contains('-tags=production') -or -not $info.Contains('CGO_ENABLED=0')) {
-    throw "The built exe does not report -tags=production and CGO_ENABLED=0:`n$info"
+$tagsPattern = '(?m)^\s*build\s+-tags=' + [regex]::Escape($buildTags) + '\s*$'
+if ($LASTEXITCODE -ne 0 -or $info -notmatch $tagsPattern -or -not $info.Contains('CGO_ENABLED=0')) {
+    throw "The built exe does not report -tags=$buildTags and CGO_ENABLED=0:`n$info"
 }
 $size = [math]::Round((Get-Item -LiteralPath $exePath).Length / 1MB, 1)
 Write-Step "Built $exePath ($size MB)"

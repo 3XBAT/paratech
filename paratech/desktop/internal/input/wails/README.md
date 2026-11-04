@@ -23,7 +23,8 @@ File names below are in this package unless a path is given.
 ## Where to add a binding
 1. `<page>.go`: the use-case interface, the DTOs, a constructor (`NewTicketService(core, log)`), exported methods. Every exported
    method is callable from the page. Conventions (see `tickets.go`): JSON tags in camelCase, IDs as strings converted
-   to `shared` IDs, empty lists as `[]`, an error type of fixed Russian texts with causes only logged, op names as
+   to `shared` IDs, empty lists as `[]`, an error type of fixed Russian texts with causes only logged (as a class or a sentinel's text, never the
+   wrapped chain, which may carry row data: see `LibraryService.fail`), op names as
    constants (`"ui: ..."`).
 2. `shell.go`: a field in `Core` and its nil check in `OpenServices`, a field in `Services` and its constructor.
 3. `shell_windows.go`: `app.RegisterService(application.NewService(b.<Name>))`.

@@ -455,7 +455,8 @@ func (s *LibraryService) material(op string) func(*material.Material, error) (Li
 	}
 }
 
-// fail maps a use case error to the page's text and logs the cause.
+// fail maps a use case error to the page's text and logs only its class: the wrapped chain may carry row data (names,
+// teachers, paths).
 func (s *LibraryService) fail(op string, err error) error {
 	known := []struct {
 		err  error
@@ -490,8 +491,16 @@ func (s *LibraryService) fail(op string, err error) error {
 			return k.text
 		}
 	}
-	s.log.Error(op, "err", err)
+	s.log.Error(op, "result", ErrLibraryUnavailable.Error(), "cause", libraryCause(err))
 	return ErrLibraryUnavailable
+}
+
+// libraryCause is the loggable class of an unexpected library error.
+func libraryCause(err error) string {
+	if errors.Is(err, library.ErrUnavailable) {
+		return "local storage"
+	}
+	return "unexpected"
 }
 
 func librarySubject(sub *subject.Subject) LibrarySubject {

@@ -52,7 +52,76 @@ type Config struct {
 	// Recorder is internal: the app starts its own executable with --recorder --data-dir <dir> as the audio recorder
 	// child process (ADR-0002 (audio capture)). It has no environment variable.
 	Recorder bool
+	// E2E is the end-to-end test mode (ADR-0035); zero (off) in every build without tag e2e.
+	E2E E2E
 }
+
+// E2E is the end-to-end test mode of the real app (ADR-0035 §3). Its flags exist only in a build with tag e2e
+// (e2e_on.go); there is no environment variable, so the shipped exe can never turn it on.
+type E2E struct {
+	// Dir is the absolute control directory of the run; set, it turns the mode on.
+	Dir string
+	// CDPPort is the WebView2 remote debugging port; 0: none.
+	CDPPort int
+	// Window is the size of the main window, "WxH"; empty: the normal size.
+	Window string
+}
+
+// Limits of the E2E flags.
+const (
+	minE2EPort   = 1024
+	maxE2EPort   = 65535
+	minE2EWindow = 640
+	maxE2EWindow = 3840
+)
+
+// On reports whether the E2E mode is on.
+func (e E2E) On() bool { return e.Dir != "" }
+
+// WindowSize is the main window size of a validated configuration; 0, 0 when not set.
+func (e E2E) WindowSize() (width, height int) {
+	w, h, err := parseWindow(e.Window)
+	if err != nil {
+		return 0, 0
+	}
+	return w, h
+}
+
+func (e E2E) validate() error {
+	var errs []error
+	if !e.On() {
+		if e.CDPPort != 0 || e.Window != "" {
+			errs = append(errs, errors.New("e2e: --e2e-cdp-port and --e2e-window need --e2e-dir"))
+		}
+		return errors.Join(errs...)
+	}
+	if !filepath.IsAbs(e.Dir) {
+		errs = append(errs, fmt.Errorf("e2e: dir %q must be an absolute path", e.Dir))
+	}
+	if e.CDPPort != 0 && (e.CDPPort < minE2EPort || e.CDPPort > maxE2EPort) {
+		errs = append(errs, fmt.Errorf("e2e: cdp port %d is outside %d..%d", e.CDPPort, minE2EPort, maxE2EPort))
+	}
+	if _, _, err := parseWindow(e.Window); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// parseWindow reads "WxH"; "" is no size.
+func parseWindow(s string) (width, height int, err error) {
+	if s == "" {
+		return 0, 0, nil
+	}
+	ws, hs, ok := strings.Cut(strings.ToLower(s), "x")
+	w, werr := strconv.Atoi(ws)
+	h, herr := strconv.Atoi(hs)
+	if !ok || werr != nil || herr != nil || !inWindowRange(w) || !inWindowRange(h) {
+		return 0, 0, fmt.Errorf("e2e: window %q must be WxH, each %d..%d", s, minE2EWindow, maxE2EWindow)
+	}
+	return w, h, nil
+}
+
+func inWindowRange(n int) bool { return n >= minE2EWindow && n <= maxE2EWindow }
 
 // Default returns the configuration used when nothing is overridden.
 func Default() Config {
@@ -94,6 +163,7 @@ func Load(args []string, out io.Writer, getenv func(string) string) (Config, err
 	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "absolute path of the local data directory (env "+EnvDataDir+", default below %"+EnvLocalAppData+"%)")
 	fs.BoolVar(&cfg.Headless, "headless", cfg.Headless, "run without the UI shell: no tray and no windows (env "+EnvHeadless+")")
 	fs.BoolVar(&cfg.Recorder, "recorder", false, "internal: run as the audio recorder child of the app (needs -data-dir)")
+	registerE2EFlags(fs, &cfg.E2E)
 
 	if err := fs.Parse(withoutSchemeLaunch(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -154,6 +224,9 @@ func (c Config) Validate() error {
 	}
 	if c.Recorder && c.DataDir == "" {
 		errs = append(errs, errors.New("the recorder needs a data dir"))
+	}
+	if err := c.E2E.validate(); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }

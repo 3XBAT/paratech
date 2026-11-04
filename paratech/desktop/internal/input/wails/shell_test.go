@@ -74,6 +74,39 @@ func TestNew(t *testing.T) {
 	}
 }
 
+// The title and the main window size come from the options; without them the window is as before.
+func TestOptionsWindows(t *testing.T) {
+	tests := []struct {
+		name         string
+		edit         func(*Options)
+		wantTitle    string
+		wantW, wantH int
+	}{
+		{name: "defaults", edit: func(*Options) {}, wantTitle: "LA", wantW: 1024, wantH: 720},
+		{name: "title", edit: func(o *Options) { o.Title = "LA · E2E" }, wantTitle: "LA · E2E", wantW: 1024, wantH: 720},
+		{name: "size", edit: func(o *Options) { o.MainWidth, o.MainHeight = 1280, 800 }, wantTitle: "LA", wantW: 1280, wantH: 800},
+		{name: "half a size", edit: func(o *Options) { o.MainWidth = 1280 }, wantTitle: "LA", wantW: 1024, wantH: 720},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o := validOptions()
+			tt.edit(&o)
+			if got := o.title(); got != tt.wantTitle {
+				t.Errorf("title = %q, want %q", got, tt.wantTitle)
+			}
+			spec := o.mainSpec()
+			if spec.Title != tt.wantTitle || spec.Width != tt.wantW || spec.Height != tt.wantH {
+				t.Errorf("main spec %q %dx%d, want %q %dx%d", spec.Title, spec.Width, spec.Height, tt.wantTitle, tt.wantW, tt.wantH)
+			}
+			want := mainWindowSpec(tt.wantTitle)
+			want.Width, want.Height = tt.wantW, tt.wantH
+			if spec != want {
+				t.Errorf("main spec %+v, want %+v: only the title and size may change", spec, want)
+			}
+		})
+	}
+}
+
 // fakeUI records forwarded commands.
 type fakeUI struct{ calls []string }
 

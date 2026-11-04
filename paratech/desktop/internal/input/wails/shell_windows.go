@@ -5,6 +5,7 @@ package wails
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -81,8 +82,8 @@ func (s *Shell) run(ctx context.Context) error {
 
 	u := &windowsUI{app: app}
 	var offs []func()
-	u.main, offs = newWindow(app, mainWindowSpec(s.opts.Name), offs)
-	u.popup, offs = newWindow(app, popupWindowSpec(s.opts.Name), offs)
+	u.main, offs = newWindow(app, s.opts.mainSpec(), offs)
+	u.popup, offs = newWindow(app, popupWindowSpec(s.opts.title()), offs)
 	// Wails runs each drop's listeners on a goroutine of their own, so the import may block. A drop on an element the
 	// page marks as a lecture goes to its notes (routeDrop).
 	offs = append(offs, u.main.OnWindowEvent(events.Common.WindowFilesDropped, func(e *application.WindowEvent) {
@@ -101,7 +102,7 @@ func (s *Shell) run(ctx context.Context) error {
 	})
 
 	// Menu handlers run on goroutines, so the offer may show the popup synchronously.
-	newTray(app, u, s.opts.Name, func() { b.Prompt.offerAdHoc(context.Background()) })
+	newTray(app, u, s.opts.title(), func() { b.Prompt.offerAdHoc(context.Background()) })
 
 	started := make(chan struct{})
 	var once sync.Once
@@ -151,6 +152,8 @@ func appOptions(opts Options, onSecondInstance func()) application.Options {
 			DisableQuitOnLastWindowClosed: true,
 			// A fixed folder, so the WebView2 state (localStorage: the UI theme) survives the exe rename (ADR-0015).
 			WebviewUserDataPath: opts.WebviewDataDir,
+			// Appended by Wails after its own --disable-features (webview_window_windows.go, setupChromium).
+			AdditionalBrowserArgs: slices.Clone(opts.BrowserArgs),
 		},
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: opts.InstanceID,

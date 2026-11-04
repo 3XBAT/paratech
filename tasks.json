@@ -6158,7 +6158,7 @@
             "dependencies": [
                 "TASK-285"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-287",
@@ -8220,7 +8220,7 @@
                 "powershell -File paratech/desktop/build-alpha.ps1 -E2E -Smoke"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-373",
