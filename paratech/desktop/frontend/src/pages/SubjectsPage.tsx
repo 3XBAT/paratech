@@ -385,15 +385,6 @@ export function SubjectsPage(props: {
   // An assignment added on the tab «Задания» only re-reads.
   const retryOverview = () => overviewFlow.current?.retry(shownId);
   const rereadOverview = () => overviewFlow.current?.refresh(shownId);
-  // A change made elsewhere (the agent's action done or undone, a dropped file): the open subject's page reads again,
-  // without «Загрузка…» and without a new opening. The first value is the arrival, which reads on its own.
-  const reloadSeen = useRef(props.reload);
-  useEffect(() => {
-    if (reloadSeen.current !== props.reload) {
-      reloadSeen.current = props.reload;
-      overviewFlow.current?.refresh(shownId);
-    }
-  }, [props.reload, shownId]);
 
   const subject = subjects?.find((s) => s.id === shownId) ?? null;
   const known = subjects?.some((s) => s.id === openId) ?? false; // the route's own subject (for «Указать почту»)

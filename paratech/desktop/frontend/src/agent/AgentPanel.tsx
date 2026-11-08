@@ -64,8 +64,6 @@ import {
   restoreUnsent,
   spendRestart,
   startRestart,
-  becameUndone,
-  newActionLines,
   type UndoNote,
   undoableActions,
   visibleEntries,
@@ -139,10 +137,6 @@ export function AgentPanel(props: {
   onLibraryChanged?: () => void;
 }) {
   const [state, dispatch] = useReducer(reducePanel, initialPanelState);
-  // The open «Предметы» reads again when an action line appears or is undone, not on every update (TASK-400, D5).
-  const libraryChangedRef = useRef(props.onLibraryChanged);
-  libraryChangedRef.current = props.onLibraryChanged;
-  const seenActions = useRef<ReadonlySet<string>>(new Set());
   // Subject names for the assignment lists of replies; unreadable subjects just leave the names out.
   const [subjects, setSubjects] = useState<Record<string, string>>({});
   useEffect(() => {
@@ -327,13 +321,6 @@ export function AgentPanel(props: {
           return;
         }
         dispatch({ type: "update", update });
-        if (!update.progress) {
-          const lines = newActionLines(seenActions.current, update.cards);
-          seenActions.current = lines.seen;
-          if (lines.fresh) {
-            libraryChangedRef.current?.();
-          }
-        }
         setFills((f) => fillsFromUpdate(f, update));
         // With no chat open (and the first list read done), the first real update names the chat the request created.
         if (openRef.current === "" && update.threadId !== "" && update.turn > 0 && listDone.current) {
@@ -629,15 +616,7 @@ export function AgentPanel(props: {
   const [undoNotes, setUndoNotes] = useState<Record<string, UndoNote>>({});
   const undoNotesRef = useRef(undoNotes);
   undoNotesRef.current = undoNotes;
-  const setNote = useCallback((id: string, note: UndoNote) => {
-    // The ref is read right away: a note set a moment ago has no render behind it yet.
-    const prev = undoNotesRef.current[id];
-    undoNotesRef.current = { ...undoNotesRef.current, [id]: note };
-    setUndoNotes((m) => ({ ...m, [id]: note }));
-    if (becameUndone(prev, note)) {
-      libraryChangedRef.current?.();
-    }
-  }, []);
+  const setNote = useCallback((id: string, note: UndoNote) => setUndoNotes((m) => ({ ...m, [id]: note })), []);
 
   // Resolves with what the line shows afterwards; null when the action is already undone or being undone.
   const undoOne = useCallback(
