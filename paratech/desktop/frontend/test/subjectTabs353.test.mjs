@@ -845,7 +845,7 @@ test("«Добавить файл» is the first thing of the tab «Файлы»
   assert.match(files, /\{filesFailed && <ErrorLine text=\{texts\.filesFailed\} onRefresh=\{refresh\} onRetry=\{refresh\} \/>\}\s*\{addLines\(""\)\}/);
   assert.doesNotMatch(src("pages/SubjectHead.tsx"), /Добавить файл|addFile/);
   assert.doesNotMatch(page, /OverviewSections|RemoveSubjectButton|onOpenLesson=\{props\.onOpenLesson\}/);
-  assert.match(page, /<SubjectTabs\s+key=\{subject\.id\}/, "another subject: the tabs start afresh");
+  assert.match(page, /<SubjectTabs\s+key=\{`tabs:\$\{subject\.id\}`\}/, "another subject: the tabs start afresh");
 });
 
 test("a failed overview is told on «Задания» only (its own line and «Повторить»); «Пары» and «Файлы» go on without it", () => {
