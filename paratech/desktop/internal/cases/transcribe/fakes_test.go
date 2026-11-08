@@ -35,7 +35,9 @@ type fakeTranscripts struct {
 	getErr error
 	// beforeSave runs inside Save before the write, for example to simulate a concurrent insert.
 	beforeSave func(f *fakeTranscripts)
-	saves      int
+	// afterSave runs after a successful write, for example to cancel the handler context.
+	afterSave func()
+	saves     int
 }
 
 func newFakeTranscripts() *fakeTranscripts {
@@ -88,6 +90,9 @@ func (f *fakeTranscripts) Save(ctx context.Context, t *transcript.Transcript) er
 	f.rows[t.ID()] = stateOf(t, next)
 	f.saves++
 	t.Persisted(next)
+	if f.afterSave != nil {
+		f.afterSave()
+	}
 	return nil
 }
 
@@ -129,14 +134,17 @@ func (f *fakeModels) Get(_ context.Context, id shared.SttModelID) (*sttmodel.Mod
 	return m, nil
 }
 
-// fakeEvents records published events; fail makes the next calls fail.
+// fakeEvents records published events; fail makes the next calls fail. A done context fails like a real enqueue.
 type fakeEvents struct {
 	mu     sync.Mutex
 	events []transcript.Created
 	fail   error
 }
 
-func (f *fakeEvents) TranscriptCreated(_ context.Context, e transcript.Created) error {
+func (f *fakeEvents) TranscriptCreated(ctx context.Context, e transcript.Created) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.fail != nil {

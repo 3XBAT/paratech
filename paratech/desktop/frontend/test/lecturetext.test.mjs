@@ -39,7 +39,8 @@ const row = (over = {}) => ({
   status: "COMPLETED", startedAt: "2026-10-18T17:19:35Z", stoppedAt: "",
   durationSeconds: 0, hasDuration: false, problem: "", stoppable: false, stage: "done", step: "", progressPercent: 0,
   partsDone: 0, parts: 0, queueReason: "", errorCode: "", jobError: "", action: "", actionJobId: "", retryWork: "",
-  canRedoSummary: false, lectureTextReady: false, remainingSeconds: 0, hasRemaining: false, advice: null, ...over,
+  canRedoSummary: false, lectureTextReady: false, canCancel: false, remainingSeconds: 0, hasRemaining: false, advice: null,
+  ...over,
 });
 
 // Mirrors SummaryView and SummaryLectureText of internal/input/wails/summary.go and lecturetext.go.

@@ -137,6 +137,17 @@ type JobEnqueuer interface {
 	// HasKeyPrefix reports whether a job of type typ in any status has an idempotency key that starts with prefix
 	// (PRD section 7.3), for example any STT job of one recording whatever model it pins.
 	HasKeyPrefix(ctx context.Context, typ job.Type, prefix string) (bool, error)
+
+	// ListByKeyPrefix returns every job of type typ in any status whose idempotency key starts with prefix, oldest
+	// first (PRD section 7.2; TASK-392: the STT jobs of one recording for the cancel and the new transcription).
+	ListByKeyPrefix(ctx context.Context, typ job.Type, prefix string) ([]*job.Job, error)
+}
+
+// TranscriptFinder tells whether a recording has a transcript (PRD section 8), so a cancelled transcription is not
+// started again over a stored one. Implemented by the sqlite adapter.
+type TranscriptFinder interface {
+	// LatestByRecording returns the newest transcript of the recording (PRD section 8); none wraps shared.ErrNotFound.
+	LatestByRecording(ctx context.Context, rec shared.RecordingID) (*transcript.Transcript, error)
 }
 
 // PendingRecordings finds the recordings that the startup sweep hands to the enqueue again (PRD sections 6.2 and

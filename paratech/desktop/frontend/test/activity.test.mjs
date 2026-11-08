@@ -29,6 +29,7 @@ const recording = {
   stoppedAt: "2026-10-15T11:00:00Z", durationSeconds: 3600, hasDuration: true, problem: "", stoppable: false,
   stage: "queued", step: "transcription", progressPercent: 0, partsDone: 0, parts: 0, queueReason: "power", errorCode: "",
   jobError: "", action: "runNow", actionJobId: "j1", retryWork: "", canRedoSummary: false, lectureTextReady: false,
+  canCancel: true,
   remainingSeconds: 1500, hasRemaining: true,
   advice: null,
 };
@@ -181,6 +182,42 @@ test("the api calls the bound methods and checks the replies", async () => {
   await assert.rejects(activityApi(async () => { throw new Error(errorMessages.alreadyRunning); }).redoSummary("r1"), /already running/);
   await assert.rejects(activityApi(async () => ({})).listJobs(), /jobs: reply is not a list/);
   await assert.rejects(activityApi(async () => [{}]).listRecordings(), /recording/);
+});
+
+test("cancel and start the transcription again: fields, codes and calls (TASK-392)", async () => {
+  const cancelled = { ...recording, stage: "failed", step: "transcription", queueReason: "", errorCode: "transcriptionCancelled",
+    action: "retranscribe", actionJobId: "", canCancel: false };
+  assert.deepEqual(parseRecording(cancelled), cancelled);
+  const { canCancel, ...older } = recording;
+  assert.equal(parseRecording(older).canCancel, false, "an older core without the flag offers no cancel");
+  assert.throws(() => parseRecording({ ...recording, canCancel: "yes" }), /recording/);
+
+  const calls = [];
+  let reply = null;
+  const api = activityApi(async (method, ...args) => {
+    calls.push([method, ...args]);
+    return reply;
+  });
+  for (const result of ["cancelled", "not_running", "ending", "failed"]) {
+    reply = { result };
+    assert.equal(await api.cancelTranscription("r1"), result);
+  }
+  for (const result of ["started", "not_allowed", "no_model", "failed"]) {
+    reply = { result };
+    assert.equal(await api.retranscribe("r1"), result);
+  }
+  assert.deepEqual(calls[0], [methods.cancelTranscription, "r1"]);
+  assert.deepEqual(calls[4], [methods.retranscribe, "r1"]);
+  assert.equal(methods.cancelTranscription, "paratech/desktop/internal/input/wails.ActivityService.CancelTranscription");
+  assert.equal(methods.retranscribe, "paratech/desktop/internal/input/wails.ActivityService.Retranscribe");
+  for (const bad of [null, {}, { result: "started" }, { result: 1 }]) {
+    reply = bad;
+    await assert.rejects(api.cancelTranscription("r1"), /cancel/, JSON.stringify(bad));
+  }
+  for (const bad of [null, { result: "cancelled" }]) {
+    reply = bad;
+    await assert.rejects(api.retranscribe("r1"), /retranscribe/, JSON.stringify(bad));
+  }
 });
 
 test("a draft job row is named by the core and opens its assignment (TASK-094)", async () => {

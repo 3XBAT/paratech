@@ -16,6 +16,7 @@ import (
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/services/modelselection"
+	"paratech/desktop/internal/domain/transcription/transcript"
 	"paratech/desktop/internal/domain/transcription/values"
 	"paratech/desktop/testenv"
 )
@@ -37,6 +38,7 @@ type fakeJobs struct {
 	mu         sync.Mutex
 	byKey      map[string]*job.Job
 	enqueueErr error
+	listErr    error
 	outsideTx  int
 }
 
@@ -70,6 +72,43 @@ func (f *fakeJobs) HasKeyPrefix(ctx context.Context, typ job.Type, prefix string
 		}
 	}
 	return false, nil
+}
+
+func (f *fakeJobs) ListByKeyPrefix(ctx context.Context, typ job.Type, prefix string) ([]*job.Job, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	var out []*job.Job
+	for k, j := range f.byKey {
+		if j.Type() == typ && strings.HasPrefix(k, prefix) {
+			out = append(out, j)
+		}
+	}
+	slices.SortFunc(out, func(a, b *job.Job) int {
+		if c := a.CreatedAt().Compare(b.CreatedAt()); c != 0 {
+			return c
+		}
+		return strings.Compare(string(a.ID()), string(b.ID()))
+	})
+	return out, nil
+}
+
+// fakeTranscriptFinder knows which recordings have a transcript.
+type fakeTranscriptFinder struct {
+	has map[shared.RecordingID]bool
+	err error
+}
+
+func (f *fakeTranscriptFinder) LatestByRecording(_ context.Context, rec shared.RecordingID) (*transcript.Transcript, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if !f.has[rec] {
+		return nil, shared.ErrNotFound
+	}
+	return nil, nil // the caller only asks whether one exists
 }
 
 func (f *fakeJobs) all() []*job.Job {
@@ -137,7 +176,9 @@ type enqueueEnv struct {
 	pending    *fakePending
 	models     *fakeResolver
 	jobs       *fakeJobs
+	transcript *fakeTranscriptFinder
 	tx         *fakeEnqueueTx
+	clock      *testenv.FakeClock
 	logs       *bytes.Buffer
 }
 
@@ -146,11 +187,12 @@ func newEnqueueEnv(t *testing.T) *enqueueEnv {
 	e := &enqueueEnv{
 		recordings: &fakeRecordings{rows: map[shared.RecordingID]*recording.Recording{"rec-1": completedRecording(t, "rec-1")}},
 		pending:    &fakePending{}, models: &fakeResolver{model: "m-1"}, jobs: newFakeJobs(), tx: &fakeEnqueueTx{},
-		logs: &bytes.Buffer{},
+		transcript: &fakeTranscriptFinder{}, clock: testenv.NewFakeClock(t0), logs: &bytes.Buffer{},
 	}
 	enq, err := NewEnqueuer(EnqueueDeps{
-		Recordings: e.recordings, Pending: e.pending, Models: e.models, Jobs: e.jobs, IDs: &seqJobIDs{}, Tx: e.tx,
-		Clock: testenv.NewFakeClock(t0), Log: slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		Recordings: e.recordings, Pending: e.pending, Models: e.models, Jobs: e.jobs, Transcripts: e.transcript,
+		IDs: &seqJobIDs{}, Tx: e.tx, Clock: e.clock,
+		Log:         slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		MaxAttempts: 4,
 	})
 	if err != nil {
@@ -163,7 +205,7 @@ func newEnqueueEnv(t *testing.T) *enqueueEnv {
 func TestNewEnqueuerRequiresPorts(t *testing.T) {
 	full := EnqueueDeps{
 		Recordings: &fakeRecordings{}, Pending: &fakePending{}, Models: &fakeResolver{}, Jobs: newFakeJobs(),
-		IDs: &seqJobIDs{}, Tx: &fakeEnqueueTx{}, Clock: testenv.NewFakeClock(t0),
+		Transcripts: &fakeTranscriptFinder{}, IDs: &seqJobIDs{}, Tx: &fakeEnqueueTx{}, Clock: testenv.NewFakeClock(t0),
 	}
 	tests := []struct {
 		name string
@@ -173,6 +215,7 @@ func TestNewEnqueuerRequiresPorts(t *testing.T) {
 		{"pending", func(d *EnqueueDeps) { d.Pending = nil }},
 		{"models", func(d *EnqueueDeps) { d.Models = nil }},
 		{"jobs", func(d *EnqueueDeps) { d.Jobs = nil }},
+		{"transcripts", func(d *EnqueueDeps) { d.Transcripts = nil }},
 		{"ids", func(d *EnqueueDeps) { d.IDs = nil }},
 		{"tx", func(d *EnqueueDeps) { d.Tx = nil }},
 		{"clock", func(d *EnqueueDeps) { d.Clock = nil }},
