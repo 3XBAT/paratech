@@ -47,6 +47,7 @@ func (r *fakeRepo) Save(_ context.Context, s *settings.Settings) error {
 		RecognitionLoad:         s.RecognitionLoad(),
 		Profile:                 s.Profile().Fields(),
 		NoteRecognition:         s.NoteRecognition(),
+		CalendarOnDueChange:     s.CalendarOnDueChange(),
 		UpdatedAt:               s.UpdatedAt(),
 	}
 	s.Persisted(r.stored.Version)
@@ -81,6 +82,7 @@ func TestGetReturnsDefaults(t *testing.T) {
 	want := Toggles{
 		RecordingPromptsEnabled: settings.DefaultRecordingPromptsEnabled, ProcessOnlyOnACPower: settings.DefaultProcessOnlyOnACPower,
 		RecognitionLoad: shared.DefaultRecognitionLoad, NoteRecognition: settings.DefaultNoteRecognition,
+		CalendarOnDueChange: settings.DefaultCalendarOnDueChange,
 	}
 	if got != want {
 		t.Fatalf("Get = %+v, want %+v", got, want)
@@ -104,7 +106,8 @@ func TestSetToggles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != (Toggles{RecognitionLoad: shared.LoadGentle, NoteRecognition: settings.NoteRecognitionOff}) {
+	if got != (Toggles{RecognitionLoad: shared.LoadGentle, NoteRecognition: settings.NoteRecognitionOff,
+		CalendarOnDueChange: settings.CalendarAsk}) {
 		t.Fatalf("after AC off: %+v, want both off", got)
 	}
 	if !repo.stored.UpdatedAt.Equal(start) {
@@ -207,6 +210,38 @@ func TestSetNoteRecognition(t *testing.T) {
 	}
 	if repo.stored.NoteRecognition != settings.NoteRecognitionLocal {
 		t.Fatalf("stored after the conflicts: %q, want local", repo.stored.NoteRecognition)
+	}
+}
+
+// TASK-276: the student is asked until a mode is chosen; an unknown mode is refused and changes nothing; a version
+// that stays stale fails like every toggle; the other toggles stay.
+func TestSetCalendarOnDueChange(t *testing.T) {
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	s := newService(t, repo)
+
+	if read, err := s.Get(ctx); err != nil || read.CalendarOnDueChange != settings.CalendarAsk {
+		t.Fatalf("fresh = %+v, %v; want ask", read, err)
+	}
+	for _, mode := range []settings.CalendarOnDueChange{settings.CalendarUpdate, settings.CalendarKeep} {
+		got, err := s.SetCalendarOnDueChange(ctx, mode)
+		if err != nil || got.CalendarOnDueChange != mode || repo.stored.CalendarOnDueChange != mode || !got.RecordingPromptsEnabled {
+			t.Fatalf("%s = %+v, %v; stored %+v", mode, got, err, repo.stored)
+		}
+	}
+	if _, err := s.SetCalendarOnDueChange(ctx, "always"); !errors.Is(err, settings.ErrInvalidSettings) {
+		t.Fatalf("unknown mode: err = %v, want ErrInvalidSettings", err)
+	}
+	if read, err := s.Get(ctx); err != nil || read.CalendarOnDueChange != settings.CalendarKeep {
+		t.Fatalf("Get = %+v, %v; want keep kept", read, err)
+	}
+
+	repo.conflicts = conflictAttempts
+	if _, err := s.SetCalendarOnDueChange(ctx, settings.CalendarAsk); !errors.Is(err, shared.ErrVersionConflict) {
+		t.Fatalf("stale every time: err = %v, want ErrVersionConflict", err)
+	}
+	if repo.stored.CalendarOnDueChange != settings.CalendarKeep {
+		t.Fatalf("stored after the conflicts: %q, want keep", repo.stored.CalendarOnDueChange)
 	}
 }
 

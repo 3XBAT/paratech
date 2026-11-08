@@ -16,6 +16,10 @@ type Querier interface {
 	AssignmentBusy(ctx context.Context, arg AssignmentBusyParams) (int64, error)
 	// The re-check of the purge inside its transaction: is assignment id still deleted before the cutoff?
 	AssignmentDeletedBefore(ctx context.Context, arg AssignmentDeletedBeforeParams) (int64, error)
+	// The Google deadline event of an assignment after a deadline change (TASK-276, ADR-0029 addendum 2): whether it
+	// exists and the queue of events to update, the ADR-0018 pattern of deadline_event_removals.
+	// An assignment has an event when its create_deadline_event proposal was executed and no removal is waiting.
+	AssignmentHasDeadlineEvent(ctx context.Context, assignmentID string) (int64, error)
 	// What references an assignment the student added before the Undo of its creation removes it (ADR-0029). works
 	// cascade on delete and proposals have no foreign key, so both are checked here; the caller passes the proposal
 	// statuses that leave the assignment free. A draft generation that has not finished has no homework_drafts row yet,
@@ -49,6 +53,7 @@ type Querier interface {
 	// (ON DELETE RESTRICT); the use case never chooses such an assignment.
 	DeleteChosenAssignment(ctx context.Context, id string) error
 	DeleteDeadlineEventRemoval(ctx context.Context, assignmentID string) error
+	DeleteDeadlineEventUpdate(ctx context.Context, assignmentID string) error
 	// The draft of an assignment chosen for deletion; its versions go with it (CASCADE).
 	DeleteDraftOfAssignment(ctx context.Context, assignmentID string) error
 	// The calls and results of an earlier final request that ended before the cutoff and has its reply line; its texts
@@ -296,6 +301,8 @@ type Querier interface {
 	ListAssignmentsDeletedBefore(ctx context.Context, arg ListAssignmentsDeletedBeforeParams) ([]Assignment, error)
 	// The deadline events left to remove, oldest first (the calendar sync).
 	ListDeadlineEventRemovals(ctx context.Context, maxRows int64) ([]string, error)
+	// The deadline events left to update, oldest first (the calendar sync).
+	ListDeadlineEventUpdates(ctx context.Context, maxRows int64) ([]string, error)
 	// The recordings marked for deletion, oldest mark first (TASK-095: the deletion resumed at the start).
 	ListDeletingRecordingIDs(ctx context.Context) ([]string, error)
 	// The deliveries of one assignment for the homework screen, newest first (idx_deliveries_assignment).
@@ -492,6 +499,8 @@ type Querier interface {
 	// stale save cannot undo ON DELETE SET NULL of the model.
 	UpdateTranscript(ctx context.Context, arg UpdateTranscriptParams) (int64, error)
 	UpdateWork(ctx context.Context, arg UpdateWorkParams) (int64, error)
+	// A repeated change keeps one row and moves it to the latest time.
+	UpsertDeadlineEventUpdate(ctx context.Context, arg UpsertDeadlineEventUpdateParams) error
 	UpsertSttSpeed(ctx context.Context, arg UpsertSttSpeedParams) error
 	// Live transcript parts (TASK-079). A row is replaced by (recording_id, seq): a rerun of the engine numbers from 0
 	// again. The STT job deletes the rows of a recording once its transcript is stored.

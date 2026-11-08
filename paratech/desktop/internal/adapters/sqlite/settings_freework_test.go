@@ -33,6 +33,10 @@ func TestMigrationDropsFreeWorkNotice(t *testing.T) {
 	if n := scanInt(t, db.sql, freeWorkColumn); n != 0 {
 		t.Fatal("settings.free_work_notice still exists")
 	}
+	// The repository reads the columns of later migrations too (0051, TASK-276).
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("migrate to the latest: %v", err)
+	}
 	r := NewSettingsRepository(db)
 	got, err := r.Load(ctx)
 	if err != nil {

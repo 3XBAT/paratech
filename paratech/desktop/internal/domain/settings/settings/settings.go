@@ -44,6 +44,9 @@ type Settings struct {
 	// noteRecognition: who recognises the text of photo pages of a note (TASK-294).
 	noteRecognition NoteRecognition
 
+	// calendarOnDueChange: what happens to the Google event when the student changes a deadline (TASK-276).
+	calendarOnDueChange CalendarOnDueChange
+
 	updatedAt time.Time // zero: never changed by the user
 }
 
@@ -55,6 +58,7 @@ func New() *Settings {
 		smtpSecurity:            DefaultMailSecurity,
 		recognitionLoad:         shared.DefaultRecognitionLoad,
 		noteRecognition:         DefaultNoteRecognition,
+		calendarOnDueChange:     DefaultCalendarOnDueChange,
 	}
 }
 
@@ -74,6 +78,7 @@ type State struct {
 	RecognitionLoad         shared.RecognitionLoad // empty or unknown: shared.DefaultRecognitionLoad
 	Profile                 ProfileFields          // the student profile; empty fields: not set
 	NoteRecognition         NoteRecognition        // empty or unknown: DefaultNoteRecognition
+	CalendarOnDueChange     CalendarOnDueChange    // empty or unknown: DefaultCalendarOnDueChange
 	UpdatedAt               time.Time              // zero: stored defaults that the user never changed
 }
 
@@ -123,7 +128,9 @@ func Restore(s State) (*Settings, error) {
 		profile:         profile,
 		// An unknown stored mode falls back to off: nothing is recognised that the student did not turn on.
 		noteRecognition: s.NoteRecognition.OrDefault(),
-		updatedAt:       s.UpdatedAt,
+		// An unknown stored mode falls back to asking: the event is never changed without the student's say.
+		calendarOnDueChange: s.CalendarOnDueChange.OrDefault(),
+		updatedAt:           s.UpdatedAt,
 	}, nil
 }
 

@@ -930,3 +930,15 @@ ALTER TABLE subjects ADD COLUMN removed_at INTEGER CHECK (removed_at IS NULL OR 
 -- subjects: the call link in the canonical form of subject.CallLink; '' none. Untrusted input, re-checked on read (a
 -- value that no longer parses is read as no link); never written to Google Calendar, the logs or the Journal.
 ALTER TABLE subjects ADD COLUMN call_link TEXT NOT NULL DEFAULT '' CHECK (length(call_link) <= 2048);
+
+-- Migration 0051 (TASK-276).
+-- settings: what a deadline change does to the Google event (settings.CalendarOnDueChange): 'ask' (the default, also
+-- of the existing row), 'update' or 'keep'.
+ALTER TABLE settings ADD COLUMN deadline_event_on_due_change TEXT NOT NULL DEFAULT 'ask' CHECK (deadline_event_on_due_change IN ('ask', 'update', 'keep'));
+-- deadline_event_updates: the assignments whose Google deadline event is to follow a changed deadline. Written in the
+-- transaction of the change; the calendar sync reads the assignment again, upserts the event and then removes the row.
+-- No foreign key and no version column: a queue as deadline_event_removals, rows are only inserted and removed.
+CREATE TABLE deadline_event_updates (
+    assignment_id TEXT    PRIMARY KEY CHECK (length(assignment_id) > 0),
+    created_at    INTEGER NOT NULL
+);

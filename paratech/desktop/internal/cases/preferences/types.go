@@ -15,6 +15,8 @@ type Toggles struct {
 	RecognitionLoad shared.RecognitionLoad
 	// NoteRecognition: who recognises the text of photo pages of notes (TASK-294); off by default.
 	NoteRecognition settings.NoteRecognition
+	// CalendarOnDueChange: what a deadline change does to the Google event (TASK-276); ask by default.
+	CalendarOnDueChange settings.CalendarOnDueChange
 }
 
 // LanguageStatus is whether the photo recognition engine has the Russian recognizer.
