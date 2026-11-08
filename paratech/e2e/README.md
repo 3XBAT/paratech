@@ -38,9 +38,9 @@ The sandbox files stay after the run (the next run wipes them); the report is `p
 | `src/checks` | layout checker (`checkLayout`, `layoutSession`, page probe, pure `evaluateLayout`, console watch, agent-thread overlap, synthetic ICS) |
 | `src/fixtures` | pure builders and readers of the packs: the synthetic week (`schedule.ts`), the model cache and the corrupted copy (`model.ts`), the pick-queue guard (`picks.ts`), text readers (`text.ts`, `files.ts`), the audio variants, the speed line and the scan for audio in requests (`audio.ts`), the lecture of an import (`lecture.ts`) |
 | `scripts` | `fetch-model.ts` (compiled by tsc like the rest, `npm run fetch-model`); `llm/<pack>/` the scripted provider answers of a pack |
-| `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check, `specs/layout` the `@layout` pack (two window sizes: `PARATECH_E2E_WINDOW=1024x640`, `docs/process/e2e.md`), `specs/settings` the `@settings` pack, `specs/recording` the `@recording` pack, `specs/agent` the `@agent` pack (below) |
+| `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check, `specs/layout` the `@layout` pack (two window sizes: `PARATECH_E2E_WINDOW=1024x640`, `docs/process/e2e.md`), `specs/settings` the `@settings` pack, `specs/recording` the `@recording` pack, `specs/agent` the `@agent` pack, `specs/assignments` the `@assignments` pack (below) |
 
-**Order of the packs.** `playwright.config.ts` has one project per pack, in the order layout, settings, recording, agent, smoke (one
+**Order of the packs.** `playwright.config.ts` has one project per pack, in the order layout, settings, recording, agent, assignments, smoke (one
 worker runs the groups of the projects in that order; without projects Playwright runs files alphabetically, which would put
 `recording` before `settings`, whose Hub key, speech model and schedule it needs). A new pack is one `pack("<name>")` line in the
 list (a unit test fails for a folder of `specs/` that is not in it). There is no `dependencies`: a red pack does not switch the
@@ -238,6 +238,42 @@ Files run by name: `01-reply`, `02-cut`, `03-busy`, `04-restart`, `05-compact` (
   what the APP says (error enums, «Действие выполнено», «Отклонено: ничего не выполнено.», no invented cause).
 - **Copy.** The panel's «Копировать» calls the shell's clipboard (`TranscriptService.CopyText`), which the E2E hooks record as
   `{kind:"clipboard"}` in `opened.jsonl`; `clipboardWrites(page)` only sees `navigator.clipboard`, which the panel does not use.
+
+## Assignments pack (`specs/assignments`, `@assignments`, TASK-381)
+
+The student's own assignment flows in the real window. Every row `requires` the settings rows it needs (the subject «История»
+from «Расписание: предметы из расписания»; the draft and send rows also the Hub key), so both packs run with
+`-- --project settings --project assignments` (observed: with `--grep "@settings|@assignments"` through `npm.cmd` on Windows only
+the `@settings` rows ran) and a lone `--grep @assignments` on a fresh sandbox says
+«не проверено (нужно: …)». Each row makes its own assignments
+through the UI (unique titles, dates relative to the real clock) and deletes them in a `finally`, so a red row does not switch
+the next one off. The send rows leave no teacher on the subject: the dialog row removes its synthetic one through the subject page,
+and the refusal row starts by removing any that is there. Files run by name: `01-add`, `02-change`, `03-done-remove`, `04-page`, `05-draft`, `06-send`, `07-journal`.
+
+| Row | What it checks |
+|---|---|
+| Задание: добавление со сроком (с временем и без) | the form starts with time `20:00`; a date alone is stored as `20:00` (TASK-304), a typed `09:30` is kept; both stand in «На этой неделе» and in «Сегодня» → «Сроки на неделе», with «до <день>, ЧЧ:ММ» and the subject |
+| Задание: просроченный срок не читается как «сегодня» | a deadline of yesterday and of today 00:00 read «просрочено, …», stand in «Просрочено», never match «сегодня/завтра до ЧЧ:ММ» and are not in «Сроки на неделе» (a control assignment proves the read is fresh) |
+| Задание: смена срока переносит в другую группу | «⋯» → «Изменить» shows the stored date and time; +10 days moves it from «На этой неделе» to «Позже» and out of «Сроки на неделе» |
+| Задание: «Выполнено» и возврат в работу | the check leaves «Открытые», the toast «Отменить» puts it back, «Выполненные» lists it with «Выполнено <дата>», it does not burn on «Сегодня», «Вернуть в работу» brings it back; the same with the buttons of the page |
+| Задание: удаление через «⋯» и «Вернуть» | «⋯» → «Удалить» (no question: it appears only for running work: draft, writing, triage) → «Задание удалено» + «Вернуть» → the row is back; a final delete leaves no row in any list and none in «Сегодня» |
+| Задание: страница открывается без ошибок консоли и сети | console watch of `src/checks` (console errors, page errors, failed or 4xx/5xx requests; the 422 of `TurnkeyService.WorkOfAssignment`) while the page lives through one more poll of the core |
+| Задание: быстрый черновик, правка, новая версия, файлы | AC-13: scripted draft in the fields, typing + «Сохранить правку» = version 2, «Дополнительные указания» + «Написать новую версию» = version 3, the Hub request carries the instruction and the edit; «Файл .txt» writes `homework.md` (content = draft), «Word (.docx)» writes `<ctl>/saved/<name>.docx` through the save hook (text = draft); «Сделать под ключ» is present and never started |
+| Задание: отправка без почты преподавателя говорит причину | AC-14: «Отправить преподавателю…» without a teacher address gives the reason and «Указать почту» (to the subject page); no dialog, no email |
+| Задание: окно «Отправить задание?» и отмена | AC-14: with a synthetic teacher address set through that way out the button stops at «Отправить задание?» (version, recipient, subject, attachment); «Отмена» sends nothing |
+| Журнал: своя правка задания не пишется (ADR-0029) | after an add, a draft and an edit by hand «Журнал» lists the draft job «Решение задания» (the control that the selector reads real lines; without it the row fails) and has no «Добавлено задание» / «Изменён срок задания» / «Изменено задание»: by design the student's clicks are not in the agent journal |
+
+- **Hub calls.** The only provider call of the pack is the draft (`homeworkflow/drafts.go`, `prompts.Build`). The rules
+  (`scripts/llm/assignments/rules.ts`) match the data block `"assignment":{"title":"<title>"` for the first draft and the typed
+  instruction itself for the regeneration (the instruction rides in `<student_instructions>`); titles and instructions must be
+  free of `<>&"` that Go's JSON escapes. Replies are the strict `{"title","body"}` of `prompts.ParseDraft`.
+- **Files.** «Файл .txt» does not open a dialog: it writes the export of the assignment inside the data dir. Only
+  «Word (.docx)» asks where to save, so only it lands in `<ctl>/saved/`; `docx.ts` reads its `word/document.xml` (zip, no dependency).
+- **Not covered, on purpose.** Extraction over an existing summary: the only UI path is the recording import (the recording pack);
+  the material extraction is an agent tool. Google Calendar and the real send are out of E2E (ADR-0035). A delete's question
+  «Работа остановится» needs running work (draft, writing, triage) and is not reachable with the instant fake.
+- **Clock.** The app's clock is the real one; the pack computes dates from `new Date()`: deadlines three or more days ahead
+  (never «завтра», also across midnight), yesterday and today 00:00 for the passed ones.
 
 ## Fake Messages API
 

@@ -5997,15 +5997,16 @@
             "priority": "medium",
             "description": "[Задания · ядро] Смена срока в правке задания: спросить, обновить сами или не трогать событие; UpdateDeadlineEvent по «Да»",
             "acceptance_criteria": [
-                "docs/adr/0029-student-assignments.md, дополнение 2 «Deadline change and the Google event» и «Дополнение 08.11: состояние события срока»; настройка, очередь и eventrefresh — TASK-276; метка удаления — TASK-384",
-                "homeworkflow.EditAssignment: при смене срока — политика через узкий порт (чтение настройки), признак события — через порт репозитория, решение — eventrefresh.Decide (в use case условий нет, ARCH-22); queue_update / queue_removal — строка очереди в транзакции правки и запрос синхронизации после фиксации (как DeleteAssignment); ask — в результате CalendarQuestion = true; nothing — ничего",
+                "docs/adr/0029-student-assignments.md, дополнение 2 «Deadline change and the Google event», «Дополнение 08.11: состояние события срока» и «Решение владельца 08.11»; настройка и очередь — TASK-276; метка, состояние события, Decide по состоянию и QueueDeadlineEventReturn — TASK-384",
+                "homeworkflow.EditAssignment: при смене срока — политика через узкий порт (чтение настройки), состояние события — AssignmentDeadlineEventState через порт репозитория, решение — eventrefresh.Decide(политика, состояние, edit, срок после) (в use case условий нет, ARCH-22); queue_update / queue_removal / queue_return (QueueDeadlineEventReturn) — строка очереди в транзакции правки и запрос синхронизации после фиксации (как DeleteAssignment); ask — CalendarQuestion = update; ask_return — CalendarQuestion = return; nothing — ничего (CalendarQuestion: '' | update | return)",
                 "homeworkflow.Execute для create_deadline_event: в транзакции, отмечающей EXECUTED (после успешного UpsertDeadline), снимает метку deadline_events_removed через узкий порт (ClearDeadlineEventRemoved)",
-                "Признак события = выполненное предложение, нет ждущего удаления и нет метки (TASK-384); повторная установка срока после выполненного удаления — ничего при любой политике (ask, update, keep): новое событие только через «Предложить в календарь» и «Да»",
-                "homeworkflow.UpdateDeadlineEvent(ctx, id): клик студента «Да» — задание живое и с событием (состояние present), иначе известная ошибка (no_event и при ждущем удалении, и после выполненного); срок есть — строка обновления, срока нет — строка удаления; запрос синхронизации; повтор безопасен",
+                "Повторная установка срока после выполненного удаления: update — событие возвращается само (queue_return), ask — вопрос «Вернуть событие в Google Календарь?» (CalendarQuestion = return), keep — ничего (остаётся «Предложить в календарь»); none — ничего при любой политике",
+                "homeworkflow.RestoreAssignment (клик студента «Вернуть», читает настройку): в состоянии removed со сроком — Decide(настройка, removed, restore, …): queue_return в транзакции восстановления и запрос синхронизации или CalendarQuestion = return в результате; в состоянии removing — как прежде (ждущая строка удаления удаляется, вопроса нет)",
+                "homeworkflow.UpdateDeadlineEvent(ctx, id): клик студента «Да» на любой из двух вопросов — Decide(update, состояние, …): present — строка обновления (срок есть) или удаления (срока нет); removing или removed со сроком — queue_return; none или без срока при removing/removed — известная ошибка no_event, удалённое — not_found; запрос синхронизации; повтор безопасен",
                 "«Запомнить» здесь не обрабатывается: привязка вызывает установку настройки отдельно (другой агрегат, TASK-279)",
                 "Агентский edit_due (SetAssignmentDue) здесь событие не трогает: это TASK-281 (C-4: правка агента обновляет событие без вопроса)",
-                "Тесты на фейках: каждая политика × есть/нет события × срок изменён/не изменён/убран; срок убран при update, удаление выполнено, срок снова задан → ничего; удалено, синхронизировано, «Вернуть», срок изменён → ничего и вопроса нет; Execute после удаления снимает метку; UpdateDeadlineEvent (живое, удалённое, без события, после выполненного удаления, повтор)",
-                "Файлы: paratech/desktop/internal/cases/homeworkflow/assignments.go, proposals.go (только снятие метки в Execute), ports.go, types.go, errors.go, новый deadlineevent.go, paratech/desktop/internal/app/* (только подключение портов) (+ тесты)",
+                "Тесты на фейках: каждая политика × состояние (none, present, removing, removed) × срок изменён / не изменён / убран по таблице «Решение владельца 08.11»; срок убран при update, удаление выполнено, срок снова задан → update: queue_return, ask: вопрос return, keep: ничего; удалено, синхронизировано, «Вернуть» → то же по политикам; «Вернуть» до синхронизации → строка удаления удалена, вопроса нет; Execute после удаления снимает метку; UpdateDeadlineEvent (живое, удалённое, без события, removing и removed со сроком и без, повтор)",
+                "Файлы: paratech/desktop/internal/cases/homeworkflow/assignments.go, proposals.go (только снятие метки в Execute), delete.go (только RestoreAssignment), ports.go, types.go, errors.go, новый deadlineevent.go, paratech/desktop/internal/app/* (только подключение портов) (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
@@ -6024,12 +6025,12 @@
             "priority": "medium",
             "description": "[Задания · календарь] Синхронизация обрабатывает очередь обновлений событий сроков (идемпотентно)",
             "acceptance_criteria": [
-                "docs/adr/0029-student-assignments.md, дополнение 2 «Deadline change and the Google event» (Sync) и «Дополнение 08.11: состояние события срока»; очередь — TASK-276, метка — TASK-384. Google — только представление (жёсткое правило 6), побочный эффект идемпотентен (жёсткое правило 7)",
+                "docs/adr/0029-student-assignments.md, дополнение 2 «Deadline change and the Google event» (Sync) и «Дополнение 08.11: состояние события срока» и «Решение владельца 08.11»; очередь — TASK-276, метка — TASK-384. Google — только представление (жёсткое правило 6), побочный эффект идемпотентен (жёсткое правило 7)",
                 "removeDeadlines: после подтверждённого удаления в Google (в том числе 404/410) вместо PurgeDeadlineRemoval — MarkDeadlineEventRemoved (удаление строки и метка в одной транзакции); падение до фиксации — повторное удаление, идемпотентно",
-                "cases/schedulesync.CalendarSync: после removeDeadlines — updateDeadlines: для каждой строки очереди заново читает задание и признак события; удалено, без срока, без события, ждёт удаления или удаление выполнено (метка) — строка удаляется без вызова Google; иначе UpsertDeadline с подтверждённым заголовком последнего выполненного предложения и текущим сроком, затем строка удаляется; временная ошибка — строка остаётся до следующей синхронизации",
+                "cases/schedulesync.CalendarSync: после removeDeadlines — updateDeadlines: для каждой строки очереди заново читает задание и состояние события; удалено, без срока, состояние none или ждёт удаления — строка удаляется без вызова Google; present или removed — UpsertDeadline с подтверждённым заголовком последнего выполненного предложения и текущим сроком, затем FinishDeadlineEventUpdate (строка и метка в одной транзакции; для removed событие создаётся заново с тем же DeadlineEventID); временная ошибка — строка остаётся до следующей синхронизации",
                 "Ключ идемпотентности команды — из задания и нового срока; событие по-прежнему по DeadlineEventID задания, повтор после потерянного ответа ничего не удваивает",
-                "Тесты с фейком Google: обновление, потерянный ответ и повтор, задание удалено до синхронизации, срок снова изменён до синхронизации (берётся текущий), нет подключения к Google — строка ждёт; выполненное удаление ставит метку, и последующая строка обновления события не создаёт; удаление и обновление в одном прогоне — события нет",
-                "Файлы: paratech/desktop/internal/cases/schedulesync/* (calendar.go, ports.go, types.go), paratech/desktop/internal/app/calendar.go (только порт), paratech/desktop/internal/adapters/sqlite/deadlineevents*.go, recordingdeletions*.go (только подключение методов TASK-384) (+ тесты)",
+                "Тесты с фейком Google: обновление, потерянный ответ и повтор, задание удалено до синхронизации, срок снова изменён до синхронизации (берётся текущий), нет подключения к Google — строка ждёт; выполненное удаление ставит метку; следующая строка возврата создаёт событие заново с тем же id и снимает метку, повтор после потерянного ответа — одно событие; удаление задания после строки возврата — события нет",
+                "Файлы: paratech/desktop/internal/cases/schedulesync/* (calendar.go, ports.go, types.go), paratech/desktop/internal/app/calendar.go (только порт), paratech/desktop/internal/adapters/sqlite/deadlineevents*.go, recordingdeletions*.go (только подключение методов TASK-384, в том числе FinishDeadlineEventUpdate) (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
@@ -6049,11 +6050,11 @@
             "description": "[Задания · привязка Wails] Вопрос об обновлении события после правки срока, «Да» и «Запомнить», настройка в SettingsService",
             "acceptance_criteria": [
                 "docs/adr/0029-student-assignments.md, дополнение 2; use cases — TASK-276 (настройка), TASK-277 (правка и UpdateDeadlineEvent)",
-                "HomeworkService.EditAssignment: ответ получает calendarQuestion (bool); новый UpdateDeadlineEvent(id) → {problem: '' | not_found | no_event | failed}; новый RememberDeadlineEventChoice(update bool) → устанавливает настройку update или keep через cases/preferences",
+                "HomeworkService.EditAssignment и RestoreAssignment: ответ получает calendarQuestion ('' | update | return); новый UpdateDeadlineEvent(id) → {problem: '' | not_found | no_event | failed}; новый RememberDeadlineEventChoice(update bool) → устанавливает настройку update или keep через cases/preferences",
                 "SettingsService: в Settings поле calendarOnDueChange (ask | update | keep) и SetCalendarOnDueChange(value) (неизвестное значение — invalid)",
                 "Подтверждение — только клик студента или его настройка; агенту и Hub ничего нового не открывается (жёсткое правило 3)",
                 "frontend/src/bindings/homework.ts и settings.ts: новые поля и методы с разбором; русские тексты — в TASK-280",
-                "Тесты: каждый problem-код, calendarQuestion в ответе правки, запоминание обоих выборов, настройка",
+                "Тесты: каждый problem-код, calendarQuestion (update и return) в ответах правки и «Вернуть», запоминание обоих выборов, настройка",
                 "Файлы: paratech/desktop/internal/input/wails/homework*.go, paratech/desktop/internal/input/wails/settings.go, paratech/desktop/internal/app/* (только подключение), paratech/desktop/frontend/src/bindings/homework.ts, src/bindings/settings.ts, frontend/test/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
@@ -6073,7 +6074,7 @@
             "description": "[Задания · UI] Вопрос «Обновить событие в Google Календаре?» после смены срока и настройка в «Настройках»",
             "acceptance_criteria": [
                 "Владелец 2026-10-27 (З3); привязки — TASK-279",
-                "После сохранения правки с calendarQuestion: диалог «Обновить событие в Google Календаре?» с кнопками «Да» и «Нет» и флажком «Запомнить»; «Да» → updateDeadlineEvent; с «Запомнить» — ещё rememberDeadlineEventChoice(да или нет); «Нет» без флажка — ничего; Esc = «Нет» без запоминания; ошибки — короткими строками",
+                "После сохранения правки или «Вернуть» с calendarQuestion: update — «Обновить событие в Google Календаре?», return — «Вернуть событие в Google Календарь?»; кнопки «Да» и «Нет» и флажок «Запомнить»; «Да» → updateDeadlineEvent; с «Запомнить» — ещё rememberDeadlineEventChoice(да или нет); «Нет» без флажка — ничего; Esc = «Нет» без запоминания; ошибки — короткими строками",
                 "«Настройки»: выбор «События в календаре при смене срока» — «спрашивать» / «обновлять сами» / «не обновлять», по умолчанию «спрашивать»",
                 "Безличные тексты, по-русски, текстовыми узлами; тёмная тема, один акцент, клавиатура и aria (фокус в диалоге)",
                 "Тесты фронтенда: диалог и оба ответа с флажком и без, один вызов при двойном клике, настройка",
@@ -6082,7 +6083,7 @@
             ],
             "test_steps": [
                 "npm --prefix paratech/desktop/frontend run test и run build",
-                "Владелец: docs/qa/tasks/TASK-280.md — задание с событием в Google, сменить срок → вопрос, «Да» → событие в Google на новом сроке; ещё раз с «Нет» и «Запомнить» → вопроса больше нет, событие не меняется; в «Настройках» переключить на «обновлять сами» → смена срока обновляет событие без вопроса"
+                "Владелец: docs/qa/tasks/TASK-280.md — задание с событием в Google, сменить срок → вопрос, «Да» → событие в Google на новом сроке; ещё раз с «Нет» и «Запомнить» → вопроса больше нет, событие не меняется; в «Настройках» переключить на «обновлять сами» → смена срока обновляет событие без вопроса; срок убран, синхронизировано, срок задан снова → «Вернуть событие в Google Календарь?», «Да» → событие снова в Google; при «обновлять сами» — возвращается без вопроса"
             ],
             "dependencies": [
                 "TASK-275",
@@ -6096,13 +6097,14 @@
             "priority": "low",
             "description": "[Агент · ядро] Срок задания поменял агент (edit_due): событие в Google Календаре обновляется без вопроса, Undo возвращает и срок, и событие",
             "acceptance_criteria": [
-                "Решение владельца 2026-10-27 (C-4): агент меняет срок не просто так — событие в Google обновляется тоже, без вопроса. docs/adr/0029-student-assignments.md, дополнение 3 «The agent's edit_due and the Google event»",
-                "homeworkflow.SetAssignmentDue (путь агента): у задания есть событие и срок изменён — eventrefresh.Decide с фиксированной политикой update (настройка «События в календаре при смене срока» здесь не читается, в том числе keep), строка deadline_event_updates в транзакции правки и запрос синхронизации после фиксации, как в EditAssignment (TASK-277); без события или срок тот же — ничего; в use case условий нет (ARCH-22)",
+                "Решение владельца 2026-10-27 (C-4): агент меняет срок не просто так — событие в Google обновляется тоже, без вопроса. docs/adr/0029-student-assignments.md, дополнение 3 «The agent's edit_due and the Google event»; docs/adr/0029 «Решение владельца 08.11»: после выполненного удаления события правка агента возвращает событие само",
+                "homeworkflow.SetAssignmentDue (путь агента): eventrefresh.Decide с фиксированной политикой update и состоянием события (TASK-384): present и срок изменён — строка обновления; removing или removed и срок задан — queue_return (событие возвращается само); none или срок тот же — ничего; настройка «События в календаре при смене срока» здесь не читается, в том числе keep; строка в транзакции правки и запрос синхронизации после фиксации; в use case условий нет (ARCH-22)",
                 "Undo edit_due (компенсация, клик студента) возвращает прежний срок и тем же путём ставит обновление события, так что событие возвращается на прежнее время; отказ Undo как changed ничего не ставит",
-                "Строка действия в панели: при поставленном обновлении — «Срок изменён; событие в Google Календаре обновится» (признак из результата действия, только перечисление, без текста модели); заголовок события — подтверждённый, текст модели в Google не попадает (жёсткое правило 3 через политику, правило 6 — Google только представление); повтор синхронизации идемпотентен (жёсткое правило 7)",
-                "Тесты: edit_due с событием → одна строка очереди и запрос синхронизации; без события — ничего; настройка keep и ask не мешают пути агента; Undo → строка очереди с прежним сроком; повтор edit_due и Undo — одна строка; сценарий с фейком Google (TASK-278): событие на новом сроке, после Undo — на прежнем; edit_due после выполненного удаления события → ничего не ставится",
+                "Undo агентского delete_assignment (компенсация RestoreAssignment, клик студента) — через новый homeworkflow.UndoDeleteAssignment с фиксированной политикой update: в состоянии removed со сроком событие возвращается само (queue_return), в removing — ждущая строка удаления удаляется",
+                "Строка действия в панели: при поставленном обновлении — «Срок изменён; событие в Google Календаре обновится», при возврате — «Срок изменён; событие в Google Календаре вернётся» (признак из результата действия, только перечисление, без текста модели); заголовок события — подтверждённый, текст модели в Google не попадает (жёсткое правило 3 через политику, правило 6 — Google только представление); повтор синхронизации идемпотентен (жёсткое правило 7)",
+                "Тесты: edit_due с событием → одна строка очереди и запрос синхронизации; без события — ничего; настройка keep и ask не мешают пути агента; Undo → строка очереди с прежним сроком; повтор edit_due и Undo — одна строка; сценарий с фейком Google (TASK-278): событие на новом сроке, после Undo — на прежнем; edit_due после выполненного удаления события → строка возврата, событие в Google снова есть с подтверждённым заголовком; Undo удаления агентом после выполненного удаления → событие возвращается",
                 "Не параллельно с TASK-304 (input/agent/actions.go)",
-                "Файлы: paratech/desktop/internal/input/agent/actions.go, paratech/desktop/internal/cases/homeworkflow/* (только SetAssignmentDue и его тесты), paratech/desktop/internal/input/wails/agent*.go (только признак в строке действия), paratech/desktop/frontend/src/bindings/agent.ts, src/agentView.ts (только текст строки), test/*, paratech/desktop/tests/* (+ тесты)",
+                "Файлы: paratech/desktop/internal/input/agent/actions.go, paratech/desktop/internal/cases/homeworkflow/* (только SetAssignmentDue, UndoDeleteAssignment и их тесты), paratech/desktop/internal/input/agent/assignment_change.go (только вызов UndoDeleteAssignment в компенсации), paratech/desktop/internal/input/wails/agent*.go (только признак в строке действия), paratech/desktop/frontend/src/bindings/agent.ts, src/agentView.ts (только текст строки), test/*, paratech/desktop/tests/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
@@ -8420,7 +8422,7 @@
             "dependencies": [
                 "TASK-377"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-382",
@@ -8469,25 +8471,244 @@
             "id": "TASK-384",
             "category": "functional",
             "priority": "medium",
-            "description": "[Задания · ядро] Метка выполненного удаления события срока (миграция 0052, sqlite)",
+            "description": "[Задания · ядро] Метка выполненного удаления события срока, состояние события и eventrefresh по состоянию (миграция 0052, домен, sqlite)",
             "acceptance_criteria": [
-                "docs/adr/0029-student-assignments.md, «Дополнение 08.11: состояние события срока»; черновик docs/tasks/TASK-384-deadline-event-removed-marker.md. Признак «у задания есть событие» ложен после выполненного синхронизацией удаления, пока не выполнено новое create_deadline_event",
+                "docs/adr/0029-student-assignments.md, «Дополнение 08.11: состояние события срока» и «Решение владельца 08.11» (оно действует, где расходится); черновик docs/tasks/TASK-384-deadline-event-removed-marker.md. Метка значит «события в Google нет»; вернуть событие могут повторно заданный срок или «Вернуть» по политике",
                 "Миграция (следующий свободный номер при push, ожидается 0052): deadline_events_removed (assignment_id TEXT PRIMARY KEY CHECK (length(assignment_id) > 0), removed_at INTEGER NOT NULL), без внешнего ключа и версии; Down удаляет; schema.sql зеркалит дословно; migrate_test — новая версия, таблица в contractTables и unversionedTables",
-                "AssignmentHasDeadlineEvent: выполненное create_deadline_event И нет строки deadline_event_removals И нет строки deadline_events_removed (один запрос)",
+                "Новый запрос AssignmentDeadlineEventState(ctx, id) → none | present | removing | removed (один запрос по таблице состояний ADR); AssignmentHasDeadlineEvent = present (тот же запрос)",
                 "Адаптер MarkDeadlineEventRemoved(ctx, id, at): в одной транзакции (вызывающего или своей) удаляет строку удаления и ставит метку только если строка задания существует; повтор безопасен; отсутствие строки удаления — не ошибка",
                 "Адаптер ClearDeadlineEventRemoved(ctx, id): удаляет метку в транзакции вызывающего; отсутствие — не ошибка",
+                "Адаптер QueueDeadlineEventReturn(ctx, id, at): в транзакции вызывающего удаляет ждущую строку deadline_event_removals и ставит строку deadline_event_updates; постановка строки удаления удаляет ждущую строку обновления",
+                "Адаптер FinishDeadlineEventUpdate(ctx, id): в одной транзакции удаляет строку обновления и метку; повтор безопасен",
+                "Домен coursework/services/eventrefresh: Decide(policy, state, trigger edit | restore, dueAfter) по таблице «Решение владельца 08.11»; новые действия ask_return и queue_return; неизвестная политика = ask; табличный тест всех строк (вызывающих пока нет)",
                 "Очистка задания (ADR-0029 дополнение 2) удаляет метку в своей транзакции",
-                "Тесты (sqlite): все переходы таблицы состояний ADR — none, present, removing, removed, removed → present после нового выполненного предложения и снятия метки; метка для жёстко удалённого задания ничего не пишет; очистка удаляет метку; sqlc generate дважды без расхождений",
+                "Тесты (sqlite): все переходы таблицы состояний ADR — none, present, removing, removed; removed → present после нового выполненного предложения и снятия метки и после FinishDeadlineEventUpdate; removing → present через QueueDeadlineEventReturn; строки очередей исключают друг друга; метка для жёстко удалённого задания ничего не пишет; очистка удаляет метку; sqlc generate дважды без расхождений",
                 "Не параллельно с другой задачей, добавляющей миграцию (общие schema.sql, migrate_test); без заполнения задним числом",
-                "Файлы: paratech/desktop/pkg/migrations/0052_deadline_events_removed.sql, docs/contracts/schema.sql, paratech/desktop/internal/adapters/sqlite/queries/{deadline_events,recording_deletions,assignments}.sql (assignments — только удаление метки при очистке), sqlcgen/*, adapters/sqlite/{deadlineevents*,recordingdeletions*,assignments_purge*}.go, migrate_test.go, paratech/desktop/tests/* (+ тесты)",
+                "Файлы: paratech/desktop/pkg/migrations/0052_deadline_events_removed.sql, docs/contracts/schema.sql, paratech/desktop/internal/adapters/sqlite/queries/{deadline_events,recording_deletions,assignments}.sql (assignments — только удаление метки при очистке), sqlcgen/*, adapters/sqlite/{deadlineevents*,recordingdeletions*,assignments_purge*}.go, migrate_test.go, paratech/desktop/tests/*, paratech/desktop/internal/domain/coursework/services/eventrefresh/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
-                "go test -race ./desktop/internal/adapters/sqlite/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "go test -race ./desktop/internal/adapters/sqlite/... ./desktop/internal/domain/coursework/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
                 "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
             ],
             "dependencies": [
                 "TASK-276"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-385",
+            "category": "infrastructure",
+            "priority": "medium",
+            "description": "[Бета · сборка] build-alpha.ps1 -Beta: тег beta, hub.exe рядом с paratech.exe в dist\\beta; другие сборки без кода локального Hub",
+            "acceptance_criteria": [
+                "docs/adr/0036-beta-local-hub.md §1; черновик docs/tasks/TASK-385-beta-build-hub-exe.md",
+                "-Beta: теги production,beta, папка по умолчанию paratech\\dist\\beta; несовместим с -E2E и -ComponentOnly",
+                "-Beta собирает и hub.exe (go -C <модуль> build -trimpath ./hub/cmd/hub, CGO_ENABLED=0, windows/amd64, окружение восстанавливается) и проверяет go version -m (CGO_ENABLED=0); без -Beta старый hub.exe из папки удаляется",
+                "Точная проверка тегов сохраняется (production / production,e2e / production,beta); в любой сборке без beta go tool nm не находит символов internal/cases/localhub и internal/adapters/hubprocess, иначе ошибка",
+                "-Beta -Smoke ещё запускает hub.exe -h (код 0); смоук Hub не поднимает",
+                "CI: go vet и go test с -tags beta для desktop (как для e2e); docs/qa/run-alpha.md — разделы сборки и запуска (без строк журнала)",
+                "Файлы: paratech/desktop/build-alpha.ps1, .github/workflows/*.yml, docs/qa/run-alpha.md",
+                "Исполнитель: go-core (sonnet)"
+            ],
+            "test_steps": [
+                "powershell -NoProfile -ExecutionPolicy Bypass -File paratech/desktop/build-alpha.ps1 -Beta -Smoke",
+                "build-alpha.ps1 -Smoke (без -Beta): проверка тегов и nm проходит, hub.exe в папке нет"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-386",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Hub] Лог в файл с ротацией по размеру (HUB_LOG_FILE); Postgres в docker-compose перезапускается вместе с Docker",
+            "acceptance_criteria": [
+                "docs/adr/0036-beta-local-hub.md §6; черновик docs/tasks/TASK-386-hub-log-file.md",
+                "config: HUB_LOG_FILE / -log-file — абсолютный путь или пусто, относительный — ошибка конфигурации; не секрет, виден в String/LogValue",
+                "serve с HUB_LOG_FILE пишет только в файл, файл подключается сразу после занятия порта (второй Hub падает на listen раньше файла); до этого и без переменной — stderr; команды keys переменную не используют",
+                "Новый адаптер hub/internal/adapters/logfile (только std): 5 МиБ, hub.1.log, hub.2.log, старший удаляется; ротация работает на Windows во время работы",
+                "Тест: после старта с известными ключом провайдера, паролем БД и секретом печати их нет в файле",
+                "hub/docker-compose.yml: у postgres restart: unless-stopped; paratech/README.md — строка таблицы настроек Hub",
+                "Файлы: paratech/hub/config/*, paratech/hub/internal/adapters/logfile/* (новый), paratech/hub/internal/app/*, paratech/hub/cmd/hub/main.go (только линейный шаг при необходимости), paratech/hub/docker-compose.yml, paratech/README.md, paratech/hub/tests/* (+ тесты)",
+                "Исполнитель: hub-dev (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./hub/... (HUB_TEST_DATABASE_URL), тест архитектуры, GOOS=windows go vet ./hub/..., golangci-lint run ./hub/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-387",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Бета · локальный Hub · ядро] Контекст localhub: значения, правило диагностики и use case cases/localhub с портами",
+            "acceptance_criteria": [
+                "docs/adr/0036-beta-local-hub.md §2–§4, §7; черновик docs/tasks/TASK-387-localhub-domain-usecase.md",
+                "domain/localhub/values: Target из «Адрес сервера» (http, 127.0.0.1 или localhost, явный порт, без пути, запроса и user info; иначе не локальный; слушать всегда 127.0.0.1:<порт>), ServerSettings (base URL https или http на loopback, auth x-api-key | bearer, квота 0 = по умолчанию или > 0), Status и Reason (закрытые списки ADR §7)",
+                "domain/localhub/services/diagnosis: чистая Diagnose(facts) в порядке предусловий ADR §4; табличный тест всех строк",
+                "cases/localhub.Service: Ensure (проба → диагноз → запуск только при всех предусловиях → ожидание готовности до 20 с через Clock), Status, Recheck, SaveSettings, SetSecret/SecretSet для provider-key и database-url, генерация ключей печати при отсутствии; параллельные Ensure — один запуск; значения секретов через use case не проходят",
+                "ports.go ровно как ADR §2 (HubProbe, HubLauncher с Start/Stop/IssueKey, SecretSlots, SettingsFile, HubURL, Clock); тела Restart и IssueAccessKey — TASK-390",
+                "Тесты на фейках: каждая причина; работающий Hub не запускается второй раз; Docker выключен — запуска нет; выход с кодом 2 — config_error; Docker включён при перепроверке — запуск; удалённый адрес — ничего",
+                "docs/architecture.md §12: строка контекста localhub (только бета, ADR-0036)",
+                "Файлы: paratech/desktop/internal/domain/localhub/** (новый), paratech/desktop/internal/cases/localhub/* (новый), docs/architecture.md (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/localhub/... ./desktop/internal/cases/localhub/... и тест архитектуры",
+                "golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-388",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Бета · локальный Hub · адаптеры] hubprocess: запуск hub.exe в фоне без окна, секреты только в окружении процесса, пробы; hubserverconf: файл настроек",
+            "acceptance_criteria": [
+                "docs/adr/0036-beta-local-hub.md §3–§5; черновик docs/tasks/TASK-388-hubprocess-adapter.md; ревью безопасности обязательно",
+                "Путь: папка os.Executable() + hub.exe, обычный файл, не точка повторной обработки; exec.Cmd{Path, Args: [path]} без поиска в PATH, без оболочки, без аргументов; Dir = <DataDir>/hub",
+                "Окружение: родительское без всех HUB_* и LA_* + HUB_LISTEN_ADDR=127.0.0.1:<порт>, HUB_LOG_FILE, HUB_LOG_LEVEL=info, заданные несекретные настройки и HUB_ANTHROPIC_API_KEY, HUB_DATABASE_URL, HUB_AGENT_SEAL_KEYS, прочитанные из хранилища hubserver в момент запуска; нет секрета — типизированная ошибка с именем слота",
+                "Windows: HideWindow, CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB; при ERROR_ACCESS_DENIED один повтор без breakaway и строка WARN; stdout/stderr → <DataDir>/logs/hub-start.log (обнуляется при запуске); горутина Wait запоминает код выхода; заглушки _other.go — ErrUnsupported",
+                "Facts: /healthz и /readyz (1 с, только loopback, без редиректов), наличие канала \\\\.\\pipe\\docker_engine (только существование), TCP к host:port адреса БД (500 мс), наличие hub.exe, последний код выхода",
+                "Ни одного секрета в строках лога, текстах ошибок и командной строке ребёнка (тест с известными значениями; фейковый ребёнок печатает аргументы и имена переменных)",
+                "hubserverconf: <DataDir>/hub/hub-server.json, schema_version 1, атомарная запись (временный файл + rename), неизвестные поля — отказ, не больше 4 КиБ",
+                "Stop и IssueKey здесь возвращают ErrUnsupported (TASK-390)",
+                "Файлы: paratech/desktop/internal/adapters/hubprocess/* (новый), paratech/desktop/internal/adapters/hubserverconf/* (новый), paratech/desktop/testenv/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/adapters/hubprocess/... ./desktop/internal/adapters/hubserverconf/... на Windows (тестовый бинарь как фейковый hub.exe) и на Linux (заглушки)",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..., тест архитектуры"
+            ],
+            "dependencies": [
+                "TASK-387"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-389",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Бета · локальный Hub · сборка app и привязка] Подключение под тегом beta: проверка Hub при старте и каждую минуту, LocalHubService, «Открыть папку с логами»",
+            "acceptance_criteria": [
+                "docs/adr/0036-beta-local-hub.md §1, §2, §4, §7; черновик docs/tasks/TASK-389-localhub-wiring-binding.md; ревью безопасности обязательно",
+                "internal/app/localhub_beta.go (//go:build beta) и localhub_nobeta.go (nil): только режим окна, после start (ADR-0009), в фоне; не в headless, recorder и E2E; Close останавливает перепроверку и никогда не останавливает Hub",
+                "Перепроверка каждые 60 с, пока состояние не running/remote; LocalHubService.Recheck для «Проверить снова»",
+                "input/wails.LocalHubService: Status → {state, reason, port, exitCode}, Settings/SaveSettings, SetProviderKey, SetDatabaseURL, SecretsSet → {providerKey, databaseURL} (только признаки), OpenLogsFolder (фиксированный <DataDir>/logs через существующий explorer-открыватель); регистрация в shell_localhub_beta.go / _nobeta.go; ошибки — закрытые коды",
+                "Хранилище секретов hubserver через wincred (имена ADR §3, профиль ADR-0014); ключи печати — через random",
+                "tests/arch_test.go: cases/localhub, adapters/hubprocess, adapters/hubserverconf импортируют только файлы с //go:build beta; проверка nm из TASK-385 проходит при наличии пакетов",
+                "frontend/src/bindings/localhub.ts: available() ложно, когда привязки нет (не бета)",
+                "Файлы: paratech/desktop/internal/app/localhub_beta.go, localhub_nobeta.go (новые), app.go/env.go (только вызов), paratech/desktop/internal/input/wails/localhub.go, shell_localhub_beta.go, shell_localhub_nobeta.go (новые), paratech/desktop/frontend/src/bindings/localhub.ts (новый), frontend/test/*, paratech/desktop/tests/arch_test.go (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/app/... ./desktop/internal/input/wails/... ./desktop/tests/... с -tags beta и без, тест архитектуры",
+                "GOOS=windows go vet ./desktop/... (с -tags beta и без), golangci-lint run ./desktop/..., npm --prefix paratech/desktop/frontend run test"
+            ],
+            "dependencies": [
+                "TASK-385",
+                "TASK-386",
+                "TASK-387",
+                "TASK-388"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-390",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Бета · локальный Hub] «Перезапустить Hub» (только наш hub.exe) и «Выпустить ключ доступа» без консоли",
+            "acceptance_criteria": [
+                "docs/adr/0036-beta-local-hub.md §5 (Stop, выпуск ключа); черновик docs/tasks/TASK-390-localhub-restart-key.md; ревью безопасности обязательно",
+                "Stop: PID, слушающий 127.0.0.1:<порт> (GetExtendedTcpTable), только если путь его образа равен нашему hub.exe (без учёта регистра, итоговый путь); TerminateProcess, ожидание закрытия порта до 5 с; чужая программа — port_busy, не трогается",
+                "Restart = Stop, затем Ensure; отказ, если Hub не наш",
+                "IssueKey: hub.exe keys create -label beta-<yyyymmdd-hhmm> (фиксированный путь, без оболочки) только с HUB_DATABASE_URL, таймаут 30 с; stdout в память (≤ 4 КиБ), формат ключа — по исходнику hub/internal/input/cli, проверка values.ParseHubAPIKey, запись в слот hub/api-key десктопа; ключ не пишется в лог и не возвращается привязке (issued | exists | failed); предлагается только без ключа и при работающем Hub",
+                "Тесты: на Windows с тестовым бинарём как фейковым hub.exe для обоих; чужой слушатель не завершается; текста ключа нет в логах и ответах",
+                "Файлы: paratech/desktop/internal/adapters/hubprocess/*, paratech/desktop/internal/cases/localhub/*, paratech/desktop/internal/input/wails/localhub.go, paratech/desktop/frontend/src/bindings/localhub.ts, paratech/desktop/internal/app/localhub_beta.go (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/adapters/hubprocess/... ./desktop/internal/cases/localhub/... ./desktop/internal/input/wails/... на Windows, с -tags beta и без",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..., тест архитектуры"
+            ],
+            "dependencies": [
+                "TASK-389"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-391",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Бета · локальный Hub · UI] Блок «Hub на этом компьютере (бета)» в «Подключениях» и состояние Hub в «Диагностике»",
+            "acceptance_criteria": [
+                "docs/adr/0036-beta-local-hub.md §3, §7; черновик docs/tasks/TASK-391-local-hub-ui.md; ADR-0034 (раскладка настроек)",
+                "Показывается только когда bindings/localhub.ts говорит «доступно» (бета); иначе ничего и без текста ошибки",
+                "«Подключения»: «Ключ провайдера» и «Адрес базы данных» только на запись («задан / не задан», «Сохранить»), base URL, «Заголовок ключа» (x-api-key / Bearer), «Квота токенов» (пусто = по умолчанию); после изменения — кнопка-слово «Перезапустить Hub»; «Выпустить ключ доступа» — только без ключа Hub и при работающем Hub",
+                "«Диагностика» → «Hub на этом компьютере»: тихий статус (значок + цветной текст, без заливки) для каждого состояния и причины ADR §7, у каждой следующий шаг (ссылка в «Подключения», «Проверить снова», «Перезапустить Hub»); «Открыть папку с логами» — значок с подсказкой и aria-label; опрос раз в 3 с, пока страница открыта",
+                "Безличные русские тексты текстовыми узлами; клавиатура и aria; инварианты раскладки ADR-0035 §5; docs/agent-parity.md — строка «только UI: вводится секрет; бета-инструмент»",
+                "Тесты: каждое состояние и причина → текст и действие; поля секретов никогда не показывают значение; двойной клик — один вызов; нет привязки — ничего не рисуется",
+                "Файлы: paratech/desktop/frontend/src/pages/ConnectionsPage.tsx, src/pages/DiagnosticsPage.tsx, src/localHubView.ts (новый), test/*, docs/agent-parity.md",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Владелец: docs/qa/tasks/TASK-391.md — Docker выключен → «включите Docker Desktop»; включить → «Работает» само в течение минуты; закрыть приложение → Hub отвечает; открыть снова → второго hub.exe в диспетчере задач нет; лог в %LOCALAPPDATA%\\LearningAssistant\\logs\\hub.log"
+            ],
+            "dependencies": [
+                "TASK-389",
+                "TASK-390"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-392",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Записи · ядро] «Отменить расшифровку» и «Расшифровать снова»: отмена задачи stt (whisper-cli останавливается), состояние «отменена», новая задача по клику",
+            "acceptance_criteria": [
+                "Владелец 2026-11-08; PRD §4.3, §7.2, §8; черновик docs/tasks/TASK-392-cancel-transcription-core.md. Переиспользовать jobrunner.Service.Cancel (cases/jobrunner/service.go), остановку процесса whispercli (adapters/whispercli/proc_windows.go, TerminateJobObject), правило «одна автоматическая задача STT на запись» (cases/transcribe/enqueue.go)",
+                "Новый чистый доменный сервис transcription/services/retranscribe: Decide(задачи STT записи, есть транскрипт) — можно, только если транскрипта нет, незавершённых задач STT нет и самая новая CANCELLED; ключ stt:<запись>:<модель>:r<n>, n = число задач STT + 1 (повтор — тот же ключ, одна задача); табличный тест",
+                "transcribe.Enqueuer.Retranscribe: в одном Tx.Do перечитывает запись (TranscribableAudio), задачи и транскрипт, закрепляет текущую модель (ResolveForJob), ставит задачу; нет модели — известная ошибка no_model. transcribe.ActiveJob(запись) — незавершённая задача STT",
+                "ActivityService.CancelTranscription(recordingId) → cancelled | not_running | ending (ErrNotCancellable: попытка завершается) | failed, повтор безопасен; ActivityService.Retranscribe(recordingId) → started | not_allowed | no_model | failed",
+                "Цепочка (cases/activity/chain.go): самая новая задача STT CANCELLED → stage failed, errorCode transcriptionCancelled, action retranscribe (не transcriptionFailed); RecordingItem.CanCancel истинно, пока самая новая задача STT в очереди, ждёт или выполняется; цепочка всегда читает самую новую задачу STT записи",
+                "После отмены: рабочая папка задачи удалена (очистка whispercli или стартовая), summarize/extract_homework не ставятся; после перезапуска строка по-прежнему «отменена» (обход при старте задачу не создаёт)",
+                "Тесты: use case на фейках; запрос sqlite (задачи STT записи по префиксу ключа, без миграции); таблица цепочки; коды привязки; сценарий в desktop/tests с фейковым whisper-cli: отмена выполняющейся → CANCELLED и процесса нет, «Расшифровать снова» → новая задача до COMPLETED и постобработка",
+                "frontend/src/bindings/activity.ts: новые поля, коды и методы (тексты — TASK-393)",
+                "Файлы: paratech/desktop/internal/domain/transcription/services/retranscribe/* (новый), paratech/desktop/internal/cases/transcribe/*, paratech/desktop/internal/cases/activity/chain.go, types.go, paratech/desktop/internal/adapters/sqlite/jobs*.go, queries/jobs.sql, sqlcgen/*, paratech/desktop/internal/input/wails/activity.go, paratech/desktop/internal/app/* (только подключение), paratech/desktop/frontend/src/bindings/activity.ts, frontend/test/*, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/transcription/... ./desktop/internal/cases/transcribe/... ./desktop/internal/cases/activity/... ./desktop/internal/adapters/sqlite/... ./desktop/internal/input/wails/... ./desktop/tests/... (и на Windows), тест архитектуры, sqlc generate без расхождений",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..., npm --prefix paratech/desktop/frontend run test"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-393",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Записи · UI] Значок «Отменить расшифровку» в строке записи и «Расшифровать снова» после отмены",
+            "acceptance_criteria": [
+                "Владелец 2026-11-08; привязки — TASK-392; черновик docs/tasks/TASK-393-cancel-transcription-ui.md",
+                "Этап распознавания или ожидания распознавания с canCancel: прежний прогресс («N %», «≈ N мин осталось») и кнопка-значок (стоп/крестик) с подсказкой и aria-label «Отменить расшифровку»; без диалога подтверждения (обратимо через «Расшифровать снова»); недоступна во время вызова; ending — строка просто обновляется; failed — «Не удалось отменить расшифровку.»",
+                "errorCode transcriptionCancelled: тихий статус (значок + приглушённый текст, не цвет ошибки) «Расшифровка отменена» и кнопка-слово «Расшифровать снова» (главное действие состояния); no_model — «Нет модели распознавания» с действием «Открыть модели»; started — строка «В очереди»",
+                "Безличные русские тексты текстовыми узлами; порядок фокуса; инварианты раскладки ADR-0035 §5; docs/agent-parity.md — строка (инструмента пока нет, последователь cancel_transcription / retranscribe)",
+                "E2E: сценарий в paratech/e2e/specs/recording — импорт → распознавание началось → отмена → «Расшифровать снова» → готово",
+                "Тесты: ключи строки для обоих состояний, один вызов при двойном клике, каждый код результата",
+                "Файлы: paratech/desktop/frontend/src/recordingRowView.ts, src/pages/RecordingRow.tsx, src/activityView.ts, src/todayView.ts (только если строка «Сегодня» показывает тот же этап), test/*, paratech/e2e/specs/recording/*, docs/agent-parity.md",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build; npm --prefix paratech/e2e test",
+                "Владелец: docs/qa/tasks/TASK-393.md — длинная запись, распознавание идёт → значок отмены → whisper-cli исчез из диспетчера задач, строка «Расшифровка отменена»; перезапуск → по-прежнему отменена; «Расшифровать снова» → до конспекта"
+            ],
+            "dependencies": [
+                "TASK-392"
             ],
             "status": "pending"
         }
