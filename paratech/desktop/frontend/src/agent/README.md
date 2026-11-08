@@ -75,9 +75,15 @@ with the exported `AgentService` methods in `agent.go`, `agentjournal.go`, `agen
 ## Gotchas
 - The core publishes updates from several operations without a global order; `reducePanel` applies each to the request it
   names (threadId + turn) and a finished request stays finished (`agentState.ts`). Do not rely on arrival order.
-- Every update of a request carries ALL its cards (the Go Driver sends the tool cards first, then the step's own): the later
-  update replaces the earlier list, never appends (`agentdriverupdates.test.mjs`).
-- Keys of cards include kind and caption (`AgentRequest`) so a new card does not inherit the typed state of the old one.
+- Every update of a request carries ALL its cards (the Go Driver sends them in display order: reading cards first; confirm
+  cards and action lines «Отменить» after the reply; the stop line last): the later update replaces the earlier list, never
+  appends (`agentdriverupdates.test.mjs`); the UI does not reorder. "Late" cards (confirm, action line, schedule, then the stop
+  line) come after the reply; `isLateCard` / `firstLateCard` (`agentView.ts`) name them, and the typing reply, the answer drafts
+  and a kept cut-off text are drawn right above the first one (`AgentRequest`), so the final reply card replaces the draft in place.
+- Keys of cards (`cardKeys`, `agentView.ts`) include kind and caption so a new card does not inherit the typed state of the old
+  one; late cards are keyed by identity (confirm target, action id, schedule token), not index: the reply arriving above a
+  confirm card must not remount it, with an occurrence counter for repeats (`#2` counts earlier cards with the same identity,
+  not the position; the planner may propose one target twice) (`agentLateCards20261108.test.mjs`).
 - `AgentActions` and `UserActions` render nothing when there is nothing to copy or rerun.
 
 ## E2E

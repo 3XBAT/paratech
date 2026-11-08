@@ -390,7 +390,10 @@ test("the dialog is a modal with «Скрыть», «Форк» and «Отмен
   assert.ok(html.includes('role="dialog"') && html.includes('aria-modal="true"'));
   assert.ok(/aria-labelledby="[^"]+"/.test(html));
   assert.ok(html.includes("Начать заново отсюда?"));
-  assert.ok(html.includes("Сообщения после этого агент забудет. Сделанные действия не отменяются."));
+  // TASK-400: the «Скрыть» line is the longer text accepted by the owner (it names the field and the forgetting).
+  assert.ok(
+    html.includes("Текст сообщения перейдёт в поле ввода. После отправки сообщения ниже пропадут из чата, и агент их забудет. Сделанные действия не отменяются."),
+  );
   assert.ok(html.includes("Будет создан новый чат с историей до этого сообщения. Этот чат не изменится."));
   assert.ok(/<button[^>]*class="btn primary sm"[^>]*>Скрыть<\/button>/.test(html));
   assert.ok(/<button[^>]*class="btn sm"[^>]*>(?:<span[^>]*>)*Форк/.test(html), "«Форк» is a plain (secondary) button");
@@ -401,7 +404,7 @@ test("the dialog is a modal with «Скрыть», «Форк» and «Отмен
   // The order is the owner's: Скрыть, Форк, Отмена; each line is the description of its own button.
   assert.ok(html.indexOf(">Скрыть<") < html.indexOf("Форк") && html.indexOf("Форк") < html.indexOf(">Отмена<"));
   const hide = /<button[^>]*aria-describedby="([^"]+)"[^>]*>Скрыть<\/button>/.exec(html);
-  assert.ok(hide && html.includes(`id="${hide[1]}"`) && html.split(`id="${hide[1]}"`)[1].startsWith(' class="ag-restart-body">Сообщения после этого'));
+  assert.ok(hide && html.includes(`id="${hide[1]}"`) && html.split(`id="${hide[1]}"`)[1].startsWith(' class="ag-restart-body">Текст сообщения перейдёт в поле ввода.'));
   const fork = /<button[^>]*aria-describedby="([^"]+)"[^>]*>(?:<span[^>]*>)*Форк/.exec(html);
   assert.ok(fork && html.split(`id="${fork[1]}"`)[1].startsWith(' class="ag-restart-body">Будет создан новый чат'));
   assert.notEqual(hide[1], fork[1]);

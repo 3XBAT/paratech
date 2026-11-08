@@ -710,8 +710,8 @@ func (d *Driver) publish(ctx context.Context, st agentturn.Step, p Problem) {
 	d.sink.Publish(d.update(ctx, st, p))
 }
 
-// update is the panel's form of step st: the tool cards shown so far by its request, then its own; a card that breaks
-// its rules is dropped, never shown. A reply that lists assignments, and the action line of an added assignment, get
+// update is the panel's form of step st: the tool cards shown so far by its request and its own, in displayOrder; a
+// card that breaks its rules is dropped, never shown. A reply that lists assignments, and the action line of an added assignment, get
 // their titles and deadlines from the local data here, on every update (ctx may have ended: the read is local).
 func (d *Driver) update(ctx context.Context, st agentturn.Step, p Problem) Update {
 	all := append(d.shownCards(st), st.Cards...)
@@ -730,7 +730,8 @@ func (d *Driver) update(ctx context.Context, st agentturn.Step, p Problem) Updat
 		cards = append(cards, c)
 	}
 	return Update{
-		Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, StopReason: st.StopReason, Cards: cards, Problem: p,
+		Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, StopReason: st.StopReason,
+		Cards: displayOrder(cards), Problem: p,
 	}
 }
 

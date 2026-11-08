@@ -8,9 +8,10 @@ or sends. See `doc.go`. File names below are in this package unless a path is gi
 
 ## Map
 - `driver.go`: `Driver`, `Deps`, `New`, the request operations (`Ask`, `ApprovePlan`, `Stop`, `Rerun`, ...), `Update`,
-  `Sink`. `shown.go`: the tool cards of the newest request of each thread, put before the step's cards of every later
-  update with a status. `progress.go`, `replydraft.go`: progress (`Update.Progress`; `Update.Retry` 1..3 while a
-  failed step is retried by itself, ADR-0026 addendum 2026-11-08) and the streamed reply draft to the panel. `compact.go`:
+  `Sink`. `shown.go`: the tool cards of the newest request of each thread, merged into every later update with a
+  status; `displayOrder` puts the agent's cards first, then confirm/action/schedule/delete cards, then the stop line.
+  `progress.go`, `replydraft.go`: progress (`Update.Progress`; `Update.Retry` 1..3 while a failed step is retried by
+  itself, ADR-0026 addendum 2026-11-08) and the streamed reply draft to the panel. `compact.go`:
   `Compactor` (cases/agentcompact), run by `Ask` of a named chat before its first step; publishes the
   `Compaction`/`Compacting` updates (ADR-0028).
 - `tools.go`: the read-only tool dispatch (`tools.reader`, `tools.run`) and the R tools; `facts.go`: `Facts` for

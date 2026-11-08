@@ -47,7 +47,28 @@ func (d *Driver) remember(st agentturn.Step, cards []values.Card) {
 	}
 }
 
-// shownCards are the tool cards to put before the cards of step st. Only a request-state update gets them: one with
+// displayOrder orders the cards of an update for reading (owner 08.11): what the agent says first, then the cards the
+// student answers or undoes after reading it (confirm, action line, schedule, delete), then the stop line as the final
+// status. Each group keeps its order.
+func displayOrder(cards []values.Card) []values.Card {
+	var says, late, stopped []values.Card
+	for _, c := range cards {
+		switch c.(type) {
+		case values.ConfirmCard, values.ActionLine, values.ScheduleSubjectsCard, values.DeleteAssignmentCard:
+			late = append(late, c)
+		case values.StoppedCard:
+			stopped = append(stopped, c)
+		default:
+			says = append(says, c)
+		}
+	}
+	out := make([]values.Card, 0, len(cards))
+	out = append(out, says...)
+	out = append(out, late...)
+	return append(out, stopped...)
+}
+
+// shownCards are the tool cards of the request of step st, merged with its own cards by update. Only a request-state update gets them: one with
 // no thread (a failed Ask) or no status (a refused button: the panel keeps what it shows) gets none, and so does an
 // update of an older request than the one kept. A newer request drops the kept cards.
 func (d *Driver) shownCards(st agentturn.Step) []values.Card {
