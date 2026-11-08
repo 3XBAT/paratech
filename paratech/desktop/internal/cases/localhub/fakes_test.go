@@ -47,6 +47,13 @@ func (p *fakeProbe) set(f values.Facts) {
 	p.before = f
 }
 
+// then replaces the facts returned after a start.
+func (p *fakeProbe) then(fs ...values.Facts) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.after = fs
+}
+
 func (p *fakeProbe) callCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()

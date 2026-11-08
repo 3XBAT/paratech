@@ -211,11 +211,20 @@ func TestRecheckStartsOnceDockerIsOn(t *testing.T) {
 }
 
 func TestEnsureWithARemoteHub(t *testing.T) {
-	for _, url := range []string{"https://hub.example.test", "http://192.0.2.1:8080", "http://127.0.0.1:8080/hub", ""} {
-		t.Run(url, func(t *testing.T) {
-			w := newWorld(t, url)
+	tests := []struct{ url, shown string }{
+		{url: "https://hub.example.test", shown: "https://hub.example.test"},
+		{url: "http://192.0.2.1:8080", shown: "http://192.0.2.1:8080"},
+		{url: "http://127.0.0.1:8080/hub", shown: "http://127.0.0.1:8080/hub"},
+		{url: "", shown: ""},
+		{url: "https://tester:fake-pass@hub.example.test/x", shown: "https://hub.example.test/x"},
+		{url: "https://tester@hub.example.test", shown: "https://hub.example.test"},
+		{url: "tester:fake-pass@hub.example.test", shown: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			w := newWorld(t, tt.url)
 			st, err := w.svc.Ensure(context.Background())
-			if err != nil || st != (Status{State: values.StatusRemote, URL: url}) {
+			if err != nil || st != (Status{State: values.StatusRemote, URL: tt.shown}) {
 				t.Fatalf("Ensure = %+v, %v", st, err)
 			}
 			if st, err := w.svc.Status(context.Background()); err != nil || st.State != values.StatusRemote {
@@ -260,7 +269,7 @@ func TestConcurrentEnsureStartsOnce(t *testing.T) {
 	waitFor(t, func() bool {
 		w.svc.mu.Lock()
 		defer w.svc.mu.Unlock()
-		return w.svc.flight != nil && w.svc.flight.joined == callers-1
+		return w.svc.flight != nil && w.svc.flight.joined == callers
 	})
 	close(w.launcher.release)
 	wg.Wait()
@@ -335,18 +344,169 @@ func TestEnsureFailures(t *testing.T) {
 	}
 }
 
-func TestEnsureCancelledWhileWaiting(t *testing.T) {
+func TestEnsureWithAnEndedContextStartsNothing(t *testing.T) {
 	w := newWorld(t, localURL)
 	ctx, cancel := context.WithCancel(context.Background())
-	w.probe.after = []values.Facts{readyFacts()}
-	w.launcher.entered = make(chan struct{}, 1)
 	cancel()
-	_, err := w.svc.Ensure(ctx)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v", err)
+	for _, call := range []func(context.Context) (Status, error){w.svc.Ensure, w.svc.Recheck} {
+		if _, err := call(ctx); !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v", err)
+		}
 	}
-	if st, _ := w.svc.Status(context.Background()); st.State != values.StatusStarting {
-		t.Fatalf("status = %+v", st)
+	if w.launcher.startCount() != 0 || w.probe.callCount() != 0 {
+		t.Fatalf("starts %d, probes %d", w.launcher.startCount(), w.probe.callCount())
+	}
+}
+
+// TestCancelledLeaderDoesNotAbandonTheStart: the caller that began the check leaves, the check goes on for the rest.
+func TestCancelledLeaderDoesNotAbandonTheStart(t *testing.T) {
+	w := newWorld(t, localURL)
+	w.launcher.entered = make(chan struct{}, 1)
+	w.launcher.release = make(chan struct{})
+	w.probe.after = []values.Facts{answering()}
+
+	leaderCtx, cancel := context.WithCancel(context.Background())
+	type result struct {
+		st  Status
+		err error
+	}
+	leader, follower := make(chan result, 1), make(chan result, 1)
+	go func() {
+		st, err := w.svc.Ensure(leaderCtx)
+		leader <- result{st, err}
+	}()
+	<-w.launcher.entered
+	go func() {
+		st, err := w.svc.Recheck(context.Background())
+		follower <- result{st, err}
+	}()
+	waitFor(t, func() bool {
+		w.svc.mu.Lock()
+		defer w.svc.mu.Unlock()
+		return w.svc.flight != nil && w.svc.flight.joined == 2
+	})
+
+	cancel()
+	got := <-leader
+	if !errors.Is(got.err, context.Canceled) || got.st.State != values.StatusStarting {
+		t.Fatalf("leader = %+v, %v; want the kept starting status and ctx's error", got.st, got.err)
+	}
+
+	close(w.launcher.release)
+	got = <-follower
+	if got.err != nil || got.st.State != values.StatusRunning {
+		t.Fatalf("follower = %+v, %v", got.st, got.err)
+	}
+	if n := w.launcher.startCount(); n != 1 {
+		t.Fatalf("started %d times", n)
+	}
+	if st, _ := w.svc.Status(context.Background()); st.State != values.StatusRunning {
+		t.Fatalf("kept status = %+v", st)
+	}
+}
+
+func exitedFacts(code int) values.Facts {
+	f := readyFacts()
+	f.Exited, f.ExitCode = true, code
+	return f
+}
+
+// TestRecordedExitNeedsTheOwner: the automatic Ensure never starts over an exit; Recheck, SaveSettings and
+// SetSecret allow one new start, after which the new process's own exit counts again.
+func TestRecordedExitNeedsTheOwner(t *testing.T) {
+	ack := map[string]func(*world) error{
+		"recheck": func(w *world) error { _, err := w.svc.Recheck(context.Background()); return err },
+		"save settings": func(w *world) error {
+			return w.svc.SaveSettings(context.Background(), Settings{BaseURL: "https://gw.example.test"})
+		},
+		"set secret": func(w *world) error {
+			return w.svc.SetSecret(context.Background(), "provider-key", "sk-fake-new")
+		},
+	}
+	for name, acknowledge := range ack {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t, localURL)
+			w.probe.after = []values.Facts{exitedFacts(values.ExitConfigError)}
+			st, err := w.svc.Ensure(context.Background())
+			if err != nil || st.Reason != values.ReasonConfigError || w.launcher.startCount() != 1 {
+				t.Fatalf("first Ensure = %+v, %v, starts %d", st, err, w.launcher.startCount())
+			}
+
+			// The automatic path keeps the exit: no respawn loop.
+			for range 3 {
+				if st, err := w.svc.Ensure(context.Background()); err != nil || st.Reason != values.ReasonConfigError {
+					t.Fatalf("automatic Ensure = %+v, %v", st, err)
+				}
+			}
+			if n := w.launcher.startCount(); n != 1 {
+				t.Fatalf("respawned automatically: %d starts", n)
+			}
+
+			// The owner acts; the new process fails as well and its exit is seen again.
+			if err := acknowledge(w); err != nil {
+				t.Fatal(err)
+			}
+			st, err = w.svc.Ensure(context.Background())
+			if err != nil || st.Reason != values.ReasonConfigError || st.ExitCode != values.ExitConfigError {
+				t.Fatalf("Ensure after the owner = %+v, %v", st, err)
+			}
+			if n := w.launcher.startCount(); n != 2 {
+				t.Fatalf("starts = %d, want one new start", n)
+			}
+			if st, err := w.svc.Ensure(context.Background()); err != nil || st.Reason != values.ReasonConfigError || w.launcher.startCount() != 2 {
+				t.Fatalf("the new exit was not kept: %+v, %v, starts %d", st, err, w.launcher.startCount())
+			}
+
+			// Fixed now: the next acknowledgement starts a Hub that answers.
+			w.probe.then(exitedFacts(values.ExitConfigError), answering())
+			if err := acknowledge(w); err != nil {
+				t.Fatal(err)
+			}
+			if st, err := w.svc.Ensure(context.Background()); err != nil || st.State != values.StatusRunning || w.launcher.startCount() != 3 {
+				t.Fatalf("Ensure after the fix = %+v, %v, starts %d", st, err, w.launcher.startCount())
+			}
+		})
+	}
+}
+
+func TestRecheckAfterTheDatabaseIsBack(t *testing.T) {
+	w := newWorld(t, localURL)
+	w.probe.after = []values.Facts{exitedFacts(1)}
+	if st, err := w.svc.Ensure(context.Background()); err != nil || st.Reason != values.ReasonExited {
+		t.Fatalf("Ensure = %+v, %v", st, err)
+	}
+
+	// The database went down: Recheck names it and starts nothing.
+	down := exitedFacts(1)
+	down.DatabasePort = false
+	w.probe.then(down)
+	if st, err := w.svc.Recheck(context.Background()); err != nil || st.Reason != values.ReasonDatabaseDown {
+		t.Fatalf("Recheck = %+v, %v", st, err)
+	}
+
+	w.probe.then(exitedFacts(1), answering())
+	if st, err := w.svc.Recheck(context.Background()); err != nil || st.State != values.StatusRunning {
+		t.Fatalf("Recheck after the database = %+v, %v", st, err)
+	}
+	if n := w.launcher.startCount(); n != 2 {
+		t.Fatalf("starts = %d", n)
+	}
+}
+
+func TestAutomaticEnsureAfterAnExitBeforeAnyStart(t *testing.T) {
+	w := newWorld(t, localURL)
+	w.probe.set(exitedFacts(1))
+	for range 3 {
+		if st, err := w.svc.Ensure(context.Background()); err != nil || st.Reason != values.ReasonExited {
+			t.Fatalf("Ensure = %+v, %v", st, err)
+		}
+	}
+	if w.launcher.startCount() != 0 {
+		t.Fatal("started over a recorded exit")
+	}
+	w.probe.after = []values.Facts{answering()}
+	if st, err := w.svc.Recheck(context.Background()); err != nil || st.State != values.StatusRunning || w.launcher.startCount() != 1 {
+		t.Fatalf("Recheck = %+v, %v, starts %d", st, err, w.launcher.startCount())
 	}
 }
 
@@ -410,7 +570,14 @@ func TestSecrets(t *testing.T) {
 	if _, ok := w.secrets.values[values.SecretSealKeys]; ok {
 		t.Fatal("seal keys were set by name")
 	}
-	for _, blank := range []string{"", "  \t"} {
+	if err := w.svc.SetSecret(context.Background(), "database-url", " \tpostgres://fake@127.0.0.1:5432/hub\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.secrets.values[values.SecretDatabaseURL]; got != "postgres://fake@127.0.0.1:5432/hub" {
+		t.Fatalf("stored %q, want it trimmed", got)
+	}
+
+	for _, blank := range []string{"", "  \t", "\r\n"} {
 		if err := w.svc.SetSecret(context.Background(), "database-url", blank); !errors.Is(err, ErrEmptySecret) {
 			t.Fatalf("SetSecret(blank) = %v", err)
 		}

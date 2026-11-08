@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -43,13 +44,17 @@ type Service struct {
 	mu     sync.Mutex
 	last   Status
 	known  bool    // last holds a status
-	flight *flight // the running Ensure; nil when none
+	flight *flight // the running check; nil when none
+
+	// acks counts the owner's acknowledgements of a recorded exit (Recheck, a saved setting or secret); spent is the
+	// count the latest spawn consumed. While they differ, a recorded exit does not stand in the way of one new start.
+	acks, spent uint64
 }
 
-// flight is one Ensure run that concurrent callers share.
+// flight is one check that concurrent callers share. It runs detached from the callers' contexts.
 type flight struct {
 	done   chan struct{}
-	joined int // callers waiting for it, for tests
+	joined int // callers that waited for it, for tests
 	st     Status
 	err    error
 }
@@ -68,26 +73,49 @@ func New(d Deps) (*Service, error) {
 	}, nil
 }
 
-// Ensure makes the local Hub run if it can (ADR-0036 section 4): a remote «Адрес сервера» gives StatusRemote and
-// nothing else; a Hub that answers is left alone; otherwise, when every precondition holds, the seal keys are
-// generated if missing, hub.exe is started and its answer awaited for up to 20 s. The returned status is also kept
-// for Status. Calls made while one runs wait for it and get its result: the Hub is started at most once.
-func (s *Service) Ensure(ctx context.Context) (Status, error) {
-	s.mu.Lock()
-	if f := s.flight; f != nil {
-		f.joined++
-		s.mu.Unlock()
-		select {
-		case <-f.done:
-			return f.st, f.err
-		case <-ctx.Done():
-			return s.cached(), fmt.Errorf("%s: %w", opEnsure, ctx.Err())
-		}
+// Ensure is the automatic check (the start of the app and the periodic recheck): it makes the local Hub run if it
+// can (ADR-0036 section 4). A remote «Адрес сервера» gives StatusRemote and nothing else; a Hub that answers is left
+// alone; otherwise, when every precondition holds, the seal keys are generated if missing, hub.exe is started and its
+// answer awaited for up to 20 s. A recorded exit of the Hub this desktop started blocks a start until the owner
+// acknowledges it (Recheck, SaveSettings, SetSecret), so an ending Hub is never respawned in a loop.
+//
+// The returned status is also kept for Status. Calls made while one runs share it: the Hub is started at most once.
+// The shared run does not stop when a caller's ctx ends; that caller gets the last kept status and ctx's error.
+func (s *Service) Ensure(ctx context.Context) (Status, error) { return s.run(ctx, false) }
+
+// Recheck is Ensure for «Проверить снова»: the owner's request also acknowledges a recorded exit, so a Hub that ended
+// may be started once more.
+func (s *Service) Recheck(ctx context.Context) (Status, error) { return s.run(ctx, true) }
+
+// run joins the running check or begins one, and waits for it or for ctx.
+func (s *Service) run(ctx context.Context, ack bool) (Status, error) {
+	if err := ctx.Err(); err != nil {
+		return s.cached(), fmt.Errorf("%s: %w", opEnsure, err)
 	}
-	f := &flight{done: make(chan struct{})}
-	s.flight = f
+
+	s.mu.Lock()
+	if ack {
+		s.acks++
+	}
+	f := s.flight
+	if f == nil {
+		f = &flight{done: make(chan struct{})}
+		s.flight = f
+		go s.fly(context.WithoutCancel(ctx), f)
+	}
+	f.joined++
 	s.mu.Unlock()
 
+	select {
+	case <-f.done:
+		return f.st, f.err
+	case <-ctx.Done():
+		return s.cached(), fmt.Errorf("%s: %w", opEnsure, ctx.Err())
+	}
+}
+
+// fly runs the check of f; the readiness wait bounds it by the Clock (readyTimeout).
+func (s *Service) fly(ctx context.Context, f *flight) {
 	st, err := s.ensure(ctx)
 	if err != nil {
 		err = fmt.Errorf("%s: %w", opEnsure, err)
@@ -98,12 +126,21 @@ func (s *Service) Ensure(ctx context.Context) (Status, error) {
 	f.st, f.err = st, err
 	s.mu.Unlock()
 	close(f.done)
-	return st, err
 }
 
-// Recheck is Ensure for «Проверить снова» and the periodic recheck: a Hub that came up, went away or can now start
-// (Docker Desktop was turned on) is found the same way.
-func (s *Service) Recheck(ctx context.Context) (Status, error) { return s.Ensure(ctx) }
+// acknowledge lets a recorded exit be started over once (see Service.acks).
+func (s *Service) acknowledge() {
+	s.mu.Lock()
+	s.acks++
+	s.mu.Unlock()
+}
+
+// pending returns the acknowledgement count and whether one is not yet spent by a spawn.
+func (s *Service) pending() (uint64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.acks, s.acks != s.spent
+}
 
 // Status returns the last status. Before the first Ensure it probes once without starting anything.
 func (s *Service) Status(ctx context.Context) (Status, error) {
@@ -121,7 +158,8 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 	if remote != nil {
 		return *remote, nil
 	}
-	d, err := s.diagnose(ctx, t)
+	_, ack := s.pending()
+	d, err := s.diagnose(ctx, t, ack)
 	if err != nil {
 		return Status{}, fmt.Errorf("%s: %w", opStatus, err)
 	}
@@ -137,7 +175,8 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 	return Settings{BaseURL: v.BaseURL(), Auth: v.Auth(), QuotaLimit: v.QuotaLimit()}, nil
 }
 
-// SaveSettings validates and saves the non-secret settings; a running Hub picks them up at its next start.
+// SaveSettings validates and saves the non-secret settings; a running Hub picks them up at its next start. Saving
+// acknowledges a recorded exit, so the next Ensure or Recheck may start the Hub with the new settings.
 func (s *Service) SaveSettings(ctx context.Context, in Settings) error {
 	v, err := values.NewServerSettings(in.BaseURL, in.Auth, in.QuotaLimit)
 	if err != nil {
@@ -146,18 +185,21 @@ func (s *Service) SaveSettings(ctx context.Context, in Settings) error {
 	if err := s.settings.Save(ctx, v); err != nil {
 		return fmt.Errorf("%s: %w", opSaveSettings, err)
 	}
+	s.acknowledge()
 	s.log.Info("local hub settings saved")
 	return nil
 }
 
-// SetSecret stores value in the slot name: provider-key or database-url only (values.ParseTypedSecret). The value is
-// handed to the store and not kept; no error or log line carries it.
+// SetSecret stores value, trimmed of surrounding whitespace, in the slot name: provider-key or database-url only
+// (values.ParseTypedSecret). The value is handed to the store and not kept; no error or log line carries it. Like
+// SaveSettings, a stored value acknowledges a recorded exit.
 func (s *Service) SetSecret(ctx context.Context, name, value string) error {
 	n, err := values.ParseTypedSecret(name)
 	if err != nil {
 		return fmt.Errorf("%s: %w", opStoreSlot, err)
 	}
-	if strings.TrimSpace(value) == "" {
+	value = strings.TrimSpace(value)
+	if value == "" {
 		return fmt.Errorf("%s %s: %w", opStoreSlot, n, ErrEmptySecret)
 	}
 	if err := s.secrets.Set(ctx, n, value); err != nil {
@@ -166,6 +208,7 @@ func (s *Service) SetSecret(ctx context.Context, name, value string) error {
 		}
 		return fmt.Errorf("%s %s: %w", opStoreSlot, n, err)
 	}
+	s.acknowledge()
 	s.log.Info("local hub secret saved", "name", n.String())
 	return nil
 }
@@ -193,18 +236,20 @@ func (s *Service) ensure(ctx context.Context) (Status, error) {
 		return s.store(*remote), nil
 	}
 
-	d, err := s.diagnose(ctx, t)
+	acks, ack := s.pending()
+	d, err := s.diagnose(ctx, t, ack)
 	if err != nil {
 		return s.cached(), err
 	}
 	if !d.CanStart() {
 		return s.store(localStatus(t, d)), nil
 	}
-	return s.start(ctx, t)
+	return s.start(ctx, t, acks)
 }
 
-// start generates the seal keys if missing, starts hub.exe and waits for its answer.
-func (s *Service) start(ctx context.Context, t values.Target) (Status, error) {
+// start generates the seal keys if missing, starts hub.exe and waits for its answer. A spawn spends the
+// acknowledgements up to acks: from then on the recorded exit is the new process's and is seen again.
+func (s *Service) start(ctx context.Context, t values.Target, acks uint64) (Status, error) {
 	if err := s.ensureSealKeys(ctx); err != nil {
 		return s.store(localStatus(t, values.Exited(values.ExitNotStarted))), err
 	}
@@ -218,6 +263,9 @@ func (s *Service) start(ctx context.Context, t values.Target) (Status, error) {
 	if err := s.launcher.Start(ctx, t, settings); err != nil {
 		return s.store(localStatus(t, values.Exited(values.ExitNotStarted))), fmt.Errorf("start hub: %w", err)
 	}
+	s.mu.Lock()
+	s.spent = acks
+	s.mu.Unlock()
 
 	deadline := s.clock.Now().Add(readyTimeout)
 	last := values.Starting()
@@ -272,7 +320,7 @@ func (s *Service) target(ctx context.Context) (values.Target, *Status, error) {
 	t, err := values.ParseTarget(raw)
 	if errors.Is(err, values.ErrNotLocal) {
 		d := values.Remote()
-		return values.Target{}, &Status{State: d.Status(), URL: raw}, nil
+		return values.Target{}, &Status{State: d.Status(), URL: withoutUserInfo(raw)}, nil
 	}
 	if err != nil {
 		return values.Target{}, nil, err
@@ -280,11 +328,28 @@ func (s *Service) target(ctx context.Context) (values.Target, *Status, error) {
 	return t, nil, nil
 }
 
-// diagnose probes t and applies the diagnosis rule.
-func (s *Service) diagnose(ctx context.Context, t values.Target) (values.Diagnosis, error) {
+// withoutUserInfo drops credentials from a remote address before it is shown. An unparsable one, or one without a
+// scheme that may hide them ("user:pass@host" parses as an opaque URL), is not shown.
+func withoutUserInfo(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || strings.Contains(u.Opaque, "@") {
+		return ""
+	}
+	if u.User == nil {
+		return raw
+	}
+	u.User = nil
+	return u.String()
+}
+
+// diagnose probes t and applies the diagnosis rule; ack hides a recorded exit the owner acknowledged.
+func (s *Service) diagnose(ctx context.Context, t values.Target, ack bool) (values.Diagnosis, error) {
 	f, err := s.facts(ctx, t)
 	if err != nil {
 		return values.Diagnosis{}, err
+	}
+	if ack {
+		f.Exited, f.ExitCode = false, 0
 	}
 	return diagnosis.Diagnose(f), nil
 }

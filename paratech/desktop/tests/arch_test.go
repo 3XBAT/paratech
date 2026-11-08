@@ -519,7 +519,7 @@ func checkNoOrgFiles(codeRoot string) ([]string, error) {
 
 // betaOnlyPackages are the packages of the local Hub (ADR-0036 section 1): the student exe must not link them, so
 // only files built with the tag beta may import them. Their own files, tests and subpackages are exempt.
-var betaOnlyPackages = []string{"internal/cases/localhub", "internal/adapters/hubprocess"}
+var betaOnlyPackages = []string{"internal/cases/localhub", "internal/adapters/hubprocess", "internal/adapters/hubserverconf"}
 
 // betaTag is the build tag of the owner's beta.
 const betaTag = "beta"
@@ -1096,12 +1096,14 @@ func TestCheckersDetectViolations(t *testing.T) {
 				"tests/localhub_test.go":           goSrc(modulePath + "/internal/cases/localhub"),
 				"internal/app/beta_after_pkg.go":   "package app\n\n//go:build beta\n\nimport _ \"paratech/desktop/internal/cases/localhub\"\n",
 				"internal/app/localhub_beta_ok.go": "//go:build beta\n\npackage app\n\nimport _ \"paratech/desktop/internal/cases/localhub\"\n",
+				"internal/app/hubconf.go":          goSrc(modulePath + "/internal/adapters/hubserverconf"),
 			},
 			check: betaOnly,
 			want: []string{
 				"ADR-0036: internal/app/localhub_nobeta.go", "ADR-0036: internal/app/either.go",
 				"ADR-0036: internal/input/wails/shell.go", "ADR-0036: internal/adapters/other/x.go",
 				"ADR-0036: tests/localhub_test.go", "ADR-0036: internal/app/beta_after_pkg.go",
+				"ADR-0036: internal/app/hubconf.go",
 			},
 		},
 		{
@@ -1115,6 +1117,7 @@ func TestCheckersDetectViolations(t *testing.T) {
 				"internal/adapters/hubprocess/sub/sub.go": goSrc(modulePath + "/internal/cases/localhub"),
 				"internal/app/similar_name.go":            goSrc(modulePath + "/internal/cases/localhubx"),
 				"internal/app/no_tag_no_beta_import.go":   goSrc(modulePath + "/internal/cases/connections"),
+				"internal/app/hubconf_beta.go":            "//go:build beta\n\npackage app\n\nimport _ \"paratech/desktop/internal/adapters/hubserverconf\"\n",
 			},
 			check: betaOnly,
 		},

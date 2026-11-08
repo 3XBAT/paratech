@@ -79,7 +79,8 @@ func (r Reason) NextStep() NextStep {
 // ExitConfigError is the exit code of a Hub that refused its configuration (config.MustLoad).
 const ExitConfigError = 2
 
-// ExitNotStarted is the exit code reported when the Hub process could not be started at all.
+// ExitNotStarted is the exit code reported when the Hub process could not be started at all (no process, so no
+// real code): the UI says «не удалось запустить» for it, never «код -1».
 const ExitNotStarted = -1
 
 // Diagnosis is a Status with its reason and, for an ended Hub, its exit code. The zero value is not a diagnosis.

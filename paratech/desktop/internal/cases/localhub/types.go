@@ -17,7 +17,9 @@ type Deps struct {
 	Log      *slog.Logger
 }
 
-// Status is what the diagnostics block shows (ADR-0036 section 7).
+// Status is what the diagnostics block shows (ADR-0036 section 7). Two cases reuse the closed reason list without a
+// process exit: a failed start (seal keys not generated, hub.exe not spawned) is exited with values.ExitNotStarted,
+// shown as «не удалось запустить», not as a code; unreadable saved settings are config_error with ExitCode 0.
 type Status struct {
 	State    values.Status
 	Reason   values.Reason
