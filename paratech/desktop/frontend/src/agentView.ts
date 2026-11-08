@@ -1576,6 +1576,39 @@ export function offerModel(offer: OfferView | null | undefined): OfferModel | nu
   return { label: spec.label, offer };
 }
 
+/**
+ * A card the Go Driver sends after the reply: a confirm card (also delete_assignment), an action line, the schedule review
+ * and the stop line. The streamed reply is drawn, and a cut-off one kept, right above the first of them, so the final reply
+ * card takes the place of the draft without jumping over them.
+ */
+export function isLateCard(c: CardModel): boolean {
+  return c.type === "confirm" || c.type === "action" || c.type === "schedule" || c.type === "stopped";
+}
+
+/** The index of the first late card, or -1. */
+export function firstLateCard(cards: readonly CardModel[]): number {
+  return cards.findIndex(isLateCard);
+}
+
+/**
+ * The React key of a card. Late cards are keyed by what they are (target, action, token), not by their place: the reply
+ * card arriving above them must not remount a confirm card (its state, its focus). Others carry kind, caption and index so
+ * a new card does not inherit the typed state of the old one.
+ */
+export function cardKey(c: CardModel, index: number): string {
+  const byIndex = `${c.type}:${"caption" in c ? c.caption : ""}:${index}`;
+  switch (c.type) {
+    case "confirm":
+      return c.target === null ? `${c.type}:${c.caption}` : `confirm:${c.target.kind}:${c.target.id}`;
+    case "action":
+      return c.actionId === "" ? byIndex : `action:${c.actionId}`;
+    case "schedule":
+      return c.token === "" ? byIndex : `schedule:${c.token}`;
+    default:
+      return byIndex;
+  }
+}
+
 /** The action line card. */
 export type ActionCardModel = Extract<CardModel, { type: "action" }>;
 
