@@ -182,7 +182,9 @@ sandbox reports «не проверено (нужно: …)», not «слома�
 - **Restart.** The setup records the pid of the app in `state.json` (`appPid`); `restartApp` kills that tree only while the pid
   still runs `paratech/dist/e2e/paratech.exe`, starts the same exe (log lines are counted from the end of the old log), writes
   the new pid (`appRestarted`), and the global teardown and the exit guard stop that process too (`killRestartedApp`). The
-  app is left running for the next pack.
+  app is left running for the next pack. It is spawned `detached` (and unref'd): libuv on Windows puts a non-detached child into a
+  kill-on-close job object, so an app started by a worker would die when that worker exits (every project gets a new worker)
+  and the next pack would get `connectOverCDP ECONNREFUSED`; the app is still stopped by pid with `taskkill /T /F`.
 - **Speed line.** `AnnotationSttSpeed` (`stt-speed`) on the first row: «50 с звука расшифровано за N с (×K от реального времени);
   модель base-q5_1; процессор …»; the reporter prints it in «Скорость расшифровки» of `report.md`, for information.
 - Processes are looked up with PowerShell `Get-CimInstance Win32_Process` (`src/app/procs.ts`), never by image name alone.

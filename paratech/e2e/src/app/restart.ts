@@ -115,6 +115,10 @@ export async function restartApp(o: RestartOptions): Promise<RunningApp> {
     ...(window ? { window } : {}),
     ...(o.startTimeoutMs ? { startTimeoutMs: o.startTimeoutMs } : {}),
     ...(o.exeArgs ? { exeArgs: o.exeArgs } : {}),
+    // This runs in a Playwright worker, and the next project gets a new worker. A non-detached child of the worker is in
+    // its job object (KILL_ON_JOB_CLOSE on Windows) and dies when the worker exits, which killed the app before the next
+    // pack. Detached, it outlives the worker; the main process stops it by pid (killRestartedApp).
+    detached: true,
     // The new process is the teardown's from the moment it exists, even if its start then fails.
     onSpawn: (app) => record(o.runRoot, app.pid),
   };
@@ -133,6 +137,8 @@ function record(runRoot: string, pid: number): void {
 /**
  * For the teardown and the exit guard of the main process (synchronous): stops the app a spec started by restartApp, i.e. the
  * pid of state.json when it is not the one the setup started. It is killed only while it still runs from the sandbox's exe.
+ * The restarted app is detached from its worker (see restartApp), so nothing but this kill (by pid, the whole tree) ends it
+ * when the worker exits; the teardown and the exit guard must therefore always call this.
  */
 export function killRestartedApp(
   runRoot: string,

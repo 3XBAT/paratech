@@ -2,6 +2,7 @@
 // requests to the provider, the scripted rules, the lookup of the sandbox's processes, the restart of the app, the STT speed
 // line in the report and the order of the packs. No app, no Docker.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -10,7 +11,7 @@ import { after, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { findRule } from "../src/fakellm/index.js";
-import { desktopLogPath, freshLog, launchApp, type LaunchOptions, type RunningApp } from "../src/app/launch.js";
+import { desktopLogPath, freshLog, killProcessTree, launchApp, type LaunchOptions, type RunningApp, spawnOptions } from "../src/app/launch.js";
 import { isInFolder, parseProcessJson, pathOfPid, processesNamed, processesNamedAsync, sandboxProcesses } from "../src/app/procs.js";
 import { killRestartedApp, restartApp, RestartError } from "../src/app/restart.js";
 import { AnnotationFeature, AnnotationRequires, AnnotationSttSpeed, type RunState } from "../src/contract.js";
@@ -429,6 +430,7 @@ describe("restartApp", () => {
     assert.equal(o.cdpPort, 45678, "the same debug port");
     assert.equal(o.dataDir, path.join(runRoot, "ctl", "data"));
     assert.equal(o.ctlDir, path.join(runRoot, "ctl"));
+    assert.equal(o.detached, true, "the restarted app must outlive its Playwright worker (no kill-on-close job object)");
     assert.equal(o.logFrom, readFileSync(log, "utf8").length, "the lines of the first start are not the new start's");
     assert.deepEqual(o.env, { Path: "C:\\bin" });
     const state = readState(runRoot);
@@ -604,6 +606,71 @@ describe("restartApp with a stub app and the real taskkill (Windows)", { skip: p
       second?.stop();
     }
   });
+});
+
+describe("an app detached from its spawning process", () => {
+  test("launchApp spawns attached unless asked; detached only on request", () => {
+    assert.equal(spawnOptions({ ctlDir: "c" }, 3).detached, false);
+    assert.equal(spawnOptions({ ctlDir: "c", detached: false }, 3).detached, false);
+    assert.equal(spawnOptions({ ctlDir: "c", detached: true }, 3).detached, true);
+    const o = spawnOptions({ ctlDir: "c", detached: true }, 3);
+    assert.deepEqual(o.stdio, ["ignore", 3, 3], "stdio stays file descriptors: nothing ties the child to the parent's pipes");
+    assert.equal(o.shell, false);
+  });
+
+  test(
+    "a detached app survives the exit of the process that started it, and the teardown's kill by pid still stops it",
+    { skip: process.platform === "win32" ? false : "Windows only (job objects, taskkill, PowerShell)" },
+    async () => {
+      const root = mkdtempSync(path.join(tmp, "detach-"));
+      const ctlDir = path.join(root, "ctl");
+      const dataDir = path.join(ctlDir, "data");
+      const port = await freeLoopbackPort();
+      const parent = path.join(here, "fixtures", "detach-parent.js");
+      const run = spawnSync(process.execPath, [parent, path.join(here, "fixtures", "stub-app.js"), dataDir, ctlDir, String(port), "detached"], {
+        encoding: "utf8",
+        timeout: 60_000,
+        windowsHide: true,
+      });
+      const pid = Number(/pid=(\d+)/.exec(run.stdout)?.[1]);
+      try {
+        assert.equal(run.status, 0, `${run.stderr}\n${run.stdout}`);
+        assert.ok(Number.isInteger(pid) && pid > 0, run.stdout);
+        // the parent has exited by now; a kill-on-close job would have taken the app with it
+        await new Promise((r) => setTimeout(r, 1_500));
+        assert.equal(path.resolve(pathOfPid(pid)).toLowerCase(), path.resolve(process.execPath).toLowerCase(), "the app still runs");
+        const res = await fetch(`http://127.0.0.1:${port}/json/version`);
+        assert.equal(res.status, 200, "and still answers on its debug port");
+
+        // what the teardown of the main process does: by pid, whole tree, only while it runs the sandbox's exe
+        const runRoot = path.join(root, "run");
+        mkdirSync(runRoot, { recursive: true });
+        writeState({
+          mode: "scripted",
+          startedAt: "x",
+          runRoot,
+          ctlDir,
+          dataDir,
+          fixturesDir: path.join(ctlDir, "fixtures"),
+          exePath: process.execPath,
+          cdpUrl: `http://127.0.0.1:${port}`,
+          hubUrl: "",
+          fakeUrl: "",
+          appPid: pid,
+          appRestarted: true,
+        });
+        assert.equal(killRestartedApp(runRoot, process.execPath, undefined), true);
+        for (let i = 0; i < 50 && pathOfPid(pid) !== ""; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        assert.equal(pathOfPid(pid), "", "stopped by pid");
+      } finally {
+        if (Number.isInteger(pid) && pid > 0 && pathOfPid(pid) !== "") {
+          killProcessTree(pid);
+        }
+      }
+    },
+  );
 });
 
 // ---------------------------------------------------------------- the report
