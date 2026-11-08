@@ -148,7 +148,7 @@ Source: owner answers of 2026-10-27 (З1–З3, 6.3). Tasks TASK-274…281 (C-1:
 ### Deadline change and the Google event (З3)
 - Google is only a view (hard rule 6). An assignment **has an event** when it has an EXECUTED `create_deadline_event`
   proposal and no waiting removal; the event id is derived from the assignment (`googlecal.DeadlineEventID`), the
-  write is an upsert.
+  write is an upsert. **Amended 2026-11-08** (addendum «Дополнение 08.11» below): and no removal executed since.
 - **Setting** (settings aggregate, migration): «События в календаре при смене срока» = `ask` (default, «спрашивать») |
   `update` («обновлять сами») | `keep` («не обновлять»).
 - **Policy**: a pure domain service `coursework/services/eventrefresh`: (has event, due changed, policy) → nothing |
@@ -210,3 +210,77 @@ Source: owner answers of 2026-10-27 (6.3 changed, C-4). Tasks TASK-304, TASK-305
 Supersedes the busy rule of the first addendum. Delete is always allowed except while a delivery of the assignment is PENDING (a scheduled one too), SENDING or UNKNOWN (hard rule 7; PENDING stays because a delivery has no cancel).
 A work in triage/writing and an active homework_draft / work_writing job no longer refuse: after the soft delete commits, the jobs naming the assignment are cancelled (idempotent, outside the transaction; a failed cancel is logged and never undoes the delete). The handlers of those jobs fail closed for a deleted assignment (no model call, nothing stored).
 Restore brings the assignment back only; the work stays stopped and the student continues it by hand. A triage call already in flight is not a job and may still save its answer. The delete card says upfront that the work will be stopped.
+
+## Дополнение 08.11: состояние события срока
+Source: TASK-276 review (medium). Tasks: new TASK-384 (next free id; migration and adapter), TASK-277, TASK-278;
+TASK-279…281 unchanged in scope.
+
+### Context
+Addendum 2 derives «the assignment has an event» as «an EXECUTED `create_deadline_event` proposal and no waiting
+`deadline_event_removals` row». The sync deletes that row once the event is gone, so the fact turns true again while
+Google has no event: due cleared under `update` (removal executed) and then set again; delete, sync, then «Вернуть».
+`update` would then re-create the event silently through the update queue; `ask` would ask about an event that is not
+there.
+
+### Decision
+- **Tombstone of an executed removal.** New table `deadline_events_removed (assignment_id TEXT PRIMARY KEY,
+  removed_at INTEGER NOT NULL)`: no foreign key, no version (a marker, as the queue tables). `removed_at` is for
+  diagnostics only and is never compared with a proposal time (no clock ordering).
+- **Writers, two only:**
+  - the calendar sync, after Google confirmed the delete (success or 404/410), in ONE transaction: delete the
+    `deadline_event_removals` row and upsert the marker. The marker is written only when the assignment row still
+    exists (one `INSERT … SELECT … WHERE EXISTS`), so assignments hard-deleted with a recording (ADR-0018) leave
+    nothing. A crash before the commit deletes in Google again (idempotent) and then writes both.
+  - `homeworkflow.Execute` of a `create_deadline_event` proposal: in the transaction that marks the proposal
+    EXECUTED (after `UpsertDeadline` succeeded), delete the marker. A new event made by the student's «Да» is an event
+    again.
+  - `PurgeDeleted` (addendum 2) deletes the marker with the other rows of the assignment (same transaction).
+- **The fact** (adapter query, one statement): has event = an EXECUTED `create_deadline_event` of the assignment AND
+  no waiting removal row AND no marker. `eventrefresh.Decide` is unchanged (it already takes `hasEvent`).
+- **State model** per assignment (derived, no new aggregate; Google stays a view, hard rule 6):
+
+  | State | Rows | has event |
+  |---|---|---|
+  | none | no EXECUTED proposal | false |
+  | present | EXECUTED proposal, no removal row, no marker | true |
+  | removing | removal row waiting (marker may exist or not) | false |
+  | removed | EXECUTED proposal + marker, no removal row | false |
+
+  none → present: «Да» executed. present → removing: delete, or a cleared due under `update` / «Да» of the question.
+  removing → present: «Вернуть» deletes a waiting row before the sync (event untouched in Google). removing → removed:
+  the sync executed the removal. removed → present: a new «Предложить в календарь» → «Да» → executed (marker deleted).
+- **Setting a due again after a removal does NOT create an event, under every policy** (`ask`, `update`, `keep`, and
+  the agent's fixed `update` of `edit_due`). `hasEvent` is false, so `Decide` returns nothing; the assignment page
+  offers «Предложить в календарь» as for any assignment without an event. Reason: policy `update` is the student's
+  consent to *mirror an existing* event, not to *create* one; creating an event stays the confirmed
+  `create_deadline_event` path (hard rule 3 through policy, ADR-0029 addendum 3). A due set again while the removal
+  still waits gives nothing too; the removal runs.
+- **Sync of an update row** re-reads the fact with the marker: removing or removed → the row is dropped with no
+  Google call (closes the silent re-creation by a stale update row). The sync processes removals before updates in a
+  run. The title of an upsert comes from the latest EXECUTED proposal (by its executed time) of the assignment.
+- Done (О13 = б) touches nothing: no removal is queued, the state stays present.
+- Accepted race: the sync deletes the event in Google, a concurrent Execute of an older CONFIRMED proposal upserts it
+  again and clears no marker yet, then the sync writes the marker. The fact says removed while the event exists; the
+  only effect is no automatic update and the offer «Предложить в календарь», whose «Да» upserts the same event id (no
+  duplicate). Not worth a sequence column.
+- Not changed: the agent's `homeworkflow.HasDeadlineEvent` (ADR-0033 О-6 б) keeps erring towards «Да» before a
+  delete; it may adopt the marker later (no task now).
+
+### Migration impact
+- Desktop migration **0052** (the next free number at push time; 0051 is merged with TASK-276):
+  `CREATE TABLE deadline_events_removed …`; Down drops it. No backfill: existing assignments whose removal was
+  already executed before 0052 keep the old wrong fact (alpha data, the feature is not wired yet; accepted).
+  `docs/contracts/schema.sql` mirrors it; `migrate_test` newest version 52, the table in `contractTables` and
+  `unversionedTables`.
+- No secrets, no new dependency.
+
+### Tasks
+- **TASK-384** (new, go-core, before TASK-277/278): migration 0052, the query change of `AssignmentHasDeadlineEvent`,
+  adapter methods `MarkDeadlineEventRemoved` (with the removal row purge, one transaction) and
+  `ClearDeadlineEventRemoved`, purge of the marker in the assignment purge; tests of every state transition.
+- **TASK-277**: `Execute` of `create_deadline_event` clears the marker through a narrow port; tests of re-set due after
+  removal (nothing under every policy); `UpdateDeadlineEvent` refuses `no_event` in removing/removed.
+- **TASK-278**: `removeDeadlines` uses the purge-and-mark method instead of the bare purge; `updateDeadlines` drops a
+  row whose assignment is removing/removed; tests for both cases of the context above.
+- TASK-279, TASK-280: no change (they see only `calendarQuestion` and the problem codes). TASK-281: one more test,
+  «edit_due after an executed removal → nothing queued».
