@@ -40,3 +40,4 @@ Open decisions are tracked in PRD §19.
 - [0033](0033-agent-parity.md) Agent parity: everything the student does in the UI, the agent can do (Proposed)
 - [0034](0034-navigation.md) Navigation of the main window, settings and permissions (Proposed)
 - [0035](0035-e2e-real-app.md) End-to-end tests of the real desktop app (Proposed)
+- [0036](0036-beta-local-hub.md) The beta starts its local Hub (Proposed)

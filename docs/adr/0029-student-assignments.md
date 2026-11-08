@@ -249,14 +249,15 @@ there.
   none → present: «Да» executed. present → removing: delete, or a cleared due under `update` / «Да» of the question.
   removing → present: «Вернуть» deletes a waiting row before the sync (event untouched in Google). removing → removed:
   the sync executed the removal. removed → present: a new «Предложить в календарь» → «Да» → executed (marker deleted).
-- **Setting a due again after a removal does NOT create an event, under every policy** (`ask`, `update`, `keep`, and
-  the agent's fixed `update` of `edit_due`). `hasEvent` is false, so `Decide` returns nothing; the assignment page
+- **Superseded by «Решение владельца 08.11» below.** ~~Setting a due again after a removal does NOT create an event,
+  under every policy~~ (`ask`, `update`, `keep`, and the agent's fixed `update` of `edit_due`). `hasEvent` is false, so `Decide` returns nothing; the assignment page
   offers «Предложить в календарь» as for any assignment without an event. Reason: policy `update` is the student's
   consent to *mirror an existing* event, not to *create* one; creating an event stays the confirmed
   `create_deadline_event` path (hard rule 3 through policy, ADR-0029 addendum 3). A due set again while the removal
   still waits gives nothing too; the removal runs.
-- **Sync of an update row** re-reads the fact with the marker: removing or removed → the row is dropped with no
-  Google call (closes the silent re-creation by a stale update row). The sync processes removals before updates in a
+- **Sync of an update row** (amended by «Решение владельца 08.11» below: removed → re-created) re-reads the fact
+  with the marker: ~~removing or removed → the row is dropped with no Google call (closes the silent re-creation by a
+  stale update row)~~. The sync processes removals before updates in a
   run. The title of an upsert comes from the latest EXECUTED proposal (by its executed time) of the assignment.
 - Done (О13 = б) touches nothing: no removal is queued, the state stays present.
 - Accepted race: the sync deletes the event in Google, a concurrent Execute of an older CONFIRMED proposal upserts it
@@ -284,3 +285,64 @@ there.
   row whose assignment is removing/removed; tests for both cases of the context above.
 - TASK-279, TASK-280: no change (they see only `calendarQuestion` and the problem codes). TASK-281: one more test,
   «edit_due after an executed removal → nothing queued».
+  (The task lines of this list are superseded where «Решение владельца 08.11» below says otherwise.)
+
+### Решение владельца 08.11
+Владелец 2026-11-08 отменил пункт «Setting a due again after a removal does NOT create an event»: когда срок задан
+снова после выполненного удаления события (или задание возвращено «Вернуть» после того, как его событие удалено),
+событие должно вернуться **само**, без «Предложить в календарь».
+
+**Decision.** The marker of TASK-384 stays: it still says «the event is gone from Google». It no longer means «never
+again without a new proposal». An event comes back only for an assignment that once had a confirmed event (an
+EXECUTED `create_deadline_event`), so the student's original «Да» plus the student's policy remain the consent
+(hard rule 3 through policy); the title is the confirmed one of the latest EXECUTED proposal and the time is the
+current local due, so no model text reaches Google. `none` (never confirmed) still needs «Предложить в календарь».
+
+- **`eventrefresh.Decide` takes the derived state** instead of `hasEvent`: `Decide(policy, state, trigger, dueAfter)`
+  with state `none | present | removing | removed`, trigger `edit` (the due changed) or `restore` («Вернуть»), and
+  whether a due is set after it. New actions `ask_return` (the question «Вернуть событие в Google Календарь?») and
+  `queue_return` (in the caller's transaction: delete a waiting removal row if any, write the update row; the sync then
+  upserts and clears the marker). Table (unknown policy = `ask`, as before):
+
+  | state | trigger, due after | update | ask | keep |
+  |---|---|---|---|---|
+  | none | any | nothing | nothing | nothing |
+  | present | edit, due set | queue_update | ask | nothing |
+  | present | edit, due cleared | queue_removal | ask | nothing |
+  | removing | edit, due set | queue_return | ask_return | nothing (the removal runs) |
+  | removed | edit or restore, due set | queue_return | ask_return | nothing |
+  | removing or removed | due cleared / no due | nothing | nothing | nothing |
+
+  «Вернуть» while the removal still waits keeps its existing effect (the waiting row is deleted, the event was never
+  touched, state present); `Decide` returns nothing for it.
+- **«Спрашивать» asks**, it does not re-create silently. In plain words: the student chose «спрашивать» to be asked
+  before the calendar changes; bringing an event back is a calendar change. The question comes right after the save
+  or the «Вернуть», one click «Да» brings the event back, so the long path «Предложить в календарь» → card → «Да» that
+  the owner objected to is gone. «Запомнить» stores `update` or `keep` as for the change question (one setting). Open
+  for the owner (В1 below).
+- **«Да» of either question** = `UpdateDeadlineEvent(id)` = `Decide(update, state, …)`: present → update or removal;
+  removing/removed with a due → return; none, or no due → `no_event`.
+- **Queue rows exclude each other**: writing an update row deletes a waiting removal row of the assignment and
+  writing a removal row deletes a waiting update row, in the same transaction. A delete of the assignment queues a
+  removal as before (and so drops a waiting update).
+- **Sync of an update row** re-reads assignment and state: deleted, no due, state `none`, or a waiting removal → the row
+  is dropped with no Google call; `present` or `removed` → `UpsertDeadline` (the event id is derived, so a re-created
+  event is the same id, no duplicate), then in ONE transaction the row is deleted and the marker cleared
+  (`FinishDeadlineEventUpdate`). A crash before the commit upserts again (idempotent, hard rule 7). Removals still run
+  before updates in a run.
+- **Agent** (`edit_due`, fixed policy `update`, C-4): same table with `update` → `queue_return` for removing/removed.
+  The Undo of the agent's `delete_assignment` (`RestoreAssignment` through the compensation, the student's click) uses
+  the fixed policy `update` too: an Undo puts back what was there. The student's own «Вернуть» uses the setting.
+- **State table** above gains: removed → present (the sync executed a return row); removing → present (a return row
+  deleted the waiting removal).
+- Accepted: a stale update row written under `update` and synced after the student switched to `keep` still acts (it
+  was decided when written).
+
+**Tasks.** TASK-384 also changes `eventrefresh.Decide` and adds the state query, `QueueDeadlineEventReturn` and
+`FinishDeadlineEventUpdate`; TASK-277, TASK-278, TASK-279, TASK-280, TASK-281 criteria are replaced (lines in the
+supervisor's report of 2026-11-08).
+
+**Open (владельцу).**
+- **В1.** Политика «Спрашивать»: после повторной установки срока (или «Вернуть») приложение спрашивает «Вернуть
+  событие в Google Календарь?» — одна кнопка «Да». Так (рекомендую), или при любой политике, кроме «Не трогать»,
+  возвращать событие без вопроса?
