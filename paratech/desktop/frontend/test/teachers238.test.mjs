@@ -519,7 +519,7 @@ test("the state made on another subject is shown as idle, so the old form never 
   assert.deepEqual(teacherStateFor(state, "s2"), idleTeacher);
   assert.equal(teacherStateFor(idleTeacher, "s2"), idleTeacher);
   const src = readFileSync(new URL("../src/pages/SubjectsPage.tsx", import.meta.url), "utf8");
-  assert.match(src, /<TeachersBlock key=\{subject\.id\} /);
+  assert.match(src, /<TeachersBlock key=\{`teachers:\$\{subject\.id\}`\} /);
   assert.match(src, /teacherStateFor\(teacher, subject\.id\)/);
 });
 
