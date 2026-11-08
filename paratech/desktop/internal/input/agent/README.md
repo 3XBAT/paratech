@@ -8,7 +8,8 @@ or sends. See `doc.go`. File names below are in this package unless a path is gi
 
 ## Map
 - `driver.go`: `Driver`, `Deps`, `New`, the request operations (`Ask`, `ApprovePlan`, `Stop`, `Rerun`, ...), `Update`,
-  `Sink`. `progress.go`, `replydraft.go`: progress and the streamed reply draft to the panel. `compact.go`:
+  `Sink`. `shown.go`: the tool cards of the newest request of each thread, put before the step's cards of every later
+  update with a status. `progress.go`, `replydraft.go`: progress and the streamed reply draft to the panel. `compact.go`:
   `Compactor` (cases/agentcompact), run by `Ask` of a named chat before its first step; publishes the
   `Compaction`/`Compacting` updates (ADR-0028).
 - `tools.go`: the read-only tool dispatch (`tools.reader`, `tools.run`) and the R tools; `facts.go`: `Facts` for
@@ -51,6 +52,10 @@ classes, waves).
 `paratech/desktop/tests/agenteval`.
 
 ## Gotchas
+- The panel replaces the cards of a request with those of its latest update. So tool cards (answers, confirm cards,
+  action lines, buttons) accumulate per request in the Driver (`shown.go`, deduped, capped) and ride on every later
+  update; step cards (plan, questions, reply, stopped, cannot_do) do not. Progress, Compaction, failed-Ask and
+  problem-only updates (no status) carry none.
 - `TestAgentHasNoPathToIrreversibleActions` (`propose_test.go`) fails on an interface method whose name contains
   `Confirm`, `Execute`, `Send`, `Decline`, `Delete` or `MarkSent`, and on calls of confirm or side-effect methods. A
   soft delete is therefore `TrashAssignment`, mapped by `agentAssignments` in

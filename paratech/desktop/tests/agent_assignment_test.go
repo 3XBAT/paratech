@@ -150,7 +150,8 @@ func addedAssignmentID(thread shared.ThreadID, turn int, callID string) shared.A
 	return shared.AssignmentID("ag-" + hex.EncodeToString(sum[:16]))
 }
 
-// ask runs a request to its end and returns every card the panel got.
+// ask runs a request to its end and returns the cards the panel shows then: those of its last update, which carries
+// the tool cards of the request before its own.
 func (e *assignmentEnv) ask(t *testing.T, text string) []values.Card {
 	t.Helper()
 	e.sink.mu.Lock()
@@ -160,11 +161,11 @@ func (e *assignmentEnv) ask(t *testing.T, text string) []values.Card {
 		t.Fatal(err)
 	}
 	e.driver.Wait()
-	var cards []values.Card
-	for _, u := range e.sink.snapshot()[before:] {
-		cards = append(cards, u.Cards...)
+	ups := e.sink.snapshot()[before:]
+	if len(ups) == 0 {
+		t.Fatal("no update")
 	}
-	return cards
+	return ups[len(ups)-1].Cards
 }
 
 // endCall is the reply that ends a request, with a call ID of its own.

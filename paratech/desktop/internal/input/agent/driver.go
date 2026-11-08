@@ -80,7 +80,10 @@ const (
 )
 
 // Update is what the panel gets after each move of a request: its state and the cards to show, in order. Cards hold
-// only IDs, enums and the short checked texts of show_plan, ask_questions, reply and cannot_do (no HTML). An update of
+// only IDs, enums and the short checked texts of show_plan, ask_questions, reply and cannot_do (no HTML). Every update
+// with a status carries the cards the tools of the request have shown so far (answers, confirm cards, action lines,
+// buttons), in order, before the cards of its own step (plan, questions, reply, stopped), which are not carried on;
+// the panel replaces the cards of a request with the latest ones. An update of
 // a failed operation names the request it acted on: Thread and Turn for a button, only Scope for an Ask whose thread
 // may not exist yet. A Progress update (a step went to the Hub) has no cards: the panel applies its status only.
 // A Compaction update reports only the context compaction of chat Thread before an Ask (compact.go): Compacting
@@ -162,6 +165,9 @@ type Driver struct {
 	inflight map[agentturn.TurnRef]map[uint64]context.CancelFunc
 	// loops are the threads the running loops (by operation id) act on; "" while an Ask has not named its thread.
 	loops map[uint64]shared.ThreadID
+	// shown are the tool cards of the newest request of each thread (shown.go). A thread keeps one entry, replaced by
+	// its next request; the chats of one student are few, so entries are never dropped otherwise.
+	shown map[shared.ThreadID]*toolCards
 	wg    sync.WaitGroup
 }
 
@@ -189,7 +195,7 @@ func New(d Deps) (*Driver, error) {
 	return &Driver{
 		turns: d.Turns, sink: d.Sink, replies: d.Replies, compact: d.Compactor, log: log, cancels: map[uint64]context.CancelFunc{},
 		stops: map[agentturn.TurnRef]*stopping{}, inflight: map[agentturn.TurnRef]map[uint64]context.CancelFunc{},
-		loops: map[uint64]shared.ThreadID{},
+		loops: map[uint64]shared.ThreadID{}, shown: map[shared.ThreadID]*toolCards{},
 		tools: tools{
 			library: d.Library, inspector: d.Inspector, answerer: d.Answerer, knowledge: d.Knowledge, activity: d.Activity, schedule: d.Schedule, assignments: d.Assignments,
 			deliveries: d.Deliveries, journal: d.Journal, actions: d.Actions, proposals: d.Proposals,
@@ -567,7 +573,8 @@ func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(
 		outcomes, cards, stopped := d.runCalls(ctx, callCtx, st)
 		got = outcomes
 		if len(cards) > 0 {
-			d.publish(ctx, agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, Cards: cards}, ProblemNone)
+			d.remember(st, cards) // update puts them before the step's own cards
+			d.publish(ctx, agentturn.Step{Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status}, ProblemNone)
 		}
 		if ctx.Err() != nil || stopped {
 			d.interrupt(ctx, st, outcomes)
@@ -700,12 +707,13 @@ func (d *Driver) publish(ctx context.Context, st agentturn.Step, p Problem) {
 	d.sink.Publish(d.update(ctx, st, p))
 }
 
-// update is the panel's form of step st; a card that breaks its rules is dropped, never shown. A reply that lists
-// assignments, and the action line of an added assignment, get their titles and deadlines from the local data here
-// (ctx may have ended: the read is local).
+// update is the panel's form of step st: the tool cards shown so far by its request, then its own; a card that breaks
+// its rules is dropped, never shown. A reply that lists assignments, and the action line of an added assignment, get
+// their titles and deadlines from the local data here, on every update (ctx may have ended: the read is local).
 func (d *Driver) update(ctx context.Context, st agentturn.Step, p Problem) Update {
-	cards := make([]values.Card, 0, len(st.Cards))
-	for _, c := range st.Cards {
+	all := append(d.shownCards(st), st.Cards...)
+	cards := make([]values.Card, 0, len(all))
+	for _, c := range all {
 		if r, ok := c.(values.ReplyCard); ok && r.Validate() == nil {
 			c = d.tools.replyLines(context.WithoutCancel(ctx), r)
 		}
