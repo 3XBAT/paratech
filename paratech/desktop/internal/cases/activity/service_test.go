@@ -444,7 +444,7 @@ func TestListRecordingsChain(t *testing.T) {
 	for range 2 {
 		got, err := s.ListRecordings(context.Background())
 		must(t, err)
-		if want := (Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42}); len(got) != 1 || got[0].Chain != want {
+		if want := (Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42, CanCancel: true}); len(got) != 1 || got[0].Chain != want {
 			t.Fatalf("rows %+v, want one with %+v", got, want)
 		}
 	}

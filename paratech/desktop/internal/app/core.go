@@ -282,8 +282,8 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 		return err
 	}
 	c.transcriptions, err = transcribe.NewEnqueuer(transcribe.EnqueueDeps{
-		Recordings: recordings, Pending: recordings, Models: modelResolver{models: c.models}, Jobs: jobs, IDs: e.ids,
-		Tx: db, Clock: e.clock, Log: log, MaxAttempts: maxAttempts,
+		Recordings: recordings, Pending: recordings, Models: modelResolver{models: c.models}, Jobs: jobs,
+		Transcripts: transcripts, IDs: e.ids, Tx: db, Clock: e.clock, Log: log, MaxAttempts: maxAttempts,
 	})
 	if err != nil {
 		return fmt.Errorf("app: transcription queue: %w", err)
@@ -492,8 +492,9 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	c.cleanups = append(c.cleanups, cleanup{name: "artifact temporary files", run: store.CleanupTemp},
 		cleanup{name: "model manager writes allowed", run: c.manager.markReady})
 	c.ui = wails.Core{
-		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner, Retrier: rerunner,
-		Models: c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), Speech: c.speech, Speed: speed,
+		Settings: prefs, Activity: history, Stopper: c.recordings, Forcer: c.runner,
+		Retrier: recordingReruns{Rerunner: rerunner, transcriptions: c.transcriptions},
+		Models:  c.manager, Downloads: c.manager, Imports: c.manager, Links: weblink.New(), Speech: c.speech, Speed: speed,
 		Sound: c.sound, Bundle: bundle, Google: c.googleSignIn, Calendar: c.calendarSync,
 		Homework:   wails.HomeworkCore{Proposals: c.proposals, Drafts: c.drafts, Deliveries: c.deliveries},
 		Transcript: viewer,
@@ -566,6 +567,23 @@ type modelResolver struct {
 func (r modelResolver) ResolveForJob(ctx context.Context, requested shared.SttModelID) (shared.SttModelID, error) {
 	m, err := r.models.ResolveForJob(ctx, requested)
 	return m.ID, err
+}
+
+// recordingReruns is the PostProcessRetrier of the recordings page: the post-processing reruns (TASK-086) and the
+// transcription after a cancel (TASK-392); forwarding only.
+type recordingReruns struct {
+	*homeworkflow.Rerunner
+	transcriptions *transcribe.Enqueuer
+}
+
+// ActiveTranscription returns the unfinished STT job of the recording.
+func (r recordingReruns) ActiveTranscription(ctx context.Context, rec shared.RecordingID) (shared.JobID, bool, error) {
+	return r.transcriptions.ActiveJob(ctx, rec)
+}
+
+// Retranscribe starts a cancelled transcription again.
+func (r recordingReruns) Retranscribe(ctx context.Context, rec shared.RecordingID) (shared.JobID, error) {
+	return r.transcriptions.Retranscribe(ctx, rec)
 }
 
 // draftNames is the DraftAssignments port of the activity screen over the homework use case; mapping only.

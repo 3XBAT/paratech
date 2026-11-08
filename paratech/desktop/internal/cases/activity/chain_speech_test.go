@@ -68,7 +68,7 @@ func TestChainOfNoSpeech(t *testing.T) {
 			name: "a newer transcription replaces the one without speech", jobs: []func(t *testing.T) *job.Job{
 				noSpeechSTT, func(t *testing.T) *job.Job { return jobIn(t, "s2", stt, time.Hour, job.StatusRunning) },
 			},
-			want: Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42},
+			want: Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42, CanCancel: true},
 		},
 		{
 			// A transcript with speech whose model answers held no block: the normal failure with «Повторить».

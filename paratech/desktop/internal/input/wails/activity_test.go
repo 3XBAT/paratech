@@ -78,9 +78,27 @@ func (f *fakeForcer) ForceRun(_ context.Context, id shared.JobID) error {
 	return f.err
 }
 
+func (f *fakeForcer) Cancel(_ context.Context, id shared.JobID) error {
+	f.got = id
+	return f.err
+}
+
 type fakeRetrier struct {
 	calls []string
 	err   error
+
+	active    shared.JobID // "" = no unfinished transcription
+	activeErr error
+}
+
+func (f *fakeRetrier) ActiveTranscription(_ context.Context, rec shared.RecordingID) (shared.JobID, bool, error) {
+	f.calls = append(f.calls, "active "+string(rec))
+	return f.active, f.active != "", f.activeErr
+}
+
+func (f *fakeRetrier) Retranscribe(_ context.Context, rec shared.RecordingID) (shared.JobID, error) {
+	f.calls = append(f.calls, "retranscribe "+string(rec))
+	return "j9", f.err
 }
 
 func (f *fakeRetrier) Retry(_ context.Context, rec shared.RecordingID, work homeworkflow.Work) (shared.JobID, bool, error) {
@@ -111,7 +129,7 @@ func TestActivityServiceListsRecordings(t *testing.T) {
 			Duration: 59*time.Minute + 1500*time.Millisecond, HasDuration: true, Problem: "limit reached",
 			Chain: activity.Chain{
 				Stage: activity.StageQueued, Step: activity.StepTranscription, Percent: 40, QueueReason: activity.QueuePower,
-				JobError: "on battery", Action: activity.ActionRunNow, ActionJob: "j1",
+				JobError: "on battery", Action: activity.ActionRunNow, ActionJob: "j1", CanCancel: true,
 			},
 		},
 		{
@@ -135,18 +153,18 @@ func TestActivityServiceListsRecordings(t *testing.T) {
 		`"status":"RECORDING","origin":"captured",` +
 		`"startedAt":"2026-10-15T06:30:00Z","stoppedAt":"","durationSeconds":0,"hasDuration":false,"problem":"",` +
 		`"stoppable":true,"stage":"recording","step":"","progressPercent":0,"partsDone":0,"parts":0,"queueReason":"","errorCode":"",` +
-		`"jobError":"","action":"","actionJobId":"","retryWork":"","canRedoSummary":false,"lectureTextReady":false,"remainingSeconds":0,"hasRemaining":false,"advice":null},` +
+		`"jobError":"","action":"","actionJobId":"","retryWork":"","canRedoSummary":false,"lectureTextReady":false,"canCancel":false,"remainingSeconds":0,"hasRemaining":false,"advice":null},` +
 		`{"id":"r2","lessonId":"","title":"","subject":"","kind":"","teacher":"","status":"COMPLETED","origin":"imported",` +
 		`"startedAt":"2026-10-15T06:30:00Z",` +
 		`"stoppedAt":"2026-10-15T07:30:00Z","durationSeconds":3542,"hasDuration":true,"problem":"limit reached",` +
 		`"stoppable":false,"stage":"queued","step":"transcription","progressPercent":40,"partsDone":0,"parts":0,"queueReason":"power",` +
 		`"errorCode":"","jobError":"on battery","action":"runNow","actionJobId":"j1",` +
-		`"retryWork":"","canRedoSummary":false,"lectureTextReady":false,"remainingSeconds":0,"hasRemaining":false,"advice":null},` +
+		`"retryWork":"","canRedoSummary":false,"lectureTextReady":false,"canCancel":true,"remainingSeconds":0,"hasRemaining":false,"advice":null},` +
 		`{"id":"r3","lessonId":"","title":"","subject":"","kind":"","teacher":"","status":"COMPLETED","origin":"captured",` +
 		`"startedAt":"2026-10-15T06:30:00Z","stoppedAt":"",` +
 		`"durationSeconds":0,"hasDuration":false,"problem":"","stoppable":false,"stage":"failed","step":"summary",` +
 		`"progressPercent":0,"partsDone":0,"parts":0,"queueReason":"","errorCode":"summaryFailed","jobError":"","action":"openConnections",` +
-		`"actionJobId":"","retryWork":"summary","canRedoSummary":true,"lectureTextReady":true,"remainingSeconds":0,"hasRemaining":false,"advice":null}]`
+		`"actionJobId":"","retryWork":"summary","canRedoSummary":true,"lectureTextReady":true,"canCancel":false,"remainingSeconds":0,"hasRemaining":false,"advice":null}]`
 	if string(b) != want {
 		t.Fatalf("JSON =\n%s\nwant\n%s", b, want)
 	}

@@ -64,6 +64,9 @@ type Chain struct {
 	// LectureTextReady: the lecture text of the current transcript is stored (TASK-090), so the row offers it instead
 	// of the raw transcript; the transcript itself is kept (it feeds the retries).
 	LectureTextReady bool
+	// CanCancel: the newest STT job of the recording is queued, waiting or running, so «Отменить расшифровку» may
+	// cancel it (TASK-392).
+	CanCancel bool
 }
 
 // Work is a post-processing work of a recording (TASK-086); the values are those of homeworkflow.Work.
@@ -124,9 +127,12 @@ type ErrorCode string
 const (
 	ErrorRecordingFailed     ErrorCode = "recordingFailed"
 	ErrorTranscriptionFailed ErrorCode = "transcriptionFailed"
-	ErrorSummaryFailed       ErrorCode = "summaryFailed"
-	ErrorHomeworkFailed      ErrorCode = "homeworkFailed"
-	ErrorLectureTextFailed   ErrorCode = "lectureTextFailed"
+	// ErrorTranscriptionCancelled: the user cancelled the newest transcription (TASK-392); the recording stays and the
+	// row offers ActionRetranscribe.
+	ErrorTranscriptionCancelled ErrorCode = "transcriptionCancelled"
+	ErrorSummaryFailed          ErrorCode = "summaryFailed"
+	ErrorHomeworkFailed         ErrorCode = "homeworkFailed"
+	ErrorLectureTextFailed      ErrorCode = "lectureTextFailed"
 	// ErrorSilentRecording: the track is silent all or almost all the time (TASK-082), so it is not transcribed; the
 	// row offers ActionCheckSound.
 	ErrorSilentRecording ErrorCode = "silentRecording"
@@ -146,6 +152,8 @@ const (
 	ActionCheckSound      Action = "checkSound"      // the sound check
 	// ActionRetry starts the failed post-processing work Chain.Retry again with a new job (TASK-086).
 	ActionRetry Action = "retry"
+	// ActionRetranscribe starts a cancelled transcription again with a new job («Расшифровать снова», TASK-392).
+	ActionRetranscribe Action = "retranscribe"
 )
 
 // JobState is what the agent's job_status shows of a job (TASK-117): no error text, payload or names.

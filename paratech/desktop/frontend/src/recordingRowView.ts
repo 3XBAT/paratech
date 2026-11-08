@@ -114,7 +114,10 @@ export const stepTexts: Readonly<Record<Exclude<ChainStep, "">, string>> = {
   lectureText: "Дальше текст лекции.",
 };
 
-export const errorTexts: Readonly<Record<Exclude<ChainErrorCode, "" | "silentRecording" | "noSpeech">, string>> = {
+// TASK-392 codes (transcriptionCancelled, retranscribe) get their texts in TASK-393.
+export const errorTexts: Readonly<
+  Record<Exclude<ChainErrorCode, "" | "silentRecording" | "noSpeech" | "transcriptionCancelled">, string>
+> = {
   recordingFailed: "Запись не удалась.",
   transcriptionFailed: "Не удалось расшифровать запись.",
   summaryFailed: "Не удалось сделать конспект.",
@@ -134,7 +137,7 @@ export const noSpeechTexts = {
   hint: "В записи нет речи — скорее всего, выбран не тот источник звука.",
 } as const;
 
-export const actionLabels: Readonly<Record<Exclude<ChainAction, "">, string>> = {
+export const actionLabels: Readonly<Record<Exclude<ChainAction, "" | "retranscribe">, string>> = {
   runNow: "Запустить сейчас",
   openModels: "Открыть модели речи",
   openConnections: "Открыть подключения",
@@ -158,7 +161,7 @@ export const fixTexts = {
 } as const;
 
 /** The page a navigation action opens; the sound check is on «Диагностика». */
-export const actionPages: Readonly<Record<Exclude<ChainAction, "" | "runNow" | "retry">, PageId>> = {
+export const actionPages: Readonly<Record<Exclude<ChainAction, "" | "runNow" | "retry" | "retranscribe">, PageId>> = {
   openModels: "models",
   openConnections: "connections",
   checkSound: "diagnostics",
