@@ -15,7 +15,7 @@ const getSettings = `-- name: GetSettings :one
 SELECT id, recording_prompts_enabled, process_only_on_ac_power, default_stt_model_id, version, updated_at,
        homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username, hub_url, recording_source_app,
        recognition_load, student_full_name, student_group, student_university, student_faculty, student_city,
-       note_recognition
+       note_recognition, deadline_event_on_due_change
 FROM settings
 WHERE id = 1
 `
@@ -46,6 +46,7 @@ func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
 		&i.StudentFaculty,
 		&i.StudentCity,
 		&i.NoteRecognition,
+		&i.DeadlineEventOnDueChange,
 	)
 	return i, err
 }
@@ -54,35 +55,36 @@ const insertSettings = `-- name: InsertSettings :exec
 INSERT INTO settings (id, recording_prompts_enabled, process_only_on_ac_power, default_stt_model_id,
                       homework_recipient, smtp_host, smtp_port, smtp_security, smtp_username, hub_url,
                       recording_source_app, recognition_load, student_full_name, student_group,
-                      student_university, student_faculty, student_city, note_recognition, version,
-                      updated_at)
+                      student_university, student_faculty, student_city, note_recognition,
+                      deadline_event_on_due_change, version, updated_at)
 VALUES (1, ?1, ?2, ?3,
         ?4, ?5, ?6, ?7,
         ?8, ?9, ?10,
         ?11, ?12, ?13, ?14,
-        ?15, ?16, ?17, 1,
-        ?18)
+        ?15, ?16, ?17,
+        ?18, 1, ?19)
 `
 
 type InsertSettingsParams struct {
-	RecordingPromptsEnabled int64
-	ProcessOnlyOnAcPower    int64
-	DefaultSttModelID       sql.NullString
-	HomeworkRecipient       string
-	SmtpHost                string
-	SmtpPort                int64
-	SmtpSecurity            string
-	SmtpUsername            string
-	HubUrl                  string
-	RecordingSourceApp      string
-	RecognitionLoad         string
-	StudentFullName         string
-	StudentGroup            string
-	StudentUniversity       string
-	StudentFaculty          string
-	StudentCity             string
-	NoteRecognition         string
-	UpdatedAt               int64
+	RecordingPromptsEnabled  int64
+	ProcessOnlyOnAcPower     int64
+	DefaultSttModelID        sql.NullString
+	HomeworkRecipient        string
+	SmtpHost                 string
+	SmtpPort                 int64
+	SmtpSecurity             string
+	SmtpUsername             string
+	HubUrl                   string
+	RecordingSourceApp       string
+	RecognitionLoad          string
+	StudentFullName          string
+	StudentGroup             string
+	StudentUniversity        string
+	StudentFaculty           string
+	StudentCity              string
+	NoteRecognition          string
+	DeadlineEventOnDueChange string
+	UpdatedAt                int64
 }
 
 // A never-stored settings aggregate (version 0) is inserted with version 1. A second insert violates the primary key,
@@ -106,6 +108,7 @@ func (q *Queries) InsertSettings(ctx context.Context, arg InsertSettingsParams) 
 		arg.StudentFaculty,
 		arg.StudentCity,
 		arg.NoteRecognition,
+		arg.DeadlineEventOnDueChange,
 		arg.UpdatedAt,
 	)
 	return err
@@ -130,31 +133,33 @@ SET recording_prompts_enabled = ?1,
     student_faculty           = ?15,
     student_city              = ?16,
     note_recognition          = ?17,
+    deadline_event_on_due_change = ?18,
     version                   = version + 1,
-    updated_at                = ?18
-WHERE id = 1 AND version = ?19
+    updated_at                = ?19
+WHERE id = 1 AND version = ?20
 `
 
 type UpdateSettingsParams struct {
-	RecordingPromptsEnabled int64
-	ProcessOnlyOnAcPower    int64
-	DefaultSttModelID       sql.NullString
-	HomeworkRecipient       string
-	SmtpHost                string
-	SmtpPort                int64
-	SmtpSecurity            string
-	SmtpUsername            string
-	HubUrl                  string
-	RecordingSourceApp      string
-	RecognitionLoad         string
-	StudentFullName         string
-	StudentGroup            string
-	StudentUniversity       string
-	StudentFaculty          string
-	StudentCity             string
-	NoteRecognition         string
-	UpdatedAt               int64
-	ExpectedVersion         int64
+	RecordingPromptsEnabled  int64
+	ProcessOnlyOnAcPower     int64
+	DefaultSttModelID        sql.NullString
+	HomeworkRecipient        string
+	SmtpHost                 string
+	SmtpPort                 int64
+	SmtpSecurity             string
+	SmtpUsername             string
+	HubUrl                   string
+	RecordingSourceApp       string
+	RecognitionLoad          string
+	StudentFullName          string
+	StudentGroup             string
+	StudentUniversity        string
+	StudentFaculty           string
+	StudentCity              string
+	NoteRecognition          string
+	DeadlineEventOnDueChange string
+	UpdatedAt                int64
+	ExpectedVersion          int64
 }
 
 // Compare-and-swap on the loaded version. Zero rows affected means a stale version (or no row): the caller maps that
@@ -178,6 +183,7 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		arg.StudentFaculty,
 		arg.StudentCity,
 		arg.NoteRecognition,
+		arg.DeadlineEventOnDueChange,
 		arg.UpdatedAt,
 		arg.ExpectedVersion,
 	)

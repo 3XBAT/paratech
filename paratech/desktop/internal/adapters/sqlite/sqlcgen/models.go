@@ -116,6 +116,11 @@ type DeadlineEventRemoval struct {
 	CreatedAt    int64
 }
 
+type DeadlineEventUpdate struct {
+	AssignmentID string
+	CreatedAt    int64
+}
+
 type Delivery struct {
 	ID               string
 	AssignmentID     string
@@ -325,26 +330,27 @@ type ScheduleEntry struct {
 }
 
 type Setting struct {
-	ID                      int64
-	RecordingPromptsEnabled int64
-	ProcessOnlyOnAcPower    int64
-	DefaultSttModelID       sql.NullString
-	Version                 int64
-	UpdatedAt               int64
-	HomeworkRecipient       string
-	SmtpHost                string
-	SmtpPort                int64
-	SmtpSecurity            string
-	SmtpUsername            string
-	HubUrl                  string
-	RecordingSourceApp      string
-	RecognitionLoad         string
-	StudentFullName         string
-	StudentGroup            string
-	StudentUniversity       string
-	StudentFaculty          string
-	StudentCity             string
-	NoteRecognition         string
+	ID                       int64
+	RecordingPromptsEnabled  int64
+	ProcessOnlyOnAcPower     int64
+	DefaultSttModelID        sql.NullString
+	Version                  int64
+	UpdatedAt                int64
+	HomeworkRecipient        string
+	SmtpHost                 string
+	SmtpPort                 int64
+	SmtpSecurity             string
+	SmtpUsername             string
+	HubUrl                   string
+	RecordingSourceApp       string
+	RecognitionLoad          string
+	StudentFullName          string
+	StudentGroup             string
+	StudentUniversity        string
+	StudentFaculty           string
+	StudentCity              string
+	NoteRecognition          string
+	DeadlineEventOnDueChange string
 }
 
 type SttModel struct {
