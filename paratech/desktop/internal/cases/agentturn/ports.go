@@ -13,7 +13,7 @@ import (
 // Implemented by the hubclient adapter. Errors are those of Complete: shared.ErrNetworkUnavailable, shared.ErrServiceNotConfigured,
 // shared.ErrServiceUnavailable, shared.ErrQuotaExceeded, backoff-classified transient and permanent failures, and
 // values.ErrTurnGone when the Hub no longer keeps the model turn of the last echo. A repeated key returns the stored
-// reply (Replayed), so an automatic retry or «Продолжить» after a lost answer does not pay twice. The reply is
+// reply (Replayed), so an automatic retry after a lost answer or «Продолжить» after «Стоп» does not pay twice. The reply is
 // untrusted: every call goes through values.ParseCall and the thread's Admit before anything runs (hard rule 3).
 //
 // An error the Hub answered with its own error detail (any PROVIDER_ERROR, a cut provider stream, a refusal, an

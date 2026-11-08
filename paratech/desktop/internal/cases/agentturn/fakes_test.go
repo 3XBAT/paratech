@@ -121,6 +121,8 @@ type memThreads struct {
 	// afterGet, when set, runs after every Get (outside the lock), so a test can save a competing change between a
 	// load and a save.
 	afterGet func()
+	// failGet, when set, is returned by the next Get once.
+	failGet error
 	// history, when set, keeps the mentions of every saved request, as the agent_turns rows the history read joins.
 	history *memHistory
 }
@@ -129,7 +131,12 @@ func (r *memThreads) Get(_ context.Context, id shared.ThreadID) (*thread.Thread,
 	r.mu.Lock()
 	st, ok := r.states[id]
 	hook := r.afterGet
+	failed := r.failGet
+	r.failGet = nil
 	r.mu.Unlock()
+	if failed != nil {
+		return nil, failed
+	}
 	if !ok {
 		return nil, fmt.Errorf("thread %s: %w", id, shared.ErrNotFound)
 	}

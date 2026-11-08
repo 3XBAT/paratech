@@ -22,13 +22,17 @@ type fakeSleeper struct {
 	waits   []time.Duration
 	block   bool
 	entered chan struct{}
+	onSleep func() // when set, runs at the start of every wait
 }
 
 func (f *fakeSleeper) Sleep(ctx context.Context, d time.Duration) error {
 	f.mu.Lock()
 	f.waits = append(f.waits, d)
-	block := f.block
+	block, hook := f.block, f.onSleep
 	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	if !block {
 		return nil
 	}
@@ -235,6 +239,68 @@ func TestStopDuringRetryWait(t *testing.T) {
 	}
 	if last := e.model.last(t); last.Key != "ag:th1:1:1" {
 		t.Fatalf("key of Continue = %q", last.Key)
+	}
+}
+
+// «Отмена» during the wait wakes it as «Стоп» does; the request ends cancelled, without an error and a retry.
+func TestCancelDuringRetryWait(t *testing.T) {
+	sl := blocking()
+	e := newRetryEnv(t, sl, nil)
+	e.model.fail(errTransport)
+
+	type result struct {
+		st  Step
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		st, err := e.svc.Ask(t.Context(), AskInput{Scope: subjectScope(t), Text: "мои предметы"})
+		done <- result{st, err}
+	}()
+	<-sl.entered
+
+	if st, err := e.svc.Cancel(t.Context(), TurnRef{Thread: "th1", Turn: 1}); err != nil || st.Status != thread.StatusCancelled {
+		t.Fatalf("Cancel = %+v, %v", st, err)
+	}
+	var r result
+	select {
+	case r = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the wait did not end on «Отмена»")
+	}
+	if r.err != nil || r.st.Status != thread.StatusCancelled {
+		t.Fatalf("Ask after «Отмена» = %+v, %v", r.st, r.err)
+	}
+	if n := len(e.model.requests()); n != 1 {
+		t.Fatalf("requests = %d, want no retry after «Отмена»", n)
+	}
+}
+
+// A failed read of the stored request during the wait stops the request offline: it never stays PLANNING without a
+// loop (TASK-171).
+func TestRetryWaitReadFails(t *testing.T) {
+	sl := &fakeSleeper{}
+	e := newRetryEnv(t, sl, nil)
+	sl.onSleep = func() {
+		e.threads.mu.Lock()
+		e.threads.failGet = errors.New("disk read failed")
+		e.threads.mu.Unlock()
+	}
+	e.model.fail(errTransport).then(raw("r1", "reply", `{"text":"готово"}`))
+
+	st, err := e.svc.Ask(t.Context(), AskInput{Scope: subjectScope(t), Text: "мои предметы"})
+	if err == nil || !errors.Is(err, shared.ErrNetworkUnavailable) {
+		t.Fatalf("Ask = %+v, %v, want the failure", st, err)
+	}
+	if st.Status != thread.StatusStopped || st.StopReason != values.StopOffline {
+		t.Fatalf("step = %s %s", st.Status, st.StopReason)
+	}
+	th, _ := e.threads.Get(t.Context(), "th1")
+	if turn, _ := th.Turn(); turn.Status() != thread.StatusStopped || turn.StopReason() != values.StopOffline || !turn.StepOpen() {
+		t.Fatalf("stored = %s %s open %v", turn.Status(), turn.StopReason(), turn.StepOpen())
+	}
+	if n := len(e.model.requests()); n != 1 {
+		t.Fatalf("requests = %d, want no retry after the failed read", n)
 	}
 }
 

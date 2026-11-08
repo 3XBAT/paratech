@@ -59,7 +59,8 @@ func (s *Service) drive(ctx context.Context, c *change, op string) (st Step, err
 		if err != nil {
 			return s.abort(ctx, c, op, values.StopOffline, fmt.Errorf("base: %w", err))
 		}
-		// The open step is stored before the call: a crash or a lost answer leaves a step «Продолжить» can repeat.
+		// The open step is stored before the call: after a crash or a lost answer «Повторить» (or «Продолжить» after
+		// «Стоп») can send it again.
 		if again, err := s.store(ctx, c); again {
 			continue
 		} else if err != nil {
@@ -146,16 +147,26 @@ func (s *Service) pause(ctx context.Context, c *change, op string, cause error, 
 	}
 
 	// A «Стоп» stored between the failed call and the registration would not wake the wait.
-	if changed, err := s.changed(ctx, c); err != nil || changed {
-		st, err := s.conflict(ctx, c, op, errors.Join(shared.ErrVersionConflict, err))
+	if st, done, err := s.recheck(ctx, c, op, cause); done {
 		return st, true, err
 	}
 	s.sleepUnlocked(wctx, wait)
 	if ctx.Err() != nil {
 		return Step{}, false, nil
 	}
-	if changed, err := s.changed(ctx, c); err != nil || changed {
-		st, err := s.conflict(ctx, c, op, errors.Join(shared.ErrVersionConflict, err))
+	return s.recheck(ctx, c, op, cause)
+}
+
+// recheck reads the stored request of c during a retry wait. A change saved meanwhile wins (see conflict); a failed
+// read stops the request as the failure cause would, so no PLANNING request is left without a loop (TASK-171).
+func (s *Service) recheck(ctx context.Context, c *change, op string, cause error) (Step, bool, error) {
+	changed, err := s.changed(ctx, c)
+	if err != nil {
+		st, err := s.abort(ctx, c, op, reasonOf(ctx, cause), errors.Join(cause, err))
+		return st, true, err
+	}
+	if changed {
+		st, err := s.conflict(ctx, c, op, shared.ErrVersionConflict)
 		return st, true, err
 	}
 	return Step{}, false, nil
@@ -346,8 +357,9 @@ func (s *Service) store(ctx context.Context, c *change) (again bool, err error) 
 }
 
 // conflict handles a failed save. A version conflict means «Стоп» saved meanwhile: the stored, stopped request wins
-// and the reply of the step is dropped (its step stays open, so «Продолжить» replays it for free). Another stored
-// state comes back with the error, so the panel shows what is stored. Any other failure stops the stored request.
+// and the reply of the step is dropped (its step stays open, so «Продолжить» replays it for free); so does an
+// «Отмена» stored during a retry wait. Another stored state comes back with the error, so the panel shows what is
+// stored. Any other failure stops the stored request.
 func (s *Service) conflict(ctx context.Context, c *change, op string, err error) (Step, error) {
 	if !errors.Is(err, shared.ErrVersionConflict) {
 		return s.abort(ctx, c, op, values.StopOffline, err)
@@ -356,7 +368,7 @@ func (s *Service) conflict(ctx context.Context, c *change, op string, err error)
 	if gerr != nil {
 		return Step{}, fmt.Errorf("%s: %w", op, errors.Join(err, gerr))
 	}
-	if turn, ok := th.Turn(); ok && turn.Status() == thread.StatusStopped {
+	if turn, ok := th.Turn(); ok && (turn.Status() == thread.StatusStopped || turn.Status() == thread.StatusCancelled) {
 		return stepOf(&change{th: th}), nil
 	}
 	return stepOf(&change{th: th}), fmt.Errorf("%s: %w", op, err)

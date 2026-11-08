@@ -387,7 +387,7 @@ func (th *Thread) BeginStep(now time.Time) (string, error) {
 	return th.stepKey(t), nil
 }
 
-// StepKey returns the key of the open step, so «Продолжить» repeats the same Hub call.
+// StepKey returns the key of the open step, so an automatic retry and «Продолжить» repeat the same Hub call.
 func (th *Thread) StepKey() (string, error) {
 	t, err := th.turn()
 	if err != nil {
@@ -400,8 +400,8 @@ func (th *Thread) StepKey() (string, error) {
 }
 
 // stepKey is ag:<thread>:<turn>:<step>, plus :r<N> after the student's N-th «Повторить» of a failed step: the Hub
-// replays a failure of a key for a day, so a retry needs a new key, while «Продолжить» after a lost answer must
-// repeat the same one (free replay).
+// replays a failure of a key for a day, so a retry needs a new key, while an automatic retry of a lost answer and
+// «Продолжить» after «Стоп» must repeat the same one (free replay).
 func (th *Thread) stepKey(t *Turn) string {
 	if t.retry > 0 {
 		return fmt.Sprintf("ag:%s:%d:%d:r%d", th.id, t.number, t.budget.Steps, t.retry)
@@ -706,7 +706,8 @@ func (th *Thread) Fail(now time.Time) error {
 	return nil
 }
 
-// Stop stops a running request. An open step stays open, so «Продолжить» repeats it with the same key.
+// Stop stops a running request. An open step stays open: «Продолжить» (after «Стоп» or the quota) repeats it with
+// the same key, «Повторить» (failed, offline) sends it under a new one.
 func (th *Thread) Stop(reason values.StopReason, now time.Time) error {
 	if !reason.Valid() {
 		return fmt.Errorf("%w: unknown stop reason", ErrInvalidThread)

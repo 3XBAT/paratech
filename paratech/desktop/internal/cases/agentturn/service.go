@@ -513,7 +513,8 @@ func (s *Service) studentText(ctx context.Context, c *change, turn int) (string,
 	return "", fmt.Errorf("%w: the text of request %d is not stored", shared.ErrNotFound, turn)
 }
 
-// Cancel is «Отмена»: the request ends; calls without results are reported to the planner as not done.
+// Cancel is «Отмена»: the request ends; calls without results are reported to the planner as not done. A step
+// waiting for its automatic retry is woken at once and ends with the stored cancel, as after «Стоп».
 func (s *Service) Cancel(ctx context.Context, ref TurnRef) (Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -524,13 +525,18 @@ func (s *Service) Cancel(ctx context.Context, ref TurnRef) (Step, error) {
 	if err := c.th.Cancel(s.clock.Now()); err != nil {
 		return Step{}, fmt.Errorf("%s: %w", opCancel, err)
 	}
-	return s.drive(ctx, c, opCancel)
+	st, err := s.drive(ctx, c, opCancel)
+	if err == nil {
+		s.wake(ref.Thread)
+	}
+	return st, err
 }
 
 // Interrupt closes a request whose calls the Driver will not run because its context ended (the app closes). The
 // outcomes of calls that did run (an action that is journaled DONE or FAILED) are recorded as they are (see
-// keepOutcomes: a report that does not fit never refuses the close); the other calls are answered not done and the request stops as «нет связи» (thread.Interrupt), so «Продолжить» goes on as
-// after Recover. A request the student already stopped keeps its reason. Only «Отмена» cancels a request.
+// keepOutcomes: a report that does not fit never refuses the close); the other calls are answered not done and the
+// request stops as «нет связи» (thread.Interrupt) with no open step, so «Продолжить» goes on with the next step. A
+// request the student already stopped keeps its reason. Only «Отмена» cancels a request.
 func (s *Service) Interrupt(ctx context.Context, in SubmitInput) (Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -556,8 +562,9 @@ func (s *Service) Interrupt(ctx context.Context, in SubmitInput) (Step, error) {
 }
 
 // Recover runs at start, before the panel works: a request left running by a crash stops as «нет связи» with its
-// step open (so «Продолжить» replays the same key), and calls that were handed to the Driver get the result
-// outcome_unknown (the journal shows them UNKNOWN). It returns the number of requests stopped.
+// step as it was (an open step needs «Повторить» under a new key, no open step «Продолжить»), and calls that were
+// handed to the Driver get the result outcome_unknown (the journal shows them UNKNOWN). It returns the number of
+// requests stopped.
 func (s *Service) Recover(ctx context.Context) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

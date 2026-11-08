@@ -13,9 +13,10 @@
 //	STOPPED          -> PLANNING | EXECUTING («Продолжить», back where it stopped) | CANCELLED
 //
 // DONE, FAILED and CANCELLED are terminal. A request over budget stops itself (STOPPED, reason budget) and cannot be
-// continued. A step is opened before the Hub call and closed with its usage; a stopped request keeps its open step,
-// so «Продолжить» repeats the same key ag:<thread>:<turn>:<step> (free replay). A step that failed for good (STOPPED,
-// reason failed) is sent again only by «Повторить» (Retry) under ag:<thread>:<turn>:<step>:r<N>; a request whose model
+// continued. A step is opened before the Hub call and closed with its usage; a stopped request keeps its open step.
+// After a stop by the student or the quota «Продолжить» repeats the same key ag:<thread>:<turn>:<step> (free replay);
+// an open step stopped failed or offline (its automatic retries used up) is sent again only by «Повторить» (Retry)
+// under ag:<thread>:<turn>:<step>:r<N>; a request whose model
 // turn expired on the Hub starts again from its text (Restart, HistoryFrom).
 //
 // Every call of a step is answered before the next step (Expect, Answer, TakeResults), because the Hub accepts an
