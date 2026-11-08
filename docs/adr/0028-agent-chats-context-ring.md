@@ -121,6 +121,11 @@ On an earlier message N of the chat the student picks «Начать занов�
   is not needed now (texts are small) and can come later without a format change.
 - The student's texts are the `entry='student'` rows of `agent_steps`; the purge (TASK-250) deletes the `calls` and
   `results` rows of requests that ended 90+ days ago, never of the current request, after freezing the reply line.
+- **Owner 2026-11-08:** the plan columns of `agent_turns` (`proposed_plan`, `approved_plan`, `used`, `created_ids`) are
+  kept forever (no change). Line breaks of a purged reply are kept: a new nullable column `agent_turns.reply_text`
+  (JSON array of the card texts with their line breaks, ≤ 64 KiB) is written by the purge in the transaction that
+  freezes `reply_line`, before the steps go; the earlier view prefers it and falls back to `reply_line`. No back-fill
+  is needed: nothing is older than 90 days yet.
 
 ## Consequences
 - `cases/agentturn`: current chat, `ThreadID`, `Mentions`, `RestartFrom`; writes `reply_line` at the end of a request.

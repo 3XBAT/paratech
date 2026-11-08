@@ -346,3 +346,8 @@ supervisor's report of 2026-11-08).
 - **В1.** Политика «Спрашивать»: после повторной установки срока (или «Вернуть») приложение спрашивает «Вернуть
   событие в Google Календарь?» — одна кнопка «Да». Так (рекомендую), или при любой политике, кроме «Не трогать»,
   возвращать событие без вопроса?
+
+**Answered 2026-11-08.** В1: ask, as recommended. Both questions («Обновить событие в Google Календаре?», «Вернуть
+событие в Google Календарь?») carry the checkbox **«Больше не спрашивать»** instead of «Запомнить» (same effect: with
+«Да» the setting becomes `update`, with «Нет» `keep`; Esc remembers nothing), with the hint «Можно вернуть в Настройки →
+Разрешения». The owner's rule: every confirmation that may repeat offers «Больше не спрашивать».

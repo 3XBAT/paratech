@@ -137,6 +137,12 @@ The student's notes are «Мой конспект», the chip on sources «ва�
   reuses), its other materials the same way, its folders, aliases and teachers. A material still a part of an active note of another subject is kept
   and moved to «Входящие». Assignments, recordings and schedule lessons are other contexts and stay; their subject
   name falls back as for an unknown subject (ADR-0024). After the purge the name is free.
+- **Owner 2026-11-08: the finished paper of a work survives the purge, outside the library.** A material that is the
+  paper of a work (`works.writing` names it) is not purged and not moved to «Входящие»: it becomes `detached`
+  (`material.Detach(now)`: no subject, no folder, status `detached`; migration rebuilds the `materials` CHECKs). A
+  detached material is in no library list, search, knowledge base, mention or Inbox; the work still opens and sends it.
+  The blob collection removes a detached material once no work names it. «Задания» shows the assignment and its work
+  with the quiet mark «предмет удалён». The source file of a work keeps the TASK-308 rule (moved to «Входящие»).
 
 ### Bulk import (mid-semester start)
 - **Aggregate `library/importbatch`**: up to 500 items (digest, size, type, display name, relative folder path,

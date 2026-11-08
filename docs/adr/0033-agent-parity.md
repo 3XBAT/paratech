@@ -180,6 +180,12 @@ cannot be marked done.
   once. О-8 no rename of an existing chat; a title for a new chat. О-9 (в) no step limit, only the quota and the
   technical guards. О-12 (б) doubtful matches merged by default.
 
+## Answered 2026-11-08
+- An assignment deleted through the `delete_assignment` card («Да») is the chat's delete too: on «Да» the card's journal
+  entry becomes `DONE` with the compensation `RestoreAssignment`, so its line has «Отменить» and
+  `change_assignment{restore}` accepts it (ADR-0029 C-2 «only what this chat deleted» now includes it).
+- `note`: the subject of an add by date comes from the context chip (request scope), as TASK-321 built it.
+
 ## Open (вопросы владельцу)
 - **О-10. Один «Да» на план с отправкой.** Сейчас каждая отправка письма внутри одобренного плана всё равно
   показывает свою карточку «Да». Сделать ли один «Да» на весь план, если карточка плана покажет каждую отправку

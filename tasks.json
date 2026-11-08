@@ -5547,7 +5547,7 @@
             "dependencies": [
                 "TASK-256"
             ],
-            "status": "pending"
+            "status": "blocked"
         },
         {
             "id": "TASK-258",
@@ -5594,7 +5594,7 @@
             "dependencies": [
                 "TASK-256"
             ],
-            "status": "pending"
+            "status": "blocked"
         },
         {
             "id": "TASK-260",
@@ -5617,7 +5617,7 @@
                 "TASK-256",
                 "TASK-259"
             ],
-            "status": "pending"
+            "status": "blocked"
         },
         {
             "id": "TASK-261",
@@ -5647,7 +5647,7 @@
                 "TASK-259",
                 "TASK-260"
             ],
-            "status": "pending"
+            "status": "blocked"
         },
         {
             "id": "TASK-262",
@@ -5668,7 +5668,7 @@
             "dependencies": [
                 "TASK-261"
             ],
-            "status": "pending"
+            "status": "blocked"
         },
         {
             "id": "TASK-263",
@@ -5689,7 +5689,7 @@
                 "TASK-261",
                 "TASK-262"
             ],
-            "status": "pending"
+            "status": "blocked"
         },
         {
             "id": "TASK-264",
@@ -5710,7 +5710,7 @@
             "dependencies": [
                 "TASK-261"
             ],
-            "status": "pending"
+            "status": "blocked"
         },
         {
             "id": "TASK-265",
@@ -6003,7 +6003,7 @@
                 "Повторная установка срока после выполненного удаления: update — событие возвращается само (queue_return), ask — вопрос «Вернуть событие в Google Календарь?» (CalendarQuestion = return), keep — ничего (остаётся «Предложить в календарь»); none — ничего при любой политике",
                 "homeworkflow.RestoreAssignment (клик студента «Вернуть», читает настройку): в состоянии removed со сроком — Decide(настройка, removed, restore, …): queue_return в транзакции восстановления и запрос синхронизации или CalendarQuestion = return в результате; в состоянии removing — как прежде (ждущая строка удаления удаляется, вопроса нет)",
                 "homeworkflow.UpdateDeadlineEvent(ctx, id): клик студента «Да» на любой из двух вопросов — Decide(update, состояние, …): present — строка обновления (срок есть) или удаления (срока нет); removing или removed со сроком — queue_return; none или без срока при removing/removed — известная ошибка no_event, удалённое — not_found; запрос синхронизации; повтор безопасен",
-                "«Запомнить» здесь не обрабатывается: привязка вызывает установку настройки отдельно (другой агрегат, TASK-279)",
+                "«Больше не спрашивать» (бывшее «Запомнить», владелец 08.11; ADR-0029 «Answered 2026-11-08») здесь не обрабатывается: привязка вызывает установку настройки отдельно (другой агрегат, TASK-279)",
                 "Агентский edit_due (SetAssignmentDue) здесь событие не трогает: это TASK-281 (C-4: правка агента обновляет событие без вопроса)",
                 "Тесты на фейках: каждая политика × состояние (none, present, removing, removed) × срок изменён / не изменён / убран по таблице «Решение владельца 08.11»; срок убран при update, удаление выполнено, срок снова задан → update: queue_return, ask: вопрос return, keep: ничего; удалено, синхронизировано, «Вернуть» → то же по политикам; «Вернуть» до синхронизации → строка удаления удалена, вопроса нет; Execute после удаления снимает метку; UpdateDeadlineEvent (живое, удалённое, без события, removing и removed со сроком и без, повтор)",
                 "Файлы: paratech/desktop/internal/cases/homeworkflow/assignments.go, proposals.go (только снятие метки в Execute), delete.go (только RestoreAssignment), ports.go, types.go, errors.go, новый deadlineevent.go, paratech/desktop/internal/app/* (только подключение портов) (+ тесты)",
@@ -6047,9 +6047,9 @@
             "id": "TASK-279",
             "category": "functional",
             "priority": "medium",
-            "description": "[Задания · привязка Wails] Вопрос об обновлении события после правки срока, «Да» и «Запомнить», настройка в SettingsService",
+            "description": "[Задания · привязка Wails] Вопрос об обновлении или возврате события после правки срока, «Да» и «Больше не спрашивать», настройка в SettingsService",
             "acceptance_criteria": [
-                "docs/adr/0029-student-assignments.md, дополнение 2; use cases — TASK-276 (настройка), TASK-277 (правка и UpdateDeadlineEvent)",
+                "docs/adr/0029-student-assignments.md, дополнение 2 и «Answered 2026-11-08» (флажок «Больше не спрашивать» вместо «Запомнить», то же действие); use cases — TASK-276 (настройка), TASK-277 (правка и UpdateDeadlineEvent)",
                 "HomeworkService.EditAssignment и RestoreAssignment: ответ получает calendarQuestion ('' | update | return); новый UpdateDeadlineEvent(id) → {problem: '' | not_found | no_event | failed}; новый RememberDeadlineEventChoice(update bool) → устанавливает настройку update или keep через cases/preferences",
                 "SettingsService: в Settings поле calendarOnDueChange (ask | update | keep) и SetCalendarOnDueChange(value) (неизвестное значение — invalid)",
                 "Подтверждение — только клик студента или его настройка; агенту и Hub ничего нового не открывается (жёсткое правило 3)",
@@ -6073,8 +6073,8 @@
             "priority": "medium",
             "description": "[Задания · UI] Вопрос «Обновить событие в Google Календаре?» после смены срока и настройка в «Настройках»",
             "acceptance_criteria": [
-                "Владелец 2026-10-27 (З3); привязки — TASK-279",
-                "После сохранения правки или «Вернуть» с calendarQuestion: update — «Обновить событие в Google Календаре?», return — «Вернуть событие в Google Календарь?»; кнопки «Да» и «Нет» и флажок «Запомнить»; «Да» → updateDeadlineEvent; с «Запомнить» — ещё rememberDeadlineEventChoice(да или нет); «Нет» без флажка — ничего; Esc = «Нет» без запоминания; ошибки — короткими строками",
+                "Владелец 2026-10-27 (З3) и 2026-11-08 (ответ 14: вопрос с флажком «Больше не спрашивать»); ADR-0029 «Answered 2026-11-08»; привязки — TASK-279",
+                "После сохранения правки или «Вернуть» с calendarQuestion: update — «Обновить событие в Google Календаре?», return — «Вернуть событие в Google Календарь?»; кнопки «Да» и «Нет» и флажок «Больше не спрашивать» с подсказкой «Можно вернуть в Настройки → Разрешения» (владелец 08.11, вместо «Запомнить»); «Да» → updateDeadlineEvent; с флажком — ещё rememberDeadlineEventChoice(да или нет); «Нет» без флажка — ничего; Esc = «Нет» без запоминания; ошибки — короткими строками",
                 "«Настройки»: выбор «События в календаре при смене срока» — «спрашивать» / «обновлять сами» / «не обновлять», по умолчанию «спрашивать»",
                 "Безличные тексты, по-русски, текстовыми узлами; тёмная тема, один акцент, клавиатура и aria (фокус в диалоге)",
                 "Тесты фронтенда: диалог и оба ответа с флажком и без, один вызов при двойном клике, настройка",
@@ -6083,7 +6083,7 @@
             ],
             "test_steps": [
                 "npm --prefix paratech/desktop/frontend run test и run build",
-                "Владелец: docs/qa/tasks/TASK-280.md — задание с событием в Google, сменить срок → вопрос, «Да» → событие в Google на новом сроке; ещё раз с «Нет» и «Запомнить» → вопроса больше нет, событие не меняется; в «Настройках» переключить на «обновлять сами» → смена срока обновляет событие без вопроса; срок убран, синхронизировано, срок задан снова → «Вернуть событие в Google Календарь?», «Да» → событие снова в Google; при «обновлять сами» — возвращается без вопроса"
+                "Владелец: docs/qa/tasks/TASK-280.md — задание с событием в Google, сменить срок → вопрос, «Да» → событие в Google на новом сроке; ещё раз с «Нет» и «Больше не спрашивать» → вопроса больше нет, событие не меняется; в «Настройках» переключить на «обновлять сами» → смена срока обновляет событие без вопроса; срок убран, синхронизировано, срок задан снова → «Вернуть событие в Google Календарь?» с флажком «Больше не спрашивать», «Да» → событие снова в Google; при «обновлять сами» — возвращается без вопроса"
             ],
             "dependencies": [
                 "TASK-275",
@@ -7793,7 +7793,7 @@
             "priority": "medium",
             "description": "[Навигация · шаг 4] «База знаний» входит в «Предметы»: поле поиска в шапке, «Пары без предмета» во «Входящих» (по ответу В1)",
             "acceptance_criteria": [
-                "docs/adr/0034-navigation.md §3; черновик docs/tasks/TASK-354-fold-knowledge-base.md; аудит А-3.1, 4.8, 9.1, 9.6. Делается по рекомендованному ответу В1 (а); если владелец выберет б или в — задачу переписать до старта",
+                "docs/adr/0034-navigation.md §3 и «Answered 2026-11-08» (В1 = а: «База знаний» и «Предметы» — одно); черновик docs/tasks/TASK-354-fold-knowledge-base.md; аудит А-3.1, 4.8, 9.1, 9.6",
                 "В шапке «Предметов» поле поиска (Ctrl+F); результаты вместо правой части (маршрут subjects + search); попадание открывает экран пары на месте; под полем «Нужен ответ, а не место в тексте? Спросите в панели справа» с кнопкой, которая подставляет запрос в поле панели (не отправляет)",
                 "«Входящие»: две группы — файлы (TASK-339) и «Пары без предмета» (пары «Без предмета» и групп со свободным названием) с «Указать предмет»; счётчик считает обе",
                 "Страница knowledge и её место в covers убраны; кнопки «База знаний» и «Билеты» ушли из LibraryActions; источники ответа и упоминания ведут на экран пары; ничего доступного не потеряно (список проверки в отчёте)",
@@ -7884,7 +7884,7 @@
             "priority": "medium",
             "description": "[Разрешения · домен] Разрешения на внешние отправки: значения в settings, сервис autoconfirm, отметка «по разрешению» у предложения, миграция и хранение",
             "acceptance_criteria": [
-                "Владелец 02.11, О10 = б: своё «Да» на каждую отправку, в первый раз — «Больше не спрашивать», раздел настроек разрешений. docs/adr/0034-navigation.md §5; черновик docs/tasks/TASK-358-permissions-domain.md; по ответу В3 (а) — одно разрешение на все предметы",
+                "Владелец 02.11, О10 = б: своё «Да» на каждую отправку, в первый раз — «Больше не спрашивать», раздел настроек разрешений. docs/adr/0034-navigation.md §5 и «Answered 2026-11-08» (В3 = а: одно разрешение на все предметы); черновик docs/tasks/TASK-358-permissions-domain.md",
                 "domain/settings/settings: PermissionKind (send_to_teacher, deadline_to_calendar — закрытый набор), PermissionMode (ask по умолчанию, allow), Permission(kind) с Mode и Offered, SetPermission и MarkPermissionOffered меняют версию; неизвестные значения — доменная ошибка; табличные тесты",
                 "Новый чистый сервис domain/coursework/services/autoconfirm со своим перечислением (ARCH-11): Decide(mode, kind, needsChoice) → Ask | Confirm; Confirm только для allow и send_homework_email / send_work_email / create_deadline_event без выбора преподавателя; табличный тест всех случаев",
                 "domain/coursework/proposal: подтверждение помнит ByPermission (статусная машина та же), Restore читает его; тест обоих путей",
@@ -7953,7 +7953,7 @@
             "priority": "medium",
             "description": "[Разрешения · UI] Раздел «Настройки → Разрешения» и флажок «Больше не спрашивать» на первой карточке отправки",
             "acceptance_criteria": [
-                "Владелец 02.11, О10 = б; docs/adr/0034-navigation.md §4, §5; черновик docs/tasks/TASK-361-permissions-ui.md; привязки — TASK-360",
+                "Владелец 02.11, О10 = б; владелец 08.11, В3 = а (на все предметы сразу); docs/adr/0034-navigation.md §4, §5; черновик docs/tasks/TASK-361-permissions-ui.md; привязки — TASK-360",
                 "Карточка с offerDontAsk: флажок «Больше не спрашивать» под кнопками и подсказка «Можно вернуть в Настройки → Разрешения»; уходит только с «Да»; кнопки «Да, отправить письмо» / «Не отправлять», «Да, добавить в календарь» / «Не добавлять»",
                 "Карточка, подтверждённая по разрешению: «Письмо отправлено без вопроса» (или «Срок добавлен в календарь без вопроса») и ссылка «Спрашивать снова» (ставит ask, итог строкой на месте)",
                 "«Настройки → Разрешения» после «Основных»: строки «Отправлять работы преподавателю» и «Добавлять сроки в Google Календарь» с «Спрашивать / Не спрашивать» и строкой о смысле («paratech отправит письмо сразу, без карточки. Адрес и файл берутся из предмета, как на карточке.»); сноска «Агент не может менять эти настройки.»",
@@ -7977,13 +7977,13 @@
             "id": "TASK-362",
             "category": "ui",
             "priority": "medium",
-            "description": "[Навигация · шаг 8] Одна точка «Сделать задание» на странице задания: «Короткий ответ» или «Работа под ключ» (по ответу В2)",
+            "description": "[Навигация · шаг 8] Одна кнопка «Сделать задание» на странице задания: режим выбирает ИИ по тексту задания (В2, владелец 08.11)",
             "acceptance_criteria": [
-                "docs/adr/0034-navigation.md §2, §7; ADR-0025; черновик docs/tasks/TASK-362-do-assignment-entry.md; аудит А-6.6, 7.4, 7.5. Делается по рекомендованному ответу В2 (а); если владелец выберет б или в — задачу переписать до старта",
-                "Один блок «Сделать задание» с выбором: «Короткий ответ (текстом, ~1 мин)» — нынешний черновик; «Работа под ключ (файл Word или PowerPoint, с вопросами, дороже)» — нынешний поток под ключ; у каждого до клика видно, что расходуются минуты обработки",
+                "docs/adr/0034-navigation.md §2, §7 и «Answered 2026-11-08» (В2: одна кнопка, без выбора режима); ADR-0025; черновик docs/tasks/TASK-362-do-assignment-entry.md (выбор режима из черновика отменён); аудит А-6.6, 7.4, 7.5; маршрут и привязка — TASK-411",
+                "Один блок «Сделать задание»: кнопка-слово «Сделать задание» и строка «Расходует минуты обработки»; выбора «Короткий ответ / Работа под ключ» нет; клик → doAssignment, пока идёт — «Определяю, как лучше сделать…» (кнопка недоступна, двойной клик — один вызов); затем короткий ответ или поток под ключ, как страница показывает их сейчас; ошибки (offline, quota, refused, no_text) — короткой строкой с действием, без тупиков",
                 "Когда черновик или работа есть, блок показывает их и их действия; «Версии» и «Письма» — свёрнутые разделы в конце со счётчиками",
                 "Карточка работы в панели агента компактная: состояние и «Открыть в задании»; управление — только на странице",
-                "Без изменений ядра и Hub",
+                "Ядро и Hub в этой задаче не меняются (маршрут и привязка doAssignment — TASK-411)",
                 "Файлы: src/pages/{HomeworkPage,HomeworkTurnkey}.tsx, src/{homeworkView,homeworkTurnkey,turnkeyView}.ts, src/agent/{WorkCard,AgentCards}.tsx (только компактная карточка), src/styles.css, тесты",
                 "UX-проверка coordinator-round.md 3a; ux-expert «ок»",
                 "Исполнитель: frontend"
@@ -7992,7 +7992,8 @@
                 "npm run test и run build"
             ],
             "dependencies": [
-                "TASK-346"
+                "TASK-346",
+                "TASK-411"
             ],
             "status": "pending"
         },
@@ -8369,8 +8370,8 @@
             "description": "[E2E] Пакет «Окно-напоминание и запись звука»: popup в начале пары, «Подключиться», «Не записывать», запись из popup; звук из колонок — по флагу",
             "acceptance_criteria": [
                 "Черновик: docs/tasks/TASK-379-e2e-popup-capture.md; ADR-0035 §2, §4; AC-01, AC-03, AC-24; TASK-370",
-                "Popup виден не позже 20 с после начала синтетической пары; «Подключиться» пишет ровно синтетическую ссылку в opened.jsonl и становится неактивной",
-                "«Не записывать» прячет popup; «Начать запись» → запись видна; «Остановить» в главном окне сохраняет её",
+                "Popup виден не позже 20 с после начала синтетической пары; «Подключиться» пишет ровно синтетическую ссылку в opened.jsonl и становится «Открыть ещё раз»; второй клик пишет вторую такую же строку (владелец 08.11, TASK-406)",
+                "«Не записывать» прячет popup; «Начать запись» → запись видна, в виде записи есть «Подключиться» или «Открыть ещё раз» (TASK-405/406); «Остановить» в главном окне сохраняет её",
                 "Только с E2E_WITH_SOUND=1: фикстура играет в устройство по умолчанию во время записи, расшифровка не пустая; без флага — «не проверено (нужен звук)»",
                 "Исполнитель: tester (sonnet)"
             ],
@@ -8378,7 +8379,8 @@
                 "bash paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --grep @popup"
             ],
             "dependencies": [
-                "TASK-377"
+                "TASK-377",
+                "TASK-406"
             ],
             "status": "pending"
         },
@@ -8529,7 +8531,7 @@
                 "serve с HUB_LOG_FILE пишет только в файл, файл подключается сразу после занятия порта (второй Hub падает на listen раньше файла); до этого и без переменной — stderr; команды keys переменную не используют",
                 "Новый адаптер hub/internal/adapters/logfile (только std): 5 МиБ, hub.1.log, hub.2.log, старший удаляется; ротация работает на Windows во время работы",
                 "Тест: после старта с известными ключом провайдера, паролем БД и секретом печати их нет в файле",
-                "hub/docker-compose.yml: у postgres restart: unless-stopped; paratech/README.md — строка таблицы настроек Hub",
+                "hub/docker-compose.yml: у postgres restart: unless-stopped; комментарий в начале: бета копирует файл в <out>\\hub\\ и запускает docker compose -p hub up -d --wait postgres (ADR-0036 §8), имя сервиса postgres и том pgdata не менять; paratech/README.md — строка таблицы настроек Hub",
                 "Файлы: paratech/hub/config/*, paratech/hub/internal/adapters/logfile/* (новый), paratech/hub/internal/app/*, paratech/hub/cmd/hub/main.go (только линейный шаг при необходимости), paratech/hub/docker-compose.yml, paratech/README.md, paratech/hub/tests/* (+ тесты)",
                 "Исполнитель: hub-dev (opus)"
             ],
@@ -8571,11 +8573,11 @@
                 "docs/adr/0036-beta-local-hub.md §3–§5; черновик docs/tasks/TASK-388-hubprocess-adapter.md; ревью безопасности обязательно",
                 "Путь: папка os.Executable() + hub.exe, обычный файл, не точка повторной обработки; exec.Cmd{Path, Args: [path]} без поиска в PATH, без оболочки, без аргументов; Dir = <DataDir>/hub",
                 "Окружение: родительское без всех HUB_* и LA_* + HUB_LISTEN_ADDR=127.0.0.1:<порт>, HUB_LOG_FILE, HUB_LOG_LEVEL=info, заданные несекретные настройки и HUB_ANTHROPIC_API_KEY, HUB_DATABASE_URL, HUB_AGENT_SEAL_KEYS, прочитанные из хранилища hubserver в момент запуска; нет секрета — типизированная ошибка с именем слота",
-                "Windows: HideWindow, CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB; при ERROR_ACCESS_DENIED один повтор без breakaway и строка WARN; stdout/stderr → <DataDir>/logs/hub-start.log (обнуляется при запуске); горутина Wait запоминает код выхода; заглушки _other.go — ErrUnsupported",
+                "Windows: HideWindow, CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB; при ERROR_ACCESS_DENIED один повтор без breakaway и строка WARN (Hub может закрыться с приложением — допустимо, владелец 08.11, О2); stdout/stderr → <DataDir>/logs/hub-start.log (обнуляется при запуске); горутина Wait запоминает код выхода; заглушки _other.go — ErrUnsupported",
                 "Facts: /healthz и /readyz (1 с, только loopback, без редиректов), наличие канала \\\\.\\pipe\\docker_engine (только существование), TCP к host:port адреса БД (500 мс), наличие hub.exe, последний код выхода",
                 "Ни одного секрета в строках лога, текстах ошибок и командной строке ребёнка (тест с известными значениями; фейковый ребёнок печатает аргументы и имена переменных)",
                 "hubserverconf: <DataDir>/hub/hub-server.json, schema_version 1, атомарная запись (временный файл + rename), неизвестные поля — отказ, не больше 4 КиБ",
-                "Stop и IssueKey здесь возвращают ErrUnsupported (TASK-390)",
+                "Stop и IssueKey здесь возвращают ErrUnsupported (TASK-390); запуск контейнера базы (StartDatabase) и факт DatabaseStartable — TASK-408, здесь DatabaseStartable = false",
                 "Файлы: paratech/desktop/internal/adapters/hubprocess/* (новый), paratech/desktop/internal/adapters/hubserverconf/* (новый), paratech/desktop/testenv/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
@@ -8595,10 +8597,10 @@
             "description": "[Бета · локальный Hub · сборка app и привязка] Подключение под тегом beta: проверка Hub при старте и каждую минуту, LocalHubService, «Открыть папку с логами»",
             "acceptance_criteria": [
                 "docs/adr/0036-beta-local-hub.md §1, §2, §4, §7; черновик docs/tasks/TASK-389-localhub-wiring-binding.md; ревью безопасности обязательно",
-                "internal/app/localhub_beta.go (//go:build beta) и localhub_nobeta.go (nil): только режим окна, после start (ADR-0009), в фоне; не в headless, recorder и E2E; Close останавливает перепроверку и никогда не останавливает Hub",
+                "internal/app/localhub_beta.go (//go:build beta) и localhub_nobeta.go (nil): только режим окна, после start (ADR-0009), в фоне; не в headless, recorder и E2E; Close останавливает перепроверку и никогда не останавливает Hub (если Windows не дала отделить Hub, он закроется с приложением — допустимо, владелец 08.11, О2)",
                 "Перепроверка каждые 60 с, пока состояние не running/remote; LocalHubService.Recheck для «Проверить снова»",
                 "input/wails.LocalHubService: Status → {state, reason, port, exitCode}, Settings/SaveSettings, SetProviderKey, SetDatabaseURL, SecretsSet → {providerKey, databaseURL} (только признаки), OpenLogsFolder (фиксированный <DataDir>/logs через существующий explorer-открыватель); регистрация в shell_localhub_beta.go / _nobeta.go; ошибки — закрытые коды",
-                "Хранилище секретов hubserver через wincred (имена ADR §3, профиль ADR-0014); ключи печати — через random",
+                "Хранилище секретов hubserver через wincred (имена ADR §3, профиль ADR-0014); ключи печати — через random; порт DatabaseStarter — hubprocess.StartDatabase (TASK-408) с тем же хранилищем hubserver (ADR-0036 §8)",
                 "tests/arch_test.go: cases/localhub, adapters/hubprocess, adapters/hubserverconf импортируют только файлы с //go:build beta; проверка nm из TASK-385 проходит при наличии пакетов",
                 "frontend/src/bindings/localhub.ts: available() ложно, когда привязки нет (не бета)",
                 "Файлы: paratech/desktop/internal/app/localhub_beta.go, localhub_nobeta.go (новые), app.go/env.go (только вызов), paratech/desktop/internal/input/wails/localhub.go, shell_localhub_beta.go, shell_localhub_nobeta.go (новые), paratech/desktop/frontend/src/bindings/localhub.ts (новый), frontend/test/*, paratech/desktop/tests/arch_test.go (+ тесты)",
@@ -8612,7 +8614,9 @@
                 "TASK-385",
                 "TASK-386",
                 "TASK-387",
-                "TASK-388"
+                "TASK-388",
+                "TASK-407",
+                "TASK-408"
             ],
             "status": "pending"
         },
@@ -8645,10 +8649,10 @@
             "priority": "medium",
             "description": "[Бета · локальный Hub · UI] Блок «Hub на этом компьютере (бета)» в «Подключениях» и состояние Hub в «Диагностике»",
             "acceptance_criteria": [
-                "docs/adr/0036-beta-local-hub.md §3, §7; черновик docs/tasks/TASK-391-local-hub-ui.md; ADR-0034 (раскладка настроек)",
+                "docs/adr/0036-beta-local-hub.md §3, §7, §8; черновик docs/tasks/TASK-391-local-hub-ui.md; ADR-0034 (раскладка настроек)",
                 "Показывается только когда bindings/localhub.ts говорит «доступно» (бета); иначе ничего и без текста ошибки",
                 "«Подключения»: «Ключ провайдера» и «Адрес базы данных» только на запись («задан / не задан», «Сохранить»), base URL, «Заголовок ключа» (x-api-key / Bearer), «Квота токенов» (пусто = по умолчанию); после изменения — кнопка-слово «Перезапустить Hub»; «Выпустить ключ доступа» — только без ключа Hub и при работающем Hub",
-                "«Диагностика» → «Hub на этом компьютере»: тихий статус (значок + цветной текст, без заливки) для каждого состояния и причины ADR §7, у каждой следующий шаг (ссылка в «Подключения», «Проверить снова», «Перезапустить Hub»); «Открыть папку с логами» — значок с подсказкой и aria-label; опрос раз в 3 с, пока страница открыта",
+                "«Диагностика» → «Hub на этом компьютере»: тихий статус (значок + цветной текст, без заливки) для каждого состояния и причины ADR §7 и §8: starting_database — «Запускается база данных…», database_start_failed — «Не удалось запустить контейнер базы, подробности в логе» с «Открыть папку с логами» и «Проверить снова», database_down без автоматического запуска — прежний текст ADR §7; у каждой причины следующий шаг (ссылка в «Подключения», «Проверить снова», «Перезапустить Hub»); «Открыть папку с логами» — значок с подсказкой и aria-label; опрос раз в 3 с, пока страница открыта",
                 "Безличные русские тексты текстовыми узлами; клавиатура и aria; инварианты раскладки ADR-0035 §5; docs/agent-parity.md — строка «только UI: вводится секрет; бета-инструмент»",
                 "Тесты: каждое состояние и причина → текст и действие; поля секретов никогда не показывают значение; двойной клик — один вызов; нет привязки — ничего не рисуется",
                 "Файлы: paratech/desktop/frontend/src/pages/ConnectionsPage.tsx, src/pages/DiagnosticsPage.tsx, src/localHubView.ts (новый), test/*, docs/agent-parity.md",
@@ -8656,11 +8660,12 @@
             ],
             "test_steps": [
                 "npm --prefix paratech/desktop/frontend run test и run build",
-                "Владелец: docs/qa/tasks/TASK-391.md — Docker выключен → «включите Docker Desktop»; включить → «Работает» само в течение минуты; закрыть приложение → Hub отвечает; открыть снова → второго hub.exe в диспетчере задач нет; лог в %LOCALAPPDATA%\\LearningAssistant\\logs\\hub.log"
+                "Владелец: docs/qa/tasks/TASK-391.md — Docker выключен → «включите Docker Desktop»; включить → приложение само поднимает контейнер базы, «Работает» в течение минуты; остановить контейнер базы в Docker Desktop → в течение минуты снова «Работает»; закрыть приложение → Hub отвечает (если Windows не дала отделить Hub, он закрылся вместе с приложением и в desktop.log строка WARN — допустимо, О2); открыть снова → Hub работает, второго hub.exe в диспетчере задач нет; лог в %LOCALAPPDATA%\\LearningAssistant\\logs\\hub.log и hub-db-start.log"
             ],
             "dependencies": [
                 "TASK-389",
-                "TASK-390"
+                "TASK-390",
+                "TASK-407"
             ],
             "status": "pending"
         },
@@ -8695,20 +8700,492 @@
             "description": "[Записи · UI] Значок «Отменить расшифровку» в строке записи и «Расшифровать снова» после отмены",
             "acceptance_criteria": [
                 "Владелец 2026-11-08; привязки — TASK-392; черновик docs/tasks/TASK-393-cancel-transcription-ui.md",
-                "Этап распознавания или ожидания распознавания с canCancel: прежний прогресс («N %», «≈ N мин осталось») и кнопка-значок (стоп/крестик) с подсказкой и aria-label «Отменить расшифровку»; без диалога подтверждения (обратимо через «Расшифровать снова»); недоступна во время вызова; ending — строка просто обновляется; failed — «Не удалось отменить расшифровку.»",
-                "errorCode transcriptionCancelled: тихий статус (значок + приглушённый текст, не цвет ошибки) «Расшифровка отменена» и кнопка-слово «Расшифровать снова» (главное действие состояния); no_model — «Нет модели распознавания» с действием «Открыть модели»; started — строка «В очереди»",
+                "Этап распознавания или ожидания распознавания с canCancel: прежний прогресс («N %», «≈ N мин осталось») и кнопка-значок (стоп/крестик) с подсказкой и aria-label «Отменить расшифровку»; в первый раз — окно «Отменить расшифровку?» с «Да, отменить» / «Не отменять» и флажком «Больше не спрашивать» (владелец 08.11; локальная настройка UI с try/catch, как «Скрыть» чек-листа; после «Да» с флажком отмена идёт без вопроса); недоступна во время вызова; ending — строка просто обновляется; failed — «Не удалось отменить расшифровку.»",
+                "errorCode transcriptionCancelled: тихий статус (значок + приглушённый текст, не цвет ошибки) «Расшифровка отменена» и кнопка-слово «Расшифровать снова» (главное действие состояния); errorCode transcriptionFailed с действием retranscribe (TASK-409): прежний текст сбоя и та же кнопка «Расшифровать снова»; no_model — «Нет модели распознавания» с действием «Открыть модели»; started — строка «В очереди»",
                 "Безличные русские тексты текстовыми узлами; порядок фокуса; инварианты раскладки ADR-0035 §5; docs/agent-parity.md — строка (инструмента пока нет, последователь cancel_transcription / retranscribe)",
-                "E2E: сценарий в paratech/e2e/specs/recording — импорт → распознавание началось → отмена → «Расшифровать снова» → готово",
-                "Тесты: ключи строки для обоих состояний, один вызов при двойном клике, каждый код результата",
+                "E2E: сценарий в paratech/e2e/specs/recording — импорт → распознавание началось → отмена (первый раз — окно, «Да, отменить» с «Больше не спрашивать») → «Расшифровать снова» → готово",
+                "Тесты: ключи строки для отмены и для сбоя, окно подтверждения с флажком и без (второй раз без окна), Esc = «Не отменять», один вызов при двойном клике, каждый код результата",
                 "Файлы: paratech/desktop/frontend/src/recordingRowView.ts, src/pages/RecordingRow.tsx, src/activityView.ts, src/todayView.ts (только если строка «Сегодня» показывает тот же этап), test/*, paratech/e2e/specs/recording/*, docs/agent-parity.md",
                 "Исполнитель: frontend"
             ],
             "test_steps": [
                 "npm --prefix paratech/desktop/frontend run test и run build; npm --prefix paratech/e2e test",
-                "Владелец: docs/qa/tasks/TASK-393.md — длинная запись, распознавание идёт → значок отмены → whisper-cli исчез из диспетчера задач, строка «Расшифровка отменена»; перезапуск → по-прежнему отменена; «Расшифровать снова» → до конспекта"
+                "Владелец: docs/qa/tasks/TASK-393.md — длинная запись, распознавание идёт → значок отмены → в первый раз вопрос с «Больше не спрашивать» → «Да, отменить» → whisper-cli исчез из диспетчера задач, строка «Расшифровка отменена»; перезапуск → по-прежнему отменена; «Расшифровать снова» → до конспекта; следующая отмена — без вопроса, если флажок был отмечен"
+            ],
+            "dependencies": [
+                "TASK-392",
+                "TASK-409"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-394",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Hub · контракт] Heartbeat в потоковых вызовах: флаг heartbeat в CompleteStreamRequest и AgentStepStreamRequest, событие StreamHeartbeat после 15 с тишины",
+            "acceptance_criteria": [
+                "docs/adr/0026-agent-stop-rerun-streaming.md, «Addendum 2026-11-08», п. 6; владелец 08.11 (ответ 8: heartbeat Hub — да)",
+                "gateway.proto (аддитивно, buf lint и buf breaking зелёные): bool heartbeat = 2 в CompleteStreamRequest и AgentStepStreamRequest; message StreamHeartbeat {} и член oneof event heartbeat = 3 в CompleteStreamResponse и AgentStepStreamResponse; комментарии: только транспорт, не входит в отпечаток и ключ, после result не приходит; buf generate",
+                "hub/internal/input/connect: при heartbeat = true — событие StreamHeartbeat после 15 с без любого сообщения потока, до result или ошибки; один писатель на поток (дельты, heartbeat и result через одну горутину, без гонок Send); без флага поток побайтно как прежде; интервал — параметр обработчика (в тестах короткий)",
+                "Отпечаток и ключ идемпотентности не зависят от флага (тест: тот же ключ с флагом и без — бесплатный повтор, не IDEMPOTENCY_CONFLICT); heartbeat не списывается и не попадает в журнал запросов",
+                "Тесты: молчание провайдера 2,5 интервала → 2 heartbeat, затем дельты и result; ошибка провайдера после heartbeat — ошибка Connect без result; без флага heartbeat нет; повтор (replayed) — без heartbeat",
+                "Файлы: paratech/shared/proto/paratech/hub/v1/gateway.proto, paratech/shared/gen/**, paratech/hub/internal/input/connect/{gateway.go,agent.go} и новый heartbeat.go (+ тесты)",
+                "Исполнитель: hub-dev (opus)"
+            ],
+            "test_steps": [
+                "buf generate, buf lint и buf breaking в paratech/shared",
+                "go test -race ./hub/... ./shared/... (HUB_TEST_DATABASE_URL), тест архитектуры, golangci-lint run ./hub/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-395",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · hubclient] answer_question: таймаут по тишине 60 с вместо 5 минут на весь ответ; флаг heartbeat в обоих потоках, сторож сбрасывается на любом сообщении",
+            "acceptance_criteria": [
+                "docs/adr/0026-agent-stop-rerun-streaming.md, «Addendum 2026-11-08», п. 5, 6; progress/BUG-20261104-agent-stream.md (StepIdleTimeout, follow-up AnswerQuestion); владелец 08.11 (ответ 8)",
+                "AnswerQuestion: сторож тишины как у Step — 60 с между сообщениями Hub (до первого — 2 мин), общий предел 10 мин; прежний AnswerTimeout 5 мин как предел всего чтения убирается; таймаут — unavailable(ErrTimeout) как раньше; отмена вызывающим — ошибка ctx; унарный запасной Complete — свой предел, как у Step",
+                "Оба потока (CompleteStream, AgentStepStream) отправляют heartbeat = true; StreamHeartbeat сбрасывает сторож и больше ничего не делает (не дельта, не result); событие без известного члена oneof игнорируется",
+                "Hub без heartbeat (старый): поведение как сейчас (тест)",
+                "Тесты на фейковом Hub: ответ молчит 90 с, но шлёт heartbeat каждые 15 с — успех; 61 с полной тишины — ErrTimeout; поток дольше 5 мин с сообщениями — успех; предел 10 мин",
+                "Не параллельно с TASK-396 (adapters/hubclient)",
+                "Файлы: paratech/desktop/internal/adapters/hubclient/{answer.go,step*.go,client.go,config*.go} (+ тесты); cases и input не трогать",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/adapters/hubclient/... и тест архитектуры, GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-394"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-396",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Агент · ядро] Авто-повтор шага при временном сбое (5, 10, 20 с, до 3 раз, тот же ключ); сбой со стороны Hub — failed, не offline; «Повторить» — новый ключ и после offline",
+            "acceptance_criteria": [
+                "docs/adr/0026-agent-stop-rerun-streaming.md, «Addendum 2026-11-08», п. 1, 2, 4; владелец 08.11 (ответы 2 и 3: «Повторить» = новый ключ, авто-повтор 5/10/20 с, максимум 3). Начинать после слияния текущего раунда ошибок D1/D2 (paratech-check2: agentturn, agentState)",
+                "domain/jobs/services/backoff: Interactive(attempt) (time.Duration, bool) — 5 с, 10 с, 20 с, затем false; табличный тест",
+                "Доменный признак «ответил Hub» (например values.ErrHubFailure в domain/agent/values): hubclient добавляет его к ошибкам с ErrorDetail Hub (любой PROVIDER_ERROR, отказ, негодный ответ); транспорт, таймаут и unavailable без ErrorDetail его не несут; описать в cases/agentturn/ports.go",
+                "cases/agentturn: временный сбой Hub-вызова шага (транспорт, таймаут, unavailable, ограничение частоты Hub, повторяемый PROVIDER_ERROR, обрыв потока) — до 3 автоматических повторов с тем же ключом по backoff.Interactive через Clock; без повтора — квота, постоянный сбой, ErrInvalidResult, ErrTurnGone, «Стоп» студента; ожидание не держит блокировку сервиса (Ask, Stop и другие чаты не ждут); «Стоп» во время ожидания завершает его сразу и сохраняет STOPPED/user",
+                "Перед каждым повтором — обновление прогресса (порт Progress) с номером попытки; input/agent публикует его в Update (поле Retry); agent:update в input/wails несёт retry (0 — нет); frontend/src/bindings/agent.ts разбирает (вид — TASK-399)",
+                "После повторов: ошибка с признаком «ответил Hub» → StopFailed, иначе StopOffline; thread.Retry допустим и из offline (новый ключ ag:<thread>:<turn>:<step>:r<N>, бюджет thread.MaxRetries прежний); Continue с тем же ключом остаётся только для user и quota",
+                "Тесты: thread (Retry из offline и failed, бюджет); agentturn на фейковых часах и Hub — сбой, сбой, успех (один шаг, один ключ, ожидания 5 и 10 с); 4 сбоя → стоп с причиной по признаку; обрыв провайдера → failed; «Стоп» во время ожидания; Ask другого чата во время ожидания не ждёт; квота — без повтора",
+                "Файлы: paratech/desktop/internal/domain/jobs/services/backoff/*, domain/agent/thread/*, domain/agent/values/* (только признак и поле Retry), cases/agentturn/*, adapters/hubclient/errors.go, input/agent/* (только прогресс), input/wails/agent*.go (только поле retry), frontend/src/bindings/agent.ts, frontend/test/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/... ./desktop/internal/cases/agentturn/... ./desktop/internal/adapters/hubclient/... ./desktop/internal/input/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..., npm --prefix paratech/desktop/frontend run test"
+            ],
+            "dependencies": [
+                "TASK-395"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-397",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] answer_question: новый ключ на каждый вызов модели (повтор после отказа — новая попытка) и авто-повтор временного сбоя 5/10/20 с",
+            "acceptance_criteria": [
+                "docs/adr/0026-agent-stop-rerun-streaming.md, «Addendum 2026-11-08», п. 1, 3; progress/TASK-366.md решение 2 (повтор отказа 24 ч); владелец 08.11 (ответ 3)",
+                "input/agent answerScope: ag:<thread>:<turn>:<8 hex sha256(call id)>; проверить, что влезает в answer.MaxScopeBytes (иначе поднять предел в domain/coursework/answer; ключ остаётся ans:v2:, миграции нет); «Продолжить» того же шага с теми же call id — тот же ключ, бесплатный повтор (тест); второй вызов answer_question в той же просьбе — новый ключ (тест)",
+                "cases/answering.Ask: вариант для вопросов «сейчас» (инструмент агента и клик студента): временный сбой (ErrNoConnection не из-за ctx) — до 3 повторов с тем же ключом по backoff.Interactive (TASK-396), ожидание через порт Clock (добавить Sleep, если его нет), отмена ctx прерывает сразу; квота, отказ, негодный ответ — без повтора; задания билетов (cases/tickets) этот повтор не используют (тест)",
+                "Черновик ответа (DraftSink) при повторе начинается заново; коды ошибок результата инструмента прежние",
+                "Тесты: answering на фейках (сбой, сбой, успех — один ответ, один ключ; 4 сбоя → ErrNoConnection; отмена во время ожидания); ключи input/agent; билеты не повторяют",
+                "Файлы: paratech/desktop/internal/cases/answering/*, paratech/desktop/internal/input/agent/answer.go, paratech/desktop/internal/domain/coursework/answer/request.go (только MaxScopeBytes при необходимости), paratech/desktop/internal/input/wails/* (только если клик студента вызывает Ask), paratech/desktop/internal/app/* (только подключение часов) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/answering/... ./desktop/internal/cases/tickets/... ./desktop/internal/input/... ./desktop/internal/domain/coursework/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-396"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-398",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Агент · ядро] Второй вопрос всегда ждёт: очередь просьб чата в agentturn (до 5), «Отменить этот запрос» (Withdraw), запуск после окончания текущей",
+            "acceptance_criteria": [
+                "docs/adr/0026-agent-stop-rerun-streaming.md, «Addendum 2026-11-08», п. 7; владелец 08.11 (ответ 4); progress/TASK-380.md решение 1 (во время шага Hub — очередь, во время инструмента — отказ: теперь всегда очередь)",
+                "cases/agentturn: Ask, пока текущая просьба чата PLANNING или EXECUTING (шаг Hub или инструмент), сразу возвращает Queued{Thread, Ticket}, не дожидаясь блокировки идущего шага; очередь в памяти, FIFO, до 5 на чат, шестая — прежний ErrTurnInProgress; AWAITING_PLAN и AWAITING_ANSWERS — без изменений",
+                "Когда текущая просьба становится финальной (DONE, FAILED, CANCELLED, STOPPED по любой причине), старейший ждущий вопрос запускается следующей просьбой тем же путём, что Ask (упоминания и область — его собственные); запускает Driver (input/agent) в конце цикла через метод agentturn (например StartQueued); вся логика очереди — в agentturn",
+                "Withdraw(thread, ticket) → withdrawn | started | not_found; отозванный вопрос не отправляется и не оплачивается",
+                "input/wails: AgentService.Ask → {queued: true, ticket} или прежний ответ; новый AgentService.Withdraw(threadId, ticket) → {result}; agent:update просьбы, запущенной из очереди, несёт ticket, чтобы панель заменила строку; frontend/src/bindings/agent.ts разбирает (вид — TASK-399)",
+                "Закрытие приложения: ждущие вопросы не отправляются (очередь в памяти, тест на Close)",
+                "Тесты: вопрос во время шага Hub и во время инструмента — в очереди, ответ привязки сразу; порядок трёх; запуск после DONE, FAILED и STOPPED/user; Withdraw до запуска и после; шестой — отказ; два чата независимы",
+                "Файлы: paratech/desktop/internal/cases/agentturn/* (новый queue.go), paratech/desktop/internal/input/agent/driver*.go, paratech/desktop/internal/input/wails/agent*.go, paratech/desktop/internal/app/* (только подключение), paratech/desktop/frontend/src/bindings/agent.ts, frontend/test/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/agentturn/... ./desktop/internal/input/... ./desktop/internal/app/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..., npm --prefix paratech/desktop/frontend run test"
+            ],
+            "dependencies": [
+                "TASK-396"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-399",
+            "category": "ui",
+            "priority": "high",
+            "description": "[Агент · UI] Панель: строка очереди с «Отменить этот запрос», «Повторная попытка N из 3», после обрыва — «Ответ оборван. Можно повторить.» без блокировки поля; D3",
+            "acceptance_criteria": [
+                "docs/adr/0026-agent-stop-rerun-streaming.md, «Addendum 2026-11-08», п. 2, 4, 7; привязки — TASK-396 (retry), TASK-398 (queued, ticket, withdraw); progress/TASK-380.md D3, D4; владелец 08.11 (ответы 2, 3, 4)",
+                "Ждущий вопрос: прежняя строка «ждёт предыдущий запрос» и значок «Отменить этот запрос» (подсказка и aria-label); withdrawn — строка уходит, текст вопроса возвращается в поле ввода, если оно пустое; started — строку заменяет просьба с тем же ticket",
+                "Авто-повтор: приглушённая строка «Повторная попытка N из 3» рядом с таймером, пока идёт ожидание; уходит с ответом",
+                "Сбой со стороны Hub (failed) после показанного текста: текст остаётся, строка «Ответ оборван. Можно повторить.» со значком повтора (Retry, новый ключ); поле ввода доступно; «Нет связи с paratech» и блокировка поля — только от состояния подключения, никогда от одной просьбы (D4)",
+                "D3: «Отправить ещё раз» после отказа не дублирует вопрос в ленте и не оставляет строку «Предыдущий запрос ещё выполняется…» после ответа; с очередью эта строка бывает только при отказе шестого вопроса",
+                "Безличные тексты текстовыми узлами; тихие статусы, мелкие действия — значки с подсказками (правила владельца); UX-проверка coordinator-round.md 3a; ux-expert «ок»",
+                "Тесты фронтенда: строка очереди и отзыв, retry 1..3, failed после текста — поле доступно, offline — прежний текст, D3 без дубля",
+                "Файлы: paratech/desktop/frontend/src/agent/*, src/agentView.ts, src/agentState.ts, src/styles.css, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-396",
+                "TASK-398"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-400",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Агент · UI] «Предметы» обновляются после «Отменить» действия агента (D5); подробный текст окна «Скрыть» из TASK-249",
+            "acceptance_criteria": [
+                "progress/TASK-380.md D5; progress/TASK-249.md (текст ux-expert принят владельцем 08.11, ответ 27). Начинать после слияния раунда ошибок D1/D2 (agentState)",
+                "Открытое дерево «Предметов» и страница предмета перечитываются, когда agent:update приносит выполненное или отменённое действие агента над предметом (create_subject и другие по виду строки действия); без перезахода в раздел; чтение только при смене состояния строки действия, не на каждое обновление",
+                "Окно «Начать заново отсюда», вариант «Скрыть»: «Текст сообщения перейдёт в поле ввода. После отправки сообщения ниже пропадут из чата, и агент их забудет. Сделанные действия не отменяются.»; текст «Форк» не меняется",
+                "Тесты фронтенда: «Отменить» create_subject → предмета нет в открытом списке; текст окна",
+                "Файлы: paratech/desktop/frontend/src/pages/{SubjectsPage,SubjectsParts}.tsx, src/libraryView.ts (при необходимости), src/agent/RestartDialog.tsx, src/agentView.ts, src/agentState.ts (только событие), test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-401",
+            "category": "testing",
+            "priority": "medium",
+            "description": "[E2E] Пакет «Агент»: D3, D4, D5 зелёные; вопрос во время инструмента ждёт и отзывается; авто-повтор после обрыва провайдера; «Повторить» с новым ключом",
+            "acceptance_criteria": [
+                "docs/tasks/TASK-380-e2e-agent-pack.md; progress/TASK-380.md (D1–D5); docs/adr/0026-agent-stop-rerun-streaming.md, «Addendum 2026-11-08»; задачи TASK-395…400",
+                "Строки D3, D4, D5 проходят без ослабления проверок; D1/D2 — по итогам раунда ошибок",
+                "Новые строки: второй вопрос во время инструмента → «ждёт предыдущий запрос», затем ответы на оба по порядку; отзыв ждущего — второго запроса нет в llm.requests(); один обрыв провайдера (cutAfter), затем полный ответ → один ответ без «Ответ оборван», два вызова fake LLM; четыре обрыва → «Ответ оборван. Можно повторить.», поле ввода доступно, «Повторить» уходит с новым ключом (видно по запросу к Hub или его логу)",
+                "Убрать задержки delayMs 12–25 с строк 08/10/11/13, если D1 исправлен (follow-up TASK-380)",
+                "Ни одного незаписанного вызова LLM; пакет ≤ 5 мин",
+                "Файлы: paratech/e2e/specs/agent/*, paratech/e2e/scripts/llm/agent/*, paratech/e2e/src/fakellm/* (только счёт обрывов по правилу), README пакета",
+                "Исполнитель: tester (sonnet)"
+            ],
+            "test_steps": [
+                "bash paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --grep @agent",
+                "npm --prefix paratech/e2e test"
+            ],
+            "dependencies": [
+                "TASK-395",
+                "TASK-397",
+                "TASK-399",
+                "TASK-400"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-402",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Билеты · ядро] Файл билетов делится на части «Билеты 1–50», «Билеты 51–100», когда не помещается в предел документа",
+            "acceptance_criteria": [
+                "Владелец 08.11 (ответ 6); progress/TASK-366.md follow-up: без пределов ответа 100 билетов превышают values.MaxDocumentRunes в homeworkdoc.BuildTickets",
+                "homeworkdoc: BuildTicketParts(in) []TicketsPart{From, To, Document}: все билеты одним документом, если он проходит Validate; иначе последовательные части, каждая проходит Validate, набирается жадно по порядку (билет не делится); в заголовке и имени файла части — диапазон: «Ответы на билеты по дисциплине «…» (билеты 1–50)», файл «Билеты <предмет> 1–50»; сводка покрытия в каждой части — по её билетам; билет, который сам не помещается, обрезается по последнему целому утверждению с пометкой «Ответ сокращён: не поместился в файл.»",
+                "ticketset: Finish принимает список файлов (1..N по порядку); Content.Encode пишет files, ParseContent читает и прежнее поле file (одна часть) — без миграции; повтор шага находит уже положенные части (те же байты — тот же материал)",
+                "cases/tickets.assemble: строит части, рендерит и кладёт каждую в «Билеты» предмета; отмена посередине убирает все положенные части (как unfile сейчас)",
+                "input/wails/tickets.go: в виде набора files: [{materialId, from, to, name}] (прежнее поле file — первая часть, для совместимости); frontend/src/bindings/tickets.ts разбирает",
+                "Тесты: 100 билетов с длинными ответами → 2+ части, каждая Validate; 10 коротких → одна часть, имя без диапазона; старый JSON с file читается; повтор шага не удваивает файлы; отмена убирает все части",
+                "Файлы: paratech/desktop/internal/domain/coursework/services/homeworkdoc/tickets*.go, domain/coursework/ticketset/*, cases/tickets/*, input/wails/tickets*.go, frontend/src/bindings/tickets.ts, frontend/test/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/coursework/... ./desktop/internal/cases/tickets/... ./desktop/internal/input/wails/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..., npm --prefix paratech/desktop/frontend run test"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-403",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Билеты · UI] «Билеты к экзамену» показывают все части файла билетов",
+            "acceptance_criteria": [
+                "Владелец 08.11 (ответ 6); привязка — TASK-402 (files)",
+                "Готовый набор: список частей «Билеты 1–50», «Билеты 51–100» (одна часть — как сейчас), у каждой прежние действия (открыть, показать в папке и т. п.); строка «Файл разделён на части: не помещается в один документ.» только когда частей больше одной",
+                "Безличные тексты текстовыми узлами; мелкие действия — значки с подсказками; UX-проверка coordinator-round.md 3a",
+                "Тесты фронтенда: одна часть, три части, прежний ответ без files",
+                "Файлы: paratech/desktop/frontend/src/pages/{TicketsPage,TicketsParts}.tsx, src/ticketsView.ts, src/pages/tickets.css, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-402"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-404",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Чаты агента · ядро] Переносы строк в очищенных ответах: колонка agent_turns.reply_text (миграция), очистка пишет её, ранние сообщения показывают её",
+            "acceptance_criteria": [
+                "docs/adr/0028-agent-chats-context-ring.md «Retention», строка «Owner 2026-11-08»; progress/TASK-250.md решения 2 и 4 (планы хранятся всегда — без изменений)",
+                "Миграция (следующий свободный номер при push; не параллельно с другой задачей, добавляющей миграцию): agent_turns.reply_text TEXT NULL CHECK (reply_text IS NULL OR (json_valid(reply_text) AND json_type(reply_text) = 'array' AND length(reply_text) <= 65536)); Down удаляет; schema.sql зеркалит; migrate_test",
+                "domain/agent/thread: замороженный полный текст ответа (тексты карточек с переводами строк, те же проверки, что у reply_line, кроме однострочности; больше 64 KiB — обрезка по целому символу с «…»)",
+                "cases/agentretention: в той же транзакции, что фиксирует reply_line, пишет reply_text, только пока он NULL; без reply_text шаги не удаляются",
+                "Ранние сообщения (cases/agentchats, earlier): reply_text, если есть, иначе reply_line; переводы строк доходят до панели (тест)",
+                "Тесты: очистка на управляемых часах (91 день) сохраняет переносы; старый ряд без reply_text показывается по reply_line; sqlc generate дважды без расхождений",
+                "Файлы: paratech/desktop/pkg/migrations/<NNNN>_agent_reply_text.sql, docs/contracts/schema.sql, paratech/desktop/internal/adapters/sqlite/{agentretention*,agent*}.go, adapters/sqlite/queries/agent.sql, sqlcgen/*, migrate_test.go, domain/agent/thread/*, cases/agentretention/*, cases/agentchats/* (только earlier), input/wails/agent*.go (только если переносы теряются при отображении) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/agent/... ./desktop/internal/cases/agentretention/... ./desktop/internal/cases/agentchats/... ./desktop/internal/adapters/sqlite/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-405",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Окно-напоминание · ядро] «Подключиться» доступно и во время записи, начатой из этого окна",
+            "acceptance_criteria": [
+                "Владелец 08.11 (ответ 12); progress/TASK-370.md follow-up; docs/adr/0032-lesson-call-links.md «Addendum 2026-11-08»",
+                "cases/recordingprompt.CallSubject(id): кроме текущей подсказки в состоянии OFFERED — и для подсказки, из которой начата запись, пока эта запись идёт (тот же урок, тот же предмет через subjectmatch); после остановки записи, для другой записи и ad-hoc — пусто; прочее как прежде (ошибки — пусто, один код в логе)",
+                "Тесты на фейках: OFFERED, запись этой подсказки идёт, после остановки, чужой id, ad-hoc",
+                "Файлы: paratech/desktop/internal/cases/recordingprompt/calllink*.go (и порт, если нужен признак идущей записи), paratech/desktop/internal/app/prompts.go (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/recordingprompt/... ./desktop/internal/app/... и тест архитектуры, GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-406",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Окно-напоминание · UI] «Открыть ещё раз» вместо серой кнопки, «Подключиться» во время записи, нейтральная точка до записи",
+            "acceptance_criteria": [
+                "Владелец 08.11 (ответы 11, 12, 13); progress/TASK-370.md; привязка — TASK-405",
+                "После открытия ссылки кнопка — «Открыть ещё раз», активна и снова открывает тем же путём (по ID предмета); заметка «Ссылка открыта. Запись пока не идёт.» — только до начала записи; двойной клик — одно открытие (состояние «Открытие…»); ошибка — как прежде, кнопка активна",
+                "Во время записи, начатой из этого окна: «Подключиться» (или «Открыть ещё раз», если уже открывали) — вторичная кнопка-слово в виде записи, не больше одного ряда, ширина 300 px соблюдается",
+                "Точка: в предложении записи — нейтральная (приглушённый цвет, без пульса); красная пульсирующая — только пока идёт запись",
+                "a11y из follow-ups TASK-370: строка ошибки с role=status, подтверждение объявляется",
+                "Тесты: joinView ready → opening → opened (кликабельно) → opening; вид записи с кнопкой и без ссылки; класс точки по состоянию",
+                "Файлы: paratech/desktop/frontend/src/popup/*, src/callLinkView.ts (тексты), test/* (+ тесты); UX-проверка coordinator-round.md 3a; ux-expert «ок»",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-405"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-407",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Бета · локальный Hub · ядро] Запуск контейнера базы, когда Docker Desktop включён: факты, правило диагностики, порт DatabaseStarter, Ensure",
+            "acceptance_criteria": [
+                "docs/adr/0036-beta-local-hub.md §8 и «Answered 2026-11-08» (О1); продолжение TASK-387",
+                "domain/localhub/values: Facts.DatabaseStartable и Facts.DatabaseStartFailed; Reason database_start_failed (NextStep open_logs, в Reasons()); Status starting_database; Diagnosis.CanStartDatabase()",
+                "diagnosis.Diagnose: движок Docker есть, порт базы не отвечает, DatabaseStartable и не DatabaseStartFailed → not_running / database_down с CanStartDatabase; так же для degraded (healthz да, readyz нет); DatabaseStartFailed → database_start_failed; без DatabaseStartable — как прежде (database_down, ручной шаг); движка нет — docker_off, запуска нет; табличный тест всех строк",
+                "cases/localhub/ports.go: DatabaseStarter.StartDatabase(ctx) error (комментарий: вызывается только при работающем движке Docker; Docker Desktop приложение не запускает)",
+                "Service.Ensure: при CanStartDatabase — состояние starting_database, StartDatabase (предел 150 с), затем проба порта раз в 1 с до 30 с, затем обычный запуск Hub; сбой запоминается (DatabaseStartFailed) до Recheck, успешного SetSecret(database-url) или пробы, где движок был выключен и снова включён; один полёт, как у запуска Hub",
+                "Тесты на фейках: Docker выключен — StartDatabase не вызывается; включён и база не отвечает — один вызов, затем запуск Hub; сбой — database_start_failed, следующий автоматический Ensure не вызывает снова, Recheck вызывает; degraded с остановленной базой — запуск контейнера без перезапуска Hub; база не startable — прежний database_down",
+                "Файлы: paratech/desktop/internal/domain/localhub/**, paratech/desktop/internal/cases/localhub/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/localhub/... ./desktop/internal/cases/localhub/... и тест архитектуры",
+                "golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-408",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Бета · локальный Hub · адаптер] hubprocess.StartDatabase: docker compose up -d --wait postgres без окна; факт DatabaseStartable; копия compose-файла в бету",
+            "acceptance_criteria": [
+                "docs/adr/0036-beta-local-hub.md §8; ревью безопасности обязательно (docs/process/security-review.md)",
+                "docker.exe: <FOLDERID_ProgramFiles>\\Docker\\Docker\\resources\\bin\\docker.exe (KnownFolderPath из x/sys/windows), обычный файл, не точка повторной обработки; без поиска в PATH и без оболочки; exec.Cmd{Path, Args: [docker.exe, compose, -f, <exeDir>\\hub\\docker-compose.yml, -p, hub, up, -d, --wait, postgres]}; Dir = <DataDir>/hub; HideWindow, CREATE_NO_WINDOW",
+                "Окружение: родительское без HUB_* и LA_* плюс HUB_PG_PORT = порт адреса БД; адрес БД (с паролем) читается из хранилища hubserver только ради хоста и порта, не передаётся, не пишется в лог и в ошибки; хост не 127.0.0.1 и не localhost — не startable",
+                "Вывод → <DataDir>/logs/hub-db-start.log (обнуляется при каждом запуске, не больше 1 МиБ); предел 120 с, по нему процесс завершается; код выхода не 0 — ошибка с кодом, без вывода",
+                "Facts: DatabaseStartable = compose-файл и docker.exe на месте и хост БД loopback; заглушки _other.go — ErrUnsupported и false",
+                "build-alpha.ps1 -Beta копирует paratech/hub/docker-compose.yml в <out>\\hub\\docker-compose.yml; без -Beta папка hub в выходной папке удаляется; docs/qa/run-alpha.md — строка раздела сборки (без строк журнала)",
+                "Тесты: на Windows с тестовым бинарём как фейковым docker.exe (печатает аргументы и имена переменных): аргументы ровно как выше, секрета нет ни в аргументах, ни в окружении (кроме HUB_PG_PORT), ни в логе; таймаут; код выхода; на Linux — заглушки",
+                "Ручная проверка на машине владельца при включённом Docker Desktop (агенты Docker Desktop не запускают; выключен — попросить владельца): остановить контейнер базы Hub → приложение поднимает его, данные на месте (тот же проект hub и том); итог в progress",
+                "Файлы: paratech/desktop/internal/adapters/hubprocess/*, paratech/desktop/build-alpha.ps1, docs/qa/run-alpha.md (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/adapters/hubprocess/... на Windows (фейковый docker.exe) и на Linux (заглушки), тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..., powershell -NoProfile -ExecutionPolicy Bypass -File paratech/desktop/build-alpha.ps1 -Beta -Smoke"
+            ],
+            "dependencies": [
+                "TASK-388",
+                "TASK-407"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-409",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Записи · ядро] «Расшифровать снова» и после сбоя распознавания, не только после отмены",
+            "acceptance_criteria": [
+                "Владелец 08.11 (ответ 17); продолжение TASK-392 (её критерии не меняются)",
+                "retranscribe.Decide: можно и когда самая новая задача STT окончательно FAILED, транскрипта нет и незавершённых задач STT нет; нельзя для сбоя «нет речи» (transcription.IsNoSpeech: там «Проверить звук»); табличный тест",
+                "Цепочка (cases/activity/chain.go): самая новая STT FAILED, не «нет речи» → stage failed, errorCode transcriptionFailed, action retranscribe; no_model при Retranscribe — как в TASK-392",
+                "Сценарий в desktop/tests с фейковым whisper-cli: сбой → Retranscribe → COMPLETED и постобработка",
+                "Файлы: paratech/desktop/internal/domain/transcription/services/retranscribe/*, cases/activity/chain.go, cases/transcribe/* (только если Retranscribe проверяет состояние), frontend/src/bindings/activity.ts (только код действия, если он новый), paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/transcription/... ./desktop/internal/cases/activity/... ./desktop/internal/cases/transcribe/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
             ],
             "dependencies": [
                 "TASK-392"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-410",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[UI · даты] Поля даты и времени показывают русский формат (ДД.ММ.ГГГГ, 24 ч) на любой локали Windows",
+            "acceptance_criteria": [
+                "Владелец 08.11 (ответ 19): на машине владельца поля даты — месяц/день (формат США)",
+                "Поля input type=date и type=time WebView2 форматирует по языку браузера, а не по lang страницы. Решение: WebView2 с языком ru — Windows.AdditionalBrowserArgs = [--lang=ru] в опциях приложения Wails (wails v3.0.0-beta.29, pkg/application/application_options.go:288–294; поле проверить по исходнику); lang=ru у html главного окна и popup",
+                "Проверка на этой машине (локаль США): срок в HomeworkDialogs, поля в RecordingImportPanel и KnowledgeParts — ДД.ММ.ГГГГ и 24 ч; снимки в progress. Если флаг формат не меняет — остановиться и сообщить (тогда отдельная задача frontend: своё поле даты); ничего не придумывать",
+                "Тест Go: опции приложения содержат флаг; режим E2E не ломается",
+                "Файлы: место сборки application.Options в paratech/desktop/internal/input/wails/* или internal/app/* (только флаг), html-файлы окон в paratech/desktop/frontend/ (lang), тесты",
+                "Исполнитель: go-core (sonnet)"
+            ],
+            "test_steps": [
+                "go test -race затронутого пакета, GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/...",
+                "Запуск приложения на этой машине: формат полей даты, снимки"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-411",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Задания · ядро] «Сделать задание»: ИИ по тексту задания выбирает короткий ответ или работу под ключ (workroute, turnkey.Route, DoAssignment)",
+            "acceptance_criteria": [
+                "docs/adr/0034-navigation.md «Answered 2026-11-08», В2; ADR-0025 (разбор задания TRIAGE_ASSIGNMENT); владелец 08.11 (ответ 21: одна кнопка, без выбора)",
+                "Новый чистый domain/coursework/services/workroute: Decide(work.WorkType, fileFormat) → short | turnkey по таблице ADR (turnkey: referat, doklad, essay, lab_report, presentation или любой требуемый формат файла; short: answers, problems, other без формата); неизвестное — turnkey; табличный тест",
+                "cases/turnkey.Route(ctx, assignmentID) → (Route, error): запрос раунда 1 тем же конструктором и с теми же входами, что Start (тест: один ключ tri:v1: у Route и следующего Start, повтор Hub бесплатный); ничего не сохраняет; ошибки — существующие коды turnkey (offline, quota, refused, no_text)",
+                "input/wails: HomeworkService.DoAssignment(id) → {route: short | turnkey, problem и прежний вид результата}: short — тот же use case, что кнопка «Быстрый черновик», turnkey — turnkey.Start; повторный клик во время вызова — один вызов",
+                "frontend/src/bindings/homework.ts: doAssignment с разбором; docs/agent-parity.md — строка «Сделать задание» (у агента оба пути уже есть)",
+                "Тесты: Route на фейковом читателе для каждого вида; DoAssignment ведёт в нужный use case; ошибки",
+                "Файлы: paratech/desktop/internal/domain/coursework/services/workroute/* (новый), cases/turnkey/*, input/wails/homework*.go, input/wails/turnkey.go (только при необходимости), internal/app/* (только подключение), frontend/src/bindings/homework.ts, frontend/test/*, docs/agent-parity.md (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/coursework/... ./desktop/internal/cases/turnkey/... ./desktop/internal/input/wails/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..., npm --prefix paratech/desktop/frontend run test"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-412",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Задание, удалённое через карточку «Да», можно вернуть: запись журнала DONE с RestoreAssignment, «Отменить» и change_assignment{restore}",
+            "acceptance_criteria": [
+                "docs/adr/0033-agent-parity.md «Answered 2026-11-08»; progress/TASK-320.md решение 4 и follow-up про «Нет»; владелец 08.11 (ответ 24). Начинать после слияния раунда ошибок D1/D2",
+                "input/wails agentconfirm_assignment: «Да» удаляет как прежде и переводит запись журнала карточки (preview:<id>) в DONE с компенсацией RestoreAssignment (версия после удаления); сбой записи журнала не отменяет удаление и пишется в лог",
+                "Строка действия карточки показывает «Отменить» (тот же путь компенсации, что у удаления класса U); change_assignment{restore} (deletedByChat) принимает такую запись",
+                "«Нет» на карточке сохраняется: после перезагрузки карточка не «ждёт»",
+                "Тесты: «Да» → журнал DONE, «Отменить» возвращает задание; restore агентом того же чата — успех, другого чата — отказ; «Нет» сохраняется",
+                "Файлы: paratech/desktop/internal/input/wails/agentconfirm_assignment.go, agentconfirm.go (только ветка вида), paratech/desktop/internal/input/agent/assignment_change.go (только deletedByChat), paratech/desktop/internal/cases/agentjournal/* (только если нет метода завершения записи), internal/app/* (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/... ./desktop/internal/cases/agentjournal/... ./desktop/internal/app/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-413",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Предметы · ядро] Готовая работа переживает стирание предмета: материал detached (миграция), задание помечено «предмет удалён»",
+            "acceptance_criteria": [
+                "docs/adr/0027-own-notes.md, «Owner 2026-11-08: the finished paper of a work survives the purge»; progress/TASK-308.md follow-up; владелец 08.11 (ответ 25)",
+                "domain/library/material: статус detached, Detach(now) из active или removed (без предмета и папки); detached в библиотеку не возвращается; табличный тест",
+                "Миграция (следующий свободный номер при push; не параллельно с другой задачей, добавляющей миграцию): пересборка materials со status IN ('active','removed','detached') и CHECK (status <> 'detached' OR subject_id IS NULL); внешние ключи и индексы как прежде (образец 0041); schema.sql зеркалит; migrate_test; старые БД открываются",
+                "cases/subjectpurge: материал — бумага работы (works.writing называет его; запрос через json_extract) — не стирается и не уходит во «Входящие», а Detach; повтор безопасен; исходный файл работы — как прежде (во «Входящие»)",
+                "Чтения библиотеки (списки, «Входящие», поиск, база знаний, упоминания, инструменты агента) detached не показывают (тест); работа открывает и отправляет detached-файл как прежде; сборка мусора blob удаляет detached, на который не ссылается ни одна работа",
+                "input/wails: subjectRemoved в виде задания и в строках «Заданий» (предмета нет: удалён или стёрт); frontend/src/bindings/homework.ts разбирает (вид — TASK-414)",
+                "Сценарий desktop/tests на настоящем SQLite: предмет с заданием и готовой работой удалён, через 3 дня стёрт; задание и работа на месте, файл открывается, во «Входящих» его нет, subjectRemoved = true; работа удалена и стёрта → файл собран",
+                "Файлы: paratech/desktop/internal/domain/library/material/*, paratech/desktop/pkg/migrations/*, docs/contracts/schema.sql, adapters/sqlite/{library*,materials*,works*}.go, adapters/sqlite/queries/*, sqlcgen/*, migrate_test.go, cases/subjectpurge/*, cases/library/* (только фильтры чтения, если нужны), input/wails/homework*.go, frontend/src/bindings/homework.ts, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/library/... ./desktop/internal/cases/subjectpurge/... ./desktop/internal/cases/library/... ./desktop/internal/adapters/sqlite/... ./desktop/internal/input/wails/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-414",
+            "category": "ui",
+            "priority": "low",
+            "description": "[Задания · UI] Пометка «предмет удалён» у задания и его работы",
+            "acceptance_criteria": [
+                "Владелец 08.11 (ответ 25); привязка — TASK-413 (subjectRemoved)",
+                "Строка «Заданий» и страница задания: рядом с названием предмета тихая пометка (значок + приглушённый текст) «предмет удалён»; работа и её файл открываются и отправляются как прежде; без цветных заливок",
+                "Безличные тексты текстовыми узлами; UX-проверка coordinator-round.md 3a",
+                "Тесты фронтенда: пометка есть и нет",
+                "Файлы: paratech/desktop/frontend/src/pages/{HomeworkPage,AssignmentFilter,AssignmentDoneParts}.tsx (только где выводится предмет), src/homeworkView.ts, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-413"
             ],
             "status": "pending"
         }
