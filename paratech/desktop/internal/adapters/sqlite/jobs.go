@@ -573,3 +573,21 @@ func (r *JobRepository) LatestByKeyPrefix(ctx context.Context, typ job.Type, pre
 	}
 	return jobFromRow(row)
 }
+
+// ListByKeyPrefix returns every job of type typ, in any status, whose idempotency key starts with prefix, oldest
+// first by creation time, then id (for example every STT job of one recording); none is an empty list.
+func (r *JobRepository) ListByKeyPrefix(ctx context.Context, typ job.Type, prefix string) ([]*job.Job, error) {
+	rows, err := r.db.Queries(ctx).ListJobsByKeyPrefix(ctx, sqlcgen.ListJobsByKeyPrefixParams{Type: string(typ), Prefix: prefix})
+	if err != nil {
+		return nil, MapError(ctx, err)
+	}
+	out := make([]*job.Job, 0, len(rows))
+	for _, row := range rows {
+		j, err := jobFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, nil
+}

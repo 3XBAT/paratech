@@ -24,8 +24,18 @@ func chainJobTypes() []job.Type { return append(recordingJobTypes(), transcriptJ
 // chainOf derives the one status of the whole chain of a recording (TASK-076) from the recording and the jobs that
 // process it: capture, saving, transcription, then the summary and the homework, then the lecture text (TASK-090). Of
 // several jobs of one type only the newest counts: an older one was replaced (for example a transcription with another
-// model).
+// model, or one started again after a cancel). CanCancel follows the newest STT job of a recording whose jobs decide
+// the chain (TASK-392); a silent one shows no transcription to cancel.
 func chainOf(r *recording.Recording, jobs []*job.Job) Chain {
+	c := chainStage(r, jobs)
+	stt := newest(jobs, transcription.STTJobType)
+	if r.Status() == recording.StatusCompleted && !r.Silent() && stt != nil && !stt.Status().IsTerminal() {
+		c.CanCancel = true
+	}
+	return c
+}
+
+func chainStage(r *recording.Recording, jobs []*job.Job) Chain {
 	switch r.Status() {
 	case recording.StatusCompleted:
 		if r.Silent() {
@@ -64,6 +74,11 @@ func chainOf(r *recording.Recording, jobs []*job.Job) Chain {
 		return Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: stt.Progress().Percent()}
 	case noSpeech(stt):
 		return noSpeechChain(StepTranscription)
+	case stt.Status() == job.StatusCancelled:
+		// The user's cancel, not a failure: the recording stays and may be transcribed again.
+		return Chain{
+			Stage: StageFailed, Step: StepTranscription, ErrorCode: ErrorTranscriptionCancelled, Action: ActionRetranscribe,
+		}
 	case failedJob(stt):
 		return Chain{
 			Stage: StageFailed, Step: StepTranscription, ErrorCode: ErrorTranscriptionFailed, JobError: stt.LastError(),

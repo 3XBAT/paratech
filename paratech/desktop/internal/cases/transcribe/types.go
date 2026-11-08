@@ -49,10 +49,12 @@ type EnqueueDeps struct {
 	Pending    PendingRecordings
 	Models     ModelResolver
 	Jobs       JobEnqueuer
-	IDs        IDGenerator
-	Tx         Tx
-	Clock      Clock
-	Log        *slog.Logger
+	// Transcripts tells Retranscribe whether the recording has a transcript.
+	Transcripts TranscriptFinder
+	IDs         IDGenerator
+	Tx          Tx
+	Clock       Clock
+	Log         *slog.Logger
 
 	// MaxAttempts caps the attempts of an STT job (the runner's backoff cap); 0 means backoff.DefaultSpec's.
 	MaxAttempts int

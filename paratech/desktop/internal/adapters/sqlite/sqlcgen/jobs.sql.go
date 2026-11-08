@@ -495,6 +495,64 @@ func (q *Queries) ListJobIDsByStatus(ctx context.Context, statuses []string) ([]
 	return items, nil
 }
 
+const listJobsByKeyPrefix = `-- name: ListJobsByKeyPrefix :many
+SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at, cause FROM jobs
+WHERE type = ?1
+  AND id IS NOT NULL
+  AND substr(idempotency_key, 1, length(CAST(?2 AS TEXT))) = CAST(?2 AS TEXT)
+ORDER BY created_at, id
+`
+
+type ListJobsByKeyPrefixParams struct {
+	Type   string
+	Prefix string
+}
+
+// Every job of the type whose idempotency key starts with the prefix, in any status, oldest first (TASK-392: the STT
+// jobs of a recording for the cancel and the new transcription after it). Same exact prefix comparison as HasJobKeyPrefix.
+func (q *Queries) ListJobsByKeyPrefix(ctx context.Context, arg ListJobsByKeyPrefixParams) ([]Job, error) {
+	rows, err := q.db.QueryContext(ctx, listJobsByKeyPrefix, arg.Type, arg.Prefix)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Job{}
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.Status,
+			&i.IdempotencyKey,
+			&i.Payload,
+			&i.PinnedModelID,
+			&i.Attempts,
+			&i.MaxAttempts,
+			&i.NextRunAt,
+			&i.RunNow,
+			&i.ProgressPercent,
+			&i.Checkpoint,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.Version,
+			&i.UpdatedAt,
+			&i.Cause,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listJobsByStatus = `-- name: ListJobsByStatus :many
 SELECT id, type, status, idempotency_key, payload, pinned_model_id, attempts, max_attempts, next_run_at, run_now, progress_percent, checkpoint, last_error, created_at, started_at, finished_at, version, updated_at, cause FROM jobs
 WHERE status IN (/*SLICE:statuses*/?)

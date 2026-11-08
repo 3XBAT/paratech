@@ -164,22 +164,25 @@ func TestChainOf(t *testing.T) {
 		},
 		{
 			name: "transcription queued", rec: recording.StatusCompleted, jobs: []func(t *testing.T) *job.Job{in("s", stt, job.StatusQueued)},
-			want: Chain{Stage: StageQueued, Step: StepTranscription, QueueReason: QueueInLine},
+			want: Chain{Stage: StageQueued, Step: StepTranscription, QueueReason: QueueInLine, CanCancel: true},
 		},
 		{
 			name: "transcription waits for power", rec: recording.StatusCompleted,
 			jobs: []func(t *testing.T) *job.Job{in("s", stt, job.StatusWaitingForPower)},
 			want: Chain{
 				Stage: StageQueued, Step: StepTranscription, QueueReason: QueuePower, Action: ActionRunNow, ActionJob: "s",
+				CanCancel: true,
 			},
 		},
 		{
 			name: "transcription retries", rec: recording.StatusCompleted, jobs: []func(t *testing.T) *job.Job{in("s", stt, job.StatusRetryWait)},
-			want: Chain{Stage: StageQueued, Step: StepTranscription, QueueReason: QueueRetry, JobError: "hub timeout"},
+			want: Chain{
+				Stage: StageQueued, Step: StepTranscription, QueueReason: QueueRetry, JobError: "hub timeout", CanCancel: true,
+			},
 		},
 		{
 			name: "transcription runs", rec: recording.StatusCompleted, jobs: []func(t *testing.T) *job.Job{in("s", stt, job.StatusRunning)},
-			want: Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42},
+			want: Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42, CanCancel: true},
 		},
 		{
 			name: "transcription failed", rec: recording.StatusCompleted, jobs: []func(t *testing.T) *job.Job{in("s", stt, job.StatusFailed)},
@@ -190,7 +193,9 @@ func TestChainOf(t *testing.T) {
 		},
 		{
 			name: "transcription cancelled", rec: recording.StatusCompleted, jobs: []func(t *testing.T) *job.Job{in("s", stt, job.StatusCancelled)},
-			want: Chain{Stage: StageFailed, Step: StepTranscription, ErrorCode: ErrorTranscriptionFailed, Action: ActionOpenModels},
+			want: Chain{
+				Stage: StageFailed, Step: StepTranscription, ErrorCode: ErrorTranscriptionCancelled, Action: ActionRetranscribe,
+			},
 		},
 		{
 			name: "the newest transcription counts", rec: recording.StatusCompleted,
@@ -198,7 +203,7 @@ func TestChainOf(t *testing.T) {
 				in("old", stt, job.StatusFailed),
 				func(t *testing.T) *job.Job { return jobIn(t, "new", stt, time.Minute, job.StatusRunning) },
 			},
-			want: Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42},
+			want: Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42, CanCancel: true},
 		},
 		{
 			name: "transcribed, post-processing not enqueued yet", rec: recording.StatusCompleted,
@@ -290,7 +295,7 @@ func TestChainOf(t *testing.T) {
 				done("s", stt), done("a", sum), done("h", hw),
 				func(t *testing.T) *job.Job { return jobIn(t, "s2", stt, time.Hour, job.StatusRunning) },
 			},
-			want: Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42},
+			want: Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42, CanCancel: true},
 		},
 		{
 			name: "a newer transcription completed, its post-processing not enqueued yet", rec: recording.StatusCompleted,
@@ -398,6 +403,61 @@ func TestChainOf(t *testing.T) {
 				jobs = append(jobs, mk(t))
 			}
 			if got := chainOf(recordingIn(t, tt.rec), jobs); got != tt.want {
+				t.Fatalf("chain = %+v\nwant    %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TASK-392: the newest STT job decides; a cancelled one offers «Расшифровать снова», the new job replaces it, and
+// only an unfinished newest job can be cancelled.
+func TestChainOfCancelledTranscription(t *testing.T) {
+	const stt = job.Type("stt")
+	cancelled := Chain{
+		Stage: StageFailed, Step: StepTranscription, ErrorCode: ErrorTranscriptionCancelled, Action: ActionRetranscribe,
+	}
+	tests := []struct {
+		name string
+		jobs []*job.Job
+		want Chain
+	}{
+		{"cancelled", []*job.Job{jobIn(t, "s", stt, 0, job.StatusCancelled)}, cancelled},
+		{
+			"started again, waits",
+			[]*job.Job{jobIn(t, "s", stt, 0, job.StatusCancelled), jobIn(t, "s2", stt, time.Minute, job.StatusQueued)},
+			Chain{Stage: StageQueued, Step: StepTranscription, QueueReason: QueueInLine, CanCancel: true},
+		},
+		{
+			"started again, runs",
+			[]*job.Job{jobIn(t, "s", stt, 0, job.StatusCancelled), jobIn(t, "s2", stt, time.Minute, job.StatusRunning)},
+			Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42, CanCancel: true},
+		},
+		{
+			"started again, cancelled again",
+			[]*job.Job{jobIn(t, "s2", stt, time.Minute, job.StatusCancelled), jobIn(t, "s", stt, 0, job.StatusCancelled)},
+			cancelled,
+		},
+		{
+			"started again, done: post-processing follows",
+			[]*job.Job{jobIn(t, "s", stt, 0, job.StatusCancelled), jobIn(t, "s2", stt, time.Minute, job.StatusCompleted)},
+			Chain{Stage: StageQueued, Step: StepSummary, QueueReason: QueueInLine},
+		},
+		{
+			"an older one cancelled, the newest failed",
+			[]*job.Job{jobIn(t, "s", stt, 0, job.StatusCancelled), jobIn(t, "s2", stt, time.Minute, job.StatusFailed)},
+			Chain{
+				Stage: StageFailed, Step: StepTranscription, ErrorCode: ErrorTranscriptionFailed, JobError: "bad answer",
+				Action: ActionOpenModels,
+			},
+		},
+		{
+			"waits for the network", []*job.Job{jobIn(t, "s", stt, 0, job.StatusWaitingForNetwork)},
+			Chain{Stage: StageQueued, Step: StepTranscription, QueueReason: QueueNetwork, CanCancel: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := chainOf(recordingIn(t, recording.StatusCompleted), tt.jobs); got != tt.want {
 				t.Fatalf("chain = %+v\nwant    %+v", got, tt.want)
 			}
 		})

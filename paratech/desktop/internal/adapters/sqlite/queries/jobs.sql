@@ -166,3 +166,12 @@ WHERE type = sqlc.arg(type)
   AND substr(idempotency_key, 1, length(CAST(sqlc.arg(prefix) AS TEXT))) = CAST(sqlc.arg(prefix) AS TEXT)
 ORDER BY created_at DESC, id DESC
 LIMIT 1;
+
+-- Every job of the type whose idempotency key starts with the prefix, in any status, oldest first (TASK-392: the STT
+-- jobs of a recording for the cancel and the new transcription after it). Same exact prefix comparison as HasJobKeyPrefix.
+-- name: ListJobsByKeyPrefix :many
+SELECT * FROM jobs
+WHERE type = sqlc.arg(type)
+  AND id IS NOT NULL
+  AND substr(idempotency_key, 1, length(CAST(sqlc.arg(prefix) AS TEXT))) = CAST(sqlc.arg(prefix) AS TEXT)
+ORDER BY created_at, id;

@@ -329,6 +329,9 @@ type Querier interface {
 	// Ids only, so that one row that cannot be read does not hide the others (startup recovery loads each with GetJob).
 	// SQLite accepts NULL in a TEXT primary key; such a row cannot be addressed by id, so it is left out.
 	ListJobIDsByStatus(ctx context.Context, statuses []string) ([]string, error)
+	// Every job of the type whose idempotency key starts with the prefix, in any status, oldest first (TASK-392: the STT
+	// jobs of a recording for the cancel and the new transcription after it). Same exact prefix comparison as HasJobKeyPrefix.
+	ListJobsByKeyPrefix(ctx context.Context, arg ListJobsByKeyPrefixParams) ([]Job, error)
 	ListJobsByStatus(ctx context.Context, statuses []string) ([]Job, error)
 	// What is stored for the newest transcript of each lesson (the order of LatestTranscriptByRecording): its id (empty: none),
 	// whether it has a summary and a finished lecture text (blocks are empty until a run completed: the rule of

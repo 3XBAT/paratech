@@ -10,6 +10,7 @@ import (
 	"paratech/desktop/internal/cases/homeworkflow"
 	"paratech/desktop/internal/cases/jobrunner"
 	"paratech/desktop/internal/cases/recordingsession"
+	"paratech/desktop/internal/cases/transcribe"
 	"paratech/desktop/internal/domain/jobs/job"
 	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/recording/values"
@@ -66,15 +67,39 @@ const (
 	switchFailed     = "failed"      // the capture of the new source did not start
 )
 
-// JobForcer is the "Run now" action; satisfied by jobrunner.Service.
+// JobForcer is the "Run now" action and the cancel of a job (TASK-392); satisfied by jobrunner.Service.
 type JobForcer interface {
 	ForceRun(ctx context.Context, id shared.JobID) error
+	Cancel(ctx context.Context, id shared.JobID) error
 }
 
-// PostProcessRetrier starts the post-processing of a recording again (TASK-086); satisfied by homeworkflow.Rerunner.
+// PostProcessRetrier starts the work of a recording again: the post-processing (TASK-086, homeworkflow.Rerunner) and a
+// cancelled transcription (TASK-392, transcribe.Enqueuer); the app joins both.
 type PostProcessRetrier interface {
 	Retry(ctx context.Context, rec shared.RecordingID, work homeworkflow.Work) (id shared.JobID, created bool, err error)
 	RedoSummary(ctx context.Context, rec shared.RecordingID) (id shared.JobID, created bool, err error)
+	// ActiveTranscription returns the unfinished STT job of the recording; ok is false when there is none.
+	ActiveTranscription(ctx context.Context, rec shared.RecordingID) (id shared.JobID, ok bool, err error)
+	// Retranscribe creates a new STT job after a cancel; transcribe.ErrNotAllowed or transcribe.ErrNoModel refuse.
+	Retranscribe(ctx context.Context, rec shared.RecordingID) (shared.JobID, error)
+}
+
+// Results of CancelTranscription and Retranscribe (TranscriptionAnswer.Result).
+const (
+	transcriptionCancelled  = "cancelled"   // the job is cancelled, or its process is being stopped
+	transcriptionNotRunning = "not_running" // nothing to cancel
+	transcriptionEnding     = "ending"      // the attempt is ending: the row refreshes to its outcome
+	transcriptionStarted    = "started"     // a new transcription is queued
+	transcriptionNotAllowed = "not_allowed" // the transcription cannot be started again now
+	transcriptionNoModel    = "no_model"    // no speech recognition model to pin
+	transcriptionFailed     = "failed"      // the action failed; the cause is logged
+)
+
+// TranscriptionAnswer is the answer of CancelTranscription («Отменить расшифровку») and Retranscribe («Расшифровать
+// снова», TASK-392). Result of a cancel: "cancelled", "not_running", "ending" or "failed"; of Retranscribe:
+// "started", "not_allowed", "no_model" or "failed". A repeated call is safe: it answers by the state it finds.
+type TranscriptionAnswer struct {
+	Result string `json:"result"`
 }
 
 // RecordingItem is the JSON form of one recording with the status of its whole chain (TASK-076). Times are RFC 3339
@@ -115,14 +140,16 @@ type RecordingItem struct {
 	// QueueReason of a queued chain: inLine, retry, power, network, quota, serviceNotConfigured (the Hub has no address
 	// or key; action openConnections) or serviceUnavailable (the Hub does not answer; retried automatically).
 	QueueReason string `json:"queueReason"`
-	// ErrorCode of a failed chain: recordingFailed, transcriptionFailed, summaryFailed, homeworkFailed,
-	// lectureTextFailed (TASK-090), silentRecording (the track is silent: «Запись без звука», TASK-082) or noSpeech
-	// (the transcript holds no speech: «В записи нет речи», TASK-110; action checkSound, no retryWork).
+	// ErrorCode of a failed chain: recordingFailed, transcriptionFailed, transcriptionCancelled (the user cancelled
+	// it, TASK-392; action retranscribe), summaryFailed, homeworkFailed, lectureTextFailed (TASK-090),
+	// silentRecording (the track is silent: «Запись без звука», TASK-082) or noSpeech (the transcript holds no speech:
+	// «В записи нет речи», TASK-110; action checkSound, no retryWork).
 	ErrorCode string `json:"errorCode"`
 	// JobError is the last error of the job the stage refers to (failed or retrying); "" otherwise.
 	JobError string `json:"jobError"`
 	// Action the row offers besides Stop: "", runNow (RunJobNow with actionJobId), openModels, openConnections,
-	// checkSound or retry (RetryPostProcessing with retryWork, «Повторить», TASK-086).
+	// checkSound, retry (RetryPostProcessing with retryWork, «Повторить», TASK-086) or retranscribe (Retranscribe,
+	// «Расшифровать снова», TASK-392).
 	Action      string `json:"action"`
 	ActionJobID string `json:"actionJobId"`
 	// RetryWork is the failed post-processing work the row may start again: "summary", "homework", "lectureText" or
@@ -135,6 +162,9 @@ type RecordingItem struct {
 	// LectureTextReady: the lecture text of the recording is stored (TASK-090): the row offers «Открыть текст лекции»
 	// instead of the raw transcript, which it offers only while this is false.
 	LectureTextReady bool `json:"lectureTextReady"`
+	// CanCancel: the newest transcription is queued, waiting or running, so CancelTranscription («Отменить
+	// расшифровку», TASK-392) may stop it.
+	CanCancel bool `json:"canCancel"`
 
 	// RemainingSeconds is the approximate time left of a queued or running transcription («≈ N мин осталось»,
 	// TASK-084); hasRemaining is false when there is none or no estimate.
@@ -242,6 +272,7 @@ func (s *ActivityService) ListRecordings(ctx context.Context) ([]RecordingItem, 
 			QueueReason: string(c.QueueReason),
 			ErrorCode:   string(c.ErrorCode), JobError: c.JobError, Action: string(c.Action), ActionJobID: string(c.ActionJob),
 			RetryWork: string(c.Retry), CanRedoSummary: c.CanRedoSummary, LectureTextReady: c.LectureTextReady,
+			CanCancel:        c.CanCancel,
 			RemainingSeconds: int64(r.Remaining.Round(time.Second) / time.Second), HasRemaining: r.HasRemaining,
 		})
 		if running && active.ID == r.ID {
@@ -399,6 +430,54 @@ func (s *ActivityService) RedoSummary(ctx context.Context, id string) error {
 	}
 	_, _, err := s.retrier.RedoSummary(ctx, rid)
 	return s.rerunError("redo summary", err)
+}
+
+// CancelTranscription cancels the unfinished transcription of recording id («Отменить расшифровку», TASK-392): a
+// waiting job at once, a running one by stopping whisper-cli. The recording stays; Retranscribe starts it again.
+func (s *ActivityService) CancelTranscription(ctx context.Context, id string) (TranscriptionAnswer, error) {
+	rid := shared.RecordingID(id)
+	if rid.Validate() != nil {
+		return TranscriptionAnswer{}, ErrInvalidID
+	}
+	jid, ok, err := s.retrier.ActiveTranscription(ctx, rid)
+	if err != nil {
+		s.log.Error("ui: find the transcription to cancel", "err", err)
+		return TranscriptionAnswer{Result: transcriptionFailed}, nil
+	}
+	if !ok {
+		return TranscriptionAnswer{Result: transcriptionNotRunning}, nil
+	}
+	err = s.forcer.Cancel(ctx, jid)
+	switch {
+	case err == nil:
+		return TranscriptionAnswer{Result: transcriptionCancelled}, nil
+	case errors.Is(err, jobrunner.ErrNotCancellable):
+		return TranscriptionAnswer{Result: transcriptionEnding}, nil
+	case errors.Is(err, shared.ErrNotFound): // deleted with its recording meanwhile
+		return TranscriptionAnswer{Result: transcriptionNotRunning}, nil
+	}
+	s.log.Error("ui: cancel the transcription", "err", err)
+	return TranscriptionAnswer{Result: transcriptionFailed}, nil
+}
+
+// Retranscribe starts the cancelled transcription of recording id again as a new job with the current model
+// («Расшифровать снова», TASK-392).
+func (s *ActivityService) Retranscribe(ctx context.Context, id string) (TranscriptionAnswer, error) {
+	rid := shared.RecordingID(id)
+	if rid.Validate() != nil {
+		return TranscriptionAnswer{}, ErrInvalidID
+	}
+	_, err := s.retrier.Retranscribe(ctx, rid)
+	switch {
+	case err == nil:
+		return TranscriptionAnswer{Result: transcriptionStarted}, nil
+	case errors.Is(err, transcribe.ErrNotAllowed):
+		return TranscriptionAnswer{Result: transcriptionNotAllowed}, nil
+	case errors.Is(err, transcribe.ErrNoModel):
+		return TranscriptionAnswer{Result: transcriptionNoModel}, nil
+	}
+	s.log.Error("ui: start the transcription again", "err", err)
+	return TranscriptionAnswer{Result: transcriptionFailed}, nil
 }
 
 func (s *ActivityService) rerunError(op string, err error) error {

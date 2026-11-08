@@ -31,6 +31,8 @@ export type ChainErrorCode =
   | ""
   | "recordingFailed"
   | "transcriptionFailed"
+  /** The user cancelled the transcription (TASK-392): the recording stays, action retranscribe. */
+  | "transcriptionCancelled"
   | "summaryFailed"
   | "homeworkFailed"
   | "lectureTextFailed"
@@ -40,9 +42,9 @@ export type ChainErrorCode =
   | "noSpeech";
 /**
  * What the row offers besides Stop; runNow calls runJobNow(actionJobId), retry calls retryPostProcessing(id,
- * retryWork) (TASK-086).
+ * retryWork) (TASK-086), retranscribe calls retranscribe(id) («Расшифровать снова», TASK-392).
  */
-export type ChainAction = "" | "runNow" | "openModels" | "openConnections" | "checkSound" | "retry";
+export type ChainAction = "" | "runNow" | "openModels" | "openConnections" | "checkSound" | "retry" | "retranscribe";
 /** The failed post-processing work the row may start again (TASK-086); "" for none. */
 export type RetryWork = "" | "summary" | "homework" | "lectureText";
 
@@ -89,6 +91,8 @@ export interface RecordingItem {
   canRedoSummary: boolean;
   /** The lecture text of the current transcript is stored (TASK-090): the row offers it instead of the transcript. */
   lectureTextReady: boolean;
+  /** The newest transcription is queued, waiting or running: cancelTranscription may stop it (TASK-392). */
+  canCancel: boolean;
   /** Approximate time left of a queued or running transcription («≈ N мин осталось», TASK-084). */
   remainingSeconds: number;
   /** false: no time left to show. */
@@ -110,6 +114,11 @@ export interface AdviceView {
   suggestApp: string;
   suggestName: string;
 }
+
+/** The answer of cancelTranscription (TASK-392): "ending" means the attempt is ending, the row refreshes. */
+export type CancelTranscriptionResult = "cancelled" | "not_running" | "ending" | "failed";
+/** The answer of retranscribe (TASK-392). */
+export type RetranscribeResult = "started" | "not_allowed" | "no_model" | "failed";
 
 /** Why a switch did not happen; "" once switched. The recording goes on with its old source either way. */
 export type SwitchProblem = "" | "source_gone" | "refused" | "failed";
@@ -177,6 +186,8 @@ export const methods = {
   retryPostProcessing: "paratech/desktop/internal/input/wails.ActivityService.RetryPostProcessing",
   redoSummary: "paratech/desktop/internal/input/wails.ActivityService.RedoSummary",
   recordingSound: "paratech/desktop/internal/input/wails.ActivityService.RecordingSound",
+  cancelTranscription: "paratech/desktop/internal/input/wails.ActivityService.CancelTranscription",
+  retranscribe: "paratech/desktop/internal/input/wails.ActivityService.Retranscribe",
 } as const;
 
 /** Messages of the errors the Go binding returns (checked by a Go test); the page may match them. */
@@ -211,6 +222,11 @@ function str(r: Record<string, unknown>, key: string, what: string): string {
 // A field an older core does not send reads as ""; a wrong type is still an error.
 function optStr(r: Record<string, unknown>, key: string, what: string): string {
   return r[key] === undefined ? "" : str(r, key, what);
+}
+
+// A flag an older core does not send reads as false; a wrong type is still an error.
+function optBool(r: Record<string, unknown>, key: string, what: string): boolean {
+  return r[key] === undefined ? false : bool(r, key, what);
 }
 
 // Anything but "imported" (a missing field of an older core, an unknown value) reads as captured, as the core does.
@@ -267,6 +283,7 @@ const errorCodes = [
   "",
   "recordingFailed",
   "transcriptionFailed",
+  "transcriptionCancelled",
   "summaryFailed",
   "homeworkFailed",
   "lectureTextFailed",
@@ -274,7 +291,9 @@ const errorCodes = [
   "noSpeech",
 ] as const;
 const switchProblems = ["", "source_gone", "refused", "failed"] as const;
-const actions = ["", "runNow", "openModels", "openConnections", "checkSound", "retry"] as const;
+const actions = ["", "runNow", "openModels", "openConnections", "checkSound", "retry", "retranscribe"] as const;
+const cancelResults = ["cancelled", "not_running", "ending", "failed"] as const;
+const retranscribeResults = ["started", "not_allowed", "no_model", "failed"] as const;
 const retryWorks = ["", "summary", "homework", "lectureText"] as const;
 
 function list<T>(raw: unknown, what: string, parse: (item: unknown) => T): T[] {
@@ -366,10 +385,21 @@ export function parseRecording(raw: unknown): RecordingItem {
     retryWork: oneOf(r, "retryWork", w, retryWorks),
     canRedoSummary: bool(r, "canRedoSummary", w),
     lectureTextReady: bool(r, "lectureTextReady", w),
+    canCancel: optBool(r, "canCancel", w),
     remainingSeconds: num(r, "remainingSeconds", w),
     hasRemaining: bool(r, "hasRemaining", w),
     advice: r.advice === null ? null : parseAdvice(r.advice),
   };
+}
+
+/** Checks the answer of cancelTranscription; an unknown result is an error, not a default. */
+export function parseCancelTranscription(raw: unknown): CancelTranscriptionResult {
+  return oneOf(record(raw, "cancel"), "result", "cancel", cancelResults);
+}
+
+/** Checks the answer of retranscribe; an unknown result is an error, not a default. */
+export function parseRetranscribe(raw: unknown): RetranscribeResult {
+  return oneOf(record(raw, "retranscribe"), "result", "retranscribe", retranscribeResults);
 }
 
 /** Checks the shape of one job; a malformed reply is an error, not a default. */
@@ -411,6 +441,10 @@ export interface ActivityApi {
   redoSummary(recordingId: string): Promise<void>;
   /** The live sound of the running recording (TASK-099); poll it about 4 times a second while a recording runs. */
   recordingSound(): Promise<RecordingSound>;
+  /** Cancels the unfinished transcription of the recording («Отменить расшифровку», TASK-392); a repeat is safe. */
+  cancelTranscription(recordingId: string): Promise<CancelTranscriptionResult>;
+  /** Starts a cancelled transcription again with the current model («Расшифровать снова», TASK-392). */
+  retranscribe(recordingId: string): Promise<RetranscribeResult>;
 }
 
 /** Builds the recordings and jobs API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -435,5 +469,8 @@ export function activityApi(call: CallByName): ActivityApi {
       await call(methods.redoSummary, recordingId);
     },
     recordingSound: async () => parseRecordingSound(await call(methods.recordingSound)),
+    cancelTranscription: async (recordingId) =>
+      parseCancelTranscription(await call(methods.cancelTranscription, recordingId)),
+    retranscribe: async (recordingId) => parseRetranscribe(await call(methods.retranscribe, recordingId)),
   };
 }
