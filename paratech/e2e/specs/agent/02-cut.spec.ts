@@ -47,8 +47,7 @@ test(Feature.cut, details(Feature.cut), async ({ main, llm }) => {
     expect(rawLeftovers(x.text), "в ленте не должно быть «undefined»/«NaN»/сырых ошибок").toEqual([]);
     const words = await panelOf(main).locator(".ag-thread").getByRole("button", { name: /Повторить/ }).count();
     expect(words, "под оборванным ответом должна быть одна кнопка со словом «Повторить»").toBe(1);
-    // Observed, not asserted (no requirement says otherwise): a broken provider stream is mapped to «offline», so the panel shows
-    // «Нет связи с paratech» and the field is off until the retry succeeds, though the Hub answered (a note for the owner).
+    // The banner and the field after a cut are the row «после оборванного ответа можно писать дальше» below.
     note(`после обрыва панель: баннер «${x.offline || "нет"}», поле ${x.fieldDisabled ? "выключено" : "включено"}`);
     const planner = await plannerRequestsAbout(llm, question);
     note(`запросов Hub к модели за обрыв: ${planner.length}`);
@@ -71,4 +70,75 @@ test(Feature.cut, details(Feature.cut), async ({ main, llm }) => {
     note("проверено: после обрыва текст остался, строка «Ответ оборван. Можно повторить.», одна «Повторить», ни «Стоп», ни таймера; «Повторить» заменил блок новым ответом ценой одного запроса к модели");
     await snapshot("Агент: оборванный ответ заменён новым");
   });
+});
+
+// A cut reply is a provider-side break, not a lost connection: the Hub answered, so the student is not offline and must be able to
+// write on at once (no dead end until a retry succeeds). Candidate defect when red: the panel maps the broken stream to «offline»
+// («Нет связи с paratech») and turns the field off; a product question for the supervisor.
+test(Feature.cutNext, details(Feature.cutNext), async ({ main, llm }) => {
+  test.setTimeout(75_000);
+  const question = "расскажи подробно про предел функции";
+  const long = filler(720, 2);
+  const full = filler(380, 4);
+
+  await step("Hub: длинный ответ потоком обрывается; второй ответ — целый", async () => {
+    await llm.script([
+      replyRule(question, long, { stream: { chunks: 12, chunkDelayMs: 150, cutAfter: 7 } }),
+      replyRule(question, full, { stream: { chunks: 4, chunkDelayMs: 100 } }),
+    ]);
+  });
+  await step("панель: новый пустой чат", () => prepare(main));
+  await step("вопрос → ответ оборван: строка «Ответ оборван»", async () => {
+    await ask(main, question);
+    await waitThread(main, `в ленте должна появиться строка «${cutLine}»`, (y) => y.stopLines.some((l) => l.includes("оборван")), { timeout: 45_000 });
+  });
+
+  let mainFailed = true;
+  try {
+    await step("сразу после обрыва: баннера «Нет связи с paratech» нет, поле запроса включено и принимает текст", async () => {
+      // the banner may come a moment after the cut line: look for 1.5 s, keep the worst sample (a poll callback must not throw)
+      const from = Date.now();
+      let x = await sample(main);
+      await waitThread(main, "окно наблюдения после обрыва", (y) => {
+        if (y.offline !== "" || y.fieldDisabled) {
+          x = y;
+        }
+        return Date.now() - from > 1_500;
+      });
+      await snapshot("Агент: сразу после обрыва ответа");
+      note(`после обрыва: баннер «${x.offline || "нет"}», поле ${x.fieldDisabled ? "выключено" : "включено"}`);
+      // both defects are named in one message; the typing is tried only when none is found
+      const wrong: string[] = [];
+      if (x.offline !== "") {
+        wrong.push(`панель помощника, над полем: ожидалось без баннера, показано «${x.offline}» (Hub ответил, обрыв на стороне модели, ученик не офлайн)`);
+      }
+      if (x.fieldDisabled) {
+        wrong.push("панель помощника, поле запроса (textarea.ag-input): ожидалось включено, оно выключено — ученик не может написать, пока не нажмёт «Повторить» (тупик)");
+      }
+      expect(wrong, `после обрыва ответа: ${wrong.join("; ")}`).toEqual([]);
+      const field = panelOf(main).locator("textarea.ag-input");
+      await field.fill("и ещё вопрос", act);
+      await expect(field, "поле должно принять текст после обрыва").toHaveValue("и ещё вопрос", act);
+      await expect(panelOf(main).locator("button.ag-send"), "«Отправить» должна включиться, когда в поле есть текст").toBeEnabled(act);
+    });
+    mainFailed = false;
+  } finally {
+    // leave the chat clean for the next rows: drop the typed text, then the retry replaces the kept block by the scripted reply
+    const cleanup = async (): Promise<void> => {
+      await step("уборка: черновик стёрт, «Повторить» заменяет оборванный блок целым ответом", async () => {
+        const field = panelOf(main).locator("textarea.ag-input");
+        if (!(await field.isDisabled())) {
+          await field.fill("", act);
+        }
+        await panelOf(main).locator(".ag-thread").getByRole("button", { name: "Повторить", exact: true }).click(act);
+        const x = await waitThread(main, "после «Повторить» должен появиться целый второй ответ", (y) => y.replies.length === 1 && y.think === 0, { timeout: 45_000 });
+        expect(x.replies[0]).toBe(collapse(full));
+      });
+    };
+    if (mainFailed) {
+      await cleanup().catch(() => undefined);
+    } else {
+      await cleanup();
+    }
+  }
 });

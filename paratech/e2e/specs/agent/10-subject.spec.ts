@@ -10,6 +10,9 @@
 // there is no check that it occurs in the request or in a tool result, the prompt asks for a copy of subject_name only as
 // a rule for the model). The last recording of the pack belongs to «Литература», which is already in «Предметы», so the scripted
 // model picks a new name that is valid; this checks the plumbing (look first, action line, tree, undo), not the choice of the name.
+//
+// NOT COVERED: the AC «the lesson moves under the new subject». The app's create_subject only creates the subject, it moves no
+// lesson, so the pack has nothing to assert (a follow-up for the product; the note of the row says so).
 import { expect, snapshot, step, test } from "../../src/steps/index.js";
 import { AfterLessons, AfterWrite, callRule, replyRule } from "../../scripts/llm/agent/rules.js";
 import {
@@ -116,15 +119,8 @@ test(Feature.addSubject, details(Feature.addSubject, { requires: PrerequisitesB 
     const cards = await cardsOf(main);
     note(`строка действия после отмены: ${cards.actionLines.join(" | ")}`);
     expect(cards.problems, "отмена прошла без сообщения об ошибке").toEqual([]);
-    // What the student sees on the page that is open: does the tree follow the undo by itself? (a note; the check is after re-entering)
-    const treeNames = async (): Promise<string[]> => (await main.locator("nav.tree .nm").allInnerTexts()).map((n) => collapse(n));
-    let liveGone = false;
-    await expect
-      .poll(async () => (liveGone = !(await treeNames()).includes(name)), { timeout: 3_000, intervals: [250, 500] })
-      .toBe(true)
-      .catch(() => undefined);
-    note(liveGone ? "дерево открытой страницы «Предметы» обновилось само после «Отменить»" : "дерево открытой страницы «Предметы» само не обновилось после «Отменить» (предмет виден, пока страницу не открыть заново)");
-    // the page reads the library again when the section is opened
+    // Whether the OPEN tree follows the undo by itself is the row ««Отменить» обновляет открытое дерево предметов» below.
+    // Here: the page reads the library again when the section is opened
     await openSection(main, "Сегодня");
     await expect
       .poll(async () => (await subjectNames(main)).includes(name), { timeout: 20_000, intervals: [300, 500], message: `после «Отменить» предмет «${name}» не должен остаться в дереве` })
@@ -133,10 +129,57 @@ test(Feature.addSubject, details(Feature.addSubject, { requires: PrerequisitesB 
     expect(after, "после отмены дерево предметов такое же, как до просьбы").toEqual(before);
     await snapshot("Предметы: после отмены");
     note(`проверено: look-first (find_lessons до create_subject, вопросов нет), create_subject ok, строка действия, предмет «${name}» в дереве и пропал после «Отменить» (дерево как до)`);
+    // Not covered: the AC «the lesson moves under the new subject». The app's create_subject only creates the subject and moves no
+    // lesson, so there is nothing to assert; inventing the move here would test a feature the app does not have (follow-up).
+    note("НЕ ПОКРЫТО: часть AC «запись переезжает под новый предмет» — create_subject только создаёт предмет и не переносит запись (follow-up)");
   });
 
   await step("ответ модели приходит и показан как есть (строка действия после него — в строке «карточки остаются после ответа»)", async () => {
     const x = await waitThread(main, "ответ модели должен появиться", (y) => y.replies.includes(collapse(answer)) && y.think === 0, { timeout: 60_000 });
     expect(x.replies).toEqual([collapse(answer)]);
   });
+});
+
+// «Предметы» stays open while the student presses «Отменить» in the panel: the tree on the screen must drop the subject at once,
+// without re-entering the section. Candidate low defect when red: the page reads the library only when the section is opened.
+test(Feature.undoTree, details(Feature.undoTree, { requires: PrerequisitesB }), async ({ main, llm }) => {
+  test.setTimeout(120_000);
+  const question = "добавь предмет по последней записи";
+  const name = "Введение в литературоведение";
+  const answer = `Предмет «${name}» добавлен.`;
+
+  await step("Hub: find_lessons, потом create_subject, потом (через 10 с) ответ", async () => {
+    await llm.script([callRule(question, "find_lessons", {}), callRule(AfterLessons, "create_subject", { name }), replyRule(AfterWrite, answer, { delayMs: 10_000 })]);
+  });
+  await step("панель: новый пустой чат на «Сегодня»", () => prepare(main));
+
+  try {
+    await step("вопрос → предмет создан, строка действия с «Отменить»", async () => {
+      await ask(main, question);
+      await waitCards(main, "строка действия должна появиться", (c) => c.actionLines.length > 0 && c.actionButtons.includes("Отменить"), 60_000);
+    });
+    await step("«Предметы» открыты: новый предмет в дереве", async () => {
+      const names = await subjectNames(main);
+      expect(names, `предмет «${name}» должен появиться в дереве «Предметы»`).toContain(name);
+      await snapshot("Предметы: открыты, предмет от помощника в дереве");
+    });
+    await step("«Отменить» в панели при открытых «Предметы»: предмет уходит из дерева без повторного входа в раздел", async () => {
+      const button = main.locator("aside.ag .ag-act").getByRole("button", { name: "Отменить", exact: true });
+      await expect(button, "кнопка «Отменить» на строке действия").toBeVisible(act);
+      await button.click(act);
+      await waitCards(main, "строка действия должна стать «отменено»", (c) => !c.actionButtons.includes("Отменить"), 20_000);
+      await expect
+        .poll(async () => (await main.locator("nav.tree .nm").allInnerTexts()).map((n) => collapse(n)).includes(name), {
+          timeout: 5_000,
+          intervals: [250, 500],
+          message: `раздел «Предметы», дерево предметов (nav.tree): после «Отменить» в панели предмет «${name}» должен пропасть из открытого дерева сам, а он остаётся, пока раздел не открыть заново`,
+        })
+        .toBe(false);
+      await snapshot("Предметы: дерево после «Отменить» без повторного входа");
+    });
+  } finally {
+    // leave the app clean for the next rows: re-enter the section (the tree is read again) and let the held reply of the model end
+    await openSection(main, "Сегодня").catch(() => undefined);
+    await waitThread(main, "запрос должен закончиться", (x) => x.think === 0, { timeout: 40_000 }).catch(() => undefined);
+  }
 });

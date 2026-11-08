@@ -159,7 +159,9 @@ test(Feature.linkNone, details(Feature.linkNone, { requires: `${PrerequisitesB} 
     const literature = rows.find((r) => r.name === WeekSubjects.literature);
     expect(literature, "в результате должен быть предмет «Литература»").toBeDefined();
     expect(literature?.call_link, "у предмета без ссылки поле call_link в результате отсутствует (ссылку нельзя выдумать)").toBeUndefined();
-    expect(rows.filter((r) => r.name !== WeekSubjects.analysis).map((r) => r.call_link), "ни у «Литература», ни у «История» ссылки нет").toEqual([undefined, undefined]);
+    const others = rows.filter((r) => r.name === WeekSubjects.literature || r.name === WeekSubjects.history);
+    expect(others.map((r) => r.name).sort(), "в результате оба предмета без ссылки: «Литература» и «История»").toEqual([WeekSubjects.history, WeekSubjects.literature].sort());
+    expect(others.map((r) => r.call_link), "ни у «Литература», ни у «История» ссылки нет").toEqual([undefined, undefined]);
   });
 
   await step("панель не предлагает никуда переходить: ни «Расписание», ни другой кнопки", async () => {

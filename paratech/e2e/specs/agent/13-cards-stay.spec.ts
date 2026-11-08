@@ -11,6 +11,7 @@ import { expect, snapshot, step, test } from "../../src/steps/index.js";
 import { AfterLessons, AfterProposal, AfterWrite, callRule, citedRule, replyRule } from "../../scripts/llm/agent/rules.js";
 import type { Rule } from "../../src/steps/index.js";
 import {
+  type AppRecording,
   act,
   ask,
   cardsOf,
@@ -36,22 +37,25 @@ test(Feature.cardsStay, details(Feature.cardsStay, { requires: `${PrerequisitesB
   const claim = "Беликов носит калоши и зонтик в любую погоду, об этом сказано в конспекте пары.";
   const answer = "Ответ по лекциям показан, удаление записи предложено и ждёт подтверждения.";
   const target = lectureOf("перезапуск");
-  const recording = await recordingByTitle(main, target.title);
+  let recording: AppRecording = { id: "", title: "", subject: "" };
 
   const subjectStudent = "добавь предмет Теория вычислений";
   const subjectName = "Теория вычислений";
   const subjectAnswer = "Предмет добавлен.";
 
-  const bothTools: Rule = {
-    kind: "tools",
-    match: AfterLessons,
-    reply: [
-      { name: "answer_question", input: { question, scope: "all" } },
-      { name: "propose_delete_recording", input: { recording: recording.id } },
-    ],
-  };
+  await step("«Записи»: запись про перезапуск есть", async () => {
+    recording = await recordingByTitle(main, target.title);
+  });
 
   await step("Hub: два хода; в первом find_lessons, потом answer_question и propose_delete_recording в одном шаге, ответ через 5 с; во втором create_subject и ответ через 20 с", async () => {
+    const bothTools: Rule = {
+      kind: "tools",
+      match: AfterLessons,
+      reply: [
+        { name: "answer_question", input: { question, scope: "all" } },
+        { name: "propose_delete_recording", input: { recording: recording.id } },
+      ],
+    };
     await llm.script([
       callRule(student, "find_lessons", {}),
       bothTools,

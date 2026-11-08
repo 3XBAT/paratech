@@ -1,7 +1,7 @@
 // Agent pack, part B, file 11: a class C tool never acts on its own (AC-18, hard rule 3, ADR-0021/0022). SCRIPTED: the model finds the
 // recording with find_lessons and proposes its deletion with propose_delete_recording (the id comes from the tool result of the
 // same turn, as the provenance check demands). The pack asserts that the panel shows the confirm card, that the recording is
-// still in «Записи» while nobody pressed anything, that the model was told it is only a proposal, and that «Не удалять» keeps the
+// still in «Записи» while nobody pressed anything, that the model was told it is only a proposal, and that «Нет» keeps the
 // recording. It never presses the destructive «Да, удалить»: the recording is needed by the rows after it and by the other packs.
 //
 // The model's final `reply` is delayed (12 s) so the card can be used while the request is still running: the app replaces the cards
@@ -10,6 +10,7 @@ import { expect, snapshot, step, test } from "../../src/steps/index.js";
 import { AfterLessons, AfterProposal, callRule, replyRule } from "../../scripts/llm/agent/rules.js";
 import { showRow } from "../recording/support.js";
 import {
+  type AppRecording,
   act,
   ask,
   cardsOf,
@@ -38,9 +39,13 @@ test(Feature.confirm, details(Feature.confirm, { requires: PrerequisitesB }), as
   const target = lectureOf("перезапуск");
   const answer = "Удаление записи предложено: оно выполнится только после подтверждения в карточке.";
 
-  const recording = await recordingByTitle(main, target.title);
-  const countBefore = (await recordingsOfApp(main)).length;
-  note(`запись для удаления: «${target.title}», всего записей: ${countBefore}`);
+  let recording: AppRecording = { id: "", title: "", subject: "" };
+  let countBefore = 0;
+  await step("«Записи»: запись для удаления есть", async () => {
+    recording = await recordingByTitle(main, target.title);
+    countBefore = (await recordingsOfApp(main)).length;
+    note(`запись для удаления: «${target.title}», всего записей: ${countBefore}`);
+  });
 
   await step("Hub: find_lessons, потом propose_delete_recording с id из результата, потом (через 12 с) ответ", async () => {
     await llm.script([

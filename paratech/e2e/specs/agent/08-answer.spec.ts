@@ -174,6 +174,7 @@ test(Feature.answerText, details(Feature.answerText, { requires }), async ({ mai
     await waitCards(main, "карточка «Ответ по материалам» с источниками", (c) => c.captions.includes("Ответ по материалам") && c.sources.length > 0, 45_000);
     await snapshot("Агент: карточка ответа без текста");
   });
+  let mainFailed = true;
   try {
     await step("карточка показывает текст утверждения из ответа, а не только «подготовлен»", async () => {
       const cards = await cardsOf(main);
@@ -183,8 +184,15 @@ test(Feature.answerText, details(Feature.answerText, { requires }), async ({ mai
         `карточка «Ответ по материалам» не показывает текст ответа (утверждение «${claim}»): в ней только «${cards.answerText}» и источники; ученик не читает ответ (TASK-296: утверждения разобраны, но не выведены)`,
       ).toBe(true);
     });
+    mainFailed = false;
   } finally {
-    // the held reply of the model ends the request; the next row starts on a quiet panel
-    await waitThread(main, "запрос должен закончиться", (x) => x.think === 0, { timeout: 40_000 }).catch(() => undefined);
+    // the held reply of the model ends the request; the next row starts on a quiet panel. A request that never ends fails the test
+    // when the main step passed; after a failed main step only that failure is reported.
+    const ended = waitThread(main, "запрос должен закончиться", (x) => x.think === 0, { timeout: 40_000 });
+    if (mainFailed) {
+      await ended.catch(() => undefined);
+    } else {
+      await ended;
+    }
   }
 });

@@ -93,7 +93,7 @@ test(
       assert.equal(calls.length, 1);
       assert.equal(calls[0]?.matched, true);
       const body = calls[0]?.body as { stream?: boolean; model?: string };
-      assert.equal(body.stream, undefined, "SCRIPTED mode calls the provider unary");
+      assert.equal(body.stream, undefined, "the unary GatewayService/Complete call reaches the provider without stream (HUB_PROVIDER_STREAM=true streams only CompleteStream and AgentStepStream)");
       assert.deepEqual(fake.unmatched(), []);
       // The client's Hub key must not travel to the provider (recordings hold the bodies the Hub sent).
       assert.ok(!JSON.stringify(calls).includes(hub.apiKey), "the run's API key reached the provider");
