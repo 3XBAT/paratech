@@ -1697,21 +1697,6 @@ export interface UndoNote {
   text: string;
 }
 
-/**
- * The open «Предметы» reads again when an action line changes state (TASK-400, D5): a line that appears (the action is done)
- * or becomes undone. `seen` holds the ids of the lines already counted; a plain update changes nothing here.
- * `fresh`: a line of `cards` is new; `seen`: the set to keep (the same object when nothing is new).
- */
-export function newActionLines(seen: ReadonlySet<string>, cards: readonly Pick<CardView, "kind" | "actionId">[]): { fresh: boolean; seen: ReadonlySet<string> } {
-  const ids = cards.flatMap((c) => (c.kind === "action_line" && c.actionId !== "" && !seen.has(c.actionId) ? [c.actionId] : []));
-  return ids.length === 0 ? { fresh: false, seen } : { fresh: true, seen: new Set([...seen, ...ids]) };
-}
-
-/** «Отменить» of a line just came back ok: the line went from not-undone to undone. */
-export function becameUndone(prev: UndoNote | undefined, next: UndoNote): boolean {
-  return next.done && prev?.done !== true;
-}
-
 /** The action lines of a request that offer «Отменить» (for «Отменить всё»). */
 export function undoableActions(cards: readonly CardModel[]): string[] {
   return cards.flatMap((c) => (c.type === "action" && c.undo.shown && c.undo.enabled ? [c.actionId] : []));

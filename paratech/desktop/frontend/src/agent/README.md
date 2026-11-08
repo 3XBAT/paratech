@@ -78,8 +78,6 @@ with the exported `AgentService` methods in `agent.go`, `agentjournal.go`, `agen
 - Every update of a request carries ALL its cards (the Go Driver sends them in display order: reading cards first; confirm
   cards and action lines «Отменить» after the reply; the stop line last): the later update replaces the earlier list, never
   appends (`agentdriverupdates.test.mjs`); the UI does not reorder.
-- «Предметы» re-reads (`onLibraryChanged`) only when an action line appears or «Отменить» succeeds (`newActionLines`,
-  `becameUndone` in `agentView.ts`, TASK-400), never on a plain update.
 - Keys of cards include kind and caption (`AgentRequest`) so a new card does not inherit the typed state of the old one.
 - `AgentActions` and `UserActions` render nothing when there is nothing to copy or rerun.
 
