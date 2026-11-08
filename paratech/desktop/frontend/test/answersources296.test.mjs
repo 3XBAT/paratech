@@ -7,7 +7,8 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { answersApi, errorMessages, methods, parseAnswer, parseSource, errorText } from "../.test-build/bindings/answers.js";
 import { errorMessages as kbErrors } from "../.test-build/bindings/knowledgeBase.js";
-import { AnswerSources,AnswerSourcesView, answerSourcesTexts } from "../.test-build/agent/AnswerSources.js";
+import { AnswerSourcesView, answerSourcesTexts } from "../.test-build/agent/AnswerSources.js";
+import { AnswerCard } from "../.test-build/agent/AnswerCard.js";
 import { AgentRequest } from "../.test-build/agent/AgentCards.js";
 import { entryModel } from "../.test-build/agentView.js";
 import {
@@ -238,12 +239,14 @@ test("no HTML is built from a label or a title: markup stays visible text", () =
 
 // The one source-text guard: a label or title must never reach the DOM as markup or a link.
 test("the sources code has no raw HTML or links", () => {
-  for (const f of ["agent/AnswerSources.tsx", "bindings/answers.ts", "knowledgeView.ts", "pages/KnowledgeBasePage.tsx", "agent/AgentCards.tsx"]) {
+  for (const f of ["agent/AnswerSources.tsx", "agent/AnswerCard.tsx", "answerView.ts", "bindings/answers.ts", "knowledgeView.ts", "pages/KnowledgeBasePage.tsx", "agent/AgentCards.tsx"]) {
     const s = readFileSync(new URL(`../src/${f}`, import.meta.url), "utf8");
     assert.ok(!s.includes("dangerouslySetInnerHTML") && !s.includes("innerHTML"), f);
   }
-  const s = readFileSync(new URL("../src/agent/AnswerSources.tsx", import.meta.url), "utf8");
-  assert.ok(!s.includes("href"));
+  for (const f of ["agent/AnswerSources.tsx", "agent/AnswerCard.tsx"]) {
+    const s = readFileSync(new URL(`../src/${f}`, import.meta.url), "utf8");
+    assert.ok(!s.includes("href"), f);
+  }
 });
 
 // ---- The card ----
@@ -281,16 +284,19 @@ test("the card keeps its caption and text; without answerId or the call nothing 
   }
 });
 
-test("with the call the card starts by loading the sources", () => {
+// BUG-20261108-agent-cards: the answer is read once for the text and the sources together (AnswerCard), so the card
+// starts with one loading line; the claims and the sources appear in the same render (answercard.test.mjs).
+test("with the call the card starts by loading the answer", () => {
   const out = html(h(AgentRequest, { model: model("a1"), actions: { ...actionsBase, answers: answersApi(async () => reply()), openSource: noop } }));
   assert.match(out, /Ответ по материалам/);
-  assert.match(out, /Загрузка источников…/);
+  assert.match(out, /Загрузка ответа…/);
+  assert.doesNotMatch(out, /Ответ с источниками подготовлен/);
   assert.doesNotMatch(out, /a1/);
 });
 
-test("AnswerSources renders nothing without the call or the id", () => {
-  assert.equal(html(h(AnswerSources, { answerId: "a1" })), "");
-  assert.equal(html(h(AnswerSources, { api: answersApi(async () => reply()), answerId: "" })), "");
+test("AnswerCard shows the fixed line without the call or the id", () => {
+  assert.match(html(h(AnswerCard, { answerId: "a1", fallback: "F" })), /^<p>F<\/p>$/);
+  assert.match(html(h(AnswerCard, { api: answersApi(async () => reply()), answerId: "", fallback: "F" })), /^<p>F<\/p>$/);
 });
 
 // ---- The jump to the place ----

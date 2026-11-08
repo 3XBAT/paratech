@@ -13,7 +13,9 @@ and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `par
 - `agent/AgentCards.tsx` - `AgentRequest` (one request) and `Card()`, the `switch` over `CardModel.type`; `CardActions` is
   what a card may ask of the panel. Big cards live in their own files:
   `ConfirmCard.tsx` (`ConfirmCardView` + stateful `ConfirmCard`), `ScheduleCard.tsx`, `WorkCard.tsx`, `WorkSend.tsx`,
-  `TurnkeyCards.tsx` (triage, questions, understanding, helper), `AnswerSources.tsx`.
+  `TurnkeyCards.tsx` (triage, questions, understanding, helper), `AnswerCard.tsx` (the `answer` card body: `useAnswer` reads the
+  answer once per answerId, claims then the missing line then the sources; pure texts and the long-claim clamp in `answerView.ts`)
+  with `AnswerSources.tsx` (the sources list only). E2E relies on: first `<p>` of the card = first claim, `ul.ag-src` buttons.
 - Smaller parts: `MessageActions.tsx` (copy / rerun icons under messages), `ChatBar.tsx`, `ContextRing.tsx`, `RestartDialog.tsx`,
   `MentionParts.tsx` with `useMentionComposer.ts`, `Waiting.tsx`, `PanelResizeHandle.tsx` with `panelWidth.ts` (pure rules).
 - Compaction (TASK-270): `AgentPanel` keeps a per-chat `CompactingMap` (`compactingFromUpdate` / `compactingFromList` / `compactingOf` in `agentView.ts`)
@@ -64,7 +66,7 @@ and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `par
 
 ## Tests
 Same runner as `README.md` of `src/`: `npm --prefix paratech/desktop/frontend run test` and `run build`. Agent tests are
-`test/agent*.test.mjs` (also `answersources296`, `messageactions365`, `panelwidth`, `chatheader365`...) and render
+`test/agent*.test.mjs` (also `answercard`, `answersources296`, `messageactions365`, `panelwidth`, `chatheader365`...) and render
 `AgentRequest` / `AgentPanelView` with `react-dom/server`. `test/agent.test.mjs` compares the `methods` of `bindings/agent.ts`
 with the exported `AgentService` methods in `agent.go`, `agentjournal.go`, `agentchats.go`, `agentmentions.go`: add a Go method, add it to `methods`
 (`ForkChat` is in `methods` as `forkChat`; its parser is `parseForkResult`, tests in `agentfork271.test.mjs`).
@@ -72,6 +74,8 @@ with the exported `AgentService` methods in `agent.go`, `agentjournal.go`, `agen
 ## Gotchas
 - The core publishes updates from several operations without a global order; `reducePanel` applies each to the request it
   names (threadId + turn) and a finished request stays finished (`agentState.ts`). Do not rely on arrival order.
+- Every update of a request carries ALL its cards (the Go Driver sends the tool cards first, then the step's own): the later
+  update replaces the earlier list, never appends (`agentdriverupdates.test.mjs`).
 - Keys of cards include kind and caption (`AgentRequest`) so a new card does not inherit the typed state of the old one.
 - `AgentActions` and `UserActions` render nothing when there is nothing to copy or rerun.
 

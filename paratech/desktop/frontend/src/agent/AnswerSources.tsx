@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
 // The .js extensions let the Node test runner load the compiled component.
-import type { AnswerSource, AnswersApi } from "../bindings/answers.js";
+import type { AnswerSource } from "../bindings/answers.js";
 import { type CitationOpening, citationLesson, citationOpening, citationPlace } from "../knowledgeView.js";
 
 // The sources of an answer on its card (TASK-296). Every text (label, lesson title) is model, lesson or imported text:
 // a React text node only. No element or link is built from it; a place opens by ids (CitationOpening), never by a path.
+// The answer is read once by AnswerCard.tsx (useAnswer), which passes the sources here.
 
 export const answerSourcesTexts = {
   list: "Источники ответа",
@@ -67,33 +67,4 @@ export function AnswerSourcesView(props: { state: SourcesState; onOpen?: (o: Cit
       })}
     </ul>
   );
-}
-
-/**
- * Reads the answer of the card once per answerId and lists its sources in the core's order. Without an id or the
- * core call it shows nothing; a failed read is one quiet line and the card stays.
- */
-export function AnswerSources(props: { api?: AnswersApi; answerId: string; onOpen?: (o: CitationOpening) => void }) {
-  const { api, answerId } = props;
-  const [state, setState] = useState<SourcesState>({ kind: "loading" });
-
-  useEffect(() => {
-    if (api === undefined || answerId === "") {
-      return;
-    }
-    let alive = true;
-    setState({ kind: "loading" });
-    api.answer(answerId).then(
-      (v) => alive && setState({ kind: "ready", sources: v.sources }),
-      () => alive && setState({ kind: "failed" }),
-    );
-    return () => {
-      alive = false;
-    };
-  }, [api, answerId]);
-
-  if (api === undefined || answerId === "") {
-    return null;
-  }
-  return <AnswerSourcesView state={state} onOpen={props.onOpen} />;
 }

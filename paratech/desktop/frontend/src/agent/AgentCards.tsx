@@ -10,7 +10,7 @@ import type { TurnkeyApi } from "../bindings/turnkey.js";
 import type { AnswersApi } from "../bindings/answers.js";
 import type { CitationOpening } from "../knowledgeView.js";
 import { type CutReply, replyDraftText, splitDrafts } from "../agentState.js";
-import { AnswerSources } from "./AnswerSources.js";
+import { AnswerCard } from "./AnswerCard.js";
 import { ConfirmCard } from "./ConfirmCard.js";
 import { ScheduleSubjectsCard } from "./ScheduleCard.js";
 import { type OfferResult, offerReasons } from "../agentOffer.js";
@@ -473,8 +473,8 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean; 
       return (
         <section className="ag-card">
           <h3 className="ag-card-h">{card.caption}</h3>
-          <p>{card.text}</p>
-          <AnswerSources api={props.actions.answers} answerId={card.answerId} onOpen={props.actions.openSource} />
+          {/* card.text is the fixed line for a card that cannot read its answer (no core call or no id). */}
+          <AnswerCard api={props.actions.answers} answerId={card.answerId} fallback={card.text} onOpen={props.actions.openSource} />
         </section>
       );
     case "reply":
