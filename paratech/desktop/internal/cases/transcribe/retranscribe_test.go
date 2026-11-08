@@ -11,8 +11,14 @@ import (
 	"paratech/desktop/internal/domain/transcription/services/modelselection"
 )
 
-// autoJob enqueues the automatic STT job of rec-1 and moves it to s.
+// autoJob enqueues the automatic STT job of rec-1 and moves it to s; a failure is an engine failure.
 func (e *enqueueEnv) autoJob(t *testing.T, s job.Status) *job.Job {
+	t.Helper()
+	return e.autoJobFailing(t, s, ErrTranscriptionFailed.Error())
+}
+
+// autoJobFailing is autoJob with the last error of a failed or retried job.
+func (e *enqueueEnv) autoJobFailing(t *testing.T, s job.Status, lastError string) *job.Job {
 	t.Helper()
 	if err := e.enq.RecordingCompleted(context.Background(), "rec-1"); err != nil {
 		t.Fatal(err)
@@ -31,7 +37,10 @@ func (e *enqueueEnv) autoJob(t *testing.T, s job.Status) *job.Job {
 		must(t, j.Cancel(now))
 	case job.StatusFailed:
 		must(t, j.Claim(now))
-		must(t, j.Fail(now, "stt job: transcription failed"))
+		must(t, j.Fail(now, lastError))
+	case job.StatusRetryWait:
+		must(t, j.Claim(now))
+		must(t, j.Retry(now, now.Add(time.Minute), lastError))
 	case job.StatusCompleted:
 		must(t, j.Claim(now))
 		must(t, j.Complete(now))
@@ -97,6 +106,33 @@ func TestRetranscribeAfterCancel(t *testing.T) {
 	}
 }
 
+// TASK-409: a transcription that failed finally starts again like a cancelled one; a repeated call makes no second job.
+func TestRetranscribeAfterFailure(t *testing.T) {
+	e := newEnqueueEnv(t)
+	ctx := context.Background()
+	e.autoJob(t, job.StatusFailed)
+
+	id, err := e.enq.Retranscribe(ctx, "rec-1")
+	if err != nil {
+		t.Fatalf("Retranscribe: %v", err)
+	}
+	var created *job.Job
+	for _, j := range e.jobs.all() {
+		if j.ID() == id {
+			created = j
+		}
+	}
+	if created == nil || created.Key() != "stt:rec-1:m-1:r2" || created.Status() != job.StatusQueued {
+		t.Fatalf("new job %+v", created)
+	}
+	if _, err := e.enq.Retranscribe(ctx, "rec-1"); !errors.Is(err, ErrNotAllowed) {
+		t.Fatalf("repeated Retranscribe = %v, want ErrNotAllowed", err)
+	}
+	if n := len(e.jobs.all()); n != 2 {
+		t.Fatalf("%d jobs, want the failed one and the new one", n)
+	}
+}
+
 // The second cancel of a recording gets the next key.
 func TestRetranscribeCountsEveryJob(t *testing.T) {
 	e := newEnqueueEnv(t)
@@ -124,7 +160,8 @@ func TestRetranscribeCountsEveryJob(t *testing.T) {
 	}
 }
 
-// Retranscribe refuses unless the newest STT job was cancelled and nothing else stands in the way.
+// Retranscribe refuses unless the newest STT job was cancelled or failed finally (not for lack of speech) and nothing
+// else stands in the way.
 func TestRetranscribeRefuses(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -133,8 +170,15 @@ func TestRetranscribeRefuses(t *testing.T) {
 		{"no job yet", func(*testing.T, *enqueueEnv) {}},
 		{"queued", func(t *testing.T, e *enqueueEnv) { e.autoJob(t, job.StatusQueued) }},
 		{"running", func(t *testing.T, e *enqueueEnv) { e.autoJob(t, job.StatusRunning) }},
-		{"failed", func(t *testing.T, e *enqueueEnv) { e.autoJob(t, job.StatusFailed) }},
+		{"a retry is pending", func(t *testing.T, e *enqueueEnv) { e.autoJob(t, job.StatusRetryWait) }},
+		{"failed for lack of speech", func(t *testing.T, e *enqueueEnv) {
+			e.autoJobFailing(t, job.StatusFailed, ErrNoSpeech.Error())
+		}},
 		{"completed", func(t *testing.T, e *enqueueEnv) { e.autoJob(t, job.StatusCompleted) }},
+		{"failed, with a transcript", func(t *testing.T, e *enqueueEnv) {
+			e.autoJob(t, job.StatusFailed)
+			e.transcript.has = map[shared.RecordingID]bool{"rec-1": true}
+		}},
 		{"a transcript exists", func(t *testing.T, e *enqueueEnv) {
 			e.autoJob(t, job.StatusCancelled)
 			e.transcript.has = map[shared.RecordingID]bool{"rec-1": true}
@@ -219,6 +263,7 @@ func TestActiveJob(t *testing.T) {
 		{job.StatusQueued, true},
 		{job.StatusRunning, true},
 		{job.StatusCancelled, false},
+		{job.StatusRetryWait, true},
 		{job.StatusFailed, false},
 		{job.StatusCompleted, false},
 	}

@@ -94,7 +94,7 @@ func TestChainOfNoSpeech(t *testing.T) {
 			jobs: []func(t *testing.T) *job.Job{failed("s", stt, 0, "stt job: transcription failed")},
 			want: Chain{
 				Stage: StageFailed, Step: StepTranscription, ErrorCode: ErrorTranscriptionFailed,
-				JobError: "stt job: transcription failed", Action: ActionOpenModels,
+				JobError: "stt job: transcription failed", Action: ActionRetranscribe,
 			},
 		},
 	}

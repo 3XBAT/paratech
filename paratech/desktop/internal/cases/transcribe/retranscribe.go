@@ -30,8 +30,8 @@ func (e *Enqueuer) ActiveJob(ctx context.Context, id shared.RecordingID) (jobID 
 	return j.ID, ok, nil
 }
 
-// Retranscribe creates a new STT job of a recording whose transcription was cancelled («Расшифровать снова»,
-// TASK-392). In one transaction it reads the recording, its STT jobs and its transcript, lets retranscribe.Policy
+// Retranscribe creates a new STT job of a recording whose transcription was cancelled or failed finally («Расшифровать
+// снова», TASK-392, TASK-409; not a failure for lack of speech). In one transaction it reads the recording, its STT jobs and its transcript, lets retranscribe.Policy
 // decide, pins the current model and stores the job keyed "stt:<recording>:<model>:r<n>". It refuses with
 // ErrNotAllowed (also for a recording that is gone or cannot be transcribed) and with ErrNoModel; a repeated call
 // finds the new job unfinished and refuses, so a double click makes one job.
@@ -106,7 +106,8 @@ func (e *Enqueuer) hasTranscript(ctx context.Context, id shared.RecordingID) (bo
 	return false, err
 }
 
-// sttJobs maps the jobs to what the policy reads of them.
+// sttJobs maps the jobs to what the policy reads of them. A failure for lack of speech counts as finished: another run
+// of the same audio finds none either, the row offers the sound check instead (TASK-110).
 func sttJobs(jobs []*job.Job) []retranscribe.Job {
 	out := make([]retranscribe.Job, 0, len(jobs))
 	for _, j := range jobs {
@@ -114,6 +115,8 @@ func sttJobs(jobs []*job.Job) []retranscribe.Job {
 		switch {
 		case j.Status() == job.StatusCancelled:
 			s = retranscribe.StateCancelled
+		case j.Status() == job.StatusFailed && !values.IsNoSpeech(j.LastError()):
+			s = retranscribe.StateFailed
 		case !j.Status().IsTerminal():
 			s = retranscribe.StateUnfinished
 		}

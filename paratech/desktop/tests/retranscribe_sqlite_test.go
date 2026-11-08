@@ -1,6 +1,6 @@
 package tests
 
-// Scenario of «Отменить расшифровку» and «Расшифровать снова» (TASK-392) on the real stack: SQLite, the file store,
+// Scenario of «Отменить расшифровку» and «Расшифровать снова» (TASK-392, after a failure TASK-409) on the real stack: SQLite, the file store,
 // the whispercli adapter with the fake whisper-cli (the test binary), the job runner, the transcription queue, the
 // post-processing enqueue and the recordings screen read. Only the clock, the binary and the LLM are fake.
 
@@ -84,8 +84,10 @@ func (e *sttEnv) postJobs(t shared.TranscriptID) []job.Type {
 	return out
 }
 
-func TestCancelTranscriptionAndStartAgain(t *testing.T) {
-	e := newSTTEnvWith(t, sttOptions{events: func(e *sttEnv) transcribe.EventPublisher {
+// newRetranscribeEnv is the STT stack whose stored transcripts enqueue the post-processing.
+func newRetranscribeEnv(t *testing.T) *sttEnv {
+	t.Helper()
+	return newSTTEnvWith(t, sttOptions{events: func(e *sttEnv) transcribe.EventPublisher {
 		post, err := homeworkflow.NewPostProcessor(homeworkflow.PostProcessDeps{
 			LLM: testenv.NewFakeLLM(), Transcripts: e.transcripts, Recordings: e.recordings,
 			Lessons: sqlite.NewLessonRepository(e.db), Artifacts: e.store, Summaries: sqlite.NewSummaryRepository(e.db),
@@ -97,6 +99,10 @@ func TestCancelTranscriptionAndStartAgain(t *testing.T) {
 		}
 		return post
 	}})
+}
+
+func TestCancelTranscriptionAndStartAgain(t *testing.T) {
+	e := newRetranscribeEnv(t)
 	ctx := context.Background()
 	m := e.installModel("m-1", "base", "1", testenv.WhisperHang)
 	ids := &sttJobIDs{}
@@ -191,5 +197,70 @@ func TestCancelTranscriptionAndStartAgain(t *testing.T) {
 	}
 	if dirs := e.runDirs(); len(dirs) != 0 {
 		t.Errorf("run directories left: %v", dirs)
+	}
+}
+
+// TASK-409: a transcription that failed finally (retries spent) offers «Расшифровать снова» too; the new job runs to
+// COMPLETED and the post-processing follows. The no-speech refusal is covered by the transcribe unit tests.
+func TestFailedTranscriptionStartsAgain(t *testing.T) {
+	e := newRetranscribeEnv(t)
+	ctx := context.Background()
+	m := e.installModel("m-1", "base", "1", testenv.WhisperFail)
+	ids := &sttJobIDs{}
+	enq := e.enqueuer(m.ID(), ids)
+	if err := enq.RecordingCompleted(ctx, e.rec.ID()); err != nil {
+		t.Fatal(err)
+	}
+	first, ok, err := enq.ActiveJob(ctx, e.rec.ID())
+	if err != nil || !ok {
+		t.Fatalf("ActiveJob = %v, %v", ok, err)
+	}
+	e.start()
+	e.waitFor(first, job.StatusFailed)
+
+	failed := e.job(first)
+	if failed.Attempts() != 2 {
+		t.Fatalf("attempts %d, want the cap 2", failed.Attempts())
+	}
+	want := activity.Chain{
+		Stage: activity.StageFailed, Step: activity.StepTranscription, ErrorCode: activity.ErrorTranscriptionFailed,
+		JobError: failed.LastError(), Action: activity.ActionRetranscribe,
+	}
+	if c := e.chain(); c != want {
+		t.Fatalf("failed row %+v, want %+v", c, want)
+	}
+
+	// A restart creates nothing: only the user's «Расшифровать снова» does.
+	again := e.enqueuer(m.ID(), ids)
+	if n, err := again.EnqueuePending(ctx); err != nil || n != 0 {
+		t.Fatalf("EnqueuePending = %d, %v; want nothing", n, err)
+	}
+
+	if err := e.store.Write(ctx, m.File(), strings.NewReader(testenv.WhisperOK)); err != nil {
+		t.Fatal(err)
+	}
+	second, err := again.Retranscribe(ctx, e.rec.ID())
+	if err != nil {
+		t.Fatalf("Retranscribe: %v", err)
+	}
+	if j := e.job(second); j.Key() != "stt:rec-1:m-1:r2" || j.PinnedModelID() != "m-1" {
+		t.Fatalf("new job key %q, model %q", j.Key(), j.PinnedModelID())
+	}
+	if _, err := again.Retranscribe(ctx, e.rec.ID()); !errors.Is(err, transcribe.ErrNotAllowed) {
+		t.Fatalf("a repeated Retranscribe = %v, want ErrNotAllowed", err)
+	}
+	e.waitFor(second, job.StatusCompleted)
+
+	if _, err := e.transcripts.Get(ctx, shared.TranscriptID(second)); err != nil {
+		t.Fatalf("transcript of the new job: %v", err)
+	}
+	if got := e.postJobs(shared.TranscriptID(second)); len(got) != 2 {
+		t.Fatalf("post-processing jobs of the new transcript: %v", got)
+	}
+	if c := e.chain(); c.Stage != activity.StageQueued || c.Step != activity.StepSummary {
+		t.Fatalf("row after the new transcription %+v, want the summary queued", c)
+	}
+	if _, err := again.Retranscribe(ctx, e.rec.ID()); !errors.Is(err, transcribe.ErrNotAllowed) {
+		t.Fatalf("Retranscribe with a transcript = %v, want ErrNotAllowed", err)
 	}
 }
