@@ -89,6 +89,8 @@ type sttOptions struct {
 	engine func(store *filestore.Store) transcribe.STTEngine
 	power  jobrunner.PowerMonitor
 	live   bool // store the live transcript parts (TASK-079)
+	// events replaces the recorder of completion events (TASK-392: the real post-processing enqueue).
+	events func(e *sttEnv) transcribe.EventPublisher
 }
 
 func newSTTEnv(t *testing.T) *sttEnv {
@@ -131,6 +133,9 @@ func newSTTEnvWith(t *testing.T, opts sttOptions) *sttEnv {
 	sttDeps := transcribe.Deps{
 		Engine: engine, Transcripts: e.transcripts, Recordings: e.recordings, Models: e.models, Artifacts: store,
 		Events: e.events, Clock: e.clock,
+	}
+	if opts.events != nil {
+		sttDeps.Events = opts.events(e)
 	}
 	if opts.live {
 		sttDeps.Live = sqlite.NewTranscriptParts(e.db)
