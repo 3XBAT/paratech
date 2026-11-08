@@ -189,6 +189,45 @@ sandbox reports «не проверено (нужно: …)», not «слома�
   модель base-q5_1; процессор …»; the reporter prints it in «Скорость расшифровки» of `report.md`, for information.
 - Processes are looked up with PowerShell `Get-CimInstance Win32_Process` (`src/app/procs.ts`), never by image name alone.
 
+## Assignments pack (`specs/assignments`, `@assignments`, TASK-381)
+
+The student's own assignment flows in the real window. Every row `requires` the settings rows it needs (the subject «История»
+from «Расписание: предметы из расписания»; the draft and send rows also the Hub key), so both packs run with
+`-- --project settings --project assignments` (not `--grep "@settings|@assignments"`: `npm run` hands the line to `cmd.exe`,
+which reads the `|` as a pipe and only `@settings` runs) and a lone `--grep @assignments` on a fresh sandbox says
+«не проверено (нужно: …)». Each row makes its own assignments
+through the UI (unique titles, dates relative to the real clock) and deletes them in a `finally`, so a red row does not switch
+the next one off. Files run by name: `01-add`, `02-change`, `03-done-remove`, `04-page`, `05-draft`, `06-send`, `07-journal`.
+
+| Row | What it checks |
+|---|---|
+| Задание: добавление со сроком (с временем и без) | the form starts with time `20:00`; a date alone is stored as `20:00` (TASK-304), a typed `09:30` is kept; both stand in «На этой неделе» and in «Сегодня» → «Сроки на неделе», with «до <день>, ЧЧ:ММ» and the subject |
+| Задание: просроченный срок не читается как «сегодня» | a deadline of yesterday and of today 00:00 read «просрочено, …», stand in «Просрочено», never match «сегодня/завтра до ЧЧ:ММ» and are not in «Сроки на неделе» (a control assignment proves the read is fresh) |
+| Задание: смена срока переносит в другую группу | «⋯» → «Изменить» shows the stored date and time; +10 days moves it from «На этой неделе» to «Позже» and out of «Сроки на неделе» |
+| Задание: «Выполнено» и возврат в работу | the check leaves «Открытые», the toast «Отменить» puts it back, «Выполненные» lists it with «Выполнено <дата>», it does not burn on «Сегодня», «Вернуть в работу» brings it back; the same with the buttons of the page |
+| Задание: удаление через «⋯» и «Вернуть» | «⋯» → «Удалить» (no question: it appears only for a running draft) → «Задание удалено» + «Вернуть» → the row is back; a final delete leaves no row in any list and none in «Сегодня» |
+| Задание: страница открывается без ошибок консоли и сети | console watch of `src/checks` (console errors, page errors, failed or 4xx/5xx requests; the 422 of `TurnkeyService.WorkOfAssignment`) while the page lives through one more poll of the core |
+| Задание: быстрый черновик, правка, новая версия, файлы | AC-13: scripted draft in the fields, typing + «Сохранить правку» = version 2, «Дополнительные указания» + «Написать новую версию» = version 3, the Hub request carries the instruction and the edit; «Файл .txt» writes `homework.md` (content = draft), «Word (.docx)» writes `<ctl>/saved/<name>.docx` through the save hook (text = draft); «Сделать под ключ» is present and never started |
+| Задание: отправка без почты преподавателя говорит причину | AC-14: «Отправить преподавателю…» without a teacher address gives the reason and «Указать почту» (to the subject page); no dialog, no email |
+| Задание: окно «Отправить задание?» и отмена | AC-14: with a synthetic teacher address set through that way out the button stops at «Отправить задание?» (version, recipient, subject, attachment); «Отмена» sends nothing |
+| Журнал: своя правка задания не пишется (ADR-0029) | after an add and an edit by hand «Журнал» (it runs after the draft row, so the page has the line «Решение задания» to show) has no «Добавлено задание» / «Изменён срок задания» / «Изменено задание»: by design the student's clicks are not in the agent journal |
+
+- **Hub calls.** The only provider call of the pack is the draft (`homeworkflow/drafts.go`, `prompts.Build`). The rules
+  (`scripts/llm/assignments/rules.ts`) match the data block `"assignment":{"title":"<title>"` for the first draft and the typed
+  instruction itself for the regeneration (the instruction rides in `<student_instructions>`); titles and instructions must be
+  free of `<>&"` that Go's JSON escapes. Replies are the strict `{"title","body"}` of `prompts.ParseDraft`.
+- **Files.** «Файл .txt» does not open a dialog: it writes the export of the assignment inside the data dir. Only
+  «Word (.docx)» asks where to save, so only it lands in `<ctl>/saved/`; `docx.ts` reads its `word/document.xml` (zip, no dependency).
+- **Not covered, on purpose.** Extraction over an existing summary: the only UI path is the recording import (the recording pack);
+  the material extraction is an agent tool. Google Calendar and the real send are out of E2E (ADR-0035). A delete's question
+  «Работа остановится» needs a running draft and is not reachable with the instant fake.
+- **Finding kept in a row.** After «Указать почту» the page of the subject shows the block «Преподаватели» three or four times (DOM:
+  `section.teachers` x3-4, all but the first with an open form). The row «отправка без почты…» asserts one block and is «сломано»; the next
+  row goes on with the first form. Probable cause: `TeachersBlock` and `SubjectTabs` share `key={subject.id}` in
+  `SubjectsPage.tsx` (a fragment with two equal keys).
+- **Clock.** The app's clock is the real one; the pack computes dates from `new Date()`: deadlines three or more days ahead
+  (never «завтра», also across midnight), yesterday and today 00:00 for the passed ones.
+
 ## Fake Messages API
 
 `node:http` on `127.0.0.1`, unary only (the Hub runs with `HUB_PROVIDER_STREAM=false`). Rules
