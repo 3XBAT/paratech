@@ -1,6 +1,6 @@
 # ADR-0036: The beta starts its local Hub
 
-- **Status:** Proposed (owner request 2026-11-08; proposal agreed with the owner, open items below)
+- **Status:** Accepted (owner request 2026-11-08; О1 and О2 answered the same day, see §8 and «Answered»)
 - **Date:** 2026-11-08
 - **Source:** owner 2026-11-08: no more console, path, env vars and `go run` to start the Hub; logs in a file.
   ADR-0003, 0009 (lifecycle, log file, connections), 0014 (secrets profile), 0035 (build tag `e2e`), PRD §12, §4.3.
@@ -77,8 +77,11 @@ file, an env default, a command line or a log. Everything else stays at the Hub'
   instance lock (ADR-0009) keeps one desktop per data dir. No extra lock file.
 - **Recheck** every 60 s while the status is not `running` or `remote`, and on «Проверить снова»: so a Hub comes up by
   itself after the owner starts Docker Desktop. A Hub that dies while the app runs is found by the same recheck.
-- Closing the app leaves the Hub running (the child is detached; the desktop never stops it at `Close`).
-- **The app never starts Docker Desktop or a container** (owner rule). It reports it.
+- Closing the app leaves the Hub running (the child is detached; the desktop never stops it at `Close`). If Windows
+  refuses the detach (§5), the Hub may end with the app: accepted by the owner (О2), with the WARN line; the next start
+  of the app starts it again.
+- **The app never starts Docker Desktop** (owner rule): it reports «включите Docker Desktop». When the Docker engine
+  already runs, it starts the Hub's database container itself (О1, §8).
 
 ### 5. Spawn (security-relevant, `adapters/hubprocess`)
 - Path: `filepath.Join(filepath.Dir(os.Executable()), "hub.exe")`, resolved once; must be a regular file, not a reparse
@@ -110,7 +113,7 @@ file, an env default, a command line or a log. Everything else stays at the Hub'
   attached **after** the listener is bound (the port is the lock, so two Hubs never rotate one file). Before that and
   without the variable: stderr, as today. `main` stays linear (ADR-0003); the sink is opened by `internal/app`.
 - `hub/docker-compose.yml`: the `postgres` service gets `restart: unless-stopped`, so a container created once comes
-  back whenever Docker Desktop runs (Open О1).
+  back whenever Docker Desktop runs (kept with §8: it covers a container stopped by a Docker restart).
 
 ### 7. Diagnostics UI («Настройки → Диагностика», block «Hub на этом компьютере»)
 Quiet status (icon + coloured text, no fills): «Работает» / «Запускается…» / «Не запущен: <reason>» / «Работает, но
@@ -121,6 +124,28 @@ Hub не отвечает: запустите контейнер postgres», `po
 завершился (код <n>), подробности в логе», `config_error` (exit 2). Actions: «Проверить снова», «Перезапустить Hub»
 (only when ours runs), «Открыть папку с логами» (opens `<DataDir>/logs` through the existing explorer opener; fixed
 path, never from the page). Every reason has a next step (no dead ends).
+
+### 8. The database container (О1, owner 2026-11-08)
+- **When:** in `Ensure`, the Docker engine pipe exists, the database port does not answer (or the Hub answers
+  `/healthz` but not `/readyz` for that reason), and the start is possible: the compose file is next to the exe, the
+  Docker CLI is at its fixed place and the host of the database URL is `127.0.0.1` or `localhost`. Then the app runs
+  the container **once**, waits for the port (up to 30 s after the command) and goes on with the normal start. A
+  failed run is remembered (reason `database_start_failed`, next step «Открыть папку с логами») and not repeated by the
+  60 s recheck until «Проверить снова», a new database URL or the engine seen off and on again. Engine off: nothing
+  runs, `docker_off` as before.
+- **Command** (`adapters/hubprocess`, security-relevant like §5): `exec.Cmd{Path: <docker.exe>, Args: [docker.exe,
+  compose, -f, <exeDir>\hub\docker-compose.yml, -p, hub, up, -d, --wait, postgres]}`; `docker.exe` =
+  `<FOLDERID_ProgramFiles>\Docker\Docker\resources\bin\docker.exe`, a regular file, not a reparse point; no PATH
+  lookup, no shell. Project `hub` = the project the owner's existing container already has (compose file in
+  `paratech/hub`), so the same container and volume are reused. Env: the parent's minus `HUB_*` and `LA_*`, plus
+  `HUB_PG_PORT=<port of the database URL>`; the URL itself (it holds the password) is never passed, logged or put on
+  a command line. `CREATE_NO_WINDOW`; `Dir` = `<DataDir>/hub`; output to `<DataDir>/logs/hub-db-start.log` (truncated
+  per run, ≤ 1 MiB); a 120 s timeout kills the command.
+- **Use case:** port `DatabaseStarter.StartDatabase(ctx) error` in `cases/localhub`; facts `DatabaseStartable` and
+  `DatabaseStartFailed`; status `starting_database` («Запускается база данных…») while the command runs; the rule
+  stays in `domain/localhub/services/diagnosis` (`Diagnosis.CanStartDatabase()`).
+- **Build:** `build-alpha.ps1 -Beta` copies `hub/docker-compose.yml` to `<out>\hub\docker-compose.yml`; other builds
+  remove that folder.
 
 ## Consequences
 - The owner double-clicks «paratech (beta)»; with Docker Desktop on, the Hub is there. The cloud path and the student
@@ -133,13 +158,12 @@ path, never from the page). Every reason has a next step (no dead ends).
 - Agent parity (ADR-0033): UI-only — a secret is typed; restart and diagnostics are beta tooling, not a student
   feature (row in `docs/agent-parity.md`).
 - Tasks: TASK-385 build script and CI, TASK-386 Hub log file and compose restart, TASK-387 domain and use case,
-  TASK-388 adapters, TASK-389 wiring and binding, TASK-390 restart and key issuance, TASK-391 UI.
+  TASK-388 adapters, TASK-389 wiring and binding, TASK-390 restart and key issuance, TASK-391 UI; §8: TASK-407
+  (domain and use case), TASK-408 (adapter and build copy).
 
-## Open (вопросы владельцу)
-- **О1.** Postgres в Docker: приложение само Docker и контейнеры не запускает. Предлагаю один раз добавить контейнеру
-  `restart: unless-stopped` — тогда база поднимается сама, как только запущен Docker Desktop. Подходит, или приложению
-  можно самому выполнить `docker compose up -d postgres`, когда Docker Desktop уже запущен?
-- **О2.** Если приложение не смогло отделить Hub от себя (Windows не разрешила), Hub закроется вместе с приложением.
-  Это допустимо (с записью в логе), или нужно что-то другое?
+## Answered 2026-11-08
+- **О1:** the app runs the Hub's database container itself when Docker Desktop is already running; it never starts
+  Docker Desktop (§8).
+- **О2:** acceptable that the Hub closes with the app when Windows refuses the detach (§4, WARN in the log).
 </content>
 </invoke>

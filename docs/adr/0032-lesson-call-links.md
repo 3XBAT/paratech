@@ -105,3 +105,11 @@ has no link. Links open today only through `adapters/weblink` (`explorer.exe`, s
 - Changes «The agent has no tool to read … a link»: the agent sees the link in `list_subjects` (`call_link`, the
   canonical form; owner О14 = а), so it goes to the Hub when that tool runs. It still has no tool to set it; the
   student saves it on the card or the subject page.
+
+## Addendum 2026-11-08 (owner): the subject link is the design
+- «Postponed» above becomes «dropped»: TASK-257, TASK-259…264 are closed as not needed (the lesson's own link, the
+  calendar link, `joinlink`, `cases/calllinks`). TASK-258 (`weblink.OpenCallLink`) stays as built.
+- Popup (TASK-370): `cases/recordingprompt.CallSubject` resolves lesson → library subject → link through its own ports.
+  Owner 08.11: it also answers while the recording started from that prompt runs (join after «Начать запись»); after
+  a click the button reads «Открыть ещё раз» and stays clickable; the dot of an offer is neutral (red only while
+  recording).

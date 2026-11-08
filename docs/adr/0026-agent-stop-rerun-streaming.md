@@ -145,3 +145,53 @@ Long replies (catalog 7+, up to 4000 characters) appeared whole at the end of a 
   answer drafts are still removed.
 - To verify live: whether the planner model streams the `reply` argument in small pieces (the docs say current
   models may emit one whole key/value per `input_json_delta`); if not, a reply appears in one or few deltas.
+
+## Addendum 2026-11-08 (owner's answers): retries, a cut reply, inactivity, heartbeat, the queue
+Supersedes, where they differ: «Продолжить» after a lost connection (Waiting / Desktop above), decision 2 of
+`progress/TASK-366.md` (24 h replay of a refused answer), «Decisions to confirm» of BUG-20261104 (core does not queue).
+
+**1. Automatic retry (planner step and `answer_question`).**
+- A Hub call that failed *transiently* (transport error, timeout, `unavailable`, Hub rate limit, a retryable
+  `PROVIDER_ERROR`, a provider stream cut) is retried by itself after **5 s, 10 s, 20 s, at most 3 times**, under the
+  **same key**: a released failure is not stored by the Hub, and a result the Hub did store is replayed free. Never
+  retried by itself: quota, permanent failures, an unusable answer, an expired turn, the student's «Стоп».
+- One schedule, pure: `domain/jobs/services/backoff.Interactive(attempt) (time.Duration, bool)` (agentturn already
+  imports this package). The wait uses the `Clock` port, never holds a lock that `Ask`, `Stop` or another chat needs,
+  and «Стоп» ends it at once. The panel gets a progress update with the attempt number (quiet line «Повторная попытка N
+  из 3»).
+- `answer_question`: only asks made for the student now (agent tool, a click) retry this way; job runs (tickets)
+  keep the job queue's backoff.
+
+**2. After the automatic retries.** A request whose failure came *from the Hub* (any `PROVIDER_ERROR`, a refusal, an
+unusable answer) stops `failed`; only a request that never reached the Hub stops `offline`. «Повторить» on either is
+`Retry`: a **new** key `…:r<N>` (`thread.Retry` is now allowed from `offline` too; budget `thread.MaxRetries`
+unchanged). «Продолжить» with the same key stays only after the student's «Стоп» and after the quota. Losing a stored
+result by the new key costs little: the three automatic attempts used the old key.
+
+**3. `answer_question` keys.** The reuse scope becomes per call: `ag:<thread>:<turn>:<8 hex of sha256(call id)>`
+(still `ans:v2:`, no migration; `MaxScopeBytes` holds it). A second `answer_question` of the model in the same request
+(after a refusal) is a fresh paid attempt; «Продолжить» replays the same step with the same call ids, so it still
+replays free.
+
+**4. A cut reply is not «no connection» (E2E D4).** After the automatic retries the panel keeps the shown text with
+«Ответ оборван. Можно повторить.» and the input stays enabled. «Нет связи с paratech» and a disabled input come only
+from the connection state, never from one request's failure.
+
+**5. Inactivity, not a total cap, for `answer_question`.** The streamed read gets the step's watchdog
+(BUG-20261104): 60 s without a Hub message (2 min before the first one), 10 min overall; the 5-minute whole-read cap
+goes.
+
+**6. Hub heartbeat.** `CompleteStreamRequest` and `AgentStepStreamRequest` get `bool heartbeat` (additive, transport
+only: **not** part of the fingerprint or key). When set, the Hub sends a new oneof event `StreamHeartbeat heartbeat`
+(empty message) after 15 s without any message, until the result or the error, never after the result; not charged,
+no data. One writer per stream in `hub/internal/input/connect`. The desktop sets the flag and resets its watchdog on
+every message, so a 60 s cut means the Hub went silent, not the model. Old clients do not set it and see nothing new.
+`HUB_LLM_TIMEOUT` is unchanged.
+
+**7. A second question always waits (never refused).** While the chat's current request is `PLANNING` or
+`EXECUTING` (a Hub step or a tool run alike), `Ask` returns at once with a *queued* ticket: an in-memory FIFO per chat
+in `cases/agentturn` (at most 5; a sixth is the old busy refusal). The panel shows «ждёт предыдущий запрос» with the
+icon «Отменить этот запрос» (`Withdraw`). When the current request becomes final (any final status, also after a
+failure or the student's «Стоп» of that request) the oldest waiting question starts as the next request, with the
+history including the first. A request waiting for the student (`AWAITING_PLAN`, `AWAITING_ANSWERS`) keeps today's
+behaviour. Not persisted: questions still waiting when the app closes are not sent and not charged (owner may object).

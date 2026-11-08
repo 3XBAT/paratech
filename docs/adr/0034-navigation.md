@@ -174,3 +174,21 @@ Each step leaves the app fully usable; no step removes a way to an object before
   «под ключ» первым, «Быстрый черновик» свернуть; (в) оставить как есть.
 - **В3. «Больше не спрашивать» для писем.** Разрешение действует (а) на все предметы сразу (рекомендую, проще);
   (б) отдельно для каждого предмета.
+
+## Answered 2026-11-08
+- **В1 = (а):** «База знаний» and «Предметы» are one place; TASK-354 proceeds as written.
+- **В3 = (а):** one permission per kind for all subjects (§5 as written, TASK-358…361).
+- **В2: none of the three.** ONE button «Сделать задание», no choice of mode; the AI decides from the assignment text
+  whether a short text answer or a turnkey work fits. Design:
+  - The decision is the triage reader's (ADR-0025): round 1 of `TRIAGE_ASSIGNMENT` reads the assignment and returns
+    `work_type` and `requirements.file_format`. A pure `domain/coursework/services/workroute.Decide(work type, file
+    format) → short | turnkey`: `turnkey` for `referat`, `doklad`, `essay`, `lab_report`, `presentation` or any
+    required file format; `short` for `answers`, `problems`, `other` without a file format. The model's output only
+    chooses between two of the student's own paid flows; no side effect follows from it (hard rule 3 holds).
+  - `cases/turnkey.Route(ctx, assignment)` asks round 1 with the **same request constructor and inputs** as
+    `turnkey.Start`, so a following `Start` gets the same key and the Hub replays it free; nothing is stored by Route.
+  - `input/wails.HomeworkService.DoAssignment(id)` calls `Route`, then the existing short-answer start or
+    `turnkey.Start` (the same use cases the two old buttons call); the page shows «Определяю, как лучше сделать…»
+    meanwhile. The minutes line «Расходует минуты обработки» is under the button.
+  - The agent keeps its own tools; parity row in `docs/agent-parity.md` («Сделать задание»: the agent already has both
+    paths).
