@@ -73,6 +73,15 @@ func (s *Service) SetNoteRecognition(ctx context.Context, mode settings.NoteReco
 	})
 }
 
+// SetCalendarOnDueChange sets what a deadline change does to the Google event (TASK-276, ADR-0029 З3) and returns the
+// stored toggles: also the «Запомнить» of the question. An unknown mode wraps settings.ErrInvalidSettings and nothing
+// is stored. No event is touched here.
+func (s *Service) SetCalendarOnDueChange(ctx context.Context, mode settings.CalendarOnDueChange) (Toggles, error) {
+	return s.change(ctx, "set calendar on due change", func(st *settings.Settings, now time.Time) error {
+		return st.SetCalendarOnDueChange(mode, now)
+	})
+}
+
 // RecognitionLanguage tells whether photo recognition can read Russian. It is LanguageUnknown without the check or
 // when the check fails; the error is returned with it for the log only.
 func (s *Service) RecognitionLanguage(ctx context.Context) (LanguageStatus, error) {
@@ -159,5 +168,6 @@ func toggles(st *settings.Settings) Toggles {
 		ProcessOnlyOnACPower:    st.ProcessOnlyOnACPower(),
 		RecognitionLoad:         st.RecognitionLoad(),
 		NoteRecognition:         st.NoteRecognition(),
+		CalendarOnDueChange:     st.CalendarOnDueChange(),
 	}
 }

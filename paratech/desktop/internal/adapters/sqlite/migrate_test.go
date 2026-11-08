@@ -20,7 +20,7 @@ import (
 )
 
 var contractTables = []string{
-	"agent_actions", "agent_steps", "agent_threads", "agent_turns", "answers", "assignments", "deadline_event_removals", "deliveries", "homework_draft_revisions", "homework_drafts", "jobs", "lecture_texts",
+	"agent_actions", "agent_steps", "agent_threads", "agent_turns", "answers", "assignments", "deadline_event_removals", "deadline_event_updates", "deliveries", "homework_draft_revisions", "homework_drafts", "jobs", "lecture_texts",
 	"material_inspections", "material_lessons", "materials", "note_parts", "notes", "proposals", "recordings", "schedule_entries", "settings", "stt_models", "stt_speeds",
 	"subject_aliases", "subject_folders", "subject_teachers", "subjects", "summaries", "ticket_sets", "today_posts", "transcript_parts",
 	"transcripts", "work_rounds", "works",
@@ -34,10 +34,12 @@ var contractTables = []string{
 // the version (TASK-121). Agent requests are saved with their thread, which carries the version, and the agent
 // history is append-only (TASK-116). The rounds of a turnkey work are rows of that aggregate (TASK-129). An answer
 // with citations is inserted once and never changes (TASK-118). The parts of a note are rows of the note (TASK-149).
-// The teachers of a subject are rows of the subject (TASK-285).
+// The teachers of a subject are rows of the subject (TASK-285). The deadline events to update are a queue as the
+// removals (TASK-276).
 var unversionedTables = map[string]bool{
 	"homework_draft_revisions": true, "transcript_parts": true, "stt_speeds": true, "deadline_event_removals": true,
-	"subject_aliases": true, "subject_folders": true, "subject_teachers": true, "material_lessons": true, "agent_turns": true, "agent_steps": true,
+	"deadline_event_updates": true,
+	"subject_aliases":        true, "subject_folders": true, "subject_teachers": true, "material_lessons": true, "agent_turns": true, "agent_steps": true,
 	"work_rounds": true, "answers": true, "note_parts": true,
 }
 
@@ -91,8 +93,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != subjectCallLinkVersion {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, subjectCallLinkVersion)
+	if err != nil || first != deadlineEventUpdatesVersion {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, deadlineEventUpdatesVersion)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
@@ -277,8 +279,12 @@ const dropFreeWorkNoticeVersion = 48
 // subjectRemovalVersion adds the soft removal of a subject (TASK-288).
 const subjectRemovalVersion = 49
 
-// subjectCallLinkVersion adds the call link of a subject (TASK-364), the newest one.
+// subjectCallLinkVersion adds the call link of a subject (TASK-364).
 const subjectCallLinkVersion = 50
+
+// deadlineEventUpdatesVersion adds the calendar setting on a deadline change and the queue of event updates
+// (TASK-276), the newest one.
+const deadlineEventUpdatesVersion = 51
 
 // recordingOriginVersion adds the origin of a recording (TASK-161).
 const recordingOriginVersion = 42
