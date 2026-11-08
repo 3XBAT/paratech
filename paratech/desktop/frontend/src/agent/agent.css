@@ -89,7 +89,7 @@
 /* Claims of an answer: model text can be long and have no break points, so it wraps anywhere and never widens the card. */
 .ag-claim, .ag-claim-miss { overflow-wrap: anywhere; min-width: 0; }
 .ag-claim-out { font-weight: 600; }
-.ag-claim-more { margin-bottom: 8px; }
+.ag-claim-more { margin: -4px 0 4px -4px; }
 .ag-sub { font-size: var(--fs-small); font-weight: 600; color: var(--muted); }
 .ag-list { margin: 0 0 8px; padding-left: 20px; overflow-wrap: anywhere; }
 .ag-list li { margin-bottom: 4px; }

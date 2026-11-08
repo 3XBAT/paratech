@@ -250,15 +250,27 @@ test("clampClaim cuts at the last space within 80 units of the limit, else hard"
   assert.equal(clampClaim(emoji).text, `${"a".repeat(claimClampLimit - 1)}…`);
 });
 
-test("a long claim shows its start and «Показать полностью»; opened it shows everything and «Свернуть»", () => {
+// TASK-400 (owner): the toggle is a small action, so an icon with a tooltip and an aria-label, not a word button.
+test("a long claim shows its start and an icon «Показать полностью»; opened it shows everything and «Свернуть»", () => {
   const long = "слово ".repeat(200).trim();
   const collapsed = html(h(ClaimLineView, { claim: claim(long), expanded: false, onToggle: noop }));
   assert.ok(!collapsed.includes(long));
   assert.match(collapsed, /…<\/p>/);
-  assert.match(collapsed, /<button type="button" class="ag-plan-more ag-claim-more" aria-expanded="false">Показать полностью<\/button>/);
+  const toggle = collapsed.match(/<button[^>]*ag-claim-more[^>]*>[\s\S]*?<\/button>/)[0];
+  assert.match(toggle, /aria-label="Показать полностью"/);
+  assert.match(toggle, /aria-expanded="false"/);
+  assert.match(toggle, /<svg[^>]*><use href="#i-chev"/);
+  assert.match(toggle, /<span class="ia-tip" aria-hidden="true">Показать полностью<\/span>/);
+  // The text is only in the tooltip and the name, not a visible word on the button.
+  assert.doesNotMatch(collapsed, />Показать полностью<\/button>/);
   const opened = html(h(ClaimLineView, { claim: claim(long), expanded: true, onToggle: noop }));
   assert.ok(opened.includes(long));
-  assert.match(opened, /aria-expanded="true">Свернуть<\/button>/);
+  const close = opened.match(/<button[^>]*ag-claim-more[^>]*>[\s\S]*?<\/button>/)[0];
+  assert.match(close, /aria-label="Свернуть"/);
+  assert.match(close, /aria-expanded="true"/);
+  assert.match(close, /#i-chevup/);
+  // The claim stays the first <p> and the toggle is no source button.
+  assert.equal(firstP(opened), long);
   // A short claim has no toggle.
   assert.doesNotMatch(html(h(ClaimLineView, { claim: claim("коротко"), expanded: false, onToggle: noop })), /<button/);
 });
@@ -266,7 +278,7 @@ test("a long claim shows its start and «Показать полностью»; 
 test("the toggle calls onToggle", () => {
   let n = 0;
   const el = ClaimLineView({ claim: claim("я".repeat(claimClampLimit + 5)), expanded: false, onToggle: () => n++ });
-  const button = el.props.children.find((c) => c && c.type === "button");
+  const button = el.props.children.find((c) => c && c.type === IconAction);
   button.props.onClick();
   assert.equal(n, 1);
 });

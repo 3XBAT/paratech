@@ -26,6 +26,8 @@ import {
   assignmentRow,
   type ButtonCard,
   cardButtonIcon,
+  cardKeys,
+  firstLateCard,
   offerIcon,
   replyCopyText,
   replyStatus,
@@ -680,15 +682,28 @@ export function AgentRequest(props: {
 }) {
   const { model } = props;
   const { reply, answers } = splitDrafts(props.drafts ?? []);
-  // The kept text goes right above the first stop line (or the problem line); with neither, after the cards: it never vanishes.
+  // The Driver sends the late cards (confirm, action line, schedule) and the stop line after the reply. The typing reply and
+  // a kept (cut-off) one sit right above the first of them, where the final reply card will be; else above the problem line;
+  // with none of them, after the cards: it never vanishes.
   const keptText = props.cut?.text ?? "";
-  const lineAt = model.cards.findIndex((c) => c.type === "stopped");
+  const lateAt = firstLateCard(model.cards);
   const problemAt = model.cards.findIndex((c) => c.type === "problem");
-  const keptAt = keptText === "" ? -1 : lineAt >= 0 ? lineAt : problemAt >= 0 ? problemAt : model.cards.length;
+  const draftAt = lateAt >= 0 ? lateAt : model.cards.length;
+  const keptAt = keptText === "" ? -1 : lateAt >= 0 ? lateAt : problemAt >= 0 ? problemAt : model.cards.length;
   const kept = <StoppedReply text={keptText} caption={props.cut?.reason === "user"} />;
+  const hasWaitingCard = model.cards.some((c) => c.type === "waiting");
+  // The reply sits where its final card will be, before the answer drafts, so it does not jump over them.
+  const drafts = (
+    <>
+      {reply !== null && <ReplyDraft text={replyDraftText(reply)} />}
+      {answers.map((d, i) => (
+        <AnswerDraft key={d.callId || i} draft={d} dots={!hasWaitingCard && reply === null && i === answers.length - 1} />
+      ))}
+    </>
+  );
   // «Отменить всё» only when there is more than one action left to undo.
   const open = undoableActions(model.cards).filter((id) => !props.actions.undoNote(id)?.done);
-  const hasWaitingCard = model.cards.some((c) => c.type === "waiting");
+  const keys = cardKeys(model.cards);
   return (
     <article className="ag-req">
       {model.userText !== "" && <p className="ag-user">{model.userText}</p>}
@@ -718,22 +733,20 @@ export function AgentRequest(props: {
         </p>
       )}
       {model.cards.map((c, i) =>
-        // Kind and caption (the question round) are in the key so a new card does not inherit the typed state of the old one.
-        // The draft goes before the waiting card, so its dots (with «Стоп») stay after the last line.
+        // `cardKeys`: kind and caption (the question round) so a new card does not inherit the typed state of the old one;
+        // late cards by identity, so the reply arriving above a confirm card does not remount it.
+        // The drafts go before the waiting card, so its dots (with «Стоп») stay after the last line.
         c.type === "waiting" ? null : (
-          <Fragment key={`${c.type}:${"caption" in c ? c.caption : ""}:${i}`}>
+          <Fragment key={keys[i]}>
             {i === keptAt && kept}
+            {i === draftAt && drafts}
             <Card card={c} actions={props.actions} startedAt={props.startedAt} clock={props.clock} />
           </Fragment>
         ),
       )}
       {keptAt === model.cards.length && kept}
       <ReplyStatus typing={reply !== null} replyCard={model.cards.some((c) => c.type === "reply")} running={hasWaitingCard} />
-      {/* The reply sits where its final card will be, before the answer drafts, so it does not jump over them. */}
-      {reply !== null && <ReplyDraft text={replyDraftText(reply)} />}
-      {answers.map((d, i) => (
-        <AnswerDraft key={d.callId || i} draft={d} dots={!hasWaitingCard && reply === null && i === answers.length - 1} />
-      ))}
+      {draftAt === model.cards.length && drafts}
       {model.cards.map((c, i) => (c.type === "waiting" ? <Card key={`w:${i}`} card={c} actions={props.actions} typing={reply !== null} startedAt={props.startedAt} clock={props.clock} /> : null))}
       {/* No copy while the reply is still typing: the final card replaces the draft. */}
       <AgentActions

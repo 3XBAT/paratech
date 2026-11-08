@@ -128,7 +128,11 @@ test("the suffix of a fork title is split off so it can stay whole", () => {
 test("the words of the choice are as the owner fixed them", () => {
   assert.equal(restartTexts.fork, "Форк");
   assert.equal(restartTexts.forkHint, "Будет создан новый чат с историей до этого сообщения. Этот чат не изменится.");
-  assert.equal(restartTexts.hideHint, "Сообщения после этого агент забудет. Сделанные действия не отменяются.");
+  // TASK-400 (TASK-249, owner accepted): the «Скрыть» line now also says where the text goes; «Форк» above is unchanged.
+  assert.equal(
+    restartTexts.hideHint,
+    "Текст сообщения перейдёт в поле ввода. После отправки сообщения ниже пропадут из чата, и агент их забудет. Сделанные действия не отменяются.",
+  );
   assert.doesNotMatch(restartTexts.fork + restartTexts.forkHint, /fork/i, "the suffix « (fork)» comes from the core");
 });
 

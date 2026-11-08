@@ -58,9 +58,15 @@ export function ClaimLineView(props: { claim: AnswerClaim; expanded: boolean; on
         {shown}
       </p>
       {clamp.clamped && (
-        <button type="button" className="ag-plan-more ag-claim-more" aria-expanded={expanded} onClick={props.onToggle}>
-          {expanded ? answerTexts.collapse : answerTexts.showAll}
-        </button>
+        // A small secondary action is an icon with a tooltip (owner rule); the words are its tooltip and name.
+        <IconAction
+          icon={expanded ? "chevup" : "chev"}
+          size="sm"
+          className="ag-claim-more"
+          label={expanded ? answerTexts.collapse : answerTexts.showAll}
+          expanded={expanded}
+          onClick={props.onToggle}
+        />
       )}
     </>
   );

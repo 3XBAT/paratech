@@ -549,7 +549,7 @@ export const restartTexts = {
   action: "Начать заново отсюда",
   title: "Начать заново отсюда?",
   // Under each choice, in the owner's words (2026-10-27).
-  hideHint: "Сообщения после этого агент забудет. Сделанные действия не отменяются.",
+  hideHint: "Текст сообщения перейдёт в поле ввода. После отправки сообщения ниже пропадут из чата, и агент их забудет. Сделанные действия не отменяются.",
   hide: "Скрыть",
   fork: "Форк",
   forkHint: "Будет создан новый чат с историей до этого сообщения. Этот чат не изменится.",
@@ -1574,6 +1574,62 @@ export function offerModel(offer: OfferView | null | undefined): OfferModel | nu
     return null;
   }
   return { label: spec.label, offer };
+}
+
+/**
+ * A card the Go Driver sends after the reply: a confirm card (also delete_assignment), an action line, the schedule review
+ * and the stop line. The streamed reply is drawn, and a cut-off one kept, right above the first of them, so the final reply
+ * card takes the place of the draft without jumping over them.
+ */
+export function isLateCard(c: CardModel): boolean {
+  return c.type === "confirm" || c.type === "action" || c.type === "schedule" || c.type === "stopped";
+}
+
+/** The index of the first late card, or -1. */
+export function firstLateCard(cards: readonly CardModel[]): number {
+  return cards.findIndex(isLateCard);
+}
+
+/**
+ * The React key of a card. Late cards are keyed by what they are (target, action, token), not by their place: the reply
+ * card arriving above them must not remount a confirm card (its state, its focus). Others carry kind, caption and index so
+ * a new card does not inherit the typed state of the old one.
+ */
+export function cardKey(c: CardModel, index: number): string {
+  const byIndex = `${c.type}:${"caption" in c ? c.caption : ""}:${index}`;
+  switch (c.type) {
+    case "confirm":
+      return c.target === null ? `${c.type}:${c.caption}` : `confirm:${c.target.kind}:${c.target.id}`;
+    case "action":
+      return c.actionId === "" ? byIndex : `action:${c.actionId}`;
+    case "schedule":
+      return c.token === "" ? byIndex : `schedule:${c.token}`;
+    default:
+      return byIndex;
+  }
+}
+
+/**
+ * The keys of a whole list, all different. The planner is untrusted and may propose the same target twice, and every
+ * confirm card without a target has the same base key, so a repeated key gets `#2`, `#3`... The counter counts the EARLIER
+ * cards with the same key, not the list position, so a reply card arriving above does not change the key of a confirm card.
+ */
+export function cardKeys(cards: readonly CardModel[]): string[] {
+  const seen = new Map<string, number>();
+  const used = new Set<string>();
+  return cards.map((c, i) => {
+    const base = cardKey(c, i);
+    let n = (seen.get(base) ?? 0) + 1;
+    let key = n === 1 ? base : `${base}#${n}`;
+    // A made-up suffix may equal another card's own key; step on until it is free.
+    while (used.has(key)) {
+      n += 1;
+      key = `${base}#${n}`;
+    }
+    seen.set(base, n);
+    used.add(key);
+    return key;
+  });
 }
 
 /** The action line card. */

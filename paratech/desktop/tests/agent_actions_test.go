@@ -264,8 +264,9 @@ func TestAgentActionLineStaysWithTheReplyOnSQLite(t *testing.T) {
 	e.hub.Then(testenv.AgentCall{ID: "w1", Tool: "create_subject", Args: `{"name":"Химия"}`}).
 		Then(testenv.AgentCall{ID: "r1", Tool: "reply", Args: `{"text":"Предмет создан"}`})
 	up := e.ask(t, values.Scope{}, "добавь химию")
-	if up.Status != thread.StatusDone || len(up.Cards) != 2 || up.Cards[0].Kind() != values.CardActionLine ||
-		up.Cards[1].Kind() != values.CardReply {
+	// (TASK-400: after the reply)
+	if up.Status != thread.StatusDone || len(up.Cards) != 2 || up.Cards[0].Kind() != values.CardReply ||
+		up.Cards[1].Kind() != values.CardActionLine {
 		t.Fatalf("last update = %+v", up)
 	}
 }
