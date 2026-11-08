@@ -514,7 +514,19 @@ func TestProgressPublishes(t *testing.T) {
 		Cards: []values.Card{values.ReplyCard{Text: "не для панели"}}})
 	ups := sink.all()
 	if len(ups) != 1 || !ups[0].Progress || ups[0].Thread != th1 || ups[0].Turn != 2 || ups[0].Scope != scope ||
-		ups[0].Status != thread.StatusPlanning || len(ups[0].Cards) != 0 || ups[0].Problem != ProblemNone {
+		ups[0].Status != thread.StatusPlanning || len(ups[0].Cards) != 0 || ups[0].Problem != ProblemNone || ups[0].Retry != 0 {
 		t.Fatalf("updates %+v", ups)
+	}
+
+	// An automatic retry of the step is the same progress update with its attempt.
+	p.Retrying(t.Context(), agentturn.Step{Thread: th1, Turn: 2, Scope: scope, Status: thread.StatusPlanning,
+		Cards: []values.Card{values.ReplyCard{Text: "не для панели"}}}, 2)
+	ups = sink.all()
+	if len(ups) != 2 {
+		t.Fatalf("updates %+v", ups)
+	}
+	if r := ups[1]; !r.Progress || r.Retry != 2 || r.Thread != th1 || r.Turn != 2 || r.Scope != scope ||
+		r.Status != thread.StatusPlanning || len(r.Cards) != 0 || r.Problem != ProblemNone {
+		t.Fatalf("retry update %+v", r)
 	}
 }

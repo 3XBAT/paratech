@@ -271,11 +271,12 @@ func TestStepsAndKeys(t *testing.T) {
 		t.Fatalf("Admit during an open step = %v", err)
 	}
 
-	// Offline: the request stops with the step open, «Продолжить» repeats the same key.
-	if err := th.Stop(values.StopOffline, at(3)); err != nil {
+	// «Стоп»: the request stops with the step open, «Продолжить» repeats the same key (offline needs Retry since
+	// ADR-0026 addendum 2026-11-08, see TestContinueAndRetryByReason).
+	if err := th.Stop(values.StopUser, at(3)); err != nil {
 		t.Fatal(err)
 	}
-	if turn, _ := th.Turn(); turn.StopReason() != values.StopOffline || !turn.StepOpen() {
+	if turn, _ := th.Turn(); turn.StopReason() != values.StopUser || !turn.StepOpen() {
 		t.Fatalf("stopped request = %+v", turn)
 	}
 	if err := th.Continue(at(4)); err != nil {

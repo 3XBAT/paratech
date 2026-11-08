@@ -34,6 +34,7 @@ func (s *Service) drive(ctx context.Context, c *change, op string) (st Step, err
 	}()
 
 	silent := true // an expired first step restarts once without asking the student
+	retry := 0     // automatic retries of the open step so far (backoff.Interactive)
 	for {
 		c.takeResults(s)
 		now := s.clock.Now()
@@ -83,32 +84,140 @@ func (s *Service) drive(ctx context.Context, c *change, op string) (st Step, err
 			History: thread.Window(entries, turn.Number(), c.th.Summary()), MaxOutputTokens: MaxOutputTokens,
 		}
 
-		if s.progress != nil {
+		if s.progress != nil && retry > 0 {
+			s.progress.Retrying(ctx, progressOf(c.th), retry)
+		} else if s.progress != nil {
 			s.progress.Started(ctx, progressOf(c.th))
 		}
-		reply, err := s.callModel(ctx, c, req)
+		reply, cut, err := s.callModel(ctx, c, req)
 		if err != nil {
+			if wait, ok := s.retryable(ctx, err, cut, retry+1); ok {
+				retry++
+				st, done, werr := s.pause(ctx, c, op, err, retry, wait)
+				if done {
+					return st, werr
+				}
+				if ctx.Err() == nil {
+					continue // the same step under the same key
+				}
+			}
 			reason := reasonOf(ctx, err)
 			again, ferr := s.fail(ctx, c, err, reason, silent)
 			if ferr != nil {
 				return s.abort(ctx, c, op, reason, ferr)
 			}
 			if again {
-				silent = false
+				silent, retry = false, 0
 				continue
 			}
 			return s.finish(ctx, c, op)
 		}
+		retry = 0
 		if err := s.handle(ctx, c, reply); err != nil {
 			return s.abort(ctx, c, op, values.StopFailed, err)
 		}
 	}
 }
 
+// retryable tells whether a failed Hub call of the open step is retried by itself (ADR-0026 addendum 2026-11-08) and
+// after which wait: a failure that may go away (transport, timeout, unavailable, the Hub's rate limit, a retryable
+// provider failure or a cut stream), while retries of the step are left. Never the quota, a permanent failure, an
+// unusable or expired answer, a Hub that is not set up, a call cut by «Стоп» or a caller gone; never without Sleeper.
+func (s *Service) retryable(ctx context.Context, err error, cut bool, attempt int) (time.Duration, bool) {
+	if s.sleeper == nil || cut || ctx.Err() != nil || stopReasonOf(err) == values.StopQuota ||
+		errors.Is(err, values.ErrTurnGone) || errors.Is(err, values.ErrInvalidResult) ||
+		errors.Is(err, shared.ErrServiceNotConfigured) || backoff.Classify(err) != backoff.ClassTransient {
+		return 0, false
+	}
+	return backoff.Interactive(attempt)
+}
+
+// pause waits before automatic retry attempt of the open step of c, WITHOUT s.mu: Ask, Stop and other chats go on
+// meanwhile, and a «Стоп» of the request (Stop wakes the wait) ends it at once. The panel learns the attempt first.
+// done is true when the request no longer waits for this retry: a stop or another change stored meanwhile wins and its
+// stored state comes back (see conflict). A done ctx returns with done false; the caller stops the request as for
+// the failure.
+func (s *Service) pause(ctx context.Context, c *change, op string, cause error, attempt int, wait time.Duration) (Step, bool, error) {
+	s.log.WarnContext(ctx, "agent step retried", "thread", c.th.ID().String(), "attempt", attempt, "wait", wait, "err", cause)
+	wctx, w := s.waiting(ctx, c.th.ID())
+	defer s.waited(c.th.ID(), w)
+	if s.progress != nil {
+		s.progress.Retrying(ctx, progressOf(c.th), attempt)
+	}
+
+	// A «Стоп» stored between the failed call and the registration would not wake the wait.
+	if changed, err := s.changed(ctx, c); err != nil || changed {
+		st, err := s.conflict(ctx, c, op, errors.Join(shared.ErrVersionConflict, err))
+		return st, true, err
+	}
+	s.sleepUnlocked(wctx, wait)
+	if ctx.Err() != nil {
+		return Step{}, false, nil
+	}
+	if changed, err := s.changed(ctx, c); err != nil || changed {
+		st, err := s.conflict(ctx, c, op, errors.Join(shared.ErrVersionConflict, err))
+		return st, true, err
+	}
+	return Step{}, false, nil
+}
+
+// sleepUnlocked sleeps with s.mu released; s.mu is held again on return, a panic included. An error of Sleep is a
+// woken or cancelled wait, which the caller reads from the stored request and ctx.
+func (s *Service) sleepUnlocked(ctx context.Context, d time.Duration) {
+	s.mu.Unlock()
+	defer s.mu.Lock()
+	_ = s.sleeper.Sleep(ctx, d)
+}
+
+// changed tells whether the stored request of c is no longer the one c holds: something was saved since.
+func (s *Service) changed(ctx context.Context, c *change) (bool, error) {
+	th, err := s.threads.Get(ctx, c.th.ID())
+	if err != nil {
+		return false, err
+	}
+	return th.Version() != c.th.Version(), nil
+}
+
+// waiter is a registered retry wait of a thread; Stop ends it.
+type waiter struct{ cancel context.CancelFunc }
+
+// waiting registers a retry wait of thread id; its ctx ends when Stop of the thread is stored.
+func (s *Service) waiting(ctx context.Context, id shared.ThreadID) (context.Context, *waiter) {
+	wctx, cancel := context.WithCancel(ctx)
+	w := &waiter{cancel: cancel}
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	if s.waits == nil {
+		s.waits = map[shared.ThreadID]*waiter{}
+	}
+	s.waits[id] = w
+	return wctx, w
+}
+
+// waited ends the wait w of thread id.
+func (s *Service) waited(id shared.ThreadID, w *waiter) {
+	w.cancel()
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	if s.waits[id] == w {
+		delete(s.waits, id)
+	}
+}
+
+// wake ends the retry wait of thread id, if one runs.
+func (s *Service) wake(id shared.ThreadID) {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	if w := s.waits[id]; w != nil {
+		w.cancel()
+	}
+}
+
 // callModel is the Hub call of the open step of c, with its reply draft when Drafts gives one. The draft is ended
 // whatever happens (a panic too) and only ever shown: nothing here reads it. A call cut by the draft's ctx (a «Стоп»
-// was stored) fails like a lost connection, and the save of that failure finds the stored stop (see conflict).
-func (s *Service) callModel(ctx context.Context, c *change, req values.StepRequest) (values.StepReply, error) {
+// was stored) fails like a lost connection, and the save of that failure finds the stored stop (see conflict); cut
+// reports it, so that failure is not retried by itself.
+func (s *Service) callModel(ctx context.Context, c *change, req values.StepRequest) (_ values.StepReply, cut bool, _ error) {
 	callCtx, draft := ctx, Draft(nil)
 	if s.drafts != nil {
 		dctx, d := s.drafts.Reply(ctx, progressOf(c.th))
@@ -128,12 +237,14 @@ func (s *Service) callModel(ctx context.Context, c *change, req values.StepReque
 		err = reply.Validate()
 	}
 	answered = err == nil
-	return reply, err
+	return reply, err != nil && callCtx.Err() != nil, err
 }
 
-// stopReasonOf sorts a failed step (ADR-0021, TASK-116 decision d): an answer that may exist or may come later
-// (network, timeout, a busy or overloaded Hub) and a used-up quota keep the same key for «Продолжить»; a failure the
-// Hub refused for good or answered unusably needs «Повторить» with a new key; an expired model turn a restart.
+// stopReasonOf sorts a failed step (ADR-0021, TASK-116 decision d, ADR-0026 addendum 2026-11-08): a used-up quota
+// keeps the same key for «Продолжить»; a failure the Hub answered (values.ErrHubFailure: a provider failure, a
+// refusal, a rate limit), one it refused for good or an unusable answer stops failed; a request that never reached the
+// Hub (network, timeout, unavailable) stops offline; both need «Повторить» with a new key; an expired model turn a
+// restart.
 func stopReasonOf(err error) values.StopReason {
 	switch {
 	case errors.Is(err, values.ErrTurnGone):
@@ -141,7 +252,9 @@ func stopReasonOf(err error) values.StopReason {
 	case errors.Is(err, values.ErrInvalidResult), errors.Is(err, backoff.ErrPermanent):
 		return values.StopFailed
 	case errors.Is(err, shared.ErrQuotaExceeded):
-		return values.StopQuota
+		return values.StopQuota // the quota error of the Hub carries ErrHubFailure too
+	case errors.Is(err, values.ErrHubFailure):
+		return values.StopFailed
 	}
 	return values.StopOffline
 }

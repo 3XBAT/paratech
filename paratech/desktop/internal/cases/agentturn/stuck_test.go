@@ -90,25 +90,28 @@ func TestStepFailureStopsTheRequest(t *testing.T) {
 	}
 }
 
-// A save that fails after the Hub answered keeps the step open: «Продолжить» replays its key (free on the Hub) and
-// the request ends with the reply it dropped.
-func TestFailedSaveAfterStepContinues(t *testing.T) {
+// A save that fails after the Hub answered keeps the step open and stops offline: since ADR-0026 addendum 2026-11-08
+// that is «Повторить» under a new key (a new paid attempt), and the request ends with the new reply.
+func TestFailedSaveAfterStepRetries(t *testing.T) {
 	e := newEnv(t)
 	e.model.then(raw("c1", "list_subjects", `{}`)).do(func(values.StepRequest) (values.StepReply, error) {
 		e.history.setFailing(errors.New("disk full"))
 		return reply(raw("r1", "reply", `{"text":"ок"}`)), nil
-	})
+	}).then(raw("r1", "reply", `{"text":"ок"}`))
 	st := ask(t, e, "мои предметы")
 	if _, err := e.svc.Submit(t.Context(), SubmitInput{Turn: ref(st), Outcomes: []Outcome{okResult("c1", `{}`)}}); err == nil {
 		t.Fatal("Submit succeeded")
 	}
 	e.history.setFailing(nil)
-	got, err := e.svc.Continue(t.Context(), ref(st))
+	if _, err := e.svc.Continue(t.Context(), ref(st)); !errors.Is(err, thread.ErrRetryRequired) {
+		t.Fatalf("Continue = %v, want retry required", err)
+	}
+	got, err := e.svc.Retry(t.Context(), ref(st))
 	if err != nil || got.Status != thread.StatusDone || len(got.Cards) != 1 || got.Cards[0].Kind() != values.CardReply {
-		t.Fatalf("Continue = %+v, %v", got, err)
+		t.Fatalf("Retry = %+v, %v", got, err)
 	}
 	reqs := e.model.requests()
-	if len(reqs) != 3 || reqs[1].Key != reqs[2].Key {
+	if len(reqs) != 3 || reqs[2].Key != reqs[1].Key+":r1" {
 		t.Fatalf("requests = %d, keys %q", len(reqs), reqs[len(reqs)-1].Key)
 	}
 }

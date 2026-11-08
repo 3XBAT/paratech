@@ -256,6 +256,26 @@ func TestAgentDraftProgressLiftsOnlyTheReply(t *testing.T) {
 	}
 }
 
+// The progress update of an automatic retry (ADR-0026 addendum 2026-11-08) treats the drafts exactly as any progress
+// update: the drafts of the request are neither flushed nor dropped, and the reply the retried step writes shows.
+func TestAgentDraftRetryIsAProgressUpdate(t *testing.T) {
+	run := func(retry int) []string {
+		p, em, clock := draftPanel(t)
+		p.Publish(AgentUpdate{Thread: "th1", Turn: 1, Status: "PLANNING", Progress: true})
+		p.Draft(reading("c1", "а"))
+		p.Draft(AgentDraft{Thread: "th1", Turn: 1, CallID: "step:reply", Texts: []string{"начало"}, Reply: true})
+		p.Publish(AgentUpdate{Thread: "th1", Turn: 1, Status: "PLANNING", Progress: true, Retry: retry})
+		p.Draft(reading("c1", "аб"))
+		p.Draft(AgentDraft{Thread: "th1", Turn: 1, CallID: "step:reply", Texts: []string{"заново"}, Reply: true})
+		clock.advance(time.Second)
+		return shown(t, em)
+	}
+	plain, retried := run(0), run(1)
+	if !slices.Equal(plain, retried) || !slices.Contains(retried, "заново|") {
+		t.Fatalf("with a retry %q, as plain progress %q", retried, plain)
+	}
+}
+
 // At most one draft per call every 100 ms, the last texts winning; calls are throttled apart.
 func TestAgentDraftThrottle(t *testing.T) {
 	p, em, clock := draftPanel(t)

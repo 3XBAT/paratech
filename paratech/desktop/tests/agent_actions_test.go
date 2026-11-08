@@ -314,8 +314,9 @@ func TestAgentUndoRequestOfASubjectAndItsFolderOnSQLite(t *testing.T) {
 
 			e.hub.Then(testenv.AgentCall{ID: "w2", Tool: "create_folder", Args: `{"subject":"` + chem + `","name":"Лабы"}`}).
 				Then(testenv.AgentCall{ID: "r1", Tool: "reply", Args: `{"text":"Готово"}`})
-			if up := e.run(t, func(ctx context.Context) error { return e.driver.Continue(ctx, ref) }); up.Status != thread.StatusDone {
-				t.Fatalf("after «Продолжить» = %+v", up)
+			// Stopped offline with its step open: «Повторить» (a new key), ADR-0026 addendum 2026-11-08.
+			if up := e.run(t, func(ctx context.Context) error { return e.driver.Retry(ctx, ref) }); up.Status != thread.StatusDone {
+				t.Fatalf("after «Повторить» = %+v", up)
 			}
 			if folder, err := e.journal.Find(t.Context(), up.Thread, up.Turn, "w2"); err != nil || folder.Status != action.StatusDone {
 				t.Fatalf("folder entry = %+v, %v", folder, err)

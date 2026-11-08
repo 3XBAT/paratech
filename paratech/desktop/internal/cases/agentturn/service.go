@@ -44,7 +44,7 @@ const MaxOutputTokens = 4096
 const historyLimit = thread.HistoryReadLimit
 
 // Service runs the steps of agent requests. Operations on threads run one at a time; Stop does not wait for a running
-// step (see Stop).
+// step (see Stop), and the wait before an automatic retry of a step runs without the lock (see pause).
 type Service struct {
 	model    AgentModel
 	threads  ThreadRepository
@@ -58,21 +58,26 @@ type Service struct {
 	drafts   Drafts    // nil: none
 	effects  Effects   // nil: no Rerun
 	mentions Mentioned // nil: mentions are dropped
+	sleeper  Sleeper   // nil: no automatic retry
 	log      *slog.Logger
 
 	mu sync.Mutex
+
+	wmu   sync.Mutex // guards waits; never held with a call out
+	waits map[shared.ThreadID]*waiter
 }
 
 // New checks the ports.
 func New(d Deps) (*Service, error) {
 	if d.Model == nil || d.Threads == nil || d.History == nil || d.Subjects == nil || d.Facts == nil || d.Tx == nil ||
 		d.Clock == nil || d.IDs == nil {
-		return nil, fmt.Errorf("%s: %w: every port except Progress, Drafts, Effects, Mentions and Log is required", opNew, ErrInvalidConfig)
+		return nil, fmt.Errorf("%s: %w: every port except Progress, Drafts, Effects, Mentions, Sleeper and Log is required",
+			opNew, ErrInvalidConfig)
 	}
 	s := &Service{
 		model: d.Model, threads: d.Threads, history: d.History, subjects: d.Subjects, facts: d.Facts, tx: d.Tx,
 		clock: d.Clock, ids: d.IDs, progress: d.Progress, drafts: d.Drafts, effects: d.Effects, mentions: d.Mentions,
-		log: d.Log,
+		sleeper: d.Sleeper, log: d.Log,
 	}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
@@ -371,7 +376,8 @@ func (s *Service) answered(ctx context.Context, ref TurnRef, tool values.Tool, o
 const maxStopSaves = 3
 
 // Stop is «Стоп». It does not wait for a running step: the step's save then finds the stopped request and drops the
-// reply, and «Продолжить» repeats the step under the same key (a free replay on the Hub).
+// reply, and «Продолжить» repeats the step under the same key (a free replay on the Hub). A step waiting for its
+// automatic retry is woken at once and ends with the stored stop.
 func (s *Service) Stop(ctx context.Context, ref TurnRef) (Step, error) {
 	for attempt := 1; ; attempt++ {
 		c, err := s.load(ctx, ref, opStop)
@@ -388,20 +394,22 @@ func (s *Service) Stop(ctx context.Context, ref TurnRef) (Step, error) {
 		if err != nil {
 			return Step{}, fmt.Errorf("%s: %w", opStop, err)
 		}
+		s.wake(ref.Thread)
 		return stepOf(c), nil
 	}
 }
 
-// Continue («Повторить» of a stopped request on the panel) runs after a stop by the student, a lost connection or the quota: an open step is sent again
-// under the SAME key, so a reply the Hub already produced is replayed for free. A step that failed for good needs
-// Retry, an expired one Restart.
+// Continue («Продолжить» of a stopped request) runs after a stop by the student or the quota: an open step is sent
+// again under the SAME key, so a reply the Hub already produced is replayed for free. An open step stopped failed or
+// offline needs Retry (thread.ErrRetryRequired), an expired one Restart.
 func (s *Service) Continue(ctx context.Context, ref TurnRef) (Step, error) {
 	return s.resume(ctx, ref, opContinue, (*thread.Thread).Continue)
 }
 
-// Retry is «Повторить» after a step failed for good (the Hub refused it or the provider failed without retry): the
-// Hub keeps that failure under its key for a day, so the step is sent under a NEW deterministic key
-// ag:<thread>:<turn>:<step>:r<N>. After thread.MaxRetries the request stops (budget).
+// Retry is «Повторить» after a step stopped failed or offline, its automatic retries used up under its key (a
+// failure the Hub keeps under that key for a day, ADR-0026 addendum 2026-11-08): the step is sent under a NEW
+// deterministic key ag:<thread>:<turn>:<step>:r<N>, with automatic retries of its own. After thread.MaxRetries the
+// request stops (budget).
 func (s *Service) Retry(ctx context.Context, ref TurnRef) (Step, error) {
 	return s.resume(ctx, ref, opRetry, (*thread.Thread).Retry)
 }

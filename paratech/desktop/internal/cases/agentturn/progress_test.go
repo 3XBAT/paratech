@@ -85,8 +85,8 @@ func TestAttemptsOfANewRequestEndWithItsText(t *testing.T) {
 		fail  error
 		again func(e *env, r TurnRef) (Step, error)
 	}{
-		{"offline, Продолжить", backoff.Transient(errors.New("hub restarted")), func(e *env, r TurnRef) (Step, error) {
-			return e.svc.Continue(t.Context(), r)
+		{"offline, Повторить", backoff.Transient(errors.New("hub restarted")), func(e *env, r TurnRef) (Step, error) {
+			return e.svc.Retry(t.Context(), r)
 		}},
 		{"failed, Повторить", backoff.Permanent(errors.New("hub refused")), func(e *env, r TurnRef) (Step, error) {
 			return e.svc.Retry(t.Context(), r)

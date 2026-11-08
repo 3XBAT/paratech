@@ -723,7 +723,11 @@ func (th *Thread) Stop(reason values.StopReason, now time.Time) error {
 	return nil
 }
 
-// Continue is «Повторить» of a stopped request on the panel: the request goes back where it stopped. A request stopped by its budget cannot continue.
+// Continue is «Продолжить» of a stopped request: the request goes back where it stopped, an open step under the same
+// key. That is only for a stop by the student or by the quota (ADR-0026 addendum 2026-11-08): an open step stopped
+// failed or offline has already used its automatic retries under that key and needs Retry. A request stopped offline
+// with no open step (its calls waited for the Driver) has no key to change and continues. A request stopped by its
+// budget cannot continue.
 func (th *Thread) Continue(now time.Time) error {
 	t, err := th.turn()
 	if err != nil {
@@ -737,20 +741,24 @@ func (th *Thread) Continue(now time.Time) error {
 		return ErrBudgetExceeded
 	case values.StopFailed:
 		return ErrRetryRequired
+	case values.StopOffline:
+		if t.stepOpen {
+			return ErrRetryRequired
+		}
 	case values.StopExpired:
 		return ErrRestartRequired
 	}
 	return th.move(t.resume, now)
 }
 
-// Retry is «Повторить» after a step failed for good: the open step is sent again under a new key (StepKey). After
-// MaxRetries retries the request stops for good (budget).
+// Retry is «Повторить» after a step stopped failed or offline: the open step is sent again under a new key (StepKey),
+// ag:<thread>:<turn>:<step>:r<N>. After MaxRetries retries of one step the request stops for good (budget).
 func (th *Thread) Retry(now time.Time) error {
 	t, err := th.turn()
 	if err != nil {
 		return err
 	}
-	if t.status != StatusStopped || t.stopReason != values.StopFailed || !t.stepOpen {
+	if t.status != StatusStopped || (t.stopReason != values.StopFailed && t.stopReason != values.StopOffline) || !t.stepOpen {
 		return fmt.Errorf("%w: no failed step to retry", ErrInvalidTransition)
 	}
 	if t.retry >= MaxRetries {

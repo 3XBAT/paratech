@@ -243,7 +243,8 @@ func TestThirdQuestionRound(t *testing.T) {
 	}
 }
 
-// Decision (d): «Продолжить» after a lost answer repeats the key; «Повторить» after a refusal uses a new one.
+// Decision (d), ADR-0026 addendum 2026-11-08: a step stopped offline or failed (its automatic retries used the old
+// key) is «Повторить» with a new key; «Продолжить» is refused.
 func TestContinueAndRetryKeys(t *testing.T) {
 	e := newEnv(t)
 	e.model.fail(backoff.Transient(shared.ErrNetworkUnavailable)).
@@ -253,12 +254,15 @@ func TestContinueAndRetryKeys(t *testing.T) {
 	if st.Status != thread.StatusStopped || st.StopReason != values.StopOffline || st.Cards[0].Kind() != values.CardStopped {
 		t.Fatalf("offline step = %+v", st)
 	}
-	st, err := e.svc.Continue(t.Context(), ref(st))
+	if _, err := e.svc.Continue(t.Context(), ref(st)); !errors.Is(err, thread.ErrRetryRequired) {
+		t.Fatalf("Continue after offline = %v", err)
+	}
+	st, err := e.svc.Retry(t.Context(), ref(st))
 	if err != nil {
-		t.Fatalf("Continue: %v", err)
+		t.Fatalf("Retry after offline: %v", err)
 	}
 	reqs := e.model.requests()
-	if reqs[0].Key != reqs[1].Key || len(st.Calls) != 1 {
+	if reqs[0].Key != "ag:th1:1:1" || reqs[1].Key != "ag:th1:1:1:r1" || len(st.Calls) != 1 {
 		t.Fatalf("keys %q %q, step %+v", reqs[0].Key, reqs[1].Key, st)
 	}
 

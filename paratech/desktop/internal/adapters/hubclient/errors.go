@@ -7,6 +7,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	agent "paratech/desktop/internal/domain/agent/values"
 	"paratech/desktop/internal/domain/jobs/services/backoff"
 	"paratech/desktop/internal/domain/shared"
 	hubv1 "paratech/shared/gen/paratech/hub/v1"
@@ -15,6 +16,8 @@ import (
 // Reasons of a failed call (ARCH-32). A returned error is an *Error that matches exactly one of them (ErrNotConfigured
 // also its reason), or shared.ErrNetworkUnavailable or shared.ErrQuotaExceeded, with errors.Is. A Hub that does not
 // serve for now also matches shared.ErrServiceUnavailable, a missing setup shared.ErrServiceNotConfigured (TASK-083).
+// An error the Hub answered with an ErrorDetail also matches agent.ErrHubFailure; a transport failure, a timeout or a
+// bare unavailable does not.
 var (
 	// ErrInvalidConfig is returned by New for an unusable configuration. A call matches it with ErrNotConfigured when
 	// the URL source gives a URL the client refuses.
@@ -157,12 +160,22 @@ func mapCallError(op string, err error) *Error {
 		return unavailable(op, ErrUnavailable)
 	}
 
-	if d := errorDetail(ce); d != nil {
-		if e := mapDetail(op, d); e != nil {
-			return e
-		}
+	d := errorDetail(ce)
+	if d == nil {
+		return mapCode(op, err, ce)
 	}
+	e := mapDetail(op, d)
+	if e == nil {
+		e = mapCode(op, err, ce)
+	}
+	// Only the Hub sends an ErrorDetail: the request reached it, so a request that fails so stops failed, not offline
+	// (ADR-0026 addendum 2026-11-08).
+	e.extra = append(e.extra, agent.ErrHubFailure)
+	return e
+}
 
+// mapCode classifies an error without a known ErrorDetail by its Connect code.
+func mapCode(op string, err error, ce *connect.Error) *Error {
 	switch ce.Code() {
 	case connect.CodeDeadlineExceeded:
 		return unavailable(op, ErrTimeout)

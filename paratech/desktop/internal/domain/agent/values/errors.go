@@ -42,4 +42,9 @@ var (
 	// ErrTurnGone means the Hub no longer keeps the model turn of the last echoed calls (ADR-0023), so the request
 	// cannot continue; it starts again from the student's text. AgentModel errors wrap it.
 	ErrTurnGone = errors.New("the hub no longer keeps the model turn")
+
+	// ErrHubFailure marks a failed Hub call that the Hub answered with its own error detail (a provider failure, a
+	// refusal, an unusable model answer, a rate limit): the request reached the Hub. A request whose last failure
+	// carries it stops failed, one without it (transport, timeout, unavailable) offline (ADR-0026 addendum 2026-11-08).
+	ErrHubFailure = errors.New("the hub answered with an error")
 )

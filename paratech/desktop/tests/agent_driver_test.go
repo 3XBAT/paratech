@@ -341,9 +341,9 @@ func TestDriverJobStatusSeesChainJobs(t *testing.T) {
 	}
 }
 
-// The Hub is unreachable: the request stops as «нет связи» with its card; «Продолжить» repeats the same key and the
-// request goes on.
-func TestDriverOfflineStopsAndContinues(t *testing.T) {
+// The Hub is unreachable: the request stops as «нет связи» with its card; «Продолжить» is refused (retry required) and
+// «Повторить» sends the step under a new key, and the request goes on (ADR-0026 addendum 2026-11-08).
+func TestDriverOfflineStopsAndRetries(t *testing.T) {
 	e := newDriverEnv(t) // no scripted step: the fake Hub answers unavailable
 
 	up := e.ask(t, physicsScope(t), "мои предметы")
@@ -354,15 +354,23 @@ func TestDriverOfflineStopsAndContinues(t *testing.T) {
 
 	e.hub.Then(testenv.AgentCall{ID: "c1", Tool: "list_subjects", Args: `{}`}).
 		Then(testenv.AgentCall{ID: "c2", Tool: "reply", Args: `{"text":"Предмет: Физика"}`})
-	if err := e.driver.Continue(t.Context(), agentturn.TurnRef{Thread: up.Thread, Turn: up.Turn}); err != nil {
+	ref := agentturn.TurnRef{Thread: up.Thread, Turn: up.Turn}
+	if err := e.driver.Continue(t.Context(), ref); err != nil {
+		t.Fatal(err)
+	}
+	e.driver.Wait()
+	if up := e.sink.last(t); up.Problem != agentloop.ProblemRetry {
+		t.Fatalf("after Continue = %+v, want retry required", up)
+	}
+	if err := e.driver.Retry(t.Context(), ref); err != nil {
 		t.Fatal(err)
 	}
 	e.driver.Wait()
 	if up := e.sink.last(t); up.Status != thread.StatusDone {
-		t.Fatalf("after Continue = %+v", up)
+		t.Fatalf("after Retry = %+v", up)
 	}
 	reqs := e.hub.Requests()
-	if reqs[0].GetIdempotencyKey() != reqs[1].GetIdempotencyKey() {
+	if reqs[1].GetIdempotencyKey() != reqs[0].GetIdempotencyKey()+":r1" {
 		t.Fatalf("keys %q and %q", reqs[0].GetIdempotencyKey(), reqs[1].GetIdempotencyKey())
 	}
 	if got := e.resultsOf(t, 2); len(got) != 1 || !strings.Contains(got[0], `{"id":"s1","name":"Физика","semester":"2026-autumn"}`) {

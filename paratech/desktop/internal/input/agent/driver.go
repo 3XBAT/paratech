@@ -85,7 +85,9 @@ const (
 // buttons), in order, before the cards of its own step (plan, questions, reply, stopped), which are not carried on;
 // the panel replaces the cards of a request with the latest ones. An update of
 // a failed operation names the request it acted on: Thread and Turn for a button, only Scope for an Ask whose thread
-// may not exist yet. A Progress update (a step went to the Hub) has no cards: the panel applies its status only.
+// may not exist yet. A Progress update (a step went to the Hub) has no cards: the panel applies its status only; Retry
+// is the automatic retry of that step in progress (1..3, «Повторная попытка N из 3»; 0 none, also on every other
+// update).
 // A Compaction update reports only the context compaction of chat Thread before an Ask (compact.go): Compacting
 // while it runs, then not, with Fill, the chat's new fill, when it stored a summary; it has no request state.
 type Update struct {
@@ -97,6 +99,7 @@ type Update struct {
 	Cards      []values.Card
 	Problem    Problem
 	Progress   bool
+	Retry      int
 	Compaction bool
 	Compacting bool
 	Fill       *agentcompact.Fill

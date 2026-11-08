@@ -29,7 +29,8 @@ type AgentFills interface {
 }
 
 // AgentUpdate is one update of a request as the Driver publishes it; app maps the Driver's own type to it. Problem is
-// one of the Driver's problem enums; Progress marks the update of a step that went to the Hub (no cards). Compaction
+// one of the Driver's problem enums; Progress marks the update of a step that went to the Hub (no cards), Retry its
+// automatic retry attempt (1..3, 0 none). Compaction
 // marks an update that only reports the context compaction of chat Thread (Compacting while it runs; Fill, the chat's
 // new fill, on the end of one that stored a summary).
 type AgentUpdate struct {
@@ -41,6 +42,7 @@ type AgentUpdate struct {
 	Cards      []values.Card
 	Problem    string
 	Progress   bool
+	Retry      int
 	Compaction bool
 	Compacting bool
 	Fill       *AgentFillView
@@ -104,7 +106,9 @@ func (p *AgentPanel) Publish(u AgentUpdate) {
 // The texts (the model's) must be rendered as plain text. Problem is "" or busy, stale, invalid, budget,
 // retry_required, restart_required or failed; the panel words the status and the stop reason itself (offline:
 // «Не завершено: нет связи · Повторить»). Progress is true for the update of a step that went to the Hub: it has no
-// cards, and the panel applies its status only and keeps the cards it shows. Fill is the context ring of the chat,
+// cards, and the panel applies its status only and keeps the cards it shows. Retry is the automatic retry of that step
+// in progress, 1..3 («Повторная попытка N из 3», ADR-0026 addendum 2026-11-08), and 0 on every other update (always
+// sent). Fill is the context ring of the chat,
 // set only when the request ended (see endsRequest) or a compaction stored a summary; null otherwise and when it could
 // not be read.
 // Compaction is true on an update that only reports the context compaction of chat threadId before a request (ADR-0028):
@@ -122,6 +126,7 @@ type AgentUpdateView struct {
 	StopReason   string          `json:"stopReason"`
 	Problem      string          `json:"problem"`
 	Progress     bool            `json:"progress"`
+	Retry        int             `json:"retry"` // 0 none
 	Cards        []AgentCardView `json:"cards"`
 	Fill         *AgentFillView  `json:"fill"`
 	Compaction   bool            `json:"compaction"`
@@ -282,7 +287,8 @@ func (p *AgentPanel) view(ctx context.Context, u AgentUpdate) AgentUpdateView {
 	v := AgentUpdateView{
 		ThreadID: string(u.Thread), Turn: u.Turn, SubjectID: u.Scope.Subject().ID(), LessonID: u.Scope.Lesson().ID(),
 		AssignmentID: u.Scope.Assignment().ID(), Screen: string(u.Scope.Screen()), Status: string(u.Status),
-		StopReason: string(u.StopReason), Problem: problem, Progress: u.Progress, Cards: make([]AgentCardView, 0, len(u.Cards)),
+		StopReason: string(u.StopReason), Problem: problem, Progress: u.Progress, Retry: u.Retry,
+		Cards: make([]AgentCardView, 0, len(u.Cards)),
 	}
 	for _, c := range u.Cards {
 		cv, ok := cardView(c)

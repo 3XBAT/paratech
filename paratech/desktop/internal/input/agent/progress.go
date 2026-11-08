@@ -27,7 +27,18 @@ func NewProgress(sink Sink) (*Progress, error) {
 
 // Started publishes the state of the request whose step goes to the Hub.
 func (p *Progress) Started(_ context.Context, st agentturn.Step) {
-	p.sink.Publish(Update{
+	p.sink.Publish(progressUpdate(st, 0))
+}
+
+// Retrying publishes the same update with the automatic retry attempt of the step (ADR-0026 addendum 2026-11-08): as
+// its wait begins and as the retried call goes to the Hub.
+func (p *Progress) Retrying(_ context.Context, st agentturn.Step, attempt int) {
+	p.sink.Publish(progressUpdate(st, attempt))
+}
+
+func progressUpdate(st agentturn.Step, retry int) Update {
+	return Update{
 		Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, StopReason: st.StopReason, Progress: true,
-	})
+		Retry: retry,
+	}
 }
