@@ -5997,13 +5997,15 @@
             "priority": "medium",
             "description": "[Задания · ядро] Смена срока в правке задания: спросить, обновить сами или не трогать событие; UpdateDeadlineEvent по «Да»",
             "acceptance_criteria": [
-                "docs/adr/0029-student-assignments.md, дополнение 2 «Deadline change and the Google event»; настройка, очередь и eventrefresh — TASK-276",
+                "docs/adr/0029-student-assignments.md, дополнение 2 «Deadline change and the Google event» и «Дополнение 08.11: состояние события срока»; настройка, очередь и eventrefresh — TASK-276; метка удаления — TASK-384",
                 "homeworkflow.EditAssignment: при смене срока — политика через узкий порт (чтение настройки), признак события — через порт репозитория, решение — eventrefresh.Decide (в use case условий нет, ARCH-22); queue_update / queue_removal — строка очереди в транзакции правки и запрос синхронизации после фиксации (как DeleteAssignment); ask — в результате CalendarQuestion = true; nothing — ничего",
-                "homeworkflow.UpdateDeadlineEvent(ctx, id): клик студента «Да» — задание живое и с событием, иначе известная ошибка; срок есть — строка обновления, срока нет — строка удаления; запрос синхронизации; повтор безопасен",
+                "homeworkflow.Execute для create_deadline_event: в транзакции, отмечающей EXECUTED (после успешного UpsertDeadline), снимает метку deadline_events_removed через узкий порт (ClearDeadlineEventRemoved)",
+                "Признак события = выполненное предложение, нет ждущего удаления и нет метки (TASK-384); повторная установка срока после выполненного удаления — ничего при любой политике (ask, update, keep): новое событие только через «Предложить в календарь» и «Да»",
+                "homeworkflow.UpdateDeadlineEvent(ctx, id): клик студента «Да» — задание живое и с событием (состояние present), иначе известная ошибка (no_event и при ждущем удалении, и после выполненного); срок есть — строка обновления, срока нет — строка удаления; запрос синхронизации; повтор безопасен",
                 "«Запомнить» здесь не обрабатывается: привязка вызывает установку настройки отдельно (другой агрегат, TASK-279)",
                 "Агентский edit_due (SetAssignmentDue) здесь событие не трогает: это TASK-281 (C-4: правка агента обновляет событие без вопроса)",
-                "Тесты на фейках: каждая политика × есть/нет события × срок изменён/не изменён/убран; UpdateDeadlineEvent (живое, удалённое, без события, повтор)",
-                "Файлы: paratech/desktop/internal/cases/homeworkflow/assignments.go, ports.go, types.go, errors.go, новый deadlineevent.go, paratech/desktop/internal/app/* (только подключение портов) (+ тесты)",
+                "Тесты на фейках: каждая политика × есть/нет события × срок изменён/не изменён/убран; срок убран при update, удаление выполнено, срок снова задан → ничего; удалено, синхронизировано, «Вернуть», срок изменён → ничего и вопроса нет; Execute после удаления снимает метку; UpdateDeadlineEvent (живое, удалённое, без события, после выполненного удаления, повтор)",
+                "Файлы: paratech/desktop/internal/cases/homeworkflow/assignments.go, proposals.go (только снятие метки в Execute), ports.go, types.go, errors.go, новый deadlineevent.go, paratech/desktop/internal/app/* (только подключение портов) (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
@@ -6011,7 +6013,8 @@
                 "golangci-lint run ./desktop/..."
             ],
             "dependencies": [
-                "TASK-276"
+                "TASK-276",
+                "TASK-384"
             ],
             "status": "pending"
         },
@@ -6021,11 +6024,12 @@
             "priority": "medium",
             "description": "[Задания · календарь] Синхронизация обрабатывает очередь обновлений событий сроков (идемпотентно)",
             "acceptance_criteria": [
-                "docs/adr/0029-student-assignments.md, дополнение 2 «Deadline change and the Google event» (Sync); очередь — TASK-276. Google — только представление (жёсткое правило 6), побочный эффект идемпотентен (жёсткое правило 7)",
-                "cases/schedulesync.CalendarSync: рядом с removeDeadlines — updateDeadlines: для каждой строки очереди заново читает задание; удалено, без срока или без события — строка удаляется без вызова Google; иначе UpsertDeadline с подтверждённым заголовком события из выполненного предложения и текущим сроком, затем строка удаляется; временная ошибка — строка остаётся до следующей синхронизации",
+                "docs/adr/0029-student-assignments.md, дополнение 2 «Deadline change and the Google event» (Sync) и «Дополнение 08.11: состояние события срока»; очередь — TASK-276, метка — TASK-384. Google — только представление (жёсткое правило 6), побочный эффект идемпотентен (жёсткое правило 7)",
+                "removeDeadlines: после подтверждённого удаления в Google (в том числе 404/410) вместо PurgeDeadlineRemoval — MarkDeadlineEventRemoved (удаление строки и метка в одной транзакции); падение до фиксации — повторное удаление, идемпотентно",
+                "cases/schedulesync.CalendarSync: после removeDeadlines — updateDeadlines: для каждой строки очереди заново читает задание и признак события; удалено, без срока, без события, ждёт удаления или удаление выполнено (метка) — строка удаляется без вызова Google; иначе UpsertDeadline с подтверждённым заголовком последнего выполненного предложения и текущим сроком, затем строка удаляется; временная ошибка — строка остаётся до следующей синхронизации",
                 "Ключ идемпотентности команды — из задания и нового срока; событие по-прежнему по DeadlineEventID задания, повтор после потерянного ответа ничего не удваивает",
-                "Тесты с фейком Google: обновление, потерянный ответ и повтор, задание удалено до синхронизации, срок снова изменён до синхронизации (берётся текущий), нет подключения к Google — строка ждёт",
-                "Файлы: paratech/desktop/internal/cases/schedulesync/* (calendar.go, ports.go, types.go), paratech/desktop/internal/app/calendar.go (только порт), paratech/desktop/internal/adapters/sqlite/deadlineevents*.go (только чтение для синхронизации) (+ тесты)",
+                "Тесты с фейком Google: обновление, потерянный ответ и повтор, задание удалено до синхронизации, срок снова изменён до синхронизации (берётся текущий), нет подключения к Google — строка ждёт; выполненное удаление ставит метку, и последующая строка обновления события не создаёт; удаление и обновление в одном прогоне — события нет",
+                "Файлы: paratech/desktop/internal/cases/schedulesync/* (calendar.go, ports.go, types.go), paratech/desktop/internal/app/calendar.go (только порт), paratech/desktop/internal/adapters/sqlite/deadlineevents*.go, recordingdeletions*.go (только подключение методов TASK-384) (+ тесты)",
                 "Исполнитель: go-core (opus)"
             ],
             "test_steps": [
@@ -6033,7 +6037,8 @@
                 "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
             ],
             "dependencies": [
-                "TASK-276"
+                "TASK-276",
+                "TASK-384"
             ],
             "status": "pending"
         },
@@ -6095,7 +6100,7 @@
                 "homeworkflow.SetAssignmentDue (путь агента): у задания есть событие и срок изменён — eventrefresh.Decide с фиксированной политикой update (настройка «События в календаре при смене срока» здесь не читается, в том числе keep), строка deadline_event_updates в транзакции правки и запрос синхронизации после фиксации, как в EditAssignment (TASK-277); без события или срок тот же — ничего; в use case условий нет (ARCH-22)",
                 "Undo edit_due (компенсация, клик студента) возвращает прежний срок и тем же путём ставит обновление события, так что событие возвращается на прежнее время; отказ Undo как changed ничего не ставит",
                 "Строка действия в панели: при поставленном обновлении — «Срок изменён; событие в Google Календаре обновится» (признак из результата действия, только перечисление, без текста модели); заголовок события — подтверждённый, текст модели в Google не попадает (жёсткое правило 3 через политику, правило 6 — Google только представление); повтор синхронизации идемпотентен (жёсткое правило 7)",
-                "Тесты: edit_due с событием → одна строка очереди и запрос синхронизации; без события — ничего; настройка keep и ask не мешают пути агента; Undo → строка очереди с прежним сроком; повтор edit_due и Undo — одна строка; сценарий с фейком Google (TASK-278): событие на новом сроке, после Undo — на прежнем",
+                "Тесты: edit_due с событием → одна строка очереди и запрос синхронизации; без события — ничего; настройка keep и ask не мешают пути агента; Undo → строка очереди с прежним сроком; повтор edit_due и Undo — одна строка; сценарий с фейком Google (TASK-278): событие на новом сроке, после Undo — на прежнем; edit_due после выполненного удаления события → ничего не ставится",
                 "Не параллельно с TASK-304 (input/agent/actions.go)",
                 "Файлы: paratech/desktop/internal/input/agent/actions.go, paratech/desktop/internal/cases/homeworkflow/* (только SetAssignmentDue и его тесты), paratech/desktop/internal/input/wails/agent*.go (только признак в строке действия), paratech/desktop/frontend/src/bindings/agent.ts, src/agentView.ts (только текст строки), test/*, paratech/desktop/tests/* (+ тесты)",
                 "Исполнитель: go-core (opus)"
@@ -8459,6 +8464,32 @@
             ],
             "dependencies": [],
             "status": "done"
+        },
+        {
+            "id": "TASK-384",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Задания · ядро] Метка выполненного удаления события срока (миграция 0052, sqlite)",
+            "acceptance_criteria": [
+                "docs/adr/0029-student-assignments.md, «Дополнение 08.11: состояние события срока»; черновик docs/tasks/TASK-384-deadline-event-removed-marker.md. Признак «у задания есть событие» ложен после выполненного синхронизацией удаления, пока не выполнено новое create_deadline_event",
+                "Миграция (следующий свободный номер при push, ожидается 0052): deadline_events_removed (assignment_id TEXT PRIMARY KEY CHECK (length(assignment_id) > 0), removed_at INTEGER NOT NULL), без внешнего ключа и версии; Down удаляет; schema.sql зеркалит дословно; migrate_test — новая версия, таблица в contractTables и unversionedTables",
+                "AssignmentHasDeadlineEvent: выполненное create_deadline_event И нет строки deadline_event_removals И нет строки deadline_events_removed (один запрос)",
+                "Адаптер MarkDeadlineEventRemoved(ctx, id, at): в одной транзакции (вызывающего или своей) удаляет строку удаления и ставит метку только если строка задания существует; повтор безопасен; отсутствие строки удаления — не ошибка",
+                "Адаптер ClearDeadlineEventRemoved(ctx, id): удаляет метку в транзакции вызывающего; отсутствие — не ошибка",
+                "Очистка задания (ADR-0029 дополнение 2) удаляет метку в своей транзакции",
+                "Тесты (sqlite): все переходы таблицы состояний ADR — none, present, removing, removed, removed → present после нового выполненного предложения и снятия метки; метка для жёстко удалённого задания ничего не пишет; очистка удаляет метку; sqlc generate дважды без расхождений",
+                "Не параллельно с другой задачей, добавляющей миграцию (общие schema.sql, migrate_test); без заполнения задним числом",
+                "Файлы: paratech/desktop/pkg/migrations/0052_deadline_events_removed.sql, docs/contracts/schema.sql, paratech/desktop/internal/adapters/sqlite/queries/{deadline_events,recording_deletions,assignments}.sql (assignments — только удаление метки при очистке), sqlcgen/*, adapters/sqlite/{deadlineevents*,recordingdeletions*,assignments_purge*}.go, migrate_test.go, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/adapters/sqlite/... ./desktop/tests/... и тест архитектуры, sqlc generate без расхождений",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-276"
+            ],
+            "status": "pending"
         }
     ]
 }
