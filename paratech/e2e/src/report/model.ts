@@ -25,6 +25,8 @@ export interface TestRecord {
   brokenStep?: string;
   /** The error is an environment problem (message starts with EnvironmentMarker). */
   environment?: boolean;
+  /** Annotation `stt-speed`: one line about the speed of the speech recognition; printed as its own section, for information. */
+  sttSpeed?: string;
   /** Links relative to the report folder: "screenshots/<file>.png". */
   screenshots: string[];
   durationMs: number;

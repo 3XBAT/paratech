@@ -90,6 +90,16 @@ export function renderReport(input: ReportInput, env: NodeJS.ProcessEnv = proces
     lines.push("");
   }
 
+  // For information only: no verdict depends on it. A speed that the run did not measure leaves no section.
+  const speeds = [...new Set(input.tests.flatMap((t) => (t.sttSpeed ? [t.sttSpeed] : [])))];
+  if (speeds.length > 0) {
+    lines.push("## Скорость расшифровки", "");
+    for (const s of speeds) {
+      lines.push(`- ${cell(s)}`);
+    }
+    lines.push("");
+  }
+
   lines.push("## Итог прогона", "");
   lines.push(`- Режим: ${input.mode}`);
   lines.push(`- Время прогона: ${formatDuration(input.elapsedMs)}`);

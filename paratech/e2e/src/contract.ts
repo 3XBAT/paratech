@@ -36,6 +36,13 @@ export interface RunState {
   fakeUrl: string;
   /** From the debug log of the app; the teardown deletes only the Credential Manager entries of this profile. */
   secretsProfileId?: string;
+  /**
+   * Pid of the app that runs now. The setup writes it; a spec that restarts the app (src/app/restart.ts) replaces it, and
+   * the teardown and the exit guard stop that process too when it is not the one they started.
+   */
+  appPid?: number;
+  /** A spec started the app again: only then do the teardown and the exit guard look for a process that is not theirs. */
+  appRestarted?: boolean;
   /** The machine could not start the run (no Docker, port busy, sandbox not isolated...): features are «не проверено». */
   environmentError?: { kind: string; message: string };
   /** The product broke at start (Hub build or readiness, the app did not come up): reported as «сломано». */
@@ -49,6 +56,7 @@ export const EnvironmentMarker = "[среда]";
 export const AnnotationFeature = "feature"; // «Запуск приложения»: the row of the report
 export const AnnotationMode = "mode"; // "SCRIPTED" | "LIVE"; default SCRIPTED
 export const AnnotationRequires = "requires"; // feature that must be «готово» first; else «не проверено (нужно: …)»
+export const AnnotationSttSpeed = "stt-speed"; // one line about the speed of the speech recognition, printed in the report
 
 /** Attachment name of a screenshot the report copies and links. */
 export const SnapshotAttachment = "снимок";

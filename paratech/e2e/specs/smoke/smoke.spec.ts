@@ -16,6 +16,11 @@ test(
     ],
   },
   async ({ main, popup, opened }) => {
+    // Earlier packs of a full run used picks (consumed.jsonl has their lines), so the check is about THIS test only.
+    const consumedFile = path.join(process.env[EnvCtlDir] ?? "", "consumed.jsonl");
+    const consumedLines = (): number => (existsSync(consumedFile) ? readFileSync(consumedFile, "utf8").split("\n").filter((l) => l.trim() !== "").length : 0);
+    const consumedBefore = consumedLines();
+
     await step("главное окно загрузилось", async () => {
       await expect(main).toHaveTitle("paratech");
       await expect(main.locator("#root")).not.toBeEmpty();
@@ -31,8 +36,7 @@ test(
 
     await step("ничего не открыто и ни один диалог не использован", async () => {
       expect(await opened()).toEqual([]);
-      const consumed = path.join(process.env[EnvCtlDir] ?? "", "consumed.jsonl");
-      expect(!existsSync(consumed) || readFileSync(consumed, "utf8").trim() === "").toBe(true);
+      expect(consumedLines(), "во время этого теста приложение не должно было открывать диалоги выбора файла").toBe(consumedBefore);
     });
   },
 );

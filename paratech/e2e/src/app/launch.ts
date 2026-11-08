@@ -62,6 +62,11 @@ export interface LaunchOptions {
    * interrupt or a timeout while the app starts). launchApp still kills it itself when the start fails.
    */
   onSpawn?: (app: RunningApp) => void;
+  /**
+   * A start in a data dir that already has a log (a restart, restart.ts): only the text after this length counts, so the
+   * lines of the earlier start cannot prove the new one. Default 0.
+   */
+  logFrom?: number;
   /** Tests only: replaces `taskkill /T /F`. */
   kill?: (pid: number) => void;
   /** Tests only: replaces the netstat listing (undefined = netstat cannot run). */
@@ -120,6 +125,11 @@ export function readSharedText(file: string): string {
   }
 }
 
+/** The part of the log written after `from` characters; a log that got shorter (rotated) is read whole. */
+export function freshLog(text: string, from: number): string {
+  return from > 0 && text.length >= from ? text.slice(from) : text;
+}
+
 export function desktopLogPath(dataDir: string): string {
   return path.join(dataDir, "logs", "desktop.log");
 }
@@ -165,7 +175,7 @@ export async function launchApp(o: LaunchOptions): Promise<RunningApp> {
   const log = desktopLogPath(o.dataDir);
   const deadline = Date.now() + (o.startTimeoutMs ?? startTimeoutMs);
   for (;;) {
-    const verdict = evaluateStartLog(readSharedText(log));
+    const verdict = evaluateStartLog(freshLog(readSharedText(log), o.logFrom ?? 0));
     if (verdict.defaultProfile) {
       fail(startFailure("SandboxNotIsolated", `${NotIsolated}: приложение пишет ${DefaultProfileLine}`));
     }

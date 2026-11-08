@@ -1,5 +1,12 @@
 import { defineConfig } from "@playwright/test";
 
+// One project per pack, in the order the packs depend on each other. Without projects Playwright runs the files of one
+// project in alphabetical order, which would put `recording` (needs the Hub key, the speech model and the schedule that
+// `settings` enters through the UI) before `settings`. With one worker the test groups of the projects run in the order
+// of this list (no `dependencies`: a red pack must not switch the following ones off; a pack that needs another says
+// `requires` and becomes «не проверено» if the other is not «готово»).
+const pack = (name: string) => ({ name, testMatch: `${name}/**/*.spec.ts` });
+
 // The runner of ADR-0035. The app is started by the global setup (src/sandbox), not by Playwright: no browsers are
 // launched or downloaded, the specs only attach over CDP (src/app/cdp.ts). One sandbox, one app, so one worker.
 export default defineConfig({
@@ -20,4 +27,5 @@ export default defineConfig({
   use: {
     trace: "retain-on-failure", // best effort: the traces of a CDP-attached page (src/steps)
   },
+  projects: [pack("layout"), pack("settings"), pack("recording"), pack("smoke")],
 });
