@@ -8420,7 +8420,7 @@
             "dependencies": [
                 "TASK-377"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-382",
