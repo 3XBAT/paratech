@@ -103,10 +103,14 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, report func(ctx
 		return s.permanent(snap, stepPayload, ErrInvalidPayload, err)
 	}
 
+	// Once the transcript is stored, Retranscribe refuses it, so a cancel must not stop the publish: the attempt
+	// finishes on a context without the cancel and the runner completes the job.
+	committed := context.WithoutCancel(ctx)
+
 	// An earlier attempt stored the transcript and then crashed or failed to publish.
-	switch t, err := s.transcripts.Get(ctx, id); {
+	switch t, err := s.transcripts.Get(committed, id); {
 	case err == nil:
-		return s.finishStored(ctx, snap, req, t)
+		return s.finishStored(committed, snap, req, t)
 	case !errors.Is(err, shared.ErrNotFound):
 		return s.retry(snap, stepTranscript, ErrStorage, err)
 	}
@@ -136,14 +140,14 @@ func (s *Service) Handle(ctx context.Context, snap job.Snapshot, report func(ctx
 		}
 		// Another attempt of this job stored it meanwhile; a missing row means the conflict was a foreign key
 		// (the recording was deleted), which the next attempt reports as such.
-		stored, gerr := s.transcripts.Get(ctx, id)
+		stored, gerr := s.transcripts.Get(committed, id)
 		if gerr != nil {
 			return s.retry(snap, stepSave, ErrStorage, errors.Join(err, gerr))
 		}
 		t = stored
 	}
 
-	return s.finish(ctx, snap, req, t, doc.HasSpeech())
+	return s.finish(committed, snap, req, t, doc.HasSpeech())
 }
 
 // inputs loads the recording with its final track and the pinned model.

@@ -428,6 +428,60 @@ func TestConcurrentInsertUsesStoredTranscript(t *testing.T) {
 	}
 }
 
+// TestCancelAfterTheTranscriptIsStoredStillPublishes: a cancel (the user's or a shutdown) that lands once the
+// transcript is stored does not stop the attempt; Handle returns nil, so the runner completes the job and
+// post-processing starts, instead of a cancelled job whose transcript blocks Retranscribe.
+func TestCancelAfterTheTranscriptIsStoredStillPublishes(t *testing.T) {
+	tests := []struct {
+		name string
+		// run cancels ctx at the point under test and returns Handle's result.
+		run func(t *testing.T, e *env, ctx context.Context, cancel context.CancelFunc) error
+	}{
+		{
+			name: "cancel right after the save",
+			run: func(t *testing.T, e *env, ctx context.Context, cancel context.CancelFunc) error {
+				e.transcripts.afterSave = cancel
+				return e.svc.Handle(ctx, e.defaultJob(t), (&reporter{}).report)
+			},
+		},
+		{
+			name: "cancelled retry finds the stored transcript",
+			run: func(t *testing.T, e *env, ctx context.Context, cancel context.CancelFunc) error {
+				e.events.fail = errors.New("queue busy")
+				if err := e.svc.Handle(context.Background(), e.defaultJob(t), (&reporter{}).report); !errors.Is(err, ErrPublish) {
+					t.Fatalf("first attempt = %v, want ErrPublish", err)
+				}
+				e.events.fail = nil
+				cancel()
+				return e.svc.Handle(ctx, e.defaultJob(t), (&reporter{}).report)
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			if err := tc.run(t, e, ctx, cancel); err != nil {
+				t.Fatalf("Handle = %v, want nil", err)
+			}
+			if ctx.Err() == nil {
+				t.Fatal("the context was not cancelled")
+			}
+			if ev := e.events.list(); len(ev) != 1 || ev[0].Transcript != "job-1" {
+				t.Fatalf("events = %+v, want the transcript's event", ev)
+			}
+			if got := e.live.deleted(); len(got) == 0 || got[len(got)-1] != "rec-1" {
+				t.Errorf("live deletes = %v, want rec-1", got)
+			}
+			if len(e.engine.Calls()) != 1 || e.transcripts.saves != 1 {
+				t.Errorf("engine %d, saves %d; want 1, 1", len(e.engine.Calls()), e.transcripts.saves)
+			}
+		})
+	}
+}
+
 // TestPowerLossStopsAtTheNextReport is PRD section 14 case 12: the runner's report returns powerpolicy.ErrPowerLost,
 // the engine process is stopped, nothing is stored, and the error reaches the runner so the job waits for power.
 func TestPowerLossStopsAtTheNextReport(t *testing.T) {
