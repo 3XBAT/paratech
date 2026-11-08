@@ -27,5 +27,5 @@ export default defineConfig({
   use: {
     trace: "retain-on-failure", // best effort: the traces of a CDP-attached page (src/steps)
   },
-  projects: [pack("layout"), pack("settings"), pack("recording"), pack("smoke")],
+  projects: [pack("layout"), pack("settings"), pack("recording"), pack("agent"), pack("smoke")],
 });

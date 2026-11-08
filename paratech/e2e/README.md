@@ -38,9 +38,9 @@ The sandbox files stay after the run (the next run wipes them); the report is `p
 | `src/checks` | layout checker (`checkLayout`, `layoutSession`, page probe, pure `evaluateLayout`, console watch, agent-thread overlap, synthetic ICS) |
 | `src/fixtures` | pure builders and readers of the packs: the synthetic week (`schedule.ts`), the model cache and the corrupted copy (`model.ts`), the pick-queue guard (`picks.ts`), text readers (`text.ts`, `files.ts`), the audio variants, the speed line and the scan for audio in requests (`audio.ts`), the lecture of an import (`lecture.ts`) |
 | `scripts` | `fetch-model.ts` (compiled by tsc like the rest, `npm run fetch-model`); `llm/<pack>/` the scripted provider answers of a pack |
-| `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check, `specs/layout` the `@layout` pack (two window sizes: `PARATECH_E2E_WINDOW=1024x640`, `docs/process/e2e.md`), `specs/settings` the `@settings` pack, `specs/recording` the `@recording` pack (below) |
+| `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check, `specs/layout` the `@layout` pack (two window sizes: `PARATECH_E2E_WINDOW=1024x640`, `docs/process/e2e.md`), `specs/settings` the `@settings` pack, `specs/recording` the `@recording` pack, `specs/agent` the `@agent` pack (below) |
 
-**Order of the packs.** `playwright.config.ts` has one project per pack, in the order layout, settings, recording, smoke (one
+**Order of the packs.** `playwright.config.ts` has one project per pack, in the order layout, settings, recording, agent, smoke (one
 worker runs the groups of the projects in that order; without projects Playwright runs files alphabetically, which would put
 `recording` before `settings`, whose Hub key, speech model and schedule it needs). A new pack is one `pack("<name>")` line in the
 list (a unit test fails for a folder of `specs/` that is not in it). There is no `dependencies`: a red pack does not switch the
@@ -188,6 +188,33 @@ sandbox reports «не проверено (нужно: …)», not «слома�
 - **Speed line.** `AnnotationSttSpeed` (`stt-speed`) on the first row: «50 с звука расшифровано за N с (×K от реального времени);
   модель base-q5_1; процессор …»; the reporter prints it in «Скорость расшифровки» of `report.md`, for information.
 - Processes are looked up with PowerShell `Get-CimInstance Win32_Process` (`src/app/procs.ts`), never by image name alone.
+
+## Agent pack (`specs/agent`, `@agent`, TASK-380)
+
+SCRIPTED: the real Hub with the fake provider playing the MODEL's side with scripted tool calls (`scripts/llm/agent/rules.ts`,
+`replyRule(match, text, {delayMs, stream})` = a `reply` tool call; `chatSummaryRule`). The pack asserts what the APP sends to the
+model (`llm.requests()`: the student's text is the last block, the tool names are those of catalog v9, `stream: true`) and what the
+PANEL shows; the model's own wording is the LIVE set (TASK-382). A request carrying another tool set fails with the names that
+differ (`catalogProblem`): the pack is written for `values.CatalogVersion` 9. Every row `requires` the Hub key and the schedule
+rows of the settings pack; every scenario starts with «Новый чат» so the history sent to the model holds only what it asked.
+Files run by name: `01-reply`, `02-cut`, `03-busy`, `04-restart`, `05-compact`. Run it with the packs it needs:
+`… run e2e -- --project=settings --project=recording --project=agent` (a lone `--project=agent` on a fresh sandbox is
+«не проверено»).
+
+| Row | What it checks |
+|---|---|
+| Агент: ответ, копирование, повтор, таймер | a streamed `reply` after a 2.5 s delay: the timer «Nс» counts, «Остановить» is in the row, the text grows in several steps and only forward, `checkAgent` (the 04.11 overlap check) runs during the delay and while the text types and `rowSeen` must be true; at the end the text is the scripted one, the row, timer and draft are gone, «Копировать» (under the answer and under the question) writes to `opened.jsonl` (`clipboard`: the copy goes through the shell, not `navigator.clipboard`), «Повторить ответ» asks again; the console is clean |
+| Агент: строка «Стоп» не перекрывает текст на двух ширинах панели | the same overlap check on the default and the widest panel while a delayed streamed reply types; `rowSeen` must be true |
+| Агент: оборванный ответ сохраняет текст | a 700+ character streamed reply is cut mid-way (BUG-20261104): the printed text stays, «Ответ оборван. Можно повторить.», one «Повторить» icon, no «Повторить ответ», no stop row/timer; «Повторить» with a full second reply replaces the kept block |
+| Агент: второй вопрос во время первого | while the first request is in its Hub step the second WAITS (the core holds one lock per Ask, `agentturn.Service.Ask`): «ждёт предыдущий запрос» with «Остановить предыдущий запрос», no timer, nothing sent to the model; after the first answer the label goes at once, the second is sent by itself, the requests reach the model in order, a third question works. (The busy refusal «Предыдущий запрос ещё выполняется…» is only for a first request outside the Hub step, e.g. running a tool: not covered in part A) |
+| Агент: начать заново отсюда и форк | «Скрыть» puts the text into the field, the hidden requests leave the thread and the next provider request holds the edit and none of the hidden questions/answers; «Форк» opens «… (fork)» with the text in the field, sends nothing, notes «Открыт новый чат. Исходный «…» не изменился.» with «Открыть исходный чат» |
+| Агент: уплотнение контекста | nine requests of ~6 KiB fill the 48 KiB window; the next Ask shows «Уплотнение контекста…» while the scripted `chat_summary` answer is delayed, and the next planner request carries the summary instead of the oldest pairs |
+
+- **Hub rate limit.** One key gets 30 calls a minute with a burst of 10 (`HUB_RATE_LIMIT_*`, defaults); a scenario with many calls
+  (compaction) delays each scripted answer (`delayMs`) so the questions go slower than the bucket refills, never a fixed sleep.
+- **Unmatched rule.** An unscripted call fails the scenario; a question that must NOT reach the model (the busy one) has no rule.
+- **Copy.** The panel's «Копировать» calls the shell's clipboard (`TranscriptService.CopyText`), which the E2E hooks record as
+  `{kind:"clipboard"}` in `opened.jsonl`; `clipboardWrites(page)` only sees `navigator.clipboard`, which the panel does not use.
 
 ## Fake Messages API
 
