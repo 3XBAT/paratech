@@ -61,7 +61,8 @@ func (g *Gateway) AgentStep(ctx context.Context, req *connectrpc.Request[hubv1.A
 
 // AgentStepStream runs one planner step with the reply streamed (ADR-0026 addendum, gateway.proto): reply deltas,
 // then the result. As in CompleteStream, the use case never waits for the client: chunks are queued and sent by a
-// separate goroutine, each cut only between characters, and after an error no queued delta is sent.
+// separate goroutine, each cut only between characters, and after an error no queued delta is sent; heartbeats go
+// through the same goroutine.
 func (g *Gateway) AgentStepStream(ctx context.Context, req *connectrpc.Request[hubv1.AgentStepStreamRequest],
 	stream *connectrpc.ServerStream[hubv1.AgentStepStreamResponse]) error {
 	owner, ok := APIKeyFrom(ctx)
@@ -74,7 +75,9 @@ func (g *Gateway) AgentStepStream(ctx context.Context, req *connectrpc.Request[h
 
 	out := newDeltaSender(func(chunk string) error {
 		return stream.Send(&hubv1.AgentStepStreamResponse{Event: &hubv1.AgentStepStreamResponse_Delta{Delta: strings.ToValidUTF8(chunk, "�")}})
-	})
+	}, g.heartbeatOf(req.Msg.GetHeartbeat(), func() error {
+		return stream.Send(&hubv1.AgentStepStreamResponse{Event: &hubv1.AgentStepStreamResponse_Heartbeat{Heartbeat: &hubv1.StreamHeartbeat{}}})
+	}))
 	res, err := g.agentStream.StepStream(ctx, agentCommand(owner, req.Msg.GetRequest()), out.push)
 	if err != nil {
 		_ = out.finish(true)

@@ -72,7 +72,9 @@ type GatewayServiceClient interface {
 	//     and its result stored, so a retry with the same key replays the answer it has paid for; if the provider was
 	//     never called, the reservation is released. Nothing is settled as partial;
 	//   - a replay (same idempotency key, completed attempt) delivers the stored output as a single delta followed by the
-	//     result.
+	//     result;
+	//   - with CompleteStreamRequest.heartbeat set, a "heartbeat" message comes after each 15 s without any message, before
+	//     the result or the error; a client ignores it except as a sign of life.
 	CompleteStream(context.Context, *connect.Request[v1.CompleteStreamRequest]) (*connect.ServerStreamForClient[v1.CompleteStreamResponse], error)
 	// AgentStep runs one step of the agent planner (ADR-0023) and returns 1 to 4 sealed tool calls. The Hub chooses the
 	// prompt, the tool catalog and the model alias by profile; the client sends neither a prompt nor an alias. Each step is
@@ -100,7 +102,8 @@ type GatewayServiceClient interface {
 	//   - when the client cancels or the connection drops, the Hub does as for CompleteStream: a provider call that has
 	//     started is read to the end on a context that is not tied to the request, settled in full and its result
 	//     stored, so a retry with the same key replays it free; if the provider was never called, the reservation is
-	//     released.
+	//     released;
+	//   - heartbeats as in CompleteStream, when AgentStepStreamRequest.heartbeat is set.
 	AgentStepStream(context.Context, *connect.Request[v1.AgentStepStreamRequest]) (*connect.ServerStreamForClient[v1.AgentStepStreamResponse], error)
 }
 
@@ -196,7 +199,9 @@ type GatewayServiceHandler interface {
 	//     and its result stored, so a retry with the same key replays the answer it has paid for; if the provider was
 	//     never called, the reservation is released. Nothing is settled as partial;
 	//   - a replay (same idempotency key, completed attempt) delivers the stored output as a single delta followed by the
-	//     result.
+	//     result;
+	//   - with CompleteStreamRequest.heartbeat set, a "heartbeat" message comes after each 15 s without any message, before
+	//     the result or the error; a client ignores it except as a sign of life.
 	CompleteStream(context.Context, *connect.Request[v1.CompleteStreamRequest], *connect.ServerStream[v1.CompleteStreamResponse]) error
 	// AgentStep runs one step of the agent planner (ADR-0023) and returns 1 to 4 sealed tool calls. The Hub chooses the
 	// prompt, the tool catalog and the model alias by profile; the client sends neither a prompt nor an alias. Each step is
@@ -224,7 +229,8 @@ type GatewayServiceHandler interface {
 	//   - when the client cancels or the connection drops, the Hub does as for CompleteStream: a provider call that has
 	//     started is read to the end on a context that is not tied to the request, settled in full and its result
 	//     stored, so a retry with the same key replays it free; if the provider was never called, the reservation is
-	//     released.
+	//     released;
+	//   - heartbeats as in CompleteStream, when AgentStepStreamRequest.heartbeat is set.
 	AgentStepStream(context.Context, *connect.Request[v1.AgentStepStreamRequest], *connect.ServerStream[v1.AgentStepStreamResponse]) error
 }
 

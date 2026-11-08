@@ -218,10 +218,14 @@ var wantFields = map[string]map[string]string{
 		"output": "string", "usage": "message paratech.hub.v1.Usage", "quota": "message paratech.hub.v1.QuotaSnapshot",
 		"reservation_id": "string", "replayed": "bool",
 	},
-	"CompleteRequest":        {"spec": "message paratech.hub.v1.CompletionSpec"},
-	"CompleteResponse":       {"result": "message paratech.hub.v1.CompletionResult"},
-	"CompleteStreamRequest":  {"spec": "message paratech.hub.v1.CompletionSpec"},
-	"CompleteStreamResponse": {"delta": "string (oneof event)", "result": "message paratech.hub.v1.CompletionResult (oneof event)"},
+	"CompleteRequest":       {"spec": "message paratech.hub.v1.CompletionSpec"},
+	"CompleteResponse":      {"result": "message paratech.hub.v1.CompletionResult"},
+	"CompleteStreamRequest": {"spec": "message paratech.hub.v1.CompletionSpec", "heartbeat": "bool"},
+	"StreamHeartbeat":       {},
+	"CompleteStreamResponse": {
+		"delta": "string (oneof event)", "result": "message paratech.hub.v1.CompletionResult (oneof event)",
+		"heartbeat": "message paratech.hub.v1.StreamHeartbeat (oneof event)",
+	},
 	"Reservation": {
 		"reservation_id": "string", "state": "enum paratech.hub.v1.ReservationState",
 		"reserved": "message paratech.hub.v1.QuotaAmount", "charged": "message paratech.hub.v1.QuotaAmount",
@@ -263,9 +267,10 @@ var wantFields = map[string]map[string]string{
 		"calls": "message paratech.hub.v1.SealedCalls", "usage": "message paratech.hub.v1.Usage",
 		"quota": "message paratech.hub.v1.QuotaSnapshot", "reservation_id": "string", "replayed": "bool",
 	},
-	"AgentStepStreamRequest": {"request": "message paratech.hub.v1.AgentStepRequest"},
+	"AgentStepStreamRequest": {"request": "message paratech.hub.v1.AgentStepRequest", "heartbeat": "bool"},
 	"AgentStepStreamResponse": {
 		"delta": "string (oneof event)", "result": "message paratech.hub.v1.AgentStepResponse (oneof event)",
+		"heartbeat": "message paratech.hub.v1.StreamHeartbeat (oneof event)",
 	},
 }
 

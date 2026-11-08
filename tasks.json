@@ -8737,7 +8737,7 @@
                 "go test -race ./hub/... ./shared/... (HUB_TEST_DATABASE_URL), тест архитектуры, golangci-lint run ./hub/..."
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-395",
