@@ -8,7 +8,7 @@ import type { Page } from "@playwright/test";
 import { firstDraftRules } from "../../scripts/llm/assignments/rules.js";
 import { expect, snapshot, step, test } from "../../src/steps/index.js";
 import { expectDraft, writeFirstDraft } from "./draft.js";
-import { addAssignment, openFromList, openList, pageTitle, removeQuietly } from "./driver.js";
+import { addAssignment, openFromList, openList, pageTitle, removeQuietly, removeTeachers } from "./driver.js";
 import { act, dayFromNow, details, Feature, note, openSection, Subject, textOf, WithHub } from "./support.js";
 
 const Teacher = { name: "Тестовый Преподаватель", email: "teacher@example.invalid" };
@@ -25,6 +25,11 @@ test(Feature.sendRefusal, details(Feature.sendRefusal, { requires: WithHub }), a
   try {
     await step("Hub: один ответ на запрос черновика", async () => {
       await llm.script(firstDraftRules(Refusal, RefusalDraft));
+    });
+    await step(`у предмета «${Subject}» нет преподавателей (убрать оставшихся через страницу предмета)`, async () => {
+      // the row does not depend on the order of the rows: a teacher left by an earlier run would turn the refusal into a dialog
+      const removed = await removeTeachers(main, Subject);
+      note(`убрано преподавателей перед проверкой: ${removed}`);
     });
     await step(`добавить «${Refusal}» (История) и написать черновик`, async () => {
       await addAssignment(main, { title: Refusal, subject: Subject, deadline: { date: dayFromNow(3) } });
@@ -123,6 +128,8 @@ test(Feature.sendDialog, details(Feature.sendDialog, { requires: WithHub }), asy
     if (left.length > 0) {
       note(`не удалось убрать после проверки: ${left.join("; ")}`);
     }
+    // the synthetic teacher must not stay on the subject: through the same page a student would use
+    await removeTeachers(main, Subject).catch((e: unknown) => note(`не удалось убрать преподавателя после проверки: ${String(e).split("\n")[0]}`));
     await openSection(main, "Задания").catch(() => undefined);
   }
 });

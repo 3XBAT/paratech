@@ -2,24 +2,37 @@
 // and changing its deadline by hand are the student's clicks, so by design nothing is written to the agent journal
 // (input/wails/homeworkchange.go, homeworkcreate.go). The journal names an agent's changes «Добавлено задание», «Изменён срок
 // задания», «Изменено задание» (frontend/src/journalView.ts); this row pins that a change made by hand leaves none of those lines.
-// It runs after the draft row on purpose: the draft job («Решение задания») is a line the journal does show, so the page is
-// proved to list things, and the missing lines are not just an empty journal.
+// The row makes its own proof that the journal lists things: it writes a draft itself, and the draft job («Решение задания») is
+// a line the journal shows. Without that line the row fails: a journal that is empty or not read proves nothing.
+import { firstDraftRules } from "../../scripts/llm/assignments/rules.js";
 import { expect, snapshot, step, test } from "../../src/steps/index.js";
+import { writeFirstDraft } from "./draft.js";
 import { addAssignment, editDeadline, pageDue, removeQuietly } from "./driver.js";
-import { act, comingText, dayFromNow, details, Feature, note, OnlySubjects, openSection, Subject, textOf } from "./support.js";
+import { act, comingText, dayFromNow, details, Feature, note, openSection, Subject, textOf, WithHub } from "./support.js";
 
 const Quiet = "Тихая правка срока по истории";
+const QuietDraft = { title: "Черновик для журнала: тихая правка", body: "Короткий текст, чтобы в журнале была строка." };
 
 // Lines of the journal that an assignment change by an agent would leave (journalView.ts: toolLabels).
 const AgentLines = ["Добавлено задание", "Изменён срок задания", "Изменено задание"];
 
-test(Feature.journal, details(Feature.journal, { requires: OnlySubjects }), async ({ main }) => {
-  test.setTimeout(3 * 60_000);
+// The line of the draft job (journalView.ts: jobLabels.homework_draft): proof that the page lists and the selector reads.
+const DraftLine = "Решение задания";
+
+test(Feature.journal, details(Feature.journal, { requires: WithHub }), async ({ main, llm }) => {
+  test.setTimeout(4 * 60_000);
+  const first = dayFromNow(3);
+  const later = dayFromNow(5);
   try {
-    await step(`добавить «${Quiet}» и сменить срок руками`, async () => {
-      await addAssignment(main, { title: Quiet, subject: Subject, deadline: { date: dayFromNow(3) } });
-      await editDeadline(main, Quiet, { date: dayFromNow(5) });
-      await expect.poll(() => pageDue(main), { timeout: 15_000 }).toMatch(comingText({ date: dayFromNow(5), time: "20:00" }));
+    await step("Hub: один ответ на запрос черновика", async () => {
+      await llm.script(firstDraftRules(Quiet, QuietDraft));
+    });
+
+    await step(`добавить «${Quiet}», написать черновик и сменить срок руками`, async () => {
+      await addAssignment(main, { title: Quiet, subject: Subject, deadline: { date: first } });
+      await writeFirstDraft(main, QuietDraft);
+      await editDeadline(main, Quiet, { date: later });
+      await expect.poll(() => pageDue(main), { timeout: 15_000 }).toMatch(comingText({ date: later, time: "20:00" }));
     });
 
     await step("«Журнал»: открыт и загружен", async () => {
@@ -30,10 +43,13 @@ test(Feature.journal, details(Feature.journal, { requires: OnlySubjects }), asyn
     });
 
     await step("в журнале нет строк о правке задания, сделанной руками", async () => {
-      const titles = (await main.locator(".jr-sec .row p.t").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
-      note(`строки журнала: ${titles.join(" | ") || "нет"}`);
-      const lines = titles.filter((t) => AgentLines.includes(t));
-      expect(lines, "своя правка студента не пишется в журнал агента (ADR-0029); строки об изменении заданий появляются только от агента").toEqual([]);
+      const lines = () => main.locator(".jr-sec .row p.t").allInnerTexts().then((all) => all.map((t) => t.replace(/\s+/g, " ").trim()));
+      // the control: the draft job is listed, so the selector reads real lines and an empty result below means «none»
+      await expect.poll(lines, { timeout: 20_000, message: `в журнале должна быть строка «${DraftLine}» (черновик из этой строки отчёта)` }).toContain(DraftLine);
+      const titles = await lines();
+      note(`строки журнала: ${titles.join(" | ")}`);
+      const found = titles.filter((t) => AgentLines.includes(t));
+      expect(found, "своя правка студента не пишется в журнал агента (ADR-0029); строки об изменении заданий появляются только от агента").toEqual([]);
       expect(await textOf(main.locator(".page").first()), "в журнале нет ошибки загрузки").not.toContain("Не удалось загрузить журнал");
     });
   } finally {

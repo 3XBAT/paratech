@@ -6,13 +6,16 @@ import { addAssignment, burningRows, editDeadline, expectInGroup, moreButton, op
 import { act, comingText, dayFromNow, details, Feature, note, OnlySubjects, Subject } from "./support.js";
 
 const Moving = "Перенести доклад по истории";
+// Stays open the whole row: while it burns on «Сегодня», an empty result for Moving there is a fresh read, not a stale one.
+const Control = "Контрольное задание рядом с переносом срока";
 
 test(Feature.edit, details(Feature.edit, { requires: OnlySubjects }), async ({ main }) => {
   test.setTimeout(3 * 60_000);
   const before = { date: dayFromNow(3), time: "09:30" };
   const after = { date: dayFromNow(10), time: "09:30" };
   try {
-    await step(`добавить «${Moving}» со сроком через 3 дня в 09:30`, async () => {
+    await step(`добавить «${Moving}» со сроком через 3 дня в 09:30 и контрольное задание «${Control}»`, async () => {
+      await addAssignment(main, { title: Control, subject: Subject, deadline: { date: dayFromNow(3) } });
       await addAssignment(main, { title: Moving, subject: Subject, deadline: before });
       expect(await pageDue(main)).toMatch(comingText(before));
       await openList(main);
@@ -50,11 +53,13 @@ test(Feature.edit, details(Feature.edit, { requires: OnlySubjects }), async ({ m
     });
 
     await step("«Сегодня»: через 10 дней задание уже не горит", async () => {
+      const control$ = await burningRows(main, Control);
+      await expect(control$, "свежие данные «Сегодня»: контрольное задание в «Сроки на неделе»").toHaveCount(1, { timeout: 30_000 });
       const rows = await burningRows(main, Moving);
       await expect(rows, "срок дальше недели: задания нет в «Сроки на неделе»").toHaveCount(0, { timeout: 30_000 });
     });
   } finally {
-    const left = await removeQuietly(main, [Moving]);
+    const left = await removeQuietly(main, [Moving, Control]);
     if (left.length > 0) {
       note(`не удалось убрать после проверки: ${left.join("; ")}`);
     }

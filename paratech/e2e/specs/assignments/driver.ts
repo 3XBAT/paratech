@@ -176,6 +176,47 @@ export async function burningRows(main: Page, title: string): Promise<Locator> {
   return section.locator("[role='listitem']").filter({ hasText: title });
 }
 
+// ---- teachers of a subject ----
+
+/** A fresh visit of the page of a subject («Сегодня» first, so the page is mounted anew): the first block «Преподаватели». */
+async function openTeachers(main: Page, subject: string): Promise<Locator> {
+  await openSection(main, "Сегодня");
+  await openSection(main, "Предметы");
+  const item = main.locator(`nav.tree button.ti[data-subject-id][title="${subject}"]`);
+  await item.click(act);
+  await expect(item, `предмет «${subject}» должен открыться в дереве`).toHaveAttribute("aria-current", "page", { timeout: loadMs });
+  const block = main.locator("section.teachers").first();
+  await expect(block.getByRole("listitem").first(), "блок «Преподаватели» должен загрузиться").toBeVisible({ timeout: loadMs });
+  return block;
+}
+
+/**
+ * «Предметы» → the subject → «Преподаватели»: «Изменить: …» → «Убрать» for every teacher that is set. Returns how many were
+ * removed. After each removal the page is visited anew: the copies of the block that the finding of 06-send leaves on the
+ * page are not trusted to show the state.
+ */
+export async function removeTeachers(main: Page, subject: string): Promise<number> {
+  let removed = 0;
+  for (let i = 0; i <= 3; i++) {
+    const block = await openTeachers(main, subject);
+    const change = block.getByRole("button", { name: /^Изменить: / });
+    if ((await change.count()) === 0) {
+      return removed;
+    }
+    if (i === 3) {
+      break;
+    }
+    await change.first().click(act);
+    const form = main.locator("form.teacher-form").first();
+    await expect(form, "после «Изменить» открыта форма преподавателя").toBeVisible({ timeout: loadMs });
+    await form.getByRole("button", { name: "Убрать", exact: true }).click(act);
+    // the note is printed by the copies of the block; any one of them proves the removal
+    await expect(main.getByText("Преподаватель убран.").first(), "после «Убрать» страница сообщает об этом").toBeVisible({ timeout: loadMs });
+    removed++;
+  }
+  throw new Error(`у предмета «${subject}» остались преподаватели после ${removed} удалений`);
+}
+
 // ---- cleanup ----
 
 /** Deletes an assignment from the list with its «⋯» → «Удалить» (best effort: a cleanup must not hide the real failure). */

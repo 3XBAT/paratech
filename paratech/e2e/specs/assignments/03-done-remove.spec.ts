@@ -4,16 +4,21 @@
 //   2. «⋯» → «Удалить» removes it at once (the question «Работа остановится» exists only for a running draft), the line
 //      «Задание удалено» offers «Вернуть», which brings the row back; a final delete leaves no row in any list.
 import { expect, snapshot, step, test } from "../../src/steps/index.js";
-import { addAssignment, burningRows, doneCheck, expectInGroup, hasStateSwitch, listRow, moreButton, openFromList, openList, pageTitle, reopen, removeQuietly, showState, toast } from "./driver.js";
+import { addAssignment, burningRows, doneCheck, expectInGroup, hasStateSwitch, listRow, moreButton, openFromList, openList, pageTitle, reopen, removeQuietly, revealRow, showState, toast } from "./driver.js";
 import { act, dayFromNow, details, Feature, note, OnlySubjects, Subject, textOf } from "./support.js";
 
 const Closing = "Закрыть тему про Ивана Грозного";
 const Removing = "Убрать лишнее задание по истории";
+// Each row keeps one open assignment next to the one it changes: while it burns on «Сегодня», the absence of the changed one there
+// is a fresh read, not a stale one.
+const ControlClosing = "Контрольное задание рядом с закрытием темы";
+const ControlRemoving = "Контрольное задание рядом с удалением";
 
 test(Feature.done, details(Feature.done, { requires: OnlySubjects }), async ({ main }) => {
   test.setTimeout(3 * 60_000);
   try {
-    await step(`добавить «${Closing}» со сроком через 3 дня; пока открыто, оно горит на «Сегодня»`, async () => {
+    await step(`добавить «${Closing}» со сроком через 3 дня (и контрольное «${ControlClosing}»); пока открыто, оно горит на «Сегодня»`, async () => {
+      await addAssignment(main, { title: ControlClosing, subject: Subject, deadline: { date: dayFromNow(3) } });
       await addAssignment(main, { title: Closing, subject: Subject, deadline: { date: dayFromNow(3) } });
       await openList(main);
       await expectInGroup(main, Closing, "На этой неделе");
@@ -52,8 +57,10 @@ test(Feature.done, details(Feature.done, { requires: OnlySubjects }), async ({ m
     });
 
     await step("«Сегодня»: выполненное задание больше не горит", async () => {
+      const control$ = await burningRows(main, ControlClosing);
+      await expect(control$, "свежие данные «Сегодня»: контрольное задание в «Сроки на неделе»").toHaveCount(1, { timeout: 30_000 });
       const rows = await burningRows(main, Closing);
-      await expect(rows).toHaveCount(0, { timeout: 30_000 });
+      await expect(rows, "выполненного задания нет в «Сроки на неделе»").toHaveCount(0, { timeout: 30_000 });
     });
 
     await step("«Вернуть в работу»: задание снова в «Открытые»", async () => {
@@ -78,7 +85,7 @@ test(Feature.done, details(Feature.done, { requires: OnlySubjects }), async ({ m
       await snapshot("Страница задания: отметка выполнено и возврат");
     });
   } finally {
-    const left = await removeQuietly(main, [Closing]);
+    const left = await removeQuietly(main, [Closing, ControlClosing]);
     if (left.length > 0) {
       note(`не удалось убрать после проверки: ${left.join("; ")}`);
     }
@@ -88,7 +95,8 @@ test(Feature.done, details(Feature.done, { requires: OnlySubjects }), async ({ m
 test(Feature.remove, details(Feature.remove, { requires: OnlySubjects }), async ({ main }) => {
   test.setTimeout(3 * 60_000);
   try {
-    await step(`добавить «${Removing}»; пока оно есть, оно горит на «Сегодня»`, async () => {
+    await step(`добавить «${Removing}» (и контрольное «${ControlRemoving}»); пока оно есть, оно горит на «Сегодня»`, async () => {
+      await addAssignment(main, { title: ControlRemoving, subject: Subject, deadline: { date: dayFromNow(3) } });
       await addAssignment(main, { title: Removing, subject: Subject, deadline: { date: dayFromNow(3) } });
       await openList(main);
       await expectInGroup(main, Removing, "На этой неделе");
@@ -120,7 +128,8 @@ test(Feature.remove, details(Feature.remove, { requires: OnlySubjects }), async 
       await main.getByRole("menuitem", { name: "Удалить", exact: true }).click(act);
       await expect(main.locator(".hw-removed")).toContainText("Задание удалено", { timeout: 15_000 });
       await openList(main);
-      await expect(listRow(main, Removing), "удалённого задания нет в «Открытые»").toHaveCount(0, act);
+      // unfold «Показать ещё N» first: a folded row is not in the DOM and its absence would prove nothing
+      await expect(await revealRow(main, Removing), "удалённого задания нет в «Открытые»").toHaveCount(0, act);
       // with no other assignment the lists give way to the first-run screen, which has no switch: nothing exists then
       for (const state of ["Все", "Выполненные"] as const) {
         if (!(await hasStateSwitch(main))) {
@@ -131,16 +140,18 @@ test(Feature.remove, details(Feature.remove, { requires: OnlySubjects }), async 
           note(`в «${state}» ничего нет: вместо списка экран «Заданий пока нет»`);
           await expect(main.getByText("Заданий пока нет")).toBeVisible(act);
         }
-        await expect(listRow(main, Removing), `удалённого задания нет и в «${state}»`).toHaveCount(0, act);
+        await expect(await revealRow(main, Removing), `удалённого задания нет и в «${state}»`).toHaveCount(0, act);
       }
     });
 
     await step("«Сегодня»: удалённое задание не горит", async () => {
+      const control$ = await burningRows(main, ControlRemoving);
+      await expect(control$, "свежие данные «Сегодня»: контрольное задание в «Сроки на неделе»").toHaveCount(1, { timeout: 30_000 });
       const rows = await burningRows(main, Removing);
-      await expect(rows).toHaveCount(0, { timeout: 30_000 });
+      await expect(rows, "удалённого задания нет в «Сроки на неделе»").toHaveCount(0, { timeout: 30_000 });
     });
   } finally {
-    const left = await removeQuietly(main, [Removing]);
+    const left = await removeQuietly(main, [Removing, ControlRemoving]);
     if (left.length > 0) {
       note(`не удалось убрать после проверки: ${left.join("; ")}`);
     }
