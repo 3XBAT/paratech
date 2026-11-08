@@ -24,10 +24,12 @@ const (
 	opCheckSlot    = "localhub: check slot"
 )
 
-// The readiness wait after a start (ADR-0036 section 4).
+// The readiness wait after a start (ADR-0036 section 4); flightTimeout bounds a whole check, so a hung port call
+// cannot hold the shared check and block every later Ensure.
 const (
-	pollInterval = 500 * time.Millisecond
-	readyTimeout = 20 * time.Second
+	pollInterval  = 500 * time.Millisecond
+	readyTimeout  = 20 * time.Second
+	flightTimeout = readyTimeout + 10*time.Second
 )
 
 // Service decides whether to start the local Hub, starts it and keeps the last status. It is safe for concurrent
@@ -40,6 +42,7 @@ type Service struct {
 	url      HubURL
 	clock    Clock
 	log      *slog.Logger
+	timeout  time.Duration // of one check; flightTimeout, shorter in tests
 
 	mu     sync.Mutex
 	last   Status
@@ -47,7 +50,8 @@ type Service struct {
 	flight *flight // the running check; nil when none
 
 	// acks counts the owner's acknowledgements of a recorded exit (Recheck, a saved setting or secret); spent is the
-	// count the latest spawn consumed. While they differ, a recorded exit does not stand in the way of one new start.
+	// count the latest spawn consumed, or a check that found no recorded exit for them to cover. While they differ, a
+	// recorded exit does not stand in the way of one new start.
 	acks, spent uint64
 }
 
@@ -70,6 +74,7 @@ func New(d Deps) (*Service, error) {
 	}
 	return &Service{
 		probe: d.Probe, launcher: d.Launcher, secrets: d.Secrets, settings: d.Settings, url: d.URL, clock: d.Clock, log: log,
+		timeout: flightTimeout,
 	}, nil
 }
 
@@ -114,9 +119,11 @@ func (s *Service) run(ctx context.Context, ack bool) (Status, error) {
 	}
 }
 
-// fly runs the check of f; the readiness wait bounds it by the Clock (readyTimeout).
+// fly runs the check of f; the readiness wait bounds it by the Clock (readyTimeout), s.timeout bounds it as a whole.
 func (s *Service) fly(ctx context.Context, f *flight) {
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	st, err := s.ensure(ctx)
+	cancel()
 	if err != nil {
 		err = fmt.Errorf("%s: %w", opEnsure, err)
 	}
@@ -142,6 +149,13 @@ func (s *Service) pending() (uint64, bool) {
 	return s.acks, s.acks != s.spent
 }
 
+// spend marks the acknowledgements up to acks as used.
+func (s *Service) spend(acks uint64) {
+	s.mu.Lock()
+	s.spent = acks
+	s.mu.Unlock()
+}
+
 // Status returns the last status. Before the first Ensure it probes once without starting anything.
 func (s *Service) Status(ctx context.Context) (Status, error) {
 	s.mu.Lock()
@@ -159,7 +173,7 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 		return *remote, nil
 	}
 	_, ack := s.pending()
-	d, err := s.diagnose(ctx, t, ack)
+	d, _, err := s.diagnose(ctx, t, ack)
 	if err != nil {
 		return Status{}, fmt.Errorf("%s: %w", opStatus, err)
 	}
@@ -237,9 +251,14 @@ func (s *Service) ensure(ctx context.Context) (Status, error) {
 	}
 
 	acks, ack := s.pending()
-	d, err := s.diagnose(ctx, t, ack)
+	d, exited, err := s.diagnose(ctx, t, ack)
 	if err != nil {
 		return s.cached(), err
+	}
+	if ack && !exited {
+		// No exit is recorded, so the acknowledgements so far cover none: a later crash needs a new one. Those given
+		// after the snapshot stay pending.
+		s.spend(acks)
 	}
 	if !d.CanStart() {
 		return s.store(localStatus(t, d)), nil
@@ -263,9 +282,7 @@ func (s *Service) start(ctx context.Context, t values.Target, acks uint64) (Stat
 	if err := s.launcher.Start(ctx, t, settings); err != nil {
 		return s.store(localStatus(t, values.Exited(values.ExitNotStarted))), fmt.Errorf("start hub: %w", err)
 	}
-	s.mu.Lock()
-	s.spent = acks
-	s.mu.Unlock()
+	s.spend(acks)
 
 	deadline := s.clock.Now().Add(readyTimeout)
 	last := values.Starting()
@@ -342,16 +359,18 @@ func withoutUserInfo(raw string) string {
 	return u.String()
 }
 
-// diagnose probes t and applies the diagnosis rule; ack hides a recorded exit the owner acknowledged.
-func (s *Service) diagnose(ctx context.Context, t values.Target, ack bool) (values.Diagnosis, error) {
+// diagnose probes t and applies the diagnosis rule; ack hides a recorded exit the owner acknowledged. exited reports
+// the probed fact before the hiding.
+func (s *Service) diagnose(ctx context.Context, t values.Target, ack bool) (d values.Diagnosis, exited bool, err error) {
 	f, err := s.facts(ctx, t)
 	if err != nil {
-		return values.Diagnosis{}, err
+		return values.Diagnosis{}, false, err
 	}
+	exited = f.Exited
 	if ack {
 		f.Exited, f.ExitCode = false, 0
 	}
-	return diagnosis.Diagnose(f), nil
+	return diagnosis.Diagnose(f), exited, nil
 }
 
 // facts probes t and sets the secret flags from the secret store.

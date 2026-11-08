@@ -20,11 +20,18 @@ type fakeProbe struct {
 	started bool
 	calls   int
 	err     error
+	hang    bool // Facts blocks until ctx ends
 	targets []values.Target
 }
 
-func (p *fakeProbe) Facts(_ context.Context, t values.Target) (values.Facts, error) {
+func (p *fakeProbe) Facts(ctx context.Context, t values.Target) (values.Facts, error) {
 	p.mu.Lock()
+	if p.hang {
+		p.calls++
+		p.mu.Unlock()
+		<-ctx.Done()
+		return values.Facts{}, ctx.Err()
+	}
 	defer p.mu.Unlock()
 	p.calls++
 	p.targets = append(p.targets, t)

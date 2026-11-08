@@ -469,6 +469,76 @@ func TestRecordedExitNeedsTheOwner(t *testing.T) {
 	}
 }
 
+// TestAckWithoutARecordedExitIsSpent: an acknowledgement given while the Hub runs covers no exit, so a crash after it
+// is not respawned automatically.
+func TestAckWithoutARecordedExitIsSpent(t *testing.T) {
+	ack := map[string]func(*world) error{
+		"recheck": func(w *world) error { _, err := w.svc.Recheck(context.Background()); return err },
+		"save settings": func(w *world) error {
+			return w.svc.SaveSettings(context.Background(), Settings{BaseURL: "https://gw.example.test"})
+		},
+		"set secret": func(w *world) error {
+			return w.svc.SetSecret(context.Background(), "provider-key", "sk-fake-new")
+		},
+	}
+	for name, acknowledge := range ack {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t, localURL)
+			w.probe.set(answering())
+			if err := acknowledge(w); err != nil {
+				t.Fatal(err)
+			}
+			// The periodic check sees the Hub running.
+			if st, err := w.svc.Ensure(context.Background()); err != nil || st.State != values.StatusRunning {
+				t.Fatalf("Ensure while running = %+v, %v", st, err)
+			}
+
+			w.probe.set(exitedFacts(1))
+			for range 2 {
+				if st, err := w.svc.Ensure(context.Background()); err != nil || st.Reason != values.ReasonExited {
+					t.Fatalf("Ensure after the crash = %+v, %v", st, err)
+				}
+			}
+			if n := w.launcher.startCount(); n != 0 {
+				t.Fatalf("respawned after an unacknowledged crash: %d starts", n)
+			}
+
+			// A new acknowledgement now covers the recorded exit.
+			w.probe.after = []values.Facts{answering()}
+			if st, err := w.svc.Recheck(context.Background()); err != nil || st.State != values.StatusRunning || w.launcher.startCount() != 1 {
+				t.Fatalf("Recheck = %+v, %v, starts %d", st, err, w.launcher.startCount())
+			}
+		})
+	}
+}
+
+// TestHungPortEndsTheFlight: a port call that never returns is cut by the flight timeout, and the next Ensure runs a
+// new check.
+func TestHungPortEndsTheFlight(t *testing.T) {
+	w := newWorld(t, localURL)
+	w.svc.timeout = 20 * time.Millisecond
+	w.probe.hang = true
+
+	if _, err := w.svc.Ensure(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the flight deadline", err)
+	}
+	w.svc.mu.Lock()
+	left := w.svc.flight
+	w.svc.mu.Unlock()
+	if left != nil {
+		t.Fatal("the hung flight is still registered")
+	}
+
+	w.probe.mu.Lock()
+	w.probe.hang = false
+	w.probe.mu.Unlock()
+	w.svc.timeout = flightTimeout
+	w.probe.after = []values.Facts{answering()}
+	if st, err := w.svc.Ensure(context.Background()); err != nil || st.State != values.StatusRunning || w.launcher.startCount() != 1 {
+		t.Fatalf("next Ensure = %+v, %v, starts %d", st, err, w.launcher.startCount())
+	}
+}
+
 func TestRecheckAfterTheDatabaseIsBack(t *testing.T) {
 	w := newWorld(t, localURL)
 	w.probe.after = []values.Facts{exitedFacts(1)}
