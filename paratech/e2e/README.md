@@ -221,8 +221,8 @@ the next one off. Files run by name: `01-add`, `02-change`, `03-done-remove`, `0
 - **Not covered, on purpose.** Extraction over an existing summary: the only UI path is the recording import (the recording pack);
   the material extraction is an agent tool. Google Calendar and the real send are out of E2E (ADR-0035). A delete's question
   «Работа остановится» needs a running draft and is not reachable with the instant fake.
-- **Finding kept in a row.** After «Указать почту» the page of the subject shows the block «Преподаватели» three or four times (DOM:
-  `section.teachers` x3-4, all but the first with an open form). The row «отправка без почты…» asserts one block and is «сломано»; the next
+- **Finding kept in a row.** After «Указать почту» the page of the subject shows the block «Преподаватели» several times (3 to 5 seen; DOM:
+  `section.teachers` x3-5, all but the first with an open form). The row «отправка без почты…» asserts one block and is «сломано»; the next
   row goes on with the first form. Probable cause: `TeachersBlock` and `SubjectTabs` share `key={subject.id}` in
   `SubjectsPage.tsx` (a fragment with two equal keys).
 - **Clock.** The app's clock is the real one; the pack computes dates from `new Date()`: deadlines three or more days ahead
