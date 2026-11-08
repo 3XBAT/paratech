@@ -8402,7 +8402,7 @@
             "dependencies": [
                 "TASK-378"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-381",
@@ -8516,7 +8516,7 @@
                 "build-alpha.ps1 -Smoke (без -Beta): проверка тегов и nm проходит, hub.exe в папке нет"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-386",
@@ -8560,7 +8560,7 @@
                 "golangci-lint run ./desktop/..."
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-388",

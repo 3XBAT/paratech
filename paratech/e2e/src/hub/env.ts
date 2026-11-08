@@ -62,7 +62,9 @@ export function providerVars(mode: HubMode, env: Env, fakeUrl: string | undefine
       vars: {
         HUB_ANTHROPIC_API_KEY: DummyProviderKey,
         HUB_ANTHROPIC_BASE_URL: fakeUrl,
-        HUB_PROVIDER_STREAM: "false",
+        // TASK-380: true (ADR-0035 section 4 said false). The fake answers a stream:true call with SSE only when the rule
+        // has `stream`, else with the JSON 200 the Hub reads as a unary answer; the agent pack needs real SSE cuts.
+        HUB_PROVIDER_STREAM: "true",
       },
       secrets: [],
     };

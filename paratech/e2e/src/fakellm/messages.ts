@@ -1,6 +1,6 @@
 // Wire format of the fake, as read by hub/internal/adapters/anthropic (wire.go, wire_agent.go) and described in
-// docs/refs/anthropic.md sections 3, 4 and 7. Unary answers only: the Hub runs with HUB_PROVIDER_STREAM=false.
-import { DefaultUsage, type Rule, type Usage } from "./script.js";
+// docs/refs/anthropic.md sections 3, 4 and 7: the unary (JSON) answer. The SSE form of the same message is in sse.ts.
+import { DefaultUsage, type FixedRule, type Rule, type Usage } from "./script.js";
 
 export const FakeModel = "claude-e2e-fake";
 
@@ -46,7 +46,7 @@ export function findRule(rules: readonly Rule[], text: string): number {
 }
 
 /** The 200 body of a Messages API answer for a rule. */
-export function messageResponse(rule: Rule, seq: number, model: string | undefined): Record<string, unknown> {
+export function messageResponse(rule: FixedRule, seq: number, model: string | undefined): Record<string, unknown> {
   const usage: Usage = rule.usage ?? DefaultUsage;
   let content: Array<Record<string, unknown>>;
   let stopReason: string;

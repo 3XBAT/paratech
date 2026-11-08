@@ -15,6 +15,16 @@ export interface ToolCall {
   id?: string;
 }
 
+/** SSE streaming of a rule (answers a Hub request with "stream": true; otherwise the rule answers as JSON). */
+export interface StreamOptions {
+  /** Pieces of the text (plain) or of each tool input JSON; default 8. */
+  chunks?: number;
+  /** Wait between two deltas, ms; default 0. */
+  chunkDelayMs?: number;
+  /** Destroy the socket after this many content_block_delta events, without message_stop (a broken network). */
+  cutAfter?: number;
+}
+
 export interface ToolsRule {
   kind: "tools";
   /** Substring of the last user content (text and tool_result text); "" matches any request. */
@@ -23,6 +33,9 @@ export interface ToolsRule {
   /** Optional text block before the tool_use blocks. */
   text?: string;
   usage?: Usage;
+  /** Wait before the first byte of the answer, ms (the rule is chosen and recorded before the wait). */
+  delayMs?: number;
+  stream?: StreamOptions;
 }
 
 export interface PlainRule {
@@ -30,9 +43,31 @@ export interface PlainRule {
   match: string;
   reply: string;
   usage?: Usage;
+  delayMs?: number;
+  stream?: StreamOptions;
 }
 
-export type Rule = ToolsRule | PlainRule;
+/**
+ * An answer of the Hub operation ANSWER: the fake builds the JSON itself from the request, citing the first fragment
+ * with a quote copied from it (a static script cannot know the chunk ids and texts).
+ */
+export interface CitedRule {
+  kind: "cited";
+  match: string;
+  /** Text of the single claim. */
+  claim: string;
+  /** Words of the fragment quoted; default 6. */
+  words?: number;
+  /** The `missing` list of the answer; default []. */
+  missing?: string[];
+  usage?: Usage;
+  delayMs?: number;
+}
+
+export type Rule = ToolsRule | PlainRule | CitedRule;
+
+/** A rule whose answer content is fixed (a cited rule becomes a plain one once the request is known). */
+export type FixedRule = ToolsRule | PlainRule;
 
 export const DefaultUsage: Usage = { input_tokens: 100, output_tokens: 20 };
 
@@ -43,7 +78,16 @@ export const ScriptLimits = {
   calls: 32,
   inputBytes: 64 * 1024,
   tokens: 10_000_000,
+  delayMs: 60_000,
+  chunks: 200,
+  chunkDelayMs: 5_000,
+  cutAfter: 1_000_000,
+  words: 30,
+  missing: 32,
 } as const;
+
+export const DefaultChunks = 8;
+export const DefaultWords = 6;
 
 const toolName = /^[a-zA-Z0-9_-]{1,64}$/;
 const toolId = /^[a-zA-Z0-9_-]{1,128}$/;
@@ -74,12 +118,41 @@ export function parseRule(raw: unknown, at = "rule"): Rule {
   const usage = r.usage === undefined ? undefined : parseUsage(r.usage, `${at}.usage`);
 
   if (r.kind === "plain") {
-    onlyKeys(r, ["kind", "match", "reply", "usage"], at);
+    onlyKeys(r, ["kind", "match", "reply", "usage", "delayMs", "stream"], at);
     const reply = string(r.reply, `${at}.reply`, ScriptLimits.text);
-    return usage ? { kind: "plain", match, reply, usage } : { kind: "plain", match, reply };
+    const rule: PlainRule = { kind: "plain", match, reply };
+    if (usage) {
+      rule.usage = usage;
+    }
+    common(rule, r, at);
+    return rule;
+  }
+  if (r.kind === "cited") {
+    onlyKeys(r, ["kind", "match", "claim", "words", "missing", "usage", "delayMs"], at);
+    const claim = string(r.claim, `${at}.claim`, ScriptLimits.text);
+    if (claim.trim() === "") {
+      throw new ScriptError(`${at}.claim: want a non-blank string`);
+    }
+    const rule: CitedRule = { kind: "cited", match, claim };
+    if (r.words !== undefined) {
+      rule.words = int(r.words, `${at}.words`, 1, ScriptLimits.words);
+    }
+    if (r.missing !== undefined) {
+      if (!Array.isArray(r.missing) || r.missing.length > ScriptLimits.missing) {
+        throw new ScriptError(`${at}.missing: want an array of at most ${ScriptLimits.missing} strings`);
+      }
+      rule.missing = r.missing.map((m, j) => string(m, `${at}.missing[${j}]`, ScriptLimits.text));
+    }
+    if (usage) {
+      rule.usage = usage;
+    }
+    if (r.delayMs !== undefined) {
+      rule.delayMs = int(r.delayMs, `${at}.delayMs`, 0, ScriptLimits.delayMs);
+    }
+    return rule;
   }
   if (r.kind === "tools") {
-    onlyKeys(r, ["kind", "match", "reply", "text", "usage"], at);
+    onlyKeys(r, ["kind", "match", "reply", "text", "usage", "delayMs", "stream"], at);
     if (!Array.isArray(r.reply) || r.reply.length === 0 || r.reply.length > ScriptLimits.calls) {
       throw new ScriptError(`${at}.reply: want 1..${ScriptLimits.calls} tool calls`);
     }
@@ -91,9 +164,39 @@ export function parseRule(raw: unknown, at = "rule"): Rule {
     if (usage) {
       rule.usage = usage;
     }
+    common(rule, r, at);
     return rule;
   }
-  throw new ScriptError(`${at}.kind: want "tools" or "plain"`);
+  throw new ScriptError(`${at}.kind: want "tools", "plain" or "cited"`);
+}
+
+/** delayMs and stream, shared by tools and plain rules. */
+function common(rule: ToolsRule | PlainRule, r: Record<string, unknown>, at: string): void {
+  if (r.delayMs !== undefined) {
+    rule.delayMs = int(r.delayMs, `${at}.delayMs`, 0, ScriptLimits.delayMs);
+  }
+  if (r.stream !== undefined) {
+    const s = object(r.stream, `${at}.stream`);
+    onlyKeys(s, ["chunks", "chunkDelayMs", "cutAfter"], `${at}.stream`);
+    const stream: StreamOptions = {};
+    if (s.chunks !== undefined) {
+      stream.chunks = int(s.chunks, `${at}.stream.chunks`, 1, ScriptLimits.chunks);
+    }
+    if (s.chunkDelayMs !== undefined) {
+      stream.chunkDelayMs = int(s.chunkDelayMs, `${at}.stream.chunkDelayMs`, 0, ScriptLimits.chunkDelayMs);
+    }
+    if (s.cutAfter !== undefined) {
+      stream.cutAfter = int(s.cutAfter, `${at}.stream.cutAfter`, 0, ScriptLimits.cutAfter);
+    }
+    rule.stream = stream;
+  }
+}
+
+function int(v: unknown, at: string, min: number, max: number): number {
+  if (typeof v !== "number" || !Number.isInteger(v) || v < min || v > max) {
+    throw new ScriptError(`${at}: want an integer ${min}..${max}`);
+  }
+  return v;
 }
 
 function parseCall(raw: unknown, at: string): ToolCall {

@@ -38,9 +38,9 @@ The sandbox files stay after the run (the next run wipes them); the report is `p
 | `src/checks` | layout checker (`checkLayout`, `layoutSession`, page probe, pure `evaluateLayout`, console watch, agent-thread overlap, synthetic ICS) |
 | `src/fixtures` | pure builders and readers of the packs: the synthetic week (`schedule.ts`), the model cache and the corrupted copy (`model.ts`), the pick-queue guard (`picks.ts`), text readers (`text.ts`, `files.ts`), the audio variants, the speed line and the scan for audio in requests (`audio.ts`), the lecture of an import (`lecture.ts`) |
 | `scripts` | `fetch-model.ts` (compiled by tsc like the rest, `npm run fetch-model`); `llm/<pack>/` the scripted provider answers of a pack |
-| `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check, `specs/layout` the `@layout` pack (two window sizes: `PARATECH_E2E_WINDOW=1024x640`, `docs/process/e2e.md`), `specs/settings` the `@settings` pack, `specs/recording` the `@recording` pack (below) |
+| `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check, `specs/layout` the `@layout` pack (two window sizes: `PARATECH_E2E_WINDOW=1024x640`, `docs/process/e2e.md`), `specs/settings` the `@settings` pack, `specs/recording` the `@recording` pack, `specs/agent` the `@agent` pack, `specs/assignments` the `@assignments` pack (below) |
 
-**Order of the packs.** `playwright.config.ts` has one project per pack, in the order layout, settings, recording, smoke (one
+**Order of the packs.** `playwright.config.ts` has one project per pack, in the order layout, settings, recording, agent, assignments, smoke (one
 worker runs the groups of the projects in that order; without projects Playwright runs files alphabetically, which would put
 `recording` before `settings`, whose Hub key, speech model and schedule it needs). A new pack is one `pack("<name>")` line in the
 list (a unit test fails for a folder of `specs/` that is not in it). There is no `dependencies`: a red pack does not switch the
@@ -189,6 +189,56 @@ sandbox reports «не проверено (нужно: …)», not «слома�
   модель base-q5_1; процессор …»; the reporter prints it in «Скорость расшифровки» of `report.md`, for information.
 - Processes are looked up with PowerShell `Get-CimInstance Win32_Process` (`src/app/procs.ts`), never by image name alone.
 
+## Agent pack (`specs/agent`, `@agent`, TASK-380)
+
+SCRIPTED: the real Hub with the fake provider playing the MODEL's side with scripted tool calls (`scripts/llm/agent/rules.ts`,
+`replyRule(match, text, {delayMs, stream})` = a `reply` tool call; `chatSummaryRule`). The pack asserts what the APP sends to the
+model (`llm.requests()`: the student's text is the last block, the tool names are those of catalog v9, `stream: true`) and what the
+PANEL shows; the model's own wording is the LIVE set (TASK-382). A request carrying another tool set fails with the names that
+differ (`catalogProblem`): the pack is written for `values.CatalogVersion` 9. Every row `requires` the Hub key and the schedule
+rows of the settings pack; every scenario starts with «Новый чат» so the history sent to the model holds only what it asked.
+Files run by name: `01-reply`, `02-cut`, `03-busy`, `04-restart`, `05-compact` (part A, the panel itself), `06-titles`, `07-link`,
+`08-answer`, `09-failure`, `10-subject`, `11-confirm`, `12-busy-tool`, `13-cards-stay` (part B, the tools). Run it with the packs it needs:
+`… run e2e -- --project=settings --project=recording --project=agent` (a lone `--project=agent` on a fresh sandbox is
+«не проверено»). The rows of part B also `require` the recording rows (the two imported recordings «Человек в футляре · основная» and
+«… · перезапуск», the deleted «… · отмена») and, for the link, the settings row «Расписание: ссылка на пару».
+
+| Row | What it checks |
+|---|---|
+| Агент: ответ, копирование, повтор, таймер | a streamed `reply` after a 2.5 s delay: the timer «Nс» counts, «Остановить» is in the row, the text grows in several steps and only forward, `checkAgent` (the 04.11 overlap check) runs during the delay and while the text types and `rowSeen` must be true; at the end the text is the scripted one, the row, timer and draft are gone, «Копировать» (under the answer and under the question) writes to `opened.jsonl` (`clipboard`: the copy goes through the shell, not `navigator.clipboard`), «Повторить ответ» asks again; the console is clean |
+| Агент: после оборванного ответа можно писать дальше | a cut reply (provider side, the Hub answered): right after the cut line there is no banner «Нет связи с paratech» and the request field is enabled and takes typing (no dead end until «Повторить»); then the retry replaces the block so the chat is clean. May fail: the panel maps a broken stream to «offline» (candidate defect, product question) |
+| Агент: строка «Стоп» не перекрывает текст на двух ширинах панели | the same overlap check on the default and the widest panel while a delayed streamed reply types; `rowSeen` must be true |
+| Агент: оборванный ответ сохраняет текст | a 700+ character streamed reply is cut mid-way (BUG-20261104): the printed text stays, «Ответ оборван. Можно повторить.», one «Повторить» icon, no «Повторить ответ», no stop row/timer; «Повторить» with a full second reply replaces the kept block |
+| Агент: второй вопрос во время первого | while the first request is in its Hub step the second WAITS (the core holds one lock per Ask, `agentturn.Service.Ask`): «ждёт предыдущий запрос» with «Остановить предыдущий запрос», no timer, nothing sent to the model; after the first answer the label goes at once, the second is sent by itself, the requests reach the model in order, a third question works. (The busy refusal «Предыдущий запрос ещё выполняется…» is only for a first request outside the Hub step, e.g. running a tool: not covered in part A) |
+| Агент: начать заново отсюда и форк | «Скрыть» puts the text into the field, the hidden requests leave the thread and the next provider request holds the edit and none of the hidden questions/answers; «Форк» opens «… (fork)» with the text in the field, sends nothing, notes «Открыт новый чат. Исходный «…» не изменился.» with «Открыть исходный чат» |
+| Агент: уплотнение контекста | nine requests of ~6 KiB fill the 48 KiB window; the next Ask shows «Уплотнение контекста…» while the scripted `chat_summary` answer is delayed, and the next planner request carries the summary instead of the oldest pairs |
+| Агент: названия записей доходят до модели (TASK-369) | «какие у меня записи?»: the model calls `find_lessons`; the NEXT request's `tool_result` holds both recordings of the recording pack (`title`, `subject_name` «Литература», `recording` = the id the page's `ActivityService.ListRecordings` returns, `transcribed`, `summary`), not the deleted «… · отмена»; the first request has the student's text last and the v9 catalog; the reply card shows the scripted text |
+| Агент: ссылка на пару (TASK-364) | `list_subjects` result: `call_link` = the saved link only on «Матанализ»; the reply shows the link as plain text; the thread has no button, link or card that leads anywhere (catalog v9 has no `offer_button`); then, as the reply says, «Сегодня» → «Подключиться» writes `{kind:"call"}` with the link to `opened.jsonl` (nothing else is opened) and the subject page shows the host |
+| Агент: ссылка на пару, когда её нет | the same for «Литература» (no `call_link` on it or on «История»); no navigation control in the thread (nothing named «Расписание»); the planner prompt of the request holds the TASK-364 lines of `system.md` v9 («No tool saves a link… never name «Расписание»…», «Расписание … holds no links», where the link lives); the subject page of «Литература» has the block «Ссылка на пару» with «Ссылки на пару нет» and «Добавить ссылку» |
+| Агент: что было на паре — карточка с источником (TASK-366) | `answer_question`: the ANSWER request to the Hub has the question and non-empty `fragments` with the text of the lesson (`cited` rule); the planner gets only counters (no claim, no quote); the card «Ответ по материалам» lists a source; its button opens the lesson page of a recording of the pack on the tab of the place («Конспект») |
+| Агент: что было на паре — текст ответа в карточке | the card shows the text of the answer. **Fails today**: the card says only «Ответ с источниками подготовлен.» and the sources (TASK-296 follow-up, claims are parsed but not rendered) |
+| Агент: сбой инструмента — честно, без выдуманной причины | the Hub's ANSWER reader answers garbage twice (the Hub asks again once) → the model gets `is_error` `{"error":"failed"}` only, no cause; no answer card, no «материала нет» in the thread; `make_summary` with an id the model never saw → `{"error":"unknown_id"}`, nothing done; a `cannot_do` reply draws «Целиком не получится» with the two lists |
+| Агент: добавь предмет по последней записи (TASK-369) | the model looks first (`find_lessons`, no question card), `create_subject` runs (class U): the model gets `{"changed":true,"done":true,"id"}`, the line «Действие выполнено» with «Отменить» appears, the subject is in the tree of «Предметы»; «Отменить» removes it (the tree is as before once the section is opened again) |
+| Агент: «Отменить» обновляет открытое дерево предметов | the same flow with «Предметы» kept open: after «Отменить» in the panel the subject must leave the visible tree within 5 s without re-entering the section. May fail (low defect: the page reads the library only on entering). The AC «the lesson moves under the new subject» is not covered: `create_subject` moves no lesson (follow-up, a note of the row above) |
+| Агент: действие класса C только через подтверждение (AC-18) | `find_lessons` then `propose_delete_recording` with the id from that result: the model gets `{"proposed":true,"waits_for":"student"}` (no `done`), the confirm card shows the recording with «Нет» / «Да»; the recording stays in «Записи» (list and ids unchanged); «Нет» → «Отклонено: ничего не выполнено.»; «Да» is never pressed |
+| Агент: второй вопрос, пока идёт инструмент | `answer_question` with the ANSWER reader held 8 s: a second question is refused at once, «Предыдущий запрос ещё выполняется. Его можно остановить или отправить этот ещё раз.» (not sent to the model); after the first answer «Отправить ещё раз» sends it and it is answered. **Fails today** on the last step: the refused request stays in the thread (the question twice, the stale refusal line) |
+| Агент: карточки инструментов остаются после ответа модели | the cards of `answer_question`, `propose_delete_recording` and `create_subject` are seen while the model's reply is held, and must be on screen after it. **Fails today**: the model's `reply` update replaces every card of the request, so the answer card, the confirm card and the action line vanish when the reply arrives |
+
+- **Hub rate limit.** One key gets 30 calls a minute with a burst of 10 (`HUB_RATE_LIMIT_*`, defaults); a scenario with many calls
+  (compaction) delays each scripted answer (`delayMs`) so the questions go slower than the bucket refills, never a fixed sleep.
+- **Unmatched rule.** An unscripted call fails the scenario; a question that must NOT reach the model (the busy one) has no rule.
+- **Part B scripting.** A rule matches the student's text for the first request of a turn and a part of the tool result for the
+  next one (`AfterLessons`, `AfterSubjects`, `AfterAnswer`, `AfterWrite`, `AfterProposal`, `afterRefusal` in `scripts/llm/agent/rules.ts`;
+  the last user message of a follow-up holds only the results). `callRule` is one tool call, `citedRule` the ANSWER reader,
+  `badAnswerRule` an answer the Hub refuses. The ids a tool needs (a recording to delete) are read from the app itself
+  (`recordingsOfApp`: `ActivityService.ListRecordings` through the page's Wails runtime), the same ids the tool result must show.
+- **Held reply.** Rows that use a card of a tool (files 8, 10, 11, 13) hold the model's final `reply` (`delayMs` 5–25 s): see the
+  last row of the table above for why the cards cannot be used after it.
+- **Untrusted wording.** Texts of the model are only drawn and compared as they were scripted; what the pack judges about words is
+  what the APP says (error enums, «Действие выполнено», «Отклонено: ничего не выполнено.», no invented cause).
+- **Copy.** The panel's «Копировать» calls the shell's clipboard (`TranscriptService.CopyText`), which the E2E hooks record as
+  `{kind:"clipboard"}` in `opened.jsonl`; `clipboardWrites(page)` only sees `navigator.clipboard`, which the panel does not use.
+
 ## Assignments pack (`specs/assignments`, `@assignments`, TASK-381)
 
 The student's own assignment flows in the real window. Every row `requires` the settings rows it needs (the subject «История»
@@ -227,10 +277,32 @@ and the refusal row starts by removing any that is there. Files run by name: `01
 
 ## Fake Messages API
 
-`node:http` on `127.0.0.1`, unary only (the Hub runs with `HUB_PROVIDER_STREAM=false`). Rules
-`{kind: "tools"|"plain", match, reply, text?, usage?}`: a request takes the first remaining rule whose `match` is a
+`node:http` on `127.0.0.1`. The Hub runs with `HUB_PROVIDER_STREAM=true` (TASK-380; ADR-0035 section 4 said `false`), so
+it calls the fake with `"stream": true` for `CompleteStream` (the ANSWER operation only) and `AgentStepStream`. Rules
+`{kind: "tools"|"plain", match, reply, text?, usage?, delayMs?, stream?}`: a request takes the first remaining rule whose `match` is a
 substring of the last user message (text and `tool_result` text); the rule is consumed. No rule: HTTP 500 `api_error`,
-listed as unmatched («unscripted LLM call»). Control: `POST /__e2e/script` `{"rules": [...]}` (strictly validated, 1 MiB
+listed as unmatched («unscripted LLM call»).
+
+- `delayMs` (integer 0..60000, any rule): the fake waits that long before the first byte (SSE too). The rule is chosen,
+  consumed and recorded first, so `remaining()`/`requests()` already show the call while it is held. A client that gives
+  up during the wait gets nothing written.
+- `stream: {chunks?, chunkDelayMs?, cutAfter?}` (tools and plain rules): when the request has `"stream": true` the answer
+  is `200 text/event-stream`, events in this order: `message_start` (empty `content`, usage input fields),
+  per content block `content_block_start` / `content_block_delta`s / `content_block_stop` (plain: one text block of
+  `text_delta`s; tools: the optional text block, then one `tool_use` block per call, started with `input: {}`, whose
+  `input_json_delta.partial_json` pieces join to `JSON.stringify(input)`), `message_delta` (stop reason, cumulative usage),
+  `message_stop`. `chunks` (1..200, default 8) pieces per block (by code points, never an empty piece, an empty text is one),
+  `chunkDelayMs` (0..5000, default 0) between deltas, `cutAfter: k` destroys the socket right after the k-th delta (before the
+  first for 0; before `message_stop` when there are fewer), without `message_stop` and without a clean end: the Hub reports a
+  transient provider error ("the LLM provider failed", retryable) and a client with deltas already out does not retry. A
+  request with `stream:true` and a rule WITHOUT `stream`, or a request with `stream:false`/none, gets the normal JSON 200
+  (the Hub reads a JSON 200 as a unary answer), so every older script works unchanged.
+- `{kind: "cited", match, claim, words?, missing?, usage?, delayMs?}` for the ANSWER operation: the fake reads the Hub's
+  user message `{"question", "fragments": [{"chunk_id", "text"}]}`, cites the FIRST fragment with a quote of its first
+  `words` (1..30, default 6) whitespace-separated words, copied verbatim, and answers (plain JSON 200, `end_turn`)
+  `{"claims":[{"text":<claim>,"cites":[{"chunk_id":…,"quote":…}]}],"missing":<missing or []>}`. A request without a usable
+  fragment is HTTP 500, listed as unmatched (`cited: no fragment in the request`), and the rule is NOT consumed.
+- Control: `POST /__e2e/script` `{"rules": [...]}` (strictly validated, 1 MiB
 cap; replaces the script and clears the recordings), `GET /__e2e/requests`, `GET /__e2e/unmatched`. Any other path
 is HTTP 404 and is recorded as unmatched too («unknown endpoint METHOD path»), so a new provider endpoint the Hub
 starts calling is not missed. Recordings hold request bodies only, never headers. A request whose `Host` is not
@@ -239,6 +311,9 @@ starts calling is not missed. Recordings hold request bodies only, never headers
 ## Решения / ограничения
 
 - The fake returns no thinking blocks: SCRIPTED checks the app side (tools, quota, flows), not the model's reasoning.
+- Streaming is per rule (`stream`); without it a `stream:true` call is answered as JSON. The Hub streams only the ANSWER
+  operation through `CompleteStream` (any other operation gets `invalid_argument`, "use Complete") and `AgentStepStream`.
+  A `cited` rule never streams (the JSON fallback).
 - Rules match as «first remaining match»: the first not yet consumed rule whose `match` is a substring wins; order
   the rules from specific to general.
 - An unmatched call is HTTP 500 `api_error`, which is transient for the Hub and the desktop: they may retry it, so

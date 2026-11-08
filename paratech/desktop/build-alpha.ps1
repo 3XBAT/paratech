@@ -25,6 +25,11 @@ see docs/qa/run-alpha.md).
 this build has the --e2e-* flags; the build without -E2E is checked to carry no e2e tag. -E2E -Smoke also passes
 --e2e-dir (a folder inside the smoke data folder) and waits for the 'e2e mode on' line.
 
+-Beta builds the owner's beta (ADR-0036): tags production,beta, by default into paratech\dist\beta, and also hub.exe
+(./hub/cmd/hub, CGO_ENABLED=0) next to paratech.exe. It cannot be combined with -E2E or -ComponentOnly. A build without
+-Beta removes a hub.exe of an earlier beta build and checks with `go tool nm` that the exe links no local-Hub code.
+-Beta -Smoke also runs `hub.exe -h` (it only prints the usage; no Hub is started).
+
 .EXAMPLE
 powershell -NoProfile -ExecutionPolicy Bypass -File .\paratech\desktop\build-alpha.ps1 -Smoke
 #>
@@ -43,7 +48,9 @@ param(
     # Only put the speech component into the output folder; no frontend or Go build (build-release.ps1 uses it).
     [switch]$ComponentOnly,
     # Build the end-to-end test exe (tags production,e2e; ADR-0035) instead of the alpha.
-    [switch]$E2E
+    [switch]$E2E,
+    # Build the owner's beta (tags production,beta; ADR-0036) and hub.exe next to it.
+    [switch]$Beta
 )
 
 Set-StrictMode -Version Latest
@@ -56,6 +63,11 @@ $exeName = 'paratech.exe'
 # The exe name before the rename (ADR-0015): removed from the output folder, so an old build next to the new one is
 # not started by mistake (it would also take the paratech: links back).
 $legacyExeName = 'learning-assistant.exe'
+# Built next to the exe only by -Beta (ADR-0036); removed from every other output folder.
+$hubExeName = 'hub.exe'
+# Packages of the local Hub (ADR-0036 §1) that only a beta exe may link.
+$betaSymbolPattern = 'internal/(cases/localhub|adapters/hubprocess)'
+$hubHelpTimeoutSeconds = 15
 $manifestPath = Join-Path $desktopDir 'internal\app\speechcomponent.json'
 $cacheRoot = Join-Path $moduleRoot 'dist\cache\speech-component'
 # Removed from the output folder before the component is copied: also any ggml-cpu-*.dll of an older set.
@@ -72,6 +84,9 @@ $buildTags = 'production'
 if ($E2E) {
     $buildTags = 'production,e2e'
     $smokeLines += 'e2e mode on'
+}
+if ($Beta) {
+    $buildTags = 'production,beta'
 }
 
 function Write-Step([string]$Message) {
@@ -492,6 +507,58 @@ function Invoke-Smoke([string]$Exe, [string]$Dir) {
     Write-Step 'Smoke passed: the app started (stopped hard afterwards).'
 }
 
+# --- beta (ADR-0036) ---------------------------------------------------------------------------------------------
+
+# ADR-0036 §1: the student exe must not link the local-Hub code. Only the beta-tagged wiring references it, so the
+# linker drops it from any other build; this checks that it really did. Takes the `go tool nm` output as text.
+function Test-NoBetaSymbols([string]$NmText) {
+    # Every Go exe has main.main: without it nm printed nothing useful and an empty list must not pass.
+    if ($NmText -notmatch '(?m)\smain\.main\s*$') {
+        throw "'go tool nm' printed no main.main symbol; the symbol check cannot run."
+    }
+    $hits = @([regex]::Matches($NmText, "(?m)^.*$betaSymbolPattern.*$") | ForEach-Object { $_.Value.Trim() })
+    if ($hits.Count -gt 0) {
+        throw "The exe links local-Hub code that only a -Beta build may have ($($hits.Count) symbols), e.g.:`n  $(($hits | Select-Object -First 5) -join "`n  ")"
+    }
+}
+
+function Invoke-BetaSymbolCheck([string]$Exe) {
+    # nm prints tens of thousands of lines; as in Invoke-Native only the exit code decides about stderr.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $lines = & $goExe tool nm $Exe
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($code -ne 0) {
+        throw "'go tool nm $Exe' failed with exit code $code"
+    }
+    Test-NoBetaSymbols (@($lines) -join "`n")
+    Write-Step "Symbols: $(@($lines).Count) in the exe, none of cases/localhub or adapters/hubprocess"
+}
+
+# Runs `hub.exe -h`: the hub prints its usage and exits 0 before it reads any setting or opens anything.
+function Invoke-HubHelpSmoke([string]$Exe, [string]$Dir) {
+    $log = Join-Path $Dir 'smoke-hub.log'
+    $stdoutLog = Join-Path $Dir 'smoke-hub-stdout.log'
+    Write-Step "Smoke: $hubExeName -h (log: $log)"
+    $proc = Start-Process -FilePath $Exe -ArgumentList '-h' -NoNewWindow -PassThru `
+        -RedirectStandardError $log -RedirectStandardOutput $stdoutLog
+    # Windows PowerShell 5.1 loses ExitCode unless the handle is taken while the process runs.
+    $null = $proc.Handle
+    if (-not $proc.WaitForExit($hubHelpTimeoutSeconds * 1000)) {
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        throw "Smoke failed: '$hubExeName -h' did not exit within $hubHelpTimeoutSeconds s."
+    }
+    $text = (Read-SharedText $log) + (Read-SharedText $stdoutLog)
+    if ($proc.ExitCode -ne 0 -or -not $text.Contains('Usage of hub')) {
+        throw "Smoke failed: '$hubExeName -h' exited with $($proc.ExitCode):`n$text"
+    }
+    Write-Step "Smoke passed: $hubExeName -h printed its usage."
+}
+
 # --- arguments ---------------------------------------------------------------------------------------------------
 
 if ($SkipWhisper -and ($ComponentOnly -or $WhisperZip -ne '' -or $WhisperDir -ne '')) {
@@ -506,15 +573,25 @@ if ($ComponentOnly -and $Smoke) {
 if ($ComponentOnly -and $E2E) {
     throw '-E2E needs a build; it cannot be combined with -ComponentOnly.'
 }
+if ($Beta -and $E2E) {
+    throw '-Beta and -E2E exclude each other: the E2E runner starts its own Hub (ADR-0036).'
+}
+if ($Beta -and $ComponentOnly) {
+    throw '-Beta needs a build; it cannot be combined with -ComponentOnly.'
+}
 
 if ($OutDir -eq '') {
     $OutDir = Join-Path $moduleRoot 'dist\alpha'
     if ($E2E) {
         $OutDir = Join-Path $moduleRoot 'dist\e2e'
     }
+    if ($Beta) {
+        $OutDir = Join-Path $moduleRoot 'dist\beta'
+    }
 }
 $OutDir = Resolve-FullPath $OutDir
 $exePath = Join-Path $OutDir $exeName
+$hubExePath = Join-Path $OutDir $hubExeName
 if ($WhisperZip -ne '') {
     $WhisperZip = Resolve-FullPath $WhisperZip
 }
@@ -571,21 +648,41 @@ if (Test-Path -LiteralPath $legacyExe -PathType Leaf) {
     Write-Step "Removing $legacyExe of a build before the rename"
     Remove-Item -LiteralPath $legacyExe -Force
 }
+# Only the beta starts a local Hub; a hub.exe of an earlier beta build must not sit next to another build.
+if (-not $Beta -and (Test-Path -LiteralPath $hubExePath -PathType Leaf)) {
+    Write-Step "Removing $hubExePath of an earlier -Beta build"
+    Remove-Item -LiteralPath $hubExePath -Force
+}
 $saved = Set-Env @{ CGO_ENABLED = '0'; GOOS = 'windows'; GOARCH = 'amd64' }
 try {
     Invoke-Native $goExe @('-C', $moduleRoot, 'build', '-tags', $buildTags, '-trimpath', '-o', $exePath, './desktop/cmd/desktop')
+    if ($Beta) {
+        Write-Step "Go: building $hubExePath (CGO_ENABLED=0, windows/amd64)"
+        Invoke-Native $goExe @('-C', $moduleRoot, 'build', '-trimpath', '-o', $hubExePath, './hub/cmd/hub')
+    }
 } finally {
     Restore-Env $saved
 }
 
-# The embedded build settings must show the release flags: exactly these tags, so an alpha never has e2e.
+# The embedded build settings must show the release flags: exactly these tags, so an alpha never has e2e or beta.
 $info = (& $goExe version -m $exePath | Out-String)
 $tagsPattern = '(?m)^\s*build\s+-tags=' + [regex]::Escape($buildTags) + '\s*$'
 if ($LASTEXITCODE -ne 0 -or $info -notmatch $tagsPattern -or -not $info.Contains('CGO_ENABLED=0')) {
     throw "The built exe does not report -tags=$buildTags and CGO_ENABLED=0:`n$info"
 }
+if (-not $Beta) {
+    Invoke-BetaSymbolCheck $exePath
+}
 $size = [math]::Round((Get-Item -LiteralPath $exePath).Length / 1MB, 1)
 Write-Step "Built $exePath ($size MB)"
+if ($Beta) {
+    $hubInfo = (& $goExe version -m $hubExePath | Out-String)
+    if ($LASTEXITCODE -ne 0 -or -not $hubInfo.Contains('CGO_ENABLED=0')) {
+        throw "The built $hubExeName does not report CGO_ENABLED=0:`n$hubInfo"
+    }
+    $hubSize = [math]::Round((Get-Item -LiteralPath $hubExePath).Length / 1MB, 1)
+    Write-Step "Built $hubExePath ($hubSize MB)"
+}
 
 if ($Smoke) {
     if (-not $SkipWhisper) {
@@ -596,4 +693,7 @@ if ($Smoke) {
         Write-Step "Smoke: the $(@($manifest.files).Count) speech component files next to the exe match the manifest"
     }
     Invoke-Smoke $exePath $OutDir
+    if ($Beta) {
+        Invoke-HubHelpSmoke $hubExePath $OutDir
+    }
 }
