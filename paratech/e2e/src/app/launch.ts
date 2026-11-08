@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -62,6 +62,19 @@ export interface LaunchOptions {
    * interrupt or a timeout while the app starts). launchApp still kills it itself when the start fails.
    */
   onSpawn?: (app: RunningApp) => void;
+  /**
+   * A start in a data dir that already has a log (a restart, restart.ts): only the text after this length counts, so the
+   * lines of the earlier start cannot prove the new one. Default 0.
+   */
+  logFrom?: number;
+  /**
+   * Spawn the app outside the job object of this process. libuv on Windows puts a non-detached child into a job with
+   * KILL_ON_JOB_CLOSE, so the app dies with the process that spawned it. The app a spec restarts is spawned by a Playwright
+   * worker, and every project gets a new worker: without this the restarted app is killed when its worker exits. The first
+   * app is spawned by the main process, which lives for the whole run. A detached child is also unref'd so the worker can
+   * exit; stop() still works by pid (taskkill /T /F). Default false.
+   */
+  detached?: boolean;
   /** Tests only: replaces `taskkill /T /F`. */
   kill?: (pid: number) => void;
   /** Tests only: replaces the netstat listing (undefined = netstat cannot run). */
@@ -120,11 +133,28 @@ export function readSharedText(file: string): string {
   }
 }
 
+/** The part of the log written after `from` characters; a log that got shorter (rotated) is read whole. */
+export function freshLog(text: string, from: number): string {
+  return from > 0 && text.length >= from ? text.slice(from) : text;
+}
+
 export function desktopLogPath(dataDir: string): string {
   return path.join(dataDir, "logs", "desktop.log");
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Exported for tests: how the app is spawned. */
+export function spawnOptions(o: Pick<LaunchOptions, "ctlDir" | "env" | "detached">, out: number): SpawnOptions {
+  return {
+    cwd: o.ctlDir,
+    env: appEnv(o.env ?? process.env),
+    shell: false,
+    windowsHide: false, // the window may appear on screen (owner OK, ADR-0035 О6)
+    stdio: ["ignore", out, out],
+    detached: o.detached ?? false,
+  };
+}
 
 /**
  * Starts the E2E exe and returns it only when it is provably isolated and reachable: all four log lines, no
@@ -135,15 +165,12 @@ export async function launchApp(o: LaunchOptions): Promise<RunningApp> {
   const out = openSync(path.join(o.logsDir, "app-stdout.log"), "a");
   let child: ChildProcess;
   try {
-    child = spawn(o.exePath, [...(o.exeArgs ?? []), ...appArgs(o)], {
-      cwd: o.ctlDir,
-      env: appEnv(o.env ?? process.env),
-      shell: false,
-      windowsHide: false, // the window may appear on screen (owner OK, ADR-0035 О6)
-      stdio: ["ignore", out, out],
-    });
+    child = spawn(o.exePath, [...(o.exeArgs ?? []), ...appArgs(o)], spawnOptions(o, out));
   } finally {
     closeSync(out);
+  }
+  if (o.detached) {
+    child.unref(); // the spawning process must be able to exit while the app runs
   }
   let spawnError: string | undefined;
   child.on("error", (err: NodeJS.ErrnoException) => (spawnError = err.code ?? "error"));
@@ -165,7 +192,7 @@ export async function launchApp(o: LaunchOptions): Promise<RunningApp> {
   const log = desktopLogPath(o.dataDir);
   const deadline = Date.now() + (o.startTimeoutMs ?? startTimeoutMs);
   for (;;) {
-    const verdict = evaluateStartLog(readSharedText(log));
+    const verdict = evaluateStartLog(freshLog(readSharedText(log), o.logFrom ?? 0));
     if (verdict.defaultProfile) {
       fail(startFailure("SandboxNotIsolated", `${NotIsolated}: приложение пишет ${DefaultProfileLine}`));
     }

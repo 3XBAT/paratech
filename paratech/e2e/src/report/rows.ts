@@ -53,6 +53,16 @@ export function envProblems(input: ReportInput): EnvProblem[] {
   return out;
 }
 
+/** The `requires` annotation may name several features, joined by « + »: all of them must be «готово». */
+export const RequiresSeparator = " + ";
+
+export function splitRequires(text: string): string[] {
+  return text
+    .split(RequiresSeparator)
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
+}
+
 export interface Evaluation {
   rows: Row[];
   verdicts: Map<TestRecord, TestVerdict>;
@@ -129,8 +139,9 @@ export function evaluate(input: ReportInput): Evaluation {
     if (start) {
       return { verdict: "broken", step: "Запуск", message: firstLine(start.message) };
     }
-    if (t.requires && !featureReady(t.requires)) {
-      return { verdict: "unchecked", need: byFeature.has(t.requires) ? t.requires : `${t.requires} (не запускалась)` };
+    const missing = t.requires === undefined ? undefined : splitRequires(t.requires).find((r) => !featureReady(r));
+    if (missing !== undefined) {
+      return { verdict: "unchecked", need: byFeature.has(missing) ? missing : `${missing} (не запускалась)` };
     }
     if (rawBroken(t)) {
       return { verdict: "broken", step: t.brokenStep || t.title, message: firstLine(t.error) };

@@ -1,6 +1,6 @@
 // Turns a Playwright TestCase and its last result into a TestRecord. Works on structural "Like" types, which the
 // real TestCase / TestResult satisfy, so tests can feed plain objects and nothing here needs the Playwright runner.
-import { AnnotationFeature, AnnotationMode, AnnotationRequires } from "../contract.js";
+import { AnnotationFeature, AnnotationMode, AnnotationRequires, AnnotationSttSpeed } from "../contract.js";
 import type { RunMode, TestOutcome, TestRecord } from "./model.js";
 import { isEnvironmentMessage } from "./rows.js";
 import type { AttachmentLike } from "./screenshots.js";
@@ -121,6 +121,10 @@ export function toRecord(test: TestLike, screenshots: string[]): TestRecord {
   const requires = annotation(test, last, AnnotationRequires);
   if (requires) {
     record.requires = requires;
+  }
+  const speed = annotation(test, last, AnnotationSttSpeed);
+  if (speed) {
+    record.sttSpeed = speed;
   }
   if (skipReason) {
     record.skipReason = skipReason;

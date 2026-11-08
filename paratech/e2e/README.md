@@ -32,13 +32,19 @@ The sandbox files stay after the run (the next run wipes them); the report is `p
 | Folder | Content |
 |---|---|
 | `src/sandbox` | run root, wipe guard, build, Credential Manager cleanup, global setup and teardown, `state.json` |
-| `src/app` | launching the exe (`launch.ts`), `netstat` loopback check, `connectOverCDP` (`cdp.ts`) |
+| `src/app` | launching the exe (`launch.ts`), `netstat` loopback check, `connectOverCDP` with `reconnect()` (`cdp.ts`), the processes of the sandbox by image name and exe path (`procs.ts`), a hard stop and a new start of the app on the same sandbox (`restart.ts`) |
 | `src/steps`, `src/report` | spec helpers (`pick`, `opened`, `llm`, `step`, page stubs) and the reporter (`docs/process/e2e.md`) |
 | `src/hub`, `src/fakellm` | the Hub harness and the fake Messages API (below) |
 | `src/checks` | layout checker (`checkLayout`, `layoutSession`, page probe, pure `evaluateLayout`, console watch, agent-thread overlap, synthetic ICS) |
-| `src/fixtures` | pure builders and readers of the packs: the synthetic week (`schedule.ts`), the model cache and the corrupted copy (`model.ts`), the pick-queue guard (`picks.ts`), text readers (`text.ts`, `files.ts`) |
-| `scripts` | `fetch-model.ts` (compiled by tsc like the rest, `npm run fetch-model`) |
-| `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check, `specs/layout` the `@layout` pack (two window sizes: `PARATECH_E2E_WINDOW=1024x640`, `docs/process/e2e.md`), `specs/settings` the `@settings` pack (below) |
+| `src/fixtures` | pure builders and readers of the packs: the synthetic week (`schedule.ts`), the model cache and the corrupted copy (`model.ts`), the pick-queue guard (`picks.ts`), text readers (`text.ts`, `files.ts`), the audio variants, the speed line and the scan for audio in requests (`audio.ts`), the lecture of an import (`lecture.ts`) |
+| `scripts` | `fetch-model.ts` (compiled by tsc like the rest, `npm run fetch-model`); `llm/<pack>/` the scripted provider answers of a pack |
+| `specs/<pack>` | scenarios; `specs/smoke` is the `@smoke` start check, `specs/layout` the `@layout` pack (two window sizes: `PARATECH_E2E_WINDOW=1024x640`, `docs/process/e2e.md`), `specs/settings` the `@settings` pack, `specs/recording` the `@recording` pack (below) |
+
+**Order of the packs.** `playwright.config.ts` has one project per pack, in the order layout, settings, recording, smoke (one
+worker runs the groups of the projects in that order; without projects Playwright runs files alphabetically, which would put
+`recording` before `settings`, whose Hub key, speech model and schedule it needs). A new pack is one `pack("<name>")` line in the
+list (a unit test fails for a folder of `specs/` that is not in it). There is no `dependencies`: a red pack does not switch the
+next ones off; a row that needs another says `requires`. `requires` may name several rows joined by « + »; all must be «готово».
 
 Ctrl+C during the setup: Playwright still runs the global teardown, and the setup's handle is in a global slot from the
 start, so the teardown stops what is already up (the app as soon as it is spawned, not only once it is proven isolated)
@@ -139,6 +145,49 @@ rows, in file order (one worker; `hub.spec.ts` < `model.spec.ts` < `schedule.spe
   schedule and the three subjects with the link of «Матанализ».
 - Every wait is on UI state with an explicit timeout; page code goes through `evalInPage`. The key is never put into a title,
   an annotation, a note or a log.
+
+## Recording pack (`specs/recording`, `@recording`, TASK-378)
+
+A synthetic lecture goes the whole real way: «Записи» → «Импортировать запись» + a picked MP3 → the real `whisper-cli.exe` of the
+exe folder with the default model → the transcript → three scripted Hub calls → the lesson screen and the assignment. It needs the
+state of the settings pack (Hub key, speech model by default, the schedule and its subjects): every row `requires` them (rows of
+the settings pack, joined by « + »), so `--grep "@settings|@recording"` runs both and a lone `--grep @recording` on a fresh
+sandbox reports «не проверено (нужно: …)», not «сломано». Files run by name: `01-import`, `02-cancel`, `03-restart`, `04-privacy`.
+
+| Row | What it checks |
+|---|---|
+| Запись: импорт и локальная расшифровка | the lecture (Литература, лекция, yesterday 10:00) is typed into «Дата и время» and the clip is picked (`fixtures/audio/…mp3`); the row goes through its statuses to «Конспект готов» without a restart; a `whisper-cli.exe` of the exe folder ran (found by image name AND exe path, with the model file in its command line) and `desktop.log` names the model of `transcription job enqueued` (AC-08); the speed line (below) |
+| Запись: расшифровка содержит слова из речи | the lesson screen, «Расшифровка» holds at least 2 of the words of `fixtures/audio/README.md` («Expected words:», case-insensitive) |
+| Запись: конспект из ответа Hub | «Конспект» shows the scripted summary and its key point |
+| Запись: задание со сроком в «Задания» и «Сегодня» | the scripted extraction made an assignment with a deadline: on the lesson's «Задания», in «Задания», in «Сегодня» → «Сроки на неделе» |
+| Запись: отмена расшифровки | a second import (other bytes, ~150 s of audio); while `whisper-cli.exe` runs the recording is deleted from its «⋯» menu; the recognition stops, no `whisper-cli.exe` of the sandbox is left, the row is gone, `desktop.log` says `outcome=cancelled`, nothing went to the Hub |
+| Запись: перезапуск приложения во время расшифровки | a third import; during the recognition the app tree is killed (`taskkill /T /F`), started again on the same sandbox, data dir and debug port (`src/app/restart.ts`), the page reconnected (`app.reconnect()`), and the job finishes (AC-09): «Конспект готов» and the words are in «Расшифровка» |
+| Запись: звук не уходит в Hub | AC-06 over ALL requests of the pack (the fake forgets them at each `script()`, so every test saves them to `<ctl>/recording-llm-requests.jsonl`): no `RIFF`, `OggS`, `ID3`, `fLaC`, no MPEG sync, no base64 run over 4 KiB or starting like a container; the scan is shown to find the real clip in base64 |
+
+- **Hub calls.** One imported lecture makes three: summary, homework and lecture text (`homeworkflow/postprocess.go`). The fake
+  picks a rule by a substring of the last user message, and the rules (`scripts/llm/recording/rules.ts`) tell the three requests
+  apart by what only that request holds: `"segments":[` (lecture text), `"transcript_minutes"` (summary), `"transcript":"`
+  (extraction, after the summary's rule). The answers are the strict JSON of `prompts.ParseSummary/ParseExtraction/ParseLectureText`;
+  the lecture text is long enough not to be refused as «condensed» (at least 45 % of the transcript). The deadline of the
+  assignment is in two days at 20:00 with the UTC offset of the lecture's start, as the app demands.
+- **Why «Дата и время».** «Пара из расписания» offers only today's lessons that have begun; the settings pack's «Литература» is
+  tomorrow. The lecture is given by date, time, subject «Литература» and kind.
+- **Other bytes for every import.** The same SHA-256 returns the existing recording, so the clip is written again behind an
+  ID3v2 tag with another title (`audioVariant`), three times in a row for the long ones. Under `<ctl>/fixtures/audio/variants/`
+  (picks are taken only from `<ctl>/fixtures`); nothing is committed.
+- **Cancel is the deletion.** The app has no «Отменить» for a running STT job: «Остановить» is for a recording that is being made,
+  and «Фоновая обработка» lists jobs without a recording. A job is cancelled only by `recordingdelete` (the recording's «⋯» →
+  «Удалить»), so the row has no «cancelled» state, it disappears. The row checks what that cancel promises (process, row, log,
+  Hub) and the missing button is a finding for the owner.
+- **Restart.** The setup records the pid of the app in `state.json` (`appPid`); `restartApp` kills that tree only while the pid
+  still runs `paratech/dist/e2e/paratech.exe`, starts the same exe (log lines are counted from the end of the old log), writes
+  the new pid (`appRestarted`), and the global teardown and the exit guard stop that process too (`killRestartedApp`). The
+  app is left running for the next pack. It is spawned `detached` (and unref'd): libuv on Windows puts a non-detached child into a
+  kill-on-close job object, so an app started by a worker would die when that worker exits (every project gets a new worker)
+  and the next pack would get `connectOverCDP ECONNREFUSED`; the app is still stopped by pid with `taskkill /T /F`.
+- **Speed line.** `AnnotationSttSpeed` (`stt-speed`) on the first row: «50 с звука расшифровано за N с (×K от реального времени);
+  модель base-q5_1; процессор …»; the reporter prints it in «Скорость расшифровки» of `report.md`, for information.
+- Processes are looked up with PowerShell `Get-CimInstance Win32_Process` (`src/app/procs.ts`), never by image name alone.
 
 ## Fake Messages API
 

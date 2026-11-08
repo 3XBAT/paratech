@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 
 import { desktopLogPath, launchApp, readSecretsProfileId, readSharedText, type RunningApp } from "../app/launch.js";
+import { killRestartedApp } from "../app/restart.js";
 import {
   EnvCdpUrl,
   EnvCtlDir,
@@ -184,6 +185,7 @@ export async function startRun(
     if (id) {
       state.secretsProfileId = id;
     }
+    state.appPid = started.app.pid; // a spec that restarts the app replaces it (src/app/restart.ts)
     writeState(state);
 
     process.env[EnvRunRoot] = p.runRoot;
@@ -321,6 +323,12 @@ async function stopAll(p: SandboxPaths, state: RunState, started: Started): Prom
   } catch (err) {
     note("остановка приложения", err);
   }
+  // The app a spec started again (state.appPid) is not in `started`.
+  try {
+    killRestartedApp(p.runRoot, state.exePath, app?.pid);
+  } catch (err) {
+    note("остановка перезапущенного приложения", err);
+  }
   // 2. Hub (schema, compose project if this run started it), then the fake.
   try {
     await hub?.stop();
@@ -346,6 +354,15 @@ async function stopAll(p: SandboxPaths, state: RunState, started: Started): Prom
 export function lastResort(p: SandboxPaths, state: RunState, started: Pick<Started, "app">): void {
   try {
     started.app?.stop();
+  } catch {
+    // nothing more can be done at exit
+  }
+  try {
+    killRestartedApp(p.runRoot, state.exePath, started.app?.pid);
+  } catch {
+    // PowerShell is not available: the profile cleanup below still runs
+  }
+  try {
     deleteProfileCredentials(readSecretsProfileId(p.dataDir) ?? state.secretsProfileId);
   } catch {
     // nothing more can be done at exit
