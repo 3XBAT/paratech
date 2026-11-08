@@ -9080,7 +9080,7 @@
             "dependencies": [
                 "TASK-392"
             ],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-410",
