@@ -191,10 +191,32 @@ sandbox reports «не проверено (нужно: …)», not «слома�
 
 ## Fake Messages API
 
-`node:http` on `127.0.0.1`, unary only (the Hub runs with `HUB_PROVIDER_STREAM=false`). Rules
-`{kind: "tools"|"plain", match, reply, text?, usage?}`: a request takes the first remaining rule whose `match` is a
+`node:http` on `127.0.0.1`. The Hub runs with `HUB_PROVIDER_STREAM=true` (TASK-380; ADR-0035 section 4 said `false`), so
+it calls the fake with `"stream": true` for `CompleteStream` (the ANSWER operation only) and `AgentStepStream`. Rules
+`{kind: "tools"|"plain", match, reply, text?, usage?, delayMs?, stream?}`: a request takes the first remaining rule whose `match` is a
 substring of the last user message (text and `tool_result` text); the rule is consumed. No rule: HTTP 500 `api_error`,
-listed as unmatched («unscripted LLM call»). Control: `POST /__e2e/script` `{"rules": [...]}` (strictly validated, 1 MiB
+listed as unmatched («unscripted LLM call»).
+
+- `delayMs` (integer 0..60000, any rule): the fake waits that long before the first byte (SSE too). The rule is chosen,
+  consumed and recorded first, so `remaining()`/`requests()` already show the call while it is held. A client that gives
+  up during the wait gets nothing written.
+- `stream: {chunks?, chunkDelayMs?, cutAfter?}` (tools and plain rules): when the request has `"stream": true` the answer
+  is `200 text/event-stream`, events in this order: `message_start` (empty `content`, usage input fields),
+  per content block `content_block_start` / `content_block_delta`s / `content_block_stop` (plain: one text block of
+  `text_delta`s; tools: the optional text block, then one `tool_use` block per call, started with `input: {}`, whose
+  `input_json_delta.partial_json` pieces join to `JSON.stringify(input)`), `message_delta` (stop reason, cumulative usage),
+  `message_stop`. `chunks` (1..200, default 8) pieces per block (by code points, never an empty piece, an empty text is one),
+  `chunkDelayMs` (0..5000, default 0) between deltas, `cutAfter: k` destroys the socket right after the k-th delta (before the
+  first for 0; before `message_stop` when there are fewer), without `message_stop` and without a clean end: the Hub reports a
+  transient provider error ("the LLM provider failed", retryable) and a client with deltas already out does not retry. A
+  request with `stream:true` and a rule WITHOUT `stream`, or a request with `stream:false`/none, gets the normal JSON 200
+  (the Hub reads a JSON 200 as a unary answer), so every older script works unchanged.
+- `{kind: "cited", match, claim, words?, missing?, usage?, delayMs?}` for the ANSWER operation: the fake reads the Hub's
+  user message `{"question", "fragments": [{"chunk_id", "text"}]}`, cites the FIRST fragment with a quote of its first
+  `words` (1..30, default 6) whitespace-separated words, copied verbatim, and answers (plain JSON 200, `end_turn`)
+  `{"claims":[{"text":<claim>,"cites":[{"chunk_id":…,"quote":…}]}],"missing":<missing or []>}`. A request without a usable
+  fragment is HTTP 500, listed as unmatched (`cited: no fragment in the request`), and the rule is NOT consumed.
+- Control: `POST /__e2e/script` `{"rules": [...]}` (strictly validated, 1 MiB
 cap; replaces the script and clears the recordings), `GET /__e2e/requests`, `GET /__e2e/unmatched`. Any other path
 is HTTP 404 and is recorded as unmatched too («unknown endpoint METHOD path»), so a new provider endpoint the Hub
 starts calling is not missed. Recordings hold request bodies only, never headers. A request whose `Host` is not
@@ -203,6 +225,9 @@ starts calling is not missed. Recordings hold request bodies only, never headers
 ## Решения / ограничения
 
 - The fake returns no thinking blocks: SCRIPTED checks the app side (tools, quota, flows), not the model's reasoning.
+- Streaming is per rule (`stream`); without it a `stream:true` call is answered as JSON. The Hub streams only the ANSWER
+  operation through `CompleteStream` (any other operation gets `invalid_argument`, "use Complete") and `AgentStepStream`.
+  A `cited` rule never streams (the JSON fallback).
 - Rules match as «first remaining match»: the first not yet consumed rule whose `match` is a substring wins; order
   the rules from specific to general.
 - An unmatched call is HTTP 500 `api_error`, which is transient for the Hub and the desktop: they may retry it, so

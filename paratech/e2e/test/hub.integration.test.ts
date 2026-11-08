@@ -21,6 +21,31 @@ const connectJSON = (url: string, procedure: string, body: unknown, apiKey?: str
     body: JSON.stringify(body),
   });
 
+interface StreamEnvelope {
+  flags: number;
+  json: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- parsed Connect JSON
+}
+
+/** A Connect server-streaming call (application/connect+json): one enveloped request, a list of enveloped messages back. */
+async function connectStream(url: string, procedure: string, body: unknown, apiKey: string): Promise<{ status: number; messages: StreamEnvelope[] }> {
+  const payload = Buffer.from(JSON.stringify(body), "utf8");
+  const header = Buffer.alloc(5);
+  header.writeUInt32BE(payload.length, 1);
+  const res = await fetch(`${url}/${procedure}`, {
+    method: "POST",
+    headers: { "content-type": "application/connect+json", authorization: `Bearer ${apiKey}` },
+    body: Buffer.concat([header, payload]),
+  });
+  const bytes = Buffer.from(await res.arrayBuffer());
+  const messages: StreamEnvelope[] = [];
+  for (let at = 0; at + 5 <= bytes.length; ) {
+    const size = bytes.readUInt32BE(at + 1);
+    messages.push({ flags: bytes[at] ?? 0, json: JSON.parse(bytes.subarray(at + 5, at + 5 + size).toString("utf8") || "{}") });
+    at += 5 + size;
+  }
+  return { status: res.status, messages };
+}
+
 test(
   "a throwaway Hub answers GetRemaining with its key and calls the scripted fake",
   { skip: canRun ? false : skipReason, timeout: 900_000 },
@@ -96,6 +121,48 @@ test(
       assert.equal(after.find((k) => k.id === second.id)?.status, "revoked");
       assert.equal(after.filter((k) => k.status === "active").length, 1);
       assert.ok(!JSON.stringify(hub).includes("postgres://") && !inspect(hub).includes("postgres://"), "the database URL is a secret of the run");
+
+      // TASK-380: the Hub runs with HUB_PROVIDER_STREAM=true. Only the ANSWER operation is streamed (CompleteStream),
+      // with the server prompt: an SSE rule, a `cited` rule (no `stream`: the JSON fallback) and a cut stream.
+      const fragment = "Сегодня разбирали теорему Ферма и её доказательство";
+      const answerSpec = (key: string, question: string) => ({
+        spec: {
+          idempotencyKey: key,
+          operationType: "OPERATION_TYPE_ANSWER",
+          untrustedData: JSON.stringify({ question, fragments: [{ chunk_id: "lesson-1-c1", text: fragment }] }),
+          maxOutputTokens: 256,
+        },
+      });
+      const answerJSON = JSON.stringify({ claims: [{ text: "Разбирали теорему Ферма.", cites: [{ chunk_id: "lesson-1-c1", quote: "разбирали теорему Ферма" }] }], missing: [] });
+      const stream = (key: string, question: string) => connectStream(hub.url, "paratech.hub.v1.GatewayService/CompleteStream", answerSpec(key, question), hub.apiKey);
+      const resultOf = (r: { messages: StreamEnvelope[] }) => r.messages.find((m) => m.flags === 0 && m.json.result)?.json.result;
+
+      fake.setScript([{ kind: "plain", match: "e2e-sse", reply: answerJSON, usage: { input_tokens: 50, output_tokens: 12 }, stream: { chunks: 5 } }]);
+      const sse = await stream("e2e-sse-1", "e2e-sse: что было на паре?");
+      assert.equal(sse.status, 200);
+      const deltas = sse.messages.filter((m) => m.flags === 0 && typeof m.json.delta === "string").map((m) => m.json.delta as string);
+      assert.ok(deltas.length >= 2, `the Hub passed ${deltas.length} deltas on: ${JSON.stringify(sse)}\n${hub.logs().slice(-1500)}`);
+      assert.equal(deltas.join(""), answerJSON);
+      assert.deepEqual(JSON.parse(resultOf(sse)?.output), JSON.parse(answerJSON));
+      assert.deepEqual(resultOf(sse)?.usage, { inputTokens: "50", outputTokens: "12" });
+      assert.equal((fake.requests()[0]?.body as { stream?: boolean }).stream, true, "CompleteStream asks the provider for SSE");
+
+      // `cited` builds the answer from the request: the Hub keeps the claim, so the chunk id and the quote were valid.
+      fake.setScript([{ kind: "cited", match: "e2e-cited", claim: "Разбирали теорему Ферма.", words: 3, missing: ["Про домашнее задание не сказано"] }]);
+      const cited = await stream("e2e-cited-1", "e2e-cited: что было на паре?");
+      assert.equal(cited.status, 200);
+      const citedOutput = JSON.parse(resultOf(cited)?.output) as { claims: Array<{ text: string; cites: Array<{ chunk_id: string; quote: string }> }>; missing: string[] };
+      assert.deepEqual(citedOutput.claims, [{ text: "Разбирали теорему Ферма.", cites: [{ chunk_id: "lesson-1-c1", quote: "Сегодня разбирали теорему" }] }]);
+      assert.deepEqual(citedOutput.missing, ["Про домашнее задание не сказано"]);
+      assert.equal((fake.requests()[0]?.body as { stream?: boolean }).stream, true, "the JSON 200 answers a stream:true call");
+      assert.deepEqual(fake.unmatched(), []);
+
+      fake.setScript([{ kind: "plain", match: "e2e-cut", reply: answerJSON, stream: { chunks: 6, cutAfter: 2 } }]);
+      const cut = await stream("e2e-cut-1", "e2e-cut: что было на паре?");
+      t.diagnostic(`cut stream: ${JSON.stringify(cut.messages)}`);
+      assert.ok(!resultOf(cut), "a cut stream has no result");
+      assert.ok(cut.messages.some((m) => m.flags === 2 && m.json.error), "a cut stream ends with an error");
+      assert.equal(fake.remaining(), 0);
     } finally {
       await hub.stop();
       await fake.stop();

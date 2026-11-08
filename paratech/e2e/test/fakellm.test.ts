@@ -28,12 +28,49 @@ describe("script validation", () => {
     assert.deepEqual(rules[1], { kind: "plain", match: "", reply: "Готово." });
   });
 
+  test("accepts delayMs, stream and cited rules (bounds included) and keeps the fields", () => {
+    const rules = parseScript({
+      rules: [
+        { kind: "plain", match: "", reply: "x", delayMs: 60_000, stream: { chunks: 200, chunkDelayMs: 5000, cutAfter: 0 } },
+        { kind: "tools", match: "", reply: [{ name: "a", input: {} }], delayMs: 0, stream: {} },
+        { kind: "cited", match: "", claim: "c", words: 30, missing: ["m"], usage: { input_tokens: 1, output_tokens: 2 }, delayMs: 5 },
+        { kind: "cited", match: "", claim: "c" },
+      ],
+    });
+    assert.deepEqual(rules[0], { kind: "plain", match: "", reply: "x", delayMs: 60_000, stream: { chunks: 200, chunkDelayMs: 5000, cutAfter: 0 } });
+    assert.deepEqual(rules[1], { kind: "tools", match: "", reply: [{ name: "a", input: {} }], delayMs: 0, stream: {} });
+    assert.deepEqual(rules[2], { kind: "cited", match: "", claim: "c", words: 30, missing: ["m"], usage: { input_tokens: 1, output_tokens: 2 }, delayMs: 5 });
+    assert.deepEqual(rules[3], { kind: "cited", match: "", claim: "c" });
+  });
+
   const bad: Array<[string, unknown]> = [
     ["not an object", []],
     ["no rules", {}],
     ["unknown top field", { rules: [], extra: 1 }],
     ["unknown kind", { rules: [{ kind: "stream", match: "", reply: "x" }] }],
     ["unknown rule field", { rules: [{ kind: "plain", match: "", reply: "x", delay: 5 }] }],
+    ["delayMs negative", { rules: [{ kind: "plain", match: "", reply: "x", delayMs: -1 }] }],
+    ["delayMs over 60000", { rules: [{ kind: "plain", match: "", reply: "x", delayMs: 60_001 }] }],
+    ["delayMs fractional", { rules: [{ kind: "tools", match: "", reply: [{ name: "a", input: {} }], delayMs: 1.5 }] }],
+    ["delayMs a string", { rules: [{ kind: "plain", match: "", reply: "x", delayMs: "5" }] }],
+    ["stream not an object", { rules: [{ kind: "plain", match: "", reply: "x", stream: true }] }],
+    ["stream unknown field", { rules: [{ kind: "plain", match: "", reply: "x", stream: { chunk: 3 } }] }],
+    ["stream.chunks 0", { rules: [{ kind: "plain", match: "", reply: "x", stream: { chunks: 0 } }] }],
+    ["stream.chunks 201", { rules: [{ kind: "tools", match: "", reply: [{ name: "a", input: {} }], stream: { chunks: 201 } }] }],
+    ["stream.chunkDelayMs 5001", { rules: [{ kind: "plain", match: "", reply: "x", stream: { chunkDelayMs: 5001 } }] }],
+    ["stream.chunkDelayMs negative", { rules: [{ kind: "plain", match: "", reply: "x", stream: { chunkDelayMs: -1 } }] }],
+    ["stream.cutAfter negative", { rules: [{ kind: "plain", match: "", reply: "x", stream: { cutAfter: -1 } }] }],
+    ["stream.cutAfter fractional", { rules: [{ kind: "plain", match: "", reply: "x", stream: { cutAfter: 0.5 } }] }],
+    ["cited without claim", { rules: [{ kind: "cited", match: "" }] }],
+    ["cited blank claim", { rules: [{ kind: "cited", match: "", claim: "  " }] }],
+    ["cited unknown field", { rules: [{ kind: "cited", match: "", claim: "c", reply: "x" }] }],
+    ["cited stream", { rules: [{ kind: "cited", match: "", claim: "c", stream: {} }] }],
+    ["cited words 0", { rules: [{ kind: "cited", match: "", claim: "c", words: 0 }] }],
+    ["cited words 31", { rules: [{ kind: "cited", match: "", claim: "c", words: 31 }] }],
+    ["cited words fractional", { rules: [{ kind: "cited", match: "", claim: "c", words: 2.5 }] }],
+    ["cited missing not an array", { rules: [{ kind: "cited", match: "", claim: "c", missing: "m" }] }],
+    ["cited missing item not a string", { rules: [{ kind: "cited", match: "", claim: "c", missing: [1] }] }],
+    ["cited delayMs over 60000", { rules: [{ kind: "cited", match: "", claim: "c", delayMs: 60_001 }] }],
     ["match not a string", { rules: [{ kind: "plain", match: 3, reply: "x" }] }],
     ["plain reply not a string", { rules: [{ kind: "plain", match: "", reply: ["x"] }] }],
     ["empty tool calls", { rules: [{ kind: "tools", match: "", reply: [] }] }],
@@ -208,16 +245,22 @@ describe("fake server", () => {
     assert.equal(res.status, 413);
   });
 
-  test("streaming, non-JSON and oversized provider calls are refused and recorded as unmatched", async () => {
-    fake.setScript([{ kind: "plain", match: "", reply: "never" }]);
-    assert.equal((await call(userTurn("x", { stream: true }))).status, 400);
+  // TASK-380: a stream:true call is no longer refused. A rule without `stream` answers it with the normal JSON 200.
+  test("non-JSON and oversized provider calls are refused and recorded as unmatched; stream:true gets the JSON answer", async () => {
+    fake.setScript([{ kind: "plain", match: "", reply: "kept" }]);
     assert.equal((await call("{oops")).status, 400);
     assert.equal((await call(userTurn("y".repeat(70 * 1024)))).status, 413);
     assert.deepEqual(
       fake.unmatched().map((r) => r.reason),
-      ["stream requested", "malformed JSON", "body too large"],
+      ["malformed JSON", "body too large"],
     );
     assert.equal(fake.remaining(), 1);
+
+    const streamed = await call(userTurn("x", { stream: true }));
+    assert.equal(streamed.status, 200);
+    assert.match(streamed.headers.get("content-type") ?? "", /^application\/json/);
+    assert.equal(((await streamed.json()) as { content: Array<{ text: string }> }).content[0]?.text, "kept");
+    assert.equal(fake.remaining(), 0);
   });
 
   test("unknown paths are 404 and recorded as unmatched with a reason, headers never kept", async () => {
