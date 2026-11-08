@@ -14,7 +14,8 @@ and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `par
   what a card may ask of the panel. Big cards live in their own files:
   `ConfirmCard.tsx` (`ConfirmCardView` + stateful `ConfirmCard`), `ScheduleCard.tsx`, `WorkCard.tsx`, `WorkSend.tsx`,
   `TurnkeyCards.tsx` (triage, questions, understanding, helper), `AnswerCard.tsx` (the `answer` card body: `useAnswer` reads the
-  answer once per answerId, claims then the missing line then the sources; pure texts and the long-claim clamp in `answerView.ts`)
+  answer once per answerId and attempt, claims then the missing line then the sources, in an `aria-live="polite"` container; a failed
+  read shows a quiet line with a «Повторить» icon that reads again; pure texts and the long-claim clamp in `answerView.ts`)
   with `AnswerSources.tsx` (the sources list only). E2E relies on: first `<p>` of the card = first claim, `ul.ag-src` buttons.
 - Smaller parts: `MessageActions.tsx` (copy / rerun icons under messages), `ChatBar.tsx`, `ContextRing.tsx`, `RestartDialog.tsx`,
   `MentionParts.tsx` with `useMentionComposer.ts`, `Waiting.tsx`, `PanelResizeHandle.tsx` with `panelWidth.ts` (pure rules).

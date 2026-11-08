@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { AnswerClaim, AnswersApi, AnswerView } from "../bindings/answers.js";
 import type { CitationOpening } from "../knowledgeView.js";
 import { answerParts, answerTexts, clampClaim } from "../answerView.js";
+import { IconAction } from "../ui/IconAction.js";
 import { AnswerSourcesView } from "./AnswerSources.js";
 
 // The body of the answer card (BUG-20261108-agent-cards): the claims, then what the lessons do not answer, then the sources.
@@ -25,24 +26,24 @@ export function startRead(api: AnswersApi, answerId: string, done: (id: string, 
 }
 
 /**
- * Reads the answer once per (api, answerId). Null when there is nothing to read (no core call or no id): the card then
- * keeps its fixed text. A failed read is `failed`; the card stays.
+ * Reads the answer once per (api, answerId, attempt). Null when there is nothing to read (no core call or no id): the card
+ * then keeps its fixed text. A failed read is `failed`; the card stays and a new `attempt` reads again.
  */
-export function useAnswer(api: AnswersApi | undefined, answerId: string): AnswerState | null {
-  const [read, setRead] = useState<{ id: string; state: AnswerState }>({ id: "", state: { kind: "loading" } });
+export function useAnswer(api: AnswersApi | undefined, answerId: string, attempt = 0): AnswerState | null {
+  const [read, setRead] = useState<{ id: string; attempt: number; state: AnswerState }>({ id: "", attempt: 0, state: { kind: "loading" } });
 
   useEffect(() => {
     if (api === undefined || answerId === "") {
       return;
     }
-    return startRead(api, answerId, (id, state) => setRead({ id, state }));
-  }, [api, answerId]);
+    return startRead(api, answerId, (id, state) => setRead({ id, attempt, state }));
+  }, [api, answerId, attempt]);
 
   if (api === undefined || answerId === "") {
     return null;
   }
-  // A state read for another id is not shown for this one.
-  return read.id === answerId ? read.state : { kind: "loading" };
+  // A state read for another id or an earlier attempt is not shown for this one.
+  return read.id === answerId && read.attempt === attempt ? read.state : { kind: "loading" };
 }
 
 /** One claim (no hooks: the tests render it directly). A claim that is not from the lessons says so in muted text in front of it. */
@@ -70,12 +71,7 @@ function ClaimLine(props: { claim: AnswerClaim }) {
   return <ClaimLineView claim={props.claim} expanded={expanded} onToggle={() => setExpanded((e) => !e)} />;
 }
 
-/** The body for a state (no hooks): `fallback` is the fixed line when there is no state to show. */
-export function AnswerBodyView(props: { state: AnswerState | null; fallback: string; onOpen?: (o: CitationOpening) => void }) {
-  const { state } = props;
-  if (state === null) {
-    return <p>{props.fallback}</p>;
-  }
+function bodyContent(state: AnswerState, onOpen: ((o: CitationOpening) => void) | undefined, onRetry: (() => void) | undefined) {
   if (state.kind === "loading") {
     return <p className="ag-src-note small muted">{answerTexts.loading}</p>;
   }
@@ -83,6 +79,7 @@ export function AnswerBodyView(props: { state: AnswerState | null; fallback: str
     return (
       <p className="ag-src-note small muted" role="status">
         {answerTexts.failed}
+        {onRetry !== undefined && <IconAction icon="retry" size="sm" className="ag-inline-ia" label={answerTexts.retry} onClick={onRetry} />}
       </p>
     );
   }
@@ -93,14 +90,31 @@ export function AnswerBodyView(props: { state: AnswerState | null; fallback: str
         <ClaimLine key={i} claim={c} />
       ))}
       {parts.missing !== "" && <p className="ag-claim-miss small muted">{parts.missing}</p>}
-      {parts.empty && <p className="muted">{answerTexts.empty}</p>}
-      <AnswerSourcesView state={{ kind: "ready", sources: state.view.sources }} onOpen={props.onOpen} />
+      {parts.emptyNote !== "" && <p className="muted">{parts.emptyNote}</p>}
+      <AnswerSourcesView state={{ kind: "ready", sources: state.view.sources }} onOpen={onOpen} />
     </>
   );
 }
 
-/** The answer card body: reads the answer of the card once and shows the claims with the sources list. */
+/**
+ * The body for a state (no hooks): `fallback` is the fixed line when there is no state to show. The container is a polite
+ * live region that stays mounted from loading on, so the arrival of the answer is announced.
+ */
+export function AnswerBodyView(props: { state: AnswerState | null; fallback: string; onOpen?: (o: CitationOpening) => void; onRetry?: () => void }) {
+  const { state } = props;
+  if (state === null) {
+    return <p>{props.fallback}</p>;
+  }
+  return (
+    <div className="ag-answer-body" aria-live="polite">
+      {bodyContent(state, props.onOpen, props.onRetry)}
+    </div>
+  );
+}
+
+/** The answer card body: reads the answer of the card once and shows the claims with the sources list; a failed read can be retried. */
 export function AnswerCard(props: { api?: AnswersApi; answerId: string; fallback: string; onOpen?: (o: CitationOpening) => void }) {
-  const state = useAnswer(props.api, props.answerId);
-  return <AnswerBodyView state={state} fallback={props.fallback} onOpen={props.onOpen} />;
+  const [attempt, setAttempt] = useState(0);
+  const state = useAnswer(props.api, props.answerId, attempt);
+  return <AnswerBodyView state={state} fallback={props.fallback} onOpen={props.onOpen} onRetry={() => setAttempt((n) => n + 1)} />;
 }
