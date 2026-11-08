@@ -99,6 +99,62 @@ func TestStepStreamOutlastsTheIdleWindow(t *testing.T) {
 	}
 }
 
+// Any message resets the step's watchdog: heartbeats (and an event the client does not know) keep a stream without
+// text alive past the idle window and never reach the draft; once they stop the step is cut as silent.
+func TestStepStreamHeartbeat(t *testing.T) {
+	const idle = 300 * time.Millisecond
+	beats := func(n int, end bool) func(context.Context, func(*hubv1.AgentStepStreamResponse) error) error {
+		return func(ctx context.Context, send func(*hubv1.AgentStepStreamResponse) error) error {
+			if err := send(stepDelta("ч")); err != nil {
+				return err
+			}
+			for i := range n {
+				if err := sleepCtx(ctx, 75*time.Millisecond); err != nil {
+					return err
+				}
+				m := stepHeartbeat()
+				if i == 1 {
+					m = &hubv1.AgentStepStreamResponse{}
+				}
+				if err := send(m); err != nil {
+					return err
+				}
+			}
+			if end {
+				return send(stepResult(okResponse()))
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		}
+	}
+	tests := []struct {
+		name string
+		end  bool
+	}{{"heartbeats keep it", true}, {"heartbeats stop", false}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := startStepGateway(t, &fakeStreamHub{serve: beats(8, tt.end)},
+				Config{RequestTimeout: idle, StepIdleTimeout: idle, StepTimeout: 5 * time.Second})
+			d := &drafts{}
+			start := time.Now()
+			_, err := c.Step(t.Context(), stepRequest(t), d.add)
+			if tt.end {
+				if err != nil {
+					t.Fatalf("Step: %v", err)
+				}
+				if took := time.Since(start); took < 2*idle {
+					t.Fatalf("the stream took %v, not longer than the idle window", took)
+				}
+			} else {
+				assertStepTimeout(t, err, errStepSilent)
+			}
+			if len(d.got) != 1 || d.got[0] != "ч" {
+				t.Fatalf("drafts = %q", d.got)
+			}
+		})
+	}
+}
+
 // A stream that goes silent after some deltas ends as a timeout after the idle window, not RequestTimeout; the draft
 // had the earlier deltas and gets nothing after the call returned.
 func TestStepStreamGoesSilent(t *testing.T) {

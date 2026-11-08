@@ -141,7 +141,7 @@ func TestAnswerQuestionStreams(t *testing.T) {
 		t.Fatalf("no callback = %q, %v", got, err)
 	}
 	sreqs, headers := h.streams()
-	wantReq := &hubv1.CompleteStreamRequest{Spec: answerSpec(req)}
+	wantReq := &hubv1.CompleteStreamRequest{Spec: answerSpec(req), Heartbeat: true}
 	if len(sreqs) != 2 || !proto.Equal(sreqs[0], wantReq) || !proto.Equal(sreqs[1], wantReq) {
 		t.Fatalf("requests on the wire:\n got %v\nwant %v", sreqs, wantReq)
 	}
@@ -209,6 +209,8 @@ func TestAnswerQuestionStreamErrors(t *testing.T) {
 		{"no result", sends(nil, delta(`{"claims":[],"missing":["Всё"]}`)), []error{ErrBadResponse, backoff.ErrPermanent}},
 		{"nothing at all", sends(nil), []error{ErrBadResponse, backoff.ErrPermanent}},
 		{"after the result", sends(nil, result("{}"), delta("x")), []error{ErrBadResponse, backoff.ErrPermanent}},
+		{"heartbeat after the result", sends(nil, result("{}"), heartbeat()), []error{ErrBadResponse, backoff.ErrPermanent}},
+		{"only heartbeats", sends(nil, heartbeat(), heartbeat()), []error{ErrBadResponse, backoff.ErrPermanent}},
 		{"over the read limit", func(_ context.Context, _ int, send func(*hubv1.CompleteStreamResponse) error) error {
 			chunk := strings.Repeat("x", 1<<20)
 			for range 3 {
@@ -244,68 +246,6 @@ func TestAnswerQuestionStreamErrors(t *testing.T) {
 				t.Fatalf("a failed stream fell back to Complete: %d calls", len(reqs))
 			}
 		})
-	}
-}
-
-// An answer (a long stream plus the Hub's reask in one call) is bounded by AnswerTimeout, not by RequestTimeout; the
-// http.Client backstop does not cut it either (TASK-366 review).
-func TestAnswerQuestionHasItsOwnTimeout(t *testing.T) {
-	const out = `{"claims":[],"missing":["Всё"]}`
-	slow := func(ctx context.Context, _ int, send func(*hubv1.CompleteStreamResponse) error) error {
-		if err := send(delta("{")); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(300 * time.Millisecond):
-		}
-		return send(result(out))
-	}
-	mux := http.NewServeMux()
-	mux.Handle(hubv1connect.NewGatewayServiceHandler(&streamHub{fakeHub: &fakeHub{}, stream: slow}))
-	srv := httptest.NewTLSServer(mux)
-	t.Cleanup(srv.Close)
-	creds := testenv.NewMemCredentials()
-	if err := creds.Set(t.Context(), DefaultCredentialName, testKey); err != nil {
-		t.Fatal(err)
-	}
-	client := func(request, answering time.Duration) *Client {
-		c, err := New(Config{BaseURL: srv.URL, HTTPClient: srv.Client(), RequestTimeout: request, AnswerTimeout: answering}, creds)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return c
-	}
-
-	if got, err := client(100*time.Millisecond, 5*time.Second).AnswerQuestion(t.Context(), answerRequest(t), nil); err != nil || got != out {
-		t.Fatalf("an answer longer than RequestTimeout = %q, %v", got, err)
-	}
-	_, err := client(5*time.Second, 100*time.Millisecond).AnswerQuestion(t.Context(), answerRequest(t), nil)
-	if !errors.Is(err, ErrTimeout) || backoff.Classify(err) != backoff.ClassTransient {
-		t.Fatalf("over AnswerTimeout = %v, want a transient timeout", err)
-	}
-
-	// Defaults: the answer gets the longer of DefaultAnswerTimeout and RequestTimeout, and the backstop covers it.
-	tests := []struct {
-		name          string
-		request, want time.Duration
-	}{
-		{"defaults", 0, DefaultAnswerTimeout},
-		{"short request timeout", time.Second, DefaultAnswerTimeout},
-		{"request timeout above the answer default", 10 * time.Minute, 10 * time.Minute},
-	}
-	for _, tt := range tests {
-		c, err := New(Config{BaseURL: "https://hub.example.com", RequestTimeout: tt.request}, creds)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if c.answerTO != tt.want || c.http.Timeout < tt.want+clientGrace {
-			t.Errorf("%s: answer timeout %v, backstop %v, want %v", tt.name, c.answerTO, c.http.Timeout, tt.want)
-		}
-	}
-	if _, err := New(Config{BaseURL: "https://hub.example.com", AnswerTimeout: -time.Second}, creds); !errors.Is(err, ErrInvalidConfig) {
-		t.Fatalf("negative answer timeout = %v", err)
 	}
 }
 

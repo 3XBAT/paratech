@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"connectrpc.com/connect"
 
@@ -31,8 +30,9 @@ var ErrTurnGone = errors.New("hub no longer keeps the model turn")
 // is asked through AgentStep with the same request, so the same key, and so is every later step of this client. The reply is the stream's result, never the
 // deltas; a stream that ends without a result is a lost answer (unavailable, «Продолжить» replays the key).
 //
-// A stream has no total cap of RequestTimeout: it ends as ErrTimeout when the Hub stays silent too long (see
-// Config.StepIdleTimeout) or after Config.StepTimeout. The unary fallback is bounded by RequestTimeout.
+// A stream has no total cap of RequestTimeout: it asks for the Hub's heartbeat and ends as ErrTimeout when the Hub
+// stays silent too long (see Config.StepIdleTimeout) or after Config.StepTimeout. The unary fallback is bounded by
+// RequestTimeout.
 func (c *Client) Step(ctx context.Context, req agent.StepRequest, draft func(soFar string)) (agent.StepReply, error) {
 	if err := ctx.Err(); err != nil {
 		return agent.StepReply{}, fmt.Errorf("%s: %w", opAgentStep, err)
@@ -72,31 +72,16 @@ func (c *Client) Step(ctx context.Context, req agent.StepRequest, draft func(soF
 	return agentReplyOf(resp)
 }
 
-// Causes of a streamed step cut by the client; each is also the detail of its ErrTimeout, so desktop.log tells them
-// apart.
-var (
-	errStepSilent  = errors.New("no message from the hub in time")
-	errStepTooLong = errors.New("the step ran over its time cap")
-)
-
 // streamStep reads AgentStepStream within c.stepTO, cut when the Hub sends nothing for c.timeout before the first
-// message or for c.stepIdle after one. older reports an unimplemented stream while ctx lives (an older Hub), with the
-// error unclassified; any other error is classified by stepError.
+// message or for c.stepIdle after one (watchStream). older reports an unimplemented stream while ctx lives (an older
+// Hub), with the error unclassified; any other error is classified by stepError.
 func (c *Client) streamStep(ctx context.Context, gateway hubv1connect.GatewayServiceClient, msg *hubv1.AgentStepRequest,
 	key string, draft func(string),
 ) (res *hubv1.AgentStepResponse, older bool, err error) {
-	capCtx, cancelCap := context.WithTimeoutCause(ctx, c.stepTO, errStepTooLong)
-	defer cancelCap()
-	callCtx, stop := context.WithCancelCause(capCtx)
-	defer stop(nil)
-	watch := time.AfterFunc(min(c.timeout, c.stepTO), func() { stop(errStepSilent) })
-	defer watch.Stop()
+	callCtx, seen, release := watchStream(ctx, c.timeout, c.stepIdle, c.stepTO)
+	defer release()
 
-	res, err = readStepStream(callCtx, gateway, msg, key, draft, func() {
-		if watch.Stop() { // false: it fired, the call is cut already
-			watch.Reset(c.stepIdle)
-		}
-	})
+	res, err = readStepStream(callCtx, gateway, msg, key, draft, seen)
 	switch {
 	case err == nil:
 		return res, false, nil
@@ -106,12 +91,13 @@ func (c *Client) streamStep(ctx context.Context, gateway hubv1connect.GatewaySer
 	return nil, false, stepError(ctx, callCtx, err)
 }
 
-// readStepStream reads AgentStepStream, calling seen on every message. Errors are those of the generated client, or an
-// *Error of a broken stream.
+// readStepStream reads AgentStepStream with the Hub's heartbeat asked for, calling seen on every message: a heartbeat
+// or an event this client does not know only does that. Errors are those of the generated client, or an *Error of a
+// broken stream.
 func readStepStream(ctx context.Context, gateway hubv1connect.GatewayServiceClient, msg *hubv1.AgentStepRequest,
 	key string, draft func(string), seen func(),
 ) (*hubv1.AgentStepResponse, error) {
-	sreq := connect.NewRequest(&hubv1.AgentStepStreamRequest{Request: msg})
+	sreq := connect.NewRequest(&hubv1.AgentStepStreamRequest{Request: msg, Heartbeat: true})
 	sreq.Header().Set("Authorization", "Bearer "+key)
 	stream, err := gateway.AgentStepStream(ctx, sreq)
 	if err != nil {
@@ -168,9 +154,7 @@ func stepError(ctx, callCtx context.Context, err error) error {
 	if perr := ctx.Err(); perr != nil {
 		return fmt.Errorf("%s: %w", opAgentStep, perr)
 	}
-	if cause := context.Cause(callCtx); errors.Is(cause, errStepSilent) || errors.Is(cause, errStepTooLong) {
-		e := unavailable(opAgentStep, ErrTimeout)
-		e.detail = cause
+	if e := watchTimeout(callCtx, opAgentStep); e != nil {
 		return e
 	}
 	if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
