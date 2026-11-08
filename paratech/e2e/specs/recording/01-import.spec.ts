@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { AnnotationSttSpeed, EnvCtlDir } from "../../src/contract.js";
-import { ClipBytesPerSecond, ClipRel, expectedWords, foundWords, modelFileInCommand, sttSpeedLine } from "../../src/fixtures/audio.js";
+import { ClipBytesPerSecond, ClipRel, expectedWords, foundWords, modelFileInCommand, modelIdFromCommand, sttSpeedLine } from "../../src/fixtures/audio.js";
 import { dueDayRu, dueMatcher } from "../../src/fixtures/lecture.js";
 import { ModelCatalogId } from "../../src/fixtures/model.js";
 import { requireEnv } from "../../src/steps/env.js";
@@ -104,14 +104,18 @@ test(Feature.import, details(Feature.import, { requires: Prerequisites }), async
     note(`whisper-cli.exe: ${first?.path}; параметры: ${first?.commandLine.slice(first.path.length).trim()}`);
     expect(first?.commandLine, `в параметрах whisper-cli.exe должен быть файл модели по умолчанию (${ModelCatalogId})`).toMatch(modelFileInCommand(ModelCatalogId));
 
+    // the real process is the evidence: the id from the -m file name (the log's model= is the internal row id of the model)
+    const ran = modelIdFromCommand(first?.commandLine ?? "");
+    note(`модель по файлу в параметрах whisper-cli.exe: ${ran ?? "не найдена"}`);
+    expect(ran, `по умолчанию (после «Модель: по умолчанию») расшифровка идёт моделью ${ModelCatalogId}`).toBe(ModelCatalogId);
+    model = ran ?? "";
+
     // only the lines written since this import started: an earlier recording's line is not this one's
     const lines = logLines(/./).slice(logBefore).filter((l) => /transcription job enqueued/.test(l));
     expect(lines.length, "в desktop.log после начала импорта нет строки «transcription job enqueued» с моделью").toBeGreaterThan(0);
-    const found = /model=("[^"]+"|\S+)/.exec(lines[0] ?? "")?.[1]?.replace(/"/g, "");
-    note(`модель расшифровки в desktop.log: ${found ?? "не найдена"}`);
-    expect(found, "в строке «transcription job enqueued» должна быть модель").toBeTruthy();
-    expect(found, `по умолчанию (после «Модель: по умолчанию») расшифровка идёт моделью ${ModelCatalogId}`).toBe(ModelCatalogId);
-    model = found ?? "";
+    const logged = /model=("[^"]+"|\S+)/.exec(lines[0] ?? "")?.[1]?.replace(/"/g, "");
+    note(`id модели в журнале: ${logged ?? "не найден"}`);
+    expect(logged, "в строке «transcription job enqueued» должна быть модель").toBeTruthy();
   });
 
   await step("скорость расшифровки для отчёта", async () => {

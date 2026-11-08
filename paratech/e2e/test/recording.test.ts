@@ -25,6 +25,7 @@ import {
   foundWords,
   id3Tag,
   modelFileInCommand,
+  modelIdFromCommand,
   requestsWithWords,
   sttSpeedLine,
   unscannedRequests,
@@ -234,6 +235,20 @@ describe("the lecture of an import", () => {
     assert.match("whisper-cli.exe -m D:\\models\\ggml-base-q5_1.bin", re);
     assert.match("whisper-cli.exe -m /m/GGML-BASE-Q5_1.BIN", re);
     assert.doesNotMatch("whisper-cli.exe -m C:\\models\\ggml-tiny.bin -f base-q5_1\\in.wav", re);
+  });
+
+  test("the catalog id of the model from the -m file of a whisper-cli command line", () => {
+    const row = "7tj6yhbdlbsqxdwo3m2wrwpaky";
+    assert.equal(modelIdFromCommand(`C:\\run\\whisper-cli.exe -m C:\\run\\artifacts\\models\\base-q5_1-${row}.bin -f in.wav`), "base-q5_1");
+    assert.equal(modelIdFromCommand(`"C:\\My Run\\whisper-cli.exe" -m "C:\\My Run\\artifacts\\models\\large-v3-turbo-q5_0-${row}.bin" -f in.wav`), "large-v3-turbo-q5_0");
+    assert.equal(modelIdFromCommand(`whisper-cli.exe -m /m/medium-${row}.bin`), "medium");
+    assert.equal(modelIdFromCommand("whisper-cli.exe -m D:\\models\\ggml-base-q5_1.bin -f a.wav"), "base-q5_1");
+    assert.equal(modelIdFromCommand("whisper-cli.exe -m D:\\models\\base-q5_1-0123abcd.bin"), "base-q5_1");
+    assert.equal(modelIdFromCommand("whisper-cli.exe -m D:\\models\\ggml-large-v3-turbo.bin"), "large-v3-turbo");
+    // a model id in another argument or directory is not the model file
+    assert.equal(modelIdFromCommand("whisper-cli.exe -f base-q5_1\\in.wav"), undefined);
+    assert.equal(modelIdFromCommand("whisper-cli.exe -m C:\\base-q5_1\\model.txt"), undefined);
+    assert.equal(modelIdFromCommand(""), undefined);
   });
 
   test("the label tells the lectures apart, in the title and in the assignment", () => {

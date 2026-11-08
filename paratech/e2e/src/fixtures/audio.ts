@@ -1,6 +1,8 @@
 // Audio fixtures of the recording pack (TASK-378): variants of the committed clip made at run time (the app answers a file
 // it has seen before with the EXISTING recording, so the cancel and restart scenarios need other bytes), the expected words
 // of the fixture README, the speed line of the report and the AC-06 scan of what the Hub sent to the provider.
+import path from "node:path";
+
 import type { RecordedRequest } from "../fakellm/index.js";
 
 /** The committed clip: MPEG-2 Layer III (MP3), 64 kbps CBR, 22.05 kHz mono; ~50 s (fixtures/audio/README.md). */
@@ -67,6 +69,22 @@ export function foundWords(text: string, expected: readonly string[]): string[] 
 export function modelFileInCommand(id: string): RegExp {
   const esc = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`ggml-${esc}|${esc}[^\\\\/]*\\.bin`, "i");
+}
+
+/**
+ * The catalog id of the model a whisper-cli command line really ran with: the `-m` file `<id>-<row id>.bin` (or
+ * `ggml-<id>.bin`) -> `<id>`. Windows paths are read as such on any host. undefined when the line has no `-m <file>.bin`.
+ */
+export function modelIdFromCommand(commandLine: string): string | undefined {
+  const file = /(?:^|\s)(?:-m|--model)(?:\s+|=)(?:"([^"]+\.bin)"|(\S+\.bin))(?=\s|$)/i.exec(commandLine);
+  const full = file?.[1] ?? file?.[2];
+  if (full === undefined) {
+    return undefined;
+  }
+  const name = path.win32.basename(full).replace(/\.bin$/i, "");
+  // the suffix is the row id of the installed model: 8+ letters and digits with at least one digit ("turbo", "q5_1" are not)
+  const id = name.replace(/^ggml-/i, "").replace(/-(?=[a-z0-9]*\d)[a-z0-9]{8,}$/i, "");
+  return id === "" ? undefined : id;
 }
 
 export interface SpeedInput {
