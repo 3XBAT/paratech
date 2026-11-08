@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { cutFor, draftsFor, initialPanelState, reducePanel } from "../.test-build/agentState.js";
-import { cardKey, entryModel, firstLateCard, isLateCard, texts } from "../.test-build/agentView.js";
+import { cardKey, cardKeys, entryModel, firstLateCard, isLateCard, texts } from "../.test-build/agentView.js";
 import { AgentRequest } from "../.test-build/agent/AgentCards.js";
 
 const noop = () => undefined;
@@ -74,7 +74,7 @@ test("answer drafts sit before the late cards too, after the reply draft; with n
   assert.ok(out.indexOf("уже есть") < out.indexOf("ag-reply-draft"));
 });
 
-test("the draft goes before the stop line when there is no late card", () => {
+test("the draft goes before the stop line when the stop line is the only late card", () => {
   const s = apply(initialPanelState, upd({ status: "STOPPED", stopReason: "user" }), drf(typing));
   // A draft after the stop is ignored by the panel; render the pieces directly.
   const model = entryModel(s.entries[0], { last: true, blocked: false });
@@ -124,8 +124,41 @@ test("a kept cut-off text lands above the late cards and above the stop line", (
   assert.equal(html.split("ag-reply-kept").length - 1, 1);
 });
 
-test("a kept text without late cards still sits above the stop line, and at the end with no line", () => {
+test("a kept text without other late cards sits above the stop line, and at the end with no line", () => {
   const s = apply(initialPanelState, upd({}), drf({ ...typing, texts: ["обрезанный текст"] }), upd({ status: "STOPPED", stopReason: "offline" }));
   const html = render(s);
+  assert.ok(html.indexOf("ag-reply-kept") >= 0);
   assert.ok(html.indexOf("ag-reply-kept") < html.indexOf("ag-stop"));
+  // No stop line and no late card: the kept text closes the cards.
+  const model = entryModel(apply(initialPanelState, upd({ status: "DONE", cards: [replyCard] })).entries[0], { last: true, blocked: false });
+  const tail = renderToStaticMarkup(h(AgentRequest, { model, actions, cut: { threadId: "t1", turn: 1, text: "обрезанный текст", reason: "offline" } }));
+  assert.ok(!tail.includes("ag-stop"));
+  assert.ok(tail.indexOf("итог ответа") >= 0);
+  assert.ok(tail.indexOf("итог ответа") < tail.indexOf("ag-reply-kept"));
+});
+
+test("cardKeys: repeated confirm cards (same target, or no target) get distinct keys; all keys of a list are unique", () => {
+  const noTarget = { ...base, kind: "confirm", target: null };
+  const cards = models([confirmCard, replyCard, confirmCard, deleteCard, deleteCard, noTarget, noTarget, actionCard, actionCard]);
+  const keys = cardKeys(cards);
+  assert.equal(keys.length, cards.length);
+  assert.equal(new Set(keys).size, keys.length);
+  assert.deepEqual(keys.slice(0, 5), ["confirm:proposal:p1", `reply::1`, "confirm:proposal:p1#2", "confirm:assignment:a9", "confirm:assignment:a9#2"]);
+  assert.equal(keys[5], `confirm:${cards[5].caption}`);
+  assert.equal(keys[6], `confirm:${cards[5].caption}#2`);
+  assert.equal(keys[7], "action:act1");
+  assert.equal(keys[8], "action:act1#2");
+  // The first of a repeated pair keeps its plain key, so a single card is not renamed when a twin arrives after it.
+  assert.equal(cardKeys(cards.slice(0, 1))[0], keys[0]);
+});
+
+test("cardKeys: the key of a repeated confirm card does not change when a reply card arrives above", () => {
+  const without = cardKeys(models([confirmCard, confirmCard, { ...base, kind: "confirm", target: null }, { ...base, kind: "confirm", target: null }]));
+  const withReply = cardKeys(models([replyCard, confirmCard, confirmCard, { ...base, kind: "confirm", target: null }, { ...base, kind: "confirm", target: null }]));
+  assert.deepEqual(withReply.slice(1), without);
+});
+
+test("two confirm cards on one target both render", () => {
+  const html = render(apply(initialPanelState, upd({ status: "DONE", cards: [confirmCard, confirmCard] })));
+  assert.equal(html.split(texts.confirmPending).length - 1, 2);
 });

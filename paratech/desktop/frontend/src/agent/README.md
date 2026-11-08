@@ -80,9 +80,10 @@ with the exported `AgentService` methods in `agent.go`, `agentjournal.go`, `agen
   appends (`agentdriverupdates.test.mjs`); the UI does not reorder. "Late" cards (confirm, action line, schedule, then the stop
   line) come after the reply; `isLateCard` / `firstLateCard` (`agentView.ts`) name them, and the typing reply, the answer drafts
   and a kept cut-off text are drawn right above the first one (`AgentRequest`), so the final reply card replaces the draft in place.
-- Keys of cards (`cardKey`, `agentView.ts`) include kind and caption so a new card does not inherit the typed state of the old
+- Keys of cards (`cardKeys`, `agentView.ts`) include kind and caption so a new card does not inherit the typed state of the old
   one; late cards are keyed by identity (confirm target, action id, schedule token), not index: the reply arriving above a
-  confirm card must not remount it (`agentLateCards20261108.test.mjs`).
+  confirm card must not remount it, with an occurrence counter for repeats (`#2` counts earlier cards with the same identity,
+  not the position; the planner may propose one target twice) (`agentLateCards20261108.test.mjs`).
 - `AgentActions` and `UserActions` render nothing when there is nothing to copy or rerun.
 
 ## E2E

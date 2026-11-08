@@ -26,7 +26,7 @@ import {
   assignmentRow,
   type ButtonCard,
   cardButtonIcon,
-  cardKey,
+  cardKeys,
   firstLateCard,
   offerIcon,
   replyCopyText,
@@ -703,6 +703,7 @@ export function AgentRequest(props: {
   );
   // «Отменить всё» only when there is more than one action left to undo.
   const open = undoableActions(model.cards).filter((id) => !props.actions.undoNote(id)?.done);
+  const keys = cardKeys(model.cards);
   return (
     <article className="ag-req">
       {model.userText !== "" && <p className="ag-user">{model.userText}</p>}
@@ -732,11 +733,11 @@ export function AgentRequest(props: {
         </p>
       )}
       {model.cards.map((c, i) =>
-        // `cardKey`: kind and caption (the question round) so a new card does not inherit the typed state of the old one;
+        // `cardKeys`: kind and caption (the question round) so a new card does not inherit the typed state of the old one;
         // late cards by identity, so the reply arriving above a confirm card does not remount it.
         // The drafts go before the waiting card, so its dots (with «Стоп») stay after the last line.
         c.type === "waiting" ? null : (
-          <Fragment key={cardKey(c, i)}>
+          <Fragment key={keys[i]}>
             {i === keptAt && kept}
             {i === draftAt && drafts}
             <Card card={c} actions={props.actions} startedAt={props.startedAt} clock={props.clock} />

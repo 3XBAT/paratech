@@ -1609,6 +1609,29 @@ export function cardKey(c: CardModel, index: number): string {
   }
 }
 
+/**
+ * The keys of a whole list, all different. The planner is untrusted and may propose the same target twice, and every
+ * confirm card without a target has the same base key, so a repeated key gets `#2`, `#3`... The counter counts the EARLIER
+ * cards with the same key, not the list position, so a reply card arriving above does not change the key of a confirm card.
+ */
+export function cardKeys(cards: readonly CardModel[]): string[] {
+  const seen = new Map<string, number>();
+  const used = new Set<string>();
+  return cards.map((c, i) => {
+    const base = cardKey(c, i);
+    let n = (seen.get(base) ?? 0) + 1;
+    let key = n === 1 ? base : `${base}#${n}`;
+    // A made-up suffix may equal another card's own key; step on until it is free.
+    while (used.has(key)) {
+      n += 1;
+      key = `${base}#${n}`;
+    }
+    seen.set(base, n);
+    used.add(key);
+    return key;
+  });
+}
+
 /** The action line card. */
 export type ActionCardModel = Extract<CardModel, { type: "action" }>;
 
