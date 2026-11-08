@@ -75,8 +75,11 @@ with the exported `AgentService` methods in `agent.go`, `agentjournal.go`, `agen
 ## Gotchas
 - The core publishes updates from several operations without a global order; `reducePanel` applies each to the request it
   names (threadId + turn) and a finished request stays finished (`agentState.ts`). Do not rely on arrival order.
-- Every update of a request carries ALL its cards (the Go Driver sends the tool cards first, then the step's own): the later
-  update replaces the earlier list, never appends (`agentdriverupdates.test.mjs`).
+- Every update of a request carries ALL its cards (the Go Driver sends them in display order: reading cards first; confirm
+  cards and action lines «Отменить» after the reply; the stop line last): the later update replaces the earlier list, never
+  appends (`agentdriverupdates.test.mjs`); the UI does not reorder.
+- «Предметы» re-reads (`onLibraryChanged`) only when an action line appears or «Отменить» succeeds (`newActionLines`,
+  `becameUndone` in `agentView.ts`, TASK-400), never on a plain update.
 - Keys of cards include kind and caption (`AgentRequest`) so a new card does not inherit the typed state of the old one.
 - `AgentActions` and `UserActions` render nothing when there is nothing to copy or rerun.
 
