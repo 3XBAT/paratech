@@ -26,13 +26,14 @@ const (
 	DefaultCredentialName = "api-key"
 	DefaultRequestTimeout = 2 * time.Minute
 
-	// DefaultAnswerTimeout bounds one AnswerQuestion call: a streamed answer of up to the Hub's output cap plus the
-	// Hub's reask inside the same call outlast DefaultRequestTimeout.
-	DefaultAnswerTimeout = 5 * time.Minute
+	// DefaultAnswerTimeout is the overall cap of a streamed AnswerQuestion read, like DefaultStepTimeout: a long answer
+	// plus the Hub's reask inside the same call is cut by silence (DefaultStepIdleTimeout), not by its length.
+	DefaultAnswerTimeout = 10 * time.Minute
 
-	// A streamed agent step: the Hub sends only reply text (no keepalive) and ends its provider call within
-	// HUB_LLM_TIMEOUT (5 min by default, half the 10 min reservation TTL), so 10 min never cuts a step the Hub still
-	// runs; 60 s without a message after the first one is a stalled stream (a planner step writes far faster).
+	// A streamed agent step or answer: the Hub ends its provider call within HUB_LLM_TIMEOUT (5 min by default, half the
+	// 10 min reservation TTL), so 10 min never cuts a call the Hub still runs. Asked for, the Hub sends a heartbeat
+	// after 15 s without a message (an older Hub sends only text), so 60 s without any message after the first one is
+	// a stalled stream.
 	DefaultStepTimeout     = 10 * time.Minute
 	DefaultStepIdleTimeout = time.Minute
 
@@ -81,16 +82,17 @@ type Config struct {
 	// RequestTimeout bounds one call; default DefaultRequestTimeout.
 	RequestTimeout time.Duration
 
-	// AnswerTimeout bounds one AnswerQuestion call; default the longer of DefaultAnswerTimeout and RequestTimeout.
+	// AnswerTimeout bounds one streamed AnswerQuestion read (CompleteStream) overall; default the longer of
+	// DefaultAnswerTimeout and RequestTimeout. The unary Complete of an older Hub keeps RequestTimeout.
 	AnswerTimeout time.Duration
 
 	// StepTimeout bounds one streamed agent step (AgentStepStream); default the longer of DefaultStepTimeout and
 	// RequestTimeout. The unary AgentStep of an older Hub keeps RequestTimeout.
 	StepTimeout time.Duration
 
-	// StepIdleTimeout bounds the wait between two messages of a streamed agent step once the first came, at most
-	// StepTimeout; default DefaultStepIdleTimeout. The first message may take RequestTimeout: a step that only calls
-	// tools streams nothing before its result.
+	// StepIdleTimeout bounds the wait between two messages of a streamed agent step or answer once the first came, at
+	// most StepTimeout and, when set, at most AnswerTimeout; default DefaultStepIdleTimeout. The first message may take
+	// RequestTimeout: a step that only calls tools streams nothing before its result.
 	StepIdleTimeout time.Duration
 
 	// HTTPClient replaces the default transport (tests). The client copies it and always refuses redirects. A Timeout
@@ -105,9 +107,9 @@ type Client struct {
 	creds    Credentials
 	credName string
 	timeout  time.Duration
-	answerTO time.Duration // the timeout of AnswerQuestion
+	answerTO time.Duration // the cap of a streamed answer
 	stepTO   time.Duration // the cap of a streamed agent step
-	stepIdle time.Duration // the longest silence of a streamed agent step after its first message
+	stepIdle time.Duration // the longest silence of a streamed step or answer after its first message
 
 	// noStepStream is set once the Hub answered AgentStepStream with unimplemented: later steps go straight to
 	// AgentStep for the life of the process instead of paying a refused round trip each time.
@@ -160,6 +162,10 @@ func New(cfg Config, creds Credentials) (*Client, error) {
 	}
 	if c.stepIdle > c.stepTO {
 		return nil, fmt.Errorf("%s: %w: step idle timeout above the step timeout", opNew, ErrInvalidConfig)
+	}
+	// A short AnswerTimeout with the default idle window is fine: the cap simply ends the read first.
+	if cfg.StepIdleTimeout > 0 && c.stepIdle > c.answerTO {
+		return nil, fmt.Errorf("%s: %w: step idle timeout above the answer timeout", opNew, ErrInvalidConfig)
 	}
 	// The backstop of the shared http.Client must not cut the longest call; each call still has its own deadline.
 	c.http = httpClientFor(cfg.HTTPClient, max(c.timeout, c.answerTO, c.stepTO))

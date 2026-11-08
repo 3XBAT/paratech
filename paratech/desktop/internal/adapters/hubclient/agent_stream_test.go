@@ -47,6 +47,10 @@ func stepDelta(s string) *hubv1.AgentStepStreamResponse {
 	return &hubv1.AgentStepStreamResponse{Event: &hubv1.AgentStepStreamResponse_Delta{Delta: s}}
 }
 
+func stepHeartbeat() *hubv1.AgentStepStreamResponse {
+	return &hubv1.AgentStepStreamResponse{Event: &hubv1.AgentStepStreamResponse_Heartbeat{Heartbeat: &hubv1.StreamHeartbeat{}}}
+}
+
 func stepResult(r *hubv1.AgentStepResponse) *hubv1.AgentStepStreamResponse {
 	return &hubv1.AgentStepStreamResponse{Event: &hubv1.AgentStepStreamResponse_Result{Result: r}}
 }
@@ -94,7 +98,7 @@ func TestStepStreamsTheReplyDraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reqs) != 1 || !proto.Equal(reqs[0].GetRequest(), want) {
+	if len(reqs) != 1 || !proto.Equal(reqs[0], &hubv1.AgentStepStreamRequest{Request: want, Heartbeat: true}) {
 		t.Fatalf("stream requests = %v", reqs)
 	}
 	if len(f.seen()) != 0 {
@@ -292,6 +296,14 @@ func TestStepStreamErrors(t *testing.T) {
 		{
 			name: "delta after the result", serve: serveAll(nil, stepResult(okResponse()), stepDelta("x")),
 			want: []error{ErrBadResponse, backoff.ErrPermanent},
+		},
+		{
+			name: "heartbeat after the result", serve: serveAll(nil, stepResult(okResponse()), stepHeartbeat()),
+			want: []error{ErrBadResponse, backoff.ErrPermanent},
+		},
+		{
+			name: "only heartbeats", serve: serveAll(nil, stepHeartbeat(), stepHeartbeat()),
+			want: []error{ErrUnavailable, backoff.ErrTransient},
 		},
 		{
 			name: "two results", serve: serveAll(nil, stepResult(okResponse()), stepResult(okResponse())),

@@ -31,8 +31,10 @@
 //
 // Retries live in the job runner, not here: an error is classified (backoff.Transient or backoff.Permanent, see
 // errors.go) and the runner retries with its bounded exponential backoff, like every other handler (TASK-009). One
-// call is one attempt bounded by Config.RequestTimeout (AnswerQuestion: Config.AnswerTimeout; a streamed agent step:
-// Config.StepTimeout and the Hub's silence, Config.StepIdleTimeout). shared.ErrNetworkUnavailable and shared.ErrQuotaExceeded tell
+// call is one attempt bounded by Config.RequestTimeout. The two streams (a streamed agent step and AnswerQuestion) ask
+// for the Hub's heartbeat and are bounded instead by the Hub's silence, the same watchdog for both (stream_watch.go):
+// RequestTimeout before the first message, Config.StepIdleTimeout after one, any message (a heartbeat too) resets it;
+// overall Config.StepTimeout or Config.AnswerTimeout. shared.ErrNetworkUnavailable and shared.ErrQuotaExceeded tell
 // the caller to park the job in WAITING_FOR_NETWORK or WAITING_FOR_QUOTA (PRD section 7.2). A Hub retry_after is
 // exposed by the RetryAfter method of *Error.
 //
