@@ -6,16 +6,18 @@ package tests
 //   - no import "C" in the desktop module (CLAUDE.md hard rule 1);
 //   - the directory layout of section 2 (ARCH-01) and the rules for pkg/ (ARCH-04);
 //   - throwaway prototypes in spikes/ are imported by nothing outside spikes/ (audio-capture ADR of TASK-015);
-//   - no organization files (docs, tasks, prompts, ...) inside the code directory paratech/.
+//   - no organization files (docs, tasks, prompts, ...) inside the code directory paratech/;
+//   - the beta-only packages are imported only by files built with the tag beta (ADR-0036 section 1).
 //
 // The checks are plain functions over a root directory, so TestCheckersDetectViolations can feed them
 // synthetic violating trees. The same logic lives in hub/tests/arch_test.go (duplication is intended:
-// no shared test module). Keep the two copies in sync; this copy additionally checks "no import C" and the
-// spikes/ rule (the hub has no spikes/ on purpose).
+// no shared test module). Keep the two copies in sync; this copy additionally checks "no import C", the
+// spikes/ rule (the hub has no spikes/ on purpose) and the beta-only rule (desktop only).
 
 import (
 	"fmt"
 	"go/ast"
+	"go/build/constraint"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -515,6 +517,116 @@ func checkNoOrgFiles(codeRoot string) ([]string, error) {
 	return out, err
 }
 
+// betaOnlyPackages are the packages of the local Hub (ADR-0036 section 1): the student exe must not link them, so
+// only files built with the tag beta may import them. Their own files, tests and subpackages are exempt.
+var betaOnlyPackages = []string{"internal/cases/localhub", "internal/adapters/hubprocess"}
+
+// betaTag is the build tag of the owner's beta.
+const betaTag = "beta"
+
+// checkBetaOnly reports files that import a beta-only package without a //go:build line that requires beta.
+func checkBetaOnly(root, modPath string) ([]string, error) {
+	files, err := goFiles(root)
+	if err != nil {
+		return nil, err
+	}
+	within := func(path, pkg string) bool { return path == pkg || strings.HasPrefix(path, pkg+"/") }
+	var out []string
+	for _, rel := range files {
+		dir := dirOf(rel)
+		own := false
+		for _, p := range betaOnlyPackages {
+			own = own || within(dir, p)
+		}
+		if own {
+			continue
+		}
+		f, err := parseFile(root, rel, parser.ImportsOnly|parser.ParseComments)
+		if err != nil {
+			return nil, err
+		}
+		var hits []string
+		for _, imp := range importPaths(f) {
+			for _, p := range betaOnlyPackages {
+				if within(imp, modPath+"/"+p) {
+					hits = append(hits, imp)
+				}
+			}
+		}
+		if len(hits) == 0 {
+			continue
+		}
+		expr, err := goBuildExpr(f)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", rel, err)
+		}
+		if !requiresTag(expr, betaTag) {
+			out = append(out, violation("ADR-0036", rel, fmt.Sprintf("imports %s without //go:build requiring %s", strings.Join(hits, ", "), betaTag)))
+		}
+	}
+	return out, nil
+}
+
+// goBuildExpr returns the //go:build expression of f; nil when it has none.
+func goBuildExpr(f *ast.File) (constraint.Expr, error) {
+	for _, g := range f.Comments {
+		if g.Pos() >= f.Package {
+			break
+		}
+		for _, c := range g.List {
+			if constraint.IsGoBuild(c.Text) {
+				return constraint.Parse(c.Text)
+			}
+		}
+	}
+	return nil, nil
+}
+
+// requiresTag reports whether expr is false whenever tag is unset, whatever the other tags of expr are.
+func requiresTag(expr constraint.Expr, tag string) bool {
+	if expr == nil {
+		return false
+	}
+	var others []string
+	seen := map[string]bool{tag: true}
+	var walk func(constraint.Expr)
+	walk = func(e constraint.Expr) {
+		switch x := e.(type) {
+		case *constraint.TagExpr:
+			if !seen[x.Tag] {
+				seen[x.Tag] = true
+				others = append(others, x.Tag)
+			}
+		case *constraint.NotExpr:
+			walk(x.X)
+		case *constraint.AndExpr:
+			walk(x.X)
+			walk(x.Y)
+		case *constraint.OrExpr:
+			walk(x.X)
+			walk(x.Y)
+		}
+	}
+	walk(expr)
+	if len(others) > 16 {
+		return false // not a real build line; refuse rather than enumerate
+	}
+	for mask := 0; mask < 1<<len(others); mask++ {
+		ok := expr.Eval(func(t string) bool {
+			for i, o := range others {
+				if o == t {
+					return mask&(1<<i) != 0
+				}
+			}
+			return false // tag itself
+		})
+		if ok {
+			return false
+		}
+	}
+	return true
+}
+
 // --- locating the real tree -----------------------------------------------------------------------
 
 // moduleRoot is the parent of this tests directory (go test runs with the package directory as cwd).
@@ -593,6 +705,10 @@ func TestRealTree(t *testing.T) {
 	})
 	t.Run("no organization files in the code directory", func(t *testing.T) {
 		v, err := checkNoOrgFiles(codeRoot(t))
+		report(t, v, err)
+	})
+	t.Run("beta-only packages", func(t *testing.T) {
+		v, err := checkBetaOnly(root, modulePath)
 		report(t, v, err)
 	})
 }
@@ -971,6 +1087,38 @@ func TestCheckersDetectViolations(t *testing.T) {
 			},
 		},
 		{
+			name: "beta-only packages imported without the beta tag",
+			files: map[string]string{
+				"internal/app/localhub_nobeta.go":  "//go:build !beta\n\npackage app\n\nimport _ \"paratech/desktop/internal/cases/localhub\"\n",
+				"internal/app/either.go":           "//go:build beta || windows\n\npackage app\n\nimport _ \"paratech/desktop/internal/cases/localhub\"\n",
+				"internal/input/wails/shell.go":    goSrc(modulePath + "/internal/adapters/hubprocess"),
+				"internal/adapters/other/x.go":     "// Package other.\n//\n//go:build windows\n\npackage other\n\nimport _ \"paratech/desktop/internal/adapters/hubprocess/sub\"\n",
+				"tests/localhub_test.go":           goSrc(modulePath + "/internal/cases/localhub"),
+				"internal/app/beta_after_pkg.go":   "package app\n\n//go:build beta\n\nimport _ \"paratech/desktop/internal/cases/localhub\"\n",
+				"internal/app/localhub_beta_ok.go": "//go:build beta\n\npackage app\n\nimport _ \"paratech/desktop/internal/cases/localhub\"\n",
+			},
+			check: betaOnly,
+			want: []string{
+				"ADR-0036: internal/app/localhub_nobeta.go", "ADR-0036: internal/app/either.go",
+				"ADR-0036: internal/input/wails/shell.go", "ADR-0036: internal/adapters/other/x.go",
+				"ADR-0036: tests/localhub_test.go", "ADR-0036: internal/app/beta_after_pkg.go",
+			},
+		},
+		{
+			name: "beta-only packages imported with the beta tag or from themselves",
+			files: map[string]string{
+				"internal/app/localhub_beta.go":           "//go:build beta\n\npackage app\n\nimport _ \"paratech/desktop/internal/cases/localhub\"\n",
+				"internal/input/wails/shell_beta.go":      "//go:build beta && !e2e\n\npackage wails\n\nimport _ \"paratech/desktop/internal/cases/localhub\"\n",
+				"internal/app/localhub_beta_windows.go":   "//go:build windows && (beta || ignore) && beta\n\npackage app\n\nimport _ \"paratech/desktop/internal/adapters/hubprocess\"\n",
+				"internal/cases/localhub/service_test.go": goSrc(modulePath + "/internal/cases/localhub"),
+				"internal/adapters/hubprocess/x_other.go": "//go:build !windows\n\npackage hubprocess\n\nimport _ \"paratech/desktop/internal/adapters/hubprocess/sub\"\n",
+				"internal/adapters/hubprocess/sub/sub.go": goSrc(modulePath + "/internal/cases/localhub"),
+				"internal/app/similar_name.go":            goSrc(modulePath + "/internal/cases/localhubx"),
+				"internal/app/no_tag_no_beta_import.go":   goSrc(modulePath + "/internal/cases/connections"),
+			},
+			check: betaOnly,
+		},
+		{
 			name: "organization names deep inside code are fine",
 			files: map[string]string{
 				"go.work":                           "go 1.26\n",
@@ -1015,6 +1163,15 @@ func TestCheckersDetectViolations(t *testing.T) {
 func determinism(t *testing.T, root string) []string {
 	t.Helper()
 	v, err := checkDeterminism(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func betaOnly(t *testing.T, root string) []string {
+	t.Helper()
+	v, err := checkBetaOnly(root, modulePath)
 	if err != nil {
 		t.Fatal(err)
 	}
