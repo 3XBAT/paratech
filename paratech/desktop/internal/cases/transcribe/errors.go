@@ -14,7 +14,8 @@ var (
 	ErrInvalidConfig = errors.New("transcribe: invalid configuration")
 
 	// ErrNotAllowed means Retranscribe refused: the recording is gone or cannot be transcribed, has a transcript, a
-	// transcription of it is unfinished or its newest one was not cancelled (retranscribe.ErrNotAllowed).
+	// transcription of it is unfinished or its newest one was neither cancelled nor failed, or failed for lack of
+	// speech (retranscribe.ErrNotAllowed).
 	ErrNotAllowed = errors.New("transcribe: the transcription cannot be started again")
 
 	// ErrNoModel means Retranscribe found no speech recognition model to pin: none installed, or several without a

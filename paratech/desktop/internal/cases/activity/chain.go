@@ -80,9 +80,10 @@ func chainStage(r *recording.Recording, jobs []*job.Job) Chain {
 			Stage: StageFailed, Step: StepTranscription, ErrorCode: ErrorTranscriptionCancelled, Action: ActionRetranscribe,
 		}
 	case failedJob(stt):
+		// TASK-409: a final failure is started again too; without a model Retranscribe says so (no_model).
 		return Chain{
 			Stage: StageFailed, Step: StepTranscription, ErrorCode: ErrorTranscriptionFailed, JobError: stt.LastError(),
-			Action: ActionOpenModels,
+			Action: ActionRetranscribe,
 		}
 	case stt.Status() != job.StatusCompleted:
 		return queued(StepTranscription, stt)

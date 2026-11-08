@@ -188,7 +188,7 @@ func TestChainOf(t *testing.T) {
 			name: "transcription failed", rec: recording.StatusCompleted, jobs: []func(t *testing.T) *job.Job{in("s", stt, job.StatusFailed)},
 			want: Chain{
 				Stage: StageFailed, Step: StepTranscription, ErrorCode: ErrorTranscriptionFailed, JobError: "bad answer",
-				Action: ActionOpenModels,
+				Action: ActionRetranscribe,
 			},
 		},
 		{
@@ -447,8 +447,19 @@ func TestChainOfCancelledTranscription(t *testing.T) {
 			[]*job.Job{jobIn(t, "s", stt, 0, job.StatusCancelled), jobIn(t, "s2", stt, time.Minute, job.StatusFailed)},
 			Chain{
 				Stage: StageFailed, Step: StepTranscription, ErrorCode: ErrorTranscriptionFailed, JobError: "bad answer",
-				Action: ActionOpenModels,
+				Action: ActionRetranscribe,
 			},
+		},
+		{
+			// TASK-409: started again after a failure, then cancelled: the cancel shows.
+			"failed, started again, cancelled",
+			[]*job.Job{jobIn(t, "s", stt, 0, job.StatusFailed), jobIn(t, "s2", stt, time.Minute, job.StatusCancelled)},
+			cancelled,
+		},
+		{
+			"failed, started again, runs",
+			[]*job.Job{jobIn(t, "s", stt, 0, job.StatusFailed), jobIn(t, "s2", stt, time.Minute, job.StatusRunning)},
+			Chain{Stage: StageTranscribing, Step: StepTranscription, Percent: 42, CanCancel: true},
 		},
 		{
 			"waits for the network", []*job.Job{jobIn(t, "s", stt, 0, job.StatusWaitingForNetwork)},

@@ -30,7 +30,7 @@ const (
 // The recording aggregate decides whether it can be transcribed (recording.TranscribableAudio, ARCH-22). Without an
 // installed model no job is created and the log says why; the next startup sweep tries again.
 //
-// The rule keeps a cancelled transcription cancelled across restarts; only the user's «Расшифровать снова»
+// The rule keeps a cancelled or failed transcription as it is across restarts; only the user's «Расшифровать снова»
 // (Retranscribe) creates another STT job of the recording.
 type Enqueuer struct {
 	recordings  RecordingReader

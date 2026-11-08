@@ -125,7 +125,9 @@ type ErrorCode string
 
 // Error codes.
 const (
-	ErrorRecordingFailed     ErrorCode = "recordingFailed"
+	ErrorRecordingFailed ErrorCode = "recordingFailed"
+	// ErrorTranscriptionFailed: the newest transcription failed finally (not for lack of speech); the row offers
+	// ActionRetranscribe (TASK-409).
 	ErrorTranscriptionFailed ErrorCode = "transcriptionFailed"
 	// ErrorTranscriptionCancelled: the user cancelled the newest transcription (TASK-392); the recording stays and the
 	// row offers ActionRetranscribe.
@@ -152,7 +154,8 @@ const (
 	ActionCheckSound      Action = "checkSound"      // the sound check
 	// ActionRetry starts the failed post-processing work Chain.Retry again with a new job (TASK-086).
 	ActionRetry Action = "retry"
-	// ActionRetranscribe starts a cancelled transcription again with a new job («Расшифровать снова», TASK-392).
+	// ActionRetranscribe starts a cancelled or failed transcription again with a new job («Расшифровать снова»,
+	// TASK-392, TASK-409).
 	ActionRetranscribe Action = "retranscribe"
 )
 

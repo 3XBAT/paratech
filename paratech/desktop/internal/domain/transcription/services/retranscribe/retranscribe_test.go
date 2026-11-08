@@ -28,9 +28,15 @@ func TestDecide(t *testing.T) {
 		{"a transcript exists", []Job{at("a", 0, StateCancelled)}, true, ""},
 		{"the newest is unfinished", []Job{at("a", 0, StateCancelled), at("b", 5, StateUnfinished)}, false, ""},
 		{"an older one is unfinished", []Job{at("a", 0, StateUnfinished), at("b", 5, StateCancelled)}, false, ""},
-		{"the newest failed", []Job{at("a", 0, StateCancelled), at("b", 5, StateFinished)}, false, ""},
+		{"the newest completed or found no speech", []Job{at("a", 0, StateCancelled), at("b", 5, StateFinished)}, false, ""},
 		{"the only one completed", []Job{at("a", 0, StateFinished)}, false, ""},
 		{"the only one runs", []Job{at("a", 0, StateUnfinished)}, false, ""},
+		{"failed once", []Job{at("a", 0, StateFailed)}, false, "stt:rec-1:m-1:r2"},
+		{"failed, then cancelled", []Job{at("a", 0, StateFailed), at("b", 5, StateCancelled)}, false, "stt:rec-1:m-1:r3"},
+		{"cancelled, then failed", []Job{at("a", 0, StateCancelled), at("b", 5, StateFailed)}, false, "stt:rec-1:m-1:r3"},
+		{"failed with a transcript", []Job{at("a", 0, StateFailed)}, true, ""},
+		{"failed, a newer one unfinished", []Job{at("a", 0, StateFailed), at("b", 5, StateUnfinished)}, false, ""},
+		{"an older failed, the newest completed", []Job{at("a", 0, StateFailed), at("b", 5, StateFinished)}, false, ""},
 		{"a tie goes to the greater id", []Job{at("b", 0, StateCancelled), at("a", 0, StateFinished)}, false, "stt:rec-1:m-1:r3"},
 		{"a tie the other way", []Job{at("a", 0, StateCancelled), at("b", 0, StateFinished)}, false, ""},
 	}
@@ -76,7 +82,7 @@ func TestUnfinished(t *testing.T) {
 		want shared.JobID // "" = none
 	}{
 		{"none", nil, ""},
-		{"only finished", []Job{at("a", 0, StateFinished), at("b", 1, StateCancelled)}, ""},
+		{"only finished", []Job{at("a", 0, StateFinished), at("b", 1, StateCancelled), at("c", 2, StateFailed)}, ""},
 		{"the unfinished one", []Job{at("a", 0, StateUnfinished), at("b", 1, StateCancelled)}, "a"},
 		{"the newest unfinished", []Job{at("a", 0, StateUnfinished), at("b", 1, StateUnfinished)}, "b"},
 	}

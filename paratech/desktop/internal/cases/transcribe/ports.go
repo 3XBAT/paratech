@@ -143,8 +143,8 @@ type JobEnqueuer interface {
 	ListByKeyPrefix(ctx context.Context, typ job.Type, prefix string) ([]*job.Job, error)
 }
 
-// TranscriptFinder tells whether a recording has a transcript (PRD section 8), so a cancelled transcription is not
-// started again over a stored one. Implemented by the sqlite adapter.
+// TranscriptFinder tells whether a recording has a transcript (PRD section 8), so a cancelled or failed transcription
+// is not started again over a stored one. Implemented by the sqlite adapter.
 type TranscriptFinder interface {
 	// LatestByRecording returns the newest transcript of the recording (PRD section 8); none wraps shared.ErrNotFound.
 	LatestByRecording(ctx context.Context, rec shared.RecordingID) (*transcript.Transcript, error)

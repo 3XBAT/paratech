@@ -10,8 +10,8 @@ import (
 )
 
 // ErrNotAllowed means the recording may not be transcribed again now: it has a transcript, an STT job of it is
-// unfinished, it has no STT job at all (the automatic enqueue makes the first one) or its newest STT job was not
-// cancelled.
+// unfinished, it has no STT job at all (the automatic enqueue makes the first one) or its newest STT job was neither
+// cancelled nor failed (a completed one, or a failure for lack of speech: another run finds none either).
 var ErrNotAllowed = errors.New("retranscribe: the transcription cannot be started again")
 
 // State is what matters of the status of an STT job; contexts do not import each other (ARCH-11), so the use case
@@ -20,9 +20,10 @@ type State int
 
 // States.
 const (
-	StateUnfinished State = iota + 1 // queued, waiting or running
+	StateUnfinished State = iota + 1 // queued, waiting or running (also waiting for a retry)
 	StateCancelled                   // cancelled by the user
-	StateFinished                    // completed or failed
+	StateFailed                      // failed finally, not for lack of speech (TASK-409)
+	StateFinished                    // completed, or failed because the audio holds no speech
 )
 
 // Job is one STT job of a recording as the decision sees it.
@@ -51,7 +52,7 @@ type Policy struct{}
 func New() Policy { return Policy{} }
 
 // Decide allows a new transcription of rec only when it has no transcript, none of its STT jobs is unfinished and
-// the newest one is cancelled; otherwise it returns ErrNotAllowed.
+// the newest one is cancelled or failed (StateFailed); otherwise it returns ErrNotAllowed.
 func (Policy) Decide(rec shared.RecordingID, jobs []Job, hasTranscript bool) (Decision, error) {
 	if hasTranscript {
 		return Decision{}, ErrNotAllowed
@@ -60,7 +61,7 @@ func (Policy) Decide(rec shared.RecordingID, jobs []Job, hasTranscript bool) (De
 		return Decision{}, ErrNotAllowed
 	}
 	last, ok := Newest(jobs)
-	if !ok || last.State != StateCancelled {
+	if !ok || (last.State != StateCancelled && last.State != StateFailed) {
 		return Decision{}, ErrNotAllowed
 	}
 	return Decision{rec: rec, n: len(jobs) + 1}, nil

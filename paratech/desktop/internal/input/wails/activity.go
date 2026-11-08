@@ -74,13 +74,13 @@ type JobForcer interface {
 }
 
 // PostProcessRetrier starts the work of a recording again: the post-processing (TASK-086, homeworkflow.Rerunner) and a
-// cancelled transcription (TASK-392, transcribe.Enqueuer); the app joins both.
+// cancelled or failed transcription (TASK-392, TASK-409, transcribe.Enqueuer); the app joins both.
 type PostProcessRetrier interface {
 	Retry(ctx context.Context, rec shared.RecordingID, work homeworkflow.Work) (id shared.JobID, created bool, err error)
 	RedoSummary(ctx context.Context, rec shared.RecordingID) (id shared.JobID, created bool, err error)
 	// ActiveTranscription returns the unfinished STT job of the recording; ok is false when there is none.
 	ActiveTranscription(ctx context.Context, rec shared.RecordingID) (id shared.JobID, ok bool, err error)
-	// Retranscribe creates a new STT job after a cancel; transcribe.ErrNotAllowed or transcribe.ErrNoModel refuse.
+	// Retranscribe creates a new STT job after a cancel or a failure; transcribe.ErrNotAllowed or transcribe.ErrNoModel refuse.
 	Retranscribe(ctx context.Context, rec shared.RecordingID) (shared.JobID, error)
 }
 
@@ -140,8 +140,8 @@ type RecordingItem struct {
 	// QueueReason of a queued chain: inLine, retry, power, network, quota, serviceNotConfigured (the Hub has no address
 	// or key; action openConnections) or serviceUnavailable (the Hub does not answer; retried automatically).
 	QueueReason string `json:"queueReason"`
-	// ErrorCode of a failed chain: recordingFailed, transcriptionFailed, transcriptionCancelled (the user cancelled
-	// it, TASK-392; action retranscribe), summaryFailed, homeworkFailed, lectureTextFailed (TASK-090),
+	// ErrorCode of a failed chain: recordingFailed, transcriptionFailed (action retranscribe, TASK-409),
+	// transcriptionCancelled (the user cancelled it, TASK-392; action retranscribe), summaryFailed, homeworkFailed, lectureTextFailed (TASK-090),
 	// silentRecording (the track is silent: «Запись без звука», TASK-082) or noSpeech (the transcript holds no speech:
 	// «В записи нет речи», TASK-110; action checkSound, no retryWork).
 	ErrorCode string `json:"errorCode"`
@@ -460,8 +460,8 @@ func (s *ActivityService) CancelTranscription(ctx context.Context, id string) (T
 	return TranscriptionAnswer{Result: transcriptionFailed}, nil
 }
 
-// Retranscribe starts the cancelled transcription of recording id again as a new job with the current model
-// («Расшифровать снова», TASK-392).
+// Retranscribe starts the cancelled or failed transcription of recording id again as a new job with the current
+// model («Расшифровать снова», TASK-392, TASK-409).
 func (s *ActivityService) Retranscribe(ctx context.Context, id string) (TranscriptionAnswer, error) {
 	rid := shared.RecordingID(id)
 	if rid.Validate() != nil {
