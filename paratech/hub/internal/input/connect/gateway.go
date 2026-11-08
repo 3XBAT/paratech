@@ -59,6 +59,8 @@ type Gateway struct {
 	// agentStream serves AgentStepStream; nil answers unimplemented.
 	agentStream AgentStreamer
 	log         *slog.Logger
+	// heartbeat is the silence before a StreamHeartbeat on a stream that asked for it.
+	heartbeat time.Duration
 }
 
 var _ hubv1connect.GatewayServiceHandler = (*Gateway)(nil)
@@ -86,7 +88,7 @@ func NewGateway(svc Completer, log *slog.Logger, opts ...GatewayOption) (*Gatewa
 	if svc == nil || log == nil {
 		return nil, errors.New("connect: gateway service and logger are required")
 	}
-	g := &Gateway{svc: svc, log: log}
+	g := &Gateway{svc: svc, log: log, heartbeat: DefaultHeartbeatInterval}
 	for _, opt := range opts {
 		opt(g)
 	}
@@ -113,7 +115,8 @@ func (g *Gateway) Complete(ctx context.Context, req *connectrpc.Request[hubv1.Co
 
 // CompleteStream runs one ANSWER completion and streams it (ADR-0026, gateway.proto): deltas, then the result. The
 // use case never waits for the client: chunks are queued and sent by a separate goroutine, so a slow or gone client
-// does not hold the provider call. After an error no queued delta is sent.
+// does not hold the provider call. After an error no queued delta is sent. The same goroutine sends the heartbeats,
+// and the result is sent only after it has stopped, so Send is never called concurrently.
 func (g *Gateway) CompleteStream(ctx context.Context, req *connectrpc.Request[hubv1.CompleteStreamRequest],
 	stream *connectrpc.ServerStream[hubv1.CompleteStreamResponse]) error {
 	if g.stream == nil {
@@ -126,7 +129,9 @@ func (g *Gateway) CompleteStream(ctx context.Context, req *connectrpc.Request[hu
 
 	out := newDeltaSender(func(chunk string) error {
 		return stream.Send(&hubv1.CompleteStreamResponse{Event: &hubv1.CompleteStreamResponse_Delta{Delta: strings.ToValidUTF8(chunk, "�")}})
-	})
+	}, g.heartbeatOf(req.Msg.GetHeartbeat(), func() error {
+		return stream.Send(&hubv1.CompleteStreamResponse{Event: &hubv1.CompleteStreamResponse_Heartbeat{Heartbeat: &hubv1.StreamHeartbeat{}}})
+	}))
 	res, err := g.stream.CompleteStream(ctx, commandOf(owner, req.Msg.GetSpec()), out.push)
 	if err != nil {
 		_ = out.finish(true)
@@ -169,10 +174,12 @@ func (g *Gateway) resultOf(ctx context.Context, res gateway.Result) (*hubv1.Comp
 	}, nil
 }
 
-// deltaSender sends the chunks of one stream from its own goroutine. push never blocks: chunks that arrive while a
-// send is in flight are joined into the next delta. The first send error stops it (the client is gone).
+// deltaSender is the only writer of one stream until finish: it sends the chunks, and the heartbeats when hb.send is
+// set, from its own goroutine. push never blocks: chunks that arrive while a send is in flight are joined into the next
+// delta. The first send error stops it (the client is gone).
 type deltaSender struct {
 	send func(string) error
+	hb   heartbeat
 	wake chan struct{}
 	done chan struct{}
 
@@ -182,8 +189,8 @@ type deltaSender struct {
 	err     error
 }
 
-func newDeltaSender(send func(string) error) *deltaSender {
-	d := &deltaSender{send: send, wake: make(chan struct{}, 1), done: make(chan struct{})}
+func newDeltaSender(send func(string) error, hb heartbeat) *deltaSender {
+	d := &deltaSender{send: send, hb: hb, wake: make(chan struct{}, 1), done: make(chan struct{})}
 	go d.loop()
 	return d
 }
@@ -224,31 +231,69 @@ func (d *deltaSender) signal() {
 
 func (d *deltaSender) loop() {
 	defer close(d.done)
-	for range d.wake {
-		d.mu.Lock()
-		chunk, closed := d.pending.String(), d.closed
-		d.pending.Reset()
-		if !closed {
-			// Each delta is made valid UTF-8 on its own, so one cut inside a character would show it as two U+FFFD:
-			// its incomplete end waits for the next chunk.
-			var tail string
-			chunk, tail = cutIncompleteRune(chunk)
-			d.pending.WriteString(tail)
-		}
-		d.mu.Unlock()
-
-		if chunk != "" {
-			if err := d.send(chunk); err != nil {
-				d.mu.Lock()
-				d.err = err
-				d.mu.Unlock()
+	var (
+		timer *time.Timer
+		beat  <-chan time.Time // nil without a heartbeat: never ready
+	)
+	if d.hb.send != nil {
+		timer = time.NewTimer(d.hb.every)
+		defer timer.Stop()
+		beat = timer.C
+	}
+	for {
+		select {
+		case <-d.wake:
+			sent, stop := d.drain()
+			if stop {
 				return
 			}
-		}
-		if closed {
-			return
+			if sent && timer != nil {
+				timer.Reset(d.hb.every) // the silence counts from the last message
+			}
+		case <-beat:
+			d.mu.Lock()
+			closed := d.closed
+			d.mu.Unlock()
+			if closed {
+				continue // finish has a wake-up due; nothing goes out after the use case returned
+			}
+			if err := d.hb.send(); err != nil {
+				d.fail(err)
+				return
+			}
+			timer.Reset(d.hb.every)
 		}
 	}
+}
+
+// drain sends what is queued and reports whether it sent a delta and whether the loop must stop.
+func (d *deltaSender) drain() (sent, stop bool) {
+	d.mu.Lock()
+	chunk, closed := d.pending.String(), d.closed
+	d.pending.Reset()
+	if !closed {
+		// Each delta is made valid UTF-8 on its own, so one cut inside a character would show it as two U+FFFD: its
+		// incomplete end waits for the next chunk.
+		var tail string
+		chunk, tail = cutIncompleteRune(chunk)
+		d.pending.WriteString(tail)
+	}
+	d.mu.Unlock()
+
+	if chunk != "" {
+		if err := d.send(chunk); err != nil {
+			d.fail(err)
+			return false, true
+		}
+		sent = true
+	}
+	return sent, closed
+}
+
+func (d *deltaSender) fail(err error) {
+	d.mu.Lock()
+	d.err = err
+	d.mu.Unlock()
 }
 
 // cutIncompleteRune splits s before a trailing UTF-8 sequence that is not complete yet but may still become a valid

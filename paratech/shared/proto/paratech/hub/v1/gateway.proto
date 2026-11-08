@@ -58,7 +58,9 @@ service GatewayService {
   //     and its result stored, so a retry with the same key replays the answer it has paid for; if the provider was
   //     never called, the reservation is released. Nothing is settled as partial;
   //   - a replay (same idempotency key, completed attempt) delivers the stored output as a single delta followed by the
-  //     result.
+  //     result;
+  //   - with CompleteStreamRequest.heartbeat set, a "heartbeat" message comes after each 15 s without any message, before
+  //     the result or the error; a client ignores it except as a sign of life.
   rpc CompleteStream(CompleteStreamRequest) returns (stream CompleteStreamResponse);
 
   // AgentStep runs one step of the agent planner (ADR-0023) and returns 1 to 4 sealed tool calls. The Hub chooses the
@@ -88,7 +90,8 @@ service GatewayService {
   //   - when the client cancels or the connection drops, the Hub does as for CompleteStream: a provider call that has
   //     started is read to the end on a context that is not tied to the request, settled in full and its result
   //     stored, so a retry with the same key replays it free; if the provider was never called, the reservation is
-  //     released.
+  //     released;
+  //   - heartbeats as in CompleteStream, when AgentStepStreamRequest.heartbeat is set.
   rpc AgentStepStream(AgentStepStreamRequest) returns (stream AgentStepStreamResponse);
 }
 
@@ -148,7 +151,15 @@ message CompleteResponse {
 
 message CompleteStreamRequest {
   CompletionSpec spec = 1;
+  // Asks for a StreamHeartbeat after each 15 s without any message, until the result or the error (ADR-0026 addendum
+  // 2026-11-08). Transport only: not part of the fingerprint or the idempotency key, so a call with and one without it
+  // are the same logical request. Old clients leave it unset and see no heartbeat.
+  bool heartbeat = 2;
 }
+
+// StreamHeartbeat says the Hub is still working on the call. It carries no data, is not charged and never follows the
+// result; a replay gets none.
+message StreamHeartbeat {}
 
 message CompleteStreamResponse {
   oneof event {
@@ -156,6 +167,8 @@ message CompleteStreamResponse {
     string delta = 1;
     // Always the last message of a successful stream.
     CompletionResult result = 2;
+    // Only when CompleteStreamRequest.heartbeat is set; see StreamHeartbeat.
+    StreamHeartbeat heartbeat = 3;
   }
 }
 
@@ -310,6 +323,9 @@ message AgentStepResponse {
 
 message AgentStepStreamRequest {
   AgentStepRequest request = 1;
+  // As CompleteStreamRequest.heartbeat: transport only, outside the fingerprint (which covers AgentStepRequest alone)
+  // and the idempotency key.
+  bool heartbeat = 2;
 }
 
 message AgentStepStreamResponse {
@@ -318,5 +334,7 @@ message AgentStepStreamResponse {
     string delta = 1;
     // Always the last message of a successful stream.
     AgentStepResponse result = 2;
+    // Only when AgentStepStreamRequest.heartbeat is set; see StreamHeartbeat.
+    StreamHeartbeat heartbeat = 3;
   }
 }

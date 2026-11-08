@@ -14,7 +14,7 @@ func TestDeltaSenderCutsOnlyBetweenRunes(t *testing.T) {
 	d := newDeltaSender(func(chunk string) error {
 		got <- chunk
 		return nil
-	})
+	}, heartbeat{})
 	steps := []struct{ push, want string }{
 		{push: "обраща" + ye[:1], want: "обраща"},
 		{push: ye[1:] + "тся " + smile[:2], want: ye + "тся "},
