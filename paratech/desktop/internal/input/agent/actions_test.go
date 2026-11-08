@@ -783,16 +783,18 @@ func TestDriverInterruptKeepsTheOutcomeOfAnAction(t *testing.T) {
 	if e, err := w.journal.Find(t.Context(), th1, 1, "c1"); err != nil || e.Status != action.StatusDone {
 		t.Fatalf("entry = %+v, %v", e, err)
 	}
-	lines := 0
-	for _, u := range sink.all() {
+	// The line stays on every later update of the request (the panel shows the latest one), never twice.
+	all := sink.all()
+	for i, u := range all {
+		lines := 0
 		for _, c := range u.Cards {
 			if c.Kind() == values.CardActionLine {
 				lines++
 			}
 		}
-	}
-	if lines != 1 {
-		t.Fatalf("action lines shown = %d", lines)
+		if lines > 1 || (i == len(all)-1 && lines != 1) {
+			t.Fatalf("update %d: action lines shown = %d", i, lines)
+		}
 	}
 }
 

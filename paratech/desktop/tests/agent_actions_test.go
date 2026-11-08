@@ -257,6 +257,19 @@ func TestAgentActionsJournalAndUndoOnSQLite(t *testing.T) {
 	}
 }
 
+// The action line of a request stays on its reply: the panel shows the cards of the latest update only
+// (BUG-20261108-agent-cards).
+func TestAgentActionLineStaysWithTheReplyOnSQLite(t *testing.T) {
+	e := newActionsEnv(t)
+	e.hub.Then(testenv.AgentCall{ID: "w1", Tool: "create_subject", Args: `{"name":"Химия"}`}).
+		Then(testenv.AgentCall{ID: "r1", Tool: "reply", Args: `{"text":"Предмет создан"}`})
+	up := e.ask(t, values.Scope{}, "добавь химию")
+	if up.Status != thread.StatusDone || len(up.Cards) != 2 || up.Cards[0].Kind() != values.CardActionLine ||
+		up.Cards[1].Kind() != values.CardReply {
+		t.Fatalf("last update = %+v", up)
+	}
+}
+
 // run waits for the Driver and returns its last update.
 func (e *actionsEnv) run(t *testing.T, start func(ctx context.Context) error) agentloop.Update {
 	t.Helper()

@@ -206,7 +206,8 @@ func methodichka(t *testing.T) string {
 	return ""
 }
 
-// ask runs a request to its end and returns every card the panel got.
+// ask runs a request to its end and returns the cards the panel shows then: those of its last update, which carries
+// the tool cards of the request before its own.
 func (e *proposeEnv) ask(t *testing.T, text string) []values.Card {
 	t.Helper()
 	before := len(e.sink.snapshot())
@@ -214,11 +215,11 @@ func (e *proposeEnv) ask(t *testing.T, text string) []values.Card {
 		t.Fatal(err)
 	}
 	e.driver.Wait()
-	var cards []values.Card
-	for _, u := range e.sink.snapshot()[before:] {
-		cards = append(cards, u.Cards...)
+	ups := e.sink.snapshot()[before:]
+	if len(ups) == 0 {
+		t.Fatal("no update")
 	}
-	return cards
+	return ups[len(ups)-1].Cards
 }
 
 func (s *driverSink) snapshot() []agentloop.Update {

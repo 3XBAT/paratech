@@ -309,12 +309,16 @@ func TestActionLineOfAnAddedAssignment(t *testing.T) {
 	}
 	d.Wait()
 
+	// The last update (the reply) still shows the line, once, before the reply.
+	all := sink.all()
+	last := all[len(all)-1].Cards
+	if len(last) != 2 || last[1].Kind() != values.CardReply {
+		t.Fatalf("last cards = %+v", last)
+	}
 	var lines []values.ActionLine
-	for _, u := range sink.all() {
-		for _, c := range u.Cards {
-			if l, ok := c.(values.ActionLine); ok {
-				lines = append(lines, l)
-			}
+	for _, c := range last {
+		if l, ok := c.(values.ActionLine); ok {
+			lines = append(lines, l)
 		}
 	}
 	due, _ := values.NewDate(2026, time.October, 23)
