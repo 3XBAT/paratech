@@ -197,9 +197,11 @@ model (`llm.requests()`: the student's text is the last block, the tool names ar
 PANEL shows; the model's own wording is the LIVE set (TASK-382). A request carrying another tool set fails with the names that
 differ (`catalogProblem`): the pack is written for `values.CatalogVersion` 9. Every row `requires` the Hub key and the schedule
 rows of the settings pack; every scenario starts with «Новый чат» so the history sent to the model holds only what it asked.
-Files run by name: `01-reply`, `02-cut`, `03-busy`, `04-restart`, `05-compact`. Run it with the packs it needs:
+Files run by name: `01-reply`, `02-cut`, `03-busy`, `04-restart`, `05-compact` (part A, the panel itself), `06-titles`, `07-link`,
+`08-answer`, `09-failure`, `10-subject`, `11-confirm`, `12-busy-tool`, `13-cards-stay` (part B, the tools). Run it with the packs it needs:
 `… run e2e -- --project=settings --project=recording --project=agent` (a lone `--project=agent` on a fresh sandbox is
-«не проверено»).
+«не проверено»). The rows of part B also `require` the recording rows (the two imported recordings «Человек в футляре · основная» and
+«… · перезапуск», the deleted «… · отмена») and, for the link, the settings row «Расписание: ссылка на пару».
 
 | Row | What it checks |
 |---|---|
@@ -209,10 +211,29 @@ Files run by name: `01-reply`, `02-cut`, `03-busy`, `04-restart`, `05-compact`. 
 | Агент: второй вопрос во время первого | while the first request is in its Hub step the second WAITS (the core holds one lock per Ask, `agentturn.Service.Ask`): «ждёт предыдущий запрос» with «Остановить предыдущий запрос», no timer, nothing sent to the model; after the first answer the label goes at once, the second is sent by itself, the requests reach the model in order, a third question works. (The busy refusal «Предыдущий запрос ещё выполняется…» is only for a first request outside the Hub step, e.g. running a tool: not covered in part A) |
 | Агент: начать заново отсюда и форк | «Скрыть» puts the text into the field, the hidden requests leave the thread and the next provider request holds the edit and none of the hidden questions/answers; «Форк» opens «… (fork)» with the text in the field, sends nothing, notes «Открыт новый чат. Исходный «…» не изменился.» with «Открыть исходный чат» |
 | Агент: уплотнение контекста | nine requests of ~6 KiB fill the 48 KiB window; the next Ask shows «Уплотнение контекста…» while the scripted `chat_summary` answer is delayed, and the next planner request carries the summary instead of the oldest pairs |
+| Агент: названия записей доходят до модели (TASK-369) | «какие у меня записи?»: the model calls `find_lessons`; the NEXT request's `tool_result` holds both recordings of the recording pack (`title`, `subject_name` «Литература», `recording` = the id the page's `ActivityService.ListRecordings` returns, `transcribed`, `summary`), not the deleted «… · отмена»; the first request has the student's text last and the v9 catalog; the reply card shows the scripted text |
+| Агент: ссылка на пару (TASK-364) | `list_subjects` result: `call_link` = the saved link only on «Матанализ»; the reply shows the link as plain text; the thread has no button, link or card that leads anywhere (catalog v9 has no `offer_button`); then, as the reply says, «Сегодня» → «Подключиться» writes `{kind:"call"}` with the link to `opened.jsonl` (nothing else is opened) and the subject page shows the host |
+| Агент: ссылка на пару, когда её нет | the same for «Литература» (no `call_link` on it or on «История»); no navigation control in the thread (nothing named «Расписание»); the planner prompt of the request holds the TASK-364 lines of `system.md` v9 («No tool saves a link… never name «Расписание»…», «Расписание … holds no links», where the link lives); the subject page of «Литература» has the block «Ссылка на пару» with «Ссылки на пару нет» and «Добавить ссылку» |
+| Агент: что было на паре — карточка с источником (TASK-366) | `answer_question`: the ANSWER request to the Hub has the question and non-empty `fragments` with the text of the lesson (`cited` rule); the planner gets only counters (no claim, no quote); the card «Ответ по материалам» lists a source; its button opens the lesson page of a recording of the pack on the tab of the place («Конспект») |
+| Агент: что было на паре — текст ответа в карточке | the card shows the text of the answer. **Fails today**: the card says only «Ответ с источниками подготовлен.» and the sources (TASK-296 follow-up, claims are parsed but not rendered) |
+| Агент: сбой инструмента — честно, без выдуманной причины | the Hub's ANSWER reader answers garbage twice (the Hub asks again once) → the model gets `is_error` `{"error":"failed"}` only, no cause; no answer card, no «материала нет» in the thread; `make_summary` with an id the model never saw → `{"error":"unknown_id"}`, nothing done; a `cannot_do` reply draws «Целиком не получится» with the two lists |
+| Агент: добавь предмет по последней записи (TASK-369) | the model looks first (`find_lessons`, no question card), `create_subject` runs (class U): the model gets `{"changed":true,"done":true,"id"}`, the line «Действие выполнено» with «Отменить» appears, the subject is in the tree of «Предметы»; «Отменить» removes it (the tree is as before once the section is opened again) |
+| Агент: действие класса C только через подтверждение (AC-18) | `find_lessons` then `propose_delete_recording` with the id from that result: the model gets `{"proposed":true,"waits_for":"student"}` (no `done`), the confirm card shows the recording with «Нет» / «Да»; the recording stays in «Записи» (list and ids unchanged); «Нет» → «Отклонено: ничего не выполнено.»; «Да» is never pressed |
+| Агент: второй вопрос, пока идёт инструмент | `answer_question` with the ANSWER reader held 8 s: a second question is refused at once, «Предыдущий запрос ещё выполняется. Его можно остановить или отправить этот ещё раз.» (not sent to the model); after the first answer «Отправить ещё раз» sends it and it is answered. **Fails today** on the last step: the refused request stays in the thread (the question twice, the stale refusal line) |
+| Агент: карточки инструментов остаются после ответа модели | the cards of `answer_question`, `propose_delete_recording` and `create_subject` are seen while the model's reply is held, and must be on screen after it. **Fails today**: the model's `reply` update replaces every card of the request, so the answer card, the confirm card and the action line vanish when the reply arrives |
 
 - **Hub rate limit.** One key gets 30 calls a minute with a burst of 10 (`HUB_RATE_LIMIT_*`, defaults); a scenario with many calls
   (compaction) delays each scripted answer (`delayMs`) so the questions go slower than the bucket refills, never a fixed sleep.
 - **Unmatched rule.** An unscripted call fails the scenario; a question that must NOT reach the model (the busy one) has no rule.
+- **Part B scripting.** A rule matches the student's text for the first request of a turn and a part of the tool result for the
+  next one (`AfterLessons`, `AfterSubjects`, `AfterAnswer`, `AfterWrite`, `AfterProposal`, `afterRefusal` in `scripts/llm/agent/rules.ts`;
+  the last user message of a follow-up holds only the results). `callRule` is one tool call, `citedRule` the ANSWER reader,
+  `badAnswerRule` an answer the Hub refuses. The ids a tool needs (a recording to delete) are read from the app itself
+  (`recordingsOfApp`: `ActivityService.ListRecordings` through the page's Wails runtime), the same ids the tool result must show.
+- **Held reply.** Rows that use a card of a tool (files 8, 10, 11, 13) hold the model's final `reply` (`delayMs` 5–25 s): see the
+  last row of the table above for why the cards cannot be used after it.
+- **Untrusted wording.** Texts of the model are only drawn and compared as they were scripted; what the pack judges about words is
+  what the APP says (error enums, «Действие выполнено», «Отклонено: ничего не выполнено.», no invented cause).
 - **Copy.** The panel's «Копировать» calls the shell's clipboard (`TranscriptService.CopyText`), which the E2E hooks record as
   `{kind:"clipboard"}` in `opened.jsonl`; `clipboardWrites(page)` only sees `navigator.clipboard`, which the panel does not use.
 

@@ -83,6 +83,59 @@ export function replyRule(match: string, text: string, opts: ReplyOptions = {}):
   return rule;
 }
 
+/**
+ * The model calls one tool (part B): a rule consumed by the first request that contains `match`. A request of the student is
+ * matched by a distinctive part of its text, the NEXT request of the same turn by a part of the tool result the app sent
+ * (the last user content of that request is only the tool results), see the `After…` markers below.
+ */
+export function callRule(match: string, name: string, input: Record<string, unknown>, opts: ReplyOptions = {}): Rule {
+  const rule: Rule = { kind: "tools", match, reply: [{ name, input }] };
+  if (opts.delayMs !== undefined) {
+    rule.delayMs = opts.delayMs;
+  }
+  if (opts.stream !== undefined) {
+    rule.stream = opts.stream;
+  }
+  return rule;
+}
+
+/** The model ends the turn with `cannot_do` (two lists of lines). */
+export function cannotDoRule(match: string, yourPart: string[], ourPart: string[]): Rule {
+  return callRule(match, "cannot_do", { your_part: yourPart, our_part: ourPart });
+}
+
+// What only the tool result of a tool holds (values/read.go, write.go, propose.go, answer.go, result.go); the result of
+// every tool is compact JSON with the keys of a Go map in alphabetical order.
+/** find_lessons: {"count":N,"lessons":[…],"truncated":false}. */
+export const AfterLessons = '"lessons":[';
+/** list_subjects: {"count":N,"subjects":[…],"truncated":false}. */
+export const AfterSubjects = '"subjects":[';
+/** answer_question that made an answer: {"answer":"…","claims":N,"fragments":N,"missing":N,"sources":N,"supported":N,"unsupported":N}. */
+export const AfterAnswer = '"supported":';
+/** A class U tool that ran: {"changed":true,"done":true,"id":"…"}. */
+export const AfterWrite = '"done":true';
+/** A class C tool: {"proposed":true,"preview":"…","waits_for":"student"}. */
+export const AfterProposal = '"proposed":true';
+/** A refusal of the desktop: {"error":"<enum>"} with is_error (ADR-0022: an enum, never a text). */
+export const afterRefusal = (why: string): string => `{"error":"${why}"}`;
+
+/**
+ * The Hub's ANSWER operation (ADR-0022): a claim that cites the first fragment of the request with a quote copied from it. `match`
+ * is a part of the question as the planner passed it (the user message is {"question":"…","fragments":[…]}).
+ */
+export function citedRule(match: string, claim: string, opts: { words?: number; delayMs?: number } = {}): Rule {
+  const rule: Rule = { kind: "cited", match, claim, words: opts.words ?? 8 };
+  if (opts.delayMs !== undefined) {
+    rule.delayMs = opts.delayMs;
+  }
+  return rule;
+}
+
+/** An ANSWER reply that is not the strict JSON of the operation: the Hub refuses it (and asks once more, then gives up). */
+export function badAnswerRule(match: string): Rule {
+  return { kind: "plain", match, reply: "Ответ тестовой модели не в формате JSON: такой ответ Hub не принимает." };
+}
+
 /** The Hub's chat_summary operation (ADR-0028): its untrusted data is {"summary":…,"pairs":[…]}, the answer {"summary":…}. */
 export const ChatSummaryMatch = '"pairs":[';
 

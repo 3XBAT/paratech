@@ -11,9 +11,11 @@ import { evalInPage } from "../../src/checks/layout.js";
 import { AnnotationFeature, AnnotationMode, AnnotationRequires } from "../../src/contract.js";
 import { collapse } from "../../src/fixtures/text.js";
 import { expect, type Llm, type RecordedRequest, test } from "../../src/steps/index.js";
+import { Feature as RecordingFeature } from "../recording/support.js";
 import { act, actionMs } from "../settings/support.js";
 
 export { act, actionMs, firstLine, openSection, textOf } from "../settings/support.js";
+export { lectureOf } from "../recording/support.js";
 export { collapse };
 
 export const Tag = "@agent";
@@ -26,10 +28,27 @@ export const Feature = {
   busy: "Агент: второй вопрос во время первого",
   restart: "Агент: начать заново отсюда и форк",
   compact: "Агент: уплотнение контекста",
+  // Part B: scenarios that drive the tools.
+  titles: "Агент: названия записей доходят до модели",
+  link: "Агент: ссылка на пару",
+  linkNone: "Агент: ссылка на пару, когда её нет",
+  source: "Агент: что было на паре — карточка с источником",
+  answerText: "Агент: что было на паре — текст ответа в карточке",
+  failure: "Агент: сбой инструмента — честно, без выдуманной причины",
+  addSubject: "Агент: добавь предмет по последней записи",
+  confirm: "Агент: действие класса C только через подтверждение",
+  cardsStay: "Агент: карточки инструментов остаются после ответа модели",
+  busyTool: "Агент: второй вопрос, пока идёт инструмент",
 } as const;
 
 /** The rows of the settings pack the agent needs: the Hub key of the run (the panel asks the Hub) and the subjects of the schedule. */
 export const Prerequisites = ["Hub: ключ прогона принят после проверки отзыва", "Расписание: предметы из расписания"].join(" + ");
+
+/** Part B reads the recordings of the recording pack (the main one and the one imported before a restart) and the deleted one. */
+export const RecordingPrerequisites = [RecordingFeature.import, RecordingFeature.restart, RecordingFeature.cancel].join(" + ");
+export const PrerequisitesB = [Prerequisites, RecordingPrerequisites].join(" + ");
+/** The call link of «Матанализ» is saved by the settings pack on «Сегодня». */
+export const LinkPrerequisite = "Расписание: ссылка на пару";
 
 export function details(feature: string, opts: { requires?: string } = {}) {
   return {
@@ -270,4 +289,201 @@ export function lastStudentText(r: RecordedRequest): string {
   }
   const blocks = (last.content as Array<{ type?: string; text?: string }>).filter((b) => b.type === "text");
   return blocks.at(-1)?.text ?? "";
+}
+
+// ---- part B: what the tools gave the model ----
+
+export interface ToolResultBlock {
+  /** The id of the tool call the result answers. */
+  toolUseId: string;
+  /** The tool the call named (read from the assistant message before the result), "" when not found. */
+  tool: string;
+  /** `is_error` of the block, as the app sent it. */
+  isError: boolean;
+  /** The text of the block: the compact JSON of the app's mapper (ADR-0022). */
+  text: string;
+  /** The text parsed; undefined when it is not JSON. */
+  json: unknown;
+}
+
+/** The tool_result blocks of the last user message of a planner request (what the app told the model about its last calls). */
+export function toolResultsOf(r: RecordedRequest): ToolResultBlock[] {
+  const messages = messagesOf(r);
+  const last = [...messages].reverse().find((m) => m.role === "user");
+  if (last === undefined || !Array.isArray(last.content)) {
+    return [];
+  }
+  const names = new Map<string, string>();
+  for (const m of messages) {
+    if (m.role !== "assistant" || !Array.isArray(m.content)) {
+      continue;
+    }
+    for (const b of m.content as Array<{ type?: string; id?: string; name?: string }>) {
+      if (b.type === "tool_use" && typeof b.id === "string") {
+        names.set(b.id, String(b.name ?? ""));
+      }
+    }
+  }
+  const out: ToolResultBlock[] = [];
+  for (const b of last.content as Array<{ type?: string; tool_use_id?: string; content?: unknown; is_error?: boolean }>) {
+    if (b.type !== "tool_result") {
+      continue;
+    }
+    const text =
+      typeof b.content === "string"
+        ? b.content
+        : Array.isArray(b.content)
+          ? (b.content as Array<{ text?: string }>).map((c) => c.text ?? "").join("")
+          : "";
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = undefined;
+    }
+    const id = String(b.tool_use_id ?? "");
+    out.push({ toolUseId: id, tool: names.get(id) ?? "", isError: b.is_error === true, text, json });
+  }
+  return out;
+}
+
+/** The server prompt of a planner request (system block 0, the planner instructions) and the whole system as text. */
+export function systemOf(r: RecordedRequest): { prompt: string; all: string } {
+  const system = (r.body as { system?: unknown } | null)?.system;
+  const blocks = Array.isArray(system) ? (system as Array<{ text?: string }>) : [];
+  return { prompt: blocks[0]?.text ?? (typeof system === "string" ? system : ""), all: blocks.map((b) => b.text ?? "").join("\n") || (typeof system === "string" ? system : "") };
+}
+
+/** The Hub request of the ANSWER operation about `question`: no tools, the user message is {"question","fragments"}. */
+export async function answerRequestsAbout(llm: Llm, question: string): Promise<RecordedRequest[]> {
+  return (await llm.requests()).filter((r) => toolNamesOf(r.body).length === 0 && r.lastUser.includes(question));
+}
+
+// ---- part B: the recordings the app itself knows ----
+
+export interface AppRecording {
+  id: string;
+  title: string;
+  subject: string;
+}
+
+// The list of «Записи» asked the way the page asks it (bindings/activity.ts listRecordings): the ids the tools must show.
+const recordingsSource = `async () => {
+  const runtime = await import("/wails/runtime.js");
+  const rows = await runtime.Call.ByName("paratech/desktop/internal/input/wails.ActivityService.ListRecordings");
+  return (Array.isArray(rows) ? rows : []).map((r) => ({ id: String(r.id), title: String(r.title || ""), subject: String(r.subject || "") }));
+}`;
+
+export const recordingsOfApp = (main: Page): Promise<AppRecording[]> => evalInPage<AppRecording[]>(main, recordingsSource);
+
+/** The recording with this title; fails with the titles there are. */
+export async function recordingByTitle(main: Page, title: string): Promise<AppRecording> {
+  const all = await recordingsOfApp(main);
+  const found = all.find((r) => r.title === title);
+  if (found === undefined) {
+    throw new Error(`в «Записи» нет записи «${title}»; есть: ${all.map((r) => `«${r.title}»`).join(", ") || "ни одной"}`);
+  }
+  return found;
+}
+
+// ---- part B: the cards of the thread ----
+
+export interface Cards {
+  /** The question cards (ask_questions): there must be none when the model should look first. */
+  askCards: number;
+  /** The confirm cards (class C) and their text. */
+  confirmCards: number;
+  confirmText: string;
+  /** The names of the buttons of the confirm card. */
+  confirmButtons: string[];
+  /** The headings of the cards (h3.ag-card-h), the answer cards among them. */
+  captions: string[];
+  /** The lines of the action cards (class U), with the names of their buttons. */
+  actionLines: string[];
+  actionButtons: string[];
+  /** The sources under an answer card (aria-labels of ul.ag-src buttons). */
+  sources: string[];
+  /** Everything in the thread that can be pressed or followed: the names of buttons and links, and the number of a[href]. */
+  controls: string[];
+  hrefs: number;
+  /** The cannot_do card: the sub-headings and the lines under them ("" when there is no such card). */
+  cannotDo: { subs: string[]; lines: string[] } | undefined;
+  /** The text under the answer card heading. */
+  answerText: string;
+  /** The stop/problem lines of the thread. */
+  problems: string[];
+}
+
+function probeCards(): Cards {
+  const norm = (t: string | null): string => (t ?? "").replace(/[\s   ]+/g, " ").trim();
+  const all = (root: ParentNode, sel: string): HTMLElement[] => Array.from(root.querySelectorAll<HTMLElement>(sel));
+  const thread = document.querySelector<HTMLElement>("aside.ag .ag-thread") ?? document.body;
+  const nameOf = (e: HTMLElement): string => e.getAttribute("aria-label") ?? (norm(e.textContent) || e.getAttribute("title") || "");
+  const sections = all(thread, "section.ag-card");
+  const heading = (s: HTMLElement): string => norm(s.querySelector("h3.ag-card-h")?.textContent ?? "");
+  const confirm = thread.querySelector<HTMLElement>("section.ag-confirm");
+  const cannot = sections.find((s) => heading(s) === "Целиком не получится");
+  const answer = sections.find((s) => heading(s) === "Ответ по материалам");
+  return {
+    askCards: all(thread, "section.ag-ask").length,
+    confirmCards: all(thread, "section.ag-confirm").length,
+    confirmText: norm(confirm?.textContent ?? ""),
+    confirmButtons: confirm === null || confirm === undefined ? [] : all(confirm, "button").map(nameOf),
+    captions: sections.map(heading).filter((h) => h !== ""),
+    actionLines: all(thread, ".ag-act .ag-act-tx").map((e) => norm(e.textContent)),
+    actionButtons: all(thread, ".ag-act button").map(nameOf),
+    sources: all(thread, "ul.ag-src button").map(nameOf),
+    controls: all(thread, "button, a, [role='button'], [role='link']").map(nameOf),
+    hrefs: all(thread, "a[href]").length,
+    cannotDo:
+      cannot === undefined
+        ? undefined
+        : { subs: all(cannot, "p.ag-sub").map((e) => norm(e.textContent)), lines: all(cannot, "ul.ag-list li").map((e) => norm(e.textContent)) },
+    answerText: norm(answer?.querySelector("p")?.textContent ?? ""),
+    problems: all(thread, ".ag-stop > .ag-act-tx").map((e) => norm(e.textContent)),
+  };
+}
+
+const probeCardsSource = probeCards.toString();
+
+export const cardsOf = (main: Page): Promise<Cards> => evalInPage<Cards>(main, probeCardsSource);
+
+/** The buttons the thread of a plain reply has: «Копировать» under the question and the answer, «Повторить ответ». */
+export const ReplyControls: readonly string[] = ["Копировать", "Повторить ответ"];
+
+/**
+ * The controls of the thread that lead somewhere (a screen, a page, a link): by the words of the app's own screens. A reply that
+ * offers one must lead to the thing it was asked for; the catalog v9 reply has none.
+ */
+export function navigationControls(c: Cards): string[] {
+  return c.controls.filter((n) => /Открыть|Перейти|Расписани|Предмет|Сегодня|Журнал|Настройк|Задани|Записи|Подключиться|Добавить ссылку/i.test(n));
+}
+
+/** Polls the cards of the thread until `done` holds. */
+export async function waitCards(main: Page, message: string, done: (c: Cards) => boolean, timeout = 30_000): Promise<Cards> {
+  let last: Cards | undefined;
+  await expect
+    .poll(
+      async () => {
+        last = await cardsOf(main);
+        return done(last);
+      },
+      { timeout, intervals: [100, 150, 200], message },
+    )
+    .toBe(true);
+  return last as Cards;
+}
+
+// ---- part B: the subjects tree ----
+
+/** The names in the tree of «Предметы» (nav.tree .nm), after opening the section. */
+export async function subjectNames(main: Page): Promise<string[]> {
+  const rail = main.getByRole("navigation", { name: "Разделы", exact: true }).getByRole("button", { name: "Предметы", exact: true });
+  await rail.click(act);
+  await expect(rail).toHaveAttribute("aria-current", "page", act);
+  await main.mouse.move(1, 1);
+  const tree = main.locator("nav.tree");
+  await expect(tree, "в «Предметы» должно быть дерево предметов").toBeVisible(act);
+  const names = await tree.locator(".nm").allInnerTexts();
+  return names.map((n) => collapse(n));
 }
