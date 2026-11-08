@@ -1,7 +1,9 @@
 import http from "node:http";
 
+import { ReasonNoFragment, resolveCited } from "./cited.js";
 import { errorResponse, findRule, lastUserContent, messageResponse } from "./messages.js";
-import { parseScript, type Rule, ScriptError } from "./script.js";
+import { type FixedRule, parseScript, type Rule, ScriptError, type StreamOptions } from "./script.js";
+import { cutIndex, encodeFrame, isDelta, type SseFrame, sseFrames } from "./sse.js";
 
 export const PathScript = "/__e2e/script";
 export const PathRequests = "/__e2e/requests";
@@ -68,11 +70,6 @@ export async function startFakeLLM(opts: FakeLLMOptions = {}): Promise<FakeLLM> 
       return;
     }
     const lastUser = lastUserContent(body);
-    if ((body as { stream?: unknown })?.stream === true) {
-      records.push({ seq, path, matched: false, reason: "stream requested", lastUser, body });
-      send(res, 400, errorResponse("invalid_request_error", "e2e fake answers unary only (HUB_PROVIDER_STREAM=false)", seq));
-      return;
-    }
     const at = findRule(
       rules.map((r) => r.rule),
       lastUser,
@@ -82,13 +79,40 @@ export async function startFakeLLM(opts: FakeLLMOptions = {}): Promise<FakeLLM> 
       send(res, 500, errorResponse("api_error", "e2e fake: unscripted LLM call", seq));
       return;
     }
-    const [hit] = rules.splice(at, 1);
-    if (!hit) {
+    const chosen = rules[at];
+    if (!chosen) {
       return;
     }
-    records.push({ seq, path, matched: true, rule: hit.index, lastUser, body });
-    const model = (body as { model?: unknown })?.model;
-    send(res, 200, messageResponse(hit.rule, seq, typeof model === "string" ? model : undefined));
+    // A cited rule needs a fragment in the request; without one it is not consumed.
+    let fixed: FixedRule;
+    if (chosen.rule.kind === "cited") {
+      const resolved = resolveCited(chosen.rule, lastUser);
+      if (!resolved) {
+        records.push({ seq, path, matched: false, reason: ReasonNoFragment, lastUser, body });
+        send(res, 500, errorResponse("api_error", `e2e fake: ${ReasonNoFragment}`, seq));
+        return;
+      }
+      fixed = resolved;
+    } else {
+      fixed = chosen.rule;
+    }
+    rules.splice(at, 1);
+    records.push({ seq, path, matched: true, rule: chosen.index, lastUser, body });
+
+    const model = typeof (body as { model?: unknown })?.model === "string" ? (body as { model: string }).model : undefined;
+    const stream = (body as { stream?: unknown })?.stream === true ? fixed.stream : undefined;
+    const delayMs = chosen.rule.delayMs ?? 0;
+    const id = seq;
+    void (async () => {
+      if (!(await wait(res, delayMs))) {
+        return;
+      }
+      if (stream) {
+        await sendStream(res, sseFrames(fixed, stream, id, model), stream);
+        return;
+      }
+      send(res, 200, messageResponse(fixed, id, model));
+    })();
   };
 
   let port = 0; // known after listen; requests only arrive after it
@@ -203,6 +227,69 @@ function parseOrRaw(raw: string): unknown {
   } catch {
     return raw;
   }
+}
+
+const gone = (res: http.ServerResponse): boolean => res.socket === null || res.socket.destroyed;
+
+/** Waits ms; false when the client went away first (the Hub gave up, «Стоп»), so nothing is written afterwards. */
+function wait(res: http.ServerResponse, ms: number): Promise<boolean> {
+  if (gone(res)) {
+    return Promise.resolve(false);
+  }
+  if (ms <= 0) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    const onClose = (): void => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+    const timer = setTimeout(() => {
+      res.off("close", onClose);
+      resolve(true);
+    }, ms);
+    res.once("close", onClose);
+  });
+}
+
+/** Writes one chunk; false when the connection is gone. */
+function write(res: http.ServerResponse, chunk: string): Promise<boolean> {
+  if (gone(res)) {
+    return Promise.resolve(false);
+  }
+  return new Promise((resolve) => {
+    const onClose = (): void => resolve(false);
+    res.once("close", onClose);
+    res.write(chunk, (err) => {
+      res.off("close", onClose);
+      resolve(!err);
+    });
+  });
+}
+
+/** Sends the events one by one; destroys the socket instead of the frame at the cut index (a broken network). */
+async function sendStream(res: http.ServerResponse, frames: readonly SseFrame[], opts: StreamOptions): Promise<void> {
+  const cut = cutIndex(frames, opts.cutAfter);
+  const chunkDelayMs = opts.chunkDelayMs ?? 0;
+  res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+  res.flushHeaders();
+  let deltas = 0;
+  for (const [i, frame] of frames.entries()) {
+    if (i === cut) {
+      res.destroy();
+      return;
+    }
+    if (isDelta(frame)) {
+      if (deltas > 0 && !(await wait(res, chunkDelayMs))) {
+        return;
+      }
+      deltas++;
+    }
+    if (!(await write(res, encodeFrame(frame)))) {
+      return;
+    }
+  }
+  res.end();
 }
 
 function send(res: http.ServerResponse, status: number, body: unknown): void {

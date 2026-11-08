@@ -20,6 +20,8 @@ test(
     const consumedFile = path.join(process.env[EnvCtlDir] ?? "", "consumed.jsonl");
     const consumedLines = (): number => (existsSync(consumedFile) ? readFileSync(consumedFile, "utf8").split("\n").filter((l) => l.trim() !== "").length : 0);
     const consumedBefore = consumedLines();
+    // The same for what was «opened»: the agent pack copies and presses «Подключиться» on purpose (TASK-380).
+    const openedBefore = (await opened()).length;
 
     await step("главное окно загрузилось", async () => {
       await expect(main).toHaveTitle("paratech");
@@ -35,7 +37,7 @@ test(
     });
 
     await step("ничего не открыто и ни один диалог не использован", async () => {
-      expect(await opened()).toEqual([]);
+      expect((await opened()).slice(openedBefore), "во время этого теста приложение не должно было ничего открывать или копировать").toEqual([]);
       expect(consumedLines(), "во время этого теста приложение не должно было открывать диалоги выбора файла").toBe(consumedBefore);
     });
   },

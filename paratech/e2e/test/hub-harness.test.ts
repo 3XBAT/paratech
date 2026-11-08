@@ -62,12 +62,12 @@ describe("environment of spawned processes", () => {
 });
 
 describe("provider settings", () => {
-  test("scripted mode: dummy key, the fake URL, unary calls", () => {
+  test("scripted mode: dummy key, the fake URL, streamed provider calls (TASK-380)", () => {
     const p = providerVars("scripted", { PARATECH_E2E_ANTHROPIC_KEY: Sentinel }, "http://127.0.0.1:4100");
     assert.deepEqual(p.vars, {
       HUB_ANTHROPIC_API_KEY: DummyProviderKey,
       HUB_ANTHROPIC_BASE_URL: "http://127.0.0.1:4100",
-      HUB_PROVIDER_STREAM: "false",
+      HUB_PROVIDER_STREAM: "true",
     });
     assert.deepEqual(p.secrets, []);
   });
@@ -325,12 +325,12 @@ describe("startHub with a stub hub", () => {
     assert.deepEqual(calls.slice(2), [`DROP SCHEMA IF EXISTS ${hub.schema} CASCADE`, "release"]);
   });
 
-  test("scripted mode sets the dummy key, the fake and unary calls", async () => {
+  test("scripted mode sets the dummy key, the fake and streamed calls", async () => {
     const { deps } = stubDeps("ok");
     const hub = await startHub({ mode: "scripted", fakeUrl: "http://127.0.0.1:4999", env: ownerEnv }, deps);
     try {
       const logs = await logsWhenComplete(hub);
-      assert.match(logs, /quota=400000 stream=false base=http:\/\/127\.0\.0\.1:4999/);
+      assert.match(logs, /quota=400000 stream=true base=http:\/\/127\.0\.0\.1:4999/);
       assert.match(logs, new RegExp(`provider key=${DummyProviderKey}`));
       assert.ok(!logs.includes(Sentinel));
     } finally {

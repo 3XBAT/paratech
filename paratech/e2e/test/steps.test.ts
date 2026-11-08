@@ -381,7 +381,9 @@ describe("llm helper against the real fake server", () => {
     assert.equal((await ask("второй")).status, 200);
   });
 
-  test("an unknown endpoint and a stream request are unscripted calls too", async () => {
+  // TASK-380: the fake no longer refuses stream:true (a rule without `stream` answers it as JSON), so the second part
+  // uses a body that is not JSON, which is still refused and recorded as unmatched.
+  test("an unknown endpoint and a malformed request are unscripted calls too", async () => {
     const llm = createLlm(fake.url);
     await llm.script([{ kind: "plain", match: "", reply: "ok" }]);
     await fetch(`${fake.url}/v1/messages/count_tokens`, { method: "POST", body: "{}" });
@@ -392,8 +394,8 @@ describe("llm helper against the real fake server", () => {
     assert.match(err?.message ?? "", /unscripted LLM call: unknown endpoint POST \/v1\/messages\/count_tokens/);
 
     await llm.script([{ kind: "plain", match: "", reply: "ok" }]);
-    assert.equal((await ask("x", { stream: true })).status, 400);
-    assert.match(describeCall((await llm.unmatched())[0]!), /stream requested/);
+    assert.equal((await fetch(`${fake.url}/v1/messages`, { method: "POST", body: "{oops" })).status, 400);
+    assert.match(describeCall((await llm.unmatched())[0]!), /malformed JSON/);
   });
 
   test("a rejected script reports the fake's reason", async () => {
