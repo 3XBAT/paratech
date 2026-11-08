@@ -102,11 +102,17 @@ export function pathOfPid(pid: number, run: PowerShell = runPowerShell): string 
   return parseProcessJson(out)[0]?.path ?? "";
 }
 
-const same = (a: string, b: string): boolean => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+/**
+ * Whether two Windows paths are the same file or folder: case-insensitive, `/` and `\` alike. Always win32 rules, whatever the
+ * host is: the paths come from Win32_Process, and the unit tests feed Windows literals on any OS.
+ */
+export function sameWinPath(a: string, b: string): boolean {
+  return path.win32.resolve(a).toLowerCase() === path.win32.resolve(b).toLowerCase();
+}
 
 /** Whether the exe path lies in the folder (a file directly inside it). Case-insensitive, like Windows. */
 export function isInFolder(exePath: string, folder: string): boolean {
-  return exePath !== "" && same(path.dirname(exePath), folder);
+  return exePath !== "" && sameWinPath(path.win32.dirname(exePath), folder);
 }
 
 /** The processes with this image name that run from `folder` (the sandbox's exe folder): the sandbox's own. */

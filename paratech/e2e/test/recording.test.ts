@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 
 import { findRule } from "../src/fakellm/index.js";
 import { desktopLogPath, freshLog, killProcessTree, launchApp, type LaunchOptions, type RunningApp, spawnOptions } from "../src/app/launch.js";
-import { isInFolder, parseProcessJson, pathOfPid, processesNamed, processesNamedAsync, sandboxProcesses } from "../src/app/procs.js";
+import { isInFolder, parseProcessJson, pathOfPid, processesNamed, processesNamedAsync, sameWinPath, sandboxProcesses } from "../src/app/procs.js";
 import { killRestartedApp, restartApp, RestartError } from "../src/app/restart.js";
 import { AnnotationFeature, AnnotationRequires, AnnotationSttSpeed, type RunState } from "../src/contract.js";
 import {
@@ -24,9 +24,12 @@ import {
   expectedWords,
   foundWords,
   id3Tag,
+  modelFileInCommand,
+  requestsWithWords,
   sttSpeedLine,
+  unscannedRequests,
 } from "../src/fixtures/audio.js";
-import { dateInput, lectureOf, localOffset } from "../src/fixtures/lecture.js";
+import { dateInput, dueDayRu, dueMatcher, lectureOf, localOffset } from "../src/fixtures/lecture.js";
 import { freeLoopbackPort } from "../src/hub/ports.js";
 import { toRecord } from "../src/report/collect.js";
 import type { ReportInput, TestRecord } from "../src/report/model.js";
@@ -166,6 +169,29 @@ describe("the scan for audio in what the Hub sent to the provider", () => {
     assert.ok(audioFindings(request(id3Tag("x").toString("latin1"))).length > 0);
   });
 
+  test("requests the fake could not read are findings: no body to scan means no proof", () => {
+    assert.deepEqual(
+      unscannedRequests([
+        { seq: 1, reason: undefined },
+        { seq: 2, reason: "body too large" },
+        { seq: 3, reason: "malformed JSON" },
+        { seq: 4, reason: "unscripted LLM call" },
+      ]),
+      ["запрос 2: body too large", "запрос 3: malformed JSON"],
+    );
+  });
+
+  test("the words of the speech are looked for in the bodies, ё = е, case ignored", () => {
+    const reqs = [
+      { seq: 1, body: { messages: [{ content: '{"transcript":"тишина"}' }] } },
+      { seq: 2, body: { messages: [{ content: '{"transcript":"Он жил около Города, сказал Иваныч"}' }] } },
+      { seq: 3, body: "raw text with ИВАНЫЧ" },
+    ];
+    assert.deepEqual(requestsWithWords(reqs, ["иваныч", "староста"]), [2, 3]);
+    assert.deepEqual(requestsWithWords(reqs, ["староста"]), []);
+    assert.deepEqual(requestsWithWords(reqs, []), []);
+  });
+
   test("findings name the request by its number", () => {
     assert.deepEqual(audioInRequests([{ seq: 4, body: request("a") }, { seq: 9, body: request("OggS") }]), ["запрос 9: marker OggS"]);
   });
@@ -183,6 +209,31 @@ describe("the lecture of an import", () => {
     assert.equal(l.dueDay, "10.11");
     assert.match(l.due, /^\d{4}-\d{2}-\d{2}T20:00:00[+-]\d{2}:\d{2}$/);
     assert.equal(dateInput(new Date(2026, 0, 5)), "2026-01-05");
+  });
+
+  test("the deadline as the app prints it: weekday, day, month, 20:00; the title's «до » does not count", () => {
+    const l = lectureOf("основная", new Date(2026, 10, 8, 15, 30));
+    assert.equal(dueDayRu(l.due), "вт, 10 нояб.");
+    assert.match("до вт, 10 нояб., 20:00", dueMatcher(l.due));
+    assert.match("Задание · до вт, 10 нояб., 20:00 · Литература", dueMatcher(l.due));
+    assert.match("до вт, 10 нояб. 2026, 20:00", dueMatcher(l.due), "the year may follow when it is not the current one");
+    assert.doesNotMatch("до ср, 11 нояб., 20:00", dueMatcher(l.due), "another day");
+    assert.doesNotMatch("до вт, 10 нояб., 19:00", dueMatcher(l.due), "another time");
+    assert.doesNotMatch(`${l.assignmentTitle} без срока`, dueMatcher(l.due, true), "the title alone is not a deadline");
+    assert.doesNotMatch("завтра до 20:00", dueMatcher(l.due), "the lesson tab never says «завтра»");
+    assert.match("завтра до 20:00", dueMatcher(l.due, true));
+    // other months and years, and the weekday follows the date, not the run
+    assert.equal(dueDayRu("2027-01-02T20:00:00+03:00"), "сб, 2 янв.");
+    assert.equal(dueDayRu("2026-05-31T20:00:00+03:00"), "вс, 31 мая");
+    assert.throws(() => dueDayRu("10.11"));
+  });
+
+  test("the model file in a whisper-cli command line, by its last path segment", () => {
+    const re = modelFileInCommand("base-q5_1");
+    assert.match('C:\\run\\whisper-cli.exe -m C:\\run\\artifacts\\models\\base-q5_1-0123abcd.bin -f in.wav', re);
+    assert.match("whisper-cli.exe -m D:\\models\\ggml-base-q5_1.bin", re);
+    assert.match("whisper-cli.exe -m /m/GGML-BASE-Q5_1.BIN", re);
+    assert.doesNotMatch("whisper-cli.exe -m C:\\models\\ggml-tiny.bin -f base-q5_1\\in.wav", re);
   });
 
   test("the label tells the lectures apart, in the title and in the assignment", () => {
@@ -326,6 +377,15 @@ describe("the processes of the sandbox", () => {
     assert.ok(!isInFolder("", "C:\\Repo"));
   });
 
+  test("Windows paths are compared by Windows rules on any host: case, slashes, a trailing separator, dots", () => {
+    assert.ok(sameWinPath("C:\\Repo\\App\\x.exe", "c:/repo/app/X.EXE"));
+    assert.ok(sameWinPath("C:\\Repo\\App\\", "C:\\Repo\\App"));
+    assert.ok(sameWinPath("C:\\Repo\\App\\..\\App\\x.exe", "C:\\Repo\\App\\x.exe"));
+    assert.ok(!sameWinPath("C:\\Repo\\App\\x.exe", "D:\\Repo\\App\\x.exe"));
+    assert.ok(!sameWinPath("C:\\Repo\\App\\x.exe", "C:\\Repo\\App\\y.exe"));
+    assert.ok(isInFolder("C:/Repo/App/x.exe", "c:\\repo\\app\\"));
+  });
+
   test("the sandbox's own are the ones of its exe folder; a lookup that cannot run is an error, not «none»", async () => {
     const run = () => json;
     assert.deepEqual(
@@ -354,8 +414,8 @@ describe("the processes of the sandbox", () => {
   test("the real lookup works on this machine: this very node process is listed with its path", { skip: process.platform === "win32" ? false : "Windows only" }, () => {
     const mine = processesNamed(path.basename(process.execPath)).find((p) => p.pid === process.pid);
     assert.ok(mine, "the test runner is among the node.exe processes");
-    assert.equal(path.resolve(mine.path).toLowerCase(), path.resolve(process.execPath).toLowerCase());
-    assert.equal(path.resolve(pathOfPid(process.pid)).toLowerCase(), path.resolve(process.execPath).toLowerCase());
+    assert.ok(sameWinPath(mine.path, process.execPath));
+    assert.ok(sameWinPath(pathOfPid(process.pid), process.execPath));
     assert.equal(pathOfPid(2_000_000_000), "", "no such pid");
   });
 });
@@ -481,6 +541,28 @@ describe("restartApp", () => {
       (err: unknown) => err instanceof RestartError && /не остановилось/.test(err.message),
     );
     assert.equal(calls.length, 0);
+  });
+
+  test("a pid reused by another exe while waiting counts as gone: the old app is not waited for and nothing is killed", async () => {
+    const { runRoot } = sandbox();
+    const killed: number[] = [];
+    const { calls, launch } = launcher(5);
+    let looks = 0;
+    await restartApp({
+      runRoot,
+      goneTimeoutMs: 50,
+      deps: {
+        launch,
+        // the sandbox's exe at the first look (killed), then the owner's own program took the pid
+        pathOfPid: () => (++looks === 1 ? exe : "C:\\Users\\owner\\paratech.exe"),
+        kill: (p) => killed.push(p),
+        portAnswers: async () => false,
+        sleep: async () => {},
+      },
+    });
+    assert.deepEqual(killed, [111], "killed once, while it was the sandbox's exe");
+    assert.equal(calls.length, 1, "the restart went on");
+    assert.ok(looks >= 2);
   });
 
   test("a port that still answers after the exe is gone is waited for too", async () => {
@@ -637,8 +719,13 @@ describe("an app detached from its spawning process", () => {
         assert.equal(run.status, 0, `${run.stderr}\n${run.stdout}`);
         assert.ok(Number.isInteger(pid) && pid > 0, run.stdout);
         // the parent has exited by now; a kill-on-close job would have taken the app with it
-        await new Promise((r) => setTimeout(r, 1_500));
-        assert.equal(path.resolve(pathOfPid(pid)).toLowerCase(), path.resolve(process.execPath).toLowerCase(), "the app still runs");
+        // observed, not slept through: the app must be listed at every poll of a 1.5 s window after the parent's exit
+        const watchUntil = Date.now() + 1_500;
+        do {
+          const running = pathOfPid(pid);
+          assert.ok(running !== "" && sameWinPath(running, process.execPath), "the app still runs");
+          await new Promise((r) => setTimeout(r, 100));
+        } while (Date.now() < watchUntil);
         const res = await fetch(`http://127.0.0.1:${port}/json/version`);
         assert.equal(res.status, 200, "and still answers on its debug port");
 

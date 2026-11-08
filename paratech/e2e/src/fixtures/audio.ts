@@ -3,7 +3,7 @@
 // of the fixture README, the speed line of the report and the AC-06 scan of what the Hub sent to the provider.
 import type { RecordedRequest } from "../fakellm/index.js";
 
-/** The committed clip: MP3, 64 kbps CBR, 44.1/22.05 kHz mono; ~50 s (fixtures/audio/README.md). */
+/** The committed clip: MPEG-2 Layer III (MP3), 64 kbps CBR, 22.05 kHz mono; ~50 s (fixtures/audio/README.md). */
 export const ClipRel = "audio/chekhov-chelovek-v-futliare-s1-20-70s.mp3";
 export const ClipBytesPerSecond = 8_000; // 64 kbps
 
@@ -60,6 +60,15 @@ export function foundWords(text: string, expected: readonly string[]): string[] 
   return expected.filter((w) => hay.includes(fold(w)));
 }
 
+/**
+ * The model in a whisper-cli command line: the app copies it as `ggml-<id>.bin` or `<id>-<hash>.bin` (artifacts\models\), and
+ * the file is passed by path, so this looks for the id in the last path segment and not at the whole line.
+ */
+export function modelFileInCommand(id: string): RegExp {
+  const esc = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`ggml-${esc}|${esc}[^\\\\/]*\\.bin`, "i");
+}
+
 export interface SpeedInput {
   audioSeconds: number;
   wallSeconds: number;
@@ -106,6 +115,19 @@ export function audioFindings(body: unknown): string[] {
     found.push("an MPEG frame sync");
   }
   return found;
+}
+
+/**
+ * The requests the fake could not read as a request: "body too large" is recorded WITHOUT a body and "malformed JSON" as raw
+ * text, so the scan above cannot vouch for them. Each is a finding of its own, named by the request number.
+ */
+export function unscannedRequests(requests: readonly Pick<RecordedRequest, "seq" | "reason">[]): string[] {
+  return requests.filter((r) => r.reason === "body too large" || r.reason === "malformed JSON").map((r) => `запрос ${r.seq}: ${r.reason}`);
+}
+
+/** The requests whose body has at least one of the words (case-insensitively, ё = е): the transcript really went to the Hub. */
+export function requestsWithWords(requests: readonly Pick<RecordedRequest, "seq" | "body">[], words: readonly string[]): number[] {
+  return requests.filter((r) => foundWords(typeof r.body === "string" ? r.body : JSON.stringify(r.body), words).length > 0).map((r) => r.seq);
 }
 
 /** Every finding of every request, named by the request number (seq) of the fake. */

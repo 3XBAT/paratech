@@ -8,7 +8,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { AnnotationSttSpeed, EnvCtlDir } from "../../src/contract.js";
-import { ClipBytesPerSecond, ClipRel, expectedWords, foundWords, sttSpeedLine } from "../../src/fixtures/audio.js";
+import { ClipBytesPerSecond, ClipRel, expectedWords, foundWords, modelFileInCommand, sttSpeedLine } from "../../src/fixtures/audio.js";
+import { dueDayRu, dueMatcher } from "../../src/fixtures/lecture.js";
+import { ModelCatalogId } from "../../src/fixtures/model.js";
 import { requireEnv } from "../../src/steps/env.js";
 import { expect, snapshot, step, test } from "../../src/steps/index.js";
 import { lectureRules } from "../../scripts/llm/recording/rules.js";
@@ -53,6 +55,8 @@ test(Feature.import, details(Feature.import, { requires: Prerequisites }), async
   });
 
   const watch = watchWhisper();
+  const logBefore = logLines(/./).length;
+  let model = "";
   const seen: string[] = [];
   let importedAt = 0;
   let doneAt = 0;
@@ -98,20 +102,23 @@ test(Feature.import, details(Feature.import, { requires: Prerequisites }), async
     expect(sightings.length, "whisper-cli.exe из папки приложения ни разу не работал, пока шла расшифровка").toBeGreaterThan(0);
     const first = sightings[0];
     note(`whisper-cli.exe: ${first?.path}; параметры: ${first?.commandLine.slice(first.path.length).trim()}`);
-    expect(first?.commandLine, "в параметрах whisper-cli.exe должен быть файл модели").toMatch(/\.bin/i);
+    expect(first?.commandLine, `в параметрах whisper-cli.exe должен быть файл модели по умолчанию (${ModelCatalogId})`).toMatch(modelFileInCommand(ModelCatalogId));
 
-    const lines = logLines(/transcription job enqueued/);
-    expect(lines.length, "в desktop.log нет строки «transcription job enqueued» с моделью").toBeGreaterThan(0);
-    const model = /model=("[^"]+"|\S+)/.exec(lines.at(-1) ?? "")?.[1]?.replace(/"/g, "");
-    note(`модель расшифровки в desktop.log: ${model ?? "не найдена"}`);
-    expect(model, "в строке «transcription job enqueued» должна быть модель").toBeTruthy();
+    // only the lines written since this import started: an earlier recording's line is not this one's
+    const lines = logLines(/./).slice(logBefore).filter((l) => /transcription job enqueued/.test(l));
+    expect(lines.length, "в desktop.log после начала импорта нет строки «transcription job enqueued» с моделью").toBeGreaterThan(0);
+    const found = /model=("[^"]+"|\S+)/.exec(lines[0] ?? "")?.[1]?.replace(/"/g, "");
+    note(`модель расшифровки в desktop.log: ${found ?? "не найдена"}`);
+    expect(found, "в строке «transcription job enqueued» должна быть модель").toBeTruthy();
+    expect(found, `по умолчанию (после «Модель: по умолчанию») расшифровка идёт моделью ${ModelCatalogId}`).toBe(ModelCatalogId);
+    model = found ?? "";
   });
 
   await step("скорость расшифровки для отчёта", async () => {
     const first = [...watch.seen.values()][0];
     const wall = first ? (first.lastSeen - first.firstSeen) / 1000 : (doneAt - importedAt) / 1000;
     const audioSeconds = Math.round(readFileSync(path.join(requireEnv(EnvCtlDir), "fixtures", ...ClipRel.split("/"))).length / ClipBytesPerSecond);
-    const line = sttSpeedLine({ audioSeconds, wallSeconds: Math.max(0.1, Math.round(wall * 10) / 10), model: "base-q5_1", cpu: os.cpus()[0]?.model.trim() ?? "?" });
+    const line = sttSpeedLine({ audioSeconds, wallSeconds: Math.max(0.1, Math.round(wall * 10) / 10), model, cpu: os.cpus()[0]?.model.trim() ?? "?" });
     test.info().annotations.push({ type: AnnotationSttSpeed, description: line });
     note(line);
   });
@@ -168,7 +175,9 @@ test(Feature.task, details(Feature.task, { requires: Feature.import }), async ({
     await openLesson(main, lecture, "Задания");
     const item = main.locator(".sm-homework .row").filter({ hasText: lecture.assignmentTitle });
     await expect(item, "на вкладке «Задания» пары должно быть задание из ответа Hub").toHaveCount(1, { timeout: 30_000 });
-    note(`задание на вкладке пары: ${await textOf(item)}`);
+    const text = await textOf(item);
+    note(`задание на вкладке пары: ${text}`);
+    expect(text, `у задания на вкладке пары должен быть срок «до ${dueDayRu(lecture.due)}, 20:00»`).toMatch(dueMatcher(lecture.due));
   });
 
   await step("«Задания»: задание есть и у него срок", async () => {
@@ -179,7 +188,7 @@ test(Feature.task, details(Feature.task, { requires: Feature.import }), async ({
     const text = await textOf(row);
     note(`задание в «Задания»: ${text}`);
     await snapshot("Задания: задание из записи");
-    expect(text, "у задания должен быть срок").toMatch(/срок|до |через|\d{1,2}[.:]\d{2}|завтра|послезавтра/i);
+    expect(text, `у задания должен быть срок «до ${dueDayRu(lecture.due)}, 20:00»`).toMatch(dueMatcher(lecture.due, true));
   });
 
   await step("«Сегодня» → «Сроки на неделе»: то же задание", async () => {
@@ -188,7 +197,9 @@ test(Feature.task, details(Feature.task, { requires: Feature.import }), async ({
     await expect(section, "на «Сегодня» должен быть блок «Сроки на неделе»").toBeVisible({ timeout: 20_000 });
     const row = section.locator("[role='listitem']").filter({ hasText: lecture.assignmentTitle });
     await expect(row, "в «Сроки на неделе» должно быть задание из записи").toHaveCount(1, { timeout: 30_000 });
-    note(`задание в «Сроки на неделе»: ${await textOf(row)}`);
+    const text = await textOf(row);
+    note(`задание в «Сроки на неделе»: ${text}`);
+    expect(text, `у задания в «Сроки на неделе» должен быть срок «до ${dueDayRu(lecture.due)}, 20:00»`).toMatch(dueMatcher(lecture.due, true));
     await snapshot("Сегодня: сроки на неделе");
   });
 });

@@ -8,11 +8,9 @@ import type { RunState } from "../contract.js";
 import { EnvWindow } from "../sandbox/options.js";
 import { readState, writeState } from "../sandbox/state.js";
 import { desktopLogPath, killProcessTree, launchApp, type LaunchOptions, readSharedText, type RunningApp } from "./launch.js";
-import { pathOfPid } from "./procs.js";
+import { pathOfPid, sameWinPath } from "./procs.js";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-const sameFile = (a: string, b: string): boolean => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 
 export interface RestartDeps {
   launch: (o: LaunchOptions) => Promise<RunningApp>;
@@ -86,14 +84,19 @@ export async function restartApp(o: RestartOptions): Promise<RunningApp> {
 
   const running = d.pathOfPid(state.appPid);
   if (running !== "") {
-    if (!sameFile(running, exePath)) {
+    if (!sameWinPath(running, exePath)) {
       throw new RestartError(`pid ${state.appPid} из state.json теперь чужой процесс (${running}): не трогаю`);
     }
     d.kill(state.appPid);
   }
   const limit = o.goneTimeoutMs ?? goneTimeoutMs;
   const deadline = Date.now() + limit;
-  while (d.pathOfPid(state.appPid) !== "" || (await d.portAnswers(state.cdpUrl))) {
+  // Gone is: no such process, or the pid was reused by another exe (never ours to wait for, still less to kill).
+  const stillRunning = (): boolean => {
+    const now = d.pathOfPid(state.appPid);
+    return now !== "" && sameWinPath(now, exePath);
+  };
+  while (stillRunning() || (await d.portAnswers(state.cdpUrl))) {
     if (Date.now() > deadline) {
       throw new RestartError(`приложение (pid ${state.appPid}) не остановилось за ${limit / 1000} с`);
     }
@@ -152,7 +155,7 @@ export function killRestartedApp(
     return false;
   }
   const running = deps.pathOfPid(pid);
-  if (running === "" || !sameFile(running, exePath)) {
+  if (running === "" || !sameWinPath(running, exePath)) {
     return false;
   }
   deps.kill(pid);

@@ -7,12 +7,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { EnvCtlDir } from "../../src/contract.js";
-import { audioFindings, audioInRequests, ClipRel, id3Tag } from "../../src/fixtures/audio.js";
+import { audioFindings, audioInRequests, ClipRel, id3Tag, requestsWithWords, unscannedRequests } from "../../src/fixtures/audio.js";
 import { requireEnv } from "../../src/steps/env.js";
 import { expect, step, test } from "../../src/steps/index.js";
-import { details, Feature, keepRequests, loadRequests, note } from "./support.js";
+import { details, Feature, keepRequests, loadRequests, note, readPack } from "./support.js";
 
-test(Feature.privacy, details(Feature.privacy, { requires: Feature.import }), async ({ llm }) => {
+test(Feature.privacy, details(Feature.privacy, { requires: `${Feature.import} + ${Feature.words}` }), async ({ llm }) => {
   await keepRequests(llm);
   const requests = loadRequests();
 
@@ -21,6 +21,16 @@ test(Feature.privacy, details(Feature.privacy, { requires: Feature.import }), as
     expect(requests.length, "за пак должно быть минимум три запроса (конспект, задание, текст лекции первой записи)").toBeGreaterThanOrEqual(3);
     const carrying = requests.filter((r) => JSON.stringify(r.body).includes("transcript"));
     expect(carrying.length, "в запросах должна быть расшифровка (текст), иначе проверять нечего").toBeGreaterThan(0);
+    const words = readPack().words ?? [];
+    expect(words.length, "строка про слова расшифровки не сохранила найденные слова: нечем проверить, что текст речи ушёл в запросы").toBeGreaterThan(0);
+    const withSpeech = requestsWithWords(requests, words);
+    note(`слова речи (${words.join(", ")}) есть в запросах: ${withSpeech.join(", ") || "ни в одном"}`);
+    expect(withSpeech.length, `хотя бы в одном запросе должно быть слово из речи записи (${words.join(", ")}), иначе проверять нечего`).toBeGreaterThan(0);
+  });
+
+  await step("все запросы прочитаны: ни «слишком большого тела», ни «битого JSON»", async () => {
+    const unread = unscannedRequests(requests);
+    expect(unread, "эти запросы фейк не смог разобрать, значит звук в них не проверен").toEqual([]);
   });
 
   await step("в запросах нет звука: ни RIFF, ни OggS, ни ID3, ни base64 длиннее 4 КиБ", async () => {

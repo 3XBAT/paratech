@@ -83,14 +83,39 @@ export function updatePack(patch: Partial<PackState>, ctl = requireEnv(EnvCtlDir
 
 const requestsFile = (ctl: string) => path.join(ctl, "recording-llm-requests.jsonl");
 
-/** Appends what the fake has recorded since its last script() to the pack's file (each request once, by seq). */
+/**
+ * Appends what the fake has recorded since its last script() to the pack's file (each request once, by seq). A Hub job can
+ * still be asking the provider when a test ends, so it first waits until the number of records is the same at two polls in a
+ * row; what was recorded is saved even if it never settles (and then the call fails, the AC-06 scan must not run on a part).
+ */
 export async function keepRequests(llm: Llm): Promise<number> {
   const ctl = requireEnv(EnvCtlDir);
+  let latest: RecordedRequest[] = [];
+  let before = -1;
+  let settleError: unknown;
+  try {
+    await expect
+      .poll(
+        async () => {
+          latest = await llm.requests();
+          const same = latest.length === before;
+          before = latest.length;
+          return same;
+        },
+        { timeout: 20_000, intervals: [300, 500, 1_000], message: "запросы Hub к провайдеру всё ещё приходят: число записей фейка не устоялось" },
+      )
+      .toBe(true);
+  } catch (err) {
+    settleError = err;
+  }
   const known = new Set(loadRequests(ctl).map((r) => r.seq));
-  const fresh = (await llm.requests()).filter((r) => !known.has(r.seq));
+  const fresh = latest.filter((r) => !known.has(r.seq));
   if (fresh.length > 0) {
     mkdirSync(ctl, { recursive: true });
     appendFileSync(requestsFile(ctl), fresh.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
+  }
+  if (settleError !== undefined) {
+    throw settleError;
   }
   return fresh.length;
 }

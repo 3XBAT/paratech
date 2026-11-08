@@ -68,6 +68,9 @@ test(Feature.cancel, details(Feature.cancel, { requires: Feature.import }), asyn
     await expect(confirm).toBeEnabled({ timeout: 20_000 });
     note(`подтверждение удаления: ${await textOf(dialog)}`);
     await snapshot("Отмена: подтверждение");
+    // A recognition that already finished is not cancelled by this click: the row would then prove nothing.
+    const running = (await whisperNow()).some((p) => p.pid === started.pid);
+    expect(running, `расшифровка (whisper-cli.exe pid ${started.pid}) успела закончиться до «Удалить»: отмену проверять не на чем`).toBe(true);
     await confirm.click(act);
     await expect(dialog).toBeHidden({ timeout: 60_000 });
   });
@@ -83,9 +86,9 @@ test(Feature.cancel, details(Feature.cancel, { requires: Feature.import }), asyn
     await snapshot("Отмена: записи нет");
 
     const after = logLines(/./).slice(logBefore);
-    const cancelled = after.filter((l) => /job attempt finished/.test(l) && /outcome=cancelled/.test(l));
+    const cancelled = after.filter((l) => /job attempt finished/.test(l) && /outcome=cancelled/.test(l) && /\btype="?stt"?(\s|$)/.test(l));
     note(`строки журнала об отмене: ${cancelled.length > 0 ? cancelled.join(" | ").slice(0, 400) : "нет"}`);
-    expect(cancelled.length, "в desktop.log должна быть строка «job attempt finished … outcome=cancelled»").toBeGreaterThan(0);
+    expect(cancelled.length, "в desktop.log должна быть строка «job attempt finished … type=stt … outcome=cancelled»").toBeGreaterThan(0);
   });
 
   await step("в Hub ничего не ушло, первая запись цела", async () => {

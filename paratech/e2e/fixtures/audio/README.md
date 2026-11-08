@@ -48,5 +48,6 @@ Expected words: ветеринарный, врач, фамилия, двойна
 ## Variants made at run time
 The app answers a file it has seen before with the EXISTING recording (same SHA-256), so the cancel and restart scenarios import
 other bytes: the clip behind an ID3v2 tag with a different title, three times in a row (about 150 s, so the recognition runs
-long enough to be stopped). They are written to `<e2e-dir>/fixtures/audio/variants/` by the spec (`specs/recording/driver.ts`,
-`src/fixtures/audio.ts`) and never committed.
+long enough to be stopped). They are written by the spec (`specs/recording/driver.ts`, `src/fixtures/audio.ts`) to `fixtures/audio/variants/` inside the
+control folder of the run (`<ctl>`, in the run root), which holds a copy of `e2e/fixtures/`, never to the committed `e2e/fixtures/`.
+They are never committed.

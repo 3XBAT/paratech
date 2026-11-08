@@ -32,6 +32,33 @@ export interface Lecture {
   keyPoint: string;
 }
 
+// The wording of the app (desktop/frontend/src/dueText.ts), copied here on purpose: the specs check the screen against it
+// without Intl, so the result does not depend on the ICU data or the locale of the runner.
+const WeekdaysShort = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+const MonthsShort = ["янв.", "февр.", "мар.", "апр.", "мая", "июн.", "июл.", "авг.", "сент.", "окт.", "нояб.", "дек."];
+
+/** «вт, 10 нояб.»: the day of a deadline `due` («ГГГГ-ММ-ДД…», the wall clock of the lecture's zone) as the app prints it. */
+export function dueDayRu(due: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T/.exec(due);
+  if (!m) {
+    throw new Error(`not an RFC 3339 deadline: ${JSON.stringify(due)}`);
+  }
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  return `${WeekdaysShort[new Date(Date.UTC(y, mo - 1, d)).getUTCDay()]}, ${d} ${MonthsShort[mo - 1]}`;
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * What the screen prints for the deadline «до вт, 10 нояб., 20:00» (the year follows only when it is not the current one).
+ * `relative` also accepts «завтра до 20:00», which the lists print if a run crosses midnight; the lesson tab never does.
+ */
+export function dueMatcher(due: string, relative = false): RegExp {
+  const time = /T(\d{2}:\d{2})/.exec(due)?.[1] ?? "20:00";
+  const plain = `до ${escapeRe(dueDayRu(due))}(?: \\d{4})?, ${escapeRe(time)}`;
+  return new RegExp(relative ? `(?:${plain}|завтра до ${escapeRe(time)})` : plain);
+}
+
 /** The lecture of one import. `label` tells the imports apart in the list («основная», «отмена», «перезапуск»). */
 export function lectureOf(label: string, now = new Date()): Lecture {
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 10, 0, 0);
