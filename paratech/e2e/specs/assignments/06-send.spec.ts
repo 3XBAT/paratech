@@ -52,7 +52,7 @@ test(Feature.sendRefusal, details(Feature.sendRefusal, { requires: WithHub }), a
     await step("«Указать почту» ведёт на страницу предмета с открытой формой лектора", async () => {
       await main.locator(".rcp-refusal").getByRole("button", { name: "Указать почту", exact: true }).click(act);
       const form = main.locator("form.teacher-form");
-      await expect(form.first(), "после «Указать почту» открыта форма преподавателя").toBeVisible({ timeout: 15_000 });
+      await expect(form, "после «Указать почту» открыта форма преподавателя").toBeVisible({ timeout: 15_000 });
       // one block «Преподаватели» and one open form: the student sees each once
       const blocks = await main.locator("section.teachers").count();
       note(`блоков «Преподаватели» на странице предмета: ${blocks}; открытых форм: ${await form.count()}`);
@@ -88,12 +88,11 @@ test(Feature.sendDialog, details(Feature.sendDialog, { requires: WithHub }), asy
       const refusal = main.locator(".rcp-refusal");
       await expect(refusal).toBeVisible({ timeout: 30_000 });
       await refusal.getByRole("button", { name: "Указать почту", exact: true }).click(act);
-      // `.first()`: the page of the subject shows the block several times (the finding of the previous row), this row goes on with the first form
       const form = main.locator("form.teacher-form");
-      await expect(form.first()).toBeVisible({ timeout: 15_000 });
-      await form.first().getByLabel("Имя", { exact: true }).fill(Teacher.name, act);
-      await form.first().getByLabel("Почта", { exact: true }).fill(Teacher.email, act);
-      await form.first().getByRole("button", { name: "Сохранить", exact: true }).click(act);
+      await expect(form).toBeVisible({ timeout: 15_000 });
+      await form.getByLabel("Имя", { exact: true }).fill(Teacher.name, act);
+      await form.getByLabel("Почта", { exact: true }).fill(Teacher.email, act);
+      await form.getByRole("button", { name: "Сохранить", exact: true }).click(act);
       await expect(main.getByText("Преподаватель сохранён."), "после «Сохранить» страница предмета сообщает об этом").toBeVisible({ timeout: 15_000 });
     });
 

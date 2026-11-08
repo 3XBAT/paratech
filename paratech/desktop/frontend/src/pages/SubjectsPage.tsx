@@ -819,10 +819,10 @@ export function SubjectsPage(props: {
               onRemove={(opener) => removal.open(subject, opener)}
             />
             {subjectForm}
-            <TeachersBlock key={subject.id} teachers={subject.teachers} state={teacherStateFor(teacher, subject.id)} on={teacherActions} />
+            <TeachersBlock key={`teachers:${subject.id}`} teachers={subject.teachers} state={teacherStateFor(teacher, subject.id)} on={teacherActions} />
             <CallLinkBlock key={`link:${subject.id}`} subject={subject} links={links} />
             <SubjectTabs
-              key={subject.id}
+              key={`tabs:${subject.id}`}
               subject={subject}
               tab={tab}
               onTab={(t) => onSubjectTab?.(t)}
