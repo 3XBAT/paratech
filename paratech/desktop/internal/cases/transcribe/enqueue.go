@@ -10,6 +10,7 @@ import (
 	"paratech/desktop/internal/domain/jobs/services/backoff"
 	"paratech/desktop/internal/domain/shared"
 	"paratech/desktop/internal/domain/transcription/services/modelselection"
+	"paratech/desktop/internal/domain/transcription/services/retranscribe"
 	"paratech/desktop/internal/domain/transcription/values"
 )
 
@@ -28,30 +29,35 @@ const (
 // nothing is created, so a repeated event or a sweep after the default model changed adds no second transcription.
 // The recording aggregate decides whether it can be transcribed (recording.TranscribableAudio, ARCH-22). Without an
 // installed model no job is created and the log says why; the next startup sweep tries again.
+//
+// The rule keeps a cancelled transcription cancelled across restarts; only the user's «Расшифровать снова»
+// (Retranscribe) creates another STT job of the recording.
 type Enqueuer struct {
 	recordings  RecordingReader
 	pending     PendingRecordings
 	models      ModelResolver
 	jobs        JobEnqueuer
+	transcripts TranscriptFinder
 	ids         IDGenerator
 	tx          Tx
 	clock       Clock
 	log         *slog.Logger
 	maxAttempts int
+	policy      retranscribe.Policy
 }
 
 // NewEnqueuer checks that every port is given.
 func NewEnqueuer(d EnqueueDeps) (*Enqueuer, error) {
-	if d.Recordings == nil || d.Pending == nil || d.Models == nil || d.Jobs == nil || d.IDs == nil || d.Tx == nil ||
-		d.Clock == nil {
+	if d.Recordings == nil || d.Pending == nil || d.Models == nil || d.Jobs == nil || d.Transcripts == nil ||
+		d.IDs == nil || d.Tx == nil || d.Clock == nil {
 		return nil, fmt.Errorf("%w: every enqueue port except the logger is required", ErrInvalidConfig)
 	}
 	if d.MaxAttempts < 0 {
 		return nil, fmt.Errorf("%w: max attempts %d", ErrInvalidConfig, d.MaxAttempts)
 	}
 	e := &Enqueuer{
-		recordings: d.Recordings, pending: d.Pending, models: d.Models, jobs: d.Jobs, ids: d.IDs, tx: d.Tx,
-		clock: d.Clock, log: d.Log, maxAttempts: d.MaxAttempts,
+		recordings: d.Recordings, pending: d.Pending, models: d.Models, jobs: d.Jobs, transcripts: d.Transcripts,
+		ids: d.IDs, tx: d.Tx, clock: d.Clock, log: d.Log, maxAttempts: d.MaxAttempts, policy: retranscribe.New(),
 	}
 	if e.maxAttempts == 0 {
 		e.maxAttempts = backoff.DefaultSpec().MaxAttempts
