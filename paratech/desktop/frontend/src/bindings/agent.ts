@@ -340,6 +340,11 @@ export interface UpdateView {
   problem: string;
   /** A step went to the Hub: no cards; apply the status only and keep the cards shown. False from an older core. */
   progress: boolean;
+  /**
+   * The attempt number (1..3) of the automatic retry of the step; 0: no retry runs. Missing or invalid from an older
+   * core reads 0. The UI line is TASK-399.
+   */
+  retry: number;
   cards: CardView[];
   /**
    * The update only reports the compaction state of the chat (turn 0, no status, no cards, no problem): it is not a
@@ -739,6 +744,7 @@ export function parseUpdate(raw: unknown): UpdateView {
     stopReason: str(r, "stopReason", w),
     problem: str(r, "problem", w),
     progress: flag(r, "progress"),
+    retry: attempt(r, "retry"),
     cards,
     compaction: flag(r, "compaction"),
     compacting: flag(r, "compacting"),
@@ -778,6 +784,12 @@ export function parseCallProblem(raw: unknown): CallProblem {
 
 function flag(r: Record<string, unknown>, key: string): boolean {
   return r[key] === true;
+}
+
+/** Tolerant: anything but a non-negative integer (missing, string, NaN, negative, fraction) reads 0. */
+function attempt(r: Record<string, unknown>, key: string): number {
+  const v = r[key];
+  return typeof v === "number" && Number.isInteger(v) && v > 0 ? v : 0;
 }
 
 /** Text fields of a journal line are optional for the page: a missing one reads as "". */

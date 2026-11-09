@@ -59,6 +59,10 @@ goes into its list, and a new `ChatRepository` method into `memChatStore`. `Fork
 - Wails answers every error of a bound method with HTTP 422, which the webview console logs as a failed request: a
   normal empty state is `nil, nil` (JSON null), not an error (`TurnkeyService.WorkOfAssignment`).
 - Nothing tests the `RegisterService` list: a service missing there builds and passes tests but is not callable.
+- A new field of `AgentUpdate` is copied from the Driver's `Update` in `panelUpdate`
+  (`paratech/desktop/internal/app/agent.go`) and needs its `AgentUpdateView` field in the exact-JSON tests of the
+  `agent:update` event (`agent_test.go`, `agentcurrent_test.go`, `agentfill_test.go`, `agentsummary_test.go`), e.g.
+  `retry` (TASK-396).
 - Wails logs binding arguments at Debug, so `Shell.WailsLogger` floors it at Info; never lower it (secrets arrive
   as arguments: `SetMailPassword`, `SetHubKey`, `SetGoogleClient`).
 - Confirm-card targets are `values.KindProposal`, `values.KindPreview`, `values.KindAssignment`

@@ -361,7 +361,7 @@ func TestRetryKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := th.Stop(values.StopOffline, at(3)); err != nil {
+	if err := th.Stop(values.StopQuota, at(3)); err != nil {
 		t.Fatal(err)
 	}
 	if err := th.Continue(at(3)); err != nil {
@@ -371,8 +371,13 @@ func TestRetryKeys(t *testing.T) {
 		t.Fatalf("key after Continue = %q, want %q", got, key)
 	}
 
+	// Failed and offline share the budget of one step's retries.
 	for n := 1; n <= MaxRetries; n++ {
-		if err := th.Stop(values.StopFailed, at(4)); err != nil {
+		reason := values.StopFailed
+		if n == 2 {
+			reason = values.StopOffline
+		}
+		if err := th.Stop(reason, at(4)); err != nil {
 			t.Fatal(err)
 		}
 		if err := th.Continue(at(4)); !errors.Is(err, ErrRetryRequired) {

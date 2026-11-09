@@ -121,6 +121,8 @@ type memThreads struct {
 	// afterGet, when set, runs after every Get (outside the lock), so a test can save a competing change between a
 	// load and a save.
 	afterGet func()
+	// failGet, when set, is returned by the next Get once.
+	failGet error
 	// history, when set, keeps the mentions of every saved request, as the agent_turns rows the history read joins.
 	history *memHistory
 }
@@ -129,7 +131,12 @@ func (r *memThreads) Get(_ context.Context, id shared.ThreadID) (*thread.Thread,
 	r.mu.Lock()
 	st, ok := r.states[id]
 	hook := r.afterGet
+	failed := r.failGet
+	r.failGet = nil
 	r.mu.Unlock()
+	if failed != nil {
+		return nil, failed
+	}
 	if !ok {
 		return nil, fmt.Errorf("thread %s: %w", id, shared.ErrNotFound)
 	}
@@ -384,6 +391,7 @@ type recProgress struct {
 	threads *memThreads
 	steps   []Step
 	stored  []thread.State
+	retries []int // attempts published by Retrying, in order
 }
 
 func (p *recProgress) Started(_ context.Context, st Step) {
@@ -393,6 +401,19 @@ func (p *recProgress) Started(_ context.Context, st Step) {
 	p.threads.mu.Lock()
 	p.stored = append(p.stored, p.threads.states[st.Thread])
 	p.threads.mu.Unlock()
+}
+
+// Retrying records the attempt; the step is not added, so steps stay the first call of each Hub step.
+func (p *recProgress) Retrying(_ context.Context, _ Step, attempt int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.retries = append(p.retries, attempt)
+}
+
+func (p *recProgress) attempts() []int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.retries)
 }
 
 func (p *recProgress) got() ([]Step, []thread.State) {
@@ -410,6 +431,12 @@ func newEnvWith(t *testing.T, progress Progress) *env {
 // newEnvPorts is newEnv with the optional Progress and Drafts ports (nil: none).
 func newEnvPorts(t *testing.T, progress Progress, drafts Drafts) *env {
 	t.Helper()
+	return newEnvDeps(t, func(d *Deps) { d.Progress, d.Drafts = progress, drafts })
+}
+
+// newEnvDeps is newEnv with the ports tune sets on the Deps.
+func newEnvDeps(t *testing.T, tune func(d *Deps)) *env {
+	t.Helper()
 	e := &env{
 		model: &fakeModel{}, history: &memHistory{},
 		clock: &fixedClock{now: time.Date(2026, 10, 22, 9, 0, 0, 0, moscow)}, effects: &fakeEffects{},
@@ -417,11 +444,13 @@ func newEnvPorts(t *testing.T, progress Progress, drafts Drafts) *env {
 	e.threads = &memThreads{history: e.history}
 	s1, _ := values.NewRef(values.KindSubject, "s1")
 	e.subjects = &subjects{list: []values.BaseSubject{{ID: s1, Name: "Физика"}}}
-	svc, err := New(Deps{
+	d := Deps{
 		Model: e.model, Threads: e.threads, History: e.history,
 		Subjects: e.subjects, Facts: zeroFacts{}, Tx: memTx{h: e.history, threads: e.threads}, Clock: e.clock, IDs: &seqIDs{},
-		Progress: progress, Drafts: drafts, Effects: e.effects,
-	})
+		Effects: e.effects,
+	}
+	tune(&d)
+	svc, err := New(d)
 	if err != nil {
 		t.Fatal(err)
 	}

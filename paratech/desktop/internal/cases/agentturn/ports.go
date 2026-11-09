@@ -13,8 +13,13 @@ import (
 // Implemented by the hubclient adapter. Errors are those of Complete: shared.ErrNetworkUnavailable, shared.ErrServiceNotConfigured,
 // shared.ErrServiceUnavailable, shared.ErrQuotaExceeded, backoff-classified transient and permanent failures, and
 // values.ErrTurnGone when the Hub no longer keeps the model turn of the last echo. A repeated key returns the stored
-// reply (Replayed), so «Продолжить» after a lost answer does not pay twice. The reply is untrusted: every call goes
-// through values.ParseCall and the thread's Admit before anything runs (hard rule 3).
+// reply (Replayed), so an automatic retry after a lost answer or «Продолжить» after «Стоп» does not pay twice. The reply is
+// untrusted: every call goes through values.ParseCall and the thread's Admit before anything runs (hard rule 3).
+//
+// An error the Hub answered with its own error detail (any PROVIDER_ERROR, a cut provider stream, a refusal, an
+// unusable model answer, a rate limit, the quota) also matches values.ErrHubFailure; a transport failure, a timeout or
+// an unavailable Hub without a detail does not. After the automatic retries a step whose error carries the mark stops
+// failed, one without it offline (ADR-0026 addendum 2026-11-08).
 //
 // A non-nil draft gets the visible reply text written so far, whole each time, in order, from the calling goroutine,
 // while the Hub streams it (ADR-0026 addendum). It is untrusted display-only text: the reply is the returned calls.
@@ -46,6 +51,18 @@ type Draft interface {
 // Sink; optional.
 type Progress interface {
 	Started(ctx context.Context, st Step)
+
+	// Retrying replaces Started for automatic retry attempt (1..backoff.InteractiveRetries) of the open step: once
+	// when the wait before it begins and again when the retried call goes to the Hub, so the panel shows «Повторная
+	// попытка N из 3» until the step answers. Same rules as Started.
+	Retrying(ctx context.Context, st Step, attempt int)
+}
+
+// Sleeper waits on the same time source as Clock (ARCH-24) before an automatic retry of a failed Hub step: it returns
+// once d has passed, or at once with the error of ctx when ctx ends (a «Стоп» ends it). Optional: without it a failed
+// step is not retried by itself.
+type Sleeper interface {
+	Sleep(ctx context.Context, d time.Duration) error
 }
 
 // Effects tells «Повторить» of a finished request (Rerun) whether the request left effects a repeat would double:

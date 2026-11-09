@@ -98,10 +98,11 @@ func (c *core) wireAgent(e env, model agentturn.AgentModel, summarizer agentcomp
 		subjects: reads.library, materials: reads.library, lessons: sqlite.NewLessonRepository(c.db),
 		assignments: reads.assignments,
 	}
+	// The automatic retry of a failed step waits on the system clock (a duration only, no time zone).
 	c.agent, err = agentturn.New(agentturn.Deps{
 		Model: model, Threads: sqlite.NewAgentThreadRepository(c.db), History: sqlite.NewAgentHistory(c.db, e.clock),
 		Subjects: subjects, Facts: facts, Tx: c.db, Clock: e.local, IDs: e.ids, Progress: progress, Drafts: replies,
-		Effects: c.journal, Mentions: c.mentions, Log: log,
+		Effects: c.journal, Mentions: c.mentions, Sleeper: e.clock, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: agent: %w", err)
@@ -188,7 +189,7 @@ func (s panelSink) Publish(u agentloop.Update) {
 func panelUpdate(u agentloop.Update) wails.AgentUpdate {
 	w := wails.AgentUpdate{
 		Thread: u.Thread, Turn: u.Turn, Scope: u.Scope, Status: u.Status, StopReason: u.StopReason, Cards: u.Cards,
-		Problem: string(u.Problem), Progress: u.Progress, Compaction: u.Compaction, Compacting: u.Compacting,
+		Problem: string(u.Problem), Progress: u.Progress, Retry: u.Retry, Compaction: u.Compaction, Compacting: u.Compacting,
 	}
 	if u.Fill != nil {
 		w.Fill = &wails.AgentFillView{Percent: u.Fill.Percent, Level: string(u.Fill.Level), Overflow: u.Fill.Overflow}

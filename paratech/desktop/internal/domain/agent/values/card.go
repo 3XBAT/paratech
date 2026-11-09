@@ -289,7 +289,7 @@ type StopReason string
 // Stop reasons.
 const (
 	StopBudget  StopReason = "budget"  // «Остановлено: лимит просьбы»; cannot be continued
-	StopOffline StopReason = "offline" // «Не завершено: нет связи · Повторить» (Continue: the same key)
+	StopOffline StopReason = "offline" // «Не завершено: нет связи · Повторить» (Retry of an open step: a new key)
 	StopUser    StopReason = "user"    // the student pressed «Стоп»; may be continued
 	StopQuota   StopReason = "quota"   // the quota is used up; «Повторить» (Continue) repeats the same key later
 	StopFailed  StopReason = "failed"  // the step failed for good; «Повторить» sends it again with a new key

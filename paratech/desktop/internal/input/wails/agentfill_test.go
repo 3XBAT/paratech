@@ -116,7 +116,7 @@ func TestAgentUpdateFillContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"threadId":"th1","turn":4,"subjectId":"","lessonId":"","assignmentId":"","screen":"",` +
-		`"status":"DONE","stopReason":"","problem":"","progress":false,"cards":[],` +
+		`"status":"DONE","stopReason":"","problem":"","progress":false,"retry":0,"cards":[],` +
 		`"fill":{"percent":100,"level":"full","overflow":true},"compaction":false,"compacting":false}`
 	if string(got) != want {
 		t.Errorf("event JSON =\n%s\nwant\n%s", got, want)

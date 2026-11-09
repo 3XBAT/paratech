@@ -27,8 +27,9 @@ var ErrTurnGone = errors.New("hub no longer keeps the model turn")
 //
 // It reads GatewayService.AgentStepStream (ADR-0026 addendum) and hands the reply text written so far, whole and
 // cleaned (see replyDraft), to a non-nil draft, in order, from the calling goroutine; a Hub without it (unimplemented)
-// is asked through AgentStep with the same request, so the same key, and so is every later step of this client. The reply is the stream's result, never the
-// deltas; a stream that ends without a result is a lost answer (unavailable, «Продолжить» replays the key).
+// is asked through AgentStep with the same request, so the same key, and so is every later step of this client. The
+// reply is the stream's result, never the deltas; a stream that ends without a result is a lost answer (unavailable:
+// the automatic retry of the case replays the key).
 //
 // A stream has no total cap of RequestTimeout: it asks for the Hub's heartbeat and ends as ErrTimeout when the Hub
 // stays silent too long (see Config.StepIdleTimeout) or after Config.StepTimeout. The unary fallback is bounded by
@@ -130,7 +131,7 @@ func readStepStream(ctx context.Context, gateway hubv1connect.GatewayServiceClie
 		return nil, err
 	}
 	if res == nil {
-		// The Hub keeps the step it finished under the key: a lost result is replayed by «Продолжить».
+		// The Hub keeps the step it finished under the key: the automatic retry of a lost result replays it.
 		return nil, unavailable(opAgentStep, ErrUnavailable)
 	}
 	return res, nil

@@ -517,7 +517,7 @@ func TestAgentPanelEventContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"threadId":"th1","turn":3,"subjectId":"sub-1","lessonId":"les-1","assignmentId":"","screen":"today",` +
-		`"status":"AWAITING_PLAN","stopReason":"","problem":"","progress":false,"cards":[` +
+		`"status":"AWAITING_PLAN","stopReason":"","problem":"","progress":false,"retry":0,"cards":[` +
 		card(`"kind":"plan","plan":{"summary":"Понял так","steps":[`+
 			`{"tool":"list_assignments","args":[`+
 			`{"name":"due_before","type":"date","idKind":"","value":"2026-10-30","values":[]},`+
@@ -568,7 +568,28 @@ func TestAgentPanelProgressContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"threadId":"th1","turn":2,"subjectId":"","lessonId":"","assignmentId":"","screen":"",` +
-		`"status":"PLANNING","stopReason":"","problem":"","progress":true,"cards":[],"fill":null,"compaction":false,"compacting":false}`
+		`"status":"PLANNING","stopReason":"","problem":"","progress":true,"retry":0,"cards":[],"fill":null,"compaction":false,"compacting":false}`
+	if string(got) != want {
+		t.Errorf("event JSON =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// The progress update of an automatic retry carries its attempt (ADR-0026 addendum 2026-11-08) and is still a progress
+// update: no cards, the status only.
+func TestAgentPanelRetryContract(t *testing.T) {
+	panel := NewAgentPanel(discard())
+	em := &fakeEmitter{}
+	panel.Attach(em)
+	panel.Publish(AgentUpdate{Thread: "th1", Turn: 2, Status: "PLANNING", Progress: true, Retry: 2})
+	if len(em.events) != 1 || em.events[0].name != AgentUpdateEvent {
+		t.Fatalf("events = %+v", em.events)
+	}
+	got, err := json.Marshal(em.events[0].data[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"threadId":"th1","turn":2,"subjectId":"","lessonId":"","assignmentId":"","screen":"",` +
+		`"status":"PLANNING","stopReason":"","problem":"","progress":true,"retry":2,"cards":[],"fill":null,"compaction":false,"compacting":false}`
 	if string(got) != want {
 		t.Errorf("event JSON =\n%s\nwant\n%s", got, want)
 	}

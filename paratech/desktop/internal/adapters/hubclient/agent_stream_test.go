@@ -237,7 +237,7 @@ func TestStepKeepsStreamingAfterOtherFailures(t *testing.T) {
 }
 
 // The stream's failures map exactly as AgentStep's, whether they come at once or after deltas; a stream that ends
-// without a result is a lost answer (transient, «Продолжить» replays the key); messages after the result are malformed.
+// without a result is a lost answer (transient, the automatic retry replays the key); messages after the result are malformed.
 func TestStepStreamErrors(t *testing.T) {
 	providerDown := detailErr(connect.CodeUnavailable, &hubv1.ErrorDetail{
 		Code: hubv1.ErrorCode_ERROR_CODE_PROVIDER_ERROR, Message: "x",

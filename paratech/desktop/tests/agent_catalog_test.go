@@ -446,9 +446,13 @@ func TestAgentRequestOfAnOlderCatalogAfterTheUpdate(t *testing.T) {
 	e.start(t)
 
 	before := len(e.hub.Requests())
-	st, err = e.turns.Continue(ctx, turnOf(st))
+	// An open step stopped offline is «Повторить» under a new key (ADR-0026 addendum 2026-11-08), not «Продолжить».
+	if _, err := e.turns.Continue(ctx, turnOf(st)); !errors.Is(err, thread.ErrRetryRequired) {
+		t.Fatalf("Continue = %v, want retry required", err)
+	}
+	st, err = e.turns.Retry(ctx, turnOf(st))
 	if err != nil || st.Status != thread.StatusStopped || st.StopReason != values.StopFailed {
-		t.Fatalf("Continue = %+v, %v", st, err)
+		t.Fatalf("first Retry = %+v, %v", st, err)
 	}
 	st, err = e.turns.Retry(ctx, turnOf(st))
 	if err != nil || st.Status != thread.StatusStopped || st.StopReason != values.StopFailed {
@@ -500,9 +504,13 @@ func TestAgentRequestOfThePreviousCatalogAfterTheUpdate(t *testing.T) {
 	e.start(t)
 
 	before := len(e.hub.Requests())
-	st, err = e.turns.Continue(ctx, turnOf(st))
+	// An open step stopped offline is «Повторить» under a new key (ADR-0026 addendum 2026-11-08), not «Продолжить».
+	if _, err := e.turns.Continue(ctx, turnOf(st)); !errors.Is(err, thread.ErrRetryRequired) {
+		t.Fatalf("Continue = %v, want retry required", err)
+	}
+	st, err = e.turns.Retry(ctx, turnOf(st))
 	if err != nil || st.Status != thread.StatusStopped || st.StopReason != values.StopFailed {
-		t.Fatalf("Continue = %+v, %v", st, err)
+		t.Fatalf("first Retry = %+v, %v", st, err)
 	}
 	st, err = e.turns.Retry(ctx, turnOf(st))
 	if err != nil || st.Status != thread.StatusStopped || st.StopReason != values.StopFailed {

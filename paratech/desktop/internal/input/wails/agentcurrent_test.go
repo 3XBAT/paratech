@@ -104,7 +104,7 @@ func TestAgentChatCurrentContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"problem":"","update":{"threadId":"th1","turn":1,"subjectId":"","lessonId":"","assignmentId":"","screen":"",` +
-		`"status":"STOPPED","stopReason":"offline","problem":"","progress":false,"cards":[` +
+		`"status":"STOPPED","stopReason":"offline","problem":"","progress":false,"retry":0,"cards":[` +
 		card(`"kind":"stopped","stopReason":"offline"`) + `],"fill":null,"compaction":false,"compacting":false}}`
 	if string(got) != want {
 		t.Errorf("ChatCurrent JSON =\n%s\nwant\n%s", got, want)

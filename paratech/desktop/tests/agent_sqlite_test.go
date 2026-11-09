@@ -59,7 +59,13 @@ type agentEnv struct {
 	ids     *agentIDs
 	turns   *agentturn.Service
 	journal *agentjournal.Service
+	sleeper agentturn.Sleeper // nil: no automatic retry of a failed step; set before start
 }
+
+// instantSleep is a Sleeper whose waits pass at once.
+type instantSleep struct{}
+
+func (instantSleep) Sleep(ctx context.Context, _ time.Duration) error { return ctx.Err() }
 
 func newAgentEnv(t *testing.T) *agentEnv {
 	t.Helper()
@@ -93,7 +99,7 @@ func (e *agentEnv) start(t *testing.T) {
 	if e.turns, err = agentturn.New(agentturn.Deps{
 		Model: e.model, Threads: sqlite.NewAgentThreadRepository(e.db), History: sqlite.NewAgentHistory(e.db, e.clock),
 		Subjects: baseSubjects{{ID: s1, Name: "Физика"}}, Facts: zeroFacts{}, Tx: e.db, Clock: e.clock,
-		IDs: e.ids, Log: log,
+		IDs: e.ids, Sleeper: e.sleeper, Log: log,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -325,22 +331,18 @@ func TestAgentRecoverAfterRestart(t *testing.T) {
 	}
 }
 
-// «Продолжить» after a lost answer repeats the key and is replayed for free; «Повторить» after a refusal sends a new
-// key; an expired model turn starts the request again from its text.
-func TestAgentKeysOnContinueRetryAndRestart(t *testing.T) {
+// A lost answer is retried by itself under the same key and replayed for free (ADR-0026 addendum 2026-11-08);
+// «Повторить» after a refusal sends a new key; an expired model turn starts the request again from its text.
+func TestAgentKeysOnAutoRetryRetryAndRestart(t *testing.T) {
 	e := newAgentEnv(t)
+	e.sleeper = instantSleep{}
+	e.start(t)
 	ctx := context.Background()
 	e.hub.ThenLost(testenv.AgentCall{ID: "r1", Tool: "reply", Args: `{"text":"первый ответ"}`})
 
 	st, err := e.turns.Ask(ctx, agentturn.AskInput{Text: "привет"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.Status != thread.StatusStopped || st.StopReason != values.StopOffline {
-		t.Fatalf("lost answer = %+v", st)
-	}
-	if st, err = e.turns.Continue(ctx, turnOf(st)); err != nil || st.Status != thread.StatusDone {
-		t.Fatalf("Continue = %+v, %v", st, err)
+	if err != nil || st.Status != thread.StatusDone {
+		t.Fatalf("lost answer, retried by itself = %+v, %v", st, err)
 	}
 	reqs := e.hub.Requests()
 	if len(reqs) != 2 || reqs[0].GetIdempotencyKey() != reqs[1].GetIdempotencyKey() || e.hub.Executed() != 1 {

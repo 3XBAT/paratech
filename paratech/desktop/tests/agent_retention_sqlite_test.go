@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -232,12 +233,16 @@ func TestAgentChatAfterTheDetailsPurge(t *testing.T) {
 		t.Fatalf("earlier replies = %q, %q, %q", earlierAfter[0].Reply, earlierAfter[1].Reply, earlierAfter[2].Reply)
 	}
 
-	// «Продолжить» of the current request sends what it sent before the purge; a provider failure, then «Повторить».
+	// «Повторить» of the current request (stopped offline: «Продолжить» is refused since ADR-0026 addendum 2026-11-08)
+	// sends what it sent before the purge; a provider failure, then «Повторить» again.
 	want22 := historyKinds(thread.Window(before, 22, values.HistorySummary{}))
 	sent := len(e.hub.Requests())
 	e.hub.ThenProviderFails()
-	if st, err = e.turns.Continue(ctx, turnOf(st)); err != nil || st.StopReason != values.StopFailed {
-		t.Fatalf("Continue = %+v, %v", st, err)
+	if _, err := e.turns.Continue(ctx, turnOf(st)); !errors.Is(err, thread.ErrRetryRequired) {
+		t.Fatalf("Continue = %v, want retry required", err)
+	}
+	if st, err = e.turns.Retry(ctx, turnOf(st)); err != nil || st.StopReason != values.StopFailed {
+		t.Fatalf("first Retry = %+v, %v", st, err)
 	}
 	e.hub.Then(testenv.AgentCall{ID: "r2", Tool: "reply", Args: `{"text":"Предметов нет."}`})
 	if st, err = e.turns.Retry(ctx, turnOf(st)); err != nil || st.Status != thread.StatusDone {
