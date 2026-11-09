@@ -15,6 +15,8 @@ business rules and no secrets: every read and action is a call to a Go service b
 - `*View.ts` (also `workView.ts`, `agentView.ts`, `todayView.ts`...) in this folder - pure view-model logic: Russian texts
   (`texts`), state mapping, gating, formatting. No React state, no DOM, no Wails calls; unit tests sit in `../test`.
   `statusPresentation.ts` / `statusWords.ts` map core status codes to chips and words; `plural.ts`, `clock.ts` are helpers.
+  `transcriptionCancelView.ts`: the cancel icon / «Расшифровать снова» of a recording row (texts, the «Больше не спрашивать»
+  localStorage flag, result notes, the in-flight guard); used by `pages/RecordingRow.tsx` and `pages/RecordingsPage.tsx`.
 - `bindings/` - hand-written typed wrappers over the Go services (not generated). One file per service:
   `methods` table with full Go names, `parse*` validators of untrusted replies, `xxxApi(call)` factory.
   `bindings/runtime.ts` is the only place that touches the Wails runtime (`callByName`, `onEvent`, `onEventData`).

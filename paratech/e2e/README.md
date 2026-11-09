@@ -152,7 +152,7 @@ A synthetic lecture goes the whole real way: «Записи» → «Импорт
 exe folder with the default model → the transcript → three scripted Hub calls → the lesson screen and the assignment. It needs the
 state of the settings pack (Hub key, speech model by default, the schedule and its subjects): every row `requires` them (rows of
 the settings pack, joined by « + »), so `--grep "@settings|@recording"` runs both and a lone `--grep @recording` on a fresh
-sandbox reports «не проверено (нужно: …)», not «сломано». Files run by name: `01-import`, `02-cancel`, `03-restart`, `04-privacy`.
+sandbox reports «не проверено (нужно: …)», not «сломано». Files run by name: `01-import`, `02-cancel`, `02a-retranscribe`, `03-restart`, `04-privacy`.
 
 | Row | What it checks |
 |---|---|
@@ -161,7 +161,8 @@ sandbox reports «не проверено (нужно: …)», not «слома�
 | Запись: конспект из ответа Hub | «Конспект» shows the scripted summary and its key point |
 | Запись: задание со сроком в «Задания» и «Сегодня» | the scripted extraction made an assignment with a deadline: on the lesson's «Задания», in «Задания», in «Сегодня» → «Сроки на неделе» |
 | Запись: отмена расшифровки | a second import (other bytes, ~150 s of audio); while `whisper-cli.exe` runs the recording is deleted from its «⋯» menu; the recognition stops, no `whisper-cli.exe` of the sandbox is left, the row is gone, `desktop.log` says `outcome=cancelled`, nothing went to the Hub |
-| Запись: перезапуск приложения во время расшифровки | a third import; during the recognition the app tree is killed (`taskkill /T /F`), started again on the same sandbox, data dir and debug port (`src/app/restart.ts`), the page reconnected (`app.reconnect()`), and the job finishes (AC-09): «Конспект готов» and the words are in «Расшифровка» |
+| Запись: отмена значком и «Расшифровать снова» | a third import (~150 s of audio); the row's icon «Отменить расшифровку»; the first click opens «Отменить расшифровку?» (title, «Да, отменить», «Не отменять», unchecked «Больше не спрашивать»); «Не отменять» keeps `whisper-cli.exe` and the row; then «Больше не спрашивать» + «Да, отменить»: no `whisper-cli.exe`, chip «Расшифровка отменена» (not «Ошибка») and «Расшифровать снова» in the ACTIVE list «Идут» (the row is not inside any «Завершённые» group), `outcome=cancelled` for `stt` in the log, nothing to the Hub; «Расшифровать снова» queues a new run (a new process); its cancel opens NO dialog; the third run reaches «Конспект готов», three Hub requests, words of the speech in «Расшифровка» |
+| Запись: перезапуск приложения во время расшифровки | a fourth import; during the recognition the app tree is killed (`taskkill /T /F`), started again on the same sandbox, data dir and debug port (`src/app/restart.ts`), the page reconnected (`app.reconnect()`), and the job finishes (AC-09): «Конспект готов» and the words are in «Расшифровка» |
 | Запись: звук не уходит в Hub | AC-06 over ALL requests of the pack (the fake forgets them at each `script()`, so every test saves them to `<ctl>/recording-llm-requests.jsonl`): no `RIFF`, `OggS`, `ID3`, `fLaC`, no MPEG sync, no base64 run over 4 KiB or starting like a container; the scan is shown to find the real clip in base64 |
 
 - **Hub calls.** One imported lecture makes three: summary, homework and lecture text (`homeworkflow/postprocess.go`). The fake
@@ -175,10 +176,14 @@ sandbox reports «не проверено (нужно: …)», not «слома�
 - **Other bytes for every import.** The same SHA-256 returns the existing recording, so the clip is written again behind an
   ID3v2 tag with another title (`audioVariant`), three times in a row for the long ones. Under `<ctl>/fixtures/audio/variants/`
   (picks are taken only from `<ctl>/fixtures`); nothing is committed.
-- **Cancel is the deletion.** The app has no «Отменить» for a running STT job: «Остановить» is for a recording that is being made,
-  and «Фоновая обработка» lists jobs without a recording. A job is cancelled only by `recordingdelete` (the recording's «⋯» →
-  «Удалить»), so the row has no «cancelled» state, it disappears. The row checks what that cancel promises (process, row, log,
-  Hub) and the missing button is a finding for the owner.
+- **Two ways to cancel (TASK-393).** A row with a running (or queued) recognition has a cancel icon «Отменить расшифровку» in its
+  status cell, next to the progress. `02-cancel` still checks the cancel through «Удалить» in «⋯» (`recordingdelete` cancels the jobs, then the row is
+  gone: process, row, log, Hub). `02a-retranscribe` checks the icon: the first click asks «Отменить расшифровку?» («Не отменять»
+  changes nothing), «Да, отменить» with «Больше не спрашивать» cancels and stores the choice in the webview's localStorage (it lives
+  under the wiped control dir, so every run starts with the question), the next cancel runs without any dialog; the cancelled row
+  stays in the active list «Идут» for the session (it folds after an app restart) with the quiet chip «Расшифровка отменена» and the word button «Расшифровать снова», which queues a new
+  recognition; the third run goes to «Конспект готов» with the three scripted Hub calls. The import is ~150 s of audio (three
+  copies of the clip) so the recognition outlasts the dialog steps; the test allows 10 minutes.
 - **Restart.** The setup records the pid of the app in `state.json` (`appPid`); `restartApp` kills that tree only while the pid
   still runs `paratech/dist/e2e/paratech.exe`, starts the same exe (log lines are counted from the end of the old log), writes
   the new pid (`appRestarted`), and the global teardown and the exit guard stop that process too (`killRestartedApp`). The

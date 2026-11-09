@@ -249,6 +249,8 @@ test("finished recordings and jobs go to the folded list; rows with an action st
   assert.equal(isFinishedRow({ stage: "queued", stoppable: false, action: "" }), false, "a completed recording still in work");
   assert.equal(isFinishedRow({ stage: "failed", stoppable: false, action: "runNow" }), false, "the core offers Run now");
   assert.equal(isFinishedRow({ stage: "done", stoppable: true, action: "" }), false, "the core offers Stop");
+  // TASK-393: «Расшифровать снова» alone is no reason to stay in view (the page keeps a just-cancelled row: pageGroups).
+  assert.equal(isFinishedRow({ stage: "failed", stoppable: false, action: "retranscribe" }), true, "folds like any failure");
   for (const s of ["COMPLETED", "FAILED", "CANCELLED"]) {
     assert.equal(isFinishedJob({ status: s, runNowOffered: false }), true, s);
   }

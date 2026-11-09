@@ -54,7 +54,8 @@ const suffixedReasons = ["inLine", "retry", "power", "network", "quota"];
 const ownLabelReasons = ["serviceNotConfigured", "serviceUnavailable"];
 const reasons = [...suffixedReasons, ...ownLabelReasons];
 const errorCodes = ["recordingFailed", "transcriptionFailed", "summaryFailed", "homeworkFailed", "lectureTextFailed"];
-const actions = ["runNow", "openModels", "openConnections", "checkSound", "retry"];
+// TASK-393: «Расшифровать снова» has its label; its page action does not go through actionPages (it is a call, not a page).
+const actions = ["runNow", "openModels", "openConnections", "checkSound", "retry", "retranscribe"];
 
 const started = "2026-10-18T17:19:35Z";
 const startMs = Date.parse(started);

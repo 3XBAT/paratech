@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { activityApi, type AdviceView, type JobItem, type RecordingItem } from "../bindings/activity";
+import { activityApi, type AdviceView, type CancelTranscriptionResult, type JobItem, type RecordingItem } from "../bindings/activity";
 import { promptApi } from "../bindings/prompt";
 import { recordingDeleteApi } from "../bindings/recordingDelete";
 import { recordingImportApi } from "../bindings/recordingImport";
@@ -34,6 +34,7 @@ import {
   headActionsVisible,
   pageGroups,
   queueLine,
+  rowTitle,
   tasksKey,
 } from "../recordingRowView";
 import { adviceKey, keepSource, switchToSuggestion, type AdvicePending } from "../sourcePicker/advice";
@@ -47,7 +48,30 @@ import {
   pickerModel,
   type Selection,
 } from "../sourcePicker/view";
+import { browserStore } from "../subjectsHome";
 import { redoTexts } from "../summaryView";
+import {
+  cancelAskOpen,
+  cancelDecision,
+  cancelNote,
+  confirmCancel,
+  Flights,
+  flightKey,
+  type FlightKind,
+  focusData,
+  type FocusWant,
+  focusExpired,
+  focusLost,
+  focusMaxMs,
+  focusMove,
+  keptAfterCancel,
+  keptBeforeCancel,
+  keptWithout,
+  pruneKept,
+  type RowNote,
+  retranscribeNote,
+  thrownNotes,
+} from "../transcriptionCancelView";
 import { Button } from "../ui/Button";
 import { SpeechComponentNotice } from "./SpeechComponentNotice";
 import { Banner, Dialog, ResultLine } from "../ui/controls";
@@ -58,10 +82,20 @@ import { useRecordingSound } from "../useRecordingSound";
 import { useOpenLesson } from "../openLesson";
 import { RecordingDeleteDialog } from "./RecordingDeleteDialog";
 import { RecordingImportPanel } from "./RecordingImportPanel";
-import { JobRow, RecordingRow } from "./RecordingRow";
+import { CancelTranscriptionDialog, JobRow, RecordingRow } from "./RecordingRow";
 import { useDisclosureFocus } from "./useDisclosureFocus";
 
 const pollMs = 3000;
+
+// The control of a row by its data attribute (the id is compared as text: no selector escaping).
+function findControl(key: string, id: string): HTMLElement | null {
+  for (const el of document.querySelectorAll<HTMLElement>(`[data-${key}]`)) {
+    if (el.getAttribute(`data-${key}`) === id) {
+      return el;
+    }
+  }
+  return null;
+}
 
 // The page shows what the Go core reports: one row per recording with the status of its whole chain (TASK-076). The
 // Stop, Run now and link buttons appear only when the core offers them (ARCH-44). «Начать запись» starts a recording
@@ -203,6 +237,167 @@ export function RecordingsPage({
     }
   }
 
+  // «Отменить расшифровку» and «Расшифровать снова» (TASK-393). One call per recording and kind: the ref answers a second
+  // click made before the next render. A row note is cleared when the next action on that row starts.
+  const flights = useRef(new Flights());
+  const [notes, setNotes] = useState<Readonly<Record<string, RowNote>>>({});
+  const [cancelAsk, setCancelAsk] = useState<string | null>(null);
+  const [cancelSkip, setCancelSkip] = useState(false);
+  const cancelOffered = cancelAskOpen(cancelAsk, recordings ?? []);
+  const askedRow = cancelAsk === null ? undefined : (recordings ?? []).find((r) => r.id === cancelAsk);
+  const cancelAskTitle = askedRow === undefined ? "" : rowTitle(askedRow).text;
+
+  // The confirmation closes when the row stops offering the cancel (the recognition ended meanwhile).
+  useEffect(() => {
+    if (cancelAsk !== null && !cancelOffered) {
+      setCancelAsk(null);
+    }
+  }, [cancelAsk, cancelOffered]);
+
+  function setNote(id: string, note: RowNote | null) {
+    setNotes((all) => {
+      const { [id]: _old, ...rest } = all;
+      return note === null ? rest : { ...rest, [id]: note };
+    });
+  }
+
+  // The cancelled rows stay in «Идут» (pageGroups) and the focus follows the click (focusMove).
+  const [kept, setKept] = useState<ReadonlySet<string>>(new Set());
+  const [focusReq, setFocusReq] = useState<{ id: string; want: FocusWant } | null>(null);
+
+  // A rejected call becomes the row's note (the busy key is the flight key); the flight ends in finally.
+  async function guarded(kind: FlightKind, id: string, call: () => Promise<RowNote | null>) {
+    const key = flightKey(kind, id);
+    if (!flights.current.begin(key)) {
+      return;
+    }
+    setNote(id, null);
+    setFocusReq(null);
+    setBusy((b) => new Set(b).add(key));
+    try {
+      const note = await call();
+      if (mounted.current) {
+        setNote(id, note);
+      }
+    } catch {
+      if (mounted.current) {
+        setNote(id, thrownNotes[kind]);
+        setFocusReq(kind === "cancel" ? { id, want: "cancel" } : { id, want: "again" });
+      }
+    } finally {
+      flights.current.end(key);
+      if (mounted.current) {
+        setBusy((b) => {
+          const next = new Set(b);
+          next.delete(key);
+          return next;
+        });
+      }
+    }
+    if (mounted.current) {
+      await refresh();
+    }
+  }
+
+  // The id is kept BEFORE the call: a refresh may bring the cancelled row before the answer. A failed or rejected cancel
+  // takes it back.
+  const runCancel = (id: string) =>
+    void guarded("cancel", id, async () => {
+      setKept((k) => keptBeforeCancel(k, id));
+      let result: CancelTranscriptionResult;
+      try {
+        result = await api.cancelTranscription(id);
+      } catch (e) {
+        setKept((k) => keptWithout(k, id));
+        throw e;
+      }
+      setKept((k) => keptAfterCancel(k, id, result));
+      setFocusReq({ id, want: result === "failed" ? "cancel" : "again" });
+      return cancelNote(result);
+    });
+  // A started retranscription keeps the id: pageGroups ignores it once the row stops offering «Расшифровать снова», and
+  // the pruning below drops it after a refresh (dropping it here would fold the old cancelled row for a moment).
+  const runRetranscribe = (id: string) =>
+    void guarded("retranscribe", id, async () => {
+      const result = await api.retranscribe(id);
+      setFocusReq({ id, want: result === "started" ? "started" : "again" });
+      return retranscribeNote(result);
+    });
+
+  // Prune the kept ids from a refreshed list (never from the click): see pruneKept. `seen` is its memory.
+  const keptSeen = useRef<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    if (recordings === null) {
+      return;
+    }
+    const next = pruneKept(kept, keptSeen.current, recordings);
+    keptSeen.current = next.seen;
+    if (next.kept !== kept) {
+      setKept(next.kept);
+    }
+  }, [kept, recordings]);
+
+  // A pending focus request expires after focusMaxMs or focusMaxRefreshes refreshes, whichever comes first.
+  const focusTrack = useRef<{ req: unknown; startedAt: number; refreshes: number; list: unknown } | null>(null);
+  useEffect(() => {
+    if (focusReq === null) {
+      return;
+    }
+    const timer = setTimeout(() => setFocusReq((cur) => (cur === focusReq ? null : cur)), focusMaxMs);
+    return () => clearTimeout(timer);
+  }, [focusReq]);
+
+  // After a cancel the clicked control is gone or off and the focus has fallen to the page: it goes to the row's
+  // «Расшифровать снова» (or back to the cancel icon of a failed call, or to the icon of a restarted row). Never when
+  // the student has moved it elsewhere.
+  useEffect(() => {
+    if (focusReq === null) {
+      focusTrack.current = null;
+      return;
+    }
+    let track = focusTrack.current;
+    if (track === null || track.req !== focusReq) {
+      track = { req: focusReq, startedAt: Date.now(), refreshes: 0, list: recordings };
+      focusTrack.current = track;
+    } else if (track.list !== recordings) {
+      track.refreshes += 1;
+      track.list = recordings;
+    }
+    const { id, want } = focusReq;
+    const move = focusMove(want, (recordings ?? []).find((r) => r.id === id), {
+      lost: focusLost(document.activeElement, document.body, id),
+      busy: busy.has(flightKey("cancel", id)) || busy.has(flightKey("retranscribe", id)),
+    });
+    if (move === "wait") {
+      if (focusExpired(Date.now() - track.startedAt, track.refreshes)) {
+        setFocusReq(null);
+      }
+      return;
+    }
+    setFocusReq(null);
+    if (move !== "drop") {
+      findControl(move === "cancel" ? focusData.cancel : focusData.again, id)?.focus({ preventScroll: true });
+    }
+  }, [focusReq, recordings, busy]);
+
+  function askCancel(id: string) {
+    if (cancelDecision(browserStore()) === "run") {
+      runCancel(id);
+      return;
+    }
+    setCancelSkip(false);
+    setCancelAsk(id);
+  }
+
+  function confirmCancelAsk() {
+    const id = cancelAsk;
+    setCancelAsk(null);
+    confirmCancel(browserStore(), cancelSkip);
+    if (id !== null) {
+      runCancel(id);
+    }
+  }
+
   // «Импортировать запись» (TASK-162): the panel; the mark of an imported row comes from the recording's origin.
   const [importOpen, setImportOpen] = useState(false);
   // Declared before the effect below: the import panel's own focus move (into it, back to its button) goes first.
@@ -306,7 +501,7 @@ export function RecordingsPage({
 
   // Two sections, «Записи» and «Фоновая обработка», each with «Идут» and the folded «Завершённые» (TASK-098); rows in progress
   // (and those with Stop or Run now) always stay in view. Only the latest draft job per assignment is listed.
-  const groups = pageGroups(recordings ?? [], jobs ?? []);
+  const groups = pageGroups(recordings ?? [], jobs ?? [], kept);
 
   // The rows of one group, in a card on the shared row grid (.arows): status, button and «⋯» columns line up in every
   // card of both sections. CollapsibleList puts the finished ones into the same kind of card.
@@ -340,6 +535,11 @@ export function RecordingsPage({
       onSelect={(on) => setSelected((sel) => withSelected(sel, r.id, on))}
       sound={sound}
       imported={r.origin === "imported"}
+      cancelling={busy.has(flightKey("cancel", r.id))}
+      onCancel={() => askCancel(r.id)}
+      retranscribing={busy.has(flightKey("retranscribe", r.id))}
+      onRetranscribe={() => runRetranscribe(r.id)}
+      note={notes[r.id] ?? null}
     />
   );
 
@@ -655,6 +855,15 @@ export function RecordingsPage({
       >
         <p>{redoTexts.body}</p>
       </Dialog>
+
+      <CancelTranscriptionDialog
+        open={cancelOffered}
+        recordingTitle={cancelAskTitle}
+        skip={cancelSkip}
+        onSkip={setCancelSkip}
+        onConfirm={confirmCancelAsk}
+        onCancel={() => setCancelAsk(null)}
+      />
 
       {queue && (
         <>
