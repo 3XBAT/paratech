@@ -492,7 +492,7 @@ func (c Content) Encode() string {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)
-	_ = enc.Encode(c) // strings, ints, bools and pointers of them only: encoding cannot fail
+	_ = enc.Encode(c) // strings, ints, bools, pointers and slices of them only: encoding cannot fail
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
