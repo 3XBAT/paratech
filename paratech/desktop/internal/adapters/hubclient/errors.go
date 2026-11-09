@@ -16,8 +16,9 @@ import (
 // Reasons of a failed call (ARCH-32). A returned error is an *Error that matches exactly one of them (ErrNotConfigured
 // also its reason), or shared.ErrNetworkUnavailable or shared.ErrQuotaExceeded, with errors.Is. A Hub that does not
 // serve for now also matches shared.ErrServiceUnavailable, a missing setup shared.ErrServiceNotConfigured (TASK-083).
-// An error the Hub answered with an ErrorDetail also matches agent.ErrHubFailure; a transport failure, a timeout or a
-// bare unavailable does not.
+// An error the Hub answered with an ErrorDetail also matches agent.ErrHubFailure, and so does a streamed agent step that
+// lost its result or was cut by the watchdog after its first message; a transport failure, a timeout or a bare
+// unavailable otherwise does not.
 var (
 	// ErrInvalidConfig is returned by New for an unusable configuration. A call matches it with ErrNotConfigured when
 	// the URL source gives a URL the client refuses.
