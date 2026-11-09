@@ -247,6 +247,46 @@ func TestQueueAndARequestWaitingForTheStudent(t *testing.T) {
 	}
 }
 
+// QueueReady is true exactly when StartQueued would take a question: one waits and the chat's request is final.
+func TestQueueReady(t *testing.T) {
+	plan := `{"summary":"План","steps":[{"tool":"create_subject","arguments":{"name":"Химия"}}]}`
+	e := newEnv(t)
+	if e.svc.QueueReady(t.Context(), "th1") {
+		t.Fatal("ready without a chat")
+	}
+	st := executing(t, e)
+	if e.svc.QueueReady(t.Context(), "th1") {
+		t.Fatal("ready with nothing queued")
+	}
+	queue(t, e, "первый")
+	if e.svc.QueueReady(t.Context(), "th1") {
+		t.Fatal("ready while tools run")
+	}
+
+	e.model.then(raw("p1", "show_plan", plan))
+	if next, err := e.svc.Submit(t.Context(), SubmitInput{Turn: ref(st), Outcomes: []Outcome{okResult("c1", `{}`)}}); err != nil ||
+		next.Status != thread.StatusAwaitingPlan {
+		t.Fatalf("submit = %+v, %v", next, err)
+	}
+	if e.svc.QueueReady(t.Context(), "th1") {
+		t.Fatal("ready while the student is asked")
+	}
+
+	cur, ok, err := e.svc.Current(t.Context(), "th1")
+	if err != nil || !ok {
+		t.Fatalf("current = %+v, %v, %v", cur, ok, err)
+	}
+	if _, err := e.svc.Cancel(t.Context(), ref(cur)); err != nil {
+		t.Fatal(err)
+	}
+	if !e.svc.QueueReady(t.Context(), "th1") {
+		t.Fatal("not ready after the request ended")
+	}
+	if got := startNext(t, e); lastText(t, e) != "первый" || e.svc.QueueReady(t.Context(), "th1") {
+		t.Fatalf("started = %+v, still ready", got)
+	}
+}
+
 // The started request uses the question's own scope, text and mentions; a mention deleted while it waited is dropped.
 func TestQueuedQuestionKeepsItsOwnContext(t *testing.T) {
 	e := newEnv(t)

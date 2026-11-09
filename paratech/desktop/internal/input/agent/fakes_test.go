@@ -287,6 +287,13 @@ func (s *scriptedTurns) HasQueued(id shared.ThreadID) bool {
 	return s.waiting[id]
 }
 
+// QueueReady is true when a question waits and startQueued would take it.
+func (s *scriptedTurns) QueueReady(_ context.Context, id shared.ThreadID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.waiting[id] && s.startQueued != nil
+}
+
 func (s *scriptedTurns) StartQueued(_ context.Context, id shared.ThreadID) (agentturn.Step, error) {
 	s.mu.Lock()
 	s.starts = append(s.starts, id)
@@ -313,6 +320,8 @@ func (noQueue) Enqueue(context.Context, agentturn.AskInput) (agentturn.Queued, b
 }
 
 func (noQueue) HasQueued(shared.ThreadID) bool { return false }
+
+func (noQueue) QueueReady(context.Context, shared.ThreadID) bool { return false }
 
 func (noQueue) StartQueued(context.Context, shared.ThreadID) (agentturn.Step, error) {
 	return agentturn.Step{}, agentturn.ErrNothingQueued

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"paratech/desktop/internal/cases/agentcompact"
 	"paratech/desktop/internal/cases/agentturn"
 	"paratech/desktop/internal/domain/agent/thread"
 	"paratech/desktop/internal/domain/agent/values"
@@ -400,6 +401,115 @@ func TestDriverQueuedAskAndAnIdleDrain(t *testing.T) {
 	if turns.asks != 0 || !slices.Equal(turns.starts, []shared.ThreadID{"th1"}) || len(sink.all()) != 0 {
 		t.Fatalf("asks %d, starts %v, updates %+v", turns.asks, turns.starts, sink.all())
 	}
+}
+
+// awaitingTurns are scripted turns whose chats wait for the student: no waiting question is ready to start.
+type awaitingTurns struct {
+	*scriptedTurns
+}
+
+func (awaitingTurns) QueueReady(context.Context, shared.ThreadID) bool { return false }
+
+// Two chats each hold a waiting question behind a request that waits for the student: their idle drains overlap, and
+// the end of one does not wake the other, so each chat gets one StartQueued; nothing starts and nothing is compacted.
+func TestDriverIdleDrainsOfTwoChatsDoNotWakeEachOther(t *testing.T) {
+	const chatA, chatB = shared.ThreadID("tha"), shared.ThreadID("thb")
+	both := make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	first := map[shared.ThreadID]bool{}
+	turns := &scriptedTurns{
+		enqueue: func(in agentturn.AskInput) (agentturn.Queued, bool, error) {
+			return agentturn.Queued{Thread: in.ThreadID, Ticket: agentturn.Ticket("q" + string(in.ThreadID))}, true, nil
+		},
+		waiting: map[shared.ThreadID]bool{chatA: true, chatB: true},
+	}
+	turns.startQueued = func(id shared.ThreadID) (agentturn.Step, error) {
+		mu.Lock()
+		first[id] = true
+		if len(first) == 2 {
+			once.Do(func() { close(both) })
+		}
+		mu.Unlock()
+		select { // the first drains of both chats run at the same time
+		case <-both:
+		case <-time.After(5 * time.Second):
+		}
+		return agentturn.Step{}, agentturn.ErrNothingQueued
+	}
+	compactor := &fakeCompactor{run: compacted(agentcompact.Fill{Level: thread.FillNormal})}
+	sink := &chanSink{}
+	deps := newReads().deps(awaitingTurns{turns}, sink)
+	deps.Compactor = compactor
+	d, err := New(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+
+	for _, id := range []shared.ThreadID{chatA, chatB} {
+		if q, err := d.Ask(t.Context(), agentturn.AskInput{ThreadID: id, Text: "потом"}); err != nil || q.Thread != id {
+			t.Fatalf("Ask in %s = %+v, %v", id, q, err)
+		}
+	}
+	d.Wait()
+
+	turns.mu.Lock()
+	starts := slices.Clone(turns.starts)
+	turns.mu.Unlock()
+	for _, id := range []shared.ThreadID{chatA, chatB} {
+		if n := countOf(starts, id); n != 1 { // the end counter before the fix let one of them drain again
+			t.Fatalf("StartQueued of %s ran %d times: %v", id, n, starts)
+		}
+	}
+	if ups := sink.all(); len(ups) != 0 {
+		t.Fatalf("updates = %+v", ups)
+	}
+	if got := compactor.calls(); len(got) != 0 {
+		t.Fatalf("compacted %v while nothing could start", got)
+	}
+}
+
+// A drain whose question can start compacts the chat first, as before an Ask.
+func TestDriverReadyDrainCompactsFirst(t *testing.T) {
+	turns := &scriptedTurns{
+		enqueue: func(agentturn.AskInput) (agentturn.Queued, bool, error) {
+			return agentturn.Queued{Thread: th1, Ticket: "q1"}, true, nil
+		},
+		waiting: map[shared.ThreadID]bool{th1: true},
+	}
+	turns.startQueued = func(id shared.ThreadID) (agentturn.Step, error) {
+		turns.mu.Lock()
+		turns.waiting[id] = false
+		turns.mu.Unlock()
+		return agentturn.Step{Thread: id, Turn: 2, Status: thread.StatusDone, Ticket: "q1"}, nil
+	}
+	compactor := &fakeCompactor{run: compacted(agentcompact.Fill{Level: thread.FillNormal})}
+	deps := newReads().deps(turns, &chanSink{})
+	deps.Compactor = compactor
+	d, err := New(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{ThreadID: th1, Text: "потом"}); err != nil {
+		t.Fatal(err)
+	}
+	d.Wait()
+	if got := compactor.calls(); !slices.Equal(got, []shared.ThreadID{th1}) {
+		t.Fatalf("compacted %v", got)
+	}
+}
+
+func countOf(ids []shared.ThreadID, id shared.ThreadID) int {
+	n := 0
+	for _, x := range ids {
+		if x == id {
+			n++
+		}
+	}
+	return n
 }
 
 // gatedAsk holds Ask until gate closes, outside the lock of the scripted turns.

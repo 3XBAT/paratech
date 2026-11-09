@@ -43,6 +43,10 @@ func (s *stuckTurns) Enqueue(ctx context.Context, in agentturn.AskInput) (agentt
 
 func (s *stuckTurns) HasQueued(id shared.ThreadID) bool { return false }
 
+func (s *stuckTurns) QueueReady(ctx context.Context, id shared.ThreadID) bool {
+	return noQueue{}.QueueReady(ctx, id)
+}
+
 func (s *stuckTurns) StartQueued(ctx context.Context, id shared.ThreadID) (agentturn.Step, error) {
 	return noQueue{}.StartQueued(ctx, id)
 }

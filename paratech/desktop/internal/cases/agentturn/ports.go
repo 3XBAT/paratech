@@ -17,9 +17,10 @@ import (
 // untrusted: every call goes through values.ParseCall and the thread's Admit before anything runs (hard rule 3).
 //
 // An error the Hub answered with its own error detail (any PROVIDER_ERROR, a cut provider stream, a refusal, an
-// unusable model answer, a rate limit, the quota) also matches values.ErrHubFailure; a transport failure, a timeout or
-// an unavailable Hub without a detail does not. After the automatic retries a step whose error carries the mark stops
-// failed, one without it offline (ADR-0026 addendum 2026-11-08).
+// unusable model answer, a rate limit, the quota) also matches values.ErrHubFailure, and so does a streamed step that
+// lost its result or was cut after the Hub's first message; otherwise a transport failure, a timeout or an unavailable
+// Hub without a detail does not. After the automatic retries a step whose error carries the mark stops failed, one
+// without it offline (ADR-0026 addendum 2026-11-08).
 //
 // A non-nil draft gets the visible reply text written so far, whole each time, in order, from the calling goroutine,
 // while the Hub streams it (ADR-0026 addendum). It is untrusted display-only text: the reply is the returned calls.

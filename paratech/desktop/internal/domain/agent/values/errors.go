@@ -44,7 +44,8 @@ var (
 	ErrTurnGone = errors.New("the hub no longer keeps the model turn")
 
 	// ErrHubFailure marks a failed Hub call that the Hub answered with its own error detail (a provider failure, a
-	// refusal, an unusable model answer, a rate limit): the request reached the Hub. A request whose last failure
-	// carries it stops failed, one without it (transport, timeout, unavailable) offline (ADR-0026 addendum 2026-11-08).
+	// refusal, an unusable model answer, a rate limit), or a streamed step lost or cut after the Hub's first message:
+	// the request reached the Hub. A request whose last failure carries it stops failed, one without it (transport,
+	// timeout, unavailable before any Hub message) offline (ADR-0026 addendum 2026-11-08).
 	ErrHubFailure = errors.New("the hub answered with an error")
 )

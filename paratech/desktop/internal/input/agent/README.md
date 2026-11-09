@@ -69,9 +69,12 @@ classes, waves).
 - The queue lives in `agentturn`; the Driver only triggers it. Every loop drains its chat AFTER `forget` (no longer
   among the loops), and a queued `Ask` drains too, so a question queued while the last loop ends is never missed. A
   loop that has not named its chat (`""`, an Ask of the current chat) holds drains back until any loop ends
-  (`later`). A drain that started nothing drains again only when other loops ended meanwhile (no spin). After
-  `Close` nothing drains: waiting questions are never sent. A new `Turns` method needs a stub in every Turns fake
-  (`noQueue`).
+  (`later`). A drain that started nothing drains again only when a drain of its own chat was deferred to it meanwhile
+  (`deferred`); ends of other chats' loops never wake it (no spin). A drain compacts the chat only when
+  `agentturn.QueueReady` says the question can start. After `Close` nothing drains: waiting questions are never sent.
+  A new `Turns` method needs a stub in every Turns fake (`noQueue`).
+- A drain that fails to read the store ends idle and does not retry; the question waits until another loop of that
+  chat ends or it is withdrawn.
 - A tool this desktop does not dispatch answers `values.RefuseUnavailable`, so a missing dispatch branch fails quietly.
 - `values.CatalogVersion` is still 9: the v10 tools (`paratech/desktop/internal/domain/agent/values/wave10*.go`) are
   declared and dispatched here but do not parse yet; tests such as `TestNoteToolsAreNotServedAtCatalog9` pin that

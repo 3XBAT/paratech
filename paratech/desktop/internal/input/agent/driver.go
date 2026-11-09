@@ -65,6 +65,7 @@ type Turns interface {
 	// The queue of waiting questions (driver_queue.go).
 	Enqueue(ctx context.Context, in agentturn.AskInput) (agentturn.Queued, bool, error)
 	HasQueued(id shared.ThreadID) bool
+	QueueReady(ctx context.Context, id shared.ThreadID) bool
 	StartQueued(ctx context.Context, id shared.ThreadID) (agentturn.Step, error)
 	Withdraw(id shared.ThreadID, ticket agentturn.Ticket) agentturn.WithdrawResult
 }
@@ -179,8 +180,9 @@ type Driver struct {
 	inflight map[agentturn.TurnRef]map[uint64]context.CancelFunc
 	// loops are the threads the running loops (by operation id) act on; "" while an Ask has not named its thread.
 	loops map[uint64]shared.ThreadID
-	// ended counts the loops that ended (forget), so a drain that started nothing knows whether others ended meanwhile.
-	ended uint64
+	// deferred marks the threads whose drain returned because a loop of the same thread ran: the end of that loop drains
+	// again even when it started nothing (driver_queue.go).
+	deferred map[shared.ThreadID]bool
 	// later are the drains a loop of no known thread held back, with their parent ctx (driver_queue.go).
 	later map[shared.ThreadID]context.Context
 	// shown are the tool cards of the newest request of each thread (shown.go). A thread keeps one entry, replaced by
@@ -214,6 +216,7 @@ func New(d Deps) (*Driver, error) {
 		turns: d.Turns, sink: d.Sink, replies: d.Replies, compact: d.Compactor, log: log, cancels: map[uint64]context.CancelFunc{},
 		stops: map[agentturn.TurnRef]*stopping{}, inflight: map[agentturn.TurnRef]map[uint64]context.CancelFunc{},
 		loops: map[uint64]shared.ThreadID{}, shown: map[shared.ThreadID]*toolCards{}, later: map[shared.ThreadID]context.Context{},
+		deferred: map[shared.ThreadID]bool{},
 		tools: tools{
 			library: d.Library, inspector: d.Inspector, answerer: d.Answerer, knowledge: d.Knowledge, activity: d.Activity, schedule: d.Schedule, assignments: d.Assignments,
 			deliveries: d.Deliveries, journal: d.Journal, actions: d.Actions, proposals: d.Proposals,
@@ -451,16 +454,15 @@ func (d *Driver) spawn(parent context.Context, at agentturn.Step, op func(ctx co
 	d.cancels[id] = cancel
 	d.loops[id] = at.Thread
 	ctx = context.WithValue(ctx, loopKey{}, id)
-	born := d.ended
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
 		idle := false
 		defer func() {
-			// A drain that started nothing drains again only when other loops ended meanwhile: one of them may have
-			// skipped the drain while this loop ran, and no loop spins on a queue it cannot start.
-			th, others := d.forget(id, born)
-			if !idle || others {
+			// A drain that started nothing drains again only when a drain of its thread was deferred to it meanwhile:
+			// no loop spins on a queue it cannot start, and the ends of other chats' loops do not wake it.
+			th, deferred := d.forget(id)
+			if !idle || deferred {
 				d.drain(parent, th)
 			}
 			d.drainLater()
@@ -533,9 +535,9 @@ func (d *Driver) callsContext(ctx context.Context, id uint64, ref agentturn.Turn
 	}
 }
 
-// forget drops loop id and returns the thread it acted on ("" when it never learnt it) and whether other loops ended
-// since it was born (born: the count of ended loops then).
-func (d *Driver) forget(id uint64, born uint64) (shared.ThreadID, bool) {
+// forget drops loop id and returns the thread it acted on ("" when it never learnt it) and whether a drain of that
+// thread was deferred to its loops; the mark is taken (a drain that meets another loop of the thread sets it again).
+func (d *Driver) forget(id uint64) (shared.ThreadID, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if cancel, ok := d.cancels[id]; ok {
@@ -544,8 +546,9 @@ func (d *Driver) forget(id uint64, born uint64) (shared.ThreadID, bool) {
 	}
 	th := d.loops[id]
 	delete(d.loops, id)
-	d.ended++
-	return th, d.ended-1 != born
+	deferred := d.deferred[th]
+	delete(d.deferred, th)
+	return th, deferred
 }
 
 // run is the loop of operation id: show the step, run its calls, report their results, until no call is left. at is

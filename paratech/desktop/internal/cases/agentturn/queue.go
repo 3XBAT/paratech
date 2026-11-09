@@ -189,6 +189,27 @@ func (s *Service) HasQueued(id shared.ThreadID) bool {
 	return s.q.has(id)
 }
 
+// QueueReady reports whether StartQueued of chat id would take a question now, as one read tells: a question waits and
+// the chat exists with no request or a final one. It does not wait for s.mu and changes nothing; a failed read is
+// false. The Driver compacts the chat before a start only when it is ready, so a drain of a chat whose request waits
+// for the student never pays for a summary.
+func (s *Service) QueueReady(ctx context.Context, id shared.ThreadID) bool {
+	if !s.q.has(id) {
+		return false
+	}
+	th, err := s.threads.Get(ctx, id)
+	if err != nil {
+		return false
+	}
+	turn, ok := th.Turn()
+	return !ok || !blocksQueue(turn)
+}
+
+// blocksQueue reports whether request turn holds the queue of its chat: it runs or waits for the student.
+func blocksQueue(turn thread.Turn) bool {
+	return running(turn) || turn.Status() == thread.StatusAwaitingPlan || turn.Status() == thread.StatusAwaitingAnswers
+}
+
 // Withdraw is «Отменить этот запрос» of waiting question t of chat id: a question still waiting is removed (never
 // sent, never paid); one that already started is WithdrawStarted; any other WithdrawNotFound. It is atomic against
 // StartQueued taking it.
@@ -218,7 +239,7 @@ func (s *Service) StartQueued(ctx context.Context, id shared.ThreadID) (Step, er
 			switch {
 			case running(turn) && s.q.has(id):
 				return Step{}, fmt.Errorf("%s: %w", opQueued, thread.ErrTurnInProgress)
-			case running(turn), turn.Status() == thread.StatusAwaitingPlan, turn.Status() == thread.StatusAwaitingAnswers:
+			case blocksQueue(turn):
 				return Step{}, ErrNothingQueued
 			}
 		}
