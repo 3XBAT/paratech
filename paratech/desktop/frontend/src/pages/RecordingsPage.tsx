@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { activityApi, type AdviceView, type JobItem, type RecordingItem } from "../bindings/activity";
+import { activityApi, type AdviceView, type CancelTranscriptionResult, type JobItem, type RecordingItem } from "../bindings/activity";
 import { promptApi } from "../bindings/prompt";
 import { recordingDeleteApi } from "../bindings/recordingDelete";
 import { recordingImportApi } from "../bindings/recordingImport";
@@ -60,9 +60,14 @@ import {
   type FlightKind,
   focusData,
   type FocusWant,
+  focusExpired,
+  focusLost,
+  focusMaxMs,
   focusMove,
   keptAfterCancel,
-  keptAfterRetranscribe,
+  keptBeforeCancel,
+  keptWithout,
+  pruneKept,
   type RowNote,
   retranscribeNote,
   thrownNotes,
@@ -294,45 +299,84 @@ export function RecordingsPage({
     }
   }
 
+  // The id is kept BEFORE the call: a refresh may bring the cancelled row before the answer. A failed or rejected cancel
+  // takes it back.
   const runCancel = (id: string) =>
     void guarded("cancel", id, async () => {
-      const result = await api.cancelTranscription(id);
+      setKept((k) => keptBeforeCancel(k, id));
+      let result: CancelTranscriptionResult;
+      try {
+        result = await api.cancelTranscription(id);
+      } catch (e) {
+        setKept((k) => keptWithout(k, id));
+        throw e;
+      }
       setKept((k) => keptAfterCancel(k, id, result));
       setFocusReq({ id, want: result === "failed" ? "cancel" : "again" });
       return cancelNote(result);
     });
+  // A started retranscription keeps the id: pageGroups ignores it once the row stops offering «Расшифровать снова», and
+  // the pruning below drops it after a refresh (dropping it here would fold the old cancelled row for a moment).
   const runRetranscribe = (id: string) =>
     void guarded("retranscribe", id, async () => {
       const result = await api.retranscribe(id);
-      setKept((k) => keptAfterRetranscribe(k, id, result));
-      setFocusReq(result === "started" ? null : { id, want: "again" });
+      setFocusReq({ id, want: result === "started" ? "started" : "again" });
       return retranscribeNote(result);
     });
 
-  // After a cancel the clicked control is gone or off and the focus has fallen to the page: it goes to the row's
-  // «Расшифровать снова» (or back to the cancel icon of a failed call). Never when the student has moved it elsewhere.
+  // Prune the kept ids from a refreshed list (never from the click): see pruneKept. `seen` is its memory.
+  const keptSeen = useRef<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    if (recordings === null) {
+      return;
+    }
+    const next = pruneKept(kept, keptSeen.current, recordings);
+    keptSeen.current = next.seen;
+    if (next.kept !== kept) {
+      setKept(next.kept);
+    }
+  }, [kept, recordings]);
+
+  // A pending focus request expires after focusMaxMs or focusMaxRefreshes refreshes, whichever comes first.
+  const focusTrack = useRef<{ req: unknown; startedAt: number; refreshes: number; list: unknown } | null>(null);
   useEffect(() => {
     if (focusReq === null) {
       return;
     }
+    const timer = setTimeout(() => setFocusReq((cur) => (cur === focusReq ? null : cur)), focusMaxMs);
+    return () => clearTimeout(timer);
+  }, [focusReq]);
+
+  // After a cancel the clicked control is gone or off and the focus has fallen to the page: it goes to the row's
+  // «Расшифровать снова» (or back to the cancel icon of a failed call, or to the icon of a restarted row). Never when
+  // the student has moved it elsewhere.
+  useEffect(() => {
+    if (focusReq === null) {
+      focusTrack.current = null;
+      return;
+    }
+    let track = focusTrack.current;
+    if (track === null || track.req !== focusReq) {
+      track = { req: focusReq, startedAt: Date.now(), refreshes: 0, list: recordings };
+      focusTrack.current = track;
+    } else if (track.list !== recordings) {
+      track.refreshes += 1;
+      track.list = recordings;
+    }
     const { id, want } = focusReq;
-    const active = document.activeElement;
-    const lost =
-      active === null ||
-      active === document.body ||
-      !active.isConnected ||
-      (active instanceof HTMLButtonElement && active.disabled) ||
-      (want === "again" && active.getAttribute(`data-${focusData.cancel}`) === id);
     const move = focusMove(want, (recordings ?? []).find((r) => r.id === id), {
-      lost,
+      lost: focusLost(document.activeElement, document.body, id),
       busy: busy.has(flightKey("cancel", id)) || busy.has(flightKey("retranscribe", id)),
     });
     if (move === "wait") {
+      if (focusExpired(Date.now() - track.startedAt, track.refreshes)) {
+        setFocusReq(null);
+      }
       return;
     }
     setFocusReq(null);
     if (move !== "drop") {
-      findControl(move === "cancel" ? focusData.cancel : focusData.again, id)?.focus();
+      findControl(move === "cancel" ? focusData.cancel : focusData.again, id)?.focus({ preventScroll: true });
     }
   }, [focusReq, recordings, busy]);
 

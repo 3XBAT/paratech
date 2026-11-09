@@ -42,14 +42,15 @@ export const thrownNotes: Readonly<Record<FlightKind, RowNote>> = {
 /**
  * The recordings whose transcription the student cancelled in this session. Such a row stays in «Идут» while it offers
  * «Расшифровать снова» (recordingRowView.pageGroups), so the way back does not fold away right under the click.
+ * The id is added BEFORE the call (a refresh may bring the cancelled row at any moment) and removed again on a failure.
  */
-export function keptAfterCancel(kept: ReadonlySet<string>, id: string, result: CancelTranscriptionResult): ReadonlySet<string> {
-  return result === "failed" ? kept : new Set(kept).add(id);
+export function keptBeforeCancel(kept: ReadonlySet<string>, id: string): ReadonlySet<string> {
+  return kept.has(id) ? kept : new Set(kept).add(id);
 }
 
-/** A started retranscription leaves the row to the usual rules; every other answer keeps it where it is. */
-export function keptAfterRetranscribe(kept: ReadonlySet<string>, id: string, result: RetranscribeResult): ReadonlySet<string> {
-  if (result !== "started" || !kept.has(id)) {
+/** A failed or rejected cancel changed nothing: the row goes back to the usual rules. */
+export function keptWithout(kept: ReadonlySet<string>, id: string): ReadonlySet<string> {
+  if (!kept.has(id)) {
     return kept;
   }
   const next = new Set(kept);
@@ -57,16 +58,79 @@ export function keptAfterRetranscribe(kept: ReadonlySet<string>, id: string, res
   return next;
 }
 
-/** What the focus should reach after an action: «Расшифровать снова» of the row, or the cancel icon again. */
-export type FocusWant = "again" | "cancel";
+export function keptAfterCancel(kept: ReadonlySet<string>, id: string, result: CancelTranscriptionResult): ReadonlySet<string> {
+  return result === "failed" ? keptWithout(kept, id) : keptBeforeCancel(kept, id);
+}
+
+/**
+ * Prunes the kept ids from a refreshed list: an id goes once its recording is gone or once the row, seen offering
+ * «Расшифровать снова», no longer offers it (a started retranscription moved on). A row not seen offering it yet (the
+ * cancel is still on its way) stays. `seen` is the helper's own memory between calls; both results keep their identity
+ * when nothing changed.
+ */
+export function pruneKept(
+  kept: ReadonlySet<string>,
+  seen: ReadonlySet<string>,
+  recordings: readonly Pick<RecordingItem, "id" | "action">[],
+): { kept: ReadonlySet<string>; seen: ReadonlySet<string> } {
+  const nextKept = new Set<string>();
+  const nextSeen = new Set<string>();
+  for (const id of kept) {
+    const row = recordings.find((r) => r.id === id);
+    if (row === undefined) {
+      continue;
+    }
+    if (row.action === "retranscribe") {
+      nextKept.add(id);
+      nextSeen.add(id);
+    } else if (!seen.has(id)) {
+      nextKept.add(id);
+    }
+  }
+  return {
+    kept: nextKept.size === kept.size ? kept : nextKept,
+    seen: nextSeen.size === seen.size && [...nextSeen].every((id) => seen.has(id)) ? seen : nextSeen,
+  };
+}
+
+/**
+ * What the focus should reach after an action: «Расшифровать снова» of the row, the cancel icon again (after a failed
+ * cancel), or the cancel icon of the row a started retranscription brings ("started": the old cancelled row does not count).
+ */
+export type FocusWant = "again" | "cancel" | "started";
 export type FocusMove = "retranscribe" | "cancel" | "wait" | "drop";
+
+/** A pending focus request is dropped after this long or after this many refreshes, whichever comes first. */
+export const focusMaxMs = 10_000;
+export const focusMaxRefreshes = 4;
+
+export function focusExpired(ageMs: number, refreshes: number): boolean {
+  return ageMs >= focusMaxMs || refreshes >= focusMaxRefreshes;
+}
+
+/** The part of a DOM element the focus check reads. */
+export interface FocusTarget {
+  readonly isConnected: boolean;
+  getAttribute(name: string): string | null;
+}
+
+/**
+ * The focus is lost when it is on nothing (null or body), on a detached element, or on a control of THAT row (the one that
+ * was clicked and is gone or off now). A student who moved it to anything else, also a disabled button, is never pulled back.
+ */
+export function focusLost(active: FocusTarget | null, body: FocusTarget | null, id: string): boolean {
+  if (active === null || active === body || !active.isConnected) {
+    return true;
+  }
+  return active.getAttribute(`data-${focusData.cancel}`) === id || active.getAttribute(`data-${focusData.again}`) === id;
+}
 
 /** The focus of the controls in the row, found by these data attributes (the row's recording id is the value). */
 export const focusData = { cancel: "cancel-for", again: "retranscribe-for" } as const;
 
 /**
  * Where the focus goes after a cancel (TASK-393): the clicked control disappears or goes off, and the focus falls to the page.
- * Called on every refresh while a request is open. `lost`: the focus is on nothing (or on the control that went off);
+ * Called on every refresh while a request is open. `lost`: the focus is on nothing (focusLost);
  * `busy`: the call still runs. A student who has moved the focus elsewhere is never pulled back ("drop").
  */
 export function focusMove(
@@ -83,8 +147,13 @@ export function focusMove(
   if (!state.lost) {
     return "drop";
   }
-  if (want === "cancel" && rowOffersCancel(row)) {
+  if (want !== "again" && rowOffersCancel(row)) {
     return "cancel";
+  }
+  if (want === "started") {
+    // The list may still hold the old cancelled row; the icon comes with the running one. Nothing to wait for on a
+    // finished row that offers no way back.
+    return row.action !== "retranscribe" && (row.stage === "done" || row.stage === "failed") ? "drop" : "wait";
   }
   if (row.action === "retranscribe") {
     return "retranscribe";

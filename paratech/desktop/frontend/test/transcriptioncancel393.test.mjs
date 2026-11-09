@@ -29,10 +29,16 @@ import {
   confirmCancel,
   Flights,
   flightKey,
+  focusExpired,
+  focusLost,
+  focusMaxMs,
+  focusMaxRefreshes,
   focusMove,
   keptAfterCancel,
-  keptAfterRetranscribe,
+  keptBeforeCancel,
+  keptWithout,
   noteTexts,
+  pruneKept,
   noteVisible,
   retranscribeNote,
   retranscribeTexts,
@@ -142,24 +148,84 @@ test("a row cancelled in this session stays in «Идут» while it offers «Р
   assert.deepEqual(restarted.recordings.active.map((r) => r.id), ["c"], "in progress is active anyway");
 });
 
-test("the kept set: a cancel (any answer but failed) adds the row, a started retranscription drops it", () => {
+// Replaces keptAfterRetranscribe: dropping the id right after "started" folded the old cancelled row into «Завершённые» for
+// one render (the list was not refreshed yet) and the refresh then brought it back. Now the id is added BEFORE the call and
+// pruned only from a refreshed list (pruneKept).
+test("the kept set: added before the cancel, taken back on a failure, pruned only from a refreshed list", () => {
   const none = new Set();
+  assert.deepEqual([...keptBeforeCancel(none, "r1")], ["r1"]);
+  assert.deepEqual([...none], [], "the argument is not mutated");
+  const one = new Set(["r1"]);
+  assert.equal(keptBeforeCancel(one, "r1"), one);
   for (const result of ["cancelled", "not_running", "ending"]) {
     assert.deepEqual([...keptAfterCancel(none, "r1", result)], ["r1"], result);
   }
-  assert.equal(keptAfterCancel(none, "r1", "failed"), none, "a failed cancel changes nothing");
-  assert.deepEqual([...none], [], "the argument is not mutated");
+  assert.deepEqual([...keptAfterCancel(one, "r1", "failed")], [], "a failed cancel takes the id back");
+  assert.equal(keptAfterCancel(none, "r1", "failed"), none, "nothing to take back");
+  assert.deepEqual([...keptWithout(new Set(["r1", "r2"]), "r1")], ["r2"]);
+  assert.deepEqual([...one], ["r1"], "the argument is not mutated");
 
-  const kept = new Set(["r1", "r2"]);
-  assert.deepEqual([...keptAfterRetranscribe(kept, "r1", "started")], ["r2"]);
-  for (const result of ["no_model", "failed", "not_allowed"]) {
-    assert.equal(keptAfterRetranscribe(kept, "r1", result), kept, result);
-  }
-  assert.equal(keptAfterRetranscribe(kept, "other", "started"), kept);
-  assert.deepEqual([...kept], ["r1", "r2"], "the argument is not mutated");
+  // The cancel is on its way: the row still runs, so it is not pruned (not seen offering «Расшифровать снова» yet).
+  let state = pruneKept(new Set(["r1"]), new Set(), [running()]);
+  assert.deepEqual([[...state.kept], [...state.seen]], [["r1"], []]);
+  // The refresh brings the cancelled row: kept and seen.
+  state = pruneKept(state.kept, state.seen, [cancelled()]);
+  assert.deepEqual([[...state.kept], [...state.seen]], [["r1"], ["r1"]]);
+  // A started retranscription: the stale list still offers it (no flicker), the refreshed one does not (pruned).
+  const stale = pruneKept(state.kept, state.seen, [cancelled()]);
+  assert.equal(stale.kept, state.kept);
+  assert.equal(stale.seen, state.seen, "identity kept when nothing changed");
+  const moved = pruneKept(state.kept, state.seen, [running()]);
+  assert.deepEqual([[...moved.kept], [...moved.seen]], [[], []]);
+  // A later plain failure of that row folds as usual.
+  assert.deepEqual(pageGroups([failedTranscription()], [], moved.kept).recordings.active, []);
+  // The recording is gone.
+  assert.deepEqual([...pruneKept(state.kept, state.seen, []).kept], []);
+  assert.deepEqual([...pruneKept(new Set(["r1", "r2"]), new Set(["r1"]), [cancelled(), running({ id: "r2" })]).kept], ["r1", "r2"]);
 
   const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
   assert.match(page, /pageGroups\(recordings \?\? \[\], jobs \?\? \[\], kept\)/);
+  assert.ok(!page.includes("keptAfterRetranscribe"), "a started retranscription does not touch the kept set");
+  const run = page.match(/const runCancel = [^]*?\n    \}\);\n/)?.[0] ?? "";
+  assert.match(run, /setKept\(\(k\) => keptBeforeCancel\(k, id\)\);[^]*?api\.cancelTranscription\(id\)[^]*?catch \(e\) \{\s*setKept\(\(k\) => keptWithout\(k, id\)\);\s*throw e;/);
+  assert.match(page, /pruneKept\(kept, keptSeen\.current, recordings\)/);
+});
+
+test("a pending focus request expires after 10 s or 4 refreshes; only a control of that row counts as lost", () => {
+  assert.deepEqual([focusMaxMs, focusMaxRefreshes], [10000, 4]);
+  assert.equal(focusExpired(0, 0), false);
+  assert.equal(focusExpired(9999, 3), false);
+  assert.equal(focusExpired(10000, 0), true);
+  assert.equal(focusExpired(100, 4), true);
+
+  const el = (attrs = {}, isConnected = true) => ({ isConnected, getAttribute: (n) => attrs[n] ?? null });
+  const body = el();
+  assert.equal(focusLost(null, body, "r1"), true, "nothing focused");
+  assert.equal(focusLost(body, body, "r1"), true, "the page");
+  assert.equal(focusLost(el({}, false), body, "r1"), true, "a detached element");
+  assert.equal(focusLost(el({ "data-cancel-for": "r1" }), body, "r1"), true, "the cancel icon of that row");
+  assert.equal(focusLost(el({ "data-retranscribe-for": "r1" }), body, "r1"), true, "its «Расшифровать снова»");
+  assert.equal(focusLost(el({ "data-cancel-for": "r2" }), body, "r1"), false, "a control of another row");
+  assert.equal(focusLost(el({ "data-retranscribe-for": "r2" }), body, "r1"), false);
+  assert.equal(focusLost(el(), body, "r1"), false, "any other control, also a disabled button");
+
+  // After a started retranscription: the icon of the restarted row; the old cancelled row does not count.
+  const lost = { lost: true, busy: false };
+  assert.equal(focusMove("started", running(), lost), "cancel");
+  assert.equal(focusMove("started", running({ stage: "queued", queueReason: "inLine" }), lost), "cancel");
+  assert.equal(focusMove("started", cancelled(), lost), "wait", "the list is not refreshed yet");
+  assert.equal(focusMove("started", running({ canCancel: false }), lost), "wait", "no icon yet: waits until the request expires");
+  assert.equal(focusMove("started", row(), lost), "drop", "finished without a way back");
+  assert.equal(focusMove("started", undefined, lost), "drop");
+  assert.equal(focusMove("started", running(), { lost: false, busy: false }), "drop");
+  assert.equal(focusMove("started", running(), { lost: true, busy: true }), "wait");
+
+  const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /want: result === "started" \? "started" : "again"/);
+  assert.match(page, /focus\(\{ preventScroll: true \}\)/);
+  assert.match(page, /focusLost\(document\.activeElement, document\.body, id\)/);
+  assert.match(page, /focusExpired\(Date\.now\(\) - track\.startedAt, track\.refreshes\)/);
+  assert.match(page, /setTimeout\(\(\) => setFocusReq\(\(cur\) => \(cur === focusReq \? null : cur\)\), focusMaxMs\)/);
 });
 
 test("the focus after a cancel: to «Расшифровать снова» once it is there, back to the icon after a failure, never pulled", () => {
