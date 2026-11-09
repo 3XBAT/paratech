@@ -77,7 +77,7 @@ test("the api calls the methods by name with the arguments", async () => {
   assert.equal((await api.restoreChat("th1")).problem, "");
   assert.deepEqual(await api.chatEarlier("th1"), { problem: "", requests: [] });
   const ask = { text: "x", subjectId: "", lessonId: "", assignmentId: "", screen: "", threadId: "th1", mentions: [{ kind: "subject", id: "s1", label: "Физика" }] };
-  assert.equal(await api.ask(ask), "");
+  assert.deepEqual(await api.ask(ask), { problem: "", queued: false, ticket: "" });
   assert.deepEqual(calls.map((c) => c[0]), [
     "paratech/desktop/internal/input/wails.AgentService.Chats",
     "paratech/desktop/internal/input/wails.AgentService.NewChat",

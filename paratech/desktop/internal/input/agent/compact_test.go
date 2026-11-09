@@ -66,7 +66,7 @@ func newCompactEnv(t *testing.T, run func(started func()) (agentcompact.Result, 
 
 func (e *compactEnv) ask(t *testing.T, id shared.ThreadID) []Update {
 	t.Helper()
-	if err := e.d.Ask(t.Context(), agentturn.AskInput{ThreadID: id, Text: "привет"}); err != nil {
+	if _, err := e.d.Ask(t.Context(), agentturn.AskInput{ThreadID: id, Text: "привет"}); err != nil {
 		t.Fatal(err)
 	}
 	e.d.Wait()
@@ -219,7 +219,7 @@ func TestOnlyAnAskOfANamedChatCompacts(t *testing.T) {
 func TestAskWithoutCompactor(t *testing.T) {
 	turns := (&scriptedTurns{}).then(step(thread.StatusDone, nil), nil)
 	d, sink := newDriver(t, newReads(), turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{ThreadID: th1, Text: "привет"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{ThreadID: th1, Text: "привет"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -236,7 +236,7 @@ func TestCompactionDoesNotHoldTheCaller(t *testing.T) {
 		<-release
 		return agentcompact.Result{Thread: th1}, nil
 	})
-	if err := e.d.Ask(t.Context(), agentturn.AskInput{ThreadID: th1, Text: "привет"}); err != nil {
+	if _, err := e.d.Ask(t.Context(), agentturn.AskInput{ThreadID: th1, Text: "привет"}); err != nil {
 		t.Fatal(err)
 	}
 	close(release)

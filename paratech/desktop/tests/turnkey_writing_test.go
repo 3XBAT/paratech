@@ -105,7 +105,7 @@ func (e *turnkeyEnv) runWriteWork(t *testing.T, w values.Ref) {
 	e.hub.Then(testenv.AgentCall{ID: "p2", Tool: "show_plan", Args: string(step)}).
 		Then(testenv.AgentCall{ID: "ww1", Tool: "write_work", Args: `{"work":"` + w.ID() + `"}`}).
 		Then(testenv.AgentCall{ID: "e2", Tool: "reply", Args: `{"text":"Работа пишется"}`})
-	if err := e.driver.Ask(ctx, agentturn.AskInput{Scope: values.Scope{}, Text: "напиши работу"}); err != nil {
+	if _, err := e.driver.Ask(ctx, agentturn.AskInput{Scope: values.Scope{}, Text: "напиши работу"}); err != nil {
 		t.Fatal(err)
 	}
 	e.driver.Wait()

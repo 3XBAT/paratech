@@ -21,6 +21,8 @@ var ref1 = agentturn.TurnRef{Thread: th1, Turn: 1}
 // stopTurns is the step use case around «Стоп»: Stop stores the request stopped by the student, Interrupt keeps the
 // stored reason (offline when the request was not stopped), as agentturn does.
 type stopTurns struct {
+	noQueue
+
 	mu          sync.Mutex
 	first       agentturn.Step // the answer of Ask
 	resumed     agentturn.Step // the answer of Continue
@@ -163,7 +165,7 @@ func TestStopDuringARead(t *testing.T) {
 	}
 	t.Cleanup(d.Close)
 
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
 		t.Fatal(err)
 	}
 	<-r.library.started
@@ -204,7 +206,7 @@ func TestStopBetweenTwoActions(t *testing.T) {
 		}
 	}
 
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "добавь химию и папку"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "добавь химию и папку"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -261,7 +263,7 @@ func TestContinueDuringAnActionCutByStop(t *testing.T) {
 		}
 	}
 
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "добавь химию и папку"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "добавь химию и папку"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -321,7 +323,7 @@ func TestRerunDuringAnActionCutByStop(t *testing.T) {
 		}
 	}
 
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "добавь химию и папку"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "добавь химию и папку"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -364,7 +366,7 @@ func TestStopKeepsAPaidJob(t *testing.T) {
 		}
 	}
 
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "сделай конспект"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "сделай конспект"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -397,7 +399,7 @@ func TestStopDuringTheHubStep(t *testing.T) {
 	}
 	t.Cleanup(d.Close)
 
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "как дела с работой"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "как дела с работой"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.Stop(t.Context(), ref1); err != nil {
@@ -443,7 +445,7 @@ func TestRefusedStopLetsTheCallsRun(t *testing.T) {
 			t.Error(err)
 		}
 	}
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "как дела"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "как дела"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -465,7 +467,7 @@ func TestFailedStepShowsTheStoredRequest(t *testing.T) {
 		then(step(thread.StatusPlanning, []agentturn.Call{readCall(t, "c1", values.ToolListSubjects, `{}`)}), nil).
 		then(stored, errors.New("disk write failed"))
 	d, sink := newDriver(t, r, turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()

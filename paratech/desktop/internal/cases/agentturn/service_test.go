@@ -124,8 +124,9 @@ func TestSubmitChecks(t *testing.T) {
 	if _, err := e.svc.Submit(t.Context(), SubmitInput{Turn: ref(st), Outcomes: []Outcome{okResult("c1", `{`)}}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("submit of broken JSON = %v", err)
 	}
-	if _, err := e.svc.Ask(t.Context(), AskInput{Scope: subjectScope(t), Text: "ещё"}); !errors.Is(err, thread.ErrTurnInProgress) {
-		t.Fatalf("Ask while calls run = %v", err)
+	// TASK-398: an Ask while calls run waits in the queue instead of being refused.
+	if q, err := e.svc.Ask(t.Context(), AskInput{Scope: subjectScope(t), Text: "ещё"}); err != nil || !q.Queued || q.Thread != st.Thread {
+		t.Fatalf("Ask while calls run = %+v, %v", q, err)
 	}
 }
 

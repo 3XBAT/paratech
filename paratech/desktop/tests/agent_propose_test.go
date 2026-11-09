@@ -211,7 +211,7 @@ func methodichka(t *testing.T) string {
 func (e *proposeEnv) ask(t *testing.T, text string) []values.Card {
 	t.Helper()
 	before := len(e.sink.snapshot())
-	if err := e.driver.Ask(t.Context(), agentturn.AskInput{Scope: values.Scope{}, Text: text}); err != nil {
+	if _, err := e.driver.Ask(t.Context(), agentturn.AskInput{Scope: values.Scope{}, Text: text}); err != nil {
 		t.Fatal(err)
 	}
 	e.driver.Wait()

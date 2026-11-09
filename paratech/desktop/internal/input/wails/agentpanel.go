@@ -46,6 +46,8 @@ type AgentUpdate struct {
 	Compaction bool
 	Compacting bool
 	Fill       *AgentFillView
+	Ticket     string // a waiting question: on its Queued update and on the updates of its start; "" none
+	Queued     bool   // the question waits in chat Thread (no request yet)
 }
 
 // EventEmitter sends a Wails event to the pages; satisfied by Wails' event manager.
@@ -89,12 +91,12 @@ func (p *AgentPanel) Attach(e EventEmitter) {
 // published from one Driver goroutine keep their order. Updates of different operations may interleave: consumers
 // must not rely on arrival order across operations. The drafts of the request are settled first (draftsBefore).
 // An update that ends a request reads the chat's fill from the local database on the Driver's goroutine, bounded by
-// fillTimeout, before the lock is taken. A compaction update has no request: it leaves the drafts.
+// fillTimeout, before the lock is taken. A compaction update and a queued one have no request: they leave the drafts.
 func (p *AgentPanel) Publish(u AgentUpdate) {
 	view := p.view(context.Background(), u)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !u.Compaction {
+	if !u.Compaction && !u.Queued {
 		p.draftsBefore(u)
 	}
 	if p.emit != nil {
@@ -115,6 +117,9 @@ func (p *AgentPanel) Publish(u AgentUpdate) {
 // turn 0, status "", problem "", progress false, cards []. Compacting is true while it runs («Уплотнение контекста…»)
 // and false once it ended, with the chat's new fill or null when it failed. Every other update has both false. No
 // update carries the summary or an error text.
+// Queued is true on an update that only reports a question waiting in chat threadId under ticket (the Ask found the
+// chat busy once it ran; ADR-0026 addendum 2026-11-08, point 7): turn 0, status "", cards []. Ticket is also set on the
+// updates of the start of a waiting question, so the panel replaces its row; "" otherwise (both always sent).
 type AgentUpdateView struct {
 	ThreadID     string          `json:"threadId"` // "" when an Ask failed before its thread existed
 	Turn         int             `json:"turn"`
@@ -127,6 +132,8 @@ type AgentUpdateView struct {
 	Problem      string          `json:"problem"`
 	Progress     bool            `json:"progress"`
 	Retry        int             `json:"retry"` // 0 none
+	Ticket       string          `json:"ticket"`
+	Queued       bool            `json:"queued"`
 	Cards        []AgentCardView `json:"cards"`
 	Fill         *AgentFillView  `json:"fill"`
 	Compaction   bool            `json:"compaction"`
@@ -287,8 +294,8 @@ func (p *AgentPanel) view(ctx context.Context, u AgentUpdate) AgentUpdateView {
 	v := AgentUpdateView{
 		ThreadID: string(u.Thread), Turn: u.Turn, SubjectID: u.Scope.Subject().ID(), LessonID: u.Scope.Lesson().ID(),
 		AssignmentID: u.Scope.Assignment().ID(), Screen: string(u.Scope.Screen()), Status: string(u.Status),
-		StopReason: string(u.StopReason), Problem: problem, Progress: u.Progress, Retry: u.Retry,
-		Cards: make([]AgentCardView, 0, len(u.Cards)),
+		StopReason: string(u.StopReason), Problem: problem, Progress: u.Progress, Retry: u.Retry, Ticket: u.Ticket,
+		Queued: u.Queued, Cards: make([]AgentCardView, 0, len(u.Cards)),
 	}
 	for _, c := range u.Cards {
 		cv, ok := cardView(c)

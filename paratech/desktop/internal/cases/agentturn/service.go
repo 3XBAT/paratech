@@ -65,6 +65,8 @@ type Service struct {
 
 	wmu   sync.Mutex // guards waits; never held with a call out
 	waits map[shared.ThreadID]*waiter
+
+	q queues // the waiting questions of each chat (queue.go), without s.mu
 }
 
 // New checks the ports.
@@ -96,6 +98,8 @@ type change struct {
 	// redo rebuilds the change of an Ask or a card answer on the stored chat when its first save meets a version
 	// conflict; nil once stored.
 	redo func() (*change, error)
+	// ticket is the waiting question the request started from (StartQueued); the steps of its first drive carry it.
+	ticket Ticket
 }
 
 func (c *change) add(entry values.HistoryTurn) {
@@ -116,19 +120,17 @@ func (c *change) takeResults(s *Service) {
 // cancelled; an archived chat comes back from the archive (thread.Ask). A named chat that does not exist wraps
 // shared.ErrNotFound. With RestartFrom the request drops the requests from that number on (thread.RestartFrom): the
 // marks are stored in the same transaction as the new request.
+//
+// A chat that is busy (Enqueue) queues the question instead and Ask returns at once, without waiting for a running
+// step: Step{Thread, Scope, Queued, Ticket}. So does an Ask the thread refuses as busy once s.mu is held (a request
+// started meanwhile). Only a full queue is refused (thread.ErrTurnInProgress).
 func (s *Service) Ask(ctx context.Context, in AskInput) (Step, error) {
-	text, err := values.NewStudentText(in.Text, in.Uploads)
+	q, queued, err := s.Enqueue(ctx, in)
 	if err != nil {
-		return Step{}, fmt.Errorf("%s: %w: %w", opAsk, ErrInvalidInput, err)
+		return Step{}, err
 	}
-	if in.ThreadID != "" {
-		if err := in.ThreadID.Validate(); err != nil {
-			return Step{}, fmt.Errorf("%s: %w: %w", opAsk, ErrInvalidInput, err)
-		}
-	}
-	// A restart names its chat: the current chat may have changed since the student chose the message.
-	if in.RestartFrom < 0 || (in.RestartFrom > 0 && in.ThreadID == "") {
-		return Step{}, fmt.Errorf("%s: %w: restart from request %d of chat %q", opAsk, ErrInvalidInput, in.RestartFrom, in.ThreadID)
+	if queued {
+		return Step{Thread: q.Thread, Scope: in.Scope, Queued: true, Ticket: q.Ticket}, nil
 	}
 	mentions, err := s.existing(ctx, in.Mentions)
 	if err != nil {
@@ -137,15 +139,49 @@ func (s *Service) Ask(ctx context.Context, in AskInput) (Step, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	c, err := s.asked(ctx, in, text, mentions)
+	return s.ask(ctx, in, mentions, "")
+}
+
+// ask starts the request of in with the mentions that still exist; ticket is the waiting question it starts from
+// ("" for an Ask). s.mu is held.
+func (s *Service) ask(ctx context.Context, in AskInput, mentions []values.Mention, ticket Ticket) (Step, error) {
+	text, err := checkAsk(in)
 	if err != nil {
 		return Step{}, err
 	}
+	c, err := s.asked(ctx, in, text, mentions)
+	if errors.Is(err, thread.ErrTurnInProgress) && ticket == "" {
+		if id, ok := s.busyChat(ctx, in); ok {
+			return s.queueBusy(id, in)
+		}
+	}
+	if err != nil {
+		return Step{}, err
+	}
+	c.ticket = ticket
 	// A chat change (rename, archive, restore) does not take s.mu; one saved before the request is stored would make
 	// the first save a version conflict and lose the student's message, so the request is asked again once on the
 	// stored chat (see store).
-	c.redo = func() (*change, error) { return s.asked(ctx, in, text, mentions) }
+	c.redo = func() (*change, error) {
+		fresh, err := s.asked(ctx, in, text, mentions)
+		if fresh != nil {
+			fresh.ticket = ticket
+		}
+		return fresh, err
+	}
 	return s.drive(ctx, c, opAsk)
+}
+
+// busyChat is the chat an Ask refused as busy asked: the one it names, else the current chat.
+func (s *Service) busyChat(ctx context.Context, in AskInput) (shared.ThreadID, bool) {
+	if in.ThreadID != "" {
+		return in.ThreadID, true
+	}
+	th, err := s.threads.Current(ctx)
+	if err != nil {
+		return "", false
+	}
+	return th.ID(), true
 }
 
 // asked loads the chat of in and starts the request in it, not yet stored.
@@ -706,7 +742,7 @@ func stepOf(c *change) Step {
 	turn, _ := c.th.Turn()
 	st := Step{
 		Thread: c.th.ID(), Turn: turn.Number(), Scope: turn.Scope(), Status: turn.Status(), StopReason: turn.StopReason(),
-		Calls: c.calls, Cards: c.cards,
+		Calls: c.calls, Cards: c.cards, Ticket: c.ticket,
 	}
 	if turn.Status() == thread.StatusStopped {
 		st.Cards = append(st.Cards, values.StoppedCard{Reason: turn.StopReason()})

@@ -56,7 +56,7 @@ func TestDriverRunsReadCallsAndShowsCards(t *testing.T) {
 		then(step(thread.StatusDone, nil, values.ReplyCard{Text: "Предметов: 1"}), nil)
 	d, sink := newDriver(t, r, turns)
 
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -104,7 +104,7 @@ func TestDriverAnswersUnavailableTools(t *testing.T) {
 				then(step(thread.StatusExecuting, []agentturn.Call{tt.call}), nil).
 				then(step(thread.StatusDone, nil), nil)
 			d, _ := newDriver(t, r, turns)
-			if err := d.Ask(t.Context(), agentturn.AskInput{Text: "сделай"}); err != nil {
+			if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "сделай"}); err != nil {
 				t.Fatal(err)
 			}
 			d.Wait()
@@ -156,7 +156,7 @@ func TestDriverProblemNamesTheRequest(t *testing.T) {
 	scope := subjectScope(t, "s1")
 	turns := (&scriptedTurns{}).then(agentturn.Step{}, thread.ErrTurnInProgress)
 	d, sink := newDriver(t, newReads(), turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Scope: scope, Text: "привет"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Scope: scope, Text: "привет"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -168,7 +168,7 @@ func TestDriverProblemNamesTheRequest(t *testing.T) {
 	first.Scope = scope
 	turns = (&scriptedTurns{}).then(first, nil).then(agentturn.Step{}, errors.New("disk full"))
 	d, sink = newDriver(t, newReads(), turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Scope: scope, Text: "мои предметы"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Scope: scope, Text: "мои предметы"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -186,7 +186,7 @@ func TestDriverDropsInvalidCards(t *testing.T) {
 		values.ReplyCard{Text: "a\u202eb"}, values.ReplyCard{Text: "Готово"},
 		values.QuestionsCard{Round: 3}, nil), nil)
 	d, sink := newDriver(t, newReads(), turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "привет"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "привет"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -203,7 +203,7 @@ func TestDriverOfflineStopAndContinue(t *testing.T) {
 		Cards: []values.Card{values.StoppedCard{Reason: values.StopOffline}}}
 	turns := (&scriptedTurns{}).then(stopped, nil).then(step(thread.StatusDone, nil, values.ReplyCard{Text: "Готово"}), nil)
 	d, sink := newDriver(t, newReads(), turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "привет"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "привет"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -231,7 +231,7 @@ func TestDriverCancelViaContext(t *testing.T) {
 	d, sink := newDriver(t, r, turns)
 
 	ctx, cancel := context.WithCancel(t.Context())
-	if err := d.Ask(ctx, agentturn.AskInput{Text: "мои предметы"}); err != nil {
+	if _, err := d.Ask(ctx, agentturn.AskInput{Text: "мои предметы"}); err != nil {
 		t.Fatal(err)
 	}
 	<-r.library.started
@@ -259,7 +259,7 @@ func TestDriverContextEndsBeforeCalls(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	turns.beforeAnswer = cancel
 	d, _ := newDriver(t, r, turns)
-	if err := d.Ask(ctx, agentturn.AskInput{Text: "мои предметы"}); err != nil {
+	if _, err := d.Ask(ctx, agentturn.AskInput{Text: "мои предметы"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -274,7 +274,7 @@ func TestDriverContextEndsWithFinalStep(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	turns.beforeAnswer = cancel
 	d, sink := newDriver(t, newReads(), turns)
-	if err := d.Ask(ctx, agentturn.AskInput{Text: "привет"}); err != nil {
+	if _, err := d.Ask(ctx, agentturn.AskInput{Text: "привет"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -292,7 +292,7 @@ func TestDriverClose(t *testing.T) {
 	r.library.block, r.library.started = true, make(chan struct{})
 	turns := (&scriptedTurns{}).then(step(thread.StatusPlanning, []agentturn.Call{readCall(t, "c1", values.ToolListSubjects, `{}`)}), nil)
 	d, _ := newDriver(t, r, turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
 		t.Fatal(err)
 	}
 	<-r.library.started
@@ -300,7 +300,7 @@ func TestDriverClose(t *testing.T) {
 	if rep := turns.report(); len(rep.stopped) != 1 || len(rep.cancelled) != 0 {
 		t.Fatalf("report %+v", rep)
 	}
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "ещё"}); !errors.Is(err, ErrClosed) {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "ещё"}); !errors.Is(err, ErrClosed) {
 		t.Fatalf("Ask after Close = %v", err)
 	}
 }
@@ -311,7 +311,7 @@ func TestDriverClose(t *testing.T) {
 func TestDriverLoopIsBounded(t *testing.T) {
 	turns := &scriptedTurns{endless: step(thread.StatusExecuting, []agentturn.Call{readCall(t, "c1", values.ToolListSubjects, `{}`)})}
 	d, _ := newDriver(t, newReads(), turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()

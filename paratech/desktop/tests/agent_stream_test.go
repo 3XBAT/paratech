@@ -135,7 +135,7 @@ func todayScope(t *testing.T) values.Scope {
 
 func (e *streamEnv) ask(t *testing.T, text string) agentloop.Update {
 	t.Helper()
-	if err := e.stream.Ask(t.Context(), agentturn.AskInput{Scope: todayScope(t), Text: text}); err != nil {
+	if _, err := e.stream.Ask(t.Context(), agentturn.AskInput{Scope: todayScope(t), Text: text}); err != nil {
 		t.Fatal(err)
 	}
 	e.stream.Wait()
@@ -246,7 +246,7 @@ func TestStopCutsTheStreamedReply(t *testing.T) {
 	e.hub.ThenStreamHeld([]string{"Начало ответа"},
 		testenv.AgentCall{ID: "r1", Tool: "reply", Args: `{"text":"Полный ответ"}`})
 
-	if err := e.stream.Ask(t.Context(), agentturn.AskInput{Scope: todayScope(t), Text: "вопрос"}); err != nil {
+	if _, err := e.stream.Ask(t.Context(), agentturn.AskInput{Scope: todayScope(t), Text: "вопрос"}); err != nil {
 		t.Fatal(err)
 	}
 	<-e.hub.Sent()

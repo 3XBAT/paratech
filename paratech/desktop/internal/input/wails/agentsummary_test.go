@@ -315,7 +315,7 @@ func TestAgentCompactionUpdateContract(t *testing.T) {
 	panel.Attach(em)
 
 	head := `{"threadId":"th1","turn":0,"subjectId":"","lessonId":"","assignmentId":"","screen":"",` +
-		`"status":"","stopReason":"","problem":"","progress":false,"retry":0,"cards":[],`
+		`"status":"","stopReason":"","problem":"","progress":false,"retry":0,"ticket":"","queued":false,"cards":[],`
 	tests := []struct {
 		name string
 		u    AgentUpdate

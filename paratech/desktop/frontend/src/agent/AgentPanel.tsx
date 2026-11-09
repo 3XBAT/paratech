@@ -402,7 +402,8 @@ export function AgentPanel(props: {
       dispatch({ type: "asked", id, text: ask.text, scope: ask });
       setNotice("");
       api.ask(ask).then(
-        (problem) => {
+        // A queued question counts as started for now; TASK-399 shows the waiting row.
+        ({ problem }) => {
           dispatch({ type: "askResult", id, problem });
           // An offline refusal may be stale: the Hub link decides, not the refusal.
           if (problem === "offline") {

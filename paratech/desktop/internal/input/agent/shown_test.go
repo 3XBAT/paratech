@@ -109,7 +109,7 @@ func TestToolCardsStayOnLaterUpdates(t *testing.T) {
 				turns.then(st, nil)
 			}
 			d, sink := newDriver(t, newReads(), turns)
-			if err := d.Ask(t.Context(), agentturn.AskInput{Text: "покажи"}); err != nil {
+			if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "покажи"}); err != nil {
 				t.Fatal(err)
 			}
 			d.Wait()
@@ -126,7 +126,7 @@ func TestStepCardsAreNotCarried(t *testing.T) {
 		then(step(thread.StatusAwaitingAnswers, nil, question(t)), nil).
 		then(step(thread.StatusDone, nil, reply("Готово")), nil)
 	d, sink := newDriver(t, newReads(), turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "покажи"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "покажи"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -148,7 +148,7 @@ func TestToolCardsOfANewRequest(t *testing.T) {
 		then(stepOn(th1, 2, thread.StatusExecuting, []agentturn.Call{button(t, "c1", "m2")}), nil).
 		then(stepOn(th1, 2, thread.StatusDone, nil, reply("Второй")), nil)
 	d, sink := newDriver(t, newReads(), turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "покажи"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "покажи"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -197,7 +197,7 @@ func TestStoppedUpdateKeepsToolCards(t *testing.T) {
 	t.Cleanup(d.Close)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	if err := d.Ask(ctx, agentturn.AskInput{Text: "покажи"}); err != nil {
+	if _, err := d.Ask(ctx, agentturn.AskInput{Text: "покажи"}); err != nil {
 		t.Fatal(err)
 	}
 	<-r.library.started
@@ -222,7 +222,7 @@ func TestProblemUpdatesGetNoToolCards(t *testing.T) {
 		then(agentturn.Step{}, thread.ErrTurnInProgress).
 		then(agentturn.Step{}, thread.ErrBudgetExceeded)
 	d, sink := newDriver(t, newReads(), turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "покажи"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "покажи"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -238,7 +238,7 @@ func TestProblemUpdatesGetNoToolCards(t *testing.T) {
 	}
 	assertCards(t, "refused button", u.Cards)
 
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "ещё"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "ещё"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -321,7 +321,7 @@ func TestToolCardsOfParallelRequests(t *testing.T) {
 	var wg sync.WaitGroup
 	for _, th := range []shared.ThreadID{th1, th2} {
 		wg.Go(func() {
-			if err := d.Ask(t.Context(), agentturn.AskInput{ThreadID: th, Text: "покажи"}); err != nil {
+			if _, err := d.Ask(t.Context(), agentturn.AskInput{ThreadID: th, Text: "покажи"}); err != nil {
 				t.Error(err)
 			}
 		})

@@ -13,7 +13,9 @@ or sends. See `doc.go`. File names below are in this package unless a path is gi
   `progress.go`, `replydraft.go`: progress (`Update.Progress`; `Update.Retry` 1..3 while a failed step is retried by
   itself, ADR-0026 addendum 2026-11-08) and the streamed reply draft to the panel. `compact.go`:
   `Compactor` (cases/agentcompact), run by `Ask` of a named chat before its first step; publishes the
-  `Compaction`/`Compacting` updates (ADR-0028).
+  `Compaction`/`Compacting` updates (ADR-0028). `driver_queue.go`: the waiting questions (ADR-0026 addendum
+  2026-11-08, point 7): `Ask` queues synchronously through `agentturn.Enqueue` when the chat is busy and returns the
+  ticket; `drain` starts the oldest one (`agentturn.StartQueued`) when the last loop of the chat ends; `Withdraw`.
 - `tools.go`: the read-only tool dispatch (`tools.reader`, `tools.run`) and the R tools; `facts.go`: `Facts` for
   `agentturn.CallFacts`.
 - `write.go` + `actions.go`: class U. `write.go` journals PENDING -> DONE/FAILED and replays a call seen before;
@@ -48,7 +50,9 @@ classes, waves).
 
 ## Tests
 `go -C paratech test -race ./desktop/internal/input/agent/...` (no Windows-only code here). Fakes: `fakes_test.go`
-(`reads`, `scriptedTurns`, `chanSink`, `fakeLibrary`), `compact_test.go` (`fakeCompactor`), `actions_fakes_test.go` (`world`, `memLibrary`, `memActions`,
+(`reads`, `scriptedTurns` with its queue hooks, `noQueue` for a Turns fake that never queues, `chanSink`,
+`fakeLibrary`), `driver_queue_test.go` (`stateStore`, `stepModel`: the real `agentturn` under the Driver),
+`compact_test.go` (`fakeCompactor`), `actions_fakes_test.go` (`world`, `memLibrary`, `memActions`,
 `directTx`), `notes_fakes_test.go` (`notesWorld`), `assignment_wave10_fakes_test.go` (`memChanges`,
 `newWave10World`). Scenario tests on real use cases and SQLite: `paratech/desktop/tests/agent_*_test.go`; evals:
 `paratech/desktop/tests/agenteval`.
@@ -62,6 +66,15 @@ classes, waves).
   `Confirm`, `Execute`, `Send`, `Decline`, `Delete` or `MarkSent`, and on calls of confirm or side-effect methods. A
   soft delete is therefore `TrashAssignment`, mapped by `agentAssignments` in
   `paratech/desktop/internal/app/agent.go` (TASK-320).
+- The queue lives in `agentturn`; the Driver only triggers it. Every loop drains its chat AFTER `forget` (no longer
+  among the loops), and a queued `Ask` drains too, so a question queued while the last loop ends is never missed. A
+  loop that has not named its chat (`""`, an Ask of the current chat) holds drains back until any loop ends
+  (`later`). A drain that started nothing drains again only when a drain of its own chat was deferred to it meanwhile
+  (`deferred`); ends of other chats' loops never wake it (no spin). A drain compacts the chat only when
+  `agentturn.QueueReady` says the question can start. After `Close` nothing drains: waiting questions are never sent.
+  A new `Turns` method needs a stub in every Turns fake (`noQueue`).
+- A drain that fails to read the store ends idle and does not retry; the question waits until another loop of that
+  chat ends or it is withdrawn.
 - A tool this desktop does not dispatch answers `values.RefuseUnavailable`, so a missing dispatch branch fails quietly.
 - `values.CatalogVersion` is still 9: the v10 tools (`paratech/desktop/internal/domain/agent/values/wave10*.go`) are
   declared and dispatched here but do not parse yet; tests such as `TestNoteToolsAreNotServedAtCatalog9` pin that

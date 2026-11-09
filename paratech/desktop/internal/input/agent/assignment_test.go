@@ -304,7 +304,7 @@ func TestActionLineOfAnAddedAssignment(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(d.Close)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "завтра в 9 скинуть проверочную Иванову"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "завтра в 9 скинуть проверочную Иванову"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()

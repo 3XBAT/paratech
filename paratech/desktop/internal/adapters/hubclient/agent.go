@@ -34,6 +34,9 @@ var ErrTurnGone = errors.New("hub no longer keeps the model turn")
 // A stream has no total cap of RequestTimeout: it asks for the Hub's heartbeat and ends as ErrTimeout when the Hub
 // stays silent too long (see Config.StepIdleTimeout) or after Config.StepTimeout. The unary fallback is bounded by
 // RequestTimeout.
+//
+// Once a message of the stream came, the request reached the Hub: a lost result or a watchdog cut after it also matches
+// agent.ErrHubFailure (the request stops failed, not offline; ADR-0026 addendum 2026-11-08), still transient.
 func (c *Client) Step(ctx context.Context, req agent.StepRequest, draft func(soFar string)) (agent.StepReply, error) {
 	if err := ctx.Err(); err != nil {
 		return agent.StepReply{}, fmt.Errorf("%s: %w", opAgentStep, err)
@@ -75,26 +78,40 @@ func (c *Client) Step(ctx context.Context, req agent.StepRequest, draft func(soF
 
 // streamStep reads AgentStepStream within c.stepTO, cut when the Hub sends nothing for c.timeout before the first
 // message or for c.stepIdle after one (watchStream). older reports an unimplemented stream while ctx lives (an older
-// Hub), with the error unclassified; any other error is classified by stepError.
+// Hub), with the error unclassified; any other error is classified by stepError, and a watchdog cut after the first
+// message also matches agent.ErrHubFailure.
 func (c *Client) streamStep(ctx context.Context, gateway hubv1connect.GatewayServiceClient, msg *hubv1.AgentStepRequest,
 	key string, draft func(string),
 ) (res *hubv1.AgentStepResponse, older bool, err error) {
 	callCtx, seen, release := watchStream(ctx, c.timeout, c.stepIdle, c.stepTO)
 	defer release()
 
-	res, err = readStepStream(callCtx, gateway, msg, key, draft, seen)
+	got := false // read and written on this goroutine only: readStepStream calls seen synchronously
+	res, err = readStepStream(callCtx, gateway, msg, key, draft, func() { got = true; seen() })
 	switch {
 	case err == nil:
 		return res, false, nil
 	case connect.CodeOf(err) == connect.CodeUnimplemented && ctx.Err() == nil:
 		return nil, true, err
 	}
-	return nil, false, stepError(ctx, callCtx, err)
+	err = stepError(ctx, callCtx, err)
+	if got && ctx.Err() == nil && watchTimeout(callCtx, opAgentStep) != nil {
+		markHubFailure(err)
+	}
+	return nil, false, err
+}
+
+// markHubFailure adds agent.ErrHubFailure to a classified *Error that lacks it; the class stays.
+func markHubFailure(err error) {
+	var e *Error
+	if errors.As(err, &e) && !errors.Is(e, agent.ErrHubFailure) {
+		e.extra = append(e.extra, agent.ErrHubFailure)
+	}
 }
 
 // readStepStream reads AgentStepStream with the Hub's heartbeat asked for, calling seen on every message: a heartbeat
 // or an event this client does not know only does that. Errors are those of the generated client, or an *Error of a
-// broken stream.
+// broken stream; a stream that ends without a result after a message also matches agent.ErrHubFailure.
 func readStepStream(ctx context.Context, gateway hubv1connect.GatewayServiceClient, msg *hubv1.AgentStepRequest,
 	key string, draft func(string), seen func(),
 ) (*hubv1.AgentStepResponse, error) {
@@ -109,9 +126,11 @@ func readStepStream(ctx context.Context, gateway hubv1connect.GatewayServiceClie
 	var (
 		text replyDraft
 		res  *hubv1.AgentStepResponse
+		got  bool
 	)
 	for stream.Receive() {
 		seen()
+		got = true
 		if res != nil {
 			return nil, permanent(opAgentStep, ErrBadResponse) // the result is the last message
 		}
@@ -132,7 +151,11 @@ func readStepStream(ctx context.Context, gateway hubv1connect.GatewayServiceClie
 	}
 	if res == nil {
 		// The Hub keeps the step it finished under the key: the automatic retry of a lost result replays it.
-		return nil, unavailable(opAgentStep, ErrUnavailable)
+		e := unavailable(opAgentStep, ErrUnavailable)
+		if got {
+			markHubFailure(e)
+		}
+		return nil, e
 	}
 	return res, nil
 }

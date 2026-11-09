@@ -89,7 +89,7 @@ func TestAnswerDraftsComeBeforeTheCard(t *testing.T) {
 		got:    answering.Asked{Answer: madeAnswer(t)},
 	}
 	d, sink, turns, logBuf := draftDriver(t, ans)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "что такое ряд"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "что такое ряд"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -138,7 +138,7 @@ func TestAnswerDraftsOfAFailedRead(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d, sink, _, _ := draftDriver(t, &streamAnswerer{drafts: [][]string{{draftText}}, got: tt.got, err: tt.err})
-			if err := d.Ask(t.Context(), agentturn.AskInput{Text: "что такое ряд"}); err != nil {
+			if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "что такое ряд"}); err != nil {
 				t.Fatal(err)
 			}
 			d.Wait()
@@ -155,7 +155,7 @@ func TestAnswerDraftsOfAFailedRead(t *testing.T) {
 func TestStopCutsDrafts(t *testing.T) {
 	ans := &streamAnswerer{drafts: [][]string{{"Ряд"}}, late: []string{draftText}, wait: true, started: make(chan struct{})}
 	d, sink, turns, _ := draftDriver(t, ans)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "что такое ряд"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "что такое ряд"}); err != nil {
 		t.Fatal(err)
 	}
 	<-ans.started

@@ -208,7 +208,7 @@ func newDriverEnv(t *testing.T) *driverEnv {
 
 func (e *driverEnv) ask(t *testing.T, scope values.Scope, text string) agentloop.Update {
 	t.Helper()
-	if err := e.driver.Ask(t.Context(), agentturn.AskInput{Scope: scope, Text: text}); err != nil {
+	if _, err := e.driver.Ask(t.Context(), agentturn.AskInput{Scope: scope, Text: text}); err != nil {
 		t.Fatal(err)
 	}
 	e.driver.Wait()
@@ -285,6 +285,13 @@ func (j *jobTurns) Ask(context.Context, agentturn.AskInput) (agentturn.Step, err
 	return agentturn.Step{Thread: "th1", Turn: 1, Status: thread.StatusExecuting, Calls: []agentturn.Call{j.call}}, nil
 }
 
+// Enqueue and HasQueued: nothing waits (the Driver asks before every Ask and at the end of every loop).
+func (j *jobTurns) Enqueue(context.Context, agentturn.AskInput) (agentturn.Queued, bool, error) {
+	return agentturn.Queued{}, false, nil
+}
+
+func (j *jobTurns) HasQueued(shared.ThreadID) bool { return false }
+
 func (j *jobTurns) Submit(_ context.Context, in agentturn.SubmitInput) (agentturn.Step, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -326,7 +333,7 @@ func TestDriverJobStatusSeesChainJobs(t *testing.T) {
 	}
 	t.Cleanup(drv.Close)
 
-	if err := drv.Ask(t.Context(), agentturn.AskInput{Scope: physicsScope(t), Text: "что с конспектом"}); err != nil {
+	if _, err := drv.Ask(t.Context(), agentturn.AskInput{Scope: physicsScope(t), Text: "что с конспектом"}); err != nil {
 		t.Fatal(err)
 	}
 	drv.Wait()
@@ -419,7 +426,7 @@ func TestDriverContextEndLeavesRequestContinuable(t *testing.T) {
 	e.hub.Then(testenv.AgentCall{ID: "c1", Tool: "find_lessons", Args: `{}`})
 
 	ctx, cancel := context.WithCancel(t.Context())
-	if err := e.driver.Ask(ctx, agentturn.AskInput{Scope: physicsScope(t), Text: "какие были пары"}); err != nil {
+	if _, err := e.driver.Ask(ctx, agentturn.AskInput{Scope: physicsScope(t), Text: "какие были пары"}); err != nil {
 		t.Fatal(err)
 	}
 	<-e.knowledge.started

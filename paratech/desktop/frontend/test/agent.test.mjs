@@ -86,7 +86,8 @@ test("the api sends the typed arguments and reads the problem of the reply", asy
     return method === methods.state ? { link: "no_key", readOnly: true } : { problem: "offline" };
   });
   assert.deepEqual(await api.state(), { link: "no_key", readOnly: true });
-  assert.equal(await api.ask(scope), "offline");
+  // TASK-398: ask answers { problem, queued, ticket }; an older core's bare {problem} reads queued false, ticket "".
+  assert.deepEqual(await api.ask(scope), { problem: "offline", queued: false, ticket: "" });
   assert.equal(await api.approvePlan({ threadId: "t", turn: 2 }), "offline");
   assert.deepEqual(calls[1], [methods.ask, scope]);
   assert.deepEqual(calls[2], [methods.approvePlan, { threadId: "t", turn: 2 }]);
@@ -97,7 +98,7 @@ test("the api sends the typed arguments and reads the problem of the reply", asy
   assert.equal(await odd.stop({ threadId: "t", turn: 1 }), "failed");
   // «Скрыть»: restartFrom goes to the core as typed (TASK-248).
   const restart = { ...scope, threadId: "t", restartFrom: 3 };
-  assert.equal(await api.ask(restart), "offline");
+  assert.deepEqual(await api.ask(restart), { problem: "offline", queued: false, ticket: "" });
   assert.deepEqual(calls[4], [methods.ask, restart]);
 });
 

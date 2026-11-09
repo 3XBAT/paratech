@@ -26,6 +26,7 @@ const (
 	opAgentRerun    = "ui: agent rerun"
 	opAgentCancel   = "ui: agent cancel"
 	opAgentLink     = "ui: agent hub link"
+	opAgentWithdraw = "ui: agent withdraw"
 )
 
 // Problems of the agent calls (AgentResult.Problem). The outcome of an accepted call comes as an AgentUpdateEvent.
@@ -55,9 +56,12 @@ var agentUpdateProblems = map[string]bool{
 }
 
 // AgentDriver is the agent loop (input/agent.Driver) as the panel uses it (ARCH-42); app wires it in, as input/wails
-// must not import input/agent. Each call starts the operation and returns; its updates go to the AgentUpdate sink.
+// must not import input/agent. Each call starts the operation and returns; its updates go to the AgentUpdate sink. Ask
+// returns the ticket of a question that waits for the chat's current request (empty: it started); Withdraw removes a
+// waiting one at once.
 type AgentDriver interface {
-	Ask(ctx context.Context, in agentturn.AskInput) error
+	Ask(ctx context.Context, in agentturn.AskInput) (agentturn.Queued, error)
+	Withdraw(thread shared.ThreadID, ticket agentturn.Ticket) agentturn.WithdrawResult
 	ApprovePlan(ctx context.Context, ref agentturn.TurnRef) error
 	RevisePlan(ctx context.Context, ref agentturn.TurnRef, wish string) error
 	AnswerQuestions(ctx context.Context, ref agentturn.TurnRef, answers []values.Answer) error
@@ -130,6 +134,28 @@ type AgentResult struct {
 	Problem string `json:"problem"`
 }
 
+// AgentAskResult is the answer of Ask: Problem as in AgentResult; Queued when the question waits for the chat's current
+// request («ждёт предыдущий запрос»), with Ticket for Withdraw and to match the update of its start ("" otherwise).
+type AgentAskResult struct {
+	Problem string `json:"problem"`
+	Queued  bool   `json:"queued"`
+	Ticket  string `json:"ticket"`
+}
+
+// Results of Withdraw: the agentturn ones, plus invalid (a malformed chat id or ticket) and failed.
+const (
+	AgentWithdrawn       = "withdrawn" // it waited and is gone: never sent, never paid
+	AgentWithdrawStarted = "started"   // it already began as a request
+	AgentWithdrawMissing = "not_found"
+	AgentWithdrawInvalid = "invalid"
+	AgentWithdrawFailed  = "failed"
+)
+
+// AgentWithdrawResult is the answer of Withdraw.
+type AgentWithdrawResult struct {
+	Result string `json:"result"`
+}
+
 // AgentState is what the panel shows before any request: ReadOnly when the Hub is not set up («Нет связи с
 // paratech»); Link says why.
 type AgentState struct {
@@ -168,29 +194,50 @@ func (s *AgentService) State(ctx context.Context) AgentState {
 
 // Ask starts a request in the chat of in; refused with "offline" while the Hub is not set up. A chat that does not
 // exist comes back as an update with problem "failed", like any outcome of the request: the update problems
-// (agentUpdateProblems) have no not_found, unlike the chat calls.
-func (s *AgentService) Ask(ctx context.Context, in AgentAskInput) AgentResult {
+// (agentUpdateProblems) have no not_found, unlike the chat calls. A question asked while the chat's request runs waits
+// (queued, with its ticket); it starts when that request ends, and the updates of its start carry the ticket.
+func (s *AgentService) Ask(ctx context.Context, in AgentAskInput) AgentAskResult {
 	scope, ok := scopeOf(in)
 	if !ok {
-		return AgentResult{Problem: AgentProblemInvalid}
+		return AgentAskResult{Problem: AgentProblemInvalid}
 	}
 	chat := shared.ThreadID(in.ThreadID)
 	if chat != "" && chat.Validate() != nil {
-		return AgentResult{Problem: AgentProblemInvalid}
+		return AgentAskResult{Problem: AgentProblemInvalid}
 	}
 	if in.RestartFrom < 0 || (in.RestartFrom > 0 && chat == "") {
-		return AgentResult{Problem: AgentProblemInvalid}
+		return AgentAskResult{Problem: AgentProblemInvalid}
 	}
 	mentions, ok := mentionsOf(in.Mentions)
 	if !ok {
-		return AgentResult{Problem: AgentProblemInvalid}
+		return AgentAskResult{Problem: AgentProblemInvalid}
 	}
 	if s.linkState(ctx) != AgentLinkReady {
-		return AgentResult{Problem: AgentProblemOffline}
+		return AgentAskResult{Problem: AgentProblemOffline}
 	}
-	return s.started(opAgentAsk, s.driver.Ask(s.life, agentturn.AskInput{
+	q, err := s.driver.Ask(s.life, agentturn.AskInput{
 		ThreadID: chat, Scope: scope, Text: in.Text, Mentions: mentions, RestartFrom: in.RestartFrom,
-	}))
+	})
+	if r := s.started(opAgentAsk, err); r.Problem != "" {
+		return AgentAskResult{Problem: r.Problem}
+	}
+	return AgentAskResult{Queued: q.Ticket != "", Ticket: string(q.Ticket)}
+}
+
+// Withdraw is «Отменить этот запрос» of waiting question ticket of chat threadID: withdrawn (never sent, never paid),
+// started (it already began: «Стоп» stops it), not_found, or invalid for a malformed id or ticket.
+func (s *AgentService) Withdraw(_ context.Context, threadID, ticket string) AgentWithdrawResult {
+	chat, t := shared.ThreadID(threadID), agentturn.Ticket(ticket)
+	if chat.Validate() != nil || t.Validate() != nil {
+		return AgentWithdrawResult{Result: AgentWithdrawInvalid}
+	}
+	switch r := s.driver.Withdraw(chat, t); r {
+	case agentturn.WithdrawWithdrawn, agentturn.WithdrawStarted, agentturn.WithdrawNotFound:
+		return AgentWithdrawResult{Result: string(r)}
+	default:
+		s.log.Warn(opAgentWithdraw, "result", string(r))
+		return AgentWithdrawResult{Result: AgentWithdrawFailed}
+	}
 }
 
 // ApprovePlan is «Да» on the plan card.
