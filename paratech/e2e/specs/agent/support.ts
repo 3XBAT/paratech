@@ -155,6 +155,10 @@ export interface Sample {
   stopPrevious: number;
   /** The timers «5с». */
   elapsed: string[];
+  /** The quiet «Повторная попытка N из 3» inside the waiting rows (.ag-think), one entry per match. */
+  attempts: string[];
+  /** The same text anywhere in the thread: it must be gone once the request is final. */
+  attemptsAnywhere: string[];
   /** The reply being typed (the draft card). */
   draft: string[];
   /** The text kept above a stop line (a stopped or broken reply). */
@@ -199,6 +203,8 @@ function probeThread(): Sample {
     stopButtons: all(".ag-thread .ag-think button").filter((b) => b.getAttribute("aria-label") === "Остановить").length,
     stopPrevious: named("Остановить предыдущий запрос"),
     elapsed: texts(".ag-thread .ag-elapsed"),
+    attempts: texts(".ag-thread .ag-think").flatMap((t) => t.match(/Повторная попытка \d+ из \d+/g) ?? []),
+    attemptsAnywhere: norm(thread?.textContent ?? "").match(/Повторная попытка \d+ из \d+/g) ?? [],
     draft: texts(".ag-thread .ag-reply-draft p.ag-text"),
     kept: texts(".ag-thread .ag-reply-kept p.ag-text"),
     replies: texts(".ag-thread section.ag-card:not(.ag-reply-draft):not(.ag-reply-kept) > p.ag-text"),

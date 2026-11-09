@@ -35,6 +35,35 @@ and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `par
   span (`splitForkTitle`) so the ellipsis never takes it. One call at a time (`beginFork`); a refusal is written under «Форк» in
   the dialog (`forkFailure`): the «Форк» button itself is the retry, «Новый чат» (gone or changed chat; `invalid` also reloads
   the earlier requests) stands in the same option. A refusal after the dialog was closed goes to the chat note.
+- The queue and the retries (TASK-399; the Go side is TASK-396, TASK-398, ADR-0026 addendum 2026-11-08):
+  - A second question while the chat's request runs is accepted and waits in the core's memory under a ticket
+    (`api.ask` -> `{problem, queued, ticket}`; `askResult` puts `Entry.ticket` on the local entry). `entryModel.queued` is the
+    ticket (not the old `queuedBehind` guess, which only finds the request «Остановить предыдущий запрос» stops): the row has the
+    still dots, «ждёт предыдущий запрос», that stop icon and «Отменить этот запрос» (`CardActions.withdraw`, `api.withdraw`,
+    outcomes in `withdrawStep`). The update with the same ticket and a real turn replaces the entry (`ticketed` in `agentState.ts`);
+    `pendingLocal` never takes a ticketed entry. The late-queued update (`queued: true`, turn 0, no status) gives its ticket
+    to a sent entry that has none and its chat to one whose ask result had none (`giveTicket`); it never becomes a failed Ask.
+  - Several waiting rows: only the oldest of the chat (`isFirstQueued`, `EntryContext.firstQueued`, `EntryModel.stopPrevious`) has the
+    «Остановить предыдущий запрос» icon; the later ones have only «Отменить этот запрос» and the same «ждёт предыдущий запрос» (E2E 03).
+  - Withdraw needs a chat (`AgentAskResult` has none): `withdrawChat` = ticket's chat, else the asked chat (never the open
+    chat: a wrong chat answers not_found); with none the icon is not drawn until a queued update names the chat (`CardActions.withdraw` undefined). With an empty field the row goes and
+    the text returns; with a busy field the entry stays as a quiet cancelled line (`Entry.withdrawn`, action `withdrawn`,
+    «Запрос отменён. Текст можно скопировать.», only the copy icon of the user text). It is no request: `pendingLocal`, `ticketed`,
+    `queuedBehind`, `hasLiveRequest`, `queueIsFull`, `lastEntry`, `isRunningEntry`, `restartBlock`, `panelMode` skip it. The input
+    takes focus after a withdraw in both cases.
+  - A question refused as busy (the 6th, `queueIsFull`) gets `texts.queueFull` INSTEAD of the busy line and only the stop icon;
+    «Отправить ещё раз» is back as soon as the queue is not full (recomputed per render) and discards the refused entry first
+    (one entry with the text).
+  - «Повторная попытка N из 3» (`UpdateView.retry`, copied by the progress branch of `agentState`) is a muted `RetryNote` after the
+    timer of the waiting card; in a progress card it is a sibling of the `<h3>` (`.ag-card-head`), so the heading's name stays.
+    `entryModel.retry` is 0 unless the request runs. `answer_question` has no such hook in Go.
+  - A reply cut by a lost connection says «Ответ оборван: нет связи. Можно повторить, когда связь вернётся.» (`texts.replyCutOffline`);
+    a failure keeps «Ответ оборван. Можно повторить.».
+  - D4: `panelMode` locks the field and shows «Нет связи с paratech» from `link.readOnly` only; an update that ends a request offline
+    only makes the panel read State again (`rereadsLink`). The offline card's icon is `retry`; an offline stop with NO open step is
+    refused by Retry with the problem `invalid` (an update with no status): `retryWatchStep` (set by the press, judged before the
+    reducer in `AgentPanel`) hides that update and presses Continue once. One watch per request (a Map by `retryWatchKey`); only
+    the repeat of the offline stop without a problem is kept, a stop with a problem (budget...) ends the watch and is shown.
 - CSS: `agent.css` (panel and common cards), `confirm.css`, `turnkey.css`; all three are imported in `main.tsx`.
 - Pure logic is outside this folder, in `src/`: `agentView.ts` (texts, `CardModel`, `cardModel`, `entryModel`, `offerSpecs`,
   button labels and icons), `agentState.ts` (panel reducer, no React), `agentOffer.ts` (`offerStep`, `runOffer`),
@@ -67,7 +96,7 @@ and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `par
 
 ## Tests
 Same runner as `README.md` of `src/`: `npm --prefix paratech/desktop/frontend run test` and `run build`. Agent tests are
-`test/agent*.test.mjs` (also `answercard`, `answersources296`, `messageactions365`, `panelwidth`, `chatheader365`...) and render
+`test/agent*.test.mjs` (`agentQueueRow399` the waiting row, withdraw and D3; `agentRetry399` the retry line, D4 and the offline card; also `answercard`, `answersources296`, `messageactions365`, `panelwidth`, `chatheader365`...) and render
 `AgentRequest` / `AgentPanelView` with `react-dom/server`. `test/agent.test.mjs` compares the `methods` of `bindings/agent.ts`
 with the exported `AgentService` methods in `agent.go`, `agentjournal.go`, `agentchats.go`, `agentmentions.go`: add a Go method, add it to `methods`
 (`ForkChat` is in `methods` as `forkChat`; its parser is `parseForkResult`, tests in `agentfork271.test.mjs`).
@@ -84,9 +113,13 @@ with the exported `AgentService` methods in `agent.go`, `agentjournal.go`, `agen
   one; late cards are keyed by identity (confirm target, action id, schedule token), not index: the reply arriving above a
   confirm card must not remount it, with an occurrence counter for repeats (`#2` counts earlier cards with the same identity,
   not the position; the planner may propose one target twice) (`agentLateCards20261108.test.mjs`).
+- Test updates are built by hand and often lack `ticket`, `queued` and `retry`: the code treats a missing ticket as none
+  (`!ticket`), never as "equal to an entry without one".
 - `AgentActions` and `UserActions` render nothing when there is nothing to copy or rerun.
 
 ## E2E
-ADR-0035 plans the pack `paratech/e2e/specs/agent/` (link question, "что было на паре", add a subject plus undo, tool failure
-honesty, recording titles). It does not exist yet (only `paratech/e2e/src` and `paratech/e2e/test`). Per ADR-0035 §6 a UI task
-that changes agent behaviour adds or updates its scenario there; `docs/process/e2e.md` is not written yet.
+The pack `paratech/e2e/specs/agent/` exists (`01-reply` ... `13-cards-stay`, with `support.ts`): reply, cut reply, busy,
+restart, compaction, titles, link, answer, failure, subject, confirm, tool busy, cards that stay. Per ADR-0035 §6 a UI task
+that changes agent behaviour adds or updates its scenario there; how to run and write one is `docs/process/e2e.md`
+(`paratech/e2e/README.md` has the layout). Texts and roles the specs look for (`aria-label`s of the icons, «Ответ оборван.
+Можно повторить.» / «Ответ оборван: нет связи. Можно повторить, когда связь вернётся.», «Нет связи с paratech») are pinned by the frontend tests too: change them in both places.

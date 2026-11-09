@@ -173,9 +173,9 @@ test("never two «Повторить» under one request: the stop card's button
     const repeats = labels.filter((l) => l === "Повторить").length + (m.rerun ? 1 : 0);
     assert.ok(repeats <= 1, JSON.stringify(v));
   }
-  // The stop card's button is the one shown, and it is still the continue call.
+  // The stop card's button is the one shown; after a lost connection it is the retry call (TASK-399), after the quota the continue call.
   const stopped = modelOf(update({ status: "STOPPED", stopReason: "offline" }));
-  assert.deepEqual(stopped.cards.at(-1).buttons.map((b) => [b.id, b.label]), [["continue", "Повторить"], ["cancel", "Отменить запрос"]]);
+  assert.deepEqual(stopped.cards.at(-1).buttons.map((b) => [b.id, b.label]), [["retry", "Повторить"], ["cancel", "Отменить запрос"]]);
   assert.equal(stopped.rerun, false);
   const html = renderToStaticMarkup(h(AgentRequest, { model: stopped, actions }));
   assert.equal(html.split(">Повторить<").length - 1, 1);

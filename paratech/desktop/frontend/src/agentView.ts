@@ -3,12 +3,12 @@
 // impersonal («Создан предмет…», not «Я создал…»). Model text (summary, notes, questions, options, labels, replies) is
 // passed through untouched and must be rendered as a text node only, never as HTML.
 
-import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, ContextFill, EarlierRequestView, LineResultView, MentionView, OfferView, PlanStepView, PlanView, QuestionView, UpdateView } from "./bindings/agent.js";
+import type { AddedAssignmentView, AnswerInput, ArgView, AskInput, AssignmentLineView, CallProblem, CardView, ChatProblem, ChatView, ContextFill, EarlierRequestView, LineResultView, MentionView, OfferView, PlanStepView, PlanView, QuestionView, UpdateView, WithdrawResult } from "./bindings/agent.js";
 import { estimateTexts, loadLabels } from "./durationEstimate.js";
 import { plural } from "./plural.js";
 import { askMentions, maxDraftLength, maxMentions, type MentionPill, mentionPills } from "./agentMentions.js";
 import { approveLabel, type PlanProgress, planProgress, stepMarks, type StepMark, planWindow } from "./planView.js";
-import { type Entry, isBusyRefused, isFinalStatus, isRunning, orderedEntries } from "./agentState.js";
+import { endReason, type Entry, hasTicket, isBusyRefused, isFinalStatus, isRunning, orderedEntries } from "./agentState.js";
 import { type PageId, pageById } from "./nav.js";
 import { dayText, daysBetween, daysLeftText, dueText, parseMoment } from "./dueText.js";
 import { doneTexts } from "./assignmentDoneView.js";
@@ -284,7 +284,7 @@ function runsLocally(entries: readonly Entry[], threadId: string): boolean {
   return entries.some(
     (e) =>
       (e.threadId === threadId && e.update !== null && isRunning(e.update.status)) ||
-      (e.threadId === "" && e.callProblem === "" && e.update === null && e.scope !== null && (e.scope.threadId ?? "") === threadId),
+      (e.threadId === "" && e.callProblem === "" && e.update === null && e.withdrawn !== true && e.scope !== null && (e.scope.threadId ?? "") === threadId),
   );
 }
 
@@ -392,7 +392,7 @@ function sameFill(a: ContextFill | undefined, b: ContextFill | undefined): boole
  * named, and plan or question waits.
  */
 function requestOpen(entries: readonly Entry[], threadId: string): boolean {
-  if (entries.some((e) => e.threadId === "" && e.callProblem === "" && e.update === null && e.scope !== null && (e.scope.threadId ?? "") === threadId)) {
+  if (entries.some((e) => e.threadId === "" && e.callProblem === "" && e.update === null && e.withdrawn !== true && e.scope !== null && (e.scope.threadId ?? "") === threadId)) {
     return true;
   }
   const last = orderedEntries(entries)
@@ -671,7 +671,7 @@ export function restartBlock(entries: readonly Entry[], openId: string, mode: { 
   if (!mode.inputEnabled) {
     return { reason: mode.offline ? restartReasons.offline : restartReasons.loading, fix: null };
   }
-  if (entries.some((e) => e.threadId === "" && e.callProblem === "" && e.update === null && e.scope !== null && (e.scope.threadId ?? "") === openId)) {
+  if (entries.some((e) => e.threadId === "" && e.callProblem === "" && e.update === null && e.withdrawn !== true && e.scope !== null && (e.scope.threadId ?? "") === openId)) {
     return { reason: restartReasons.sending, fix: null };
   }
   const current = orderedEntries(entries)
@@ -1022,10 +1022,19 @@ export const texts = {
   replyStopped: "Ответ остановлен",
   /** The stop line of a request that broke off (a lost connection, a failure) while its reply was typing; the text read stays above it. */
   replyCut: "Ответ оборван. Можно повторить.",
+  /** The same for a lost connection: says why and when the repeat will work. */
+  replyCutOffline: "Ответ оборван: нет связи. Можно повторить, когда связь вернётся.",
   /** The accessible label of a request that waits for the previous one (the dots' region; «waiting» is for a running one). */
   waitingQueued: "Запрос ждёт предыдущий",
   /** A request sent while another one of the chat still runs. */
   queued: "ждёт предыдущий запрос",
+  /** The small icon of a waiting question: it takes this question back (the other icon stops the running one). */
+  withdraw: "Отменить этот запрос",
+  withdrawFailed: "Не удалось отменить запрос. Можно попробовать ещё раз.",
+  /** The line of a question taken back while the field held a draft (never overwritten): its text stays in the thread. */
+  withdrawnLine: "Запрос отменён. Текст можно скопировать.",
+  /** The line of a question refused as busy when five questions already wait in the chat; it replaces the busy line. */
+  queueFull: "Не принят: уже ждут пять запросов. Можно отменить один из них или остановить текущий.",
   // The busy-refused request: what its icons do (the line names the way out, the icons carry no visible word).
   busyBoth: "Предыдущий запрос ещё выполняется. Его можно остановить или отправить этот ещё раз.",
   busyStop: "Предыдущий запрос ещё выполняется. Его можно остановить.",
@@ -1115,7 +1124,9 @@ interface StopText {
 
 /** Why a request stopped: the text of the stop card and the buttons it offers. */
 const stopTexts: Record<string, StopText> = {
-  offline: { text: "Не завершено: нет связи.", hint: "Можно повторить, когда связь вернётся.", buttons: ["continue", "cancel"] },
+  // «Повторить» is Retry (a new key) since TASK-396: «Продолжить» with the same key stays for the student's stop and the quota.
+  // An offline stop with no open step is refused by Retry; the panel then continues it (retryWatchStep).
+  offline: { text: "Не завершено: нет связи.", hint: "Можно повторить, когда связь вернётся.", buttons: ["retry", "cancel"] },
   // «Остановить» keeps «Продолжить» (the same free replay): «Повторить» would promise another attempt, which is the rerun button.
   user: { text: "Остановлено.", hint: "Можно продолжить.", buttons: ["resume", "cancel"] },
   // The request does not continue by itself after a top-up: the retry is the next step.
@@ -1796,8 +1807,17 @@ export interface EntryModel {
   callLine: string;
   /** The call runs and nothing has come back yet: the waiting dots show instead of a line. */
   waiting: boolean;
-  /** The request waits behind a running one of its chat: «ждёт предыдущий запрос» and a stop for that one, no timer. */
+  /**
+   * The question waits in the core's queue under a ticket: «ждёт предыдущий запрос», a stop for the running one and
+   * «Отменить этот запрос» (withdraw), no timer.
+   */
   queued: boolean;
+  /** The row offers the stop of the running request: only the oldest waiting question of the chat does. */
+  stopPrevious: boolean;
+  /** The question was taken back and its text stays as a quiet cancelled line (no waiting row, no icons but the copy). */
+  withdrawn: boolean;
+  /** The attempt (1..3) of the automatic retry of the step the request runs, shown beside the timer; 0: none. */
+  retry: number;
   cards: CardModel[];
   /** «Повторить» is offered under the request. */
   rerun: boolean;
@@ -1813,8 +1833,23 @@ export interface EntryContext {
   mentions?: readonly MentionView[];
   /** The request ended while its reply was typing: the text read stays above, and a lost connection or a failure says the reply broke off. */
   replyCut?: boolean;
-  /** Another request of the chat is running and this one has not been answered yet (queuedBehind). */
-  queued?: boolean;
+  /** A refused-as-busy question found five questions already waiting in its chat (queueIsFull): the line says so. */
+  queueFull?: boolean;
+  /** The question is the oldest waiting one of its chat (isFirstQueued); absent: yes. */
+  firstQueued?: boolean;
+}
+
+/** The core retries a failed step by itself this many times (backoff.InteractiveRetries). */
+export const maxAutoRetries = 3;
+
+/** «Повторная попытка 2 из 3», the quiet line beside the timer while the core retries a step. */
+export function retryAttemptText(attempt: number): string {
+  return `Повторная попытка ${attempt} из ${maxAutoRetries}`;
+}
+
+/** The attempt to show: 1..3 while the request runs, else 0 (a stop or an answer ends the retry). */
+function retryOf(u: UpdateView): number {
+  return activeStatuses.has(u.status) && Number.isInteger(u.retry) && u.retry >= 1 && u.retry <= maxAutoRetries ? u.retry : 0;
 }
 
 /**
@@ -1837,8 +1872,21 @@ const finishedStatuses = new Set(["DONE", "FAILED", "CANCELLED", "STOPPED"]);
 
 export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked: false }): EntryModel {
   const callLine = e.callProblem !== "" ? callProblemText(e.callProblem) : "";
-  const waiting = e.callProblem === "" && e.update === null;
-  const base = { key: e.key, userText: e.text, mentions: mentionPills(e.scope?.mentions ?? ctx.mentions), callLine, waiting, queued: waiting && ctx.queued === true, rerun: false };
+  const withdrawn = e.withdrawn === true && e.update === null;
+  const waiting = e.callProblem === "" && e.update === null && !withdrawn;
+  const queued = waiting && hasTicket(e);
+  const base = {
+    key: e.key,
+    userText: e.text,
+    mentions: mentionPills(e.scope?.mentions ?? ctx.mentions),
+    callLine,
+    waiting,
+    queued,
+    stopPrevious: queued && ctx.firstQueued !== false,
+    withdrawn,
+    retry: 0,
+    rerun: false,
+  };
   const u = e.update;
   if (u === null) {
     return { ...base, cards: [] };
@@ -1867,7 +1915,7 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
   // student read stays above it, so the line is the only caption. Other reasons keep their own line.
   const cutHere = ctx.replyCut === true && (reason === "failed" || reason === "offline");
   if (stop && cutHere) {
-    stop = { ...stop, text: texts.replyCut, hint: "" };
+    stop = { ...stop, text: reason === "offline" ? texts.replyCutOffline : texts.replyCut, hint: "" };
   }
   // The problem's own «Повторить» is the next step: the stop card must not offer a second way on, nor a second «Повторить».
   if (stop && (problem === "retry_required" || problem === "restart_required")) {
@@ -1892,10 +1940,15 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
     if (isBusyRefused(e) && ctx.last) {
       const canStop = ctx.blocked;
       const canResend = e.text !== "" && e.scope !== null;
-      next = [...(canStop ? (["stop"] as const) : []), ...(canResend ? (["resend"] as const) : [])];
+      // Five questions already wait: sending again would be refused the same way, so only the stop stays and the line
+      // is the one sentence pair about the queue. «Отправить ещё раз» returns once the queue is not full (recomputed per render).
+      const full = ctx.queueFull === true;
+      next = [...(canStop ? (["stop"] as const) : []), ...(canResend && !full ? (["resend"] as const) : [])];
       // Two icons: the line says what each one does, and the stop one names the request it stops.
       nextButtons = buttons(next).map((b) => (b.id === "stop" ? { ...b, label: texts.stopPrevious } : b));
-      if (canStop && canResend) {
+      if (full) {
+        text = texts.queueFull;
+      } else if (canStop && canResend) {
         text = texts.busyBoth;
       } else if (canStop) {
         text = texts.busyStop;
@@ -1920,5 +1973,82 @@ export function entryModel(e: Entry, ctx: EntryContext = { last: false, blocked:
     // The stop card's `continue` button is worded «Повторить» too: two of them under one request would be confusing.
     // `resume` («Продолжить», after «Остановить») does not clash: the rerun stays.
     !offered.includes("continue");
-  return { ...base, cards, rerun };
+  return { ...base, cards, rerun, retry: retryOf(u) };
+}
+
+// ---- «Отменить этот запрос» of a waiting question (TASK-399) ----
+
+/** What the panel does with the result of Withdraw: "thrown" is a call that failed before an answer. */
+export interface WithdrawStep {
+  /** The row leaves the thread (its text returns to the empty field). */
+  discard: boolean;
+  /** The question's text (and mentions) return to the field. */
+  restore: boolean;
+  /** The row stays as a quiet cancelled line (the field is busy, so the text could not return): never dropped. */
+  keep: boolean;
+  /** The input takes focus: the student goes on typing. */
+  focus: boolean;
+  /** A short line for the student; "" says nothing. */
+  note: string;
+}
+
+/**
+ * withdrawn: the question never ran. With an EMPTY field the row goes and the text returns there; with a busy field (a
+ * typed draft is never overwritten) the row stays as a cancelled line whose text can be copied, so nothing typed is lost.
+ * not_found / invalid: the question is not in the queue and will never run, the same. Either way the input takes focus.
+ * started: it began meanwhile, the update that carries its ticket replaces the row. failed or a thrown call: the row
+ * stays and the line says it can be tried again.
+ */
+export function withdrawStep(result: WithdrawResult | "thrown", fieldEmpty: boolean): WithdrawStep {
+  switch (result) {
+    case "withdrawn":
+    case "not_found":
+    case "invalid":
+      return { discard: fieldEmpty, restore: fieldEmpty, keep: !fieldEmpty, focus: true, note: "" };
+    case "started":
+      return { discard: false, restore: false, keep: false, focus: false, note: "" };
+    default:
+      return { discard: false, restore: false, keep: false, focus: false, note: texts.withdrawFailed };
+  }
+}
+
+// ---- «Повторить» after an offline stop (TASK-396, TASK-399) ----
+// An offline stop with an open step is retried (a new key). One with NO open step (its calls waited for the Driver) has
+// no key to change: Retry refuses it as an invalid transition, which reaches the panel as an update of the request with
+// no status and the problem "invalid" (driver.go problemOf), and Continue is what works. The panel presses Continue once,
+// so the student clicks once and sees no error in between. No other problem leads there (budget, busy... are shown).
+
+/** The request a «Повторить» of an offline stop was pressed on. */
+export interface RetryWatch {
+  threadId: string;
+  turn: number;
+  /** The key of its entry, for the guard of the buttons. */
+  key: string;
+}
+
+/** The request stopped offline: its «Повторить» may be refused for lack of an open step. */
+export function stoppedOffline(u: UpdateView | null): boolean {
+  return u !== null && u.status === "STOPPED" && endReason(u) === "offline";
+}
+
+export type RetryWatchStep = "refused" | "went_on" | "keep";
+
+/** One watch per request, so two requests (or chats) never share a refusal. */
+export function retryWatchKey(r: { threadId: string; turn: number }): string {
+  return `${r.threadId}:${r.turn}`;
+}
+
+/**
+ * What an update means for the watched request: "refused" (no status, problem "invalid": continue instead and hide this
+ * update), "went_on" (the request moved on or another refusal came: stop watching and show it), "keep" (another request,
+ * or the repeat of the offline stop itself). A stop with a problem (a budget...) or for another reason is a real answer.
+ */
+export function retryWatchStep(w: Pick<RetryWatch, "threadId" | "turn">, u: UpdateView): RetryWatchStep {
+  if (u.threadId !== w.threadId || u.turn !== w.turn || u.compaction || u.queued) {
+    return "keep";
+  }
+  if (u.status === "") {
+    return u.problem === "invalid" ? "refused" : "went_on";
+  }
+  return u.status === "STOPPED" && u.problem === "" && endReason(u) === "offline" ? "keep" : "went_on";
 }

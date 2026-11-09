@@ -31,6 +31,7 @@ import {
   offerIcon,
   replyCopyText,
   replyStatus,
+  retryAttemptText,
   type ButtonId,
   type ButtonModel,
   type CardModel,
@@ -82,6 +83,10 @@ export interface CardActions {
   /** Puts a message text on the clipboard («Копировать»); absent: the message actions offer no copy. */
   copy?: (text: string) => Promise<void>;
   press(id: ButtonId): void;
+  /** «Отменить этот запрос» of a waiting question (its ticket is the panel's); absent: the icon is not drawn. */
+  withdraw?: () => void;
+  /** The call of `withdraw` runs: the icon shows a spinner and is off (one click is one call). */
+  withdrawBusy?: boolean;
   revise(wish: string): void;
   answer(answers: AnswerInput[]): void;
   /** «Отменить» of an action line. */
@@ -426,11 +431,24 @@ function QuestionsCard(props: { card: Extract<CardModel, { type: "questions" }>;
   );
 }
 
+/** «Повторная попытка 2 из 3»: a quiet muted line beside the timer, no box and no colour; nothing for attempt 0. */
+function RetryNote(props: { attempt?: number }) {
+  if (props.attempt === undefined || props.attempt < 1) {
+    return null;
+  }
+  return (
+    <span className="ag-retry small muted" role="status">
+      {retryAttemptText(props.attempt)}
+    </span>
+  );
+}
+
 /**
  * `typing`: the reply is being typed above, so the waiting row keeps the elapsed time and «Стоп» (the text is the progress).
  * `startedAt`: when the request started running, for the timer; `clock` is the time source of the timer (tests).
+ * `retry`: the attempt of the automatic retry of the step (1..3), said beside the timer.
  */
-function Card(props: { card: CardModel; actions: CardActions; typing?: boolean; startedAt?: number; clock?: () => number }) {
+function Card(props: { card: CardModel; actions: CardActions; typing?: boolean; startedAt?: number; clock?: () => number; retry?: number }) {
   const { card } = props;
   switch (card.type) {
     case "plan":
@@ -440,11 +458,15 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean; 
     case "progress":
       return (
         <section className="ag-card">
-          <h3 className="ag-card-h">
-            <span className="ag-dot" aria-hidden="true" />
-            {card.caption}
-            {props.startedAt !== undefined && <Elapsed since={props.startedAt} clock={props.clock} />}
-          </h3>
+          {/* The retry note is a sibling of the heading, so its live text never changes the heading's accessible name. */}
+          <div className="ag-card-head">
+            <h3 className="ag-card-h">
+              <span className="ag-dot" aria-hidden="true" />
+              {card.caption}
+              {props.startedAt !== undefined && <Elapsed since={props.startedAt} clock={props.clock} />}
+            </h3>
+            <RetryNote attempt={props.retry} />
+          </div>
           <Buttons buttons={card.buttons} card="progress" busy={props.actions.busy} onPress={props.actions.press} />
         </section>
       );
@@ -453,6 +475,7 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean; 
         <div className="ag-think">
           {!props.typing && <Waiting />}
           {props.startedAt !== undefined && <Elapsed since={props.startedAt} clock={props.clock} />}
+          <RetryNote attempt={props.retry} />
           <Buttons buttons={card.buttons} card="waiting" busy={props.actions.busy} onPress={props.actions.press} />
         </div>
       );
@@ -717,8 +740,14 @@ export function AgentRequest(props: {
           {model.queued ? (
             <>
               <span className="ag-queued small muted">{texts.queued}</span>
-              {/* The running request's stop, on the row of the one that waits for it. */}
-              <IconAction icon="stop" label={texts.stopPrevious} disabled={props.actions.busy === true} onClick={() => props.actions.press("stop")} />
+              {/* The running request's stop, on the row of the oldest waiting question only (one stop is enough). */}
+              {model.stopPrevious && (
+                <IconAction icon="stop" label={texts.stopPrevious} disabled={props.actions.busy === true} onClick={() => props.actions.press("stop")} />
+              )}
+              {/* This question's own cancel: it never runs and is never paid; its text returns to the field or stays copyable. */}
+              {props.actions.withdraw !== undefined && (
+                <IconAction icon="x" variant="danger" label={texts.withdraw} busy={props.actions.withdrawBusy === true} disabled={props.actions.busy === true} onClick={props.actions.withdraw} />
+              )}
             </>
           ) : (
             props.startedAt !== undefined && <Elapsed since={props.startedAt} clock={props.clock} />
@@ -727,6 +756,11 @@ export function AgentRequest(props: {
       ) : (
         <Waiting />
       ))}
+      {model.withdrawn && (
+        <p className="ag-withdrawn small muted" role="status">
+          {texts.withdrawnLine}
+        </p>
+      )}
       {model.callLine !== "" && (
         <p className="ag-callline small muted" role="status">
           {model.callLine}
@@ -740,14 +774,14 @@ export function AgentRequest(props: {
           <Fragment key={keys[i]}>
             {i === keptAt && kept}
             {i === draftAt && drafts}
-            <Card card={c} actions={props.actions} startedAt={props.startedAt} clock={props.clock} />
+            <Card card={c} actions={props.actions} startedAt={props.startedAt} clock={props.clock} retry={model.retry} />
           </Fragment>
         ),
       )}
       {keptAt === model.cards.length && kept}
       <ReplyStatus typing={reply !== null} replyCard={model.cards.some((c) => c.type === "reply")} running={hasWaitingCard} />
       {draftAt === model.cards.length && drafts}
-      {model.cards.map((c, i) => (c.type === "waiting" ? <Card key={`w:${i}`} card={c} actions={props.actions} typing={reply !== null} startedAt={props.startedAt} clock={props.clock} /> : null))}
+      {model.cards.map((c, i) => (c.type === "waiting" ? <Card key={`w:${i}`} card={c} actions={props.actions} typing={reply !== null} startedAt={props.startedAt} clock={props.clock} retry={model.retry} /> : null))}
       {/* No copy while the reply is still typing: the final card replaces the draft. */}
       <AgentActions
         text={reply === null ? replyCopyText(model.cards) : ""}

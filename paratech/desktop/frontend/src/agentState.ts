@@ -21,6 +21,19 @@ export interface Entry {
   /** The call failed before the core accepted it. */
   callProblem: CallProblem;
   update: UpdateView | null;
+  /**
+   * The id of this question in the core's queue of waiting questions (TASK-398): set while it waits behind a running
+   * request of its chat. The update that carries the same ticket is the question starting; it replaces the entry. Absent
+   * or "": the question is not queued.
+   */
+  ticket?: string;
+  /** The chat the question waits in, when known better than by its scope (the chat of the queued update). */
+  ticketChat?: string;
+  /**
+   * The waiting question was taken back while the field held another draft, so its text could not return there: it stays in
+   * the thread as a quiet cancelled line (copyable). It is no request: never sent, never counted as sending, waiting or last.
+   */
+  withdrawn?: boolean;
 }
 
 export interface PanelState {
@@ -50,7 +63,8 @@ export const initialPanelState: PanelState = { entries: [], nextSeq: 1, link: nu
 
 export type PanelAction =
   | { type: "asked"; id: number; text: string; scope: AskInput }
-  | { type: "askResult"; id: number; problem: CallProblem }
+  /** `queued` with a `ticket`: the question was accepted and waits behind the running request of its chat (not a refusal). */
+  | { type: "askResult"; id: number; problem: CallProblem; queued?: boolean; ticket?: string }
   | { type: "rerunAsked"; from: { threadId: string; turn: number; text: string; scope: AskInput | null } }
   | { type: "rerunRefused"; key: string }
   | { type: "update"; update: UpdateView }
@@ -61,6 +75,8 @@ export type PanelAction =
   | { type: "restarted"; threadId: string; from: number; upTo: number }
   /** A refused restart request is taken back from the thread (its text returns to the field). */
   | { type: "discard"; key: string }
+  /** A waiting question taken back whose text stays in the thread (the field is busy): a cancelled line, not a request. */
+  | { type: "withdrawn"; key: string }
   | { type: "history"; requests: readonly UpdateView[] }
   | { type: "link"; link: AgentState };
 
@@ -93,10 +109,82 @@ function pendingLocal(entries: readonly Entry[], scope: string, threadId = ""): 
       e.key.startsWith("local:") &&
       e.callProblem === "" &&
       e.update === null &&
+      e.withdrawn !== true &&
+      // A waiting question is named by its own ticket only, never by the next update of the scope.
+      !hasTicket(e) &&
       e.scope !== null &&
       scopeKey(e.scope) === scope &&
       (threadId === "" || (e.scope.threadId ?? "") === "" || e.scope.threadId === threadId),
   );
+}
+
+/** The question waits in the core's queue under a ticket. */
+export function hasTicket(e: Entry): boolean {
+  return typeof e.ticket === "string" && e.ticket !== "";
+}
+
+/** The chat a waiting question is in ("" when unknown): the ticket's chat, else the chat it was asked in. */
+export function queueChat(e: Entry): string {
+  return e.ticketChat || (e.scope?.threadId ?? "");
+}
+
+/**
+ * The chat `Withdraw` is called with: the ticket's chat, else the chat it was asked in. "" when none is known (the core put
+ * the question into its own current chat): the panel then offers no withdraw icon until a queued update names the chat.
+ * The open chat is NOT a fallback: a wrong chat answers not_found, which would pass for "taken back" while it still runs.
+ */
+export function withdrawChat(e: Entry): string {
+  return queueChat(e);
+}
+
+/** The question is waiting in the core's queue: sent, not answered, not refused, not taken back. */
+export function isWaitingQueued(e: Entry): boolean {
+  return e.update === null && e.callProblem === "" && e.withdrawn !== true && hasTicket(e);
+}
+
+/**
+ * The oldest waiting question of its chat: only its row offers the stop of the running request (one stop is enough;
+ * the later rows only take their own question back).
+ */
+export function isFirstQueued(entries: readonly Entry[], e: Entry): boolean {
+  const chat = queueChat(e);
+  const first = orderedEntries(entries).find((x) => isWaitingQueued(x) && queueChat(x) === chat);
+  return first === undefined || first === e;
+}
+
+/** The waiting question that has this ticket and no update yet. */
+function ticketed(entries: readonly Entry[], ticket: string): Entry | undefined {
+  return !ticket ? undefined : entries.find((e) => e.key.startsWith("local:") && e.update === null && e.withdrawn !== true && e.ticket === ticket);
+}
+
+/** The core keeps at most this many waiting questions per chat; the next one is refused as busy. */
+export const maxQueuedQuestions = 5;
+
+/** The refused question found the queue of its chat full: as many waiting questions as the core keeps. */
+export function queueIsFull(entries: readonly Entry[], refused: Entry): boolean {
+  const chat = refused.scope?.threadId ?? "";
+  if (chat === "") {
+    return false;
+  }
+  return entries.filter((e) => isWaitingQueued(e) && queueChat(e) === chat).length >= maxQueuedQuestions;
+}
+
+/**
+ * The late-queued update (the Driver found the chat busy only when the Ask ran): it names the ticket of a question the
+ * panel has sent. A sent question that has no ticket yet takes it; otherwise the update is ignored. It never becomes a
+ * failed Ask, an orphan entry or a problem.
+ */
+function giveTicket(s: PanelState, u: UpdateView): PanelState {
+  if (!u.ticket) {
+    return s;
+  }
+  const known = ticketed(s.entries, u.ticket);
+  if (known !== undefined) {
+    // The ask result named the ticket but not always the chat (an Ask without one): the update knows it.
+    return known.ticketChat || u.threadId === "" ? s : { ...s, entries: replace(s.entries, known.key, { ...known, ticketChat: u.threadId }) };
+  }
+  const local = pendingLocal(s.entries, scopeKey(u), u.threadId);
+  return local ? { ...s, entries: replace(s.entries, local.key, { ...local, ticket: u.ticket, ticketChat: u.threadId }) } : s;
 }
 
 /**
@@ -106,6 +194,11 @@ function pendingLocal(entries: readonly Entry[], scope: string, threadId = ""): 
 function clearsDrafts(u: UpdateView): boolean {
   // An ended request has no draft, whatever else the update says.
   return u.threadId !== "" && (isEnded(u) || (!u.progress && !(u.status === "" && u.cards.length === 0)));
+}
+
+/** The update ends a request for lack of a connection: the link state may have changed, so the panel reads it again. */
+export function rereadsLink(u: UpdateView): boolean {
+  return isEnded(u) && endReason(u) === "offline";
 }
 
 /** The update says the request stopped or failed. */
@@ -120,7 +213,7 @@ function isFailedAsk(u: UpdateView): boolean {
 
 function applyUpdate(s: PanelState, u: UpdateView): PanelState {
   const next = applyUpdateEntries(s, u);
-  if (isFailedAsk(u)) {
+  if (u.queued || isFailedAsk(u)) {
     return next;
   }
   const cuts = nextCuts(s, u);
@@ -133,7 +226,7 @@ function applyUpdate(s: PanelState, u: UpdateView): PanelState {
 }
 
 /** The reason of a request that ended: the stopped card's own, else the update's. */
-function endReason(u: UpdateView): string {
+export function endReason(u: UpdateView): string {
   return u.cards.find((c) => c.kind === "stopped")?.stopReason || u.stopReason;
 }
 
@@ -224,11 +317,15 @@ export function endSignature(last: Entry | undefined): string {
 }
 
 function applyUpdateEntries(s: PanelState, u: UpdateView): PanelState {
+  if (u.queued) {
+    return giveTicket(s, u);
+  }
   if (isFailedAsk(u)) {
     // A failed Ask: the core never named a request (threadId "", or the asked chat with turn 0 and no status; real
     // turns start at 1). The entry keeps threadId "": it stays unnamed, so its buttons act on the blocker, not on turn 0.
     const sc = scopeKey(u);
-    const local = pendingLocal(s.entries, sc, u.threadId);
+    // A queued question that failed to start carries its ticket: its row becomes the refusal.
+    const local = ticketed(s.entries, u.ticket) ?? pendingLocal(s.entries, sc, u.threadId);
     if (local) {
       return { ...s, entries: replace(s.entries, local.key, { ...local, update: u }) };
     }
@@ -248,9 +345,9 @@ function applyUpdateEntries(s: PanelState, u: UpdateView): PanelState {
     if (known.update && final.has(known.update.status) && !final.has(u.status) && u.status !== "") {
       return s;
     }
-    // A step went to the Hub: only the status and the stop reason move, the cards shown stay.
+    // A step went to the Hub: only the status, the stop reason and the attempt of the automatic retry move, the cards shown stay.
     if (u.progress && known.update) {
-      return { ...s, entries: replace(s.entries, key, { ...known, update: { ...known.update, status: u.status, stopReason: u.stopReason, problem: "" } }) };
+      return { ...s, entries: replace(s.entries, key, { ...known, update: { ...known.update, status: u.status, stopReason: u.stopReason, problem: "", retry: u.retry } }) };
     }
     // A failed button operation: no status, no cards, only a problem. The request itself is unchanged, so keep its
     // cards and buttons and attach the problem; the next real update replaces it.
@@ -264,7 +361,8 @@ function applyUpdateEntries(s: PanelState, u: UpdateView): PanelState {
     const pending = threadKey(u.threadId, u.turn + 1);
     return { ...s, entries: u.problem === "" ? replaced : replaced.filter((x) => !(x.key === pending && x.update === null)) };
   }
-  const local = pendingLocal(s.entries, scopeKey(u), u.threadId);
+  // The question that waited under this ticket starts; else the oldest sent request of the scope.
+  const local = ticketed(s.entries, u.ticket) ?? pendingLocal(s.entries, scopeKey(u), u.threadId);
   if (local) {
     return { ...s, entries: replace(s.entries, local.key, { ...local, key, threadId: u.threadId, turn: u.turn, update: u }) };
   }
@@ -291,8 +389,15 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
     }
     case "askResult": {
       const e = s.entries.find((x) => x.key === localKey(a.id));
-      // An accepted call needs nothing; a request the core already named has its own updates.
-      if (!e || a.problem === "") {
+      if (!e) {
+        return s;
+      }
+      // An accepted call needs nothing, except a queued question: it waits under its ticket (a request the core already
+      // named has its own updates, and one that already got this ticket from the queued update keeps it).
+      if (a.problem === "") {
+        if (a.queued === true && (a.ticket ?? "") !== "" && e.update === null && !hasTicket(e) && e.withdrawn !== true) {
+          return { ...s, entries: replace(s.entries, e.key, { ...e, ticket: a.ticket, ticketChat: e.scope?.threadId ?? "" }) };
+        }
         return s;
       }
       return { ...s, entries: replace(s.entries, e.key, { ...e, callProblem: a.problem }) };
@@ -347,6 +452,11 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
     }
     case "discard":
       return { ...s, entries: s.entries.filter((e) => e.key !== a.key) };
+    case "withdrawn": {
+      const e = s.entries.find((x) => x.key === a.key);
+      // Only a question still waiting can be taken back; the ticket goes with it (a late update must not find this row).
+      return e === undefined || e.update !== null ? s : { ...s, entries: replace(s.entries, e.key, { ...e, withdrawn: true, ticket: "" }) };
+    }
     case "history":
       return a.requests.reduce(
         (acc, u) => (acc.entries.some((e) => e.threadId === u.threadId && e.turn === u.turn && e.update !== null) ? acc : applyUpdate(acc, u)),
@@ -367,7 +477,7 @@ export function hasLiveRequest(entries: readonly Entry[], threadId: string): boo
   return entries.some(
     (e) =>
       (e.threadId === threadId && threadId !== "") ||
-      (e.threadId === "" && e.callProblem === "" && e.update === null && e.scope !== null && (e.scope.threadId ?? "") === threadId),
+      (e.threadId === "" && e.callProblem === "" && e.update === null && e.withdrawn !== true && e.scope !== null && (e.scope.threadId ?? "") === threadId),
   );
 }
 
@@ -445,9 +555,9 @@ export function isRunning(status: string): boolean {
   return status === "PLANNING" || status === "EXECUTING";
 }
 
-/** The last request of the thread: the only one that offers «Повторить». */
+/** The last request of the thread: the only one that offers «Повторить». A cancelled line is no request. */
 export function lastEntry(entries: readonly Entry[]): Entry | undefined {
-  return orderedEntries(entries).at(-1);
+  return orderedEntries(entries.filter((e) => e.withdrawn !== true)).at(-1);
 }
 
 /**
@@ -479,7 +589,7 @@ export function blockingEntry(entries: readonly Entry[], refused: Entry): Entry 
  * or a failed call / an update already says what became of it).
  */
 export function queuedBehind(entries: readonly Entry[], e: Entry): Entry | undefined {
-  if (e.update !== null || e.callProblem !== "") {
+  if (e.update !== null || e.callProblem !== "" || e.withdrawn === true) {
     return undefined;
   }
   const chat = e.threadId || (e.scope?.threadId ?? "");
@@ -567,23 +677,21 @@ export interface PanelMode {
 }
 
 /**
- * Offline has two sources: the Hub is not set up (State, read-only) and a request that stopped for lack of a
- * connection (stopReason "offline" on its latest update).
+ * Offline comes from the connection state only (State: the Hub is not set up, `link.readOnly`), never from one request:
+ * a request that stopped offline or failed (a cut reply) says so in its own line and leaves the field usable. When such
+ * a stop arrives the panel re-reads State (`rereadsLink`), so the banner follows the real connection.
  */
 export function panelMode(s: PanelState): PanelMode {
   if (s.link === null) {
     return { inputEnabled: false, offline: false, placeholder: "Загрузка…", staleNote: "" };
   }
-  const latest = orderedEntries(s.entries).at(-1);
-  // A local "offline" refusal does not lock the input: the panel re-reads State and link.readOnly decides.
-  const stoppedOffline = latest?.update?.stopReason === "offline";
-  const offline = s.link.readOnly || stoppedOffline;
+  const offline = s.link.readOnly;
   if (offline) {
     return {
       inputEnabled: false,
       offline: true,
       placeholder: "Нет связи с paratech",
-      staleNote: s.entries.length > 0 ? "нет связи — может быть неактуально" : "",
+      staleNote: s.entries.some((e) => e.withdrawn !== true) ? "нет связи — может быть неактуально" : "",
     };
   }
   return { inputEnabled: true, offline: false, placeholder: "Спросить paratech", staleNote: "" };

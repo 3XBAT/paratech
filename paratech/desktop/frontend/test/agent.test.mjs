@@ -614,17 +614,17 @@ test("confirm card without the confirm calls offers no buttons", () => {
 
 // ---- Stop reasons ----
 
-test("stop reasons: offline repeats (continue), failed retries, expired restarts, budget has no button", () => {
+test("stop reasons: offline retries (TASK-399), failed retries, expired restarts, budget has no button", () => {
   const stop = (reason, over = {}) => modelOf(update({ status: "STOPPED", stopReason: reason, ...over })).cards.at(-1);
   const off = stop("offline");
   assert.equal(off.type, "stopped");
   assert.equal(off.text, "Не завершено: нет связи. Можно повторить, когда связь вернётся.");
   assert.deepEqual(off.buttons.map((b) => b.label), ["Повторить", "Отменить запрос"]);
-  assert.deepEqual(off.buttons.map((b) => b.id), ["continue", "cancel"]);
+  assert.deepEqual(off.buttons.map((b) => b.id), ["retry", "cancel"]);
   assert.deepEqual(stop("failed").buttons.map((b) => b.label), ["Повторить"]);
   assert.deepEqual(stop("expired").buttons.map((b) => b.label), ["Повторить"]);
   assert.deepEqual(stop("budget").buttons, []);
-  // «Остановить» resumes («Продолжить», id resume); offline and quota repeat («Повторить», id continue).
+  // «Остановить» resumes («Продолжить», id resume); the quota repeats the same step («Повторить», id continue).
   assert.deepEqual(stop("user").buttons.map((b) => b.label), ["Продолжить", "Отменить запрос"]);
   assert.deepEqual(stop("user").buttons.map((b) => b.id), ["resume", "cancel"]);
   assert.deepEqual(stop("quota").buttons.map((b) => b.label), ["Повторить", "Отменить запрос"]);
@@ -679,11 +679,20 @@ test("offline: input disabled, «Нет связи с paratech», last thread vi
   assert.equal(panelMode(reducePanel(initialPanelState, { type: "link", link: { link: "no_hub", readOnly: true } })).staleNote, "");
 });
 
-test("a request stopped for lack of connection also reads as offline until it continues", () => {
+// TASK-399 (D4): the banner and the locked field come from the connection state only, never from one request.
+test("a request stopped for lack of connection does not lock the field: only the link state does", () => {
   const s = stateWith({ type: "update", update: update({ status: "STOPPED", stopReason: "offline" }) });
-  assert.equal(panelMode(s).inputEnabled, false);
-  const back = reducePanel(s, { type: "update", update: update({ status: "EXECUTING" }) });
-  assert.equal(panelMode(back).inputEnabled, true);
+  assert.equal(panelMode(s).inputEnabled, true);
+  assert.equal(panelMode(s).offline, false);
+  assert.equal(panelMode(s).placeholder, "Спросить paratech");
+  assert.doesNotMatch(panelHtml(s), /Нет связи с paratech/);
+  assert.doesNotMatch(panelHtml(s), /<textarea[^>]*disabled/);
+  // When the link itself is down (State says so) the banner and the lock are there, whatever the request did.
+  const down = reducePanel(s, { type: "link", link: { link: "no_key", readOnly: true } });
+  assert.equal(panelMode(down).inputEnabled, false);
+  assert.equal(panelMode(down).offline, true);
+  const back = reducePanel(down, { type: "update", update: update({ status: "EXECUTING" }) });
+  assert.equal(panelMode(back).inputEnabled, false, "a running request does not bring the link back");
 });
 
 test("a local offline refusal does not lock the input", () => {

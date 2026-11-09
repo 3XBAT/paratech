@@ -2,21 +2,22 @@
 // the moment a request started running is kept per request (by `seq`, which survives the local -> thread rename), and
 // the label is always `now - start`, so a throttled timer or a hidden window never makes it drift.
 
-import { type Entry, isRunning, queuedBehind } from "./agentState.js";
+import { type Entry, hasTicket, isRunning, queuedBehind } from "./agentState.js";
 import { formatElapsed } from "./agentView.js";
 
 /** When each running request started running, in ms, by `Entry.seq`. A request that is not running has no entry. */
 export type RunStarts = Readonly<Record<number, number>>;
 
 /**
- * The request is working now: sent and not yet answered (but not queued behind another one), or its status is
- * PLANNING / EXECUTING. A plan or question wait, a stop, a failure and a finished request are not running.
+ * The request is working now: sent and not yet answered (but not waiting in the queue under a ticket, nor behind another
+ * request of its chat), or its status is PLANNING / EXECUTING. A plan or question wait, a stop, a failure and a finished
+ * request are not running.
  */
 export function isRunningEntry(entries: readonly Entry[], e: Entry): boolean {
-  if (e.callProblem !== "") {
+  if (e.callProblem !== "" || e.withdrawn === true) {
     return false;
   }
-  return e.update === null ? queuedBehind(entries, e) === undefined : isRunning(e.update.status);
+  return e.update === null ? !hasTicket(e) && queuedBehind(entries, e) === undefined : isRunning(e.update.status);
 }
 
 /**

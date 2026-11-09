@@ -64,6 +64,6 @@ Tests are `test/<topic>.test.mjs` (some carry the task number, `breadcrumbs356.t
 - `run build` rewrites the git-ignored `assets/app/` of the Go package; never stage it.
 
 ## E2E
-ADR-0035 plans real-app Playwright packs in `paratech/e2e/specs/<pack>/` (settings and connections, recording, popup and
-capture, assignments, agent, layout). That directory does not exist yet (only `paratech/e2e/src` and `paratech/e2e/test`
-do). Per ADR-0035 §6 a UI task will add or update its scenario in its pack; `docs/process/e2e.md` is not written yet.
+Real-app Playwright packs live in `paratech/e2e/specs/<pack>/` (agent, assignments, layout, recording, settings, smoke;
+ADR-0035). Per ADR-0035 §6 a UI task adds or updates its scenario in its pack; how to run and write one is
+`docs/process/e2e.md`.

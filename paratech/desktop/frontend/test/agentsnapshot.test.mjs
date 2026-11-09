@@ -93,7 +93,8 @@ test("a request stopped by «Остановить» restored from the snapshot o
   const stopped = snap(initialPanelState, update({ status: "STOPPED", stopReason: "user", cards: [] })).entries[0];
   assert.deepEqual(ids(stopped), ["resume", "cancel"]);
   const offline = snap(initialPanelState, update({ status: "STOPPED", stopReason: "offline", cards: [] })).entries[0];
-  assert.deepEqual(ids(offline), ["continue", "cancel"]);
+  // TASK-399: «Повторить» after a lost connection is Retry (a new key), not Continue.
+  assert.deepEqual(ids(offline), ["retry", "cancel"]);
   const running = snap(initialPanelState, update({ status: "EXECUTING", cards: [] })).entries[0];
   assert.deepEqual(ids(running), ["stop"]);
 });

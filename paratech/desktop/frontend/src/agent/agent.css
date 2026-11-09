@@ -54,6 +54,9 @@
 .ag-req { display: flex; flex-direction: column; gap: 8px; }
 .ag-user { align-self: flex-end; max-width: 88%; margin: 0; padding: 8px 12px; border-radius: var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg); background: var(--fill-2); overflow-wrap: anywhere; white-space: pre-wrap; }
 .ag-callline { margin: 0; }
+.ag-withdrawn { margin: 0; }
+.ag-card-head { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.ag-card-head > .ag-card-h { margin: 0; }
 
 .ag-card { padding: 12px 16px 16px; border-radius: var(--r-lg); background: var(--raised); box-shadow: 0 0 0 1px var(--edge); }
 .ag-card p { margin: 0 0 8px; overflow-wrap: anywhere; }
@@ -148,6 +151,8 @@
 /* A queued request: nothing answers yet, so the dots are still and muted (one breathing indicator at a time). */
 .ag-wait.queued .ag-wdot { background: var(--muted); animation: none; }
 .ag-queued { flex: 1 1 auto; min-width: 0; font-weight: 400; overflow-wrap: break-word; }
+/* «Повторная попытка N из 3» (TASK-399): quiet muted text beside the timer, no box and no colour; it wraps on a narrow panel. */
+.ag-retry { flex: 0 1 auto; min-width: 0; font-weight: 400; overflow-wrap: break-word; }
 .ag-file { display: flex; align-items: center; gap: 8px; }
 .ag-file .i { flex: none; color: var(--muted); }
 .ag-file-kind { color: var(--muted); }
