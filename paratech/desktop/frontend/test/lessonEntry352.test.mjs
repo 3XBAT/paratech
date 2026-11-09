@@ -189,7 +189,7 @@ test("the row is keyboard-operable; only its real controls sit above the stretch
   assert.match(css, /\.row-open:focus-visible::after \{ outline: 2px solid var\(--accent\)/);
   assert.match(css, /\.btn\.row-open:active:enabled \{ transform: none; \}/);
   assert.match(css, /\.row-openable :is\(\.today-problem, button:not\(\.row-open\)\) \{ position: relative; z-index: 1; \}/);
-  assert.match(css, /\.row:has\(\.row-open\) :is\(\.row-lead-box input, \.st \.btn, \.row-below \.btn\)/);
+  assert.match(css, /\.row:has\(\.row-open\) :is\(\.row-lead-box input, \.st \.btn, \.st \.ia, \.row-below \.btn\)/);
   // A plain chip is no dead zone: no rule raises it, so a click on it reaches the stretched button (the lesson).
   const raised = css.split("\n").filter((l) => /position: relative; z-index: 1;/.test(l) && /row-open/.test(l)).join("\n");
   assert.doesNotMatch(raised, /\.chip/, "chips stay under the overlay");

@@ -112,7 +112,8 @@ async function waitLeftCancelled(main: Page, lecture: Lecture, message: string):
       async () => {
         try {
           const word = statusWord(await chipOf(rowOf(main, lecture.title)));
-          return word === Cancelled ? "" : word || "нет строки";
+          // A missing row (the list is redrawn) is not a new status: look again.
+          return word === Cancelled ? "" : word;
         } catch {
           return ""; // the list is being redrawn: look again
         }

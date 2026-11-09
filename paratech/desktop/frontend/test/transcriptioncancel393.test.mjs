@@ -452,3 +452,9 @@ test("«Расшифровать снова» is busy while its call runs and ro
   assert.ok(!render(running()).includes("Расшифровать снова"));
   assert.equal(chainStatusView(running(), 0).label, "Расшифровка");
 });
+
+test("the cancel icon is raised above the stretched row-open overlay (a click reaches it, TASK-393 E2E)", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const line = css.split("\n").find((l) => l.startsWith(".row:has(.row-open) :is("));
+  assert.ok(line !== undefined && line.includes(".st .ia") && line.includes("z-index: 1"));
+});

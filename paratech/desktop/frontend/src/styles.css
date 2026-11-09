@@ -212,7 +212,7 @@ button.row-open:not(.btn) { padding: 0; border: 0; background: none; color: inhe
 /* The button moves one pixel when pressed: that would shrink the stretched area under the cursor and lose the click. */
 .btn.row-open:active:enabled { transform: none; }
 .row:has(.row-open):hover, .row-openable:hover { background: var(--fill); }
-.row:has(.row-open) :is(.row-lead-box input, .st .btn, .row-below .btn), .row-openable :is(.today-problem, button:not(.row-open)) { position: relative; z-index: 1; }
+.row:has(.row-open) :is(.row-lead-box input, .st .btn, .st .ia, .row-below .btn), .row-openable :is(.today-problem, button:not(.row-open)) { position: relative; z-index: 1; }
 @media (forced-colors: active) {
   .row-open:focus-visible::after { outline-color: Highlight; }
 }
