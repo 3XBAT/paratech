@@ -23,8 +23,10 @@ import { importTexts } from "../recordingImportView.js";
 import type { AdvicePending } from "../sourcePicker/advice.js";
 import { SourceAdvice } from "../sourcePicker/SourceAdvice.js";
 import { jobStatusView, showsProgress, type StatusView } from "../statusPresentation.js";
+import { cancelTexts, noteVisible, retranscribeTexts, type RowNote, rowOffersCancel } from "../transcriptionCancelView.js";
 import { Button } from "../ui/Button.js";
-import { Progress, Row } from "../ui/controls.js";
+import { Dialog, Progress, Row } from "../ui/controls.js";
+import { IconAction } from "../ui/IconAction.js";
 import { RowMenu, type RowMenuItem } from "../ui/RowMenu.js";
 import { SoundLevel } from "../ui/SoundLevel.js";
 import { StatusChip } from "../ui/StatusChip.js";
@@ -63,6 +65,14 @@ export interface RecordingRowProps {
   sound?: RecordingSound | null;
   /** The recording was imported from a file (TASK-162): the row says «импортирована». */
   imported?: boolean;
+  /** The cancel icon of a running or waiting transcription (TASK-393): the call running, and the click; without it no icon. */
+  cancelling?: boolean;
+  onCancel?: () => void;
+  /** «Расшифровать снова»: the call running, and the click. */
+  retranscribing?: boolean;
+  onRetranscribe?: () => void;
+  /** The line after an action that did not simply work; the row shows it only while it still matches (noteVisible). */
+  note?: RowNote | null;
 }
 
 type MenuKey = RowItemKey | "delete";
@@ -82,12 +92,18 @@ export function RecordingRow(props: RecordingRowProps) {
   const retry = fixes.retry;
   const title = v.titleIsTime ? <span className="num">{v.title}</span> : v.title;
   const sound = r.stage === "recording" && props.sound?.recordingId === r.id ? props.sound : null;
+  const onCancel = props.onCancel;
+  const cancel = onCancel !== undefined && rowOffersCancel(r);
+  const note = noteVisible(props.note, r) ? (props.note ?? null) : null;
 
   const run = (key: MenuKey) => {
     const a = v.action;
     switch (key) {
       case "stop":
         props.onStop();
+        break;
+      case "retranscribe":
+        props.onRetranscribe?.();
         break;
       case "runNow":
         if (a?.kind === "runNow") {
@@ -148,6 +164,18 @@ export function RecordingRow(props: RecordingRowProps) {
             {i.label}
           </Button>
         );
+      case "retranscribe":
+        return (
+          <Button
+            icon="retry"
+            busy={props.retranscribing}
+            busyLabel={retranscribeTexts.busy}
+            disabled={props.retranscribing}
+            onClick={() => run("retranscribe")}
+          >
+            {i.label}
+          </Button>
+        );
       case "open":
         return <Button onClick={() => run(i.key)}>{i.label}</Button>;
       default:
@@ -161,7 +189,10 @@ export function RecordingRow(props: RecordingRowProps) {
   };
 
   // «Остановить» is always the main button, never in the menu.
-  const busy = (key: MenuKey) => (key === "runNow" && props.starting) || (key === "redo" && (props.redoing ?? false));
+  const busy = (key: MenuKey) =>
+    (key === "runNow" && props.starting) ||
+    (key === "redo" && (props.redoing ?? false)) ||
+    (key === "retranscribe" && (props.retranscribing ?? false));
   const menu: RowMenuItem<MenuKey>[] = acts.menu.map((i) => ({ key: i.key, label: i.label, disabled: busy(i.key) }));
   if (props.onDelete) {
     menu.push({ key: "delete", label: deleteTexts.menu, disabled: del.disabled, hint: del.hint });
@@ -197,33 +228,64 @@ export function RecordingRow(props: RecordingRowProps) {
           notes={v.notes}
           details={v.details}
           fixes={
-            (fixes.connections || (fixes.retry !== null && onRetry)) && (
-              <span className="st-fixes">
-                {fixes.connections && (
-                  <Button size="sm" onClick={() => props.onOpen("connections")}>
-                    {fixTexts.connections}
-                  </Button>
-                )}
-                {retry !== null && onRetry && (
-                  <Button
-                    size="sm"
-                    title={retry.label}
-                    aria-label={retry.label}
-                    busy={props.retrying}
-                    busyLabel="Повтор…"
-                    disabled={props.retrying}
-                    aria-busy={props.retrying || undefined}
-                    onClick={() => onRetry(retry.work)}
-                  >
-                    {fixTexts.retry}
-                  </Button>
-                )}
-              </span>
-            )
+            <>
+              {(fixes.connections || (fixes.retry !== null && onRetry)) && (
+                <span className="st-fixes">
+                  {fixes.connections && (
+                    <Button size="sm" onClick={() => props.onOpen("connections")}>
+                      {fixTexts.connections}
+                    </Button>
+                  )}
+                  {retry !== null && onRetry && (
+                    <Button
+                      size="sm"
+                      title={retry.label}
+                      aria-label={retry.label}
+                      busy={props.retrying}
+                      busyLabel="Повтор…"
+                      disabled={props.retrying}
+                      aria-busy={props.retrying || undefined}
+                      onClick={() => onRetry(retry.work)}
+                    >
+                      {fixTexts.retry}
+                    </Button>
+                  )}
+                </span>
+              )}
+              {note !== null && (
+                <>
+                  <span className="small muted row-note" role="status">
+                    {note.text}
+                  </span>
+                  {note.openModels && (
+                    <span className="st-fixes">
+                      <Button size="sm" onClick={() => props.onOpen("models")}>
+                        {retranscribeTexts.openModels}
+                      </Button>
+                    </span>
+                  )}
+                </>
+              )}
+            </>
           }
         >
           {v.progress !== null && <Progress value={v.progress} label={v.status.label} text={false} />}
-          {v.remaining !== "" && <span className="small muted num row-remaining">{v.remaining}</span>}
+          {cancel ? (
+            // The cancel sits by the progress it stops (the actions cell holds «Открыть» or «Запустить сейчас» here).
+            <span className="st-cancel">
+              {v.remaining !== "" && <span className="small muted num row-remaining">{v.remaining}</span>}
+              <IconAction
+                icon="x"
+                size="sm"
+                variant="danger"
+                label={cancelTexts.action}
+                busy={props.cancelling}
+                onClick={onCancel}
+              />
+            </span>
+          ) : (
+            v.remaining !== "" && <span className="small muted num row-remaining">{v.remaining}</span>
+          )}
           <SoundLevel sound={sound} hint />
         </StatusLine>
       }
@@ -247,6 +309,35 @@ export function RecordingRow(props: RecordingRowProps) {
         )
       }
     />
+  );
+}
+
+/**
+ * The first «Отменить расшифровку» asks (TASK-393). The focus starts on «Не отменять» and Esc is the same answer (Dialog);
+ * «Больше не спрашивать» counts only with «Да, отменить».
+ */
+export function CancelTranscriptionDialog(props: {
+  open: boolean;
+  skip: boolean;
+  onSkip: (skip: boolean) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Dialog
+      open={props.open}
+      title={cancelTexts.title}
+      confirmLabel={cancelTexts.confirm}
+      cancelLabel={cancelTexts.keep}
+      onConfirm={props.onConfirm}
+      onCancel={props.onCancel}
+    >
+      <p>{cancelTexts.body}</p>
+      <label className="del-check">
+        <input type="checkbox" checked={props.skip} onChange={(e) => props.onSkip(e.target.checked)} />
+        <span>{cancelTexts.skip}</span>
+      </label>
+    </Dialog>
   );
 }
 

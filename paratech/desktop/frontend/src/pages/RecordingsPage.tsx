@@ -47,7 +47,19 @@ import {
   pickerModel,
   type Selection,
 } from "../sourcePicker/view";
+import { browserStore } from "../subjectsHome";
 import { redoTexts } from "../summaryView";
+import {
+  cancelAskOpen,
+  cancelDecision,
+  cancelNote,
+  confirmCancel,
+  Flights,
+  flightKey,
+  type FlightKind,
+  type RowNote,
+  retranscribeNote,
+} from "../transcriptionCancelView";
 import { Button } from "../ui/Button";
 import { SpeechComponentNotice } from "./SpeechComponentNotice";
 import { Banner, Dialog, ResultLine } from "../ui/controls";
@@ -58,7 +70,7 @@ import { useRecordingSound } from "../useRecordingSound";
 import { useOpenLesson } from "../openLesson";
 import { RecordingDeleteDialog } from "./RecordingDeleteDialog";
 import { RecordingImportPanel } from "./RecordingImportPanel";
-import { JobRow, RecordingRow } from "./RecordingRow";
+import { CancelTranscriptionDialog, JobRow, RecordingRow } from "./RecordingRow";
 import { useDisclosureFocus } from "./useDisclosureFocus";
 
 const pollMs = 3000;
@@ -203,6 +215,65 @@ export function RecordingsPage({
     }
   }
 
+  // «Отменить расшифровку» and «Расшифровать снова» (TASK-393). One call per recording and kind: the ref answers a second
+  // click made before the next render. A row note is cleared when the next action on that row starts.
+  const flights = useRef(new Flights());
+  const [notes, setNotes] = useState<Readonly<Record<string, RowNote>>>({});
+  const [cancelAsk, setCancelAsk] = useState<string | null>(null);
+  const [cancelSkip, setCancelSkip] = useState(false);
+  const cancelOffered = cancelAskOpen(cancelAsk, recordings ?? []);
+
+  // The confirmation closes when the row stops offering the cancel (the recognition ended meanwhile).
+  useEffect(() => {
+    if (cancelAsk !== null && !cancelOffered) {
+      setCancelAsk(null);
+    }
+  }, [cancelAsk, cancelOffered]);
+
+  function setNote(id: string, note: RowNote | null) {
+    setNotes((all) => {
+      const { [id]: _old, ...rest } = all;
+      return note === null ? rest : { ...rest, [id]: note };
+    });
+  }
+
+  function guarded(kind: FlightKind, id: string, call: () => Promise<RowNote | null>) {
+    const key = flightKey(kind, id);
+    if (!flights.current.begin(key)) {
+      return;
+    }
+    setNote(id, null);
+    // act() never throws: a rejected call becomes the page's action error; the busy key is the flight key.
+    void act(key, async () => {
+      const note = await call();
+      if (mounted.current) {
+        setNote(id, note);
+      }
+    }).finally(() => flights.current.end(key));
+  }
+
+  const runCancel = (id: string) => guarded("cancel", id, async () => cancelNote(await api.cancelTranscription(id)));
+  const runRetranscribe = (id: string) =>
+    guarded("retranscribe", id, async () => retranscribeNote(await api.retranscribe(id)));
+
+  function askCancel(id: string) {
+    if (cancelDecision(browserStore()) === "run") {
+      runCancel(id);
+      return;
+    }
+    setCancelSkip(false);
+    setCancelAsk(id);
+  }
+
+  function confirmCancelAsk() {
+    const id = cancelAsk;
+    setCancelAsk(null);
+    confirmCancel(browserStore(), cancelSkip);
+    if (id !== null) {
+      runCancel(id);
+    }
+  }
+
   // «Импортировать запись» (TASK-162): the panel; the mark of an imported row comes from the recording's origin.
   const [importOpen, setImportOpen] = useState(false);
   // Declared before the effect below: the import panel's own focus move (into it, back to its button) goes first.
@@ -340,6 +411,11 @@ export function RecordingsPage({
       onSelect={(on) => setSelected((sel) => withSelected(sel, r.id, on))}
       sound={sound}
       imported={r.origin === "imported"}
+      cancelling={busy.has(flightKey("cancel", r.id))}
+      onCancel={() => askCancel(r.id)}
+      retranscribing={busy.has(flightKey("retranscribe", r.id))}
+      onRetranscribe={() => runRetranscribe(r.id)}
+      note={notes[r.id] ?? null}
     />
   );
 
@@ -655,6 +731,14 @@ export function RecordingsPage({
       >
         <p>{redoTexts.body}</p>
       </Dialog>
+
+      <CancelTranscriptionDialog
+        open={cancelOffered}
+        skip={cancelSkip}
+        onSkip={setCancelSkip}
+        onConfirm={confirmCancelAsk}
+        onCancel={() => setCancelAsk(null)}
+      />
 
       {queue && (
         <>

@@ -296,6 +296,9 @@ button.row-open:not(.btn) { padding: 0; border: 0; background: none; color: inhe
 .rec-empty-privacy .i { width: 14px; height: 14px; }
 /* The text buttons «Повторить» / «Открыть подключения» under the hint of a failed row (TASK-347). */
 .st-fixes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+/* The cancel icon of a running transcription: by the remaining time, at the end of the status cell's line. */
+.st-cancel { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.st-cancel > .ia { margin-left: auto; flex: none; }
 /* «Фоновая обработка» (TASK-347): the count in the title, a text button for failures under it while the fold hides them. */
 .background-failed { margin: -4px 0 8px; padding: 0 16px; }
 /* The start and import panels wrap in one element only to find the first control when the empty state hands over. */

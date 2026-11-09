@@ -125,6 +125,7 @@ Legend
 | Записи и задачи | `ActivityService.ListRecordings`, `ListJobs` | `find_lessons`, `job_status` | R | — | |
 | Предмет и тип пары у записи | `KnowledgeBaseService.SetLessonInfo` | `set_lesson_info` | U | — | |
 | «Запустить сейчас» (от батареи) | `ActivityService.RunJobNow` | нет | C, *кнопка* | клик | no compensation |
+| «Отменить расшифровку» / «Расшифровать снова» | `ActivityService.CancelTranscription`, `Retranscribe` | нет → follow-up `cancel_transcription`, `retranscribe` | U, *кнопка* | клик (первая отмена спрашивает, «Больше не спрашивать» — настройка окна) | TASK-393; the cancel is undone by retranscribe; local work only, no quota |
 | «Повторить» обработку / текст лекции | `ActivityService.RetryPostProcessing` | `make_summary`, `find_homework`, `make_lecture_text` | U (платно) | лекция — план всегда | |
 | «Сделать конспект заново» | `ActivityService.RedoSummary` | `make_summary` | U (платно) | план (заменяет готовое) | |
 | Звук записи, совет по источнику, «Скрыть» | `RecordingSound`, `PromptService.Advice`, `DismissAdvice` | — | только UI | — | status and hints |

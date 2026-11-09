@@ -114,7 +114,7 @@ export const stepTexts: Readonly<Record<Exclude<ChainStep, "">, string>> = {
   lectureText: "Дальше текст лекции.",
 };
 
-// TASK-392 codes (transcriptionCancelled, retranscribe) get their texts in TASK-393.
+// transcriptionCancelled is no error: it has its own quiet status (cancelledTexts).
 export const errorTexts: Readonly<
   Record<Exclude<ChainErrorCode, "" | "silentRecording" | "noSpeech" | "transcriptionCancelled">, string>
 > = {
@@ -137,12 +137,19 @@ export const noSpeechTexts = {
   hint: "В записи нет речи — скорее всего, выбран не тот источник звука.",
 } as const;
 
-export const actionLabels: Readonly<Record<Exclude<ChainAction, "" | "retranscribe">, string>> = {
+/** A transcription the student cancelled (TASK-393): nothing failed, so a quiet status instead of «Ошибка». */
+export const cancelledTexts = {
+  label: "Расшифровка отменена",
+  hint: "Запись сохранена.",
+} as const;
+
+export const actionLabels: Readonly<Record<Exclude<ChainAction, "">, string>> = {
   runNow: "Запустить сейчас",
   openModels: "Открыть модели речи",
   openConnections: "Открыть подключения",
   checkSound: "Проверить звук",
   retry: "Повторить",
+  retranscribe: "Расшифровать снова",
 };
 
 /**
@@ -170,6 +177,7 @@ export const actionPages: Readonly<Record<Exclude<ChainAction, "" | "runNow" | "
 /** The core's action of the row besides Stop. */
 export type RowAction =
   | { kind: "runNow"; jobId: string; label: string }
+  | { kind: "retranscribe"; label: string }
   | { kind: "open"; page: PageId; label: string }
   | { kind: "retry"; work: Exclude<RetryWork, "">; label: string };
 
@@ -290,6 +298,13 @@ export function chainStatusView(r: RecordingItem, now: number): StatusView {
         view.hint = noSpeechTexts.hint;
         break;
       }
+      if (r.errorCode === "transcriptionCancelled") {
+        view.label = cancelledTexts.label;
+        view.kind = "neutral";
+        view.icon = "stop";
+        view.hint = cancelledTexts.hint;
+        break;
+      }
       view.hint = own(errorTexts, r.errorCode) ?? "";
       break;
   }
@@ -307,6 +322,9 @@ export function rowAction(r: Pick<RecordingItem, "action" | "actionJobId" | "ret
   }
   if (r.action === "retry") {
     return retryAction(r.retryWork);
+  }
+  if (r.action === "retranscribe") {
+    return { kind: "retranscribe", label: actionLabels.retranscribe };
   }
   const page = own(actionPages, r.action);
   return page === undefined ? null : { kind: "open", page, label: actionLabels[r.action as keyof typeof actionPages] };
@@ -382,7 +400,7 @@ export function recordingRowView(r: RecordingItem, now: number): RecordingRowVie
 }
 
 /** What a row button or «⋯» item does; runNow and open take the job or the page from the core's action. */
-export type RowItemKey = "stop" | "runNow" | "open" | "lesson" | "summary" | "lectureText" | "transcript" | "redo";
+export type RowItemKey = "stop" | "runNow" | "retranscribe" | "open" | "lesson" | "summary" | "lectureText" | "transcript" | "redo";
 
 export interface RowItem {
   key: RowItemKey;
@@ -431,8 +449,10 @@ export function rowItemTab(key: RowItemKey): LessonTab | null {
 }
 
 /**
- * The actions of a row (TASK-096). The main button is the first of: Stop, «Запустить сейчас», the texts, the core's fix
- * link (models, connections, sound check) only when no text is offered. The texts are one lesson screen (TASK-352): the
+ * The actions of a row (TASK-096). The main button is the first of: Stop, «Запустить сейчас», «Расшифровать снова»
+ * (TASK-393: the way back after a cancel or a failed recognition must stay a visible word button, so it goes before the
+ * texts, which stay in «⋯»), the texts, the core's fix link (models, connections, sound check) only when no text is
+ * offered. The texts are one lesson screen (TASK-352): the
  * main one is «Открыть», with no tab named (the screen opens its own: «Мой конспект» with parts, else the summary, ...);
  * «⋯» keeps every named text as the choice of that tab. The rest goes to «⋯».
  */
@@ -449,12 +469,13 @@ export function rowActions(
   const lecture = links.lectureText ? item("lectureText", rowItemLabels.lectureText) : null;
   const sum = summary !== null ? item("summary", rowItemLabels.summary) : null;
   const transcript = links.transcript !== null ? item("transcript", rowItemLabels.transcript) : null;
+  const again = core?.kind === "retranscribe" ? item("retranscribe", core.label) : null;
   const open = core?.kind === "open" ? item("open", core.label) : null;
   const redo = offers.redo && r.canRedoSummary ? item("redo", rowItemLabels.redo) : null;
   const hasText = lecture !== null || sum !== null || transcript !== null;
   const lesson = hasText ? item("lesson", rowItemLabels.open) : null;
-  const main = stop ?? runNow ?? lesson ?? open;
-  const menu = [stop, runNow, lecture, sum, transcript, open, redo].filter((i): i is RowItem => i !== null && i !== main);
+  const main = stop ?? runNow ?? again ?? lesson ?? open;
+  const menu = [stop, runNow, again, lecture, sum, transcript, open, redo].filter((i): i is RowItem => i !== null && i !== main);
   return { main, menu };
 }
 
@@ -515,10 +536,11 @@ export function pairLinks(
 
 /**
  * A finished row goes to the folded «Завершённые» of «Записи»: the summary is ready or the chain failed. A row with
- * Stop or Run now stays in view; a failed row keeps its link (models, connections, sound check) in the group.
+ * Stop or Run now stays in view, and so does one that offers «Расшифровать снова» (TASK-393: the student has just cancelled,
+ * the way back must not fold away); a failed row keeps its link (models, connections, sound check) in the group.
  */
 export function isFinishedRow(r: Pick<RecordingItem, "stage" | "stoppable" | "action">): boolean {
-  return !r.stoppable && r.action !== "runNow" && (r.stage === "done" || r.stage === "failed");
+  return !r.stoppable && r.action !== "runNow" && r.action !== "retranscribe" && (r.stage === "done" || r.stage === "failed");
 }
 
 /** One section of the page: the rows in progress («Идут») and the finished ones («Завершённые (N)»), newest first. */

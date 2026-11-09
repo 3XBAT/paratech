@@ -559,10 +559,13 @@ export function dayProblems(recordings: readonly RecordingItem[], day: string): 
   });
 }
 
-/** The chip of a failed recording: its own status text when the core has one (no sound, no speech), else a fixed one. */
+/**
+ * The chip of a failed recording: its own status text when the core has one (no sound, no speech, a cancelled
+ * recognition: nothing is wrong with the recording itself), else a fixed one.
+ */
 export function problemOf(r: RecordingItem): Problem {
   const v = chainStatusView(r, 0);
-  const own = r.errorCode === "silentRecording" || r.errorCode === "noSpeech";
+  const own = r.errorCode === "silentRecording" || r.errorCode === "noSpeech" || r.errorCode === "transcriptionCancelled";
   return own ? { label: v.label, kind: v.kind, icon: v.icon } : { label: texts.recordingProblem, kind: "fail", icon: "warn" };
 }
 
