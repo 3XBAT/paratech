@@ -32,6 +32,17 @@ type fakeAgentDriver struct {
 	mu    sync.Mutex
 	calls []agentCall
 	err   error
+	// queued is what Ask returns (zero: the question started); withdraw answers Withdraw, withdrawn records its calls.
+	queued    agentturn.Queued
+	withdraw  agentturn.WithdrawResult
+	withdrawn []agentturn.Queued
+}
+
+func (f *fakeAgentDriver) Withdraw(th shared.ThreadID, t agentturn.Ticket) agentturn.WithdrawResult {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.withdrawn = append(f.withdrawn, agentturn.Queued{Thread: th, Ticket: t})
+	return f.withdraw
 }
 
 func (f *fakeAgentDriver) record(c agentCall) error {
@@ -41,8 +52,14 @@ func (f *fakeAgentDriver) record(c agentCall) error {
 	return f.err
 }
 
-func (f *fakeAgentDriver) Ask(ctx context.Context, in agentturn.AskInput) error {
-	return f.record(agentCall{op: "ask", ctx: ctx, ask: in})
+func (f *fakeAgentDriver) Ask(ctx context.Context, in agentturn.AskInput) (agentturn.Queued, error) {
+	err := f.record(agentCall{op: "ask", ctx: ctx, ask: in})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err != nil {
+		return agentturn.Queued{}, err
+	}
+	return f.queued, nil
 }
 
 func (f *fakeAgentDriver) ApprovePlan(ctx context.Context, ref agentturn.TurnRef) error {
@@ -81,6 +98,9 @@ func (f *fakeAgentDriver) Cancel(ctx context.Context, ref agentturn.TurnRef) err
 	return f.record(agentCall{op: "cancel", ctx: ctx, ref: ref})
 }
 
+// askProblem is the problem of an Ask as the result of the other calls, for tables of both.
+func askProblem(r AgentAskResult) AgentResult { return AgentResult{Problem: r.Problem} }
+
 // readyLink is a Hub with an address and a key.
 func readyLink() *fakeConnections {
 	return &fakeConnections{view: connections.View{HubURL: "https://hub.example.test", HubKey: connections.SecretSet}}
@@ -118,7 +138,11 @@ func TestAgentForwardsOnTheAppContext(t *testing.T) {
 		want agentCall
 	}{
 		{"ask", func(s *AgentService, ctx context.Context) AgentResult {
-			return s.Ask(ctx, AgentAskInput{Text: "Что задали?"})
+			r := s.Ask(ctx, AgentAskInput{Text: "Что задали?"})
+			if r.Queued || r.Ticket != "" {
+				return AgentResult{Problem: "queued"}
+			}
+			return AgentResult{Problem: r.Problem}
 		}, agentCall{ask: agentturn.AskInput{Text: "Что задали?"}}},
 		{"approve", func(s *AgentService, ctx context.Context) AgentResult { return s.ApprovePlan(ctx, ref) },
 			agentCall{ref: want}},
@@ -255,16 +279,16 @@ func TestAgentRefusesMalformedInput(t *testing.T) {
 		call func(*AgentService) AgentResult
 	}{
 		{"subject id", func(s *AgentService) AgentResult {
-			return s.Ask(context.Background(), AgentAskInput{Text: "x", SubjectID: "a/b"})
+			return askProblem(s.Ask(context.Background(), AgentAskInput{Text: "x", SubjectID: "a/b"}))
 		}},
 		{"lesson id", func(s *AgentService) AgentResult {
-			return s.Ask(context.Background(), AgentAskInput{Text: "x", LessonID: "CON"})
+			return askProblem(s.Ask(context.Background(), AgentAskInput{Text: "x", LessonID: "CON"}))
 		}},
 		{"assignment id", func(s *AgentService) AgentResult {
-			return s.Ask(context.Background(), AgentAskInput{Text: "x", AssignmentID: "a b"})
+			return askProblem(s.Ask(context.Background(), AgentAskInput{Text: "x", AssignmentID: "a b"}))
 		}},
 		{"screen", func(s *AgentService) AgentResult {
-			return s.Ask(context.Background(), AgentAskInput{Text: "x", Screen: "desktop"})
+			return askProblem(s.Ask(context.Background(), AgentAskInput{Text: "x", Screen: "desktop"}))
 		}},
 		{"thread id", func(s *AgentService) AgentResult {
 			return s.Stop(context.Background(), AgentTurnRef{ThreadID: "..\\x", Turn: 1})
@@ -282,30 +306,30 @@ func TestAgentRefusesMalformedInput(t *testing.T) {
 			return s.Answer(context.Background(), good, make([]AgentAnswerInput, values.MaxQuestions+1))
 		}},
 		{"ask chat id", func(s *AgentService) AgentResult {
-			return s.Ask(context.Background(), AgentAskInput{Text: "x", ThreadID: "a/b"})
+			return askProblem(s.Ask(context.Background(), AgentAskInput{Text: "x", ThreadID: "a/b"}))
 		}},
 		{"mention kind", func(s *AgentService) AgentResult {
-			return s.Ask(context.Background(), AgentAskInput{Text: "x", Mentions: []AgentMention{{Kind: "upload", ID: "u1", Label: "Файл"}}})
+			return askProblem(s.Ask(context.Background(), AgentAskInput{Text: "x", Mentions: []AgentMention{{Kind: "upload", ID: "u1", Label: "Файл"}}}))
 		}},
 		{"mention id", func(s *AgentService) AgentResult {
-			return s.Ask(context.Background(), AgentAskInput{Text: "x", Mentions: []AgentMention{{Kind: "subject", ID: "a/b", Label: "Матан"}}})
+			return askProblem(s.Ask(context.Background(), AgentAskInput{Text: "x", Mentions: []AgentMention{{Kind: "subject", ID: "a/b", Label: "Матан"}}}))
 		}},
 		{"mention label", func(s *AgentService) AgentResult {
 			bidi := "Ма" + string(rune(0x202e)) + "тан" // a right-to-left override inside the name
-			return s.Ask(context.Background(), AgentAskInput{Text: "x", Mentions: []AgentMention{{Kind: "subject", ID: "s1", Label: bidi}}})
+			return askProblem(s.Ask(context.Background(), AgentAskInput{Text: "x", Mentions: []AgentMention{{Kind: "subject", ID: "s1", Label: bidi}}}))
 		}},
 		{"negative restart", func(s *AgentService) AgentResult {
-			return s.Ask(context.Background(), AgentAskInput{Text: "x", ThreadID: "th1", RestartFrom: -1})
+			return askProblem(s.Ask(context.Background(), AgentAskInput{Text: "x", ThreadID: "th1", RestartFrom: -1}))
 		}},
 		{"restart without a chat", func(s *AgentService) AgentResult {
-			return s.Ask(context.Background(), AgentAskInput{Text: "x", RestartFrom: 2})
+			return askProblem(s.Ask(context.Background(), AgentAskInput{Text: "x", RestartFrom: 2}))
 		}},
 		{"too many mentions", func(s *AgentService) AgentResult {
 			ms := make([]AgentMention, values.MaxMentions+1)
 			for i := range ms {
 				ms[i] = AgentMention{Kind: "material", ID: "m" + string(rune('a'+i)), Label: "Файл"}
 			}
-			return s.Ask(context.Background(), AgentAskInput{Text: "x", Mentions: ms})
+			return askProblem(s.Ask(context.Background(), AgentAskInput{Text: "x", Mentions: ms}))
 		}},
 	}
 	for _, tt := range tests {
@@ -348,7 +372,7 @@ func TestAgentOffline(t *testing.T) {
 			if got := s.State(context.Background()); got != (AgentState{Link: tt.want, ReadOnly: !ready}) {
 				t.Errorf("State = %+v", got)
 			}
-			res := s.Ask(context.Background(), AgentAskInput{Text: "Что задали?"})
+			res := askProblem(s.Ask(context.Background(), AgentAskInput{Text: "Что задали?"}))
 			if ready != (res.Problem == "") || !ready && res.Problem != AgentProblemOffline {
 				t.Errorf("Ask = %+v", res)
 			}
@@ -517,7 +541,7 @@ func TestAgentPanelEventContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"threadId":"th1","turn":3,"subjectId":"sub-1","lessonId":"les-1","assignmentId":"","screen":"today",` +
-		`"status":"AWAITING_PLAN","stopReason":"","problem":"","progress":false,"retry":0,"cards":[` +
+		`"status":"AWAITING_PLAN","stopReason":"","problem":"","progress":false,"retry":0,"ticket":"","queued":false,"cards":[` +
 		card(`"kind":"plan","plan":{"summary":"Понял так","steps":[`+
 			`{"tool":"list_assignments","args":[`+
 			`{"name":"due_before","type":"date","idKind":"","value":"2026-10-30","values":[]},`+
@@ -568,7 +592,7 @@ func TestAgentPanelProgressContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"threadId":"th1","turn":2,"subjectId":"","lessonId":"","assignmentId":"","screen":"",` +
-		`"status":"PLANNING","stopReason":"","problem":"","progress":true,"retry":0,"cards":[],"fill":null,"compaction":false,"compacting":false}`
+		`"status":"PLANNING","stopReason":"","problem":"","progress":true,"retry":0,"ticket":"","queued":false,"cards":[],"fill":null,"compaction":false,"compacting":false}`
 	if string(got) != want {
 		t.Errorf("event JSON =\n%s\nwant\n%s", got, want)
 	}
@@ -589,7 +613,7 @@ func TestAgentPanelRetryContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"threadId":"th1","turn":2,"subjectId":"","lessonId":"","assignmentId":"","screen":"",` +
-		`"status":"PLANNING","stopReason":"","problem":"","progress":true,"retry":2,"cards":[],"fill":null,"compaction":false,"compacting":false}`
+		`"status":"PLANNING","stopReason":"","problem":"","progress":true,"retry":2,"ticket":"","queued":false,"cards":[],"fill":null,"compaction":false,"compacting":false}`
 	if string(got) != want {
 		t.Errorf("event JSON =\n%s\nwant\n%s", got, want)
 	}

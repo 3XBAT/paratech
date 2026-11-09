@@ -64,7 +64,7 @@ func TestReplyShowsTitlesFromLocalData(t *testing.T) {
 		then(step(thread.StatusDone, nil, values.ReplyCard{Text: "Три задания.", Assignments: []values.Ref{a2, a9, a1}}), nil)
 	d, sink, _, buf := replyDriver(t, turns)
 
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "что горит"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "что горит"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -102,7 +102,7 @@ func TestReplyListWhenTheDataCannotBeRead(t *testing.T) {
 		turns := (&scriptedTurns{}).then(step(thread.StatusDone, nil, reply), nil)
 		d, sink, r, buf := replyDriver(t, turns)
 		r.assignments.err = errors.New("db is locked")
-		if err := d.Ask(t.Context(), agentturn.AskInput{Text: "что горит"}); err != nil {
+		if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "что горит"}); err != nil {
 			t.Fatal(err)
 		}
 		d.Wait()
@@ -118,7 +118,7 @@ func TestReplyListWhenTheDataCannotBeRead(t *testing.T) {
 		turns := (&scriptedTurns{}).then(step(thread.StatusDone, nil, reply), nil)
 		d, sink, r, _ := replyDriver(t, turns)
 		r.library.err = errors.New("library is busy")
-		if err := d.Ask(t.Context(), agentturn.AskInput{Text: "что горит"}); err != nil {
+		if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "что горит"}); err != nil {
 			t.Fatal(err)
 		}
 		d.Wait()
@@ -138,7 +138,7 @@ func TestReplySkipsACorruptTitle(t *testing.T) {
 			turns := (&scriptedTurns{}).then(step(thread.StatusDone, nil, values.ReplyCard{Text: "Два задания.", Assignments: []values.Ref{a2, a1}}), nil)
 			d, sink, r, _ := replyDriver(t, turns)
 			r.assignments.views[1].Title = title
-			if err := d.Ask(t.Context(), agentturn.AskInput{Text: "что горит"}); err != nil {
+			if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "что горит"}); err != nil {
 				t.Fatal(err)
 			}
 			d.Wait()
@@ -157,7 +157,7 @@ func TestReplyLineDueInTheClockLocation(t *testing.T) {
 	turns := (&scriptedTurns{}).then(step(thread.StatusDone, nil, values.ReplyCard{Text: "Одно задание.", Assignments: []values.Ref{a1}}), nil)
 	d, sink, r, _ := replyDriver(t, turns)
 	r.assignments.views[0].Due = time.Date(2026, 10, 24, 21, 30, 0, 0, time.UTC)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "что горит"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "что горит"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -194,7 +194,7 @@ func TestReplyWithoutAssignmentsReadsNothing(t *testing.T) {
 	turns := (&scriptedTurns{}).then(step(thread.StatusDone, nil, values.ReplyCard{Text: "Готово."}), nil)
 	d, sink, r, buf := replyDriver(t, turns)
 	r.assignments.err = errors.New("must not be read")
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "привет"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "привет"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()

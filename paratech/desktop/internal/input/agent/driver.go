@@ -61,6 +61,12 @@ type Turns interface {
 	Interrupt(ctx context.Context, in agentturn.SubmitInput) (agentturn.Step, error)
 	RecoverIdle(ctx context.Context, in agentturn.IdleInput, live func(shared.ThreadID) bool) (bool, error)
 	Current(ctx context.Context, id shared.ThreadID) (agentturn.Step, bool, error)
+
+	// The queue of waiting questions (driver_queue.go).
+	Enqueue(ctx context.Context, in agentturn.AskInput) (agentturn.Queued, bool, error)
+	HasQueued(id shared.ThreadID) bool
+	StartQueued(ctx context.Context, id shared.ThreadID) (agentturn.Step, error)
+	Withdraw(id shared.ThreadID, ticket agentturn.Ticket) agentturn.WithdrawResult
 }
 
 // Problem is why an operation on a request did not go through, as an enum (no error text reaches the panel).
@@ -90,6 +96,9 @@ const (
 // update).
 // A Compaction update reports only the context compaction of chat Thread before an Ask (compact.go): Compacting
 // while it runs, then not, with Fill, the chat's new fill, when it stored a summary; it has no request state.
+// A Queued update reports an Ask that waits in chat Thread under Ticket (it found the chat busy once it ran; no turn,
+// no status, no cards). Ticket is also set on the updates of the first operation of a request started from the queue
+// (driver_queue.go), so the panel replaces the waiting row; "" otherwise.
 type Update struct {
 	Thread     shared.ThreadID
 	Turn       int
@@ -103,6 +112,8 @@ type Update struct {
 	Compaction bool
 	Compacting bool
 	Fill       *agentcompact.Fill
+	Ticket     string
+	Queued     bool
 }
 
 // Sink receives the updates of every request, from the Driver's goroutines; it must not block for long. Draft gets
@@ -168,6 +179,10 @@ type Driver struct {
 	inflight map[agentturn.TurnRef]map[uint64]context.CancelFunc
 	// loops are the threads the running loops (by operation id) act on; "" while an Ask has not named its thread.
 	loops map[uint64]shared.ThreadID
+	// ended counts the loops that ended (forget), so a drain that started nothing knows whether others ended meanwhile.
+	ended uint64
+	// later are the drains a loop of no known thread held back, with their parent ctx (driver_queue.go).
+	later map[shared.ThreadID]context.Context
 	// shown are the tool cards of the newest request of each thread (shown.go). A thread keeps one entry, replaced by
 	// its next request; the chats of one student are few, so entries are never dropped otherwise.
 	shown map[shared.ThreadID]*toolCards
@@ -198,7 +213,7 @@ func New(d Deps) (*Driver, error) {
 	return &Driver{
 		turns: d.Turns, sink: d.Sink, replies: d.Replies, compact: d.Compactor, log: log, cancels: map[uint64]context.CancelFunc{},
 		stops: map[agentturn.TurnRef]*stopping{}, inflight: map[agentturn.TurnRef]map[uint64]context.CancelFunc{},
-		loops: map[uint64]shared.ThreadID{}, shown: map[shared.ThreadID]*toolCards{},
+		loops: map[uint64]shared.ThreadID{}, shown: map[shared.ThreadID]*toolCards{}, later: map[shared.ThreadID]context.Context{},
 		tools: tools{
 			library: d.Library, inspector: d.Inspector, answerer: d.Answerer, knowledge: d.Knowledge, activity: d.Activity, schedule: d.Schedule, assignments: d.Assignments,
 			deliveries: d.Deliveries, journal: d.Journal, actions: d.Actions, proposals: d.Proposals,
@@ -221,9 +236,20 @@ var resumes = opMarks{clear: true}
 // Ask starts a request typed in the panel, in the chat it names or the current one. A chat it names is compacted first
 // when its window is full (compact.go). A thread found busy while no loop of this process drives it is recovered once
 // and asked again (unstick). An update of a failed Ask names its chat when the Ask named one.
-func (d *Driver) Ask(ctx context.Context, in agentturn.AskInput) error {
+//
+// A chat that is busy queues the question first, synchronously (agentturn.Enqueue): Ask returns its ticket at once,
+// with no compaction and no Hub call, and the question starts when the last loop of the chat ends (drain). Any other
+// outcome of Enqueue (not queued, a full queue, an invalid input) goes the usual way, which reports it.
+func (d *Driver) Ask(ctx context.Context, in agentturn.AskInput) (agentturn.Queued, error) {
+	if d.isClosed() {
+		return agentturn.Queued{}, ErrClosed
+	}
+	if q, ok, err := d.turns.Enqueue(ctx, in); err == nil && ok {
+		d.drain(ctx, q.Thread)
+		return q, nil
+	}
 	at := agentturn.Step{Thread: in.ThreadID, Scope: in.Scope}
-	return d.start(ctx, at, opMarks{}, func(ctx context.Context) (agentturn.Step, error) {
+	return agentturn.Queued{}, d.start(ctx, at, opMarks{}, func(ctx context.Context) (agentturn.Step, error) {
 		d.compactBefore(ctx, in.ThreadID)
 		st, err := d.turns.Ask(ctx, in)
 		if d.unstick(ctx, err, agentturn.IdleInput{Thread: in.ThreadID}) { // "": the current chat
@@ -411,19 +437,36 @@ func (d *Driver) start(ctx context.Context, at agentturn.Step, marks opMarks, op
 	if marks.stop != nil {
 		d.stops[refOf(at)] = marks.stop
 	}
-	ctx, cancel := context.WithCancel(ctx)
+	d.spawn(ctx, at, op)
+	return nil
+}
+
+// spawn runs op and its loop in a goroutine. When the loop ends (and is no longer among the loops) the waiting
+// questions of its thread get their turn (drain), on parent: the ctx the operation got, which lives as long as the app.
+// d.mu is held.
+func (d *Driver) spawn(parent context.Context, at agentturn.Step, op func(ctx context.Context) (agentturn.Step, error)) {
+	ctx, cancel := context.WithCancel(parent)
 	id := d.next
 	d.next++
 	d.cancels[id] = cancel
 	d.loops[id] = at.Thread
 	ctx = context.WithValue(ctx, loopKey{}, id)
+	born := d.ended
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
-		defer d.forget(id)
-		d.run(ctx, id, at, op)
+		idle := false
+		defer func() {
+			// A drain that started nothing drains again only when other loops ended meanwhile: one of them may have
+			// skipped the drain while this loop ran, and no loop spins on a queue it cannot start.
+			th, others := d.forget(id, born)
+			if !idle || others {
+				d.drain(parent, th)
+			}
+			d.drainLater()
+		}()
+		idle = d.run(ctx, id, at, op)
 	}()
-	return nil
 }
 
 // stopped settles a «Стоп» of ref: when it is stored the calls in flight of the request are cut.
@@ -490,21 +533,26 @@ func (d *Driver) callsContext(ctx context.Context, id uint64, ref agentturn.Turn
 	}
 }
 
-func (d *Driver) forget(id uint64) {
+// forget drops loop id and returns the thread it acted on ("" when it never learnt it) and whether other loops ended
+// since it was born (born: the count of ended loops then).
+func (d *Driver) forget(id uint64, born uint64) (shared.ThreadID, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if cancel, ok := d.cancels[id]; ok {
 		cancel()
 		delete(d.cancels, id)
 	}
+	th := d.loops[id]
 	delete(d.loops, id)
+	d.ended++
+	return th, d.ended-1 != born
 }
 
 // run is the loop of operation id: show the step, run its calls, report their results, until no call is left. at is
 // the request the operation acts on; it names the request in an update of a failed operation.
 // No path leaves a request running without this loop (TASK-171): a failed Submit, a panic and a running step without
-// calls close the request through Interrupt.
-func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(ctx context.Context) (agentturn.Step, error)) {
+// calls close the request through Interrupt. idle is true for a drain that started nothing (errNothingToStart).
+func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(ctx context.Context) (agentturn.Step, error)) (idle bool) {
 	var (
 		release func()              // set while the calls of a step are in flight
 		calls   []agentturn.Call    // the calls of the last step run
@@ -521,10 +569,18 @@ func (d *Driver) run(ctx context.Context, id uint64, at agentturn.Step, op func(
 	}()
 
 	st, err := op(ctx)
+	if errors.Is(err, errNothingToStart) {
+		return true
+	}
 	submitted := false
 	for submits := 0; ; submits++ {
 		if st.Thread != "" {
 			d.track(id, st.Thread)
+		}
+		if err == nil && st.Queued {
+			// The Ask found its chat busy once it ran: it waits, and this loop's end lets the queue go on.
+			d.sink.Publish(Update{Thread: st.Thread, Scope: st.Scope, Ticket: string(st.Ticket), Queued: true})
+			return
 		}
 		if err != nil && submitted && !errors.Is(err, agentturn.ErrStaleTurn) && (st.Thread == "" || running(st.Status)) {
 			// Submit failed and the request may still run: close it, keeping the outcomes of the calls that ran.
@@ -732,7 +788,7 @@ func (d *Driver) update(ctx context.Context, st agentturn.Step, p Problem) Updat
 	}
 	return Update{
 		Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, StopReason: st.StopReason,
-		Cards: displayOrder(cards), Problem: p,
+		Cards: displayOrder(cards), Problem: p, Ticket: string(st.Ticket),
 	}
 }
 

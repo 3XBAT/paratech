@@ -261,6 +261,65 @@ type scriptedTurns struct {
 	current    agentturn.Step
 	currentErr error
 	currents   []shared.ThreadID
+	// The queue (driver_queue.go): enqueue answers Enqueue (nil: never queued), waiting is what HasQueued reports
+	// per chat, startQueued answers StartQueued (nil: ErrNothingQueued); asks and starts count the calls.
+	enqueue     func(in agentturn.AskInput) (agentturn.Queued, bool, error)
+	waiting     map[shared.ThreadID]bool
+	startQueued func(id shared.ThreadID) (agentturn.Step, error)
+	asks        int
+	starts      []shared.ThreadID
+	withdrawn   []agentturn.Ticket
+}
+
+func (s *scriptedTurns) Enqueue(_ context.Context, in agentturn.AskInput) (agentturn.Queued, bool, error) {
+	s.mu.Lock()
+	enqueue := s.enqueue
+	s.mu.Unlock()
+	if enqueue == nil {
+		return agentturn.Queued{}, false, nil
+	}
+	return enqueue(in)
+}
+
+func (s *scriptedTurns) HasQueued(id shared.ThreadID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.waiting[id]
+}
+
+func (s *scriptedTurns) StartQueued(_ context.Context, id shared.ThreadID) (agentturn.Step, error) {
+	s.mu.Lock()
+	s.starts = append(s.starts, id)
+	start := s.startQueued
+	s.mu.Unlock()
+	if start == nil {
+		return agentturn.Step{}, agentturn.ErrNothingQueued
+	}
+	return start(id)
+}
+
+func (s *scriptedTurns) Withdraw(_ shared.ThreadID, t agentturn.Ticket) agentturn.WithdrawResult {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.withdrawn = append(s.withdrawn, t)
+	return agentturn.WithdrawWithdrawn
+}
+
+// noQueue is the queue of a Turns fake that never queues.
+type noQueue struct{}
+
+func (noQueue) Enqueue(context.Context, agentturn.AskInput) (agentturn.Queued, bool, error) {
+	return agentturn.Queued{}, false, nil
+}
+
+func (noQueue) HasQueued(shared.ThreadID) bool { return false }
+
+func (noQueue) StartQueued(context.Context, shared.ThreadID) (agentturn.Step, error) {
+	return agentturn.Step{}, agentturn.ErrNothingQueued
+}
+
+func (noQueue) Withdraw(shared.ThreadID, agentturn.Ticket) agentturn.WithdrawResult {
+	return agentturn.WithdrawNotFound
 }
 
 func (s *scriptedTurns) Current(_ context.Context, id shared.ThreadID) (agentturn.Step, bool, error) {
@@ -305,6 +364,9 @@ func (s *scriptedTurns) next() (agentturn.Step, error) {
 }
 
 func (s *scriptedTurns) Ask(context.Context, agentturn.AskInput) (agentturn.Step, error) {
+	s.mu.Lock()
+	s.asks++
+	s.mu.Unlock()
 	return s.next()
 }
 

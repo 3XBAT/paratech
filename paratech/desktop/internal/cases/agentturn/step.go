@@ -86,9 +86,9 @@ func (s *Service) drive(ctx context.Context, c *change, op string) (st Step, err
 		}
 
 		if s.progress != nil && retry > 0 {
-			s.progress.Retrying(ctx, progressOf(c.th), retry)
+			s.progress.Retrying(ctx, progressOf(c), retry)
 		} else if s.progress != nil {
-			s.progress.Started(ctx, progressOf(c.th))
+			s.progress.Started(ctx, progressOf(c))
 		}
 		reply, cut, err := s.callModel(ctx, c, req)
 		if err != nil {
@@ -143,7 +143,7 @@ func (s *Service) pause(ctx context.Context, c *change, op string, cause error, 
 	wctx, w := s.waiting(ctx, c.th.ID())
 	defer s.waited(c.th.ID(), w)
 	if s.progress != nil {
-		s.progress.Retrying(ctx, progressOf(c.th), attempt)
+		s.progress.Retrying(ctx, progressOf(c), attempt)
 	}
 
 	// A «Стоп» stored between the failed call and the registration would not wake the wait.
@@ -231,7 +231,7 @@ func (s *Service) wake(id shared.ThreadID) {
 func (s *Service) callModel(ctx context.Context, c *change, req values.StepRequest) (_ values.StepReply, cut bool, _ error) {
 	callCtx, draft := ctx, Draft(nil)
 	if s.drafts != nil {
-		dctx, d := s.drafts.Reply(ctx, progressOf(c.th))
+		dctx, d := s.drafts.Reply(ctx, progressOf(c))
 		if d != nil && dctx != nil {
 			callCtx, draft = dctx, d
 		}
@@ -302,9 +302,11 @@ func (s *Service) fail(ctx context.Context, c *change, cause error, reason value
 }
 
 // progressOf is the request state a Progress gets: no calls, no cards.
-func progressOf(th *thread.Thread) Step {
+func progressOf(c *change) Step {
+	th := c.th
 	turn, _ := th.Turn()
-	return Step{Thread: th.ID(), Turn: turn.Number(), Scope: turn.Scope(), Status: turn.Status(), StopReason: turn.StopReason()}
+	return Step{Thread: th.ID(), Turn: turn.Number(), Scope: turn.Scope(), Status: turn.Status(), StopReason: turn.StopReason(),
+		Ticket: c.ticket}
 }
 
 // abort stores the request stopped (an open step stays open, so it can be repeated) after a failure once a step may

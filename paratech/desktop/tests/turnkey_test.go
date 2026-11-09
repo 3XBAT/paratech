@@ -178,7 +178,7 @@ func (e *turnkeyEnv) runTriage(t *testing.T) []values.Card {
 	e.hub.Then(testenv.AgentCall{ID: "p1", Tool: "show_plan", Args: string(step)}).
 		Then(testenv.AgentCall{ID: "w1", Tool: "triage_assignment", Args: `{"upload":"` + e.upload.ID() + `"}`}).
 		Then(testenv.AgentCall{ID: "e1", Tool: "reply", Args: `{"text":"Разбор готов"}`})
-	if err := e.driver.Ask(ctx, agentturn.AskInput{Scope: values.Scope{}, Text: "разбери задание", Uploads: []values.Ref{e.upload}}); err != nil {
+	if _, err := e.driver.Ask(ctx, agentturn.AskInput{Scope: values.Scope{}, Text: "разбери задание", Uploads: []values.Ref{e.upload}}); err != nil {
 		t.Fatal(err)
 	}
 	e.driver.Wait()

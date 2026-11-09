@@ -215,7 +215,7 @@ func TestDriverAnswerQuestionIsAPaidRead(t *testing.T) {
 
 	e.hub.Then(testenv.AgentCall{ID: "c1", Tool: "answer_question", Args: `{"question":"Когда ряд сходится абсолютно?"}`}).
 		Then(testenv.AgentCall{ID: "r1", Tool: "reply", Args: `{"text":"Ответ по лекции ниже"}`})
-	if err := driver.Ask(ctx, agentturn.AskInput{Scope: physicsScope(t), Text: "когда ряд сходится абсолютно?"}); err != nil {
+	if _, err := driver.Ask(ctx, agentturn.AskInput{Scope: physicsScope(t), Text: "когда ряд сходится абсолютно?"}); err != nil {
 		t.Fatal(err)
 	}
 	driver.Wait()
@@ -299,7 +299,7 @@ func TestDriverAnswerQuestionHubRefusalIsPlain(t *testing.T) {
 
 	e.hub.Then(testenv.AgentCall{ID: "c1", Tool: "answer_question", Args: `{"question":"Когда ряд сходится абсолютно?"}`}).
 		Then(testenv.AgentCall{ID: "r1", Tool: "reply", Args: `{"text":"Не получилось ответить, попробуйте ещё раз"}`})
-	if err := driver.Ask(ctx, agentturn.AskInput{Scope: physicsScope(t), Text: "когда ряд сходится абсолютно?"}); err != nil {
+	if _, err := driver.Ask(ctx, agentturn.AskInput{Scope: physicsScope(t), Text: "когда ряд сходится абсолютно?"}); err != nil {
 		t.Fatal(err)
 	}
 	driver.Wait()

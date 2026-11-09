@@ -36,6 +36,21 @@ type stuckTurns struct {
 	askIn     []agentturn.AskInput
 }
 
+// The queue: nothing is ever queued (the embedded Turns is nil).
+func (s *stuckTurns) Enqueue(ctx context.Context, in agentturn.AskInput) (agentturn.Queued, bool, error) {
+	return noQueue{}.Enqueue(ctx, in)
+}
+
+func (s *stuckTurns) HasQueued(id shared.ThreadID) bool { return false }
+
+func (s *stuckTurns) StartQueued(ctx context.Context, id shared.ThreadID) (agentturn.Step, error) {
+	return noQueue{}.StartQueued(ctx, id)
+}
+
+func (s *stuckTurns) Withdraw(id shared.ThreadID, t agentturn.Ticket) agentturn.WithdrawResult {
+	return noQueue{}.Withdraw(id, t)
+}
+
 func (s *stuckTurns) stepLocked() agentturn.Step {
 	st := agentturn.Step{Thread: th1, Turn: s.turn, Status: s.status, StopReason: s.reason}
 	if s.status == thread.StatusStopped {
@@ -169,7 +184,7 @@ func TestSubmitErrorClosesTheRequest(t *testing.T) {
 		submitErr: errors.New("disk full")}
 	d, sink := newDriver(t, r, turns)
 
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "как дела с работой"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "как дела с работой"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -184,7 +199,7 @@ func TestSubmitErrorClosesTheRequest(t *testing.T) {
 	turns.mu.Lock()
 	turns.calls, turns.submitErr = nil, nil
 	turns.mu.Unlock()
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "ещё"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "ещё"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -203,7 +218,10 @@ func TestBusyWithoutALoopIsRecoveredOnce(t *testing.T) {
 		name string
 		op   func(d *Driver) error
 	}{
-		{"ask", func(d *Driver) error { return d.Ask(context.Background(), agentturn.AskInput{Text: "привет"}) }},
+		{"ask", func(d *Driver) error {
+			_, err := d.Ask(context.Background(), agentturn.AskInput{Text: "привет"})
+			return err
+		}},
 		{"rerun", func(d *Driver) error { return d.Rerun(context.Background(), ref1) }},
 	}
 	for _, tt := range tests {
@@ -255,7 +273,7 @@ func TestAskNamesItsChat(t *testing.T) {
 			turns := &stuckTurns{turn: 1, status: thread.StatusExecuting, noRecover: true}
 			d, sink := newDriver(t, newReads(), turns)
 			in := agentturn.AskInput{ThreadID: tt.chat, Text: "привет", Mentions: []values.Mention{m}}
-			if err := d.Ask(t.Context(), in); err != nil {
+			if _, err := d.Ask(t.Context(), in); err != nil {
 				t.Fatal(err)
 			}
 			d.Wait()
@@ -284,7 +302,7 @@ func TestAskNamesItsChat(t *testing.T) {
 func TestRecoveryIsTriedOnce(t *testing.T) {
 	turns := &stuckTurns{turn: 1, status: thread.StatusExecuting, noRecover: true}
 	d, sink := newDriver(t, newReads(), turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "привет"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "привет"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -305,11 +323,11 @@ func TestHungToolStopsAndTheNextRequestPasses(t *testing.T) {
 	turns := &stuckTurns{calls: []agentturn.Call{readCall(t, "c1", values.ToolListSubjects, `{}`)}, looked: looked}
 	d, sink := newDriver(t, r, turns)
 
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
 		t.Fatal(err)
 	}
 	<-r.library.started
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "ещё"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "ещё"}); err != nil {
 		t.Fatal(err)
 	}
 	<-looked
@@ -332,7 +350,7 @@ func TestHungToolStopsAndTheNextRequestPasses(t *testing.T) {
 	turns.mu.Lock()
 	turns.calls = nil
 	turns.mu.Unlock()
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "ещё раз"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "ещё раз"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -359,7 +377,7 @@ func TestSubmitErrorOfAClosedRequest(t *testing.T) {
 				then(step(thread.StatusPlanning, []agentturn.Call{readCall(t, "c1", values.ToolListSubjects, `{}`)}), nil).
 				then(tt.st, tt.err)
 			d, _ := newDriver(t, newReads(), turns)
-			if err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
+			if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
 				t.Fatal(err)
 			}
 			d.Wait()
@@ -389,7 +407,7 @@ func TestCloseReplacesRefusedOutcomes(t *testing.T) {
 				then(step(thread.StatusExecuting, []agentturn.Call{tt.call(t)}), nil).
 				then(agentturn.Step{}, errors.New("disk full"))
 			d, sink := newDriver(t, newReads(), turns)
-			if err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
+			if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
 				t.Fatal(err)
 			}
 			d.Wait()
@@ -415,7 +433,7 @@ func TestCloseReplacesRefusedOutcomes(t *testing.T) {
 func TestRunningStepWithoutCallsIsClosed(t *testing.T) {
 	turns := (&scriptedTurns{}).then(step(thread.StatusPlanning, nil), nil)
 	d, sink := newDriver(t, newReads(), turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "привет"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "привет"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -435,7 +453,7 @@ func TestToolPanicAnswersFailed(t *testing.T) {
 		then(step(thread.StatusPlanning, []agentturn.Call{readCall(t, "c1", values.ToolListSubjects, `{}`)}), nil).
 		then(step(thread.StatusDone, nil), nil)
 	d, _ := newDriver(t, r, turns)
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()
@@ -460,7 +478,7 @@ func TestLoopPanicClosesTheRequest(t *testing.T) {
 		then(step(thread.StatusPlanning, []agentturn.Call{readCall(t, "c1", values.ToolListSubjects, `{}`)}), nil).
 		then(step(thread.StatusDone, nil), nil)
 	d, sink := newDriver(t, newReads(), panicTurns{turns})
-	if err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
+	if _, err := d.Ask(t.Context(), agentturn.AskInput{Text: "мои предметы"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()

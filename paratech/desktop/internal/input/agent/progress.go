@@ -39,6 +39,6 @@ func (p *Progress) Retrying(_ context.Context, st agentturn.Step, attempt int) {
 func progressUpdate(st agentturn.Step, retry int) Update {
 	return Update{
 		Thread: st.Thread, Turn: st.Turn, Scope: st.Scope, Status: st.Status, StopReason: st.StopReason, Progress: true,
-		Retry: retry,
+		Retry: retry, Ticket: string(st.Ticket),
 	}
 }

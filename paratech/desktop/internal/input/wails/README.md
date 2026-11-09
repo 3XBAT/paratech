@@ -62,7 +62,12 @@ goes into its list, and a new `ChatRepository` method into `memChatStore`. `Fork
 - A new field of `AgentUpdate` is copied from the Driver's `Update` in `panelUpdate`
   (`paratech/desktop/internal/app/agent.go`) and needs its `AgentUpdateView` field in the exact-JSON tests of the
   `agent:update` event (`agent_test.go`, `agentcurrent_test.go`, `agentfill_test.go`, `agentsummary_test.go`), e.g.
-  `retry` (TASK-396).
+  `retry` (TASK-396), `ticket` and `queued` (TASK-398).
+- `AgentService.Ask` returns `AgentAskResult` (`queued`, `ticket`: the question waits for the chat's request), not
+  `AgentResult`; `Withdraw` takes the chat and the ticket. A queued update (`queued: true`) has no request: the panel
+  leaves its drafts (`Publish`). `AgentService` is not in `TestFrontendCallsBoundNames`: `bindings/agent.ts` builds the
+  names from a template, which that test cannot read.
+- Agent queue tests: `agentqueue_test.go` (`fakeAgentDriver.queued`, `.withdraw`).
 - Wails logs binding arguments at Debug, so `Shell.WailsLogger` floors it at Info; never lower it (secrets arrive
   as arguments: `SetMailPassword`, `SetHubKey`, `SetGoogleClient`).
 - Confirm-card targets are `values.KindProposal`, `values.KindPreview`, `values.KindAssignment`

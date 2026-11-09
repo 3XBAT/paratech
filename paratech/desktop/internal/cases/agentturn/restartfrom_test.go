@@ -91,10 +91,11 @@ func TestAskRestartFromRefusals(t *testing.T) {
 			e.model.then(raw("p1", "show_plan", plan))
 			ask(t, e, "добавь")
 		}, AskInput{ThreadID: "th1", RestartFrom: 1}, thread.ErrInvalidTransition},
+		// TASK-398: a restart while calls run waits in the queue (nil: queued), changing nothing yet.
 		{"running calls", func(t *testing.T, e *env) {
 			e.model.then(raw("c1", "list_subjects", `{}`))
 			ask(t, e, "мои предметы")
-		}, AskInput{ThreadID: "th1", RestartFrom: 1}, thread.ErrTurnInProgress},
+		}, AskInput{ThreadID: "th1", RestartFrom: 1}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -107,7 +108,11 @@ func TestAskRestartFromRefusals(t *testing.T) {
 			steps := len(e.model.requests())
 			in := tt.in
 			in.Scope, in.Text = subjectScope(t), "заново"
-			if _, err := e.svc.Ask(t.Context(), in); !errors.Is(err, tt.wantErr) {
+			st, err := e.svc.Ask(t.Context(), in)
+			if tt.wantErr == nil && (err != nil || !st.Queued) {
+				t.Fatalf("Ask = %+v, %v, want queued", st, err)
+			}
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
 				t.Fatalf("Ask = %v, want %v", err, tt.wantErr)
 			}
 			after, _ := e.threads.Get(t.Context(), "th1")

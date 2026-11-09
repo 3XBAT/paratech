@@ -190,6 +190,7 @@ func panelUpdate(u agentloop.Update) wails.AgentUpdate {
 	w := wails.AgentUpdate{
 		Thread: u.Thread, Turn: u.Turn, Scope: u.Scope, Status: u.Status, StopReason: u.StopReason, Cards: u.Cards,
 		Problem: string(u.Problem), Progress: u.Progress, Retry: u.Retry, Compaction: u.Compaction, Compacting: u.Compacting,
+		Ticket: u.Ticket, Queued: u.Queued,
 	}
 	if u.Fill != nil {
 		w.Fill = &wails.AgentFillView{Percent: u.Fill.Percent, Level: string(u.Fill.Level), Overflow: u.Fill.Overflow}

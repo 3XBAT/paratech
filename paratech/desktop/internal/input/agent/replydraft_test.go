@@ -181,7 +181,7 @@ func TestStreamedReplyThroughTheDriver(t *testing.T) {
 		},
 	}
 	drv := streamDriver(t, model, r, sink)
-	if err := drv.Ask(t.Context(), agentturn.AskInput{Text: "что такое ряд"}); err != nil {
+	if _, err := drv.Ask(t.Context(), agentturn.AskInput{Text: "что такое ряд"}); err != nil {
 		t.Fatal(err)
 	}
 	drv.Wait()
@@ -216,7 +216,7 @@ func TestFailedStreamKeepsTheReplyDraft(t *testing.T) {
 		return errors.New("stream broke")
 	}}
 	drv := streamDriver(t, model, r, sink)
-	if err := drv.Ask(t.Context(), agentturn.AskInput{Text: "что такое ряд"}); err != nil {
+	if _, err := drv.Ask(t.Context(), agentturn.AskInput{Text: "что такое ряд"}); err != nil {
 		t.Fatal(err)
 	}
 	drv.Wait()
@@ -259,7 +259,7 @@ func TestStopDuringAStreamedReply(t *testing.T) {
 		}
 	}}
 	drv := streamDriver(t, model, r, sink)
-	if err := drv.Ask(t.Context(), agentturn.AskInput{Text: "что такое ряд"}); err != nil {
+	if _, err := drv.Ask(t.Context(), agentturn.AskInput{Text: "что такое ряд"}); err != nil {
 		t.Fatal(err)
 	}
 	<-streaming

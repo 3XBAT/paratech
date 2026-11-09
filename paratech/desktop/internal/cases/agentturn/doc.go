@@ -13,5 +13,11 @@
 // else by Restart. «Повторить» of a finished or stopped request (Rerun, ADR-0026) starts a new request with the same
 // text and scope under ag:<thread>:<turn+1>:<step>, refused while the request has live effects (port Effects).
 //
+// A second question is never refused (ADR-0026 addendum 2026-11-08, point 7, queue.go): while the chat's request is
+// PLANNING or EXECUTING, or questions already wait, Ask queues it in memory (FIFO, MaxQueued per chat) and returns a
+// Ticket at once, without the lock of a running step. The Driver calls StartQueued when the last loop of the chat ends;
+// it starts the oldest question once the request is final. Withdraw removes a waiting one. Nothing is persisted: a
+// question still waiting when the app closes is never sent.
+//
 // Rules that apply: ARCH-20..27. Decisions (class, plan, provenance, budget) are made by the agent domain, not here.
 package agentturn

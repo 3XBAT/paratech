@@ -767,7 +767,7 @@ func TestDriverInterruptKeepsTheOutcomeOfAnAction(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(d.Close)
-	if err := d.Ask(ctx, agentturn.AskInput{Text: "добавь химию"}); err != nil {
+	if _, err := d.Ask(ctx, agentturn.AskInput{Text: "добавь химию"}); err != nil {
 		t.Fatal(err)
 	}
 	d.Wait()

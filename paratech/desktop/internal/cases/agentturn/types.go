@@ -77,7 +77,9 @@ type Call struct {
 }
 
 // Step is the state of the request after an operation: the calls to run and the cards to show, in order. Scope is
-// the scope of the request, the default subject of the read tools.
+// the scope of the request, the default subject of the read tools. Queued is an Ask that waits in chat Thread under
+// Ticket (no request yet: no turn, no status); Ticket is also set on every Step of the first drive of a request
+// started from the queue (StartQueued), so the panel replaces the waiting row.
 type Step struct {
 	Thread     shared.ThreadID
 	Turn       int
@@ -86,4 +88,6 @@ type Step struct {
 	StopReason values.StopReason
 	Calls      []Call
 	Cards      []values.Card
+	Queued     bool
+	Ticket     Ticket
 }

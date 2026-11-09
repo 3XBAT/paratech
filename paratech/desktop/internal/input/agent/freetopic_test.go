@@ -213,7 +213,7 @@ func TestFreeTopicThroughTheDriver(t *testing.T) {
 	}
 	t.Cleanup(drv.Close)
 
-	if err := drv.Ask(t.Context(), agentturn.AskInput{Text: "сделай презентацию про Петра"}); err != nil {
+	if _, err := drv.Ask(t.Context(), agentturn.AskInput{Text: "сделай презентацию про Петра"}); err != nil {
 		t.Fatal(err)
 	}
 	drv.Wait()

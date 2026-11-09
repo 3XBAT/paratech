@@ -164,7 +164,7 @@ func (e *actionsEnv) restart(t *testing.T) {
 
 func (e *actionsEnv) ask(t *testing.T, scope values.Scope, text string) agentloop.Update {
 	t.Helper()
-	if err := e.driver.Ask(t.Context(), agentturn.AskInput{Scope: scope, Text: text}); err != nil {
+	if _, err := e.driver.Ask(t.Context(), agentturn.AskInput{Scope: scope, Text: text}); err != nil {
 		t.Fatal(err)
 	}
 	e.driver.Wait()
@@ -374,8 +374,9 @@ func TestAgentUndoRequestOfAPlacedAndLinkedUploadOnSQLite(t *testing.T) {
 				Then(testenv.AgentCall{ID: "w2", Tool: "link_material", Args: link}).
 				Then(testenv.AgentCall{ID: "r1", Tool: "reply", Args: `{"text":"Готово"}`})
 			up := e.run(t, func(ctx context.Context) error {
-				return e.driver.Ask(ctx, agentturn.AskInput{Scope: scope, Text: "положи файл в физику и привяжи",
+				_, err := e.driver.Ask(ctx, agentturn.AskInput{Scope: scope, Text: "положи файл в физику и привяжи",
 					Uploads: []values.Ref{agentRef(t, values.KindUpload, m)}})
+				return err
 			})
 			if up.Status != thread.StatusAwaitingPlan {
 				t.Fatalf("plan = %+v", up)
@@ -480,8 +481,9 @@ func TestAgentInspectKeepsUndoOfAMaterialOnSQLite(t *testing.T) {
 			}
 			e.hub.Then(testenv.AgentCall{ID: "r1", Tool: "reply", Args: `{"text":"Готово"}`})
 			up := e.run(t, func(ctx context.Context) error {
-				return e.driver.Ask(ctx, agentturn.AskInput{Scope: scope, Text: "посмотри файл и положи в физику",
+				_, err := e.driver.Ask(ctx, agentturn.AskInput{Scope: scope, Text: "посмотри файл и положи в физику",
 					Uploads: []values.Ref{agentRef(t, values.KindUpload, m)}})
+				return err
 			})
 			if up.Status == thread.StatusAwaitingPlan {
 				ref := agentturn.TurnRef{Thread: up.Thread, Turn: up.Turn}
