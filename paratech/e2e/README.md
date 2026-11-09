@@ -253,8 +253,9 @@ Files run by name: `01-reply`, `02-cut`, `03-busy`, `04-restart`, `05-compact` (
   in Postgres `quota_idempotency_keys`; `specs/agent/support.ts` `agentStepKeys()` / `agentStepRows()` read the `ag:<thread>:<turn>:<step>`
   keys (plus `:r<N>` after a student's «Повторить») through `pgQuery` of `src/hub/pg.ts` (simple query protocol, a read-only helper;
   `SET search_path` is taken from the `search_path` of `PARATECH_E2E_HUB_DATABASE_URL`, the URL never printed). The table lives through
-  the whole run, so a row compares the keys before and after its question (`newKeys`). The Hub may release a failed attempt
-  without a key row; the cut row then judges only the new `K:r1` key (its note says so).
+  the whole run, so a row compares the keys before and after its question (`newKeys`). The cut rows assert the key row and its
+  `attempts` count: one key `K` with 4 Hub attempts after the call and its 3 automatic retries, then one new `K:r1` after «Повторить»;
+  one cut and one automatic retry leave one key with 2 attempts.
 - **Untrusted wording.** Texts of the model are only drawn and compared as they were scripted; what the pack judges about words is
   what the APP says (error enums, «Действие выполнено», «Отклонено: ничего не выполнено.», no invented cause).
 - **Copy.** The panel's «Копировать» calls the shell's clipboard (`TranscriptService.CopyText`), which the E2E hooks record as

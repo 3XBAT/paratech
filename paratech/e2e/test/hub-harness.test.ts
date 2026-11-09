@@ -25,7 +25,7 @@ import {
   type HubDeps,
   type StartedHub,
 } from "../src/hub/index.js";
-import { parseDataRow, parsePgUrl, pgQuery, pgQueryUrl, scramClientFinal, searchPathOf, searchPathStatement, withSearchPath } from "../src/hub/pg.js";
+import { parseDataRow, parsePgUrl, PgError, pgQuery, pgQueryUrl, scramClientFinal, searchPathOf, searchPathStatement, withSearchPath } from "../src/hub/pg.js";
 import { assertAllowedHubPort, freeLoopbackPort, loopbackPortBusy } from "../src/hub/ports.js";
 import { composePort } from "../src/hub/postgres.js";
 
@@ -334,6 +334,60 @@ describe("postgres client", () => {
       const plain = await pgQuery({ host: "127.0.0.1", port, user: "hub", password: "x", database: "hub" }, "SELECT 1");
       assert.equal(plain.length, 2);
       assert.equal(received[1], "SELECT 1", "no search_path option: the SQL is sent as is");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  test("a query ErrorResponse (E, then ReadyForQuery) rejects with PgError and returns no rows", async () => {
+    const frame = (type: string, payload: Buffer): Buffer => {
+      const head = Buffer.alloc(5);
+      head.write(type, 0, "ascii");
+      head.writeInt32BE(payload.length + 4, 1);
+      return Buffer.concat([head, payload]);
+    };
+    // ErrorResponse fields: a code byte, a C string, ...; a zero byte ends the list
+    const errorBody = Buffer.concat([
+      Buffer.from("SERROR\0", "latin1"),
+      Buffer.from("C42P01\0", "latin1"),
+      Buffer.from('Mrelation "quota_idempotency_keys" does not exist\0', "utf8"),
+      Buffer.from([0]),
+    ]);
+    const server = net.createServer((sock) => {
+      let buf = Buffer.alloc(0);
+      let started = false;
+      sock.on("error", () => {});
+      sock.on("data", (chunk: Buffer) => {
+        buf = Buffer.concat([buf, chunk]);
+        while (buf.length >= (started ? 5 : 4)) {
+          const len = started ? buf.readInt32BE(1) + 1 : buf.readInt32BE(0);
+          if (buf.length < len) {
+            return;
+          }
+          const type = started ? String.fromCharCode(buf[0] ?? 0) : "";
+          buf = buf.subarray(len);
+          if (!started) {
+            started = true;
+            sock.write(Buffer.concat([frame("R", Buffer.alloc(4)), frame("Z", Buffer.from("I"))]));
+          } else if (type === "Q") {
+            sock.write(Buffer.concat([frame("E", errorBody), frame("Z", Buffer.from("I"))]));
+          } else if (type === "X") {
+            sock.end();
+          }
+        }
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const port = (server.address() as net.AddressInfo).port;
+      let rows: string[][] | undefined;
+      await assert.rejects(
+        async () => {
+          rows = await pgQuery({ host: "127.0.0.1", port, user: "hub", password: "never-printed", database: "hub" }, "SELECT * FROM quota_idempotency_keys");
+        },
+        (err: unknown) => err instanceof PgError && err.sqlState === "42P01" && /does not exist/.test(err.message) && !err.message.includes("never-printed"),
+      );
+      assert.equal(rows, undefined, "a failed query returns no rows");
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

@@ -126,15 +126,17 @@ test(Feature.cut, details(Feature.cut), async ({ main, llm }) => {
     expectCatalogV9(planner);
   });
 
-  // Key K of the step is `ag:<thread>:<turn>:<step>`: the automatic retries repeat it and add no `:r<N>`. The Hub may release a failed
-  // attempt without a trace in the key table; then K is unknown here and only the keys made by «Повторить» can be judged.
+  // Key K of the step is `ag:<thread>:<turn>:<step>`: the automatic retries repeat it and add no `:r<N>`. The Hub keeps the row of the
+  // failed key and counts its attempts: the call and 3 retries = 4.
   let failedKeys: string[] = [];
-  await step("Hub: после трёх автоповторов ключ шага один и без суффикса «:r»", async () => {
+  await step("Hub: после трёх автоповторов ключ шага один, без суффикса «:r», попыток Hub 4", async () => {
     const rows = await agentStepRows();
-    failedKeys = newKeys(keysBefore, rows.map((r) => r.key));
-    note(`ключи шага после обрывов: ${failedKeys.join(", ") || "в таблице Hub ключа нет"}; попыток Hub по ним: ${rows.filter((r) => failedKeys.includes(r.key)).map((r) => r.attempts).join(", ") || "—"}`);
+    const made = rows.filter((r) => !keysBefore.includes(r.key));
+    failedKeys = made.map((r) => r.key);
+    note(`ключи шага после обрывов: ${made.map((r) => `${r.key} (попыток Hub: ${r.attempts})`).join(", ") || "нет"}`);
     expect(failedKeys.filter(isRetryKey), "автоматические повторы идут под тем же ключом: ключа с «:r<N>» быть не должно (его даёт только «Повторить»)").toEqual([]);
-    expect(failedKeys.length, "один запрос — один ключ шага на все четыре обращения к модели").toBeLessThanOrEqual(1);
+    expect(made.length, "один запрос — ровно один ключ шага на все четыре обращения к модели (строка ключа в таблице Hub есть)").toBe(1);
+    expect(made[0]?.attempts, "Hub видел ключ 4 раза: первый вызов и три автоматических повтора").toBe(AutoRetries + 1);
   });
 
   await step("«Повторить» с целым пятым ответом: оставшийся блок заменён новым текстом", async () => {
@@ -158,14 +160,9 @@ test(Feature.cut, details(Feature.cut), async ({ main, llm }) => {
     expect(retryKeys.length, "«Повторить» даёт ровно один новый ключ с суффиксом «:r1»").toBe(1);
     expect(retryKeys[0]?.endsWith(":r1"), "первый «Повторить» — суффикс «:r1»").toBe(true);
     const base = (retryKeys[0] ?? "").replace(/:r1$/, "");
-    expect(failedKeys.includes(base) || failedKeys.length === 0, "«:r1» — тот же шаг, что и обрыв: ключ без суффикса совпадает с ключом обрыва").toBe(true);
+    expect(failedKeys, "ключ обрыва K не изменился: «:r1» — тот же шаг, ключ без суффикса совпадает с ключом обрыва").toEqual([base]);
     expect(retryKeys[0], "ключ «Повторить» отличается от ключа обрыва").not.toBe(failedKeys[0]);
-    if (failedKeys.length === 1) {
-      expect([...made].sort(), "в таблице Hub ровно два ключа шага: K обрыва и K:r1").toEqual([base, `${base}:r1`].sort());
-    } else {
-      note("Hub не оставил ключа от оборванных обращений (неудачные попытки освобождены без записи): проверен только новый ключ «:r1» и отсутствие «:r» до «Повторить»");
-      expect(made, "в таблице Hub только ключ «Повторить»").toEqual([`${base}:r1`]);
-    }
+    expect([...made].sort(), "в таблице Hub ровно два ключа шага: K обрыва и K:r1").toEqual([base, `${base}:r1`].sort());
     note("проверено: обрыв повторён приложением трижды («Повторная попытка 1…3 из 3»), после чего текст остался, строка «Ответ оборван. Можно повторить.», одна «Повторить», ни «Стоп», ни таймера; «Повторить» заменил блок новым ответом ценой одного запроса к модели");
     await snapshot("Агент: оборванный ответ заменён новым");
   });
@@ -333,6 +330,7 @@ test(Feature.cutRetry, details(Feature.cutRetry), async ({ main, llm }) => {
     note(`новые ключи шага: ${made.map((r) => `${r.key} (попыток Hub: ${r.attempts})`).join(", ") || "нет"}`);
     expect(made.length, "один запрос — один ключ шага (`ag:<чат>:<ход>:<шаг>`): автоповтор взял тот же ключ").toBe(1);
     expect(isRetryKey(made[0]?.key ?? ""), "автоповтор не добавляет «:r<N>» — суффикс даёт только «Повторить» ученика").toBe(false);
+    expect(made[0]?.attempts, "Hub видел ключ 2 раза: первый вызов и один автоповтор").toBe(2);
     expect(newKeys(keysBefore, await agentStepKeys()).filter(isRetryKey), "ключей с «:r<N>» в таблице Hub нет").toEqual([]);
     note("проверено: один обрыв → «Повторная попытка 1 из 3» → целый ответ; «Ответ оборван» и иконки «Повторить» не было, баннера нет, поле включено; два запроса к модели под одним ключом шага");
   });
