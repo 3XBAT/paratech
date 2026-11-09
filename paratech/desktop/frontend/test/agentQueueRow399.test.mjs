@@ -340,7 +340,7 @@ test("AgentPanel wires withdraw once per press, to the resolved chat, keeps the 
   // The panel is a React container, not rendered in these tests: its wiring is read like the other panel tests do.
   const src = readPanel();
   assert.match(src, /pressed\.current\.mark\(waitingKey, null\)/);
-  assert.match(src, /withdrawChat\(state\.entries, e, openRef\.current\)/);
+  assert.match(src, /withdrawChat\(e\)/);
   assert.match(src, /api\.withdraw\(withdrawIn, e\.ticket \?\? ""\)/);
   assert.match(src, /withdrawStep\(still \? result : "started", fieldEmpty\)/);
   assert.match(src, /draftRef\.current\.trim\(\) === "" && pillsRef\.current\.length === 0/);
@@ -354,16 +354,18 @@ test("AgentPanel wires withdraw once per press, to the resolved chat, keeps the 
 
 // ---- The chat of a withdrawn question (AgentAskResult has none) ----
 
-test("withdrawChat: the ticket's chat, then the asked chat, then the chat it waits in, then the open chat; \"\" when none", () => {
+test("withdrawChat: the ticket's chat, then the asked chat; \"\" when none (never the open chat: a wrong chat reads not_found)", () => {
   const e = (over) => ({ key: "local:1", seq: 1, threadId: "", turn: 0, text: "в", scope: { ...scope, threadId: "" }, callProblem: "", update: null, ticket: "q1", ...over });
-  assert.equal(withdrawChat([], e({ ticketChat: "tc", scope: { ...scope, threadId: "ts" } }), "open"), "tc");
-  assert.equal(withdrawChat([], e({ scope: { ...scope, threadId: "ts" } }), "open"), "ts");
-  assert.equal(withdrawChat([], e(), "open"), "open");
-  assert.equal(withdrawChat([], e(), ""), "");
-  // The request it waits behind names the chat when the entry itself is named (threadId set, no update yet).
-  const behind = { key: "thread:tb:1", seq: 0, threadId: "tb", turn: 1, text: "", scope: null, callProblem: "", update: update({ threadId: "tb" }) };
-  const named = e({ threadId: "tb", scope: null });
-  assert.equal(withdrawChat([behind, named], named, "open"), "tb");
+  assert.equal(withdrawChat(e({ ticketChat: "tc", scope: { ...scope, threadId: "ts" } })), "tc");
+  assert.equal(withdrawChat(e({ scope: { ...scope, threadId: "ts" } })), "ts");
+  assert.equal(withdrawChat(e()), "");
+});
+
+test("a late askResult does not give a ticket back to a withdrawn entry", () => {
+  const s = apply(initialPanelState, asked(1, scope), queuedResult(1));
+  const w = reducePanel(s, { type: "withdrawn", key: s.entries[0].key });
+  const again = reducePanel(w, { type: "askResult", id: 1, problem: "", queued: true, ticket: "q9" });
+  assert.equal(again.entries[0].ticket ?? "", "");
 });
 
 test("a queued update tells the chat to a question whose ask result did not (Ask without a chat)", () => {
@@ -373,7 +375,7 @@ test("a queued update tells the chat to a question whose ask result did not (Ask
   const told = reducePanel(s, update_(lateQueued({ threadId: "t1" })));
   assert.equal(queueChat(told.entries[0]), "t1");
   assert.equal(told.entries[0].ticket, "q7");
-  assert.equal(withdrawChat(told.entries, told.entries[0], ""), "t1");
+  assert.equal(withdrawChat(told.entries[0]), "t1");
 });
 
 // ---- Five waiting questions (the 6th is refused as busy) ----

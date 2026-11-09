@@ -801,7 +801,7 @@ export function AgentPanel(props: {
     const waitingKey = `withdraw:${e.key}`;
     const waiting = isWaitingQueued(e);
     // The chat is not always known from the ask result: the ticket's chat, the asked one, the one it waits in, the open one.
-    const withdrawIn = waiting ? withdrawChat(state.entries, e, openRef.current) : "";
+    const withdrawIn = waiting ? withdrawChat(e) : "";
     const withdraw = () => {
       if (!waiting || withdrawIn === "" || !pressed.current.mark(waitingKey, null)) {
         return;

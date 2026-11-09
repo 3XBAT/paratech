@@ -129,11 +129,12 @@ export function queueChat(e: Entry): string {
 }
 
 /**
- * The chat `Withdraw` is called with: the ticket's chat, the chat it was asked in, the chat of the request it waits behind,
- * else the open chat of the panel. "" when none is known: the panel then offers no withdraw icon.
+ * The chat `Withdraw` is called with: the ticket's chat, else the chat it was asked in. "" when none is known (the core put
+ * the question into its own current chat): the panel then offers no withdraw icon until a queued update names the chat.
+ * The open chat is NOT a fallback: a wrong chat answers not_found, which would pass for "taken back" while it still runs.
  */
-export function withdrawChat(entries: readonly Entry[], e: Entry, openId: string): string {
-  return queueChat(e) || queuedBehind(entries, e)?.threadId || openId;
+export function withdrawChat(e: Entry): string {
+  return queueChat(e);
 }
 
 /** The question is waiting in the core's queue: sent, not answered, not refused, not taken back. */
@@ -394,7 +395,7 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
       // An accepted call needs nothing, except a queued question: it waits under its ticket (a request the core already
       // named has its own updates, and one that already got this ticket from the queued update keeps it).
       if (a.problem === "") {
-        if (a.queued === true && (a.ticket ?? "") !== "" && e.update === null && !hasTicket(e)) {
+        if (a.queued === true && (a.ticket ?? "") !== "" && e.update === null && !hasTicket(e) && e.withdrawn !== true) {
           return { ...s, entries: replace(s.entries, e.key, { ...e, ticket: a.ticket, ticketChat: e.scope?.threadId ?? "" }) };
         }
         return s;

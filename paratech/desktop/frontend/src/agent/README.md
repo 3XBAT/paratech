@@ -45,8 +45,8 @@ and every rule live in Go (ADR-0021, ADR-0033). Paths below are relative to `par
     to a sent entry that has none and its chat to one whose ask result had none (`giveTicket`); it never becomes a failed Ask.
   - Several waiting rows: only the oldest of the chat (`isFirstQueued`, `EntryContext.firstQueued`, `EntryModel.stopPrevious`) has the
     «Остановить предыдущий запрос» icon; the later ones have only «Отменить этот запрос» and the same «ждёт предыдущий запрос» (E2E 03).
-  - Withdraw needs a chat (`AgentAskResult` has none): `withdrawChat` = ticket's chat, asked chat, chat of the request it waits
-    behind, the open chat; with none the icon is not drawn (`CardActions.withdraw` undefined). With an empty field the row goes and
+  - Withdraw needs a chat (`AgentAskResult` has none): `withdrawChat` = ticket's chat, else the asked chat (never the open
+    chat: a wrong chat answers not_found); with none the icon is not drawn until a queued update names the chat (`CardActions.withdraw` undefined). With an empty field the row goes and
     the text returns; with a busy field the entry stays as a quiet cancelled line (`Entry.withdrawn`, action `withdrawn`,
     «Запрос отменён. Текст можно скопировать.», only the copy icon of the user text). It is no request: `pendingLocal`, `ticketed`,
     `queuedBehind`, `hasLiveRequest`, `queueIsFull`, `lastEntry`, `isRunningEntry`, `restartBlock`, `panelMode` skip it. The input
