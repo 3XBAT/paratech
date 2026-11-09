@@ -19,6 +19,9 @@ func WithHeartbeatInterval(d time.Duration) GatewayOption {
 type heartbeat struct {
 	send  func() error
 	every time.Duration
+	// ticks, when set, replaces the timer: a receive is one elapsed silence. Tests drive it without wall-clock races;
+	// production leaves it nil. With ticks the silence is not restarted by a sent message.
+	ticks <-chan time.Time
 }
 
 // heartbeatOf is the heartbeat of a stream whose request set the flag to on. The flag is transport only: it never
@@ -27,5 +30,5 @@ func (g *Gateway) heartbeatOf(on bool, send func() error) heartbeat {
 	if !on {
 		return heartbeat{}
 	}
-	return heartbeat{send: send, every: g.heartbeat}
+	return heartbeat{send: send, every: g.heartbeat, ticks: g.ticks}
 }
