@@ -1,4 +1,4 @@
-// Pack «Запись → конспект → задание», part 3: AC-09, a job survives a hard stop of the app (TASK-378). A third import (other
+// Pack «Запись → конспект → задание», part 3: AC-09, a job survives a hard stop of the app (TASK-378). A fourth import (other
 // bytes); while its recognition runs the app is stopped the way a crash does it (taskkill /T /F of the whole tree, whisper-cli
 // included), started again on the SAME sandbox, data dir and debug port (src/app/restart.ts), the page is reconnected, and the
 // job goes on: the row reaches «Конспект готов» and «Расшифровка» holds words of the speech. The Hub and the fake stay up.

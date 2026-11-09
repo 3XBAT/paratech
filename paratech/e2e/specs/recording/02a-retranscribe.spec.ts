@@ -1,6 +1,6 @@
 // Pack «Запись → конспект → задание», part 2a: the cancel icon of a running recognition and «Расшифровать снова» (TASK-393).
 // 02-cancel checks the cancel through the deletion of the recording; this row checks the cancel the row itself offers:
-//   - an icon «Отменить расшифровку» in the row's actions while the chip says «Расшифровка» (or «В очереди»);
+//   - an icon «Отменить расшифровку» in the row's status cell (next to the progress) while the chip says «Расшифровка» (or «В очереди»);
 //   - the first click asks «Отменить расшифровку?» («Не отменять» does nothing; «Да, отменить» + «Больше не спрашивать» cancels
 //     and stores the choice in the webview's localStorage, which lives under the wiped control dir, so a run starts with the dialog);
 //   - the next cancel runs without the dialog;
@@ -91,16 +91,35 @@ async function waitRecognising(main: Page, lecture: Lecture, what: string) {
   return proc;
 }
 
-/** The row is in the list of active rows: visible, and «Завершённые» (if there is such a list) is still folded. */
+/**
+ * The row is in the list of active rows «Идут»: visible and NOT inside a `.clist` (the CollapsibleList group «Завершённые»,
+ * folded or unfolded: an earlier test may have left it unfolded). A row the student cancelled in this session stays in «Идут»
+ * and folds only after an app restart.
+ */
 async function expectActiveRow(main: Page, lecture: Lecture, what: string): Promise<Locator> {
   const row = rowOf(main, lecture.title);
   await expect(row, `${what}: строка записи должна остаться в основном списке «Записей»`).toHaveCount(1, act);
   await expect(row).toBeVisible(act);
-  const toggle = main.locator(".page.recordings .clist-toggle").filter({ hasText: /Завершённые/ });
-  if ((await toggle.count()) > 0) {
-    expect(await toggle.first().getAttribute("aria-expanded", act), `${what}: «Завершённые» не раскрывали, строка не должна быть спрятана в них`).toBe("false");
-  }
+  const finished = main.locator(".page.recordings .clist").filter({ has: row });
+  expect(await finished.count(), `${what}: строка не должна лежать в «Завершённые» (раскрытых или свёрнутых)`).toBe(0);
   return row;
+}
+
+/** Waits until the chip of the row no longer says «Расшифровка отменена»: the click and the refresh of the page are over. */
+async function waitLeftCancelled(main: Page, lecture: Lecture, message: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        try {
+          const word = statusWord(await chipOf(rowOf(main, lecture.title)));
+          return word === Cancelled ? "" : word || "нет строки";
+        } catch {
+          return ""; // the list is being redrawn: look again
+        }
+      },
+      { timeout: 30_000, intervals: [200, 300], message },
+    )
+    .not.toBe("");
 }
 
 test(Feature.retranscribe, details(Feature.retranscribe, { requires: Feature.import }), async ({ main, pick, llm }) => {
@@ -225,6 +244,9 @@ test(Feature.retranscribe, details(Feature.retranscribe, { requires: Feature.imp
 
   await step("«Расшифровать снова» ещё раз: расшифровка доходит до «Конспект готов»", async () => {
     await againButton(rowOf(main, lecture.title)).click(act);
+    // the first polls may still read the old «Расшифровка отменена» (the call and the refresh are not finished): the check
+    // below is about what the row shows once the new run is accepted
+    await waitLeftCancelled(main, lecture, "после «Расшифровать снова» строка должна выйти из «Расшифровка отменена»");
     const seen = await waitChip(main, lecture, "Конспект готов", 5 * 60_000, "строка записи должна дойти до «Конспект готов»", { folded: true });
     note(`статусы строки после третьего запуска: ${seen.join(" → ")}`);
     expect(seen, "после «Расшифровать снова» строка не должна оставаться в «Расшифровка отменена»").not.toContain(Cancelled);
