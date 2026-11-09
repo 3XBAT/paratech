@@ -25,7 +25,7 @@ import {
   type HubDeps,
   type StartedHub,
 } from "../src/hub/index.js";
-import { parsePgUrl, scramClientFinal, withSearchPath } from "../src/hub/pg.js";
+import { parseDataRow, parsePgUrl, pgQuery, pgQueryUrl, scramClientFinal, searchPathOf, searchPathStatement, withSearchPath } from "../src/hub/pg.js";
 import { assertAllowedHubPort, freeLoopbackPort, loopbackPortBusy } from "../src/hub/ports.js";
 import { composePort } from "../src/hub/postgres.js";
 
@@ -248,6 +248,102 @@ describe("postgres client", () => {
       (err: unknown) => err instanceof BadConfigError && !err.message.includes("secret-pw"),
     );
     assert.match(withSearchPath("postgres://hub:x@127.0.0.1:1/hub?sslmode=disable", "e2e_ab"), /sslmode=disable&search_path=e2e_ab$/);
+  });
+
+  // The body of a DataRow ('D'): Int16 column count, then Int32 length (-1 = NULL) and the bytes of each column.
+  const dataRowBody = (cells: Array<string | null>): Buffer => {
+    const parts: Buffer[] = [Buffer.alloc(2)];
+    parts[0]?.writeInt16BE(cells.length);
+    for (const c of cells) {
+      const bytes = c === null ? Buffer.alloc(0) : Buffer.from(c, "utf8");
+      const len = Buffer.alloc(4);
+      len.writeInt32BE(c === null ? -1 : bytes.length);
+      parts.push(len, bytes);
+    }
+    return Buffer.concat(parts);
+  };
+
+  test("a DataRow is parsed into text cells: UTF-8, empty string, NULL as \"\"", () => {
+    assert.deepEqual(parseDataRow(dataRowBody(["ag:t1:1:1", "2", "Привет", "", null])), ["ag:t1:1:1", "2", "Привет", "", ""]);
+    assert.deepEqual(parseDataRow(dataRowBody([])), []);
+    assert.throws(() => parseDataRow(dataRowBody(["abcdef"]).subarray(0, 8)), E2EEnvironmentError);
+  });
+
+  test("the search_path of a database URL is read and quoted as an identifier", () => {
+    assert.equal(searchPathOf("postgres://hub:x@127.0.0.1:1/hub?sslmode=disable&search_path=e2e_ab12"), "e2e_ab12");
+    assert.equal(searchPathOf("postgres://hub:x@127.0.0.1:1/hub?sslmode=disable"), undefined);
+    assert.equal(searchPathOf("not a url"), undefined);
+    assert.equal(searchPathStatement("e2e_ab12"), 'SET search_path TO "e2e_ab12"');
+    assert.equal(searchPathStatement('a"; DROP SCHEMA x; --'), 'SET search_path TO "a""; DROP SCHEMA x; --"');
+  });
+
+  test("pgQuery logs in, sets the search_path, and returns the rows of the SELECT as text", async () => {
+    const frame = (type: string, payload: Buffer): Buffer => {
+      const head = Buffer.alloc(5);
+      head.write(type, 0, "ascii");
+      head.writeInt32BE(payload.length + 4, 1);
+      return Buffer.concat([head, payload]);
+    };
+    const authOk = Buffer.alloc(4); // AuthenticationOk
+    const received: string[] = [];
+    const server = net.createServer((sock) => {
+      let buf = Buffer.alloc(0);
+      let started = false;
+      sock.on("error", () => {});
+      sock.on("data", (chunk: Buffer) => {
+        buf = Buffer.concat([buf, chunk]);
+        while (buf.length >= (started ? 5 : 4)) {
+          const len = started ? buf.readInt32BE(1) + 1 : buf.readInt32BE(0);
+          if (buf.length < len) {
+            return;
+          }
+          const type = started ? String.fromCharCode(buf[0] ?? 0) : "";
+          const body = buf.subarray(started ? 5 : 4, len);
+          buf = buf.subarray(len);
+          if (!started) {
+            started = true;
+            sock.write(Buffer.concat([frame("R", authOk), frame("Z", Buffer.from("I"))]));
+          } else if (type === "Q") {
+            received.push(body.toString("utf8").replace(/\0$/, ""));
+            sock.write(
+              Buffer.concat([
+                frame("C", Buffer.from("SET\0")),
+                frame("D", dataRowBody(["ag:t1:1:1", "1"])),
+                frame("D", dataRowBody(["ag:t1:1:1:r1", null])),
+                frame("C", Buffer.from("SELECT 2\0")),
+                frame("Z", Buffer.from("I")),
+              ]),
+            );
+          } else if (type === "X") {
+            sock.end();
+          }
+        }
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const port = (server.address() as net.AddressInfo).port;
+      const url = `postgres://hub:never-printed@127.0.0.1:${port}/hub?sslmode=disable&search_path=e2e_ab12`;
+      const rows = await pgQueryUrl(url, "database url", "SELECT idempotency_key, attempts FROM quota_idempotency_keys");
+      assert.deepEqual(rows, [
+        ["ag:t1:1:1", "1"],
+        ["ag:t1:1:1:r1", ""],
+      ]);
+      assert.deepEqual(received, ['SET search_path TO "e2e_ab12"; SELECT idempotency_key, attempts FROM quota_idempotency_keys']);
+
+      const plain = await pgQuery({ host: "127.0.0.1", port, user: "hub", password: "x", database: "hub" }, "SELECT 1");
+      assert.equal(plain.length, 2);
+      assert.equal(received[1], "SELECT 1", "no search_path option: the SQL is sent as is");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  test("a bad database URL is named by the variable, never echoed", async () => {
+    await assert.rejects(
+      pgQueryUrl("postgres://hub:secret-pw@127.0.0.1/hub?sslmode=require", "DB_VAR", "SELECT 1"),
+      (err: unknown) => err instanceof BadConfigError && err.message.includes("DB_VAR") && !err.message.includes("secret-pw"),
+    );
   });
 });
 

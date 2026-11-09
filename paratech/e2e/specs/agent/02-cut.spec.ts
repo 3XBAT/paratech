@@ -10,9 +10,31 @@
 // retries take four cut rules, the student's «Повторить» takes the whole reply. With fewer cut rules the app would consume the whole
 // reply by itself after 5 s and the scenario would never reach `failed`; the count of planner requests (4, then 5) pins this down.
 // The retries add 5 + 10 + 20 s of waiting to each of the two rows (about 40 s to the final line): the timeouts are raised for it.
+//
+// TASK-401: the first row also reads the Hub's key table (quota_idempotency_keys, support.ts agentStepKeys): the automatic retries make
+// no `:r<N>` key, «Повторить» makes `K:r1`. The third row is ONE cut then a whole answer: one automatic retry after 5 s under the same key.
 import { expect, snapshot, step, test } from "../../src/steps/index.js";
 import { filler, replyRule } from "../../scripts/llm/agent/rules.js";
-import { ask, collapse, details, expectCatalogV9, Feature, note, panelOf, plannerRequestsAbout, prepare, rawLeftovers, sample, type Sample, waitThread, act } from "./support.js";
+import {
+  act,
+  agentStepKeys,
+  agentStepRows,
+  ask,
+  collapse,
+  details,
+  expectCatalogV9,
+  Feature,
+  isRetryKey,
+  newKeys,
+  note,
+  panelOf,
+  plannerRequestsAbout,
+  prepare,
+  rawLeftovers,
+  sample,
+  type Sample,
+  waitThread,
+} from "./support.js";
 
 const cutLine = "Ответ оборван. Можно повторить.";
 const AutoRetries = 3;
@@ -57,6 +79,12 @@ test(Feature.cut, details(Feature.cut), async ({ main, llm }) => {
   });
   await step("панель: новый пустой чат", () => prepare(main));
 
+  // The Hub's key table lives through the whole run: what this row made is what is new after it (key evidence, TASK-401).
+  let keysBefore: string[] = [];
+  await step("Hub: ключи шагов агента до вопроса", async () => {
+    keysBefore = await agentStepKeys();
+  });
+
   let kept = "";
   await step("вопрос → ответ обрывается, приложение повторяет само («Повторная попытка 1…3 из 3»), потом текст остаётся и внизу строка «Ответ оборван»", async () => {
     const watch = watchRetries();
@@ -98,6 +126,17 @@ test(Feature.cut, details(Feature.cut), async ({ main, llm }) => {
     expectCatalogV9(planner);
   });
 
+  // Key K of the step is `ag:<thread>:<turn>:<step>`: the automatic retries repeat it and add no `:r<N>`. The Hub may release a failed
+  // attempt without a trace in the key table; then K is unknown here and only the keys made by «Повторить» can be judged.
+  let failedKeys: string[] = [];
+  await step("Hub: после трёх автоповторов ключ шага один и без суффикса «:r»", async () => {
+    const rows = await agentStepRows();
+    failedKeys = newKeys(keysBefore, rows.map((r) => r.key));
+    note(`ключи шага после обрывов: ${failedKeys.join(", ") || "в таблице Hub ключа нет"}; попыток Hub по ним: ${rows.filter((r) => failedKeys.includes(r.key)).map((r) => r.attempts).join(", ") || "—"}`);
+    expect(failedKeys.filter(isRetryKey), "автоматические повторы идут под тем же ключом: ключа с «:r<N>» быть не должно (его даёт только «Повторить»)").toEqual([]);
+    expect(failedKeys.length, "один запрос — один ключ шага на все четыре обращения к модели").toBeLessThanOrEqual(1);
+  });
+
   await step("«Повторить» с целым пятым ответом: оставшийся блок заменён новым текстом", async () => {
     const before = (await plannerRequestsAbout(llm, question)).length;
     await panelOf(main).locator(".ag-thread").getByRole("button", { name: "Повторить", exact: true }).click(act);
@@ -112,6 +151,21 @@ test(Feature.cut, details(Feature.cut), async ({ main, llm }) => {
     const after = (await plannerRequestsAbout(llm, question)).length;
     note(`запросов к модели с этим вопросом: до «Повторить» ${before}, после ${after}`);
     expect(after, "«Повторить» должен добавить ровно один запрос к модели").toBe(before + 1);
+    // «Повторить» of a failed step is a NEW key (the Hub replays a failed key for a day): K:r1
+    const made = newKeys(keysBefore, await agentStepKeys());
+    const retryKeys = made.filter(isRetryKey);
+    note(`ключи шага после «Повторить»: ${made.join(", ")}`);
+    expect(retryKeys.length, "«Повторить» даёт ровно один новый ключ с суффиксом «:r1»").toBe(1);
+    expect(retryKeys[0]?.endsWith(":r1"), "первый «Повторить» — суффикс «:r1»").toBe(true);
+    const base = (retryKeys[0] ?? "").replace(/:r1$/, "");
+    expect(failedKeys.includes(base) || failedKeys.length === 0, "«:r1» — тот же шаг, что и обрыв: ключ без суффикса совпадает с ключом обрыва").toBe(true);
+    expect(retryKeys[0], "ключ «Повторить» отличается от ключа обрыва").not.toBe(failedKeys[0]);
+    if (failedKeys.length === 1) {
+      expect([...made].sort(), "в таблице Hub ровно два ключа шага: K обрыва и K:r1").toEqual([base, `${base}:r1`].sort());
+    } else {
+      note("Hub не оставил ключа от оборванных обращений (неудачные попытки освобождены без записи): проверен только новый ключ «:r1» и отсутствие «:r» до «Повторить»");
+      expect(made, "в таблице Hub только ключ «Повторить»").toEqual([`${base}:r1`]);
+    }
     note("проверено: обрыв повторён приложением трижды («Повторная попытка 1…3 из 3»), после чего текст остался, строка «Ответ оборван. Можно повторить.», одна «Повторить», ни «Стоп», ни таймера; «Повторить» заменил блок новым ответом ценой одного запроса к модели");
     await snapshot("Агент: оборванный ответ заменён новым");
   });
@@ -197,4 +251,89 @@ test(Feature.cutNext, details(Feature.cutNext), async ({ main, llm }) => {
       await cleanup();
     }
   }
+});
+
+// ONE cut, then a whole answer: the app retries once by itself after 5 s and the retry succeeds. The student sees «Повторная попытка 1
+// из 3» and then the whole reply: never «Ответ оборван», no retry icon, no banner, the field on throughout. The retry repeats the key of
+// the step (no `:r<N>`: that is only «Повторить»), so the Hub's key table gets ONE agent step key for the request, without a suffix.
+test(Feature.cutRetry, details(Feature.cutRetry), async ({ main, llm }) => {
+  test.setTimeout(90_000);
+  const question = "расскажи подробно про сходимость числового ряда";
+  const long = filler(720, 2);
+  const full = filler(380, 4);
+
+  await step("Hub: длинный ответ потоком обрывается один раз; второй ответ — целый", async () => {
+    await llm.script([replyRule(question, long, { stream: cutStream }), replyRule(question, full, { stream: { chunks: 4, chunkDelayMs: 100 } })]);
+  });
+  await step("панель: новый пустой чат", () => prepare(main));
+
+  let keysBefore: string[] = [];
+  await step("Hub: ключи шагов агента до вопроса", async () => {
+    keysBefore = await agentStepKeys();
+  });
+
+  const attempts = new Set<string>();
+  const cutShown: string[] = [];
+  const bannerShown: string[] = [];
+  let fieldOffAt = 0;
+  let samples = 0;
+  let final: Sample | undefined;
+  await step("вопрос → обрыв → «Повторная попытка 1 из 3» → целый ответ; «Ответ оборван» не показывается ни в одном срезе", async () => {
+    await ask(main, question);
+    final = await waitThread(main, "после одного обрыва и автоповтора должен появиться целый ответ", (y) => y.replies.length === 1 && y.think === 0, {
+      timeout: 60_000,
+      each: (y) => {
+        samples++;
+        y.attemptsAnywhere.forEach((a) => attempts.add(a));
+        if (y.text.includes("оборван") || y.stopLines.length > 0) {
+          cutShown.push(`строки «${y.stopLines.join(" | ")}»`);
+        }
+        if (y.offline !== "") {
+          bannerShown.push(y.offline);
+        }
+        if (y.fieldDisabled) {
+          fieldOffAt++;
+        }
+      },
+    });
+    note(`срезов ленты: ${samples}; попытки, которые видел ученик: ${[...attempts].join(" → ") || "ни одной"}`);
+    expect([...attempts], "во время ожидания автоповтора рядом с таймером показано «Повторная попытка 1 из 3», других попыток нет").toEqual([attemptLine(1)]);
+    expect(cutShown, `строка «${cutLine}» (и любая строка «не завершено») не должна показываться: повтор удался сам`).toEqual([]);
+    expect(bannerShown, "баннера «Нет связи с paratech» не было ни в одном срезе: Hub ответил, обрыв на стороне модели").toEqual([]);
+    expect(fieldOffAt, "поле запроса было включено во всех срезах").toBe(0);
+    await snapshot("Агент: один обрыв, ответ после автоповтора");
+  });
+
+  await step("итог: одна карточка с целым ответом, без иконки «Повторить», без «Повторная попытка», поле включено", async () => {
+    const x = await sample(main);
+    expect(final?.replies, "ответ — одна карточка").toHaveLength(1);
+    expect(x.replies, "одна карточка готового ответа").toEqual([collapse(full)]);
+    expect(x.kept, "оставшегося обрывка нет: повтор вытеснил его целым ответом").toEqual([]);
+    expect(x.draft, "черновика «печатается» нет").toEqual([]);
+    expect(x.stopLines, "строк «Ответ оборван»/«не завершено» нет").toEqual([]);
+    expect(x.retry, "иконки «Повторить» нет: повтор не потребовался").toBe(0);
+    expect(x.rerun, "под готовым ответом «Повторить ответ»").toBe(1);
+    expect(x.think + x.stopButtons + x.elapsed.length, "строки «Стоп» и таймера нет").toBe(0);
+    expect(x.attemptsAnywhere, "после ответа «Повторная попытка N из 3» не осталось").toEqual([]);
+    expect(x.offline, "баннера «Нет связи с paratech» нет").toBe("");
+    expect(x.fieldDisabled, "поле запроса включено").toBe(false);
+    expect(rawLeftovers(x.text), "в ленте нет «undefined»/«NaN»/сырых ошибок").toEqual([]);
+  });
+
+  await step("у модели ровно два запроса про этот вопрос: обрыв и один автоповтор", async () => {
+    const planner = await plannerRequestsAbout(llm, question);
+    note(`запросов Hub к модели про вопрос: ${planner.length}`);
+    expect(planner.length, "первый вызов и один автоповтор").toBe(2);
+    expectCatalogV9(planner);
+  });
+
+  await step("Hub: у запроса один ключ шага, без суффикса «:r» (автоповтор — тот же ключ)", async () => {
+    const rows = await agentStepRows();
+    const made = rows.filter((r) => !keysBefore.includes(r.key));
+    note(`новые ключи шага: ${made.map((r) => `${r.key} (попыток Hub: ${r.attempts})`).join(", ") || "нет"}`);
+    expect(made.length, "один запрос — один ключ шага (`ag:<чат>:<ход>:<шаг>`): автоповтор взял тот же ключ").toBe(1);
+    expect(isRetryKey(made[0]?.key ?? ""), "автоповтор не добавляет «:r<N>» — суффикс даёт только «Повторить» ученика").toBe(false);
+    expect(newKeys(keysBefore, await agentStepKeys()).filter(isRetryKey), "ключей с «:r<N>» в таблице Hub нет").toEqual([]);
+    note("проверено: один обрыв → «Повторная попытка 1 из 3» → целый ответ; «Ответ оборван» и иконки «Повторить» не было, баннера нет, поле включено; два запроса к модели под одним ключом шага");
+  });
 });
