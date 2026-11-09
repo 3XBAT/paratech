@@ -8,8 +8,9 @@ import type { Locator, Page } from "@playwright/test";
 
 import { catalogProblem, toolNamesOf } from "../../scripts/llm/agent/rules.js";
 import { evalInPage } from "../../src/checks/layout.js";
-import { AnnotationFeature, AnnotationMode, AnnotationRequires } from "../../src/contract.js";
+import { AnnotationFeature, AnnotationMode, AnnotationRequires, EnvHubDatabaseUrl } from "../../src/contract.js";
 import { collapse } from "../../src/fixtures/text.js";
+import { pgQueryUrl } from "../../src/hub/pg.js";
 import { expect, type Llm, type RecordedRequest, test } from "../../src/steps/index.js";
 import { Feature as RecordingFeature } from "../recording/support.js";
 import { act, actionMs } from "../settings/support.js";
@@ -41,6 +42,9 @@ export const Feature = {
   confirm: "Агент: действие класса C только через подтверждение",
   cardsStay: "Агент: карточки инструментов остаются после ответа модели",
   busyTool: "Агент: второй вопрос, пока идёт инструмент",
+  // TASK-401.
+  withdraw: "Агент: отмена ждущего вопроса — текст возвращается в поле",
+  cutRetry: "Агент: один обрыв — одна автоповторная попытка под тем же ключом",
 } as const;
 
 /** The rows of the settings pack the agent needs: the Hub key of the run (the panel asks the Hub) and the subjects of the schedule. */
@@ -72,7 +76,7 @@ export function note(text: string): void {
 // ---- the panel ----
 
 export const panelOf = (main: Page): Locator => main.locator("aside.ag");
-const fieldOf = (main: Page): Locator => panelOf(main).locator("textarea.ag-input");
+export const fieldOf = (main: Page): Locator => panelOf(main).locator("textarea.ag-input");
 
 /** Ctrl+K opens a closed panel and closes an open one; the shell carries `agent-closed` while it is closed. */
 export async function setAgentPanel(main: Page, open: boolean): Promise<void> {
@@ -153,6 +157,8 @@ export interface Sample {
   stopButtons: number;
   /** «Остановить предыдущий запрос» buttons. */
   stopPrevious: number;
+  /** «Отменить этот запрос» buttons (the withdraw icon of a waiting question). */
+  withdrawButtons: number;
   /** The timers «5с». */
   elapsed: string[];
   /** The quiet «Повторная попытка N из 3» inside the waiting rows (.ag-think), one entry per match. */
@@ -202,6 +208,7 @@ function probeThread(): Sample {
     think: all(".ag-thread .ag-think").length,
     stopButtons: all(".ag-thread .ag-think button").filter((b) => b.getAttribute("aria-label") === "Остановить").length,
     stopPrevious: named("Остановить предыдущий запрос"),
+    withdrawButtons: named("Отменить этот запрос"),
     elapsed: texts(".ag-thread .ag-elapsed"),
     attempts: texts(".ag-thread .ag-think").flatMap((t) => t.match(/Повторная попытка \d+ из \d+/g) ?? []),
     attemptsAnywhere: norm(thread?.textContent ?? "").match(/Повторная попытка \d+ из \d+/g) ?? [],
@@ -248,6 +255,61 @@ export async function waitThread(
     .toBe(true);
   return last as Sample;
 }
+
+/** Looks at the thread for `ms` more (every sample goes to `each`): "nothing happens after this" needs a window, not one sample. */
+export async function settle(main: Page, ms: number, each?: (s: Sample) => Promise<void> | void): Promise<Sample> {
+  const from = Date.now();
+  return waitThread(main, `окно наблюдения ${ms} мс`, () => Date.now() - from > ms, { timeout: ms + 10_000, each });
+}
+
+// ---- the Hub's idempotency keys (TASK-401) ----
+
+// The Hub keeps every call's key in quota_idempotency_keys (hub/pkg/migrations/0003_quota.sql); neither the fake provider's request
+// nor the Hub log carries it. The step key of the agent is `ag:<thread>:<turn>:<step>` (domain/agent/thread stepKey), plus `:r<N>`
+// after the student's N-th «Повторить» of a failed step. The automatic retry of a lost answer repeats the key without a suffix.
+const stepKeyShape = /^ag:[^:]+:\d+:\d+(?::r\d+)?$/;
+// the marker goes into SQL text: only the characters a thread id and a key are made of
+const markerShape = /^[A-Za-z0-9:_.-]+$/;
+
+export interface StepKeyRow {
+  key: string;
+  /** How many times the Hub saw this key (the column `attempts`). */
+  attempts: number;
+}
+
+/**
+ * The agent step keys the Hub of this run knows, oldest first (created_at; a re-attempt of a key moves it). `threadMarker` keeps
+ * only the keys that contain it. The database URL stays inside (EnvHubDatabaseUrl, process memory); nothing here prints it.
+ */
+export async function agentStepRows(threadMarker?: string): Promise<StepKeyRow[]> {
+  const url = process.env[EnvHubDatabaseUrl];
+  if (!url) {
+    throw new Error(`Нет ${EnvHubDatabaseUrl}: ключи Hub читаются только в прогоне, который поднял тестовый Hub`);
+  }
+  if (threadMarker !== undefined && !markerShape.test(threadMarker)) {
+    throw new Error("threadMarker: допустимы буквы, цифры и «: _ . -»");
+  }
+  const marker = threadMarker === undefined ? "" : ` AND position('${threadMarker}' in idempotency_key) > 0`;
+  const rows = await pgQueryUrl(
+    url,
+    EnvHubDatabaseUrl,
+    `SELECT idempotency_key, attempts FROM quota_idempotency_keys WHERE idempotency_key LIKE 'ag:%'${marker} ORDER BY created_at, idempotency_key`,
+  );
+  return rows
+    .map((r) => ({ key: r[0] ?? "", attempts: Number(r[1]) }))
+    .filter((r) => stepKeyShape.test(r.key));
+}
+
+/** The agent step keys (`ag:…`, answer_question's `ans:v2:…` and the like are left out), oldest first. */
+export async function agentStepKeys(threadMarker?: string): Promise<string[]> {
+  return (await agentStepRows(threadMarker)).map((r) => r.key);
+}
+
+/** A key of a student's «Повторить»: the step key plus `:r<N>`. */
+export const isRetryKey = (key: string): boolean => /:r\d+$/.test(key);
+
+/** The keys in `after` that `before` did not have: what a scenario made, in a database that lives through the whole run. */
+export const newKeys = (before: readonly string[], after: readonly string[]): string[] => after.filter((k) => !before.includes(k));
 
 /** Leftovers of the code in a text for a student: «undefined», «NaN», a raw error. */
 export function rawLeftovers(text: string): string[] {

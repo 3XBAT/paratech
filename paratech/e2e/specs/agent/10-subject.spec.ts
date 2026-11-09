@@ -3,8 +3,8 @@
 // create_subject (class U: it runs at once, the panel shows the action line with «Отменить»); the pack asserts the names the app
 // gave the model, that the subject is in the tree of «Предметы», and that «Отменить» takes it back without a leftover.
 //
-// The model's final `reply` is delayed (25 s) so the action line can be used while the request is still running: the app replaces the
-// cards of a request with the last one, the model's reply (the row «карточки остаются после ответа модели», file 13).
+// The action line is used AFTER the model's final `reply` (no hold): the cards of a tool stay when the reply arrives (D1, TASK-399;
+// the row «карточки остаются после ответа модели», file 13). The row «Отменить обновляет дерево» below is unchanged on purpose.
 //
 // The name: the app checks a name of create_subject by its shape only (values.ParseName: 1..80 letters, digits, spaces, .,-();
 // there is no check that it occurs in the request or in a tool result, the prompt asks for a copy of subject_name only as
@@ -35,8 +35,6 @@ import {
   waitThread,
 } from "./support.js";
 
-const replyDelayMs = 25_000;
-
 test(Feature.addSubject, details(Feature.addSubject, { requires: PrerequisitesB }), async ({ main, llm }) => {
   test.setTimeout(120_000);
   const question = "добавь предмет по последней записи";
@@ -44,12 +42,8 @@ test(Feature.addSubject, details(Feature.addSubject, { requires: PrerequisitesB 
   const answer = `Предмет «${name}» добавлен.`;
   const last = lectureOf("перезапуск");
 
-  await step("Hub: модель сначала вызывает find_lessons, потом create_subject, потом (через 25 с) отвечает", async () => {
-    await llm.script([
-      callRule(question, "find_lessons", {}),
-      callRule(AfterLessons, "create_subject", { name }),
-      replyRule(AfterWrite, answer, { delayMs: replyDelayMs }),
-    ]);
+  await step("Hub: модель сначала вызывает find_lessons, потом create_subject, потом отвечает", async () => {
+    await llm.script([callRule(question, "find_lessons", {}), callRule(AfterLessons, "create_subject", { name }), replyRule(AfterWrite, answer)]);
   });
   let before: string[] = [];
   await step("«Предметы»: такого предмета ещё нет", async () => {
@@ -59,16 +53,22 @@ test(Feature.addSubject, details(Feature.addSubject, { requires: PrerequisitesB 
   await step("панель: новый пустой чат на «Сегодня»", () => prepare(main));
 
   let asked = 0;
-  await step("вопрос → модель сначала смотрит записи, предмет создаётся, строка действия с «Отменить»; карточки вопросов нет ни разу", async () => {
+  await step("вопрос → модель сначала смотрит записи, предмет создаётся, строка действия с «Отменить» остаётся после ответа; карточки вопросов нет ни разу", async () => {
     await ask(main, question);
+    await waitThread(main, "ответ модели должен появиться", (y) => y.replies.includes(collapse(answer)) && y.think === 0, {
+      timeout: 60_000,
+      each: async () => {
+        asked = Math.max(asked, (await cardsOf(main)).askCards);
+      },
+    });
     const cards = await waitCards(
       main,
-      "строка действия должна появиться",
+      "строка действия должна остаться после ответа",
       (c) => {
         asked = Math.max(asked, c.askCards);
         return c.actionLines.length > 0;
       },
-      60_000,
+      15_000,
     );
     note(`строка действия: ${cards.actionLines.join(" | ")}; кнопки: ${cards.actionButtons.join(" | ")}`);
     expect(asked, "ученика не спрашивали об имени: карточки «ask_questions» не было").toBe(0);
@@ -134,8 +134,8 @@ test(Feature.addSubject, details(Feature.addSubject, { requires: PrerequisitesB 
     note("НЕ ПОКРЫТО: часть AC «запись переезжает под новый предмет» — create_subject только создаёт предмет и не переносит запись (follow-up)");
   });
 
-  await step("ответ модели приходит и показан как есть (строка действия после него — в строке «карточки остаются после ответа»)", async () => {
-    const x = await waitThread(main, "ответ модели должен появиться", (y) => y.replies.includes(collapse(answer)) && y.think === 0, { timeout: 60_000 });
+  await step("ответ модели показан как есть, один раз (строка действия осталась: подробнее в строке «карточки остаются после ответа»)", async () => {
+    const x = await waitThread(main, "ответ модели должен быть в ленте", (y) => y.replies.includes(collapse(answer)) && y.think === 0, { timeout: 15_000 });
     expect(x.replies).toEqual([collapse(answer)]);
   });
 });

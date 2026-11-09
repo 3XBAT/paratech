@@ -118,8 +118,9 @@ with the exported `AgentService` methods in `agent.go`, `agentjournal.go`, `agen
 - `AgentActions` and `UserActions` render nothing when there is nothing to copy or rerun.
 
 ## E2E
-The pack `paratech/e2e/specs/agent/` exists (`01-reply` ... `13-cards-stay`, with `support.ts`): reply, cut reply, busy,
-restart, compaction, titles, link, answer, failure, subject, confirm, tool busy, cards that stay. Per ADR-0035 §6 a UI task
+The pack `paratech/e2e/specs/agent/` exists (`01-reply` ... `14-withdraw`, with `support.ts`): reply, cut reply (and a single cut with one automatic retry), busy,
+restart, compaction, titles, link, answer, failure, subject, confirm, tool busy, cards that stay, withdraw of a waiting question
+(«Отменить этот запрос»; the aria-label is pinned there). Per ADR-0035 §6 a UI task
 that changes agent behaviour adds or updates its scenario there; how to run and write one is `docs/process/e2e.md`
 (`paratech/e2e/README.md` has the layout). Texts and roles the specs look for (`aria-label`s of the icons, «Ответ оборван.
 Можно повторить.» / «Ответ оборван: нет связи. Можно повторить, когда связь вернётся.», «Нет связи с paratech») are pinned by the frontend tests too: change them in both places.

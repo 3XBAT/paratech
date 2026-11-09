@@ -4,8 +4,8 @@
 // still in «Записи» while nobody pressed anything, that the model was told it is only a proposal, and that «Нет» keeps the
 // recording. It never presses the destructive «Да, удалить»: the recording is needed by the rows after it and by the other packs.
 //
-// The model's final `reply` is delayed (12 s) so the card can be used while the request is still running: the app replaces the cards
-// of a request with the last one, the model's reply (the row «карточки остаются после ответа модели», file 13).
+// The card is used AFTER the model's final `reply` (no hold): the cards of a tool stay when the reply arrives (D1, TASK-399; the row
+// «карточки остаются после ответа модели», file 13).
 import { expect, snapshot, step, test } from "../../src/steps/index.js";
 import { AfterLessons, AfterProposal, callRule, replyRule } from "../../scripts/llm/agent/rules.js";
 import { showRow } from "../recording/support.js";
@@ -31,8 +31,6 @@ import {
   waitThread,
 } from "./support.js";
 
-const replyDelayMs = 12_000;
-
 test(Feature.confirm, details(Feature.confirm, { requires: PrerequisitesB }), async ({ main, llm }) => {
   test.setTimeout(120_000);
   const question = "удали запись про перезапуск";
@@ -47,18 +45,15 @@ test(Feature.confirm, details(Feature.confirm, { requires: PrerequisitesB }), as
     note(`запись для удаления: «${target.title}», всего записей: ${countBefore}`);
   });
 
-  await step("Hub: find_lessons, потом propose_delete_recording с id из результата, потом (через 12 с) ответ", async () => {
-    await llm.script([
-      callRule(question, "find_lessons", {}),
-      callRule(AfterLessons, "propose_delete_recording", { recording: recording.id }),
-      replyRule(AfterProposal, answer, { delayMs: replyDelayMs }),
-    ]);
+  await step("Hub: find_lessons, потом propose_delete_recording с id из результата, потом ответ", async () => {
+    await llm.script([callRule(question, "find_lessons", {}), callRule(AfterLessons, "propose_delete_recording", { recording: recording.id }), replyRule(AfterProposal, answer)]);
   });
   await step("панель: новый пустой чат на «Сегодня»", () => prepare(main));
 
-  await step("просьба удалить запись → карточка подтверждения: «Не удалять» и «Да, удалить», строки действия нет", async () => {
+  await step("просьба удалить запись → ответ модели и карточка подтверждения под ним: «Нет» и «Да…», строки действия нет", async () => {
     await ask(main, question);
-    const cards = await waitCards(main, "карточка подтверждения должна появиться", (c) => c.confirmCards > 0 && c.confirmButtons.length > 0, 60_000);
+    await waitThread(main, "ответ модели должен появиться", (y) => y.replies.includes(collapse(answer)) && y.think === 0, { timeout: 60_000 });
+    const cards = await waitCards(main, "карточка подтверждения должна остаться после ответа", (c) => c.confirmCards > 0 && c.confirmButtons.length > 0, 15_000);
     note(`карточка: «${cards.confirmText}»; кнопки: ${cards.confirmButtons.join(" | ")}`);
     expect(cards.confirmCards, "ровно одна карточка подтверждения").toBe(1);
     expect(cards.confirmText, "карточка называет удаление записи").toContain("Удаление записи");
@@ -114,8 +109,8 @@ test(Feature.confirm, details(Feature.confirm, { requires: PrerequisitesB }), as
     note("проверено: C-инструмент даёт только карточку подтверждения; запись на месте и до, и после «Нет»; модели сказано proposed/waits_for=student без done; «Да» не нажималась");
   });
 
-  await step("ответ модели приходит и показан как есть (карточка после него — в строке «карточки остаются после ответа»)", async () => {
-    const x = await waitThread(main, "ответ модели должен появиться", (y) => y.replies.includes(collapse(answer)) && y.think === 0, { timeout: 60_000 });
+  await step("ответ модели показан как есть, один раз (карточка осталась: подробнее в строке «карточки остаются после ответа»)", async () => {
+    const x = await waitThread(main, "ответ модели должен быть в ленте", (y) => y.replies.includes(collapse(answer)) && y.think === 0, { timeout: 15_000 });
     expect(x.replies).toEqual([collapse(answer)]);
   });
 });

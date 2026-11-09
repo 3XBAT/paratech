@@ -1,6 +1,6 @@
-// A minimal Postgres client for the two statements the harness needs (CREATE SCHEMA, DROP SCHEMA): the simple query
-// protocol over plain TCP with SCRAM-SHA-256, MD5 or cleartext login. It adds no dependency and talks to the
-// compose database. No TLS: the database is local (sslmode=disable).
+// A minimal Postgres client for the statements the harness needs (CREATE SCHEMA, DROP SCHEMA, and read-only SELECTs of the specs,
+// TASK-401): the simple query protocol over plain TCP with SCRAM-SHA-256, MD5 or cleartext login. It adds no dependency and
+// talks to the compose database. No TLS: the database is local (sslmode=disable).
 import { createHash, createHmac, pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import net from "node:net";
 
@@ -64,8 +64,72 @@ export function withSearchPath(raw: string, schema: string): string {
 }
 
 /** Runs one SQL statement and resolves when the server has finished it. */
-export function pgExec(t: PgTarget, sql: string, timeoutMs = 15_000): Promise<void> {
+export async function pgExec(t: PgTarget, sql: string, timeoutMs = 15_000): Promise<void> {
+  await pgRun(t, sql, timeoutMs);
+}
+
+export interface PgQueryOptions {
+  /** Becomes `SET search_path TO "<schema>"` before the query (the run's schema of the Hub database). */
+  searchPath?: string;
+  timeoutMs?: number;
+}
+
+/**
+ * Runs a read statement and returns its rows as text cells (the simple query protocol sends every value as text; a NULL is
+ * ""). Several statements in `sql` give the rows of all of them, one after another.
+ */
+export function pgQuery(t: PgTarget, sql: string, opts: PgQueryOptions = {}): Promise<string[][]> {
+  const text = opts.searchPath === undefined ? sql : `${searchPathStatement(opts.searchPath)}; ${sql}`;
+  return pgRun(t, text, opts.timeoutMs ?? 15_000);
+}
+
+/**
+ * The same for a database URL like the one the setup exports (EnvHubDatabaseUrl, the run's schema in `search_path`). Errors name
+ * `name`, never the URL: it holds the password.
+ */
+export async function pgQueryUrl(rawUrl: string, name: string, sql: string, timeoutMs = 15_000): Promise<string[][]> {
+  const target = parsePgUrl(rawUrl, name);
+  return pgQuery(target, sql, { searchPath: searchPathOf(rawUrl), timeoutMs });
+}
+
+/** The `search_path` query parameter of a database URL, undefined when there is none (or the URL is not one). */
+export function searchPathOf(rawUrl: string): string | undefined {
+  try {
+    return new URL(rawUrl).searchParams.get("search_path") ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** `SET search_path TO "<schema>"` with the identifier quoted, so a schema name cannot add a statement. */
+export function searchPathStatement(schema: string): string {
+  return `SET search_path TO "${schema.replace(/"/g, '""')}"`;
+}
+
+/** The cells of a DataRow ('D') message body as text: Int16 count, then per column Int32 length (-1 is NULL) and the bytes. */
+export function parseDataRow(body: Buffer): string[] {
+  const count = body.readInt16BE(0);
+  const cells: string[] = [];
+  let at = 2;
+  for (let i = 0; i < count; i++) {
+    const len = body.readInt32BE(at);
+    at += 4;
+    if (len < 0) {
+      cells.push("");
+      continue;
+    }
+    if (at + len > body.length) {
+      throw new DatabaseUnavailableError("Postgres: строка результата обрезана");
+    }
+    cells.push(body.subarray(at, at + len).toString("utf8"));
+    at += len;
+  }
+  return cells;
+}
+
+function pgRun(t: PgTarget, sql: string, timeoutMs: number): Promise<string[][]> {
   return new Promise((resolve, reject) => {
+    const rows: string[][] = [];
     const where = `${t.host}:${t.port}`;
     const sock = net.connect({ host: t.host, port: t.port });
     let buf = Buffer.alloc(0);
@@ -86,7 +150,7 @@ export function pgExec(t: PgTarget, sql: string, timeoutMs = 15_000): Promise<vo
         return;
       }
       sock.end(message("X", Buffer.alloc(0)));
-      resolve();
+      resolve(rows);
     };
     const timer = setTimeout(() => finish(new DatabaseUnavailableError(`Postgres на ${where} не ответил вовремя`)), timeoutMs);
 
@@ -159,7 +223,12 @@ export function pgExec(t: PgTarget, sql: string, timeoutMs = 15_000): Promise<vo
           }
           finish(queryError);
           return;
-        default: // ParameterStatus, BackendKeyData, NoticeResponse, CommandComplete, rows: not needed
+        case "D":
+          if (queried) {
+            rows.push(parseDataRow(body));
+          }
+          return;
+        default: // ParameterStatus, BackendKeyData, NoticeResponse, RowDescription, CommandComplete: not needed
           return;
       }
     };

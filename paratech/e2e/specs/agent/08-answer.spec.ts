@@ -4,9 +4,9 @@
 // what the app sent to the ANSWER reader (the fragments of the student's own lessons), what it told the planner (counters only,
 // ADR-0022: never the claim or the lesson text) and what the card shows.
 //
-// The model's final `reply` is delayed (12 s) so the card can be looked at and used while the request is still running: the app
-// replaces the cards of a request with the last one, the model's reply, so the card is gone once the reply arrives (the row
-// «карточки инструментов остаются после ответа модели», file 13). The second row here is the text of the card: see its comment.
+// The card is looked at and used AFTER the model's final `reply` (no hold of the reply): the cards of a tool stay when the reply
+// arrives (D1, TASK-399; the row «карточки инструментов остаются после ответа модели», file 13). The second row here is the text of
+// the card: see its comment.
 import { expect, snapshot, step, test } from "../../src/steps/index.js";
 import { AfterAnswer, callRule, citedRule, replyRule } from "../../scripts/llm/agent/rules.js";
 import { firstWords } from "../../src/fakellm/cited.js";
@@ -35,9 +35,6 @@ import {
 const lecture = lectureOf("основная");
 const requires = `${PrerequisitesB} + ${RecordingFeature.summary}`;
 
-/** How long the model's reply is held, so the card of the tool can be used before it. */
-const replyDelayMs = 12_000;
-
 interface Fragment {
   chunk_id?: string;
   text?: string;
@@ -64,20 +61,17 @@ test(Feature.source, details(Feature.source, { requires }), async ({ main, llm }
   const claim = "Беликов носит калоши и зонтик в любую погоду, об этом сказано в конспекте пары.";
   const finish = "Ответ с источниками подготовлен выше.";
 
-  await step("Hub: модель вызывает answer_question; ANSWER отвечает по первому фрагменту; потом (через 12 с) модель заканчивает ответом", async () => {
-    await llm.script([
-      callRule(student, "answer_question", { question, scope: "all" }),
-      citedRule(question, claim),
-      replyRule(AfterAnswer, finish, { delayMs: replyDelayMs }),
-    ]);
+  await step("Hub: модель вызывает answer_question; ANSWER отвечает по первому фрагменту; потом модель заканчивает ответом", async () => {
+    await llm.script([callRule(student, "answer_question", { question, scope: "all" }), citedRule(question, claim), replyRule(AfterAnswer, finish)]);
   });
   await step("панель: новый пустой чат на «Сегодня»", () => prepare(main));
 
   let place = "";
   let label = "";
-  await step("вопрос ученика → карточка «Ответ по материалам» с источником, пока модель ещё пишет ответ", async () => {
+  await step("вопрос ученика → ответ модели показан, карточка «Ответ по материалам» с источником осталась под ним", async () => {
     await ask(main, student);
-    const cards = await waitCards(main, "карточка «Ответ по материалам» с источниками должна появиться", (c) => c.captions.includes("Ответ по материалам") && c.sources.length > 0, 45_000);
+    await waitThread(main, "ответ модели должен появиться", (y) => y.replies.includes(collapse(finish)) && y.think === 0, { timeout: 60_000 });
+    const cards = await waitCards(main, "карточка «Ответ по материалам» с источниками должна остаться после ответа", (c) => c.captions.includes("Ответ по материалам") && c.sources.length > 0, 15_000);
     label = cards.sources[0] ?? "";
     expect(label, "источник открывается кнопкой «Открыть: …»").toMatch(/^Открыть: /);
     place = label.replace(/^Открыть: /, "").split(",")[0] ?? "";
@@ -144,8 +138,8 @@ test(Feature.source, details(Feature.source, { requires }), async ({ main, llm }
     note(`проверено: ANSWER получил вопрос и ${fragments.length} фрагментов с текстом записи; планировщик — только счётчики; карточка «Ответ по материалам», источник «${place}» открыл страницу пары на вкладке «${want}»`);
   });
 
-  await step("ответ модели приходит и показан как есть (карточка после него — в строке «карточки остаются после ответа»)", async () => {
-    const x = await waitThread(main, "ответ модели должен появиться", (y) => y.replies.includes(collapse(finish)) && y.think === 0, { timeout: 60_000 });
+  await step("ответ модели показан как есть, один раз (карточка источника осталась: подробнее в строке «карточки остаются после ответа»)", async () => {
+    const x = await waitThread(main, "ответ модели должен быть в ленте", (y) => y.replies.includes(collapse(finish)) && y.think === 0, { timeout: 15_000 });
     expect(x.replies).toEqual([collapse(finish)]);
   });
 });
@@ -161,12 +155,8 @@ test(Feature.answerText, details(Feature.answerText, { requires }), async ({ mai
   const question = "Беликов зонтик калоши погоду коротко";
   const claim = "Беликов носит калоши и зонтик в любую погоду, об этом сказано в конспекте пары.";
 
-  await step("Hub: модель вызывает answer_question; ANSWER отвечает по первому фрагменту; ответ модели задержан", async () => {
-    await llm.script([
-      callRule(student, "answer_question", { question, scope: "all" }),
-      citedRule(question, claim),
-      replyRule(AfterAnswer, "Ответ готов.", { delayMs: replyDelayMs }),
-    ]);
+  await step("Hub: модель вызывает answer_question; ANSWER отвечает по первому фрагменту; потом модель заканчивает ответом", async () => {
+    await llm.script([callRule(student, "answer_question", { question, scope: "all" }), citedRule(question, claim), replyRule(AfterAnswer, "Ответ готов.")]);
   });
   await step("панель: новый пустой чат на «Сегодня»", () => prepare(main));
   await step("вопрос ученика → карточка «Ответ по материалам»", async () => {
@@ -186,7 +176,7 @@ test(Feature.answerText, details(Feature.answerText, { requires }), async ({ mai
     });
     mainFailed = false;
   } finally {
-    // the held reply of the model ends the request; the next row starts on a quiet panel. A request that never ends fails the test
+    // the reply of the model ends the request; the next row starts on a quiet panel. A request that never ends fails the test
     // when the main step passed; after a failed main step only that failure is reported.
     const ended = waitThread(main, "запрос должен закончиться", (x) => x.think === 0, { timeout: 40_000 });
     if (mainFailed) {
