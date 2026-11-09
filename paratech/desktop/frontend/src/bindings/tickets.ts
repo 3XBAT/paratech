@@ -1,6 +1,7 @@
 // Bindings of the exam tickets screen (TASK-134): calls into internal/input/wails/tickets.go. The page never talks to
 // the Hub and keeps nothing in browser storage. Ticket titles come from the student's list: show them as text nodes
-// only. Errors of the binding are fixed Russian texts, shown as they are. The .docx is opened by libraryApi.openMaterial(materialId).
+// only. Errors of the binding are fixed Russian texts, shown as they are. A .docx is opened by libraryApi.openMaterial(materialId);
+// a done set may hold several files (TicketSet.files), materialId is the first one.
 
 import type { CallByName } from "./settings";
 
@@ -49,6 +50,16 @@ export interface TicketReport {
   pending: number;
 }
 
+/** One filed .docx of a set; a long list is split into parts «Билеты 1–50», «Билеты 51–100». */
+export interface TicketFile {
+  materialId: string;
+  /** First and last ticket number of the part; 0 and 0 when the range is unknown (a set filed before the split). */
+  from: number;
+  to: number;
+  /** The file name as filed; "" for a set filed before the split. */
+  name: string;
+}
+
 export interface TicketSet {
   id: string;
   subjectId: string;
@@ -60,7 +71,10 @@ export interface TicketSet {
   budget: TicketBudget;
   costAccepted: boolean;
   report: TicketReport;
+  /** The first part's material (kept for older readers); "" until the set is done. */
   materialId: string;
+  /** All parts in order; [] until the set is done. */
+  files: TicketFile[];
   result: string;
   job: string;
   /** QUEUED, RUNNING, RETRY_WAIT, WAITING_*, COMPLETED, FAILED, CANCELLED; "" none. */
@@ -195,10 +209,30 @@ function parseReport(raw: unknown): TicketReport {
   };
 }
 
+function parseFile(raw: unknown): TicketFile {
+  const w = "ticket file";
+  const r = record(raw, w);
+  const materialId = str(r, "materialId", w);
+  if (materialId === "") {
+    throw new Error(`${w}: materialId is empty`);
+  }
+  return { materialId, from: count(r, "from", w), to: count(r, "to", w), name: str(r, "name", w) };
+}
+
+/** The parts as sent; a reply without them (an older core) gets one part of the first material, or none. */
+function parseFiles(r: Record<string, unknown>, materialId: string, what: string): TicketFile[] {
+  const v = r.files;
+  if (v === null || v === undefined) {
+    return materialId === "" ? [] : [{ materialId, from: 0, to: 0, name: "" }];
+  }
+  return items(r, "files", what, parseFile);
+}
+
 /** Checks the shape of a set; a malformed reply is an error, not a default. */
 export function parseSet(raw: unknown): TicketSet {
   const w = "ticket set";
   const r = record(raw, w);
+  const materialId = str(r, "materialId", w);
   return {
     id: str(r, "id", w),
     subjectId: str(r, "subjectId", w),
@@ -210,7 +244,8 @@ export function parseSet(raw: unknown): TicketSet {
     budget: parseBudget(r.budget),
     costAccepted: bool(r, "costAccepted", w),
     report: parseReport(r.report),
-    materialId: str(r, "materialId", w),
+    materialId,
+    files: parseFiles(r, materialId, w),
     result: str(r, "result", w),
     job: str(r, "job", w),
     jobStatus: str(r, "jobStatus", w),
