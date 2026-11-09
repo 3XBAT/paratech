@@ -14,7 +14,8 @@ var (
 	ErrNotFound = errors.New("answering: answer not found")
 
 	// ErrNoConnection means the Hub was not reached, is not set up or refused the request: nothing was charged as an
-	// answer, asking again later repeats the same key.
+	// answer. Asking again later in the same scope repeats the same key, free if the Hub stored an answer meanwhile;
+	// AskNow has already retried a transient failure under that key.
 	ErrNoConnection = errors.New("answering: no connection to the Hub")
 
 	// ErrQuota means the quota is used up.

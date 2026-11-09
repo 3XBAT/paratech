@@ -6,13 +6,15 @@ import (
 	"paratech/desktop/internal/domain/coursework/answer"
 )
 
-// Deps are the ports of the use case; all but Notes and Log are required. Without Notes no citation shows as removed.
+// Deps are the ports of the use case; all but Notes, Sleeper and Log are required. Without Notes no citation shows as
+// removed; without Sleeper AskNow does not retry.
 type Deps struct {
 	Knowledge Knowledge
 	Reader    Reader
 	Answers   Repository
 	Notes     Notes
 	Clock     Clock
+	Sleeper   Sleeper
 	IDs       IDs
 	Log       *slog.Logger
 }

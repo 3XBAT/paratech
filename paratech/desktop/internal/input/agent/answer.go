@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"strings"
@@ -14,11 +16,12 @@ import (
 	"paratech/desktop/internal/domain/shared"
 )
 
-// Answerer answers a question from the student's lessons (cases/answering, TASK-118): a paid read whose answer is
-// shown only in its card (ADR-0022). scope is the reuse scope of its key: the same question is answered once per scope.
-// drafts gets the draft of the answer while it is read.
+// Answerer answers a question the student waits for from their lessons (cases/answering AskNow, TASK-118, TASK-397):
+// a paid read whose answer is shown only in its card (ADR-0022), a transient failure retried by itself under the same
+// key. scope is the reuse scope of its key: the same question is answered once per scope. drafts gets the draft of the
+// answer while it is read; a retried read drafts afresh.
 type Answerer interface {
-	Ask(ctx context.Context, question string, subject shared.SubjectID, scope string, drafts answering.DraftSink) (answering.Asked, error)
+	AskNow(ctx context.Context, question string, subject shared.SubjectID, scope string, drafts answering.DraftSink) (answering.Asked, error)
 }
 
 // Draft is the draft of the answer an answer_question call (CallID) of a request is reading (ADR-0026): the claim
@@ -120,9 +123,18 @@ func cleanTexts(texts []string) []string {
 	return out
 }
 
-// answerScope is the reuse scope of the answers of step st: its request (thread and turn). «Продолжить» replays the
-// paid answer of the request; «Повторить» is another turn, so a fresh answer (ADR-0026).
+// answerScope is the prefix of the reuse scopes of the answers of step st: its request (thread and turn); callScope
+// adds the call.
 func answerScope(st agentturn.Step) string { return fmt.Sprintf("ag:%s:%d", st.Thread, st.Turn) }
+
+// callScope is the reuse scope of answer_question call id in the request of prefix (ADR-0026 addendum 2026-11-08,
+// item 3): ag:<thread>:<turn>:<8 hex of sha256(id)>. «Продолжить» replays the step with the same call ids, so the paid
+// answer is replayed free; another call of the model in the request (after a refusal) is a fresh paid attempt, and
+// «Повторить» is another turn. The call id is the model's text: hashed, it stays printable and bounded (MaxScopeBytes).
+func callScope(prefix, id string) string {
+	sum := sha256.Sum256([]byte(id))
+	return prefix + ":" + hex.EncodeToString(sum[:4])
+}
 
 // answerCards is the card of an answer_question that made an answer: the panel reads its text by ID from the core
 // (AnswerService), so neither the planner nor the step carries it.
@@ -151,7 +163,7 @@ func (t tools) answerQuestion(ctx context.Context, call values.Call, scope value
 		bound = &callDraft{ctx: ctx, sink: t.sink, base: Draft{Thread: t.turn.Thread, Turn: t.turn.Turn, CallID: call.ID()}}
 		drafts = bound
 	}
-	got, err := t.answerer.Ask(ctx, string(q), shared.SubjectID(sub.ID()), t.reuse, drafts)
+	got, err := t.answerer.AskNow(ctx, string(q), shared.SubjectID(sub.ID()), callScope(t.reuse, call.ID()), drafts)
 	if bound != nil {
 		bound.end(err == nil && got.Answer != nil)
 	}

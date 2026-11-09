@@ -29,7 +29,7 @@ type streamAnswerer struct {
 	err     error
 }
 
-func (a *streamAnswerer) Ask(ctx context.Context, _ string, _ shared.SubjectID, _ string, sink answering.DraftSink) (answering.Asked, error) {
+func (a *streamAnswerer) AskNow(ctx context.Context, _ string, _ shared.SubjectID, _ string, sink answering.DraftSink) (answering.Asked, error) {
 	for _, d := range a.drafts {
 		sink.Draft(d)
 	}

@@ -11,6 +11,7 @@ import (
 
 	"paratech/desktop/internal/domain/coursework/answer"
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
+	"paratech/desktop/internal/domain/jobs/services/backoff"
 	"paratech/desktop/internal/domain/shared"
 )
 
@@ -18,6 +19,7 @@ import (
 const (
 	opAsked     = "answering: answer made"
 	opReused    = "answering: answer found by its key"
+	opRetried   = "answering: read retried after a transient failure"
 	opNoPassage = "answering: no passage matches the question"
 	opNoteCheck = "answering: note of a citation not checked, shown as there"
 )
@@ -29,6 +31,7 @@ type Service struct {
 	answers   Repository
 	notes     Notes // nil: no citation shows as removed
 	clock     Clock
+	sleeper   Sleeper // nil: AskNow does not retry
 	ids       IDs
 	log       *slog.Logger
 }
@@ -36,28 +39,48 @@ type Service struct {
 // New checks that every port is given.
 func New(d Deps) (*Service, error) {
 	if d.Knowledge == nil || d.Reader == nil || d.Answers == nil || d.Clock == nil || d.IDs == nil {
-		return nil, fmt.Errorf("%w: every port except the logger is required", ErrInvalidConfig)
+		return nil, fmt.Errorf("%w: every port except Notes, Sleeper and the logger is required", ErrInvalidConfig)
 	}
 	log := d.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Service{knowledge: d.Knowledge, reader: d.Reader, answers: d.Answers, notes: d.Notes, clock: d.Clock, ids: d.IDs,
+	return &Service{knowledge: d.Knowledge, reader: d.Reader, answers: d.Answers, notes: d.Notes, clock: d.Clock, sleeper: d.Sleeper, ids: d.IDs,
 		log: log}, nil
 }
 
 // Ask answers question from the lessons of a library subject, or of the whole base for a zero subject. The passages
 // that best match it (kb.Passages) go to the reader as fragments with their places; its answer is parsed strictly, its
 // citations are checked (answer.New) and the answer is stored. The same question about the same fragments in the same
-// reuse scope (answer.NewRequest: e.g. one agent request) returns the stored answer without asking again; another
+// reuse scope (answer.NewRequest: e.g. one agent call) returns the stored answer without asking again; another
 // scope asks afresh. No matching passage: Asked without an answer, nothing asked. A non-nil drafts gets the claim texts
 // of the output while it is read (throttled, the last one once the read succeeded); the draft is never stored,
 // returned or checked, only the whole output is.
+//
+// Ask reads once: a job run (tickets) keeps the job queue's backoff. A question the student waits for uses AskNow.
 //
 // Errors: ErrInvalidQuestion, ErrNoConnection (asking again later repeats the same key, free if the Hub answered),
 // ErrQuota, ErrReaderRefused, ErrUnavailable (also for an invalid scope: the caller's bug, not the student's input),
 // or the error of ctx.
 func (s *Service) Ask(ctx context.Context, question string, subject shared.SubjectID, scope string, drafts DraftSink) (Asked, error) {
+	return s.ask(ctx, question, subject, scope, drafts, false)
+}
+
+// AskNow is Ask for a question the student waits for (the agent's answer_question, ADR-0026 addendum 2026-11-08): a
+// transient failure to reach the Hub is retried by itself after backoff.Interactive (5 s, 10 s, 20 s) under the SAME
+// key, an answer stored meanwhile found first, so a result the Hub kept is replayed free. Never retried: the quota, a
+// refused or unusable answer, an invalid request, a Hub that is not set up, a permanent failure, the local store, ctx
+// gone; never without Sleeper. Each retry starts a fresh draft: its first draft replaces the shown one. ctx ending
+// during a wait returns its error at once. Errors: those of Ask, ErrNoConnection after the last retry.
+func (s *Service) AskNow(ctx context.Context, question string, subject shared.SubjectID, scope string, drafts DraftSink) (Asked, error) {
+	return s.ask(ctx, question, subject, scope, drafts, true)
+}
+
+// ask builds the request once, so every attempt has the same key, and reads it; retry allows the automatic retries
+// of AskNow.
+func (s *Service) ask(ctx context.Context, question string, subject shared.SubjectID, scope string, drafts DraftSink,
+	retry bool,
+) (Asked, error) {
 	q, err := answer.ParseQuestion(question)
 	if err != nil {
 		return Asked{}, fmt.Errorf("%w: %w", ErrInvalidQuestion, err)
@@ -85,6 +108,38 @@ func (s *Service) Ask(ctx context.Context, question string, subject shared.Subje
 		return Asked{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 
+	for attempt := 1; ; attempt++ {
+		got, err := s.once(ctx, req, subject, drafts)
+		if err == nil {
+			return got, nil
+		}
+		wait, ok := s.retryable(ctx, retry, err, attempt)
+		if !ok {
+			return Asked{}, err
+		}
+		s.log.WarnContext(ctx, opRetried, slog.Int("attempt", attempt), slog.Duration("wait", wait), slog.Any("cause", err))
+		if serr := s.sleeper.Sleep(ctx, wait); serr != nil {
+			if ctx.Err() != nil {
+				return Asked{}, ctx.Err()
+			}
+			return Asked{}, err
+		}
+	}
+}
+
+// retryable tells whether AskNow retries the failure err of attempt (1 for the first read) and after which wait: only
+// a transient ErrNoConnection while ctx lives (see AskNow).
+func (s *Service) retryable(ctx context.Context, retry bool, err error, attempt int) (time.Duration, bool) {
+	if !retry || s.sleeper == nil || ctx.Err() != nil || !errors.Is(err, ErrNoConnection) ||
+		errors.Is(err, shared.ErrServiceNotConfigured) || backoff.Classify(err) != backoff.ClassTransient {
+		return 0, false
+	}
+	return backoff.Interactive(attempt)
+}
+
+// once is one attempt at req: the answer stored under its key, else one read with a fresh draft, parsed, checked and
+// stored.
+func (s *Service) once(ctx context.Context, req answer.Request, subject shared.SubjectID, drafts DraftSink) (Asked, error) {
 	if got, ok, err := s.find(ctx, req.Key()); err != nil || ok {
 		return got, err
 	}
