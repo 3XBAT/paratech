@@ -6,13 +6,20 @@ import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+  hasLiveRequest,
   hasTicket,
   initialPanelState,
+  isFirstQueued,
+  isWaitingQueued,
+  lastEntry,
   maxQueuedQuestions,
   orderedEntries,
+  panelMode,
   queueChat,
   queueIsFull,
+  queuedBehind,
   reducePanel,
+  withdrawChat,
 } from "../.test-build/agentState.js";
 import { isRunningEntry, syncRunStarts } from "../.test-build/agentElapsed.js";
 import { entryModel, texts, withdrawStep } from "../.test-build/agentView.js";
@@ -209,18 +216,25 @@ test("a queued update never reaches the compaction early return of reducePanel",
 
 // ---- Withdraw outcomes ----
 
-test("withdraw: withdrawn takes the row away and the text back into an EMPTY field only", () => {
-  assert.deepEqual(withdrawStep("withdrawn", true), { discard: true, restore: true, note: "" });
+test("withdraw: withdrawn takes the row away and the text back into an EMPTY field, and focuses the input", () => {
+  assert.deepEqual(withdrawStep("withdrawn", true), { discard: true, restore: true, keep: false, focus: true, note: "" });
+});
+
+test("withdraw into a busy field: the typed draft is never overwritten and the question is NOT dropped (review TASK-399)", () => {
   const kept = withdrawStep("withdrawn", false);
-  assert.equal(kept.discard, true);
-  assert.equal(kept.restore, false, "a typed draft is never overwritten");
-  assert.equal(kept.note, texts.withdrawKept);
-  assert.match(kept.note, /Запрос отменён/);
+  assert.equal(kept.discard, false, "the text must not be lost");
+  assert.equal(kept.keep, true, "it stays as a cancelled line");
+  assert.equal(kept.restore, false);
+  assert.equal(kept.focus, true, "the input takes focus in this branch too");
+  assert.equal(kept.note, "");
+  assert.equal(texts.withdrawnLine, "Запрос отменён. Текст можно скопировать.");
+  assert.equal(Object.hasOwn(texts, "withdrawKept"), false);
 });
 
 test("withdraw: started does nothing (the update with the ticket replaces the row)", () => {
-  assert.deepEqual(withdrawStep("started", true), { discard: false, restore: false, note: "" });
-  assert.deepEqual(withdrawStep("started", false), { discard: false, restore: false, note: "" });
+  const none = { discard: false, restore: false, keep: false, focus: false, note: "" };
+  assert.deepEqual(withdrawStep("started", true), none);
+  assert.deepEqual(withdrawStep("started", false), none);
 });
 
 test("withdraw: not_found and invalid mean the question will never run: row away, text back like withdrawn", () => {
@@ -234,9 +248,85 @@ test("withdraw: failed and a thrown call keep the row and say so, with the way o
   for (const r of ["failed", "thrown"]) {
     const step = withdrawStep(r, true);
     assert.equal(step.discard, false);
+    assert.equal(step.keep, false);
     assert.equal(step.restore, false);
-    assert.equal(step.note, "Не удалось отменить запрос. Можно нажать ещё раз.");
+    assert.equal(step.focus, false);
+    assert.equal(step.note, "Не удалось отменить запрос. Можно попробовать ещё раз.");
   }
+});
+
+// ---- A withdrawn question stays as a quiet cancelled line ----
+
+const withdrawnState = () => apply(initialPanelState, update_(running), asked(1), queuedResult(1), { type: "withdrawn", key: "local:1" });
+
+test("withdrawn reducer: the entry stays with its text, flagged, ticket gone; only a still-waiting question can be flagged", () => {
+  const s = withdrawnState();
+  const e = s.entries.find((x) => x.text === "второй вопрос");
+  assert.equal(e.withdrawn, true);
+  assert.equal(hasTicket(e), false);
+  assert.equal(e.update, null);
+  // An unknown key and an already answered request change nothing.
+  assert.equal(reducePanel(s, { type: "withdrawn", key: "local:9" }), s);
+  const answered = apply(initialPanelState, update_(running));
+  assert.equal(reducePanel(answered, { type: "withdrawn", key: "thread:t1:1" }), answered);
+});
+
+test("a withdrawn entry renders the muted line, the user text with its copy icon, and no waiting row or icons", () => {
+  const s = withdrawnState();
+  const e = s.entries.find((x) => x.text === "второй вопрос");
+  const m = entryModel(e, { last: true, blocked: false });
+  assert.equal(m.withdrawn, true);
+  assert.equal(m.waiting, false);
+  assert.equal(m.queued, false);
+  assert.equal(m.rerun, false);
+  assert.deepEqual(m.cards, []);
+  const html = render(e, {}, { ...actions, copy: () => Promise.resolve(), withdraw: noop });
+  assert.ok(html.includes("второй вопрос"));
+  assert.ok(html.includes('<p class="ag-withdrawn small muted" role="status">Запрос отменён. Текст можно скопировать.</p>'));
+  assert.deepEqual(ariaLabels(html), ["Копировать"]);
+  assert.ok(!html.includes("ag-think") && !html.includes("ag-wait") && !html.includes("ждёт предыдущий"));
+});
+
+test("a withdrawn entry is no request: not waiting, not sending, not last, no timer, not counted by the queue, not named by an update", () => {
+  const s = apply(withdrawnState(), asked(2, { ...scope, text: "третий" }), queuedResult(2, "q8"));
+  const gone = s.entries.find((x) => x.text === "второй вопрос");
+  const live = s.entries.find((x) => x.text === "третий");
+  // Elapsed timer: the cancelled line has none.
+  assert.equal(isRunningEntry(s.entries, gone), false);
+  // The queue: only the live waiting question counts, and only it is the first one.
+  assert.equal(isWaitingQueued(gone), false);
+  assert.equal(isWaitingQueued(live), true);
+  assert.equal(isFirstQueued(s.entries, live), true);
+  // lastEntry skips the cancelled line even when it is the newest.
+  const tail = apply(initialPanelState, update_(running), asked(1), queuedResult(1), { type: "withdrawn", key: "local:1" });
+  assert.equal(lastEntry(tail.entries).key, "thread:t1:1");
+  // Not sending: the chat has no pending request because of it, and the next update of the scope does not take its place.
+  const only = apply(initialPanelState, asked(1), { type: "withdrawn", key: "local:1" });
+  assert.equal(hasLiveRequest(only.entries, "t1"), false);
+  assert.equal(queuedBehind(apply(only, update_(running)).entries, only.entries[0]), undefined);
+  const next = reducePanel(only, update_(update({ turn: 1, status: "PLANNING" })));
+  assert.equal(next.entries.length, 2, "the update is a new entry, not the cancelled question");
+  assert.equal(next.entries.find((x) => x.key === "local:1").update, null);
+  assert.equal(next.entries.find((x) => x.key === "thread:t1:1").text, "");
+  // Not counted for the panel mode: an offline panel with only a cancelled line shows no «неактуально».
+  const offline = reducePanel(only, { type: "link", link: { link: "offline", readOnly: true } });
+  assert.equal(panelMode(offline).staleNote, "");
+  // Not a request for the sixth-question check either.
+  let full = apply(initialPanelState, update_(running));
+  for (let i = 1; i <= maxQueuedQuestions; i++) {
+    full = apply(full, asked(i, { ...scope, text: `в ${i}` }), queuedResult(i, `q${i}`));
+  }
+  const refused = { ...full.entries[0], scope };
+  assert.equal(queueIsFull(full.entries, refused), true);
+  const one = reducePanel(full, { type: "withdrawn", key: "local:1" });
+  assert.equal(queueIsFull(one.entries, refused), false, "a cancelled one frees a place");
+});
+
+test("a late update with the ticket of a withdrawn question does not find its row", () => {
+  const s = withdrawnState();
+  const next = reducePanel(s, update_(update({ turn: 2, status: "PLANNING", ticket: "q7" })));
+  assert.equal(next.entries.find((x) => x.key === "local:1").update, null);
+  assert.equal(next.entries.length, 3, "the running request, the cancelled line and the new entry");
 });
 
 test("discard removes the waiting row, and only that one", () => {
@@ -246,14 +336,44 @@ test("discard removes the waiting row, and only that one", () => {
   assert.equal(gone.entries.find((x) => x.text === "второй вопрос").ticket, "q8");
 });
 
-test("AgentPanel wires withdraw once per press, to the chat of the question, and gates the text restore", () => {
+test("AgentPanel wires withdraw once per press, to the resolved chat, keeps the text of a busy field and focuses the input", () => {
   // The panel is a React container, not rendered in these tests: its wiring is read like the other panel tests do.
   const src = readPanel();
   assert.match(src, /pressed\.current\.mark\(waitingKey, null\)/);
-  assert.match(src, /api\.withdraw\(chat, e\.ticket \?\? ""\)/);
+  assert.match(src, /withdrawChat\(state\.entries, e, openRef\.current\)/);
+  assert.match(src, /api\.withdraw\(withdrawIn, e\.ticket \?\? ""\)/);
   assert.match(src, /withdrawStep\(still \? result : "started", fieldEmpty\)/);
   assert.match(src, /draftRef\.current\.trim\(\) === "" && pillsRef\.current\.length === 0/);
   assert.match(src, /\{ type: "askResult", id, problem, queued, ticket \}/);
+  // A busy field: the entry is flagged, never discarded; both branches focus the input.
+  assert.match(src, /else if \(step\.keep\) \{[^}]*dispatch\(\{ type: "withdrawn", key: e\.key \}\)/);
+  assert.match(src, /if \(step\.focus\) \{\s*focusInput\(\);/);
+  // An unknown chat: no icon at all, instead of one that always fails.
+  assert.match(src, /withdraw: waiting && withdrawIn !== "" \? withdraw : undefined/);
+});
+
+// ---- The chat of a withdrawn question (AgentAskResult has none) ----
+
+test("withdrawChat: the ticket's chat, then the asked chat, then the chat it waits in, then the open chat; \"\" when none", () => {
+  const e = (over) => ({ key: "local:1", seq: 1, threadId: "", turn: 0, text: "в", scope: { ...scope, threadId: "" }, callProblem: "", update: null, ticket: "q1", ...over });
+  assert.equal(withdrawChat([], e({ ticketChat: "tc", scope: { ...scope, threadId: "ts" } }), "open"), "tc");
+  assert.equal(withdrawChat([], e({ scope: { ...scope, threadId: "ts" } }), "open"), "ts");
+  assert.equal(withdrawChat([], e(), "open"), "open");
+  assert.equal(withdrawChat([], e(), ""), "");
+  // The request it waits behind names the chat when the entry itself is named (threadId set, no update yet).
+  const behind = { key: "thread:tb:1", seq: 0, threadId: "tb", turn: 1, text: "", scope: null, callProblem: "", update: update({ threadId: "tb" }) };
+  const named = e({ threadId: "tb", scope: null });
+  assert.equal(withdrawChat([behind, named], named, "open"), "tb");
+});
+
+test("a queued update tells the chat to a question whose ask result did not (Ask without a chat)", () => {
+  const noChat = { ...scope, threadId: "" };
+  const s = apply(initialPanelState, asked(1, noChat), queuedResult(1));
+  assert.equal(queueChat(s.entries[0]), "");
+  const told = reducePanel(s, update_(lateQueued({ threadId: "t1" })));
+  assert.equal(queueChat(told.entries[0]), "t1");
+  assert.equal(told.entries[0].ticket, "q7");
+  assert.equal(withdrawChat(told.entries, told.entries[0], ""), "t1");
 });
 
 // ---- Five waiting questions (the 6th is refused as busy) ----
@@ -274,21 +394,71 @@ test("queueIsFull counts the waiting questions of the refused one's chat", () =>
   assert.equal(queueIsFull(sixth.entries, elsewhere), false);
 });
 
-test("the busy line of the sixth question says why and what to do, with the existing icons", () => {
+test("the line of the sixth question REPLACES the busy text, keeps only the stop icon, and «Отправить ещё раз» returns when the queue is not full", () => {
   const refused = {
     key: "local:6", seq: 6, threadId: "", turn: 0, text: "шестой", scope, callProblem: "",
     update: update({ threadId: "", turn: 0, status: "", problem: "busy" }),
   };
+  const line = "Не принят: уже ждут пять запросов. Можно отменить один из них или остановить текущий.";
+  assert.equal(texts.queueFull, line);
   const full = entryModel(refused, { last: true, blocked: true, queueFull: true });
-  assert.equal(
-    full.cards[0].text,
-    "В очереди уже пять вопросов, этот не принят. Предыдущий запрос ещё выполняется. Его можно остановить или отправить этот ещё раз.",
-  );
-  assert.deepEqual(full.cards[0].buttons.map((b) => b.id), ["stop", "resend"]);
+  assert.equal(full.cards[0].text, line);
+  assert.ok(!full.cards[0].text.includes("ещё выполняется"));
+  assert.ok(!/вопрос/.test(full.cards[0].text), "only the word «запрос»");
+  assert.deepEqual(full.cards[0].buttons.map((b) => b.id), ["stop"]);
+  assert.equal(full.cards[0].buttons[0].label, "Остановить предыдущий запрос");
+  // Nothing to stop: the line alone, no icons.
   const noStop = entryModel(refused, { last: true, blocked: false, queueFull: true });
-  assert.equal(noStop.cards[0].text, "В очереди уже пять вопросов, этот не принят. Предыдущий запрос ещё выполняется. Этот можно отправить ещё раз.");
-  // Busy for another reason: the old line.
-  assert.equal(entryModel(refused, { last: true, blocked: true }).cards[0].text, "Предыдущий запрос ещё выполняется. Его можно остановить или отправить этот ещё раз.");
+  assert.equal(noStop.cards[0].text, line);
+  assert.deepEqual(noStop.cards[0].buttons, []);
+  // The queue is no longer full (recomputed per render): the busy line and the resend icon are back.
+  const free = entryModel(refused, { last: true, blocked: true, queueFull: false });
+  assert.equal(free.cards[0].text, "Предыдущий запрос ещё выполняется. Его можно остановить или отправить этот ещё раз.");
+  assert.deepEqual(free.cards[0].buttons.map((b) => b.id), ["stop", "resend"]);
+  assert.equal(entryModel(refused, { last: true, blocked: true }).cards[0].text, free.cards[0].text);
+});
+
+test("the full-queue line follows the queue: withdrawing one of the five brings «Отправить ещё раз» back", () => {
+  let s = apply(initialPanelState, update_(running));
+  for (let i = 1; i <= maxQueuedQuestions; i++) {
+    s = apply(s, asked(i, { ...scope, text: `в ${i}` }), queuedResult(i, `q${i}`));
+  }
+  s = apply(s, asked(6, { ...scope, text: "шестой" }), update_(update({ threadId: "", turn: 0, status: "", problem: "busy" })));
+  const model = (state) => {
+    const refused = state.entries.find((x) => x.text === "шестой");
+    return entryModel(refused, { last: true, blocked: true, queueFull: queueIsFull(state.entries, refused) });
+  };
+  assert.deepEqual(model(s).cards[0].buttons.map((b) => b.id), ["stop"]);
+  const after = apply(s, { type: "discard", key: "local:1" });
+  assert.deepEqual(model(after).cards[0].buttons.map((b) => b.id), ["stop", "resend"]);
+});
+
+// ---- Several waiting rows: one stop icon, on the oldest ----
+
+test("only the oldest waiting row of a chat offers «Остановить предыдущий запрос»; the later rows keep their label and the cancel", () => {
+  const s = apply(initialPanelState, update_(running), asked(1), queuedResult(1), asked(2, { ...scope, text: "третий" }), queuedResult(2, "q8"));
+  const first = s.entries.find((x) => x.text === "второй вопрос");
+  const second = s.entries.find((x) => x.text === "третий");
+  assert.equal(isFirstQueued(s.entries, first), true);
+  assert.equal(isFirstQueued(s.entries, second), false);
+  const html = (e) => render(e, {}, { ...actions, withdraw: noop });
+  const modelOf = (e) => entryModel(e, { last: true, blocked: false, firstQueued: isFirstQueued(s.entries, e) });
+  const row = (e) => renderToStaticMarkup(h(AgentRequest, { model: modelOf(e), actions: { ...actions, withdraw: noop } }));
+  assert.deepEqual(ariaLabels(row(first)), ["Остановить предыдущий запрос", "Отменить этот запрос"]);
+  assert.deepEqual(ariaLabels(row(second)), ["Отменить этот запрос"]);
+  assert.ok(row(second).includes('<span class="ag-queued small muted">ждёт предыдущий запрос</span>'), "the wording is pinned by E2E 03");
+  assert.ok(html(first).includes("ждёт предыдущий запрос"));
+  // Withdrawing the oldest makes the next one the first.
+  const gone = apply(s, { type: "discard", key: first.key });
+  assert.equal(isFirstQueued(gone.entries, gone.entries.find((x) => x.text === "третий")), true);
+  const flagged = apply(s, { type: "withdrawn", key: first.key });
+  assert.equal(isFirstQueued(flagged.entries, flagged.entries.find((x) => x.text === "третий")), true);
+  // A queue of another chat does not take the first place.
+  const other = apply(s, asked(3, { ...scope, threadId: "t2", text: "в другом" }), queuedResult(3, "q9"));
+  assert.equal(isFirstQueued(other.entries, other.entries.find((x) => x.text === "в другом")), true);
+  // A single row (E2E 03) keeps both icons.
+  const single = apply(initialPanelState, update_(running), asked(1), queuedResult(1));
+  assert.equal(entryModel(single.entries[1], { last: true, blocked: false }).stopPrevious, true);
 });
 
 // ---- D3: the resend leaves one entry ----

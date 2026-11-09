@@ -29,6 +29,11 @@ export interface Entry {
   ticket?: string;
   /** The chat the question waits in, when known better than by its scope (the chat of the queued update). */
   ticketChat?: string;
+  /**
+   * The waiting question was taken back while the field held another draft, so its text could not return there: it stays in
+   * the thread as a quiet cancelled line (copyable). It is no request: never sent, never counted as sending, waiting or last.
+   */
+  withdrawn?: boolean;
 }
 
 export interface PanelState {
@@ -70,6 +75,8 @@ export type PanelAction =
   | { type: "restarted"; threadId: string; from: number; upTo: number }
   /** A refused restart request is taken back from the thread (its text returns to the field). */
   | { type: "discard"; key: string }
+  /** A waiting question taken back whose text stays in the thread (the field is busy): a cancelled line, not a request. */
+  | { type: "withdrawn"; key: string }
   | { type: "history"; requests: readonly UpdateView[] }
   | { type: "link"; link: AgentState };
 
@@ -102,6 +109,7 @@ function pendingLocal(entries: readonly Entry[], scope: string, threadId = ""): 
       e.key.startsWith("local:") &&
       e.callProblem === "" &&
       e.update === null &&
+      e.withdrawn !== true &&
       // A waiting question is named by its own ticket only, never by the next update of the scope.
       !hasTicket(e) &&
       e.scope !== null &&
@@ -115,14 +123,37 @@ export function hasTicket(e: Entry): boolean {
   return typeof e.ticket === "string" && e.ticket !== "";
 }
 
-/** The chat a waiting question is in ("" when unknown): what `Withdraw` needs. */
+/** The chat a waiting question is in ("" when unknown): the ticket's chat, else the chat it was asked in. */
 export function queueChat(e: Entry): string {
   return e.ticketChat || (e.scope?.threadId ?? "");
 }
 
+/**
+ * The chat `Withdraw` is called with: the ticket's chat, the chat it was asked in, the chat of the request it waits behind,
+ * else the open chat of the panel. "" when none is known: the panel then offers no withdraw icon.
+ */
+export function withdrawChat(entries: readonly Entry[], e: Entry, openId: string): string {
+  return queueChat(e) || queuedBehind(entries, e)?.threadId || openId;
+}
+
+/** The question is waiting in the core's queue: sent, not answered, not refused, not taken back. */
+export function isWaitingQueued(e: Entry): boolean {
+  return e.update === null && e.callProblem === "" && e.withdrawn !== true && hasTicket(e);
+}
+
+/**
+ * The oldest waiting question of its chat: only its row offers the stop of the running request (one stop is enough;
+ * the later rows only take their own question back).
+ */
+export function isFirstQueued(entries: readonly Entry[], e: Entry): boolean {
+  const chat = queueChat(e);
+  const first = orderedEntries(entries).find((x) => isWaitingQueued(x) && queueChat(x) === chat);
+  return first === undefined || first === e;
+}
+
 /** The waiting question that has this ticket and no update yet. */
 function ticketed(entries: readonly Entry[], ticket: string): Entry | undefined {
-  return !ticket ? undefined : entries.find((e) => e.key.startsWith("local:") && e.update === null && e.ticket === ticket);
+  return !ticket ? undefined : entries.find((e) => e.key.startsWith("local:") && e.update === null && e.withdrawn !== true && e.ticket === ticket);
 }
 
 /** The core keeps at most this many waiting questions per chat; the next one is refused as busy. */
@@ -134,7 +165,7 @@ export function queueIsFull(entries: readonly Entry[], refused: Entry): boolean 
   if (chat === "") {
     return false;
   }
-  return entries.filter((e) => e.update === null && e.callProblem === "" && hasTicket(e) && queueChat(e) === chat).length >= maxQueuedQuestions;
+  return entries.filter((e) => isWaitingQueued(e) && queueChat(e) === chat).length >= maxQueuedQuestions;
 }
 
 /**
@@ -143,8 +174,13 @@ export function queueIsFull(entries: readonly Entry[], refused: Entry): boolean 
  * failed Ask, an orphan entry or a problem.
  */
 function giveTicket(s: PanelState, u: UpdateView): PanelState {
-  if (!u.ticket || ticketed(s.entries, u.ticket) !== undefined) {
+  if (!u.ticket) {
     return s;
+  }
+  const known = ticketed(s.entries, u.ticket);
+  if (known !== undefined) {
+    // The ask result named the ticket but not always the chat (an Ask without one): the update knows it.
+    return known.ticketChat || u.threadId === "" ? s : { ...s, entries: replace(s.entries, known.key, { ...known, ticketChat: u.threadId }) };
   }
   const local = pendingLocal(s.entries, scopeKey(u), u.threadId);
   return local ? { ...s, entries: replace(s.entries, local.key, { ...local, ticket: u.ticket, ticketChat: u.threadId }) } : s;
@@ -415,6 +451,11 @@ export function reducePanel(s: PanelState, a: PanelAction): PanelState {
     }
     case "discard":
       return { ...s, entries: s.entries.filter((e) => e.key !== a.key) };
+    case "withdrawn": {
+      const e = s.entries.find((x) => x.key === a.key);
+      // Only a question still waiting can be taken back; the ticket goes with it (a late update must not find this row).
+      return e === undefined || e.update !== null ? s : { ...s, entries: replace(s.entries, e.key, { ...e, withdrawn: true, ticket: "" }) };
+    }
     case "history":
       return a.requests.reduce(
         (acc, u) => (acc.entries.some((e) => e.threadId === u.threadId && e.turn === u.turn && e.update !== null) ? acc : applyUpdate(acc, u)),
@@ -435,7 +476,7 @@ export function hasLiveRequest(entries: readonly Entry[], threadId: string): boo
   return entries.some(
     (e) =>
       (e.threadId === threadId && threadId !== "") ||
-      (e.threadId === "" && e.callProblem === "" && e.update === null && e.scope !== null && (e.scope.threadId ?? "") === threadId),
+      (e.threadId === "" && e.callProblem === "" && e.update === null && e.withdrawn !== true && e.scope !== null && (e.scope.threadId ?? "") === threadId),
   );
 }
 
@@ -513,9 +554,9 @@ export function isRunning(status: string): boolean {
   return status === "PLANNING" || status === "EXECUTING";
 }
 
-/** The last request of the thread: the only one that offers «Повторить». */
+/** The last request of the thread: the only one that offers «Повторить». A cancelled line is no request. */
 export function lastEntry(entries: readonly Entry[]): Entry | undefined {
-  return orderedEntries(entries).at(-1);
+  return orderedEntries(entries.filter((e) => e.withdrawn !== true)).at(-1);
 }
 
 /**
@@ -547,7 +588,7 @@ export function blockingEntry(entries: readonly Entry[], refused: Entry): Entry 
  * or a failed call / an update already says what became of it).
  */
 export function queuedBehind(entries: readonly Entry[], e: Entry): Entry | undefined {
-  if (e.update !== null || e.callProblem !== "") {
+  if (e.update !== null || e.callProblem !== "" || e.withdrawn === true) {
     return undefined;
   }
   const chat = e.threadId || (e.scope?.threadId ?? "");
@@ -649,7 +690,7 @@ export function panelMode(s: PanelState): PanelMode {
       inputEnabled: false,
       offline: true,
       placeholder: "Нет связи с paratech",
-      staleNote: s.entries.length > 0 ? "нет связи — может быть неактуально" : "",
+      staleNote: s.entries.some((e) => e.withdrawn !== true) ? "нет связи — может быть неактуально" : "",
     };
   }
   return { inputEnabled: true, offline: false, placeholder: "Спросить paratech", staleNote: "" };

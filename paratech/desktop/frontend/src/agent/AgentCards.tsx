@@ -458,12 +458,15 @@ function Card(props: { card: CardModel; actions: CardActions; typing?: boolean; 
     case "progress":
       return (
         <section className="ag-card">
-          <h3 className="ag-card-h">
-            <span className="ag-dot" aria-hidden="true" />
-            {card.caption}
-            {props.startedAt !== undefined && <Elapsed since={props.startedAt} clock={props.clock} />}
+          {/* The retry note is a sibling of the heading, so its live text never changes the heading's accessible name. */}
+          <div className="ag-card-head">
+            <h3 className="ag-card-h">
+              <span className="ag-dot" aria-hidden="true" />
+              {card.caption}
+              {props.startedAt !== undefined && <Elapsed since={props.startedAt} clock={props.clock} />}
+            </h3>
             <RetryNote attempt={props.retry} />
-          </h3>
+          </div>
           <Buttons buttons={card.buttons} card="progress" busy={props.actions.busy} onPress={props.actions.press} />
         </section>
       );
@@ -737,9 +740,11 @@ export function AgentRequest(props: {
           {model.queued ? (
             <>
               <span className="ag-queued small muted">{texts.queued}</span>
-              {/* The running request's stop, on the row of the one that waits for it. */}
-              <IconAction icon="stop" label={texts.stopPrevious} disabled={props.actions.busy === true} onClick={() => props.actions.press("stop")} />
-              {/* This question's own cancel: it never runs and is never paid; its text returns to the field. */}
+              {/* The running request's stop, on the row of the oldest waiting question only (one stop is enough). */}
+              {model.stopPrevious && (
+                <IconAction icon="stop" label={texts.stopPrevious} disabled={props.actions.busy === true} onClick={() => props.actions.press("stop")} />
+              )}
+              {/* This question's own cancel: it never runs and is never paid; its text returns to the field or stays copyable. */}
               {props.actions.withdraw !== undefined && (
                 <IconAction icon="x" variant="danger" label={texts.withdraw} busy={props.actions.withdrawBusy === true} disabled={props.actions.busy === true} onClick={props.actions.withdraw} />
               )}
@@ -751,6 +756,11 @@ export function AgentRequest(props: {
       ) : (
         <Waiting />
       ))}
+      {model.withdrawn && (
+        <p className="ag-withdrawn small muted" role="status">
+          {texts.withdrawnLine}
+        </p>
+      )}
       {model.callLine !== "" && (
         <p className="ag-callline small muted" role="status">
           {model.callLine}

@@ -14,7 +14,7 @@ export type RunStarts = Readonly<Record<number, number>>;
  * request are not running.
  */
 export function isRunningEntry(entries: readonly Entry[], e: Entry): boolean {
-  if (e.callProblem !== "") {
+  if (e.callProblem !== "" || e.withdrawn === true) {
     return false;
   }
   return e.update === null ? !hasTicket(e) && queuedBehind(entries, e) === undefined : isRunning(e.update.status);

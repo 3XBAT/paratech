@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { cutFor, draftsFor, initialPanelState, panelMode, reducePanel, rereadsLink } from "../.test-build/agentState.js";
-import { contextFor, entryModel, maxAutoRetries, retryAttemptText, retryWatchStep, stoppedOffline, texts } from "../.test-build/agentView.js";
+import { contextFor, entryModel, maxAutoRetries, retryAttemptText, retryWatchKey, retryWatchStep, stoppedOffline, texts } from "../.test-build/agentView.js";
 import { AgentRequest } from "../.test-build/agent/AgentCards.js";
 import { AgentPanelView } from "../.test-build/agent/AgentPanelView.js";
 import { ariaLabels } from "./iconbtn.mjs";
@@ -72,10 +72,18 @@ test("the retry line is there without a timer too, is a text node and shows noth
   assert.equal(entryModel(apply(initialPanelState, upd({ retry: 3 })).entries[0]).retry, 3);
 });
 
-test("the retry line also stands in the header of a progress card", () => {
+test("the retry line stands beside the heading of a progress card, not inside it (the heading's name does not change)", () => {
   const card = { kind: "progress", plan: null, questions: null, jobId: "", artifact: "", target: null, actionId: "", answerId: "", cannotDo: null, text: "", stopReason: "", workId: "", outcome: "" };
   const html = render(apply(initialPanelState, upd({ retry: 1, cards: [card] })), { startedAt: 0, clock: () => 5_000 });
   assert.ok(html.includes("Повторная попытка 1 из 3"));
+  const heading = html.match(/<h3 class="ag-card-h">.*?<\/h3>/)?.[0] ?? "";
+  assert.ok(heading !== "");
+  assert.ok(!heading.includes("Повторная попытка"));
+  assert.ok(!heading.includes('role="status"'));
+  assert.ok(html.indexOf("</h3>") < html.indexOf("Повторная попытка 1 из 3"));
+  // Without a retry the heading is the same.
+  const plain = render(apply(initialPanelState, upd({ retry: 0, cards: [card] })), { startedAt: 0, clock: () => 5_000 });
+  assert.equal(plain.match(/<h3 class="ag-card-h">.*?<\/h3>/)?.[0], heading);
 });
 
 test("the progress update moves the attempt and keeps the cards; the answer or the stop takes the line away", () => {
@@ -132,7 +140,7 @@ test("D4: the same for a stop offline with the link ok: text stays, one retry ic
   const s = apply(online(), upd({}), typing(), upd({ status: "STOPPED", stopReason: "offline" }));
   const html = render(s);
   assert.ok(html.includes("Длинный ответ"));
-  assert.ok(html.includes("Ответ оборван. Можно повторить."));
+  assert.ok(html.includes("Ответ оборван: нет связи. Можно повторить, когда связь вернётся."));
   assert.equal(retryIcons(html), 1);
   assert.equal(panelMode(s).inputEnabled, true);
   assert.doesNotMatch(panel(s), /Нет связи с paratech/);
@@ -207,16 +215,35 @@ test("retryWatchStep: only the refusal of the watched request with the problem �
   }
 });
 
-test("retryWatchStep: the request moving on ends the watch; other requests and a repeat of the stop do not", () => {
+test("retryWatchStep: the request moving on ends the watch; other requests and the repeat of the offline stop do not", () => {
   const w = { threadId: "t1", turn: 1 };
   for (const status of ["EXECUTING", "PLANNING", "DONE", "FAILED", "AWAITING_PLAN", "CANCELLED"]) {
     assert.equal(retryWatchStep(w, update({ status })), "went_on", status);
   }
   assert.equal(retryWatchStep(w, update({ status: "STOPPED", stopReason: "offline" })), "keep");
+  // The stopped card's own reason counts like the update's.
+  assert.equal(retryWatchStep(w, update({ status: "STOPPED", cards: [{ kind: "stopped", stopReason: "offline" }] })), "keep");
   assert.equal(retryWatchStep(w, update({ threadId: "t2", status: "", problem: "invalid" })), "keep");
   assert.equal(retryWatchStep(w, update({ turn: 2, status: "", problem: "invalid" })), "keep");
   assert.equal(retryWatchStep(w, update({ turn: 0, status: "", queued: true, ticket: "q1" })), "keep");
   assert.equal(retryWatchStep(w, { ...update({ status: "", problem: "invalid" }), compaction: true }), "keep");
+});
+
+test("retryWatchStep: a STOPPED update with a problem or another reason is a real answer, the watch ends (review TASK-399)", () => {
+  const w = { threadId: "t1", turn: 1 };
+  // Retry came back as a stop for the budget: shown, never swallowed as «a repeat of the stop».
+  assert.equal(retryWatchStep(w, update({ status: "STOPPED", stopReason: "offline", problem: "budget" })), "went_on");
+  assert.equal(retryWatchStep(w, update({ status: "STOPPED", stopReason: "budget", problem: "budget" })), "went_on");
+  assert.equal(retryWatchStep(w, update({ status: "STOPPED", stopReason: "", problem: "budget" })), "went_on");
+  for (const stopReason of ["user", "failed", "quota", "expired", ""]) {
+    assert.equal(retryWatchStep(w, update({ status: "STOPPED", stopReason })), "went_on", stopReason);
+  }
+});
+
+test("retryWatchKey: one watch per request", () => {
+  assert.equal(retryWatchKey({ threadId: "t1", turn: 1 }), retryWatchKey({ threadId: "t1", turn: 1 }));
+  assert.notEqual(retryWatchKey({ threadId: "t1", turn: 1 }), retryWatchKey({ threadId: "t1", turn: 2 }));
+  assert.notEqual(retryWatchKey({ threadId: "t1", turn: 1 }), retryWatchKey({ threadId: "t2", turn: 1 }));
 });
 
 test("stoppedOffline: only a stopped request whose reason is offline starts the watch", () => {
@@ -232,12 +259,15 @@ test("AgentPanel watches Retry of an offline stop, hides the refusal and presses
   const src = readFileSync(new URL("../src/agent/AgentPanel.tsx", import.meta.url), "utf8");
   // The press sets the watch only for an offline stop and drops it when the call itself is refused.
   assert.match(src, /id === "retry" && stoppedOffline\(e\.update\)/);
-  assert.match(src, /retryWatch\.current = \{ threadId: e\.threadId, turn: e\.turn, key: e\.key \}/);
+  // One watch per request (a Map keyed by thread and turn), so two requests never share a refusal.
+  assert.match(src, /useRef\(new Map<string, RetryWatch>\(\)\)/);
+  assert.match(src, /retryWatch\.current\.set\(watchKey, \{ threadId: e\.threadId, turn: e\.turn, key: e\.key \}\)/);
+  assert.match(src, /retryWatch\.current\.delete\(watchKey\)/);
   // The update is judged before it reaches the reducer; the refusal is not dispatched and calls Continue once.
   const judged = src.indexOf("retryWatchStep(w, update)");
   const dispatched = src.indexOf('dispatch({ type: "update", update })');
   assert.ok(judged > 0 && judged < dispatched);
   assert.match(src, /if \(watched === "refused"\) \{\s*continueAfterRetry\(w\);\s*return;/);
-  assert.match(src, /retryWatch\.current = null;\s*if \(watched === "refused"\)/);
+  assert.match(src, /retryWatch\.current\.delete\(watchKey\);\s*if \(watched === "refused"\)/);
   assert.match(src, /api\.continueTurn\(\{ threadId: w\.threadId, turn: w\.turn \}\)/);
 });

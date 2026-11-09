@@ -63,6 +63,7 @@ import {
   restoredMentions,
   restoreUnsent,
   type RetryWatch,
+  retryWatchKey,
   retryWatchStep,
   spendRestart,
   startRestart,
@@ -78,7 +79,7 @@ import {
 import { maxDraftLength } from "../agentMentions.js";
 import { draftEvent, draftText } from "../agentDraft.js";
 import { problemText, undoOutcome } from "../journalView.js";
-import { blockingEntry, type Entry, hasTicket, initialPanelState, loadSnapshot, maxKnownTurn, panelMode, PressTracker, queueChat, reducePanel, rereadsLink, restartOutcome } from "../agentState.js";
+import { blockingEntry, type Entry, initialPanelState, isWaitingQueued, loadSnapshot, maxKnownTurn, panelMode, PressTracker, reducePanel, rereadsLink, restartOutcome, withdrawChat } from "../agentState.js";
 import { useMentionComposer } from "./useMentionComposer.js";
 import type { PageId } from "../nav.js";
 import type { ButtonId } from "../agentView.js";
@@ -329,7 +330,8 @@ export function AgentPanel(props: {
 
   // «Повторить» of a request stopped offline: Retry refuses one with no open step (an update with the problem "invalid"),
   // then Continue is pressed once for the student (retryWatchStep). The refusal update itself is not shown.
-  const retryWatch = useRef<RetryWatch | null>(null);
+  // One watch per request (threadId:turn): two stopped requests never share a refusal.
+  const retryWatch = useRef(new Map<string, RetryWatch>());
   const continueAfterRetry = useCallback(
     (w: RetryWatch) => {
       const release = () => {
@@ -367,10 +369,11 @@ export function AgentPanel(props: {
           setFills((f) => fillsFromUpdate(f, update));
           return;
         }
-        const w = retryWatch.current;
-        const watched = w === null ? "keep" : retryWatchStep(w, update);
-        if (w !== null && watched !== "keep") {
-          retryWatch.current = null;
+        const watchKey = retryWatchKey(update);
+        const w = retryWatch.current.get(watchKey);
+        const watched = w === undefined ? "keep" : retryWatchStep(w, update);
+        if (w !== undefined && watched !== "keep") {
+          retryWatch.current.delete(watchKey);
           if (watched === "refused") {
             continueAfterRetry(w);
             return;
@@ -796,10 +799,11 @@ export function AgentPanel(props: {
     // «Отменить этот запрос» of a question waiting under a ticket. One call at a time; the mark stays after "started"
     // (the update with its ticket replaces the row), and goes after a failure so the icon can be pressed again.
     const waitingKey = `withdraw:${e.key}`;
-    const waiting = e.update === null && e.callProblem === "" && hasTicket(e);
+    const waiting = isWaitingQueued(e);
+    // The chat is not always known from the ask result: the ticket's chat, the asked one, the one it waits in, the open one.
+    const withdrawIn = waiting ? withdrawChat(state.entries, e, openRef.current) : "";
     const withdraw = () => {
-      const chat = queueChat(e);
-      if (!waiting || !pressed.current.mark(waitingKey, null)) {
+      if (!waiting || withdrawIn === "" || !pressed.current.mark(waitingKey, null)) {
         return;
       }
       redraw();
@@ -810,11 +814,16 @@ export function AgentPanel(props: {
         const step = withdrawStep(still ? result : "started", fieldEmpty);
         if (step.discard) {
           dispatch({ type: "discard", key: e.key });
-          if (step.restore && e.scope !== null) {
-            setDraft(e.scope.text.slice(0, maxDraftLength));
-            setPills(e.scope.mentions ?? []);
-            focusInput();
-          }
+        } else if (step.keep) {
+          // The field is busy: the text stays in the thread as a cancelled line, never lost.
+          dispatch({ type: "withdrawn", key: e.key });
+        }
+        if (step.restore && e.scope !== null) {
+          setDraft(e.scope.text.slice(0, maxDraftLength));
+          setPills(e.scope.mentions ?? []);
+        }
+        if (step.focus) {
+          focusInput();
         }
         setNotice(step.note);
         if (result === "failed" || result === "thrown") {
@@ -822,11 +831,7 @@ export function AgentPanel(props: {
           redraw();
         }
       };
-      if (chat === "") {
-        done("thrown"); // the chat of the question is unknown: nothing to take back by id
-        return;
-      }
-      api.withdraw(chat, e.ticket ?? "").then(done, () => done("thrown"));
+      api.withdraw(withdrawIn, e.ticket ?? "").then(done, () => done("thrown"));
     };
     const press = (id: ButtonId) => {
       if (!named) {
@@ -858,10 +863,11 @@ export function AgentPanel(props: {
       }
       if (id === "retry" && stoppedOffline(e.update)) {
         // Retry refuses an offline stop with no open step: the update that says so makes the panel press Continue once.
-        retryWatch.current = { threadId: e.threadId, turn: e.turn, key: e.key };
+        const watchKey = retryWatchKey(e);
+        retryWatch.current.set(watchKey, { threadId: e.threadId, turn: e.turn, key: e.key });
         run(calls[id], {
           onRefused: () => {
-            retryWatch.current = null;
+            retryWatch.current.delete(watchKey);
           },
         });
         return;
@@ -870,7 +876,8 @@ export function AgentPanel(props: {
     };
     return {
       busy,
-      withdraw: waiting ? withdraw : undefined,
+      // No icon when the chat is unknown: it could only fail.
+      withdraw: waiting && withdrawIn !== "" ? withdraw : undefined,
       withdrawBusy: waiting && pressed.current.busy(waitingKey, null),
       confirm,
       turnkey,
