@@ -536,11 +536,10 @@ export function pairLinks(
 
 /**
  * A finished row goes to the folded «Завершённые» of «Записи»: the summary is ready or the chain failed. A row with
- * Stop or Run now stays in view, and so does one that offers «Расшифровать снова» (TASK-393: the student has just cancelled,
- * the way back must not fold away); a failed row keeps its link (models, connections, sound check) in the group.
+ * Stop or Run now stays in view; a failed row keeps its link (models, connections, sound check) in the group.
  */
 export function isFinishedRow(r: Pick<RecordingItem, "stage" | "stoppable" | "action">): boolean {
-  return !r.stoppable && r.action !== "runNow" && r.action !== "retranscribe" && (r.stage === "done" || r.stage === "failed");
+  return !r.stoppable && r.action !== "runNow" && (r.stage === "done" || r.stage === "failed");
 }
 
 /** One section of the page: the rows in progress («Идут») and the finished ones («Завершённые (N)»), newest first. */
@@ -610,9 +609,20 @@ export function latestDrafts(jobs: readonly JobItem[]): JobItem[] {
   );
 }
 
-/** Splits the page into its two sections; finished recordings sort by their start, finished jobs by their creation. */
-export function pageGroups(recordings: readonly RecordingItem[], jobs: readonly JobItem[]): PageGroups {
-  const rec = splitFinished(recordings, isFinishedRow);
+/**
+ * Splits the page into its two sections; finished recordings sort by their start, finished jobs by their creation.
+ * keepActive (TASK-393): the ids of the recordings whose transcription the student cancelled in this session; such a row
+ * stays in «Идут» while it still offers «Расшифровать снова», so the way back does not fold away under the click.
+ */
+export function pageGroups(
+  recordings: readonly RecordingItem[],
+  jobs: readonly JobItem[],
+  keepActive?: ReadonlySet<string>,
+): PageGroups {
+  const rec = splitFinished(
+    recordings,
+    (r) => isFinishedRow(r) && !(keepActive?.has(r.id) === true && r.action === "retranscribe"),
+  );
   const job = splitFinished(latestDrafts(jobs), isFinishedJob);
   return {
     recordings: { active: rec.active, finished: newestFirst(rec.finished, (r) => r.startedAt) },

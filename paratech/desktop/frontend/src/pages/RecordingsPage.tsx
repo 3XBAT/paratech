@@ -34,6 +34,7 @@ import {
   headActionsVisible,
   pageGroups,
   queueLine,
+  rowTitle,
   tasksKey,
 } from "../recordingRowView";
 import { adviceKey, keepSource, switchToSuggestion, type AdvicePending } from "../sourcePicker/advice";
@@ -57,8 +58,14 @@ import {
   Flights,
   flightKey,
   type FlightKind,
+  focusData,
+  type FocusWant,
+  focusMove,
+  keptAfterCancel,
+  keptAfterRetranscribe,
   type RowNote,
   retranscribeNote,
+  thrownNotes,
 } from "../transcriptionCancelView";
 import { Button } from "../ui/Button";
 import { SpeechComponentNotice } from "./SpeechComponentNotice";
@@ -74,6 +81,16 @@ import { CancelTranscriptionDialog, JobRow, RecordingRow } from "./RecordingRow"
 import { useDisclosureFocus } from "./useDisclosureFocus";
 
 const pollMs = 3000;
+
+// The control of a row by its data attribute (the id is compared as text: no selector escaping).
+function findControl(key: string, id: string): HTMLElement | null {
+  for (const el of document.querySelectorAll<HTMLElement>(`[data-${key}]`)) {
+    if (el.getAttribute(`data-${key}`) === id) {
+      return el;
+    }
+  }
+  return null;
+}
 
 // The page shows what the Go core reports: one row per recording with the status of its whole chain (TASK-076). The
 // Stop, Run now and link buttons appear only when the core offers them (ARCH-44). «Начать запись» starts a recording
@@ -222,6 +239,8 @@ export function RecordingsPage({
   const [cancelAsk, setCancelAsk] = useState<string | null>(null);
   const [cancelSkip, setCancelSkip] = useState(false);
   const cancelOffered = cancelAskOpen(cancelAsk, recordings ?? []);
+  const askedRow = cancelAsk === null ? undefined : (recordings ?? []).find((r) => r.id === cancelAsk);
+  const cancelAskTitle = askedRow === undefined ? "" : rowTitle(askedRow).text;
 
   // The confirmation closes when the row stops offering the cancel (the recognition ended meanwhile).
   useEffect(() => {
@@ -237,24 +256,85 @@ export function RecordingsPage({
     });
   }
 
-  function guarded(kind: FlightKind, id: string, call: () => Promise<RowNote | null>) {
+  // The cancelled rows stay in «Идут» (pageGroups) and the focus follows the click (focusMove).
+  const [kept, setKept] = useState<ReadonlySet<string>>(new Set());
+  const [focusReq, setFocusReq] = useState<{ id: string; want: FocusWant } | null>(null);
+
+  // A rejected call becomes the row's note (the busy key is the flight key); the flight ends in finally.
+  async function guarded(kind: FlightKind, id: string, call: () => Promise<RowNote | null>) {
     const key = flightKey(kind, id);
     if (!flights.current.begin(key)) {
       return;
     }
     setNote(id, null);
-    // act() never throws: a rejected call becomes the page's action error; the busy key is the flight key.
-    void act(key, async () => {
+    setFocusReq(null);
+    setBusy((b) => new Set(b).add(key));
+    try {
       const note = await call();
       if (mounted.current) {
         setNote(id, note);
       }
-    }).finally(() => flights.current.end(key));
+    } catch {
+      if (mounted.current) {
+        setNote(id, thrownNotes[kind]);
+        setFocusReq(kind === "cancel" ? { id, want: "cancel" } : { id, want: "again" });
+      }
+    } finally {
+      flights.current.end(key);
+      if (mounted.current) {
+        setBusy((b) => {
+          const next = new Set(b);
+          next.delete(key);
+          return next;
+        });
+      }
+    }
+    if (mounted.current) {
+      await refresh();
+    }
   }
 
-  const runCancel = (id: string) => guarded("cancel", id, async () => cancelNote(await api.cancelTranscription(id)));
+  const runCancel = (id: string) =>
+    void guarded("cancel", id, async () => {
+      const result = await api.cancelTranscription(id);
+      setKept((k) => keptAfterCancel(k, id, result));
+      setFocusReq({ id, want: result === "failed" ? "cancel" : "again" });
+      return cancelNote(result);
+    });
   const runRetranscribe = (id: string) =>
-    guarded("retranscribe", id, async () => retranscribeNote(await api.retranscribe(id)));
+    void guarded("retranscribe", id, async () => {
+      const result = await api.retranscribe(id);
+      setKept((k) => keptAfterRetranscribe(k, id, result));
+      setFocusReq(result === "started" ? null : { id, want: "again" });
+      return retranscribeNote(result);
+    });
+
+  // After a cancel the clicked control is gone or off and the focus has fallen to the page: it goes to the row's
+  // «Расшифровать снова» (or back to the cancel icon of a failed call). Never when the student has moved it elsewhere.
+  useEffect(() => {
+    if (focusReq === null) {
+      return;
+    }
+    const { id, want } = focusReq;
+    const active = document.activeElement;
+    const lost =
+      active === null ||
+      active === document.body ||
+      !active.isConnected ||
+      (active instanceof HTMLButtonElement && active.disabled) ||
+      (want === "again" && active.getAttribute(`data-${focusData.cancel}`) === id);
+    const move = focusMove(want, (recordings ?? []).find((r) => r.id === id), {
+      lost,
+      busy: busy.has(flightKey("cancel", id)) || busy.has(flightKey("retranscribe", id)),
+    });
+    if (move === "wait") {
+      return;
+    }
+    setFocusReq(null);
+    if (move !== "drop") {
+      findControl(move === "cancel" ? focusData.cancel : focusData.again, id)?.focus();
+    }
+  }, [focusReq, recordings, busy]);
 
   function askCancel(id: string) {
     if (cancelDecision(browserStore()) === "run") {
@@ -377,7 +457,7 @@ export function RecordingsPage({
 
   // Two sections, «Записи» and «Фоновая обработка», each with «Идут» and the folded «Завершённые» (TASK-098); rows in progress
   // (and those with Stop or Run now) always stay in view. Only the latest draft job per assignment is listed.
-  const groups = pageGroups(recordings ?? [], jobs ?? []);
+  const groups = pageGroups(recordings ?? [], jobs ?? [], kept);
 
   // The rows of one group, in a card on the shared row grid (.arows): status, button and «⋯» columns line up in every
   // card of both sections. CollapsibleList puts the finished ones into the same kind of card.
@@ -734,6 +814,7 @@ export function RecordingsPage({
 
       <CancelTranscriptionDialog
         open={cancelOffered}
+        recordingTitle={cancelAskTitle}
         skip={cancelSkip}
         onSkip={setCancelSkip}
         onConfirm={confirmCancelAsk}

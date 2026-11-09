@@ -11,6 +11,7 @@ import {
   jobActions,
   jobDetails,
   jobMeta,
+  actionLabels,
   fixTexts,
   type RowItem,
   type RowItemKey,
@@ -23,7 +24,15 @@ import { importTexts } from "../recordingImportView.js";
 import type { AdvicePending } from "../sourcePicker/advice.js";
 import { SourceAdvice } from "../sourcePicker/SourceAdvice.js";
 import { jobStatusView, showsProgress, type StatusView } from "../statusPresentation.js";
-import { cancelTexts, noteVisible, retranscribeTexts, type RowNote, rowOffersCancel } from "../transcriptionCancelView.js";
+import {
+  cancelBody,
+  cancelTexts,
+  focusData,
+  noteVisible,
+  retranscribeTexts,
+  type RowNote,
+  rowOffersCancel,
+} from "../transcriptionCancelView.js";
 import { Button } from "../ui/Button.js";
 import { Dialog, Progress, Row } from "../ui/controls.js";
 import { IconAction } from "../ui/IconAction.js";
@@ -171,6 +180,8 @@ export function RecordingRow(props: RecordingRowProps) {
             busy={props.retranscribing}
             busyLabel={retranscribeTexts.busy}
             disabled={props.retranscribing}
+            // The focus code of the page finds the button by this (focus after a cancel).
+            data-retranscribe-for={r.id}
             onClick={() => run("retranscribe")}
           >
             {i.label}
@@ -260,7 +271,7 @@ export function RecordingRow(props: RecordingRowProps) {
                   {note.openModels && (
                     <span className="st-fixes">
                       <Button size="sm" onClick={() => props.onOpen("models")}>
-                        {retranscribeTexts.openModels}
+                        {actionLabels.openModels}
                       </Button>
                     </span>
                   )}
@@ -279,6 +290,7 @@ export function RecordingRow(props: RecordingRowProps) {
                 size="sm"
                 variant="danger"
                 label={cancelTexts.action}
+                data={{ [focusData.cancel]: r.id }}
                 busy={props.cancelling}
                 onClick={onCancel}
               />
@@ -318,6 +330,8 @@ export function RecordingRow(props: RecordingRowProps) {
  */
 export function CancelTranscriptionDialog(props: {
   open: boolean;
+  /** The row's title text (untrusted): the body names the recording. */
+  recordingTitle: string;
   skip: boolean;
   onSkip: (skip: boolean) => void;
   onConfirm: () => void;
@@ -329,10 +343,11 @@ export function CancelTranscriptionDialog(props: {
       title={cancelTexts.title}
       confirmLabel={cancelTexts.confirm}
       cancelLabel={cancelTexts.keep}
+      danger
       onConfirm={props.onConfirm}
       onCancel={props.onCancel}
     >
-      <p>{cancelTexts.body}</p>
+      <p>{cancelBody(props.recordingTitle)}</p>
       <label className="del-check">
         <input type="checkbox" checked={props.skip} onChange={(e) => props.onSkip(e.target.checked)} />
         <span>{cancelTexts.skip}</span>

@@ -8,23 +8,90 @@ export const cancelTexts = {
   /** The tooltip and the accessible name of the cancel icon. */
   action: "Отменить расшифровку",
   title: "Отменить расшифровку?",
-  body: "Запись останется, расшифровать её можно будет снова.",
   confirm: "Да, отменить",
   keep: "Не отменять",
   skip: "Больше не спрашивать",
 } as const;
 
+/**
+ * The dialog body: names the recording and the cost (the finished part is lost). The title is untrusted text; the dialog
+ * renders this string as a text node.
+ */
+export function cancelBody(title: string): string {
+  const name = title.trim() === "" ? "Расшифровка" : `Расшифровка «${title.trim()}»`;
+  return `${name} остановится, готовая часть не сохранится. Запись останется — расшифровать её можно снова, с начала.`;
+}
+
 export const retranscribeTexts = {
   busy: "Запуск…",
-  openModels: "Открыть модели",
 } as const;
 
 export const noteTexts = {
-  cancelEnding: "Расшифровка уже завершается. Если она ещё идёт, отмените её ещё раз.",
-  cancelFailed: "Не удалось отменить расшифровку.",
-  noModel: "Нет модели распознавания.",
-  retranscribeFailed: "Не удалось запустить расшифровку.",
+  cancelEnding: "Расшифровка уже завершается. Если она не закончится, отмену можно повторить.",
+  cancelFailed: "Не удалось отменить расшифровку. Можно попробовать ещё раз.",
+  noModel: "Модель расшифровки не установлена.",
+  retranscribeFailed: "Не удалось запустить расшифровку. Можно попробовать ещё раз.",
 } as const;
+
+/** The notes of a call that threw (the Wails call was rejected): the same words as the core's «failed». */
+export const thrownNotes: Readonly<Record<FlightKind, RowNote>> = {
+  cancel: { kind: "cancel", text: noteTexts.cancelFailed, openModels: false },
+  retranscribe: { kind: "retranscribe", text: noteTexts.retranscribeFailed, openModels: false },
+};
+
+/**
+ * The recordings whose transcription the student cancelled in this session. Such a row stays in «Идут» while it offers
+ * «Расшифровать снова» (recordingRowView.pageGroups), so the way back does not fold away right under the click.
+ */
+export function keptAfterCancel(kept: ReadonlySet<string>, id: string, result: CancelTranscriptionResult): ReadonlySet<string> {
+  return result === "failed" ? kept : new Set(kept).add(id);
+}
+
+/** A started retranscription leaves the row to the usual rules; every other answer keeps it where it is. */
+export function keptAfterRetranscribe(kept: ReadonlySet<string>, id: string, result: RetranscribeResult): ReadonlySet<string> {
+  if (result !== "started" || !kept.has(id)) {
+    return kept;
+  }
+  const next = new Set(kept);
+  next.delete(id);
+  return next;
+}
+
+/** What the focus should reach after an action: «Расшифровать снова» of the row, or the cancel icon again. */
+export type FocusWant = "again" | "cancel";
+export type FocusMove = "retranscribe" | "cancel" | "wait" | "drop";
+
+/** The focus of the controls in the row, found by these data attributes (the row's recording id is the value). */
+export const focusData = { cancel: "cancel-for", again: "retranscribe-for" } as const;
+
+/**
+ * Where the focus goes after a cancel (TASK-393): the clicked control disappears or goes off, and the focus falls to the page.
+ * Called on every refresh while a request is open. `lost`: the focus is on nothing (or on the control that went off);
+ * `busy`: the call still runs. A student who has moved the focus elsewhere is never pulled back ("drop").
+ */
+export function focusMove(
+  want: FocusWant,
+  row: Pick<RecordingItem, "stage" | "canCancel" | "action"> | undefined,
+  state: { lost: boolean; busy: boolean },
+): FocusMove {
+  if (row === undefined) {
+    return "drop";
+  }
+  if (state.busy) {
+    return "wait";
+  }
+  if (!state.lost) {
+    return "drop";
+  }
+  if (want === "cancel" && rowOffersCancel(row)) {
+    return "cancel";
+  }
+  if (row.action === "retranscribe") {
+    return "retranscribe";
+  }
+  // «Ending»: the row still shows the progress, the button comes with a later refresh.
+  return want === "again" && rowOffersCancel(row) ? "wait" : "drop";
+}
 
 /** The cancel icon sits on a row that shows the progress or waits for recognition and that the core lets cancel. */
 export function rowOffersCancel(r: Pick<RecordingItem, "stage" | "canCancel">): boolean {

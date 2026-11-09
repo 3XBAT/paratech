@@ -426,8 +426,8 @@ const wordButtons = {
   "pages/OwnNotesParts.tsx": ["{t.pasteSave}", "{t.pasteCancel}", "{t.addFiles}", "{t.paste}", "{t.pasteSave}", "{t.pasteCancel}"],
   "pages/RecipientParts.tsx": ["{action.label}"],
   "pages/RecordingImportPanel.tsx": ["{importTexts.choose}", "{importTexts.close}"],
-  // TASK-393: the main «Расшифровать снова» ({i.label}) and the named way out «Открыть модели» next to «Нет модели распознавания.».
-  "pages/RecordingRow.tsx": ["{i.label}", "{i.label}", "{i.label}", "{i.label}", "{i.label}", "{fixTexts.connections}", "{fixTexts.retry}", "{retranscribeTexts.openModels}", "{i.label}", "{i.label}"],
+  // TASK-393: the main «Расшифровать снова» ({i.label}) and the named way out «Открыть модели речи» next to «Модель расшифровки не установлена.».
+  "pages/RecordingRow.tsx": ["{i.label}", "{i.label}", "{i.label}", "{i.label}", "{i.label}", "{fixTexts.connections}", "{fixTexts.retry}", "{actionLabels.openModels}", "{i.label}", "{i.label}"],
   "pages/RecordingsPage.tsx": ["{importTexts.open}", "{manualStartTexts.open}", "{manualStartTexts.start}", "{manualStartTexts.cancel}", "{emptyTexts.schedule}", "{failed}"],
   "pages/SchedulePage.tsx": ["Выбрать файл…", "{reviewTexts.open}", "{folded ? listTexts.expandAll : listTexts.collapseAll}", "{applyLabel(p)}", "Отмена"],
   "pages/ScheduleSubjectsReview.tsx": ["{stepLabels[s]}", "{main.label}", "{reviewTexts.close}", "{label}", '{reviewTexts.open} {props.groups !== undefined && <span className="sched-cnt num">{props.groups}</span>}', "{reviewTexts.retry}", "{props.addLabel}", "{reviewTexts.retry}", "{reviewTexts.importSchedule}"],

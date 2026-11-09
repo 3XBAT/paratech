@@ -21,6 +21,7 @@ import { problemOf } from "../.test-build/todayView.js";
 import {
   cancelAskOpen,
   cancelAskSkipped,
+  cancelBody,
   cancelDecision,
   cancelNote,
   cancelSkipKey,
@@ -28,11 +29,15 @@ import {
   confirmCancel,
   Flights,
   flightKey,
+  focusMove,
+  keptAfterCancel,
+  keptAfterRetranscribe,
   noteTexts,
   noteVisible,
   retranscribeNote,
   retranscribeTexts,
   rowOffersCancel,
+  thrownNotes,
 } from "../.test-build/transcriptionCancelView.js";
 
 const { renderToStaticMarkup } = server;
@@ -113,13 +118,89 @@ test("a failed transcription keeps its text and also offers «Расшифров
   assert.equal(old.main?.key, "open");
 });
 
-test("rows that offer «Расшифровать снова» stay out of the folded «Завершённые»", () => {
-  assert.equal(isFinishedRow(cancelled()), false);
-  assert.equal(isFinishedRow(failedTranscription()), false);
-  assert.equal(isFinishedRow(failedTranscription({ action: "openModels" })), true, "a plain failure still folds");
-  const g = pageGroups([cancelled({ id: "c" }), row({ id: "d" })], []);
+// Replaces the old rule «every row with retranscribe stays active» (isFinishedRow): only a row the student cancelled in this
+// session (keepActive) stays in «Идут»; every old failed transcription folds as before.
+test("a row cancelled in this session stays in «Идут» while it offers «Расшифровать снова»; old failures fold", () => {
+  assert.equal(isFinishedRow(cancelled()), true, "the rule of a finished row is unchanged");
+  assert.equal(isFinishedRow(failedTranscription()), true);
+
+  const rows = [cancelled({ id: "c" }), failedTranscription({ id: "f" }), row({ id: "d" })];
+  const plain = pageGroups(rows, []);
+  assert.deepEqual(plain.recordings.active.map((r) => r.id), []);
+  assert.deepEqual(plain.recordings.finished.map((r) => r.id).sort(), ["c", "d", "f"]);
+  const empty = pageGroups(rows, [], new Set());
+  assert.deepEqual(empty.recordings.active.map((r) => r.id), []);
+
+  const g = pageGroups(rows, [], new Set(["c"]));
   assert.deepEqual(g.recordings.active.map((r) => r.id), ["c"]);
-  assert.deepEqual(g.recordings.finished.map((r) => r.id), ["d"]);
+  assert.deepEqual(g.recordings.finished.map((r) => r.id).sort(), ["d", "f"], "a plain old failure still folds");
+
+  // The kept id counts only while the action is «Расшифровать снова»: once the chain moved on, the usual rules apply.
+  const moved = pageGroups([row({ id: "c" }), cancelled({ id: "x", action: "openModels" })], [], new Set(["c", "x"]));
+  assert.deepEqual(moved.recordings.active.map((r) => r.id), []);
+  const restarted = pageGroups([running({ id: "c" })], [], new Set(["c"]));
+  assert.deepEqual(restarted.recordings.active.map((r) => r.id), ["c"], "in progress is active anyway");
+});
+
+test("the kept set: a cancel (any answer but failed) adds the row, a started retranscription drops it", () => {
+  const none = new Set();
+  for (const result of ["cancelled", "not_running", "ending"]) {
+    assert.deepEqual([...keptAfterCancel(none, "r1", result)], ["r1"], result);
+  }
+  assert.equal(keptAfterCancel(none, "r1", "failed"), none, "a failed cancel changes nothing");
+  assert.deepEqual([...none], [], "the argument is not mutated");
+
+  const kept = new Set(["r1", "r2"]);
+  assert.deepEqual([...keptAfterRetranscribe(kept, "r1", "started")], ["r2"]);
+  for (const result of ["no_model", "failed", "not_allowed"]) {
+    assert.equal(keptAfterRetranscribe(kept, "r1", result), kept, result);
+  }
+  assert.equal(keptAfterRetranscribe(kept, "other", "started"), kept);
+  assert.deepEqual([...kept], ["r1", "r2"], "the argument is not mutated");
+
+  const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /pageGroups\(recordings \?\? \[\], jobs \?\? \[\], kept\)/);
+});
+
+test("the focus after a cancel: to «Расшифровать снова» once it is there, back to the icon after a failure, never pulled", () => {
+  const lost = { lost: true, busy: false };
+  // The call has run and the refresh brought the cancelled row.
+  assert.equal(focusMove("again", cancelled(), lost), "retranscribe");
+  // The row is not refreshed yet (or «ending»): it still shows the progress; wait for the next refresh.
+  assert.equal(focusMove("again", running(), lost), "wait");
+  // The call still runs: wait.
+  assert.equal(focusMove("again", cancelled(), { lost: true, busy: true }), "wait");
+  assert.equal(focusMove("cancel", running(), { lost: true, busy: true }), "wait");
+  // The student has moved the focus: leave it.
+  assert.equal(focusMove("again", cancelled(), { lost: false, busy: false }), "drop");
+  assert.equal(focusMove("cancel", running(), { lost: false, busy: false }), "drop");
+  // A failed cancel: the row still offers the icon.
+  assert.equal(focusMove("cancel", running(), lost), "cancel");
+  // A failed cancel, but the recognition ended meanwhile.
+  assert.equal(focusMove("cancel", cancelled(), lost), "retranscribe");
+  assert.equal(focusMove("cancel", row(), lost), "drop");
+  // The row is gone / has nothing to focus.
+  assert.equal(focusMove("again", undefined, lost), "drop");
+  assert.equal(focusMove("again", row(), lost), "drop");
+
+  // The controls carry the data the page finds them by.
+  assert.match(render(running(), { onCancel: () => undefined }), /<button[^>]*data-cancel-for="r1"[^>]*aria-label="Отменить расшифровку"|<button[^>]*aria-label="Отменить расшифровку"[^>]*data-cancel-for="r1"/);
+  assert.match(render(cancelled(), { onRetranscribe: () => undefined }), /<button[^>]*data-retranscribe-for="r1"/);
+});
+
+test("a rejected cancel or retranscribe becomes the row's note and frees the flight", () => {
+  assert.deepEqual(thrownNotes.cancel, { kind: "cancel", text: "Не удалось отменить расшифровку. Можно попробовать ещё раз.", openModels: false });
+  assert.deepEqual(thrownNotes.retranscribe, { kind: "retranscribe", text: "Не удалось запустить расшифровку. Можно попробовать ещё раз.", openModels: false });
+  assert.deepEqual(thrownNotes.cancel, cancelNote("failed"), "the same words as the core's «failed»");
+  assert.deepEqual(thrownNotes.retranscribe, retranscribeNote("failed"));
+  assert.equal(noteVisible(thrownNotes.cancel, running()), true);
+  assert.equal(noteVisible(thrownNotes.retranscribe, cancelled()), true);
+
+  const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
+  const guarded = page.match(/async function guarded\([^]*?\n  \}\n/)?.[0] ?? "";
+  assert.match(guarded, /catch \{[^]*?setNote\(id, thrownNotes\[kind\]\);/);
+  assert.match(guarded, /finally \{\s*flights\.current\.end\(key\);/);
+  assert.ok(!guarded.includes("setActionError"), "not the page-level action error");
 });
 
 test("«Сегодня» shows a cancelled recognition as its quiet status, not as a recording problem", () => {
@@ -189,16 +270,27 @@ test("a missing or failing localStorage never throws and always asks", () => {
 
 test("the dialog: texts, focus on the safe button, the checkbox, Esc = «Не отменять»", () => {
   assert.deepEqual(
-    [cancelTexts.title, cancelTexts.body, cancelTexts.confirm, cancelTexts.keep, cancelTexts.skip],
-    ["Отменить расшифровку?", "Запись останется, расшифровать её можно будет снова.", "Да, отменить", "Не отменять", "Больше не спрашивать"],
+    [cancelTexts.title, cancelTexts.confirm, cancelTexts.keep, cancelTexts.skip],
+    ["Отменить расшифровку?", "Да, отменить", "Не отменять", "Больше не спрашивать"],
   );
+  assert.equal(
+    cancelBody("Матанализ"),
+    "Расшифровка «Матанализ» остановится, готовая часть не сохранится. Запись останется — расшифровать её можно снова, с начала.",
+  );
+  assert.ok(cancelBody("").startsWith("Расшифровка остановится,"), "a row without a title");
   const noop = () => undefined;
-  const html = renderToStaticMarkup(h(CancelTranscriptionDialog, { open: false, skip: false, onSkip: noop, onConfirm: noop, onCancel: noop }));
+  const dialog = (over = {}) =>
+    renderToStaticMarkup(h(CancelTranscriptionDialog, { open: false, recordingTitle: "Матанализ", skip: false, onSkip: noop, onConfirm: noop, onCancel: noop, ...over }));
+  const html = dialog();
   assert.ok(html.includes("<h2") && html.includes("Отменить расшифровку?"));
+  assert.ok(html.includes("Расшифровка «Матанализ» остановится, готовая часть не сохранится."), "names the row and the cost");
   assert.match(html, /<label class="del-check"><input type="checkbox"\/><span>Больше не спрашивать<\/span><\/label>/);
-  assert.match(html, /<button type="button" class="btn primary">Да, отменить<\/button><button type="button" class="btn">Не отменять<\/button>/);
-  const checked = renderToStaticMarkup(h(CancelTranscriptionDialog, { open: false, skip: true, onSkip: noop, onConfirm: noop, onCancel: noop }));
-  assert.ok(checked.includes('checked=""'));
+  // The destructive confirm is the danger button, like the delete dialog.
+  assert.match(html, /<button type="button" class="btn danger">Да, отменить<\/button><button type="button" class="btn">Не отменять<\/button>/);
+  assert.ok(dialog({ skip: true }).includes('checked=""'));
+  // The title is untrusted text: a text node, escaped, never markup.
+  const hostile = dialog({ recordingTitle: "<img src=x onerror=alert(1)>" });
+  assert.ok(!hostile.includes("<img") && hostile.includes("&lt;img src=x onerror=alert(1)&gt;"), hostile);
 
   // Wiring on the page: Esc and «Не отменять» only close; only the confirmation calls the core, once per kind.
   const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
@@ -234,35 +326,37 @@ test("a second click while a call is in flight starts no second call, per record
   const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
   assert.match(page, /const flights = useRef\(new Flights\(\)\);/);
   assert.match(page, /if \(!flights\.current\.begin\(key\)\) \{\s*return;\s*\}/);
-  assert.match(page, /\.finally\(\(\) => flights\.current\.end\(key\)\)/);
+  assert.match(page, /finally \{\s*flights\.current\.end\(key\);/);
 });
 
 test("each cancel result maps to its note; the row refreshes either way", () => {
   assert.equal(cancelNote("cancelled"), null);
   assert.equal(cancelNote("not_running"), null);
   assert.deepEqual(cancelNote("ending"), { kind: "cancel", text: noteTexts.cancelEnding, openModels: false });
-  assert.deepEqual(cancelNote("failed"), { kind: "cancel", text: "Не удалось отменить расшифровку.", openModels: false });
-  assert.match(noteTexts.cancelEnding, /ещё раз/, "invites another try");
-  // The page refreshes after every call (act) and a rejected call goes to the action error.
+  assert.deepEqual(cancelNote("failed"), { kind: "cancel", text: "Не удалось отменить расшифровку. Можно попробовать ещё раз.", openModels: false });
+  assert.equal(noteTexts.cancelEnding, "Расшифровка уже завершается. Если она не закончится, отмену можно повторить.");
+  assert.ok(!/отмените/.test(noteTexts.cancelEnding), "impersonal voice");
+  // The page refreshes after every call, thrown or not.
   const page = readFileSync(new URL("../src/pages/RecordingsPage.tsx", import.meta.url), "utf8");
-  assert.match(page, /void act\(key, async \(\) => \{\s*const note = await call\(\);/);
+  assert.match(page, /const note = await call\(\);[^]*?finally \{[^]*?\n    if \(mounted\.current\) \{\s*await refresh\(\);/);
 });
 
-test("each retranscribe result maps to its note; no_model offers «Открыть модели»", () => {
+test("each retranscribe result maps to its note; no_model offers «Открыть модели речи»", () => {
   assert.equal(retranscribeNote("started"), null, "the row then shows «В очереди»");
   assert.equal(retranscribeNote("not_allowed"), null, "quiet: the state changed");
-  assert.deepEqual(retranscribeNote("no_model"), { kind: "retranscribe", text: "Нет модели распознавания.", openModels: true });
-  assert.deepEqual(retranscribeNote("failed"), { kind: "retranscribe", text: "Не удалось запустить расшифровку.", openModels: false });
+  assert.deepEqual(retranscribeNote("no_model"), { kind: "retranscribe", text: "Модель расшифровки не установлена.", openModels: true });
+  assert.deepEqual(retranscribeNote("failed"), { kind: "retranscribe", text: "Не удалось запустить расшифровку. Можно попробовать ещё раз.", openModels: false });
 
   const opened = [];
   const note = retranscribeNote("no_model");
   const html = render(cancelled(), { note, onOpen: (p) => opened.push(p), onRetranscribe: () => undefined });
-  assert.match(html, /<span class="small muted row-note" role="status">Нет модели распознавания\.<\/span>/);
-  assert.match(html, /<span class="st-fixes"><button[^>]*class="btn sm"[^>]*>.*Открыть модели<\/button><\/span>/);
+  assert.match(html, /<span class="small muted row-note" role="status">Модель расшифровки не установлена\.<\/span>/);
+  assert.match(html, /<span class="st-fixes"><button[^>]*class="btn sm"[^>]*>.*Открыть модели речи<\/button><\/span>/);
   assert.ok(html.includes("Расшифровать снова"), "the main button stays for another try");
   const failed = render(cancelled(), { note: retranscribeNote("failed") });
-  assert.ok(failed.includes("Не удалось запустить расшифровку.") && !failed.includes("Открыть модели<"));
-  assert.equal(retranscribeTexts.openModels, "Открыть модели");
+  assert.ok(failed.includes("Не удалось запустить расшифровку.") && !failed.includes("Открыть модели речи<"));
+  assert.equal(actionLabels.openModels, "Открыть модели речи", "the same words as the core's openModels action");
+  assert.ok(!("openModels" in retranscribeTexts), "no second wording of the button");
   const page = readFileSync(new URL("../src/pages/RecordingRow.tsx", import.meta.url), "utf8");
   assert.match(page, /props\.onOpen\("models"\)/);
 });
