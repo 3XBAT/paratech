@@ -13,11 +13,20 @@ import (
 // opCallSubject names the failures of CallSubject in the log.
 const opCallSubject = "recording prompt: call subject unread"
 
+// startedPrompt is the prompt a recording was last started from (TASK-405): the popup page keeps its id and still asks
+// for the link while that recording runs. lesson is empty for an ad-hoc prompt.
+type startedPrompt struct {
+	id        prompt.ID
+	lesson    shared.LessonID
+	recording shared.RecordingID
+}
+
 // CallSubject returns the library subject whose call link the popup of prompt id may offer («Подключиться», ADR-0032,
-// TASK-370): only for the current lesson prompt, while it is offered, whose lesson's subject string resolves to exactly one subject, as on
-// «Сегодня», and only while that subject keeps a link. Anything else, failures included, is "": the popup then simply
-// offers no link. The link stays here; the popup opens it by the subject. Failures are logged without their cause: a
-// storage error may carry row data, and a link a meeting password.
+// TASK-370): for the current lesson prompt while it is offered, and for the lesson prompt the latest recording was
+// started from while that recording runs (TASK-405), when the lesson's subject string resolves to exactly one
+// subject, as on «Сегодня», and only while that subject keeps a link. Anything else, failures included, is "": the
+// popup then simply offers no link. The link stays here; the popup opens it by the subject. Failures are logged
+// without their cause: a storage error may carry row data, and a link a meeting password.
 func (s *Service) CallSubject(ctx context.Context, id prompt.ID) shared.SubjectID {
 	if s.subjects == nil || s.callLinks == nil {
 		return ""
@@ -63,15 +72,25 @@ func (s *Service) CallSubject(ctx context.Context, id prompt.ID) shared.SubjectI
 	return r.Match.ID
 }
 
-// promptLesson is the lesson of the current prompt when it is id and is an offered lesson prompt, else "".
+// promptLesson is the lesson of prompt id when it may offer a link: the current prompt, an offered lesson prompt, or
+// the lesson prompt the latest recording was started from while that recording runs; else "".
 func (s *Service) promptLesson(id prompt.ID) shared.LessonID {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	p, err := s.lookup(id)
-	if err != nil || p.Kind() != prompt.KindLesson || p.State() != prompt.StateOffered {
+	if p, err := s.lookup(id); err == nil {
+		defer s.mu.Unlock()
+		if p.Kind() != prompt.KindLesson || p.State() != prompt.StateOffered {
+			return ""
+		}
+		return p.Lesson().ID
+	}
+	started := s.started
+	s.mu.Unlock()
+
+	// Asked outside s.mu: the recording session has locks of its own.
+	if s.running == nil || started.id != id || started.lesson == "" || !s.running.IsRunning(started.recording) {
 		return ""
 	}
-	return p.Lesson().ID
+	return started.lesson
 }
 
 func (s *Service) callSubjectFailed(id prompt.ID, result string) {

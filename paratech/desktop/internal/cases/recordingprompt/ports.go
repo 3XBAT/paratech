@@ -56,6 +56,15 @@ type Recordings interface {
 	StartRecording(ctx context.Context, lesson shared.LessonID, source values.Source) (shared.RecordingID, error)
 }
 
+// RunningRecordings tells whether a recording still runs, so the popup keeps offering «Подключиться» while the
+// recording started from it runs (ADR-0032 addendum 2026-11-08, TASK-405). Implemented in app over the recording
+// session.
+type RunningRecordings interface {
+	// IsRunning reports whether recording id is starting or capturing now; one being stopped or finished is not. It is
+	// cheap and never blocks.
+	IsRunning(id shared.RecordingID) bool
+}
+
 // Lessons reads the local schedule to link a recording started from the main window to the lesson in progress
 // (TASK-081) and to find the subject of a prompt's lesson (TASK-370). Implemented by the sqlite adapter
 // (LessonRepository).

@@ -78,6 +78,7 @@ type callEnv struct {
 	*env
 	subjects *fakeSubjects
 	links    *fakeCallLinks
+	running  *fakeRunning
 	logs     *bytes.Buffer
 }
 
@@ -95,11 +96,13 @@ func newCallEnv(t *testing.T, subj string) *callEnv {
 			"Матан":         {Outcome: subjectmatch.Ambiguous},
 			"Физика":        {Outcome: subjectmatch.NoMatch},
 		}},
-		links: &fakeCallLinks{links: map[shared.SubjectID]subject.CallLink{"sub-1": link}},
+		links:   &fakeCallLinks{links: map[shared.SubjectID]subject.CallLink{"sub-1": link}},
+		running: &fakeRunning{},
 	}
 	svc, err := New(Deps{
 		Settings: e.settings, Apps: e.apps, Popup: e.popup, Recordings: e.recordings, Lessons: e.lessons, Clock: e.clock,
-		Sleeper: e.clock, Subjects: c.subjects, CallLinks: c.links, Log: slog.New(slog.NewTextHandler(c.logs, nil)),
+		Sleeper: e.clock, Subjects: c.subjects, CallLinks: c.links, Running: c.running,
+		Log: slog.New(slog.NewTextHandler(c.logs, nil)),
 	}, DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
