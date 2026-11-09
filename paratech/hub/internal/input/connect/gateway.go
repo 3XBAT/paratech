@@ -61,6 +61,8 @@ type Gateway struct {
 	log         *slog.Logger
 	// heartbeat is the silence before a StreamHeartbeat on a stream that asked for it.
 	heartbeat time.Duration
+	// ticks replaces the heartbeat timer; set by tests only (see export_test.go).
+	ticks <-chan time.Time
 }
 
 var _ hubv1connect.GatewayServiceHandler = (*Gateway)(nil)
@@ -235,7 +237,10 @@ func (d *deltaSender) loop() {
 		timer *time.Timer
 		beat  <-chan time.Time // nil without a heartbeat: never ready
 	)
-	if d.hb.send != nil {
+	switch {
+	case d.hb.send != nil && d.hb.ticks != nil:
+		beat = d.hb.ticks
+	case d.hb.send != nil:
 		timer = time.NewTimer(d.hb.every)
 		defer timer.Stop()
 		beat = timer.C
@@ -261,7 +266,9 @@ func (d *deltaSender) loop() {
 				d.fail(err)
 				return
 			}
-			timer.Reset(d.hb.every)
+			if timer != nil {
+				timer.Reset(d.hb.every)
+			}
 		}
 	}
 }
