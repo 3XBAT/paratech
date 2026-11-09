@@ -17,6 +17,7 @@ const service = "paratech/desktop/internal/input/wails.AgentService";
 export const methods = {
   state: `${service}.State`,
   ask: `${service}.Ask`,
+  withdraw: `${service}.Withdraw`,
   approvePlan: `${service}.ApprovePlan`,
   revisePlan: `${service}.RevisePlan`,
   answer: `${service}.Answer`,
@@ -358,7 +359,18 @@ export interface UpdateView {
    * compaction. Null: unknown, leave the ring as is.
    */
   fill: ContextFill | null;
+  /**
+   * The id of a question in the queue of waiting questions ("" none, at most maxTicketLength characters). It is also sent
+   * on the first updates of a request that started from the queue, so the panel can replace the waiting row by it.
+   * "" from an older core.
+   */
+  ticket: string;
+  /** The question was accepted but waits behind the running request (not a refusal). False from an older core. */
+  queued: boolean;
 }
+
+/** The longest ticket the panel accepts; a longer one reads as "". */
+export const maxTicketLength = 32;
 
 /** How full the model context of a chat is. The core decides the level; the page never derives it from the percent. */
 export type ContextFillLevel = "normal" | "high" | "full";
@@ -749,7 +761,14 @@ export function parseUpdate(raw: unknown): UpdateView {
     compaction: flag(r, "compaction"),
     compacting: flag(r, "compacting"),
     fill: parseFill(r.fill),
+    ticket: parseTicket(r.ticket),
+    queued: flag(r, "queued"),
   };
+}
+
+/** Tolerant: anything but a string of at most maxTicketLength characters (missing, number, too long) reads "". */
+function parseTicket(raw: unknown): string {
+  return typeof raw === "string" && raw.length <= maxTicketLength ? raw : "";
 }
 
 /** Checks one draft; a malformed draft is an error (the caller drops it). */
@@ -780,6 +799,43 @@ export function parseCallProblem(raw: unknown): CallProblem {
   const r = record(raw, w);
   const p = str(r, "problem", w);
   return (callProblems as readonly string[]).includes(p) ? (p as CallProblem) : "failed";
+}
+
+/**
+ * What Ask answers. queued: the question was accepted and waits behind the running request under `ticket`; that is NOT a
+ * refusal (problem is ""). Invariant of the parser: queued implies a non-empty ticket, else the answer is a broken core
+ * and reads { problem: "failed", queued: false, ticket: "" }. A refusal never carries a ticket.
+ */
+export interface AskResult {
+  problem: CallProblem;
+  queued: boolean;
+  ticket: string;
+}
+
+/** An older core answers {problem} only: queued false, ticket "". A malformed answer is an error (like parseCallProblem). */
+export function parseAskResult(raw: unknown): AskResult {
+  const problem = parseCallProblem(raw);
+  const r = raw as Record<string, unknown>;
+  if (r.queued !== true) {
+    return { problem, queued: false, ticket: "" };
+  }
+  const ticket = parseTicket(r.ticket);
+  if (problem !== "" || ticket === "") {
+    return { problem: "failed", queued: false, ticket: "" };
+  }
+  return { problem, queued: true, ticket };
+}
+
+/** How Withdraw ended: withdrawn; started (it has already begun, stop it as a request); not_found; invalid; failed. */
+export type WithdrawResult = "withdrawn" | "started" | "not_found" | "invalid" | "failed";
+
+export const withdrawResults: readonly WithdrawResult[] = ["withdrawn", "started", "not_found", "invalid", "failed"];
+
+/** An unknown or missing result reads as "failed"; a malformed answer is an error. */
+export function parseWithdrawResult(raw: unknown): WithdrawResult {
+  const r = record(raw, "withdraw result");
+  const v = r.result;
+  return typeof v === "string" && (withdrawResults as readonly string[]).includes(v) ? (v as WithdrawResult) : "failed";
 }
 
 function flag(r: Record<string, unknown>, key: string): boolean {
@@ -1067,8 +1123,13 @@ export interface AgentApi {
   chatEarlier(threadId: string): Promise<EarlierView>;
   /** The Hub link of the panel; calls no Hub. */
   state(): Promise<AgentState>;
-  /** Starts a request; the outcome comes as updates. */
-  ask(input: AskInput): Promise<CallProblem>;
+  /**
+   * Starts a request, or queues it behind the running one (queued with a ticket; the waiting row is TASK-399); the
+   * outcome comes as updates. A queued question is not a refusal.
+   */
+  ask(input: AskInput): Promise<AskResult>;
+  /** Takes back a waiting question of a chat by its ticket; "started": it has begun meanwhile and is a request now. */
+  withdraw(threadId: string, ticket: string): Promise<WithdrawResult>;
   approvePlan(ref: TurnRef): Promise<CallProblem>;
   revisePlan(ref: TurnRef, wish: string): Promise<CallProblem>;
   answer(ref: TurnRef, answers: AnswerInput[]): Promise<CallProblem>;
@@ -1101,7 +1162,8 @@ export function agentApi(call: CallByName): AgentApi {
     chatEarlier: async (threadId) => parseEarlier(await call(methods.chatEarlier, threadId)),
     chatCurrent: async (threadId) => parseCurrent(await call(methods.chatCurrent, threadId)),
     state: async () => parseState(await call(methods.state)),
-    ask: async (input) => parseCallProblem(await call(methods.ask, input)),
+    ask: async (input) => parseAskResult(await call(methods.ask, input)),
+    withdraw: async (threadId, ticket) => parseWithdrawResult(await call(methods.withdraw, threadId, ticket)),
     approvePlan: turn(methods.approvePlan),
     revisePlan: async (ref, wish) => parseCallProblem(await call(methods.revisePlan, ref, wish)),
     answer: async (ref, answers) => parseCallProblem(await call(methods.answer, ref, answers)),
