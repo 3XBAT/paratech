@@ -1,8 +1,8 @@
-// Agent pack, part A, file 3: a second question while the first still runs (BUG-20261104, TASK-380). What the app really does
-// (found by the first run): the core holds one lock for a whole Ask, Hub step included (agentturn.Service.Ask), so a second Ask in
-// the same chat WAITS for the first and is sent to the model by itself when the first one is over; the panel shows it as «ждёт
-// предыдущий запрос» with a stop for the running one. (The busy refusal «Предыдущий запрос ещё выполняется…» of the same bug
-// note appears only when the first request is outside the Hub step, for example running a tool; part B can script that.)
+// Agent pack, part A, file 3: a second question while the first still runs (BUG-20261104, TASK-380, TASK-398/399). A second question
+// while the chat's current request is PLANNING or EXECUTING is never refused (ADR-0026 addendum 2026-11-08, point 7): it is queued
+// (FIFO, at most 5), the panel shows «ждёт предыдущий запрос» with a stop for the running one, and it is sent to the model by
+// itself, with the first one in its history, when the first request is final. This file is the Hub-step case; file 12 is the same
+// rule while a TOOL runs (it used to be the busy refusal «Предыдущий запрос ещё выполняется…», now gone).
 // Checked: while the first runs the second is not sent to the model, the order is kept, and nothing stale is left on the way.
 import { expect, snapshot, step, test } from "../../src/steps/index.js";
 import { filler, replyRule } from "../../scripts/llm/agent/rules.js";
