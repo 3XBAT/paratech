@@ -222,33 +222,43 @@ func (s *Service) Cancel(ctx context.Context, id shared.TicketSetID) (View, erro
 	return viewOf(set), nil
 }
 
-// Unfile is the Undo of the filing: the file of a done set goes back from «Билеты» to «Входящие», the file kept. A
-// file already in «Входящие» is no error; one the student moved or removed is left alone (ErrChanged). Errors:
-// ErrNotFound, ErrInvalidRequest (no file), ErrChanged, ErrUnavailable.
+// Unfile is the Undo of the filing: every file of a done set goes back from «Билеты» to «Входящие», the files kept. A
+// file already in «Входящие» is skipped; one the student moved or removed is left alone. ErrChanged when none was
+// moved and one was left alone. Errors: ErrNotFound, ErrInvalidRequest (no file), ErrChanged, ErrUnavailable.
 func (s *Service) Unfile(ctx context.Context, id shared.TicketSetID) (View, error) {
 	set, err := s.get(ctx, id)
 	if err != nil {
 		return View{}, err
 	}
-	f, ok := set.File()
-	if !ok {
+	files := set.Files()
+	if len(files) == 0 {
 		return viewOf(set), fmt.Errorf("%w: no file", ErrInvalidRequest)
 	}
-	m, err := s.shelf.Material(ctx, f.Material)
-	switch {
-	case errors.Is(err, shared.ErrNotFound):
-		return viewOf(set), fmt.Errorf("%w: %w", ErrChanged, err)
-	case err != nil:
-		return viewOf(set), fmt.Errorf("%w: %w", ErrUnavailable, err)
-	case m.Active() && m.InInbox():
-		return viewOf(set), nil
-	case !inTickets(set, m):
-		return viewOf(set), ErrChanged
+	moved := 0
+	var changed error
+	for _, f := range files {
+		m, err := s.shelf.Material(ctx, f.Material)
+		switch {
+		case errors.Is(err, shared.ErrNotFound):
+			changed = fmt.Errorf("%w: %w", ErrChanged, err)
+			continue
+		case err != nil:
+			return viewOf(set), fmt.Errorf("%w: %w", ErrUnavailable, err)
+		case m.Active() && m.InInbox():
+			continue
+		case !inTickets(set, m):
+			changed = ErrChanged
+			continue
+		}
+		if _, err := s.shelf.MoveToInbox(ctx, f.Material); err != nil {
+			return viewOf(set), fmt.Errorf("%w: %w", ErrUnavailable, err)
+		}
+		moved++
+		s.log.InfoContext(ctx, opUnfiled, slog.String("set", string(id)), slog.String("material", string(f.Material)))
 	}
-	if _, err := s.shelf.MoveToInbox(ctx, f.Material); err != nil {
-		return viewOf(set), fmt.Errorf("%w: %w", ErrUnavailable, err)
+	if moved == 0 && changed != nil {
+		return viewOf(set), changed
 	}
-	s.log.InfoContext(ctx, opUnfiled, slog.String("set", string(id)), slog.String("material", string(f.Material)))
 	return viewOf(set), nil
 }
 

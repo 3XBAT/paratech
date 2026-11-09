@@ -112,6 +112,43 @@ type TicketsInput struct {
 // TicketNotAnswered for a refused one, and the closing coverage summary. Texts are plain text: one-line texts are
 // cleaned of control and format characters; the renderer escapes them.
 func BuildTickets(in TicketsInput) values.Document {
+	return ticketsDoc(ticketsTitle(in, 0, 0), prepareTickets(in.Tickets))
+}
+
+// preparedTicket is a ticket as its blocks: built once, then joined into the document of each part tried.
+type preparedTicket struct {
+	number   int
+	coverage ticketset.Coverage
+	heading  values.Block
+	body     []values.Block // the answer blocks of a covered or partial ticket, else its fixed note
+}
+
+func prepareTickets(entries []TicketEntry) []preparedTicket {
+	out := make([]preparedTicket, 0, len(entries))
+	for _, e := range entries {
+		heading := ticketPrefix + strconv.Itoa(e.Number) + "."
+		if title := oneLine(e.Title); title != "" {
+			heading += " " + title
+		}
+		p := preparedTicket{
+			number: e.Number, coverage: e.Coverage,
+			heading: values.Block{Kind: values.BlockHeading, Level: values.MinHeadingLevel, Lines: []string{heading}},
+		}
+		switch e.Coverage {
+		case ticketset.CoverageCovered, ticketset.CoveragePartial:
+			p.body = answerBlocks(e)
+		case ticketset.CoverageFailed:
+			p.body = []values.Block{paragraph(TicketNotAnswered)}
+		default:
+			p.body = []values.Block{paragraph(NotInLectures)}
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// ticketsTitle is the title page of the file; a part (from > 0) names its tickets after the heading.
+func ticketsTitle(in TicketsInput, from, to int) values.TitlePage {
 	st := in.Student
 	t := values.TitlePage{
 		University: values.CleanName(st.University),
@@ -123,25 +160,29 @@ func BuildTickets(in TicketsInput) values.Document {
 	if subject := values.CleanName(in.Subject); subject != "" {
 		t.Heading = strings.Replace(ticketsBySubject, "%s", subject, 1)
 	}
+	if from > 0 {
+		word := partTickets
+		if from == to {
+			word = partTicket
+		}
+		t.Heading += " (" + word + ticketRange(from, to) + ")"
+	}
+	return t
+}
 
-	doc := values.Document{Title: t, TableOfContents: true}
+// ticketsDoc joins the tickets into a document under the title page, with the coverage summary of these tickets.
+func ticketsDoc(title values.TitlePage, tickets []preparedTicket) values.Document {
+	n := 3
+	for _, t := range tickets {
+		n += 1 + len(t.body)
+	}
+	doc := values.Document{Title: title, TableOfContents: true, Blocks: make([]values.Block, 0, n)}
 	doc.Blocks = append(doc.Blocks, paragraph(GeneratedMark))
 	var r ticketset.Report
-	for _, e := range in.Tickets {
-		heading := ticketPrefix + strconv.Itoa(e.Number) + "."
-		if title := oneLine(e.Title); title != "" {
-			heading += " " + title
-		}
-		doc.Blocks = append(doc.Blocks, values.Block{Kind: values.BlockHeading, Level: values.MinHeadingLevel, Lines: []string{heading}})
-		switch e.Coverage {
-		case ticketset.CoverageCovered, ticketset.CoveragePartial:
-			doc.Blocks = append(doc.Blocks, answerBlocks(e)...)
-		case ticketset.CoverageFailed:
-			doc.Blocks = append(doc.Blocks, paragraph(TicketNotAnswered))
-		default:
-			doc.Blocks = append(doc.Blocks, paragraph(NotInLectures))
-		}
-		switch e.Coverage {
+	for _, t := range tickets {
+		doc.Blocks = append(doc.Blocks, t.heading)
+		doc.Blocks = append(doc.Blocks, t.body...)
+		switch t.coverage {
 		case ticketset.CoverageCovered:
 			r.Covered++
 		case ticketset.CoveragePartial:
@@ -154,7 +195,7 @@ func BuildTickets(in TicketsInput) values.Document {
 	}
 
 	summary := []string{
-		coverageTotal + strconv.Itoa(len(in.Tickets)), coverageCovered + strconv.Itoa(r.Covered),
+		coverageTotal + strconv.Itoa(len(tickets)), coverageCovered + strconv.Itoa(r.Covered),
 		coveragePartial + strconv.Itoa(r.Partial), coverageNotCovered + strconv.Itoa(r.NotCovered),
 	}
 	if r.Failed > 0 {
@@ -220,9 +261,7 @@ func sourceLabel(s TicketSource) string {
 }
 
 // TicketsFileName is the name of a tickets file: «Билеты <subject>», safe for Windows, with DocxExtension.
-func TicketsFileName(subject string) string {
-	return FileName(strings.TrimSpace(ticketsFile + " " + values.CleanName(subject)))
-}
+func TicketsFileName(subject string) string { return ticketsFileName(subject, "") }
 
 func paragraph(line string) values.Block {
 	return values.Block{Kind: values.BlockParagraph, Lines: []string{line}}

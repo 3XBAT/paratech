@@ -47,10 +47,18 @@ type Ticket struct {
 	Result *Result `json:"result"`
 }
 
-// File is the .docx of a done set: the library material that holds it and its artifact.
+// MaxFileNameBytes bounds the name of a file as filed.
+const MaxFileNameBytes = 255
+
+// File is a .docx of a done set: the library material that holds it and its artifact. A set too large for one
+// document has one file per part (TASK-402): From and To are the numbers of its first and last ticket and Name the
+// file name as filed. A set filed before TASK-402 has one file with From, To and Name zero.
 type File struct {
 	Material shared.MaterialID `json:"material"`
 	Artifact string            `json:"artifact"` // shared.ArtifactRef in its string form
+	From     int               `json:"from,omitempty"`
+	To       int               `json:"to,omitempty"`
+	Name     string            `json:"name,omitempty"`
 }
 
 // ArtifactRef returns the artifact of the file; zero for a malformed one.
@@ -71,12 +79,21 @@ type Accepted struct {
 func (a Accepted) overCap() bool { return a.EstimateMicroUSD > a.CapMicroUSD }
 
 // Content is the stored body of a set beside its columns: the tickets with their results, the figures the student
-// confirmed, their acceptance of a cost above the cap and the file. Stored as canonical JSON (Encode), read back with
+// confirmed, their acceptance of a cost above the cap and the files. Stored as canonical JSON (Encode), read back with
 // ParseContent.
 type Content struct {
 	Tickets      []Ticket  `json:"tickets"`
 	Accepted     *Accepted `json:"accepted"`
 	CostAccepted bool      `json:"cost_accepted"`
+	Files        []File    `json:"files"`
+}
+
+// wireContent is the stored form ParseContent reads: Content and the single "file" a set stored before TASK-402.
+type wireContent struct {
+	Tickets      []Ticket  `json:"tickets"`
+	Accepted     *Accepted `json:"accepted"`
+	CostAccepted bool      `json:"cost_accepted"`
+	Files        []File    `json:"files"`
 	File         *File     `json:"file"`
 }
 
@@ -198,15 +215,14 @@ func (s *Set) Record(st Step, r Result, now time.Time) error {
 	return s.move(next, StatusAnswering, now)
 }
 
-// Finish keeps the filed file and marks the set done. Errors: ErrStaleStep when the file is not due, ErrInvalidSet for
-// a bad file.
-func (s *Set) Finish(f File, now time.Time) error {
+// Finish keeps the filed files, in the order of their tickets, and marks the set done. Errors: ErrStaleStep when the
+// file is not due, ErrInvalidSet for bad files (see validateFiles).
+func (s *Set) Finish(files []File, now time.Time) error {
 	if s.Next().Kind != StepAssemble {
 		return ErrStaleStep
 	}
 	next := s.clone()
-	file := f
-	next.content.File = &file
+	next.content.Files = slices.Clone(files)
 	return s.move(next, StatusDone, now)
 }
 
@@ -242,10 +258,7 @@ func (c Content) clone() Content {
 		a := *c.Accepted
 		out.Accepted = &a
 	}
-	if c.File != nil {
-		f := *c.File
-		out.File = &f
-	}
+	out.Files = slices.Clone(c.Files)
 	return out
 }
 
@@ -308,19 +321,59 @@ func (s *Set) validate() error {
 			return bad("a cost acceptance that does not match the confirmed figures")
 		}
 	}
-	switch {
-	case (s.status == StatusDone) != (s.content.File != nil):
-		return bad("a file exactly when done")
+	if (s.status == StatusDone) != (len(s.content.Files) > 0) {
+		return bad("files exactly when done")
 	}
-	if f := s.content.File; f != nil {
-		if f.Material.Validate() != nil {
-			return bad("file material")
-		}
-		if _, err := shared.ParseArtifactRef(f.Artifact); err != nil {
-			return bad("file artifact")
-		}
+	if why := s.validateFiles(); why != "" {
+		return bad(why)
 	}
 	return nil
+}
+
+// validateFiles checks the files of a done set; "" when they are valid. Each file is a live material with its
+// artifact, no material twice. A single file may carry no range (a set filed before TASK-402); otherwise the parts
+// cover the tickets in order: the first starts at the first ticket, each next one at the ticket after the previous
+// part, each ends at a ticket number, the last at the last ticket.
+func (s *Set) validateFiles() string {
+	files, tickets := s.content.Files, s.content.Tickets
+	if len(files) > MaxTickets {
+		return "too many files"
+	}
+	seen := make(map[shared.MaterialID]bool, len(files))
+	for _, f := range files {
+		switch {
+		case f.Material.Validate() != nil:
+			return "file material"
+		case seen[f.Material]:
+			return "a material filed twice"
+		case len(f.Name) > MaxFileNameBytes:
+			return "file name"
+		}
+		if _, err := shared.ParseArtifactRef(f.Artifact); err != nil {
+			return "file artifact"
+		}
+		seen[f.Material] = true
+	}
+	if len(files) == 0 || (len(files) == 1 && files[0].From == 0 && files[0].To == 0) {
+		return ""
+	}
+
+	i := 0 // the index of the first ticket of the next part
+	for _, f := range files {
+		if i >= len(tickets) || f.From != tickets[i].Number || f.To < f.From {
+			return "file ranges"
+		}
+		for i < len(tickets) && tickets[i].Number <= f.To {
+			i++
+		}
+		if tickets[i-1].Number != f.To {
+			return "file ranges"
+		}
+	}
+	if i != len(tickets) {
+		return "file ranges"
+	}
+	return ""
 }
 
 // validTitle is a title as ParseList gives it: a question the reader takes (answer.ParseQuestion) unchanged.
@@ -349,13 +402,8 @@ func (s *Set) Tickets() []Ticket { return s.content.clone().Tickets }
 // CostAccepted reports whether the student accepted a cost above the cap.
 func (s *Set) CostAccepted() bool { return s.content.CostAccepted }
 
-// File returns the file of a done set; ok is false before.
-func (s *Set) File() (File, bool) {
-	if s.content.File == nil {
-		return File{}, false
-	}
-	return *s.content.File, true
-}
+// Files returns a copy of the files of a done set in the order of their tickets; none before.
+func (s *Set) Files() []File { return slices.Clone(s.content.Files) }
 
 // Progress returns how many tickets have their result of how many.
 func (s *Set) Progress() (done, total int) {
@@ -449,16 +497,24 @@ func (c Content) Encode() string {
 }
 
 // ParseContent reads stored content strictly (no unknown field, nothing after it); Restore checks its bounds, so a
-// stored title passes the same checks as a fresh one. Error: ErrInvalidSet.
+// stored title passes the same checks as a fresh one. The single "file" of a set stored before TASK-402 is read as its
+// only file, without a range; content with both "file" and "files" is refused. Error: ErrInvalidSet.
 func ParseContent(s string) (Content, error) {
 	d := json.NewDecoder(strings.NewReader(s))
 	d.DisallowUnknownFields()
-	var c Content
-	if err := d.Decode(&c); err != nil {
+	var w wireContent
+	if err := d.Decode(&w); err != nil {
 		return Content{}, fmt.Errorf("%w: content: %w", ErrInvalidSet, err)
 	}
 	if _, err := d.Token(); !errors.Is(err, io.EOF) {
 		return Content{}, fmt.Errorf("%w: content: data after the object", ErrInvalidSet)
+	}
+	c := Content{Tickets: w.Tickets, Accepted: w.Accepted, CostAccepted: w.CostAccepted, Files: w.Files}
+	if w.File != nil {
+		if len(w.Files) > 0 {
+			return Content{}, fmt.Errorf("%w: content: both file and files", ErrInvalidSet)
+		}
+		c.Files = []File{{Material: w.File.Material, Artifact: w.File.Artifact}}
 	}
 	return c, nil
 }

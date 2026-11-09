@@ -64,8 +64,10 @@ type TicketsUseCase interface {
 }
 
 // TicketSet is a set of exam tickets for the screen (TASK-134): «Найдено N билетов — подтвердить», the progress
-// «Билет N из M», the coverage report and the file. Titles come from the student's list: render them as plain text
-// only. Status is proposed, confirmed, answering, done, failed or cancelled.
+// «Билет N из M», the coverage report and the files: answers too large for one document are filed in parts
+// («Билеты 1–50», «Билеты 51–100», TASK-402), so files has one entry per part; materialId and result are the first.
+// Titles come from the student's list: render them as plain text only. Status is proposed, confirmed, answering,
+// done, failed or cancelled.
 type TicketSet struct {
 	ID           string       `json:"id"`
 	SubjectID    string       `json:"subjectId"`
@@ -77,8 +79,9 @@ type TicketSet struct {
 	Budget       TicketBudget `json:"budget"`
 	CostAccepted bool         `json:"costAccepted"`
 	Report       TicketReport `json:"report"`
-	MaterialID   string       `json:"materialId"` // the file in «Билеты» (open it through the library), once done
+	MaterialID   string       `json:"materialId"` // the (first) file in «Билеты» (open it through the library), once done
 	Result       string       `json:"result"`     // the artifact of the ResultCard, once done
+	Files        []TicketFile `json:"files"`      // every file in the order of its tickets; [] until done
 	Job          string       `json:"job"`        // the newest job of the run (the progress card); "" none
 	// JobStatus is the status of that job (Get and List): QUEUED, RUNNING, RETRY_WAIT or WAITING_* while it lives,
 	// COMPLETED, FAILED or CANCELLED after; "" none. Stalled: the run is confirmed or answering but no job runs it
@@ -86,6 +89,14 @@ type TicketSet struct {
 	JobStatus string `json:"jobStatus"`
 	Stalled   bool   `json:"stalled"`
 	Version   int64  `json:"version"`
+}
+
+// TicketFile is one file of a done set: the whole answers, or one part of them.
+type TicketFile struct {
+	MaterialID string `json:"materialId"`
+	From       int    `json:"from"` // first and last ticket number of the part; for a set filed before TASK-402 the whole range
+	To         int    `json:"to"`
+	Name       string `json:"name"` // file name as filed («Билеты Физика 1–50.docx»); "" for a set filed before TASK-402
 }
 
 // TicketItem is one ticket: coverage covered, partial, not_covered or failed once answered; answerId opens the
@@ -223,7 +234,7 @@ func (s *TicketService) fail(op string, err error) error {
 func ticketSetView(v tickets.View) TicketSet {
 	out := TicketSet{
 		ID: string(v.ID), SubjectID: string(v.Subject), SourceID: string(v.Source), Status: string(v.Status),
-		Tickets: []TicketItem{}, Done: v.Done, Total: v.Total, CostAccepted: v.CostAccepted,
+		Tickets: []TicketItem{}, Files: []TicketFile{}, Done: v.Done, Total: v.Total, CostAccepted: v.CostAccepted,
 		Budget: TicketBudget{
 			Tickets: v.Budget.Tickets, EstimateMicroUSD: v.Budget.EstimateMicroUSD, CapMicroUSD: v.Budget.CapMicroUSD,
 			OverCap: v.Budget.OverCap,
@@ -234,6 +245,9 @@ func ticketSetView(v tickets.View) TicketSet {
 		},
 		MaterialID: string(v.Material), Result: v.Result.String(), Job: string(v.Job), JobStatus: string(v.JobStatus),
 		Stalled: v.Stalled, Version: v.Version,
+	}
+	for _, f := range v.Files {
+		out.Files = append(out.Files, TicketFile{MaterialID: string(f.Material), From: f.From, To: f.To, Name: f.Name})
 	}
 	for _, t := range v.Tickets {
 		out.Tickets = append(out.Tickets, TicketItem{

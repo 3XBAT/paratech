@@ -124,8 +124,9 @@ func (s *Service) answerTicket(ctx context.Context, snap job.Snapshot, report fu
 	return job.ErrContinueLater
 }
 
-// assemble builds the file of the answered tickets, files it into the subject's «Билеты» and marks the set done. The
-// same answers give the same bytes, so a repeated step finds the material it filed.
+// assemble builds the files of the answered tickets (one, or a part per file when they do not fit one document),
+// files them into the subject's «Билеты» in order and marks the set done. The same answers give the same bytes, so a
+// repeated step finds the materials it filed: no part is filed twice.
 func (s *Service) assemble(ctx context.Context, snap job.Snapshot, report func(context.Context, job.Progress) error,
 	set *ticketset.Set) error {
 	prefs, err := s.profiles.Load(ctx)
@@ -146,44 +147,57 @@ func (s *Service) assemble(ctx context.Context, snap job.Snapshot, report func(c
 	}
 	p := prefs.Profile().Fields()
 	now := s.clock.Now()
-	doc := homeworkdoc.BuildTickets(homeworkdoc.TicketsInput{
+	parts := homeworkdoc.BuildTicketParts(homeworkdoc.TicketsInput{
 		Student: homeworkdoc.Student{
 			FullName: p.FullName, Group: p.Group, University: p.University, Faculty: p.Faculty, City: p.City,
 		},
 		Subject: subjectName, Year: now.Year(), Tickets: entries,
 	})
-	if err := doc.Validate(); err != nil {
-		return s.failRun(ctx, snap, set, err)
-	}
-	content, err := s.renderer.Render(ctx, doc)
-	if err != nil {
-		return s.failRun(ctx, snap, set, err)
+	// Every part is built before any is filed: a part that cannot be built leaves nothing in «Билеты».
+	contents := make([][]byte, 0, len(parts))
+	for _, part := range parts {
+		if err := part.Document.Validate(); err != nil {
+			return s.failRun(ctx, snap, set, err)
+		}
+		content, err := s.renderer.Render(ctx, part.Document)
+		if err != nil {
+			return s.failRun(ctx, snap, set, err)
+		}
+		contents = append(contents, content)
 	}
 	if err := s.progress(ctx, snap, report, set); err != nil {
 		return err
 	}
-	m, err := s.shelf.FileTickets(ctx, set.Subject(), homeworkdoc.TicketsFileName(subjectName), content)
-	if err != nil {
-		return s.retry(snap, ErrJobStorage, err)
+
+	filed := make([]*material.Material, 0, len(parts))
+	files := make([]ticketset.File, 0, len(parts))
+	for i, part := range parts {
+		m, err := s.shelf.FileTickets(ctx, set.Subject(), part.Name, contents[i])
+		if err != nil {
+			return s.retry(snap, ErrJobStorage, err)
+		}
+		ref, err := material.BlobRef(m.Digest())
+		if err != nil {
+			return s.permanent(snap, ErrJobStorage, err)
+		}
+		filed = append(filed, m)
+		files = append(files, ticketset.File{Material: m.ID(), Artifact: ref.String(), From: part.From, To: part.To, Name: part.Name})
 	}
-	ref, err := material.BlobRef(m.Digest())
-	if err != nil {
-		return s.permanent(snap, ErrJobStorage, err)
-	}
-	got, err := s.saveStep(ctx, set, func(set *ticketset.Set) error {
-		return set.Finish(ticketset.File{Material: m.ID(), Artifact: ref.String()}, s.clock.Now())
-	})
+	got, err := s.saveStep(ctx, set, func(set *ticketset.Set) error { return set.Finish(files, s.clock.Now()) })
 	if err != nil {
 		return s.retry(snap, ErrJobStorage, err)
 	}
 	if got.Status() != ticketset.StatusDone {
-		// Cancelled while the file was built: the file just filed is no file of the set.
-		if err := s.unfile(ctx, got, m); err != nil {
-			return s.retry(snap, ErrJobStorage, err)
+		// Cancelled while the files were built: the files just filed are no files of the set.
+		for _, m := range filed {
+			if err := s.unfile(ctx, got, m); err != nil {
+				return s.retry(snap, ErrJobStorage, err)
+			}
 		}
 		return nil
 	}
-	s.log.InfoContext(ctx, opFiled, slog.String("set", string(set.ID())), slog.String("material", string(m.ID())))
+	s.log.InfoContext(ctx, opFiled, slog.String("set", string(set.ID())), slog.Int("parts", len(files)),
+		slog.String("material", string(files[0].Material)))
 	return nil
 }
 
