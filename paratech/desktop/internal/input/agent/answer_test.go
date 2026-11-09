@@ -28,7 +28,7 @@ type fakeAnswerer struct {
 	asked []askedQuestion
 }
 
-func (f *fakeAnswerer) Ask(_ context.Context, q string, s shared.SubjectID, scope string, _ answering.DraftSink) (answering.Asked, error) {
+func (f *fakeAnswerer) AskNow(_ context.Context, q string, s shared.SubjectID, scope string, _ answering.DraftSink) (answering.Asked, error) {
 	f.asked = append(f.asked, askedQuestion{q, s, scope})
 	return f.got, f.err
 }
@@ -130,12 +130,21 @@ func TestAnswerQuestion(t *testing.T) {
 		t.Fatalf("cards = %+v", r.cards)
 	}
 
-	// The answer is reused within the request only: the same turn asks in the same scope, another turn in another.
+	// The answer is reused per call (ADR-0026 addendum 2026-11-08, item 3): «Продолжить» replays the same step with
+	// the same call id, so the same scope (a free replay); another call of the request, or another turn, a new one.
 	tl.run(t.Context(), agentturn.Step{Thread: "th1", Turn: 3, Scope: inPhysics}, answerCall(t, `{"question":"Что такое ряд?"}`))
+	second := agentturn.Call{Call: mustCall(t, "c2", values.ToolAnswerQuestion, `{"question":"Что такое ряд?"}`),
+		Class: actionpolicy.ClassR, Paid: true, PlanStep: -1}
+	tl.run(t.Context(), agentturn.Step{Thread: "th1", Turn: 3, Scope: inPhysics}, second)
 	tl.run(t.Context(), agentturn.Step{Thread: "th1", Turn: 4, Scope: inPhysics}, answerCall(t, `{"question":"Что такое ряд?"}`))
-	if len(asker.asked) != 3 || asker.asked[0].scope != "ag:th1:3" || asker.asked[1].scope != "ag:th1:3" ||
-		asker.asked[2].scope != "ag:th1:4" || tl.reuse != "" {
+	wantScopes := []string{"ag:th1:3:d0f631ca", "ag:th1:3:d0f631ca", "ag:th1:3:9c0abe51", "ag:th1:4:d0f631ca"}
+	if len(asker.asked) != len(wantScopes) || tl.reuse != "" {
 		t.Fatalf("asked %+v, tools scope %q", asker.asked, tl.reuse)
+	}
+	for i, want := range wantScopes {
+		if asker.asked[i].scope != want {
+			t.Fatalf("scope %d = %q, want %q", i, asker.asked[i].scope, want)
+		}
 	}
 	for _, ans := range []*fakeAnswerer{{}, {err: answering.ErrNoConnection}} {
 		tl.answerer = ans
@@ -147,6 +156,22 @@ func TestAnswerQuestion(t *testing.T) {
 	// Without an answerer the paid reader stays unavailable and nothing is asked.
 	if out := newWorld(t).tools(t).read(t.Context(), values.Scope{}, answerCall(t, `{"question":"Что такое ряд?"}`)); out.Result.ResultJSON != `{"error":"unavailable"}` {
 		t.Fatalf("no answerer: %s", out.Result.ResultJSON)
+	}
+}
+
+// The scope of a call fits the key's bounds whatever the model's call id: a thread id as the app makes it (26 base32
+// characters), a large turn, a long or non-ASCII call id.
+func TestCallScopeFitsTheKey(t *testing.T) {
+	prefix := answerScope(agentturn.Step{Thread: shared.ThreadID(strings.Repeat("a", 26)), Turn: 1_000_000})
+	for _, id := range []string{"c1", "toolu_01ABCdef", strings.Repeat("я", 500), "a b\tc"} {
+		s := callScope(prefix, id)
+		if len(s) > answer.MaxScopeBytes || !strings.HasPrefix(s, prefix+":") || len(s) != len(prefix)+9 {
+			t.Fatalf("scope %q (%d bytes)", s, len(s))
+		}
+		if _, err := answer.NewRequest("Что такое ряд?", []answer.Excerpt{{Text: "Ряд сходится.",
+			Source: answer.Source{Recording: "r1", Section: answer.SectionLectureText}}}, s); err != nil {
+			t.Fatalf("scope %q refused: %v", s, err)
+		}
 	}
 }
 

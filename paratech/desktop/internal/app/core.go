@@ -349,7 +349,7 @@ func (c *core) wire(dataDir string, profile wincred.Profile, e env, log *slog.Lo
 	// locally for their cards; a card marks a citation of a note removed since.
 	answers, err := answering.New(answering.Deps{
 		Knowledge: knowledge, Reader: llm, Answers: sqlite.NewAnswerRepository(db), Notes: answerNotes{notes: noteRepo},
-		Clock: e.clock, IDs: e.ids, Log: log,
+		Clock: e.clock, Sleeper: e.clock, IDs: e.ids, Log: log,
 	})
 	if err != nil {
 		return fmt.Errorf("app: answers: %w", err)

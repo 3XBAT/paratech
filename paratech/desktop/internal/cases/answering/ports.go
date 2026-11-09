@@ -58,6 +58,12 @@ type Clock interface {
 	Now() time.Time
 }
 
+// Sleeper waits on the same time source as Clock (ARCH-24) before an automatic retry of AskNow: it returns once d has
+// passed, or at once with the error of ctx when ctx ends. Optional: without it AskNow does not retry.
+type Sleeper interface {
+	Sleep(ctx context.Context, d time.Duration) error
+}
+
 // IDs generates answer identifiers (ARCH-24).
 type IDs interface {
 	NewAnswerID() shared.AnswerID
