@@ -898,13 +898,14 @@ describe("the packs are projects in the order they depend on each other", () => 
     assert.ok(!/dependencies/.test(config.replace(/\/\/.*$/gm, "")), "a dependency would skip the dependent packs when one fails");
   });
 
-  test("the files of the recording pack run as import, cancel, restart, privacy; each `requires` names a row of the pack or the settings pack", () => {
+  test("the files of the recording pack run as import, cancel, retranscribe, restart, privacy; each `requires` names a row of the pack or the settings pack", () => {
     const dir = path.join(e2eDir, "specs", "recording");
     const files = readdirSync(dir).filter((f) => f.endsWith(".spec.ts")).sort();
-    assert.deepEqual(files, ["01-import.spec.ts", "02-cancel.spec.ts", "03-restart.spec.ts", "04-privacy.spec.ts"]);
+    // 02a sorts after 02-cancel and before 03: 04-privacy scans the requests every earlier test kept
+    assert.deepEqual(files, ["01-import.spec.ts", "02-cancel.spec.ts", "02a-retranscribe.spec.ts", "03-restart.spec.ts", "04-privacy.spec.ts"]);
     const support = readFileSync(path.join(dir, "support.ts"), "utf8");
     const features = [...support.matchAll(/^\s+(\w+): "(Запись: [^"]+)",$/gm)].map((m) => m[2]);
-    assert.equal(features.length, 7);
+    assert.equal(features.length, 8);
     for (const f of files) {
       for (const m of readFileSync(path.join(dir, f), "utf8").matchAll(/details\(Feature\.(\w+),/g)) {
         assert.ok(support.includes(`${m[1]}: "`), `${f}: Feature.${m[1]} exists`);

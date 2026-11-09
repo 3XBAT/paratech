@@ -1,11 +1,10 @@
 // Pack «Запись → конспект → задание», part 2: the cancel of a running recognition (TASK-378, PRD 7.2).
 //
-// What the app offers: a job of a recording has no «Отменить» of its own. «Остановить» on a row is only for a recording that is
-// being made, and «Фоновая обработка» lists the jobs WITHOUT a recording (drafts, mail). The one way a student cancels a running
-// STT job is «Удалить» in the «⋯» menu of the recording: recordingdelete cancels its jobs (jobrunner.Cancel, the handler's
-// context ends, whisper-cli is killed) and then removes the recording. The row therefore has no «cancelled» state: it is gone.
-// This row checks what that cancel promises: the recognition stops, no whisper-cli of the sandbox stays, nothing went to the Hub,
-// no transcript or row is left, and the log says the job was cancelled. The missing cancel on the row is a finding (README).
+// This row checks the DELETION path only: «Удалить» in the «⋯» menu of a recording with a running recognition. recordingdelete
+// cancels its jobs (jobrunner.Cancel, the handler's context ends, whisper-cli is killed) and then removes the recording, so the
+// row is gone. It checks what that cancel promises: the recognition stops, no whisper-cli of the sandbox stays, nothing went to
+// the Hub, no transcript or row is left, and the log says the job was cancelled. The cancel icon of the row itself, the
+// «Больше не спрашивать» choice and «Расшифровать снова» (TASK-393) are checked by 02a-retranscribe.spec.ts.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
