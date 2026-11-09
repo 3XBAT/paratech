@@ -45,8 +45,9 @@ type Service struct {
 	popup      Popup
 	recordings Recordings
 	lessons    Lessons
-	subjects   SubjectResolver  // nil: no call subject
-	callLinks  SubjectCallLinks // nil: no call subject
+	subjects   SubjectResolver   // nil: no call subject
+	callLinks  SubjectCallLinks  // nil: no call subject
+	running    RunningRecordings // nil: no call subject once the prompt started
 	clock      Clock
 	sleeper    Sleeper
 	log        *slog.Logger
@@ -59,6 +60,7 @@ type Service struct {
 	mu      sync.Mutex
 	current *prompt.Prompt // nil when no prompt runs; a prompt is dropped when it ends
 	advice  Advice         // the silent-source advice of the running recording; zero when none (TASK-082)
+	started startedPrompt  // the prompt the latest recording was started from (TASK-405)
 	// seq is the last prompt ID. Deliberately not the ID port (ARCH-24): a prompt ID is an in-memory handle of this
 	// process, never stored, and a deterministic sequence is unique enough.
 	seq uint64
@@ -80,7 +82,7 @@ func New(deps Deps, cfg Config) (*Service, error) {
 	}
 	return &Service{
 		settings: deps.Settings, apps: deps.Apps, popup: deps.Popup, recordings: deps.Recordings, lessons: deps.Lessons,
-		subjects: deps.Subjects, callLinks: deps.CallLinks, clock: deps.Clock, sleeper: deps.Sleeper, log: log, cfg: cfg,
+		subjects: deps.Subjects, callLinks: deps.CallLinks, running: deps.Running, clock: deps.Clock, sleeper: deps.Sleeper, log: log, cfg: cfg,
 	}, nil
 }
 
@@ -229,6 +231,7 @@ func (s *Service) Start(ctx context.Context, id prompt.ID, source values.Source)
 		if s.current == p {
 			s.current = nil
 		}
+		s.started = startedPrompt{id: id, lesson: lessonID, recording: rec}
 	} else {
 		err = p.StartFailed(problem)
 	}

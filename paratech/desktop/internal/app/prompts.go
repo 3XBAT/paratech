@@ -10,6 +10,7 @@ import (
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/cases/recordingsession"
 	"paratech/desktop/internal/cases/scheduler"
+	"paratech/desktop/internal/domain/recording/recording"
 	"paratech/desktop/internal/domain/recording/values"
 	"paratech/desktop/internal/domain/shared"
 )
@@ -37,6 +38,13 @@ func (p promptRecordings) StartRecording(ctx context.Context, lesson shared.Less
 	return info.ID, err
 }
 
+// IsRunning reports whether recording id is the one in progress and is still starting or capturing: a recording being
+// stopped no longer keeps the popup's «Подключиться» (TASK-405).
+func (p promptRecordings) IsRunning(id shared.RecordingID) bool {
+	info, ok := p.session.Active()
+	return ok && info.ID == id && (info.Status == recording.StatusStarting || info.Status == recording.StatusRecording)
+}
+
 // adviceRelay is the AdviceListener of the recording session: it hands the silent-source advice to the recording
 // prompt, which shows it in the popup (TASK-082). The prompt is wired after the session and only in UI mode; until
 // then, and headless, the advice is only kept by the session.
@@ -54,12 +62,14 @@ func (r *adviceRelay) SourceAdviceChanged(ctx context.Context, id shared.Recordi
 
 // wirePrompts builds the recording prompt on popup and the scheduler that feeds it. UI mode only: headless has no
 // popup, and a scheduler there would mark the announcements as made without showing anything. The popup's
-// «Подключиться» resolves the lesson's subject and its call link through the library, as «Сегодня» does (TASK-370).
+// «Подключиться» resolves the lesson's subject and its call link through the library, as «Сегодня» does (TASK-370),
+// also while the recording started from the popup runs (TASK-405).
 func (c *core) wirePrompts(e env, popup recordingprompt.Popup, log *slog.Logger) error {
 	lessons := sqlite.NewLessonRepository(c.db)
+	recs := promptRecordings{session: c.recordings}
 	prompts, err := recordingprompt.New(recordingprompt.Deps{
 		Settings: sqlite.NewSettingsRepository(c.db), Apps: e.apps(log), Popup: popup,
-		Recordings: promptRecordings{session: c.recordings}, Lessons: lessons, Subjects: c.library, CallLinks: c.library,
+		Recordings: recs, Lessons: lessons, Subjects: c.library, CallLinks: c.library, Running: recs,
 		Clock: e.clock, Sleeper: e.clock, Log: log,
 	}, recordingprompt.DefaultConfig())
 	if err != nil {

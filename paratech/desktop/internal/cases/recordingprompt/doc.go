@@ -19,5 +19,9 @@
 // sound check reads the same setting), and StartManual starts a recording without the popup, linked to the lesson in
 // progress now if there is one; it ends a prompt on offer as started.
 //
+// CallSubject is the popup's «Подключиться» (ADR-0032, TASK-370): the library subject of the offered lesson prompt
+// that keeps a call link, and of the lesson prompt the latest recording was started from while that recording runs
+// (TASK-405, asked through the optional RunningRecordings port). A start from the main window enables nothing.
+//
 // Rules that apply: ARCH-20..27. The prompt's states and rules live in the domain/recording/prompt aggregate.
 package recordingprompt

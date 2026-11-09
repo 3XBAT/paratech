@@ -12,7 +12,7 @@ import (
 // DefaultPollInterval is how often Run looks at the current prompt: an expired one hides at most this late.
 const DefaultPollInterval = 5 * time.Second
 
-// Deps are the ports the Service needs. All are required except Subjects, CallLinks and Log.
+// Deps are the ports the Service needs. All are required except Subjects, CallLinks, Running and Log.
 type Deps struct {
 	Settings   SettingsStore
 	Apps       AudioApps
@@ -24,7 +24,9 @@ type Deps struct {
 	// Subjects and CallLinks let the popup offer «Подключиться» (TASK-370); without either CallSubject offers nothing.
 	Subjects  SubjectResolver
 	CallLinks SubjectCallLinks
-	Log       *slog.Logger // optional: nil discards
+	// Running keeps «Подключиться» on while the recording started from the popup runs (TASK-405); nil: only an offer.
+	Running RunningRecordings
+	Log     *slog.Logger // optional: nil discards
 }
 
 // Config tunes the Service.
