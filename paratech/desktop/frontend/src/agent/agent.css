@@ -148,6 +148,8 @@
 /* A queued request: nothing answers yet, so the dots are still and muted (one breathing indicator at a time). */
 .ag-wait.queued .ag-wdot { background: var(--muted); animation: none; }
 .ag-queued { flex: 1 1 auto; min-width: 0; font-weight: 400; overflow-wrap: break-word; }
+/* «Повторная попытка N из 3» (TASK-399): quiet muted text beside the timer, no box and no colour; it wraps on a narrow panel. */
+.ag-retry { flex: 0 1 auto; min-width: 0; font-weight: 400; overflow-wrap: break-word; }
 .ag-file { display: flex; align-items: center; gap: 8px; }
 .ag-file .i { flex: none; color: var(--muted); }
 .ag-file-kind { color: var(--muted); }

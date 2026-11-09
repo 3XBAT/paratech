@@ -343,7 +343,7 @@ export interface UpdateView {
   progress: boolean;
   /**
    * The attempt number (1..3) of the automatic retry of the step; 0: no retry runs. Missing or invalid from an older
-   * core reads 0. The UI line is TASK-399.
+   * core reads 0. The panel says it as «Повторная попытка N из 3» beside the timer (TASK-399).
    */
   retry: number;
   cards: CardView[];
@@ -1124,7 +1124,7 @@ export interface AgentApi {
   /** The Hub link of the panel; calls no Hub. */
   state(): Promise<AgentState>;
   /**
-   * Starts a request, or queues it behind the running one (queued with a ticket; the waiting row is TASK-399); the
+   * Starts a request, or queues it behind the running one (queued with a ticket: the waiting row of the panel); the
    * outcome comes as updates. A queued question is not a refusal.
    */
   ask(input: AskInput): Promise<AskResult>;

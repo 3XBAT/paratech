@@ -330,10 +330,11 @@ test("a request waits behind a running request of the same chat only while it ha
 });
 
 test("a queued request shows «ждёт предыдущий запрос», the dots and a stop icon for the running one, and no timer", () => {
-  const running = named(1, "EXECUTING");
-  const sent = local({ seq: 2, scope: { ...local({}).scope, threadId: "t1" } });
+  // TASK-399: the row is driven by the ticket of the waiting question, not by the guess of queuedBehind.
+  const plainSent = local({ seq: 2, scope: { ...local({}).scope, threadId: "t1" } });
+  const sent = { ...plainSent, ticket: "q7" };
   const html = renderToStaticMarkup(
-    h(AgentRequest, { model: entryModel(sent, { last: true, blocked: false, queued: queuedBehind([running, sent], sent) !== undefined }), actions, startedAt: undefined }),
+    h(AgentRequest, { model: entryModel(sent, { last: true, blocked: false }), actions, startedAt: undefined }),
   );
   assert.ok(html.includes('<span class="ag-queued small muted">ждёт предыдущий запрос</span>'));
   assert.ok(html.includes("ag-wait queued"));
@@ -344,7 +345,7 @@ test("a queued request shows «ждёт предыдущий запрос», the
   assert.ok(!html.includes("ag-elapsed"));
   assert.equal(texts.queued, "ждёт предыдущий запрос");
   // Not queued: the plain dots, no label, no stop.
-  const plain = renderToStaticMarkup(h(AgentRequest, { model: entryModel(sent, { last: true, blocked: false }), actions }));
+  const plain = renderToStaticMarkup(h(AgentRequest, { model: entryModel(plainSent, { last: true, blocked: false }), actions }));
   assert.ok(!plain.includes("ждёт предыдущий запрос"));
   assert.ok(!plain.includes("Остановить предыдущий запрос"));
   // Running: the same region in the same place with the usual label and animated dots.
@@ -353,7 +354,7 @@ test("a queued request shows «ждёт предыдущий запрос», the
   assert.ok(!plain.includes("ag-wait queued"));
   // Both states start the thread row with the same region, so the polite region announces the change.
   const start = (m) => m.slice(m.indexOf('<div class="ag-think">'), m.indexOf('<div class="ag-think">') + 40);
-  const ticking = renderToStaticMarkup(h(AgentRequest, { model: entryModel(sent, { last: true, blocked: false }), actions, startedAt: 0, clock: () => 5000 }));
+  const ticking = renderToStaticMarkup(h(AgentRequest, { model: entryModel(plainSent, { last: true, blocked: false }), actions, startedAt: 0, clock: () => 5000 }));
   assert.equal(start(html).slice(0, 36), start(ticking).slice(0, 36));
   assert.ok(ticking.includes("ag-elapsed"));
 });
@@ -381,8 +382,8 @@ test("the cut reply line says what is possible: «Ответ оборван. М�
 });
 
 test("the queued label is not an announcement and its stop is disabled while a press is running", () => {
-  const sent = local({ seq: 2 });
-  const model = entryModel(sent, { last: true, blocked: false, queued: true });
+  const sent = local({ seq: 2, ticket: "q7" });
+  const model = entryModel(sent, { last: true, blocked: false });
   const html = renderToStaticMarkup(h(AgentRequest, { model, actions: { ...actions, busy: true } }));
   assert.match(html, /<button[^>]*aria-label="Остановить предыдущий запрос"[^>]*disabled/);
   assert.ok(!/role="status"[^>]*>[^<]*ждёт/.test(html));

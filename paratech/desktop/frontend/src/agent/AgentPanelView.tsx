@@ -3,7 +3,7 @@ import { type RunStarts, syncRunStarts } from "../agentElapsed.js";
 import type { MentionView } from "../bindings/agent.js";
 import { maxDraftLength, maxMentions, mentionTexts } from "../agentMentions.js";
 import { type AgentContext, chatTexts, composerKey, type EarlierItem, entryModel, inputPlacement, type RestartTarget, texts } from "../agentView.js";
-import { blockingEntry, cutFor, draftSize, draftsFor, endSignature, type Entry, orderedEntries, panelMode, type PanelState, queuedBehind } from "../agentState.js";
+import { blockingEntry, cutFor, draftSize, draftsFor, endSignature, type Entry, orderedEntries, panelMode, type PanelState, queueIsFull } from "../agentState.js";
 import { Icon } from "../ui/Icon.js";
 import { AgentRequest, type CardActions } from "./AgentCards.js";
 import type { ContextFill } from "../bindings/agent.js";
@@ -268,7 +268,7 @@ export function AgentPanelView(props: AgentPanelViewProps) {
                 blocked: blockingEntry(entries, e) !== undefined,
                 mentions: props.mentionsFor?.(e),
                 replyCut: cutFor(state, e) !== undefined,
-                queued: queuedBehind(entries, e) !== undefined,
+                queueFull: queueIsFull(entries, e),
               })}
               startedAt={starts[e.seq]}
               clock={props.clock}

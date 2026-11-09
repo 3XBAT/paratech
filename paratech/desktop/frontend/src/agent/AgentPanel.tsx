@@ -1,5 +1,5 @@
 import { type RefObject, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { type AgentApi, agentApi, type AskInput, type CallProblem, type ChatResult, type ChatView, draftEvent as draftEventName, type EarlierRequestView, type ForkResult, parseDraft, parseUpdate, updateEvent, type UpdateView } from "../bindings/agent.js";
+import { type AgentApi, agentApi, type AskInput, type CallProblem, type ChatResult, type ChatView, draftEvent as draftEventName, type EarlierRequestView, type ForkResult, parseDraft, parseUpdate, updateEvent, type UpdateView, type WithdrawResult } from "../bindings/agent.js";
 import { agentConfirmApi } from "../bindings/agentConfirm.js";
 import { answersApi } from "../bindings/answers.js";
 import type { CitationOpening } from "../knowledgeView.js";
@@ -62,11 +62,15 @@ import {
   type RestartStep,
   restoredMentions,
   restoreUnsent,
+  type RetryWatch,
+  retryWatchStep,
   spendRestart,
   startRestart,
+  stoppedOffline,
   type UndoNote,
   undoableActions,
   visibleEntries,
+  withdrawStep,
   withRestart,
   withoutRestartFrom,
   withoutRestarted,
@@ -74,7 +78,7 @@ import {
 import { maxDraftLength } from "../agentMentions.js";
 import { draftEvent, draftText } from "../agentDraft.js";
 import { problemText, undoOutcome } from "../journalView.js";
-import { blockingEntry, type Entry, initialPanelState, loadSnapshot, maxKnownTurn, panelMode, PressTracker, reducePanel, restartOutcome } from "../agentState.js";
+import { blockingEntry, type Entry, hasTicket, initialPanelState, loadSnapshot, maxKnownTurn, panelMode, PressTracker, queueChat, reducePanel, rereadsLink, restartOutcome } from "../agentState.js";
 import { useMentionComposer } from "./useMentionComposer.js";
 import type { PageId } from "../nav.js";
 import type { ButtonId } from "../agentView.js";
@@ -308,6 +312,49 @@ export function AgentPanel(props: {
     [refreshChats],
   );
 
+  // The Hub link as the core reports it (State); a failed read counts as read-only: nothing is sent into the dark.
+  const loadState = useCallback(
+    () =>
+      api.state().then(
+        (link) => dispatch({ type: "link", link }),
+        () => dispatch({ type: "link", link: { link: "unknown", readOnly: true } }),
+      ),
+    [],
+  );
+
+  // Requests whose buttons were pressed, with the update they were pressed on: off until a newer update arrives.
+  // The tracker is read synchronously, so a double click before the next render makes one call.
+  const pressed = useRef(new PressTracker());
+  const [, redraw] = useReducer((n: number) => n + 1, 0);
+
+  // «Повторить» of a request stopped offline: Retry refuses one with no open step (an update with the problem "invalid"),
+  // then Continue is pressed once for the student (retryWatchStep). The refusal update itself is not shown.
+  const retryWatch = useRef<RetryWatch | null>(null);
+  const continueAfterRetry = useCallback(
+    (w: RetryWatch) => {
+      const release = () => {
+        pressed.current.release(w.key);
+        redraw();
+      };
+      api.continueTurn({ threadId: w.threadId, turn: w.turn }).then(
+        (problem) => {
+          setNotice(callProblemText(problem));
+          if (problem !== "") {
+            release();
+          }
+          if (problem === "offline") {
+            void loadState();
+          }
+        },
+        () => {
+          setNotice(callProblemText("failed"));
+          release();
+        },
+      );
+    },
+    [loadState],
+  );
+
   useEffect(() => {
     let off: (() => void) | undefined;
     let closed = false;
@@ -320,7 +367,20 @@ export function AgentPanel(props: {
           setFills((f) => fillsFromUpdate(f, update));
           return;
         }
+        const w = retryWatch.current;
+        const watched = w === null ? "keep" : retryWatchStep(w, update);
+        if (w !== null && watched !== "keep") {
+          retryWatch.current = null;
+          if (watched === "refused") {
+            continueAfterRetry(w);
+            return;
+          }
+        }
         dispatch({ type: "update", update });
+        // A request that stopped for lack of a connection: the banner follows the real link state, not the one request.
+        if (rereadsLink(update)) {
+          void loadState();
+        }
         setFills((f) => fillsFromUpdate(f, update));
         // With no chat open (and the first list read done), the first real update names the chat the request created.
         if (openRef.current === "" && update.threadId !== "" && update.turn > 0 && listDone.current) {
@@ -344,7 +404,7 @@ export function AgentPanel(props: {
       closed = true;
       off?.();
     };
-  }, [refreshChats]);
+  }, [refreshChats, loadState, continueAfterRetry]);
 
   useEffect(() => {
     let off: (() => void) | undefined;
@@ -367,16 +427,6 @@ export function AgentPanel(props: {
       off?.();
     };
   }, []);
-
-  const loadState = useCallback(
-    () =>
-      api.state().then(
-        (link) => dispatch({ type: "link", link }),
-        // No answer reads as read-only: nothing is sent into the dark.
-        () => dispatch({ type: "link", link: { link: "unknown", readOnly: true } }),
-      ),
-    [],
-  );
 
   // State is re-read on window focus and when the section changes.
   useEffect(() => {
@@ -402,9 +452,9 @@ export function AgentPanel(props: {
       dispatch({ type: "asked", id, text: ask.text, scope: ask });
       setNotice("");
       api.ask(ask).then(
-        // A queued question counts as started for now; TASK-399 shows the waiting row.
-        ({ problem }) => {
-          dispatch({ type: "askResult", id, problem });
+        // A queued question is accepted, not refused: it waits under its ticket (the waiting row with «Отменить этот запрос»).
+        ({ problem, queued, ticket }) => {
+          dispatch({ type: "askResult", id, problem, queued, ticket });
           // An offline refusal may be stale: the Hub link decides, not the refusal.
           if (problem === "offline") {
             void loadState();
@@ -608,11 +658,6 @@ export function AgentPanel(props: {
     applyStep(hideRestart(restart, { draft: draftRef.current, pills: pillsRef.current }, block), block === null);
   };
 
-  // Requests whose buttons were pressed, with the update they were pressed on: off until a newer update arrives.
-  // The tracker is read synchronously, so a double click before the next render makes one call.
-  const pressed = useRef(new PressTracker());
-  const [, redraw] = useReducer((n: number) => n + 1, 0);
-
   // What «Отменить» did, per action. The journal itself is «Журнал»; here only the lines of the thread.
   const [undoNotes, setUndoNotes] = useState<Record<string, UndoNote>>({});
   const undoNotesRef = useRef(undoNotes);
@@ -748,6 +793,41 @@ export function AgentPanel(props: {
       revise: () => Promise.resolve("invalid"), // Handled by the plan card, which asks for the wish first.
       resend: () => Promise.resolve("invalid"), // Handled below: it asks again, not a call on this request.
     };
+    // «Отменить этот запрос» of a question waiting under a ticket. One call at a time; the mark stays after "started"
+    // (the update with its ticket replaces the row), and goes after a failure so the icon can be pressed again.
+    const waitingKey = `withdraw:${e.key}`;
+    const waiting = e.update === null && e.callProblem === "" && hasTicket(e);
+    const withdraw = () => {
+      const chat = queueChat(e);
+      if (!waiting || !pressed.current.mark(waitingKey, null)) {
+        return;
+      }
+      redraw();
+      const done = (result: WithdrawResult | "thrown") => {
+        // The question may have started while the call ran: its update has replaced the row, nothing is left to take back.
+        const still = entriesRef.current.some((x) => x.key === e.key && x.update === null);
+        const fieldEmpty = draftRef.current.trim() === "" && pillsRef.current.length === 0;
+        const step = withdrawStep(still ? result : "started", fieldEmpty);
+        if (step.discard) {
+          dispatch({ type: "discard", key: e.key });
+          if (step.restore && e.scope !== null) {
+            setDraft(e.scope.text.slice(0, maxDraftLength));
+            setPills(e.scope.mentions ?? []);
+            focusInput();
+          }
+        }
+        setNotice(step.note);
+        if (result === "failed" || result === "thrown") {
+          pressed.current.release(waitingKey);
+          redraw();
+        }
+      };
+      if (chat === "") {
+        done("thrown"); // the chat of the question is unknown: nothing to take back by id
+        return;
+      }
+      api.withdraw(chat, e.ticket ?? "").then(done, () => done("thrown"));
+    };
     const press = (id: ButtonId) => {
       if (!named) {
         if (id === "stop" && blocking) {
@@ -756,6 +836,9 @@ export function AgentPanel(props: {
           run(() => api.stop({ threadId: blocking.threadId, turn: blocking.turn }), { key: blocking.key, update: blocking.update });
         } else if (id === "resend" && e.scope !== null && e.text !== "" && pressed.current.mark(e.key, e.update)) {
           redraw();
+          // The refused question leaves the thread as it is sent again: it appears once, and the stale «ещё выполняется»
+          // line goes with it (a refusal of the new one shows its own line).
+          dispatch({ type: "discard", key: e.key });
           // A refused restart is started again from the note, not by this button.
           send(withoutRestartFrom(e.scope));
         }
@@ -773,10 +856,22 @@ export function AgentPanel(props: {
         );
         return;
       }
+      if (id === "retry" && stoppedOffline(e.update)) {
+        // Retry refuses an offline stop with no open step: the update that says so makes the panel press Continue once.
+        retryWatch.current = { threadId: e.threadId, turn: e.turn, key: e.key };
+        run(calls[id], {
+          onRefused: () => {
+            retryWatch.current = null;
+          },
+        });
+        return;
+      }
       run(calls[id]);
     };
     return {
       busy,
+      withdraw: waiting ? withdraw : undefined,
+      withdrawBusy: waiting && pressed.current.busy(waitingKey, null),
       confirm,
       turnkey,
       subjects,
@@ -801,7 +896,7 @@ export function AgentPanel(props: {
       },
       undoNote: (actionId) => undoNotes[actionId],
     };
-  }, [state.entries, send, loadState, undoNotes, undoOne, undoAll, undoLatest, undoTarget, restore, subjects, props.onOpenAssignment, props.onOpenMention, props.onOpenSource, offerNav, props.onLibraryChanged]);
+  }, [state.entries, send, loadState, setPills, focusInput, undoNotes, undoOne, undoAll, undoLatest, undoTarget, restore, subjects, props.onOpenAssignment, props.onOpenMention, props.onOpenSource, offerNav, props.onLibraryChanged]);
 
   const sections = useMemo(() => chatSections(chats, state.entries), [chats, state.entries]);
   const openChat = [...sections.active, ...sections.archived].find((r) => r.threadId === openId) ?? null;
