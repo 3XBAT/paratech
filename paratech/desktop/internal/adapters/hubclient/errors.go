@@ -1,6 +1,7 @@
 package hubclient
 
 import (
+	"context"
 	"errors"
 	"net"
 	"time"
@@ -152,6 +153,19 @@ func notConfigured(why error) *Error {
 // quotaExceeded carries no class marker: the job waits for quota, not for a backoff delay. Unmarked errors are
 // transient for backoff.Classify, so a runner that does not park jobs yet still stops at its attempt cap.
 func quotaExceeded(op string) *Error { return &Error{op: op, reason: shared.ErrQuotaExceeded} }
+
+// callerEnd is the error of the caller's own end of a failed call, or nil. The Hub gets the caller's deadline as
+// Connect-Timeout-Ms, truncated to whole milliseconds, so the Hub's end of it can come back before ctx's timer fires:
+// within that millisecond the failure is the caller's deadline, not a Hub timeout.
+func callerEnd(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if dl, ok := ctx.Deadline(); ok && time.Until(dl) < time.Millisecond {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
 
 // mapCallError classifies an error of the generated client by ErrorDetail first and by the Connect code when the
 // detail is missing (errors.proto, ADR-0005(c)). The caller has already handled a done parent context.

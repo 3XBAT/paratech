@@ -155,7 +155,7 @@ func completeAnswer(ctx context.Context, gateway hubv1connect.GatewayServiceClie
 // answerError classifies a failed read like Complete; a permanent provider error is a refused answer. The caller's ctx
 // going away stays its error; a silent or overlong stream (the cause of callCtx) is a timeout.
 func answerError(ctx, callCtx context.Context, err error) error {
-	if perr := ctx.Err(); perr != nil {
+	if perr := callerEnd(ctx); perr != nil {
 		return fmt.Errorf("%s: %w", opAnswer, perr)
 	}
 	if e := watchTimeout(callCtx, opAnswer); e != nil {

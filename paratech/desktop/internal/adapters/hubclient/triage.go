@@ -48,7 +48,7 @@ func (c *Client) TriageAssignment(ctx context.Context, req work.Request) (string
 	creq.Header().Set("Authorization", "Bearer "+key)
 	resp, err := gateway.Complete(callCtx, creq)
 	if err != nil {
-		if perr := ctx.Err(); perr != nil {
+		if perr := callerEnd(ctx); perr != nil {
 			return "", fmt.Errorf("%s: %w", opTriage, perr)
 		}
 		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {

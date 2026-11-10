@@ -52,7 +52,7 @@ func (c *Client) Summarize(ctx context.Context, req agent.SummaryRequest) (strin
 	creq.Header().Set("Authorization", "Bearer "+key)
 	resp, err := gateway.Complete(callCtx, creq)
 	if err != nil {
-		if perr := ctx.Err(); perr != nil {
+		if perr := callerEnd(ctx); perr != nil {
 			return "", fmt.Errorf("%s: %w", opSummary, perr)
 		}
 		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {

@@ -190,6 +190,33 @@ func TestAnswerQuestionCallerEndIsNoTimeout(t *testing.T) {
 	}
 }
 
+// The Hub's end of the caller's deadline (sent truncated to whole milliseconds) can come back before the caller's
+// timer fires; it is still the caller's deadline. The same wire error far from the caller's deadline is a Hub timeout.
+func TestHubEndOfCallerDeadlineIsNoTimeout(t *testing.T) {
+	for _, code := range []connect.Code{connect.CodeDeadlineExceeded, connect.CodeCanceled} {
+		wire := connect.NewWireError(code, errors.New("hub context ended"))
+
+		ctx, cancel := context.WithTimeout(t.Context(), 900*time.Microsecond)
+		errs := map[string]error{
+			"answer": answerError(ctx, ctx, wire),
+			"step":   stepError(ctx, ctx, wire),
+		}
+		cancel()
+		for name, err := range errs {
+			if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrTimeout) {
+				t.Fatalf("%s, %v just before the caller's deadline = %v, want the caller's deadline", name, code, err)
+			}
+		}
+
+		far, cancelFar := context.WithTimeout(t.Context(), time.Hour)
+		err := answerError(far, far, wire)
+		cancelFar()
+		if !errors.Is(err, ErrTimeout) {
+			t.Fatalf("%v an hour before the caller's deadline = %v, want a Hub timeout", code, err)
+		}
+	}
+}
+
 // The unary fallback keeps RequestTimeout as its total cap, on a context of its own: the stream's wait for
 // unimplemented does not count, and AnswerTimeout does not apply. Each wait is under RequestTimeout, both exceed it.
 func TestAnswerQuestionUnaryFallbackKeepsRequestTimeout(t *testing.T) {

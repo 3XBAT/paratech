@@ -43,7 +43,7 @@ func (c *Client) GetRemaining(ctx context.Context) (values.QuotaSnapshot, error)
 	creq.Header().Set("Authorization", "Bearer "+key)
 	resp, err := quota.GetRemaining(callCtx, creq)
 	if err != nil {
-		if perr := ctx.Err(); perr != nil {
+		if perr := callerEnd(ctx); perr != nil {
 			return values.QuotaSnapshot{}, fmt.Errorf("%s: %w", opRemaining, perr)
 		}
 		// Our own deadline: Connect may report it as unavailable or canceled, depending on where the call was.
