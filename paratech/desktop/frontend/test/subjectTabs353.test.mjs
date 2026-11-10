@@ -683,7 +683,7 @@ test("the tab «Пары»: «Импортировать запись» opens th
   assert.match(tab, /onImported=\{props\.onImported\}/);
   assert.match(tab, /variant=\{empty && !importOpen \? "primary" : undefined\}/, "the accent only on an empty tab, and not while the panel is open");
   const tabs = src("pages/SubjectTabs.tsx");
-  assert.match(tabs, /onImported=\{\(\) => setImports\(\(n\) => n \+ 1\)\}/);
+  assert.match(tabs, /onImported=\{\(\) => \{\s*setImports\(\(n\) => n \+ 1\);\s*props\.onImported\?\.\(\);\s*\}\}/, "TASK-430: the page is told too");
   assert.match(tabs, /useSubjectPairs\(kb, props\.subject\.id, props\.lessonsSeen \+ props\.lessonsEdited \+ imports\)/);
 });
 

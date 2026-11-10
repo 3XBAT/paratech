@@ -420,12 +420,11 @@ export function SubjectsPage(props: {
   }, [api, subject?.id, props.reload, changes]);
 
   // The recorded lessons placed in the folders of their kind (TASK-430): read next to the files, on the same triggers, and
-  // again when a lesson screen was left or corrected and when the tab «Файлы» comes on screen (a recording imported on
-  // «Пары» is found there). A reply for another subject never shows: the flow drops it and the state names its subject.
+  // again when a lesson screen was left or corrected and when a recording was imported on «Пары» (SubjectTabs `onImported`).
+  // A reply for another subject never shows: the flow drops it and the state names its subject.
   const lessonsApi = useMemo(() => knowledgeBaseApi(callByName), []);
   const [lessonsRead, setLessonsRead] = useState<FolderLessonsState>(noFolderLessons);
   const lessonsFlow = useRef<FolderLessonsFlow | null>(null);
-  const filesTab = tab === "files";
   useEffect(() => {
     if (subject === null) {
       return;
@@ -439,7 +438,7 @@ export function SubjectsPage(props: {
     } else {
       flow.reread();
     }
-  }, [lessonsApi, subject?.id, props.reload, changes, props.lessonsSeen, props.lessonsEdited, filesTab]);
+  }, [lessonsApi, subject?.id, props.reload, changes, props.lessonsSeen, props.lessonsEdited]);
   useEffect(
     () => () => {
       lessonsFlow.current?.close();
@@ -870,6 +869,7 @@ export function SubjectsPage(props: {
               onOpenLesson={(lesson, opening) => props.onOpenKnowledgeLesson?.(lesson, opening)}
               lessonsSeen={props.lessonsSeen ?? 0}
               lessonsEdited={props.lessonsEdited ?? 0}
+              onImported={() => lessonsFlow.current?.reread()}
               files={
                 <>
                   <div className="tab-acts">
@@ -879,7 +879,7 @@ export function SubjectsPage(props: {
                   </div>
                   {filesFailed && <ErrorLine text={texts.filesFailed} onRefresh={refresh} onRetry={refresh} />}
                   {addLines("")}
-                  <FolderLessonsLine state={folderLessons} onRetry={() => lessonsFlow.current?.open()} />
+                  <FolderLessonsLine state={folderLessons} onRetry={() => lessonsFlow.current?.retry()} />
                   <SubjectDetail
                     subject={subject}
                     materials={materials}

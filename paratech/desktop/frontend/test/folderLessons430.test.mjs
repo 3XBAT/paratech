@@ -26,7 +26,7 @@ import { FolderLessonRows, FolderLessonsNotice, lessonRowOpening } from "../.tes
 import { SubjectDetail, SubjectTree } from "../.test-build/pages/SubjectsParts.js";
 import { IconAction } from "../.test-build/ui/IconAction.js";
 import { lessonChip, lessonMarks } from "../.test-build/subjectTabsView.js";
-import { noFocus } from "../.test-build/knowledgeView.js";
+import { lessonHeading, noFocus } from "../.test-build/knowledgeView.js";
 import { ariaLabels, buttonTag, visibleText } from "./iconbtn.mjs";
 
 const noop = () => undefined;
@@ -134,14 +134,19 @@ test("the head of a section: only the non-zero parts, with the plurals of «па
   assert.equal(folderHeadCount(0, 0), "");
 });
 
-test("the title and the muted line of a row: the title or «Запись 21.10», «21.10 · 1 ч 20 мин»", () => {
+test("the title and the muted line of a row: a real title with «21.10 · 1 ч 20 мин»; no title: the heading of the lesson screen and only the length", () => {
   assert.equal(folderLessonTitle(lesson({ title: "Пределы" })), "Пределы");
-  assert.equal(folderLessonTitle(lesson({ title: "  " })), "Запись 21.10");
+  // The same words as the heading of the lesson screen («Запись 21.10 14:05»; the clock is of the local zone).
+  assert.equal(folderLessonTitle(lesson({ title: "  " })), lessonHeading(lesson({ title: "" })));
+  assert.match(folderLessonTitle(lesson({ title: "  " })), /^Запись 21\.10 \d{2}:\d{2}$/);
   assert.equal(folderLessonTitle(lesson({ title: "", startedAt: "" })), "Запись");
-  assert.equal(folderLessonMeta(lesson()), "21.10 · 1 ч 20 мин");
-  assert.equal(folderLessonMeta(lesson({ durationSeconds: 0 })), "21.10", "an unknown length is left out");
-  assert.equal(folderLessonMeta(lesson({ startedAt: "", durationSeconds: 600 })), "10 мин");
-  assert.equal(folderLessonMeta(lesson({ startedAt: "", durationSeconds: 0 })), "");
+  assert.equal(folderLessonMeta(lesson({ title: "Пределы" })), "21.10 · 1 ч 20 мин");
+  assert.equal(folderLessonMeta(lesson({ title: "Пределы", durationSeconds: 0 })), "21.10", "an unknown length is left out");
+  assert.equal(folderLessonMeta(lesson({ title: "Пределы", startedAt: "", durationSeconds: 600 })), "10 мин");
+  assert.equal(folderLessonMeta(lesson({ title: "Пределы", startedAt: "", durationSeconds: 0 })), "");
+  // No title: the name already carries the date, so the line has the length only.
+  assert.equal(folderLessonMeta(lesson()), "1 ч 20 мин");
+  assert.equal(folderLessonMeta(lesson({ title: " ", durationSeconds: 0 })), "");
 });
 
 // ---- the section on the page ----
@@ -149,8 +154,8 @@ test("the title and the muted line of a row: the title or «Запись 21.10»
 test("one processed lecture: the section «Лекции · 1 пара» has the row; «Пусто:» no longer lists «Лекции»", () => {
   const out = html(detail({ lessons: [row()] }));
   assert.match(out, /<h2 class="sec-h">Лекции <span class="cnt num">· 1 пара<\/span>/);
-  assert.match(out, />Запись 21\.10</);
-  assert.match(out, /21\.10 · 1 ч 20 мин/);
+  assert.match(out, />Запись 21\.10 \d{2}:\d{2}</);
+  assert.match(out, /<span class="lm num">1 ч 20 мин<\/span>/, "no title: the date is in the name, not in the line");
   const line = out.slice(out.indexOf("Пусто:"));
   assert.doesNotMatch(line, /Лекции/);
   assert.match(line, /Семинары[\s\S]*Лабораторные/);
@@ -169,6 +174,7 @@ test("link rows come before the files of the folder; the head says both counts",
   assert.match(out, /Лекции <span class="cnt num">· 2 пары · 1 файл<\/span>/);
   assert.ok(out.indexOf("lrow-lesson") < out.indexOf("лекция.pdf"), "rows first");
   assert.ok(out.indexOf("Запись 21.10") < out.indexOf("Ряды"), "the core's order (newest first) is kept");
+  assert.match(out, /<span class="lm num">21\.10 · 1 ч 20 мин<\/span>/, "a real title keeps the date in the line");
   assert.equal((out.match(/class="lrow lrow-lesson"/g) ?? []).length, 2);
   // One card holds both lists.
   assert.equal((out.match(/class="card lrows"/g) ?? []).length, 1);
@@ -213,12 +219,14 @@ test("a row is one button that opens the lesson screen on its default tab", () =
   assert.deepEqual(noFocus, { tab: "notes", index: -1 }, "the screen chooses its tab (openingTab)");
 });
 
-test("«Открыть конспект» opens the tab «Конспект», «Открыть запись» the tab «Расшифровка»; both are icons with tooltips", () => {
+test("«Открыть конспект» opens the tab «Конспект», «Открыть расшифровку и аудио» the tab «Расшифровка»; both are icons named after the lesson, with short tooltips", () => {
   const opened = [];
-  const tree = FolderLessonRows({ rows: [row()], onOpen: (l, o) => opened.push([l.key, o.focus, o.materialId, o.editing]) });
+  const named = row("fl", "lectures", { title: "Пределы" });
+  const tree = FolderLessonRows({ rows: [named], onOpen: (l, o) => opened.push([l.key, o.focus, o.materialId, o.editing]) });
   const actions = findAll(tree, (n) => n.type === IconAction);
-  assert.deepEqual(actions.map((a) => a.props.label), ["Открыть конспект", "Открыть запись"]);
-  assert.deepEqual(actions.map((a) => a.props.icon), ["doc", "play"]);
+  assert.deepEqual(actions.map((a) => a.props.label), ["Открыть конспект: Пределы", "Открыть расшифровку и аудио: Пределы"]);
+  assert.deepEqual(actions.map((a) => a.props.tipText), ["Открыть конспект", "Открыть расшифровку и аудио"]);
+  assert.deepEqual(actions.map((a) => a.props.icon), ["doc", "wave"], "the wave, not a play button: nothing is played here");
   for (const a of actions) {
     a.props.onClick();
   }
@@ -228,14 +236,28 @@ test("«Открыть конспект» opens the tab «Конспект», «
   ]);
   assert.deepEqual(lessonRowOpening("transcript").focus, { tab: "transcript", index: -1 });
   assert.deepEqual(lessonRowOpening().focus, noFocus);
-  // Markup: the name is the aria-label, the same words are the tooltip, nothing but the icon is visible on them.
-  const out = html(h(FolderLessonRows, { rows: [row()], onOpen: noop }));
-  assert.deepEqual(ariaLabels(out), ["Открыть конспект", "Открыть запись"]);
+  // Markup: the aria-label names the lesson, the tooltip is the short phrase, nothing but the icon is visible on them.
+  const out = html(h(FolderLessonRows, { rows: [named], onOpen: noop }));
+  assert.deepEqual(ariaLabels(out), ["Открыть конспект: Пределы", "Открыть расшифровку и аудио: Пределы"]);
   assert.match(out, /<span class="ia-tip" aria-hidden="true">Открыть конспект<\/span>/);
-  assert.match(out, /<span class="ia-tip" aria-hidden="true">Открыть запись<\/span>/);
+  assert.match(out, /<span class="ia-tip" aria-hidden="true">Открыть расшифровку и аудио<\/span>/);
   assert.equal(folderLessonTexts.openSummary, "Открыть конспект");
-  assert.equal(folderLessonTexts.openRecording, "Открыть запись");
+  assert.equal(folderLessonTexts.openRecording, "Открыть расшифровку и аудио");
   assert.doesNotMatch(visibleText(out), /Открыть/);
+  // A lesson with no title is named by its heading («Запись 21.10 14:05»).
+  const untitled = html(h(FolderLessonRows, { rows: [row()], onOpen: noop }));
+  assert.match(ariaLabels(untitled)[1], /^Открыть расшифровку и аудио: Запись 21\.10 \d{2}:\d{2}$/);
+});
+
+test("the row button says what else is on the lesson screen; «новое» shows as on the tab «Пары»", () => {
+  const out = html(h(FolderLessonRows, { rows: [row()], onOpen: noop }));
+  assert.equal(folderLessonTexts.openRow, "Открыть пару. Предмет, тип пары и удаление — на экране пары, в меню «⋯».");
+  assert.match(out, /<button type="button" class="lrow-open" title="Открыть пару\. Предмет, тип пары и удаление — на экране пары, в меню «⋯»\.">/);
+  assert.doesNotMatch(out, /class="fresh"/, "no mark without the overview's word");
+  const marks = lessonMarks([{ recordingId: "r1", status: "summaryReady", summaryNew: true }, { recordingId: "r2", status: "summaryReady", summaryNew: false }]);
+  const fresh = html(h(FolderLessonRows, { rows: [row(), row("fl", "lectures", { key: "recording:r2", recordingId: "r2" })], marks, onOpen: noop }));
+  assert.equal((fresh.match(/<span class="fresh">новое<\/span>/g) ?? []).length, 1, "only the new summary");
+  assert.match(fresh, /<button type="button" class="lrow-open"[^>]*>[^]*?<span class="fresh">новое<\/span>[^]*?<\/button>/, "inside the row button, spans only");
 });
 
 test("the keyboard reaches the row and both icons as plain buttons, and no button sits inside another", () => {
@@ -243,7 +265,7 @@ test("the keyboard reaches the row and both icons as plain buttons, and no butto
   assert.equal((out.match(/<button\b/g) ?? []).length, 5, "row + 2 icons, row + 1 icon");
   assert.doesNotMatch(out, /tabindex/, "no tab stop is taken away");
   assert.doesNotMatch(out, /<button\b(?:(?!<\/button>)[^])*<button\b/, "the icons are siblings of the row button");
-  const tag = out.match(/<button type="button" class="lrow-open">/);
+  const tag = out.match(/<button type="button" class="lrow-open"[^>]*>/);
   assert.ok(tag, "the whole row is a type=button");
   // A button is activated by Enter and Space by the browser; the row adds no key handler of its own.
   assert.doesNotMatch(code("pages/FolderLessonRows.tsx"), /onKeyDown|onKeyUp|onKeyPress|role="button"/);
@@ -251,7 +273,8 @@ test("the keyboard reaches the row and both icons as plain buttons, and no butto
 
 test("«Открыть конспект» only when the summary is ready; «Открыть запись» always", () => {
   const out = html(h(FolderLessonRows, { rows: [row("fl", "lectures", { summaryReady: false, transcriptReady: false })], onOpen: noop }));
-  assert.deepEqual(ariaLabels(out), ["Открыть запись"]);
+  assert.equal(ariaLabels(out).length, 1);
+  assert.match(ariaLabels(out)[0], /^Открыть расшифровку и аудио: /);
 });
 
 test("no «⋯», no drag, no checkbox, no move or delete on a row", () => {
@@ -276,7 +299,7 @@ test("the quiet status shows only while the lesson is not processed: icon and te
   assert.equal(lessonChip("recorded").label, "В обработке");
   assert.equal(out.includes("lrow-open"), true);
   // The chip lives inside the row button, so a click on it opens the lesson too (spans only).
-  assert.match(out, /<button type="button" class="lrow-open">[^]*?chip-text[^]*?<\/button>/);
+  assert.match(out, /<button type="button" class="lrow-open"[^>]*>[^]*?chip-text[^]*?<\/button>/);
 });
 
 test("the title is a text node: markup in it stays text", () => {
@@ -303,6 +326,45 @@ test("a failed read: a quiet line with an icon «Повторить» (tooltip a
   assert.deepEqual(calls, ["retry"]);
 });
 
+test("a failed re-read: the rows stay, the line says the list did not update, with the same icon «Повторить»", () => {
+  const out = html(h(FolderLessonsNotice, { failed: false, stale: true, slow: false, onRetry: noop }));
+  assert.equal(folderLessonTexts.stale, "Список пар не обновился: изменения могут пока не отображаться.");
+  assert.match(out, /<p class="result s-wait" role="status"><svg[^>]*>[^]*?<\/svg><span>Список пар не обновился: изменения могут пока не отображаться\.<\/span><\/p>/);
+  assert.deepEqual(ariaLabels(out), ["Повторить"]);
+  assert.doesNotMatch(out, /Не удалось загрузить пары предмета/);
+  assert.equal(visibleText(out), folderLessonTexts.stale);
+  // The first-read failure keeps its own words and is told apart from it.
+  assert.match(html(h(FolderLessonsNotice, { failed: true, stale: false, slow: false, onRetry: noop })), /Не удалось загрузить пары предмета\./);
+});
+
+test("«Повторить» running: the line and its icon stay mounted (off, but focusable) and the text is «Загрузка пар…»", () => {
+  for (const failed of [true, false]) {
+    const out = html(h(FolderLessonsNotice, { failed, stale: !failed, retrying: true, slow: false, onRetry: noop }));
+    assert.match(out, /<p class="small muted" role="status">Загрузка пар…<\/p>/);
+    assert.doesNotMatch(out, /Не удалось|не обновился/);
+    assert.deepEqual(ariaLabels(out), ["Повторить"], "the icon is still there");
+    // aria-disabled, not `disabled`: a button that is `disabled` may drop the keyboard focus.
+    assert.match(buttonTag(out, "Повторить"), /aria-disabled="true"/);
+    assert.doesNotMatch(buttonTag(out, "Повторить"), /\sdisabled(=|\s|>)/);
+    // A click while it runs is ignored.
+    const calls = [];
+    const tree = FolderLessonsNotice({ failed, stale: !failed, retrying: true, slow: false, onRetry: () => calls.push("x") });
+    const icon = findAll(tree, (n) => n.type === IconAction)[0];
+    assert.equal(icon.props.disabled, true);
+    assert.equal(icon.props.disabledReason, "Загрузка пар…");
+  }
+  // The line goes only after the reply: neither failed nor stale shows nothing.
+  assert.equal(html(h(FolderLessonsNotice, { failed: false, stale: false, retrying: false, slow: false, onRetry: noop })), "");
+});
+
+test("the line of the page keeps a box that takes the focus when «Повторить» had it and the line went away", () => {
+  const line = code("pages/FolderLessonRows.tsx");
+  assert.match(line, /<div ref=\{box\} className="lrow-notice" tabIndex=\{-1\}>/);
+  assert.match(line, /keep\.current = box\.current\?\.contains\(document\.activeElement\) \?\? false;/);
+  assert.match(line, /box\.current\?\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(code("pages/SubjectsPage.tsx"), /onRetry=\{\(\) => lessonsFlow\.current\?\.retry\(\)\}/, "a retry is not a new opening: the line does not unmount");
+});
+
 test("a slow read shows a small «Загрузка пар…»; a quick read and a settled one show nothing", () => {
   assert.match(html(h(FolderLessonsNotice, { failed: false, slow: true, onRetry: noop })), /<p class="small muted" role="status">Загрузка пар…<\/p>/);
   assert.equal(html(h(FolderLessonsNotice, { failed: false, slow: false, onRetry: noop })), "");
@@ -323,29 +385,70 @@ function deferred() {
 }
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
-test("the flow reads the rows of its subject: unknown first, then the rows; a failure makes them unknown again and says so", async () => {
+const state = (rows, over = {}) => ({ subjectId: "s1", rows, failed: false, stale: false, retrying: false, ...over });
+
+test("the flow reads the rows of its subject: unknown first, then the rows; a failed FIRST read leaves them unknown and says so", async () => {
   const states = [];
   const replies = [];
   const api = { folderLessons: (id) => { const d = deferred(); replies.push([id, d]); return d.promise; } };
   const flow = new FolderLessonsFlow(api, "s1", (s) => states.push(s));
   flow.open();
-  assert.deepEqual(states, [{ subjectId: "s1", rows: null, failed: false }]);
+  assert.deepEqual(states, [state(null)]);
+  replies[0][1].reject(new Error("first"));
+  await settle();
+  assert.deepEqual(states[1], state(null, { failed: true }));
+  // «Повторить» keeps the line (retrying) and does not go back to «not known and not failed».
+  flow.retry();
+  assert.deepEqual(states[2], state(null, { failed: true, retrying: true }));
+  replies[1][1].reject(new Error("again"));
+  await settle();
+  assert.deepEqual(states[3], state(null, { failed: true }), "still the first-read failure");
+  flow.retry();
+  replies[2][1].resolve([row()]);
+  await settle();
+  assert.deepEqual(states.at(-1), state([row()]), "a successful reply clears the line");
+  assert.deepEqual(replies.map((r) => r[0]), ["s1", "s1", "s1"]);
+});
+
+test("a failed RE-read keeps the rows already shown and marks them stale; a later success clears the mark", async () => {
+  const states = [];
+  const replies = [];
+  const api = { folderLessons: (id) => { const d = deferred(); replies.push([id, d]); return d.promise; } };
+  const flow = new FolderLessonsFlow(api, "s1", (s) => states.push(s));
+  flow.open();
   replies[0][1].resolve([row()]);
   await settle();
-  assert.deepEqual(states[1], { subjectId: "s1", rows: [row()], failed: false });
+  assert.deepEqual(states[1], state([row()]));
   // A re-read keeps what is shown meanwhile (no state until the reply).
   flow.reread();
   assert.equal(states.length, 2);
   replies[1][1].reject(new Error("x"));
   await settle();
-  assert.deepEqual(states[2], { subjectId: "s1", rows: null, failed: true });
-  // «Повторить» is a first reading: unknown again, then the answer.
-  flow.open();
-  assert.deepEqual(states[3], { subjectId: "s1", rows: null, failed: false });
-  replies[2][1].resolve([]);
+  assert.deepEqual(states[2], state([row()], { stale: true }));
+  assert.equal(states[2].failed, false, "only the first read may end in «rows: null, failed»");
+  // Counts and «Пусто:» go on with the kept rows.
+  assert.equal(folderCounts(subject.folders, [], states[2].rows).get("fl"), 1);
+  assert.equal(foldEmptyFolders(subject.folders, [], new Set(), states[2].rows).shown.length, 1);
+  // A second failed re-read keeps them too.
+  flow.reread();
+  replies[2][1].reject(new Error("y"));
   await settle();
-  assert.deepEqual(states[4], { subjectId: "s1", rows: [], failed: false });
-  assert.deepEqual(replies.map((r) => r[0]), ["s1", "s1", "s1"]);
+  assert.deepEqual(states.at(-1), state([row()], { stale: true }));
+  // «Повторить» of the stale line: the line and the rows stay while it runs.
+  flow.retry();
+  assert.deepEqual(states.at(-1), state([row()], { stale: true, retrying: true }));
+  replies[3][1].reject(new Error("z"));
+  await settle();
+  assert.deepEqual(states.at(-1), state([row()], { stale: true }));
+  flow.retry();
+  replies[4][1].resolve([row(), row("fl", "lectures", { key: "recording:b", recordingId: "b" })]);
+  await settle();
+  assert.deepEqual(states.at(-1).stale, false);
+  assert.equal(states.at(-1).rows.length, 2);
+  assert.equal(states.at(-1).retrying, false);
+  // A new opening starts from «not known» again.
+  flow.open();
+  assert.deepEqual(states.at(-1), state(null));
 });
 
 test("a late reply of another subject never shows: a closed flow and an older read are dropped", async () => {
@@ -389,10 +492,11 @@ test("a late reply of another subject never shows: a closed flow and an older re
 });
 
 test("the page shows only the rows read for the subject on screen", () => {
-  const read = { subjectId: "s1", rows: [row()], failed: false };
+  const read = state([row()]);
   assert.equal(folderLessonsFor(read, "s1"), read);
-  assert.deepEqual(folderLessonsFor(read, "s2"), { subjectId: "s2", rows: null, failed: false });
-  assert.deepEqual(folderLessonsFor({ subjectId: "s1", rows: null, failed: true }, "s2"), { subjectId: "s2", rows: null, failed: false }, "a failure of another subject is not shown");
+  assert.deepEqual(folderLessonsFor(read, "s2"), state(null, { subjectId: "s2" }));
+  assert.deepEqual(folderLessonsFor(state(null, { failed: true }), "s2"), state(null, { subjectId: "s2" }), "a failure of another subject is not shown");
+  assert.deepEqual(folderLessonsFor(state([row()], { stale: true, retrying: true }), "s2"), state(null, { subjectId: "s2" }), "nor a stale mark");
   assert.deepEqual(folderLessonsFor(noFolderLessons, ""), noFolderLessons);
 });
 
@@ -403,10 +507,15 @@ test("the page reads the rows next to the files on the same triggers and after t
   assert.match(page, /knowledgeBaseApi\(callByName\)/);
   assert.match(page, /new FolderLessonsFlow\(lessonsApi, subject\.id, setLessonsRead\)/);
   assert.match(page, /flow\.open\(\);[^]*?\} else \{\s*flow\.reread\(\);/, "another subject: a first reading; the same one: a re-read");
-  assert.match(page, /\[lessonsApi, subject\?\.id, props\.reload, changes, props\.lessonsSeen, props\.lessonsEdited, filesTab\]/);
+  assert.match(page, /\[lessonsApi, subject\?\.id, props\.reload, changes, props\.lessonsSeen, props\.lessonsEdited\]/);
+  assert.doesNotMatch(page, /filesTab/, "no re-read at every visit of the tab «Файлы»: the import tells the page itself");
+  assert.match(page, /onImported=\{\(\) => lessonsFlow\.current\?\.reread\(\)\}/, "a recording imported on «Пары» re-reads the folder rows");
+  const tabs = src("pages/SubjectTabs.tsx");
+  assert.match(tabs, /onImported\?: \(\) => void;/);
+  assert.match(tabs, /setImports\(\(n\) => n \+ 1\);\s*props\.onImported\?\.\(\);/, "called next to the counter bump");
   assert.match(page, /const folderLessons = folderLessonsFor\(lessonsRead, subject\?\.id \?\? ""\);/);
   assert.match(page, /folderCounts\(subject\.folders, materials, lessonRows\)/);
-  assert.match(page, /<FolderLessonsLine state=\{folderLessons\} onRetry=\{\(\) => lessonsFlow\.current\?\.open\(\)\} \/>/);
+  assert.match(page, /<FolderLessonsLine state=\{folderLessons\} onRetry=\{\(\) => lessonsFlow\.current\?\.retry\(\)\} \/>/);
   assert.match(page, /lessons=\{lessonRows\}\s+lessonMarks=\{lessonStatuses\}\s+onOpenLesson=\{\(lesson, opening\) => props\.onOpenKnowledgeLesson\?\.\(lesson, opening\)\}/);
   assert.match(page, /lessonsFlow\.current\?\.close\(\);/, "the flow is closed when the page goes");
   // The files effect is unchanged beside it.
@@ -421,6 +530,7 @@ test("the section head shows the counts as num text and the row layout adds no f
   for (const r of rules.filter((x) => /\.lrow-(open|lesson|tx)/.test(x.selector))) {
     assert.doesNotMatch(r.decls, /border(?!: 0)[^;]*:|box-shadow|background: var\(--(accent|ok|rec|wait)/, r.selector);
   }
-  assert.match(css, /\.lrow-open:hover \{ background: var\(--fill\); \}/);
+  assert.match(css, /\.lrow-lesson:hover \{ background: var\(--fill\); \}/, "the hover covers the whole row, icons included");
+  assert.doesNotMatch(css, /\.lrow-open:hover/);
   assert.equal(texts.emptyFolders, "Пусто:");
 });

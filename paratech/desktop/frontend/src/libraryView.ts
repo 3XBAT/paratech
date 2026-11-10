@@ -4,6 +4,7 @@
 import { type KnowledgeBaseApi, type KnowledgeFolderLesson, type KnowledgeLesson, lessonFolderSystems } from "./bindings/knowledgeBase.js";
 import type { LibraryApi, LibraryFolder, LibraryMaterial, LibrarySubject, SubjectOverview, SubjectSlot } from "./bindings/library.js";
 import { durationText } from "./durationEstimate.js";
+import { lessonHeading } from "./knowledgeView.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 
 export const texts = {
@@ -203,58 +204,69 @@ export function folderHeadCount(pairs: number, files: number): string {
 
 export const folderLessonTexts = {
   failed: "Не удалось загрузить пары предмета.",
+  stale: "Список пар не обновился: изменения могут пока не отображаться.",
   retry: "Повторить",
   loading: "Загрузка пар…",
   openSummary: "Открыть конспект",
-  openRecording: "Открыть запись",
+  openRecording: "Открыть расшифровку и аудио",
+  openRow: "Открыть пару. Предмет, тип пары и удаление — на экране пары, в меню «⋯».",
 } as const;
 
-/** The title of a link row: the title of the recording, else «Запись 21.10» (just «Запись» when the date is unknown). */
+/** The title of a link row: the one of the lesson screen (the recorded or typed title, else «Запись 21.10 14:05»). */
 export function folderLessonTitle(l: Pick<KnowledgeLesson, "title" | "startedAt">): string {
-  const t = l.title.trim();
-  if (t !== "") {
-    return t;
-  }
-  const day = dayMonth(l.startedAt);
-  return day === "" ? "Запись" : `Запись ${day}`;
+  return lessonHeading(l);
 }
 
-/** The muted line of a link row: «21.10 · 1 ч 20 мин»; the parts that are unknown are left out. */
-export function folderLessonMeta(l: Pick<KnowledgeLesson, "startedAt" | "durationSeconds">): string {
-  return [dayMonth(l.startedAt), l.durationSeconds > 0 ? durationText(l.durationSeconds) : ""].filter((p) => p !== "").join(" · ");
+/**
+ * The muted line of a link row: «21.10 · 1 ч 20 мин»; the parts that are unknown are left out. A row with no title of its
+ * own already carries the date and the time in its name, so the line keeps only the length.
+ */
+export function folderLessonMeta(l: Pick<KnowledgeLesson, "title" | "startedAt" | "durationSeconds">): string {
+  const day = l.title.trim() === "" ? "" : dayMonth(l.startedAt);
+  return [day, l.durationSeconds > 0 ? durationText(l.durationSeconds) : ""].filter((p) => p !== "").join(" · ");
 }
 
 /** What the page knows of the link rows of a subject; `subjectId` is the subject the rows were read for. */
 export interface FolderLessonsState {
   subjectId: string;
   rows: FolderLessons;
-  /** The last read failed: the page says so with «Повторить»; `rows` is null then. */
+  /** The first read failed: the page says so with «Повторить»; `rows` is null then. */
   failed: boolean;
+  /** A re-read failed: `rows` are the previous ones, still shown, and the page says they may be out of date. */
+  stale: boolean;
+  /** «Повторить» is running: the line stays (its button keeps the focus) and says that the list is loading. */
+  retrying: boolean;
 }
 
-export const noFolderLessons: FolderLessonsState = { subjectId: "", rows: null, failed: false };
+export const noFolderLessons: FolderLessonsState = { subjectId: "", rows: null, failed: false, stale: false, retrying: false };
 
 /** The state as far as it belongs to `subjectId`: what was read for another subject is «not known yet», never shown. */
 export function folderLessonsFor(state: FolderLessonsState, subjectId: string): FolderLessonsState {
-  return state.subjectId === subjectId ? state : { subjectId, rows: null, failed: false };
+  return state.subjectId === subjectId ? state : { ...noFolderLessons, subjectId };
 }
 
 /**
  * Reads the link rows of one subject. `open` starts with «not known» and reads; `reread` reads again and keeps what is
- * shown meanwhile (a change on the page, a lesson screen left); a failed read makes the rows unknown again and says so.
- * A reply that came after a newer read, or after `close`, is dropped, so a late reply of the previous subject never shows.
+ * shown meanwhile (a change on the page, a lesson screen left). Only the first read may end with the rows unknown
+ * (`failed`); a failed re-read keeps the rows it has and marks them `stale`. `retry` is «Повторить»: it reads again with
+ * the line staying (`retrying`). A reply that came after a newer read, or after `close`, is dropped, so a late reply of
+ * the previous subject never shows.
  */
 export class FolderLessonsFlow {
   private token = 0;
+  private current: FolderLessonsState;
 
   constructor(
     private readonly api: Pick<KnowledgeBaseApi, "folderLessons">,
     readonly subjectId: string,
     private readonly onChange: (s: FolderLessonsState) => void,
-  ) {}
+  ) {
+    this.current = { ...noFolderLessons, subjectId };
+  }
 
   open(): void {
-    this.onChange({ subjectId: this.subjectId, rows: null, failed: false });
+    this.current = { ...noFolderLessons, subjectId: this.subjectId };
+    this.onChange(this.current);
     this.read(++this.token);
   }
 
@@ -262,20 +274,31 @@ export class FolderLessonsFlow {
     this.read(++this.token);
   }
 
+  retry(): void {
+    this.emit({ ...this.current, retrying: true });
+    this.read(++this.token);
+  }
+
   close(): void {
     this.token++;
+  }
+
+  private emit(s: FolderLessonsState): void {
+    this.current = s;
+    this.onChange(s);
   }
 
   private read(mine: number): void {
     this.api.folderLessons(this.subjectId).then(
       (rows) => {
         if (mine === this.token) {
-          this.onChange({ subjectId: this.subjectId, rows, failed: false });
+          this.emit({ ...noFolderLessons, subjectId: this.subjectId, rows });
         }
       },
       () => {
         if (mine === this.token) {
-          this.onChange({ subjectId: this.subjectId, rows: null, failed: true });
+          const kept = this.current.rows;
+          this.emit({ ...noFolderLessons, subjectId: this.subjectId, rows: kept, failed: kept === null, stale: kept !== null });
         }
       },
     );
