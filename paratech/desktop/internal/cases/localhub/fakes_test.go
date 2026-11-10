@@ -252,6 +252,7 @@ type fakeClock struct {
 	mu     sync.Mutex
 	now    time.Time
 	sleeps int
+	slept  []time.Duration
 }
 
 func (c *fakeClock) Now() time.Time {
@@ -267,6 +268,7 @@ func (c *fakeClock) Sleep(ctx context.Context, d time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sleeps++
+	c.slept = append(c.slept, d)
 	c.now = c.now.Add(d)
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"paratech/desktop/internal/domain/localhub/values"
 )
@@ -218,6 +219,124 @@ func TestDatabaseStartFailureIsRemembered(t *testing.T) {
 			}
 			if st, _ := w.svc.Status(context.Background()); st.State != values.StatusRunning {
 				t.Fatalf("status = %+v", st)
+			}
+		})
+	}
+}
+
+func TestDatabaseFailureClearedDuringTheStartIsNotRemembered(t *testing.T) {
+	boom := errors.New("compose failed")
+	// Each clears the memory while the failing start blocks, then releases it.
+	clearings := map[string]func(*testing.T, *world){
+		"new database url": func(t *testing.T, w *world) {
+			if err := w.svc.SetSecret(context.Background(), "database-url", "postgres://fake@127.0.0.1:5432/hub"); err != nil {
+				t.Fatal(err)
+			}
+			close(w.database.release)
+		},
+		"recheck": func(t *testing.T, w *world) {
+			errs := make(chan error, 1)
+			go func() { _, err := w.svc.Recheck(context.Background()); errs <- err }()
+			waitFor(t, func() bool {
+				w.svc.mu.Lock()
+				defer w.svc.mu.Unlock()
+				return w.svc.flight != nil && w.svc.flight.joined == 2
+			})
+			close(w.database.release)
+			// The Recheck joined the running start, so it gets that start's failure.
+			if err := <-errs; !errors.Is(err, boom) {
+				t.Fatalf("Recheck err = %v", err)
+			}
+		},
+	}
+	for name, act := range clearings {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t, localURL)
+			withDatabase(w)
+			w.database.err = boom
+			w.database.entered = make(chan struct{}, 2)
+			w.database.release = make(chan struct{})
+
+			done := make(chan error, 1)
+			go func() { _, err := w.svc.Ensure(context.Background()); done <- err }()
+			<-w.database.entered
+			// The blocked call has read its error already; the next one succeeds.
+			w.database.mu.Lock()
+			w.database.err = nil
+			w.database.mu.Unlock()
+			act(t, w)
+			if err := <-done; !errors.Is(err, boom) {
+				t.Fatalf("err = %v", err)
+			}
+
+			// The next automatic check starts the database again, and the Hub follows.
+			st, err := w.svc.Ensure(context.Background())
+			if err != nil || st.State != values.StatusRunning {
+				t.Fatalf("Ensure = %+v, %v", st, err)
+			}
+			if w.database.callCount() != 2 || w.launcher.startCount() != 1 {
+				t.Fatalf("database starts %d, hub starts %d; want 2 and 1", w.database.callCount(), w.launcher.startCount())
+			}
+		})
+	}
+}
+
+func TestDegradedHubReadyAfterTheDatabaseStarts(t *testing.T) {
+	degraded := dbDown()
+	degraded.Healthz, degraded.Listener = true, values.ListenerOurs
+	notReady := dbUp() // the port answers, /readyz lags
+	notReady.Healthz, notReady.Listener = true, values.ListenerOurs
+	ready := answering()
+	ready.DatabaseStartable = true
+
+	tests := []struct {
+		name   string
+		up     func(*world)
+		want   Status
+		sleeps int
+	}{
+		{
+			name: "ready after a few polls",
+			// The port wait sees the first, two polls more stay unready, the third is ready.
+			up:     func(w *world) { w.probe.set(ready); w.probe.queue(notReady, notReady, notReady) },
+			want:   Status{State: values.StatusRunning, Port: 8080, URL: localURL},
+			sleeps: 3,
+		},
+		{
+			name:   "never ready",
+			up:     func(w *world) { w.probe.set(notReady) },
+			want:   Status{State: values.StatusDegraded, Reason: values.ReasonDatabaseDown, Next: values.NextStartDatabase, Port: 8080, URL: localURL},
+			sleeps: int(readyTimeout / time.Second),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newWorld(t, localURL)
+			w.probe.set(degraded)
+			w.database.up = func() { tt.up(w) }
+
+			st, err := w.svc.Ensure(context.Background())
+			if err != nil || st != tt.want {
+				t.Fatalf("Ensure = %+v, %v; want %+v", st, err, tt.want)
+			}
+			if w.clock.sleeps != tt.sleeps {
+				t.Fatalf("sleeps = %d, want %d", w.clock.sleeps, tt.sleeps)
+			}
+			for _, d := range w.clock.slept {
+				if d != time.Second {
+					t.Fatalf("slept %v, want polls of 1 s", d)
+				}
+			}
+			if w.database.callCount() != 1 || w.launcher.startCount() != 0 {
+				t.Fatalf("database starts %d, hub starts %d; the Hub must not be restarted", w.database.callCount(), w.launcher.startCount())
+			}
+
+			// The next automatic check neither waits nor starts anything.
+			if st, err := w.svc.Ensure(context.Background()); err != nil || st != tt.want || w.clock.sleeps != tt.sleeps {
+				t.Fatalf("next Ensure = %+v, %v, sleeps %d", st, err, w.clock.sleeps)
+			}
+			if w.database.callCount() != 1 || w.launcher.startCount() != 0 {
+				t.Fatalf("next Ensure: database starts %d, hub starts %d", w.database.callCount(), w.launcher.startCount())
 			}
 		})
 	}

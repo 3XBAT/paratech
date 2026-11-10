@@ -24,15 +24,16 @@ const (
 	opCheckSlot    = "localhub: check slot"
 )
 
-// The readiness wait after a start (ADR-0036 section 4) and the database container start (section 8); flightTimeout
-// bounds a whole check, so a hung port call cannot hold the shared check and block every later Ensure.
+// The readiness wait after a start (ADR-0036 section 4) and the database container start (section 8); readyTimeout
+// also bounds the wait for /readyz of a Hub that answered while its database was down. flightTimeout bounds a whole
+// check, so a hung port call cannot hold the shared check and block every later Ensure.
 const (
 	pollInterval   = 500 * time.Millisecond
 	readyTimeout   = 20 * time.Second
 	dbStartTimeout = 150 * time.Second
 	dbPollInterval = time.Second
 	dbWaitTimeout  = 30 * time.Second
-	flightTimeout  = dbStartTimeout + dbWaitTimeout + readyTimeout + 10*time.Second
+	flightTimeout  = dbStartTimeout + dbWaitTimeout + 2*readyTimeout + 10*time.Second
 )
 
 // Service decides whether to start the local Hub, starts it and keeps the last status. It is safe for concurrent
@@ -61,6 +62,10 @@ type Service struct {
 	// dbFailed: a start of the database container failed; no automatic check starts it again until Recheck, a stored
 	// database URL, or the engine seen off (dbEngineOff) and then on again.
 	dbFailed, dbEngineOff bool
+
+	// dbClears counts those clearings; a start that fails remembers its failure only if none came while it ran, so a
+	// database URL saved meanwhile is tried by the next Ensure.
+	dbClears uint64
 }
 
 // flight is one check that concurrent callers share. It runs detached from the callers' contexts.
@@ -95,7 +100,8 @@ func New(d Deps) (*Service, error) {
 //
 // When the Docker engine runs, the database port does not answer and the container is startable (ADR-0036 section 8),
 // the status is starting_database while DatabaseStarter runs (up to 150 s); then the port is probed every 1 s for up
-// to 30 s and the normal start follows (a Hub that already answers /healthz is not started again). A failed start is
+// to 30 s and the normal start follows (a Hub that already answers /healthz is not started again; its /readyz is
+// probed every 1 s for up to 20 s). A failed start is
 // database_start_failed and is not repeated by Ensure until Recheck, a stored database URL or the engine seen off and
 // on again.
 //
@@ -104,7 +110,8 @@ func New(d Deps) (*Service, error) {
 func (s *Service) Ensure(ctx context.Context) (Status, error) { return s.run(ctx, false) }
 
 // Recheck is Ensure for «Проверить снова»: the owner's request also acknowledges a recorded exit, so a Hub that ended
-// may be started once more, and forgets a failed database start, so the container may be started once more.
+// may be started once more, and forgets a failed database start, so the container may be started once more. A Recheck
+// that joins a running check returns that check's result; the memory is cleared for the later Ensures.
 func (s *Service) Recheck(ctx context.Context) (Status, error) { return s.run(ctx, true) }
 
 // run joins the running check or begins one, and waits for it or for ctx.
@@ -116,7 +123,7 @@ func (s *Service) run(ctx context.Context, ack bool) (Status, error) {
 	s.mu.Lock()
 	if ack {
 		s.acks++
-		s.dbFailed, s.dbEngineOff = false, false
+		s.clearDatabaseFailureLocked()
 	}
 	f := s.flight
 	if f == nil {
@@ -161,8 +168,21 @@ func (s *Service) acknowledge() {
 // forgetDatabaseFailure lets the database container be started once more.
 func (s *Service) forgetDatabaseFailure() {
 	s.mu.Lock()
-	s.dbFailed, s.dbEngineOff = false, false
+	s.clearDatabaseFailureLocked()
 	s.mu.Unlock()
+}
+
+// clearDatabaseFailureLocked forgets a failed database start and counts the clearing (Service.dbClears); s.mu held.
+func (s *Service) clearDatabaseFailureLocked() {
+	s.dbFailed, s.dbEngineOff = false, false
+	s.dbClears++
+}
+
+// databaseClears returns the count of clearings so far, taken before a database start.
+func (s *Service) databaseClears() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dbClears
 }
 
 // databaseFailed reports whether a failed database start still stands, given whether the probe saw the engine: the
@@ -177,7 +197,7 @@ func (s *Service) databaseFailed(engine bool) bool {
 		s.dbEngineOff = true
 		return true
 	case s.dbEngineOff:
-		s.dbFailed, s.dbEngineOff = false, false
+		s.clearDatabaseFailureLocked()
 		return false
 	}
 	return true
@@ -316,10 +336,12 @@ func (s *Service) ensure(ctx context.Context) (Status, error) {
 }
 
 // startDatabase starts the database container for the diagnosis of f, waits for its port and goes on with the normal
-// start; a Hub that already answers /healthz is left alone. A failure is remembered (Service.dbFailed).
+// start; a Hub that already answers /healthz is left alone, its /readyz awaited. A failure is remembered
+// (Service.dbFailed).
 func (s *Service) startDatabase(ctx context.Context, t values.Target, f values.Facts, ack bool, acks uint64) (Status, error) {
 	s.store(localStatus(t, values.StartingDatabase()))
 	s.log.Info("starting the local hub database")
+	clears := s.databaseClears()
 	dbCtx, cancel := context.WithTimeout(ctx, dbStartTimeout)
 	err := s.database.StartDatabase(dbCtx)
 	cancel()
@@ -327,7 +349,7 @@ func (s *Service) startDatabase(ctx context.Context, t values.Target, f values.F
 		if ctx.Err() != nil {
 			return s.cached(), ctx.Err()
 		}
-		return s.databaseStartFailed(t, f, ack), fmt.Errorf("start database: %w", err)
+		return s.databaseStartFailed(t, f, ack, clears), fmt.Errorf("start database: %w", err)
 	}
 
 	after, ok, err := s.awaitDatabase(ctx, t)
@@ -336,7 +358,10 @@ func (s *Service) startDatabase(ctx context.Context, t values.Target, f values.F
 	}
 	if !ok {
 		s.log.Warn("the local hub database does not answer after its start", "wait", dbWaitTimeout.String())
-		return s.databaseStartFailed(t, f, ack), nil
+		return s.databaseStartFailed(t, f, ack, clears), nil
+	}
+	if after, err = s.awaitReadyz(ctx, t, after); err != nil {
+		return s.cached(), err
 	}
 
 	d := diagnose(after, ack)
@@ -346,13 +371,41 @@ func (s *Service) startDatabase(ctx context.Context, t values.Target, f values.F
 	return s.start(ctx, t, acks)
 }
 
-// databaseStartFailed remembers a failed database start and keeps the diagnosis of f with it.
-func (s *Service) databaseStartFailed(t values.Target, f values.Facts, ack bool) Status {
+// databaseStartFailed keeps the diagnosis of f with a failed database start and remembers the failure, unless the
+// owner cleared the memory since clears was taken (then the next Ensure tries again).
+func (s *Service) databaseStartFailed(t values.Target, f values.Facts, ack bool, clears uint64) Status {
 	s.mu.Lock()
-	s.dbFailed, s.dbEngineOff = true, false
+	if s.dbClears == clears {
+		s.dbFailed, s.dbEngineOff = true, false
+	}
 	s.mu.Unlock()
 	f.DatabaseStartFailed = true
 	return s.store(localStatus(t, diagnose(f, ack)))
+}
+
+// awaitReadyz: a Hub that answered /healthz while its database was down reports /readyz a little after the database
+// port answers. While it answers /healthz but not /readyz, the database being up, t is probed every dbPollInterval for
+// up to readyTimeout; the Hub is never started there. It returns the last facts.
+func (s *Service) awaitReadyz(ctx context.Context, t values.Target, f values.Facts) (values.Facts, error) {
+	deadline := s.clock.Now().Add(readyTimeout)
+	for f.Healthz && !f.Readyz && f.DockerEngine && f.DatabasePort && s.clock.Now().Before(deadline) {
+		if err := s.clock.Sleep(ctx, dbPollInterval); err != nil {
+			return values.Facts{}, err
+		}
+		next, err := s.facts(ctx, t)
+		if err != nil {
+			if ctx.Err() != nil {
+				return values.Facts{}, ctx.Err()
+			}
+			s.log.Warn("probing the local hub readiness failed", "err", err)
+			continue
+		}
+		f = next
+	}
+	if f.Healthz && !f.Readyz {
+		s.log.Warn("the local hub is not ready after its database started", "wait", readyTimeout.String())
+	}
+	return f, nil
 }
 
 // awaitDatabase probes t every dbPollInterval for up to dbWaitTimeout until the database port answers or the engine
