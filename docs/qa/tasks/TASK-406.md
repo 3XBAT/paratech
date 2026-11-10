@@ -7,5 +7,5 @@ Start from the cold app with a lesson of today that has a call link (subject wit
 3. Click «Открыть ещё раз»: opens again, no row jumps.
 4. «Начать запись»: the popup closes, the recording runs. Show the popup again: red pulsing dot, «Идёт запись», under «Остановить»/«Скрыть» a full-width «Открыть ещё раз» (or «Подключиться» if the link was not opened before) and a quiet «Ссылка открыта.» after an open. Click: opens the meeting.
 5. Stop the recording: the button goes. Start a recording from the main window: no join button in the popup.
-6. Remove the link of the subject while the popup is open and click: «Ссылки на пару уже нет.», the button goes.
+6. Remove the link of the subject while the popup is open and click: the button stays in its row, disabled, with its last label; the note and the hover text read «Ссылки на пару уже нет. Её можно добавить на странице предмета.». «Начать запись» does not move. The row goes on the next showing of the popup.
 7. Screen reader (optional): «Ссылка открыта…» and «Не удалось открыть ссылку. Можно повторить.» are announced.
