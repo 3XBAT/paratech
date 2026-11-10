@@ -50,7 +50,6 @@ export const texts = {
   cancel: "Отменить",
   cancelBusy: "Отменяется…",
   undo: "Вернуть файл во «Входящие»",
-  undoMany: "Вернуть файлы во «Входящие»",
   partsNote: "Файл разделён на части: не помещается в один документ.",
   partsLabel: "Части файла билетов",
   show: "Показать билеты",
@@ -64,6 +63,10 @@ export const texts = {
   open: "Открыть .docx",
   openBusy: "Открывается…",
   openedCopy: "Открыта копия файла: правки в Word в библиотеку не попадают.",
+  /** The success line under one part of several: the note about the copy is said once above the list. */
+  openedPart: "Открыта копия.",
+  /** Why the other icons are off while one file opens. */
+  otherOpening: "Открывается другой файл.",
   costConsent: "Стоимость больше обычной, согласие на неё обязательно.",
   restartNote: "Подбор продолжится с того места, где встал: уже готовые ответы повторно не оплачиваются.",
 } as const;
@@ -319,7 +322,18 @@ export function partsNote(parts: number): string {
 
 /** The tooltip of the undo icon: all parts go back together. */
 export function undoLabel(parts: number): string {
-  return parts > 1 ? texts.undoMany : texts.undo;
+  return parts > 1 ? `Вернуть все ${parts} ${plural(parts, "файл", "файла", "файлов")} во «Входящие»` : texts.undo;
+}
+
+/** The material ids of every part of a set. */
+export function materialIdsOf(s: TicketSet): string[] {
+  return filesOf(s).map((f) => f.materialId);
+}
+
+/** The open results without the given materials: a result of a moved set must not come back when an id reappears. */
+export function withoutResults<T>(results: Readonly<Record<string, T>>, ids: readonly string[]): Record<string, T> {
+  const drop = new Set(ids);
+  return Object.fromEntries(Object.entries(results).filter(([id]) => !drop.has(id)));
 }
 
 /** The busy key of the open of one part. */

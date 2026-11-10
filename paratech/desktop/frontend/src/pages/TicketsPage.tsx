@@ -3,7 +3,7 @@ import { type LibraryMaterial, type LibrarySubject, libraryApi } from "../bindin
 import { callByName } from "../bindings/runtime.js";
 import { type TicketSet, ticketsApi, ticketsErrorText } from "../bindings/tickets.js";
 import type { PageId } from "../nav.js";
-import { needsPolling, openingId, openKeyPrefix, openResultView, startSubjectId, subjectLine, texts, ticketsCrumbs, ticketsPollMs } from "../ticketsView.js";
+import { materialIdsOf, needsPolling, openingId, openKeyPrefix, openResultView, startSubjectId, subjectLine, texts, ticketsCrumbs, ticketsPollMs, withoutResults } from "../ticketsView.js";
 import { Breadcrumbs } from "../ui/Breadcrumbs.js";
 import { Button } from "../ui/Button.js";
 import { EmptyState, Field, ResultLine, Select } from "../ui/controls.js";
@@ -141,7 +141,12 @@ export function TicketsPage(props: {
 
   const onSetAction = (id: string, work: () => Promise<TicketSet>) =>
     run(id, async () => {
-      replace(await work());
+      const before = (sets ?? []).find((x) => x.id === id);
+      const next = await work();
+      replace(next);
+      // The lines under the parts of this set are stale after a move: they must not come back with the same ids.
+      const gone = [...(before ? materialIdsOf(before) : []), ...materialIdsOf(next)];
+      setOpenResults((o) => withoutResults(o, gone));
       setSetErrors((e) => ({ ...e, [id]: "" }));
     }, (t) => setSetErrors((e) => ({ ...e, [id]: t })));
 

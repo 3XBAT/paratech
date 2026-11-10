@@ -96,15 +96,20 @@ function ConfirmPanel(props: {
 type OpenResultView = { kind: "ok" | "fail"; text: string };
 
 /** The line under an open button: a success or the binding's refusal text (a student's file name is never put into it). */
-function OpenResult(props: { result: OpenResultView | undefined }) {
+function OpenResult(props: { result: OpenResultView | undefined; /** Replaces the text of a success (the short line of a part). */ okText?: string }) {
   if (!props.result) {
     return null;
   }
   return (
     <ResultLine kind={props.result.kind} role={props.result.kind === "fail" ? "alert" : "status"}>
-      {props.result.text}
+      {props.result.kind === "ok" && props.okText !== undefined ? props.okText : props.result.text}
     </ResultLine>
   );
+}
+
+/** The reason an icon is off while another file opens; nothing when no open runs or this very control is the one running. */
+function otherOpens(openingId: string, own = ""): string | undefined {
+  return openingId !== "" && openingId !== own ? texts.otherOpening : undefined;
 }
 
 /**
@@ -129,10 +134,11 @@ export function FilesList(props: {
             label={p.openLabel}
             busy={props.openingId === p.materialId}
             disabled={props.blocked}
+            disabledReason={otherOpens(props.openingId, p.materialId)}
             onClick={() => props.onOpen(p.materialId)}
           />
           <div className="tk-file-result">
-            <OpenResult result={props.results[p.materialId]} />
+            <OpenResult result={props.results[p.materialId]} okText={texts.openedPart} />
           </div>
         </li>
       ))}
@@ -192,18 +198,27 @@ export function SetCard(props: {
       )}
       {s.status === "done" && (
         <div className="tk-done">
-          <p className="small">{fileNote(props.subjectName, parts.length)}</p>
           {parts.length > 1 && <p className="small muted">{partsNote(parts.length)}</p>}
-          {canOpenDocx(s) && <p className="small muted">{texts.openNote}</p>}
-          <p className="small muted">{texts.generatedNote}</p>
+          <p className="small">{fileNote(props.subjectName, parts.length)}</p>
+          {parts.length <= 1 && (
+            <>
+              {canOpenDocx(s) && <p className="small muted">{texts.openNote}</p>}
+              <p className="small muted">{texts.generatedNote}</p>
+            </>
+          )}
           {parts.length > 1 && (
-            <FilesList
-              parts={parts}
-              blocked={props.blocked || props.busy}
-              openingId={openingId}
-              results={openResults}
-              onOpen={props.onOpen}
-            />
+            <>
+              <FilesList
+                parts={parts}
+                blocked={props.blocked || props.busy}
+                openingId={openingId}
+                results={openResults}
+                onOpen={props.onOpen}
+              />
+              {/* The notes of the whole file sit under the list, said once. */}
+              {canOpenDocx(s) && <p className="small muted">{texts.openNote}</p>}
+              <p className="small muted">{texts.generatedNote}</p>
+            </>
           )}
           {parts.length === 1 && (
             <>
@@ -240,7 +255,15 @@ export function SetCard(props: {
             onClick={props.onCancel}
           />
         )}
-        {m.undo && <IconAction icon="undo" label={undoLabel(parts.length)} disabled={props.blocked || props.busy} onClick={props.onUndo} />}
+        {m.undo && (
+          <IconAction
+            icon="undo"
+            label={undoLabel(parts.length)}
+            disabled={props.blocked || props.busy}
+            disabledReason={parts.length > 1 ? otherOpens(openingId) : undefined}
+            onClick={props.onUndo}
+          />
+        )}
         {s.tickets.length > 0 && (
           <IconAction icon={open ? "chevup" : "chev"} expanded={open} label={open ? texts.hide : texts.show} onClick={() => setOpen((o) => !o)} />
         )}
