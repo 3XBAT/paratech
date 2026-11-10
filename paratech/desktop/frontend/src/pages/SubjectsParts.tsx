@@ -1,4 +1,5 @@
 import { type DragEvent, Fragment, type ReactNode, useState } from "react";
+import type { KnowledgeLesson } from "../bindings/knowledgeBase.js";
 import type { LibraryMaterial, LibrarySubject } from "../bindings/library.js";
 import {
   addToFolderLabel,
@@ -11,27 +12,33 @@ import {
   scrollToFolder as scrollToFolderIn,
 } from "../libraryInboxView.js";
 import {
+  type FolderLessons,
   type FreshMarks,
   filesOfFolder,
   foldEmptyFolders,
   folderCountText,
+  folderHeadCount,
   folderTitle,
   groupBySemester,
+  isLessonFolder,
+  lessonsOfFolder,
   noFresh,
   orderedFolders,
   texts,
   treeCount,
 } from "../libraryView.js";
 import { offerGroups, reviewTexts } from "../scheduleSubjectsView.js";
-import { folderAddId } from "../subjectTabsView.js";
+import { folderAddId, type LessonMark } from "../subjectTabsView.js";
 import { expandSubject, initialOpen, isSubjectOpen, seedOpen, toggleLabel, toggleSubject } from "../subjectTreeState.js";
 import { emptyInboxText, type InboxEntry } from "../subjectsHome.js";
 import { Button, IconButton } from "../ui/Button.js";
 import { Card, EmptyState, ResultLine } from "../ui/controls.js";
 import { Icon } from "../ui/Icon.js";
 import { type FileActions, FileRows } from "./FileRows.js";
+import { FolderLessonRows } from "./FolderLessonRows.js";
 import { NameForm } from "./NameForm.js";
 import { EmptySubjectsActions, type ScheduleOffer } from "./ScheduleSubjectsReview.js";
+import type { LessonOpening } from "./SubjectPairsTab.js";
 
 export { NameForm };
 
@@ -240,8 +247,11 @@ export function SubjectTree(props: {
                                 <span className="nm">{folderTitle(f)}</span>
                                 {props.freshFolders?.has(f.id) === true && <span className="fresh">{texts.fresh}</span>}
                                 {/* Blank while the files are being read (or failed to load): «—» would claim an empty folder.
-                                    The files are read for the subject on screen only, so another subject shows no count. */}
-                                {props.counts !== null && s.id === props.currentId && <span className="cnt num">{treeCount(props.counts.get(f.id))}</span>}
+                                    The files are read for the subject on screen only, so another subject shows no count.
+                                    A folder missing from `counts` is unknown too (a lesson folder whose link rows are not read). */}
+                                {props.counts !== null && s.id === props.currentId && props.counts.has(f.id) && (
+                                  <span className="cnt num">{treeCount(props.counts.get(f.id))}</span>
+                                )}
                               </button>
                             </li>
                           ))}
@@ -300,35 +310,52 @@ export function SubjectDetail(props: {
    * when it has no header of its own (it sits in the «Пусто» line), so the result can name it.
    */
   folderExtra?(folderId: string, named?: string): ReactNode;
+  /**
+   * The recorded lessons placed in the folders by their kind, as link rows before the files (TASK-430). `null`: not read
+   * yet or the read failed, so the three lesson folders claim nothing; absent: none (the rows only show files).
+   */
+  lessons?: FolderLessons;
+  /** The statuses of the lessons by `recordingId` (see lessonMarks), for the quiet status of a row not processed yet. */
+  lessonMarks?: ReadonlyMap<string, LessonMark>;
+  /** A link row (or one of its icons) opens the lesson screen; without it the rows are not drawn. */
+  onOpenLesson?: (lesson: KnowledgeLesson, opening: LessonOpening) => void;
 }) {
   const { subject } = props;
   const fresh = props.fresh ?? noFresh;
   const onAddFile = props.onAddFile;
-  // Folders without files are one line, not a section each (TASK-347); with unknown files nothing is called empty.
-  // A folder just made and a folder marked «новое» keep their sections.
+  const lessons = props.lessons === undefined ? [] : props.lessons;
+  // Folders without files or link rows are one line, not a section each (TASK-347); with unknown contents nothing is
+  // called empty. A folder just made and a folder marked «новое» keep their sections.
   const keepOpen = new Set([...(props.created ?? []), ...fresh.folders]);
-  const { shown, empty } = foldEmptyFolders(subject.folders, props.materials, keepOpen);
+  const { shown, empty } = foldEmptyFolders(subject.folders, props.materials, keepOpen, lessons);
   return (
     <>
       {shown.map((f) => {
         const files = props.materials === null ? null : filesOfFolder(props.materials, f.id);
+        const rows = lessonsOfFolder(lessons, f.id);
+        const head = folderHeadCount(rows.length, files?.length ?? 0);
+        // «Пока пусто» only when everything the folder can hold is known: the files, and for a lesson folder the link rows.
+        const knownEmpty = files !== null && files.length === 0 && rows.length === 0 && !(lessons === null && isLessonFolder(f));
         return (
           <section className="section" key={f.id} id={folderAnchor(f.id)}>
             <div className="sec-head">
               <h2 className="sec-h">
-                {folderTitle(f)} {files !== null && files.length > 0 && <span className="cnt num">· {folderCountText(files.length)}</span>}
+                {folderTitle(f)} {head !== "" && <span className="cnt num">· {head}</span>}
                 {fresh.folders.has(f.id) && <span className="fresh">{texts.fresh}</span>}
               </h2>
               {onAddFile && <IconButton id={folderAddId(f.id)} icon="plus" label={addToFolderLabel(folderTitle(f))} disabled={props.busy} onClick={() => onAddFile(f.id)} />}
             </div>
             {props.folderExtra?.(f.id)}
             {/* Unknown files (loading, failed): no «пусто» claim and no per-folder «Загрузка…»; a failure is one line under the head of the page. */}
-            {files === null ? null : files.length === 0 ? (
+            {knownEmpty ? (
               <p className="small muted folder-empty">{texts.folderEmpty}</p>
             ) : (
-              <Card className="lrows" label={folderTitle(f)}>
-                <FileRows files={files} where="folder" fresh={fresh.materials} actions={props.actions} />
-              </Card>
+              (rows.length > 0 || (files !== null && files.length > 0)) && (
+                <Card className="lrows" label={folderTitle(f)}>
+                  {rows.length > 0 && props.onOpenLesson && <FolderLessonRows rows={rows} marks={props.lessonMarks} onOpen={props.onOpenLesson} />}
+                  {files !== null && files.length > 0 && <FileRows files={files} where="folder" fresh={fresh.materials} actions={props.actions} />}
+                </Card>
+              )
             )}
           </section>
         );

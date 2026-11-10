@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KnowledgeLesson } from "../bindings/knowledgeBase.js";
+import { knowledgeBaseApi, type KnowledgeLesson } from "../bindings/knowledgeBase.js";
 import {
   type LibraryMaterial,
   type LibrarySubject,
@@ -17,10 +17,14 @@ import { fileTexts, type ImportElsewhere, type ImportOutcome, scrollToFolder } f
 import { addFileInto, CardDrop } from "../materialFlow.js";
 import {
   folderCounts,
+  FolderLessonsFlow,
+  type FolderLessonsState,
+  folderLessonsFor,
   freshMarks,
   idleOverview,
   importNote,
   inFolderText,
+  noFolderLessons,
   type OverviewState,
   scheduleLine,
   SubjectOverviewFlow,
@@ -46,11 +50,12 @@ import {
 } from "../subjectsHome.js";
 import { CallLinkFlow, idleLink, type LinkState } from "../callLinkView.js";
 import { removedLineText, restoreNeedsReload, runRestore } from "../subjectRemovalView.js";
-import { addFileId, folderAddId, type SubjectTab } from "../subjectTabsView.js";
+import { addFileId, folderAddId, lessonMarks, type SubjectTab } from "../subjectTabsView.js";
 import { idleTeacher, TeacherFlow, type TeacherFocus, type TeacherState, teacherFocusStep, teacherStateFor } from "../teachersView.js";
 import { Button } from "../ui/Button.js";
 import { ResultLine } from "../ui/controls.js";
 import { AddFileLines, ErrorLine, UndoLines } from "./FileRows.js";
+import { FolderLessonsLine } from "./FolderLessonRows.js";
 import {
   KeptUndoLine,
   offerButtonId,
@@ -414,6 +419,36 @@ export function SubjectsPage(props: {
     };
   }, [api, subject?.id, props.reload, changes]);
 
+  // The recorded lessons placed in the folders of their kind (TASK-430): read next to the files, on the same triggers, and
+  // again when a lesson screen was left or corrected and when a recording was imported on «Пары» (SubjectTabs `onImported`).
+  // A reply for another subject never shows: the flow drops it and the state names its subject.
+  const lessonsApi = useMemo(() => knowledgeBaseApi(callByName), []);
+  const [lessonsRead, setLessonsRead] = useState<FolderLessonsState>(noFolderLessons);
+  const lessonsFlow = useRef<FolderLessonsFlow | null>(null);
+  useEffect(() => {
+    if (subject === null) {
+      return;
+    }
+    let flow = lessonsFlow.current;
+    if (flow === null || flow.subjectId !== subject.id) {
+      flow?.close();
+      flow = new FolderLessonsFlow(lessonsApi, subject.id, setLessonsRead);
+      lessonsFlow.current = flow;
+      flow.open();
+    } else {
+      flow.reread();
+    }
+  }, [lessonsApi, subject?.id, props.reload, changes, props.lessonsSeen, props.lessonsEdited]);
+  useEffect(
+    () => () => {
+      lessonsFlow.current?.close();
+      lessonsFlow.current = null;
+    },
+    [],
+  );
+  const folderLessons = folderLessonsFor(lessonsRead, subject?.id ?? "");
+  const lessonStatuses = useMemo(() => lessonMarks(overview?.lessons ?? []), [overview]);
+
   // «Указать почту»: once the subject is in the list, its form for that role opens (and takes the focus); taken once.
   const { teacherFocus, onTeacherFocusDone } = props;
   useEffect(() => {
@@ -426,7 +461,8 @@ export function SubjectsPage(props: {
     }
   }, [teacherFocus, openId, subjects, known, flow, onTeacherFocusDone]);
 
-  const counts = useMemo(() => (subject && materials ? folderCounts(subject.folders, materials) : null), [subject, materials]);
+  const lessonRows = folderLessons.rows;
+  const counts = useMemo(() => (subject && materials ? folderCounts(subject.folders, materials, lessonRows) : null), [subject, materials, lessonRows]);
 
   // A restored subject joins the list at once; the reload that follows brings the rest.
   const putSubject = (s: LibrarySubject) => setSubjects((list) => (list === null || list.some((x) => x.id === s.id) ? list : [...list, s]));
@@ -833,6 +869,7 @@ export function SubjectsPage(props: {
               onOpenLesson={(lesson, opening) => props.onOpenKnowledgeLesson?.(lesson, opening)}
               lessonsSeen={props.lessonsSeen ?? 0}
               lessonsEdited={props.lessonsEdited ?? 0}
+              onImported={() => lessonsFlow.current?.reread()}
               files={
                 <>
                   <div className="tab-acts">
@@ -842,6 +879,7 @@ export function SubjectsPage(props: {
                   </div>
                   {filesFailed && <ErrorLine text={texts.filesFailed} onRefresh={refresh} onRetry={refresh} />}
                   {addLines("")}
+                  <FolderLessonsLine state={folderLessons} onRetry={() => lessonsFlow.current?.retry()} />
                   <SubjectDetail
                     subject={subject}
                     materials={materials}
@@ -856,6 +894,9 @@ export function SubjectsPage(props: {
                     actions={mat.actions}
                     onAddFile={(folderId) => void addFileTo(folderId)}
                     folderExtra={(folderId, named) => addLines(folderId, named)}
+                    lessons={lessonRows}
+                    lessonMarks={lessonStatuses}
+                    onOpenLesson={(lesson, opening) => props.onOpenKnowledgeLesson?.(lesson, opening)}
                   />
                 </>
               }

@@ -34,6 +34,8 @@ export function SubjectTabs(props: {
   onOpenLesson: (lesson: KnowledgeLesson, opening: LessonOpening) => void;
   lessonsSeen: number;
   lessonsEdited: number;
+  /** A recording was imported on «Пары»: the page re-reads what else shows the lessons (the link rows of «Файлы»). */
+  onImported?: () => void;
   files: ReactNode;
 }) {
   const base = useId();
@@ -90,7 +92,10 @@ export function SubjectTabs(props: {
             subject={props.subject}
             data={data}
             onRetry={retry}
-            onImported={() => setImports((n) => n + 1)}
+            onImported={() => {
+              setImports((n) => n + 1);
+              props.onImported?.();
+            }}
             onOpenLesson={props.onOpenLesson}
             marks={marks}
           />
