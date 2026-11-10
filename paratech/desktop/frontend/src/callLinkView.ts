@@ -4,6 +4,7 @@
 // The voice is impersonal. Subject names and links are typed or imported text: passed through untouched, text nodes only.
 
 import {
+  lessonCallLink,
   type CallLinkResult,
   type CreateWithCallLink,
   type LibraryApi,
@@ -182,23 +183,27 @@ export function pairLabel(action: string, title: string): string {
  * card shows «Подключиться» without waiting for the next read. `key` is the pair that acted (it may have had no subject).
  */
 export function applySubjectLink(lessons: readonly TodayLesson[], key: string, subject: LibrarySubject): TodayLesson[] {
-  return lessons.map((l) =>
-    linkKey(l) === key || (l.subjectId !== "" && l.subjectId === subject.id)
-      ? {
-          ...l,
-          subjectState: "known",
-          subjectId: subject.id,
-          subjectName: subject.name,
-          hasCallLink: subject.callLink !== null,
-          callLinkHost: subject.callLink?.host ?? "",
-        }
-      : l,
-  );
+  return lessons.map((l) => {
+    if (linkKey(l) !== key && !(l.subjectId !== "" && l.subjectId === subject.id)) {
+      return l;
+    }
+    // Each pair shows the link its own kind opens (the kind's, else the general one), as the core resolves it.
+    const open = lessonCallLink(subject, l.kind);
+    return {
+      ...l,
+      subjectState: "known",
+      subjectId: subject.id,
+      subjectName: subject.name,
+      hasCallLink: open !== null,
+      callLinkHost: open?.link.host ?? "",
+      callLinkKind: open?.kind ?? "",
+    };
+  });
 }
 
 /** The link of a subject is gone (an open found none): its pairs offer «Добавить ссылку». */
 export function withoutLink(lessons: readonly TodayLesson[], subjectId: string): TodayLesson[] {
-  return lessons.map((l) => (l.subjectId === subjectId ? { ...l, hasCallLink: false, callLinkHost: "" } : l));
+  return lessons.map((l) => (l.subjectId === subjectId ? { ...l, hasCallLink: false, callLinkHost: "", callLinkKind: "" } : l));
 }
 
 // ---- Element ids (the focus goes to them) ----
@@ -328,6 +333,8 @@ export interface LinkTarget {
   key: string;
   subjectId: string;
   name: string;
+  /** TASK-432: the schedule lesson kind code of the pair; the core opens the link of that kind, else the general one. Absent: "". */
+  lessonKind?: string;
 }
 
 /** What the flow needs from the page that shows the subjects. */
@@ -441,7 +448,8 @@ export class CallLinkFlow {
 
   private async setLink(subjectId: string, text: string): Promise<CallLinkResult> {
     try {
-      return await this.api.setSubjectCallLink(subjectId, text);
+      // The cards of «Сегодня» and the block of the subject page keep the general link; the links by kind are TASK-433.
+      return await this.api.setSubjectCallLink(subjectId, "general", text);
     } catch {
       return failedResult;
     }
@@ -576,7 +584,7 @@ export class CallLinkFlow {
     await this.guard("open", target.key, async (fresh) => {
       let problem: string;
       try {
-        problem = (await this.api.openSubjectCallLink(target.subjectId)).problem;
+        problem = (await this.api.openSubjectCallLink(target.subjectId, target.lessonKind ?? "")).problem;
       } catch {
         problem = "failed";
       }
@@ -610,7 +618,7 @@ export class CallLinkFlow {
     await this.guard("clear", target.key, async (fresh) => {
       let res: CallLinkResult;
       try {
-        res = await this.api.clearSubjectCallLink(target.subjectId);
+        res = await this.api.clearSubjectCallLink(target.subjectId, "general");
       } catch {
         res = failedResult;
       }

@@ -34,46 +34,87 @@ function deferred() {
 /** Lets the pending microtasks run. */
 const settle = () => new Promise((r) => setImmediate(r));
 
-function setup({ subject = () => Promise.resolve("sub-1"), open = () => Promise.resolve({ problem: "" }) } = {}) {
+/**
+ * `subject` resolves to the subject ID (a string) or to a whole reply `{ subjectId, lessonKind }`; a string gets `kind`
+ * (TASK-432: callSubject now carries the lesson kind). `opens` holds the subject IDs, `openKinds` the lesson kinds passed.
+ */
+function setup({ subject = () => Promise.resolve("sub-1"), open = () => Promise.resolve({ problem: "" }), kind = "lecture" } = {}) {
   const reads = [];
   const opens = [];
+  const openKinds = [];
   const states = [];
   const ctl = new JoinController(
     {
-      callSubject: (id) => {
+      callSubject: async (id) => {
         reads.push(id);
-        return subject(id);
+        const got = await subject(id);
+        return typeof got === "string" ? { subjectId: got, lessonKind: kind } : got;
       },
-      open: (id) => {
+      open: (id, lessonKind) => {
         opens.push(id);
+        openKinds.push(lessonKind);
         return open(id);
       },
     },
     (s) => states.push(s),
   );
-  return { ctl, reads, opens, states };
+  return { ctl, reads, opens, openKinds, states };
 }
 
 // ---- the binding ----
 
-test("callSubject is bound to PromptService.CallSubject and returns the subject ID", async () => {
+test("callSubject is bound to PromptService.CallSubject and returns the subject ID with the lesson kind", async () => {
   const calls = [];
   const api = promptApi(async (method, ...args) => {
     calls.push([method, ...args]);
-    return { subjectId: "sub-1" };
+    return { subjectId: "sub-1", lessonKind: "seminar" };
   });
   assert.equal(methods.callSubject, "paratech/desktop/internal/input/wails.PromptService.CallSubject");
-  assert.equal(await api.callSubject("p1"), "sub-1");
+  assert.deepEqual(await api.callSubject("p1"), { subjectId: "sub-1", lessonKind: "seminar" });
   assert.deepEqual(calls, [["paratech/desktop/internal/input/wails.PromptService.CallSubject", "p1"]]);
-  assert.equal(await promptApi(async () => ({ subjectId: "" })).callSubject("p1"), "");
+  assert.deepEqual(await promptApi(async () => ({ subjectId: "", lessonKind: "" })).callSubject("p1"), { subjectId: "", lessonKind: "" });
 });
 
-test("parsePromptCallSubject is strict about the shape and ignores extra fields", () => {
-  assert.deepEqual(parsePromptCallSubject({ subjectId: "s" }), { subjectId: "s" });
-  assert.deepEqual(parsePromptCallSubject({ subjectId: "", link: "https://x.test", host: "x.test" }), { subjectId: "" }, "extra fields are dropped");
+test("parsePromptCallSubject is strict about the subject ID, tolerant about the kind, and ignores extra fields", () => {
+  assert.deepEqual(parsePromptCallSubject({ subjectId: "s", lessonKind: "lab" }), { subjectId: "s", lessonKind: "lab" });
+  assert.deepEqual(parsePromptCallSubject({ subjectId: "s" }), { subjectId: "s", lessonKind: "" }, "an older core: no kind");
+  for (const kind of [null, 5, {}, []]) {
+    assert.deepEqual(parsePromptCallSubject({ subjectId: "s", lessonKind: kind }), { subjectId: "s", lessonKind: "" }, JSON.stringify(kind));
+  }
+  assert.deepEqual(
+    parsePromptCallSubject({ subjectId: "", lessonKind: "", link: "https://x.test", host: "x.test" }),
+    { subjectId: "", lessonKind: "" },
+    "extra fields are dropped",
+  );
   for (const bad of [null, undefined, "s", 1, [], {}, { subjectId: 1 }, { subjectId: null }, { subject_id: "s" }]) {
     assert.throws(() => parsePromptCallSubject(bad), undefined, JSON.stringify(bad));
   }
+});
+
+test("the popup passes the lesson kind of the offered lesson to open; a new prompt does not inherit it; none offered: empty kind", async () => {
+  const { ctl, openKinds } = setup({ subject: () => Promise.resolve({ subjectId: "sub-1", lessonKind: "seminar" }) });
+  ctl.offer("p1");
+  await settle();
+  await ctl.click();
+  assert.deepEqual(openKinds, ["seminar"]);
+  await ctl.click();
+  assert.deepEqual(openKinds, ["seminar", "seminar"], "«Открыть ещё раз» keeps the kind");
+
+  const noKind = setup({ subject: () => Promise.resolve({ subjectId: "sub-1", lessonKind: "" }) });
+  noKind.ctl.offer("p1");
+  await settle();
+  await noKind.ctl.click();
+  assert.deepEqual(noKind.openKinds, [""], "the general link opens");
+
+  // The kind of one prompt is not carried to the next: the next read sets its own.
+  const kinds = { p1: "lecture", p2: "lab" };
+  const two = setup({ subject: (id) => Promise.resolve({ subjectId: "sub-1", lessonKind: kinds[id] }) });
+  two.ctl.offer("p1");
+  await settle();
+  two.ctl.offer("p2");
+  await settle();
+  await two.ctl.click();
+  assert.deepEqual(two.openKinds, ["lab"]);
 });
 
 test("a malformed reply or a failed call rejects (the popup shows no button then)", async () => {

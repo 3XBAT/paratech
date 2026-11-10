@@ -185,7 +185,7 @@ function setup(results = {}) {
       removed: null,
     })),
     restoreSubject: queue("restore", ([id]) => ({ problem: "", subject: subject({ id, name: "Физика" }) })),
-    setSubjectCallLink: queue("set", ([id, text]) => ({ problem: "", subject: linked({ id, callLink: { link: text, host: HOST } }) })),
+    setSubjectCallLink: queue("set", ([id, , text]) => ({ problem: "", subject: linked({ id, callLink: { link: text, host: HOST } }) })),
     clearSubjectCallLink: queue("clear", () => ({ problem: "", subject: subject() })),
     openSubjectCallLink: queue("open", () => ({ problem: "" })),
   };
@@ -220,7 +220,7 @@ test("save: the typed text goes to the core as typed (trimmed), the card is told
   p.flow.openForm("l1", "add");
   p.flow.type(`  ${LINK}  `);
   await p.flow.save(target());
-  assert.deepEqual(p.calls, [["set", "s1", LINK]]);
+  assert.deepEqual(p.calls, [["set", "s1", "general", LINK]], "the card keeps the general link");
   assert.deepEqual(p.applied, [["s1", "l1", LINK]]);
   const s = p.flow.state;
   assert.equal(s.form, null);
@@ -320,7 +320,7 @@ test("«Вернуть предмет и сохранить»: the second submit
   await p.flow.save(target({ subjectId: "", name: "Физика" }));
   await p.flow.save(target({ subjectId: "", name: "Физика" }));
   assert.deepEqual(p.calls.map((c) => c[0]), ["create", "restore", "set"], "create ran once");
-  assert.deepEqual(p.calls.slice(1), [["restore", "s9", 2], ["set", "s9", LINK]]);
+  assert.deepEqual(p.calls.slice(1), [["restore", "s9", 2], ["set", "s9", "general", LINK]]);
   assert.deepEqual(p.applied.map((a) => a[0]), ["s9", "s9"], "the card learns of the restored subject, then of its link");
   const s = p.flow.state;
   assert.equal(s.form, null);
@@ -392,11 +392,10 @@ test("a pair that names no subject cannot be saved: nothing is made or sent", as
   assert.deepEqual(p.calls, []);
 });
 
-test("«Подключиться» sends only the subject ID; a removed link switches the card, a failure offers a retry", async () => {
+test("«Подключиться» sends the subject ID and the lesson kind; a removed link switches the card, a failure offers a retry", async () => {
   const p = setup({ open: [{ problem: "" }, { problem: "no_link" }, { problem: "failed" }, { problem: "not_found" }, new Error("x")] });
-  await p.flow.join(target());
-  assert.deepEqual(p.calls, [["open", "s1"]]);
-  assert.deepEqual(p.flow.state.line, { key: "l1", kind: "ok", text: callLinkTexts.opened, action: "" });
+  await p.flow.join(target({ lessonKind: "seminar" }));
+  assert.deepEqual(p.calls, [["open", "s1", "seminar"]], "the kind of the pair crosses so the core picks that kind's link");  assert.deepEqual(p.flow.state.line, { key: "l1", kind: "ok", text: callLinkTexts.opened, action: "" });
   assert.equal(p.flow.state.focus.id, linkId("l1", "join"));
 
   await p.flow.join(target());
@@ -414,6 +413,36 @@ test("«Подключиться» sends only the subject ID; a removed link swi
 
   await p.flow.join(target());
   assert.equal(p.flow.state.line.action, "retry", "a rejected call reads as failed");
+});
+
+test("«Подключиться» without a lesson (the page of a subject) sends an empty kind: the general link opens", async () => {
+  const p = setup();
+  await p.flow.join(target());
+  assert.deepEqual(p.calls, [["open", "s1", ""]]);
+});
+
+test("the Today card hands the kind of its pair to «Подключиться», the subject page none (wiring)", () => {
+  const parts = src("pages/CallLinkParts.tsx");
+  assert.match(parts, /function targetOf[\s\S]*?lessonKind: l\.kind/, "the card passes the lesson's kind code");
+  assert.match(parts, /const target: LinkTarget = \{ key, subjectId: subject\.id, name: "" \};/, "the subject page names no lesson");
+});
+
+test("a link saved or cleared shows on each pair as the link of its kind (the kind's own, else the general one)", () => {
+  const seminar = { link: "https://meet.example.org/sem", host: "sem.example.org" };
+  const day = [lesson({ id: "a", kind: "lecture" }), lesson({ id: "b", kind: "practice" }), lesson({ id: "c", kind: "lab" })];
+  const s = linked({ callLinks: { general: { link: LINK, host: HOST }, seminar } });
+  const out = applySubjectLink(day, "a", s);
+  assert.deepEqual(
+    out.map((l) => [l.hasCallLink, l.callLinkHost, l.callLinkKind]),
+    [[true, HOST, "general"], [true, "sem.example.org", "seminar"], [true, HOST, "general"]],
+  );
+  const cleared = applySubjectLink(out, "a", subject({ callLinks: { seminar } }));
+  assert.deepEqual(
+    cleared.map((l) => [l.hasCallLink, l.callLinkKind]),
+    [[false, ""], [true, "seminar"], [false, ""]],
+    "clearing the general link leaves the seminar link on the seminar pairs",
+  );
+  assert.deepEqual(withoutLink(out, "s1").map((l) => [l.hasCallLink, l.callLinkKind]), [[false, ""], [false, ""], [false, ""]]);
 });
 
 test("one call at a time: a second click while one runs does nothing", async () => {
@@ -447,7 +476,7 @@ test("one call at a time: a second click while one runs does nothing", async () 
 test("delete keeps the removed link for «Вернуть»; the restore saves it again; a failure keeps the offer", async () => {
   const p = setup({ set: [{ problem: "failed", subject: null }] });
   await p.flow.clear(target({ key: "s1" }), { link: LINK, host: HOST });
-  assert.deepEqual(p.calls, [["clear", "s1"]]);
+  assert.deepEqual(p.calls, [["clear", "s1", "general"]], "the block of the subject page clears the general link");
   assert.deepEqual(p.flow.state.removed, { key: "s1", subjectId: "s1", link: LINK });
   assert.equal(p.flow.state.line.text, callLinkTexts.cleared);
   assert.equal(p.flow.state.focus.id, linkId("s1", "undo"));
@@ -457,7 +486,7 @@ test("delete keeps the removed link for «Вернуть»; the restore saves it
   assert.notEqual(p.flow.state.removed, null, "a failed call can be repeated");
 
   await p.flow.restore();
-  assert.deepEqual(p.calls.at(-1), ["set", "s1", LINK], "the same link goes through the same check");
+  assert.deepEqual(p.calls.at(-1), ["set", "s1", "general", LINK], "the same link goes through the same check");
   assert.equal(p.flow.state.removed, null);
   assert.equal(p.flow.state.line.text, callLinkTexts.restored);
   assert.equal(p.flow.state.focus.id, linkId("s1", "join"));

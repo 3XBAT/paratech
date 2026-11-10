@@ -48,9 +48,12 @@ export const idleJoin: JoinState = { shown: false, phase: "hidden", subjectId: "
 
 /** What the controller needs from the bindings (PromptApi.callSubject and LibraryApi.openSubjectCallLink). */
 export interface JoinDeps {
-  /** The subject ID of the lesson prompt when it has a call link, otherwise "". May throw: that means no button. */
-  callSubject(promptId: string): Promise<string>;
-  open(subjectId: string): Promise<{ problem: string }>;
+  /**
+   * The subject ID of the lesson prompt when it has a call link, otherwise "", with the lesson kind code the core
+   * wants back when opening (TASK-432). May throw: that means no button.
+   */
+  callSubject(promptId: string): Promise<{ subjectId: string; lessonKind: string }>;
+  open(subjectId: string, lessonKind: string): Promise<{ problem: string }>;
 }
 
 /**
@@ -64,6 +67,8 @@ export interface JoinDeps {
 export class JoinController {
   private current: JoinState = idleJoin;
   private promptId = "";
+  /** The lesson kind code of the prompt, passed to open so the core picks the link of that kind. */
+  private lessonKind = "";
   private read = 0;
   private epoch = 0;
 
@@ -94,6 +99,7 @@ export class JoinController {
     }
     if (promptId !== this.promptId) {
       this.promptId = promptId;
+      this.lessonKind = "";
       this.epoch++;
       this.set({ ...idleJoin, shown: true });
     } else {
@@ -139,10 +145,14 @@ export class JoinController {
   private async load(promptId: string): Promise<void> {
     const seq = ++this.read;
     let id: string;
+    let kind: string;
     try {
-      id = await this.deps.callSubject(promptId);
+      const got = await this.deps.callSubject(promptId);
+      id = got.subjectId;
+      kind = got.lessonKind;
     } catch {
       id = "";
+      kind = "";
     }
     if (seq !== this.read || promptId !== this.promptId) {
       return;
@@ -151,6 +161,8 @@ export class JoinController {
     if (s.phase === "opening") {
       return;
     }
+    // The kind belongs to the subject just read; it must be in place before the next click.
+    this.lessonKind = id === "" ? "" : kind;
     if (id === "") {
       this.set({ ...s, phase: "hidden", subjectId: "" });
     } else if (id === s.subjectId && s.phase === "opened") {
@@ -174,7 +186,7 @@ export class JoinController {
     this.set({ ...s, phase: "opening", problem: "" });
     let problem: string;
     try {
-      problem = (await this.deps.open(s.subjectId)).problem;
+      problem = (await this.deps.open(s.subjectId, this.lessonKind)).problem;
     } catch {
       problem = "failed";
     }

@@ -199,7 +199,7 @@ function Form(props: { form: LinkForm; card: CardLink; target: LinkTarget; links
 // ---- «Сегодня» ----
 
 function targetOf(l: TodayLesson, card: CardLink): LinkTarget {
-  return { key: linkKey(l), subjectId: l.subjectId, name: card.kind === "create" ? card.name : "" };
+  return { key: linkKey(l), subjectId: l.subjectId, name: card.kind === "create" ? card.name : "", lessonKind: l.kind };
 }
 
 /**
