@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -47,16 +48,72 @@ func (s *Service) OpenCallLink(ctx context.Context, id shared.SubjectID) error {
 		return fmt.Errorf("%w: no opener is configured", ErrCallLinkNotOpened)
 	}
 	l, err := s.CallLink(ctx, id)
-	switch {
-	case err != nil:
+	if err != nil {
 		return err
-	case l.IsZero():
+	}
+	return s.openCallLink(ctx, l)
+}
+
+// OpenJoinLink opens the link a lesson of lessonKind of an active subject opens (subject.CallLinks.Join: the link of
+// the lesson's kind, else the general one), read again from storage at the click. It answers as OpenCallLink:
+// ErrNoCallLink when Join finds none.
+func (s *Service) OpenJoinLink(ctx context.Context, id shared.SubjectID, lessonKind string) error {
+	if s.calls == nil {
+		return fmt.Errorf("%w: no opener is configured", ErrCallLinkNotOpened)
+	}
+	sub, err := s.subject(ctx, id)
+	if err != nil {
+		return err
+	}
+	l, _ := sub.CallLinks().Join(lessonKind)
+	return s.openCallLink(ctx, l)
+}
+
+func (s *Service) openCallLink(ctx context.Context, l subject.CallLink) error {
+	if l.IsZero() {
 		return ErrNoCallLink
 	}
 	if err := s.calls.OpenSubjectCallLink(ctx, l); err != nil {
 		return fmt.Errorf("%w: %w", ErrCallLinkNotOpened, err)
 	}
 	return nil
+}
+
+// SetCallLinkOf sets the link of kind k of a subject (ADR-0032 addendum 2026-11-10) as SetCallLink sets the general
+// one: an unknown kind is ErrInvalidCallKind and a bad link ErrInvalidCallLink, both checked before the subject is
+// read; no version check, the last save wins; the same link again changes nothing. Nothing is logged.
+func (s *Service) SetCallLinkOf(ctx context.Context, id shared.SubjectID, k subject.CallKind,
+	link string) (*subject.Subject, error) {
+	if !k.Valid() {
+		return nil, ErrInvalidCallKind
+	}
+	if _, err := subject.ParseCallLink(link); err != nil {
+		return nil, domainError(err)
+	}
+	return s.changeSubject(ctx, id, func(sub *subject.Subject) (bool, error) {
+		changed, err := sub.SetCallLinkOf(k, link, s.clock.Now())
+		return changed, callLinkError(err)
+	})
+}
+
+// ClearCallLinkOf removes the link of kind k of a subject; an unknown kind is ErrInvalidCallKind (before the subject
+// is read), a kind without a link returns the subject unchanged.
+func (s *Service) ClearCallLinkOf(ctx context.Context, id shared.SubjectID, k subject.CallKind) (*subject.Subject, error) {
+	if !k.Valid() {
+		return nil, ErrInvalidCallKind
+	}
+	return s.changeSubject(ctx, id, func(sub *subject.Subject) (bool, error) {
+		changed, err := sub.ClearCallLinkOf(k, s.clock.Now())
+		return changed, callLinkError(err)
+	})
+}
+
+// callLinkError is domainError with the call kind as well.
+func callLinkError(err error) error {
+	if errors.Is(err, subject.ErrInvalidCallKind) {
+		return fmt.Errorf("%w: %w", ErrInvalidCallKind, err)
+	}
+	return domainError(err)
 }
 
 // ClearCallLink removes the link to the online class of a subject; a subject without one is returned unchanged.
@@ -94,6 +151,28 @@ func (s *Service) CallLinks(ctx context.Context, ids []shared.SubjectID) (map[sh
 	for _, sub := range list {
 		if want[sub.ID()] && !sub.CallLink().IsZero() {
 			out[sub.ID()] = sub.CallLink()
+		}
+	}
+	return out, nil
+}
+
+// CallLinkSets returns the links (general and per kind) of each active subject of ids that has at least one.
+func (s *Service) CallLinkSets(ctx context.Context, ids []shared.SubjectID) (map[shared.SubjectID]subject.CallLinks, error) {
+	out := map[shared.SubjectID]subject.CallLinks{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	list, err := s.Subjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	want := make(map[shared.SubjectID]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	for _, sub := range list {
+		if want[sub.ID()] && !sub.CallLinks().IsZero() {
+			out[sub.ID()] = sub.CallLinks()
 		}
 	}
 	return out, nil

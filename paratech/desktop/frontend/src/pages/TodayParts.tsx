@@ -268,7 +268,7 @@ export function LessonsSection(props: {
       {props.lessons.length === 0 ? (
         <Empty>{texts.lessonsEmpty}</Empty>
       ) : (
-        <div className="card" role="list">
+        <div className="card today-list" role="list">
           {props.lessons.map((l) => {
             const m = lessonLine(l, props.recordings, day, props.now ?? new Date(), props.recordingsKnown ?? true);
             const open = m.open;

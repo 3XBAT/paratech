@@ -77,9 +77,16 @@
 .today-host .btn.ghost { padding: 0 4px; }
 .today-link { grid-column: 2 / -1; position: relative; z-index: 1; }
 
-/* Wide enough for a lesson row with its status column. */
+/* Wide enough for a lesson row with its status column. The four columns belong to the list (.today-list) and every row takes
+   them as a subgrid (TASK-428), so the status column starts at the same x in every row. The actions track is FIXED (11rem of
+   content + the row's 16px right padding, which a subgrid's edge counts into the last track; likewise the 16px left padding
+   in the time track): an auto track would change with the buttons of any row («Подключиться», the link field, «Записать»)
+   and move the status column. 11rem = 176px: «Добавить ссылку» (about 130px) or «Подключиться» (about 110px) alone fit on
+   one line; with «Записать» (about 100px) beside «Добавить ссылку» the buttons wrap into two lines (flex-wrap on .today-ac).
+   The title keeps a 10rem floor; the status (capped at 12rem) takes the shortfall in narrow lists. */
 @container (min-width: 38rem) {
-  .today-lesson { grid-template-columns: 4.5rem minmax(0, 1fr) minmax(0, 14rem) auto; }
+  .today-list { display: grid; grid-template-columns: calc(4.5rem + 16px) minmax(10rem, 1fr) minmax(0, 12rem) calc(11rem + 16px); column-gap: 16px; }
+  .today-lesson { grid-template-columns: subgrid; grid-column: 1 / -1; }
   .today-lesson .today-st { grid-column: auto; }
   .today-lesson .today-ac { grid-column: auto; justify-self: end; justify-content: flex-end; }
   .today-lesson .today-ac > .btn.ghost:first-child { margin-left: 0; }

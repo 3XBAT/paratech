@@ -9365,7 +9365,7 @@
                 "npx --prefix paratech/e2e tsc --noEmit -p paratech/e2e/tsconfig.json"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-423",
@@ -9500,7 +9500,7 @@
                 "Ручная проверка на этой машине: главное окно, панель агента с длинной беседой, всплывающее окно; светлая и тёмная тема; высокий контраст; снимки в progress"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-429",
@@ -9569,7 +9569,7 @@
                 "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-432",

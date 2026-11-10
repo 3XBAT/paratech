@@ -942,3 +942,10 @@ CREATE TABLE deadline_event_updates (
     assignment_id TEXT    PRIMARY KEY CHECK (length(assignment_id) > 0),
     created_at    INTEGER NOT NULL
 );
+
+-- Migration 0052 (TASK-431).
+-- subjects: the links of lectures, seminars (and practice) and labs, in the canonical form of subject.CallLink; ''
+-- none. Untrusted input, re-checked on read as call_link.
+ALTER TABLE subjects ADD COLUMN call_link_lecture TEXT NOT NULL DEFAULT '' CHECK (length(call_link_lecture) <= 2048);
+ALTER TABLE subjects ADD COLUMN call_link_seminar TEXT NOT NULL DEFAULT '' CHECK (length(call_link_seminar) <= 2048);
+ALTER TABLE subjects ADD COLUMN call_link_lab TEXT NOT NULL DEFAULT '' CHECK (length(call_link_lab) <= 2048);
