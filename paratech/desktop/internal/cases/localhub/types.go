@@ -10,6 +10,7 @@ import (
 type Deps struct {
 	Probe    HubProbe
 	Launcher HubLauncher
+	Database DatabaseStarter
 	Secrets  SecretSlots
 	Settings SettingsFile
 	URL      HubURL

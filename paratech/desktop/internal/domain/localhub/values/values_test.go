@@ -148,8 +148,12 @@ func TestEveryReasonHasANextStep(t *testing.T) {
 		}
 		seen[step] = true
 	}
-	if len(Reasons()) != 8 || len(seen) != 8 {
-		t.Fatalf("reasons %d, distinct next steps %d; want 8 and 8", len(Reasons()), len(seen))
+	// database_start_failed shares open_logs with exited: both send the owner to the log folder.
+	if len(Reasons()) != 9 || len(seen) != 8 {
+		t.Fatalf("reasons %d, distinct next steps %d; want 9 and 8", len(Reasons()), len(seen))
+	}
+	if ReasonDatabaseStartFailed.NextStep() != NextOpenLogs {
+		t.Fatalf("database_start_failed next step = %s", ReasonDatabaseStartFailed.NextStep())
 	}
 	if ReasonNone.NextStep() != NextNone || Reason("bogus").NextStep() != NextNone {
 		t.Fatal("no reason must have no next step")
@@ -158,12 +162,13 @@ func TestEveryReasonHasANextStep(t *testing.T) {
 
 func TestDiagnosisConstructors(t *testing.T) {
 	tests := []struct {
-		name     string
-		d        Diagnosis
-		status   Status
-		reason   Reason
-		exit     int
-		canStart bool
+		name       string
+		d          Diagnosis
+		status     Status
+		reason     Reason
+		exit       int
+		canStart   bool
+		canStartDB bool
 	}{
 		{name: "remote", d: Remote(), status: StatusRemote},
 		{name: "running", d: Running(), status: StatusRunning},
@@ -174,11 +179,17 @@ func TestDiagnosisConstructors(t *testing.T) {
 		{name: "exit 1", d: Exited(1), status: StatusNotRunning, reason: ReasonExited, exit: 1},
 		{name: "not started", d: Exited(ExitNotStarted), status: StatusNotRunning, reason: ReasonExited, exit: -1},
 		{name: "ready", d: ReadyToStart(), status: StatusNotRunning, canStart: true},
+		{name: "starting database", d: StartingDatabase(), status: StatusStartingDatabase},
+		{name: "database down", d: DatabaseDown(false, false), status: StatusNotRunning, reason: ReasonDatabaseDown},
+		{name: "database down, startable", d: DatabaseDown(false, true), status: StatusNotRunning, reason: ReasonDatabaseDown, canStartDB: true},
+		{name: "degraded database down, startable", d: DatabaseDown(true, true), status: StatusDegraded, reason: ReasonDatabaseDown, canStartDB: true},
+		{name: "degraded database down", d: DatabaseDown(true, false), status: StatusDegraded, reason: ReasonDatabaseDown},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d := tt.d
-			if d.Status() != tt.status || d.Reason() != tt.reason || d.ExitCode() != tt.exit || d.CanStart() != tt.canStart || d.IsZero() {
+			if d.Status() != tt.status || d.Reason() != tt.reason || d.ExitCode() != tt.exit || d.CanStart() != tt.canStart ||
+				d.CanStartDatabase() != tt.canStartDB || d.IsZero() {
 				t.Fatalf("diagnosis = %+v", d)
 			}
 		})

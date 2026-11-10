@@ -18,12 +18,13 @@ func TestDiagnose(t *testing.T) {
 		return f
 	}
 	tests := []struct {
-		name     string
-		facts    values.Facts
-		status   values.Status
-		reason   values.Reason
-		exitCode int
-		canStart bool
+		name       string
+		facts      values.Facts
+		status     values.Status
+		reason     values.Reason
+		exitCode   int
+		canStart   bool
+		canStartDB bool
 	}{
 		{name: "healthz and readyz ok", facts: with(func(f *values.Facts) { f.Healthz, f.Readyz = true, true }), status: values.StatusRunning},
 		{name: "a hand-run hub counts with nothing set", facts: values.Facts{Healthz: true, Readyz: true}, status: values.StatusRunning},
@@ -44,13 +45,45 @@ func TestDiagnose(t *testing.T) {
 		{name: "exited with 0", facts: with(func(f *values.Facts) { f.Exited = true }), status: values.StatusNotRunning, reason: values.ReasonExited},
 		{name: "database down wins over the exit it caused", facts: with(func(f *values.Facts) { f.DatabasePort, f.Exited, f.ExitCode = false, true, 1 }), status: values.StatusNotRunning, reason: values.ReasonDatabaseDown},
 		{name: "ready to start", facts: ready(), status: values.StatusNotRunning, canStart: true},
+
+		// The database container (ADR-0036 section 8).
+		{name: "database down, startable", facts: with(func(f *values.Facts) { f.DatabasePort, f.DatabaseStartable = false, true }),
+			status: values.StatusNotRunning, reason: values.ReasonDatabaseDown, canStartDB: true},
+		{name: "database down, startable, start failed", facts: with(func(f *values.Facts) {
+			f.DatabasePort, f.DatabaseStartable, f.DatabaseStartFailed = false, true, true
+		}), status: values.StatusNotRunning, reason: values.ReasonDatabaseStartFailed},
+		{name: "degraded, startable", facts: with(func(f *values.Facts) { f.Healthz, f.DatabasePort, f.DatabaseStartable = true, false, true }),
+			status: values.StatusDegraded, reason: values.ReasonDatabaseDown, canStartDB: true},
+		{name: "degraded, startable, start failed", facts: with(func(f *values.Facts) {
+			f.Healthz, f.DatabasePort, f.DatabaseStartable, f.DatabaseStartFailed = true, false, true, true
+		}), status: values.StatusDegraded, reason: values.ReasonDatabaseStartFailed},
+		{name: "degraded, port answers: nothing to start", facts: with(func(f *values.Facts) { f.Healthz, f.DatabaseStartable = true, true }),
+			status: values.StatusDegraded, reason: values.ReasonDatabaseDown},
+		{name: "docker off, startable: nothing to start", facts: with(func(f *values.Facts) {
+			f.DockerEngine, f.DatabasePort, f.DatabaseStartable = false, false, true
+		}), status: values.StatusNotRunning, reason: values.ReasonDockerOff},
+		{name: "degraded, docker off, startable: nothing to start", facts: values.Facts{Healthz: true, DatabaseStartable: true},
+			status: values.StatusDegraded, reason: values.ReasonDockerOff},
+		{name: "docker off wins over a failed start", facts: with(func(f *values.Facts) {
+			f.DockerEngine, f.DatabasePort, f.DatabaseStartable, f.DatabaseStartFailed = false, false, true, true
+		}), status: values.StatusNotRunning, reason: values.ReasonDockerOff},
+		{name: "precondition wins over a startable database", facts: with(func(f *values.Facts) {
+			f.ProviderKeySet, f.DatabasePort, f.DatabaseStartable = false, false, true
+		}), status: values.StatusNotRunning, reason: values.ReasonNoProviderKey},
+		{name: "database answers: a failed start is past", facts: with(func(f *values.Facts) { f.DatabaseStartable, f.DatabaseStartFailed = true, true }),
+			status: values.StatusNotRunning, canStart: true},
+		{name: "startable database down wins over an exit", facts: with(func(f *values.Facts) {
+			f.DatabasePort, f.DatabaseStartable, f.Exited, f.ExitCode = false, true, true, 1
+		}), status: values.StatusNotRunning, reason: values.ReasonDatabaseDown, canStartDB: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d := Diagnose(tt.facts)
-			if d.Status() != tt.status || d.Reason() != tt.reason || d.ExitCode() != tt.exitCode || d.CanStart() != tt.canStart {
-				t.Fatalf("Diagnose = %s/%s/%d canStart=%v, want %s/%s/%d canStart=%v",
-					d.Status(), d.Reason(), d.ExitCode(), d.CanStart(), tt.status, tt.reason, tt.exitCode, tt.canStart)
+			if d.Status() != tt.status || d.Reason() != tt.reason || d.ExitCode() != tt.exitCode || d.CanStart() != tt.canStart ||
+				d.CanStartDatabase() != tt.canStartDB {
+				t.Fatalf("Diagnose = %s/%s/%d canStart=%v canStartDB=%v, want %s/%s/%d canStart=%v canStartDB=%v",
+					d.Status(), d.Reason(), d.ExitCode(), d.CanStart(), d.CanStartDatabase(),
+					tt.status, tt.reason, tt.exitCode, tt.canStart, tt.canStartDB)
 			}
 			if d.Reason() != values.ReasonNone && d.NextStep() == values.NextNone {
 				t.Fatalf("reason %s has no next step", d.Reason())

@@ -5,11 +5,12 @@ type Status string
 
 // Statuses.
 const (
-	StatusRemote     Status = "remote"      // «Адрес сервера» is not local: nothing to start
-	StatusRunning    Status = "running"     // /healthz and /readyz answer
-	StatusStarting   Status = "starting"    // started, not answering yet
-	StatusDegraded   Status = "degraded"    // /healthz answers, the database does not
-	StatusNotRunning Status = "not_running" // nothing answers
+	StatusRemote           Status = "remote"            // «Адрес сервера» is not local: nothing to start
+	StatusRunning          Status = "running"           // /healthz and /readyz answer
+	StatusStarting         Status = "starting"          // started, not answering yet
+	StatusStartingDatabase Status = "starting_database" // the database container is being started (section 8)
+	StatusDegraded         Status = "degraded"          // /healthz answers, the database does not
+	StatusNotRunning       Status = "not_running"       // nothing answers
 )
 
 // Reason says why the Hub is not running or degraded. A closed list (ADR-0036 section 7).
@@ -26,13 +27,15 @@ const (
 	ReasonPortBusy      Reason = "port_busy"
 	ReasonExited        Reason = "exited"
 	ReasonConfigError   Reason = "config_error"
+	// ReasonDatabaseStartFailed: the app's start of the database container failed (section 8).
+	ReasonDatabaseStartFailed Reason = "database_start_failed"
 )
 
 // Reasons returns every reason except ReasonNone, in a fixed order.
 func Reasons() []Reason {
 	return []Reason{
 		ReasonNoProviderKey, ReasonNoDatabaseURL, ReasonNoHubExe, ReasonDockerOff, ReasonDatabaseDown,
-		ReasonPortBusy, ReasonExited, ReasonConfigError,
+		ReasonPortBusy, ReasonExited, ReasonConfigError, ReasonDatabaseStartFailed,
 	}
 }
 
@@ -68,7 +71,7 @@ func (r Reason) NextStep() NextStep {
 		return NextStartDatabase
 	case ReasonPortBusy:
 		return NextFreePort
-	case ReasonExited:
+	case ReasonExited, ReasonDatabaseStartFailed:
 		return NextOpenLogs
 	case ReasonConfigError:
 		return NextCheckSettings
@@ -85,9 +88,10 @@ const ExitNotStarted = -1
 
 // Diagnosis is a Status with its reason and, for an ended Hub, its exit code. The zero value is not a diagnosis.
 type Diagnosis struct {
-	status   Status
-	reason   Reason
-	exitCode int
+	status        Status
+	reason        Reason
+	exitCode      int
+	startDatabase bool
 }
 
 // Remote is the diagnosis of a desktop that uses a remote Hub.
@@ -105,6 +109,20 @@ func Degraded(r Reason) Diagnosis { return Diagnosis{status: StatusDegraded, rea
 // NotRunning is the diagnosis of a Hub that does not answer, for reason r.
 func NotRunning(r Reason) Diagnosis { return Diagnosis{status: StatusNotRunning, reason: r} }
 
+// DatabaseDown is the diagnosis of a database that does not answer while the Docker engine runs: degraded when the Hub
+// answers /healthz, else not running. startable means the app starts the container itself (section 8); otherwise the
+// owner does.
+func DatabaseDown(hubAnswers, startable bool) Diagnosis {
+	st := StatusNotRunning
+	if hubAnswers {
+		st = StatusDegraded
+	}
+	return Diagnosis{status: st, reason: ReasonDatabaseDown, startDatabase: startable}
+}
+
+// StartingDatabase is the diagnosis while the app starts the database container.
+func StartingDatabase() Diagnosis { return Diagnosis{status: StatusStartingDatabase} }
+
 // Exited is the diagnosis of a Hub that ended with code: ReasonConfigError for ExitConfigError, else ReasonExited.
 func Exited(code int) Diagnosis {
 	r := ReasonExited
@@ -120,7 +138,7 @@ func ReadyToStart() Diagnosis { return Diagnosis{status: StatusNotRunning} }
 // Status returns the status.
 func (d Diagnosis) Status() Status { return d.status }
 
-// Reason returns the reason; ReasonNone for running, starting, remote and ReadyToStart.
+// Reason returns the reason; ReasonNone for running, starting, starting_database, remote and ReadyToStart.
 func (d Diagnosis) Reason() Reason { return d.reason }
 
 // NextStep returns the next step of the reason.
@@ -131,6 +149,10 @@ func (d Diagnosis) ExitCode() int { return d.exitCode }
 
 // CanStart reports whether the Hub may be started: nothing answers and nothing stands in the way.
 func (d Diagnosis) CanStart() bool { return d.status == StatusNotRunning && d.reason == ReasonNone }
+
+// CanStartDatabase reports whether the app may start the database container: the engine runs, the database does not
+// answer, the start is possible and no earlier start failed.
+func (d Diagnosis) CanStartDatabase() bool { return d.startDatabase }
 
 // IsZero reports whether d is not a diagnosis.
 func (d Diagnosis) IsZero() bool { return d.status == "" }

@@ -24,12 +24,15 @@ const (
 	opCheckSlot    = "localhub: check slot"
 )
 
-// The readiness wait after a start (ADR-0036 section 4); flightTimeout bounds a whole check, so a hung port call
-// cannot hold the shared check and block every later Ensure.
+// The readiness wait after a start (ADR-0036 section 4) and the database container start (section 8); flightTimeout
+// bounds a whole check, so a hung port call cannot hold the shared check and block every later Ensure.
 const (
-	pollInterval  = 500 * time.Millisecond
-	readyTimeout  = 20 * time.Second
-	flightTimeout = readyTimeout + 10*time.Second
+	pollInterval   = 500 * time.Millisecond
+	readyTimeout   = 20 * time.Second
+	dbStartTimeout = 150 * time.Second
+	dbPollInterval = time.Second
+	dbWaitTimeout  = 30 * time.Second
+	flightTimeout  = dbStartTimeout + dbWaitTimeout + readyTimeout + 10*time.Second
 )
 
 // Service decides whether to start the local Hub, starts it and keeps the last status. It is safe for concurrent
@@ -37,6 +40,7 @@ const (
 type Service struct {
 	probe    HubProbe
 	launcher HubLauncher
+	database DatabaseStarter
 	secrets  SecretSlots
 	settings SettingsFile
 	url      HubURL
@@ -53,6 +57,10 @@ type Service struct {
 	// count the latest spawn consumed, or a check that found no recorded exit for them to cover. While they differ, a
 	// recorded exit does not stand in the way of one new start.
 	acks, spent uint64
+
+	// dbFailed: a start of the database container failed; no automatic check starts it again until Recheck, a stored
+	// database URL, or the engine seen off (dbEngineOff) and then on again.
+	dbFailed, dbEngineOff bool
 }
 
 // flight is one check that concurrent callers share. It runs detached from the callers' contexts.
@@ -65,7 +73,8 @@ type flight struct {
 
 // New checks the ports.
 func New(d Deps) (*Service, error) {
-	if d.Probe == nil || d.Launcher == nil || d.Secrets == nil || d.Settings == nil || d.URL == nil || d.Clock == nil {
+	if d.Probe == nil || d.Launcher == nil || d.Database == nil || d.Secrets == nil || d.Settings == nil || d.URL == nil ||
+		d.Clock == nil {
 		return nil, fmt.Errorf("%w: every port is required", ErrInvalidConfig)
 	}
 	log := d.Log
@@ -73,8 +82,8 @@ func New(d Deps) (*Service, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Service{
-		probe: d.Probe, launcher: d.Launcher, secrets: d.Secrets, settings: d.Settings, url: d.URL, clock: d.Clock, log: log,
-		timeout: flightTimeout,
+		probe: d.Probe, launcher: d.Launcher, database: d.Database, secrets: d.Secrets, settings: d.Settings, url: d.URL,
+		clock: d.Clock, log: log, timeout: flightTimeout,
 	}, nil
 }
 
@@ -84,12 +93,18 @@ func New(d Deps) (*Service, error) {
 // answer awaited for up to 20 s. A recorded exit of the Hub this desktop started blocks a start until the owner
 // acknowledges it (Recheck, SaveSettings, SetSecret), so an ending Hub is never respawned in a loop.
 //
+// When the Docker engine runs, the database port does not answer and the container is startable (ADR-0036 section 8),
+// the status is starting_database while DatabaseStarter runs (up to 150 s); then the port is probed every 1 s for up
+// to 30 s and the normal start follows (a Hub that already answers /healthz is not started again). A failed start is
+// database_start_failed and is not repeated by Ensure until Recheck, a stored database URL or the engine seen off and
+// on again.
+//
 // The returned status is also kept for Status. Calls made while one runs share it: the Hub is started at most once.
 // The shared run does not stop when a caller's ctx ends; that caller gets the last kept status and ctx's error.
 func (s *Service) Ensure(ctx context.Context) (Status, error) { return s.run(ctx, false) }
 
 // Recheck is Ensure for «Проверить снова»: the owner's request also acknowledges a recorded exit, so a Hub that ended
-// may be started once more.
+// may be started once more, and forgets a failed database start, so the container may be started once more.
 func (s *Service) Recheck(ctx context.Context) (Status, error) { return s.run(ctx, true) }
 
 // run joins the running check or begins one, and waits for it or for ctx.
@@ -101,6 +116,7 @@ func (s *Service) run(ctx context.Context, ack bool) (Status, error) {
 	s.mu.Lock()
 	if ack {
 		s.acks++
+		s.dbFailed, s.dbEngineOff = false, false
 	}
 	f := s.flight
 	if f == nil {
@@ -142,6 +158,31 @@ func (s *Service) acknowledge() {
 	s.mu.Unlock()
 }
 
+// forgetDatabaseFailure lets the database container be started once more.
+func (s *Service) forgetDatabaseFailure() {
+	s.mu.Lock()
+	s.dbFailed, s.dbEngineOff = false, false
+	s.mu.Unlock()
+}
+
+// databaseFailed reports whether a failed database start still stands, given whether the probe saw the engine: the
+// engine seen off and then on again forgets it.
+func (s *Service) databaseFailed(engine bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case !s.dbFailed:
+		return false
+	case !engine:
+		s.dbEngineOff = true
+		return true
+	case s.dbEngineOff:
+		s.dbFailed, s.dbEngineOff = false, false
+		return false
+	}
+	return true
+}
+
 // pending returns the acknowledgement count and whether one is not yet spent by a spawn.
 func (s *Service) pending() (uint64, bool) {
 	s.mu.Lock()
@@ -173,11 +214,11 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 		return *remote, nil
 	}
 	_, ack := s.pending()
-	d, _, err := s.diagnose(ctx, t, ack)
+	f, err := s.facts(ctx, t)
 	if err != nil {
 		return Status{}, fmt.Errorf("%s: %w", opStatus, err)
 	}
-	return localStatus(t, d), nil
+	return localStatus(t, diagnose(f, ack)), nil
 }
 
 // Settings returns the saved non-secret settings for the form.
@@ -206,7 +247,8 @@ func (s *Service) SaveSettings(ctx context.Context, in Settings) error {
 
 // SetSecret stores value, trimmed of surrounding whitespace, in the slot name: provider-key or database-url only
 // (values.ParseTypedSecret). The value is handed to the store and not kept; no error or log line carries it. Like
-// SaveSettings, a stored value acknowledges a recorded exit.
+// SaveSettings, a stored value acknowledges a recorded exit; a stored database URL also forgets a failed database
+// start.
 func (s *Service) SetSecret(ctx context.Context, name, value string) error {
 	n, err := values.ParseTypedSecret(name)
 	if err != nil {
@@ -223,6 +265,9 @@ func (s *Service) SetSecret(ctx context.Context, name, value string) error {
 		return fmt.Errorf("%s %s: %w", opStoreSlot, n, err)
 	}
 	s.acknowledge()
+	if n == values.SecretDatabaseURL {
+		s.forgetDatabaseFailure()
+	}
 	s.log.Info("local hub secret saved", "name", n.String())
 	return nil
 }
@@ -251,19 +296,86 @@ func (s *Service) ensure(ctx context.Context) (Status, error) {
 	}
 
 	acks, ack := s.pending()
-	d, exited, err := s.diagnose(ctx, t, ack)
+	f, err := s.facts(ctx, t)
 	if err != nil {
 		return s.cached(), err
 	}
-	if ack && !exited {
+	if ack && !f.Exited {
 		// No exit is recorded, so the acknowledgements so far cover none: a later crash needs a new one. Those given
 		// after the snapshot stay pending.
 		s.spend(acks)
+	}
+	d := diagnose(f, ack)
+	if d.CanStartDatabase() {
+		return s.startDatabase(ctx, t, f, ack, acks)
 	}
 	if !d.CanStart() {
 		return s.store(localStatus(t, d)), nil
 	}
 	return s.start(ctx, t, acks)
+}
+
+// startDatabase starts the database container for the diagnosis of f, waits for its port and goes on with the normal
+// start; a Hub that already answers /healthz is left alone. A failure is remembered (Service.dbFailed).
+func (s *Service) startDatabase(ctx context.Context, t values.Target, f values.Facts, ack bool, acks uint64) (Status, error) {
+	s.store(localStatus(t, values.StartingDatabase()))
+	s.log.Info("starting the local hub database")
+	dbCtx, cancel := context.WithTimeout(ctx, dbStartTimeout)
+	err := s.database.StartDatabase(dbCtx)
+	cancel()
+	if err != nil {
+		if ctx.Err() != nil {
+			return s.cached(), ctx.Err()
+		}
+		return s.databaseStartFailed(t, f, ack), fmt.Errorf("start database: %w", err)
+	}
+
+	after, ok, err := s.awaitDatabase(ctx, t)
+	if err != nil {
+		return s.cached(), err
+	}
+	if !ok {
+		s.log.Warn("the local hub database does not answer after its start", "wait", dbWaitTimeout.String())
+		return s.databaseStartFailed(t, f, ack), nil
+	}
+
+	d := diagnose(after, ack)
+	if !d.CanStart() {
+		return s.store(localStatus(t, d)), nil
+	}
+	return s.start(ctx, t, acks)
+}
+
+// databaseStartFailed remembers a failed database start and keeps the diagnosis of f with it.
+func (s *Service) databaseStartFailed(t values.Target, f values.Facts, ack bool) Status {
+	s.mu.Lock()
+	s.dbFailed, s.dbEngineOff = true, false
+	s.mu.Unlock()
+	f.DatabaseStartFailed = true
+	return s.store(localStatus(t, diagnose(f, ack)))
+}
+
+// awaitDatabase probes t every dbPollInterval for up to dbWaitTimeout until the database port answers or the engine
+// is gone (then the caller's diagnosis names docker_off); ok is false when the wait ran out.
+func (s *Service) awaitDatabase(ctx context.Context, t values.Target) (values.Facts, bool, error) {
+	deadline := s.clock.Now().Add(dbWaitTimeout)
+	for {
+		f, err := s.facts(ctx, t)
+		switch {
+		case err == nil && (f.DatabasePort || !f.DockerEngine):
+			return f, true, nil
+		case err != nil && ctx.Err() != nil:
+			return values.Facts{}, false, ctx.Err()
+		case err != nil:
+			s.log.Warn("probing the local hub database failed", "err", err)
+		}
+		if !s.clock.Now().Before(deadline) {
+			return values.Facts{}, false, nil
+		}
+		if err := s.clock.Sleep(ctx, dbPollInterval); err != nil {
+			return values.Facts{}, false, err
+		}
+	}
 }
 
 // start generates the seal keys if missing, starts hub.exe and waits for its answer. A spawn spends the
@@ -359,26 +471,21 @@ func withoutUserInfo(raw string) string {
 	return u.String()
 }
 
-// diagnose probes t and applies the diagnosis rule; ack hides a recorded exit the owner acknowledged. exited reports
-// the probed fact before the hiding.
-func (s *Service) diagnose(ctx context.Context, t values.Target, ack bool) (d values.Diagnosis, exited bool, err error) {
-	f, err := s.facts(ctx, t)
-	if err != nil {
-		return values.Diagnosis{}, false, err
-	}
-	exited = f.Exited
+// diagnose applies the diagnosis rule to f; ack hides a recorded exit the owner acknowledged.
+func diagnose(f values.Facts, ack bool) values.Diagnosis {
 	if ack {
 		f.Exited, f.ExitCode = false, 0
 	}
-	return diagnosis.Diagnose(f), exited, nil
+	return diagnosis.Diagnose(f)
 }
 
-// facts probes t and sets the secret flags from the secret store.
+// facts probes t and sets the secret flags from the secret store and DatabaseStartFailed from the Service's memory.
 func (s *Service) facts(ctx context.Context, t values.Target) (values.Facts, error) {
 	f, err := s.probe.Facts(ctx, t)
 	if err != nil {
 		return values.Facts{}, fmt.Errorf("probe: %w", err)
 	}
+	f.DatabaseStartFailed = s.databaseFailed(f.DockerEngine)
 	if f.ProviderKeySet, err = s.secrets.IsSet(ctx, values.SecretProviderKey); err != nil {
 		return values.Facts{}, fmt.Errorf("check %s: %w", values.SecretProviderKey, err)
 	}
