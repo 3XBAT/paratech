@@ -185,6 +185,18 @@ html, body, #root { height: 100%; }
 .lrow-extra { flex: 0 0 100%; order: 9; display: flex; flex-direction: column; gap: 8px; padding: 0 0 8px 28px; }
 .lrow-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .lrow-error .result { margin: 0; }
+/* Link rows of recorded lessons (TASK-430): the whole row is one button, its two icon actions sit beside it (never inside).
+   The files of the folder follow in a list of their own, so the separator is drawn between the two lists as well. */
+.lrow-lesson { flex-wrap: nowrap; gap: 4px; padding: 0 12px 0 0; }
+.lrow-open { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; min-height: 44px; padding: 8px 8px 8px 16px; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.lrow-open:hover { background: var(--fill); }
+.lrow-open:focus-visible { outline-offset: -2px; }
+.lrow-open > .i { flex: none; color: var(--muted); }
+.lrow-tx { flex: 1; min-width: 0; }
+.lrow-tx .lt { display: block; font-weight: 500; overflow-wrap: anywhere; }
+.lrow-tx .lm { display: block; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.lrow-lesson > .ia { flex: none; }
+.lrows > [role="list"] + [role="list"] > .lrow:first-child::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 1px; background: var(--sep); }
 .place-panel { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; }
 .place-panel .ui-field { margin-bottom: 0; min-width: 180px; }
 .place-panel .name-form { margin-bottom: 0; }

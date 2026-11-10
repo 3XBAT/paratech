@@ -1,7 +1,9 @@
 // View logic of «Предметы»: semesters, folders and file lines. Pure, no React. Names are typed or imported text and are
 // passed through untouched (the page renders them as text nodes).
 
+import { type KnowledgeBaseApi, type KnowledgeFolderLesson, type KnowledgeLesson, lessonFolderSystems } from "./bindings/knowledgeBase.js";
 import type { LibraryApi, LibraryFolder, LibraryMaterial, LibrarySubject, SubjectOverview, SubjectSlot } from "./bindings/library.js";
+import { durationText } from "./durationEstimate.js";
 import type { ChipKind } from "./ui/StatusChip.js";
 
 export const texts = {
@@ -129,28 +131,155 @@ export function treeCount(n: number | undefined): string {
   return n === undefined || n === 0 ? "—" : String(n);
 }
 
-/** Files per folder of the open subject (removed files and «Входящие» do not count). */
-export function folderCounts(folders: readonly LibraryFolder[], materials: readonly LibraryMaterial[]): Map<string, number> {
-  return new Map(folders.map((f) => [f.id, filesOfFolder(materials, f.id).length]));
+// ---- Recorded lessons in the folders of their kind (TASK-430, ADR-0034 amendment 2026-11-10) ----
+
+/**
+ * The recorded lessons of the open subject as the core placed them (see knowledgeBase.folderLessons). `null` is
+ * «not known»: not read yet or the read failed. Where a parameter below takes it, `[]` means «known: none» and is the
+ * default, so a caller that knows of no link rows (a test, an older screen) sees only files.
+ */
+export type FolderLessons = readonly KnowledgeFolderLesson[] | null;
+
+/** The system folders that hold link rows of lessons («Лекции», «Семинары», «Лабораторные»). */
+export function isLessonFolder(f: Pick<LibraryFolder, "system">): boolean {
+  return (lessonFolderSystems as readonly string[]).includes(f.system);
+}
+
+/** The link rows of one folder, in the core's order (newest first). */
+export function lessonsOfFolder(lessons: FolderLessons | undefined, folderId: string): KnowledgeFolderLesson[] {
+  return (lessons ?? []).filter((l) => l.folderId === folderId);
 }
 
 /**
- * The folders of the page of a subject split for the screen (TASK-347): the ones with files (or whose files are not
- * known yet: no «пусто» claim then) get a section each; the empty ones fold into one line «Пусто: ...». Order is kept.
- * `keepOpen` holds the ids of folders that stay sections while empty (a folder just created: it must not vanish into
- * the line); they say «Пока пусто» themselves.
+ * Files and link rows per folder of the open subject (removed files and «Входящие» do not count). While the link rows
+ * are unknown (`null`) the three lesson folders have no entry at all: neither «0» nor «—» may claim them empty, and a
+ * number that leaves the lessons out would be wrong.
+ */
+export function folderCounts(folders: readonly LibraryFolder[], materials: readonly LibraryMaterial[], lessons: FolderLessons = []): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const f of folders) {
+    if (lessons === null && isLessonFolder(f)) {
+      continue;
+    }
+    counts.set(f.id, filesOfFolder(materials, f.id).length + lessonsOfFolder(lessons, f.id).length);
+  }
+  return counts;
+}
+
+/**
+ * The folders of the page of a subject split for the screen (TASK-347): the ones with files or link rows (or whose
+ * contents are not known yet: no «пусто» claim then) get a section each; the empty ones fold into one line «Пусто: ...».
+ * Order is kept. `keepOpen` holds the ids of folders that stay sections while empty (a folder just created: it must not
+ * vanish into the line); they say «Пока пусто» themselves. While `lessons` is unknown (`null`) the three lesson folders
+ * are never called empty.
  */
 export function foldEmptyFolders(
   folders: readonly LibraryFolder[],
   materials: readonly LibraryMaterial[] | null,
   keepOpen: ReadonlySet<string> = new Set(),
+  lessons: FolderLessons = [],
 ): { shown: LibraryFolder[]; empty: LibraryFolder[] } {
   const ordered = orderedFolders(folders);
   if (materials === null) {
     return { shown: ordered, empty: [] };
   }
-  const isEmpty = (f: LibraryFolder) => filesOfFolder(materials, f.id).length === 0 && !keepOpen.has(f.id);
+  const isEmpty = (f: LibraryFolder) =>
+    filesOfFolder(materials, f.id).length === 0 &&
+    lessonsOfFolder(lessons, f.id).length === 0 &&
+    !(lessons === null && isLessonFolder(f)) &&
+    !keepOpen.has(f.id);
   return { shown: ordered.filter((f) => !isEmpty(f)), empty: ordered.filter(isEmpty) };
+}
+
+/** «1 пара», «2 пары», «5 пар». */
+export function pairCountText(n: number): string {
+  return `${n} ${plural(n, "пара", "пары", "пар")}`;
+}
+
+/** After the name in the head of a section: «2 пары · 1 файл»; only the non-zero parts, "" when both are zero. */
+export function folderHeadCount(pairs: number, files: number): string {
+  return [pairs > 0 ? pairCountText(pairs) : "", files > 0 ? folderCountText(files) : ""].filter((p) => p !== "").join(" · ");
+}
+
+export const folderLessonTexts = {
+  failed: "Не удалось загрузить пары предмета.",
+  retry: "Повторить",
+  loading: "Загрузка пар…",
+  openSummary: "Открыть конспект",
+  openRecording: "Открыть запись",
+} as const;
+
+/** The title of a link row: the title of the recording, else «Запись 21.10» (just «Запись» when the date is unknown). */
+export function folderLessonTitle(l: Pick<KnowledgeLesson, "title" | "startedAt">): string {
+  const t = l.title.trim();
+  if (t !== "") {
+    return t;
+  }
+  const day = dayMonth(l.startedAt);
+  return day === "" ? "Запись" : `Запись ${day}`;
+}
+
+/** The muted line of a link row: «21.10 · 1 ч 20 мин»; the parts that are unknown are left out. */
+export function folderLessonMeta(l: Pick<KnowledgeLesson, "startedAt" | "durationSeconds">): string {
+  return [dayMonth(l.startedAt), l.durationSeconds > 0 ? durationText(l.durationSeconds) : ""].filter((p) => p !== "").join(" · ");
+}
+
+/** What the page knows of the link rows of a subject; `subjectId` is the subject the rows were read for. */
+export interface FolderLessonsState {
+  subjectId: string;
+  rows: FolderLessons;
+  /** The last read failed: the page says so with «Повторить»; `rows` is null then. */
+  failed: boolean;
+}
+
+export const noFolderLessons: FolderLessonsState = { subjectId: "", rows: null, failed: false };
+
+/** The state as far as it belongs to `subjectId`: what was read for another subject is «not known yet», never shown. */
+export function folderLessonsFor(state: FolderLessonsState, subjectId: string): FolderLessonsState {
+  return state.subjectId === subjectId ? state : { subjectId, rows: null, failed: false };
+}
+
+/**
+ * Reads the link rows of one subject. `open` starts with «not known» and reads; `reread` reads again and keeps what is
+ * shown meanwhile (a change on the page, a lesson screen left); a failed read makes the rows unknown again and says so.
+ * A reply that came after a newer read, or after `close`, is dropped, so a late reply of the previous subject never shows.
+ */
+export class FolderLessonsFlow {
+  private token = 0;
+
+  constructor(
+    private readonly api: Pick<KnowledgeBaseApi, "folderLessons">,
+    readonly subjectId: string,
+    private readonly onChange: (s: FolderLessonsState) => void,
+  ) {}
+
+  open(): void {
+    this.onChange({ subjectId: this.subjectId, rows: null, failed: false });
+    this.read(++this.token);
+  }
+
+  reread(): void {
+    this.read(++this.token);
+  }
+
+  close(): void {
+    this.token++;
+  }
+
+  private read(mine: number): void {
+    this.api.folderLessons(this.subjectId).then(
+      (rows) => {
+        if (mine === this.token) {
+          this.onChange({ subjectId: this.subjectId, rows, failed: false });
+        }
+      },
+      () => {
+        if (mine === this.token) {
+          this.onChange({ subjectId: this.subjectId, rows: null, failed: true });
+        }
+      },
+    );
+  }
 }
 
 /** «Семинары»: Файл добавлен. — names the folder in the result of one that has no section of its own (it sits in the «Пусто» line). */
