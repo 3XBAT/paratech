@@ -31,11 +31,20 @@ import {
   SourcesPoller,
   type Selection,
 } from "../sourcePicker/view";
-import { idleJoin, JoinController, joinPromptId, joinView, type JoinState } from "./joinView";
+import {
+  idleJoin,
+  JoinController,
+  joinPromptId,
+  joinView,
+  StartedRecording,
+  startedPromptId,
+  type JoinState,
+} from "./joinView";
 import {
   adviceHeading,
   buttonHints,
   buttonLabels,
+  dotClass,
   elapsedText,
   HeightFitter,
   loadErrorText,
@@ -45,6 +54,7 @@ import {
   shouldRefresh,
   showsRecording,
   textsLayout,
+  topClass,
   wantedHeight,
   type Action,
   type ButtonId,
@@ -77,6 +87,10 @@ export function Popup() {
     const library = libraryApi(callByName);
     return new JoinController({ callSubject: api.callSubject, open: library.openSubjectCallLink }, setJoin);
   }, [api]);
+  // The prompt a recording was started from in this popup: the running view keeps asking the core for its call link
+  // with this ID, although the prompt is no longer the current one. "" for a recording not started from here.
+  const startedRec = useMemo(() => new StartedRecording(), []);
+  const [runningFrom, setRunningFrom] = useState("");
   // Only the newest reply is applied: an older Current() must not overwrite a newer prompt or action result.
   const latest = useRef(0);
 
@@ -232,7 +246,8 @@ export function Popup() {
   const showPicker = m.buttons.includes("start");
   const live = sound !== null && advice === null && showsRecording(view, sound.recording, pending);
   const liveId = live && sound !== null ? sound.recordingId : "";
-  const jv = joinView(join, m.disabled);
+  // While the recording runs «Подключиться» is not blocked by a start; the hover text and the notes differ (joinView).
+  const jv = joinView(join, live ? false : m.disabled, live);
   const joinShown = showPicker && jv.visible;
   // Only start problems are red. The join texts are quiet notes (opened, gone) or the amber failure line, all in the
   // texts area, so they count in its layout but never grow the window.
@@ -244,10 +259,19 @@ export function Popup() {
     : [];
   const layout = textsLayout(notes, errorLine);
 
-  const offeredId = joinPromptId(view, advice !== null || live);
+  // Which recording captures now ("" none, null: the sound could not be read) ties the started prompt to its recording
+  // and drops it when that one ends or another one is shown.
+  const recordingNow = sound === null ? null : sound.recording ? sound.recordingId : "";
   useEffect(() => {
-    joinCtl.offer(offeredId);
-  }, [joinCtl, offeredId]);
+    setRunningFrom(startedRec.track(recordingNow));
+  }, [startedRec, recordingNow]);
+
+  // The button belongs to the offered lesson, or, in the running view, to the prompt the recording was started from.
+  const offeredId = joinPromptId(view, advice !== null || live);
+  const joinId = live ? (runningFrom === "" ? null : runningFrom) : offeredId;
+  useEffect(() => {
+    joinCtl.offer(joinId);
+  }, [joinCtl, joinId]);
 
   useEffect(() => {
     if (liveId === "") {
@@ -306,6 +330,11 @@ export function Popup() {
     const seq = ++latest.current;
     try {
       const v = action === "start" ? await api.start(view.id, picker.chosen.app) : await api[action](view.id);
+      // A started recording keeps the prompt ID for «Подключиться» (even if a newer reply replaced the view meanwhile).
+      const started = action === "start" ? startedPromptId(view, v) : "";
+      if (started !== "") {
+        startedRec.started(started);
+      }
       if (seq === latest.current) {
         setView(v);
       }
@@ -366,8 +395,8 @@ export function Popup() {
     return (
       <div className="popup" ref={popupRef}>
         <IconSprite />
-        <div className="p-top live">
-          <span className="dot" aria-hidden="true" />
+        <div className={topClass("advice")}>
+          <span className={dotClass("advice")} aria-hidden="true" />
           <span className="heading">{adviceHeading}</span>
         </div>
         <div className="texts">
@@ -400,8 +429,8 @@ export function Popup() {
     return (
       <div className="popup" ref={popupRef}>
         <IconSprite />
-        <div className="p-top live">
-          <span className="dot" aria-hidden="true" />
+        <div className={topClass("recording")}>
+          <span className={dotClass("recording")} aria-hidden="true" />
           <span className="heading">{recordingTexts.heading}</span>
           {timer !== "" && <span className="time num">{timer}</span>}
         </div>
@@ -424,6 +453,17 @@ export function Popup() {
             <p className="p-note">{recordingTexts.tip}</p>
           )}
           {stopProblem !== "" && <p className="warning">{stopProblem}</p>}
+          {/* The link is gone note and the failure line of «Подключиться»: live regions drawn before their text. */}
+          {jv.live && (
+            <p className="p-note join-note" role="status">
+              {jv.note}
+            </p>
+          )}
+          {jv.live && (
+            <p className="warning join-fail" role="status">
+              {jv.failure}
+            </p>
+          )}
         </div>
         <div className="pbtns two">
           <Button
@@ -440,6 +480,19 @@ export function Popup() {
           <Button title={recordingTexts.hideHint} onClick={hideRecording}>
             {recordingTexts.hide}
           </Button>
+          {jv.visible && (
+            // At most one extra row, the width of the popup: «Подключиться», or «Открыть ещё раз» once it was opened.
+            <Button
+              className="wide"
+              busy={jv.busy}
+              busyLabel={callLinkTexts.joining}
+              disabled={jv.disabled}
+              title={jv.title}
+              onClick={() => void joinCtl.click()}
+            >
+              {jv.label}
+            </Button>
+          )}
         </div>
       </div>
     );
@@ -448,8 +501,8 @@ export function Popup() {
   return (
     <div className="popup" ref={popupRef}>
       <IconSprite />
-      <div className={showPicker ? "p-top live" : "p-top"}>
-        {showPicker && <span className="dot" aria-hidden="true" />}
+      <div className={topClass("offer")}>
+        {showPicker && <span className={dotClass("offer")} aria-hidden="true" />}
         <span className="heading">{m.heading}</span>
         {m.time !== "" && <span className="time num">{m.time}</span>}
       </div>
@@ -487,17 +540,17 @@ export function Popup() {
                 {w}
               </p>
             ))}
-          {joinQuiet.map((n) => (
-            // The confirmation is a status for screen readers; the gone note is plain text.
+          {showPicker && jv.live && (
+            // A live region drawn before its text (the confirmation or the gone note) so that it is announced; empty, it
+            // takes no room.
             <p
-              key={n}
               className={layout.clamp ? "p-note join-note clamp" : "p-note join-note"}
-              role={n === jv.confirm ? "status" : undefined}
-              title={layout.clamp ? n : undefined}
+              role="status"
+              title={layout.clamp && joinQuiet.length > 0 ? joinQuiet[0] : undefined}
             >
-              {n}
+              {joinQuiet[0]}
             </p>
-          ))}
+          )}
           {showPicker && (
             <p
               className={layout.collapsed ? "advice collapsed" : "advice"}
@@ -506,9 +559,13 @@ export function Popup() {
               {picker.advice}
             </p>
           )}
-          {joinFailure !== "" && (
-            // Last, right above the buttons.
-            <p className={layout.clamp ? "warning clamp" : "warning"} title={layout.clamp ? joinFailure : undefined}>
+          {showPicker && jv.live && (
+            // Last, right above the buttons; a status like the line above (drawn before its text).
+            <p
+              className={layout.clamp ? "warning join-fail clamp" : "warning join-fail"}
+              role="status"
+              title={layout.clamp && joinFailure !== "" ? joinFailure : undefined}
+            >
               {joinFailure}
             </p>
           )}
@@ -532,14 +589,13 @@ export function Popup() {
               // Between «Начать запись» and «Не записывать»: they share one row, so the three do not stack. It never
               // disables the start and takes no focus itself.
               <Button
-                className={jv.opened ? "joined" : undefined}
                 busy={jv.busy}
                 busyLabel={callLinkTexts.joining}
                 disabled={jv.disabled}
                 title={jv.title}
                 onClick={() => void joinCtl.click()}
               >
-                {callLinkTexts.join}
+                {jv.label}
               </Button>
             )}
           </Fragment>

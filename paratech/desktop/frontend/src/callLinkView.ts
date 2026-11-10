@@ -21,6 +21,12 @@ export const callLinkTexts = {
   joining: "Открытие…",
   /** The tooltip of «Подключиться»: where it leads is on the card already. */
   joinTitle: "Открыть ссылку на пару (запись не начнётся)",
+  /** TASK-406, the popup: after the link was opened the button stays active and reads like this. */
+  joinAgain: "Открыть ещё раз",
+  joinAgainTitle: "Открыть ссылку на пару ещё раз (запись не начнётся)",
+  /** While the recording runs it has started already, so the tooltips do not say it will not. */
+  joinRunningTitle: "Открыть ссылку на пару",
+  joinAgainRunningTitle: "Открыть ссылку на пару ещё раз",
   add: "Добавить ссылку",
   change: "Изменить",
   clear: "Удалить",

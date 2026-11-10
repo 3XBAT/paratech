@@ -44,7 +44,23 @@ export const stateNotes: Readonly<Record<string, string>> = {
   EXPIRED: "Пара закончилась.",
 };
 
-export const noPromptNote = "Сейчас нет предложения записи.";
+/**
+ * What the top line of the popup is about. The dot is neutral while only a recording is offered; the red pulsing dot
+ * (and the red heading) mean a recording runs: the running view and the silent-source advice, which is about it.
+ */
+export type PopupStage = "offer" | "recording" | "advice";
+
+/** The class of the dot: only a running recording pulses red (owner 2026-11-08). */
+export function dotClass(stage: PopupStage): string {
+  return stage === "offer" ? "dot" : "dot rec";
+}
+
+/** The class of the top line: the heading takes the recording colour only with the red dot. */
+export function topClass(stage: PopupStage): string {
+  return stage === "offer" ? "p-top" : "p-top live";
+}
+
+export const noPromptNote ="Сейчас нет предложения записи.";
 export const staleNote = "Предложение больше не актуально.";
 
 /** What the popup shows. */

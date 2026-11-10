@@ -5,7 +5,16 @@ import { readFileSync } from "node:fs";
 import { methods, parsePromptCallSubject, promptApi } from "../.test-build/bindings/prompt.js";
 import { methods as libraryMethods } from "../.test-build/bindings/library.js";
 import { callLinkTexts } from "../.test-build/callLinkView.js";
-import { idleJoin, JoinController, joinPromptId, joinTexts, joinView } from "../.test-build/popup/joinView.js";
+import {
+  idleJoin,
+  JoinController,
+  joinPromptId,
+  joinTexts,
+  joinView,
+  StartedRecording,
+  startedPromptId,
+} from "../.test-build/popup/joinView.js";
+import { dotClass, topClass } from "../.test-build/popup/view.js";
 
 const src = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
 
@@ -89,13 +98,14 @@ test("an offered lesson with a link shows the button ready; no link or no subjec
   assert.deepEqual(withLink.reads, ["p1"]);
   assert.deepEqual(withLink.ctl.state, { shown: true, phase: "ready", subjectId: "sub-1", problem: "" });
   const v = joinView(withLink.ctl.state, false);
-  assert.deepEqual(v, { visible: true, busy: false, disabled: false, opened: false, title: callLinkTexts.joinTitle, confirm: "", failure: "", note: "" });
+  // TASK-406 added `label` and `live` to the view.
+  assert.deepEqual(v, { visible: true, busy: false, disabled: false, opened: false, label: "Подключиться", title: callLinkTexts.joinTitle, confirm: "", failure: "", note: "", live: true });
 
   const none = setup({ subject: () => Promise.resolve("") });
   none.ctl.offer("p1");
   await settle();
   assert.deepEqual(none.ctl.state, { shown: true, phase: "hidden", subjectId: "", problem: "" });
-  assert.deepEqual(joinView(none.ctl.state, false), { visible: false, busy: false, disabled: true, opened: false, title: callLinkTexts.joinTitle, confirm: "", failure: "", note: "" });
+  assert.deepEqual(joinView(none.ctl.state, false), { visible: false, busy: false, disabled: true, opened: false, label: "Подключиться", title: callLinkTexts.joinTitle, confirm: "", failure: "", note: "", live: false });
 });
 
 test("the prompt is read only for an offered lesson: not for ad-hoc, STARTING, other states, the recording or the advice", () => {
@@ -114,7 +124,8 @@ test("the prompt is read only for an offered lesson: not for ad-hoc, STARTING, o
   assert.equal(ctl.state.shown, false);
 });
 
-test("a click opens the meeting through the open call with the subject ID, shows busy, then stays opened (grey, disabled)", async () => {
+// TASK-406 (owner 2026-11-08, answer 11): once the meeting is open the button is «Открыть ещё раз», active, not grey.
+test("a click opens the meeting through the open call with the subject ID, shows busy, then «Открыть ещё раз» stays clickable and opens again", async () => {
   const open = deferred();
   const { ctl, opens } = setup({ open: () => open.promise });
   ctl.offer("p1");
@@ -130,11 +141,19 @@ test("a click opens the meeting through the open call with the subject ID, shows
   assert.equal(ctl.state.phase, "opened");
   v = joinView(ctl.state, false);
   assert.deepEqual(
-    [v.visible, v.busy, v.disabled, v.opened, v.title, v.confirm, v.failure, v.note],
-    [true, false, true, true, joinTexts.openedTitle, "Ссылка открыта. Запись пока не идёт.", "", ""],
+    [v.visible, v.busy, v.disabled, v.opened, v.label, v.title, v.confirm, v.failure, v.note],
+    [true, false, false, true, "Открыть ещё раз", callLinkTexts.joinAgainTitle, "Ссылка открыта. Запись пока не идёт.", "", ""],
   );
-  await ctl.click();
-  assert.deepEqual(opens, ["sub-1"], "no second open once opened");
+  assert.equal(joinView(ctl.state, true).disabled, true, "a start that runs still blocks it");
+
+  // Again: the same path (the subject ID); the busy state shows at once, then it is opened once more.
+  const second = ctl.click();
+  assert.equal(ctl.state.phase, "opening");
+  assert.equal(joinView(ctl.state, false).busy, true);
+  await second;
+  assert.deepEqual(opens, ["sub-1", "sub-1"], "the same subject ID is opened the second time");
+  assert.equal(ctl.state.phase, "opened");
+  assert.equal(joinView(ctl.state, false).label, "Открыть ещё раз");
 });
 
 test("two quick clicks open the meeting once", async () => {
@@ -196,37 +215,127 @@ test("an unknown open problem counts as a failure that can be repeated", async (
   assert.equal(ctl.state.problem, "failed");
 });
 
-test("the popup closing resets the opened state and the texts; the next showing offers the button anew", async () => {
+// TASK-406: the core hides the popup right after the start, so a closing must not forget what was opened for the same
+// prompt: the running view says «Открыть ещё раз». Changed from "closing resets the opened state" (TASK-370).
+test("the popup closing keeps what was opened for the same prompt and drops only the failure text; the next showing asks again", async () => {
   const { ctl, reads, opens } = setup();
   ctl.offer("p1");
   await settle();
   await ctl.click();
   assert.equal(ctl.state.phase, "opened");
   ctl.closed();
-  assert.equal(ctl.state.phase, "hidden");
-  assert.equal(ctl.state.problem, "");
+  assert.equal(ctl.state.phase, "opened");
   ctl.refresh();
   await settle();
   assert.deepEqual(reads, ["p1", "p1"], "the core showed the popup again: read again");
-  assert.equal(ctl.state.phase, "ready");
+  assert.equal(ctl.state.phase, "opened");
   await ctl.click();
-  assert.equal(opens.length, 2);
+  assert.equal(opens.length, 2, "and it can be opened again");
+
+  const failing = setup({ open: () => Promise.resolve({ problem: "failed" }) });
+  failing.ctl.offer("p1");
+  await settle();
+  await failing.ctl.click();
+  assert.equal(joinView(failing.ctl.state, false).failure, callLinkTexts.openFailed);
+  failing.ctl.closed();
+  assert.equal(failing.ctl.state.problem, "");
+  assert.equal(failing.ctl.state.phase, "ready", "the button is still there");
 });
 
-test("the same prompt shown again: closed() then the refresh on visible brings the button back, ready and not opened", async () => {
-  const { ctl, reads, opens } = setup();
+test("the same prompt shown again: closed() then the refresh on visible brings the button back, still «Открыть ещё раз»; a removed link takes it away", async () => {
+  let subject = "sub-1";
+  const { ctl, reads, opens } = setup({ subject: () => Promise.resolve(subject) });
   ctl.offer("p1");
   await settle();
   await ctl.click();
-  assert.equal(ctl.state.phase, "opened");
   ctl.closed(); // visibilitychange: hidden
   ctl.refresh(); // visibilitychange: visible (no new offer, the prompt id is the same)
   await settle();
   assert.deepEqual(reads, ["p1", "p1"]);
-  assert.deepEqual(ctl.state, { shown: true, phase: "ready", subjectId: "sub-1", problem: "" });
-  assert.equal(joinView(ctl.state, false).confirm, "");
+  assert.deepEqual(ctl.state, { shown: true, phase: "opened", subjectId: "sub-1", problem: "" });
+  assert.equal(joinView(ctl.state, false).label, "Открыть ещё раз");
   await ctl.click();
   assert.equal(opens.length, 2, "it can be opened again in the new showing");
+
+  subject = "";
+  ctl.closed();
+  ctl.refresh();
+  await settle();
+  assert.equal(joinView(ctl.state, false).visible, false, "the link was removed meanwhile: no button");
+});
+
+test("«Открыть ещё раз» keeps its label when the second open fails, and double click on it opens once", async () => {
+  let reply = () => Promise.resolve({ problem: "" });
+  const { ctl, opens } = setup({ open: () => reply() });
+  ctl.offer("p1");
+  await settle();
+  await ctl.click();
+  reply = () => Promise.resolve({ problem: "failed" });
+  await ctl.click();
+  assert.equal(ctl.state.phase, "opened", "the first open still stands");
+  const v = joinView(ctl.state, false);
+  assert.deepEqual([v.label, v.disabled, v.failure, v.confirm], ["Открыть ещё раз", false, callLinkTexts.openFailed, ""], "active, the failure line, no stale confirmation");
+  assert.equal(joinView(ctl.state, false).live, true);
+
+  const slow = deferred();
+  reply = () => slow.promise;
+  const a = ctl.click();
+  const b = ctl.click();
+  slow.resolve({ problem: "" });
+  await Promise.all([a, b]);
+  assert.equal(opens.length, 3, "one open for the double click");
+  assert.equal(ctl.state.phase, "opened");
+  assert.equal(joinView(ctl.state, false).failure, "");
+
+  // The link is gone on the second open: the button goes with a note.
+  reply = () => Promise.resolve({ problem: "no_link" });
+  await ctl.click();
+  const gone = joinView(ctl.state, false);
+  assert.deepEqual([gone.visible, gone.note, gone.live], [false, joinTexts.gone, true], "the note comes inside the live region that was there");
+});
+
+test("the confirmation is not shown while the recording runs; the hover texts do not say that the recording will not start", async () => {
+  const { ctl } = setup();
+  ctl.offer("p1");
+  await settle();
+  await ctl.click();
+  const before = joinView(ctl.state, false, false);
+  const during = joinView(ctl.state, false, true);
+  assert.equal(before.confirm, joinTexts.opened);
+  assert.equal(during.confirm, "");
+  assert.equal(before.title, callLinkTexts.joinAgainTitle);
+  assert.equal(during.title, "Открыть ссылку на пару ещё раз");
+  assert.doesNotMatch(during.title, /запись не начнётся/);
+  assert.equal(joinView({ shown: true, phase: "ready", subjectId: "s", problem: "" }, false, true).title, "Открыть ссылку на пару");
+  assert.doesNotMatch(joinView({ shown: true, phase: "ready", subjectId: "s", problem: "" }, false, true).title, /запись не начнётся/);
+  assert.equal(joinView({ shown: true, phase: "ready", subjectId: "s", problem: "" }, false, true).label, "Подключиться");
+  assert.equal(during.label, "Открыть ещё раз");
+});
+
+test("opened for a prompt, the recording starts from it: the opened state survives the start; another prompt starts clean", async () => {
+  const subjects = { p1: "sub-1", p2: "sub-2" };
+  const { ctl, reads } = setup({ subject: (id) => Promise.resolve(subjects[id] ?? "") });
+  ctl.offer("p1");
+  await settle();
+  await ctl.click();
+  // «Начать запись»: no offer any more (STARTED), the popup closes, then the running view asks with the same ID.
+  ctl.offer(null);
+  ctl.closed();
+  assert.equal(joinView(ctl.state, false, true).visible, false, "nothing shown until the recording is seen");
+  ctl.offer("p1");
+  ctl.refresh();
+  await settle();
+  assert.deepEqual(reads, ["p1", "p1", "p1"], "the core is asked about the started prompt");
+  const v = joinView(ctl.state, false, true);
+  assert.deepEqual([v.visible, v.label, v.confirm, v.disabled], [true, "Открыть ещё раз", "", false]);
+
+  // The recording is over: nothing is asked for it.
+  ctl.offer(null);
+  assert.equal(joinView(ctl.state, false, true).visible, false);
+  ctl.offer("p2");
+  assert.equal(ctl.state.phase, "hidden", "a different prompt starts clean");
+  await settle();
+  assert.deepEqual([ctl.state.phase, ctl.state.subjectId], ["ready", "sub-2"]);
 });
 
 test("a read while the popup stays open does not undo the opened state, and a changed subject starts clean", async () => {
@@ -292,7 +401,9 @@ test("only the newest read is applied", async () => {
   assert.equal(other.ctl.state.subjectId, "sub-p2");
 });
 
-test("an open that ends after the popup closed or the prompt changed no longer touches the state", async () => {
+// TASK-406: an open that ends after the popup closed still counts (the core hides the popup right after the start, and the
+// meeting did open); only a changed prompt drops it. Changed from "closed: hidden" (TASK-370).
+test("an open that ends after the popup closed is kept; one that ends after the prompt changed no longer touches the state", async () => {
   const open = deferred();
   const { ctl } = setup({ open: () => open.promise });
   ctl.offer("p1");
@@ -301,7 +412,7 @@ test("an open that ends after the popup closed or the prompt changed no longer t
   ctl.closed();
   open.resolve({ problem: "" });
   await click;
-  assert.equal(ctl.state.phase, "hidden");
+  assert.equal(ctl.state.phase, "opened");
 
   const open2 = deferred();
   const subjects = { p1: "sub-1", p2: "sub-2" };
@@ -359,15 +470,84 @@ test("a running start or skip disables the button but nothing here disables «Н
   assert.equal(joinView({ shown: false, phase: "opened", subjectId: "s", problem: "" }, false).confirm, "");
 });
 
-test("the confirmation is shown only while the meeting is open", () => {
+// Changed in TASK-406: the opened button is no longer grey (disabled) and its hover text is «Открыть ссылку на пару ещё раз
+// (запись не начнётся)» instead of «Ссылка уже открыта».
+test("the confirmation is shown only while the meeting is open and the recording has not started", () => {
   assert.equal(joinTexts.opened, "Ссылка открыта. Запись пока не идёт.");
   for (const phase of ["hidden", "ready", "opening"]) {
     assert.equal(joinView({ shown: true, phase, subjectId: "s", problem: "" }, false).confirm, "", phase);
   }
   const opened = joinView({ shown: true, phase: "opened", subjectId: "s", problem: "" }, false);
   assert.equal(opened.confirm, joinTexts.opened);
-  assert.equal(opened.title, joinTexts.openedTitle, "the hover text stays");
-  assert.equal(opened.disabled, true, "still grey and not clickable");
+  assert.equal(opened.title, callLinkTexts.joinAgainTitle);
+  assert.equal(opened.disabled, false, "active, not a grey dead end");
+  assert.equal(opened.label, "Открыть ещё раз");
+  assert.equal(joinView({ shown: true, phase: "opened", subjectId: "s", problem: "" }, false, true).confirm, "", "never while the recording runs");
+  assert.equal(joinTexts.openedTitle, undefined, "the grey-button hover text is gone");
+});
+
+test("the live regions exist as soon as the button does, and stay for the gone note", () => {
+  const live = (s) => joinView({ shown: true, subjectId: "s", problem: "", ...s }, false).live;
+  assert.equal(live({ phase: "ready" }), true, "drawn (empty) before any text");
+  assert.equal(live({ phase: "opening" }), true);
+  assert.equal(live({ phase: "opened" }), true);
+  assert.equal(live({ phase: "hidden" }), false, "no link, never a button: nothing to announce");
+  assert.equal(live({ phase: "hidden", problem: "gone" }), true, "the gone note arrives inside the region");
+  assert.equal(live({ phase: "ready", shown: false }), false);
+});
+
+test("the popup texts: «Открыть ещё раз» and its hover texts", () => {
+  assert.equal(callLinkTexts.joinAgain, "Открыть ещё раз");
+  assert.equal(callLinkTexts.joinAgainTitle, "Открыть ссылку на пару ещё раз (запись не начнётся)");
+  assert.equal(callLinkTexts.joinRunningTitle, "Открыть ссылку на пару");
+  assert.equal(callLinkTexts.joinAgainRunningTitle, "Открыть ссылку на пару ещё раз");
+  assert.equal(callLinkTexts.joinTitle, "Открыть ссылку на пару (запись не начнётся)", "the first open before the recording is unchanged");
+});
+
+// ---- the prompt the recording was started from ----
+
+test("startedPromptId: only a successful start of a lesson prompt counts", () => {
+  const sent = { id: "p1", kind: "lesson" };
+  assert.equal(startedPromptId(sent, { id: "p1", state: "STARTED" }), "p1");
+  assert.equal(startedPromptId(sent, { id: "p1", state: "OFFERED" }), "", "a failed start leaves the offer");
+  assert.equal(startedPromptId(sent, { id: "p1", state: "STARTING" }), "");
+  assert.equal(startedPromptId(sent, { id: "p2", state: "STARTED" }), "", "another prompt answered");
+  assert.equal(startedPromptId({ id: "a1", kind: "adhoc" }, { id: "a1", state: "STARTED" }), "", "an ad-hoc recording has no lesson link");
+  assert.equal(startedPromptId(null, { id: "p1", state: "STARTED" }), "");
+});
+
+test("StartedRecording keeps the started prompt for callSubject while its recording runs and drops it after", () => {
+  const rec = new StartedRecording();
+  assert.equal(rec.track("r1"), "", "nothing started from the popup: a recording from the main window or ad-hoc gets no ID");
+  rec.started("p1");
+  assert.equal(rec.track(""), "", "not capturing yet: nothing to ask for, the start still waits");
+  assert.equal(rec.track("r1"), "p1", "the recording is seen: its prompt is asked for, though it is no longer current");
+  assert.equal(rec.track("r1"), "p1");
+  assert.equal(rec.track(null), "p1", "a failed sound read changes nothing");
+  assert.equal(rec.track(""), "", "the recording ended");
+  assert.equal(rec.track("r1"), "", "and the prompt is forgotten");
+  assert.equal(rec.track("r2"), "");
+
+  rec.started("p2");
+  assert.equal(rec.track("r3"), "p2");
+  assert.equal(rec.track("r4"), "", "a different recording is shown: dropped");
+  assert.equal(rec.track("r3"), "", "and not taken back");
+
+  rec.started("p5");
+  assert.equal(rec.track(null), "", "unread sound before the recording was seen");
+  rec.started("p6");
+  assert.equal(rec.track("r5"), "p6", "a newer start replaces the older prompt");
+});
+
+test("Popup.tsx remembers the prompt of a successful start and asks the core with it while the recording is on screen", () => {
+  const code = src("popup/Popup.tsx");
+  assert.match(code, /const startedRec = useMemo\(\(\) => new StartedRecording\(\), \[\]\);/);
+  assert.match(code, /const started = action === "start" \? startedPromptId\(view, v\) : "";\s*if \(started !== ""\) \{\s*startedRec\.started\(started\);/);
+  assert.match(code, /const recordingNow = sound === null \? null : sound\.recording \? sound\.recordingId : "";/);
+  assert.match(code, /setRunningFrom\(startedRec\.track\(recordingNow\)\)/);
+  assert.match(code, /const joinId = live \? \(runningFrom === "" \? null : runningFrom\) : offeredId;/);
+  assert.match(code, /joinCtl\.offer\(joinId\)/);
+  assert.match(code, /joinView\(join, live \? false : m\.disabled, live\)/);
 });
 
 test("the buttons: «Начать запись» full width on top, then «Подключиться» and «Не записывать» side by side; no join keeps the old look", () => {
@@ -376,8 +556,9 @@ test("the buttons: «Начать запись» full width on top, then «По�
   const start = row.indexOf("m.buttons.map");
   const join = row.indexOf("{id === \"start\" && joinShown && (");
   assert.ok(start >= 0 && join > start, "the join button is drawn right after the start button, before the skip one");
-  assert.match(row, /callLinkTexts\.join\}\s*<\/Button>/);
-  assert.match(row, /title=\{jv\.title\}/, "the hint is callLinkTexts.joinTitle (via joinView)");
+  // TASK-406: the label is «Подключиться» or «Открыть ещё раз» (jv.label, from callLinkTexts via joinView).
+  assert.match(row, /\{jv\.label\}\s*<\/Button>/);
+  assert.match(row, /title=\{jv\.title\}/, "the hint is callLinkTexts.joinTitle or joinAgainTitle (via joinView)");
   assert.match(row, /busyLabel=\{callLinkTexts\.joining\}/);
   assert.match(row, /disabled=\{jv\.disabled\}/);
   assert.match(row, /disabled=\{m\.disabled\}/, "start and skip still follow the old rule");
@@ -391,8 +572,9 @@ test("the buttons: «Начать запись» full width on top, then «По�
   const css = src("popup/popup.css");
   assert.match(css, /\.pbtns:not\(\.two\) > \.btn:nth-child\(2\):last-child \{ grid-column: 1 \/ -1; \}/);
   assert.match(css, /\.pbtns \{ display: grid; grid-template-columns: 1fr 1fr;/);
-  assert.match(css, /\.btn\.joined:disabled \{[^}]*\}/);
-  assert.doesNotMatch(css.match(/\.btn\.joined:disabled \{[^}]*\}/)[0], /opacity/, "the grey button fades like every disabled one");
+  // TASK-406: no grey «joined» look any more; the opened button is an ordinary active one.
+  assert.doesNotMatch(css, /\.joined/);
+  assert.doesNotMatch(code, /joined/);
   assert.equal(callLinkTexts.join, "Подключиться");
   assert.equal(callLinkTexts.joining, "Открытие…");
 });
@@ -405,18 +587,82 @@ test("the red banner carries only the page error and the start problem; the join
   assert.match(code, /\[picker\.autoNote, \.\.\.picker\.warnings, \.\.\.joinQuiet, joinFailure\]/);
   assert.match(code, /textsLayout\(notes, errorLine\)/);
   assert.match(code, /const joinQuiet = showPicker \? \[jv\.confirm, jv\.note\]/);
-  // Quiet: p-note (muted), the confirmation is a status; the failure is the amber warning, last in the area.
+  // Quiet: p-note (muted); the failure is the amber warning, last in the area. Both are live regions (TASK-406): drawn
+  // as soon as the button is, text changes inside them.
   const area = code.slice(code.indexOf('<div className="texts">\n          {errorLine'), code.indexOf('<div className="pbtns">\n        {m.buttons'));
-  assert.match(area, /joinQuiet\.map/);
-  assert.match(area, /"p-note join-note clamp" : "p-note join-note"/);
-  assert.match(area, /role=\{n === jv\.confirm \? "status" : undefined\}/);
-  assert.doesNotMatch(area.slice(area.indexOf("joinQuiet.map"), area.indexOf("{showPicker && (\n            <p\n              className={layout.collapsed")), /warning/, "the quiet lines are not amber");
-  const failure = area.indexOf("{joinFailure !== \"\" && (");
+  const quiet = area.indexOf("{showPicker && jv.live && (");
+  assert.ok(quiet > area.indexOf("picker.warnings.map"), "the quiet line follows the warnings");
+  assert.match(area.slice(quiet), /"p-note join-note clamp" : "p-note join-note"/);
+  assert.match(area.slice(quiet), /\{joinQuiet\[0\]\}/);
+  const failure = area.lastIndexOf("{showPicker && jv.live && (");
   assert.ok(failure > area.indexOf("picker.advice"), "the failure is the last item, below the advice");
-  assert.match(area.slice(failure), /className=\{layout\.clamp \? "warning clamp" : "warning"\}/);
+  assert.match(area.slice(failure), /"warning join-fail clamp" : "warning join-fail"/);
+  assert.match(area.slice(failure), /\{joinFailure\}/);
+  assert.doesNotMatch(area.slice(quiet, area.indexOf("{showPicker && (\n            <p\n              className={layout.collapsed")), /warning/, "the quiet lines are not amber");
   assert.doesNotMatch(area.slice(failure), /Banner|alert/);
-  assert.equal(area.indexOf("Banner kind=\"fail\"") < area.indexOf("joinQuiet.map"), true);
+  assert.equal(area.indexOf("Banner kind=\"fail\"") < quiet, true);
   assert.doesNotMatch(area.slice(area.indexOf("Banner kind"), area.indexOf("</Banner>")), /join/i, "nothing of the join reaches the banner");
+});
+
+test("a11y: the confirmation, the gone note and the failure line are persistent role=status regions in both views (TASK-370 follow-up)", () => {
+  const code = src("popup/Popup.tsx");
+  // Offer view: the two regions are mounted with jv.live, not with their text, and carry role="status".
+  const offer = code.slice(code.indexOf('<div className="texts">\n          {errorLine'), code.indexOf('<div className="pbtns">\n        {m.buttons'));
+  assert.equal([...offer.matchAll(/\{showPicker && jv\.live && \(/g)].length, 2);
+  assert.equal([...offer.matchAll(/role="status"/g)].length, 2);
+  assert.doesNotMatch(offer, /\{joinFailure !== "" && \(/, "the failure line is no longer mounted together with its text");
+  assert.doesNotMatch(offer, /role=\{n === jv\.confirm/, "the confirmation is no longer mounted together with its text");
+  // Running view: the gone note and the failure line, again drawn with jv.live.
+  const running = code.slice(code.indexOf("{stopProblem !== \"\" && <p className=\"warning\">"), code.indexOf('<div className="pbtns two">'));
+  assert.equal([...running.matchAll(/\{jv\.live && \(/g)].length, 2);
+  assert.equal([...running.matchAll(/role="status"/g)].length, 2);
+  assert.match(running, /\{jv\.note\}/);
+  assert.match(running, /\{jv\.failure\}/);
+  assert.doesNotMatch(running, /jv\.confirm/, "no «Запись пока не идёт» while it runs");
+  // An empty region takes no room: the negative margin takes back the gap of the column.
+  const css = src("popup/popup.css");
+  assert.match(css, /\.join-note:empty, \.join-fail:empty \{ margin-top: -4px; \}/);
+  assert.doesNotMatch(css, /\.join-(note|fail)[^{]*\{[^}]*display:\s*none/, "display:none would unregister the live region");
+});
+
+test("the running view: one extra full-width row with «Подключиться» / «Открыть ещё раз», only when the core gave a link", () => {
+  const code = src("popup/Popup.tsx");
+  const run = code.slice(code.indexOf('<div className="pbtns two">'), code.indexOf("  return (\n    <div className=\"popup\" ref={popupRef}>\n      <IconSprite />\n      <div className={topClass(\"offer\")}"));
+  assert.match(run, /\{jv\.visible && \(/, "no link: the button is not drawn and nothing else changes");
+  assert.equal([...run.matchAll(/<Button/g)].length, 3, "«Остановить», «Скрыть» and the join button: no more rows");
+  const join = run.slice(run.indexOf("{jv.visible && ("));
+  assert.match(join, /className="wide"/);
+  assert.match(join, /busyLabel=\{callLinkTexts\.joining\}/);
+  assert.match(join, /disabled=\{jv\.disabled\}/);
+  assert.match(join, /title=\{jv\.title\}/);
+  assert.match(join, /\{jv\.label\}/);
+  assert.doesNotMatch(join, /variant=|danger|primary/, "a secondary button, as «Скрыть»");
+  assert.doesNotMatch(join, /autoFocus|\.focus\(/);
+  // The row stays inside the two-column grid: «wide» spans it, the popup width holds.
+  const css = src("popup/popup.css");
+  assert.match(css, /\.pbtns \.wide, \.pbtns:not\(\.two\) > \.btn:nth-child\(2\):last-child \{ grid-column: 1 \/ -1; \}/);
+});
+
+test("the dot: neutral in the offer view, red and pulsing only while a recording runs (running view and the advice about it)", () => {
+  assert.equal(dotClass("offer"), "dot");
+  assert.equal(dotClass("recording"), "dot rec");
+  assert.equal(dotClass("advice"), "dot rec");
+  assert.equal(topClass("offer"), "p-top", "the heading of an offer is not red either");
+  assert.equal(topClass("recording"), "p-top live");
+  assert.equal(topClass("advice"), "p-top live");
+  const css = src("popup/popup.css");
+  assert.match(css, /\n\.dot \{[^}]*background: var\(--muted\);[^}]*\}/);
+  assert.doesNotMatch(css.match(/\n\.dot \{[^}]*\}/)[0], /animation|--rec/, "the base dot neither pulses nor is red");
+  assert.match(css, /\n\.dot\.rec \{ background: var\(--rec\); animation: breath var\(--t-breath\) ease-in-out infinite; \}/);
+  // Each view uses the function: no literal dot or top classes are left in the page.
+  const code = src("popup/Popup.tsx");
+  assert.match(code, /className=\{dotClass\("advice"\)\}/);
+  assert.match(code, /className=\{dotClass\("recording"\)\}/);
+  assert.match(code, /className=\{dotClass\("offer"\)\}/);
+  assert.match(code, /className=\{topClass\("advice"\)\}/);
+  assert.match(code, /className=\{topClass\("recording"\)\}/);
+  assert.match(code, /className=\{topClass\("offer"\)\}/);
+  assert.doesNotMatch(code, /className="dot"|className="p-top/);
 });
 
 test("the visibility handler: hidden closes the join state, visible reads the subject again", () => {

@@ -459,7 +459,9 @@ const wordButtons = {
   "pages/TranscriptLinks.tsx": ["{links.length === 1 ? openPairTexts.one : openPairTexts.many(formatTime(l.startedAt))}"],
   // The popup is one prompt window: every button answers the prompt («Записать», «Пропустить», «Остановить», «Скрыть»);
   // TASK-370: «Подключиться» (the meeting of the lesson on offer) is its second main action and stays a word.
-  "popup/Popup.tsx": ['{advicePending === "switch" ? adviceLabels.switching : adviceLabels.switch}', "{adviceLabels.keep}", "{recordingTexts.stop}", "{recordingTexts.hide}", '{id === "start" ? m.startLabel : buttonLabels[id]}', "{callLinkTexts.join}"],
+  // TASK-406: it also stands in the running view, and once opened it reads «Открыть ещё раз»: both draw `{jv.label}`
+  // (callLinkTexts.join / joinAgain via joinView), first in the running view, then in the offer row.
+  "popup/Popup.tsx": ['{advicePending === "switch" ? adviceLabels.switching : adviceLabels.switch}', "{adviceLabels.keep}", "{recordingTexts.stop}", "{recordingTexts.hide}", "{jv.label}", '{id === "start" ? m.startLabel : buttonLabels[id]}', "{jv.label}"],
   "sourcePicker/SourceAdvice.tsx": ["{adviceLabels.switch}", "{adviceLabels.keep}"],
 };
 
