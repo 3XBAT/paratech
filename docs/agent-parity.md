@@ -42,6 +42,7 @@ Legend
 | Добавить файл через диалог | `LibraryService.ImportFile` | — | только UI, *кнопка* | клик | native open dialog; in the panel a dropped file is an upload |
 | Перетащить файл в окно / в панель | `librarydrop`, `AgentPanel.Attach` | `inspect_upload` | R (платно) | — | |
 | Список файлов предмета / «Входящие» | `LibraryService.Materials` | нет | R | — | IDs, type, counters; no file names (ADR-0022) |
+| Пары в папках предмета (ссылки на записи) | `KnowledgeBaseService.FolderLessons` (TASK-429, в работе) | `find_lessons` | R | — | view only: derived from the recordings, nothing to change (ADR-0034 amendment 2026-11-10) |
 | Разложить в папку предмета | `LibraryService.Place` | `place_upload` (только из «Входящих») | U | 2-я запись → план | moving a filed material between folders: no tool |
 | Вернуть во «Входящие» | `LibraryService.MoveToInbox` | нет (только «Отменить» у `place_upload`) | U | — | |
 | Привязать к паре / отвязать | `LibraryService.Link`, `Unlink` | `link_material` / нет | U | — | |

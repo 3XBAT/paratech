@@ -1,6 +1,6 @@
 # ADR-0034: Navigation of the main window, settings and permissions
 
-- **Status:** Proposed
+- **Status:** Proposed; amended 2026-11-10 (owner, «Пары в папках предмета», section at the end)
 - **Date:** 2026-11-03
 - **Source:** owner 2026-11-02 («да» to the UX audit plan: quick fixes + an architect pass on navigation; the UI is too
   complex, usability first: no dead ends, fewer clicks, fewer «Да»); owner answer О10 = б 2026-11-02 (each external
@@ -192,3 +192,55 @@ Each step leaves the app fully usable; no step removes a way to an object before
     meanwhile. The minutes line «Расходует минуты обработки» is under the button.
   - The agent keeps its own tools; parity row in `docs/agent-parity.md` («Сделать задание»: the agent already has both
     paths).
+
+## Amendment 2026-11-10 (owner): recorded lessons in the subject's folders
+**Context.** A recorded and processed lesson is listed on the tab «Пары» (`Пары · 1`), but the tree says «Лекции —» and
+the tab «Файлы» says «Пусто: Лекции»: folders list only materials, and a recording is not a material. The owner
+(2026-11-10, «заводи»): the lesson appears in the folder of its kind as a link to the recording, not a copy.
+
+**Rule.**
+1. A **lesson of the knowledge base** (a completed recording that is neither silent nor marked for deletion, the set
+   `cases/knowledgebase.Lessons` lists) whose subject resolves to library subject S (`librarySubjectState = matched`)
+   shows as a **link row** in a system folder of S chosen by its kind (the student's correction wins), by the existing
+   rule `domain/library/services/filing.NoteFolder` (ADR-0027, the same folder a note part of that lesson goes to):
+   `lecture` and no or unknown kind → «Лекции»; `seminar` and `practice` → «Семинары»; `lab` → «Лабораторные».
+   If S has no such system folder (`filing.Target` not ok), the lesson is in no folder (still on «Пары»).
+2. **Nothing is stored.** The row is derived on every read: no `materials` row, no file copy, no migration. It follows
+   the recording: correcting the subject or kind moves it, marking the recording for deletion removes it, a lesson whose
+   subject is `none` / `ambiguous` / absent is in no folder (it stays in «Входящие → Пары без предмета», §2). Lectures
+   known only from notes give no link row: their parts are already materials in these folders.
+3. **The row.** Recording icon, title (or «Запись <дата>»), muted «21.10 · 1 ч 20 мин», a quiet status only while not
+   processed (the status of the «Пары» row); the whole row opens the lesson screen (its default tab); two icon actions
+   with tooltips: «Открыть конспект» (lesson screen, tab «Конспект»; only when the summary is ready) and «Открыть
+   запись» (lesson screen, tab
+   «Расшифровка», where the audio player is). No «⋯», no drag, no move or remove of its own: it is changed through the
+   recording (lesson screen «⋯» → «Исправить предмет или тип пары», delete there or in «Записи»). Link rows come before
+   the files of the folder, newest first.
+4. **Counts.** The tree count of a folder and the «Пусто:» line count link rows and files together; the section head
+   says «Лекции · 2 пары · 1 файл» (only the non-zero parts). While the link rows are not read yet, the three lesson
+   folders make no «пусто» claim (as with files).
+
+**Placement.**
+- Read model: `cases/knowledgebase.Service.FolderLessons(ctx, sub shared.SubjectID) ([]FolderLesson, error)`;
+  `FolderLesson{Folder shared.FolderID; System subject.System; Lesson kb.Lesson}` in `types.go`. It reads the lessons as
+  `Lessons` does (recordings only, no notes), keeps those matched to `sub`, and places each with
+  `filing.Target(sub, s, filing.NoteFolder(kind))` (S from the existing `SubjectLister`). An unknown or removed subject
+  gives an empty list. No new port. `cases` importing `domain/library/**` is allowed (ARCH-20); the rule stays in the
+  domain service (ARCH-22).
+- Binding: `input/wails.KnowledgeBaseService.FolderLessons(subjectId string) ([]KnowledgeFolderLesson, error)`, JSON
+  `{"folderId": "...", "system": "lectures"|"seminars"|"labs", "lesson": KnowledgeLesson}` with `lesson.anchor =
+  "recording"`, `lesson.notes = []`, in the core's order (newest first). An id that does not validate →
+  «Неверный идентификатор предмета.»; a store failure → `ErrKnowledgeUnavailable`. Parsed in
+  `frontend/src/bindings/knowledgeBase.ts` (`folderLessons`, `parseFolderLesson`; a malformed reply is an error).
+- Agent: no new tool; `find_lessons` already lists the lessons of a subject (`docs/agent-parity.md`, row «Пары в папках
+  предмета»: view only).
+
+**Consequences.** One more read on opening a subject (the same recordings read as «Пары»). A lesson shows in two places
+of one subject page (tab «Пары» and its folder in «Файлы»); both open the same lesson screen. Moving a lesson between
+folders by hand is not possible (only through its kind); see Open В4.
+
+**Open (вопросы владельцу).**
+- **В4.** Пара с типом «Практика» и пара без типа: (а) «Практика» — в «Семинары», без типа — в «Лекции», как уже
+  раскладываются части «Моего конспекта» (рекомендую); (б) пары без типа не показывать ни в одной папке.
+- **В5.** «Открыть запись»: (а) экран пары на вкладке «Расшифровка», там же проигрыватель (рекомендую, без нового
+  экрана); (б) раздел «Записи» с этой записью в списке.

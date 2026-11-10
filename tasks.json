@@ -9477,6 +9477,77 @@
             ],
             "dependencies": [],
             "status": "pending"
+        },
+        {
+            "id": "TASK-428",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Интерфейс · UI] Полосы прокрутки как в Claude: не видны в покое, появляются при прокрутке (колесо, перетаскивание, клавиатура) и при наведении на край, исчезают через ~1 с; раскладка не сдвигается; отступ под блоком «Ссылка на пару» до вкладок",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-428-scrollbars-on-activity.md; владелец 10.11 («заводи»); progress/TASK-363.md (цвета, контраст, forced-colors остаются)",
+                "Без overflow: overlay, без флагов WebView2, без scrollbar-width/-color; класс scroll-active на прокручиваемом элементе из src/ui/scrollActivity.ts (scroll в фазе захвата, pointermove по полосе, перетаскивание), снимается через 1000 мс; ставится в src/main.tsx и src/popup/main.tsx",
+                "В покое бегунок прозрачный, под .scroll-active — цвета TASK-363; затухание — проверка на этой машине двух способов (@property и border-color: inherit), иначе мгновенно через 1 с; итог в progress; prefers-reduced-motion — без затухания; forced-colors — бегунок виден всегда (CanvasText, forced-color-adjust: none)",
+                "У каждого прокручиваемого контейнера scrollbar-gutter: stable (исключения перечислены в тесте с причиной); при появлении бегунка и при переполнении ничего не сдвигается (снимки до/после в progress)",
+                "Блок «Ссылка на пару» отделён от вкладок «Пары / Файлы / Задания» отступом 24 px во всех состояниях (ссылка, форма, отказ, строка результата), в широком и узком окне",
+                "Работает в главном окне, панели агента и всплывающем окне (и в выборе источника)",
+                "UX-проверка coordinator-round.md 3a: заметно (наведение на край показывает полосу), без тупиков, все состояния (покой, прокрутка, наведение, перетаскивание, высокий контраст), тихий интерфейс, одно акцентное",
+                "Тесты фронтенда: scrollActivity на фейковых таймерах и подменённой геометрии; CSS-проверки (прозрачно в покое, видно только под .scroll-active, forced-colors без условия, нет scrollbar-width/-color, gutter у контейнеров, отступ под блоком ссылки); обе точки входа ставят обработчик; windowscroll363 и contrast не ослаблены",
+                "Файлы: paratech/desktop/frontend/src/ui/scrollbar.css, src/ui/scrollActivity.ts (новый), src/main.tsx, src/popup/main.tsx, src/styles.css, src/agent/agent.css, src/popup/popup.css, src/sourcePicker/sourcePicker.css (только gutter и отступ), test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Ручная проверка на этой машине: главное окно, панель агента с длинной беседой, всплывающее окно; светлая и тёмная тема; высокий контраст; снимки в progress"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-429",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Предметы · ядро] Пары в папках предмета: чтение FolderLessons (лекция → «Лекции», семинар/практика → «Семинары», лабораторная → «Лабораторные») и привязка KnowledgeBaseService.FolderLessons, без хранения и без миграции",
+            "acceptance_criteria": [
+                "Черновик с контрактом: docs/tasks/TASK-429-folder-lessons-core.md; docs/adr/0034-navigation.md (дополнение 2026-11-10), ADR-0027 (filing.NoteFolder); владелец 10.11",
+                "cases/knowledgebase: FolderLessons(ctx, sub) → []FolderLesson{Folder, System, Lesson}; уроки как в Lessons (записи, без конспектов), только librarySubjectState matched к sub; папка — filing.Target(sub, s, filing.NoteFolder(kind)) с исправленным типом; нет папки → урока нет; неизвестный/удалённый предмет → []; неверный ID → ErrInvalidRequest; новых портов нет",
+                "input/wails: KnowledgeBaseService.FolderLessons(subjectId) → [{folderId, system: lectures|seminars|labs, lesson: KnowledgeLesson (anchor recording, notes [])}] в порядке ядра; неверный ID — «Неверный идентификатор предмета.»; сбой хранилища — ErrKnowledgeUnavailable",
+                "frontend/src/bindings/knowledgeBase.ts: methods.folderLessons, KnowledgeFolderLesson, parseFolderLesson (неверный system, пустой folderId, anchor не recording — ошибка), errorMessages.invalidSubjectId; Go-тест имён методов и текстов покрывает новое",
+                "Тесты: таблица на фейках (lecture, seminar, practice, lab, пустой и неизвестный тип, исправленный тип, чужой предмет, none, ambiguous, без предмета, нет системной папки, удалённый предмет, неверный ID, сбой); сценарий desktop/tests на SQLite: запись лекции → строка в «Лекции», SetLessonInfo seminar → в «Семинары», запись помечена на удаление → строки нет; версия схемы не меняется; точный JSON строки",
+                "Файлы: paratech/desktop/internal/cases/knowledgebase/* (types.go, service.go или folders.go), internal/domain/library/services/filing/note.go (только комментарий), internal/input/wails/knowledgebase.go и knowledgebase_test.go, internal/app/* (только подключение, если нужно), frontend/src/bindings/knowledgeBase.ts, paratech/desktop/tests/folderlessons_sqlite_test.go (новый) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/knowledgebase/... ./desktop/internal/domain/library/... ./desktop/internal/input/wails/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..., npm --prefix paratech/desktop/frontend run test"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-430",
+            "category": "ui",
+            "priority": "high",
+            "description": "[Предметы · UI] Проведённая пара — строкой-ссылкой в папке своего типа («Лекции», «Семинары», «Лабораторные») со значками «Открыть конспект» и «Открыть запись»; счётчики дерева и строка «Пусто:» учитывают такие строки",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-430-folder-lessons-ui.md; docs/adr/0034-navigation.md (дополнение 2026-11-10, правила 3–4); привязка — TASK-429 (folderLessons)",
+                "SubjectsPage читает folderLessons рядом с materials (открытие предмета, перезагрузка, изменения, перечитывания «Пар»: уход с экрана пары, исправление, импорт записи); поздний ответ другого предмета не показывается",
+                "libraryView.ts: счётчики папок, «Пусто:» и заголовок секции считают файлы и строки пар («Лекции · 2 пары · 1 файл», только ненулевые части, склонение пара/пары/пар); пока строки пар не прочитаны или чтение не удалось — три папки не объявляются пустыми",
+                "Строка (новый src/pages/FolderLessonRows.tsx): значок записи, название или «Запись 21.10», тихая строка «21.10 · 1 ч 20 мин», тихий статус строки «Пар» пока не обработано; вся строка открывает экран пары; значки с подсказками и aria-label: «Открыть конспект» (вкладка summary, только при summaryReady), «Открыть запись» (вкладка transcript, проигрыватель); без «⋯», без перетаскивания; строки пар перед файлами, новые сверху",
+                "Запись удалена или исправлены предмет/тип — после возврата строка исчезает или переезжает; сбой чтения — тихая строка «Не удалось загрузить пары предмета.» со значком «Повторить» (подсказка), файлы показаны",
+                "Правила владельца: мелкие действия — значки с подсказками; статусы — значок + цветной текст, без заливок и цветных обводок; одно акцентное; безличные тексты текстовыми узлами; UX-проверка coordinator-round.md 3a (заметно, без тупиков, все состояния, тихий интерфейс); клавиатура: Tab до строки и обоих значков, Enter/Space, видимый фокус",
+                "Тесты фронтенда: логика вида (счётчики, свёртка, заголовок и склонения, непрочитанные строки), действия строки вызывают открытие с нужным ключом и вкладкой, сбой и «Повторить», поздний ответ другого предмета",
+                "Файлы: paratech/desktop/frontend/src/libraryView.ts, src/pages/SubjectsPage.tsx, src/pages/SubjectsParts.tsx, src/pages/FolderLessonRows.tsx (новый), src/subjectTabsView.ts (только экспорт помощника статуса), src/styles.css (только раскладка строки), test/* (+ тесты); TASK-427 (отложена) правит те же две страницы",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Ручная проверка на этой машине: предмет с проведённой лекцией — дерево «Лекции 1», вкладка «Файлы», оба значка, удаление записи; снимки в progress"
+            ],
+            "dependencies": [
+                "TASK-428",
+                "TASK-429"
+            ],
+            "status": "pending"
         }
     ]
 }
