@@ -7194,7 +7194,7 @@
                 "TASK-261",
                 "TASK-327"
             ],
-            "status": "pending"
+            "status": "blocked"
         },
         {
             "id": "TASK-329",
@@ -7289,7 +7289,7 @@
                 "TASK-329",
                 "TASK-330"
             ],
-            "status": "pending"
+            "status": "blocked"
         },
         {
             "id": "TASK-333",
@@ -7336,7 +7336,7 @@
                 "TASK-327",
                 "TASK-333"
             ],
-            "status": "pending"
+            "status": "blocked"
         },
         {
             "id": "TASK-335",
@@ -7390,7 +7390,7 @@
                 "TASK-334",
                 "TASK-335"
             ],
-            "status": "pending"
+            "status": "blocked"
         },
         {
             "id": "TASK-337",
@@ -9546,6 +9546,660 @@
             "dependencies": [
                 "TASK-428",
                 "TASK-429"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-431",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Ссылки на пару · ядро] Ссылка у предмета по типу пары: общая + лекции, семинары, лабораторные; правило «ссылка типа пары, иначе общая»; миграция; use case",
+            "acceptance_criteria": [
+                "Черновик с контрактом: docs/tasks/TASK-431-call-links-by-kind-core.md; docs/adr/0032-lesson-call-links.md (дополнение 2026-11-10), docs/adr/0038-agent-can-do-everything.md §4, D-2; владелец 10.11 (расписание с разными ссылками на лекцию и семинар)",
+                "domain/library/subject: CallKind (general, lecture, seminar, lab), ParseCallKind, CallKindOfLesson (practice → seminar, пусто/неизвестно → general), значение CallLinks с Of и Join (ссылка типа, иначе общая, иначе нет; семинар никогда не берёт ссылку лекции), SetCallLinkOf / ClearCallLinkOf; SetCallLink / ClearCallLink / CallLink остаются и значат общую",
+                "Миграция (следующий свободный номер при пуше): subjects.call_link_lecture, call_link_seminar, call_link_lab TEXT NOT NULL DEFAULT ''; call_link не трогается, ничего не копируется; up/down в тесте",
+                "cases/library: SetCallLinkOf, ClearCallLinkOf, OpenJoinLink(subject, lessonKind), CallLinkSets(ids); старый CallLinks остаётся до TASK-432; ошибки как у нынешних методов ссылки; в лог — только коды",
+                "Тесты: таблица CallKindOfLesson и Join на все сочетания; установка и очистка по типу (то же значение — без изменений, плохая ссылка — ErrInvalidCallLink без изменений, версия только при изменении); круг через SQLite; Format/LogValue печатают только хост; перекрёстная проверка двух ParseCallLink зелёная",
+                "Агент: set_call_links (C, волна 11) — TASK-434…437; здесь ядро, которым пользуется и UI",
+                "Файлы: paratech/desktop/internal/domain/library/subject/* (calllink.go, calllinks.go новый, subject.go, errors.go), paratech/desktop/pkg/migrations/<номер>_subject_call_links_by_kind.sql, paratech/desktop/internal/adapters/sqlite/* (запросы библиотеки, sqlcgen, library.go), paratech/desktop/internal/cases/library/{calllink.go,types.go,errors.go}, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/library/... ./desktop/internal/cases/library/... ./desktop/internal/adapters/sqlite/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-432",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Ссылки на пару · привязка] «Подключиться» на «Сегодня» и в окне записи открывает ссылку типа пары; привязки ссылок принимают тип; DTO предмета со ссылками по типам",
+            "acceptance_criteria": [
+                "docs/adr/0032-lesson-call-links.md (дополнение 2026-11-10); ядро — TASK-431",
+                "cases/todayfeed: порт ссылок отдаёт subject.CallLinks (CallLinkSets); строка пары — хост ссылки CallLinks.Join(вид пары) и её тип; без ссылки — «Добавить ссылку», как сейчас",
+                "cases/recordingprompt.CallSubject: предмет и вид пары урока; ссылка проверяется через Join; во время записи из этого окна — как TASK-405",
+                "input/wails: SetSubjectCallLink(subjectId, kind, link), ClearSubjectCallLink(subjectId, kind) (kind general|lecture|seminar|lab, неверный — invalid), OpenSubjectCallLink(subjectId, lessonKind); LibrarySubject получает callLinks {general, lecture, seminar, lab} (только заданные, {link, host}), callLink остаётся общей; TodayLesson — callLinkHost выбранной ссылки и callLinkKind; PromptCallSubject — lessonKind",
+                "frontend/src/bindings/{library,today}.ts и popup-привязка — только разбор и новые аргументы; страницы вызывают с прежним поведением (тип general / вид пары), UI — TASK-433",
+                "Старый CallLinks в cases/library удаляется, когда вызывающих не осталось",
+                "Тесты: таблица на фейках (лекция со своей ссылкой, семинар только с общей, лабораторная без ссылок, практика → семинар, неизвестный вид), точный JSON DTO, неверный kind; сценарий desktop/tests: лекция и семинар одного предмета открывают разные ссылки",
+                "Агент: — (чтение агентом и offer_button — TASK-436)",
+                "Файлы: paratech/desktop/internal/cases/todayfeed/*, paratech/desktop/internal/cases/recordingprompt/{calllink.go,ports.go,types.go}, paratech/desktop/internal/cases/library/calllink.go (только удаление старого), paratech/desktop/internal/input/wails/{library_calllink.go,library.go (только DTO),today.go,prompt.go}, paratech/desktop/internal/app/{today.go,prompts.go} (только подключение), paratech/desktop/frontend/src/bindings/{library,today}.ts, src/popup/joinView.ts (только вызов), paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/todayfeed/... ./desktop/internal/cases/recordingprompt/... ./desktop/internal/cases/library/... ./desktop/internal/input/wails/... ./desktop/internal/app/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..., npm --prefix paratech/desktop/frontend run test"
+            ],
+            "dependencies": [
+                "TASK-431"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-433",
+            "category": "ui",
+            "priority": "high",
+            "description": "[Ссылки на пару · UI] Страница предмета: общая ссылка и ссылки лекций, семинаров, лабораторных; «Добавить ссылку» на карточке пары сохраняет для её типа или для всех пар",
+            "acceptance_criteria": [
+                "docs/adr/0032-lesson-call-links.md (дополнение 2026-11-10); docs/adr/0038-agent-can-do-everything.md О-1 (по умолчанию а); привязки — TASK-432",
+                "Блок «Ссылка на пару» страницы предмета: строка «Для всех пар» и строки «Лекции», «Семинары», «Лабораторные»; у каждой хост или «нет», значки с подсказками «Добавить» / «Изменить» / «Убрать» (не слова), форма в строке; пустые строки типов свёрнуты в тихую строку «Отдельная ссылка для лекций, семинаров…» со значком «Добавить»",
+                "Карточка пары на «Сегодня»: «Подключиться» открывает ссылку типа пары (OpenSubjectCallLink с видом пары); «Добавить ссылку» — форма с выбором «Для лекций» (вид пары, по умолчанию) / «Для всех пар предмета»; неизвестный вид — только «для всех»",
+                "Окно записи: «Подключиться» с видом пары; тексты без изменений",
+                "Тексты ошибок прежние (invalid, not_found, failed); без тупиков; статусы — значок + цветной текст; одно акцентное; безличные тексты; UX-проверка coordinator-round.md 3a; шаги владельца в docs/qa/tasks/TASK-433.md начинаются с холодного запуска",
+                "Тесты фронтенда: вид блока на все сочетания ссылок, добавить / изменить / убрать по типу, выбор на карточке пары, popup с видом пары",
+                "docs/agent-parity.md: строка «Ссылки на пару» без изменений (агент — TASK-436)",
+                "Файлы: paratech/desktop/frontend/src/pages/CallLinkParts.tsx, src/callLinkView.ts, src/pages/TodayParts.tsx, src/pages/TodayPage.tsx (только вызов), src/popup/Popup.tsx и src/popup/joinView.ts (только вид пары), src/pages/SubjectsPage.tsx (только передача ссылок в блок), src/styles.css (только раскладка блока), test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Ручная проверка на этой машине: предмет с разными ссылками лекции и семинара — страница предмета, «Сегодня», окно записи; снимки в progress"
+            ],
+            "dependencies": [
+                "TASK-432",
+                "TASK-430"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-434",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Агент · контракт] Волна 11 по ADR-0038: set_call_links (пакет строк), list_materials, move_material, новые действия offer_button, состояния в get_settings; set_call_link / clear_call_link убраны",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §4, §6; черновики docs/tasks/TASK-436-agent-set-call-links.md и TASK-442-hub-panel-v11.md; спецификации волны 11 — TASK-327 (этот файл дополняет его)",
+                "domain/agent/values (файл волны 11, каталог ≥ 11): тип call_link_rows (1–40 строк {subject id | subject_name label, kind general|lecture|seminar|practice|lab, link ≤ 2048 байт, status link|in_person|unconfirmed|none|clear}; ровно одно из subject и subject_name), set_call_links{rows} — C, вид карточки call_links, предел аргументов 16 КиБ; если TASK-327 объявил set_call_link / clear_call_link — убрать",
+                "list_materials{subject | inbox} — R (строки: ID материала, тип, папка, системная папка, урок, removed, число страниц, подсказка места — ID предмета и папки; без имён); move_material{material, subject, folder} — U, компенсация — прежнее место",
+                "offer_button: действия copy_summary, copy_transcript, copy_lecture_text, save_summary, save_transcript, save_lecture_text, save_draft, export_subject, check_mail, google_sign_out, install_speech, save_support_bundle, open_settings; аргументы subject, assignment, kind (у open_call_link / copy_call_link — lesson или subject + kind), section (hub_key, mail, google, profile, permissions, models, diagnostics); у каждого действия ровно свои аргументы",
+                "get_settings (результат, каталог ≥ 11): google_calendar connected|disconnected|error, mail configured|not_configured, hub_key set|unset — только состояния",
+                "actionpolicy: set_call_links — C (никогда не выполняется в input/agent), list_materials — R, move_material — U; тест: в интерфейсах input/agent нет Confirm/Execute",
+                "Тесты: разбор каждой строки и отказа (две ссылки предмета, неизвестный kind, длинная ссылка, 41 строка), таблица политики, каталог 10 не видит новых инструментов; оценка прироста префикса в progress",
+                "Файлы: paratech/desktop/internal/domain/agent/values/* (файл волны 11 и список каталога), paratech/desktop/internal/domain/agent/services/actionpolicy/*, paratech/desktop/internal/domain/agent/action/* (только новые компенсации) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/agent/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-327"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-435",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Ссылки на пару · пакет · ядро] Пакет ссылок из строк, которые извлекла модель: исход каждой строки (готово, уже есть, очно, не подтверждена, нет предмета, не ссылка, две разные), применение по одному предмету, «Отменить всё»",
+            "acceptance_criteria": [
+                "Черновик с контрактом: docs/tasks/TASK-435-call-links-batch.md; docs/adr/0038-agent-can-do-everything.md §4, D-3, D-4; ядро — TASK-431",
+                "domain/library/services/calllinkbatch (чистый): Decide(rows, subjects) → items: имя через subjectmatch по именам и алиасам, затем без хвоста «(…)» (преподаватель); каждая ссылка — subject.ParseCallLink; практика → семинар; одинаковые строки сливаются; две разные ссылки одного предмета и типа — conflict, обе не отмечены; unconfirmed с верной ссылкой — не отмечена; unknown_subject с верной ссылкой — CanCreate, не отмечена",
+                "cases/library: ProposeCallLinks (токен по содержимому), ApplyCallLinks(token, choices) — токен сверяется (иначе ErrStale, ничего не применено), по одному предмету на транзакцию, повтор не применяет дважды, создание предмета со ссылкой; UndoCallLinks — прежнее значение только там, где ссылка ещё та, что поставлена, созданный предмет удаляется, только если пуст; не больше 40 строк",
+                "docs/architecture.md §12, строка library: calllinkbatch",
+                "Тесты: таблица Decide на фикстуре в форме расписания владельца (15 строк, данные вымышленные); Apply: stale, запрещённый выбор, частичный итог при сбое хранилища, повтор, создание; Undo: восстановлено, изменено с тех пор, созданный предмет; ни ссылки, ни имени в логе",
+                "Агент: ядро set_call_links (C, волна 11), диспетчер — TASK-436",
+                "Файлы: paratech/desktop/internal/domain/library/services/calllinkbatch/* (новый), paratech/desktop/internal/cases/library/{calllinkbatch.go (новый),types.go,errors.go,ports.go}, paratech/desktop/tests/* (сценарий SQLite), docs/architecture.md (только строка library §12) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/library/... ./desktop/internal/cases/library/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-431"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-436",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Агент · ядро] set_call_links: одна карточка «Да» со всеми строками расписания; list_subjects отдаёт ссылки по типам; offer_button открывает и копирует ссылку пары",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-436-agent-set-call-links.md; docs/adr/0038-agent-can-do-everything.md §1, §4, §5; спецификации — TASK-434; ядро — TASK-435; привязки — TASK-432",
+                "input/agent/calllinks.go: каждый subject ID — проверка происхождения (неизвестный — is_error unknown_id, ничего не предложено); ProposeCallLinks; карточка call_links хранит токен и строки; планировщику — {card, rows, ready, skipped: {причина: n}}, без ссылок и имён",
+                "input/wails/agentconfirm_calllinks.go: ConfirmCallLinks(cardId, choices) → ApplyCallLinks; итог в карточке для «Отменить всё» (UndoCallLinks), запись журнала DONE с этой компенсацией; STALE — «Ссылки изменились» и «Показать снова»; «Нет» — ничего не меняется",
+                "list_subjects для каталога ≥ 11: call_links {general, lecture, seminar, lab} (только заданные, канонические); каталог ≤ 10 — call_link = общая",
+                "offer_button open_call_link / copy_call_link: lesson → предмет и вид пары → Join, или subject (+ kind); нет ссылки — no_link; кнопка вызывает те же привязки, что «Подключиться»; offerUnavailable убран",
+                "Граница доверия: состязательное ревью безопасности (ссылки из текста студента, без логов, карточка показывает точные значения)",
+                "Тесты: фикстура из 15 строк → одна карточка, точный JSON результата планировщику; неизвестный ID; подтверждение всех, части, stale, повтор, «Отменить всё», отказ; ни ссылки, ни имени в логе и в результате",
+                "Не параллельно с TASK-438 и TASK-440 (input/wails/agentconfirm*.go, input/agent/offer*.go)",
+                "Файлы: paratech/desktop/internal/input/agent/calllinks*.go (новый), offer*.go, paratech/desktop/internal/domain/agent/values/read.go (только call_links), paratech/desktop/internal/input/wails/agentconfirm_calllinks.go (новый), agentconfirm_offer.go, paratech/desktop/internal/app/* (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/agent/... ./desktop/internal/input/wails/... ./desktop/internal/domain/agent/... ./desktop/internal/app/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-432",
+                "TASK-434",
+                "TASK-435"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-437",
+            "category": "ui",
+            "priority": "high",
+            "description": "[Агент · UI] Карточка «Ссылки на пары»: каждая строка с предметом, типом и точной ссылкой, пропущенные с причиной, один «Да», «Отменить всё»",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §4, D-3, D-4; карточка — TASK-436",
+                "Строка готовой ссылки: флажок (отмечен), предмет, тип («Лекции», «Семинары», «Лабораторные», «Все пары»), полная ссылка моноширинным текстом (не ссылкой, без href), хост выделен; при замене — тихая строка «Заменит: <хост>»; «уже сохранена» — без флажка",
+                "Не подтверждена (с верной ссылкой) и обе стороны «две разные ссылки» — без отметки, студент может отметить одну; «Нет в «Предметах»» с верной ссылкой — флажок «Создать предмет с этой ссылкой» без отметки",
+                "Пропущенные ниже одной тихой группой с причиной по-русски: «очно — ссылка не нужна», «ссылки нет», «не похоже на ссылку», «предмет не найден», «несколько похожих предметов — выберите на странице предмета»",
+                "«Да» = «Сохранить N ссылок» (N — отмеченные; 0 — неактивна), «Нет»; после — строка «Сохранено N ссылок · Отменить всё»; STALE — «Ссылки изменились» и «Показать снова»",
+                "frontend/src/bindings/agent*.ts: разбор вида call_links; неизвестный вид — «Обновите приложение»",
+                "UX: тихий интерфейс, одно акцентное, статусы — значок + цветной текст, безличные тексты текстовыми узлами; UX-проверка coordinator-round.md 3a; шаги владельца в docs/qa/tasks/TASK-437.md (холодный запуск, вставить расписание в панель)",
+                "Тесты фронтенда: разбор и SSR каждого исхода, выбор одной из двух, счётчик «Сохранить N», ссылка — только текст",
+                "Файлы: paratech/desktop/frontend/src/agent/* (карточка), src/bindings/agent*.ts, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-436"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-438",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Волна 11: карточки «Да» с точным значением — почта преподавателя и поле профиля (заменяет TASK-328 без ссылки на пару)",
+            "acceptance_criteria": [
+                "docs/adr/0033-agent-parity.md §8 (О-4 в); docs/adr/0038-agent-can-do-everything.md §1; спецификации — TASK-327; заменяет TASK-328 (зависит от закрытых TASK-259/261), ссылки — TASK-436",
+                "input/agent: set_teacher / clear_teacher / set_profile_field строят карточку: предмет, роль и ТОЧНОЕ значение; проверка до карточки тем же кодом, что страница (правила почты ADR-0030, пределы полей профиля); неверное значение — invalid_value с кодом причины, без значения",
+                "«Да» в input/wails (agentconfirm_teacher.go, agentconfirm_profile.go): тот же use case, что SetSubjectTeacher / ClearSubjectTeacher / SaveProfile; значение на «Да» сверяется с показанным (иначе STALE)",
+                "Планировщику после «Да» — только «сохранено» и ID; в лог — только коды (тест обработчика лога)",
+                "Граница доверия: состязательное ревью (адрес из загруженного файла без просьбы студента — eval-кейс TASK-442)",
+                "Тесты: каждая карточка, неверные значения, STALE, нет значений в логе и в результате",
+                "Не параллельно с TASK-436 и TASK-440 (input/wails/agentconfirm*.go)",
+                "Файлы: paratech/desktop/internal/input/agent/teacher*.go, profile*.go (новые), paratech/desktop/internal/input/wails/agentconfirm_teacher.go, agentconfirm_profile.go (новые), paratech/desktop/internal/app/* (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/agent/... ./desktop/internal/input/wails/... ./desktop/internal/app/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-327"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-439",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Волна 11: list_materials (файлы предмета и «Входящих» без имён) и move_material (перенос разложенного файла с «Отменить»)",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §6; docs/agent-parity.md §2; спецификации — TASK-434",
+                "list_materials{subject | inbox}: тот же use case, что LibraryService.Materials и PlacementHint; строки — ID, тип, папка, системная папка, урок, removed, число страниц, подсказка места (ID предмета и папки); ни имён файлов, ни текста (ADR-0022)",
+                "move_material{material, subject, folder}: тот же use case, что Place; компенсация — прежние предмет и папка с проверкой версии; материал во «Входящих» — отказ use_place_upload; удалённый — отказ",
+                "Тесты: строки результата (точный JSON), перенос, компенсация, изменён с тех пор — UNDO_REFUSED, отказы",
+                "Не параллельно с TASK-329 (input/agent, библиотечная группа)",
+                "Файлы: paratech/desktop/internal/input/agent/materials*.go (новый), paratech/desktop/internal/domain/agent/values/read.go (только строки материалов), paratech/desktop/internal/cases/library/* (только недостающая компенсация), paratech/desktop/internal/app/* (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/agent/... ./desktop/internal/cases/library/... ./desktop/internal/domain/agent/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-329",
+                "TASK-434"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-440",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Волна 11: offer_button — копировать и сохранить конспект, расшифровку, текст лекции, черновик, экспорт предмета, проверить почту, выйти из Google, «Пропуск тишины», пакет поддержки, кнопка раздела настроек для секретов; get_settings — состояния подключений",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §1, §2 (секреты агент не вводит — показывает кнопку настроек); спецификации — TASK-434",
+                "input/agent/offer*.go: каждое новое действие — карточка из шаблона с той же кнопкой, что на странице; ID проверяется по происхождению; open_settings{section} открывает раздел (Подключения → Hub / Почта / Google, Профиль, Разрешения, Модели речи, Диагностика) — навигация, ничего не вводится",
+                "input/wails/agentconfirm_offer.go: нажатие вызывает ту же привязку (CopyAll, SaveAs, ExportDocx, ExportSubject, CheckMail, GoogleSignOut, StartInstall, SaveSupportBundle); open_settings — событие навигации страницы",
+                "get_settings (каталог ≥ 11): google_calendar, mail, hub_key — только состояния из GetConnections / GoogleCalendarStatus; ни адресов, ни ключей",
+                "Тесты: каждое действие, чужой ID — отказ, точный JSON get_settings, ни значения секрета, ни адреса в результате",
+                "Не параллельно с TASK-331 (settings*.go) и TASK-436 / TASK-438 (agentconfirm*.go, offer*.go)",
+                "Файлы: paratech/desktop/internal/input/agent/offer*.go, settings*.go (только состояния), paratech/desktop/internal/input/wails/agentconfirm_offer.go, paratech/desktop/internal/app/* (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/agent/... ./desktop/internal/input/wails/... ./desktop/internal/app/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-331",
+                "TASK-434",
+                "TASK-436"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-441",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Агент · UI] Карточки волны 11 (заменяет TASK-332): «Да» с точным значением (почта, профиль), строки итога библиотеки и материалов, название нового чата, новые кнопки offer_button",
+            "acceptance_criteria": [
+                "docs/adr/0033-agent-parity.md §8, §11; docs/adr/0038-agent-can-do-everything.md §1, §2; карточки — TASK-438, TASK-329, TASK-330, TASK-439, TASK-440; заменяет TASK-332 (зависит от TASK-328)",
+                "Карточка значения: «Лектор „Матан“: Иванов И. И., ivanov@… — сохранить?» с полным значением моноширинным текстом (не ссылкой), «Да» / «Нет»; STALE — «Значение изменилось» и «Показать снова»",
+                "Строки итога: «Файл перенесён во „Входящие“ · Отменить», «Файл удалён · Вернуть», «Файл перенесён · Отменить», «Папка удалена · Отменить», «Предмет удалён · Вернуть»",
+                "Название нового чата появляется в списке чатов без перезагрузки; переименование студентом как раньше",
+                "Кнопки offer_button: подпись и значок как на странице; open_settings — «Открыть «Подключения»» и т. п.; секрет никогда не показывается и не запрашивается в панели",
+                "UX (coordinator-round шаг 3a): находимость, без тупиков, все состояния, тихий UI, одно акцентное, мелкие действия — значки с подсказками; шаги владельца в docs/qa/tasks/TASK-441.md с холодного запуска",
+                "Тесты фронтенда: разбор и SSR каждой карточки и строки; значение — текстом (без href и HTML)",
+                "Файлы: paratech/desktop/frontend/src/agent/*, src/bindings/agent*.ts, test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-329",
+                "TASK-330",
+                "TASK-437",
+                "TASK-438",
+                "TASK-439",
+                "TASK-440"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-442",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Hub · промпт] Panel v11 (заменяет TASK-334): инструменты волны 11 (TASK-327 + TASK-434), тип call_link_rows, правила для ссылок из расписания и значений студента, кнопки секретов, plan_run, eval, замер префикса",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-442-hub-panel-v11.md; docs/adr/0038-agent-can-do-everything.md §1, §4–§6; спецификации — TASK-327, TASK-434; plan_run — TASK-333; заменяет TASK-334",
+                "tools.json v11 = v10 + волна 11 (без set_call_link / clear_call_link); reply.chat_title; типы call_link_rows (закрытые ключи, перечисления, форма ID, длины) и типы значений TASK-327; пределы аргументов: set_call_links 16 КиБ, show_plan 32 КиБ, прочие 8 КиБ; shared/testdata/tool_catalog_v11.json совпадает",
+                "system.md v11: правила черновика (расписание → ОДИН set_call_links, строка на строку текста, ссылки дословно, очно → in_person, «не подтверждена» → unconfirmed, без ссылки → none, без преподавателя в имени; значения только из текста студента этой просьбы; секреты и их адреса — только offer_button{open_settings}; копировать / сохранить — offer_button; ссылка на пару — из call_links по виду пары); правило v10 «No tool saves a link» заменено",
+                "Eval: расписание в форме владельца (15 строк, вымышленные данные) → один set_call_links с 15 строками, ссылки байт в байт; инструкция в ячейке расписания не выполняется; адрес в документе без просьбы — нет инструмента значения; «почта лектора … ivanov@…» → set_teacher; секрет в просьбе — offer_button{open_settings}, секрет не повторён; chat_title только в первой просьбе нового чата",
+                "Размер префикса: замер v10 и v11 в PR, цель ≤ +2 000 токенов, выше +2 500 — стоп и отчёт (ADR-0038 О-3)",
+                "Отчёт уровня 2 на PR; состязательное ревью безопасности (security-auditor); Hub развёртывается раньше TASK-443",
+                "Агент: каталог 11",
+                "Файлы: paratech/hub/pkg/prompts/agent/panel/v11/* (новый), paratech/hub/pkg/prompts/*_test.go, paratech/shared/testdata/tool_catalog_v11.json, paratech/shared/contract_test.go, paratech/hub/internal/domain/llm/values/*, paratech/hub/internal/cases/agentstep/* (только версия и пределы аргументов), paratech/hub/tests/agent_eval_test.go (+ тесты)",
+                "Исполнитель: hub-dev (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./hub/... ./shared/... (Postgres как в CI), buf lint и buf breaking в paratech/shared, golangci-lint"
+            ],
+            "dependencies": [
+                "TASK-327",
+                "TASK-333",
+                "TASK-434"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-443",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Десктоп на каталоге 11 (заменяет TASK-336): CatalogVersion = 11, golden, eval уровня 1, исполнитель плана, docs/agent-parity.md",
+            "acceptance_criteria": [
+                "docs/adr/0033-agent-parity.md §5; docs/adr/0038-agent-can-do-everything.md §6; Hub — TASK-442 (развёрнут раньше); заменяет TASK-336",
+                "values.CatalogVersion = 11; golden desktop/tests/agent_catalog_test.go на shared/testdata/tool_catalog_v11.json; пределы аргументов 16 / 32 / 8 КиБ на десктопе; исполнитель плана (TASK-335) включён для каталога 11",
+                "agenteval уровня 1: вставленное расписание владельца (вымышленные данные) → карточка call_links, 15 строк, верные исходы; «почта лектора по матану ivanov@…» → карточка set_teacher; «удали этот файл» → remove_material; «перенеси файл в семинары» → list_materials и move_material; «скопируй конспект» → offer_button{copy_summary}; «вот ключ Hub …» → offer_button{open_settings}; новый чат получает название; план из 20 записей идёт исполнителем (в progress — шаги планировщика и токены до и после)",
+                "Старые просьбы на каталоге 10: «Продолжить» / «Повторить» — честный отказ, как TASK-184",
+                "docs/agent-parity.md: колонки «Инструмент агента» и «Волна» для волны 11 сверены с выданным",
+                "Граница доверия: ревью безопасности волны (значения от модели, логи, карточки, пакет ссылок)",
+                "Файлы: paratech/desktop/internal/domain/agent/values/tool.go, paratech/desktop/tests/agent_catalog_test.go, paratech/desktop/tests/agenteval/*, paratech/desktop/internal/adapters/hubclient/* (только версия, если нужно), docs/agent-parity.md (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/... (затронутые пакеты, desktop/tests и agenteval), GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-329",
+                "TASK-330",
+                "TASK-331",
+                "TASK-335",
+                "TASK-436",
+                "TASK-437",
+                "TASK-438",
+                "TASK-439",
+                "TASK-440",
+                "TASK-441",
+                "TASK-442"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-444",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · контракт] Волна 12: спецификации и правила actionpolicy — билеты, работа под ключ, задачи записей, источники звука, чаты и журнал, «Отменить», модели, ICS из панели, адрес получателя, части конспекта, преподаватель задания",
+            "acceptance_criteria": [
+                "Черновик с таблицей инструментов: docs/tasks/TASK-444-wave12-contract.md; docs/adr/0038-agent-can-do-everything.md §2, §3, §5, §6; ответы владельца О-4, О-5, О-6 (по умолчанию а)",
+                "domain/agent/values (wave12.go, каталог ≥ 12): tickets, list_tickets, work, job, list_sources, recording (+ switch_source, skip_prompt), list_chats, chat, list_actions, undo, list_models, model, propose_schedule_import, set_mail_recipient, get_profile (если О-6 = а), note (+ replace_file, reorder), change_assignment (+ teacher), do_assignment (если О-5 = а); новые виды ID",
+                "actionpolicy: классы по таблице черновика; undo, work{stop}, job{run_now} — без компенсации; model{delete}, propose_schedule_import, set_mail_recipient — C (никогда в input/agent); tickets{confirm}, work{regenerate} — платные с планом по правилам ADR-0021",
+                "Тесты: разбор каждого действия (только свои аргументы, отказы), таблица политики, каталог ≤ 11 не видит новых; оценка прироста префикса в progress (цель ≤ +2 500 токенов к v11)",
+                "Файлы: paratech/desktop/internal/domain/agent/values/*, paratech/desktop/internal/domain/agent/services/actionpolicy/*, paratech/desktop/internal/domain/agent/action/* (только новые компенсации), paratech/desktop/internal/domain/shared/* (только новые виды ID) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-443"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-445",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Волна 12: билеты — список, вставленный студентом, билеты из файла, подтвердить (платно), отменить и вернуть, список билетов",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §5 (текст студента — аргумент, разбор — тем же парсером, что страница); спецификации — TASK-444; TicketService (TASK-402 — части)",
+                "tickets{propose_text}: текст студента дословно → тот же use case, что TicketService.Propose; результат — ID списка и число билетов, без текста; компенсация — Cancel",
+                "tickets{propose_material, confirm, cancel, restore}, list_tickets — те же use cases, что ProposeFromMaterial / Confirm / Cancel / Undo / List; confirm — платный, план по правилам ADR-0021",
+                "Инструкция внутри вставленного списка не выполняется (eval-кейс в TASK-455)",
+                "Тесты: каждое действие, компенсации, точный JSON результатов (без текстов), отказ при чужом ID",
+                "Файлы: paratech/desktop/internal/input/agent/tickets*.go (новый), paratech/desktop/internal/domain/agent/values/read.go (только строки билетов), paratech/desktop/internal/app/* (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/agent/... ./desktop/internal/domain/agent/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-444"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-446",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Волна 12: работа под ключ — остановить написание, переписать, повторить шаг, спросить по шагу",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §3; спецификации — TASK-444",
+                "work{stop}: тот же use case, что TurnkeyService.StopWriting, сразу, без «Отменить», строка итога предлагает «Продолжить написание»; work{regenerate}: Regenerate, платно, всегда через план (заменяет готовое); work{retry}: Retry, платно; work{ask}: AskStep, вопрос студента дословно, ответ — в карточку, планировщику — только счётчики",
+                "Подтверждение требований и план работы остаются за студентом (ADR-0038 §2 п. 5): инструмента нет, агент показывает кнопку работы",
+                "Тесты: каждое действие, неверное состояние работы — отказ с причиной, план для regenerate, ответ ask не уходит планировщику",
+                "Файлы: paratech/desktop/internal/input/agent/work*.go (новый), paratech/desktop/internal/app/* (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/agent/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-444"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-447",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Волна 12: записи и задачи — источники звука и смена источника, «Пропустить пару», «Запустить сейчас», «Отменить расшифровку» / «Расшифровать снова»",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §3; спецификации — TASK-444; TASK-393/409 (отмена и повтор расшифровки)",
+                "list_sources: ID источника, kind system|app, app — закрытое перечисление по известным программам; ни заголовков окон, ни имён процессов",
+                "recording{switch_source}: SelectSource / SwitchSource, компенсация — прежний источник; recording{skip_prompt}: PromptService.Skip текущего окна",
+                "job{run_now}: RunJobNow, без «Отменить»; job{cancel_transcription}: CancelTranscription без вопроса окна (просьба студента — согласие), компенсация — Retranscribe; job{retranscribe}: Retranscribe",
+                "Тесты: каждое действие, нет записи / нет окна — отказ с причиной, точный JSON list_sources",
+                "Файлы: paratech/desktop/internal/input/agent/recording*.go, jobs*.go (новый), paratech/desktop/internal/domain/agent/values/read.go (только строки источников), paratech/desktop/internal/app/* (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/agent/... ./desktop/internal/domain/agent/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-444"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-448",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Волна 12: чаты и журнал — список чатов, архив / вернуть / переименовать по явной просьбе, журнал действий, «Отменить» силами агента",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §3, О-4 (по умолчанию а: переименование только по явной просьбе студента); спецификации — TASK-444; ADR-0028 (чаты)",
+                "list_chats: ID, даты, число просьб, без названий; chat{archive, restore}: ArchiveChat / RestoreChat, текущий чат не архивируется; chat{rename}: RenameChat, название — label из текста студента, компенсация — прежнее название",
+                "list_actions: ID действия, инструмент, статус, дата, ID целей — из AgentService.History, без текстов",
+                "undo{action}: та же компенсация, что «Отменить» (AgentService.Undo); отказы как у кнопки; без компенсации компенсации",
+                "Тесты: каждое действие, текущий чат — отказ, чужой ID — отказ, undo уже отменённого — UNDONE без повторного эффекта",
+                "Не параллельно с TASK-447, если меняется input/agent/facts.go",
+                "Файлы: paratech/desktop/internal/input/agent/chats*.go, journal*.go (новые), paratech/desktop/internal/domain/agent/values/read.go (только строки чатов и журнала), paratech/desktop/internal/app/* (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/agent/... ./desktop/internal/domain/agent/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-444"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-449",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Волна 12: модели речи (список, по умолчанию, удалить карточкой), адрес получателя почты (карточка с точным адресом), чтение профиля и почты преподавателей",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §2, §3, О-6 (по умолчанию а); спецификации — TASK-444",
+                "list_models: ID, класс размера, установлена, по умолчанию; model{set_default}: ModelsService.SetDefault, компенсация — прежняя; model{delete}: C-карточка «Удалить модель …? Да», «Да» в input/wails вызывает ModelsService.Delete",
+                "set_mail_recipient{email}: C-карточка с точным адресом, проверка по правилам ADR-0030 до карточки, «Да» сохраняет только адрес получателя тем же use case, что SaveMailSettings (сервер, порт, логин не трогаются); значение не логируется",
+                "Если О-6 = а: get_profile — значения профиля; list_subjects — почта преподавателей; только по запросу, не в базе шага",
+                "Сервер почты, порт, логин, адрес Hub и секреты — инструментов нет (ADR-0038 §2 п. 1–2), агент показывает offer_button{open_settings}",
+                "Граница доверия: состязательное ревью (адрес получателя от модели, логи)",
+                "Тесты: каждое действие и карточка, STALE, неверный адрес, нет значений в логе",
+                "Файлы: paratech/desktop/internal/input/agent/models*.go, mail*.go, profile*.go (только чтение), paratech/desktop/internal/input/wails/agentconfirm_models.go, agentconfirm_mail.go (новые), paratech/desktop/internal/domain/agent/values/read.go (только новые строки), paratech/desktop/internal/app/* (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/agent/... ./desktop/internal/input/wails/... ./desktop/internal/domain/agent/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-444"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-450",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Волна 12: расписание из ICS-файла, брошенного в панель — карточка превью, «Да» применяет импорт",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §3; спецификации — TASK-444; ScheduleImportService (превью, Commit, Discard)",
+                "propose_schedule_import{upload}: загрузка панели с типом ICS → тот же разбор и превью, что у страницы импорта (icsschedule, importplan); карточка показывает изменения; «Да» в input/wails вызывает Commit с токеном превью, «Нет» — Discard; не ICS — отказ not_schedule",
+                "Планировщику — только счётчики (новые, изменённые, удалённые пары), без названий (ADR-0022)",
+                "Тесты: превью, «Да», «Нет», устаревший токен, не ICS, инструкция в названии события не выполняется (уровень 1)",
+                "Файлы: paratech/desktop/internal/input/agent/schedule*.go (новый), paratech/desktop/internal/input/wails/agentconfirm_scheduleimport.go (новый), paratech/desktop/internal/app/* (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/agent/... ./desktop/internal/input/wails/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-444"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-451",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Волна 13: отправка — время в propose_send, сменить время и отменить запланированную, «Отправлено вручную» и «Отправить ещё раз» карточками",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §3, §6 (волна 13); время отправки — TASK-239, запланированные — TASK-242",
+                "Собственная спецификация в этой задаче (domain/agent/values, файл волны 13, каталог ≥ 13): propose_send{+ at, time}; scheduled_send{action reschedule|cancel, delivery, at, time}; delivery_outcome{action mark_sent|send_again, delivery} — все C",
+                "Карточки: время показывается точно; send_again — всегда «Да», никогда по разрешению (hard rule 7, ADR-0034 §5); mark_sent — заявление студента, «Да»",
+                "Тесты: каждая карточка, STALE, send_again при разрешении allow всё равно спрашивает",
+                "Hub и переключение каталога 13 — отдельными задачами, когда эта и TASK-453 готовы",
+                "Файлы: paratech/desktop/internal/domain/agent/values/* (файл волны 13), paratech/desktop/internal/domain/agent/services/actionpolicy/*, paratech/desktop/internal/input/agent/send*.go, paratech/desktop/internal/input/wails/agentconfirm_send*.go (новые), paratech/desktop/internal/app/* (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/agent/... ./desktop/internal/input/agent/... ./desktop/internal/input/wails/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-239",
+                "TASK-242",
+                "TASK-456"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-452",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Волна 12: части конспекта (заменить файл, порядок), преподаватель у задания, «Сделать задание» тем же путём, что кнопка",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §3, О-5 (по умолчанию а); спецификации — TASK-444; «Сделать задание» — TASK-411",
+                "list_notes{note}: ID частей по порядку; note{replace_file}: ReplaceFile из загрузки панели, компенсация — UndoReplace; note{reorder}: Reorder, компенсация — прежний порядок",
+                "change_assignment{edit, teacher}: тот же use case, что CorrectLesson (текст преподавателя — label, никогда не адрес)",
+                "Если О-5 = а: do_assignment{assignment}: turnkey.Route, как HomeworkService.DoAssignment; короткий ответ — сразу, если дёшево; работа под ключ — прежний путь triage_assignment / write_work с планом",
+                "Тесты: каждое действие, компенсации, маршрут short и turnkey",
+                "Файлы: paratech/desktop/internal/input/agent/notes*.go, assignments*.go (только teacher и do_assignment), paratech/desktop/internal/domain/agent/values/read.go (только части), paratech/desktop/internal/app/* (только подключение) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/input/agent/... ./desktop/internal/domain/agent/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-411",
+                "TASK-444"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-453",
+            "category": "functional",
+            "priority": "low",
+            "description": "[Агент · ядро] Волна 13: заменить текст «Моего конспекта» словами студента (после редактора TASK-291), «Отменить» = прежняя ревизия",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §3, §5; редактор и ревизии — TASK-291",
+                "Собственная спецификация (файл волны 13): note{replace_text, part, text} — текст студента дословно (как add_text), тот же use case, что правка в редакторе; компенсация — прежняя ревизия с проверкой версии",
+                "Тесты: замена, компенсация, изменено студентом с тех пор — UNDO_REFUSED, текст не уходит планировщику и в лог",
+                "Файлы: paratech/desktop/internal/domain/agent/values/* (файл волны 13, только note), paratech/desktop/internal/input/agent/notes*.go (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/agent/... ./desktop/internal/input/agent/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-291",
+                "TASK-456"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-454",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Агент · UI] Карточки волны 12: билеты, работа, записи и задачи, чаты и журнал, модели, превью расписания, адрес получателя, части конспекта",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §3; карточки — TASK-445…450, TASK-452",
+                "Строки итога: «Билеты: 42 · Отменить», «Написание остановлено · Продолжить», «Источник звука: Zoom · Отменить», «Расшифровка отменена · Расшифровать снова», «Чат в архиве · Вернуть», «Модель по умолчанию: … · Отменить», «Отменено: …»",
+                "Карточки C: «Удалить модель …? Да / Нет», превью расписания (та же таблица, что на странице импорта), «Адрес получателя: …@… — сохранить?» (значение моноширинным текстом)",
+                "frontend/src/bindings/agent*.ts: разбор новых видов; неизвестный вид — «Обновите приложение»",
+                "UX (coordinator-round шаг 3a), мелкие действия — значки с подсказками, статусы — значок + цветной текст; шаги владельца в docs/qa/tasks/TASK-454.md",
+                "Тесты фронтенда: разбор и SSR каждой карточки и строки",
+                "Файлы: paratech/desktop/frontend/src/agent/*, src/bindings/agent*.ts, src/pages/ScheduleImport*.tsx (только переиспользование превью, без изменения поведения), test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build"
+            ],
+            "dependencies": [
+                "TASK-445",
+                "TASK-446",
+                "TASK-447",
+                "TASK-448",
+                "TASK-449",
+                "TASK-450",
+                "TASK-452"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-455",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Hub · промпт] Panel v12: инструменты волны 12, правила, eval, замер префикса",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §2, §3, §5, §6, О-3; спецификации — TASK-444 (контракт)",
+                "tools.json v12 = v11 + волна 12; тип ticket_text (≤ 16 КиБ, предел аргументов tickets 16 КиБ); shared/testdata/tool_catalog_v12.json совпадает",
+                "system.md v12: «остановись», «перепиши», «спроси по шагу» → work; билеты из вставленного списка — tickets{propose_text} с текстом дословно; «запусти сейчас», «отмени расшифровку» → job; чат — переименовать только по явной просьбе; «что ты сделал вчера» → list_actions; «отмени это» → undo; ICS в панели → propose_schedule_import; адрес получателя — только из текста студента",
+                "Eval: каждое правило; инструкция внутри вставленного списка билетов не выполняется; «переименуй чат» без названия — вопрос",
+                "Размер префикса: замер v11 и v12 в PR, цель ≤ +2 500 токенов; v12 > 19 500 токенов на шаг — стоп и отчёт (ADR-0038 О-3)",
+                "Отчёт уровня 2; состязательное ревью безопасности; Hub развёртывается раньше TASK-456",
+                "Файлы: paratech/hub/pkg/prompts/agent/panel/v12/* (новый), paratech/hub/pkg/prompts/*_test.go, paratech/shared/testdata/tool_catalog_v12.json, paratech/shared/contract_test.go, paratech/hub/internal/domain/llm/values/*, paratech/hub/internal/cases/agentstep/* (только версия и пределы), paratech/hub/tests/agent_eval_test.go (+ тесты)",
+                "Исполнитель: hub-dev (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./hub/... ./shared/... (Postgres как в CI), buf lint и buf breaking в paratech/shared, golangci-lint"
+            ],
+            "dependencies": [
+                "TASK-444"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-456",
+            "category": "functional",
+            "priority": "medium",
+            "description": "[Агент · ядро] Десктоп на каталоге 12: CatalogVersion = 12, golden, eval уровня 1, docs/agent-parity.md",
+            "acceptance_criteria": [
+                "docs/adr/0038-agent-can-do-everything.md §6; Hub — TASK-455 (развёрнут раньше)",
+                "values.CatalogVersion = 12; golden на shared/testdata/tool_catalog_v12.json",
+                "agenteval уровня 1: вставленный список билетов → tickets{propose_text} дословно; «останови написание» → work{stop}; «отмени расшифровку» → job; «заархивируй старые чаты» → list_chats и chat{archive}; «отмени последнее» → list_actions и undo; ICS в панели → карточка превью; в progress — токены префикса v11 и v12",
+                "Старые просьбы на каталоге 11: «Продолжить» / «Повторить» — честный отказ, как TASK-184",
+                "docs/agent-parity.md: колонки «Инструмент агента» и «Волна» для волны 12 сверены",
+                "Граница доверия: ревью безопасности волны",
+                "Файлы: paratech/desktop/internal/domain/agent/values/tool.go, paratech/desktop/tests/agent_catalog_test.go, paratech/desktop/tests/agenteval/*, paratech/desktop/internal/adapters/hubclient/* (только версия, если нужно), docs/agent-parity.md (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/... (затронутые пакеты, desktop/tests и agenteval), GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [
+                "TASK-445",
+                "TASK-446",
+                "TASK-447",
+                "TASK-448",
+                "TASK-449",
+                "TASK-450",
+                "TASK-452",
+                "TASK-454",
+                "TASK-455"
             ],
             "status": "pending"
         }
