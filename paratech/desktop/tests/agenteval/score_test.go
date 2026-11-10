@@ -150,10 +150,10 @@ func TestParseCaseSetRejects(t *testing.T) {
 			return strings.Replace(s, `"once": ["change_assignment"]`, `"once": ["reply"]`, 1)
 		},
 		"never of an expected tool": func(s string) string {
-			return strings.Replace(s, `"never": ["mark_assignments_done", "change_assignment"]`, `"never": ["note"]`, 1)
+			return strings.Replace(s, `"never": ["mark_assignments_done", "change_assignment", "recording", "set_setting"]`, `"never": ["note"]`, 1)
 		},
 		"never of a tool outside the catalog": func(s string) string {
-			return strings.Replace(s, `"never": ["change_assignment", "mark_assignments_done", "propose_send"]`, `"never": ["send_email"]`, 1)
+			return strings.Replace(s, `"never": ["change_assignment", "mark_assignments_done", "propose_send", "recording", "set_setting"]`, `"never": ["send_email"]`, 1)
 		},
 	} {
 		mutated := mutate(string(raw))

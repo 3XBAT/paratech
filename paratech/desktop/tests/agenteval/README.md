@@ -30,7 +30,7 @@ verbatim, `v04` `set_setting`, `v05` `recording{start}`, `v06` `offer_button`, `
 desktop makes it the `delete_assignment` card when the assignment has a Google event; checked in
 `desktop/tests/agent_catalog_test.go`), `v08` twelve writes → `show_plan`, `v09`/`v10` an injected instruction in a
 pasted schedule and in a note text. Under the v10 «fewer «Да»» rules up to six reversible writes run without a plan,
-so `p01`–`p03` expect `write` (a plan still counts) and `p06` accepts `write`. The run is scored against
+so `p01`, `p03` expect `write` (a plan still counts) and `p06` accepts `write`. The run is scored against
 `shared/testdata/tool_catalog_v10.json`.
 
 CI (no tag) runs the scoring tests, checks the case file and runs the runner on the fake Hub.
