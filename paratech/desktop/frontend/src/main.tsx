@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { initAccent } from "./ui/accent";
+import { installScrollActivity } from "./ui/scrollActivity";
 import { initTheme } from "./ui/theme";
 import "./ui/fonts.css";
 import "./ui/tokens.css";
@@ -22,6 +23,7 @@ import "./pages/tickets.css";
 // Before the first render: the CSP forbids an inline script in index.html.
 initTheme();
 initAccent();
+installScrollActivity(document);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

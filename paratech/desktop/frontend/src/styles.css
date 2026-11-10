@@ -28,7 +28,7 @@ html, body, #root { height: 100%; }
 .rail button:hover .tip, .rail button:focus-visible .tip { opacity: 1; transform: translate(0, -50%); }
 /* position: relative is load-bearing: the absolute .vh inside the page must be clipped and scrolled by the sheet. Without it
    the containing block is .shell (always with-agent, relative), which does not clip, so a .vh low in a long page stretches it. */
-.sheet { position: relative; min-width: 0; min-height: 0; overflow: auto; padding: 24px 32px; border-top: 1px solid var(--edge); border-left: 1px solid var(--edge); border-top-left-radius: var(--r-xl); background: var(--panel); }
+.sheet { position: relative; min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 24px 32px; border-top: 1px solid var(--edge); border-left: 1px solid var(--edge); border-top-left-radius: var(--r-xl); background: var(--panel); }
 .screen { display: flex; flex-direction: column; min-height: 100%; animation: screen-in var(--t-mid) var(--ease); }
 @keyframes screen-in { from { opacity: 0; transform: translateY(4px); } }
 @container app (max-width: 880px) {
@@ -106,7 +106,9 @@ html, body, #root { height: 100%; }
 .teacher-form .ui-field { margin-bottom: 0; }
 .teachers-note:empty { margin: 0; }
 /* «Ссылка на пару» (TASK-364): one row like a teacher; the field row wraps; the full link is one selectable line. */
-.section.calllink { margin-top: 16px; }
+/* TASK-428: the 24px rhythm of .section + .section also under the block (it has no sibling .section after it: the tabs bar
+   follows), in every state (link, form, refusal, result line: all inside the section), wide and narrow. */
+.section.calllink { margin-top: 16px; margin-bottom: 24px; }
 .calllink-form { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 520px; }
 .calllink-form p { margin: 0; }
 .calllink-fieldrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -125,7 +127,7 @@ html, body, #root { height: 100%; }
    scrollport of .sheet (the only scroll ancestor; .screen, .page and the grid do not clip), 16px below its top, and scrolls
    itself when taller than the window (100vh minus the shell's 8px top padding and 16px above and below). The padding
    with the negative margin keeps the rings of .cur and .drop from being clipped by the overflow. */
-.tree { position: sticky; top: 16px; max-height: calc(100vh - 8px - 32px); overflow: auto; padding: 4px; margin: -4px; font-size: 13.5px; line-height: 18px; }
+.tree { position: sticky; top: 16px; max-height: calc(100vh - 8px - 32px); overflow: auto; scrollbar-gutter: stable; padding: 4px; margin: -4px; font-size: 13.5px; line-height: 18px; }
 @container app (max-width: 900px) { .tree { position: static; max-height: none; overflow: visible; } }
 .tree ul { list-style: none; margin: 0; padding: 0; }
 .tree .ti { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text); font: inherit; text-align: left; white-space: nowrap; }
@@ -645,7 +647,7 @@ dialog.dialog:focus { outline: none; }
 .mmenu-hint { max-width: 260px; padding: 0 12px 8px; white-space: normal; }
 .rec-selected { margin-bottom: 12px; }
 .rec-deleted-line { display: block; overflow-wrap: anywhere; }
-.del-body { max-height: 55vh; overflow: auto; }
+.del-body { max-height: 55vh; overflow: auto; scrollbar-gutter: stable; }
 .del-body p { margin: 0; }
 .del-rec + .del-rec, .del-group { margin-top: 12px; }
 .del-title { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }

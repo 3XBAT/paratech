@@ -44,7 +44,7 @@ h1, p, ul { margin: 0; }
 /* The source picker is in ../sourcePicker/sourcePicker.css. */
 
 /* Error banner, warnings and the general advice. */
-.texts { display: flex; flex: 0 1 auto; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
+.texts { display: flex; flex: 0 1 auto; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
 .texts > * { flex: none; }
 /* TASK-367: a neutral note, no tint and no coloured border; only the icon carries the colour. On --raised with the
    group contour like the main window's (the popup sheet is --panel; --panel-2 was nearly the same shade). */
