@@ -211,9 +211,10 @@ func TestCallLinkSets(t *testing.T) {
 	if got, err := e.svc.CallLinkSets(ctx, nil); err != nil || len(got) != 0 {
 		t.Fatalf("CallLinkSets(none) = %v, %v", got, err)
 	}
-	// The old CallLinks still answers with the general link only.
-	if old, err := e.svc.CallLinks(ctx, []shared.SubjectID{phys.ID(), bio.ID()}); err != nil || len(old) != 1 || old[bio.ID()].String() != callLink {
-		t.Fatalf("CallLinks = %v, %v", old, err)
+	// A subject with only the general link is in the sets too.
+	if got, err := e.svc.CallLinkSets(ctx, []shared.SubjectID{bio.ID()}); err != nil || len(got) != 1 ||
+		got[bio.ID()] != (subject.CallLinks{General: got[bio.ID()].General}) || got[bio.ID()].General.String() != callLink {
+		t.Fatalf("CallLinkSets(general only) = %v, %v", got, err)
 	}
 
 	e.subjects.err = errors.New("disk full")

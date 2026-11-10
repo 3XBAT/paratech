@@ -134,29 +134,8 @@ func (s *Service) CallLink(ctx context.Context, id shared.SubjectID) (subject.Ca
 	return sub.CallLink(), nil
 }
 
-// CallLinks returns the link of each active subject of ids that has one (the lesson cards of «Сегодня»).
-func (s *Service) CallLinks(ctx context.Context, ids []shared.SubjectID) (map[shared.SubjectID]subject.CallLink, error) {
-	out := map[shared.SubjectID]subject.CallLink{}
-	if len(ids) == 0 {
-		return out, nil
-	}
-	list, err := s.Subjects(ctx)
-	if err != nil {
-		return nil, err
-	}
-	want := make(map[shared.SubjectID]bool, len(ids))
-	for _, id := range ids {
-		want[id] = true
-	}
-	for _, sub := range list {
-		if want[sub.ID()] && !sub.CallLink().IsZero() {
-			out[sub.ID()] = sub.CallLink()
-		}
-	}
-	return out, nil
-}
-
-// CallLinkSets returns the links (general and per kind) of each active subject of ids that has at least one.
+// CallLinkSets returns the links (general and per kind) of each active subject of ids that has at least one (the
+// lesson cards of «Сегодня» and the popup).
 func (s *Service) CallLinkSets(ctx context.Context, ids []shared.SubjectID) (map[shared.SubjectID]subject.CallLinks, error) {
 	out := map[shared.SubjectID]subject.CallLinks{}
 	if len(ids) == 0 {
