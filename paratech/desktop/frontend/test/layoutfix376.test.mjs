@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Breadcrumbs, crumbLongFrom } from "../.test-build/ui/Breadcrumbs.js";
-import { BurningSection, WaitingSection } from "../.test-build/pages/TodayParts.js";
+import { BurningSection, LessonsSection, WaitingSection } from "../.test-build/pages/TodayParts.js";
 import { SubjectTree } from "../.test-build/pages/SubjectsParts.js";
 import { loadTurnkeyBlock } from "../.test-build/homeworkTurnkey.js";
 import { methods, turnkeyApi } from "../.test-build/bindings/turnkey.js";
@@ -48,14 +48,52 @@ test("narrow: the quiet ghost button is pulled left by its own padding; the wide
   assert.match(rule(css.slice(cut, css.indexOf("@container (min-width: 62rem)")), sel), /margin-left: 0/);
 });
 
-test("wide lesson row: four columns as before, the actions are auto-placed in the last one and end-aligned", () => {
+// TASK-428: the old assertion pinned `.today-lesson { grid-template-columns: 4.5rem minmax(0, 1fr) minmax(0, 14rem) auto; }`,
+// the four columns of EACH row. They are now the columns of the list (rows take them as a subgrid), see the test below.
+test("wide lesson row: four columns (on the list), the actions are auto-placed in the last one and end-aligned", () => {
   const css = read("pages/today.css");
   const wide = css.slice(css.indexOf("@container (min-width: 38rem)"), css.indexOf("@container (min-width: 62rem)"));
-  assert.match(wide, /\.today-lesson \{ grid-template-columns: 4\.5rem minmax\(0, 1fr\) minmax\(0, 14rem\) auto; \}/);
+  assert.match(rule(wide, ".today-list"), /grid-template-columns: calc\(4\.5rem \+ 16px\) minmax\(0, 1fr\) minmax\(0, 14rem\) auto;/);
   const w = rule(wide, ".today-lesson .today-ac");
   assert.match(w, /grid-column: auto/);
   assert.match(w, /justify-self: end/);
   assert.match(w, /justify-content: flex-end/);
+});
+
+test("the status column does not depend on the actions of a row: the columns are the list's, the rows are subgrids", () => {
+  const css = read("pages/today.css");
+  const cut = css.indexOf("@container (min-width: 38rem)");
+  const wide = css.slice(cut, css.indexOf("@container (min-width: 62rem)"));
+  const list = rule(wide, ".today-list");
+  assert.match(list, /display: grid/);
+  assert.match(list, /column-gap: 16px/, "the same column gap as the rows' own (gap: 4px 16px)");
+  const row = rule(wide, ".today-lesson");
+  assert.match(row, /grid-template-columns: subgrid/);
+  assert.match(row, /grid-column: 1 \/ -1/);
+  // No row declares its own last `auto` column (that is what made each row size the status column by its own actions).
+  assert.doesNotMatch(wide, /\.today-lesson\s*\{[^}]*grid-template-columns:[^;}]*\bauto\b/);
+  // Narrow (above the container query): the row's own three columns stay, the list is no grid.
+  const narrow = css.slice(0, cut);
+  assert.match(rule(narrow, ".today-lesson"), /grid-template-columns: 4\.5rem minmax\(0, 1fr\) auto/);
+  assert.doesNotMatch(narrow.replace(/\/\*[\s\S]*?\*\//g, ""), /\.today-list/);
+  // The row gap stays the row's own (4px), the separators are positioned on the row.
+  assert.match(rule(css, ".today-row"), /gap: 4px 16px/);
+});
+
+test("rows with different actions share one list class: the columns are the list's", () => {
+  const at = (hh, mm) => new Date(2026, 9, 21, hh, mm).toISOString();
+  const lesson = (id, title, from, to) => ({ id, title, subject: title, kind: "lecture", teacher: "", start: at(from, 0), end: at(to, 0), post: null });
+  // «Записать» is offered in the first row only (it starts in ten minutes); the others have no actions at all.
+  const lessons = [lesson("a", "Матанализ", 10, 11), lesson("b", "Физика", 14, 15), lesson("c", "Химия", 16, 17)];
+  const noLinks = renderToStaticMarkup(h(LessonsSection, { lessons, recordings: [], onOpenLesson: noop, onRecord: noop, now: new Date(2026, 9, 21, 9, 55) }));
+  assert.equal((noLinks.match(/Записать/g) ?? []).length >= 1, true);
+  assert.equal((noLinks.match(/class="today-ac"><\/div>/g) ?? []).length, 2, "two rows with empty actions, one with a button");
+  // One list element carries the class once; every row sits directly in it and is a plain `today-lesson` (no per-row column rule).
+  assert.equal((noLinks.match(/class="card today-list"/g) ?? []).length, 1);
+  const rows = noLinks.match(/<div class="today-row today-lesson[^"]*" role="listitem">/g) ?? [];
+  assert.equal(rows.length, 3);
+  assert.doesNotMatch(noLinks, /style="/, "no inline column widths");
+  assert.match(read("pages/TodayParts.tsx"), /className="card today-list" role="list"/);
 });
 
 // ---- «Сегодня»: the clamped subject ----
