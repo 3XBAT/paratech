@@ -9365,7 +9365,7 @@
                 "npx --prefix paratech/e2e tsc --noEmit -p paratech/e2e/tsconfig.json"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-423",

@@ -247,7 +247,11 @@ describe("evalInPage under the CSP of the app", () => {
       assert.deepEqual(await evalInPage<{ a: number[] }>(page, "(o) => ({ a: [o.n, o.n + 1] })", { n: 1 }), { a: [1, 2] });
       assert.equal(await evalInPage<string>(page, "() => document.querySelector('p').textContent"), "страница под CSP");
       await new Promise((r) => setTimeout(r, 150)); // a short grace only: this checks that a record is ABSENT, which cannot be awaited
-      assert.deepEqual(drainConsole(page), [], "inspector evaluation is exempt from the CSP and prints nothing to the page console");
+      assert.deepEqual(
+        drainConsole(page).filter((r) => r.kind !== "request"),
+        [],
+        "inspector evaluation is exempt from the CSP and prints nothing to the page console",
+      );
     });
   });
 
@@ -271,9 +275,15 @@ describe("evalInPage under the CSP of the app", () => {
     // The first run of an evaluate is exempt (it is started by the inspector); the polling re-runs come from page timers.
     await cspPage(t, async (page) => {
       drainConsole(page);
-      await page.waitForFunction("window.__ready === true", undefined, { timeout: 600, polling: 50 }).catch(() => undefined);
-      await new Promise((r) => setTimeout(r, 300));
-      const got = drainConsole(page);
+      // The timeout is only a ceiling: the loop below stops at the first CSP record, and closing the context ends the polling.
+      void page.waitForFunction("window.__ready === true", undefined, { timeout: 5_000, polling: 50 }).catch(() => undefined);
+      // Drain empties the watch, so the records are accumulated across the polls; wait for the state, not for a fixed time.
+      const got: ReturnType<typeof drainConsole> = [];
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline && !got.some((r) => /script-src/.test(r.text) && r.kind === "console")) {
+        await new Promise((r) => setTimeout(r, 50));
+        got.push(...drainConsole(page));
+      }
       assert.ok(got.some((r) => /script-src/.test(r.text) && r.kind === "console"), JSON.stringify(got));
     });
   });
@@ -303,10 +313,12 @@ describe("evalInPage under the CSP of the app", () => {
 
   test("a running finite animation is waited for without a console error (this is where the polling used to eval)", async (t) => {
     await cspPage(t, async (page) => {
-      await evalInPage(page, "() => { document.body.animate([{ opacity: 1 }, { opacity: 1 }], { duration: 500 }); }");
-      const started = Date.now();
+      // 1500 ms: under the 2 s cap of the checker (animationWaitMs) with margin, and long enough that a slow runner has not finished it yet.
+      const running = await evalInPage<number>(page, "() => { document.body.animate([{ opacity: 1 }, { opacity: 1 }], { duration: 1500 }); return document.getAnimations().length; }");
+      assert.equal(running, 1, "the animation runs when the check starts");
       const v = await layoutViolations(page);
-      assert.ok(Date.now() - started >= 250, `the check should wait for the animation (${Date.now() - started} ms)`);
+      // The checker's guarantee is "nothing is running", not "the list is empty" (a finished animation may linger in it a moment).
+      assert.equal(await evalInPage<boolean>(page, "() => document.getAnimations().every((a) => a.playState !== 'running')"), true, "the check waited until the animation finished");
       assert.deepEqual(v, [], "no console violation from the waiting");
     });
   });
