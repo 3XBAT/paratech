@@ -88,8 +88,13 @@ describe("fake server: delay, SSE and cited", () => {
       fake.setScript([{ kind: "plain", match: "", reply: "поздно", delayMs: 250 }]);
       const t0 = Date.now();
       const pending = call(body("вопрос"));
+      // Same process: the fake's 250 ms timer cannot fire before the 10 ms poll that saw the record,
+      // so "not answered yet" here proves the record and the consume came before the wait.
+      let answered = false;
+      void pending.then(() => { answered = true; }, () => undefined);
       try {
         await until(() => fake.requests().length === 1, "the request reaches the fake");
+        assert.equal(answered, false, "recorded and consumed before the answer");
         assert.equal(fake.remaining(), 0, "consumed at once");
         assert.equal(fake.requests()[0]?.matched, true);
 
@@ -258,8 +263,9 @@ describe("fake server: delay, SSE and cited", () => {
       const events = await readEvents(await call(body("q", { stream: true })), t0);
       const deltas = events.filter((e) => e.event === "content_block_delta");
       assert.equal(deltas.length, 4);
-      const span = (deltas.at(-1)?.at ?? 0) - (deltas[0]?.at ?? 0);
-      assert.ok(span >= 3 * 60 - 15, `4 deltas arrived over ${span} ms`);
+      // From t0, not between arrivals: a stalled client loop can batch deltas into one read.
+      const lastAt = deltas.at(-1)?.at ?? 0;
+      assert.ok(lastAt >= 3 * 60 - 15, `last of 4 deltas arrived at ${lastAt} ms`);
       assert.equal(events.at(-1)?.event, "message_stop");
     });
 
