@@ -1,5 +1,9 @@
 /* Scrollbars of every window (main and popup): ::-webkit-scrollbar only (WebView2). Do not set scrollbar-width/-color
-   anywhere: Chromium then ignores these rules. 10px track, 6px visible thumb. Needs tokens.css. */
+   anywhere: Chromium then ignores these rules. 10px track, 6px visible thumb. Needs tokens.css.
+   TASK-428: the thumb is transparent at rest and shows under .scroll-active, which ui/scrollActivity.ts puts on a scroller
+   while it scrolls or is pointed at. The track keeps its width (scrollbar-gutter: stable on every scroller), so nothing
+   moves when the thumb shows. No fade yet: transitions do not apply to scrollbar pseudo-elements, and a fade by a trick
+   (@property, border-color: inherit) was not tried (the app may not be started in the loop); the owner tries it by hand. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -13,18 +17,60 @@
 ::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 5px;
+  background: transparent;
+  background-clip: padding-box;
+}
+
+.scroll-active::-webkit-scrollbar-thumb {
   background: var(--scroll);
   background-clip: padding-box;
 }
 
-::-webkit-scrollbar-thumb:hover,
-::-webkit-scrollbar-thumb:active {
+.scroll-active::-webkit-scrollbar-thumb:hover,
+.scroll-active::-webkit-scrollbar-thumb:active {
   background: var(--scroll-hover);
   background-clip: padding-box;
 }
 
-@media (forced-colors: active) {
+/* «Расписание»: the clipped lines of the CSV example must not look cut off, and a mouse wheel does not scroll sideways,
+   so the bar of this horizontal-only <pre> stays visible all the time. */
+.template::-webkit-scrollbar-thumb {
+  background: var(--scroll);
+  background-clip: padding-box;
+}
+
+.template::-webkit-scrollbar-thumb:hover,
+.template::-webkit-scrollbar-thumb:active {
+  background: var(--scroll-hover);
+  background-clip: padding-box;
+}
+
+/* Placeholder for the deferred fade: nothing transitions on the thumb today. */
+@media (prefers-reduced-motion: reduce) {
   ::-webkit-scrollbar-thumb {
+    transition: none;
+  }
+}
+
+/* High contrast: always visible, in the system color the user chose (not hidden at rest). The hover and active rules come
+   after the colored ones and are as specific as theirs, so a hovered or dragged thumb does not fall back to the grey. */
+@media (forced-colors: active) {
+  ::-webkit-scrollbar-thumb,
+  .template::-webkit-scrollbar-thumb,
+  .scroll-active::-webkit-scrollbar-thumb {
     background: CanvasText;
+    background-clip: padding-box;
+    forced-color-adjust: none;
+  }
+
+  ::-webkit-scrollbar-thumb:hover,
+  ::-webkit-scrollbar-thumb:active,
+  .template::-webkit-scrollbar-thumb:hover,
+  .template::-webkit-scrollbar-thumb:active,
+  .scroll-active::-webkit-scrollbar-thumb:hover,
+  .scroll-active::-webkit-scrollbar-thumb:active {
+    background: Highlight;
+    background-clip: padding-box;
+    forced-color-adjust: none;
   }
 }

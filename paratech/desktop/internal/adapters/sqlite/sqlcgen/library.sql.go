@@ -160,7 +160,7 @@ func (q *Queries) GetMaterialBySHA256(ctx context.Context, sha256 string) (Mater
 }
 
 const getSubject = `-- name: GetSubject :one
-SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email, removed_at, call_link FROM subjects WHERE id = ?1 AND removed_at IS NULL
+SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email, removed_at, call_link, call_link_lecture, call_link_seminar, call_link_lab FROM subjects WHERE id = ?1 AND removed_at IS NULL
 `
 
 func (q *Queries) GetSubject(ctx context.Context, id string) (Subject, error) {
@@ -178,12 +178,15 @@ func (q *Queries) GetSubject(ctx context.Context, id string) (Subject, error) {
 		&i.TeacherEmail,
 		&i.RemovedAt,
 		&i.CallLink,
+		&i.CallLinkLecture,
+		&i.CallLinkSeminar,
+		&i.CallLinkLab,
 	)
 	return i, err
 }
 
 const getSubjectAnyStatus = `-- name: GetSubjectAnyStatus :one
-SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email, removed_at, call_link FROM subjects WHERE id = ?1
+SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email, removed_at, call_link, call_link_lecture, call_link_seminar, call_link_lab FROM subjects WHERE id = ?1
 `
 
 func (q *Queries) GetSubjectAnyStatus(ctx context.Context, id string) (Subject, error) {
@@ -201,6 +204,9 @@ func (q *Queries) GetSubjectAnyStatus(ctx context.Context, id string) (Subject, 
 		&i.TeacherEmail,
 		&i.RemovedAt,
 		&i.CallLink,
+		&i.CallLinkLecture,
+		&i.CallLinkSeminar,
+		&i.CallLinkLab,
 	)
 	return i, err
 }
@@ -262,19 +268,24 @@ func (q *Queries) InsertMaterialLesson(ctx context.Context, arg InsertMaterialLe
 }
 
 const insertSubject = `-- name: InsertSubject :exec
-INSERT INTO subjects (id, name, name_key, semester, call_link, version, created_at, updated_at)
-VALUES (?1, ?2, ?3, ?4, ?5, 1,
-        ?6, ?7)
+INSERT INTO subjects (id, name, name_key, semester, call_link, call_link_lecture, call_link_seminar, call_link_lab,
+                      version, created_at, updated_at)
+VALUES (?1, ?2, ?3, ?4, ?5,
+        ?6, ?7, ?8, 1,
+        ?9, ?10)
 `
 
 type InsertSubjectParams struct {
-	ID        string
-	Name      string
-	NameKey   string
-	Semester  string
-	CallLink  string
-	CreatedAt int64
-	UpdatedAt int64
+	ID              string
+	Name            string
+	NameKey         string
+	Semester        string
+	CallLink        string
+	CallLinkLecture string
+	CallLinkSeminar string
+	CallLinkLab     string
+	CreatedAt       int64
+	UpdatedAt       int64
 }
 
 // A never-stored subject (version 0) is inserted with version 1. subjects.teacher_* are legacy since migration 0044
@@ -286,6 +297,9 @@ func (q *Queries) InsertSubject(ctx context.Context, arg InsertSubjectParams) er
 		arg.NameKey,
 		arg.Semester,
 		arg.CallLink,
+		arg.CallLinkLecture,
+		arg.CallLinkSeminar,
+		arg.CallLinkLab,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -650,7 +664,7 @@ func (q *Queries) ListRecordingSubjectCounts(ctx context.Context) ([]ListRecordi
 }
 
 const listRemovedSubjects = `-- name: ListRemovedSubjects :many
-SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email, removed_at, call_link FROM subjects WHERE removed_at IS NOT NULL ORDER BY removed_at, id
+SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email, removed_at, call_link, call_link_lecture, call_link_seminar, call_link_lab FROM subjects WHERE removed_at IS NOT NULL ORDER BY removed_at, id
 `
 
 func (q *Queries) ListRemovedSubjects(ctx context.Context) ([]Subject, error) {
@@ -674,6 +688,9 @@ func (q *Queries) ListRemovedSubjects(ctx context.Context) ([]Subject, error) {
 			&i.TeacherEmail,
 			&i.RemovedAt,
 			&i.CallLink,
+			&i.CallLinkLecture,
+			&i.CallLinkSeminar,
+			&i.CallLinkLab,
 		); err != nil {
 			return nil, err
 		}
@@ -886,7 +903,7 @@ func (q *Queries) ListSubjectTeachers(ctx context.Context, subjectID string) ([]
 
 const listSubjects = `-- name: ListSubjects :many
 
-SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email, removed_at, call_link FROM subjects WHERE removed_at IS NULL ORDER BY name_key, id
+SELECT id, name, name_key, semester, version, created_at, updated_at, teacher_name, teacher_email, removed_at, call_link, call_link_lecture, call_link_seminar, call_link_lab FROM subjects WHERE removed_at IS NULL ORDER BY name_key, id
 `
 
 // The library (TASK-121, ADR-0024): subjects with their aliases and folders, materials with their lesson links. Both
@@ -914,6 +931,9 @@ func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
 			&i.TeacherEmail,
 			&i.RemovedAt,
 			&i.CallLink,
+			&i.CallLinkLecture,
+			&i.CallLinkSeminar,
+			&i.CallLinkLab,
 		); err != nil {
 			return nil, err
 		}
@@ -1095,14 +1115,17 @@ func (q *Queries) UpdateMaterialText(ctx context.Context, arg UpdateMaterialText
 
 const updateSubject = `-- name: UpdateSubject :execrows
 UPDATE subjects
-SET name       = ?1,
-    name_key   = ?2,
-    semester   = ?3,
-    call_link  = ?4,
-    removed_at = ?5,
-    version    = version + 1,
-    updated_at = ?6
-WHERE id = ?7 AND version = ?8
+SET name              = ?1,
+    name_key          = ?2,
+    semester          = ?3,
+    call_link         = ?4,
+    call_link_lecture = ?5,
+    call_link_seminar = ?6,
+    call_link_lab     = ?7,
+    removed_at        = ?8,
+    version           = version + 1,
+    updated_at        = ?9
+WHERE id = ?10 AND version = ?11
 `
 
 type UpdateSubjectParams struct {
@@ -1110,6 +1133,9 @@ type UpdateSubjectParams struct {
 	NameKey         string
 	Semester        string
 	CallLink        string
+	CallLinkLecture string
+	CallLinkSeminar string
+	CallLinkLab     string
 	RemovedAt       sql.NullInt64
 	UpdatedAt       int64
 	ID              string
@@ -1122,6 +1148,9 @@ func (q *Queries) UpdateSubject(ctx context.Context, arg UpdateSubjectParams) (i
 		arg.NameKey,
 		arg.Semester,
 		arg.CallLink,
+		arg.CallLinkLecture,
+		arg.CallLinkSeminar,
+		arg.CallLinkLab,
 		arg.RemovedAt,
 		arg.UpdatedAt,
 		arg.ID,

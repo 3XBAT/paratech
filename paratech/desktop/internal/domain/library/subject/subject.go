@@ -44,12 +44,12 @@ type Subject struct {
 	version int64 // persisted version for optimistic concurrency; 0 = never stored (ADR-0004)
 	id      shared.SubjectID
 
-	name     Name
-	aliases  []Name
-	semester values.Semester
-	folders  []Folder // the system folders first, in the order of Systems, then own folders in the order added
-	teachers Teachers
-	callLink CallLink // the student's link to the online class (ADR-0032, TASK-364); zero: none
+	name      Name
+	aliases   []Name
+	semester  values.Semester
+	folders   []Folder // the system folders first, in the order of Systems, then own folders in the order added
+	teachers  Teachers
+	callLinks CallLinks // the links to the online class, general and per lesson kind (ADR-0032); zero: none
 
 	status    Status
 	removedAt time.Time // zero while active
@@ -98,9 +98,13 @@ type State struct {
 	Folders  []FolderState
 	// Teachers holds one entry per role that has a teacher, in the order of TeacherRoles.
 	Teachers []TeacherState
-	// CallLink is the canonical call link; "" none. A stored value that no longer parses is restored as no link
-	// (ADR-0032), so a tightened rule never fails the read.
-	CallLink string
+	// CallLink is the canonical general call link, CallLinkLecture, CallLinkSeminar and CallLinkLab those of the lesson
+	// kinds; "" none. A stored value that no longer parses is restored as no link (ADR-0032), so a tightened rule never
+	// fails the read.
+	CallLink        string
+	CallLinkLecture string
+	CallLinkSeminar string
+	CallLinkLab     string
 	// RemovedAt is when the subject was removed; zero while it is active (the status follows from it).
 	RemovedAt time.Time
 	CreatedAt time.Time
@@ -153,13 +157,22 @@ func Restore(st State) (*Subject, error) {
 		}
 		s.teachers.byRole[i] = t
 	}
-	if l, err := ParseCallLink(st.CallLink); err == nil && l.link == st.CallLink {
-		s.callLink = l
+	s.callLinks = CallLinks{
+		General: storedCallLink(st.CallLink), Lecture: storedCallLink(st.CallLinkLecture),
+		Seminar: storedCallLink(st.CallLinkSeminar), Lab: storedCallLink(st.CallLinkLab),
 	}
 	if err := s.validate(); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// storedCallLink reads a stored call link: a value that no longer parses, or not in canonical form, is no link.
+func storedCallLink(stored string) CallLink {
+	if l, err := ParseCallLink(stored); err == nil && l.link == stored {
+		return l
+	}
+	return CallLink{}
 }
 
 // validate checks the invariants: ids, the six system folders in order and with their names, unique folder ids and
@@ -360,35 +373,54 @@ func (s *Subject) ClearTeacher(role TeacherRole, now time.Time) (changed bool, e
 	return true, nil
 }
 
-// SetCallLink sets the link to the online class of the subject (ADR-0032, TASK-364), replacing the one set before;
-// the same canonical link again changes nothing (changed is false). Errors: ErrRemoved, or an error wrapping
-// ErrInvalidCallLink.
+// SetCallLink sets the general link to the online class of the subject (ADR-0032, TASK-364): SetCallLinkOf with
+// CallGeneral.
 func (s *Subject) SetCallLink(text string, now time.Time) (changed bool, err error) {
+	return s.SetCallLinkOf(CallGeneral, text, now)
+}
+
+// ClearCallLink removes the general link to the online class: ClearCallLinkOf with CallGeneral.
+func (s *Subject) ClearCallLink(now time.Time) (changed bool, err error) {
+	return s.ClearCallLinkOf(CallGeneral, now)
+}
+
+// SetCallLinkOf sets the link of kind k (ADR-0032 addendum 2026-11-10), replacing the one set before; the same
+// canonical link again changes nothing (changed is false). Errors: ErrRemoved, ErrInvalidCallKind, or an error
+// wrapping ErrInvalidCallLink; nothing changes on an error.
+func (s *Subject) SetCallLinkOf(k CallKind, text string, now time.Time) (changed bool, err error) {
 	if err := s.active(); err != nil {
 		return false, err
+	}
+	field := s.callLinks.field(k)
+	if field == nil {
+		return false, ErrInvalidCallKind
 	}
 	l, err := ParseCallLink(text)
 	if err != nil {
 		return false, err
 	}
-	if l == s.callLink {
+	if l == *field {
 		return false, nil
 	}
-	s.callLink = l
+	*field = l
 	s.updatedAt = now
 	return true, nil
 }
 
-// ClearCallLink removes the link to the online class; a subject without one changes nothing (changed is false).
-// Error: ErrRemoved.
-func (s *Subject) ClearCallLink(now time.Time) (changed bool, err error) {
+// ClearCallLinkOf removes the link of kind k; a kind without one changes nothing (changed is false). Errors:
+// ErrRemoved, ErrInvalidCallKind.
+func (s *Subject) ClearCallLinkOf(k CallKind, now time.Time) (changed bool, err error) {
 	if err := s.active(); err != nil {
 		return false, err
 	}
-	if s.callLink.IsZero() {
+	field := s.callLinks.field(k)
+	switch {
+	case field == nil:
+		return false, ErrInvalidCallKind
+	case field.IsZero():
 		return false, nil
 	}
-	s.callLink = CallLink{}
+	*field = CallLink{}
 	s.updatedAt = now
 	return true, nil
 }
@@ -501,8 +533,11 @@ func (s *Subject) Teacher(role TeacherRole) Teacher { return s.teachers.Of(role)
 // Teachers returns the teachers of every role (a copy).
 func (s *Subject) Teachers() Teachers { return s.teachers }
 
-// CallLink returns the link to the online class; the zero CallLink while none is set.
-func (s *Subject) CallLink() CallLink { return s.callLink }
+// CallLink returns the general link to the online class; the zero CallLink while none is set.
+func (s *Subject) CallLink() CallLink { return s.callLinks.General }
+
+// CallLinks returns the general link and the links of the lesson kinds.
+func (s *Subject) CallLinks() CallLinks { return s.callLinks }
 
 // String names the subject by id and name only, never its teachers or its call link.
 func (s *Subject) String() string {
@@ -541,8 +576,9 @@ func (s *Subject) UpdatedAt() time.Time { return s.updatedAt }
 // State returns the stored form, for the repositories.
 func (s *Subject) State() State {
 	st := State{
-		Version: s.version, ID: s.id, Name: s.name.text, Semester: s.semester, CallLink: s.callLink.link,
-		RemovedAt: s.removedAt, CreatedAt: s.createdAt, UpdatedAt: s.updatedAt,
+		Version: s.version, ID: s.id, Name: s.name.text, Semester: s.semester, CallLink: s.callLinks.General.link,
+		CallLinkLecture: s.callLinks.Lecture.link, CallLinkSeminar: s.callLinks.Seminar.link,
+		CallLinkLab: s.callLinks.Lab.link, RemovedAt: s.removedAt, CreatedAt: s.createdAt, UpdatedAt: s.updatedAt,
 	}
 	for i, t := range s.teachers.byRole {
 		if !t.IsZero() {

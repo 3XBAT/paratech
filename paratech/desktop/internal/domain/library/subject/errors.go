@@ -47,6 +47,9 @@ var (
 	// the rule, never the text.
 	ErrInvalidCallLink = errors.New("invalid call link")
 
+	// ErrInvalidCallKind means a call kind that is not general, lecture, seminar or lab.
+	ErrInvalidCallKind = errors.New("invalid call kind")
+
 	// ErrRemoved means a change of a removed subject other than restoring it.
 	ErrRemoved = errors.New("subject is removed")
 

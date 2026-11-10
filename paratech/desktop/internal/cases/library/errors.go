@@ -39,6 +39,9 @@ var (
 	// error never holds the typed text.
 	ErrInvalidCallLink = errors.New("library: invalid call link")
 
+	// ErrInvalidCallKind means a call kind that is not general, lecture, seminar or lab (subject.ParseCallKind).
+	ErrInvalidCallKind = errors.New("library: invalid call kind")
+
 	// ErrNoCallLink means OpenCallLink found no call link on the subject (any more): nothing was opened.
 	ErrNoCallLink = errors.New("library: the subject has no call link")
 

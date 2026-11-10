@@ -93,8 +93,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrating(t)
 	first, err := db.SchemaVersion(ctx)
-	if err != nil || first != deadlineEventUpdatesVersion {
-		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, deadlineEventUpdatesVersion)
+	if err != nil || first != subjectCallLinksByKindVersion {
+		t.Fatalf("SchemaVersion after Open = %d, %v; want %d", first, err, subjectCallLinksByKindVersion)
 	}
 	mustExec(t, db, "INSERT INTO settings (id, updated_at) VALUES (1, 5)")
 	appliedBefore := scanInt(t, db.sql, "SELECT count(*) FROM goose_db_version WHERE version_id > 0")
@@ -283,8 +283,11 @@ const subjectRemovalVersion = 49
 const subjectCallLinkVersion = 50
 
 // deadlineEventUpdatesVersion adds the calendar setting on a deadline change and the queue of event updates
-// (TASK-276), the newest one.
+// (TASK-276).
 const deadlineEventUpdatesVersion = 51
+
+// subjectCallLinksByKindVersion adds the call links per lesson kind of a subject (TASK-431), the newest one.
+const subjectCallLinksByKindVersion = 52
 
 // recordingOriginVersion adds the origin of a recording (TASK-161).
 const recordingOriginVersion = 42
