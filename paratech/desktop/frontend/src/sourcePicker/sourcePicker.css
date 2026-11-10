@@ -16,7 +16,7 @@
 .picker .mark.muted, .picker .mark.gone { color: var(--rec-t); }
 .picker .caret { width: 16px; height: 16px; color: var(--muted); }
 .picker .backdrop { position: fixed; inset: 0; z-index: 1; }
-.picker .list { position: absolute; z-index: 2; top: 100%; right: 0; left: 0; max-height: 190px; margin: 2px 0 0; padding: 2px; overflow-y: auto; list-style: none; border: 1px solid var(--control); border-radius: var(--r-ctl); background: var(--raised); box-shadow: var(--sh-win); }
+.picker .list { position: absolute; z-index: 2; top: 100%; right: 0; left: 0; max-height: 190px; margin: 2px 0 0; padding: 2px; overflow-y: auto; scrollbar-gutter: stable; list-style: none; border: 1px solid var(--control); border-radius: var(--r-ctl); background: var(--raised); box-shadow: var(--sh-win); }
 .picker .list .source { border-color: transparent; }
 .picker .list .source:hover { background: var(--panel-2); }
 .picker .list .source.current { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent-fill); }
