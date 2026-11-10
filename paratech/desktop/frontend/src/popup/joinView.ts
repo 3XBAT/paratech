@@ -1,30 +1,47 @@
-// «Подключиться» in the recording popup (TASK-370, ADR-0032): opens the online class of the lesson on offer, before the
-// recording starts. Pure, no React. The page never sees the link or the host: the core says only which subject of the
-// offered lesson has one (PromptApi.callSubject) and opens it by that subject ID (LibraryApi.openSubjectCallLink).
-// The button opens the meeting once per showing of the popup: it stays grey until the popup closes.
+// «Подключиться» in the recording popup (TASK-370, ADR-0032): opens the online class of the lesson, before the recording
+// starts and (TASK-406, owner 2026-11-08) while the recording started from this popup runs. Pure, no React. The page
+// never sees the link or the host: the core says only which subject of the lesson has one (PromptApi.callSubject) and
+// opens it by that subject ID (LibraryApi.openSubjectCallLink).
+// Once the meeting is open the button is not grey: it reads «Открыть ещё раз» and opens the same link again.
 
+import type { PromptView } from "../bindings/prompt.js";
 import { callLinkTexts } from "../callLinkView.js";
 
 export const joinTexts = {
-  /** The link was removed meanwhile (or the subject is gone): the button goes, «Начать запись» stays. */
-  gone: "Ссылки на пару уже нет.",
-  /** Why the grey button does nothing (the hover text). */
-  openedTitle: "Ссылка уже открыта",
-  /** The visible confirmation while the button is grey: the open does not start the recording. */
+  /**
+   * The link was removed meanwhile (or the subject is gone): the button stays in its row, disabled, so that no other
+   * button slides under the pointer (TASK-406 review); this text is its note and its hover text.
+   */
+  gone: "Ссылки на пару уже нет. Её можно добавить на странице предмета.",
+  /** The label of the disabled button when no earlier label is known. */
+  noLink: "Ссылки нет",
+  /** The visible confirmation before the recording starts: the open does not start it. */
   opened: "Ссылка открыта. Запись пока не идёт.",
+  /** While the recording runs the confirmation must not say it is not going. */
+  openedRunning: callLinkTexts.opened,
 } as const;
 
-/** hidden: no button; ready: «Подключиться»; opening: the call runs; opened: grey until the popup closes. */
+/** hidden: no button (with problem "gone": the disabled button, see joinView); ready: «Подключиться»; opening: the call runs; opened: «Открыть ещё раз», clickable. */
 export type JoinPhase = "hidden" | "ready" | "opening" | "opened";
 
 export interface JoinState {
-  /** A lesson is on offer in the popup now (the offered view, not the recording or the advice). */
+  /** The button has a place in the popup now: the offered lesson, or the running recording started from the popup. */
   shown: boolean;
   phase: JoinPhase;
   /** The subject whose link «Подключиться» opens; "" while there is none. */
   subjectId: string;
   /** The last open: "failed" can be repeated, "gone" cannot (no link any more). */
   problem: "" | "failed" | "gone";
+  /**
+   * Only while problem is "gone": the button that was clicked was «Открыть ещё раз» (true) or «Подключиться» (false), so the
+   * disabled button keeps its label. Absent: no earlier label is known.
+   */
+  reopen?: boolean;
+}
+
+/** The state without what only a gone link carries. */
+function dropGone(s: JoinState): JoinState {
+  return { shown: s.shown, phase: s.phase, subjectId: s.subjectId, problem: "" };
 }
 
 export const idleJoin: JoinState = { shown: false, phase: "hidden", subjectId: "", problem: "" };
@@ -38,7 +55,11 @@ export interface JoinDeps {
 
 /**
  * The state machine of the button. Replies of older reads and opens are dropped: only the newest read counts, and an
- * open that ends after the popup closed or the prompt changed no longer touches the state.
+ * open that ends after the prompt changed no longer touches the state.
+ *
+ * What was opened is remembered per prompt ID: the same prompt keeps it over the start of the recording (the offer goes
+ * away, then the running view asks again with the same ID) and over a closing and re-showing of the popup (the core
+ * hides it right after the start). A different prompt ID starts clean.
  */
 export class JoinController {
   private current: JoinState = idleJoin;
@@ -61,8 +82,9 @@ export class JoinController {
   }
 
   /**
-   * The lesson prompt on offer, or null (none, a recording or the advice is shown, the start runs). A new prompt starts
-   * clean; the same one (the offer came back after a failed start) keeps the opened state.
+   * The prompt the button belongs to, or null (nothing to offer it for: the advice, the start runs, no recording from
+   * here). It is the offered lesson, or the prompt the recording on screen was started from; the core answers for both.
+   * A new prompt starts clean; the same one keeps the state.
    */
   offer(promptId: string | null): void {
     this.read++;
@@ -82,21 +104,34 @@ export class JoinController {
 
   /** The core showed the popup again: the link may have changed, ask once more. */
   refresh(): void {
+    // The popup is shown anew, no pointer is on the row: the disabled button of a gone link goes now.
+    if (this.current.problem === "gone") {
+      this.set(dropGone(this.current));
+    }
     if (this.current.shown) {
       void this.load(this.promptId);
     }
   }
 
-  /** The popup closed (the page became hidden): the next showing offers the button anew. */
+  /**
+   * The popup closed (the page became hidden). What was opened stays: the core hides the popup right after the start,
+   * and the running view must still say «Открыть ещё раз». Only the text of a failed open goes; the next showing asks
+   * the core again (refresh), so a link removed meanwhile takes the button away.
+   */
   closed(): void {
     this.read++;
-    this.epoch++;
-    this.set({ ...idleJoin, shown: this.current.shown });
+    this.clearFailure();
   }
 
   /** A start was tried: the text of an earlier open goes. */
   clearProblem(): void {
     if (this.current.problem !== "") {
+      this.set(dropGone(this.current));
+    }
+  }
+
+  private clearFailure(): void {
+    if (this.current.problem === "failed") {
       this.set({ ...this.current, problem: "" });
     }
   }
@@ -121,16 +156,20 @@ export class JoinController {
     } else if (id === s.subjectId && s.phase === "opened") {
       return;
     } else {
-      this.set({ ...s, phase: "ready", subjectId: id, problem: id === s.subjectId ? s.problem : "" });
+      this.set({ ...dropGone(s), phase: "ready", subjectId: id, problem: id === s.subjectId ? s.problem : "" });
     }
   }
 
-  /** «Подключиться»: the second click while the first runs, or after it, does nothing. */
+  /**
+   * «Подключиться» / «Открыть ещё раз»: opens the link. A second click while the call runs does nothing, so a double
+   * click opens once; after it the button can be clicked again.
+   */
   async click(): Promise<void> {
     const s = this.current;
-    if (!s.shown || s.phase !== "ready") {
+    if (!s.shown || (s.phase !== "ready" && s.phase !== "opened")) {
       return;
     }
+    const before = s.phase;
     const epoch = this.epoch;
     this.set({ ...s, phase: "opening", problem: "" });
     let problem: string;
@@ -146,42 +185,83 @@ export class JoinController {
     if (problem === "") {
       this.set({ ...now, phase: "opened" });
     } else if (problem === "no_link" || problem === "not_found") {
-      this.set({ ...now, phase: "hidden", subjectId: "", problem: "gone" });
+      // phase "hidden" with problem "gone" is drawn as the disabled button (joinView), until the next prompt or showing.
+      this.set({ ...now, phase: "hidden", subjectId: "", problem: "gone", reopen: before === "opened" });
     } else {
-      this.set({ ...now, phase: "ready", problem: "failed" });
+      // A failed second open leaves the first one standing: the button keeps reading «Открыть ещё раз».
+      this.set({ ...now, phase: before, problem: "failed" });
     }
   }
 }
 
 /** What the popup draws. */
 export interface JoinView {
-  /** The button is in the row of the offered lesson. */
+  /** The button is drawn (in the row of the offered lesson, or of the running recording). */
   visible: boolean;
   busy: boolean;
+  /** Only while a call runs, the link is gone or a start/skip runs: never because the meeting is already open. */
   disabled: boolean;
-  /** The meeting is open: the button stays grey until the popup closes. */
+  /** The meeting was opened already: the label is «Открыть ещё раз». */
   opened: boolean;
+  label: string;
   title: string;
-  /** A quiet line while the meeting is open; "" otherwise. */
+  /** A quiet line while the meeting is open: «…Запись пока не идёт.» before the recording starts, «Ссылка открыта.» while it runs. */
   confirm: string;
   /** The amber line of a failed open (never the red banner, it must not grow the window); "" when none. */
   failure: string;
-  /** A quiet line: the link is gone; "" when none. */
+  /** A quiet line next to the disabled button: the link is gone; "" when none. */
   note: string;
+  /**
+   * The live regions of the texts area exist: they are drawn (empty) as soon as the button is, so a screen reader has
+   * them registered before a text appears in them.
+   */
+  live: boolean;
 }
 
-/** `blocked`: a start or skip runs; it disables this button but never «Начать запись». */
-export function joinView(s: JoinState, blocked: boolean): JoinView {
+/**
+ * `blocked`: a start or skip runs; it disables this button but never «Начать запись». `running`: the recording runs, so
+ * the hover text does not promise that it will not start and the confirmation does not say «Запись пока не идёт».
+ * While a repeated open runs the confirmation is off for a moment and comes back with its end: that tells the open
+ * happened again, and a screen reader says it again.
+ */
+export function joinView(s: JoinState, blocked: boolean, running = false): JoinView {
+  const opened = s.phase === "opened";
+  const clickable = s.phase === "ready" || opened;
+  const gone = s.shown && s.problem === "gone";
+  let title: string;
+  let label: string = opened ? callLinkTexts.joinAgain : callLinkTexts.join;
+  if (gone) {
+    // Stays in its row, disabled, with its last label: the row must not vanish under the pointer of a double click.
+    title = joinTexts.gone;
+    label = s.reopen === undefined ? joinTexts.noLink : s.reopen ? callLinkTexts.joinAgain : callLinkTexts.join;
+  } else if (running) {
+    title = opened ? callLinkTexts.joinAgainRunningTitle : callLinkTexts.joinRunningTitle;
+  } else {
+    title = opened ? callLinkTexts.joinAgainTitle : callLinkTexts.joinTitle;
+  }
   return {
-    visible: s.shown && s.phase !== "hidden",
+    visible: s.shown && (s.phase !== "hidden" || gone),
     busy: s.phase === "opening",
-    disabled: s.phase !== "ready" || blocked,
-    opened: s.phase === "opened",
-    title: s.phase === "opened" ? joinTexts.openedTitle : callLinkTexts.joinTitle,
-    confirm: s.shown && s.phase === "opened" ? joinTexts.opened : "",
+    disabled: !clickable || blocked,
+    opened,
+    label,
+    title,
+    confirm: s.shown && opened && s.problem === "" ? (running ? joinTexts.openedRunning : joinTexts.opened) : "",
     failure: s.shown && s.problem === "failed" ? callLinkTexts.openFailed : "",
     note: s.shown && s.problem === "gone" ? joinTexts.gone : "",
+    live: s.shown && (s.phase !== "hidden" || s.problem !== ""),
   };
+}
+
+/**
+ * Whenever the join button is shown in the offer view it takes its own row: «Начать запись», the join button and
+ * «Не записывать» are all full width, in every phase (ready, opening, opened). The layout must not change between phases:
+ * the rows are pinned to the bottom, so a row that moves puts another button under the pointer, and the second click of a
+ * double click starts the recording or skips the lesson. This deliberately reverses the TASK-370 choice («Подключиться»
+ * shares a row with «Не записывать»).
+ */
+export function joinOnOwnRow(v: Pick<JoinView, "visible">): boolean {
+  return v.visible;
 }
 
 /** The lesson prompt the button belongs to: an offered lesson while neither the recording nor the advice is shown. */
@@ -193,4 +273,65 @@ export function joinPromptId(
     return null;
   }
   return view.id;
+}
+
+/** The lesson prompt a successful start from the popup began a recording for; "" for a failed start or an ad-hoc offer. */
+export function startedPromptId(
+  sent: Pick<PromptView, "id" | "kind"> | null,
+  result: Pick<PromptView, "id" | "state">,
+): string {
+  if (sent === null || sent.kind !== "lesson" || result.id !== sent.id || result.state !== "STARTED") {
+    return "";
+  }
+  return sent.id;
+}
+
+/**
+ * The prompt the popup started a recording from, kept so the running view can keep asking the core for its call link
+ * (PromptService.CallSubject answers for it while that recording runs, although the prompt is no longer current).
+ * The prompt is tied to the first recording the popup sees running after the start; it is dropped when that recording
+ * ends or another one is shown. A recording that was not started from here never gets an ID: the core answers "".
+ */
+export class StartedRecording {
+  private promptId = "";
+  private recordingId = "";
+
+  /** A start from the popup succeeded for this lesson prompt; its recording is not seen yet. */
+  started(promptId: string): void {
+    this.promptId = promptId;
+    this.recordingId = "";
+  }
+
+  /**
+   * `recordingId`: the recording that captures now, "" when none does, null when the sound could not be read (nothing
+   * is learned: a failed read must not make the popup forget its recording). Returns the prompt ID to ask the core
+   * with while that recording is the one this popup started; "" otherwise.
+   */
+  track(recordingId: string | null): string {
+    if (this.promptId === "") {
+      return "";
+    }
+    if (recordingId === null) {
+      return this.recordingId === "" ? "" : this.promptId;
+    }
+    if (recordingId === "") {
+      // The recording is over: forget it. Before it was seen (not capturing yet) the start still waits for it.
+      if (this.recordingId !== "") {
+        this.forget();
+      }
+      return "";
+    }
+    if (this.recordingId === "") {
+      this.recordingId = recordingId;
+    } else if (this.recordingId !== recordingId) {
+      this.forget();
+      return "";
+    }
+    return this.promptId;
+  }
+
+  private forget(): void {
+    this.promptId = "";
+    this.recordingId = "";
+  }
 }

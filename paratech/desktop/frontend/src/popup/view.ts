@@ -44,6 +44,22 @@ export const stateNotes: Readonly<Record<string, string>> = {
   EXPIRED: "Пара закончилась.",
 };
 
+/**
+ * What the top line of the popup is about. The dot is neutral while only a recording is offered; the red pulsing dot
+ * (and the red heading) mean a recording runs: the running view and the silent-source advice, which is about it.
+ */
+export type PopupStage = "offer" | "recording" | "advice";
+
+/** The class of the dot: only a running recording pulses red (owner 2026-11-08). */
+export function dotClass(stage: PopupStage): string {
+  return stage === "offer" ? "dot" : "dot rec";
+}
+
+/** The class of the top line: the heading takes the recording colour only with the red dot. */
+export function topClass(stage: PopupStage): string {
+  return stage === "offer" ? "p-top" : "p-top live";
+}
+
 export const noPromptNote = "Сейчас нет предложения записи.";
 export const staleNote = "Предложение больше не актуально.";
 
@@ -110,6 +126,9 @@ export const loadErrorText = "Не удалось загрузить предл�
  * it stays in full, since it carries the muted-tab advice.
  */
 export function collapseAdvice(warnings: readonly string[], error: string): boolean {
+  // Changed in the TASK-406 review: the join button on its own row no longer lowers the limit. The window grows to its
+  // natural height while that button is shown (see windowGrows), so only the max-height case needs the collapse, and the
+  // original rule serves it. The reserved join line is not a message (layoutNotes), so it is the same in every phase.
   return warnings.length + (error !== "" ? 1 : 0) >= 2;
 }
 
@@ -132,10 +151,39 @@ export interface TextsLayout {
   collapsed: boolean;
 }
 
+/**
+ * The messages the layout counts. While the join button is shown the join line (confirmation, gone note, failure) is a
+ * reserved line that takes room (.join-note.reserved) but is not a message: it counts for nothing, whatever its text is, so
+ * the advice neither collapses nor expands as the phase changes, and a browser warning next to the button keeps the advice
+ * in full as before TASK-406 (the window grows for the extra row, see windowGrows). Without the button the join texts count
+ * as they are.
+ */
+export function layoutNotes(base: readonly string[], joinTexts: readonly string[], joinShown: boolean): string[] {
+  if (joinShown) {
+    return [...base];
+  }
+  return [...base, ...joinTexts];
+}
+
 /** Layout of the text area: an error grows the window and shows everything in full; otherwise the 300 px rules hold. */
 export function textsLayout(warnings: readonly string[], error: string): TextsLayout {
   const grows = error !== "";
   return { grows, clamp: !grows, collapsed: !grows && collapseAdvice(warnings, error) };
+}
+
+/**
+ * Whether the page measures its natural height and may ask the core for a taller window. Only in the offer view (the
+ * advice and the running recording keep the normal size: their texts are short). `textsGrow`: an error is shown.
+ * `joinOwnRow` (TASK-406 review): with the join button «Начать запись», the join button and «Не записывать» each take a
+ * full row, about 34 px more than the 300 px window was drawn for; at a larger Windows text size the texts would shrink to
+ * nothing and «Не записывать» could be cut. So the window may grow then too. Nothing changes at 100 %: the natural height
+ * fits 300, wantedHeight answers the base and no resize is sent. The natural height is the same in the ready, opening and
+ * opened phases (the join line is reserved, see layoutNotes and .join-note.reserved), so the window does not resize between
+ * them; it grows upwards (the core keeps the bottom-right corner), so the buttons stay where the pointer is, and it is
+ * clamped by the core (popupMaxHeight 440, the work area), past which the texts area shrinks and scrolls.
+ */
+export function windowGrows(offerView: boolean, textsGrow: boolean, joinOwnRow: boolean): boolean {
+  return offerView && (textsGrow || joinOwnRow);
 }
 
 /**

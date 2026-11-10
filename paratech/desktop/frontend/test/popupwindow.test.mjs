@@ -6,9 +6,11 @@ import {
   collapseAdvice,
   fitSlack,
   HeightFitter,
+  layoutNotes,
   popupBaseHeight,
   textsLayout,
   wantedHeight,
+  windowGrows,
 } from "../.test-build/popup/view.js";
 import { adviceTexts } from "../.test-build/sourcePicker/view.js";
 
@@ -39,6 +41,49 @@ test("only an error grows the window and shows the texts in full", () => {
   assert.deepEqual(textsLayout([], error), { grows: true, clamp: false, collapsed: false });
   assert.deepEqual(textsLayout(two, error), { grows: true, clamp: false, collapsed: false });
   assert.deepEqual(textsLayout([adviceTexts.browser], error), { grows: true, clamp: false, collapsed: false });
+});
+
+// Changed in the TASK-406 review (second pass): the join button on its own row no longer lowers the collapse limit to 1
+// (it was: collapseAdvice/textsLayout took joinOwnRow and one other message collapsed the advice). The window grows for
+// that row instead (windowGrows), so only the original rule remains: two or more messages (the reserved join line is not one).
+test("the advice collapses only by the original rule; the join row does not lower the limit", () => {
+  const one = [adviceTexts.browser];
+  const two = [adviceTexts.muted, adviceTexts.browser];
+  assert.equal(collapseAdvice(one, ""), false, "one message keeps the advice in full");
+  assert.equal(collapseAdvice([], error), false);
+  assert.equal(collapseAdvice(one, error), true);
+  assert.deepEqual(textsLayout(one, ""), { grows: false, clamp: true, collapsed: false });
+  assert.deepEqual(textsLayout([], ""), { grows: false, clamp: true, collapsed: false });
+  assert.deepEqual(textsLayout(one, error), { grows: true, clamp: false, collapsed: false });
+  // Changed in the TASK-406 review (final): with the join button the reserved line is not a message, so a browser warning
+  // next to it keeps the advice in full, as before TASK-406 (it was: collapsed, the reserved line counted as one message).
+  assert.deepEqual(textsLayout(layoutNotes([], [], true), ""), { grows: false, clamp: true, collapsed: false });
+  assert.deepEqual(textsLayout(layoutNotes(one, [], true), ""), { grows: false, clamp: true, collapsed: false });
+  assert.deepEqual(textsLayout(layoutNotes(two, [], true), ""), { grows: false, clamp: true, collapsed: true }, "two real messages still collapse");
+});
+
+// TASK-406 review (second pass): the window may grow for the join button's extra row, in the offer view only.
+test("windowGrows: the offer view grows for an error or for the join row; the advice and the running view never", () => {
+  assert.equal(windowGrows(true, false, false), false, "plain offer: the base size, nothing measured");
+  assert.equal(windowGrows(true, true, false), true, "an error");
+  assert.equal(windowGrows(true, false, true), true, "the join button on its own row");
+  assert.equal(windowGrows(true, true, true), true);
+  assert.equal(windowGrows(false, true, true), false, "advice or running recording: the normal size");
+  assert.equal(windowGrows(false, false, true), false);
+});
+
+test("with the join row the window stays at the base while the content fits (100 %), and grows when it does not (150 %)", () => {
+  // The natural height is the same in ready, opening and opened (reserved line), so these inputs do not change per phase.
+  assert.equal(wantedHeight(298, windowGrows(true, false, true)), popupBaseHeight, "fits 300: no resize is sent");
+  assert.equal(wantedHeight(334.4, windowGrows(true, false, true)), 335 + fitSlack, "needs more: grows to the natural height");
+  assert.equal(wantedHeight(334.4, windowGrows(false, false, false)), popupBaseHeight, "a plain offer is never measured");
+  // The fitter sends nothing for the base height the window already has, and one call for growth.
+  const calls = [];
+  const f = new HeightFitter(async (h) => calls.push(h));
+  f.request(wantedHeight(298, true));
+  assert.deepEqual(calls, []);
+  f.request(wantedHeight(334.4, true));
+  assert.deepEqual(calls, [335 + fitSlack]);
 });
 
 test("the wanted height is the base unless the growing content needs more", () => {
