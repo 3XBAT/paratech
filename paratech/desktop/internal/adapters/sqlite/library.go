@@ -157,13 +157,15 @@ func (r *SubjectRepository) Save(ctx context.Context, s *subject.Subject) error 
 		if st.Version == 0 {
 			if err := DuplicateAsVersionConflict(MapError(ctx, q.InsertSubject(ctx, sqlcgen.InsertSubjectParams{
 				ID: string(st.ID), Name: st.Name, NameKey: values.Key(st.Name), Semester: st.Semester.Code(),
-				CallLink: st.CallLink, CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
+				CallLink: st.CallLink, CallLinkLecture: st.CallLinkLecture, CallLinkSeminar: st.CallLinkSeminar,
+				CallLinkLab: st.CallLinkLab, CreatedAt: jobMs(st.CreatedAt), UpdatedAt: jobMs(st.UpdatedAt),
 			}))); err != nil {
 				return err
 			}
 		} else {
 			n, err := q.UpdateSubject(ctx, sqlcgen.UpdateSubjectParams{
 				Name: st.Name, NameKey: values.Key(st.Name), Semester: st.Semester.Code(), CallLink: st.CallLink,
+				CallLinkLecture: st.CallLinkLecture, CallLinkSeminar: st.CallLinkSeminar, CallLinkLab: st.CallLinkLab,
 				RemovedAt: jobNullMs(st.RemovedAt), UpdatedAt: jobMs(st.UpdatedAt), ID: string(st.ID),
 				ExpectedVersion: st.Version,
 			})
@@ -244,7 +246,7 @@ func (r *SubjectRepository) Delete(ctx context.Context, s *subject.Subject) erro
 }
 
 // subjectFromRows restores a subject. subjects.teacher_* are legacy (migration 0044) and never read. A call link that
-// no longer parses is restored as none by the aggregate (ADR-0032).
+// (general or of a lesson kind) that no longer parses is restored as none by the aggregate (ADR-0032).
 func subjectFromRows(row sqlcgen.Subject, aliases []sqlcgen.SubjectAlias, folders []sqlcgen.SubjectFolder,
 	teachers []sqlcgen.SubjectTeacher) (*subject.Subject, error) {
 	sem, err := values.ParseSemester(row.Semester)
@@ -253,6 +255,7 @@ func subjectFromRows(row sqlcgen.Subject, aliases []sqlcgen.SubjectAlias, folder
 	}
 	st := subject.State{
 		Version: row.Version, ID: shared.SubjectID(row.ID), Name: row.Name, Semester: sem, CallLink: row.CallLink,
+		CallLinkLecture: row.CallLinkLecture, CallLinkSeminar: row.CallLinkSeminar, CallLinkLab: row.CallLinkLab,
 		RemovedAt: jobFromNullMs(row.RemovedAt), CreatedAt: jobFromMs(row.CreatedAt), UpdatedAt: jobFromMs(row.UpdatedAt),
 	}
 	for _, t := range teachers {
