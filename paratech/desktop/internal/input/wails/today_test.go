@@ -93,7 +93,7 @@ func TestTodayLessonCallLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	uc := &fakeToday{today: todayfeed.Today{Lessons: []todayfeed.LessonRow{
-		{Lesson: "l1", Subject: "Матанализ", SubjectState: todayfeed.SubjectKnown, SubjectID: "s1", SubjectName: "Математический анализ", CallLink: link},
+		{Lesson: "l1", Subject: "Матанализ", SubjectState: todayfeed.SubjectKnown, SubjectID: "s1", SubjectName: "Математический анализ", CallLink: link, CallLinkKind: subject.CallGeneral},
 		{Lesson: "l2", Subject: "Химия", SubjectState: todayfeed.SubjectKnown, SubjectID: "s2", SubjectName: "Химия"},
 		{Lesson: "l3", Subject: "Физкультура", SubjectState: todayfeed.SubjectUnknown},
 	}}}
@@ -114,8 +114,44 @@ func TestTodayLessonCallLink(t *testing.T) {
 	}
 	raw, err := json.Marshal(got.Lessons)
 	if err != nil || strings.Contains(string(raw), "FakePwd42") ||
-		!strings.Contains(string(raw), `"subjectId":"s1","subjectName":"Математический анализ","hasCallLink":true,"callLinkHost":"meet.example.org"`) {
+		!strings.Contains(string(raw), `"subjectId":"s1","subjectName":"Математический анализ","hasCallLink":true,"callLinkHost":"meet.example.org","callLinkKind":"general"`) {
 		t.Fatalf("lessons JSON = %s, %v", raw, err)
+	}
+}
+
+// ADR-0032 addendum 2026-11-10: the card carries the host and the kind of the link its lesson's kind opens, and ""
+// for none; the exact JSON the page reads.
+func TestTodayLessonCallLinkKindJSON(t *testing.T) {
+	link, err := subject.ParseCallLink("https://lecture.example.org/j/2?pwd=FakePwd42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, time.November, 10, 9, 0, 0, 0, time.UTC)
+	uc := &fakeToday{today: todayfeed.Today{Lessons: []todayfeed.LessonRow{
+		{
+			Lesson: "l1", Title: "Лекция", Subject: "Физика", SubjectState: todayfeed.SubjectKnown, SubjectID: "s1",
+			SubjectName: "Физика", CallLink: link, CallLinkKind: subject.CallLecture, Kind: "lecture",
+			Teacher: "Петров А. В.", Start: start, End: start.Add(90 * time.Minute),
+		},
+		// A kind without a link is not shown: the use case would never send one, the binding drops it anyway.
+		{Lesson: "l2", Subject: "Физика", SubjectState: todayfeed.SubjectKnown, SubjectID: "s1", SubjectName: "Физика",
+			CallLinkKind: subject.CallSeminar, Kind: "lab"},
+	}}}
+	got, err := NewTodayService(uc, discard()).Today(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(got.Lessons)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"id":"l1","title":"Лекция","subject":"Физика","subjectState":"known","subjectId":"s1","subjectName":"Физика",` +
+		`"hasCallLink":true,"callLinkHost":"lecture.example.org","callLinkKind":"lecture","kind":"lecture",` +
+		`"teacher":"Петров А. В.","start":"2026-11-10T09:00:00Z","end":"2026-11-10T10:30:00Z","post":null},` +
+		`{"id":"l2","title":"","subject":"Физика","subjectState":"known","subjectId":"s1","subjectName":"Физика",` +
+		`"hasCallLink":false,"callLinkHost":"","callLinkKind":"","kind":"lab","teacher":"","start":"","end":"","post":null}]`
+	if string(raw) != want {
+		t.Fatalf("JSON =\n%s\nwant\n%s", raw, want)
 	}
 }
 

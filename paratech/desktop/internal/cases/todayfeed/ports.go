@@ -96,10 +96,10 @@ type SubjectResolver interface {
 }
 
 // SubjectCallLinks reads the links to the online classes the student keeps on the subjects of the library (ADR-0032,
-// TASK-364). Implemented by cases/library, wired by the app.
+// TASK-364, addendum 2026-11-10). Implemented by cases/library, wired by the app.
 type SubjectCallLinks interface {
-	// CallLinks returns the link of each active subject of ids that has one (ADR-0032).
-	CallLinks(ctx context.Context, ids []shared.SubjectID) (map[shared.SubjectID]subject.CallLink, error)
+	// CallLinkSets returns the links (general and per kind) of each active subject of ids that has at least one.
+	CallLinkSets(ctx context.Context, ids []shared.SubjectID) (map[shared.SubjectID]subject.CallLinks, error)
 }
 
 // Clock supplies the current time in the student's zone, whose calendar days the screen uses (ARCH-24, PRD

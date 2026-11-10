@@ -22,54 +22,57 @@ type startedPrompt struct {
 }
 
 // CallSubject returns the library subject whose call link the popup of prompt id may offer («Подключиться», ADR-0032,
-// TASK-370): for the current lesson prompt while it is offered, and for the lesson prompt the latest recording was
-// started from while that recording runs (TASK-405), when the lesson's subject string resolves to exactly one
-// subject, as on «Сегодня», and only while that subject keeps a link. Anything else, failures included, is "": the
-// popup then simply offers no link. The link stays here; the popup opens it by the subject. Failures are logged
-// without their cause: a storage error may carry row data, and a link a meeting password.
-func (s *Service) CallSubject(ctx context.Context, id prompt.ID) shared.SubjectID {
+// TASK-370) and the kind of its lesson: for the current lesson prompt while it is offered, and for the lesson prompt
+// the latest recording was started from while that recording runs (TASK-405), when the lesson's subject string
+// resolves to exactly one subject, as on «Сегодня», and only while the lesson's kind finds a link on that subject
+// (subject.CallLinks.Join: the kind's link, else the general one; addendum 2026-11-10). Anything else, failures
+// included, is the zero Call: the popup then simply offers no link. The link stays here; the popup opens it by the
+// subject and the kind. Failures are logged without their cause: a storage error may carry row data, and a link a
+// meeting password.
+func (s *Service) CallSubject(ctx context.Context, id prompt.ID) Call {
 	if s.subjects == nil || s.callLinks == nil {
-		return ""
+		return Call{}
 	}
 	lessonID := s.promptLesson(id)
 	if lessonID == "" {
-		return ""
+		return Call{}
 	}
 
 	l, err := s.lessons.Get(ctx, lessonID)
 	switch {
 	case errors.Is(err, shared.ErrNotFound):
-		return "" // the lesson was removed from the schedule meanwhile
+		return Call{} // the lesson was removed from the schedule meanwhile
 	case err != nil:
 		s.callSubjectFailed(id, "lesson unread")
-		return ""
+		return Call{}
 	case l.Deleted():
-		return ""
+		return Call{}
 	}
 	name := l.Content().Subject
 	if name == "" {
-		return ""
+		return Call{}
 	}
 
 	found, err := s.subjects.LookupSubjects(ctx, []string{name})
 	if err != nil {
 		s.callSubjectFailed(id, "subjects unread")
-		return ""
+		return Call{}
 	}
 	r, ok := found[name]
 	if !ok || r.Outcome != subjectmatch.Matched || r.Match.ID == "" {
-		return ""
+		return Call{}
 	}
 
-	links, err := s.callLinks.CallLinks(ctx, []shared.SubjectID{r.Match.ID})
+	links, err := s.callLinks.CallLinkSets(ctx, []shared.SubjectID{r.Match.ID})
 	if err != nil {
 		s.callSubjectFailed(id, "call links unread")
-		return ""
+		return Call{}
 	}
-	if links[r.Match.ID].IsZero() {
-		return ""
+	kind := l.Content().Kind.String()
+	if link, _ := links[r.Match.ID].Join(kind); link.IsZero() {
+		return Call{}
 	}
-	return r.Match.ID
+	return Call{Subject: r.Match.ID, LessonKind: kind}
 }
 
 // promptLesson is the lesson of prompt id when it may offer a link: the current prompt, an offered lesson prompt, or

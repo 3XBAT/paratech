@@ -53,9 +53,9 @@ func (noSubjects) LookupSubjects(_ context.Context, names []string) (map[string]
 	return out, nil
 }
 
-// CallLinks is the SubjectCallLinks port of the same empty library.
-func (noSubjects) CallLinks(context.Context, []shared.SubjectID) (map[shared.SubjectID]subject.CallLink, error) {
-	return map[shared.SubjectID]subject.CallLink{}, nil
+// CallLinkSets is the SubjectCallLinks port of the same empty library.
+func (noSubjects) CallLinkSets(context.Context, []shared.SubjectID) (map[shared.SubjectID]subject.CallLinks, error) {
+	return map[shared.SubjectID]subject.CallLinks{}, nil
 }
 
 func (e *ppEnv) today() (*todayfeed.Poster, *todayfeed.Screen) {

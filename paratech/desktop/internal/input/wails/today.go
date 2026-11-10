@@ -73,8 +73,10 @@ type TodayPost struct {
 // subject has the name: LibraryService.CreateSubjectWithCallLink can create one), "ambiguous" (several subjects have
 // it), "known" (one: SubjectID) or "unavailable" (the library could not be read now: offer nothing). SubjectID and
 // SubjectName are set only for "known": the other lessons have no place to keep a call link. CallLinkHost is the host
-// of the link kept on the subject ("" none, HasCallLink false); «Подключиться» calls LibraryService.
-// OpenSubjectCallLink(SubjectID), «Добавить ссылку» LibraryService.SetSubjectCallLink(SubjectID, text).
+// of the link the lesson's kind opens (the kind's link, else the general one; ADR-0032 addendum 2026-11-10) and
+// CallLinkKind the kind it is kept under ("general", "lecture", "seminar", "lab"); "" and HasCallLink false for none.
+// «Подключиться» calls LibraryService.OpenSubjectCallLink(SubjectID, Kind), «Добавить ссылку»
+// LibraryService.SetSubjectCallLink(SubjectID, kind, text).
 type TodayLesson struct {
 	ID           string     `json:"id"`
 	Title        string     `json:"title"`
@@ -84,6 +86,7 @@ type TodayLesson struct {
 	SubjectName  string     `json:"subjectName"`
 	HasCallLink  bool       `json:"hasCallLink"`
 	CallLinkHost string     `json:"callLinkHost"`
+	CallLinkKind string     `json:"callLinkKind"`
 	Kind         string     `json:"kind"`
 	Teacher      string     `json:"teacher"`
 	Start        string     `json:"start"`
@@ -169,6 +172,9 @@ func (s *TodayService) Today(ctx context.Context) (TodayScreen, error) {
 			SubjectID:   l.SubjectID.String(),
 			SubjectName: l.SubjectName, HasCallLink: !l.CallLink.IsZero(), CallLinkHost: l.CallLink.Host(), Kind: l.Kind,
 			Teacher: l.Teacher, Start: timeText(l.Start), End: timeText(l.End),
+		}
+		if row.HasCallLink {
+			row.CallLinkKind = string(l.CallLinkKind)
 		}
 		if l.Post != nil {
 			p := todayPost(*l.Post)

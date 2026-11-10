@@ -91,8 +91,9 @@ const (
 
 // LessonRow is a lesson of the day with its post, if the post-processing of its recording produced one. SubjectState
 // says how its subject string resolves; SubjectID is the library subject when it is SubjectKnown ("" otherwise: no
-// place to keep a call link), SubjectName its name and CallLink the link the student keeps on it (ADR-0032, TASK-364;
-// zero none).
+// place to keep a call link), SubjectName its name, CallLink the link «Подключиться» opens for the lesson's kind
+// (subject.CallLinks.Join: the kind's link, else the general one; zero none) and CallLinkKind the kind it was taken
+// from ("" none; ADR-0032, addendum 2026-11-10).
 type LessonRow struct {
 	Lesson       shared.LessonID
 	Title        string
@@ -101,6 +102,7 @@ type LessonRow struct {
 	SubjectID    shared.SubjectID
 	SubjectName  string
 	CallLink     subject.CallLink
+	CallLinkKind subject.CallKind
 	Kind         string // lesson kind code; "unknown" when the schedule does not say
 	Teacher      string
 	Start        time.Time

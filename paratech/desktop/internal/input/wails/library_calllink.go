@@ -36,6 +36,15 @@ type LibraryCallLink struct {
 	Host string `json:"host"`
 }
 
+// LibraryCallLinks are the links of a subject by kind (ADR-0032 addendum 2026-11-10): only the kinds that have one
+// are present; {} when none.
+type LibraryCallLinks struct {
+	General *LibraryCallLink `json:"general,omitempty"`
+	Lecture *LibraryCallLink `json:"lecture,omitempty"`
+	Seminar *LibraryCallLink `json:"seminar,omitempty"`
+	Lab     *LibraryCallLink `json:"lab,omitempty"`
+}
+
 // LibraryCallLinkResult answers SetSubjectCallLink and ClearSubjectCallLink: Problem "" with Subject set, or a problem
 // code ("invalid", "not_found", "failed") with Subject null.
 type LibraryCallLinkResult struct {
@@ -60,11 +69,15 @@ type LibraryCreateWithCallLink struct {
 	RemovedVersion   int64           `json:"removedVersion"`
 }
 
-// SetSubjectCallLink keeps link as the link to the online class of a subject (the subject page, and «Добавить ссылку»
-// of a lesson card on «Сегодня»). It is the student's action only; nothing is opened or sent, and the link is never
-// logged.
-func (s *LibraryService) SetSubjectCallLink(ctx context.Context, subjectID, link string) LibraryCallLinkResult {
-	sub, err := s.uc.SetCallLink(ctx, shared.SubjectID(subjectID), link)
+// SetSubjectCallLink keeps link as the link of kind ("general", "lecture", "seminar" or "lab"; anything else is
+// "invalid") to the online class of a subject (the subject page, and «Добавить ссылку» of a lesson card on
+// «Сегодня»). It is the student's action only; nothing is opened or sent, and the link is never logged.
+func (s *LibraryService) SetSubjectCallLink(ctx context.Context, subjectID, kind, link string) LibraryCallLinkResult {
+	k, err := subject.ParseCallKind(kind)
+	if err != nil {
+		return LibraryCallLinkResult{Problem: s.callLinkProblem(opLibrarySetCallLink, err)}
+	}
+	sub, err := s.uc.SetCallLinkOf(ctx, shared.SubjectID(subjectID), k, link)
 	if err != nil {
 		return LibraryCallLinkResult{Problem: s.callLinkProblem(opLibrarySetCallLink, err)}
 	}
@@ -72,9 +85,13 @@ func (s *LibraryService) SetSubjectCallLink(ctx context.Context, subjectID, link
 	return LibraryCallLinkResult{Subject: &out}
 }
 
-// ClearSubjectCallLink removes the link to the online class of a subject.
-func (s *LibraryService) ClearSubjectCallLink(ctx context.Context, subjectID string) LibraryCallLinkResult {
-	sub, err := s.uc.ClearCallLink(ctx, shared.SubjectID(subjectID))
+// ClearSubjectCallLink removes the link of kind (as SetSubjectCallLink) to the online class of a subject.
+func (s *LibraryService) ClearSubjectCallLink(ctx context.Context, subjectID, kind string) LibraryCallLinkResult {
+	k, err := subject.ParseCallKind(kind)
+	if err != nil {
+		return LibraryCallLinkResult{Problem: s.callLinkProblem(opLibraryClearCallLink, err)}
+	}
+	sub, err := s.uc.ClearCallLinkOf(ctx, shared.SubjectID(subjectID), k)
 	if err != nil {
 		return LibraryCallLinkResult{Problem: s.callLinkProblem(opLibraryClearCallLink, err)}
 	}
@@ -117,10 +134,12 @@ func (s *LibraryService) CreateSubjectWithCallLink(ctx context.Context, name, li
 	return LibraryCreateWithCallLink{Problem: problem}
 }
 
-// OpenSubjectCallLink opens the link kept on a subject («Подключиться»). The page sends only the subject; the use case
-// reads the link again and the opener checks it once more (ADR-0032 «Opening and copying»). Recording does not start.
-func (s *LibraryService) OpenSubjectCallLink(ctx context.Context, subjectID string) LibraryCallLinkOpen {
-	err := s.uc.OpenCallLink(ctx, shared.SubjectID(subjectID))
+// OpenSubjectCallLink opens the link a lesson of lessonKind (the schedule kind code: "lecture", "seminar",
+// "practice", "lab"; anything else uses the general link) of a subject opens («Подключиться»): the kind's link, else
+// the general one (ADR-0032 addendum 2026-11-10). The page sends only the subject and the kind; the use case reads the
+// links again and the opener checks the link once more (ADR-0032 «Opening and copying»). Recording does not start.
+func (s *LibraryService) OpenSubjectCallLink(ctx context.Context, subjectID, lessonKind string) LibraryCallLinkOpen {
+	err := s.uc.OpenJoinLink(ctx, shared.SubjectID(subjectID), lessonKind)
 	switch {
 	case err == nil:
 		return LibraryCallLinkOpen{}
@@ -141,6 +160,9 @@ func (s *LibraryService) callLinkProblem(op string, err error) string {
 	switch {
 	case errors.Is(err, library.ErrInvalidCallLink):
 		return callLinkInvalid
+	case errors.Is(err, library.ErrInvalidCallKind), errors.Is(err, subject.ErrInvalidCallKind):
+		s.log.Info(op, "result", callLinkInvalid, "cause", "call kind")
+		return callLinkInvalid
 	case errors.Is(err, library.ErrSubjectNotFound), errors.Is(err, library.ErrInvalidRequest):
 		s.log.Info(op, "result", callLinkNotFound)
 		return callLinkNotFound
@@ -158,4 +180,12 @@ func libraryCallLink(l subject.CallLink) *LibraryCallLink {
 		return nil
 	}
 	return &LibraryCallLink{Link: l.String(), Host: l.Host()}
+}
+
+// libraryCallLinks keeps only the kinds that have a link.
+func libraryCallLinks(c subject.CallLinks) LibraryCallLinks {
+	return LibraryCallLinks{
+		General: libraryCallLink(c.General), Lecture: libraryCallLink(c.Lecture),
+		Seminar: libraryCallLink(c.Seminar), Lab: libraryCallLink(c.Lab),
+	}
 }

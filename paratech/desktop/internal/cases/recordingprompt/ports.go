@@ -84,11 +84,11 @@ type SubjectResolver interface {
 	LookupSubjects(ctx context.Context, names []string) (map[string]subjectmatch.Resolution, error)
 }
 
-// SubjectCallLinks reads the links to the online classes kept on the subjects (ADR-0032). Implemented by
-// cases/library, wired by the app.
+// SubjectCallLinks reads the links to the online classes kept on the subjects (ADR-0032, addendum 2026-11-10).
+// Implemented by cases/library, wired by the app.
 type SubjectCallLinks interface {
-	// CallLinks returns the link of each active subject of ids that has one.
-	CallLinks(ctx context.Context, ids []shared.SubjectID) (map[shared.SubjectID]subject.CallLink, error)
+	// CallLinkSets returns the links (general and per kind) of each active subject of ids that has at least one.
+	CallLinkSets(ctx context.Context, ids []shared.SubjectID) (map[shared.SubjectID]subject.CallLinks, error)
 }
 
 // Clock supplies the current time (ARCH-24, PRD section 6.1). Implemented by the clock adapter and by a fake.
