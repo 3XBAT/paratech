@@ -275,7 +275,8 @@ describe("evalInPage under the CSP of the app", () => {
     // The first run of an evaluate is exempt (it is started by the inspector); the polling re-runs come from page timers.
     await cspPage(t, async (page) => {
       drainConsole(page);
-      const polling = page.waitForFunction("window.__ready === true", undefined, { timeout: 600, polling: 50 }).catch(() => undefined);
+      // The timeout is only a ceiling: the loop below stops at the first CSP record, and closing the context ends the polling.
+      void page.waitForFunction("window.__ready === true", undefined, { timeout: 5_000, polling: 50 }).catch(() => undefined);
       // Drain empties the watch, so the records are accumulated across the polls; wait for the state, not for a fixed time.
       const got: ReturnType<typeof drainConsole> = [];
       const deadline = Date.now() + 5_000;
@@ -283,7 +284,6 @@ describe("evalInPage under the CSP of the app", () => {
         await new Promise((r) => setTimeout(r, 50));
         got.push(...drainConsole(page));
       }
-      await polling;
       assert.ok(got.some((r) => /script-src/.test(r.text) && r.kind === "console"), JSON.stringify(got));
     });
   });
@@ -317,7 +317,8 @@ describe("evalInPage under the CSP of the app", () => {
       const running = await evalInPage<number>(page, "() => { document.body.animate([{ opacity: 1 }, { opacity: 1 }], { duration: 1500 }); return document.getAnimations().length; }");
       assert.equal(running, 1, "the animation runs when the check starts");
       const v = await layoutViolations(page);
-      assert.equal(await evalInPage<number>(page, "() => document.getAnimations().length"), 0, "the check waited until the animation finished");
+      // The checker's guarantee is "nothing is running", not "the list is empty" (a finished animation may linger in it a moment).
+      assert.equal(await evalInPage<boolean>(page, "() => document.getAnimations().every((a) => a.playState !== 'running')"), true, "the check waited until the animation finished");
       assert.deepEqual(v, [], "no console violation from the waiting");
     });
   });
