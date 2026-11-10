@@ -80,6 +80,19 @@ var rules = map[values.Tool]Rule{
 	values.ToolQuotaStatus:                 {Class: ClassR},
 	values.ToolRecording:                   {Class: ClassU},
 	values.ToolOfferButton:                 {Class: ClassUI},
+
+	// Catalog v11 (ADR-0033 §8, §11), declared before it is served. A value the model typed is always C: its card shows
+	// the exact value that will be saved. The library tools are U with an Undo; remove_subject of a subject with notes
+	// or files always goes through a plan (Facts.RemovesContent).
+	values.ToolSetTeacher:      {Class: ClassC},
+	values.ToolClearTeacher:    {Class: ClassC},
+	values.ToolSetProfileField: {Class: ClassC},
+	values.ToolMoveToInbox:     {Class: ClassU},
+	values.ToolUnlinkMaterial:  {Class: ClassU},
+	values.ToolRemoveMaterial:  {Class: ClassU},
+	values.ToolAddAlias:        {Class: ClassU},
+	values.ToolRemoveFolder:    {Class: ClassU},
+	values.ToolRemoveSubject:   {Class: ClassU},
 }
 
 // Of returns the policy entry of a tool; a tool outside the table is ErrUnknownTool.
@@ -116,6 +129,9 @@ type Facts struct {
 	// HasCalendarEvent: the assignment a change_assignment{delete} names has a Google Calendar event, read from local
 	// data by the case (never from the model): deleting it then needs «Да» (ADR-0033 О-6 б).
 	HasCalendarEvent bool
+	// RemovesContent: the subject remove_subject names holds notes or files, read from local data by the case (never
+	// from the model): removing it then always needs a plan (docs/agent-parity.md §1). An empty subject is a plain write.
+	RemovesContent bool
 }
 
 // FreeTopic reports whether call is a work on a free topic: triage_assignment with a topic instead of an assignment
@@ -135,13 +151,15 @@ const (
 	ReasonAlwaysPlan  Reason = "always_plan"
 	ReasonTriage      Reason = "triage_not_full"
 	ReasonReplaces    Reason = "replaces_ready"
+	// ReasonRemovesContent: remove_subject of a subject with notes or files (catalog v11).
+	ReasonRemovesContent Reason = "removes_content"
 )
 
 // NeedsPlan reports whether a U call may run only as a step of an approved plan (ADR-0021, design §2.4, D8): a second
 // write in the request, a paid job above the threshold (or with an unknown cost), lecture text and turnkey writing,
 // a call that would replace a ready result (TASK-123: its Undo can only stop the job, the old result is not kept),
-// or a triage that said «partly» or «impossible». A free topic is not costly (Facts.FreeTopic): the
-// student's request stands for the plan of that one call. Other classes never need a plan here.
+// removing a subject with notes or files, or a triage that said «partly» or «impossible». A free topic is not costly
+// (Facts.FreeTopic): the student's request stands for the plan of that one call. Other classes never need a plan here.
 func NeedsPlan(t values.Tool, f Facts) (Reason, error) {
 	r, err := Of(t)
 	if err != nil {
@@ -155,6 +173,8 @@ func NeedsPlan(t values.Tool, f Facts) (Reason, error) {
 		return ReasonAlwaysPlan, nil
 	case f.ReplacesReady:
 		return ReasonReplaces, nil
+	case f.RemovesContent && t == values.ToolRemoveSubject:
+		return ReasonRemovesContent, nil
 	case f.WritesBefore > 0:
 		return ReasonSecondWrite, nil
 	case f.Triage == TriagePartly || f.Triage == TriageImpossible:

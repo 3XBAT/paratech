@@ -85,7 +85,7 @@ func TestCatalog10(t *testing.T) {
 	if got := ToolsAt(CatalogWave10); !slices.Equal(got, want) {
 		t.Fatalf("catalog 10 = %v", got)
 	}
-	if !slices.Equal(ToolsAt(CatalogWave10+1), ToolsAt(CatalogWave10)) {
+	if !slices.Equal(ToolsAt(CatalogWave11+1), ToolsAt(CatalogWave11)) {
 		t.Fatal("a later catalog is not the newest declared")
 	}
 	seen := map[Tool]bool{}
@@ -295,10 +295,10 @@ func TestSettingValues(t *testing.T) {
 		SettingACPowerOnly:      {"on", "off"},
 		SettingRecognitionLoad:  {"gentle", "normal", "max"},
 	}
-	if len(Settings()) != len(want) {
-		t.Fatalf("settings = %v", Settings())
+	if len(SettingsAt(CatalogWave10)) != len(want) {
+		t.Fatalf("settings = %v", SettingsAt(CatalogWave10))
 	}
-	for _, s := range Settings() {
+	for _, s := range SettingsAt(CatalogWave10) {
 		if !s.Valid() || !slices.Equal(SettingValues(s), want[s]) {
 			t.Fatalf("%s values = %v", s, SettingValues(s))
 		}

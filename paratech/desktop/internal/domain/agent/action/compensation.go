@@ -50,6 +50,13 @@ var compensationOf = map[values.Tool][]CompensationKind{
 	values.ToolNote:                {CompRemoveNotePart, CompRemoveNote, CompReanchorNote, CompRetitleNote, CompRestoreNote},
 	values.ToolSetSetting:          {CompRestoreSetting},
 	values.ToolRecording:           {CompStopRecording}, // recording{stop} has none (noUndoTools)
+
+	values.ToolMoveToInbox:    {CompPlaceBack},
+	values.ToolUnlinkMaterial: {CompRelinkMaterial},
+	values.ToolRemoveMaterial: {CompRestoreMaterial},
+	values.ToolAddAlias:       {CompRemoveAlias},
+	values.ToolRemoveFolder:   {CompRecreateFolder},
+	values.ToolRemoveSubject:  {CompRestoreSubject},
 }
 
 // CompensationFor returns the compensation kind of a tool, the first one of a tool with an action enum.
