@@ -3,7 +3,7 @@ import { type LibraryMaterial, type LibrarySubject, libraryApi } from "../bindin
 import { callByName } from "../bindings/runtime.js";
 import { type TicketSet, ticketsApi, ticketsErrorText } from "../bindings/tickets.js";
 import type { PageId } from "../nav.js";
-import { needsPolling, openResultView, startSubjectId, subjectLine, texts, ticketsCrumbs, ticketsPollMs } from "../ticketsView.js";
+import { needsPolling, openingId, openKeyPrefix, openResultView, startSubjectId, subjectLine, texts, ticketsCrumbs, ticketsPollMs } from "../ticketsView.js";
 import { Breadcrumbs } from "../ui/Breadcrumbs.js";
 import { Button } from "../ui/Button.js";
 import { EmptyState, Field, ResultLine, Select } from "../ui/controls.js";
@@ -145,12 +145,13 @@ export function TicketsPage(props: {
       setSetErrors((e) => ({ ...e, [id]: "" }));
     }, (t) => setSetErrors((e) => ({ ...e, [id]: t })));
 
-  // Opens a copy of the filed .docx through the library binding; only the id is passed.
-  const onOpenDocx = (set: TicketSet) =>
-    run(`open:${set.id}`, async () => {
-      const r = await lib.openMaterial(set.materialId);
-      setOpenResults((o) => ({ ...o, [set.id]: openResultView(r) }));
-    }, (t) => t !== "" && setOpenResults((o) => ({ ...o, [set.id]: { kind: "fail", text: t } })));
+  // Opens a copy of one filed .docx (a part of a set) through the library binding; only the id is passed.
+  // The busy key and the result line belong to the material, so each part has its own.
+  const onOpenDocx = (materialId: string) =>
+    run(`${openKeyPrefix}${materialId}`, async () => {
+      const r = await lib.openMaterial(materialId);
+      setOpenResults((o) => ({ ...o, [materialId]: openResultView(r) }));
+    }, (t) => t !== "" && setOpenResults((o) => ({ ...o, [materialId]: { kind: "fail", text: t } })));
 
   const subject = subjects?.find((s) => s.id === subjectId) ?? null;
   const blocked = busy !== "";
@@ -275,9 +276,9 @@ export function TicketsPage(props: {
                   subjectName={subject.name}
                   busy={busy === s.id}
                   blocked={blocked}
-                  openBusy={busy === `open:${s.id}`}
-                  openResult={openResults[s.id] ?? null}
-                  onOpen={() => void onOpenDocx(s)}
+                  openingId={openingId(busy)}
+                  openResults={openResults}
+                  onOpen={(materialId) => void onOpenDocx(materialId)}
                   error={setErrors[s.id] ?? ""}
                   onConfirm={(accept) => void onSetAction(s.id, () => api.confirm(s.id, accept))}
                   onCancel={() => void onSetAction(s.id, () => api.cancel(s.id))}

@@ -3,7 +3,7 @@
 // «Подтвердить» and never from a rule on this page. Ticket titles are the student's text: the page shows them as plain
 // text, so nothing here formats or links them.
 
-import type { Coverage, TicketItem, TicketReport, TicketSet } from "./bindings/tickets.js";
+import type { Coverage, TicketFile, TicketItem, TicketReport, TicketSet } from "./bindings/tickets.js";
 import { plural } from "./plural.js";
 import { waitingWords } from "./statusWords.js";
 import type { Crumb } from "./ui/Breadcrumbs.js";
@@ -50,6 +50,9 @@ export const texts = {
   cancel: "Отменить",
   cancelBusy: "Отменяется…",
   undo: "Вернуть файл во «Входящие»",
+  undoMany: "Вернуть файлы во «Входящие»",
+  partsNote: "Файл разделён на части: не помещается в один документ.",
+  partsLabel: "Части файла билетов",
   show: "Показать билеты",
   hide: "Скрыть билеты",
   stalledTitle: "Подбор остановлен",
@@ -196,7 +199,7 @@ export function moves(s: TicketSet): Moves {
   return {
     confirm,
     cancel: s.status === "proposed" || isRunning(s),
-    undo: s.status === "done" && s.materialId !== "",
+    undo: s.status === "done" && filesOf(s).length > 0,
   };
 }
 
@@ -273,14 +276,63 @@ export function showReport(s: TicketSet): boolean {
   return s.status === "done" || s.status === "failed" || s.status === "cancelled" || s.done > 0;
 }
 
-/** «Файл в папке „Билеты“ предмета …»: where the finished file is. */
-export function fileNote(subjectName: string): string {
-  return subjectName === "" ? `Файл лежит в папке «${filedFolder}» предмета.` : `Файл лежит в папке «${filedFolder}» предмета «${subjectName}».`;
+/** «Файл в папке „Билеты“ предмета …»: where the finished file (or, for several parts, files) is. */
+export function fileNote(subjectName: string, parts = 1): string {
+  const where = subjectName === "" ? "предмета" : `предмета «${subjectName}»`;
+  return `${parts > 1 ? "Файлы лежат" : "Файл лежит"} в папке «${filedFolder}» ${where}.`;
 }
 
-/** The button opens the filed .docx only for a finished set that has one. */
+/** The parts of a set in order; a set that only knows its first material is one part with an unknown range. */
+export function filesOf(s: TicketSet): TicketFile[] {
+  if (s.files.length > 0) {
+    return s.files;
+  }
+  return s.materialId === "" ? [] : [{ materialId: s.materialId, from: 0, to: 0, name: "" }];
+}
+
+/** «Билеты 1–50», «Билет 7» for a part of one ticket; «Часть N» (by position) when the range is unknown. The file name is not used. */
+export function partLabel(f: TicketFile, index: number): string {
+  if (f.from > 0 && f.to >= f.from) {
+    return f.from === f.to ? `Билет ${f.from}` : `Билеты ${f.from}–${f.to}`;
+  }
+  return `Часть ${index + 1}`;
+}
+
+/** One row of the parts list: the label and the name of its open button. */
+export interface PartView {
+  materialId: string;
+  label: string;
+  openLabel: string;
+}
+
+export function partsList(s: TicketSet): PartView[] {
+  return filesOf(s).map((f, i) => {
+    const label = partLabel(f, i);
+    return { materialId: f.materialId, label, openLabel: `Открыть «${label}»` };
+  });
+}
+
+/** The explanation of several parts: shown only when there are more than one. */
+export function partsNote(parts: number): string {
+  return parts > 1 ? texts.partsNote : "";
+}
+
+/** The tooltip of the undo icon: all parts go back together. */
+export function undoLabel(parts: number): string {
+  return parts > 1 ? texts.undoMany : texts.undo;
+}
+
+/** The busy key of the open of one part. */
+export const openKeyPrefix = "open:";
+
+/** The material of the open that runs, from the busy key `open:<materialId>`; "" when none runs. */
+export function openingId(busy: string): string {
+  return busy.startsWith(openKeyPrefix) ? busy.slice(openKeyPrefix.length) : "";
+}
+
+/** The buttons open the filed .docx only for a finished set that has at least one file. */
 export function canOpenDocx(s: TicketSet): boolean {
-  return s.status === "done" && s.materialId !== "";
+  return s.status === "done" && filesOf(s).length > 0;
 }
 
 /** The line under «Открыть .docx»: the binding's fixed text; success says that a copy was opened. */

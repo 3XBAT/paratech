@@ -9,6 +9,8 @@ import {
   isRunning,
   moves,
   needsCostConsent,
+  partsList,
+  partsNote,
   percent,
   progressText,
   reportParts,
@@ -18,6 +20,8 @@ import {
   texts,
   ticketCount,
   ticketRows,
+  undoLabel,
+  type PartView,
 } from "../ticketsView.js";
 import { Button } from "../ui/Button.js";
 import { Card, Progress, ResultLine } from "../ui/controls.js";
@@ -89,6 +93,53 @@ function ConfirmPanel(props: {
   );
 }
 
+type OpenResultView = { kind: "ok" | "fail"; text: string };
+
+/** The line under an open button: a success or the binding's refusal text (a student's file name is never put into it). */
+function OpenResult(props: { result: OpenResultView | undefined }) {
+  if (!props.result) {
+    return null;
+  }
+  return (
+    <ResultLine kind={props.result.kind} role={props.result.kind === "fail" ? "alert" : "status"}>
+      {props.result.text}
+    </ResultLine>
+  );
+}
+
+/**
+ * The parts of a split tickets file, in order: «Билеты 1–50», «Билеты 51–100». Each part has its own open icon and its own
+ * result line; one running open blocks the others, and a failed part can be tried again.
+ */
+export function FilesList(props: {
+  parts: PartView[];
+  blocked: boolean;
+  openingId: string;
+  results: Readonly<Record<string, OpenResultView>>;
+  onOpen: (materialId: string) => void;
+}) {
+  return (
+    <ul className="tk-files" aria-label={texts.partsLabel}>
+      {props.parts.map((p) => (
+        <li key={p.materialId} className="tk-file">
+          <span className="tk-file-name">{p.label}</span>
+          <IconAction
+            icon="open"
+            size="sm"
+            label={p.openLabel}
+            busy={props.openingId === p.materialId}
+            disabled={props.blocked}
+            onClick={() => props.onOpen(p.materialId)}
+          />
+          <div className="tk-file-result">
+            <OpenResult result={props.results[p.materialId]} />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** One set: status, progress, the move buttons, the coverage report and the tickets. */
 export function SetCard(props: {
   set: TicketSet;
@@ -101,13 +152,17 @@ export function SetCard(props: {
   onConfirm: (acceptCost: boolean) => void;
   onCancel: () => void;
   onUndo: () => void;
-  /** Opens the filed .docx (a copy); only the set's material id goes to the core. */
-  onOpen: () => void;
-  /** The opening of this card runs. */
-  openBusy: boolean;
-  openResult: { kind: "ok" | "fail"; text: string } | null;
+  /** Opens one filed .docx (a copy); only that part's material id goes to the core. */
+  onOpen: (materialId: string) => void;
+  /** The material whose opening runs ("" none); a part of another card is not this card's. */
+  openingId?: string;
+  /** The last open result of each material, by material id. */
+  openResults?: Readonly<Record<string, OpenResultView>>;
 }) {
   const s = props.set;
+  const parts = partsList(s);
+  const openingId = props.openingId ?? "";
+  const openResults = props.openResults ?? {};
   const [open, setOpen] = useState(s.status === "proposed" || isRunning(s));
   const status = statusView(s);
   const m = moves(s);
@@ -137,20 +192,34 @@ export function SetCard(props: {
       )}
       {s.status === "done" && (
         <div className="tk-done">
-          <p className="small">{fileNote(props.subjectName)}</p>
+          <p className="small">{fileNote(props.subjectName, parts.length)}</p>
+          {parts.length > 1 && <p className="small muted">{partsNote(parts.length)}</p>}
           {canOpenDocx(s) && <p className="small muted">{texts.openNote}</p>}
           <p className="small muted">{texts.generatedNote}</p>
-          {canOpenDocx(s) && (
-            <div className="acts start">
-              <Button size="sm" busy={props.openBusy} busyLabel={texts.openBusy} disabled={props.blocked || props.busy} onClick={props.onOpen}>
-                {texts.open}
-              </Button>
-            </div>
+          {parts.length > 1 && (
+            <FilesList
+              parts={parts}
+              blocked={props.blocked || props.busy}
+              openingId={openingId}
+              results={openResults}
+              onOpen={props.onOpen}
+            />
           )}
-          {canOpenDocx(s) && props.openResult && (
-            <ResultLine kind={props.openResult.kind} role={props.openResult.kind === "fail" ? "alert" : "status"}>
-              {props.openResult.text}
-            </ResultLine>
+          {parts.length === 1 && (
+            <>
+              <div className="acts start">
+                <Button
+                  size="sm"
+                  busy={openingId === parts[0].materialId}
+                  busyLabel={texts.openBusy}
+                  disabled={props.blocked || props.busy}
+                  onClick={() => props.onOpen(parts[0].materialId)}
+                >
+                  {texts.open}
+                </Button>
+              </div>
+              <OpenResult result={openResults[parts[0].materialId]} />
+            </>
           )}
         </div>
       )}
@@ -171,7 +240,7 @@ export function SetCard(props: {
             onClick={props.onCancel}
           />
         )}
-        {m.undo && <IconAction icon="undo" label={texts.undo} disabled={props.blocked || props.busy} onClick={props.onUndo} />}
+        {m.undo && <IconAction icon="undo" label={undoLabel(parts.length)} disabled={props.blocked || props.busy} onClick={props.onUndo} />}
         {s.tickets.length > 0 && (
           <IconAction icon={open ? "chevup" : "chev"} expanded={open} label={open ? texts.hide : texts.show} onClick={() => setOpen((o) => !o)} />
         )}
