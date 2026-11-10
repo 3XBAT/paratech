@@ -2,6 +2,7 @@ package agenteval
 
 import (
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"unicode"
@@ -173,6 +174,30 @@ func CreatedSubject(tool, argumentsJSON string) string {
 		return ""
 	}
 	return strings.TrimSpace(args.Name)
+}
+
+// ArgsMatch reports whether a call's arguments give every value of want (equal as JSON, strings verbatim); an empty
+// want matches a call without any argument (null counts as absent). Unreadable arguments never match.
+func ArgsMatch(want map[string]json.RawMessage, argumentsJSON string) bool {
+	var got map[string]any
+	if json.Unmarshal([]byte(argumentsJSON), &got) != nil || got == nil {
+		return false
+	}
+	if len(want) == 0 {
+		for _, v := range got {
+			if v != nil {
+				return false
+			}
+		}
+		return true
+	}
+	for name, raw := range want {
+		var w any
+		if json.Unmarshal(raw, &w) != nil || !reflect.DeepEqual(got[name], w) {
+			return false
+		}
+	}
+	return true
 }
 
 // AvoidedPhrases returns the phrases of avoid that text contains, ignoring case, «ё»/«е» and runs of spaces.

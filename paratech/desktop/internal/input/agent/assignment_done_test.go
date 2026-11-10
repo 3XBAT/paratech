@@ -242,13 +242,13 @@ func TestListAssignmentsByState(t *testing.T) {
 		}
 	}
 
-	// Catalog v9 (no state): the open list as before, byte for byte, no done field.
+	// No state at the current catalog (v10 since TASK-326): the open ones, rows with done, through the state filter.
 	out := drv.tools.read(t.Context(), values.Scope{}, readCall(t, "c1", values.ToolListAssignments, `{}`))
-	if out.Result.ResultJSON != `{"assignments":[{"id":"a1","status":"no_due"},{"id":"a2","status":"no_due"}],"count":2,"truncated":false}` {
-		t.Fatalf("v9 = %s", out.Result.ResultJSON)
+	if out.Result.ResultJSON != `{"assignments":[{"id":"a1","status":"no_due","done":false}],"count":1,"truncated":false}` {
+		t.Fatalf("no state = %s", out.Result.ResultJSON)
 	}
-	if len(list.asked) != 3 {
-		t.Fatalf("asked = %v, the v9 call reads ListAssignments", list.asked)
+	if len(list.asked) != 4 || list.asked[3] != "" {
+		t.Fatalf("asked = %v, the call without state reads by state", list.asked)
 	}
 }
 

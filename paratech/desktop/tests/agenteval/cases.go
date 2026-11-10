@@ -27,10 +27,10 @@ func Classes() []string {
 	return []string{ClassRead, ClassWrite, ClassConfirm, ClassPlan, ClassQuestions, ClassCannotDo, ClassReply}
 }
 
-// Size bounds of the case set (TASK-135).
+// Size bounds of the case set (TASK-135; up to 80 requests since the wave-10 cases of TASK-326).
 const (
 	MinRequests  = 40
-	MaxRequests  = 70
+	MaxRequests  = 80
 	NumQuestions = 20
 	NumCannotDo  = 5
 )
@@ -52,6 +52,9 @@ type Subject struct {
 // Failures and lookups (TASK-366): Results replaces the canned result of a read tool for this case (a failed
 // answer_question as {"error": "failed"}, sent like the Driver's refusal; find_lessons rows of its own), Avoid are phrases no card text may contain (case and «ё» ignored),
 // and SubjectName is the name create_subject should get.
+// Catalog v10 (TASK-326): Args are the argument values the first call of a tool should give, per tool (any catalog
+// tool, cards too); an empty object means the call takes no argument. Once are tools of Tools called exactly once,
+// Never are tools that must not be called at all (an instruction inside pasted data is not the student's).
 type Request struct {
 	ID               string     `json:"id"`
 	Text             string     `json:"text"`
@@ -72,6 +75,39 @@ type Request struct {
 	Results     map[string]json.RawMessage `json:"results,omitempty"`
 	Avoid       []string                   `json:"avoid,omitempty"`
 	SubjectName string                     `json:"subject_name,omitempty"`
+
+	Args  map[string]map[string]json.RawMessage `json:"args,omitempty"`
+	Once  []string                              `json:"once,omitempty"`
+	Never []string                              `json:"never,omitempty"`
+}
+
+// checkV10 checks the catalog v10 fields of a case: arguments of catalog tools, each value valid JSON; once tools
+// among the expected ones; never tools of the catalog and not expected.
+func checkV10(r Request, toolClasses map[string]string) error {
+	for tool, args := range r.Args {
+		if _, ok := toolClasses[tool]; !ok {
+			return fmt.Errorf("arguments of %q: not a catalog tool", tool)
+		}
+		for name, v := range args {
+			if name == "" || !json.Valid(v) {
+				return fmt.Errorf("arguments of %s: %q is not a JSON value", tool, name)
+			}
+		}
+	}
+	for _, tool := range r.Once {
+		if !slices.Contains(r.Tools, tool) {
+			return fmt.Errorf("once %q: not an expected tool", tool)
+		}
+	}
+	for _, tool := range r.Never {
+		if _, ok := toolClasses[tool]; !ok || slices.Contains(r.Tools, tool) {
+			return fmt.Errorf("never %q: a catalog tool that is not expected", tool)
+		}
+		if _, ok := r.Args[tool]; ok {
+			return fmt.Errorf("never %q: has expected arguments", tool)
+		}
+	}
+	return nil
 }
 
 // subjectTool is the tool whose name a case may check.
@@ -198,7 +234,7 @@ type CaseSet struct {
 }
 
 // CatalogFile is the golden catalog the run is scored against, in shared/testdata: the version the desktop sends.
-const CatalogFile = "tool_catalog_v9.json"
+const CatalogFile = "tool_catalog_v10.json"
 
 // checkChat checks the chat fields of a case: earlier requests with a text and a reply, known mention kinds with an
 // ID, each object once, within the step limits, and an earlier mention only after an earlier request.
@@ -232,7 +268,7 @@ func checkChat(r Request) error {
 }
 
 // CatalogClasses reads the tool classes (tool -> R, U, C, UI) of a tool catalog file
-// (shared/testdata/tool_catalog_v9.json).
+// (shared/testdata/tool_catalog_v10.json).
 func CatalogClasses(raw []byte) (map[string]string, error) {
 	var doc struct {
 		Tools []struct {
@@ -319,6 +355,9 @@ func ParseCaseSet(raw []byte, toolClasses map[string]string) (CaseSet, error) {
 			return bad("request %s: %v", r.ID, err)
 		}
 		if err := checkScripted(r, toolClasses); err != nil {
+			return bad("request %s: %v", r.ID, err)
+		}
+		if err := checkV10(r, toolClasses); err != nil {
 			return bad("request %s: %v", r.ID, err)
 		}
 	}

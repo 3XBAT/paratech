@@ -796,17 +796,23 @@ func TestListNotes(t *testing.T) {
 	}
 }
 
-// Catalog v9 is what the Hub serves until TASK-326: the note tools are not in it.
+// The note tools are not in catalog v9; the current catalog (v10 since TASK-326) serves them.
 func TestNoteToolsAreNotServedAtCatalog9(t *testing.T) {
-	if values.CatalogVersion != 9 {
+	if values.CatalogVersion != values.CatalogWave10 {
 		t.Fatalf("CatalogVersion = %d", values.CatalogVersion)
 	}
 	for _, tool := range []values.Tool{values.ToolNote, values.ToolListNotes} {
-		if _, err := values.ParseCall("c1", string(tool), `{"subject":"s1"}`); err == nil {
+		if _, err := values.ParseCallAt("c1", string(tool), `{"subject":"s1"}`, 9); err == nil {
 			t.Fatalf("%s parses at catalog 9", tool)
 		}
-		if slices.Contains(values.Tools(), tool) {
+		if slices.Contains(values.ToolsAt(9), tool) {
 			t.Fatalf("%s is in catalog 9", tool)
 		}
+		if !slices.Contains(values.Tools(), tool) {
+			t.Fatalf("%s is not in the current catalog", tool)
+		}
+	}
+	if _, err := values.ParseCall("c1", string(values.ToolListNotes), `{"subject":"s1"}`); err != nil {
+		t.Fatalf("list_notes at the current catalog = %v", err)
 	}
 }

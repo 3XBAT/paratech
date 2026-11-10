@@ -76,9 +76,9 @@ classes, waves).
 - A drain that fails to read the store ends idle and does not retry; the question waits until another loop of that
   chat ends or it is withdrawn.
 - A tool this desktop does not dispatch answers `values.RefuseUnavailable`, so a missing dispatch branch fails quietly.
-- `values.CatalogVersion` is still 9: the v10 tools (`paratech/desktop/internal/domain/agent/values/wave10*.go`) are
-  declared and dispatched here but do not parse yet; tests such as `TestNoteToolsAreNotServedAtCatalog9` pin that
-  until the switch task (TASK-326).
+- `values.CatalogVersion` is 10 since TASK-326: the v10 tools (`paratech/desktop/internal/domain/agent/values/wave10*.go`)
+  parse and are dispatched here; tests such as `TestNoteToolsAreNotServedAtCatalog9` pin that catalog 9 still lacks
+  them. `list_assignments` always answers in the v10 form (rows carry `done`).
 
 ## E2E
 The planned agent pack of ADR-0035 §6 (`paratech/e2e/specs/<pack>`, the directory does not exist yet) covers this

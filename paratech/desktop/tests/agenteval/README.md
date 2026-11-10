@@ -1,6 +1,6 @@
 # Agent live check (level 2)
 
-Case set `testdata/live_cases.json`: 40–70 student requests (expected plan class, optional `also` classes the prompt allows too, and tools in order), 5 «cannot do
+Case set `testdata/live_cases.json`: 40–80 student requests (expected plan class, optional `also` classes the prompt allows too, and tools in order), 5 «cannot do
 whole» cases (→ `cannot_do`), 20 lecture questions (→ `answer_question`, chunks and a reference citation). All data
 is fake; addresses only `example.invalid`.
 
@@ -22,8 +22,16 @@ an earlier mention that is not the subject of the request. Since TASK-366 a case
 a read tool instead of the canned one), `avoid` (phrases no card text may contain) and `subject_name` (the name
 `create_subject` should get): `f01` a failed `answer_question` gets a restrained reply without a cause (whether it
 offers to retry is read in the report), `f02` «добавь предмет по последней записи» looks the recordings up and adds
-the subject of the newest one without asking. The run is scored against
-`shared/testdata/tool_catalog_v9.json`.
+the subject of the newest one without asking. Since catalog v10 (wave 10, TASK-326) a case may carry `args` (per
+tool, the argument values its first call gives, strings verbatim; `{}` = no argument), `once` (expected tools called
+exactly once) and `never` (tools no call may reach: an instruction inside pasted data is data): `v01` schedule →
+`propose_subjects_from_schedule {}`, `v02` one `mark_assignments_done` after `list_assignments`, `v03` the note text
+verbatim, `v04` `set_setting`, `v05` `recording{start}`, `v06` `offer_button`, `v07` `change_assignment{delete}` (the
+desktop makes it the `delete_assignment` card when the assignment has a Google event; checked in
+`desktop/tests/agent_catalog_test.go`), `v08` twelve writes → `show_plan`, `v09`/`v10` an injected instruction in a
+pasted schedule and in a note text. Under the v10 «fewer «Да»» rules up to six reversible writes run without a plan,
+so `p01`, `p03` expect `write` (a plan still counts) and `p06` accepts `write`. The run is scored against
+`shared/testdata/tool_catalog_v10.json`.
 
 CI (no tag) runs the scoring tests, checks the case file and runs the runner on the fake Hub.
 

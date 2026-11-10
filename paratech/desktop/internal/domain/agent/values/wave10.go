@@ -8,10 +8,9 @@ import (
 )
 
 // Wave 10 of agent parity (ADR-0033 §10): catalog v10 is v9 plus the tools below, list_assignments with a state and
-// show_plan of up to MaxPlanSteps steps (already accepted for every catalog since TASK-317). The tools are declared
-// here and reached only through the *At functions with a version from CatalogWave10 on; Tools, ParseTool, SpecOf and
-// ParseCall keep CatalogVersion (v9) until the switch task (TASK-326). The tool order of the Hub golden (TASK-325)
-// wins over the order here.
+// show_plan of up to MaxPlanSteps steps (already accepted for every catalog since TASK-317). CatalogVersion is v10
+// since TASK-326, so Tools, ParseTool, SpecOf and ParseCall serve these tools; ToolsAt(9) still is the v9 set. The
+// tool order of the Hub golden (shared/testdata/tool_catalog_v10.json, TASK-325) wins over the order here.
 
 // CatalogWave10 is the catalog version of wave 10.
 const CatalogWave10 = 10

@@ -8,7 +8,7 @@ import (
 	"paratech/desktop/internal/domain/agent/values"
 )
 
-// call10 parses a call of catalog v10 (wave 10 is declared, not served: TASK-326).
+// call10 parses a call of catalog v10.
 func call10(t *testing.T, id, tool, args string) values.Call {
 	t.Helper()
 	c, err := values.ParseCallAt(id, tool, args, values.CatalogWave10)
