@@ -128,8 +128,47 @@ export interface LibrarySubject {
   version: number;
   /** The teacher of each role; null for a role without one. */
   teachers: LibraryTeachers;
-  /** TASK-364: the link to the online class; null for none. */
+  /** TASK-364: the general link to the online class; null for none. */
   callLink: LibraryCallLink | null;
+  /** TASK-432: the links by kind (ADR-0032 addendum), only the set ones; always an object. */
+  callLinks: LibraryCallLinks;
+}
+
+/** The kinds a link is kept for: «general» is the fallback of every lesson kind. */
+export type CallKind = "general" | "lecture" | "seminar" | "lab";
+
+export const callKinds: readonly CallKind[] = ["general", "lecture", "seminar", "lab"];
+
+export type LibraryCallLinks = Partial<Record<CallKind, LibraryCallLink>>;
+
+/**
+ * The link kind a schedule lesson kind code opens first, as the core decides it (ADR-0032 addendum): practice uses the
+ * seminar link; an empty or unknown code has only the general one. Mirrors the core for views; the core resolves at the click.
+ */
+export function callKindOfLesson(lessonKind: string): CallKind {
+  switch (lessonKind) {
+    case "lecture":
+      return "lecture";
+    case "seminar":
+    case "practice":
+      return "seminar";
+    case "lab":
+      return "lab";
+    default:
+      return "general";
+  }
+}
+
+/** The link a lesson of lessonKind opens: its kind's link, else the general one; null for none. */
+export function lessonCallLink(subject: Pick<LibrarySubject, "callLink" | "callLinks">, lessonKind: string): { kind: CallKind; link: LibraryCallLink } | null {
+  const links = subject.callLinks ?? {};
+  const own = callKindOfLesson(lessonKind);
+  const ownLink = links[own];
+  if (ownLink !== undefined) {
+    return { kind: own, link: ownLink };
+  }
+  const general = links.general ?? subject.callLink;
+  return general !== null && general !== undefined ? { kind: "general", link: general } : null;
 }
 
 /** The student's own link to the online class in canonical form, and its host (shown in full). Text nodes only. */
@@ -282,7 +321,24 @@ export function parseSubject(raw: unknown): LibrarySubject {
     version: typeof r.version === "number" && Number.isSafeInteger(r.version) && r.version >= 0 ? r.version : 0,
     teachers: parseTeachers(r.teachers),
     callLink: parseCallLink(r.callLink),
+    callLinks: parseCallLinks(r.callLinks),
   };
+}
+
+/** The links by kind: unknown keys are ignored, a malformed entry is dropped like a malformed single link. */
+export function parseCallLinks(raw: unknown): LibraryCallLinks {
+  const out: LibraryCallLinks = {};
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return out;
+  }
+  const r = raw as Record<string, unknown>;
+  for (const kind of callKinds) {
+    const link = parseCallLink(r[kind]);
+    if (link !== null) {
+      out[kind] = link;
+    }
+  }
+  return out;
 }
 
 /** The call link of a subject; null for none or for a reply without both texts. */
@@ -730,12 +786,15 @@ export interface LibraryApi {
   setSubjectTeacher(subjectId: string, version: number, role: TeacherRole, name: string, email: string): Promise<TeacherResult>;
   /** Removes the teacher of role while the subject is at version; a failed call is "failed". */
   clearSubjectTeacher(subjectId: string, version: number, role: TeacherRole): Promise<TeacherResult>;
-  /** TASK-364: keeps text as the subject's call link (checked in the core); a failed call is "failed". */
-  setSubjectCallLink(subjectId: string, link: string): Promise<CallLinkResult>;
-  /** Removes the subject's call link; a failed call is "failed". */
-  clearSubjectCallLink(subjectId: string): Promise<CallLinkResult>;
-  /** «Подключиться»: only the subject ID crosses, the core reads the link and opens it; recording does not start. */
-  openSubjectCallLink(subjectId: string): Promise<CallLinkOpen>;
+  /** TASK-364: keeps text as the subject's call link of kind (checked in the core); a failed call is "failed". */
+  setSubjectCallLink(subjectId: string, kind: CallKind, link: string): Promise<CallLinkResult>;
+  /** Removes the subject's call link of kind; a failed call is "failed". */
+  clearSubjectCallLink(subjectId: string, kind: CallKind): Promise<CallLinkResult>;
+  /**
+   * «Подключиться»: only the subject ID and the lesson kind code cross ("" when there is no lesson), the core picks the
+   * link (the kind's, else the general one) and opens it; recording does not start.
+   */
+  openSubjectCallLink(subjectId: string, lessonKind: string): Promise<CallLinkOpen>;
   /**
    * A new subject of the current semester that keeps link as its call link (a lesson card of «Сегодня»): the core
    * checks the link first and stores both in one save, so with a problem nothing exists. A failed call is "failed".
@@ -792,23 +851,23 @@ export function libraryApi(call: CallByName): LibraryApi {
         return parseTeacherResult(null);
       }
     },
-    setSubjectCallLink: async (subjectId, link) => {
+    setSubjectCallLink: async (subjectId, kind, link) => {
       try {
-        return parseCallLinkResult(await call(methods.setSubjectCallLink, subjectId, link));
+        return parseCallLinkResult(await call(methods.setSubjectCallLink, subjectId, kind, link));
       } catch {
         return parseCallLinkResult(null);
       }
     },
-    clearSubjectCallLink: async (subjectId) => {
+    clearSubjectCallLink: async (subjectId, kind) => {
       try {
-        return parseCallLinkResult(await call(methods.clearSubjectCallLink, subjectId));
+        return parseCallLinkResult(await call(methods.clearSubjectCallLink, subjectId, kind));
       } catch {
         return parseCallLinkResult(null);
       }
     },
-    openSubjectCallLink: async (subjectId) => {
+    openSubjectCallLink: async (subjectId, lessonKind) => {
       try {
-        return parseCallLinkOpen(await call(methods.openSubjectCallLink, subjectId));
+        return parseCallLinkOpen(await call(methods.openSubjectCallLink, subjectId, lessonKind));
       } catch {
         return parseCallLinkOpen(null);
       }

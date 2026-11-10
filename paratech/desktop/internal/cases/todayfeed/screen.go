@@ -340,8 +340,8 @@ func lessonsOf(list []*lesson.Lesson, day time.Time, views []PostView) []LessonR
 	return out
 }
 
-// lessonSubjects sets the subject state of each lesson of the day, its library subject and the call link the student
-// keeps on it (ADR-0032, TASK-364). With no lookup (found nil) or a failed read of the links, a lesson that names a
+// lessonSubjects sets the subject state of each lesson of the day, its library subject and the call link its kind
+// opens (ADR-0032, TASK-364, addendum 2026-11-10). With no lookup (found nil) or a failed read of the links, a lesson that names a
 // subject is SubjectUnavailable without SubjectID: a «Добавить ссылку» then could overwrite a link it did not see.
 func (s *Screen) lessonSubjects(ctx context.Context, rows []LessonRow, found map[string]subjectmatch.Resolution) {
 	var ids []shared.SubjectID
@@ -359,7 +359,7 @@ func (s *Screen) lessonSubjects(ctx context.Context, rows []LessonRow, found map
 	if len(ids) == 0 {
 		return
 	}
-	links, err := s.callLinks.CallLinks(ctx, ids)
+	links, err := s.callLinks.CallLinkSets(ctx, ids)
 	if err != nil {
 		// The cause is not logged: a storage error may carry row data, and a link a meeting password.
 		s.log.Warn(opCallLinks, slog.String("result", "call links unread"))
@@ -372,7 +372,7 @@ func (s *Screen) lessonSubjects(ctx context.Context, rows []LessonRow, found map
 	}
 	for i, r := range rows {
 		if r.SubjectID != "" {
-			rows[i].CallLink = links[r.SubjectID]
+			rows[i].CallLink, rows[i].CallLinkKind = links[r.SubjectID].Join(r.Kind)
 		}
 	}
 }

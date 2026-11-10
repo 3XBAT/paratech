@@ -52,19 +52,19 @@ func (f *fakeSubjects) LookupSubjects(_ context.Context, names []string) (map[st
 // fakeCallLinks holds the call links of the subjects.
 type fakeCallLinks struct {
 	mu    sync.Mutex
-	links map[shared.SubjectID]subject.CallLink
+	links map[shared.SubjectID]subject.CallLinks
 	err   error
 	ids   []shared.SubjectID
 }
 
-func (f *fakeCallLinks) CallLinks(_ context.Context, ids []shared.SubjectID) (map[shared.SubjectID]subject.CallLink, error) {
+func (f *fakeCallLinks) CallLinkSets(_ context.Context, ids []shared.SubjectID) (map[shared.SubjectID]subject.CallLinks, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ids = append(f.ids, ids...)
 	if f.err != nil {
 		return nil, f.err
 	}
-	out := map[shared.SubjectID]subject.CallLink{}
+	out := map[shared.SubjectID]subject.CallLinks{}
 	for _, id := range ids {
 		if l, ok := f.links[id]; ok {
 			out[id] = l
@@ -84,6 +84,12 @@ type callEnv struct {
 
 func newCallEnv(t *testing.T, subj string) *callEnv {
 	t.Helper()
+	return newCallEnvOf(t, subj, lesson.KindUnknown)
+}
+
+// newCallEnvOf is newCallEnv with a lesson of kind k; "sub-1" keeps testCallLink as its general link.
+func newCallEnvOf(t *testing.T, subj string, k lesson.Kind) *callEnv {
+	t.Helper()
 	e := newEnv(t)
 	link, err := subject.ParseCallLink(testCallLink)
 	if err != nil {
@@ -96,7 +102,7 @@ func newCallEnv(t *testing.T, subj string) *callEnv {
 			"Матан":         {Outcome: subjectmatch.Ambiguous},
 			"Физика":        {Outcome: subjectmatch.NoMatch},
 		}},
-		links:   &fakeCallLinks{links: map[shared.SubjectID]subject.CallLink{"sub-1": link}},
+		links:   &fakeCallLinks{links: map[shared.SubjectID]subject.CallLinks{"sub-1": {General: link}}},
 		running: &fakeRunning{},
 	}
 	svc, err := New(Deps{
@@ -110,13 +116,79 @@ func newCallEnv(t *testing.T, subj string) *callEnv {
 	e.svc = svc
 
 	l, err := lesson.New(lesson.Spec{ID: "lesson-1", Content: lesson.Content{
-		Title: "History", Subject: subj, Start: t0, End: lessonEnd, TimeZone: "Europe/Moscow",
+		Title: "History", Subject: subj, Kind: k, Start: t0, End: lessonEnd, TimeZone: "Europe/Moscow",
 	}}, t0.Add(-24*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.lessons.lessons = append(e.lessons.lessons, l)
 	return c
+}
+
+// wantCall is the Call of subject id for the unknown-kind lesson of newCallEnv; "" is no call.
+func wantCall(id shared.SubjectID) Call {
+	if id == "" {
+		return Call{}
+	}
+	return Call{Subject: id, LessonKind: "unknown"}
+}
+
+// The popup is offered a call only when the lesson's kind finds a link (ADR-0032 addendum 2026-11-10): the kind's
+// link, else the general one; the lesson kind travels with the subject so the click opens the same link.
+func TestCallSubjectByLessonKind(t *testing.T) {
+	ctx := context.Background()
+	general, lecture, seminar := mustCallLink(t, testCallLink), mustCallLink(t, "https://lecture.example.org/j/2"),
+		mustCallLink(t, "https://seminar.example.org/j/3")
+	tests := []struct {
+		name  string
+		kind  lesson.Kind
+		links subject.CallLinks
+		want  Call
+	}{
+		{"lecture with its own link", lesson.KindLecture, subject.CallLinks{Lecture: lecture},
+			Call{Subject: "sub-1", LessonKind: "lecture"}},
+		{"seminar with only the general", lesson.KindSeminar, subject.CallLinks{General: general, Lecture: lecture},
+			Call{Subject: "sub-1", LessonKind: "seminar"}},
+		{"seminar never takes the lecture", lesson.KindSeminar, subject.CallLinks{Lecture: lecture}, Call{}},
+		{"lab without links", lesson.KindLab, subject.CallLinks{}, Call{}},
+		{"practice takes the seminar", lesson.KindPractice, subject.CallLinks{Seminar: seminar},
+			Call{Subject: "sub-1", LessonKind: "practice"}},
+		{"unknown kind takes the general", lesson.KindUnknown, subject.CallLinks{General: general},
+			Call{Subject: "sub-1", LessonKind: "unknown"}},
+		{"unknown kind without the general", lesson.KindUnknown, subject.CallLinks{Lecture: lecture, Seminar: seminar},
+			Call{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newCallEnvOf(t, callSubjectName, tt.kind)
+			c.links.links = map[shared.SubjectID]subject.CallLinks{"sub-1": tt.links}
+			v := c.offer("lesson-1")
+			if got := c.svc.CallSubject(ctx, v.ID); got != tt.want {
+				t.Fatalf("CallSubject = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+
+	// While the recording started from the popup runs, the call keeps the lesson's kind (TASK-405).
+	c := newCallEnvOf(t, callSubjectName, lesson.KindLecture)
+	c.links.links = map[shared.SubjectID]subject.CallLinks{"sub-1": {Lecture: lecture}}
+	c.running.set("rec-1")
+	v := c.offer("lesson-1")
+	if _, err := c.svc.Start(ctx, v.ID, values.WholeComputer()); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.svc.CallSubject(ctx, v.ID); got != (Call{Subject: "sub-1", LessonKind: "lecture"}) {
+		t.Fatalf("running: %+v", got)
+	}
+}
+
+func mustCallLink(t *testing.T, s string) subject.CallLink {
+	t.Helper()
+	l, err := subject.ParseCallLink(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l
 }
 
 // TASK-370: only the current lesson prompt whose subject resolves to one subject with a link gets that subject.
@@ -188,8 +260,8 @@ func TestCallSubject(t *testing.T) {
 				id = tt.id(v)
 			}
 
-			if got := c.svc.CallSubject(ctx, prompt.ID(id)); got != tt.want {
-				t.Fatalf("CallSubject = %q, want %q", got, tt.want)
+			if got := c.svc.CallSubject(ctx, prompt.ID(id)); got != wantCall(tt.want) {
+				t.Fatalf("CallSubject = %+v, want %q", got, tt.want)
 			}
 			logs := c.logs.String()
 			if tt.failed != "" && !strings.Contains(logs, tt.failed) {
@@ -236,8 +308,8 @@ func TestCallSubjectWhileStarting(t *testing.T) {
 	if cur, ok := c.svc.Current(); !ok || cur.ID != v.ID || cur.State != prompt.StateStarting {
 		t.Fatalf("current %+v, %v, want STARTING", cur, ok)
 	}
-	if got := c.svc.CallSubject(ctx, v.ID); got != "" || len(c.subjects.names) != 0 {
-		t.Fatalf("while starting: %q, names %v", got, c.subjects.names)
+	if got := c.svc.CallSubject(ctx, v.ID); got != (Call{}) || len(c.subjects.names) != 0 {
+		t.Fatalf("while starting: %+v, names %v", got, c.subjects.names)
 	}
 	release()
 	if err := <-done; err != nil {
@@ -252,13 +324,13 @@ func TestCallSubjectReadsOnlyWhatItNeeds(t *testing.T) {
 	if _, err := c.svc.OfferAdHoc(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := c.svc.CallSubject(ctx, "prompt-1"); got != "" || len(c.subjects.names) != 0 || len(c.links.ids) != 0 {
-		t.Fatalf("ad hoc: %q, names %v, ids %v", got, c.subjects.names, c.links.ids)
+	if got := c.svc.CallSubject(ctx, "prompt-1"); got != (Call{}) || len(c.subjects.names) != 0 || len(c.links.ids) != 0 {
+		t.Fatalf("ad hoc: %+v, names %v, ids %v", got, c.subjects.names, c.links.ids)
 	}
 
 	v := c.offer("lesson-1")
-	if got := c.svc.CallSubject(ctx, v.ID); got != "sub-1" {
-		t.Fatalf("CallSubject = %q", got)
+	if got := c.svc.CallSubject(ctx, v.ID); got != wantCall("sub-1") {
+		t.Fatalf("CallSubject = %+v", got)
 	}
 	if !slices.Equal(c.subjects.names, []string{callSubjectName}) || !slices.Equal(c.links.ids, []shared.SubjectID{"sub-1"}) {
 		t.Fatalf("names %v, ids %v", c.subjects.names, c.links.ids)
@@ -268,8 +340,8 @@ func TestCallSubjectReadsOnlyWhatItNeeds(t *testing.T) {
 	if _, err := c.svc.Skip(ctx, v.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got := c.svc.CallSubject(ctx, v.ID); got != "" {
-		t.Fatalf("after skip: %q", got)
+	if got := c.svc.CallSubject(ctx, v.ID); got != (Call{}) {
+		t.Fatalf("after skip: %+v", got)
 	}
 }
 
@@ -277,7 +349,7 @@ func TestCallSubjectReadsOnlyWhatItNeeds(t *testing.T) {
 func TestCallSubjectNotWired(t *testing.T) {
 	e := newEnv(t)
 	v := e.offer("lesson-1")
-	if got := e.svc.CallSubject(context.Background(), v.ID); got != "" {
-		t.Fatalf("CallSubject = %q, want none", got)
+	if got := e.svc.CallSubject(context.Background(), v.ID); got != (Call{}) {
+		t.Fatalf("CallSubject = %+v, want none", got)
 	}
 }

@@ -35,8 +35,9 @@ type fakeLibrary struct {
 	discarded  library.Discarded
 	removed    map[shared.SubjectID]*subject.Subject
 	removedErr error
-	// openErr is the opener's refusal OpenCallLink reports (TASK-364).
+	// openErr is the opener's refusal OpenJoinLink reports (TASK-364); opened the links it opened.
 	openErr error
+	opened  []string
 }
 
 func (f *fakeLibrary) note(format string, args ...any) {

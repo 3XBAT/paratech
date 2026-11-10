@@ -18,7 +18,6 @@ import (
 	"paratech/desktop/internal/cases/recordingprompt"
 	"paratech/desktop/internal/domain/recording/prompt"
 	"paratech/desktop/internal/domain/recording/values"
-	"paratech/desktop/internal/domain/shared"
 )
 
 // fakePrompt is the recording prompt use case behind the binding.
@@ -39,10 +38,10 @@ type fakePrompt struct {
 
 	advice recordingprompt.Advice
 
-	callSubject shared.SubjectID
+	callSubject recordingprompt.Call
 }
 
-func (f *fakePrompt) CallSubject(_ context.Context, id prompt.ID) shared.SubjectID {
+func (f *fakePrompt) CallSubject(_ context.Context, id prompt.ID) recordingprompt.Call {
 	f.calls = append(f.calls, "call subject")
 	f.gotIDs = append(f.gotIDs, id)
 	return f.callSubject

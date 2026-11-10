@@ -67,6 +67,13 @@ type Manual struct {
 	Problem   prompt.Problem     // why it did not start; prompt.ProblemNone once it runs
 }
 
+// Call is what «Подключиться» of the popup opens (ADR-0032 addendum 2026-11-10): the library subject and the stable
+// code of the lesson's kind ("lecture", ..., "unknown"), which picks the link at the click. Zero: nothing is offered.
+type Call struct {
+	Subject    shared.SubjectID
+	LessonKind string
+}
+
 // Advice is the silent-source advice of the running recording as the popup shows it (TASK-082).
 type Advice struct {
 	Recording shared.RecordingID

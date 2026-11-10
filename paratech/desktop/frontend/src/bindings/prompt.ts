@@ -194,11 +194,18 @@ export function parsePromptView(raw: unknown): PromptView {
 
 /**
  * Checks the reply of callSubject: an object with a string subjectId (other fields are ignored). A malformed reply is an
- * error; the popup shows no button then. The link itself never crosses to the page.
+ * error; the popup shows no button then. lessonKind (TASK-432, the schedule kind code of the offered lesson) is read
+ * tolerantly: missing or not a string is "", which opens the general link. The link itself never crosses to the page.
  */
-export function parsePromptCallSubject(raw: unknown): { subjectId: string } {
+export function parsePromptCallSubject(raw: unknown): CallSubject {
   const r = record(raw, "call subject");
-  return { subjectId: str(r, "subjectId") };
+  return { subjectId: str(r, "subjectId"), lessonKind: typeof r.lessonKind === "string" ? r.lessonKind : "" };
+}
+
+/** What the popup learns about the call of the offered lesson; both are "" when it offers none. */
+export interface CallSubject {
+  subjectId: string;
+  lessonKind: string;
 }
 
 export interface PromptApi {
@@ -215,10 +222,11 @@ export interface PromptApi {
   /** The silent-source advice the popup shows (TASK-082), or null. */
   advice(): Promise<AdviceView | null>;
   /**
-   * The subject ID of the lesson prompt id when its subject has a call link, otherwise "". Rejects on a failed call or
-   * a malformed reply; the caller treats that as no button.
+   * The subject ID of the lesson prompt id when its subject has a call link, otherwise "", with the lesson kind code
+   * that «Подключиться» passes back to openSubjectCallLink. Rejects on a failed call or a malformed reply; the caller
+   * treats that as no button.
    */
-  callSubject(id: string): Promise<string>;
+  callSubject(id: string): Promise<CallSubject>;
 }
 
 /** Builds the prompt API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -239,7 +247,7 @@ export function promptApi(call: CallByName): PromptApi {
       const raw = await call(methods.advice);
       return raw === null || raw === undefined ? null : parseAdvice(raw);
     },
-    callSubject: async (id) => parsePromptCallSubject(await call(methods.callSubject, id)).subjectId,
+    callSubject: async (id) => parsePromptCallSubject(await call(methods.callSubject, id)),
   };
 }
 

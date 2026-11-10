@@ -138,8 +138,8 @@ func TestCallSubjectWhileTheStartedRecordingRuns(t *testing.T) {
 			}
 			id := tt.run(t, c)
 
-			if got := c.svc.CallSubject(ctx, id); got != tt.want {
-				t.Fatalf("CallSubject = %q, want %q", got, tt.want)
+			if got := c.svc.CallSubject(ctx, id); got != wantCall(tt.want) {
+				t.Fatalf("CallSubject = %+v, want %q", got, tt.want)
 			}
 			if logs := c.logs.String(); strings.Contains(logs, opCallSubject) || strings.Contains(logs, "FakePwd42") {
 				t.Errorf("unexpected log: %q", logs)
@@ -157,16 +157,16 @@ func TestCallSubjectAfterStartAsksItsRecording(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := c.svc.CallSubject(ctx, v.ID); got != "" || len(c.subjects.names) != 0 {
-		t.Fatalf("not running: %q, names %v", got, c.subjects.names)
+	if got := c.svc.CallSubject(ctx, v.ID); got != (Call{}) || len(c.subjects.names) != 0 {
+		t.Fatalf("not running: %+v, names %v", got, c.subjects.names)
 	}
 	c.running.set("rec-1")
-	if got := c.svc.CallSubject(ctx, v.ID); got != "sub-1" {
-		t.Fatalf("running: %q", got)
+	if got := c.svc.CallSubject(ctx, v.ID); got != wantCall("sub-1") {
+		t.Fatalf("running: %+v", got)
 	}
 	c.running.set()
-	if got := c.svc.CallSubject(ctx, v.ID); got != "" {
-		t.Fatalf("after stop: %q", got)
+	if got := c.svc.CallSubject(ctx, v.ID); got != (Call{}) {
+		t.Fatalf("after stop: %+v", got)
 	}
 	if !slices.Equal(c.running.asked, []shared.RecordingID{"rec-1", "rec-1", "rec-1"}) {
 		t.Fatalf("asked %v", c.running.asked)
@@ -186,8 +186,8 @@ func TestCallSubjectAfterStartFailureLogged(t *testing.T) {
 	c.links.err = errors.New(`read C:\Users\student\db: row "` + testCallLink + `"`)
 	c.links.mu.Unlock()
 
-	if got := c.svc.CallSubject(ctx, v.ID); got != "" {
-		t.Fatalf("CallSubject = %q, want none", got)
+	if got := c.svc.CallSubject(ctx, v.ID); got != (Call{}) {
+		t.Fatalf("CallSubject = %+v, want none", got)
 	}
 	logs := c.logs.String()
 	if strings.Count(logs, opCallSubject) != 1 || !strings.Contains(logs, "call links unread") {

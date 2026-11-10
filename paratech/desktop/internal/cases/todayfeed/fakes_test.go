@@ -118,9 +118,9 @@ type world struct {
 	ambiguous    map[string]bool // names several subjects have
 	subjectReads int             // calls of LookupSubjects
 	failSubjects error           // returned by LookupSubjects when set
-	callLinks    map[shared.SubjectID]subject.CallLink
-	linkReads    int   // calls of CallLinks
-	failLinks    error // returned by CallLinks when set
+	callLinks    map[shared.SubjectID]subject.CallLinks
+	linkReads    int   // calls of CallLinkSets
+	failLinks    error // returned by CallLinkSets when set
 	failReads    error // returned by the reads of the screen when set
 }
 
@@ -131,7 +131,7 @@ func newWorld(t *testing.T) *world {
 		recordings: map[shared.RecordingID]*recording.Recording{}, lessons: map[shared.LessonID]*lesson.Lesson{},
 		homework: map[shared.TranscriptID][]*assignment.Assignment{}, labels: map[shared.AssignmentID][2]string{},
 		subjects: map[string]subjectmatch.Match{}, ambiguous: map[string]bool{},
-		callLinks: map[shared.SubjectID]subject.CallLink{},
+		callLinks: map[shared.SubjectID]subject.CallLinks{},
 	}
 }
 
@@ -157,11 +157,17 @@ func (w *world) screen() *Screen {
 	return s
 }
 
-// addLesson stores a lesson of the schedule.
+// addLesson stores a lecture of the schedule.
 func (w *world) addLesson(id shared.LessonID, title, subject string, start time.Time) {
 	w.t.Helper()
+	w.addLessonOf(id, title, subject, lesson.KindLecture, start)
+}
+
+// addLessonOf stores a lesson of kind k of the schedule.
+func (w *world) addLessonOf(id shared.LessonID, title, subject string, k lesson.Kind, start time.Time) {
+	w.t.Helper()
 	l, err := lesson.New(lesson.Spec{ID: id, Content: lesson.Content{
-		Title: title, Subject: subject, Kind: lesson.KindLecture, Teacher: "Петров А. В.",
+		Title: title, Subject: subject, Kind: k, Teacher: "Петров А. В.",
 		Start: start, End: start.Add(80 * time.Minute), TimeZone: "Europe/Moscow",
 	}}, tNow.Add(-30*24*time.Hour))
 	if err != nil {
@@ -377,12 +383,12 @@ func (f worldSubjects) LookupSubjects(_ context.Context, names []string) (map[st
 
 type worldCallLinks struct{ w *world }
 
-func (f worldCallLinks) CallLinks(_ context.Context, ids []shared.SubjectID) (map[shared.SubjectID]subject.CallLink, error) {
+func (f worldCallLinks) CallLinkSets(_ context.Context, ids []shared.SubjectID) (map[shared.SubjectID]subject.CallLinks, error) {
 	if f.w.failLinks != nil {
 		return nil, f.w.failLinks
 	}
 	f.w.linkReads++
-	out := map[shared.SubjectID]subject.CallLink{}
+	out := map[shared.SubjectID]subject.CallLinks{}
 	for _, id := range ids {
 		if l, ok := f.w.callLinks[id]; ok {
 			out[id] = l

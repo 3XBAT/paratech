@@ -116,10 +116,10 @@ type LibraryUseCase interface {
 	PlacementHint(ctx context.Context, id shared.MaterialID) (library.Placement, error)
 	SetTeacher(ctx context.Context, id shared.SubjectID, role subject.TeacherRole, name, email string, expectedVersion int64) (*subject.Subject, error)
 	ClearTeacher(ctx context.Context, id shared.SubjectID, role subject.TeacherRole, expectedVersion int64) (*subject.Subject, error)
-	SetCallLink(ctx context.Context, id shared.SubjectID, link string) (*subject.Subject, error)
-	ClearCallLink(ctx context.Context, id shared.SubjectID) (*subject.Subject, error)
+	SetCallLinkOf(ctx context.Context, id shared.SubjectID, k subject.CallKind, link string) (*subject.Subject, error)
+	ClearCallLinkOf(ctx context.Context, id shared.SubjectID, k subject.CallKind) (*subject.Subject, error)
 	CreateSubjectWithCallLink(ctx context.Context, req library.NewSubject, link string) (*subject.Subject, error)
-	OpenCallLink(ctx context.Context, id shared.SubjectID) error
+	OpenJoinLink(ctx context.Context, id shared.SubjectID, lessonKind string) error
 }
 
 // MaterialFilePicker shows the native open dialog for a file of the library. It returns the chosen path, or "" when
@@ -150,7 +150,8 @@ type LibraryFolder struct {
 
 // LibrarySubject is a subject of the library. Semester is the code ("2026-autumn"), SemesterLabel the text shown
 // («Осень 2026»). Names are typed text: plain text only. Version is passed back to the teacher calls; Teachers holds
-// the three roles. CallLink is the link to the online class (TASK-364), null for none.
+// the three roles. CallLink is the general link to the online class (TASK-364), null for none; CallLinks has the
+// general link and the link of each lesson kind that has one (ADR-0032 addendum 2026-11-10).
 type LibrarySubject struct {
 	ID            string           `json:"id"`
 	Name          string           `json:"name"`
@@ -161,6 +162,7 @@ type LibrarySubject struct {
 	Version       int64            `json:"version"`
 	Teachers      LibraryTeachers  `json:"teachers"`
 	CallLink      *LibraryCallLink `json:"callLink"`
+	CallLinks     LibraryCallLinks `json:"callLinks"`
 }
 
 // LibraryMaterial is a file of the library. Name is the original file name, shown only (plain text). Type is "docx",
@@ -507,7 +509,7 @@ func librarySubject(sub *subject.Subject) LibrarySubject {
 	out := LibrarySubject{
 		ID: string(sub.ID()), Name: sub.Name().String(), Aliases: []string{}, Semester: sub.Semester().Code(),
 		SemesterLabel: sub.Semester().Label(), Folders: []LibraryFolder{}, Version: sub.Version(),
-		CallLink: libraryCallLink(sub.CallLink()),
+		CallLink: libraryCallLink(sub.CallLink()), CallLinks: libraryCallLinks(sub.CallLinks()),
 	}
 	ts := sub.Teachers()
 	out.Teachers = LibraryTeachers{

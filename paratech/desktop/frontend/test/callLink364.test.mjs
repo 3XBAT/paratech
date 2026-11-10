@@ -4,7 +4,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  callKindOfLesson,
+  callKinds,
   callLinkOpenProblems,
+  lessonCallLink,
   callLinkProblems,
   createWithCallLinkProblems,
   libraryApi,
@@ -50,7 +53,7 @@ test("a subject carries its link; none or a malformed one is null", () => {
   }
 });
 
-test("set, clear and open pass only the subject id (and the typed text to set) and read the replies", async () => {
+test("set and clear pass the kind, open the lesson kind; only the id and the typed text cross; the replies are read", async () => {
   const calls = [];
   const api = libraryApi(async (method, ...args) => {
     calls.push([method, ...args]);
@@ -59,17 +62,101 @@ test("set, clear and open pass only the subject id (and the typed text to set) a
     }
     return { problem: "", subject: subject({ version: 4, callLink: method === methods.clearSubjectCallLink ? null : link }) };
   });
-  const set = await api.setSubjectCallLink("s1", " https://meet.example.org/j/1?pwd=FakePwd42 ");
+  const set = await api.setSubjectCallLink("s1", "general", " https://meet.example.org/j/1?pwd=FakePwd42 ");
   assert.equal(set.problem, "");
   assert.deepEqual(set.subject.callLink, link);
-  const cleared = await api.clearSubjectCallLink("s1");
+  const cleared = await api.clearSubjectCallLink("s1", "lecture");
   assert.equal(cleared.subject.callLink, null);
-  assert.deepEqual(await api.openSubjectCallLink("s1"), { problem: "" });
+  assert.deepEqual(await api.openSubjectCallLink("s1", "practice"), { problem: "" });
+  assert.deepEqual(await api.openSubjectCallLink("s1", ""), { problem: "" });
   assert.deepEqual(calls, [
-    [methods.setSubjectCallLink, "s1", " https://meet.example.org/j/1?pwd=FakePwd42 "],
-    [methods.clearSubjectCallLink, "s1"],
-    [methods.openSubjectCallLink, "s1"],
+    [methods.setSubjectCallLink, "s1", "general", " https://meet.example.org/j/1?pwd=FakePwd42 "],
+    [methods.clearSubjectCallLink, "s1", "lecture"],
+    [methods.openSubjectCallLink, "s1", "practice"],
+    [methods.openSubjectCallLink, "s1", ""],
   ]);
+});
+
+test("a subject carries its links by kind: set ones only, unknown keys ignored, a malformed entry dropped (TASK-432)", () => {
+  const other = { link: "https://meet.example.org/j/2", host: "meet.example.org" };
+  assert.deepEqual(parseSubject(subject({ callLinks: {} })).callLinks, {});
+  assert.deepEqual(parseSubject(subject({ callLinks: { general: link, lecture: other } })).callLinks, { general: link, lecture: other });
+  assert.deepEqual(
+    parseSubject(subject({ callLinks: { seminar: other, lab: link, practice: link, extra: 1 } })).callLinks,
+    { seminar: other, lab: link },
+    "an unknown key is ignored",
+  );
+  assert.deepEqual(
+    parseSubject(subject({ callLinks: { general: link, lecture: { link: "https://a.example.org" }, seminar: "x", lab: null } })).callLinks,
+    { general: link },
+    "a malformed entry is dropped like a malformed single link",
+  );
+  // A reply without the field (older core) or with a wrong type is an empty object; callLink stays what it was.
+  const old = subject();
+  assert.deepEqual(parseSubject(old).callLinks, {});
+  assert.deepEqual(parseSubject(old).callLink, link);
+  for (const raw of [null, "x", [], 5]) {
+    assert.deepEqual(parseSubject(subject({ callLinks: raw })).callLinks, {}, JSON.stringify(raw));
+  }
+});
+
+test("the link a lesson opens: its kind, else the general one; practice takes the seminar link (TASK-432)", () => {
+  const lecture = { link: "https://meet.example.org/lec", host: "meet.example.org" };
+  const seminar = { link: "https://meet.example.org/sem", host: "meet.example.org" };
+  const s = parseSubject(subject({ callLinks: { general: link, lecture, seminar } }));
+  assert.deepEqual(lessonCallLink(s, "lecture"), { kind: "lecture", link: lecture });
+  assert.deepEqual(lessonCallLink(s, "seminar"), { kind: "seminar", link: seminar });
+  assert.deepEqual(lessonCallLink(s, "practice"), { kind: "seminar", link: seminar });
+  assert.deepEqual(lessonCallLink(s, "lab"), { kind: "general", link }, "no lab link: the general one");
+  assert.deepEqual(lessonCallLink(s, "unknown"), { kind: "general", link });
+  assert.deepEqual(lessonCallLink(s, ""), { kind: "general", link });
+  const only = parseSubject(subject({ callLink: null, callLinks: { lecture } }));
+  assert.equal(lessonCallLink(only, "seminar"), null, "a seminar never takes the lecture link");
+  assert.equal(lessonCallLink(only, ""), null);
+  // A subject with only the single general field (no callLinks) still answers with it.
+  assert.deepEqual(lessonCallLink({ callLink: link }, "lecture"), { kind: "general", link });
+  assert.deepEqual(callKinds, ["general", "lecture", "seminar", "lab"]);
+});
+
+test("the call kinds and the lesson-kind mapping mirror the Go domain (calllinks.go)", () => {
+  const go = readFileSync(new URL("../../internal/domain/library/subject/calllinks.go", import.meta.url), "utf8");
+
+  // const ( CallGeneral CallKind = "general" ... )
+  const goKinds = [...go.matchAll(/^\s+Call\w+\s+CallKind\s*=\s*"([^"]*)"/gm)].map((m) => m[1]);
+  assert.ok(goKinds.length > 0, "calllinks.go: no CallKind constants found; the Go shape changed, update this test");
+  assert.deepEqual([...callKinds].sort(), [...goKinds].sort(), "callKinds differs from the Go CallKind constants");
+
+  // Go constant name -> code, so the switch below can be read by names.
+  const codeOf = Object.fromEntries([...go.matchAll(/^\s+(Call\w+)\s+CallKind\s*=\s*"([^"]*)"/gm)].map((m) => [m[1], m[2]]));
+
+  const fn = go.match(/func CallKindOfLesson\([^)]*\)\s*CallKind\s*\{([\s\S]*?)\n\}/);
+  assert.ok(fn, "calllinks.go: func CallKindOfLesson not found; the Go shape changed, update this test");
+  const body = fn[1];
+  assert.match(body, /switch\s+\w+\s*\{/, "CallKindOfLesson is no longer a switch; update this test");
+
+  // Each `case "a", "b":` followed by `return CallX`; `default:` followed by `return CallX`.
+  const goMap = {};
+  let cases = 0;
+  for (const m of body.matchAll(/case\s+((?:"[^"]*"\s*,?\s*)+):\s*return\s+(Call\w+)/g)) {
+    const code = codeOf[m[2]];
+    assert.ok(code !== undefined, `CallKindOfLesson returns an unknown constant ${m[2]}`);
+    for (const lessonKind of m[1].matchAll(/"([^"]*)"/g)) {
+      goMap[lessonKind[1]] = code;
+    }
+    cases++;
+  }
+  const dflt = body.match(/default:\s*return\s+(Call\w+)/);
+  assert.ok(cases > 0 && dflt, "CallKindOfLesson: cases or default not parsed; the Go shape changed, update this test");
+  const goDefault = codeOf[dflt[1]];
+  assert.ok(goDefault !== undefined, `CallKindOfLesson default returns an unknown constant ${dflt[1]}`);
+
+  assert.deepEqual(goMap, { lecture: "lecture", seminar: "seminar", practice: "seminar", lab: "lab" }, "Go mapping changed: update the UI mirror and this test");
+  for (const [lessonKind, kind] of Object.entries(goMap)) {
+    assert.equal(callKindOfLesson(lessonKind), kind, `callKindOfLesson(${JSON.stringify(lessonKind)})`);
+  }
+  for (const other of ["", "unknown", "weird", "toString", "Lecture"]) {
+    assert.equal(callKindOfLesson(other), goDefault, `callKindOfLesson(${JSON.stringify(other)}) must be the Go default`);
+  }
 });
 
 test("problem codes are read as they are; an unknown, malformed or failed reply is «failed»", async () => {
@@ -88,9 +175,9 @@ test("problem codes are read as they are; an unknown, malformed or failed reply 
   const api = libraryApi(async () => {
     throw new Error("boom");
   });
-  assert.deepEqual(await api.setSubjectCallLink("s1", "x"), { problem: "failed", subject: null });
-  assert.deepEqual(await api.clearSubjectCallLink("s1"), { problem: "failed", subject: null });
-  assert.deepEqual(await api.openSubjectCallLink("s1"), { problem: "failed" });
+  assert.deepEqual(await api.setSubjectCallLink("s1", "general", "x"), { problem: "failed", subject: null });
+  assert.deepEqual(await api.clearSubjectCallLink("s1", "general"), { problem: "failed", subject: null });
+  assert.deepEqual(await api.openSubjectCallLink("s1", ""), { problem: "failed" });
 });
 
 test("createSubjectWithCallLink: the name and the link cross in one call; the problems match the Go binding", async () => {
@@ -158,6 +245,16 @@ test("a lesson of «Сегодня» carries its library subject and the host of
   const go = readFileSync(new URL("../../internal/input/wails/today.go", import.meta.url), "utf8");
   for (const field of ["subjectState", "subjectId", "subjectName", "hasCallLink", "callLinkHost"]) {
     assert.match(go, new RegExp(`json:"${field}"`), field);
+  }
+});
+
+test("a lesson of «Сегодня» tells which link it opens (TASK-432); missing, empty or unknown is none", () => {
+  const base = { id: "l1", title: "Физика", subject: "Физика", kind: "lecture", teacher: "", start: "", end: "", post: null, subjectId: "s1" };
+  for (const k of ["general", "lecture", "seminar", "lab"]) {
+    assert.equal(parseLesson({ ...base, hasCallLink: true, callLinkHost: "h", callLinkKind: k }).callLinkKind, k, k);
+  }
+  for (const k of [undefined, "", "practice", "weird", "toString", 1, null]) {
+    assert.equal(parseLesson({ ...base, callLinkKind: k }).callLinkKind, "", String(k));
   }
 });
 

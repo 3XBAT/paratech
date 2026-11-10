@@ -2,6 +2,8 @@
 // headlines and recipients are imported or model text: show them as text nodes only. The Go errors are fixed Russian
 // texts; only a text from the list below is shown, anything else gets a generic one.
 
+// The .js extension lets the Node test runner load the compiled module; TypeScript and Vite map it to the .ts file.
+import { callKinds, type CallKind } from "./library.js";
 import type { CallByName } from "./settings";
 
 const service = "paratech/desktop/internal/input/wails.TodayService";
@@ -86,14 +88,16 @@ export interface TodayLesson {
   subjectState: SubjectState;
   /**
    * TASK-364: the library subject the lesson resolves to, set only for subjectState "known": the other lessons have no
-   * place to keep a call link. «Подключиться» is library openSubjectCallLink(subjectId), «Добавить ссылку» library
-   * setSubjectCallLink(subjectId, text).
+   * place to keep a call link. «Подключиться» is library openSubjectCallLink(subjectId, kind), «Добавить ссылку» library
+   * setSubjectCallLink(subjectId, "general", text).
    */
   subjectId: string;
   subjectName: string;
-  /** The subject keeps a call link; its host is callLinkHost (the link itself never reaches this screen). */
+  /** The link THIS lesson's kind opens exists; its host is callLinkHost (the link itself never reaches this screen). */
   hasCallLink: boolean;
   callLinkHost: string;
+  /** TASK-432: which link that is (the kind's own or the general one); "" for none. */
+  callLinkKind: CallKind | "";
   kind: string;
   teacher: string;
   start: string;
@@ -238,6 +242,11 @@ function parseSubjectState(r: Record<string, unknown>, subjectId: string): Subje
   return st === "known" && subjectId === "" ? "unavailable" : st;
 }
 
+/** The kind of the link a lesson opens; missing, empty or a value this page does not know is "". */
+function parseCallLinkKind(v: unknown): CallKind | "" {
+  return typeof v === "string" && callKinds.includes(v as CallKind) ? (v as CallKind) : "";
+}
+
 export function parseLesson(raw: unknown): TodayLesson {
   const w = "lesson";
   const r = record(raw, w);
@@ -252,6 +261,7 @@ export function parseLesson(raw: unknown): TodayLesson {
     subjectName: r.subjectName === undefined ? "" : str(r, "subjectName", w),
     hasCallLink: r.hasCallLink === undefined ? false : bool(r, "hasCallLink", w),
     callLinkHost: r.callLinkHost === undefined ? "" : str(r, "callLinkHost", w),
+    callLinkKind: parseCallLinkKind(r.callLinkKind),
     kind: str(r, "kind", w),
     teacher: str(r, "teacher", w),
     start: str(r, "start", w),

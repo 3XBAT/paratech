@@ -10,6 +10,7 @@ import (
 
 	"paratech/desktop/internal/domain/library/services/subjectmatch"
 	"paratech/desktop/internal/domain/library/subject"
+	"paratech/desktop/internal/domain/schedule/lesson"
 )
 
 // fakeLink is a made-up call link with a meeting password; it must never reach the log.
@@ -44,7 +45,7 @@ func TestTodayLessonsCarrySubjectAndCallLink(t *testing.T) {
 	w.addLesson("l-chem", "Химия", "Химия", at(21, 16, 0))
 	w.subjects["Химия"] = subjectmatch.Match{ID: "subj-chem", Name: "Химия"}
 	link := mustLink(t)
-	w.callLinks["subj-math"] = link
+	w.callLinks["subj-math"] = subject.CallLinks{General: link}
 
 	got, err := w.screen().Today(context.Background())
 	if err != nil {
@@ -55,18 +56,75 @@ func TestTodayLessonsCarrySubjectAndCallLink(t *testing.T) {
 	}
 	math, phys, chem := got.Lessons[0], got.Lessons[1], got.Lessons[2]
 	if math.SubjectState != SubjectKnown || math.SubjectID != "subj-math" || math.SubjectName != "Математический анализ" ||
-		math.CallLink != link {
-		t.Errorf("math = %q %q %q %v", math.SubjectState, math.SubjectID, math.SubjectName, math.CallLink)
+		math.CallLink != link || math.CallLinkKind != subject.CallGeneral {
+		t.Errorf("math = %q %q %q %v %q", math.SubjectState, math.SubjectID, math.SubjectName, math.CallLink, math.CallLinkKind)
 	}
 	if phys.SubjectState != SubjectUnknown || phys.SubjectID != "" || phys.SubjectName != "" || !phys.CallLink.IsZero() {
 		t.Errorf("physics, no library subject = %q %q %q %v", phys.SubjectState, phys.SubjectID, phys.SubjectName, phys.CallLink)
 	}
-	if chem.SubjectState != SubjectKnown || chem.SubjectID != "subj-chem" || !chem.CallLink.IsZero() {
+	if chem.SubjectState != SubjectKnown || chem.SubjectID != "subj-chem" || !chem.CallLink.IsZero() || chem.CallLinkKind != "" {
 		t.Errorf("chemistry, no link = %q %q %v", chem.SubjectState, chem.SubjectID, chem.CallLink)
 	}
 	if w.subjectReads != 1 || w.linkReads != 1 {
 		t.Errorf("LookupSubjects read %d times, CallLinks %d; want once each", w.subjectReads, w.linkReads)
 	}
+}
+
+// A lesson card carries the link its kind opens (ADR-0032 addendum 2026-11-10): the kind's link, else the general
+// one, else none; practice takes the seminar link, an unknown kind the general one, and a seminar never the lecture's.
+func TestTodayLessonCallLinkByKind(t *testing.T) {
+	general := parseLink(t, "https://general.example.org/j/1")
+	lecture := parseLink(t, "https://lecture.example.org/j/2")
+	seminar := parseLink(t, "https://seminar.example.org/j/3")
+	tests := []struct {
+		name     string
+		kind     lesson.Kind
+		links    subject.CallLinks
+		wantLink subject.CallLink
+		wantKind subject.CallKind
+	}{
+		{"lecture with its own link", lesson.KindLecture, subject.CallLinks{General: general, Lecture: lecture},
+			lecture, subject.CallLecture},
+		{"seminar with only the general", lesson.KindSeminar, subject.CallLinks{General: general, Lecture: lecture},
+			general, subject.CallGeneral},
+		{"seminar never takes the lecture", lesson.KindSeminar, subject.CallLinks{Lecture: lecture},
+			subject.CallLink{}, ""},
+		{"lab without links", lesson.KindLab, subject.CallLinks{}, subject.CallLink{}, ""},
+		{"practice takes the seminar", lesson.KindPractice, subject.CallLinks{General: general, Seminar: seminar},
+			seminar, subject.CallSeminar},
+		{"unknown kind takes the general", lesson.KindUnknown,
+			subject.CallLinks{General: general, Lecture: lecture, Seminar: seminar}, general, subject.CallGeneral},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newWorld(t)
+			w.addLessonOf("l-chem", "Химия", "Химия", tt.kind, at(21, 16, 0))
+			w.subjects["Химия"] = subjectmatch.Match{ID: "subj-chem", Name: "Химия"}
+			if !tt.links.IsZero() {
+				w.callLinks["subj-chem"] = tt.links
+			}
+
+			got, err := w.screen().Today(context.Background())
+			if err != nil || len(got.Lessons) != 1 {
+				t.Fatalf("Today = %+v, %v", got.Lessons, err)
+			}
+			l := got.Lessons[0]
+			if l.SubjectID != "subj-chem" || l.Kind != tt.kind.String() || l.CallLink != tt.wantLink ||
+				l.CallLinkKind != tt.wantKind {
+				t.Errorf("lesson = %q %q %v %q; want %v %q", l.SubjectID, l.Kind, l.CallLink, l.CallLinkKind,
+					tt.wantLink, tt.wantKind)
+			}
+		})
+	}
+}
+
+func parseLink(t *testing.T, s string) subject.CallLink {
+	t.Helper()
+	l, err := subject.ParseCallLink(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l
 }
 
 // Each state of the subject string is told apart: none, unknown, several subjects, one.
@@ -113,7 +171,7 @@ func TestTodayLibraryUnreadKeepsTheDay(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			w := day(t)
 			w.addLesson("l-free", "Окно", "", at(21, 18, 0))
-			w.callLinks["subj-math"] = mustLink(t)
+			w.callLinks["subj-math"] = subject.CallLinks{General: mustLink(t)}
 			tt.setUp(w)
 			s, logs := loggingScreen(t, w)
 

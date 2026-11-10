@@ -298,28 +298,3 @@ func TestOpenCallLinkFailures(t *testing.T) {
 		})
 	}
 }
-
-func TestCallLinks(t *testing.T) {
-	e, ctx := newEnv(t), context.Background()
-	phys := createSubject(t, e, "Физика")
-	chem := createSubject(t, e, "Химия")
-	bio := createSubject(t, e, "Биология")
-	for _, id := range []shared.SubjectID{phys.ID(), bio.ID()} {
-		if _, err := e.svc.SetCallLink(ctx, id, callLink); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	got, err := e.svc.CallLinks(ctx, []shared.SubjectID{phys.ID(), chem.ID(), "nope"})
-	if err != nil || len(got) != 1 || got[phys.ID()].String() != callLink {
-		t.Fatalf("CallLinks = %v, %v", got, err)
-	}
-	if got, err := e.svc.CallLinks(ctx, nil); err != nil || len(got) != 0 {
-		t.Fatalf("CallLinks(none) = %v, %v", got, err)
-	}
-
-	e.subjects.err = errors.New("disk full")
-	if _, err := e.svc.CallLinks(ctx, []shared.SubjectID{phys.ID()}); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("CallLinks on a failing store = %v", err)
-	}
-}
