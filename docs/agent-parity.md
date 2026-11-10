@@ -1,253 +1,211 @@
 # Agent parity: what the student can do in the UI and what the agent can do
 
-- **Date:** 2026-10-28 (catalog 8 on master; TASK-308 was the latest task; owner answers the same day, tasks from
-  TASK-309)
-- **Rule and mechanics:** [ADR-0033](adr/0033-agent-parity.md). Classes: ADR-0021 (`actionpolicy`).
-- **Source of the rows:** every exported method of the services in `paratech/desktop/internal/input/wails/*.go`
-  (a binding = a UI action), the pages in `paratech/desktop/frontend/src/pages/`, and the pending tasks that add
-  bindings (marked «TASK-NNN, в работе»).
+- **Date:** 2026-11-10 (catalog 10 built on the Hub, TASK-326 switches the desktop; owner 10.11 «агент может всё»,
+  ADR-0038; tasks from TASK-431). Previous audit: 2026-10-28.
+- **Rules:** [ADR-0033](adr/0033-agent-parity.md) (classes, waves, cards), [ADR-0038](adr/0038-agent-can-do-everything.md)
+  (everything except the closed list of UI-only reasons, §2 there). Classes: ADR-0021 (`actionpolicy`).
+- **Source of the rows:** every exported method of `paratech/desktop/internal/input/wails/*.go` on 2026-11-10 (a
+  binding = a UI action), the pages in `paratech/desktop/frontend/src/pages/`, and pending tasks that add bindings
+  («TASK-NNN, в работе»). Bindings added after 28.10 are marked *new*.
 
 Legend
-- **Class** — what the action is, not what exists today: **R** read; **U** reversible local change, the agent
-  does it at once with «Отменить»; **C** the agent only proposes, the student's click («Да» or the card button) runs it
-  (irreversible, external, or a batch the desktop builds); **UI** card or control only; **только UI** — stays a manual
-  action (reason in the notes); with *кнопка* the agent can still show the page's own button on a card
-  (`offer_button`, ADR-0033), and the student's click is the action.
+- **Class** — what the action is: **R** read; **U** reversible local change, done at once with «Отменить»; **C** the
+  agent proposes a card, the student's click («Да» or the card button) runs it; **UI** a card or control only;
+  **только UI (n)** — stays manual for reason *n* of ADR-0038 §2; *кнопка* — the agent can show the page's own button
+  (`offer_button`).
 - **«Да» / план** — **—** none; **план** = a plan card with one «Да» (a second write, a costly paid job, replacing a
-  ready result, `AlwaysPlan`); **«Да»** = a confirmation card per effect; **клик** = the button itself is the consent.
+  ready result); **«Да»** = a confirmation card; **клик** = the button itself is the consent.
+- **Волна** — the catalog that brings the tool: **≤9** done, **10** TASK-326, **11**, **12**, **13** (waits for a
+  feature task); **—** never (UI-only).
 - Paid U jobs: one cheap job (≤ $0.05) without a plan; above it a plan (ADR-0021; ADR-0033 О-1 а).
-- **Волна** — the catalog that brings the tool (ADR-0033 §10, §11): **10**, **11**; empty = later or never.
 
 ## 1. Предметы и папки
 
-| Действие в UI | Binding | Инструмент агента сейчас | Класс | «Да» / план | Notes |
-|---|---|---|---|---|---|
-| Список предметов | `LibraryService.Subjects` | `list_subjects` | R | — | |
-| Обзор предмета | `LibraryService.SubjectOverview`, `MarkSubjectOpened` | частично: `list_subjects`, `find_lessons`, `list_assignments` | R | — | `MarkSubjectOpened` is view state, not an action |
-| Создать предмет | `LibraryService.CreateSubject` | `create_subject` (без написаний) | U | 2-я запись → план | |
-| **Завести предметы из расписания** | нет (по одному: `Suggestions` + `CreateSubject` / `AddAlias`) | нет → `propose_subjects_from_schedule` (10) | C (пакет) | один «Да» | gap P1; the desktop builds the list, see §11; doubtful rows merged by default (О-12 б) |
-| Подсказки «предмет из расписания» | `LibraryService.Suggestions` | нет | R | — | result to the planner: IDs and counters only, never the strings (ADR-0022) |
-| Добавить написание (алиас) | `LibraryService.AddAlias` | нет | U | 2-я запись → план | the alias is a suggestion ID, never model text |
-| Создать папку | `LibraryService.CreateFolder` | `create_folder` | U | 2-я запись → план | |
-| Удалить пустую папку | `LibraryService.RemoveFolder` | нет | U | — | Undo re-creates the folder with the same ID |
-| Удалить пустой предмет | `LibraryService.RemoveSubject` | нет (только «Отменить» у `create_subject`) | U | — | |
-| Удалить предмет с конспектами и файлами, «Вернуть» 3 дня | TASK-288/289, в работе | нет | U | план всегда | hides N notes and M files; Undo = restore within the window |
-| Лектор / семинарист / лабораторные: задать, очистить | `LibraryService.SetSubjectTeacher`, `ClearSubjectTeacher` | нет → `set_teacher` (11) | C | «Да» с точным адресом | О-4 в: the model passes the address; validated, never logged |
-| Ссылка на звонок у предмета: вписать, убрать | TASK-259/261/264, в работе | нет → `set_call_link` (11) | C | «Да» с точной ссылкой | О-4 в |
+| Действие в UI | Binding | Инструмент агента | Класс | «Да» / план | Волна | Notes |
+|---|---|---|---|---|---|---|
+| Список предметов | `LibraryService.Subjects` | `list_subjects` | R | — | ≤9 | catalog ≥ 11: `call_links` per kind instead of `call_link` |
+| Обзор предмета | `SubjectOverview`, `MarkSubjectOpened` *new* | `list_subjects`, `find_lessons`, `list_assignments` | R | — | ≤9 | `MarkSubjectOpened` is view state |
+| Создать предмет | `CreateSubject` | `create_subject` | U | 2-я запись → план | ≤9 | |
+| Завести предметы из расписания | `ScheduleSubjects`, `CreateFromSchedule`, `UndoFromSchedule` *new* | `propose_subjects_from_schedule` | C (пакет) | один «Да» | 10 | |
+| Подсказки «предмет из расписания» | `Suggestions` | via `add_alias` (TASK-329) | R | — | 11 | IDs and counters only |
+| Добавить написание (алиас) | `AddAlias` | `add_alias` | U | — | 11 | TASK-329; a suggestion ID, never model text |
+| Создать папку | `CreateFolder` | `create_folder` | U | 2-я запись → план | ≤9 | |
+| Удалить пустую папку | `RemoveFolder` | `remove_folder` | U | — | 11 | TASK-329 |
+| Удалить пустой предмет | `RemoveSubject` | `remove_subject` | U | — | 11 | TASK-329 |
+| Удалить предмет с конспектами и файлами / «Вернуть» | `DiscardSubject`, `RestoreSubject` *new* | `remove_subject` (Undo = restore) | U | план всегда | 11 | TASK-329 |
+| Лектор / семинарист / лабораторные | `SetSubjectTeacher`, `ClearSubjectTeacher` | `set_teacher`, `clear_teacher` | C | «Да» с точным адресом | 11 | TASK-327 specs, TASK-438 cards |
+| **Ссылки на пару: общая и по типу пары** | `SetSubjectCallLink`, `ClearSubjectCallLink`, `CreateSubjectWithCallLink` *new*; по типу — TASK-431/432 | `set_call_links` (пакет строк) | C (пакет) | один «Да», точные ссылки | 11 | ADR-0038 §4: the model extracts rows from the student's text; skipped rows with reasons (очно, не подтверждена, нет предмета, не ссылка, две разные) |
+| «Подключиться» | `OpenSubjectCallLink` *new* | `offer_button{open_call_link}` | UI, *кнопка* | клик | 11 | link of the lesson's kind, else general (TASK-436) |
 
 ## 2. Файлы (библиотека)
 
-| Действие в UI | Binding | Инструмент агента сейчас | Класс | «Да» / план | Notes |
-|---|---|---|---|---|---|
-| Добавить файл через диалог | `LibraryService.ImportFile` | — | только UI, *кнопка* | клик | native open dialog; in the panel a dropped file is an upload |
-| Перетащить файл в окно / в панель | `librarydrop`, `AgentPanel.Attach` | `inspect_upload` | R (платно) | — | |
-| Список файлов предмета / «Входящие» | `LibraryService.Materials` | нет | R | — | IDs, type, counters; no file names (ADR-0022) |
-| Разложить в папку предмета | `LibraryService.Place` | `place_upload` (только из «Входящих») | U | 2-я запись → план | moving a filed material between folders: no tool |
-| Вернуть во «Входящие» | `LibraryService.MoveToInbox` | нет (только «Отменить» у `place_upload`) | U | — | |
-| Привязать к паре / отвязать | `LibraryService.Link`, `Unlink` | `link_material` / нет | U | — | |
-| Удалить файл / вернуть | `LibraryService.RemoveMaterial`, `RestoreMaterial` | нет | U | — | soft delete, the blob is kept |
-| Открыть файл в Word/PowerPoint | `LibraryService.OpenMaterial` | нет | UI, *кнопка* | клик | starts an external program |
+| Действие в UI | Binding | Инструмент агента | Класс | «Да» / план | Волна | Notes |
+|---|---|---|---|---|---|---|
+| Добавить файл через диалог | `ImportFile`, `ImportFileTo` *new* | — | только UI (4), *кнопка* | клик | — | a file dropped in the panel is an upload |
+| Перетащить файл в окно / в панель | `librarydrop`, `AgentPanel.Attach` | `inspect_upload` | R (платно) | — | ≤9 | |
+| Список файлов предмета / «Входящие» | `Materials` | `list_materials` | R | — | 11 | TASK-439; IDs, type, folder, counters; no names |
+| Подсказка, куда положить | `PlacementHint` *new* | in `list_materials` rows (subject and folder IDs) | R | — | 11 | TASK-439 |
+| Пары в папках предмета | `KnowledgeBaseService.FolderLessons` (TASK-429) | `find_lessons` | R | — | ≤9 | view only |
+| Разложить из «Входящих» | `Place` | `place_upload` | U | 2-я запись → план | ≤9 | |
+| Перенести разложенный файл | `Place` | `move_material` | U | — | 11 | TASK-439; Undo = previous place |
+| Вернуть во «Входящие» | `MoveToInbox` | `move_to_inbox` | U | — | 11 | TASK-329 |
+| Привязать к паре / отвязать | `Link`, `Unlink` | `link_material` / `unlink_material` | U | — | ≤9 / 11 | |
+| Удалить файл / вернуть | `RemoveMaterial`, `RestoreMaterial` | `remove_material` | U | — | 11 | TASK-329 |
+| Открыть файл в Word/PowerPoint | `OpenMaterial` | `offer_button{open_material}` | UI, *кнопка* | клик | 10 | |
 
 ## 3. «Мой конспект»
 
-| Действие в UI | Binding | Инструмент агента сейчас | Класс | «Да» / план | Notes |
-|---|---|---|---|---|---|
-| Конспекты пары / предмета | `NotesService.ForLesson`, `ForSubject` | нет | R | — | IDs, anchor date and kind, part counters; no titles |
-| Добавить файлы к паре | `NotesService.AddFiles` (диалог) | нет | U для файла из панели; диалог — только UI | — | gap P3: an upload dropped in the panel becomes a part |
-| Вставить текст / «запиши в конспект: …» | `NotesService.Paste` | нет → `note{add_text}` (10) | U | — | О-5 в: the model passes the text; the result line shows it with «Отменить» |
-| Написать / править текст, «Вернуть предыдущую версию» | TASK-291/292, в работе | нет | только UI | — | editor with autosave; the agent only appends a new text part |
-| Заменить файл / отменить замену | `NotesService.ReplaceFile`, `UndoReplace` | нет | U | — | from an upload |
-| Порядок частей | `NotesService.Reorder` | нет | только UI | — | drag and drop; low value for the agent |
-| Перенести к другой паре / дню | `NotesService.Reanchor` | нет | U | — | |
-| Переименовать | `NotesService.Retitle` | нет | U | — | the label is the student's words (as `create_assignment.title`) |
-| Удалить / вернуть конспект | `NotesService.Remove`, `Restore` | нет | U | — | soft |
-| Удалить навсегда | ADR-0027, не построено | нет | C | «Да» | purges blobs |
-| Распознать фото (Windows OCR) / «Принять» текст | TASK-167/169, в работе | нет | U / только UI | — | «Принять» stays manual: the student reviews the text |
+| Действие в UI | Binding | Инструмент агента | Класс | «Да» / план | Волна | Notes |
+|---|---|---|---|---|---|---|
+| Конспекты пары / предмета | `NotesService.ForLesson`, `ForSubject` | `list_notes` | R | — | 10 | catalog 12: part IDs for `note{lesson}` |
+| Добавить файлы | `AddFiles` (диалог) | `note{add_upload}` | U; диалог — только UI (4) | — | 10 | |
+| «Запиши в конспект: …» / вставить | `Paste` | `note{add_text}` | U | — | 10 | the student's words verbatim |
+| Писать / править текст | TASK-291/292, в работе | `note{replace_text}` | U | — | 13 | TASK-453; Undo = previous revision |
+| Заменить файл / отменить замену | `ReplaceFile`, `UndoReplace` | `note{replace_file}` | U | — | 12 | TASK-452 |
+| Порядок частей | `Reorder` | `note{reorder}` | U | — | 12 | TASK-452 |
+| Перенести, переименовать, удалить / вернуть | `Reanchor`, `Retitle`, `Remove`, `Restore` | `note{move, rename, remove}` | U | — | 10 | |
+| Удалить навсегда | ADR-0027, не построено | — | C | «Да» | — | row when it is built |
+| Распознать фото / «Принять» текст | TASK-167/169, в работе | — / только UI (5) | U / только UI (5) | — | — | «Принять» is the student's review |
 
 ## 4. Задания
 
-| Действие в UI | Binding | Инструмент агента сейчас | Класс | «Да» / план | Notes |
-|---|---|---|---|---|---|
-| Список заданий | `HomeworkService.ListAssignments` | `list_assignments` | R | — | |
-| Открыть задание | `HomeworkService.OpenAssignment` | частично: `reply.assignments` (карточка) | R | — | |
-| Добавить задание | `HomeworkService.CreateAssignment` | `create_assignment` | U | 2-я → план | |
-| Изменить название, заметку, срок, предмет | `HomeworkService.EditAssignment` | `edit_due` (только срок) → `change_assignment{edit}` (10) | U | — | dispatch done in TASK-320, served with catalog 10 (TASK-326) |
-| Удалить / «Вернуть» (3 дня) | `HomeworkService.DeleteAssignment`, `RestoreAssignment` | нет → `change_assignment{delete, restore}` (10) | U; с событием в Google — C | с событием — «Да» (О-6 б) | dispatch and the `delete_assignment` card done in TASK-320, served with catalog 10 (TASK-326); the agent can restore only what it deleted in this chat (no list of deleted ones, ADR-0029 C-2) |
-| **Отметить «Выполнено» / «Вернуть в работу»** | нет (ADR-0033 §9, новое) | нет → `mark_assignments_done` (10, списком) | U | — | dispatch done in TASK-320, served with catalog 10 (TASK-326); a done assignment leaves «Сегодня» and «Горит», stays in the list («Выполненные») and history; Google event unchanged (О-13) |
-| Выполненные задания (фильтр) | нет (ADR-0033 §9) | `list_assignments{state}` (10) | R | — | dispatch done in TASK-320, served with catalog 10 (TASK-326) |
-| Исправить предмет / преподавателя у извлечённого | `HomeworkService.CorrectLesson` | нет | U | — | subject: through `edit_assignment`; the teacher text stays manual (ADR-0030) |
-| Предложить срок в Google Календарь | `AgentConfirmService.ProposeDeadline` | `propose_deadline` | C | «Да» | |
-| «Обновить событие в Google Календаре?» после правки срока | TASK-277/279, в работе | нет (агентский `edit_due` обновляет сам, C-4) | C | «Да» (только в UI) | О-2 а: the agent's change updates the event without asking |
-| Быстрый черновик | `HomeworkService.Generate` | нет (убран из агента, владелец 2026-10-26) | U (платно) | — | stays UI by the owner's decision |
-| Правка черновика | `HomeworkService.EditDraft` | — | только UI | — | the student's text in the editor |
-| Версии и статус черновика | `DraftVersion`, `DraftStatus`, `GenerationStatus` | `job_status` | R | — | |
-| Сохранить DOCX / экспорт | `ExportDraft`, `ExportDocx`, `SaveDocx` | нет | только UI, *кнопка* | клик | «Сохранить как» only (ADR-0022) |
+| Действие в UI | Binding | Инструмент агента | Класс | «Да» / план | Волна | Notes |
+|---|---|---|---|---|---|---|
+| Список, открыть | `ListAssignments`, `OpenAssignment` | `list_assignments`, `reply.assignments` | R | — | ≤9 | |
+| Добавить | `CreateAssignment` | `create_assignment` | U | 2-я → план | ≤9 | |
+| Изменить, удалить, вернуть | `EditAssignment`, `DeleteAssignment`, `RestoreAssignment`, `DeleteImpact` *new* | `change_assignment` | U; с событием в Google — C | с событием — «Да» | 10 | `DeleteImpact` feeds the card |
+| «Выполнено» / «Вернуть в работу» | `MarkDone`, `RestoreDone` *new* | `mark_assignments_done` | U | — | 10 | |
+| Исправить предмет у извлечённого | `CorrectLesson` | `change_assignment{edit, subject}` | U | — | 10 | |
+| Исправить преподавателя у извлечённого | `CorrectLesson` | `change_assignment{edit, teacher}` | U | — | 12 | TASK-452; a label, never an address |
+| Срок в Google Календарь | `AgentConfirmService.ProposeDeadline` | `propose_deadline` | C | «Да» или разрешение | ≤9 | |
+| «Обновить событие?» после правки срока | TASK-277/279, в работе | агент обновляет сам (C-4) | C | — | ≤9 | |
+| «Сделать задание» (короткий ответ или под ключ) | `HomeworkService.Generate`; `DoAssignment` (TASK-411) | `do_assignment` | U (платно) | план для работы под ключ | 12 | TASK-452 after TASK-411, ADR-0038 О-5 |
+| Правка черновика | `EditDraft` | — («Переписать» с указаниями) | только UI (5) | — | — | the agent rewrites through the job, not in the editor |
+| Версии и статус | `DraftVersion`, `DraftStatus`, `GenerationStatus` | `job_status` | R | — | ≤9 | |
+| Сохранить DOCX | `ExportDraft`, `ExportDocx`, `SaveDocx` | `offer_button{save_draft}` | только UI (4), *кнопка* | клик | 11 | TASK-440 |
 
 ## 5. Работа под ключ
 
-| Действие в UI | Binding | Инструмент агента сейчас | Класс | «Да» / план | Notes |
-|---|---|---|---|---|---|
-| «Сделать под ключ» (разбор) | `TurnkeyService.StartForAssignment` | `triage_assignment` | U (платно) | план, если дорого или «частично» | |
-| Ответить на вопросы / «Пропустить» | `AnswerQuestions`, `SkipQuestions` | карточка `ask_questions` | UI | — | |
-| «Как я понял задание»: поправить / «Подтвердить» | `EditUnderstanding`, `ConfirmRequirements` | в плане `write_work` | только UI / UI | клик | the student's edit |
-| Писать работу | `TurnkeyService.StartWriting` | `write_work` | U (платно) | план всегда | |
-| План работы: одобрить / править | `ApproveOutline`, `EditOutline`, `EditOutlineAt` | нет | только UI | клик | the approval is the student's |
-| Остановить написание | `TurnkeyService.StopWriting` | только «Отменить» у `write_work` | C, *кнопка* | клик | |
-| Переписать | `TurnkeyService.Regenerate` | нет | U (платно) | план (заменяет готовое) | |
-| «Спросить по шагу» (помощник) | `TurnkeyService.AskStep` | нет | R (платно) | — | |
-| Повторить шаг | `TurnkeyService.Retry` | нет | U (платно) | — | |
-| Работа и её статус | `Work`, `WorkOfAssignment` | `job_status` | R | — | |
-| Сохранить PDF | `TurnkeyService.ExportPDF` | нет | только UI, *кнопка* | клик | save dialog |
+| Действие в UI | Binding | Инструмент агента | Класс | «Да» / план | Волна | Notes |
+|---|---|---|---|---|---|---|
+| Разбор | `StartForAssignment` | `triage_assignment` | U (платно) | план, если дорого | ≤9 | |
+| Ответить на вопросы / пропустить | `AnswerQuestions`, `SkipQuestions` | карточка `ask_questions` | UI | — | ≤9 | |
+| «Как я понял задание»: поправить / подтвердить | `EditUnderstanding`, `ConfirmRequirements` | — | только UI (5) | клик | — | the student's review |
+| Писать работу | `StartWriting` | `write_work` | U (платно) | план всегда | ≤9 | |
+| План работы: одобрить / править | `ApproveOutline`, `EditOutline`, `EditOutlineAt` | — | только UI (5) | клик | — | |
+| Остановить написание | `StopWriting` | `work{stop}` | U без «Отменить» | — | 12 | TASK-446; the line offers «Продолжить» |
+| Переписать | `Regenerate` | `work{regenerate}` | U (платно) | план (заменяет готовое) | 12 | TASK-446 |
+| Повторить шаг | `Retry` | `work{retry}` | U (платно) | — | 12 | TASK-446 |
+| «Спросить по шагу» | `AskStep` | `work{ask}` | R (платно) | — | 12 | TASK-446; answer in a card |
+| Работа и статус | `Work`, `WorkOfAssignment` | `job_status` | R | — | ≤9 | |
+| Сохранить PDF | `ExportPDF` | `offer_button{save_as}` | только UI (4), *кнопка* | клик | 10 | |
 
 ## 6. Отправка преподавателю
 
-| Действие в UI | Binding | Инструмент агента сейчас | Класс | «Да» / план | Notes |
-|---|---|---|---|---|---|
-| Подготовить отправку (черновик / работа) | `HomeworkService.PrepareSend`, `AgentConfirmService.ProposeSendWork` | `propose_send` | C | «Да» | |
-| «Да» в карточке | `HomeworkService.ConfirmSend`, `AgentConfirmService.Confirm` | — | клик студента | «Да» | by design (hard rule 3) |
-| Отказаться | `HomeworkService.CancelSend`, `AgentConfirmService.Decline` | — | UI | клик | |
-| Статус отправки | `HomeworkService.Deliveries` | `delivery_status` | R | — | |
-| «Отправлено вручную» (неизвестный исход) | `HomeworkService.MarkSent` | нет | C, *кнопка* | клик | the student's statement about the outside world |
-| «Отправить ещё раз» (неизвестный исход) | `HomeworkService.SendAgain` | нет | C, *кнопка* | клик | hard rule 7: never a blind retry |
-| «Отправить в…» (время) | TASK-239…241, в работе | нет | C | «Да» | the agent may prefill the time from the request; the card confirms it |
-| Запланированные: сменить время, отменить, решить опоздавшую | TASK-242/243, в работе | нет | C | «Да» | |
+| Действие в UI | Binding | Инструмент агента | Класс | «Да» / план | Волна | Notes |
+|---|---|---|---|---|---|---|
+| Подготовить отправку | `PrepareSend`, `ProposeSendWork` | `propose_send` | C | «Да» или разрешение | ≤9 | |
+| «Да» / отказаться | `ConfirmSend`, `Confirm`, `CancelSend`, `Decline` | — | только UI (7) | клик | — | hard rule 3 |
+| Статус | `Deliveries` | `delivery_status` | R | — | ≤9 | |
+| «Отправлено вручную» | `MarkSent` | `delivery_outcome{mark_sent}` | C | «Да» | 13 | TASK-451 |
+| «Отправить ещё раз» | `SendAgain` | `delivery_outcome{send_again}` | C | «Да» всегда | 13 | TASK-451; hard rule 7, never by permission |
+| «Отправить в…» | TASK-239…241, в работе | `propose_send{at, time}` | C | «Да» | 13 | TASK-451 |
+| Запланированные: время, отмена | TASK-242/243, в работе | `scheduled_send` | C | «Да» | 13 | TASK-451 |
 
 ## 7. Записи, расшифровки, конспекты paratech
 
-| Действие в UI | Binding | Инструмент агента сейчас | Класс | «Да» / план | Notes |
-|---|---|---|---|---|---|
-| Начать запись (окно перед парой / вручную) | `PromptService.Start`, `StartRecording` | нет → `recording{start}` (10) | U | — | О-7 а; Undo = stop and keep the audio; dispatch done in TASK-322 (the source the page's picker preselects; the model names none), served with catalog 10 (TASK-326) |
-| Пропустить пару в окне записи | `PromptService.Skip` | — | только UI | — | popup control |
-| Сменить источник звука | `PromptService.SelectSource`, `ActivityService.SwitchSource` | нет | U | — | |
-| Остановить запись | `ActivityService.StopRecording` | нет → `recording{stop}` (10) | U без «Отменить» | — | О-7 а; the result line offers «Начать запись»; dispatch done in TASK-322 (the offer is `ActionLine.Offer`, rendered by TASK-324), served with catalog 10 (TASK-326) |
-| Удалить записи | `RecordingDeleteService.Preview`, `Delete` | `propose_delete_recording` | C | «Да» | |
-| Импорт старой записи | `RecordingImportService.Import` (диалог) | нет | только UI, *кнопка*; аудио из панели — U позже | — | audio stays local (hard rule 2) |
-| Записи и задачи | `ActivityService.ListRecordings`, `ListJobs` | `find_lessons`, `job_status` | R | — | |
-| Предмет и тип пары у записи | `KnowledgeBaseService.SetLessonInfo` | `set_lesson_info` | U | — | |
-| «Запустить сейчас» (от батареи) | `ActivityService.RunJobNow` | нет | C, *кнопка* | клик | no compensation |
-| «Отменить расшифровку» / «Расшифровать снова» | `ActivityService.CancelTranscription`, `Retranscribe` | нет → follow-up `cancel_transcription`, `retranscribe` | U, *кнопка* | клик (первая отмена спрашивает, «Больше не спрашивать» — настройка окна) | TASK-393; the cancel is undone by retranscribe; local work only, no quota |
-| «Повторить» обработку / текст лекции | `ActivityService.RetryPostProcessing` | `make_summary`, `find_homework`, `make_lecture_text` | U (платно) | лекция — план всегда | |
-| «Сделать конспект заново» | `ActivityService.RedoSummary` | `make_summary` | U (платно) | план (заменяет готовое) | |
-| Звук записи, совет по источнику, «Скрыть» | `RecordingSound`, `PromptService.Advice`, `DismissAdvice` | — | только UI | — | status and hints |
-| Посмотреть конспект / текст лекции / расшифровку | `SummaryService.View`, `TranscriptService.Status/Segments/Text` | нет (планировщик не видит тексты) | R, *кнопка* «Открыть» | — | content questions go to `answer_question` |
-| Копировать | `SummaryService.CopyAll`, `TranscriptService.CopyAll/CopyText`, `LectureTextService.Copy` | нет | только UI, *кнопка* | клик | clipboard |
-| Сохранить как | `SummaryService.SaveAs`, `TranscriptService.SaveAs`, `LectureTextService.SaveAs`, `KnowledgeBaseService.ExportSubject` | нет | только UI, *кнопка* | клик | save dialog (ADR-0022) |
+| Действие в UI | Binding | Инструмент агента | Класс | «Да» / план | Волна | Notes |
+|---|---|---|---|---|---|---|
+| Начать / остановить запись | `PromptService.Start`, `StartRecording`, `ActivityService.StopRecording` | `recording{start, stop}` | U / U без «Отменить» | — | 10 | |
+| Пропустить пару в окне записи | `PromptService.Skip` | `recording{skip_prompt}` | U | — | 12 | TASK-447 |
+| Источники звука, сменить | `Sources`, `SelectSource`, `SwitchSource` | `list_sources`, `recording{switch_source}` | R / U | — | 12 | TASK-447; source IDs and app enums, no window titles |
+| Окно записи: текущая пара, ссылка | `PromptService.Current`, `CallSubject` *new* | — | только UI (7) | — | — | popup state |
+| Удалить записи | `RecordingDeleteService.Preview`, `Delete` | `propose_delete_recording` | C | «Да» | ≤9 | |
+| Импорт старой записи | `RecordingImportService.Import` (диалог) | — | только UI (4), *кнопка* | клик | — | audio from the panel: ADR-0038 О-7 |
+| Записи и задачи | `ListRecordings`, `ListJobs` | `find_lessons`, `job_status` | R | — | ≤9 | |
+| Предмет и тип пары у записи | `SetLessonInfo` | `set_lesson_info` | U | — | ≤9 | |
+| «Запустить сейчас» | `RunJobNow` | `job{run_now}` | U без «Отменить» | — | 12 | TASK-447 |
+| «Отменить расшифровку» / «Расшифровать снова» | `CancelTranscription`, `Retranscribe` *new* | `job{cancel_transcription, retranscribe}` | U | — | 12 | TASK-447; cancel is undone by retranscribe |
+| «Повторить», текст лекции, «Сделать конспект заново» | `RetryPostProcessing`, `RedoSummary` | `make_summary`, `find_homework`, `make_lecture_text` | U (платно) | лекция / замена — план | ≤9 | |
+| Звук, совет, «Скрыть» | `RecordingSound`, `Advice`, `DismissAdvice` | — | только UI (7) | — | — | status and hints |
+| Открыть конспект / текст лекции / расшифровку | `SummaryService.View`, `TranscriptService.*` | `offer_button{open_*}` | UI, *кнопка* | клик | 10 | content questions → `answer_question` |
+| Копировать | `SummaryService.CopyAll`, `TranscriptService.CopyAll/CopyText`, `LectureTextService.Copy` | `offer_button{copy_*}` | UI, *кнопка* | клик | 11 | TASK-440 |
+| Сохранить как | `SummaryService.SaveAs`, `TranscriptService.SaveAs`, `LectureTextService.SaveAs`, `ExportSubject` | `offer_button{save_*, export_subject}` | только UI (4), *кнопка* | клик | 11 | TASK-440 |
 
 ## 8. База знаний и билеты
 
-| Действие в UI | Binding | Инструмент агента сейчас | Класс | «Да» / план | Notes |
-|---|---|---|---|---|---|
-| Поиск | `KnowledgeBaseService.Search` | `search` | R | — | |
-| Вопрос по лекциям | `AnswerService.Answer` | `answer_question` | R (платно) | — | О-1 а |
-| Предметы и лекции базы | `KnowledgeBaseService.Subjects/Lessons/Lectures/Lesson/LessonByKey` | частично `find_lessons` | R | — | |
-| Билеты из вставленного списка | `TicketService.Propose` | нет | U | — | the pasted list is foreign text: only from an upload, never through the planner |
-| Билеты из файла | `TicketService.ProposeFromMaterial` | нет | U | — | |
-| Подтвердить билеты (платно) | `TicketService.Confirm` | нет | U (платно) | план | |
-| Отменить / вернуть | `TicketService.Cancel`, `Undo` | нет | U | — | |
-| Списки билетов | `TicketService.List`, `Get` | нет | R | — | |
+| Действие в UI | Binding | Инструмент агента | Класс | «Да» / план | Волна | Notes |
+|---|---|---|---|---|---|---|
+| Поиск, вопрос по лекциям | `Search`, `AnswerService.Answer` | `search`, `answer_question` | R / R (платно) | — | ≤9 | |
+| Предметы и лекции базы | `Subjects`, `Lessons`, `Lectures`, `Lesson`, `LessonByKey` | `find_lessons` | R | — | ≤9 | |
+| Билеты из вставленного списка | `TicketService.Propose` | `tickets{propose_text}` | U | — | 12 | TASK-445; the student's pasted list verbatim, the page's parser (ADR-0038 §5) |
+| Билеты из файла | `ProposeFromMaterial` | `tickets{propose_material}` | U | — | 12 | TASK-445 |
+| Подтвердить (платно) | `Confirm` | `tickets{confirm}` | U (платно) | план | 12 | TASK-445 |
+| Отменить / вернуть | `Cancel`, `Undo` | `tickets{cancel, restore}` | U | — | 12 | TASK-445 |
+| Списки билетов | `List`, `Get` | `list_tickets` | R | — | 12 | TASK-445; IDs, state, counts |
 
-## 9. Расписание, ссылки на пару, Google Календарь
+## 9. Расписание, Google Календарь
 
-| Действие в UI | Binding | Инструмент агента сейчас | Класс | «Да» / план | Notes |
-|---|---|---|---|---|---|
-| Импорт расписания (диалог) | `ScheduleImportService.ChooseFile` | нет | только UI, *кнопка*; ICS из панели — превью | — | |
-| Применить импорт | `ScheduleImportService.Commit` | нет | C | «Да» на превью | changes lessons and the Google projection |
-| Отменить импорт | `ScheduleImportService.Discard` | — | UI | клик | |
-| Пары на сегодня / неделю | `TodayService.Today`, `SubjectPosts` | `find_lessons`, `list_assignments` | R | — | |
-| Ссылка на пару: «Открыть», «Копировать» | TASK-261, в работе | нет | UI, *кнопка* | клик | Go resolves the link by lesson ID; the planner never sees it |
-| Ссылка на пару: вписать, убрать | TASK-261/264, в работе | нет → `set_call_link` (11) | C | «Да» с точной ссылкой | О-4 в |
-| Синхронизировать с Google | `GoogleCalendarService.GoogleCalendarSync` | нет | C, *кнопка* | клик | network; mirrors confirmed state |
-| Статус календаря | `GoogleCalendarService.GoogleCalendarStatus` | нет | R | — | |
+| Действие в UI | Binding | Инструмент агента | Класс | «Да» / план | Волна | Notes |
+|---|---|---|---|---|---|---|
+| Импорт расписания (диалог) | `ScheduleImportService.ChooseFile` | — | только UI (4), *кнопка* | клик | — | |
+| ICS, брошенный в панель → превью → применить | `Commit`, `Discard` | `propose_schedule_import{upload}` | C | «Да» на превью | 12 | TASK-450; the same preview as the page |
+| Пары на сегодня / неделю | `TodayService.Today`, `SubjectPosts` | `find_lessons`, `list_assignments` | R | — | ≤9 | |
+| Синхронизировать с Google | `GoogleCalendarSync` | `offer_button{google_sync}` | C, *кнопка* | клик | 10 | |
+| Статус календаря | `GoogleCalendarStatus` | `get_settings` (state only) | R | — | 11 | TASK-440 |
 
 ## 10. Чаты, журнал, настройки, подключения
 
-| Действие в UI | Binding | Инструмент агента сейчас | Класс | «Да» / план | Notes |
-|---|---|---|---|---|---|
-| Новый чат | `AgentService.NewChat` | — | только UI | — | the request already lives in a chat |
-| Переименовать чат | `AgentService.RenameChat` | — | только UI | — | О-8: the agent never renames an existing chat |
-| Название нового чата | — | `reply.chat_title` (11) | U | — | О-8: only on the first request of a new chat |
-| Архивировать / вернуть чат | `AgentService.ArchiveChat`, `RestoreChat` | нет | U | — | only other chats: the current one has a running request |
-| Форк, «Начать заново отсюда» | `AgentService.ForkChat` (TASK-271), `Ask` with `restartFrom` (TASK-248) | — | только UI | — | picks a message |
-| Список чатов, ранние сообщения | `Chats`, `ChatEarlier`, `ChatCurrent`, `MentionCandidates` | — | только UI | — | |
-| Журнал действий агента | `AgentService.History` | нет | R | — | |
-| «Отменить» действие / всё | `AgentService.Undo`, `UndoRequest` | нет | UI, *кнопка* | клик | |
-| «Да», «Стоп», «Продолжить», «Повторить», «Начать заново», «Отмена», ответы | `ApprovePlan`, `RevisePlan`, `Answer`, `Stop`, `Continue`, `Retry`, `Restart`, `Rerun`, `Cancel` | — | только UI | клик | control of the agent itself |
-| Окно записи перед парой: вкл / выкл | `SettingsService.SetRecordingPromptsEnabled` | нет → `set_setting` (10) | U | — | gap P6; dispatch done in TASK-322, served with catalog 10 (TASK-326) |
-| Обрабатывать только от сети | `SettingsService.SetProcessOnlyOnACPower` | нет → `set_setting` (10) | U | — | dispatch done in TASK-322, served with catalog 10 (TASK-326) |
-| Нагрузка распознавания | `SettingsService.SetRecognitionLoad` | нет → `set_setting` (10) | U | — | dispatch done in TASK-322, served with catalog 10 (TASK-326) |
-| События в календаре при смене срока | TASK-276/279, в работе | нет → `set_setting` (11) | U | — | |
-| «ИИ распознаёт фото конспектов» | TASK-294, в работе | нет | U (`off`/`local`); будущий `cloud` — C | «Да» для `cloud` | images would leave the PC |
-| Настройки (чтение) | `SettingsService.GetSettings` | нет → `get_settings` (10) | R | — | enums only; dispatch done in TASK-322, served with catalog 10 (TASK-326) |
-| Профиль (ФИО, группа, вуз, факультет, город) | `SettingsService.GetProfile`, `SaveProfile` | нет → `set_profile_field` (11) | C | «Да» с точным значением | О-4 в; reading the values back: О-14 |
-| Почта: адрес получателя, SMTP | `ConnectionsService.SaveMailSettings` | — | только UI | — | addresses and servers (ADR-0022) |
-| Пароль почты | `SetMailPassword`, `RemoveMailPassword` | — | только UI | — | secret (hard rule 4) |
-| Проверить почту | `ConnectionsService.CheckMail` | нет | C, *кнопка* | клик | network |
-| Адрес Hub | `ConnectionsService.SaveHubURL` | — | только UI | — | trust boundary |
-| Ключ Hub | `SetHubKey`, `RemoveHubKey` | — | только UI | — | secret |
-| Квота | `GetConnections`, `RefreshQuota` | нет → `quota_status` (10) | R | — | «сколько осталось»: share and reset date only; dispatch done in TASK-322, served with catalog 10 (TASK-326) |
-| Google: Client ID / secret | `GoogleService.SetGoogleClient`, `ClearGoogleClient` | — | только UI | — | secret |
-| Войти в Google | `GoogleService.GoogleSignIn`, `GoogleCancelSignIn` | — | только UI, *кнопка* | клик | OAuth consent in the browser |
-| Выйти из Google | `GoogleService.GoogleSignOut` | нет | C, *кнопка* | клик | |
-| Модели: скачать, отменить, страница источника | `ModelsService.PreflightDownload`, `StartDownload`, `CancelDownload`, `DiscardPartial`, `OpenSourcePage`, `OpenModelsHomePage` | нет | C, *кнопка* | клик | network, gigabytes |
-| Модели: импорт файла | `ChooseImportFile`, `ConfirmImport`, `DiscardImport`, `ImportCatalogFile` | — | только UI | — | file dialog |
-| Модель по умолчанию | `ModelsService.SetDefault` | нет | U | — | |
-| Удалить модель | `ModelsService.Delete` | нет | C, *кнопка* | клик | |
-| Компонент «пропуск тишины» | `SpeechService.Status`, `StartInstall`, `CancelInstall` | нет | C, *кнопка* | клик | download |
-| Проверка звука | `DiagnosticsService.StartSoundCheck`, `SoundCheckStatus`, `StopSoundCheck` | нет | только UI, *кнопка* | клик | the student has to listen |
-| Пакет для поддержки | `DiagnosticsService.SaveSupportBundle` | — | только UI | — | save dialog |
-| Справка | `HelpService.OpenHelpPage` | нет | UI, *кнопка* | клик | |
+| Действие в UI | Binding | Инструмент агента | Класс | «Да» / план | Волна | Notes |
+|---|---|---|---|---|---|---|
+| Новый чат, форк, «Начать заново отсюда» | `NewChat`, `ForkChat`, `Ask(restartFrom)` | — | только UI (7) | — | — | |
+| Название нового чата | — | `reply.chat_title` | U | — | 11 | TASK-330 |
+| Переименовать чат | `RenameChat` | `chat{rename}` | U | — | 12 | TASK-448; only on the student's explicit request (ADR-0038 О-4) |
+| Архивировать / вернуть чат | `ArchiveChat`, `RestoreChat` | `chat{archive, restore}` | U | — | 12 | TASK-448; never the current chat |
+| Список чатов, ранние сообщения | `Chats`, `ChatEarlier`, `ChatCurrent`, `MentionCandidates` | `list_chats` | R | — | 12 | TASK-448; IDs, dates, counters, no titles |
+| Журнал действий | `AgentService.History` | `list_actions` | R | — | 12 | TASK-448 |
+| «Отменить» действие / всё | `Undo`, `UndoRequest` | `undo{action}`; `offer_button{undo_action}` | U без «Отменить» | — | 12 | TASK-448; the same compensation |
+| Управление агентом | `ApprovePlan`, `RevisePlan`, `Answer`, `Stop`, `Continue`, `Retry`, `Restart`, `Rerun`, `Cancel`, `Withdraw` *new*, `AgentConfirmService.*` | — | только UI (7) | клик | — | |
+| Окно записи, только от сети, нагрузка | `SetRecordingPromptsEnabled`, `SetProcessOnlyOnACPower`, `SetRecognitionLoad` | `set_setting` | U | — | 10 | |
+| События при смене срока | TASK-276 (done) / 279 | `set_setting{calendar_update_on_due_change}` | U | — | 11 | TASK-331 |
+| «ИИ распознаёт фото конспектов» | `SetNoteRecognition` *new* | `set_setting{notes_ocr}` | U (`off`/`local`) | — | 11 | TASK-331; a future `cloud` is C |
+| Настройки (чтение) | `GetSettings` | `get_settings` | R | — | 10 | catalog 11: + Google, mail, Hub key states (TASK-440) |
+| Разрешения | `Permissions`, `SetPermission` (TASK-360) | — | только UI (6) | — | — | ADR-0034 §5 |
+| Профиль | `GetProfile`, `SaveProfile` | `set_profile_field`; чтение — `get_profile` | C / R | «Да» с точным значением | 11 / 12 | TASK-438; reading: TASK-449, ADR-0038 О-6 |
+| Почта: адрес получателя | `SaveMailSettings` (recipient) | `set_mail_recipient` | C | «Да» с точным адресом | 12 | TASK-449 |
+| Почта: сервер, порт, защита, логин | `SaveMailSettings` | `offer_button{open_settings}` | только UI (2), *кнопка* | — | — | the password is sent there |
+| Пароль почты, ключ Hub, Google Client ID/secret | `SetMailPassword`, `RemoveMailPassword`, `SetHubKey`, `RemoveHubKey`, `SetGoogleClient`, `ClearGoogleClient` | `offer_button{open_settings}` | только UI (1), *кнопка* | — | 11 (кнопка) | TASK-440 |
+| Адрес Hub | `SaveHubURL` | `offer_button{open_settings}` | только UI (2), *кнопка* | — | 11 (кнопка) | |
+| Проверить почту | `CheckMail` | `offer_button{check_mail}` | C, *кнопка* | клик | 11 | TASK-440 |
+| Квота | `GetConnections`, `RefreshQuota` | `quota_status` | R | — | 10 | |
+| Войти в Google | `GoogleSignIn`, `GoogleCancelSignIn`, `GoogleStatus` | `offer_button{google_sign_in}` | только UI (3), *кнопка* | клик | 10 | |
+| Выйти из Google | `GoogleSignOut` | `offer_button{google_sign_out}` | C, *кнопка* | клик | 11 | TASK-440 |
+| Модели: список, по умолчанию | `ModelsService.List`, `SetDefault` | `list_models`, `model{set_default}` | R / U | — | 12 | TASK-449 |
+| Модели: скачать, отменить | `PreflightDownload`, `StartDownload`, `CancelDownload`, `DiscardPartial`, `OpenSourcePage`, `OpenModelsHomePage` | `offer_button{download_model}` | C, *кнопка* | клик | 10 | network, gigabytes |
+| Удалить модель | `ModelsService.Delete` | `model{delete}` | C | «Да» | 12 | TASK-449 |
+| Модели: импорт файла | `ChooseImportFile`, `ConfirmImport`, `DiscardImport`, `ImportCatalogFile` | — | только UI (4) | — | — | |
+| «Пропуск тишины» | `SpeechService.Status`, `StartInstall`, `CancelInstall` | `offer_button{install_speech}` | C, *кнопка* | клик | 11 | TASK-440 |
+| Проверка звука | `StartSoundCheck`, `SoundCheckStatus`, `StopSoundCheck` | `offer_button{sound_check}` | только UI (8), *кнопка* | клик | 10 | |
+| Пакет для поддержки | `SaveSupportBundle` | `offer_button{save_support_bundle}` | только UI (4), *кнопка* | клик | 11 | TASK-440 |
+| Справка | `HelpService.OpenHelpPage` | `offer_button{open_help}` | UI, *кнопка* | клик | 10 | |
+| Hub на этом компьютере (бета) | `LocalHubService.*` (TASK-389…391) | — | только UI (1) | — | — | beta tooling (ADR-0036) |
+| «Проверить снова» (сервер не отвечает) | `ActivityService.RecheckNetwork` (TASK-424) | — | только UI (7) | — | — | ADR-0037 |
 
-Not actions (no row): `Shell.*`, `PopupWindowService.Fit`, `AgentPanel.Publish/Draft`, the media handler, pickers.
+Not actions (no row): `Shell.*`, `PopupWindowService.Fit`, `AgentPanel.SetFills/Attach/Publish/Draft`, the media
+handler, pickers, `WailsLogger`.
 
-## 11. Gaps in priority order
+## 11. Tasks
 
-Owner answers 2026-10-28 are in ADR-0033 («Answered»). Tasks (tasks.json):
-- Предметы из расписания: TASK-309 (domain), TASK-310 (use case), TASK-311 (binding), TASK-312 (UI).
-- «Выполнено»: TASK-313 (domain, migration), TASK-314 (use cases, «Сегодня»), TASK-315 (binding), TASK-316 (UI).
-- Plan budget (О-9 в): TASK-317 (domain), TASK-318 (long plan card).
-- Wave 10: TASK-319 (desktop specs and policy), TASK-320 (assignments: dispatch done, not served), TASK-321 (notes), TASK-322 (settings, quota,
-  recording), TASK-323 (schedule-subjects card, `offer_button`), TASK-324 (cards UI), TASK-325 (Hub panel v10),
-  TASK-326 (desktop switch to catalog 10).
-- Wave 11: TASK-327 (specs), TASK-328 (teacher, call link, profile cards), TASK-329 (library), TASK-330 (new chat
-  title), TASK-331 (two more settings), TASK-332 (cards UI), TASK-333 (Hub `plan_run`), TASK-334 (Hub panel v11),
-  TASK-335 (plan runner), TASK-336 (desktop switch to catalog 11).
-- Not filed yet: sending (time, reschedule, «Отправлено вручную» / «Отправить ещё раз» buttons, after TASK-239/242),
-  tickets from a file, «Переписать», «Остановить написание», source switch, default model, archive chat, journal as R.
-
-The items below are the original audit; the classes and decisions above (tables, ADR-0033 §8–§11) win where they
-differ.
-
-1. **Предметы из расписания** (owner 2026-10-28).
-   - A pure domain service `library/services/schedulesubjects` groups the free schedule strings
-     (`subjectmatch.Suggestion` plus the lesson kinds of each string): an **obvious** group (same name once the kind mark
-     is cut — «(лек.)», «(сем.)», «(пр.)», «(лаб.)», «лекция», «семинар»…, case, «ё», spaces) is merged; a
-     **doubtful** one (abbreviation, typo, a string close to an existing subject) is a separate row. The name is
-     the cleaned schedule string, the raw strings become aliases, the lesson kinds are listed per group.
-   - `cases/library`: `ScheduleSubjects(ctx)` (the proposal with a token over its content, as the schedule import) and
-     `CreateFromSchedule(ctx, token, choices)`; one subject per transaction, the subject ID derived from the group key,
-     so a retry creates nothing twice (ARCH-23, hard rule 7). Undo of the batch removes the subjects that are still
-     empty.
-   - UI: button «Завести предметы из расписания» on «Предметы» opens the review; the agent tool
-     `propose_subjects_from_schedule` (class C, no arguments) shows the same review as a card: obvious groups checked,
-     doubtful ones below with «Объединить / Отдельно / Не заводить» (default: Open О-12). One «Да» applies the
-     checked rows. Nothing of the strings goes to the planner; the names reach it only after «Да», as subjects the
-     student confirmed (ADR-0022).
-   - Folders: every subject already gets the system folders «Лекции», «Семинары», «Лабораторные» (with «Материалы»,
-     «ДЗ», «Билеты»; `subject/folder.go`) at creation, so nothing new is created; Open О-3 asks whether empty ones should be hidden.
-2. **Задания: изменить, удалить, вернуть.** `edit_assignment` (title, note, due, time, subject; old values in the
-   journal), `delete_assignment` (Undo = «Вернуть» within 3 days), restore through that Undo. Google event: Open О-6.
-3. **«Мой конспект».** `list_notes` (R), `add_note_part` (an upload from the panel to a lesson / day / recording),
-   `move_note`, `rename_note`, `remove_note` (U with Undo). Paste: Open О-5. Editing stays manual.
-4. **Преподаватели** — after Open О-4.
-5. **Ссылки на пару** — «Открыть» / «Копировать» through `offer_button`; typing a link after Open О-4.
-6. **Настройки.** `get_settings` (R) and `set_setting` (U, a closed enum of setting and value; the old value is the
-   compensation); `quota_status` (R). Profile after Open О-4.
-7. **`offer_button`** (UI): a card with the page's own button for the rows marked *кнопка* (open, copy, save as,
-   sign in to Google, sync, download a model, sound check, help, «Отменить»).
-8. Библиотека: `move_to_inbox`, `unlink_material`, `remove_material` / restore, `add_alias`, `remove_folder`, removing a
-   subject (after TASK-288).
-9. Отправка: time in `propose_send` (after TASK-239), rescheduling and cancelling (after TASK-242), «Отправлено вручную» /
-   «Отправить ещё раз» as buttons.
-10. Билеты from a file, «Переписать» a work, «Остановить написание».
-11. Записи: start / stop (after Open О-7), source switch, default model.
-12. Чаты: rename / archive (after Open О-8), the action journal as R.
+- Wave 10: TASK-326 (desktop switch; the owner's 10.11 instruction is the choice to switch it on, ADR-0038 D-1).
+- Call links per kind (usable from the UI before the agent): TASK-431 (domain, migration, use case), TASK-432
+  (bindings, «Подключиться» by kind), TASK-433 (UI), TASK-435 (batch service).
+- Wave 11: TASK-327 (specs, as written minus `set_call_link`/`clear_call_link`), TASK-434 (ADR-0038 specs),
+  TASK-436 (`set_call_links`), TASK-437 (its card), TASK-438 (teacher and profile cards; replaces TASK-328), TASK-329
+  (library), TASK-330 (chat title), TASK-331 (two settings), TASK-439 (materials), TASK-440 (buttons, settings
+  states), TASK-441 (cards UI; replaces TASK-332), TASK-333 + TASK-335 (plan runner), TASK-442 (Hub panel v11;
+  replaces TASK-334), TASK-443 (switch to 11; replaces TASK-336).
+- Wave 12: TASK-444 (specs), TASK-445 (tickets), TASK-446 (work controls), TASK-447 (recordings and jobs), TASK-448
+  (chats, journal, undo), TASK-449 (models, recipient, reading values), TASK-450 (ICS from the panel), TASK-452 (note
+  parts, assignment teacher, «Сделать задание»), TASK-454 (cards UI), TASK-455 (Hub panel v12), TASK-456 (switch to 12).
+- Wave 13 (waits for features): TASK-451 (sending: time, reschedule, outcome cards; after TASK-239/242), TASK-453
+  (note text edit; after TASK-291). Their Hub and switch tasks are filed when they are ready.

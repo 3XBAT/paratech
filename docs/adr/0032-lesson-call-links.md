@@ -113,3 +113,22 @@ has no link. Links open today only through `adapters/weblink` (`explorer.exe`, s
   Owner 08.11: it also answers while the recording started from that prompt runs (join after «Начать запись»); after
   a click the button reads «Открыть ещё раз» and stays clickable; the dot of an offer is neutral (red only while
   recording).
+
+## Addendum 2026-11-10 (owner, ADR-0038 §4): a link per lesson kind; the agent may set links
+- The owner's timetable has different links for the lecture and the seminar of one subject and an in-person lecture.
+  A subject keeps a **general** link (the existing `subjects.call_link`, unchanged) and one link per kind: **lecture**,
+  **seminar**, **lab** (new columns `call_link_lecture`, `call_link_seminar`, `call_link_lab`, `TEXT NOT NULL DEFAULT
+  ''`, one migration, next free number at push; nothing is copied). Each is checked by `subject.ParseCallLink`; a stored
+  value that no longer parses is read as no link, as before.
+- **Which link opens** (`subject.CallLinks.Join(lessonKind)`, pure): the link of the lesson's kind, else the general
+  one, else none. `practice` uses the seminar link (as `filing.NoteFolder`); an empty or unknown kind uses the general
+  one; a seminar never takes the lecture link. Same rule for «Подключиться» on «Сегодня», in the popup
+  (`recordingprompt.CallSubject` returns the subject and the lesson kind) and for `offer_button`.
+- The page still sends only IDs and a kind code (`OpenSubjectCallLink(subjectID, lessonKind)`); Go resolves the link
+  at the click. `SetSubjectCallLink` / `ClearSubjectCallLink` take a kind (`general | lecture | seminar | lab`).
+- The subject page shows the general link and the three kinds, each with «Добавить» / «Изменить» / «Убрать».
+- **Superseded:** «Set and cleared only by the student» and «It still has no tool to set it». The agent sets and
+  clears links with `set_call_links` (class C, one card for the whole batch, the exact links shown, catalog 11,
+  ADR-0038 §4). It reads them in `list_subjects` (`call_links`, catalog ≥ 11).
+- Tasks: TASK-431 (domain, migration, use case), TASK-432 (bindings), TASK-433 (UI), TASK-435 (batch), TASK-436/437
+  (agent tool and card).

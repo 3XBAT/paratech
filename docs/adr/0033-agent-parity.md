@@ -1,6 +1,7 @@
 # ADR-0033: Agent parity — everything the student does in the UI, the agent can do
 
-- **Status:** Accepted (owner answers 2026-10-28); Open О-10, О-11, О-13, О-14 remain
+- **Status:** Accepted (owner answers 2026-10-28); Open О-10, О-11, О-13, О-14 remain. §1 (UI-only reasons), §5/§6
+  (waves 11–13, prefix) and the `set_call_link` row of §11 are amended by ADR-0038 (Proposed, 2026-11-10)
 - **Date:** 2026-10-28
 - **Source:** owner 2026-10-28 («вся работа с приложением может идти полностью через агента»); the audit
   `docs/agent-parity.md`; ADR-0021, ADR-0022, ADR-0023, ADR-0026…0030, ADR-0032; `domain/agent/values/tool.go`
