@@ -31,6 +31,13 @@ type fakeKnowledge struct {
 	query     string
 	path      string
 	set       [3]string
+	folders   []knowledgebase.FolderLesson
+	subject   shared.SubjectID
+}
+
+func (f *fakeKnowledge) FolderLessons(_ context.Context, sub shared.SubjectID) ([]knowledgebase.FolderLesson, error) {
+	f.subject = sub
+	return f.folders, f.err
 }
 
 func (f *fakeKnowledge) Subjects(context.Context) ([]kb.Subject, error) { return f.subjects, f.err }
@@ -536,10 +543,66 @@ func TestFrontendKnowsKnowledgeErrors(t *testing.T) {
 	}
 	for _, e := range []error{
 		ErrKnowledgeInvalidID, ErrKnowledgeNotFound, ErrKnowledgeSubjectNotFound, ErrKnowledgeQuery, ErrKnowledgeLessonInfo,
-		ErrKnowledgeNotFinished, ErrKnowledgeBusy, ErrKnowledgeUnavailable,
+		ErrKnowledgeNotFinished, ErrKnowledgeBusy, ErrKnowledgeUnavailable, ErrKnowledgeInvalidSubject,
 	} {
 		if !strings.Contains(string(src), `"`+e.Error()+`"`) {
 			t.Errorf("frontend/src/bindings/knowledgeBase.ts does not list the error %q", e)
 		}
+	}
+}
+
+// TASK-429: a recorded lesson in a folder of its subject reaches the page as the folder, its code and the lesson.
+func TestKnowledgeFolderLessonsJSON(t *testing.T) {
+	ctx := context.Background()
+	l := kbLesson()
+	l.Library = kbPhys
+	f := &fakeKnowledge{folders: []knowledgebase.FolderLesson{{Folder: "phys-lectures", System: "lectures", Lesson: l}}}
+	s, _ := newKnowledgeService(f, nil)
+
+	got, err := s.FolderLessons(ctx, "phys")
+	if err != nil || f.subject != "phys" {
+		t.Fatalf("FolderLessons = %v, asked %q", err, f.subject)
+	}
+	raw, _ := json.Marshal(got)
+	want := `[{"folderId":"phys-lectures","system":"lectures","lesson":{"key":"recording:r1","noteOnly":false,"undated":false,` +
+		`"anchor":"recording","scheduleLessonId":"l1","date":"","notes":[],"recordingId":"r1","startedAt":"2026-10-19T07:00:00Z",` +
+		`"durationSeconds":5400,"title":"Механика","subject":"Физика","subjectKey":"ID:phys","kind":"lecture","subjectEdited":true,` +
+		`"kindEdited":false,"transcriptReady":true,"summaryReady":true,"lectureTextReady":false,"librarySubjectId":"phys",` +
+		`"librarySubjectState":"matched"}}]`
+	if string(raw) != want {
+		t.Fatalf("FolderLessons JSON = %s\nwant %s", raw, want)
+	}
+
+	f.folders = nil
+	if got, err := s.FolderLessons(ctx, "bio"); err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("no rows = %#v, %v; want an empty list", got, err)
+	}
+}
+
+// An id the core refuses names the subject, a failed read is the unavailable text; neither shows the cause.
+func TestKnowledgeFolderLessonsErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want error
+	}{
+		{"invalid id", knowledgebase.ErrInvalidRequest, ErrKnowledgeInvalidSubject},
+		{"unavailable", errors.Join(knowledgebase.ErrUnavailable, errors.New(`open C:\Users\student\db: locked`)), ErrKnowledgeUnavailable},
+		{"cancelled", context.Canceled, ErrKnowledgeUnavailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, logs := newKnowledgeService(&fakeKnowledge{err: tt.err}, nil)
+			got, err := s.FolderLessons(context.Background(), "a/b")
+			if got != nil || !errors.Is(err, tt.want) || err.Error() != tt.want.Error() {
+				t.Fatalf("FolderLessons = %+v, %v; want %v", got, err, tt.want)
+			}
+			if strings.Contains(err.Error(), "student") {
+				t.Fatalf("the error shows the cause: %q", err)
+			}
+			if tt.want == ErrKnowledgeUnavailable && !strings.Contains(logs.String(), opKnowledgeFolders) {
+				t.Fatalf("the failure is not logged: %s", logs)
+			}
+		})
 	}
 }

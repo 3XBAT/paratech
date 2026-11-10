@@ -28,6 +28,7 @@ const (
 	ErrKnowledgeNotFinished     = knowledgeError("Запись ещё идёт: поправить её можно после окончания.")
 	ErrKnowledgeBusy            = knowledgeError("Запись сейчас меняется. Попробуйте ещё раз.")
 	ErrKnowledgeUnavailable     = knowledgeError("Не удалось прочитать базу знаний. Попробуйте ещё раз.")
+	ErrKnowledgeInvalidSubject  = knowledgeError("Неверный идентификатор предмета.")
 )
 
 // Operation names of the log.
@@ -41,6 +42,7 @@ const (
 	opKnowledgePick        = "ui: choose where to save the subject"
 	opKnowledgeExport      = "ui: export subject"
 	opKnowledgeCorrect     = "ui: set the subject and kind of a recording"
+	opKnowledgeFolders     = "ui: knowledge base lessons in the folders of a subject"
 )
 
 // Fixed texts of «Экспорт предмета» (Russian UI); the statuses are those of the transcript.
@@ -61,6 +63,7 @@ type KnowledgeUseCase interface {
 	SubjectFileName(ctx context.Context, key string) (string, error)
 	ExportSubject(ctx context.Context, key, path string) error
 	SetLessonInfo(ctx context.Context, id shared.RecordingID, subject, kind string) (kb.Lesson, error)
+	FolderLessons(ctx context.Context, sub shared.SubjectID) ([]knowledgebase.FolderLesson, error)
 }
 
 // KnowledgeFilePicker shows the native save dialog of an exported subject (Markdown) with name proposed. It returns
@@ -189,6 +192,15 @@ type KnowledgeHit struct {
 type KnowledgeSearchResult struct {
 	Hits      []KnowledgeHit `json:"hits"`
 	Truncated bool           `json:"truncated"`
+}
+
+// KnowledgeFolderLesson is a recorded lesson shown as a link row in a system folder of its library subject
+// (ADR-0034 amendment 2026-11-10): FolderID is the folder, System its code ("lectures", "seminars" or "labs"), Lesson
+// the lesson as Lessons returns it (anchor "recording", notes empty). Nothing of it is stored.
+type KnowledgeFolderLesson struct {
+	FolderID string          `json:"folderId"`
+	System   string          `json:"system"`
+	Lesson   KnowledgeLesson `json:"lesson"`
 }
 
 // KnowledgeBaseService is bound to the UI (the «База знаний» section): every exported method is callable from the page
@@ -350,6 +362,25 @@ func (s *KnowledgeBaseService) SetLessonInfo(ctx context.Context, recordingID, s
 		return KnowledgeLesson{}, s.fail(opKnowledgeCorrect, err)
 	}
 	return knowledgeLesson(l), nil
+}
+
+// FolderLessons lists the recorded lessons of the library subject with subjectID with the system folder each shows
+// in, newest first; an unknown or removed subject is an empty list.
+func (s *KnowledgeBaseService) FolderLessons(ctx context.Context, subjectID string) ([]KnowledgeFolderLesson, error) {
+	list, err := s.uc.FolderLessons(ctx, shared.SubjectID(subjectID))
+	switch {
+	case errors.Is(err, knowledgebase.ErrInvalidRequest):
+		return nil, ErrKnowledgeInvalidSubject
+	case err != nil:
+		return nil, s.fail(opKnowledgeFolders, err)
+	}
+	out := make([]KnowledgeFolderLesson, 0, len(list))
+	for _, fl := range list {
+		out = append(out, KnowledgeFolderLesson{
+			FolderID: string(fl.Folder), System: string(fl.System), Lesson: knowledgeLesson(fl.Lesson),
+		})
+	}
+	return out, nil
 }
 
 // fail maps a use case error to the page's text and logs the cause.
