@@ -13,6 +13,9 @@ import {
   openResultView,
   fileNote,
   moves,
+  openingId,
+  partLabel,
+  partsList,
   needsCostConsent,
   needsPolling,
   percent,
@@ -21,9 +24,12 @@ import {
   statusView,
   ticketRow,
   ticketRows,
+  undoLabel,
   usd,
+  withoutResults,
+  materialIdsOf,
 } from "../.test-build/ticketsView.js";
-import { SetCard } from "../.test-build/pages/TicketsParts.js";
+import { FilesList, SetCard } from "../.test-build/pages/TicketsParts.js";
 
 function wireSet(over = {}) {
   return {
@@ -257,7 +263,7 @@ test("«Открыть .docx» is shown only for a done set with a material, wit
 test("the open button is blocked while an action runs and shows the busy label", () => {
   const s = set({ status: "done", done: 2, materialId: "m-1" });
   assert.match(card(s, { blocked: true }), /<button[^>]*disabled=""[^>]*>[^]*?Открыть \.docx/);
-  assert.ok(card(s, { openBusy: true, blocked: true }).includes("Открывается…"));
+  assert.ok(card(s, { openingId: "m-1", blocked: true }).includes("Открывается…"));
 });
 
 test("the open result line: success says a copy was opened, a failure shows the binding text", () => {
@@ -270,7 +276,7 @@ test("the open result line: success says a copy was opened, a failure shows the 
     text: "Файл не найден: возможно, его удалили.",
   });
   const s = set({ status: "done", done: 2, materialId: "m-1" });
-  assert.ok(card(s, { openResult: { kind: "ok", text: "Открыта копия файла: x" } }).includes("Открыта копия файла: x"));
+  assert.ok(card(s, { openResults: { "m-1": { kind: "ok", text: "Открыта копия файла: x" } } }).includes("Открыта копия файла: x"));
 });
 
 test("canOpenDocx needs a done set with a material id", () => {
@@ -282,7 +288,201 @@ test("canOpenDocx needs a done set with a material id", () => {
 test("the page opens the file through the library binding with the material id only", () => {
   const page = readFileSync(new URL("../src/pages/TicketsPage.tsx", import.meta.url), "utf8");
   assert.equal((page.match(/lib\.openMaterial\(/g) ?? []).length, 1);
-  assert.ok(page.includes("lib.openMaterial(set.materialId)"), "only the id is passed");
+  assert.ok(page.includes("lib.openMaterial(materialId)"), "only the id is passed");
+});
+
+// ---- TASK-403: the parts of a split tickets file ----
+
+const part = (from, to, id) => ({ materialId: id, from, to, name: `${id}.docx` });
+const threeParts = [part(1, 50, "m-1"), part(51, 100, "m-2"), part(101, 120, "m-3")];
+const splitSet = (files = threeParts, over = {}) => set({ status: "done", done: 2, materialId: files[0]?.materialId ?? "", files, ...over });
+const partNote = "Файл разделён на части: не помещается в один документ.";
+const count = (html, text) => html.split(text).length - 1;
+
+test("partLabel: a range, one ticket, an unknown range by position", () => {
+  assert.equal(partLabel(part(1, 50, "a"), 0), "Билеты 1–50");
+  assert.equal(partLabel(part(51, 100, "a"), 1), "Билеты 51–100");
+  assert.equal(partLabel(part(7, 7, "a"), 2), "Билет 7");
+  assert.equal(partLabel(part(0, 0, "a"), 0), "Часть 1");
+  assert.equal(partLabel(part(0, 0, "a"), 1), "Часть 2");
+  assert.deepEqual(partsList(splitSet()).map((p) => p.openLabel), ["Открыть «Билеты 1–50»", "Открыть «Билеты 51–100»", "Открыть «Билеты 101–120»"]);
+});
+
+test("one part: no list, no split note, the word button and the singular file note as before", () => {
+  const html = card(splitSet([part(1, 50, "m-1")]));
+  assert.ok(html.includes("Открыть .docx"));
+  assert.ok(!html.includes("tk-files"));
+  assert.ok(!html.includes(partNote));
+  assert.ok(!html.includes("Билеты 1–50"));
+  assert.ok(html.includes("Файл лежит в папке «Билеты» предмета «Физика»."));
+  assert.ok(html.includes("Вернуть файл во «Входящие»"));
+  assert.equal(fileNote("Физика"), "Файл лежит в папке «Билеты» предмета «Физика».");
+});
+
+// The elements of a rendered-by-hand tree (a plain function component's result) and the rendered tag of a button by its name.
+const walk = (n, out = []) => {
+  if (Array.isArray(n)) {
+    n.forEach((c) => walk(c, out));
+  } else if (n && typeof n === "object" && n.props) {
+    out.push(n);
+    walk(n.props.children, out);
+  }
+  return out;
+};
+const byLabel = (tree, label) => walk(tree).find((e) => e.props.label === label);
+const buttonTag = (html, label) => (html.match(/<button[^>]*>/g) ?? []).find((t) => t.includes(`aria-label="${label}"`));
+const labels = ["Билеты 1–50", "Билеты 51–100", "Билеты 101–120"];
+const undoThree = "Вернуть все 3 файла во «Входящие»";
+
+test("three parts: labels in order, an open icon per part, the note once, the plural file note, one undo", () => {
+  const html = card(splitSet());
+  const at = labels.map((l) => html.indexOf(`>${l}<`));
+  assert.ok(at.every((i) => i > 0) && at[0] < at[1] && at[1] < at[2], "the labels are listed in order");
+  for (const l of labels) {
+    assert.ok(buttonTag(html, `Открыть «${l}»`), l);
+  }
+  assert.ok(!html.includes("Открыть .docx"), "no word button with several parts");
+  assert.equal(count(html, partNote), 1);
+  assert.ok(html.includes("Файлы лежат в папке «Билеты» предмета «Физика»."));
+  assert.ok(buttonTag(html, undoThree), "one undo icon for all parts, with the count");
+  assert.ok(!html.includes("Вернуть файл во"));
+  assert.equal(count(html, "Открывается копия файла: правки в Word в библиотеку не попадают."), 1, "the copy note is said once");
+  assert.equal(fileNote("", 2), "Файлы лежат в папке «Билеты» предмета.");
+});
+
+test("done block order: several parts = split note, file note, the list, then the muted notes; one part as before", () => {
+  const many = card(splitSet());
+  const at = [partNote, "Файлы лежат в папке", 'class="tk-files"', "Открывается копия файла", "Ответы сгенерированы по лекциям"].map((t) => many.indexOf(t));
+  assert.ok(at.every((i) => i > 0), JSON.stringify(at));
+  assert.ok(at[0] < at[1] && at[1] < at[2], "split note, file note, then the list");
+  assert.ok(at[2] < at[3] && at[3] < at[4], "the notes of the whole file sit under the list");
+  const one = card(splitSet([part(1, 50, "m-1")]));
+  const o = ["Файл лежит в папке", "Открывается копия файла", "Ответы сгенерированы по лекциям", "Открыть .docx"].map((t) => one.indexOf(t));
+  assert.ok(o.every((i) => i > 0) && o[0] < o[1] && o[1] < o[2] && o[2] < o[3], "single card: file note, notes, then the button");
+});
+
+test("the open callback of a part gets that part's material id (and only it)", () => {
+  const clicked = [];
+  const list = FilesList({ parts: partsList(splitSet()), blocked: false, openingId: "", results: {}, onOpen: (id) => clicked.push(id) });
+  for (const l of labels) {
+    byLabel(list, `Открыть «${l}»`).props.onClick();
+  }
+  assert.deepEqual(clicked, ["m-1", "m-2", "m-3"]);
+});
+
+test("undo tooltip names the count of files with the right plural; one file keeps its text", () => {
+  assert.equal(undoLabel(1), "Вернуть файл во «Входящие»");
+  assert.equal(undoLabel(2), "Вернуть все 2 файла во «Входящие»");
+  assert.equal(undoLabel(5), "Вернуть все 5 файлов во «Входящие»");
+  assert.equal(undoLabel(21), "Вернуть все 21 файл во «Входящие»");
+  assert.equal(undoLabel(12), "Вернуть все 12 файлов во «Входящие»");
+});
+
+test("a reply without files: parseSet derives one part, the card is the single-part card", () => {
+  const s = set({ status: "done", done: 2, materialId: "m-9" });
+  assert.deepEqual(s.files, [{ materialId: "m-9", from: 0, to: 0, name: "" }]);
+  const html = card(s);
+  assert.ok(html.includes("Открыть .docx"));
+  assert.ok(!html.includes("tk-files") && !html.includes(partNote));
+  assert.equal(canOpenDocx(s), true);
+  assert.equal(moves(s).undo, true);
+});
+
+test("unknown ranges of several parts are «Часть 1», «Часть 2»; the file name is never shown", () => {
+  const html = card(splitSet([part(0, 0, "m-1"), part(0, 0, "m-2")]));
+  assert.ok(html.includes(">Часть 1<") && html.includes(">Часть 2<"));
+  assert.ok(html.includes("Открыть «Часть 2»"));
+  assert.ok(!html.includes("m-1.docx"));
+});
+
+test("a part of one ticket is «Билет N»", () => {
+  const html = card(splitSet([part(1, 50, "m-1"), part(51, 51, "m-2")]));
+  assert.ok(html.includes(">Билет 51<"));
+});
+
+test("canOpenDocx and undo count the parts; a done set without files shows no open controls", () => {
+  assert.equal(canOpenDocx(splitSet()), true);
+  assert.equal(moves(splitSet()).undo, true);
+  assert.equal(canOpenDocx(set({ status: "done", files: [] })), false);
+  assert.equal(moves(set({ status: "done", files: [] })).undo, false);
+  assert.equal(canOpenDocx(set({ status: "failed", files: threeParts, materialId: "m-1" })), false);
+  const html = card(set({ status: "done", files: [] }));
+  assert.ok(!html.includes("Открыть") && !html.includes("tk-files") && !html.includes("Вернуть"));
+  assert.ok(html.includes("Ответы сгенерированы по лекциям"));
+});
+
+test("per-part state: the busy part spins, the others and the undo are off with a reason, each part has its own result line", () => {
+  const busy = card(splitSet(), { openingId: "m-2", blocked: true });
+  assert.equal(count(busy, 'aria-busy="true"'), 1);
+  assert.ok(buttonTag(busy, "Открыть «Билеты 51–100»").includes('aria-busy="true"'));
+  for (const l of ["Билеты 1–50", "Билеты 101–120"]) {
+    const tag = buttonTag(busy, `Открыть «${l}»`);
+    assert.ok(tag.includes('aria-disabled="true"'), `${l} is off`);
+    assert.ok(tag.includes("aria-describedby"), `${l} says why to a screen reader`);
+  }
+  const undo = buttonTag(busy, undoThree);
+  assert.ok(undo.includes('aria-disabled="true"') && undo.includes("aria-describedby"), "undo is off with a reason");
+  assert.equal(count(busy, "Открывается другой файл."), 6, "tooltip and screen reader text of the two parts and the undo");
+  const idle = card(splitSet());
+  assert.equal(count(idle, 'aria-busy="true"'), 0);
+  assert.ok(!idle.includes("Открывается другой файл."), "no reason while nothing opens");
+  for (const l of labels) {
+    assert.ok(!buttonTag(idle, `Открыть «${l}»`).includes("disabled"), `${l} is on`);
+  }
+  assert.ok(!buttonTag(idle, undoThree).includes("disabled"));
+});
+
+test("another action that is not an open disables the icons without the «other file» reason", () => {
+  const html = card(splitSet(), { blocked: true });
+  for (const l of labels) {
+    assert.ok(buttonTag(html, `Открыть «${l}»`).includes('disabled=""'), l);
+  }
+  assert.ok(!html.includes("Открывается другой файл."));
+});
+
+test("a part's own line: the short success «Открыта копия.» and the binding's refusal; the note is not repeated", () => {
+  const results = {
+    "m-1": { kind: "ok", text: "Открыта копия файла: правки в Word в библиотеку не попадают." },
+    "m-3": { kind: "fail", text: "Файл не найден: возможно, его удалили." },
+  };
+  const html = card(splitSet(), { openResults: results });
+  assert.equal(count(html, "Открыта копия."), 1);
+  assert.equal(count(html, "Открыта копия файла"), 0, "the long success text is not in the list");
+  assert.equal(count(html, "Открывается копия файла: правки в Word в библиотеку не попадают."), 1, "the note stays once, above the list");
+  assert.equal(count(html, "Файл не найден: возможно, его удалили."), 1);
+  assert.ok(html.indexOf("Открыта копия.") < html.indexOf(">Билеты 51–100<"), "the line sits under its own part");
+  assert.ok(html.indexOf("Файл не найден") > html.indexOf(">Билеты 101–120<"));
+  assert.ok(html.includes('role="alert"'), "a failed part says why");
+  // The single-part card keeps the full text.
+  const one = card(splitSet([part(1, 50, "m-1")]), { openResults: { "m-1": results["m-1"] } });
+  assert.equal(count(one, "Открыта копия файла: правки в Word в библиотеку не попадают."), 1);
+  assert.ok(!one.includes("Открыта копия."));
+});
+
+test("the busy key names the material, so each part has its own state", () => {
+  assert.equal(openingId("open:m-2"), "m-2");
+  assert.equal(openingId("propose"), "");
+  assert.equal(openingId(""), "");
+});
+
+test("a moved or confirmed set loses its open lines: the ids of every part are dropped, others stay", () => {
+  assert.deepEqual(materialIdsOf(splitSet()), ["m-1", "m-2", "m-3"]);
+  assert.deepEqual(materialIdsOf(set({ status: "done", materialId: "m-9" })), ["m-9"]);
+  const results = { "m-1": { kind: "ok", text: "a" }, "m-2": { kind: "fail", text: "b" }, "x-1": { kind: "ok", text: "c" } };
+  assert.deepEqual(withoutResults(results, ["m-1", "m-2", "m-3"]), { "x-1": { kind: "ok", text: "c" } });
+  assert.deepEqual(withoutResults(results, []), results);
+  assert.equal(results["m-1"].text, "a", "the input is not changed");
+});
+
+test("the page drops the lines of a set after its action (undo, confirm, cancel all go through one place)", () => {
+  const page = readFileSync(new URL("../src/pages/TicketsPage.tsx", import.meta.url), "utf8");
+  assert.ok(page.includes("withoutResults("), "the page uses the helper");
+});
+
+test("student text of the parts is plain text: a hostile file name is not shown at all", () => {
+  const evil = '<img src=x onerror=alert(1)>.docx';
+  const html = card(splitSet([{ ...part(1, 50, "m-1"), name: evil }, { ...part(51, 100, "m-2"), name: evil }]));
+  assert.ok(!html.includes("<img") && !html.includes("onerror"));
 });
 
 test("the confirm card of a run over the cap shows the estimate and a disabled button until the consent", () => {
