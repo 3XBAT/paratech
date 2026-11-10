@@ -175,7 +175,7 @@ func unaryStep(ctx context.Context, gateway hubv1connect.GatewayServiceClient, m
 // stepError classifies a failed step like Complete; the Hub's own failed_precondition is a model turn it forgot. The
 // caller's ctx going away stays its error; a silent or overlong stream (the cause of callCtx) is a timeout.
 func stepError(ctx, callCtx context.Context, err error) error {
-	if perr := ctx.Err(); perr != nil {
+	if perr := callerEnd(ctx); perr != nil {
 		return fmt.Errorf("%s: %w", opAgentStep, perr)
 	}
 	if e := watchTimeout(callCtx, opAgentStep); e != nil {

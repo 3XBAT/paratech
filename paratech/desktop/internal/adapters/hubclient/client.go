@@ -199,7 +199,7 @@ func (c *Client) Complete(ctx context.Context, req values.LLMRequest) (values.LL
 	creq.Header().Set("Authorization", "Bearer "+key)
 	resp, err := gateway.Complete(callCtx, creq)
 	if err != nil {
-		if perr := ctx.Err(); perr != nil {
+		if perr := callerEnd(ctx); perr != nil {
 			return values.LLMResult{}, fmt.Errorf("%s: %w", opComplete, perr)
 		}
 		// Our own deadline: Connect may report it as unavailable or canceled, depending on where the call was.

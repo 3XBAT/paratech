@@ -73,7 +73,14 @@ func testEnv(t *testing.T) (env, *fakes) {
 	runner.PollInterval = 10 * time.Millisecond
 
 	return env{
-		lock:   acquireLock,
+		// openCore takes the lock right before buildCore opens the database: the place to seed it (dbseed_test.go).
+		lock: func(dataDir string) (instanceLock, error) {
+			l, err := acquireLock(dataDir)
+			if err == nil {
+				seedDatabase(t, dataDir)
+			}
+			return l, err
+		},
 		clock:  clock.System{},
 		local:  clock.Local{},
 		ids:    random.IDs{},

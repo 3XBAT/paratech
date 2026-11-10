@@ -48,7 +48,7 @@ func (c *Client) InspectMaterial(ctx context.Context, req inspection.Request) (s
 	creq.Header().Set("Authorization", "Bearer "+key)
 	resp, err := gateway.Complete(callCtx, creq)
 	if err != nil {
-		if perr := ctx.Err(); perr != nil {
+		if perr := callerEnd(ctx); perr != nil {
 			return "", fmt.Errorf("%s: %w", opInspect, perr)
 		}
 		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
