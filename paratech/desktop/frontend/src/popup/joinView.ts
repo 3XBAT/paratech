@@ -228,11 +228,14 @@ export function joinView(s: JoinState, blocked: boolean, running = false): JoinV
 }
 
 /**
- * «Открыть ещё раз» (about 134 px) does not fit a half-width column at larger text sizes: once the meeting was opened
- * the button and «Не записывать» each take a full row of the offer. «Подключиться» stays in the half row.
+ * Whenever the join button is shown in the offer view it takes its own row: «Начать запись», the join button and
+ * «Не записывать» are all full width, in every phase (ready, opening, opened). The layout must not change between phases:
+ * the rows are pinned to the bottom, so a row that moves puts another button under the pointer, and the second click of a
+ * double click starts the recording or skips the lesson. This deliberately reverses the TASK-370 choice («Подключиться»
+ * shares a row with «Не записывать»).
  */
-export function joinOnOwnRow(v: Pick<JoinView, "visible" | "opened">): boolean {
-  return v.visible && v.opened;
+export function joinOnOwnRow(v: Pick<JoinView, "visible">): boolean {
+  return v.visible;
 }
 
 /** The lesson prompt the button belongs to: an offered lesson while neither the recording nor the advice is shown. */

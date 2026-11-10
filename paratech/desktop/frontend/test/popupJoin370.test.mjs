@@ -15,7 +15,8 @@ import {
   StartedRecording,
   startedPromptId,
 } from "../.test-build/popup/joinView.js";
-import { dotClass, topClass } from "../.test-build/popup/view.js";
+import { dotClass, layoutNotes, textsLayout, topClass } from "../.test-build/popup/view.js";
+import { adviceTexts } from "../.test-build/sourcePicker/view.js";
 
 const src = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
 
@@ -565,15 +566,45 @@ test("Popup.tsx re-runs the started-prompt binding when a started prompt is regi
   assert.match(code, /setRunningFrom\(startedRec\.track\(recordingNow\)\);\s*\}, \[startedRec, recordingNow, startedSeq\]\);/);
 });
 
-test("joinOnOwnRow: only the opened button takes its own row; «Подключиться» stays in the half row", () => {
-  assert.equal(joinOnOwnRow(joinView({ shown: true, phase: "opened", subjectId: "s", problem: "" }, false)), true);
-  for (const phase of ["ready", "opening", "hidden"]) {
-    assert.equal(joinOnOwnRow(joinView({ shown: true, phase, subjectId: "s", problem: "" }, false)), false, phase);
+// Changed in the TASK-406 review: the join button takes its own row in EVERY phase while it is visible (it was: only when
+// opened), because a row that moves between phases puts another button under the pointer of a double click.
+test("joinOnOwnRow: the visible join button takes its own row in every phase; hidden or not shown: no", () => {
+  for (const phase of ["ready", "opening", "opened"]) {
+    assert.equal(joinOnOwnRow(joinView({ shown: true, phase, subjectId: "s", problem: "" }, false)), true, phase);
   }
+  assert.equal(joinOnOwnRow(joinView({ shown: true, phase: "hidden", subjectId: "s", problem: "" }, false)), false);
   assert.equal(joinOnOwnRow(joinView({ shown: false, phase: "opened", subjectId: "s", problem: "" }, false)), false);
 });
 
-test("popup.css: a long label never spills out of a popup button, and «Открыть ещё раз» and «Не записывать» get full rows", () => {
+test("the offer layout is identical for ready, opening and opened: same row structure, same texts layout (TASK-406 review)", () => {
+  const views = ["ready", "opening", "opened"].map((phase) => joinView({ shown: true, phase, subjectId: "s", problem: "" }, false));
+  assert.deepEqual(views.map((v) => joinOnOwnRow(v)), [true, true, true], "the same wide classes: start, join and skip");
+  // The confirmation text exists only in the opened phase, but must not change what the layout counts.
+  assert.deepEqual(views.map((v) => v.confirm !== ""), [false, false, true]);
+  const failed = joinView({ shown: true, phase: "ready", subjectId: "s", problem: "failed" }, false);
+  const gone = joinView({ shown: true, phase: "hidden", subjectId: "s", problem: "gone" }, false);
+  const bases = [[], [adviceTexts.browser], [adviceTexts.muted, adviceTexts.browser]];
+  for (const base of bases) {
+    const layouts = views.map((v) => {
+      const own = joinOnOwnRow(v);
+      const texts = [v.confirm, v.note, v.failure].filter((n) => n !== "");
+      return textsLayout(layoutNotes(base, texts, v.visible), "", own);
+    });
+    assert.deepEqual(layouts[1], layouts[0], `opening == ready for ${base.length} other messages`);
+    assert.deepEqual(layouts[2], layouts[0], `opened == ready for ${base.length} other messages`);
+    assert.equal(layouts[0].collapsed, true, "the advice is one ellipsis line while the join button is shown");
+    // The failure line appearing does not toggle it either.
+    const withFailure = textsLayout(layoutNotes(base, [failed.failure], failed.visible), "", joinOnOwnRow(failed));
+    assert.deepEqual(withFailure, layouts[0]);
+  }
+  // Without the join button the layout is the old one: the join texts count as they are (gone: no button, the note shows).
+  assert.equal(gone.visible, false);
+  assert.deepEqual(layoutNotes([], [gone.note], gone.visible), [gone.note]);
+  assert.deepEqual(layoutNotes([adviceTexts.browser], [], false), [adviceTexts.browser]);
+  assert.deepEqual(textsLayout(layoutNotes([adviceTexts.browser], [], false), "", false), { grows: false, clamp: true, collapsed: false });
+});
+
+test("popup.css: a long label never spills out of a popup button, and the join button and «Не записывать» get full rows", () => {
   const css = src("popup/popup.css");
   const guard = css.match(/\.popup \.pbtns \.btn-labels \{[^}]*\}/)?.[0] ?? "";
   assert.match(guard, /min-width: 0/);
@@ -601,7 +632,7 @@ test("Popup.tsx remembers the prompt of a successful start and asks the core wit
   assert.match(code, /joinView\(join, live \? false : m\.disabled, live\)/);
 });
 
-test("the buttons: «Начать запись» full width on top, then «Подключиться» and «Не записывать» side by side; no join keeps the old look", () => {
+test("the buttons: «Начать запись», the join button and «Не записывать» each on a full-width row; no join keeps the old look", () => {
   const code = src("popup/Popup.tsx");
   const row = code.slice(code.lastIndexOf('<div className="pbtns">'));
   const start = row.indexOf("m.buttons.map");
@@ -613,10 +644,11 @@ test("the buttons: «Начать запись» full width on top, then «По�
   assert.match(row, /busyLabel=\{callLinkTexts\.joining\}/);
   assert.match(row, /disabled=\{jv\.disabled\}/);
   assert.match(row, /disabled=\{m\.disabled\}/, "start and skip still follow the old rule");
-  // Changed in the TASK-406 review: once the meeting was opened «Открыть ещё раз» and «Не записывать» take full rows
-  // (it was: only start and close are full width, the join button never).
+  // Changed in the TASK-406 review: the join button is full width in every phase (it was: only once opened, as «Открыть
+  // ещё раз»; before that it shared a row with «Не записывать»), so no row moves under the pointer between phases.
   assert.match(row, /className=\{id === "start" \|\| id === "close" \|\| \(id === "skip" && joinOwnRow\) \? "wide" : undefined\}/);
-  assert.match(row.slice(join), /className=\{joinOwnRow \? "wide" : undefined\}/, "the join button is wide only as «Открыть ещё раз»");
+  assert.match(row.slice(join), /className="wide"/, "the join button is wide in every phase");
+  assert.doesNotMatch(row.slice(join), /className=\{joinOwnRow/, "its width does not depend on the phase");
   assert.match(code, /const joinOwnRow = joinShown && joinOnOwnRow\(jv\);/);
   assert.match(code, /textsLayout\(notes, errorLine, joinOwnRow\)/, "the 300 px layout counts the extra row");
   assert.doesNotMatch(row, /autoFocus|\.focus\(/, "no focus is taken");
@@ -639,7 +671,10 @@ test("the red banner carries only the page error and the start problem; the join
   assert.match(code, /const errorLine = error \|\| m\.problem;/);
   assert.doesNotMatch(code, /jv\.error/);
   // The notes count in the layout, the failure and the opened note too, so the buttons stay uncut.
-  assert.match(code, /\[picker\.autoNote, \.\.\.picker\.warnings, \.\.\.joinQuiet, joinFailure\]/);
+  // Changed in the TASK-406 review: the join texts go through layoutNotes, which counts one reserved line while the
+  // button is shown (it was: the notes list held the join texts directly, so the count changed with the phase).
+  assert.match(code, /\[picker\.autoNote, \.\.\.picker\.warnings\]/);
+  assert.match(code, /layoutNotes\(baseNotes, \[\.\.\.joinQuiet, joinFailure\]\.filter\(\(n\) => n !== ""\), joinShown\)/);
   assert.match(code, /textsLayout\(notes, errorLine, joinOwnRow\)/);
   assert.match(code, /const joinQuiet = showPicker \? \[jv\.confirm, jv\.note\]/);
   // Quiet: p-note (muted); the failure is the amber warning, last in the area. Both are live regions (TASK-406): drawn

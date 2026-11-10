@@ -41,7 +41,8 @@ test("only an error grows the window and shows the texts in full", () => {
   assert.deepEqual(textsLayout([adviceTexts.browser], error), { grows: true, clamp: false, collapsed: false });
 });
 
-// TASK-406 review: the join button on its own row (opened) adds a button row, so one other message already shrinks the advice.
+// TASK-406 review: the join button on its own row (in every phase, see joinOnOwnRow) adds a button row, so one other
+// message already shrinks the advice. The assertions are unchanged; the layout counts a reserved line (layoutNotes).
 test("with the join button on its own row one other message collapses the advice; an error still grows instead", () => {
   const one = [adviceTexts.browser];
   assert.equal(collapseAdvice(one, ""), false, "one row less: one message keeps the advice in full");

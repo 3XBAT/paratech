@@ -48,6 +48,7 @@ import {
   dotClass,
   elapsedText,
   HeightFitter,
+  layoutNotes,
   loadErrorText,
   popupModel,
   recordingInfo,
@@ -258,10 +259,10 @@ export function Popup() {
   const errorLine = error || m.problem;
   const joinQuiet = showPicker ? [jv.confirm, jv.note].filter((n) => n !== "") : [];
   const joinFailure = showPicker ? jv.failure : "";
-  const notes = showPicker
-    ? [picker.autoNote, ...picker.warnings, ...joinQuiet, joinFailure].filter((n) => n !== "")
-    : [];
-  // Once opened, the join button and «Не записывать» each take a full row: one more row, so the advice shrinks sooner.
+  const baseNotes = showPicker ? [picker.autoNote, ...picker.warnings].filter((n) => n !== "") : [];
+  const notes = layoutNotes(baseNotes, [...joinQuiet, joinFailure].filter((n) => n !== ""), joinShown);
+  // With the join button every button takes a full row in every phase (no row moves under the pointer): one more row, so
+  // the advice shrinks sooner; the join line counts as one reserved line, so the advice does not flash between phases.
   const joinOwnRow = joinShown && joinOnOwnRow(jv);
   const layout = textsLayout(notes, errorLine, joinOwnRow);
 
@@ -594,10 +595,10 @@ export function Popup() {
               {id === "start" ? m.startLabel : buttonLabels[id]}
             </Button>
             {id === "start" && joinShown && (
-              // Between «Начать запись» and «Не записывать»: «Подключиться» shares a row with the skip button, «Открыть
-              // ещё раз» is too long for a half row and takes its own. It never disables the start and takes no focus.
+              // Between «Начать запись» and «Не записывать», on its own row in every phase so that no row moves under the
+              // pointer. It never disables the start and takes no focus.
               <Button
-                className={joinOwnRow ? "wide" : undefined}
+                className="wide"
                 busy={jv.busy}
                 busyLabel={callLinkTexts.joining}
                 disabled={jv.disabled}

@@ -127,7 +127,7 @@ export const loadErrorText = "Не удалось загрузить предл�
  */
 export function collapseAdvice(warnings: readonly string[], error: string, joinOwnRow = false): boolean {
   // The join button on its own row (TASK-406) takes one more button row (about 33 px) from the texts: one other message
-  // is enough to shrink the advice then.
+  // is enough to shrink the advice then (the layout counts the reserved join line, see layoutNotes).
   const limit = joinOwnRow ? 1 : 2;
   return warnings.length + (error !== "" ? 1 : 0) >= limit;
 }
@@ -151,9 +151,24 @@ export interface TextsLayout {
   collapsed: boolean;
 }
 
+/** Stands for the join line (confirmation, gone note, failure) in the layout count while the join button is shown. */
+export const joinReservedLine = "join";
+
+/**
+ * The messages the layout counts. While the join button is shown the join line counts as exactly one reserved line, whatever
+ * its text is (the confirmation appears and goes between ready, opening and opened): the advice must not collapse and expand
+ * again as the phase changes. Without the button the join texts count as they are.
+ */
+export function layoutNotes(base: readonly string[], joinTexts: readonly string[], joinShown: boolean): string[] {
+  if (joinShown) {
+    return [...base, joinReservedLine];
+  }
+  return [...base, ...joinTexts];
+}
+
 /**
  * Layout of the text area: an error grows the window and shows everything in full; otherwise the 300 px rules hold.
- * `joinOwnRow`: «Открыть ещё раз» and «Не записывать» each take a full row (see joinOnOwnRow in joinView.ts).
+ * `joinOwnRow`: the join button, «Начать запись» and «Не записывать» each take a full row (see joinOnOwnRow in joinView.ts).
  */
 export function textsLayout(warnings: readonly string[], error: string, joinOwnRow = false): TextsLayout {
   const grows = error !== "";
