@@ -66,29 +66,54 @@ describe("fake server: delay, SSE and cited", () => {
 
   const names = (events: Event[]) => events.map((e) => e.event);
 
+  /** Polls a state condition; a slow runner only makes it take longer, never fail early. */
+  async function until(cond: () => boolean, what: string, deadlineMs = 5_000): Promise<void> {
+    const end = Date.now() + deadlineMs;
+    while (!cond()) {
+      if (Date.now() > end) {
+        throw new Error(`timed out after ${deadlineMs} ms waiting for: ${what}`);
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+
+  /** Waits for a response promise and drops its body, whatever the outcome. */
+  async function settled(p: Promise<Response>): Promise<void> {
+    const res = await p.catch(() => undefined);
+    await res?.body?.cancel().catch(() => undefined);
+  }
+
   describe("delayMs", () => {
     test("JSON answer comes no earlier than delayMs; the rule is consumed and recorded before the wait", async () => {
       fake.setScript([{ kind: "plain", match: "", reply: "поздно", delayMs: 250 }]);
       const t0 = Date.now();
       const pending = call(body("вопрос"));
-      await new Promise((r) => setTimeout(r, 60));
-      assert.equal(fake.remaining(), 0, "consumed at once");
-      assert.equal(fake.requests().length, 1);
-      assert.equal(fake.requests()[0]?.matched, true);
+      try {
+        await until(() => fake.requests().length === 1, "the request reaches the fake");
+        assert.equal(fake.remaining(), 0, "consumed at once");
+        assert.equal(fake.requests()[0]?.matched, true);
 
-      const res = await pending;
-      assert.ok(Date.now() - t0 >= 245, `answered after ${Date.now() - t0} ms`);
-      assert.equal(res.status, 200);
-      assert.equal(((await res.json()) as { content: Array<{ text: string }> }).content[0]?.text, "поздно");
+        const res = await pending;
+        assert.ok(Date.now() - t0 >= 245, `answered after ${Date.now() - t0} ms`);
+        assert.equal(res.status, 200);
+        assert.equal(((await res.json()) as { content: Array<{ text: string }> }).content[0]?.text, "поздно");
+      } finally {
+        await settled(pending); // a failed assertion must not leave a request in flight for the next test
+      }
     });
 
     test("the first byte of an SSE answer waits too", async () => {
       fake.setScript([{ kind: "plain", match: "", reply: "поздно", delayMs: 200, stream: { chunks: 2 } }]);
       const t0 = Date.now();
-      const res = await call(body("вопрос", { stream: true })); // fetch resolves on the headers: the first byte
-      assert.ok(Date.now() - t0 >= 195, `headers after ${Date.now() - t0} ms`);
-      assert.match(res.headers.get("content-type") ?? "", /^text\/event-stream/);
-      await res.text();
+      const pending = call(body("вопрос", { stream: true })); // fetch resolves on the headers: the first byte
+      try {
+        const res = await pending;
+        assert.ok(Date.now() - t0 >= 195, `headers after ${Date.now() - t0} ms`);
+        assert.match(res.headers.get("content-type") ?? "", /^text\/event-stream/);
+        await res.text();
+      } finally {
+        await settled(pending);
+      }
     });
 
     test("a client that gives up during the wait gets nothing written and the fake keeps working", async () => {
@@ -98,9 +123,16 @@ describe("fake server: delay, SSE and cited", () => {
       ]);
       const ac = new AbortController();
       const first = fetch(fake.url + "/v1/messages", { method: "POST", body: JSON.stringify(body("первый")), signal: ac.signal });
-      await new Promise((r) => setTimeout(r, 50));
+      try {
+        await until(() => fake.requests().length === 1, "the first request reaches the fake"); // abort only once it is inside the wait
+      } catch (err) {
+        ac.abort();
+        await first.catch(() => undefined);
+        throw err;
+      }
       ac.abort();
       await assert.rejects(first);
+      // The fake's 300 ms timer started before the request was seen here, so a 350 ms timer started now fires after it.
       await new Promise((r) => setTimeout(r, 350));
       const second = (await (await call(body("второй"))).json()) as { content: Array<{ text: string }> };
       assert.equal(second.content[0]?.text, "ok");
