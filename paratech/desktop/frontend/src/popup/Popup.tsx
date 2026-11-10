@@ -263,7 +263,7 @@ export function Popup() {
   const baseNotes = showPicker ? [picker.autoNote, ...picker.warnings].filter((n) => n !== "") : [];
   const notes = layoutNotes(baseNotes, [...joinQuiet, joinFailure].filter((n) => n !== ""), joinShown);
   // With the join button every button takes a full row in every phase (no row moves under the pointer): one more row, which
-  // the window grows for (windowGrows). The join line counts as one reserved line, so the advice does not flash between phases.
+  // the window grows for (windowGrows). The join line is a reserved line, not a message, so the advice does not flash between phases.
   const joinOwnRow = joinShown && joinOnOwnRow(jv);
   const layout = textsLayout(notes, errorLine);
 
@@ -553,8 +553,8 @@ export function Popup() {
             ))}
           {showPicker && jv.live && (
             // A live region drawn before its text (the confirmation or the gone note) so that it is announced. While the
-            // join button is shown it is one line high even empty (.reserved), so the confirmation does not make the texts
-            // jump; without the button (the gone note) an empty region takes no room.
+            // join button is shown (also for a gone link: the button stays, disabled) it is one line high even empty
+            // (.reserved), so the confirmation does not make the texts jump.
             <p
               className={
                 (layout.clamp ? "p-note join-note clamp" : "p-note join-note") + (joinShown ? " reserved" : "")

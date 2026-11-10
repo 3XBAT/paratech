@@ -15,7 +15,7 @@ import {
   StartedRecording,
   startedPromptId,
 } from "../.test-build/popup/joinView.js";
-import { dotClass, layoutNotes, textsLayout, topClass } from "../.test-build/popup/view.js";
+import { dotClass, layoutNotes, textsLayout, topClass, windowGrows } from "../.test-build/popup/view.js";
 import { adviceTexts } from "../.test-build/sourcePicker/view.js";
 
 const src = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
@@ -191,21 +191,83 @@ test("a failed or thrown open shows the failure text and the button is active ag
   }
 });
 
-test("no_link and not_found remove the button and say the link is gone, without offering to add one", async () => {
+// Changed in the TASK-406 review (final): the button no longer goes when the link is gone (it was: visible false, so
+// «Начать запись» slid under the pointer of a double click); it stays, disabled, with its last label and a hover text. The
+// note says where to add a link again (it was «Ссылки на пару уже нет.»).
+test("no_link and not_found keep the button in its row, disabled, and say the link is gone and where to add one", async () => {
   for (const problem of ["no_link", "not_found"]) {
-    const { ctl } = setup({ open: () => Promise.resolve({ problem }) });
+    const { ctl, opens } = setup({ open: () => Promise.resolve({ problem }) });
     ctl.offer("p1");
     await settle();
     await ctl.click();
     const v = joinView(ctl.state, false);
-    assert.equal(v.visible, false);
-    assert.equal(v.note, "Ссылки на пару уже нет.");
+    assert.equal(v.visible, true, "the row stays");
+    assert.equal(v.disabled, true);
+    assert.equal(v.busy, false);
+    assert.equal(v.label, "Подключиться", "the last label");
+    assert.equal(v.title, "Ссылки на пару уже нет. Её можно добавить на странице предмета.");
+    assert.equal(v.note, "Ссылки на пару уже нет. Её можно добавить на странице предмета.");
     assert.equal(v.failure, "");
     assert.equal(v.confirm, "");
-    assert.doesNotMatch(v.note, /Добавить/);
     await ctl.click();
-    assert.equal(ctl.state.phase, "hidden", "nothing to click");
+    assert.equal(opens.length, 1, "nothing to click");
+    assert.equal(ctl.state.phase, "hidden");
   }
+});
+
+test("a gone link keeps the last label of the button, or «Ссылки нет» when none is known", () => {
+  const gone = (extra) => joinView({ shown: true, phase: "hidden", subjectId: "", problem: "gone", ...extra }, false);
+  assert.equal(gone({ reopen: true }).label, "Открыть ещё раз");
+  assert.equal(gone({ reopen: false }).label, "Подключиться");
+  assert.equal(gone({}).label, "Ссылки нет");
+  assert.equal(gone({}).disabled, true);
+  assert.equal(joinView({ shown: true, phase: "hidden", subjectId: "", problem: "gone", reopen: true }, false, true).title, joinTexts.gone, "also while the recording runs");
+});
+
+test("the disabled button of a gone link stays until the next prompt or the next showing", async () => {
+  let linked = true;
+  const gone = () => {
+    linked = true;
+    return setup({
+      subject: () => Promise.resolve(linked ? "sub-1" : ""),
+      open: () => {
+        linked = false;
+        return Promise.resolve({ problem: "no_link" });
+      },
+    });
+  };
+
+  // After «Открыть ещё раз» the label stays «Открыть ещё раз».
+  let reply = { problem: "" };
+  const again = setup({ open: () => Promise.resolve(reply) });
+  again.ctl.offer("p1");
+  await settle();
+  await again.ctl.click();
+  reply = { problem: "no_link" };
+  await again.ctl.click();
+  assert.equal(joinView(again.ctl.state, false).label, "Открыть ещё раз");
+  assert.equal(joinView(again.ctl.state, false).visible, true);
+
+  // Closing keeps the row; the next showing reads afresh.
+  const a = gone();
+  a.ctl.offer("p1");
+  await settle();
+  await a.ctl.click();
+  a.ctl.closed();
+  assert.equal(joinView(a.ctl.state, false).visible, true, "closing keeps it");
+  // The popup is shown again: the row is read afresh (the link is still missing here: no button).
+  a.ctl.refresh();
+  await settle();
+  assert.deepEqual(a.ctl.state, { shown: true, phase: "hidden", subjectId: "", problem: "" });
+  assert.equal(joinView(a.ctl.state, false).visible, false);
+
+  // A new prompt starts clean.
+  const b = gone();
+  b.ctl.offer("p1");
+  await settle();
+  await b.ctl.click();
+  b.ctl.offer("p2");
+  assert.deepEqual(b.ctl.state, { shown: true, phase: "hidden", subjectId: "", problem: "" });
 });
 
 test("an unknown open problem counts as a failure that can be repeated", async () => {
@@ -293,7 +355,8 @@ test("«Открыть ещё раз» keeps its label when the second open fail
   reply = () => Promise.resolve({ problem: "no_link" });
   await ctl.click();
   const gone = joinView(ctl.state, false);
-  assert.deepEqual([gone.visible, gone.note, gone.live], [false, joinTexts.gone, true], "the note comes inside the live region that was there");
+  // Changed in the TASK-406 review (final): the button stays, disabled, with its last label (it was: visible false).
+  assert.deepEqual([gone.visible, gone.disabled, gone.label, gone.note, gone.live], [true, true, "Открыть ещё раз", joinTexts.gone, true], "the note comes inside the live region that was there");
 });
 
 // Changed in the TASK-406 review: while the recording runs the confirmation is the short «Ссылка открыта.» (it was "").
@@ -433,7 +496,9 @@ test("an open that ends after the popup closed is kept; one that ends after the 
   assert.deepEqual([two.ctl.state.phase, two.ctl.state.subjectId, two.ctl.state.problem], ["ready", "sub-2", ""]);
 });
 
-test("a link that vanished while the popup was open hides the button on the next read; the note of a gone link stays until cleared", async () => {
+// Changed in the TASK-406 review (final): the disabled button of a gone link stays (visible) until the next showing (refresh),
+// where it was: hidden at once with the note staying until cleared.
+test("a link that vanished while the popup was open hides the button on the next read; the gone button goes with the next showing", async () => {
   let subject = "sub-1";
   const { ctl } = setup({ subject: () => Promise.resolve(subject) });
   ctl.offer("p1");
@@ -454,12 +519,20 @@ test("a link that vanished while the popup was open hides the button on the next
   gone.ctl.offer("p1");
   await settle();
   await gone.ctl.click();
+  assert.equal(joinView(gone.ctl.state, false).visible, true, "the row stays after the failed open");
   gone.ctl.refresh();
   await settle();
-  assert.equal(joinView(gone.ctl.state, false).visible, false);
-  assert.equal(joinView(gone.ctl.state, false).note, joinTexts.gone, "a read that finds no link keeps the note");
-  gone.ctl.clearProblem();
+  assert.equal(joinView(gone.ctl.state, false).visible, false, "shown again: the link is not there, no button");
   assert.equal(joinView(gone.ctl.state, false).note, "");
+
+  const cleared = setup({ open: () => Promise.resolve({ problem: "no_link" }) });
+  cleared.ctl.offer("p1");
+  await settle();
+  await cleared.ctl.click();
+  assert.equal(joinView(cleared.ctl.state, false).note, joinTexts.gone);
+  cleared.ctl.clearProblem();
+  assert.equal(joinView(cleared.ctl.state, false).note, "");
+  assert.equal(joinView(cleared.ctl.state, false).visible, false, "a start was tried: the row goes");
 });
 
 // ---- placement and disabled rules ----
@@ -497,7 +570,7 @@ test("the confirmation is shown only while the meeting is open and the recording
   assert.equal(joinTexts.openedTitle, undefined, "the grey-button hover text is gone");
 });
 
-test("the live regions exist as soon as the button does, and stay for the gone note", () => {
+test("the live regions exist as soon as the button does, and stay for the gone note (the disabled button)", () => {
   const live = (s) => joinView({ shown: true, subjectId: "s", problem: "", ...s }, false).live;
   assert.equal(live({ phase: "ready" }), true, "drawn (empty) before any text");
   assert.equal(live({ phase: "opening" }), true);
@@ -576,32 +649,44 @@ test("joinOnOwnRow: the visible join button takes its own row in every phase; hi
   assert.equal(joinOnOwnRow(joinView({ shown: false, phase: "opened", subjectId: "s", problem: "" }, false)), false);
 });
 
-test("the offer layout is identical for ready, opening and opened: same row structure, same texts layout (TASK-406 review)", () => {
-  const views = ["ready", "opening", "opened"].map((phase) => joinView({ shown: true, phase, subjectId: "s", problem: "" }, false));
-  assert.deepEqual(views.map((v) => joinOnOwnRow(v)), [true, true, true], "the same wide classes: start, join and skip");
-  // The confirmation text exists only in the opened phase, but must not change what the layout counts.
-  assert.deepEqual(views.map((v) => v.confirm !== ""), [false, false, true]);
+// Changed in the TASK-406 review (final): «gone» joins the phases that must lay out identically (it was: the button went).
+test("the offer layout is identical for ready, opening, opened and gone: same row structure, same texts layout (TASK-406 review)", () => {
+  const states = [
+    { phase: "ready", problem: "" },
+    { phase: "opening", problem: "" },
+    { phase: "opened", problem: "" },
+    { phase: "hidden", problem: "gone", reopen: false },
+  ];
+  const views = states.map((s) => joinView({ shown: true, subjectId: "s", ...s }, false));
+  assert.deepEqual(views.map((v) => v.visible), [true, true, true, true], "the row never goes: the pointer stays on the same button");
+  assert.deepEqual(views.map((v) => joinOnOwnRow(v)), [true, true, true, true], "the same wide classes: start, join and skip");
+  // The window grows for the join row in all of them, nothing else differs in the structure.
+  assert.deepEqual(views.map((v) => windowGrows(true, false, joinOnOwnRow(v))), [true, true, true, true]);
+  // The text exists only in some phases, but must not change what the layout counts.
+  assert.deepEqual(views.map((v) => v.confirm !== "" || v.note !== ""), [false, false, true, true]);
   const failed = joinView({ shown: true, phase: "ready", subjectId: "s", problem: "failed" }, false);
-  const gone = joinView({ shown: true, phase: "hidden", subjectId: "s", problem: "gone" }, false);
+  const gone = views[3];
   const bases = [[], [adviceTexts.browser], [adviceTexts.muted, adviceTexts.browser]];
   for (const base of bases) {
     const layouts = views.map((v) => {
-      const own = joinOnOwnRow(v);
       const texts = [v.confirm, v.note, v.failure].filter((n) => n !== "");
       return textsLayout(layoutNotes(base, texts, v.visible), "");
     });
-    assert.deepEqual(layouts[1], layouts[0], `opening == ready for ${base.length} other messages`);
-    assert.deepEqual(layouts[2], layouts[0], `opened == ready for ${base.length} other messages`);
-    // Changed in the TASK-406 review (second pass): the original rule again (two or more messages, the reserved line
-    // included), it was: collapsed for every base because the join row lowered the limit to one.
-    assert.equal(layouts[0].collapsed, base.length >= 1, "the advice collapses only by the original rule");
+    for (const i of [1, 2, 3]) {
+      assert.deepEqual(layouts[i], layouts[0], `${states[i].phase}/${states[i].problem} == ready for ${base.length} other messages`);
+    }
+    // Changed in the TASK-406 review (final): the reserved join line is not a message, so the advice collapses by the
+    // original rule alone (two or more real messages); it was: base.length >= 1, the reserved line counted as one.
+    assert.equal(layouts[0].collapsed, base.length >= 2, "the advice collapses only by the original rule");
     // The failure line appearing does not toggle it either.
     const withFailure = textsLayout(layoutNotes(base, [failed.failure], failed.visible), "");
     assert.deepEqual(withFailure, layouts[0]);
   }
-  // Without the join button the layout is the old one: the join texts count as they are (gone: no button, the note shows).
-  assert.equal(gone.visible, false);
-  assert.deepEqual(layoutNotes([], [gone.note], gone.visible), [gone.note]);
+  // A browser warning next to the join button keeps the advice in full, as before TASK-406.
+  assert.equal(textsLayout(layoutNotes([adviceTexts.browser], [], true), "").collapsed, false);
+  assert.deepEqual(layoutNotes([adviceTexts.browser], [gone.note], true), [adviceTexts.browser], "the join line is not counted");
+  // Without the join button the layout is the old one: the join texts count as they are.
+  assert.deepEqual(layoutNotes([], [gone.note], false), [gone.note]);
   assert.deepEqual(layoutNotes([adviceTexts.browser], [], false), [adviceTexts.browser]);
   assert.deepEqual(textsLayout(layoutNotes([adviceTexts.browser], [], false), ""), { grows: false, clamp: true, collapsed: false });
 });

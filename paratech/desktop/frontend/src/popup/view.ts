@@ -128,7 +128,7 @@ export const loadErrorText = "Не удалось загрузить предл�
 export function collapseAdvice(warnings: readonly string[], error: string): boolean {
   // Changed in the TASK-406 review: the join button on its own row no longer lowers the limit. The window grows to its
   // natural height while that button is shown (see windowGrows), so only the max-height case needs the collapse, and the
-  // original rule serves it. The reserved join line counts as one message (layoutNotes), so it is the same in every phase.
+  // original rule serves it. The reserved join line is not a message (layoutNotes), so it is the same in every phase.
   return warnings.length + (error !== "" ? 1 : 0) >= 2;
 }
 
@@ -151,17 +151,16 @@ export interface TextsLayout {
   collapsed: boolean;
 }
 
-/** Stands for the join line (confirmation, gone note, failure) in the layout count while the join button is shown. */
-export const joinReservedLine = "join";
-
 /**
- * The messages the layout counts. While the join button is shown the join line counts as exactly one reserved line, whatever
- * its text is (the confirmation appears and goes between ready, opening and opened): the advice must not collapse and expand
- * again as the phase changes. Without the button the join texts count as they are.
+ * The messages the layout counts. While the join button is shown the join line (confirmation, gone note, failure) is a
+ * reserved line that takes room (.join-note.reserved) but is not a message: it counts for nothing, whatever its text is, so
+ * the advice neither collapses nor expands as the phase changes, and a browser warning next to the button keeps the advice
+ * in full as before TASK-406 (the window grows for the extra row, see windowGrows). Without the button the join texts count
+ * as they are.
  */
 export function layoutNotes(base: readonly string[], joinTexts: readonly string[], joinShown: boolean): string[] {
   if (joinShown) {
-    return [...base, joinReservedLine];
+    return [...base];
   }
   return [...base, ...joinTexts];
 }

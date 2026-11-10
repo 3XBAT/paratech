@@ -45,20 +45,21 @@ test("only an error grows the window and shows the texts in full", () => {
 
 // Changed in the TASK-406 review (second pass): the join button on its own row no longer lowers the collapse limit to 1
 // (it was: collapseAdvice/textsLayout took joinOwnRow and one other message collapsed the advice). The window grows for
-// that row instead (windowGrows), so only the original rule remains: two or more messages, the reserved join line included.
+// that row instead (windowGrows), so only the original rule remains: two or more messages (the reserved join line is not one).
 test("the advice collapses only by the original rule; the join row does not lower the limit", () => {
   const one = [adviceTexts.browser];
+  const two = [adviceTexts.muted, adviceTexts.browser];
   assert.equal(collapseAdvice(one, ""), false, "one message keeps the advice in full");
   assert.equal(collapseAdvice([], error), false);
   assert.equal(collapseAdvice(one, error), true);
-  assert.equal(collapseAdvice(one, "", true), false, "an extra argument (the old joinOwnRow) is ignored");
   assert.deepEqual(textsLayout(one, ""), { grows: false, clamp: true, collapsed: false });
-  assert.deepEqual(textsLayout(one, "", true), { grows: false, clamp: true, collapsed: false });
   assert.deepEqual(textsLayout([], ""), { grows: false, clamp: true, collapsed: false });
   assert.deepEqual(textsLayout(one, error), { grows: true, clamp: false, collapsed: false });
-  // With the join button the reserved line counts as one message: a browser warning next to it collapses, as before.
+  // Changed in the TASK-406 review (final): with the join button the reserved line is not a message, so a browser warning
+  // next to it keeps the advice in full, as before TASK-406 (it was: collapsed, the reserved line counted as one message).
   assert.deepEqual(textsLayout(layoutNotes([], [], true), ""), { grows: false, clamp: true, collapsed: false });
-  assert.deepEqual(textsLayout(layoutNotes(one, [], true), ""), { grows: false, clamp: true, collapsed: true });
+  assert.deepEqual(textsLayout(layoutNotes(one, [], true), ""), { grows: false, clamp: true, collapsed: false });
+  assert.deepEqual(textsLayout(layoutNotes(two, [], true), ""), { grows: false, clamp: true, collapsed: true }, "two real messages still collapse");
 });
 
 // TASK-406 review (second pass): the window may grow for the join button's extra row, in the offer view only.

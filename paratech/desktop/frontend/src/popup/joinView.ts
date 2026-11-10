@@ -8,15 +8,20 @@ import type { PromptView } from "../bindings/prompt.js";
 import { callLinkTexts } from "../callLinkView.js";
 
 export const joinTexts = {
-  /** The link was removed meanwhile (or the subject is gone): the button goes, «Начать запись» stays. */
-  gone: "Ссылки на пару уже нет.",
+  /**
+   * The link was removed meanwhile (or the subject is gone): the button stays in its row, disabled, so that no other
+   * button slides under the pointer (TASK-406 review); this text is its note and its hover text.
+   */
+  gone: "Ссылки на пару уже нет. Её можно добавить на странице предмета.",
+  /** The label of the disabled button when no earlier label is known. */
+  noLink: "Ссылки нет",
   /** The visible confirmation before the recording starts: the open does not start it. */
   opened: "Ссылка открыта. Запись пока не идёт.",
   /** While the recording runs the confirmation must not say it is not going. */
   openedRunning: callLinkTexts.opened,
 } as const;
 
-/** hidden: no button; ready: «Подключиться»; opening: the call runs; opened: «Открыть ещё раз», clickable. */
+/** hidden: no button (with problem "gone": the disabled button, see joinView); ready: «Подключиться»; opening: the call runs; opened: «Открыть ещё раз», clickable. */
 export type JoinPhase = "hidden" | "ready" | "opening" | "opened";
 
 export interface JoinState {
@@ -27,6 +32,16 @@ export interface JoinState {
   subjectId: string;
   /** The last open: "failed" can be repeated, "gone" cannot (no link any more). */
   problem: "" | "failed" | "gone";
+  /**
+   * Only while problem is "gone": the button that was clicked was «Открыть ещё раз» (true) or «Подключиться» (false), so the
+   * disabled button keeps its label. Absent: no earlier label is known.
+   */
+  reopen?: boolean;
+}
+
+/** The state without what only a gone link carries. */
+function dropGone(s: JoinState): JoinState {
+  return { shown: s.shown, phase: s.phase, subjectId: s.subjectId, problem: "" };
 }
 
 export const idleJoin: JoinState = { shown: false, phase: "hidden", subjectId: "", problem: "" };
@@ -89,6 +104,10 @@ export class JoinController {
 
   /** The core showed the popup again: the link may have changed, ask once more. */
   refresh(): void {
+    // The popup is shown anew, no pointer is on the row: the disabled button of a gone link goes now.
+    if (this.current.problem === "gone") {
+      this.set(dropGone(this.current));
+    }
     if (this.current.shown) {
       void this.load(this.promptId);
     }
@@ -107,7 +126,7 @@ export class JoinController {
   /** A start was tried: the text of an earlier open goes. */
   clearProblem(): void {
     if (this.current.problem !== "") {
-      this.set({ ...this.current, problem: "" });
+      this.set(dropGone(this.current));
     }
   }
 
@@ -137,7 +156,7 @@ export class JoinController {
     } else if (id === s.subjectId && s.phase === "opened") {
       return;
     } else {
-      this.set({ ...s, phase: "ready", subjectId: id, problem: id === s.subjectId ? s.problem : "" });
+      this.set({ ...dropGone(s), phase: "ready", subjectId: id, problem: id === s.subjectId ? s.problem : "" });
     }
   }
 
@@ -166,7 +185,8 @@ export class JoinController {
     if (problem === "") {
       this.set({ ...now, phase: "opened" });
     } else if (problem === "no_link" || problem === "not_found") {
-      this.set({ ...now, phase: "hidden", subjectId: "", problem: "gone" });
+      // phase "hidden" with problem "gone" is drawn as the disabled button (joinView), until the next prompt or showing.
+      this.set({ ...now, phase: "hidden", subjectId: "", problem: "gone", reopen: before === "opened" });
     } else {
       // A failed second open leaves the first one standing: the button keeps reading «Открыть ещё раз».
       this.set({ ...now, phase: before, problem: "failed" });
@@ -189,11 +209,11 @@ export interface JoinView {
   confirm: string;
   /** The amber line of a failed open (never the red banner, it must not grow the window); "" when none. */
   failure: string;
-  /** A quiet line: the link is gone; "" when none. */
+  /** A quiet line next to the disabled button: the link is gone; "" when none. */
   note: string;
   /**
    * The live regions of the texts area exist: they are drawn (empty) as soon as the button is, so a screen reader has
-   * them registered before a text appears in them. They stay for the gone note, which comes as the button goes.
+   * them registered before a text appears in them.
    */
   live: boolean;
 }
@@ -207,18 +227,24 @@ export interface JoinView {
 export function joinView(s: JoinState, blocked: boolean, running = false): JoinView {
   const opened = s.phase === "opened";
   const clickable = s.phase === "ready" || opened;
+  const gone = s.shown && s.problem === "gone";
   let title: string;
-  if (running) {
+  let label: string = opened ? callLinkTexts.joinAgain : callLinkTexts.join;
+  if (gone) {
+    // Stays in its row, disabled, with its last label: the row must not vanish under the pointer of a double click.
+    title = joinTexts.gone;
+    label = s.reopen === undefined ? joinTexts.noLink : s.reopen ? callLinkTexts.joinAgain : callLinkTexts.join;
+  } else if (running) {
     title = opened ? callLinkTexts.joinAgainRunningTitle : callLinkTexts.joinRunningTitle;
   } else {
     title = opened ? callLinkTexts.joinAgainTitle : callLinkTexts.joinTitle;
   }
   return {
-    visible: s.shown && s.phase !== "hidden",
+    visible: s.shown && (s.phase !== "hidden" || gone),
     busy: s.phase === "opening",
     disabled: !clickable || blocked,
     opened,
-    label: opened ? callLinkTexts.joinAgain : callLinkTexts.join,
+    label,
     title,
     confirm: s.shown && opened && s.problem === "" ? (running ? joinTexts.openedRunning : joinTexts.opened) : "",
     failure: s.shown && s.problem === "failed" ? callLinkTexts.openFailed : "",
