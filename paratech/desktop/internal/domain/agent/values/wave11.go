@@ -15,6 +15,8 @@ import (
 // CatalogVersion stays CatalogWave10 until the desktop switch task (TASK-443), so Tools, ParseTool, SpecOf and
 // ParseCall do not know these tools; ToolsAt(11) and ParseCallAt(…, 11) do. The order of the Hub golden
 // (shared/testdata/tool_catalog_v11.json, TASK-442) will win over the order here.
+// A reply with an invalid chat_title keeps the reply and drops the title; the Hub schema (TASK-442) must accept and
+// ignore it the same way or refuse it, the desktop drop is only defensive.
 
 // CatalogWave11 is the catalog version of wave 11.
 const CatalogWave11 = 11
@@ -277,25 +279,25 @@ func parseValue11(as ArgSpec, raw json.RawMessage) (argValue, error) {
 		if err != nil {
 			return v, err
 		}
-		v.str = string(e)
+		v.str, v.canon = string(e), string(e)
 	case ArgCallLink:
 		l, err := ParseCallLink(s)
 		if err != nil {
 			return v, err
 		}
-		v.str = string(l)
+		v.str, v.canon = string(l), string(l)
 	case ArgProfileValue:
 		p, err := ParseProfileValue(s)
 		if err != nil {
 			return v, err
 		}
-		v.str = string(p)
+		v.str, v.canon = string(p), string(p)
 	case ArgChatTitle:
 		t, err := ParseChatTitle(s)
 		if err != nil {
 			return v, err
 		}
-		v.str = string(t)
+		v.str, v.canon = string(t), string(t)
 	default:
 		return v, fmt.Errorf("%w: unsupported type", ErrInvalidArguments)
 	}
@@ -342,6 +344,8 @@ var setSetting11 = ToolSpec{tool: ToolSetSetting, args: []ArgSpec{
 // wave11 are the schemas of the wave-11 tools. set_teacher takes both the name and the address, as the subject page
 // (subject.NewTeacher needs both); the name is the student's words, a label.
 var wave11 = []ToolSpec{
+	// The name is a label of at most 80 characters on purpose (the page allows 200; a longer name needs its own type)
+	// and it is stored model text.
 	{tool: ToolSetTeacher, args: []ArgSpec{
 		id("subject", KindSubject, true), enum("role", true, teacherRoleValues()...), typed("name", ArgLabel, true),
 		typed("email", ArgEmail, true),

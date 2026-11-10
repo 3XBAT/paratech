@@ -17,7 +17,7 @@ func call11(t *testing.T, tool, args string) values.Call {
 
 // TestDecideWave11 is the ADR-0033 §11 table: a value the model typed is a C card, the library tools are U writes.
 func TestDecideWave11(t *testing.T) {
-	content := Facts{RemovesContent: true}
+	empty := Facts{SubjectEmpty: true}
 	tests := []struct {
 		name string
 		tool string
@@ -37,10 +37,12 @@ func TestDecideWave11(t *testing.T) {
 		{"remove a material", "remove_material", `{"material":"m1"}`, Facts{}, Decision{Rule: Rule{Class: ClassU}}, ReasonNone},
 		{"add an alias", "add_alias", `{"subject":"s1","suggestion":"g-1"}`, Facts{}, Decision{Rule: Rule{Class: ClassU}}, ReasonNone},
 		{"remove a folder", "remove_folder", `{"subject":"s1","folder":"f1"}`, Facts{}, Decision{Rule: Rule{Class: ClassU}}, ReasonNone},
-		{"remove an empty subject", "remove_subject", `{"subject":"s1"}`, Facts{}, Decision{Rule: Rule{Class: ClassU}}, ReasonNone},
-		{"remove a subject with notes or files", "remove_subject", `{"subject":"s1"}`, content,
+		{"remove a subject proven empty", "remove_subject", `{"subject":"s1"}`, empty, Decision{Rule: Rule{Class: ClassU}}, ReasonNone},
+		{"remove a subject, fact never set", "remove_subject", `{"subject":"s1"}`, Facts{},
 			Decision{Rule: Rule{Class: ClassU}}, ReasonRemovesContent},
-		{"content of another tool changes nothing", "remove_folder", `{"subject":"s1","folder":"f1"}`, content,
+		{"the empty fact changes no other tool", "remove_folder", `{"subject":"s1","folder":"f1"}`, empty,
+			Decision{Rule: Rule{Class: ClassU}}, ReasonNone},
+		{"the unset fact changes no other tool", "remove_folder", `{"subject":"s1","folder":"f1"}`, Facts{},
 			Decision{Rule: Rule{Class: ClassU}}, ReasonNone},
 		{"set a wave-11 setting", "set_setting", `{"setting":"notes_ocr","value":"local"}`, Facts{},
 			Decision{Rule: Rule{Class: ClassU}}, ReasonNone},
@@ -97,7 +99,7 @@ func TestRulesOfCatalog11(t *testing.T) {
 		if err != nil || r.Class != class || r.Paid || r.AlwaysPlan {
 			t.Fatalf("%s: %+v, %v", tool, r, err)
 		}
-		d, err := decide(tool, "", Facts{RemovesContent: true, HasCalendarEvent: true})
+		d, err := decide(tool, "", Facts{SubjectEmpty: true, HasCalendarEvent: true})
 		if err != nil || (d.Class == ClassC || d.Class == ClassUI) != (d.Card != "") {
 			t.Fatalf("%s: decision %+v, %v", tool, d, err)
 		}

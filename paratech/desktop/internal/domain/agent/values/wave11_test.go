@@ -2,6 +2,7 @@ package values
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -409,6 +410,35 @@ func TestWave11ValuesAreNotEchoed(t *testing.T) {
 	}
 	if got := fmt.Sprint(c); got != "call(c1 set_teacher args(email,name,role,subject))" {
 		t.Fatalf("call prints %q", got)
+	}
+}
+
+// TestParseValue11Canon: every typed wave-11 value has its own canonical form, so a plan step never matches another
+// value.
+func TestParseValue11Canon(t *testing.T) {
+	tests := []struct {
+		typ  ArgType
+		a, b string
+	}{
+		{ArgEmail, `"a@example.invalid"`, `"b@example.invalid"`},
+		{ArgCallLink, `"https://meet.example.invalid/a"`, `"https://meet.example.invalid/b"`},
+		{ArgProfileValue, `"ИВТ-21"`, `"ИВТ-22"`},
+		{ArgChatTitle, `"Матан"`, `"Физика"`},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.typ), func(t *testing.T) {
+			a, err := parseValue11(ArgSpec{Type: tt.typ}, json.RawMessage(tt.a))
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := parseValue11(ArgSpec{Type: tt.typ}, json.RawMessage(tt.b))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if a.canon == "" || a.canon == b.canon {
+				t.Fatalf("canon %q and %q must be set and differ", a.canon, b.canon)
+			}
+		})
 	}
 }
 

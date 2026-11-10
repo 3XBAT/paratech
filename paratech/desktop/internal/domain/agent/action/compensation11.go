@@ -17,8 +17,8 @@ const (
 	CompRemoveAlias     CompensationKind = "remove_alias"     // add_alias: the alias it added is removed
 	CompRecreateFolder  CompensationKind = "recreate_folder"  // remove_folder: the same ID and name again
 	// CompRestoreSubject undoes remove_subject: RestoreSubject of the soft-removed subject. The use case keeps a removed
-	// subject for 3 days (TASK-288) and refuses the restore after; an empty subject is removed softly too, so it has the
-	// same Undo.
+	// subject for 3 days (TASK-288) and refuses the restore after. It works only for a soft removal (DiscardSubject), so
+	// the dispatch (TASK-329) must use that path for every remove_subject.
 	CompRestoreSubject CompensationKind = "restore_subject"
 )
 

@@ -83,7 +83,7 @@ var rules = map[values.Tool]Rule{
 
 	// Catalog v11 (ADR-0033 §8, §11), declared before it is served. A value the model typed is always C: its card shows
 	// the exact value that will be saved. The library tools are U with an Undo; remove_subject of a subject with notes
-	// or files always goes through a plan (Facts.RemovesContent).
+	// or files always goes through a plan unless the case proved it empty (Facts.SubjectEmpty).
 	values.ToolSetTeacher:      {Class: ClassC},
 	values.ToolClearTeacher:    {Class: ClassC},
 	values.ToolSetProfileField: {Class: ClassC},
@@ -129,9 +129,10 @@ type Facts struct {
 	// HasCalendarEvent: the assignment a change_assignment{delete} names has a Google Calendar event, read from local
 	// data by the case (never from the model): deleting it then needs «Да» (ADR-0033 О-6 б).
 	HasCalendarEvent bool
-	// RemovesContent: the subject remove_subject names holds notes or files, read from local data by the case (never
-	// from the model): removing it then always needs a plan (docs/agent-parity.md §1). An empty subject is a plain write.
-	RemovesContent bool
+	// SubjectEmpty: the subject remove_subject names has no notes and no files, read from local data by the case (never
+	// from the model). Fail-closed: unless it is set, removing a subject always needs a plan (docs/agent-parity.md §1);
+	// an empty subject is a plain write. Ignored for every other tool.
+	SubjectEmpty bool
 }
 
 // FreeTopic reports whether call is a work on a free topic: triage_assignment with a topic instead of an assignment
@@ -151,7 +152,7 @@ const (
 	ReasonAlwaysPlan  Reason = "always_plan"
 	ReasonTriage      Reason = "triage_not_full"
 	ReasonReplaces    Reason = "replaces_ready"
-	// ReasonRemovesContent: remove_subject of a subject with notes or files (catalog v11).
+	// ReasonRemovesContent: remove_subject of a subject not proven empty (catalog v11).
 	ReasonRemovesContent Reason = "removes_content"
 )
 
@@ -173,7 +174,7 @@ func NeedsPlan(t values.Tool, f Facts) (Reason, error) {
 		return ReasonAlwaysPlan, nil
 	case f.ReplacesReady:
 		return ReasonReplaces, nil
-	case f.RemovesContent && t == values.ToolRemoveSubject:
+	case !f.SubjectEmpty && t == values.ToolRemoveSubject:
 		return ReasonRemovesContent, nil
 	case f.WritesBefore > 0:
 		return ReasonSecondWrite, nil
