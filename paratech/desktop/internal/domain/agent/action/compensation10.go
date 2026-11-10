@@ -36,9 +36,11 @@ const (
 var noUndoTools = map[values.Tool]bool{values.ToolRecording: true}
 
 // priorPinned are the kinds whose whole prior state is read before the use case runs: Complete and Restore accept
-// only the compensation the intent journaled as its Prior.
+// only the compensation the intent journaled as its Prior. Wave 11 (compensation11.go): the prior place, link, alias
+// and folder of the library tools.
 var priorPinned = map[CompensationKind]bool{
 	CompRevertAssignment: true, CompReanchorNote: true, CompRetitleNote: true, CompRestoreSetting: true,
+	CompPlaceBack: true, CompRelinkMaterial: true, CompRemoveAlias: true, CompRecreateFolder: true,
 }
 
 // checkTrusted ties a compensation to what the journal recorded: a pinned kind equals Intent.Prior, and a list of
@@ -333,7 +335,7 @@ func targetOfWave10(c Compensation) values.Ref {
 	case StopRecording:
 		return v.Recording
 	}
-	return values.Ref{}
+	return targetOfWave11(c)
 }
 
 // oneLine reports whether s is valid UTF-8 of at most maxRunes characters without control characters.

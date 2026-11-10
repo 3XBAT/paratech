@@ -58,6 +58,9 @@ var cards = map[values.Tool]values.CardKind{
 	values.ToolReply:                       values.CardReply,
 	values.ToolCannotDo:                    values.CardCannotDo,
 	values.ToolOfferButton:                 values.CardOfferButton,
+	values.ToolSetTeacher:                  values.CardTeacher,
+	values.ToolClearTeacher:                values.CardTeacher,
+	values.ToolSetProfileField:             values.CardProfileField,
 }
 
 type actionRule func(Decision, Facts) Decision

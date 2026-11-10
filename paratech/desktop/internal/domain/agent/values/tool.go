@@ -54,7 +54,8 @@ const (
 func Tools() []Tool { return ToolsAt(CatalogVersion) }
 
 // ToolsAt returns every tool of catalog version v in catalog order. Versions below CatalogWave10 are catalog v9 (the
-// tools of v4 to v9 are the same); versions from CatalogWave10 on are catalog v10, the current one.
+// tools of v4 to v9 are the same); CatalogWave10 is catalog v10, the current one; versions from CatalogWave11 on are
+// catalog v11, declared but not served yet (wave11.go).
 func ToolsAt(v int) []Tool { return toolsOf(specsAt(v)) }
 
 // RetiredTools returns the tools that left the catalog but may still be named by stored data.
@@ -194,9 +195,12 @@ func storedSpecOf(t Tool) (ToolSpec, bool) {
 	return findSpec(retired, t)
 }
 
-// specsAt returns the schemas of catalog version v: v9 below CatalogWave10, else v10.
+// specsAt returns the schemas of catalog version v: v9 below CatalogWave10, v10, then v11 from CatalogWave11 on.
 func specsAt(v int) []ToolSpec {
-	if v >= CatalogWave10 {
+	switch {
+	case v >= CatalogWave11:
+		return catalog11
+	case v >= CatalogWave10:
 		return catalog10
 	}
 	return catalog

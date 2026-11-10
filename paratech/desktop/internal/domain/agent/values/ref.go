@@ -30,13 +30,16 @@ const (
 	// proposal (the row a choice on its card refers to).
 	KindNote          IDKind = "note"
 	KindScheduleGroup IDKind = "schedule_group"
+	// Since catalog v11: a subject string the library suggests (SuggestSubjects lists names, not IDs: the desktop
+	// derives the ID of each, as of a schedule group), so add_alias never takes the model's text.
+	KindSuggestion IDKind = "suggestion"
 )
 
 // IDKinds returns every kind.
 func IDKinds() []IDKind {
 	return []IDKind{
 		KindSubject, KindFolder, KindLesson, KindRecording, KindMaterial, KindUpload, KindAssignment, KindJob,
-		KindWork, KindVersion, KindProposal, KindPreview, KindAnswer, KindNote, KindScheduleGroup,
+		KindWork, KindVersion, KindProposal, KindPreview, KindAnswer, KindNote, KindScheduleGroup, KindSuggestion,
 	}
 }
 

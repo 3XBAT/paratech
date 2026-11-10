@@ -288,6 +288,10 @@ func parseArgs(spec ToolSpec, raw []byte, cat int) (Args, error) {
 			continue
 		}
 		v, err := parseValue(as, rv, cat)
+		if err != nil && as.Type == ArgChatTitle {
+			// A title that is not plain text is dropped: the chat keeps its name, the reply still shows (TASK-330).
+			continue
+		}
 		if err != nil {
 			return Args{}, fmt.Errorf("%w: %s: %w", ErrInvalidArguments, name, err)
 		}
@@ -514,7 +518,7 @@ func parseValue(as ArgSpec, raw json.RawMessage, cat int) (argValue, error) {
 		}
 		v.questions = qs
 	default:
-		return v, fmt.Errorf("%w: unsupported type", ErrInvalidArguments)
+		return parseValue11(as, raw)
 	}
 	return v, nil
 }

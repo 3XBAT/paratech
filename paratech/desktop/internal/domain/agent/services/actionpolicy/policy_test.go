@@ -9,7 +9,7 @@ import (
 
 func TestEveryToolHasARule(t *testing.T) {
 	// The newest declared catalog: it holds every tool of the served one (catalogs are additive, ADR-0033 §5).
-	tools := append(values.ToolsAt(values.CatalogWave10), values.RetiredTools()...)
+	tools := append(values.ToolsAt(values.CatalogWave11), values.RetiredTools()...)
 	for _, tool := range tools {
 		r, err := Of(tool)
 		if err != nil {

@@ -64,7 +64,8 @@ const (
 	StateAll  = "all"
 )
 
-// Setting is a setting set_setting may change (wave 10: the three toggles of «Настройки»).
+// Setting is a setting set_setting may change (wave 10: the three toggles of «Настройки»; wave 11: two more,
+// SettingsAt).
 type Setting string
 
 // Settings of wave 10.
@@ -80,18 +81,21 @@ const (
 	SettingOff = "off"
 )
 
-// Settings returns every setting of wave 10.
-func Settings() []Setting {
-	return []Setting{SettingRecordingPrompts, SettingACPowerOnly, SettingRecognitionLoad}
-}
+// Settings returns every declared setting (SettingsAt of the newest catalog), so stored actions of any catalog
+// restore; set_setting of a catalog takes only SettingsAt(v).
+func Settings() []Setting { return SettingsAt(CatalogWave11) }
 
 // Valid reports whether s is one of the settings.
 func (s Setting) Valid() bool { return slices.Contains(Settings(), s) }
 
-// SettingValues returns the values setting s takes: on/off for a toggle, the load modes for recognition_load; nil
-// for an unknown setting.
+// SettingValues returns the values setting s takes: on/off for a toggle, the load modes for recognition_load, the
+// modes of the wave-11 settings; nil for an unknown setting.
 func SettingValues(s Setting) []string {
 	switch s {
+	case SettingCalendarOnDueChange:
+		return []string{CalendarAsk, CalendarUpdate, CalendarKeep}
+	case SettingNotesOCR:
+		return []string{SettingOff, NotesOCRLocal}
 	case SettingRecordingPrompts, SettingACPowerOnly:
 		return []string{SettingOn, SettingOff}
 	case SettingRecognitionLoad:
@@ -108,11 +112,11 @@ func SettingValues(s Setting) []string {
 // ValidSettingValue reports whether v is a value of setting s.
 func ValidSettingValue(s Setting, v string) bool { return slices.Contains(SettingValues(s), v) }
 
-// settingValueEnum is the value enum of set_setting: every value of any setting, each once; the pair is checked by
-// checkSetting.
-func settingValueEnum() []string {
+// settingValueEnum is the value enum of set_setting of catalog v: every value of its settings, each once; the pair is
+// checked by checkSetting.
+func settingValueEnum(v int) []string {
 	var out []string
-	for _, s := range Settings() {
+	for _, s := range SettingsAt(v) {
 		for _, v := range SettingValues(s) {
 			if !slices.Contains(out, v) {
 				out = append(out, v)
@@ -205,9 +209,9 @@ func offerActionValues() []string {
 	return out
 }
 
-func settingNames() []string {
-	out := make([]string, 0, len(Settings()))
-	for _, s := range Settings() {
+func settingNames(v int) []string {
+	out := make([]string, 0, len(SettingsAt(v)))
+	for _, s := range SettingsAt(v) {
 		out = append(out, string(s))
 	}
 	return out
@@ -243,7 +247,7 @@ var wave10 = []ToolSpec{
 	}},
 	{tool: ToolGetSettings},
 	{tool: ToolSetSetting, args: []ArgSpec{
-		enum("setting", true, settingNames()...), enum("value", true, settingValueEnum()...),
+		enum("setting", true, settingNames(CatalogWave10)...), enum("value", true, settingValueEnum(CatalogWave10)...),
 	}},
 	{tool: ToolQuotaStatus},
 	{tool: ToolRecording, args: []ArgSpec{enum(ArgAction, true, RecordingStart, RecordingStop)}},
@@ -322,6 +326,8 @@ func checkToolArgs(t Tool, vals map[string]argValue, open []string) error {
 		return checkAction(t, vals, open, offerRules)
 	case ToolSetSetting:
 		return checkSetting(vals)
+	case ToolSetProfileField:
+		return checkProfileField(vals)
 	}
 	return nil
 }
