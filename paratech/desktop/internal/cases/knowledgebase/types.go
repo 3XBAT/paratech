@@ -4,7 +4,17 @@ import (
 	"log/slog"
 
 	kb "paratech/desktop/internal/domain/coursework/services/knowledgebase"
+	"paratech/desktop/internal/domain/library/subject"
+	"paratech/desktop/internal/domain/shared"
 )
+
+// FolderLesson is a recorded lesson of a library subject shown as a link row in one of its system folders
+// (ADR-0034 amendment 2026-11-10). Nothing of it is stored.
+type FolderLesson struct {
+	Folder shared.FolderID // subject.SystemFolderID of the subject's system folder
+	System subject.System  // SystemLectures | SystemSeminars | SystemLabs
+	Lesson kb.Lesson       // a recorded lesson, as Lessons returns it (no notes)
+}
 
 // SearchHit is one place a query was found and the lesson it is in.
 type SearchHit struct {
