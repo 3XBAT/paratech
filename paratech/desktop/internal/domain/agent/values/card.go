@@ -29,6 +29,10 @@ const (
 	CardScheduleSubjects CardKind = "schedule_subjects" // the desktop-built subjects-from-schedule package, one «Да»
 	CardDeleteAssignment CardKind = "delete_assignment" // «Да» to delete an assignment that has a Google event (О-6 б)
 	CardOfferButton      CardKind = "offer_button"      // the page's own button; the click is the action
+
+	// Catalog v11 (ADR-0033 §8, §11): «Да» with the exact value that will be saved, from the stored proposal.
+	CardTeacher      CardKind = "teacher"       // set_teacher and clear_teacher of a subject and role
+	CardProfileField CardKind = "profile_field" // set_profile_field
 )
 
 // Card is a typed card. Texts other than the model fields of show_plan, reply, cannot_do and ask_questions are

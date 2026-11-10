@@ -14,6 +14,7 @@ export const methods = {
   search: "paratech/desktop/internal/input/wails.KnowledgeBaseService.Search",
   exportSubject: "paratech/desktop/internal/input/wails.KnowledgeBaseService.ExportSubject",
   setLessonInfo: "paratech/desktop/internal/input/wails.KnowledgeBaseService.SetLessonInfo",
+  folderLessons: "paratech/desktop/internal/input/wails.KnowledgeBaseService.FolderLessons",
 } as const;
 
 /** Messages of the errors the Go binding returns (checked by a Go test); the page shows them as they are. */
@@ -26,6 +27,7 @@ export const errorMessages = {
   notFinished: "Запись ещё идёт: поправить её можно после окончания.",
   busy: "Запись сейчас меняется. Попробуйте ещё раз.",
   unavailable: "Не удалось прочитать базу знаний. Попробуйте ещё раз.",
+  invalidSubjectId: "Неверный идентификатор предмета.",
 } as const;
 
 /** A group of lessons of one subject; key "" with noSubject is «Без предмета» (name holds that text). */
@@ -148,6 +150,19 @@ export interface KnowledgeSearchResult {
   hits: KnowledgeHit[];
   /** More places may exist than are listed. */
   truncated: boolean;
+}
+
+/** The system folders a recorded lesson shows in, by its kind (ADR-0034 amendment 2026-11-10). */
+export type LessonFolderSystem = "lectures" | "seminars" | "labs";
+
+export const lessonFolderSystems: readonly LessonFolderSystem[] = ["lectures", "seminars", "labs"];
+
+/** A recorded lesson shown as a link row in a system folder of its subject; nothing of it is stored. */
+export interface KnowledgeFolderLesson {
+  folderId: string;
+  system: LessonFolderSystem;
+  /** A recording (anchor "recording"), without notes. */
+  lesson: KnowledgeLesson;
 }
 
 export type ExportStatus = "saved" | "cancelled" | "failed";
@@ -329,6 +344,21 @@ export function parseSearchResult(raw: unknown): KnowledgeSearchResult {
   return { hits: list(r.hits, `${w}: hits`).map(parseHit), truncated: bool(r, "truncated", w) };
 }
 
+export function parseFolderLesson(raw: unknown): KnowledgeFolderLesson {
+  const w = "knowledge folder lesson";
+  const r = record(raw, w);
+  const folderId = str(r, "folderId", w);
+  if (folderId === "") {
+    throw new Error(`${w}: folderId is empty`);
+  }
+  const system = oneOf(r, "system", lessonFolderSystems, w);
+  const lesson = parseLesson(r.lesson);
+  if (lesson.anchor !== "recording") {
+    throw new Error(`${w}: the lesson is not a recording`);
+  }
+  return { folderId, system, lesson };
+}
+
 export function parseExportResult(raw: unknown): ExportResult {
   const w = "subject export result";
   const r = record(raw, w);
@@ -357,6 +387,8 @@ export interface KnowledgeBaseApi {
   exportSubject(subjectKey: string): Promise<ExportResult>;
   /** Sets the subject and the kind of a recording; "" clears that correction. */
   setLessonInfo(recordingId: string, subject: string, kind: LessonKind): Promise<KnowledgeLesson>;
+  /** The recorded lessons of a library subject with the system folder each shows in, newest first. */
+  folderLessons(subjectId: string): Promise<KnowledgeFolderLesson[]>;
 }
 
 /** Builds the knowledge base API over a call function (the Wails runtime in the app, a fake in tests). */
@@ -370,5 +402,6 @@ export function knowledgeBaseApi(call: CallByName): KnowledgeBaseApi {
     search: async (query) => parseSearchResult(await call(methods.search, query)),
     exportSubject: async (key) => parseExportResult(await call(methods.exportSubject, key)),
     setLessonInfo: async (id, subject, kind) => parseLesson(await call(methods.setLessonInfo, id, subject, kind)),
+    folderLessons: async (id) => list(await call(methods.folderLessons, id), "knowledge folder lessons").map(parseFolderLesson),
   };
 }
