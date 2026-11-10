@@ -2,6 +2,7 @@ package wails
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -112,6 +113,48 @@ func TestTicketServiceMapsTheSet(t *testing.T) {
 	none, err := NewTicketService(&fakeTickets{}, discard()).List(t.Context(), "sub1")
 	if err != nil || none == nil || len(none) != 0 {
 		t.Fatalf("no sets = %v, %v", none, err)
+	}
+}
+
+// A set filed in parts maps every part, the first also as materialId/result; a set not done has files [].
+func TestTicketServiceMapsTheFiles(t *testing.T) {
+	ref, err := shared.NewArtifactRef(shared.ArtifactMaterials, strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeTickets{view: tickets.View{
+		ID: "ts1", Status: ticketset.StatusDone, Material: "file1", Result: ref,
+		Files: []tickets.FileView{
+			{Material: "file1", Result: ref, From: 1, To: 50, Name: "Билеты Физика 1–50.docx"},
+			{Material: "file2", Result: ref, From: 51, To: 100, Name: "Билеты Физика 51–100.docx"},
+		},
+	}}
+	got, err := NewTicketService(f, discard()).Get(t.Context(), "ts1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []TicketFile{
+		{MaterialID: "file1", From: 1, To: 50, Name: "Билеты Физика 1–50.docx"},
+		{MaterialID: "file2", From: 51, To: 100, Name: "Билеты Физика 51–100.docx"},
+	}
+	if fmt.Sprint(got.Files) != fmt.Sprint(want) || got.MaterialID != "file1" || got.Result != ref.String() {
+		t.Fatalf("files %+v, material %q", got.Files, got.MaterialID)
+	}
+
+	// A set filed before TASK-402: one file, the whole range from the use case, no name.
+	f.view.Files = []tickets.FileView{{Material: "file1", Result: ref, From: 1, To: 3}}
+	if got, _ := NewTicketService(f, discard()).Get(t.Context(), "ts1"); len(got.Files) != 1 ||
+		got.Files[0] != (TicketFile{MaterialID: "file1", From: 1, To: 3}) {
+		t.Fatalf("legacy files %+v", got.Files)
+	}
+
+	empty, err := NewTicketService(&fakeTickets{}, discard()).Get(t.Context(), "ts1")
+	if err != nil || empty.Files == nil {
+		t.Fatalf("files of a set not done = %+v, %v", empty.Files, err)
+	}
+	raw, err := json.Marshal(empty)
+	if err != nil || !strings.Contains(string(raw), `"files":[]`) {
+		t.Fatalf("json %s, %v", raw, err)
 	}
 }
 

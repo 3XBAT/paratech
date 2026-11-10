@@ -165,7 +165,7 @@ func TestRunStepByStep(t *testing.T) {
 	if second.Ticket != 2 || second.Key == first.Key {
 		t.Fatalf("second step = %+v", second)
 	}
-	if err := s.Finish(File{Material: "m1", Artifact: "materials/" + strings.Repeat("a", 64)}, t0); !errors.Is(err, ErrStaleStep) {
+	if err := s.Finish([]File{{Material: "m1", Artifact: "materials/" + strings.Repeat("a", 64)}}, t0); !errors.Is(err, ErrStaleStep) {
 		t.Fatalf("finish before every ticket = %v", err)
 	}
 	if err := s.Record(second, Result{Coverage: CoverageNotCovered}, t0); err != nil {
@@ -174,18 +174,172 @@ func TestRunStepByStep(t *testing.T) {
 	if done, total := s.Progress(); done != 2 || total != 2 || s.Next().Kind != StepAssemble {
 		t.Fatalf("progress %d/%d, next %+v", done, total, s.Next())
 	}
-	if err := s.Finish(File{Material: "m1", Artifact: "not a ref"}, t0); !errors.Is(err, ErrInvalidSet) {
+	if err := s.Finish([]File{{Material: "m1", Artifact: "not a ref"}}, t0); !errors.Is(err, ErrInvalidSet) {
 		t.Fatalf("bad artifact = %v", err)
 	}
+	if err := s.Finish(nil, t0); !errors.Is(err, ErrInvalidSet) {
+		t.Fatalf("finish without a file = %v", err)
+	}
 	ref := validArtifact(t)
-	if err := s.Finish(File{Material: "m1", Artifact: ref}, t0); err != nil || s.Status() != StatusDone {
+	if err := s.Finish([]File{{Material: "m1", Artifact: ref}}, t0); err != nil || s.Status() != StatusDone {
 		t.Fatalf("finish = %v, %s", err, s.Status())
+	}
+	if f := s.Files(); len(f) != 1 || f[0].Material != "m1" {
+		t.Fatalf("files = %+v", f)
 	}
 	if r := s.Report(); r != (Report{Partial: 1, NotCovered: 1}) {
 		t.Fatalf("report = %+v", r)
 	}
 	if err := s.Cancel(t0); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("cancel a done set = %v", err)
+	}
+}
+
+// assembling returns a started set of the tickets numbered nums, every one answered: the file step is due.
+func assembling(t *testing.T, nums ...int) *Set {
+	t.Helper()
+	var its []Item
+	for _, n := range nums {
+		its = append(its, Item{Number: n, Title: fmt.Sprintf("Вопрос %d", n)})
+	}
+	s, err := New("ts1", "sub1", "", its, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Confirm(s.Budget().OverCap, t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(t0); err != nil {
+		t.Fatal(err)
+	}
+	for s.Next().Kind == StepTicket {
+		if err := s.Record(s.Next(), Result{Coverage: CoverageNotCovered}, t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return s
+}
+
+// part is a file of the tickets from..to.
+func part(t *testing.T, id string, from, to int) File {
+	t.Helper()
+	ref, err := shared.NewArtifactRef(shared.ArtifactMaterials, strings.Repeat(id[len(id)-1:], 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return File{Material: shared.MaterialID(id), Artifact: ref.String(), From: from, To: to, Name: fmt.Sprintf("Билеты %d–%d.docx", from, to)}
+}
+
+// The parts of a set too large for one document cover its tickets in order; anything else is refused.
+func TestFinishWithParts(t *testing.T) {
+	nums := []int{1, 2, 3, 5, 8, 9}
+	long := part(t, "m1", 1, 3)
+	long.Name = strings.Repeat("я", MaxFileNameBytes/2) + ".docx"
+	tests := []struct {
+		name  string
+		files []File
+		ok    bool
+	}{
+		{"one part", []File{part(t, "m1", 1, 9)}, true},
+		{"two parts", []File{part(t, "m1", 1, 3), part(t, "m2", 5, 9)}, true},
+		{"one ticket each", []File{part(t, "m1", 1, 2), part(t, "m2", 3, 3), part(t, "m3", 5, 5), part(t, "m4", 8, 9)}, true},
+		{"a set filed before parts", []File{{Material: "m1", Artifact: validArtifact(t)}}, true},
+		{"two parts without ranges", []File{{Material: "m1", Artifact: validArtifact(t)}, {Material: "m2", Artifact: validArtifact(t)}}, false},
+		{"gap", []File{part(t, "m1", 1, 2), part(t, "m2", 5, 9)}, false},
+		{"overlap", []File{part(t, "m1", 1, 3), part(t, "m2", 3, 9)}, false},
+		{"starts late", []File{part(t, "m1", 2, 9)}, false},
+		{"ends early", []File{part(t, "m1", 1, 3), part(t, "m2", 5, 8)}, false},
+		{"ends past the last", []File{part(t, "m1", 1, 3), part(t, "m2", 5, 10)}, false},
+		{"ends between tickets", []File{part(t, "m1", 1, 4), part(t, "m2", 5, 9)}, false},
+		{"backwards", []File{part(t, "m2", 5, 9), part(t, "m1", 1, 3)}, false},
+		{"to before from", []File{part(t, "m1", 1, 3), part(t, "m2", 5, 4)}, false},
+		{"one part after the end", []File{part(t, "m1", 1, 9), part(t, "m2", 9, 9)}, false},
+		{"material twice", []File{part(t, "m1", 1, 3), part(t, "m1", 5, 9)}, false},
+		{"bad material", []File{part(t, "m1", 1, 3), {Artifact: validArtifact(t), From: 5, To: 9}}, false},
+		{"name too long", []File{long, part(t, "m2", 5, 9)}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := assembling(t, nums...)
+			err := s.Finish(tt.files, t0)
+			if !tt.ok {
+				if !errors.Is(err, ErrInvalidSet) || s.Status() != StatusAnswering {
+					t.Fatalf("Finish = %v, %s", err, s.Status())
+				}
+				return
+			}
+			if err != nil || s.Status() != StatusDone || len(s.Files()) != len(tt.files) {
+				t.Fatalf("Finish = %v, %s, %+v", err, s.Status(), s.Files())
+			}
+			got := s.Files()
+			got[0].Material = "changed"
+			if s.Files()[0].Material == "changed" {
+				t.Fatal("Files is not a copy")
+			}
+		})
+	}
+
+	s := assembling(t, 1)
+	many := make([]File, MaxTickets+1)
+	if err := s.Finish(many, t0); !errors.Is(err, ErrInvalidSet) {
+		t.Fatalf("too many files = %v", err)
+	}
+}
+
+// Content keeps the files; content stored before TASK-402 has one "file", read as the only file without a range.
+func TestContentFiles(t *testing.T) {
+	s := assembling(t, 1, 2, 3)
+	if err := s.Finish([]File{part(t, "m1", 1, 2), part(t, "m2", 3, 3)}, t0); err != nil {
+		t.Fatal(err)
+	}
+	s.Persisted(4)
+	st := s.State()
+	raw := st.Content.Encode()
+	if strings.Contains(raw, `"file":`) || !strings.Contains(raw, `"files":[`) || !strings.Contains(raw, `"name":"Билеты 1–2.docx"`) {
+		t.Fatalf("encoded %s", raw)
+	}
+	c, err := ParseContent(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Content = c
+	got, err := Restore(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got.Files(); len(f) != 2 || f[1] != part(t, "m2", 3, 3) {
+		t.Fatalf("restored files %+v", f)
+	}
+
+	art := validArtifact(t)
+	tickets := `{"tickets":[{"number":1,"title":"Вопрос 1","result":{"answer":"","coverage":"not_covered"}}],` +
+		`"accepted":{"estimate_micro_usd":1,"cap_micro_usd":2},"cost_accepted":false,`
+	old, err := ParseContent(tickets + `"file":{"material":"m1","artifact":"` + art + `"}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(old.Files) != 1 || old.Files[0] != (File{Material: "m1", Artifact: art}) {
+		t.Fatalf("old file read as %+v", old.Files)
+	}
+	done, err := Restore(State{Version: 1, ID: "ts1", Subject: "sub1", Status: StatusDone, Content: old, CreatedAt: t0, UpdatedAt: t0})
+	if err != nil || len(done.Files()) != 1 {
+		t.Fatalf("an old done set = %v", err)
+	}
+	if !strings.Contains(old.Encode(), `"files":[{"material":"m1","artifact":"`+art+`"}]`) {
+		t.Fatalf("old content encoded as %s", old.Encode())
+	}
+	if c, err := ParseContent(tickets + `"file":null}`); err != nil || c.Files != nil {
+		t.Fatalf("an old set without its file = %+v, %v", c, err)
+	}
+
+	for name, raw := range map[string]string{
+		"file and files":          tickets + `"file":{"material":"m1","artifact":"` + art + `"},"files":[{"material":"m2","artifact":"` + art + `"}]}`,
+		"unknown field":           tickets + `"files":[],"x":1}`,
+		"unknown field of a file": tickets + `"files":[{"material":"m1","artifact":"` + art + `","size":1}]}`,
+	} {
+		if _, err := ParseContent(raw); !errors.Is(err, ErrInvalidSet) {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }
 
@@ -250,7 +404,7 @@ func TestContentRoundTripAndRestore(t *testing.T) {
 		func(st *State) { st.Content.CostAccepted = false },
 		func(st *State) { st.Status = StatusProposed },
 		func(st *State) { st.Status = StatusDone },
-		func(st *State) { st.Content.File = &File{Material: "m1", Artifact: validArtifact(t)} },
+		func(st *State) { st.Content.Files = []File{{Material: "m1", Artifact: validArtifact(t)}} },
 	}
 	for i, edit := range bad {
 		st := s.State()

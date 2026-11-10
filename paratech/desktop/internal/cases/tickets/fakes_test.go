@@ -211,7 +211,9 @@ type fakeShelf struct {
 	byData map[string]shared.MaterialID
 	names  []string
 	moves  []shared.MaterialID
-	getErr error // Material fails with it
+	getErr error     // Material fails with it
+	onFile func(int) // called before the n-th FileTickets (from 1), outside the lock
+	calls  int
 }
 
 func (f *fakeShelf) Subjects(context.Context) ([]*subject.Subject, error) {
@@ -223,6 +225,13 @@ func (f *fakeShelf) Subjects(context.Context) ([]*subject.Subject, error) {
 }
 
 func (f *fakeShelf) FileTickets(_ context.Context, sub shared.SubjectID, name string, data []byte) (*material.Material, error) {
+	f.mu.Lock()
+	f.calls++
+	n, hook := f.calls, f.onFile
+	f.mu.Unlock()
+	if hook != nil {
+		hook(n)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.names = append(f.names, name)

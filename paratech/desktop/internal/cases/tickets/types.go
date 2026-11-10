@@ -40,8 +40,9 @@ type View struct {
 	CostAccepted bool
 	Report       ticketset.Report
 
-	Material shared.MaterialID  // the file in «Билеты», once done
-	Result   shared.ArtifactRef // the artifact of the file, once done
+	Material shared.MaterialID  // the (first) file in «Билеты», once done
+	Result   shared.ArtifactRef // the artifact of that file, once done
+	Files    []FileView         // every file in the order of its tickets, once done; one unless the set was split
 
 	// The newest ticket_answers job of the set and its status (Set and List only; "" when it has none). Stalled: the
 	// run is confirmed or answering but no job is live (the last one failed after its attempts or was cancelled), so
@@ -61,6 +62,15 @@ type TicketView struct {
 	Answered bool
 	Coverage ticketset.Coverage
 	Answer   shared.AnswerID
+}
+
+// FileView is one file of a done set: the whole answers or a part of them (TASK-402), with the numbers of its first
+// and last ticket. Name is the file name as filed; "" for a set filed before TASK-402.
+type FileView struct {
+	Material shared.MaterialID
+	Result   shared.ArtifactRef
+	From, To int
+	Name     string
 }
 
 // Started is the outcome of Confirm: the set and its job; Created is false when a job of the run runs (or ran)
@@ -85,8 +95,15 @@ func viewOf(s *ticketset.Set) View {
 		}
 		v.Tickets = append(v.Tickets, tv)
 	}
-	if f, ok := s.File(); ok {
-		v.Material, v.Result = f.Material, f.ArtifactRef()
+	for _, f := range s.Files() {
+		fv := FileView{Material: f.Material, Result: f.ArtifactRef(), From: f.From, To: f.To, Name: f.Name}
+		if fv.From == 0 && len(v.Tickets) > 0 { // a set filed before TASK-402: its one file holds every ticket
+			fv.From, fv.To = v.Tickets[0].Number, v.Tickets[len(v.Tickets)-1].Number
+		}
+		v.Files = append(v.Files, fv)
+	}
+	if len(v.Files) > 0 {
+		v.Material, v.Result = v.Files[0].Material, v.Files[0].Result
 	}
 	return v
 }

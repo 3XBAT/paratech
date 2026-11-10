@@ -77,6 +77,51 @@ test("a null list is empty and a malformed reply is an error", async () => {
   assert.throws(() => parseSet({ ...wireSet(), budget: null }));
 });
 
+test("files: two parts are parsed as sent", () => {
+  const files = [
+    { materialId: "m-1", from: 1, to: 50, name: "Билеты 1–50.docx" },
+    { materialId: "m-2", from: 51, to: 100, name: "Билеты 51–100.docx" },
+  ];
+  assert.deepEqual(set({ status: "done", materialId: "m-1", files }).files, files);
+});
+
+test("files absent: one derived part with a material id, none without", () => {
+  const { files: _drop, ...older } = wireSet({ status: "done", materialId: "m-1" });
+  assert.deepEqual(parseSet(older).files, [{ materialId: "m-1", from: 0, to: 0, name: "" }]);
+  const { files: _drop2, ...noMaterial } = wireSet();
+  assert.deepEqual(parseSet(noMaterial).files, []);
+  assert.deepEqual(parseSet({ ...noMaterial, files: undefined }).files, []);
+});
+
+test("files null is treated as absent", () => {
+  assert.deepEqual(set({ status: "done", materialId: "m-1", files: null }).files, [{ materialId: "m-1", from: 0, to: 0, name: "" }]);
+  assert.deepEqual(set({ files: null }).files, []);
+});
+
+test("files present are used as is: an empty list stays empty", () => {
+  assert.deepEqual(set({ status: "done", materialId: "m-1", files: [] }).files, []);
+});
+
+test("a malformed file item is an error", () => {
+  const ok = { materialId: "m-1", from: 1, to: 50, name: "a.docx" };
+  assert.throws(() => set({ files: [{ from: 1, to: 50, name: "a.docx" }] }));
+  assert.throws(() => set({ files: [{ ...ok, materialId: "" }] }));
+  assert.throws(() => set({ files: [{ ...ok, from: "1" }] }));
+  assert.throws(() => set({ files: [{ ...ok, to: -1 }] }));
+  assert.throws(() => set({ files: [{ ...ok, name: 5 }] }));
+  assert.throws(() => set({ files: [null] }));
+  assert.throws(() => set({ files: "m-1" }));
+});
+
+test("list keeps working with sets that carry files", async () => {
+  const files = [{ materialId: "m-1", from: 1, to: 50, name: "a.docx" }];
+  const api = ticketsApi(async () => [wireSet({ status: "done", materialId: "m-1", files }), wireSet({ id: "ts-2" })]);
+  const sets = await api.list("sub-1");
+  assert.equal(sets.length, 2);
+  assert.deepEqual(sets[0].files, files);
+  assert.deepEqual(sets[1].files, []);
+});
+
 test("error texts: known ones as they are, others generic", () => {
   assert.equal(ticketsErrorText(new Error("Прогон дороже обычного: подтвердите стоимость.")), "Прогон дороже обычного: подтвердите стоимость.");
   assert.equal(ticketsErrorText("Слишком много билетов: не больше 100 за один раз."), "Слишком много билетов: не больше 100 за один раз.");
