@@ -58,6 +58,7 @@ import {
   textsLayout,
   topClass,
   wantedHeight,
+  windowGrows,
   type Action,
   type ButtonId,
   type RecordingInfo,
@@ -261,10 +262,10 @@ export function Popup() {
   const joinFailure = showPicker ? jv.failure : "";
   const baseNotes = showPicker ? [picker.autoNote, ...picker.warnings].filter((n) => n !== "") : [];
   const notes = layoutNotes(baseNotes, [...joinQuiet, joinFailure].filter((n) => n !== ""), joinShown);
-  // With the join button every button takes a full row in every phase (no row moves under the pointer): one more row, so
-  // the advice shrinks sooner; the join line counts as one reserved line, so the advice does not flash between phases.
+  // With the join button every button takes a full row in every phase (no row moves under the pointer): one more row, which
+  // the window grows for (windowGrows). The join line counts as one reserved line, so the advice does not flash between phases.
   const joinOwnRow = joinShown && joinOnOwnRow(jv);
-  const layout = textsLayout(notes, errorLine, joinOwnRow);
+  const layout = textsLayout(notes, errorLine);
 
   // Which recording captures now ("" none, null: the sound could not be read) ties the started prompt to its recording
   // and drops it when that one ends or another one is shown.
@@ -303,8 +304,9 @@ export function Popup() {
   const now = useNow(liveInfo !== null && liveInfo.startedAt !== "");
 
   useLayoutEffect(() => {
-    // The advice and the running recording keep the normal size: their texts are short.
-    growsRef.current = advice === null && !live && layout.grows;
+    // The advice and the running recording keep the normal size: their texts are short. The offer view may grow for an
+    // error and for the join button's extra row (windowGrows); the wanted height stays the base while the content fits.
+    growsRef.current = windowGrows(advice === null && !live, layout.grows, joinOwnRow);
     measure();
   });
 
@@ -550,10 +552,13 @@ export function Popup() {
               </p>
             ))}
           {showPicker && jv.live && (
-            // A live region drawn before its text (the confirmation or the gone note) so that it is announced; empty, it
-            // takes no room.
+            // A live region drawn before its text (the confirmation or the gone note) so that it is announced. While the
+            // join button is shown it is one line high even empty (.reserved), so the confirmation does not make the texts
+            // jump; without the button (the gone note) an empty region takes no room.
             <p
-              className={layout.clamp ? "p-note join-note clamp" : "p-note join-note"}
+              className={
+                (layout.clamp ? "p-note join-note clamp" : "p-note join-note") + (joinShown ? " reserved" : "")
+              }
               role="status"
               title={layout.clamp && joinQuiet.length > 0 ? joinQuiet[0] : undefined}
             >

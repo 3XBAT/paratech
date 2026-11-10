@@ -1,6 +1,7 @@
 /* The lesson window, 360x300 DIP (internal/input/wails/spec.go). Needs only tokens.css, fonts.css and the shared
    sourcePicker.css: the few base and component rules it uses are repeated here, so the popup does not load the main
-   window's styles. With a start error the window grows in height to show the texts in full (Popup.tsx measures them).
+   window's styles. With a start error, or with the join button's extra row, the window grows in height to show the texts
+   in full (Popup.tsx measures them).
    The buttons never shrink: only the text area does, and it scrolls as a last resort (larger Windows text, max height)
    instead of pushing them out. */
 *, *::before, *::after { box-sizing: border-box; }
@@ -61,12 +62,17 @@ h1, p, ul { margin: 0; }
    negative margin takes back the gap of the column). */
 .p-note.join-note { font-size: var(--fs-label); line-height: var(--lh-label); }
 .join-note:empty, .join-fail:empty { margin-top: -4px; }
+/* TASK-406 review: in the offer view the quiet line keeps one label line while the join button is shown, so the
+   confirmation appearing (or going) does not move the texts by a line. */
+.p-note.join-note.reserved { min-height: var(--lh-label); }
+.join-note.reserved:empty { margin-top: 0; }
 .advice { color: var(--muted); font-size: var(--fs-nav); line-height: 15px; }
 .advice.collapsed { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
-/* Buttons: «Начать запись» across the width, the others below it; «Подключиться» and «Не записывать» share one row,
-   «Открыть ещё раз» is too long for a half row and, like «Не записывать» then, takes a full one (Popup.tsx adds .wide).
-   In the running view it is the one extra full-width row under «Остановить» and «Скрыть». */
+/* Buttons: «Начать запись» across the width. Without the join button «Не записывать» is the one below it; with it
+   (TASK-406) every offer button takes a full row in every phase: «Начать запись», «Подключиться» / «Открыть ещё раз»,
+   «Не записывать» (Popup.tsx adds .wide). In the running view the join button is the one extra full-width row under
+   «Остановить» and «Скрыть». */
 .pbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: auto; }
 /* The running recording (TASK-099): .two keeps «Остановить» and «Скрыть» side by side. */
 .pbtns .wide, .pbtns:not(.two) > .btn:nth-child(2):last-child { grid-column: 1 / -1; }

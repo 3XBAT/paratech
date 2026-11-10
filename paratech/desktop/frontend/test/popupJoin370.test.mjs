@@ -588,20 +588,22 @@ test("the offer layout is identical for ready, opening and opened: same row stru
     const layouts = views.map((v) => {
       const own = joinOnOwnRow(v);
       const texts = [v.confirm, v.note, v.failure].filter((n) => n !== "");
-      return textsLayout(layoutNotes(base, texts, v.visible), "", own);
+      return textsLayout(layoutNotes(base, texts, v.visible), "");
     });
     assert.deepEqual(layouts[1], layouts[0], `opening == ready for ${base.length} other messages`);
     assert.deepEqual(layouts[2], layouts[0], `opened == ready for ${base.length} other messages`);
-    assert.equal(layouts[0].collapsed, true, "the advice is one ellipsis line while the join button is shown");
+    // Changed in the TASK-406 review (second pass): the original rule again (two or more messages, the reserved line
+    // included), it was: collapsed for every base because the join row lowered the limit to one.
+    assert.equal(layouts[0].collapsed, base.length >= 1, "the advice collapses only by the original rule");
     // The failure line appearing does not toggle it either.
-    const withFailure = textsLayout(layoutNotes(base, [failed.failure], failed.visible), "", joinOnOwnRow(failed));
+    const withFailure = textsLayout(layoutNotes(base, [failed.failure], failed.visible), "");
     assert.deepEqual(withFailure, layouts[0]);
   }
   // Without the join button the layout is the old one: the join texts count as they are (gone: no button, the note shows).
   assert.equal(gone.visible, false);
   assert.deepEqual(layoutNotes([], [gone.note], gone.visible), [gone.note]);
   assert.deepEqual(layoutNotes([adviceTexts.browser], [], false), [adviceTexts.browser]);
-  assert.deepEqual(textsLayout(layoutNotes([adviceTexts.browser], [], false), "", false), { grows: false, clamp: true, collapsed: false });
+  assert.deepEqual(textsLayout(layoutNotes([adviceTexts.browser], [], false), ""), { grows: false, clamp: true, collapsed: false });
 });
 
 test("popup.css: a long label never spills out of a popup button, and the join button and «Не записывать» get full rows", () => {
@@ -650,7 +652,9 @@ test("the buttons: «Начать запись», the join button and «Не з�
   assert.match(row.slice(join), /className="wide"/, "the join button is wide in every phase");
   assert.doesNotMatch(row.slice(join), /className=\{joinOwnRow/, "its width does not depend on the phase");
   assert.match(code, /const joinOwnRow = joinShown && joinOnOwnRow\(jv\);/);
-  assert.match(code, /textsLayout\(notes, errorLine, joinOwnRow\)/, "the 300 px layout counts the extra row");
+  // Changed in the TASK-406 review (second pass): the layout no longer takes joinOwnRow; the window grows for the row.
+  assert.match(code, /textsLayout\(notes, errorLine\)/);
+  assert.match(code, /growsRef\.current = windowGrows\(advice === null && !live, layout\.grows, joinOwnRow\);/, "the join row lets the window grow");
   assert.doesNotMatch(row, /autoFocus|\.focus\(/, "no focus is taken");
   const view = src("popup/view.ts");
   assert.match(view, /buttons: ButtonId\[\] = onOffer \? \["start", "skip"\] : \["close"\]/, "view.ts buttons are unchanged");
@@ -675,7 +679,7 @@ test("the red banner carries only the page error and the start problem; the join
   // button is shown (it was: the notes list held the join texts directly, so the count changed with the phase).
   assert.match(code, /\[picker\.autoNote, \.\.\.picker\.warnings\]/);
   assert.match(code, /layoutNotes\(baseNotes, \[\.\.\.joinQuiet, joinFailure\]\.filter\(\(n\) => n !== ""\), joinShown\)/);
-  assert.match(code, /textsLayout\(notes, errorLine, joinOwnRow\)/);
+  assert.match(code, /textsLayout\(notes, errorLine\)/);
   assert.match(code, /const joinQuiet = showPicker \? \[jv\.confirm, jv\.note\]/);
   // Quiet: p-note (muted); the failure is the amber warning, last in the area. Both are live regions (TASK-406): drawn
   // as soon as the button is, text changes inside them.
@@ -713,6 +717,21 @@ test("a11y: the confirmation, the gone note and the failure line are persistent 
   const css = src("popup/popup.css");
   assert.match(css, /\.join-note:empty, \.join-fail:empty \{ margin-top: -4px; \}/);
   assert.doesNotMatch(css, /\.join-(note|fail)[^{]*\{[^}]*display:\s*none/, "display:none would unregister the live region");
+});
+
+// TASK-406 review (second pass): the quiet line is one line high while the join button is shown, so the confirmation
+// appearing does not move the texts; the region still exists (empty) before its text, so it stays announced.
+test("the offer view's quiet join line keeps one label line while the join button is shown", () => {
+  const code = src("popup/Popup.tsx");
+  const quiet = code.slice(code.indexOf('"p-note join-note clamp"') - 200, code.indexOf("{joinQuiet[0]}"));
+  assert.match(quiet, /role="status"/, "still a persistent live region");
+  assert.match(quiet, /\(joinShown \? " reserved" : ""\)/, "reserved only while the button is shown");
+  const css = src("popup/popup.css");
+  assert.match(css, /\.p-note\.join-note\.reserved \{ min-height: var\(--lh-label\); \}/);
+  assert.match(css, /\.join-note\.reserved:empty \{ margin-top: 0; \}/, "the empty margin trick does not shrink the reserved line");
+  assert.doesNotMatch(css, /\.join-(note|fail)[^{]*\{[^}]*display:\s*none/);
+  // The reserved line height is the line height of the label text, so the text fills it exactly.
+  assert.match(css, /\.p-note\.join-note \{ font-size: var\(--fs-label\); line-height: var\(--lh-label\); \}/);
 });
 
 test("the running view: one extra full-width row with «Подключиться» / «Открыть ещё раз», only when the core gave a link", () => {

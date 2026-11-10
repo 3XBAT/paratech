@@ -125,11 +125,11 @@ export const loadErrorText = "Не удалось загрузить предл�
  * Only when two or more other messages are shown: next to one warning (the browser one included) or an error alone
  * it stays in full, since it carries the muted-tab advice.
  */
-export function collapseAdvice(warnings: readonly string[], error: string, joinOwnRow = false): boolean {
-  // The join button on its own row (TASK-406) takes one more button row (about 33 px) from the texts: one other message
-  // is enough to shrink the advice then (the layout counts the reserved join line, see layoutNotes).
-  const limit = joinOwnRow ? 1 : 2;
-  return warnings.length + (error !== "" ? 1 : 0) >= limit;
+export function collapseAdvice(warnings: readonly string[], error: string): boolean {
+  // Changed in the TASK-406 review: the join button on its own row no longer lowers the limit. The window grows to its
+  // natural height while that button is shown (see windowGrows), so only the max-height case needs the collapse, and the
+  // original rule serves it. The reserved join line counts as one message (layoutNotes), so it is the same in every phase.
+  return warnings.length + (error !== "" ? 1 : 0) >= 2;
 }
 
 // Window growth for a start error (owner's decision 2026-10-16): the error popup grows in height to show its texts in
@@ -166,13 +166,25 @@ export function layoutNotes(base: readonly string[], joinTexts: readonly string[
   return [...base, ...joinTexts];
 }
 
-/**
- * Layout of the text area: an error grows the window and shows everything in full; otherwise the 300 px rules hold.
- * `joinOwnRow`: the join button, «Начать запись» and «Не записывать» each take a full row (see joinOnOwnRow in joinView.ts).
- */
-export function textsLayout(warnings: readonly string[], error: string, joinOwnRow = false): TextsLayout {
+/** Layout of the text area: an error grows the window and shows everything in full; otherwise the 300 px rules hold. */
+export function textsLayout(warnings: readonly string[], error: string): TextsLayout {
   const grows = error !== "";
-  return { grows, clamp: !grows, collapsed: !grows && collapseAdvice(warnings, error, joinOwnRow) };
+  return { grows, clamp: !grows, collapsed: !grows && collapseAdvice(warnings, error) };
+}
+
+/**
+ * Whether the page measures its natural height and may ask the core for a taller window. Only in the offer view (the
+ * advice and the running recording keep the normal size: their texts are short). `textsGrow`: an error is shown.
+ * `joinOwnRow` (TASK-406 review): with the join button «Начать запись», the join button and «Не записывать» each take a
+ * full row, about 34 px more than the 300 px window was drawn for; at a larger Windows text size the texts would shrink to
+ * nothing and «Не записывать» could be cut. So the window may grow then too. Nothing changes at 100 %: the natural height
+ * fits 300, wantedHeight answers the base and no resize is sent. The natural height is the same in the ready, opening and
+ * opened phases (the join line is reserved, see layoutNotes and .join-note.reserved), so the window does not resize between
+ * them; it grows upwards (the core keeps the bottom-right corner), so the buttons stay where the pointer is, and it is
+ * clamped by the core (popupMaxHeight 440, the work area), past which the texts area shrinks and scrolls.
+ */
+export function windowGrows(offerView: boolean, textsGrow: boolean, joinOwnRow: boolean): boolean {
+  return offerView && (textsGrow || joinOwnRow);
 }
 
 /**
