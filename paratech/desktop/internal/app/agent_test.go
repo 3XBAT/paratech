@@ -24,6 +24,7 @@ func TestAgentRecoveryAtStart(t *testing.T) {
 	// The core runs on the real clock; the seeded rows are older than the start.
 	at := time.Now().Add(-time.Hour).UTC()
 
+	seedDatabase(t, dir)
 	db, err := sqlite.Open(ctx, sqlite.Options{Path: filepath.Join(dir, dbFile), Migrate: true})
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +78,7 @@ func TestAgentChatCurrentWiring(t *testing.T) {
 	dir := t.TempDir()
 	at := time.Now().Add(-time.Hour).UTC()
 
+	seedDatabase(t, dir)
 	db, err := sqlite.Open(ctx, sqlite.Options{Path: filepath.Join(dir, dbFile), Migrate: true})
 	if err != nil {
 		t.Fatal(err)

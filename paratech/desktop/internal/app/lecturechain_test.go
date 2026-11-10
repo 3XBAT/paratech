@@ -104,6 +104,7 @@ func newChainEnv(t *testing.T) *chainEnv {
 func openChainCore(t *testing.T, dataDir string, e env) *uiCore {
 	t.Helper()
 	log := slog.New(slog.DiscardHandler)
+	seedDatabase(t, dataDir)
 	c, err := buildCore(context.Background(), dataDir, testProfile, e, log)
 	if err != nil {
 		t.Fatal(err)
