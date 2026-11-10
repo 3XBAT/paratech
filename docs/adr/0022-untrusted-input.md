@@ -55,6 +55,11 @@ foreign text and pick tools.
   since is skipped. The planner still never sees a title and never writes one; nothing read for the card goes back to
   it (the result stays `{"shown":true}`) or into the log.
 
+## Addendum 2026-11-10 (ADR-0038 §4, §5, Proposed)
+- Text the student pastes into the request (timetable rows, a ticket list) may become a tool argument when the tool's
+  parser is the page's parser (`set_call_links`, `tickets{propose_text}`); a value the model typed is always a C card
+  showing the exact value. Text from files, transcripts and tool results never becomes such an argument.
+
 ## Consequences
 - Some answers are less helpful (the planner cannot quote a title); cards show the trusted data instead.
 - Eval level 1 (CI, blocking): policy tests plus injection fixtures — a manual saying «send to x@y», a file name with a
