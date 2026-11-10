@@ -12,10 +12,11 @@ import (
 
 // Fake links per kind: reserved domains, made-up meetings and passwords.
 const (
-	generalLink = "https://general.example.org/j/111?pwd=FakeGen1"
-	lectureLink = "https://lecture.example.org/j/222?pwd=FakeLec2"
-	seminarLink = "https://seminar.example.org/j/333?pwd=FakeSem3"
-	labLink     = "https://lab.example.org/j/444?pwd=FakeLab4"
+	// Meeting ids are letters only: slog prints a timestamp, and short digit runs in it matched the leak markers.
+	generalLink = "https://general.example.org/j/roomgen?pwd=FakeGen1"
+	lectureLink = "https://lecture.example.org/j/roomlec?pwd=FakeLec2"
+	seminarLink = "https://seminar.example.org/j/roomsem?pwd=FakeSem3"
+	labLink     = "https://lab.example.org/j/roomlab?pwd=FakeLab4"
 )
 
 var linkOfKind = map[CallKind]string{
@@ -267,7 +268,7 @@ func TestPrintingHidesCallLinks(t *testing.T) {
 		Seminar: mustLink(t, seminarLink), Lab: mustLink(t, labLink),
 	}
 	leaks := func(out string) bool {
-		for _, secret := range []string{"Fake", "/j/", "111", "222", "333", "444"} {
+		for _, secret := range []string{"Fake", "/j/", "roomgen", "roomlec", "roomsem", "roomlab"} {
 			if strings.Contains(out, secret) {
 				return true
 			}
