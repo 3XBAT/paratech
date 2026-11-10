@@ -8,6 +8,7 @@ import { callLinkTexts } from "../.test-build/callLinkView.js";
 import {
   idleJoin,
   JoinController,
+  joinOnOwnRow,
   joinPromptId,
   joinTexts,
   joinView,
@@ -294,7 +295,8 @@ test("«Открыть ещё раз» keeps its label when the second open fail
   assert.deepEqual([gone.visible, gone.note, gone.live], [false, joinTexts.gone, true], "the note comes inside the live region that was there");
 });
 
-test("the confirmation is not shown while the recording runs; the hover texts do not say that the recording will not start", async () => {
+// Changed in the TASK-406 review: while the recording runs the confirmation is the short «Ссылка открыта.» (it was "").
+test("while the recording runs the confirmation does not say it is not going; the hover texts do not say that the recording will not start", async () => {
   const { ctl } = setup();
   ctl.offer("p1");
   await settle();
@@ -302,7 +304,9 @@ test("the confirmation is not shown while the recording runs; the hover texts do
   const before = joinView(ctl.state, false, false);
   const during = joinView(ctl.state, false, true);
   assert.equal(before.confirm, joinTexts.opened);
-  assert.equal(during.confirm, "");
+  assert.equal(during.confirm, "Ссылка открыта.");
+  assert.equal(during.confirm, callLinkTexts.opened);
+  assert.doesNotMatch(during.confirm, /Запись пока не идёт/);
   assert.equal(before.title, callLinkTexts.joinAgainTitle);
   assert.equal(during.title, "Открыть ссылку на пару ещё раз");
   assert.doesNotMatch(during.title, /запись не начнётся/);
@@ -327,7 +331,8 @@ test("opened for a prompt, the recording starts from it: the opened state surviv
   await settle();
   assert.deepEqual(reads, ["p1", "p1", "p1"], "the core is asked about the started prompt");
   const v = joinView(ctl.state, false, true);
-  assert.deepEqual([v.visible, v.label, v.confirm, v.disabled], [true, "Открыть ещё раз", "", false]);
+  // Changed in the TASK-406 review: the running view confirms the open with «Ссылка открыта.» (it was "").
+  assert.deepEqual([v.visible, v.label, v.confirm, v.disabled], [true, "Открыть ещё раз", "Ссылка открыта.", false]);
 
   // The recording is over: nothing is asked for it.
   ctl.offer(null);
@@ -482,7 +487,12 @@ test("the confirmation is shown only while the meeting is open and the recording
   assert.equal(opened.title, callLinkTexts.joinAgainTitle);
   assert.equal(opened.disabled, false, "active, not a grey dead end");
   assert.equal(opened.label, "Открыть ещё раз");
-  assert.equal(joinView({ shown: true, phase: "opened", subjectId: "s", problem: "" }, false, true).confirm, "", "never while the recording runs");
+  // Changed in the TASK-406 review: never «Запись пока не идёт» while the recording runs, but «Ссылка открыта.».
+  const running = (s) => joinView({ shown: true, subjectId: "s", problem: "", ...s }, false, true);
+  assert.equal(running({ phase: "opened" }).confirm, "Ссылка открыта.");
+  assert.equal(running({ phase: "opened", problem: "failed" }).confirm, "", "a failed open keeps only the amber line");
+  assert.equal(running({ phase: "ready" }).confirm, "", "nothing opened, nothing confirmed");
+  assert.equal(running({ phase: "opened", shown: false }).confirm, "");
   assert.equal(joinTexts.openedTitle, undefined, "the grey-button hover text is gone");
 });
 
@@ -539,6 +549,47 @@ test("StartedRecording keeps the started prompt for callSubject while its record
   assert.equal(rec.track("r5"), "p6", "a newer start replaces the older prompt");
 });
 
+// TASK-406 review: the sound poll may report the recording before the start reply comes; started() after that still binds.
+test("StartedRecording: started() after the sound poll already saw the recording binds at the next track", () => {
+  const rec = new StartedRecording();
+  assert.equal(rec.track("r1"), "", "the poll saw the recording, the start reply is pending");
+  rec.started("p1");
+  assert.equal(rec.track("r1"), "p1", "re-evaluated on the registration: the button shows");
+  assert.equal(rec.track("r1"), "p1");
+});
+
+test("Popup.tsx re-runs the started-prompt binding when a started prompt is registered", () => {
+  const code = src("popup/Popup.tsx");
+  assert.match(code, /const \[startedSeq, setStartedSeq\] = useState\(0\);/);
+  assert.match(code, /startedRec\.started\(started\);\s*setStartedSeq\(\(n\) => n \+ 1\);/);
+  assert.match(code, /setRunningFrom\(startedRec\.track\(recordingNow\)\);\s*\}, \[startedRec, recordingNow, startedSeq\]\);/);
+});
+
+test("joinOnOwnRow: only the opened button takes its own row; «Подключиться» stays in the half row", () => {
+  assert.equal(joinOnOwnRow(joinView({ shown: true, phase: "opened", subjectId: "s", problem: "" }, false)), true);
+  for (const phase of ["ready", "opening", "hidden"]) {
+    assert.equal(joinOnOwnRow(joinView({ shown: true, phase, subjectId: "s", problem: "" }, false)), false, phase);
+  }
+  assert.equal(joinOnOwnRow(joinView({ shown: false, phase: "opened", subjectId: "s", problem: "" }, false)), false);
+});
+
+test("popup.css: a long label never spills out of a popup button, and «Открыть ещё раз» and «Не записывать» get full rows", () => {
+  const css = src("popup/popup.css");
+  const guard = css.match(/\.popup \.pbtns \.btn-labels \{[^}]*\}/)?.[0] ?? "";
+  assert.match(guard, /min-width: 0/);
+  assert.match(guard, /overflow: hidden/);
+  const label = css.match(/\.popup \.pbtns \.btn-labels > \* \{[^}]*\}/)?.[0] ?? "";
+  assert.match(label, /overflow: hidden/);
+  assert.match(label, /text-overflow: ellipsis/);
+  const code = src("popup/Popup.tsx");
+  assert.match(code, /id === "skip" && joinOwnRow/);
+  assert.match(css, /\.pbtns \.wide,/);
+});
+
+test("view.ts: noPromptNote is written like the other constants", () => {
+  assert.match(src("popup/view.ts"), /export const noPromptNote = "/);
+});
+
 test("Popup.tsx remembers the prompt of a successful start and asks the core with it while the recording is on screen", () => {
   const code = src("popup/Popup.tsx");
   assert.match(code, /const startedRec = useMemo\(\(\) => new StartedRecording\(\), \[\]\);/);
@@ -562,8 +613,12 @@ test("the buttons: «Начать запись» full width on top, then «По�
   assert.match(row, /busyLabel=\{callLinkTexts\.joining\}/);
   assert.match(row, /disabled=\{jv\.disabled\}/);
   assert.match(row, /disabled=\{m\.disabled\}/, "start and skip still follow the old rule");
-  assert.match(row, /className=\{id === "start" \|\| id === "close" \? "wide" : undefined\}/, "only start and close are full width, as before");
-  assert.doesNotMatch(row.slice(join), /wide/, "the join button is not full width");
+  // Changed in the TASK-406 review: once the meeting was opened «Открыть ещё раз» and «Не записывать» take full rows
+  // (it was: only start and close are full width, the join button never).
+  assert.match(row, /className=\{id === "start" \|\| id === "close" \|\| \(id === "skip" && joinOwnRow\) \? "wide" : undefined\}/);
+  assert.match(row.slice(join), /className=\{joinOwnRow \? "wide" : undefined\}/, "the join button is wide only as «Открыть ещё раз»");
+  assert.match(code, /const joinOwnRow = joinShown && joinOnOwnRow\(jv\);/);
+  assert.match(code, /textsLayout\(notes, errorLine, joinOwnRow\)/, "the 300 px layout counts the extra row");
   assert.doesNotMatch(row, /autoFocus|\.focus\(/, "no focus is taken");
   const view = src("popup/view.ts");
   assert.match(view, /buttons: ButtonId\[\] = onOffer \? \["start", "skip"\] : \["close"\]/, "view.ts buttons are unchanged");
@@ -585,7 +640,7 @@ test("the red banner carries only the page error and the start problem; the join
   assert.doesNotMatch(code, /jv\.error/);
   // The notes count in the layout, the failure and the opened note too, so the buttons stay uncut.
   assert.match(code, /\[picker\.autoNote, \.\.\.picker\.warnings, \.\.\.joinQuiet, joinFailure\]/);
-  assert.match(code, /textsLayout\(notes, errorLine\)/);
+  assert.match(code, /textsLayout\(notes, errorLine, joinOwnRow\)/);
   assert.match(code, /const joinQuiet = showPicker \? \[jv\.confirm, jv\.note\]/);
   // Quiet: p-note (muted); the failure is the amber warning, last in the area. Both are live regions (TASK-406): drawn
   // as soon as the button is, text changes inside them.
@@ -616,9 +671,9 @@ test("a11y: the confirmation, the gone note and the failure line are persistent 
   const running = code.slice(code.indexOf("{stopProblem !== \"\" && <p className=\"warning\">"), code.indexOf('<div className="pbtns two">'));
   assert.equal([...running.matchAll(/\{jv\.live && \(/g)].length, 2);
   assert.equal([...running.matchAll(/role="status"/g)].length, 2);
-  assert.match(running, /\{jv\.note\}/);
+  // Changed in the TASK-406 review: the quiet region says the note or the confirmation (it said only the note).
+  assert.match(running, /\{jv\.note \|\| jv\.confirm\}/, "«Ссылка открыта.» (jv.confirm is never «Запись пока не идёт» while it runs)");
   assert.match(running, /\{jv\.failure\}/);
-  assert.doesNotMatch(running, /jv\.confirm/, "no «Запись пока не идёт» while it runs");
   // An empty region takes no room: the negative margin takes back the gap of the column.
   const css = src("popup/popup.css");
   assert.match(css, /\.join-note:empty, \.join-fail:empty \{ margin-top: -4px; \}/);

@@ -60,7 +60,7 @@ export function topClass(stage: PopupStage): string {
   return stage === "offer" ? "p-top" : "p-top live";
 }
 
-export const noPromptNote ="Сейчас нет предложения записи.";
+export const noPromptNote = "Сейчас нет предложения записи.";
 export const staleNote = "Предложение больше не актуально.";
 
 /** What the popup shows. */
@@ -125,8 +125,11 @@ export const loadErrorText = "Не удалось загрузить предл�
  * Only when two or more other messages are shown: next to one warning (the browser one included) or an error alone
  * it stays in full, since it carries the muted-tab advice.
  */
-export function collapseAdvice(warnings: readonly string[], error: string): boolean {
-  return warnings.length + (error !== "" ? 1 : 0) >= 2;
+export function collapseAdvice(warnings: readonly string[], error: string, joinOwnRow = false): boolean {
+  // The join button on its own row (TASK-406) takes one more button row (about 33 px) from the texts: one other message
+  // is enough to shrink the advice then.
+  const limit = joinOwnRow ? 1 : 2;
+  return warnings.length + (error !== "" ? 1 : 0) >= limit;
 }
 
 // Window growth for a start error (owner's decision 2026-10-16): the error popup grows in height to show its texts in
@@ -148,10 +151,13 @@ export interface TextsLayout {
   collapsed: boolean;
 }
 
-/** Layout of the text area: an error grows the window and shows everything in full; otherwise the 300 px rules hold. */
-export function textsLayout(warnings: readonly string[], error: string): TextsLayout {
+/**
+ * Layout of the text area: an error grows the window and shows everything in full; otherwise the 300 px rules hold.
+ * `joinOwnRow`: «Открыть ещё раз» and «Не записывать» each take a full row (see joinOnOwnRow in joinView.ts).
+ */
+export function textsLayout(warnings: readonly string[], error: string, joinOwnRow = false): TextsLayout {
   const grows = error !== "";
-  return { grows, clamp: !grows, collapsed: !grows && collapseAdvice(warnings, error) };
+  return { grows, clamp: !grows, collapsed: !grows && collapseAdvice(warnings, error, joinOwnRow) };
 }
 
 /**

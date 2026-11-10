@@ -34,6 +34,7 @@ import {
 import {
   idleJoin,
   JoinController,
+  joinOnOwnRow,
   joinPromptId,
   joinView,
   StartedRecording,
@@ -91,6 +92,9 @@ export function Popup() {
   // with this ID, although the prompt is no longer the current one. "" for a recording not started from here.
   const startedRec = useMemo(() => new StartedRecording(), []);
   const [runningFrom, setRunningFrom] = useState("");
+  // Bumped when a started prompt is registered: the binding below re-runs even if the sound poll saw the recording
+  // before the start reply came.
+  const [startedSeq, setStartedSeq] = useState(0);
   // Only the newest reply is applied: an older Current() must not overwrite a newer prompt or action result.
   const latest = useRef(0);
 
@@ -257,14 +261,16 @@ export function Popup() {
   const notes = showPicker
     ? [picker.autoNote, ...picker.warnings, ...joinQuiet, joinFailure].filter((n) => n !== "")
     : [];
-  const layout = textsLayout(notes, errorLine);
+  // Once opened, the join button and «Не записывать» each take a full row: one more row, so the advice shrinks sooner.
+  const joinOwnRow = joinShown && joinOnOwnRow(jv);
+  const layout = textsLayout(notes, errorLine, joinOwnRow);
 
   // Which recording captures now ("" none, null: the sound could not be read) ties the started prompt to its recording
   // and drops it when that one ends or another one is shown.
   const recordingNow = sound === null ? null : sound.recording ? sound.recordingId : "";
   useEffect(() => {
     setRunningFrom(startedRec.track(recordingNow));
-  }, [startedRec, recordingNow]);
+  }, [startedRec, recordingNow, startedSeq]);
 
   // The button belongs to the offered lesson, or, in the running view, to the prompt the recording was started from.
   const offeredId = joinPromptId(view, advice !== null || live);
@@ -334,6 +340,7 @@ export function Popup() {
       const started = action === "start" ? startedPromptId(view, v) : "";
       if (started !== "") {
         startedRec.started(started);
+        setStartedSeq((n) => n + 1);
       }
       if (seq === latest.current) {
         setView(v);
@@ -453,10 +460,11 @@ export function Popup() {
             <p className="p-note">{recordingTexts.tip}</p>
           )}
           {stopProblem !== "" && <p className="warning">{stopProblem}</p>}
-          {/* The link is gone note and the failure line of «Подключиться»: live regions drawn before their text. */}
+          {/* The confirmation («Ссылка открыта.») or the link is gone note, and the failure line of «Подключиться»: live
+              regions drawn before their text. The note and the confirmation never exist together. */}
           {jv.live && (
             <p className="p-note join-note" role="status">
-              {jv.note}
+              {jv.note || jv.confirm}
             </p>
           )}
           {jv.live && (
@@ -577,7 +585,7 @@ export function Popup() {
             <Button
               variant={id === "start" ? "primary" : id === "skip" ? "ghost" : "secondary"}
               icon={id === "start" ? "rec" : undefined}
-              className={id === "start" || id === "close" ? "wide" : undefined}
+              className={id === "start" || id === "close" || (id === "skip" && joinOwnRow) ? "wide" : undefined}
               disabled={m.disabled}
               // The title is also the accessible description of the button (the label stays its name).
               title={buttonHints[id]}
@@ -586,9 +594,10 @@ export function Popup() {
               {id === "start" ? m.startLabel : buttonLabels[id]}
             </Button>
             {id === "start" && joinShown && (
-              // Between «Начать запись» and «Не записывать»: they share one row, so the three do not stack. It never
-              // disables the start and takes no focus itself.
+              // Between «Начать запись» and «Не записывать»: «Подключиться» shares a row with the skip button, «Открыть
+              // ещё раз» is too long for a half row and takes its own. It never disables the start and takes no focus.
               <Button
+                className={joinOwnRow ? "wide" : undefined}
                 busy={jv.busy}
                 busyLabel={callLinkTexts.joining}
                 disabled={jv.disabled}

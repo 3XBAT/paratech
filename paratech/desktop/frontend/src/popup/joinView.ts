@@ -10,8 +10,10 @@ import { callLinkTexts } from "../callLinkView.js";
 export const joinTexts = {
   /** The link was removed meanwhile (or the subject is gone): the button goes, «Начать запись» stays. */
   gone: "Ссылки на пару уже нет.",
-  /** The visible confirmation before the recording starts: the open does not start it. Not shown while it runs. */
+  /** The visible confirmation before the recording starts: the open does not start it. */
   opened: "Ссылка открыта. Запись пока не идёт.",
+  /** While the recording runs the confirmation must not say it is not going. */
+  openedRunning: callLinkTexts.opened,
 } as const;
 
 /** hidden: no button; ready: «Подключиться»; opening: the call runs; opened: «Открыть ещё раз», clickable. */
@@ -183,7 +185,7 @@ export interface JoinView {
   opened: boolean;
   label: string;
   title: string;
-  /** A quiet line before the recording starts while the meeting is open; "" otherwise (never while it runs). */
+  /** A quiet line while the meeting is open: «…Запись пока не идёт.» before the recording starts, «Ссылка открыта.» while it runs. */
   confirm: string;
   /** The amber line of a failed open (never the red banner, it must not grow the window); "" when none. */
   failure: string;
@@ -198,7 +200,7 @@ export interface JoinView {
 
 /**
  * `blocked`: a start or skip runs; it disables this button but never «Начать запись». `running`: the recording runs, so
- * the hover text does not promise that it will not start and the «Запись пока не идёт» confirmation is not shown.
+ * the hover text does not promise that it will not start and the confirmation does not say «Запись пока не идёт».
  * While a repeated open runs the confirmation is off for a moment and comes back with its end: that tells the open
  * happened again, and a screen reader says it again.
  */
@@ -218,11 +220,19 @@ export function joinView(s: JoinState, blocked: boolean, running = false): JoinV
     opened,
     label: opened ? callLinkTexts.joinAgain : callLinkTexts.join,
     title,
-    confirm: s.shown && !running && opened && s.problem === "" ? joinTexts.opened : "",
+    confirm: s.shown && opened && s.problem === "" ? (running ? joinTexts.openedRunning : joinTexts.opened) : "",
     failure: s.shown && s.problem === "failed" ? callLinkTexts.openFailed : "",
     note: s.shown && s.problem === "gone" ? joinTexts.gone : "",
     live: s.shown && (s.phase !== "hidden" || s.problem !== ""),
   };
+}
+
+/**
+ * «Открыть ещё раз» (about 134 px) does not fit a half-width column at larger text sizes: once the meeting was opened
+ * the button and «Не записывать» each take a full row of the offer. «Подключиться» stays in the half row.
+ */
+export function joinOnOwnRow(v: Pick<JoinView, "visible" | "opened">): boolean {
+  return v.visible && v.opened;
 }
 
 /** The lesson prompt the button belongs to: an offered lesson while neither the recording nor the advice is shown. */

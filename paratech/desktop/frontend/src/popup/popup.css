@@ -64,8 +64,9 @@ h1, p, ul { margin: 0; }
 .advice { color: var(--muted); font-size: var(--fs-nav); line-height: 15px; }
 .advice.collapsed { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
-/* Buttons: «Начать запись» across the width, the others below it; with «Подключиться» («Открыть ещё раз») it and
-   «Не записывать» share one row. In the running view it is the one extra full-width row under «Остановить» and «Скрыть». */
+/* Buttons: «Начать запись» across the width, the others below it; «Подключиться» and «Не записывать» share one row,
+   «Открыть ещё раз» is too long for a half row and, like «Не записывать» then, takes a full one (Popup.tsx adds .wide).
+   In the running view it is the one extra full-width row under «Остановить» and «Скрыть». */
 .pbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: auto; }
 /* The running recording (TASK-099): .two keeps «Остановить» and «Скрыть» side by side. */
 .pbtns .wide, .pbtns:not(.two) > .btn:nth-child(2):last-child { grid-column: 1 / -1; }
@@ -88,6 +89,9 @@ h1, p, ul { margin: 0; }
 .btn-labels { display: inline-grid; }
 .btn-labels > * { grid-area: 1 / 1; }
 .btn-labels > .btn-off { visibility: hidden; }
+/* TASK-406 guard: a long label (larger Windows text) never spills out of a button of the popup, it is cut with an ellipsis. */
+.popup .pbtns .btn-labels { min-width: 0; max-width: 100%; overflow: hidden; grid-template-columns: minmax(0, 1fr); }
+.popup .pbtns .btn-labels > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

@@ -41,6 +41,19 @@ test("only an error grows the window and shows the texts in full", () => {
   assert.deepEqual(textsLayout([adviceTexts.browser], error), { grows: true, clamp: false, collapsed: false });
 });
 
+// TASK-406 review: the join button on its own row (opened) adds a button row, so one other message already shrinks the advice.
+test("with the join button on its own row one other message collapses the advice; an error still grows instead", () => {
+  const one = [adviceTexts.browser];
+  assert.equal(collapseAdvice(one, ""), false, "one row less: one message keeps the advice in full");
+  assert.equal(collapseAdvice(one, "", true), true);
+  assert.equal(collapseAdvice([], "", true), false, "no other message: nothing to shrink for");
+  assert.equal(collapseAdvice([], error, true), true);
+  assert.deepEqual(textsLayout(one, "", true), { grows: false, clamp: true, collapsed: true });
+  assert.deepEqual(textsLayout(one, ""), { grows: false, clamp: true, collapsed: false });
+  assert.deepEqual(textsLayout([], "", true), { grows: false, clamp: true, collapsed: false });
+  assert.deepEqual(textsLayout(one, error, true), { grows: true, clamp: false, collapsed: false });
+});
+
 test("the wanted height is the base unless the growing content needs more", () => {
   assert.equal(popupBaseHeight, 300);
   assert.equal(wantedHeight(420, false), popupBaseHeight, "no error: never grows");
