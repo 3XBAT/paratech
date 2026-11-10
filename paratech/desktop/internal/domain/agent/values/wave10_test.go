@@ -13,53 +13,75 @@ var waveTools = []Tool{
 	ToolGetSettings, ToolSetSetting, ToolQuotaStatus, ToolRecording, ToolOfferButton,
 }
 
-// TestCatalog9SeesNoWaveTool: wave 10 is declared, not served. Catalog 9 (CatalogVersion) has exactly the tools of
-// catalog 8, and nothing of the wave parses, plans or restores in it.
+// TestCatalog9SeesNoWaveTool: catalog 10 is served since TASK-326 (CatalogVersion), and ToolsAt(9) still is the v9
+// set: exactly the tools of catalog 8, in which nothing of the wave parses or plans. The current catalog is the v10 set.
 func TestCatalog9SeesNoWaveTool(t *testing.T) {
-	if CatalogVersion != 9 || CatalogWave10 != 10 {
+	if CatalogVersion != CatalogWave10 || CatalogWave10 != 10 {
 		t.Fatalf("CatalogVersion = %d, wave %d", CatalogVersion, CatalogWave10)
 	}
-	if !slices.Equal(Tools(), ToolsAt(9)) || !slices.Equal(ToolsAt(8), ToolsAt(9)) || len(Tools()) != 27 {
-		t.Fatalf("catalog 9 = %v, catalog 8 = %v", Tools(), ToolsAt(8))
+	if !slices.Equal(ToolsAt(8), ToolsAt(9)) || len(ToolsAt(9)) != 27 {
+		t.Fatalf("catalog 9 = %v, catalog 8 = %v", ToolsAt(9), ToolsAt(8))
+	}
+	if !slices.Equal(Tools(), ToolsAt(CatalogWave10)) || len(Tools()) != 27+len(waveTools) {
+		t.Fatalf("current catalog = %v", Tools())
 	}
 	for _, tool := range waveTools {
 		t.Run(string(tool), func(t *testing.T) {
-			if slices.Contains(Tools(), tool) || tool.Valid() {
+			if slices.Contains(ToolsAt(9), tool) {
 				t.Fatal("catalog 9 lists the tool")
-			}
-			if _, err := ParseTool(string(tool)); !errors.Is(err, ErrUnknownTool) {
-				t.Fatalf("ParseTool = %v", err)
 			}
 			if _, err := ParseToolAt(string(tool), 9); !errors.Is(err, ErrUnknownTool) {
 				t.Fatalf("ParseToolAt(9) = %v", err)
 			}
-			if _, err := SpecOf(tool); !errors.Is(err, ErrUnknownTool) {
-				t.Fatalf("SpecOf = %v", err)
+			if _, err := SpecAt(tool, 9); !errors.Is(err, ErrUnknownTool) {
+				t.Fatalf("SpecAt(9) = %v", err)
 			}
-			if _, err := ParseCall("c1", string(tool), `{}`); !errors.Is(err, ErrUnknownTool) {
-				t.Fatalf("ParseCall = %v", err)
+			if _, err := ParseCallAt("c1", string(tool), `{}`, 9); !errors.Is(err, ErrUnknownTool) {
+				t.Fatalf("ParseCallAt(9) = %v", err)
 			}
 			step := `[{"tool":"` + string(tool) + `"}]`
-			if _, err := ParseCall("c1", "show_plan", `{"summary":"План","steps":`+step+`}`); !errors.Is(err, ErrUnknownTool) {
+			if _, err := ParseCallAt("c1", "show_plan", `{"summary":"План","steps":`+step+`}`, 9); !errors.Is(err, ErrUnknownTool) {
 				t.Fatalf("planned at catalog 9: %v", err)
 			}
-			if _, err := DecodePlanSteps(step); !errors.Is(err, ErrUnknownTool) {
-				t.Fatalf("stored at catalog 9: %v", err)
+
+			// The current catalog serves the tool.
+			if !slices.Contains(Tools(), tool) || !tool.Valid() {
+				t.Fatal("the current catalog does not list the tool")
+			}
+			if got, err := ParseTool(string(tool)); err != nil || got != tool {
+				t.Fatalf("ParseTool = %v, %v", got, err)
+			}
+			if _, err := SpecOf(tool); err != nil {
+				t.Fatalf("SpecOf = %v", err)
 			}
 		})
 	}
-	if _, err := ParseCall("c1", "list_assignments", `{"state":"done"}`); !errors.Is(err, ErrInvalidArguments) {
+	if _, err := ParseCallAt("c1", "list_assignments", `{"state":"done"}`, 9); !errors.Is(err, ErrInvalidArguments) {
 		t.Fatalf("list_assignments.state at catalog 9 = %v", err)
 	}
-	spec, _ := SpecOf(ToolListAssignments)
-	if len(spec.Args()) != 3 {
+	if _, err := ParseCall("c1", "list_assignments", `{"state":"done"}`); err != nil {
+		t.Fatalf("list_assignments.state at the current catalog = %v", err)
+	}
+	if spec, _ := SpecAt(ToolListAssignments, 9); len(spec.Args()) != 3 {
 		t.Fatalf("list_assignments of catalog 9 = %+v", spec.Args())
 	}
 }
 
-// TestCatalog10: v10 is v9 (list_assignments with a state) plus the wave, through the *At functions only.
+// TestStoredDataOfCatalog9Restores: a plan stored under catalog 9 decodes under the current catalog unchanged.
+func TestStoredDataOfCatalog9Restores(t *testing.T) {
+	stored := `[{"tool":"list_assignments","arguments":{"status":"overdue"}},{"tool":"edit_due","arguments":{"assignment":"a1","due":"2026-11-03"}}]`
+	steps, err := DecodePlanSteps(stored)
+	if err != nil || len(steps) != 2 {
+		t.Fatalf("DecodePlanSteps(stored v9 plan) = %+v, %v", steps, err)
+	}
+	if enc, err := EncodePlanSteps(steps); err != nil || enc != stored {
+		t.Fatalf("EncodePlanSteps = %s, %v", enc, err)
+	}
+}
+
+// TestCatalog10: v10 is v9 (list_assignments with a state) plus the wave.
 func TestCatalog10(t *testing.T) {
-	want := append(slices.Clone(Tools()), waveTools...)
+	want := append(slices.Clone(ToolsAt(9)), waveTools...)
 	if got := ToolsAt(CatalogWave10); !slices.Equal(got, want) {
 		t.Fatalf("catalog 10 = %v", got)
 	}

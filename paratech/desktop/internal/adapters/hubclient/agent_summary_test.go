@@ -47,7 +47,8 @@ func TestStepRequestCarriesTheSummaryOnCatalog9(t *testing.T) {
 	if strings.Contains(protojson.Format(msg.GetScope()), "задачу") || strings.Contains(protojson.Format(msg.GetBase()), "задачу") {
 		t.Fatal("the summary text leaked into the scope or the base")
 	}
-	if via, err := agentRequestOf(req); err != nil || via.GetCatalogVersion() != agent.CatalogVersion ||
+	// The current catalog (v10 since TASK-326) carries the summary the same way.
+	if via, err := agentRequestOf(req); err != nil || via.GetCatalogVersion() != 10 || agent.CatalogVersion != 10 ||
 		via.GetTurns()[0].GetHistorySummary() != text {
 		t.Fatalf("agentRequestOf = %v, %v", via, err)
 	}

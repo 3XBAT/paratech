@@ -206,7 +206,7 @@ func newWave10World(t *testing.T) (*world, *memChanges) {
 	return w, ch
 }
 
-// call10 is an admitted call of catalog v10 of the given class (wave 10 is declared, not served: TASK-326).
+// call10 is an admitted call of catalog v10 of the given class.
 func call10(t *testing.T, id string, tool values.Tool, args string, class actionpolicy.Class) agentturn.Call {
 	t.Helper()
 	c, err := values.ParseCallAt(id, string(tool), args, values.CatalogWave10)

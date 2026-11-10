@@ -248,8 +248,8 @@ func TestListAssignmentsShowsTheLatestDraftVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := drv.tools.read(t.Context(), values.Scope{}, readCall(t, "c1", values.ToolListAssignments, `{}`))
-	if !strings.Contains(out.Result.ResultJSON, `{"id":"a1","status":"no_due","version":"v2"}`) ||
-		!strings.Contains(out.Result.ResultJSON, `{"id":"a2","status":"no_due"}`) {
+	if !strings.Contains(out.Result.ResultJSON, `{"id":"a1","status":"no_due","done":false,"version":"v2"}`) ||
+		!strings.Contains(out.Result.ResultJSON, `{"id":"a2","status":"no_due","done":false}`) {
 		t.Fatalf("result = %s", out.Result.ResultJSON)
 	}
 	if !values.NewRefSet(out.Seen...).Has(mustRef(t, values.KindVersion, "v2")) {

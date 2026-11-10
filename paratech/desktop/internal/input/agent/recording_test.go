@@ -332,20 +332,23 @@ func TestRecordingUnwired(t *testing.T) {
 
 // --- catalog and admission of the four control tools -------------------------------------------------------
 
-// Catalog 10 is not served yet (TASK-326): at catalog 9 the four tools do not exist.
+// Catalog 10 is served since TASK-326: the four tools are in the current catalog and still do not exist at catalog 9.
 func TestControlToolsInvisibleAtCatalog9(t *testing.T) {
-	if values.CatalogVersion != 9 {
+	if values.CatalogVersion != values.CatalogWave10 {
 		t.Fatalf("CatalogVersion = %d", values.CatalogVersion)
 	}
 	for _, tool := range []values.Tool{values.ToolGetSettings, values.ToolSetSetting, values.ToolQuotaStatus, values.ToolRecording} {
-		if _, err := values.ParseTool(string(tool)); err == nil {
+		if _, err := values.ParseToolAt(string(tool), 9); err == nil {
 			t.Errorf("%s is a tool of catalog 9", tool)
 		}
-		if _, err := values.SpecOf(tool); err == nil {
+		if _, err := values.SpecAt(tool, 9); err == nil {
 			t.Errorf("%s has a spec at catalog 9", tool)
 		}
-		if _, err := values.ParseCall("c1", string(tool), `{}`); err == nil {
+		if _, err := values.ParseCallAt("c1", string(tool), `{}`, 9); err == nil {
 			t.Errorf("%s parses at catalog 9", tool)
+		}
+		if _, err := values.ParseTool(string(tool)); err != nil {
+			t.Errorf("%s is not served by the current catalog: %v", tool, err)
 		}
 	}
 }

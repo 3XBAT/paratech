@@ -30,7 +30,7 @@ var sweepIDs = map[values.IDKind]string{
 	values.KindSubject: "s1", values.KindFolder: "f1", values.KindLesson: "l1", values.KindRecording: "rec1",
 	values.KindMaterial: "m1", values.KindUpload: "u1", values.KindAssignment: "a1", values.KindJob: "j1",
 	values.KindWork: "w1", values.KindVersion: "v1", values.KindProposal: "p1", values.KindPreview: "pv1",
-	values.KindAnswer: "an1",
+	values.KindAnswer: "an1", values.KindNote: "n1",
 }
 
 // baselineValue is a valid value of an argument; with one of them per argument the call parses and is admitted.
@@ -57,6 +57,8 @@ func baselineValue(a values.ArgSpec) any {
 		return "Готово."
 	case values.ArgTextList:
 		return []string{"Готово."}
+	case values.ArgBool:
+		return true
 	case values.ArgPlanSteps:
 		return []any{map[string]any{"tool": "create_subject", "arguments": map[string]any{"name": "Химия"}}}
 	default: // questions
@@ -91,6 +93,43 @@ func baselineArgs(spec values.ToolSpec) map[string]any {
 				args[a.Name] = baselineValue(a)
 			}
 		}
+	}
+	return args
+}
+
+// offerFor is a button of offer_button that takes the ID argument name (catalog 10).
+var offerFor = map[string]struct {
+	action values.OfferAction
+	kind   values.IDKind
+}{
+	"material":  {values.OfferOpenMaterial, values.KindMaterial},
+	"lesson":    {values.OfferOpenCallLink, values.KindLesson},
+	"recording": {values.OfferOpenSummary, values.KindRecording},
+	"work":      {values.OfferSaveAs, values.KindWork},
+}
+
+// sweepArgs are the baseline arguments of a tool with the action of catalog 10 that takes the argument name the
+// sweep fills ("" for the baseline alone), so the call is refused for the text, not for an argument its action lacks.
+func sweepArgs(tool values.Tool, spec values.ToolSpec, name string) map[string]any {
+	args := baselineArgs(spec)
+	switch tool {
+	case values.ToolChangeAssignment:
+		args["action"], args["due"] = values.AssignmentEdit, "2026-10-22"
+	case values.ToolNote:
+		args["action"], args["text"], args["lesson"] = values.NoteAddText, "Готово.", "l1"
+		switch name {
+		case "note", "date":
+			delete(args, "lesson")
+		case "upload":
+			args["action"], args["upload"] = values.NoteAddUpload, "u1"
+			delete(args, "text")
+		}
+	case values.ToolOfferButton:
+		if _, ok := offerFor[name]; !ok {
+			name = "material"
+		}
+		b := offerFor[name]
+		args["action"], args[name] = string(b.action), sweepIDs[b.kind]
 	}
 	return args
 }
@@ -155,7 +194,7 @@ func TestAgentInjectionSlotSweep(t *testing.T) {
 		}
 		// Lecture text and turnkey writing always need a plan; their arguments are still valid.
 		rule, _ := actionpolicy.Of(tool)
-		if _, err := decideAlone(t, tool, baselineArgs(spec)); err != nil && (!rule.AlwaysPlan || !errors.Is(err, thread.ErrPlanRequired)) {
+		if _, err := decideAlone(t, tool, sweepArgs(tool, spec, "")); err != nil && (!rule.AlwaysPlan || !errors.Is(err, thread.ErrPlanRequired)) {
 			t.Fatalf("%s: the baseline call is refused: %v", tool, err)
 		}
 	}
@@ -165,7 +204,7 @@ func TestAgentInjectionSlotSweep(t *testing.T) {
 			for _, tool := range values.Tools() {
 				spec, _ := values.SpecOf(tool)
 				for _, a := range spec.Args() {
-					args := baselineArgs(spec)
+					args := sweepArgs(tool, spec, a.Name)
 					// Another member of a one-of group replaces the first, so the injected one is the only one.
 					for _, group := range spec.OneOf() {
 						if slices.Contains(group[1:], a.Name) {

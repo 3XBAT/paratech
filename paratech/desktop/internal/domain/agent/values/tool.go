@@ -5,13 +5,13 @@ import (
 	"slices"
 )
 
-// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v9.json). Catalog
-// v10 (ADR-0033 §10, wave10.go) is declared but not served until this constant becomes CatalogWave10 (TASK-326). v9 has
-// the tools of v8 and lets a step carry mentions and a history summary turn (panel prompt v9, chats; TASK-244,
-// TASK-245); v8 has the tools of v7 and asks the subject of an assignment (TASK-233, TASK-234); v7 is v6 with
+// CatalogVersion is the tool catalog version this desktop implements (shared/testdata/tool_catalog_v10.json). v10 is v9
+// plus the wave-10 tools, list_assignments.state and show_plan of up to MaxPlanSteps steps (ADR-0033 §10, wave10.go;
+// TASK-326); v9 has the tools of v8 and lets a step carry mentions and a history summary turn (panel prompt v9, chats;
+// TASK-244, TASK-245); v8 has the tools of v7 and asks the subject of an assignment (TASK-233, TASK-234); v7 is v6 with
 // reply.text of the type reply_text, up to 4000 characters (TASK-223); v6 added create_assignment and the argument type
 // time (TASK-216, ADR-0029).
-const CatalogVersion = 9
+const CatalogVersion = CatalogWave10
 
 // Tool is a tool of the closed catalog. A name outside it is ErrUnknownTool.
 type Tool string
@@ -53,8 +53,8 @@ const (
 // Tools returns every tool of CatalogVersion in catalog order.
 func Tools() []Tool { return ToolsAt(CatalogVersion) }
 
-// ToolsAt returns every tool of catalog version v in catalog order. Versions below CatalogWave10 are catalog v9, the
-// oldest one served; versions from CatalogWave10 on are catalog v10 (the newest declared).
+// ToolsAt returns every tool of catalog version v in catalog order. Versions below CatalogWave10 are catalog v9 (the
+// tools of v4 to v9 are the same); versions from CatalogWave10 on are catalog v10, the current one.
 func ToolsAt(v int) []Tool { return toolsOf(specsAt(v)) }
 
 // RetiredTools returns the tools that left the catalog but may still be named by stored data.
