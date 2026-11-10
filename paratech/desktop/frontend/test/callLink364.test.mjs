@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  callKindOfLesson,
   callKinds,
   callLinkOpenProblems,
   lessonCallLink,
@@ -115,6 +116,47 @@ test("the link a lesson opens: its kind, else the general one; practice takes th
   // A subject with only the single general field (no callLinks) still answers with it.
   assert.deepEqual(lessonCallLink({ callLink: link }, "lecture"), { kind: "general", link });
   assert.deepEqual(callKinds, ["general", "lecture", "seminar", "lab"]);
+});
+
+test("the call kinds and the lesson-kind mapping mirror the Go domain (calllinks.go)", () => {
+  const go = readFileSync(new URL("../../internal/domain/library/subject/calllinks.go", import.meta.url), "utf8");
+
+  // const ( CallGeneral CallKind = "general" ... )
+  const goKinds = [...go.matchAll(/^\s+Call\w+\s+CallKind\s*=\s*"([^"]*)"/gm)].map((m) => m[1]);
+  assert.ok(goKinds.length > 0, "calllinks.go: no CallKind constants found; the Go shape changed, update this test");
+  assert.deepEqual([...callKinds].sort(), [...goKinds].sort(), "callKinds differs from the Go CallKind constants");
+
+  // Go constant name -> code, so the switch below can be read by names.
+  const codeOf = Object.fromEntries([...go.matchAll(/^\s+(Call\w+)\s+CallKind\s*=\s*"([^"]*)"/gm)].map((m) => [m[1], m[2]]));
+
+  const fn = go.match(/func CallKindOfLesson\([^)]*\)\s*CallKind\s*\{([\s\S]*?)\n\}/);
+  assert.ok(fn, "calllinks.go: func CallKindOfLesson not found; the Go shape changed, update this test");
+  const body = fn[1];
+  assert.match(body, /switch\s+\w+\s*\{/, "CallKindOfLesson is no longer a switch; update this test");
+
+  // Each `case "a", "b":` followed by `return CallX`; `default:` followed by `return CallX`.
+  const goMap = {};
+  let cases = 0;
+  for (const m of body.matchAll(/case\s+((?:"[^"]*"\s*,?\s*)+):\s*return\s+(Call\w+)/g)) {
+    const code = codeOf[m[2]];
+    assert.ok(code !== undefined, `CallKindOfLesson returns an unknown constant ${m[2]}`);
+    for (const lessonKind of m[1].matchAll(/"([^"]*)"/g)) {
+      goMap[lessonKind[1]] = code;
+    }
+    cases++;
+  }
+  const dflt = body.match(/default:\s*return\s+(Call\w+)/);
+  assert.ok(cases > 0 && dflt, "CallKindOfLesson: cases or default not parsed; the Go shape changed, update this test");
+  const goDefault = codeOf[dflt[1]];
+  assert.ok(goDefault !== undefined, `CallKindOfLesson default returns an unknown constant ${dflt[1]}`);
+
+  assert.deepEqual(goMap, { lecture: "lecture", seminar: "seminar", practice: "seminar", lab: "lab" }, "Go mapping changed: update the UI mirror and this test");
+  for (const [lessonKind, kind] of Object.entries(goMap)) {
+    assert.equal(callKindOfLesson(lessonKind), kind, `callKindOfLesson(${JSON.stringify(lessonKind)})`);
+  }
+  for (const other of ["", "unknown", "weird", "toString", "Lecture"]) {
+    assert.equal(callKindOfLesson(other), goDefault, `callKindOfLesson(${JSON.stringify(other)}) must be the Go default`);
+  }
 });
 
 test("problem codes are read as they are; an unknown, malformed or failed reply is «failed»", async () => {

@@ -395,7 +395,8 @@ test("a pair that names no subject cannot be saved: nothing is made or sent", as
 test("«Подключиться» sends the subject ID and the lesson kind; a removed link switches the card, a failure offers a retry", async () => {
   const p = setup({ open: [{ problem: "" }, { problem: "no_link" }, { problem: "failed" }, { problem: "not_found" }, new Error("x")] });
   await p.flow.join(target({ lessonKind: "seminar" }));
-  assert.deepEqual(p.calls, [["open", "s1", "seminar"]], "the kind of the pair crosses so the core picks that kind's link");  assert.deepEqual(p.flow.state.line, { key: "l1", kind: "ok", text: callLinkTexts.opened, action: "" });
+  assert.deepEqual(p.calls, [["open", "s1", "seminar"]], "the kind of the pair crosses so the core picks that kind's link");
+  assert.deepEqual(p.flow.state.line,{ key: "l1", kind: "ok", text: callLinkTexts.opened, action: "" });
   assert.equal(p.flow.state.focus.id, linkId("l1", "join"));
 
   await p.flow.join(target());
