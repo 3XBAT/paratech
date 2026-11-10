@@ -78,6 +78,10 @@ export function installScrollActivity(doc: Document, raf?: Frame): () => void {
     }
     for (let e: Element | null = target; e !== null && e !== doc.documentElement; e = e.parentElement) {
       const box = e as HTMLElement;
+      // An inline box (a span, a link) has clientWidth and clientHeight 0: its whole box would count as a strip.
+      if (box.clientWidth === 0 && box.clientHeight === 0) {
+        continue;
+      }
       // Cheap filter first: a scrollbar or a right/bottom border is what makes the border box wider than the client box.
       if (box.offsetWidth - box.clientWidth - box.clientLeft <= 0 && box.offsetHeight - box.clientHeight - box.clientTop <= 0) {
         continue;

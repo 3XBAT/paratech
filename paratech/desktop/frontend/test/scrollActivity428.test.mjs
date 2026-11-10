@@ -144,6 +144,29 @@ test("the strip is measured without borders: a left border and a right border ar
   assert.equal(framed.on(), true);
 });
 
+test("an inline box (client size 0) is not a scroller: hovering text sets nothing and costs no getComputedStyle", () => {
+  const d = fakeDoc();
+  const view = d.doc.defaultView;
+  const styledEls = [];
+  d.doc.defaultView = { getComputedStyle: (el) => (styledEls.push(el), view.getComputedStyle(el)) };
+  install(d);
+  const el = scroller();
+  const span = scroller(
+    { offsetWidth: 80, clientWidth: 0, offsetHeight: 18, clientHeight: 0, getBoundingClientRect: () => ({ left: 20, right: 100, top: 40, bottom: 58 }) },
+    el,
+  );
+  d.fire("pointermove", { target: span, clientX: 50, clientY: 50, buttons: 0 });
+  d.flush();
+  assert.equal(span.on(), false, "the span's whole box is not a strip");
+  assert.equal(el.on(), false);
+  assert.equal(styledEls.includes(span), false, "the cheap filter skips it before the computed style");
+  // The strip of the scroller around it still works through the inline target.
+  d.fire("pointermove", { target: span, clientX: 405, clientY: 50, buttons: 0 });
+  d.flush();
+  assert.equal(el.on(), true);
+  assert.equal(span.on(), false);
+});
+
 test("a horizontal strip counts too", () => {
   const d = fakeDoc();
   install(d);
@@ -248,10 +271,24 @@ test("scrollbar.css: the thumb is transparent at rest and visible only under .sc
   const hover = /\.scroll-active::-webkit-scrollbar-thumb:hover,\s*\.scroll-active::-webkit-scrollbar-thumb:active\s*\{([^}]*)\}/.exec(css);
   assert.ok(hover);
   assert.match(hover[1], /var\(--scroll-hover\)/);
-  // The coloured values appear nowhere else (a rule without the class would show the thumb at rest).
-  const outside = css.replace(/\.scroll-active::-webkit-scrollbar-thumb[^{]*\{[^}]*\}/g, "");
+  // The coloured values appear nowhere else but the class and the always-visible bar of .template (a rule without them would
+  // show the thumb at rest).
+  const outside = css.replace(/(?:\.scroll-active|\.template)::-webkit-scrollbar-thumb[^{]*\{[^}]*\}/g, "");
   assert.doesNotMatch(outside, /var\(--scroll/);
   assert.doesNotMatch(css, /overflow:\s*overlay|scrollbar-(?:width|color)\s*:/);
+});
+
+test("scrollbar.css: the horizontal-only .template keeps a visible thumb (the wheel does not scroll sideways)", () => {
+  const on = /(?:^|\})\s*\.template::-webkit-scrollbar-thumb\s*\{([^}]*)\}/.exec(css);
+  assert.ok(on);
+  assert.match(on[1], /background:\s*var\(--scroll\)/);
+  assert.match(on[1], /background-clip:\s*padding-box/);
+  const hover = /\.template::-webkit-scrollbar-thumb:hover,\s*\.template::-webkit-scrollbar-thumb:active\s*\{([^}]*)\}/.exec(css);
+  assert.ok(hover);
+  assert.match(hover[1], /var\(--scroll-hover\)/);
+  // It does not depend on the class (nothing puts .scroll-active on a pre that is only dragged sideways).
+  const outsideForced = css.replace(/@media \(forced-colors: active\)[\s\S]*$/, "");
+  assert.doesNotMatch(outsideForced, /\.template[^{]*\.scroll-active|\.scroll-active[^{]*\.template/);
 });
 
 test("scrollbar.css: forced colors always show the thumb (CanvasText, forced-color-adjust none), not conditional on the class", () => {
@@ -261,35 +298,75 @@ test("scrollbar.css: forced colors always show the thumb (CanvasText, forced-col
   assert.match(block[1], /forced-color-adjust:\s*none/);
   assert.match(block[1], /(?:^|\s)::-webkit-scrollbar-thumb,/, "the rest selector is in the block");
   assert.match(block[1], /\.scroll-active::-webkit-scrollbar-thumb\s*\{/);
+  assert.match(block[1], /\.template::-webkit-scrollbar-thumb,/, ".template is covered");
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  // A hovered or dragged thumb is as specific as the grey hover rule (0,2,1) and comes after it, so it stays in the system color.
+  const hoverBlock = /\n  ([^{}]*:hover[^{}]*)\{([^}]*)\}/.exec(block[1]);
+  assert.ok(hoverBlock, "a hover/active rule inside the forced-colors block");
+  const sels = hoverBlock[1].split(",").map((s) => s.trim());
+  for (const sel of [
+    "::-webkit-scrollbar-thumb:hover",
+    "::-webkit-scrollbar-thumb:active",
+    ".template::-webkit-scrollbar-thumb:hover",
+    ".template::-webkit-scrollbar-thumb:active",
+    ".scroll-active::-webkit-scrollbar-thumb:hover",
+    ".scroll-active::-webkit-scrollbar-thumb:active",
+  ]) {
+    assert.ok(sels.includes(sel), sel);
+  }
+  assert.match(hoverBlock[2], /background:\s*Highlight/);
+  assert.match(hoverBlock[2], /forced-color-adjust:\s*none/);
+  assert.doesNotMatch(hoverBlock[2], /var\(--scroll/);
+  assert.ok(css.indexOf("@media (forced-colors: active)") > css.lastIndexOf("var(--scroll-hover)"), "the block comes last");
 });
 
 // Every scroll container has a stable gutter (the track keeps its width, nothing moves when the thumb shows), except these.
+// `ua`: the overflow comes from the user agent, not from a rule of ours, so there is nothing to find in the scanned files.
 const exempt = new Map([
-  [".template", "a horizontal-only pre: a gutter would add a pointless strip at its right edge"],
-  [".ag-input", "the textarea of the agent: the gutter would eat the width of the text; it rarely scrolls"],
+  [".template", { why: "horizontal-only pre; its bar stays visible because the wheel does not scroll sideways" }],
+  [".ag-input", { why: "the textarea of the agent: the gutter would eat the width of the text; it rarely scrolls" }],
+  [".ag-chat-menu", { why: "opened at final size; a blank strip would make the insets asymmetric" }],
+  [".ag-mpop", { why: "opened at final size; a blank strip would make the insets asymmetric" }],
+  [".picker .list", { why: "opened at final size; a blank strip would make the insets asymmetric" }],
+  [".dialog", { why: "UA overflow on a modal dialog; components.css is outside this task, follow-up", ua: ["../src/ui/components.css", /\.dialog\s*\{/] }],
 ]);
+
+const ruleRe = /(?<=^|[{}])\s*([^{}@]+)\{([^}]*)\}/g;
+const overflowRe = /overflow(?:-x|-y)?:\s*(?:auto|scroll)/;
 
 test("every scroll container has scrollbar-gutter: stable or a listed exemption", () => {
   const files = ["../src/styles.css", "../src/agent/agent.css", "../src/popup/popup.css", "../src/sourcePicker/sourcePicker.css"];
+  const found = new Set();
   let seen = 0;
   for (const f of files) {
-    for (const m of read(f).matchAll(/(?<=^|\})\s*([^{}@]+)\{([^}]*)\}/g)) {
+    // A rule starts after the file start, a `}` or a `{` (the first rule inside @media / @container), whatever the axis.
+    for (const m of read(f).matchAll(ruleRe)) {
       const body = m[2];
-      if (!/overflow(?:-y)?:\s*(?:auto|scroll)/.test(body)) continue;
+      if (!overflowRe.test(body)) continue;
       const selector = m[1].trim();
       seen++;
+      found.add(selector);
       if (exempt.has(selector)) {
-        assert.ok(exempt.get(selector).length > 10);
+        assert.ok(exempt.get(selector).why.length > 10);
+        assert.doesNotMatch(body, /scrollbar-gutter/, `${selector} is exempt: drop the gutter or the exemption`);
         continue;
       }
       assert.match(body, /scrollbar-gutter:\s*stable/, `${f}: ${selector}`);
     }
   }
   assert.ok(seen >= 10, `found ${seen} scroll containers`);
-  // The exemptions are real (a stale entry would hide a missing gutter later).
-  assert.match(read("../src/styles.css"), /\.template\s*\{[^}]*overflow-x:\s*auto/);
-  assert.match(read("../src/agent/agent.css"), /\.ag-input\s*\{[^}]*overflow-y:\s*auto/);
+  // Every exemption is proven to match a real container (a stale entry would hide a missing gutter later).
+  for (const [selector, e] of exempt) {
+    if (e.ua !== undefined) {
+      assert.match(read(e.ua[0]), e.ua[1], `${selector}: the UA container`);
+    } else {
+      assert.ok(found.has(selector), `${selector}: no scroll container with this selector`);
+    }
+  }
+  // The scan itself sees an axis-only overflow and a rule first in an at-rule block.
+  const sample = "@media (x) {\n  .a { overflow-x: auto; }\n  .b { overflow: scroll; }\n}\n.c { overflow-y: auto; }";
+  const rules = [...sample.matchAll(ruleRe)].filter((m) => overflowRe.test(m[2])).map((m) => m[1].trim());
+  assert.deepEqual(rules, [".a", ".b", ".c"]);
 });
 
 test("no scroll container hides in a tsx inline style", () => {

@@ -215,7 +215,7 @@
 .ag-chat-notewrap:has(> .ag-chat-note:empty) { display: none; }
 .ag-chat-note { flex: 1; min-width: 0; margin: 0; min-height: 0; color: var(--muted); overflow-wrap: anywhere; }
 .ag-chat-note:empty { display: none; }
-.ag-chat-menu { position: absolute; z-index: 6; top: 32px; left: 0; right: 0; max-height: min(60vh, 420px); margin: 0; padding: 4px; overflow-y: auto; scrollbar-gutter: stable; list-style: none; border-radius: var(--r-md); background: var(--panel); box-shadow: 0 0 0 1px var(--edge), 0 8px 24px rgb(0 0 0 / 0.35); }
+.ag-chat-menu { position: absolute; z-index: 6; top: 32px; left: 0; right: 0; max-height: min(60vh, 420px); margin: 0; padding: 4px; overflow-y: auto; list-style: none; border-radius: var(--r-md); background: var(--panel); box-shadow: 0 0 0 1px var(--edge), 0 8px 24px rgb(0 0 0 / 0.35); }
 .ag-chat-group { margin: 0; padding: 0 0 0 8px; list-style: none; }
 .ag-chat-row { display: flex; align-items: center; gap: 4px; }
 .ag-chat-item { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; height: 28px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
@@ -255,7 +255,7 @@ button.ag-pill:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .ag-mpill { min-width: 0; }
 .ag-mpill .ag-chip-text { min-width: 0; }
 .ag-mpill-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.ag-mpop { position: absolute; z-index: 6; left: 0; right: 0; box-sizing: border-box; max-height: 240px; padding: 4px; overflow-y: auto; scrollbar-gutter: stable; border-radius: var(--r-md); background: var(--panel); box-shadow: 0 0 0 1px var(--edge), 0 8px 24px rgb(0 0 0 / 0.35); }
+.ag-mpop { position: absolute; z-index: 6; left: 0; right: 0; box-sizing: border-box; max-height: 240px; padding: 4px; overflow-y: auto; border-radius: var(--r-md); background: var(--panel); box-shadow: 0 0 0 1px var(--edge), 0 8px 24px rgb(0 0 0 / 0.35); }
 .ag-in-bottom .ag-mpop { bottom: calc(100% + 6px); }
 .ag-in-top .ag-mpop { top: calc(100% + 6px); }
 .ag-mlist { margin: 0; padding: 0; list-style: none; }

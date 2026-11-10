@@ -49,15 +49,27 @@ test("narrow: the quiet ghost button is pulled left by its own padding; the wide
 });
 
 // TASK-428: the old assertion pinned `.today-lesson { grid-template-columns: 4.5rem minmax(0, 1fr) minmax(0, 14rem) auto; }`,
-// the four columns of EACH row. They are now the columns of the list (rows take them as a subgrid), see the test below.
+// the four columns of EACH row. They are now the columns of the list (rows take them as a subgrid) and the tracks changed:
+// a fixed actions track (no `auto`, the status column must not move with the buttons of a row), a 10rem floor for the title
+// (it collapsed to ~0 in a narrow list), the status capped at 12rem (it absorbs a shortfall).
 test("wide lesson row: four columns (on the list), the actions are auto-placed in the last one and end-aligned", () => {
   const css = read("pages/today.css");
   const wide = css.slice(css.indexOf("@container (min-width: 38rem)"), css.indexOf("@container (min-width: 62rem)"));
-  assert.match(rule(wide, ".today-list"), /grid-template-columns: calc\(4\.5rem \+ 16px\) minmax\(0, 1fr\) minmax\(0, 14rem\) auto;/);
+  assert.match(
+    rule(wide, ".today-list"),
+    /grid-template-columns: calc\(4\.5rem \+ 16px\) minmax\(10rem, 1fr\) minmax\(0, 12rem\) calc\(11rem \+ 16px\);/,
+  );
   const w = rule(wide, ".today-lesson .today-ac");
   assert.match(w, /grid-column: auto/);
   assert.match(w, /justify-self: end/);
   assert.match(w, /justify-content: flex-end/);
+  const tracks = /grid-template-columns: ([^;]+);/.exec(rule(wide, ".today-list"))[1];
+  assert.doesNotMatch(tracks, /\bauto\b/, "no auto track: the actions of a row would move the status column");
+  assert.match(tracks, /^calc\(4\.5rem \+ 16px\) minmax\(10rem, /, "the title has a floor");
+  assert.match(tracks, / minmax\(0, 12rem\) calc\(11rem \+ 16px\)$/, "the status is capped, the actions track is a fixed length");
+  // The buttons wrap inside the fixed track, and the row may grow past its 60px floor when they do.
+  assert.match(rule(css, ".today-ac"), /flex-wrap: wrap/);
+  assert.match(rule(css, ".today-row"), /min-height: 60px/);
 });
 
 test("the status column does not depend on the actions of a row: the columns are the list's, the rows are subgrids", () => {
