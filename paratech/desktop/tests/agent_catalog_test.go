@@ -25,9 +25,9 @@ import (
 	"paratech/desktop/testenv"
 )
 
-// goldenCatalog is shared/testdata/tool_catalog_v9.json (TASK-113; v2 since TASK-118, v3 since TASK-173, v4 since
-// TASK-184, v5 since TASK-210, v6 since TASK-217, v7 since TASK-223, v8 since TASK-234, v9 since TASK-245), the tool
-// list the Hub serves for the catalog version the desktop sends.
+// goldenCatalog is shared/testdata/tool_catalog_v10.json (TASK-113; v2 since TASK-118, v3 since TASK-173, v4 since
+// TASK-184, v5 since TASK-210, v6 since TASK-217, v7 since TASK-223, v8 since TASK-234, v9 since TASK-245, v10 since
+// TASK-326), the tool list the Hub serves for the catalog version the desktop sends.
 type goldenCatalog struct {
 	CatalogVersion int               `json:"catalog_version"`
 	Types          map[string]string `json:"types"`
@@ -42,6 +42,7 @@ type goldenCatalog struct {
 			Type     string   `json:"type"`
 			Required bool     `json:"required"`
 			Values   []string `json:"values"`
+			MaxItems int      `json:"max_items"` // ids only, since catalog 10
 		} `json:"arguments"`
 	} `json:"tools"`
 }
@@ -315,12 +316,189 @@ func TestToolCatalogMatchesGolden(t *testing.T) {
 			}
 			for i, ga := range g.Arguments {
 				a := args[i]
-				if a.Name != ga.Name || string(a.Type) != ga.Type || a.Required != ga.Required || !slices.Equal(a.Values, ga.Values) {
+				if a.Name != ga.Name || string(a.Type) != ga.Type || a.Required != ga.Required || !slices.Equal(a.Values, ga.Values) ||
+					a.MaxItems != ga.MaxItems {
 					t.Fatalf("argument %d = %+v, golden %+v", i, a, ga)
 				}
 			}
 		})
 	}
+}
+
+// waveTools are the tools catalog 10 adds (ADR-0033 §10), in golden order.
+var waveTools = []values.Tool{
+	values.ToolProposeSubjectsFromSchedule, values.ToolChangeAssignment, values.ToolMarkAssignmentsDone,
+	values.ToolListNotes, values.ToolNote, values.ToolGetSettings, values.ToolSetSetting, values.ToolQuotaStatus,
+	values.ToolRecording, values.ToolOfferButton,
+}
+
+// TestToolCatalogV10IsV9PlusTheWave: the desktop serves catalog 10 (TASK-326): the golden is the tools of v9 with
+// list_assignments.state, then the wave tools, and every one of them parses on the desktop.
+func TestToolCatalogV10IsV9PlusTheWave(t *testing.T) {
+	if values.CatalogVersion != 10 {
+		t.Fatalf("CatalogVersion = %d", values.CatalogVersion)
+	}
+	v9, v10 := loadGoldenCatalogFile(t, "tool_catalog_v9.json"), loadGoldenCatalog(t)
+	if len(v10.Tools) != len(v9.Tools)+len(waveTools) {
+		t.Fatalf("v10 has %d tools, v9 %d", len(v10.Tools), len(v9.Tools))
+	}
+	for i, old := range v9.Tools {
+		got := v10.Tools[i]
+		if got.Name == string(values.ToolListAssignments) {
+			n := len(got.Arguments)
+			if n != len(old.Arguments)+1 || got.Arguments[n-1].Name != "state" {
+				t.Fatalf("list_assignments of v10 = %+v", got.Arguments)
+			}
+			got.Arguments = got.Arguments[:n-1]
+		}
+		a, err := json.Marshal(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := json.Marshal(old)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(a) != string(b) {
+			t.Fatalf("v9 tool %s changed in v10:\n %s\n %s", old.Name, a, b)
+		}
+	}
+	for i, tool := range waveTools {
+		if v10.Tools[len(v9.Tools)+i].Name != string(tool) || !slices.Contains(values.Tools(), tool) {
+			t.Fatalf("wave tool %s is not served", tool)
+		}
+		if _, err := values.ParseTool(string(tool)); err != nil {
+			t.Fatalf("ParseTool(%s) = %v", tool, err)
+		}
+	}
+}
+
+// TestPlanArgumentsLimitOfCatalog10: show_plan of catalog 10 carries up to MaxPlanSteps steps, so its arguments may
+// take 32 KiB (as the Hub, TASK-325); every other tool keeps 8 KiB.
+func TestPlanArgumentsLimitOfCatalog10(t *testing.T) {
+	if values.MaxPlanArgumentsBytes != 32<<10 || values.MaxArgumentsBytes != 8<<10 || values.MaxPlanSteps != 200 {
+		t.Fatalf("limits %d / %d, %d steps", values.MaxPlanArgumentsBytes, values.MaxArgumentsBytes, values.MaxPlanSteps)
+	}
+	steps := make([]string, values.MaxPlanSteps)
+	for i := range steps {
+		steps[i] = fmt.Sprintf(`{"tool":"mark_assignments_done","arguments":{"assignments":["a%d"],"done":true}}`, i)
+	}
+	plan := `{"summary":"Отметить всё","steps":[` + strings.Join(steps, ",") + `]}`
+	if len(plan) <= values.MaxArgumentsBytes || len(plan) > values.MaxPlanArgumentsBytes {
+		t.Fatalf("a plan of %d steps is %d bytes", values.MaxPlanSteps, len(plan))
+	}
+	c, err := values.ParseCall("toolu_1", string(values.ToolShowPlan), plan)
+	if err != nil || len(c.Args().PlanSteps("steps")) != values.MaxPlanSteps {
+		t.Fatalf("plan of %d bytes = %v", len(plan), err)
+	}
+
+	// padTo fills a JSON object with spaces before its closing brace up to size bytes.
+	padTo := func(obj string, size int) string {
+		return strings.TrimSuffix(obj, "}") + strings.Repeat(" ", size-len(obj)) + "}"
+	}
+	if _, err := values.ParseCall("toolu_1", string(values.ToolShowPlan), padTo(plan, values.MaxPlanArgumentsBytes+1)); !errors.Is(err, values.ErrInvalidArguments) {
+		t.Fatalf("plan over 32 KiB = %v", err)
+	}
+	others := []struct{ tool, args string }{
+		{string(values.ToolListSubjects), `{}`},
+		{string(values.ToolReply), `{"text":"Готово"}`},
+		{string(values.ToolNote), `{"action":"add_text","lesson":"l1","text":"Конспект"}`},
+		{string(values.ToolMarkAssignmentsDone), `{"assignments":["a1"],"done":true}`},
+	}
+	for _, o := range others {
+		if _, err := values.ParseCall("toolu_1", o.tool, padTo(o.args, values.MaxArgumentsBytes)); err != nil {
+			t.Errorf("%s at 8 KiB = %v", o.tool, err)
+		}
+		if _, err := values.ParseCall("toolu_1", o.tool, padTo(o.args, values.MaxArgumentsBytes+1)); !errors.Is(err, values.ErrInvalidArguments) {
+			t.Errorf("%s over 8 KiB = %v", o.tool, err)
+		}
+	}
+}
+
+// eventFacts is evalFacts plus a Google event on every assignment change_assignment{delete} names.
+type eventFacts struct{ evalFacts }
+
+func (f eventFacts) Facts(ctx context.Context, c values.Call) (thread.Facts, error) {
+	facts, err := f.evalFacts.Facts(ctx, c)
+	facts.HasCalendarEvent = true
+	return facts, err
+}
+
+// Catalog 10 on the real agent use cases, SQLite and Hub client (TASK-326): «удали задание» of an assignment with a
+// Google event reaches the Driver as the delete_assignment card, without one as a write with Undo; a plan of 12
+// wave-10 writes takes one «Да» and runs to the end, each step its own Hub call, with no limit stop.
+func TestCatalog10OnTheAgentUseCases(t *testing.T) {
+	ctx := context.Background()
+	const deleteA1 = `{"assignment":"a1","action":"delete"}`
+
+	t.Run("delete with an event is a card", func(t *testing.T) {
+		e := newEvalEnv(t, eventFacts{evalFacts{cost: evalCost}})
+		e.hub.Then(testenv.AgentCall{ID: "toolu_1", Tool: "change_assignment", Args: deleteA1}).Then(evalEnd)
+		st := evalAsk(t, e, "удали задание")
+		if len(st.Calls) != 1 || st.Calls[0].Class != actionpolicy.ClassC || st.Calls[0].Card != values.CardDeleteAssignment {
+			t.Fatalf("calls = %+v", st.Calls)
+		}
+	})
+
+	t.Run("delete without an event is a write", func(t *testing.T) {
+		e := newEvalEnv(t, evalFacts{cost: evalCost})
+		e.hub.Then(testenv.AgentCall{ID: "toolu_1", Tool: "change_assignment", Args: deleteA1}).Then(evalEnd)
+		st := evalAsk(t, e, "удали задание")
+		if len(st.Calls) != 1 || st.Calls[0].Class != actionpolicy.ClassU || st.Calls[0].Card != "" {
+			t.Fatalf("calls = %+v", st.Calls)
+		}
+	})
+
+	t.Run("plan of 12 entries", func(t *testing.T) {
+		e := newEvalEnv(t, evalFacts{cost: evalCost})
+		writes := []testenv.AgentCall{
+			{Tool: "change_assignment", Args: `{"assignment":"a1","action":"edit","due":"2026-11-20"}`},
+			{Tool: "mark_assignments_done", Args: `{"assignments":["a1"],"done":true}`},
+			{Tool: "set_setting", Args: `{"setting":"recording_prompts","value":"off"}`},
+			{Tool: "set_setting", Args: `{"setting":"ac_power_only","value":"on"}`},
+			{Tool: "set_setting", Args: `{"setting":"recognition_load","value":"gentle"}`},
+		}
+		for i := range 7 {
+			writes = append(writes, testenv.AgentCall{Tool: "create_subject", Args: fmt.Sprintf(`{"name":"Предмет %d"}`, i)})
+		}
+		var steps []string
+		for i := range writes {
+			writes[i].ID = fmt.Sprintf("w%d", i)
+			steps = append(steps, desktopStep(writes[i].Tool, writes[i].Args))
+		}
+		if len(steps) != 12 {
+			t.Fatalf("%d entries", len(steps))
+		}
+		e.hub.Then(testenv.AgentCall{ID: "p1", Tool: "show_plan", Args: desktopPlan("План: двенадцать изменений.", steps...)})
+		for _, w := range writes {
+			e.hub.Then(w)
+		}
+		e.hub.Then(evalEnd)
+
+		st := evalAsk(t, e, "сделай всё по списку")
+		if st.Status != thread.StatusAwaitingPlan {
+			t.Fatalf("plan step = %+v", st)
+		}
+		st, err := e.turns.ApprovePlan(ctx, turnOf(st))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ran := 0
+		for len(st.Calls) > 0 {
+			c := st.Calls[0]
+			if c.PlanStep != ran || c.Class != actionpolicy.ClassU || string(c.Call.Tool()) != writes[ran].Tool {
+				t.Fatalf("call %d = %+v", ran, c)
+			}
+			ran++
+			st = e.submit(t, st, okOutcome(c))
+		}
+		if st.Status != thread.StatusDone || ran != len(writes) || len(e.hub.Requests()) != len(writes)+2 {
+			t.Fatalf("after %d writes and %d Hub steps: %+v", ran, len(e.hub.Requests()), st)
+		}
+		if st.Status == thread.StatusAwaitingPlan || st.StopReason != "" {
+			t.Fatalf("a second «Да» or a stop: %+v", st)
+		}
+	})
 }
 
 // TestArgumentTypesMatchGolden: every argument type of the desktop parser is a golden type, and card_ids keeps the
@@ -481,10 +659,13 @@ func TestAgentRequestOfAnOlderCatalogAfterTheUpdate(t *testing.T) {
 }
 
 // The update to the current catalog (4 -> 5 in TASK-210, 5 -> 6 in TASK-217, 6 -> 7 in TASK-223, 7 -> 8 in TASK-234,
-// 8 -> 9 in TASK-245, where the tools stay the same and only the seal's catalog differs): calls sealed for a
-// request stopped on the previous catalog no longer pass the Hub's check once the desktop sends the new one, so
-// «Продолжить» and «Повторить» end with the honest «не удалось», and a new request works.
+// 8 -> 9 in TASK-245, 9 -> 10 in TASK-326, where list_subjects stays the same and only the seal's catalog differs):
+// calls sealed for a request stopped on the previous catalog no longer pass the Hub's check once the desktop sends the
+// new one, so «Продолжить» and «Повторить» end with the honest «не удалось», and a new request works.
 func TestAgentRequestOfThePreviousCatalogAfterTheUpdate(t *testing.T) {
+	if values.CatalogVersion-1 != 9 {
+		t.Fatalf("previous catalog = %d, want 9", values.CatalogVersion-1)
+	}
 	e := newAgentEnv(t)
 	ctx := context.Background()
 

@@ -1,7 +1,7 @@
 # Agent parity: what the student can do in the UI and what the agent can do
 
-- **Date:** 2026-11-10 (catalog 10 built on the Hub, TASK-326 switches the desktop; owner 10.11 «агент может всё»,
-  ADR-0038; tasks from TASK-431). Previous audit: 2026-10-28.
+- **Date:** 2026-11-10 (catalog 10 built on the Hub and served by the desktop since TASK-326; owner 10.11 «агент может
+  всё», ADR-0038; tasks from TASK-431). Previous audit: 2026-10-28.
 - **Rules:** [ADR-0033](adr/0033-agent-parity.md) (classes, waves, cards), [ADR-0038](adr/0038-agent-can-do-everything.md)
   (everything except the closed list of UI-only reasons, §2 there). Classes: ADR-0021 (`actionpolicy`).
 - **Source of the rows:** every exported method of `paratech/desktop/internal/input/wails/*.go` on 2026-11-10 (a
@@ -15,8 +15,8 @@ Legend
   (`offer_button`).
 - **«Да» / план** — **—** none; **план** = a plan card with one «Да» (a second write, a costly paid job, replacing a
   ready result); **«Да»** = a confirmation card; **клик** = the button itself is the consent.
-- **Волна** — the catalog that brings the tool: **≤9** done, **10** TASK-326, **11**, **12**, **13** (waits for a
-  feature task); **—** never (UI-only).
+- **Волна** — the catalog that brings the tool: **≤9** done, **10** done (the desktop sends catalog 10 since
+  TASK-326), **11**, **12**, **13** (waits for a feature task); **—** never (UI-only).
 - Paid U jobs: one cheap job (≤ $0.05) without a plan; above it a plan (ADR-0021; ADR-0033 О-1 а).
 
 ## 1. Предметы и папки
@@ -196,7 +196,8 @@ handler, pickers, `WailsLogger`.
 
 ## 11. Tasks
 
-- Wave 10: TASK-326 (desktop switch; the owner's 10.11 instruction is the choice to switch it on, ADR-0038 D-1).
+- Wave 10: done, TASK-326 switched the desktop to catalog 10 (the owner's 10.11 instruction is the choice to switch
+  it on, ADR-0038 D-1).
 - Call links per kind (usable from the UI before the agent): TASK-431 (domain, migration, use case), TASK-432
   (bindings, «Подключиться» by kind), TASK-433 (UI), TASK-435 (batch service).
 - Wave 11: TASK-327 (specs, as written minus `set_call_link`/`clear_call_link`), TASK-434 (ADR-0038 specs),
