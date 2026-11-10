@@ -12,9 +12,11 @@ import (
 	"paratech/desktop/internal/domain/localhub/values"
 )
 
-// fakeProbe returns before until the launcher started the Hub, then the after facts in turn (the last one repeats).
+// fakeProbe returns the queued facts first, one per call; then before until the launcher started the Hub, then the
+// after facts in turn (the last one repeats).
 type fakeProbe struct {
 	mu      sync.Mutex
+	queued  []values.Facts
 	before  values.Facts
 	after   []values.Facts
 	started bool
@@ -38,6 +40,11 @@ func (p *fakeProbe) Facts(ctx context.Context, t values.Target) (values.Facts, e
 	if p.err != nil {
 		return values.Facts{}, p.err
 	}
+	if len(p.queued) > 0 {
+		f := p.queued[0]
+		p.queued = p.queued[1:]
+		return f, nil
+	}
 	if !p.started || len(p.after) == 0 {
 		return p.before, nil
 	}
@@ -52,6 +59,13 @@ func (p *fakeProbe) set(f values.Facts) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.before = f
+}
+
+// queue makes the next calls return fs, one each.
+func (p *fakeProbe) queue(fs ...values.Facts) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.queued = fs
 }
 
 // then replaces the facts returned after a start.
@@ -108,6 +122,47 @@ func (l *fakeLauncher) startCount() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.starts
+}
+
+// fakeDatabase counts StartDatabase calls; on success it runs up (e.g. the probe sees the port answer).
+type fakeDatabase struct {
+	mu      sync.Mutex
+	calls   int
+	err     error
+	up      func()
+	entered chan struct{} // receives once per call when not nil
+	release chan struct{} // the call blocks on it when not nil
+	hasDL   bool          // the ctx of the last call had a deadline
+}
+
+func (d *fakeDatabase) StartDatabase(ctx context.Context) error {
+	d.mu.Lock()
+	d.calls++
+	_, d.hasDL = ctx.Deadline()
+	err, up, entered, release := d.err, d.up, d.entered, d.release
+	d.mu.Unlock()
+	if entered != nil {
+		entered <- struct{}{}
+	}
+	if release != nil {
+		<-release
+	}
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if up != nil {
+		up()
+	}
+	return nil
+}
+
+func (d *fakeDatabase) callCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.calls
 }
 
 type fakeSecrets struct {
@@ -197,6 +252,7 @@ type fakeClock struct {
 	mu     sync.Mutex
 	now    time.Time
 	sleeps int
+	slept  []time.Duration
 }
 
 func (c *fakeClock) Now() time.Time {
@@ -212,6 +268,7 @@ func (c *fakeClock) Sleep(ctx context.Context, d time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sleeps++
+	c.slept = append(c.slept, d)
 	c.now = c.now.Add(d)
 	return nil
 }
@@ -221,6 +278,7 @@ type world struct {
 	svc      *Service
 	probe    *fakeProbe
 	launcher *fakeLauncher
+	database *fakeDatabase
 	secrets  *fakeSecrets
 	settings *fakeSettings
 	clock    *fakeClock
@@ -246,11 +304,12 @@ func newWorld(t *testing.T, url string) *world {
 		secrets:  newSecrets(values.SecretProviderKey, values.SecretDatabaseURL),
 		settings: &fakeSettings{},
 		clock:    &fakeClock{now: time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)},
+		database: &fakeDatabase{},
 		logs:     &syncBuffer{},
 	}
 	w.launcher = &fakeLauncher{probe: w.probe}
 	svc, err := New(Deps{
-		Probe: w.probe, Launcher: w.launcher, Secrets: w.secrets, Settings: w.settings, URL: fakeURL{raw: url},
+		Probe: w.probe, Launcher: w.launcher, Database: w.database, Secrets: w.secrets, Settings: w.settings, URL: fakeURL{raw: url},
 		Clock: w.clock, Log: slog.New(slog.NewTextHandler(w.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	})
 	if err != nil {

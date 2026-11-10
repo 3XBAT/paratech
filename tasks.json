@@ -9031,7 +9031,7 @@
                 "golangci-lint run ./desktop/..."
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-408",

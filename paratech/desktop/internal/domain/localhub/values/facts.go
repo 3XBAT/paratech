@@ -25,6 +25,12 @@ type Facts struct {
 	DockerEngine bool
 	// DatabasePort: the host and port of the database URL accept TCP.
 	DatabasePort bool
+	// DatabaseStartable: the app may start the database container (ADR-0036 section 8): the compose file is next to
+	// the exe, the Docker CLI is at its fixed place and the host of the database URL is loopback.
+	DatabaseStartable bool
+	// DatabaseStartFailed: a start of the container failed and is not to be repeated automatically (set by the use
+	// case from its memory, never by the probe).
+	DatabaseStartFailed bool
 	// Listener: who listens on the Target port.
 	Listener Listener
 	// Exited and ExitCode: the Hub this desktop started last has ended, with that code.

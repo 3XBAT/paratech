@@ -19,9 +19,12 @@
 //   - Secret slot: a named secret of the Hub kept in the secret store (provider key, database URL, seal keys). The
 //     domain knows only the names; values never pass through it.
 //   - Facts: what a probe found (secrets present, hub.exe present, /healthz, /readyz, Docker engine, database port,
-//     who listens on the port, last exit of the Hub this desktop started). Facts never carry a secret value.
-//   - Diagnosis: the status shown to the owner, its reason and the next step, derived from the facts.
+//     whether the database container is startable, who listens on the port, last exit of the Hub this desktop
+//     started) plus the use case's memory of a failed container start. Facts never carry a secret value.
+//   - Diagnosis: the status shown to the owner, its reason and the next step, derived from the facts; it also says
+//     whether the app may start the database container (CanStartDatabase).
 //
-// The app never starts Docker Desktop or a container (owner rule): Docker off and a database that does not answer are
-// reasons with a next step for the owner.
+// The app never starts Docker Desktop (owner rule): Docker off is a reason with a next step for the owner. When the
+// engine already runs and the database does not answer, the app starts the database container itself if it can
+// (ADR-0036 section 8, О1); a failed start is the reason database_start_failed.
 package localhub
