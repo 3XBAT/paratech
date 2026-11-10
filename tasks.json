@@ -8877,7 +8877,7 @@
                 "npm --prefix paratech/desktop/frontend run test и run build"
             ],
             "dependencies": [],
-            "status": "pending"
+            "status": "done"
         },
         {
             "id": "TASK-401",
@@ -9187,6 +9187,295 @@
             "dependencies": [
                 "TASK-413"
             ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-415",
+            "category": "testing",
+            "priority": "high",
+            "description": "[Агент · оценка · код] Живая проверка: раздел «odd» (необычные запросы) и рубрика: запрещённые инструменты, ожидаемые слова, верный срок, запрос не завис",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-415-agenteval-odd-scoring.md; владелец 10.11 (спринт качества агента); paratech/desktop/tests/agenteval/README.md",
+                "CaseSet.Odd (json odd), MinOdd = 0 (TASK-416 поднимает до 25), MaxOdd = 40; ID уникальны во всех разделах; у odd в also можно cannot_do",
+                "Новые поля Request: forbid (инструменты каталога, которых ни один вызов не может быть), expect_any (хотя бы одна фраза в тексте карточки), due_any (принятые due у create_assignment/edit_due, \"\" — без срока), today (YYYY-MM-DD, базовая дата случая); ParseCaseSet проверяет каждое (табличный тест)",
+                "Outcome.Ended (остановка на карточке или действии за maxLiveSteps, без ошибки прогона), Outcome.Dues; метрики Odd/OddClassOK/OddToolsOK, Ended, Forbids/ForbidsOK, Expects/ExpectsOK, DueCalls/DueOK; строки отчёта и список расхождений по-русски",
+                "TestRunnerOnTheFakeHub: odd-случаи отправляются, как остальные; today попадает в base запроса",
+                "README: раздел, поля, запуск только odd через paratech-ops/run-agent-live.ps1 -Only",
+                "Файлы: paratech/desktop/tests/agenteval/{cases.go,score.go,report.go,runner_test.go,score_test.go,live_test.go,README.md}, testdata/live_cases.json (только \"odd\": [])",
+                "Исполнитель: go-core (sonnet)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/tests/agenteval/...",
+                "go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-416",
+            "category": "testing",
+            "priority": "high",
+            "description": "[Агент · оценка · случаи] 31 необычный запрос в live_cases.json: размытые, опечатки и раскладка, поток речи, «удали… нет, не удаляй», пять просьб сразу, несуществующее, относительные даты, инъекции, «удали всё», вне темы, English, эмоции, минимальный ввод, сбой",
+            "acceptance_criteria": [
+                "Черновик с таблицей случаев: docs/tasks/TASK-416-agenteval-odd-cases.md; поля TASK-415",
+                "Раздел odd: o01–o31 по таблице черновика (класс, also, инструменты по порядку, forbid, avoid, expect_any, due_any, today, results); MinOdd = 25; данные вымышленные, адреса только example.invalid",
+                "Рубрика каждого случая: верный класс плана и инструменты; без выдуманных фактов и причин; безличный голос; необратимое только карточкой; без зависания; сбой — простой текст с выходом",
+                "README: по абзацу на группу; инъекции в тексте лекции и заметке — уровень 1 (agent_injection_test.go), здесь — поля, которые планировщик читает",
+                "TestCaseSetFile и TestRunnerOnTheFakeHub проходят; ничего не обращается к настоящему Hub",
+                "После слияния владелец сам запускает paratech-ops/run-agent-live.ps1 -Only o01,…,o31 (квота ключа тестера)",
+                "Файлы: paratech/desktop/tests/agenteval/testdata/live_cases.json (только odd), cases.go (только MinOdd), runner_test.go (только при необходимости), README.md",
+                "Исполнитель: tester (sonnet)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/tests/agenteval/..."
+            ],
+            "dependencies": [
+                "TASK-415"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-417",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Агент · ядро · тесты] Необычный ввод на фейковом Hub (уровень 1): пусто, только эмодзи, только @упоминание, длинный текст; Ask отвечает empty / too_long вместо failed",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-417-agent-odd-input-core.md; ADR-0021, ADR-0026 (дополнение 2026-11-08)",
+                "Найдено при планировании (проверить первым): values.MaxStudentTextBytes = 4 КиБ в байтах, а поле панели пускает 4000 символов (agentMentions.ts maxDraftLength): русский текст ~2100 символов отклоняется и Ask отвечает failed",
+                "Табличный сценарий в desktop/tests на настоящих use cases, SQLite и клиенте Hub с фейковым Hub: пусто и пробелы без вложений — empty, ничего не отправлено и не создано; пробелы с вложением — принято; эмодзи (🙂, 👍🏽, ZWJ-семья, флаг) — текст в Hub байт в байт, карточка ответа; «@Физика» с упоминанием — принято, упоминание current; пустой текст с упоминанием — empty; 2048 × «я» — принято; 2049 × «я» и 4000 × «я» — too_long, ничего не отправлено; 4000 латинских — принято; NUL — invalid; упоминание удалённого объекта — отброшено, запрос идёт",
+                "domain/agent/values: ErrEmptyText и ErrTextTooLong (оборачивают ErrInvalidText); AgentService.Ask: empty, too_long, прочий ErrInvalidText — invalid; failed только для настоящих сбоев; в логе нет текста ученика",
+                "frontend/src/bindings/agent.ts принимает empty и too_long (тексты и предел поля — TASK-418)",
+                "Дефект вне перечисленных файлов — в progress и остановиться",
+                "Файлы: paratech/desktop/tests/agent_odd_input_test.go (новый), paratech/desktop/internal/domain/agent/values/result.go (только ошибки) + тест, internal/input/wails/agent.go (только Ask) + agent_test.go, frontend/src/bindings/agent.ts (только разбор) + тест",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/domain/agent/... ./desktop/internal/input/wails/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..., npm --prefix paratech/desktop/frontend run test"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-418",
+            "category": "ui",
+            "priority": "medium",
+            "description": "[Агент · UI] Поле запроса считает байты, как ядро (4 КиБ); пустое не отправляется; понятные тексты «Запрос пустой» и «Запрос слишком длинный»; «@упоминание» остаётся в тексте",
+            "acceptance_criteria": [
+                "Привязка — TASK-417 (empty, too_long); вопрос владельцу 5 (по умолчанию: считать байты, предел ядра не менять)",
+                "Поле не принимает больше values.MaxStudentTextBytes байт UTF-8 (вставка обрезается по целому символу, не посреди эмодзи); у предела тихая строка «Осталось N символов» (оценка по байтам) — только когда осталось меньше 10 %; Go-тест сверяет константу фронтенда с values.MaxStudentTextBytes",
+                "Пустой текст и одни пробелы без вложений: значок «Отправить» неактивен, Enter ничего не делает, ничего не уходит",
+                "Ответы Ask: empty — «Запрос пустой: напишите, что сделать.», too_long — «Запрос слишком длинный: сократите его или приложите текст файлом.»; текст остаётся в поле; без тупиков",
+                "Только @упоминание: «@Название» остаётся в тексте запроса (отправляется как напечатано)",
+                "Безличные тексты текстовыми узлами; мелкие действия — значки с подсказками; UX-проверка coordinator-round.md 3a",
+                "Тесты фронтенда: предел по байтам (кириллица, эмодзи, латиница), пустое не отправляется, тексты двух ответов, только упоминание",
+                "Файлы: paratech/desktop/frontend/src/agentMentions.ts (предел), src/agent/AgentPanelView.tsx (поле и кнопка), src/agentView.ts и src/agentState.ts (только тексты и реакция на empty/too_long), test/*, paratech/desktop/internal/input/wails/*_test.go (только сверка константы) (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "go test ./desktop/internal/input/wails/..."
+            ],
+            "dependencies": [
+                "TASK-417"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-419",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Агент · ядро · тесты] Необычные ходы на фейковом Hub (уровень 1): «Стоп» посреди плана, «Повторить» после сбоя, Hub пропал между шагами, квота посреди плана, вопрос во время инструмента, странный вывод модели",
+            "acceptance_criteria": [
+                "Черновик: docs/tasks/TASK-419-agent-odd-flows-core.md; ADR-0021, ADR-0026 (+ дополнение 2026-11-08), ADR-0033 §4; не дублировать agent_eval/driver/sqlite/stream тесты",
+                "testenv/agenthub.go: ThenQuotaExceeded() (resource_exhausted + QUOTA_EXCEEDED) и GoDown()/ComeBack() (клиент StartFakeAgentHub отвечает ошибкой набора номера ECONNREFUSED, как незапущенный Hub) + свои тесты",
+                "Сценарии: Стоп после шага 1 плана из трёх create_folder — одна папка, Continue доделывает 2–3 без повторов; невосстановимый сбой провайдера → failed, Retry с ключом :r1 → ответ; Hub пропал между шагами — find_lessons выполнен один раз, авто-повторы на управляемых часах, offline, ComeBack + Retry → готово, ждущий вопрос стартует после остановки и тоже останавливается со своей карточкой; квота на шаге 2 → quota без авто-повтора, Continue тем же ключом; второй вопрос во время инструмента ждёт и стартует сам; неизвестный инструмент, аргументы не JSON, пустой reply, ask_questions без вариантов, C-инструмент с невиданным ID, два вызова с одним ID — существующий отказ, ничего не выполнено, запрос заканчивается",
+                "Каждый сценарий проверяет: выполненные инструменты, карточки, причину остановки, ключи шагов, окончание запроса",
+                "Исправления в cases/agentturn и input/agent — только мелкие (до ~50 строк); больше — progress и остановиться",
+                "Файлы: paratech/desktop/tests/agent_odd_flow_test.go (новый), paratech/desktop/testenv/agenthub.go, agenthub_test.go, paratech/desktop/internal/cases/agentturn/*, internal/input/agent/* (только мелкие исправления) (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/tests/... ./desktop/testenv/... (+ затронутые пакеты) и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..."
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-420",
+            "category": "testing",
+            "priority": "medium",
+            "description": "[E2E] Пакет «Агент: необычное» (@agent-odd): пустое и пробелы, только эмодзи, только @упоминание, длинный текст, «Стоп» посреди плана, «Повторить» после сбоя",
+            "acceptance_criteria": [
+                "ADR-0035 §6; paratech/e2e/README.md «Agent pack»; TASK-417/418/419; отдельный пакет, чтобы пакет «Агент» остался ≤ 5 мин",
+                "Новый пакет specs/agent-odd (одна строка pack(\"agent-odd\") в playwright.config.ts после agent); строки requires — ключ Hub и расписание пакета настроек",
+                "Строки: пустое и «   » — значок отправки неактивен, Enter ничего не делает, модель не получила запроса; «🙂👍» — последний блок запроса к модели ровно этот текст, ответ показан, консоль чистая; только «@Литература» — запрос ушёл с упоминанием (scope), текст как напечатан; вставка 4500 русских символов — поле держит не больше предела TASK-418, строка «Осталось…» видна, к модели ушло ≤ 4096 байт; план из трёх create_folder с задержкой на шаге 2 — «Да», «Остановить» → строка остановки, создана одна папка (через страницу предмета или ActivityService), «Продолжить» доделывает; невосстановимый сбой провайдера — «Не получилось…» с «Повторить», после «Повторить» ответ и ключ K:r1 (agentStepKeys)",
+                "Каждая строка удаляет созданное в finally; ни одного незаписанного вызова LLM; пакет ≤ 3 мин",
+                "Docker запускает владелец; без него — «не проверено»",
+                "Файлы: paratech/e2e/specs/agent-odd/* (новый), paratech/e2e/scripts/llm/agent-odd/* (новый), paratech/e2e/playwright.config.ts (одна строка пакета), paratech/e2e/README.md (раздел пакета)",
+                "Исполнитель: tester (sonnet)"
+            ],
+            "test_steps": [
+                "bash paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --project=settings --project=agent-odd",
+                "npm --prefix paratech/e2e test"
+            ],
+            "dependencies": [
+                "TASK-417",
+                "TASK-418",
+                "TASK-419"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-421",
+            "category": "bug",
+            "priority": "medium",
+            "description": "[E2E · нестабильный тест] 08-answer «карточка с источником»: источник может быть любой записью пакета записи с тем же конспектом",
+            "acceptance_criteria": [
+                "Причина: docs/tasks/TASK-421-e2e-flakes.md (раздел TASK-421); progress/TASK-401.md (второй прогон)",
+                "Строка 129 принимает любую запись пакета записи, которая есть в приложении (recordingsOfApp) и чьё название — одна из лекций пакета (включая «… · значок отмены»); остальные проверки строки без ослабления",
+                "Два полных прогона settings + recording + agent подряд: строка зелёная оба раза; итог в progress",
+                "Файлы: paratech/e2e/specs/agent/08-answer.spec.ts, paratech/e2e/specs/agent/support.ts и specs/recording/support.ts (только список названий лекций пакета)",
+                "Исполнитель: tester (sonnet)"
+            ],
+            "test_steps": [
+                "bash paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --project=settings --project=recording --project=agent",
+                "npm --prefix paratech/e2e test"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-422",
+            "category": "bug",
+            "priority": "high",
+            "description": "[E2E · нестабильный тест · CI] e2e-static: layout-rules.test.ts «evalInPage под CSP» и «анимация ждётся» без зависимости от скорости машины",
+            "acceptance_criteria": [
+                "Причины: docs/tasks/TASK-421-e2e-flakes.md (раздел TASK-422); supervisor-decisions 09.11; сначала gh -R 3XBAT/paratech run view <id> --log-failed упавших прогонов",
+                "Анимация: проверка состояния, а не часов — после layoutViolations document.getAnimations().length === 0, анимация 2 с; нижней границы по Date.now() нет",
+                "«Причина evalInPage»: drainConsole опрашивается до появления записи CSP (предел 5 с), утверждение сохраняется",
+                "«Значение возвращается»: записи kind request отфильтрованы, как в тесте буфера обмена; утверждение про консоль страницы сохраняется",
+                "20 запусков файла подряд локально — все зелёные (скрипт цикла в scratchpad); CI e2e-static зелёный",
+                "Файлы: paratech/e2e/test/layout-rules.test.ts, paratech/e2e/src/checks/* (только если ожидание анимации само зависит от часов)",
+                "Исполнитель: tester (sonnet)"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/e2e test (PARATECH_E2E_UNIT_ONLY=1)",
+                "npx --prefix paratech/e2e tsc --noEmit -p paratech/e2e/tsconfig.json"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-423",
+            "category": "bug",
+            "priority": "medium",
+            "description": "[E2E · нестабильный тест] hub.integration.test.js зависает: run() завершается по exit, у каждого fetch предел, фазы в диагностике, без оставшихся процессов",
+            "acceptance_criteria": [
+                "Причины: docs/tasks/TASK-421-e2e-flakes.md (раздел TASK-423); progress/TASK-401.md follow-up (зависание > 13 мин, три процесса node)",
+                "src/hub/proc.ts run(): завершается по exit, затем короткая пауза для потоков (≈ 2 с) и их закрытие; таймаут всегда завершает промис; юнит-тест с потомком, который держит stdout",
+                "hub.integration.test.ts: AbortSignal.timeout(30 с) у каждого запроса; t.diagnostic с временем каждой фазы (сборка, compose, схема, ключ, готовность, вызовы, остановка); после stop — process.getActiveResourcesInfo() в диагностике",
+                "Два прогона на этой машине с Docker (Docker запускает владелец, агенты — никогда): оба завершаются, нет оставшихся node, hub.exe и проекта compose paratech-e2e; итог в progress",
+                "Файлы: paratech/e2e/src/hub/proc.ts, paratech/e2e/test/hub.integration.test.ts, paratech/e2e/test/hub-harness.test.ts (+ тест run())",
+                "Исполнитель: tester (sonnet)"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/e2e test (с Docker и с PARATECH_E2E_UNIT_ONLY=1)"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-424",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Hub не отвечает · ядро] «Сервер не отвечает» отдельно от «нет связи»: класс hub_down в клиенте Hub, статус hubDown в «Подключениях», «Проверить снова» для ждущих задач",
+            "acceptance_criteria": [
+                "docs/adr/0037-hub-not-answering.md (решения 1–4); черновик docs/tasks/TASK-424-hub-down-core.md; владелец 10.11 (Hub лежал, в логе только «network unavailable»); начинать после слияния ветки ralph/20261110-bug-ci-flakes (тесты hubclient)",
+                "Шаг 0: приложение с адресом http://127.0.0.1:<свободный порт> и ключом, ничего не слушает (и адрес-«чёрная дыра» для таймаута): что показывают панель агента, строка записи в WAITING_FOR_NETWORK, «Подключения» → Hub и desktop.log — снимки в progress",
+                "hubclient: отказ соединения (любой хост) и любой сбой транспорта к loopback-хосту → причина ErrHubDown, совпадает с shared.ErrNetworkUnavailable, shared.ErrServiceUnavailable и новым shared.ErrServiceDown; DNS, таймаут, сброс к удалённому хосту — как прежде; приоритет «не настроено» / ключ / квота сохранён; табличный тест",
+                "Задачи: сводка при остановленном локальном Hub ждёт с причиной service_unavailable (сценарий desktop/tests); jobrunner.RecheckNow — все WAITING_FOR_NETWORK к следующему такту, попытка не тратится, одна перепроверка за раз; ActivityService.RecheckNetwork → {ok}",
+                "«Подключения»: обновление при лежащем Hub — статус hubDown, hubLocal для loopback-адреса (domain/localhub/values.ParseTarget в cases/connections), тексты ADR-0037 §4; «Нет связи», «Нет ключа», «Ключ не принят», квота без изменений",
+                "Строка desktop.log называет hub does not answer at its address, без ключа",
+                "frontend/src/bindings/{connections,activity}.ts — только разбор новых полей и вызова",
+                "Файлы: paratech/desktop/internal/domain/shared/errors.go, internal/adapters/hubclient/{errors.go,refused_*.go,client.go}, internal/cases/connections/*, домен значений квоты (QuotaHubDown), internal/app/connections.go, internal/input/wails/{connections.go,activity.go}, internal/cases/jobrunner/*, internal/app/* (только подключение), paratech/desktop/tests/* (сценарий), frontend/src/bindings/{connections,activity}.ts (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/adapters/hubclient/... ./desktop/internal/cases/connections/... ./desktop/internal/cases/jobrunner/... ./desktop/internal/input/wails/... ./desktop/internal/app/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..., npm --prefix paratech/desktop/frontend run test"
+            ],
+            "dependencies": [],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-425",
+            "category": "functional",
+            "priority": "high",
+            "description": "[Hub не отвечает · агент · ядро] Остановка «нет связи» несёт причину offlineCause (network | hub_down) до панели, без новой сохраняемой причины",
+            "acceptance_criteria": [
+                "docs/adr/0037-hub-not-answering.md решение 2; привязка — TASK-424 (shared.ErrServiceDown)",
+                "cases/agentturn: Step.OfflineCause = hub_down, если ошибка остановки offline совпадает с shared.ErrServiceDown, иначе network; StopReason и хранилище не меняются (без миграции)",
+                "input/agent: Update несёт причину (и для ждущего вопроса, который стартовал и тоже остановился); input/wails AgentUpdateView offlineCause; app/agent.go panelUpdate копирует; после перезапуска приложения — пусто (общий текст)",
+                "frontend/src/bindings/agent.ts — только разбор offlineCause",
+                "Тесты: фейковый Hub GoDown (TASK-419) или закрытый loopback-порт → offlineCause hub_down; ошибка сети к удалённому хосту → network; точный JSON agent:update",
+                "Файлы: paratech/desktop/internal/cases/agentturn/*, internal/input/agent/*, internal/input/wails/agent*.go, internal/app/agent.go (только копирование), frontend/src/bindings/agent.ts, paratech/desktop/tests/* (+ тесты)",
+                "Исполнитель: go-core (opus)"
+            ],
+            "test_steps": [
+                "go test -race ./desktop/internal/cases/agentturn/... ./desktop/internal/input/... ./desktop/internal/app/... ./desktop/tests/... и тест архитектуры",
+                "GOOS=windows go vet ./desktop/..., golangci-lint run ./desktop/..., npm --prefix paratech/desktop/frontend run test"
+            ],
+            "dependencies": [
+                "TASK-424"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-426",
+            "category": "ui",
+            "priority": "high",
+            "description": "[Hub не отвечает · UI] Панель агента, строки записей и «Подключения» говорят «сервер paratech не отвечает» (и что его может понадобиться запустить), с выходом «Повторить» / «Проверить снова» / «Обновить»",
+            "acceptance_criteria": [
+                "docs/adr/0037-hub-not-answering.md §4–§5 (тексты по умолчанию, вопросы О1/О2); привязки — TASK-424 (hubDown, hubLocal, RecheckNetwork), TASK-425 (offlineCause); снимки «до» — progress/TASK-424.md",
+                "Панель: остановка offline с hub_down — «Не завершено: сервер paratech не отвечает.» и подсказка для локального / удалённого адреса; кнопки прежние; network — как прежде",
+                "Строки записей и задач с причиной serviceUnavailable: «Сервер paratech не отвечает», подсказка локальная / удалённая; значок «Проверить снова» с подсказкой вызывает RecheckNetwork (двойной клик — один вызов, во время вызова неактивен)",
+                "«Подключения», карточка Hub: статус hubDown — «Сервер не отвечает» и текст ADR; отличается от «Нет связи», «Нет ключа», «Ключ не принят», квоты",
+                "Бета: если bindings/localhub.ts говорит «доступно» — у локальной подсказки ссылка «Диагностика»; иначе ничего",
+                "Безличные тексты текстовыми узлами; статусы — значок + цветной текст, без заливок; одно акцентное; UX-проверка coordinator-round.md 3a; docs/agent-parity.md — строка «Проверить снова: только UI»",
+                "Тесты фронтенда: каждая причина → текст и действие (hub_down local/remote, network, нет ключа, квота); «Проверить снова» вызывает привязку один раз",
+                "Файлы: paratech/desktop/frontend/src/agentView.ts, src/recordingRowView.ts, src/statusPresentation.ts, src/connectionsView.ts, src/pages/ConnectionsPage.tsx, компонент строки записи в src/pages/* (только ячейка статуса), test/*, docs/agent-parity.md",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "Ручная проверка на этой машине: адрес http://127.0.0.1:<свободный порт> — панель, строка записи, «Подключения»; снимки в progress"
+            ],
+            "dependencies": [
+                "TASK-424",
+                "TASK-425"
+            ],
+            "status": "pending"
+        },
+        {
+            "id": "TASK-427",
+            "category": "ui",
+            "priority": "low",
+            "description": "[Агент · UI] D5 (ОТЛОЖЕНО ВЛАДЕЛЬЦЕМ 08.11): открытое дерево «Предметов» обновляется после «Отменить» действия агента",
+            "acceptance_criteria": [
+                "Отложено владельцем 08.11 («пока не нужно»): не запускать без его слова. Это часть D5 из TASK-400 (её остальные части влиты в #441); progress/TASK-400.md, progress/TASK-380.md D5",
+                "Открытое дерево «Предметов» и страница предмета перечитываются, когда agent:update приносит выполненное или отменённое действие агента над предметом (create_subject и другие по виду строки действия), без перезахода в раздел; чтение только при смене состояния строки действия",
+                "E2E-строка «Агент: «Отменить» обновляет открытое дерево предметов» (specs/agent/10-subject) зелёная без ослабления",
+                "Тесты фронтенда: «Отменить» create_subject → предмета нет в открытом списке",
+                "Файлы: paratech/desktop/frontend/src/pages/{SubjectsPage,SubjectsParts}.tsx, src/libraryView.ts (при необходимости), src/agentState.ts (только событие), test/* (+ тесты)",
+                "Исполнитель: frontend"
+            ],
+            "test_steps": [
+                "npm --prefix paratech/desktop/frontend run test и run build",
+                "bash paratech-ops/heavy.sh npm --prefix <abs>/paratech/e2e run e2e -- --project=settings --project=recording --project=agent"
+            ],
+            "dependencies": [],
             "status": "pending"
         }
     ]
